@@ -206,3 +206,9 @@ test('RDF goes through a database file on disk in --work-dir, which is removed a
   assert.equal(b.code, 2, b.out + b.err);
   assert.deepEqual(jsonLines(b.out).map((l) => l.status), ['failed', 'ok', undefined]);
 });
+
+test('counts of one are singular in the summary: "1 place", "1 identity relation"', async () => {
+  const { summary } = await import('../src/engine/words.js');
+  assert.equal(summary({ errors: 0, counts: { places: 1, attestations: 3, 'identity relations': 1 } }).counted, 'Read 1 place, 3 attestations, 1 identity relation.');
+  assert.equal(summary({ errors: 0, counts: { places: 2, triples: 1 } }).counted, 'Read 2 places, 1 triple.');
+});

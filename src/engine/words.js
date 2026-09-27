@@ -6,12 +6,16 @@ export const FORMAT_NAMES = { tables: 'PLATO spreadsheet tables', 'plato-json': 
 /** What a detected input is, in words: "PLATO JSON Lines (place-centric)". */
 export const formatName = (input) => FORMAT_NAMES[input.format] + (input.profile ? ` (${input.profile})` : '') + (input.lpfVersion === 2 ? ', version 2' : '');
 
+// A count in words, singular for one: "1 place", "2 places", "1 identity relation".
+const ONE = { places: 'place', attestations: 'attestation', 'identity relations': 'identity relation', triples: 'triple', 'triples written': 'triple written', 'table rows': 'table row' };
+const count = (n, what) => `${n.toLocaleString('en-GB')} ${n === 1 ? ONE[what] || what : what}`;
+
 /** A progress event in words: "Loading into the working database: 1,000 triples (3 s)". */
 export function progressText(p) {
   const bits = [];
-  if (p.triples) bits.push(`${p.triples.toLocaleString('en-GB')} triples`);
-  if (p.places) bits.push(`${p.places.toLocaleString('en-GB')} places`);
-  if (p.attestations) bits.push(`${p.attestations.toLocaleString('en-GB')} attestations`);
+  if (p.triples) bits.push(count(p.triples, 'triples'));
+  if (p.places) bits.push(count(p.places, 'places'));
+  if (p.attestations) bits.push(count(p.attestations, 'attestations'));
   const phase = { reading: 'Reading', loading: 'Loading into the working database', indexing: 'Indexing', writing: 'Writing', done: 'Finishing' }[p.phase] || p.phase;
   return `${phase}${bits.length ? ': ' + bits.join(', ') : ''} (${fmtTime(p.elapsedMs || 0)})`;
 }
@@ -19,7 +23,7 @@ export function progressText(p) {
 /** The two halves of a report's summary: "2 problems found." and "Read 3 places, 5 attestations." */
 export function summary(report) {
   const c = report.counts;
-  const counted = ['places', 'attestations', 'identity relations', 'triples', 'triples written', 'table rows'].filter((k) => c[k]).map((k) => `${c[k].toLocaleString('en-GB')} ${k}`).join(', ');
+  const counted = ['places', 'attestations', 'identity relations', 'triples', 'triples written', 'table rows'].filter((k) => c[k]).map((k) => count(c[k], k)).join(', ');
   const nErr = report.errors;
   return {
     problems: nErr ? `${nErr.toLocaleString('en-GB')} problem${nErr === 1 ? '' : 's'} found.` : 'No problems found.',
