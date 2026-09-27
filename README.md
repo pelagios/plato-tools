@@ -31,6 +31,15 @@ A **denial**, where a source states that something is not so (PLATO's `negated`,
 tables carry it. Linked Places Format cannot, so a denied attestation is left out of LPF and
 reported; so is a denial of several things at once in the tables, whose rows deny one thing each.
 
+**The current state.** A published gazetteer never deletes a claim: a later attestation withdraws
+it (`plato:Retracts`) or replaces it (`plato:Supersedes`). PLATO JSON and RDF keep both, so that an
+earlier state can be recomputed. Linked Places Format and the spreadsheet tables cannot express
+either, so they show the current state: every attestation that the file retracts or supersedes,
+wherever in the file that is said, is left out and reported. A withdrawn claim is never written as
+current. A gazetteer's `version`, `status`, `isVersionOf` and `previousVersion` go to RDF and back;
+LPF defines no place for them and the tables have no gazetteer sheet, so there they are reported as
+lost.
+
 **Numbers in RDF.** JSON-LD writes a number with a fractional part as a canonical `xsd:double` of
 16 significant digits, and these tools write exactly what `jsonld.js` writes. A JavaScript number
 can need 17 digits to be told apart from its neighbour, and such a number comes back from RDF one

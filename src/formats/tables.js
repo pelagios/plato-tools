@@ -5,7 +5,7 @@
 // Validation follows the CSVW rules the metadata uses, and is tested against the reference
 // implementation (rdf-tabular, strict mode) on the same good and broken tables.
 import { PLATO } from '../lib/context.js';
-import { isDenial, isAlternative, qualificationLosses } from './shared.js';
+import { isDenial, isAlternative, qualificationLosses, currentAttestations } from './shared.js';
 
 export const CITO = 'http://purl.org/spar/cito/';
 
@@ -199,12 +199,14 @@ function representativePoint(g) {
 /**
  * One PLATO record -> rows for each sheet. `ids.place(iri, label)` and `ids.source(obj)` return
  * short table ids (registering rows for places and sources as needed); `loss(l)` receives what
- * the tables cannot hold.
+ * the tables cannot hold. The tables cannot express meta-attestations, so they show the current
+ * state: an attestation in `withdrawn` (@id -> 'retracted' | 'superseded'), or withdrawn within
+ * the record, gets no row.
  */
-export function recordToRows(rec, ids, loss = () => {}, accepts = () => true) {
+export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, withdrawn = null) {
   const rows = { places: [], names: [], locations: [], types: [], relations: [], properties: [], identities: [] };
   const pid = ids.place(rec['@id'], rec.label, true, rec.ccodes, rec.entityIdentifier);
-  for (const a of rec.attestations || []) {
+  for (const a of currentAttestations(rec, withdrawn, loss)) {
     const facets = ['names', 'geometries', 'types', 'relations', 'properties'].filter((k) => a[k]?.length);
     // A row states one thing, and its denied column denies that one thing. A denial of several
     // things together ("no market and no fair here") split into rows would deny each of them on its

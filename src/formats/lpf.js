@@ -6,7 +6,7 @@
 // Writing LPF from PLATO is lossy by design (bundling, locators, form status, numeric certainty
 // and more have no LPF slot); every loss is reported, with counts.
 import { PLATO } from '../lib/context.js';
-import { isDenial, isAlternative, qualificationLosses } from './shared.js';
+import { isDenial, isAlternative, qualificationLosses, currentAttestations } from './shared.js';
 
 // The README's alias table, plus the vocabulary prefixes its own examples use.
 export const LPF_PREFIXES = {
@@ -165,11 +165,15 @@ function platoToCitations(a, loss) {
   return out;
 }
 
-/** PLATO place-centric record -> LPF Feature; `loss(l)` receives what LPF cannot hold. */
-export function recordToFeature(rec, idrs = [], loss = () => {}) {
+/**
+ * PLATO place-centric record -> LPF Feature; `loss(l)` receives what LPF cannot hold. `withdrawn`
+ * (attestation @id -> 'retracted' | 'superseded') is what the rest of the document withdraws or
+ * replaces: LPF has no meta-attestations, so it shows the current state and leaves those out.
+ */
+export function recordToFeature(rec, idrs = [], loss = () => {}, withdrawn = null) {
   const f = { '@id': rec['@id'], type: 'Feature', properties: clean({ title: rec.label, ccodes: rec.ccodes?.length ? rec.ccodes : undefined }), names: [], types: [], relations: [], links: [], descriptions: [], depictions: [] };
   const geoms = [], fclasses = [], whens = [];
-  for (const a of rec.attestations || []) {
+  for (const a of currentAttestations(rec, withdrawn, loss)) {
     // LPF cannot say that a source denies something: a denial written as LPF would assert what its
     // source says is not so. It is left out, and reported (PLATO cf87b78).
     if (isDenial(a)) { loss({ kind: 'denial', value: rec['@id'] }); continue; }

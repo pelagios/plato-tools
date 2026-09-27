@@ -14,6 +14,7 @@ import { tripleNT } from '../lib/ntriples.js';
 import { TripleStore } from '../lib/store.js';
 import { PLATO, RDF } from '../lib/context.js';
 import { featureToRecord, recordToFeature } from '../formats/lpf.js';
+import { collectWithdrawn, versionLosses } from '../formats/shared.js';
 import { validateTables, rowToAttestation, tableIds, recordToRows, identityRow, ATTESTATION_SHEETS, tableSchemas, cellChecker } from '../formats/tables.js';
 import { lineChunks, lines, jsonDocument, TABLE_SHEETS, DataError } from './input.js';
 import { Report, LOSS_TEXT } from './report.js';
@@ -269,12 +270,24 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   const outputs = [];
   let writer = null;
   const idrsBySubject = new Map();
-  if (action === 'convert' && (target === 'lpf' || target === 'lpf-seq') && !needsStore && input.format.startsWith('plato')) {
-    // DEEP-style files list identity relations after every place; LPF needs them on the feature.
+  const lpfTarget = target === 'lpf' || target === 'lpf-seq';
+  // LPF and the tables have no meta-attestations, so they show the current state (see
+  // src/formats/shared.js): what the document retracts or supersedes is left out, and reported.
+  const currentOnly = action === 'convert' && (lpfTarget || target === 'tables');
+  let withdrawn = null;
+  if (currentOnly && !needsStore && input.format.startsWith('plato')) {
+    // One pass first, because a retraction can come anywhere in the file, even after what it
+    // withdraws, and under another place. DEEP-style files also list identity relations after
+    // every place, and LPF needs them on the feature.
+    withdrawn = new Map();
     const again = input.format === 'plato-jsonl' ? platoJsonl(input.files[0], new Report()) : platoJson(input.files[0]);
-    for await (const ev of again) if (ev.type === 'idr') (idrsBySubject.get(ev.value.subject) || idrsBySubject.set(ev.value.subject, []).get(ev.value.subject)).push(ev.value);
+    for await (const ev of again) {
+      if (ev.type === 'idr') { if (lpfTarget) (idrsBySubject.get(ev.value.subject) || idrsBySubject.set(ev.value.subject, []).get(ev.value.subject)).push(ev.value); }
+      else if (ev.type === 'record') collectWithdrawn(ev.value?.attestations, withdrawn);
+      else if (ev.type === 'attestation') collectWithdrawn([ev.value], withdrawn);
+    }
   }
-  if (action === 'convert') writer = await makeWriter(target, env, rep, { ...options, idrsBySubject }, typing, outputs, input);
+  if (action === 'convert') writer = await makeWriter(target, env, rep, { ...options, idrsBySubject, withdrawn }, typing, outputs, input);
 
   // Checking (and writing) records as they stream past.
   const checkRecord = (ev) => {
@@ -339,6 +352,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     store.index();
     if (isRdf) checkGraph(store, res, rep);
     const r2j = new Rdf2Json({ context: res.context, core: res.core, profile: res.profiles['place-centric'], types: res.types }, store, {
+      withdrawn: currentOnly ? withdrawnInStore(store) : null,
       onLoss: (l) => rep.loss(l.kind, `${LOSS_TEXT[l.kind] || l.kind}`, l.predicate || l.value),
       onIssue: (i) => rep.warning(i.kind, i.kind === 'multiple-values' ? `A value that PLATO JSON allows once appears several times; the first is kept (${i.key})` : i.kind, i.node),
     });
@@ -365,6 +379,16 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   if (writer) await writer.close();
   progress({ phase: 'done', ...rep.counts, elapsedMs: Date.now() - t0 });
   return { report: rep.toJSON(), outputs };
+}
+/** What the graph retracts or supersedes: node key -> 'retracted' | 'superseded' (retracted wins). */
+function withdrawnInStore(store) {
+  const m = new Map();
+  for (const [type, kind] of [[PLATO + 'Supersedes', 'superseded'], [PLATO + 'Retracts', 'retracted']]) {
+    for (const s of store.subjects(PLATO + 'has_meta_type', type)) {
+      for (const o of store.objects(s, PLATO + 'meta_attestation_about')) if (o.termType !== 'Literal') m.set(o.termType === 'BlankNode' ? '_:' + o.value : o.value, kind);
+    }
+  }
+  return m;
 }
 function firstSubjectWith(store, p) {
   const q = store.db.prepare('SELECT s FROM t WHERE p=? LIMIT 1');
@@ -434,12 +458,13 @@ async function makeWriter(target, env, rep, options, typing, outputs, input) {
     const feats = [];
     return {
       header(h) {
+        versionLosses(h.gazetteer, loss);
         const head = { type: 'FeatureCollection', '@context': 'https://raw.githubusercontent.com/LinkedPasts/linked-places-format/main/linkedplaces-context-v1.1.jsonld', title: h.gazetteer?.title };
         if (target === 'lpf-seq') sink.write(JSON.stringify(head) + '\n'); else { const s = JSON.stringify(head); sink.write(s.slice(0, -1) + ',"features":['); }
       },
       event(ev) {
         if (ev.type !== 'record') return;
-        const f = recordToFeature(ev.value, options.idrsBySubject.get(ev.value['@id']) || [], loss);
+        const f = recordToFeature(ev.value, options.idrsBySubject.get(ev.value['@id']) || [], loss, options.withdrawn);
         sink.write(target === 'lpf-seq' ? JSON.stringify(f) + '\n' : (first ? '' : ',') + JSON.stringify(f)); first = false;
       },
       async close() { if (target === 'lpf') sink.write(']}'); outputs.push(await sink.close()); },
@@ -485,9 +510,9 @@ function tablesWriter(env, rep, options, outputs, stem, loss) {
     },
   };
   return {
-    header() {},
+    header(h) { versionLosses(h.gazetteer, loss); },
     event(ev) {
-      if (ev.type === 'record') { const rows = recordToRows(ev.value, ids, loss, accepts); for (const [k, v] of Object.entries(rows)) buffers[k]?.push(...v); }
+      if (ev.type === 'record') { const rows = recordToRows(ev.value, ids, loss, accepts, options.withdrawn); for (const [k, v] of Object.entries(rows)) buffers[k]?.push(...v); }
       else if (ev.type === 'idr') buffers.identities.push(identityRow(ev.value, ids, loss));
       else if (ev.type === 'attestation') loss({ kind: 'attestation-centric' });
     },

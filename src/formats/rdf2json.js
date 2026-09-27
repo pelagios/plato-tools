@@ -39,7 +39,14 @@ function shape(schema, core, profile) {
 
 export class Rdf2Json {
   /** graph: { out(id) -> [{p, o}], in(p, id) -> [id] }; terms are {termType, value, datatype?, language?}. */
-  constructor({ context, core, profile, types = null }, graph, { onLoss = () => {}, onIssue = () => {} } = {}) {
+  /**
+   * withdrawn: node key -> 'retracted' | 'superseded', for a target that shows only the current
+   * state (LPF, the tables). Those attestations are not read into their place, and each is reported
+   * as a loss. A blank-node attestation has no @id in JSON, so this is the one place it can be
+   * recognised. Left null for PLATO JSON, which keeps everything.
+   */
+  constructor({ context, core, profile, types = null }, graph, { onLoss = () => {}, onIssue = () => {}, withdrawn = null } = {}) {
+    this.withdrawn = withdrawn && withdrawn.size ? withdrawn : null;
     this.types = types;   // the ontology's domains and ranges, to recognise a node's other roles
     this.root = compileContext(context);
     this.core = core; this.profile = profile;
@@ -183,6 +190,7 @@ export class Rdf2Json {
       for (const sid of this.g.in(p, id)) {
         // An identity relation the document holds at its top level stays there.
         if (e.key === 'identityRelations' && this.g.in(PLATO + 'contains_identity_relation', sid).length) continue;
+        if (e.key === 'attestations' && this.withdrawn) { const kind = this.withdrawn.get(sid); if (kind) { this.loss({ kind, value: sid }); continue; } }
         // The place-centric profile forbids repeating `about` on a nested attestation; identity
         // relations keep their `subject`, which the schema requires even when nested.
         const back = p === PLATO + 'attests_about' ? { p, id } : null;

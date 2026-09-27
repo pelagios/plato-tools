@@ -131,7 +131,9 @@ for (const target of ['lpf', 'tables']) {
     assert.equal(l?.count, 1, JSON.stringify(lossKinds(r)));
     assert.match(l.message, /at most one of them right/);
     assert.deepEqual(l.examples, ['https://whgazetteer.org/example/attestation/newton-b']);
-    assert.equal(loss(r, 'meta-attestation'), undefined, 'the only meta-attestation is the alternative');
+    // The example's other meta-attestation is a retraction (PLATO e96d90d): LPF reports it as a
+    // meta-attestation, the tables as an attestation with no row. The alternative is not counted there.
+    assert.equal(loss(r, 'meta-attestation')?.count, target === 'lpf' ? 1 : undefined, 'the alternative is not also a plain meta-attestation');
   });
 }
 test('control: a meta-attestation of another type is reported as a meta-attestation, not as alternatives', () => {
