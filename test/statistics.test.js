@@ -301,14 +301,19 @@ test('Data Cube: a clean cube passes IC-1, IC-2, IC-11, IC-12 and IC-14, each wi
   assert.deepEqual(status(results), { 'IC-1': 'pass', 'IC-2': 'pass', 'IC-11': 'pass', 'IC-12': 'pass', 'IC-14': 'pass' });
   for (const x of results) assert.ok(x.evaluated > 0, x.ic);
 });
-test('Data Cube: the draft example as published fails IC-11 and IC-12, on its two totals, which have no sex', async () => {
-  // A finding about the draft example, not about the tools: its structure declares sdmx-dimension:sex,
-  // and the occupation total and the county total have none. IC-12 follows, because the spec's query
-  // compares a pair on the dimensions both have: the agricultural total then equals its own parts.
+test('Data Cube: the draft example as published passes IC-1, IC-2, IC-11, IC-12 and IC-14', async () => {
+  // PLATO 3ef2063 gave the example's two totals the SDMX code sex-T; before that they had no sex,
+  // though the structure declares it, and failed IC-11 and IC-12. The control below keeps that case.
   const results = integrity(await cubeOf(doc()));
+  assert.deepEqual(status(results), { 'IC-1': 'pass', 'IC-2': 'pass', 'IC-11': 'pass', 'IC-12': 'pass', 'IC-14': 'pass' });
+});
+test('control: a total without its sex code fails IC-11 and IC-12, as the example once did', async () => {
+  const d = doc();
+  const total = d.spatialEntities[0].attestations[0].properties.find((f) => f['@id'].endsWith('/agri/total'));
+  delete total.dimensions[`${SD}sex`];
+  const results = integrity(await cubeOf(d));
   assert.deepEqual(status(results), { 'IC-1': 'pass', 'IC-2': 'pass', 'IC-11': 'fail', 'IC-12': 'fail', 'IC-14': 'pass' });
-  assert.deepEqual(results[2].violations, [`${T}/all/total has no ${SD}sex`, `${T}/agri/total has no ${SD}sex`]);
-  assert.deepEqual(results[3].violations.sort(), [`${T}: ${T}/agri/total and ${T}/agri/f have the same dimension values`, `${T}: ${T}/agri/total and ${T}/agri/m have the same dimension values`]);
+  assert.deepEqual(results[2].violations, [`${T}/agri/total has no ${SD}sex`]);
 });
 const TYPE = '<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>';
 // Each planted defect fails its constraint, and no other except where the spec makes it follow:
