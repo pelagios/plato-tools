@@ -163,3 +163,18 @@ test('tables -> JSON Lines: place_id is kept as entityIdentifier, the date as so
   const spans = lines.flatMap((l) => (l.attestations || []).flatMap((a) => a.timespans || []));
   assert.ok(spans.length && spans.every((t) => t.sourceLabel && !t.label), JSON.stringify(spans.slice(0, 2)));
 });
+
+// A citation's source may be a URI or an object (a oneOf): the report must name what is wrong
+// with the object, not complain that it is not a string.
+const citing = (source) => JSON.stringify({ profile: 'attestation-centric', gazetteer: { title: 't' },
+  attestations: [{ about: 'https://example.org/p', names: [{ toponym: 'N' }], citations: [{ source }] }] });
+test('a source object without a title is reported as a missing title, not as "must be string"', async () => {
+  const r = await go([textFile(citing({ authorityType: 'source', citation: 'Domesday Book' }), 'no-title.json')], 'check');
+  const msgs = errors(r).map((i) => i.message);
+  assert.ok(msgs.some((m) => /source has no title/.test(m)), JSON.stringify(msgs));
+  assert.ok(!msgs.some((m) => /must be string/.test(m)), JSON.stringify(msgs));
+});
+test('control: a source that is a malformed address is reported as one', async () => {
+  const r = await go([textFile(citing('not a web address'), 'bad-uri.json')], 'check');
+  assert.ok(errors(r).some((i) => /full web address/.test(i.message)), JSON.stringify(errors(r).map((i) => i.message)));
+});

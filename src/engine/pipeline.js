@@ -48,10 +48,18 @@ export function prepare(res) {
   }
   return { ...res, validators: v };
 }
-const ajvMessage = (errs) => (errs || []).slice(0, 1).map((e) => `${e.instancePath || '(record)'} ${e.message}${e.params?.additionalProperty ? `: ${e.params.additionalProperty}` : ''}`).join('; ');
+// Which schema error to show. With allErrors, a value that fails a oneOf (a source that may be a
+// URI or an object) yields one error per branch, then the oneOf's own: shown in that order, an
+// object source without a title read "must be string" and sent the reader after the wrong fix.
+// An error about the content of a value (a missing title, a malformed address) says what to
+// change, so it comes before one saying the value is of another type, and those before the
+// bare "must match exactly one schema".
+const RANK = { oneOf: 2, anyOf: 2, not: 2, if: 2, type: 1 };
+const pick = (errs) => [...(errs || [])].sort((a, b) => (RANK[a.keyword] || 0) - (RANK[b.keyword] || 0));
+const ajvMessage = (errs) => pick(errs).slice(0, 1).map((e) => `${e.instancePath || '(record)'} ${e.message}${e.params?.additionalProperty ? `: ${e.params.additionalProperty}` : ''}`).join('; ');
 /** The first schema error in plain words, with the spreadsheet column where that helps. */
 export function explainSchema(errs, fromTables) {
-  const e = (errs || [])[0];
+  const e = pick(errs)[0];
   if (!e) return 'does not match the PLATO JSON Schema';
   const at = e.instancePath || '';
   const col = (c) => (fromTables ? ` In the spreadsheets, fill in ${c}.` : '');
