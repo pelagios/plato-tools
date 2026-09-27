@@ -5,6 +5,9 @@
 // Validation follows the CSVW rules the metadata uses, and is tested against the reference
 // implementation (rdf-tabular, strict mode) on the same good and broken tables.
 import { PLATO } from '../lib/context.js';
+import { isDenial, isAlternative, qualificationLosses } from './shared.js';
+
+export const CITO = 'http://purl.org/spar/cito/';
 
 const NUM = { decimal: true, integer: true, nonNegativeInteger: true, double: true, float: true };
 
@@ -32,6 +35,11 @@ export function checkCell(col, raw) {
       if (dt && dt.minInclusive !== undefined && n < dt.minInclusive) return `${v} is below ${dt.minInclusive}`;
       if (dt && dt.maxInclusive !== undefined && n > dt.maxInclusive) return `${v} is above ${dt.maxInclusive}`;
     }
+    // A CSVW boolean: with a format 'yes|no', the first word is true and the second false.
+    if (base === 'boolean') {
+      const words = dt && dt.format ? dt.format.split('|') : ['true', 'false', '1', '0'];
+      if (!words.includes(v)) return `'${v}' is not ${words.length === 2 ? `${words[0]} or ${words[1]}` : 'true or false'}`;
+    }
     if (base === 'anyURI' && !/^[A-Za-z][A-Za-z0-9+.-]*:\S+$/.test(v)) return `'${v}' is not a web address`;
     if (dt && dt.format && base === 'string' && !new RegExp(dt.format).test(v)) {
       const m = dt.format.match(/^\^\(([A-Za-z|]+)\)\$$/);
@@ -39,6 +47,13 @@ export function checkCell(col, raw) {
     }
   }
   return null;
+}
+
+/** A test of whether a value fits a column, by the table definitions: accepts('names', 'citation_function', 'citesAsEvidence'). */
+export function cellChecker(meta) {
+  const cols = new Map();
+  for (const t of tableSchemas(meta)) for (const c of t.columns) cols.set(t.name + '\u0001' + c.titles, c);
+  return (sheet, column, value) => { const c = cols.get(sheet + '\u0001' + column); return !c || checkCell(c, String(value)) === null; };
 }
 
 /**
@@ -85,11 +100,16 @@ export async function validateTables(meta, { header, rows, keys, issue }) {
 const ATTESTATION_SHEETS = ['names', 'locations', 'types', 'relations', 'properties'];
 const clean = (o) => { for (const k of Object.keys(o)) if (o[k] === undefined || o[k] === '' || (Array.isArray(o[k]) && !o[k].length)) delete o[k]; return o; };
 const num = (v) => (v === '' || v === undefined ? undefined : Number(v));
+// The denied column (plato:negated): 'yes' is a denial and 'no' is not. Any other word is a
+// problem the validator reports; read, it counts as a denial, so that a mistyped 'Yes' can never
+// turn what a source denies into an assertion.
+const denied = (v) => (v === undefined || v === '' ? undefined : !['no', 'false', '0'].includes(String(v).trim().toLowerCase()));
 
 /** One row of an attestation sheet -> one PLATO attestation object. */
 export function rowToAttestation(sheet, row, ids) {
   const src = ids.source(row.source_id);
-  const citation = clean({ source: src, locator: row.locator, attributionStatus: row.attribution ? PLATO + 'Attribution' + row.attribution : undefined });
+  const citation = clean({ source: src, locator: row.locator, attributionStatus: row.attribution ? PLATO + 'Attribution' + row.attribution : undefined,
+    citationFunction: row.citation_function ? CITO + row.citation_function : undefined });
   const a = clean({
     // The date column is the date as the source writes it: plato:source_label since PLATO 9d2c36e.
     timespans: [clean({ sourceLabel: row.date, startEarliest: row.from, endLatest: row.to })],
@@ -97,10 +117,14 @@ export function rowToAttestation(sheet, row, ids) {
     citations: [citation],
     certainty: num(row.certainty),
     certaintyLevel: row.certainty_level ? PLATO + row.certainty_level : undefined,
+    negated: denied(row.denied),
     notes: row.notes,
   });
   if (sheet === 'names') {
-    a.names = [clean({ toponym: row.name, language: row.language, script: row.script, romanized: row.romanized, nameType: row.name_type ? row.name_type.split(';') : undefined })];
+    const q = clean({ transcriptionAccuracy: row.transcription_accuracy ? PLATO + 'Transcription' + row.transcription_accuracy : undefined,
+      transcriptionCompleteness: row.transcription_completeness ? PLATO + 'Transcription' + row.transcription_completeness : undefined });
+    a.names = [clean({ toponym: row.name, language: row.language, script: row.script, romanized: row.romanized, nameType: row.name_type ? row.name_type.split(';') : undefined,
+      qualification: Object.keys(q).length ? q : undefined })];
     if (row.form_status) a.formStatus = PLATO + row.form_status;
     if (row.occurrence_context) a.occurrenceContext = PLATO + row.occurrence_context;
     if (row.occurrence_count) a.occurrenceCount = num(row.occurrence_count);
@@ -146,6 +170,7 @@ export { ATTESTATION_SHEETS };
 // ---- PLATO records -> table rows (lossy; every loss reported) ----------------------------------
 const GVP_BROADER_PARTITIVE = 'http://vocab.getty.edu/ontology#broaderPartitive';
 const LEVELS = new Set(['Certain', 'LessCertain', 'Uncertain']);   // the tables' certainty_level values
+const ACCURACY = new Set(['Accurate', 'Inaccurate', 'False']), COMPLETENESS = new Set(['Complete', 'Reconstructable', 'NonReconstructable']);
 const local = (iri, prefix) => (iri && iri.startsWith(prefix) ? iri.slice(prefix.length) : null);
 /** GeoJSON geometry -> WKT, for the locations sheet's wkt column. */
 export function geojsonToWkt(g) {
@@ -176,16 +201,22 @@ function representativePoint(g) {
  * short table ids (registering rows for places and sources as needed); `loss(l)` receives what
  * the tables cannot hold.
  */
-export function recordToRows(rec, ids, loss = () => {}) {
+export function recordToRows(rec, ids, loss = () => {}, accepts = () => true) {
   const rows = { places: [], names: [], locations: [], types: [], relations: [], properties: [], identities: [] };
   const pid = ids.place(rec['@id'], rec.label, true, rec.ccodes, rec.entityIdentifier);
   for (const a of rec.attestations || []) {
     const facets = ['names', 'geometries', 'types', 'relations', 'properties'].filter((k) => a[k]?.length);
+    // A row states one thing, and its denied column denies that one thing. A denial of several
+    // things together ("no market and no fair here") split into rows would deny each of them on its
+    // own, which the source did not say; so it is left out whole, and reported.
+    const deny = isDenial(a);
+    if (deny && facets.reduce((n, k) => n + a[k].length, 0) > 1) { loss({ kind: 'denial-bundled', value: rec['@id'] }); continue; }
     if (facets.length > 1) loss({ kind: 'bundled-attestation', value: facets.join('+') });
     if (!facets.length) { loss({ kind: 'attestation-without-facet' }); continue; }
     const spans = a.timespans || [];
     if (spans.length > 1) loss({ kind: 'extra-timespans', value: spans.length - 1 });
     const t = spans[0] || {};
+    qualificationLosses(t.qualification, [], loss);
     if ((t.startLatest && t.startLatest !== t.startEarliest) || (t.endEarliest && t.endEarliest !== t.endLatest)) loss({ kind: 'four-date-bounds' });
     const srcs = [...(a.sources || []), ...(a.citations || []).map((c) => c.source)].filter(Boolean);
     const unique = [...new Map(srcs.map((s) => [typeof s === 'string' ? s : s['@id'] || s.title, s])).values()];
@@ -197,28 +228,38 @@ export function recordToRows(rec, ids, loss = () => {}) {
     if (t.sourceLabel && t.label && t.sourceLabel !== t.label) loss({ kind: 'period-label', value: t.label });
     const date = t.sourceLabel || t.label || (t.startEarliest || t.endLatest ? [t.startEarliest, t.endLatest].filter(Boolean).join('-') : 'undated');
     const notes = [a.notes, a.certaintyNote && `Certainty: ${a.certaintyNote}`].filter(Boolean).join(' ') || '';
+    // Why the source is cited: a CiTO property, written by its local name (citesAsEvidence).
+    let citationFunction = local(cit.citationFunction, CITO) || '';
+    if (cit.citationFunction && (!citationFunction || !accepts('names', 'citation_function', citationFunction))) { loss({ kind: 'citation-function-not-cito', value: cit.citationFunction }); citationFunction = ''; }
     const common = { place_id: pid, date, from: t.startEarliest || '', to: t.endLatest || '', source_id: sid, locator: cit.locator || '',
-      attribution: local(cit.attributionStatus, PLATO + 'Attribution') || '', certainty: a.certainty ?? '',
-      certainty_level: LEVELS.has(local(a.certaintyLevel, PLATO)) ? local(a.certaintyLevel, PLATO) : '', notes };
+      attribution: local(cit.attributionStatus, PLATO + 'Attribution') || '', citation_function: citationFunction, certainty: a.certainty ?? '',
+      certainty_level: LEVELS.has(local(a.certaintyLevel, PLATO)) ? local(a.certaintyLevel, PLATO) : '',
+      denied: deny ? 'yes' : a.negated === false ? 'no' : '', notes };
     if (a.certaintyLevel && !common.certainty_level) loss({ kind: 'certainty-level', value: a.certaintyLevel });
-    if (a.meta) loss({ kind: 'meta-attestation' });
+    if (a.meta) loss(isAlternative(a.meta) ? { kind: 'alternative-readings', value: a['@id'] } : { kind: 'meta-attestation' });
     for (const n of a.names || []) {
-      if (n.qualification) loss({ kind: 'qualification' });
+      const q = n.qualification || {};
+      qualificationLosses(q, ['transcriptionAccuracy', 'transcriptionCompleteness'], loss);
       if (n.sourceLabel) loss({ kind: 'source-label' });
+      // How well the name was read: the names sheet holds PLATO's own judgements, by their words.
+      const judged = (iri, words) => { const w = local(iri, PLATO + 'Transcription'); if (iri && !words.has(w)) loss({ kind: 'transcription-value', value: iri }); return words.has(w) ? w : ''; };
       rows.names.push({ place_id: pid, name: n.toponym, language: n.language || '', script: n.script || '', romanized: n.romanized || '',
         name_type: (n.nameType || []).join(';'), form_status: local(a.formStatus, PLATO) || '', occurrence_context: local(a.occurrenceContext, PLATO) || '',
-        occurrence_count: a.occurrenceCount ?? '', ...common, place_id: pid });
+        occurrence_count: a.occurrenceCount ?? '', transcription_accuracy: judged(q.transcriptionAccuracy, ACCURACY),
+        transcription_completeness: judged(q.transcriptionCompleteness, COMPLETENESS), ...common, place_id: pid });
     }
     for (const g of a.geometries || []) {
       let p = g.reprPoint || (g.geojson?.type === 'Point' ? g.geojson.coordinates : null);
       if (!p) { p = representativePoint(g.geojson); if (p) loss({ kind: 'point-derived-from-shape' }); }
       if (!p) { loss({ kind: 'geometry-without-coordinates' }); continue; }
-      if (g.qualification) loss({ kind: 'qualification' });
+      qualificationLosses(g.qualification, [], loss);
       if (g.sourceLabel) loss({ kind: 'source-label' });
       rows.locations.push({ place_id: pid, latitude: p[1], longitude: p[0],
         wkt: g.wkt || (g.geojson && g.geojson.type !== 'Point' ? geojsonToWkt(g.geojson) || '' : ''),
         geometry_role: local(g.role, PLATO) || '', precision_km: (g.precisionKm || [])[0] ?? '', ...common });
     }
+    for (const ty of a.types || []) qualificationLosses(ty.qualification, [], loss);
+    for (const pv of a.properties || []) qualificationLosses(pv.qualification, [], loss);
     for (const ty of a.types || []) rows.types.push({ place_id: pid, type_label: ty.label || ty.sourceLabel || '', type_uri: ty.identifier || '', ...common });
     for (const r of a.relations || []) {
       let rt = local(r.relationType, PLATO);

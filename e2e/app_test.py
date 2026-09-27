@@ -88,6 +88,17 @@ def main():
             ok = s.get('phase') == 'done' and s.get('outputs')
             nt = download(page, s['outputs'][0]['name'], tmp / 'c.nt').read_text() if ok else ''
             check('Constantinople JSON -> N-Triples: triples written and saved', ok and nt.count(' .\n') > 50 and 'attests_about' in nt, s if not ok else nt[:200])
+            # A source's denial (plato:negated) must never reach LPF as an assertion: Littleworth
+            # had no market, so its feature must carry no market, and the page must say why.
+            s = run_case(page, [PLATO / 'schemas/examples/place-centric-judgements.json'], 'convert', 'lpf')
+            ok = s.get('phase') == 'done' and s.get('outputs')
+            fc = json.loads(download(page, s['outputs'][0]['name'], tmp / 'judgements.geojson').read_text()) if ok else {}
+            lw = next((f for f in fc.get('features', []) if f.get('@id', '').endswith('/littleworth')), None)
+            facets = json.dumps([[f.get(k) for k in ('names', 'types', 'relations', 'geometry', 'descriptions', 'links')] for f in fc.get('features', [])])
+            shown = page.inner_text('#report') if ok else ''
+            check('a denial -> LPF: the place is written, the denied market is not, and the page says so',
+                  ok and lw is not None and 'types' not in lw and '"market"' not in facets and len(fc['features']) == 5
+                  and any(i['kind'] == 'denial' for i in s['report']['items']) and 'would assert what its source denies' in shown, s.get('report') or s)
             bad = tmp / 'bad.nt'; bad.write_text('<https://x.org/a> <https://w3id.org/plato#notes> "fine" .\n<https://x.org/a> <https://w3id.org/plato#notes "broken .\n')
             s = run_case(page, [bad], 'check')
             check('broken N-Triples: the bad line is reported by number', s.get('phase') == 'done' and any(i['kind'] == 'rdf-syntax' and 'line 2' in ' '.join(i['examples']) for i in s['report']['items']), s.get('report') or s)

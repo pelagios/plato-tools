@@ -102,7 +102,15 @@ export class Rdf2Json {
   _scalar(o, sh) {
     if (o.termType !== 'Literal') return o.value;
     if (o.datatype === RDF_JSON) { try { return JSON.parse(o.value); } catch { return o.value; } }
-    if (o.datatype === XSD + 'boolean') return o.value === 'true';
+    // xsd:boolean is written 'true', 'false', '1' or '0'. Read wrongly, plato:negated "1" would turn a
+    // source's denial into an assertion; a value outside the four is kept as it is, for the schema to
+    // report, and the writers treat anything but false as a denial.
+    if (o.datatype === XSD + 'boolean' || (sh.type === 'boolean' && o.datatype === XSD + 'string')) {
+      const v = o.value.trim();
+      if (v === 'true' || v === '1') return true;
+      if (v === 'false' || v === '0') return false;
+      return o.value;
+    }
     if (NUMERIC.has(o.datatype) || (sh.type === 'number' || sh.type === 'integer')) {
       const n = Number(o.value); if (Number.isFinite(n) && o.value.trim() !== '') return n;
     }

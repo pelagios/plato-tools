@@ -7,14 +7,14 @@ import { Parser } from 'n3';
 import Papa from 'papaparse';
 import { unzipSync, strFromU8 } from 'fflate';
 import Ajv2020 from 'ajv/dist/2020.js';
-import addFormats from 'ajv-formats';
+import { addPlatoFormats, strictFormatLogger } from '../lib/formats.js';
 import { Json2Rdf } from '../formats/json2rdf.js';
 import { Rdf2Json } from '../formats/rdf2json.js';
 import { tripleNT } from '../lib/ntriples.js';
 import { TripleStore } from '../lib/store.js';
 import { PLATO, RDF } from '../lib/context.js';
 import { featureToRecord, recordToFeature } from '../formats/lpf.js';
-import { validateTables, rowToAttestation, tableIds, recordToRows, identityRow, ATTESTATION_SHEETS, tableSchemas } from '../formats/tables.js';
+import { validateTables, rowToAttestation, tableIds, recordToRows, identityRow, ATTESTATION_SHEETS, tableSchemas, cellChecker } from '../formats/tables.js';
 import { lineChunks, lines, jsonDocument, TABLE_SHEETS, DataError } from './input.js';
 import { Report, LOSS_TEXT } from './report.js';
 
@@ -30,7 +30,8 @@ const TYPE = RDF + 'type';
 
 // ---- resources ------------------------------------------------------------------------------------
 export function prepare(res) {
-  const ajv = new Ajv2020({ strict: false, allErrors: true }); addFormats(ajv);
+  // An unknown format is refused, not ignored: ignored, it would check nothing (see src/lib/formats.js).
+  const ajv = addPlatoFormats(new Ajv2020({ strict: false, allErrors: true, logger: strictFormatLogger }));
   ajv.addSchema(res.core, 'https://w3id.org/plato/schemas/plato.schema.json');
   for (const p of Object.values(res.profiles)) ajv.addSchema(p);
   const v = {};
@@ -74,7 +75,7 @@ export function explainSchema(errs, fromTables) {
   }
   if (e.keyword === 'minItems' && /attestations$/.test(at)) return 'A place has no evidence about it: PLATO JSON needs at least one attestation per place.' + (fromTables ? ' Give it at least one row in names, locations, types, relations or properties.' : '');
   if (e.keyword === 'additionalProperties') return `A key PLATO does not define: ${e.params.additionalProperty}.`;
-  if (e.keyword === 'format' && e.params.format === 'uri') return 'A value that must be a full web address is not one.';
+  if (e.keyword === 'format' && ['uri', 'iri', 'iri-reference'].includes(e.params.format)) return 'A value that must be a full web address is not one.';
   if (e.keyword === 'enum') return `A value is not one of those allowed: ${(e.params.allowedValues || []).join(', ')}.`;
   if (e.keyword === 'not' && /attestations\/\d+$/.test(at)) return 'An attestation nested under its place also says what it is about; in place-centric JSON that is implied, and must be left out.';
   return 'does not match the PLATO JSON Schema: ' + ajvMessage(errs).replace(/"[^"]*"/g, '…');
@@ -453,6 +454,7 @@ function tablesWriter(env, rep, options, outputs, stem, loss) {
   const header = Object.fromEntries(schemas.map((t) => [t.name, t.columns.map((c) => c.titles)]));
   const buffers = Object.fromEntries(schemas.map((t) => [t.name, []]));
   const places = new Map(), sources = new Map(), usedIds = new Set();
+  const accepts = cellChecker(env.csvMeta);
   const shortId = (iri, fallback) => {
     let s = (iri || fallback || 'x').replace(/[#/]+$/, '').split(/[#/]/).pop() || fallback || 'x';
     s = decodeURIComponent(s).replace(/\s+/g, '-');
@@ -485,7 +487,7 @@ function tablesWriter(env, rep, options, outputs, stem, loss) {
   return {
     header() {},
     event(ev) {
-      if (ev.type === 'record') { const rows = recordToRows(ev.value, ids, loss); for (const [k, v] of Object.entries(rows)) buffers[k]?.push(...v); }
+      if (ev.type === 'record') { const rows = recordToRows(ev.value, ids, loss, accepts); for (const [k, v] of Object.entries(rows)) buffers[k]?.push(...v); }
       else if (ev.type === 'idr') buffers.identities.push(identityRow(ev.value, ids, loss));
       else if (ev.type === 'attestation') loss({ kind: 'attestation-centric' });
     },

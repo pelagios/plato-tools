@@ -26,6 +26,11 @@ of the formats above, and reports everything the target format cannot hold inste
 silently: converting to LPF or to the spreadsheet tables is lossy by design, converting between
 PLATO JSON and RDF is not.
 
+A **denial**, where a source states that something is not so (PLATO's `negated`, the tables'
+`denied`: no market here), is never written as an assertion. PLATO JSON, RDF and the spreadsheet
+tables carry it. Linked Places Format cannot, so a denied attestation is left out of LPF and
+reported; so is a denial of several things at once in the tables, whose rows deny one thing each.
+
 ## From the command line
 
 The same checks and conversions run in a terminal, with Node.js 24 or later, using the same engine
@@ -72,6 +77,12 @@ definitions) are vendored from a pinned commit of
 recorded in `package.json` and `public/plato/VERSION.json` and shown at the foot of the page. The
 build checks that the vendored ontology is byte-identical to the pinned commit's. `npm run vendor`
 re-pins to the current head of PLATO's main branch.
+
+The JSON Schemas give PLATO's identifiers the format `iri`, so that an address with a non-ASCII
+letter (`#André-1980`) is valid as written. The JSON Schema library's formats package does not
+define `iri`, and would ignore it, accepting any string at all; `src/lib/formats.js` defines it
+(an absolute IRI, by RFC 3987), and the tools refuse to start on any format they do not know
+rather than leave it unchecked.
 
 ## How it works
 

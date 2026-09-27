@@ -49,10 +49,30 @@ const controls = {
   'duplicate source_id': () => mutate(survey(), 'sources', (r) => { r[1].source_id = 'asc-annal-921'; }),
   'missing sheet': () => { const t = survey(); delete t.properties; return t; },
 };
+// The columns PLATO cf87b78 added, filled in (test/fixtures/tables-judgements), and broken one at a
+// time. rdf-tabular (strict, serialize --validate) accepted the fixture and '12000', and rejected
+// each of these, on 2026-09-27; the validator here must give the same verdicts.
+const judged = () => loadDir('test/fixtures/tables-judgements');
+test('valid tables are accepted: the new columns filled in', async () => {
+  assert.deepEqual(await validate(judged()), []);
+  assert.deepEqual(await validate(mutate(judged(), 'relations', (r) => { r[0].from = '12000'; })), [], 'a five-digit year is a year');
+});
+Object.assign(controls, {
+  'denied written Yes': () => mutate(judged(), 'types', (r) => { r[0].denied = 'Yes'; }),
+  'denied written true': () => mutate(judged(), 'types', (r) => { r[0].denied = 'true'; }),
+  'denied written 1': () => mutate(judged(), 'types', (r) => { r[0].denied = '1'; }),
+  'denied written y': () => mutate(judged(), 'types', (r) => { r[0].denied = 'y'; }),
+  'a citation function that is not CiTO': () => mutate(judged(), 'names', (r) => { r[0].citation_function = 'seeFurther'; }),
+  'a citation function given as a full address': () => mutate(judged(), 'names', (r) => { r[0].citation_function = 'http://purl.org/spar/cito/citesAsEvidence'; }),
+  'a misspelt transcription accuracy': () => mutate(judged(), 'names', (r) => { r[0].transcription_accuracy = 'Misread'; }),
+  'a transcription completeness in lower case': () => mutate(judged(), 'names', (r) => { r[0].transcription_completeness = 'complete'; }),
+  'a three-digit year beside a deep-time one': () => mutate(judged(), 'relations', (r) => { r[0].from = '921'; }),
+});
 for (const [name, make] of Object.entries(controls)) {
   test(`broken tables are rejected: ${name}`, async () => {
     const issues = await validate(make());
     assert.ok(issues.length >= 1, 'expected at least one issue');
+    assert.ok(issues.length <= 2, `only the broken cell should be reported: ${JSON.stringify(issues)}`);
   });
 }
 

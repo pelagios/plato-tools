@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import jsonld from 'jsonld';
 import Ajv2020 from 'ajv/dist/2020.js';
-import addFormats from 'ajv-formats';
+import { addPlatoFormats, strictFormatLogger } from '../src/lib/formats.js';
 import { Json2Rdf } from '../src/formats/json2rdf.js';
 import { Rdf2Json, MemGraph } from '../src/formats/rdf2json.js';
 import { tripleNT } from '../src/lib/ntriples.js';
@@ -42,7 +42,7 @@ function toJson(g, docNode, profileName) {
   const ir = kids('contains_identity_relation'); if (ir.length) doc.identityRelations = ir.map((i) => r.identityRelation(i));
   return { doc, losses };
 }
-const ajv = new Ajv2020({ strict: false, allErrors: true }); addFormats(ajv);
+const ajv = addPlatoFormats(new Ajv2020({ strict: false, allErrors: true, logger: strictFormatLogger }));
 ajv.addSchema(CORE, 'https://w3id.org/plato/schemas/plato.schema.json');
 for (const p of Object.values(PROFILES)) ajv.addSchema(p);
 
@@ -166,3 +166,4 @@ test("a relation's wording survives JSON -> RDF -> JSON (plato:source_label), an
   w.header({ gazetteer: doc.gazetteer }); w.record('spatialEntities', doc.spatialEntities[0]);
   assert.doesNotMatch(nt, /source_label/);
 });
+

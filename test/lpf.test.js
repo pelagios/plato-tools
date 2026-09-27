@@ -7,12 +7,12 @@ import { readFileSync, existsSync, createReadStream } from 'node:fs';
 import { createGunzip } from 'node:zlib';
 import { createInterface } from 'node:readline';
 import Ajv2020 from 'ajv/dist/2020.js';
-import addFormats from 'ajv-formats';
+import { addPlatoFormats, strictFormatLogger } from '../src/lib/formats.js';
 import { featureToRecord, recordToFeature, expandLpf } from '../src/formats/lpf.js';
 
 const load = (f) => JSON.parse(readFileSync(`public/plato/${f}`, 'utf8'));
 const CORE = load('plato.schema.json'), PC = load('place-centric.schema.json');
-const ajv = new Ajv2020({ strict: false, allErrors: true }); addFormats(ajv);
+const ajv = addPlatoFormats(new Ajv2020({ strict: false, allErrors: true, logger: strictFormatLogger }));
 ajv.addSchema(CORE, 'https://w3id.org/plato/schemas/plato.schema.json'); ajv.addSchema(PC);
 const validDoc = (recs) => {
   const v = ajv.getSchema('https://w3id.org/plato/schemas/place-centric.schema.json');

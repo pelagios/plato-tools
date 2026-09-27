@@ -6,6 +6,7 @@
 // Writing LPF from PLATO is lossy by design (bundling, locators, form status, numeric certainty
 // and more have no LPF slot); every loss is reported, with counts.
 import { PLATO } from '../lib/context.js';
+import { isDenial, isAlternative, qualificationLosses } from './shared.js';
 
 // The README's alias table, plus the vocabulary prefixes its own examples use.
 export const LPF_PREFIXES = {
@@ -27,7 +28,12 @@ const DCT_DESCRIPTION = 'http://purl.org/dc/terms/description', FOAF_DEPICTION =
 const LINK_PROPERTY = { primaryTopicOf: 'http://xmlns.com/foaf/0.1/isPrimaryTopicOf', subjectOf: 'http://purl.org/dc/terms/isReferencedBy', seeAlso: 'http://www.w3.org/2000/01/rdf-schema#seeAlso' };
 const PROPERTY_LINK = Object.fromEntries(Object.entries(LINK_PROPERTY).map(([k, v]) => [v, k]));
 
-const pad = (s) => (typeof s === 'string' && /^-?\d{1,3}$/.test(s) ? (s.startsWith('-') ? '-' + s.slice(1).padStart(4, '0') : s.padStart(4, '0')) : s);
+// A year of fewer than four digits is padded to four ('921' -> '0921'); longer years (deep time,
+// '-12000', since PLATO cf87b78) are kept as they are. A whole-number year is written as a string.
+const pad = (s0) => {
+  const s = typeof s0 === 'number' && Number.isInteger(s0) ? String(s0) : s0;
+  return typeof s === 'string' && /^-?\d{1,3}$/.test(s) ? (s.startsWith('-') ? '-' + s.slice(1).padStart(4, '0') : s.padStart(4, '0')) : s;
+};
 const bound = (b, which) => (b === undefined ? undefined : typeof b === 'string' ? pad(b) : pad(b.in ?? b[which]));
 const clean = (o) => { for (const k of Object.keys(o)) if (o[k] === undefined || (Array.isArray(o[k]) && !o[k].length)) delete o[k]; return o; };
 
@@ -137,16 +143,22 @@ function platoToWhen(spans, note) {
 function platoToCitations(a, loss) {
   const out = [];
   const cited = new Map();
-  for (const c of a.citations || []) {
-    const s = typeof c.source === 'string' ? { '@id': c.source } : c.source || {};
-    const key = s['@id'] || s.title;
-    cited.set(key, c);
+  const asObject = (s) => (typeof s === 'string' ? { '@id': s } : s || {});
+  const keyOf = (s) => s['@id'] || s.title;
+  for (const c of a.citations || []) cited.set(keyOf(asObject(c.source)), c);
+  // Every source the attestation names, in `sources` or only in a citation, once each; where one is
+  // named both by address and in full, the fuller description is kept.
+  const all = new Map();
+  for (const s0 of [...(a.sources || []), ...(a.citations || []).map((c) => c.source)]) {
+    if (!s0) continue;
+    const s = asObject(s0), k = keyOf(s), prev = all.get(k);
+    if (!prev || Object.keys(s).length > Object.keys(prev).length) all.set(k, s);
   }
-  for (const s0 of a.sources || []) {
-    const s = typeof s0 === 'string' ? { '@id': s0 } : s0;
-    const c = cited.get(s['@id'] || s.title);
+  for (const [k, s] of all) {
+    const c = cited.get(k);
     if (c?.attributionStatus) loss({ kind: 'attribution-status' });
-    const year = s.timespan?.startEarliest && /^-?\d{4}$/.test(s.timespan.startEarliest) ? Number(s.timespan.startEarliest) : undefined;
+    if (c?.citationFunction) loss({ kind: 'citation-function' });
+    const year = s.timespan?.startEarliest && /^-?\d{4,}$/.test(s.timespan.startEarliest) ? Number(s.timespan.startEarliest) : undefined;
     if (s.derivedFrom) loss({ kind: 'source-derivation' });
     out.push(clean({ label: [s.title || s['@id'], c?.locator].filter(Boolean).join(', '), year, '@id': s['@id'] || s.uri }));
   }
@@ -158,6 +170,9 @@ export function recordToFeature(rec, idrs = [], loss = () => {}) {
   const f = { '@id': rec['@id'], type: 'Feature', properties: clean({ title: rec.label, ccodes: rec.ccodes?.length ? rec.ccodes : undefined }), names: [], types: [], relations: [], links: [], descriptions: [], depictions: [] };
   const geoms = [], fclasses = [], whens = [];
   for (const a of rec.attestations || []) {
+    // LPF cannot say that a source denies something: a denial written as LPF would assert what its
+    // source says is not so. It is left out, and reported (PLATO cf87b78).
+    if (isDenial(a)) { loss({ kind: 'denial', value: rec['@id'] }); continue; }
     const when = platoToWhen(a.timespans, a.certaintyNote);
     const cits = platoToCitations(a, loss);
     const facets = ['names', 'geometries', 'types', 'relations', 'properties'].filter((k) => a[k]?.length);
@@ -169,20 +184,24 @@ export function recordToFeature(rec, idrs = [], loss = () => {}) {
     // LPF has certainty on a when, a geometry and a relation only.
     if (a.certaintyLevel && !a.geometries?.length && !a.relations?.length) loss({ kind: 'certainty-level', value: a.certaintyLevel.replace(PLATO, '') });
     else if (a.certaintyLevel && !WORD[a.certaintyLevel]) loss({ kind: 'certainty-level', value: a.certaintyLevel });
-    if (a.meta) loss({ kind: 'meta-attestation' });
+    // Alternative readings are written, each as its own claim: that at most one is right is lost,
+    // and said so in its own words, since it changes what the output claims.
+    if (a.meta) loss(isAlternative(a.meta) ? { kind: 'alternative-readings', value: a['@id'] } : { kind: 'meta-attestation' });
+    for (const t of a.timespans || []) qualificationLosses(t.qualification, ['certaintyLevel'], loss);
     if (!facets.length && when) { whens.push(when); continue; }
     for (const n of a.names || []) {
-      if (n.qualification) loss({ kind: 'qualification' });
+      qualificationLosses(n.qualification, [], loss);
       if (n.sourceLabel) loss({ kind: 'source-label' });
       f.names.push(clean({ toponym: n.toponym, lang: n.language, citations: cits.length ? cits : undefined, when }));
     }
     for (const t of a.types || []) {
+      qualificationLosses(t.qualification, [], loss);
       if (t.identifier?.startsWith(GN_CLASS)) { fclasses.push(t.identifier.slice(GN_CLASS.length)); continue; }
       f.types.push(clean({ identifier: t.identifier, label: t.label, sourceLabels: t.sourceLabel ? [{ label: t.sourceLabel }] : undefined, when, citations: cits.length ? cits : undefined }));
     }
     for (const g of a.geometries || []) {
-      const { certaintyLevel: gl, ...otherQual } = g.qualification || {};
-      if (Object.keys(otherQual).length) loss({ kind: 'qualification' });
+      const gl = g.qualification?.certaintyLevel;
+      qualificationLosses(g.qualification, ['certaintyLevel'], loss);
       if (g.sourceLabel) loss({ kind: 'source-label' });
       if (g.role) loss({ kind: 'geometry-role' });
       const lg = g.geojson ? { ...g.geojson } : g.reprPoint ? { type: 'Point', coordinates: g.reprPoint } : {};
@@ -194,6 +213,7 @@ export function recordToFeature(rec, idrs = [], loss = () => {}) {
     }
     for (const r of a.relations || []) f.relations.push(clean({ relationType: r.relationType, relationTo: r.relatesTo, label: r.relationLabel, when, citations: cits.length ? cits : undefined, certainty: certaintyWord(a.certaintyLevel, a.certaintyNote) }));
     for (const p of a.properties || []) {
+      qualificationLosses(p.qualification, [], loss);
       if (p.property === DCT_DESCRIPTION) f.descriptions.push(clean({ value: String(p.value), source: cits[0]?.['@id'] }));
       else if (p.property === FOAF_DEPICTION) f.depictions.push(clean({ '@id': String(p.value), title: p.label !== 'depiction' ? p.label : undefined }));
       else if (PROPERTY_LINK[p.property]) f.links.push({ type: PROPERTY_LINK[p.property], identifier: String(p.value) });
