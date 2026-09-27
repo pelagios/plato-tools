@@ -69,7 +69,30 @@ test('tables -> PLATO attestations: the survey name rows', () => {
   assert.equal(headword.formStatus, 'https://w3id.org/plato#Headword');
   const witness = ids.source('asc-ms-a');
   assert.equal(witness.derivedFrom, 'https://example.org/survey/source/asc-annal-921');
-  assert.deepEqual(witness.timespan, { label: 'c. 925', startEarliest: '0915', endLatest: '0935' });
+  // The date column is the date as written: plato:source_label since PLATO 9d2c36e.
+  assert.deepEqual(witness.timespan, { sourceLabel: 'c. 925', startEarliest: '0915', endLatest: '0935' });
+  assert.equal(rowToAttestation('names', names[0], ids).timespans[0].sourceLabel, names[0].date);
+});
+
+test('tables: certainty_level becomes certaintyLevel, and comes back', () => {
+  const t = survey();
+  const sources = Object.fromEntries(Papa.parse(t.sources, { header: true, skipEmptyLines: true }).data.map((r) => [r.source_id, r]));
+  const ids = tableIds('https://example.org/survey/', (id) => sources[id]);
+  const row = { ...Papa.parse(t.names, { header: true, skipEmptyLines: true }).data[0], certainty_level: 'LessCertain', form_status: 'Preferred' };
+  const a = rowToAttestation('names', row, ids);
+  assert.equal(a.certaintyLevel, 'https://w3id.org/plato#LessCertain');
+  assert.equal(a.formStatus, 'https://w3id.org/plato#Preferred');
+  const losses = [];
+  const back = recordToRows({ '@id': 'https://example.org/survey/place/x', label: 'X', entityIdentifier: 'x', attestations: [a] },
+    { place: (iri, label, own, cc, eid) => eid || 'p', source: () => 's' }, (l) => losses.push(l.kind));
+  assert.equal(back.names[0].certainty_level, 'LessCertain');
+  assert.equal(back.names[0].form_status, 'Preferred');
+  assert.equal(back.names[0].place_id, 'x', 'entityIdentifier is offered as the place_id');
+  assert.deepEqual(losses, []);
+  const other = recordToRows({ '@id': 'x', label: 'X', attestations: [{ ...a, certaintyLevel: 'https://example.org/levels/Probable' }] },
+    { place: () => 'p', source: () => 's' }, (l) => losses.push(l.kind));
+  assert.equal(other.names[0].certainty_level, '');
+  assert.deepEqual(losses, ['certainty-level'], 'a level the tables cannot hold is reported');
 });
 
 import { recordToRows } from '../src/formats/tables.js';

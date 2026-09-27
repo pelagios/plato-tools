@@ -91,10 +91,12 @@ export function rowToAttestation(sheet, row, ids) {
   const src = ids.source(row.source_id);
   const citation = clean({ source: src, locator: row.locator, attributionStatus: row.attribution ? PLATO + 'Attribution' + row.attribution : undefined });
   const a = clean({
-    timespans: [clean({ label: row.date, startEarliest: row.from, endLatest: row.to })],
+    // The date column is the date as the source writes it: plato:source_label since PLATO 9d2c36e.
+    timespans: [clean({ sourceLabel: row.date, startEarliest: row.from, endLatest: row.to })],
     sources: [src],
     citations: [citation],
     certainty: num(row.certainty),
+    certaintyLevel: row.certainty_level ? PLATO + row.certainty_level : undefined,
     notes: row.notes,
   });
   if (sheet === 'names') {
@@ -132,7 +134,7 @@ export function tableIds(base, sourcesById) {
       if (!r) return b + 'source/' + encodeURIComponent(id);
       return clean({
         '@id': b + 'source/' + encodeURIComponent(id), title: r.title, citation: r.citation, uri: r.uri, authorityType: 'source',
-        timespan: r.date || r.from || r.to ? clean({ label: r.date, startEarliest: r.from, endLatest: r.to }) : undefined,
+        timespan: r.date || r.from || r.to ? clean({ sourceLabel: r.date, startEarliest: r.from, endLatest: r.to }) : undefined,
         derivedFrom: r.derived_from ? b + 'source/' + encodeURIComponent(r.derived_from) : undefined,
       });
     },
@@ -143,6 +145,7 @@ export { ATTESTATION_SHEETS };
 
 // ---- PLATO records -> table rows (lossy; every loss reported) ----------------------------------
 const GVP_BROADER_PARTITIVE = 'http://vocab.getty.edu/ontology#broaderPartitive';
+const LEVELS = new Set(['Certain', 'LessCertain', 'Uncertain']);   // the tables' certainty_level values
 const local = (iri, prefix) => (iri && iri.startsWith(prefix) ? iri.slice(prefix.length) : null);
 /** GeoJSON geometry -> WKT, for the locations sheet's wkt column. */
 export function geojsonToWkt(g) {
@@ -175,7 +178,7 @@ function representativePoint(g) {
  */
 export function recordToRows(rec, ids, loss = () => {}) {
   const rows = { places: [], names: [], locations: [], types: [], relations: [], properties: [], identities: [] };
-  const pid = ids.place(rec['@id'], rec.label, true, rec.ccodes);
+  const pid = ids.place(rec['@id'], rec.label, true, rec.ccodes, rec.entityIdentifier);
   for (const a of rec.attestations || []) {
     const facets = ['names', 'geometries', 'types', 'relations', 'properties'].filter((k) => a[k]?.length);
     if (facets.length > 1) loss({ kind: 'bundled-attestation', value: facets.join('+') });
@@ -191,13 +194,17 @@ export function recordToRows(rec, ids, loss = () => {}) {
     if (!src) loss({ kind: 'attestation-without-source' });
     const sid = ids.source(src);
     const cit = (a.citations || []).find((c) => !src || c.source === src || (c.source?.['@id'] && c.source['@id'] === (src['@id'] || src))) || {};
-    const date = t.label || (t.startEarliest || t.endLatest ? [t.startEarliest, t.endLatest].filter(Boolean).join('-') : 'undated');
+    if (t.sourceLabel && t.label && t.sourceLabel !== t.label) loss({ kind: 'period-label', value: t.label });
+    const date = t.sourceLabel || t.label || (t.startEarliest || t.endLatest ? [t.startEarliest, t.endLatest].filter(Boolean).join('-') : 'undated');
     const notes = [a.notes, a.certaintyNote && `Certainty: ${a.certaintyNote}`].filter(Boolean).join(' ') || '';
     const common = { place_id: pid, date, from: t.startEarliest || '', to: t.endLatest || '', source_id: sid, locator: cit.locator || '',
-      attribution: local(cit.attributionStatus, PLATO + 'Attribution') || '', certainty: a.certainty ?? '', notes };
+      attribution: local(cit.attributionStatus, PLATO + 'Attribution') || '', certainty: a.certainty ?? '',
+      certainty_level: LEVELS.has(local(a.certaintyLevel, PLATO)) ? local(a.certaintyLevel, PLATO) : '', notes };
+    if (a.certaintyLevel && !common.certainty_level) loss({ kind: 'certainty-level', value: a.certaintyLevel });
     if (a.meta) loss({ kind: 'meta-attestation' });
     for (const n of a.names || []) {
       if (n.qualification) loss({ kind: 'qualification' });
+      if (n.sourceLabel) loss({ kind: 'source-label' });
       rows.names.push({ place_id: pid, name: n.toponym, language: n.language || '', script: n.script || '', romanized: n.romanized || '',
         name_type: (n.nameType || []).join(';'), form_status: local(a.formStatus, PLATO) || '', occurrence_context: local(a.occurrenceContext, PLATO) || '',
         occurrence_count: a.occurrenceCount ?? '', ...common, place_id: pid });
@@ -207,6 +214,7 @@ export function recordToRows(rec, ids, loss = () => {}) {
       if (!p) { p = representativePoint(g.geojson); if (p) loss({ kind: 'point-derived-from-shape' }); }
       if (!p) { loss({ kind: 'geometry-without-coordinates' }); continue; }
       if (g.qualification) loss({ kind: 'qualification' });
+      if (g.sourceLabel) loss({ kind: 'source-label' });
       rows.locations.push({ place_id: pid, latitude: p[1], longitude: p[0],
         wkt: g.wkt || (g.geojson && g.geojson.type !== 'Point' ? geojsonToWkt(g.geojson) || '' : ''),
         geometry_role: local(g.role, PLATO) || '', precision_km: (g.precisionKm || [])[0] ?? '', ...common });

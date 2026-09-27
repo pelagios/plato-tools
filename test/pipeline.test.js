@@ -153,3 +153,13 @@ test('control: tables with an unknown place_id are rejected', async () => {
   const r = await go([...files.filter((f) => f.name !== 'names.csv'), textFile(names, 'names.csv')], 'check');
   assert.ok(errors(r).some((e) => e.kind === 'table' && /nowhere/.test(e.examples[0])), JSON.stringify(errors(r)));
 });
+
+test('tables -> JSON Lines: place_id is kept as entityIdentifier, the date as sourceLabel, and both are valid', async () => {
+  const r = await go(tablesDir('survey'), 'convert', 'plato-jsonl', { base: 'https://example.org/survey/' });
+  assert.deepEqual(errors(r), []);
+  const lines = outText(r.e, Object.keys(r.e.outs)[0]).trim().split('\n').map((l) => JSON.parse(l)).slice(1).filter((l) => l.label);
+  assert.deepEqual(lines.map((l) => l.entityIdentifier).sort(), ['buckinghamshire', 'bunsty', 'cambridge']);
+  for (const l of lines) assert.equal(l['@id'], `https://example.org/survey/place/${l.entityIdentifier}`);
+  const spans = lines.flatMap((l) => (l.attestations || []).flatMap((a) => a.timespans || []));
+  assert.ok(spans.length && spans.every((t) => t.sourceLabel && !t.label), JSON.stringify(spans.slice(0, 2)));
+});

@@ -31,7 +31,19 @@ const pad = (s) => (typeof s === 'string' && /^-?\d{1,3}$/.test(s) ? (s.startsWi
 const bound = (b, which) => (b === undefined ? undefined : typeof b === 'string' ? pad(b) : pad(b.in ?? b[which]));
 const clean = (o) => { for (const k of Object.keys(o)) if (o[k] === undefined || (Array.isArray(o[k]) && !o[k].length)) delete o[k]; return o; };
 
-/** LPF when -> PLATO timespans; LPF certainty -> a certainty note (the enum has no numeric equivalent). */
+// LPF's three certainty words are PLATO's three CertaintyLevels (since PLATO 9d2c36e), so they
+// round-trip as words; no number is invented for them.
+const LEVEL = { certain: PLATO + 'Certain', 'less-certain': PLATO + 'LessCertain', uncertain: PLATO + 'Uncertain' };
+const WORD = Object.fromEntries(Object.entries(LEVEL).map(([w, l]) => [l, w]));
+/** An LPF certainty word -> { certaintyLevel } or, for a word outside LPF's three, a note. */
+function level(word) {
+  if (!word) return {};
+  return LEVEL[word] ? { certaintyLevel: LEVEL[word] } : { certaintyNote: `LPF certainty: ${word}` };
+}
+/** A PLATO certainty level (or a note written by an earlier version of these tools) -> an LPF word. */
+const certaintyWord = (lvl, note) => WORD[lvl] || (note && /LPF certainty: (certain|less-certain|uncertain)/.exec(note)?.[1]) || undefined;
+
+/** LPF when -> PLATO timespans; the when's certainty qualifies each of its timespans. */
 function whenToPlato(when, loss) {
   if (!when) return {};
   const spans = (when.timespans || []).map((t) => {
@@ -41,18 +53,20 @@ function whenToPlato(when, loss) {
   for (const p of when.periods || []) spans.push(clean({ label: p.name, periodoUri: expandLpf(p.uri || p['@id']) }));
   if (when.label && spans.length) spans[0].label = spans[0].label ? spans[0].label + '; ' + when.label : when.label;
   if (when.duration) loss({ kind: 'lpf-duration', value: when.duration });
-  return { timespans: spans, certaintyNote: when.certainty ? `LPF certainty: ${when.certainty}` : undefined };
+  const c = level(when.certainty);
+  if (c.certaintyLevel && spans.length) { for (const t of spans) t.qualification = { certaintyLevel: c.certaintyLevel }; return { timespans: spans }; }
+  return { timespans: spans, ...c };
 }
 function citationsToSources(cits) {
   return (cits || []).map((c) => clean({
     ...(c['@id'] ? { '@id': expandLpf(c['@id']) } : {}), title: c.label || c['@id'] || 'untitled', authorityType: 'source',
-    timespan: c.year !== undefined ? { label: String(c.year), startEarliest: pad(String(c.year)), endLatest: pad(String(c.year)) } : undefined,
+    timespan: c.year !== undefined ? { sourceLabel: String(c.year), startEarliest: pad(String(c.year)), endLatest: pad(String(c.year)) } : undefined,
   }));
 }
 function attestation(facets, when, cits, loss, extra = {}) {
   const w = whenToPlato(when, loss);
   const certaintyNote = [w.certaintyNote, extra.certaintyNote].filter(Boolean).join('; ') || undefined;
-  return clean({ ...facets, timespans: w.timespans, sources: citationsToSources(cits), certaintyNote });
+  return clean({ ...facets, timespans: w.timespans, sources: citationsToSources(cits), certaintyLevel: extra.certaintyLevel || w.certaintyLevel, certaintyNote });
 }
 
 /** LPF Feature -> PLATO place-centric record. `loss(l)` receives what PLATO JSON cannot hold. */
@@ -75,11 +89,14 @@ export function featureToRecord(f, loss = () => {}) {
       wkt: g.geowkt,
       reprPoint: g.type === 'Point' && g.coordinates ? g.coordinates.slice(0, 2) : undefined,
     });
-    A.push(attestation({ geometries: [geom] }, g.when, g.citations, loss, { certaintyNote: g.certainty ? `LPF certainty: ${g.certainty}` : undefined }));
+    // A geometry's certainty qualifies the geometry itself.
+    const gc = level(g.certainty);
+    if (gc.certaintyLevel) geom.qualification = { certaintyLevel: gc.certaintyLevel };
+    A.push(attestation({ geometries: [geom] }, g.when, g.citations, loss, { certaintyNote: gc.certaintyNote }));
   }
   for (const r of f.relations || []) {
     A.push(attestation({ relations: [clean({ relatesTo: expandLpf(r.relationTo), relationType: expandLpf(r.relationType), relationLabel: r.label })] }, r.when, r.citations, loss,
-      { certaintyNote: r.certainty ? `LPF certainty: ${r.certainty}` : undefined }));
+      level(r.certainty)));
   }
   for (const l of f.links || []) {
     if (l.type === 'closeMatch' || l.type === 'exactMatch') rec.identityRelations.push({ subject: f['@id'], object: expandLpf(l.identifier), identityType: l.type });
@@ -102,7 +119,6 @@ export function featureToRecord(f, loss = () => {}) {
 }
 
 // ---- PLATO record -> LPF Feature -------------------------------------------------------------
-const certaintyWord = (note) => (note && /LPF certainty: (certain|less-certain|uncertain)/.exec(note)?.[1]) || undefined;
 function platoToWhen(spans, note) {
   const ts = [], periods = [];
   let label;
@@ -111,10 +127,12 @@ function platoToWhen(spans, note) {
     const start = t.startEarliest === t.startLatest || t.startLatest === undefined ? (t.startEarliest !== undefined ? { in: t.startEarliest } : undefined) : clean({ earliest: t.startEarliest, latest: t.startLatest });
     const end = t.endEarliest === t.endLatest || t.endEarliest === undefined ? (t.endLatest !== undefined ? { in: t.endLatest } : undefined) : clean({ earliest: t.endEarliest, latest: t.endLatest });
     if (start || end) ts.push(clean({ start: start || end, end: start && end && JSON.stringify(start) !== JSON.stringify(end) ? end : undefined }));
-    if (t.label && !label) label = t.label;
+    // The date as the source wrote it, or else a period's name, is the when's label.
+    if ((t.sourceLabel || t.label) && !label) label = t.sourceLabel || t.label;
   }
   if (!ts.length && !periods.length) return undefined;
-  return clean({ timespans: ts.length ? ts : undefined, periods: periods.length ? periods : undefined, label, certainty: certaintyWord(note) });
+  const lvl = (spans || []).map((t) => t.qualification?.certaintyLevel).find(Boolean);
+  return clean({ timespans: ts.length ? ts : undefined, periods: periods.length ? periods : undefined, label, certainty: certaintyWord(lvl, note) });
 }
 function platoToCitations(a, loss) {
   const out = [];
@@ -148,10 +166,14 @@ export function recordToFeature(rec, idrs = [], loss = () => {}) {
     if (a.occurrenceContext) loss({ kind: 'occurrence-context', value: a.occurrenceContext.replace(PLATO, '') });
     if (a.occurrenceCount !== undefined) loss({ kind: 'occurrence-count' });
     if (a.certainty !== undefined) loss({ kind: 'numeric-certainty' });
+    // LPF has certainty on a when, a geometry and a relation only.
+    if (a.certaintyLevel && !a.geometries?.length && !a.relations?.length) loss({ kind: 'certainty-level', value: a.certaintyLevel.replace(PLATO, '') });
+    else if (a.certaintyLevel && !WORD[a.certaintyLevel]) loss({ kind: 'certainty-level', value: a.certaintyLevel });
     if (a.meta) loss({ kind: 'meta-attestation' });
     if (!facets.length && when) { whens.push(when); continue; }
     for (const n of a.names || []) {
       if (n.qualification) loss({ kind: 'qualification' });
+      if (n.sourceLabel) loss({ kind: 'source-label' });
       f.names.push(clean({ toponym: n.toponym, lang: n.language, citations: cits.length ? cits : undefined, when }));
     }
     for (const t of a.types || []) {
@@ -159,16 +181,18 @@ export function recordToFeature(rec, idrs = [], loss = () => {}) {
       f.types.push(clean({ identifier: t.identifier, label: t.label, sourceLabels: t.sourceLabel ? [{ label: t.sourceLabel }] : undefined, when, citations: cits.length ? cits : undefined }));
     }
     for (const g of a.geometries || []) {
-      if (g.qualification) loss({ kind: 'qualification' });
+      const { certaintyLevel: gl, ...otherQual } = g.qualification || {};
+      if (Object.keys(otherQual).length) loss({ kind: 'qualification' });
+      if (g.sourceLabel) loss({ kind: 'source-label' });
       if (g.role) loss({ kind: 'geometry-role' });
       const lg = g.geojson ? { ...g.geojson } : g.reprPoint ? { type: 'Point', coordinates: g.reprPoint } : {};
       if (g.wkt) lg.geowkt = g.wkt;
       if (when) lg.when = when;
       if (cits.length) lg.citations = cits;
-      const c = certaintyWord(a.certaintyNote); if (c) lg.certainty = c;
+      const c = certaintyWord(gl || a.certaintyLevel, a.certaintyNote); if (c) lg.certainty = c;
       geoms.push(lg);
     }
-    for (const r of a.relations || []) f.relations.push(clean({ relationType: r.relationType, relationTo: r.relatesTo, label: r.relationLabel, when, citations: cits.length ? cits : undefined, certainty: certaintyWord(a.certaintyNote) }));
+    for (const r of a.relations || []) f.relations.push(clean({ relationType: r.relationType, relationTo: r.relatesTo, label: r.relationLabel, when, citations: cits.length ? cits : undefined, certainty: certaintyWord(a.certaintyLevel, a.certaintyNote) }));
     for (const p of a.properties || []) {
       if (p.property === DCT_DESCRIPTION) f.descriptions.push(clean({ value: String(p.value), source: cits[0]?.['@id'] }));
       else if (p.property === FOAF_DEPICTION) f.depictions.push(clean({ '@id': String(p.value), title: p.label !== 'depiction' ? p.label : undefined }));

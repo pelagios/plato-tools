@@ -65,3 +65,34 @@ test('DEEP LPF export (first 2,000 features) -> valid PLATO', async (t) => {
   assert.equal(recs.length, 2000);
   assert.equal(validDoc(recs), null);
 });
+
+// LPF certainty words are PLATO CertaintyLevels (PLATO 9d2c36e): they must come back as words,
+// on the same element, with no number invented and no note written.
+function certainties(f) {
+  const out = [];
+  const walk = (o, path) => {
+    if (Array.isArray(o)) return o.forEach((x, i) => walk(x, path));
+    if (!o || typeof o !== 'object') return;
+    for (const [k, v] of Object.entries(o)) { if (k === 'certainty' && typeof v === 'string') out.push(`${path}:${v}`); else walk(v, k === 'when' ? path + '.when' : ['geometry', 'geometries', 'relations'].includes(k) ? k.replace(/ies$/, 'y').replace(/s$/, '') : path); }
+  };
+  walk(f, 'feature');
+  return out.sort();
+}
+for (const [name, feature] of [['README example', README], ...JSON.parse(readFileSync('test/fixtures/lpf-sample-v1.2.2.geojson', 'utf8')).features.map((f, i) => [`sample feature ${i}`, f])]) {
+  const want = certainties(feature);
+  if (!want.length) continue;
+  test(`LPF certainty words round-trip as certainty levels: ${name}`, () => {
+    const rec = featureToRecord(feature);
+    const json = JSON.stringify(rec);
+    assert.ok(!json.includes('LPF certainty:'), 'a certainty word was written as a note');
+    assert.ok(/#(Certain|LessCertain|Uncertain)"/.test(json), 'no certainty level in the PLATO record');
+    assert.equal(validDoc([rec]), null);
+    assert.deepEqual(certainties(recordToFeature(rec)), want);
+  });
+}
+test('control: a changed certainty level is noticed', () => {
+  const f = structuredClone(README);
+  const rec = featureToRecord(f);
+  const s = JSON.stringify(rec).replace(/#LessCertain"/g, '#Certain"').replace(/#Uncertain"/g, '#Certain"');
+  assert.notDeepEqual(certainties(recordToFeature(JSON.parse(s))), certainties(f).length ? certainties(f) : ['none']);
+});

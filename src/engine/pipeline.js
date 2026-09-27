@@ -60,7 +60,7 @@ export function explainSchema(errs, fromTables) {
     if (p === 'identifier' && /types\/\d+$/.test(at)) return 'A type has no identifier: PLATO JSON requires the web address of the concept in a published vocabulary.' + col('type_uri');
     if (p === 'label') return 'A place has no label.' + col('label');
     if (p === 'toponym') return 'A name has no spelling (toponym).' + col('name');
-    if (p === 'identityType') return 'An identity match does not say what kind of match it is (exactMatch, closeMatch or related): PLATO JSON requires it.' + col('match_type');
+    if (p === 'identityType') return 'An identity match does not say what kind of match it is (exactMatch, closeMatch, related, or unspecified if the source does not say): PLATO JSON requires it.' + col('match_type');
     if (p === 'title') return 'A source has no title.' + col('title');
     return `Something required is missing: ${p}.`;
   }
@@ -186,7 +186,9 @@ async function* tablesSource(input, env, rep, options) {
   let n = 0;
   for (const p of rows('places')) {
     n++;
-    const rec = { '@id': ids.place(p.place_id), label: p.label, attestations: byPlace.get(p.place_id) || [] };
+    // place_id reaches the data as the record's own identifier (plato:entity_identifier), as the
+    // table definitions write it, not only as the tail of the minted address.
+    const rec = { '@id': ids.place(p.place_id), label: p.label, entityIdentifier: p.place_id, attestations: byPlace.get(p.place_id) || [] };
     if (p.country_codes) rec.ccodes = p.country_codes.split(';');
     for (const r of idrs.get(p.place_id) || []) {
       (rec.identityRelations ||= []).push(Object.fromEntries(Object.entries({
@@ -244,9 +246,18 @@ export async function run({ input, action, target, options = {} }, env) {
   // Checking (and writing) records as they stream past.
   const checkRecord = (ev) => {
     const f = ev.newEntity ? V.newEntity : ev.type === 'record' ? V.entity : ev.type === 'attestation' ? V.attestation : V.identity;
-    if (f && !f(ev.value)) rep.error('schema', explainSchema(f.errors, input.format === 'tables'), `${ev.value['@id'] || ev.value.subject || `item ${ev.n}`}: ${ajvMessage(f.errors)}`);
+    if (f && !f(ev.value)) rep.error('schema', explainSchema(f.errors, input.format === 'tables'), `${ev.value?.['@id'] || ev.value?.subject || `item ${ev.n}`}: ${ajvMessage(f.errors)}`);
   };
-  const dry = new Json2Rdf(res.context, () => {}, { onIssue: (i) => rep.warning(i.kind, i.kind === 'relative-iri' ? `A value that must be a full web address is not one, so it is dropped in RDF (${i.where})` : i.kind === 'not-in-rdf' ? `${LOSS_TEXT['not-in-rdf']} (${i.key})` : `A key PLATO does not define is dropped: ${i.value}`, i.value || i.key) });
+  // What the JSON-to-RDF converter could not use, in words. Every kind it can raise is named here.
+  const jsonIssue = (i) => {
+    if (i.kind === 'record-failed') return rep.error('record-failed', 'A record could not be converted to RDF and is left out; the rest of the file was still checked', `${i.value}: ${i.error}`);
+    if (i.kind === 'null-value') return rep.warning('null-value', `An empty value (null) is left out of RDF (${i.where})`, i.where);
+    if (i.kind === 'unconvertible') return rep.warning('unconvertible', `A value of the wrong kind cannot be turned into RDF and is left out (${i.where})`, i.value);
+    if (i.kind === 'relative-iri') return rep.warning(i.kind, `A value that must be a full web address is not one, so it is dropped in RDF (${i.where})`, i.value);
+    if (i.kind === 'not-in-rdf') return rep.warning(i.kind, `${LOSS_TEXT['not-in-rdf']} (${i.key})`, i.key);
+    return rep.warning(i.kind, `A key PLATO does not define is dropped: ${i.value}`, i.value);
+  };
+  const dry = new Json2Rdf(res.context, () => {}, { onIssue: jsonIssue });
 
   if (!needsStore) {
     let header = null;
@@ -259,15 +270,19 @@ export async function run({ input, action, target, options = {} }, env) {
         continue;
       }
       if (input.format.startsWith('plato') || input.format === 'lpf' || input.format === 'lpf-seq' || input.format === 'tables') checkRecord(ev);
-      if (ev.type === 'record') { rep.count('places'); rep.count('attestations', ev.value.attestations?.length || 0); dry.record(ev.newEntity ? 'newSpatialEntities' : 'spatialEntities', ev.value); }
+      if (ev.type === 'record') { rep.count('places'); rep.count('attestations', ev.value?.attestations?.length || 0); dry.record(ev.newEntity ? 'newSpatialEntities' : 'spatialEntities', ev.value); }
       else if (ev.type === 'idr') { rep.count('identity relations'); dry.record('identityRelations', ev.value); }
-      writer && writer.event(ev);
+      if (writer) {
+        try { writer.event(ev); }
+        catch (e) { rep.error('record-failed', 'A record could not be written and is left out of the output; the rest of the file was still converted', `${ev.value?.['@id'] || `item ${ev.n}`}: ${e && e.message || e}`); }
+      }
       beat('reading');
     }
   } else {
     // Gather everything in the on-disk store first, then read it back one place at a time.
     const store = new TripleStore(await env.openDb());
-    const w = new Json2Rdf(res.context, (s, p, o) => store.add(s, p, o), { onIssue: () => {} });
+    // Here the store's converter is the only one that sees the records, so it reports.
+    const w = new Json2Rdf(res.context, (s, p, o) => store.add(s, p, o), { onIssue: jsonIssue });
     let header = null, batch = 0;
     store.beginBatch();
     for await (const ev of source) {
@@ -405,9 +420,10 @@ function tablesWriter(env, rep, options, outputs, stem, loss) {
     usedIds.add(id); return id;
   };
   const ids = {
-    place(iri, label, own, ccodes) {
+    place(iri, label, own, ccodes, entityIdentifier) {
       let p = places.get(iri);
-      if (!p) { p = { place_id: shortId(iri, 'place'), label: label || iri, country_codes: '', own }; places.set(iri, p); }
+      // A record's own identifier (from a place_id, say) is its place_id again, so tables round-trip.
+      if (!p) { p = { place_id: entityIdentifier && !usedIds.has(entityIdentifier) ? (usedIds.add(entityIdentifier), entityIdentifier) : shortId(iri, 'place'), label: label || iri, country_codes: '', own }; places.set(iri, p); }
       if (own) { p.own = true; if (label) p.label = label; if (ccodes?.length) p.country_codes = ccodes.join(';'); }
       return p.place_id;
     },
@@ -418,7 +434,7 @@ function tablesWriter(env, rep, options, outputs, stem, loss) {
       let r = sources.get(key);
       if (!r) {
         const ts = s.timespan || {};
-        r = { source_id: shortId(s['@id'], 'source'), title: s.title || s['@id'], citation: s.citation || '', uri: s.uri || '', date: ts.label || (ts.startEarliest ? [ts.startEarliest, ts.endLatest].filter(Boolean).join('-') : 'undated'),
+        r = { source_id: shortId(s['@id'], 'source'), title: s.title || s['@id'], citation: s.citation || '', uri: s.uri || '', date: ts.sourceLabel || ts.label || (ts.startEarliest ? [ts.startEarliest, ts.endLatest].filter(Boolean).join('-') : 'undated'),
           from: ts.startEarliest || '', to: ts.endLatest || '', derived_from: '' };
         sources.set(key, r);
         if (s.derivedFrom) r.derived_from = this.source(s.derivedFrom);

@@ -88,39 +88,69 @@ export class Json2Rdf {
     return bnode(`r${this.n}b${this.b++}`);
   }
   _id(s, where) {
+    if (typeof s !== 'string') { this.issues({ kind: 'unconvertible', value: JSON.stringify(s), where }); return null; }
     if (s.startsWith('_:')) return this._blank(s);
     const v = expandIri(s, this.root.prefixes);
     if (!isAbsoluteIri(v)) { this.issues({ kind: 'relative-iri', value: s, where }); return null; }
     return iri(v);
   }
-  _nodeId(obj) { return obj['@id'] !== undefined ? this._id(obj['@id'], '@id') : this._blank(); }
+  _nodeId(obj) {
+    if (obj['@id'] === null) { this._null('@id'); return this._blank(); }   // described, but with no address
+    return obj['@id'] !== undefined ? this._id(obj['@id'], '@id') : this._blank();
+  }
+  _null(where) { this.issues({ kind: 'null-value', where }); }
 
   /** Start a document from its header (everything except the record arrays); returns the document node. */
   header(head) {
     this._begin();
-    const gz = head.gazetteer || {};
-    const doc = gz['@id'] !== undefined ? this._id(gz['@id'], 'gazetteer.@id') : this._blank();
+    const gz = head && typeof head.gazetteer === 'object' && head.gazetteer || {};
+    if (gz['@id'] === null) this._null('gazetteer.@id');
+    const doc = (gz['@id'] !== undefined && gz['@id'] !== null && this._id(gz['@id'], 'gazetteer.@id')) || this._blank();
     this.doc = doc;
-    this._walk(head, this.root, doc);
+    // Whatever a document holds, conversion goes on and says what it could not use: a check must
+    // always end with a report, never with an exception.
+    try { if (head && typeof head === 'object') this._walk(head, this.root, doc); }
+    catch (e) { this.issues({ kind: 'record-failed', value: 'the document header', error: String(e && e.message || e) }); }
     return doc;
   }
   /** One record from a top-level array: 'spatialEntities', 'newSpatialEntities', 'attestations' or 'identityRelations'. */
   record(arrayKey, obj) {
     this._begin();
-    const term = this.root.terms.get(arrayKey);
-    const id = this._nodeId(obj);
-    if (!id) return;
-    this._out(this.doc, iri(term.iri), id);
-    this._walk(obj, child(this.root, term), id);
+    if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) {
+      if (obj === null || obj === undefined) this._null(arrayKey); else this.issues({ kind: 'unconvertible', value: JSON.stringify(obj).slice(0, 80), where: arrayKey });
+      return;
+    }
+    try {
+      const term = this.root.terms.get(arrayKey);
+      const id = this._nodeId(obj);
+      if (!id) return;
+      this._out(this.doc, iri(term.iri), id);
+      this._walk(obj, child(this.root, term), id);
+    } catch (e) {
+      this.issues({ kind: 'record-failed', value: obj['@id'] || obj.about || obj.subject || arrayKey, error: String(e && e.message || e) });
+    }
   }
   _walk(obj, active, subj) {
     for (const [key, val] of Object.entries(obj)) {
       if (key === '@id' || key === '@context') continue;
-      if (key === 'spatialEntities' || key === 'newSpatialEntities' || ((key === 'attestations' || key === 'identityRelations') && active === this.root)) continue;
+      if (key === 'spatialEntities' || key === 'newSpatialEntities' || ((key === 'attestations' || key === 'identityRelations') && active === this.root)) {
+        if (val === null) this._null(key);
+        continue;
+      }
       const term = active.terms.get(key);
+      // A JSON literal holds its whole value, null and arrays included, exactly as jsonld.js writes it.
+      if (term && term.type === '@json' && val !== undefined) { this._out(subj, iri(term.iri), literal(jcs(val), RDF_JSON)); continue; }
+      if (val === null || val === undefined) { if (key !== '$schema') this._null(key); continue; }
       if (!term) { this.issues({ kind: 'unmapped-key', value: key }); continue; }
       if (term.drop) { if (NOT_IN_RDF.has(key) && val !== null && val !== undefined) this.issues({ kind: 'not-in-rdf', key }); continue; }
-      if (term.nest) { for (const v of [].concat(val)) if (v && typeof v === 'object') this._walk(v, active, subj); continue; }
+      if (term.nest) {
+        for (const v of [].concat(val)) {
+          if (v && typeof v === 'object') this._walk(v, active, subj);
+          else if (v === null || v === undefined) this._null(key);
+          else this.issues({ kind: 'unconvertible', value: JSON.stringify(v), where: key });
+        }
+        continue;
+      }
       const c = child(active, term);
       const p = iri(term.iri);
       if (term.container === '@list') {
@@ -130,8 +160,9 @@ export class Json2Rdf {
         this._out(subj, p, this._list([].concat(val), term, c)); continue;
       }
       for (const v of [].concat(val)) {
-        if (v === null || v === undefined) continue;
+        if (v === null || v === undefined) { this._null(key); continue; }
         if (term.reverse) {
+          if (typeof v !== 'object') { this.issues({ kind: 'unconvertible', value: JSON.stringify(v), where: key }); continue; }
           const n = this._nodeId(v); if (!n) continue;
           this._out(n, p, subj); this._walk(v, c, n); continue;
         }
@@ -150,14 +181,20 @@ export class Json2Rdf {
   _list(items, term, c) {
     let head = RDF_NIL;
     for (let i = items.length - 1; i >= 0; i--) {
+      // A null in a list is dropped, as JSON-LD drops it, and reported: a coordinate pair with a
+      // null in it is a position that cannot be placed.
+      if (items[i] === null || items[i] === undefined) { this._null(`${term.key}[${i}]`); continue; }
+      const o = this._value(items[i], term, c);
+      if (!o) { this.issues({ kind: 'unconvertible', value: JSON.stringify(items[i]).slice(0, 80), where: `${term.key}[${i}]` }); continue; }
       const node = this._blank();
-      this._emit(node, RDF_FIRST, this._value(items[i], term, c));
+      this._emit(node, RDF_FIRST, o);
       this._emit(node, RDF_REST, head);
       head = node;
     }
     return head;
   }
   _value(v, term, c) {
+    if (v === null || v === undefined) { this._null(term.key); return null; }
     if (term.type === '@json') return literal(jcs(v), RDF_JSON);
     if (typeof v === 'object') return this._nodeId(v);
     if (typeof v === 'string') {
