@@ -62,3 +62,12 @@ test('control: a changed value makes the graphs differ', async () => {
   const [a, b] = await Promise.all([canon(compiled(changed)), canon(await reference(doc))]);
   assert.notEqual(a, b);
 });
+
+test('a shared source is described once across records, and the graph is unchanged', async () => {
+  const src = { '@id': 'https://example.org/source/db', title: 'DB', citation: 'Domesday Book', authorityType: 'source', timespan: { label: '1086' } };
+  const doc = { profile: 'place-centric', gazetteer: { '@id': 'https://example.org/g', title: 't' }, spatialEntities: [1, 2, 3].map((i) => ({
+    '@id': `https://example.org/p${i}`, label: `P${i}`, attestations: [{ names: [{ toponym: `N${i}` }], sources: [src] }] })) };
+  const nt = compiled(doc);
+  assert.equal((nt.match(/authority_title/g) || []).length, 1, 'the source title should be written once');
+  assert.equal(await canon(nt), await canon(await reference(doc)));
+});

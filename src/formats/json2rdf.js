@@ -13,6 +13,9 @@ const REPR_POINT = PLATO + 'repr_point';
 const WKT = 'http://www.opengis.net/ont/geosparql#wktLiteral';
 // Keys the context deliberately leaves out of the RDF: a conversion to RDF loses their values.
 const NOT_IN_RDF = new Set(['relationLabel', 'metaTypeLabel']);
+// Terms whose values are shared authority nodes (sources), described in full wherever cited.
+const SHARED_TERMS = new Set(['sources', 'source', 'derivedFrom']);
+const SHARED_CAP = 2_000_000;
 
 /** RFC 8785 JSON canonicalisation, as jsonld.js uses for @json literals. */
 export function jcs(v) {
@@ -45,6 +48,7 @@ export class Json2Rdf {
     this.opt = options;
     this.issues = options.onIssue || (() => {});
     this.n = 0;
+    this.shared = new Set(); this.inShared = false;
   }
   _emit(s, p, o) {
     // A node that appears several times in one record (a shared source or name with an @id) is
@@ -52,6 +56,13 @@ export class Json2Rdf {
     const k = s.termType[0] + s.value + '\u0001' + p.value + '\u0001' + o.termType[0] + o.value + '\u0001' + (o.datatype || '') + (o.language || '');
     if (this.seen.has(k)) return;
     this.seen.add(k);
+    // A source with its own IRI is described again in every record that cites it. Across records
+    // its triples are emitted once: the set grows with the number of distinct sources, not with the
+    // data, and is capped, past which repeats are simply written again (still the same graph).
+    if (this.inShared && s.termType === 'NamedNode') {
+      if (this.shared.has(k)) return;
+      if (this.shared.size < SHARED_CAP) this.shared.add(k);
+    }
     this.emit(s, p, o);
   }
   _out(s, p, o) {
@@ -125,7 +136,12 @@ export class Json2Rdf {
         const o = this._value(v, term, c);
         if (!o) continue;
         this._out(subj, p, o);
-        if (o.termType !== 'Literal' && typeof v === 'object') this._walk(v, c, o);
+        if (o.termType !== 'Literal' && typeof v === 'object') {
+          const was = this.inShared;
+          if (SHARED_TERMS.has(key) && o.termType === 'NamedNode') this.inShared = true;
+          this._walk(v, c, o);
+          this.inShared = was;
+        }
       }
     }
   }

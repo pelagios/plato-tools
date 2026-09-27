@@ -74,7 +74,7 @@ def main():
             check('customs tables: detected as tables and checked with no problems', s.get('format') == 'tables' and s.get('phase') == 'done' and s['report']['errors'] == 0, s.get('report') or s)
             s = run_case(page, sorted((ex / 'survey').glob('*.csv')), 'check')
             errs = [i for i in (s.get('report') or {}).get('items', []) if i['severity'] == 'error']
-            check('survey tables: exactly the two things the tables allow and PLATO JSON does not', s.get('phase') == 'done' and len(errs) == 2 and all(i['kind'] == 'schema' for i in errs), errs or s)
+            check('survey tables: checked with no problems (a label-only type and an evidence-less place are valid PLATO)', s.get('phase') == 'done' and not errs and (s.get('report') or {}).get('counts', {}).get('places') == 3, errs or s)
             s = run_case(page, sorted((ex / 'customs').glob('*.csv')), 'convert', 'plato-jsonl')
             ok = s.get('phase') == 'done' and s.get('outputs')
             out = download(page, s['outputs'][0]['name'], tmp / 'customs.jsonl') if ok else None

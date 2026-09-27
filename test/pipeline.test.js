@@ -62,18 +62,17 @@ test('tables (customs, eight CSV files) -> JSON Lines: valid, no errors', async 
   assert.deepEqual(errors(r), []);
   assert.equal(r.report.counts.places, 2);
 });
-test('tables (survey) -> JSON: the two things the tables allow and PLATO JSON does not are reported', async () => {
-  // The tables allow a type with only a label, and a place with no evidence rows (Buckinghamshire
-  // is only the target of a relation); the JSON Schema requires a type identifier, and at least
-  // one attestation per place. Both are reported, and nothing else.
+test('tables (survey) -> JSON: a label-only type and a place with no evidence are valid PLATO', async () => {
+  // PLATO 0.4.0 plus the resolutions of ee80543: a type needs only a label, and a place may have
+  // no attestations (Buckinghamshire is only the target of a relation). Nothing is reported.
   const r = await go(tablesDir('survey'), 'check');
-  const e = errors(r).map((x) => x.examples[0]).sort();
-  assert.equal(e.length, 2, JSON.stringify(e));
-  assert.match(e[0], /buckinghamshire: \/attestations must NOT have fewer than 1 items/);
-  assert.match(e[1], /bunsty: .*types\/0 must have required property 'identifier'/);
-  const msgs = errors(r).map((x) => x.message).sort();
-  assert.match(msgs[0], /^A place has no evidence about it.*names, locations, types, relations or properties/);
-  assert.match(msgs[1], /^A type has no identifier.*fill in type_uri/);
+  assert.deepEqual(errors(r), []);
+  assert.equal(r.report.counts.places, 3);
+});
+test('control: an identity row without a match type is rejected, now that the tables require one', async () => {
+  const ids = readFileSync(`${PLATO_REPO}/schemas/tables/examples/customs/identities.csv`, 'utf8').replace(',exactMatch,', ',,');
+  const r = await go([...tablesDir('customs').filter((f) => f.name !== 'identities.csv'), textFile(ids, 'identities.csv')], 'check');
+  assert.ok(errors(r).some((e) => e.kind === 'table' && /match_type/.test(e.message)), JSON.stringify(errors(r)));
 });
 test('tables -> tables round trip through a zip, and the zip is accepted again', async () => {
   const r = await go(tablesDir('customs'), 'convert', 'tables', { base: 'https://example.org/customs/' });
@@ -115,7 +114,7 @@ test('N-Triples written by the tool read back to the same places', async () => {
   assert.equal(recs.length, orig.length);
   assert.equal(recs[0].attestations.length, orig[0].attestations.length);
   const c = await go([textFile(outText(b.e, 'c.jsonl'), 'c.jsonl')], 'convert', 'ntriples');
-  assert.equal(await canon(outText(c.e, 'c.nt')), await canon(nt));
+  assert.equal(await canon(outText(c.e, 'c.nt')), await canon(nt));   // no shared blank-node children here, so even isomorphic
 });
 test('Turtle examples from the PLATO repository -> JSON Lines', async () => {
   const r = await go([file(`${PLATO_REPO}/examples/survey-attestations.ttl`)], 'convert', 'plato-jsonl');

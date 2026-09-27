@@ -105,7 +105,9 @@ export class Rdf2Json {
   /** Build the JSON object for node `id` as JSON type `def` in context `active`. */
   node(id, def, active, seen = new Set(), back = null) {
     const obj = {};
-    if (seen.has(id)) return obj;
+    // A node met again on its own path (DEEP gives some names the IRI of their own place) is read
+    // for its own values, but not followed further: that is what stops a cycle.
+    const shallow = seen.has(id);
     seen = new Set(seen).add(id);
     const m = this._inverse(def, active);
     const put = (entry, value) => {
@@ -126,6 +128,7 @@ export class Rdf2Json {
       if (back && p === back.p && this._key(o) === back.id) continue;
       const e = m.fwd.get(p);
       if (!e) {
+        if (shallow) continue;                              // its other triples belong to its other role
         if (p === WGS84 + 'lat') { lat = Number(o.value); continue; }
         if (p === WGS84 + 'long') { long = Number(o.value); continue; }
         if (p === PLATO + 'repr_point' && o.termType === 'Literal') { const xy = o.value.match(/POINT\s*\(\s*(\S+)\s+(\S+)\s*\)/i); if (xy) { obj.reprPoint = [Number(xy[1]), Number(xy[2])]; continue; } }
@@ -141,13 +144,12 @@ export class Rdf2Json {
       if (o.termType === 'Literal') { put(e, this._scalar(o, e.shape)); continue; }
       const oid = this._key(o);
       const sh = e.shape;
-      let inline = sh.kind === 'object' || (sh.kind === 'either' && (o.termType === 'BlankNode' || this._describes(oid)));
-      // A shared node with its own IRI is written out in full wherever it is used, so that each
-      // record stands alone, unless it has blank-node children: those would be minted afresh by
-      // every copy when the JSON is read again. Such a node is written in full once, then by IRI.
-      if (inline && sh.kind === 'either' && o.termType === 'NamedNode' && this._hasBlankChildren(oid)) {
-        if (this.inlined.has(oid)) inline = false; else this.inlined.add(oid);
-      }
+      // A shared node with its own IRI (a source cited by many places) is written out in full
+      // wherever it is used, so that every record stands alone, as a JSON Lines line should. If it
+      // has blank-node children (a source's date), each copy mints its own when the JSON is read
+      // again: redundant nodes that RDF treats as the same information (a lean-equivalent graph).
+      const inline = sh.kind === 'object' || (sh.kind === 'either' && (o.termType === 'BlankNode' || this._describes(oid)));
+      if (shallow && inline) continue;
       if (inline) {
         const sub = this.node(oid, sh.def, e.ctx, seen);
         put(e, o.termType === 'BlankNode' ? sub : { '@id': o.value, ...sub });
@@ -157,6 +159,7 @@ export class Rdf2Json {
       if (!obj.reprPoint) obj.reprPoint = [long, lat];
       if (!obj.geojson && !obj.wkt) obj.geojson = { type: 'Point', coordinates: [long, lat] };
     }
+    if (shallow) return obj;
     for (const [p, e] of m.rev) {
       for (const sid of this.g.in(p, id)) {
         // An identity relation the document holds at its top level stays there.

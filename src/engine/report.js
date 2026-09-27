@@ -34,6 +34,7 @@ export const LOSS_TEXT = {
   'relation-type-not-in-plato': 'A relation whose type is not in PLATO\'s vocabulary cannot go in the tables and is dropped.',
   'relation-label': 'Relation labels are dropped.',
   'identity-provenance': 'Who asserted an identity match, and the candidate it came from, are dropped.',
+  'identity-type-missing': 'An identity match does not say what kind of match it is; the tables require match_type, so these rows must be completed before the tables are valid.',
   'form-status': 'Form status (headword, normalised…) has no LPF slot and is dropped.',
   'occurrence-context': 'Occurrence context (in a personal name…) has no LPF slot and is dropped.',
   'occurrence-count': 'Occurrence counts have no LPF slot and are dropped.',

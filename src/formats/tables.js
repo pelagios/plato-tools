@@ -227,6 +227,7 @@ export function recordToRows(rec, ids, loss = () => {}) {
 }
 export function identityRow(ir, ids, loss = () => {}) {
   if (ir.assertedBy || ir.promotedFrom) loss({ kind: 'identity-provenance' });
+  if (!ir.identityType) loss({ kind: 'identity-type-missing' });
   return { place_id: ids.place(ir.subject, null, false), same_as: ir.object, match_type: ir.identityType || '', certainty: ir.certainty ?? '',
     basis: ir.basis || '', source_id: ir.source ? ids.source(ir.source) : '' };
 }

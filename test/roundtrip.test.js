@@ -54,8 +54,9 @@ for (const f of readdirSync(EXAMPLES).filter((f) => f.endsWith('.json'))) {
     assert.deepEqual(losses, [], 'nothing should be unplaceable');
     const validate = ajv.getSchema(`https://w3id.org/plato/schemas/${doc.profile}.schema.json`);
     assert.ok(validate(back), JSON.stringify(validate.errors?.slice(0, 3)));
-    const second = toRdf(back);
-    assert.equal(await canon(second.nt), await canon(first.nt));
+    // Lean equivalence: a shared source written out in each record that cites it gives each copy its
+    // own blank-node date when read again, which RDF treats as the same information.
+    assert.equal(lean(toRdf(back).nt), lean(first.nt));
   });
 }
 test('control: the comparison notices a dropped attestation', async () => {
@@ -63,7 +64,7 @@ test('control: the comparison notices a dropped attestation', async () => {
   const first = toRdf(doc);
   const { doc: back } = toJson(first.g, first.docNode, 'place-centric');
   back.spatialEntities[0].attestations.pop();
-  assert.notEqual(await canon(toRdf(back).nt), await canon(first.nt));
+  assert.notEqual(lean(toRdf(back).nt), lean(first.nt));
 });
 
 import { existsSync, createReadStream } from 'node:fs';
@@ -116,3 +117,13 @@ function lean(nt) {
   };
   return [...new Set(triples.map(([s, p, o]) => (s.startsWith('_:') ? label(s) : s) + ' ' + p + ' ' + (o.startsWith('_:') ? label(o) : o)))].sort().join('\n');
 }
+
+test('a name that carries the IRI of its own place keeps its spelling (DEEP does this 27,447 times)', () => {
+  const doc = { profile: 'place-centric', gazetteer: { '@id': 'https://example.org/g', title: 'test' }, spatialEntities: [
+    { '@id': 'https://example.org/p1', label: 'Norton', attestations: [{ names: [{ '@id': 'https://example.org/p1', toponym: 'Norton' }], sources: [{ title: 's' }] }] }] };
+  const first = toRdf(doc);
+  const { doc: back } = toJson(first.g, first.docNode, 'place-centric');
+  assert.equal(back.spatialEntities[0].attestations[0].names[0].toponym, 'Norton');
+  const validate = ajv.getSchema('https://w3id.org/plato/schemas/place-centric.schema.json');
+  assert.ok(validate(back), JSON.stringify(validate.errors?.slice(0, 2)));
+});
