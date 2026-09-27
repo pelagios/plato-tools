@@ -57,12 +57,18 @@ export async function* jsonDocument(file, { arrays = [], keys = [], onlyKeys = f
     else if (keys.includes(key) && stack.length === 1) queue.push({ path: key, value });
   };
   const reader = (await textStream(file)).getReader();
+  let stopped = false;
   try {
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
-      try { parser.write(value); } catch (e) { if (e === STOP) { reader.cancel().catch(() => {}); break; } throw e; }
+      try { parser.write(value); } catch (e) { if (e === STOP) { reader.cancel().catch(() => {}); stopped = true; break; } throw e; }
       while (queue.length) yield queue.shift();
+    }
+    // The parser ends itself when the document closes; if the input ran out first, the document
+    // was cut short, and saying so is the difference between a truncated file and a clean check.
+    if (!stopped && !parser.isEnded) {
+      try { parser.end(); } catch (e) { throw new Error(`The JSON document stops before it is complete, so the file may have been cut short (${String(e.message).split('.')[0]}).`); }
     }
     while (queue.length) yield queue.shift();
   } finally { reader.releaseLock?.(); }

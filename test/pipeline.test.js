@@ -200,3 +200,11 @@ test('control: a nested identity relation whose subject is another place is an e
   const ok = await go([textFile(withIdr({ subject: 'https://example.org/p/1' }), 'same.json')], 'check');
   assert.deepEqual(errors(ok), [], 'repeating its own place is fine');
 });
+
+// A JSON document is parsed as a stream, and a stream that stops early looks like one that ended.
+test('control: a JSON document cut short is not passed as clean', async () => {
+  const whole = readFileSync(`${EX}/place-centric-constantinople.json`, 'utf8');
+  const ok = await go([textFile(whole, 'whole.json')], 'check');
+  assert.deepEqual(errors(ok), [], 'the whole document is clean');
+  await assert.rejects(go([textFile(whole.slice(0, 1500), 'cut.json')], 'check'), /stops before it is complete/);
+});
