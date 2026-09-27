@@ -1,7 +1,8 @@
 // Reading inputs as streams. Nothing here holds a whole file: gzip is decompressed as it arrives,
 // text is cut into lines or parsed incrementally, and JSON documents are parsed with a streaming
 // parser that hands over one record at a time. Works on browser File objects and on Node's File.
-import { JSONParser } from '@streamparser/json';
+// Vendored, with the one change that keeps a U+FEFF inside a string: see src/vendor/streamparser-json/.
+import { JSONParser } from '../vendor/streamparser-json/index.js';
 
 /**
  * The file's content stopped the reader: JSON that is not well formed or stops early, or

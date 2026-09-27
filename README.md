@@ -85,6 +85,25 @@ node bin/plato-tools.mjs check --json data/*.json > report.jsonl        # for sc
 
 `plato-tools --help` lists everything.
 
+**Results that must be citable.** `npx github:pelagios/plato-tools` runs whatever the branch holds
+when it is fetched (npx may also reuse a copy it has cached), and npm does not use a git
+dependency's lockfile, so its dependencies can differ from those the tools were tested with. For a
+result someone must be able to reproduce, run a named ref from a clone, with that ref's own
+lockfile, and record the two commits:
+
+```bash
+REF=main                                   # a branch or tag; a clone of a ref that does not exist fails
+git clone --depth 1 --branch "$REF" https://github.com/pelagios/plato-tools "plato-tools-$REF"
+cd "plato-tools-$REF" && npm ci            # exactly the dependencies in the ref's package-lock.json
+git rev-parse HEAD                         # the tools' commit
+node bin/plato-tools.mjs --version         # and the PLATO commit they check against
+node bin/plato-tools.mjs check my-data.json
+```
+
+For a single commit rather than a branch or tag, replace the clone with
+`git init plato-tools-C && cd plato-tools-C && git fetch --depth 1 https://github.com/pelagios/plato-tools C && git checkout FETCH_HEAD`,
+which also fails if the commit does not exist, then run `npm ci` as above.
+
 ## What it checks against
 
 PLATO's normative files (the ontology, the JSON Schemas, the JSON-LD context and the table
@@ -129,6 +148,7 @@ npm install
 npm test                                  # conversion and command-line tests in Node, against jsonld.js and PLATO's examples
 python3 e2e/app_test.py                   # the page itself, in Playwright's bundled Chromium
 python3 e2e/app_test.py --prove-it-fails  # every check pointed at a page with no tools: all must fail
+node scripts/install-test.mjs             # install the packed tools as npx does, and run the command
 python3 e2e/scale_test.py --input deep-plato.nt.gz --target plato-jsonl --out out.jsonl
 node e2e/verify_jsonl.mjs out.jsonl 539372 13032 deep-plato.jsonl.gz <entity IRIs…>
 ```

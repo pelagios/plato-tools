@@ -38,6 +38,11 @@ jobs:
         run: npm test
         env:
           PLATO_REPO: plato-repo
+      # The tools installed as npx installs them (packed, production dependencies only, install
+      # scripts run), then run: a postinstall needing a development dependency once made
+      # `npx github:pelagios/plato-tools` exit 127 with nothing installed, and every test passed.
+      - name: Install as npx does, and run the command
+        run: node scripts/install-test.mjs
       - name: Build (vendors PLATO's files at the pinned commit)
         run: npm run build
       - name: The vendored files are the pinned commit's
