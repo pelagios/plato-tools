@@ -3,7 +3,13 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Browser tools that validate and convert PLATO data locally, at any scale.",
+  "description": "Browser and command-line tools that validate and convert PLATO data locally, at any scale.",
+  "bin": {
+    "plato-tools": "bin/plato-tools.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  },
   "license": "BSD-3-Clause",
   "scripts": {
     "dev": "vite",

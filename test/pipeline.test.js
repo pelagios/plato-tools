@@ -3,33 +3,11 @@ import { PLATO_REPO, DEEP_EXPORT } from './paths.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
-import * as XLSX from 'xlsx';
 import { unzipSync, strFromU8, zipSync, strToU8 } from 'fflate';
 import jsonld from 'jsonld';
-import { loadResources } from '../src/engine/resources.js';
-import { prepare, run } from '../src/engine/pipeline.js';
-import { detect } from '../src/engine/input.js';
-import { openSqlite } from '../src/lib/store.js';
+import * as XLSX from 'xlsx';
+import { res, file, textFile, outText, go } from './engine.js';
 
-const res = prepare(await loadResources(async (f) => readFileSync(`public/plato/${f}`, 'utf8')));
-const file = (path, name) => new File([readFileSync(path)], name || path.split('/').pop());
-const textFile = (text, name) => new File([text], name);
-function env() {
-  const outs = {};
-  return {
-    outs, resources: res, csvMeta: res.csvMeta, xlsx: XLSX,
-    openDb: () => openSqlite(sqlite3InitModule, { memory: true }),
-    output: async (name) => { const parts = []; return { write: (s) => parts.push(s), writeBytes: (b) => parts.push(b), close: async () => { outs[name] = parts; const size = parts.reduce((n, p) => n + p.length, 0); return { name, size }; } }; },
-  };
-}
-const outText = (e, name) => e.outs[name].join('');
-async function go(files, action, target, options = {}) {
-  const e = env(); const input = await detect(files);
-  assert.ok(input.format, `not detected: ${input.reason}`);
-  const r = await run({ input, action, target, options }, e);
-  return { ...r, e, input };
-}
 const errors = (r) => r.report.items.filter((i) => i.severity === 'error');
 const canon = (nt) => jsonld.canonize([...new Set(nt.split('\n').filter(Boolean))].join('\n') + '\n', { algorithm: 'URDNA2015', inputFormat: 'application/n-quads', format: 'application/n-quads', safe: false });
 const EX = `${PLATO_REPO}/schemas/examples`;

@@ -2,7 +2,8 @@
 
 Check and convert data about places in the formats of
 [PLATO](https://pelagios.org/place-attestation-ontology/guide/), the Place Attestation Ontology,
-in your browser: **https://pelagios.org/plato-tools/**
+in your browser: **https://pelagios.org/plato-tools/**, or [from the command line](#from-the-command-line),
+many files at a time.
 
 Everything happens in the browser tab. Your files are never uploaded, and the tools handle
 datasets of any size your disk can hold: memory stays roughly constant while the working data
@@ -25,6 +26,44 @@ of the formats above, and reports everything the target format cannot hold inste
 silently: converting to LPF or to the spreadsheet tables is lossy by design, converting between
 PLATO JSON and RDF is not.
 
+## From the command line
+
+The same checks and conversions run in a terminal, with Node.js 24 or later, using the same engine
+as the page and saying the same things:
+
+```bash
+npx github:pelagios/plato-tools check data/*.jsonl tables/           # without installing anything
+git clone https://github.com/pelagios/plato-tools && cd plato-tools && npm install
+node bin/plato-tools.mjs check my-tables/ places.jsonl.gz export.nt    # or from a clone
+node bin/plato-tools.mjs convert --to plato-jsonl --out converted/ export.nt.gz
+node bin/plato-tools.mjs check --json data/*.json > report.jsonl        # for scripts
+```
+
+- `check INPUT…` reports on each input in turn, then gives a total. `convert --to TARGET INPUT…`
+  also writes each input in the target format (`plato-jsonl`, `plato-json`, `ntriples`, `tables`,
+  `lpf-seq` or `lpf`) into `--out` (the current directory by default), named after the input. It
+  never replaces an existing file unless given `--overwrite`, and it removes an output left
+  incomplete by a file that could not be read to the end.
+- **Which files make one input.** Each file is one input, except that a directory is one set of
+  spreadsheet tables (the CSV files in it), and CSV files named one by one are one set of tables per
+  directory, so `a/*.csv b/*.csv` is two sets. A zip of the CSV files, or a workbook, is one set.
+- **Exit status:** 0 if no input has problems, 1 if any has, 2 if the command is wrong or an input
+  cannot be read or written (a missing file, an unrecognised format, an output that already exists).
+  Warnings, and what a conversion cannot carry over, do not count as problems.
+- `--json` prints one JSON object per input, one per line (the page's report, with the input's
+  format, counts, outputs and status), then one for the total. `--brief` prints one line per input.
+- The page's options are flags with the page's defaults: `--base URL` for the web address under
+  which identifiers from spreadsheet tables are made (`https://example.org/my-dataset/`), and
+  `--no-typing` to leave out the node types and typed dates N-Triples output otherwise has.
+- RDF and attestation-centric JSON go through a working database on disk, as in the browser, so
+  memory stays roughly constant at any size. It is kept in the system's temporary directory, or in
+  `--work-dir DIR`, and removed afterwards. It needs room for about one and a half times the
+  uncompressed input: checking DEEP's 25 million triples (2.7 GB of N-Triples) took 3.7 GB there at
+  most, about four minutes, and 830 MB of memory. If the temporary directory is held in memory (a
+  `tmpfs`), point `--work-dir` at a real disk.
+
+`plato-tools --help` lists everything.
+
 ## What it checks against
 
 PLATO's normative files (the ontology, the JSON Schemas, the JSON-LD context and the table
@@ -42,7 +81,10 @@ through an on-disk SQLite store (`src/lib/store.js`, `src/formats/rdf2json.js`),
 triples can be anywhere in an RDF file. SQLite runs as WebAssembly on the origin private file system,
 through the pool-based VFS, which needs none of the cross-origin isolation headers GitHub Pages
 cannot send. `src/engine/pipeline.js` composes readers and writers; `src/engine/worker.js` runs it in
-the browser, `test/` in Node.
+the browser, and `src/node/host.js` runs it in Node for the command line (`bin/plato-tools.mjs`),
+where the store is a file on disk opened with Node's built-in SQLite (`src/node/sqlite.js`, which
+gives it the few calls the store makes of SQLite in the browser). What the tools say about a run is
+worded once, in `src/engine/words.js`, for both.
 
 ## Limits, stated plainly
 
@@ -57,7 +99,7 @@ the browser, `test/` in Node.
 
 ```bash
 npm install
-npm test                                  # 42 conversion tests in Node, against jsonld.js and PLATO's examples
+npm test                                  # conversion and command-line tests in Node, against jsonld.js and PLATO's examples
 python3 e2e/app_test.py                   # the page itself, in Playwright's bundled Chromium
 python3 e2e/app_test.py --prove-it-fails  # every check pointed at a page with no tools: all must fail
 python3 e2e/scale_test.py --input deep-plato.nt.gz --target plato-jsonl --out out.jsonl

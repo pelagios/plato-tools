@@ -14,11 +14,18 @@ export async function openSqlite(sqlite3InitModule, { memory = false, name = '/p
     const pool = await sqlite3.installOpfsSAHPoolVfs({ clearOnInit: true, initialCapacity: 8 });
     db = new pool.OpfsSAHPoolDb(name);
   }
-  // One process owns the database: exclusive locking stops SQLite re-validating its page cache at
-  // every implicit read transaction, which on OPFS made lookups four times slower in the spike.
-  db.exec(['PRAGMA locking_mode=EXCLUSIVE', 'PRAGMA journal_mode=OFF', 'PRAGMA synchronous=OFF',
-    `PRAGMA cache_size=-${cacheMB * 1024}`, 'PRAGMA temp_store=FILE'].join(';'));
+  db.exec(pragmas(cacheMB));
   return db;
+}
+/**
+ * The settings every store opens with, in the browser and in Node. One process owns the database:
+ * exclusive locking stops SQLite re-validating its page cache at every implicit read transaction,
+ * which on OPFS made lookups four times slower in the spike. There is no journal and no syncing,
+ * because a working database that is lost is simply rebuilt from the input.
+ */
+export function pragmas(cacheMB = 64) {
+  return ['PRAGMA locking_mode=EXCLUSIVE', 'PRAGMA journal_mode=OFF', 'PRAGMA synchronous=OFF',
+    `PRAGMA cache_size=-${cacheMB * 1024}`, 'PRAGMA temp_store=FILE'].join(';');
 }
 
 export class TripleStore {

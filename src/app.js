@@ -1,13 +1,11 @@
 // The page: choose files, check or convert them, show progress and the report, save the output.
 // The work happens in a worker (src/engine/worker.js). The page publishes its own state on
 // window.__plato for automated tests; nothing else reads it.
+import { fmtBytes, formatName, progressText, summary, groups } from './engine/words.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
 let worker, files = [], input = null, targets = {}, busy = false;
 
-function fmtBytes(n) { return n > 1e9 ? (n / 1e9).toFixed(2) + ' GB' : n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : n > 1e3 ? Math.round(n / 1e3) + ' KB' : n + ' bytes'; }
-function fmtTime(ms) { const s = Math.round(ms / 1000); return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`; }
-const FORMAT_NAMES = { tables: 'PLATO spreadsheet tables', 'plato-json': 'a PLATO JSON document', 'plato-jsonl': 'PLATO JSON Lines', ntriples: 'RDF (N-Triples)', nquads: 'RDF (N-Quads)', turtle: 'RDF (Turtle)', lpf: 'a Linked Places Format FeatureCollection', 'lpf-seq': 'a Linked Places Format sequence' };
 const INPUT_TO_TARGET = { tables: 'tables', 'plato-json': 'plato-json', 'plato-jsonl': 'plato-jsonl', ntriples: 'ntriples', lpf: 'lpf', 'lpf-seq': 'lpf-seq' };
 
 function startWorker() {
@@ -40,7 +38,7 @@ function onDetected({ input: inp, targets: t }) {
   input = inp; targets = t;
   const p = $('chosen').querySelector('p');
   if (!inp.format) { p.innerHTML = `<span class="warn">${escapeHtml(inp.reason)}</span>`; Object.assign(state, { phase: 'unrecognised', reason: inp.reason }); return; }
-  const what = FORMAT_NAMES[inp.format] + (inp.profile ? ` (${inp.profile})` : '') + (inp.lpfVersion === 2 ? ', version 2' : '');
+  const what = formatName(inp);
   p.innerHTML = `This looks like <span class="detected">${what}</span>.`;
   const sel = $('target'); sel.innerHTML = '';
   for (const [k, v] of Object.entries(t)) {
@@ -75,22 +73,15 @@ function start(action) {
   worker.postMessage({ cmd: 'run', files, action, target, options: { base: $('base').value, typing: $('typing').checked } });
 }
 function onProgress(p) {
-  const bits = [];
-  if (p.triples) bits.push(`${p.triples.toLocaleString('en-GB')} triples`);
-  if (p.places) bits.push(`${p.places.toLocaleString('en-GB')} places`);
-  if (p.attestations) bits.push(`${p.attestations.toLocaleString('en-GB')} attestations`);
-  const phase = { reading: 'Reading', loading: 'Loading into the working database', indexing: 'Indexing', writing: 'Writing', done: 'Finishing' }[p.phase] || p.phase;
-  $('phase').textContent = `${phase}${bits.length ? ': ' + bits.join(', ') : ''} (${fmtTime(p.elapsedMs || 0)})`;
+  $('phase').textContent = progressText(p);
   Object.assign(state, { progress: p });
 }
 function onDone({ report, outputs }) {
   busy = false;
   $('check').disabled = $('convert').disabled = false;
   $('progress').hidden = true; $('result').hidden = false;
-  const c = report.counts;
-  const counted = ['places', 'attestations', 'identity relations', 'triples', 'triples written', 'table rows'].filter((k) => c[k]).map((k) => `${c[k].toLocaleString('en-GB')} ${k}`).join(', ');
-  const nErr = report.errors;
-  $('summary').innerHTML = (nErr ? `<span class="warn">${nErr.toLocaleString('en-GB')} problem${nErr === 1 ? '' : 's'} found.</span> ` : '<span class="good">No problems found.</span> ') + escapeHtml(counted ? `Read ${counted}.` : '');
+  const { problems, counted } = summary(report);
+  $('summary').innerHTML = `<span class="${report.errors ? 'warn' : 'good'}">${problems}</span> ` + escapeHtml(counted);
   const saves = $('saves'); saves.innerHTML = '';
   for (const o of outputs || []) {
     const b = document.createElement('button'); b.className = 'primary';
@@ -102,15 +93,11 @@ function onDone({ report, outputs }) {
   Object.assign(state, { phase: 'done', report, outputs });
 }
 function renderReport(report) {
-  const checking = state.action === 'check';
-  const groups = { error: 'Problems', warning: 'Warnings', loss: checking ? 'Would not be carried over' : 'Not carried over' };
-  const intro = { error: 'These must be fixed for the data to be valid PLATO.', warning: 'Worth a look; the data can still be used.',
-    loss: checking ? 'PLATO JSON has no place for these, so a conversion to it would leave them out.' : 'The target format has no place for these, so they are left out.' };
   const out = [];
-  for (const [sev, title] of Object.entries(groups)) {
+  for (const { severity: sev, title, intro } of groups(state.action === 'check')) {
     const items = report.items.filter((i) => i.severity === sev);
     if (!items.length) continue;
-    out.push(`<div class="report-group ${sev}"><h3>${title}</h3><p>${intro[sev]}</p>` + items.map((i) =>
+    out.push(`<div class="report-group ${sev}"><h3>${title}</h3><p>${intro}</p>` + items.map((i) =>
       `<details class="item"><summary>${escapeHtml(i.message)}<span class="count">× ${i.count.toLocaleString('en-GB')}</span></summary>${i.examples.length ? `<ul>${i.examples.map((e) => `<li>${escapeHtml(String(e))}</li>`).join('')}</ul>` : ''}</details>`).join('') + '</div>');
   }
   $('report').innerHTML = out.join('');
