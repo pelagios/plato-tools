@@ -140,3 +140,93 @@ export function tableIds(base, sourcesById) {
 }
 
 export { ATTESTATION_SHEETS };
+
+// ---- PLATO records -> table rows (lossy; every loss reported) ----------------------------------
+const GVP_BROADER_PARTITIVE = 'http://vocab.getty.edu/ontology#broaderPartitive';
+const local = (iri, prefix) => (iri && iri.startsWith(prefix) ? iri.slice(prefix.length) : null);
+/** GeoJSON geometry -> WKT, for the locations sheet's wkt column. */
+export function geojsonToWkt(g) {
+  const pt = (c) => c.slice(0, 2).join(' ');
+  const ring = (r) => '(' + r.map(pt).join(', ') + ')';
+  switch (g.type) {
+    case 'Point': return `POINT(${pt(g.coordinates)})`;
+    case 'MultiPoint': return `MULTIPOINT(${g.coordinates.map((c) => '(' + pt(c) + ')').join(', ')})`;
+    case 'LineString': return `LINESTRING${ring(g.coordinates)}`;
+    case 'MultiLineString': return `MULTILINESTRING(${g.coordinates.map(ring).join(', ')})`;
+    case 'Polygon': return `POLYGON(${g.coordinates.map(ring).join(', ')})`;
+    case 'MultiPolygon': return `MULTIPOLYGON(${g.coordinates.map((p) => '(' + p.map(ring).join(', ') + ')').join(', ')})`;
+    default: return null;
+  }
+}
+function representativePoint(g) {
+  if (!g) return null;
+  if (g.type === 'Point') return g.coordinates.slice(0, 2);
+  const flat = []; const walk = (c) => (typeof c[0] === 'number' ? flat.push(c) : c.forEach(walk));
+  walk(g.coordinates || []);
+  if (!flat.length) return null;
+  const xs = flat.map((c) => c[0]), ys = flat.map((c) => c[1]);
+  return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
+}
+
+/**
+ * One PLATO record -> rows for each sheet. `ids.place(iri, label)` and `ids.source(obj)` return
+ * short table ids (registering rows for places and sources as needed); `loss(l)` receives what
+ * the tables cannot hold.
+ */
+export function recordToRows(rec, ids, loss = () => {}) {
+  const rows = { places: [], names: [], locations: [], types: [], relations: [], properties: [], identities: [] };
+  const pid = ids.place(rec['@id'], rec.label, true);
+  for (const a of rec.attestations || []) {
+    const facets = ['names', 'geometries', 'types', 'relations', 'properties'].filter((k) => a[k]?.length);
+    if (facets.length > 1) loss({ kind: 'bundled-attestation', value: facets.join('+') });
+    if (!facets.length) { loss({ kind: 'attestation-without-facet' }); continue; }
+    const spans = a.timespans || [];
+    if (spans.length > 1) loss({ kind: 'extra-timespans', value: spans.length - 1 });
+    const t = spans[0] || {};
+    if ((t.startLatest && t.startLatest !== t.startEarliest) || (t.endEarliest && t.endEarliest !== t.endLatest)) loss({ kind: 'four-date-bounds' });
+    const srcs = [...(a.sources || []), ...(a.citations || []).map((c) => c.source)].filter(Boolean);
+    const unique = [...new Map(srcs.map((s) => [typeof s === 'string' ? s : s['@id'] || s.title, s])).values()];
+    if (unique.length > 1) loss({ kind: 'extra-sources', value: unique.length - 1 });
+    const src = unique[0] || null;
+    if (!src) loss({ kind: 'attestation-without-source' });
+    const sid = ids.source(src);
+    const cit = (a.citations || []).find((c) => !src || c.source === src || (c.source?.['@id'] && c.source['@id'] === (src['@id'] || src))) || {};
+    const date = t.label || (t.startEarliest || t.endLatest ? [t.startEarliest, t.endLatest].filter(Boolean).join('-') : 'undated');
+    const notes = [a.notes, a.certaintyNote && `Certainty: ${a.certaintyNote}`].filter(Boolean).join(' ') || '';
+    const common = { place_id: pid, date, from: t.startEarliest || '', to: t.endLatest || '', source_id: sid, locator: cit.locator || '',
+      attribution: local(cit.attributionStatus, PLATO + 'Attribution') || '', certainty: a.certainty ?? '', notes };
+    if (a.meta) loss({ kind: 'meta-attestation' });
+    for (const n of a.names || []) {
+      if (n.qualification) loss({ kind: 'qualification' });
+      rows.names.push({ place_id: pid, name: n.toponym, language: n.language || '', script: n.script || '', romanized: n.romanized || '',
+        name_type: (n.nameType || []).join(';'), form_status: local(a.formStatus, PLATO) || '', occurrence_context: local(a.occurrenceContext, PLATO) || '',
+        occurrence_count: a.occurrenceCount ?? '', ...common, place_id: pid });
+    }
+    for (const g of a.geometries || []) {
+      let p = g.reprPoint || (g.geojson?.type === 'Point' ? g.geojson.coordinates : null);
+      if (!p) { p = representativePoint(g.geojson); if (p) loss({ kind: 'point-derived-from-shape' }); }
+      if (!p) { loss({ kind: 'geometry-without-coordinates' }); continue; }
+      if (g.qualification) loss({ kind: 'qualification' });
+      rows.locations.push({ place_id: pid, latitude: p[1], longitude: p[0],
+        wkt: g.wkt || (g.geojson && g.geojson.type !== 'Point' ? geojsonToWkt(g.geojson) || '' : ''),
+        geometry_role: local(g.role, PLATO) || '', precision_km: (g.precisionKm || [])[0] ?? '', ...common });
+    }
+    for (const ty of a.types || []) rows.types.push({ place_id: pid, type_label: ty.label || ty.sourceLabel || '', type_uri: ty.identifier || '', ...common });
+    for (const r of a.relations || []) {
+      let rt = local(r.relationType, PLATO);
+      if (!rt && r.relationType === GVP_BROADER_PARTITIVE) rt = 'ContainedIn';   // the alignment plato:ContainedIn declares
+      if (!rt) { loss({ kind: 'relation-type-not-in-plato', value: r.relationType }); continue; }
+      if (r.relationLabel) loss({ kind: 'relation-label' });
+      rows.relations.push({ place_id: pid, relation_type: rt, related_place_id: ids.place(r.relatesTo, null, false), ...common });
+    }
+    for (const pv of a.properties || []) rows.properties.push({ place_id: pid, property_uri: pv.property, property_label: pv.label || '',
+      value: typeof pv.value === 'object' ? JSON.stringify(pv.value) : pv.value, unit_uri: pv.unit || '', ...common });
+  }
+  for (const ir of rec.identityRelations || []) rows.identities.push(identityRow(ir, ids, loss));
+  return rows;
+}
+export function identityRow(ir, ids, loss = () => {}) {
+  if (ir.assertedBy || ir.promotedFrom) loss({ kind: 'identity-provenance' });
+  return { place_id: ids.place(ir.subject, null, false), same_as: ir.object, match_type: ir.identityType || '', certainty: ir.certainty ?? '',
+    basis: ir.basis || '', source_id: ir.source ? ids.source(ir.source) : '' };
+}

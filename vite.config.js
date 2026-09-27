@@ -10,7 +10,10 @@ export default defineConfig({
   build: {
     target: 'es2022',
     rollupOptions: {
-      input: { spike: fileURLToPath(new URL('spike/index.html', import.meta.url)) },
+      input: {
+        main: fileURLToPath(new URL('index.html', import.meta.url)),
+        spike: fileURLToPath(new URL('spike/index.html', import.meta.url)),
+      },
     },
   },
 });

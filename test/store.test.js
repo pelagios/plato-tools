@@ -1,3 +1,4 @@
+import { PLATO_REPO, DEEP_EXPORT } from './paths.js';
 // The reverse mapping must give the same records from the SQLite store as from the in-memory graph.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,7 +10,7 @@ import { openSqlite, TripleStore } from '../src/lib/store.js';
 
 const load = (f) => JSON.parse(readFileSync(`public/plato/${f}`, 'utf8'));
 const CTX = load('plato.context.jsonld'), CORE = load('plato.schema.json'), PROF = load('place-centric.schema.json');
-const EXAMPLES = '../place-attestation-ontology/schemas/examples';
+const EXAMPLES = `${PLATO_REPO}/schemas/examples`;
 
 test('SQLite store and in-memory graph give identical records', async () => {
   const doc = JSON.parse(readFileSync(`${EXAMPLES}/place-centric-constantinople.json`, 'utf8'));

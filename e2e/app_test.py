@@ -1,0 +1,100 @@
+"""Browser tests of the page itself, in Playwright's bundled Chromium with an on-disk profile.
+
+    python3 e2e/app_test.py                 run every check against the built site
+    python3 e2e/app_test.py --prove-it-fails run every check against a page with no tools on it;
+                                            every check must fail, or the harness cannot fail
+"""
+import json, os, pathlib, subprocess, sys, tempfile, time, urllib.request
+from playwright.sync_api import sync_playwright
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+PLATO = pathlib.Path(os.environ.get('PLATO_REPO', ROOT.parent / 'place-attestation-ontology'))
+PROVE = '--prove-it-fails' in sys.argv
+PORT = 4174
+results = []
+
+def check(name, cond, detail=''):
+    results.append((name, bool(cond), detail))
+    print(f"  {'PASS' if cond else 'FAIL'}  {name}{('  -- ' + str(detail)[:300]) if detail and not cond else ''}", flush=True)
+
+def wait_state(page, pred, timeout=120, what=''):
+    """Poll the page's own state; on timeout return it, with the page's account of why."""
+    t0 = time.time(); last = None
+    while time.time() - t0 < timeout:
+        try: last = page.evaluate('() => window.__plato ? JSON.parse(JSON.stringify(window.__plato)) : null')
+        except Exception as e: last = {'phase': 'page-error', 'error': str(e)[:200]}
+        if last and pred(last): return last
+        time.sleep(0.25)
+    return {**(last or {}), 'timedOut': what, 'summary': page.evaluate("() => document.getElementById('summary')?.textContent || document.title")}
+
+def run_case(page, files, action, target=None, timeout=300):
+    try:
+        return _run_case(page, files, action, target, timeout)
+    except Exception as e:                       # a harness error is a failed check, never a crash
+        return {'phase': 'harness-error', 'error': str(e).split('\n')[0][:200]}
+
+def _run_case(page, files, action, target=None, timeout=300):
+    page.set_input_files('#picker', [str(f) for f in files])
+    s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), 60, 'detection')
+    if s.get('phase') != 'detected': return s
+    if action == 'convert': page.select_option('#target', target)
+    page.click('#check' if action == 'check' else '#convert')
+    return wait_state(page, lambda s: s.get('phase') in ('done', 'error'), timeout, 'run')
+
+def download(page, name, dest):
+    with page.expect_download(timeout=600_000) as d:
+        page.evaluate(f'window.__plato_save({json.dumps(name)})')
+    d.value.save_as(dest); return pathlib.Path(dest)
+
+def main():
+    subprocess.run(['npx', 'vite', 'build'], cwd=ROOT, check=True, capture_output=True)
+    srv = subprocess.Popen(['npx', 'vite', 'preview', '--port', str(PORT), '--strictPort'], cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    url = f'http://localhost:{PORT}/'
+    for _ in range(60):
+        try: urllib.request.urlopen(url, timeout=1); break
+        except Exception: time.sleep(0.5)
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix='plato-tools-e2e-'))
+    try:
+        with sync_playwright() as pw:
+            ctx = pw.chromium.launch_persistent_context(str(tmp / 'profile'), headless=True, accept_downloads=True)
+            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            page.add_init_script('window.__plato_forceDownload = true;')
+            page.goto('data:text/html,<title>no tools here</title><input id=picker type=file multiple>' if PROVE else url)
+            ready = wait_state(page, lambda s: s.get('phase') == 'ready', 30, 'ready')
+            check('page is ready and names the PLATO commit it checks against', ready.get('phase') == 'ready' and len(ready.get('platoCommit') or '') == 40, ready)
+
+            ex = PLATO / 'schemas/tables/examples'
+            s = run_case(page, sorted((ex / 'customs').glob('*.csv')), 'check')
+            check('customs tables: detected as tables and checked with no problems', s.get('format') == 'tables' and s.get('phase') == 'done' and s['report']['errors'] == 0, s.get('report') or s)
+            s = run_case(page, sorted((ex / 'survey').glob('*.csv')), 'check')
+            errs = [i for i in (s.get('report') or {}).get('items', []) if i['severity'] == 'error']
+            check('survey tables: exactly the two things the tables allow and PLATO JSON does not', s.get('phase') == 'done' and len(errs) == 2 and all(i['kind'] == 'schema' for i in errs), errs or s)
+            s = run_case(page, sorted((ex / 'customs').glob('*.csv')), 'convert', 'plato-jsonl')
+            ok = s.get('phase') == 'done' and s.get('outputs')
+            out = download(page, s['outputs'][0]['name'], tmp / 'customs.jsonl') if ok else None
+            lines = out.read_text().strip().split('\n') if out else []
+            check('customs tables -> JSON Lines: saved, a header and two places', ok and len(lines) == 3 and json.loads(lines[0]).get('profile') == 'place-centric', s if not ok else len(lines))
+            s = run_case(page, [ROOT / 'test/fixtures/lpf-readme-example.json'], 'convert', 'plato-json')
+            ok = s.get('phase') == 'done' and s.get('outputs')
+            doc = json.loads(download(page, s['outputs'][0]['name'], tmp / 'abingdon.json').read_text()) if ok else {}
+            check('LPF README example -> PLATO JSON: one place, its losses reported', ok and len(doc.get('spatialEntities', [])) == 1 and any(i['kind'] == 'lpf-duration' for i in s['report']['items']), s if not ok else doc.keys())
+            s = run_case(page, [PLATO / 'schemas/examples/place-centric-constantinople.json'], 'convert', 'ntriples')
+            ok = s.get('phase') == 'done' and s.get('outputs')
+            nt = download(page, s['outputs'][0]['name'], tmp / 'c.nt').read_text() if ok else ''
+            check('Constantinople JSON -> N-Triples: triples written and saved', ok and nt.count(' .\n') > 50 and 'attests_about' in nt, s if not ok else nt[:200])
+            bad = tmp / 'bad.nt'; bad.write_text('<https://x.org/a> <https://w3id.org/plato#notes> "fine" .\n<https://x.org/a> <https://w3id.org/plato#notes "broken .\n')
+            s = run_case(page, [bad], 'check')
+            check('broken N-Triples: the bad line is reported by number', s.get('phase') == 'done' and any(i['kind'] == 'rdf-syntax' and 'line 2' in ' '.join(i['examples']) for i in s['report']['items']), s.get('report') or s)
+            png = tmp / 'picture.png'; png.write_bytes(b'\x89PNG\r\n\x1a\n' + b'\0' * 64)
+            s = run_case(page, [png], 'check')
+            check('an image is not mistaken for data', s.get('phase') == 'unrecognised', s)
+            ctx.close()
+    finally:
+        srv.kill()
+    failed = [r for r in results if not r[1]]
+    if PROVE:
+        print('PROVE-IT-FAILS:', 'every check failed, as it must' if len(failed) == len(results) else f'{len(results) - len(failed)} check(s) passed against a page with no tools: they cannot fail')
+        sys.exit(0 if len(failed) == len(results) else 1)
+    print('RESULT:', 'ALL PASS' if not failed else f'{len(failed)} FAILED'); sys.exit(1 if failed else 0)
+
+main()

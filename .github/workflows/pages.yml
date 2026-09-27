@@ -1,0 +1,58 @@
+# Test, build and publish the tools to GitHub Pages (https://pelagios.org/plato-tools/).
+name: Test and publish
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Pinned PLATO commit
+        id: plato
+        run: echo "commit=$(node -p "require('./package.json').plato.commit")" >> "$GITHUB_OUTPUT"
+      # The tests use PLATO's examples at the same commit the tools check against.
+      - uses: actions/checkout@v4
+        with:
+          repository: pelagios/place-attestation-ontology
+          ref: ${{ steps.plato.outputs.commit }}
+          path: plato-repo
+      - run: npm ci
+      - name: Unit and conversion tests
+        run: npm test
+        env:
+          PLATO_REPO: plato-repo
+      - name: Build (vendors PLATO's files at the pinned commit)
+        run: npm run build
+      - name: The vendored files are the pinned commit's
+        run: |
+          node -e "const v=require('./dist/plato/VERSION.json'), p=require('./package.json'); if (v.commit !== p.plato.commit) { console.error('vendored', v.commit, 'pinned', p.plato.commit); process.exit(1) }"
+          cmp dist/plato/ontology.ttl plato-repo/ontology.ttl
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PLATO tools: check and convert data about places</title>
+  <meta name="description" content="Check and convert data about places between PLATO spreadsheet tables, PLATO JSON, RDF and Linked Places Format, in your browser. Your files never leave your computer.">
+  <link rel="stylesheet" href="./src/styles.css">
+</head>
+<body>
+<header class="top">
+  <h1>PLATO tools</h1>
+  <p class="lede">Check and convert data about places, in the formats of <a href="https://pelagios.org/place-attestation-ontology/guide/">PLATO</a>, the Place Attestation Ontology.</p>
+  <p class="privacy"><strong>Your files stay on your computer.</strong> Nothing is uploaded: everything happens in this browser tab, and it works for datasets of any size your disk can hold.</p>
+</header>
+<main>
+  <section id="files" aria-labelledby="files-h">
+    <h2 id="files-h"><span class="step">1</span> Choose your data</h2>
+    <label class="drop" id="drop">
+      <input type="file" id="picker" multiple>
+      <span>Drop a file here, or <u>choose one</u>.</span>
+      <small>A PLATO JSON or JSON Lines file; RDF in N-Triples, N-Quads or Turtle; Linked Places Format v1; or a set of PLATO spreadsheet tables (the eight CSV files, a zip of them, or the template workbook). Gzipped files are fine.</small>
+    </label>
+    <div id="chosen" hidden></div>
+  </section>
+
+  <section id="action" aria-labelledby="action-h" hidden>
+    <h2 id="action-h"><span class="step">2</span> Check it, or convert it</h2>
+    <div class="actions">
+      <button id="check" class="primary">Check</button>
+      <span class="or">or</span>
+      <label for="target" class="visually-hidden">Convert to</label>
+      <select id="target"></select>
+      <button id="convert">Convert</button>
+    </div>
+    <details id="options">
+      <summary>Options</summary>
+      <div class="opt" data-for="tables-input">
+        <label for="base">Web address for your identifiers</label>
+        <input id="base" type="url" value="https://example.org/my-dataset/" size="40">
+        <small>The spreadsheet ids (such as <code>bristol</code>) become web addresses under this one. Use one you control, if you have it.</small>
+      </div>
+      <div class="opt" data-for="ntriples-output">
+        <label><input id="typing" type="checkbox" checked> Add node types and typed dates, as the DEEP RDF export does</label>
+        <small>Adds <code>rdf:type</code> from the ontology's domains and ranges, <code>xsd:gYear</code> on year bounds, and WKT points.</small>
+      </div>
+    </details>
+  </section>
+
+  <section id="progress" aria-labelledby="progress-h" hidden>
+    <h2 id="progress-h"><span class="step">3</span> Working</h2>
+    <p id="phase" aria-live="polite"></p>
+    <p><button id="cancel">Cancel</button></p>
+  </section>
+
+  <section id="result" aria-labelledby="result-h" hidden>
+    <h2 id="result-h"><span class="step">4</span> Result</h2>
+    <p id="summary"></p>
+    <div id="saves"></div>
+    <div id="report"></div>
+  </section>
+
+  <p id="storage-warning" class="warn" hidden></p>
+</main>
+<footer>
+  <p>Checked against PLATO <span id="plato-version">…</span>. <a href="https://github.com/pelagios/plato-tools">Source code</a> (BSD 3-Clause). PLATO is published by the <a href="https://pelagios.org">Pelagios Network</a> Place Working Group.</p>
+</footer>
+<script type="module" src="./src/app.js"></script>
+</body>
+</html>

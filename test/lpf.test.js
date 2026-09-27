@@ -1,3 +1,4 @@
+import { PLATO_REPO, DEEP_EXPORT } from './paths.js';
 // LPF -> PLATO must produce valid PLATO JSON and lose only what is reported; LPF -> PLATO -> LPF
 // must give back every LPF element the README example uses.
 import { test } from 'node:test';
@@ -53,7 +54,7 @@ test('control: a dropped name is noticed', () => {
   assert.notDeepEqual(recordToFeature(rec).names.map((n) => n.toponym).sort(), README.names.map((n) => n.toponym).sort());
 });
 
-const DEEP_LPF = '../deep/data/export/deep-lpf.geojsonl.gz';
+const DEEP_LPF = `${DEEP_EXPORT}/deep-lpf.geojsonl.gz`;
 test('DEEP LPF export (first 2,000 features) -> valid PLATO', async (t) => {
   if (!existsSync(DEEP_LPF)) { t.skip('DEEP LPF export not found'); return; }
   const rl = createInterface({ input: createReadStream(DEEP_LPF).pipe(createGunzip()), crlfDelay: Infinity });

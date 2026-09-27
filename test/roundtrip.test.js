@@ -1,3 +1,4 @@
+import { PLATO_REPO, DEEP_EXPORT } from './paths.js';
 // JSON -> RDF -> JSON must lose nothing: the second JSON must give the same graph as the first,
 // and must itself be valid against the PLATO JSON Schemas.
 import { test } from 'node:test';
@@ -14,7 +15,7 @@ import { PLATO } from '../src/lib/context.js';
 const load = (f) => JSON.parse(readFileSync(`public/plato/${f}`, 'utf8'));
 const CTX = load('plato.context.jsonld'), CORE = load('plato.schema.json');
 const PROFILES = { 'place-centric': load('place-centric.schema.json'), 'attestation-centric': load('attestation-centric.schema.json') };
-const EXAMPLES = '../place-attestation-ontology/schemas/examples';
+const EXAMPLES = `${PLATO_REPO}/schemas/examples`;
 const dedupe = (nq) => [...new Set(nq.split('\n').filter(Boolean))].join('\n') + '\n';
 const canon = (nq) => jsonld.canonize(dedupe(nq), { algorithm: 'URDNA2015', inputFormat: 'application/n-quads', format: 'application/n-quads', safe: false });
 
@@ -68,7 +69,7 @@ test('control: the comparison notices a dropped attestation', async () => {
 import { existsSync, createReadStream } from 'node:fs';
 import { createGunzip } from 'node:zlib';
 import { createInterface } from 'node:readline';
-const DEEP = process.env.DEEP_JSONL || '../deep/data/export/deep-plato.jsonl.gz';
+const DEEP = `${DEEP_EXPORT}/deep-plato.jsonl.gz`;
 test('JSON -> RDF -> JSON is lossless and valid: DEEP sample (300 entities, 50 identity relations)', async (t) => {
   if (!existsSync(DEEP)) { t.skip(`DEEP export not found at ${DEEP}`); return; }
   const rl = createInterface({ input: createReadStream(DEEP).pipe(createGunzip()), crlfDelay: Infinity });

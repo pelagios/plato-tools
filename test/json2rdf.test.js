@@ -1,3 +1,4 @@
+import { PLATO_REPO, DEEP_EXPORT } from './paths.js';
 // The compiled context must give exactly the graph jsonld.js gives, for every example.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,7 +10,7 @@ import { Json2Rdf } from '../src/formats/json2rdf.js';
 import { tripleNT } from '../src/lib/ntriples.js';
 
 const CTX = JSON.parse(readFileSync('public/plato/plato.context.jsonld', 'utf8'));
-const EXAMPLES = process.env.PLATO_REPO ? `${process.env.PLATO_REPO}/schemas/examples` : '../place-attestation-ontology/schemas/examples';
+const EXAMPLES = process.env.PLATO_REPO ? `${process.env.PLATO_REPO}/schemas/examples` : `${PLATO_REPO}/schemas/examples`;
 // Compared as graphs: duplicate lines (the same triple from two records) are one triple.
 const dedupe = (nq) => [...new Set(nq.split('\n').filter(Boolean))].join('\n') + '\n';
 const canon = (nq) => jsonld.canonize(dedupe(nq), { algorithm: 'URDNA2015', inputFormat: 'application/n-quads', format: 'application/n-quads', safe: false });
@@ -33,7 +34,7 @@ for (const f of readdirSync(EXAMPLES).filter((f) => f.endsWith('.json'))) {
   });
 }
 
-const DEEP = process.env.DEEP_JSONL || '../deep/data/export/deep-plato.jsonl.gz';
+const DEEP = `${DEEP_EXPORT}/deep-plato.jsonl.gz`;
 async function deepSample(nRecords, nIdrs) {
   // Streamed: the file is larger than any JavaScript string can be.
   const rl = createInterface({ input: createReadStream(DEEP).pipe(createGunzip()), crlfDelay: Infinity });

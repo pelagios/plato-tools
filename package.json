@@ -20,7 +20,8 @@
     "ajv-formats": "^3.0.1",
     "fflate": "^0.8.3",
     "n3": "^2.7.12",
-    "papaparse": "^5.7.0"
+    "papaparse": "^5.7.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "jsonld": "^9.0.0",
