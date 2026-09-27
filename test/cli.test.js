@@ -212,3 +212,50 @@ test('counts of one are singular in the summary: "1 place", "1 identity relation
   assert.equal(summary({ errors: 0, counts: { places: 1, attestations: 3, 'identity relations': 1 } }).counted, 'Read 1 place, 3 attestations, 1 identity relation.');
   assert.equal(summary({ errors: 0, counts: { places: 2, triples: 1 } }).counted, 'Read 2 places, 1 triple.');
 });
+
+// ---- RDF back to PLATO JSON, through the command line, for every PLATO example ------------------------
+// This path (N-Triples in, PLATO JSON out) crashed on PLATO's draft statistics example while every
+// in-memory test passed, so each example is taken through it as a user would: to N-Triples, then to
+// a PLATO JSON document and to JSON Lines, each written, valid, and with every place.
+for (const f of readdirSync(EX).filter((x) => x.endsWith('.json'))) {
+  test(`command line: ${f} -> N-Triples -> PLATO JSON and JSON Lines, each written and valid`, () => {
+    const dir = scratch();
+    const places = (JSON.parse(readFileSync(`${EX}/${f}`, 'utf8')).spatialEntities || []).length;
+    const toNt = cli('convert', '--to', 'ntriples', '--out', dir, '--json', `${EX}/${f}`);
+    assert.equal(toNt.code, 0, toNt.out + toNt.err);
+    const ntFile = join(dir, f.replace(/\.json$/, '.nt'));
+    for (const [target, ext] of [['plato-json', '.json'], ['plato-jsonl', '.jsonl']]) {
+      const out = join(dir, target); mkdirSync(out);
+      const back = cli('convert', '--to', target, '--out', out, '--json', ntFile);
+      const [r] = jsonLines(back.out);
+      assert.equal(back.code, 0, `${target}: ${back.out}${back.err}`);
+      assert.equal(r.status, 'ok', JSON.stringify(r));
+      const written = join(out, f.replace(/\.json$/, ext));
+      const again = cli('check', '--json', written);
+      assert.equal(again.code, 0, `${target} output does not check clean: ${again.out}`);
+      if (places) assert.equal(jsonLines(again.out)[0].counts.places, places, `${target}: every place is there`);
+    }
+  });
+}
+
+// ---- a fault in the tools is not a fault in the data ------------------------------------------------
+test('a fault in the tools is reported as one, with exit status 2, never as a problem in the file', () => {
+  const dir = scratch();
+  const nt = join(dir, 'c.nt');
+  assert.equal(cli('convert', '--to', 'ntriples', '--out', dir, `${EX}/place-centric-constantinople.json`).code, 0);
+  writeFileSync(nt, readFileSync(join(dir, 'place-centric-constantinople.nt')));
+  // Break the reader from outside, in the process the command line runs in: a TypeError, as a bug gives.
+  const rdf2json = new URL('../src/formats/rdf2json.js', import.meta.url).href;
+  const breakIt = `data:text/javascript,${encodeURIComponent(`import { Rdf2Json } from ${JSON.stringify(rdf2json)}; Rdf2Json.prototype.entity = function () { return undefined.properties; };`)}`;
+  const run = (...pre) => { const r = spawnSync(process.execPath, [...pre, CLI, 'convert', '--to', 'plato-json', '--out', join(dir, 'o' + pre.length), '--json', nt], { encoding: 'utf8' }); return { code: r.status, out: r.stdout, err: r.stderr }; };
+  mkdirSync(join(dir, 'o2')); mkdirSync(join(dir, 'o0'));
+  const broken = run('--import', breakIt);
+  const [r] = jsonLines(broken.out);
+  assert.equal(broken.code, 2, broken.out + broken.err);
+  assert.equal(r.status, 'failed');
+  assert.match(r.message, /fault in the tools, not in the data: Cannot read properties of undefined/);
+  assert.doesNotMatch(broken.out, /could not be read to the end/);
+  assert.deepEqual(readdirSync(join(dir, 'o2')), [], 'and nothing is left behind');
+  // control: the same conversion, unbroken, succeeds
+  assert.equal(run().code, 0);
+});

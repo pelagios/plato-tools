@@ -122,6 +122,12 @@ async function main(argv) {
   return total.exitCode;
 }
 
+/** A thrown error that is not the data's: said to be the tools' fault, with where it happened. */
+function toolsFault(e) {
+  const where = String(e && e.stack || '').split('\n').find((l) => /\/src\//.test(l))?.trim().replace(/^at\s+/, '') || '';
+  return `PLATO tools failed on this input, which is a fault in the tools, not in the data: ${e && e.message || e}${where ? ` (${where})` : ''}. Please report it at https://github.com/pelagios/plato-tools/issues.`;
+}
+
 /** Check or convert one input, and say how it went, as an object that --json prints as it is. */
 async function runOne(item, action, o, resources, host, live) {
   const t0 = Date.now();
@@ -132,7 +138,8 @@ async function runOne(item, action, o, resources, host, live) {
   try { files = await openFiles(item.paths); input = await detect(files); }
   catch (e) {
     if (isSystemError(e)) { r.message = e.message; r.elapsedMs = Date.now() - t0; return r; }
-    input = { format: null, reason: `It could not be read: ${e.message}` };
+    // Detection turns what the data does wrong into a reason itself; anything thrown is the tools' own fault.
+    input = { format: null, reason: toolsFault(e) };
   }
   if (!input.format) { r.message = input.reason; r.elapsedMs = Date.now() - t0; return r; }
   r.format = input.format; r.profile = input.profile || null;
@@ -154,10 +161,10 @@ async function runOne(item, action, o, resources, host, live) {
     return r;
   }
   if (failure) {
-    // The data stopped the reader (JSON that is not well formed, say): a problem in the file.
-    r.status = 'problems'; r.errors = 1;
-    r.items = [{ severity: 'error', kind: 'unreadable', message: 'The file could not be read to the end, so it was not fully checked', count: 1, examples: [String(failure.message || failure)] }];
-    if (done.removed.length) r.message = `Nothing was written: ${done.removed.join(', ')} was removed, being incomplete.`;
+    // The engine turns a file that stops its reader (a DataError) into a report of its own, so what
+    // reaches here is a fault in the tools, not in the data: it must not be presented as a problem in
+    // the file. The input has failed, the exit status says so, and the error is shown as it is.
+    r.message = toolsFault(failure) + (done.removed.length ? ` Nothing was written: ${done.removed.join(', ')} was removed, being incomplete.` : '');
     return r;
   }
   Object.assign(r, { status: result.report.errors ? 'problems' : 'ok', errors: result.report.errors, counts: result.report.counts, items: result.report.items,
