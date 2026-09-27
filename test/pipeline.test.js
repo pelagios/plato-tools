@@ -178,3 +178,25 @@ test('control: a source that is a malformed address is reported as one', async (
   const r = await go([textFile(citing('not a web address'), 'bad-uri.json')], 'check');
   assert.ok(errors(r).some((i) => /full web address/.test(i.message)), JSON.stringify(errors(r).map((i) => i.message)));
 });
+
+// PLATO eb8065a: nested under its place, an identity relation may leave out its subject.
+const withIdr = (ir) => JSON.stringify({ profile: 'place-centric', gazetteer: { '@id': 'https://example.org/g', title: 't' },
+  spatialEntities: [{ '@id': 'https://example.org/p/1', label: 'P', attestations: [{ names: [{ toponym: 'P' }], sources: [{ title: 's' }] }],
+    identityRelations: [{ object: 'https://sws.geonames.org/745044/', identityType: 'closeMatch', ...ir }] }] });
+test('a nested identity relation without a subject is valid, and reaches the tables with its place', async () => {
+  const r = await go([textFile(withIdr({}), 'nested.json')], 'convert', 'tables');
+  assert.deepEqual(errors(r), []);
+  const zipName = Object.keys(r.e.outs).find((n) => n.endsWith('.zip'));
+  const files = unzipSync(new Uint8Array(await new Blob(r.e.outs[zipName]).arrayBuffer()));
+  const idRows = strFromU8(files['identities.csv']).trim().split(/\r?\n/);
+  assert.equal(idRows.length, 2, idRows.join(' / '));
+  const placeRows = strFromU8(files['places.csv']).trim().split(/\r?\n/).slice(1);
+  assert.deepEqual(placeRows, ['1,P,'], 'only the one place, not a phantom place with no label');
+  assert.equal(idRows[1].split(',')[0], '1', 'the identity row names the place it was nested under');
+});
+test('control: a nested identity relation whose subject is another place is an error', async () => {
+  const r = await go([textFile(withIdr({ subject: 'https://example.org/p/2' }), 'mismatch.json')], 'check');
+  assert.ok(errors(r).some((i) => i.kind === 'identity-subject-mismatch'), JSON.stringify(errors(r)));
+  const ok = await go([textFile(withIdr({ subject: 'https://example.org/p/1' }), 'same.json')], 'check');
+  assert.deepEqual(errors(ok), [], 'repeating its own place is fine');
+});

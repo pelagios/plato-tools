@@ -230,12 +230,13 @@ export function recordToRows(rec, ids, loss = () => {}) {
     for (const pv of a.properties || []) rows.properties.push({ place_id: pid, property_uri: pv.property, property_label: pv.label || '',
       value: typeof pv.value === 'object' ? JSON.stringify(pv.value) : pv.value, unit_uri: pv.unit || '', ...common });
   }
-  for (const ir of rec.identityRelations || []) rows.identities.push(identityRow(ir, ids, loss));
+  // Nested under its place, a relation may leave out its subject (PLATO eb8065a): it is the place.
+  for (const ir of rec.identityRelations || []) rows.identities.push(identityRow(ir, ids, loss, ir.subject || rec['@id']));
   return rows;
 }
-export function identityRow(ir, ids, loss = () => {}) {
+export function identityRow(ir, ids, loss = () => {}, subject = ir.subject) {
   if (ir.assertedBy || ir.promotedFrom) loss({ kind: 'identity-provenance' });
   if (!ir.identityType) loss({ kind: 'identity-type-missing' });
-  return { place_id: ids.place(ir.subject, null, false), same_as: ir.object, match_type: ir.identityType || '', certainty: ir.certainty ?? '',
+  return { place_id: ids.place(subject, null, false), same_as: ir.object, match_type: ir.identityType || '', certainty: ir.certainty ?? '',
     basis: ir.basis || '', source_id: ir.source ? ids.source(ir.source) : '' };
 }

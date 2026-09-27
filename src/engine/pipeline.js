@@ -255,6 +255,14 @@ export async function run({ input, action, target, options = {} }, env) {
   const checkRecord = (ev) => {
     const f = ev.newEntity ? V.newEntity : ev.type === 'record' ? V.entity : ev.type === 'attestation' ? V.attestation : V.identity;
     if (f && !f(ev.value)) rep.error('schema', explainSchema(f.errors, input.format === 'tables'), `${ev.value?.['@id'] || ev.value?.subject || `item ${ev.n}`}: ${ajvMessage(f.errors)}`);
+    // A nested identity relation may leave out its subject, which is then its place; if it gives
+    // one, it must be that place, or in RDF it has two subjects. A schema cannot say this.
+    if (ev.type === 'record' && ev.value && Array.isArray(ev.value.identityRelations)) {
+      for (const ir of ev.value.identityRelations) {
+        if (ir && ir.subject !== undefined && ev.value['@id'] !== undefined && ir.subject !== ev.value['@id'])
+          rep.error('identity-subject-mismatch', 'An identity relation nested under a place names a different place as its subject; leave the subject out, or move the relation to the place it is about', `${ev.value['@id']}: ${ir.subject}`);
+      }
+    }
   };
   // What the JSON-to-RDF converter could not use, in words. Every kind it can raise is named here.
   const jsonIssue = (i) => {
