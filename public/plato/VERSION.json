@@ -1,5 +1,8 @@
 {
   "repository": "https://github.com/pelagios/place-attestation-ontology",
-  "commit": "e96d90dcc96ae4af54c40df2389216a74c619b7e",
-  "versionInfo": "0.4.0"
+  "commit": "39dc20289c6d2d13eef5c6ff5a24aca51210d961",
+  "versionInfo": "0.4.0",
+  "ref": "issue-14-statistics",
+  "draft": true,
+  "note": "A draft: PLATO's issue-14-statistics branch, not a release of PLATO."
 }

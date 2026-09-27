@@ -38,6 +38,7 @@ details#options { margin-top: .75rem; }
 .good { color: var(--ok); font-weight: 600; }
 .warn { color: var(--warn); }
 footer { color: var(--muted); font-size: .9rem; padding-bottom: 2rem; }
+footer .draft { color: var(--err); }
 code { font-size: .92em; }
 a { color: var(--accent); }
 a:visited { color: var(--accent); }

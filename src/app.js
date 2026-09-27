@@ -17,8 +17,10 @@ function startWorker() {
 function onMessage({ data }) {
   if (data.type === 'ready') {
     const v = data.version;
-    $('plato-version').innerHTML = `${v.versionInfo} at <a href="${v.repository}/tree/${v.commit}">${v.commit.slice(0, 7)}</a>`;
-    Object.assign(state, { phase: 'ready', platoCommit: v.commit });
+    $('plato-version').innerHTML = `${v.versionInfo} at <a href="${v.repository}/tree/${v.commit}">${v.commit.slice(0, 7)}</a>`
+      // A pin to a branch other than main is a draft of PLATO, and says so wherever the pin is shown.
+      + (v.draft ? ` <strong class="draft">DRAFT: PLATO's ${v.ref} branch, not a release</strong>` : '');
+    Object.assign(state, { phase: 'ready', platoCommit: v.commit, platoDraft: v.draft ? v.ref : null });
   } else if (data.type === 'detected') onDetected(data);
   else if (data.type === 'progress') onProgress(data);
   else if (data.type === 'done') onDone(data);
@@ -70,7 +72,7 @@ function start(action) {
   $('check').disabled = $('convert').disabled = true;
   $('phase').textContent = 'Starting…';
   Object.assign(state, { phase: 'running', action, target, report: null, outputs: null, error: null });
-  worker.postMessage({ cmd: 'run', files, action, target, options: { base: $('base').value, typing: $('typing').checked } });
+  worker.postMessage({ cmd: 'run', files, action, target, options: { base: $('base').value, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked } });
 }
 function onProgress(p) {
   $('phase').textContent = progressText(p);
