@@ -3,7 +3,7 @@ import { PLATO_REPO, DEEP_EXPORT } from './paths.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { unzipSync, strFromU8, zipSync, strToU8 } from 'fflate';
+import { unzipSync, strFromU8, zipSync, strToU8, gzipSync } from 'fflate';
 import jsonld from 'jsonld';
 import * as XLSX from 'xlsx';
 import { res, file, textFile, outText, go } from './engine.js';
@@ -184,5 +184,43 @@ test('control: a JSON document cut short is not passed as clean', async () => {
   const whole = readFileSync(`${EX}/place-centric-constantinople.json`, 'utf8');
   const ok = await go([textFile(whole, 'whole.json')], 'check');
   assert.deepEqual(errors(ok), [], 'the whole document is clean');
-  await assert.rejects(go([textFile(whole.slice(0, 1500), 'cut.json')], 'check'), /stops before it is complete/);
+  // Not thrown: a problem in the report, with what was read before it.
+  const cut = await go([textFile(whole.slice(0, 1500), 'cut.json')], 'check');
+  const e = errors(cut);
+  assert.equal(e.length, 1, JSON.stringify(e));
+  assert.equal(e[0].kind, 'unreadable');
+  assert.match(e[0].examples[0], /stops before it is complete/);
+  assert.equal(cut.incomplete, true);
+});
+
+// Every way a file's content can stop the reader ends in a report, never an exception.
+test('a file that stops the reader part-way is a problem in the report, not an exception', async () => {
+  const whole = readFileSync(`${EX}/place-centric-constantinople.json`, 'utf8');
+  const cases = [
+    ['JSON not well formed part-way', textFile(whole.replace('"attestations": [', '"attestations": [}'), 'bad.json'), /not well formed/],
+    ['gzip cut short', (() => { const b = gzipSync(strToU8(whole)); return new File([b.slice(0, b.length - 12)], 'cut.json.gz'); })(), /stops, or is damaged|stops before it is complete/],
+    ['a damaged zip of tables', (() => { const z = zipSync(Object.fromEntries(readdirSync(`${PLATO_REPO}/schemas/tables/examples/customs`).map((f) => [f, readFileSync(`${PLATO_REPO}/schemas/tables/examples/customs/${f}`)]))); return new File([z.slice(0, 200)], 'tables.zip'); })(), /zip is damaged/],
+  ];
+  for (const [name, f, re] of cases) {
+    let r;
+    try { r = await go([f], 'check'); } catch (err) { assert.fail(`${name}: threw ${err.message}`); }
+    const e = errors(r).filter((i) => i.kind === 'unreadable');
+    assert.equal(e.length, 1, `${name}: ${JSON.stringify(errors(r))}`);
+    assert.match(e[0].examples[0], re, name);
+    assert.deepEqual(r.outputs, [], `${name}: no outputs`);
+  }
+});
+test('an LPF sequence with a line that is not JSON reports the line and reads the rest', async () => {
+  const f = JSON.parse(readFileSync('test/fixtures/lpf-readme-example.json', 'utf8')).features[0];
+  const r = await go([textFile(JSON.stringify(f) + '\n{"type": "Feat\n' + JSON.stringify({ ...f, '@id': f['@id'] + '-2' }) + '\n', 'x.geojsonl')], 'check');
+  const e = errors(r).find((i) => i.kind === 'json-syntax');
+  assert.ok(e && /line 2/.test(e.examples[0]), JSON.stringify(errors(r)));
+  assert.equal(r.report.counts.places, 2);
+});
+test('a gzip file broken from the start is reported as unreadable when it is detected, not thrown', async () => {
+  const { detect } = await import('../src/engine/input.js');
+  const b = gzipSync(strToU8('{"profile":"place-centric"}'));
+  const d = await detect([new File([b.slice(0, 11)], 'broken.json.gz')]);
+  assert.equal(d.format, null);
+  assert.match(d.reason, /Nothing could be read from it/);
 });

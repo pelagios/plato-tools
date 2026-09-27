@@ -15,7 +15,7 @@ import { TripleStore } from '../lib/store.js';
 import { PLATO, RDF } from '../lib/context.js';
 import { featureToRecord, recordToFeature } from '../formats/lpf.js';
 import { validateTables, rowToAttestation, tableIds, recordToRows, identityRow, ATTESTATION_SHEETS, tableSchemas } from '../formats/tables.js';
-import { lineChunks, lines, jsonDocument, TABLE_SHEETS } from './input.js';
+import { lineChunks, lines, jsonDocument, TABLE_SHEETS, DataError } from './input.js';
 import { Report, LOSS_TEXT } from './report.js';
 
 export const TARGETS = {
@@ -111,7 +111,13 @@ async function* platoJson(file) {
 async function* lpfSource(file, seq, rep) {
   yield { type: 'header', value: { profile: 'place-centric', gazetteer: { title: file.name } } };
   const loss = (l) => rep.loss(l.kind, LOSS_TEXT[l.kind] || l.kind, l.value);
-  const each = seq ? (async function* () { for await (const { line, n } of lines(file)) { const v = JSON.parse(line); if (v.type === 'Feature') yield { v, n }; } })()
+  const each = seq ? (async function* () {
+    for await (const { line, n } of lines(file)) {
+      let v;
+      try { v = JSON.parse(line); } catch (e) { rep.error('json-syntax', 'A line is not valid JSON', `line ${n}: ${e.message}`); continue; }
+      if (v && v.type === 'Feature') yield { v, n };
+    }
+  })()
     : (async function* () { let n = 0; for await (const { value } of jsonDocument(file, { arrays: ['features'] })) yield { v: value, n: ++n }; })();
   for await (const { v, n } of each) {
     if (!v['@id']) rep.warning('lpf-no-id', 'An LPF feature has no @id', `feature ${n}`);
@@ -161,11 +167,15 @@ async function readSheets(input, env) {
   const put = (name, text) => { const b = name.split('/').pop().toLowerCase().replace(/\.csv$/, ''); if (TABLE_SHEETS.includes(b)) sheets[b] = Papa.parse(text.replace(/^﻿/, ''), { header: true, skipEmptyLines: 'greedy' }); };
   if (input.container === 'csv') for (const f of input.files) put(f.name, await f.text());
   else if (input.container === 'zip') {
-    const z = unzipSync(new Uint8Array(await input.files[0].arrayBuffer()));
+    let z;
+    try { z = unzipSync(new Uint8Array(await input.files[0].arrayBuffer())); }
+    catch (e) { throw new DataError(`The zip is damaged or incomplete, so its tables cannot be read (${String(e && e.message || e)}).`); }
     for (const [name, data] of Object.entries(z)) if (name.toLowerCase().endsWith('.csv')) put(name, strFromU8(data));
   } else {
     const XLSX = env.xlsx;
-    const wb = XLSX.read(new Uint8Array(await input.files[0].arrayBuffer()), { type: 'array', raw: false });
+    let wb;
+    try { wb = XLSX.read(new Uint8Array(await input.files[0].arrayBuffer()), { type: 'array', raw: false }); }
+    catch (e) { throw new DataError(`The workbook is damaged or incomplete, so its sheets cannot be read (${String(e && e.message || e)}).`); }
     for (const name of wb.SheetNames) if (TABLE_SHEETS.includes(name.toLowerCase())) put(name, XLSX.utils.sheet_to_csv(wb.Sheets[name], { blankrows: false, rawNumbers: false }));
   }
   return sheets;
@@ -216,8 +226,22 @@ class TextSink {
 }
 
 // ---- the run -------------------------------------------------------------------------------------
-export async function run({ input, action, target, options = {} }, env) {
+/**
+ * Check or convert one input. A file whose content stops the reader part-way (JSON cut short or
+ * not well formed, damaged compression, a broken zip) is a problem in the data, so it ends in a
+ * report like any other, with what was read before it and no outputs: only a failure of the tools
+ * themselves is thrown.
+ */
+export async function run(job, env) {
   const rep = new Report();
+  try { return await runChecked(job, env, rep); }
+  catch (e) {
+    if (!(e instanceof DataError)) throw e;
+    rep.error('unreadable', 'The file could not be read to the end, so only the part before the problem was checked', e.message);
+    return { report: rep.toJSON(), outputs: [], incomplete: true };
+  }
+}
+async function runChecked({ input, action, target, options = {} }, env, rep) {
   const res = env.resources;
   const progress = env.progress || (() => {});
   const t0 = Date.now();

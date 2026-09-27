@@ -144,7 +144,9 @@ async function runOne(item, action, o, resources, host, live) {
   try { result = await run({ input, action, target: r.target, options: { base: o.base, typing: o.typing, name: item.name } }, env); }
   catch (e) { failure = e; }
   if (live) process.stderr.write('\r\x1b[K');
-  const done = finish(!!failure);
+  // A file the engine could not read to the end comes back as a report marked incomplete; any
+  // output it had begun is removed, as after a failure.
+  const done = finish(!!failure || !!result?.incomplete);
   r.storeBytes = done.storeBytes;
   r.elapsedMs = Date.now() - t0;
   if (failure && isSystemError(failure)) {
@@ -160,6 +162,7 @@ async function runOne(item, action, o, resources, host, live) {
   }
   Object.assign(r, { status: result.report.errors ? 'problems' : 'ok', errors: result.report.errors, counts: result.report.counts, items: result.report.items,
     outputs: result.outputs.map(({ path, size }) => ({ path, size })) });
+  if (result.incomplete && done.removed.length) r.message = `Nothing was written: ${done.removed.join(', ')} was removed, being incomplete.`;
   return r;
 }
 

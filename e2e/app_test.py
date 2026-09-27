@@ -5,7 +5,7 @@
     python3 e2e/app_test.py --prove-it-fails run every check against a page with no tools on it;
                                             every check must fail, or the harness cannot fail
 """
-import json, os, pathlib, subprocess, sys, tempfile, time, urllib.request
+import json, os, pathlib, shutil, subprocess, sys, tempfile, time, urllib.request
 from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -96,12 +96,20 @@ def main():
                 {'@id': 'https://example.org/p/1', 'label': 'Ranny', 'attestations': [{'geometries': [{'reprPoint': [130.6, None]}], 'sources': [{'title': 's'}]}]}]}))
             s = run_case(page, [nul], 'check')
             check('a null coordinate: the check finishes and reports it (it used to stop the check)', s.get('phase') == 'done' and any(i['kind'] == 'null-value' for i in (s.get('report') or {}).get('items', [])), s.get('report') or s)
+            cut = tmp / 'cut-short.json'
+            cut.write_text((PLATO / 'schemas/examples/place-centric-constantinople.json').read_text()[:1500])
+            s = run_case(page, [cut], 'check')
+            shown = page.inner_text('#summary') if s.get('phase') == 'done' else ''
+            check('a JSON file cut short: reported as a problem in the report, not "Something went wrong"', s.get('phase') == 'done' and any(i['kind'] == 'unreadable' for i in (s.get('report') or {}).get('items', [])) and 'Something went wrong' not in shown, s.get('report') or s)
             png = tmp / 'picture.png'; png.write_bytes(b'\x89PNG\r\n\x1a\n' + b'\0' * 64)
             s = run_case(page, [png], 'check')
             check('an image is not mistaken for data', s.get('phase') == 'unrecognised', s)
             ctx.close()
     finally:
         srv.kill()
+        # The profile and the saved outputs are this run's alone: remove them (they were left in
+        # /tmp by every run until now, some 2.7 MB each).
+        shutil.rmtree(tmp, ignore_errors=True)
     failed = [r for r in results if not r[1]]
     if PROVE:
         print('PROVE-IT-FAILS:', 'every check failed, as it must' if len(failed) == len(results) else f'{len(results) - len(failed)} check(s) passed against a page with no tools: they cannot fail')
