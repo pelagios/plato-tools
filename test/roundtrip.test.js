@@ -148,3 +148,21 @@ test('the report stays quiet about a place that is also a name, and about identi
   new Rdf2Json({ context: CTX, core: CORE, profile: PROFILES['place-centric'], types: RES.types }, first.g, { onIssue: (i) => issues2.push(i) }).entity('https://example.org/p1');
   assert.ok(issues2.some((i) => i.kind === 'multiple-values' && i.key === 'title'), JSON.stringify(issues2));
 });
+
+test("a relation's wording survives JSON -> RDF -> JSON (plato:source_label), and would be noticed if lost", () => {
+  const doc = { profile: 'place-centric', gazetteer: { '@id': 'https://example.org/g', title: 't' }, spatialEntities: [
+    { '@id': 'https://example.org/abingdon', label: 'Abingdon', attestations: [{ relations: [{ relatesTo: 'https://example.org/berkshire',
+      relationType: 'https://w3id.org/plato#ContainedIn', relationLabel: 'part of Berkshire (UK)' }], sources: [{ title: 's' }] }] }] };
+  const first = toRdf(doc);
+  assert.match(first.nt, /<https:\/\/w3id\.org\/plato#source_label> "part of Berkshire \(UK\)"/);
+  const { doc: back, losses } = toJson(first.g, first.docNode, 'place-centric');
+  assert.deepEqual(losses, []);
+  assert.equal(back.spatialEntities[0].attestations[0].relations[0].relationLabel, 'part of Berkshire (UK)');
+  // control: with the old context, where relationLabel mapped to null, the wording would be gone
+  const old = structuredClone(CTX);
+  const walk = (o) => { if (o && typeof o === 'object') { if ('relationLabel' in o) o.relationLabel = null; Object.values(o).forEach(walk); } };
+  walk(old['@context']);
+  let nt = ''; const w = new Json2Rdf(old, (s, p, o) => { nt += tripleNT(s, p, o); });
+  w.header({ gazetteer: doc.gazetteer }); w.record('spatialEntities', doc.spatialEntities[0]);
+  assert.doesNotMatch(nt, /source_label/);
+});

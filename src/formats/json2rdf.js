@@ -12,7 +12,9 @@ const BOUNDS = new Set(['start_earliest', 'start_latest', 'end_earliest', 'end_l
 const REPR_POINT = PLATO + 'repr_point';
 const WKT = 'http://www.opengis.net/ont/geosparql#wktLiteral';
 // Keys the context deliberately leaves out of the RDF: a conversion to RDF loses their values.
-const NOT_IN_RDF = new Set(['relationLabel', 'metaTypeLabel']);
+// (Since PLATO 2e32d7e there are none: relationLabel maps to plato:source_label, and
+// metaTypeLabel is gone from the schema, so a document using it fails validation instead.)
+const NOT_IN_RDF = new Set([]);
 // Terms whose values are shared authority nodes (sources), described in full wherever cited.
 const SHARED_TERMS = new Set(['sources', 'source', 'derivedFrom']);
 const SHARED_CAP = 2_000_000;
