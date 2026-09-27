@@ -1,0 +1,637 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://w3id.org/plato/schemas/plato.schema.json",
+  "title": "PLATO — Place Attestation Ontology: Core Definitions",
+  "description": "Shared object-type definitions for the PLATO data model. These definitions are composed by the place-centric and attestation-centric submission profiles.",
+
+  "$defs": {
+
+    "uri": {
+      "type": "string",
+      "format": "uri",
+      "description": "A URI identifying an entity."
+    },
+
+    "isoOrYear": {
+      "type": "string",
+      "description": "ISO 8601 date/time or a signed integer year (e.g. '-0500' for 500 BCE).",
+      "pattern": "^-?\\d{4}(-\\d{2}(-\\d{2}(T\\d{2}:\\d{2}(:\\d{2})?Z?)?)?)?$"
+    },
+
+    "precision": {
+      "type": "string",
+      "enum": ["day", "month", "year", "decade", "century", "era", "geological_period"],
+      "description": "Precision/granularity of a temporal bound."
+    },
+
+    "unitFloat01": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "A value on the unit interval [0, 1]."
+    },
+
+    "languageTag": {
+      "type": "string",
+      "description": "BCP 47 language tag (e.g. 'en', 'zh-Hant', 'grc').",
+      "pattern": "^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{1,8})*$"
+    },
+
+
+    "qualification": {
+      "type": "object",
+      "description": "Qualification properties applicable to any facet node: epistemic certainty, ontological fuzziness, or relativity to an anchor entity. All properties are optional.",
+      "properties": {
+        "certainty": {
+          "$ref": "#/$defs/unitFloat01",
+          "description": "Epistemic certainty: 0.0 = completely uncertain, 1.0 = completely certain. Better evidence could raise it; distinct from fuzziness."
+        },
+        "certaintyNote": {
+          "type": "string",
+          "description": "Explanation of the basis for the certainty value: quality of evidence, reliability of source, scholarly consensus."
+        },
+        "fuzziness": {
+          "$ref": "#/$defs/unitFloat01",
+          "description": "Ontological fuzziness: 0.0 = crisp, 1.0 = maximally vague."
+        },
+        "fuzzinessNote": {
+          "type": "string",
+          "description": "Explanation of the nature of ontological fuzziness."
+        },
+        "relativeTo": {
+          "$ref": "#/$defs/uri",
+          "description": "URI of the anchor entity (SpatialEntity, Name, Period, etc.) to which this facet is defined relatively."
+        },
+        "relativeBearing": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 360,
+          "description": "Compass bearing from the anchor, in degrees."
+        },
+        "relativeDistance": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Distance from the anchor, in metres."
+        },
+        "relativeQualifier": {
+          "$ref": "#/$defs/uri",
+          "description": "URI of a controlled-vocabulary term describing the relative relationship (e.g. plato:Near, plato:Within, plato:UpstreamOf)."
+        }
+      },
+      "additionalProperties": false
+    },
+
+
+    "name": {
+      "type": "object",
+      "description": "A toponym or appellation. Reusable across attestations and SpatialEntities.",
+      "properties": {
+        "@id": { "$ref": "#/$defs/uri", "description": "Stable URI for this Name node, if it has one." },
+        "toponym": { "type": "string", "description": "The name string in its original script." },
+        "language": { "$ref": "#/$defs/languageTag" },
+        "script": {
+          "type": "string",
+          "description": "ISO 15924 script code (e.g. 'Latn', 'Arab', 'Grek')."
+        },
+        "nameType": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "What the name denotes. An open list, matching plato:name_type in the ontology. Starter values: toponym (place), chrononym (period), ethnonym (people), demonym (inhabitants), odonym (street), hydronym (water body); a project may add others (oronym, hagionym) provided it documents them. Classifies the referent, not the status of the form: see attestation.formStatus."
+        },
+        "romanized": {
+          "type": "string",
+          "description": "Romanised/transliterated form if the toponym is in a non-Latin script."
+        },
+        "transliterationSystem": {
+          "type": "string",
+          "description": "The transliteration/romanization system used (e.g. 'Pinyin', 'BGN/PCGN', 'ISO 259')."
+        },
+        "ipa": {
+          "type": "string",
+          "description": "International Phonetic Alphabet representation of pronunciation."
+        },
+        "nameEmbedding": {
+          "type": "string",
+          "description": "Vector embedding for phonetic similarity search (format: implementation-specific, typically 256-dimensional vector)."
+        },
+        "qualification": { "$ref": "#/$defs/qualification" }
+      },
+      "required": ["toponym"],
+      "additionalProperties": false
+    },
+
+
+    "geometry": {
+      "type": "object",
+      "description": "A spatial representation. Supports both WKT and GeoJSON formats, with precision metadata.",
+      "properties": {
+        "@id": { "$ref": "#/$defs/uri" },
+        "wkt": {
+          "type": "string",
+          "description": "Well-Known Text representation of the geometry."
+        },
+        "geojson": {
+          "type": "object",
+          "description": "GeoJSON Geometry object (Point, Polygon, LineString, etc.). Note: GeometryCollection not supported in some implementations.",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["Point", "MultiPoint", "LineString", "MultiLineString", "Polygon", "MultiPolygon"]
+            },
+            "coordinates": {}
+          },
+          "required": ["type", "coordinates"]
+        },
+        "reprPoint": {
+          "type": "array",
+          "description": "Representative point as [longitude, latitude]. Required for spatial indexing.",
+          "items": { "type": "number" },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "role": {
+          "$ref": "#/$defs/uri",
+          "description": "URI of a controlled-vocabulary concept stating what this geometry depicts: an extent, a feature point, a representative point standing in for the SpatialEntity, a label anchor. Orthogonal to spatialPrecision, which states how well the location is known rather than what it locates."
+        },
+        "bbox": {
+          "type": "array",
+          "description": "Bounding box: [min_lon, min_lat, max_lon, max_lat].",
+          "items": { "type": "number" },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "hull": {
+          "type": "string",
+          "description": "Convex hull as WKT Polygon for quick spatial filtering."
+        },
+        "spatialPrecision": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["exact", "approximate", "uncertain", "historical_approximate"]
+          },
+          "description": "Spatial precision qualifier(s)."
+        },
+        "precisionKm": {
+          "type": "array",
+          "items": { "type": "number", "minimum": 0 },
+          "description": "Uncertainty radius in kilometers."
+        },
+        "sourceCrs": {
+          "type": "string",
+          "description": "Original coordinate reference system (e.g. 'EPSG:4326')."
+        },
+        "qualification": { "$ref": "#/$defs/qualification" }
+      },
+      "additionalProperties": false
+    },
+
+
+    "propertyValue": {
+      "type": "object",
+      "description": "An attribute of a SpatialEntity that is not a Name, Geometry, Timespan or Type: a population, a valuation, an elevation, a market's trading day. The property is identified by URI in an external vocabulary; the value is either a literal or a structured object whose shape is declared by valueType.",
+      "properties": {
+        "@id": { "$ref": "#/$defs/uri" },
+        "property": {
+          "$ref": "#/$defs/uri",
+          "description": "URI of the property in an external vocabulary (e.g. a Wikidata property, a CIDOC-CRM property, a project vocabulary term)."
+        },
+        "label": {
+          "type": "string",
+          "description": "Human-readable label for the property (e.g. 'population')."
+        },
+        "sourceLabel": {
+          "type": "string",
+          "description": "The original wording in the contributing source, before mapping. For structured values this preserves the unparsed original, e.g. 'Monday after Whitsun, 3 days'."
+        },
+        "value": {
+          "description": "The value. A literal (number, string, boolean) for scalar attributes, or an object for structured ones — in which case valueType should declare its shape.",
+          "type": ["number", "string", "boolean", "object"]
+        },
+        "datatype": {
+          "$ref": "#/$defs/uri",
+          "description": "Datatype of a literal value (e.g. xsd:integer). Omitted for structured values."
+        },
+        "unit": {
+          "$ref": "#/$defs/uri",
+          "description": "URI of the unit of measurement, where the value has one. Omitted for counts and dimensionless values."
+        },
+        "valueType": {
+          "$ref": "#/$defs/uri",
+          "description": "URI declaring the shape of a structured value, so a consumer can tell whether it understands the value before reading it. Omitted for literal values."
+        },
+        "qualification": { "$ref": "#/$defs/qualification" }
+      },
+      "required": ["property", "value"],
+      "additionalProperties": false
+    },
+
+
+    "timespan": {
+      "type": "object",
+      "description": "A temporal interval with explicit uncertainty bounds using a four-date model. Aligned with PeriodO best practices.",
+      "properties": {
+        "@id": { "$ref": "#/$defs/uri" },
+        "startEarliest": { "$ref": "#/$defs/isoOrYear", "description": "Earliest possible start date." },
+        "startLatest": { "$ref": "#/$defs/isoOrYear", "description": "Latest possible start date." },
+        "endEarliest": { "$ref": "#/$defs/isoOrYear", "description": "Earliest possible end date." },
+        "endLatest": { "$ref": "#/$defs/isoOrYear", "description": "Latest possible end date." },
+        "label": { "type": "string", "description": "Human-readable period name (e.g. 'Byzantine period')." },
+        "startPrecision": { "$ref": "#/$defs/precision" },
+        "endPrecision": { "$ref": "#/$defs/precision" },
+        "precisionValue": { "type": "integer", "description": "Numeric precision in years." },
+        "openStart": { "type": "boolean", "description": "True if start is deliberately unspecified (not just unknown)." },
+        "openEnd": { "type": "boolean", "description": "True if end is deliberately unspecified (not just unknown)." },
+        "periodoUri": { "$ref": "#/$defs/uri", "description": "Link to PeriodO period definition." },
+        "edtfString": { "type": "string", "description": "Extended Date/Time Format representation." },
+        "qualification": { "$ref": "#/$defs/qualification" }
+      },
+      "additionalProperties": false
+    },
+
+
+    "type": {
+      "type": "object",
+      "description": "A classification from a controlled vocabulary (typically AAT).",
+      "properties": {
+        "@id": { "$ref": "#/$defs/uri" },
+        "identifier": {
+          "$ref": "#/$defs/uri",
+          "description": "URI in the controlled vocabulary (e.g. an AAT concept URI)."
+        },
+        "label": { "type": "string", "description": "Human-readable label." },
+        "sourceLabel": {
+          "type": "string",
+          "description": "Original label as given in the contributing source, before vocabulary mapping."
+        },
+        "qualification": { "$ref": "#/$defs/qualification" }
+      },
+      "required": ["identifier", "label"],
+      "additionalProperties": false
+    },
+
+
+    "citation": {
+      "type": "object",
+      "description": "One attestation's use of one source: the qualified form of a source reference, carrying what is true of this citation rather than of the source (plato:Citation).",
+      "properties": {
+        "@id": { "$ref": "#/$defs/uri" },
+        "source": {
+          "oneOf": [
+            { "$ref": "#/$defs/uri", "description": "URI of the source cited." },
+            { "$ref": "#/$defs/source" }
+          ],
+          "description": "The source or dataset cited (plato:cites): a URI, or an inline source object."
+        },
+        "locator": {
+          "type": "string",
+          "description": "Where in the cited work the evidence sits (plato:locator): 'p. 412', 'f. 12v', 'Table VI, col. 3, row 88'. An uninterpreted string."
+        },
+        "attributionStatus": {
+          "$ref": "#/$defs/uri",
+          "description": "URI of a concept saying whether the attribution was stated by the source or resolved editorially (plato:attribution_status): https://w3id.org/plato#AttributionInferred for an 'ibidem' resolved by an editor. Omit where the source is named where the form occurs."
+        }
+      },
+      "required": ["source"],
+      "additionalProperties": false
+    },
+
+    "source": {
+      "type": "object",
+      "description": "A citable document or authority that grounds an attestation.",
+      "properties": {
+        "@id": { "$ref": "#/$defs/uri" },
+        "title": { "type": "string" },
+        "uri": { "$ref": "#/$defs/uri", "description": "Resolvable URI for the source." },
+        "citation": { "type": "string", "description": "Bibliographic citation string." },
+        "timespan": {
+          "$ref": "#/$defs/timespan",
+          "description": "When this source, as a document, was produced: the date of the manuscript, cartulary or edition (plato:source_timespan). Distinct from the attestation's timespans, which date the claim rather than the witness. Only for authorityType 'source'."
+        },
+        "derivedFrom": {
+          "oneOf": [
+            { "$ref": "#/$defs/uri", "description": "URI of the source this one transmits." },
+            { "$ref": "#/$defs/source" }
+          ],
+          "description": "The source of which this one is a copy, transcript, edition, calendar or confirmation (plato:derived_from): a URI, or an inline source object. Only for authorityType 'source'."
+        },
+        "authorityType": {
+          "type": "string",
+          "enum": ["source", "dataset", "period", "relationType", "certaintyLevel"],
+          "default": "source",
+          "description": "Which Authority subclass this represents. The default applies to JSON consumers only: JSON-LD applies no defaults, so a document that will be turned into RDF should state authorityType, or the source expands as an Authority of no stated kind."
+        }
+      },
+      "required": ["title"],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "required": ["authorityType"], "properties": { "authorityType": { "not": { "const": "source" } } } },
+          "then": { "not": { "anyOf": [ { "required": ["timespan"] }, { "required": ["derivedFrom"] } ] } }
+        }
+      ]
+    },
+
+
+    "relation": {
+      "type": "object",
+      "description": "A entity-to-entity relation attested by an attestation (e.g. capital_of, successor_to).",
+      "properties": {
+        "relatesTo": {
+          "$ref": "#/$defs/uri",
+          "description": "URI of the target SpatialEntity."
+        },
+        "relationType": {
+          "$ref": "#/$defs/uri",
+          "description": "URI of the RelationType authority (e.g. a vocabulary term for 'capital_of')."
+        },
+        "relationLabel": {
+          "type": "string",
+          "description": "Human-readable label for the relation type."
+        }
+      },
+      "required": ["relatesTo", "relationType"],
+      "additionalProperties": false
+    },
+
+
+    "metaAttestation": {
+      "type": "object",
+      "description": "A reference to a target attestation and the nature of the commentary. Meta-types use SKOS concepts for vocabulary management.",
+      "properties": {
+        "targetAttestation": {
+          "$ref": "#/$defs/uri",
+          "description": "URI of the attestation being commented on."
+        },
+        "metaType": {
+          "$ref": "#/$defs/uri",
+          "description": "URI of a SKOS concept defining the nature of the meta-attestation (e.g. contradicts, supports, supersedes, refines, bundles)."
+        },
+        "metaTypeLabel": {
+          "type": "string",
+          "description": "Human-readable label for the meta-type (optional, for convenience)."
+        }
+      },
+      "required": ["targetAttestation", "metaType"],
+      "additionalProperties": false
+    },
+
+
+    "attestation": {
+      "type": "object",
+      "description": "A bundle of evidence linking a SpatialEntity to Names, Geometries, Timespans, Types, and Sources. The core unit of contributed knowledge in PLATO.",
+      "properties": {
+        "@id": { "$ref": "#/$defs/uri", "description": "Stable URI for this attestation." },
+        "about": {
+          "$ref": "#/$defs/uri",
+          "description": "URI of the SpatialEntity this attestation is about. Required in attestation-centric submissions; implicit in place-centric submissions where the attestation is nested under its SpatialEntity."
+        },
+
+        "names": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/name" },
+          "description": "Names attested."
+        },
+        "geometries": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/geometry" },
+          "description": "Geometries attested."
+        },
+        "timespans": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/timespan" },
+          "description": "Timespans attested."
+        },
+        "types": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/type" },
+          "description": "Type classifications attested."
+        },
+        "properties": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/propertyValue" },
+          "description": "Attributes attested that are not names, geometries, timespans or types — populations, valuations, market days. Scoped by the attestation's own timespans."
+        },
+
+        "sources": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/source" },
+          "description": "Sources grounding this attestation: the direct form of plato:sourced_by. Use 'citations' to add a locator or an attribution status."
+        },
+        "citations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/citation" },
+          "description": "Qualified source references (plato:has_citation), each with its own locator or attribution status. An attestation resting on two sources has two citations. May appear alongside 'sources'."
+        },
+
+        "relations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/relation" },
+          "description": "entity-to-entity relations asserted by this attestation."
+        },
+
+        "meta": {
+          "$ref": "#/$defs/metaAttestation",
+          "description": "If this attestation is a meta-attestation commenting on another."
+        },
+
+        "certainty": {
+          "$ref": "#/$defs/unitFloat01",
+          "description": "Overall certainty of this attestation, from 0.0 to 1.0."
+        },
+        "certaintyNote": {
+          "type": "string",
+          "description": "Explanation of the certainty assessment."
+        },
+
+        "sequence": {
+          "type": "integer",
+          "description": "Ordering index for attestations in routes or itineraries."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Free-text notes providing additional context."
+        },
+
+        "contributor": {
+          "oneOf": [
+            { "$ref": "#/$defs/uri", "description": "URI reference to a Contributor." },
+            { "$ref": "#/$defs/contributorObject" }
+          ],
+          "description": "The contributor who created this attestation (URI or inline object)."
+        },
+        "created": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When this attestation was created."
+        },
+        "modified": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When this attestation was last modified."
+        },
+        "occurrenceCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of times the attested form occurs in the cited source or passage (plato:occurrence_count)."
+        },
+        "occurrenceContext": {
+          "$ref": "#/$defs/uri",
+          "description": "URI of a concept giving the capacity in which the form occurs (plato:occurrence_context), e.g. https://w3id.org/plato#InPersonalName for a form found only as an element of a personal name. An 'ibidem' resolved by an editor is not an occurrence context; put it on the citation as attributionStatus. Omit for a direct occurrence."
+        },
+        "formStatus": {
+          "$ref": "#/$defs/uri",
+          "description": "URI of a concept giving the status of the name form(s) this attestation contributes (plato:form_status): https://w3id.org/plato#Headword for an editorial or preferred form, https://w3id.org/plato#Normalised for a derived search form, https://w3id.org/plato#Reconstructed for an inferred form. Omit for a form read in the cited source."
+        }
+      },
+      "additionalProperties": false
+    },
+
+
+    "contributorObject": {
+      "type": "object",
+      "description": "A person, team, or automated process that creates attestations. ORCID required in WHG but optional in general ontology.",
+      "properties": {
+        "@id": { "$ref": "#/$defs/uri", "description": "URI for this contributor." },
+        "name": {
+          "type": "string",
+          "description": "Full name for persons, team name for groups, descriptive name for automated processes."
+        },
+        "orcid": {
+          "type": "string",
+          "pattern": "^https://orcid\\.org/\\d{4}-\\d{4}-\\d{4}-\\d{3}[0-9X]$",
+          "description": "ORCID identifier in full URI format (https://orcid.org/0000-0000-0000-0000). Preferred format for persistent identification."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Contact email address."
+        },
+        "affiliation": {
+          "oneOf": [
+            { "$ref": "#/$defs/uri", "description": "URI reference to an Organization." },
+            { "$ref": "#/$defs/organization" },
+            { "type": "string", "description": "Free-text affiliation name." }
+          ],
+          "description": "Organizational affiliation (Organization object, URI, or free text)."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["principal_investigator", "data_curator", "student_researcher", "automated_process", "external_contributor"],
+          "description": "Role in the project or gazetteer."
+        },
+        "url": {
+          "$ref": "#/$defs/uri",
+          "description": "Website or profile URL for the contributor."
+        },
+        "identifier": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Additional persistent identifiers (ISNI, VIAF, Wikidata QID, etc.). Format: 'TYPE:value' (e.g., 'VIAF:12345678')."
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+
+    "organization": {
+      "type": "object",
+      "description": "An organization to which a Contributor is affiliated. Lightweight class for organizational references.",
+      "properties": {
+        "@id": { "$ref": "#/$defs/uri", "description": "URI for this organization (preferably ROR, ISNI, or Wikidata)." },
+        "name": {
+          "type": "string",
+          "description": "Name of the organization."
+        },
+        "identifier": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Persistent identifiers: ROR, ISNI, Wikidata QID, etc. Format: 'TYPE:value'."
+        },
+        "url": {
+          "$ref": "#/$defs/uri",
+          "description": "Organization website or homepage."
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+
+
+    "identityRelation": {
+      "type": "object",
+      "description": "An assertion that two SpatialEntities refer to the same real-world entity. Distinct from scholarly entity-to-entity relations and from algorithm-generated Candidates.",
+      "properties": {
+        "@id": { "$ref": "#/$defs/uri" },
+        "subject": {
+          "$ref": "#/$defs/uri",
+          "description": "URI of the first SpatialEntity."
+        },
+        "object": {
+          "$ref": "#/$defs/uri",
+          "description": "URI of the second SpatialEntity."
+        },
+        "identityType": {
+          "type": "string",
+          "enum": ["exactMatch", "closeMatch", "related"],
+          "description": "Semantic strength of the identity assertion."
+        },
+        "certainty": {
+          "$ref": "#/$defs/unitFloat01",
+          "description": "Confidence in the identity assertion."
+        },
+        "basis": {
+          "type": "string",
+          "description": "Evidence or reasoning supporting this identity assertion."
+        },
+        "assertedBy": {
+          "type": "string",
+          "description": "Identifier or URI of the agent who made this assertion."
+        },
+        "assertedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "source": {
+          "$ref": "#/$defs/source",
+          "description": "Authority providing evidence for this assertion."
+        },
+        "promotedFrom": {
+          "$ref": "#/$defs/uri",
+          "description": "URI of the Candidate from which this was promoted, if any."
+        }
+      },
+      "required": ["subject", "object", "identityType"],
+      "additionalProperties": false
+    },
+
+
+    "spatialEntity": {
+      "type": "object",
+      "description": "A stable, persistent identity: the point on which attestations from different sources, periods and contributors converge. Many SpatialEntities are places in the everyday sense and some are not; PLATO gives 'place' no prescribed meaning. What kind of entity this is (settlement, route, region, administrative unit, period) is a matter for Type attestations.",
+      "properties": {
+        "@id": {
+          "$ref": "#/$defs/uri",
+          "description": "Stable URI for this SpatialEntity. For new SpatialEntities not yet in the system, omit or use a local identifier."
+        },
+        "label": {
+          "type": "string",
+          "description": "A preferred display label (convenience field; canonical names come via attestations)."
+        },
+        "attestations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/attestation" },
+          "description": "Attestations about this SpatialEntity (used in place-centric submissions)."
+        },
+        "identityRelations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/identityRelation" },
+          "description": "Identity assertions linking this SpatialEntity to others."
+        }
+      },
+      "required": ["label"],
+      "additionalProperties": false
+    }
+
+  }
+}

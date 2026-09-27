@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Spike: N-Triples to JSON Lines through OPFS SQLite</title></head>
+<body>
+<h1>Spike: stream N-Triples into SQLite on OPFS, write grouped JSON Lines</h1>
+<p><input type="file" id="file" accept=".gz">
+<select id="mode"><option value="stream">stream (the design)</option><option value="naive">naive (control: hold every line)</option></select>
+<button id="start">Start</button> <button id="dl">Download output</button></p>
+<pre id="status">idle</pre>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
