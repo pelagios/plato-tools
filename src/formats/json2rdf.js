@@ -18,6 +18,7 @@ const NOT_IN_RDF = new Set([]);
 // Terms whose values are shared authority nodes (sources), described in full wherever cited.
 const SHARED_TERMS = new Set(['sources', 'source', 'derivedFrom']);
 const SHARED_CAP = 2_000_000;
+const TYPED_CAP = 200_000;
 
 /** RFC 8785 JSON canonicalisation, as jsonld.js uses for @json literals. */
 export function jcs(v) {
@@ -50,7 +51,7 @@ export class Json2Rdf {
     this.opt = options;
     this.issues = options.onIssue || (() => {});
     this.n = 0;
-    this.shared = new Set(); this.inShared = false;
+    this.shared = new Set(); this.inShared = false; this.typedNow = new Set(); this.typedBefore = new Set();
   }
   _emit(s, p, o) {
     // A node that appears several times in one record (a shared source or name with an @id) is
@@ -80,6 +81,21 @@ export class Json2Rdf {
     const k = node.termType + node.value + ' ' + cls;
     if (this.typed.has(k)) return;
     this.typed.add(k);
+    // A named node (a source, the gazetteer, a relation type, a place another record refers to)
+    // is typed once rather than once per record that mentions it: the graph is the same, and
+    // DEEP's export is 2.5 million lines shorter for it. Two generations of a small set keep
+    // memory flat however many nodes a file has: a node seen again moves to the current
+    // generation, so nodes that recur (sources, volumes) stay, and one typed again after it has
+    // aged out only repeats a line. (A least-recently-used Set was six times slower: deleting
+    // its oldest entry scans the holes earlier deletions leave.)
+    if (node.termType === 'NamedNode') {
+      const g = node.value + ' ' + cls;
+      if (this.typedNow.has(g)) return;
+      const again = this.typedBefore.has(g);
+      this.typedNow.add(g);
+      if (this.typedNow.size > TYPED_CAP) { this.typedBefore = this.typedNow; this.typedNow = new Set(); }
+      if (again) return;
+    }
     this._emit(node, RDF_TYPE, iri(cls));
   }
   _begin() { this.n++; this.b = 0; this.bmap = new Map(); this.typed = new Set(); this.seen = new Set(); }

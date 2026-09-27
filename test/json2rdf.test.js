@@ -71,3 +71,22 @@ test('a shared source is described once across records, and the graph is unchang
   assert.equal((nt.match(/authority_title/g) || []).length, 1, 'the source title should be written once');
   assert.equal(await canon(nt), await canon(await reference(doc)));
 });
+
+test('with typing, a node shared by records is typed once for the file, and the graph is unchanged', async () => {
+  const { loadResources } = await import('../src/engine/resources.js');
+  const { prepare } = await import('../src/engine/pipeline.js');
+  const res = prepare(await loadResources(async (f) => readFileSync(`public/plato/${f}`, 'utf8')));
+  const src = { '@id': 'https://example.org/source/db', title: 'DB', authorityType: 'source' };
+  const doc = { profile: 'place-centric', gazetteer: { '@id': 'https://example.org/g', title: 't' }, spatialEntities: [1, 2, 3].map((i) => ({
+    '@id': `https://example.org/p${i}`, label: `P${i}`, attestations: [{ names: [{ toponym: `N${i}` }], sources: [src], relations: [{ relatesTo: 'https://example.org/county', relationType: 'https://w3id.org/plato#ContainedIn' }] }] })) };
+  const typed = compiled(doc, { types: res.types });
+  const lines = typed.split('\n').filter(Boolean);
+  const count = (re) => lines.filter((l) => re.test(l)).length;
+  assert.equal(count(/source\/db> <http:\/\/www.w3.org\/1999\/02\/22-rdf-syntax-ns#type>/), new Set(lines.filter((l) => /source\/db> <[^>]*#type>/.test(l))).size, 'each type of the source once');
+  assert.equal(count(/county> <http:\/\/www.w3.org\/1999\/02\/22-rdf-syntax-ns#type> <https:\/\/w3id.org\/plato#SpatialEntity>/), 1, 'the county is typed once, not once per record');
+  assert.equal(count(/example.org\/g> <http:\/\/www.w3.org\/1999\/02\/22-rdf-syntax-ns#type>/), 1, 'the gazetteer is typed once');
+  assert.equal(lines.length, new Set(lines).size, 'no line is written twice');
+  // Removing the type lines leaves exactly the untyped graph.
+  const untyped = lines.filter((l) => !/22-rdf-syntax-ns#type>/.test(l) || /Source>|Dataset>/.test(l)).join('\n') + '\n';
+  assert.equal(await canon(untyped), await canon(compiled(doc)));
+});
