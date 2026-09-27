@@ -17,7 +17,8 @@
     "preview": "vite preview",
     "test": "node --test test/*.test.js",
     "vendor": "node scripts/vendor-plato.mjs --latest",
-    "prebuild": "node scripts/vendor-plato.mjs"
+    "prebuild": "node scripts/vendor-plato.mjs",
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@sqlite.org/sqlite-wasm": "^3.53.4-build1",
@@ -31,6 +32,7 @@
   },
   "devDependencies": {
     "jsonld": "^9.0.0",
+    "patch-package": "^8.0.1",
     "vite": "^8.3.1"
   },
   "plato": {

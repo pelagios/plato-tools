@@ -28,6 +28,13 @@ export function pragmas(cacheMB = 64) {
     `PRAGMA cache_size=-${cacheMB * 1024}`, 'PRAGMA temp_store=FILE'].join(';');
 }
 
+// Literals are stored behind one fixed character. SQLite WebAssembly decodes each text value with
+// a TextDecoder that strips a leading U+FEFF, so a literal that began with one (a byte-order mark
+// copied into a name, as in Pleiades place 585129) came back without it. With the prefix no
+// stored value starts with U+FEFF, whatever SQLite build reads it. Only literals carry it; IRIs
+// and blank nodes, which the queries match on, are stored as they are.
+const LIT = "'";
+
 export class TripleStore {
   constructor(db) {
     this.db = db;
@@ -42,7 +49,7 @@ export class TripleStore {
     let ov, k, dt = null, lang = null;
     if (o.termType === 'NamedNode') { ov = o.value; k = 0; }
     else if (o.termType === 'BlankNode') { ov = '_:' + o.value; k = 1; }
-    else { ov = o.value; k = 2; lang = o.language || null; const d = o.datatype && (o.datatype.value || o.datatype); if (!lang && d && d !== XSD_STRING) dt = this._intern(this.did, this.dname, d); }
+    else { ov = LIT + o.value; k = 2; lang = o.language || null; const d = o.datatype && (o.datatype.value || o.datatype); if (!lang && d && d !== XSD_STRING) dt = this._intern(this.did, this.dname, d); }
     this.ins.bind([sk, this._intern(this.pid, this.pname, p.value), ov, k, dt, lang]).stepReset();
     this.count++;
   }
@@ -63,7 +70,7 @@ export class TripleStore {
     while (q.step()) {
       const k = q.get(2), v = q.get(1);
       const o = k === 0 ? { termType: 'NamedNode', value: v } : k === 1 ? { termType: 'BlankNode', value: v.slice(2) }
-        : { termType: 'Literal', value: v, datatype: q.get(3) === null ? (q.get(4) ? null : XSD_STRING) : this.dname[q.get(3)], language: q.get(4) };
+        : { termType: 'Literal', value: v.slice(LIT.length), datatype: q.get(3) === null ? (q.get(4) ? null : XSD_STRING) : this.dname[q.get(3)], language: q.get(4) };
       r.push({ p: this.pname[q.get(0)], o });
     }
     q.reset();
