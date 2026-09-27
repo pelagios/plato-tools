@@ -127,3 +127,24 @@ test('a name that carries the IRI of its own place keeps its spelling (DEEP does
   const validate = ajv.getSchema('https://w3id.org/plato/schemas/place-centric.schema.json');
   assert.ok(validate(back), JSON.stringify(validate.errors?.slice(0, 2)));
 });
+
+import { loadResources } from '../src/engine/resources.js';
+const RES = await loadResources(async (f) => readFileSync(`public/plato/${f}`, 'utf8'));
+test('the report stays quiet about a place that is also a name, and about identical repeated values', () => {
+  const src = { '@id': 'https://example.org/source/db', title: 'DB', authorityType: 'source', timespan: { label: '1086' } };
+  const doc = { profile: 'place-centric', gazetteer: { '@id': 'https://example.org/g', title: 't' }, spatialEntities: [
+    { '@id': 'https://example.org/p1', label: 'Norton', attestations: [{ names: [{ '@id': 'https://example.org/p1', toponym: 'Norton' }], sources: [src] }] },
+    { '@id': 'https://example.org/p2', label: 'Sutton', attestations: [{ names: [{ toponym: 'Sutton' }], sources: [src] }] }] };
+  const first = toRdf(doc);   // two records each mint their own copy of the source's date
+  const losses = [], issues = [];
+  const r = new Rdf2Json({ context: CTX, core: CORE, profile: PROFILES['place-centric'], types: RES.types }, first.g, { onLoss: (l) => losses.push(l), onIssue: (i) => issues.push(i) });
+  const recs = ['https://example.org/p1', 'https://example.org/p2'].map((e) => r.entity(e));
+  assert.equal(recs[0].attestations[0].names[0].toponym, 'Norton');
+  assert.deepEqual(losses, [], 'the toponym on p1 is its name role, not a loss');
+  assert.deepEqual(issues, [], 'identical copies of the source date are one value');
+  // control: a genuinely different second value is still reported
+  first.g.add({ termType: 'NamedNode', value: 'https://example.org/source/db' }, { termType: 'NamedNode', value: 'https://w3id.org/plato#authority_title' }, { termType: 'Literal', value: 'Domesday', datatype: 'http://www.w3.org/2001/XMLSchema#string' });
+  const issues2 = [];
+  new Rdf2Json({ context: CTX, core: CORE, profile: PROFILES['place-centric'], types: RES.types }, first.g, { onIssue: (i) => issues2.push(i) }).entity('https://example.org/p1');
+  assert.ok(issues2.some((i) => i.kind === 'multiple-values' && i.key === 'title'), JSON.stringify(issues2));
+});

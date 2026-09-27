@@ -46,7 +46,6 @@ export const LOSS_TEXT = {
   'identity-type': 'LPF links are exact or close matches; "related" becomes a close match.',
   'identity-certainty-or-basis': 'The certainty and basis of identity matches have no LPF slot and are dropped.',
   'lpf-fclasses-missing': 'LPF requires feature classes (A, H, L, P, R, S, T); none could be derived for some places.',
-  'lpf-ccodes': 'PLATO JSON has no country-code field, so LPF ccodes are dropped (the spreadsheet tables do have one).',
   'lpf-duration': 'LPF durations (such as P100Y) have no PLATO equivalent and are dropped.',
   'lpf-extra-source-labels': 'Only the first source label of an LPF type fits.',
   'lpf-description-language': 'The language of LPF descriptions is dropped.',

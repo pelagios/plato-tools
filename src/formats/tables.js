@@ -175,7 +175,7 @@ function representativePoint(g) {
  */
 export function recordToRows(rec, ids, loss = () => {}) {
   const rows = { places: [], names: [], locations: [], types: [], relations: [], properties: [], identities: [] };
-  const pid = ids.place(rec['@id'], rec.label, true);
+  const pid = ids.place(rec['@id'], rec.label, true, rec.ccodes);
   for (const a of rec.attestations || []) {
     const facets = ['names', 'geometries', 'types', 'relations', 'properties'].filter((k) => a[k]?.length);
     if (facets.length > 1) loss({ kind: 'bundled-attestation', value: facets.join('+') });

@@ -57,10 +57,10 @@ function attestation(facets, when, cits, loss, extra = {}) {
 
 /** LPF Feature -> PLATO place-centric record. `loss(l)` receives what PLATO JSON cannot hold. */
 export function featureToRecord(f, loss = () => {}) {
-  const rec = { '@id': f['@id'], label: f.properties?.title, attestations: [], identityRelations: [] };
+  const rec = { '@id': f['@id'], label: f.properties?.title, ccodes: f.properties?.ccodes, attestations: [], identityRelations: [] };
   if (rec['@id'] === undefined) delete rec['@id'];
+  if (!rec.ccodes?.length) delete rec.ccodes;
   const A = rec.attestations;
-  if (f.properties?.ccodes?.length) loss({ kind: 'lpf-ccodes', value: f.properties.ccodes.join(';') });
   for (const c of f.properties?.fclasses || []) A.push({ types: [{ identifier: GN_CLASS + c, label: FCLASS[c] || c }] });
   if (f.when) A.push(attestation({}, f.when, [], loss));
   for (const n of f.names || []) A.push(attestation({ names: [clean({ toponym: n.toponym, language: n.lang })] }, n.when, n.citations, loss));
@@ -137,7 +137,7 @@ function platoToCitations(a, loss) {
 
 /** PLATO place-centric record -> LPF Feature; `loss(l)` receives what LPF cannot hold. */
 export function recordToFeature(rec, idrs = [], loss = () => {}) {
-  const f = { '@id': rec['@id'], type: 'Feature', properties: clean({ title: rec.label }), names: [], types: [], relations: [], links: [], descriptions: [], depictions: [] };
+  const f = { '@id': rec['@id'], type: 'Feature', properties: clean({ title: rec.label, ccodes: rec.ccodes?.length ? rec.ccodes : undefined }), names: [], types: [], relations: [], links: [], descriptions: [], depictions: [] };
   const geoms = [], fclasses = [], whens = [];
   for (const a of rec.attestations || []) {
     const when = platoToWhen(a.timespans, a.certaintyNote);

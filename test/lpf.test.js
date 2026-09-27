@@ -25,8 +25,9 @@ test('LPF README example -> valid PLATO, with only the reported losses', () => {
   const losses = [];
   const rec = featureToRecord(README, (l) => losses.push(l.kind));
   assert.equal(validDoc([rec]), null);
-  assert.deepEqual([...new Set(losses)].sort(), ['lpf-ccodes', 'lpf-depiction-licence', 'lpf-description-language', 'lpf-duration'].sort());
+  assert.deepEqual([...new Set(losses)].sort(), ['lpf-depiction-licence', 'lpf-description-language', 'lpf-duration'].sort());
   assert.equal(rec.identityRelations.length, 3);
+  assert.deepEqual(rec.ccodes, README.properties.ccodes);
 });
 
 test('LPF README example -> PLATO -> LPF keeps every element', () => {
@@ -44,6 +45,7 @@ test('LPF README example -> PLATO -> LPF keeps every element', () => {
   const coords = (f) => (f.geometry.type === 'GeometryCollection' ? f.geometry.geometries : [f.geometry]).map((g) => JSON.stringify(g.coordinates ?? g.geowkt)).sort();
   assert.deepEqual(coords(back), coords(README));
   assert.equal(back.descriptions[0].value, README.descriptions[0].value);
+  assert.deepEqual(back.properties.ccodes, README.properties.ccodes);
   assert.equal(back.depictions[0]['@id'], README.depictions[0]['@id']);
   assert.deepEqual(back.when.timespans, README.when.timespans);
   assert.deepEqual(back.when.periods.map((p) => p.uri), README.when.periods.map((p) => expandLpf(p['@id'])));

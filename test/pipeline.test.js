@@ -61,6 +61,9 @@ test('tables (customs, eight CSV files) -> JSON Lines: valid, no errors', async 
   assert.equal(r.input.format, 'tables');
   assert.deepEqual(errors(r), []);
   assert.equal(r.report.counts.places, 2);
+  const recs = outText(r.e, Object.keys(r.e.outs)[0]).trim().split('\n').slice(1).map((l) => JSON.parse(l));
+  assert.deepEqual(recs.map((x) => x.ccodes), [['GB'], ['GB']]);
+  assert.ok(!r.report.items.some((i) => i.severity === 'loss'), 'country codes are no longer a loss');
 });
 test('tables (survey) -> JSON: a label-only type and a place with no evidence are valid PLATO', async () => {
   // PLATO 0.4.0 plus the resolutions of ee80543: a type needs only a label, and a place may have
@@ -81,6 +84,7 @@ test('tables -> tables round trip through a zip, and the zip is accepted again',
   const z = unzipSync(bytes);
   assert.deepEqual(Object.keys(z).sort(), ['identities.csv', 'locations.csv', 'names.csv', 'places.csv', 'properties.csv', 'relations.csv', 'sources.csv', 'types.csv']);
   assert.match(strFromU8(z['names.csv']), /Bristowe/);
+  assert.match(strFromU8(z['places.csv']), /\nbristol,Bristol,GB\n/);
   const again = await go([new File([bytes], 'again.zip')], 'check');
   assert.deepEqual(errors(again), []);
   assert.equal(again.report.counts.places, 2);

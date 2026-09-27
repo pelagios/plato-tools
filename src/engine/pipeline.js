@@ -187,7 +187,7 @@ async function* tablesSource(input, env, rep, options) {
   for (const p of rows('places')) {
     n++;
     const rec = { '@id': ids.place(p.place_id), label: p.label, attestations: byPlace.get(p.place_id) || [] };
-    if (p.country_codes) rep.loss('lpf-ccodes', 'Country codes have no field in PLATO JSON (they do in RDF from the tables)', p.place_id);
+    if (p.country_codes) rec.ccodes = p.country_codes.split(';');
     for (const r of idrs.get(p.place_id) || []) {
       (rec.identityRelations ||= []).push(Object.fromEntries(Object.entries({
         subject: rec['@id'], object: r.same_as, identityType: r.match_type || undefined, certainty: r.certainty !== '' ? Number(r.certainty) : undefined,
@@ -282,7 +282,7 @@ export async function run({ input, action, target, options = {} }, env) {
     beat('indexing', { triples: store.count, force: true });
     store.index();
     if (isRdf) checkGraph(store, res, rep);
-    const r2j = new Rdf2Json({ context: res.context, core: res.core, profile: res.profiles['place-centric'] }, store, {
+    const r2j = new Rdf2Json({ context: res.context, core: res.core, profile: res.profiles['place-centric'], types: res.types }, store, {
       onLoss: (l) => rep.loss(l.kind, `${LOSS_TEXT[l.kind] || l.kind}`, l.predicate || l.value),
       onIssue: (i) => rep.warning(i.kind, i.kind === 'multiple-values' ? `A value that PLATO JSON allows once appears several times; the first is kept (${i.key})` : i.kind, i.node),
     });
@@ -405,10 +405,10 @@ function tablesWriter(env, rep, options, outputs, stem, loss) {
     usedIds.add(id); return id;
   };
   const ids = {
-    place(iri, label, own) {
+    place(iri, label, own, ccodes) {
       let p = places.get(iri);
       if (!p) { p = { place_id: shortId(iri, 'place'), label: label || iri, country_codes: '', own }; places.set(iri, p); }
-      if (own) { p.own = true; if (label) p.label = label; }
+      if (own) { p.own = true; if (label) p.label = label; if (ccodes?.length) p.country_codes = ccodes.join(';'); }
       return p.place_id;
     },
     source(src) {

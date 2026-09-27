@@ -39,7 +39,8 @@ function shape(schema, core, profile) {
 
 export class Rdf2Json {
   /** graph: { out(id) -> [{p, o}], in(p, id) -> [id] }; terms are {termType, value, datatype?, language?}. */
-  constructor({ context, core, profile }, graph, { onLoss = () => {}, onIssue = () => {} } = {}) {
+  constructor({ context, core, profile, types = null }, graph, { onLoss = () => {}, onIssue = () => {} } = {}) {
+    this.types = types;   // the ontology's domains and ranges, to recognise a node's other roles
     this.root = compileContext(context);
     this.core = core; this.profile = profile;
     this.g = graph; this.loss = onLoss; this.issue = onIssue;
@@ -78,6 +79,13 @@ export class Rdf2Json {
     return m;
   }
   _describes(id) { return this.g.out(id).some((t) => t.p !== RDF_TYPE); }
+  /** True when predicate p belongs to a class this node also plays, by being the object of a property with that range. */
+  _otherRole(id, p) {
+    const t = this.types; if (!t) return false;
+    const cls = t.domain.get(p); if (!cls) return false;
+    for (const [prop, range] of t.range) if (range === cls && this.g.in(prop, id).length) return true;
+    return false;
+  }
   _hasBlankChildren(id) { return this.g.out(id).some((t) => t.o.termType === 'BlankNode'); }
   _list(head, depth = 0) {
     const items = [];
@@ -119,7 +127,9 @@ export class Rdf2Json {
       const k = entry.path ? entry.path.key : entry.key;
       if (entry.shape.array) (tgt[k] ||= []).push(value);
       else if (tgt[k] === undefined) tgt[k] = value;
-      else this.issue({ kind: 'multiple-values', key: k, node: id });
+      // Identical repeats are copies of one value (DEEP writes a source's date out once per record
+      // that cites it, so the source gathers many identical date nodes); only differences matter.
+      else if (JSON.stringify(tgt[k]) !== JSON.stringify(value)) this.issue({ kind: 'multiple-values', key: k, node: id });
     };
     let lat, long;
     for (const { p, o } of this.g.out(id)) {
@@ -133,6 +143,7 @@ export class Rdf2Json {
         if (p === WGS84 + 'long') { long = Number(o.value); continue; }
         if (p === PLATO + 'repr_point' && o.termType === 'Literal') { const xy = o.value.match(/POINT\s*\(\s*(\S+)\s+(\S+)\s*\)/i); if (xy) { obj.reprPoint = [Number(xy[1]), Number(xy[2])]; continue; } }
         if (p === RDF_TYPE) continue;                       // structure implies the PLATO types
+        if (this._otherRole(id, p)) continue;               // e.g. a toponym on a place that is also a name
         if (def === '$gazetteer' && DOC_LINKS.has(p)) continue;   // the records, read by the driver
         this.loss({ kind: 'unmapped-predicate', predicate: p, as: def });
         continue;
