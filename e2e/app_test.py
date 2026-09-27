@@ -1,6 +1,7 @@
 """Browser tests of the page itself, in Playwright's bundled Chromium with an on-disk profile.
 
     python3 e2e/app_test.py                 run every check against the built site
+    python3 e2e/app_test.py --url=https://pelagios.org/plato-tools/   the deployed site
     python3 e2e/app_test.py --prove-it-fails run every check against a page with no tools on it;
                                             every check must fail, or the harness cannot fail
 """
@@ -46,10 +47,15 @@ def download(page, name, dest):
         page.evaluate(f'window.__plato_save({json.dumps(name)})')
     d.value.save_as(dest); return pathlib.Path(dest)
 
+REMOTE = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--url=')), None)
+
 def main():
-    subprocess.run(['npx', 'vite', 'build'], cwd=ROOT, check=True, capture_output=True)
-    srv = subprocess.Popen(['npx', 'vite', 'preview', '--port', str(PORT), '--strictPort'], cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
-    url = f'http://localhost:{PORT}/'
+    if REMOTE:                                    # the deployed site: a green local run is not a green deploy
+        srv = subprocess.Popen(['true']); url = REMOTE
+    else:
+        subprocess.run(['npx', 'vite', 'build'], cwd=ROOT, check=True, capture_output=True)
+        srv = subprocess.Popen(['npx', 'vite', 'preview', '--port', str(PORT), '--strictPort'], cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        url = f'http://localhost:{PORT}/'
     for _ in range(60):
         try: urllib.request.urlopen(url, timeout=1); break
         except Exception: time.sleep(0.5)
