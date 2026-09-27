@@ -24,12 +24,19 @@ Gzipped files are read directly. **Check** validates a file against PLATO: its J
 spreadsheet table definitions, or, for RDF, the terms the ontology declares. **Convert** writes any
 of the formats above, and reports everything the target format cannot hold instead of dropping it
 silently: converting to LPF or to the spreadsheet tables is lossy by design, converting between
-PLATO JSON and RDF is not.
+PLATO JSON and RDF is not, except at the last digit of some numbers (below).
 
 A **denial**, where a source states that something is not so (PLATO's `negated`, the tables'
 `denied`: no market here), is never written as an assertion. PLATO JSON, RDF and the spreadsheet
 tables carry it. Linked Places Format cannot, so a denied attestation is left out of LPF and
 reported; so is a denial of several things at once in the tables, whose rows deny one thing each.
+
+**Numbers in RDF.** JSON-LD writes a number with a fractional part as a canonical `xsd:double` of
+16 significant digits, and these tools write exactly what `jsonld.js` writes. A JavaScript number
+can need 17 digits to be told apart from its neighbour, and such a number comes back from RDF one
+unit in its last place away: a longitude of `106.82041100000001` becomes
+`"1.06820411E2"^^xsd:double` and is read back as `106.820411`. Numbers of 16 significant digits or
+fewer, and whole numbers below 10²¹, come back exactly. `test/roundtrip.test.js` pins this behaviour.
 
 ## From the command line
 

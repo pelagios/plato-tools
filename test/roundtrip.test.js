@@ -167,3 +167,28 @@ test("a relation's wording survives JSON -> RDF -> JSON (plato:source_label), an
   assert.doesNotMatch(nt, /source_label/);
 });
 
+// JSON -> RDF -> JSON is exact for every value but one kind: a JSON number that needs all 17
+// significant digits. JSON-LD writes a non-integer as a canonical xsd:double with 16 significant
+// digits (%1.15E), as jsonld.js does and these tools must, so such a number comes back one unit in
+// the last place away. GLOBALISE's Fort Rijswijk longitude is the case that was found. This test
+// pins the behaviour: it fails if the rounding changes, or if it starts to reach shorter numbers.
+test('a 17-digit number comes back rounded to 16 digits, exactly as jsonld.js writes it', async () => {
+  const lon = 106.82041100000001, lat = -6.1333;
+  const doc = { profile: 'place-centric', gazetteer: { '@id': 'https://example.org/g', title: 't' }, spatialEntities: [
+    { '@id': 'https://example.org/rijswijk', label: 'Fort Rijswijk', attestations: [{ geometries: [{ reprPoint: [lon, lat] }], sources: [{ title: 's' }] }] }] };
+  const first = toRdf(doc);
+  assert.match(first.nt, /"1\.06820411E2"\^\^<http:\/\/www\.w3\.org\/2001\/XMLSchema#double>/);
+  const ref = await jsonld.toRDF({ ...doc, '@context': CTX['@context'] }, { format: 'application/n-quads', safe: false });
+  assert.match(ref, /"1\.06820411E2"\^\^<http:\/\/www\.w3\.org\/2001\/XMLSchema#double>/, 'jsonld.js writes the same literal');
+  const { doc: back } = toJson(first.g, first.docNode, 'place-centric');
+  const [lon2, lat2] = back.spatialEntities[0].attestations[0].geometries[0].reprPoint;
+  assert.equal(lon2, 106.820411);
+  assert.notEqual(lon2, lon, 'the 17th digit is lost');
+  assert.equal(Math.abs(lon2 - lon), 2 ** -46, 'by one unit in the last place (for numbers between 64 and 128)');
+  assert.equal(lat2, lat, 'a number of 16 digits or fewer comes back exactly');
+  for (const n of [0.1, 1 / 3, 51.507222, -0.1275, 2.220446049250313e-16, 123456789.12345678]) {
+    const d = structuredClone(doc); d.spatialEntities[0].attestations[0].geometries[0].reprPoint = [n, 0];
+    const r = toRdf(d); const got = toJson(r.g, r.docNode, 'place-centric').doc.spatialEntities[0].attestations[0].geometries[0].reprPoint[0];
+    assert.equal(got, Number(n.toPrecision(16)), `${n}`);
+  }
+});
