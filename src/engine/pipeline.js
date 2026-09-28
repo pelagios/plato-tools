@@ -13,12 +13,12 @@ import { Rdf2Json } from '../formats/rdf2json.js';
 import { tripleNT } from '../lib/ntriples.js';
 import { TripleStore } from '../lib/store.js';
 import { PLATO, RDF } from '../lib/context.js';
-import { featureToRecord, recordToFeature } from '../formats/lpf.js';
-import { collectWithdrawn, resolveWithdrawn, addWithdrawal, versionLosses, tableLosses } from '../formats/shared.js';
+import { featureToRecord, recordToFeature, collectionHead, collectionToGazetteer } from '../formats/lpf.js';
+import { collectWithdrawn, resolveWithdrawn, addWithdrawal, versionLosses, tableLosses, dropKeys } from '../formats/shared.js';
 import { CubeExport, CUBE_TEXT } from '../formats/cube.js';
-import { validateTables, rowToAttestation, tableIds, recordToRows, identityRow, ATTESTATION_SHEETS, tableSchemas, cellChecker } from '../formats/tables.js';
+import { validateTables, rowToAttestation, tableIds, recordToRows, identityRow, ATTESTATION_SHEETS, tableSchemas, cellChecker, sourceLosses, TABLE_KEEPS } from '../formats/tables.js';
 import { lineChunks, lines, jsonDocument, TABLE_SHEETS, DataError } from './input.js';
-import { Report, LOSS_TEXT } from './report.js';
+import { Report, LOSS_TEXT, droppedText, FORMAT_WORDS } from './report.js';
 
 export const TARGETS = {
   'plato-jsonl': { label: 'PLATO JSON Lines (.jsonl): one place per line', ext: '.jsonl' },
@@ -29,6 +29,8 @@ export const TARGETS = {
   lpf: { label: 'Linked Places Format v1, FeatureCollection (.geojson)', ext: '.geojson' },
 };
 const TYPE = RDF + 'type';
+// The base address for the places and sources of spreadsheet tables, when none is given.
+const DEFAULT_TABLE_BASE = 'https://example.org/dataset/';
 
 // ---- resources ------------------------------------------------------------------------------------
 export function prepare(res) {
@@ -116,8 +118,15 @@ async function* platoJson(file) {
     else yield { type: 'record', value, n, newEntity: path === 'newSpatialEntities' };
   }
 }
+// The FeatureCollection's own members that PLATO's gazetteer header holds (collectionToGazetteer).
+const LPF_HEAD = ['@id', 'id', 'title', 'license', 'descriptions'];
 async function* lpfSource(file, seq, rep) {
-  yield { type: 'header', value: { profile: 'place-centric', gazetteer: { title: file.name } } };
+  let head = {};
+  if (seq) {
+    // A GeoJSON sequence may open with the collection's own line, as these tools write it.
+    for await (const { line } of lines(file)) { try { const v = JSON.parse(line); if (v && v.type === 'FeatureCollection') head = v; } catch { /* reported below */ } break; }
+  } else for await (const { path, value } of jsonDocument(file, { arrays: ['features'], keys: LPF_HEAD, onlyKeys: true })) head[path] = value;
+  yield { type: 'header', value: { profile: 'place-centric', gazetteer: collectionToGazetteer(head, file.name) } };
   const loss = (l) => rep.loss(l.kind, LOSS_TEXT[l.kind] || l.kind, l.value);
   const each = seq ? (async function* () {
     for await (const { line, n } of lines(file)) {
@@ -197,7 +206,7 @@ async function* tablesSource(input, env, rep, options) {
     keys: { add: async (t, k) => { const s = sets.get(t) || sets.set(t, new Set()).get(t); if (s.has(k)) return false; s.add(k); return true; }, has: async (t, k) => !!sets.get(t)?.has(k) },
     issue: (i) => rep.error('table', `${i.table}${i.column ? `, column ${i.column}` : ''}: ${i.message.replace(/'[^']*'/, "'…'")}`, `${i.table}${i.row ? ` row ${i.row + 1}` : ''}${i.column ? ` ${i.column}` : ''}: ${i.message}`),
   });
-  const base = options.base || 'https://example.org/dataset/';
+  const base = options.base || DEFAULT_TABLE_BASE;
   yield { type: 'header', value: { profile: 'place-centric', gazetteer: { '@id': base, title: options.title || 'Converted from PLATO spreadsheet tables' } } };
   const rows = (n) => (sheets[n] ? sheets[n].data : []);
   const sources = new Map(rows('sources').map((r) => [r.source_id, r]));
@@ -311,11 +320,14 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     }
   };
   // What the JSON-to-RDF converter could not use, in words. Every kind it can raise is named here.
+  const rdfBound = action === 'convert' && (target === 'ntriples' || needsStore);
   const jsonIssue = (i) => {
     if (i.kind === 'record-failed') return rep.error('record-failed', 'A record could not be converted to RDF and is left out; the rest of the file was still checked', `${i.value}: ${i.error}`);
     if (i.kind === 'null-value') return rep.warning('null-value', `An empty value (null) is left out of RDF (${i.where})`, i.where);
     if (i.kind === 'unconvertible') return rep.warning('unconvertible', `A value of the wrong kind cannot be turned into RDF and is left out (${i.where})`, i.value);
-    if (i.kind === 'relative-iri') return rep.warning(i.kind, `A value that must be a full web address is not one, so it is dropped in RDF (${i.where})`, i.value);
+    // A value the context reads as an address that is not one (a contributor given by name, which the
+    // schema allows) is lost wherever the output is RDF or is made through it: a loss, not a warning.
+    if (i.kind === 'relative-iri') return (rdfBound ? rep.loss : rep.warning).call(rep, i.kind, `A value that must be a full web address in RDF is not one, so it is dropped in RDF (${i.where}): PLATO's context reads it as an address. Give a web address, not a name.`, i.value);
     if (i.kind === 'not-in-rdf') return rep.warning(i.kind, `${LOSS_TEXT['not-in-rdf']} (${i.key})`, i.key);
     return rep.warning(i.kind, `A key PLATO does not define is dropped: ${i.value}`, i.value);
   };
@@ -374,7 +386,10 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     writer && writer.header(head);
     const idrIds = docId ? [...objectsOf(store, docId, PLATO + 'contains_identity_relation')] : [...store.subjects(TYPE, PLATO + 'IdentityRelation')];
     if (target === 'lpf' || target === 'lpf-seq') for (const i of idrIds) { const v = r2j.identityRelation(i); (idrsBySubject.get(v.subject) || idrsBySubject.set(v.subject, []).get(v.subject)).push(v); }
-    const entities = docId && firstSubjectWith(store, PLATO + 'contains_entity') ? objectsOf(store, docId, PLATO + 'contains_entity') : distinctEntities(store);
+    // The places the document lists, then any other place its attestations are about: an
+    // attestation-centric document's attestations are about existing places, which it need not list
+    // (only its newSpatialEntities are), and they were once left out whenever it listed any.
+    const entities = docId && firstSubjectWith(store, PLATO + 'contains_entity') ? listedThenOthers(store, docId) : distinctEntities(store);
     let n = 0;
     for (const e of entities) {
       const rec = r2j.entity(e);
@@ -423,6 +438,13 @@ function* objectsOf(store, s, p) {
   const q = store.db.prepare('SELECT o FROM t WHERE s=? AND p=?');
   try { q.bind([s, i]); while (q.step()) yield q.get(0); } finally { q.finalize(); }
 }
+function* listedThenOthers(store, docId) {
+  yield* objectsOf(store, docId, PLATO + 'contains_entity');
+  const ce = store.pid.get(PLATO + 'contains_entity'), ab = store.pid.get(PLATO + 'attests_about');
+  if (ab === undefined) return;
+  const q = store.db.prepare('SELECT DISTINCT o FROM t WHERE p=? AND k<2 AND o NOT IN (SELECT o FROM t WHERE s=? AND p=?)');
+  try { q.bind([ab, docId, ce]); while (q.step()) yield q.get(0); } finally { q.finalize(); }
+}
 function* distinctEntities(store) {
   const tp = store.pid.get(TYPE), ab = store.pid.get(PLATO + 'attests_about');
   const q = store.db.prepare(`SELECT DISTINCT e FROM (SELECT s AS e FROM t WHERE p=? AND o=? UNION SELECT o AS e FROM t WHERE p=? AND k<2)`);
@@ -444,7 +466,8 @@ function checkGraph(store, res, rep) {
 async function makeWriter(target, env, rep, options, typing, outputs, input) {
   const stem = (options.name || input.files[0].name).replace(/\.(gz)$/i, '').replace(/\.[^.]+$/, '');
   const open = async (ext) => { const o = await env.output(stem + ext); return new TextSink(o); };
-  const loss = (l) => rep.loss(l.kind, LOSS_TEXT[l.kind] || l.kind, l.value);
+  // A key the target has no place for is reported by its own name, one line per key (report.js).
+  const loss = (l) => (l.kind === 'dropped' ? rep.loss(`dropped:${l.key}`, droppedText(l.key, FORMAT_WORDS[target]), l.value) : rep.loss(l.kind, LOSS_TEXT[l.kind] || l.kind, l.value));
   if (target === 'plato-jsonl' || target === 'plato-json') {
     const sink = await open(TARGETS[target].ext);
     let started = false, inIdrs = false;
@@ -487,20 +510,25 @@ async function makeWriter(target, env, rep, options, typing, outputs, input) {
   if (target === 'lpf' || target === 'lpf-seq') {
     const sink = await open(TARGETS[target].ext);
     let first = true;
-    const pending = new Map();   // identity relations that arrive after their place (DEEP writes them last)
-    const feats = [];
+    const placed = new Set();   // the places written, so that an identity match with none is reported
     return {
       header(h) {
         versionLosses(h.gazetteer, loss); tableLosses(h, loss);
-        const head = { type: 'FeatureCollection', '@context': 'https://raw.githubusercontent.com/LinkedPasts/linked-places-format/main/linkedplaces-context-v1.1.jsonld', title: h.gazetteer?.title };
+        const { '@id': id, ...own } = collectionHead(h.gazetteer, loss);
+        const head = { type: 'FeatureCollection', '@context': 'https://raw.githubusercontent.com/LinkedPasts/linked-places-format/main/linkedplaces-context-v1.1.jsonld', ...(id ? { '@id': id } : {}), ...own };
         if (target === 'lpf-seq') sink.write(JSON.stringify(head) + '\n'); else { const s = JSON.stringify(head); sink.write(s.slice(0, -1) + ',"features":['); }
       },
       event(ev) {
         if (ev.type !== 'record') return;
+        placed.add(ev.value['@id']);
         const f = recordToFeature(ev.value, options.idrsBySubject.get(ev.value['@id']) || [], loss, options.withdrawn);
         sink.write(target === 'lpf-seq' ? JSON.stringify(f) + '\n' : (first ? '' : ',') + JSON.stringify(f)); first = false;
       },
-      async close() { if (target === 'lpf') sink.write(']}'); outputs.push(await sink.close()); },
+      async close() {
+        // An identity match goes on its place's feature; one whose place is not in the file has none.
+        for (const [subject, list] of options.idrsBySubject) if (!placed.has(subject)) for (const ir of list) loss({ kind: 'identity-without-place', value: `${subject} ${ir.object}` });
+        if (target === 'lpf') sink.write(']}'); outputs.push(await sink.close());
+      },
     };
   }
   if (target === 'tables') return tablesWriter(env, rep, options, outputs, stem, loss);
@@ -513,6 +541,9 @@ function tablesWriter(env, rep, options, outputs, stem, loss) {
   const buffers = Object.fromEntries(schemas.map((t) => [t.name, []]));
   const places = new Map(), sources = new Map(), usedIds = new Set();
   const accepts = cellChecker(env.csvMeta);
+  // Reading the tables back mints each place's and source's address from a base address and its id:
+  // an address that is not the one it would mint is lost (the default base is the one the reader uses).
+  const minted = tableIds(options.base || DEFAULT_TABLE_BASE, () => null);
   const shortId = (iri, fallback) => {
     let s = (iri || fallback || 'x').replace(/[#/]+$/, '').split(/[#/]/).pop() || fallback || 'x';
     s = decodeURIComponent(s).replace(/\s+/g, '-');
@@ -523,7 +554,11 @@ function tablesWriter(env, rep, options, outputs, stem, loss) {
     place(iri, label, own, ccodes, entityIdentifier) {
       let p = places.get(iri);
       // A record's own identifier (from a place_id, say) is its place_id again, so tables round-trip.
-      if (!p) { p = { place_id: entityIdentifier && !usedIds.has(entityIdentifier) ? (usedIds.add(entityIdentifier), entityIdentifier) : shortId(iri, 'place'), label: label || iri, country_codes: '', own }; places.set(iri, p); }
+      if (!p) {
+        p = { place_id: entityIdentifier && !usedIds.has(entityIdentifier) ? (usedIds.add(entityIdentifier), entityIdentifier) : shortId(iri, 'place'), label: label || iri, country_codes: '', own };
+        places.set(iri, p);
+        if (iri && iri !== minted.place(p.place_id)) loss({ kind: 'place-address', value: iri });
+      }
       if (own) { p.own = true; if (label) p.label = label; if (ccodes?.length) p.country_codes = ccodes.join(';'); }
       return p.place_id;
     },
@@ -537,13 +572,16 @@ function tablesWriter(env, rep, options, outputs, stem, loss) {
         r = { source_id: shortId(s['@id'], 'source'), title: s.title || s['@id'], citation: s.citation || '', uri: s.uri || '', date: ts.sourceLabel || ts.label || (ts.startEarliest ? [ts.startEarliest, ts.endLatest].filter(Boolean).join('-') : 'undated'),
           from: ts.startEarliest || '', to: ts.endLatest || '', derived_from: '' };
         sources.set(key, r);
+        sourceLosses(s, loss);
+        if (s['@id'] && s['@id'] !== minted.sourceIri(r.source_id)) loss({ kind: 'source-address', value: s['@id'] });
         if (s.derivedFrom) r.derived_from = this.source(s.derivedFrom);
       }
       return r.source_id;
     },
   };
   return {
-    header(h) { versionLosses(h.gazetteer, loss); tableLosses(h, loss); },
+    // The tables have no sheet for the gazetteer: each of its keys is reported.
+    header(h) { versionLosses(h.gazetteer, loss); tableLosses(h, loss); dropKeys(h.gazetteer, 'gazetteer', TABLE_KEEPS.gazetteer, loss); },
     event(ev) {
       if (ev.type === 'record') { const rows = recordToRows(ev.value, ids, loss, accepts, options.withdrawn); for (const [k, v] of Object.entries(rows)) buffers[k]?.push(...v); }
       else if (ev.type === 'idr') buffers.identities.push(identityRow(ev.value, ids, loss));

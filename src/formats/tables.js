@@ -5,7 +5,7 @@
 // Validation follows the CSVW rules the metadata uses, and is tested against the reference
 // implementation (rdf-tabular, strict mode) on the same good and broken tables.
 import { PLATO } from '../lib/context.js';
-import { isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure } from './shared.js';
+import { isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey } from './shared.js';
 
 export const CITO = 'http://purl.org/spar/cito/';
 
@@ -168,6 +168,38 @@ export function tableIds(base, sourcesById) {
 export { ATTESTATION_SHEETS };
 
 // ---- PLATO records -> table rows (lossy; every loss reported) ----------------------------------
+// What the tables hold of each PLATO object; every other key present is reported (dropKeys), including
+// a key PLATO adds after this was written. Keys the tables hold only in some cases are checked where
+// they are written: a form status only on a name row, a vocabulary value only if it is PLATO's own.
+export const TABLE_KEEPS = {
+  gazetteer: new Set(['version', 'status', 'isVersionOf', 'previousVersion']),   // reported by versionLosses
+  spatialEntity: new Set(['@id', 'label', 'ccodes', 'entityIdentifier', 'attestations', 'identityRelations']),
+  attestation: new Set(['about', 'names', 'geometries', 'timespans', 'types', 'properties', 'relations', 'sources', 'citations', 'meta', 'certainty', 'certaintyLevel', 'certaintyNote', 'negated', 'notes', 'occurrenceCount', 'occurrenceContext', 'formStatus']),
+  name: new Set(['toponym', 'language', 'script', 'romanized', 'nameType', 'sourceLabel', 'qualification']),
+  geometry: new Set(['reprPoint', 'geojson', 'wkt', 'role', 'precisionKm', 'sourceLabel', 'qualification']),
+  timespan: new Set(['startEarliest', 'startLatest', 'endEarliest', 'endLatest', 'label', 'sourceLabel', 'qualification']),
+  type: new Set(['identifier', 'label', 'sourceLabel', 'qualification']),
+  propertyValue: new Set(['property', 'label', 'value', 'unit', 'qualification', 'dataSet', 'dimensions', 'attributes', 'universe']),
+  source: new Set(['@id', 'title', 'citation', 'uri', 'timespan', 'derivedFrom', 'authorityType']),
+  sourceTimespan: new Set(['startEarliest', 'endLatest', 'sourceLabel', 'label']),
+  citation: new Set(['source', 'locator', 'attributionStatus', 'citationFunction']),
+  relation: new Set(['relatesTo', 'relationType', 'relationLabel']),
+  identityRelation: new Set(['subject', 'object', 'identityType', 'certainty', 'basis', 'source', 'assertedBy', 'promotedFrom']),
+};
+/** Report what the sources sheet cannot hold of a source: called once, when the source gets its row. */
+export function sourceLosses(s, loss) {
+  if (!s || typeof s !== 'object') return;
+  dropKeys(s, 'source', TABLE_KEEPS.source, loss);
+  if (s.authorityType && s.authorityType !== 'source') dropKey('source', 'authorityType', loss);
+  const ts = s.timespan;
+  if (!ts || typeof ts !== 'object') return;
+  for (const k of Object.keys(ts)) {
+    if (ts[k] === undefined || ts[k] === null) continue;
+    if (k === 'qualification' && typeof ts[k] === 'object') { for (const q of Object.keys(ts[k])) if (ts[k][q] !== undefined && ts[k][q] !== null) loss({ kind: 'dropped', key: `source.timespan.qualification.${q}` }); continue; }
+    // The date column holds the date as written, or else a period's name: not both.
+    if (!TABLE_KEEPS.sourceTimespan.has(k) || (k === 'label' && ts.sourceLabel && ts.sourceLabel !== ts.label)) loss({ kind: 'dropped', key: `source.timespan.${k}` });
+  }
+}
 const GVP_BROADER_PARTITIVE = 'http://vocab.getty.edu/ontology#broaderPartitive';
 const LEVELS = new Set(['Certain', 'LessCertain', 'Uncertain']);   // the tables' certainty_level values
 const ACCURACY = new Set(['Accurate', 'Inaccurate', 'False']), COMPLETENESS = new Set(['Complete', 'Reconstructable', 'NonReconstructable']);
@@ -206,7 +238,9 @@ function representativePoint(g) {
 export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, withdrawn = null) {
   const rows = { places: [], names: [], locations: [], types: [], relations: [], properties: [], identities: [] };
   const pid = ids.place(rec['@id'], rec.label, true, rec.ccodes, rec.entityIdentifier);
+  dropKeys(rec, 'spatialEntity', TABLE_KEEPS.spatialEntity, loss);
   for (const a of currentAttestations(rec, withdrawn, loss)) {
+    dropKeys(a, 'attestation', TABLE_KEEPS.attestation, loss);
     const facets = ['names', 'geometries', 'types', 'relations', 'properties'].filter((k) => a[k]?.length);
     // A row states one thing, and its denied column denies that one thing. A denial of several
     // things together ("no market and no fair here") split into rows would deny each of them on its
@@ -219,6 +253,7 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
     if (spans.length > 1) loss({ kind: 'extra-timespans', value: spans.length - 1 });
     const t = spans[0] || {};
     qualificationLosses(t.qualification, [], loss);
+    dropKeys(t, 'timespan', TABLE_KEEPS.timespan, loss);
     if ((t.startLatest && t.startLatest !== t.startEarliest) || (t.endEarliest && t.endEarliest !== t.endLatest)) loss({ kind: 'four-date-bounds' });
     const srcs = [...(a.sources || []), ...(a.citations || []).map((c) => c.source)].filter(Boolean);
     const unique = [...new Map(srcs.map((s) => [typeof s === 'string' ? s : s['@id'] || s.title, s])).values()];
@@ -227,26 +262,35 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
     if (!src) loss({ kind: 'attestation-without-source' });
     const sid = ids.source(src);
     const cit = (a.citations || []).find((c) => !src || c.source === src || (c.source?.['@id'] && c.source['@id'] === (src['@id'] || src))) || {};
+    for (const c of a.citations || []) dropKeys(c, 'citation', TABLE_KEEPS.citation, loss);
     if (t.sourceLabel && t.label && t.sourceLabel !== t.label) loss({ kind: 'period-label', value: t.label });
     const date = t.sourceLabel || t.label || (t.startEarliest || t.endLatest ? [t.startEarliest, t.endLatest].filter(Boolean).join('-') : 'undated');
     const notes = [a.notes, a.certaintyNote && `Certainty: ${a.certaintyNote}`].filter(Boolean).join(' ') || '';
     // Why the source is cited: a CiTO property, written by its local name (citesAsEvidence).
     let citationFunction = local(cit.citationFunction, CITO) || '';
     if (cit.citationFunction && (!citationFunction || !accepts('names', 'citation_function', citationFunction))) { loss({ kind: 'citation-function-not-cito', value: cit.citationFunction }); citationFunction = ''; }
+    // How the attribution was made: PLATO's own words (Inferred, for "ibid."), or it is reported.
+    let attribution = local(cit.attributionStatus, PLATO + 'Attribution') || '';
+    if (cit.attributionStatus && (!attribution || !accepts('names', 'attribution', attribution))) { dropKey('citation', 'attributionStatus', loss); attribution = ''; }
     const common = { place_id: pid, date, from: t.startEarliest || '', to: t.endLatest || '', source_id: sid, locator: cit.locator || '',
-      attribution: local(cit.attributionStatus, PLATO + 'Attribution') || '', citation_function: citationFunction, certainty: a.certainty ?? '',
+      attribution, citation_function: citationFunction, certainty: a.certainty ?? '',
       certainty_level: LEVELS.has(local(a.certaintyLevel, PLATO)) ? local(a.certaintyLevel, PLATO) : '',
       denied: deny ? 'yes' : a.negated === false ? 'no' : '', notes };
     if (a.certaintyLevel && !common.certainty_level) loss({ kind: 'certainty-level', value: a.certaintyLevel });
     if (a.meta) loss(isAlternative(a.meta) ? { kind: 'alternative-readings', value: a['@id'] } : { kind: 'meta-attestation' });
+    // A form status, occurrence context and count go on name rows, as PLATO's own words.
+    const vocab = (k, col) => { const w = local(a[k], PLATO); if (a[k] && (!w || !accepts('names', col, w))) { dropKey('attestation', k, loss); return ''; } return w || ''; };
+    const formStatus = vocab('formStatus', 'form_status'), occurrenceContext = vocab('occurrenceContext', 'occurrence_context');
+    if (!a.names?.length) for (const k of ['formStatus', 'occurrenceContext', 'occurrenceCount']) if (a[k] !== undefined && a[k] !== null && (k === 'occurrenceCount' || local(a[k], PLATO))) dropKey('attestation', k, loss);
     for (const n of a.names || []) {
+      dropKeys(n, 'name', TABLE_KEEPS.name, loss);
       const q = n.qualification || {};
       qualificationLosses(q, ['transcriptionAccuracy', 'transcriptionCompleteness'], loss);
       if (n.sourceLabel) loss({ kind: 'source-label' });
       // How well the name was read: the names sheet holds PLATO's own judgements, by their words.
       const judged = (iri, words) => { const w = local(iri, PLATO + 'Transcription'); if (iri && !words.has(w)) loss({ kind: 'transcription-value', value: iri }); return words.has(w) ? w : ''; };
       rows.names.push({ place_id: pid, name: n.toponym, language: n.language || '', script: n.script || '', romanized: n.romanized || '',
-        name_type: (n.nameType || []).join(';'), form_status: local(a.formStatus, PLATO) || '', occurrence_context: local(a.occurrenceContext, PLATO) || '',
+        name_type: (n.nameType || []).join(';'), form_status: formStatus, occurrence_context: occurrenceContext,
         occurrence_count: a.occurrenceCount ?? '', transcription_accuracy: judged(q.transcriptionAccuracy, ACCURACY),
         transcription_completeness: judged(q.transcriptionCompleteness, COMPLETENESS), ...common, place_id: pid });
     }
@@ -256,14 +300,25 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
       if (!p) { loss({ kind: 'geometry-without-coordinates' }); continue; }
       qualificationLosses(g.qualification, [], loss);
       if (g.sourceLabel) loss({ kind: 'source-label' });
+      dropKeys(g, 'geometry', TABLE_KEEPS.geometry, loss);
+      // A GeoJSON point beside a different representative point has no column of its own.
+      if (g.reprPoint && g.geojson?.type === 'Point' && JSON.stringify(g.geojson.coordinates?.slice(0, 2)) !== JSON.stringify(g.reprPoint.slice(0, 2))) dropKey('geometry', 'geojson', loss);
+      if ((g.precisionKm || []).length > 1) dropKey('geometry', 'precisionKm', loss);
+      let role = local(g.role, PLATO) || '';
+      if (g.role && (!role || !accepts('locations', 'geometry_role', role))) { dropKey('geometry', 'role', loss); role = ''; }
       rows.locations.push({ place_id: pid, latitude: p[1], longitude: p[0],
         wkt: g.wkt || (g.geojson && g.geojson.type !== 'Point' ? geojsonToWkt(g.geojson) || '' : ''),
-        geometry_role: local(g.role, PLATO) || '', precision_km: (g.precisionKm || [])[0] ?? '', ...common });
+        geometry_role: role, precision_km: (g.precisionKm || [])[0] ?? '', ...common });
     }
-    for (const ty of a.types || []) qualificationLosses(ty.qualification, [], loss);
-    for (const pv of a.properties || []) if (!isFigure(pv)) qualificationLosses(pv.qualification, [], loss);
+    for (const ty of a.types || []) {
+      qualificationLosses(ty.qualification, [], loss);
+      dropKeys(ty, 'type', TABLE_KEEPS.type, loss);
+      if (ty.label && ty.sourceLabel && ty.sourceLabel !== ty.label) loss({ kind: 'source-label' });
+    }
+    for (const pv of a.properties || []) if (!isFigure(pv)) { qualificationLosses(pv.qualification, [], loss); dropKeys(pv, 'propertyValue', TABLE_KEEPS.propertyValue, loss); }
     for (const ty of a.types || []) rows.types.push({ place_id: pid, type_label: ty.label || ty.sourceLabel || '', type_uri: ty.identifier || '', ...common });
     for (const r of a.relations || []) {
+      dropKeys(r, 'relation', TABLE_KEEPS.relation, loss);
       let rt = local(r.relationType, PLATO);
       if (!rt && r.relationType === GVP_BROADER_PARTITIVE) rt = 'ContainedIn';   // the alignment plato:ContainedIn declares
       if (!rt) { loss({ kind: 'relation-type-not-in-plato', value: r.relationType }); continue; }
@@ -281,6 +336,7 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
   return rows;
 }
 export function identityRow(ir, ids, loss = () => {}, subject = ir.subject) {
+  dropKeys(ir, 'identityRelation', TABLE_KEEPS.identityRelation, loss);
   if (ir.assertedBy || ir.promotedFrom) loss({ kind: 'identity-provenance' });
   if (!ir.identityType) loss({ kind: 'identity-type-missing' });
   return { place_id: ids.place(subject, null, false), same_as: ir.object, match_type: ir.identityType || '', certainty: ir.certainty ?? '',

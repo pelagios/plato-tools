@@ -6,7 +6,7 @@
 // Writing LPF from PLATO is lossy by design (bundling, locators, form status, numeric certainty
 // and more have no LPF slot); every loss is reported, with counts.
 import { PLATO } from '../lib/context.js';
-import { isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure } from './shared.js';
+import { isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey } from './shared.js';
 
 // The README's alias table, plus the vocabulary prefixes its own examples use.
 export const LPF_PREFIXES = {
@@ -125,20 +125,62 @@ export function featureToRecord(f, loss = () => {}) {
 }
 
 // ---- PLATO record -> LPF Feature -------------------------------------------------------------
-function platoToWhen(spans, note) {
-  const ts = [], periods = [];
-  let label;
+// What LPF holds of each PLATO object; every other key present is reported (dropKeys), including a
+// key PLATO adds after this was written. The keys handled case by case are noted where they are.
+const KEEPS = {
+  gazetteer: new Set(['@id', 'title', 'licence', 'description', 'version', 'status', 'isVersionOf', 'previousVersion']),   // versions: versionLosses
+  spatialEntity: new Set(['@id', 'label', 'ccodes', 'attestations', 'identityRelations']),
+  // certaintyNote: kept only as LPF's own certainty word, written by the LPF reader
+  attestation: new Set(['about', 'names', 'geometries', 'timespans', 'types', 'properties', 'relations', 'sources', 'citations', 'meta', 'certainty', 'certaintyLevel', 'certaintyNote', 'negated', 'occurrenceCount', 'occurrenceContext', 'formStatus']),
+  name: new Set(['toponym', 'language', 'sourceLabel', 'qualification']),
+  geometry: new Set(['wkt', 'geojson', 'reprPoint', 'bbox', 'role', 'sourceLabel', 'qualification']),   // reprPoint: only without a shape
+  timespan: new Set(['startEarliest', 'startLatest', 'endEarliest', 'endLatest', 'label', 'sourceLabel', 'periodoUri', 'qualification']),
+  type: new Set(['identifier', 'label', 'sourceLabel', 'qualification']),
+  // uri: only where there is no @id; authorityType: only 'source'; timespan: one year (citationYear)
+  source: new Set(['@id', 'title', 'uri', 'timespan', 'derivedFrom', 'authorityType']),
+  citation: new Set(['source', 'locator', 'attributionStatus', 'citationFunction']),
+  relation: new Set(['relatesTo', 'relationType', 'relationLabel']),
+  identityRelation: new Set(['subject', 'object', 'identityType', 'certainty', 'basis']),
+  // a description, depiction or link: label only as a depiction's title
+  propertyValue: new Set(['property', 'value', 'label', 'qualification']),
+};
+export { KEEPS as LPF_KEEPS };
+
+/** PLATO timespans -> an LPF when; `loss` receives what the when cannot hold. */
+function platoToWhen(spans, note, loss = () => {}) {
+  const ts = [], periods = [], labels = [];
+  let lvl;
   for (const t of spans || []) {
-    if (t.periodoUri && !t.startEarliest && !t.endLatest) { periods.push(clean({ name: t.label, uri: t.periodoUri })); continue; }
+    dropKeys(t, 'timespan', KEEPS.timespan, loss);
     const start = t.startEarliest === t.startLatest || t.startLatest === undefined ? (t.startEarliest !== undefined ? { in: t.startEarliest } : undefined) : clean({ earliest: t.startEarliest, latest: t.startLatest });
     const end = t.endEarliest === t.endLatest || t.endEarliest === undefined ? (t.endLatest !== undefined ? { in: t.endLatest } : undefined) : clean({ earliest: t.endEarliest, latest: t.endLatest });
-    if (start || end) ts.push(clean({ start: start || end, end: start && end && JSON.stringify(start) !== JSON.stringify(end) ? end : undefined }));
-    // The date as the source wrote it, or else a period's name, is the when's label.
-    if ((t.sourceLabel || t.label) && !label) label = t.sourceLabel || t.label;
+    const dated = !!(start || end);
+    if (dated) ts.push(clean({ start: start || end, end: start && end && JSON.stringify(start) !== JSON.stringify(end) ? end : undefined }));
+    // A PeriodO period is one of the when's periods, dated or not.
+    if (t.periodoUri) periods.push(clean({ name: t.label, uri: t.periodoUri }));
+    else if (!dated) { if (t.sourceLabel || t.label || t.qualification?.certaintyLevel) loss({ kind: 'lpf-undated', value: t.sourceLabel || t.label || t.qualification.certaintyLevel }); continue; }
+    // The when has one label: the date as the source wrote it, and any period's name, joined.
+    for (const l of [t.sourceLabel, t.periodoUri ? undefined : t.label]) if (l && !labels.includes(l)) labels.push(l);
+    const l = t.qualification?.certaintyLevel;
+    if (l && lvl && l !== lvl) dropKey('timespan', 'certaintyLevel', loss);
+    lvl = lvl || l;
   }
   if (!ts.length && !periods.length) return undefined;
-  const lvl = (spans || []).map((t) => t.qualification?.certaintyLevel).find(Boolean);
-  return clean({ timespans: ts.length ? ts : undefined, periods: periods.length ? periods : undefined, label, certainty: certaintyWord(lvl, note) });
+  return clean({ timespans: ts.length ? ts : undefined, periods: periods.length ? periods : undefined, label: labels.join('; ') || undefined, certainty: certaintyWord(lvl, note) });
+}
+/** A cited source's date as LPF's one citation year; the rest of the date is reported. */
+function citationYear(ts, loss) {
+  if (!ts || typeof ts !== 'object') return undefined;
+  const year = (d) => (typeof d === 'string' ? /^(-?\d{4,})(?:-|$)/.exec(d)?.[1] : undefined);
+  const y = year(ts.startEarliest);
+  for (const k of Object.keys(ts)) {
+    if (ts[k] === undefined || ts[k] === null) continue;
+    if (k === 'startEarliest' && y && y === ts.startEarliest) continue;
+    if (k === 'endLatest' && y && ts.endLatest === y) continue;
+    if (k === 'qualification' && typeof ts[k] === 'object') { for (const q of Object.keys(ts[k])) if (ts[k][q] !== undefined && ts[k][q] !== null) loss({ kind: 'dropped', key: `source.timespan.qualification.${q}` }); continue; }
+    loss({ kind: 'dropped', key: `source.timespan.${k}` });
+  }
+  return y !== undefined ? Number(y) : undefined;
 }
 function platoToCitations(a, loss) {
   const out = [];
@@ -154,15 +196,35 @@ function platoToCitations(a, loss) {
     const s = asObject(s0), k = keyOf(s), prev = all.get(k);
     if (!prev || Object.keys(s).length > Object.keys(prev).length) all.set(k, s);
   }
+  for (const c of a.citations || []) dropKeys(c, 'citation', KEEPS.citation, loss);
   for (const [k, s] of all) {
     const c = cited.get(k);
     if (c?.attributionStatus) loss({ kind: 'attribution-status' });
     if (c?.citationFunction) loss({ kind: 'citation-function' });
-    const year = s.timespan?.startEarliest && /^-?\d{4,}$/.test(s.timespan.startEarliest) ? Number(s.timespan.startEarliest) : undefined;
+    dropKeys(s, 'source', KEEPS.source, loss);
+    if (s.uri && s['@id'] && s.uri !== s['@id']) dropKey('source', 'uri', loss);
+    if (s.authorityType && s.authorityType !== 'source') dropKey('source', 'authorityType', loss);
+    const year = citationYear(s.timespan, loss);
     if (s.derivedFrom) loss({ kind: 'source-derivation' });
     out.push(clean({ label: [s.title || s['@id'], c?.locator].filter(Boolean).join(', '), year, '@id': s['@id'] || s.uri }));
   }
   return out;
+}
+
+/**
+ * The FeatureCollection's own members from a PLATO document header. LPF's context maps `@id`,
+ * `title` (dct:title), `license` (dct:license) and `descriptions` (dct:description, as on a feature:
+ * objects with a `value`); it has no term for a contributor. `loss` receives the rest.
+ */
+export function collectionHead(gazetteer, loss = () => {}) {
+  const g = gazetteer && typeof gazetteer === 'object' ? gazetteer : {};
+  dropKeys(g, 'gazetteer', KEEPS.gazetteer, loss);
+  return clean({ '@id': g['@id'], title: g.title, license: g.licence, descriptions: g.description ? [{ value: g.description }] : undefined });
+}
+/** The PLATO gazetteer header from a FeatureCollection's own members (collectionHead's inverse). */
+export function collectionToGazetteer(fc, fallbackTitle) {
+  const d = (fc.descriptions || []).map((x) => (typeof x === 'string' ? x : x?.value)).find((x) => typeof x === 'string');
+  return clean({ '@id': fc['@id'] || fc.id, title: typeof fc.title === 'string' && fc.title ? fc.title : fallbackTitle, description: d, licence: typeof fc.license === 'string' ? expandLpf(fc.license) : undefined });
 }
 
 /**
@@ -173,11 +235,15 @@ function platoToCitations(a, loss) {
 export function recordToFeature(rec, idrs = [], loss = () => {}, withdrawn = null) {
   const f = { '@id': rec['@id'], type: 'Feature', properties: clean({ title: rec.label, ccodes: rec.ccodes?.length ? rec.ccodes : undefined }), names: [], types: [], relations: [], links: [], descriptions: [], depictions: [] };
   const geoms = [], fclasses = [], whens = [];
+  dropKeys(rec, 'spatialEntity', KEEPS.spatialEntity, loss);
   for (const a of currentAttestations(rec, withdrawn, loss)) {
+    dropKeys(a, 'attestation', KEEPS.attestation, loss);
     // LPF cannot say that a source denies something: a denial written as LPF would assert what its
     // source says is not so. It is left out, and reported (PLATO cf87b78).
     if (isDenial(a)) { loss({ kind: 'denial', value: rec['@id'] }); continue; }
-    const when = platoToWhen(a.timespans, a.certaintyNote);
+    const when = platoToWhen(a.timespans, a.certaintyNote, loss);
+    // A note on certainty is kept only as LPF's own certainty word, which the LPF reader writes.
+    if (a.certaintyNote && !/^LPF certainty: (certain|less-certain|uncertain)$/.test(a.certaintyNote)) dropKey('attestation', 'certaintyNote', loss);
     const cits = platoToCitations(a, loss);
     const facets = ['names', 'geometries', 'types', 'relations', 'properties'].filter((k) => a[k]?.length);
     if (facets.length > 1) loss({ kind: 'bundled-attestation', value: facets.join('+') });
@@ -196,10 +262,12 @@ export function recordToFeature(rec, idrs = [], loss = () => {}, withdrawn = nul
     for (const n of a.names || []) {
       qualificationLosses(n.qualification, [], loss);
       if (n.sourceLabel) loss({ kind: 'source-label' });
+      dropKeys(n, 'name', KEEPS.name, loss);
       f.names.push(clean({ toponym: n.toponym, lang: n.language, citations: cits.length ? cits : undefined, when }));
     }
     for (const t of a.types || []) {
       qualificationLosses(t.qualification, [], loss);
+      dropKeys(t, 'type', KEEPS.type, loss);
       if (t.identifier?.startsWith(GN_CLASS)) { fclasses.push(t.identifier.slice(GN_CLASS.length)); continue; }
       f.types.push(clean({ identifier: t.identifier, label: t.label, sourceLabels: t.sourceLabel ? [{ label: t.sourceLabel }] : undefined, when, citations: cits.length ? cits : undefined }));
     }
@@ -208,24 +276,34 @@ export function recordToFeature(rec, idrs = [], loss = () => {}, withdrawn = nul
       qualificationLosses(g.qualification, ['certaintyLevel'], loss);
       if (g.sourceLabel) loss({ kind: 'source-label' });
       if (g.role) loss({ kind: 'geometry-role' });
+      dropKeys(g, 'geometry', KEEPS.geometry, loss);
+      // A representative point beside a shape has no place of its own in a GeoJSON geometry.
+      if (g.geojson && g.reprPoint && !(g.geojson.type === 'Point' && JSON.stringify(g.geojson.coordinates?.slice(0, 2)) === JSON.stringify(g.reprPoint))) dropKey('geometry', 'reprPoint', loss);
       const lg = g.geojson ? { ...g.geojson } : g.reprPoint ? { type: 'Point', coordinates: g.reprPoint } : {};
+      if (g.bbox) lg.bbox = g.bbox;   // a GeoJSON member, which LPF's context maps
       if (g.wkt) lg.geowkt = g.wkt;
       if (when) lg.when = when;
       if (cits.length) lg.citations = cits;
       const c = certaintyWord(gl || a.certaintyLevel, a.certaintyNote); if (c) lg.certainty = c;
       geoms.push(lg);
     }
+    for (const r of a.relations || []) dropKeys(r, 'relation', KEEPS.relation, loss);
     for (const r of a.relations || []) f.relations.push(clean({ relationType: r.relationType, relationTo: r.relatesTo, label: r.relationLabel, when, citations: cits.length ? cits : undefined, certainty: certaintyWord(a.certaintyLevel, a.certaintyNote) }));
     for (const p of a.properties || []) {
       if (isFigure(p)) { loss({ kind: 'statistical-figure', value: p['@id'] || p.label || p.property }); continue; }
       qualificationLosses(p.qualification, [], loss);
-      if (p.property === DCT_DESCRIPTION) f.descriptions.push(clean({ value: String(p.value), source: cits[0]?.['@id'] }));
-      else if (p.property === FOAF_DEPICTION) f.depictions.push(clean({ '@id': String(p.value), title: p.label !== 'depiction' ? p.label : undefined }));
-      else if (PROPERTY_LINK[p.property]) f.links.push({ type: PROPERTY_LINK[p.property], identifier: String(p.value) });
-      else loss({ kind: 'property-value', value: p.label || p.property });
+      const lpfKind = p.property === DCT_DESCRIPTION ? 'description' : p.property === FOAF_DEPICTION ? 'depiction' : PROPERTY_LINK[p.property];
+      if (!lpfKind) { loss({ kind: 'property-value', value: p.label || p.property }); continue; }
+      dropKeys(p, 'propertyValue', KEEPS.propertyValue, loss);
+      // A label is a depiction's title; on a description or a link it is only the property's name.
+      if (p.label && lpfKind !== 'depiction' && p.label !== lpfKind) dropKey('propertyValue', 'label', loss);
+      if (lpfKind === 'description') f.descriptions.push(clean({ value: String(p.value), source: cits[0]?.['@id'] }));
+      else if (lpfKind === 'depiction') f.depictions.push(clean({ '@id': String(p.value), title: p.label !== 'depiction' ? p.label : undefined }));
+      else f.links.push({ type: lpfKind, identifier: String(p.value) });
     }
   }
   for (const ir of [...(rec.identityRelations || []), ...idrs]) {
+    dropKeys(ir, 'identityRelation', KEEPS.identityRelation, loss);
     if (ir.identityType === 'exactMatch' || ir.identityType === 'closeMatch') f.links.push({ type: ir.identityType, identifier: ir.object });
     else { f.links.push({ type: 'closeMatch', identifier: ir.object }); loss({ kind: 'identity-type', value: ir.identityType }); }
     if (ir.certainty !== undefined || ir.basis) loss({ kind: 'identity-certainty-or-basis' });

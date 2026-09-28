@@ -95,7 +95,8 @@ for (const target of ['lpf', 'lpf-seq', 'tables']) {
     assert.equal(l?.count, 4, JSON.stringify(lossKinds(out.r)));
     assert.deepEqual(l.examples.sort(), ['isVersionOf', 'previousVersion', 'status', 'version']);
     assert.match(l.message, /does not say which state of the gazetteer it holds/);
-    assert.doesNotMatch(out.text, /2026-09|2026-06|published/);
+    // The gazetteer's own address may contain its version (…/g/2026-09) and LPF carries it; no version is written.
+    assert.doesNotMatch(out.text.replaceAll(d.gazetteer['@id'] || '\u0000', ''), /2026-09|2026-06|published/);
     assert.deepEqual(toponyms(out), ['P'], 'the place itself is written');
     // control: a header without them reports nothing
     const plain = await written(textFile(JSON.stringify(placeDoc(d.spatialEntities)), 'v.json'), target, 'v.json');

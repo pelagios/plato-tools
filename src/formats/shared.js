@@ -135,3 +135,18 @@ export function versionLosses(gazetteer, loss) {
 export const isFigure = (pv) => !!pv && typeof pv === 'object' && ['dataSet', 'dimensions', 'attributes', 'universe'].some((k) => pv[k] !== undefined && pv[k] !== null);
 /** Report the header's statistical tables where the target has no place for them. */
 export function tableLosses(head, loss) { if (head && Array.isArray(head.dataSets) && head.dataSets.length) loss({ kind: 'statistical-tables', value: head.dataSets.length }); }
+
+// ---- keys a writer has no place for ---------------------------------------------------------------
+/**
+ * Report each key of `obj` that the writer neither carries nor reports in words of its own, so that
+ * nothing is dropped silently: not the keys known today, and not a key PLATO adds later, which
+ * reaches here before any writer knows it. `where` names the kind of object ('name', 'source') and
+ * `keeps` the keys the writer handles; each other key present is reported as `where.key`, which
+ * src/engine/report.js turns into words (droppedText).
+ */
+export function dropKeys(obj, where, keeps, loss) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return;
+  for (const k of Object.keys(obj)) if (!keeps.has(k) && obj[k] !== undefined && obj[k] !== null) loss({ kind: 'dropped', key: `${where}.${k}` });
+}
+/** Report one key as dropped, where the writer decides that case by case. */
+export const dropKey = (where, key, loss) => loss({ kind: 'dropped', key: `${where}.${key}` });

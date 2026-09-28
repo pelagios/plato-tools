@@ -96,3 +96,28 @@ test('control: a changed certainty level is noticed', () => {
   const s = JSON.stringify(rec).replace(/#LessCertain"/g, '#Certain"').replace(/#Uncertain"/g, '#Certain"');
   assert.notDeepEqual(certainties(recordToFeature(JSON.parse(s))), certainties(f).length ? certainties(f) : ['none']);
 });
+
+// ---- the gazetteer, as the FeatureCollection's own members ---------------------------------------
+// LPF v1's context maps @id, title (dct:title), license (dct:license) and descriptions (dct:description);
+// a gazetteer's contributor has no term there, so it is reported. Read back, the members return.
+import { go, textFile, outText } from './engine.js';
+const GAZ = { '@id': 'https://example.org/gaz', title: 'A gazetteer', description: 'Places of one county', licence: 'https://creativecommons.org/licenses/by/4.0/', contributor: 'https://orcid.org/0000-0002-1825-0097' };
+const gazDoc = (g) => JSON.stringify({ profile: 'place-centric', gazetteer: g, spatialEntities: [{ '@id': 'https://example.org/p', label: 'P', attestations: [{ names: [{ toponym: 'P' }] }] }] });
+for (const [target, ext] of [['lpf', '.geojson'], ['lpf-seq', '.geojsonl']]) {
+  test(`${target}: the gazetteer's address, title, description and licence are the collection's, and come back`, async () => {
+    const r = await go([textFile(gazDoc(GAZ), 'g.json')], 'convert', target);
+    const text = outText(r.e, 'g' + ext);
+    const head = JSON.parse(target === 'lpf' ? text : text.split('\n')[0]);
+    assert.deepEqual([head['@id'], head.title, head.license, head.descriptions], [GAZ['@id'], GAZ.title, GAZ.licence, [{ value: GAZ.description }]]);
+    const lost = r.report.items.filter((i) => i.severity === 'loss').map((i) => i.kind);
+    assert.deepEqual(lost.filter((k) => k.startsWith('dropped:gazetteer')), ['dropped:gazetteer.contributor']);
+    assert.match(r.report.items.find((i) => i.kind === 'dropped:gazetteer.contributor').message, /^Who made the gazetteer \(its contributor\): Linked Places Format has no place for this, so it is left out\.$/);
+    const back = await go([textFile(text, 'g' + ext)], 'convert', 'plato-json');
+    const { contributor, ...kept } = GAZ;
+    assert.deepEqual(JSON.parse(outText(back.e, 'g.json')).gazetteer, kept);
+    // control: a header with a title alone writes none of the others, and the file name is not the title
+    const bare = await go([textFile(gazDoc({ title: 'Bare' }), 'b.json')], 'convert', target);
+    const bh = JSON.parse(outText(bare.e, 'b' + ext).split('\n')[0].replace(/,"features":.*$/, '}'));
+    assert.deepEqual(Object.keys(bh).sort(), ['@context', 'title', 'type']);
+  });
+}

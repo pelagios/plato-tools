@@ -239,7 +239,8 @@ test('tables using every new column are valid, and tables -> JSON -> tables give
   assert.equal(atts.filter((x) => x.negated === false).length, 1);
   assert.ok(atts.some((x) => x.timespans?.[0]?.startEarliest === '-12000'));
   assert.ok(atts.some((x) => x.names?.[0]?.qualification?.transcriptionCompleteness === P + 'TranscriptionReconstructable'));
-  const b = await go([textFile(json, 'j.json')], 'convert', 'tables');
+  // Back with the same base address, so that every place and source address is the one it was minted as.
+  const b = await go([textFile(json, 'j.json')], 'convert', 'tables', { base: 'https://example.org/survey/' });
   assert.deepEqual(errors(b), []);
   const zip = b.e.outs['j-tables.zip'][0];
   const norm = (rows) => rows.map((r) => JSON.stringify(r)).sort();
@@ -247,7 +248,8 @@ test('tables using every new column are valid, and tables -> JSON -> tables give
     const orig = Papa.parse(readFileSync(`${FIXTURE}/${s}.csv`, 'utf8'), { header: true, skipEmptyLines: true }).data;
     assert.deepEqual(norm(sheet(zip, `${s}.csv`)), norm(orig), `${s} rows differ`);
   }
-  assert.deepEqual(lossKinds(b), []);
+  // The tables have no sheet for the gazetteer, so its title and address are reported, and nothing else.
+  assert.deepEqual(lossKinds(b).sort(), ['dropped:gazetteer.@id', 'dropped:gazetteer.title']);
   const again = await go([new File([zip], 'again.zip')], 'check');
   assert.deepEqual(errors(again), []);
 });

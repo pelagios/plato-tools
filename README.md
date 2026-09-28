@@ -26,6 +26,26 @@ of the formats above, and reports everything the target format cannot hold inste
 silently: converting to LPF or to the spreadsheet tables is lossy by design, converting between
 PLATO JSON and RDF is not, except at the last digit of some numbers (below).
 
+**Nothing is dropped silently.** Each writer names the keys of each PLATO object it holds; every
+other key present is reported by name, in words ("The pronunciation of a name in the International
+Phonetic Alphabet (ipa): Linked Places Format has no place for this, so it is left out."), including
+a key PLATO adds after the tools were written. `test/keys.test.js` enumerates every key the JSON
+Schema allows, at every level, from the schema itself, and fails for any key that a writer (LPF,
+LPF sequence, the tables, N-Triples, or PLATO JSON made from RDF) neither carries nor reports.
+
+- **LPF** carries the gazetteer's address, title, licence (`license`) and description
+  (`descriptions`, as on a feature) as the FeatureCollection's own members, which its context maps,
+  and reads them back; it has no term for the gazetteer's contributor, which is reported. It also
+  carries a location's `bbox` (a GeoJSON member) and a dated timespan's PeriodO period.
+- **The spreadsheet tables** have no gazetteer sheet, so each of its keys is reported. A place's or
+  source's web address survives only when it is the one reading the tables back would make from the
+  base address and its id; otherwise it is reported.
+- **RDF.** A value that PLATO's context reads as a web address but that is a name (the gazetteer's
+  `contributor`, an identity match's `assertedBy`, which the schema allows as names) cannot be written
+  in RDF, and is reported as lost whenever the output is RDF or is made through it.
+- **Attestation-centric documents** that list `newSpatialEntities` have every place written, not
+  only the listed ones: an attestation about an existing place was once left out of every output.
+
 A **denial**, where a source states that something is not so (PLATO's `negated`, the tables'
 `denied`: no market here), is never written as an assertion. PLATO JSON, RDF and the spreadsheet
 tables carry it. Linked Places Format cannot, so a denied attestation is left out of LPF and
