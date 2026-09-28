@@ -100,10 +100,14 @@ def main():
             ok = s.get('phase') == 'done' and s.get('outputs')
             fc = json.loads(download(page, s['outputs'][0]['name'], tmp / 'judgements.geojson').read_text()) if ok else {}
             lw = next((f for f in fc.get('features', []) if f.get('@id', '').endswith('/littleworth')), None)
-            facets = json.dumps([[f.get(k) for k in ('names', 'types', 'relations', 'geometry', 'descriptions', 'links')] for f in fc.get('features', [])])
+            # Kingsbury's markets are asserted, with a source stance (reported, doubted), so they are rightly
+            # written: the search for the denied market leaves them out, and they are the control that it can see one.
+            kb = next((f for f in fc.get('features', []) if f.get('@id', '').endswith('/kingsbury')), None)
+            facets = json.dumps([[f.get(k) for k in ('names', 'types', 'relations', 'geometry', 'descriptions', 'links')] for f in fc.get('features', []) if f is not kb])
             shown = page.inner_text('#report') if ok else ''
             check('a denial -> LPF: the place is written, the denied market is not, and the page says so',
-                  ok and lw is not None and 'types' not in lw and '"market"' not in facets and len(fc['features']) == 5
+                  ok and lw is not None and 'types' not in lw and '"market"' not in facets and len(fc['features']) == 6
+                  and kb is not None and [x.get('label') for x in kb.get('types', [])] == ['market', 'market']
                   and any(i['kind'] == 'denial' for i in s['report']['items']) and 'would assert what its source denies' in shown, s.get('report') or s)
             bad = tmp / 'bad.nt'; bad.write_text('<https://x.org/a> <https://w3id.org/plato#notes> "fine" .\n<https://x.org/a> <https://w3id.org/plato#notes "broken .\n')
             s = run_case(page, [bad], 'check')
