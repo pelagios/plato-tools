@@ -1,5 +1,5 @@
 // RDF Data Cube integrity constraints (W3C RDF Data Cube, section 11), written as checks in JS over
-// N-Triples, for the cube export of PLATO's draft statistics design (issue #14). The constraints
+// N-Triples, for the cube export of PLATO's statistics design (issue #14). The constraints
 // are read after the spec's normalisation, which the checks apply as they go: a component's
 // property is its qb:dimension, qb:measure or qb:attribute.
 //
@@ -12,8 +12,9 @@
 //   IC-11  every observation has a value for every dimension of its structure
 //   IC-12  no two observations of one data set have the same value for every dimension
 //   IC-14  every observation has a value for every measure of its structure (no qb:measureType
-//          dimension), except, by PLATO's decision 7, one whose sdmx-attribute:obsStatus declares
-//          the absence: a printed dash
+//          dimension), except, by PLATO's decision 7, a declared absence: one with an
+//          sdmx-attribute:obsStatus and no plato:value_literal (a printed dash). One with a status
+//          and a value, such as an approximate amount, is checked like any other
 //
 // IC-12 as the spec writes it compares every pair of observations (3×10¹⁰ pairs for Vision of
 // Ireland). Here observations are grouped instead, in linear time. The spec's query takes, for each
@@ -30,6 +31,7 @@ import { lineChunks } from '../engine/input.js';
 const QB = 'http://purl.org/linked-data/cube#';
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 const OBS_STATUS = 'http://purl.org/linked-data/sdmx/2009/attribute#obsStatus';
+const PLATO_VALUE = 'https://w3id.org/plato#value_literal';
 const k = (t) => (t.termType === 'BlankNode' ? '_:' + t.value : t.termType === 'Literal' ? JSON.stringify([t.value, t.datatype?.value || '', t.language || '']) : t.value);
 
 /** The graph from N-Triples text held in memory; for a file of any size use graphOfFile(). */
@@ -101,7 +103,11 @@ export function ic14(g) {
   let evaluated = 0; const violations = [];
   for (const { o, c } of placed(g)) {
     if (c.dimension.includes(QB + 'measureType')) continue;
-    if (g.objs(o, OBS_STATUS).length) continue;   // a declared absence (PLATO decision 7)
+    // A declared absence (PLATO decision 7) is a status and no value: a printed dash. A status alone is
+    // not enough, since obsStatus is a general attribute ("approximate" is not an absence), and a
+    // figure with a value must have its measure whatever its status says. PLATO's schema allows a
+    // figure without a value only when it has a status, so the check never reads the status code.
+    if (g.objs(o, OBS_STATUS).length && !g.objs(o, PLATO_VALUE).length) continue;
     for (const m of c.measure) { evaluated++; if (!g.objs(o, m).length) violations.push(`${o} has no ${m}`); }
   }
   return result('IC-14', evaluated, violations);
