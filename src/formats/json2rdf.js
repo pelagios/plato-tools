@@ -10,6 +10,7 @@ const RDF_TYPE = iri(RDF + 'type'), RDF_FIRST = iri(RDF + 'first'), RDF_REST = i
 const RDF_JSON = RDF + 'JSON';
 const BOUNDS = new Set(['start_earliest', 'start_latest', 'end_earliest', 'end_latest'].map((x) => PLATO + x));
 const REPR_POINT = PLATO + 'repr_point';
+const VALUE_LITERAL = PLATO + 'value_literal', VALUE_JSON = PLATO + 'value_json';
 const WKT = 'http://www.opengis.net/ont/geosparql#wktLiteral';
 // Keys the context deliberately leaves out of the RDF: a conversion to RDF loses their values.
 // (Since PLATO 2e32d7e there are none: relationLabel maps to plato:source_label, and
@@ -158,6 +159,11 @@ export class Json2Rdf {
       const term = active.terms.get(key);
       // A JSON literal holds its whole value, null and arrays included, exactly as jsonld.js writes it.
       if (term && term.type === '@json' && val !== undefined) { this._out(subj, iri(term.iri), literal(jcs(val), RDF_JSON)); continue; }
+      // A structured value (an object, its shape declared by valueType) cannot be a value_literal: the
+      // context maps value to plato:value_literal, which would make the object a node and drop its
+      // keys. The context's limit (4) leaves it to the triplifier to serialise it into
+      // plato:value_json, as the ontology defines: the JSON text, canonical so that it compares.
+      if (term && term.iri === VALUE_LITERAL && val && typeof val === 'object' && !Array.isArray(val)) { this._out(subj, iri(VALUE_JSON), literal(jcs(val))); continue; }
       if (val === null || val === undefined) { if (key !== '$schema') this._null(key); continue; }
       if (!term) {
         // A key the context does not name, but which is itself an IRI (or a compact IRI with one of

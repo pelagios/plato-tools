@@ -194,6 +194,16 @@ export class Rdf2Json {
       const e = m.fwd.get(p);
       if (!e) {
         if (shallow) continue;                              // its other triples belong to its other role
+        // A structured value, serialised as JSON text on plato:value_json (json2rdf.js): read back
+        // into the object it was, so that the round trip gives what went in.
+        if (def === 'propertyValue' && p === PLATO + 'value_json' && o.termType === 'Literal') {
+          let v; try { v = JSON.parse(o.value); } catch { v = undefined; }
+          if (v && typeof v === 'object' && !Array.isArray(v)) {
+            if (obj.value === undefined) obj.value = v;
+            else if (JSON.stringify(obj.value) !== JSON.stringify(v)) this.issue({ kind: 'multiple-values', key: 'value', node: id, value: o.value });
+          } else this.loss({ kind: 'value-json-invalid', value: `${id}: ${o.value.slice(0, 80)}` });
+          continue;
+        }
         if (p === WGS84 + 'lat') { lat = Number(o.value); continue; }
         if (p === WGS84 + 'long') { long = Number(o.value); continue; }
         if (p === PLATO + 'repr_point' && o.termType === 'Literal') { const xy = o.value.match(/POINT\s*\(\s*(\S+)\s+(\S+)\s*\)/i); if (xy) { obj.reprPoint = [Number(xy[1]), Number(xy[2])]; continue; } }
@@ -226,6 +236,11 @@ export class Rdf2Json {
       if (inline) {
         const sub = this.node(oid, sh.def, e.ctx, seen);
         put(e, o.termType === 'BlankNode' ? sub : { '@id': o.value, ...sub });
+      } else if (o.termType === 'BlankNode') {
+        // A blank node where a value belongs (value_literal pointing at a node, as a structured value
+        // written without value_json leaves it): its label is not a value, and writing it as one
+        // ("r2b6") invents data. Reported, and left out.
+        this.loss({ kind: 'value-is-node', value: `${id} ${p}` });
       } else put(e, o.value);
     }
     if (def === 'geometry' && lat !== undefined && long !== undefined) {
