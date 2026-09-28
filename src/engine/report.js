@@ -21,6 +21,7 @@ export class Report {
 
 // Plain-language explanations for the kinds the converters report.
 export const LOSS_TEXT = {
+  'type-not-carried': "A type the input states for a node is neither one PLATO JSON carries nor one the tools would derive from the node's own statements, so it is left out; the example names the node and the type.",
   'lpf-licence-text': "The collection's licence is written in words, not as a web address, and PLATO's licence must be an address, so it is left out; give the licence's address (for example https://creativecommons.org/licenses/by-nc/4.0/) to keep it.",
   'bundled-attestation': 'Attestations that bundle several kinds of fact are split into one row or element per fact; that they came from one attestation is lost.',
   'extra-sources': 'Only the first source of an attestation fits; the others are dropped.',

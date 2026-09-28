@@ -192,3 +192,25 @@ test('a 17-digit number comes back rounded to 16 digits, exactly as jsonld.js wr
     assert.equal(got, Number(n.toPrecision(16)), `${n}`);
   }
 });
+
+// An rdf:type the tools would derive again passes in silence; any other is reported as a loss.
+test('types: the tools\' own typed export reads back with no type lost; a foreign or contrary type is reported', async () => {
+  const { go, textFile, outText } = await import('./engine.js');
+  for (const f of ['place-centric-constantinople.json', 'place-centric-judgements.json', 'place-centric-statistics.json', 'attestation-centric-survey.json']) {
+    const nt = await go([textFile(readFileSync(`${EXAMPLES}/${f}`, 'utf8'), f)], 'convert', 'ntriples', { typing: true });
+    const text = outText(nt.e, f.replace(/\.json$/, '.nt'));
+    assert.ok(/22-rdf-syntax-ns#type/.test(text), `${f}: the export is typed`);
+    const back = await go([textFile(text, 'b.nt')], 'convert', 'plato-jsonl');
+    assert.deepEqual(back.report.items.filter((i) => i.kind === 'type-not-carried').map((i) => i.examples), [], f);
+  }
+  const doc = { profile: 'place-centric', gazetteer: { '@id': 'https://example.org/g', title: 't' },
+    spatialEntities: [{ '@id': 'https://example.org/p/1', label: 'P', attestations: [{ '@id': 'https://example.org/a/1', names: [{ '@id': 'https://example.org/n/1', toponym: 'P' }], sources: [{ title: 's' }] }] }] };
+  const nt = await go([textFile(JSON.stringify(doc), 'd.json')], 'convert', 'ntriples', { typing: true });
+  const T = '<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>';
+  const extra = `<https://example.org/p/1> ${T} <http://xmlns.com/foaf/0.1/Person> .\n<https://example.org/n/1> ${T} <https://w3id.org/plato#Timespan> .\n`;
+  const back = await go([textFile(outText(nt.e, 'd.nt') + extra, 'e.nt')], 'convert', 'plato-jsonl');
+  const lost = back.report.items.filter((i) => i.kind === 'type-not-carried');
+  assert.equal(lost.length, 1);
+  assert.equal(lost[0].severity, 'loss');
+  assert.deepEqual(lost[0].examples.sort(), ['https://example.org/n/1: https://w3id.org/plato#Timespan', 'https://example.org/p/1: http://xmlns.com/foaf/0.1/Person']);
+});

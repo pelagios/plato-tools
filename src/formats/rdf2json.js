@@ -62,6 +62,34 @@ export class Rdf2Json {
     const ds = this.root.terms.get('dataSets');
     this.dataSetsIri = ds && ds.iri ? ds.iri : null;
     this.tables = new Map(); this.derived = new Map();
+    // Types an input graph asserts that PLATO JSON cannot carry (see _type): reported once each.
+    this.typeSeen = new Set();
+    this.rangeProps = new Map();   // class -> the properties whose range it is
+    if (types) for (const [prop, cls] of types.range) (this.rangeProps.get(cls) || this.rangeProps.set(cls, []).get(cls)).push(prop);
+  }
+  /**
+   * An rdf:type the input asserts for node `id`. PLATO JSON carries no types for most nodes: the
+   * tools derive them from structure (a property's domain or range, or the cube export's rules), so
+   * a type that would be derived again is not lost, and passes in silence; every round trip of the
+   * tools' own output asserts hundreds of thousands of them. A type they would not derive (a
+   * foreign class, or a PLATO class that disagrees with the node's own statements) is read and
+   * discarded, which changes what the graph says: that is reported, once per node and type.
+   */
+  _type(id, out, cls) {
+    if (this._derivable(id, out, cls)) return;
+    const k = id + '\u0001' + cls;
+    if (this.typeSeen.has(k)) return;
+    if (this.typeSeen.size < 2_000_000) this.typeSeen.add(k);
+    this.loss({ kind: 'type-not-carried', value: `${id}: ${cls}` });
+  }
+  _derivable(id, out, cls) {
+    if (cls === QB + 'Observation') return out.some((t) => t.p === QB + 'dataSet');
+    if (cls === QB + 'DataSet') return out.some((t) => t.p === QB + 'structure') || this.g.in(QB + 'dataSet', id).length > 0;
+    if (cls === QB + 'DataStructureDefinition') return out.some((t) => t.p === QB + 'component') || this.g.in(QB + 'structure', id).length > 0;
+    const t = this.types; if (!t) return false;
+    if (out.some((x) => x.p !== RDF_TYPE && t.domain.get(x.p) === cls)) return true;
+    for (const prop of this.rangeProps.get(cls) || []) if (this.g.in(prop, id).length) return true;
+    return false;
   }
   _defSchema(def) {
     if (def === '$gazetteer') return this.profile.properties.gazetteer;
@@ -169,7 +197,7 @@ export class Rdf2Json {
         if (p === WGS84 + 'lat') { lat = Number(o.value); continue; }
         if (p === WGS84 + 'long') { long = Number(o.value); continue; }
         if (p === PLATO + 'repr_point' && o.termType === 'Literal') { const xy = o.value.match(/POINT\s*\(\s*(\S+)\s+(\S+)\s*\)/i); if (xy) { obj.reprPoint = [Number(xy[1]), Number(xy[2])]; continue; } }
-        if (p === RDF_TYPE) continue;                       // structure implies the PLATO types
+        if (p === RDF_TYPE) { if (o.termType === 'NamedNode') this._type(id, this.g.out(id), o.value); continue; }   // structure implies the PLATO types; any other is reported
         if (this._otherRole(id, p)) continue;               // e.g. a toponym on a place that is also a name
         if (def === '$gazetteer' && DOC_LINKS.has(p)) continue;   // the records, read by the driver
         if (def === '$gazetteer' && p === this.dataSetsIri) continue;   // the tables, read by header()
