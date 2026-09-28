@@ -3,9 +3,10 @@
 // and table definitions. Fetched from GitHub, so a build is reproducible anywhere.
 //   node scripts/vendor-plato.mjs              use the pinned commit
 //   node scripts/vendor-plato.mjs --latest     re-pin to the current head of main
-//   node scripts/vendor-plato.mjs --ref NAME   re-pin to a named branch's head, or a commit: a DRAFT
-//                                              pin, which VERSION.json and the page footer say is not
-//                                              a release, so a branch cannot pass for one
+//   node scripts/vendor-plato.mjs --ref NAME   re-pin to a named branch's head, or a commit: a draft
+//                                              pin, which VERSION.json, the page footer and --version
+//                                              mark as not a release, so a branch cannot pass for one
+//                                              (test/pin.test.js)
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 
 const REPO = 'pelagios/place-attestation-ontology';

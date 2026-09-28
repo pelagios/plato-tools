@@ -1,7 +1,7 @@
 // The page: choose files, check or convert them, show progress and the report, save the output.
 // The work happens in a worker (src/engine/worker.js). The page publishes its own state on
 // window.__plato for automated tests; nothing else reads it.
-import { fmtBytes, formatName, progressText, summary, groups } from './engine/words.js';
+import { fmtBytes, formatName, progressText, summary, groups, draftNote } from './engine/words.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
 let worker, files = [], input = null, targets = {}, busy = false;
@@ -19,7 +19,7 @@ function onMessage({ data }) {
     const v = data.version;
     $('plato-version').innerHTML = `${v.versionInfo} at <a href="${v.repository}/tree/${v.commit}">${v.commit.slice(0, 7)}</a>`
       // A pin to a branch other than main is a draft of PLATO, and says so wherever the pin is shown.
-      + (v.draft ? ` <strong class="draft">DRAFT: PLATO's ${v.ref} branch, not a release</strong>` : '');
+      + (v.draft ? ` <strong class="draft">${draftNote(v)}</strong>` : '');
     Object.assign(state, { phase: 'ready', platoCommit: v.commit, platoDraft: v.draft ? v.ref : null });
   } else if (data.type === 'detected') onDetected(data);
   else if (data.type === 'progress') onProgress(data);

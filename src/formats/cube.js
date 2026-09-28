@@ -1,4 +1,4 @@
-// RDF Data Cube (PLATO draft, issue #14). A figure from a statistical table is a PropertyValue that
+// RDF Data Cube (PLATO issue #14). A figure from a statistical table is a PropertyValue that
 // is also a qb:Observation: it has qb:dataSet (its table), one direct statement per coordinate and
 // per attribute, and plato:universe for its denominator. PLATO does not write anything twice, so a
 // PLATO document is not Data Cube as it stands: the measure is PLATO's pair (plato:property_type,

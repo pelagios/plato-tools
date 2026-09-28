@@ -161,9 +161,9 @@ export class Json2Rdf {
       if (val === null || val === undefined) { if (key !== '$schema') this._null(key); continue; }
       if (!term) {
         // A key the context does not name, but which is itself an IRI (or a compact IRI with one of
-        // the context's prefixes), is a predicate as it stands, as JSON-LD reads it. PLATO's draft
-        // (issue #14) relies on this: under a propertyValue's `dimensions` and `attributes`, both
-        // nesting keys, each key is a Data Cube dimension or attribute property.
+        // the context's prefixes), is a predicate as it stands, as JSON-LD reads it. PLATO's
+        // statistics design (issue #14) relies on this: under a propertyValue's `dimensions` and
+        // `attributes`, both nesting keys, each key is a Data Cube dimension or attribute property.
         const pred = key.startsWith('@') ? null : expandIri(key, active.prefixes);
         if (pred && isAbsoluteIri(pred) && !pred.startsWith('_:')) { this._iriKey(iri(pred), key, val, active, subj); continue; }
         this.issues({ kind: 'unmapped-key', value: key }); continue;

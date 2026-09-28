@@ -214,7 +214,7 @@ test('counts of one are singular in the summary: "1 place", "1 identity relation
 });
 
 // ---- RDF back to PLATO JSON, through the command line, for every PLATO example ------------------------
-// This path (N-Triples in, PLATO JSON out) crashed on PLATO's draft statistics example while every
+// This path (N-Triples in, PLATO JSON out) crashed on PLATO's statistics example while every
 // in-memory test passed, so each example is taken through it as a user would: to N-Triples, then to
 // a PLATO JSON document and to JSON Lines, each written, valid, and with every place.
 for (const f of readdirSync(EX).filter((x) => x.endsWith('.json'))) {

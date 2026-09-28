@@ -104,18 +104,14 @@ For a single commit rather than a branch or tag, replace the clone with
 `git init plato-tools-C && cd plato-tools-C && git fetch --depth 1 https://github.com/pelagios/plato-tools C && git checkout FETCH_HEAD`,
 which also fails if the commit does not exist, then run `npm ci` as above.
 
-## Draft: statistical figures (branch `issue-14-statistics`)
+## Statistical figures
 
-**This branch is a draft, not a release.** It vendors PLATO's own draft branch
-`issue-14-statistics` (see `public/plato/VERSION.json`; the page footer and `--version` say
-DRAFT), so that PLATO's design for statistical figures
-([issue #14](https://github.com/pelagios/place-attestation-ontology/issues/14)) can be tested with
-the real toolchain: `npx github:pelagios/plato-tools#issue-14-statistics check|convert …`. It is
-not merged into main, and the published page does not use it.
-
-In the draft, a figure from a statistical table is a property value that is also an RDF Data Cube
-observation: `dataSet` names its table, and `dimensions` and `attributes` hold its coordinates and
-the facts about it, each keyed by the IRI of a dimension or attribute property.
+PLATO records a figure from a statistical table (a census count, an amount in a return) as a
+property value that is also an RDF Data Cube observation: `dataSet` names its table, and
+`dimensions` and `attributes` hold its coordinates and the facts about it, each keyed by the IRI
+of a dimension or attribute property. PLATO's guide explains the design in
+[Statistical tables](https://pelagios.org/place-attestation-ontology/guide/statistics.html)
+([issue #14](https://github.com/pelagios/place-attestation-ontology/issues/14)).
 
 - **PLATO JSON to RDF.** A key that is an IRI becomes a predicate on the figure, as in JSON-LD: an
   `{"@id": …}` value an IRI, anything else a literal. The graph is exactly the one `jsonld.js`
@@ -141,12 +137,15 @@ the facts about it, each keyed by the IRI of a dimension or attribute property.
 - **LPF and the tables** leave a figure out, and report it: without its coordinates it would be
   stated of the place as a whole.
 
-`test/datacube.js` checks Data Cube's integrity constraints IC-1, IC-2, IC-11, IC-12 and IC-14 on
-the export, IC-12 by grouping in linear time rather than by pairs, IC-14 exempting a declared
-absence, and a constraint with nothing to evaluate reported as not tested, never as passed. On the
-draft example and on six planted defects it gives the same verdicts as the specification's own SPARQL
-queries run after its normalisation. The draft example itself fails IC-11 and IC-12: its two totals
-have no `sex`, although the structure declares it.
+`plato-tools datacube FILE…` (`src/lib/datacube.js`) checks Data Cube's integrity constraints IC-1,
+IC-2, IC-11, IC-12 and IC-14 on the export, reading it as a stream so that a file of any size can be
+checked, and gives beside each verdict how many things it evaluated. IC-12 is checked by grouping,
+in linear time, rather than by pairs. IC-14 exempts a declared absence, which is a figure with an
+`obsStatus` and no value: a status alone is not enough, since `obsStatus` is a general attribute
+("approximate" is not an absence), and a figure with a value must have its measure whatever its
+status. A constraint with nothing to evaluate is reported as not tested, never as passed. On
+PLATO's example and on six planted defects it gives the same verdicts as the specification's own
+SPARQL queries run after its normalisation, and PLATO's example passes all five.
 
 ## What it checks against
 
@@ -155,7 +154,10 @@ definitions) are vendored from a pinned commit of
 [pelagios/place-attestation-ontology](https://github.com/pelagios/place-attestation-ontology),
 recorded in `package.json` and `public/plato/VERSION.json` and shown at the foot of the page. The
 build checks that the vendored ontology is byte-identical to the pinned commit's. `npm run vendor`
-re-pins to the current head of PLATO's main branch.
+re-pins to the current head of PLATO's main branch. `node scripts/vendor-plato.mjs --ref NAME` pins
+to a PLATO branch or commit instead, for testing a design before it reaches main: such a pin is a
+draft, and `VERSION.json`, the page footer and `--version` all say so, so that it cannot pass for a
+release.
 
 The JSON Schemas give PLATO's identifiers the format `iri`, so that an address with a non-ASCII
 letter (`#André-1980`) is valid as written. The JSON Schema library's formats package does not

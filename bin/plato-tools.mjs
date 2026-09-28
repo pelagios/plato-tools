@@ -16,7 +16,7 @@ const { readFileSync } = await import('node:fs');
 const { run, TARGETS } = await import('../src/engine/pipeline.js');
 const { detect } = await import('../src/engine/input.js');
 const { nodeResources, gatherInputs, openFiles, isSystemError, NodeHost } = await import('../src/node/host.js');
-const { fmtBytes, fmtTime, formatName, progressText, summary, groups } = await import('../src/engine/words.js');
+const { fmtBytes, fmtTime, formatName, progressText, summary, groups, draftNote } = await import('../src/engine/words.js');
 
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const DEFAULT_BASE = 'https://example.org/my-dataset/';   // as the page's "Web address for your identifiers"
@@ -26,9 +26,9 @@ const HELP = `plato-tools: check and convert PLATO data from the command line.
 Usage:
   plato-tools check [options] INPUT...
   plato-tools convert --to TARGET [--out DIR] [options] INPUT...
-  plato-tools datacube [--json] FILE...     (DRAFT, issue #14) check a cube export (convert --to
-                                            ntriples --cube) against the RDF Data Cube integrity
-                                            constraints IC-1, IC-2, IC-11, IC-12 and IC-14
+  plato-tools datacube [--json] FILE...     check a cube export (convert --to ntriples --cube)
+                                            against the RDF Data Cube integrity constraints IC-1,
+                                            IC-2, IC-11, IC-12 and IC-14
 
 Each INPUT is one file, or one set of spreadsheet tables:
   - a directory is one set of tables, made of the CSV files in it;
@@ -50,8 +50,8 @@ Options:
                     places and sources are made (default: ${DEFAULT_BASE}).
   --no-typing       N-Triples output: leave out the node types and typed dates that the DEEP RDF
                     export adds (they are added by default, as in the browser).
-  --cube            N-Triples output (PLATO draft, issue #14): also write what the RDF Data
-                    Cube vocabulary expects of each statistical figure: its qb:Observation type,
+  --cube            N-Triples output: also write what the RDF Data Cube vocabulary expects of
+                    each figure from a statistical table: its qb:Observation type,
                     the measure as a direct statement, sdmx-dimension:refArea and refPeriod,
                     and the types of its table and structure. Without it, the plain PLATO graph.
   --work-dir DIR    where the working database for RDF and attestation-centric input is kept
@@ -90,7 +90,7 @@ async function main(argv) {
   const resources = await nodeResources();
   if (o.version) {
     const v = resources.version;
-    process.stdout.write(`plato-tools ${PKG.version}, checking against PLATO ${v.versionInfo} at ${v.commit}${v.draft ? ` (DRAFT: PLATO's ${v.ref} branch, not a release)` : ''}\n`);
+    process.stdout.write(`plato-tools ${PKG.version}, checking against PLATO ${v.versionInfo} at ${v.commit}${v.draft ? ` (${draftNote(v)})` : ''}\n`);
     return 0;
   }
   const [action, ...args] = positionals;

@@ -57,7 +57,7 @@ export class Rdf2Json {
     this.g = graph; this.loss = onLoss; this.issue = onIssue;
     this.inv = new Map();
     this.inlined = new Set();   // shared nodes with blank-node children already written in full
-    // PLATO draft (issue #14): a document's statistical tables, and what each table's structure
+    // PLATO issue #14: a document's statistical tables, and what each table's structure
     // says its components are, read once per table.
     const ds = this.root.terms.get('dataSets');
     this.dataSetsIri = ds && ds.iri ? ds.iri : null;
@@ -78,7 +78,7 @@ export class Rdf2Json {
       const term = active.terms.get(key);
       if (!term || term.drop) return;
       if (term.nest) {
-        // dimensions and attributes (PLATO draft, issue #14) nest keys that are IRIs, not a schema
+        // dimensions and attributes (PLATO issue #14) nest keys that are IRIs, not a schema
         // definition's keys: they are read by _figure, not by this mapping.
         if (!NEST_DEF[key]) return;
         const nd = this.core.$defs[NEST_DEF[key]];
@@ -226,7 +226,7 @@ export class Rdf2Json {
   header(docId) {
     const g = this.node(docId, '$gazetteer', this.root);
     const head = { profile: 'place-centric', gazetteer: docId.startsWith('_:') ? g : { '@id': docId, ...g } };
-    // The document's statistical tables (PLATO draft, issue #14), dcterms:hasPart of the gazetteer.
+    // The document's statistical tables (PLATO issue #14), dcterms:hasPart of the gazetteer.
     if (this.dataSetsIri) {
       const ctx = child(this.root, this.root.terms.get('dataSets'));
       const parts = this.g.out(docId).filter((t) => t.p === this.dataSetsIri && t.o.termType !== 'Literal');
@@ -239,7 +239,7 @@ export class Rdf2Json {
     return head;
   }
 
-  // ---- statistical figures (PLATO draft, issue #14) ----------------------------------------------
+  // ---- statistical figures (PLATO issue #14) -----------------------------------------------------
   /** What a table's structure, where the graph describes it, says its components are. */
   _table(ds) {
     let t = this.tables.get(ds);

@@ -124,7 +124,7 @@ export function versionLosses(gazetteer, loss) {
   for (const k of VERSION_KEYS) if (gazetteer[k] !== undefined && gazetteer[k] !== null) loss({ kind: 'gazetteer-version', value: k });
 }
 
-// ---- statistical figures (PLATO draft, issue #14) ---------------------------------------------------
+// ---- statistical figures (PLATO issue #14) ----------------------------------------------------------
 /**
  * True when a property value is a figure from a statistical table, or carries what one does: a table
  * (dataSet), coordinates (dimensions), facts about the figure (attributes) or a denominator

@@ -270,7 +270,7 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
       if (r.relationLabel) loss({ kind: 'relation-label' });
       rows.relations.push({ place_id: pid, relation_type: rt, related_place_id: ids.place(r.relatesTo, null, false), ...common });
     }
-    // A statistical figure keeps its own CSVW description (PLATO draft, issue #14, decision 4): the
+    // A statistical figure keeps its own CSVW description (PLATO issue #14, decision 4): the
     // properties sheet has no columns for its table or coordinates, and without them it says something false.
     for (const pv of a.properties || []) if (isFigure(pv)) loss({ kind: 'statistical-figure', value: pv['@id'] || pv.label || pv.property });
     for (const pv of (a.properties || []).filter((x) => !isFigure(x))) rows.properties.push({ place_id: pid, property_uri: pv.property, property_label: pv.label || '',

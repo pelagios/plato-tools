@@ -11,6 +11,12 @@ const ONE = { places: 'place', attestations: 'attestation', 'identity relations'
 const MANY = { observations: 'Data Cube observations' };
 const count = (n, what) => `${n.toLocaleString('en-GB')} ${n === 1 ? ONE[what] || what : MANY[what] || what}`;
 
+/**
+ * What the page and the command line add to a PLATO pin that is not the head of PLATO's main branch
+ * (`npm run vendor -- --ref NAME`): a draft, which must never pass for a release. Empty otherwise.
+ */
+export const draftNote = (v) => (v?.draft ? `DRAFT: PLATO's ${v.ref} branch, not a release` : '');
+
 /** A progress event in words: "Loading into the working database: 1,000 triples (3 s)". */
 export function progressText(p) {
   const bits = [];

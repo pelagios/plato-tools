@@ -73,7 +73,7 @@ export function explainSchema(errs, fromTables) {
     if (p === 'toponym') return 'A name has no spelling (toponym).' + col('name');
     if (p === 'identityType') return 'An identity match does not say what kind of match it is (exactMatch, closeMatch, related, or unspecified if the source does not say): PLATO JSON requires it.' + col('match_type');
     if (p === 'title') return 'A source has no title.' + col('title');
-    // PLATO draft (issue #14): a value is required unless the figure's attributes give obsStatus.
+    // PLATO issue #14: a value is required unless the figure's attributes give obsStatus.
     if (p === 'value' && /properties\/\d+$/.test(at)) return 'A property value has no value. Give it, or, for a figure that has none (a printed dash), say why with sdmx-attribute:obsStatus in its attributes; a dash is never written as 0.';
     return `Something required is missing: ${p}.`;
   }
@@ -100,7 +100,7 @@ async function* platoJsonl(file, rep) {
   }
 }
 async function* platoJson(file) {
-  // dataSets (PLATO draft, issue #14) are the document's statistical tables, part of its header.
+  // dataSets (PLATO issue #14) are the document's statistical tables, part of its header.
   const keys = ['gazetteer', 'profile', '$schema', 'dataSets'];
   const head = {};
   for await (const { path, value } of jsonDocument(file, { arrays: ['spatialEntities', 'newSpatialEntities', 'attestations', 'identityRelations'], keys, onlyKeys: true })) head[path] = value;
@@ -407,7 +407,7 @@ function withdrawnInStore(store, rep) {
   }
   return resolved(edges, rep);
 }
-// What RDF -> JSON says about statistical figures and tables (PLATO draft, issue #14).
+// What RDF -> JSON says about statistical figures and tables (PLATO issue #14).
 const ISSUE_TEXT = {
   'figure-undeclared': "A statement on a statistical figure that its table's structure does not declare, and that is not typed or named as an attribute, is read as one of the figure's coordinates (dimensions). The graph is the same either way.",
   'table-without-address': 'A statistical table has no web address; PLATO JSON requires one for each table in dataSets.',
@@ -470,7 +470,7 @@ async function makeWriter(target, env, rep, options, typing, outputs, input) {
     let triples = 0, buf = null;
     const write = (s, p, o) => { triples++; sink.write(tripleNT(s, p, o)); };
     const wrapped = new Json2Rdf(env.resources.context, (s, p, o) => { write(s, p, o); if (buf) buf.push([s, p, o]); }, { ...typing, onIssue: () => {} });
-    // The Data Cube export (PLATO draft, issue #14): the plain graph, and after each header and
+    // The Data Cube export (PLATO issue #14): the plain graph, and after each header and
     // record the statements Data Cube expects that PLATO does not write (src/formats/cube.js).
     const cube = options.cube ? new CubeExport(write, (kind, example) => rep.warning(kind, CUBE_TEXT[kind] || kind, example)) : null;
     return {

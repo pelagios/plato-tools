@@ -50,7 +50,7 @@ test('plato-tools datacube: 0 when every constraint passes, 1 when one fails, 2 
   r = cli('datacube', bad);
   assert.match(r.stdout, /IC-12  FAILS \(1\)/);
   assert.equal(r.status, 1);
-  // A real cube export that passes everything: the draft example, through convert --cube.
+  // A real cube export that passes everything: PLATO's example, through convert --cube.
   const ex = `${PLATO_REPO}/schemas/examples/place-centric-statistics.json`;
   if (existsSync(ex)) {
     const c = cli('convert', '--to', 'ntriples', '--cube', '--out', dir, '--overwrite', ex);

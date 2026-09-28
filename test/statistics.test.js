@@ -1,14 +1,11 @@
 import { PLATO_REPO } from './paths.js';
-// PLATO's draft design for statistical figures (issue #14, branch issue-14-statistics), which this
-// branch of the tools vendors so that the design can be tested with the real toolchain. A figure is
-// a PropertyValue that is also a Data Cube observation: its table (dataSet), its coordinates
-// (dimensions) and facts about it (attributes) are direct statements on it, keyed by IRI. Covered:
-// the draft pin is marked as a draft; JSON -> RDF gives jsonld.js's graph for keys that are IRIs;
-// RDF -> JSON puts them back, validly and losslessly; the header's dataSets both ways; the cube
-// export (--cube); the rule that a value is required unless obsStatus says why not; and the Data
-// Cube integrity constraints on the export.
-//
-// Run with PLATO_REPO set to a checkout of PLATO's issue-14-statistics branch.
+// PLATO's design for statistical figures (issue #14). A figure is a PropertyValue that is also a
+// Data Cube observation: its table (dataSet), its coordinates (dimensions) and facts about it
+// (attributes) are direct statements on it, keyed by IRI. Covered: JSON -> RDF gives jsonld.js's
+// graph for keys that are IRIs; RDF -> JSON puts them back, validly and losslessly; the header's
+// dataSets both ways; the cube export (--cube); the rule that a value is required unless obsStatus
+// says why not; and the Data Cube integrity constraints on the export. That the pin is PLATO main,
+// and that a draft pin is marked as one, is in pin.test.js.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
@@ -22,8 +19,8 @@ import { refPeriod } from '../src/formats/cube.js';
 import { integrity } from './datacube.js';
 
 const STATS = `${PLATO_REPO}/schemas/examples/place-centric-statistics.json`;
-test('the draft example is there to test against', () => {
-  assert.ok(existsSync(STATS), `${STATS} not found: set PLATO_REPO to a checkout of PLATO's issue-14-statistics branch`);
+test('PLATO\'s statistics example is there to test against', () => {
+  assert.ok(existsSync(STATS), `${STATS} not found: set PLATO_REPO to a checkout of PLATO at the pinned commit`);
 });
 const EXAMPLE = existsSync(STATS) ? JSON.parse(readFileSync(STATS, 'utf8')) : null;
 const doc = () => structuredClone(EXAMPLE);
@@ -43,19 +40,6 @@ const predicates = (nt) => lines(nt).map((l) => l.match(/^\S+ <([^>]+)>/)?.[1]);
 const CUBE_P = new Set([SD + 'refArea', SD + 'refPeriod', 'https://whgazetteer.org/example/measure/persons']);
 const cubeLines = (nt) => lines(nt).filter((l) => CUBE_P.has(l.match(/^\S+ <([^>]+)>/)?.[1]) || new RegExp(`> <${QB}(Observation|DataSet|DataStructureDefinition)> \\.$`).test(l)).sort();
 const figures = (d) => d.spatialEntities.flatMap((e) => (e.attestations || []).flatMap((a) => a.properties || []));
-
-// ---- the draft pin ------------------------------------------------------------------------------
-test('the draft pin is recorded as a draft, in VERSION.json and in package.json, and they agree', () => {
-  const v = JSON.parse(readFileSync('public/plato/VERSION.json', 'utf8')), pkg = JSON.parse(readFileSync('package.json', 'utf8'));
-  assert.equal(v.draft, true); assert.equal(v.ref, 'issue-14-statistics');
-  assert.match(v.note, /not a release/);
-  assert.deepEqual([pkg.plato.commit, pkg.plato.ref, pkg.plato.draft], [v.commit, v.ref, true]);
-});
-test('the command line names the draft pin as a draft', () => {
-  const r = spawnSync(process.execPath, [fileURLToPath(new URL('../bin/plato-tools.mjs', import.meta.url)), '--version'], { encoding: 'utf8' });
-  assert.equal(r.status, 0);
-  assert.match(r.stdout, /DRAFT: PLATO's issue-14-statistics branch, not a release/);
-});
 
 // ---- JSON -> RDF: keys that are IRIs --------------------------------------------------------------
 const compiled = (d) => {
@@ -85,7 +69,7 @@ test('control: the comparison notices a dimension that is left out', async () =>
   const without = lines(kept).filter((l) => !l.includes(`${SD}sex>`)).join('\n');
   assert.notEqual(await canon(without), await canon(await jsonld.toRDF({ ...d, '@context': CTX['@context'] }, { format: 'application/n-quads', safe: false })));
 });
-test('the draft example: each coordinate and attribute is a statement on the figure, never on the place', async () => {
+test('the example: each coordinate and attribute is a statement on the figure, never on the place', async () => {
   const { r, text } = await nt(doc());
   assert.deepEqual(errors(r), []); assert.deepEqual(warnings(r), []);
   assert.ok(lines(text).includes(`<${T}/agri/m> <${SD}sex> <http://purl.org/linked-data/sdmx/2009/code#sex-M> .`));
@@ -94,7 +78,7 @@ test('the draft example: each coordinate and attribute is a statement on the fig
 });
 
 // ---- RDF -> JSON: back under dimensions and attributes ---------------------------------------------
-test('the draft example: JSON -> RDF -> JSON gives back the same document, key for key, and it is valid', async () => {
+test('the example: JSON -> RDF -> JSON gives back the same document, key for key, and it is valid', async () => {
   const { text } = await nt(doc(), 'place-centric-statistics.json');
   const { r, doc: back } = await jsonBack(text);
   assert.deepEqual(errors(r), []); assert.deepEqual(losses(r), []); assert.deepEqual(warnings(r), []);
@@ -191,7 +175,7 @@ test('refPeriod: one year is an xsd:gYear, one day an xsd:date, anything else is
   assert.deepEqual(refPeriod('-12000', '-12000'), { value: '-12000', datatype: Y });
   for (const [a, b] of [['1851', '1852'], ['1851-12-31', '1852-01-01'], ['1851', undefined], [undefined, '1851'], ['c. 1851', '1851'], ['1851', 'about 1851']]) assert.equal(refPeriod(a, b), null, `${a} to ${b}`);
 });
-test('--cube on the draft example adds exactly what Data Cube expects, and nothing else changes', async () => {
+test('--cube on the example adds exactly what Data Cube expects, and nothing else changes', async () => {
   const plain = await nt(doc(), 'place-centric-statistics.json');
   const cube = await nt(doc(), 'place-centric-statistics.json', { cube: true });
   assert.deepEqual(errors(cube.r), []); assert.deepEqual(warnings(cube.r), []);
@@ -290,7 +274,7 @@ for (const target of ['lpf', 'tables']) {
 // ---- the Data Cube integrity constraints, on the export ------------------------------------------------
 const cubeOf = async (d, name = 'c.json') => (await nt(d, name, { cube: true })).text;
 const status = (results) => Object.fromEntries(results.map((x) => [x.ic, x.status]));
-/** The draft example with a code for "both sexes" on its two totals, as decision 9 asks of every coordinate. */
+/** The example with a code for "both sexes" on its two totals, as decision 9 asks of every coordinate. */
 function clean() {
   const d = doc();
   for (const f of figures(d)) if (!f.dimensions[SD + 'sex']) f.dimensions[SD + 'sex'] = { '@id': 'http://purl.org/linked-data/sdmx/2009/code#sex-T' };
@@ -301,7 +285,7 @@ test('Data Cube: a clean cube passes IC-1, IC-2, IC-11, IC-12 and IC-14, each wi
   assert.deepEqual(status(results), { 'IC-1': 'pass', 'IC-2': 'pass', 'IC-11': 'pass', 'IC-12': 'pass', 'IC-14': 'pass' });
   for (const x of results) assert.ok(x.evaluated > 0, x.ic);
 });
-test('Data Cube: the draft example as published passes IC-1, IC-2, IC-11, IC-12 and IC-14', async () => {
+test('Data Cube: the example as published passes IC-1, IC-2, IC-11, IC-12 and IC-14', async () => {
   // PLATO 3ef2063 gave the example's two totals the SDMX code sex-T; before that they had no sex,
   // though the structure declares it, and failed IC-11 and IC-12. The control below keeps that case.
   const results = integrity(await cubeOf(doc()));
