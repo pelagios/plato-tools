@@ -156,7 +156,7 @@ export class Rdf2Json {
       else if (tgt[k] === undefined) tgt[k] = value;
       // Identical repeats are copies of one value (DEEP writes a source's date out once per record
       // that cites it, so the source gathers many identical date nodes); only differences matter.
-      else if (JSON.stringify(tgt[k]) !== JSON.stringify(value)) this.issue({ kind: 'multiple-values', key: k, node: id });
+      else if (JSON.stringify(tgt[k]) !== JSON.stringify(value)) this.issue({ kind: 'multiple-values', key: k, node: id, value: JSON.stringify(value) });
     };
     let lat, long;
     for (const { p, o } of this.g.out(id)) {
@@ -310,7 +310,7 @@ export class Rdf2Json {
     }
     const box = (obj[where] ||= {});
     if (box[p] === undefined) box[p] = v;
-    else if (JSON.stringify(box[p]) !== JSON.stringify(v)) this.issue({ kind: 'multiple-values', key: p, node: id });
+    else if (JSON.stringify(box[p]) !== JSON.stringify(v)) this.issue({ kind: 'multiple-values', key: p, node: id, value: JSON.stringify(v) });
   }
   /** A table's structure: its components listed, where the graph describes them, or its IRI. */
   _structure(o) {

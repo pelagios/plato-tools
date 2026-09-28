@@ -374,10 +374,23 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     beat('indexing', { triples: store.count, force: true });
     store.index();
     if (isRdf) checkGraph(store, res, rep);
+    // A node with several different values where PLATO JSON holds one: the others are not carried
+    // over, so it is a loss, counted once per distinct value dropped. The same node is met again
+    // wherever it is cited (a source in thousands of records), and counting each meeting made
+    // Pleiades' 35,294 dropped values read as 265 million. Each node and key is shown once.
+    const seenValue = new Set(), seenNode = new Set(), CAP = 2_000_000;
+    const multipleValues = (i) => {
+      const nk = i.node + '\u0001' + i.key, vk = nk + '\u0001' + (i.value ?? '');
+      if (seenValue.has(vk)) return;
+      if (seenValue.size < CAP) seenValue.add(vk);
+      const first = !seenNode.has(nk);
+      if (first && seenNode.size < CAP) seenNode.add(nk);
+      rep.loss('multiple-values', `A value that PLATO JSON holds once has several different values here; the first is kept and the others are left out (${i.key})`, first ? i.node : undefined);
+    };
     const r2j = new Rdf2Json({ context: res.context, core: res.core, profile: res.profiles['place-centric'], types: res.types }, store, {
       withdrawn: currentOnly ? withdrawnInStore(store, rep) : null,
       onLoss: (l) => rep.loss(l.kind, `${LOSS_TEXT[l.kind] || l.kind}`, l.predicate || l.value),
-      onIssue: (i) => rep.warning(i.kind, i.kind === 'multiple-values' ? `A value that PLATO JSON allows once appears several times; the first is kept (${i.key})` : ISSUE_TEXT[i.kind] || i.kind, i.kind === 'figure-undeclared' ? i.key : i.node),
+      onIssue: (i) => (i.kind === 'multiple-values' ? multipleValues(i) : rep.warning(i.kind, ISSUE_TEXT[i.kind] || i.kind, i.kind === 'figure-undeclared' ? i.key : i.node)),
     });
     const docs = [...store.subjects(TYPE, PLATO + 'Gazetteer')];
     const docId = docs[0] || firstSubjectWith(store, PLATO + 'contains_entity') || firstSubjectWith(store, PLATO + 'contains_attestation');

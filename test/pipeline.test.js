@@ -224,3 +224,19 @@ test('a gzip file broken from the start is reported as unreadable when it is det
   assert.equal(d.format, null);
   assert.match(d.reason, /Nothing could be read from it/);
 });
+
+// A source with two different titles, cited from many places: the extra title is one value lost,
+// however many records cite the source (Pleiades' 35,294 dropped values were reported 265 million
+// times as a warning, under "No problems found").
+test('several values where PLATO JSON holds one: a loss, counted once per distinct value dropped', async () => {
+  const places = Array.from({ length: 50 }, (_, n) => ({ '@id': `https://example.org/p/${n}`, label: `P${n}`,
+    attestations: [{ names: [{ toponym: `P${n}` }], sources: [{ '@id': 'https://example.org/bib/1', title: n % 2 ? 'Second title' : 'First title' }] }] }));
+  const doc = { profile: 'place-centric', gazetteer: { '@id': 'https://example.org/g', title: 't' }, spatialEntities: places };
+  const nt = await go([textFile(JSON.stringify(doc), 'mv.json')], 'convert', 'ntriples');
+  const r = await go([textFile(outText(nt.e, 'mv.nt'), 'mv.nt')], 'convert', 'plato-jsonl');
+  const items = r.report.items.filter((i) => i.kind === 'multiple-values');
+  assert.equal(items.length, 1, JSON.stringify(items));
+  assert.equal(items[0].severity, 'loss', 'not carried over is a loss, not a warning');
+  assert.equal(items[0].count, 1, 'one title dropped, not one per citing record');
+  assert.deepEqual(items[0].examples, ['https://example.org/bib/1']);
+});
