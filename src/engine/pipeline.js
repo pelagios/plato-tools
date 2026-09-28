@@ -14,7 +14,7 @@ import { tripleNT } from '../lib/ntriples.js';
 import { TripleStore } from '../lib/store.js';
 import { PLATO, RDF } from '../lib/context.js';
 import { featureToRecord, recordToFeature } from '../formats/lpf.js';
-import { collectWithdrawn, versionLosses, tableLosses } from '../formats/shared.js';
+import { collectWithdrawn, resolveWithdrawn, addWithdrawal, versionLosses, tableLosses } from '../formats/shared.js';
 import { CubeExport, CUBE_TEXT } from '../formats/cube.js';
 import { validateTables, rowToAttestation, tableIds, recordToRows, identityRow, ATTESTATION_SHEETS, tableSchemas, cellChecker } from '../formats/tables.js';
 import { lineChunks, lines, jsonDocument, TABLE_SHEETS, DataError } from './input.js';
@@ -292,6 +292,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       else if (ev.type === 'record') collectWithdrawn(ev.value?.attestations, withdrawn);
       else if (ev.type === 'attestation') collectWithdrawn([ev.value], withdrawn);
     }
+    withdrawn = resolved(withdrawn, rep);
   }
   if (action === 'convert' && options.cube && target !== 'ntriples') rep.warning('cube-not-ntriples', 'The Data Cube export applies to N-Triples output only, so it is not made here.');
   if (action === 'convert') writer = await makeWriter(target, env, rep, { ...options, idrsBySubject, withdrawn }, typing, outputs, input);
@@ -362,7 +363,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     store.index();
     if (isRdf) checkGraph(store, res, rep);
     const r2j = new Rdf2Json({ context: res.context, core: res.core, profile: res.profiles['place-centric'], types: res.types }, store, {
-      withdrawn: currentOnly ? withdrawnInStore(store) : null,
+      withdrawn: currentOnly ? withdrawnInStore(store, rep) : null,
       onLoss: (l) => rep.loss(l.kind, `${LOSS_TEXT[l.kind] || l.kind}`, l.predicate || l.value),
       onIssue: (i) => rep.warning(i.kind, i.kind === 'multiple-values' ? `A value that PLATO JSON allows once appears several times; the first is kept (${i.key})` : ISSUE_TEXT[i.kind] || i.kind, i.kind === 'figure-undeclared' ? i.key : i.node),
     });
@@ -390,15 +391,21 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   progress({ phase: 'done', ...rep.counts, elapsedMs: Date.now() - t0 });
   return { report: rep.toJSON(), outputs };
 }
-/** What the graph retracts or supersedes: node key -> 'retracted' | 'superseded' (retracted wins). */
-function withdrawnInStore(store) {
-  const m = new Map();
+/** Resolve a document's withdrawals, reporting any loop of them as an error in the data. */
+function resolved(edges, rep) {
+  const { status, cycles } = resolveWithdrawn(edges);
+  for (const c of cycles) rep.error('withdrawal-cycle', 'Attestations withdraw one another in a loop (a retraction or supersession that, followed round, withdraws itself), so none of them is shown as current', c);
+  return status;
+}
+/** What the graph retracts or supersedes, resolved: node key -> 'retracted' | 'superseded'. */
+function withdrawnInStore(store, rep) {
+  const edges = new Map();
   for (const [type, kind] of [[PLATO + 'Supersedes', 'superseded'], [PLATO + 'Retracts', 'retracted']]) {
     for (const s of store.subjects(PLATO + 'has_meta_type', type)) {
-      for (const o of store.objects(s, PLATO + 'meta_attestation_about')) if (o.termType !== 'Literal') m.set(o.termType === 'BlankNode' ? '_:' + o.value : o.value, kind);
+      for (const o of store.objects(s, PLATO + 'meta_attestation_about')) if (o.termType !== 'Literal') addWithdrawal(edges, o.termType === 'BlankNode' ? '_:' + o.value : o.value, s, kind);
     }
   }
-  return m;
+  return resolved(edges, rep);
 }
 // What RDF -> JSON says about statistical figures and tables (PLATO draft, issue #14).
 const ISSUE_TEXT = {

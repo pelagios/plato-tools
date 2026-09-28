@@ -26,9 +26,10 @@ export const isAlternative = (meta) => [].concat(meta || []).some((m) => metaTyp
 const WITHDRAWING = new Map([[PLATO + 'Retracts', 'retracted'], [PLATO + 'Supersedes', 'superseded']]);
 
 /**
- * Add to `into` (attestation @id -> 'retracted' | 'superseded') the targets of every Retracts or
- * Supersedes meta-attestation among `attestations`. A target both retracted and superseded counts
- * as retracted: withdrawn is the stronger statement.
+ * Add to `into` (target @id -> [{ by, kind }]) every Retracts or Supersedes meta-attestation among
+ * `attestations`: which attestation withdraws which, and how. `by` is the withdrawing attestation's
+ * @id, or null when it has none (it can then never be withdrawn itself). Resolve with
+ * resolveWithdrawn(): whether a target is withdrawn depends on whether its withdrawer still holds.
  */
 export function collectWithdrawn(attestations, into = new Map()) {
   for (const a of attestations || []) {
@@ -36,10 +37,51 @@ export function collectWithdrawn(attestations, into = new Map()) {
     for (const m of [].concat(a.meta || [])) {
       const kind = WITHDRAWING.get(metaType(m));
       if (!kind || typeof m.targetAttestation !== 'string') continue;
-      if (into.get(m.targetAttestation) !== 'retracted') into.set(m.targetAttestation, kind);
+      addWithdrawal(into, m.targetAttestation, typeof a['@id'] === 'string' ? a['@id'] : null, kind);
     }
   }
   return into;
+}
+export function addWithdrawal(edges, target, by, kind) {
+  (edges.get(target) || edges.set(target, []).get(target)).push({ by, kind });
+  return edges;
+}
+
+/**
+ * Which targets are withdrawn in the current state (PLATO 5e7901c): a supersession or retraction
+ * takes effect only while it holds itself, so retracting a retraction restores its target, and a
+ * chain resolves the same way. Returns { status: target -> 'retracted' | 'superseded', cycles },
+ * where a target withdrawn by a holding retraction counts as retracted (the stronger statement),
+ * and `cycles` lists attestations caught in a loop of withdrawals, an error in the data; within a
+ * loop every withdrawal is taken to hold, so nothing in it is shown as current.
+ */
+export function resolveWithdrawn(edges) {
+  // First the loops: follow each target to whatever withdraws it; any attestation reached again
+  // while its own path is still open is in a loop, and so is everything on the path back to it.
+  const inLoop = new Set(), done = new Set(), onPath = [];
+  const visit = (id) => {
+    if (id === null || done.has(id)) return;
+    const at = onPath.indexOf(id);
+    if (at >= 0) { for (const x of onPath.slice(at)) inLoop.add(x); return; }
+    onPath.push(id);
+    for (const e of edges.get(id) || []) visit(e.by);
+    onPath.pop(); done.add(id);
+  };
+  for (const t of edges.keys()) visit(t);
+  // Then each target holds unless something that holds withdraws it; a loop's members never hold.
+  const status = new Map(), memo = new Map();
+  const kindOf = (id) => { let k = null; for (const e of edges.get(id) || []) { k = k === 'retracted' ? k : e.kind; } return k; };
+  const holds = (id) => {
+    if (id === null) return true;
+    if (memo.has(id)) return memo.get(id);
+    let kind = inLoop.has(id) ? kindOf(id) : null;
+    if (!kind) for (const e of edges.get(id) || []) if (holds(e.by)) { kind = kind === 'retracted' ? kind : e.kind; if (kind === 'retracted') break; }
+    memo.set(id, !kind);
+    if (kind) status.set(id, kind);
+    return !kind;
+  };
+  for (const t of edges.keys()) holds(t);
+  return { status, cycles: [...inLoop] };
 }
 
 /**
@@ -50,11 +92,13 @@ export function collectWithdrawn(attestations, into = new Map()) {
  */
 export function currentAttestations(rec, withdrawn, loss) {
   const atts = rec.attestations || [];
-  const own = collectWithdrawn(atts);
-  if (!own.size && !(withdrawn && withdrawn.size)) return atts;
+  // `withdrawn` is the whole document's resolution (resolveWithdrawn().status); without it, this
+  // record's own withdrawals are resolved here.
+  const status = withdrawn || resolveWithdrawn(collectWithdrawn(atts)).status;
+  if (!status.size) return atts;
   return atts.filter((a) => {
     const id = a && a['@id'];
-    const kind = typeof id === 'string' && (own.get(id) || (withdrawn && withdrawn.get(id)));
+    const kind = typeof id === 'string' && status.get(id);
     if (!kind) return true;
     loss({ kind, value: id });
     return false;
