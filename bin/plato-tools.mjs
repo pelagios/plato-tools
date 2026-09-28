@@ -26,6 +26,9 @@ const HELP = `plato-tools: check and convert PLATO data from the command line.
 Usage:
   plato-tools check [options] INPUT...
   plato-tools convert --to TARGET [--out DIR] [options] INPUT...
+  plato-tools datacube [--json] FILE...     (DRAFT, issue #14) check a cube export (convert --to
+                                            ntriples --cube) against the RDF Data Cube integrity
+                                            constraints IC-1, IC-2, IC-11, IC-12 and IC-14
 
 Each INPUT is one file, or one set of spreadsheet tables:
   - a directory is one set of tables, made of the CSV files in it;
@@ -92,7 +95,8 @@ async function main(argv) {
   }
   const [action, ...args] = positionals;
   if (!action) return usage('say what to do: check or convert.');
-  if (action !== 'check' && action !== 'convert') return usage(`"${action}" is not a command; the commands are check and convert.`);
+  if (action === 'datacube') return datacube(args, o);
+  if (action !== 'check' && action !== 'convert') return usage(`"${action}" is not a command; the commands are check, convert and datacube.`);
   if (!args.length) return usage(`name at least one input to ${action}.`);
   if (action === 'convert' && !o.to) return usage(`convert needs --to, one of: ${Object.keys(TARGETS).join(', ')}.`);
   if (action === 'convert' && !TARGETS[o.to]) return usage(`"${o.to}" is not a target; the targets are ${Object.keys(TARGETS).join(', ')}.`);
@@ -211,3 +215,30 @@ function describeTotal(t) {
 }
 
 process.exitCode = await main(process.argv.slice(2));
+
+/**
+ * Check cube exports against the Data Cube integrity constraints, streaming each file so that one of
+ * any size can be checked. Exit 0 when every constraint passed, 1 when any failed or had nothing to
+ * evaluate (a constraint over nothing is not tested, never passed), 2 when a file cannot be read.
+ */
+async function datacube(files, o) {
+  if (!files.length) return usage('name at least one N-Triples cube export to check.');
+  const { integrityOfFile } = await import('../src/lib/datacube.js');
+  const { openFiles } = await import('../src/node/host.js');
+  let code = 0;
+  for (const path of files) {
+    let results;
+    try { const [f] = await openFiles([path]); results = await integrityOfFile(f); }
+    catch (e) { process.stdout.write(o.json ? JSON.stringify({ input: path, status: 'failed', message: e.message }) + '\n' : `${path}: could not be checked: ${e.message}\n`); code = 2; continue; }
+    const bad = results.filter((r) => r.status !== 'pass');
+    if (bad.length && code < 1) code = 1;
+    if (o.json) { process.stdout.write(JSON.stringify({ input: path, results: results.map(({ ic, status, evaluated, violations }) => ({ ic, status, evaluated, violations: violations.slice(0, 20), violationCount: violations.length })) }) + '\n'); continue; }
+    process.stdout.write(`${path}:\n`);
+    for (const r of results) {
+      const word = r.status === 'pass' ? 'passes' : r.status === 'fail' ? `FAILS (${r.violations.length.toLocaleString('en-GB')})` : 'NOT TESTED: nothing to evaluate';
+      process.stdout.write(`  ${r.ic.padEnd(6)} ${word}, ${r.evaluated.toLocaleString('en-GB')} evaluated\n`);
+      for (const v of r.violations.slice(0, 5)) process.stdout.write(`         ${v}\n`);
+    }
+  }
+  return code;
+}
