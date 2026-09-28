@@ -576,14 +576,14 @@ function tablesWriter(env, rep, options, outputs, stem, loss) {
       return p.place_id;
     },
     source(src) {
-      if (!src) { if (!sources.has('')) sources.set('', { source_id: 'none', title: 'No source given', citation: '', uri: '', date: 'undated', from: '', to: '', derived_from: '' }); return 'none'; }
+      if (!src) { if (!sources.has('')) sources.set('', { source_id: 'none', title: 'No source given', citation: '', uri: '', date: 'undated', from: '', to: '', derived_from: '', licence: '' }); return 'none'; }
       const s = typeof src === 'string' ? { '@id': src } : src;
       const key = s['@id'] || JSON.stringify([s.title, s.citation, s.uri]);
       let r = sources.get(key);
       if (!r) {
         const ts = s.timespan || {};
         r = { source_id: shortId(s['@id'], 'source'), title: s.title || s['@id'], citation: s.citation || '', uri: s.uri || '', date: ts.sourceLabel || ts.label || (ts.startEarliest ? [ts.startEarliest, ts.endLatest].filter(Boolean).join('-') : 'undated'),
-          from: ts.startEarliest || '', to: ts.endLatest || '', derived_from: '' };
+          from: ts.startEarliest || '', to: ts.endLatest || '', derived_from: '', licence: typeof s.licence === 'string' ? s.licence : '' };
         sources.set(key, r);
         sourceLosses(s, loss);
         if (s['@id'] && s['@id'] !== minted.sourceIri(r.source_id)) loss({ kind: 'source-address', value: s['@id'] });

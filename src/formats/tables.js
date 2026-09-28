@@ -118,6 +118,8 @@ export function rowToAttestation(sheet, row, ids) {
     certainty: num(row.certainty),
     certaintyLevel: row.certainty_level ? PLATO + row.certainty_level : undefined,
     negated: denied(row.denied),
+    // How firmly the source itself says it (plato:source_stance): the tables write the concept's suffix.
+    sourceStance: row.stance ? PLATO + 'Stance' + row.stance : undefined,
     notes: row.notes,
   });
   if (sheet === 'names') {
@@ -153,13 +155,19 @@ export function tableIds(base, sourcesById) {
   return {
     place: (id) => b + 'place/' + encodeURIComponent(id),
     sourceIri: (id) => b + 'source/' + encodeURIComponent(id),
-    source(id) {
+    source(id, seen = new Set()) {
       const r = sourcesById(id);
       if (!r) return b + 'source/' + encodeURIComponent(id);
+      // The source it derives from is written in full, as PLATO JSON allows, so that a source cited only
+      // as another's original keeps its title and citation; a loop of derivations stops at an address.
+      seen.add(id);
+      const from = !r.derived_from ? undefined : seen.has(r.derived_from) || !sourcesById(r.derived_from)
+        ? b + 'source/' + encodeURIComponent(r.derived_from) : this.source(r.derived_from, seen);
       return clean({
         '@id': b + 'source/' + encodeURIComponent(id), title: r.title, citation: r.citation, uri: r.uri, authorityType: 'source',
         timespan: r.date || r.from || r.to ? clean({ sourceLabel: r.date, startEarliest: r.from, endLatest: r.to }) : undefined,
-        derivedFrom: r.derived_from ? b + 'source/' + encodeURIComponent(r.derived_from) : undefined,
+        derivedFrom: from,
+        licence: r.licence,
       });
     },
   };
@@ -174,13 +182,13 @@ export { ATTESTATION_SHEETS };
 export const TABLE_KEEPS = {
   gazetteer: new Set(['version', 'status', 'isVersionOf', 'previousVersion']),   // reported by versionLosses
   spatialEntity: new Set(['@id', 'label', 'ccodes', 'entityIdentifier', 'attestations', 'identityRelations']),
-  attestation: new Set(['about', 'names', 'geometries', 'timespans', 'types', 'properties', 'relations', 'sources', 'citations', 'meta', 'certainty', 'certaintyLevel', 'certaintyNote', 'negated', 'notes', 'occurrenceCount', 'occurrenceContext', 'formStatus']),
+  attestation: new Set(['about', 'names', 'geometries', 'timespans', 'types', 'properties', 'relations', 'sources', 'citations', 'meta', 'certainty', 'certaintyLevel', 'certaintyNote', 'negated', 'sourceStance', 'notes', 'occurrenceCount', 'occurrenceContext', 'formStatus']),
   name: new Set(['toponym', 'language', 'script', 'romanized', 'nameType', 'sourceLabel', 'qualification']),
   geometry: new Set(['reprPoint', 'geojson', 'wkt', 'role', 'precisionKm', 'sourceLabel', 'qualification']),
   timespan: new Set(['startEarliest', 'startLatest', 'endEarliest', 'endLatest', 'label', 'sourceLabel', 'qualification']),
   type: new Set(['identifier', 'label', 'sourceLabel', 'qualification']),
   propertyValue: new Set(['property', 'label', 'value', 'unit', 'qualification', 'dataSet', 'dimensions', 'attributes', 'universe']),
-  source: new Set(['@id', 'title', 'citation', 'uri', 'timespan', 'derivedFrom', 'authorityType']),
+  source: new Set(['@id', 'title', 'citation', 'uri', 'timespan', 'derivedFrom', 'licence', 'authorityType']),
   sourceTimespan: new Set(['startEarliest', 'endLatest', 'sourceLabel', 'label']),
   citation: new Set(['source', 'locator', 'attributionStatus', 'citationFunction']),
   relation: new Set(['relatesTo', 'relationType', 'relationLabel']),
@@ -275,8 +283,11 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
     const common = { place_id: pid, date, from: t.startEarliest || '', to: t.endLatest || '', source_id: sid, locator: cit.locator || '',
       attribution, citation_function: citationFunction, certainty: a.certainty ?? '',
       certainty_level: LEVELS.has(local(a.certaintyLevel, PLATO)) ? local(a.certaintyLevel, PLATO) : '',
-      denied: deny ? 'yes' : a.negated === false ? 'no' : '', notes };
+      denied: deny ? 'yes' : a.negated === false ? 'no' : '', stance: '', notes };
     if (a.certaintyLevel && !common.certainty_level) loss({ kind: 'certainty-level', value: a.certaintyLevel });
+    // The source's own stance: PLATO's own words (Reported, Tentative, Doubted, Asserted), or it is reported.
+    const stance = local(a.sourceStance, PLATO + 'Stance');
+    if (a.sourceStance) { if (stance && accepts('names', 'stance', stance)) common.stance = stance; else dropKey('attestation', 'sourceStance', loss); }
     if (a.meta) loss(isAlternative(a.meta) ? { kind: 'alternative-readings', value: a['@id'] } : { kind: 'meta-attestation' });
     // A form status, occurrence context and count go on name rows, as PLATO's own words.
     const vocab = (k, col) => { const w = local(a[k], PLATO); if (a[k] && (!w || !accepts('names', col, w))) { dropKey('attestation', k, loss); return ''; } return w || ''; };

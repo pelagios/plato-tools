@@ -88,7 +88,10 @@ test('tables -> PLATO attestations: the survey name rows', () => {
   const headword = rowToAttestation('names', names.find((r) => r.form_status === 'Headword'), ids);
   assert.equal(headword.formStatus, 'https://w3id.org/plato#Headword');
   const witness = ids.source('asc-ms-a');
-  assert.equal(witness.derivedFrom, 'https://example.org/survey/source/asc-annal-921');
+  // The original is written in full, so that a source cited only as another's original keeps its title.
+  assert.equal(witness.derivedFrom['@id'], 'https://example.org/survey/source/asc-annal-921');
+  assert.equal(witness.derivedFrom.title, 'Anglo-Saxon Chronicle, annal for 921');
+  assert.equal(witness.derivedFrom.citation, 'ASC s.a. 921');
   // The date column is the date as written: plato:source_label since PLATO 9d2c36e.
   assert.deepEqual(witness.timespan, { sourceLabel: 'c. 925', startEarliest: '0915', endLatest: '0935' });
   assert.equal(rowToAttestation('names', names[0], ids).timespans[0].sourceLabel, names[0].date);
@@ -137,4 +140,12 @@ test('tables -> PLATO records -> tables gives back the survey rows', () => {
     assert.deepEqual(norm(back[sheet]), norm(orig), `${sheet} rows differ`);
   }
   assert.deepEqual(losses, []);
+});
+
+test('a loop of derivations in the sources sheet stops at an address', () => {
+  const rows = { a: { source_id: 'a', title: 'A', derived_from: 'b' }, b: { source_id: 'b', title: 'B', derived_from: 'a' } };
+  const ids = tableIds('https://example.org/loop/', (id) => rows[id]);
+  const a = ids.source('a');
+  assert.equal(a.derivedFrom.title, 'B');
+  assert.equal(a.derivedFrom.derivedFrom, 'https://example.org/loop/source/a');
 });

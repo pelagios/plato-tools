@@ -30,6 +30,11 @@ const one = (attestation, extra = {}) => ({ profile: 'place-centric', gazetteer:
 // ---- denials ------------------------------------------------------------------------------------
 /** Every LPF element that could carry a facet of the feature, as one string to search. */
 const lpfFacets = (fc) => JSON.stringify(fc.features.map((f) => [f.names, f.types, f.relations, f.geometry, f.descriptions, f.links]));
+// Kingsbury's markets are asserted, with a source stance (reported, doubted), so they are rightly written;
+// a search for the denied market leaves them out, and the stance tests below check them.
+const KINGSBURY = /\/kingsbury$/;
+const deniedSearch = (fc) => lpfFacets({ features: fc.features.filter((f) => !KINGSBURY.test(f['@id'])) });
+const littleworthFacets = (fc) => lpfFacets({ features: fc.features.filter((f) => f['@id'].endsWith('/littleworth')) });
 
 for (const target of ['lpf', 'lpf-seq']) {
   test(`a denial is left out of LPF (${target}), never written as an assertion, and reported`, async () => {
@@ -40,7 +45,8 @@ for (const target of ['lpf', 'lpf-seq']) {
     const littleworth = fc.features.find((f) => f['@id'].endsWith('/littleworth'));
     assert.ok(littleworth, 'the place itself is still written');
     assert.equal(littleworth.types, undefined, 'the denied type is not written');
-    assert.doesNotMatch(lpfFacets(fc), /"market"/, 'nowhere in the output is there a market');
+    assert.doesNotMatch(deniedSearch(fc), /"market"/, 'nowhere else in the output is there a market');
+    assert.match(lpfFacets(fc), /"market"/, 'control: the search can see a market (Kingsbury\'s)');
     assert.equal(loss(r, 'denial')?.count, 1, JSON.stringify(lossKinds(r)));
     assert.match(loss(r, 'denial').message, /would assert what its source denies/);
   });
@@ -48,7 +54,7 @@ for (const target of ['lpf', 'lpf-seq']) {
 test('control: the same attestation without negated is written to LPF as a market', async () => {
   const d = doc(); delete d.spatialEntities[0].attestations[0].negated;
   const r = await go([textFile(JSON.stringify(d), 'asserted.json')], 'convert', 'lpf');
-  assert.match(lpfFacets(JSON.parse(outText(r.e, 'asserted.geojson'))), /"market"/);
+  assert.match(littleworthFacets(JSON.parse(outText(r.e, 'asserted.geojson'))), /"market"/);
   assert.equal(loss(r, 'denial'), undefined);
 });
 test('control: negated false is an assertion, and is written to LPF', () => {
@@ -71,7 +77,7 @@ test('a denial read from RDF is still left out of LPF, whether written "true" or
     if (name === '1') assert.match(text, /plato#negated> "1"\^\^/);
     const r = await go([textFile(text, `denial-${name}.nt`)], 'convert', 'lpf');
     const fc = JSON.parse(outText(r.e, `denial-${name}.geojson`));
-    assert.doesNotMatch(lpfFacets(fc), /"market"/, `plato:negated "${name}"`);
+    assert.doesNotMatch(deniedSearch(fc), /"market"/, `plato:negated "${name}"`);
     assert.equal(loss(r, 'denial')?.count, 1);
   }
 });
@@ -151,7 +157,7 @@ test('citationFunction: JSON -> RDF -> JSON keeps it, as an IRI', async () => {
   const r = await go([textFile(nt, 'j.nt')], 'convert', 'plato-jsonl');
   const recs = outText(r.e, 'j.jsonl').trim().split('\n').slice(1).map((l) => JSON.parse(l));
   const fns = recs.flatMap((x) => (x.attestations || []).flatMap((a) => (a.citations || []).map((c) => c.citationFunction))).filter(Boolean).sort();
-  assert.deepEqual(fns, [CITO + 'citesAsDataSource', CITO + 'citesAsEvidence', CITO + 'citesAsEvidence']);
+  assert.deepEqual(fns, [CITO + 'citesAsDataSource', ...Array(4).fill(CITO + 'citesAsEvidence')]);
 });
 test('citationFunction goes into LPF nowhere, and is reported; the citation itself is kept', async () => {
   const r = await go([file(JUDGEMENTS)], 'convert', 'lpf');
@@ -239,12 +245,15 @@ test('tables using every new column are valid, and tables -> JSON -> tables give
   assert.equal(atts.filter((x) => x.negated === false).length, 1);
   assert.ok(atts.some((x) => x.timespans?.[0]?.startEarliest === '-12000'));
   assert.ok(atts.some((x) => x.names?.[0]?.qualification?.transcriptionCompleteness === P + 'TranscriptionReconstructable'));
+  assert.deepEqual(atts.map((x) => x.sourceStance).filter(Boolean).sort(), [P + 'StanceDoubted', P + 'StanceReported']);
+  const licensed = JSON.stringify(d).match(/"licence":"([^"]+)"/g) || [];
+  assert.ok(licensed.includes('"licence":"https://creativecommons.org/publicdomain/mark/1.0/"'), 'a source keeps its licence: ' + licensed);
   // Back with the same base address, so that every place and source address is the one it was minted as.
   const b = await go([textFile(json, 'j.json')], 'convert', 'tables', { base: 'https://example.org/survey/' });
   assert.deepEqual(errors(b), []);
   const zip = b.e.outs['j-tables.zip'][0];
   const norm = (rows) => rows.map((r) => JSON.stringify(r)).sort();
-  for (const s of ['names', 'types', 'relations', 'places']) {
+  for (const s of ['names', 'types', 'relations', 'places', 'sources']) {
     const orig = Papa.parse(readFileSync(`${FIXTURE}/${s}.csv`, 'utf8'), { header: true, skipEmptyLines: true }).data;
     assert.deepEqual(norm(sheet(zip, `${s}.csv`)), norm(orig), `${s} rows differ`);
   }
