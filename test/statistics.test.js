@@ -343,11 +343,12 @@ test('Data Cube: a constraint over nothing is reported as not tested, never as p
   const results = integrity(outText(r.e, 'j.nt'));
   assert.deepEqual(status(results), { 'IC-1': 'not-tested', 'IC-2': 'not-tested', 'IC-11': 'not-tested', 'IC-12': 'not-tested', 'IC-14': 'not-tested' });
   for (const x of results) assert.equal(x.evaluated, 0);
-  // observations, but no dimension or measure declared: IC-11, IC-12 and IC-14 have nothing to test
+  // observations whose structure declares nothing of its own: the export still declares the area it
+  // adds, so IC-11 and IC-12 have that to evaluate, but no measure is declared, so IC-14 has nothing
   const bare = oneFigure({ dimensions: { 'https://example.org/dim/a': 'v' } }, []);
   bare.dataSets[0].structure = 'https://example.org/t/s';
   const s = status(integrity(await cubeOf(bare)));
-  assert.deepEqual(s, { 'IC-1': 'pass', 'IC-2': 'pass', 'IC-11': 'not-tested', 'IC-12': 'not-tested', 'IC-14': 'not-tested' });
+  assert.deepEqual(s, { 'IC-1': 'pass', 'IC-2': 'pass', 'IC-11': 'pass', 'IC-12': 'pass', 'IC-14': 'not-tested' });
 });
 test('Data Cube: IC-12 groups rather than pairs, so 100,000 observations take moments', async () => {
   const obs = [];
@@ -379,4 +380,41 @@ test('the command line writes the cube with --cube, and the plain graph without 
     const help = spawnSync(process.execPath, [CLI, '--help'], { encoding: 'utf8' });
     assert.match(help.stdout, /--cube\s+N-Triples output/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// The derived area and date must reach the table's structure, or the checks cannot use them: found
+// on Vision of Britain, where the same row in 55 counties read as 28,620 duplicates under IC-12.
+const REF_AREA = SD + 'refArea', REF_PERIOD = SD + 'refPeriod';
+/** Two counties with the same figures, and a structure that lists neither area nor date. */
+function twoCounties({ secondPeriod } = {}) {
+  const d = clean();
+  d.dataSets[0].structure.components = d.dataSets[0].structure.components.filter((c) => c.dimension !== REF_AREA && c.dimension !== REF_PERIOD);
+  const se = d.spatialEntities[0], other = structuredClone(se);
+  other['@id'] = se['@id'] + '-2'; other.label = 'Other County';
+  for (const f of other.attestations[0].properties) { f['@id'] += '-2'; if (f.universe) f.universe += '-2'; }
+  if (secondPeriod) other.attestations[0].timespans = [secondPeriod];
+  d.spatialEntities.push(other);
+  return d;
+}
+const declares = (text, prop) => new RegExp(`<http://purl.org/linked-data/cube#dimension> <${prop.replace(/[.#]/g, '\\$&')}>`).test(text);
+test('--cube declares refArea in each structure, so the same row in two places is not a duplicate', async () => {
+  const text = await cubeOf(twoCounties());
+  assert.ok(declares(text, REF_AREA), 'refArea is declared');
+  assert.ok(declares(text, REF_PERIOD), 'refPeriod is declared where every figure has one');
+  assert.deepEqual(status(integrity(text)), { 'IC-1': 'pass', 'IC-2': 'pass', 'IC-11': 'pass', 'IC-12': 'pass', 'IC-14': 'pass' });
+});
+test('control: without refArea declared, the two counties read as duplicates under IC-12', async () => {
+  const text = (await cubeOf(twoCounties())).split('\n').filter((l) => !(l.includes('cube#dimension') && l.includes('refArea'))).join('\n') + '\n';
+  assert.equal(status(integrity(text))['IC-12'], 'fail');
+});
+test('--cube declares refPeriod only where every figure of the table has one, and reports the rest', async () => {
+  const { r, text } = await nt(twoCounties({ secondPeriod: { startEarliest: '1887', endLatest: '1891', sourceLabel: '1887-91' } }), 'p.json', { cube: true });
+  assert.ok(declares(text, REF_AREA));
+  assert.ok(!declares(text, REF_PERIOD), 'refPeriod is not declared for a table where some figures have none');
+  assert.ok(r.report.items.some((i) => i.kind === 'cube-period-partial'), JSON.stringify(r.report.items.map((i) => i.kind)));
+  assert.equal(status(integrity(text))['IC-11'], 'pass', 'no figure fails for a date the source never gives');
+});
+test('--cube does not declare a component twice when the structure already lists it', async () => {
+  const text = await cubeOf(clean());
+  assert.equal((text.match(/cube#dimension> <http:\/\/purl\.org\/linked-data\/sdmx\/2009\/dimension#refArea>/g) || []).length, 1);
 });

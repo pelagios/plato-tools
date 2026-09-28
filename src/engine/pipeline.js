@@ -481,7 +481,7 @@ async function makeWriter(target, env, rep, options, typing, outputs, input) {
         if (cube) cube.record(buf);
         buf = null;
       },
-      async close() { rep.count('triples written', triples); if (cube) rep.count('observations', cube.observations); outputs.push(await sink.close()); },
+      async close() { if (cube) { cube.finish(); rep.count('observations', cube.observations); } rep.count('triples written', triples); outputs.push(await sink.close()); },
     };
   }
   if (target === 'lpf' || target === 'lpf-seq') {

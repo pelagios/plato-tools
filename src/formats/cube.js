@@ -13,7 +13,7 @@
 //     and latest end fall in one year, an xsd:date where they fall on one day. Any other figure is
 //     reported as not placeable on the time axis; its period is never guessed.
 import { RDF, XSD, PLATO } from '../lib/context.js';
-import { iri, literal } from '../lib/ntriples.js';
+import { iri, literal, bnode } from '../lib/ntriples.js';
 
 export const QB = 'http://purl.org/linked-data/cube#';
 export const SDMX_DIMENSION = 'http://purl.org/linked-data/sdmx/2009/dimension#';
@@ -118,6 +118,8 @@ export const CUBE_TEXT = {
   'cube-no-attestation': 'A figure that no attestation in its record carries has no area or period in the cube.',
   'cube-no-value': 'A figure with no value, and no obsStatus to say why, has no measure statement in the cube.',
   'cube-no-measure-property': 'A figure whose property is not one full web address cannot be given a measure statement in the cube.',
+  'cube-period-partial': "Some figures of a table have a date on the cube's time axis and some do not, so sdmx-dimension:refPeriod is not declared in its structure: declared, every figure without one would fail the check that every dimension has a value.",
+  'cube-no-structure': 'A table has no structure (qb:structure) in this file, so the area and date the export adds cannot be declared in it.',
 };
 
 /**
@@ -129,6 +131,9 @@ export class CubeExport {
     this.emit = emit; this.report = report;
     this.typed = new Set();     // tables and structures already typed: few, however large the file
     this.observations = 0;
+    this.structureOf = new Map();  // table -> its structure, from the header or a record
+    this.declared = new Map();     // structure -> the component properties the file declares
+    this.tables = new Map();       // table -> { n, area, period }: how many figures got each
   }
   _type(k, cls) { const t = k + ' ' + cls; if (this.typed.has(t)) return; this.typed.add(t); this.emit(term(k), iri(TYPE), iri(cls)); }
   /** The triples of the document header, as [s, p, o]: the tables it describes, and their structures. */
@@ -155,10 +160,44 @@ export class CubeExport {
       if (d.area) this.emit(s, iri(d.area.p), d.area.o);
       if (d.period) this.emit(s, iri(d.period.p), d.period.o);
       for (const k of d.problems) this.report(k, obs);
+      const n = this.tables.get(key(o)) || this.tables.set(key(o), { n: 0, area: 0, period: 0 }).get(key(o));
+      n.n++; if (d.area) n.area++; if (d.period) n.period++;
     }
   }
   _table(g, ds) {
     this._type(ds, QB + 'DataSet');
-    for (const t of g.out(ds)) if (t.p === QB + 'structure' && t.o.termType !== 'Literal') this._type(key(t.o), QB + 'DataStructureDefinition');
+    for (const t of g.out(ds)) {
+      if (t.p !== QB + 'structure' || t.o.termType === 'Literal') continue;
+      const dsd = key(t.o);
+      this._type(dsd, QB + 'DataStructureDefinition');
+      this.structureOf.set(ds, dsd);
+      const have = this.declared.get(dsd) || this.declared.set(dsd, new Set()).get(dsd);
+      for (const c of g.out(dsd)) if (c.p === QB + 'component') for (const x of g.out(key(c.o))) if (x.o.termType === 'NamedNode') have.add(x.o.value);
+    }
+  }
+  /**
+   * After the last record: declare in each table's structure what the export added to its figures,
+   * or the integrity checks cannot use it (without refArea declared, the same row in 55 counties
+   * reads as 55 duplicates). The area is on every figure by construction, so it is always declared.
+   * The date is declared only where every figure of the table has one: a table of figures that each
+   * cover several years has none, and declaring it would fail every one of them.
+   */
+  finish() {
+    let c = 0;
+    for (const [ds, n] of this.tables) {
+      const dsd = this.structureOf.get(ds);
+      if (!dsd) { this.report('cube-no-structure', ds); continue; }
+      const have = this.declared.get(dsd) || new Set();
+      const declare = (prop) => {
+        if (have.has(prop)) return;
+        const comp = bnode(`cube${++c}`);
+        this.emit(term(dsd), iri(QB + 'component'), comp);
+        this.emit(comp, iri(QB + 'dimension'), iri(prop));
+        have.add(prop);
+      };
+      if (n.area) declare(REF_AREA);
+      if (n.period === n.n && n.n) declare(REF_PERIOD);
+      else if (n.period) this.report('cube-period-partial', ds);
+    }
   }
 }
