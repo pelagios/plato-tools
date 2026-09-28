@@ -5,7 +5,7 @@
 // few LPF things PLATO JSON has no slot for are reported as losses, never dropped silently.
 // Writing LPF from PLATO is lossy by design (bundling, locators, form status, numeric certainty
 // and more have no LPF slot); every loss is reported, with counts.
-import { PLATO } from '../lib/context.js';
+import { PLATO, isAbsoluteIri } from '../lib/context.js';
 import { isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey } from './shared.js';
 
 // The README's alias table, plus the vocabulary prefixes its own examples use.
@@ -221,10 +221,20 @@ export function collectionHead(gazetteer, loss = () => {}) {
   dropKeys(g, 'gazetteer', KEEPS.gazetteer, loss);
   return clean({ '@id': g['@id'], title: g.title, license: g.licence, descriptions: g.description ? [{ value: g.description }] : undefined });
 }
-/** The PLATO gazetteer header from a FeatureCollection's own members (collectionHead's inverse). */
-export function collectionToGazetteer(fc, fallbackTitle) {
+/**
+ * The PLATO gazetteer header from a FeatureCollection's own members (collectionHead's inverse).
+ * LPF's license may be prose ("… released under a Creative Commons Attribution-NonCommercial 4.0
+ * International License", as DEEP writes it); PLATO's licence must be a web address, so prose is
+ * reported to `loss` and not put where an address belongs. An LPF short form (cc:by/4.0/) expands.
+ */
+export function collectionToGazetteer(fc, fallbackTitle, loss = () => {}) {
   const d = (fc.descriptions || []).map((x) => (typeof x === 'string' ? x : x?.value)).find((x) => typeof x === 'string');
-  return clean({ '@id': fc['@id'] || fc.id, title: typeof fc.title === 'string' && fc.title ? fc.title : fallbackTitle, description: d, licence: typeof fc.license === 'string' ? expandLpf(fc.license) : undefined });
+  let licence;
+  if (typeof fc.license === 'string' && fc.license.trim()) {
+    const x = expandLpf(fc.license.trim());
+    if (isAbsoluteIri(x) && !/\s/.test(x)) licence = x; else loss({ kind: 'lpf-licence-text', value: fc.license });
+  }
+  return clean({ '@id': fc['@id'] || fc.id, title: typeof fc.title === 'string' && fc.title ? fc.title : fallbackTitle, description: d, licence });
 }
 
 /**

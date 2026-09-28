@@ -126,8 +126,8 @@ async function* lpfSource(file, seq, rep) {
     // A GeoJSON sequence may open with the collection's own line, as these tools write it.
     for await (const { line } of lines(file)) { try { const v = JSON.parse(line); if (v && v.type === 'FeatureCollection') head = v; } catch { /* reported below */ } break; }
   } else for await (const { path, value } of jsonDocument(file, { arrays: ['features'], keys: LPF_HEAD, onlyKeys: true })) head[path] = value;
-  yield { type: 'header', value: { profile: 'place-centric', gazetteer: collectionToGazetteer(head, file.name) } };
   const loss = (l) => rep.loss(l.kind, LOSS_TEXT[l.kind] || l.kind, l.value);
+  yield { type: 'header', value: { profile: 'place-centric', gazetteer: collectionToGazetteer(head, file.name, loss) } };
   const each = seq ? (async function* () {
     for await (const { line, n } of lines(file)) {
       let v;

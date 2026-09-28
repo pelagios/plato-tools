@@ -121,3 +121,15 @@ for (const [target, ext] of [['lpf', '.geojson'], ['lpf-seq', '.geojsonl']]) {
     assert.deepEqual(Object.keys(bh).sort(), ['@context', 'title', 'type']);
   });
 }
+
+// LPF's collection licence may be prose (DEEP writes a sentence); PLATO's licence is an address.
+test('an LPF licence in words is reported, not put where a web address belongs; a short form expands', async () => {
+  const { collectionToGazetteer } = await import('../src/formats/lpf.js');
+  const losses = [];
+  const prose = 'Released under a Creative Commons Attribution-NonCommercial 4.0 International License.';
+  const g = collectionToGazetteer({ type: 'FeatureCollection', license: prose }, 'f.geojson', (l) => losses.push(l));
+  assert.equal(g.licence, undefined);
+  assert.deepEqual(losses, [{ kind: 'lpf-licence-text', value: prose }]);
+  assert.equal(collectionToGazetteer({ license: 'cc:by/4.0/' }, 'f').licence, 'https://creativecommons.org/licenses/by/4.0/');
+  assert.equal(collectionToGazetteer({ license: 'https://example.org/licence' }, 'f').licence, 'https://example.org/licence');
+});
