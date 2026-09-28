@@ -6,7 +6,7 @@
 // Writing LPF from PLATO is lossy by design (bundling, locators, form status, numeric certainty
 // and more have no LPF slot); every loss is reported, with counts.
 import { PLATO } from '../lib/context.js';
-import { isDenial, isAlternative, qualificationLosses, currentAttestations } from './shared.js';
+import { isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure } from './shared.js';
 
 // The README's alias table, plus the vocabulary prefixes its own examples use.
 export const LPF_PREFIXES = {
@@ -217,6 +217,7 @@ export function recordToFeature(rec, idrs = [], loss = () => {}, withdrawn = nul
     }
     for (const r of a.relations || []) f.relations.push(clean({ relationType: r.relationType, relationTo: r.relatesTo, label: r.relationLabel, when, citations: cits.length ? cits : undefined, certainty: certaintyWord(a.certaintyLevel, a.certaintyNote) }));
     for (const p of a.properties || []) {
+      if (isFigure(p)) { loss({ kind: 'statistical-figure', value: p['@id'] || p.label || p.property }); continue; }
       qualificationLosses(p.qualification, [], loss);
       if (p.property === DCT_DESCRIPTION) f.descriptions.push(clean({ value: String(p.value), source: cits[0]?.['@id'] }));
       else if (p.property === FOAF_DEPICTION) f.depictions.push(clean({ '@id': String(p.value), title: p.label !== 'depiction' ? p.label : undefined }));

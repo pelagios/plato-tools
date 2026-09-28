@@ -68,6 +68,12 @@ def main():
             page.goto('data:text/html,<title>no tools here</title><input id=picker type=file multiple>' if PROVE else url)
             ready = wait_state(page, lambda s: s.get('phase') == 'ready', 30, 'ready')
             check('page is ready and names the PLATO commit it checks against', ready.get('phase') == 'ready' and len(ready.get('platoCommit') or '') == 40, ready)
+            # The commit shown is the one served, and a draft pin (a PLATO branch, not a release) says so.
+            served = json.loads(urllib.request.urlopen(url.rstrip('/') + '/plato/VERSION.json', timeout=10).read())
+            footer = page.evaluate("() => document.getElementById('plato-version')?.textContent || ''")
+            check('the footer shows the commit served, and says DRAFT exactly when the pin is a draft',
+                  ready.get('phase') == 'ready' and ready.get('platoCommit') == served['commit'] and served['commit'][:7] in footer
+                  and ('DRAFT' in footer) == bool(served.get('draft')), {'footer': footer, 'served': served})
 
             ex = PLATO / 'schemas/tables/examples'
             s = run_case(page, sorted((ex / 'customs').glob('*.csv')), 'check')

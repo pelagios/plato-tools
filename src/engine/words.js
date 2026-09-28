@@ -7,8 +7,9 @@ export const FORMAT_NAMES = { tables: 'PLATO spreadsheet tables', 'plato-json': 
 export const formatName = (input) => FORMAT_NAMES[input.format] + (input.profile ? ` (${input.profile})` : '') + (input.lpfVersion === 2 ? ', version 2' : '');
 
 // A count in words, singular for one: "1 place", "2 places", "1 identity relation".
-const ONE = { places: 'place', attestations: 'attestation', 'identity relations': 'identity relation', triples: 'triple', 'triples written': 'triple written', 'table rows': 'table row' };
-const count = (n, what) => `${n.toLocaleString('en-GB')} ${n === 1 ? ONE[what] || what : what}`;
+const ONE = { places: 'place', attestations: 'attestation', 'identity relations': 'identity relation', triples: 'triple', 'triples written': 'triple written', 'table rows': 'table row', observations: 'Data Cube observation' };
+const MANY = { observations: 'Data Cube observations' };
+const count = (n, what) => `${n.toLocaleString('en-GB')} ${n === 1 ? ONE[what] || what : MANY[what] || what}`;
 
 /** A progress event in words: "Loading into the working database: 1,000 triples (3 s)". */
 export function progressText(p) {
@@ -23,7 +24,7 @@ export function progressText(p) {
 /** The two halves of a report's summary: "2 problems found." and "Read 3 places, 5 attestations." */
 export function summary(report) {
   const c = report.counts;
-  const counted = ['places', 'attestations', 'identity relations', 'triples', 'triples written', 'table rows'].filter((k) => c[k]).map((k) => count(c[k], k)).join(', ');
+  const counted = ['places', 'attestations', 'identity relations', 'triples', 'triples written', 'table rows', 'observations'].filter((k) => c[k]).map((k) => count(c[k], k)).join(', ');
   const nErr = report.errors;
   return {
     problems: nErr ? `${nErr.toLocaleString('en-GB')} problem${nErr === 1 ? '' : 's'} found.` : 'No problems found.',

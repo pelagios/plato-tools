@@ -5,7 +5,7 @@
 // Validation follows the CSVW rules the metadata uses, and is tested against the reference
 // implementation (rdf-tabular, strict mode) on the same good and broken tables.
 import { PLATO } from '../lib/context.js';
-import { isDenial, isAlternative, qualificationLosses, currentAttestations } from './shared.js';
+import { isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure } from './shared.js';
 
 export const CITO = 'http://purl.org/spar/cito/';
 
@@ -261,7 +261,7 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
         geometry_role: local(g.role, PLATO) || '', precision_km: (g.precisionKm || [])[0] ?? '', ...common });
     }
     for (const ty of a.types || []) qualificationLosses(ty.qualification, [], loss);
-    for (const pv of a.properties || []) qualificationLosses(pv.qualification, [], loss);
+    for (const pv of a.properties || []) if (!isFigure(pv)) qualificationLosses(pv.qualification, [], loss);
     for (const ty of a.types || []) rows.types.push({ place_id: pid, type_label: ty.label || ty.sourceLabel || '', type_uri: ty.identifier || '', ...common });
     for (const r of a.relations || []) {
       let rt = local(r.relationType, PLATO);
@@ -270,7 +270,10 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
       if (r.relationLabel) loss({ kind: 'relation-label' });
       rows.relations.push({ place_id: pid, relation_type: rt, related_place_id: ids.place(r.relatesTo, null, false), ...common });
     }
-    for (const pv of a.properties || []) rows.properties.push({ place_id: pid, property_uri: pv.property, property_label: pv.label || '',
+    // A statistical figure keeps its own CSVW description (PLATO draft, issue #14, decision 4): the
+    // properties sheet has no columns for its table or coordinates, and without them it says something false.
+    for (const pv of a.properties || []) if (isFigure(pv)) loss({ kind: 'statistical-figure', value: pv['@id'] || pv.label || pv.property });
+    for (const pv of (a.properties || []).filter((x) => !isFigure(x))) rows.properties.push({ place_id: pid, property_uri: pv.property, property_label: pv.label || '',
       value: typeof pv.value === 'object' ? JSON.stringify(pv.value) : pv.value, unit_uri: pv.unit || '', ...common });
   }
   // Nested under its place, a relation may leave out its subject (PLATO eb8065a): it is the place.

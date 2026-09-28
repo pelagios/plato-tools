@@ -14,7 +14,8 @@ import { tripleNT } from '../lib/ntriples.js';
 import { TripleStore } from '../lib/store.js';
 import { PLATO, RDF } from '../lib/context.js';
 import { featureToRecord, recordToFeature } from '../formats/lpf.js';
-import { collectWithdrawn, resolveWithdrawn, addWithdrawal, versionLosses } from '../formats/shared.js';
+import { collectWithdrawn, resolveWithdrawn, addWithdrawal, versionLosses, tableLosses } from '../formats/shared.js';
+import { CubeExport, CUBE_TEXT } from '../formats/cube.js';
 import { validateTables, rowToAttestation, tableIds, recordToRows, identityRow, ATTESTATION_SHEETS, tableSchemas, cellChecker } from '../formats/tables.js';
 import { lineChunks, lines, jsonDocument, TABLE_SHEETS, DataError } from './input.js';
 import { Report, LOSS_TEXT } from './report.js';
@@ -72,6 +73,8 @@ export function explainSchema(errs, fromTables) {
     if (p === 'toponym') return 'A name has no spelling (toponym).' + col('name');
     if (p === 'identityType') return 'An identity match does not say what kind of match it is (exactMatch, closeMatch, related, or unspecified if the source does not say): PLATO JSON requires it.' + col('match_type');
     if (p === 'title') return 'A source has no title.' + col('title');
+    // PLATO draft (issue #14): a value is required unless the figure's attributes give obsStatus.
+    if (p === 'value' && /properties\/\d+$/.test(at)) return 'A property value has no value. Give it, or, for a figure that has none (a printed dash), say why with sdmx-attribute:obsStatus in its attributes; a dash is never written as 0.';
     return `Something required is missing: ${p}.`;
   }
   if (e.keyword === 'minItems' && /attestations$/.test(at)) return 'A place has no evidence about it: PLATO JSON needs at least one attestation per place.' + (fromTables ? ' Give it at least one row in names, locations, types, relations or properties.' : '');
@@ -97,13 +100,16 @@ async function* platoJsonl(file, rep) {
   }
 }
 async function* platoJson(file) {
-  const keys = ['gazetteer', 'profile', '$schema'];
+  // dataSets (PLATO draft, issue #14) are the document's statistical tables, part of its header.
+  const keys = ['gazetteer', 'profile', '$schema', 'dataSets'];
   const head = {};
   for await (const { path, value } of jsonDocument(file, { arrays: ['spatialEntities', 'newSpatialEntities', 'attestations', 'identityRelations'], keys, onlyKeys: true })) head[path] = value;
   if (!('gazetteer' in head)) for await (const { path, value } of jsonDocument(file, { keys })) head[path] = value;   // header after the arrays: rare
   yield { type: 'header', value: head };
   let n = 0;
-  for await (const { path, value } of jsonDocument(file, { arrays: ['spatialEntities', 'newSpatialEntities', 'attestations', 'identityRelations'] })) {
+  for await (const { path, value } of jsonDocument(file, { arrays: ['spatialEntities', 'newSpatialEntities', 'attestations', 'identityRelations'], keys: ['dataSets'] })) {
+    // The header is read before the records, so dataSets written after them are met only now.
+    if (path === 'dataSets') { if (!('dataSets' in head)) yield { type: 'late-header', key: 'dataSets' }; continue; }
     n++;
     if (path === 'identityRelations') yield { type: 'idr', value, n };
     else if (path === 'attestations') yield { type: 'attestation', value, n };
@@ -288,6 +294,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     }
     withdrawn = resolved(withdrawn, rep);
   }
+  if (action === 'convert' && options.cube && target !== 'ntriples') rep.warning('cube-not-ntriples', 'The Data Cube export applies to N-Triples output only, so it is not made here.');
   if (action === 'convert') writer = await makeWriter(target, env, rep, { ...options, idrsBySubject, withdrawn }, typing, outputs, input);
 
   // Checking (and writing) records as they stream past.
@@ -313,10 +320,12 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     return rep.warning(i.kind, `A key PLATO does not define is dropped: ${i.value}`, i.value);
   };
   const dry = new Json2Rdf(res.context, () => {}, { onIssue: jsonIssue });
+  const lateHeader = (ev) => rep.error('late-header', `The document's ${ev.key} come after its records. These tools read a document's header before its records, so ${ev.key} must come before spatialEntities or attestations; as the file is, they are not read at all.`, ev.key);
 
   if (!needsStore) {
     let header = null;
     for await (const ev of source) {
+      if (ev.type === 'late-header') { lateHeader(ev); continue; }
       if (ev.type === 'header') {
         header = ev.value;
         if (input.format.startsWith('plato') && !V.header(header)) rep.error('schema', `The document header does not match the PLATO JSON Schema: ${ajvMessage(V.header.errors)}`);
@@ -342,6 +351,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     store.beginBatch();
     for await (const ev of source) {
       if (ev.type === 'triple') { store.add(ev.s, ev.p, ev.o); if (++batch % 50000 === 0) { store.endBatch(); store.beginBatch(); beat('loading', { triples: store.count }); } continue; }
+      if (ev.type === 'late-header') { lateHeader(ev); continue; }
       if (ev.type === 'header') { header = ev.value; w.header(header); dry.header(header); if (!V.header(header)) rep.error('schema', `The document header does not match the PLATO JSON Schema: ${ajvMessage(V.header.errors)}`); continue; }
       checkRecord(ev);
       w.record(ev.type === 'idr' ? 'identityRelations' : ev.type === 'attestation' ? 'attestations' : ev.newEntity ? 'newSpatialEntities' : 'spatialEntities', ev.value);
@@ -355,7 +365,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     const r2j = new Rdf2Json({ context: res.context, core: res.core, profile: res.profiles['place-centric'], types: res.types }, store, {
       withdrawn: currentOnly ? withdrawnInStore(store, rep) : null,
       onLoss: (l) => rep.loss(l.kind, `${LOSS_TEXT[l.kind] || l.kind}`, l.predicate || l.value),
-      onIssue: (i) => rep.warning(i.kind, i.kind === 'multiple-values' ? `A value that PLATO JSON allows once appears several times; the first is kept (${i.key})` : i.kind, i.node),
+      onIssue: (i) => rep.warning(i.kind, i.kind === 'multiple-values' ? `A value that PLATO JSON allows once appears several times; the first is kept (${i.key})` : ISSUE_TEXT[i.kind] || i.kind, i.kind === 'figure-undeclared' ? i.key : i.node),
     });
     const docs = [...store.subjects(TYPE, PLATO + 'Gazetteer')];
     const docId = docs[0] || firstSubjectWith(store, PLATO + 'contains_entity') || firstSubjectWith(store, PLATO + 'contains_attestation');
@@ -397,6 +407,13 @@ function withdrawnInStore(store, rep) {
   }
   return resolved(edges, rep);
 }
+// What RDF -> JSON says about statistical figures and tables (PLATO draft, issue #14).
+const ISSUE_TEXT = {
+  'figure-undeclared': "A statement on a statistical figure that its table's structure does not declare, and that is not typed or named as an attribute, is read as one of the figure's coordinates (dimensions). The graph is the same either way.",
+  'table-without-address': 'A statistical table has no web address; PLATO JSON requires one for each table in dataSets.',
+  'structure-without-address': "A table's structure has no web address; PLATO JSON requires one for a structure whose components are listed.",
+  'component-several': "A component of a table's structure names more than one dimension, measure or attribute; PLATO JSON gives each its own component.",
+};
 function firstSubjectWith(store, p) {
   const q = store.db.prepare('SELECT s FROM t WHERE p=? LIMIT 1');
   try { const i = store.pid.get(p); if (i === undefined) return null; q.bind([i]); return q.step() ? q.get(0) : null; } finally { q.finalize(); }
@@ -450,12 +467,21 @@ async function makeWriter(target, env, rep, options, typing, outputs, input) {
   }
   if (target === 'ntriples') {
     const sink = await open('.nt');
-    let triples = 0;
-    const wrapped = new Json2Rdf(env.resources.context, (s, p, o) => { triples++; sink.write(tripleNT(s, p, o)); }, { ...typing, onIssue: () => {} });
+    let triples = 0, buf = null;
+    const write = (s, p, o) => { triples++; sink.write(tripleNT(s, p, o)); };
+    const wrapped = new Json2Rdf(env.resources.context, (s, p, o) => { write(s, p, o); if (buf) buf.push([s, p, o]); }, { ...typing, onIssue: () => {} });
+    // The Data Cube export (PLATO draft, issue #14): the plain graph, and after each header and
+    // record the statements Data Cube expects that PLATO does not write (src/formats/cube.js).
+    const cube = options.cube ? new CubeExport(write, (kind, example) => rep.warning(kind, CUBE_TEXT[kind] || kind, example)) : null;
     return {
-      header(h) { wrapped.header(h); },
-      event(ev) { wrapped.record(ev.type === 'idr' ? 'identityRelations' : ev.type === 'attestation' ? 'attestations' : ev.newEntity ? 'newSpatialEntities' : 'spatialEntities', ev.value); },
-      async close() { rep.count('triples written', triples); outputs.push(await sink.close()); },
+      header(h) { buf = cube && []; const doc = wrapped.header(h); if (cube) cube.header(buf, doc); buf = null; },
+      event(ev) {
+        buf = cube && [];
+        wrapped.record(ev.type === 'idr' ? 'identityRelations' : ev.type === 'attestation' ? 'attestations' : ev.newEntity ? 'newSpatialEntities' : 'spatialEntities', ev.value);
+        if (cube) cube.record(buf);
+        buf = null;
+      },
+      async close() { if (cube) { cube.finish(); rep.count('observations', cube.observations); } rep.count('triples written', triples); outputs.push(await sink.close()); },
     };
   }
   if (target === 'lpf' || target === 'lpf-seq') {
@@ -465,7 +491,7 @@ async function makeWriter(target, env, rep, options, typing, outputs, input) {
     const feats = [];
     return {
       header(h) {
-        versionLosses(h.gazetteer, loss);
+        versionLosses(h.gazetteer, loss); tableLosses(h, loss);
         const head = { type: 'FeatureCollection', '@context': 'https://raw.githubusercontent.com/LinkedPasts/linked-places-format/main/linkedplaces-context-v1.1.jsonld', title: h.gazetteer?.title };
         if (target === 'lpf-seq') sink.write(JSON.stringify(head) + '\n'); else { const s = JSON.stringify(head); sink.write(s.slice(0, -1) + ',"features":['); }
       },
@@ -517,7 +543,7 @@ function tablesWriter(env, rep, options, outputs, stem, loss) {
     },
   };
   return {
-    header(h) { versionLosses(h.gazetteer, loss); },
+    header(h) { versionLosses(h.gazetteer, loss); tableLosses(h, loss); },
     event(ev) {
       if (ev.type === 'record') { const rows = recordToRows(ev.value, ids, loss, accepts, options.withdrawn); for (const [k, v] of Object.entries(rows)) buffers[k]?.push(...v); }
       else if (ev.type === 'idr') buffers.identities.push(identityRow(ev.value, ids, loss));

@@ -123,3 +123,15 @@ export function versionLosses(gazetteer, loss) {
   if (!gazetteer || typeof gazetteer !== 'object') return;
   for (const k of VERSION_KEYS) if (gazetteer[k] !== undefined && gazetteer[k] !== null) loss({ kind: 'gazetteer-version', value: k });
 }
+
+// ---- statistical figures (PLATO draft, issue #14) ---------------------------------------------------
+/**
+ * True when a property value is a figure from a statistical table, or carries what one does: a table
+ * (dataSet), coordinates (dimensions), facts about the figure (attributes) or a denominator
+ * (universe). LPF and the spreadsheet tables have no place for any of these, and written without
+ * them the figure would be stated of the place as a whole: the county would "have" the number of its
+ * male agricultural labourers as its persons. So these writers leave such a figure out, and report it.
+ */
+export const isFigure = (pv) => !!pv && typeof pv === 'object' && ['dataSet', 'dimensions', 'attributes', 'universe'].some((k) => pv[k] !== undefined && pv[k] !== null);
+/** Report the header's statistical tables where the target has no place for them. */
+export function tableLosses(head, loss) { if (head && Array.isArray(head.dataSets) && head.dataSets.length) loss({ kind: 'statistical-tables', value: head.dataSets.length }); }

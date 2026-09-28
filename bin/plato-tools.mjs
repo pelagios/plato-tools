@@ -26,6 +26,9 @@ const HELP = `plato-tools: check and convert PLATO data from the command line.
 Usage:
   plato-tools check [options] INPUT...
   plato-tools convert --to TARGET [--out DIR] [options] INPUT...
+  plato-tools datacube [--json] FILE...     (DRAFT, issue #14) check a cube export (convert --to
+                                            ntriples --cube) against the RDF Data Cube integrity
+                                            constraints IC-1, IC-2, IC-11, IC-12 and IC-14
 
 Each INPUT is one file, or one set of spreadsheet tables:
   - a directory is one set of tables, made of the CSV files in it;
@@ -47,6 +50,10 @@ Options:
                     places and sources are made (default: ${DEFAULT_BASE}).
   --no-typing       N-Triples output: leave out the node types and typed dates that the DEEP RDF
                     export adds (they are added by default, as in the browser).
+  --cube            N-Triples output (PLATO draft, issue #14): also write what the RDF Data
+                    Cube vocabulary expects of each statistical figure: its qb:Observation type,
+                    the measure as a direct statement, sdmx-dimension:refArea and refPeriod,
+                    and the types of its table and structure. Without it, the plain PLATO graph.
   --work-dir DIR    where the working database for RDF and attestation-centric input is kept
                     while it is in use (default: the system's temporary directory). It needs
                     room for about 1.5 times the uncompressed input; it is removed afterwards.
@@ -72,7 +79,7 @@ async function main(argv) {
       args: argv, allowPositionals: true, allowNegative: true, strict: true,
       options: {
         to: { type: 'string' }, out: { type: 'string', default: '.' }, overwrite: { type: 'boolean', default: false },
-        base: { type: 'string', default: DEFAULT_BASE }, typing: { type: 'boolean', default: true },
+        base: { type: 'string', default: DEFAULT_BASE }, typing: { type: 'boolean', default: true }, cube: { type: 'boolean', default: false },
         'work-dir': { type: 'string' }, json: { type: 'boolean', default: false }, brief: { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h', default: false }, version: { type: 'boolean', short: 'V', default: false },
       },
@@ -81,15 +88,21 @@ async function main(argv) {
   const { values: o, positionals } = parsed;
   if (o.help) { process.stdout.write(HELP); return 0; }
   const resources = await nodeResources();
-  if (o.version) { process.stdout.write(`plato-tools ${PKG.version}, checking against PLATO ${resources.version.versionInfo} at ${resources.version.commit}\n`); return 0; }
+  if (o.version) {
+    const v = resources.version;
+    process.stdout.write(`plato-tools ${PKG.version}, checking against PLATO ${v.versionInfo} at ${v.commit}${v.draft ? ` (DRAFT: PLATO's ${v.ref} branch, not a release)` : ''}\n`);
+    return 0;
+  }
   const [action, ...args] = positionals;
   if (!action) return usage('say what to do: check or convert.');
-  if (action !== 'check' && action !== 'convert') return usage(`"${action}" is not a command; the commands are check and convert.`);
+  if (action === 'datacube') return datacube(args, o);
+  if (action !== 'check' && action !== 'convert') return usage(`"${action}" is not a command; the commands are check, convert and datacube.`);
   if (!args.length) return usage(`name at least one input to ${action}.`);
   if (action === 'convert' && !o.to) return usage(`convert needs --to, one of: ${Object.keys(TARGETS).join(', ')}.`);
   if (action === 'convert' && !TARGETS[o.to]) return usage(`"${o.to}" is not a target; the targets are ${Object.keys(TARGETS).join(', ')}.`);
   if (action === 'check' && (o.to || o.overwrite)) return usage('--to and --overwrite are for convert.');
   if (o.json && o.brief) return usage('choose --json or --brief, not both.');
+  if (o.cube && o.to !== 'ntriples') return usage('--cube is for convert --to ntriples.');
 
   const host = new NodeHost({ workDir: o['work-dir'], outDir: o.out, overwrite: o.overwrite });
   const stop = (signal) => {
@@ -148,7 +161,7 @@ async function runOne(item, action, o, resources, host, live) {
   const xlsx = input.container === 'workbook' ? await import('xlsx') : undefined;
   const { env, finish } = host.env(resources, { progress, xlsx });
   let result = null, failure = null;
-  try { result = await run({ input, action, target: r.target, options: { base: o.base, typing: o.typing, name: item.name } }, env); }
+  try { result = await run({ input, action, target: r.target, options: { base: o.base, typing: o.typing, cube: o.cube, name: item.name } }, env); }
   catch (e) { failure = e; }
   if (live) process.stderr.write('\r\x1b[K');
   // A file the engine could not read to the end comes back as a report marked incomplete; any
@@ -202,3 +215,30 @@ function describeTotal(t) {
 }
 
 process.exitCode = await main(process.argv.slice(2));
+
+/**
+ * Check cube exports against the Data Cube integrity constraints, streaming each file so that one of
+ * any size can be checked. Exit 0 when every constraint passed, 1 when any failed or had nothing to
+ * evaluate (a constraint over nothing is not tested, never passed), 2 when a file cannot be read.
+ */
+async function datacube(files, o) {
+  if (!files.length) return usage('name at least one N-Triples cube export to check.');
+  const { integrityOfFile } = await import('../src/lib/datacube.js');
+  const { openFiles } = await import('../src/node/host.js');
+  let code = 0;
+  for (const path of files) {
+    let results;
+    try { const [f] = await openFiles([path]); results = await integrityOfFile(f); }
+    catch (e) { process.stdout.write(o.json ? JSON.stringify({ input: path, status: 'failed', message: e.message }) + '\n' : `${path}: could not be checked: ${e.message}\n`); code = 2; continue; }
+    const bad = results.filter((r) => r.status !== 'pass');
+    if (bad.length && code < 1) code = 1;
+    if (o.json) { process.stdout.write(JSON.stringify({ input: path, results: results.map(({ ic, status, evaluated, violations }) => ({ ic, status, evaluated, violations: violations.slice(0, 20), violationCount: violations.length })) }) + '\n'); continue; }
+    process.stdout.write(`${path}:\n`);
+    for (const r of results) {
+      const word = r.status === 'pass' ? 'passes' : r.status === 'fail' ? `FAILS (${r.violations.length.toLocaleString('en-GB')})` : 'NOT TESTED: nothing to evaluate';
+      process.stdout.write(`  ${r.ic.padEnd(6)} ${word}, ${r.evaluated.toLocaleString('en-GB')} evaluated\n`);
+      for (const v of r.violations.slice(0, 5)) process.stdout.write(`         ${v}\n`);
+    }
+  }
+  return code;
+}

@@ -26,8 +26,10 @@ export function jcs(v) {
   if (Array.isArray(v)) return '[' + v.map(jcs).join(',') + ']';
   return '{' + Object.keys(v).sort().map((k) => JSON.stringify(k) + ':' + jcs(v[k])).join(',') + '}';
 }
-function numberLiteral(n) {
-  if (String(n).includes('.') || Math.abs(n) >= 1e21 || !Number.isFinite(n)) return literal(n.toExponential(15).replace(/(\d)0*e\+?/, '$1E'), XSD_DOUBLE);
+/** The canonical lexical form of an xsd:double, as jsonld.js writes it: 1.06820411E2. */
+const canonicalDouble = (n) => n.toExponential(15).replace(/(\d)0*e\+?/, '$1E');
+export function numberLiteral(n) {
+  if (String(n).includes('.') || Math.abs(n) >= 1e21 || !Number.isFinite(n)) return literal(canonicalDouble(n), XSD_DOUBLE);
   return literal(n.toFixed(0), XSD_INTEGER);
 }
 export function boundDatatype(s) {
@@ -157,7 +159,15 @@ export class Json2Rdf {
       // A JSON literal holds its whole value, null and arrays included, exactly as jsonld.js writes it.
       if (term && term.type === '@json' && val !== undefined) { this._out(subj, iri(term.iri), literal(jcs(val), RDF_JSON)); continue; }
       if (val === null || val === undefined) { if (key !== '$schema') this._null(key); continue; }
-      if (!term) { this.issues({ kind: 'unmapped-key', value: key }); continue; }
+      if (!term) {
+        // A key the context does not name, but which is itself an IRI (or a compact IRI with one of
+        // the context's prefixes), is a predicate as it stands, as JSON-LD reads it. PLATO's draft
+        // (issue #14) relies on this: under a propertyValue's `dimensions` and `attributes`, both
+        // nesting keys, each key is a Data Cube dimension or attribute property.
+        const pred = key.startsWith('@') ? null : expandIri(key, active.prefixes);
+        if (pred && isAbsoluteIri(pred) && !pred.startsWith('_:')) { this._iriKey(iri(pred), key, val, active, subj); continue; }
+        this.issues({ kind: 'unmapped-key', value: key }); continue;
+      }
       if (term.drop) { if (NOT_IN_RDF.has(key) && val !== null && val !== undefined) this.issues({ kind: 'not-in-rdf', key }); continue; }
       if (term.nest) {
         for (const v of [].concat(val)) {
@@ -193,6 +203,38 @@ export class Json2Rdf {
         }
       }
     }
+  }
+  /** The values of a key that is an IRI, which has no term definition, so no coercion: as jsonld.js writes them. */
+  _iriKey(p, key, val, active, subj) {
+    for (const v of [].concat(val)) {
+      if (v === null || v === undefined) { this._null(key); continue; }
+      if (Array.isArray(v)) { this.issues({ kind: 'unconvertible', value: JSON.stringify(v).slice(0, 80), where: key }); continue; }
+      if (typeof v !== 'object') { const o = this._value(v, { key }, active); if (o) this._out(subj, p, o); continue; }
+      if ('@value' in v) { const o = this._valueObject(v, key, active); if (o) this._out(subj, p, o); continue; }
+      if ('@list' in v || '@set' in v) { this.issues({ kind: 'unconvertible', value: JSON.stringify(v).slice(0, 80), where: key }); continue; }
+      // A node: a reference ({"@id": IRI}, a code in a code list) or a node with properties of its own.
+      const n = this._nodeId(v);
+      if (!n) continue;
+      this._out(subj, p, n);
+      this._walk(v, active, n);
+    }
+  }
+  /** A JSON-LD value object: {"@value": v} with an optional "@type" or "@language". */
+  _valueObject(v, key, active) {
+    const x = v['@value'];
+    if (x === null || x === undefined) { this._null(key); return null; }
+    const extra = Object.keys(v).filter((k) => !['@value', '@type', '@language', '@direction', '@index'].includes(k));
+    if (extra.length || typeof x === 'object') { this.issues({ kind: 'unconvertible', value: JSON.stringify(v).slice(0, 80), where: key }); return null; }
+    if (typeof v['@language'] === 'string' && typeof x === 'string' && v['@type'] === undefined) return literal(x, RDF + 'langString', v['@language'].toLowerCase());
+    let dt = typeof v['@type'] === 'string' ? expandIri(v['@type'], active.prefixes) : null;
+    if (dt !== null && !isAbsoluteIri(dt)) { this.issues({ kind: 'relative-iri', value: v['@type'], where: key }); return null; }
+    if (typeof x === 'number') {
+      // jsonld.js: a number with a fraction, or typed xsd:double, is a canonical double; otherwise an integer.
+      if (!Number.isInteger(x) || dt === XSD_DOUBLE) return literal(canonicalDouble(x), dt || XSD_DOUBLE);
+      return literal(x.toFixed(0), dt || XSD_INTEGER);
+    }
+    if (typeof x === 'boolean') return literal(String(x), dt || XSD_BOOLEAN);
+    return literal(x, dt || undefined);
   }
   _list(items, term, c) {
     let head = RDF_NIL;

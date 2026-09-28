@@ -35,6 +35,8 @@
   },
   "plato": {
     "repository": "https://github.com/pelagios/place-attestation-ontology",
-    "commit": "5e7901c6017802053526828678369e054a8fbadc"
+    "commit": "0f25b0c8bc3b8a5d7b6e2da19035bedc1bb413ca",
+    "ref": "issue-14-statistics",
+    "draft": true
   }
 }

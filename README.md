@@ -104,6 +104,50 @@ For a single commit rather than a branch or tag, replace the clone with
 `git init plato-tools-C && cd plato-tools-C && git fetch --depth 1 https://github.com/pelagios/plato-tools C && git checkout FETCH_HEAD`,
 which also fails if the commit does not exist, then run `npm ci` as above.
 
+## Draft: statistical figures (branch `issue-14-statistics`)
+
+**This branch is a draft, not a release.** It vendors PLATO's own draft branch
+`issue-14-statistics` (see `public/plato/VERSION.json`; the page footer and `--version` say
+DRAFT), so that PLATO's design for statistical figures
+([issue #14](https://github.com/pelagios/place-attestation-ontology/issues/14)) can be tested with
+the real toolchain: `npx github:pelagios/plato-tools#issue-14-statistics check|convert …`. It is
+not merged into main, and the published page does not use it.
+
+In the draft, a figure from a statistical table is a property value that is also an RDF Data Cube
+observation: `dataSet` names its table, and `dimensions` and `attributes` hold its coordinates and
+the facts about it, each keyed by the IRI of a dimension or attribute property.
+
+- **PLATO JSON to RDF.** A key that is an IRI becomes a predicate on the figure, as in JSON-LD: an
+  `{"@id": …}` value an IRI, anything else a literal. The graph is exactly the one `jsonld.js`
+  gives. The header's `dataSets` (tables, their scope and structure) go to RDF too.
+- **RDF to PLATO JSON.** A statement on a figure that no PLATO key names goes back under
+  `attributes` or `dimensions`, by this rule, in order: the table's structure, where the graph has
+  it (`qb:attribute`, `qb:dimension`); else the property's own type in the graph
+  (`qb:AttributeProperty`, `qb:DimensionProperty`); else its namespace (SDMX's attribute namespace,
+  where `obsStatus` is, or its dimension namespace); else `dimensions`, with a warning naming it.
+  Both keys give the same graph, so the round trip is lossless either way. A structure that lists
+  its components comes back listed; one given by address alone, as an address. A value whose
+  datatype JSON cannot carry (a year typed `xsd:gYear`) keeps its text, and the loss is reported.
+- **`convert --to ntriples --cube`** (and the page's option for N-Triples) adds what Data Cube
+  expects and PLATO does not write: `rdf:type qb:Observation`, `qb:DataSet` and
+  `qb:DataStructureDefinition`; the measure as a direct statement, `figure <property> <value>`,
+  except for a figure with no value whose `obsStatus` says why (a printed dash); `sdmx-dimension:refArea`,
+  the attestation's place; and `sdmx-dimension:refPeriod`, an `xsd:gYear` when the timespan's earliest
+  start and latest end fall in one year, an `xsd:date` when on one day. A figure whose date is neither
+  is reported as not placeable on the time axis, and is not guessed. Without `--cube` the output is
+  the plain PLATO graph. Reading an export back leaves out only its own derived statements.
+- **Checks.** A property value needs a value unless its attributes give `sdmx-attribute:obsStatus`.
+  `dataSets` written after the records are reported, since the header is read first.
+- **LPF and the tables** leave a figure out, and report it: without its coordinates it would be
+  stated of the place as a whole.
+
+`test/datacube.js` checks Data Cube's integrity constraints IC-1, IC-2, IC-11, IC-12 and IC-14 on
+the export, IC-12 by grouping in linear time rather than by pairs, IC-14 exempting a declared
+absence, and a constraint with nothing to evaluate reported as not tested, never as passed. On the
+draft example and on six planted defects it gives the same verdicts as the specification's own SPARQL
+queries run after its normalisation. The draft example itself fails IC-11 and IC-12: its two totals
+have no `sex`, although the structure declares it.
+
 ## What it checks against
 
 PLATO's normative files (the ontology, the JSON Schemas, the JSON-LD context and the table
