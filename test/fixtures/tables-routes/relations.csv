@@ -1,8 +1,8 @@
-place_id,relation_type,related_place_id,related_uri,related_label,sequence,date,from,to,source_id,locator,attribution,citation_function,certainty,certainty_level,denied,stance,notes
-bunsty,ContainedIn,buckinghamshire,,,,1086,1086,,domesday,,,,,,,,Domesday lists the hundred under Buckinghamshire; no end date is asserted.
-bunsty,MemberOf,iter2,,,3,undated,,,domesday,,,,,,,,
-lumbini,BirthplaceOf,,http://www.wikidata.org/entity/Q9441,the Buddha,,c. 563 BCE,,,domesday,,,,,,,,
-leg-2,HasEnd,cambridge,,,,undated,,,domesday,,,,,,,,
-leg-2,HasEnd,bunsty,,,,undated,,,domesday,,,,,,,,
-leg-2,MemberOf,iter2,,,2,undated,,,domesday,,,,,,,,
-cambridge,WorkplaceOf,,http://www.wikidata.org/entity/Q935,Isaac Newton,,1669-1696,1669,1696,domesday,,,,,,,,
+place_id,relation_type,related_place_id,related_uri,related_label,sequence,date,from,to,duration,source_id,locator,attribution,citation_function,certainty,certainty_level,denied,stance,notes
+bunsty,ContainedIn,buckinghamshire,,,,1086,1086,,,domesday,,,,,,,,Domesday lists the hundred under Buckinghamshire; no end date is asserted.
+bunsty,MemberOf,iter2,,,3,undated,,,,domesday,,,,,,,,
+lumbini,BirthplaceOf,,http://www.wikidata.org/entity/Q9441,the Buddha,,c. 563 BCE,,,,domesday,,,,,,,,
+leg-2,HasEnd,cambridge,,,,undated,,,,domesday,,,,,,,,
+leg-2,HasEnd,bunsty,,,,undated,,,,domesday,,,,,,,,
+leg-2,MemberOf,iter2,,,2,undated,,,,domesday,,,,,,,,
+cambridge,WorkplaceOf,,http://www.wikidata.org/entity/Q935,Isaac Newton,,1669-1696,1669,1696,,domesday,,,,,,,,

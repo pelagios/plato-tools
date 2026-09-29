@@ -41,6 +41,8 @@ export function checkCell(col, raw) {
       if (!words.includes(v)) return `'${v}' is not ${words.length === 2 ? `${words[0]} or ${words[1]}` : 'true or false'}`;
     }
     if (base === 'anyURI' && !/^[A-Za-z][A-Za-z0-9+.-]*:\S+$/.test(v)) return `'${v}' is not a web address`;
+    // An xsd:duration (PLATO 0.6.0): P, then at least one of years, months, days, hours, minutes, seconds; no weeks.
+    if (base === 'duration' && !/^-?P(?=\d|T\d)(\d+Y)?(\d+M)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)?(\d+(\.\d+)?S)?)?$/.test(v)) return `'${v}' is not a duration (write six weeks as P42D)`;
     if (dt && dt.format && base === 'string' && !new RegExp(dt.format).test(v)) {
       const m = dt.format.match(/^\^\(([A-Za-z|]+)\)\$$/);
       return m ? `'${v}' is not one of ${m[1].split('|').join(', ')}` : `'${v}' is not in the expected form`;
@@ -112,7 +114,7 @@ export function rowToAttestation(sheet, row, ids) {
     citationFunction: row.citation_function ? CITO + row.citation_function : undefined });
   const a = clean({
     // The date column is the date as the source writes it: plato:source_label since PLATO 9d2c36e.
-    timespans: [clean({ sourceLabel: row.date, startEarliest: row.from, endLatest: row.to })],
+    timespans: [clean({ sourceLabel: row.date, startEarliest: row.from, endLatest: row.to, duration: row.duration })],   // duration: relations only
     sources: [src],
     citations: [citation],
     certainty: num(row.certainty),
@@ -217,7 +219,7 @@ export const TABLE_KEEPS = {
   attestation: new Set(['about', 'names', 'geometries', 'timespans', 'types', 'properties', 'relations', 'sources', 'citations', 'meta', 'certainty', 'certaintyLevel', 'certaintyNote', 'negated', 'sourceStance', 'notes', 'occurrenceCount', 'occurrenceContext', 'formStatus', 'sequence', 'computed']),
   name: new Set(['toponym', 'language', 'script', 'romanized', 'nameType', 'sourceLabel', 'qualification']),
   geometry: new Set(['reprPoint', 'geojson', 'wkt', 'role', 'precisionKm', 'sourceLabel', 'qualification']),
-  timespan: new Set(['startEarliest', 'startLatest', 'endEarliest', 'endLatest', 'label', 'sourceLabel', 'qualification']),
+  timespan: new Set(['startEarliest', 'startLatest', 'endEarliest', 'endLatest', 'label', 'sourceLabel', 'qualification', 'duration']),
   type: new Set(['identifier', 'label', 'sourceLabel', 'qualification']),
   propertyValue: new Set(['property', 'label', 'value', 'unit', 'qualification', 'dataSet', 'dimensions', 'attributes', 'universe']),
   source: new Set(['@id', 'title', 'citation', 'uri', 'timespan', 'derivedFrom', 'licence', 'authorityType']),
@@ -311,6 +313,8 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
     qualificationLosses(t.qualification, [], loss);
     dropKeys(t, 'timespan', TABLE_KEEPS.timespan, loss);
     if ((t.startLatest && t.startLatest !== t.startEarliest) || (t.endEarliest && t.endEarliest !== t.endLatest)) loss({ kind: 'four-date-bounds' });
+    // Only the relations sheet has a duration column: a stay at a stop on a journey.
+    if (t.duration && (!a.relations?.length || connection)) dropKey('timespan', 'duration', loss);
     const srcs = [...(a.sources || []), ...(a.citations || []).map((c) => c.source)].filter(Boolean);
     const unique = [...new Map(srcs.map((s) => [typeof s === 'string' ? s : s['@id'] || s.title, s])).values()];
     if (unique.length > 1) loss({ kind: 'extra-sources', value: unique.length - 1 });
@@ -391,7 +395,7 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
       // not a place in the places sheet: it goes to related_uri, and gets no row of its own.
       const external = !!r.relatedLabel || EXTERNAL.has(rt);
       rows.relations.push({ place_id: pid, relation_type: rt, related_place_id: external ? '' : ids.place(r.relatesTo, null, false),
-        related_uri: external ? r.relatesTo : '', related_label: external ? r.relatedLabel || '' : '', sequence: a.sequence ?? '', ...common });
+        related_uri: external ? r.relatesTo : '', related_label: external ? r.relatedLabel || '' : '', sequence: a.sequence ?? '', duration: t.duration || '', ...common });
     }
     // A statistical figure keeps its own CSVW description (PLATO issue #14, decision 4): the
     // properties sheet has no columns for its table or coordinates, and without them it says something false.

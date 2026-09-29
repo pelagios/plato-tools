@@ -134,7 +134,8 @@ test('tables -> PLATO records -> tables gives back the survey rows', () => {
   const back = { names: [], relations: [], types: [], locations: [], properties: [], identities: [] }; const losses = [];
   const ids = { place: (iri) => decodeURIComponent(iri.slice((base + 'place/').length)), source: (s) => decodeURIComponent((s['@id'] || s).slice((base + 'source/').length)) };
   for (const r of recs) { const rows = recordToRows(r, ids, (l) => losses.push(l.kind)); for (const k of Object.keys(back)) back[k].push(...rows[k]); }
-  const norm = (rows) => rows.map((r) => JSON.stringify(Object.fromEntries(Object.entries(r).map(([k, v]) => [k, String(v)])))).sort();
+  // Key order is not compared: the writer lays out each row by the sheet's own column order.
+  const norm = (rows) => rows.map((r) => JSON.stringify(Object.fromEntries(Object.entries(r).map(([k, v]) => [k, String(v)]).sort(([a], [b]) => a.localeCompare(b))))).sort();
   for (const sheet of ['names', 'types', 'relations']) {
     const orig = parse(sheet).map((r) => ({ ...r, certainty: r.certainty === '' ? '' : String(Number(r.certainty)) }));
     assert.deepEqual(norm(back[sheet]), norm(orig), `${sheet} rows differ`);

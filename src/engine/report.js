@@ -130,6 +130,7 @@ const KEY_WORDS = {
   'timespan.precisionValue': "a date's precision in years (precisionValue)",
   'timespan.openStart': 'that a date deliberately has no start (openStart)',
   'timespan.openEnd': 'that a date deliberately has no end (openEnd)',
+  'timespan.duration': 'how long something lasted, such as a stay on a journey (duration)',
   'timespan.periodoUri': "a date's PeriodO period (periodoUri)",
   'timespan.edtfString': 'a date in Extended Date/Time Format (edtfString)',
   'timespan.label': "a period's name, beside the date as the source wrote it",

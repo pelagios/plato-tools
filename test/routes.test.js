@@ -145,3 +145,21 @@ test('a route that is, through its members, a member of itself is an error; a ch
   const t = await go(files, 'check');
   assert.ok(kinds(t, 'error').includes('membership-cycle'), JSON.stringify(t.report.items));
 });
+
+test('a duration is checked as rdf-tabular checks it: P42D is one, six weeks and P6W are not', async () => {
+  // rdf-tabular (strict) accepted P42D in the relations sheet's duration column and rejected
+  // 'six weeks' on 2026-09-29; xsd:duration has no weeks, so P6W is rejected too.
+  const { checkCell } = await import('../src/formats/tables.js');
+  const col = { datatype: { base: 'duration' } };
+  for (const ok of ['P42D', 'P1D', 'PT12H', 'P1Y2M', 'P0D']) assert.equal(checkCell(col, ok), null, ok);
+  for (const bad of ['six weeks', 'P6W', 'P', 'PT', '42D']) assert.ok(checkCell(col, bad), bad);
+  const rel = readFileSync(`${DIR}/relations.csv`, 'utf8').replace('bunsty,MemberOf,iter2,,,3,undated,,,', 'bunsty,MemberOf,iter2,,,3,undated,,,P42D');
+  const files = (text) => readdirSync(DIR).filter((f) => f !== 'relations.csv').map((f) => file(`${DIR}/${f}`)).concat(textFile(text, 'relations.csv'));
+  const good = await go(files(rel), 'convert', 'plato-jsonl');
+  assert.deepEqual(items(good, 'error'), []);
+  assert.ok(outText(good.e, 'connections.jsonl').includes('"duration":"P42D"'));
+  const bad = await go(files(rel.replace('P42D', 'six weeks')), 'check');
+  // The cell, and the record it becomes (the JSON Schema's duration pattern), each report it.
+  assert.ok(items(bad, 'error').some((i) => i.kind === 'table' && /duration/.test(i.message)), JSON.stringify(bad.report.items));
+  assert.ok(items(bad, 'error').every((i) => /duration|pattern|match/i.test(i.message + JSON.stringify(i.examples))), JSON.stringify(bad.report.items));
+});
