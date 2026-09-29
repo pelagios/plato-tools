@@ -34,7 +34,7 @@ for (const f of readdirSync(EX).filter((f) => f.startsWith('attestation-centric'
 }
 
 const tablesDir = (ex) => readdirSync(`${PLATO_REPO}/schemas/tables/examples/${ex}`).map((f) => file(`${PLATO_REPO}/schemas/tables/examples/${ex}/${f}`));
-test('tables (customs, eight CSV files) -> JSON Lines: valid, no errors', async () => {
+test('tables (customs, nine CSV files) -> JSON Lines: valid, no errors', async () => {
   const r = await go(tablesDir('customs'), 'convert', 'plato-jsonl', { base: 'https://example.org/customs/' });
   assert.equal(r.input.format, 'tables');
   assert.deepEqual(errors(r), []);
@@ -60,7 +60,7 @@ test('tables -> tables round trip through a zip, and the zip is accepted again',
   const zipName = Object.keys(r.e.outs)[0];
   const bytes = r.e.outs[zipName][0];
   const z = unzipSync(bytes);
-  assert.deepEqual(Object.keys(z).sort(), ['identities.csv', 'locations.csv', 'names.csv', 'places.csv', 'properties.csv', 'relations.csv', 'sources.csv', 'types.csv']);
+  assert.deepEqual(Object.keys(z).sort(), ['connections.csv', 'identities.csv', 'locations.csv', 'names.csv', 'places.csv', 'properties.csv', 'relations.csv', 'sources.csv', 'types.csv']);
   assert.match(strFromU8(z['names.csv']), /Bristowe/);
   assert.match(strFromU8(z['places.csv']), /\nbristol,Bristol,GB\n/);
   const again = await go([new File([bytes], 'again.zip')], 'check');

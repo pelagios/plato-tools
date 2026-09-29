@@ -5,7 +5,7 @@
 // Validation follows the CSVW rules the metadata uses, and is tested against the reference
 // implementation (rdf-tabular, strict mode) on the same good and broken tables.
 import { PLATO } from '../lib/context.js';
-import { isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey } from './shared.js';
+import { isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey, isComputed, isComputedFacet } from './shared.js';
 
 export const CITO = 'http://purl.org/spar/cito/';
 
@@ -97,7 +97,7 @@ export async function validateTables(meta, { header, rows, keys, issue }) {
   }
 }
 
-const ATTESTATION_SHEETS = ['names', 'locations', 'types', 'relations', 'properties'];
+const ATTESTATION_SHEETS = ['names', 'locations', 'types', 'relations', 'connections', 'properties'];
 const clean = (o) => { for (const k of Object.keys(o)) if (o[k] === undefined || o[k] === '' || (Array.isArray(o[k]) && !o[k].length)) delete o[k]; return o; };
 const num = (v) => (v === '' || v === undefined ? undefined : Number(v));
 // The denied column (plato:negated): 'yes' is a denial and 'no' is not. Any other word is a
@@ -141,12 +141,44 @@ export function rowToAttestation(sheet, row, ids) {
   } else if (sheet === 'types') {
     a.types = [clean({ identifier: row.type_uri, label: row.type_label })];
   } else if (sheet === 'relations') {
-    a.relations = [clean({ relatesTo: ids.place(row.related_place_id), relationType: PLATO + row.relation_type })];
+    // The target is a place in the places sheet, or something described elsewhere, by its address
+    // (PLATO 0.6.0): a person, an object or an event, named by related_label.
+    a.relations = [clean({ relatesTo: row.related_place_id ? ids.place(row.related_place_id) : row.related_uri || undefined,
+      relatedLabel: row.related_label, relationType: PLATO + row.relation_type })];
+    if (row.sequence !== undefined && row.sequence !== '') a.sequence = num(row.sequence);
+  } else if (sheet === 'connections') {
+    // One link and one figure about it: a single attestation, so the figure is about the connection.
+    a.relations = [{ relatesTo: ids.place(row.related_place_id), relationType: PLATO + row.relation_type }];
+    a.properties = [propertyValue(row)];
   } else if (sheet === 'properties') {
-    const v = row.value !== '' && !Number.isNaN(Number(row.value)) ? Number(row.value) : row.value;
-    a.properties = [clean({ property: row.property_uri, label: row.property_label, value: v, unit: row.unit_uri })];
+    a.properties = [propertyValue(row)];
   }
   return a;
+}
+
+function propertyValue(row) {
+  const v = row.value !== '' && !Number.isNaN(Number(row.value)) ? Number(row.value) : row.value;
+  return clean({ property: row.property_uri, label: row.property_label, value: v, unit: row.unit_uri });
+}
+
+/**
+ * PLATO's rules for the tables that CSVW cannot state, so rdf-tabular does not check them: a relations
+ * row names exactly one target, a place or an address; an address has a name to show it by; and no
+ * route, itinerary or network is, through its members, a member of itself. Reports through `issue`
+ * (errors) and `warn`.
+ */
+export function checkTableRules(rows, { issue, warn }) {
+  const member = new Map();
+  let n = 0;
+  for (const r of rows('relations')) {
+    n++;
+    const place = !!r.related_place_id, uri = !!r.related_uri;
+    if (place === uri) issue({ table: 'relations.csv', row: n, column: 'related_place_id', message: place ? 'gives both a related place and a related_uri: fill in one of them' : 'gives no related place: fill in related_place_id or related_uri' });
+    if (uri && !r.related_label) warn({ table: 'relations.csv', row: n, column: 'related_label', message: 'has a related_uri but no related_label to show it by' });
+    if (r.sequence && r.relation_type !== 'MemberOf') warn({ table: 'relations.csv', row: n, column: 'sequence', message: `gives a sequence on a ${r.relation_type} row; a sequence orders the members of a route (MemberOf)` });
+    if (r.relation_type === 'MemberOf' && place) (member.get(r.place_id) || member.set(r.place_id, new Set()).get(r.place_id)).add(r.related_place_id);
+  }
+  return member;
 }
 
 /** Identifier minting for tables: a base address the user chooses, plus the table's own ids. */
@@ -182,7 +214,7 @@ export { ATTESTATION_SHEETS };
 export const TABLE_KEEPS = {
   gazetteer: new Set(['version', 'status', 'isVersionOf', 'previousVersion']),   // reported by versionLosses
   spatialEntity: new Set(['@id', 'label', 'ccodes', 'entityIdentifier', 'attestations', 'identityRelations']),
-  attestation: new Set(['about', 'names', 'geometries', 'timespans', 'types', 'properties', 'relations', 'sources', 'citations', 'meta', 'certainty', 'certaintyLevel', 'certaintyNote', 'negated', 'sourceStance', 'notes', 'occurrenceCount', 'occurrenceContext', 'formStatus']),
+  attestation: new Set(['about', 'names', 'geometries', 'timespans', 'types', 'properties', 'relations', 'sources', 'citations', 'meta', 'certainty', 'certaintyLevel', 'certaintyNote', 'negated', 'sourceStance', 'notes', 'occurrenceCount', 'occurrenceContext', 'formStatus', 'sequence', 'computed']),
   name: new Set(['toponym', 'language', 'script', 'romanized', 'nameType', 'sourceLabel', 'qualification']),
   geometry: new Set(['reprPoint', 'geojson', 'wkt', 'role', 'precisionKm', 'sourceLabel', 'qualification']),
   timespan: new Set(['startEarliest', 'startLatest', 'endEarliest', 'endLatest', 'label', 'sourceLabel', 'qualification']),
@@ -191,7 +223,7 @@ export const TABLE_KEEPS = {
   source: new Set(['@id', 'title', 'citation', 'uri', 'timespan', 'derivedFrom', 'licence', 'authorityType']),
   sourceTimespan: new Set(['startEarliest', 'endLatest', 'sourceLabel', 'label']),
   citation: new Set(['source', 'locator', 'attributionStatus', 'citationFunction']),
-  relation: new Set(['relatesTo', 'relationType', 'relationLabel']),
+  relation: new Set(['relatesTo', 'relatedLabel', 'relationType', 'relationLabel']),
   identityRelation: new Set(['subject', 'object', 'identityType', 'certainty', 'basis', 'source', 'assertedBy', 'promotedFrom']),
 };
 /** Report what the sources sheet cannot hold of a source: called once, when the source gets its row. */
@@ -209,6 +241,8 @@ export function sourceLosses(s, loss) {
   }
 }
 const GVP_BROADER_PARTITIVE = 'http://vocab.getty.edu/ontology#broaderPartitive';
+// PLATO's relations to people, objects and events: their target is described elsewhere, not a place.
+const EXTERNAL = new Set(['BirthplaceOf', 'DeathplaceOf', 'ResidenceOf', 'FindspotOf', 'SettingOf', 'WorkplaceOf']);
 const LEVELS = new Set(['Certain', 'LessCertain', 'Uncertain']);   // the tables' certainty_level values
 const ACCURACY = new Set(['Accurate', 'Inaccurate', 'False']), COMPLETENESS = new Set(['Complete', 'Reconstructable', 'NonReconstructable']);
 const local = (iri, prefix) => (iri && iri.startsWith(prefix) ? iri.slice(prefix.length) : null);
@@ -244,12 +278,26 @@ function representativePoint(g) {
  * the record, gets no row.
  */
 export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, withdrawn = null) {
-  const rows = { places: [], names: [], locations: [], types: [], relations: [], properties: [], identities: [] };
+  const rows = { places: [], names: [], locations: [], types: [], relations: [], connections: [], properties: [], identities: [] };
   const pid = ids.place(rec['@id'], rec.label, true, rec.ccodes, rec.entityIdentifier);
   dropKeys(rec, 'spatialEntity', TABLE_KEEPS.spatialEntity, loss);
-  for (const a of currentAttestations(rec, withdrawn, loss)) {
+  for (const whole of currentAttestations(rec, withdrawn, loss)) {
+    // A computed value (plato:computed) is not evidence, and a row in the tables states evidence: a
+    // computed attestation or facet is left out, and reported, never written as a source's statement.
+    if (isComputed(whole)) { loss({ kind: 'computed', value: whole['@id'] || rec['@id'] }); continue; }
+    const a = { ...whole };
+    for (const k of ['names', 'geometries', 'types', 'properties', 'timespans']) {
+      if (!Array.isArray(a[k]) || !a[k].some(isComputedFacet)) continue;
+      loss({ kind: 'computed', value: `${whole['@id'] || rec['@id']} (${k})` });
+      a[k] = a[k].filter((f) => !isComputedFacet(f));
+    }
     dropKeys(a, 'attestation', TABLE_KEEPS.attestation, loss);
-    const facets = ['names', 'geometries', 'types', 'relations', 'properties'].filter((k) => a[k]?.length);
+    // A connection with figures about it goes to the connections sheet, one row for each figure; a
+    // relations row and a properties row would state the figure of the place, not of the connection.
+    const rt0 = a.relations?.length === 1 ? local(a.relations[0].relationType, PLATO) : null;
+    const connection = !!rt0 && accepts('connections', 'relation_type', rt0) && (a.properties || []).some((pv) => !isFigure(pv));
+    const facets = ['names', 'geometries', 'types', connection ? null : 'relations', 'properties'].filter((k) => k && a[k]?.length);
+    if (a.sequence !== undefined && a.sequence !== null && (!a.relations?.length || connection)) dropKey('attestation', 'sequence', loss);
     // A row states one thing, and its denied column denies that one thing. A denial of several
     // things together ("no market and no fair here") split into rows would deny each of them on its
     // own, which the source did not say; so it is left out whole, and reported.
@@ -332,14 +380,23 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
       dropKeys(r, 'relation', TABLE_KEEPS.relation, loss);
       let rt = local(r.relationType, PLATO);
       if (!rt && r.relationType === GVP_BROADER_PARTITIVE) rt = 'ContainedIn';   // the alignment plato:ContainedIn declares
-      if (!rt) { loss({ kind: 'relation-type-not-in-plato', value: r.relationType }); continue; }
+      if (!rt || !accepts('relations', 'relation_type', rt)) { loss({ kind: 'relation-type-not-in-plato', value: r.relationType }); continue; }
       if (r.relationLabel) loss({ kind: 'relation-label' });
-      rows.relations.push({ place_id: pid, relation_type: rt, related_place_id: ids.place(r.relatesTo, null, false), ...common });
+      if (connection) {
+        for (const pv of a.properties.filter((x) => !isFigure(x))) rows.connections.push({ place_id: pid, relation_type: rt, related_place_id: ids.place(r.relatesTo, null, false),
+          property_uri: pv.property, property_label: pv.label || '', value: typeof pv.value === 'object' ? JSON.stringify(pv.value) : pv.value, unit_uri: pv.unit || '', ...common });
+        continue;
+      }
+      // A target named by related_label, or related by a relation to people, objects or events, is
+      // not a place in the places sheet: it goes to related_uri, and gets no row of its own.
+      const external = !!r.relatedLabel || EXTERNAL.has(rt);
+      rows.relations.push({ place_id: pid, relation_type: rt, related_place_id: external ? '' : ids.place(r.relatesTo, null, false),
+        related_uri: external ? r.relatesTo : '', related_label: external ? r.relatedLabel || '' : '', sequence: a.sequence ?? '', ...common });
     }
     // A statistical figure keeps its own CSVW description (PLATO issue #14, decision 4): the
     // properties sheet has no columns for its table or coordinates, and without them it says something false.
     for (const pv of a.properties || []) if (isFigure(pv)) loss({ kind: 'statistical-figure', value: pv['@id'] || pv.label || pv.property });
-    for (const pv of (a.properties || []).filter((x) => !isFigure(x))) rows.properties.push({ place_id: pid, property_uri: pv.property, property_label: pv.label || '',
+    if (!connection) for (const pv of (a.properties || []).filter((x) => !isFigure(x))) rows.properties.push({ place_id: pid, property_uri: pv.property, property_label: pv.label || '',
       value: typeof pv.value === 'object' ? JSON.stringify(pv.value) : pv.value, unit_uri: pv.unit || '', ...common });
   }
   // Nested under its place, a relation may leave out its subject (PLATO eb8065a): it is the place.

@@ -6,7 +6,7 @@
 // Writing LPF from PLATO is lossy by design (bundling, locators, form status, numeric certainty
 // and more have no LPF slot); every loss is reported, with counts.
 import { PLATO, isAbsoluteIri } from '../lib/context.js';
-import { isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey } from './shared.js';
+import { isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey, isComputed, isComputedFacet } from './shared.js';
 
 // The README's alias table, plus the vocabulary prefixes its own examples use.
 export const LPF_PREFIXES = {
@@ -131,7 +131,7 @@ const KEEPS = {
   gazetteer: new Set(['@id', 'title', 'licence', 'description', 'version', 'status', 'isVersionOf', 'previousVersion']),   // versions: versionLosses
   spatialEntity: new Set(['@id', 'label', 'ccodes', 'attestations', 'identityRelations']),
   // certaintyNote: kept only as LPF's own certainty word, written by the LPF reader
-  attestation: new Set(['about', 'names', 'geometries', 'timespans', 'types', 'properties', 'relations', 'sources', 'citations', 'meta', 'certainty', 'certaintyLevel', 'certaintyNote', 'negated', 'occurrenceCount', 'occurrenceContext', 'formStatus']),
+  attestation: new Set(['about', 'names', 'geometries', 'timespans', 'types', 'properties', 'relations', 'sources', 'citations', 'meta', 'certainty', 'certaintyLevel', 'certaintyNote', 'negated', 'occurrenceCount', 'occurrenceContext', 'formStatus', 'computed']),
   name: new Set(['toponym', 'language', 'sourceLabel', 'qualification']),
   geometry: new Set(['wkt', 'geojson', 'reprPoint', 'bbox', 'role', 'sourceLabel', 'qualification']),   // reprPoint: only without a shape
   timespan: new Set(['startEarliest', 'startLatest', 'endEarliest', 'endLatest', 'label', 'sourceLabel', 'periodoUri', 'qualification']),
@@ -246,7 +246,16 @@ export function recordToFeature(rec, idrs = [], loss = () => {}, withdrawn = nul
   const f = { '@id': rec['@id'], type: 'Feature', properties: clean({ title: rec.label, ccodes: rec.ccodes?.length ? rec.ccodes : undefined }), names: [], types: [], relations: [], links: [], descriptions: [], depictions: [] };
   const geoms = [], fclasses = [], whens = [];
   dropKeys(rec, 'spatialEntity', KEEPS.spatialEntity, loss);
-  for (const a of currentAttestations(rec, withdrawn, loss)) {
+  for (const whole of currentAttestations(rec, withdrawn, loss)) {
+    // A computed value (plato:computed) is not evidence, and LPF cannot mark one: written, it would
+    // read as a source's statement. A computed attestation or facet is left out, and reported.
+    if (isComputed(whole)) { loss({ kind: 'computed', value: whole['@id'] || rec['@id'] }); continue; }
+    const a = { ...whole };
+    for (const k of ['names', 'geometries', 'types', 'properties', 'timespans']) {
+      if (!Array.isArray(a[k]) || !a[k].some(isComputedFacet)) continue;
+      loss({ kind: 'computed', value: `${whole['@id'] || rec['@id']} (${k})` });
+      a[k] = a[k].filter((f) => !isComputedFacet(f));
+    }
     dropKeys(a, 'attestation', KEEPS.attestation, loss);
     // LPF cannot say that a source denies something: a denial written as LPF would assert what its
     // source says is not so. It is left out, and reported (PLATO cf87b78).

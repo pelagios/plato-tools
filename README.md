@@ -13,7 +13,7 @@ lives on disk, in the browser's private file storage.
 
 | Format | Read | Write |
 |---|---|---|
-| PLATO spreadsheet tables: the eight CSV files, a zip of them, or the template workbook (`.xlsx`) | yes | yes (a zip of the eight CSV files) |
+| PLATO spreadsheet tables: the nine CSV files, a zip of them, or the template workbook (`.xlsx`) | yes | yes (a zip of the nine CSV files) |
 | PLATO JSON document, place-centric or attestation-centric | yes | yes (place-centric) |
 | PLATO JSON Lines: a header line, then one place per line (the DEEP export's form) | yes | yes |
 | RDF: N-Triples, N-Quads, Turtle | yes | N-Triples |

@@ -99,7 +99,7 @@ test('--json: one object per input, then the total, and the report is the engine
   const lines = jsonLines(r.out);
   assert.deepEqual(lines.map((l) => [l.type, l.status]), [['input', 'problems'], ['input', 'ok'], ['input', 'failed'], ['total', undefined]]);
   const [bad, good, missing, total] = lines;
-  assert.equal(bad.format, 'tables'); assert.equal(bad.files.length, 8); assert.equal(bad.errors, 1);
+  assert.equal(bad.format, 'tables'); assert.equal(bad.files.length, 9); assert.equal(bad.errors, 1);
   const engine = await go(readdirSync(broken).map((f) => file(join(broken, f))), 'check', undefined, { base: DEFAULT_BASE, typing: true, name: 'broken' });
   assert.deepEqual(bad.items, engine.report.items);
   assert.deepEqual(bad.counts, engine.report.counts);
@@ -114,7 +114,7 @@ test('CSV files named one by one are one set of tables per directory', () => {
   const r = cli('check', '--json', ...names('customs'), ...names('survey'));
   assert.equal(r.code, 0, r.out + r.err);
   const lines = jsonLines(r.out).filter((l) => l.type === 'input');
-  assert.deepEqual(lines.map((l) => [l.files.length, l.counts.places]), [[8, 2], [8, 3]]);
+  assert.deepEqual(lines.map((l) => [l.files.length, l.counts.places]), [[9, 2], [9, 3]]);
 });
 test('a workbook, and the zip the command line writes, are each one set of tables', () => {
   const dir = scratch();

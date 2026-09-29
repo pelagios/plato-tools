@@ -83,7 +83,10 @@ test('with typing, a node shared by records is typed once for the file, and the 
   const lines = typed.split('\n').filter(Boolean);
   const count = (re) => lines.filter((l) => re.test(l)).length;
   assert.equal(count(/source\/db> <http:\/\/www.w3.org\/1999\/02\/22-rdf-syntax-ns#type>/), new Set(lines.filter((l) => /source\/db> <[^>]*#type>/.test(l))).size, 'each type of the source once');
-  assert.equal(count(/county> <http:\/\/www.w3.org\/1999\/02\/22-rdf-syntax-ns#type> <https:\/\/w3id.org\/plato#SpatialEntity>/), 1, 'the county is typed once, not once per record');
+  // The relation's target is not typed at all since PLATO 0.6.0: relates_to has no range, because its
+  // target may be a person or an object described elsewhere. The relation type is shared instead.
+  assert.equal(count(/county> <http:\/\/www.w3.org\/1999\/02\/22-rdf-syntax-ns#type>/), 0, 'a relation\'s target is not inferred to be a SpatialEntity');
+  assert.equal(count(/plato#ContainedIn> <http:\/\/www.w3.org\/1999\/02\/22-rdf-syntax-ns#type> <https:\/\/w3id.org\/plato#RelationType>/), 1, 'the relation type is typed once, not once per record');
   assert.equal(count(/example.org\/g> <http:\/\/www.w3.org\/1999\/02\/22-rdf-syntax-ns#type>/), 1, 'the gazetteer is typed once');
   assert.equal(lines.length, new Set(lines).size, 'no line is written twice');
   // Removing the type lines leaves exactly the untyped graph.

@@ -109,7 +109,8 @@ const TRANSCRIPTION = ['transcriptionAccuracy', 'transcriptionCompleteness'];
 /** Report what a facet's qualification holds beyond the keys the target format keeps. */
 export function qualificationLosses(q, kept, loss) {
   if (!q || typeof q !== 'object') return;
-  const rest = Object.keys(q).filter((k) => !kept.includes(k) && q[k] !== undefined && q[k] !== null);
+  // computed is not a loss here: the writers leave a computed facet out whole (isComputedFacet).
+  const rest = Object.keys(q).filter((k) => !kept.includes(k) && k !== 'computed' && q[k] !== undefined && q[k] !== null);
   if (rest.some((k) => TRANSCRIPTION.includes(k))) loss({ kind: 'transcription-judgement' });
   if (rest.some((k) => !TRANSCRIPTION.includes(k))) loss({ kind: 'qualification' });
 }
@@ -150,3 +151,51 @@ export function dropKeys(obj, where, keeps, loss) {
 }
 /** Report one key as dropped, where the writer decides that case by case. */
 export const dropKey = (where, key, loss) => loss({ kind: 'dropped', key: `${where}.${key}` });
+
+// ---- routes, itineraries and networks (PLATO 0.6.0) ----------------------------------------------
+const plato = (iri) => (typeof iri === 'string' && iri.startsWith('plato:') ? PLATO + iri.slice(6) : iri);
+/** True when a relation type is plato:MemberOf, written in full or with the context's prefix. */
+export const isMemberOf = (rt) => plato(rt) === PLATO + 'MemberOf';
+
+/**
+ * Add to `into` (member -> Set of wholes) each plato:MemberOf that `rec`'s attestations state: the
+ * member is the attestation's subject (its `about`, or the record it is nested under), the whole is
+ * the relation's target. Used to find a route that is, through its members, a member of itself.
+ */
+export function collectMembership(attestations, subject, into = new Map()) {
+  for (const a of attestations || []) {
+    if (!a || typeof a !== 'object') continue;
+    const member = typeof a.about === 'string' ? a.about : subject;
+    for (const r of a.relations || []) {
+      if (!r || !isMemberOf(r.relationType) || typeof r.relatesTo !== 'string' || typeof member !== 'string') continue;
+      (into.get(member) || into.set(member, new Set()).get(member)).add(r.relatesTo);
+    }
+  }
+  return into;
+}
+/** The entities caught in a loop of memberships: a route that, followed up, contains itself. */
+export function membershipCycles(edges) {
+  const inLoop = new Set(), done = new Set(), onPath = [];
+  const visit = (id) => {
+    if (done.has(id)) return;
+    const at = onPath.indexOf(id);
+    if (at >= 0) { for (const x of onPath.slice(at)) inLoop.add(x); return; }
+    onPath.push(id);
+    for (const w of edges.get(id) || []) visit(w);
+    onPath.pop(); done.add(id);
+  };
+  for (const id of edges.keys()) visit(id);
+  return [...inLoop];
+}
+
+// ---- computed values (plato:computed, PLATO 0.6.0) -----------------------------------------------
+/**
+ * True when a value was worked out by software rather than taken from a source: an itinerary's
+ * span from its stops. It is not evidence, so a writer whose format cannot mark it (LPF, the
+ * spreadsheet tables) must leave it out and report it: written there, it would read as a source's
+ * statement. As with a denial, anything but absent or false counts, so a malformed flag errs
+ * towards leaving a value out.
+ */
+export const isComputed = (x) => !!x && typeof x === 'object' && x.computed !== undefined && x.computed !== null && x.computed !== false;
+/** A facet is computed when its qualification says so. */
+export const isComputedFacet = (f) => !!f && typeof f === 'object' && isComputed(f.qualification);

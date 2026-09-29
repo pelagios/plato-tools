@@ -1,2 +1,2 @@
-place_id,relation_type,related_place_id,date,from,to,source_id,locator,attribution,citation_function,certainty,certainty_level,denied,stance,notes
-bunsty,ContainedIn,buckinghamshire,"c. 12,000-10,000 BCE (illustrative)",-12000,-10000,domesday,,,citesForInformation,,,,Doubted,An illustrative deep-time date: years have as many digits as they need.
+place_id,relation_type,related_place_id,related_uri,related_label,sequence,date,from,to,source_id,locator,attribution,citation_function,certainty,certainty_level,denied,stance,notes
+bunsty,ContainedIn,buckinghamshire,,,,"c. 12,000-10,000 BCE (illustrative)",-12000,-10000,domesday,,,citesForInformation,,,,Doubted,An illustrative deep-time date: years have as many digits as they need.

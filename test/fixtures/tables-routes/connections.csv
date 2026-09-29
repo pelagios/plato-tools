@@ -1,0 +1,2 @@
+place_id,relation_type,related_place_id,property_uri,property_label,value,unit_uri,date,from,to,source_id,locator,attribution,citation_function,certainty,certainty_level,denied,stance,notes
+florence,LeadsTo,barcelona,https://example.org/prop/letters,letters sent,412,,1383-1410,1383,1410,domesday,,,,,,,,

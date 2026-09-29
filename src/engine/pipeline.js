@@ -14,9 +14,9 @@ import { tripleNT } from '../lib/ntriples.js';
 import { TripleStore } from '../lib/store.js';
 import { PLATO, RDF } from '../lib/context.js';
 import { featureToRecord, recordToFeature, collectionHead, collectionToGazetteer } from '../formats/lpf.js';
-import { collectWithdrawn, resolveWithdrawn, addWithdrawal, versionLosses, tableLosses, dropKeys } from '../formats/shared.js';
+import { collectWithdrawn, resolveWithdrawn, addWithdrawal, versionLosses, tableLosses, dropKeys, collectMembership, membershipCycles } from '../formats/shared.js';
 import { CubeExport, CUBE_TEXT } from '../formats/cube.js';
-import { validateTables, rowToAttestation, tableIds, recordToRows, identityRow, ATTESTATION_SHEETS, tableSchemas, cellChecker, sourceLosses, TABLE_KEEPS } from '../formats/tables.js';
+import { validateTables, checkTableRules, rowToAttestation, tableIds, recordToRows, identityRow, ATTESTATION_SHEETS, tableSchemas, cellChecker, sourceLosses, TABLE_KEEPS } from '../formats/tables.js';
 import { lineChunks, lines, jsonDocument, TABLE_SHEETS, DataError } from './input.js';
 import { Report, LOSS_TEXT, droppedText, FORMAT_WORDS } from './report.js';
 
@@ -24,7 +24,7 @@ export const TARGETS = {
   'plato-jsonl': { label: 'PLATO JSON Lines (.jsonl): one place per line', ext: '.jsonl' },
   'plato-json': { label: 'PLATO JSON document (.json), place-centric', ext: '.json' },
   ntriples: { label: 'RDF, N-Triples (.nt)', ext: '.nt' },
-  tables: { label: 'PLATO spreadsheet tables (.zip of eight CSV files)', ext: '.zip' },
+  tables: { label: 'PLATO spreadsheet tables (.zip of nine CSV files)', ext: '.zip' },
   'lpf-seq': { label: 'Linked Places Format v1, GeoJSON sequence (.geojsonl): one feature per line', ext: '.geojsonl' },
   lpf: { label: 'Linked Places Format v1, FeatureCollection (.geojson)', ext: '.geojson' },
 };
@@ -206,6 +206,12 @@ async function* tablesSource(input, env, rep, options) {
     keys: { add: async (t, k) => { const s = sets.get(t) || sets.set(t, new Set()).get(t); if (s.has(k)) return false; s.add(k); return true; }, has: async (t, k) => !!sets.get(t)?.has(k) },
     issue: (i) => rep.error('table', `${i.table}${i.column ? `, column ${i.column}` : ''}: ${i.message.replace(/'[^']*'/, "'…'")}`, `${i.table}${i.row ? ` row ${i.row + 1}` : ''}${i.column ? ` ${i.column}` : ''}: ${i.message}`),
   });
+  // PLATO's own rules for the tables, beyond what CSVW can state (and rdf-tabular checks).
+  const where = (i) => `${i.table}${i.row ? ` row ${i.row + 1}` : ''}${i.column ? ` ${i.column}` : ''}: ${i.message}`;
+  checkTableRules((n) => (sheets[n] ? sheets[n].data : []), {
+    issue: (i) => rep.error('table', `${i.table}, column ${i.column}: ${i.message}`, where(i)),
+    warn: (i) => rep.warning('table', `${i.table}, column ${i.column}: ${i.message}`, where(i)),
+  });
   const base = options.base || DEFAULT_TABLE_BASE;
   yield { type: 'header', value: { profile: 'place-centric', gazetteer: { '@id': base, title: options.title || 'Converted from PLATO spreadsheet tables' } } };
   const rows = (n) => (sheets[n] ? sheets[n].data : []);
@@ -307,7 +313,11 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   if (action === 'convert') writer = await makeWriter(target, env, rep, { ...options, idrsBySubject, withdrawn }, typing, outputs, input);
 
   // Checking (and writing) records as they stream past.
+  // Memberships of routes, itineraries and networks, to find one that contains itself (PLATO 0.6.0).
+  const membership = new Map();
   const checkRecord = (ev) => {
+    if (ev.type === 'record' && ev.value) collectMembership(ev.value.attestations, ev.value['@id'], membership);
+    else if (ev.type === 'attestation' && ev.value) collectMembership([ev.value], null, membership);
     const f = ev.newEntity ? V.newEntity : ev.type === 'record' ? V.entity : ev.type === 'attestation' ? V.attestation : V.identity;
     if (f && !f(ev.value)) rep.error('schema', explainSchema(f.errors, input.format === 'tables'), `${ev.value?.['@id'] || ev.value?.subject || `item ${ev.n}`}: ${ajvMessage(f.errors)}`);
     // A nested identity relation may leave out its subject, which is then its place; if it gives
@@ -409,12 +419,14 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       if (!rec.label) { rec.label = e; rep.warning('no-label', 'A place has no label; its identifier is used as its label', e); }
       n++; rep.count('places'); rep.count('attestations', rec.attestations?.length || 0);
       if (isRdf && !V.entity(rec)) rep.error('schema', explainSchema(V.entity.errors, false), `${e}: ${ajvMessage(V.entity.errors)}`);
+      collectMembership(rec.attestations, rec['@id'], membership);
       writer && writer.event({ type: 'record', value: rec, n });
       beat('writing', { places: n });
     }
     for (const i of idrIds) { rep.count('identity relations'); writer && writer.event({ type: 'idr', value: r2j.identityRelation(i) }); }
     store.close();
   }
+  for (const c of membershipCycles(membership)) rep.error('membership-cycle', 'A route, itinerary or network is, through its members, a member of itself (MemberOf, followed round, comes back to where it started)', c);
   if (writer) await writer.close();
   progress({ phase: 'done', ...rep.counts, elapsedMs: Date.now() - t0 });
   return { report: rep.toJSON(), outputs };

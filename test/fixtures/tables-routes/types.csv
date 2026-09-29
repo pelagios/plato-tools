@@ -1,0 +1,4 @@
+place_id,type_label,type_uri,date,from,to,source_id,locator,attribution,citation_function,certainty,certainty_level,denied,stance,notes
+bunsty,hundred,,1086,1086,1086,domesday,,,,,,,,
+leg-2,segment,https://w3id.org/plato#TypeSegment,undated,,,domesday,,,,,,,,
+iter2,route,https://w3id.org/plato#TypeRoute,undated,,,domesday,,,,,,,,
