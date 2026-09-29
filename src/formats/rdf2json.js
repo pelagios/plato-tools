@@ -61,6 +61,8 @@ export class Rdf2Json {
     // says its components are, read once per table.
     const ds = this.root.terms.get('dataSets');
     this.dataSetsIri = ds && ds.iri ? ds.iri : null;
+    const rt = this.root.terms.get('relationTypes');
+    this.relationTypesIri = rt && rt.iri ? rt.iri : null;
     this.tables = new Map(); this.derived = new Map();
     // Types an input graph asserts that PLATO JSON cannot carry (see _type): reported once each.
     this.typeSeen = new Set();
@@ -210,7 +212,7 @@ export class Rdf2Json {
         if (p === RDF_TYPE) { if (o.termType === 'NamedNode') this._type(id, this.g.out(id), o.value); continue; }   // structure implies the PLATO types; any other is reported
         if (this._otherRole(id, p)) continue;               // e.g. a toponym on a place that is also a name
         if (def === '$gazetteer' && DOC_LINKS.has(p)) continue;   // the records, read by the driver
-        if (def === '$gazetteer' && p === this.dataSetsIri) continue;   // the tables, read by header()
+        if (def === '$gazetteer' && (p === this.dataSetsIri || p === this.relationTypesIri)) continue;   // tables and relation types, read by header()
         if (def === 'propertyValue') {
           const where = this._figure(id, p, o);
           if (where === 'derived') continue;
@@ -278,6 +280,12 @@ export class Rdf2Json {
         if (t.o.termType === 'BlankNode') { this.issue({ kind: 'table-without-address', node: this._key(t.o) }); return d; }
         return { '@id': t.o.value, ...d };
       });
+    }
+    // The relation types it declares for its own use (PLATO 0.6.0), plato:declares_relation_type.
+    if (this.relationTypesIri) {
+      const ctx = child(this.root, this.root.terms.get('relationTypes'));
+      const rts = this.g.out(docId).filter((t) => t.p === this.relationTypesIri && t.o.termType === 'NamedNode');
+      if (rts.length) head.relationTypes = rts.map((t) => ({ '@id': t.o.value, ...this.node(this._key(t.o), 'relationType', ctx) }));
     }
     return head;
   }

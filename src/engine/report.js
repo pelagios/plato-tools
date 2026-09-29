@@ -38,6 +38,7 @@ export const LOSS_TEXT = {
   'figure-blank-value': 'A coordinate or attribute of a statistical figure that is a node with no web address cannot be written in PLATO JSON, which needs a code or a literal, and is dropped.',
   'component-address': "The web address of a component of a table's structure has no place in PLATO JSON and is dropped; the component itself is kept.",
   'statistical-figure': 'A figure from a statistical table cannot go here: without its coordinates it would be stated of the place as a whole (a county does not have "persons: 280", its male agricultural labourers do), so it is left out.',
+  'relation-types': "The relation types the document declares for its own use (relationTypes: their names and the PLATO types they narrow) have no place here and are dropped; relations that use them keep their addresses where the format can hold them.",
   'statistical-tables': "The document's statistical tables (dataSets: their titles, scope and structure) have no place here and are dropped.",
   'meta-attestation': 'Comments on other attestations (contradicts, supports…) have no place here and are dropped.',
   denial: 'A denial (the source says that this is not so) cannot be expressed here, so that attestation is left out: written, it would assert what its source denies.',

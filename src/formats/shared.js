@@ -135,6 +135,8 @@ export function versionLosses(gazetteer, loss) {
  */
 export const isFigure = (pv) => !!pv && typeof pv === 'object' && ['dataSet', 'dimensions', 'attributes', 'universe'].some((k) => pv[k] !== undefined && pv[k] !== null);
 /** Report the header's statistical tables where the target has no place for them. */
+/** Report the header's own relation types (PLATO 0.6.0) where the target cannot declare them. */
+export function relationTypeLosses(head, loss) { if (head && Array.isArray(head.relationTypes) && head.relationTypes.length) loss({ kind: 'relation-types', value: head.relationTypes.length }); }
 export function tableLosses(head, loss) { if (head && Array.isArray(head.dataSets) && head.dataSets.length) loss({ kind: 'statistical-tables', value: head.dataSets.length }); }
 
 // ---- keys a writer has no place for ---------------------------------------------------------------

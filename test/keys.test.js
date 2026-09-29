@@ -27,6 +27,7 @@ const baseDoc = () => ({
 function hostBase(host, slug) {
   switch (host) {
     case 'dataSet': return { '@id': E + 'table/' + slug };
+    case 'relationType': return { '@id': E + 'reltype/' + slug, label: 'flows into' };
     case 'structure': return { '@id': E + 'structure/' + slug, components: [{ dimension: E + 'dim/base' }] };
     case 'component': return { dimension: E + 'dim/base' };
     case 'name': return { toponym: 'Basename' };
@@ -112,8 +113,8 @@ export function build(entry, value, variant) {
   else cur[leaf] = value;
   // The header first, as documents are written: dataSets after the records is a late header, which
   // the readers report as such.
-  const { $schema, profile, gazetteer, dataSets, ...rest } = doc;
-  return JSON.parse(JSON.stringify({ $schema, profile, gazetteer, dataSets, ...rest }));
+  const { $schema, profile, gazetteer, dataSets, relationTypes, ...rest } = doc;
+  return JSON.parse(JSON.stringify({ $schema, profile, gazetteer, dataSets, relationTypes, ...rest }));
 }
 /** The host of the object reached at path segment i: the n-th object segment's host in entry.hosts. */
 function hostAt(entry, i) {
@@ -162,7 +163,7 @@ export const NOT_DATA = new Set(['$schema', 'profile']);
 export const WHOLE_LOSS = {
   lpf: {}, 'lpf-seq': {}, tables: {}, ntriples: {}, 'rdf-json': {},
 };
-for (const w of ['lpf', 'lpf-seq', 'tables']) Object.assign(WHOLE_LOSS[w], { dataSets: 'statistical-tables', 'spatialEntities.attestations.meta': 'meta-attestation' });
+for (const w of ['lpf', 'lpf-seq', 'tables']) Object.assign(WHOLE_LOSS[w], { dataSets: 'statistical-tables', relationTypes: 'relation-types', 'spatialEntities.attestations.meta': 'meta-attestation' });
 WHOLE_LOSS.tables['spatialEntities.attestations.contributor'] = 'dropped:attestation.contributor';
 for (const w of ['lpf', 'lpf-seq']) {
   Object.assign(WHOLE_LOSS[w], {

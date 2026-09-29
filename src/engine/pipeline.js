@@ -14,7 +14,7 @@ import { tripleNT } from '../lib/ntriples.js';
 import { TripleStore } from '../lib/store.js';
 import { PLATO, RDF } from '../lib/context.js';
 import { featureToRecord, recordToFeature, collectionHead, collectionToGazetteer } from '../formats/lpf.js';
-import { collectWithdrawn, resolveWithdrawn, addWithdrawal, versionLosses, tableLosses, dropKeys, collectMembership, membershipCycles } from '../formats/shared.js';
+import { collectWithdrawn, resolveWithdrawn, addWithdrawal, versionLosses, tableLosses, relationTypeLosses, dropKeys, collectMembership, membershipCycles } from '../formats/shared.js';
 import { CubeExport, CUBE_TEXT } from '../formats/cube.js';
 import { validateTables, checkTableRules, rowToAttestation, tableIds, recordToRows, identityRow, ATTESTATION_SHEETS, tableSchemas, cellChecker, sourceLosses, TABLE_KEEPS } from '../formats/tables.js';
 import { lineChunks, lines, jsonDocument, TABLE_SHEETS, DataError } from './input.js';
@@ -102,16 +102,17 @@ async function* platoJsonl(file, rep) {
   }
 }
 async function* platoJson(file) {
-  // dataSets (PLATO issue #14) are the document's statistical tables, part of its header.
-  const keys = ['gazetteer', 'profile', '$schema', 'dataSets'];
+  // dataSets (PLATO issue #14) are the document's statistical tables, and relationTypes (PLATO 0.6.0) the
+  // relation types it declares: both part of its header.
+  const keys = ['gazetteer', 'profile', '$schema', 'dataSets', 'relationTypes'];
   const head = {};
   for await (const { path, value } of jsonDocument(file, { arrays: ['spatialEntities', 'newSpatialEntities', 'attestations', 'identityRelations'], keys, onlyKeys: true })) head[path] = value;
   if (!('gazetteer' in head)) for await (const { path, value } of jsonDocument(file, { keys })) head[path] = value;   // header after the arrays: rare
   yield { type: 'header', value: head };
   let n = 0;
-  for await (const { path, value } of jsonDocument(file, { arrays: ['spatialEntities', 'newSpatialEntities', 'attestations', 'identityRelations'], keys: ['dataSets'] })) {
-    // The header is read before the records, so dataSets written after them are met only now.
-    if (path === 'dataSets') { if (!('dataSets' in head)) yield { type: 'late-header', key: 'dataSets' }; continue; }
+  for await (const { path, value } of jsonDocument(file, { arrays: ['spatialEntities', 'newSpatialEntities', 'attestations', 'identityRelations'], keys: ['dataSets', 'relationTypes'] })) {
+    // The header is read before the records, so dataSets or relationTypes written after them are met only now.
+    if (path === 'dataSets' || path === 'relationTypes') { if (!(path in head)) yield { type: 'late-header', key: path }; continue; }
     n++;
     if (path === 'identityRelations') yield { type: 'idr', value, n };
     else if (path === 'attestations') yield { type: 'attestation', value, n };
@@ -538,7 +539,7 @@ async function makeWriter(target, env, rep, options, typing, outputs, input) {
     const placed = new Set();   // the places written, so that an identity match with none is reported
     return {
       header(h) {
-        versionLosses(h.gazetteer, loss); tableLosses(h, loss);
+        versionLosses(h.gazetteer, loss); tableLosses(h, loss); relationTypeLosses(h, loss);
         const { '@id': id, ...own } = collectionHead(h.gazetteer, loss);
         const head = { type: 'FeatureCollection', '@context': 'https://raw.githubusercontent.com/LinkedPasts/linked-places-format/main/linkedplaces-context-v1.1.jsonld', ...(id ? { '@id': id } : {}), ...own };
         if (target === 'lpf-seq') sink.write(JSON.stringify(head) + '\n'); else { const s = JSON.stringify(head); sink.write(s.slice(0, -1) + ',"features":['); }
@@ -606,7 +607,7 @@ function tablesWriter(env, rep, options, outputs, stem, loss) {
   };
   return {
     // The tables have no sheet for the gazetteer: each of its keys is reported.
-    header(h) { versionLosses(h.gazetteer, loss); tableLosses(h, loss); dropKeys(h.gazetteer, 'gazetteer', TABLE_KEEPS.gazetteer, loss); },
+    header(h) { versionLosses(h.gazetteer, loss); tableLosses(h, loss); relationTypeLosses(h, loss); dropKeys(h.gazetteer, 'gazetteer', TABLE_KEEPS.gazetteer, loss); },
     event(ev) {
       if (ev.type === 'record') { const rows = recordToRows(ev.value, ids, loss, accepts, options.withdrawn); for (const [k, v] of Object.entries(rows)) buffers[k]?.push(...v); }
       else if (ev.type === 'idr') buffers.identities.push(identityRow(ev.value, ids, loss));

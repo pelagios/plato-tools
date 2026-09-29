@@ -163,3 +163,27 @@ test('a duration is checked as rdf-tabular checks it: P42D is one, six weeks and
   assert.ok(items(bad, 'error').some((i) => i.kind === 'table' && /duration/.test(i.message)), JSON.stringify(bad.report.items));
   assert.ok(items(bad, 'error').every((i) => /duration|pattern|match/i.test(i.message + JSON.stringify(i.examples))), JSON.stringify(bad.report.items));
 });
+
+test('a relation type a document declares for itself goes to RDF and back, and LPF and the tables report it as lost', async () => {
+  const doc = {
+    profile: 'place-centric', gazetteer: { '@id': 'https://example.org/g/rivers', title: 'Rivers' },
+    relationTypes: [{ '@id': 'https://example.org/vocab/flows-into', label: 'flows into', inverseLabel: 'receives', broaderRelation: P + 'LeadsTo' }],
+    spatialEntities: [{ '@id': 'https://example.org/e/ryton', label: 'River Ryton', attestations: [
+      { relations: [{ relatesTo: 'https://example.org/e/idle', relationType: 'https://example.org/vocab/flows-into' }], citations: [{ source: { '@id': 'https://example.org/s/rewt', title: 'REWT' } }] }] }],
+  };
+  const a = await go([textFile(JSON.stringify(doc), 'r.json')], 'convert', 'ntriples');
+  assert.deepEqual(items(a, 'error'), []);
+  const nt = outText(a.e, 'r.nt');
+  assert.match(nt, /<https:\/\/example\.org\/g\/rivers> <https:\/\/w3id\.org\/plato#declares_relation_type> <https:\/\/example\.org\/vocab\/flows-into> \./);
+  assert.match(nt, /<https:\/\/example\.org\/vocab\/flows-into> <https:\/\/w3id\.org\/plato#broader_relation> <https:\/\/w3id\.org\/plato#LeadsTo> \./);
+  const b = await go([textFile(nt, 'r2.nt')], 'convert', 'plato-json');
+  assert.deepEqual(items(b, 'loss'), []);
+  assert.deepEqual(JSON.parse(outText(b.e, 'r2.json')).relationTypes, doc.relationTypes);
+  for (const target of ['lpf', 'tables']) {
+    const c = await go([textFile(JSON.stringify(doc), 'r.json')], 'convert', target);
+    assert.ok(kinds(c, 'loss').includes('relation-types'), `${target}: ${kinds(c, 'loss')}`);
+  }
+  // The tables take only PLATO's own relation types, so the relation that uses it is reported too.
+  const t = await go([textFile(JSON.stringify(doc), 'r.json')], 'convert', 'tables');
+  assert.ok(kinds(t, 'loss').includes('relation-type-not-in-plato'), kinds(t, 'loss').join(', '));
+});
