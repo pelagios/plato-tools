@@ -146,6 +146,55 @@ What it reports, and why, is in the guide:
   added were all found, with nothing else but a warning for each of the 32 sources only the deleted
   attestations cited, in under ten minutes (the second reading included) and 490 MB of memory.
 
+## Publishing (Agora)
+
+What each part reports, and the order to take them in, is in the guide:
+[Publishing your dataset](https://pelagios.org/place-attestation-ontology/guide/tools.html#publishing-your-dataset).
+`src/engine/agora/` holds it: `index.js` runs one part, reading the dataset through `run()` as the
+version check does, and each part is a module of its own, with its wording in its own `TEXT`.
+
+- **The four parts.** `report` (`fair.js`) grades the dataset's description against FAIR and writes
+  the deposit files (`.zenodo.json`, `CITATION.cff`, DataCite 4.7 JSON, which agree with each
+  other); `mint` (`mint.js`) writes a copy in which every attestation has an address,
+  `<place>#a-<hash>` from the digest the version check uses, inherited from a previous release
+  where it has one and never changed once given; `site` (`site.js`, `site/`) writes a page and a
+  JSON-LD document for every place and source, for GitHub Pages, with the workflow that builds it;
+  `w3id` (`w3id.js`, `w3id/`) writes the `.htaccess` for a w3id.org namespace and the addresses to
+  test it with. A part that writes something to publish writes nothing from a dataset the check
+  finds problems in.
+- **One address scheme.** `address.js` is the only place that says where things live: the address
+  of a place, a source, an attestation, a release and a download, and the file the site holds for
+  each. The report, minting, the site and the rules all ask it, so the data, the files and the
+  redirects cannot drift apart. Change an address there or nowhere.
+- **Folder or zip.** `tree.js` writes a set of files as a folder on the command line and as one
+  zip, streamed into a single output, in the browser, which cannot write a folder without asking
+  for each file. A part asks for a tree and does not know which it has.
+- **Which tools made the site.** The site's workflow runs the same commit of PLATO tools that made
+  the site locally. `src/node/build-info.js` finds it: from git in a clone of the tools, else from
+  the lockfile of the project they are installed in (npx's cache is one), else from
+  `src/build-info.json`, which `scripts/build-info.mjs` writes before the page is built.
+- **The site's size** is estimated while the dataset is checked, from each record's size and
+  factors measured on PLATO's examples (`FACTORS` in `site.js`; `test/agora-site.test.js` fails if
+  the estimate ever falls short of what is written), against GitHub Pages' 1 GB. Over it, the page
+  refuses, and the command line writes the site with a warning. DEEP cannot fit whole.
+- **The w3id rules in Apache.** `test/agora-w3id.test.js` serves the folder with Apache's own
+  `httpd:2.4` image in Docker and asks for every row of `tests.tsv`, as curl would, then shows a
+  copy without the `text/html` rule failing. It is skipped, visibly, when Docker or the image is
+  not there (a test does not download 60 MB): `docker pull httpd:2.4` to run it.
+
+Traps found on the way:
+
+- **CI must never mint.** Addresses minted in the site's workflow would be minted afresh on every
+  push, and an address that changes is none. The user mints once and commits the copy with ids; the
+  site refuses a dataset whose attestations have no addresses, and never makes them itself.
+- **Duplicate places.** Two records whose addresses are the same, or differ only after `#` (which a
+  server never sees), would write the same files; only the first gets them, and the rest is a
+  `duplicate-place` problem, not a page silently overwritten.
+- **The browser checks' port.** Another session's preview server on the port `e2e/app_test.py`
+  uses would be tested instead of this build, and pass. Set `E2E_PORT` to a free port (`ss -ltn`);
+  the run stops if the port is taken. The preview server is started in a session of its own and
+  stopped as a group: stopping `npx` alone left `vite` holding the port.
+
 ## Limits
 
 - **Private windows** keep the browser's file storage in memory and allow it very little, so large
