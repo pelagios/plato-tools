@@ -69,6 +69,7 @@ export const LOSS_TEXT = {
   'identity-bundle': "Identity matches that an attestation makes together (its identities, such as the matches made in accepting a cluster) cannot go here: written as separate matches they would lose the source, date and certainty they share, and could no longer be withdrawn together. They are left out; the example names the attestation.",
   'identity-denied': 'A statement that places are NOT the same (an attestation that denies the identity matches it bundles) cannot be expressed here, so it is left out: written as a match, it would say the opposite. The example names the attestation.',
   'identity-provenance': 'Who made an identity match, and the candidate it came from, have no place here and are dropped.',
+  'place-without-address': 'A place has no web address (@id), so it is written as a place of its own, with a place_id of its own (place, place-2 and so on), and reading the tables back gives it an address under the base address it did not have.',
   'place-address': "A place's web address is not kept: its place_id is only the last part of it, and reading the tables back makes a new address from the base address you choose.",
   'source-address': "A source's web address is not kept: its source_id is only the last part of it, and reading the tables back makes a new address from the base address you choose.",
   'lpf-undated': "A date with no years (a date as the source wrote it, or a period's name, alone) cannot be an LPF when, which needs a timespan, so it is dropped.",

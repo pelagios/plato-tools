@@ -188,6 +188,10 @@ export function checkTableRules(rows, { issue, warn }) {
 // One row: the gazetteer header of the document the tables make. Lists are ';'-separated in a cell.
 const parts = (v) => (v ? String(v).split(';').map((x) => x.trim()).filter(Boolean) : []);
 const withSlash = (b) => (b.endsWith('/') || b.endsWith('#') ? b : b + '/');
+// An id as the last part of an address, as PLATO says: every character other than RFC 3986's
+// unreserved ones (letters, digits, - . _ ~) percent-encoded as UTF-8. encodeURIComponent leaves
+// ! ' ( ) * as they are, which the tables' own URI templates (RFC 6570) encode.
+export const encodeId = (id) => encodeURIComponent(id).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
 
 /**
  * The about row -> the document's gazetteer. `base` is the address the places and sources are made
@@ -197,7 +201,7 @@ const withSlash = (b) => (b.endsWith('/') || b.endsWith('#') ? b : b + '/');
  */
 export function aboutToGazetteer(row, base, fallbackTitle) {
   return clean({
-    '@id': row.dataset_uri || base, title: row.title || fallbackTitle, description: row.description, contributor: row.contributor,
+    '@id': row.dataset_uri || withSlash(base), title: row.title || fallbackTitle, description: row.description, contributor: row.contributor,
     creator: [...parts(row.creator).map((id) => ({ '@id': id })), ...parts(row.creator_name).map((name) => ({ name }))],
     licence: row.licence, version: row.version, status: row.status,
     keywords: parts(row.keywords), spatial: parts(row.spatial),
@@ -270,18 +274,18 @@ export function gazetteerToAbout(g, loss = () => {}, accepts = () => true) {
 export function tableIds(base, sourcesById) {
   const b = base.endsWith('/') || base.endsWith('#') ? base : base + '/';
   return {
-    place: (id) => b + 'place/' + encodeURIComponent(id),
-    sourceIri: (id) => b + 'source/' + encodeURIComponent(id),
+    place: (id) => b + 'place/' + encodeId(id),
+    sourceIri: (id) => b + 'source/' + encodeId(id),
     source(id, seen = new Set()) {
       const r = sourcesById(id);
-      if (!r) return b + 'source/' + encodeURIComponent(id);
+      if (!r) return b + 'source/' + encodeId(id);
       // The source it derives from is written in full, as PLATO JSON allows, so that a source cited only
       // as another's original keeps its title and citation; a loop of derivations stops at an address.
       seen.add(id);
       const from = !r.derived_from ? undefined : seen.has(r.derived_from) || !sourcesById(r.derived_from)
-        ? b + 'source/' + encodeURIComponent(r.derived_from) : this.source(r.derived_from, seen);
+        ? b + 'source/' + encodeId(r.derived_from) : this.source(r.derived_from, seen);
       return clean({
-        '@id': b + 'source/' + encodeURIComponent(id), title: r.title, citation: r.citation, uri: r.uri, authorityType: 'source',
+        '@id': b + 'source/' + encodeId(id), title: r.title, citation: r.citation, uri: r.uri, authorityType: 'source',
         timespan: r.date || r.from || r.to ? clean({ sourceLabel: r.date, startEarliest: r.from, endLatest: r.to }) : undefined,
         derivedFrom: from,
         licence: r.licence,

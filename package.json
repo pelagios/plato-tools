@@ -17,7 +17,7 @@
     "preview": "vite preview",
     "test": "node --test test/*.test.js",
     "vendor": "node scripts/vendor-plato.mjs --latest",
-    "prebuild": "node scripts/vendor-plato.mjs",
+    "prebuild": "node scripts/vendor-plato.mjs && node scripts/build-info.mjs",
     "test:install": "node scripts/install-test.mjs"
   },
   "dependencies": {
@@ -37,6 +37,6 @@
   },
   "plato": {
     "repository": "https://github.com/pelagios/place-attestation-ontology",
-    "commit": "c19049141c42c30a337acc5c69998bf47340795a"
+    "commit": "8404593ccf0fc930c3bac9961be186831c6d9cfc"
   }
 }

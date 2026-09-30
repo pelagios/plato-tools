@@ -3,3 +3,5 @@ dist/
 .scratch/
 __pycache__/
 src/build-info.json
+.env
+.env.*
