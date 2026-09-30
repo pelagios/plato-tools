@@ -1,0 +1,283 @@
+{
+  "id": "https://annotations.allmaps.org/maps/f551eca65c4c0f82",
+  "type": "Annotation",
+  "@context": [
+    "http://iiif.io/api/extension/georef/1/context.json",
+    "http://iiif.io/api/presentation/3/context.json"
+  ],
+  "created": "2025-11-21T15:32:16.550Z",
+  "modified": "2025-11-21T15:32:16.550Z",
+  "motivation": "georeferencing",
+  "target": {
+    "type": "SpecificResource",
+    "source": {
+      "id": "https://iiif.digitalcommonwealth.org/iiif/2/commonwealth:qn59wr209",
+      "type": "ImageService2",
+      "height": 5949,
+      "width": 7306,
+      "partOf": [
+        {
+          "id": "https://ark.digitalcommonwealth.org/ark:/50959/66833p58x/canvas/qn59wr209",
+          "type": "Canvas",
+          "label": {
+            "none": [
+              "image 1"
+            ]
+          },
+          "partOf": [
+            {
+              "id": "https://ark.digitalcommonwealth.org/ark:/50959/66833p58x/manifest",
+              "type": "Manifest",
+              "label": {
+                "none": [
+                  "British dominions in America agreeable to the treaty of 1763"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "provider": [
+        {
+          "label": {
+            "none": [
+              "Digital Commonwealth"
+            ]
+          },
+          "homepage": [
+            {
+              "id": "https://www.digitalcommonwealth.org/search?f%5Bgenre_basic_ssim%5D%5B%5D=Maps"
+            }
+          ]
+        }
+      ]
+    },
+    "selector": {
+      "type": "SvgSelector",
+      "value": "<svg width=\"7306\" height=\"5949\"><polygon points=\"0,0 0,5949 7306,5949 7306,0\" /></svg>"
+    }
+  },
+  "body": {
+    "type": "FeatureCollection",
+    "transformation": {
+      "type": "polynomial",
+      "options": {
+        "order": 1
+      }
+    },
+    "features": [
+      {
+        "type": "Feature",
+        "properties": {
+          "resourceCoords": [
+            3703,
+            3294
+          ]
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -75.16152688968297,
+            39.94902543913628
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": {
+          "resourceCoords": [
+            3524,
+            3382
+          ]
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -76.60978851359002,
+            39.29566093504809
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": {
+          "resourceCoords": [
+            1620,
+            3843
+          ]
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -89.93756596712585,
+            37.97510852850256
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": {
+          "resourceCoords": [
+            3922,
+            3086
+          ]
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -74.00338641396908,
+            40.70889485671222
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": {
+          "resourceCoords": [
+            4392,
+            1855
+          ]
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -66.05731113352918,
+            45.27798096675224
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": {
+          "resourceCoords": [
+            1565,
+            3561
+          ]
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -90.01095456679525,
+            37.98357968318493
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": {
+          "resourceCoords": [
+            5019,
+            2105
+          ]
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -66.0586936484194,
+            45.27849864662468
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": {
+          "resourceCoords": [
+            3388,
+            3769
+          ]
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -76.70498154017518,
+            37.271697107770336
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": {
+          "resourceCoords": [
+            4381,
+            2781
+          ]
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -71.0588147522812,
+            42.35666983321585
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": {
+          "resourceCoords": [
+            3472,
+            3495
+          ]
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -76.48743818153116,
+            38.97866231050827
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": {
+          "resourceCoords": [
+            4431,
+            2889
+          ]
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -70.66712388298917,
+            41.95325257818001
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": {
+          "resourceCoords": [
+            4394,
+            1857
+          ]
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -71.21277391873767,
+            46.812411461659735
+          ]
+        }
+      }
+    ],
+    "_allmaps": {
+      "id": "https://annotations.allmaps.org/maps/f551eca65c4c0f82",
+      "version": "https://annotations.allmaps.org/maps/f551eca65c4c0f82@8991194549a1fa63",
+      "image": {
+        "id": "https://annotations.allmaps.org/images/7809311d2c613170",
+        "version": "https://annotations.allmaps.org/images/7809311d2c613170@37897fd153d57344",
+        "canvases": [
+          {
+            "id": "https://annotations.allmaps.org/canvases/ead8ba37aa740cd6",
+            "manifests": [
+              {
+                "id": "https://annotations.allmaps.org/manifests/bb0fa3c9a8433bda"
+              }
+            ]
+          }
+        ]
+      },
+      "scale": 0.001928,
+      "area": 11695509661184.49
+    }
+  }
+}
