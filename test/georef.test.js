@@ -26,6 +26,10 @@ const ROCQUE_CANVAS = 'https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/
 const ROCQUE_MANIFEST = 'https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/manifest';
 const ROCQUE_IMAGE = 'https://iiif.digitalcommonwealth.org/iiif/2/commonwealth:8623qf00m';
 const ROCQUE_ID = 'https://annotations.allmaps.org/maps/56425c69f9cd4f1b';
+const ROCQUE_VERSION = 'https://annotations.allmaps.org/maps/56425c69f9cd4f1b@a6d3c486366af594';
+const ROCQUE_MODIFIED = '2025-02-26T13:27:42.116Z';
+/** A record without the annotation's version and date, whose note is the original template alone. */
+const unversioned = (r) => ({ ...r, annotationVersion: null, annotationModified: null });
 const ROCQUE_TITLE = "A general map of North America; in which is express'd the several new roads, forts, engagements, &c. taken from actual surveys and observations made in the army employ'd there, from the year 1754, to 1761";
 
 const rocque = () => readGeoreference(ROCQUE, { manifest: ROCQUE_M });
@@ -568,8 +572,8 @@ const citationValid = ajv.getSchema('https://w3id.org/plato/schemas/plato.schema
 
 test('georefNote: a label anchor adds its sentence; without one, unchanged', async () => {
   const g = await rocque();
-  const plain = (await toWorld(g, pt([5000, 4000]), { space: 'image' })).record;
-  const anchored = (await toWorld(g, pt([5000, 4000]), { space: 'image', role: 'https://w3id.org/plato#LabelAnchor' })).record;
+  const plain = unversioned((await toWorld(g, pt([5000, 4000]), { space: 'image' })).record);
+  const anchored = unversioned((await toWorld(g, pt([5000, 4000]), { space: 'image', role: 'https://w3id.org/plato#LabelAnchor' })).record);
   assert.equal(LABEL_ANCHOR, 'https://w3id.org/plato#LabelAnchor');
   assert.equal(anchored.role, LABEL_ANCHOR);
   assert.equal('role' in plain, false);
@@ -582,19 +586,22 @@ test('georefNote: a label anchor adds its sentence; without one, unchanged', asy
 
 test('the record, and georefNote: the fixed template, pinned exactly', async () => {
   const g = await rocque();
-  const { record } = await toWorld(g, pt([5000, 4000]), { space: 'image' });
-  assert.deepEqual(record, {
+  const { record: made } = await toWorld(g, pt([5000, 4000]), { space: 'image' });
+  assert.deepEqual(made, {
     direction: 'toWorld', transformation: 'thinPlateSpline', gcps: 22, annotationId: ROCQUE_ID,
+    annotationVersion: ROCQUE_VERSION, annotationModified: ROCQUE_MODIFIED,
     manifestId: ROCQUE_MANIFEST, canvasId: ROCQUE_CANVAS, imageServiceId: ROCQUE_IMAGE, space: 'image',
     title: ROCQUE_TITLE, imageSize: { width: 11436, height: 6268 }, canvasSize: { width: 11436, height: 6268 },
     software: '@allmaps/transform@1.0.0-beta.53',
   });
+  // The original template, alone (the version sentence, pinned in its own test, needs a version).
+  const record = unversioned(made);
   // Retrieved at a known time, and not.
   assert.equal(georefNote(record, { fetched: '2026-09-30T14:05:00Z' }), `Georeferenced through ${ROCQUE_ID} (thin plate spline, 22 control points), retrieved 2026-09-30T14:05:00Z. On canvas ${ROCQUE_CANVAS} of manifest ${ROCQUE_MANIFEST}.`);
   assert.equal(georefNote(record), `Georeferenced through ${ROCQUE_ID} (thin plate spline, 22 control points), retrieval date not recorded. On canvas ${ROCQUE_CANVAS} of manifest ${ROCQUE_MANIFEST}.`);
   assert.equal(georefNote(record, {}), georefNote(record));
   const h = await readGeoreference(LYNN, { manifest: LYNN_M, index: 7 });
-  const r2 = (await toWorld(h, pt([2000, 1000]), { space: 'image' })).record;
+  const r2 = unversioned((await toWorld(h, pt([2000, 1000]), { space: 'image' })).record);
   assert.equal(georefNote(r2, { fetched: '2026-09-30T15:00:00.123+01:00' }), `Georeferenced through https://annotations.allmaps.org/maps/051d059e8d1111fd (polynomial order 1, 23 control points), retrieved 2026-09-30T15:00:00.123+01:00. On canvas ${LYNN_CANVAS('jd475s53d')} of manifest ${LYNN_MANIFEST}.`);
   // Each place sentence; one control point: no plural.
   const bare = { ...record, canvasId: null, manifestId: null, gcps: 1, transformation: 'polynomial' };
@@ -602,7 +609,7 @@ test('the record, and georefNote: the fixed template, pinned exactly', async () 
   assert.equal(georefNote({ ...record, manifestId: null }), `Georeferenced through ${ROCQUE_ID} (thin plate spline, 22 control points), retrieval date not recorded. On canvas ${ROCQUE_CANVAS}.`);
   assert.equal(georefNote({ ...record, canvasId: null }), `Georeferenced through ${ROCQUE_ID} (thin plate spline, 22 control points), retrieval date not recorded. In manifest ${ROCQUE_MANIFEST}.`);
   // The way back uses the same template.
-  const back = (await toPixels(g, pt([-80, 45]), { space: 'image' })).record;
+  const back = unversioned((await toPixels(g, pt([-80, 45]), { space: 'image' })).record);
   assert.equal(georefNote(back), georefNote(record));
   assert.doesNotMatch(georefNote(record), /allmaps\/transform/, 'the software is not in the note');
   // fetched that is not an ISO date-time with a zone is a TypeError; the valid one above is the control.
@@ -1055,3 +1062,51 @@ test("an order-2 annotation is placed where Allmaps' renderer draws it at order 
   assert.ok(far > 10000, `${far} m`);
 });
 
+// ---- The annotation's version ------------------------------------------------------------------
+
+test('readGeoreference carries the annotation version and date into g and the record; an annotation without them gives null', async () => {
+  const g = await rocque();
+  assert.equal(g.annotationVersion, ROCQUE_VERSION);
+  assert.equal(g.annotationModified, ROCQUE_MODIFIED);
+  assert.equal(ROCQUE.body._allmaps.version, ROCQUE_VERSION, 'where the real fixture keeps it');
+  assert.equal(ROCQUE.modified, ROCQUE_MODIFIED);
+  const { record } = await toWorld(g, pt([5000, 4000]), { space: 'image' });
+  assert.equal(record.annotationVersion, ROCQUE_VERSION);
+  assert.equal(record.annotationModified, ROCQUE_MODIFIED);
+  assert.equal((await toPixels(g, pt([-80, 45]), { space: 'image' })).record.annotationVersion, ROCQUE_VERSION);
+  // In a page, the chosen annotation's own.
+  const lynn = await readGeoreference(LYNN, { index: 7 });
+  assert.equal(lynn.annotationVersion, 'https://annotations.allmaps.org/maps/051d059e8d1111fd@e8405163b4a995bf');
+  assert.equal(lynn.annotationModified, '2023-06-22T19:44:41.434Z');
+  // Without them (and with a blank version): null. The real ones above are the control.
+  const bare = clone(ROCQUE); delete bare.body._allmaps; delete bare.modified;
+  const b = await readGeoreference(bare);
+  assert.equal(b.annotationVersion, null);
+  assert.equal(b.annotationModified, null);
+  const odd = clone(ROCQUE); odd.body._allmaps.version = '  ';
+  assert.equal((await readGeoreference(odd)).annotationVersion, null);
+  assert.equal((await readGeoreference(odd)).annotationModified, ROCQUE_MODIFIED, 'each part independently');
+  // (A modified that is not a date-time is refused by Allmaps' parser, so it never reaches g.)
+  const late = clone(ROCQUE); late.modified = 'yesterday';
+  await assert.rejects(readGeoreference(late), isDataError);
+});
+
+test('georefNote: the version sentence, pinned exactly, after the place and before the label anchor; none without a version', async () => {
+  const g = await rocque();
+  const record = (await toWorld(g, pt([5000, 4000]), { space: 'image' })).record;
+  const base = `Georeferenced through ${ROCQUE_ID} (thin plate spline, 22 control points), retrieved 2026-09-30T14:05:00Z. On canvas ${ROCQUE_CANVAS} of manifest ${ROCQUE_MANIFEST}.`;
+  const opts = { fetched: '2026-09-30T14:05:00Z' };
+  assert.equal(georefNote(record, opts), `${base} Annotation version https://annotations.allmaps.org/maps/56425c69f9cd4f1b@a6d3c486366af594, modified 2025-02-26T13:27:42.116Z.`);
+  // Each part alone.
+  assert.equal(georefNote({ ...record, annotationModified: null }, opts), `${base} Annotation version https://annotations.allmaps.org/maps/56425c69f9cd4f1b@a6d3c486366af594.`);
+  assert.equal(georefNote({ ...record, annotationVersion: null }, opts), `${base} Annotation modified 2025-02-26T13:27:42.116Z.`);
+  // Control: neither, and the note is the original template, unchanged.
+  assert.equal(georefNote(unversioned(record), opts), base);
+  const noKeys = { ...record }; delete noKeys.annotationVersion; delete noKeys.annotationModified;
+  assert.equal(georefNote(noKeys, opts), base);
+  // Before the label-anchor sentence.
+  const anchored = { ...record, role: LABEL_ANCHOR };
+  assert.equal(georefNote(anchored, opts), `${base} Annotation version ${ROCQUE_VERSION}, modified ${ROCQUE_MODIFIED}. The position is where the map writes the name, not necessarily where the place is.`);
+  // With no canvas or manifest, after the image sentence.
+  assert.equal(georefNote({ ...record, canvasId: null, manifestId: null }), `Georeferenced through ${ROCQUE_ID} (thin plate spline, 22 control points), retrieval date not recorded. On image ${ROCQUE_IMAGE}. Annotation version ${ROCQUE_VERSION}, modified ${ROCQUE_MODIFIED}.`);
+});

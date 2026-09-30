@@ -362,10 +362,14 @@ function inverseLine(entry, pts, closed, tol) {
  *   page of several is narrowed to the one on `canvasId`; if that does not leave exactly one, a
  *   DataError says so.
  * @returns Promise of g = { annotationId, imageServiceId, canvasId, manifestId, image: {width, height},
- *   canvas: {width, height} | null, gcps, transformation, title, controlPoints, mask }. `title` is
+ *   canvas: {width, height} | null, gcps, transformation, title, controlPoints, mask,
+ *   annotationVersion, annotationModified }. `title` is
  *   the manifest's label (else the label the annotation gives it), or null; `controlPoints` are
  *   [{ resource: [x, y], geo: [lon, lat] }] and `mask` the annotation's mask in image pixels (or
  *   null), carried so that g still works after it is copied or sent to a worker.
+ *   `annotationVersion` is the IRI of this version of the annotation as Allmaps gives it
+ *   (body._allmaps.version), and `annotationModified` the annotation's `modified`, each as
+ *   written, or null.
  *
  * g is IMMUTABLE, and is returned frozen, all the way down: the transformations fitted from it
  * (control points, image size and mask) are cached by g itself, so a g changed in place would go on
@@ -465,6 +469,11 @@ export async function readGeoreference(annotation, { manifest, canvasId, index }
   }
   if (!title) title = partOf.find((p) => !cId || normaliseId(p.id) === normaliseId(cId))?.manifestLabel ?? null;
 
+  // The version and date as the annotation itself writes them (Allmaps' parser keeps neither).
+  const item = items[maps.indexOf(map)];
+  const text = (v) => (typeof v === 'string' && v.trim() ? v : null);
+  const annotationVersion = text(item.body && item.body._allmaps && item.body._allmaps.version);
+  const annotationModified = text(item.modified);
   const controlPoints = map.gcps.map((p) => ({ resource: [p.resource[0], p.resource[1]], geo: [p.geo[0], p.geo[1]] }));
   const who = `the georeference${map.id ? ` ${map.id}` : ''}`;
   controlPoints.forEach((p, i) => checkControlPoint(p, i, who));
@@ -481,6 +490,8 @@ export async function readGeoreference(annotation, { manifest, canvasId, index }
     title,
     controlPoints,
     mask: Array.isArray(map.resourceMask) && map.resourceMask.length >= 3 ? map.resourceMask.map((p) => [p[0], p[1]]) : null,
+    annotationVersion,
+    annotationModified,
   };
   enoughPoints(g, g.transformation);
   return deepFreeze(g);
@@ -578,7 +589,9 @@ function pixelGeometry(g, geometry, space) {
 function makeRecord(g, direction, name, space, region, canvasRegion, role) {
   return {
     direction, transformation: name, gcps: g.gcps,
-    annotationId: g.annotationId ?? null, manifestId: g.manifestId ?? null, canvasId: g.canvasId ?? null,
+    annotationId: g.annotationId ?? null,
+    annotationVersion: g.annotationVersion ?? null, annotationModified: g.annotationModified ?? null,
+    manifestId: g.manifestId ?? null, canvasId: g.canvasId ?? null,
     imageServiceId: g.imageServiceId ?? null, space,
     ...(region ? { region } : {}),
     ...(region && canvasRegion && g.canvasId ? { canvasRegion } : {}),
@@ -605,6 +618,8 @@ function makeRecord(g, direction, name, space, region, canvasRegion, role) {
  * @param options.role Optional: what the geometry is, as an IRI, copied into the record (e.g.
  *   https://w3id.org/plato#LabelAnchor, which georefNote then mentions).
  * @returns Promise of { geojson (WGS84 [lon, lat]; polygons closed, outer rings counter-clockwise), record }.
+ *   The record carries, among the rest, annotationVersion and annotationModified (from g);
+ *   toPixels's record has the same.
  */
 export async function toWorld(g, geometry, { space, transformation, precision, densify, role } = {}) {
   spaceOf(space);
@@ -743,6 +758,10 @@ const ISO_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[
  * record.role is LABEL_ANCHOR, "The position is where the map writes the name, not necessarily
  * where the place is."
  *
+ * Sentences added later, each fixed too, the earlier ones unchanged: after the place sentence and
+ * before the label-anchor one, the annotation's version when it is known ("Annotation version <v>,
+ * modified <d>." | "Annotation version <v>." | "Annotation modified <d>.").
+ *
  * @param options.fetched When the annotation was retrieved: an ISO 8601 date-time with an offset
  *   or Z (e.g. 2026-09-30T14:05:00Z). A TypeError otherwise.
  */
@@ -759,6 +778,11 @@ export function georefNote(record, { fetched } = {}) {
   else if (record.canvasId) sentences.push(`On canvas ${record.canvasId}.`);
   else if (record.manifestId) sentences.push(`In manifest ${record.manifestId}.`);
   else if (record.imageServiceId) sentences.push(`On image ${record.imageServiceId}.`);
+  const version = typeof record.annotationVersion === 'string' && record.annotationVersion ? record.annotationVersion : null;
+  const modified = typeof record.annotationModified === 'string' && record.annotationModified ? record.annotationModified : null;
+  if (version && modified) sentences.push(`Annotation version ${version}, modified ${modified}.`);
+  else if (version) sentences.push(`Annotation version ${version}.`);
+  else if (modified) sentences.push(`Annotation modified ${modified}.`);
   if (record.role === LABEL_ANCHOR) sentences.push(LABEL_ANCHOR_NOTE);
   return sentences.join(' ');
 }
