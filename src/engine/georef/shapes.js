@@ -254,16 +254,20 @@ function ringsToPolygons(rings) {
  * An SVG selector (a whole <svg> element or a fragment) as a GeoJSON-shaped pixel geometry.
  * Read: polygon, polyline, line, rect, circle and ellipse (as a polygon of CIRCLE_SIDES sides),
  * and path with straight segments only; a transform attribute on the shape itself is applied.
- * Refused: curves and arcs, a transform on a group, text and images, and a mixture of areas
- * and lines.
+ * Refused: curves and arcs, a transform on anything but a shape (a group, a link, the <svg>
+ * itself), an <svg> inside another, text and images, and a mixture of areas and lines.
  */
 export function parseSvg(svg) {
   const s = String(svg);
   const polys = [], lines = [];
+  let svgs = 0;
   for (const m of s.matchAll(/<\s*([A-Za-z][\w:-]*)\b([^>]*)>/g)) {
     const tag = m[1].replace(/^svg:/, '');
     const a = attributes(m[2]);
-    if (tag === 'g' && a.transform) throw new DataError('The SVG has a transform on a group (<g>), which is not applied: give the transform on the shape itself.');
+    // Only a transform on a shape is applied; one on anything else (the <svg> itself, a group, a
+    // link) would move the shapes inside it, and so would a nested <svg> (its x, y and viewBox).
+    if (tag === 'svg' && ++svgs > 1) throw new DataError('The SVG has an <svg> inside another, whose position and viewBox are not applied, so its shapes would be put in the wrong place. Nothing was changed: give the shapes in one <svg>.');
+    if (a.transform && !SHAPES.includes(tag)) throw new DataError(`The SVG has a transform on ${tag === 'g' ? 'a group (<g>)' : `an <${tag}> element`}, which is not applied, so the shapes inside it would be put in the wrong place. Nothing was changed: give the transform on each shape itself.`);
     if (REFUSED.includes(tag)) throw new DataError(`The SVG has a <${tag}> element, which is not a shape that can be transformed.`);
     if (!SHAPES.includes(tag)) continue;
     const M = a.transform ? transformMatrix(a.transform) : null;

@@ -91,6 +91,86 @@ function enoughPoints(g, name) {
   if (g.gcps < min) {
     throw new DataError(`The georeference ${g.annotationId ?? ''} has ${g.gcps} control point${g.gcps === 1 ? '' : 's'}, too few for a ${words} transformation, which needs at least ${min}.`.replace('  ', ' '));
   }
+  if (Array.isArray(g.controlPoints)) spreadEnough(g, name);
+}
+
+// ---- Control points that cannot fix a transformation ------------------------------------------
+
+/**
+ * Where the control points are too few once repeats are counted, or all on one line, the
+ * transformation is not determined: Allmaps either fails (a thin plate spline's matrix is
+ * singular) or, worse, returns a position that means nothing (three points on a line gave
+ * [0.2, 0.199989]; three identical points put every pixel at [0, 0]). So both sets of points, on
+ * the map and on the ground (in the Web Mercator metres the transformation is fitted in), are
+ * checked for the chosen transformation. A Helmert transformation (a shift, a turn and a scale)
+ * and a straight one are fixed by any two distinct points, on a line or not; every other needs
+ * points that span an area. A thin plate spline passes through every point exactly, so it cannot
+ * take two control points at the same place at all.
+ */
+const LINE_ONLY = new Set(['helmert', 'straight']);
+/** Points closer than this share of the spread of all of them count as the same point. */
+const SAME = 1e-9;
+/**
+ * Points count as on one line when none lies further from the line through the two furthest apart
+ * than this share of the distance between those two (so twice the largest triangle's area is below
+ * this share of that distance squared): the scale of the map or of the ground does not matter.
+ */
+const FLAT = 1e-4;
+function spreadOf(points) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y] of points) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  const size = Math.max(x1 - x0, y1 - y0, 0);
+  const distinct = [];
+  for (const p of points) if (!distinct.some((q) => Math.hypot(p[0] - q[0], p[1] - q[1]) <= SAME * size)) distinct.push(p);
+  let a = null, b = null, far = 0;
+  for (let i = 0; i < distinct.length; i++) {
+    for (let k = i + 1; k < distinct.length; k++) {
+      const d = Math.hypot(distinct[i][0] - distinct[k][0], distinct[i][1] - distinct[k][1]);
+      if (d > far) { far = d; a = distinct[i]; b = distinct[k]; }
+    }
+  }
+  let off = 0;
+  if (far > 0) {
+    for (const p of distinct) off = Math.max(off, Math.abs((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])) / far);
+  }
+  return { distinct: distinct.length, repeats: distinct.length < points.length, flat: far === 0 || off <= FLAT * far };
+}
+function spreadEnough(g, name) {
+  const { min, words } = TRANSFORMATIONS[name];
+  const who = `The georeference${g.annotationId ? ` ${g.annotationId}` : ''}`;
+  const sets = [
+    ['on the map', g.controlPoints.map((p) => p.resource)],
+    ['on the ground', g.controlPoints.map((p) => mercatorAgain(toMercator(p.geo)))],
+  ];
+  for (const [where, points] of sets) {
+    const s = spreadOf(points);
+    if (s.distinct < min) {
+      throw new DataError(`${who} has ${g.gcps} control points but only ${s.distinct} different place${s.distinct === 1 ? '' : 's'} ${where} among them, too few for a ${words} transformation, which needs at least ${min}. Nothing was changed: the map cannot be placed until the control points are spread out.`);
+    }
+    if (name === 'thinPlateSpline' && s.repeats) {
+      throw new DataError(`${who} has two or more control points at the same place ${where}, which a thin plate spline transformation cannot use (it must pass through each point exactly). Nothing was changed: remove the repeated control points, or choose another transformation.`);
+    }
+    if (!LINE_ONLY.has(name) && s.flat) {
+      throw new DataError(`${who} has its control points all on one straight line ${where}, so a ${words} transformation cannot tell where anything off that line goes. Nothing was changed: the map cannot be placed until a control point is added off the line.`);
+    }
+  }
+}
+/** Each control point must be a pair of numbers on the map and a longitude and latitude a web map can show. */
+function checkControlPoint(p, i, who) {
+  const n = `Control point ${i + 1} of ${who}`;
+  if (!p.resource.every(Number.isFinite)) {
+    throw new DataError(`${n} has a position on the map that is not a pair of numbers (${JSON.stringify(p.resource)}). Nothing was changed.`);
+  }
+  const [lon, lat] = p.geo;
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+    throw new DataError(`${n} has a position on the ground that is not a pair of numbers (${JSON.stringify(p.geo)}). Nothing was changed.`);
+  }
+  if (Math.abs(lon) > 180) {
+    throw new DataError(`${n} is at longitude ${lon}, which is not a longitude (they run from -180 to 180). Nothing was changed.`);
+  }
+  if (Math.abs(lat) > MAX_LAT) {
+    throw new DataError(`${n} is at latitude ${lat}, beyond the ±85.0511° that a web map can show, so the map cannot be placed with it. Nothing was changed.`);
+  }
 }
 
 // Web Mercator (EPSG:3857 on its sphere), computed exactly as proj4 computes it for Allmaps
@@ -328,6 +408,7 @@ export async function readGeoreference(annotation, { manifest, canvasId, index }
   if (!title) title = partOf.find((p) => !cId || normaliseId(p.id) === normaliseId(cId))?.manifestLabel ?? null;
 
   const controlPoints = map.gcps.map((p) => ({ resource: [p.resource[0], p.resource[1]], geo: [p.geo[0], p.geo[1]] }));
+  controlPoints.forEach((p, i) => checkControlPoint(p, i, `the georeference${map.id ? ` ${map.id}` : ''}`));
   const g = {
     annotationId: map.id ?? null,
     imageServiceId: map.resource.id ?? image,
@@ -463,7 +544,13 @@ export async function toWorld(g, geometry, { space, transformation, precision, d
   const { t, metresPerPixel } = await transformerFor(g, name);
   const opts = tol ? refinement(tol * metresPerPixel) : undefined;
   const round = roundTo(p);
-  const out = (m) => { const [lon, lat] = fromMercator(m); return [round(lon), round(lat)]; };
+  const out = (m) => {
+    const [lon, lat] = fromMercator(m);
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+      throw new DataError(`The georeference${g.annotationId ? ` ${g.annotationId}` : ''} gives no position in the world for this geometry through a ${TRANSFORMATIONS[name].words} transformation (it came out as [${lon}, ${lat}]). Nothing was changed.`);
+    }
+    return [round(lon), round(lat)];
+  };
   const world = mapParts(inImage, {
     point: (pt) => out(t.transformToGeo(pt)),
     line: (l) => t.transformToGeo(l, opts).map(out),
