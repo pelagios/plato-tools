@@ -138,3 +138,11 @@ words them all.
 - `src/engine/krisis/identity.js`: `gazetteerSource(service)`, `candidateSource(work, candidate)`.
 - `src/engine/krisis/match.js`: `gather({ subjects, options }, env) -> { report, subjects, places }`.
 - Words: `LOOKUP_WORDS`, `krisisLookupNote` in words.js. DEVELOPERS.md, "Gazetteer lookup".
+
+## Gazetteer lookup on the page (change 2, phase B)
+
+- `src/lib/whg-token.js`: `get()`, `set(token)`, `forget()`, `onChange(fn(hasToken))`; sessionStorage,
+  memory fallback, no localStorage. Shared with Chora; no Krisis UI in it.
+- worker.js `cmd: 'places'` `{ subjects, options: { base } }` → `{ type: 'places', subjects, places, report }`
+  (`gather()`), for `runLookup`'s `places`; the lookup itself runs on the page's thread.
+- words.js `lookupPage` (the panel, progress, the review screen's additions, what Finish cites).

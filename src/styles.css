@@ -405,3 +405,35 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; tex
   .tools { grid-template-columns: 1fr; }
   section { padding: .9rem 1rem; }
 }
+
+/* Krisis: gazetteer lookup. The panel beside matching, its preview of the queries exactly as sent,
+   and on the review screen the candidates grouped by where they came from, with the service's own
+   figures, a far mark and the licence of each candidate's source. */
+.lookup { margin-top: .75rem; border: 1px solid var(--line); border-radius: 8px; padding: .5rem .8rem; }
+.lookup > summary { cursor: pointer; font-family: var(--font-headings); }
+.lookup[open] > summary { margin-bottom: .5rem; }
+.lookup label { display: block; margin-top: .4rem; }
+.lookup fieldset { border: 1px solid var(--line); border-radius: 8px; margin: .5rem 0; padding: .3rem .8rem .6rem; }
+.lookup legend { padding: 0 .3rem; }
+.lookup small { display: block; color: var(--muted); }
+.lookup input[type=url], .lookup input[type=text], .lookup input[type=password], .lookup input[type=number], .find-form input { font: inherit; padding: .3rem .4rem; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); max-width: 100%; }
+.lookup input[type=number] { width: 7rem; }
+.lookup select { max-width: 100%; }
+.lookup-privacy { border-left: 4px solid var(--gold); padding-left: .6rem; }
+.lookup-other[hidden] { display: none; }
+#lookup-preview p { margin: .5rem 0 .25rem; }
+.lookup-queries { margin: 0; padding-left: 2rem; max-height: 14rem; overflow: auto; font-size: .85rem; }
+.lookup-queries code { font-family: var(--font-mono); overflow-wrap: anywhere; }
+.lookup-go { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .5rem; }
+#lookup-progress { margin: .4rem 0 0; }
+.find { margin-top: .35rem; display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.find .lookup-state { flex-basis: 100%; margin: 0; }
+.find-form { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.find-form label { flex-basis: 100%; font-size: .95rem; }
+.find-form input { flex: 1 1 14rem; }
+.source-group h4.source { margin: .75rem 0 .25rem; font: 700 .95rem/1.3 var(--font-text); color: var(--muted); }
+.candidate .far { font-weight: 700; color: var(--warn); }
+.candidate .gazetteer { color: var(--muted); }
+.candidate .licence.warn { color: var(--warn); }
+.candidate:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 34rem) { .lookup { padding: .5rem .6rem; } .lookup-queries { padding-left: 1.4rem; } }

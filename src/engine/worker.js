@@ -6,7 +6,7 @@ import { loadResources } from './resources.js';
 import { prepare, run, TARGETS } from './pipeline.js';
 import { compare } from './compare.js';
 import { publish } from './agora/index.js';
-import { match } from './krisis/match.js';
+import { match, gather } from './krisis/match.js';
 import { apply } from './krisis/apply.js';
 import { review, choraLoadFailure } from './words.js';
 import { DataError } from './input.js';
@@ -267,6 +267,15 @@ self.onmessage = async ({ data }) => {
       postMessage({ type: 'done', ...result });
     } else if (typeof data.cmd === 'string' && data.cmd.startsWith('chora-')) {
       await choraCommand(data);
+    } else if (data.cmd === 'places') {
+      // Krisis: gazetteer lookup. The places of the dataset, with the links it states, for a lookup the
+      // page runs on its own thread (src/engine/krisis/lookup.js), so that the token never comes here.
+      const subjects = await detect(data.subjects);
+      if (!subjects.format) { postMessage({ type: 'places', subjects: null, places: null, reason: subjects.reason }); return; }
+      const { env, tidy } = await runEnv();
+      let result;
+      try { result = await gather({ subjects, options: data.options || {} }, env); } finally { tidy(); }
+      postMessage({ type: 'places', subjects: result.subjects, places: result.incomplete ? null : result.places, report: result.report });
     }
   } catch (e) {
     postMessage({ type: 'error', message: String(e && e.message || e), stack: String(e && e.stack || ''), ...(e && e.kind ? { kind: e.kind } : {}) });

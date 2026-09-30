@@ -12,6 +12,12 @@ import { stash as stashForChora, dropStale as dropStaleHandoff } from './chora/h
 import { storageNeed } from './engine/storage.js';
 import * as permissions from './lib/permissions.js';
 import { RELOAD_LOSES } from './lib/permission-words.js';
+// Krisis: gazetteer lookup, run on this thread (never the worker), with the token from its one keeper.
+import { LOOKUP_WORDS, lookupPage as LW } from './engine/words.js';
+import * as whgToken from './lib/whg-token.js';
+import { createLookup, WHG_ENDPOINT, isWhg } from './engine/gazetteer/index.js';
+import { runLookup, planQueries, selectPlaces, serviceOf, iriFromTemplate, newWork, defaultChoice, licenceOf, PLACE_CHOICES, WHG_REQUESTS_A_DAY } from './engine/krisis/lookup.js';
+import { candidateSource } from './engine/krisis/identity.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
 let worker, files = [], input = null, targets = {}, busy = false;
@@ -38,6 +44,8 @@ function onMessage({ data }) {
   else if (data.type === 'progress') onProgress(data);
   else if (data.type === 'done') onDone(data);
   else if (data.type === 'columns') onColumns(data);
+  else if (data.type === 'places') onPlaces(data);   // Krisis: gazetteer lookup
+  else if (data.type === 'error' && placesWaiting) onPlaces({ subjects: null, places: null, reason: data.message });
   // Another tab of the main page is running: said in words, and the run may be tried again.
   else if (data.type === 'error' && data.kind === 'pool-busy') fail(data.message, POOL_BUSY);
   // This tab could not let go of the working files: no other tab is to blame, and a reload frees them.
@@ -81,6 +89,7 @@ function onDetected({ input: inp, targets: t }) {
   $('action').hidden = false;
   Object.assign(state, { phase: 'detected', format: inp.format, profile: inp.profile || null });
   storageCheck();
+  if ($('lookup').open) refreshPreview();   // Krisis: gazetteer lookup
 }
 async function storageCheck() {
   const w = $('storage-warning');
@@ -524,8 +533,8 @@ async function resume(file) {
   if (isTable(input)) { columns = null; state.columns = null; gateOnColumns(); requestColumns(w.match_parameters.columns, workName); reviewColumnsAsked = columnsAsked; }
   try { const differ = await filesDiffer(w.subjects, files); showWarning(differ.length ? W.differs(differ) : ''); } catch { showWarning(''); }
 }
-function beginReview(w, name) {
-  work = w; workName = name || workName; basisFor = null; allDone = false; unsaved = 0;
+function beginReview(w, name, { focus = true } = {}) {
+  work = w; workName = name || workName; basisFor = null; findFor = null; allDone = false; unsaved = 0;
   order = reviewPlaces(work);
   cursor = Math.min(Math.max(0, work.cursor || 0), Math.max(0, order.length - 1));
   // A place with no candidates has nothing to review: start at the first that has some.
@@ -537,7 +546,7 @@ function beginReview(w, name) {
   reviewColumnsAsked = 0; reviewMapping = isTable(input) && columns ? mappingText(columns.mapping) : undefined;
   lockColumns();
   askName(!reviewer() && order.length > 0);
-  goTo(cursor);
+  goTo(cursor, focus);
 }
 function showWarning(text) { $('review-warning').textContent = text; $('review-warning').hidden = !text; }
 function askName(show, why) {
@@ -547,11 +556,11 @@ function askName(show, why) {
 const undecided = (iri) => candidatesOf(work, iri).findIndex((c) => !c.decision);
 // A place still to decide has candidates, none of them decided; one with no candidates has nothing to decide.
 const toDecide = (iri) => !isReviewed(work, iri) && candidatesOf(work, iri).length > 0;
-function goTo(i) {
-  cursor = i; basisFor = null;
+function goTo(i, focus = true) {
+  cursor = i; basisFor = null; findFor = null;
   const u = order.length ? undecided(order[cursor]) : -1;
   current = u < 0 ? 0 : u;
-  render(true);
+  render(focus);
 }
 /** The next (step 1) or previous (step -1) place the filter shows, or null. */
 function step(dir) {
@@ -580,14 +589,16 @@ function render(focus) {
   $('review-progress').textContent = W.progress(p, order.length ? cursor + 1 : 0);
   $('review-prev').disabled = step(-1) === null; $('review-next').disabled = $('review-skip').disabled = step(1) === null;
   Object.assign(state, { phase: 'reviewing', work, review: { cursor, subject: order[cursor] || null, current, filter: $('review-filter').value, ...p } });
+  $('finish-cites').textContent = LW.cites(citedSources());   // Krisis: gazetteer lookup, one attestation per source
   if (!order.length) { box.innerHTML = `<p>${escapeHtml(W.none)}</p>`; return; }
   const iri = order[cursor], place = work.places[iri] || {}, cands = candidatesOf(work, iri);
   box.innerHTML = (allDone ? `<p class="good">${escapeHtml(W.allDone)}</p>` : '')
     + `<div class="subject"><h3 id="review-subject">${escapeHtml(place.label || iri)}</h3>`
     + (W.names(place.label, place.names) ? `<p>${escapeHtml(W.names(place.label, place.names))}</p>` : '')
-    + `<p>${escapeHtml(W.point(place.point))}</p><p class="iri">${escapeHtml(iri)}</p></div>`
-    + `<p>${escapeHtml(W.candidates(cands.length))}</p><ol class="candidates">`
-    + cands.map((c, i) => candidateHtml(c, i)).join('') + '</ol>';
+    + `<p>${escapeHtml(W.point(place.point))}</p><p class="iri">${escapeHtml(iri)}</p>` + lookupPlaceHtml(iri, place) + '</div>'
+    + (hasLookups() ? groupedHtml(cands)
+      : `<p>${escapeHtml(W.candidates(cands.length))}</p><ol class="candidates">` + cands.map((c, i) => candidateHtml(c, i)).join('') + '</ol>');
+  if (findFor === iri) { $('find-query')?.focus(); return; }
   if (basisFor) { $('basis-input')?.focus(); return; }
   if (!$('review-who').hidden) { $('review-name').focus(); return; }   // while the name is asked, it keeps the focus
   if (focus) box.focus({ preventScroll: false });
@@ -595,10 +606,11 @@ function render(focus) {
 function candidateHtml(c, i) {
   const o = c.other || (Object.hasOwn(work.places, c.candidate_candidate) ? work.places[c.candidate_candidate] : {}), d = c.decision, id = escapeHtml(c.id);
   const btn = (act, text, key) => `<button type="button" data-act="${act}" data-id="${id}" aria-pressed="${d?.kind === act}">${text}${i === current && key ? ` <kbd>${key}</kbd>` : ''}</button>`;
-  return `<li class="candidate${i === current ? ' current' : ''}${d ? ' decided' : ''}" data-id="${id}"${i === current ? ' aria-current="true"' : ''}>`
+  return `<li class="candidate${i === current ? ' current' : ''}${d ? ' decided' : ''}" data-id="${id}" tabindex="-1"${i === current ? ' aria-current="true"' : ''}>`
     + `<h4><span class="n">${i + 1}</span>${escapeHtml(o.label || c.candidate_candidate)}</h4>`
     + (W.names(o.label, o.names) ? `<p>${escapeHtml(W.names(o.label, o.names))}</p>` : '')
     + `<p class="facts">${escapeHtml(W.facts(c))}; ${escapeHtml(W.point(o.point))}</p>`
+    + (c.lookup ? gazetteerHtml(c) : '')
     + `<p class="iri">${escapeHtml(c.candidate_candidate)}</p>`
     + `<p class="decision">${escapeHtml(W.decision(d))}</p>`
     + `<div class="acts">${btn('match', 'Same place', 'a')}${btn('not-this', 'Not this one', 'n')}${btn('distinct', 'Different places', 'd')}`
@@ -620,15 +632,17 @@ $('review-place').addEventListener('click', (e) => {
 });
 $('review-place').addEventListener('submit', (e) => {
   e.preventDefault();
+  if (!e.target.matches('form.basis')) return;   // Krisis: gazetteer lookup has a form of its own here
   const basis = $('basis-input').value.trim();
   if (!basis) { $('basis-warn').hidden = false; $('basis-input').focus(); return; }
   decideOn(e.target.dataset.id, 'distinct', basis);
 });
-$('review-place').addEventListener('keydown', (e) => { if (e.key === 'Escape' && basisFor) { basisFor = null; render(true); } });
+$('review-place').addEventListener('keydown', (e) => { if (e.key === 'Escape' && basisFor) { basisFor = null; render(true); } else if (e.key === 'Escape' && findFor) { findFor = null; render(true); } });
 // The keys act only while the review is shown, and never while typing (or choosing from a list).
 document.addEventListener('keydown', (e) => {
   if ($('review').hidden || busy || !work || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;
+  if (e.target.closest?.('#lookup, form.find-form')) return;   // Krisis: nor in the lookup panel, token field and all
   const cands = order.length ? candidatesOf(work, order[cursor]) : [], c = cands[current];
   const k = e.key;
   if (k === 'j' || k === 's') move(1);
@@ -691,4 +705,266 @@ permissions.mount({ state });
 permissions.onBeforeReload(() => {}, { loses: () => (files.length ? RELOAD_LOSES.files(files.map((f) => f.name)) : null) });
 permissions.onBeforeReload(() => {}, { loses: () => (busy ? RELOAD_LOSES.running : null) });
 permissions.onBeforeReload(() => {}, { loses: () => (work && unsaved ? RELOAD_LOSES.review(unsaved) : null) });
+// Krisis: gazetteer lookup (online, optional). The places of the dataset are looked up in WHG, or
+// another reconciliation service, and what is found is added to the review on screen (or begins one).
+// It runs HERE, on the page's thread, never in the worker, so that the token (src/lib/whg-token.js,
+// its one keeper; the page holds no copy) goes nowhere but the Authorization header of a request to
+// WHG: not into window.__plato, a work file, an address, the console or the words of an error. The
+// answers are merged into the work object after each batch, so "Save the review" works at any moment.
+let gathered = null, placesWaiting = null, looking = null, findFor = null, afterStop = null;
+const showTokenState = () => { $('whg-token-state').textContent = whgToken.get() ? LW.tokenGiven : LW.tokenNone; };
+/** The review on screen, which a lookup adds to; null when none is (a lookup then begins one). */
+const reviewWork = () => (work && !$('review').hidden ? work : null);
+const hasLookups = () => !!work && ((work.lookups || []).length > 0 || work.others === null);
+const shortName = (service) => (isWhg(service.endpoint) ? LW.whg : service.title);
+const lookupOf = (id) => (work.lookups || []).find((l) => l.id === id);
+/** Text cleaned of the token, whatever the service said. The gazetteer module cleans its own errors too. */
+const scrub = (text) => { const t = whgToken.get(); return t ? String(text).split(t).join('[token]') : String(text); };
+function lookupSay(text, warn = false) { const p = $('lookup-progress'); p.textContent = text; p.classList.toggle('warn', warn); }
+function lookupState(more) { state.lookup = { ...(state.lookup || {}), ...more }; }
+
+// The places of the dataset, with the links it states, read by the worker (gather()); once per choice of files.
+function gatherPlaces() {
+  const base = $('base').value.trim() || undefined;
+  if (gathered && gathered.files === files && gathered.base === base) return Promise.resolve(gathered);
+  if (placesWaiting) return placesWaiting.promise;
+  if (busy || !input?.format) return Promise.resolve(null);
+  busy = true; buttons(true);
+  lookupSay(LW.reading);
+  let resolve;
+  const promise = new Promise((r) => { resolve = r; });
+  placesWaiting = { promise, resolve, files, base };
+  worker.postMessage({ cmd: 'places', subjects: files, options: { base } });
+  return promise;
+}
+function onPlaces(data) {
+  const w = placesWaiting; placesWaiting = null;
+  busy = false; buttons(false);
+  gathered = { files: w.files, base: w.base, subjects: data.subjects || null, places: data.places || null };
+  lookupSay('');
+  w.resolve(gathered);
+}
+
+/** The service chosen: WHG's, or another's by its address (and a template for its candidates' addresses). */
+function lookupService() {
+  if (document.querySelector('input[name="lookup-service"]:checked')?.value !== 'other') return { service: serviceOf(WHG_ENDPOINT), whg: true };
+  const endpoint = $('lookup-endpoint').value.trim();
+  let service, iri;
+  try { if (!/^https:\/\//i.test(endpoint)) throw new Error(); service = serviceOf(endpoint); } catch { return { problem: LW.badEndpoint }; }
+  if (isWhg(endpoint)) return { service: serviceOf(WHG_ENDPOINT), whg: true };
+  const t = $('lookup-iri').value.trim();
+  if (t) { try { iri = iriFromTemplate(t); } catch { return { problem: LW.badTemplate }; } }
+  return { service, whg: false, iri };
+}
+function lookupOptions(extra = {}) {
+  const km = parseFloat($('lookup-near-km').value);
+  return { places: $('lookup-places').value, allNames: $('lookup-all-names').checked, countries: $('lookup-countries').checked,
+    nearKm: $('lookup-near').checked && km > 0 ? km : null, maxDistanceKm: matchOptions().maxDistanceKm, ...extra };
+}
+/** The places a lookup would take and what it would send, as runLookup() will plan it. */
+function planFor(svc, opts, places) {
+  const chosen = selectPlaces({ work: reviewWork(), places, which: opts.places, service: svc.service, only: opts.only });
+  return planQueries(chosen, { ...opts, service: svc.service, batchSize: 25 });
+}
+const workPlaces = () => Object.entries(reviewWork()?.places || {}).map(([iri, p]) => ({ iri, ...p }));
+
+// The choice of places: after a match, those it found nothing for; once a lookup has run, those not answered.
+function fillChoices() {
+  const sel = $('lookup-places'), want = defaultChoice(reviewWork());
+  sel.innerHTML = PLACE_CHOICES.map((k) => `<option value="${k}"${k === want ? ' selected' : ''}>${escapeHtml(LOOKUP_WORDS.choices[k])}</option>`).join('');
+}
+/** The preview: places, queries, requests, the share of WHG's allowance, and the first queries exactly as sent. */
+async function refreshPreview() {
+  const box = $('lookup-preview'), send = $('lookup-send');
+  if (!$('lookup').open) return;
+  const svc = lookupService();
+  send.disabled = true;
+  if (svc.problem) { box.innerHTML = `<p class="warn">${escapeHtml(svc.problem)}</p>`; return; }
+  if (!input?.format && !reviewWork()) { box.innerHTML = `<p>${escapeHtml(LW.noDataset)}</p>`; return; }
+  const g = await gatherPlaces();
+  const places = g?.places ?? null;
+  if (!places && !reviewWork()) { box.innerHTML = `<p class="warn">${escapeHtml(busy ? LW.busy : LW.placesNotRead)}</p>`; return; }
+  const p = planFor(svc, lookupOptions(), places).preview;
+  const lines = LOOKUP_WORDS.preview(p);
+  if (svc.whg) lines.splice(1, 0, LW.share(p.requests, WHG_REQUESTS_A_DAY));
+  if (!places) lines.push(LOOKUP_WORDS.linksUnknown);
+  box.innerHTML = `<p>${lines.map(escapeHtml).join(' ')}</p>`
+    + (p.first.length ? `<ol class="lookup-queries">${p.first.map((q) => `<li><code>${escapeHtml(JSON.stringify(q))}</code></li>`).join('')}</ol>` : `<p>${escapeHtml(LOOKUP_WORDS.noPlaces)}</p>`);
+  send.textContent = LW.send(p.queries, shortName(svc.service));
+  send.disabled = !p.queries || !!looking;
+  lookupState({ preview: { places: p.places, queries: p.queries, requests: p.requests, first: p.first } });
+}
+
+/**
+ * Look places up. With nothing given, as the panel says; `only` (IRIs) for one place from the review
+ * screen, with `query` the name to send instead of its label, or `allNames` to send its other names.
+ */
+async function lookUp({ only = null, query = null, allNames, which } = {}) {
+  if (looking) return;
+  if ($('whg-token').value.trim()) commitToken();
+  const svc = lookupService();
+  if (svc.problem) { $('lookup').open = true; return lookupSay(svc.problem, true); }
+  if (svc.whg && !whgToken.get()) { $('lookup').open = true; lookupSay(LW.needToken, true); $('whg-token').focus(); return; }
+  const g = await gatherPlaces();
+  let places = g?.places ?? null;
+  const existing = reviewWork();
+  if (!existing && !g?.subjects) return lookupSay(input?.format ? LW.placesNotRead : LW.noDataset, true);
+  const opts = lookupOptions({ ...(which ? { places: which } : {}), ...(only ? { places: 'all', only } : {}), ...(allNames !== undefined ? { allNames } : {}) });
+  if (only && query) {
+    // The name typed is sent in place of the label; the place's own names are still what its candidates are compared with.
+    places = (places || workPlaces()).filter((p) => only.includes(p.iri)).map((p) => ({ ...p, label: query, names: [...new Set([query, ...(p.names || [])])] }));
+    opts.allNames = false;
+  }
+  let lookup;
+  try {
+    // WHG's lookup is the one shared in the page (one request in flight, whoever asks), given the token on every call.
+    lookup = svc.whg ? createLookup({ endpoint: WHG_ENDPOINT, token: whgToken.get() })
+      : createLookup({ endpoint: svc.service.endpoint, token: null, shared: false, ...(svc.iri ? { iri: svc.iri } : {}) });
+  } catch (e) { return lookupSay(scrub(e.message), true); }
+  const w = existing || newWork(g.subjects, { reviewer: reviewer() });
+  const name = existing ? workName : `${(files[0]?.name || 'review').replace(/\.gz$/i, '').replace(/\.[^.]+$/, '')}.krisis.json`;
+  const before = new Set(w.candidates.map((c) => c.id));
+  const service = shortName(svc.service);
+  looking = new AbortController();
+  afterStop = null;
+  $('lookup-send').disabled = true; $('lookup-stop').hidden = false; $('lookup-resume').hidden = true;
+  lookupSay(LW.sending(service));
+  lookupState({ running: true, done: 0, total: null, stopped: null, summary: null, single: !!only });
+  const show = () => { if (work !== w || $('review').hidden) beginReview(w, name, { focus: false }); else { order = reviewPlaces(work); render(false); } };
+  let result = null, fault = false;
+  try {
+    result = await runLookup({ lookup, work: w, places, options: { ...opts, service: svc.service, scrub }, signal: looking.signal,
+      onBatch: ({ done, total }) => { lookupSay(LW.progress({ done, total }, service)); lookupState({ done, total }); show(); } });
+  } catch (e) {
+    fault = true;
+    console.error('Krisis lookup:', scrub(e?.stack || e?.message || e));
+  } finally {
+    looking = null;
+    $('lookup-stop').hidden = true;
+  }
+  show();
+  const stopped = fault ? { kind: 'fault', message: null } : result.stopped;
+  const said = [];
+  if (result) { const sum = LOOKUP_WORDS.summary(result.record.counts, svc.service.title); said.push(sum.problems, sum.counted); }
+  if (stopped) said.push(LOOKUP_WORDS.stopped({ ...stopped, message: stopped.message ? scrub(stopped.message) : null }), LW.kept);
+  lookupSay(said.join(' '), !!stopped);
+  lookupState({ running: false, stopped: stopped?.kind || null, summary: said.join(' '), counts: result?.record.counts || null });
+  fillChoices();
+  if (stopped && stopped.kind !== 'fault') offerResume(svc);
+  await refreshPreview();
+  if (stopped?.kind === 'auth') $('whg-token').focus();
+  // After one place's lookup, the focus goes to the first new candidate, if any.
+  if (only && order[cursor] && only.includes(order[cursor])) {
+    const fresh = candidatesOf(work, order[cursor]).findIndex((c) => !before.has(c.id));
+    if (fresh >= 0) { current = fresh; render(false); $('review-place').querySelector(`li.candidate[data-id="${CSS.escape(candidatesOf(work, order[cursor])[fresh].id)}"]`)?.focus(); }
+  }
+}
+/** After a stop: Resume takes the places not yet answered, with the same settings. */
+async function offerResume(svc) {
+  const g = await gatherPlaces();
+  const p = planFor(svc, lookupOptions({ places: 'pending' }), g?.places ?? null).preview;
+  if (!p.queries) return;
+  afterStop = true;
+  const b = $('lookup-resume'); b.textContent = LW.resume(p.queries); b.hidden = false;
+}
+function commitToken() {
+  const f = $('whg-token');
+  if (!f.value.trim()) return;
+  whgToken.set(f.value);
+  f.value = '';   // the token is kept by its keeper only, not in the field
+}
+
+// Places and candidates on the review screen.
+/** The latest lookup's word on a place, or null if it was never looked up. */
+function lastQuery(iri) {
+  let found = null;
+  for (const l of work.lookups || []) if (l.queries[iri]) found = { l, q: l.queries[iri] };
+  return found;
+}
+function lookupPlaceHtml(iri, place) {
+  const svc = lookupService(), service = svc.problem ? LW.whg : shortName(svc.service), last = lastQuery(iri);
+  const cands = candidatesOf(work, iri).filter((c) => c.lookup && lookupOf(c.lookup)?.service.endpoint === last?.l.service.endpoint);
+  let out = '';
+  if (last && !(last.q.state === 'answered' && cands.length)) {
+    out += `<p class="lookup-state${last.q.state === 'answered' ? '' : ' warn'}">${escapeHtml(LW.state(shortName(last.l.service), last.q))}</p>`;
+    const others = [...new Set((place.names || []).filter((n) => n && n.trim().toLowerCase() !== (place.label || '').trim().toLowerCase()))];
+    if (last.q.state === 'answered' && !last.q.found && last.q.sent.length === 1 && others.length) out += `<button type="button" data-look="names">${escapeHtml(LW.tryNames(1 + others.length))}</button> `;
+    if (last.q.state !== 'answered') out += `<button type="button" data-look="again">${escapeHtml(LW.again)}</button> `;
+  }
+  out += `<button type="button" data-look="find">${escapeHtml(LW.find(service))}</button>`;
+  if (findFor === iri) {
+    out += `<form class="find-form"><label for="find-query">${escapeHtml(LW.findLabel)}</label>`
+      + `<input id="find-query" type="text" value="${escapeHtml(place.label || '')}" autocomplete="off" spellcheck="false">`
+      + `<button type="submit" class="primary">${escapeHtml(LW.findSend)}</button><button type="button" data-look="cancel">Cancel</button></form>`;
+  }
+  return `<div class="find">${out}</div>`;
+}
+/** Candidates grouped by where they came from, each group in the order it was ranked in (never by name). */
+function groupedHtml(cands) {
+  const groups = [];
+  cands.forEach((c, i) => {
+    const l = c.lookup ? lookupOf(c.lookup) : null, key = l ? l.service.endpoint : '';
+    let g = groups.find((x) => x.key === key);
+    if (!g) groups.push(g = { key, title: l ? LW.from(l.service.title) : LW.fromOthers(work.others?.title || c.other?.source?.title || ''), items: [] });
+    g.items.push(candidateHtml(c, i));
+  });
+  // A place with none, that a lookup has had its word on (not found, not answered), says only that.
+  if (!cands.length && lastQuery(order[cursor])) return '';
+  return `<p>${escapeHtml(LW.candidates(cands.length))}</p>`
+    + groups.map((g) => `<section class="source-group" aria-label="${escapeHtml(g.title)}"><h4 class="source">${escapeHtml(g.title)}</h4><ol class="candidates">${g.items.join('')}</ol></section>`).join('');
+}
+/** What a looked-up candidate adds: far or not, the service's own figures (as its own), and its source's licence. */
+function gazetteerHtml(c) {
+  const l = lookupOf(c.lookup), g = c.gazetteer || {}, service = l ? shortName(l.service) : LW.whg;
+  const km = l?.parameters?.maxDistanceKm ?? 50;
+  const lic = licenceOf(l?.attribution ?? null, g.namespace ?? null);
+  return (c.far ? `<p class="far">${escapeHtml(LW.far(km))}</p>` : '')
+    + (LW.figures(g, service) ? `<p class="gazetteer">${escapeHtml(LW.figures(g, service))}</p>` : '')
+    + (g.description ? `<p class="gazetteer">${escapeHtml(LW.described(service, g.description))}</p>` : '')
+    + `<p class="licence${LW.licenceWarns(lic) ? ' warn' : ''}">${escapeHtml(LW.licence(lic))}</p>`;
+}
+/** The sources the attestations would cite, one per source (identity.js candidateSource, as Finish uses). */
+function citedSources() {
+  const out = new Map();
+  for (const c of work.candidates) {
+    if (!c.decision || c.decision.kind === 'not-this') continue;
+    const s = candidateSource(work, c);
+    out.set(s.title + '\n' + (s['@id'] || ''), s);
+  }
+  return [...out.values()];
+}
+
+$('review-place').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-look]'); if (!b) return;
+  const iri = order[cursor], look = b.dataset.look;
+  if (look === 'find') { findFor = iri; basisFor = null; render(); }
+  else if (look === 'cancel') { findFor = null; render(true); }
+  else if (look === 'names') lookUp({ only: [iri], allNames: true });
+  else if (look === 'again') lookUp({ only: [iri] });
+});
+$('review-place').addEventListener('submit', (e) => {
+  if (!e.target.matches('form.find-form')) return;
+  e.preventDefault();
+  const query = $('find-query').value.trim(), iri = order[cursor];
+  if (!query) return $('find-query').focus();
+  findFor = null;
+  lookUp({ only: [iri], query });
+});
+$('lookup').addEventListener('toggle', () => { if ($('lookup').open) { fillChoices(); refreshPreview(); } });
+$('lookup').addEventListener('change', (e) => {
+  if (e.target.id === 'whg-token') return commitToken();
+  if (e.target.name === 'lookup-service') document.querySelector('.lookup-other').hidden = e.target.value !== 'other';
+  refreshPreview();
+});
+$('lookup').addEventListener('input', (e) => { if (e.target.type === 'number' || e.target.type === 'url' || e.target.id === 'lookup-iri') refreshPreview(); });
+$('whg-forget').onclick = () => { $('whg-token').value = ''; whgToken.forget(); lookupSay(LW.forgotten); };
+whgToken.onChange((has) => {
+  showTokenState();
+  // The shared lookup forgets it too (token null clears it, where the gazetteer module can; clearToken if it has it).
+  if (!has) { try { const l = createLookup({ endpoint: WHG_ENDPOINT, token: null }); l.clearToken?.(); } catch { /* nothing to clear */ } }
+});
+showTokenState();
+$('lookup-send').onclick = () => lookUp();
+$('lookup-stop').onclick = () => looking?.abort();
+$('lookup-resume').onclick = () => { $('lookup-resume').hidden = true; if (afterStop) lookUp({ which: 'pending' }); };
 startWorker();

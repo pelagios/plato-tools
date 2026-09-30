@@ -451,3 +451,63 @@ export const LOOKUP_WORDS = {
     };
   },
 };
+/** Krisis: gazetteer lookup on the page (src/app.js): the panel, the progress, and the review screen's additions. */
+const pct = (part, whole) => { const x = (100 * part) / whole; return x > 0 && x < 1 ? 'under 1%' : `${Math.round(x).toLocaleString('en-GB')}%`; };
+export const lookupPage = {
+  whg: 'WHG',
+  reading: 'Reading the places of your dataset…',
+  noDataset: 'Choose your dataset first: its places are what is looked up.',
+  placesNotRead: 'The places of your dataset could not be read, so there is nothing to look up.',
+  busy: 'Wait for the work in hand to finish, then look up.',
+  needToken: 'Give your WHG token first: WHG answers only queries that carry one.',
+  tokenGiven: 'A token is given for this tab',
+  tokenNone: 'No token given yet',
+  forgotten: 'The token is forgotten in this tab. If it may have been seen anywhere else, regenerate it in WHG: that is the only way to revoke it.',
+  badEndpoint: "Give the reconciliation service's address, beginning https://.",
+  badTemplate: "Give how to make a candidate's address from its id, with {{id}} in it, such as https://www.wikidata.org/wiki/{{id}}; or leave it empty.",
+  /** The share of WHG's daily allowance a lookup would use. */
+  share: (requests, perDay) => `That is ${pct(requests, perDay)} of WHG's allowance of ${perDay.toLocaleString('en-GB')} requests a day.`,
+  /** The button that sends the lookup. */
+  send: (n, service) => `Send ${plural(n, 'query', 'queries')} to ${service}`,
+  sending: (service) => `Sending to ${service}…`,
+  /** The progress line while a lookup runs. */
+  progress: ({ done, total }, service) => `${done.toLocaleString('en-GB')} of ${plural(total, 'place')} looked up in ${service}…`,
+  /** The button that takes up a stopped lookup again. */
+  resume: (n) => `Resume: send ${plural(n, 'query', 'queries')}`,
+  kept: 'What was answered is kept in the review below, and can be saved now.',
+  /** Where the candidates of a group came from. */
+  from: (title) => `From ${title}`,
+  fromOthers: (title) => `From ${title}, the other dataset`,
+  candidates: (n) => (n ? `${n === 1 ? 'One candidate' : `${n} candidates`}:` : 'No candidates yet.'),
+  /** The gazetteer's own figures for a candidate, labelled as its own. */
+  figures: (g, service) => {
+    const parts = [g.score != null ? `score ${g.score.toLocaleString('en-GB')} (relative to the best in this search)` : '',
+      g.confidence != null ? `confidence ${g.confidence.toLocaleString('en-GB')} (name only)` : ''].filter(Boolean);
+    return parts.length ? `${service}'s own figures: ${parts.join(', ')}. Neither says it is the same place.` : '';
+  },
+  described: (service, text) => `${service} describes it: ${text}`,
+  /** A candidate far away: shown, marked, never hidden. */
+  far: (km) => `Far: ${LOOKUP_WORDS.far(km)}`,
+  /** A candidate's licence, from the attribution the service sent; a warning when it limits use, and "licence unknown" never shown as fine. */
+  licence: (l) => {
+    const text = `Licence of its source: ${LOOKUP_WORDS.licence(l)}`;
+    if (!l) return `${text}. Check its source's terms before you use its data.`;
+    if (l.commercial === false || l.redistributable === false) return `${text}. Check the terms before you use or pass on its data.`;
+    return `${text}.`;
+  },
+  licenceWarns: (l) => !l || l.commercial === false || l.redistributable === false,
+  /** Single-place lookups on the review screen. */
+  find: (service) => `Find this place in ${service}…`,
+  findLabel: 'The name to look for. You may change it; only this name is sent.',
+  findSend: 'Send 1 query',
+  tryNames: (n) => `Not found? Try its other names (${plural(n, 'query', 'queries')})`,
+  again: 'Look it up again',
+  /** What a lookup said about this place, when it found nothing or could not answer. */
+  state: (service, q) => (q.state === 'answered' ? `${service}: ${LOOKUP_WORDS.notFound(q)}`
+    : q.state === 'unanswered' ? `${service}: ${LOOKUP_WORDS.unanswered}`
+    : `${service}: the lookup stopped before this place was looked up; this is not a finding that it has no match. Look it up again.`),
+  /** What finishing will cite: one attestation per source. */
+  cites: (sources) => (sources.length
+    ? `Finishing makes one attestation for each source a place's decisions rest on, citing ${sources.map((s) => (s['@id'] ? `${s.title} (${s['@id']})` : s.title)).join('; ')}.`
+    : 'Nothing is decided yet, so finishing would make no attestations.'),
+};

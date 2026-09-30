@@ -946,8 +946,8 @@ World Historical Gazetteer by default, or any other by its address), and add wha
 same work file as a local match, for the same review. `src/engine/krisis/lookup.js` holds it; the
 talking to the service is the shared gazetteer module's (`src/engine/gazetteer/`, owned by the Chora
 work, used here and never changed). The command line is `plato-tools lookup` (with `--dry-run` to see
-what would be sent); the page comes later. This sends each place's name to the gazetteer, and its
-coordinates only with `--near`.
+what would be sent); on the page it is the panel "Look up in a gazetteer (online, optional)" beside
+matching (below). This sends each place's name to the gazetteer, and its coordinates only with `--near`.
 
 - **The token** is never seen by the engine: it is given a lookup made with it (`createLookup`), and
   nothing writes a token into the work file, a report or an error. The command line reads WHG's from
@@ -1030,6 +1030,31 @@ coordinates only with `--near`.
   suspect?, scopeNotApplied? } } }]`; a looked-up candidate has `lookup` and `gazetteer`. `readWork` reads
   version 1 and gives it back as version 2, so **saving a version 1 file writes version 2**, which
   earlier tools cannot read. `match()` writes version 2 with `lookups: []`.
+- **On the page** (`src/app.js`, Krisis's lookup block), the lookup runs on the page's own thread,
+  never in the worker, so that the token never crosses to it; the worker only reads the dataset's places
+  and the links it states (`cmd: 'places'`, `gather()`). The token has one keeper, `src/lib/whg-token.js`
+  (shared with Chora; `get`, `set`, `forget`, `onChange`): sessionStorage (this tab only) with memory as
+  the fallback, and no "remember in this browser", because the tools are served on the shared
+  pelagios.org origin, where localStorage is readable by every page of the site (whether to move them is
+  a maintainer's decision still to be taken; the keeper has a one-line switch for it). The page keeps no
+  copy: the field is emptied once the token is given, and every `createLookup` call is given the
+  keeper's token (Forget passes `token: null`, and calls `clearToken()` where the module has it). No
+  token is sent to another service. The panel previews places, queries, requests, the share of WHG's
+  5,000 requests a day, and the first 20 queries exactly as sent (the e2e compares them with what the
+  fake WHG received); filters are off by default and say they hide the right answer too. Answers are
+  merged into the review's work object after each batch, so "Save the review" works at any moment; a
+  stop (refused token, spent allowance, too many queries, no answer, failure, or Stop) keeps what was
+  answered and offers Resume (the places the stop left, and those not answered). On the review screen,
+  candidates are grouped by where they came from, in the order ranked (`candidatesOf`); a looked-up
+  one shows WHG's own figures labelled as WHG's, a far mark rather than being hidden, and its source's
+  licence (a warning when not for commercial use or not to be passed on, and "licence unknown" never
+  shown as fine). Each place has "Find this place in WHG…" (one query, the name editable), "Look it up
+  again" when it was not answered, and "Not found? Try its other names" when it was answered with
+  nothing under its label; after one place's lookup the focus goes to its first new candidate. The
+  keys do nothing in the panel or the find form. Above Finish, the page says what each attestation
+  will cite. The e2e (`krisis_lookup_case`) answers for WHG with `page.route`, never the real service,
+  and looks for the token in window.__plato, the page, the console, request addresses and bodies, and
+  the saved work file, beside the control that it is in every request's Authorization header.
 - **Still open** (for the gazetteer module, whose owner plans them): a `manifest()` for another
   service's `defaultTypes` and `view.url` (the command line has no way to fetch them through the module
   yet, so it sends no type to another service, and takes `--gazetteer-iri`); a per-query `error` cleaned

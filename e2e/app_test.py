@@ -231,7 +231,7 @@ def krisis_case(page, tmp):
         except Exception as e: saved = {'error': str(e)[:200]}
     skinds = {c['candidate_source'].rsplit('/', 1)[-1]: (c.get('decision') or {}).get('kind') for c in saved.get('candidates', []) if c.get('decision')}
     check('match review: Save the review writes the work file with the decisions and the reviewer',
-          saved.get('krisis') == 1 and skinds == {'bristol': 'match', 'bath': 'distinct', 'wells': 'not-this'} and (saved.get('reviewer') or {}).get('name') == 'Ada Reviewer', saved.get('error') or skinds)
+          saved.get('krisis') == 2 and skinds == {'bristol': 'match', 'bath': 'distinct', 'wells': 'not-this'} and (saved.get('reviewer') or {}).get('name') == 'Ada Reviewer', saved.get('error') or skinds)
     # Finish with the default: the dataset, with the new attestations added, checked with the version check.
     ds, default, summ, left = {}, None, '', None
     if s.get('phase') == 'reviewing':
@@ -283,7 +283,7 @@ def krisis_case(page, tmp):
           and not any('@id' in a for a in atts), {k: v for k, v in out.items() if k != 'attestations'} if isinstance(out, dict) else out)
     # Resuming: the saved review, opened again, is back where it was, decisions and all.
     r = {}
-    if saved.get('krisis') == 1:
+    if saved.get('krisis') == 2:
         try:
             page.set_input_files('#workfile', [str(tmp / 'saved.krisis.json')])
             r = wait_state(page, lambda s: s.get('phase') == 'reviewing', 20, 'resume')
@@ -508,6 +508,201 @@ def krisis_table_review(page, tmp, table, subjects, chosen):
 # Krisis: the note beside a table's column choices, as shown (None when hidden), and whether every choice is locked, or every one open.
 LOCK_NOTE = """() => { const n = document.getElementById('columns-locked'), sels = [...document.querySelectorAll('#columns select[data-column]')];
     return { note: n && !n.hidden && n.offsetParent !== null ? n.textContent : null, locked: sels.length > 0 && sels.every((x) => x.disabled), open: sels.length > 0 && sels.every((x) => !x.disabled) }; }"""
+
+# Krisis: gazetteer lookup. WHG is never called: page.route answers for it, as a fake reconciliation
+# service (the answers are shaped as src/engine/gazetteer/whg.js says WHG's are), and records each request.
+LOOKUP_TOKEN = 'e2e-SECRET-whg-token-7f3a91c0'
+LOOKUP_ATTRIBUTION = {'whg': {'license': 'CC-BY-4.0'}, 'sources': {
+    'gn': {'license': {'spdx_id': 'CC-BY-4.0', 'permits_commercial': True, 'no_derivatives': False}, 'redistributable': True},
+    'nc': {'license': {'spdx_id': 'CC-BY-NC-4.0', 'permits_commercial': False, 'no_derivatives': False}, 'redistributable': True}}}
+LOOKUP_ANSWERS = {
+    # WHG's own order puts Australia first, and all three score 100: its score is relative within one answer.
+    'Newcastle': [
+        {'id': 'place:osm:2155472', 'name': 'Newcastle', 'score': 100, 'match': True, 'description': 'Country: AU', 'ccodes': ['AU'], 'repr_point': [151.7765, -32.9272], 'namespace': 'osm', 'alt_names': []},
+        {'id': 'place:nc:3354071', 'name': 'Newcastle', 'score': 100, 'match': True, 'description': 'Country: NA', 'ccodes': ['NA'], 'repr_point': [17.0833, -22.5667], 'namespace': 'nc', 'alt_names': []},
+        {'id': 'place:gn:2641673', 'name': 'Newcastle upon Tyne', 'score': 100, 'match': False, 'description': 'Country: GB', 'ccodes': ['GB'], 'repr_point': [-1.6132, 54.9733], 'namespace': 'gn', 'alt_names': ['Newcastle'], 'confidence': 92}],
+    'York': [{'id': 'place:gn:2633352', 'name': 'York', 'score': 100, 'match': True, 'ccodes': ['GB'], 'repr_point': [-1.0827, 53.9576], 'namespace': 'gn'}],
+    'Zennor Churchtown': [{'id': 'place:gn:2633485', 'name': 'Zennor', 'score': 100, 'match': False, 'ccodes': ['GB'], 'repr_point': [-5.566, 50.191], 'namespace': 'gn'}],
+}
+
+def krisis_lookup_case(page, tmp):
+    """Krisis, gazetteer lookup: the panel, the preview, a quota stop and Resume, the review screen's additions, one
+    place looked up, Finish citing WHG; and the token nowhere but the Authorization header."""
+    import re
+    from collections import Counter
+    a = 'https://example.org/l/'
+    subjects = tmp / 'krisis-lookup.json'
+    places = [krisis_place(a + 'newcastle', 'Newcastle', -1.6178, 54.9783), krisis_place(a + 'atlantis', 'Atlantis', -20.0, 35.0),
+              krisis_place(a + 'zennor', 'Zennor', -5.5680, 50.1910, 'Senara'), krisis_place(a + 'york', 'York', -1.0819, 53.9590)]
+    places += [krisis_place(a + f'filler-{i:02}', f'Filler {i:02}', -3.0 + i / 100, 52.0) for i in range(26)]   # 30 places: two requests of 25
+    subjects.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': a, 'title': 'Places to look up'}, 'spatialEntities': places}))
+    calls, consoled, quota_on = [], [], {'n': 2}
+    cors = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+            'Access-Control-Allow-Headers': 'authorization, content-type, accept, user-agent'}
+    def fake_whg(route):
+        req = route.request
+        if req.method == 'OPTIONS': return route.fulfill(status=204, headers=cors)
+        calls.append({'url': req.url, 'headers': req.all_headers(), 'body': req.post_data or ''})
+        if len(calls) == quota_on['n']:
+            return route.fulfill(status=401, headers={**cors, 'Content-Type': 'application/json'}, body=json.dumps({'detail': 'Daily API limit exceeded'}))
+        out = {'attribution': LOOKUP_ATTRIBUTION}
+        for k, q in json.loads(req.post_data)['queries'].items():
+            # Atlantis: the gateway did not answer, which is not "no match".
+            out[k] = {'result': [], 'gateway': 'timeout'} if q['query'] == 'Atlantis' else {'result': LOOKUP_ANSWERS.get(q['query'], [])}
+        route.fulfill(status=200, headers={**cors, 'Content-Type': 'application/json'}, body=json.dumps(out))
+    page.route(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'), fake_whg)
+    page.on('console', lambda m: consoled.append(m.text))
+    has = lambda hay: LOOKUP_TOKEN in (hay if isinstance(hay, str) else json.dumps(hay))
+    lk = lambda s: s.get('lookup') or {}
+    def step(fn, default):
+        try: return fn()
+        except Exception as e: return {**(default if isinstance(default, dict) else {}), 'error': str(e).split('\n')[0][:200]}
+
+    # The panel, the token, the preview.
+    def open_panel():
+        page.set_input_files('#picker', [str(subjects)])
+        s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), 60, 'detection')
+        if s.get('phase') != 'detected': return {'phase': s.get('phase')}
+        page.evaluate("() => { const r = document.getElementById('reviewer'); if (!r.value) { r.value = 'Lu Reviewer'; r.dispatchEvent(new Event('change')); } }")
+        page.click('#lookup > summary')
+        page.fill('#whg-token', LOOKUP_TOKEN); page.press('#whg-token', 'Tab')
+        page.wait_for_function("() => /^Send 30 queries to WHG$/.test(document.getElementById('lookup-send').textContent) && !document.getElementById('lookup-send').disabled", timeout=60_000)
+        return {'phase': 'open', 'privacy': page.inner_text('.lookup-privacy'), 'field': page.input_value('#whg-token'),
+                'session': page.evaluate("() => sessionStorage.getItem('plato-tools.whg-token')"),
+                'local': page.evaluate("() => localStorage.getItem('plato-tools.whg-token')"), 'tokenState': page.inner_text('#whg-token-state'),
+                'preview': page.inner_text('#lookup-preview'), 'first': page.eval_on_selector_all('.lookup-queries code', 'els => els.map((e) => e.textContent)'),
+                'send': page.inner_text('#lookup-send'), 'filters': page.evaluate("() => ['lookup-countries', 'lookup-near', 'lookup-all-names'].map((id) => document.getElementById(id).checked)")}
+    o = step(open_panel, {})
+    check('lookup: the panel says it is optional and goes online, and what WHG receives', 'optional and goes online' in o.get('privacy', '')
+          and 'forgotten when you close this tab' in o.get('privacy', '') and 'never saved in your files' in o.get('privacy', ''), o)
+    check('lookup: the token is kept in this tab only (sessionStorage), not in the field and not in localStorage',
+          o.get('session') == LOOKUP_TOKEN and o.get('local') is None and o.get('field') == '' and 'A token is given' in o.get('tokenState', ''), {k: v for k, v in o.items() if k in ('field', 'local', 'tokenState', 'error')})
+    first = [json.loads(x) for x in o.get('first', [])]
+    check('lookup: the preview gives places, queries, requests and the share of the allowance, filters off, and the first 20 queries exactly',
+          'Would look up 30 places in World Historical Gazetteer: 30 queries in 2 requests' in o.get('preview', '') and "under 1% of WHG's allowance of 5,000 requests a day" in o.get('preview', '')
+          and 'label only' in o.get('preview', '') and o.get('filters') == [False, False, False] and len(first) == 20
+          and first[0] == {'query': 'Newcastle', 'type': 'Place', 'limit': 10} and o.get('send') == 'Send 30 queries to WHG', o)
+
+    # Sending: the second request finds the day's allowance spent.
+    def send():
+        page.click('#lookup-send')
+        s = wait_state(page, lambda s: lk(s).get('running') is False, 60, 'lookup')
+        return {**s, 'progress': page.inner_text('#lookup-progress'), 'resume': page.inner_text('#lookup-resume') if page.is_visible('#lookup-resume') else None}
+    s = step(send, {}) if o.get('phase') == 'open' else {}
+    q1 = ((s.get('work') or {}).get('lookups') or [{}])[0].get('queries', {})
+    states = dict(Counter(v['state'] for v in q1.values()))
+    check('lookup: the first 20 queries in the preview are those WHG received', bool(calls) and bool(first) and list(json.loads(calls[0]['body'])['queries'].values())[:20] == first, calls[:1])
+    check('lookup: a quota stop keeps what was answered, says so in words, and offers Resume',
+          lk(s).get('stopped') == 'quota' and states == {'answered': 24, 'unanswered': 1, 'stopped': 5} and "allowance of requests for today is spent" in s.get('progress', '')
+          and s.get('resume') == 'Resume: send 6 queries' and s.get('phase') == 'reviewing', {'lookup': lk(s), 'states': states, 'progress': s.get('progress'), 'resume': s.get('resume')})
+
+    # The review screen: Newcastle, its candidates from WHG in the lookup's order, not WHG's and not by name.
+    def newcastle():
+        return {'subject': page.inner_text('#review-subject'), 'iris': page.eval_on_selector_all('#review-place li.candidate .iri', 'els => els.map((e) => e.textContent)'),
+                'groups': page.eval_on_selector_all('#review-place h4.source', 'els => els.map((e) => e.textContent)'),
+                'cands': page.eval_on_selector_all('#review-place li.candidate', 'els => els.map((e) => ({ text: e.innerText, far: !!e.querySelector(".far"), warn: !!e.querySelector(".licence.warn") }))')}
+    n = step(newcastle, {}) if s.get('phase') == 'reviewing' else {}
+    W3 = 'https://w3id.org/whg/id/'
+    cs = n.get('cands') or [{}, {}, {}]
+    check('lookup: three Newcastles grouped "From World Historical Gazetteer", ranked by distance (Tyne first; WHG gave Australia first), the far ones shown and marked',
+          n.get('subject') == 'Newcastle' and n.get('groups') == ['From World Historical Gazetteer'] and n.get('iris') == [W3 + 'place:gn:2641673', W3 + 'place:nc:3354071', W3 + 'place:osm:2155472']
+          and [c.get('far') for c in cs] == [False, True, True] and 'Far: further than 50 km' in cs[1].get('text', ''), n)
+    check("lookup: WHG's own figures are shown as WHG's (relative to the best in this search; confidence of the name only)",
+          len(cs) == 3 and "WHG's own figures: score 100 (relative to the best in this search), confidence 92 (name only)" in cs[0].get('text', '')
+          and 'relative to the best in this search' in cs[2].get('text', '') and 'confidence' not in cs[2].get('text', ''), cs)
+    check('lookup: each candidate shows its licence: a warning for non-commercial, "licence unknown" never shown as fine, a free licence without a warning',
+          len(cs) == 3 and 'CC-BY-4.0.' in cs[0].get('text', '') and not cs[0].get('warn') and 'CC-BY-NC-4.0, non-commercial' in cs[1].get('text', '') and cs[1].get('warn')
+          and 'licence unknown' in cs[2].get('text', '') and cs[2].get('warn'), cs)
+
+    # Resume: the places stopped, and the one not answered, are looked up again.
+    def resume():
+        page.click('#lookup-resume')
+        return wait_state(page, lambda s: lk(s).get('running') is False and len((s.get('work') or {}).get('lookups') or []) == 2, 60, 'resume')
+    r = step(resume, {}) if s.get('resume') else {}
+    q2 = ((r.get('work') or {}).get('lookups') or [{}, {}])[1].get('queries', {})
+    check('lookup: Resume looks up what the stop left, and the lookup finishes', lk(r).get('stopped') is None and dict(Counter(v['state'] for v in q2.values())) == {'answered': 5, 'unanswered': 1}
+          and len(calls) == 3, {'lookup': lk(r), 'calls': len(calls)})
+
+    # A place the gateway did not answer is "look it up again", not "no match"; beside it, one answered with nothing.
+    def unanswered():
+        page.select_option('#review-filter', 'all'); page.click('#review-next')
+        at = {'subject': page.inner_text('#review-subject'), 'text': page.inner_text('#review-place')}
+        page.click('#review-next')
+        return {'atlantis': at, 'zennor': {'subject': page.inner_text('#review-subject'), 'text': page.inner_text('#review-place')}}
+    u = step(unanswered, {}) if r.get('phase') == 'reviewing' else {}
+    at, zn = u.get('atlantis') or {}, u.get('zennor') or {}
+    check('lookup: a place WHG did not answer says "look it up again", not "no match"; one answered with nothing says "no candidates (label only)"',
+          at.get('subject') == 'Atlantis' and 'not a finding that it has no match' in at.get('text', '') and 'Look it up again' in at.get('text', '') and 'No candidates' not in at.get('text', '')
+          and zn.get('subject') == 'Zennor' and 'No candidates (label only)' in zn.get('text', '') and 'Not found? Try its other names (2 queries)' in zn.get('text', ''), u)
+
+    # One place, from the review screen: the query as typed, one query sent, the focus on the new candidate.
+    def single():
+        page.click('#review-place button[data-look="find"]')
+        page.fill('#find-query', 'Zennor Churchtown'); page.press('#find-query', 'Enter')
+        s = wait_state(page, lambda s: lk(s).get('running') is False and lk(s).get('single') is True, 60, 'single lookup')
+        focused = page.evaluate("() => { const li = document.activeElement && document.activeElement.closest('li.candidate'); return li ? li.dataset.id : null; }")
+        return {**s, 'focused': focused}
+    g = step(single, {}) if zn.get('subject') == 'Zennor' else {}
+    new = [c for c in (g.get('work') or {}).get('candidates', []) if c['candidate_source'] == a + 'zennor']
+    check('lookup: one place looked up from the review screen sends one query, as typed, and the focus moves to its new candidate',
+          len(calls) == 4 and list(json.loads(calls[3]['body'])['queries'].values()) == [{'query': 'Zennor Churchtown', 'type': 'Place', 'limit': 10}]
+          and len(new) == 1 and new[0]['candidate_candidate'] == W3 + 'place:gn:2633485' and g.get('focused') == new[0]['id'], {'calls': len(calls), 'new': new, 'focused': g.get('focused'), 'error': g.get('error')})
+
+    # Deciding on it, saving, and finishing: one attestation citing WHG.
+    def finish():
+        page.keyboard.press('a')
+        s = wait_state(page, lambda s: any(c.get('decision') for c in (s.get('work') or {}).get('candidates', [])), 10, 'decision')
+        cites = page.inner_text('#finish-cites')
+        with page.expect_download(timeout=30_000) as d: page.click('#save-review')
+        d.value.save_as(tmp / 'lookup.krisis.json'); saved = (tmp / 'lookup.krisis.json').read_text()
+        page.check('input[name="review-output"][value="attestations"]'); page.click('#finish')
+        s = wait_state(page, lambda s: s.get('action') == 'apply' and s.get('phase') in ('done', 'error'), 120, 'finish')
+        out = json.loads(download(page, s['outputs'][0]['name'], tmp / 'lookup-attestations.json').read_text()) if s.get('phase') == 'done' and s.get('outputs') else {}
+        return {'cites': cites, 'saved': saved, 'out': out, 'phase': s.get('phase'), 'report': s.get('report')}
+    f = step(finish, {}) if g.get('focused') else {}
+    atts = (f.get('out') or {}).get('attestations', [])
+    cited = lambda x: x.get('sources', []) + [c.get('source') or {} for c in x.get('citations', [])]
+    whg = [x for x in atts if any(src.get('title') == 'World Historical Gazetteer' and src.get('@id') == 'https://whgazetteer.org/' for src in cited(x))
+           and [(i.get('subject'), i.get('object')) for i in x.get('identities', [])] == [(a + 'zennor', W3 + 'place:gn:2633485')]]
+    check('lookup: the page says what Finish will cite, and Finish makes one attestation citing WHG, for the match accepted',
+          'World Historical Gazetteer (https://whgazetteer.org/)' in f.get('cites', '') and len(atts) == 1 and len(whg) == 1, {k: f.get(k) for k in ('cites', 'phase', 'report', 'error')} if not atts else atts)
+
+    # The token: in the Authorization header of every request (the control: the search finds it there), and nowhere else.
+    def where():
+        return {'plato': page.evaluate('() => JSON.stringify(window.__plato)'), 'text': page.evaluate('() => document.body.innerText'),
+                'html': page.evaluate('() => document.documentElement.outerHTML'), 'url': page.url}
+    wh = step(where, {})
+    headers = [c['headers'].get('authorization') for c in calls]
+    check('lookup: the token goes in the Authorization header of every request to WHG (the control for the absences below)',
+          len(calls) == 4 and all(h == 'Bearer ' + LOOKUP_TOKEN for h in headers) and all(has(h) for h in headers), headers)
+    check('lookup: the token is not in any address or request body, window.__plato, the page, the console, or the saved work file',
+          bool(calls) and bool(wh.get('plato')) and bool(f.get('saved')) and '"lookups"' in f.get('saved', '') and 'World Historical Gazetteer' in f.get('saved', '')
+          and not any(has(c['url']) or has(c['body']) for c in calls) and not has(wh.get('plato', LOOKUP_TOKEN)) and not has(wh.get('text', LOOKUP_TOKEN))
+          and not has(wh.get('html', LOOKUP_TOKEN)) and not has(wh.get('url', LOOKUP_TOKEN)) and not has(consoled) and not has(f.get('saved', LOOKUP_TOKEN)),
+          {'in': [k for k, v in {**wh, 'console': consoled, 'saved': f.get('saved', '')}.items() if has(v)], 'error': wh.get('error')})
+
+    # Forget: gone from the tab, and nothing is sent without it.
+    def forget():
+        before = len(calls)
+        page.click('#lookup > summary') if not page.evaluate("() => document.getElementById('lookup').open") else None
+        page.click('#whg-forget')
+        gone = page.evaluate("() => sessionStorage.getItem('plato-tools.whg-token')")
+        page.click('#lookup-send', force=True)
+        page.wait_for_function("() => /token first/.test(document.getElementById('lookup-progress').textContent)", timeout=10_000)
+        return {'gone': gone, 'sent': len(calls) - before, 'said': page.inner_text('#lookup-progress'), 'focus': page.evaluate('() => document.activeElement && document.activeElement.id')}
+    fg = step(forget, {}) if calls else {}
+    check('lookup: Forget clears the token from the tab, and nothing is sent without one (the page asks for it)',
+          'gone' in fg and fg.get('gone') is None and fg.get('sent') == 0 and 'Give your WHG token first' in fg.get('said', '') and fg.get('focus') == 'whg-token', fg)
+
+    # At phone width, the panel and the review fit the screen.
+    def phone():
+        page.set_viewport_size({'width': 375, 'height': 800})
+        wide = page.evaluate("() => ({ page: document.documentElement.scrollWidth, panel: document.getElementById('lookup').open && document.getElementById('lookup').getBoundingClientRect().width, review: !document.getElementById('review').hidden })")
+        page.set_viewport_size({'width': 1280, 'height': 720})
+        return wide
+    ph = step(phone, {})
+    check('lookup: at 375 px wide, the panel and the review fit without scrolling sideways', ph.get('panel') and ph.get('review') and ph.get('page', 999) <= 375, ph)
+    page.unroute(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'))
 
 def download(page, name, dest):
     with page.expect_download(timeout=600_000) as d:
@@ -1140,6 +1335,7 @@ def main():
                   half.get('held again') == 2 and refused(half.get('refused again'))
                   and done(half.get('second meanwhile')) and done(half.get('first after')), half)
             main_permissions(ctx, page, url, main_requests)
+            krisis_lookup_case(page, tmp)
             ctx.close()
             front = pw.chromium.launch(headless=True)
             try: front_page_checks(front, url); theme_checks(front, url)
