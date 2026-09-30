@@ -7,14 +7,15 @@
 // is carried as ONE POINT: the region's centre, worked out in image pixels (the area centroid of an
 // area, the midpoint by length of a line) and then placed with the map's own transformation (not
 // the centre of the placed outline, which a non-linear transformation would move), with
-// `precisionKm` the greatest ground distance from that point to any vertex of the placed outline,
-// so that the radius holds the whole region. The outline itself is not carried, and is reported. A
+// `precisionKm` the greatest ground distance from that point to any vertex of the placed outline
+// (so that the radius holds the whole region), plus, for a transformation fitted by least squares,
+// how far the georeference misses its own control points (the root mean square, in the record). The outline itself is not carried, and is reported. A
 // region that reaches beyond the mask is still placed, with a warning.
 //
 // The citation of the annotated image is REPLACED, for a placed region, by the citation of the map
 // (the manifest, cito:citesAsEvidence, the region on the canvas as the locator), followed by the
 // citation of the georeference (cito:usesMethodIn): one evidence citation, as in PLATO's worked
-// example. The pixel region in words, where it says more than the canvas locator, goes to the notes.
+// example. The pixel region in words, where it says more than the map's locator, goes to the notes.
 //
 // What the point is (its role) needs evidence, never a guess:
 //   - plato:LabelAnchor when the annotation gives the label's words or says it is a label: a
@@ -220,11 +221,14 @@ export function haversineKm([lon1, lat1], [lon2, lat2]) {
 const upToHundredths = (km) => Math.ceil(km * 100 - 1e-9) / 100;
 /**
  * The radius of a placed region, in km: the greatest ground distance from its point to any vertex
- * of its placed outline. (The georeference's own error, where the georeference module comes to
- * estimate it, is to be added here, and said in its fixed note.)
+ * of its placed outline, plus the georeference's control-point misfit (record.controlPointMisfitKm,
+ * the root mean square) where there is one: a transformation fitted by least squares misses its own
+ * control points, and one that passes through them (a thin plate spline) has no misfit to add, and
+ * no estimate of its error elsewhere. georefNote's misfit sentence says which.
  */
-function radiusKm(point, outline) {
-  return upToHundredths(Math.max(0, ...vertices(outline).map((v) => haversineKm(point.coordinates, v))));
+function radiusKm(point, outline, record) {
+  const outlineKm = Math.max(0, ...vertices(outline).map((v) => haversineKm(point.coordinates, v)));
+  return upToHundredths(outlineKm + (record.controlPointMisfitKm ?? 0));
 }
 
 /**
@@ -289,17 +293,23 @@ async function place(m, geom, centre, attestations, ctx, report, shape) {
   // The centre was worked out in pixels, and is placed as a point of its own.
   const { geojson: point, record } = await toWorld(m.g, { type: 'Point', coordinates: centre }, { space: 'image', role });
   const { geojson: outline } = await toWorld(m.g, geom, { space: 'image' });
-  const geometry = { geojson: point, ...(role ? { role } : {}), precisionKm: [radiusKm(point, outline)] };
-  const map = georefCitation(record, { region: bboxOf(geom) });
+  const geometry = { geojson: point, ...(role ? { role } : {}), precisionKm: [radiusKm(point, outline, record)] };
+  // The region's exact pixel box (georefCitation pads nothing unless asked).
+  const box = bboxOf(geom);
+  const map = georefCitation(record, { region: box });
+  // The pixel region in words adds something only where the map's locator does not give the same
+  // box (a canvas of another size than the image, say).
+  const same = typeof map.locator === 'string' && map.locator.endsWith(`#xywh=${box.join(',')}`);
   const method = record.annotationId ? [georefAnnotationCitation(record)] : [];
-  // Georeference files are supplied by the user, so no retrieval date is known (georefNote says so).
-  const notes = [georefNote(record), ...(note ? [note] : [])];
+  // Georeference files are supplied by the user, so no retrieval date is known (georefNote says so);
+  // the misfit sentence says what precisionKm holds of the georeference's own error.
+  const notes = [georefNote(record, { misfit: true }), ...(note ? [note] : [])];
   const first = !ctx.replaced.has(ctx.index);
   ctx.replaced.add(ctx.index);
   for (const att of attestations) {
     const citations = [...(att.citations || [])];
     const own = citations[ctx.index];
-    const words = own && own.locator && own.locator !== SHAPE_WORDS ? [`Drawn on the map: ${own.locator}.`] : [];
+    const words = own && own.locator && own.locator !== SHAPE_WORDS && !same ? [`Drawn on the map: ${own.locator}.`] : [];
     // The image's citation gives way to the map's, in its place (so that the citations of the other
     // targets keep theirs); another region on the same target adds its own citation of the map. The
     // citation of the georeference comes after.

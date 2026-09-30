@@ -141,12 +141,14 @@ output is byte for byte what it was (the test holds the digests).
   is placed, with a warning.
 - **What is written.** One `Point`: the centre, worked out in pixels (the area centroid; the
   midpoint by length of a line) and then transformed; `precisionKm` (an array, as the schema has
-  it) the greatest haversine distance from it to the transformed outline's vertices, rounded up to
-  0.01 km (`radiusKm`, where the georeference's own error is to be added once the georeference
-  module estimates it). The outline is reported, not carried. The image's citation is replaced by
-  `georefCitation(record, { region })` and followed by `georefAnnotationCitation(record)`; the
-  notes get `georefNote(record)` (no `fetched`: "retrieval date not recorded"), and a rectangle's
-  pixels in words.
+  it) the greatest haversine distance from it to the transformed outline's vertices, plus the
+  record's `controlPointMisfitKm` for a transformation fitted by least squares (null, so nothing,
+  for a thin plate spline), rounded up to 0.01 km (`radiusKm`). The outline is reported, not
+  carried. The image's citation is replaced by `georefCitation(record, { region })` (the exact
+  pixel box, unpadded) and followed by `georefAnnotationCitation(record)`; the notes get
+  `georefNote(record, { misfit: true })` (no `fetched`: "retrieval date not recorded"; the misfit
+  sentence says what the georeference's error is, or that a spline's is not estimated), and a
+  rectangle's pixels in words where the map's locator does not give the same box.
 - **Roles, by evidence only.** `plato:LabelAnchor` for a transcription, a quote, or a tag `label`;
   otherwise no role, a note and a warning. The tag conventions (`label`, `symbol`, or `map label`,
   `map symbol`, singular or plural, any case, free or from a vocabulary) are the only evidence

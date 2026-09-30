@@ -78,15 +78,20 @@ function fanCentroid(points) {
   return [x / area, y / area];
 }
 const outlineVertices = (g) => (g.type === 'Polygon' ? g.coordinates.flat(1) : g.coordinates.flat(2));
-/** What the reader must have written for a region with this centre, outline and role. */
-async function expected(g, centre, outline, role, bbox) {
-  const { geojson: point, record } = await toWorld(g, { type: 'Point', coordinates: centre }, { space: 'image', role });
-  const { geojson: shape } = await toWorld(g, outline, { space: 'image' });
-  const far = Math.max(...outlineVertices(shape).map((v) => km(point.coordinates, v)));
+/**
+ * What the reader must have written for a region with this centre, outline and role: the point is
+ * toWorld of the centre; the radius the farthest outline vertex plus the control-point misfit (none
+ * for a thin plate spline), rounded up to 0.01 km; the note and citations georef's own.
+ */
+async function expected(g, centre, outline, role, bbox, transformation) {
+  const { geojson: point, record } = await toWorld(g, { type: 'Point', coordinates: centre }, { space: 'image', role, transformation });
+  const { geojson: shape } = await toWorld(g, outline, { space: 'image', transformation });
+  const far = Math.max(...outlineVertices(shape).map((v) => km(point.coordinates, v))) + (record.controlPointMisfitKm ?? 0);
   return {
     geometry: { geojson: point, ...(role ? { role } : {}), precisionKm: [Math.ceil(far * 100 - 1e-9) / 100] },
     far,
-    note: georefNote(record),
+    record,
+    note: georefNote(record, { misfit: true }),
     citations: [georefCitation(record, { region: bbox }), georefAnnotationCitation(record)],
   };
 }
@@ -244,15 +249,47 @@ for (const [n, c] of Object.entries(CASES)) {
     const notes = att.notes.split('\n');
     assert.ok(notes.includes(want.note), att.notes);
     assert.match(want.note, /retrieval date not recorded\./);
+    assert.ok(want.note.endsWith('The georeference passes through its control points exactly, so its error elsewhere is not estimated.'), 'a thin plate spline: no misfit, and the note says so');
+    assert.equal(want.record.controlPointMisfitKm, null);
     assert.equal(want.note.includes('The position is where the map writes the name'), c.role === LABEL_ANCHOR, 'the label-anchor sentence exactly when the role is LabelAnchor');
     for (const x of [NO_ROLE_NOTE, SYMBOL_NOTE]) assert.equal(notes.includes(x), NOTE(c) === x, x);
-    // The region in words goes to the notes where it says more than the canvas locator (a rectangle's
-    // exact pixels); an SVG shape's words ("a shape drawn on the image") say nothing more.
-    const words = `Drawn on the map: ${image[0].locator}.`;
-    assert.equal(notes.includes(words), 'xywh' in c.outline, words);
+    // The region in words would say nothing the map's locator does not (this canvas is the image's
+    // size, and the box is not padded), so it is not in the notes; see the half-size canvas below.
+    assert.ok(!notes.some((l) => l.startsWith('Drawn on the map')), att.notes);
     assert.equal(valid(AC, { profile: 'attestation-centric', gazetteer: { title: 't' }, attestations: [att] }), null);
   });
 }
+test('placed through a polynomial georeference: the radius adds its control-point misfit (136.80 km on the Rocque map), and the note says so', async () => {
+  // The Rocque annotation, declaring a first-order polynomial instead of its thin plate spline.
+  const annotation = json(ROCQUE);
+  annotation.body.transformation = { type: 'polynomial', options: { order: 1 } };
+  const poly = textFile(JSON.stringify(annotation), 'rocque-polynomial.json');
+  const r = await placed({ georefs: [poly], manifests: [ROCQUE_M] }, [item(1)]);
+  const [att] = r.doc.attestations;
+  // Independently: the real annotation, with the transformation chosen through toWorld's option.
+  const want = await expected(await rocque(), CASES[1].centre, CASES[1].outline, LABEL_ANCHOR, CASES[1].bbox, 'polynomial');
+  assert.equal(want.record.controlPointMisfitKm, 136.8);
+  assert.deepEqual(att.geometries[0].geojson, want.geometry.geojson);
+  assert.deepEqual(att.geometries[0].precisionKm, want.geometry.precisionKm);
+  const tps = (await MAIN()).attestation(1).geometries[0].precisionKm[0];
+  assert.ok(att.geometries[0].precisionKm[0] > 136.8 && att.geometries[0].precisionKm[0] > tps, 'control: more than the misfit alone, and than the spline gives');
+  const note = att.notes.split('\n').find((l) => l.startsWith('Georeferenced through'));
+  assert.match(note, /\(polynomial order 1, 22 control points\)/);
+  assert.match(note, /The georeference misses its own control points by 136\.80 km on average \(root mean square; at most \d+\.\d\d km\)/);
+});
+test('a canvas half the image\'s size: the region is cited on the canvas, scaled, and its exact pixels go to the notes; an SVG shape\'s words do not', async () => {
+  const manifest = json(ROCQUE_M);
+  const canvas = manifest.sequences[0].canvases[0];
+  assert.deepEqual([canvas.width, canvas.height], [11436, 6268]);
+  Object.assign(canvas, { width: 5718, height: 3134 });
+  const r = await placed({ georefs: [ROCQUE], manifests: [textFile(JSON.stringify(manifest), 'half.json')] }, [item(1), item(2)]);
+  const [erie, ontario] = r.doc.attestations;
+  assert.equal(erie.citations[0].locator, `${CANVAS}#xywh=2560,2800,115,36`);
+  assert.ok(erie.notes.split('\n').includes('Drawn on the map: region at x 5120, y 5600, 230 by 72 pixels.'), erie.notes);
+  assert.ok(!ontario.notes.includes('Drawn on the map'), 'the polygon\'s words, "a shape drawn on the image", add nothing');
+  // The point does not depend on the canvas: it is placed in image pixels.
+  assert.deepEqual(erie.geometries, (await MAIN()).attestation(1).geometries);
+});
 test('placed: the points differ from each other and lie where the map is (a control on the comparison above)', async () => {
   const { doc } = await MAIN();
   const points = doc.attestations.filter((a) => a.geometries).map((a) => a.geometries[0].geojson.coordinates);
