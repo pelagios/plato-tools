@@ -301,3 +301,21 @@ test('publish mint on the command line: 0 and the copy; with --previous, 1 and n
   const missing = cli('publish', 'mint', '--previous', join(dir, 'nowhere.jsonl'), '--out', out3, write('v3.json', doc(places(), PUB)));
   assert.equal(missing.code, 2, missing.out + missing.err);
 });
+
+test('a base given for the run is written into the copy, so the site and the w3id rules use it too', async () => {
+  const B = 'https://w3id.org/other/';
+  const d = doc([{ ...place('a', [{ names: [{ toponym: 'Anon' }], sources: [src] }]), '@id': B + 'place/a' }]);
+  const r = await mint(json(d), { options: { base: B } });
+  const head = JSON.parse(r.text.split('\n')[0]);
+  assert.equal(head.gazetteer.uriSpace, B);
+  assert.equal(head.gazetteer['@id'], B);          // it was the old base, so it follows
+  assert.ok(records(r.text)[0].attestations[0]['@id'].startsWith(B + 'place/a#a-'));
+  assert.ok(item(r, 'base-written'));
+  // Control: without a base for the run, the dataset's own is kept and nothing is said.
+  const own = await mint(json(doc(places())));
+  assert.equal(JSON.parse(own.text.split('\n')[0]).gazetteer.uriSpace, X);
+  assert.equal(item(own, 'base-written'), undefined);
+  // The same base, written without its closing '/', is not a different one.
+  const same = await mint(json(doc(places())), { options: { base: X.slice(0, -1) } });
+  assert.equal(item(same, 'base-written'), undefined);
+});

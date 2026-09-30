@@ -53,8 +53,10 @@
 // about as much as the copy written.
 import { compare, attestationLines } from '../compare.js';
 import { sha256 } from '../../lib/sha256.js';
+import { normaliseBase } from './address.js';
 
 export const TEXT = {
+  'base-written': "A base address was given for this run that is not the dataset's own (uriSpace, the about sheet's base_uri): the addresses were made under the base given, and the copy records it as its uriSpace, so that the site and the w3id rules made from the copy use the same one. Put it in the dataset too.",
   'place-outside-base': "An attestation is about a place whose web address is not under the dataset's base address at all, so it cannot be given an address as a part of its place's, and is left without one. Give the place an address under the base, or give the base its places are under. The example names the place.",
   'previous-not-read': 'The previous release could not be read to the end, so the addresses it gave could not be kept, and nothing was written.',
   'against-previous': 'Compared with the previous release (the earlier version), the dataset with its addresses (the later one): ',
@@ -121,9 +123,20 @@ export function create(ctx) {
   let db = null, ins = null, recs = 0, header = null;
   const counts = { minted: 0, kept: 0, inherited: 0, twins: 0, lengthened: 0, outside: 0 };
 
+  // The copy says which base its addresses were made under: a base given for this run (--base, or
+  // the page's field) becomes its uriSpace, and its own address too when that was the old base, so
+  // that the site and the w3id rules made from the copy agree with the addresses in it.
+  function withBase(head) {
+    const g = head && typeof head.gazetteer === 'object' && head.gazetteer;
+    if (!options.base || !ctx.scheme || !g || normaliseBase(g.uriSpace) === ctx.scheme.base) return head;
+    const old = normaliseBase(g.uriSpace);
+    const id = g['@id'] === undefined || g['@id'] === g.uriSpace || (old && g['@id'] === old) ? ctx.scheme.base : g['@id'];
+    return { ...head, gazetteer: { ...g, '@id': id, uriSpace: ctx.scheme.base } };
+  }
+
   /** The copy, line by line: the header, then each record with the addresses given. */
   function* copy() {
-    yield JSON.stringify({ $schema: 'https://w3id.org/plato/schemas/place-centric.schema.json', ...header, profile: 'place-centric' }) + '\n';
+    yield JSON.stringify({ $schema: 'https://w3id.org/plato/schemas/place-centric.schema.json', ...withBase(header), profile: 'place-centric' }) + '\n';
     const q = db.prepare('SELECT r, line FROM rec ORDER BY r');
     const a = db.prepare('SELECT i, given FROM att WHERE r=? AND id IS NULL AND given IS NOT NULL ORDER BY i');
     try {
@@ -268,6 +281,8 @@ export function create(ctx) {
     },
     header(head) {
       header = head;
+      const g = head && typeof head.gazetteer === 'object' && head.gazetteer;
+      if (options.base && ctx.scheme && g && normaliseBase(g.uriSpace) !== ctx.scheme.base) rep.warning('base-written', TEXT['base-written'], `${ctx.scheme.base}${g.uriSpace ? `, not ${g.uriSpace}` : ''}`);
       // Without a base nothing can be minted; finish() says so (ctx.blocked()).
       if (!ctx.scheme) return;
       ins = {
