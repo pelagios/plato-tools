@@ -165,8 +165,40 @@ test('the overview reads a covering index of the places with a point, not the re
   s.overview();
   s.db.prepare = prepare;
   assert.equal(seen.length, 1);
-  const plan = [...s.rows('EXPLAIN QUERY PLAN ' + seen[0], [1])].map((q) => q.get(3)).join(' | ');
+  const steps = [];
+  for (const q of s.rows('EXPLAIN QUERY PLAN ' + seen[0], [1])) steps.push(q.get(3));
+  const plan = steps.join(' | ');
   assert.match(plan, /COVERING INDEX/, plan);
+});
+
+test('a query of three letters or more is looked up in a trigram index; shorter ones are scanned; both find the same', async () => {
+  const s = await open();
+  // The plan of the query that fetches the page, with made-up values for its parameters.
+  const plan = (q) => {
+    const seen = [], prepare = s.db.prepare;
+    s.db.prepare = (sql) => { seen.push(sql); return prepare.call(s.db, sql); };
+    try { s.search(q, { limit: 2 }); } finally { delete s.db.prepare; }
+    const sql = seen.find((x) => /SELECT p\.id/.test(x));
+    const steps = [];
+    for (const r of s.rows('EXPLAIN QUERY PLAN ' + sql, sql.includes('MATCH') ? [0, '"x"', 3] : [0, '%x%', 3])) steps.push(r.get(3));
+    return steps.join(' | ');
+  };
+  assert.match(plan('villa'), /VIRTUAL TABLE/, 'three letters or more: the index');
+  assert.doesNotMatch(plan('vi'), /VIRTUAL TABLE/, 'two: the scan');
+  // Whatever the path, the places found are those whose label or a current name holds the query,
+  // worked out here from the dataset, with the text a query language might read as syntax.
+  const places = dataset().spatialEntities.map((p, i) => ({
+    id: p['@id'] || `#${i + 1}`,
+    texts: [p.label, ...p.attestations.filter((a) => a.names && !a.negated && !['b3', 'b4'].map(att).includes(a['@id']))
+      .flatMap((a) => a.names.flatMap((n) => [n.toponym, n.romanized]))].filter(Boolean).map(fold),
+  }));
+  const queries = ['o', 'on', 'con', 'lygos', 'villa 3', 'a 1', '"', 'a"b', "'", 'ro*', 'or', 'and', 'NOT', 'NEAR', 'villa OR place', '(vi', 'l_', 'a%', '%_%', ' 3', 'ΑΘΗ', 'æ', 'ae'];
+  for (const q of queries) {
+    const want = places.filter((p) => p.texts.some((t) => t.includes(fold(q)))).map((p) => p.id);
+    const got = s.search(q, { limit: 100 });
+    assert.deepEqual(got.items.map((i) => i.id), want, JSON.stringify(q));
+    assert.equal(got.total, want.length, JSON.stringify(q));
+  }
 });
 
 test('names reach the search from every route: JSON Lines and N-Triples', async () => {
