@@ -7,7 +7,7 @@
 // subjects that point at a node, so the same code runs on an in-memory graph (tests, small files)
 // and on the on-disk SQLite store (any size). Whatever it cannot place is reported as a loss.
 import { RDF, PLATO, compileContext, child } from '../lib/context.js';
-import { numberLiteral } from './json2rdf.js';
+import { numberLiteral, boundDatatype } from './json2rdf.js';
 import { QB, SDMX_ATTRIBUTE, SDMX_DIMENSION, isDerived } from './cube.js';
 
 const RDF_TYPE = RDF + 'type', RDF_FIRST = RDF + 'first', RDF_REST = RDF + 'rest', RDF_NIL = RDF + 'nil', RDF_JSON = RDF + 'JSON';
@@ -17,6 +17,7 @@ const WGS84 = 'http://www.w3.org/2003/01/geo/wgs84_pos#';
 const NEST_DEF = { qualification: 'qualification', relations: 'relation', meta: 'metaAttestation' };
 const DOC_LINKS = new Set(['contains_entity', 'contains_attestation', 'contains_identity_relation'].map((x) => PLATO + x));
 const XSD_STRING = XSD + 'string', XSD_BOOLEAN = XSD + 'boolean';
+const BOUNDS = new Set(['start_earliest', 'start_latest', 'end_earliest', 'end_latest'].map((x) => PLATO + x));
 const COMPONENT = { [QB + 'dimension']: 'dimension', [QB + 'measure']: 'measure', [QB + 'attribute']: 'attribute' };
 
 /** Resolve a schema fragment's $ref / oneOf into { kind: 'object'|'uri'|'scalar'|'either', def, array }. */
@@ -177,6 +178,21 @@ export class Rdf2Json {
     return o.value;
   }
   _key(o) { return o.termType === 'BlankNode' ? '_:' + o.value : o.value; }
+  /**
+   * What PLATO JSON cannot hold of a literal read into value v: a language tag, or a datatype other
+   * than the one the key's value is written back with (the context's type for the key, else the
+   * one its JSON value gives). The value is kept; the tag or datatype is reported lost.
+   */
+  _literalLoss(id, p, o, v, term) {
+    if (o.language) { this.loss({ kind: 'literal-language', value: `${id} ${p} "${o.value}"@${o.language}` }); return; }
+    const dt = o.datatype || XSD_STRING;
+    const again = term.type && !term.type.startsWith('@') ? term.type
+      : typeof v === 'number' ? numberLiteral(v).datatype : typeof v === 'boolean' ? XSD_BOOLEAN : XSD_STRING;
+    if (dt === again) return;
+    // A bound typed by its shape (xsd:gYear, xsd:date) is what a typed export writes, and writes again.
+    if (BOUNDS.has(p) && typeof v === 'string' && boundDatatype(v) === dt) return;
+    this.loss({ kind: 'literal-datatype', value: `${id} ${p} "${o.value}"^^<${dt}>` });
+  }
 
   /** Build the JSON object for node `id` as JSON type `def` in context `active`. */
   node(id, def, active, seen = new Set(), back = null) {
@@ -237,7 +253,7 @@ export class Rdf2Json {
       if (t.type === '@vocab') { const key = [...e.ctx.terms.entries()].find(([, v]) => v.iri === o.value); if (key) put(e, key[0]); else if (!o.value.startsWith(PLATO)) this.loss({ kind: 'unmapped-type', value: o.value }); continue; }
       if (t.container === '@list') { if (o.termType === 'Literal') { const xy = o.value.match(/POINT\s*\(\s*(\S+)\s+(\S+)\s*\)/i); if (xy) put({ ...e, shape: { ...e.shape, array: false } }, [Number(xy[1]), Number(xy[2])]); } else put({ ...e, shape: { ...e.shape, array: false } }, this._list(o)); continue; }
       if (t.type === '@json') { put(e, this._scalar(o, e.shape)); continue; }
-      if (o.termType === 'Literal') { put(e, this._scalar(o, e.shape)); continue; }
+      if (o.termType === 'Literal') { const v = this._scalar(o, e.shape); this._literalLoss(id, p, o, v, t); put(e, v); continue; }
       const oid = this._key(o);
       const sh = e.shape;
       // A shared node with its own IRI (a source cited by many places) is written out in full
