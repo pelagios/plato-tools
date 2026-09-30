@@ -13,6 +13,8 @@ import { readFileSync, writeFileSync, mkdtempSync, rmSync, readdirSync, existsSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import Ajv from 'ajv';
+import addFormats from 'ajv-formats';
 import { env as baseEnv, file, textFile } from './engine.js';
 import { detect } from '../src/engine/input.js';
 import { publish } from '../src/engine/agora/index.js';
@@ -276,7 +278,8 @@ test('the deposit files parse, and carry the description', async () => {
   assert.equal(z.upload_type, 'dataset');
   assert.equal(z.title, GOOD.title);
   assert.equal(z.description, '<p>Market towns &lt;and&gt; &quot;fairs&quot;.</p><p>A second paragraph, long enough to pass.</p>');
-  assert.deepEqual(z.creators, [{ name: 'Carberry, Josiah', orcid: '0000-0002-1825-0097' }, { name: 'Universidad de los Andes' }]);
+  // 'Josiah Carberry' has no comma, so it is kept whole (the next test splits names written with one).
+  assert.deepEqual(z.creators, [{ name: 'Josiah Carberry', orcid: '0000-0002-1825-0097' }, { name: 'Universidad de los Andes' }]);
   assert.equal(z.license, 'cc-by-4.0');
   assert.deepEqual(z.keywords, GOOD.keywords);
   assert.equal(z.version, '1.0');
@@ -293,7 +296,7 @@ test('the deposit files parse, and carry the description', async () => {
   assert.equal(c.license, 'CC-BY-4.0');
   assert.equal(c.version, '1.0');
   assert.equal(c.url, BASE);
-  assert.deepEqual(c.authors, [{ 'family-names': 'Carberry', 'given-names': 'Josiah', orcid: 'https://orcid.org/0000-0002-1825-0097' }, { name: 'Universidad de los Andes' }]);
+  assert.deepEqual(c.authors, [{ 'family-names': 'Josiah Carberry', orcid: 'https://orcid.org/0000-0002-1825-0097' }, { name: 'Universidad de los Andes' }]);
   assert.deepEqual(c.identifiers[0], { type: 'doi', value: '10.5281/zenodo.123', description: 'The DOI of every version of the dataset (the concept DOI).' });
   assert.equal(c.identifiers[1].value, `${BASE}release/v2`);
   assert.deepEqual(c.keywords, GOOD.keywords);
@@ -313,6 +316,54 @@ test('the deposit files parse, and carry the description', async () => {
   assert.equal(d.url, `${BASE}release/v2`);
   assert.match(f('README.txt'), /\.zenodo\.json +For Zenodo/);
   assert.doesNotMatch(f('README.txt'), /the DOI, once/, 'the DOI was given');
+});
+
+// Round 4, B3: a name is split only at a comma; any other is kept whole in every file.
+const WHOLE = ['Ludwig van Beethoven', 'Mao Zedong', 'Plato'];
+test("authors' names are split into family and given only at a comma, and kept whole otherwise, in all three files", async () => {
+  const names = ['Gadd, Stephen', ...WHOLE];
+  const r = await report(doc(edit((g) => { g.creator = names.map((name) => ({ name })); })));
+  const f = (n) => r.files[`a-test-gazetteer-of-market-towns-deposit/${n}`];
+  assert.equal(r.counts.places, 2, 'the records were read');
+  // Zenodo: 'Family, Given' for the one split, the name as given for the rest.
+  assert.deepEqual(JSON.parse(f('.zenodo.json')).creators.map((c) => c.name), names);
+  // CITATION.cff: family-names and given-names for the one split; the whole name in family-names
+  // (its person has no single-name field) and no given-names for the rest.
+  assert.deepEqual(cff(f('CITATION.cff')).authors, [
+    { 'family-names': 'Gadd', 'given-names': 'Stephen' },
+    ...WHOLE.map((n) => ({ 'family-names': n })),
+  ]);
+  // DataCite: Personal throughout; familyName and givenName only for the one split.
+  const d = JSON.parse(f('datacite.json')).data.attributes.creators;
+  assert.deepEqual(d[0], { name: 'Gadd, Stephen', nameType: 'Personal', familyName: 'Gadd', givenName: 'Stephen' });
+  for (const [i, n] of WHOLE.entries()) assert.deepEqual(d[i + 1], { name: n, nameType: 'Personal' }, n);
+  // Nothing split at a space anywhere: no 'Beethoven' or 'Zedong' as a family name on its own.
+  for (const file of ['.zenodo.json', 'CITATION.cff', 'datacite.json']) {
+    assert.match(f(file), /Gadd/, file);
+    assert.doesNotMatch(f(file), /"(Beethoven|Zedong|Beethoven, Ludwig van|Zedong, Mao)"/, file);
+  }
+  // The README says how to have names split.
+  assert.match(f('README.txt'), /"Family, Given"/);
+  assert.match(f('CITATION.cff'), /only where it is written 'Family, Given'/);
+});
+
+// CITATION.cff against its own JSON schema (1.2.0), which is not kept in this repository (63 KB):
+// fetch https://raw.githubusercontent.com/citation-file-format/citation-file-format/main/schema.json
+// and give its path in CFF_SCHEMA to run this. The file is parsed with cff() above, which fails on
+// any line it does not expect, so what is validated is what is written.
+test('CITATION.cff is valid against the CITATION.cff 1.2.0 schema, whole names and split (CFF_SCHEMA)', async (t) => {
+  if (!process.env.CFF_SCHEMA) { t.skip('CFF_SCHEMA not set'); return; }
+  const ajv = new Ajv({ allErrors: true, strict: false });
+  addFormats(ajv);
+  const validate = ajv.compile(JSON.parse(readFileSync(process.env.CFF_SCHEMA, 'utf8')));
+  const g = edit((x) => { x.creator = ['Gadd, Stephen', ...WHOLE].map((name) => ({ name })); x.creator.push({ '@id': 'https://orcid.org/0000-0002-1825-0097', name: 'Josiah Carberry' }, { '@id': 'https://ror.org/02mhbdp94', name: 'Universidad de los Andes' }); });
+  const r = await report(doc(g), { release: 'v2', conceptDoi: '10.5281/zenodo.123', name: 'towns.json' });
+  const c = cff(r.files['towns-deposit/CITATION.cff']);
+  assert.equal(c.authors.length, 6, 'the authors were read');
+  assert.ok(validate(c), JSON.stringify(validate.errors));
+  // Control: the same file with a person's field the schema does not have is refused.
+  const bad = structuredClone(c); bad.authors[1].name = 'Ludwig van Beethoven';
+  assert.equal(validate(bad), false);
 });
 
 test('deposit files for an author given by ORCID only, and without a DOI, say what to fill in', async () => {

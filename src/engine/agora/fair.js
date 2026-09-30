@@ -134,15 +134,19 @@ function coverage(g) {
 }
 /**
  * A person's one name split into family and given names, which Zenodo, CITATION.cff and DataCite
- * want apart: at the comma if it has one ('Gadd, Stephen'), else before the last word. That is wrong
- * for some names ('van Gogh'), so the README says to check.
+ * can hold apart: only at a comma, where the dataset says which is which ('Gadd, Stephen'). A name
+ * without one is not guessed at (Round 4, B3): no rule of word order serves 'Ludwig van Beethoven',
+ * 'Mao Zedong' and 'Plato' alike, so each file keeps it whole, and the README says to write
+ * 'Family, Given' to have names split. Null when there is nothing to split.
  */
 function familyGiven(name) {
-  if (name.includes(',')) { const [f, ...g] = name.split(','); return { family: f.trim(), given: g.join(',').trim() }; }
-  const w = name.split(/\s+/);
-  return w.length < 2 ? { family: name, given: '' } : { family: w.pop(), given: w.join(' ') };
+  if (!name.includes(',')) return null;
+  const [f, ...g] = name.split(',');
+  const family = f.trim(), given = g.join(',').trim();
+  return family ? { family, given } : null;
 }
-const fmtFamilyGiven = (name) => { const { family, given } = familyGiven(name); return given ? `${family}, ${given}` : family; };
+/** A person's name as Zenodo and DataCite show it: 'Family, Given' when split, else as given. */
+const fmtFamilyGiven = (name) => { const s = familyGiven(name); return !s ? name : s.given ? `${s.family}, ${s.given}` : s.family; };
 
 // ---- schema.org, for the landing page ----------------------------------------------------------
 
@@ -453,7 +457,8 @@ function citation(g, scheme, lic, release, conceptDoi) {
   const q = (s) => JSON.stringify(String(s));
   const lines = [
     '# Citation metadata for the dataset (https://citation-file-format.github.io/).',
-    "# Check each author's family and given names: they were split from one name.",
+    "# An author's name is split into family and given names only where it is written 'Family, Given';",
+    '# otherwise the whole name is in family-names, as CITATION.cff has no single name for a person.',
     'cff-version: 1.2.0',
     'message: "If you use this dataset, please cite it using the metadata from this file."',
     'type: dataset',
@@ -466,9 +471,11 @@ function citation(g, scheme, lic, release, conceptDoi) {
   for (const c of creators) {
     if (looksRor(c.id)) { lines.push(`  - name: ${q(c.name || c.id)}`); continue; }
     if (c.name) {
-      const { family, given } = familyGiven(c.name);
-      lines.push(`  - family-names: ${q(family)}`);
-      if (given) lines.push(`    given-names: ${q(given)}`);
+      // CITATION.cff's person has no field for one whole name (its 'name' is an entity's, an
+      // organisation's), so an unsplit name goes whole into family-names, which is what it cites by.
+      const split = familyGiven(c.name);
+      lines.push(`  - family-names: ${q(split ? split.family : c.name)}`);
+      if (split?.given) lines.push(`    given-names: ${q(split.given)}`);
     } else lines.push(`  - family-names: ${q(`FILL IN: the name for ${c.id}`)}`);
     if (looksOrcid(c.id)) lines.push(`    orcid: ${q(c.id)}`);
   }
@@ -497,7 +504,10 @@ function datacite(g, scheme, lic, release, conceptDoi, publisher, options) {
   a.creators = creatorsOf(g).map((c) => {
     const org = looksRor(c.id);
     const o = { name: c.name ? (org ? c.name : fmtFamilyGiven(c.name)) : orcidId(c.id) || c.id, nameType: org ? 'Organizational' : 'Personal' };
-    if (c.name && !org) { const { family, given } = familyGiven(c.name); o.familyName = family; if (given) o.givenName = given; }
+    // Split only at a comma; otherwise a Personal name with no familyName or givenName, which
+    // DataCite allows (both are optional), rather than a guess at which part is which.
+    const split = c.name && !org ? familyGiven(c.name) : null;
+    if (split) { o.familyName = split.family; if (split.given) o.givenName = split.given; }
     if (looksOrcid(c.id)) o.nameIdentifiers = [{ nameIdentifier: c.id, nameIdentifierScheme: 'ORCID', schemeUri: 'https://orcid.org' }];
     else if (org) o.nameIdentifiers = [{ nameIdentifier: c.id, nameIdentifierScheme: 'ROR', schemeUri: 'https://ror.org' }];
     return o;
@@ -553,7 +563,10 @@ function readme(g, scheme, lic, release, conceptDoi, publisher) {
     'The period and the part of the world it covers are in the notes of .zenodo.json, as Zenodo',
     'has no field for either that fits.',
     '',
-    "Check each author's family and given names, which were split from one name.",
+    "Authors' names: each file splits a name into family and given names only where the dataset",
+    'writes it "Family, Given" (with a comma), as in "Gadd, Stephen"; any other name is kept whole',
+    '(in CITATION.cff, whole in family-names, since it has no single name for a person). To have',
+    'names split, write them "Family, Given" in the dataset\'s creators and make these files again.',
     ...(fill.length ? ['', 'To fill in before depositing:', ...fill.map((f) => `  - ${f}`)] : []),
     '',
   ].join('\n');
