@@ -295,6 +295,10 @@ export async function run(job, env) {
   }
 }
 async function runChecked({ input, action, target, options = {} }, env, rep) {
+  // options.augment(record) -> record: a caller's change to each place-centric record on its way to
+  // the writer or sink (another tool appending its attestations to the places they are about), after
+  // the record has been checked and counted as read. Its additions are the caller's to check.
+  const augmented = (ev) => (options.augment && ev.type === 'record' ? { ...ev, value: options.augment(ev.value) } : ev);
   const res = env.resources;
   const progress = env.progress || (() => {});
   const t0 = Date.now();
@@ -394,7 +398,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       if (ev.type === 'record') { rep.count('places'); rep.count('attestations', ev.value?.attestations?.length || 0); dry.record(ev.newEntity ? 'newSpatialEntities' : 'spatialEntities', ev.value); }
       else if (ev.type === 'idr') { rep.count('identity relations'); dry.record('identityRelations', ev.value); }
       if (writer) {
-        try { writer.event(ev); }
+        try { writer.event(augmented(ev)); }
         catch (e) { rep.error('record-failed', 'A record could not be written and is left out of the output; the rest of the file was still converted', `${ev.value?.['@id'] || `item ${ev.n}`}: ${e && e.message || e}`); }
       }
       beat('reading');
@@ -458,7 +462,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       n++; rep.count('places'); rep.count('attestations', rec.attestations?.length || 0);
       if (isRdf && !V.entity(rec)) rep.error('schema', explainSchema(V.entity.errors, false), `${e}: ${ajvMessage(V.entity.errors)}`);
       collectMembership(rec.attestations, rec['@id'], membership);
-      writer && writer.event({ type: 'record', value: rec, n });
+      writer && writer.event(augmented({ type: 'record', value: rec, n }));
       beat('writing', { places: n });
     }
     for (const i of idrIds) { rep.count('identity relations'); writer && writer.event({ type: 'idr', value: r2j.identityRelation(i) }); }
