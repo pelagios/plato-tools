@@ -94,3 +94,6 @@ a:visited { color: var(--accent); }
 .badge { position: absolute; top: .55rem; right: .6rem; font-size: .72rem; letter-spacing: .05em; text-transform: uppercase; border: 1px solid var(--soon); border-radius: 999px; padding: .05rem .5rem; color: var(--soon); }
 .badge.partly { background: var(--gold); border-color: var(--gold-edge); color: var(--pupil); }
 .follow { display: inline-block; margin-top: .45rem; font-size: .88rem; color: var(--soon); }
+/* Each name carries a tooltip saying why it was chosen; dotted, as abbreviations are, and reachable
+   by keyboard as well as by pointer. */
+.tool .why { text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: .18em; cursor: help; }
