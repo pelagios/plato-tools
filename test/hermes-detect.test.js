@@ -8,7 +8,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { detect, readable, jsonHead, GEOREF_REASON, GEOJSON_SEQ_REASON } from '../src/engine/input.js';
+import { detect, readable, jsonHead, GEOREF_REASON, GEOJSON_SEQ_REASON, XML_REASONS } from '../src/engine/input.js';
+import { gzipSync } from 'node:zlib';
 import { file, textFile, go, outText } from './engine.js';
 
 const fc = (features, extra = {}) => JSON.stringify({ type: 'FeatureCollection', ...extra, features });
@@ -126,6 +127,56 @@ test('a DOCTYPE whose internal subset has ] or > in a comment or a quoted litera
     assert.notEqual(await kind(tei(d, '<html xmlns="http://www.w3.org/1999/xhtml">', '</html>'), 'x.xml'), 'tei', `${d} before <html>`);
     assert.notEqual(await kind(tei(d, '<TEI>'), 'x.xml'), 'tei', `${d} before a TEI with no namespace`);
   }
+});
+test('XML that is not TEI P5 is refused, saying what it is, and never read as N-Triples', async () => {
+  const cases = {
+    'tei-p4': ['<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE TEI.2 PUBLIC "-//TEI P4//DTD Main Document Type//EN" "http://www.tei-c.org/Guidelines/DTD/tei2.dtd" [ <!ENTITY % TEI.XML "INCLUDE"> ]>\n<TEI.2><teiHeader/></TEI.2>\n',
+      '<?xml version="1.0"?>\n<TEI><teiHeader/></TEI>', '<teiCorpus><TEI/></teiCorpus>'],
+    kml: ['<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark/></Document></kml>'],
+    xml: ['<?xml version="1.0"?>\n<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>', '<root><a/></root>', '<?xml-stylesheet href="x.xsl"?><doc/>', '<!-- a note --><doc/>'],
+  };
+  for (const [kind, texts] of Object.entries(cases)) for (const t of texts) {
+    const d = await detect([textFile(t, 'x.xml')]);
+    assert.deepEqual([d.format, d.reason], [null, XML_REASONS[kind]], t);
+  }
+  // Controls: TEI P5 is TEI, and N-Triples, Turtle and N-Quads are detected as before, by content and by name.
+  assert.equal(await kind('<?xml version="1.0"?>\n<TEI xmlns="http://www.tei-c.org/ns/1.0"><teiHeader/></TEI>', 'x.xml'), 'tei');
+  const r = await go([file('test/fixtures/lpf-readme-example.json')], 'convert', 'ntriples');
+  const nt = outText(r.e, Object.keys(r.e.outs).find((k) => k.endsWith('.nt')));
+  assert.ok(nt.length > 100);
+  assert.equal(await kind(nt, 'export.txt'), 'ntriples');
+  assert.equal(await kind('_:b0 <https://example.org/p> "o" .\n', 'x.txt'), 'ntriples');
+  assert.equal(await kind('<urn:x:a> <https://example.org/p> <urn:x:b> .\n', 'x.txt'), 'ntriples');
+  assert.equal(await kind('@prefix ex: <https://example.org/> .\nex:a ex:p ex:b .\n', 'x.txt'), 'turtle');
+  assert.equal(await kind('<https://example.org/a> <https://example.org/p> <https://example.org/b> <https://example.org/g> .\n', 'x.nq'), 'nquads');
+  assert.equal(await kind(nt, 'x.nt'), 'ntriples');
+});
+test('a head that ends part-way (a first record past 64 KB, a gzip cut mid-record, a DOCTYPE past 64 KB) never makes detection throw', async () => {
+  // A File made of 16 KB parts streams them one by one, as a file on disk streams in chunks, so the
+  // head (64 KB) ends part-way through the record.
+  const long = 'x'.repeat(300000);
+  const chunked = (t, name) => { const parts = []; for (let i = 0; i < t.length; i += 16384) parts.push(t.slice(i, i + 16384)); return new File(parts, name); };
+  const feature = { type: 'Feature', geometry: { type: 'Point', coordinates: [1, 2] }, properties: { name: 'A', note: long } };
+  const texts = {
+    'jsonl, first line past the head': [JSON.stringify(feature) + '\n' + JSON.stringify(feature) + '\n', 'x.geojsonl'],
+    'JSON Lines named so, first line past the head': [JSON.stringify({ profile: 'place-centric', note: long }) + '\n{}\n', 'x.jsonl'],
+    'JSON Lines whose first line is not JSON': ['not json\n{}\n', 'x.jsonl'],
+    'a FeatureCollection whose first feature is past the head': [JSON.stringify({ type: 'FeatureCollection', features: [feature] }), 'x.geojson'],
+    'a georeference annotation cut': [JSON.stringify({ type: 'AnnotationPage', items: [{ type: 'Annotation', motivation: 'georeferencing', body: long }] }), 'x.json'],
+    'a TEI DOCTYPE past the head': ['<?xml version="1.0"?>\n<!DOCTYPE TEI [ <!-- ' + long + ' --> ]>\n<TEI xmlns="http://www.tei-c.org/ns/1.0"/>', 'x.xml'],
+    'a CSV header past the head': ['name,' + long + '\nA,1\n', 'x.csv'],
+  };
+  for (const [what, [t, name]] of Object.entries(texts)) {
+    for (const f of [chunked(t, name), new File([gzipSync(Buffer.from(t))], name + '.gz')]) {
+      let d;
+      await assert.doesNotReject(async () => { d = await detect([f]); }, `${what} (${f.name})`);
+      assert.ok(d.format || d.reason, `${what}: a format or a reason`);
+    }
+  }
+  assert.equal((await detect([chunked(texts['a TEI DOCTYPE past the head'][0], 'x.xml')])).reason, XML_REASONS.unseen);
+  // Control: the same records within the head are detected.
+  assert.equal(await kind(JSON.stringify({ ...feature, properties: { name: 'A' } }) + '\n', 'x.geojsonl'), null, 'a plain sequence: refused with its reason');
+  assert.equal(await kind(JSON.stringify({ profile: 'place-centric' }) + '\n{}\n', 'x.jsonl'), 'plato-jsonl');
 });
 test('a places.csv separated by semicolons, tabs or bars is still the spreadsheet tables; with a header of its own, a table of places', async () => {
   for (const d of [';', '\t', '|', ',']) {

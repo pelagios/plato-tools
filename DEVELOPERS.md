@@ -134,7 +134,8 @@ readers link to those headings, so keep them.
   no DOM (a Web Worker has none); the only thing held to the end is a place name waiting for a
   `<place>` later in the file, indexed by the id it waits for. The edition, from its `teiHeader`, is the source; a place name's
   `xml:id` is never the attestation's `@id`. A file that declares an encoding other than UTF-8 is
-  refused.
+  refused. Any other XML (TEI P4, TEI in no namespace, KML, anything else) is refused by
+  `detect()` with a reason (`XML_REASONS`), never sniffed as N-Triples.
 - **Tables of places** (`columns.js`, `generic.js`). `input.js`'s `detect()` sends a lone CSV (or
   `.tsv`/`.tab`) that is not one of the tables' sheets, and a FeatureCollection or Feature whose
   structure is not LPF's (`isLpf`, on the head read as structure by `jsonHead`), here. A GeoJSON

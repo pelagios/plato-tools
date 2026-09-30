@@ -267,7 +267,11 @@ export async function detect(files) {
   try { h = (await head(f)).trimStart(); }
   catch (e) { if (e instanceof DataError) return { format: null, reason: `${e.message} Nothing could be read from it.` }; throw e; }
   if (n.endsWith('.jsonl') || n.endsWith('.ndjson') || n.endsWith('.geojsonl') || n.endsWith('.geojsons') || /^\{[^\n]*\}\s*\n\s*\{/.test(h)) {
-    const first = JSON.parse(h.split('\n')[0]);
+    // The first line as structure, as far as the head goes (a line longer than the head is cut).
+    const line = h.split('\n')[0];
+    let first;
+    try { first = JSON.parse(line); } catch { first = jsonHead(line); }
+    if (!first || typeof first !== 'object' || Array.isArray(first)) return { format: null, reason: 'This is JSON Lines, but its first line is not a JSON object, so what it holds cannot be told.' };
     if (first.profile) return { format: 'plato-jsonl', profile: first.profile, files };
     if (first.type === 'Feature' || first.type === 'FeatureCollection') {
       // Linked Places Format only by its structure, as for a FeatureCollection below: the collection's
@@ -303,9 +307,11 @@ export async function detect(files) {
     if (annotationShape(h, true)) return { format: 'w3c-annotations', shape: 'array', files };
     return { format: null, reason: 'This JSON array is not a list of W3C Web Annotations (as Recogito exports them): the first annotations do not name the Web Annotation context.' };
   }
-  // TEI XML (src/engine/hermes/tei.js): the root element is <TEI> or <teiCorpus> in the TEI namespace.
-  // Before the N-Triples test, which an XML declaration followed by an element would also pass.
-  if (h.startsWith('<') && isTei(h)) return { format: 'tei', files };
+  // XML, before the N-Triples test, which an XML declaration followed by an element would also pass:
+  // TEI P5 (src/engine/hermes/tei.js) is read; any other XML is refused, saying what it is.
+  const xml = xmlKind(h);
+  if (xml === 'tei') return { format: 'tei', files };
+  if (xml) return { format: null, reason: XML_REASONS[xml] };
   if (/^(@prefix|@base|PREFIX|BASE)\b/i.test(h)) return { format: 'turtle', files };
   if (/^(<[^>]+>|_:\S+)\s+<[^>]+>/.test(h)) return { format: 'ntriples', files };
   return { format: null, reason: 'The format of this file could not be recognised.' };
@@ -330,10 +336,34 @@ function annotationShape(h, array) {
 // the internal subset or the DOCTYPE.
 const XML_PROLOG = /^(?:\s+|<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!DOCTYPE(?:"[^"]*"|'[^']*'|[^[>"']|\[(?:<!--[\s\S]*?-->|"[^"]*"|'[^']*'|<(?!!--)|[^\]"'<])*\])*>)*/;
 const XML_ROOT = /^<(?:([A-Za-z_][\w.-]*):)?([A-Za-z_][\w.-]*)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*\/?>/;
+// The start of an element (a name, with or without a prefix), as far as the head goes; an IRI in
+// angle brackets, as N-Triples and Turtle begin, is not one (<https://… has // after its "prefix").
+const XML_START = /^<(?:[A-Za-z_][\w.-]*:)?[A-Za-z_][\w.-]*(?=[\s/>]|$)/;
 function isTei(h) {
   const m = XML_ROOT.exec(h.slice(XML_PROLOG.exec(h)[0].length));
   if (!m || (m[2] !== 'TEI' && m[2] !== 'teiCorpus')) return false;
   return new RegExp(`\\sxmlns${m[1] ? ':' + m[1] : ''}\\s*=\\s*["']http://www\\.tei-c\\.org/ns/1\\.0["']`).test(m[3]);
+}
+export const XML_REASONS = {
+  'tei-p4': 'This is a TEI P4 edition (or TEI with no namespace), which PLATO tools cannot read yet; TEI P5 with the TEI namespace can be read.',
+  kml: 'This is KML, which PLATO tools cannot read yet. Convert it to GeoJSON (a FeatureCollection), whose properties can be matched to PLATO.',
+  xml: 'This is XML but not TEI, so PLATO tools cannot read it: of XML, only TEI P5 editions (in the TEI namespace) can be read.',
+  unseen: 'This is XML, but its root element is not in the first 64 KB (its prolog or DOCTYPE is longer), so what it is cannot be told. Of XML, only TEI P5 editions can be read.',
+};
+/**
+ * What XML the head `h` is, or null when it is not XML: 'tei' (TEI P5, read), 'tei-p4' (<TEI.2>, or
+ * <TEI>/<teiCorpus> in no namespace), 'kml', 'unseen' (XML whose root is past the head) or 'xml'.
+ * XML is an XML declaration, a DOCTYPE or comment first, or an element first.
+ */
+function xmlKind(h) {
+  if (!/^<\?[A-Za-z]/.test(h) && !/^<!(?:DOCTYPE\s|--)/.test(h) && !XML_START.test(h)) return null;
+  if (isTei(h)) return 'tei';
+  const rest = h.slice(XML_PROLOG.exec(h)[0].length);
+  const root = XML_START.exec(rest);
+  if (!root) return rest.startsWith('<') || !rest ? 'unseen' : 'xml';
+  const name = root[0].slice(1).replace(/^[^:]*:/, '');
+  if (name === 'TEI.2' || name === 'TEI' || name === 'teiCorpus') return 'tei-p4';
+  return name === 'kml' ? 'kml' : 'xml';
 }
 function lpfVersion(obj) {
   const c = JSON.stringify(obj['@context'] || '');
