@@ -210,18 +210,59 @@ const clean = (o) => { for (const k of Object.keys(o)) if (o[k] === undefined ||
 const inRange = (lon, lat) => Number.isFinite(lon) && Number.isFinite(lat) && lon >= -180 && lon <= 180 && lat >= -90 && lat <= 90;
 
 /**
+ * What is wrong with a GeoJSON geometry's coordinates, in words, or null when nothing is (RFC 7946):
+ * every position is two or three finite numbers, a longitude from -180 to 180 and a latitude from
+ * -90 to 90; a LineString has at least two positions; a Polygon's rings each have at least four
+ * and end where they begin; a Multi form is a list of these. { range: true } when the only fault
+ * is a position off the earth.
+ */
+export function geometryFault(type, coordinates) {
+  const position = (p, at) => {
+    if (!Array.isArray(p) || (p.length !== 2 && p.length !== 3)) return { why: `${at} is ${Array.isArray(p) ? `${p.length} numbers, not two or three` : `not a list of numbers (${cellText(p).slice(0, 40)})`}` };
+    if (!p.every((x) => typeof x === 'number' && Number.isFinite(x))) return { why: `${at} is not all numbers (${JSON.stringify(p).slice(0, 60)})` };
+    const [lon, lat] = p;
+    if (lon < -180 || lon > 180) return { why: `${at} has longitude ${lon}, outside -180 to 180`, range: true };
+    if (lat < -90 || lat > 90) return { why: `${at} has latitude ${lat}, outside -90 to 90`, range: true };
+    return null;
+  };
+  const list = (a, at, min, what, each) => {
+    if (!Array.isArray(a)) return { why: `${at} is not a list` };
+    if (a.length < min) return { why: `${at} has ${a.length} ${what}, fewer than ${min}` };
+    for (const [i, x] of a.entries()) { const f = each(x, `${what.replace(/s$/, '')} ${i + 1}${at === 'the geometry' ? '' : ` of ${at}`}`); if (f) return f; }
+    return null;
+  };
+  const line = (a, at) => list(a, at, 2, 'positions', position);
+  const ring = (a, at) => list(a, at, 4, 'positions', position)
+    || (JSON.stringify(a[0]) !== JSON.stringify(a[a.length - 1]) ? { why: `${at} does not end where it begins, so it is not closed` } : null);
+  const polygon = (a, at) => list(a, at, 1, 'rings', ring);
+  const top = 'the geometry';
+  switch (type) {
+    case 'Point': return position(coordinates, 'the point');
+    case 'MultiPoint': return list(coordinates, top, 1, 'positions', position);
+    case 'LineString': return line(coordinates, top);
+    case 'MultiLineString': return list(coordinates, top, 1, 'lines', line);
+    case 'Polygon': return polygon(coordinates, top);
+    case 'MultiPolygon': return list(coordinates, top, 1, 'polygons', polygon);
+    default: return { why: `type ${JSON.stringify(type)}` };
+  }
+}
+
+/**
  * A GeoJSON geometry -> PLATO geometries: [] for none, or one with its geojson (and, for a point,
  * its reprPoint, as the LPF reader gives it). A GeometryCollection is refused, as PLATO's schema
- * refuses it, and so is anything that is not a GeoJSON geometry; both are reported.
+ * refuses it, and so is anything that is not a GeoJSON geometry, or whose coordinates are not well
+ * formed or not on the earth (geometryFault); each is reported, with why, and the rest of the row
+ * is kept.
  */
 export function geometryToPlato(g, report = () => {}, where = '') {
   if (g === undefined || g === null) return [];
   if (typeof g !== 'object' || Array.isArray(g)) { report('generic-geometry-invalid', `${where}: ${cellText(g).slice(0, 80)}`); return []; }
   if (g.type === 'GeometryCollection') { report('generic-geometry-collection', where); return []; }
-  if (!GEOJSON_TYPES.has(g.type) || !Array.isArray(g.coordinates)) { report('generic-geometry-invalid', `${where}: ${g.type === undefined ? 'no type' : `type ${JSON.stringify(g.type)}`}`); return []; }
+  if (!GEOJSON_TYPES.has(g.type) || !Array.isArray(g.coordinates)) { report('generic-geometry-invalid', `${where}: ${g.type === undefined ? 'no type' : `type ${JSON.stringify(g.type)}`}${GEOJSON_TYPES.has(g.type) ? ' with no coordinates' : ''}`); return []; }
+  const fault = geometryFault(g.type, g.coordinates);
+  if (fault) { report(fault.range ? 'generic-coordinate-range' : 'generic-geometry-invalid', `${where}: ${g.type}: ${fault.why}`); return []; }
   if (g.type === 'Point') {
     const [lon, lat] = g.coordinates;
-    if (!inRange(lon, lat)) { report('generic-coordinate-range', `${where}: ${JSON.stringify(g.coordinates)}`); return []; }
     return [{ reprPoint: [lon, lat], geojson: { type: 'Point', coordinates: g.coordinates } }];
   }
   return [{ geojson: { type: g.type, coordinates: g.coordinates } }];

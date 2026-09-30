@@ -159,6 +159,34 @@ test('a GeoJSON geometry is kept, a GeometryCollection refused, and anything els
   const { a } = read({ n: 'A', g: '{"type":"Point","coordinates":[3,4]}' }, { n: 'name', g: 'geometry' });
   assert.deepEqual(a.attestation.geometries, [{ reprPoint: [3, 4], geojson: { type: 'Point', coordinates: [3, 4] } }]);
 });
+test('every position of every geometry type is checked: numbers, on the earth, enough of them, rings closed', () => {
+  const at = (g) => { const r = []; const out = geometryToPlato(g, (k, e) => r.push([k, e]), 'feature 1'); return { out, r }; };
+  const sq = [[0, 0], [1, 0], [1, 1], [0, 0]];
+  // Controls: a well-formed geometry of each type is kept, with nothing reported.
+  for (const g of [{ type: 'MultiPoint', coordinates: [[1, 2], [3, 4, 100]] }, { type: 'LineString', coordinates: [[1, 2], [3, 4]] }, { type: 'MultiLineString', coordinates: [[[1, 2], [3, 4]]] },
+    { type: 'Polygon', coordinates: [sq] }, { type: 'MultiPolygon', coordinates: [[sq], [sq, sq]] }, { type: 'Point', coordinates: [-180, 90] }]) {
+    const { out, r } = at(g);
+    assert.deepEqual([out.length, r], [1, []], g.type);
+    assert.deepEqual(out[0].geojson, g, g.type);
+  }
+  const cases = [
+    [{ type: 'LineString', coordinates: [[1, 2], [3, 95]] }, 'generic-coordinate-range', 'feature 1: LineString: position 2 has latitude 95, outside -90 to 90'],
+    [{ type: 'MultiPolygon', coordinates: [[sq], [[[0, 0], [190, 0], [1, 1], [0, 0]]]] }, 'generic-coordinate-range', 'feature 1: MultiPolygon: position 2 of ring 1 of polygon 2 has longitude 190, outside -180 to 180'],
+    [{ type: 'Point', coordinates: [200, 0] }, 'generic-coordinate-range', 'feature 1: Point: the point has longitude 200, outside -180 to 180'],
+    [{ type: 'LineString', coordinates: [[1, 2]] }, 'generic-geometry-invalid', 'feature 1: LineString: the geometry has 1 positions, fewer than 2'],
+    [{ type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1]]] }, 'generic-geometry-invalid', 'feature 1: Polygon: ring 1 does not end where it begins, so it is not closed'],
+    [{ type: 'Polygon', coordinates: [[[0, 0], [1, 0], [0, 0]]] }, 'generic-geometry-invalid', 'feature 1: Polygon: ring 1 has 3 positions, fewer than 4'],
+    [{ type: 'MultiPoint', coordinates: [[1, 2, 3, 4]] }, 'generic-geometry-invalid', 'feature 1: MultiPoint: position 1 is 4 numbers, not two or three'],
+    [{ type: 'Point', coordinates: ['1', 2] }, 'generic-geometry-invalid', 'feature 1: Point: the point is not all numbers (["1",2])'],
+    [{ type: 'MultiLineString', coordinates: [[1, 2], [3, 4]] }, 'generic-geometry-invalid', 'feature 1: MultiLineString: position 1 of line 1 is not a list of numbers (1)'],
+    [{ type: 'Polygon', coordinates: [] }, 'generic-geometry-invalid', 'feature 1: Polygon: the geometry has 0 rings, fewer than 1'],
+  ];
+  for (const [g, kind, example] of cases) assert.deepEqual(at(g), { out: [], r: [[kind, example]] }, JSON.stringify(g));
+  // In a row, the geometry is lost and the rest of the row kept.
+  const { a, reported } = read({ n: 'Roma', g: JSON.stringify(cases[4][0]) }, { n: 'name', g: 'geometry' });
+  assert.deepEqual([a.label, a.attestation.geometries, reported.map(([k]) => k)], ['Roma', undefined, ['generic-geometry-invalid']]);
+  assert.match(reported[0][1], /^row 2, g: Polygon: ring 1 does not end where it begins/);
+});
 test('a column called __proto__ or constructor is a column like any other, guessed or given', () => {
   const g = guessColumns(['__proto__', 'constructor', 'name'], [{ __proto__: null, ['__proto__']: 'x', constructor: 'y', name: 'Roma' }]);
   assert.equal(Object.getPrototypeOf(g.mapping), null);
