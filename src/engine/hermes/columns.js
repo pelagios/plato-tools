@@ -68,6 +68,7 @@ export const GENERIC_KINDS = {
   'generic-mapping-unknown-column': 'warning',
   'generic-mapping': 'error',
   'generic-nothing-converted': 'error',
+  'generic-features-not-list': 'error',
   'generic-empty': 'warning',
 };
 

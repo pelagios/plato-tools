@@ -96,3 +96,21 @@ test('a sheet of the tables that is not UTF-8 is unreadable, as CSV files and in
     }
   }
 });
+
+// ---- where, when the file comes in chunks -----------------------------------------------------------
+/** A File of `size`-byte parts, which it streams one by one, as a file on disk streams in chunks. */
+const inParts = (bytes, name, size) => { const parts = []; for (let i = 0; i < bytes.length; i += size) parts.push(bytes.subarray(i, i + size)); return new File(parts, name); };
+test('the line and byte of the first byte that is not UTF-8 are right however the file is cut into chunks, and a letter cut in two by a chunk is no fault', async () => {
+  const lines = Array.from({ length: 3000 }, (_, i) => `P${i},Köln ${i},50.9,6.9`);
+  const good = Buffer.from(['name,label,lat,lon', ...lines].join('\n') + '\n', 'utf8');
+  const at = good.indexOf(Buffer.from('Köln 2998'));   // on line 3000: the header is line 1
+  const bad = Buffer.concat([good.subarray(0, at + 1), Buffer.from([0xf6]), good.subarray(at + 3)]);
+  for (const size of [16384, 16385, 4099, 65536]) {
+    const r = await go([inParts(bad, 'x.csv', size)], 'check');
+    assert.match(unreadable(r)[0]?.examples[0] || 'none', new RegExp(`on line 3,000 \\(byte ${(at + 2).toLocaleString('en-GB')}\\)`), `parts of ${size}`);
+    // Control: the good file, whose two-byte ö is cut in two at some of these sizes, reads.
+    const ok = await go([inParts(good, 'x.csv', size)], 'check');
+    assert.deepEqual(unreadable(ok), [], `control, parts of ${size}`);
+    assert.equal(ok.report.counts.rows, 3000);
+  }
+});

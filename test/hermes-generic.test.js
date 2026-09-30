@@ -353,6 +353,26 @@ test('a file whose every row is lost is an error, saying why, never "No problems
     assert.match(c.out, /The one row did not become a place/);
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
+test('a feature that is null, a number, a string or a list, or has properties or a geometry of the wrong kind, is reported, never a TypeError', async () => {
+  const features = [null, 5, 'x', [1, 2], { type: 'Feature', properties: 5, geometry: 'x' }, { type: 'Feature', properties: ['a', 'b'], geometry: [1, 2] },
+    { type: 'Feature', properties: { name: 'Roma', alt: [null, 3, { a: 1 }] }, geometry: { type: 'Point', coordinates: [12.5, 41.9] } }];
+  let r;
+  await assert.doesNotReject(async () => { r = await readAll(textFile(JSON.stringify({ type: 'FeatureCollection', features }), 'odd.geojson'), { columns: { name: 'name', alt: 'alternativeNames', 0: 'note', 1: 'note' } }); });
+  assert.deepEqual(r.of('generic-not-feature').examples, ['feature 1', 'feature 2', 'feature 3', 'feature 4']);
+  assert.ok(r.kinds.has('generic-geometry-invalid'));
+  // Control: the well-formed feature is read, its odd list items as text.
+  assert.deepEqual(r.doc.spatialEntities.map((p) => [p.label, p.attestations[0].names.map((n) => n.toponym)]), [['Roma', ['Roma', '3', '{"a":1}']]]);
+  await assert.doesNotReject(detect([textFile(JSON.stringify({ type: 'FeatureCollection', features }), 'odd.geojson')]));
+  await assert.doesNotReject(detect([textFile(JSON.stringify({ type: 'FeatureCollection', features: 7 }), 'odd.geojson')]));
+  // Features that are not a list are not one feature: a number is an error, null is no features.
+  const seven = await readAll(textFile(JSON.stringify({ type: 'FeatureCollection', features: 7 }), 'odd.geojson'));
+  assert.deepEqual(seven.of('generic-features-not-list').examples, ['features is a number']);
+  assert.ok(!seven.kinds.has('generic-not-feature'));
+  assert.equal(seven.counts.features, undefined);
+  const none = await readAll(textFile(JSON.stringify({ type: 'FeatureCollection', features: null }), 'odd.geojson'));
+  assert.ok(!none.kinds.has('generic-features-not-list') && !none.kinds.has('generic-not-feature'));
+  assert.ok(none.kinds.has('generic-empty'));
+});
 test('a row whose address is not one, but which has an id, becomes a place of its own, keeping what the address column said', async () => {
   const r = await readAll(textFile('id,name,wikidata\nr1,Roma,https://www.wikidata.org/wiki/Q220\nr2,Athenae,Q1524\n', 'x.csv'), { columns: { id: 'id', name: 'name', wikidata: 'address' } });
   assert.deepEqual(r.doc.attestations.map((a) => a.about), ['https://www.wikidata.org/wiki/Q220']);

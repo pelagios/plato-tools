@@ -20,6 +20,7 @@ import { tableIds } from '../../formats/tables.js';
 import { resolveColumns, applyColumns, GENERIC_KINDS, FEATURE_ID } from './columns.js';
 
 const SAMPLE = 50;
+const NOT_A_LIST = Symbol('not a list');
 // The feature members GeoJSON defines and this reader uses; any other is reported by name.
 const FEATURE_KEYS = new Set(['type', 'id', 'geometry', 'properties']);
 // Coordinates in GeoJSON are WGS 84 longitude and latitude (RFC 7946); an older file may name another
@@ -171,9 +172,15 @@ async function openGeojson(file, input) {
     try { f = JSON.parse(await wholeText(file)); } catch (e) { throw new DataError(`The JSON is not well formed, so the file cannot be read (${String(e.message).split('\n')[0]}).`); }
     features = all = async function* () { yield f; };
   } else {
-    features = async function* () { for await (const { value } of jsonDocument(file, { arrays: ['features'] })) yield value; };
+    // `features` given as something else than a list is no features: null says so; anything else
+    // is reported (NOT_A_LIST), never read as one feature.
+    features = async function* () {
+      for await (const { value, notAList } of jsonDocument(file, { arrays: ['features'] })) {
+        if (notAList) { if (notAList !== 'null') yield { [NOT_A_LIST]: notAList }; } else yield value;
+      }
+    };
     all = async function* () {
-      for await (const { path, value } of jsonDocument(file, { arrays: ['features'], keys: ['crs', 'name', 'title'] })) { if (path === 'features') yield value; else head[path] = value; }
+      for await (const { path, value, notAList } of jsonDocument(file, { arrays: ['features'], keys: ['crs', 'name', 'title'] })) { if (path === 'features') { if (!notAList) yield value; } else head[path] = value; }
     };
   }
   // The columns are every property any feature has, in the order they are first met, and the
@@ -193,6 +200,7 @@ async function openGeojson(file, input) {
     async *rows() {
       let n = 0;
       for await (const f of features()) {
+        if (f && f[NOT_A_LIST]) { yield { notAList: f[NOT_A_LIST] }; continue; }
         n++;
         const where = `feature ${n}`;
         if (!f || typeof f !== 'object' || f.type !== 'Feature') { yield { where, notFeature: true }; continue; }
@@ -255,6 +263,7 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
   const skipped = new Set();
   let n = 0, out = 0;
   for await (const r of t.rows()) {
+    if (r.notAList) { report('generic-features-not-list', `features is ${r.notAList}`); continue; }
     n++;
     rep.count(input.format === 'csv' ? 'rows' : 'features');
     if (r.notFeature) { report('generic-not-feature', r.where); continue; }

@@ -182,6 +182,20 @@ test('a place name with no ref is reported, with its key where it has one; one w
   assert.ok(names(PROSE).includes('Sikyon'), 'control: the place name around it is converted');
 });
 const P = (id) => `https://pleiades.stoa.org/places/${id}`;
+test('the line a place name is on is right however the file is cut into chunks', async () => {
+  const filler = Array.from({ length: 2997 }, (_, i) => `<p>line ${i}</p>`).join('\n');
+  const text = tei(`${filler}\n<p><placeName ref="${P(7)}">Roma</placeName></p>`);
+  const line = text.split('\n').findIndex((l) => l.includes('Roma')) + 1;
+  assert.ok(line > 2900, String(line));
+  const bytes = Buffer.from(text);
+  for (const size of [1000, 16384, 16385]) {
+    const parts = []; for (let i = 0; i < bytes.length; i += size) parts.push(bytes.subarray(i, i + size));
+    const evs = [];
+    for await (const ev of teiSource({ format: 'tei', files: [new File(parts, 'f.xml')] }, new Report())) evs.push(ev);
+    const [att] = evs.filter((e) => e.type === 'attestation');
+    assert.match(att.value.notes, new RegExp(`on line ${line} of f\\.xml$`), `parts of ${size}`);
+  }
+});
 test('a place name with a ref but no words makes no attestation, and is reported; one with words beside it does', () => {
   const m = mapped(tei(`<p><placeName ref="${P(1)}"/> and <placeName ref="${P(2)}">Roma</placeName> and <placeName ref="${P(3)}"> </placeName></p>`));
   assert.deepEqual(about(m), [P(2)]);
