@@ -80,6 +80,11 @@ Options:
   --site-url URL    publish: where the site is served, if not at the base address or at the
                     repository's GitHub Pages address.
   --turtle          publish site: also write Turtle for each place and source.
+  --only FILE       publish site: only the places whose keys (the last part of their addresses)
+                    FILE lists, one a line; the rest are left to the downloads.
+  --dataset-path P  publish site: where the dataset is in the repository, for the workflow
+                    (default: its file name).
+  --tools-ref REF   publish site: the commit or tag of PLATO tools the workflow runs.
   --work-dir DIR    where the working database for RDF and attestation-centric input is kept
                     while it is in use (default: the system's temporary directory). It needs
                     room for about 1.5 times the uncompressed input; it is removed afterwards.
@@ -110,6 +115,7 @@ async function main(argv) {
         'work-dir': { type: 'string' }, json: { type: 'boolean', default: false }, brief: { type: 'boolean', default: false },
         release: { type: 'string' }, previous: { type: 'string' }, 'concept-doi': { type: 'string' }, maintainer: { type: 'string', multiple: true, default: [] },
         repo: { type: 'string' }, 'site-url': { type: 'string' }, turtle: { type: 'boolean', default: false },
+        only: { type: 'string' }, 'dataset-path': { type: 'string' }, 'tools-ref': { type: 'string' },
         help: { type: 'boolean', short: 'h', default: false }, version: { type: 'boolean', short: 'V', default: false },
       },
     });
@@ -260,7 +266,13 @@ async function publishCommand(args, o, resources) {
     const xlsx = [input, previous].some((i) => i?.container === 'workbook') ? await import('xlsx') : undefined;
     const { env, finish } = host.env(resources, { progress, xlsx });
     let result = null, failure = null;
-    const options = { base: o.base, release: o.release, conceptDoi: o['concept-doi'], maintainers: o.maintainer, repo: o.repo, siteUrl: o['site-url'], turtle: o.turtle, name: items[0].name };
+    let only;
+    if (o.only) {
+      try { only = readFileSync(o.only, 'utf8').split(/\r?\n/).map((l) => l.trim()).filter(Boolean); }
+      catch (e) { r.message = `--only ${o.only}: ${e.code === 'ENOENT' ? 'there is no such file.' : e.message}`; return finishPublish(r, o, t0); }
+    }
+    const options = { base: o.base, release: o.release, conceptDoi: o['concept-doi'], maintainers: o.maintainer, repo: o.repo, siteUrl: o['site-url'], turtle: o.turtle, name: items[0].name,
+      only, datasetPath: o['dataset-path'], toolsRef: o['tools-ref'] };
     try { result = await publish({ part, input, previous, options }, env); } catch (e) { failure = e; }
     if (live) process.stderr.write('\r\x1b[K');
     const done = finish(!!failure || !!result?.incomplete);

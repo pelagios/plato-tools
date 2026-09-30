@@ -41,6 +41,9 @@ export const TEXT = {
  *   repo         the GitHub repository ('owner/name') the site is published from;
  *   siteUrl      where the site is served, if not at the base address or the repository's Pages address;
  *   turtle       the site also holds Turtle for each place;
+ *   only         the site holds only these places (the keys of their addresses); the rest are in its downloads;
+ *   datasetPath  where the dataset is in the user's repository, for the site's workflow;
+ *   toolsRef     the commit or tag of PLATO tools the site's workflow runs;
  * Returns { report, outputs, incomplete? }, as run() does.
  */
 export async function publish({ part, input, previous, options = {} }, env) {
