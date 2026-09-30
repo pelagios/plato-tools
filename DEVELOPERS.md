@@ -294,14 +294,45 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   romanised form, from attestations that are not denials), one point, country codes and types, and
   the identity relations either dataset states are kept, in memory. A place without an `@id` cannot
   be matched, and is reported as a problem.
-- **Scoring** (`names.js`, algorithm `krisis-names 1`). Names are normalised: NFKD, combining marks
+- **Scoring** (`names.js`, algorithm `krisis-names 2`). Names are normalised: NFKD, combining marks
   removed, ß æ œ ø ł đ ð þ ı spelt out, lower-cased, everything but letters and digits a space. Two
   names score their Jaro-Winkler similarity (prefix scale 0.1, up to four letters) or, if higher, that
   of their words sorted, so that "Upper Newton" and "Newton Upper" agree. Two places score the best
   pair of their names. The work file's `match_parameters.scoring` says the same, so that a review can
   be read without this file.
-- **Blocking.** Two names are compared only when they share at least 30% of the padded trigrams of
-  the one with fewer (`BLOCKING`); the others' names are indexed by trigram first.
+- **Names alike only in a word they share** (`distinctive()`, new in `krisis-names 2`). Jaro-Winkler
+  rewards a shared beginning, so "Saint Martin" and "Saint Maurice" scored 0.921 and "East Ham" and
+  "West Ham" 0.917 on letters alone. Now the words both names have are set aside (a word also counts
+  as shared with its abbreviation or contraction: its letters in order in the other, ending alike, and
+  beginning alike unless it has two letters, so St and Saint, Mt and Mount, on and upon), and what is
+  left of each is compared. If the rest is alike (at least 0.85, `DISTINCT_GATE`, or one letter added,
+  dropped, changed or two swapped: Kafr Cal and Kafr Cel), the pair scores the shared words' share of
+  the weight plus the rest's score over the remaining weight; if not, the shared words' share alone
+  (Saint Martin and Saint Maurice now 0.333 with equal weights). Each word weighs its inverse document
+  frequency in the names of both datasets, ln(1 + N / df), so a common word such as Kafr or Tell counts
+  for little. It only ever lowers the name score, and names that share no word, or where every word of
+  one is shared ("Newton", "Upper Newton"), keep it. Respellings, abbreviations and reorderings stay
+  over the threshold (Tell Brak and Tell Barak, St Martin and Saint Martin, Stratford upon Avon and
+  Stratford-on-Avon: the tests hold both lists). Letters alone cannot tell "East" from "West" and a
+  respelling of a word as short, so a pair whose distinctive word is short and differs by more than
+  one letter is not suggested; the limit is deliberate.
+- **Blocking** (`blocking.js`, `match_parameters.blocking`). The rule until September 2026 (compare
+  names sharing 30% of their padded trigrams) let every "Saint …", "San …", "Kafr …" or "Tell …" pass
+  against each other, and a short name against every name with its first letter: a review measured
+  11 s for 5,000 names with 5,000, and 20,000 with 20,000 did not finish in two minutes. Now the other dataset's names
+  are indexed by trigram, and a trigram is **common** when more than 1% of those names have it, and more
+  than 50 (so a small dataset has none). A name is looked up only by its trigrams that are not common,
+  or, with fewer than four of those, by its four rarest; the lists of common trigrams are not read. A
+  name found so is compared when the two share at least 40% of the trigrams of the one with fewer
+  (30% before; 40% makes 40% fewer comparisons for the loss of four planted variants in 2,000), and
+  when their lengths let them reach the threshold at all (`canReach()`: a name of two letters cannot
+  reach 0.85 with one of more than four); a name exactly the same is always compared. So a name is
+  compared with at most 1% of the other dataset for each trigram it is looked up by. `e2e/match_scale.mjs
+  [N]` matches two synthetic datasets of N places (half the names beginning with a common word, one in
+  ten of the others a planted variant) with `plato-tools match` and requires it to finish in time and
+  suggest 97% of the planted pairs: on its data, 20,000 with 20,000 took 50.6 s (about 11 million
+  comparisons of names) before, and takes about 9 s (1.7 million) now; the suite runs 4,000 with 4,000 and requires fewer
+  comparisons than 1% of the pairs, where the rule before made more than 2%.
 - **Filters**, in order, after the threshold (0.85): a pair either dataset already links by an
   identity relation (nested, top-level, or bundled in an attestation not since withdrawn) is not
   suggested, and is counted; so is one either says are different places (a negated identity); a pair
@@ -316,7 +347,13 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   reconciliation service fits the same record. It records each dataset's files by name, size and
   SHA-256 (streamed, `digest.js`), so a resumed or finished review can say when the files have
   changed. `readWork` refuses a file no review could have written: a decision that disagrees with its
-  candidate's status, a candidate for a place it does not list, a denial without a basis.
+  candidate's status, a candidate for a place it does not list, a denial without a basis, and what
+  would only fail later, as a fault in the tools, when the attestations are made: a decision time that
+  is not an ISO date-time, a place or a suggestion whose address is not an IRI, the same suggestion
+  twice for one place. The page checks the reviewer's ORCID by the same rule (`checkReviewer`) before
+  it saves or finishes, so it never writes one a resumed review would refuse. The base address given
+  for spreadsheet tables is kept in `match_parameters.base`; finishing tables with another warns
+  (`base-differs`), as their places' addresses are made from it.
 - **Decisions.** "Same place" confirms a candidate; "Not this one" rejects it and writes nothing;
   "Different places" rejects it and writes a negated attestation bundling exactly one exactMatch,
   with the reviewer's basis. The matches accepted for one place are ONE attestation bundling a
@@ -335,7 +372,9 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   earlier version and the new file as the later: anything deleted or changed, or fewer attestations
   added than were made, is an error, a fault in the tools, and its counts are carried into the report
   ("the version check found nothing deleted or changed"). Any error means nothing is offered for saving
-  (`incomplete`), and the command line removes the file. The file is `<name>.krisis-dataset.json`, so
+  (`incomplete`), and the command line removes the file. Before anything is converted, each new
+  attestation is checked against the place-centric schema, under a place of its own (the profile has
+  no schema for an attestation alone), as the attestations-only output checks its own. The file is `<name>.krisis-dataset.json`, so
   it never takes the work file's name. The tests prove the check can fail: an augment that drops an
   attestation of the original is caught as not append-only, one that adds nothing as not all added.
 - **The other output** is a PLATO document of only the new attestations, in the attestation-centric

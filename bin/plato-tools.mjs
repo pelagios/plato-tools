@@ -19,7 +19,8 @@ const { compare } = await import('../src/engine/compare.js');
 const { publish, PUBLISH_PARTS } = await import('../src/engine/agora/index.js');
 const { match } = await import('../src/engine/krisis/match.js');
 const { apply, OUTPUTS: REVIEW_OUTPUTS } = await import('../src/engine/krisis/apply.js');
-const { detect, readable } = await import('../src/engine/input.js');
+const { checkReviewer } = await import('../src/engine/krisis/work.js');
+const { detect, readable, DataError } = await import('../src/engine/input.js');
 const { nodeResources, gatherInputs, openFiles, isSystemError, NodeHost } = await import('../src/node/host.js');
 const { toolsCommit } = await import('../src/node/build-info.js');
 const { fmtBytes, fmtTime, formatName, progressText, summary, groups, draftNote, explainedLines, gazetteerWarnings } = await import('../src/engine/words.js');
@@ -474,6 +475,8 @@ async function review(action, args, o, resources) {
   const reviewer = o.reviewer ? { name: o.reviewer, ...(o.orcid ? { orcid: o.orcid } : {}) } : null;
   if (o.orcid && !o.reviewer) return usage('--orcid needs --reviewer, the name it belongs to.');
   if (o.orcid && !/^https:\/\/orcid\.org\/\d{4}-\d{4}-\d{4}-\d{3}[0-9X]$/.test(o.orcid)) return usage('give the ORCID in full, as https://orcid.org/0000-0000-0000-0000.');
+  // The reviewer is checked by the engine's own rule, so that what it would refuse is a mistake in the command, not a fault in the tools.
+  if (reviewer) { try { checkReviewer(reviewer, '--reviewer'); } catch (e) { return usage(e.message.replace(/^--reviewer must have a name\.$/, '--reviewer must give a name.')); } }
   const items = await gatherInputs(args);
   if (items.length !== 1) return usage(`${action} takes one dataset of places to match; ${items.length} ${items.length === 1 ? 'was' : 'were'} given.`);
   let others = null, work = null, options;
@@ -515,7 +518,7 @@ async function review(action, args, o, resources) {
     catch (e) { failure = e; }
     if (live) process.stderr.write('\r\x1b[K');
     finish(!!failure || !!result?.incomplete);
-    if (failure) r.message = isSystemError(failure) ? (failure.code === 'EEXIST' ? `${failure.path} already exists; give --overwrite to replace it, or --out for somewhere else.` : failure.message) : failure instanceof Error && /^The (threshold|greatest|number)/.test(failure.message) ? failure.message : toolsFault(failure);
+    if (failure) r.message = isSystemError(failure) ? (failure.code === 'EEXIST' ? `${failure.path} already exists; give --overwrite to replace it, or --out for somewhere else.` : failure.message) : failure instanceof DataError ? failure.message : toolsFault(failure);
     else Object.assign(r, { status: result.incomplete ? 'failed' : result.report.errors ? 'problems' : 'ok', errors: result.report.errors, counts: result.report.counts, items: result.report.items,
       outputs: result.outputs.map(({ path, size }) => ({ path, size })) });
   }

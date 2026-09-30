@@ -6,9 +6,9 @@
 // options.sink, as the version check reads), so every input format reaches the matcher as
 // place-centric records. Of each place only what matching needs is kept: its address, label and
 // names, one representative point, its country codes and types, and the identity relations the
-// dataset already states. Names are compared as src/engine/krisis/names.js says; two places are
-// only compared when some pair of their names shares enough trigrams (blocking), so the work grows
-// with the number of plausible pairs, not with the product of the datasets.
+// dataset already states. Names are compared as src/engine/krisis/names.js says; two names are only
+// compared when they share enough trigrams, found through the rarer ones (blocking.js), so the work
+// grows with the pairs of names that share something uncommon, not with the product of the datasets.
 //
 // A pair is suggested when its best name score reaches the threshold, the two are not further apart
 // than the greatest distance (when both have a point), and the datasets do not already link them,
@@ -16,18 +16,23 @@
 import { run } from '../pipeline.js';
 import { Report } from '../report.js';
 import { collectWithdrawn, resolveWithdrawn } from '../../formats/shared.js';
-import { normalise, similarityNormalised, trigrams } from './names.js';
+import { DISTINCT_GATE } from './names.js';
+import { NameIndex, BLOCKING, BLOCKING_RULE } from './blocking.js';
+import { DataError } from '../input.js';
 import { WORK_VERSION, fileRecords, serialiseWork, checkReviewer } from './work.js';
 
-export const ALGORITHM = 'krisis-names 1';
+export const ALGORITHM = 'krisis-names 2';
 export const DEFAULTS = { threshold: 0.85, maxDistanceKm: 50, topK: 5 };
-// Names are compared only when they share at least this share of the trigrams of the one with fewer.
-export const BLOCKING = 0.3;
+export { BLOCKING };
 export const SCORING = 'Each name of a place (its label and every toponym and romanised form) is normalised: '
   + 'decomposed (NFKD), combining marks removed, ß æ œ ø ł đ ð þ ı spelt out, lower-cased, and everything but letters and digits made a space. '
   + 'Two names score their Jaro-Winkler similarity (prefix scale 0.1, up to four letters), or, if higher, that of their words sorted alphabetically. '
-  + 'Two places score the best of any pair of their names. Names are compared only when they share at least '
-  + `${BLOCKING * 100}% of the trigrams of the one with fewer (blocking). A place's point is its first Point geometry, else the centre of its first bounding box, else none; `
+  + 'Names that share a word are held to the words they do not share: a word also counts as shared with its abbreviation or contraction (its letters in order in the other, ending alike, and beginning alike unless it has two letters: St and Saint, on and upon). '
+  + 'Each word weighs its inverse document frequency in the names of both datasets, ln(1 + N / df). If the words left of each name score at least '
+  + `${DISTINCT_GATE} (as above), or are one letter added, dropped, changed or two swapped apart, the pair scores the shared words' share of the weight of all the words of the two (a shared word counted once), plus the rest's score times the remaining share; `
+  + "otherwise the shared words' share alone. The lower of this and the name score is the score. "
+  + 'Two places score the best of any pair of their names, over the pairs blocking allows (see blocking). '
+  + "A place's point is its first Point geometry, else the centre of its first bounding box, else none; "
   + 'a pair whose points are further apart than maxDistanceKm (great-circle distance) is dropped, and a pair without two points is kept, with no distance. '
   + 'Pairs that either dataset already links by an identity relation, or says are different places, are not suggested. Each subject place keeps its topK best.';
 
@@ -136,9 +141,9 @@ async function readSide(input, word, options, env, rep, progress) {
 function checkOptions(o) {
   const t = { ...DEFAULTS };
   for (const k of Object.keys(DEFAULTS)) if (o[k] !== undefined && o[k] !== null && o[k] !== '') t[k] = Number(o[k]);
-  if (!(t.threshold > 0 && t.threshold <= 1)) throw new Error(`The threshold must be above 0 and at most 1, not ${o.threshold}.`);
-  if (!(t.maxDistanceKm >= 0)) throw new Error(`The greatest distance must be a number of kilometres, not ${o.maxDistanceKm}.`);
-  if (!(Number.isInteger(t.topK) && t.topK >= 1)) throw new Error(`The number of suggestions per place must be a whole number from 1, not ${o.topK}.`);
+  if (!(t.threshold > 0 && t.threshold <= 1)) throw new DataError(`The threshold must be above 0 and at most 1, not ${o.threshold}.`);
+  if (!(t.maxDistanceKm >= 0)) throw new DataError(`The greatest distance must be a number of kilometres, not ${o.maxDistanceKm}.`);
+  if (!(Number.isInteger(t.topK) && t.topK >= 1)) throw new DataError(`The number of suggestions per place must be a whole number from 1, not ${o.topK}.`);
   return t;
 }
 
@@ -173,20 +178,12 @@ export async function match({ subjects, others, options = {} }, env) {
   const linked = new Set(), different = new Set();
   for (const l of [...S.links, ...O.links]) (l.negated ? different : linked).add(pairKey(l.a, l.b));
 
-  // The index: each normalised name of the other places, by its trigrams.
+  // The index: each normalised name of the other places, by its trigrams (blocking.js).
   const otherIris = [...O.places.keys()];
-  const oNames = [], postings = new Map();
-  otherIris.forEach((iri, pi) => {
-    for (const n of new Set(O.places.get(iri).names.map(normalise))) {
-      if (!n) continue;
-      const tri = trigrams(n), ni = oNames.length;
-      oNames.push({ pi, n, size: tri.size });
-      for (const t of tri) (postings.get(t) || postings.set(t, []).get(t)).push(ni);
-    }
-  });
+  const index = new NameIndex(otherIris.map((iri) => O.places.get(iri).names), [...S.places.values()].map((p) => p.names));
 
   const generated_at = options.now || new Date().toISOString();
-  const counts = { subjects: S.places.size, others: O.places.size, candidates: 0, suggestedFor: 0, linked: 0, judgedDifferent: 0, tooFar: 0, unaddressed: S.unaddressed + O.unaddressed };
+  const counts = { subjects: S.places.size, others: O.places.size, candidates: 0, suggestedFor: 0, linked: 0, judgedDifferent: 0, tooFar: 0, unaddressed: S.unaddressed + O.unaddressed, comparisons: 0 };
   const places = {}, candidates = [], emitted = new Set(), linkedSeen = new Set(), differentSeen = new Set();
   const source = { title: O.title, ...(O.uri ? { uri: O.uri } : {}) };
   let i = 0, lastBeat = 0;
@@ -195,21 +192,9 @@ export async function match({ subjects, others, options = {} }, env) {
     const now = Date.now();
     if (now - lastBeat > 250) { lastBeat = now; progress({ phase: 'matching', places: i, elapsedMs: now - t0 }); }
     // The best score of each other place against any name of this one, over the pairs blocking allows.
-    const best = new Map();
-    for (const s of new Set(sp.names.map(normalise))) {
-      if (!s) continue;
-      const tri = trigrams(s), shared = new Map();
-      for (const t of tri) for (const ni of postings.get(t) || []) shared.set(ni, (shared.get(ni) || 0) + 1);
-      for (const [ni, k] of shared) {
-        const o = oNames[ni];
-        if (k < Math.max(1, Math.ceil(BLOCKING * Math.min(tri.size, o.size)))) continue;
-        const score = similarityNormalised(s, o.n);
-        if (score > (best.get(o.pi) ?? -1)) best.set(o.pi, score);
-      }
-    }
+    const best = index.best(sp.names, params.threshold);
     const found = [];
     for (const [pi, score] of best) {
-      if (score < params.threshold) continue;
       const oiri = otherIris[pi];
       if (oiri === iri) continue;
       const key = pairKey(iri, oiri);
@@ -242,11 +227,12 @@ export async function match({ subjects, others, options = {} }, env) {
     }
   }
   counts.candidates = candidates.length;
+  counts.comparisons = index.comparisons;
   rep.counts = counts;
 
   const work = {
     krisis: WORK_VERSION, generated_at, algorithm_version: ALGORITHM,
-    match_parameters: { ...params, blocking: BLOCKING, scoring: SCORING },
+    match_parameters: { ...params, ...(options.base ? { base: options.base } : {}), blocking: { ...BLOCKING, rule: BLOCKING_RULE }, scoring: SCORING },
     subjects: sideRecord(S), others: sideRecord(O),
     places, candidates, reviewer: options.reviewer || null, cursor: 0,
   };

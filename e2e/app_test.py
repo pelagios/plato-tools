@@ -141,7 +141,10 @@ def krisis_case(page, tmp):
     others.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': b, 'title': 'Their places'}, 'spatialEntities': [
         krisis_place(b + 'bristoll', 'Bristoll', -2.5900, 51.4500), krisis_place(b + 'bathe', 'Bathe', -2.3600, 51.3800),
         krisis_place(b + 'bath-maine', 'Bath', -69.8203, 43.9109), krisis_place(b + 'welles', 'Welles', -2.6500, 51.2100)]}))
+    # The base address in the options (for spreadsheet tables) goes to matching, and is kept in the work file.
+    page.evaluate("() => { const b = document.getElementById('base'); if (b) b.value = 'https://example.org/a/'; }")
     s = match_case(page, subjects, others)
+    page.evaluate("() => { const b = document.getElementById('base'); if (b) b.value = ''; }")
     work = s.get('work') or {}
     cands = {(c['candidate_source'].rsplit('/', 1)[-1], c['candidate_candidate'].rsplit('/', 1)[-1]) for c in work.get('candidates', [])}
     check('match review: two files matched, the review screen shows the first place with its candidates',
@@ -150,11 +153,14 @@ def krisis_case(page, tmp):
     # Bath in Maine has Bath's own name but is thousands of kilometres away: not suggested, beside the Bath that is.
     check('match review: a namesake too far away is not suggested, one near by is',
           s.get('phase') == 'reviewing' and ('bath', 'bathe') in cands and ('bath', 'bath-maine') not in cands, sorted(cands))
-    ok = s.get('phase') == 'reviewing'; asked = False
+    check('match review: the base address in the options is passed to matching and kept in the work file',
+          (work.get('match_parameters') or {}).get('base') == 'https://example.org/a/', work.get('match_parameters') or s)
+    ok = s.get('phase') == 'reviewing'; asked = False; focused = None
     try:
         if ok:
-            # The name is asked once, in the page, and remembered by the browser.
+            # The name is asked once, in the page, and remembered by the browser; while it is asked, it has the focus.
             asked = page.is_visible('#review-name')
+            focused = page.evaluate("() => document.activeElement && document.activeElement.id")
             page.fill('#review-name', 'Ada Reviewer'); page.press('#review-name', 'Enter')
             asked = asked and not page.is_visible('#review-name')
             page.keyboard.press('a')                  # Bristol: same place as its first candidate
@@ -173,6 +179,21 @@ def krisis_case(page, tmp):
           and kinds.get('bath>bathe') == 'distinct' and dec['bath>bathe'].get('basis') == 'Bathe is a farm; and so near by, just a namesake'
           and sum(1 for v in kinds.values() if v) == 3 and '3 of 3 places reviewed' in page.inner_text('#review-progress'), s.get('review') or s)
     check('match review: the reviewer\'s name is asked in the page, then put away, and remembered by the browser', ok and asked and 'Ada Reviewer' in (remembered or ''), {'asked then hidden': asked, 'remembered': remembered})
+    check('match review: while the name is asked, the name field has the focus', focused == 'review-name', focused)
+    # An ORCID that is not one (a digit group short) is refused before anything is saved, and not remembered.
+    orcid = {}
+    if s.get('phase') == 'reviewing':
+        try:
+            page.evaluate("() => { const o = document.getElementById('orcid'); o.value = '0000-0002-1825'; o.dispatchEvent(new Event('change')); }")
+            page.click('#save-review')
+            page.wait_for_selector('#review-warning:not([hidden])', timeout=10_000)
+            orcid = {'warning': page.inner_text('#review-warning'), 'saved': page.evaluate("() => window.__plato.reviewSaved || null"),
+                     'remembered': page.evaluate("() => { try { return localStorage.getItem('plato-tools.reviewer'); } catch { return null; } }")}
+            page.evaluate("() => { const o = document.getElementById('orcid'); o.value = ''; o.dispatchEvent(new Event('change')); }")
+        except Exception as e: orcid = {'error': str(e).split('\n')[0][:200]}
+    check('match review: an ORCID that is not one is refused in the page, in plain words, and neither saved nor remembered',
+          'ORCID is not written as one' in orcid.get('warning', '') and orcid.get('saved') is None
+          and 'Ada Reviewer' in (orcid.get('remembered') or '') and '1825' not in (orcid.get('remembered') or ''), orcid)
     saved = {}
     if s.get('phase') == 'reviewing':
         try:
@@ -241,6 +262,19 @@ def krisis_case(page, tmp):
             page.wait_for_selector('#review-warning:not([hidden])', timeout=20_000); w = page.inner_text('#review-warning')
         except Exception as e: w = 'harness-error: ' + str(e).split('\n')[0][:200]
     check('match review: a review resumed against other files than it was made from says so', 'other files than the ones chosen' in w and 'krisis-others.json' in w, w)
+    # Checking the file chosen puts the review away, and its keys with it.
+    put = {}
+    if 'other files than the ones chosen' in w:
+        try:
+            decisions = "() => JSON.stringify((window.__plato.work || {}).candidates.map((c) => c.decision && c.decision.kind))"
+            put = {'shown before': page.is_visible('#review'), 'before': page.evaluate(decisions)}
+            page.click('#check')
+            wait_state(page, lambda s: s.get('action') == 'check' and s.get('phase') in ('done', 'error'), 60, 'check')
+            page.keyboard.press('a'); page.keyboard.press('n'); page.keyboard.press('k'); page.keyboard.press('n')
+            put.update({'shown after': page.is_visible('#review'), 'after': page.evaluate(decisions)})
+        except Exception as e: put = {'error': str(e).split('\n')[0][:200]}
+    check('match review: Check puts the review away, and its keys then decide nothing',
+          put.get('shown before') is True and put.get('shown after') is False and put.get('before') == put.get('after') and 'match' in (put.get('before') or ''), put)
 
 def download(page, name, dest):
     with page.expect_download(timeout=600_000) as d:

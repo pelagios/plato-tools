@@ -6,7 +6,14 @@ Status: IMPLEMENTED; engine and CLI tests pass (test/krisis.test.js, test/krisis
 
 - `src/engine/krisis/work.js` — light (no pipeline import; safe to import in app.js):
   - `readWork(text) -> work` — parses and validates a work file; throws `DataError` (from
-    `../input.js`) with a plain message.
+    `../input.js`) with a plain message. It also refuses what would make `recordIdentity` throw
+    later: a `decided_at` that is not an ISO date-time, a place key or `candidate_candidate` that is
+    not an IRI, the same (candidate_source, candidate_candidate) pair twice.
+  - `checkReviewer({ name, orcid? }, where?)` — throws `DataError` unless it is PLATO's
+    contributorObject (a name that is not blank; an ORCID written in full,
+    `https://orcid.org/0000-0000-0000-0000`). The page checks the reviewer with it before saving or
+    finishing, and never stores an ORCID it refuses.
+  - `DATE_TIME`, `isIri` — the rules `readWork` and `recordIdentity` share.
   - `serialiseWork(work) -> string` (JSON, 2-space indent, trailing newline).
   - `decide(work, candidateId, kind, { identityType = 'exactMatch', basis, at = new Date().toISOString() } = {}) -> candidate`
     kind: `'match' | 'not-this' | 'distinct' | null` (null clears the decision). Sets
@@ -22,15 +29,22 @@ Status: IMPLEMENTED; engine and CLI tests pass (test/krisis.test.js, test/krisis
 - `src/engine/krisis/match.js`:
   - `match({ subjects, others, options }, env) -> { report, outputs, work, incomplete? }`
     `subjects`/`others` are inputs as `detect()` returns them. options: `threshold` (0.85),
-    `maxDistanceKm` (50), `topK` (5). Writes output `<subjects stem>.krisis.json`.
+    `maxDistanceKm` (50), `topK` (5), `base` (spreadsheet tables: the base address of their
+    places; kept in `match_parameters.base`), `reviewer`. Bad options throw `DataError`. Writes output
+    `<subjects stem>.krisis.json`. `match_parameters` also holds `blocking` (`BLOCKING` with its
+    `rule` in words) and `scoring` (in words); `algorithm_version` is `krisis-names 2`.
 - `src/engine/krisis/apply.js`:
   - `apply({ subjects, work, options: { output = 'dataset', reviewer, date, base } }, env) -> { report, outputs, incomplete? }`
     `work` is a work object or its text. `reviewer` ({ name, orcid? }) overrides `work.reviewer`.
-    `base`: for spreadsheet tables, the base address given to `match()`.
+    `base`: for spreadsheet tables, the base address given to `match()`; if it differs from the
+    review's `match_parameters.base` (tables only), a warning `base-differs`. The page passes the
+    Options' base to both `match` and `apply`, as the command line passes `--base`.
     'dataset' (the default) converts `subjects` with `run({ action: 'convert', target: 'plato-json',
     options: { augment } })`, appending each place's new attestations, and writes
     `<subjects stem>.krisis-dataset.json` (place-centric PLATO JSON, whatever the input format; not
-    `.krisis.json`, which is the work file's name). It then runs `checkAppendOnly()`. Any error
+    `.krisis.json`, which is the work file's name). Each new attestation is first checked against
+    the place-centric schema (`validators['place-centric'].entity`, under a place of its own): a
+    failure is `not-valid`, nothing converted. It then runs `checkAppendOnly()`. Any error
     (below) → `incomplete: true`, no outputs.
     'attestations' writes `<subjects stem>.krisis-attestations.json` (attestation-centric PLATO).
   - `checkAppendOnly({ earlier, later, added, options: { base } }, env, rep)` — the version check
@@ -39,7 +53,16 @@ Status: IMPLEMENTED; engine and CLI tests pass (test/krisis.test.js, test/krisis
 - `src/engine/krisis/identity.js`: `recordIdentity({ subject, targets, source, reviewer, date, negated, notes })`,
   `attestationsFrom(work, { reviewer, source, date }) -> [{ subject, attestation }]` (each attestation
   dated by its latest decision's `decided_at` unless `date` is given).
-- `src/engine/krisis/names.js`: `normalise(s)`, `similarity(a, b)`, `trigrams(normalised)`.
+- `src/engine/krisis/names.js`: `normalise(s)`, `similarity(a, b, weight?)`,
+  `similarityNormalised(x, y, weight?)`, `nameScore(x, y)` (Jaro-Winkler, as written or with the
+  words sorted), `distinctive(x, y, weight?)` (the score on the words the names do not share, or
+  null), `oneEdit(a, b)`, `trigrams(normalised)`, `DISTINCT_GATE`. `weight(word)` defaults to 1 for
+  every word; the matcher gives inverse document frequency.
+- `src/engine/krisis/blocking.js`: `new NameIndex(otherPlacesNames, subjectPlacesNames)`;
+  `.best(names, threshold) -> Map(other place number -> score)` (only scores reaching the
+  threshold), `.candidates(normalised, threshold)`, `.comparisons` (pairs of names scored), `.weight`;
+  `BLOCKING` `{ share: 0.4, commonShare: 0.01, commonFloor: 50, keys: 4 }`, `BLOCKING_RULE`,
+  `canReach(lengthA, lengthB, threshold)`.
 
 ## Work file (version 1)
 
@@ -51,7 +74,7 @@ subject places with at least one candidate, in review order. `reviewer: null | {
 ## Worker/UI notes
 
 - `match()` result `{ report, outputs: [{ name, size }], work }`; `report.counts` keys: subjects,
-  others, candidates, suggestedFor, linked, judgedDifferent, tooFar, unaddressed.
+  others, candidates, suggestedFor, linked, judgedDifferent, tooFar, unaddressed, comparisons.
 - `apply()` result `{ report, outputs, attestations }`; counts: attestations, matchAttestations,
   distinctAttestations, relations; with output 'dataset' also `places` and `versionCheck: { earlier,
   later, unchanged, changed, lost, added }` (compare's counts). Report kinds of the dataset output:

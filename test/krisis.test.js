@@ -12,9 +12,12 @@ import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { env, res, file, textFile, go, outText } from './engine.js';
 import { detect } from '../src/engine/input.js';
-import { normalise, similarity, jaroWinkler, trigrams } from '../src/engine/krisis/names.js';
+import { normalise, similarity, similarityNormalised, nameScore, distinctive, oneEdit, jaroWinkler, trigrams } from '../src/engine/krisis/names.js';
+import { NameIndex, BLOCKING } from '../src/engine/krisis/blocking.js';
+import { syntheticNames } from './krisis-synthetic.js';
+import { DataError } from '../src/engine/input.js';
 import { Sha256, fileSha256 } from '../src/engine/krisis/digest.js';
-import { match, distanceKm, representativePoint, DEFAULTS } from '../src/engine/krisis/match.js';
+import { match, distanceKm, representativePoint, DEFAULTS, ALGORITHM } from '../src/engine/krisis/match.js';
 import { readWork, serialiseWork, decide, reviewProgress, reviewPlaces, candidatesOf, isReviewed, filesDiffer } from '../src/engine/krisis/work.js';
 import { recordIdentity, attestationsFrom } from '../src/engine/krisis/identity.js';
 import { apply, checkAppendOnly } from '../src/engine/krisis/apply.js';
@@ -257,8 +260,8 @@ test('a work file that no review could have written is refused, saying why; the 
   refused('{}', /no "krisis" version/);
   refused(tamper((w) => { w.krisis = 2; }), /later version of the tools/);
   refused(tamper((w) => { w.candidates[0].candidate_status = 'confirmed'; }), /confirmed, but no decision/);
-  refused(tamper((w) => { w.candidates[0].decision = { kind: 'match', identityType: 'exactMatch', decided_at: 'x' }; }), /suggested, which disagrees/);
-  refused(tamper((w) => { w.candidates[0].candidate_status = 'rejected'; w.candidates[0].decision = { kind: 'distinct', identityType: 'exactMatch', decided_at: 'x' }; }), /without saying why/);
+  refused(tamper((w) => { w.candidates[0].decision = { kind: 'match', identityType: 'exactMatch', decided_at: '2026-09-30T13:00:00Z' }; }), /suggested, which disagrees/);
+  refused(tamper((w) => { w.candidates[0].candidate_status = 'rejected'; w.candidates[0].decision = { kind: 'distinct', identityType: 'exactMatch', decided_at: '2026-09-30T13:00:00Z' }; }), /without saying why/);
   refused(tamper((w) => { w.candidates[0].candidate_source = X + 'elsewhere'; }), /a place the file does not list/);
   refused(tamper((w) => { w.candidates[1].id = w.candidates[0].id; }), /two candidates have the id/);
   refused(tamper((w) => { w.candidates[0].similarity_score = 1.5; }), /between 0 and 1/);
@@ -508,4 +511,149 @@ test('progress is worded for each dataset and each phase', () => {
   assert.equal(progressText({ phase: 'reading', dataset: 'others', places: 3, elapsedMs: 0 }), 'Other dataset: Reading: 3 places (0 s)');
   assert.equal(progressText({ phase: 'matching', places: 10, elapsedMs: 2000 }), 'Comparing the names: 10 places (2 s)');
   assert.equal(progressText({ phase: 'reading', places: 3, elapsedMs: 0 }), 'Reading: 3 places (0 s)', 'control: a plain run is not labelled');
+});
+
+// ---- scoring: names alike only in a shared word (krisis-names 2) ---------------------------------------------
+test('names alike only in a word they share score under the threshold; respellings, abbreviations and reorderings stay over it', () => {
+  for (const [a, b] of [['Saint Martin', 'Saint Maurice'], ['East Ham', 'West Ham'], ['Kafr Saba', 'Kafr Qasim'], ['Newton on the Hill', 'Newton by the River']]) {
+    assert.ok(nameScore(normalise(a), normalise(b)) >= 0.85, `control: ${a} and ${b} score over the threshold on their letters alone`);
+    assert.ok(similarity(a, b) < 0.85, `${a} and ${b}: ${similarity(a, b)}`);
+  }
+  for (const [a, b] of [['Tell Brak', 'Tell Barak'], ['Newton Abbot', 'Newton Abbott'], ['Saint Martin', 'San Martin'], ['St Martin', 'Saint Martin'],
+    ['Stratford upon Avon', 'Stratford-on-Avon'], ['Sainte-Mère-Église', 'Ste Mere Eglise'], ['Kafr Cal', 'Kafr Cel'], ['Upper Newton', 'Newton Upper'],
+    ['Kafr Saba', 'Kafar Saba'], ['Bristol', 'Bristoll'], ['Köln', 'Koln'], ['Newton', 'Neuton']])
+    assert.ok(similarity(a, b) >= 0.85, `${a} and ${b}: ${similarity(a, b)}`);
+  // It only ever lowers a score, and leaves names that share no word as they were.
+  assert.equal(similarity('Springfield', 'Springfeld'), nameScore('springfield', 'springfeld'));
+  assert.equal(distinctive('newton', 'neuton'), null);
+  assert.equal(distinctive('newton', 'upper newton'), null, 'every word of one is shared: the name score stands');
+  // One edit apart: a letter added, dropped, changed, or two swapped; not two changes.
+  assert.deepEqual([oneEdit('cal', 'cel'), oneEdit('ab', 'ba'), oneEdit('abc', 'abcd'), oneEdit('abcd', 'acd')], [true, true, true, true]);
+  assert.deepEqual([oneEdit('east', 'west'), oneEdit('cal', 'cal'), oneEdit('ab', 'abcd')], [false, false, false]);
+});
+test('a word common in the datasets counts for little: the same pair scores lower when the word they share is common', () => {
+  const uniform = similarity('Kafr Cal', 'Kafr Cel');
+  const common = similarity('Kafr Cal', 'Kafr Cel', (w) => (w === 'kafr' ? 0.2 : 3));
+  const rare = similarity('Kafr Cal', 'Kafr Cel', (w) => (w === 'kafr' ? 3 : 0.2));
+  assert.ok(common < uniform && uniform < rare, `${common} < ${uniform} < ${rare}`);
+  // In matching, the weights are the words' inverse document frequency in the names of both datasets.
+  const idx = new NameIndex([['Kafr Cel'], ['Kafr Dan'], ['Kafr Ana'], ['Kafr Bir']], [['Kafr Cal']]);
+  assert.ok(idx.weight('kafr') < idx.weight('cel'), 'kafr, in every name, weighs less than cel, in one');
+});
+test('matching: Saint Maurice is not suggested for Saint Martin, St Martin is; the work file says how it was made', async () => {
+  const s = { profile: 'place-centric', gazetteer: { '@id': X + 'a', title: 'A' }, spatialEntities: [place('a', 'martin', 'Saint Martin', [at(2, 48)])] };
+  const o = { profile: 'place-centric', gazetteer: { '@id': X + 'b', title: 'B' }, spatialEntities: [
+    place('b', 'maurice', 'Saint Maurice', [at(2.01, 48.01)]), place('b', 'st-martin', 'St Martin', [at(2.02, 48.02)])] };
+  const { work, report } = await run({}, s, o);
+  assert.deepEqual(pairs(work), [`${A('martin')} ${B('st-martin')}`]);
+  assert.equal(work.algorithm_version, 'krisis-names 2');
+  assert.equal(ALGORITHM, 'krisis-names 2');
+  assert.match(work.match_parameters.scoring, /do not share/);
+  assert.deepEqual({ ...work.match_parameters.blocking, rule: undefined }, { ...BLOCKING, rule: undefined });
+  assert.match(work.match_parameters.blocking.rule, /common when more than 1%/);
+  assert.equal(report.counts.comparisons, 2, 'both names were compared: the one not suggested was scored, not missed');
+});
+
+// ---- blocking --------------------------------------------------------------------------------------------------
+/** How many pairs the rule before this one compared: every pair sharing 30% of the padded trigrams of the one with fewer. */
+function oldRule(subjects, others) {
+  const post = new Map(), sizes = others.map((n) => trigrams(normalise(n)).size);
+  others.forEach((n, i) => { for (const t of trigrams(normalise(n))) (post.get(t) || post.set(t, []).get(t)).push(i); });
+  let pairs = 0;
+  for (const n of subjects) {
+    const tri = trigrams(normalise(n)), k = new Map();
+    for (const t of tri) for (const i of post.get(t) || []) k.set(i, (k.get(i) || 0) + 1);
+    for (const [i, c] of k) if (c >= Math.max(1, Math.ceil(0.3 * Math.min(tri.size, sizes[i])))) pairs++;
+  }
+  return pairs;
+}
+test('blocking: a short name, or one that begins with a common word, is not compared with every name that shares its beginning; respellings, accents and short names are still found', () => {
+  const { subjects: background } = syntheticNames({ n: 3000, m: 0, seed: 3 });
+  const others = [...background, 'Bristoll', 'Koln', 'Ur', 'Ay', 'Kaiubrg', 'Saint Martine'];
+  const idx = new NameIndex(others.map((n) => [n]));
+  const at_ = (n) => others.indexOf(n);
+  for (const [s, o] of [['Bristol', 'Bristoll'], ['Köln', 'Koln'], ['Ur', 'Ur'], ['Ay', 'Ay'], ['Kaiburg', 'Kaiubrg'], ['Saint Martin', 'Saint Martine']])
+    assert.ok(idx.best([s], 0.85).has(at_(o)), `${s} finds ${o}`);
+  // The absences, beside the presences above: how many names each is compared with, and how many the rule before compared it with.
+  for (const [s, most, oldMore] of [['Sa', 10, 150], ['Saint Martin', 10, 80], ['Tell Bara', 10, 40]]) {
+    const before = idx.comparisons;
+    idx.best([s], 0.85);
+    const compared = idx.comparisons - before, old = oldRule([s], others);
+    assert.ok(old > oldMore, `control: the rule before compared ${s} with ${old} names`);
+    assert.ok(compared <= most, `${s} was compared with ${compared} names`);
+  }
+  assert.equal(idx.common, Math.max(BLOCKING.commonFloor, Math.ceil(BLOCKING.commonShare * others.length)));
+});
+test('blocking at scale: 4,000 names with 4,000 compare a small share of the pairs, and find the planted variants', () => {
+  const n = 4000;
+  const { subjects, others, pairs: planted } = syntheticNames({ n, seed: 1 });
+  const t0 = performance.now();
+  const idx = new NameIndex(others.map((x) => [x]), subjects.map((x) => [x]));
+  const found = subjects.map((x) => idx.best([x], 0.85));
+  const ms = performance.now() - t0;
+  // The planted variants that score over the threshold are the ones a matcher can find: blocking must not lose them.
+  const findable = planted.filter(([i, j]) => similarityNormalised(normalise(subjects[i]), normalise(others[j]), idx.weight) >= 0.85);
+  const got = findable.filter(([i, j]) => found[i].has(j)).length;
+  assert.ok(findable.length > planted.length * 0.95, `${findable.length} of ${planted.length} planted variants score over the threshold`);
+  assert.ok(got >= findable.length * 0.98, `${got} of ${findable.length} found`);
+  const old = oldRule(subjects, others);
+  assert.ok(old > 0.02 * n * n, `control: the rule before compared ${old} pairs`);
+  assert.ok(idx.comparisons < 0.01 * n * n, `${idx.comparisons} pairs compared`);
+  assert.ok(ms < 15000, `${Math.round(ms)} ms`);
+});
+
+// ---- the base address, the work file's checks, the dataset output's schema check ----------------------------------
+test('the base address matched with is kept in the work file, and finishing with another warns', async () => {
+  const s = subjectsDoc(); s.spatialEntities.pop();
+  const tables = await go([json(s, 'a.json')], 'convert', 'tables');
+  const subjects = await detect([new File(tables.e.outs['a-tables.zip'], 'a-tables.zip')]);
+  const { work: w } = await match({ subjects, others: (await inputs()).others, options: { base: X + 'a/' } }, env());
+  assert.equal(w.match_parameters.base, X + 'a/');
+  assert.equal(readWork(serialiseWork(w)).match_parameters.base, X + 'a/');
+  decide(w, w.candidates.find((c) => c.candidate_source === X + 'a/place/newton' && c.candidate_candidate === B('newton')).id, 'match', { at: '2026-09-30T13:00:00Z' });
+  w.reviewer = reviewer;
+  const same = await apply({ subjects, work: w, options: { output: 'attestations', base: X + 'a/' } }, env());
+  assert.ok(!same.report.items.some((i) => i.kind === 'base-differs'), 'control: the same base, no warning');
+  for (const base of [X + 'elsewhere/', undefined]) {
+    const r = await apply({ subjects, work: w, options: { output: 'attestations', base } }, env());
+    const warned = r.report.items.find((i) => i.kind === 'base-differs');
+    assert.ok(warned, `base ${base}`);
+    assert.match(warned.message, base ? /elsewhere\/ is given now/ : /none is given now/);
+  }
+  const plain = (await run()).work;
+  assert.equal(plain.match_parameters.base, undefined, 'no base given, none recorded');
+});
+test('a work file that would make attestations PLATO cannot hold is refused as the data\'s mistake, in plain words', async () => {
+  const w = await reviewed();
+  const text = serialiseWork(w);
+  const tamper = (edit) => { const x = JSON.parse(text); edit(x); return x; };
+  const decided = (x) => x.candidates.find((c) => c.decision?.kind === 'match');
+  const cases = [
+    [(x) => { decided(x).decision.decided_at = 'yesterday'; }, /decided "yesterday", which is not a date and time/],
+    [(x) => { decided(x).candidate_candidate = 'Newton'; }, /suggests "Newton", which is not a web address/],
+    [(x) => { const k = decided(x).candidate_source; x.places.newton = x.places[k]; delete x.places[k]; for (const c of x.candidates) if (c.candidate_source === k) c.candidate_source = 'newton'; }, /listed by "newton", which is not a web address/],
+    [(x) => { const c = decided(x); x.candidates.push({ ...structuredClone(c), id: 'c99' }); }, /same place for the same place as another candidate/],
+  ];
+  for (const [edit, re] of cases) {
+    const x = tamper(edit);
+    // Control: unchecked, the same work makes recordIdentity throw a plain Error, which would be reported as a fault in the tools.
+    assert.throws(() => attestationsFrom(x, { reviewer }), (e) => !(e instanceof DataError), `control for ${re}`);
+    assert.throws(() => readWork(JSON.stringify(x)), (e) => e instanceof DataError && re.test(e.message), re);
+    const r = await apply({ work: JSON.stringify(x), options: { output: 'attestations' } }, env());
+    assert.deepEqual(r.report.items.map((i) => i.kind), ['work-unreadable']);
+  }
+  assert.ok(readWork(text), 'control: the file untouched reads');
+});
+test('apply, the dataset: each new attestation is checked against the schema before anything is written', async () => {
+  const w = await reviewed();
+  const e = env();
+  const rejecting = Object.assign(() => false, { errors: [{ instancePath: '/attestations/0', message: 'is not what the schema allows' }] });
+  e.resources = { ...res, validators: { ...res.validators, 'place-centric': { ...res.validators['place-centric'], entity: rejecting } } };
+  const r = await apply({ subjects: (await inputs()).subjects, work: w, options: {} }, e);
+  assert.ok(r.incomplete);
+  assert.deepEqual(r.outputs, []);
+  assert.deepEqual([...new Set(r.report.items.map((i) => i.kind))], ['not-valid']);
+  assert.match(r.report.items[0].examples[0], /is not what the schema allows/);
+  const ok = await apply({ subjects: (await inputs()).subjects, work: w, options: {} }, env());
+  assert.equal(ok.report.errors, 0, 'control: with the real schema, the same review is written');
 });

@@ -55,6 +55,9 @@ export async function apply({ subjects, work, options = {} }, env) {
   const reviewer = options.reviewer || w.reviewer;
   if (!reviewer) { rep.error('no-reviewer', TEXT['no-reviewer']); return fail(); }
   try { checkReviewer(reviewer); } catch (e) { if (!(e instanceof DataError)) throw e; rep.error('bad-reviewer', TEXT['bad-reviewer'], e.message); return fail(); }
+  // Spreadsheet tables' places take their addresses from the base address: another than the review's gives other places.
+  const reviewedBase = w.match_parameters.base || undefined, base = options.base || undefined;
+  if (subjects?.format === 'tables' && reviewedBase !== base) rep.warning('base-differs', KRISIS_TEXT.baseDiffers(reviewedBase, base));
   if (subjects?.files) {
     const differ = await filesDiffer(w.subjects, subjects.files);
     if (differ.length) rep.add('warning', 'subjects-differ', TEXT['subjects-differ'], differ.join(', '), differ.length);
@@ -68,7 +71,16 @@ export async function apply({ subjects, work, options = {} }, env) {
     relations: made.reduce((n, m) => n + m.attestation.identities.length, 0),
   };
   if (!made.length) { rep.warning('nothing-decided', TEXT['nothing-decided']); return { report: rep.toJSON(), outputs: [], attestations: [] }; }
-  if (output === 'dataset') return writeDataset({ subjects, made, work: w, options }, env, rep, fail);
+  if (output === 'dataset') {
+    // Each attestation is checked as the checker would check it in a place-centric dataset, before anything is
+    // converted: the profile has no schema for an attestation alone, so it is checked under a place of its own.
+    const V = env.resources.validators['place-centric'].entity;
+    for (const { subject, attestation } of made) {
+      if (!V({ '@id': subject, label: subject, attestations: [attestation] })) rep.error('not-valid', TEXT['not-valid'], `${subject}: ${V.errors.map((e) => `${e.instancePath} ${e.message}`).join('; ')}`);
+    }
+    if (rep.toJSON().errors) return fail();
+    return writeDataset({ subjects, made, work: w, options }, env, rep, fail);
+  }
 
   const doc = attestationsDocument(w, made);
   // Each attestation is checked as the checker would check it: what is written must be valid PLATO.

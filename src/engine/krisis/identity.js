@@ -13,12 +13,10 @@
 // from lives only in the work file, which is not published.
 //
 // recordIdentity is shared with the Chora session (gazetteer reconciliation); its signature is agreed.
-import { checkReviewer } from './work.js';
+import { checkReviewer, DATE_TIME, isIri } from './work.js';
 import { krisisNote } from '../words.js';
 
 const TYPES = new Set(['exactMatch', 'closeMatch', 'related', 'unspecified']);
-const DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
-const isIri = (s) => typeof s === 'string' && /^[A-Za-z][A-Za-z0-9+.-]*:\S+$/.test(s);
 
 /**
  * One attestation recording identity relations from `subject` to each of `targets`.

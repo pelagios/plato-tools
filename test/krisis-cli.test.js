@@ -120,3 +120,32 @@ test('apply adds the decisions to the dataset by default, or writes them alone; 
   assert.equal(cli('apply', join(dir, 'a.json'), '--review', join(dir, 'review.json'), '--output', 'everything').code, 2);
   assert.equal(cli('apply', join(dir, 'a.json')).code, 2, 'no --review');
 });
+test('a reviewer with no name is a mistake in the command (exit 2), not a fault in the tools', () => {
+  const dir = fixtures();
+  for (const args of [['match', join(dir, 'a.json'), '--with', join(dir, 'b.json')], ['apply', join(dir, 'a.json'), '--review', join(dir, 'a.krisis.json')]]) {
+    const r = cli(...args, '--out', scratch(), '--reviewer', ' ');
+    assert.equal(r.code, 2, r.out + r.err);
+    assert.match(r.err, /--reviewer must give a name/);
+    assert.doesNotMatch(r.out + r.err, /fault in the tools/);
+  }
+  const named = cli('match', join(dir, 'a.json'), '--with', join(dir, 'b.json'), '--out', dir, '--reviewer', 'R');
+  assert.equal(named.code, 0, 'control: a reviewer with a name is taken');
+  assert.equal(readWork(readFileSync(join(dir, 'a.krisis.json'), 'utf8')).reviewer.name, 'R');
+});
+test('spreadsheet tables: the base address matched with is kept, and apply with another warns', () => {
+  const dir = fixtures();
+  assert.equal(cli('convert', join(dir, 'a.json'), '--to', 'tables', '--out', dir).code, 0);
+  const zip = join(dir, 'a-tables.zip');
+  assert.ok(existsSync(zip));
+  const m = cli('match', zip, '--with', join(dir, 'b.json'), '--out', dir, '--base', `${X}a/`);
+  assert.equal(m.code, 0, m.out + m.err);
+  const w = readWork(readFileSync(join(dir, 'a-tables.krisis.json'), 'utf8'));
+  assert.equal(w.match_parameters.base, `${X}a/`);
+  decide(w, w.candidates[0].id, 'match');
+  writeFileSync(join(dir, 'review.json'), serialiseWork(w));
+  const same = cli('apply', zip, '--review', join(dir, 'review.json'), '--out', scratch(), '--reviewer', 'R', '--output', 'attestations', '--base', `${X}a/`);
+  assert.equal(same.code, 0, same.out);
+  assert.doesNotMatch(same.out, /base address/, 'control: the same base, no warning');
+  const other = cli('apply', zip, '--review', join(dir, 'review.json'), '--out', scratch(), '--reviewer', 'R', '--output', 'attestations', '--base', `${X}elsewhere/`);
+  assert.match(other.out, /The review was made with the base address https:\/\/example\.org\/a\/ for the places of your spreadsheet tables, and https:\/\/example\.org\/elsewhere\/ is given now/);
+});

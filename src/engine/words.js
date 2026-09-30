@@ -191,6 +191,7 @@ export const review = {
   none: 'No matches were suggested, so there is nothing to review. With a lower threshold for how alike names must be, or a greater distance, there may be some.',
   allDone: 'Every place has been reviewed. Finish to make the attestations, or choose "all places" to look again.',
   nameNeeded: 'Give your name first: each attestation records who made it.',
+  badOrcid: 'Your ORCID is not written as one: it is sixteen digits in four groups, the last of which may be an X, such as 0000-0002-1825-0097, or the same as a web address, https://orcid.org/0000-0002-1825-0097. Correct it in the options, or leave it empty: until then the review cannot be saved or finished.',
   saved: (name) => `Saved the review as ${name}.`,
   /** When a resumed review was made from other files than those chosen now. */
   differs: (names) => `This review was made from other files than the ones chosen: ${names.join(', ')}. Its places may no longer match the data.`,
@@ -255,6 +256,8 @@ export const KRISIS_TEXT = {
   notInDataset: 'A place the review made attestations about is not in the dataset, so its attestations have nowhere to go and nothing was written. Is this the dataset the review was made of? The example gives the place.',
   notAppendOnly: 'The version check found that the dataset written does not keep all of the original, which is a fault in the tools (please report it); nothing was written.',
   notChecked: 'The dataset written could not be checked with the version check, so nothing was written',
+  /** The base address given to finish a review of spreadsheet tables is not the one it was matched with. */
+  baseDiffers: (reviewed, given) => `The review was made with ${reviewed ? `the base address ${reviewed}` : 'no base address'} for the places of your spreadsheet tables, and ${given ? `${given} is given now` : 'none is given now'}, so the places may not have the addresses the review gives them. Give the same base address as when matching.`,
   /** The version check does not find every new attestation in the dataset written. */
   notAllAdded: (made, added) => `The review made ${plural(made, 'new attestation')}, but the version check finds ${plural(added || 0, 'attestation')} added to the dataset written, which is a fault in the tools (please report it); nothing was written.`,
 };

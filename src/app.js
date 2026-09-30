@@ -5,7 +5,7 @@
 import { fmtBytes, formatName, progressText, summary, groups, draftNote, explainedLines } from './engine/words.js';
 import { COLUMN_CHOICES, COLUMN_WORDS, columnWarnings, columnProblem } from './engine/words.js';
 import { review as W } from './engine/words.js';
-import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer } from './engine/krisis/work.js';
+import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer } from './engine/krisis/work.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
 let worker, files = [], input = null, targets = {}, busy = false;
@@ -92,14 +92,16 @@ function start(action, earlier) {
   $('phase').textContent = 'Starting…';
   Object.assign(state, { phase: 'running', action, target, report: null, outputs: null, error: null });
   const base = $('base').value.trim() || undefined;
+  // Krisis: a review on the page is put away (and its keys with it) while anything but its own finishing runs.
+  if (action !== 'apply') $('review').hidden = true;
   // The version check: the files chosen are the later version, and `earlier` the one it is compared with.
   if (action === 'compare') worker.postMessage({ cmd: 'compare', earlier, later: files, options: { base } });
   else if (action === 'publish') onlyKeys().then(
     (only) => worker.postMessage({ cmd: 'publish', part: $('part').value, files, previous: [...$('previous').files], options: { base, ...publishOptions(), only } }),
     (e) => fail(`the list of places to include could not be read (${e.message || e}).`));
   // Match review (Krisis): the files chosen are the subjects, and `earlier` the other dataset; to finish, the review is applied to them.
-  else if (action === 'match') worker.postMessage({ cmd: 'match', subjects: files, others: earlier, options: matchOptions() });
-  else if (action === 'apply') worker.postMessage({ cmd: 'apply', subjects: files, work, options: { output: earlier, reviewer: reviewer() } });
+  else if (action === 'match') worker.postMessage({ cmd: 'match', subjects: files, others: earlier, options: { ...matchOptions(), base } });
+  else if (action === 'apply') worker.postMessage({ cmd: 'apply', subjects: files, work, options: { output: earlier, reviewer: reviewer(), base } });
   else worker.postMessage({ cmd: 'run', files, action, target, options: { base, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked,
     // Hermes: the matching of columns shown, as chosen (the same JSON as the command line's --columns).
     ...(isTable(input) && columns ? { columns: { ...columns.mapping } } : {}) } });
@@ -310,7 +312,11 @@ $('target').onchange = () => { document.querySelector('[data-for="ntriples-outpu
 let work = null, workName = 'review.krisis.json', order = [], cursor = 0, current = 0, basisFor = null, allDone = false;
 const REVIEWER_KEY = 'plato-tools.reviewer';
 function remembered() { try { return JSON.parse(localStorage.getItem(REVIEWER_KEY)) || {}; } catch { return {}; } }
-function remember() { try { localStorage.setItem(REVIEWER_KEY, JSON.stringify(reviewer() || {})); } catch {} }
+function remember() {
+  const r = reviewer() || {};
+  if (r.orcid && reviewerProblem()) delete r.orcid;   // an ORCID that is not one is not remembered
+  try { localStorage.setItem(REVIEWER_KEY, JSON.stringify(r)); } catch {}
+}
 /** The reviewer, as a PLATO contributor ({ name, orcid? }), or null until a name is given. */
 function reviewer() {
   const name = $('reviewer').value.trim();
@@ -318,6 +324,12 @@ function reviewer() {
   let orcid = $('orcid').value.trim();
   if (/^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/.test(orcid)) orcid = 'https://orcid.org/' + orcid;
   return name ? { name, ...(orcid ? { orcid } : {}) } : null;
+}
+/** What is wrong with the reviewer given, in words, or null: the engine's own rule (checkReviewer), so the page never saves what a resumed review would refuse. */
+function reviewerProblem() {
+  const r = reviewer();
+  if (!r) return null;
+  try { checkReviewer(r); return null; } catch { return W.badOrcid; }
 }
 function matchOptions() {
   const num = (id) => { const v = parseFloat($(id).value); return Number.isFinite(v) ? v : undefined; };
@@ -397,6 +409,7 @@ function render(focus) {
     + `<p>${escapeHtml(W.candidates(cands.length))}</p><ol class="candidates">`
     + cands.map((c, i) => candidateHtml(c, i)).join('') + '</ol>';
   if (basisFor) { $('basis-input')?.focus(); return; }
+  if (!$('review-who').hidden) { $('review-name').focus(); return; }   // while the name is asked, it keeps the focus
   if (focus) box.focus({ preventScroll: false });
 }
 function candidateHtml(c, i) {
@@ -459,6 +472,7 @@ for (const id of ['reviewer', 'orcid']) $(id).addEventListener('change', remembe
 { const r = remembered(); $('reviewer').value = r.name || ''; $('orcid').value = r.orcid || ''; }
 $('save-review').onclick = () => {
   if (!work) return;
+  const problem = reviewerProblem(); if (problem) return showWarning(problem);
   work.cursor = cursor;
   const who = reviewer(); if (who) work.reviewer = who;
   saveBlob(new Blob([serialiseWork(work)], { type: 'application/json' }), workName);
@@ -468,6 +482,7 @@ $('finish').onclick = () => {
   if (!work) return;
   if (!input?.format) return showWarning(W.noDataset);
   if (!reviewer()) return askName(true, W.nameNeeded);
+  const problem = reviewerProblem(); if (problem) return showWarning(problem);
   work.cursor = cursor; work.reviewer = reviewer();
   start('apply', document.querySelector('input[name="review-output"]:checked').value);
 };
