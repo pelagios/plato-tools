@@ -71,10 +71,14 @@ test('check: several inputs in one run, each reported, then the total; any probl
   assert.match(r.out, /\nChecked 3 inputs: 2 without problems, 1 with problems \(1 problem in all\)\.\n$/);
 });
 test('check: an input that cannot be read makes it 2, and the others are still checked', () => {
-  const r = cli('check', `${TABLES}/customs`, join(scratch(), 'no-such-file.nt'), `${PLATO_REPO}/README.md`);
+  // Prose that is no data format, written here: PLATO's README once served, until it began with an
+  // HTML <picture> element, which reads as the start of an N-Triples line.
+  const prose = join(scratch(), 'notes.md');
+  writeFileSync(prose, '# Notes\n\nSome prose about places, which is not data in any format.\n');
+  const r = cli('check', `${TABLES}/customs`, join(scratch(), 'no-such-file.nt'), prose);
   assert.equal(r.code, 2, r.out + r.err);
   assert.match(r.out, /no-such-file\.nt\n {2}Could not be checked: There is no such file or directory\./);
-  assert.match(r.out, /README\.md\n {2}Could not be checked: The format of this file could not be recognised\./);
+  assert.match(r.out, /notes\.md\n {2}Could not be checked: The format of this file could not be recognised\./);
   assert.match(r.out, /No problems found\. Read 2 places/);
   assert.match(r.out, /Checked 3 inputs: 1 without problems, 0 with problems, 2 could not be checked\./);
 });
