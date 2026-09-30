@@ -766,12 +766,11 @@ export function georefNote(record, { fetched } = {}) {
 const okSize = (d) => d && Number.isFinite(d.width) && Number.isFinite(d.height) && d.width > 0 && d.height > 0;
 
 /**
- * [x, y, w, h] padded by 2% of its larger side (at least 1), rounded outwards, then kept within size
- * when known (and at 0 or more always). A TypeError when nothing of the padded box is left: the
- * region is not on the canvas (or image) at all, which is the caller's mistake.
+ * [x, y, w, h] padded by `pad` pixels on every side (0 for none), rounded outwards to whole pixels,
+ * then kept within size when known (and at 0 or more always). A TypeError when nothing of the padded
+ * box is left: the region is not on the canvas (or image) at all, which is the caller's mistake.
  */
-function paddedXywh([x, y, w, h], size) {
-  const pad = Math.max(1, 0.02 * Math.max(w, h));
+function paddedXywh([x, y, w, h], size, pad) {
   const clamp = (v, max) => Math.min(Math.max(0, v), max);
   const W = okSize(size) ? size.width : Infinity, H = okSize(size) ? size.height : Infinity;
   const x0 = clamp(Math.floor(x - pad + 1e-9), W), y0 = clamp(Math.floor(y - pad + 1e-9), H);
@@ -782,25 +781,28 @@ function paddedXywh([x, y, w, h], size) {
   return `${x0},${y0},${x1 - x0},${y1 - y0}`;
 }
 
-/** The locator for an explicit pixel bbox [x, y, w, h] in record.space (see georefCitation). */
-function regionLocator(record, region) {
+/** The locator for an explicit pixel bbox [x, y, w, h] in record.space, padded by pad canvas pixels (see georefCitation). */
+function regionLocator(record, region, pad) {
   if (!Array.isArray(region) || region.length !== 4 || !region.every(Number.isFinite) || region[2] <= 0 || region[3] <= 0) {
     throw new TypeError(`The region must be a pixel box [x, y, w, h] with a positive width and height (it was ${JSON.stringify(region)}).`);
   }
   const { canvasSize: c, imageSize: i } = record;
   const [x, y, w, h] = region;
   if (record.canvasId) {
-    if (record.space === 'canvas') return `${record.canvasId}#xywh=${paddedXywh(region, c)}`;
+    if (record.space === 'canvas') return `${record.canvasId}#xywh=${paddedXywh(region, c, pad)}`;
     if (okSize(c) && okSize(i)) {
       const sx = c.width / i.width, sy = c.height / i.height;
-      return `${record.canvasId}#xywh=${paddedXywh([x * sx, y * sy, w * sx, h * sy], c)}`;
+      return `${record.canvasId}#xywh=${paddedXywh([x * sx, y * sy, w * sx, h * sy], c, pad)}`;
     }
   }
   if (!record.imageServiceId) return record.canvasId ?? undefined;
-  if (record.space === 'image') return `${record.imageServiceId}#xywh=${paddedXywh(region, i)}`;
+  // On the image, the padding is converted from canvas pixels where both sizes are known; with no
+  // canvas size there is nothing to convert from, and it is taken in image pixels.
+  const along = okSize(c) && okSize(i) ? Math.max(i.width / c.width, i.height / c.height) : 1;
+  if (record.space === 'image') return `${record.imageServiceId}#xywh=${paddedXywh(region, i, pad * along)}`;
   if (okSize(c) && okSize(i)) {
     const sx = i.width / c.width, sy = i.height / c.height;
-    return `${record.imageServiceId}#xywh=${paddedXywh([x * sx, y * sy, w * sx, h * sy], i)}`;
+    return `${record.imageServiceId}#xywh=${paddedXywh([x * sx, y * sy, w * sx, h * sy], i, pad * along)}`;
   }
   return record.canvasId ?? undefined;
 }
@@ -816,18 +818,24 @@ function regionLocator(record, region) {
  * image pixels.
  *
  * @param options.region A pixel box [x, y, w, h] in record.space, overriding record.canvasRegion:
- *   the locator is then the canvas "#xywh=…" of that box padded by 2% of its larger side (at least
- *   1 pixel), rounded outwards and kept within the canvas, in canvas units (converted from image
- *   pixels when needed); on the image service, in image pixels, when there is no canvas or its
- *   size is unknown. A TypeError when no part of the padded box is on the canvas (or image).
+ *   the locator is then the canvas "#xywh=…" of that box, padded by `pad`, rounded outwards to whole
+ *   pixels and kept within the canvas, in canvas units (converted from image pixels when needed); on
+ *   the image service, in image pixels, when there is no canvas or its size is unknown. A TypeError
+ *   when no part of the padded box is on the canvas (or image).
+ * @param options.pad Padding on every side of `region`, in canvas pixels (default 0: none); on the
+ *   image service it is converted to image pixels (by the larger of the two scales), or taken as
+ *   image pixels when the canvas size is unknown. A TypeError when it is not a number of 0 or more,
+ *   or when it is more than 0 without a region to pad.
  */
-export function georefCitation(record, { region } = {}) {
+export function georefCitation(record, { region, pad = 0 } = {}) {
+  if (typeof pad !== 'number' || !Number.isFinite(pad) || pad < 0) throw new TypeError(`pad must be a number of canvas pixels, 0 or more (it was ${JSON.stringify(pad)}).`);
+  if (pad > 0 && region === undefined) throw new TypeError('pad pads the region option, and no region was given: give the pixel box to pad as region.');
   const id = record.manifestId || record.imageServiceId;
   const title = record.title
     || (record.manifestId ? `The georeferenced map (IIIF manifest ${record.manifestId})` : `The georeferenced map (IIIF image ${record.imageServiceId})`);
   const source = { ...(id ? { '@id': id } : {}), title, authorityType: 'source' };
   let locator;
-  if (region !== undefined) locator = regionLocator(record, region);
+  if (region !== undefined) locator = regionLocator(record, region, pad);
   else if (record.region && record.canvasId && record.canvasRegion) locator = `${record.canvasId}#xywh=${record.canvasRegion}`;
   else if (record.region && record.space === 'image' && record.imageServiceId) locator = `${record.imageServiceId}#xywh=${record.region}`;
   else if (record.canvasId) locator = record.canvasId;

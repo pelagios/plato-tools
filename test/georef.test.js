@@ -662,38 +662,70 @@ test('georefCitation: exact shapes, valid against the pinned PLATO schema (and a
   assert.equal(citationValid({ source: 'not an address' }), false);
 });
 
-test('georefCitation with a region: padded 2% (at least 1 px), rounded outwards, on the canvas; it overrides canvasRegion', async () => {
+test('georefCitation with a region: unpadded by default, rounded outwards, on the canvas; it overrides canvasRegion', async () => {
   const g = await rocque();
   const img = (await toWorld(g, pt([5000, 4000]), { space: 'image' })).record;
   const cnv = (await toWorld(g, pt([5000, 4000]), { space: 'canvas' })).record;
-  // 2% of 2000 = 40 on every side.
-  assert.equal(georefCitation(cnv, { region: [3000, 3000, 2000, 1000] }).locator, `${ROCQUE_CANVAS}#xywh=2960,2960,2080,1080`);
-  assert.equal(georefCitation(img, { region: [3000, 3000, 2000, 1000] }).locator, `${ROCQUE_CANVAS}#xywh=2960,2960,2080,1080`);
-  // Fractional edges are rounded outwards: 2% of 10.5 is 0.21, so 1 px (the minimum): 99.5 -> 98, 110.0+1 -> 111.
-  assert.equal(georefCitation(cnv, { region: [99.5, 50, 10.5, 3] }).locator, `${ROCQUE_CANVAS}#xywh=98,49,13,5`);
-  // 2% of 100 = 2 exactly, not rounded out further.
-  assert.equal(georefCitation(cnv, { region: [10, 10, 100, 50] }).locator, `${ROCQUE_CANVAS}#xywh=8,8,104,54`);
+  // No padding unless asked for: the box itself.
+  assert.equal(georefCitation(cnv, { region: [3000, 3000, 2000, 1000] }).locator, `${ROCQUE_CANVAS}#xywh=3000,3000,2000,1000`);
+  assert.equal(georefCitation(img, { region: [3000, 3000, 2000, 1000] }).locator, `${ROCQUE_CANVAS}#xywh=3000,3000,2000,1000`);
+  assert.deepEqual(georefCitation(cnv, { region: [3000, 3000, 2000, 1000], pad: 0 }), georefCitation(cnv, { region: [3000, 3000, 2000, 1000] }));
+  // Fractional edges are rounded outwards: 99.5 -> 99, 110.0 stays: 11 wide.
+  assert.equal(georefCitation(cnv, { region: [99.5, 50, 10.5, 3] }).locator, `${ROCQUE_CANVAS}#xywh=99,50,11,3`);
   // Kept within the canvas.
   assert.equal(georefCitation(cnv, { region: [0, 0, 11436, 6268] }).locator, `${ROCQUE_CANVAS}#xywh=0,0,11436,6268`);
-  // From image pixels on a canvas at half the size: the box is halved, then padded in canvas units.
+  // From image pixels on a canvas at half the size: the box is halved, then rounded outwards.
   const half = await readGeoreference(ROCQUE, { manifest: scaledManifest(2) });
   const rh = (await toWorld(half, pt([5000, 4000]), { space: 'image' })).record;
-  assert.equal(georefCitation(rh, { region: [3001, 3001, 2001, 1001] }).locator, `${ROCQUE_CANVAS}#xywh=1480,1480,1042,542`);
+  assert.equal(georefCitation(rh, { region: [3001, 3001, 2001, 1001] }).locator, `${ROCQUE_CANVAS}#xywh=1500,1500,1001,501`);
   // It overrides canvasRegion; without it, canvasRegion is the control.
   const withRegion = (await toWorld(g, { xywh: '3000,3000,2000,1000' }, { space: 'canvas' })).record;
   assert.equal(georefCitation(withRegion).locator, `${ROCQUE_CANVAS}#xywh=3000,3000,2000,1000`);
-  assert.equal(georefCitation(withRegion, { region: [10, 10, 100, 50] }).locator, `${ROCQUE_CANVAS}#xywh=8,8,104,54`);
+  assert.equal(georefCitation(withRegion, { region: [10, 10, 100, 50] }).locator, `${ROCQUE_CANVAS}#xywh=10,10,100,50`);
   // No canvas: on the image service, in image pixels.
   const noCanvas = { ...img, canvasId: null, manifestId: null, canvasSize: null };
-  assert.equal(georefCitation(noCanvas, { region: [3000, 3000, 2000, 1000] }).locator, `${ROCQUE_IMAGE}#xywh=2960,2960,2080,1080`);
+  assert.equal(georefCitation(noCanvas, { region: [3000, 3000, 2000, 1000] }).locator, `${ROCQUE_IMAGE}#xywh=3000,3000,2000,1000`);
   // Canvas size unknown, box in image pixels: on the image service too.
-  assert.equal(georefCitation({ ...img, canvasSize: null }, { region: [3000, 3000, 2000, 1000] }).locator, `${ROCQUE_IMAGE}#xywh=2960,2960,2080,1080`);
+  assert.equal(georefCitation({ ...img, canvasSize: null }, { region: [3000, 3000, 2000, 1000] }).locator, `${ROCQUE_IMAGE}#xywh=3000,3000,2000,1000`);
   for (const c of [georefCitation(cnv, { region: [3000, 3000, 2000, 1000] }), georefCitation(noCanvas, { region: [1, 1, 5, 5] })]) {
     assert.ok(citationValid(c), JSON.stringify(citationValid.errors));
   }
   for (const bad of [[1, 2, 3], [1, 2, 0, 4], [1, 2, 3, -4], ['1', 2, 3, 4], 'x', [1, 2, NaN, 4]]) {
     assert.throws(() => georefCitation(cnv, { region: bad }), TypeError, JSON.stringify(bad));
   }
+});
+
+test('georefCitation pad: canvas pixels on every side, rounded outwards and clamped; converted on the image service', async () => {
+  const g = await rocque();
+  const img = (await toWorld(g, pt([5000, 4000]), { space: 'image' })).record;
+  const cnv = (await toWorld(g, pt([5000, 4000]), { space: 'canvas' })).record;
+  assert.equal(georefCitation(cnv, { region: [3000, 3000, 2000, 1000], pad: 40 }).locator, `${ROCQUE_CANVAS}#xywh=2960,2960,2080,1080`);
+  assert.equal(georefCitation(img, { region: [3000, 3000, 2000, 1000], pad: 40 }).locator, `${ROCQUE_CANVAS}#xywh=2960,2960,2080,1080`);
+  assert.equal(georefCitation(cnv, { region: [10, 10, 100, 50], pad: 2 }).locator, `${ROCQUE_CANVAS}#xywh=8,8,104,54`);
+  // A fractional pad: 99.5 - 0.5 = 99, 110 + 0.5 -> 111; 49.5 -> 49, 53.5 -> 54.
+  assert.equal(georefCitation(cnv, { region: [99.5, 50, 10.5, 3], pad: 0.5 }).locator, `${ROCQUE_CANVAS}#xywh=99,49,12,5`);
+  // Clamped to the canvas.
+  assert.equal(georefCitation(cnv, { region: [0, 0, 11436, 6268], pad: 10 }).locator, `${ROCQUE_CANVAS}#xywh=0,0,11436,6268`);
+  // Image pixels on a half-size canvas: halved, then padded in canvas pixels (1500.5 - 20 -> 1480).
+  const half = await readGeoreference(ROCQUE, { manifest: scaledManifest(2) });
+  const rh = (await toWorld(half, pt([5000, 4000]), { space: 'image' })).record;
+  assert.equal(georefCitation(rh, { region: [3001, 3001, 2001, 1001], pad: 20 }).locator, `${ROCQUE_CANVAS}#xywh=1480,1480,1041,541`);
+  // On the image service with both sizes known, 10 canvas pixels are 20 image pixels; the same pad
+  // taken as image pixels (2990) would be caught.
+  const onImage = { ...rh, canvasId: null, manifestId: null };
+  assert.equal(georefCitation(onImage, { region: [3000, 3000, 2000, 1000], pad: 10 }).locator, `${ROCQUE_IMAGE}#xywh=2980,2980,2040,1040`);
+  assert.notEqual(georefCitation(onImage, { region: [3000, 3000, 2000, 1000], pad: 10 }).locator, `${ROCQUE_IMAGE}#xywh=2990,2990,2020,1020`);
+  // With no canvas size there is nothing to convert from: image pixels.
+  const noCanvas = { ...img, canvasId: null, manifestId: null, canvasSize: null };
+  assert.equal(georefCitation(noCanvas, { region: [3000, 3000, 2000, 1000], pad: 40 }).locator, `${ROCQUE_IMAGE}#xywh=2960,2960,2080,1080`);
+  assert.ok(citationValid(georefCitation(cnv, { region: [3000, 3000, 2000, 1000], pad: 40 })));
+  // A pad that is not a number of 0 or more, or one with no region to pad, is a TypeError; the
+  // controls: 0 without a region is the plain citation, and a valid pad with a region is above.
+  for (const bad of [-1, NaN, Infinity, '2', null, true]) {
+    assert.throws(() => georefCitation(cnv, { region: [10, 10, 100, 50], pad: bad }), (e) => e instanceof TypeError && /pad must be/.test(e.message), String(bad));
+  }
+  assert.throws(() => georefCitation(cnv, { pad: 5 }), (e) => e instanceof TypeError && /no region was given/.test(e.message));
+  assert.deepEqual(georefCitation(cnv, { pad: 0 }), georefCitation(cnv));
 });
 
 test('georefAnnotationCitation: the annotation, cited for its method; valid against the pinned PLATO schema', async () => {
@@ -817,11 +849,17 @@ test('a citation region wholly off the canvas is a TypeError; one partly off is 
   assert.throws(() => georefCitation(cnv, { region: [100, 7000, 50, 50] }), TypeError);
   assert.throws(() => georefCitation(cnv, { region: [-500, -500, 100, 100] }), TypeError);
   assert.throws(() => georefCitation({ ...img, canvasId: null, manifestId: null, canvasSize: null }, { region: [12000, 100, 50, 50] }), TypeError);
-  // Partly beyond: cut at the edges. 2% of 100 = 2: 11398..11436 and 98..152.
-  assert.equal(georefCitation(cnv, { region: [11400, 100, 100, 50] }).locator, `${ROCQUE_CANVAS}#xywh=11398,98,38,54`);
-  assert.equal(georefCitation(cnv, { region: [-50, -20, 100, 50] }).locator, `${ROCQUE_CANVAS}#xywh=0,0,52,32`);
+  // Padding does not bring a box wholly off the canvas back onto it unless it reaches the canvas.
+  assert.throws(() => georefCitation(cnv, { region: [12000, 100, 50, 50], pad: 100 }), TypeError);
+  // Partly beyond: cut at the edges: 11400..11436 and 100..150; padded by 2, 11398..11436 and 98..152.
+  assert.equal(georefCitation(cnv, { region: [11400, 100, 100, 50] }).locator, `${ROCQUE_CANVAS}#xywh=11400,100,36,50`);
+  assert.equal(georefCitation(cnv, { region: [11400, 100, 100, 50], pad: 2 }).locator, `${ROCQUE_CANVAS}#xywh=11398,98,38,54`);
+  assert.equal(georefCitation(cnv, { region: [-50, -20, 100, 50] }).locator, `${ROCQUE_CANVAS}#xywh=0,0,50,30`);
+  assert.equal(georefCitation(cnv, { region: [-50, -20, 100, 50], pad: 2 }).locator, `${ROCQUE_CANVAS}#xywh=0,0,52,32`);
+  // Control: a box just off the edge that the padding reaches is cited (11436 - 11430 = 6 wide).
+  assert.equal(georefCitation(cnv, { region: [11440, 100, 10, 10], pad: 10 }).locator, `${ROCQUE_CANVAS}#xywh=11430,90,6,30`);
   // Control: inside the canvas, as before.
-  assert.equal(georefCitation(cnv, { region: [10, 10, 100, 50] }).locator, `${ROCQUE_CANVAS}#xywh=8,8,104,54`);
+  assert.equal(georefCitation(cnv, { region: [10, 10, 100, 50] }).locator, `${ROCQUE_CANVAS}#xywh=10,10,100,50`);
 });
 
 test('matchTarget: a picture at size "max" matches but is marked assumedFullSize; "full" is not marked', async () => {
