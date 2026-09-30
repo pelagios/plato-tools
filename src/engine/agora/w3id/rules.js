@@ -8,7 +8,7 @@
 // land on a file the site holds. Apache matches the Accept header as text and ignores q-values, so
 // the ORDER of the rules is the preference: a browser's Accept also contains */*, and the rule for
 // text/html must come before the fallback for */* or every browser is sent JSON-LD (decision D6).
-import { SITE } from '../address.js';
+import { SITE, SUFFIXES } from '../address.js';
 
 // A key as a rule may capture it: the characters address.js allows (SAFE), not starting with '.'
 // (keyProblem refuses those), so a rule for place/ cannot capture a hidden file, '..', a deeper
@@ -17,9 +17,9 @@ export const KEY = '[A-Za-z0-9_~-][A-Za-z0-9._~-]*';
 // A release name (releaseProblem) and a file name in a release or download/ are the same shape: one
 // path segment, so release/<name>/<file> cannot reach further.
 export const SEGMENT = KEY;
-// The suffixes that name one representation of a place or source. A key that itself ends in one
-// is read by the suffix rule as another key's file, so such keys are refused (w3id.js).
-export const SUFFIXES = ['jsonld', 'ttl', 'html'];
+// The suffixes that name one representation of a place or source live in address.js, whose
+// servable() refuses keys ending in one: the suffix rule would read such a key as another's file.
+export { SUFFIXES };
 
 // What a browser sends (Firefox's and Chrome's, less their image types): text/html first, and
 // */* at the end, which is why the order of the rules matters.

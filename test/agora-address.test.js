@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, existsSync, writeFileSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { unzipSync, strFromU8 } from 'fflate';
-import { scheme, baseKind, normaliseBase, keyProblem, releaseProblem, caseGuard } from '../src/engine/agora/address.js';
+import { scheme, baseKind, normaliseBase, keyProblem, releaseProblem, caseGuard, servable, servability, sourcesOf, SUFFIXES } from '../src/engine/agora/address.js';
 import { openTree, put } from '../src/engine/agora/tree.js';
 import { tableIds } from '../src/formats/tables.js';
 import { NodeHost } from '../src/node/host.js';
@@ -63,6 +63,68 @@ test('keys that a static site cannot serve are found, and ordinary ones pass', (
   assert.equal(releaseProblem('data-2026-10-01'), null);
   assert.equal(releaseProblem('0.7.1'), null);
   for (const bad of ['', '.x', 'a/b', 'a b', undefined]) assert.ok(releaseProblem(bad), String(bad));
+});
+
+test('one rule says which addresses the site and the w3id rules can serve, and why not', () => {
+  const s = scheme('https://w3id.org/pelagios/customs/');
+  const B = s.base;
+  const cases = [
+    ['place', B + 'place/bristol#a-1', { key: 'bristol' }],
+    ['source', B + 'source/tna-e190', { key: 'tna-e190' }],
+    ['source', B + 'source/gazetteer/geonames', { problem: 'key', why: /more than one part/ }],
+    ['place', B + 'place/kent/dover', { problem: 'key', why: /more than one part/ }],
+    ['source', B + 'volume/12', { problem: 'elsewhere', why: /not under https:\/\/w3id\.org\/pelagios\/customs\/source\// }],
+    ['place', B + 'places/p-1', { problem: 'elsewhere' }],
+    ['place', B + 'source/x', { problem: 'elsewhere' }],   // a source's address is not a place's
+    ['source', 'https://other.org/source/x', { problem: 'outside' }],
+    ['place', B + 'place/london.html', { problem: 'key', why: /ends in \.jsonld, \.ttl, \.html/, suffix: true }],
+    ['place', B + 'place/London.JSONLD', { problem: 'key', suffix: true }],
+    ['place', B + 'place/St%20Ives', { problem: 'key', why: /characters other than/ }],
+    ['place', B + 'place/', { problem: 'key', why: /is empty/ }],
+    ['place', B + 'place/.hidden', { problem: 'key', why: /starts with '\.'/ }],
+  ];
+  for (const [part, iri, want] of cases) {
+    const r = servable(s, part, iri);
+    if (want.key) { assert.deepEqual(r, { key: want.key }, iri); continue; }
+    assert.equal(r.key, undefined, iri);
+    assert.equal(r.problem, want.problem, iri);
+    if (want.why) assert.match(r.why, want.why, iri);
+    assert.equal(!!r.suffix, !!want.suffix, iri);
+  }
+  // placeKey and sourceKey are servable's key, or null.
+  assert.equal(s.placeKey(B + 'place/london.html'), null);
+  assert.equal(s.placeKey(B + 'place/london'), 'london');
+  assert.deepEqual(SUFFIXES, ['jsonld', 'ttl', 'html']);
+});
+
+test('servability judges each address once, and finds keys that differ only in case', () => {
+  const s = scheme('https://w3id.org/x/');
+  const f = servability(s);
+  assert.deepEqual(f.check('place', s.base + 'place/Bristol'), { key: 'Bristol' });
+  assert.deepEqual(f.check('place', s.base + 'place/Bristol#a-1'), { key: 'Bristol', seen: true });
+  assert.deepEqual(f.check('source', s.base + 'source/bristol'), { key: 'bristol' });   // another part
+  const twin = f.check('place', s.base + 'place/bristol');
+  assert.equal(twin.problem, 'case');
+  assert.equal(twin.other, s.base + 'place/Bristol');
+  assert.equal(f.check('place', s.base + 'place/bristol').seen, true);
+  const bad = f.check('place', s.base + 'place/a/b');
+  assert.equal(bad.problem, 'key');
+  assert.equal(bad.seen, undefined);
+  assert.equal(f.check('place', s.base + 'place/a/b').seen, true);
+});
+
+test('the sources of an attestation: its sources, its citations\' sources, and what they derive from', () => {
+  const att = {
+    sources: ['s1', { '@id': 's2', derivedFrom: [{ '@id': 's3', derivedFrom: 's4' }] }],
+    citations: [{ source: 's5' }, { source: { '@id': 's6' } }, 'not a citation object'],
+    names: [{ toponym: 'not a source', source: 'nor this' }],
+  };
+  const ids = [...sourcesOf(att)].map((x) => (typeof x === 'string' ? x : x['@id']));
+  assert.deepEqual(ids, ['s1', 's2', 's3', 's4', 's5', 's6']);
+  assert.deepEqual([...sourcesOf(null)], []);
+  // A loop of derivations ends.
+  const loop = { '@id': 'L' }; loop.derivedFrom = loop;
+  assert.equal([...sourcesOf({ sources: [loop] })].length, 21);   // depths 0 to 20
 });
 
 test('keys differing only in case collide; the same key twice does not', () => {

@@ -20,7 +20,7 @@
 // written from what the passes gathered. (RDF and attestation-centric input are the exception: the
 // engine hands their records over from its working database without pausing, so their pages queue
 // in memory until written. At scale, give the site PLATO JSON Lines, as publish mint writes.)
-import { SITE, PARTS, keyProblem, caseGuard } from './address.js';
+import { SITE, PARTS, servability, sourcesOf, unservableExample } from './address.js';
 import { collectWithdrawn, resolveWithdrawn } from '../../formats/shared.js';
 import { placeDocument, sourceDocument, descriptionDocument, Turtle } from './site/linked.js';
 import { schemaOrgDataset } from './fair.js';
@@ -58,7 +58,7 @@ export const TEXT = {
   'too-big-for-pages': 'The site would be larger than GitHub Pages serves (1 GB a site). Leave out Turtle if it was asked for, publish a subset of the places (--only, a file of the keys of the places to include; the rest are still in the downloads), or build the site with the command line and host it elsewhere.',
   'too-big-for-pages-cli': 'The site is larger than GitHub Pages serves (1 GB a site), so GitHub will refuse to deploy it. It is written all the same, to serve from somewhere else; for GitHub Pages, leave out Turtle, or publish a subset of the places (--only).',
   'stopped-at-limit': 'The site grew past what GitHub Pages serves (1 GB) while it was written, beyond its estimate, so no site was made. Publish a subset of the places (--only), or build it with the command line.',
-  'key-not-servable': 'A place or source address ends in something a static site cannot serve as a file name, so the address would not lead to its page: it has no page or data file. Give it an identifier of letters, digits and . _ ~ - only (in the spreadsheets, its place_id or source_id).',
+  'key-not-servable': "A place or source address ends in something a static site cannot serve as a file name (more than one part after place/ or source/, characters other than letters, digits and . _ ~ -, a leading '.', or .jsonld, .ttl or .html, which the w3id rules read as a format), so the address would not lead to its page: it has no page or data file. Give it an identifier of one part, of letters, digits and . _ ~ - only (in the spreadsheets, its place_id or source_id).",
   'keys-differ-in-case': 'Two place or source addresses differ only in the case of their letters. On macOS and Windows, and in many zips, they would be one file, so neither has a page: give them identifiers that differ in more than case.',
   // Published, the addresses are frozen (Round 3, A3): the rest of the site is made, the places are
   // listed on its home page and its 404 page as held in the downloads, and the workflow deploys it.
@@ -67,6 +67,7 @@ export const TEXT = {
   'attestations-without-ids': 'Attestations have no address of their own (@id), so nothing can link to them, retract them or replace them, and no site is made. Give them addresses first: plato-tools publish mint writes a copy of the dataset in which every attestation has one; commit that copy. The site never makes addresses itself.',
   'attestations-without-ids-draft': 'Attestations have no address of their own (@id). That will do for a draft, but before publishing give them addresses (plato-tools publish mint), so that each can be linked to, retracted or replaced.',
   'place-not-under-base': "A place's address is not under the dataset's base address (its place/ part), so this site cannot serve it and it has no page. Its record is still in the downloads.",
+  'sources-not-served': "Sources have addresses under the dataset's base address but not of the form <base>source/<id>, so the site has no page for them and their addresses will not lead to one; what the dataset says of them is in the downloads. The example names them.",
   'attestation-address-elsewhere': "An attestation's address is not a fragment of its place's address (<place>#…), so it does not lead to the place's page. The attestation is shown there, but its address will not find it.",
   'places-left-out': "Places are left out of the site (it holds only those in the --only list). Their addresses still redirect to where their pages would be, where GitHub Pages shows the site's 404 page: it explains, and points to the downloads, which hold every place.",
   'only-unknown': 'Keys in the --only list match no place of the dataset, so they select nothing.',
@@ -116,12 +117,11 @@ const placeCost = (size, turtle) => size * (FACTORS.jsonld + FACTORS.html + (tur
 export function create(ctx) {
   const { rep, options } = ctx;
   const only = Array.isArray(options.only) ? new Set(options.only.map((k) => String(k).trim()).filter(Boolean)) : null;
-  const guard = caseGuard();
   // What the check pass learns: which places and sources are served, and at what cost.
   const served = new Set(), bad = new Set(), onlySeen = new Set();
   // The key of every place met, so that a second record with it is not written over the first.
   const seenPlace = new Map();        // key -> { iri, label, listed } of its first record
-  const sources = new Map();          // key -> { iri, obj, n, places: [{ key, label, served }], last }, or null when unservable
+  const sources = new Map();          // key -> { iri, obj, n, places: [{ key, label, served }], last }
   const idrs = new Map();             // place address -> identity matches the dataset lists apart from it
   const withdrawals = new Map();
   let places = 0, leftOut = 0, notUnder = 0, unidentified = 0, elsewhere = 0, jsonAll = 0, keptIdrs = 0, idrsDropped = false;
@@ -140,43 +140,41 @@ export function create(ctx) {
     const published = ctx.gazetteer?.status === 'published';
     rep.add(published ? 'warning' : 'error', kind, TEXT[published ? kind + '-published' : kind], example);
   };
-  const addKey = (part, key, iri, label) => {
-    const problem = keyProblem(key);
-    if (problem) {
-      say('key-not-servable', `${iri}: its last part ${problem}`); bad.add(part + '/' + key);
-      if (part === 'place') unserved(iri, label);
-      return false;
-    }
-    const other = guard.add(part, key);
-    if (other) {
-      say('keys-differ-in-case', `${sc.base}${part}/${other} and ${iri}`);
-      if (part === 'place') { if (!bad.has('place/' + other)) unserved(sc.base + 'place/' + other, null); if (!bad.has('place/' + key)) unserved(iri, label); }
+  // Whether the site can serve a place's or source's address, by the rule the FAIR report and the
+  // w3id rules use too (servability in address.js): its key, or null. What it cannot serve is
+  // reported the first time it is met, and a place is listed on the home page as held in the
+  // downloads. Two keys that differ only in case are both left out: which of them the one file is
+  // would depend on the system that unpacks the site.
+  let found = null;
+  const sourcesElsewhere = { n: 0, eg: [] };
+  const judge = (part, iri, label) => {
+    const r = found.check(part, iri);
+    if (r.key) return bad.has(part + '/' + r.key) ? null : r.key;
+    if (r.seen) return null;
+    if (r.problem === 'elsewhere' && part === PARTS.source) { sourcesElsewhere.n++; if (sourcesElsewhere.eg.length < 5) sourcesElsewhere.eg.push(iri.split('#')[0]); }
+    else if (r.problem === 'key') {
+      say('key-not-servable', unservableExample(iri, r));
+      if (part === PARTS.place) unserved(iri, label);
+    } else if (r.problem === 'case') {
+      say('keys-differ-in-case', unservableExample(iri, r));
+      const pre = sc.base + part + '/';
+      const other = r.other.slice(pre.length), key = iri.split('#')[0].slice(pre.length);
+      if (part === PARTS.place) { if (!bad.has('place/' + other)) unserved(r.other, null); unserved(iri, label); }
       bad.add(part + '/' + key); bad.add(part + '/' + other);
-      return false;
     }
-    return !bad.has(part + '/' + key);
+    return null;
   };
-  // Every source an attestation cites: directly, through a citation, or as what another is derived from.
-  function* walkSource(s) {
-    if (!s) return;
-    yield s;
-    if (typeof s === 'object') for (const d of [].concat(s.derivedFrom || [])) yield* walkSource(d);
-  }
-  function* eachSource(att) {
-    for (const s of [].concat(att.sources || [])) yield* walkSource(s);
-    for (const c of [].concat(att.citations || [])) if (c && typeof c === 'object') yield* walkSource(c.source);
-  }
   const noteSources = (rec, placeKey, isServed) => {
     for (const att of [].concat(rec.attestations || [])) {
       if (!att || typeof att !== 'object') continue;
-      for (const s of eachSource(att)) {
+      for (const s of sourcesOf(att)) {
         const iri = typeof s === 'string' ? s : s && s['@id'];
-        const key = sc.sourceKey(iri);
+        // A source outside the base is another dataset's, cited: not this site's to serve.
+        if (typeof iri !== 'string' || !iri.startsWith(sc.base)) continue;
+        const key = judge(PARTS.source, iri);
         if (!key) continue;
         let e = sources.get(key);
-        if (e === null) continue;
         if (!e) {
-          if (!addKey('source', key, iri)) { sources.set(key, null); continue; }
           e = { iri, obj: null, n: 0, places: [], last: null };
           sources.set(key, e);
           // A source's JSON-LD carries the context its keys are read under, some 2.5 KB (sourceDocument).
@@ -192,7 +190,7 @@ export function create(ctx) {
   };
 
   return {
-    header() { sc = ctx.scheme; },
+    header() { sc = ctx.scheme; if (sc) found = servability(sc); },
     // The check pass: measure, and learn which places and sources the site will serve.
     event(ev) {
       if (!sc) return;
@@ -210,10 +208,13 @@ export function create(ctx) {
       collectWithdrawn(atts, withdrawals);
       const size = JSON.stringify(rec).length;
       jsonAll += size;
-      const key = sc.placeKey(rec['@id']);
+      // Keyed by what follows <base>place/, servable or not, without any fragment.
+      const pre = sc.base + PARTS.place + '/';
+      const addr = typeof rec['@id'] === 'string' ? rec['@id'].split('#')[0] : null;
+      const key = addr !== null && addr.startsWith(pre) ? addr.slice(pre.length) : null;
       // A second record for a place's key (the same address, or one that differs after '#'): its
       // files would be written over the first's, or fail because they exist. It is in the downloads.
-      if (key && seenPlace.has(key)) {
+      if (key !== null && seenPlace.has(key)) {
         say('duplicate-place', rec['@id']);
         // Listed once for each place, however many records repeat it, by the first record's address.
         const first = seenPlace.get(key);
@@ -223,14 +224,15 @@ export function create(ctx) {
         }
         return;
       }
-      if (key) seenPlace.set(key, { iri: rec['@id'], label: rec.label, listed: false });
+      if (key !== null) seenPlace.set(key, { iri: rec['@id'], label: rec.label, listed: false });
       places++;
       for (const x of atts) {
         if (typeof x['@id'] !== 'string') unidentified++;
         else if (typeof rec['@id'] === 'string' && !x['@id'].startsWith(rec['@id'].split('#')[0] + '#')) elsewhere++;
       }
-      if (!key) { notUnder++; noteSources(rec, null, false); return; }
-      const ok = addKey('place', key, rec['@id'], rec.label);
+      // Not under <base>place/ at all (outside the base, or elsewhere under it): no page, a warning.
+      if (key === null) { notUnder++; noteSources(rec, null, false); return; }
+      const ok = judge(PARTS.place, rec['@id'], rec.label) !== null;
       if (only && !only.has(key)) { leftOut++; noteSources(rec, key, false); return; }
       if (only) onlySeen.add(key);
       if (ok) { served.add(key); estimate += placeCost(size, options.turtle); }
@@ -242,7 +244,8 @@ export function create(ctx) {
       // workflow could read as more than an address (javascript:, a quote, a space).
       if (options.siteUrl && siteTarget({ siteUrl: options.siteUrl }).error) { rep.error('bad-site-url', TEXT['bad-site-url'], String(options.siteUrl)); return; }
       // A place that collided in case with a later one was counted as served before the collision was seen.
-      for (const b of bad) if (b.startsWith('place/')) served.delete(b.slice(6));
+      // So was a source, which is not written either.
+      for (const b of bad) if (b.startsWith('place/')) served.delete(b.slice(6)); else sources.delete(b.slice(7));
       const g = ctx.gazetteer;
       const published = g.status === 'published';
       // D4: addresses are minted before the dataset is committed, never while the site is built.
@@ -251,6 +254,7 @@ export function create(ctx) {
         rep.add('warning', 'attestations-without-ids', TEXT['attestations-without-ids-draft'], undefined, unidentified);
       }
       if (notUnder) rep.add('warning', 'place-not-under-base', TEXT['place-not-under-base'], `not under ${sc.base}place/`, notUnder);
+      sourcesElsewhere.eg.forEach((e, i) => rep.add('warning', 'sources-not-served', TEXT['sources-not-served'], e, i === 0 ? sourcesElsewhere.n - sourcesElsewhere.eg.length + 1 : 1));
       if (elsewhere) rep.add('warning', 'attestation-address-elsewhere', TEXT['attestation-address-elsewhere'], undefined, elsewhere);
       if (only) {
         const unknown = [...only].filter((k) => !onlySeen.has(k));
@@ -398,7 +402,6 @@ export function create(ctx) {
       // The sources, from what the check pass gathered.
       let sourcePages = 0;
       for (const [key, s] of sources) {
-        if (!s) continue;
         const f = sc.files(PARTS.source, key);
         await put(f.jsonld, JSON.stringify(sourceDocument(s.obj, s.iri, ctx.env.resources.context), null, 1) + '\n');
         await put(f.html, sourcePage(s, { gazetteer: g, draft, turtle: !!turtle, key, iri: s.iri, href: href('../../') }));

@@ -245,23 +245,35 @@ test('a release without its repository is an error and writes nothing; control: 
 
 test('addresses the rules cannot reach are found: bad characters, a deeper path, a suffix, a case twin; control: none in the clean dataset', async () => {
   const r = await run(antonine({ edit: (d) => {
+    // Added, not renamed, so that the dataset stays one the check passes (a renamed place leaves
+    // relations naming it behind): the rules are then written, and the findings are all there is.
     const p = d.spatialEntities;
-    p[0]['@id'] = BASE + 'place/St%20Albans';
-    p[1]['@id'] = BASE + 'place/kent/dover';
-    p[2]['@id'] = BASE + 'place/london.html';
-    p[3]['@id'] = BASE + 'place/Iter-III';
-    p[4]['@id'] = BASE + 'place/iter-iii';
-    p[5]['@id'] = 'https://elsewhere.org/place/x';
+    const add = (id) => p.push({ '@id': id, label: id, attestations: [{ names: [{ toponym: 'X' }] }] });
+    for (const k of ['St%20Albans', 'kent/dover', 'london.html', 'Iter-III']) add(BASE + 'place/' + k);   // Iter-III: a case twin of iter-iii
+    add('https://elsewhere.org/place/x');
     p[6].attestations[0].citations = [{ source: BASE + 'source/a.b/c' }];
   } }));
   assert.equal(r.item('key-unreachable').count, 3, JSON.stringify(r.item('key-unreachable')));
   assert.ok(r.item('key-unreachable').examples.some((e) => e.startsWith(BASE + 'place/St%20Albans: its last part has characters')));
-  assert.equal(r.item('key-suffix').examples[0], BASE + 'place/london.html');
-  assert.deepEqual(r.item('key-case').examples, ['place/Iter-III and place/iter-iii']);
-  assert.equal(r.item('place-outside-base').severity, 'warning');
-  assert.equal(r.outputs.length, 0);
+  assert.ok(r.item('key-unreachable').examples.includes(BASE + 'place/kent/dover: its last part has more than one part'));
+  assert.match(r.item('key-suffix').examples[0], new RegExp('^' + BASE + 'place/london\\.html: its last part ends in \\.jsonld'));
+  assert.deepEqual(r.item('key-case').examples, [`${BASE}place/iter-iii and ${BASE}place/Iter-III: they differ only in capital letters`]);
+  // The dataset is published, so these addresses are frozen (A3): warnings, and the rules are
+  // written for the rest, with the count said in the README and the summary.
+  for (const k of ['key-unreachable', 'key-suffix', 'key-case', 'place-outside-base']) assert.equal(r.item(k).severity, 'warning', k);
+  assert.equal(r.report.errors, 0, JSON.stringify(r.report.items.filter((i) => i.severity === 'error')));
+  assert.equal(r.outputs.length, 1);
+  // A case twin is tested by neither address, since the site serves neither; the other places are.
+  const tsv = read(r, 'tests.tsv');
+  assert.doesNotMatch(tsv, /place\/iter-iii\b/i);
+  assert.match(tsv, /place\/iter-iv\b/);
+  assert.match(read(r, 'ids/antonine-test/README.md'), /\n5 addresses of the dataset are not of that form, so these rules cannot reach them; the site lists them as held in the downloads\./);
+  assert.ok(r.report.counts.said.includes('5 addresses these rules cannot reach; the site lists them as held in the downloads.'), r.report.counts.said.join('\n'));
   const clean = await run(antonine());
   for (const k of ['key-unreachable', 'key-suffix', 'key-case', 'place-outside-base']) assert.ok(!clean.kinds.includes(k), k);
+  assert.equal(clean.outputs.length, 1);
+  assert.doesNotMatch(read(clean, 'ids/antonine-test/README.md'), /cannot reach/);
+  assert.ok(!clean.report.counts.said.some((l) => /cannot reach/.test(l)) && clean.report.counts.said.length > 0);
 });
 
 test('every finding kind the part raises has its wording', () => {

@@ -9,14 +9,14 @@
 //   PULL_REQUEST.md, STEPS.md    the pull request, and how to test and open it (Agora never opens it)
 //
 // The rules are the same for every key, so they do not grow with the dataset: the dataset is read
-// to check that every place's and source's address is one the rules can reach (keyProblem, no key
-// read as a suffix, no two keys the same but for case), and for a few real keys to test with.
+// to find the places' and sources' addresses the rules cannot reach (servability in address.js, as
+// the report and the site find them), which are counted and said, and for a few real keys to test with.
 //
 // Only for a dataset that is published (E1): once w3id's maintainers merge the rules, the addresses
 // are public and meant to be cited for good. Only for a w3id base (E2): any other base IS the site's
 // address, and needs no redirects.
-import { keyProblem, releaseProblem, caseGuard, normaliseBase } from './address.js';
-import { htaccess, testRows, toTsv, SUFFIXES, SITE_FILES } from './w3id/rules.js';
+import { releaseProblem, normaliseBase, servability, sourcesOf, unservableExample } from './address.js';
+import { htaccess, testRows, toTsv, SITE_FILES } from './w3id/rules.js';
 import { readme, pullRequest, steps, script } from './w3id/texts.js';
 
 export { SITE_FILES };
@@ -45,10 +45,14 @@ export const TEXT = {
   'w3id-path-case': "The w3id name has capital letters. w3id's folders are compared ignoring case on some systems, and addresses are mostly typed in lower case: a lower-case name is safer.",
   'bad-release': "The release name is not one the rules can reach: letters, digits and . _ ~ -, not starting with '.'.",
   'release-without-repo': 'A release is named (--release), but not the GitHub repository it is published in, so there could be no rules for releases and its address would answer 404. Nothing is written. Either give the repository (--repo OWNER/NAME), or leave out --release, which gives rules without releases.',
-  'key-unreachable': "The address of a place or source cannot be served by the rules or the site: its last part is empty or more than one part, has characters other than letters, digits and . _ ~ -, or starts with '.'. Give it an address of those characters only; the example names it and says what is wrong.",
-  'key-suffix': "The address of a place or source ends in .jsonld, .ttl or .html, which the rules read as a request for another key's file in that format, so its own address would go to the wrong place. Give it an address without that ending.",
-  'key-case': 'Two places or two sources have addresses that differ only in capital letters. On macOS and Windows these are one file, so the site would serve one for both. Give one of them another address; the example names both.',
+  // The dataset is published (these rules are only for one), so these addresses are frozen: the
+  // rules are written for the rest, and the site lists these as held in the downloads (A3).
+  'key-unreachable': "The address of a place or source cannot be served by the rules or the site: what follows place/ or source/ is empty or more than one part, has characters other than letters, digits and . _ ~ -, or starts with '.'. The dataset is published, so the address cannot change: the rules are written for the rest, and the site lists it as held in the downloads. The example names it and says what is wrong.",
+  'key-suffix': "The address of a place or source ends in .jsonld, .ttl or .html, which the rules read as a request for another address's file in that format, so the rules cannot send its own address to it. The dataset is published, so the address cannot change: the rules are written for the rest, and the site lists it as held in the downloads.",
+  'key-case': 'Two places or two sources have addresses that differ only in capital letters. On macOS and Windows these are one file, so the site serves neither. The dataset is published, so the addresses cannot change: the rules are written for the rest, and the site lists them as held in the downloads. The example names both.',
   'place-outside-base': "A place's address is not under the dataset's base address, so these rules do not reach it: it resolves only if someone else's rules send it somewhere.",
+  'places-not-served': "A place's address is under the dataset's base address but not of the form <base>place/<id>, so these rules do not reach it and the site has no page for it; the downloads hold it.",
+  'sources-not-served': "A source's address is under the dataset's base address but not of the form <base>source/<id>, so these rules do not reach it and the site has no page for it; the downloads hold what the dataset says of it.",
   'place-without-address': 'A place has no address (@id), so there is nothing to redirect for it.',
 };
 
@@ -57,7 +61,6 @@ const REPO = /^([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38})\/([A-Za-z0-9.
 // What may go into a rule's target: nothing Apache would read as syntax (a space, '$', '%', a quote).
 const SITE_URL = /^https?:\/\/[A-Za-z0-9.-]+(:\d+)?(\/[A-Za-z0-9._~/-]*)?$/;
 const SEGMENT_OK = /^[A-Za-z0-9_~-][A-Za-z0-9._~-]*$/;
-const SUFFIX = new RegExp(`\\.(${SUFFIXES.join('|')})$`, 'i');
 
 /**
  * Where the rules send people: `siteUrl` if given, else the GitHub Pages address of `repo`
@@ -80,31 +83,28 @@ export function siteTarget({ siteUrl, repo } = {}) {
 
 export function create(ctx) {
   const { rep, options } = ctx;
-  const guard = caseGuard();
   const examples = { place: [], source: [] };
-  const sources = new Set();
-  const counts = { places: 0, sources: 0 };
-  let sourcePrefix = null;
+  const counts = { places: 0, sources: 0, unreachable: 0 };
+  let found = null;
 
-  // A key found in the data: can the rules and the site serve it?
-  function key(part, k, iri) {
-    const why = k === null ? 'is empty or more than one part' : keyProblem(k);
-    if (why) { rep.add('error', 'key-unreachable', TEXT['key-unreachable'], `${iri}: its last part ${why}`); return; }
-    if (SUFFIX.test(k)) { rep.add('error', 'key-suffix', TEXT['key-suffix'], iri); return; }
-    const twin = guard.add(part, k);
-    if (twin) { rep.add('error', 'key-case', TEXT['key-case'], `${part}/${twin} and ${part}/${k}`); return; }
-    if (examples[part].length < EXAMPLES && !examples[part].includes(k)) examples[part].push(k);
-  }
-  // A source is cited wherever an attestation cites it (as a string, or an object's @id): every
-  // string under <base>source/ in a record is one. Each is looked at once.
-  function walk(v) {
-    if (typeof v === 'string') {
-      if (sourcePrefix && v.startsWith(sourcePrefix)) {
-        const id = v.split('#')[0];
-        if (!sources.has(id)) { sources.add(id); counts.sources++; key('source', ctx.scheme.sourceKey(id), id); }
-      }
-    } else if (Array.isArray(v)) for (const x of v) walk(x);
-    else if (v && typeof v === 'object') for (const x of Object.values(v)) walk(x);
+  // An address found in the data: can the rules and the site serve it? By the one rule the report
+  // and the site use too (servability in address.js). What they cannot serve is a warning, not a
+  // reason to write nothing (decision A3, as the site treats a published dataset, and w3id is only
+  // for one): its address is frozen, the site lists it as held in the downloads, and the rules serve
+  // the rest. It is counted for the README and the summary. Not by a catch-all rule to the 404 page,
+  // nor by rules for deeper paths, which would serve addresses the site does not (decision A1).
+  function see(part, iri) {
+    const r = found.check(part, iri);
+    if (r.seen) return;
+    if (part === 'source' && (r.key || r.problem === 'key' || r.problem === 'case')) counts.sources++;
+    if (r.key) { if (examples[part].length < EXAMPLES) examples[part].push(r.key); return; }
+    if (r.problem === 'outside') { if (part === 'place') rep.add('warning', 'place-outside-base', TEXT['place-outside-base'], iri); return; }
+    if (r.problem === 'elsewhere') { rep.add('warning', `${part}s-not-served`, TEXT[`${part}s-not-served`], iri.split('#')[0]); return; }
+    counts.unreachable++;
+    // A case twin's first address has no page either (the site serves neither): not one to test with.
+    if (r.problem === 'case') { const i = examples[part].indexOf(r.other.slice((ctx.scheme.base + part + '/').length)); if (i >= 0) examples[part].splice(i, 1); }
+    const kind = r.problem === 'case' ? 'key-case' : r.suffix ? 'key-suffix' : 'key-unreachable';
+    rep.add('warning', kind, TEXT[kind], unservableExample(iri, r));
   }
 
   // The gates, then what the rules are made of, each checked before any of it goes into them.
@@ -136,22 +136,28 @@ export function create(ctx) {
     if (rep.toJSON().errors) return null;
     return {
       w3idPath: s.w3idPath, base: s.base, site: t.site, repo, release, turtle: !!options.turtle, maintainers,
-      title: g.title, gazetteer: g, examples, counts,
+      title: g.title, gazetteer: g, examples, counts, unreachable: counts.unreachable,
       // The downloads' short name, which the site puts before each download's suffix (SITE.downloads).
       stem: s.stem,
     };
   }
 
   return {
-    header() { sourcePrefix = ctx.scheme ? ctx.scheme.base + 'source/' : null; },
+    header() { if (ctx.scheme) found = servability(ctx.scheme); },
     event(ev) {
       if (!ctx.scheme || ev.type !== 'record' || !ev.value) return;
-      const s = ctx.scheme, id = ev.value['@id'];
+      const id = ev.value['@id'];
       counts.places++;
       if (typeof id !== 'string') rep.add('warning', 'place-without-address', TEXT['place-without-address'], ev.value.label);
-      else if (!id.startsWith(s.base + 'place/')) rep.add('warning', 'place-outside-base', TEXT['place-outside-base'], id);
-      else key('place', s.placeKey(id), id);
-      walk(ev.value.attestations);
+      else see('place', id);
+      // Every source an attestation names, as the report and the site find them; one outside the
+      // base is another dataset's, and not for these rules.
+      for (const a of [].concat(ev.value.attestations || [])) {
+        for (const src of sourcesOf(a)) {
+          const iri = typeof src === 'string' ? src : src && src['@id'];
+          if (typeof iri === 'string' && iri.startsWith(ctx.scheme.base)) see('source', iri);
+        }
+      }
     },
     async finish() {
       const c = settle();
@@ -167,6 +173,7 @@ export function create(ctx) {
       ctx.done(await tree.close());
       rep.count('addresses to test', rows.length);
       (rep.counts.said ||= []).push(`Redirect rules for ${c.base}, to the site at ${c.site}, for ${counts.places.toLocaleString('en-GB')} place${counts.places === 1 ? '' : 's'} and ${counts.sources.toLocaleString('en-GB')} source${counts.sources === 1 ? '' : 's'}, with ${rows.length} addresses to test (tests.tsv). STEPS.md says how to test them and open the pull request.`);
+      if (counts.unreachable) rep.counts.said.push(`${counts.unreachable.toLocaleString('en-GB')} address${counts.unreachable === 1 ? '' : 'es'} these rules cannot reach; the site lists ${counts.unreachable === 1 ? 'it' : 'them'} as held in the downloads.`);
     },
   };
 }

@@ -20,7 +20,7 @@
 //
 // The report runs on a dataset the check found problems in (it is a report), and says so; the
 // deposit files are then not written, since they would describe something not fit to deposit.
-import { baseKind, normaliseBase, releaseProblem, keyProblem, caseGuard } from './address.js';
+import { baseKind, normaliseBase, releaseProblem, servability, sourcesOf, unservableExample } from './address.js';
 import { TEXT as SHARED } from './index.js';
 
 export const TEXT = {
@@ -55,8 +55,9 @@ export const TEXT = {
   'previous-version-outside': "The previous version (previousVersion) is not one of this dataset's releases (<base>release/<name>): name the release this one follows.",
   'places-outside-base': "Places have addresses outside the dataset's base address, so the site made from it cannot serve them and their addresses will not lead to them: make their addresses under the base. It is a problem once the dataset is published.",
   'places-not-served': "Places have addresses under the dataset's base address but not of the form <base>place/<id>. Their attestations are given addresses (publish mint), but the site has no page for them and the w3id rules do not reach them, so their addresses will not lead to them; the downloads hold them. To serve them, give them addresses of that form before the dataset is published.",
-  'keys-not-servable': "Places or sources have addresses a static site cannot serve: the last part has characters other than letters, digits and . _ ~ -, starts with '.', or differs from another's only in capital letters (one file on macOS and Windows). The site has no page for them and the w3id rules do not reach them. While the dataset is a draft, give them identifiers of those characters that differ in more than case (in the spreadsheets, place_id or source_id); once it is published its addresses are frozen, and the site lists them as held only in the downloads. The example names each and says what is wrong.",
-  'sources-outside-base': "Sources described in full have addresses outside the dataset's base address (under <base>source/), so the site made from it will not serve them: if they are the dataset's own, make their addresses under the base; if another dataset's, cite them by address alone.",
+  'keys-not-servable': "Places or sources have addresses a static site cannot serve: what follows <base>place/ or <base>source/ has more than one part, has characters other than letters, digits and . _ ~ -, starts with '.', ends in .jsonld, .ttl or .html (which the w3id rules read as a format), or differs from another's only in capital letters (one file on macOS and Windows). The site has no page for them and the w3id rules do not reach them. While the dataset is a draft, give them identifiers of one part, of those characters, that differ in more than case (in the spreadsheets, place_id or source_id); once it is published its addresses are frozen, and the site lists them as held only in the downloads. The example names each and says what is wrong.",
+  'sources-outside-base': "Sources described in full have addresses not under the dataset's base address, so the site made from it will not serve them: if they are the dataset's own, give them addresses of the form <base>source/<id>; if another dataset's, cite them by address alone.",
+  'sources-not-served': "Sources have addresses under the dataset's base address but not of the form <base>source/<id> (the example names them), so the site has no page for them and the w3id rules do not reach them: their addresses will not lead anywhere. If they are the dataset's sources, give them addresses of that form before the dataset is published; the downloads hold what the dataset says of them.",
   'no-publisher': "Nothing says who publishes the dataset, which DataCite requires: give a contributor by name, or an author's name, or fill in the publisher in datacite.json.",
 };
 
@@ -196,54 +197,45 @@ export function schemaOrgDataset(gazetteer, scheme, extras = {}) {
 
 export function create(ctx) {
   const { rep, options } = ctx;
-  // Places and sources the records give addresses outside the base: counted, a few kept.
-  // Also places under the base but not at <base>place/<id> (given attestation addresses, but no page
-  // or rule), and the places and sources whose key the site cannot serve (as site.js finds them).
-  const outside = { place: { n: 0, eg: [] }, source: { n: 0, eg: [] }, notServed: { n: 0, eg: [] }, keys: { n: 0, eg: [] } };
-  const seenSource = new Set();
+  // Every place's and source's address, sorted by servability() in address.js as the site and the
+  // w3id rules sort it: outside the base; under it but not at <base>place/<id> or <base>source/<id>
+  // (minted, but served by neither); or there, with a key the site cannot serve. Counted, a few kept.
+  const outside = { place: { n: 0, eg: [] }, source: { n: 0, eg: [] }, notServed: { n: 0, eg: [] }, sourcesNotServed: { n: 0, eg: [] }, keys: { n: 0, eg: [] } };
   const note = (k, iri) => { const o = outside[k]; o.n++; if (o.eg.length < 5) o.eg.push(iri); };
-  const guard = caseGuard(), keyed = new Set();
-  const key = (part, iri) => {
-    const k = part === 'place' ? ctx.scheme.placeKey(iri) : ctx.scheme.sourceKey(iri);
-    if (!k || keyed.has(part + '/' + k)) return;
-    keyed.add(part + '/' + k);
-    const why = keyProblem(k);
-    if (why) { note('keys', `${iri}: its last part ${why}`); return; }
-    const other = guard.add(part, k);
-    if (other) note('keys', `${ctx.scheme.base}${part}/${other} and ${iri}: they differ only in capital letters`);
+  let found = null;
+  const seenOutside = new Set();
+  const place = (iri) => {
+    const r = found.check('place', iri);
+    if (r.seen) return;
+    if (r.problem === 'outside') note('place', iri);
+    else if (r.problem === 'elsewhere') note('notServed', iri);
+    else if (r.problem) note('keys', unservableExample(iri, r));
   };
-  // A source described here (an object with an address, so something the dataset says about it), in
-  // an attestation's sources, its citations, or what another source derives from. A source cited
-  // by its address alone may be another dataset's, and is not the site's to serve.
-  const source = (s, depth = 0) => {
-    if (!s || typeof s !== 'object' || depth > 20) return;
-    const id = s['@id'];
-    if (typeof id === 'string' && !seenSource.has(id)) {
-      seenSource.add(id);   // each once, however often it is cited
-      if (ctx.scheme.sourceKey(id) === null) note('source', id);
-      else key('source', id);
+  // A source outside the base is counted only when described here (an object with an address, so
+  // something the dataset says about it): one cited by its address alone may be another dataset's,
+  // and is not the site's to serve. Under the base, cited or described, the site serves it.
+  const source = (s) => {
+    const iri = typeof s === 'string' ? s : s && typeof s === 'object' ? s['@id'] : null;
+    if (typeof iri !== 'string') return;
+    if (!iri.startsWith(ctx.scheme.base)) {
+      if (typeof s === 'object' && !seenOutside.has(iri)) { seenOutside.add(iri); note('source', iri); }
+      return;
     }
-    source(s.derivedFrom, depth + 1);
+    const r = found.check('source', iri);
+    if (r.seen) return;
+    if (r.problem === 'elsewhere') note('sourcesNotServed', iri.split('#')[0]);
+    else if (r.problem) note('keys', unservableExample(iri, r));
   };
-  const attestation = (a) => {
-    if (!a || typeof a !== 'object') return;
-    // A source cited by its address alone gets a page on the site too, when it is under the base.
-    const cited = (s) => { if (typeof s === 'string') key('source', s); else source(s); };
-    for (const s of list(a.sources)) cited(s);
-    for (const c of list(a.citations)) if (c && typeof c === 'object') cited(c.source);
-  };
+  const attestation = (a) => { for (const s of sourcesOf(a)) source(s); };
   return {
+    header() { if (ctx.scheme) found = servability(ctx.scheme); },
     event(ev) {
       // Counted whatever else: what the report was given to read, which a test can hold it to.
       if (ev.type === 'record') rep.count('places');
       if (!ctx.scheme) return;
       if (ev.type === 'record' && ev.value) {
         const id = ev.value['@id'];
-        if (typeof id === 'string') {
-          if (!id.startsWith(ctx.scheme.base)) note('place', id);
-          else if (ctx.scheme.placeKey(id) === null) note('notServed', id);
-          else key('place', id);
-        }
+        if (typeof id === 'string') place(id);
         for (const a of list(ev.value.attestations)) attestation(a);
       } else if (ev.type === 'attestation') attestation(ev.value);
       // An attestation-centric dataset's attestations are about places that may be other
@@ -382,8 +374,9 @@ function assess(ctx, g, outside) {
   // in the downloads). Keys the site cannot serve: to fix while the dataset is a draft; once it is
   // published they are frozen (an address is for ever), so the site lists them instead (Round 3, A3).
   tell('warning', 'places-not-served', outside.notServed);
+  tell('warning', 'sources-not-served', outside.sourcesNotServed);
   tell(published ? 'warning' : 'error', 'keys-not-servable', outside.keys);
-  record(...AFTER_BASE[4], !outside.notServed.n && !outside.keys.n);
+  record(...AFTER_BASE[4], !outside.notServed.n && !outside.sourcesNotServed.n && !outside.keys.n);
   return checks;
 }
 // The checks made against the base address, in order.

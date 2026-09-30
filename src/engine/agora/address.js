@@ -70,14 +70,7 @@ export function scheme(base) {
   if (!b) return null;
   const kind = baseKind(b);
   const u = new URL(b);
-  const local = (part, iri) => {
-    if (typeof iri !== 'string') return null;
-    const pre = b + part + '/';
-    if (!iri.startsWith(pre)) return null;
-    const rest = iri.slice(pre.length).split('#')[0];
-    return rest && !rest.includes('/') ? rest : null;
-  };
-  return {
+  const sc = {
     base: b,
     kind,
     // For a w3id base, the path under w3id.org without its slashes at either end: the folder
@@ -93,14 +86,18 @@ export function scheme(base) {
     source: (id) => b + 'source/' + encodeURIComponent(id),
     release: (name) => b + 'release/' + name,
     download: (file) => b + 'download/' + file,
-    /** The last part of a place's or source's address, as written in it (so still encoded); null if the address is not under this base in that part. */
-    placeKey: (iri) => local('place', iri),
-    sourceKey: (iri) => local('source', iri),
+    /**
+     * The last part of a place's or source's address, as written in it: the key the site's files and
+     * the w3id rules are named by. Null if the address is not one they can serve (servable says why).
+     */
+    placeKey: (iri) => servable(sc, 'place', iri).key ?? null,
+    sourceKey: (iri) => servable(sc, 'source', iri).key ?? null,
     /** The address of an attestation of a place: a fragment of the place's address. */
     attestation: (placeIri, hash) => placeIri.split('#')[0] + '#a-' + hash,
     /** Where the site keeps a place's or source's files; the key is the last part of its address, as placeKey gives it. */
     files: (part, key) => ({ html: `${part}/${key}/index.html`, jsonld: `${part}/${key}.jsonld`, ttl: `${part}/${key}.ttl`, dir: `${part}/${key}/` }),
   };
+  return sc;
 }
 
 /**
@@ -131,4 +128,92 @@ export function caseGuard() {
       return had === key ? null : had;
     },
   };
+}
+
+// ---- which addresses the site and the w3id rules can serve -----------------------------------------
+//
+// One rule, asked by the FAIR report, the site and the w3id rules alike, so that the three sort every
+// address the same way: they once did it three ways, and an address one of them served another
+// refused (Round 5).
+
+// The suffixes that name one representation of a place or source (<part>/<key>.jsonld, .ttl, and the
+// page). A key that itself ends in one is read by the w3id rules as another key's file in that format,
+// and on the site its files would stand beside that key's (place/london.html/ by place/london.html.jsonld).
+export const SUFFIXES = ['jsonld', 'ttl', 'html'];
+const SUFFIX = new RegExp(`\\.(${SUFFIXES.join('|')})$`, 'i');
+export const SUFFIX_PROBLEM = `ends in .${SUFFIXES.join(', .')}, which the w3id rules read as a request for another address's file in that format`;
+
+/**
+ * Whether a place's or source's address (`part` 'place' or 'source') can be served by the site and
+ * the w3id rules of the scheme `sc`: { key } if it can, the last part of the address as written in it
+ * (so still encoded, and without any '#' fragment, which a server never sees); otherwise
+ * { problem, why }, the problem one of
+ *   'outside'    not under the base at all: another dataset's, or a mistake;
+ *   'elsewhere'  under the base but not under <base><part>/ (DEEP's places, a volume/12, an agent/…):
+ *                the rules have no pattern for it and the site no folder, so it is served nowhere
+ *                (decision A1: site and w3id serve place/<id> and source/<id> only);
+ *   'key'        under <base><part>/, but what follows cannot be one file's name: it has more than one
+ *                part, or characters a URL and a file system encode differently (keyProblem), or it
+ *                ends in a suffix the rules read as a format (SUFFIXES). `suffix` is set for the last.
+ */
+export function servable(sc, part, iri) {
+  if (typeof iri !== 'string' || !iri.startsWith(sc.base)) return { problem: 'outside', why: `is not under ${sc.base}` };
+  const pre = sc.base + part + '/';
+  if (!iri.startsWith(pre)) return { problem: 'elsewhere', why: `is not under ${pre}` };
+  const rest = iri.slice(pre.length).split('#')[0];
+  if (rest.includes('/')) return { problem: 'key', why: 'has more than one part' };
+  const why = keyProblem(rest);
+  if (why) return { problem: 'key', why };
+  if (SUFFIX.test(rest)) return { problem: 'key', why: SUFFIX_PROBLEM, suffix: true };
+  return { key: rest };
+}
+
+/**
+ * servable() across a whole dataset: each address is judged once (a repeat, or the same address with
+ * another fragment, comes back with seen: true, so a part counts it once), and two keys that differ
+ * only in case collide ({ problem: 'case', other }, `other` the address met first), since they are one
+ * file on macOS and Windows. Holds one entry per address met, which is small beside a site's files.
+ */
+export function servability(sc) {
+  const guard = caseGuard();
+  const met = new Map();
+  return {
+    check(part, iri) {
+      const addr = typeof iri === 'string' ? iri.split('#')[0] : null;
+      const memo = part + ' ' + addr;
+      const had = addr !== null && met.get(memo);
+      if (had) return { ...had, seen: true };
+      let r = servable(sc, part, iri);
+      if (r.key) {
+        const other = guard.add(part, r.key);
+        if (other) r = { problem: 'case', other: sc.base + part + '/' + other, why: 'differs only in capital letters from another address' };
+      }
+      if (addr !== null) met.set(memo, r);
+      return r;
+    },
+  };
+}
+
+/** How one address's problem is named in a finding's example, in every part alike. */
+export function unservableExample(iri, r) {
+  const addr = typeof iri === 'string' ? iri.split('#')[0] : String(iri);
+  if (r.problem === 'case') return `${r.other} and ${addr}: they differ only in capital letters`;
+  if (r.problem === 'key') return `${addr}: its last part ${r.why}`;
+  return addr;
+}
+
+/**
+ * Every source an attestation names, as it names it (an address, or an object describing it): among
+ * its sources, as the source of each citation, and what each of those is derived from, however deep
+ * (to a limit, against a loop). The report, the site and the w3id rules all find sources this way.
+ */
+export function* sourcesOf(att) {
+  if (!att || typeof att !== 'object') return;
+  function* walk(s, depth) {
+    if (!s || depth > 20) return;
+    yield s;
+    if (typeof s === 'object') for (const d of [].concat(s.derivedFrom || [])) yield* walk(d, depth + 1);
+  }
+  for (const s of [].concat(att.sources || [])) yield* walk(s, 0);
+  for (const c of [].concat(att.citations || [])) if (c && typeof c === 'object') yield* walk(c.source, 0);
 }

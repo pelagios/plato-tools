@@ -44,7 +44,10 @@ export function readme(c) {
   if (c.repo) L.push(`| \`/release/{name}\` | 303 to that release's page, \`https://github.com/${c.repo}/releases/tag/{name}\`: a frozen version of the dataset. |`,
     `| \`/release/{name}/{file}\` | 302 to one file of that release, which never changes. |`);
   L.push('| anything else | 404. Nothing falls through to the site. |', '',
-    "`{key}` is letters, digits and `. _ ~ -`, not starting with `.`: the dataset's addresses are checked to be of that form before these rules are written. A key that is not in the dataset still redirects (the rules cannot know every key) and the site answers 404.", '',
+    "`{key}` is letters, digits and `. _ ~ -`, not starting with `.`: the dataset's addresses are checked to be of that form before these rules are written. A key that is not in the dataset still redirects (the rules cannot know every key) and the site answers 404.", '');
+  // A published dataset's addresses are frozen (decision A3): those the rules cannot reach are said here.
+  if (c.unreachable) L.push(`${c.unreachable.toLocaleString('en-GB')} address${c.unreachable === 1 ? '' : 'es'} of the dataset ${c.unreachable === 1 ? 'is' : 'are'} not of that form, so these rules cannot reach ${c.unreachable === 1 ? 'it' : 'them'}; the site lists ${c.unreachable === 1 ? 'it' : 'them'} as held in the downloads.`, '');
+  L.push(
     'Apache ignores q-values in `Accept`, so the rules are in order of preference: a browser sends `text/html` and `*/*` together, and the `text/html` rule comes first. `*/*` or no `Accept` (curl, scripts) gets JSON-LD rather than 404.', '');
   if (g.licence) L.push('## Licence of what resolves', '', `The data: ${g.licence}`, '');
   L.push('## Contact', '', ...c.maintainers.map((m) => `GitHub: [${m}](https://github.com/${m})<br/>`), '');

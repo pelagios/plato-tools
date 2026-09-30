@@ -165,6 +165,25 @@ test('places and sources outside the base are counted, with examples; places sto
   assert.deepEqual(s.examples, [`${other}source/s-x2`]);
 });
 
+test('sources-outside-base is for sources not under the base at all; those under it go to the findings that say why', async () => {
+  const other = 'https://other.org/';
+  const d = doc(GOOD, [place(BASE, 'a')]);
+  d.spatialEntities[0].attestations[0].sources.push({ '@id': `${other}source/x`, title: 'Elsewhere' },
+    { '@id': `${BASE}source/gazetteer/geonames`, title: 'GeoNames' }, { '@id': `${BASE}volume/12`, title: 'Volume 12' });
+  const r = await report(d);
+  const s = item(r, 'sources-outside-base');
+  assert.equal(s?.count, 1, kinds(r));
+  assert.deepEqual(s.examples, [`${other}source/x`]);
+  assert.match(s.message, /not under the dataset's base address/);
+  assert.doesNotMatch(s.message, new RegExp(`under ${'<base>'}source/`));
+  assert.deepEqual(item(r, 'sources-not-served')?.examples, [`${BASE}volume/12`]);
+  assert.deepEqual(item(r, 'keys-not-servable')?.examples, [`${BASE}source/gazetteer/geonames: its last part has more than one part`]);
+  // Control: the good description has none of them, and its sources were read (it has a source page's worth).
+  const good = await report(doc(GOOD));
+  for (const k of ['sources-outside-base', 'sources-not-served', 'keys-not-servable']) assert.equal(item(good, k), undefined, k);
+  assert.equal(good.counts.places, 2);
+});
+
 test('a release: its name, and the dataset\'s address and isVersionOf for it', async () => {
   const plain = await report(doc(GOOD), { release: 'v1' });
   assert.equal(item(plain, 'release-id').examples[0], `set @id to ${BASE}release/v1 and set isVersionOf to ${BASE}`);
@@ -204,7 +223,7 @@ test('without a base: the report says so, the same checks are counted, and nothi
 // ---- the deposit files ---------------------------------------------------------------------------
 
 /** The top-level keys of a CITATION.cff and their scalar values; list items under their key. No YAML library: the file is written simply enough to read by line. */
-test('places under the base but not at <base>place/<id> are a warning: minted, but not served', async () => {
+test('places under the base but not under <base>place/ are a warning: minted, but not served; deeper under it, a key not servable', async () => {
   const deep = { '@id': `${BASE}places/p-1`, label: 'deep', attestations: [{ names: [{ toponym: 'Deep' }] }] };
   const nested = { '@id': `${BASE}place/a/b`, label: 'nested', attestations: [{ names: [{ toponym: 'Nested' }] }] };
   const other = place('https://example.org/elsewhere/', 'x', BASE);
@@ -212,9 +231,12 @@ test('places under the base but not at <base>place/<id> are a warning: minted, b
     const r = await report(doc(edit((g) => { g.status = status; }), [place(BASE, 'a'), deep, nested, other]));
     const i = item(r, 'places-not-served');
     assert.equal(i?.severity, 'warning', status);
-    assert.equal(i.count, 2);
-    assert.deepEqual(i.examples, [deep['@id'], nested['@id']]);
+    assert.equal(i.count, 1);
+    assert.deepEqual(i.examples, [deep['@id']]);
     assert.match(i.message, /given addresses \(publish mint\), but the site has no page/);
+    // Under <base>place/ but more than one part deep: a key the site cannot serve, as the site and
+    // the w3id rules judge it (servability in address.js).
+    assert.deepEqual(item(r, 'keys-not-servable').examples, [`${nested['@id']}: its last part has more than one part`]);
     // Outside the base altogether is the other finding, and only that place.
     assert.deepEqual(item(r, 'places-outside-base').examples, [other['@id']]);
     assert.equal(r.counts.fairChecks.find((c) => c.check === 'every place and source address served by the site').passed, false);
