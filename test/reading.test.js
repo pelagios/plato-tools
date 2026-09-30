@@ -8,6 +8,7 @@ import { detect, lines } from '../src/engine/input.js';
 import { go, env } from './engine.js';
 import { compare } from '../src/engine/compare.js';
 import { randomBytes } from 'node:crypto';
+import { Tokenizer, TokenizerError } from '../src/vendor/streamparser-json/index.js';
 
 /** A File-like whose stream() yields `size`-byte chunks, as a large file's does. */
 export function chunked(bytes, name, size = 16384) {
@@ -121,6 +122,17 @@ test('a gzipped JSON Lines file damaged within its long first line says so, not 
   assert.doesNotMatch(d.reason, /not valid JSON/);
   // Control: whole, the same file is detected.
   assert.equal((await detect([chunked(gz, 'whole.jsonl.gz')])).format, 'plato-jsonl');
+});
+test('detection lets a fault of its own through, and stands on what it found before a document breaks', async () => {
+  const doc = JSON.stringify({ gazetteer: { title: 'T' }, profile: 'place-centric', spatialEntities: [JSON.parse(onePlace)] });
+  const write = Tokenizer.prototype.write;
+  try {
+    Tokenizer.prototype.write = function () { throw new TypeError('a fault in the tools'); };
+    await assert.rejects(detect([chunked(doc, 'x.json')]), /a fault in the tools/);
+    // Control: a document that breaks (the parser's own error) is still detected by what came before.
+    Tokenizer.prototype.write = function () { throw new TokenizerError('Unexpected "x"'); };
+    assert.equal((await detect([chunked(doc, 'x.json')])).format, 'plato-json');
+  } finally { Tokenizer.prototype.write = write; }
 });
 
 // ---- what a line holds ------------------------------------------------------------------------

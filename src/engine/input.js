@@ -2,7 +2,7 @@
 // text is cut into lines or parsed incrementally, and JSON documents are parsed with a streaming
 // parser that hands over one record at a time. Works on browser File objects and on Node's File.
 // Vendored, with the one change that keeps a U+FEFF inside a string: see src/vendor/streamparser-json/.
-import { JSONParser, Tokenizer, TokenType } from '../vendor/streamparser-json/index.js';
+import { JSONParser, Tokenizer, TokenizerError, TokenType } from '../vendor/streamparser-json/index.js';
 import Papa from 'papaparse';
 
 /**
@@ -218,8 +218,12 @@ async function topLevelStrings(file, wanted, cap = DETECT_CAP) {
       read += value.length;
       tokenizer.write(value);
     }
-  } catch { /* STOP, or the document breaks here: what was found before it stands, and the check reports the break */ }
-  reader.cancel().catch(() => {});
+  } catch (e) {
+    // STOP, or the document breaks here (it is not well formed, or its bytes cannot be read): what
+    // was found before it stands, and the check reports the break. Anything else is a fault of the
+    // tools, and is not passed off as the document's.
+    if (e !== STOP && !(e instanceof TokenizerError) && !(e instanceof DataError)) throw e;
+  } finally { reader.cancel().catch(() => {}); }
   return found;
 }
 
