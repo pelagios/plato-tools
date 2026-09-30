@@ -1,5 +1,7 @@
-The icons in this folder (search-check, arrow-right-left, chart-column, file-input, history,
-landmark, map-pinned, scale) are from Lucide 1.49.0, https://lucide.dev, under this licence.
+The icons in this folder, shown in the toolbox on the page and in the README (search-check,
+arrow-right-left, chart-column, file-input, history, landmark, map-pinned, scale), are from
+Lucide 1.49.0, https://lucide.dev, under this licence. The files here are coloured for the README;
+the page draws the same shapes in its own colours.
 
 ISC License
 

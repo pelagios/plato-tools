@@ -97,3 +97,7 @@ a:visited { color: var(--accent); }
 /* Each name carries a tooltip saying why it was chosen; dotted, as abbreviations are, and reachable
    by keyboard as well as by pointer. */
 .tool .why { text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: .18em; cursor: help; }
+/* And an icon before it (Lucide, ISC; public/icons/Lucide-ISC.txt), drawn in the panel's own colour:
+   the band's for a tool that is here, the dashed border's for one to come. */
+.tool .icon { width: 1.1em; height: 1.1em; vertical-align: -.16em; margin-right: .4rem; fill: none; stroke: var(--tool-band); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tool.coming .icon { stroke: var(--soon); }
