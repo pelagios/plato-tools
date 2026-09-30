@@ -15,6 +15,17 @@
 
 export const PARTS = { place: 'place', source: 'source', release: 'release', download: 'download' };
 
+// The files at the site's root, which the w3id rules send the dataset's own address to, by format.
+// The downloads are the latest dataset whole, in download/ (their names end in these suffixes, after
+// the dataset's short name).
+export const SITE = {
+  landing: 'index.html',            // the dataset's landing page, for people
+  description: 'index.jsonld',      // the dataset's description (the gazetteer header), for machines
+  descriptionTtl: 'index.ttl',      // the same in Turtle, when the site has Turtle
+  notFound: '404.html',
+  downloads: { jsonl: '.jsonl.gz', ntriples: '.nt.gz', tables: '-tables.zip' },
+};
+
 // What a path segment may be for a site on GitHub Pages: characters that need no encoding in a URL
 // or a file name on any system. Anything else (a space, '/', '%', a non-Latin letter) is encoded one
 // way in the address and another by the server or the unzip, so a page would not be found.

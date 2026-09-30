@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx';
 import { loadResources } from './resources.js';
 import { prepare, run, TARGETS } from './pipeline.js';
 import { compare } from './compare.js';
+import { publish } from './agora/index.js';
 import { pragmas } from '../lib/store.js';
 import { detect } from './input.js';
 
@@ -88,6 +89,21 @@ self.onmessage = async ({ data }) => {
       const { env, tidy } = await runEnv();
       let result;
       try { result = await compare({ earlier, later, options: data.options || {} }, env); } finally { tidy(); }
+      postMessage({ type: 'done', ...result });
+    } else if (data.cmd === 'publish') {
+      // Agora (src/engine/agora/): one part of publishing, for the dataset chosen, with the previous
+      // release when one is given.
+      const input = await detect(data.files);
+      const previous = data.previous?.length ? await detect(data.previous) : undefined;
+      const unknown = [['dataset', input], ['previous release', previous]].find(([, i]) => i && !i.format);
+      if (unknown) {
+        postMessage({ type: 'done', incomplete: true, outputs: [], report: { counts: {}, errors: 1, items: [{ severity: 'error', kind: 'not-recognised', count: 1,
+          message: `The ${unknown[0]} was not recognised as data these tools read, so nothing was done`, examples: [unknown[1].reason] }] } });
+        return;
+      }
+      const { env, tidy } = await runEnv();
+      let result;
+      try { result = await publish({ part: data.part, input, previous, options: data.options || {} }, env); } finally { tidy(); }
       postMessage({ type: 'done', ...result });
     }
   } catch (e) {

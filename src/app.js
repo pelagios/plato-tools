@@ -65,7 +65,7 @@ async function storageCheck() {
   } catch { w.hidden = true; }
 }
 
-const buttons = (disabled) => { for (const id of ['check', 'convert', 'compare']) $(id).disabled = disabled; };
+const buttons = (disabled) => { for (const id of ['check', 'convert', 'compare', 'publish']) $(id).disabled = disabled; };
 function start(action, earlier) {
   if (busy || !input?.format) return;
   busy = true;
@@ -77,7 +77,14 @@ function start(action, earlier) {
   const base = $('base').value.trim() || undefined;
   // The version check: the files chosen are the later version, and `earlier` the one it is compared with.
   if (action === 'compare') worker.postMessage({ cmd: 'compare', earlier, later: files, options: { base } });
+  else if (action === 'publish') worker.postMessage({ cmd: 'publish', part: $('part').value, files, previous: [...$('previous').files], options: { base, ...publishOptions() } });
   else worker.postMessage({ cmd: 'run', files, action, target, options: { base, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked } });
+}
+// Agora's options, from the Options panel: only those given are sent.
+function publishOptions() {
+  const v = (id) => $(id).value.trim() || undefined;
+  const maintainers = (v('maintainers') || '').split(/[\s,]+/).map((m) => m.replace(/^@/, '')).filter(Boolean);
+  return { release: v('release'), conceptDoi: v('concept-doi'), repo: v('repo'), siteUrl: v('site-url'), maintainers, turtle: $('turtle').checked };
 }
 function onProgress(p) {
   $('phase').textContent = progressText(p);
@@ -149,6 +156,7 @@ $('convert').onclick = () => start('convert');
 // Comparing asks for one more file, the earlier version, and starts once it is chosen.
 $('compare').onclick = () => $('earlier').click();
 $('earlier').onchange = (e) => { const earlier = [...e.target.files]; e.target.value = ''; if (earlier.length) start('compare', earlier); };
+$('publish').onclick = () => start('publish');
 $('cancel').onclick = () => { worker.terminate(); busy = false; $('progress').hidden = true; buttons(false); Object.assign(state, { phase: 'cancelled' }); startWorker(); };
 $('target').onchange = () => { document.querySelector('[data-for="ntriples-output"]').hidden = $('target').value !== 'ntriples'; };
 startWorker();

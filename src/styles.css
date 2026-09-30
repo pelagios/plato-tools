@@ -49,8 +49,8 @@ button.primary { background: var(--accent); color: var(--accent-fg); border-colo
 button:disabled { opacity: .5; cursor: default; }
 select { padding: .4rem; border-radius: 6px; max-width: min(100%, 30rem); }
 .or { color: var(--muted); }
-.versions { margin-top: .75rem; }
-.versions small { flex-basis: 100%; color: var(--muted); }
+.versions, .publishing { margin-top: .75rem; }
+.versions small, .publishing small { flex-basis: 100%; color: var(--muted); }
 details#options { margin-top: .75rem; }
 .opt { margin: .6rem 0; }
 .opt small { display: block; color: var(--muted); }

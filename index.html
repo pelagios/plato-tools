@@ -83,7 +83,7 @@
   </section>
 
   <section id="action" aria-labelledby="action-h" hidden>
-    <h2 id="action-h"><span class="step">2</span> Check it, convert it, or compare it with an earlier version</h2>
+    <h2 id="action-h"><span class="step">2</span> Check it, convert it, compare it with an earlier version, or publish it</h2>
     <div class="actions">
       <button id="check" class="primary">Check</button>
       <span class="or">or</span>
@@ -97,12 +97,43 @@
       <input type="file" id="earlier" multiple hidden aria-label="The earlier version">
       <small>You will be asked for the earlier version's file. Once a dataset is published, its attestations are only added to: this shows that none was deleted or changed.</small>
     </div>
+    <div class="actions publishing">
+      <span class="or">or, to publish it,</span>
+      <label for="part" class="visually-hidden">What to prepare</label>
+      <select id="part">
+        <option value="report">Report on its description, and write the deposit metadata</option>
+        <option value="mint">Give every attestation a permanent address</option>
+        <option value="site">Make a website for GitHub Pages</option>
+        <option value="w3id">Write the w3id redirect rules</option>
+      </select>
+      <button id="publish">Prepare</button>
+      <small>See <em>Options</em> for the release's name, the previous release, and where the site will be published.</small>
+    </div>
     <details id="options">
       <summary>Options</summary>
       <div class="opt" data-for="tables-input">
         <label for="base">Web address for your identifiers</label>
         <input id="base" type="url" value="" placeholder="https://example.org/my-dataset/" size="40">
         <small>The spreadsheet ids (such as <code>bristol</code>) become web addresses under this one. Leave it empty to use the <code>base_uri</code> in the about sheet, which is where it belongs; given here, it is used instead.</small>
+      </div>
+      <div class="opt" data-for="publishing">
+        <label for="release">Release name</label>
+        <input id="release" type="text" placeholder="data-2026-10-01" size="20">
+        <small>For a frozen release, which gets its own address, <code>…/release/<em>name</em></code>.</small>
+        <label for="previous">Previous release</label>
+        <input id="previous" type="file" multiple>
+        <small>Its attestations keep their addresses, and nothing it published may be missing.</small>
+        <label for="repo">GitHub repository</label>
+        <input id="repo" type="text" placeholder="owner/name" size="20">
+        <label for="site-url">Where the site is served</label>
+        <input id="site-url" type="url" placeholder="https://owner.github.io/name/" size="40">
+        <small>Only if it is neither the base address nor the repository's GitHub Pages address.</small>
+        <label for="maintainers">w3id maintainers</label>
+        <input id="maintainers" type="text" placeholder="GitHub user names" size="30">
+        <label for="concept-doi">Concept DOI</label>
+        <input id="concept-doi" type="text" placeholder="10.5281/zenodo.…" size="24">
+        <small>The DOI Zenodo gives to every version of the dataset, once it has given one.</small>
+        <label><input id="turtle" type="checkbox"> Also write Turtle for each place and source</label>
       </div>
       <div class="opt" data-for="ntriples-output">
         <label><input id="typing" type="checkbox" checked> Add node types and typed dates, as the DEEP RDF export does</label>
