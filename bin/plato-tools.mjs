@@ -440,8 +440,8 @@ function describeTotal(t) {
 process.exitCode = await main(process.argv.slice(2));
 
 /**
- * Check cube exports against the Data Cube integrity constraints, streaming each file so that one of
- * any size can be checked. Exit 0 when every constraint passed, 1 when any failed or had nothing to
+ * Check cube exports against the Data Cube integrity constraints. Each file is read as a stream,
+ * but its graph is held in memory to be checked, so a cube larger than memory cannot be. Exit 0 when every constraint passed, 1 when any failed or had nothing to
  * evaluate (a constraint over nothing is not tested, never passed), 2 when a file cannot be read.
  */
 async function datacube(files, o) {

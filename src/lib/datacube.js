@@ -34,7 +34,7 @@ const OBS_STATUS = 'http://purl.org/linked-data/sdmx/2009/attribute#obsStatus';
 const PLATO_VALUE = 'https://w3id.org/plato#value_literal';
 const k = (t) => (t.termType === 'BlankNode' ? '_:' + t.value : t.termType === 'Literal' ? JSON.stringify([t.value, t.datatype?.value || '', t.language || '']) : t.value);
 
-/** The graph from N-Triples text held in memory; for a file of any size use graphOfFile(). */
+/** The graph from N-Triples text held in memory; for a file, graphOfFile() reads it as a stream (the graph is still held in memory). */
 export function graph(nt) {
   const out = new Map();
   addQuads(out, new Parser({ format: 'N-Triples' }).parse(nt));

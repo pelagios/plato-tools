@@ -108,11 +108,13 @@ gives the design and the two commands.
   is one year or one day), declared in each table's structure. Reading an export back leaves out
   only these derived statements.
 - **`datacube`** (`src/lib/datacube.js`) checks integrity constraints IC-1, IC-2, IC-11, IC-12 and
-  IC-14 as a stream, IC-12 by grouping rather than by pairs, and says beside each verdict how many
+  IC-14, IC-12 by grouping rather than by pairs, and says beside each verdict how many
   things it evaluated; a constraint with nothing to evaluate is not tested, never passed. IC-14
   exempts only a declared absence, a figure with an `obsStatus` and no value, since `obsStatus` is
   a general attribute. On PLATO's example and six planted defects it gives the verdicts of the
-  specification's own SPARQL queries, run after its normalisation.
+  specification's own SPARQL queries, run after its normalisation. The file is read as a stream,
+  but the cube's graph is held in memory to be checked, so the size it can check is bounded by
+  memory (see Limits).
 
 ### Web annotations
 
@@ -289,6 +291,16 @@ Traps found on the way:
   labelled with its address, with a warning.
 - **A long SQLite step cannot be interrupted** from the command line: Ctrl-C takes effect when it
   ends.
+- **Memory that grows with the named things written.** Streaming keeps memory flat in the number
+  of records, except for two sets that grow, linearly, with the distinct addresses written: with
+  `--typing`, `Json2Rdf` keeps each named node it has typed (`typedNamed`, one set of addresses per
+  class), so that none is typed twice; the LPF writers keep each place written (`placed`), to
+  report an identity match whose place is not in the file. On data rich in addresses they dominate:
+  the audit of 30 September 2026 measured 358 MB converting 300,000 places whose attestations all
+  have minted addresses to N-Triples with `--typing`, against 221 MB without.
+- **`datacube` holds the cube's graph in memory** (`graphOfFile` in `src/lib/datacube.js`): the
+  file streams in, but every statement is kept until the checks have run, so a cube export larger
+  than memory cannot be checked.
 - **RDF output is N-Triples only**, and Linked Places Format v2 is refused until it is specified.
 
 ## Testing
