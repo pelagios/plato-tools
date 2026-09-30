@@ -1,14 +1,15 @@
 // Georeferencing: positions on a map image to positions in the world and back, through a IIIF
 // Georeference Annotation (as Allmaps makes them), for every PLATO tool that needs it.
 //
-//   import { readGeoreference, toWorld, toPixels, georefNote, georefCitation,
+//   import { readGeoreference, toWorld, toPixels, georefNote, georefCitation, georefAnnotationCitation,
 //            matchesTarget, matchTarget, containsRegion, allmapsLookupUrl } from './engine/georef/index.js'
 //
 // ASYNC: readGeoreference, toWorld and toPixels return Promises. The Allmaps libraries they use
 // are loaded by dynamic import() the first time one of them is called, so that a page which never
-// meets a georeference never downloads them. georefNote, georefCitation, matchesTarget,
-// matchTarget and containsRegion are synchronous and never load Allmaps. allmapsLookupUrl is
-// async only because it hashes with Web Crypto; it builds a URL and fetches nothing.
+// meets a georeference never downloads them. georefNote, georefCitation, georefAnnotationCitation,
+// matchesTarget, matchTarget and containsRegion are synchronous and never load Allmaps.
+// allmapsLookupUrl is async only because it hashes with Web Crypto; it builds a URL and fetches
+// nothing.
 //
 // Nothing here fetches anything: the caller fetches the annotation and the manifest.
 // Pure ESM, no DOM: runs in Node and in a Web Worker.
@@ -517,6 +518,8 @@ function makeRecord(g, direction, name, space, region, canvasRegion, role) {
     ...(region ? { region } : {}),
     ...(region && canvasRegion && g.canvasId ? { canvasRegion } : {}),
     title: g.title ?? null,
+    imageSize: okSize(g.image) ? { width: g.image.width, height: g.image.height } : null,
+    canvasSize: okSize(g.canvas) ? { width: g.canvas.width, height: g.canvas.height } : null,
     ...(role ? { role } : {}),
     software: SOFTWARE,
   };
@@ -648,35 +651,122 @@ export function containsRegion(g, geometry, { space } = {}) {
 
 export const LABEL_ANCHOR = 'https://w3id.org/plato#LabelAnchor';
 const LABEL_ANCHOR_NOTE = 'The position is where the map writes the name, not necessarily where the place is.';
+const CITO = 'http://purl.org/spar/cito/';
 
-/** One sentence for PLATO `notes`, the same wherever it is written (two when record.role is LABEL_ANCHOR). */
-export function georefNote(record) {
+/**
+ * The fixed words georefNote uses for each transformation. A PLATO issue quotes and parses the
+ * note, so these do not change.
+ */
+export const TRANSFORMATION_WORDS = Object.freeze(Object.fromEntries(Object.entries(TRANSFORMATIONS).map(([k, v]) => [k, v.words])));
+
+const ISO_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+/**
+ * The note for PLATO `notes`: a FIXED TEMPLATE, quoted and parsed by a PLATO issue, so its wording
+ * does not change:
+ *
+ *   Georeferenced through <annotationId> (<transformation words>, <N> control point(s)), retrieved <fetched>.
+ *
+ * with "retrieval date not recorded" in place of "retrieved <fetched>" when `fetched` is not given
+ * (the user supplied the file). Then, each as its own fixed sentence: where the map is ("On canvas
+ * <c> of manifest <m>." | "On canvas <c>." | "In manifest <m>." | "On image <i>."), and, when
+ * record.role is LABEL_ANCHOR, "The position is where the map writes the name, not necessarily
+ * where the place is."
+ *
+ * @param options.fetched When the annotation was retrieved: an ISO 8601 date-time with an offset
+ *   or Z (e.g. 2026-09-30T14:05:00Z). A TypeError otherwise.
+ */
+export function georefNote(record, { fetched } = {}) {
+  if (fetched !== undefined && (typeof fetched !== 'string' || !ISO_DATE_TIME.test(fetched) || Number.isNaN(Date.parse(fetched)))) {
+    throw new TypeError(`fetched must be an ISO 8601 date-time with a time zone, such as 2026-09-30T14:05:00Z (it was ${JSON.stringify(fetched)}).`);
+  }
+  const words = TRANSFORMATION_WORDS[ALIASES[record.transformation] ?? record.transformation];
+  if (!words) throw new TypeError(`The record names no known transformation (${JSON.stringify(record.transformation)}).`);
   const n = record.gcps;
-  const words = (TRANSFORMATIONS[ALIASES[record.transformation] ?? record.transformation] || {}).words ?? record.transformation;
-  const where = record.canvasId && record.manifestId ? `, canvas ${record.canvasId} of ${record.manifestId}`
-    : record.canvasId ? `, canvas ${record.canvasId}`
-      : record.manifestId ? `, in ${record.manifestId}`
-        : record.imageServiceId ? `, image ${record.imageServiceId}` : '';
-  const lead = record.direction === 'toPixels' ? 'Position on the map derived' : 'Position derived from the map';
-  const note = `${lead} through its georeference ${record.annotationId ?? '(no identifier)'} (${n} control point${n === 1 ? '' : 's'}, ${words} transformation)${where}.`;
-  return record.role === LABEL_ANCHOR ? `${note} ${LABEL_ANCHOR_NOTE}` : note;
+  const when = fetched ? `retrieved ${fetched}` : 'retrieval date not recorded';
+  const sentences = [`Georeferenced through ${record.annotationId ?? '(no identifier)'} (${words}, ${n} control point${n === 1 ? '' : 's'}), ${when}.`];
+  if (record.canvasId && record.manifestId) sentences.push(`On canvas ${record.canvasId} of manifest ${record.manifestId}.`);
+  else if (record.canvasId) sentences.push(`On canvas ${record.canvasId}.`);
+  else if (record.manifestId) sentences.push(`In manifest ${record.manifestId}.`);
+  else if (record.imageServiceId) sentences.push(`On image ${record.imageServiceId}.`);
+  if (record.role === LABEL_ANCHOR) sentences.push(LABEL_ANCHOR_NOTE);
+  return sentences.join(' ');
+}
+
+const okSize = (d) => d && Number.isFinite(d.width) && Number.isFinite(d.height) && d.width > 0 && d.height > 0;
+
+/** [x, y, w, h] padded by 2% of its larger side (at least 1), rounded outwards, kept within size when known. */
+function paddedXywh([x, y, w, h], size) {
+  const pad = Math.max(1, 0.02 * Math.max(w, h));
+  let x0 = Math.floor(x - pad + 1e-9), y0 = Math.floor(y - pad + 1e-9);
+  let x1 = Math.ceil(x + w + pad - 1e-9), y1 = Math.ceil(y + h + pad - 1e-9);
+  x0 = Math.max(0, x0); y0 = Math.max(0, y0);
+  if (okSize(size)) { x1 = Math.min(size.width, x1); y1 = Math.min(size.height, y1); }
+  return `${x0},${y0},${x1 - x0},${y1 - y0}`;
+}
+
+/** The locator for an explicit pixel bbox [x, y, w, h] in record.space (see georefCitation). */
+function regionLocator(record, region) {
+  if (!Array.isArray(region) || region.length !== 4 || !region.every(Number.isFinite) || region[2] <= 0 || region[3] <= 0) {
+    throw new TypeError(`The region must be a pixel box [x, y, w, h] with a positive width and height (it was ${JSON.stringify(region)}).`);
+  }
+  const { canvasSize: c, imageSize: i } = record;
+  const [x, y, w, h] = region;
+  if (record.canvasId) {
+    if (record.space === 'canvas') return `${record.canvasId}#xywh=${paddedXywh(region, c)}`;
+    if (okSize(c) && okSize(i)) {
+      const sx = c.width / i.width, sy = c.height / i.height;
+      return `${record.canvasId}#xywh=${paddedXywh([x * sx, y * sy, w * sx, h * sy], c)}`;
+    }
+  }
+  if (!record.imageServiceId) return record.canvasId ?? undefined;
+  if (record.space === 'image') return `${record.imageServiceId}#xywh=${paddedXywh(region, i)}`;
+  if (okSize(c) && okSize(i)) {
+    const sx = i.width / c.width, sy = i.height / c.height;
+    return `${record.imageServiceId}#xywh=${paddedXywh([x * sx, y * sy, w * sx, h * sy], i)}`;
+  }
+  return record.canvasId ?? undefined;
 }
 
 /**
  * A PLATO citation of the map: the manifest (else the image) as an inline source, as
- * src/formats/annotations.js writes one ({ '@id', title, authorityType }), and the canvas as the
- * locator, with "#xywh=…" in canvas units (record.canvasRegion) when the geometry was a region. Only
- * when there is no canvas, or its size is unknown so the region cannot be converted, is the region
- * given on the image service's id, in image pixels.
+ * src/formats/annotations.js writes one ({ '@id', title, authorityType }), cited as a data source
+ * (cito:citesAsDataSource), and the canvas as the locator, with "#xywh=…" in canvas units
+ * (record.canvasRegion) when the geometry was a region. Only when there is no canvas, or its size
+ * is unknown so the region cannot be converted, is the region given on the image service's id, in
+ * image pixels.
+ *
+ * @param options.region A pixel box [x, y, w, h] in record.space, overriding record.canvasRegion:
+ *   the locator is then the canvas "#xywh=…" of that box padded by 2% of its larger side (at least
+ *   1 pixel), rounded outwards and kept within the canvas, in canvas units (converted from image
+ *   pixels when needed); on the image service, in image pixels, when there is no canvas or its
+ *   size is unknown.
  */
-export function georefCitation(record) {
+export function georefCitation(record, { region } = {}) {
   const id = record.manifestId || record.imageServiceId;
   const title = record.title
     || (record.manifestId ? `The georeferenced map (IIIF manifest ${record.manifestId})` : `The georeferenced map (IIIF image ${record.imageServiceId})`);
   const source = { ...(id ? { '@id': id } : {}), title, authorityType: 'source' };
   let locator;
-  if (record.region && record.canvasId && record.canvasRegion) locator = `${record.canvasId}#xywh=${record.canvasRegion}`;
+  if (region !== undefined) locator = regionLocator(record, region);
+  else if (record.region && record.canvasId && record.canvasRegion) locator = `${record.canvasId}#xywh=${record.canvasRegion}`;
   else if (record.region && record.space === 'image' && record.imageServiceId) locator = `${record.imageServiceId}#xywh=${record.region}`;
   else if (record.canvasId) locator = record.canvasId;
-  return { source, ...(locator ? { locator } : {}) };
+  return { source, ...(locator ? { locator } : {}), citationFunction: `${CITO}citesAsDataSource` };
+}
+
+/**
+ * A PLATO citation of the georeference annotation itself, whose method (its control points and
+ * transformation) placed the position: { source: { '@id': annotationId, title: 'Georeference of
+ * <map title>', authorityType: 'source' }, citationFunction: cito:usesMethodIn }. A TypeError
+ * when the record has no annotation id, since there is then nothing to cite.
+ */
+export function georefAnnotationCitation(record) {
+  if (!record.annotationId) throw new TypeError('The georeference has no identifier, so it cannot be cited.');
+  const of = record.title
+    || (record.manifestId ? `the map in IIIF manifest ${record.manifestId}` : `the map in IIIF image ${record.imageServiceId}`);
+  return {
+    source: { '@id': record.annotationId, title: `Georeference of ${of}`, authorityType: 'source' },
+    citationFunction: `${CITO}usesMethodIn`,
+  };
 }
