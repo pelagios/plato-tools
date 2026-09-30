@@ -162,7 +162,7 @@ async function main(argv) {
   if (o.json && o.brief) return usage('choose --json or --brief, not both.');
   if (o.cube && o.to !== 'ntriples') return usage('--cube is for convert --to ntriples.');
   if (o.columns) {
-    try { o.savedColumns = JSON.parse(readFileSync(o.columns, 'utf8')); }
+    try { o.savedColumns = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(o.columns))); }
     catch (e) { return usage(`--columns ${o.columns} cannot be read as JSON: ${e.message}`); }
     if (!o.savedColumns || typeof o.savedColumns !== 'object' || Array.isArray(o.savedColumns)) return usage(`--columns ${o.columns} must hold one JSON object, {"column name": "field"}.`);
   }

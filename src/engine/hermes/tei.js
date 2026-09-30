@@ -169,8 +169,9 @@ export class TeiReader {
     });
     p.on('doctype', (d) => this.doctype(d));
     p.on('xmldecl', (d) => {
-      // The file is decoded as UTF-8 (as TextDecoderStream does by default); a file that says it is
-      // in another encoding would be read with its letters wrong, silently, so it is refused.
+      // The file is decoded as UTF-8, strictly (input.js, textStream); a file that says it is in
+      // another encoding is refused even when its bytes happen to be valid UTF-8, as they would be
+      // read as letters other than those meant.
       if (d.encoding && !/^(utf-?8|us-ascii)$/i.test(d.encoding)) throw new DataError(`The file says it is encoded as ${d.encoding}; only UTF-8 can be read. Save it as UTF-8 and try again.`);
     });
     p.on('opentag', (t) => this.open(t));
@@ -618,7 +619,7 @@ async function* chunks(file) {
     for (;;) {
       let r;
       try { r = await reader.read(); }
-      catch (e) { throw new DataError(`The file stops, or is damaged, part-way through, so it cannot be read to the end (${String(e && (e.message || e.name) || e).split('\n')[0]}).`); }
+      catch (e) { throw e instanceof DataError ? e : new DataError(`The file stops, or is damaged, part-way through, so it cannot be read to the end (${String(e && (e.message || e.name) || e).split('\n')[0]}).`); }
       if (r.done) break;
       yield r.value;
     }

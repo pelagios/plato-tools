@@ -354,6 +354,16 @@ test('an earlier version with no attestations is a problem: nothing was tested',
   const r = await cmp(json(doc([place('a', [])], G1)), v2());
   assert.deepEqual(kinds(r, 'error'), ['nothing-to-compare']);
 });
+test('a version that is not UTF-8 is not compared, and says so; the control, the same in UTF-8, is', async () => {
+  const latin1 = new File([Buffer.from(JSON.stringify(doc([place('Köln', [{ '@id': A + 'k', names: [{ toponym: 'Köln' }], sources: [src] }])], G1)), 'latin1')], 'v1.json');
+  const r = await cmp(latin1, v2());
+  assert.equal(r.incomplete, true);
+  assert.deepEqual(kinds(r, 'error'), ['unreadable']);
+  assert.match(item(r, 'unreadable').message, /The earlier version could not be read to the end/);
+  assert.match(item(r, 'unreadable').examples[0], /v1\.json is not encoded as UTF-8/);
+  const same = await cmp(v1(), v2());
+  assert.ok(!kinds(same, 'error').includes('unreadable'));
+});
 test('an earlier version cut short is not compared, and says so; a later one likewise', async () => {
   const cut = textFile(JSON.stringify(doc(places(), G1)).slice(0, 300), 'cut.json');
   for (const [a, b, word] of [[cut, v2(), 'earlier'], [v1(), cut, 'later']]) {

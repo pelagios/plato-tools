@@ -13,20 +13,92 @@ import Papa from 'papaparse';
 export class DataError extends Error {
   constructor(message) { super(message); this.name = 'DataError'; }
 }
-/** Read a chunk, saying in plain words when the bytes themselves cannot be read or decompressed. */
+/**
+ * Read a chunk, saying in plain words when the bytes themselves cannot be read or decompressed. A
+ * DataError from the stream (text that is not UTF-8) is passed on as it is.
+ */
 async function readChunk(reader) {
   try { return await reader.read(); }
-  catch (e) { throw new DataError(`The file stops, or is damaged, part-way through, so it cannot be read to the end (${String(e && (e.message || e.name) || e).split('\n')[0]}).`); }
+  catch (e) { throw e instanceof DataError ? e : new DataError(`The file stops, or is damaged, part-way through, so it cannot be read to the end (${String(e && (e.message || e.name) || e).split('\n')[0]}).`); }
 }
 
 export async function isGzip(file) {
   const b = new Uint8Array(await file.slice(0, 2).arrayBuffer());
   return b[0] === 0x1f && b[1] === 0x8b;
 }
-export async function textStream(file) {
+
+// ---- UTF-8, strictly ----------------------------------------------------------------------------
+// Every text input is decoded as UTF-8, and a byte that is not UTF-8 stops the file: decoded
+// leniently, a Windows-1252 or Latin-1 file would have its letters replaced (Köln read as K�ln)
+// without a word. A byte-order mark is allowed, and dropped.
+/** The index of the first byte of `b` that cannot begin or continue UTF-8, or -1 (a sequence cut off at the end is not counted). */
+export function firstNonUtf8(b) {
+  for (let i = 0; i < b.length;) {
+    const x = b[i];
+    if (x < 0x80) { i++; continue; }
+    const len = x >= 0xc2 && x <= 0xdf ? 2 : x >= 0xe0 && x <= 0xef ? 3 : x >= 0xf0 && x <= 0xf4 ? 4 : 0;
+    if (!len) return i;
+    const lo = x === 0xe0 ? 0xa0 : x === 0xf0 ? 0x90 : 0x80, hi = x === 0xed ? 0x9f : x === 0xf4 ? 0x8f : 0xbf;
+    for (let k = 1; k < len; k++) {
+      if (i + k >= b.length) return -1;
+      const c = b[i + k];
+      if (c < (k === 1 ? lo : 0x80) || c > (k === 1 ? hi : 0xbf)) return i;
+    }
+    i += len;
+  }
+  return -1;
+}
+/** The DataError for a file that is not UTF-8; `at` says where, when it is known ("on line 3, byte 57"). */
+export function notUtf8(name, at = '') {
+  const gz = /\.gz$/i.test(name) ? ' of its decompressed text' : '';
+  return new DataError(`${name} is not encoded as UTF-8${at ? `: the first byte${gz} that is not is ${at}` : ''}, so its letters cannot be read as they were meant (it may be in a Windows or Latin-1 encoding, where é or ö are single bytes). Save it as UTF-8 and try again: in Excel, “Save As” and choose “CSV UTF-8”; in LibreOffice, choose the character set “Unicode (UTF-8)”.`);
+}
+const AT_END = 'at its very end, where a character stops part-way';
+/**
+ * Where the first byte of `b` that is not UTF-8 is, in words, given the bytes and lines before `b`
+ * (`whole` when `b` is all there is). A fault begun in the bytes before `b` is placed at its start.
+ */
+function whereNotUtf8(b, bytes, lines, whole = false) {
+  const found = firstNonUtf8(b);
+  if (found < 0 && whole) return AT_END;
+  const i = Math.max(found, 0);
+  let n = lines;
+  for (let k = 0; k < i; k++) if (b[k] === 0x0a) n++;
+  return `on line ${n.toLocaleString('en-GB')} (byte ${(bytes + i + 1).toLocaleString('en-GB')})`;
+}
+/** Bytes -> text, strictly: a TransformStream that stops with notUtf8, saying where, at the first byte that is not UTF-8. */
+function strictUtf8(name) {
+  const dec = new TextDecoder('utf-8', { fatal: true });
+  let bytes = 0, lines = 1;
+  return new TransformStream({
+    transform(chunk, ctl) {
+      let t;
+      try { t = dec.decode(chunk, { stream: true }); } catch { throw notUtf8(name, whereNotUtf8(chunk, bytes, lines)); }
+      bytes += chunk.length;
+      for (let k = 0; k < chunk.length; k++) if (chunk[k] === 0x0a) lines++;
+      if (t) ctl.enqueue(t);
+    },
+    flush(ctl) {
+      let t;
+      try { t = dec.decode(); } catch { throw notUtf8(name, AT_END); }
+      if (t) ctl.enqueue(t);
+    },
+  });
+}
+/** Bytes (a whole file's, or a file's in a zip) as text, strictly (notUtf8 names `name`). */
+export function decodeUtf8(bytes, name) {
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+  catch { throw notUtf8(name, whereNotUtf8(bytes, 0, 1, true)); }
+}
+/**
+ * The text of a file as a stream, decompressed and decoded as UTF-8. `lenient` replaces a byte that
+ * is not UTF-8 instead of stopping, for detection only, which looks at the start of the file to
+ * tell its format, and leaves the fault to the reader, which reports it.
+ */
+export async function textStream(file, { lenient = false } = {}) {
   let s = file.stream();
   if (await isGzip(file)) s = s.pipeThrough(new DecompressionStream('gzip'));
-  return s.pipeThrough(new TextDecoderStream());
+  return s.pipeThrough(lenient ? new TextDecoderStream() : strictUtf8(file.name));
 }
 /** Text chunks that each end on a line break (the last may not). */
 export async function* lineChunks(file) {
@@ -49,9 +121,9 @@ export async function* lines(file) {
     for (const line of chunk.split('\n')) { n++; if (line.trim()) yield { line, n }; }
   }
 }
-/** The first `bytes` of a file as text (decompressed), for format detection. */
+/** The first `bytes` of a file as text (decompressed, and decoded leniently: textStream), for format detection. */
 export async function head(file, bytes = 65536) {
-  const reader = (await textStream(file)).getReader();
+  const reader = (await textStream(file, { lenient: true })).getReader();
   let s = '';
   // Detection needs only the start: if the file breaks within it, use what came before the break,
   // and leave the break to the check, which reports it.

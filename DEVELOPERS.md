@@ -28,6 +28,11 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   `src/engine/input.js`; `run()` turns it into a problem in the report, marked incomplete. A new
   reader must throw `DataError` for bad input, or a fault in the data will look like a fault in
   the tools, which is the only thing shown as one.
+- **Text is UTF-8, strictly.** Every text input is decoded by `textStream` (or `decodeUtf8`, for the
+  tables' sheets) with a fatal decoder: a byte that is not UTF-8 is a `DataError` naming the file,
+  the line and the byte, and saying how to save it as UTF-8, never a replacement character. A
+  byte-order mark is dropped. Detection alone (`head`) decodes leniently, so that such a file is
+  still recognised and its reader can say what is wrong.
 
 ## What it checks against
 

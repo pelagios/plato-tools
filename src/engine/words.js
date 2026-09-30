@@ -128,7 +128,7 @@ export const COLUMN_WORDS = {
   saveNote: 'Saved as JSON, the file can be used again here, or given to the command line with --columns.',
   base: 'Each place id becomes a web address under the web address given in Options.',
   loaded: (name) => `Using the matching saved in ${name}.`,
-  notJson: (name) => `${name} cannot be used: it is not a saved matching (a JSON object of column names, each with what it is read as).`,
+  notJson: (name) => `${name} cannot be used: it is not a saved matching (a JSON object of column names, each with what it is read as, in UTF-8).`,
   missing: (col) => `The saved matching does not mention the column “${col}”, so it is kept as a note.`,
   unknown: (col) => `The saved matching mentions a column this file does not have, “${col}”; that part of it is not used.`,
   unusable: (example) => `Part of the saved matching cannot be used, so that column is kept as a note: ${example}.`,

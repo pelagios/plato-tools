@@ -453,6 +453,13 @@ test('command line: --columns that is not a JSON object is refused before anythi
     const r2 = cli('check', '--columns', join(d, 'missing.json'), DIR + 'no-ids.csv');
     assert.equal(r2.code, 2);
     assert.match(r2.err, /cannot be read as JSON/);
+    // A mapping that is not UTF-8 is refused too; the control, the same in UTF-8, is used.
+    writeFileSync(join(d, 'latin1.json'), Buffer.from('{"Köln": "name"}', 'latin1'));
+    const r3 = cli('check', '--columns', join(d, 'latin1.json'), DIR + 'no-ids.csv');
+    assert.equal(r3.code, 2);
+    assert.match(r3.err, /latin1\.json cannot be read as JSON: .*utf-8/i);
+    writeFileSync(join(d, 'utf8.json'), '{"Köln": "name"}');
+    assert.notEqual(cli('check', '--columns', join(d, 'utf8.json'), DIR + 'no-ids.csv').code, 2);
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
 test('command line: the columns as read are printed with the report, as JSON to save and give back', { skip }, () => {

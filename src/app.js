@@ -253,7 +253,7 @@ function saveMatching() {
 }
 async function loadMatching(file) {
   let saved;
-  try { saved = JSON.parse(await file.text()); } catch { saved = undefined; }
+  try { saved = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer())); } catch { saved = undefined; }
   if (!saved || typeof saved !== 'object' || Array.isArray(saved)) {
     $('columns-messages').innerHTML = `<p class="warn">${escapeHtml(COLUMN_WORDS.notJson(file.name))}</p>`;
     state.columns = { ...state.columns, messages: [COLUMN_WORDS.notJson(file.name)] };

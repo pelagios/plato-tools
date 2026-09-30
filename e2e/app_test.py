@@ -278,6 +278,11 @@ def main():
             s = run_case(page, [cut], 'check')
             shown = page.inner_text('#summary') if s.get('phase') == 'done' else ''
             check('a JSON file cut short: reported as a problem in the report, not "Something went wrong"', s.get('phase') == 'done' and any(i['kind'] == 'unreadable' for i in (s.get('report') or {}).get('items', [])) and 'Something went wrong' not in shown, s.get('report') or s)
+            latin = tmp / 'latin-1.json'
+            latin.write_bytes((PLATO / 'schemas/examples/place-centric-constantinople.json').read_text().replace('"label": "', '"label": "K\u00f6ln ', 1).encode('latin-1', 'replace'))
+            s = run_case(page, [latin], 'check')
+            shown = page.inner_text('#summary') if s.get('phase') == 'done' else ''
+            check('a file not in UTF-8: reported as unreadable in the report, saying so, not "Something went wrong"', s.get('phase') == 'done' and any(i['kind'] == 'unreadable' and 'not encoded as UTF-8' in ' '.join(i['examples']) for i in (s.get('report') or {}).get('items', [])) and 'Something went wrong' not in shown, s.get('report') or s)
             png = tmp / 'picture.png'; png.write_bytes(b'\x89PNG\r\n\x1a\n' + b'\0' * 64)
             s = run_case(page, [png], 'check')
             check('an image is not mistaken for data', s.get('phase') == 'unrecognised', s)

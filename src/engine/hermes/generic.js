@@ -34,7 +34,7 @@ async function* textChunks(file) {
     for (;;) {
       let r;
       try { r = await reader.read(); }
-      catch (e) { throw new DataError(`The file stops, or is damaged, part-way through, so it cannot be read to the end (${String(e && (e.message || e.name) || e).split('\n')[0]}).`); }
+      catch (e) { throw e instanceof DataError ? e : new DataError(`The file stops, or is damaged, part-way through, so it cannot be read to the end (${String(e && (e.message || e.name) || e).split('\n')[0]}).`); }
       if (r.done) break;
       let t = r.value;
       if (first && t) { t = t.replace(/^\ufeff/, ''); first = false; }
