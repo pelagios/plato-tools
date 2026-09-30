@@ -90,15 +90,29 @@ function serviceIds(resource) {
 }
 
 /**
+ * 2 or 3: by the manifest's @context (presentation/2 or presentation/3), else its type ("@type":
+ * "sc:Manifest" is 2, "type": "Manifest" is 3), and only when it gives neither, by whether it has
+ * sequences. Not by the shape of sequences: a v2 manifest may give its one sequence as an object.
+ */
+function presentationVersion(manifest) {
+  const contexts = asArray(manifest['@context']).filter((c) => typeof c === 'string');
+  if (contexts.some((c) => /iiif\.io\/api\/presentation\/2\b/.test(c))) return 2;
+  if (contexts.some((c) => /iiif\.io\/api\/presentation\/3\b/.test(c))) return 3;
+  if (manifest['@type'] === 'sc:Manifest') return 2;
+  if (manifest.type === 'Manifest') return 3;
+  return manifest.sequences !== undefined && manifest.sequences !== null ? 2 : 3;
+}
+
+/**
  * The canvases of a manifest: [{ id, width, height, label, services: [image service id] }].
  * v2: sequences[].canvases[].images[].resource.service; v3: items[] (Canvas) .items[]
  * (AnnotationPage) .items[] (painting Annotation) .body.service.
  */
 export function manifestCanvases(manifest) {
   const canvases = [];
-  const v2 = Array.isArray(manifest.sequences);
+  const v2 = presentationVersion(manifest) === 2;
   const raw = v2
-    ? manifest.sequences.flatMap((s) => asArray(s && s.canvases))
+    ? asArray(manifest.sequences).flatMap((s) => asArray(s && s.canvases))
     : asArray(manifest.items).filter((c) => c && (c.type === 'Canvas' || c['@type'] === 'sc:Canvas' || c.items));
   for (const c of raw) {
     if (!c || typeof c !== 'object') continue;

@@ -489,7 +489,8 @@ test('matchTarget: a IIIF picture URL of the whole image, unrotated, matches the
   assert.deepEqual(matchTarget(g, ROCQUE_IMAGE), { match: true, via: 'service' });
   assert.deepEqual(matchTarget(g, ROCQUE_CANVAS), { match: true, via: 'canvas' });
   for (const tail of ['full/max/0/default.jpg', 'full/full/0/default.jpg', 'full/max/0.0/gray.webp', 'full/full/0/native.jp2']) {
-    assert.deepEqual(matchTarget(g, `${ROCQUE_IMAGE}/${tail}`), { match: true, via: 'image-url' }, tail);
+    const assumed = tail.includes('/max/') ? { assumedFullSize: true } : {};
+    assert.deepEqual(matchTarget(g, `${ROCQUE_IMAGE}/${tail}`), { match: true, via: 'image-url', ...assumed }, tail);
     assert.equal(matchesTarget(g, `${ROCQUE_IMAGE}/${tail}`), true, tail);
   }
   // Not Image API grammar: no stripping (control above uses the same service).
@@ -502,7 +503,7 @@ test('matchTarget: a IIIF picture URL of the whole image, unrotated, matches the
 
 test('matchTarget: a cropped or rotated picture URL does not match, and says why', async () => {
   const g = await rocque();
-  assert.deepEqual(matchTarget(g, `${ROCQUE_IMAGE}/full/max/0/default.jpg`), { match: true, via: 'image-url' }); // control
+  assert.deepEqual(matchTarget(g, `${ROCQUE_IMAGE}/full/max/0/default.jpg`), { match: true, via: 'image-url', assumedFullSize: true }); // control
   assert.deepEqual(matchTarget(g, `${ROCQUE_IMAGE}/100,200,3000,4000/max/0/default.jpg`), { match: false, via: null, reason: 'cropped' });
   assert.deepEqual(matchTarget(g, `${ROCQUE_IMAGE}/pct:10,10,50,50/max/0/default.jpg`), { match: false, via: null, reason: 'cropped' });
   assert.deepEqual(matchTarget(g, `${ROCQUE_IMAGE}/square/max/0/default.jpg`), { match: false, via: null, reason: 'cropped' });
@@ -787,4 +788,135 @@ test('an annotation in its own projection (resourceCrs) is refused; one that nam
   const merc = clone(ROCQUE);
   merc.body.resourceCrs = { id: 'https://example.org/projections/3857', name: 'EPSG:3857 - WGS 84 / Pseudo-Mercator', definition: '+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs' };
   assert.equal((await readGeoreference(merc)).gcps, 22);
+});
+
+// ---- Fixes after the pre-push review -----------------------------------------------------------
+
+test('control points on both sides of the 180° meridian are a DataError; a set from 170° to 179.9° is the control', async () => {
+  const across = withGcps([[[1000, 1000], [179.5, 10]], [[9000, 1200], [-179.5, 10.5]], [[5000, 5000], [179.8, 5]]]);
+  await assert.rejects(readGeoreference(across), (e) => isDataError(e) && /180° meridian are not supported yet\. Nothing was changed\.$/.test(e.message));
+  // Also when most points are on the far side.
+  const back = withGcps([[[1000, 1000], [-179.5, 10]], [[9000, 1200], [-178, 10.5]], [[5000, 5000], [179.9, 5]]]);
+  await assert.rejects(readGeoreference(back), isDataError);
+  // Control: the same shape of set, all west of 180°.
+  const east = await readGeoreference(withGcps([[[1000, 1000], [170, 10]], [[9000, 1200], [179.9, 10.5]], [[5000, 5000], [175, 5]]]));
+  assert.equal(east.gcps, 3);
+  near((await toWorld(east, pt([9000, 1200]), { space: 'image' })).geojson.coordinates, [179.9, 10.5]);
+});
+
+test('a citation region wholly off the canvas is a TypeError; one partly off is clamped to it (the control)', async () => {
+  const g = await rocque();
+  const cnv = (await toWorld(g, pt([5000, 4000]), { space: 'canvas' })).record;
+  const img = (await toWorld(g, pt([5000, 4000]), { space: 'image' })).record;
+  // Wholly beyond the right edge (it was 11999,99,-563,52), or above and left of the canvas.
+  assert.throws(() => georefCitation(cnv, { region: [12000, 100, 50, 50] }), TypeError);
+  assert.throws(() => georefCitation(cnv, { region: [100, 7000, 50, 50] }), TypeError);
+  assert.throws(() => georefCitation(cnv, { region: [-500, -500, 100, 100] }), TypeError);
+  assert.throws(() => georefCitation({ ...img, canvasId: null, manifestId: null, canvasSize: null }, { region: [12000, 100, 50, 50] }), TypeError);
+  // Partly beyond: cut at the edges. 2% of 100 = 2: 11398..11436 and 98..152.
+  assert.equal(georefCitation(cnv, { region: [11400, 100, 100, 50] }).locator, `${ROCQUE_CANVAS}#xywh=11398,98,38,54`);
+  assert.equal(georefCitation(cnv, { region: [-50, -20, 100, 50] }).locator, `${ROCQUE_CANVAS}#xywh=0,0,52,32`);
+  // Control: inside the canvas, as before.
+  assert.equal(georefCitation(cnv, { region: [10, 10, 100, 50] }).locator, `${ROCQUE_CANVAS}#xywh=8,8,104,54`);
+});
+
+test('matchTarget: a picture at size "max" matches but is marked assumedFullSize; "full" is not marked', async () => {
+  const g = await rocque();
+  const max = matchTarget(g, `${ROCQUE_IMAGE}/full/max/0/default.jpg`);
+  assert.equal(max.match, true);
+  assert.equal(max.assumedFullSize, true);
+  const full = matchTarget(g, `${ROCQUE_IMAGE}/full/full/0/default.jpg`);
+  assert.deepEqual(full, { match: true, via: 'image-url' });
+  assert.equal('assumedFullSize' in full, false);
+  // Nor are the service or the canvas themselves.
+  assert.deepEqual(matchTarget(g, ROCQUE_IMAGE), { match: true, via: 'service' });
+});
+
+test("svg: an outer <svg> whose viewBox or size is not the pixel frame is a DataError; one that is, or none, is the control", async () => {
+  const g = await rocque();
+  const W = (svg) => toWorld(g, { svg }, { space: 'image' });
+  const poly = '<polygon points="3000,3000 5000,3000 5000,4000"/>';
+  const refused = [
+    `<svg viewBox="0 0 100 100" width="11436" height="6268">${poly}</svg>`, // the case that was read as raw pixels
+    `<svg viewBox="10 20 11436 6268">${poly}</svg>`,
+    `<svg viewBox="10 20 11436 6268" width="11436" height="6268">${poly}</svg>`,
+    `<svg viewBox="0 0 11436 6268" width="5718">${poly}</svg>`,
+    `<svg width="100%" height="100%">${poly}</svg>`,
+    `<svg width="30cm" height="20cm">${poly}</svg>`,
+    `<svg viewBox="0 0 100">${poly}</svg>`,
+  ];
+  for (const svg of refused) await assert.rejects(W(svg), (e) => isDataError(e) && /Nothing was changed/.test(e.message), svg);
+  const bare = await W(`<svg>${poly}</svg>`);
+  // Controls: a viewBox equal to the image, with and without its size; plain and px sizes.
+  for (const svg of [
+    `<svg viewBox="0 0 11436 6268">${poly}</svg>`,
+    `<svg viewBox="0 0 11436 6268" width="11436" height="6268">${poly}</svg>`,
+    `<svg viewBox="0,0,11436,6268" width="11436px" height="6268px">${poly}</svg>`,
+    `<svg width="11436" height="6268">${poly}</svg>`,
+    `<svg viewBox="0 0 100 100">${poly}</svg>`, // origin 0 0, no size: read as pixels
+  ]) assert.deepEqual((await W(svg)).geojson, bare.geojson, svg);
+});
+
+test('svg: a <rect> with rounded corners is a DataError; rx="0" or ry="0" is the control', async () => {
+  const g = await rocque();
+  const W = (svg) => toWorld(g, { svg }, { space: 'image' });
+  for (const rounded of ['rx="50"', 'ry="50"', 'rx="50" ry="20"']) {
+    await assert.rejects(W(`<svg><rect x="3000" y="3000" width="2000" height="1000" ${rounded}/></svg>`), (e) => isDataError(e) && /rounded corners.*Nothing was changed/.test(e.message), rounded);
+  }
+  const plain = await W('<svg><rect x="3000" y="3000" width="2000" height="1000"/></svg>');
+  for (const square of ['rx="0"', 'ry="0"', 'rx="0" ry="50"', 'rx="50" ry="0"']) {
+    assert.deepEqual((await W(`<svg><rect x="3000" y="3000" width="2000" height="1000" ${square}/></svg>`)).geojson, plain.geojson, square);
+  }
+});
+
+test('svg: a line after Z starts a new subpath from where the last one started; the same with an explicit M is the control', async () => {
+  const g = await rocque();
+  const W = (svg) => toWorld(g, { svg }, { space: 'image' });
+  const implicit = await W('<svg><path d="M3000,3000 L5000,3000 L5000,4000 Z L3000,5000 L2000,5000 Z"/></svg>');
+  const explicit = await W('<svg><path d="M3000,3000 L5000,3000 L5000,4000 Z M3000,3000 L3000,5000 L2000,5000 Z"/></svg>');
+  assert.equal(explicit.geojson.type, 'MultiPolygon', 'two triangles meeting at a corner, neither a hole in the other');
+  assert.deepEqual(implicit.geojson, explicit.geojson);
+  // Relative, and H and V, after z: from the start point too.
+  const rel = await W('<svg><path d="M3000,3000 L5000,3000 L5000,4000 z l0,2000 h-1000 z"/></svg>');
+  assert.deepEqual(rel.geojson, explicit.geojson);
+  // Still refused: drawing before any moveto.
+  await assert.rejects(W('<svg><path d="L3000,3000 L5000,3000 Z"/></svg>'), isDataError);
+});
+
+test('a IIIF Presentation 2 manifest with its sequence as an object, not an array, is read as v2', async () => {
+  const m = clone(ROCQUE_M);
+  m.sequences = m.sequences[0];
+  assert.ok(!Array.isArray(m.sequences));
+  const g = await readGeoreference(ROCQUE, { manifest: m });
+  assert.equal(g.canvasId, ROCQUE_CANVAS);
+  assert.deepEqual(g.canvas, { width: 11436, height: 6268 });
+  // Control: the manifest as published, and the v3 one, give the same.
+  assert.deepEqual(g, await rocque());
+  assert.equal((await readGeoreference(ROCQUE, { manifest: ROCQUE_V3 })).canvasId, ROCQUE_CANVAS);
+});
+
+test('motivation given as an array holding "georeferencing" is read; an array without it is a DataError', async () => {
+  const a = clone(ROCQUE); a.motivation = ['georeferencing'];
+  assert.equal((await readGeoreference(a)).annotationId, ROCQUE_ID);
+  const b = clone(ROCQUE); b.motivation = ['commenting', 'georeferencing'];
+  assert.equal((await readGeoreference(b)).annotationId, ROCQUE_ID);
+  const c = clone(ROCQUE); c.motivation = ['commenting'];
+  await assert.rejects(readGeoreference(c), (e) => isDataError(e) && /not a Georeference Annotation/.test(e.message));
+  // Control: the string, as Allmaps writes it.
+  assert.equal(ROCQUE.motivation, 'georeferencing');
+  assert.equal((await readGeoreference(ROCQUE)).annotationId, ROCQUE_ID);
+});
+
+test('readGeoreference returns g frozen all the way down, and a clone or a spread of it still works', async () => {
+  const g = await rocque();
+  for (const o of [g, g.image, g.canvas, g.controlPoints, g.controlPoints[0], g.controlPoints[0].resource, g.mask, g.mask[0]]) assert.ok(Object.isFrozen(o));
+  assert.throws(() => { g.mask[0][0] = 0; }, TypeError);
+  assert.throws(() => { g.mask = null; }, TypeError);
+  const at = (x) => toWorld(x, pt([5000, 4000]), { space: 'image' }).then((r) => r.geojson.coordinates);
+  const here = await at(g);
+  // Controls: a structured clone (as postMessage makes) is not frozen and gives the same place; so does a spread.
+  const copy = structuredClone(g);
+  assert.equal(Object.isFrozen(copy), false);
+  assert.deepEqual(await at(copy), here);
+  assert.deepEqual(await at({ ...g }), here);
 });
