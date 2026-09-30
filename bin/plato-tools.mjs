@@ -47,8 +47,10 @@ Usage:
                                             IC-2, IC-11, IC-12 and IC-14
 
 Each INPUT is one file, or one set of spreadsheet tables:
-  - a directory is one set of tables, made of the CSV files in it;
-  - CSV files named one by one are one set of tables per directory they are in;
+  - the sheets of the tables (places.csv, names.csv...) are one set of tables per directory,
+    whether the directory is given or its CSV files are named one by one;
+  - every other CSV file, in a directory given or named, is an input of its own, and so is a
+    lone sheet whose header does not begin as that sheet's does (a places.csv of one's own);
   - a zip of the CSV files, or a workbook (.xlsx), is one set of tables.
 A CSV (or TSV) file that is not one of the tables' sheets, and plain GeoJSON that is not Linked
 Places Format, are read as a table of places: which column holds what (name, latitude,

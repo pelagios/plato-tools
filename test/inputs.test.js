@@ -92,3 +92,15 @@ test('the command line checks the tables of a mixed directory, and the other CSV
   assert.match(r.stdout, /\n\S*\/gauges\.csv: /, 'the other file is an input of its own');
   assert.match(r.stdout, /\nChecked 2 inputs: /);
 });
+test('the command line checks two ordinary CSV files named one by one as two inputs, each a table of places', () => {
+  const d = dir(false, { 'a.csv': GAUGES, 'b.csv': 'name,lat,lon\nOstia,41.75,12.29\n' });
+  const run = (...files) => spawnSync(process.execPath, [fileURLToPath(new URL('../bin/plato-tools.mjs', import.meta.url)), 'check', ...files], { encoding: 'utf8' });
+  const r = run(join(d, 'a.csv'), join(d, 'b.csv'));
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /\n?\S*\/a\.csv: a table of places \(CSV\)/, r.stdout);
+  assert.match(r.stdout, /\n\S*\/b\.csv: a table of places \(CSV\)/);
+  assert.match(r.stdout, /\nChecked 2 inputs: 2 without problems/);
+  // Control: one of them alone is one input, read the same way.
+  const one = run(join(d, 'a.csv'));
+  assert.match(one.stdout, /a\.csv: a table of places \(CSV\)[\s\S]*\nChecked 1 input: /);
+});
