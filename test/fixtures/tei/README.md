@@ -29,7 +29,9 @@ address its ref points to, becomes one attestation-centric attestation about tha
 | `@ref`: a local pointer (`#athens`) | `about`: the one web-address `<idno>` of the `<place xml:id="athens">` in the same file | Several web addresses: ambiguous, reported, nothing converted. None, or no such place: reported. A place later in the file is waited for |
 | `@ref`: another file (`places.xml#x`), or a `urn:` | | Reported |
 | The element's text, whitespace made single, notes left out, words broken over a line (`break="no"`) joined | `names[].toponym`, with `formStatus` `plato:Attested` | In a `<choice>`, `reg`, `expan`, `corr`; in an `<app>`, the `lem` |
-| The form as printed, where a `<choice>` changed it (`orig`, `abbr`, `sic`) | `names[].sourceLabel` | |
+| The form as printed, where a `<choice>` changed it (`orig`, `abbr`, `sic`) | `names[].sourceLabel` | Also where the place name is inside the `<choice>`, one in each part with the same ref: the part taken is the attestation, the printed one its `sourceLabel` |
+| A place name wholly inside an `<rdg>`, or inside the part of a `<choice>` not taken (`orig`, `abbr`, `sic` beside `reg`, `expan`, `corr`) | | A variant reading: reported (`tei-variant`), not converted. A `<choice>` with one part takes it |
+| An entity declared with its text in the file's own DOCTYPE (`<!ENTITY nbsp "&#160;">`) | its text | One whose text holds markup is refused where it is used. An external entity (`SYSTEM`, `PUBLIC`) is never fetched or read: using one stops the file |
 | The nearest `xml:lang`, inherited | `names[].language` | Only a language tag of two or three letters and its subtags; anything else is reported |
 | `@key` | `notes` ("Key: …") | With no ref, the key is given in the report's example |
 | `<div type n>` (for `type="textpart"`, its subtype), `<milestone unit n>`, `<pb n>`, `<l n>` or `<lb n>`, a `<note>`, `@xml:id` | `citations[].locator`, in words | "book 2, chapter 1, section 1, page 12", "edition, lines 2 to 4", "line 6", "commentary" |

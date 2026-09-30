@@ -122,14 +122,19 @@ readers link to those headings, so keep them.
   attestation-centric attestation for each address its `@ref` resolves to: a web address as it is,
   a prefixed pointer through the header's `<prefixDef>` (the pattern anchored to the whole of what
   follows the prefix), and `#x` through the one web-address `<idno>` of `<place xml:id="x">` in the
-  same file (several: ambiguous, nothing converted). The file is parsed as a stream with saxes, with
+  same file (several: ambiguous, nothing converted). A place name in an `<rdg>`, or in the part of a
+  `<choice>` not taken, is a variant (`tei-variant`): one in a part of a `<choice>` waits until the
+  `<choice>` closes. Entities declared with their text in the file's own DOCTYPE are given to
+  saxes' `ENTITIES`; an external entity is never read. The file is parsed as a stream with saxes, with
   no DOM (a Web Worker has none); the only thing held to the end is a place name waiting for a
-  `<place>` later in the file. The edition, from its `teiHeader`, is the source; a place name's
+  `<place>` later in the file, indexed by the id it waits for. The edition, from its `teiHeader`, is the source; a place name's
   `xml:id` is never the attestation's `@id`. A file that declares an encoding other than UTF-8 is
   refused.
 - **Tables of places** (`columns.js`, `generic.js`). `input.js`'s `detect()` sends a lone CSV (or
-  `.tsv`/`.tab`) that is not one of the tables' sheets, and a FeatureCollection or Feature with no
-  LPF markers (`isLpf`), here. `guessColumns` maps each column to one `FIELDS` key, `note` or `skip`
+  `.tsv`/`.tab`) that is not one of the tables' sheets, and a FeatureCollection or Feature whose
+  structure is not LPF's (`isLpf`, on the head read as structure by `jsonHead`), here. A IIIF
+  Georeference Annotation (Allmaps) is detected first, as `georef` with a `reason`, and refused
+  like an unrecognised file (`readable()`). `guessColumns` maps each column to one `FIELDS` key, `note` or `skip`
   from its normalised heading and the first 50 rows; `resolveColumns` checks a saved mapping
   instead. The mapping is the same JSON on the page (the column-matching step in `src/app.js`, via
   `columnsOf`/`mappingOf` in `worker.js`, worded in `words.js`: `COLUMN_CHOICES`, `COLUMN_WORDS`,
@@ -137,8 +142,10 @@ readers link to those headings, so keep them.
   `--columns FILE`). An address column makes the rows attestation-centric; otherwise each row is a
   place whose `@id` is minted by `tableIds` from its id under the base address, with the id kept as
   `entityIdentifier`. No id column means no addresses and one `generic-no-ids` warning; a repeated
-  id is a `DataError`. An unrecognised column goes to `notes`, never `properties`. A CSV is parsed
-  whole, as the tables are; GeoJSON features are streamed, in more than one pass.
+  id is a `DataError`. An unrecognised column goes to `notes`, never `properties`. The mapping, reasons
+  and rows have no prototype, so a column called `__proto__` is kept. A CSV streams through Papa's
+  chunk parser (`csvRecords`): the columns and guess read its header and first 50 rows, and the rows
+  are read again, never kept. A FeatureCollection streams too, read twice (columns, then rows).
 - **Addresses** (`addresses.js`). `placeAddress(value)` returns `{ iri }`, `{ iri, from }` when it
   rewrote a WHG form (`place:<ns>:<id>` or an entity page) to `https://w3id.org/whg/id/place:…`,
   or `{ lost, value }` for a WHG portal address below whg_id 12,345,678 (`whg-portal-record`) or

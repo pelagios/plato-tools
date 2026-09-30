@@ -33,7 +33,7 @@ as a table to edit. Every column goes to exactly one field, to `note`, or to `sk
 | `alternative names`, `alt names`, `variants`, `aliases`, `names`… → **alternativeNames** | Further names of the attestation | Split on `;` or `\|`; a GeoJSON list is taken item by item |
 | `lat`, `latitude`, `y`, `reprLat` → **latitude**; `lon`, `lng`, `long`, `longitude`, `x`, `reprLong` → **longitude** | A geometry exactly as the locations sheet makes one: `reprPoint` and a GeoJSON Point | Guessed only if a value is a number. Missing one of the pair, not a number, or out of range: reported, and the row carried without a location |
 | `wkt`, `geowkt` → **wkt** | The geometry's `wkt`, beside the point if there is one | |
-| `geometry`, `geom`, `geojson` → **geometry** | The geometry's `geojson` (and `reprPoint` for a point) | In a CSV, GeoJSON written out in the cell; guessed only if the values are. A GeoJSON feature's own geometry is always carried. A GeometryCollection is refused, as PLATO's schema refuses it |
+| `geometry`, `geom`, `geojson` → **geometry** | The geometry's `geojson` (and `reprPoint` for a point) | In a CSV, GeoJSON written out in the cell; guessed only if the values are. A GeoJSON feature's own geometry is always carried if it is well formed: every position two or three numbers on the earth, a line of two positions or more, each ring of a polygon four or more, closed. Otherwise, and for a GeometryCollection (which PLATO's schema refuses), it is reported, with why, and the rest of the row carried |
 | `id`, `identifier`, `place id`; a GeoJSON feature's own `id` → **id** | The place's `@id`, made under the base address as the tables make one from `place_id`, and its `entityIdentifier` | Two rows with one id are refused. No id: no address, and a warning. Never an address from a row number or a name |
 | `uri`, `url`, `wikidata`, `pleiades`, `geonames`, `whg`… → **address** | The attestation's `about`: the rows become attestation-centric | Only if every value is a web address, or WHG's `place:<ns>:<id>` (an `id` column of addresses too). WHG's forms are rewritten to its persistent addresses, with a note; record and staging addresses are reported and not carried. A row whose address cannot be used becomes a new place of its own if it has an id |
 | `type`, `feature type`, `category`, `class`, `fclass`… → **type** | A type: its `label`, and its `identifier` when the value is a web address | Split on `;` or `\|`, not on commas: Pleiades' `settlement, settlement-modern` stays one label |
@@ -42,3 +42,9 @@ as a table to edit. Every column goes to exactly one field, to `note`, or to `sk
 | `date`, `period`, `year` → **date**; `start`, `from`, `minDate`… → **start**; `end`, `to`, `maxDate`… → **end** | The timespan's `sourceLabel`, `startEarliest` and `endLatest`, as in the tables | A start or end must be a year (padded to four digits) or an ISO date; otherwise reported |
 | anything else → **note** | The attestation's `notes`, as `column: value` | Never `properties`: a property would claim the source said something PLATO defines |
 | (chosen) → **skip** | Nothing | Reported once, naming the column |
+
+Two columns with the same heading are each known by the heading and their place, `name (column 3)`,
+in the matching and the notes, and the report says so once. A quotation mark never closed, or stray
+in a quoted cell, stops the file, naming the line. A property of plain GeoJSON called `toponym`,
+`timespans` or `@id` does not make it Linked Places Format: only LPF's context, or features with
+`names` that have a toponym, a `when` with `timespans`, or an `@id` of the feature itself do.
