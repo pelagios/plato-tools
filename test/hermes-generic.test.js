@@ -346,6 +346,19 @@ test('a quotation mark out of place stops the file wherever it is, however the f
   await assert.rejects(readAll(textFile(bad, 'x.csv')), (e) => e instanceof DataError && /near line 20002/.test(e.message));
   assert.equal((await readAll(textFile(good, 'x.csv'))).doc.spatialEntities.length, 30000, 'control');
 });
+test('a GeoJSON FeatureCollection is read twice, and a CSV file once whole beside the start of it, however many steps ask for its columns', async () => {
+  for (const f of ['plain.geojson', 'with-ids.csv']) {
+    let streams = 0;
+    const counted = new (class extends File { stream() { streams++; return super.stream(); } })([readFileSync(DIR + f)], f);
+    const input = await detect([counted]);
+    const before = streams;   // detection reads a GeoJSON file's start; a CSV file only by its name
+    await genericProfile(input); await columnsOf(input); await mappingOf(input);
+    const rep = new Report(); let records = 0;
+    for await (const ev of genericSource(input, rep)) if (ev.type === 'record') records++;
+    assert.ok(records > 0, f);
+    assert.equal(streams - before, 2, f);
+  }
+});
 test('a CSV file with no header, and GeoJSON in another reference system, are refused', async () => {
   await assert.rejects(readAll(textFile('\n\n', 'x.csv')), DataError);
   const crs = { type: 'FeatureCollection', crs: { type: 'name', properties: { name: 'urn:ogc:def:crs:EPSG::27700' } }, features: [{ type: 'Feature', properties: { name: 'A' }, geometry: { type: 'Point', coordinates: [400000, 500000] } }] };

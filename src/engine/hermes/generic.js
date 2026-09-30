@@ -164,27 +164,32 @@ async function openGeojson(file, input) {
   const add = (k) => { if (!seen.has(k)) { seen.add(k); headers.push(k); } };
   // A row with no prototype, so that a property called "__proto__" is a column like any other.
   const rowOf = (f) => Object.assign(Object.create(null), f.properties && typeof f.properties === 'object' ? f.properties : {}, f.id !== undefined && f.id !== null ? { [FEATURE_ID]: f.id } : {});
-  let features;
+  // A FeatureCollection is read twice, as it streams: once here, for its columns, its first rows and
+  // what it says of itself (crs, name, title), and once for its rows. One Feature on its own is read
+  // once, whole.
+  let features, all;
   if (input.shape === 'feature') {
     let f;
     try { f = JSON.parse(await wholeText(file)); } catch (e) { throw new DataError(`The JSON is not well formed, so the file cannot be read (${String(e.message).split('\n')[0]}).`); }
-    features = async function* () { yield f; };
+    features = all = async function* () { yield f; };
   } else {
-    for await (const { path, value } of jsonDocument(file, { arrays: ['features'], keys: ['crs', 'name', 'title'], onlyKeys: true })) head[path] = value;
     features = async function* () { for await (const { value } of jsonDocument(file, { arrays: ['features'] })) yield value; };
+    all = async function* () {
+      for await (const { path, value } of jsonDocument(file, { arrays: ['features'], keys: ['crs', 'name', 'title'] })) { if (path === 'features') yield value; else head[path] = value; }
+    };
   }
-  const crs = head.crs?.properties?.name;
-  if (head.crs && !(typeof crs === 'string' && WGS84.test(crs))) throw new DataError(`The GeoJSON names a coordinate reference system other than WGS 84 longitude and latitude (${typeof crs === 'string' ? crs : JSON.stringify(head.crs)}), so its coordinates cannot be read as degrees. Convert it to WGS 84 (EPSG:4326) first.`);
   // The columns are every property any feature has, in the order they are first met, and the
   // feature's own id first when any feature has one.
   let anyId = false;
-  for await (const f of features()) {
+  for await (const f of all()) {
     if (!f || typeof f !== 'object' || f.type !== 'Feature') continue;
     if (f.id !== undefined && f.id !== null) anyId = true;
     if (f.properties && typeof f.properties === 'object') for (const k of Object.keys(f.properties)) add(k);
     if (sample.length < SAMPLE) sample.push(rowOf(f));
   }
   if (anyId) headers.unshift(FEATURE_ID);
+  const crs = head.crs?.properties?.name;
+  if (head.crs && !(typeof crs === 'string' && WGS84.test(crs))) throw new DataError(`The GeoJSON names a coordinate reference system other than WGS 84 longitude and latitude (${typeof crs === 'string' ? crs : JSON.stringify(head.crs)}), so its coordinates cannot be read as degrees. Convert it to WGS 84 (EPSG:4326) first.`);
   return {
     headers, sample, head,
     async *rows() {
