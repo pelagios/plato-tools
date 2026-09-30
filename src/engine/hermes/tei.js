@@ -638,8 +638,15 @@ export async function* teiSource(input, rep) {
     { fileName: file.name, count: () => rep.count('place names') });
   let n = 0;
   const events = function* (evs) { for (const e of evs) yield e.type === 'attestation' ? { ...e, n: ++n } : e; };
-  for await (const chunk of chunks(file)) yield* events(reader.write(chunk));
-  yield* events(reader.close());
+  // What a chunk gave before a fault in it is yielded before the fault, so that the part of the file
+  // before the problem is checked, as the report says it was.
+  const step = function* (read) {
+    let evs;
+    try { evs = read(); } catch (e) { yield* events(reader.take()); throw e; }
+    yield* events(evs);
+  };
+  for await (const chunk of chunks(file)) yield* step(() => reader.write(chunk));
+  yield* step(() => reader.close());
 }
 
 /** Every attestation of a TEI document given as text, and the document: for tests and small inputs. */

@@ -354,6 +354,28 @@ test('teiSource yields the header first, then numbered attestations, and reports
   assert.equal(summary({ counts: { 'place names': 1 } }).counted, 'Read 1 place name.');
 });
 
+test('a fault after several place names in the same chunk: those names come out first, then the DataError', async () => {
+  const places = ['423025', '579885', '520985'].map((id, i) => `<placeName ref="https://pleiades.stoa.org/places/${id}">P${i}</placeName>`).join(' ');
+  const read = async (body) => {
+    const evs = [];
+    let error;
+    try { for await (const ev of teiSource({ format: 'tei', files: [textFile(tei(body), 'f.xml')] }, new Report())) evs.push(ev); } catch (e) { error = e; }
+    return { names: evs.filter((e) => e.type === 'attestation').map((e) => e.value.names[0].toponym), header: evs[0]?.type, error };
+  };
+  const bad = await read(`<p>${places}</p><p>broken</q>`);
+  assert.ok(bad.error instanceof DataError, String(bad.error));
+  assert.match(bad.error.message, /not well formed/);
+  assert.equal(bad.header, 'header');
+  assert.deepEqual(bad.names, ['P0', 'P1', 'P2']);
+  // Control: the same names with no fault, and no names before the fault.
+  const good = await read(`<p>${places}</p>`);
+  assert.equal(good.error, undefined);
+  assert.deepEqual(good.names, ['P0', 'P1', 'P2']);
+  const none = await read('<p>broken</q>');
+  assert.ok(none.error instanceof DataError);
+  assert.deepEqual(none.names, []);
+});
+
 // ---- detection, and files that cannot be read ------------------------------------------------------
 test('detected as TEI: a prefixed root, a teiCorpus, a DOCTYPE and comments before the root', async () => {
   const cases = {
