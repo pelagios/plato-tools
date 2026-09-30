@@ -265,7 +265,7 @@ export async function detect(files) {
     return { format: 'tables', container: 'zip', files };
   }
   if (n.endsWith('.xlsx') || n.endsWith('.ods')) return { format: 'tables', container: 'workbook', files };
-  if (n.endsWith('.tsv') || n.endsWith('.tab')) return { format: 'csv', delimiter: '\t', files };
+  if (n.endsWith('.tsv') || n.endsWith('.tab')) return (await headerless(f, '\t')) ? { format: null, reason: HEADERLESS_REASON } : { format: 'csv', delimiter: '\t', files };
   if (n.endsWith('.nt')) return { format: 'ntriples', files };
   if (n.endsWith('.nq')) return { format: 'nquads', files };
   if (n.endsWith('.ttl')) return { format: 'turtle', files };
@@ -418,8 +418,22 @@ function lpfVersion(obj) {
  */
 async function csvSetKind(files) {
   if (files.length > 1 ? files.some((f) => sheetOf(f.name)) : (await tableSheets(files)).length) return { format: 'tables', container: 'csv', files };
-  if (files.length === 1) return { format: 'csv', files };
+  if (files.length === 1) return (await headerless(files[0])) ? { format: null, reason: HEADERLESS_REASON } : { format: 'csv', files };
   return { format: null, reason: 'These CSV files are not a set of PLATO spreadsheet tables (none is named after one of its sheets, such as places.csv), so choose one of them at a time: each is read as a table of places, with its columns matched to PLATO.' };
+}
+export const HEADERLESS_REASON = 'This file seems to have no heading row: its first row holds numbers with decimals, as rows of data do, where the names of its columns should be. Add a first row naming each column (name, latitude, longitude…), then choose it again.';
+/**
+ * Whether a table of places seems to have no heading row: its first row has two numbers or more, one
+ * of them with a fractional part (a coordinate, as in GeoNames' rows). Headings that are whole
+ * numbers (years, as a census table has) do not count. The first row is read from the start of the
+ * file only, and a start that cannot be read is left to the reader.
+ */
+async function headerless(file, delimiter) {
+  let cells;
+  try { cells = Papa.parse((await head(file, 4096)).replace(/^\uFEFF/, ''), { preview: 1, skipEmptyLines: 'greedy', ...(delimiter ? { delimiter } : {}) }).data[0] || []; }
+  catch (e) { if (e instanceof DataError) return false; throw e; }
+  const numbers = cells.map((c) => String(c).trim()).filter((c) => /^[+-]?\d+(\.\d+)?$/.test(c));
+  return numbers.length >= 2 && numbers.some((c) => c.includes('.'));
 }
 /**
  * A FeatureCollection (or Feature) is Linked Places Format when it says so or has LPF's structure:

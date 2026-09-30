@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { detect, readable, jsonHead, GEOREF_REASON, GEOJSON_SEQ_REASON, XML_REASONS } from '../src/engine/input.js';
+import { detect, readable, jsonHead, GEOREF_REASON, GEOJSON_SEQ_REASON, XML_REASONS, HEADERLESS_REASON } from '../src/engine/input.js';
 import { gzipSync } from 'node:zlib';
 import { zipSync } from 'fflate';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -192,6 +192,18 @@ test('a zip holding no file named after a sheet is refused, saying what it holds
   assert.equal((await detect([new File([zipSync(sheets)], 'customs.zip')])).format, 'tables');
   assert.equal((await detect([new File([zipSync({ customs: sheets })], 'customs.zip')])).format, 'tables');
   assert.equal((await detect([new File([zipSync(sheets).slice(0, 200)], 'broken.zip')])).format, 'tables');
+});
+test('a table with no heading row (GeoNames) is refused with a reason; headings that are years are headings', async () => {
+  const geonames = '2633352\tBristol\tBristol\t\t51.45523\t-2.59665\tP\tPPLA2\tGB\t\tENG\tA6\t\t\t465866\t\t20\tEurope/London\t2019-09-05\n';
+  for (const [t, name] of [[geonames, 'GB.tsv'], [geonames.replaceAll('\t', ','), 'GB.csv']]) {
+    const d = await detect([textFile(t, name)]);
+    assert.deepEqual([d.format, d.reason], [null, HEADERLESS_REASON], name);
+  }
+  // Controls: the same rows under a heading row, and a census table whose headings are years.
+  const heads = 'geonameid\tname\tasciiname\talternatenames\tlatitude\tlongitude\tfclass\tfcode\tcc\tcc2\tadmin1\tadmin2\tadmin3\tadmin4\tpopulation\televation\tdem\ttimezone\tmodified\n';
+  assert.equal(await kind(heads + geonames, 'GB.tsv'), 'csv');
+  assert.equal(await kind('parish,1801,1811,1821\nAshby,120,131,140\n', 'census.csv'), 'csv');
+  assert.equal(await kind('id,name\n1,Roma\n', 'x.csv'), 'csv', 'one whole number in the first row of data is not enough to tell');
 });
 test('a places.csv separated by semicolons, tabs or bars is still the spreadsheet tables; with a header of its own, a table of places', async () => {
   for (const d of [';', '\t', '|', ',']) {
