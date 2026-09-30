@@ -2,7 +2,7 @@
 
     python3 e2e/scale_test.py --input FILE --target plato-jsonl --out OUT [--timeout 7200]
 """
-import argparse, json, os, pathlib, shutil, subprocess, sys, tempfile, time, urllib.request
+import argparse, json, os, pathlib, shutil, signal, subprocess, sys, tempfile, time, urllib.request
 import psutil
 from playwright.sync_api import sync_playwright
 
@@ -12,7 +12,12 @@ ap.add_argument('--timeout', type=int, default=7200); ap.add_argument('--port', 
 ap.add_argument('--no-typing', action='store_true')
 a = ap.parse_args()
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-srv = subprocess.Popen(['npx', 'vite', 'preview', '--port', str(a.port), '--strictPort'], cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+# Its own session, so that stopping it stops node vite preview under npx too (a plain kill() left it holding the port).
+srv = subprocess.Popen(['npx', 'vite', 'preview', '--port', str(a.port), '--strictPort'], cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
+def stop(srv):
+    try: os.killpg(srv.pid, signal.SIGTERM)
+    except ProcessLookupError: pass
+    srv.wait(timeout=10)
 url = f'http://localhost:{a.port}/'
 for _ in range(60):
     try: urllib.request.urlopen(url, timeout=1); break
@@ -62,5 +67,5 @@ try:
             d.value.save_as(a.out); result['outputBytes'] = pathlib.Path(a.out).stat().st_size
         ctx.close()
 finally:
-    srv.kill(); shutil.rmtree(profile, ignore_errors=True)
+    stop(srv); shutil.rmtree(profile, ignore_errors=True)
 print('RESULT ' + json.dumps(result), flush=True)

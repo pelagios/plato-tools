@@ -11,6 +11,14 @@ from playwright.sync_api import sync_playwright
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PLATO = pathlib.Path(os.environ.get('PLATO_REPO', ROOT.parent / 'place-attestation-ontology'))
 PROVE = '--prove-it-fails' in sys.argv
+# The preview server runs under npx, whose child (node vite preview) outlived a plain kill() and
+# held the port for the next run: it gets a session of its own, and the whole group is stopped.
+def stop(srv):
+    if srv.args == ['true']: return                # the deployed site: no server was started
+    try: os.killpg(srv.pid, signal.SIGTERM)
+    except ProcessLookupError: pass
+    srv.wait(timeout=10)
+
 # Another session's preview server on this port would be tested instead of this build, and pass:
 # E2E_PORT chooses another, and a port in use stops the run (main()).
 PORT = int(os.environ.get('E2E_PORT', '4174'))
@@ -172,14 +180,12 @@ REMOTE = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--url=')), 
 
 def main():
     if REMOTE:                                    # the deployed site: a green local run is not a green deploy
-        srv = subprocess.Popen(['true'], start_new_session=True); url = REMOTE
+        srv = subprocess.Popen(['true']); url = REMOTE
     else:
         with socket.socket() as s:
             if s.connect_ex(('127.0.0.1', PORT)) == 0:
                 sys.exit(f'Port {PORT} is in use, so the page there is not this build: set E2E_PORT to a free port.')
         subprocess.run(['npx', 'vite', 'build'], cwd=ROOT, check=True, capture_output=True)
-        # In a session of its own, so that stopping it stops vite too: killing npx alone left vite
-        # serving the port, and the next run on that port refused to start.
         srv = subprocess.Popen(['npx', 'vite', 'preview', '--port', str(PORT), '--strictPort'], cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
         url = f'http://localhost:{PORT}/'
     for _ in range(60):
@@ -282,8 +288,7 @@ def main():
             agora_checks(page, tmp)
             ctx.close()
     finally:
-        try: os.killpg(srv.pid, signal.SIGTERM)
-        except ProcessLookupError: pass
+        stop(srv)
         # The profile and the saved outputs are this run's alone: remove them (they were left in
         # /tmp by every run until now, some 2.7 MB each).
         shutil.rmtree(tmp, ignore_errors=True)
