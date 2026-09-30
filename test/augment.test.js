@@ -59,3 +59,17 @@ test("the dataset's own address is the base with its closing '/', as for its pla
   assert.equal(aboutToGazetteer({ title: 't' }, 'https://w3id.org/x/')['@id'], 'https://w3id.org/x/');
   assert.equal(aboutToGazetteer({ title: 't', dataset_uri: 'https://w3id.org/x/release/r1' }, 'https://w3id.org/x')['@id'], 'https://w3id.org/x/release/r1');
 });
+
+test('places without addresses stay apart in the tables, and say so', async () => {
+  const doc = { profile: 'place-centric', gazetteer: { title: 't' },
+    spatialEntities: [{ label: 'Alpha', attestations: [{ source: 'https://example.org/s', names: [{ toponym: 'Alpha' }] }] },
+      { label: 'Beta', attestations: [{ source: 'https://example.org/s', names: [{ toponym: 'Beta' }] }] }] };
+  const r = await go([textFile(JSON.stringify(doc), 'x.json')], 'convert', 'tables');
+  const { unzipSync, strFromU8 } = await import('fflate');
+  const z = unzipSync(new Uint8Array(await new Blob(r.e.outs[Object.keys(r.e.outs)[0]]).arrayBuffer()));
+  const places = strFromU8(z[Object.keys(z).find((k) => k.endsWith('places.csv'))]).trim().split('\n').slice(1);
+  assert.equal(places.length, 2, places.join(' | '));
+  assert.ok(places.some((l) => l.includes('Alpha')) && places.some((l) => l.includes('Beta')));
+  assert.equal(new Set(places.map((l) => l.split(',')[0])).size, 2);
+  assert.ok(r.report.items.some((i) => i.kind === 'place-without-address' && i.count === 2));
+});

@@ -624,12 +624,15 @@ function tablesWriter(env, rep, options, outputs, stem, loss) {
   };
   const ids = {
     place(iri, label, own, ccodes, entityIdentifier) {
+      // A place without an address is a place of its own, not one with every other place that has
+      // none: each gets its own row and place_id, and reading back gives it an address it did not have.
+      if (!iri) { loss({ kind: 'place-without-address', value: label || entityIdentifier || '(no label)' }); iri = {}; }
       let p = places.get(iri);
       // A record's own identifier (from a place_id, say) is its place_id again, so tables round-trip.
       if (!p) {
-        p = { place_id: entityIdentifier && !usedIds.has(entityIdentifier) ? (usedIds.add(entityIdentifier), entityIdentifier) : shortId(iri, 'place'), label: label || iri, country_codes: '', own };
+        p = { place_id: entityIdentifier && !usedIds.has(entityIdentifier) ? (usedIds.add(entityIdentifier), entityIdentifier) : shortId(typeof iri === 'string' ? iri : undefined, 'place'), label: label || (typeof iri === 'string' ? iri : 'place'), country_codes: '', own };
         places.set(iri, p);
-        if (iri && iri !== minted.place(p.place_id)) loss({ kind: 'place-address', value: iri });
+        if (typeof iri === 'string' && iri !== minted.place(p.place_id)) loss({ kind: 'place-address', value: iri });
       }
       if (own) { p.own = true; if (label) p.label = label; if (ccodes?.length) p.country_codes = ccodes.join(';'); }
       return p.place_id;
