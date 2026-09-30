@@ -28,9 +28,15 @@ export function jcs(v) {
 }
 /** The canonical lexical form of an xsd:double, as jsonld.js writes it: 1.06820411E2. */
 const canonicalDouble = (n) => n.toExponential(15).replace(/(\d)0*e\+?/, '$1E');
+/**
+ * A JSON number as a literal: a whole number below 10^21 an xsd:integer, any other an xsd:double.
+ * jsonld.js tells a double by a '.' in the number's text, so it writes 1e-7 as "0"^^xsd:integer;
+ * here it is "1.0E-7"^^xsd:double, a deliberate departure (DEVELOPERS.md, Numbers). Such a number
+ * has one significant digit, so its canonical form is exact.
+ */
 export function numberLiteral(n) {
-  if (String(n).includes('.') || Math.abs(n) >= 1e21 || !Number.isFinite(n)) return literal(canonicalDouble(n), XSD_DOUBLE);
-  return literal(n.toFixed(0), XSD_INTEGER);
+  if (Number.isInteger(n) && Math.abs(n) < 1e21) return literal(n.toFixed(0), XSD_INTEGER);
+  return literal(canonicalDouble(n), XSD_DOUBLE);
 }
 export function boundDatatype(s) {
   if (/^-?\d{4,}$/.test(s)) return XSD + 'gYear';

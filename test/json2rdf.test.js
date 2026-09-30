@@ -25,9 +25,19 @@ function compiled(doc, options = {}) {
 }
 const reference = (doc) => jsonld.toRDF({ ...doc, '@context': CTX['@context'] }, { format: 'application/n-quads', safe: false });
 
+// The one kind of number where these tools depart from jsonld.js (DEVELOPERS.md, Numbers): not a
+// whole number, yet written without a '.' (1e-7), which jsonld.js writes as "0"^^xsd:integer.
+const departs = (n) => typeof n === 'number' && Number.isFinite(n) && !Number.isInteger(n) && !String(n).includes('.');
+function departures(v, at = '$', out = []) {
+  if (departs(v)) out.push(`${at}: ${v}`);
+  else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) departures(x, `${at}.${k}`, out);
+  return out;
+}
 for (const f of readdirSync(EXAMPLES).filter((f) => f.endsWith('.json'))) {
   test(`same graph as jsonld.js: ${f}`, async () => {
     const doc = JSON.parse(readFileSync(`${EXAMPLES}/${f}`, 'utf8'));
+    // Such a number would make the graphs differ by design: none is here, so the comparison is whole.
+    assert.deepEqual(departures(doc), [], 'a number these tools write, by design, otherwise than jsonld.js');
     const [a, b] = await Promise.all([canon(compiled(doc)), canon(await reference(doc))]);
     assert.ok(b.length > 0, 'reference graph is empty');
     assert.equal(a, b);
@@ -92,4 +102,31 @@ test('with typing, a node shared by records is typed once for the file, and the 
   // Removing the type lines leaves exactly the untyped graph.
   const untyped = lines.filter((l) => !/22-rdf-syntax-ns#type>/.test(l) || /Source>|Dataset>/.test(l)).join('\n') + '\n';
   assert.equal(await canon(untyped), await canon(compiled(doc)));
+});
+
+// jsonld.js decides that a number is a double by its text containing '.', so a number JavaScript
+// writes in exponent form without one (1e-7) is written as the integer 0: the value is lost. These
+// tools write a whole number as an integer and every other as a double, and so depart from
+// jsonld.js for exactly these numbers; the equivalence tests above hold because no example has one.
+test('a number below 1e-6 is a double, not the integer 0 jsonld.js makes of it, and comes back exactly', async () => {
+  const { go, textFile, outText } = await import('./engine.js');
+  const tiny = [1e-7, -3e-10, 5e-324, 2e-7];
+  const doc = { profile: 'place-centric', gazetteer: { '@id': 'https://example.org/g', title: 't' }, spatialEntities: tiny.map((n, i) => ({
+    '@id': `https://example.org/p${i}`, label: `P${i}`, attestations: [{ properties: [{ property: 'https://example.org/prop/share', value: n }] }] })) };
+  assert.deepEqual(departures(doc).length, tiny.length, 'control: the finder finds them');
+  const ref = await reference(doc);
+  assert.match(ref, /"0"\^\^<http:\/\/www\.w3\.org\/2001\/XMLSchema#integer>/, 'why: jsonld.js writes 1e-7 as the integer 0');
+  const nt = compiled(doc);
+  assert.doesNotMatch(nt, /XMLSchema#integer/);
+  for (const lex of ['1.0E-7', '-3.0E-10', '4.940656458412465E-324', '2.0E-7']) assert.ok(nt.includes(`"${lex}"^^<http://www.w3.org/2001/XMLSchema#double>`), lex);
+  // And otherwise the graph is jsonld.js's: with 0.5 for each, where both agree, they are the same.
+  const half = structuredClone(doc); for (const e of half.spatialEntities) e.attestations[0].properties[0].value = 0.5;
+  assert.equal(await canon(compiled(half)), await canon(await reference(half)));
+  // Whole numbers stay integers, as in jsonld.js, and a large one a double.
+  assert.ok(compiled({ ...half, spatialEntities: [{ ...half.spatialEntities[0], attestations: [{ properties: [{ property: 'https://example.org/prop/n', value: 1e20 }] }] }] }).includes('"100000000000000000000"^^<http://www.w3.org/2001/XMLSchema#integer>'));
+  // Through RDF and back, each is the number it was.
+  const r = await go([textFile(JSON.stringify(doc), 'tiny.json')], 'convert', 'ntriples');
+  const back = await go([textFile(outText(r.e, 'tiny.nt'), 'tiny.nt')], 'convert', 'plato-jsonl');
+  const values = outText(back.e, 'tiny.jsonl').trim().split('\n').slice(1).map((l) => JSON.parse(l).attestations[0].properties[0].value);
+  assert.deepEqual(values.sort(), [...tiny].sort());
 });

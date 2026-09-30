@@ -77,7 +77,12 @@ are held to.
   need 17 digits to be told from its neighbour, and such a number comes back from RDF one unit in
   its last place away: `106.82041100000001` becomes `"1.06820411E2"^^xsd:double` and is read back
   as `106.820411`. Numbers of 16 significant digits or fewer, and whole numbers below 10²¹, come
-  back exactly. `test/roundtrip.test.js` pins this.
+  back exactly. `test/roundtrip.test.js` pins this. One departure from `jsonld.js` is deliberate:
+  it tells a double by a `.` in the number's text, so it writes `1e-7` (JavaScript's form for a
+  number below 10⁻⁶ with one significant digit) as `"0"^^xsd:integer`, and the value is lost. Here
+  a whole number below 10²¹ is an `xsd:integer` and any other number an `xsd:double`, so `1e-7` is
+  `"1.0E-7"^^xsd:double` and comes back exactly. The tests of equivalence with `jsonld.js` check
+  that their data holds no such number, and `test/json2rdf.test.js` shows the difference.
 - **A structured value** (a property value whose `value` is a JSON object) goes to RDF as
   `plato:value_json`, in canonical form (RFC 8785), and comes back as the object. This departs from
   `jsonld.js`, which would make the object a node and drop its keys.
