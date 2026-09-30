@@ -31,12 +31,11 @@ export const TEXT = {
   'short-description': 'The description is shorter than 50 characters, which Google Dataset Search ignores: say what the dataset holds, where and when it covers, and where it comes from.',
   'long-description': 'The description is longer than 5,000 characters, which Google Dataset Search cuts: put the detail in documentation and keep the description to a summary.',
   'no-creator': 'The dataset does not say who made it (creator): name each author, by ORCID for a person or ROR for an organisation.',
-  'creator-without-orcid': 'An author is named without an address (ORCID for a person, ROR for an organisation): give one, so that the work is credited to the right person, whose name may be shared or spelt in other ways.',
-  'creator-id-unrecognised': 'An author is identified by an address that is neither an ORCID (https://orcid.org/…) nor a ROR (https://ror.org/…): repositories and citation indexes recognise only those, so give the ORCID or ROR if there is one.',
+  'creator-id-unrecognised': "An author is identified by an address that is neither an ORCID (https://orcid.org/…) nor a ROR (https://ror.org/…): repositories and citation indexes recognise only those, and these tools cannot tell from it whether the author is a person or an organisation, so the author is treated as of unknown kind (the name kept whole, and no kind given to DataCite or on the landing page). Give the ORCID or ROR if there is one.",
   'orcid-malformed': 'An ORCID is not written as one: write it as the full address, https://orcid.org/ and four groups of four digits (the last may be X), such as https://orcid.org/0000-0002-1825-0097.',
   'orcid-checksum': "An ORCID's last digit does not match the others (its check digit, ISO 7064 11,2), so it is mistyped and names nobody, or somebody else: copy it again from the author's ORCID record.",
   'ror-malformed': 'A ROR is not written as one: write it as the full address, https://ror.org/ and the nine characters of the identifier, such as https://ror.org/02mhbdp94.',
-  'creator-kind-unknown': "An author has neither an ORCID nor a ROR, so these tools cannot tell whether this is a person or an organisation: the deposit files keep the name whole, as written (not split into family and given names, even at a comma), and do not tell DataCite which it is. Give an ORCID for a person or a ROR for an organisation.",
+  'creator-kind-unknown': "An author has neither an ORCID nor a ROR, so these tools cannot tell whether this is a person or an organisation: the deposit files keep the name whole, as written (not split into family and given names, even at a comma), and neither DataCite nor the landing page is told which it is. The address is also what makes the author findable, as FAIR asks: a name alone may be shared or spelt in other ways, so the work may be credited to the wrong author. Give an ORCID for a person or a ROR for an organisation.",
   'creator-without-name': "An author is given by ORCID only, so the deposit files cannot give their name, which Zenodo and CITATION.cff need: the ORCID stands in for it in .zenodo.json and datacite.json, and CITATION.cff says to fill it in. Replace it with the author's name before depositing. In PLATO JSON give the name beside the ORCID; the about sheet holds one or the other.",
   'no-licence': "The dataset does not say under what licence it may be reused (licence): give the licence's address, such as https://creativecommons.org/licenses/by/4.0/. It is required once status is 'published'.",
   'licence-not-uri': 'The licence is not given as a web address, so no machine can tell what it allows: give the address of the licence, such as https://creativecommons.org/licenses/by/4.0/.',
@@ -186,7 +185,12 @@ export function schemaOrgDataset(gazetteer, scheme, extras = {}) {
     url: str(g.landingPage) || base,
     identifier: identifier.length === 1 ? identifier[0] : identifier,
     creator: creatorsOf(g).map((c) => clean({
-      '@type': looksRor(c.id) ? 'Organization' : 'Person',
+      // Typed only where the address says which (C2). schema.org's creator and Google Dataset
+      // Search expect a Person or an Organization, and neither accepts a bare name; but a guessed
+      // type is a false statement about the author, where a node with a name and no @type is only
+      // incomplete (schema.org reads an untyped value liberally, and a validator may ask for the
+      // type, which creator-kind-unknown or creator-id-unrecognised already asks the author for).
+      '@type': { person: 'Person', organisation: 'Organization' }[c.kind],
       '@id': c.id || undefined, name: c.name || undefined,
       identifier: c.id || undefined,
     })),
@@ -321,8 +325,10 @@ function assess(ctx, g, outside) {
   if (!record('creator', 'R1.2-01M', creators.length)) warn('no-creator');
   let identified = creators.length > 0;
   for (const c of creators) {
-    if (c.kind === 'unknown') warn('creator-kind-unknown', c.name || c.id);
-    if (!c.id) { identified = false; warn('creator-without-orcid', c.name); continue; }
+    // One finding per author. Without an address the author is of unknown kind, and that one
+    // finding also says what an ORCID or ROR is for; an author with some other address is of
+    // unknown kind too, but the fault to mend is the address, so creator-id-unrecognised says both.
+    if (!c.id) { identified = false; warn('creator-kind-unknown', c.name); continue; }
     if (looksOrcid(c.id)) {
       const p = orcidProblem(c.id);
       if (p) { identified = false; add('error', p, c.id); }

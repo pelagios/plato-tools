@@ -75,7 +75,7 @@ const FIRES = [
   ['a short description', (g) => { g.description = 'Market towns.'; }, 'short-description', 'warning'],
   ['a long description', (g) => { g.description = 'x'.repeat(5001); }, 'long-description', 'warning'],
   ['no creator', (g) => delete g.creator, 'no-creator', 'warning'],
-  ['a creator by name only', (g) => { g.creator = [{ name: 'Josiah Carberry' }]; }, 'creator-without-orcid', 'warning'],
+  ['a creator by name only', (g) => { g.creator = [{ name: 'Josiah Carberry' }]; }, 'creator-kind-unknown', 'warning'],
   ['a creator by another address', (g) => { g.creator = [{ '@id': 'https://example.org/people/jc', name: 'J C' }]; }, 'creator-id-unrecognised', 'warning'],
   ['an ORCID with a wrong check digit', (g) => { g.creator[0]['@id'] = 'https://orcid.org/0000-0002-1825-0098'; }, 'orcid-checksum', 'error'],
   ['an ORCID not written as one', (g) => { g.creator[0]['@id'] = 'https://orcid.org/0000-0002-1825'; }, 'orcid-malformed', 'error'],
@@ -434,6 +434,31 @@ test("authors' names are split only for a person (an ORCID), only at a comma; an
   assert.match(f('CITATION.cff'), /only for a person \(with an ORCID\)/);
 });
 
+// One finding per author (C2): an author with no address is of unknown kind, and that one finding
+// says both what the tools cannot tell and what makes the author findable; an author with some
+// other address is reported as that (creator-id-unrecognised), which also says the kind is unknown.
+// Either way the FAIR check 'authors identified' still fails.
+test('an author without an ORCID or ROR is reported once: by name only as of unknown kind, by another address as unrecognised', async () => {
+  const good = await report(doc(GOOD));
+  const named = await report(doc(edit((g) => { g.creator = [{ name: 'Josiah Carberry' }]; })));
+  const other = await report(doc(edit((g) => { g.creator = [{ '@id': 'https://example.org/people/jc', name: 'J C' }]; })));
+  const creatorKinds = (r) => r.items.filter((i) => i.kind.startsWith('creator-')).map((i) => i.kind);
+  assert.deepEqual(creatorKinds(named), ['creator-kind-unknown'], kinds(named));
+  assert.deepEqual(item(named, 'creator-kind-unknown').examples, ['Josiah Carberry']);
+  assert.deepEqual(creatorKinds(other), ['creator-id-unrecognised'], kinds(other));
+  assert.deepEqual(item(other, 'creator-id-unrecognised').examples, ['https://example.org/people/jc']);
+  assert.deepEqual(creatorKinds(good), [], 'control: an author with an ORCID raises none');
+  // The one finding says both things: the kind cannot be told, and an ORCID or ROR makes the author findable.
+  assert.match(TEXT['creator-kind-unknown'], /cannot tell whether this is a person or an organisation/);
+  assert.match(TEXT['creator-kind-unknown'], /ORCID for a person or a ROR for an organisation/);
+  assert.match(TEXT['creator-kind-unknown'], /FAIR/);
+  assert.match(TEXT['creator-id-unrecognised'], /unknown kind/);
+  assert.equal(TEXT['creator-without-orcid'], undefined, 'the second warning is gone');
+  // The FAIR accounting: authors identified fails for both, passes for the good description.
+  for (const r of [named, other]) assert.equal(r.counts.fair.passed, good.counts.fair.passed - 1);
+  assert.equal(good.counts.fair.passed, good.counts.fair.of);
+});
+
 // CITATION.cff against its own JSON schema (1.2.0), which is not kept in this repository (63 KB):
 // fetch https://raw.githubusercontent.com/citation-file-format/citation-file-format/main/schema.json
 // and give its path in CFF_SCHEMA to run this. The file is parsed with cff() above, which fails on
@@ -482,6 +507,18 @@ test('schemaOrgDataset: the landing page\'s Dataset', () => {
   assert.equal(s.distribution.length, 1);
   assert.equal(schemaOrgDataset(edit((g) => { g.temporal = { startDate: '1200' }; }), scheme(BASE)).temporalCoverage, '1200/..');
   assert.equal(slug('Ἑρμῆς: Café towns!'), 'cafe-towns');
+});
+
+test('schemaOrgDataset types an author only by address: ORCID a Person, ROR an Organization, neither untyped', () => {
+  const s = schemaOrgDataset(edit((g) => { g.creator = MIXED(); g.creator.push({ '@id': 'https://example.org/people/jc', name: 'J C' }); }), scheme(BASE));
+  const by = (n) => s.creator.filter((c) => c.name === n);
+  assert.equal(s.creator.length, 8, 'every author is there');
+  assert.deepEqual(by(INSTITUTE), [{ name: INSTITUTE }], 'the institute: a name, no guessed type');
+  assert.deepEqual(by('J C'), [{ '@id': 'https://example.org/people/jc', name: 'J C', identifier: 'https://example.org/people/jc' }]);
+  // 'Gadd, Stephen' twice: the one with an ORCID a Person, the one without untyped.
+  assert.deepEqual(by('Gadd, Stephen').map((c) => c['@type'] ?? null), ['Person', null]);
+  assert.deepEqual(s.creator.filter((c) => c['@type'] === 'Person').map((c) => c['@id']), ORCIDS, 'control: the people are typed');
+  assert.deepEqual(s.creator.filter((c) => c['@type'] === 'Organization'), [{ '@type': 'Organization', '@id': ROR_ORG['@id'], name: ROR_ORG.name, identifier: ROR_ORG['@id'] }]);
 });
 
 // ---- the command line, and PLATO's examples ---------------------------------------------------
