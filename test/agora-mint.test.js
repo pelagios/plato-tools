@@ -157,6 +157,18 @@ test('a place whose address is not under the base: its attestations are left wit
   assert.deepEqual(a.map((x) => x.id === undefined), [false, true, true], 'the place under the base is minted; the other is not');
   assert.equal(r.counts.outside, 2);
 });
+test('a place under the base but not at <base>place/<id> (DEEP\'s shape) has its attestations minted all the same', async () => {
+  const deep = { '@id': `${X}places/deep-7`, label: 'deep', attestations: [{ names: [{ toponym: 'Deep' }] }] };
+  const nested = { '@id': `${X}place/a/b#it`, label: 'nested', attestations: [{ names: [{ toponym: 'Nested' }] }] };
+  const r = await mint(json(doc([deep, nested, { '@id': 'https://elsewhere.org/p/q', label: 'q', attestations: [{ names: [{ toponym: 'Out' }] }] }])));
+  assert.deepEqual(kinds(r, 'error'), ['place-outside-base']);
+  assert.deepEqual(item(r, 'place-outside-base').examples, ['https://elsewhere.org/p/q']);
+  const a = attestations(r.text);
+  assert.match(a[0].id, new RegExp(`^${X}places/deep-7#a-[0-9a-f]{8}$`));
+  assert.match(a[1].id, new RegExp(`^${X}place/a/b#a-[0-9a-f]{8}$`));
+  assert.equal(a[2].id, undefined);
+  assert.deepEqual([r.counts.minted, r.counts.outside], [2, 1]);
+});
 test('no base address, or a dataset with problems: nothing is written', async () => {
   const noBase = await mint(json(doc(places(), { title: 't' })));
   assert.deepEqual(kinds(noBase, 'error'), ['no-base']);
@@ -213,7 +225,17 @@ test('a changed attestation, against a published release, is not written either;
     const r = await mint(json(doc(changed, { ...PUB, status, version: '2' }), 'v2.json'), { previous: textFile(previous.text, 'v1-with-ids.jsonl') });
     assert.equal(r.outputs.length === 1, written, `${status}: ${JSON.stringify(r.items)}`);
     assert.equal(item(r, 'attestation-removed')?.severity, written ? 'warning' : 'error', status);
+    // Against a draft it is written, and the summary says, not only a warning among others, what
+    // would be refused once the previous release is published.
+    if (written) assert.match(r.counts.said.join(' '), /Against the previous release, which is a draft: 1 of its attestations is gone\. Written, as a draft binds nothing; once it is published, this would be refused/);
+    else assert.doesNotMatch(r.counts.said.join(' '), /which is a draft/);
   }
+  // Nothing lost against a draft: no such line.
+  const previous = await mint(json(doc(places(), G), 'v1.json'));
+  const same = await mint(json(doc(strip(places()), { ...G, version: '2' }), 'v2.json'), { previous: textFile(previous.text, 'v1-with-ids.jsonl') });
+  assert.equal(same.outputs.length, 1);
+  assert.ok(same.items.some((i) => i.kind === 'earlier-not-published'), 'control: the previous release is a draft');
+  assert.doesNotMatch(same.counts.said.join(' '), /which is a draft/);
 });
 
 // ---- tables, and the check ---------------------------------------------------------------------------------

@@ -55,7 +55,7 @@ import { compare, attestationLines } from '../compare.js';
 import { sha256 } from '../../lib/sha256.js';
 
 export const TEXT = {
-  'place-outside-base': "An attestation is about a place whose web address is not under the dataset's base address (<base>place/<id>), so it cannot be given an address as a part of its place's, and is left without one. Give the place an address under the base, or give the base its places are under. The example names the place.",
+  'place-outside-base': "An attestation is about a place whose web address is not under the dataset's base address at all, so it cannot be given an address as a part of its place's, and is left without one. Give the place an address under the base, or give the base its places are under. The example names the place.",
   'previous-not-read': 'The previous release could not be read to the end, so the addresses it gave could not be kept, and nothing was written.',
   'against-previous': 'Compared with the previous release (the earlier version), the dataset with its addresses (the later one): ',
 };
@@ -186,7 +186,11 @@ export function create(ctx) {
       }
       const rest = open.filter((g) => !g.given);
       if (!rest.length) return;
-      if (!at || !ctx.scheme.placeKey(at)) {
+      // Any place under the base is the dataset's own, so its attestations are given addresses, even
+      // one not at <base>place/<id> (DEEP's shape): the site and the w3id rules serve only those, and
+      // the FAIR report says how many others there are; an address for each attestation is wanted
+      // either way. A place under another base is someone else's to give addresses in.
+      if (!at || !at.startsWith(ctx.scheme.base)) {
         counts.outside += rest.length;
         rep.add('error', 'place-outside-base', TEXT['place-outside-base'], at || '(a place with no address)', rest.length);
         return;
@@ -217,7 +221,12 @@ export function create(ctx) {
     } finally { for (const s of [upd, use, taken, prev, q]) s.finalize(); db.exec('COMMIT'); }
   }
 
-  /** The version check between the previous release and the copy. True if the copy may be written. */
+  /**
+   * The version check between the previous release and the copy. True if the copy may be written.
+   * Only a published release binds (as in the version check itself): against a draft, what would
+   * be refused is written all the same, and `drafted` says how much of it there is.
+   */
+  let drafted = null;
   async function gate() {
     const later = { format: 'plato-jsonl', profile: 'place-centric', files: [copyFile()] };
     const r = await compare({ earlier: ctx.previous, later, options: { base: options.base } }, ctx.env);
@@ -228,6 +237,10 @@ export function create(ctx) {
       for (const x of i.explained || []) rep.explain(i.kind, x.example, x.earlier, x.later);
     }
     rep.counts.previous = r.report.counts;
+    if (r.report.items.some((i) => i.kind === 'earlier-not-published')) {
+      const n = (kind) => r.report.items.filter((i) => i.kind === kind && i.severity === 'warning').reduce((t, i) => t + i.count, 0);
+      drafted = { removed: n('attestation-removed'), changed: n('attestation-changed') };
+    }
     return !r.incomplete && r.report.errors === 0;
   }
 
@@ -300,6 +313,12 @@ export function create(ctx) {
           return;
         }
         rep.counts.said = [said];
+        // Against a draft, what would break the append-only rule is only warned of: said here too,
+        // where it cannot be missed among the warnings, since once published it would be refused.
+        if (drafted && (drafted.removed || drafted.changed)) {
+          const parts = [drafted.removed && `${n(drafted.removed)} of its attestations ${drafted.removed === 1 ? 'is' : 'are'} gone`, drafted.changed && `${n(drafted.changed)} ${drafted.changed === 1 ? 'says' : 'say'} something different`].filter(Boolean);
+          rep.counts.said.push(`Against the previous release, which is a draft: ${parts.join(' and ')}. Written, as a draft binds nothing; once it is published, this would be refused (see the warnings).`);
+        }
         const out = await ctx.env.output(name());
         for (const s of copy()) out.write(s);
         ctx.done(await out.close());
