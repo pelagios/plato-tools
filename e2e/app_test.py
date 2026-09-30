@@ -342,8 +342,9 @@ def main():
             before = page.inner_text('#columns-warnings') if cols else None
             s = table_case(page, odd, {'wikidata': 'note', 'Long': 'note'})
             after = page.inner_text('#columns-warnings') if s.get('columns') else ''
-            check('odd-headed CSV: with no address or id column, and a latitude without a longitude, the page warns of both',
-                  before == '' and noids in after and 'read as latitude but none as longitude' in after and len((s.get('columns') or {}).get('warnings', [])) == 2, {'before': before, 'after': after})
+            check('odd-headed CSV: with no address or id column, and a latitude without a longitude, the page warns of both, and that the wikidata column is not the address',
+                  before == '' and noids in after and 'read as latitude but none as longitude' in after and 'The column \u201cwikidata\u201d is named for a gazetteer' in after
+                  and len((s.get('columns') or {}).get('warnings', [])) == 3, {'before': before, 'after': after})
 
             # Changing a dropdown changes the output: first the guess, as the control (the types are
             # carried and the remark kept in the notes), then with Feature Type kept as a note and
