@@ -18,6 +18,8 @@ import { list, collectWithdrawn, resolveWithdrawn, addWithdrawal, versionLosses,
 import { CubeExport, CUBE_TEXT } from '../formats/cube.js';
 import { validateTables, checkTableRules, checkAboutRules, aboutToGazetteer, gazetteerToAbout, rowToAttestation, tableIds, recordToRows, identityRow, ATTESTATION_SHEETS, tableSchemas, cellChecker, sourceLosses } from '../formats/tables.js';
 import { AnnotationReader, ANNOTATION_KINDS } from '../formats/annotations.js';
+import { teiSource } from './hermes/tei.js';
+import { genericSource, genericProfile } from './hermes/generic.js';
 import { lineChunks, lines, jsonDocument, annotationItems, TABLE_SHEETS, DataError } from './input.js';
 import { Report, LOSS_TEXT, droppedText, FORMAT_WORDS } from './report.js';
 
@@ -318,6 +320,8 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     : input.format === 'lpf' || input.format === 'lpf-seq' ? lpfSource(input.files[0], input.format === 'lpf-seq', rep)
     : input.format === 'tables' ? tablesSource(input, env, rep, options)
     : input.format === 'w3c-annotations' ? annotationSource(input, rep)
+    : input.format === 'tei' ? teiSource(input, rep)
+    : input.format === 'csv' || input.format === 'geojson' ? genericSource(input, rep, options, DEFAULT_TABLE_BASE)
     : ['ntriples', 'nquads', 'turtle'].includes(input.format) ? rdfSource(input.files[0], input.format, rep) : null;
   if (!source) throw new Error(`Unsupported input: ${input.format}`);
   if ((input.format === 'lpf' || input.format === 'lpf-seq') && input.lpfVersion === 2) {
@@ -325,10 +329,12 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     return { report: rep.toJSON(), outputs: [] };
   }
   const isRdf = ['ntriples', 'nquads', 'turtle'].includes(input.format);
-  // Annotations become attestation-centric attestations, which are gathered by place like any others.
-  const needsStore = isRdf || input.profile === 'attestation-centric' || input.format === 'w3c-annotations';
+  // Annotations and TEI become attestation-centric attestations, which are gathered by place like
+  // any others. A CSV or GeoJSON is either, by its column matching: the file is read (and kept) first.
+  const generic = input.format === 'csv' || input.format === 'geojson' ? await genericProfile(input, options.columns) : null;
+  const needsStore = isRdf || input.profile === 'attestation-centric' || input.format === 'w3c-annotations' || input.format === 'tei' || generic === 'attestation-centric';
   const typing = options.typing ? { types: res.types, typedBounds: true, wktPoints: true } : {};
-  const profileName = input.profile || (input.format === 'w3c-annotations' ? 'attestation-centric' : 'place-centric');
+  const profileName = input.profile || generic || (input.format === 'w3c-annotations' || input.format === 'tei' ? 'attestation-centric' : 'place-centric');
   const V = res.validators[profileName] || res.validators['place-centric'];
 
   // Where the records go: a writer for the target, or nothing when checking.
@@ -404,7 +410,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
         writer && writer.header(header);
         continue;
       }
-      if (input.format.startsWith('plato') || input.format === 'lpf' || input.format === 'lpf-seq' || input.format === 'tables') checkRecord(ev);
+      if (input.format.startsWith('plato') || input.format === 'lpf' || input.format === 'lpf-seq' || input.format === 'tables' || generic) checkRecord(ev);
       if (ev.type === 'record') { rep.count('places'); rep.count('attestations', list(ev.value?.attestations).length); dry.record(ev.newEntity ? 'newSpatialEntities' : 'spatialEntities', ev.value); }
       else if (ev.type === 'idr') { rep.count('identity relations'); dry.record('identityRelations', ev.value); }
       if (writer) {
