@@ -36,13 +36,25 @@ import PKG from '../../../package.json' with { type: 'json' };
 export const PAGES_LIMIT = 1e9;
 
 // What the site's files weigh beside a place's record as PLATO JSON (JSON.stringify's length),
-// measured on PLATO's examples, JSON and spreadsheet tables (test/agora-site.test.js measures again,
-// and fails if the estimate falls short of what is written). The JSON-LD document is the record in
-// a small wrapper; the page says what the record says in HTML, 0.5 to 1.7 times as long, and about
-// 1 KB of its own (page); Turtle is 0.7 to 1.7 times. The downloads are the whole dataset,
-// compressed. The larger measurement is taken each time: an estimate that errs should err towards
-// refusing too early, not towards a deployment GitHub refuses after ten minutes.
-export const FACTORS = { jsonld: 1.02, html: 1.8, turtle: 1.8, perFile: 400, page: 1400, downloads: 0.4 };
+// fitted per file on PLATO's examples (JSON and spreadsheet tables) and on DEEP (a 2,000-place
+// sample, and runs of 20,000, 80,000 and all 539,372 places), 2026-09-30:
+//   jsonld   the record in a small wrapper: 1.01 to 1.05 times, and perFile of its own;
+//   html     the page says what the record says, but names the sources it gives whole by a link
+//            (embeddedSources), so it is measured against the record less them ('shown'): about
+//            1.25 times that, and page (some 2 KB) of its own. Against the whole record it was 0.5
+//            (tables, which give every source whole in every attestation) to 1.9 times (JSON);
+//   turtle   1.35 (DEEP) to 1.65 times the record (JSON examples), and perFile;
+//   listed   a place's line in a list of places, on the landing page or a page of its own;
+//   root     the landing page, the description, the 404 page and the style sheet, 7 to 11 KB;
+//   downloads the whole dataset gzipped, 0.18 to 0.21 of its JSON at scale (JSON Lines 0.05, N-Triples
+//            0.14 on DEEP), the tables zipped 0.02 to 0.06, and `each` of its own (a header, the
+//            description, a zip's directory), which is most of a small dataset's.
+// Each factor is taken about 15% above the fit, so the estimate runs 1.1 to 1.15 times what is
+// written at DEEP's scale and at most 1.3 times on the small examples (test/agora-site.test.js holds
+// it to that band, on the examples and on a DEEP-shaped dataset): an estimate that errs should err
+// towards refusing too early, not towards a deployment GitHub refuses after ten minutes, but one
+// 1.5 times too high (as before) refuses sites that fit.
+export const FACTORS = { jsonld: 1.02, html: 1.45, turtle: 1.6, perFile: 400, page: 2200, listed: 90, root: 10000, downloads: { gz: 0.21, tables: 0.06, each: 3000 } };
 // The spreadsheet tables are made in memory, whole (tablesWriter in pipeline.js): past this much
 // PLATO JSON they are left out of the downloads rather than risk running out of memory.
 export const TABLES_MAX_JSON = 100e6;
@@ -114,7 +126,20 @@ export function siteAddress(scheme, options) {
 }
 
 /** What a place's files will weigh, from its record's length as JSON. */
-const placeCost = (size, turtle) => size * (FACTORS.jsonld + FACTORS.html + (turtle ? FACTORS.turtle : 0)) + FACTORS.page + (turtle ? 2 : 1) * FACTORS.perFile;
+const placeCost = (size, shown, turtle) => size * FACTORS.jsonld + shown * FACTORS.html + (turtle ? size * FACTORS.turtle + FACTORS.perFile : 0) + FACTORS.page + FACTORS.perFile;
+/**
+ * How much of a record's JSON its page does not show at length: the sources its attestations give
+ * whole (spreadsheet tables give each one whole, twice, in every attestation citing it), which the
+ * page names by a link to the source's own page. The JSON-LD carries them all the same.
+ */
+function embeddedSources(atts) {
+  let n = 0;
+  for (const a of atts) {
+    for (const s of [].concat(a.sources || [])) if (s && typeof s === 'object') n += JSON.stringify(s).length;
+    for (const c of [].concat(a.citations || [])) if (c && typeof c === 'object' && c.source && typeof c.source === 'object') n += JSON.stringify(c.source).length;
+  }
+  return n;
+}
 
 export function create(ctx) {
   const { rep, options } = ctx;
@@ -179,8 +204,9 @@ export function create(ctx) {
         if (!e) {
           e = { iri, obj: null, n: 0, places: [], last: null };
           sources.set(key, e);
-          // A source's JSON-LD carries the context its keys are read under, some 2.5 KB (sourceDocument).
-          estimate += 2 * FACTORS.page + 2500;
+          // A source's page, and its JSON-LD, which carries the context its keys are read under,
+          // some 2.5 KB (sourceDocument); its Turtle, the prefixes (about 1.5 KB).
+          estimate += FACTORS.page + 2500 + (options.turtle ? 1500 : 0);
         }
         if (!e.obj && typeof s === 'object') { e.obj = s; estimate += JSON.stringify(s).length * (FACTORS.jsonld + FACTORS.html + (options.turtle ? FACTORS.turtle : 0)); }
         if (e.last !== rec['@id']) {
@@ -237,7 +263,7 @@ export function create(ctx) {
       const ok = judge(PARTS.place, rec['@id'], rec.label) !== null;
       if (only && !only.has(key)) { leftOut++; noteSources(rec, key, false); return; }
       if (only) onlySeen.add(key);
-      if (ok) { served.add(key); estimate += placeCost(size, options.turtle); }
+      if (ok) { served.add(key); estimate += placeCost(size, size - embeddedSources(atts), options.turtle); }
       noteSources(rec, key, ok);
     },
     async finish() {
@@ -275,8 +301,12 @@ export function create(ctx) {
 
       // The estimate, with the downloads (compressed, of every place) and the pages that list the places.
       const withTables = jsonAll <= TABLES_MAX_JSON;
-      for (const s of sources.values()) if (s) estimate += s.places.length * 90;
-      estimate += jsonAll * FACTORS.downloads + Math.ceil(served.size / PAGE) * (PAGE * 90 + FACTORS.page) + 4 * FACTORS.page;
+      // Each download is the whole dataset compressed, and a little of its own (a header, the
+      // description, a zip's directory); the places are listed on the landing page up to PAGE of
+      // them, and past that on pages of their own.
+      for (const s of sources.values()) if (s) estimate += s.places.length * FACTORS.listed;
+      estimate += jsonAll * (FACTORS.downloads.gz + (withTables ? FACTORS.downloads.tables : 0)) + (withTables ? 3 : 2) * FACTORS.downloads.each;
+      estimate += served.size * FACTORS.listed + (served.size > PAGE ? Math.ceil(served.size / PAGE) * FACTORS.page : 0) + FACTORS.root + (options.turtle ? FACTORS.perFile : 0);
       const limit = options.limitBytes || PAGES_LIMIT;
       const said = `estimated ${fmtBytes(Math.round(estimate))}, against GitHub Pages' ${fmtBytes(limit)}`;
       if (estimate > limit) {

@@ -318,16 +318,68 @@ test('too big for Pages: the page refuses and writes nothing; the command line w
   assert.ok(ok.zips['king-john-repo.zip']['.github/workflows/pages.yml']);
 });
 
-test('the estimate is not less than what is written, on the tables and JSON examples', async () => {
-  const measured = [];
-  for (const [name, files, options] of [['tables', () => tableFiles(TABLES), { base: 'https://w3id.org/test-x/' }], ['json', () => [jsonFile(kingJohn())], {}], ['json+turtle', () => [jsonFile(kingJohn())], { turtle: true }]]) {
-    const s = await site(files(), options);
-    const written = walk(s.siteDir).reduce((n, f) => n + statSync(join(s.siteDir, f)).size, 0);
-    measured.push(`${name}: estimated ${s.r.report.counts.estimate}, wrote ${written} (${(s.r.report.counts.estimate / written).toFixed(2)})`);
-    assert.ok(s.r.report.counts.estimate >= written, measured.at(-1));
-    assert.ok(s.r.report.counts.estimate < 4 * written, `wildly over: ${measured.at(-1)}`);
+/**
+ * A dataset of DEEP's shape (the English Place-Name Society survey, its 539,372 places the reason the
+ * site estimates at all): `n` places of about 20 KB each, some thirty attestations apiece, each a
+ * name, a date and a citation of a source given whole, as DEEP's are. Made here, so the test needs
+ * no copy of DEEP.
+ */
+function deepShaped(n = 300, base = 'https://w3id.org/deep-shaped/') {
+  const lines = [JSON.stringify({ profile: 'place-centric', gazetteer: { '@id': base, title: 'A DEEP-shaped test survey', uriSpace: base, status: 'draft', version: '1' } })];
+  const year = (y) => String(y).padStart(4, '0');
+  for (let i = 0; i < n; i++) {
+    const id = `${base}place/p-${String(i).padStart(6, '0')}`;
+    const attestations = Array.from({ length: 30 }, (_, k) => {
+      const y = 900 + ((i * 37 + k * 11) % 900), s = (i + k) % 40;
+      return {
+        '@id': `${id}#a${k}`,
+        names: [{ toponym: `Brage${'nfeld'.slice(0, 1 + (k % 5))}${k}` }],
+        timespans: [{ sourceLabel: `c. ${y}`, startEarliest: year(y - 10), startLatest: year(y + 10), endEarliest: year(y - 10), endLatest: year(y + 10), edtfString: `${y}~`, precisionValue: 20 }],
+        citations: [{ source: { '@id': `${base}source/s-${s}`, title: `Charters of house ${s}`, citation: `Source abbreviation 'Ch ${s}' in the county volume; set in italics in the volume: the survey's convention for an unpublished manuscript source`, authorityType: 'source' }, citationFunction: 'http://purl.org/spar/cito/citesAsEvidence' }],
+        notes: `Form ${k} of the name, as the survey gives it under this place (record ${i}-${k}).`,
+      };
+    });
+    lines.push(JSON.stringify({ '@id': id, label: `Place ${i}`, attestations }));
   }
+  return lines.join('\n') + '\n';
+}
+const writtenBytes = (s) => walk(s.siteDir).reduce((n, f) => n + statSync(join(s.siteDir, f)).size, 0);
+
+test('the estimate is 1 to 1.3 times what is written: the tables and JSON examples, and a dataset of DEEP\'s shape', async () => {
+  const measured = [];
+  const cases = [
+    ['tables', () => tableFiles(TABLES), { base: 'https://w3id.org/test-x/' }], ['json', () => [jsonFile(kingJohn())], {}], ['json+turtle', () => [jsonFile(kingJohn())], { turtle: true }],
+    ['deep-shaped', () => [textFile(deepShaped(), 'deep-shaped.jsonl')], {}], ['deep-shaped+turtle', () => [textFile(deepShaped(), 'deep-shaped.jsonl')], { turtle: true }],
+  ];
+  for (const [name, files, options] of cases) {
+    const s = await site(files(), options);
+    const written = writtenBytes(s), est = s.r.report.counts.estimate;
+    measured.push(`${name}: estimated ${est}, wrote ${written} (${(est / written).toFixed(2)})`);
+    assert.ok(written > 100_000, `a site was written: ${measured.at(-1)}`);
+    assert.ok(est >= written, `short: ${measured.at(-1)}`);
+    assert.ok(est <= 1.3 * written, `too high: ${measured.at(-1)}`);
+  }
+  // The DEEP-shaped pages are as DEEP's are beside their records: shorter, not longer, as the
+  // estimate once assumed (1.8 times), which had it 1.45 times too high at DEEP's scale.
   console.log(measured.join('\n'));
+});
+
+test('the estimate is never less than what is written, on every PLATO example that makes a site', async () => {
+  const ex = `${PLATO_REPO}/schemas`;
+  const inputs = [
+    ...readdirSync(`${ex}/examples`).filter((f) => f.startsWith('place-centric-') && f.endsWith('.json')).map((f) => [f, () => [file(`${ex}/examples/${f}`)], {}]),
+    ...readdirSync(`${ex}/tables/examples`).map((d) => [d, () => tableFiles(`${ex}/tables/examples/${d}`), { base: 'https://w3id.org/test-x/', name: d }]),
+  ];
+  let sites = 0;
+  for (const [name, files, options] of inputs) for (const turtle of [false, true]) {
+    const s = await site(files(), { ...options, turtle });
+    if (!s.siteDir) continue;   // an example with no base address, or not place-centric enough to serve
+    sites++;
+    const written = writtenBytes(s), est = s.r.report.counts.estimate;
+    assert.ok(est >= written, `${name}${turtle ? '+turtle' : ''}: estimated ${est}, wrote ${written}`);
+  }
+  // Presence: most examples made a site (the four JSON ones with a base, and every set of tables, each twice).
+  assert.ok(sites >= 16, `only ${sites} sites were made`);
 });
 
 test('--only: the places left out have no files, and the 404 page and the report say where they are', async () => {
