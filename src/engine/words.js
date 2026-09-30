@@ -79,3 +79,27 @@ export function groups(action) {
       intro: checking ? 'PLATO JSON has no place for these, so a conversion to it would leave them out.' : 'The target format has no place for these, so they are left out.' },
   ];
 }
+
+// ---- Chora (the map viewer and editor) -----------------------------------------------------------
+/**
+ * What a drawing's notes say of how it was made, since PLATO has no term for it: "Drawn by hand on
+ * the Natural Earth basemap at zoom 9 in PLATO tools (Chora)".
+ */
+export const choraDrawingNote = ({ basemap = 'Natural Earth', zoom } = {}) =>
+  `Drawn by hand on the ${basemap} basemap${Number.isFinite(zoom) ? ` at zoom ${Math.round(zoom)}` : ''} in PLATO tools (Chora)`;
+/** What a Chora save reports of itself (src/engine/chora/save.js), by kind. */
+export const CHORA_TEXT = {
+  'chora-addition-invalid': 'A drawing could not be added, because PLATO would not accept it as it is, so nothing was saved',
+  'chora-no-such-place': 'A drawing is for a place this dataset does not have, so nothing was saved. Open the dataset the drawing was made on.',
+  'chora-not-placed': 'A drawing did not reach its place in the saved file, so the file must not be used.',
+  'chora-unreadable': 'The dataset could not be read to the end, so it was not saved.',
+  'chora-mneme-failed': 'The version check (Mneme) found that the saved file does not keep every attestation of the dataset exactly as it was, or does not add exactly the drawings. Do not use it.',
+};
+/** A Chora save's outcome in one line, for the page and the command line. */
+export function choraSaveText(result) {
+  const n = result.report?.counts?.['attestations added'] || 0;
+  if (!result.mneme) return 'Nothing was saved.';
+  return result.mneme.passed
+    ? `Saved, with ${n.toLocaleString('en-GB')} new attestation${n === 1 ? '' : 's'}; the version check (Mneme) confirms that every attestation of the dataset is there as it was.`
+    : CHORA_TEXT['chora-mneme-failed'];
+}
