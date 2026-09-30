@@ -73,10 +73,11 @@ async function open(input) {
  *
  * A quotation mark out of place moves where Papa thinks a row ends: rows are merged into one cell,
  * or split, and nothing read after it can be trusted to be the row it seems. It stops the file with
- * a DataError naming the line, found from where in the text it is. Any other problem Papa finds is
- * given to `problem(example)`, never dropped.
+ * a DataError naming the line, found from where in the text it is. Papa's chunk parser reports no
+ * other kind of error (its delimiter and field-count errors are Papa.parse's, which this does not
+ * use); one it came to report would stop the file too, never be dropped.
  */
-export async function* csvRecords(chunks, { delimiter, problem = () => {} } = {}) {
+export async function* csvRecords(chunks, { delimiter } = {}) {
   const it = chunks[Symbol.asyncIterator]();
   let buf = '', done = false;
   // Enough of the start to guess the delimiter and the line break from, as Papa guesses them from its
@@ -100,7 +101,7 @@ export async function* csvRecords(chunks, { delimiter, problem = () => {} } = {}
       if (e.type === 'Quotes') {
         throw new DataError(`The CSV file has ${e.code === 'MissingQuotes' ? 'a quotation mark that opens a cell and is never closed' : 'a stray quotation mark in a quoted cell (a quotation mark inside a quoted cell is written twice: "")'}${line ? ` near line ${line}` : ''}, so where its rows begin and end cannot be told. Correct the quotation marks and try again.`);
       }
-      problem(`${e.message}${line ? ` (near line ${line})` : ''}`);
+      throw new DataError(`The CSV file cannot be read${line ? ` near line ${line}` : ''} (${e.message}).`);
     }
     for (const cells of res.data) if (!cells.every((c) => c.trim() === '')) yield cells;
     if (last) return;
@@ -118,7 +119,7 @@ function rowOfCells(headers, cells) {
   return row;
 }
 async function openCsv(file, input) {
-  const records = (problem) => csvRecords(textChunks(file), { delimiter: input.delimiter, problem });
+  const records = () => csvRecords(textChunks(file), { delimiter: input.delimiter });
   // The header and the first rows, for the guess: the rest of the file is not read here.
   let rawHeaders = [];
   const first = [];
@@ -141,19 +142,16 @@ async function openCsv(file, input) {
   for (const [h, cols] of uses) if (cols.length > 1) headProblems.push({ kind: 'generic-csv-duplicate-header', example: `"${h}": ${cols.length} columns (${cols.join(', ')}), read as ${cols.map((c) => `"${h} (column ${c})"`).join(', ')}` });
   return {
     headers, headerText, headProblems, sample: first.map((cells) => rowOfCells(headers, cells)), head: {},
-    // Each row, and each problem of the file's as it is found ({ fileProblem }).
+    // Each row.
     async *rows() {
-      const problems = [];
       let i = -1;
-      for await (const cells of records((example) => problems.push({ kind: 'generic-csv-problem', example }))) {
+      for await (const cells of records()) {
         if (i++ < 0) continue;   // the header
         const where = `row ${i + 1}`;   // as a spreadsheet numbers it, the header being row 1
         const extra = cells.length > headers.length ? cells.slice(headers.length) : undefined;
         const problem = cells.length < headers.length ? `${plural(cells.length, 'cell')} where the header has ${plural(headers.length, 'column')}` : undefined;
-        while (problems.length) yield { fileProblem: problems.shift() };
         yield { row: rowOfCells(headers, cells), where, problem, extra };
       }
-      while (problems.length) yield { fileProblem: problems.shift() };
     },
   };
 }
@@ -253,7 +251,6 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
   const skipped = new Set();
   let n = 0;
   for await (const r of t.rows()) {
-    if (r.fileProblem) { report(r.fileProblem.kind, r.fileProblem.example); continue; }
     n++;
     rep.count(input.format === 'csv' ? 'rows' : 'features');
     if (r.notFeature) { report('generic-not-feature', r.where); continue; }
@@ -271,7 +268,7 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
       else report(a.label ? 'generic-no-address' : 'generic-row-empty', r.where);
       continue;
     }
-    if (!a.label) { report('generic-row-empty', r.where); continue; }
+    if (!a.label) { report('generic-row-no-name', r.where); continue; }
     const rec = {};
     if (a.id !== undefined) {
       if (seen.has(a.id)) throw new DataError(`The id "${a.id}" is used by more than one ${input.format === 'csv' ? 'row' : 'feature'} (${whereOf(seen.get(a.id))} and ${r.where}). Each id becomes the web address of a place, so ids must be unique: correct the duplicate, or map another column as the id.`);

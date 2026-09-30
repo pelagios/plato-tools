@@ -180,7 +180,8 @@ test('plain.geojson: properties matched, the geometry kept, a GeometryCollection
   assert.ok(!coria.attestations[0].geometries && !magna.attestations[0].geometries);
   assert.deepEqual(r.of('generic-geometry-collection').examples, ['feature 3']);
   assert.deepEqual(r.of('generic-feature-key').examples, ['bbox', 'surveyed_by']);
-  assert.deepEqual(r.of('generic-row-empty').examples, ['feature 5']);
+  assert.deepEqual(r.of('generic-row-no-name').examples, ['feature 5']);
+  assert.ok(!r.kinds.has('generic-row-empty'), 'a place-centric row needs only a name');
   assert.ok(r.kinds.has('generic-no-ids'));
   assert.equal(r.counts.features, 5);
 });
@@ -302,6 +303,17 @@ test('a column named for a gazetteer that is not the address is warned of, on th
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
 
+test('a row with an id and no name is reported as having no name; one with neither a name nor an address, as that', async () => {
+  const r = await readAll(textFile('id,name,lat,lon\nr1,Roma,41.9,12.5\nr2,,40,14\n', 'x.csv'));
+  assert.deepEqual(r.of('generic-row-no-name').examples, ['row 3']);
+  assert.ok(!r.kinds.has('generic-row-empty'));
+  assert.deepEqual(r.doc.spatialEntities.map((p) => p.label), ['Roma'], 'control: the row with a name is read');
+  const a = await readAll(textFile('id,name,uri\nr1,Roma,https://www.wikidata.org/wiki/Q220\nr2,,\n', 'y.csv'));
+  assert.deepEqual(a.of('generic-row-empty').examples, ['row 3']);
+  assert.ok(!a.kinds.has('generic-row-no-name'));
+  assert.equal(a.doc.attestations.length, 1, 'control: the row with an address is read');
+});
+
 test('a row whose address is not one, but which has an id, becomes a place of its own, keeping what the address column said', async () => {
   const r = await readAll(textFile('id,name,wikidata\nr1,Roma,https://www.wikidata.org/wiki/Q220\nr2,Athenae,Q1524\n', 'x.csv'), { columns: { id: 'id', name: 'name', wikidata: 'address' } });
   assert.deepEqual(r.doc.attestations.map((a) => a.about), ['https://www.wikidata.org/wiki/Q220']);
@@ -325,7 +337,7 @@ test('a quotation mark that is never closed, or stray in a quoted cell, stops th
   // Control: quotes used as CSV uses them, a line break and a doubled quotation mark inside a cell.
   const r = await readAll(textFile('id,name\n1,"Roma\nnova"\n2,"Os""tia"\n3,Athenae\n', 'x.csv'));
   assert.deepEqual(r.doc.spatialEntities.map((p) => p.label), ['Roma\nnova', 'Os"tia', 'Athenae']);
-  assert.ok(!r.kinds.has('generic-csv-problem') && !r.kinds.has('generic-csv-row'));
+  assert.ok(!r.kinds.has('generic-csv-row'));
 });
 test('two columns with one heading are both read, each known by its heading and place, and the report says so', async () => {
   const r = await readAll(textFile('id,name,name\n1,Roma,Rome\n', 'x.csv'));
