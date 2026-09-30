@@ -413,7 +413,10 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     const head = docId ? { $schema: 'https://w3id.org/plato/schemas/place-centric.schema.json', ...r2j.header(docId) } : { profile: 'place-centric', gazetteer: { title: input.files[0].name } };
     head.profile = 'place-centric';
     writer && writer.header(head);
-    const idrIds = docId ? [...objectsOf(store, docId, PLATO + 'contains_identity_relation')] : [...store.subjects(TYPE, PLATO + 'IdentityRelation')];
+    // Without a document node, every identity relation is one of the document's own, except those an
+    // attestation bundles (plato:attests_identity), which are read under their attestation.
+    const idrIds = docId ? [...objectsOf(store, docId, PLATO + 'contains_identity_relation')]
+      : [...store.subjects(TYPE, PLATO + 'IdentityRelation')].filter((i) => !store.in(PLATO + 'attests_identity', i).length);
     if (target === 'lpf' || target === 'lpf-seq') for (const i of idrIds) { const v = r2j.identityRelation(i); (idrsBySubject.get(v.subject) || idrsBySubject.set(v.subject, []).get(v.subject)).push(v); }
     // The places the document lists, then any other place its attestations are about: an
     // attestation-centric document's attestations are about existing places, which it need not list
@@ -486,10 +489,12 @@ function checkGraph(store, res, rep) {
   for (const p of store.pname) if (p.startsWith(PLATO) && !res.terms.has(p)) rep.error('undeclared-term', 'A predicate in the PLATO namespace is not declared in the ontology', p);
   const q = store.db.prepare('SELECT DISTINCT o FROM t WHERE k=0 AND o LIKE ?');
   try { q.bind([PLATO + '%']); while (q.step()) { const o = q.get(0); if (!res.terms.has(o)) rep.error('undeclared-term', 'A class or concept in the PLATO namespace is not declared in the ontology', o); } } finally { q.finalize(); }
-  const tp = store.pid.get(TYPE), ab = store.pid.get(PLATO + 'attests_about');
+  // A meta-attestation (plato:meta_attestation_about) need not say what it is about: the attestation
+  // it comments on does (PLATO 238d15f; examples/relation.ttl's karakorum-dispute).
+  const tp = store.pid.get(TYPE), ab = store.pid.get(PLATO + 'attests_about'), mab = store.pid.get(PLATO + 'meta_attestation_about');
   if (tp !== undefined) {
-    const c = store.db.prepare('SELECT s FROM t WHERE p=? AND o=? AND s NOT IN (SELECT s FROM t WHERE p=?) LIMIT 5');
-    try { c.bind([tp, PLATO + 'Attestation', ab ?? -1]); while (c.step()) rep.error('attestation-without-subject', 'An attestation does not say what it is about (plato:attests_about)', c.get(0)); } finally { c.finalize(); }
+    const c = store.db.prepare('SELECT s FROM t WHERE p=? AND o=? AND s NOT IN (SELECT s FROM t WHERE p=?) AND s NOT IN (SELECT s FROM t WHERE p=?) LIMIT 5');
+    try { c.bind([tp, PLATO + 'Attestation', ab ?? -1, mab ?? -1]); while (c.step()) rep.error('attestation-without-subject', 'An attestation does not say what it is about (plato:attests_about)', c.get(0)); } finally { c.finalize(); }
   }
 }
 

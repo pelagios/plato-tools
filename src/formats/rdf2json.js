@@ -30,6 +30,9 @@ function shape(schema, core, profile) {
   const defName = (s) => (s && s.$ref && s.$ref.includes('/$defs/') ? s.$ref.split('/$defs/')[1] : null);
   let array = false, s = schema;
   if (s && s.type === 'array') { array = true; s = s.items; }
+  // A definition narrowed in place (an attestation's bundled identities: an identityRelation that
+  // must give its subject) is that definition: allOf's part with a $ref names it.
+  if (s && !s.$ref && Array.isArray(s.allOf)) s = s.allOf.find((x) => x && x.$ref) || s;
   if (s && s.oneOf) {
     const obj = s.oneOf.find((x) => defName(x) && defName(x) !== 'uri');
     return { kind: obj ? 'either' : 'uri', def: obj ? defName(obj) : null, array };
@@ -262,6 +265,11 @@ export class Rdf2Json {
       for (const sid of this.g.in(p, id)) {
         // An identity relation the document holds at its top level stays there.
         if (e.key === 'identityRelations' && this.g.in(PLATO + 'contains_identity_relation', sid).length) continue;
+        // So does one an attestation bundles (plato:attests_identity): it is read there, under the
+        // attestation whose provenance it shares, and never as a relation of its own. Nested here,
+        // it would lose that provenance, and a denied identity (the attestation negated) would read
+        // as a match.
+        if (e.key === 'identityRelations' && this.g.in(PLATO + 'attests_identity', sid).length) continue;
         if (e.key === 'attestations' && this.withdrawn) { const kind = this.withdrawn.get(sid); if (kind) { this.loss({ kind, value: sid }); continue; } }
         // The place-centric profile forbids repeating `about` on a nested attestation; identity
         // relations keep their `subject`, which the schema requires even when nested.
@@ -269,10 +277,29 @@ export class Rdf2Json {
         const sub = this.node(sid, e.shape.def, e.ctx, seen, back);
         const v = sid.startsWith('_:') ? sub : { '@id': sid, ...sub };
         (obj[e.key] ||= []).push(v);
+        if (e.key === 'attestations') this._metaWithoutSubject(sid, e, seen, obj[e.key]);
       }
     }
     if (def === 'name' && obj.toponym === undefined) this.issue({ kind: 'name-without-toponym', node: id });
     return obj;
+  }
+
+  /**
+   * The meta-attestations on attestation `target` that do not say what they are about themselves
+   * (PLATO 238d15f: a meta-attestation need not; its target does). PLATO JSON nests every attestation
+   * under a place, so each is nested beside its target, under the place the target is about, and
+   * followed on to comments on it. One with its own plato:attests_about is read under that place.
+   */
+  _metaWithoutSubject(target, e, seen, into, depth = 0) {
+    if (depth > 50) return;
+    for (const mid of this.g.in(PLATO + 'meta_attestation_about', target)) {
+      if (this.g.out(mid).some((t) => t.p === PLATO + 'attests_about') || seen.has(mid) || this.metaPlaced?.has(mid)) continue;
+      (this.metaPlaced ||= new Set()).add(mid);
+      if (this.withdrawn) { const kind = this.withdrawn.get(mid); if (kind) { this.loss({ kind, value: mid }); continue; } }
+      const sub = this.node(mid, 'attestation', e.ctx, seen);
+      into.push(mid.startsWith('_:') ? sub : { '@id': mid, ...sub });
+      this._metaWithoutSubject(mid, e, seen, into, depth + 1);
+    }
   }
 
   /** The document node and its header, or null when the graph has no Gazetteer node. */
