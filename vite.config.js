@@ -16,6 +16,14 @@ export default defineConfig({
         chora: fileURLToPath(new URL('chora.html', import.meta.url)),
         spike: fileURLToPath(new URL('spike/index.html', import.meta.url)),
       },
+      // The code both pages load (styles.css, words.js, src/chora/handoff.js) goes in one chunk
+      // named for what it is, shared-[hash].js and shared-[hash].css. Left to itself the bundler
+      // names such a chunk after the first module in it, which is an accident of imports. Only this
+      // repository's src/ is grouped, so that Vite's module-preload polyfill, which the spike page
+      // shares too, stays a chunk of its own and the spike page loads nothing of the tools.
+      output: {
+        codeSplitting: { groups: [{ name: 'shared', test: /[\\/]src[\\/]/, minShareCount: 2 }] },
+      },
     },
   },
 });
