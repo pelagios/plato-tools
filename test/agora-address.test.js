@@ -39,10 +39,14 @@ test('the scheme makes the addresses the tables make, and finds the key in each'
   assert.equal(scheme('https://gazetteer.example.ac.uk/').stem, 'gazetteer-example-ac-uk');
   // The same addresses as reading spreadsheet tables makes (formats/tables.js), which PLATO makes normative.
   const t = tableIds(s.base, () => null);
-  for (const id of ['bristol', 'St Ives', 'a/b']) {
+  for (const id of ['bristol', 'St Ives', 'a/b', "St Mary's (Old)!*", 'Zürich']) {
     assert.equal(s.place(id), t.place(id));
     assert.equal(s.source(id), t.sourceIri(id));
   }
+  // PLATO's rule: everything but RFC 3986's unreserved characters is encoded, ! ' ( ) * too, which
+  // encodeURIComponent leaves alone; the unreserved ones are not (the control).
+  assert.equal(s.place("St Mary's (Old)!*"), s.base + 'place/St%20Mary%27s%20%28Old%29%21%2A');
+  assert.equal(s.source('a-b.c_d~e'), s.base + 'source/a-b.c_d~e');
   assert.equal(s.placeKey(s.place('bristol')), 'bristol');
   assert.equal(s.placeKey(s.place('bristol') + '#a-12345678'), 'bristol');
   assert.equal(s.sourceKey(s.source('tna-e190')), 'tna-e190');

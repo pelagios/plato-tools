@@ -5,6 +5,7 @@
 // Validation follows the CSVW rules the metadata uses, and is tested against the reference
 // implementation (rdf-tabular, strict mode) on the same good and broken tables.
 import { PLATO } from '../lib/context.js';
+import { encodeId } from '../engine/agora/address.js';
 import { isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey, isComputed, isComputedFacet, identityBundleLosses } from './shared.js';
 
 export const CITO = 'http://purl.org/spar/cito/';
@@ -188,10 +189,10 @@ export function checkTableRules(rows, { issue, warn }) {
 // One row: the gazetteer header of the document the tables make. Lists are ';'-separated in a cell.
 const parts = (v) => (v ? String(v).split(';').map((x) => x.trim()).filter(Boolean) : []);
 const withSlash = (b) => (b.endsWith('/') || b.endsWith('#') ? b : b + '/');
-// An id as the last part of an address, as PLATO says: every character other than RFC 3986's
-// unreserved ones (letters, digits, - . _ ~) percent-encoded as UTF-8. encodeURIComponent leaves
-// ! ' ( ) * as they are, which the tables' own URI templates (RFC 6570) encode.
-export const encodeId = (id) => encodeURIComponent(id).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+// An id as the last part of an address (PLATO's rule) is encoded by encodeId, which lives with the
+// publishing address scheme (engine/agora/address.js) so that the two cannot encode differently;
+// it is exported from here too, for the modules that have always imported it from the tables.
+export { encodeId };
 
 /**
  * The about row -> the document's gazetteer. `base` is the address the places and sources are made

@@ -33,6 +33,13 @@ const SAFE = /^[A-Za-z0-9._~-]+$/;
 // Release names: the same, and not starting with '.', which a server may hide.
 const SAFE_RELEASE = /^[A-Za-z0-9_~-][A-Za-z0-9._~-]*$/;
 
+// An id as the last part of an address, as PLATO says: every character other than RFC 3986's
+// unreserved ones (letters, digits, - . _ ~) percent-encoded as UTF-8. encodeURIComponent leaves
+// ! ' ( ) * as they are, which the tables' own URI templates (RFC 6570) encode. Here, and not in
+// formats/tables.js (which imports it, and still exports it), so that the scheme and the tables
+// encode one way: they once differed on those five characters, and a place's address did not match.
+export const encodeId = (id) => encodeURIComponent(id).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+
 /** A base address as the scheme uses it: with its closing '/'. Null for one that is not an http(s) URL. */
 export function normaliseBase(base) {
   if (typeof base !== 'string' || !/^https?:\/\/[^/?#\s]+(\/[^?#\s]*)?$/.test(base)) return null;
@@ -82,8 +89,8 @@ export function scheme(base) {
     stem: u.pathname.split('/').filter(Boolean).pop() || u.hostname.replace(/\./g, '-'),
     /** The dataset's own address: the base itself. */
     dataset: b,
-    place: (id) => b + 'place/' + encodeURIComponent(id),
-    source: (id) => b + 'source/' + encodeURIComponent(id),
+    place: (id) => b + 'place/' + encodeId(id),
+    source: (id) => b + 'source/' + encodeId(id),
     release: (name) => b + 'release/' + name,
     download: (file) => b + 'download/' + file,
     /**
