@@ -427,6 +427,9 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       }
       if (input.format.startsWith('plato') || input.format === 'lpf' || input.format === 'lpf-seq' || input.format === 'tables' || generic) checkRecord(ev);
       if (ev.type === 'record') { rep.count('places'); rep.count('attestations', list(ev.value?.attestations).length); dry.record(ev.newEntity ? 'newSpatialEntities' : 'spatialEntities', ev.value); }
+      // Only attestation-centric input is read through the store and regrouped by place; here the
+      // header said place-centric, which has no attestation on its own, and no schema to check one by.
+      else if (ev.type === 'attestation') { rep.count('attestations'); rep.error('schema', 'An attestation is given on its own (it says what it is about), but the document is place-centric, where every attestation goes under its place. Put it under its place, or give the document the attestation-centric profile.', `${input.format === 'plato-jsonl' ? 'line' : 'attestation'} ${ev.n}${ev.value?.['@id'] ? `: ${ev.value['@id']}` : ''}`); }
       else if (ev.type === 'idr') { rep.count('identity relations'); dry.record('identityRelations', ev.value); }
       if (writer) {
         try { await writer.event(augmented(ev)); }
@@ -597,7 +600,9 @@ async function makeWriter(target, env, rep, options, typing, outputs, input) {
         else { const s = JSON.stringify(head); sink.write(s.slice(0, -1) + (s.length > 2 ? ',' : '') + '"spatialEntities":['); }
       },
       event(ev) {
-        if (ev.type === 'attestation') { rep.warning('attestation-centric', 'Attestation-centric input is regrouped by place for place-centric output'); return; }
+        // Attestation-centric input reaches here regrouped by place, through the store; one on its own
+        // is in input that said it was place-centric, and has no place to go.
+        if (ev.type === 'attestation') { loss({ kind: 'attestation-centric', value: ev.value?.['@id'] || `item ${ev.n}` }); return; }
         const line = JSON.stringify(ev.value);
         if (target === 'plato-jsonl') { sink.write(line + '\n'); return; }
         if (ev.type === 'idr') return hold(line);
@@ -655,6 +660,7 @@ async function makeWriter(target, env, rep, options, typing, outputs, input) {
         if (target === 'lpf-seq') sink.write(JSON.stringify(head) + '\n'); else { const s = JSON.stringify(head); sink.write(s.slice(0, -1) + ',"features":['); }
       },
       event(ev) {
+        if (ev.type === 'attestation') loss({ kind: 'attestation-centric', value: ev.value?.['@id'] || `item ${ev.n}` });
         if (ev.type !== 'record') return;
         placed.add(ev.value['@id']);
         const f = recordToFeature(ev.value, options.idrsBySubject.get(ev.value['@id']) || [], loss, options.withdrawn);
@@ -731,7 +737,7 @@ function tablesWriter(env, rep, options, outputs, stem, loss) {
     event(ev) {
       if (ev.type === 'record') { const rows = recordToRows(ev.value, ids, loss, accepts, options.withdrawn); for (const [k, v] of Object.entries(rows)) buffers[k]?.push(...v); }
       else if (ev.type === 'idr') buffers.identities.push(identityRow(ev.value, ids, loss));
-      else if (ev.type === 'attestation') loss({ kind: 'attestation-centric' });
+      else if (ev.type === 'attestation') loss({ kind: 'attestation-centric', value: ev.value?.['@id'] || `item ${ev.n}` });
     },
     async close() {
       buffers.places = [...places.values()].map(({ own, ...r }) => r);

@@ -156,3 +156,39 @@ test('Turtle with a syntax error part-way is not read to the end: the run is inc
   assert.equal(good.outputs.length, 1);
   assert.equal(good.report.counts.triples, 5);
 });
+
+// ---- an attestation on its own in a place-centric file ---------------------------------------------
+const loose = { '@id': 'https://example.org/a/loose', about: 'https://example.org/p', names: [{ toponym: 'Loose' }] };
+const placeCentricWithLoose = () => chunked([JSON.stringify({ profile: 'place-centric', gazetteer: { title: 'T' } }), onePlace, JSON.stringify(loose)].join('\n') + '\n', 'loose.jsonl');
+test('an attestation on its own line of place-centric JSON Lines is a schema error, and counted', async () => {
+  const r = await go([placeCentricWithLoose()], 'check');
+  const e = errors(r).filter((i) => i.kind === 'schema');
+  assert.equal(e.length, 1, JSON.stringify(errors(r)));
+  assert.match(e[0].message, /place-centric/);
+  assert.match(e[0].examples[0], /line 3/);
+  assert.equal(r.report.counts.attestations, 2);
+  // Control: the same attestation under its place is no error.
+  const nested = chunked([JSON.stringify({ profile: 'place-centric', gazetteer: { title: 'T' } }), JSON.stringify({ ...JSON.parse(onePlace), attestations: [{ names: [{ toponym: 'P' }] }, { '@id': loose['@id'], names: loose.names }] })].join('\n') + '\n', 'nested.jsonl');
+  const ok = await go([nested], 'check');
+  assert.deepEqual(errors(ok), []);
+  assert.equal(ok.report.counts.attestations, 2);
+});
+test('an attestation on its own in a place-centric document is a schema error too', async () => {
+  const doc = { profile: 'place-centric', gazetteer: { title: 'T' }, spatialEntities: [JSON.parse(onePlace)], attestations: [loose] };
+  const r = await go([chunked(JSON.stringify(doc), 'loose.json')], 'check');
+  assert.equal(errors(r).filter((i) => i.kind === 'schema' && /place-centric/.test(i.message)).length, 1, JSON.stringify(errors(r)));
+});
+test('every writer says truly what becomes of an attestation on its own in place-centric input', async () => {
+  for (const target of ['plato-jsonl', 'plato-json', 'lpf', 'lpf-seq', 'tables']) {
+    const r = await go([placeCentricWithLoose()], 'convert', target);
+    const lost = r.report.items.find((i) => i.kind === 'attestation-centric');
+    assert.equal(lost?.severity, 'loss', `${target}: ${JSON.stringify(r.report.items)}`);
+    assert.match(lost.message, /left out/, target);
+    assert.deepEqual(lost.examples, ['https://example.org/a/loose'], target);
+    assert.ok(!r.report.items.some((i) => /regrouped/.test(i.message)), `${target}: nothing was regrouped`);
+  }
+  // N-Triples carries it, and so reports no loss: control that the loss is not reported regardless.
+  const r = await go([placeCentricWithLoose()], 'convert', 'ntriples');
+  assert.ok(!r.report.items.some((i) => i.kind === 'attestation-centric' && i.severity === 'loss'));
+  assert.match(r.e.outs['loose.nt'].join(''), /<https:\/\/example.org\/a\/loose> <https:\/\/w3id.org\/plato#attests_about> <https:\/\/example.org\/p>/);
+});

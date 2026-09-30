@@ -73,6 +73,7 @@ export const LOSS_TEXT = {
   'place-address': "A place's web address is not kept: its place_id is only the last part of it, and reading the tables back makes a new address from the base address you choose.",
   'source-address': "A source's web address is not kept: its source_id is only the last part of it, and reading the tables back makes a new address from the base address you choose.",
   'lpf-undated': "A date with no years (a date as the source wrote it, or a period's name, alone) cannot be an LPF when, which needs a timespan, so it is dropped.",
+  'attestation-centric': 'An attestation given on its own (saying what it is about), in input whose header says it is place-centric, has no place to go here, where attestations are written under their place, so it is left out; the example names it. Put it under its place, or give the document the attestation-centric profile, to keep it.',
   'identity-without-place': 'An identity match whose place is not in the file has no feature to go on in Linked Places Format, so it is dropped.',
   'identity-type-missing': 'An identity match does not say what kind of match it is; the tables require match_type, so these rows must be completed before the tables are valid.',
   'form-status': 'Form status (headword, normalised…) has no LPF slot and is dropped.',
