@@ -17,6 +17,8 @@ const { readFileSync } = await import('node:fs');
 const { run, TARGETS, DEFAULT_TABLE_BASE } = await import('../src/engine/pipeline.js');
 const { compare } = await import('../src/engine/compare.js');
 const { publish, PUBLISH_PARTS } = await import('../src/engine/agora/index.js');
+const { match } = await import('../src/engine/krisis/match.js');
+const { apply, OUTPUTS: REVIEW_OUTPUTS } = await import('../src/engine/krisis/apply.js');
 const { detect, readable } = await import('../src/engine/input.js');
 const { nodeResources, gatherInputs, openFiles, isSystemError, NodeHost } = await import('../src/node/host.js');
 const { toolsCommit } = await import('../src/node/build-info.js');
@@ -42,6 +44,13 @@ Usage:
                                             mint:   a copy in which every attestation has an @id
                                             site:   a static website for GitHub Pages
                                             w3id:   redirect rules for a w3id.org namespace
+  plato-tools match [options] SUBJECTS --with OTHERS
+                                            suggest places of SUBJECTS that may be the same as
+                                            places of OTHERS, for review, in a work file
+                                            (matching two local files sends nothing anywhere)
+  plato-tools apply [options] SUBJECTS --review WORKFILE
+                                            make the decisions of a finished review into PLATO
+                                            attestations
   plato-tools datacube [--json] FILE...     check a cube export (convert --to ntriples --cube)
                                             against the RDF Data Cube integrity constraints IC-1,
                                             IC-2, IC-11, IC-12 and IC-14
@@ -66,10 +75,10 @@ ${Object.entries(TARGETS).map(([k, v]) => `  ${k.padEnd(12)} ${v.label}`).join('
 
 Options:
   --to TARGET       convert: the format to write (required).
-  --out DIR         convert: where to write the outputs (default: the current directory).
+  --out DIR         convert, match, apply: where to write the outputs (default: the current directory).
                     Each output is named after its input; an existing file is never replaced
                     unless --overwrite is given.
-  --overwrite       convert: replace outputs that already exist.
+  --overwrite       convert, match, apply: replace outputs that already exist.
   --base URL        spreadsheet tables: the web address under which the identifiers of the
                     places and sources are made (default: the about sheet's base_uri, or
                     ${DEFAULT_TABLE_BASE} without one). Given, it is used instead of
@@ -110,6 +119,18 @@ Options:
                     while it is in use (default: the system's temporary directory). It needs
                     room for about 1.2 to 1.5 times the uncompressed size of the input and, with
                     --previous, of the previous release as well; it is removed afterwards.
+  --with INPUT      match: the other dataset, whose places are suggested.
+  --threshold N     match: the lowest name score suggested, above 0 and at most 1 (default 0.85).
+  --max-distance KM match: the greatest distance apart, in kilometres, of two places with
+                    coordinates that may be suggested (default 50).
+  --top K           match: the most suggestions for one place (default 5).
+  --review FILE     apply: the work file of the review (made by match, and saved by the page).
+  --output KIND     apply: what to write: attestations, a PLATO file of only the new
+                    attestations (the default); dataset, the dataset with them added, is not
+                    yet available.
+  --reviewer NAME   match, apply: who reviews, recorded as each attestation's contributor
+                    (apply: default, the name in the work file).
+  --orcid URL       match, apply: the reviewer's ORCID, as https://orcid.org/0000-0000-0000-0000.
   --json            print one JSON object per input, one per line, then one for the total.
                     Its "columns", for a table of places, is a list of {column, field, reason}
                     to read; --columns takes the object printed without --json instead.
@@ -120,7 +141,8 @@ Options:
 Exit status: 0 if no input has problems, 1 if any has, 2 if the command is wrong or an input
 cannot be read or written. Warnings, and what a conversion cannot carry over, do not count
 as problems. For compare: 0 if nothing was deleted or changed, 1 if something was, 2 if the
-versions could not be compared.
+versions could not be compared. For match and apply: 0 if nothing stopped it, 1 if something
+did (a place without an address), 2 if it could not be done.
 `;
 
 function usage(message) {
@@ -137,6 +159,8 @@ async function main(argv) {
         to: { type: 'string' }, out: { type: 'string', default: '.' }, overwrite: { type: 'boolean', default: false },
         base: { type: 'string' }, typing: { type: 'boolean', default: true }, cube: { type: 'boolean', default: false },
         columns: { type: 'string' },
+        with: { type: 'string' }, threshold: { type: 'string' }, 'max-distance': { type: 'string' }, top: { type: 'string' },
+        review: { type: 'string' }, output: { type: 'string' }, reviewer: { type: 'string' }, orcid: { type: 'string' },
         'work-dir': { type: 'string' }, json: { type: 'boolean', default: false }, brief: { type: 'boolean', default: false },
         release: { type: 'string' }, previous: { type: 'string' }, 'concept-doi': { type: 'string' }, maintainer: { type: 'string', multiple: true, default: [] },
         repo: { type: 'string' }, 'site-url': { type: 'string' }, turtle: { type: 'boolean', default: false },
@@ -154,10 +178,12 @@ async function main(argv) {
     return 0;
   }
   const [action, ...args] = positionals;
-  if (!action) return usage('say what to do: check, convert, compare or publish.');
+  if (!action) return usage('say what to do: check, convert, compare, publish, match or apply.');
   if (action === 'datacube') return datacube(args, o);
   if (action === 'publish') return publishCommand(args, o, resources);
-  if (action !== 'check' && action !== 'convert' && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, compare, publish and datacube.`);
+  if (action === 'match' || action === 'apply') return review(action, args, o, resources);
+  if (o.with || o.threshold || o['max-distance'] || o.top || o.review || o.output || o.reviewer || o.orcid) return usage('--with, --threshold, --max-distance, --top, --review, --output, --reviewer and --orcid are for match and apply.');
+  if (action !== 'check' && action !== 'convert' && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, compare, publish, match, apply and datacube.`);
   if (!args.length) return usage(`name at least one input to ${action}.`);
   if (action === 'convert' && !o.to) return usage(`convert needs --to, one of: ${Object.keys(TARGETS).join(', ')}.`);
   if (action === 'convert' && !TARGETS[o.to]) return usage(`"${o.to}" is not a target; the targets are ${Object.keys(TARGETS).join(', ')}.`);
@@ -438,6 +464,80 @@ function describeTotal(t) {
 }
 
 process.exitCode = await main(process.argv.slice(2));
+
+// Krisis: matching. `match` suggests places of one dataset that may be the same as places of another,
+// and writes the suggestions to a work file for review (on the page); `apply` makes the decisions of
+// a review into PLATO attestations (src/engine/krisis/).
+async function review(action, args, o, resources) {
+  if (o.to) return usage('--to is for convert.');
+  if (o.json && o.brief) return usage('choose --json or --brief, not both.');
+  const reviewer = o.reviewer ? { name: o.reviewer, ...(o.orcid ? { orcid: o.orcid } : {}) } : null;
+  if (o.orcid && !o.reviewer) return usage('--orcid needs --reviewer, the name it belongs to.');
+  if (o.orcid && !/^https:\/\/orcid\.org\/\d{4}-\d{4}-\d{4}-\d{3}[0-9X]$/.test(o.orcid)) return usage('give the ORCID in full, as https://orcid.org/0000-0000-0000-0000.');
+  const items = await gatherInputs(args);
+  if (items.length !== 1) return usage(`${action} takes one dataset of places to match; ${items.length} ${items.length === 1 ? 'was' : 'were'} given.`);
+  let others = null, work = null, options;
+  if (action === 'match') {
+    if (o.review || o.output) return usage('--review and --output are for apply.');
+    if (!o.with) return usage('match needs --with, the other dataset.');
+    others = await gatherInputs([o.with]);
+    if (others.length !== 1) return usage('--with takes one dataset.');
+    options = { threshold: o.threshold, maxDistanceKm: o['max-distance'], topK: o.top, base: o.base, name: items[0].name, reviewer };
+    for (const [flag, v, ok] of [['--threshold', o.threshold, (x) => x > 0 && x <= 1], ['--max-distance', o['max-distance'], (x) => x >= 0], ['--top', o.top, (x) => Number.isInteger(x) && x >= 1]])
+      if (v !== undefined && !(/^\s*[\d.]+\s*$/.test(v) && ok(Number(v)))) return usage(`${flag} ${v} is not allowed; see --help.`);
+  } else {
+    if (o.with || o.threshold || o['max-distance'] || o.top) return usage('--with, --threshold, --max-distance and --top are for match.');
+    if (!o.review) return usage('apply needs --review, the work file of the review.');
+    if (o.output && !REVIEW_OUTPUTS.includes(o.output)) return usage(`"${o.output}" is not an output; the outputs are ${REVIEW_OUTPUTS.join(' and ')}.`);
+    try { work = readFileSync(o.review, 'utf8'); }
+    catch (e) { return usage(`the work file ${o.review} cannot be read: ${e.code === 'ENOENT' ? 'there is no such file.' : e.message}`); }
+    options = { output: o.output || 'attestations', reviewer: reviewer || undefined, name: items[0].name };
+  }
+  const host = new NodeHost({ workDir: o['work-dir'], outDir: o.out, overwrite: o.overwrite });
+  process.once('SIGINT', () => { host.abandon(); process.exit(130); });
+  const t0 = Date.now();
+  const r = { type: action, subjects: { input: items[0].label, format: null, profile: null }, status: 'failed', errors: 0, counts: {}, items: [], outputs: [], elapsedMs: 0 };
+  if (others) r.others = { input: others[0].label, format: null, profile: null };
+  const inputs = {};
+  for (const [key, item] of [['subjects', items[0]], ...(others ? [['others', others[0]]] : [])]) {
+    const { input, message } = await readInput(item);
+    if (!input) { r.message = `${item.label}: ${message}`; break; }
+    Object.assign(r[key], { format: input.format, profile: input.profile || null });
+    inputs[key] = input;
+  }
+  if (!r.message) {
+    const live = process.stderr.isTTY && !o.json;
+    const progress = live ? (p) => process.stderr.write(`\r\x1b[K${progressText(p)}`) : undefined;
+    const xlsx = Object.values(inputs).some((i) => i.container === 'workbook') ? await import('xlsx') : undefined;
+    const { env, finish } = host.env(resources, { progress, xlsx });
+    let result = null, failure = null;
+    try { result = action === 'match' ? await match({ subjects: inputs.subjects, others: inputs.others, options }, env) : await apply({ subjects: inputs.subjects, work, options }, env); }
+    catch (e) { failure = e; }
+    if (live) process.stderr.write('\r\x1b[K');
+    finish(!!failure || !!result?.incomplete);
+    if (failure) r.message = isSystemError(failure) ? (failure.code === 'EEXIST' ? `${failure.path} already exists; give --overwrite to replace it, or --out for somewhere else.` : failure.message) : failure instanceof Error && /^The (threshold|greatest|number)/.test(failure.message) ? failure.message : toolsFault(failure);
+    else Object.assign(r, { status: result.incomplete ? 'failed' : result.report.errors ? 'problems' : 'ok', errors: result.report.errors, counts: result.report.counts, items: result.report.items,
+      outputs: result.outputs.map(({ path, size }) => ({ path, size })) });
+  }
+  host.cleanup();
+  r.elapsedMs = Date.now() - t0;
+  r.exitCode = r.status === 'failed' ? 2 : r.status === 'problems' ? 1 : 0;
+  if (o.json) process.stdout.write(JSON.stringify(r) + '\n');
+  else {
+    const side = (word, s) => `${word} ${s.input}${s.format ? `: ${formatName(s)}` : ''}`;
+    const lines = [side('Places to match:', r.subjects)];
+    if (r.others) lines.push(side('Other dataset:  ', r.others));
+    if (r.message && r.status === 'failed' && !r.items.length) lines.push(`  Could not be done: ${r.message}`);
+    else {
+      const { problems, counted } = summary({ errors: r.errors, counts: r.counts }, action);
+      lines.push(`  ${problems}${counted ? ' ' + counted : ''} (${fmtTime(r.elapsedMs)})`);
+      if (!o.brief) lines.push(...itemLines(r.items, action));
+    }
+    for (const x of r.outputs) lines.push(`  Wrote ${x.path} (${fmtBytes(x.size)})`);
+    process.stdout.write(lines.join('\n') + '\n');
+  }
+  return r.exitCode;
+}
 
 /**
  * Check cube exports against the Data Cube integrity constraints. Each file is read as a stream,

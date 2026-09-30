@@ -28,9 +28,9 @@ export function progressText(p) {
   if (p.triples) bits.push(count(p.triples, 'triples'));
   if (p.places) bits.push(count(p.places, 'places'));
   if (p.attestations) bits.push(count(p.attestations, 'attestations'));
-  const phase = { reading: 'Reading', loading: 'Loading into the working database', indexing: 'Indexing', writing: 'Writing', done: 'Finishing', read: 'Read', comparing: 'Comparing the two versions' }[p.phase] || p.phase;
+  const phase = { reading: 'Reading', loading: 'Loading into the working database', indexing: 'Indexing', writing: 'Writing', done: 'Finishing', read: 'Read', comparing: 'Comparing the two versions' }[p.phase] || KRISIS_PHASES[p.phase] || p.phase;
   // The version check reads two inputs, one after the other, and says which it is on.
-  const which = p.version ? `${p.version === 'earlier' ? 'Earlier' : 'Later'} version${p.again ? ', again, to see what changed' : ''}: ` : '';
+  const which = p.version ? `${p.version === 'earlier' ? 'Earlier' : 'Later'} version${p.again ? ', again, to see what changed' : ''}: ` : p.dataset ? `${KRISIS_DATASETS[p.dataset]}: ` : '';
   return `${which}${phase}${bits.length ? ': ' + bits.join(', ') : ''} (${fmtTime(p.elapsedMs || 0)})`;
 }
 
@@ -42,6 +42,8 @@ export function summary(report, action) {
   const c = report.counts;
   if (action === 'compare') return compareSummary(report);
   if (action === 'publish') return publishSummary(report);
+  if (action === 'match') return matchSummary(report);
+  if (action === 'apply') return applySummary(report);
   const counted = ['annotations', 'place names', 'rows', 'features', 'places', 'attestations', 'identity relations', 'triples', 'triples written', 'table rows', 'observations'].filter((k) => c[k]).map((k) => count(c[k], k)).join(', ');
   const nErr = report.errors;
   return {
@@ -90,6 +92,7 @@ export function groups(action) {
     { severity: 'error', title: 'Problems', intro: 'These stop the dataset being published as it is.' },
     { severity: 'warning', title: 'Warnings', intro: 'Worth fixing: the dataset can be published, but is harder to find, cite or reuse.' },
   ];
+  if (action === 'match' || action === 'apply') return krisisGroups(action);
   if (action === 'compare') return [
     { severity: 'error', title: 'Problems', intro: 'These break the append-only rule: once a dataset is published, its attestations are added to, never deleted or changed.' },
     { severity: 'warning', title: 'Warnings', intro: 'Worth a look; none of these breaks the rule.' },
@@ -162,3 +165,46 @@ export function columnProblem(p) {
   if (p.kind === 'generic-mapping-unknown-column') return COLUMN_WORDS.unknown(p.example);
   return COLUMN_WORDS.unusable(p.example);
 }
+// Krisis: matching. What the match review (src/engine/krisis/) says, on the page and the command line.
+const KRISIS_PHASES = { matching: 'Comparing the names', applying: 'Making the attestations' };
+const KRISIS_DATASETS = { subjects: 'Places to match', others: 'Other dataset' };
+const plural = (n, one, many = one + 's') => `${n.toLocaleString('en-GB')} ${n === 1 ? one : many}`;
+
+/** The summary of a matching: how many places were compared, and how many suggestions were found for how many. */
+function matchSummary(report) {
+  const c = report.counts, nErr = report.errors;
+  if (c.subjects === undefined) return { problems: 'The two datasets could not be matched.', counted: '' };
+  const already = [c.linked ? `${plural(c.linked, 'pair')} already linked` : '', c.judgedDifferent ? `${plural(c.judgedDifferent, 'pair')} already said to be different places` : '',
+    c.tooFar ? `${plural(c.tooFar, 'pair')} alike in name but further apart than the greatest distance` : ''].filter(Boolean);
+  return {
+    problems: nErr ? `${plural(nErr, 'problem')} found.` : c.candidates ? `${plural(c.candidates, 'possible match', 'possible matches')} to review.` : 'No possible matches found.',
+    counted: `Compared ${plural(c.subjects, 'place')} with ${plural(c.others, 'place')} of the other dataset; ${plural(c.suggestedFor, 'place has', 'places have')} suggestions.`
+      + (already.length ? ` Not suggested: ${already.join('; ')}.` : ''),
+  };
+}
+/** The summary of finishing a review: the attestations made. */
+function applySummary(report) {
+  const c = report.counts, nErr = report.errors;
+  if (c.attestations === undefined) return { problems: nErr ? `${plural(nErr, 'problem')} found.` : '', counted: '' };
+  return {
+    problems: nErr ? `${plural(nErr, 'problem')} found.` : c.attestations ? 'The review was made into attestations.' : 'Nothing to write.',
+    counted: `Made ${plural(c.attestations, 'new attestation')}: ${c.matchAttestations.toLocaleString('en-GB')} accepting ${plural(c.relations - c.distinctAttestations, 'match', 'matches')}, ${c.distinctAttestations.toLocaleString('en-GB')} saying that two places are different.`,
+  };
+}
+function krisisGroups(action) {
+  return action === 'match' ? [
+    { severity: 'error', title: 'Problems', intro: 'These stopped places being matched: a place that is not matched is not suggested.' },
+    { severity: 'warning', title: 'Warnings', intro: 'Worth a look; the suggestions can still be reviewed.' },
+  ] : [
+    { severity: 'error', title: 'Problems', intro: 'Nothing was written because of these.' },
+    { severity: 'warning', title: 'Warnings', intro: 'Worth a look before the attestations are added to the dataset.' },
+  ];
+}
+/** The note each attestation a review makes carries, saying how it came about. */
+export function krisisNote(kind, algorithm) {
+  return kind === 'match'
+    ? `Accepted by the reviewer in a match review (PLATO tools, Krisis), from suggestions made by comparing names (${algorithm}).`
+    : `The reviewer judged these to be different places in a match review (PLATO tools, Krisis), rejecting a suggestion made by comparing names (${algorithm}).`;
+}
+/** A match review's progress: "12 of 340 places reviewed". */
+export const reviewProgressText = ({ reviewed, total }) => `${reviewed.toLocaleString('en-GB')} of ${plural(total, 'place')} reviewed`;
