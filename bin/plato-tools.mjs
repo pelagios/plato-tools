@@ -21,6 +21,8 @@ const { detect } = await import('../src/engine/input.js');
 const { nodeResources, gatherInputs, openFiles, isSystemError, NodeHost } = await import('../src/node/host.js');
 const { toolsCommit } = await import('../src/node/build-info.js');
 const { fmtBytes, fmtTime, formatName, progressText, summary, groups, draftNote, explainedLines } = await import('../src/engine/words.js');
+const { mappingOf } = await import('../src/engine/hermes/generic.js');
+const { FIELDS } = await import('../src/engine/hermes/columns.js');
 
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -48,9 +50,13 @@ Each INPUT is one file, or one set of spreadsheet tables:
   - a directory is one set of tables, made of the CSV files in it;
   - CSV files named one by one are one set of tables per directory they are in;
   - a zip of the CSV files, or a workbook (.xlsx), is one set of tables.
+A CSV (or TSV) file that is not one of the tables' sheets, and plain GeoJSON that is not Linked
+Places Format, are read as a table of places: which column holds what (name, latitude,
+longitude, id, the place's web address…) is guessed from the column names, and printed; see
+--columns.
 Everything else is read as the format it turns out to be: PLATO JSON or JSON Lines, RDF
-(N-Triples, N-Quads, Turtle), Linked Places Format v1, or W3C Web Annotations as Recogito exports
-them (read only). Gzipped files are read directly.
+(N-Triples, N-Quads, Turtle), Linked Places Format v1, W3C Web Annotations as Recogito exports
+them, or a TEI XML edition (these two read only). Gzipped files are read directly.
 
 Targets for --to:
 ${Object.entries(TARGETS).map(([k, v]) => `  ${k.padEnd(12)} ${v.label}`).join('\n')}
@@ -64,7 +70,15 @@ Options:
   --base URL        spreadsheet tables: the web address under which the identifiers of the
                     places and sources are made (default: the about sheet's base_uri, or
                     ${DEFAULT_TABLE_BASE} without one). Given, it is used instead of
-                    base_uri, with a warning if they differ.
+                    base_uri, with a warning if they differ. For a table of places (CSV or
+                    GeoJSON), the base under which each place's address is made from its id.
+  --columns FILE    a table of places (CSV or GeoJSON): which column holds what, as a JSON
+                    object {"column name": "field"}, instead of the guess. The guess is
+                    printed with each such input, as JSON to save, edit and give back here.
+                    The fields: ${Object.keys(FIELDS).slice(0, 6).join(', ')},
+                    ${Object.keys(FIELDS).slice(6).join(', ')};
+                    or "note" (kept in the notes as "column: value") or "skip" (not carried
+                    over, and reported).
   --no-typing       N-Triples output: leave out the node types and typed dates that the DEEP RDF
                     export adds (they are added by default, as in the browser).
   --cube            N-Triples output: also write what the RDF Data Cube vocabulary expects of
@@ -117,6 +131,7 @@ async function main(argv) {
       options: {
         to: { type: 'string' }, out: { type: 'string', default: '.' }, overwrite: { type: 'boolean', default: false },
         base: { type: 'string' }, typing: { type: 'boolean', default: true }, cube: { type: 'boolean', default: false },
+        columns: { type: 'string' },
         'work-dir': { type: 'string' }, json: { type: 'boolean', default: false }, brief: { type: 'boolean', default: false },
         release: { type: 'string' }, previous: { type: 'string' }, 'concept-doi': { type: 'string' }, maintainer: { type: 'string', multiple: true, default: [] },
         repo: { type: 'string' }, 'site-url': { type: 'string' }, turtle: { type: 'boolean', default: false },
@@ -144,6 +159,11 @@ async function main(argv) {
   if (action !== 'convert' && (o.to || o.overwrite)) return usage('--to and --overwrite are for convert.');
   if (o.json && o.brief) return usage('choose --json or --brief, not both.');
   if (o.cube && o.to !== 'ntriples') return usage('--cube is for convert --to ntriples.');
+  if (o.columns) {
+    try { o.savedColumns = JSON.parse(readFileSync(o.columns, 'utf8')); }
+    catch (e) { return usage(`--columns ${o.columns} cannot be read as JSON: ${e.message}`); }
+    if (!o.savedColumns || typeof o.savedColumns !== 'object' || Array.isArray(o.savedColumns)) return usage(`--columns ${o.columns} must hold one JSON object, {"column name": "field"}.`);
+  }
 
   const host = new NodeHost({ workDir: o['work-dir'], outDir: o.out, overwrite: o.overwrite });
   const stop = (signal) => {
@@ -342,11 +362,20 @@ async function runOne(item, action, o, resources, host, live) {
   if (!input) { r.message = message; r.elapsedMs = Date.now() - t0; return r; }
   r.format = input.format; r.profile = input.profile || null;
   if (input.lpfVersion) r.lpfVersion = input.lpfVersion;
+  // A table of places: the columns as they are read (the mapping given with --columns, else the
+  // guess), printed with the report so that it can be saved, edited and given back.
+  if (input.format === 'csv' || input.format === 'geojson') {
+    try {
+      const m = await mappingOf(input, o.savedColumns);
+      r.columns = m.mapping; r.columnReasons = m.reasons;
+      r.profile = Object.values(m.mapping).includes('address') ? 'attestation-centric' : 'place-centric';
+    } catch (e) { if (e?.name !== 'DataError') throw e; /* the run reports what stops the reader */ }
+  }
   const progress = live ? (p) => process.stderr.write(`\r\x1b[K${item.label}: ${progressText(p)}`) : undefined;
   const xlsx = input.container === 'workbook' ? await import('xlsx') : undefined;
   const { env, finish } = host.env(resources, { progress, xlsx });
   let result = null, failure = null;
-  try { result = await run({ input, action, target: r.target, options: { base: o.base, typing: o.typing, cube: o.cube, name: item.name } }, env); }
+  try { result = await run({ input, action, target: r.target, options: { base: o.base, typing: o.typing, cube: o.cube, name: input.format === 'csv' ? undefined : item.name, columns: o.savedColumns } }, env); }
   catch (e) { failure = e; }
   if (live) process.stderr.write('\r\x1b[K');
   // A file the engine could not read to the end comes back as a report marked incomplete; any
@@ -376,10 +405,20 @@ function describe(r, action, brief) {
   if (r.status === 'failed') return `${head}  Could not be ${action === 'check' ? 'checked' : 'converted'}: ${r.message}\n${brief ? '' : '\n'}`;
   const { problems, counted } = summary({ errors: r.errors, counts: r.counts });
   const lines = [head + `  ${problems}${counted ? ' ' + counted : ''}`];
+  if (!brief && r.columns) lines.push(...columnLines(r));
   if (!brief) lines.push(...itemLines(r.items, action));
   if (r.message) lines.push(`  ${r.message}`);
   for (const x of r.outputs) lines.push(`  Wrote ${x.path} (${fmtBytes(x.size)})`);
   return lines.join('\n') + (brief ? '\n' : '\n\n');
+}
+/** How a table of places' columns were read: one line each, with why, then the whole as JSON for --columns. */
+function columnLines(r) {
+  const cols = Object.keys(r.columns), w = Math.min(24, Math.max(...cols.map((c) => c.length)));
+  return [
+    '  Columns read as (to change this, save the JSON below to a file, edit it, and give it with --columns FILE):',
+    ...cols.map((c) => `    ${c.padEnd(w)}  ${r.columns[c].padEnd(16)}  ${r.columnReasons?.[c] || ''}`),
+    `    ${JSON.stringify(r.columns)}`,
+  ];
 }
 function describeTotal(t) {
   const n = (k, one, many = one + 's') => `${k.toLocaleString('en-GB')} ${k === 1 ? one : many}`;

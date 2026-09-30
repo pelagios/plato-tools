@@ -1,0 +1,335 @@
+// Tables of places that are not PLATO's own, CSV and plain GeoJSON (src/engine/hermes/generic.js):
+// telling them from PLATO's spreadsheet tables and from Linked Places Format, and reading them as
+// PLATO records. The fixtures, and where each comes from, are described in
+// test/fixtures/generic/README.md. Every test that asserts an absence asserts, in the same test, a
+// presence it could have missed.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync, readdirSync, existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import Ajv2020 from 'ajv/dist/2020.js';
+import { addPlatoFormats, strictFormatLogger } from '../src/lib/formats.js';
+import { detect, DataError } from '../src/engine/input.js';
+import { Report } from '../src/engine/report.js';
+import { tableIds } from '../src/formats/tables.js';
+import { genericSource, genericProfile, columnsOf, mappingOf } from '../src/engine/hermes/generic.js';
+import { FEATURE_ID } from '../src/engine/hermes/columns.js';
+import { PLATO_REPO } from './paths.js';
+import { file, textFile, go, outText } from './engine.js';
+
+const DIR = 'test/fixtures/generic/';
+const STAND_IN = 'https://example.org/my-dataset/';
+const load = (f) => JSON.parse(readFileSync(`public/plato/${f}`, 'utf8'));
+const ajv = addPlatoFormats(new Ajv2020({ strict: false, allErrors: true, logger: strictFormatLogger }));
+ajv.addSchema(load('plato.schema.json'), 'https://w3id.org/plato/schemas/plato.schema.json');
+ajv.addSchema(load('attestation-centric.schema.json'));
+ajv.addSchema(load('place-centric.schema.json'));
+const SCHEMA = { 'place-centric': 'https://w3id.org/plato/schemas/place-centric.schema.json', 'attestation-centric': 'https://w3id.org/plato/schemas/attestation-centric.schema.json' };
+const valid = (doc) => { const v = ajv.getSchema(SCHEMA[doc.profile]); return v(doc) ? null : v.errors.slice(0, 3); };
+
+/** Read an input through the generic reader into one document: { input, doc, items, kinds, of(kind) }. */
+async function readAll(files, options = {}) {
+  const input = await detect([].concat(files));
+  const rep = new Report();
+  const events = [];
+  for await (const ev of genericSource(input, rep, options)) events.push(ev);
+  const [head, ...rest] = events;
+  assert.equal(head.type, 'header');
+  const doc = head.value.profile === 'place-centric' ? { ...head.value, spatialEntities: rest.filter((e) => e.type === 'record').map((e) => e.value) }
+    : { ...head.value, attestations: rest.filter((e) => e.type === 'attestation').map((e) => e.value) };
+  const fresh = rest.filter((e) => e.type === 'record' && e.newEntity).map((e) => e.value);
+  if (fresh.length) doc.newSpatialEntities = fresh;
+  const { items, counts } = rep.toJSON();
+  return { input, doc, items, counts, kinds: new Set(items.map((i) => i.kind)), of: (k) => items.find((i) => i.kind === k) };
+}
+const fx = (f) => file(DIR + f);
+
+// ---- detection ----------------------------------------------------------------------------------------
+const TABLE_DIRS = ['test/fixtures/tables-judgements', 'test/fixtures/tables-routes',
+  ...(existsSync(`${PLATO_REPO}/schemas/tables/examples`) ? readdirSync(`${PLATO_REPO}/schemas/tables/examples`).map((d) => `${PLATO_REPO}/schemas/tables/examples/${d}`) : [])];
+test('every set of PLATO spreadsheet tables is still read as tables, whole or one sheet at a time', async () => {
+  assert.ok(TABLE_DIRS.length >= 2);
+  for (const dir of TABLE_DIRS) {
+    const csvs = readdirSync(dir).filter((f) => f.endsWith('.csv'));
+    assert.ok(csvs.length >= 9, dir);
+    assert.equal((await detect(csvs.map((f) => file(`${dir}/${f}`)))).format, 'tables', dir);
+    // A sheet chosen on its own is still the tables (their check then says which sheets are missing).
+    for (const f of csvs) assert.equal((await detect([file(`${dir}/${f}`)])).format, 'tables', `${dir}/${f}`);
+  }
+});
+test('any other CSV file is a table of places; a TSV file too', async () => {
+  const csvs = readdirSync(DIR).filter((f) => f.endsWith('.csv'));
+  assert.ok(csvs.length >= 5);
+  for (const f of csvs) assert.equal((await detect([fx(f)])).format, 'csv', f);
+  // Named like a sheet, but with a header of its own: a table of places, not the tables.
+  assert.equal((await detect([textFile('Name,Lat,Lon\nA,1,2\n', 'places.csv')])).format, 'csv');
+  assert.equal((await detect([textFile('place_id,label,country_codes\na,A,\n', 'places.csv')])).format, 'tables', 'control: with the sheet\'s header, the tables');
+  const tsv = await detect([textFile('name\tlat\tlon\nA\t1\t2\n', 'places.tsv')]);
+  assert.deepEqual([tsv.format, tsv.delimiter], ['csv', '\t']);
+});
+test('several CSV files that are not tables are refused, with the reason, rather than read as broken tables', async () => {
+  const d = await detect([fx('no-ids.csv'), fx('with-ids.csv')]);
+  assert.equal(d.format, null);
+  assert.match(d.reason, /one of them at a time/);
+});
+test('Linked Places Format is still read as LPF; plain GeoJSON is read as a table of its properties', async () => {
+  for (const f of ['lpf-readme-example.json', 'lpf-sample-v1.2.2.geojson']) assert.equal((await detect([file(`test/fixtures/${f}`)])).format, 'lpf', f);
+  for (const f of ['plain.geojson', 'feature-ids.geojson']) {
+    const d = await detect([fx(f)]);
+    assert.deepEqual([d.format, d.shape], ['geojson', 'collection'], f);
+  }
+  // LPF without its context is still told by its own members; the tools' own LPF output by its context.
+  const bare = { type: 'FeatureCollection', features: [{ type: 'Feature', '@id': 'https://x.org/p', properties: { title: 'P' }, names: [{ toponym: 'P' }] }] };
+  assert.equal((await detect([textFile(JSON.stringify(bare), 'x.json')])).format, 'lpf');
+  const ours = { type: 'FeatureCollection', '@context': 'https://raw.githubusercontent.com/LinkedPasts/linked-places-format/main/linkedplaces-context-v1.1.jsonld', features: [] };
+  assert.equal((await detect([textFile(JSON.stringify(ours), 'x.geojson')])).format, 'lpf');
+  const one = await detect([textFile(JSON.stringify({ type: 'Feature', properties: { name: 'A' }, geometry: null }), 'one.geojson')]);
+  assert.deepEqual([one.format, one.shape], ['geojson', 'feature']);
+});
+
+// ---- the fixtures read -------------------------------------------------------------------------------
+for (const f of readdirSync(DIR).filter((f) => /\.(csv|geojson)$/.test(f) && f !== 'duplicate-ids.csv')) {
+  test(`${f}: read into valid PLATO JSON`, async () => {
+    const { doc } = await readAll(fx(f));
+    const n = (doc.spatialEntities || doc.attestations).length;
+    assert.ok(n > 0, f);
+    assert.equal(valid(doc), null);
+  });
+}
+
+test('odd-headers.csv: rows with a web address become attestations about it, several about one address', async () => {
+  const r = await readAll(fx('odd-headers.csv'));
+  assert.equal(r.doc.profile, 'attestation-centric');
+  assert.equal(await genericProfile(r.input), 'attestation-centric');
+  const about = r.doc.attestations.map((a) => a.about);
+  assert.deepEqual(about.filter((a) => a === 'https://www.wikidata.org/wiki/Q90').length, 2);
+  assert.equal(about.length, 7);
+  const roma = r.doc.attestations[0];
+  assert.deepEqual(roma.names, [{ toponym: 'Roma' }, { toponym: 'Rome' }, { toponym: 'Urbs' }]);
+  assert.deepEqual(roma.citations, [{ source: { title: 'Itinerarium Antonini', authorityType: 'source' } }]);
+  assert.equal(roma.notes, 'Remarks: the capital');
+  for (const [k, ex] of [['generic-coordinate-missing', 'row 6'], ['generic-coordinate-not-number', 'row 7'], ['generic-coordinate-range', 'row 8'], ['generic-no-address', 'row 9'], ['generic-row-empty', 'row 10']]) {
+    assert.ok(r.of(k)?.examples.some((e) => e.startsWith(ex)), `${k} at ${ex}`);
+  }
+  // The rows whose coordinates are lost are still carried, without a location.
+  const lost = r.doc.attestations.filter((a) => ['Londinium', 'Eboracum', 'Thule'].includes(a.names[0].toponym));
+  assert.equal(lost.length, 3);
+  assert.ok(lost.every((a) => !a.geometries));
+  assert.ok(roma.geometries?.length, 'control: a good row has its location');
+  // A row about an address: never a place of its own, so neither an id nor a minted address.
+  assert.ok(!r.doc.attestations.some((a) => '@id' in a));
+  assert.equal(r.counts.rows, 9);
+});
+
+test('with-ids.csv: places get addresses made from their ids exactly as the tables make them, and keep the id', async () => {
+  const r = await readAll(fx('with-ids.csv'));
+  assert.equal(r.doc.profile, 'place-centric');
+  const ids = tableIds(STAND_IN, () => null);
+  const bath = r.doc.spatialEntities.find((p) => p.label === 'Aquae Sulis');
+  assert.deepEqual([bath['@id'], bath.entityIdentifier], [ids.place('bath'), 'bath']);
+  assert.deepEqual(bath.attestations[0].timespans, [{ startEarliest: '0060', endLatest: '0410' }]);
+  assert.equal(bath.attestations[0].names[0].language, 'la');
+  // The row with no id has no address at all, and is reported; the others are not.
+  const isca = r.doc.spatialEntities.find((p) => p.label === 'Isca');
+  assert.ok(isca && !('@id' in isca) && !('entityIdentifier' in isca));
+  assert.deepEqual(r.of('generic-id-empty').examples, ['row 6']);
+  assert.ok(r.of('generic-date-invalid').examples[0].includes('c. 75'));
+  assert.ok(r.of('generic-language-invalid'));
+  // Made under the stand-in base, the addresses are said not to be permanent; under a base given, not.
+  assert.ok(r.kinds.has('generic-stand-in-base'));
+  const based = await readAll(fx('with-ids.csv'), { base: 'https://data.example.ac.uk/forts' });
+  assert.equal(based.doc.spatialEntities[0]['@id'], 'https://data.example.ac.uk/forts/place/bath');
+  assert.ok(!based.kinds.has('generic-stand-in-base'));
+});
+test('an id is encoded into the address as the tables encode place_id', async () => {
+  const r = await readAll(textFile('id,name\nSt Albans/Verulamium,Verulamium\n', 'x.csv'));
+  assert.equal(r.doc.spatialEntities[0]['@id'], tableIds(STAND_IN, () => null).place('St Albans/Verulamium'));
+  assert.equal(r.doc.spatialEntities[0]['@id'], `${STAND_IN}place/St%20Albans%2FVerulamium`);
+});
+
+test('no-ids.csv: places without ids have no address, and one warning says how to give them one', async () => {
+  const r = await readAll(fx('no-ids.csv'));
+  assert.equal(r.doc.spatialEntities.length, 2);
+  assert.ok(r.doc.spatialEntities.every((p) => p.label && !('@id' in p)));
+  const w = r.of('generic-no-ids');
+  assert.deepEqual([w.severity, w.count], ['warning', 1]);
+  assert.match(w.message, /cannot be published or linked/);
+  assert.match(w.message, /match an existing column as the id/);
+  // No address is made from a row number or a name instead.
+  assert.ok(!JSON.stringify(r.doc).includes('/place/'));
+  assert.ok(JSON.stringify((await readAll(fx('with-ids.csv'))).doc).includes('/place/'), 'control: with ids, the addresses are there');
+});
+
+test('duplicate-ids.csv: two rows with one id are refused, naming the id and both rows', async () => {
+  await assert.rejects(readAll(fx('duplicate-ids.csv')), (e) => e instanceof DataError && /"a"/.test(e.message) && /row 2 and row 4/.test(e.message));
+  await assert.doesNotReject(readAll(fx('with-ids.csv')), 'control: unique ids are read');
+});
+
+test('plain.geojson: properties matched, the geometry kept, a GeometryCollection and foreign members reported', async () => {
+  const r = await readAll(fx('plain.geojson'));
+  assert.equal(r.doc.gazetteer.title, 'Some Roman forts');
+  const [vindolanda, wall, coria, magna] = r.doc.spatialEntities;
+  assert.deepEqual(vindolanda.attestations[0].names.map((n) => n.toponym), ['Vindolanda', 'Vindolana', 'Vindolande']);
+  assert.equal(vindolanda.attestations[0].notes, 'garrison: cohors IX Batavorum\npop: 500');
+  assert.equal(wall.attestations[0].geometries[0].geojson.type, 'LineString');
+  assert.ok(!coria.attestations[0].geometries && !magna.attestations[0].geometries);
+  assert.deepEqual(r.of('generic-geometry-collection').examples, ['feature 3']);
+  assert.deepEqual(r.of('generic-feature-key').examples, ['bbox', 'surveyed_by']);
+  assert.deepEqual(r.of('generic-row-empty').examples, ['feature 5']);
+  assert.ok(r.kinds.has('generic-no-ids'));
+  assert.equal(r.counts.features, 5);
+});
+test("feature-ids.geojson: a feature's own id makes the place's address, a number as well as a word", async () => {
+  const r = await readAll(fx('feature-ids.geojson'));
+  const { headers } = await columnsOf(r.input);
+  assert.equal(headers[0], FEATURE_ID);
+  assert.deepEqual(r.doc.spatialEntities.map((p) => p['@id']), ['vindolanda', '2', 'magna'].map((i) => tableIds(STAND_IN, () => null).place(i)));
+  assert.deepEqual(r.doc.spatialEntities[1].attestations[0].types, [{ label: 'fort' }, { label: 'town' }]);
+  assert.ok(!r.kinds.has('generic-no-ids'));
+});
+test('pleiades-places-subset.csv: a real Pleiades export is read with its ids, dates and representative points', async () => {
+  const r = await readAll(fx('pleiades-places-subset.csv'));
+  const athenae = r.doc.spatialEntities.find((p) => p.entityIdentifier === '579885');
+  assert.equal(athenae.label, 'Athenae');
+  assert.deepEqual(athenae.attestations[0].geometries[0].reprPoint, [23.7239143561, 37.9716372547]);
+  assert.deepEqual(athenae.attestations[0].timespans, [{ startEarliest: '-0750', endLatest: '2100' }]);
+  assert.match(athenae.attestations[0].notes, /^path: \/places\/579885$/m);
+  assert.equal(r.doc.spatialEntities.length, 5);
+});
+
+// ---- a saved mapping ------------------------------------------------------------------------------
+test('a saved mapping is used instead of the guess, and a skipped column is reported by name', async () => {
+  const columns = { 'Place Name': 'name', LAT: 'latitude', Long: 'longitude', wikidata: 'note', 'Feature Type': 'skip', 'Alt. names': 'alternativeNames', Source: 'source', Remarks: 'note' };
+  const r = await readAll(fx('odd-headers.csv'), { columns });
+  assert.equal(r.doc.profile, 'place-centric', 'with no address column, the rows are places');
+  assert.equal(await genericProfile(r.input, columns), 'place-centric');
+  assert.deepEqual(r.of('generic-column-skipped').examples, ['Feature Type']);
+  assert.ok(r.doc.spatialEntities.every((p) => !p.attestations[0].types));
+  assert.match(r.doc.spatialEntities[0].attestations[0].notes, /wikidata: https:\/\/www\.wikidata\.org\/wiki\/Q220/);
+  const { mapping } = await mappingOf(r.input, columns);
+  assert.deepEqual(mapping, columns);
+});
+test('an address column whose value is not a web address loses the row, and says so', async () => {
+  const r = await readAll(textFile('name,wikidata\nRoma,https://www.wikidata.org/wiki/Q220\nAthenae,Q1524\n', 'x.csv'), { columns: { name: 'name', wikidata: 'address' } });
+  assert.deepEqual(r.doc.attestations.map((a) => a.about), ['https://www.wikidata.org/wiki/Q220']);
+  assert.deepEqual(r.of('generic-address-not-web').examples, ['row 3: Q1524']);
+});
+
+// ---- World Historical Gazetteer addresses (addresses.js) ------------------------------------------
+const W3ID = 'https://w3id.org/whg/id/';
+const WHG_CSV = `id,name,whg
+r1,Roma,place:gn:3169070
+r2,Lutetia,https://whgazetteer.org/entity/place:wd:Q90/api
+r3,Old link,https://whgazetteer.org/places/1234/portal/
+r4,Staged,https://dev.whgazetteer.org/places/99999999/portal/
+,No id,https://whgazetteer.org/places/1234/portal/
+r6,Cluster,https://whgazetteer.org/places/12345999/portal/
+`;
+test("WHG's reconciliation ids and entity pages become its persistent addresses, with a note of what the file gave", async () => {
+  const r = await readAll(textFile(WHG_CSV, 'whg.csv'));
+  assert.equal(r.doc.profile, 'attestation-centric', 'place:<ns>:<id> values are recognised as addresses');
+  assert.equal(valid(r.doc), null);
+  const [roma, lutetia, cluster] = r.doc.attestations;
+  assert.equal(roma.about, `${W3ID}place:gn:3169070`);
+  assert.equal(roma.notes, 'id: r1\nPlace address given as place:gn:3169070');
+  assert.equal(lutetia.about, `${W3ID}place:wd:Q90`);
+  assert.match(lutetia.notes, /Place address given as https:\/\/whgazetteer\.org\/entity\/place:wd:Q90\/api$/);
+  // A cluster's own address (a whg_id) has no other form, and is kept as it is, with no note.
+  assert.equal(cluster.about, 'https://whgazetteer.org/places/12345999/portal/');
+  assert.doesNotMatch(cluster.notes, /Place address given as/);
+});
+test('a WHG address that must not be carried is reported by kind; the row becomes a place of its own if it has an id', async () => {
+  const r = await readAll(textFile(WHG_CSV, 'whg.csv'));
+  assert.deepEqual(r.of('generic-whg-record').examples, ['row 4: https://whgazetteer.org/places/1234/portal/', 'row 6: https://whgazetteer.org/places/1234/portal/']);
+  assert.deepEqual(r.of('generic-whg-staging').examples, ['row 5: https://dev.whgazetteer.org/places/99999999/portal/']);
+  const ids = tableIds(STAND_IN, () => null);
+  assert.deepEqual(r.doc.newSpatialEntities.map((p) => [p['@id'], p.label, p.entityIdentifier]), [[ids.place('r3'), 'Old link', 'r3'], [ids.place('r4'), 'Staged', 'r4']]);
+  assert.ok(!JSON.stringify(r.doc).includes('/places/1234/'), 'the record address is carried nowhere');
+  assert.ok(!r.doc.attestations.some((a) => a.about.includes('dev.whgazetteer')));
+  // The row with neither is lost, reported once, as the WHG loss, not again as a row with no address.
+  assert.ok(!r.kinds.has('generic-no-address') && !r.kinds.has('generic-address-not-web'));
+  assert.equal(r.doc.attestations.length + r.doc.newSpatialEntities.length, 5, 'control: every other row is read');
+});
+test('a bare number, or whg:<n>, is never expanded into a WHG address', async () => {
+  for (const v of ['2988507', 'whg:2988507']) {
+    const r = await readAll(textFile(`name,whg\nA,${v}\nB,place:gn:2988507\n`, 'x.csv'), { columns: { name: 'name', whg: 'address' } });
+    assert.deepEqual(r.of('generic-address-not-web').examples, [`row 2: ${v}`]);
+    assert.deepEqual(r.doc.attestations.map((a) => a.about), [`${W3ID}place:gn:2988507`], 'control: the reconciliation id beside it is');
+    const { mapping } = await mappingOf(await detect([textFile(`name,whg\nA,${v}\n`, 'y.csv')]));
+    assert.equal(mapping.whg, 'note', `${v} is not guessed as an address`);
+  }
+});
+
+test('a row whose address is not one, but which has an id, becomes a place of its own, keeping what the address column said', async () => {
+  const r = await readAll(textFile('id,name,wikidata\nr1,Roma,https://www.wikidata.org/wiki/Q220\nr2,Athenae,Q1524\n', 'x.csv'), { columns: { id: 'id', name: 'name', wikidata: 'address' } });
+  assert.deepEqual(r.doc.attestations.map((a) => a.about), ['https://www.wikidata.org/wiki/Q220']);
+  assert.deepEqual(r.doc.newSpatialEntities.map((p) => [p.entityIdentifier, p.attestations[0].notes]), [['r2', 'wikidata: Q1524']]);
+  assert.ok(!r.kinds.has('generic-address-not-web'), 'nothing is lost, so nothing is reported');
+  assert.equal(valid(r.doc), null);
+});
+
+// ---- bad input -------------------------------------------------------------------------------------------
+test('a CSV row with too many or too few cells is read as far as it goes, and reported', async () => {
+  const r = await readAll(textFile('name,lat,lon\nA,1,2,extra\nB,1\nC,3,4\n', 'x.csv'));
+  assert.deepEqual(r.of('generic-csv-extra-cells').examples, ['row 2: extra']);
+  assert.ok(r.of('generic-csv-row').examples.some((e) => e.startsWith('row 3')));
+  assert.equal(r.doc.spatialEntities.length, 3);
+});
+test('a CSV file with no header, and GeoJSON in another reference system, are refused', async () => {
+  await assert.rejects(readAll(textFile('\n\n', 'x.csv')), DataError);
+  const crs = { type: 'FeatureCollection', crs: { type: 'name', properties: { name: 'urn:ogc:def:crs:EPSG::27700' } }, features: [{ type: 'Feature', properties: { name: 'A' }, geometry: { type: 'Point', coordinates: [400000, 500000] } }] };
+  await assert.rejects(readAll(textFile(JSON.stringify(crs), 'x.geojson')), (e) => e instanceof DataError && /EPSG::27700/.test(e.message));
+  crs.crs.properties.name = 'urn:ogc:def:crs:OGC:1.3:CRS84';
+  crs.features[0].geometry.coordinates = [-1, 52];
+  await assert.doesNotReject(readAll(textFile(JSON.stringify(crs), 'x.geojson')), 'control: WGS 84 named is read');
+});
+
+// ---- through the engine (once src/engine/pipeline.js dispatches to the reader) ---------------------
+const wired = /genericSource/.test(readFileSync('src/engine/pipeline.js', 'utf8'));
+const skip = wired ? false : 'src/engine/pipeline.js does not yet dispatch csv and geojson to src/engine/hermes/generic.js';
+test('through the engine: converted to PLATO JSON and N-Triples with no errors, place-centric and attestation-centric', { skip }, async () => {
+  for (const [f, stem] of [['with-ids.csv', 'with-ids'], ['odd-headers.csv', 'odd-headers'], ['feature-ids.geojson', 'feature-ids']]) {
+    const j = await go([fx(f)], 'convert', 'plato-json');
+    assert.equal(j.report.errors, 0, `${f}: ${JSON.stringify(j.report.items.filter((i) => i.severity === 'error'))}`);
+    const pc = JSON.parse(outText(j.e, `${stem}.json`));
+    assert.equal(valid(pc), null);
+    assert.ok(pc.spatialEntities.length > 0);
+    const n = await go([fx(f)], 'convert', 'ntriples');
+    assert.equal(n.report.errors, 0, f);
+    assert.match(outText(n.e, `${stem}.nt`), /<https:\/\/w3id\.org\/plato#attests_about>|contains_entity/);
+  }
+});
+test('through the engine: a duplicate id stops the run with no output', { skip }, async () => {
+  const r = await go([fx('duplicate-ids.csv')], 'convert', 'plato-json');
+  assert.ok(r.incomplete);
+  assert.deepEqual(r.outputs, []);
+  assert.ok(r.report.items.some((i) => i.severity === 'error' && i.examples.some((e) => /"a"/.test(e))));
+});
+
+// ---- the command line -----------------------------------------------------------------------------
+const CLI = fileURLToPath(new URL('../bin/plato-tools.mjs', import.meta.url));
+const cli = (...args) => { const r = spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8' }); return { code: r.status, out: r.stdout, err: r.stderr }; };
+test('command line: --columns that is not a JSON object is refused before anything is read', () => {
+  const d = mkdtempSync(join(tmpdir(), 'plato-tools-hermes-'));
+  try {
+    writeFileSync(join(d, 'bad.json'), '["name"]');
+    const r = cli('check', '--columns', join(d, 'bad.json'), DIR + 'no-ids.csv');
+    assert.equal(r.code, 2);
+    assert.match(r.err, /must hold one JSON object/);
+    const r2 = cli('check', '--columns', join(d, 'missing.json'), DIR + 'no-ids.csv');
+    assert.equal(r2.code, 2);
+    assert.match(r2.err, /cannot be read as JSON/);
+  } finally { rmSync(d, { recursive: true, force: true }); }
+});
+test('command line: the columns as read are printed with the report, as JSON to save and give back', { skip }, () => {
+  const r = cli('check', DIR + 'odd-headers.csv');
+  assert.equal(r.code, 0, r.out + r.err);
+  assert.match(r.out, /Columns read as/);
+  assert.ok(r.out.includes('{"Place Name":"name","LAT":"latitude","Long":"longitude","wikidata":"address"'));
+  const j = JSON.parse(cli('check', '--json', DIR + 'odd-headers.csv').out.split('\n')[0]);
+  assert.equal(j.columns.wikidata, 'address');
+  assert.equal(j.profile, 'attestation-centric');
+});

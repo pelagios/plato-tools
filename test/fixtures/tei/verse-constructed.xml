@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Constructed for the tests of src/engine/hermes/tei.js: not a real edition. -->
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader>
+    <fileDesc>
+      <titleStmt>
+        <title>Verses on the Rivers of Gaul</title>
+      </titleStmt>
+      <publicationStmt>
+        <p>Made for testing.</p>
+        <availability>
+          <licence>Free to use for any purpose.</licence>
+        </availability>
+      </publicationStmt>
+      <sourceDesc>
+        <p>Born digital.</p>
+      </sourceDesc>
+    </fileDesc>
+  </teiHeader>
+  <text xml:lang="la">
+    <body>
+      <lg type="stanza" n="1">
+        <l n="1">Transieram celerem nebuloso lumine <rs type="place" ref="https://pleiades.stoa.org/places/108825">Navam</rs>,</l>
+        <l n="2">addita miratus veteri nova moenia <name type="place" ref="https://pleiades.stoa.org/places/108782">Vinco</name>,</l>
+        <l n="3">unde iter ingrediens nemorosa per avia solum</l>
+        <l n="4">et nulla humani spectans vestigia cultus</l>
+        <l n="5">praetereo arentem sitientibus undique terris</l>
+        <l n="6"><placeName ref="https://pleiades.stoa.org/places/109026">Dumnissum</placeName> riguasque perenni fonte
+          <region ref="https://pleiades.stoa.org/places/108836">Tabernas</region></l>
+        <l n="7" xml:lang="Latin">arvaque <rs type="person">Sauromatum</rs> nuper metata colonis.</l>
+        <l n="8">et tandem primis <placeName xml:lang="Latin" ref="https://pleiades.stoa.org/places/108729">Belgarum</placeName> conspicor oris</l>
+      </lg>
+    </body>
+  </text>
+</TEI>

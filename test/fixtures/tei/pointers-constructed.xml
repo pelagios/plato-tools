@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Constructed for the tests of src/engine/hermes/tei.js: not a real edition. -->
+<TEI xmlns="http://www.tei-c.org/ns/1.0" xml:lang="grc">
+  <teiHeader>
+    <fileDesc>
+      <titleStmt>
+        <title>Places by Pointer</title>
+        <author>First Author</author>
+        <author>Second Author</author>
+      </titleStmt>
+      <publicationStmt>
+        <idno type="URI">https://example.org/editions/pointers</idno>
+      </publicationStmt>
+      <sourceDesc>
+        <listBibl>
+          <bibl>First witness</bibl>
+          <bibl>Second witness</bibl>
+        </listBibl>
+      </sourceDesc>
+    </fileDesc>
+    <encodingDesc>
+      <listPrefixDef>
+        <prefixDef ident="pl" matchPattern="([0-9]+)" replacementPattern="https://pleiades.stoa.org/places/$1"/>
+        <prefixDef ident="gn" matchPattern="([0-9]+)" replacementPattern="urn:geonames:$1"/>
+      </listPrefixDef>
+    </encodingDesc>
+    <profileDesc>
+      <settingDesc>
+        <listPlace>
+          <place xml:id="athens">
+            <placeName>Athenae</placeName>
+            <idno type="pleiades">https://pleiades.stoa.org/places/579885</idno>
+            <location><geo>37.97 23.72</geo></location>
+          </place>
+          <place xml:id="thebes">
+            <idno>https://pleiades.stoa.org/places/541138</idno>
+            <idno type="URI">https://www.wikidata.org/entity/Q192393</idno>
+          </place>
+          <place xml:id="nowhere">
+            <placeName>Nephelokokkygia</placeName>
+            <idno type="local">N1</idno>
+          </place>
+        </listPlace>
+      </settingDesc>
+    </profileDesc>
+  </teiHeader>
+  <text>
+    <body>
+      <ab>
+        <lb n="1"/><placeName ref="pl:570182">Κόρινθος</placeName>
+        <lb n="2"/><placeName ref="xx:1">Μέγαρα</placeName>
+        <lb n="3"/><placeName ref="gn:264371">Ἀθῆναι</placeName>
+        <lb n="4"/><placeName ref="urn:cts:greekLit:tlg0525">Παυσανίας</placeName>
+        <lb n="5"/><placeName ref="#athens">Ἀθηνῶν</placeName>
+        <lb n="6"/><placeName ref="#thebes">Θῆβαι</placeName>
+        <lb n="7"/><placeName ref="#nowhere">Νεφελοκοκκυγία</placeName>
+        <lb n="8"/><placeName ref="#sparta">Σπάρτη</placeName>
+        <lb n="9"/><placeName ref="#missing">Ἄργος</placeName>
+        <lb n="10"/><placeName ref="places.xml#delphi">Δελφοί</placeName>
+        <lb n="11"/><placeName key="olympia">Ὀλυμπία</placeName>
+        <lb n="12"/><placeName>Ἐπίδαυρος</placeName>
+        <lb n="13"/><placeName ref="https://pleiades.stoa.org/places/570375"><choice><orig>Ἤλις</orig><reg>Ἦλις</reg></choice></placeName>
+        <lb n="14"/><placeName ref="https://pleiades.stoa.org/places/570511"><choice><abbr>Ἰθ.</abbr><expan>Ἰθάκη</expan></choice></placeName>
+        <lb n="15"/><placeName ref="https://pleiades.stoa.org/places/579925"><choice><sic>Κυθῆρα</sic><corr>Κύθηρα</corr></choice></placeName>
+        <lb n="16"/><placeName ref="https://pleiades.stoa.org/places/589704"><app><lem>Πύλος</lem><rdg>Πύλλος</rdg></app></placeName>
+        <lb n="17"/><placeName ref="pl:570182">Κο<lb n="18" break="no"/>ρινθος</placeName>
+      </ab>
+    </body>
+    <back>
+      <listPlace>
+        <place xml:id="sparta">
+          <placeName>Lacedaemon</placeName>
+          <idno type="URI">https://pleiades.stoa.org/places/570685</idno>
+        </place>
+      </listPlace>
+    </back>
+  </text>
+</TEI>

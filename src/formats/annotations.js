@@ -31,6 +31,7 @@
 //   - a tag from a vocabulary is a `value` object { label, id }; a free tag a string.
 //   - the target's `source` is the Studio project's id, not the document's address.
 import { PLATO, isAbsoluteIri } from '../lib/context.js';
+import { placeAddress } from '../engine/hermes/addresses.js';
 
 export const ANNO_CONTEXT = /^https?:\/\/www\.w3\.org\/ns\/anno\.jsonld$/;
 const ATTESTED = PLATO + 'Attested';
@@ -58,6 +59,8 @@ export const ANNOTATION_KINDS = {
   'annotation-key': 'loss',
   'annotation-creator-not-address': 'loss',
   'annotation-date': 'loss',
+  'annotation-whg-record': 'loss',
+  'annotation-whg-staging': 'loss',
   'annotation-source-not-address': 'warning',
   'annotation-several-places': 'warning',
   'annotation-verification-unknown': 'warning',
@@ -290,7 +293,15 @@ export class AnnotationReader {
       if (b && typeof b === 'object') for (const k of Object.keys(b)) if (!BODY_KEYS.has(k) && b[k] !== undefined && b[k] !== null) keyLoss(`body.${k}`);
       return c;
     });
-    const links = read.filter((c) => c.kind === 'link');
+    // A place's address in the form PLATO should carry (src/engine/hermes/addresses.js): WHG's
+    // record addresses are rewritten to their persistent form, and an address WHG would answer
+    // with the wrong place is not carried over.
+    const links = [];
+    for (const c of read.filter((c) => c.kind === 'link')) {
+      const addr = placeAddress(c.iri);
+      if (addr.lost) { report(addr.lost === 'whg-staging' ? 'annotation-whg-staging' : 'annotation-whg-record', `${where}: ${addr.value}`); continue; }
+      links.push(addr.from ? { ...c, iri: addr.iri, from: addr.from } : c);
+    }
     // Recogito v1 does not write whether a link was confirmed. A link with no creator was made by
     // software (named-entity recognition and gazetteer matching) and never saved by a person:
     // v1 stamps a body's creator whenever a person saves it, confirming included. Such a link is a
@@ -303,7 +314,7 @@ export class AnnotationReader {
     for (const c of read) if ((c.kind === 'gazetteer' && c.value) || ((c.kind === 'link' || c.kind === 'notAddress') && c.gazetteer)) report('annotation-gazetteer-copy', c.kind === 'gazetteer' ? c.value : c.gazetteer);
     if (!kept.length) {
       // Nothing for `about`: say why, once per annotation, by the most specific reason.
-      if (links.length || read.some((c) => c.kind === 'notAddress')) { /* reported above */ }
+      if (links.length || read.some((c) => c.kind === 'notAddress' || (c.kind === 'link' && placeAddress(c.iri).lost))) { /* reported above */ }
       else if (read.some((c) => c.kind === 'unlinked')) report('annotation-place-unlinked', `${where}: ${this.quote(a) || read.find((c) => c.kind === 'unlinked').what}`);
       else if (read.some((c) => c.kind === 'person' || c.kind === 'event')) report('annotation-not-place', `${where}: ${read.filter((c) => c.kind === 'person' || c.kind === 'event').map((c) => c.kind).join(', ')}${this.quote(a) ? ` (${this.quote(a)})` : ''}`);
       else if (read.some((c) => c.kind === 'unidentified')) report('annotation-unidentified', `${where}${this.quote(a) ? `: ${this.quote(a)}` : ''}`);
@@ -357,6 +368,7 @@ export class AnnotationReader {
       if (created) att.created = created;
       if (modified) att.modified = modified;
       const own = [...notes];
+      if (l.from) own.push(`Place address given as ${l.from}`);
       if (typeof b.note === 'string' && b.note.trim()) own.unshift(`Note: ${b.note}`);
       if (kept.length > 1) own.push(`Annotation ${id || where} links this passage to ${kept.length} places: ${kept.map((k) => k.iri).join(', ')}.`);
       // The annotation's address is not the attestation's @id: an annotation can be edited and

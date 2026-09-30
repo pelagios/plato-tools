@@ -3,12 +3,17 @@
 export function fmtBytes(n) { return n > 1e9 ? (n / 1e9).toFixed(2) + ' GB' : n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : n > 1e3 ? Math.round(n / 1e3) + ' KB' : n + ' bytes'; }
 export function fmtTime(ms) { const s = Math.round(ms / 1000); return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`; }
 export const FORMAT_NAMES = { tables: 'PLATO spreadsheet tables', 'plato-json': 'a PLATO JSON document', 'plato-jsonl': 'PLATO JSON Lines', ntriples: 'RDF (N-Triples)', nquads: 'RDF (N-Quads)', turtle: 'RDF (Turtle)', lpf: 'a Linked Places Format FeatureCollection', 'lpf-seq': 'a Linked Places Format sequence', 'w3c-annotations': 'W3C Web Annotations (as Recogito exports them)' };
+FORMAT_NAMES.tei = 'a TEI XML edition';
+FORMAT_NAMES.csv = 'a table of places (CSV), its columns matched to PLATO';
+FORMAT_NAMES.geojson = 'plain GeoJSON (not Linked Places Format), its properties matched to PLATO';
 /** What a detected input is, in words: "PLATO JSON Lines (place-centric)". */
 export const formatName = (input) => FORMAT_NAMES[input.format] + (input.profile ? ` (${input.profile})` : '') + (input.lpfVersion === 2 ? ', version 2' : '');
 
 // A count in words, singular for one: "1 place", "2 places", "1 identity relation".
 const ONE = { 'earlier attestations': 'earlier attestation', annotations: 'annotation', places: 'place', attestations: 'attestation', 'identity relations': 'identity relation', triples: 'triple', 'triples written': 'triple written', 'table rows': 'table row', observations: 'Data Cube observation' };
 const MANY = { observations: 'Data Cube observations' };
+ONE['place names'] = 'place name';
+ONE.rows = 'row'; ONE.features = 'feature';
 const count = (n, what) => `${n.toLocaleString('en-GB')} ${n === 1 ? ONE[what] || what : MANY[what] || what}`;
 
 /**
@@ -37,7 +42,7 @@ export function summary(report, action) {
   const c = report.counts;
   if (action === 'compare') return compareSummary(report);
   if (action === 'publish') return publishSummary(report);
-  const counted = ['annotations', 'places', 'attestations', 'identity relations', 'triples', 'triples written', 'table rows', 'observations'].filter((k) => c[k]).map((k) => count(c[k], k)).join(', ');
+  const counted = ['annotations', 'place names', 'rows', 'features', 'places', 'attestations', 'identity relations', 'triples', 'triples written', 'table rows', 'observations'].filter((k) => c[k]).map((k) => count(c[k], k)).join(', ');
   const nErr = report.errors;
   return {
     problems: nErr ? `${nErr.toLocaleString('en-GB')} problem${nErr === 1 ? '' : 's'} found.` : 'No problems found.',
@@ -95,4 +100,55 @@ export function groups(action) {
     { severity: 'loss', title: checking ? 'Would not be carried over' : 'Not carried over',
       intro: checking ? 'PLATO JSON has no place for these, so a conversion to it would leave them out.' : 'The target format has no place for these, so they are left out.' },
   ];
+}
+
+// ---- Hermes: matching the columns of a table of places (a CSV file, or plain GeoJSON) to PLATO ----
+// The page shows the guess (src/engine/hermes/columns.js, guessColumns) as a table, one choice for
+// each column, before anything is checked or converted. The fields are named in plain words here;
+// the JSON saved and loaded keeps the engine's own names (the format --columns takes).
+/** Each choice a column can be given, in the order the page offers them. `properties` is never one. */
+export const COLUMN_CHOICES = {
+  name: 'Name', alternativeNames: 'Alternative names', latitude: 'Latitude', longitude: 'Longitude',
+  wkt: 'Point or shape, as WKT text', geometry: 'Point or shape, as GeoJSON', id: 'Place id', address: "Place's web address",
+  type: 'Kind of place', language: 'Language of the name', source: 'Source', date: 'Date, as the source writes it',
+  start: 'Earliest date', end: 'Latest date', note: 'Keep as a note', skip: "Don't carry over",
+};
+export const COLUMN_WORDS = {
+  heading: 'Which column holds what',
+  intro: (geojson) => `These are guesses, made from the ${geojson ? 'names of the properties' : 'column headings'} and the first rows. Check each one and change any that is wrong before you check or convert the file. A column kept as a note is carried over as “column: value” in the notes; one you choose not to carry over is named in the report.`,
+  caption: (file, geojson) => `The ${geojson ? 'properties' : 'columns'} of ${file}, three examples of each, and what each will be read as`,
+  column: 'Column', examples: 'Examples from the file', readAs: 'Read as', why: 'Why',
+  selectLabel: (col) => `Read the column “${col}” as`,
+  noExamples: 'empty in the first rows',
+  youChose: 'your choice',
+  saved: 'as the saved matching says',
+  movedTo: (field, col) => `kept as a note, as ${field} is now the column “${col}”, and only one column can be`,
+  looking: 'Reading the columns…',
+  save: 'Save this matching', load: 'Use a saved matching…', loadLabel: 'A saved matching',
+  saveNote: 'Saved as JSON, the file can be used again here, or given to the command line with --columns.',
+  base: 'Each place id becomes a web address under the web address given in Options.',
+  loaded: (name) => `Using the matching saved in ${name}.`,
+  notJson: (name) => `${name} cannot be used: it is not a saved matching (a JSON object of column names, each with what it is read as).`,
+  missing: (col) => `The saved matching does not mention the column “${col}”, so it is kept as a note.`,
+  unknown: (col) => `The saved matching mentions a column this file does not have, “${col}”; that part of it is not used.`,
+  unusable: (example) => `Part of the saved matching cannot be used, so that column is kept as a note: ${example}.`,
+  cannotRead: (message) => `The columns could not be read: ${message}`,
+  noIds: 'These places will have no web addresses: they can be checked and converted, but not published or linked until they have ids. Choose a column as the place id, or add one.',
+  latOnly: 'A column is read as latitude but none as longitude, so no place will have a location from them. Choose the longitude column too, or keep the latitude as a note.',
+  lonOnly: 'A column is read as longitude but none as latitude, so no place will have a location from them. Choose the latitude column too, or keep the longitude as a note.',
+};
+/** The warnings a matching deserves before it is used, in words: no ids or addresses, half a coordinate pair. */
+export function columnWarnings(mapping) {
+  const fields = new Set(Object.values(mapping || {}));
+  const out = [];
+  if (!fields.has('address') && !fields.has('id')) out.push(COLUMN_WORDS.noIds);
+  if (fields.has('latitude') && !fields.has('longitude')) out.push(COLUMN_WORDS.latOnly);
+  if (fields.has('longitude') && !fields.has('latitude')) out.push(COLUMN_WORDS.lonOnly);
+  return out;
+}
+/** A problem with a saved matching (columns.js, resolveColumns: { kind, example }) in words. */
+export function columnProblem(p) {
+  if (p.kind === 'generic-mapping-missing-column') return COLUMN_WORDS.missing(p.example);
+  if (p.kind === 'generic-mapping-unknown-column') return COLUMN_WORDS.unknown(p.example);
+  return COLUMN_WORDS.unusable(p.example);
 }

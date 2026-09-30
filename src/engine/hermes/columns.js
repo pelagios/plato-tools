@@ -1,0 +1,312 @@
+// Reading an ordinary table of places (a CSV file, or the properties of plain GeoJSON features):
+// which column holds what, guessed from the column names and a few of their values, and each row
+// read through that mapping into one PLATO attestation.
+//
+// The mapping is a plain JSON object, { "column name": field }, where field is one of FIELDS' keys,
+// "note" (kept in the attestation's notes as "column: value") or "skip" (not carried over, and
+// reported by name). Every column goes to exactly one of these. A column that is not recognised is
+// kept in the notes, never put in `properties`: a property would claim the source said something
+// PLATO defines, when all that is known is that a column had that heading.
+//
+// The shapes are those of the spreadsheet tables (src/formats/tables.js, rowToAttestation) wherever
+// the tables have one: a latitude and longitude become a location exactly as the locations sheet's
+// do, a date column is the date as the source writes it, a start and end the earliest start and
+// latest end, a type column a type's label (and its identifier, when it is a web address).
+import { isAbsoluteIri } from '../../lib/context.js';
+import { placeAddress } from './addresses.js';
+
+/** What each field of the mapping means, and whether one column only may be mapped to it. */
+export const FIELDS = {
+  name: { single: true, words: "the place's name: its label, and a name the file attests" },
+  alternativeNames: { single: false, words: 'other names for the place; several in one cell are separated by ; or |' },
+  latitude: { single: true, words: 'latitude, in decimal degrees' },
+  longitude: { single: true, words: 'longitude, in decimal degrees' },
+  wkt: { single: true, words: 'a point or shape in Well-Known Text (WKT)' },
+  geometry: { single: true, words: 'a GeoJSON geometry, written out in the cell' },
+  id: { single: true, words: "the place's own identifier in the file, from which its web address is made" },
+  address: { single: true, words: "the place's web address in a gazetteer (Wikidata, Pleiades, GeoNames, the World Historical Gazetteer…): each row is then evidence about that place" },
+  type: { single: false, words: 'what kind of place it is; several in one cell are separated by ; or |' },
+  language: { single: true, words: 'the language of the name, as a code such as en, la or grc' },
+  source: { single: false, words: 'the source the row comes from: a title, or a web address' },
+  date: { single: true, words: 'the date as the source writes it' },
+  start: { single: true, words: 'the earliest date: a year (such as -0500 or 1066) or an ISO date' },
+  end: { single: true, words: 'the latest date: a year (such as -0500 or 1066) or an ISO date' },
+};
+export const OTHER = { note: 'kept in the notes, as "column: value"', skip: 'not carried over; the report says so' };
+
+/**
+ * Each kind the reader reports, and how: 'loss' (not carried into PLATO), 'warning' (carried, but
+ * worth a look) or 'error'. The words for each are in src/engine/report.js (LOSS_TEXT).
+ */
+export const GENERIC_KINDS = {
+  'generic-column-skipped': 'loss',
+  'generic-coordinate-missing': 'loss',
+  'generic-coordinate-not-number': 'loss',
+  'generic-coordinate-range': 'loss',
+  'generic-geometry-collection': 'loss',
+  'generic-geometry-invalid': 'loss',
+  'generic-date-invalid': 'loss',
+  'generic-language-invalid': 'loss',
+  'generic-row-empty': 'loss',
+  'generic-no-address': 'loss',
+  'generic-address-not-web': 'loss',
+  'generic-whg-record': 'loss',
+  'generic-whg-staging': 'loss',
+  'generic-feature-key': 'loss',
+  'generic-not-feature': 'loss',
+  'generic-csv-extra-cells': 'loss',
+  'generic-csv-row': 'warning',
+  'generic-no-ids': 'warning',
+  'generic-id-empty': 'warning',
+  'generic-stand-in-base': 'warning',
+  'generic-mapping-missing-column': 'warning',
+  'generic-mapping-unknown-column': 'warning',
+  'generic-mapping': 'error',
+};
+
+/** The name of the column that stands for a GeoJSON feature's own id (its `id` member, not a property). */
+export const FEATURE_ID = '(feature id)';
+
+/** A column heading reduced for matching: case, accents, spaces and punctuation do not count. */
+export const normaliseHeader = (h) => String(h).normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+// Column headings, normalised, and the field each reads as. An address column counts only if its
+// values are web addresses; a coordinate only if its values are numbers.
+const HEADINGS = {
+  name: ['name', 'placename', 'toponym', 'title', 'label', 'placelabel', 'placetitle', 'nametoponym'],
+  alternativeNames: ['alternativenames', 'alternativename', 'alternatenames', 'alternatename', 'altnames', 'altname', 'names', 'variants', 'variantnames', 'variantname', 'namevariants', 'othernames', 'aliases', 'alias', 'alsoknownas', 'aka'],
+  latitude: ['lat', 'latitude', 'y', 'reprlat', 'latdd', 'decimallatitude', 'latwgs84'],
+  longitude: ['lon', 'lng', 'long', 'longitude', 'x', 'reprlong', 'reprlon', 'londd', 'longdd', 'decimallongitude', 'lonwgs84', 'longwgs84'],
+  id: ['id', 'identifier', 'placeid', 'featureid', 'localid', 'recordid'],
+  address: ['uri', 'url', 'iri', 'link', 'placeuri', 'placeurl', 'placeiri', 'wikidata', 'pleiades', 'geonames', 'whg', 'tgn'],
+  type: ['type', 'types', 'featuretype', 'featuretypes', 'placetype', 'placetypes', 'category', 'categories', 'class', 'fclass', 'featureclass', 'featurecode', 'fcode', 'kind'],
+  language: ['language', 'lang', 'languagecode', 'langcode', 'namelanguage', 'namelang'],
+  source: ['source', 'sources', 'citation', 'citations', 'reference', 'references', 'bibliography', 'ref', 'bibref'],
+  date: ['date', 'dates', 'period', 'when', 'datelabel', 'year'],
+  start: ['start', 'from', 'startdate', 'begin', 'begindate', 'mindate', 'earliest', 'notbefore', 'datefrom', 'fromdate', 'yearfrom', 'fromyear', 'startyear'],
+  end: ['end', 'to', 'enddate', 'maxdate', 'latest', 'notafter', 'dateto', 'todate', 'yearto', 'toyear', 'endyear', 'until'],
+  wkt: ['wkt', 'geowkt', 'geometrywkt', 'wktgeometry', 'shapewkt'],
+  geometry: ['geometry', 'geom', 'geojson', 'thegeom', 'shape'],
+};
+const BY_HEADING = new Map(Object.entries(HEADINGS).flatMap(([f, hs]) => hs.map((h) => [h, f])));
+// A gazetteer's name at the start of a heading (wikidata_uri, pleiades_url, geonames_id) reads as an address column.
+const GAZETTEER_PREFIX = /^(wikidata|pleiades|geonames|whg|tgn)/;
+const ADDRESS_SUFFIX = /(uri|url|iri)$/;
+
+export const isWebAddress = (s) => typeof s === 'string' && /^https?:\/\/\S+$/i.test(s.trim()) && isAbsoluteIri(s.trim());
+// A value that names a place's address: a web address, or a form addresses.js rewrites into one
+// (WHG's place:<ns>:<id>). A bare number, or whg:<n>, is neither, and is never expanded.
+const namesAddress = (s) => { const p = placeAddress(s); return isWebAddress(p.lost ? p.value : p.iri); };
+const NUMBER = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
+const isNumber = (s) => NUMBER.test(s);
+const FIELD_WORDS = {
+  name: "the place's name", alternativeNames: 'other names', latitude: 'latitude', longitude: 'longitude', wkt: 'Well-Known Text', geometry: 'a geometry',
+  id: 'an identifier', address: "the place's web address", type: 'a type', language: 'a language', source: 'a source', date: 'a date', start: 'a start date', end: 'an end date',
+};
+
+/** A cell as text: '' for nothing; a number or true/false as written; a list or object as JSON. */
+export function cellText(v) {
+  if (v === undefined || v === null) return '';
+  if (typeof v === 'string') return v.trim();
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  return JSON.stringify(v);
+}
+/** A cell as a list of values: a JSON list's items, or the text split on ; or |. */
+function cellList(v) {
+  if (Array.isArray(v)) return v.map(cellText).filter(Boolean);
+  return cellText(v).split(/[;|]/).map((s) => s.trim()).filter(Boolean);
+}
+function geometryLike(s) {
+  try { const g = JSON.parse(s); return !!g && typeof g === 'object' && typeof g.type === 'string'; } catch { return false; }
+}
+
+/**
+ * Guess which column holds what, from the headings and a few rows. Returns { mapping, reasons }:
+ * the mapping as described at the top of this file, and for each column a reason in words, which
+ * the page shows beside its guess and the command line prints.
+ */
+export function guessColumns(headers, sampleRows = []) {
+  const mapping = {}, reasons = {}, taken = new Map();
+  const values = (h) => sampleRows.map((r) => cellText(r?.[h])).filter(Boolean);
+  for (const h of headers) {
+    const n = normaliseHeader(h);
+    let field = h === FEATURE_ID ? 'id' : BY_HEADING.get(n);
+    let reason = h === FEATURE_ID ? "the GeoJSON feature's own id" : field ? `the heading "${h}" reads as ${FIELD_WORDS[field]}` : undefined;
+    if (!field && (GAZETTEER_PREFIX.test(n) || ADDRESS_SUFFIX.test(n))) { field = 'address'; reason = `the heading "${h}" reads as a web address`; }
+    const vs = values(h);
+    if (field === 'address' || field === 'id') {
+      // A column of web addresses is the place's address, whatever it is called (an id column of
+      // Pleiades addresses included); a column named for one that holds none is only a note.
+      if (vs.length && vs.every(namesAddress)) { field = 'address'; reason = `${reason}, and its values are web addresses`; }
+      else if (field === 'address') { field = 'note'; reason = vs.length ? `the heading "${h}" reads as a web address, but its values are not web addresses (http or https), so it is kept in the notes` : `the heading "${h}" reads as a web address, but it is empty in the rows looked at, so it is kept in the notes`; }
+    } else if (field === 'latitude' || field === 'longitude') {
+      // One number is enough: a stray value that is not one ("north") is then reported, row by row.
+      if (!vs.some(isNumber)) { reason = `the heading "${h}" reads as ${field}, but ${vs.length ? 'none of its values is a number in decimal degrees' : 'it is empty in the rows looked at'}, so it is kept in the notes`; field = 'note'; }
+    } else if (field === 'geometry') {
+      if (!vs.length || !vs.every(geometryLike)) { reason = `the heading "${h}" reads as a geometry, but its values are not GeoJSON geometries, so it is kept in the notes`; field = 'note'; }
+    }
+    if (field && FIELDS[field]?.single && taken.has(field)) { reason = `${reason}, but ${FIELD_WORDS[field]} is already column "${taken.get(field)}", so it is kept in the notes`; field = 'note'; }
+    if (!field) { field = 'note'; reason = 'the heading is not one these tools recognise, so it is kept in the notes'; }
+    if (FIELDS[field]?.single) taken.set(field, h);
+    mapping[h] = field; reasons[h] = reason;
+  }
+  return { mapping, reasons };
+}
+
+/**
+ * The mapping to use: `saved` (a mapping given, from --columns or the page), checked against the
+ * columns there are, else the guess. Returns { mapping, reasons, problems }, each problem
+ * { kind, example } of a kind in GENERIC_KINDS. A column the saved mapping leaves out, or maps to
+ * something that is not a field, is kept in the notes, so that nothing is lost or claimed.
+ */
+export function resolveColumns(headers, sampleRows, saved) {
+  if (saved === undefined || saved === null) return { ...guessColumns(headers, sampleRows), problems: [] };
+  const problems = [];
+  if (typeof saved !== 'object' || Array.isArray(saved)) {
+    problems.push({ kind: 'generic-mapping', example: 'the mapping given is not a JSON object of column names and fields; the guess is used instead' });
+    return { ...guessColumns(headers, sampleRows), problems };
+  }
+  const mapping = {}, reasons = {}, taken = new Map();
+  for (const h of headers) {
+    if (!Object.hasOwn(saved, h)) {
+      mapping[h] = 'note'; reasons[h] = 'the mapping given does not name this column, so it is kept in the notes';
+      problems.push({ kind: 'generic-mapping-missing-column', example: h });
+      continue;
+    }
+    const f = saved[h];
+    if (typeof f !== 'string' || !(FIELDS[f] || OTHER[f])) {
+      mapping[h] = 'note'; reasons[h] = `the mapping given says ${JSON.stringify(f)}, which is not a field, so it is kept in the notes`;
+      problems.push({ kind: 'generic-mapping', example: `${h}: ${JSON.stringify(f)} is not one of ${[...Object.keys(FIELDS), ...Object.keys(OTHER)].join(', ')}` });
+      continue;
+    }
+    if (FIELDS[f]?.single && taken.has(f)) {
+      mapping[h] = 'note'; reasons[h] = `the mapping given also maps column "${taken.get(f)}" to ${f}, which one column only can be, so this one is kept in the notes`;
+      problems.push({ kind: 'generic-mapping', example: `${h}: ${f} is already column "${taken.get(f)}"` });
+      continue;
+    }
+    if (FIELDS[f]?.single) taken.set(f, h);
+    mapping[h] = f; reasons[h] = 'as the mapping given says';
+  }
+  for (const k of Object.keys(saved)) if (!headers.includes(k)) problems.push({ kind: 'generic-mapping-unknown-column', example: k });
+  return { mapping, reasons, problems };
+}
+
+// ---- one row through the mapping ------------------------------------------------------------------
+const ISO_OR_YEAR = /^-?\d{4,}(-\d{2}(-\d{2}(T\d{2}:\d{2}(:\d{2})?Z?)?)?)?$/;
+const LANGUAGE = /^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{1,8})*$/;
+const GEOJSON_TYPES = new Set(['Point', 'MultiPoint', 'LineString', 'MultiLineString', 'Polygon', 'MultiPolygon']);
+// A year of fewer than four digits is padded to four ('921' -> '0921', '-50' -> '-0050'), as the
+// LPF reader does; anything else must already be a year of four or more digits or an ISO date.
+const pad = (s) => (/^-?\d{1,3}$/.test(s) ? (s.startsWith('-') ? '-' + s.slice(1).padStart(4, '0') : s.padStart(4, '0')) : s);
+const clean = (o) => { for (const k of Object.keys(o)) if (o[k] === undefined || o[k] === '' || (Array.isArray(o[k]) && !o[k].length)) delete o[k]; return o; };
+const inRange = (lon, lat) => Number.isFinite(lon) && Number.isFinite(lat) && lon >= -180 && lon <= 180 && lat >= -90 && lat <= 90;
+
+/**
+ * A GeoJSON geometry -> PLATO geometries: [] for none, or one with its geojson (and, for a point,
+ * its reprPoint, as the LPF reader gives it). A GeometryCollection is refused, as PLATO's schema
+ * refuses it, and so is anything that is not a GeoJSON geometry; both are reported.
+ */
+export function geometryToPlato(g, report = () => {}, where = '') {
+  if (g === undefined || g === null) return [];
+  if (typeof g !== 'object' || Array.isArray(g)) { report('generic-geometry-invalid', `${where}: ${cellText(g).slice(0, 80)}`); return []; }
+  if (g.type === 'GeometryCollection') { report('generic-geometry-collection', where); return []; }
+  if (!GEOJSON_TYPES.has(g.type) || !Array.isArray(g.coordinates)) { report('generic-geometry-invalid', `${where}: ${g.type === undefined ? 'no type' : `type ${JSON.stringify(g.type)}`}`); return []; }
+  if (g.type === 'Point') {
+    const [lon, lat] = g.coordinates;
+    if (!inRange(lon, lat)) { report('generic-coordinate-range', `${where}: ${JSON.stringify(g.coordinates)}`); return []; }
+    return [{ reprPoint: [lon, lat], geojson: { type: 'Point', coordinates: g.coordinates } }];
+  }
+  return [{ geojson: { type: g.type, coordinates: g.coordinates } }];
+}
+
+/**
+ * One row (an object keyed by column) through the mapping. Returns
+ *   { label, name, id, address, addressText, addressLost, attestation, skipped }
+ * where `attestation` is the row's one PLATO attestation (without `about`), `label` the place's
+ * label (the name, else the first other name), `address` the place's web address when the address
+ * column holds one (`addressText` what it holds, if it is not; `addressLost` when it held one that must
+ * not be carried, which is reported here), and `skipped` the skipped columns
+ * that had a value. `where` says which row, for the report; `fileName` is the file, cited as the
+ * source when no source column gives one; `geometry` is a GeoJSON feature's own geometry.
+ * `idAsNote` keeps the id in the notes, for rows that are attestations about an address.
+ */
+export function applyColumns(row, mapping, { where = '', report = () => {}, fileName = 'the file', geometry, idAsNote = false } = {}) {
+  let name, id, idCol, address, addressFrom, addressText, addressLost = false, language, languageCol, date, start, end, wkt, lat = '', lon = '', geomCell;
+  const alternatives = [], types = [], sources = [], notes = [], skipped = [];
+  const note = (col, v) => notes.push(`${col}: ${v}`);
+  for (const [col, field] of Object.entries(mapping)) {
+    const raw = row[col];
+    const v = cellText(raw);
+    if (v === '') continue;
+    switch (field) {
+      case 'name': name = v; break;
+      case 'alternativeNames': for (const x of cellList(raw)) if (!alternatives.includes(x)) alternatives.push(x); break;
+      case 'latitude': lat = v; break;
+      case 'longitude': lon = v; break;
+      case 'wkt': wkt = v; break;
+      case 'geometry': geomCell = { col, v }; break;
+      case 'id': id = v; idCol = col; break;
+      case 'address': {
+        // Put into the form `about` should carry (addresses.js): WHG's reconciliation ids and entity
+        // pages become its persistent addresses; one that must not be carried is reported.
+        const p = placeAddress(v);
+        if (p.lost) { addressLost = true; report(p.lost === 'whg-staging' ? 'generic-whg-staging' : 'generic-whg-record', `${where}: ${p.value}`); }
+        else if (isWebAddress(p.iri)) { address = p.iri.trim(); addressFrom = p.from; }
+        else { addressText = v; note(col, v); }   // kept, should the row become a place of its own
+        break;
+      }
+      case 'type': for (const x of cellList(raw)) types.push(isWebAddress(x) ? { identifier: x, label: x } : { label: x }); break;
+      case 'language': language = v; languageCol = col; break;
+      case 'source': sources.push(isWebAddress(v) ? { '@id': v, title: v, authorityType: 'source' } : { title: v, authorityType: 'source' }); break;
+      case 'date': date = v; break;
+      case 'start': if (ISO_OR_YEAR.test(pad(v))) start = pad(v); else report('generic-date-invalid', `${where}, ${col}: ${v}`); break;
+      case 'end': if (ISO_OR_YEAR.test(pad(v))) end = pad(v); else report('generic-date-invalid', `${where}, ${col}: ${v}`); break;
+      case 'skip': skipped.push(col); break;
+      default: note(col, v);
+    }
+  }
+  // The name, in the language the language column gives; a language with no name to be the language
+  // of is kept in the notes rather than lost.
+  const names = [];
+  if (name) {
+    const n = { toponym: name };
+    if (language && LANGUAGE.test(language)) n.language = language;
+    else if (language) report('generic-language-invalid', `${where}: ${language}`);
+    names.push(n);
+  } else if (language) note(languageCol, language);
+  for (const a of alternatives) if (a !== name) names.push({ toponym: a });
+  // A row about an address keeps its id in the notes, since the place is not the file's to name.
+  if (idAsNote && address && id !== undefined) note(idCol, id);
+  if (address && addressFrom) notes.push(`Place address given as ${addressFrom}`);
+
+  const geometries = [];
+  // A latitude and longitude: a location exactly as the locations sheet makes one, with the WKT beside it.
+  if (lat !== '' || lon !== '') {
+    if (lat === '' || lon === '') report('generic-coordinate-missing', `${where}: ${lat === '' ? `longitude ${lon} with no latitude` : `latitude ${lat} with no longitude`}`);
+    else if (!isNumber(lat) || !isNumber(lon)) report('generic-coordinate-not-number', `${where}: ${lat}, ${lon}`);
+    else if (!inRange(Number(lon), Number(lat))) report('generic-coordinate-range', `${where}: latitude ${lat}, longitude ${lon}`);
+    else {
+      const [x, y] = [Number(lon), Number(lat)];
+      geometries.push(clean({ reprPoint: [x, y], geojson: { type: 'Point', coordinates: [x, y] }, wkt }));
+      wkt = undefined;
+    }
+  }
+  if (wkt) geometries.push({ wkt });
+  if (geomCell) {
+    let g;
+    try { g = JSON.parse(geomCell.v); } catch { g = geomCell.v; }
+    geometries.push(...geometryToPlato(g, report, `${where}, ${geomCell.col}`));
+  }
+  if (geometry !== undefined) geometries.push(...geometryToPlato(geometry, report, where));
+
+  // The file is the source, and the row its locator, unless a source column names the source.
+  const cited = sources.length ? sources.map((s) => ({ source: s })) : [{ source: { title: fileName, authorityType: 'source' }, locator: where }];
+  const attestation = clean({
+    names, geometries, types,
+    timespans: date || start || end ? [clean({ sourceLabel: date, startEarliest: start, endLatest: end })] : undefined,
+    sources: cited.map((c) => c.source),
+    citations: cited.map((c) => clean({ ...c })),
+    notes: notes.join('\n') || undefined,
+  });
+  return { label: name || alternatives[0], name, id, address, addressText, addressLost, attestation, skipped };
+}

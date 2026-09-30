@@ -1,0 +1,6 @@
+id,name,latitude,longitude,type,start,end,language,description
+bath,Aquae Sulis,51.3811,-2.3590,spa,0060,0410,la,Roman baths
+york,Eboracum,53.9590,-1.0815,fortress,71,,la,
+chester,Deva Victrix,53.1905,-2.8908,fortress,c. 75,,la,start date in words
+lincoln,Lindum Colonia,53.2307,-0.5406,colonia,,,Latin (classical),language not a code
+,Isca,51.6100,-2.9600,fortress,,,la,no id
