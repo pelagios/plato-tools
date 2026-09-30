@@ -182,16 +182,39 @@ def krisis_case(page, tmp):
     skinds = {c['candidate_source'].rsplit('/', 1)[-1]: (c.get('decision') or {}).get('kind') for c in saved.get('candidates', []) if c.get('decision')}
     check('match review: Save the review writes the work file with the decisions and the reviewer',
           saved.get('krisis') == 1 and skinds == {'bristol': 'match', 'bath': 'distinct', 'wells': 'not-this'} and (saved.get('reviewer') or {}).get('name') == 'Ada Reviewer', saved.get('error') or skinds)
-    out = {}
+    # Finish with the default: the dataset, with the new attestations added, checked with the version check.
+    ds, default, summ = {}, None, ''
     if s.get('phase') == 'reviewing':
         try:
+            default = page.evaluate("() => { const r = document.querySelector('input[name=\"review-output\"]:checked'); return r && !r.disabled ? r.value : null; }")
             page.click('#finish')
             s = wait_state(page, lambda s: s.get('action') == 'apply' and s.get('phase') in ('done', 'error'), 120, 'finish')
+            summ = page.inner_text('#summary')
+            if s.get('phase') == 'done' and s.get('outputs'):
+                ds = json.loads(download(page, s['outputs'][0]['name'], tmp / 'krisis-dataset.json').read_text())
+        except Exception as e: s = {'phase': 'harness-error', 'error': str(e).split('\n')[0][:200]}
+    places = {p.get('@id', '').rsplit('/', 1)[-1]: p.get('attestations', []) for p in ds.get('spatialEntities', [])} if isinstance(ds, dict) else {}
+    added = {k: v[1:] for k, v in places.items()}
+    rel = lambda a: [(i.get('subject', '').rsplit('/', 1)[-1], i.get('object', '').rsplit('/', 1)[-1]) for i in a.get('identities', [])]
+    check('match review: Finish by default writes your dataset with the match on Bristol, the denial on Bath, and nothing new on Wells or Zennor',
+          default == 'dataset' and s.get('phase') == 'done' and ds.get('profile') == 'place-centric' and sorted(places) == ['bath', 'bristol', 'wells', 'zennor']
+          and [rel(a) for a in added['bristol']] == [[('bristol', 'bristoll')]] and not added['bristol'][0].get('negated')
+          and [rel(a) for a in added['bath']] == [[('bath', 'bathe')]] and added['bath'][0].get('negated') is True
+          and added['wells'] == [] and added['zennor'] == [] and all(len(v) >= 1 and v[0].get('names') for v in places.values()),
+          {'default': default, 'summary': summ, 'added': {k: [rel(a) for a in v] for k, v in added.items()}} if places else (s.get('report') or s))
+    check('match review: the dataset written was passed by the version check, and the page says so', 'the version check found nothing deleted or changed' in summ
+          and ((s.get('report') or {}).get('counts') or {}).get('versionCheck', {}).get('added') == 2, summ or s)
+    # And the alternative: only the new attestations.
+    out = {}
+    if s.get('phase') == 'done' and page.is_visible('#finish'):
+        try:
+            page.check('input[name="review-output"][value="attestations"]')
+            page.click('#finish')
+            s = wait_state(page, lambda s: s.get('action') == 'apply' and s.get('phase') in ('done', 'error') and (s.get('phase') == 'error' or str((s.get('outputs') or [{}])[0].get('name', '')).endswith('.krisis-attestations.json')), 120, 'finish, attestations only')
             if s.get('phase') == 'done' and s.get('outputs'):
                 out = json.loads(download(page, s['outputs'][0]['name'], tmp / 'krisis-attestations.json').read_text())
         except Exception as e: s = {'phase': 'harness-error', 'error': str(e).split('\n')[0][:200]}
     atts = out.get('attestations', []) if isinstance(out, dict) else []
-    rel = lambda a: [(i.get('subject', '').rsplit('/', 1)[-1], i.get('object', '').rsplit('/', 1)[-1]) for i in a.get('identities', [])]
     same = [a for a in atts if not a.get('negated') and rel(a) == [('bristol', 'bristoll')]]
     distinct = [a for a in atts if a.get('negated') and rel(a) == [('bath', 'bathe')]]
     check('match review: Finish (attestations only) saves one attestation of the match, one negated for the different places, none for "not this one"',

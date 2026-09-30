@@ -200,7 +200,7 @@ export const review = {
 };
 
 // Krisis: matching. What the match review (src/engine/krisis/) says, on the page and the command line.
-const KRISIS_PHASES = { matching: 'Comparing the names', applying: 'Making the attestations' };
+const KRISIS_PHASES = { matching: 'Comparing the names', applying: 'Making the attestations', checking: 'Checking the new dataset with the version check' };
 const KRISIS_DATASETS = { subjects: 'Places to match', others: 'Other dataset' };
 const plural = (n, one, many = one + 's') => `${n.toLocaleString('en-GB')} ${n === 1 ? one : many}`;
 
@@ -216,13 +216,17 @@ function matchSummary(report) {
       + (already.length ? ` Not suggested: ${already.join('; ')}.` : ''),
   };
 }
-/** The summary of finishing a review: the attestations made. */
+/** The summary of finishing a review: the attestations made, and with the dataset output, what the version check found. */
 function applySummary(report) {
-  const c = report.counts, nErr = report.errors;
+  const c = report.counts, nErr = report.errors, v = c.versionCheck;
   if (c.attestations === undefined) return { problems: nErr ? `${plural(nErr, 'problem')} found.` : '', counted: '' };
+  const made = `Made ${plural(c.attestations, 'new attestation')}: ${c.matchAttestations.toLocaleString('en-GB')} accepting ${plural(c.relations - c.distinctAttestations, 'match', 'matches')}, ${c.distinctAttestations.toLocaleString('en-GB')} saying that two places are different.`;
+  if (!v) return { problems: nErr ? `${plural(nErr, 'problem')} found.` : c.attestations ? 'The review was made into attestations.' : 'Nothing to write.', counted: made };
+  const kept = v.changed || v.lost ? `the version check found ${[v.changed ? `${plural(v.changed, 'attestation')} changed` : '', v.lost ? `${plural(v.lost, 'attestation')} no longer there` : ''].filter(Boolean).join(' and ')}`
+    : 'the version check found nothing deleted or changed';
   return {
-    problems: nErr ? `${plural(nErr, 'problem')} found.` : c.attestations ? 'The review was made into attestations.' : 'Nothing to write.',
-    counted: `Made ${plural(c.attestations, 'new attestation')}: ${c.matchAttestations.toLocaleString('en-GB')} accepting ${plural(c.relations - c.distinctAttestations, 'match', 'matches')}, ${c.distinctAttestations.toLocaleString('en-GB')} saying that two places are different.`,
+    problems: nErr ? `${plural(nErr, 'problem')} found.` : 'The review was added to the dataset.',
+    counted: `${made} The dataset of ${plural(c.places || 0, 'place')} had ${plural(v.earlier, 'attestation')}, and has ${v.later.toLocaleString('en-GB')} with ${v.added.toLocaleString('en-GB')} added; ${kept}.`,
   };
 }
 function krisisGroups(action) {
@@ -232,6 +236,7 @@ function krisisGroups(action) {
   ] : [
     { severity: 'error', title: 'Problems', intro: 'Nothing was written because of these.' },
     { severity: 'warning', title: 'Warnings', intro: 'Worth a look before the attestations are added to the dataset.' },
+    { severity: 'loss', title: 'Not carried over', intro: 'The dataset written is PLATO JSON, which has no place for these, so they are left out of it.' },
   ];
 }
 /** The note each attestation a review makes carries, saying how it came about. */
@@ -240,5 +245,16 @@ export function krisisNote(kind, algorithm) {
     ? `Accepted by the reviewer in a match review (PLATO tools, Krisis), from suggestions made by comparing names (${algorithm}).`
     : `The reviewer judged these to be different places in a match review (PLATO tools, Krisis), rejecting a suggestion made by comparing names (${algorithm}).`;
 }
-/** A match review's progress: "12 of 340 places reviewed". */
-export const reviewProgressText = ({ reviewed, total }) => `${reviewed.toLocaleString('en-GB')} of ${plural(total, 'place')} reviewed`;
+/** What finishing a review with the dataset output says (src/engine/krisis/apply.js). */
+export const KRISIS_TEXT = {
+  noDataset: 'Choose the dataset this review was made from: the new attestations are added to it. Nothing was written.',
+  datasetNotRead: 'The dataset could not be read to the end, so it was not written with the new attestations',
+  datasetHasProblems: 'The dataset has problems of its own, which finishing a review does not list or change. The new attestations were still added; check the dataset by itself to see them.',
+  /** The subject dataset came in another format than a PLATO JSON document. */
+  datasetNowPlatoJson: (input) => `Your dataset is ${formatName(input)}; the dataset written with the new attestations is a PLATO JSON document (place-centric), whatever format it came in. What PLATO JSON has no place for is listed below, if anything.`,
+  notInDataset: 'A place the review made attestations about is not in the dataset, so its attestations have nowhere to go and nothing was written. Is this the dataset the review was made of? The example gives the place.',
+  notAppendOnly: 'The version check found that the dataset written does not keep all of the original, which is a fault in the tools (please report it); nothing was written.',
+  notChecked: 'The dataset written could not be checked with the version check, so nothing was written',
+  /** The version check does not find every new attestation in the dataset written. */
+  notAllAdded: (made, added) => `The review made ${plural(made, 'new attestation')}, but the version check finds ${plural(added || 0, 'attestation')} added to the dataset written, which is a fault in the tools (please report it); nothing was written.`,
+};

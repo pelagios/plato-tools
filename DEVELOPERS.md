@@ -325,12 +325,23 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   attestation. Each is dated by its last decision, cites the other dataset as its source
   (`authorityType: dataset`), names the reviewer as its contributor, and has no `@id` (the saver
   mints one) and no `promotedFrom` (the candidate is not published).
-- **The output.** `apply` writes a PLATO document of only the new attestations, in the
-  attestation-centric profile, PLATO's profile for attesting about places that exist already: each
-  attestation names its place in `about`, and nothing of the places is copied. Each attestation is
-  checked against the schema before it is written, and the tests run the checker on the file. The
-  subject dataset with the attestations appended, checked by the version check, waits on a hook in
-  the pipeline (`options.augment`) and is marked TODO in `apply.js`.
+- **The output**, by default, is the subject dataset with the new attestations appended to their
+  places (`apply.js`, `writeDataset`). The dataset is converted to a PLATO JSON document by `run()`
+  with `options.augment`, whatever format it came in (tables, LPF, RDF: the report says the output is
+  PLATO JSON, and passes on what the conversion could not carry over). Its own schema problems are
+  counted as one warning, not listed: the review adds to the dataset, it does not mend it. A place the
+  decisions are about that no record of the dataset has is an error (`not-in-dataset`): its
+  attestations would have nowhere to go. Then the version check (`compare()`) reads the original as the
+  earlier version and the new file as the later: anything deleted or changed, or fewer attestations
+  added than were made, is an error, a fault in the tools, and its counts are carried into the report
+  ("the version check found nothing deleted or changed"). Any error means nothing is offered for saving
+  (`incomplete`), and the command line removes the file. The file is `<name>.krisis-dataset.json`, so
+  it never takes the work file's name. The tests prove the check can fail: an augment that drops an
+  attestation of the original is caught as not append-only, one that adds nothing as not all added.
+- **The other output** is a PLATO document of only the new attestations, in the attestation-centric
+  profile, PLATO's profile for attesting about places that exist already: each attestation names its
+  place in `about`, and nothing of the places is copied. Each attestation is checked against the schema
+  before it is written, and the tests run the checker on the file.
 
 ## Limits
 
@@ -342,6 +353,10 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   reported, not read.
 - **Web annotations** give attestations about places the file does not describe, so each place is
   labelled with its address, with a warning.
+- **Finishing a review with the dataset output holds the dataset written in memory** until the
+  version check has read it back (the engine's hosts have no way to read an output again): as Blob
+  parts, so about the size of the file in UTF-8, on top of what the conversion and the check need. A
+  very large dataset may need the attestations-only output instead.
 - **A long SQLite step cannot be interrupted** from the command line: Ctrl-C takes effect when it
   ends.
 - **Memory that grows with the named things written.** Streaming keeps memory flat in the number

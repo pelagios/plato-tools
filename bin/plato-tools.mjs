@@ -50,7 +50,7 @@ Usage:
                                             (matching two local files sends nothing anywhere)
   plato-tools apply [options] SUBJECTS --review WORKFILE
                                             make the decisions of a finished review into PLATO
-                                            attestations
+                                            attestations, added to SUBJECTS (or on their own)
   plato-tools datacube [--json] FILE...     check a cube export (convert --to ntriples --cube)
                                             against the RDF Data Cube integrity constraints IC-1,
                                             IC-2, IC-11, IC-12 and IC-14
@@ -125,9 +125,9 @@ Options:
                     coordinates that may be suggested (default 50).
   --top K           match: the most suggestions for one place (default 5).
   --review FILE     apply: the work file of the review (made by match, and saved by the page).
-  --output KIND     apply: what to write: attestations, a PLATO file of only the new
-                    attestations (the default); dataset, the dataset with them added, is not
-                    yet available.
+  --output KIND     apply: what to write: dataset (the default), the dataset as a PLATO JSON
+                    document with the new attestations added to its places, checked with the
+                    version check; or attestations, a PLATO file of only the new attestations.
   --reviewer NAME   match, apply: who reviews, recorded as each attestation's contributor
                     (apply: default, the name in the work file).
   --orcid URL       match, apply: the reviewer's ORCID, as https://orcid.org/0000-0000-0000-0000.
@@ -491,7 +491,7 @@ async function review(action, args, o, resources) {
     if (o.output && !REVIEW_OUTPUTS.includes(o.output)) return usage(`"${o.output}" is not an output; the outputs are ${REVIEW_OUTPUTS.join(' and ')}.`);
     try { work = readFileSync(o.review, 'utf8'); }
     catch (e) { return usage(`the work file ${o.review} cannot be read: ${e.code === 'ENOENT' ? 'there is no such file.' : e.message}`); }
-    options = { output: o.output || 'attestations', reviewer: reviewer || undefined, name: items[0].name };
+    options = { output: o.output || 'dataset', reviewer: reviewer || undefined, name: items[0].name, base: o.base };
   }
   const host = new NodeHost({ workDir: o['work-dir'], outDir: o.out, overwrite: o.overwrite });
   process.once('SIGINT', () => { host.abandon(); process.exit(130); });

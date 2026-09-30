@@ -17,8 +17,11 @@ import { Sha256, fileSha256 } from '../src/engine/krisis/digest.js';
 import { match, distanceKm, representativePoint, DEFAULTS } from '../src/engine/krisis/match.js';
 import { readWork, serialiseWork, decide, reviewProgress, reviewPlaces, candidatesOf, isReviewed, filesDiffer } from '../src/engine/krisis/work.js';
 import { recordIdentity, attestationsFrom } from '../src/engine/krisis/identity.js';
-import { apply } from '../src/engine/krisis/apply.js';
-import { summary, groups, progressText, reviewProgressText } from '../src/engine/words.js';
+import { apply, checkAppendOnly } from '../src/engine/krisis/apply.js';
+import { compare } from '../src/engine/compare.js';
+import { run as runPipeline } from '../src/engine/pipeline.js';
+import { Report } from '../src/engine/report.js';
+import { summary, groups, progressText, review } from '../src/engine/words.js';
 
 const X = 'https://example.org/';
 const JUDGEMENTS = `${PLATO_REPO}/schemas/examples/place-centric-judgements.json`;
@@ -228,7 +231,7 @@ test('decisions: each sets its status, and a place counts as reviewed once any o
   const [first] = candidatesOf(work, A('newton'));
   assert.equal(first.candidate_candidate, B('newton'));
   assert.deepEqual(reviewProgress(work), { reviewed: 0, total: 3 });
-  assert.equal(reviewProgressText(reviewProgress(work)), '0 of 3 places reviewed');
+  assert.equal(review.progress(reviewProgress(work)), '0 of 3 places reviewed.');
   decide(work, first.id, 'match', { at: '2026-09-30T13:00:00Z' });
   assert.equal(first.candidate_status, 'confirmed');
   assert.ok(isReviewed(work, A('newton')));
@@ -363,7 +366,7 @@ test('apply warns when the dataset is not the one reviewed, and says nothing whe
   assert.deepEqual(r.report.items.map((i) => i.kind), ['subjects-differ']);
   assert.equal(r.outputs.length, 1, 'a warning, not a refusal');
 });
-test('apply refuses a tampered work file, a review with no reviewer, and (for now) the whole dataset', async () => {
+test('apply refuses a tampered work file, and a review with no reviewer', async () => {
   const w = await reviewed();
   const tampered = JSON.parse(serialiseWork(w)); tampered.candidates[0].candidate_status = 'rejected';
   const t = await apply({ work: JSON.stringify(tampered), options: {} }, env());
@@ -371,17 +374,135 @@ test('apply refuses a tampered work file, a review with no reviewer, and (for no
   assert.deepEqual(t.report.items.map((i) => i.kind), ['work-unreadable']);
   assert.deepEqual(t.outputs, []);
   const anon = { ...w, reviewer: null };
-  const n = await apply({ work: anon, options: {} }, env());
+  const n = await apply({ work: anon, options: { output: 'attestations' } }, env());
   assert.deepEqual(n.report.items.map((i) => i.kind), ['no-reviewer']);
-  const given = await apply({ work: anon, options: { reviewer: { name: 'Given' } } }, env());
+  const given = await apply({ work: anon, options: { output: 'attestations', reviewer: { name: 'Given' } } }, env());
   assert.equal(given.report.errors, 0, 'control: a reviewer given with the command will do');
   assert.equal(given.attestations[0].attestation.contributor.name, 'Given');
-  const d = await apply({ work: w, options: { output: 'dataset' } }, env());
-  assert.ok(d.incomplete);
-  assert.deepEqual(d.report.items.map((i) => i.kind), ['dataset-not-yet']);
   const none = await apply({ work: (await run()).work, options: { reviewer } }, env());
   assert.deepEqual(none.report.items.map((i) => i.kind), ['nothing-decided']);
   assert.deepEqual(none.outputs, []);
+});
+
+// ---- the dataset output (the default) ----------------------------------------------------------------
+const byId = (doc) => new Map(doc.spatialEntities.filter((p) => p['@id']).map((p) => [p['@id'], p]));
+test('apply, by default: the dataset with the new attestations on exactly their places, valid, and passed by the version check', async () => {
+  const w = await reviewed();
+  const e = env();
+  const phases = [];
+  e.progress = (p) => phases.push(p.phase);
+  const subjects = (await inputs()).subjects;
+  const r = await apply({ subjects, work: w, options: {} }, e);
+  assert.ok(!r.incomplete, JSON.stringify(r.report.items));
+  assert.equal(r.report.errors, 0, JSON.stringify(r.report.items));
+  assert.ok(!r.report.items.some((i) => i.kind === 'dataset-now-plato-json'), 'PLATO JSON in, so nothing to say about the format');
+  assert.deepEqual(r.outputs.map((o) => o.name), ['a.krisis-dataset.json']);
+  assert.ok(phases.includes('checking'), 'the version check ran');
+  const text = outText(e, 'a.krisis-dataset.json');
+  const doc = JSON.parse(text), was = subjectsDoc();
+  assert.equal(doc.profile, 'place-centric');
+  assert.deepEqual(doc.gazetteer, was.gazetteer);
+  assert.equal(doc.spatialEntities.length, was.spatialEntities.length, 'every place of the original, and no other');
+  // The new attestations are on Newton (the matches) and Sainte-Mère-Église (the denial), after its own.
+  const now = byId(doc), before = byId(was);
+  for (const [id, p] of before) {
+    const extra = now.get(id).attestations.slice(p.attestations.length);
+    assert.deepEqual(now.get(id).attestations.slice(0, p.attestations.length), p.attestations, `${id} keeps its own attestations`);
+    assert.deepEqual({ ...now.get(id), attestations: undefined }, { ...p, attestations: undefined }, `${id} is otherwise as it was`);
+    const want = r.attestations.filter((m) => m.subject === id).map((m) => m.attestation);
+    assert.deepEqual(extra, want, `${id} has exactly its new attestations`);
+  }
+  assert.equal(now.get(A('newton')).attestations.length, before.get(A('newton')).attestations.length + 1, 'presence: Newton has one more');
+  assert.equal(now.get(A('springfield')).attestations.length, before.get(A('springfield')).attestations.length, 'absence: "not this one" adds nothing to Springfield');
+  assert.ok(now.get(A('sainte-mere-eglise')).attestations.at(-1).negated);
+  assert.deepEqual(doc.spatialEntities.at(-1), was.spatialEntities.at(-1), 'the place without an address is carried over as it was');
+  // The checker passes it, and the version check, run by itself, finds the two new attestations and nothing lost.
+  const checked = await go([textFile(text, 'out.json')], 'check');
+  assert.equal(checked.report.errors, 0, JSON.stringify(checked.report.items));
+  assert.equal(checked.report.counts.attestations, 7 + 2);
+  const c = await compare({ earlier: subjects, later: await detect([textFile(text, 'out.json')]) }, env());
+  assert.equal(c.report.errors, 0);
+  assert.deepEqual([c.report.counts.earlier, c.report.counts.unchanged, c.report.counts.added, c.report.counts.lost, c.report.counts.changed], [7, 7, 2, 0, 0]);
+  // Its counts are carried into the report, and said plainly.
+  assert.deepEqual(r.report.counts.versionCheck, { earlier: 7, later: 9, unchanged: 7, changed: 0, lost: 0, added: 2 });
+  const s = summary(r.report, 'apply');
+  assert.equal(s.problems, 'The review was added to the dataset.');
+  assert.equal(s.counted, 'Made 2 new attestations: 1 accepting 2 matches, 1 saying that two places are different. The dataset of 6 places had 7 attestations, and has 9 with 2 added; the version check found nothing deleted or changed.');
+});
+test('control: the version check catches a dataset that was not only added to, as a fault in the tools', async () => {
+  const w = await reviewed();
+  const subjects = (await inputs()).subjects;
+  const made = attestationsFrom(w, { reviewer });
+  const by = new Map(made.map((m) => [m.subject, m.attestation]));
+  const write = async (augment) => {
+    const e = env();
+    await runPipeline({ input: subjects, action: 'convert', target: 'plato-json', options: { name: 'x.json', augment } }, e);
+    return textFile(outText(e, 'x.json'), 'x.json');
+  };
+  const honest = (rec) => (by.has(rec['@id']) ? { ...rec, attestations: [...rec.attestations, by.get(rec['@id'])] } : rec);
+  // Tampered: Newton's own first attestation (its other name) is dropped as the new one is added.
+  const tampered = (rec) => (rec['@id'] === A('newton') ? { ...honest(rec), attestations: honest(rec).attestations.slice(1) } : honest(rec));
+  const ok = new Report();
+  await checkAppendOnly({ earlier: subjects, later: await write(honest), added: made.length }, env(), ok);
+  assert.equal(ok.toJSON().errors, 0, 'presence: appended as apply appends, it passes');
+  const bad = new Report();
+  await checkAppendOnly({ earlier: subjects, later: await write(tampered), added: made.length }, env(), bad);
+  const items = bad.toJSON().items;
+  assert.ok(items.some((i) => i.kind === 'not-append-only' && i.severity === 'error' && /fault in the tools/.test(i.message)), JSON.stringify(items));
+  assert.equal(bad.counts.versionCheck.lost, 1);
+  const counts = { attestations: 2, matchAttestations: 1, distinctAttestations: 1, relations: 3, places: 6, versionCheck: bad.counts.versionCheck };
+  assert.match(summary({ ...bad.toJSON(), counts }, 'apply').counted, /; the version check found 1 attestation no longer there\.$/);
+  assert.match(summary({ ...ok.toJSON(), counts: { ...counts, versionCheck: ok.counts.versionCheck } }, 'apply').counted, /; the version check found nothing deleted or changed\.$/, 'control');
+  // And one that adds too few is caught as well: nothing appended at all.
+  const short = new Report();
+  await checkAppendOnly({ earlier: subjects, later: await write((rec) => rec), added: made.length }, env(), short);
+  assert.deepEqual(short.toJSON().items.map((i) => i.kind), ['not-all-added']);
+});
+test('apply, the dataset from spreadsheet tables: written as PLATO JSON, said so, with the attestations on their places', async () => {
+  const s = subjectsDoc(); s.spatialEntities.pop();
+  const tables = await go([json(s, 'a.json')], 'convert', 'tables');
+  const subjects = await detect([new File(tables.e.outs['a-tables.zip'], 'a-tables.zip')]);
+  assert.equal(subjects.format, 'tables');
+  // Reviewed as tables: their places' addresses are made from the base given (base + 'place/' + id).
+  const { work: w } = await match({ subjects, others: (await inputs()).others, options: { base: X + 'a/' } }, env());
+  const newton = X + 'a/place/newton', springfield = X + 'a/place/springfield';
+  decide(w, w.candidates.find((c) => c.candidate_source === newton && c.candidate_candidate === B('newton')).id, 'match', { at: '2026-09-30T13:00:00Z' });
+  w.reviewer = reviewer;
+  const e = env();
+  const r = await apply({ subjects, work: w, options: { base: X + 'a/' } }, e);
+  assert.equal(r.report.errors, 0, JSON.stringify(r.report.items));
+  const said = r.report.items.find((i) => i.kind === 'dataset-now-plato-json');
+  assert.ok(said, 'it says the output is PLATO JSON');
+  assert.match(said.message, /^Your dataset is PLATO spreadsheet tables; the dataset written with the new attestations is a PLATO JSON document/);
+  assert.ok(!r.report.items.some((i) => i.kind === 'subjects-differ'), 'the tables are the files reviewed');
+  assert.deepEqual(r.outputs.map((o) => o.name), ['a-tables.krisis-dataset.json']);
+  const doc = JSON.parse(outText(e, 'a-tables.krisis-dataset.json'));
+  assert.equal(doc.profile, 'place-centric');
+  const now = byId(doc);
+  assert.equal(now.size, 5);
+  assert.ok(now.get(newton).attestations.some((a) => a.identities?.some((i) => i.object === B('newton'))), 'presence: the match is on Newton');
+  assert.ok(!now.get(springfield).attestations.some((a) => a.identities), 'absence: nothing on Springfield');
+  assert.equal(r.report.counts.versionCheck.added, 1);
+  assert.equal(r.report.counts.versionCheck.lost + r.report.counts.versionCheck.changed, 0);
+  // The same review applied to the JSON the tables came from finds none of its places there.
+  const json_ = await apply({ subjects: (await inputs()).subjects, work: w, options: {} }, env());
+  assert.deepEqual(json_.report.items.filter((i) => i.kind === 'not-in-dataset').map((i) => i.examples), [[newton]]);
+});
+test('apply, the dataset: a place the review is about that is not in the dataset is reported, and nothing is written', async () => {
+  const w = await reviewed();
+  const s = subjectsDoc(); s.spatialEntities = s.spatialEntities.filter((p) => p['@id'] !== A('newton'));
+  const e = env();
+  const r = await apply({ subjects: await detect([json(s, 'a.json')]), work: w, options: {} }, e);
+  assert.ok(r.incomplete);
+  assert.deepEqual(r.outputs, []);
+  const missing = r.report.items.filter((i) => i.kind === 'not-in-dataset');
+  assert.deepEqual(missing.map((i) => [i.severity, i.examples]), [['error', [A('newton')]]], 'Newton, and only Newton');
+  // Control: with Newton there, it is not reported (the test above has the whole dataset pass).
+  const whole = await apply({ subjects: (await inputs()).subjects, work: w, options: {} }, env());
+  assert.ok(!whole.report.items.some((i) => i.kind === 'not-in-dataset'));
+  // No dataset at all: said so, not thrown.
+  const no = await apply({ work: w, options: {} }, env());
+  assert.deepEqual(no.report.items.map((i) => i.kind), ['no-dataset']);
 });
 test('progress is worded for each dataset and each phase', () => {
   assert.equal(progressText({ phase: 'reading', dataset: 'others', places: 3, elapsedMs: 0 }), 'Other dataset: Reading: 3 places (0 s)');

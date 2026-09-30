@@ -68,7 +68,7 @@ test('match: a command that is wrong exits 2, and an existing work file is not r
   assert.match(again.out, /already exists; give --overwrite/);
   assert.equal(cli('match', join(dir, 'a.json'), '--with', join(dir, 'b.json'), '--out', dir, '--overwrite').code, 0);
 });
-test('apply makes the decisions into a file the checker passes; a tampered work file exits 2', () => {
+test('apply adds the decisions to the dataset by default, or writes them alone; both pass the checker; a tampered work file exits 2', () => {
   const dir = fixtures();
   assert.equal(cli('match', join(dir, 'a.json'), '--with', join(dir, 'b.json'), '--out', dir).code, 0);
   const w = readWork(readFileSync(join(dir, 'a.krisis.json'), 'utf8'));
@@ -78,13 +78,28 @@ test('apply makes the decisions into a file the checker passes; a tampered work 
   // No reviewer, in the file or given: nothing written.
   const anon = cli('apply', join(dir, 'a.json'), '--review', join(dir, 'review.json'), '--out', dir);
   assert.equal(anon.code, 2, anon.out + anon.err);
-  assert.ok(!existsSync(join(dir, 'a.krisis-attestations.json')));
+  assert.ok(!existsSync(join(dir, 'a.krisis-dataset.json')));
+  // The default: the dataset, with the attestations added, checked with the version check.
   const r = cli('apply', join(dir, 'a.json'), '--review', join(dir, 'review.json'), '--out', dir, '--reviewer', 'A. Reviewer', '--orcid', 'https://orcid.org/0000-0002-1825-0097');
   assert.equal(r.code, 0, r.out + r.err);
-  assert.match(r.out, /Made 2 new attestations: 1 accepting 1 match, 1 saying that two places are different\./);
+  assert.match(r.out, /The review was added to the dataset\. Made 2 new attestations: 1 accepting 1 match, 1 saying that two places are different\. The dataset of 2 places had 2 attestations, and has 4 with 2 added; the version check found nothing deleted or changed\./);
+  const ds = join(dir, 'a.krisis-dataset.json');
+  assert.match(r.out, new RegExp(`Wrote ${ds.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  const d = JSON.parse(readFileSync(ds, 'utf8'));
+  assert.deepEqual(d.spatialEntities.map((p) => [p['@id'], p.attestations.length]), [[`${X}a/newton`, 2], [`${X}a/springfield`, 2]]);
+  assert.deepEqual(d.spatialEntities.map((p) => [p.attestations[1].contributor.name, !!p.attestations[1].negated]), [['A. Reviewer', false], ['A. Reviewer', true]]);
+  assert.ok(existsSync(join(dir, 'a.krisis.json')), 'the work file is not replaced by the dataset');
+  const dsChecked = cli('check', ds);
+  assert.equal(dsChecked.code, 0, dsChecked.out);
+  const versions = cli('compare', join(dir, 'a.json'), ds);
+  assert.equal(versions.code, 0, versions.out);
+  // The alternative: only the new attestations.
+  const r2 = cli('apply', join(dir, 'a.json'), '--review', join(dir, 'review.json'), '--out', dir, '--reviewer', 'A. Reviewer', '--output', 'attestations');
+  assert.equal(r2.code, 0, r2.out + r2.err);
+  assert.match(r2.out, /The review was made into attestations\. Made 2 new attestations/);
   const out = join(dir, 'a.krisis-attestations.json');
-  const d = JSON.parse(readFileSync(out, 'utf8'));
-  assert.deepEqual(d.attestations.map((a) => [a.about, a.contributor.name, !!a.negated]), [[`${X}a/newton`, 'A. Reviewer', false], [`${X}a/springfield`, 'A. Reviewer', true]]);
+  const a = JSON.parse(readFileSync(out, 'utf8'));
+  assert.deepEqual(a.attestations.map((x) => [x.about, x.contributor.name, !!x.negated]), [[`${X}a/newton`, 'A. Reviewer', false], [`${X}a/springfield`, 'A. Reviewer', true]]);
   const checked = cli('check', out);
   assert.equal(checked.code, 0, checked.out);
   assert.match(checked.out, /attestation-centric/);
@@ -94,8 +109,14 @@ test('apply makes the decisions into a file the checker passes; a tampered work 
   const bad = cli('apply', join(dir, 'a.json'), '--review', join(dir, 'tampered.json'), '--out', scratch(), '--reviewer', 'R');
   assert.equal(bad.code, 2, bad.out);
   assert.match(bad.out, /The work file cannot be used/);
-  // The whole dataset is not yet available; an unknown output is a wrong command.
-  assert.equal(cli('apply', join(dir, 'a.json'), '--review', join(dir, 'review.json'), '--out', scratch(), '--reviewer', 'R', '--output', 'dataset').code, 2);
+  // A dataset that lacks a place the review is about: a problem, and nothing is left written.
+  const lacking = scratch();
+  writeFileSync(join(lacking, 'a.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(dir, 'a.json'), 'utf8')), spatialEntities: JSON.parse(readFileSync(join(dir, 'a.json'), 'utf8')).spatialEntities.slice(0, 1) }));
+  const miss = cli('apply', join(lacking, 'a.json'), '--review', join(dir, 'review.json'), '--out', lacking, '--reviewer', 'R');
+  assert.equal(miss.code, 2, miss.out);
+  assert.match(miss.out, /is not in the dataset/);
+  assert.ok(!existsSync(join(lacking, 'a.krisis-dataset.json')), 'the partial dataset is removed');
+  // An unknown output is a wrong command.
   assert.equal(cli('apply', join(dir, 'a.json'), '--review', join(dir, 'review.json'), '--output', 'everything').code, 2);
   assert.equal(cli('apply', join(dir, 'a.json')).code, 2, 'no --review');
 });

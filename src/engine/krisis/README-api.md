@@ -24,10 +24,18 @@ Status: IMPLEMENTED; engine and CLI tests pass (test/krisis.test.js, test/krisis
     `subjects`/`others` are inputs as `detect()` returns them. options: `threshold` (0.85),
     `maxDistanceKm` (50), `topK` (5). Writes output `<subjects stem>.krisis.json`.
 - `src/engine/krisis/apply.js`:
-  - `apply({ subjects, work, options: { output = 'attestations', reviewer, date } }, env) -> { report, outputs, incomplete? }`
+  - `apply({ subjects, work, options: { output = 'dataset', reviewer, date, base } }, env) -> { report, outputs, incomplete? }`
     `work` is a work object or its text. `reviewer` ({ name, orcid? }) overrides `work.reviewer`.
+    `base`: for spreadsheet tables, the base address given to `match()`.
+    'dataset' (the default) converts `subjects` with `run({ action: 'convert', target: 'plato-json',
+    options: { augment } })`, appending each place's new attestations, and writes
+    `<subjects stem>.krisis-dataset.json` (place-centric PLATO JSON, whatever the input format; not
+    `.krisis.json`, which is the work file's name). It then runs `checkAppendOnly()`. Any error
+    (below) → `incomplete: true`, no outputs.
     'attestations' writes `<subjects stem>.krisis-attestations.json` (attestation-centric PLATO).
-    'dataset' is not yet available: report item `dataset-not-yet`, no outputs.
+  - `checkAppendOnly({ earlier, later, added, options: { base } }, env, rep)` — the version check
+    (`compare()`) of the dataset written (`later`, a File) against the subject dataset; adds its
+    findings to the Report `rep` and returns compare's result.
 - `src/engine/krisis/identity.js`: `recordIdentity({ subject, targets, source, reviewer, date, negated, notes })`,
   `attestationsFrom(work, { reviewer, source, date }) -> [{ subject, attestation }]` (each attestation
   dated by its latest decision's `decided_at` unless `date` is given).
@@ -45,15 +53,24 @@ subject places with at least one candidate, in review order. `reviewer: null | {
 - `match()` result `{ report, outputs: [{ name, size }], work }`; `report.counts` keys: subjects,
   others, candidates, suggestedFor, linked, judgedDifferent, tooFar, unaddressed.
 - `apply()` result `{ report, outputs, attestations }`; counts: attestations, matchAttestations,
-  distinctAttestations, relations. output 'dataset' → error item `dataset-not-yet`, `incomplete: true`.
+  distinctAttestations, relations; with output 'dataset' also `places` and `versionCheck: { earlier,
+  later, unchanged, changed, lost, added }` (compare's counts). Report kinds of the dataset output:
+  errors `no-dataset`, `dataset-not-read`, `not-in-dataset` (a subject IRI in the decisions that no
+  record of the dataset has), `not-append-only` (compare found something deleted or changed: a fault
+  in the tools), `not-checked`, `not-all-added`; warnings `dataset-has-problems` (the dataset's own
+  schema problems, counted), `dataset-now-plato-json` (input was not a place-centric PLATO JSON
+  document), and the conversion's own warnings and losses, passed on (`groups('apply')` has a loss group).
 - For resume: `readWork(text)` then `filesDiffer(work.subjects, files)` / `filesDiffer(work.others, files)`.
-- words.js also exports `reviewProgressText({ reviewed, total })` → "12 of 340 places reviewed".
+- The review's progress line is `review.progress({ reviewed, total }, at?)` in words.js → "12 of 340
+  places reviewed; this is place 13."
 
 ## Progress phases (env.progress)
 
 `{ phase, dataset: 'subjects' | 'others', ...counts, elapsedMs }` while reading (phases are
 pipeline's: reading/loading/indexing/writing, and 'read' when a dataset is finished), then
-`{ phase: 'matching', places, elapsedMs }`, then `{ phase: 'done' }`. `progressText()` in words.js
+`{ phase: 'matching', places, elapsedMs }`, then `{ phase: 'done' }`. `apply()` with the dataset
+output reports `applying`, the conversion's phases, `checking`, then the version check's (with
+`version: 'earlier' | 'later'`), then `done`. `progressText()` in words.js
 words them all.
 
 ## Words

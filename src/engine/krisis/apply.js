@@ -1,17 +1,21 @@
 // Krisis: finish a review. The decisions in a work file become PLATO attestations
 // (src/engine/krisis/identity.js), written out in one of two ways:
 //
+// - 'dataset' (the default): the subject dataset in PLATO JSON (place-centric) with the new
+//   attestations appended to the places they are about. The dataset is converted by the pipeline
+//   (run(), whatever format it came in), which hands each place to options.augment on its way to the
+//   writer; then the version check (compare.js) reads the original as the earlier version and the new
+//   file as the later, and anything it finds deleted or changed is a fault in the tools.
 // - 'attestations': a PLATO document holding only the new attestations. It is attestation-centric
 //   (attestation-centric.schema.json), the profile PLATO has for attesting evidence about places
 //   that already exist without redefining them: each attestation names its place in `about`, and
 //   the document's gazetteer names the dataset the places belong to. Nothing of the places is
 //   copied, so the file cannot contradict the dataset it adds to.
-// - 'dataset': the subject dataset in PLATO JSON with the new attestations appended to its places,
-//   then checked with the version check (the original as the earlier version, the new file as the
-//   later). NOT YET AVAILABLE: it needs a hook in the pipeline (options.augment) that another change
-//   is adding. See writeDataset below, the one place that will change.
 import { Report } from '../report.js';
-import { DataError } from '../input.js';
+import { DataError, detect } from '../input.js';
+import { run } from '../pipeline.js';
+import { compare } from '../compare.js';
+import { KRISIS_TEXT } from '../words.js';
 import { readWork, filesDiffer, checkReviewer } from './work.js';
 import { attestationsFrom } from './identity.js';
 
@@ -23,7 +27,6 @@ const TEXT = {
   'bad-reviewer': 'The reviewer cannot be recorded as PLATO records a contributor, so nothing was written',
   'subjects-differ': 'The files given are not the ones this review was made of: the places may have changed since. Check the attestations before adding them.',
   'nothing-decided': 'No decision in this review makes an attestation (only "Same place" and "Different places" do), so there is nothing to write.',
-  'dataset-not-yet': 'Writing the dataset with the new attestations added is not yet available; choose the new attestations only.',
   'not-valid': 'An attestation made from the review does not match the PLATO JSON Schema, which is a fault in the tools; please report it',
 };
 
@@ -33,9 +36,10 @@ const stemOf = (subjects, work, options) => (options.name || subjects?.files?.[0
 /**
  * Turn a review's decisions into attestations and write them. `subjects` is the subject dataset as
  * detect() describes it (compared with the files the review was made of, and read again for the
- * 'dataset' output), `work` a work file's object or text. options: output ('attestations' or
- * 'dataset'), reviewer ({ name, orcid? }, else the work file's), date (to stamp every attestation
- * with, else each is dated by its decisions), name (the stem of the output's name).
+ * 'dataset' output), `work` a work file's object or text. options: output ('dataset', the default,
+ * or 'attestations'), reviewer ({ name, orcid? }, else the work file's), date (to stamp every
+ * attestation with, else each is dated by its decisions), name (the stem of the output's name),
+ * base (spreadsheet tables: the base address of their places, as given to match()).
  * Returns { report, outputs, attestations }, with `incomplete` when nothing could be written.
  */
 export async function apply({ subjects, work, options = {} }, env) {
@@ -43,7 +47,7 @@ export async function apply({ subjects, work, options = {} }, env) {
   const progress = env.progress || (() => {});
   const t0 = Date.now();
   const fail = () => ({ report: rep.toJSON(), outputs: [], attestations: [], incomplete: true });
-  const output = options.output || 'attestations';
+  const output = options.output || 'dataset';
   if (!OUTPUTS.includes(output)) throw new Error(`Not an output of a review: ${output}`);
   let w;
   try { w = typeof work === 'string' ? readWork(work) : readWork(JSON.parse(JSON.stringify(work))); }
@@ -63,8 +67,8 @@ export async function apply({ subjects, work, options = {} }, env) {
     distinctAttestations: made.filter((m) => m.attestation.negated).length,
     relations: made.reduce((n, m) => n + m.attestation.identities.length, 0),
   };
-  if (output === 'dataset') return writeDataset({ subjects, made, work: w, options }, env, rep, fail);
   if (!made.length) { rep.warning('nothing-decided', TEXT['nothing-decided']); return { report: rep.toJSON(), outputs: [], attestations: [] }; }
+  if (output === 'dataset') return writeDataset({ subjects, made, work: w, options }, env, rep, fail);
 
   const doc = attestationsDocument(w, made);
   // Each attestation is checked as the checker would check it: what is written must be valid PLATO.
@@ -84,16 +88,90 @@ export function attestationsDocument(work, made) {
   return { $schema: AC, profile: 'attestation-centric', gazetteer, attestations: made.map(({ subject, attestation }) => ({ about: subject, ...attestation })) };
 }
 
-// TODO(Krisis, output 'dataset'): blocked on the pipeline hook `options.augment`, which lands on main
-// from another change; do not add it to pipeline.js here. When it has landed, this becomes:
-//
-//   const bySubject = new Map();
-//   for (const { subject, attestation } of made) (bySubject.get(subject) || bySubject.set(subject, []).get(subject)).push(attestation);
-//   const r = await run({ input: subjects, action: 'convert', target: 'plato-json', options: { name: stemOf(subjects, work, options) + '.krisis',
-//     augment: (record) => bySubject.has(record['@id']) ? { ...record, attestations: [...(record.attestations || []), ...bySubject.get(record['@id'])] } : record } }, env);
-//   then compare({ earlier: subjects, later: <the output, detected> }, env), merging both reports into `rep`.
+// ---- the dataset, with the new attestations added -------------------------------------------------
+// What the version check reports that a dataset only added to cannot have: something deleted or changed.
+const CHANGED = new Set(['attestation-removed', 'attestation-changed', 'attestation-gone', 'facet-changed', 'facet-removed', 'facet-added-to',
+  'identity-removed', 'identity-changed', 'identity-gone', 'description-removed', 'description-changed']);
+// What stops part of the dataset being read: the dataset written would then lack what was not.
+const NOT_READ = new Set(['unreadable', 'json-syntax', 'rdf-syntax', 'record-failed', 'late-header', 'lpf-v2']);
+
+/**
+ * env, with each output also kept as Blob parts, so that the file can be read again for the version
+ * check (env has no way to read an output back). The whole output is held until the check is done.
+ */
+function teeing(env, kept) {
+  return { ...env, output: async (name, binary) => {
+    const o = await env.output(name, binary);
+    const parts = [];
+    return {
+      write: (s) => { parts.push(new Blob([s])); o.write(s); },
+      writeBytes: (b) => { parts.push(new Blob([b])); o.writeBytes(b); },
+      close: async () => { const r = await o.close(); kept.set(name, parts); return r; },
+    };
+  } };
+}
+
 async function writeDataset({ subjects, made, work, options }, env, rep, fail) {
-  void subjects; void made; void work; void options; void env;
-  rep.error('dataset-not-yet', TEXT['dataset-not-yet']);
-  return fail();
+  const K = KRISIS_TEXT;
+  if (!subjects?.format) { rep.error('no-dataset', K.noDataset); return fail(); }
+  const progress = env.progress || (() => {});
+  const t0 = Date.now();
+  // Each place's new attestations, appended when the pipeline hands the place over: once, should
+  // the dataset give the same place twice.
+  const bySubject = new Map(), met = new Set();
+  for (const { subject, attestation } of made) (bySubject.get(subject) || bySubject.set(subject, []).get(subject)).push(attestation);
+  const augment = (record) => {
+    const id = record?.['@id'];
+    if (!bySubject.has(id) || met.has(id)) return record;
+    met.add(id);
+    return { ...record, attestations: [...(record.attestations || []), ...bySubject.get(id)] };
+  };
+  const name = stemOf(subjects, work, options) + '.krisis-dataset.json';
+  const kept = new Map();
+  const r = await run({ input: subjects, action: 'convert', target: 'plato-json', options: { name, base: options.base, augment } }, teeing(env, kept));
+  // What the conversion says of the dataset. Its own problems are its own, not the review's: they
+  // are counted, and the dataset is best checked by itself. What stopped it being read is not.
+  let own = 0;
+  for (const i of r.report.items) {
+    if (NOT_READ.has(i.kind)) rep.add('error', 'dataset-not-read', `${K.datasetNotRead}: ${i.message}`, i.examples[0], i.count);
+    else if (i.severity === 'error') own += i.count;
+    else rep.add(i.severity, i.kind, i.message, i.examples[0], i.count);
+  }
+  if (own) rep.add('warning', 'dataset-has-problems', K.datasetHasProblems, undefined, own);
+  if (subjects.format !== 'plato-json' || subjects.profile === 'attestation-centric') rep.add('warning', 'dataset-now-plato-json', K.datasetNowPlatoJson(subjects), name);
+  for (const [subject, list] of bySubject) if (!met.has(subject)) rep.add('error', 'not-in-dataset', K.notInDataset, subject, list.length);
+  rep.counts.places = r.report.counts.places || 0;
+  const parts = kept.get(name);
+  if (r.incomplete || !parts || rep.toJSON().errors) return fail();
+
+  progress({ phase: 'checking', elapsedMs: Date.now() - t0 });
+  const c = await checkAppendOnly({ earlier: subjects, later: new File(parts, name), added: made.length, options }, env, rep);
+  kept.clear();
+  if (c.incomplete || rep.toJSON().errors) return fail();
+  progress({ phase: 'done', attestations: made.length, elapsedMs: Date.now() - t0 });
+  return { report: rep.toJSON(), outputs: r.outputs, attestations: made };
+}
+
+/**
+ * The version check of a dataset written with new attestations: `earlier` is the subject dataset (as
+ * detect() describes it), `later` the File written. It must find nothing deleted or changed, and
+ * `added` attestations added. What it finds goes into `rep` (errors 'not-append-only', 'not-checked'
+ * and 'not-all-added'), and its counts into rep.counts.versionCheck. Returns compare()'s result.
+ */
+export async function checkAppendOnly({ earlier, later, added, options = {} }, env, rep) {
+  const K = KRISIS_TEXT;
+  const c = await compare({ earlier, later: await detect([later]), options: { base: options.base } }, env);
+  for (const i of c.report.items) {
+    if (CHANGED.has(i.kind)) {
+      rep.add('error', 'not-append-only', `${K.notAppendOnly} ${i.message}`, i.examples[0], i.count);
+      for (const x of i.explained || []) rep.explain('not-append-only', x.example, x.earlier, x.later);
+    } else if (i.kind === 'unreadable' || i.kind === 'version-not-read') rep.add('error', 'not-checked', `${K.notChecked}: ${i.message}`, i.examples[0], i.count);
+    else if (i.kind === 'not-compared') rep.add('warning', i.kind, i.message, i.examples[0], i.count);
+  }
+  const k = c.report.counts;
+  if (k.earlier !== undefined) {
+    rep.counts.versionCheck = { earlier: k.earlier, later: k.later, unchanged: k.unchanged, changed: k.changed, lost: k.lost, added: k.added };
+    if (k.added !== added) rep.add('error', 'not-all-added', K.notAllAdded(added, k.added));
+  }
+  return c;
 }
