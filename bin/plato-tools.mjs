@@ -16,6 +16,7 @@ const { parseArgs } = await import('node:util');
 const { readFileSync } = await import('node:fs');
 const { run, TARGETS, DEFAULT_TABLE_BASE } = await import('../src/engine/pipeline.js');
 const { compare } = await import('../src/engine/compare.js');
+const { publish, PUBLISH_PARTS } = await import('../src/engine/agora/index.js');
 const { detect } = await import('../src/engine/input.js');
 const { nodeResources, gatherInputs, openFiles, isSystemError, NodeHost } = await import('../src/node/host.js');
 const { fmtBytes, fmtTime, formatName, progressText, summary, groups, draftNote, explainedLines } = await import('../src/engine/words.js');
@@ -31,6 +32,13 @@ Usage:
                                             check that a published dataset was only added to:
                                             every attestation of the EARLIER version must be in
                                             the LATER one, unchanged (PLATO's append-only rule)
+  plato-tools publish PART [options] INPUT
+                                            prepare a dataset for publishing (Agora); PART is
+                                            report: what its description lacks, and deposit
+                                                    metadata (.zenodo.json, CITATION.cff, DataCite)
+                                            mint:   a copy in which every attestation has an @id
+                                            site:   a static website for GitHub Pages
+                                            w3id:   redirect rules for a w3id.org namespace
   plato-tools datacube [--json] FILE...     check a cube export (convert --to ntriples --cube)
                                             against the RDF Data Cube integrity constraints IC-1,
                                             IC-2, IC-11, IC-12 and IC-14
@@ -62,6 +70,16 @@ Options:
                     each figure from a statistical table: its qb:Observation type,
                     the measure as a direct statement, sdmx-dimension:refArea and refPeriod,
                     and the types of its table and structure. Without it, the plain PLATO graph.
+  --release NAME    publish: the name of the release being made (its address is
+                    <base>release/NAME).
+  --previous FILE   publish: the previous release: minting keeps its attestations' addresses,
+                    and nothing it published may be missing.
+  --concept-doi DOI publish: the DOI Zenodo gave to every version of the dataset.
+  --maintainer NAME publish w3id: a GitHub user who maintains the namespace (repeatable).
+  --repo OWNER/NAME publish: the GitHub repository the site is published from.
+  --site-url URL    publish: where the site is served, if not at the base address or at the
+                    repository's GitHub Pages address.
+  --turtle          publish site: also write Turtle for each place and source.
   --work-dir DIR    where the working database for RDF and attestation-centric input is kept
                     while it is in use (default: the system's temporary directory). It needs
                     room for about 1.5 times the uncompressed input; it is removed afterwards.
@@ -90,6 +108,8 @@ async function main(argv) {
         to: { type: 'string' }, out: { type: 'string', default: '.' }, overwrite: { type: 'boolean', default: false },
         base: { type: 'string' }, typing: { type: 'boolean', default: true }, cube: { type: 'boolean', default: false },
         'work-dir': { type: 'string' }, json: { type: 'boolean', default: false }, brief: { type: 'boolean', default: false },
+        release: { type: 'string' }, previous: { type: 'string' }, 'concept-doi': { type: 'string' }, maintainer: { type: 'string', multiple: true, default: [] },
+        repo: { type: 'string' }, 'site-url': { type: 'string' }, turtle: { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h', default: false }, version: { type: 'boolean', short: 'V', default: false },
       },
     });
@@ -103,9 +123,10 @@ async function main(argv) {
     return 0;
   }
   const [action, ...args] = positionals;
-  if (!action) return usage('say what to do: check, convert or compare.');
+  if (!action) return usage('say what to do: check, convert, compare or publish.');
   if (action === 'datacube') return datacube(args, o);
-  if (action !== 'check' && action !== 'convert' && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, compare and datacube.`);
+  if (action === 'publish') return publishCommand(args, o, resources);
+  if (action !== 'check' && action !== 'convert' && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, compare, publish and datacube.`);
   if (!args.length) return usage(`name at least one input to ${action}.`);
   if (action === 'convert' && !o.to) return usage(`convert needs --to, one of: ${Object.keys(TARGETS).join(', ')}.`);
   if (action === 'convert' && !TARGETS[o.to]) return usage(`"${o.to}" is not a target; the targets are ${Object.keys(TARGETS).join(', ')}.`);
@@ -210,6 +231,65 @@ function describeComparison(r, brief) {
   }
   return lines.join('\n') + '\n';
 }
+/** Agora: one part of publishing, for one dataset. Exit 0 with no problems, 1 with problems, 2 if it could not be done. */
+async function publishCommand(args, o, resources) {
+  const [part, ...rest] = args;
+  if (!part || !PUBLISH_PARTS[part]) return usage(`publish needs a part: ${Object.keys(PUBLISH_PARTS).join(', ')}.`);
+  if (o.to || o.cube) return usage('--to and --cube are for convert.');
+  if (o.json && o.brief) return usage('choose --json or --brief, not both.');
+  const items = await gatherInputs(rest);
+  if (items.length !== 1) return usage(`publish ${part} takes one dataset; ${items.length} ${items.length === 1 ? 'was' : 'were'} given.`);
+  const host = new NodeHost({ workDir: o['work-dir'], outDir: o.out, overwrite: o.overwrite });
+  const stop = (signal) => { const removed = host.abandon(); process.stderr.write(`\nplato-tools: stopped (${signal})${removed.length ? `; the incomplete ${removed.length === 1 ? 'file is' : 'files are'} removed` : ''}.\n`); process.exit(130); };
+  process.once('SIGINT', stop); process.once('SIGTERM', stop);
+  const live = process.stderr.isTTY && !o.json;
+  const t0 = Date.now();
+  const r = { type: 'publish', part, input: items[0].label, files: items[0].paths, format: null, status: 'failed', errors: 0, counts: {}, items: [], outputs: [], elapsedMs: 0 };
+  try {
+    const { input, message } = await readInput(items[0]);
+    if (!input) { r.message = message; return finishPublish(r, o, t0); }
+    r.format = input.format; r.profile = input.profile || null;
+    let previous;
+    if (o.previous) {
+      const [p] = await gatherInputs([o.previous]);
+      const got = await readInput(p);
+      if (!got.input) { r.message = `${o.previous}: ${got.message}`; return finishPublish(r, o, t0); }
+      previous = got.input;
+    }
+    const progress = live ? (p) => process.stderr.write(`\r\x1b[K${progressText(p)}`) : undefined;
+    const xlsx = [input, previous].some((i) => i?.container === 'workbook') ? await import('xlsx') : undefined;
+    const { env, finish } = host.env(resources, { progress, xlsx });
+    let result = null, failure = null;
+    const options = { base: o.base, release: o.release, conceptDoi: o['concept-doi'], maintainers: o.maintainer, repo: o.repo, siteUrl: o['site-url'], turtle: o.turtle, name: items[0].name };
+    try { result = await publish({ part, input, previous, options }, env); } catch (e) { failure = e; }
+    if (live) process.stderr.write('\r\x1b[K');
+    const done = finish(!!failure || !!result?.incomplete);
+    if (failure) {
+      r.message = isSystemError(failure) ? (failure.code === 'EEXIST' ? `${failure.path} already exists; give --overwrite to replace it, or --out for somewhere else.` : failure.message) : toolsFault(failure);
+      if (done.removed.length) r.message += ` Nothing was written: the incomplete ${done.removed.length === 1 ? 'file was' : 'files were'} removed.`;
+      return finishPublish(r, o, t0);
+    }
+    Object.assign(r, { status: result.incomplete ? 'failed' : result.report.errors ? 'problems' : 'ok', errors: result.report.errors, counts: result.report.counts, items: result.report.items,
+      outputs: result.outputs.map(({ name, path, size, files }) => ({ path: path || name, size, files })) });
+    return finishPublish(r, o, t0);
+  } finally { host.cleanup(); }
+}
+function finishPublish(r, o, t0) {
+  r.elapsedMs = Date.now() - t0;
+  r.exitCode = r.status === 'failed' ? 2 : r.status === 'problems' ? 1 : 0;
+  if (o.json) { process.stdout.write(JSON.stringify(r) + '\n'); return r.exitCode; }
+  const lines = [`${r.input}${r.format ? `: ${formatName(r)}` : ''} (${fmtTime(r.elapsedMs)})`];
+  if (r.status === 'failed' && r.message) lines.push(`  Could not be done: ${r.message}`);
+  else {
+    const { problems, counted } = summary({ errors: r.errors, counts: r.counts }, 'publish');
+    lines.push(`  ${problems}${counted ? ' ' + counted : ''}`);
+    if (!o.brief) lines.push(...itemLines(r.items, 'publish'));
+    for (const x of r.outputs) lines.push(`  Wrote ${x.path}${x.files ? ` (${x.files.toLocaleString('en-GB')} files, ${fmtBytes(x.size)})` : ` (${fmtBytes(x.size)})`}`);
+  }
+  process.stdout.write(lines.join('\n') + '\n');
+  return r.exitCode;
+}
+
 /** A report's findings, group by group, as the lines the terminal shows. */
 function itemLines(all, action) {
   const lines = [];

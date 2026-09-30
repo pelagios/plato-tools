@@ -36,6 +36,7 @@ export function progressText(p) {
 export function summary(report, action) {
   const c = report.counts;
   if (action === 'compare') return compareSummary(report);
+  if (action === 'publish') return publishSummary(report);
   const counted = ['annotations', 'places', 'attestations', 'identity relations', 'triples', 'triples written', 'table rows', 'observations'].filter((k) => c[k]).map((k) => count(c[k], k)).join(', ');
   const nErr = report.errors;
   return {
@@ -65,9 +66,25 @@ function compareSummary(report) {
   };
 }
 
+/**
+ * The summary of a part of publishing (Agora): whether anything stops publication, and what the
+ * part counted. Each part counts in its own words (report.counts.said, a list of short phrases).
+ */
+function publishSummary(report) {
+  const nErr = report.errors, said = report.counts.said || [];
+  return {
+    problems: nErr ? `${nErr.toLocaleString('en-GB')} problem${nErr === 1 ? '' : 's'} to fix before publishing.` : 'Nothing stops publication.',
+    counted: said.length ? said.join(' ') : '',
+  };
+}
+
 /** The report's groups, in order, with a title and a line saying what each means, for `action` 'check', 'convert' or 'compare'. */
 export function groups(action) {
   const checking = action === 'check';
+  if (action === 'publish') return [
+    { severity: 'error', title: 'Problems', intro: 'These stop the dataset being published as it is.' },
+    { severity: 'warning', title: 'Warnings', intro: 'Worth fixing: the dataset can be published, but is harder to find, cite or reuse.' },
+  ];
   if (action === 'compare') return [
     { severity: 'error', title: 'Problems', intro: 'These break the append-only rule: once a dataset is published, its attestations are added to, never deleted or changed.' },
     { severity: 'warning', title: 'Warnings', intro: 'Worth a look; none of these breaks the rule.' },

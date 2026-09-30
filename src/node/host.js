@@ -84,20 +84,32 @@ export class NodeHost {
         host.open.add(run.db);
         return run.db;
       },
-      output: async (name) => {
-        mkdirSync(host.outDir, { recursive: true });
-        const path = join(host.outDir, name);
-        const fd = openSync(path, host.overwrite ? 'w' : 'wx');   // wx: never replace a file unasked
-        run.created.push(path);
-        let size = 0;
-        const put = (buf) => { let at = 0; while (at < buf.length) at += writeSync(fd, buf, at, buf.length - at); size += buf.length; };
+      output: async (name) => create(join(host.outDir, name), name),
+      // A folder of files with paths of their own (Agora's site and w3id folder); in the browser the
+      // same tree is one zip (engine/agora/tree.js). Each file is made as output() makes one.
+      folder: async (name) => {
+        const root = join(host.outDir, name);
         return {
-          write: (s) => put(Buffer.from(s, 'utf8')),
-          writeBytes: (b) => put(b),
-          close: async () => { closeSync(fd); return { name, size, path }; },
+          path: root,
+          file: async (rel) => {
+            if (rel.split('/').some((p) => p === '..' || p === '.' || p === '')) throw new Error(`not a path inside the folder: ${rel}`);
+            return create(join(root, rel), rel);
+          },
         };
       },
     };
+    function create(path, name) {
+      mkdirSync(dirname(path), { recursive: true });
+      const fd = openSync(path, host.overwrite ? 'w' : 'wx');   // wx: never replace a file unasked
+      run.created.push(path);
+      let size = 0;
+      const put = (buf) => { let at = 0; while (at < buf.length) at += writeSync(fd, buf, at, buf.length - at); size += buf.length; };
+      return {
+        write: (s) => put(Buffer.from(s, 'utf8')),
+        writeBytes: (b) => put(b),
+        close: async () => { closeSync(fd); return { name, size, path }; },
+      };
+    }
     return {
       env,
       /** After the run: close and delete its database; on failure, delete its partial outputs. */
