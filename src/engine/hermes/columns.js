@@ -2,11 +2,13 @@
 // which column holds what, guessed from the column names and a few of their values, and each row
 // read through that mapping into one PLATO attestation.
 //
-// The mapping is a plain JSON object, { "column name": field }, where field is one of FIELDS' keys,
+// The mapping is a JSON object, { "column name": field }, where field is one of FIELDS' keys,
 // "note" (kept in the attestation's notes as "column: value") or "skip" (not carried over, and
 // reported by name). Every column goes to exactly one of these. A column that is not recognised is
 // kept in the notes, never put in `properties`: a property would claim the source said something
-// PLATO defines, when all that is known is that a column had that heading.
+// PLATO defines, when all that is known is that a column had that heading. The mapping and the
+// reasons are made with no prototype (Object.create(null)), so that a column called "__proto__" or
+// "constructor" is a column like any other, and only FIELDS' and OTHER's own keys are fields.
 //
 // The shapes are those of the spreadsheet tables (src/formats/tables.js, rowToAttestation) wherever
 // the tables have one: a latitude and longitude become a location exactly as the locations sheet's
@@ -56,6 +58,8 @@ export const GENERIC_KINDS = {
   'generic-not-feature': 'loss',
   'generic-csv-extra-cells': 'loss',
   'generic-csv-row': 'warning',
+  'generic-csv-problem': 'warning',
+  'generic-csv-duplicate-header': 'warning',
   'generic-no-ids': 'warning',
   'generic-id-empty': 'warning',
   'generic-stand-in-base': 'warning',
@@ -120,16 +124,20 @@ function geometryLike(s) {
   try { const g = JSON.parse(s); return !!g && typeof g === 'object' && typeof g.type === 'string'; } catch { return false; }
 }
 
+const isField = (f) => typeof f === 'string' && (Object.hasOwn(FIELDS, f) || Object.hasOwn(OTHER, f));
+const single = (f) => Object.hasOwn(FIELDS, f) && FIELDS[f].single;
+
 /**
  * Guess which column holds what, from the headings and a few rows. Returns { mapping, reasons }:
  * the mapping as described at the top of this file, and for each column a reason in words, which
- * the page shows beside its guess and the command line prints.
+ * the page shows beside its guess and the command line prints. `headerText` gives, for a column known
+ * by its heading and place ("name (column 3)", where two columns share a heading), the heading itself.
  */
-export function guessColumns(headers, sampleRows = []) {
-  const mapping = {}, reasons = {}, taken = new Map();
+export function guessColumns(headers, sampleRows = [], headerText = {}) {
+  const mapping = Object.create(null), reasons = Object.create(null), taken = new Map();
   const values = (h) => sampleRows.map((r) => cellText(r?.[h])).filter(Boolean);
   for (const h of headers) {
-    const n = normaliseHeader(h);
+    const n = normaliseHeader(Object.hasOwn(headerText, h) ? headerText[h] : h);
     let field = h === FEATURE_ID ? 'id' : BY_HEADING.get(n);
     let reason = h === FEATURE_ID ? "the GeoJSON feature's own id" : field ? `the heading "${h}" reads as ${FIELD_WORDS[field]}` : undefined;
     if (!field && (GAZETTEER_PREFIX.test(n) || ADDRESS_SUFFIX.test(n))) { field = 'address'; reason = `the heading "${h}" reads as a web address`; }
@@ -145,9 +153,9 @@ export function guessColumns(headers, sampleRows = []) {
     } else if (field === 'geometry') {
       if (!vs.length || !vs.every(geometryLike)) { reason = `the heading "${h}" reads as a geometry, but its values are not GeoJSON geometries, so it is kept in the notes`; field = 'note'; }
     }
-    if (field && FIELDS[field]?.single && taken.has(field)) { reason = `${reason}, but ${FIELD_WORDS[field]} is already column "${taken.get(field)}", so it is kept in the notes`; field = 'note'; }
+    if (field && single(field) && taken.has(field)) { reason = `${reason}, but ${FIELD_WORDS[field]} is already column "${taken.get(field)}", so it is kept in the notes`; field = 'note'; }
     if (!field) { field = 'note'; reason = 'the heading is not one these tools recognise, so it is kept in the notes'; }
-    if (FIELDS[field]?.single) taken.set(field, h);
+    if (single(field)) taken.set(field, h);
     mapping[h] = field; reasons[h] = reason;
   }
   return { mapping, reasons };
@@ -159,14 +167,14 @@ export function guessColumns(headers, sampleRows = []) {
  * { kind, example } of a kind in GENERIC_KINDS. A column the saved mapping leaves out, or maps to
  * something that is not a field, is kept in the notes, so that nothing is lost or claimed.
  */
-export function resolveColumns(headers, sampleRows, saved) {
-  if (saved === undefined || saved === null) return { ...guessColumns(headers, sampleRows), problems: [] };
+export function resolveColumns(headers, sampleRows, saved, headerText) {
+  if (saved === undefined || saved === null) return { ...guessColumns(headers, sampleRows, headerText), problems: [] };
   const problems = [];
   if (typeof saved !== 'object' || Array.isArray(saved)) {
     problems.push({ kind: 'generic-mapping', example: 'the mapping given is not a JSON object of column names and fields; the guess is used instead' });
-    return { ...guessColumns(headers, sampleRows), problems };
+    return { ...guessColumns(headers, sampleRows, headerText), problems };
   }
-  const mapping = {}, reasons = {}, taken = new Map();
+  const mapping = Object.create(null), reasons = Object.create(null), taken = new Map();
   for (const h of headers) {
     if (!Object.hasOwn(saved, h)) {
       mapping[h] = 'note'; reasons[h] = 'the mapping given does not name this column, so it is kept in the notes';
@@ -174,17 +182,17 @@ export function resolveColumns(headers, sampleRows, saved) {
       continue;
     }
     const f = saved[h];
-    if (typeof f !== 'string' || !(FIELDS[f] || OTHER[f])) {
+    if (!isField(f)) {
       mapping[h] = 'note'; reasons[h] = `the mapping given says ${JSON.stringify(f)}, which is not a field, so it is kept in the notes`;
       problems.push({ kind: 'generic-mapping', example: `${h}: ${JSON.stringify(f)} is not one of ${[...Object.keys(FIELDS), ...Object.keys(OTHER)].join(', ')}` });
       continue;
     }
-    if (FIELDS[f]?.single && taken.has(f)) {
+    if (single(f) && taken.has(f)) {
       mapping[h] = 'note'; reasons[h] = `the mapping given also maps column "${taken.get(f)}" to ${f}, which one column only can be, so this one is kept in the notes`;
       problems.push({ kind: 'generic-mapping', example: `${h}: ${f} is already column "${taken.get(f)}"` });
       continue;
     }
-    if (FIELDS[f]?.single) taken.set(f, h);
+    if (single(f)) taken.set(f, h);
     mapping[h] = f; reasons[h] = 'as the mapping given says';
   }
   for (const k of Object.keys(saved)) if (!headers.includes(k)) problems.push({ kind: 'generic-mapping-unknown-column', example: k });

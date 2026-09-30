@@ -210,7 +210,7 @@ test('a saved mapping is used instead of the guess, and a skipped column is repo
   assert.ok(r.doc.spatialEntities.every((p) => !p.attestations[0].types));
   assert.match(r.doc.spatialEntities[0].attestations[0].notes, /wikidata: https:\/\/www\.wikidata\.org\/wiki\/Q220/);
   const { mapping } = await mappingOf(r.input, columns);
-  assert.deepEqual(mapping, columns);
+  assert.deepEqual({ ...mapping }, columns);
 });
 test('an address column whose value is not a web address loses the row, and says so', async () => {
   const r = await readAll(textFile('name,wikidata\nRoma,https://www.wikidata.org/wiki/Q220\nAthenae,Q1524\n', 'x.csv'), { columns: { name: 'name', wikidata: 'address' } });
@@ -277,6 +277,43 @@ test('a CSV row with too many or too few cells is read as far as it goes, and re
   assert.deepEqual(r.of('generic-csv-extra-cells').examples, ['row 2: extra']);
   assert.ok(r.of('generic-csv-row').examples.some((e) => e.startsWith('row 3')));
   assert.equal(r.doc.spatialEntities.length, 3);
+});
+test('a quotation mark that is never closed, or stray in a quoted cell, stops the file, naming the line; it never merges the rows', async () => {
+  await assert.rejects(readAll(textFile('id,name\n1,"Roma\n2,Ostia\n3,Athenae\n', 'x.csv')),
+    (e) => e instanceof DataError && /never closed near line 2/.test(e.message));
+  await assert.rejects(readAll(textFile('id,name\n1,Roma\n2,"Os"tia"\n3,Athenae\n', 'x.csv')),
+    (e) => e instanceof DataError && /stray quotation mark in a quoted cell .* near line 3/.test(e.message));
+  // Control: quotes used as CSV uses them, a line break and a doubled quotation mark inside a cell.
+  const r = await readAll(textFile('id,name\n1,"Roma\nnova"\n2,"Os""tia"\n3,Athenae\n', 'x.csv'));
+  assert.deepEqual(r.doc.spatialEntities.map((p) => p.label), ['Roma\nnova', 'Os"tia', 'Athenae']);
+  assert.ok(!r.kinds.has('generic-csv-problem') && !r.kinds.has('generic-csv-row'));
+});
+test('two columns with one heading are both read, each known by its heading and place, and the report says so', async () => {
+  const r = await readAll(textFile('id,name,name\n1,Roma,Rome\n', 'x.csv'));
+  assert.deepEqual(r.of('generic-csv-duplicate-header').examples, ['"name": 2 columns (2, 3), read as "name (column 2)", "name (column 3)"']);
+  assert.equal(r.of('generic-csv-duplicate-header').severity, 'warning');
+  const p = r.doc.spatialEntities[0];
+  assert.equal(p.label, 'Roma', 'the first is guessed as the name, from its heading');
+  assert.equal(p.attestations[0].notes, 'name (column 3): Rome');
+  const { headers } = await columnsOf(r.input);
+  assert.deepEqual(headers, ['id', 'name (column 2)', 'name (column 3)']);
+  const { reasons } = await mappingOf(r.input);
+  assert.match(reasons['name (column 3)'], /already column "name \(column 2\)"/);
+  assert.ok(!Object.keys(reasons).some((h) => /name_1/.test(h)));
+  // Control: headings that differ are read as they are, with nothing reported.
+  const c = await readAll(textFile('id,name,other\n1,Roma,Rome\n', 'x.csv'));
+  assert.deepEqual([(await columnsOf(c.input)).headers, c.kinds.has('generic-csv-duplicate-header')], [['id', 'name', 'other'], false]);
+});
+test('a column or a property called __proto__ is read like any other, in a CSV file and in GeoJSON', async () => {
+  const r = await readAll(textFile('id,__proto__,name\n1,x,Roma\n', 'x.csv'));
+  assert.deepEqual((await columnsOf(r.input)).headers, ['id', '__proto__', 'name']);
+  assert.equal(r.doc.spatialEntities[0].label, 'Roma', 'control');
+  assert.equal(r.doc.spatialEntities[0].attestations[0].notes, '__proto__: x');
+  const gj = '{"type":"FeatureCollection","features":[{"type":"Feature","id":"f1","geometry":null,"properties":{"__proto__":{"a":1},"name":"Roma"}}]}';
+  const g = await readAll(textFile(gj, 'x.geojson'));
+  assert.deepEqual((await columnsOf(g.input)).headers, [FEATURE_ID, '__proto__', 'name']);
+  assert.equal(g.doc.spatialEntities[0].label, 'Roma', 'control');
+  assert.equal(g.doc.spatialEntities[0].attestations[0].notes, '__proto__: {"a":1}');
 });
 test('a CSV file with no header, and GeoJSON in another reference system, are refused', async () => {
   await assert.rejects(readAll(textFile('\n\n', 'x.csv')), DataError);

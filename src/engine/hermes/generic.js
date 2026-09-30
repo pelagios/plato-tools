@@ -50,34 +50,54 @@ async function open(input) {
   return t;
 }
 async function openCsv(file, input) {
-  const parsed = Papa.parse(await wholeText(file), { header: true, skipEmptyLines: 'greedy', ...(input.delimiter ? { delimiter: input.delimiter } : {}) });
-  const headers = parsed.meta.fields || [];
-  if (!headers.length || headers.every((h) => h.trim() === '')) throw new DataError('The CSV file has no header row naming its columns, so its columns cannot be read.');
-  // Papa's errors, by row: a row with more or fewer cells than the header is read as far as it goes,
-  // and is reported; a file with one column has no delimiter to detect, which is not a problem.
-  const problems = new Map();
+  const text = await wholeText(file);
+  // Parsed without Papa's header: it renames a repeated heading (name -> name_1) without saying so,
+  // and loses a heading "__proto__" from its row objects. The header is read here instead.
+  const parsed = Papa.parse(text, { skipEmptyLines: 'greedy', ...(input.delimiter ? { delimiter: input.delimiter } : {}) });
+  const lineOf = (index) => (Number.isInteger(index) ? text.slice(0, index).split('\n').length : undefined);
+  const problems = [];
   for (const e of parsed.errors) {
+    // A file with one column has no delimiter to detect, which is not a problem.
     if (e.code === 'UndetectableDelimiter') continue;
-    if (e.row === undefined) throw new DataError(`The CSV file cannot be read: ${e.message}.`);
-    problems.set(e.row, e.message);
+    const line = lineOf(e.index);
+    // A quotation mark out of place moves where Papa thinks a row ends: rows are merged into one cell,
+    // or split, and nothing read after it can be trusted to be the row it seems. Papa's row numbers
+    // for these count differently from its rows, so the line is found from where in the text it is.
+    if (e.type === 'Quotes') {
+      throw new DataError(`The CSV file has ${e.code === 'MissingQuotes' ? 'a quotation mark that opens a cell and is never closed' : 'a stray quotation mark in a quoted cell (a quotation mark inside a quoted cell is written twice: "")'}${line ? ` near line ${line}` : ''}, so where its rows begin and end cannot be told. Correct the quotation marks and try again.`);
+    }
+    problems.push({ kind: 'generic-csv-problem', example: `${e.message}${line ? ` (near line ${line})` : ''}` });
   }
+  const [rawHeaders = [], ...data] = parsed.data;
+  if (!rawHeaders.length || rawHeaders.every((h) => String(h).trim() === '')) throw new DataError('The CSV file has no header row naming its columns, so its columns cannot be read.');
+  // A heading given to more than one column: each such column is known by the heading and its place,
+  // "name (column 3)", in the matching, the notes and the report, and the report says so once.
+  const uses = new Map();
+  rawHeaders.forEach((h, j) => uses.set(h, [...(uses.get(h) || []), j + 1]));
+  const headers = rawHeaders.map((h, j) => (uses.get(h).length > 1 ? `${h} (column ${j + 1})` : h));
+  const headerText = Object.create(null);
+  headers.forEach((k, j) => { headerText[k] = rawHeaders[j]; });
+  for (const [h, cols] of uses) if (cols.length > 1) problems.push({ kind: 'generic-csv-duplicate-header', example: `"${h}": ${cols.length} columns (${cols.join(', ')}), read as ${cols.map((c) => `"${h} (column ${c})"`).join(', ')}` });
+  const rowOf = (cells) => { const row = Object.create(null); headers.forEach((k, j) => { if (j < cells.length) row[k] = cells[j]; }); return row; };
   return {
-    headers, sample: parsed.data.slice(0, SAMPLE), head: {},
+    headers, headerText, problems, sample: data.slice(0, SAMPLE).map(rowOf), head: {},
     *rows() {
-      for (const [i, row] of parsed.data.entries()) {
+      for (const [i, cells] of data.entries()) {
         const where = `row ${i + 2}`;   // as a spreadsheet numbers it, the header being row 1
-        const extra = row.__parsed_extra;
-        if (extra) delete row.__parsed_extra;
-        yield { row, where, problem: problems.get(i), extra };
+        const extra = cells.length > headers.length ? cells.slice(headers.length) : undefined;
+        const problem = cells.length < headers.length ? `${plural(cells.length, 'cell')} where the header has ${plural(headers.length, 'column')}` : undefined;
+        yield { row: rowOf(cells), where, problem, extra };
       }
     },
   };
 }
+const plural = (n, one) => `${n} ${n === 1 ? one : one + 's'}`;
 async function openGeojson(file, input) {
   const head = {};
   const headers = [], seen = new Set(), sample = [];
   const add = (k) => { if (!seen.has(k)) { seen.add(k); headers.push(k); } };
-  const rowOf = (f) => ({ ...(f.properties && typeof f.properties === 'object' ? f.properties : {}), ...(f.id !== undefined && f.id !== null ? { [FEATURE_ID]: f.id } : {}) });
+  // A row with no prototype, so that a property called "__proto__" is a column like any other.
+  const rowOf = (f) => Object.assign(Object.create(null), f.properties && typeof f.properties === 'object' ? f.properties : {}, f.id !== undefined && f.id !== null ? { [FEATURE_ID]: f.id } : {});
   let features;
   if (input.shape === 'feature') {
     let f;
@@ -121,8 +141,8 @@ export async function columnsOf(input) {
 }
 /** The mapping a run of this input uses: { mapping, reasons, problems } (columns.js, resolveColumns). */
 export async function mappingOf(input, saved) {
-  const { headers, sample } = await open(input);
-  return resolveColumns(headers, sample, saved);
+  const { headers, sample, headerText } = await open(input);
+  return resolveColumns(headers, sample, saved, headerText);
 }
 /** 'attestation-centric' when a column holds the places' web addresses, else 'place-centric'. */
 export async function genericProfile(input, saved) {
@@ -140,8 +160,8 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
   const file = input.files[0];
   const report = (kind, example) => rep.add(GENERIC_KINDS[kind] || 'loss', kind, LOSS_TEXT[kind] || kind, example);
   const t = await open(input);
-  const { mapping, problems } = resolveColumns(t.headers, t.sample, options.columns);
-  for (const p of problems) report(p.kind, p.example);
+  const { mapping, problems } = resolveColumns(t.headers, t.sample, options.columns, t.headerText);
+  for (const p of [...(t.problems || []), ...problems]) report(p.kind, p.example);
   const fields = Object.values(mapping);
   const byAddress = fields.includes('address'), hasId = fields.includes('id');
   const what = input.format === 'csv' ? 'a table of places (CSV)' : 'plain GeoJSON';

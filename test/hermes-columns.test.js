@@ -6,7 +6,9 @@ import assert from 'node:assert/strict';
 import { guessColumns, resolveColumns, applyColumns, normaliseHeader, geometryToPlato, FIELDS, OTHER, GENERIC_KINDS, FEATURE_ID } from '../src/engine/hermes/columns.js';
 import { LOSS_TEXT } from '../src/engine/report.js';
 
-const guess = (headers, rows = []) => guessColumns(headers, rows).mapping;
+// The mapping has no prototype (so that a column called __proto__ is kept): compared as a plain object.
+const plain = (o) => ({ ...o });
+const guess = (headers, rows = []) => plain(guessColumns(headers, rows).mapping);
 /** Read one row, collecting what is reported: { a, reported: [[kind, example]], kinds }. */
 function read(row, mapping, opts = {}) {
   const reported = [];
@@ -53,7 +55,7 @@ test('a coordinate column needs a number among its values; one stray word does n
 });
 test('a field one column only can hold goes to the first such column; the next is kept in the notes, and says why', () => {
   const g = guessColumns(['name', 'title', 'lat', 'latitude'], [{ lat: '1', latitude: '2' }]);
-  assert.deepEqual(g.mapping, { name: 'name', title: 'note', lat: 'latitude', latitude: 'note' });
+  assert.deepEqual(plain(g.mapping), { name: 'name', title: 'note', lat: 'latitude', latitude: 'note' });
   assert.match(g.reasons.title, /already column "name"/);
   // Several columns may be other names, types or sources.
   assert.deepEqual(guess(['names', 'aliases', 'type', 'category']), { names: 'alternativeNames', aliases: 'alternativeNames', type: 'type', category: 'type' });
@@ -67,18 +69,18 @@ test('an unknown column is kept in the notes, never guessed into anything that w
 });
 test("a GeoJSON feature's own id is guessed as the id, ahead of any property", () => {
   const g = guessColumns([FEATURE_ID, 'id', 'name'], [{ [FEATURE_ID]: 'f1', id: '7', name: 'A' }]);
-  assert.deepEqual(g.mapping, { [FEATURE_ID]: 'id', id: 'note', name: 'name' });
+  assert.deepEqual(plain(g.mapping), { [FEATURE_ID]: 'id', id: 'note', name: 'name' });
 });
 
 // ---- a saved mapping --------------------------------------------------------------------------------
 test('a saved mapping is used as given, where it is a mapping of these columns', () => {
   const r = resolveColumns(['A', 'B', 'C'], [], { A: 'name', B: 'skip', C: 'note' });
-  assert.deepEqual(r.mapping, { A: 'name', B: 'skip', C: 'note' });
+  assert.deepEqual(plain(r.mapping), { A: 'name', B: 'skip', C: 'note' });
   assert.deepEqual(r.problems, []);
 });
 test('what a saved mapping gets wrong is reported, and the column concerned is kept in the notes', () => {
   const r = resolveColumns(['A', 'B', 'C', 'D'], [], { A: 'name', B: 'colour', C: 'name', E: 'id' });
-  assert.deepEqual(r.mapping, { A: 'name', B: 'note', C: 'note', D: 'note' });
+  assert.deepEqual(plain(r.mapping), { A: 'name', B: 'note', C: 'note', D: 'note' });
   const kinds = r.problems.map((p) => [p.kind, p.example.split(':')[0]]);
   assert.deepEqual(kinds, [['generic-mapping', 'B'], ['generic-mapping', 'C'], ['generic-mapping-missing-column', 'D'], ['generic-mapping-unknown-column', 'E']]);
   const notObject = resolveColumns(['name'], [], ['name']);
@@ -156,6 +158,24 @@ test('a GeoJSON geometry is kept, a GeometryCollection refused, and anything els
   // A geometry column in a CSV holds the geometry written out as GeoJSON.
   const { a } = read({ n: 'A', g: '{"type":"Point","coordinates":[3,4]}' }, { n: 'name', g: 'geometry' });
   assert.deepEqual(a.attestation.geometries, [{ reprPoint: [3, 4], geojson: { type: 'Point', coordinates: [3, 4] } }]);
+});
+test('a column called __proto__ or constructor is a column like any other, guessed or given', () => {
+  const g = guessColumns(['__proto__', 'constructor', 'name'], [{ __proto__: null, ['__proto__']: 'x', constructor: 'y', name: 'Roma' }]);
+  assert.equal(Object.getPrototypeOf(g.mapping), null);
+  assert.deepEqual(Object.keys(g.mapping), ['__proto__', 'constructor', 'name']);
+  assert.deepEqual(Object.values(g.mapping), ['note', 'note', 'name']);
+  assert.match(g.reasons.__proto__ ?? '', /not one these tools recognise/);
+  const r = resolveColumns(['__proto__', 'name'], [], JSON.parse('{"__proto__": "id", "name": "name"}'));
+  assert.deepEqual([Object.keys(r.mapping), r.mapping.__proto__, r.mapping.name, r.problems], [['__proto__', 'name'], 'id', 'name', []]);
+});
+test('a saved matching that names constructor, toString or __proto__ as a field is reported, and the column kept in the notes', () => {
+  for (const f of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+    const r = resolveColumns(['A', 'B'], [], { A: 'name', B: f });
+    assert.equal(r.mapping.B, 'note', f);
+    assert.equal(r.mapping.A, 'name', `control (${f}): a field is taken`);
+    assert.deepEqual(r.problems.map((p) => [p.kind, p.example.split(':')[0]]), [['generic-mapping', 'B']], f);
+    assert.match(r.reasons.B, /which is not a field/);
+  }
 });
 test('every kind the reader reports has words, and a severity the report knows', () => {
   for (const [k, sev] of Object.entries(GENERIC_KINDS)) {
