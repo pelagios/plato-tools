@@ -41,6 +41,9 @@ const SCHEMES = new Set(['urn', 'doi', 'info', 'tag', 'mailto', 'file', 'ftp', '
 export const TEI_KINDS = {
   'tei-place-no-ref': 'loss',
   'tei-place-outside-text': 'loss',
+  'tei-place-in-record': 'loss',
+  'tei-place-empty': 'loss',
+  'tei-place-ethnic': 'loss',
   'tei-ref-prefix': 'loss',
   'tei-ref-local': 'loss',
   'tei-ref-ambiguous': 'loss',
@@ -94,6 +97,13 @@ const READ_ATTRIBUTES = new Set(['ref', 'key', 'xml:id', 'xml:lang', 'xml:space'
 // The children of a <place> in a list of places that are read (idno) or reported by a kind of their
 // own (its names, its location); a nested <place> is read as a place. Any other child is reported.
 const PLACE_CHILDREN = new Set(['idno', 'location', 'place', ...PLACE_ELEMENTS]);
+// A description of a person, an organisation, an event or a book (in <back>, say), whose place names
+// (a birthplace in a <listPerson>) describe it, not a passage of the text that names the place.
+const RECORDS = new Set(['listPerson', 'listOrg', 'listEvent', 'listBibl', 'person', 'personGrp', 'org', 'event', 'bibl', 'biblStruct']);
+// A <g> (a glyph) whose ref or type names a mark of punctuation, such as an interpunct
+// (<g ref="#interpunct">·</g>), a middle dot or a hedera: in a name it is a word divider, so it is
+// read as one space ("colonia·Augusta" is "colonia Augusta"). Any other <g> is read as its text.
+const PUNCTUATION_GLYPH = /punct|middot|hedera|divider|separator/i;
 
 const norm = (s) => s.replace(/\s+/g, ' ').trim();
 const isWeb = (s) => typeof s === 'string' && WEB.test(s) && isAbsoluteIri(s);
@@ -301,7 +311,10 @@ export class TeiReader {
 
   // ---- the events --------------------------------------------------------------------------------
   capture(onDone, extra = {}) { const c = new Capture(this.stack.length); c.onDone = onDone; c.inNoteFrom = this.inNote + 1; Object.assign(c, extra); this.captures.push(c); return c; }
-  text(t) { for (const c of this.captures) if (this.inNote < c.inNoteFrom) c.text(t); }
+  text(t) {
+    if (this.inPunctuation) t = ' ';
+    for (const c of this.captures) if (this.inNote < c.inNoteFrom) c.text(t);
+  }
   open(t) {
     const tei = t.uri === TEI_NS, local = t.local;
     const attr = (n) => t.attributes[n]?.value;
@@ -318,6 +331,10 @@ export class TeiReader {
     if (parent?.choice) { el.part = true; parent.parts.push(local); for (const c of this.captures) c.partOpen(local, depth); }
     if (tei && (local === 'choice' || local === 'app')) { el.choice = true; el.parts = []; el.deferred = []; for (const c of this.captures) c.choiceOpen(depth); }
     if (tei && local === 'note') { this.inNote++; el.note = true; }
+    if (tei && local === 'g' && PUNCTUATION_GLYPH.test(`${(attr('ref') || '').split(/[#/]/).pop()} ${attr('type') || ''}`)) {
+      this.inPunctuation = (this.inPunctuation || 0) + 1; el.punctuation = true;
+      for (const c of this.captures) if (this.inNote < c.inNoteFrom) c.text(' ');
+    }
     if (tei && BREAKS.has(local)) for (const c of this.captures) c.brk(attr('break') === 'no');
     if (!tei) return;
 
@@ -365,6 +382,20 @@ export class TeiReader {
 
     if (!this.isPlace(t)) return;
     const ref = attr('ref');
+    // An ethnic (<placeName type="ethnic">Σελινόντιοι</placeName>) names the people of a place, not
+    // the place: it is not a toponym, and is not converted.
+    if (attr('type') === 'ethnic' && this.inText) {
+      this.capture((c) => this.report('tei-place-ethnic', `${norm(c.pref) || `<${t.name}>`}${ref !== undefined ? ` (${norm(ref)})` : ''} on line ${this.parser.line}`));
+      return;
+    }
+    // A place name in a description of a person, an organisation, an event or a book describes it,
+    // not a passage of the text: reported with where it stands, and not converted.
+    const record = this.stack.findIndex((e) => e.tei && RECORDS.has(e.local));
+    if (record >= 0 && this.inText) {
+      const path = this.stack.slice(record).map((e) => e.local).join('/');
+      if (ref !== undefined) this.capture((c) => this.report('tei-place-in-record', `${path}: ${norm(c.pref) || `<${t.name}>`} (${norm(ref)})`));
+      return;
+    }
     // A place name in a list of places describes the place listed, not a passage that names it.
     if (pl) { this.capture((c) => { const s = norm(c.pref); if (s) pl.names.push(s); }); return; }
     // A place name outside the text (in the teiHeader, where EpiDoc says where an inscription was
@@ -397,6 +428,7 @@ export class TeiReader {
     if (el.choice && el.deferred.length) this.choiceDone(el);
     if (el.part) for (const c of this.captures) c.partClose(depth);
     if (el.note) this.inNote--;
+    if (el.punctuation) this.inPunctuation--;
     if (el.mention) this.inPlaceMention--;
     if (el.div) { this.divs.pop(); this.line = undefined; this.milestones = new Map(); }
     if (el.textRoot) this.inText--;
@@ -529,6 +561,8 @@ export class TeiReader {
     this.mentions++; this.countOne();
     if (d.noRef) { this.report('tei-place-no-ref', d.words); return; }
     const m = d.m;
+    // A place name with no words (<placeName ref="…"/>) gives no name to attest.
+    if (!m.toponym) { this.report('tei-place-empty', `<${m.element} ref="${m.pointers.join(' ')}"> on line ${m.fileLine}`); return; }
     // How many <place>s, not yet read, the place name waits for (each id once, however often it is given).
     const ids = new Set(m.pointers.filter((p) => p.startsWith('#') && !this.places.has(p.slice(1))).map((p) => p.slice(1)));
     if (!ids.size) { this.emit(m, false); return; }

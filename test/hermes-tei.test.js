@@ -181,6 +181,30 @@ test('a place name with no ref is reported, with its key where it has one; one w
   assert.ok(!examples(PROSE, 'tei-place-no-ref').includes('Sikyon'));
   assert.ok(names(PROSE).includes('Sikyon'), 'control: the place name around it is converted');
 });
+const P = (id) => `https://pleiades.stoa.org/places/${id}`;
+test('a place name with a ref but no words makes no attestation, and is reported; one with words beside it does', () => {
+  const m = mapped(tei(`<p><placeName ref="${P(1)}"/> and <placeName ref="${P(2)}">Roma</placeName> and <placeName ref="${P(3)}"> </placeName></p>`));
+  assert.deepEqual(about(m), [P(2)]);
+  assert.deepEqual(examples(m, 'tei-place-empty'), [`<placeName ref="${P(1)}"> on line 2`, `<placeName ref="${P(3)}"> on line 2`]);
+  assert.ok(m.doc.attestations.every((a) => a.names?.length), 'no attestation without a name');
+});
+test('a place name in a list of people, organisations, events or books is reported with its path, not converted; the same in the body is', () => {
+  const body = `<p><settlement ref="${P(1)}">Wien</settlement></p></body><back><listPerson><person><birth><settlement ref="${P(2)}">Wien</settlement></birth></person></listPerson>`
+    + `<listBibl><bibl><pubPlace><placeName ref="${P(3)}">Berlin</placeName></pubPlace></bibl></listBibl></back><body>`;
+  const m = mapped(tei(body).replace('<body><p>', '<body><p>').replace('</back><body></body>', '</back>'));
+  assert.deepEqual(about(m), [P(1)]);
+  assert.deepEqual(examples(m, 'tei-place-in-record'), [`listPerson/person/birth/settlement: Wien (${P(2)})`, `listBibl/bibl/pubPlace/placeName: Berlin (${P(3)})`]);
+});
+test('an ethnic (placeName type="ethnic") is not a toponym: reported, not converted; a placeName with no such type is converted', () => {
+  const m = mapped(tei(`<p><placeName type="ethnic" ref="${P(1)}">Σελινόντιοι</placeName> of <placeName ref="${P(2)}">Σελινοῦς</placeName></p>`));
+  assert.deepEqual(names(m), ['Σελινοῦς']);
+  assert.deepEqual(examples(m, 'tei-place-ethnic'), [`Σελινόντιοι (${P(1)}) on line 2`]);
+});
+test('a punctuation glyph (<g ref="#interpunct">) in a name is one space; any other <g> is read as its text', () => {
+  const m = mapped(tei(`<p><placeName ref="${P(1)}">colonia<g ref="#interpunct">·</g>Augusta <g type="interpunct">·</g> Panhormitanorum</placeName>`
+    + ` <placeName ref="${P(2)}">A<g ref="#staurogram">𐆠</g>B</placeName></p>`));
+  assert.deepEqual(names(m), ['colonia Augusta Panhormitanorum', 'A𐆠B']);
+});
 test('a place name in <front> or <back> is in the text and converted; one in a <standOff> is reported as outside it, by name', () => {
   const pn = (id, n) => `<placeName ref="https://pleiades.stoa.org/places/${id}">${n}</placeName>`;
   const s = tei(`<p>${pn(1, 'Body')}</p>`).replace('<text><body>', `<text><front><p>${pn(2, 'Front')}</p></front><body>`)
