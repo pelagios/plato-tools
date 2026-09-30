@@ -180,16 +180,22 @@ export async function detect(files) {
     return { format: null, reason: 'This is JSON Lines, but its first line is neither a PLATO header, an LPF feature nor a W3C Web Annotation.' };
   }
   if (h.startsWith('{')) {
+    // Read as far as the head goes, as structure (null where it is not well formed): a test of the
+    // text would take a property that is only called "toponym" for Linked Places Format.
+    const top = jsonHead(h);
+    // A IIIF Georeference Annotation (Allmaps) is an annotation too, so it is told apart first.
+    const georef = georefOf(top);
+    if (georef) return { format: 'georef', ...georef, reason: GEOREF_REASON, files };
     const profile = (h.match(/"profile"\s*:\s*"([a-z-]+)"/) || [])[1];
     if (profile === 'place-centric' || profile === 'attestation-centric') return { format: 'plato-json', profile, files };
     if (/"type"\s*:\s*"FeatureCollection"/.test(h)) {
-      if (!isLpf(h)) return { format: 'geojson', shape: 'collection', files };
-      return { format: 'lpf', files, lpfVersion: lpfVersion({ '@context': (h.match(/"@context"\s*:\s*"([^"]+)"/) || [])[1] }) };
+      if (!isLpf(top)) return { format: 'geojson', shape: 'collection', files };
+      return { format: 'lpf', files, lpfVersion: lpfVersion({ '@context': top?.['@context'] ?? (h.match(/"@context"\s*:\s*"([^"]+)"/) || [])[1] }) };
     }
     const shape = annotationShape(h, false);
     if (shape) return { format: 'w3c-annotations', shape, files };
     // One GeoJSON Feature on its own (tested after the annotations, whose bodies may hold Features).
-    if (/"type"\s*:\s*"Feature"/.test(h) && !isLpf(h)) return { format: 'geojson', shape: 'feature', files };
+    if (/"type"\s*:\s*"Feature"/.test(h) && !isLpf(top)) return { format: 'geojson', shape: 'feature', files };
     return { format: null, reason: 'This JSON document is neither a PLATO submission (it has no "profile"), an LPF FeatureCollection, nor W3C Web Annotations.' };
   }
   if (h.startsWith('[')) {
@@ -254,13 +260,127 @@ async function csvSetKind(files, names) {
   return { format: null, reason: 'These CSV files are not a set of PLATO spreadsheet tables (none is named after one of its sheets, such as places.csv), so choose one of them at a time: each is read as a table of places, with its columns matched to PLATO.' };
 }
 /**
- * A FeatureCollection (or Feature) is Linked Places Format when it says so or looks it: it names
- * LPF's context (linkedplaces), or its features carry LPF's own members: names with a toponym, a
- * when with timespans, or an @id beside properties.title (lpf.js reads @id, title and names). Plain
- * GeoJSON has none of these, and is read as a table of its features' properties ('geojson').
+ * A FeatureCollection (or Feature) is Linked Places Format when it says so or has LPF's structure:
+ * it names LPF's context (linkedplaces), or its features carry LPF's own members, at the feature's
+ * level: names whose items have a toponym, a when with timespans, or an @id of the feature itself
+ * (lpf.js reads each). A property of plain GeoJSON that is only called "toponym", "timespans" or
+ * "@id" is none of these, and plain GeoJSON is read as a table of its features' properties
+ * ('geojson'). `top` is the head of the document as structure (jsonHead), or null.
  */
-function isLpf(h) {
-  if (/"@context"\s*:\s*(?:\[[^\]]*?)?"[^"]*linked-?places/i.test(h)) return true;
-  if (/"toponym"\s*:/.test(h) || /"timespans"\s*:/.test(h)) return true;
-  return /"@id"\s*:/.test(h) && /"title"\s*:/.test(h);
+function isLpf(top) {
+  if (!top || typeof top !== 'object') return false;
+  if ([].concat(top['@context'] ?? []).some((c) => typeof c === 'string' && /linked-?places/i.test(c))) return true;
+  const isObj = (o) => !!o && typeof o === 'object' && !Array.isArray(o);
+  const lpfFeature = (f) => isObj(f) && (Object.hasOwn(f, '@id')
+    || (Array.isArray(f.names) && f.names.some((n) => isObj(n) && Object.hasOwn(n, 'toponym')))
+    || (isObj(f.when) && Array.isArray(f.when.timespans)));
+  return Array.isArray(top.features) ? top.features.some(lpfFeature) : lpfFeature(top);
 }
+
+/**
+ * The start of a JSON document as structure, as far as it goes: objects and arrays cut off by the
+ * end of `text` hold what was complete in them, and a string, number or word cut off is left out.
+ * null when the text is not well formed JSON as far as it goes. For detection, which reads only
+ * the first 64 KB of a file.
+ */
+export function jsonHead(text) {
+  let i = 0;
+  const END = Symbol('end');
+  const n = text.length;
+  const space = () => { while (i < n && (text[i] === ' ' || text[i] === '\n' || text[i] === '\r' || text[i] === '\t')) i++; };
+  const bad = () => { throw new SyntaxError(`not JSON at ${i}`); };
+  const string = () => {
+    const start = i++;
+    while (i < n && text[i] !== '"') i += text[i] === '\\' ? 2 : 1;
+    if (i >= n) return END;
+    i++;
+    return JSON.parse(text.slice(start, i));
+  };
+  const NUMBER = /-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?/y;
+  const value = () => {
+    space();
+    if (i >= n) return END;
+    const c = text[i];
+    if (c === '"') return string();
+    if (c === '{') {
+      i++;
+      const o = {};
+      for (let first = true; ; first = false) {
+        space();
+        if (i >= n) return o;
+        if (text[i] === '}') { i++; return o; }
+        if (!first) { if (text[i] !== ',') bad(); i++; space(); if (i >= n) return o; }
+        if (text[i] !== '"') bad();
+        const k = string();
+        if (k === END) return o;
+        space();
+        if (i >= n) return o;
+        if (text[i] !== ':') bad();
+        i++;
+        const v = value();
+        if (v === END) return o;
+        // Defined, not assigned, so that a key "__proto__" is a key like any other.
+        Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true });
+      }
+    }
+    if (c === '[') {
+      i++;
+      const a = [];
+      for (let first = true; ; first = false) {
+        space();
+        if (i >= n) return a;
+        if (text[i] === ']') { i++; return a; }
+        if (!first) { if (text[i] !== ',') bad(); i++; }
+        const v = value();
+        if (v === END) return a;
+        a.push(v);
+      }
+    }
+    NUMBER.lastIndex = i;
+    const m = NUMBER.exec(text);
+    if (m) { i += m[0].length; return i >= n ? END : Number(m[0]); }
+    for (const [w, v] of [['true', true], ['false', false], ['null', null]]) {
+      if (text.startsWith(w, i)) { i += w.length; return v; }
+      if (w.startsWith(text.slice(i))) { i = n; return END; }
+    }
+    return bad();
+  };
+  try { const v = value(); return v === END ? null : v; } catch { return null; }
+}
+
+// ---- IIIF Georeference Annotations (Allmaps) --------------------------------------------------------
+const GEOREF_CONTEXT = /^https?:\/\/iiif\.io\/api\/extension\/georef\/1\/context\.json$/;
+export const GEOREF_REASON = "This is a IIIF Georeference Annotation (a map's georeference, not a dataset): drop it together with the Recogito export whose regions it places.";
+/**
+ * A IIIF Georeference Annotation, or an AnnotationPage of them (as Allmaps publishes them): an
+ * annotation whose motivation is "georeferencing", or that names the georeference extension's
+ * context. It places a map image on the earth, and says nothing about places, so it is not read on
+ * its own. Returns { count, imageServiceIds } from the head (the annotations and the image services
+ * they georeference, as far as the head goes), or null.
+ */
+function georefOf(top) {
+  if (!top || typeof top !== 'object' || Array.isArray(top)) return null;
+  const contexts = (o) => [].concat(o?.['@context'] ?? []);
+  const isGeoref = (o) => !!o && typeof o === 'object' && [].concat(o.type).includes('Annotation')
+    && ([].concat(o.motivation ?? []).includes('georeferencing') || contexts(o).some((c) => typeof c === 'string' && GEOREF_CONTEXT.test(c)));
+  const types = [].concat(top.type);
+  let maps;
+  if (types.includes('Annotation')) maps = isGeoref(top) ? [top] : [];
+  else if (types.includes('AnnotationPage') && Array.isArray(top.items)) maps = top.items.filter(isGeoref);
+  else return null;
+  if (!maps.length) return null;
+  const ids = [];
+  for (const m of maps) {
+    const s = m.target?.source;
+    const id = s && typeof s === 'object' ? s.id ?? s['@id'] : undefined;
+    if (typeof id === 'string' && !ids.includes(id)) ids.push(id);
+  }
+  return { count: maps.length, imageServiceIds: ids };
+}
+
+/**
+ * Whether a detected input can be read: it has a format, and no reason it is refused. An input with
+ * a reason (a IIIF Georeference Annotation, which is recognised but not read on its own) is refused
+ * exactly as one that was not recognised, with the reason.
+ */
+export const readable = (input) => !!input?.format && input.reason === undefined;

@@ -7,7 +7,7 @@ import { prepare, run, TARGETS } from './pipeline.js';
 import { compare } from './compare.js';
 import { publish } from './agora/index.js';
 import { pragmas } from '../lib/store.js';
-import { detect } from './input.js';
+import { detect, readable } from './input.js';
 import { columnsOf, mappingOf } from './hermes/generic.js';
 import { FIELDS, cellText } from './hermes/columns.js';
 
@@ -88,7 +88,7 @@ self.onmessage = async ({ data }) => {
       }
     } else if (data.cmd === 'run') {
       const input = await detect(data.files);
-      if (!input.format) throw new Error(input.reason);
+      if (!readable(input)) throw new Error(input.reason);
       const { env, tidy } = await runEnv();
       let result;
       try { result = await run({ input, action: data.action, target: data.target, options: data.options || {} }, env); } finally { tidy(); }
@@ -97,7 +97,7 @@ self.onmessage = async ({ data }) => {
       // The version check: two inputs, the earlier version and the later one (src/engine/compare.js).
       const earlier = await detect(data.earlier), later = await detect(data.later);
       // A file that is not recognised is a finding about the file, reported as one, not a failure of the tools.
-      const unknown = [['earlier', earlier], ['later', later]].find(([, input]) => !input.format);
+      const unknown = [['earlier', earlier], ['later', later]].find(([, input]) => !readable(input));
       if (unknown) {
         postMessage({ type: 'done', incomplete: true, outputs: [], report: { counts: {}, errors: 1, items: [{ severity: 'error', kind: 'not-recognised', count: 1,
           message: `The ${unknown[0]} version was not recognised as data these tools read, so the two versions were not compared`, examples: [unknown[1].reason] }] } });

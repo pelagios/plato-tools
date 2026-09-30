@@ -47,7 +47,8 @@ function choose(list) {
 function onDetected({ input: inp, targets: t }) {
   input = inp; targets = t;
   const p = $('chosen').querySelector('p');
-  if (!inp.format) { p.innerHTML = `<span class="warn">${escapeHtml(inp.reason)}</span>`; Object.assign(state, { phase: 'unrecognised', reason: inp.reason }); return; }
+  // Not recognised, or recognised and refused with a reason (a IIIF Georeference Annotation): input.js, readable().
+  if (!inp.format || inp.reason !== undefined) { p.innerHTML = `<span class="warn">${escapeHtml(inp.reason)}</span>`; Object.assign(state, { phase: 'unrecognised', reason: inp.reason }); return; }
   const what = formatName(inp);
   p.innerHTML = `This looks like <span class="detected">${what}</span>.`;
   const sel = $('target'); sel.innerHTML = '';
@@ -79,7 +80,7 @@ async function storageCheck() {
 
 const buttons = (disabled) => { for (const id of ['check', 'convert', 'compare', 'publish']) $(id).disabled = disabled; };
 function start(action, earlier) {
-  if (busy || !input?.format) return;
+  if (busy || !input?.format || input.reason !== undefined) return;
   busy = true;
   const target = action === 'convert' ? $('target').value : null;
   $('progress').hidden = false; $('result').hidden = true;

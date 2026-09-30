@@ -17,7 +17,7 @@ const { readFileSync } = await import('node:fs');
 const { run, TARGETS, DEFAULT_TABLE_BASE } = await import('../src/engine/pipeline.js');
 const { compare } = await import('../src/engine/compare.js');
 const { publish, PUBLISH_PARTS } = await import('../src/engine/agora/index.js');
-const { detect } = await import('../src/engine/input.js');
+const { detect, readable } = await import('../src/engine/input.js');
 const { nodeResources, gatherInputs, openFiles, isSystemError, NodeHost } = await import('../src/node/host.js');
 const { toolsCommit } = await import('../src/node/build-info.js');
 const { fmtBytes, fmtTime, formatName, progressText, summary, groups, draftNote, explainedLines } = await import('../src/engine/words.js');
@@ -221,7 +221,7 @@ async function readInput(item) {
     // Detection turns what the data does wrong into a reason itself; anything thrown is the tools' own fault.
     return { message: toolsFault(e) };
   }
-  return input.format ? { input } : { message: input.reason };
+  return readable(input) ? { input } : { message: input.reason };
 }
 
 /** Compare two versions, and say how it went, as an object that --json prints as it is. */
