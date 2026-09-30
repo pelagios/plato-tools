@@ -108,6 +108,7 @@ node bin/plato-tools.mjs publish w3id --repo owner/name --maintainer you --out .
   a list of the places to include (the rest are in the site's downloads), or leave out `--turtle`.
 - The w3id folder is for a base address on `w3id.org` and a dataset whose `status` is `published`;
   its `STEPS.md` says how to test the rules and open the pull request.
+- `--overwrite` replaces a whole output folder (such as `<stem>-site`), not single files in it.
 
 `plato-tools --help` lists everything, and `plato-tools --version` names the PLATO commit the
 checks follow.
