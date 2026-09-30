@@ -177,12 +177,12 @@ function checkControlPoint(p, i, who) {
 }
 
 /**
- * The control points must lie on one side of the 180° meridian. The shortest span of longitude that
- * holds them all is found (sorted, the largest gap between neighbours is left out); if that largest
- * gap is not the one across ±180°, the shortest span crosses it, and Web Mercator would put the
- * points at either edge of the world: a point between 179.5° and -179.5° came out at [0, 10.1] (as
- * it does in Allmaps). So such a set is refused. A map that reaches more than half way round the
- * world with its control points spread evenly can be refused by this too.
+ * The control points must lie on one side of the 180° meridian. A set is taken to straddle it when
+ * its points fit within half the world across ±180° while leaving more than half the world empty
+ * between them (sorted, a gap between neighbours wider than 180° that is not the gap across ±180°):
+ * Web Mercator would then put them at either edge of the world, and a point between 179.5° and
+ * -179.5° came out at [0, 10.1] (as it does in Allmaps). Such a set is refused. A world map, whose
+ * points spread round the world with no gap wider than 180°, is not: it fits in Web Mercator.
  */
 function checkAntimeridian(points, who) {
   const lons = points.map((p) => p.geo[0]).sort((a, b) => a - b);
@@ -190,7 +190,7 @@ function checkAntimeridian(points, who) {
   const across = lons[0] + 360 - lons[lons.length - 1];
   let widest = 0, at = 0;
   for (let i = 1; i < lons.length; i++) if (lons[i] - lons[i - 1] > widest) { widest = lons[i] - lons[i - 1]; at = i; }
-  if (widest > across) {
+  if (widest > 180 && widest > across) {
     throw new DataError(`${who[0].toUpperCase()}${who.slice(1)} has control points on both sides of the 180° meridian (at longitudes up to ${lons[at - 1]} and from ${lons[at]}), and maps that cross the 180° meridian are not supported yet. Nothing was changed.`);
   }
 }

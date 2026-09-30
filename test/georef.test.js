@@ -802,6 +802,10 @@ test('control points on both sides of the 180° meridian are a DataError; a set 
   const east = await readGeoreference(withGcps([[[1000, 1000], [170, 10]], [[9000, 1200], [179.9, 10.5]], [[5000, 5000], [175, 5]]]));
   assert.equal(east.gcps, 3);
   near((await toWorld(east, pt([9000, 1200]), { space: 'image' })).geojson.coordinates, [179.9, 10.5]);
+  // Control: a world map, its points spread round the world with no gap wider than 180°, fits in
+  // Web Mercator and is not refused.
+  const world = await readGeoreference(withGcps([[[100, 3000], [-170, 0]], [[3000, 3000], [-100, 10]], [[5700, 3100], [0, 5]], [[8500, 2900], [100, -10]], [[11300, 3000], [170, 0]]]));
+  assert.equal(world.gcps, 5);
 });
 
 test('a citation region wholly off the canvas is a TypeError; one partly off is clamped to it (the control)', async () => {
