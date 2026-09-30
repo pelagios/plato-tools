@@ -18,23 +18,25 @@ how they are built and tested.
 
 ## The toolbox
 
-| Tool | What it does | How to use it |
-|---|---|---|
-| <img src="public/icons/search-check.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;**Elenchos**:&nbsp;check | Finds every problem in a file, names it and says where it is | [Spreadsheets](https://pelagios.org/place-attestation-ontology/guide/spreadsheets/index.html#checking-your-tables), [JSON](https://pelagios.org/place-attestation-ontology/guide/json.html#checking-and-converting), [linked data](https://pelagios.org/place-attestation-ontology/guide/linked-data.html) |
-| <img src="public/icons/arrow-right-left.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;**Metaphrasis**:&nbsp;convert | Writes a file in another format, and reports what that format cannot hold | The same pages; [what is kept](#what-a-conversion-keeps-and-what-it-reports) |
-| <img src="public/icons/chart-column.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;**Arithmos**:&nbsp;statistical&nbsp;figures | Publishes figures from statistical tables as RDF Data Cube, and checks the result | [Statistical tables](https://pelagios.org/place-attestation-ontology/guide/statistics.html); [below](#statistical-figures) |
-| <img src="public/icons/file-input.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;**Hermes**:&nbsp;readers | Brings other formats into PLATO. So far: Recogito's annotations | [Annotations from Recogito](https://pelagios.org/place-attestation-ontology/guide/annotations.html); [below](#web-annotations-recogito) |
+<table>
+<tr><th width="290">Tool</th><th>What it does</th><th>How to use it</th></tr>
+<tr><td nowrap><img src="public/icons/search-check.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Elenchos</b>: check</td><td>Finds every problem in a file, names it and says where it is</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/spreadsheets/index.html#checking-your-tables">Spreadsheets</a>, <a href="https://pelagios.org/place-attestation-ontology/guide/json.html#checking-and-converting">JSON</a>, <a href="https://pelagios.org/place-attestation-ontology/guide/linked-data.html">linked data</a></td></tr>
+<tr><td nowrap><img src="public/icons/arrow-right-left.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Metaphrasis</b>: convert</td><td>Writes a file in another format, and reports what that format cannot hold</td><td>The same pages; <a href="#what-a-conversion-keeps-and-what-it-reports">what is kept</a></td></tr>
+<tr><td nowrap><img src="public/icons/chart-column.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Arithmos</b>: statistical figures</td><td>Publishes figures from statistical tables as RDF Data Cube, and checks the result</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/statistics.html">Statistical tables</a>; <a href="#statistical-figures">below</a></td></tr>
+<tr><td nowrap><img src="public/icons/file-input.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Hermes</b>: readers</td><td>Brings other formats into PLATO. So far: Recogito's annotations</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/annotations.html">Annotations from Recogito</a>; <a href="#web-annotations-recogito">below</a></td></tr>
+</table>
 
 Still to come, each planned in its own issue, with the plan as a whole in
 [#1](https://github.com/pelagios/plato-tools/issues/1):
 
-| Tool | What it will do | Issue |
-|---|---|---|
-| <img src="public/icons/history.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;**Mneme**:&nbsp;version&nbsp;check | Show that a new version of a published dataset deleted and changed nothing | [#2](https://github.com/pelagios/plato-tools/issues/2) |
-| <img src="public/icons/landmark.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;**Agora**:&nbsp;publish | A FAIR report, a web page for every place, and permanent addresses | [#3](https://github.com/pelagios/plato-tools/issues/3) |
-| <img src="public/icons/map-pinned.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;**Chora**:&nbsp;place&nbsp;on&nbsp;the&nbsp;map | Point to a place, draw it, or trace it from a georeferenced map | [#4](https://github.com/pelagios/plato-tools/issues/4) |
-| <img src="public/icons/file-input.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;**Hermes**:&nbsp;more&nbsp;readers | TEI, any CSV or GeoJSON, georeferenced Recogito regions | [#5](https://github.com/pelagios/plato-tools/issues/5) |
-| <img src="public/icons/scale.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;**Krisis**:&nbsp;match&nbsp;review | Find a place in other gazetteers, and record each judgement of identity | [#6](https://github.com/pelagios/plato-tools/issues/6) |
+<table>
+<tr><th width="290">Tool</th><th>What it will do</th><th>Issue</th></tr>
+<tr><td nowrap><img src="public/icons/history.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Mneme</b>: version check</td><td>Show that a new version of a published dataset deleted and changed nothing</td><td><a href="https://github.com/pelagios/plato-tools/issues/2">#2</a></td></tr>
+<tr><td nowrap><img src="public/icons/landmark.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Agora</b>: publish</td><td>A FAIR report, a web page for every place, and permanent addresses</td><td><a href="https://github.com/pelagios/plato-tools/issues/3">#3</a></td></tr>
+<tr><td nowrap><img src="public/icons/map-pinned.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Chora</b>: place on the map</td><td>Point to a place, draw it, or trace it from a georeferenced map</td><td><a href="https://github.com/pelagios/plato-tools/issues/4">#4</a></td></tr>
+<tr><td nowrap><img src="public/icons/file-input.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Hermes</b>: more readers</td><td>TEI, any CSV or GeoJSON, georeferenced Recogito regions</td><td><a href="https://github.com/pelagios/plato-tools/issues/5">#5</a></td></tr>
+<tr><td nowrap><img src="public/icons/scale.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Krisis</b>: match review</td><td>Find a place in other gazetteers, and record each judgement of identity</td><td><a href="https://github.com/pelagios/plato-tools/issues/6">#6</a></td></tr>
+</table>
 
 ## What it reads and writes
 
