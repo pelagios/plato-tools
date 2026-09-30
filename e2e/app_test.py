@@ -5,7 +5,7 @@
     python3 e2e/app_test.py --prove-it-fails run every check against a page with no tools on it;
                                             every check must fail, or the harness cannot fail
 """
-import json, os, pathlib, shutil, socket, subprocess, sys, tempfile, time, urllib.request
+import json, os, pathlib, shutil, signal, socket, subprocess, sys, tempfile, time, urllib.request
 from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -64,13 +64,15 @@ REMOTE = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--url=')), 
 
 def main():
     if REMOTE:                                    # the deployed site: a green local run is not a green deploy
-        srv = subprocess.Popen(['true']); url = REMOTE
+        srv = subprocess.Popen(['true'], start_new_session=True); url = REMOTE
     else:
         with socket.socket() as s:
             if s.connect_ex(('127.0.0.1', PORT)) == 0:
                 sys.exit(f'Port {PORT} is in use, so the page there is not this build: set E2E_PORT to a free port.')
         subprocess.run(['npx', 'vite', 'build'], cwd=ROOT, check=True, capture_output=True)
-        srv = subprocess.Popen(['npx', 'vite', 'preview', '--port', str(PORT), '--strictPort'], cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        # In a session of its own, so that stopping it stops vite too: killing npx alone left vite
+        # serving the port, and the next run on that port refused to start.
+        srv = subprocess.Popen(['npx', 'vite', 'preview', '--port', str(PORT), '--strictPort'], cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
         url = f'http://localhost:{PORT}/'
     for _ in range(60):
         try: urllib.request.urlopen(url, timeout=1); break
@@ -171,7 +173,8 @@ def main():
                   and 'Only in the later version: plato:attests_name [plato:toponym "Newton, respelt"]' in shown, shown[-600:])
             ctx.close()
     finally:
-        srv.kill()
+        try: os.killpg(srv.pid, signal.SIGTERM)
+        except ProcessLookupError: pass
         # The profile and the saved outputs are this run's alone: remove them (they were left in
         # /tmp by every run until now, some 2.7 MB each).
         shutil.rmtree(tmp, ignore_errors=True)
