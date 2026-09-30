@@ -6,6 +6,7 @@
                                             every check must fail, or the harness cannot fail
     --no-gl-flags   start Chora's browser without the software-GL switches, to measure whether the map
                     still draws without them (it did on this machine, Chromium 147, September 2026)
+    --chora-only    Chora's checks alone, for work on Chora (a full run is what counts)
 """
 import json, os, pathlib, shutil, signal, socket, subprocess, sys, tempfile, time, urllib.request
 from playwright.sync_api import sync_playwright
@@ -13,6 +14,7 @@ from playwright.sync_api import sync_playwright
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PLATO = pathlib.Path(os.environ.get('PLATO_REPO', ROOT.parent / 'place-attestation-ontology'))
 PROVE = '--prove-it-fails' in sys.argv
+CHORA_ONLY = '--chora-only' in sys.argv
 # The preview server runs under npx, whose child (node vite preview) outlived a plain kill() and
 # held the port for the next run: it gets a session of its own, and the whole group is stopped.
 def stop(srv):
@@ -91,94 +93,95 @@ def main():
             ctx = pw.chromium.launch_persistent_context(str(tmp / 'profile'), headless=True, accept_downloads=True)
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
             page.add_init_script('window.__plato_forceDownload = true;')
-            page.goto('data:text/html,<title>no tools here</title><input id=picker type=file multiple>' if PROVE else url)
-            ready = wait_state(page, lambda s: s.get('phase') == 'ready', 30, 'ready')
-            check('page is ready and names the PLATO commit it checks against', ready.get('phase') == 'ready' and len(ready.get('platoCommit') or '') == 40, ready)
-            # The commit shown is the one served, and a draft pin (a PLATO branch, not a release) says so.
-            served = json.loads(urllib.request.urlopen(url.rstrip('/') + '/plato/VERSION.json', timeout=10).read())
-            footer = page.evaluate("() => document.getElementById('plato-version')?.textContent || ''")
-            check('the footer shows the commit served, and says DRAFT exactly when the pin is a draft',
-                  ready.get('phase') == 'ready' and ready.get('platoCommit') == served['commit'] and served['commit'][:7] in footer
-                  and ('DRAFT' in footer) == bool(served.get('draft')), {'footer': footer, 'served': served})
+            if not CHORA_ONLY:                       # the main page's checks
+                page.goto('data:text/html,<title>no tools here</title><input id=picker type=file multiple>' if PROVE else url)
+                ready = wait_state(page, lambda s: s.get('phase') == 'ready', 30, 'ready')
+                check('page is ready and names the PLATO commit it checks against', ready.get('phase') == 'ready' and len(ready.get('platoCommit') or '') == 40, ready)
+                # The commit shown is the one served, and a draft pin (a PLATO branch, not a release) says so.
+                served = json.loads(urllib.request.urlopen(url.rstrip('/') + '/plato/VERSION.json', timeout=10).read())
+                footer = page.evaluate("() => document.getElementById('plato-version')?.textContent || ''")
+                check('the footer shows the commit served, and says DRAFT exactly when the pin is a draft',
+                      ready.get('phase') == 'ready' and ready.get('platoCommit') == served['commit'] and served['commit'][:7] in footer
+                      and ('DRAFT' in footer) == bool(served.get('draft')), {'footer': footer, 'served': served})
 
-            ex = PLATO / 'schemas/tables/examples'
-            s = run_case(page, sorted((ex / 'customs').glob('*.csv')), 'check')
-            check('customs tables: detected as tables and checked with no problems', s.get('format') == 'tables' and s.get('phase') == 'done' and s['report']['errors'] == 0, s.get('report') or s)
-            s = run_case(page, sorted((ex / 'survey').glob('*.csv')), 'check')
-            errs = [i for i in (s.get('report') or {}).get('items', []) if i['severity'] == 'error']
-            check('survey tables: checked with no problems (a label-only type and an evidence-less place are valid PLATO)', s.get('phase') == 'done' and not errs and (s.get('report') or {}).get('counts', {}).get('places') == 3, errs or s)
-            s = run_case(page, sorted((ex / 'customs').glob('*.csv')), 'convert', 'plato-jsonl')
-            ok = s.get('phase') == 'done' and s.get('outputs')
-            out = download(page, s['outputs'][0]['name'], tmp / 'customs.jsonl') if ok else None
-            lines = out.read_text().strip().split('\n') if out else []
-            check('customs tables -> JSON Lines: saved, a header and two places', ok and len(lines) == 3 and json.loads(lines[0]).get('profile') == 'place-centric', s if not ok else len(lines))
-            s = run_case(page, [ROOT / 'test/fixtures/lpf-readme-example.json'], 'convert', 'plato-json')
-            ok = s.get('phase') == 'done' and s.get('outputs')
-            doc = json.loads(download(page, s['outputs'][0]['name'], tmp / 'abingdon.json').read_text()) if ok else {}
-            check('LPF README example -> PLATO JSON: one place, its losses reported', ok and len(doc.get('spatialEntities', [])) == 1 and any(i['kind'] == 'lpf-duration' for i in s['report']['items']), s if not ok else doc.keys())
-            # Recogito's web annotations: the confirmed links become attestations, and the link
-            # software suggested and nobody confirmed (Lechaeum) is reported, not converted.
-            s = run_case(page, [ROOT / 'test/fixtures/annotations/recogito-v1-constructed.jsonld'], 'convert', 'plato-json')
-            ok = s.get('phase') == 'done' and s.get('outputs')
-            doc = json.loads(download(page, s['outputs'][0]['name'], tmp / 'annotations.json').read_text()) if ok else {}
-            names = [n['toponym'] for p in doc.get('spatialEntities', []) for a in p['attestations'] for n in a.get('names', [])]
-            check('Recogito annotations -> PLATO JSON: linked places converted, the unconfirmed link reported',
-                  ok and s.get('format') == 'w3c-annotations' and 'Corinthus' in names and 'Lechaeum' not in names and any(i['kind'] == 'annotation-unverified' for i in s['report']['items']), s if not ok else names)
-            s = run_case(page, [PLATO / 'schemas/examples/place-centric-constantinople.json'], 'convert', 'ntriples')
-            ok = s.get('phase') == 'done' and s.get('outputs')
-            nt = download(page, s['outputs'][0]['name'], tmp / 'c.nt').read_text() if ok else ''
-            check('Constantinople JSON -> N-Triples: triples written and saved', ok and nt.count(' .\n') > 50 and 'attests_about' in nt, s if not ok else nt[:200])
-            # A source's denial (plato:negated) must never reach LPF as an assertion: Littleworth
-            # had no market, so its feature must carry no market, and the page must say why.
-            s = run_case(page, [PLATO / 'schemas/examples/place-centric-judgements.json'], 'convert', 'lpf')
-            ok = s.get('phase') == 'done' and s.get('outputs')
-            fc = json.loads(download(page, s['outputs'][0]['name'], tmp / 'judgements.geojson').read_text()) if ok else {}
-            lw = next((f for f in fc.get('features', []) if f.get('@id', '').endswith('/littleworth')), None)
-            # Kingsbury's markets are asserted, with a source stance (reported, doubted), so they are rightly
-            # written: the search for the denied market leaves them out, and they are the control that it can see one.
-            kb = next((f for f in fc.get('features', []) if f.get('@id', '').endswith('/kingsbury')), None)
-            facets = json.dumps([[f.get(k) for k in ('names', 'types', 'relations', 'geometry', 'descriptions', 'links')] for f in fc.get('features', []) if f is not kb])
-            shown = page.inner_text('#report') if ok else ''
-            check('a denial -> LPF: the place is written, the denied market is not, and the page says so',
-                  ok and lw is not None and 'types' not in lw and '"market"' not in facets and len(fc['features']) == 6
-                  and kb is not None and [x.get('label') for x in kb.get('types', [])] == ['market', 'market']
-                  and any(i['kind'] == 'denial' for i in s['report']['items']) and 'would assert what its source denies' in shown, s.get('report') or s)
-            bad = tmp / 'bad.nt'; bad.write_text('<https://x.org/a> <https://w3id.org/plato#notes> "fine" .\n<https://x.org/a> <https://w3id.org/plato#notes "broken .\n')
-            s = run_case(page, [bad], 'check')
-            check('broken N-Triples: the bad line is reported by number', s.get('phase') == 'done' and any(i['kind'] == 'rdf-syntax' and 'line 2' in ' '.join(i['examples']) for i in s['report']['items']), s.get('report') or s)
-            nul = tmp / 'null-coordinate.json'
-            nul.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': 'https://example.org/g', 'title': 't'}, 'spatialEntities': [
-                {'@id': 'https://example.org/p/1', 'label': 'Ranny', 'attestations': [{'geometries': [{'reprPoint': [130.6, None]}], 'sources': [{'title': 's'}]}]}]}))
-            s = run_case(page, [nul], 'check')
-            check('a null coordinate: the check finishes and reports it (it used to stop the check)', s.get('phase') == 'done' and any(i['kind'] == 'null-value' for i in (s.get('report') or {}).get('items', [])), s.get('report') or s)
-            cut = tmp / 'cut-short.json'
-            cut.write_text((PLATO / 'schemas/examples/place-centric-constantinople.json').read_text()[:1500])
-            s = run_case(page, [cut], 'check')
-            shown = page.inner_text('#summary') if s.get('phase') == 'done' else ''
-            check('a JSON file cut short: reported as a problem in the report, not "Something went wrong"', s.get('phase') == 'done' and any(i['kind'] == 'unreadable' for i in (s.get('report') or {}).get('items', [])) and 'Something went wrong' not in shown, s.get('report') or s)
-            png = tmp / 'picture.png'; png.write_bytes(b'\x89PNG\r\n\x1a\n' + b'\0' * 64)
-            s = run_case(page, [png], 'check')
-            check('an image is not mistaken for data', s.get('phase') == 'unrecognised', s)
-            # The version check: the file chosen is the later version, and the earlier one is asked for.
-            # The same example against itself must compare clean AND say how many attestations it
-            # compared; with one name respelt, that attestation must be named as changed.
-            judgements = PLATO / 'schemas/examples/place-centric-judgements.json'
-            s = compare_case(page, judgements, judgements)
-            shown = page.inner_text('#summary') if s.get('phase') == 'done' else ''
-            check('version check: the example against itself has nothing deleted or changed, all ten attestations compared',
-                  s.get('phase') == 'done' and s['report']['errors'] == 0 and s['report']['counts'].get('unchanged') == 10 and 'Nothing was deleted or changed' in shown, s.get('report') or s)
-            d = json.loads(judgements.read_text()); d['spatialEntities'][1]['attestations'][0]['names'][0]['toponym'] = 'Newton, respelt'
-            edited = tmp / 'judgements-v2.json'; edited.write_text(json.dumps(d))
-            s = compare_case(page, edited, judgements)
-            # text_content, not inner_text: the address is an example, inside a closed <details>.
-            shown = page.text_content('#report') if s.get('phase') == 'done' else ''
-            changed = next((i for i in (s.get('report') or {}).get('items', []) if i['kind'] == 'attestation-changed'), None)
-            check('version check: a respelt name is reported as a changed attestation, by its address, as a breach of the append-only rule',
-                  s.get('phase') == 'done' and s['report']['errors'] == 1 and changed and changed['examples'] == ['https://whgazetteer.org/example/attestation/newton-a']
-                  and 'append-only rule' in shown and 'attestation/newton-a' in shown, s.get('report') or s)
-            check('version check: the page shows what changed in it, the old spelling and the new',
-                  'Only in the earlier version: plato:attests_name [plato:toponym "Neuton"]' in shown
-                  and 'Only in the later version: plato:attests_name [plato:toponym "Newton, respelt"]' in shown, shown[-600:])
+                ex = PLATO / 'schemas/tables/examples'
+                s = run_case(page, sorted((ex / 'customs').glob('*.csv')), 'check')
+                check('customs tables: detected as tables and checked with no problems', s.get('format') == 'tables' and s.get('phase') == 'done' and s['report']['errors'] == 0, s.get('report') or s)
+                s = run_case(page, sorted((ex / 'survey').glob('*.csv')), 'check')
+                errs = [i for i in (s.get('report') or {}).get('items', []) if i['severity'] == 'error']
+                check('survey tables: checked with no problems (a label-only type and an evidence-less place are valid PLATO)', s.get('phase') == 'done' and not errs and (s.get('report') or {}).get('counts', {}).get('places') == 3, errs or s)
+                s = run_case(page, sorted((ex / 'customs').glob('*.csv')), 'convert', 'plato-jsonl')
+                ok = s.get('phase') == 'done' and s.get('outputs')
+                out = download(page, s['outputs'][0]['name'], tmp / 'customs.jsonl') if ok else None
+                lines = out.read_text().strip().split('\n') if out else []
+                check('customs tables -> JSON Lines: saved, a header and two places', ok and len(lines) == 3 and json.loads(lines[0]).get('profile') == 'place-centric', s if not ok else len(lines))
+                s = run_case(page, [ROOT / 'test/fixtures/lpf-readme-example.json'], 'convert', 'plato-json')
+                ok = s.get('phase') == 'done' and s.get('outputs')
+                doc = json.loads(download(page, s['outputs'][0]['name'], tmp / 'abingdon.json').read_text()) if ok else {}
+                check('LPF README example -> PLATO JSON: one place, its losses reported', ok and len(doc.get('spatialEntities', [])) == 1 and any(i['kind'] == 'lpf-duration' for i in s['report']['items']), s if not ok else doc.keys())
+                # Recogito's web annotations: the confirmed links become attestations, and the link
+                # software suggested and nobody confirmed (Lechaeum) is reported, not converted.
+                s = run_case(page, [ROOT / 'test/fixtures/annotations/recogito-v1-constructed.jsonld'], 'convert', 'plato-json')
+                ok = s.get('phase') == 'done' and s.get('outputs')
+                doc = json.loads(download(page, s['outputs'][0]['name'], tmp / 'annotations.json').read_text()) if ok else {}
+                names = [n['toponym'] for p in doc.get('spatialEntities', []) for a in p['attestations'] for n in a.get('names', [])]
+                check('Recogito annotations -> PLATO JSON: linked places converted, the unconfirmed link reported',
+                      ok and s.get('format') == 'w3c-annotations' and 'Corinthus' in names and 'Lechaeum' not in names and any(i['kind'] == 'annotation-unverified' for i in s['report']['items']), s if not ok else names)
+                s = run_case(page, [PLATO / 'schemas/examples/place-centric-constantinople.json'], 'convert', 'ntriples')
+                ok = s.get('phase') == 'done' and s.get('outputs')
+                nt = download(page, s['outputs'][0]['name'], tmp / 'c.nt').read_text() if ok else ''
+                check('Constantinople JSON -> N-Triples: triples written and saved', ok and nt.count(' .\n') > 50 and 'attests_about' in nt, s if not ok else nt[:200])
+                # A source's denial (plato:negated) must never reach LPF as an assertion: Littleworth
+                # had no market, so its feature must carry no market, and the page must say why.
+                s = run_case(page, [PLATO / 'schemas/examples/place-centric-judgements.json'], 'convert', 'lpf')
+                ok = s.get('phase') == 'done' and s.get('outputs')
+                fc = json.loads(download(page, s['outputs'][0]['name'], tmp / 'judgements.geojson').read_text()) if ok else {}
+                lw = next((f for f in fc.get('features', []) if f.get('@id', '').endswith('/littleworth')), None)
+                # Kingsbury's markets are asserted, with a source stance (reported, doubted), so they are rightly
+                # written: the search for the denied market leaves them out, and they are the control that it can see one.
+                kb = next((f for f in fc.get('features', []) if f.get('@id', '').endswith('/kingsbury')), None)
+                facets = json.dumps([[f.get(k) for k in ('names', 'types', 'relations', 'geometry', 'descriptions', 'links')] for f in fc.get('features', []) if f is not kb])
+                shown = page.inner_text('#report') if ok else ''
+                check('a denial -> LPF: the place is written, the denied market is not, and the page says so',
+                      ok and lw is not None and 'types' not in lw and '"market"' not in facets and len(fc['features']) == 6
+                      and kb is not None and [x.get('label') for x in kb.get('types', [])] == ['market', 'market']
+                      and any(i['kind'] == 'denial' for i in s['report']['items']) and 'would assert what its source denies' in shown, s.get('report') or s)
+                bad = tmp / 'bad.nt'; bad.write_text('<https://x.org/a> <https://w3id.org/plato#notes> "fine" .\n<https://x.org/a> <https://w3id.org/plato#notes "broken .\n')
+                s = run_case(page, [bad], 'check')
+                check('broken N-Triples: the bad line is reported by number', s.get('phase') == 'done' and any(i['kind'] == 'rdf-syntax' and 'line 2' in ' '.join(i['examples']) for i in s['report']['items']), s.get('report') or s)
+                nul = tmp / 'null-coordinate.json'
+                nul.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': 'https://example.org/g', 'title': 't'}, 'spatialEntities': [
+                    {'@id': 'https://example.org/p/1', 'label': 'Ranny', 'attestations': [{'geometries': [{'reprPoint': [130.6, None]}], 'sources': [{'title': 's'}]}]}]}))
+                s = run_case(page, [nul], 'check')
+                check('a null coordinate: the check finishes and reports it (it used to stop the check)', s.get('phase') == 'done' and any(i['kind'] == 'null-value' for i in (s.get('report') or {}).get('items', [])), s.get('report') or s)
+                cut = tmp / 'cut-short.json'
+                cut.write_text((PLATO / 'schemas/examples/place-centric-constantinople.json').read_text()[:1500])
+                s = run_case(page, [cut], 'check')
+                shown = page.inner_text('#summary') if s.get('phase') == 'done' else ''
+                check('a JSON file cut short: reported as a problem in the report, not "Something went wrong"', s.get('phase') == 'done' and any(i['kind'] == 'unreadable' for i in (s.get('report') or {}).get('items', [])) and 'Something went wrong' not in shown, s.get('report') or s)
+                png = tmp / 'picture.png'; png.write_bytes(b'\x89PNG\r\n\x1a\n' + b'\0' * 64)
+                s = run_case(page, [png], 'check')
+                check('an image is not mistaken for data', s.get('phase') == 'unrecognised', s)
+                # The version check: the file chosen is the later version, and the earlier one is asked for.
+                # The same example against itself must compare clean AND say how many attestations it
+                # compared; with one name respelt, that attestation must be named as changed.
+                judgements = PLATO / 'schemas/examples/place-centric-judgements.json'
+                s = compare_case(page, judgements, judgements)
+                shown = page.inner_text('#summary') if s.get('phase') == 'done' else ''
+                check('version check: the example against itself has nothing deleted or changed, all ten attestations compared',
+                      s.get('phase') == 'done' and s['report']['errors'] == 0 and s['report']['counts'].get('unchanged') == 10 and 'Nothing was deleted or changed' in shown, s.get('report') or s)
+                d = json.loads(judgements.read_text()); d['spatialEntities'][1]['attestations'][0]['names'][0]['toponym'] = 'Newton, respelt'
+                edited = tmp / 'judgements-v2.json'; edited.write_text(json.dumps(d))
+                s = compare_case(page, edited, judgements)
+                # text_content, not inner_text: the address is an example, inside a closed <details>.
+                shown = page.text_content('#report') if s.get('phase') == 'done' else ''
+                changed = next((i for i in (s.get('report') or {}).get('items', []) if i['kind'] == 'attestation-changed'), None)
+                check('version check: a respelt name is reported as a changed attestation, by its address, as a breach of the append-only rule',
+                      s.get('phase') == 'done' and s['report']['errors'] == 1 and changed and changed['examples'] == ['https://whgazetteer.org/example/attestation/newton-a']
+                      and 'append-only rule' in shown and 'attestation/newton-a' in shown, s.get('report') or s)
+                check('version check: the page shows what changed in it, the old spelling and the new',
+                      'Only in the earlier version: plato:attests_name [plato:toponym "Neuton"]' in shown
+                      and 'Only in the later version: plato:attests_name [plato:toponym "Newton, respelt"]' in shown, shown[-600:])
             ctx.close()
             chora_checks(pw, url, tmp)
     finally:
@@ -186,6 +189,9 @@ def main():
         # The profile and the saved outputs are this run's alone: remove them (they were left in
         # /tmp by every run until now, some 2.7 MB each).
         shutil.rmtree(tmp, ignore_errors=True)
+    report()
+
+def report():
     failed = [r for r in results if not r[1]]
     if PROVE:
         print('PROVE-IT-FAILS:', 'every check failed, as it must' if len(failed) == len(results) else f'{len(results) - len(failed)} check(s) passed against a page with no tools: they cannot fail')
@@ -202,6 +208,12 @@ import csv, re, unicodedata
 from urllib.parse import urlparse
 GL = [] if '--no-gl-flags' in sys.argv else ['--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader']
 NOTOOLS = 'data:text/html,<title>no tools here</title><input id=picker type=file multiple>'
+import zlib, struct
+def _png(w=256, h=256, rgb=(200, 180, 140)):
+    raw = b''.join(b'\x00' + bytes(rgb) * w for _ in range(h))
+    chunk = lambda t, d: struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
+    return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
+PNG = _png()
 EX = PLATO / 'schemas/examples'
 T = (lambda s: min(s, 6)) if PROVE else (lambda s: s)   # against the page with no tools every wait fails: sooner
 
@@ -214,11 +226,23 @@ def attempt(name, fn):
 DIAG = '''() => { const m = window.__chora_map; return { hidden: document.hidden, phase: window.__chora?.phase, mapReadyCount: window.__chora?.mapReadyCount,
   styleLoaded: m ? m.isStyleLoaded() : null, loaded: m ? m.loaded() : null, says: document.getElementById('phase')?.textContent || document.title }; }'''
 
+# A predicate given to Playwright as an expression is evaluated in the page from a string, which
+# Chora's Content Security Policy forbids (as it should: no 'unsafe-eval'); a function is called as it
+# is. So an expression is made a function here.
+FUNCTION = re.compile(r'^\s*(async\s+)?(\(|[A-Za-z_$][\w$]*\s*=>|function\b)')
+def as_function(js): return js if FUNCTION.match(js) else f'() => ({js})'
+
+CSP_JS = """() => { const m = document.querySelector('meta[http-equiv="Content-Security-Policy"]');
+  return { first: !!m && document.head.firstElementChild === m, policy: m ? m.getAttribute('content') : null, published: window.__choraCsp || null,
+           canary: window.__chora?.canary, why: window.__chora?.canaryWhy || null, directive: window.__chora?.canaryDirective || null }; }"""
+def directives(policy):
+    return {d.strip().split(' ', 1)[0]: (d.strip().split(' ', 1) + [''])[1] for d in (policy or '').split(';') if d.strip()}
+
 def until(page, js, timeout=60, arg=None):
     """Wait for `js` to hold; a timeout says what the page was doing (a hidden tab never draws a map, and
     looks exactly like a map that cannot), in the words the page itself shows."""
     t0 = time.time()
-    try: page.wait_for_function(js, arg=arg, timeout=T(timeout) * 1000)
+    try: page.wait_for_function(as_function(js), arg=arg, timeout=T(timeout) * 1000)
     except Exception as e:
         try: d = page.evaluate(DIAG)
         except Exception as e2: d = str(e2).split('\n')[0][:100]
@@ -330,6 +354,29 @@ def chora_checks(pw, url, tmp):
         # The absence means something only beside the presence: the basemap and PLATO's files were fetched, from here.
         return not foreign(since) and any('/basemap/' in u for u in mine) and any('/plato/' in u for u in mine), {'foreign': foreign(since), 'same-origin requests': len(mine)}
     attempt('Chora: a default load asks nothing of any other site (and did fetch the basemap and PLATO files from this one)', nothing_leaves)
+
+    # The hard block: the page's Content Security Policy, written by the first script in its <head>.
+    def csp_first():
+        chora_boot(page, base)
+        until(page, '() => window.__chora.canary !== "pending"', 15)
+        c = page.evaluate(CSP_JS); pol = directives(c['policy'])
+        return (c['first'] and pol.get('connect-src') == "'self' data: blob:" and pol.get('worker-src') == "'self' blob:" and pol.get('default-src') == "'self'"
+                and c['published'] and c['published']['origins'] == [] and c['canary'] == 'enforced' and c['directive'] == 'connect-src'), c
+    attempt('Chora: first in its <head> is a Content Security Policy that lets it reach this site alone, and the canary finds it enforced in a blob: worker', csp_first)
+    def canary_can_fail():
+        # The same page served without the script that writes the policy: the canary must say that the
+        # policy is NOT enforced. (Otherwise "enforced" above might be what it says whatever happens.)
+        def strip(route):
+            r = route.fetch()
+            route.fulfill(response=r, body=re.sub(r"<script>\s*// Chora's hard block.*?</script>", '', r.text(), flags=re.S))
+        page.route('**/chora.html', strip)
+        try:
+            chora_boot(page, base)
+            until(page, '() => window.__chora.canary !== "pending"', 15)
+            c = page.evaluate(CSP_JS)
+        finally: page.unroute('**/chora.html', strip)
+        return c['policy'] is None and not c['published'] and c['canary'] == 'not-enforced', c
+    attempt('Chora: without its policy script, the same page\'s canary reports the policy NOT enforced', canary_can_fail)
 
     def guard():
         before = chora_boot(page, base)['blocked']; since = len(requests)
@@ -710,11 +757,24 @@ def chora_checks(pw, url, tmp):
     # After that check, since it asks another site (stopped here, by the route) for a style.
     STYLES = 'https://styles.example.org'
     GOOD = json.dumps({'version': 8, 'name': 'Probe style', 'sources': {}, 'layers': [{'id': 'probe-bg', 'type': 'background', 'paint': {'background-color': '#f4efe4'}}]})
-    ctx.route(STYLES + '/**', lambda route: route.fulfill(status=200, content_type='application/json', body=GOOD) if route.request.url.endswith('/good.json') else route.fulfill(status=404, body='not here'))
+    TILES2 = 'https://tiles2.example.org'
+    MULTI = json.dumps({'version': 8, 'name': 'Probe multi', 'sources': {'t': {'type': 'raster', 'tiles': [TILES2 + '/{z}/{x}/{y}.png'], 'tileSize': 256}},
+                        'layers': [{'id': 'probe-bg', 'type': 'background', 'paint': {'background-color': '#f4efe4'}}, {'id': 't', 'type': 'raster', 'source': 't'}]})
+    STYLE_BODIES = {'/good.json': GOOD, '/multi.json': MULTI}
+    def style_route(route):
+        body = STYLE_BODIES.get(urlparse(route.request.url).path)
+        route.fulfill(status=200, content_type='application/json', body=body) if body else route.fulfill(status=404, body='not here')
+    ctx.route(STYLES + '/**', style_route)
+    tile_hits = []
+    ctx.route(TILES2 + '/**', lambda route: (tile_hits.append(route.request.url), route.fulfill(status=200, content_type='image/png', body=PNG)))
+    def agree_and_reload(p):
+        """Agree in the notice shown: the page reloads, once, to put the sites in its policy; wait for it to be back."""
+        with p.expect_navigation(timeout=T(30) * 1000): p.click('#consent-yes')
+        until(p, '() => window.__chora && window.__chora.mapReadyCount >= 1 && !["loading", "opening", "reloading"].includes(window.__chora.phase)', 60)
     def use_pasted(address):
         page.evaluate("() => { document.getElementById('basemaps').open = true; }")
         page.fill('#paste', address); page.click('#paste-form button[type=submit]')
-        if page.is_visible('#consent-yes'): page.click('#consent-yes')
+        if soon(page, '() => !!document.getElementById("consent-yes")', 5): agree_and_reload(page)
     def bad_style():
         chora_boot(page, base); since = len(requests)
         # The control: a style that loads is kept.
@@ -728,6 +788,44 @@ def chora_checks(pw, url, tmp):
         return (kept_good and asked and back and drew and 'Natural Earth' in text and 'could not be loaded' in text and s['basemapError'] in text), {
             'the good style kept': kept_good, 'asked for the missing one': asked, 'state': {k: s.get(k) for k in ('basemap', 'basemapError')}, 'said': text[:300]}
     attempt('Chora: a basemap whose style cannot be loaded gives way to Natural Earth, and the page says why (a style that loads is kept)', bad_style)
+
+    OFM = 'https://tiles.openfreemap.org'; ofm_asked = []
+    OFM_STYLE = json.dumps({'version': 8, 'name': 'Probe OFM', 'sources': {}, 'layers': [{'id': 'probe-bg', 'type': 'background', 'paint': {'background-color': '#e4efe4'}}]})
+    ctx.route(OFM + '/**', lambda route: (ofm_asked.append(route.request.url), route.fulfill(status=200, content_type='application/json', body=OFM_STYLE)))
+    def builtin_basemap():
+        chora_boot(page, base)
+        page.evaluate("() => { document.getElementById('basemaps').open = true; }")
+        page.click('input[name=basemap][value="ofm-liberty"]')
+        notice = page.inner_text('#consent-text') if soon(page, '() => !!document.getElementById("consent-text")', 5) else ''
+        before = len(ofm_asked)                                  # nothing is asked of the provider before the user agrees
+        agree_and_reload(page)
+        kept = soon(page, '() => window.__chora_map.getStyle()?.name === "Probe OFM"', 20)
+        c = page.evaluate(CSP_JS); s = cstate(page)
+        page.evaluate("() => localStorage.setItem('chora-basemap', JSON.stringify('natural-earth'))")   # the checks after this start on Natural Earth
+        return (OFM in notice and before == 0 and kept and len(ofm_asked) > 0 and OFM in c['published']['origins'] and OFM in directives(c['policy']).get('connect-src', '')
+                and s['basemap'] == 'ofm-liberty'), {'notice': notice, 'asked before agreeing': before, 'asked after': len(ofm_asked), 'kept': kept, 'policy': c['policy'], 'basemap': s['basemap']}
+    attempt('Chora: OpenFreeMap, agreed to, is put in the page\'s policy by one reload and used; nothing is asked of it before', builtin_basemap)
+    def multi_origin():
+        # A pasted style whose tiles are on another site: the style's site was agreed to (the check
+        # before), and the tiles' site is asked about by name before any tile is asked for. The reload
+        # that follows keeps the dataset, the place and the drawing not yet saved.
+        f = fixture(ant, 'antonine-multi.json', tmp); chora_boot(page, base, [f]); pid = chora_pick(page, 'londinium')
+        x, y = map_centre(page); draw(page, 'point', [(x + 50, y + 30)]); page.click('#draw-tools button[data-mode="static"]')
+        until(page, '() => window.__chora.pendingCount === 1', 10)
+        navs = []; page.on('framenavigated', lambda fr: navs.append(fr.url) if fr == page.main_frame else None)
+        page.evaluate("() => { document.getElementById('basemaps').open = true; }")
+        page.fill('#paste', STYLES + '/multi.json'); page.click('#paste-form button[type=submit]')
+        notice = page.inner_text('#consent-text') if soon(page, '() => !!document.getElementById("consent-text")', 10) else ''
+        before = len(tile_hits)
+        agree_and_reload(page)
+        until(page, '() => !!window.__chora.resumed && window.__chora.phase === "place"', 60)
+        drew = soon(page, '() => window.__chora_map.getStyle()?.name === "Probe multi"', 20) and soon(page, '() => window.__chora_map.isSourceLoaded("t")', 20)
+        s = cstate(page); c = page.evaluate(CSP_JS)
+        page.evaluate("() => localStorage.setItem('chora-basemap', JSON.stringify('natural-earth'))")
+        return (TILES2 in notice and STYLES not in notice and before == 0 and drew and len(tile_hits) > 0 and TILES2 in c['published']['origins']
+                and len(navs) == 1 and s['resumed']['files'] == [f.name] and s['placeId'] == pid and s['pendingCount'] == 1 and s['blocked'] == 0), {
+            'notice': notice, 'tiles before agreeing': before, 'tiles after': len(tile_hits), 'drew': drew, 'navigations': navs, 'state': {k: s.get(k) for k in ('resumed', 'placeId', 'pendingCount', 'blocked', 'blockedOrigins')}}
+    attempt('Chora: a pasted style with tiles on another site asks about that site by name, then one reload keeps the dataset, place and drawing, and the tiles load', multi_origin)
     ctx.close()
 
 main()

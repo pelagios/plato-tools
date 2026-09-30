@@ -1,10 +1,13 @@
 import { defineConfig } from 'vite';
 import { fileURLToPath } from 'node:url';
+import { choraCspPlugin } from './scripts/vite-chora-csp.mjs';
 
 // The OPFS "SAHPool" storage mode of SQLite needs no cross-origin isolation headers,
 // which GitHub Pages cannot send, so no server headers are configured here.
 export default defineConfig({
   base: './',
+  // Chora's hard block: its Content Security Policy, written by the first script in chora.html's <head>.
+  plugins: [choraCspPlugin()],
   optimizeDeps: { exclude: ['@sqlite.org/sqlite-wasm'] },
   worker: { format: 'es' },
   build: {

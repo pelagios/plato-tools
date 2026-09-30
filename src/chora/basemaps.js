@@ -77,9 +77,14 @@ export const choose = (b) => put('chora-basemap', b.id);
 export const consented = (origin) => get('chora-basemap-consent', []).includes(origin);
 export const consent = (origin) => put('chora-basemap-consent', [...new Set([...get('chora-basemap-consent', []), origin])]);
 
-/** The notice shown before a basemap from another site is first used. */
-export function notice(b) {
-  return `${b.name} is served by ${originOf(b)}. Using it, the map asks that site for the part of the world you are looking at, so the provider sees where you look (and your address on the internet, as any website does). It sees nothing of your data, which stays in this tab.`;
+/**
+ * The notice shown before a basemap's sites are first used: `origins` are the sites it needs that have
+ * not been agreed to (by default, the one its address is on).
+ */
+export function notice(b, origins = [originOf(b)]) {
+  const sites = origins.length === 1 ? `${origins[0]}` : `${origins.slice(0, -1).join(', ')} and ${origins[origins.length - 1]}`;
+  const what = origins.length === 1 ? 'that site' : 'those sites';
+  return `${b.name} is served by ${sites}. Using it, the map asks ${what} for the part of the world you are looking at, so the provider sees where you look (and your address on the internet, as any website does). It sees nothing of your data, which stays in this tab.`;
 }
 
 // A style's addresses, made absolute against the style's own address. Natural Earth's style writes
@@ -107,24 +112,53 @@ export function resolveStyle(style, base) {
 }
 
 /**
- * The style to give MapLibre for a basemap. Natural Earth's is fetched here, from this site, and its
- * addresses made absolute; a raster basemap is wrapped in a style of one layer, so that nothing but
- * its tiles is asked of the provider; another style is given by its address,
- * for MapLibre to fetch (through map.js's guard).
+ * The style to give MapLibre for a basemap, as an object. Natural Earth's is fetched from this site;
+ * another style is fetched from its provider (whose site must be in the page's policy by then), so
+ * that every site it names is known (styleOrigins) before MapLibre asks any of them for anything. Its
+ * addresses are made absolute against its own. A raster basemap is wrapped in a style of one layer, so
+ * that nothing but its tiles is asked of the provider. Throws, in words, when the style cannot be read.
  */
 export async function styleFor(b) {
-  if (b.local) {
-    const url = new URL(b.url, location.href).href;
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`The Natural Earth basemap could not be read (${r.status})`);
-    return resolveStyle(await r.json(), url);
-  }
-  if (b.kind === 'raster') {
+  if (b.kind === 'raster' && !b.local) {
     return {
       version: 8,
       sources: { basemap: { type: 'raster', tiles: [b.tiles], tileSize: 256, maxzoom: b.maxzoom || 19, attribution: b.attribution || '' } },
       layers: [{ id: 'basemap', type: 'raster', source: 'basemap' }],
     };
   }
-  return b.url;
+  const url = new URL(b.url, location.href).href;
+  let r;
+  try { r = await fetch(url, { credentials: 'omit' }); } catch (e) { throw new Error(b.local ? `The Natural Earth basemap could not be read (${e.message})` : `it could not be fetched (${e.message})`); }
+  if (!r.ok) throw new Error(b.local ? `The Natural Earth basemap could not be read (${r.status})` : `the address answered ${r.status}`);
+  let style;
+  try { style = await r.json(); } catch { throw new Error(b.local ? 'The Natural Earth basemap is not a style' : 'it is not a map style'); }
+  if (!style || typeof style !== 'object' || style.version !== 8 || !Array.isArray(style.layers)) throw new Error(b.local ? 'The Natural Earth basemap is not a style' : 'it is not a map style (version 8)');
+  return resolveStyle(style, url);
+}
+
+const originOfUrl = (u) => { try { const o = new URL(String(u).replace(/[{}]/g, '_')).origin; return o === 'null' ? null : o; } catch { return null; } };
+/**
+ * Every site a style (as styleFor gives it, its addresses absolute) will send requests to: its
+ * sources' addresses and tiles, its glyphs and its sprites. A source given by a TileJSON address
+ * (`url`) may have its tiles on yet another site: `tileJson(url)` is asked for that document, and its
+ * tiles' sites are added (when it cannot be read, MapLibre will not get further either). Addresses on
+ * this site, data: and blob: are not counted. Sorted, each once.
+ */
+export async function styleOrigins(style, { tileJson } = {}) {
+  const found = new Set();
+  const add = (u) => { if (typeof u === 'string' && /^https?:/i.test(u)) { const o = originOfUrl(u); if (o && o !== location.origin) found.add(o); } };
+  for (const src of Object.values(style?.sources || {})) {
+    if (typeof src.data === 'string') add(src.data);
+    if (Array.isArray(src.tiles)) src.tiles.forEach(add);
+    if (typeof src.url === 'string') {
+      add(src.url);
+      if (tileJson && /^https?:/i.test(src.url)) {
+        try { const tj = await tileJson(src.url); if (Array.isArray(tj?.tiles)) tj.tiles.forEach(add); } catch {}
+      }
+    }
+  }
+  add(style?.glyphs);
+  if (typeof style?.sprite === 'string') add(style.sprite);
+  else if (Array.isArray(style?.sprite)) style.sprite.forEach((x) => add(x?.url));
+  return [...found].sort();
 }

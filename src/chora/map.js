@@ -2,18 +2,22 @@
 // the status of each attestation, and Terra Draw for drawing new ones.
 //
 // The guard. Every request MapLibre makes goes through transformRequest, which refuses any address
-// not on this site or on the site of the basemap the user has agreed to. A Content Security Policy
-// would do this better, but a policy in a <meta> tag cannot be widened once the page is running, and
-// a pasted basemap may be on any site; so it is done here, and each refusal is counted
-// (window.__chora.blocked) and named (blockedOrigins), for the page and its tests.
+// not on this site or on the sites of the basemap the user has agreed to, and counts each refusal
+// (window.__chora.blocked) and names it (blockedOrigins), for the page and its tests. Beneath it is
+// the hard block, the page's Content Security Policy (src/chora/csp-head.js), which the browser
+// enforces on every request of the page and of its workers, redirects included; this guard is what
+// counts, names and explains.
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 // MapLibre's own worker, bundled by Vite with what it imports, and served from this site.
 import mapWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { TerraDraw, TerraDrawPointMode, TerraDrawLineStringMode, TerraDrawPolygonMode, TerraDrawSelectMode } from 'terra-draw';
 import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter';
+import { blobWorkerUrl } from './csp.js';
 
-maplibregl.setWorkerUrl(mapWorkerUrl);
+// Started from a blob: that imports it, so that the worker is under the page's Content Security Policy
+// (a worker started from its own address takes the policy of its own response, which has none).
+maplibregl.setWorkerUrl(blobWorkerUrl(mapWorkerUrl));
 
 // Colours of the statuses, the same in the card (styles.css) and on the map.
 export const STATUS_COLOURS = { asserted: '#2757dd', reported: '#7a4fc9', tentative: '#b7791f', doubted: '#6b7280', denied: '#c0392b' };

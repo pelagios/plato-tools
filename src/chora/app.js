@@ -9,10 +9,11 @@ import { createMap, placeFeatures, contextFeatures, STATUS_COLOURS } from './map
 import * as basemaps from './basemaps.js';
 import * as contributors from './contributor.js';
 import { fingerprint, loadDrafts, saveDrafts } from './drafts.js';
-import { take as takeHandoff } from './handoff.js';
+import { take as takeHandoff, keepForReload, takeResume } from './handoff.js';
+import { canary, inPolicy } from './csp.js';
 
 const $ = (id) => document.getElementById(id);
-const state = (window.__chora = { phase: 'loading', placeId: null, pendingCount: 0, basemap: null, mapReadyCount: 0, blocked: 0, lastSave: null });
+const state = (window.__chora = { phase: 'loading', placeId: null, pendingCount: 0, basemap: null, mapReadyCount: 0, blocked: 0, lastSave: null, canary: 'pending', reloads: 0 });
 const PAGE = 50;
 let showing = false;   // true while the drawings shown are being replaced
 let worker, files = [], fp = null, dataset = null, drafts = [], view = null, offset = 0, total = 0, query = '';
@@ -383,34 +384,47 @@ async function save(name) {
 window.__chora_save = save;
 
 // ---- Basemaps ------------------------------------------------------------------------------------
-let asking = null;   // a basemap waiting for the user to agree to its provider
+// A basemap from another site is used only once the user has agreed to every site it needs (the one
+// its address is on, then any other its style names), and only once those sites are in the page's
+// Content Security Policy, which is written at load (src/chora/csp-head.js): so agreeing to a site
+// the policy does not have reloads the page, once, with the dataset, the place and the view kept.
+let asking = null;   // {b, origins}: a basemap waiting for the user to agree to these sites
 let basemapError = null;   // why the basemap chosen could not be used
 function renderBasemaps() {
-  const cur = basemaps.current();
+  const cur = basemaps.byId(state.basemap) || basemaps.current();
   $('basemap-name').textContent = cur.name;
   const groups = new Map();
   for (const b of basemaps.all()) { if (!groups.has(b.group)) groups.set(b.group, []); groups.get(b.group).push(b); }
   $('basemap-options').innerHTML = (basemapError ? `<p class="warn" role="status">${esc(basemapError)}</p>` : '') + [...groups].map(([g, bs]) => `<fieldset><legend>${esc(g)}</legend>${bs.map((b) => `<label class="${b.disabled ? 'disabled' : ''}">
-      <input type="radio" name="basemap" value="${esc(b.id)}"${b.id === (asking || cur).id ? ' checked' : ''}${b.disabled ? ' disabled' : ''}> ${esc(b.name)}${b.disabled ? ` <small>(${esc(b.disabled)})</small>` : ''}
+      <input type="radio" name="basemap" value="${esc(b.id)}"${b.id === (asking?.b || cur).id ? ' checked' : ''}${b.disabled ? ' disabled' : ''}> ${esc(b.name)}${b.disabled ? ` <small>(${esc(b.disabled)})</small>` : ''}
       ${b.group === 'Pasted' ? ` <button type="button" class="link" data-unpaste="${esc(b.id)}">remove</button>` : ''}</label>`).join('')}</fieldset>`).join('')
-    + (asking ? `<div class="consent" role="alertdialog" aria-labelledby="consent-text"><p id="consent-text">${esc(basemaps.notice(asking))}</p>
-      <p><button type="button" class="primary" id="consent-yes">Use ${esc(asking.name)}</button> <button type="button" id="consent-no">Keep the current map</button></p></div>` : '')
+    + (asking ? `<div class="consent" role="alertdialog" aria-labelledby="consent-text"><p id="consent-text">${esc(basemaps.notice(asking.b, asking.origins))}</p>
+      ${asking.origins.some((o) => !inPolicy(o)) ? '<p class="muted">The page will reload once to let the map reach them; your drawings and the dataset open are kept.</p>' : ''}
+      <p><button type="button" class="primary" id="consent-yes">Use ${esc(asking.b.name)}</button> <button type="button" id="consent-no">Keep the current map</button></p></div>` : '')
     + `<form id="paste-form"><label for="paste">Paste a style address or a tile template</label>
       <input id="paste" type="url" placeholder="https://…/style.json or https://…/{z}/{x}/{y}.png" autocomplete="off">
       <small>Kept in this browser only, key and all, and sent to nowhere but that provider.</small>
       <button type="submit">Add</button> <span id="paste-error" class="warn"></span></form>`
     + (state.blocked ? `<p class="muted">Refused ${n(state.blocked)} request${state.blocked === 1 ? '' : 's'} to ${esc(state.blockedOrigins.join(', '))}, not the basemap's site.</p>` : '');
 }
+/** Use `b` if every site it needs has been agreed to; else ask, naming the sites not yet agreed to. */
+function chooseBasemap(b) {
+  if (b.local) return useBasemap(b);
+  const primary = basemaps.originOf(b);
+  if (!basemaps.consented(primary)) { asking = { b, origins: [primary] }; renderBasemaps(); return; }
+  useBasemap(b);
+}
 $('basemap-options').addEventListener('change', (e) => {
   if (e.target.name !== 'basemap') return;
   const b = basemaps.byId(e.target.value);
-  if (!b || b.disabled) return;
-  if (!b.local && !basemaps.consented(basemaps.originOf(b))) { asking = b; renderBasemaps(); return; }
-  useBasemap(b);
+  if (b && !b.disabled) chooseBasemap(b);
 });
 $('basemap-options').addEventListener('click', (e) => {
-  if (e.target.id === 'consent-yes') { basemaps.consent(basemaps.originOf(asking)); const b = asking; asking = null; useBasemap(b); }
-  else if (e.target.id === 'consent-no') { asking = null; renderBasemaps(); }
+  if (e.target.id === 'consent-yes') {
+    const { b, origins } = asking; asking = null;
+    for (const o of origins) basemaps.consent(o);
+    useBasemap(b);
+  } else if (e.target.id === 'consent-no') { asking = null; renderBasemaps(); }
   else if (e.target.dataset.unpaste) {
     const id = e.target.dataset.unpaste;
     basemaps.removePasted(id);
@@ -422,16 +436,57 @@ $('basemap-options').addEventListener('submit', (e) => {
   const b = basemaps.fromPaste($('paste').value);
   if (!b) { $('paste-error').textContent = 'That is not an https address.'; return; }
   basemaps.addPasted(b);
-  asking = basemaps.consented(basemaps.originOf(b)) ? null : b;
-  if (asking) renderBasemaps(); else useBasemap(b);
+  chooseBasemap(b);
 });
+// A TileJSON document, fetched only from a site the page may already reach (any other is asked about first).
+const tileJson = async (u) => (inPolicy(new URL(u).origin) ? (await fetch(u, { credentials: 'omit' })).json() : null);
 async function useBasemap(b) {
   if (!b.local) basemapError = state.basemapError = null;
+  const primary = b.local ? null : basemaps.originOf(b);
+  // The style itself is on the basemap's own site: reachable once agreed to, from the next load.
+  if (primary && !inPolicy(primary)) { basemaps.choose(b); return reloadFor([primary]); }
+  let style;
+  try { style = await basemaps.styleFor(b); } catch (e) {
+    if (b.local) { console.warn(e); return; }
+    return styleFailed(e.message, b);
+  }
+  const origins = b.local ? [] : [...new Set([primary, ...await basemaps.styleOrigins(style, { tileJson })])];
+  const missing = origins.filter((o) => !basemaps.consented(o));
+  if (missing.length) {
+    // The style names sites not yet agreed to: asked about, with Natural Earth shown meanwhile.
+    asking = { b, origins: missing };
+    $('basemaps').open = true;
+    if (!state.basemap) await useBasemap(basemaps.byId('natural-earth')); else renderBasemaps();
+    return;
+  }
   basemaps.choose(b);
-  mapApi.allow([basemaps.originOf(b)]);
-  state.basemap = b.id;
-  try { mapApi.setStyle(await basemaps.styleFor(b)); } catch (e) { console.warn(e); }
+  if (origins.some((o) => !inPolicy(o))) return reloadFor(origins.filter((o) => !inPolicy(o)));
+  mapApi.allow(origins);
+  state.basemap = b.id; state.basemapOrigins = origins;
+  mapApi.setStyle(style);
   renderBasemaps();
+}
+
+// The page's policy cannot be widened while it runs: a site agreed to is reachable from the next
+// load. What the user was doing is kept for it (the files open, the place, the view, and what was
+// being added), and the page reloads once.
+async function reloadFor(origins, pending = null) {
+  if (state.phase === 'reloading') return;
+  // Never a loop: sites the last reload was for, still not in the policy after it (one that is not a
+  // plain web address, say), are reported, not reloaded for again.
+  const key = [...new Set(origins)].sort().join(' ');
+  let last = null;
+  try { last = JSON.parse(sessionStorage.getItem('chora-reloaded-for')); } catch {}
+  if (last && last.key === key && Date.now() - last.at < 60000) {
+    basemapError = state.basemapError = `The page could not be given leave to reach ${key}, so it was not used.`;
+    state.reloadRefused = key; renderBasemaps();
+    return;
+  }
+  try { sessionStorage.setItem('chora-reloaded-for', JSON.stringify({ key, at: Date.now() })); } catch {}
+  state.phase = 'reloading';
+  const m = mapApi.map;
+  await keepForReload({ files, placeId: state.placeId, camera: { center: m.getCenter().toArray(), zoom: m.getZoom(), bearing: m.getBearing(), pitch: m.getPitch() }, pending });
+  location.reload();
 }
 
 // ---- The rest ------------------------------------------------------------------------------------
@@ -462,8 +517,7 @@ drop.ondragleave = () => drop.classList.remove('over');
 drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); open(e.dataTransfer.files); };
 
 // A basemap whose style cannot be loaded leaves no map to draw on: Natural Earth, from this site, instead.
-function styleFailed(why) {
-  const b = basemaps.byId(state.basemap);
+function styleFailed(why, b = basemaps.byId(state.basemap)) {
   if (!b || b.local) return;
   basemapError = state.basemapError = `${b.name} could not be loaded from ${basemaps.originOf(b)} (${why}), so the map is back on Natural Earth, from this site.`;
   $('basemaps').open = true;
@@ -483,8 +537,30 @@ mapApi.onDraw({
 // The map and the drawing tool, for automated tests; nothing else reads them.
 window.__chora_map = mapApi.map;
 Object.defineProperty(window, '__chora_draw', { get: () => mapApi.draw });
+// The proof that the policy is enforced in workers made from a blob:, as a historical map's are
+// (src/chora/csp.js): until it has come, and unless it holds, no historical map is admitted.
+// A reload that did put its sites in the policy is done with: a later one for the same sites (agreed
+// to again after being forgotten) is not a loop.
+try {
+  const last = JSON.parse(sessionStorage.getItem('chora-reloaded-for'));
+  if (last && last.key.split(' ').every(inPolicy)) sessionStorage.removeItem('chora-reloaded-for');
+} catch {}
+const canaryDone = canary().then((r) => { Object.assign(state, { canary: r.enforced ? 'enforced' : 'not-enforced', canaryWhy: r.why || null, canaryDirective: r.directive || null }); return r; });
+window.__chora_canary = canaryDone;
 useBasemap(basemaps.current());
 startWorker().then(async () => {
+  // Back from a reload for a site agreed to: the dataset, the place and the view as they were.
+  const resumed = await takeResume();
+  if (resumed) {
+    state.reloads++;
+    if (resumed.files?.length) {
+      await open(resumed.files);
+      if (resumed.placeId && dataset) await selectPlace(resumed.placeId);
+    }
+    if (resumed.camera) mapApi.map.jumpTo(resumed.camera);
+    state.resumed = { files: (resumed.files || []).map((f) => f.name), placeId: resumed.placeId || null, pending: resumed.pending || null };
+    return;
+  }
   // Files chosen on the main page, offered here.
   const handed = await takeHandoff();
   if (handed && !files.length) {
