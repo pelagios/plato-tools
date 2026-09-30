@@ -10,9 +10,18 @@
 import { run } from '../pipeline.js';
 import { collectWithdrawn, resolveWithdrawn } from '../../formats/shared.js';
 import { viewPlace, currentGeometries } from './view.js';
+import { unionBbox } from './geo.js';
 
 /** The key a place goes by in Chora: its @id, or its position in the dataset when it has none. */
 export const placeKey = (rec, n) => (rec && typeof rec['@id'] === 'string' ? rec['@id'] : `#${n}`);
+/**
+ * The key of each record in turn, by the one rule the store and the save both count by: every record
+ * counts towards the position, and one that is not a place (null, say) has no key.
+ */
+export function keyer() {
+  let n = 0;
+  return (rec) => { n++; return rec && typeof rec === 'object' && !Array.isArray(rec) ? placeKey(rec, n) : null; };
+}
 /** A label as the search box compares it: lower case, without accents (Ἑρμῆς finds ερμης, İstanbul finds istanbul). */
 export const fold = (s) => String(s ?? '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 /** How many places the overview map is given at most. */
@@ -37,21 +46,22 @@ export class ChoraStore {
     const db = this.db;
     const insP = db.prepare('INSERT INTO p(n,id,label,fold,ccodes,rel,rec) VALUES (?,?,?,?,?,?,?)');
     const insG = db.prepare('INSERT INTO g(n,att,w,s,e,nn,rx,ry) VALUES (?,?,?,?,?,?,?,?)');
-    const edges = new Map();
+    const edges = new Map(), keyOf = keyer();
     let n = 0, open = false, closed = false;
     const self = this;
     return {
       header(h) { self.header = h || {}; },
       event(ev) {
         // Identity matches are not shown on the map; everything reaches here as place-centric records.
-        if (ev.type !== 'record' || !ev.value || typeof ev.value !== 'object') return;
+        if (ev.type !== 'record') return;
+        const rec = ev.value, key = keyOf(rec);
+        if (key === null) return;
         if (!open) { db.exec('BEGIN'); open = true; }
-        const rec = ev.value;
         n++;
         collectWithdrawn(rec.attestations, edges);
         const related = [...new Set((rec.attestations || []).flatMap((a) => (a && Array.isArray(a.relations) ? a.relations : [])).map((r) => r && r.relatesTo).filter((x) => typeof x === 'string'))];
-        const label = typeof rec.label === 'string' ? rec.label : placeKey(rec, n);
-        insP.bind([n, placeKey(rec, n), label, fold(label), JSON.stringify(Array.isArray(rec.ccodes) ? rec.ccodes : []), JSON.stringify(related), JSON.stringify(rec)]).stepReset();
+        const label = typeof rec.label === 'string' ? rec.label : key;
+        insP.bind([n, key, label, fold(label), JSON.stringify(Array.isArray(rec.ccodes) ? rec.ccodes : []), JSON.stringify(related), JSON.stringify(rec)]).stepReset();
         // Withdrawn geometries are removed once the whole dataset is known; denied ones never enter.
         for (const g of currentGeometries(rec, null)) {
           if (!g.bbox) continue;
@@ -86,6 +96,17 @@ export class ChoraStore {
     const first = (col) => `(SELECT ${col} FROM g WHERE g.n=p.n AND g.rx IS NOT NULL ORDER BY g.rowid LIMIT 1)`;
     db.exec(`UPDATE p SET w=(SELECT MIN(w) FROM g WHERE g.n=p.n), s=(SELECT MIN(s) FROM g WHERE g.n=p.n),
       e=(SELECT MAX(e) FROM g WHERE g.n=p.n), nn=(SELECT MAX(nn) FROM g WHERE g.n=p.n), rx=${first('rx')}, ry=${first('ry')}`);
+    // A place across the antimeridian, by one geometry (west > east) or by several either side of it
+    // (a box wider than half the world): its boxes joined the short way round, not by MIN and MAX.
+    const across = [];
+    for (const q of this.rows('SELECT DISTINCT n FROM g WHERE w > e UNION SELECT n FROM p WHERE e - w > 180')) across.push(q.get(0));
+    const upd = db.prepare('UPDATE p SET w=?, s=?, e=?, nn=? WHERE n=?');
+    for (const n of across) {
+      const boxes = [];
+      for (const q of this.rows('SELECT w, s, e, nn FROM g WHERE n=? ORDER BY rowid', [n])) boxes.push([q.get(0), q.get(1), q.get(2), q.get(3)]);
+      upd.bind([...unionBbox(boxes), n]).stepReset();
+    }
+    upd.finalize();
     db.exec('COMMIT');
   }
 
@@ -146,7 +167,8 @@ export class ChoraStore {
       const kind = this.one('SELECT kind FROM wd WHERE id=?', [a['@id']]);
       if (kind) withdrawn.set(a['@id'], kind);
     }
-    return viewPlace(rec, { withdrawn, lookup: (other) => this.brief(other), ccodeBbox });
+    // Under the key it goes by here (placeKey), so that a place without an @id finds its drawings.
+    return { ...viewPlace(rec, { withdrawn, lookup: (other) => this.brief(other), ccodeBbox }), id };
   }
 
   close() { try { this.db.close(); } catch { /* closed already */ } }
@@ -169,6 +191,10 @@ export async function load(input, env, db, { name } = {}) {
   const withGeometry = store.one('SELECT COUNT(*) FROM p WHERE w IS NOT NULL');
   let bbox = null;
   if (withGeometry) for (const q of store.rows('SELECT MIN(w), MIN(s), MAX(e), MAX(nn) FROM p')) bbox = [q.get(0), q.get(1), q.get(2), q.get(3)];
+  // With a place across the antimeridian, MIN and MAX are no box at all: the places' boxes are joined.
+  if (withGeometry && store.one('SELECT 1 FROM p WHERE w > e LIMIT 1')) {
+    bbox = unionBbox((function* () { for (const q of store.rows('SELECT w, s, e, nn FROM p WHERE w IS NOT NULL ORDER BY n')) yield [q.get(0), q.get(1), q.get(2), q.get(3)]; })());
+  }
   store.loaded = {
     input: { format: input.format, profile: input.profile || null, name: name || input.name || input.files?.[0]?.name || null },
     header, places, bbox, withGeometry, withdrawn: store.one('SELECT COUNT(*) FROM wd'), report: r.report, incomplete: !!r.incomplete,

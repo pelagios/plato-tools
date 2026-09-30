@@ -1,9 +1,10 @@
 // Files chosen on the main page, handed to Chora's page: kept in this browser's IndexedDB under one
 // key, 'chora-handoff', as the File objects themselves (they can be stored as they are; the browser
 // keeps a reference to the file on disk, or a copy, and nothing leaves the computer). The main page
-// puts them there when the way to Chora is taken with files chosen; chora.html offers to open them,
-// and lets them go once opened, so that no copy lingers.
-const DB = 'plato-tools-chora', STORE = 'kv', KEY = 'chora-handoff';
+// puts them there when the way to Chora is taken with files chosen; chora.html takes them at once,
+// holding them in the page to offer, so that no copy lingers, and one left longer than a few minutes
+// ago (the way taken, and Chora's page closed before it started) is let go without an offer.
+const DB = 'plato-tools-chora', STORE = 'kv', KEY = 'chora-handoff', FRESH = 5 * 60 * 1000;
 
 function open() {
   return new Promise((resolve, reject) => {
@@ -30,7 +31,10 @@ export async function stash(files) {
 }
 /** Let the files go. */
 export async function clear() { try { await tx('readwrite', (s) => s.delete(KEY)); } catch {} }
-/** The files kept for Chora's page, or null. */
+/** The files kept for Chora's page, or null: taken, so that the browser keeps them no longer, if kept in the last few minutes. */
 export async function take() {
-  try { const v = await tx('readonly', (s) => s.get(KEY)); return v?.files?.length ? v.files : null; } catch { return null; }
+  let v;
+  try { v = await tx('readonly', (s) => s.get(KEY)); } catch { return null; }
+  await clear();
+  return v?.files?.length && Date.now() - (v.at || 0) < FRESH ? v.files : null;
 }

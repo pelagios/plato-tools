@@ -55,6 +55,20 @@ export function checkGeoJSON(geojson) {
   return { type: geojson.type, coordinates };
 }
 
+/**
+ * A geometry drawn on a copy of the world (MapLibre shows copies east and west of it, where longitudes
+ * run past 180) moved back onto the world by whole turns of 360 degrees, as one, so that its shape is
+ * kept: the middle of its extent comes to lie between -180 and 180. One drawn across the antimeridian
+ * still has a longitude beyond, which checkGeoJSON refuses.
+ */
+export function wrapLongitudes(geojson) {
+  const b = bboxOf(geojson, { plain: true });
+  const shift = b ? -360 * Math.round((b[0] + b[2]) / 2 / 360) : 0;
+  if (!shift) return geojson;
+  const move = (c) => (typeof c[0] === 'number' ? [c[0] + shift, ...c.slice(1)] : c.map(move));
+  return { ...geojson, coordinates: move(geojson.coordinates) };
+}
+
 /** A role by its short name (Extent), with the plato: prefix, or in full; throws for anything else. */
 export function roleIri(role) {
   if (role === undefined || role === null || role === '') return undefined;
@@ -91,8 +105,9 @@ function contributorOf(c) {
  */
 export function newGeometryAttestation({ geojson, role, precision, precisionKm, contributor, created, source, citation, notes } = {}) {
   const g = checkGeoJSON(geojson);
-  const geometry = { geojson: g, reprPoint: reprPointOf(g).map(round) };
-  if (g.type !== 'Point') geometry.bbox = bboxOf(g);
+  // A drawing is between -180 and 180 (wrapLongitudes, checkGeoJSON), so its extent is as drawn.
+  const geometry = { geojson: g, reprPoint: reprPointOf(g, { plain: true }).map(round) };
+  if (g.type !== 'Point') geometry.bbox = bboxOf(g, { plain: true });
   const r = roleIri(role);
   if (r) geometry.role = r;
   if (precision !== undefined && precision !== null && precision !== '') {

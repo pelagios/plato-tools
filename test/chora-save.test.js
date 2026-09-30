@@ -12,6 +12,7 @@ import { save, verify, savedName } from '../src/engine/chora/save.js';
 import { placeKey, load } from '../src/engine/chora/store.js';
 import { newGeometryAttestation } from '../src/engine/chora/draw.js';
 import { choraDrawingNote, choraSaveText } from '../src/engine/words.js';
+import { PLATO_REPO } from './paths.js';
 
 const JUDGEMENTS = 'test/fixtures/chora/place-centric-judgements.json';
 const SURVEY = 'test/fixtures/chora/attestation-centric-survey.json';
@@ -190,4 +191,90 @@ test("the keys Chora's store gives places are the keys a save finds them by: pla
     }
     store.close();
   }
+});
+
+// ---- The review of 30 September 2026: each test below failed before its fix. ----------------------
+const X = 'https://example.org/';
+const doc = (places, g = {}) => JSON.stringify({ profile: 'place-centric', gazetteer: { '@id': X + 'g', title: 'Test', ...g }, spatialEntities: places });
+const named = (label, extra = {}) => ({ ...extra, label, attestations: [{ names: [{ toponym: label }], sources: [{ title: 's' }] }] });
+
+test('a record that is not a place is counted by the one rule everywhere: a drawing reaches its own place, and none is made', async () => {
+  const files = () => textFile(doc([named('First'), null, named('Third')]), 'nulls.json');
+  const { store } = await storeKeys(files());
+  const third = store.search('third').items[0]?.id;
+  assert.ok(third, 'the store has Third');
+  for (const options of [{}, { hasPlace: (k) => store.has(k) }]) {
+    const r = await saved(files(), [{ placeId: third, attestation: drawing(1, 1) }], options);
+    const out = JSON.parse(r.text).spatialEntities;
+    assert.equal(out.find((p) => p && p.label === 'Third')?.attestations.length, 2, 'the drawing is on Third');
+    assert.ok(out.every((p) => p === null || typeof p.label === 'string'), `no place without a label was made: ${JSON.stringify(out)}`);
+    assert.equal(r.mneme.passed, true, r.mneme.reasons.join('; '));
+  }
+  // The record that is not a place has a position, and no key: a drawing on it is refused, not made a place.
+  for (const options of [{}, { hasPlace: (k) => store.has(k) }]) {
+    const r = await saved(files(), [{ placeId: '#2', attestation: drawing(1, 1) }], options);
+    assert.deepEqual(r.report.items.map((i) => i.kind), ['chora-no-such-place']);
+    assert.equal(r.mneme, null);
+  }
+  store.close();
+});
+
+test('a place whose @id the dataset gives twice gets its drawing once, on the first, and Mneme passes', async () => {
+  const twin = X + 'p/twin';
+  const r = await saved(textFile(doc([named('Twin', { '@id': twin }), named('Other', { '@id': X + 'p/other' }), named('Twin again', { '@id': twin })]), 'twins.json'),
+    [{ placeId: twin, attestation: drawing(2, 2) }]);
+  const out = JSON.parse(r.text).spatialEntities;
+  assert.deepEqual(out.map((p) => p.attestations.length), [2, 1, 1]);
+  assert.equal(r.mneme.passed, true, r.mneme.reasons.join('; '));
+  assert.equal(r.mneme.report.counts.added, 1);
+});
+
+test('a dataset with no attestations yet, a list of places to locate: the first drawings are saved, and Mneme passes', async () => {
+  const places = [{ '@id': X + 'p/a', label: 'Alpha' }, { '@id': X + 'p/b', label: 'Beta' }, { label: 'Gamma' }];
+  const json = () => textFile(doc(places), 'to-locate.json');
+  const additions = [{ placeId: X + 'p/b', attestation: drawing(1, 1) }, { placeId: '#3', attestation: area() }];
+  const r = await saved(json(), additions);
+  await assertAppendedOnly(r.input, r.text, additions);
+  assert.deepEqual(r.mneme.reasons, []);
+  assert.equal(r.mneme.passed, true);
+  assert.deepEqual([r.mneme.report.counts.earlier, r.mneme.report.counts.added], [0, 2]);
+  // The controls: the list itself, where two were expected, fails; so does a file that adds a third.
+  const none = await verify(r.input, json(), 2, env());
+  assert.equal(none.passed, false);
+  assert.match(none.reasons.join(), /0 added where 2 were expected/);
+  const more = JSON.parse(r.text); more.spatialEntities[0].attestations = [drawing(5, 5)];
+  const m = await verify(r.input, textFile(JSON.stringify(more), 'more.json'), 2, env());
+  assert.equal(m.passed, false);
+  assert.match(m.reasons.join(), /3 added where 2 were expected/);
+  // A dataset with no attestations and another problem still fails for it: the one allowance is not a blanket one.
+  const cut = await verify(r.input, textFile(r.text.slice(0, 200), 'cut.json'), 2, env());
+  assert.equal(cut.passed, false);
+
+  // The same, as spreadsheet tables: only the places, with their labels.
+  const tables = () => [file(TABLES[0]), textFile('place_id,label\nalpha,Alpha\nbeta,Beta\n', 'places.csv')];
+  const { store, ids } = await storeKeys(tables());
+  assert.equal(ids.length, 2);
+  const t = await saved(tables(), [{ placeId: ids[1], attestation: drawing(3, 3) }], { name: 'to-locate', hasPlace: (k) => store.has(k) });
+  assert.equal(t.mneme.passed, true, t.mneme.reasons.join('; '));
+  assert.deepEqual([t.mneme.report.counts.earlier, t.mneme.report.counts.added], [0, 1]);
+  store.close();
+});
+
+test('Mneme fails a save that changes or drops what identifies or describes a place, which Chora must never do', async () => {
+  const ANT = `${PLATO_REPO}/schemas/examples/place-centric-antonine.json`;
+  const input = await detect([file(ANT)]);
+  const first = [...(await attestationsOf(input)).keys()][0];
+  const r = await saved(file(ANT), [{ placeId: first, attestation: drawing(0, 51) }]);
+  assert.equal(r.mneme.passed, true, r.mneme.reasons.join('; '));
+  const d = JSON.parse(r.text);
+  const withIds = d.spatialEntities.filter((p) => p.identityRelations?.length);
+  assert.ok(withIds.length, 'the example has identity relations to lose');
+  const noIds = JSON.parse(r.text); for (const p of noIds.spatialEntities) delete p.identityRelations;
+  const i = await verify(r.input, textFile(JSON.stringify(noIds), 'no-ids.json'), 1, env());
+  assert.equal(i.passed, false);
+  assert.match(i.reasons.join(), /identity-(removed|gone)/);
+  const relabelled = JSON.parse(r.text); relabelled.spatialEntities[0].label += ' (relabelled)';
+  const l = await verify(r.input, textFile(JSON.stringify(relabelled), 'relabelled.json'), 1, env());
+  assert.equal(l.passed, false, JSON.stringify(l.report.items.map((x) => x.kind)));
+  assert.match(l.reasons.join(), /description-changed/);
 });

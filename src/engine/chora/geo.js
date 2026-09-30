@@ -13,13 +13,26 @@ export function* positions(coords) {
   if (Array.isArray(coords)) for (const c of coords) yield* positions(c);
 }
 
-/** [west, south, east, north] of a GeoJSON geometry, or null when it has no position. */
-export function bboxOf(geojson) {
+/**
+ * [west, south, east, north] of a GeoJSON geometry, or null when it has no position. A geometry across
+ * the antimeridian (Fiji, from 178 to -178) is boxed the short way round, with west > east as RFC 7946
+ * has it: of its extent as given and its extent with every longitude east of 180 (-178 as 182), the
+ * narrower. `plain` gives the extent as given, for a geometry known not to cross (a drawing).
+ */
+export function bboxOf(geojson, { plain = false } = {}) {
   if (!geojson || typeof geojson !== 'object') return null;
-  let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
-  for (const [x, y] of positions(geojson.coordinates)) { if (x < w) w = x; if (x > e) e = x; if (y < s) s = y; if (y > n) n = y; }
-  return w === Infinity ? null : [w, s, e, n];
+  let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity, uw = Infinity, ue = -Infinity;
+  for (const [x, y] of positions(geojson.coordinates)) {
+    if (x < w) w = x; if (x > e) e = x; if (y < s) s = y; if (y > n) n = y;
+    const u = x < 0 ? x + 360 : x;
+    if (u < uw) uw = u; if (u > ue) ue = u;
+  }
+  if (w === Infinity) return null;
+  if (!plain && ue - uw < e - w) return [uw > 180 ? uw - 360 : uw, s, ue > 180 ? ue - 360 : ue, n];
+  return [w, s, e, n];
 }
+// Every longitude west of 0 taken east of 180, for arithmetic on a geometry across the antimeridian.
+const unwrap = (c) => (isPosition(c) ? [c[0] < 0 ? c[0] + 360 : c[0], ...c.slice(1)] : Array.isArray(c) ? c.map(unwrap) : c);
 
 /**
  * The smallest box holding every box given; null when none is. A box across the antimeridian has
@@ -73,11 +86,20 @@ function midpoint(line) {
  * A representative point, [lon, lat]: the point itself; the mean of several points; the point half
  * way along a line (the longest, of several); the centroid of a polygon's area, holes taken out
  * (of all a multipolygon's parts together). A polygon of no area falls back to its vertices' mean.
+ * A geometry across the antimeridian (bboxOf) has its point worked out on its longitudes unwrapped,
+ * then put back between -180 and 180; `plain` takes it as given, as bboxOf does.
  */
-export function reprPointOf(geojson) {
+export function reprPointOf(geojson, { plain = false } = {}) {
   if (!geojson || typeof geojson !== 'object') return null;
-  const c = geojson.coordinates;
-  switch (geojson.type) {
+  const b = plain ? null : bboxOf(geojson);
+  if (b && b[0] > b[2]) {
+    const p = pointOf(geojson.type, unwrap(geojson.coordinates));
+    return p && [p[0] > 180 ? p[0] - 360 : p[0], p[1]];
+  }
+  return pointOf(geojson.type, geojson.coordinates);
+}
+function pointOf(type, c) {
+  switch (type) {
     case 'Point': return isPosition(c) ? [c[0], c[1]] : null;
     case 'MultiPoint': return mean([...positions(c)]);
     case 'LineString': return Array.isArray(c) ? midpoint(c.filter(isPosition)) : null;
@@ -87,7 +109,7 @@ export function reprPointOf(geojson) {
       return midpoint(longest.filter(isPosition));
     }
     case 'Polygon': case 'MultiPolygon': {
-      const polys = geojson.type === 'Polygon' ? [c] : c;
+      const polys = type === 'Polygon' ? [c] : c;
       let a = 0, x = 0, y = 0;
       for (const poly of polys || []) for (const [i, ring] of (poly || []).entries()) {
         const r = ringCentroid(ring.filter(isPosition));
