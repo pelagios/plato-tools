@@ -10,6 +10,9 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { detect, readable, jsonHead, GEOREF_REASON, GEOJSON_SEQ_REASON, XML_REASONS } from '../src/engine/input.js';
 import { gzipSync } from 'node:zlib';
+import { zipSync } from 'fflate';
+import { readdirSync, readFileSync } from 'node:fs';
+import { PLATO_REPO } from './paths.js';
 import { file, textFile, go, outText } from './engine.js';
 
 const fc = (features, extra = {}) => JSON.stringify({ type: 'FeatureCollection', ...extra, features });
@@ -177,6 +180,18 @@ test('a head that ends part-way (a first record past 64 KB, a gzip cut mid-recor
   // Control: the same records within the head are detected.
   assert.equal(await kind(JSON.stringify({ ...feature, properties: { name: 'A' } }) + '\n', 'x.geojsonl'), null, 'a plain sequence: refused with its reason');
   assert.equal(await kind(JSON.stringify({ profile: 'place-centric' }) + '\n{}\n', 'x.jsonl'), 'plato-jsonl');
+});
+test('a zip holding no file named after a sheet is refused, saying what it holds; one of the tables is the tables', async () => {
+  const gb = zipSync({ 'GB.txt': Buffer.from('2633352\tBristol\t51.45\t-2.58\n'), 'readme.txt': Buffer.from('GeoNames'), 'docs/': new Uint8Array() });
+  const d = await detect([new File([gb], 'GB.zip')]);
+  assert.equal(d.format, null);
+  assert.match(d.reason, /^This zip holds GB\.txt, readme\.txt, and no PLATO spreadsheet tables/);
+  // Controls: PLATO's customs tables zipped, in a folder or not, and a damaged zip, left to the tables reader to report.
+  const dir = `${PLATO_REPO}/schemas/tables/examples/customs`;
+  const sheets = Object.fromEntries(readdirSync(dir).filter((f) => f.endsWith('.csv')).map((f) => [f, readFileSync(`${dir}/${f}`)]));
+  assert.equal((await detect([new File([zipSync(sheets)], 'customs.zip')])).format, 'tables');
+  assert.equal((await detect([new File([zipSync({ customs: sheets })], 'customs.zip')])).format, 'tables');
+  assert.equal((await detect([new File([zipSync(sheets).slice(0, 200)], 'broken.zip')])).format, 'tables');
 });
 test('a places.csv separated by semicolons, tabs or bars is still the spreadsheet tables; with a header of its own, a table of places', async () => {
   for (const d of [';', '\t', '|', ',']) {

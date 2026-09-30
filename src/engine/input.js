@@ -257,7 +257,13 @@ export async function detect(files) {
   if (csvs.length && csvs.length === files.length) return csvSetKind(files);
   if (files.length !== 1) return { format: null, reason: 'Choose one file, or the ten CSV files of a set of tables.' };
   const f = files[0], n = names[0];
-  if (n.endsWith('.zip')) return { format: 'tables', container: 'zip', files };
+  if (n.endsWith('.zip')) {
+    // A zip is the tables only when a file in it is named after a sheet; one that holds none (a
+    // gazetteer's download, say) is refused, saying what it holds.
+    const inside = await zipNames(f);
+    if (inside && !inside.some((x) => sheetOf(x))) return { format: null, reason: zipReason(inside) };
+    return { format: 'tables', container: 'zip', files };
+  }
   if (n.endsWith('.xlsx') || n.endsWith('.ods')) return { format: 'tables', container: 'workbook', files };
   if (n.endsWith('.tsv') || n.endsWith('.tab')) return { format: 'csv', delimiter: '\t', files };
   if (n.endsWith('.nt')) return { format: 'ntriples', files };
@@ -344,6 +350,38 @@ function isTei(h) {
   if (!m || (m[2] !== 'TEI' && m[2] !== 'teiCorpus')) return false;
   return new RegExp(`\\sxmlns${m[1] ? ':' + m[1] : ''}\\s*=\\s*["']http://www\\.tei-c\\.org/ns/1\\.0["']`).test(m[3]);
 }
+/**
+ * The names of the files in a zip, from its central directory at the end of the file (so only the
+ * end is read, however large the zip), or null when they cannot be listed (not a zip, or a Zip64
+ * archive): the tables reader then says what is wrong.
+ */
+export async function zipNames(file) {
+  try {
+    const tail = new Uint8Array(await file.slice(Math.max(0, file.size - 65557)).arrayBuffer());
+    const dv = new DataView(tail.buffer, tail.byteOffset, tail.byteLength);
+    let e = -1;
+    for (let i = tail.length - 22; i >= 0; i--) if (dv.getUint32(i, true) === 0x06054b50) { e = i; break; }
+    if (e < 0) return null;
+    const count = dv.getUint16(e + 10, true), size = dv.getUint32(e + 12, true), offset = dv.getUint32(e + 16, true);
+    if (count === 0xffff || size === 0xffffffff || offset === 0xffffffff) return null;
+    const cd = new Uint8Array(await file.slice(offset, offset + size).arrayBuffer());
+    const c = new DataView(cd.buffer, cd.byteOffset, cd.byteLength);
+    const names = [];
+    for (let i = 0; names.length < count; ) {
+      if (i + 46 > cd.length || c.getUint32(i, true) !== 0x02014b50) return null;
+      const utf8 = c.getUint16(i + 8, true) & 0x800, len = c.getUint16(i + 28, true), extra = c.getUint16(i + 30, true), note = c.getUint16(i + 32, true);
+      const raw = cd.subarray(i + 46, i + 46 + len);
+      names.push(utf8 ? new TextDecoder().decode(raw) : String.fromCharCode(...raw));
+      i += 46 + len + extra + note;
+    }
+    return names.filter((x) => !x.endsWith('/'));
+  } catch { return null; }
+}
+const zipReason = (inside) => {
+  const shown = inside.slice(0, 5).map((x) => x.split('/').pop());
+  const more = inside.length > 5 ? `, and ${inside.length - 5} more files` : '';
+  return `This zip holds ${inside.length ? shown.join(', ') + more : 'no files'}, and no PLATO spreadsheet tables (CSV files named after their sheets, such as places.csv), so it cannot be read. Unzip it and choose the file to read.`;
+};
 export const XML_REASONS = {
   'tei-p4': 'This is a TEI P4 edition (or TEI with no namespace), which PLATO tools cannot read yet; TEI P5 with the TEI namespace can be read.',
   kml: 'This is KML, which PLATO tools cannot read yet. Convert it to GeoJSON (a FeatureCollection), whose properties can be matched to PLATO.',
