@@ -5,7 +5,7 @@
 // was never written, or a search that finds nothing anywhere, cannot pass.
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, existsSync, mkdtempSync, rmSync, writeFileSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -393,5 +393,28 @@ test('publish site on the command line writes both folders, and exits 0, 1 or 2'
   writeFileSync(pub, JSON.stringify(kingJohn({ status: 'published', mint: false, retract: false })));
   const p = cli('publish', 'site', pub, '--out', join(dir, 'cli-pub'));
   assert.equal(p.code, 1, p.out);
-  assert.ok(!existsSync(join(dir, 'cli-pub/pub-site')));
+  // Nothing at all under --out: not the site, and not a folder made for it and left empty.
+  assert.deepEqual(leftIn(join(dir, 'cli-pub')), []);
+  assert.ok(leftIn(out).length > 10);   // the same listing finds what a run wrote
+});
+
+/** Every file and folder under `d`, or none when it is not there. */
+const leftIn = (d) => (existsSync(d) ? readdirSync(d, { recursive: true }) : []);
+
+test('a publish site that fails part-way leaves nothing it made, and keeps what was there', () => {
+  const out = join(dir, 'cli-fail');
+  // A file in the way of the second folder: the run fails there, after the site was written.
+  mkdirSync(join(out, 'king-john-repo/.github/workflows'), { recursive: true });
+  writeFileSync(join(out, 'king-john-repo/.github/workflows/pages.yml'), 'mine\n');
+  const r = cli('publish', 'site', TABLES, '--base', 'https://w3id.org/test-x/', '--out', out, '--tools-ref', 'abc1234');
+  assert.equal(r.code, 2, r.out + r.err);
+  assert.match(r.out, /already exists; give --overwrite[^]*Nothing was written/);
+  assert.equal(existsSync(join(out, 'king-john-site')), false);
+  assert.deepEqual(leftIn(out).sort(), ['king-john-repo', 'king-john-repo/.github', 'king-john-repo/.github/workflows', 'king-john-repo/.github/workflows/pages.yml']);
+  assert.equal(readFileSync(join(out, 'king-john-repo/.github/workflows/pages.yml'), 'utf8'), 'mine\n');
+  // With --overwrite the same run succeeds, and writes the site that failed to be kept above.
+  const ok = cli('publish', 'site', TABLES, '--base', 'https://w3id.org/test-x/', '--out', out, '--tools-ref', 'abc1234', '--overwrite');
+  assert.equal(ok.code, 0, ok.out + ok.err);
+  assert.ok(existsSync(join(out, 'king-john-site/place/windsor/index.html')));
+  assert.notEqual(readFileSync(join(out, 'king-john-repo/.github/workflows/pages.yml'), 'utf8'), 'mine\n');
 });

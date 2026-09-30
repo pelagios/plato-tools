@@ -1,7 +1,7 @@
 // The engine in Node, as src/engine/worker.js is the engine in the browser: the same pipeline,
 // given a triple store in a file on disk, outputs written straight to disk, and PLATO's vendored
 // files read from public/plato/. Also how command-line arguments become inputs.
-import { openAsBlob, mkdirSync, mkdtempSync, openSync, writeSync, closeSync, rmSync } from 'node:fs';
+import { openAsBlob, mkdirSync, mkdtempSync, openSync, writeSync, closeSync, rmSync, rmdirSync, existsSync } from 'node:fs';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -55,6 +55,19 @@ export async function openFiles(paths) {
 export const isSystemError = (e) => !!(e && typeof e.code === 'string' && /^E[A-Z]+$/.test(e.code));
 
 /**
+ * Take back what a failed run wrote: its files; the roots of trees it began, whole; then every
+ * folder it made that is now empty, deepest first. A folder that was there before the run is never
+ * removed, even when --overwrite emptied it, and one that still holds something is kept.
+ */
+function undo(run) {
+  for (const p of run.created) rmSync(p, { force: true });
+  for (const r of run.roots) rmSync(r, { recursive: true, force: true });
+  for (const d of [...run.dirs].sort((a, b) => b.length - a.length)) {
+    try { rmdirSync(d); } catch { /* gone already, or not empty */ }
+  }
+}
+
+/**
  * One host per invocation. The working databases live in one temporary directory under
  * `workDir`, made when first needed and removed by cleanup(); SQLite's own temporary files (for
  * sorting while it builds indexes) go there too.
@@ -75,7 +88,9 @@ export class NodeHost {
   /** The environment for one run: its store, its outputs, and what it left behind. */
   env(resources, { progress, xlsx } = {}) {
     const host = this;
-    const run = { db: null, created: [] };
+    // What this run made, so that a run that fails can take it all back: its files, the folders
+    // made to hold them, and the roots of the trees it began (env.folder) where there was none.
+    const run = { db: null, created: [], dirs: new Set(), roots: [] };
     this.running = run;
     const env = {
       resources, csvMeta: resources.csvMeta, xlsx, progress,
@@ -88,7 +103,17 @@ export class NodeHost {
       // A folder of files with paths of their own (Agora's site and w3id folder); in the browser the
       // same tree is one zip (engine/agora/tree.js). Each file is made as output() makes one.
       folder: async (name) => {
+        // One name, never a path: the tree's own folder is all that --overwrite may clear.
+        if (!name || /[/\\]/.test(name) || name === '.' || name === '..') throw new Error(`not a name for a folder: ${name}`);
         const root = join(host.outDir, name);
+        if (!existsSync(root)) run.roots.push(root);
+        else if (host.overwrite) {
+          // Replaced, not written over: a file the last run wrote and this one does not (a place
+          // since left out) must not stay behind to be served. It is made again at once, so that it
+          // counts as the folder that was there, which a failure empties but never removes.
+          rmSync(root, { recursive: true, force: true });
+          mkdirSync(root);
+        }
         return {
           path: root,
           file: async (rel) => {
@@ -99,7 +124,9 @@ export class NodeHost {
       },
     };
     function create(path, name) {
-      mkdirSync(dirname(path), { recursive: true });
+      const made = mkdirSync(dirname(path), { recursive: true });
+      // mkdirSync gives the first folder it had to make: that one and those below it are this run's.
+      if (made) for (let d = dirname(path); d.length >= made.length; d = dirname(d)) run.dirs.add(d);
       const fd = openSync(path, host.overwrite ? 'w' : 'wx');   // wx: never replace a file unasked
       run.created.push(path);
       let size = 0;
@@ -116,7 +143,7 @@ export class NodeHost {
       finish(failed) {
         host.running = null;
         const storeBytes = run.db ? (run.db.close(), host.open.delete(run.db), run.db.bytes) : null;
-        if (failed) for (const p of run.created) rmSync(p, { force: true });
+        if (failed) undo(run);
         return { storeBytes, removed: failed ? run.created : [] };
       },
     };
@@ -124,7 +151,7 @@ export class NodeHost {
   /** Stopped part-way (interrupted): the output being written is incomplete, so remove it. */
   abandon() {
     const removed = this.running ? this.running.created : [];
-    for (const p of removed) rmSync(p, { force: true });
+    if (this.running) undo(this.running);
     this.running = null;
     this.cleanup();
     return removed;

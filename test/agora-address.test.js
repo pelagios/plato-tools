@@ -2,7 +2,7 @@
 // and the folder (command line) or zip (browser) a part writes its files into.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { unzipSync, strFromU8 } from 'fflate';
@@ -106,5 +106,61 @@ test('a tree is a folder on the command line, and never replaces a file unasked'
     await assert.rejects(() => again.file('../escape.txt'));
     assert.equal(existsSync(join(dir, 'escape.txt')), false);
     host.cleanup();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a run that fails takes back the folders it made, but never one that was there before', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'agora-undo-'));
+  try {
+    const host = new NodeHost({ outDir: join(dir, 'out') });
+    // A tree this run began: removed whole, and the --out folder it made too.
+    const { env: e, finish } = host.env(res);
+    const tree = await openTree(e, 'site');
+    await put(tree, 'place/bristol/index.html', 'Bristol');
+    assert.ok(existsSync(join(dir, 'out/site/place/bristol/index.html')));   // written, before the failure
+    assert.deepEqual(finish(true).removed, [join(dir, 'out/site/place/bristol/index.html')]);
+    assert.equal(existsSync(join(dir, 'out/site')), false);
+    assert.equal(existsSync(join(dir, 'out')), false);
+    // A folder that was there before keeps what it held; only what this run made in it goes.
+    mkdirSync(join(dir, 'out/site'), { recursive: true });
+    writeFileSync(join(dir, 'out/site/keep.txt'), 'mine');
+    const second = host.env(res);
+    const t2 = await openTree(second.env, 'site');
+    await put(t2, 'place/york/index.html', 'York');
+    assert.ok(existsSync(join(dir, 'out/site/place/york/index.html')));
+    second.finish(true);
+    assert.equal(readFileSync(join(dir, 'out/site/keep.txt'), 'utf8'), 'mine');
+    assert.equal(existsSync(join(dir, 'out/site/place')), false);
+    // Stopped part-way (abandon), the same.
+    const third = host.env(res);
+    const t3 = await openTree(third.env, 'other');
+    await put(t3, 'a/b.txt', 'x');
+    assert.ok(existsSync(join(dir, 'out/other/a/b.txt')));
+    host.abandon();
+    assert.equal(existsSync(join(dir, 'out/other')), false);
+    assert.ok(existsSync(join(dir, 'out/site/keep.txt')));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('--overwrite replaces a tree whole, so no file of the last one stays behind; a name that is a path is refused', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'agora-overwrite-'));
+  try {
+    const first = new NodeHost({ outDir: dir });
+    await put(await openTree(first.env(res).env, 'site'), 'place/old/index.html', 'old');
+    assert.ok(existsSync(join(dir, 'site/place/old/index.html')));
+    const again = new NodeHost({ outDir: dir, overwrite: true });
+    const { env: e, finish } = again.env(res);
+    await put(await openTree(e, 'site'), 'place/new/index.html', 'new');
+    finish(false);
+    assert.equal(readFileSync(join(dir, 'site/place/new/index.html'), 'utf8'), 'new');
+    assert.equal(existsSync(join(dir, 'site/place/old')), false);
+    // A replaced tree that then fails is emptied, not removed: it was there before the run.
+    const failing = again.env(res);
+    await put(await openTree(failing.env, 'site'), 'place/x/index.html', 'x');
+    failing.finish(true);
+    assert.ok(existsSync(join(dir, 'site')));
+    assert.equal(existsSync(join(dir, 'site/place')), false);
+    for (const bad of ['../site', 'a/b', '..', '']) await assert.rejects(() => again.env(res).env.folder(bad), /not a name for a folder/, bad);
+    assert.ok(existsSync(join(dir, 'site')));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
