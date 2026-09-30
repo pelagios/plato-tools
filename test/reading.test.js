@@ -7,6 +7,7 @@ import { gzipSync, strToU8 } from 'fflate';
 import { detect, lines } from '../src/engine/input.js';
 import { go, env } from './engine.js';
 import { compare } from '../src/engine/compare.js';
+import { randomBytes } from 'node:crypto';
 
 /** A File-like whose stream() yields `size`-byte chunks, as a large file's does. */
 export function chunked(bytes, name, size = 16384) {
@@ -109,6 +110,17 @@ test('detecting a PLATO JSON document stops reading once its profile is found', 
   const late = counted(JSON.stringify({ gazetteer: { title: 'T', description: 'd'.repeat(600_000) }, profile: 'place-centric', spatialEntities: many }), 'late.json');
   assert.equal((await detect([late])).profile, 'place-centric');
   assert.ok(late.read > 600_000 && late.read < 600_000 + 2 ** 18, `read ${late.read}`);
+});
+test('a gzipped JSON Lines file damaged within its long first line says so, not that the line is not JSON', async () => {
+  // Hex text compresses to about half: cut the gzip at 300 KB and well over 64 KB of the line has come through.
+  const line = JSON.stringify({ profile: 'place-centric', gazetteer: { title: 'T', description: randomBytes(500_000).toString('hex') } });
+  const gz = gzipSync(strToU8(line + '\n' + onePlace + '\n'));
+  const d = await detect([chunked(gz.slice(0, 300_000), 'cut.jsonl.gz')]);
+  assert.equal(d.format, null);
+  assert.match(d.reason, /stops, or is damaged, part-way through/);
+  assert.doesNotMatch(d.reason, /not valid JSON/);
+  // Control: whole, the same file is detected.
+  assert.equal((await detect([chunked(gz, 'whole.jsonl.gz')])).format, 'plato-jsonl');
 });
 
 // ---- what a line holds ------------------------------------------------------------------------

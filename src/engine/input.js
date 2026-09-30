@@ -177,8 +177,9 @@ export async function firstLine(file, cap = DETECT_CAP) {
       parts.push(v); size += v.length;
       if (size >= cap) break;
     }
-  } catch (e) { if (!(e instanceof DataError) || !parts.length) throw e; }
-  reader.cancel().catch(() => {});
+  } finally { reader.cancel().catch(() => {}); }
+  // A break within the line is thrown, not read past: part of a line is not JSON, and saying so
+  // hid that the file is damaged or cut short.
   return { line: parts.join(''), capped: !ended && size >= cap };
 }
 /**
@@ -367,7 +368,7 @@ export async function detect(files) {
     if (!h.includes('\n')) {
       let capped;
       try { ({ line, capped } = await firstLine(f)); }
-      catch (e) { if (e instanceof DataError) return { format: null, reason: `${e.message} Nothing could be read from it.` }; throw e; }
+      catch (e) { if (e instanceof DataError) return { format: null, reason: `${e.message} Its first line could not be read whole, so what the file is cannot be told from it.` }; throw e; }
       if (capped) return { format: null, reason: `This looks like JSON Lines, but its first line is longer than ${DETECT_CAP / 2 ** 20} MB, so what the file is cannot be told from it.` };
     }
     let first;
