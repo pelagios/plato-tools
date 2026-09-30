@@ -37,7 +37,7 @@ const NEWCASTLES = [
   { id: 'place:gn:3354071', name: 'Newcastle', score: 100, match: true, description: 'Country: NA', ccodes: ['NA'], repr_point: [17.0833, -22.5667], namespace: 'gn', alt_names: [] },
   { id: 'place:gn:2641673', name: 'Newcastle upon Tyne', score: 100, match: false, description: 'Country: GB', ccodes: ['GB'], repr_point: [-1.6132, 54.9733], namespace: 'gn', alt_names: ['Newcastle'], confidence: 92 },
 ];
-const ATTRIBUTION = { whg: { license: 'CC-BY-4.0' }, sources: { gn: { license: { spdx_id: 'CC-BY-4.0', permits_commercial: true, no_derivatives: false } }, un: { license: { spdx_id: null, permits_commercial: null, no_derivatives: null } } } };
+const ATTRIBUTION = { whg: { license: 'CC-BY-4.0' }, sources: { gn: { license: { spdx_id: 'CC-BY-4.0', permits_commercial: true, no_derivatives: false }, redistributable: true }, un: { license: { spdx_id: null, permits_commercial: null, no_derivatives: null } } } };
 /**
  * A fetch that answers as WHG would: `answer(query)` gives a query's object ({result} or {result,
  * gateway}), or a Response to answer the whole request with. Every call is kept, headers included.
@@ -59,7 +59,11 @@ function fakeWhg(answer = () => ({ result: [] }), { attribution = ATTRIBUTION } 
   return { fetch, calls };
 }
 const byName = (table) => (q) => ({ result: table[q.query] ?? [] });
-const lookupWith = (fake, more = {}) => createLookup({ endpoint: WHG_ENDPOINT, token: 'test-token', fetch: fake.fetch, sleep: () => Promise.resolve(), queryRate: null, ...more });
+// Each test's lookup is its own (shared: false), and takes no Web Lock (locks: null; Node 24 has
+// navigator.locks): createLookup otherwise gives every caller of this process one lookup per endpoint,
+// with the first caller's fetch, so a test would be answered by an earlier test's fake.
+const PRIVATE = { shared: false, locks: null };
+const lookupWith = (fake, more = {}) => createLookup({ endpoint: WHG_ENDPOINT, token: 'test-token', fetch: fake.fetch, sleep: () => Promise.resolve(), queryRate: null, ...PRIVATE, ...more });
 
 // ---- datasets ------------------------------------------------------------------------------------------
 const doc = (places) => ({ profile: 'place-centric', gazetteer: { '@id': X + 'a', title: 'Dataset A' }, spatialEntities: places });
@@ -78,7 +82,9 @@ test('planQueries sends the label only, without filters, unless asked; the previ
   assert.deepEqual(label.queries.map((q) => q.query), ['Newcastle', 'York', 'Nowhere']);
   assert.ok(label.queries.every((q) => !q.params), 'no filters by default');
   assert.deepEqual({ ...label.preview, first: undefined, service: undefined }, { places: 3, queries: 3, requests: 1, allNames: false, limit: 10, filters: [], sendsCoordinates: false, nearKm: null, withoutCountries: 0, withoutPoint: 0, first: undefined, service: undefined });
-  assert.ok(label.queries.every((q) => q.type === 'https://whgazetteer.org/static/whg_schema.jsonld#Place'), 'WHG is always sent its type');
+  // The type in the form the gazetteer module sends WHG (it writes every form of Place as "Place"), so
+  // that the preview below is what WHG receives.
+  assert.ok(label.queries.every((q) => q.type === 'Place'), 'WHG is always sent its type');
   const all = planQueries(g.places, { allNames: true, countries: true, nearKm: 10, batchSize: 2 });
   assert.deepEqual(all.queries.map((q) => q.query), ['Newcastle', 'Newcastle upon Tyne', 'York', 'Eboracum', 'Jorvik', 'Nowhere']);
   assert.deepEqual(all.queries[0].params.countries, ['GB'], 'control: countries sent when asked');
@@ -94,6 +100,19 @@ test('planQueries sends the label only, without filters, unless asked; the previ
   const fake = fakeWhg();
   await runLookup({ lookup: lookupWith(fake), subjects: g.subjects, places: g.places, options: { places: 'all' } });
   assert.deepEqual(Object.values(fake.calls[0].body.queries), label.preview.first);
+});
+test('countries are sent as a JSON list of ISO 3166-1 alpha-2 codes, in capitals', async () => {
+  const p = (ccodes) => ({ iri: A('c'), label: 'C', names: ['C'], point: null, ccodes });
+  assert.deepEqual(planQueries([p(['gb', 'IE', ' fr '])], { countries: true }).queries[0].params.countries, ['GB', 'IE', 'FR']);
+  assert.deepEqual(planQueries([p(['GBR', 'G', 'gb', 'GB', 7])], { countries: true }).queries[0].params.countries, ['GB'], 'only two-letter codes, once each');
+  const none = planQueries([p(['GBR'])], { countries: true });
+  assert.equal(none.queries[0].params, undefined, 'no code of two letters: no filter');
+  assert.equal(none.preview.withoutCountries, 1);
+  // On the wire, a list, exactly as planned.
+  const g = await gathered([tyne()]);
+  const fake = fakeWhg();
+  await runLookup({ lookup: lookupWith(fake), subjects: g.subjects, places: g.places, options: { places: 'all', countries: true } });
+  assert.deepEqual(fake.calls[0].body.queries.q0.countries, ['GB']);
 });
 test('the preview shows at most the first twenty queries', () => {
   const places = Array.from({ length: 30 }, (_, i) => ({ iri: A('p' + i), label: 'Place ' + i, names: ['Place ' + i], point: null }));
@@ -287,7 +306,7 @@ test('the token never reaches the work file, the stop message or the summary (wi
     (q) => ({ result: [], error: `bad query from ${TOKEN}` }),
   ]) {
     const fake = fakeWhg(answer);
-    const r = await runLookup({ lookup: createLookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: fake.fetch, sleep: () => Promise.resolve(), queryRate: null, maxRetries: 0 }), subjects: g.subjects, places: g.places, now: clock() });
+    const r = await runLookup({ lookup: createLookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: fake.fetch, sleep: () => Promise.resolve(), queryRate: null, maxRetries: 0, ...PRIVATE }), subjects: g.subjects, places: g.places, now: clock() });
     assert.ok(leaks(fake.calls[0].headers.Authorization), 'control: the token was in play, in the header');
     assert.ok(!leaks(serialiseWork(r.work)), 'not in the work file');
     assert.ok(!leaks(JSON.stringify(r.stopped)) && !leaks(r.stopped ? LOOKUP_WORDS.stopped(r.stopped) : ''), 'not in the stop');
@@ -334,9 +353,24 @@ test('licences are read from the answer, never assumed: unknown stays unknown', 
   assert.equal(LOOKUP_WORDS.licence(licenceOf(ATTRIBUTION, 'osm')), 'licence unknown');
   assert.equal(LOOKUP_WORDS.licence(licenceOf(null, 'gn')), 'licence unknown');
   assert.equal(LOOKUP_WORDS.licence(licenceOf(ATTRIBUTION, 'gn')), 'CC-BY-4.0');
-  const other = { sources: { x: { license: { spdx_id: 'X-TEST-1.0', permits_commercial: false, no_derivatives: true } } } };
-  assert.equal(LOOKUP_WORDS.licence(licenceOf(other, 'x')), 'X-TEST-1.0, non-commercial, no derivatives', 'whatever the answer says');
-  assert.deepEqual(licenceOf(ATTRIBUTION, 'un'), { spdx: null, commercial: null, derivatives: null });
+  const other = { sources: { x: { license: { spdx_id: 'X-TEST-1.0', permits_commercial: false, no_derivatives: true }, redistributable: false } } };
+  assert.equal(LOOKUP_WORDS.licence(licenceOf(other, 'x')), 'X-TEST-1.0, non-commercial, no derivatives, not to be passed on', 'whatever the answer says');
+  assert.deepEqual(licenceOf(ATTRIBUTION, 'un'), { spdx: null, commercial: null, derivatives: null, redistributable: null });
+});
+test('a source is not redistributable only when it says false; missing or null is not known, never true', () => {
+  const lic = { spdx_id: 'CC-BY-4.0', permits_commercial: true, no_derivatives: false };
+  const said = (redistributable) => ({ sources: { gn: { license: lic, ...(redistributable === undefined ? {} : { redistributable }) } } });
+  assert.equal(licenceOf(said(false), 'gn').redistributable, false);
+  assert.equal(LOOKUP_WORDS.licence(licenceOf(said(false), 'gn')), 'CC-BY-4.0, not to be passed on');
+  assert.equal(licenceOf(said(true), 'gn').redistributable, true, 'control: true is read as true');
+  assert.equal(LOOKUP_WORDS.licence(licenceOf(said(true), 'gn')), 'CC-BY-4.0');
+  for (const v of [undefined, null, 'no', 0]) {
+    assert.equal(licenceOf(said(v), 'gn').redistributable, null, `${JSON.stringify(v)} is not known`);
+    assert.equal(LOOKUP_WORDS.licence(licenceOf(said(v), 'gn')), 'CC-BY-4.0, terms partly unknown', `${JSON.stringify(v)} is not taken for true`);
+  }
+  // Not redistributable without a licence is still said, not lost as "licence unknown".
+  assert.equal(LOOKUP_WORDS.licence(licenceOf({ sources: { gn: { redistributable: false } } }, 'gn')), 'licence not named, not to be passed on, terms partly unknown');
+  assert.equal(licenceOf({ sources: { gn: { redistributable: null } } }, 'gn'), null, 'control: nothing said is licence unknown');
 });
 test('another reconciliation service is cited by its address; mergeAnswers and startLookup work on a work file directly', () => {
   const s = serviceOf('https://recon.example.net/api');
@@ -412,7 +446,9 @@ test('a dataset\'s link to the authority\'s own address counts as a link to the 
 });
 test('licences of WHG\'s own records fall back to their dataset, then to WHG\'s', () => {
   const a = { whg: { license: 'CC-BY-4.0' }, datasets: { 42: { license: { spdx_id: 'CC-BY-NC-4.0', permits_commercial: false, no_derivatives: false } } }, sources: {} };
-  assert.equal(LOOKUP_WORDS.licence(licenceOf(a, null, 42)), 'CC-BY-NC-4.0, non-commercial');
+  // The dataset's entry says nothing of redistribution, which is not known, never taken for allowed.
+  assert.equal(LOOKUP_WORDS.licence(licenceOf(a, null, 42)), 'CC-BY-NC-4.0, non-commercial, terms partly unknown');
+  assert.equal(LOOKUP_WORDS.licence(licenceOf({ ...a, datasets: { 42: { ...a.datasets[42], redistributable: true } } }, null, 42)), 'CC-BY-NC-4.0, non-commercial', 'control: said of the dataset');
   assert.equal(LOOKUP_WORDS.licence(licenceOf(a, 'whg', 7)), 'CC-BY-4.0, terms partly unknown', 'no dataset entry: WHG\'s own');
   assert.equal(licenceOf(a, 'gn', 42), null, 'an authority\'s record does not take WHG\'s licence');
   assert.equal(licenceOf({ sources: {} }, null), null);
@@ -421,11 +457,11 @@ test('another service: its ids made into addresses by a template, and its type f
   const s = serviceOf('https://wd.example.org/reconcile');
   const g = await gathered([place('newcastle', 'Newcastle', [at(-1.61, 54.97)])]);
   const answer = () => ({ result: [{ id: 'Q1425428', name: 'Newcastle upon Tyne', score: 30 }] });
-  const without = await runLookup({ lookup: createLookup({ endpoint: s.endpoint, fetch: fakeWhg(answer).fetch, queryRate: null }), subjects: g.subjects, places: g.places, options: { service: s }, now: clock() });
+  const without = await runLookup({ lookup: createLookup({ endpoint: s.endpoint, fetch: fakeWhg(answer).fetch, queryRate: null, ...PRIVATE }), subjects: g.subjects, places: g.places, options: { service: s }, now: clock() });
   assert.equal(without.record.counts.skipped.noIri, 1, 'an id that is not an address is not suggested');
   const fake = fakeWhg(answer);
   const type = typeFromManifest({ name: 'x', defaultTypes: [{ id: 'Q486972', name: 'human settlement' }] });
-  const withIt = await runLookup({ lookup: createLookup({ endpoint: s.endpoint, fetch: fake.fetch, queryRate: null, iri: iriFromTemplate('https://www.wikidata.org/entity/{{id}}') }), subjects: g.subjects, places: g.places, options: { service: s, type }, now: clock() });
+  const withIt = await runLookup({ lookup: createLookup({ endpoint: s.endpoint, fetch: fake.fetch, queryRate: null, iri: iriFromTemplate('https://www.wikidata.org/entity/{{id}}'), ...PRIVATE }), subjects: g.subjects, places: g.places, options: { service: s, type }, now: clock() });
   assert.deepEqual(withIt.work.candidates.map((c) => c.candidate_candidate), ['https://www.wikidata.org/entity/Q1425428']);
   assert.equal(Object.values(fake.calls[0].body.queries)[0].type, 'Q486972');
   assert.equal(typeFromManifest({}), null);

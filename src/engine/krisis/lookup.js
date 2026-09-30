@@ -32,7 +32,9 @@
 //   left null, on the lookup record, so the page can show each candidate's licence. No licence is ever
 //   written into an attestation, and none is assumed here.
 import { WHG_ENDPOINT, isWhg, normaliseWhgIri } from '../gazetteer/index.js';
-import { mergeAttribution } from '../gazetteer/whg.js';
+// TODO: take mergeAttribution (and whgQueryType's canonical type) from index.js once the gazetteer
+// module re-exports them there, as its owner plans; whg.js is imported directly until then.
+import { mergeAttribution, whgQueryType } from '../gazetteer/whg.js';
 import { similarity } from './names.js';
 import { WORK_VERSION } from './work.js';
 import { linkState } from './identities.js';
@@ -51,11 +53,13 @@ export const WHG_REQUESTS_A_DAY = 5000;
 /** WHG, as the source a judgement on one of its candidates cites (identity.js gazetteerSource). */
 export const WHG_SERVICE = { endpoint: WHG_ENDPOINT, title: 'World Historical Gazetteer', uri: 'https://whgazetteer.org/' };
 /**
- * The type every query to WHG is sent as, always: WHG takes it and the bare "Place" alike, refuses an
- * unknown type or two types in one request (400), and a query without one is unsafe (confirmed from
- * WHG's production code, 30 September 2026). Not in whg.js; see DEVELOPERS.md.
+ * The type every query to WHG is sent as, always, in the form the gazetteer module sends it (its
+ * whgQueryType, which writes every form of Place as "Place"), so that the preview is what WHG
+ * receives. WHG refuses an unknown type or two types in one request (400), and a query without one is
+ * unsafe (confirmed from WHG's production code, 30 September 2026).
+ * TODO: use whg.js's own constant when the gazetteer module has one (its owner plans to move it there).
  */
-export const WHG_PLACE_TYPE = 'https://whgazetteer.org/static/whg_schema.jsonld#Place';
+export const WHG_PLACE_TYPE = whgQueryType(null);
 /** The type to send another service: the first of its manifest's defaultTypes, or null (none sent). */
 export function typeFromManifest(manifest) {
   const t = Array.isArray(manifest?.defaultTypes) ? manifest.defaultTypes[0] : null;
@@ -134,12 +138,15 @@ export const MAX_RADIUS_KM = 20015;
  * The filters of one place's queries, when asked for, as top-level keys of the query. `nearKm`: `lat`,
  * `lng` and `radius` (km), which WHG resolves as a disc (H3 cells, so its edge is approximate: a place
  * 10.3 km away may pass a 10 km radius), and answers from its upstream gateway only; confirmed from
- * WHG's production code, 30 September 2026. `countries`: the place's own ISO codes as a list (as WHG
- * documents it; not yet confirmed).
+ * WHG's production code, 30 September 2026. `countries`: the place's own country codes as a JSON list
+ * of ISO 3166-1 alpha-2 codes, in capitals (as the gazetteer module's owner confirmed, 30 September
+ * 2026); a code that is not two letters is not sent.
  */
 function filtersOf(place, { countries, nearKm }) {
   const params = {};
-  if (countries && Array.isArray(place.ccodes) && place.ccodes.length) params.countries = [...place.ccodes];
+  const iso2 = countries && Array.isArray(place.ccodes)
+    ? [...new Set(place.ccodes.filter((c) => typeof c === 'string' && /^[a-z]{2}$/i.test(c.trim())).map((c) => c.trim().toUpperCase()))] : [];
+  if (iso2.length) params.countries = iso2;
   const p = place.point;
   if (nearKm > 0 && Array.isArray(p) && Math.abs(p[0]) <= 180 && Math.abs(p[1]) <= 90) {
     const r = (x) => Math.round(x * 1e6) / 1e6;
@@ -331,17 +338,24 @@ export const lookupCandidatesOf = (work, iri, lookupId) => work.candidates.filte
  * records, whose namespace is null or whg, its dataset's in attribution.datasets, else WHG's own), as
  * the service wrote it, or null when it gives none ("licence unknown"): { spdx, commercial, derivatives }, where
  * commercial is permits_commercial and derivatives the opposite of no_derivatives, each true, false
- * or null (not known). Nothing is assumed: a value the service left null stays null.
+ * or null (not known), and redistributable the source's own `redistributable` (false only when the
+ * service says false; missing or null is not known, never true). Nothing is assumed: a value the
+ * service left null stays null. A source that says it is not redistributable, with no licence, still
+ * gives an object, so that it is not read as merely "licence unknown".
  */
 export function licenceOf(attribution, namespace, dataset) {
   const pick = (x) => (x && (typeof x.license === 'string' || (x.license && typeof x.license === 'object')) ? x.license : null);
   // A source's own; else, for WHG's own records (no namespace, or whg), its dataset's, then WHG's.
-  let l = namespace && namespace !== 'whg' ? pick(attribution?.sources?.[namespace]) : null;
-  if (!l && (!namespace || namespace === 'whg')) l = (dataset != null && pick(attribution?.datasets?.[dataset])) || pick(attribution?.whg) || pick(attribution?.sources?.whg);
-  if (!l) return null;
-  if (typeof l === 'string') return { spdx: l, commercial: null, derivatives: null };
+  const own = namespace && namespace !== 'whg' ? attribution?.sources?.[namespace] : null;
+  let l = pick(own), entry = own;
+  if (!l && (!namespace || namespace === 'whg')) {
+    for (const e of [dataset != null ? attribution?.datasets?.[dataset] : null, attribution?.whg, attribution?.sources?.whg]) if (pick(e)) { l = pick(e); entry = e; break; }
+  }
   const yes = (v) => (v === true || v === false ? v : null);
-  return { spdx: typeof l.spdx_id === 'string' ? l.spdx_id : null, commercial: yes(l.permits_commercial), derivatives: l.no_derivatives === true ? false : l.no_derivatives === false ? true : null };
+  const redistributable = yes(entry?.redistributable);
+  if (!l) return redistributable === false ? { spdx: null, commercial: null, derivatives: null, redistributable } : null;
+  if (typeof l === 'string') return { spdx: l, commercial: null, derivatives: null, redistributable };
+  return { spdx: typeof l.spdx_id === 'string' ? l.spdx_id : null, commercial: yes(l.permits_commercial), derivatives: l.no_derivatives === true ? false : l.no_derivatives === false ? true : null, redistributable };
 }
 
 // ---- the run ------------------------------------------------------------------------------------------------

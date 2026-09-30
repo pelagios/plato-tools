@@ -14,7 +14,7 @@ test('WHG answers one query for Newcastle, ranked, with the attribution kept and
   const fetch = (...a) => { requests++; return globalThis.fetch(...a); };
   const subjects = { title: 'Live test', files: [] };
   const places = [{ iri: 'https://example.org/live/newcastle', label: 'Newcastle upon Tyne', names: ['Newcastle upon Tyne'], point: [-1.61, 54.97], ccodes: ['GB'], identities: { linked: [], denied: [] } }];
-  const { work, record, stopped } = await runLookup({ lookup: createLookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch, maxRetries: 0 }), subjects, places, options: { limit: 5 } });
+  const { work, record, stopped } = await runLookup({ lookup: createLookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch, maxRetries: 0, shared: false, locks: null }), subjects, places, options: { limit: 5 } });
   assert.equal(requests, 1, 'one request');
   assert.equal(stopped, null, JSON.stringify(stopped));
   assert.equal(record.queries[places[0].iri].state, 'answered');

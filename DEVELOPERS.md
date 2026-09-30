@@ -957,13 +957,25 @@ coordinates only with `--near`.
   token; they are kept (`queries[…].error`) only when the caller, who holds the token, gives `scrub`.
   The tests look for the token in everything written, beside a control that the service received it
   (that check found the unscrubbed per-query error before it was fixed).
+- **One request in flight.** Krisis relies on the gazetteer module for it and keeps no queue of its
+  own: `createLookup` gives one shared lookup per endpoint in a page or worker, so Krisis's and
+  Chora's lookups in one page share its queue and one request is in flight whoever asks, and across
+  tabs each request is made holding the module's Web Lock for the site. `runLookup` takes the lookup
+  it is given and uses nothing of it but `reconcile` and `batchSize` (the first caller's, which the
+  plan follows), so it works the same with the shared one; a later `createLookup` with a token
+  changes the shared lookup's token, and its other options are the first call's (the command line
+  makes one lookup a run, so its `--batch` and `--gazetteer-iri` stand). The tests make private
+  lookups (`shared: false`, `locks: null`, as Node 24 has `navigator.locks`): shared, each test was
+  answered by the first test's fake.
 - **What is sent.** Each place's label, and only its label, unless `allNames` (`--all-names`) sends its
-  other names too, one query each. WHG's queries always carry its type
-  (`https://whgazetteer.org/static/whg_schema.jsonld#Place`, confirmed from WHG's code: an unknown type,
-  or two in one request, is refused, and a query without one is unsafe); another service's the first of
+  other names too, one query each. WHG's queries always carry its type, `Place`, in the form the
+  module sends it (`whgQueryType`, which writes every form of Place so, and refuses any type but Place
+  or Period before a request), so that the preview is what WHG receives (confirmed from WHG's code: an
+  unknown type, or two in one request, is refused, and a query without one is unsafe); another service's the first of
   its manifest's `defaultTypes` (`typeFromManifest`), when given. Query properties FILTER, never boost,
   and a wrong value silently removes the right answer (WHG's country codes are patchy), so none is sent
-  unless asked for: `countries` (the place's own codes, as WHG documents them; not yet confirmed) and
+  unless asked for: `countries` (the place's own codes as a JSON list of ISO 3166-1 alpha-2 codes, in
+  capitals, as the module's owner confirmed; a code not of two letters is not sent) and
   `nearKm` (`lat`, `lng` and `radius` in kilometres, which WHG resolves as a disc of H3 cells, so the
   edge is approximate, and answers from its upstream gateway only; confirmed). An answer whose
   `scope.applied` is not true is counted and warned of (the filter was not applied). A place's
@@ -1009,17 +1021,20 @@ coordinates only with `--near`.
   **No licence is written into an attestation.** The service's `attribution` is kept in the work file as
   it came, nulls left null (`lookups[].attribution`), and `licenceOf(attribution, namespace, dataset)`
   reads a candidate's (its source's; for WHG's own records its dataset's, then WHG's), or null: "licence
-  unknown". No licence value is written in the code.
+  unknown". It gives `redistributable` as well: false only when the entry says `redistributable: false`
+  ("not to be passed on"), and missing or null is not known, never true, like `permits_commercial` and
+  `no_derivatives` ("terms partly unknown"). No licence value is written in the code.
 - **The work file, version 2** (`work.js`): `others` may be null; `places` may hold places without
   candidates; `lookups: [{ id, service, started_at, finished_at, algorithm_version, parameters,
   attribution, counts, stopped, queries: { <place>: { state, sent, found, added, refused?, error?,
   suspect?, scopeNotApplied? } } }]`; a looked-up candidate has `lookup` and `gazetteer`. `readWork` reads
   version 1 and gives it back as version 2, so **saving a version 1 file writes version 2**, which
   earlier tools cannot read. `match()` writes version 2 with `lookups: []`.
-- **Still open** (for the gazetteer module or WHG): the wire form of the `countries` filter; a
-  `manifest()` for another service's `defaultTypes` and `view.url` (the command line has no way to fetch
-  them through the module yet, so it sends no type to another service, and takes `--gazetteer-iri`);
-  and a per-query `error` cleaned of the token by the module itself.
+- **Still open** (for the gazetteer module, whose owner plans them): a `manifest()` for another
+  service's `defaultTypes` and `view.url` (the command line has no way to fetch them through the module
+  yet, so it sends no type to another service, and takes `--gazetteer-iri`); a per-query `error` cleaned
+  of the token by the module itself; WHG's type as a constant of `whg.js`; and `mergeAttribution`
+  exported from `index.js` (Krisis imports it and `whgQueryType` from `whg.js` until then).
 
 ## Permissions
 

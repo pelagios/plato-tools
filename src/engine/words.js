@@ -415,7 +415,8 @@ export const LOOKUP_WORDS = {
   far: (km) => `further than ${km.toLocaleString('en-GB')} km`,
   /** A candidate's licence (lookup.js licenceOf), or that it is not known. */
   licence: (l) => (!l ? 'licence unknown' : [l.spdx || 'licence not named', l.commercial === false ? 'non-commercial' : '', l.derivatives === false ? 'no derivatives' : '',
-    l.commercial === null || l.derivatives === null ? 'terms partly unknown' : ''].filter(Boolean).join(', ')),
+    l.redistributable === false ? 'not to be passed on' : '',
+    l.commercial === null || l.derivatives === null || l.redistributable == null ? 'terms partly unknown' : ''].filter(Boolean).join(', ')),
   gazetteerFigures: 'The gazetteer\'s own score is relative to its best answer for that query, and its confidence measures the name only: neither says the place is the same.',
   noToken: (variable) => `The World Historical Gazetteer needs a token: set ${variable} in the environment (from your WHG profile). It is never given on the command line.`,
   tokenOnCommandLine: 'the token is never given on the command line, where it would be kept in the shell\'s history and seen by other programs: set WHG_TOKEN in the environment instead (for another service, name the variable that holds its token with --token-env).',
