@@ -129,3 +129,30 @@ test('a version with a line that is not a Feature is not read whole, so the vers
   const good = await cmp(fc + '\n' + feature + '\n');
   assert.ok(!good.items.some((i) => i.kind === 'version-not-read'), JSON.stringify(good.items.map((i) => i.kind)));
 });
+
+// ---- Turtle that breaks part-way ----------------------------------------------------------------
+const TTL = `@prefix plato: <https://w3id.org/plato#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+<https://x.org/p> rdfs:label "Place" ; a plato:SpatialEntity .
+<https://x.org/a> plato:attests_about <https://x.org/p> ; plato:notes "n" .
+<https://x.org/r> rdfs:label "R" broken here .
+<https://x.org/s> rdfs:label "S" .
+`;
+test('Turtle with a syntax error part-way is not read to the end: the run is incomplete, with no output, and says where', async () => {
+  for (const f of [chunked(TTL, 'bad.ttl'), chunked(TTL, 'bad.ttl', 64)]) {
+    const r = await go([f], 'convert', 'plato-jsonl');
+    assert.equal(r.incomplete, true);
+    assert.deepEqual(r.outputs, []);
+    const e = errors(r).find((i) => i.kind === 'unreadable');
+    assert.ok(e, JSON.stringify(errors(r)));
+    assert.match(e.examples[0], /line 5/);
+    // What came before the break was read: its four statements.
+    assert.match(e.examples[0], /the 4 statements before it were read/);
+  }
+  // Control: without the broken line, the same file converts, complete.
+  const good = await go([chunked(TTL.replace(/.*broken.*\n/, ''), 'good.ttl')], 'convert', 'plato-jsonl');
+  assert.ok(!good.incomplete);
+  assert.deepEqual(errors(good), []);
+  assert.equal(good.outputs.length, 1);
+  assert.equal(good.report.counts.triples, 5);
+});

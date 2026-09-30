@@ -187,17 +187,20 @@ async function* annotationSource(input, rep) {
 async function* rdfSource(file, format, rep) {
   if (format === 'turtle') {
     // N3 accepts any object with on('data') / on('end') as a stream; this shim feeds it chunks.
-    const handlers = {}; const quads = []; let finished = false, failure = null;
+    const handlers = {}; const quads = []; let finished = false, failure = null, read = 0;
     const input = { on: (ev, fn) => { handlers[ev] = fn; return input; } };
     new Parser({ format: 'text/turtle' }).parse(input, (err, q) => { if (err) failure = err; else if (q) quads.push(q); else finished = true; });
+    // Turtle cannot be read on past a syntax error, as N-Triples can line by line: what was parsed
+    // before it is read, and the run stops there, incomplete, so no partial output is kept.
+    const broken = () => new DataError(`The Turtle cannot be parsed past a syntax error, so the file cannot be read to the end; the ${read} statements before it were read (${String(failure.message).split('\n')[0]}).`);
     for await (const chunk of lineChunks(file)) {
       handlers.data(chunk);
-      if (failure) { rep.error('rdf-syntax', 'The Turtle cannot be parsed', failure.message); return; }
-      while (quads.length) { const q = quads.shift(); yield { type: 'triple', s: q.subject, p: q.predicate, o: q.object }; }
+      while (quads.length) { const q = quads.shift(); read++; yield { type: 'triple', s: q.subject, p: q.predicate, o: q.object }; }
+      if (failure) throw broken();
     }
     handlers.end();
-    while (quads.length) { const q = quads.shift(); yield { type: 'triple', s: q.subject, p: q.predicate, o: q.object }; }
-    if (failure) rep.error('rdf-syntax', 'The Turtle cannot be parsed', failure.message);
+    while (quads.length) { const q = quads.shift(); read++; yield { type: 'triple', s: q.subject, p: q.predicate, o: q.object }; }
+    if (failure) throw broken();
     return;
   }
   const fmt = format === 'nquads' ? 'N-Quads' : 'N-Triples';
