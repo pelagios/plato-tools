@@ -250,6 +250,52 @@ test('a file with no place name that points to a place says so; one with such na
   assert.deepEqual([m.doc.attestations.length, examples(m, 'tei-none-linked')], [0, ['1 place name in the text']]);
   assert.equal(PROSE.kinds.has('tei-none-linked'), false, 'control');
 });
+// ---- variant readings: place names inside <app> and <choice> ---------------------------------------
+const PL = (id) => `https://pleiades.stoa.org/places/${id}`;
+const pn = (id, words) => `<placeName ref="${PL(id)}">${words}</placeName>`;
+test('app: a place name in the lemma is an attestation; one wholly inside an rdg is not, and is reported once', () => {
+  const m = mapped(tei(`<p><app><lem>${pn(1, 'Roma')}</lem><rdg>${pn(2, 'Remus')}</rdg></app> <app><lem>${pn(1, 'Roma')}</lem><rdg>${pn(2, 'Remus')}</rdg></app></p>`));
+  assert.deepEqual(about(m), [PL(1), PL(1)], 'the lemmas are taken');
+  assert.deepEqual(examples(m, 'tei-variant'), [`rdg: Remus (<placeName> ref="${PL(2)}" on line 2)`]);
+  // An rdg with no lem beside it is still a variant; a place name with no ref in one is a variant too.
+  const r = mapped(tei(`<p><app><rdg>${pn(3, 'Veii')}</rdg><rdg><placeName>Gabii</placeName></rdg></app> ${pn(4, 'Ostia')}</p>`));
+  assert.deepEqual(about(r), [PL(4)], 'control: the place name outside the app is taken');
+  assert.deepEqual(examples(r, 'tei-variant').map((e) => e.split(' (')[0]), ['rdg: Veii', 'rdg: Gabii']);
+  assert.ok(!r.kinds.has('tei-place-no-ref'));
+});
+test('choice: of two place names, the one in the part taken is the attestation, and the one printed its sourceLabel', () => {
+  for (const [printed, edited] of [['orig', 'reg'], ['abbr', 'expan'], ['sic', 'corr']]) {
+    // The review's case, in each order of the parts.
+    for (const body of [`<choice><${printed}>${pn(1, 'Rhoma')}</${printed}><${edited}>${pn(1, 'Roma')}</${edited}></choice>`,
+      `<choice><${edited}>${pn(1, 'Roma')}</${edited}><${printed}>${pn(1, 'Rhoma')}</${printed}></choice>`]) {
+      const m = mapped(tei(`<p>${body}</p>`));
+      assert.deepEqual(m.doc.attestations.map((a) => [a.about, a.names[0].toponym, a.names[0].sourceLabel]), [[PL(1), 'Roma', 'Rhoma']], body);
+      assert.ok(!m.kinds.has('tei-variant'), body);
+    }
+    // Pointing at another place, the part not taken is a variant, reported.
+    const v = mapped(tei(`<p><choice><${printed}>${pn(2, 'Rhoma')}</${printed}><${edited}>${pn(1, 'Roma')}</${edited}></choice></p>`));
+    assert.deepEqual(v.doc.attestations.map((a) => [a.about, a.names[0].toponym, a.names[0].sourceLabel]), [[PL(1), 'Roma', undefined]]);
+    assert.deepEqual(examples(v, 'tei-variant'), [`${printed}: Rhoma (<placeName> ref="${PL(2)}" on line 2)`]);
+    // Only in the part not taken: nothing converted, the variant reported.
+    const o = mapped(tei(`<p><choice><${printed}>${pn(2, 'Rhoma')}</${printed}><${edited}>Roma</${edited}></choice> ${pn(5, 'Capua')}</p>`));
+    assert.deepEqual(about(o), [PL(5)], `control (${printed}): the place name after the choice is taken`);
+    assert.deepEqual(examples(o, 'tei-variant').map((e) => e.split(' (')[0]), [`${printed}: Rhoma`]);
+  }
+});
+test('choice: with one part only, that part is taken; the same name spelt the same in both parts is one attestation', () => {
+  const m = mapped(tei(`<p><choice><orig>${pn(1, 'Rhoma')}</orig></choice></p>`));
+  assert.deepEqual(m.doc.attestations.map((a) => [a.about, a.names[0].toponym]), [[PL(1), 'Rhoma']]);
+  assert.ok(!m.kinds.has('tei-variant'));
+  const s = mapped(tei(`<p><choice><orig>${pn(1, 'Roma')}</orig><reg>${pn(1, 'Roma')}</reg></choice></p>`));
+  assert.deepEqual(s.doc.attestations.map((a) => [a.about, a.names[0].toponym, a.names[0].sourceLabel]), [[PL(1), 'Roma', undefined]]);
+  assert.ok(!s.kinds.has('tei-variant'));
+});
+test('a choice inside an rdg, and an app inside the part of a choice not taken: variants however deep', () => {
+  const m = mapped(tei(`<p><app><lem>${pn(1, 'Roma')}</lem><rdg><choice><orig>${pn(2, 'Rhemus')}</orig><reg>${pn(2, 'Remus')}</reg></choice></rdg></app>`
+    + `<choice><orig><app><lem>${pn(3, 'Ueii')}</lem></app></orig><reg>${pn(4, 'Veii')}</reg></choice></p>`));
+  assert.deepEqual(about(m), [PL(1), PL(4)]);
+  assert.deepEqual(examples(m, 'tei-variant').map((e) => e.split(' (')[0]), ['rdg: Remus', 'orig: Ueii']);
+});
 test('every kind the reader reports has words, and a severity the report knows', () => {
   for (const [k, sev] of Object.entries(TEI_KINDS)) {
     assert.ok(LOSS_TEXT[k], k);

@@ -135,6 +135,7 @@ export const LOSS_TEXT = {
   'tei-whg-staging': "An address on dev.whgazetteer.org is WHG's staging copy, which has its own records and changes without notice, so the place name is not converted with it. Use the place's address on whgazetteer.org instead.",
   'tei-attribute': 'An attribute of a place name that PLATO has no place for (such as cert, type or resp) is not carried; the example gives the element, the attribute and its value. TEI\'s cert does not say what it is certain of (the reading, or which place is meant), so it is not taken for the certainty of the attestation.',
   'tei-place-content': 'A part of a place in a list of places that PLATO has no place for (a description, a note, an idno that is not a web address) is not carried; the example names the place and the part.',
+  'tei-variant': "A place name in a variant reading (an rdg in an app), or in the part of a choice that is not taken (an orig, abbr or sic beside a reg, expan or corr), is not converted: the edition's text at that point is the lemma or the edited form, and a variant is not what the text says. Where the part taken names the same place, the form not taken is kept as the name's form in the source (its sourceLabel), and is not reported. The example gives the part, the words, the element and its line.",
   'not-in-rdf': 'The PLATO RDF model has no property for this key, so its values are dropped in RDF.',
   'unmapped-predicate': 'A predicate that has no place in PLATO JSON is dropped.',
   'unmapped-type': 'A class that has no place in PLATO JSON is dropped.',

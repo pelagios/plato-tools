@@ -55,6 +55,7 @@ export const TEI_KINDS = {
   'tei-whg-staging': 'loss',
   'tei-attribute': 'loss',
   'tei-place-content': 'loss',
+  'tei-variant': 'loss',
   'tei-ref-several': 'warning',
   'tei-source-no-address': 'warning',
   'tei-none-linked': 'warning',
@@ -69,7 +70,12 @@ const PLACE_ELEMENTS = new Set(['placeName', 'settlement', 'region', 'country', 
 const GENERAL_NAMES = new Set(['rs', 'name']);
 // In a <choice>, the edited form is the name (<reg> over <orig>, <expan> over <abbr>, <corr> over
 // <sic>), and the form as the source prints it, where it differs, is kept as the name's sourceLabel.
-// In an <app>, the lemma is taken and the variant readings are not.
+// In an <app>, the lemma is taken and the variant readings are not. This holds both for a <choice>
+// or <app> inside a place name, and for place names inside the parts of one: a place name wholly
+// inside an <rdg>, or inside the part of a <choice> that is not taken (an <orig>, <abbr> or <sic>
+// beside a <reg>, <expan> or <corr>), is not an attestation, and is reported (tei-variant); where
+// the part taken has a place name with the same ref, the one not taken is its sourceLabel instead.
+// A <choice> with one part only (an <orig> with no <reg>) takes that part.
 const PREFERRED = ['reg', 'expan', 'corr', 'lem'];
 const PRINTED = ['orig', 'abbr', 'sic', 'lem'];
 // Where a <div> labels itself: its type ("book 2"), or for EpiDoc's type="textpart" its subtype
@@ -269,8 +275,8 @@ export class TeiReader {
     this.stack.push(el);
     const depth = this.stack.length;
     // A <choice> or <app>, and its parts, for every capture open around it.
-    if (parent?.choice) { el.part = true; for (const c of this.captures) c.partOpen(local, depth); }
-    if (tei && (local === 'choice' || local === 'app')) { el.choice = true; for (const c of this.captures) c.choiceOpen(depth); }
+    if (parent?.choice) { el.part = true; parent.parts.push(local); for (const c of this.captures) c.partOpen(local, depth); }
+    if (tei && (local === 'choice' || local === 'app')) { el.choice = true; el.parts = []; el.deferred = []; for (const c of this.captures) c.choiceOpen(depth); }
     if (tei && local === 'note') { this.inNote++; el.note = true; }
     if (tei && BREAKS.has(local)) for (const c of this.captures) c.brk(attr('break') === 'no');
     if (!tei) return;
@@ -347,6 +353,7 @@ export class TeiReader {
       if (c.depth === depth) { this.captures.splice(i, 1); c.onDone(c); }
     }
     if (el.choice) for (const c of this.captures) c.choiceClose(depth);
+    if (el.choice && el.deferred.length) this.choiceDone(el);
     if (el.part) for (const c of this.captures) c.partClose(depth);
     if (el.note) this.inNote--;
     if (el.mention) this.inPlaceMention--;
@@ -411,33 +418,71 @@ export class TeiReader {
     const ref = attr('ref'), key = attr('key'), xmlId = attr('xml:id');
     const toponym = norm(c.pref), printed = norm(c.printed);
     const el = this.stack[this.stack.length - 1];
+    let d;
     if (ref === undefined || !norm(ref)) {
       // A place name with no ref points to no place. One inside another place name is part of that
       // name ("<placeName><settlement>Roma</settlement></placeName>"), and one around a place name
       // that has a ref is only its wrapping: neither is reported.
-      if (!nested && !c.hasRef) {
-        this.mentions++; this.countOne();
-        this.report('tei-place-no-ref', `${toponym || `<${t.name}>`}${key ? ` (key ${key})` : ''}`);
+      if (nested || c.hasRef) return;
+      d = { noRef: true, words: `${toponym || `<${t.name}>`}${key ? ` (key ${key})` : ''}` };
+    } else {
+      for (const o of this.captures) if (o.hasRef !== undefined) o.hasRef = true;
+      const line = el.verse ?? this.verseLine() ?? this.line;
+      const lineWords = el.verse !== undefined || this.verseLine() !== undefined ? `line ${line}`
+        : startLine !== undefined && line !== undefined && startLine !== line ? `lines ${startLine} to ${line}` : line !== undefined ? `line ${line}` : undefined;
+      const locator = [...where, lineWords, this.inNote ? 'in a note' : undefined, xmlId ? `xml:id ${xmlId}` : undefined].filter(Boolean).join(', ');
+      let language;
+      if (el.lang !== undefined && el.lang !== '') {
+        if (LANGUAGE_TAG.test(el.lang)) language = el.lang;
+        else this.report('tei-lang-not-tag', el.lang);
       }
-      return;
+      d = { m: {
+        element: t.name, ref, key, xmlId, toponym, printed, language, locator,
+        fileLine, source: this.source(), pointers: norm(ref).split(' '), waiting: [],
+        prefixes: this.scopes.flatMap((s) => s.hdr.prefixDefs).reverse(),   // innermost first
+      } };
     }
-    for (const o of this.captures) if (o.hasRef !== undefined) o.hasRef = true;
+    d.element = t.name; d.fileLine = fileLine; d.toponym = toponym;
+    this.route(d, this.stack.length - 1);
+  }
+  /**
+   * Where a place name goes, looking outwards from the element at stack index `from`: inside an
+   * <rdg>, it is a variant reading, reported and not converted; inside a part of a <choice>, it
+   * waits until the <choice> closes, when which part is taken is known; else it is delivered.
+   */
+  route(d, from) {
+    for (let i = from; i >= 0; i--) {
+      const e = this.stack[i];
+      if (!e.tei) continue;
+      if (e.local === 'rdg') { this.variant(d, 'rdg'); return; }
+      if (e.part && i > 0 && this.stack[i - 1].local === 'choice' && this.stack[i - 1].tei) { this.stack[i - 1].deferred.push({ part: e.local, d }); return; }
+    }
+    this.deliver(d);
+  }
+  /** A <choice> closes: its place names in the part taken go on; the others are variants, or the sourceLabel of one taken. */
+  choiceDone(el) {
+    const pick = (order) => order.find((n) => el.parts.includes(n));
+    const taken = pick(PREFERRED) || el.parts[0];
+    const printed = pick(PRINTED.filter((n) => n !== 'lem'));
+    const kept = el.deferred.filter((x) => x.part === taken && !x.d.noRef);
+    for (const x of el.deferred) {
+      if (x.part === taken) continue;
+      // The form as printed of a place name the part taken also names, with the same ref.
+      const same = x.part === printed && !x.d.noRef && kept.find((k) => !k.labelled && norm(k.d.m.ref) === norm(x.d.m.ref));
+      if (same) { same.labelled = true; if (x.d.toponym && x.d.toponym !== same.d.m.toponym) same.d.m.printed = x.d.toponym; continue; }
+      this.variant(x.d, x.part);
+    }
+    const at = this.stack.length - 2;   // the <choice> is still the innermost element
+    for (const x of el.deferred) if (x.part === taken) this.route(x.d, at);
+  }
+  variant(d, part) {
     this.mentions++; this.countOne();
-    const line = el.verse ?? this.verseLine() ?? this.line;
-    const lineWords = el.verse !== undefined || this.verseLine() !== undefined ? `line ${line}`
-      : startLine !== undefined && line !== undefined && startLine !== line ? `lines ${startLine} to ${line}` : line !== undefined ? `line ${line}` : undefined;
-    const locator = [...where, lineWords, this.inNote ? 'in a note' : undefined, xmlId ? `xml:id ${xmlId}` : undefined].filter(Boolean).join(', ');
-    let language;
-    if (el.lang !== undefined && el.lang !== '') {
-      if (LANGUAGE_TAG.test(el.lang)) language = el.lang;
-      else this.report('tei-lang-not-tag', el.lang);
-    }
-    const m = {
-      element: t.name, ref, key, xmlId, toponym, printed, language, locator,
-      fileLine, source: this.source(), pointers: norm(ref).split(' '), waiting: [],
-    };
-    const prefixes = this.scopes.flatMap((s) => s.hdr.prefixDefs).reverse();   // innermost first
-    m.prefixes = prefixes;
+    this.once('tei-variant', `${part}: ${d.toponym || `<${d.element}>`} (<${d.element}>${d.m ? ` ref="${norm(d.m.ref)}"` : ''} on line ${d.fileLine})`);
+  }
+  deliver(d) {
+    this.mentions++; this.countOne();
+    if (d.noRef) { this.report('tei-place-no-ref', d.words); return; }
+    const m = d.m;
     for (const p of m.pointers) if (p.startsWith('#') && !this.places.has(p.slice(1))) m.waiting.push(p.slice(1));
     if (m.waiting.length) this.pending.push(m);
     else this.emit(m, false);
