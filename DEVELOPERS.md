@@ -131,7 +131,12 @@ What it reports, and why, is in the guide:
   would otherwise count twice). Any other named node (a place, a
   source) may be corrected: a lost statement is a warning, an added one nothing.
 - **An address used twice** in the later version, once unchanged and once saying something else,
-  is one node in RDF, so it is a changed attestation.
+  is one node in RDF, so it is a changed attestation. **An address lost**, where the later version
+  says the same without it or under another, is a breach of its own (`attestation-readdressed`),
+  since its remedy is the address, not the content.
+- **A stand-in label is not compared.** Reading RDF or attestation-centric JSON, the pipeline gives
+  a place with no label its address as a label; that statement is not the data's, so the check
+  leaves it out, or every such place would read as relabelled.
 - **What changed.** When anything changed, both versions are read a second time, keeping the
   statements of the first five changed things of each kind only (as many as the report shows), and
   each example is given the statements one version makes and the other does not.

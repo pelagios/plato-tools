@@ -211,6 +211,8 @@ test('a name shared under its own address, respelt, breaks the rule: the attesta
   const r = await sharedPair({ toponym: 'Oldford' }, { toponym: 'Oldeford' });
   assert.deepEqual(kinds(r, 'error'), ['facet-changed'], JSON.stringify(r.items));
   assert.deepEqual(item(r, 'facet-changed').examples, [N]);
+  // Not also "has more said of it": that warning says what was said still holds, which a respelling denies.
+  assert.deepEqual(kinds(r, 'warning'), [], JSON.stringify(r.items));
   assert.equal(r.counts.unchanged, 2, 'the attestations themselves are unchanged, and counted so');
   assert.deepEqual(item(r, 'facet-changed').explained, [{ example: N, earlier: ['plato:toponym "Oldford"'], later: ['plato:toponym "Oldeford"'] }]);
 });
@@ -245,6 +247,29 @@ test('giving a name an address is a change to its attestation: it now points to 
   const r = await cmp(json(doc(bare, G1)), json(doc(named, G2)));
   assert.deepEqual(item(r, 'attestation-changed')?.examples, [A + 'a1'], JSON.stringify(r.items));
   assert.deepEqual(item(r, 'attestation-changed').explained, [{ example: A + 'a1', earlier: ['plato:attests_name [plato:toponym "Oldford"]'], later: [`plato:attests_name <${N}>`] }]);
+});
+
+test('an attestation that keeps what it says but loses its address is a breach whose remedy is the address', async () => {
+  const r = await cmp(v1(), v2((p) => { delete p[1].attestations[0]['@id']; }));
+  assert.deepEqual(kinds(r, 'error'), ['attestation-readdressed'], JSON.stringify(r.items));
+  assert.deepEqual(item(r, 'attestation-readdressed').examples, [A + 'b1']);
+  assert.match(item(r, 'attestation-readdressed').message, /give it back its address/);
+  assert.deepEqual([r.counts.changed, r.counts.lost, r.counts.added], [1, 0, 0]);
+  // and under another address, the same
+  assert.deepEqual(kinds(await cmp(v1(), v2((p) => { p[1].attestations[0]['@id'] = A + 'b1-renamed'; })), 'error'), ['attestation-readdressed']);
+  // control: deleted outright, it is removed
+  assert.deepEqual(kinds(await cmp(v1(), v2((p) => { p[1].attestations = []; })), 'error'), ['attestation-removed']);
+});
+test('a place read without a label is not reported as relabelled against a version that gives its label', async () => {
+  // Attestation-centric JSON names no labels; the reader gives each place its address as a stand-in.
+  const ac = json({ profile: 'attestation-centric', gazetteer: G1, attestations: [{ '@id': A + 'a1', about: X + 'place/a', names: [{ toponym: 'Oldford' }], sources: [src] }] }, 'ac.json');
+  const pc = json(doc([place('a', [{ '@id': A + 'a1', names: [{ toponym: 'Oldford' }], sources: [src] }])], G2));
+  const r = await cmp(ac, pc);
+  assert.deepEqual([r.errors, r.counts.unchanged], [0, 1], JSON.stringify(r.items));
+  assert.equal(item(r, 'description-changed'), undefined, JSON.stringify(r.items));
+  // control: a real label that changes is still reported
+  const pc2 = json(doc([place('a', [{ '@id': A + 'a1', names: [{ toponym: 'Oldford' }], sources: [src] }])], G1));
+  assert.deepEqual(item(await cmp(pc2, json(doc([{ ...place('a', [{ '@id': A + 'a1', names: [{ toponym: 'Oldford' }], sources: [src] }]), label: 'A, renamed' }], G2))), 'description-changed')?.examples, [X + 'place/a']);
 });
 
 // ---- what changed ---------------------------------------------------------------------------------------------

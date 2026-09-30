@@ -201,7 +201,7 @@ async function compareTwo(items, o, resources, host, live) {
 }
 function describeComparison(r, brief) {
   const side = (word, s) => `${word} ${s.input}${s.format ? `: ${formatName(s)}` : ''}\n`;
-  const lines = [side('Earlier:', r.earlier) + (r.later ? side('Later:  ', r.later) : '').replace(/\n$/, '')];
+  const lines = [(side('Earlier:', r.earlier) + (r.later ? side('Later:  ', r.later) : '')).replace(/\n$/, '')];
   if (r.message) lines.push(`  Could not be compared: ${r.message}`);
   else {
     const { problems, counted } = summary({ errors: r.errors, counts: r.counts }, 'compare');
