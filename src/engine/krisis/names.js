@@ -11,7 +11,7 @@
 // rewards a shared beginning, so "Saint Martin" and "Saint Maurice", or "East Ham" and "West Ham",
 // score over 0.9 on letters alone, though all they have in common is a word that tells nothing, or
 // the difference is the whole point. The words both names have (a word also counts as shared with
-// its abbreviation or contraction: St and Saint, Mt and Mount, on and upon) are set aside, and what
+// its known short form, SHORT_FORMS: St and Saint, Mt and Mount, on and upon) are set aside, and what
 // is left of each name is compared. If what is left is alike (at least DISTINCT_GATE, or one letter
 // added, dropped, changed or two swapped: Kafr Cal and Kafr Cel, though a word of three letters
 // with one changed scores only about 0.8, so such a pair is suggested only if the words shared weigh
@@ -20,8 +20,8 @@
 // only the shared words' share. Words are weighted by how rare they are in the two datasets
 // (inverse document frequency, given by the matcher), so a common word such as Saint or Tell
 // counts for little. The score is never raised by this, only lowered. The one case that raises a
-// score is two names whose words are all shared, some only as an abbreviation (Mt Pleasant and Mount
-// Pleasant, St Zan and Saint Zan; a contraction of at most three letters, two fewer than the word): the letters of St and Saint differ and would count against a pair
+// score is two names whose words are all shared, some only as a known short form (Mt Pleasant and
+// Mount Pleasant, St Zan and Saint Zan): the letters of St and Saint differ and would count against a pair
 // that differs in nothing else, so such names are scored again with each short form written out in
 // full, and the higher score is kept (expandedScore()).
 // Trigrams of the normalised name are what matching blocks on (blocking.js).
@@ -97,21 +97,19 @@ export function similarityNormalised(x, y, weight) {
   return d === null ? base : Math.min(base, d);
 }
 
-/** Whether `a` (the shorter) abbreviates or contracts `b`: its letters in order in b, ending alike, and beginning alike unless it has only two. */
-function contracts(a, b) {
-  if (a.length < 2 || a.length >= b.length || a.at(-1) !== b.at(-1) || (a[0] !== b[0] && a.length > 2)) return false;
-  let j = 0;
-  for (let i = 0; i < b.length && j < a.length; i++) if (b[i] === a[j]) j++;
-  return j === a.length;
-}
-const sameWord = (a, b) => a === b || (a.length < b.length ? contracts(a, b) : contracts(b, a));
-
-/** Whether a contraction is short enough to be an abbreviation (St, Ste, Mt, Rd, on for upon): at most three letters, and two fewer than the word. */
-const isAbbreviation = (a, b) => a.length <= 3 && b.length - a.length >= 2;
+/**
+ * The known short forms, and only these: St and Saint, Ste and Sainte, Mt and Mount, Ft and Fort, Pt
+ * and Port, on and upon. A word counts as shared with its short form, and names alike but for them
+ * are scored with them written out (expandedScore()). Until krisis-names 4 any contraction counted
+ * (letters in order, ending alike): that scored Dry Hill as Danebury Hill, Great Bow as Great Baddow
+ * and By Park as Cornbury Park at 1.
+ */
+export const SHORT_FORMS = new Map([['st', 'saint'], ['ste', 'sainte'], ['mt', 'mount'], ['ft', 'fort'], ['pt', 'port'], ['on', 'upon']]);
+const sameWord = (a, b) => a === b || SHORT_FORMS.get(a) === b || SHORT_FORMS.get(b) === a;
 
 /**
- * The words two normalised names share, and those left of each: `shared` (a word and its contraction
- * counted once, as the longer), `restX`, `restY`, and `long`, the long form of each abbreviation by its short one.
+ * The words two normalised names share, and those left of each: `shared` (a word and its short form
+ * counted once, as the long form), `restX`, `restY`, and `long`, the long form of each short form used.
  */
 function alignWords(wx, wy) {
   const restY = [...wy], restX = [], shared = [], long = new Map();
@@ -120,22 +118,21 @@ function alignWords(wx, wy) {
     const i = restY.findIndex((v) => sameWord(restX[k], v));
     if (i >= 0) {
       const [a, b] = restX[k].length > restY[i].length ? [restY[i], restX[k]] : [restX[k], restY[i]];
-      shared.push(b); if (isAbbreviation(a, b)) long.set(a, b); restY.splice(i, 1); restX.splice(k, 1);
+      shared.push(b); long.set(a, b); restY.splice(i, 1); restX.splice(k, 1);
     }
   }
   return { shared, restX, restY, long };
 }
 
 /**
- * When every word of two normalised names is shared, some only as an abbreviation (St Zan and Saint
- * Zan, Mt Pleasant and Mount Pleasant: a contraction of at most three letters, two fewer than the
- * word, so not Tel and Tell or Cal and Carl), the name score of the two with each short form written out
- * in full; otherwise null. The letters of "St" and "Saint" differ, and would otherwise count against
+ * When every word of two normalised names is shared, some only as a known short form (St Zan and
+ * Saint Zan, Mt Pleasant and Mount Pleasant: SHORT_FORMS, so not Dry for Danebury or Cal for Carl),
+ * the name score of the two with each short form written out in full; otherwise null. The letters of "St" and "Saint" differ, and would otherwise count against
  * the pair; so this is the one case where the score is raised (the higher of this and the name score).
  */
 export function expandedScore(x, y) {
   if (!x.includes(' ') && !y.includes(' ')) return null;
-  if (Math.abs(x.length - y.length) < 2) return null; // an abbreviation is two letters shorter than its word
+  if (Math.abs(x.length - y.length) < 2) return null; // each short form is at least two letters shorter than its word
   const wx = x.split(' '), wy = y.split(' ');
   if (wx.length !== wy.length) return null;
   const { restX, restY, long } = alignWords(wx, wy);

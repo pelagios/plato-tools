@@ -12,33 +12,36 @@
 //
 // A pair is suggested when its best name score reaches the threshold, the two are not further apart
 // than the greatest distance (when both have a point), and the datasets do not already link them,
-// or say that they are different places. Each subject place keeps its best few.
+// or say that they are different places. Each subject place keeps its best few,
+// those near it before those with no point.
 import { run } from '../pipeline.js';
 import { Report } from '../report.js';
-import { collectWithdrawn, resolveWithdrawn } from '../../formats/shared.js';
+import { collectWithdrawn, resolveWithdrawn, currentAttestations } from '../../formats/shared.js';
 import { DISTINCT_GATE } from './names.js';
 import { NameIndex, BLOCKING, BLOCKING_RULE } from './blocking.js';
 import { WORK_VERSION, MATCH_DEFAULTS, fileRecords, serialiseWork, checkReviewer, checkMatchOptions } from './work.js';
 import { KRISIS_TEXT } from '../words.js';
 
-export const ALGORITHM = 'krisis-names 3';
+export const ALGORITHM = 'krisis-names 4';
 export const DEFAULTS = MATCH_DEFAULTS;
 export { BLOCKING };
 export const SCORING = 'Each name of a place (its label and every toponym and romanised form) is normalised: '
   + 'decomposed (NFKD), combining marks removed, ß æ œ ø ł đ ð þ ı spelt out, lower-cased, and everything but letters and digits made a space. '
   + 'Two names score their Jaro-Winkler similarity (prefix scale 0.1, up to four letters), or, if higher, that of their words sorted alphabetically. '
-  + 'Names that share a word are held to the words they do not share: a word also counts as shared with its abbreviation or contraction (its letters in order in the other, ending alike, and beginning alike unless it has two letters: St and Saint, on and upon). '
+  + 'Names that share a word are held to the words they do not share: a word also counts as shared with its known short form, and only these: St and Saint, Ste and Sainte, Mt and Mount, Ft and Fort, Pt and Port, on and upon. '
   + 'Each word weighs its inverse document frequency in the names of both datasets, ln(1 + N / df). If the words left of each name score at least '
   + `${DISTINCT_GATE} (as above), or are one letter added, dropped, changed or two swapped apart, the pair scores the shared words' share of the weight of all the words of the two (a shared word counted once), plus the rest's score times the remaining share; `
   + "otherwise the shared words' share alone. The lower of this and the name score is the score. "
   + 'A distinctive word of three letters with one letter changed scores 0.78 to 0.82 on its letters, so such a pair reaches 0.85 only when the words it shares weigh from a sixth to a third of all its words: '
   + 'for words of three letters one letter is already the limit, and a common shared word takes the pair under it (Kafr Cal and Kafr Cel score 0.87 with every word weighed alike, and under 0.85 where Kafr is common). '
-  + 'The one exception that raises a score: two names whose words are all shared, some only as an abbreviation (a contraction of at most three letters, two fewer than its word: St and Saint, Mt and Mount), '
-  + 'are scored again with each abbreviation written out in full, and the higher score is kept. '
+  + 'The one exception that raises a score: two names whose words are all shared, some only as a known short form (as above: St and Saint, Mt and Mount), '
+  + 'are scored again with each short form written out in full, and the higher score is kept. '
   + 'Two places score the best of any pair of their names, over the pairs blocking allows (see blocking). '
-  + "A place's point is its first Point geometry, else the centre of its first bounding box, else none; "
+  + "A place's point is the first Point geometry of its attestations, else the centre of the first bounding box, else none, passing over attestations that are negated or withdrawn (retracted or superseded); "
   + 'a pair whose points are further apart than maxDistanceKm (great-circle distance) is dropped, and a pair without two points is kept, with no distance. '
-  + 'Pairs that either dataset already links by an identity relation, or says are different places, are not suggested. Each subject place keeps its topK best.';
+  + 'Pairs that either dataset already links by an identity relation, or says are different places, are not suggested. '
+  + 'Each subject place keeps its topK best: when it has a point, first the places within maxDistanceKm of it, and then, in the places left, those with no point; '
+  + 'each group by score, then distance.';
 
 // A problem of a dataset's own that stops part of it being read: the matching is then of less than the whole.
 const NOT_READ = new Set(['json-syntax', 'rdf-syntax', 'record-failed', 'late-header', 'lpf-v2']);
@@ -68,25 +71,51 @@ function coordsBox(c, box = [Infinity, Infinity, -Infinity, -Infinity]) {
   return box;
 }
 const centre = (b) => (b && b.length === 4 && b.every(Number.isFinite) && b[0] <= b[2] && b[1] <= b[3] ? [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2] : null);
-/** A place's representative point: its first Point, else the centre of its first bounding box, else null. */
-export function representativePoint(record) {
-  const geoms = [];
-  for (const a of record.attestations || []) for (const g of a?.geometries || []) if (g && typeof g === 'object') geoms.push(g);
-  for (const g of geoms) {
-    if (okPoint(g.reprPoint)) return [g.reprPoint[0], g.reprPoint[1]];
-    if (g.geojson?.type === 'Point' && okPoint(g.geojson.coordinates)) return [g.geojson.coordinates[0], g.geojson.coordinates[1]];
-    const m = typeof g.wkt === 'string' && /^\s*POINT\s*\(\s*(-?[\d.]+)\s+(-?[\d.]+)\s*\)\s*$/i.exec(g.wkt);
-    if (m && okPoint([+m[1], +m[2]])) return [+m[1], +m[2]];
+/** A geometry's point (reprPoint, a GeoJSON Point, or a WKT POINT), else null. */
+function pointOf(g) {
+  if (okPoint(g.reprPoint)) return [g.reprPoint[0], g.reprPoint[1]];
+  if (g.geojson?.type === 'Point' && okPoint(g.geojson.coordinates)) return [g.geojson.coordinates[0], g.geojson.coordinates[1]];
+  const m = typeof g.wkt === 'string' && /^\s*POINT\s*\(\s*(-?[\d.]+)\s+(-?[\d.]+)\s*\)\s*$/i.exec(g.wkt);
+  return m && okPoint([+m[1], +m[2]]) ? [+m[1], +m[2]] : null;
+}
+/**
+ * The points a place's attestations give, in order, as { att (the attestation's @id, or null),
+ * point, exact (false for the centre of a bounding box) }. A negated attestation ("not here") gives
+ * none, nor one that the record itself withdraws (plato:Retracts, plato:Supersedes): a bad import
+ * at 0°, 0° that was retracted is not where the place is. Withdrawals made elsewhere in the dataset
+ * are applied by pickPoint().
+ */
+function attestationPoints(record) {
+  const out = [];
+  for (const a of currentAttestations(record, null, () => {})) {
+    if (!a || typeof a !== 'object' || a.negated) continue;
+    const att = typeof a['@id'] === 'string' ? a['@id'] : null;
+    for (const g of Array.isArray(a.geometries) ? a.geometries : []) {
+      if (!g || typeof g !== 'object') continue;
+      const p = pointOf(g);
+      if (p) { out.push({ att, point: p, exact: true }); continue; }
+      const c = centre(g.bbox) || (g.geojson ? centre(coordsBox(g.geojson.coordinates)) : null);
+      if (c) out.push({ att, point: c, exact: false });
+    }
   }
-  for (const g of geoms) {
-    const c = centre(g.bbox) || (g.geojson ? centre(coordsBox(g.geojson.coordinates)) : null);
-    if (c) return c;
-  }
-  return null;
+  return out;
+}
+/** The first point of `points` not withdrawn (`withdrawn`: @id -> kind), else the first box centre, else null. */
+function pickPoint(points, withdrawn = null) {
+  const current = withdrawn && withdrawn.size ? points.filter((p) => !(p.att && withdrawn.has(p.att))) : points;
+  return (current.find((p) => p.exact) || current[0])?.point ?? null;
+}
+/**
+ * A place's representative point: the first Point of its current attestations, else the centre of
+ * the first bounding box, else null. Negated and withdrawn attestations are passed over; `withdrawn`
+ * (@id -> kind, resolveWithdrawn().status) adds what the rest of the dataset withdraws.
+ */
+export function representativePoint(record, withdrawn = null) {
+  return pickPoint(attestationPoints(record), withdrawn);
 }
 
 /** What the pipeline writes one dataset's records to: the places, and the identity links it states. */
-function reader(side, rep, word) {
+function reader(side, rep, word, standIns = new Set()) {
   const link = (a, b, negated, att) => { if (typeof a === 'string' && typeof b === 'string' && a !== b) side.links.push({ a, b, negated, att }); };
   const record = (rec) => {
     const iri = rec['@id'];
@@ -103,16 +132,19 @@ function reader(side, rep, word) {
     }
     collectWithdrawn(rec.attestations, side.withdrawals);
     for (const r of rec.identityRelations || []) link(r?.subject ?? iri, r?.object, false, null);
-    const p = { label: typeof rec.label === 'string' ? rec.label : iri, names, point: representativePoint(rec) };
+    // The point is picked once the whole dataset's withdrawals are known (readSide()).
+    const p = { label: typeof rec.label === 'string' ? rec.label : iri, names, point: null, points: attestationPoints(rec) };
     if (Array.isArray(rec.ccodes) && rec.ccodes.length) p.ccodes = rec.ccodes.filter((c) => typeof c === 'string');
     if (types.size) p.types = [...types];
     if (!side.places.has(iri)) side.places.set(iri, p);
-    else { const q = side.places.get(iri); for (const n of names) if (!q.names.includes(n)) q.names.push(n); q.point ||= p.point; }
+    else { const q = side.places.get(iri); for (const n of names) if (!q.names.includes(n)) q.names.push(n); q.points.push(...p.points); }
   };
   return {
     header(head) {
       const g = (head && typeof head.gazetteer === 'object' && head.gazetteer) || {};
-      if (typeof g.title === 'string' && g.title) { side.title = g.title; side.titleFrom = 'gazetteer'; }
+      // A title the reader made up for a dataset that gives none (an LPF FeatureCollection with no
+      // title is given its file's name) is a stand-in, as the file's name is.
+      if (typeof g.title === 'string' && g.title && !standIns.has(g.title)) { side.title = g.title; side.titleFrom = 'gazetteer'; }
       if (typeof g['@id'] === 'string') side.uri = g['@id'];
     },
     event(ev) {
@@ -123,9 +155,21 @@ function reader(side, rep, word) {
   };
 }
 
+/**
+ * The titles the engine's readers give a dataset that has none of its own (pipeline.js, and the
+ * readers in src/formats/): its file's name, "Place annotations in <file>" for Web Annotations, and
+ * the tables' default. Such a title is not the dataset's, and is no better than the file's name.
+ */
+const TABLES_TITLE = 'Converted from PLATO spreadsheet tables';
+function standInTitles(input) {
+  const out = new Set([TABLES_TITLE]);
+  for (const f of input.files || []) if (f?.name) { out.add(f.name); out.add(`Place annotations in ${f.name}`); }
+  return out;
+}
+
 async function readSide(input, word, options, env, rep, progress) {
   const side = { title: input.files[0]?.name || 'Untitled dataset', titleFrom: 'file-name', uri: undefined, places: new Map(), links: [], withdrawals: new Map(), unaddressed: 0 };
-  const r = await run({ input, action: 'check', options: { base: options.base, sink: reader(side, rep, word) } },
+  const r = await run({ input, action: 'check', options: { base: options.base, sink: reader(side, rep, word, standInTitles(input)) } },
     { ...env, progress: (p) => progress({ ...p, dataset: word, phase: p.phase === 'done' ? 'read' : p.phase }) });
   if (r.incomplete) return { side, failed: r.report.items.find((i) => i.kind === 'unreadable')?.examples[0] };
   let others = 0;
@@ -138,6 +182,8 @@ async function readSide(input, word, options, env, rep, progress) {
   // A link an attestation made that a later one withdrew (retracted, or replaced) no longer holds.
   const withdrawn = resolveWithdrawn(side.withdrawals).status;
   side.links = side.links.filter((l) => !(l.att && withdrawn.has(l.att)));
+  // And a point an attestation gave that a later one withdrew is not where the place is.
+  for (const p of side.places.values()) { p.point = pickPoint(p.points, withdrawn); delete p.points; }
   side.files = await fileRecords(input.files);
   return { side };
 }
@@ -212,7 +258,11 @@ export async function match({ subjects, others, options = {} }, env) {
       }
       found.push({ oiri, op, score: round(score, 3), distance_km });
     }
-    found.sort((a, b) => b.score - a.score || (a.distance_km ?? Infinity) - (b.distance_km ?? Infinity) || (a.oiri < b.oiri ? -1 : 1));
+    // When the subject has a point, the places near it come first, and those with no point take only
+    // the places left: otherwise namesakes with no point, at 1, crowd out a variant 4 km away. Then by
+    // score, then distance.
+    const unplaced = (f) => (sp.point && f.distance_km === null ? 1 : 0);
+    found.sort((a, b) => unplaced(a) - unplaced(b) || b.score - a.score || (a.distance_km ?? Infinity) - (b.distance_km ?? Infinity) || (a.oiri < b.oiri ? -1 : 1));
     const kept = found.slice(0, params.topK);
     if (!kept.length) continue;
     places[iri] = sp;

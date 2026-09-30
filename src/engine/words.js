@@ -198,6 +198,8 @@ export const review = {
   noDataset: 'Choose the dataset this review was made from first; it is needed to finish.',
   /** A review resumed before any dataset is chosen. */
   noDatasetYet: 'No dataset is chosen yet. You can look through the review, but to finish it, choose the dataset it was made from, then resume the review again.',
+  /** A review resumed with files chosen that are not data these tools read. */
+  notRecognisedYet: 'The files chosen were not recognised as data these tools read. You can look through the review, but to finish it, choose the dataset it was made from, then resume the review again.',
   /** A dataset given to matching that is not data these tools read ('subjects' or 'others'). */
   notRecognised: (which) => `${which === 'subjects' ? 'Your dataset' : 'The other dataset'} was not recognised as data these tools read, so nothing was matched`,
 };

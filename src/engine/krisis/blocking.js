@@ -14,7 +14,11 @@
 // the trigrams beginning at no more than BLOCKING.spread (4) places in a row, and a name's rarest
 // trigrams often all fall in its one unusual stretch ("great shunia": uni, hun, nia, shu; "Great
 // Shnuia" has none of them). So when the keys all begin within that many places, the rarest trigram
-// beginning further off is added.
+// beginning further off is added, if it is in no more than BLOCKING.far (10) times as many names as
+// make a trigram common (a tenth of a large dataset): in "San Xyz" the only trigram beginning further
+// off may be "an ", and when every name is San or Kafr and three letters, adding it compared every
+// name with all of them (20,000 with 20,000 did not finish in ten minutes). The bound is 10 and not 5
+// because at 5 "Granabad" loses "Grnaabad", whose far keys ("  g", " gr", "aba") are in 6 to 7 times as many.
 //
 // A name found so is compared when the two share at least BLOCKING.share (40%) of the trigrams of
 // the one with fewer, counting all of them, and at least one, or when they begin with the same three
@@ -30,11 +34,11 @@
 // both datasets, ln(1 + N / df), so that a common word counts for little.
 import { normalise, nameScore, distinctive, expandedScore, sortWords, trigrams } from './names.js';
 
-export const BLOCKING = { share: 0.4, commonShare: 0.01, commonFloor: 50, keys: 4, spread: 4 };
+export const BLOCKING = { share: 0.4, commonShare: 0.01, commonFloor: 50, keys: 4, spread: 4, far: 10 };
 export const BLOCKING_RULE = 'The names of the other dataset are indexed by their trigrams (normalised, padded with two spaces before and one after). '
   + `A trigram is common when more than ${BLOCKING.commonShare * 100}% of the other dataset's names have it, and more than ${BLOCKING.commonFloor}. `
   + `A name is looked up by its trigrams that are not common (or, with fewer than ${BLOCKING.keys} of those, by its ${BLOCKING.keys} rarest), `
-  + `and, when those keys all begin within ${BLOCKING.spread} places of each other, by the rarest trigram beginning further off too; `
+  + `and, when those keys all begin within ${BLOCKING.spread} places of each other, by the rarest trigram beginning further off too, unless more than ${BLOCKING.far} times as many names as make a trigram common have it; `
   + `each name found is compared if it shares at least ${BLOCKING.share * 100}% of the trigrams of the one with fewer (and at least one), or begins with the same three letters; `
   + 'a name that is exactly the same is always compared.';
 
@@ -95,7 +99,8 @@ export class NameIndex {
       let lo = Infinity, hi = -Infinity;
       for (const id of keys) { const p = start.get(id); if (p < lo) lo = p; if (p > hi) hi = p; }
       if (hi - lo < BLOCKING.spread) {
-        const far = known.find((id) => { const p = start.get(id); return Math.max(hi, p) - Math.min(lo, p) >= BLOCKING.spread; });
+        // Not a trigram of a common word, though ("an " of San Xyz): that would read nearly every name.
+        const far = known.find((id) => { const p = start.get(id); return this.postings[id].length <= BLOCKING.far * this.common && Math.max(hi, p) - Math.min(lo, p) >= BLOCKING.spread; });
         if (far !== undefined) keys = [...keys, far];
       }
     }
@@ -113,7 +118,7 @@ export class NameIndex {
       const ni = found[j]; seen[ni] = 0;
       if (out.has(ni)) continue;
       const o = this.names[ni];
-      // Names of the same number of words may be abbreviations of each other (expandedScore()), which
+      // Names of the same number of words may differ only in short forms (expandedScore()), which
       // letters and lengths cannot bound.
       if (!canReach(s.length, o.n.length, threshold) && !(words > 1 && o.words === words)) continue;
       const need = Math.max(1, Math.ceil(BLOCKING.share * Math.min(all.size, o.t.length)));
@@ -139,7 +144,7 @@ export class NameIndex {
         const o = this.names[ni];
         this.comparisons++;
         let score = nameScore(s, o.n, ss, o.sorted);
-        // Names of the same words but for abbreviations are scored with them written out (names.js);
+        // Names of the same words but for short forms are scored with them written out (names.js);
         // otherwise a score under the threshold is let go, as lowering by the distinctive words cannot raise it.
         const e = score < 1 && sw > 1 && o.words === sw && Math.abs(s.length - o.n.length) >= 2 ? expandedScore(s, o.n) : null;
         if (e !== null) { if (e > score) score = e; }

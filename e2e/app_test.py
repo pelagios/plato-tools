@@ -209,10 +209,14 @@ def krisis_case(page, tmp):
     check('match review: Save the review writes the work file with the decisions and the reviewer',
           saved.get('krisis') == 1 and skinds == {'bristol': 'match', 'bath': 'distinct', 'wells': 'not-this'} and (saved.get('reviewer') or {}).get('name') == 'Ada Reviewer', saved.get('error') or skinds)
     # Finish with the default: the dataset, with the new attestations added, checked with the version check.
-    ds, default, summ = {}, None, ''
+    ds, default, summ, left = {}, None, '', None
     if s.get('phase') == 'reviewing':
         try:
             default = page.evaluate("() => { const r = document.querySelector('input[name=\"review-output\"]:checked'); return r && !r.disabled ? r.value : null; }")
+            # The title given for matching was put away when the review began; one typed in now is not
+            # cited, as the review's other dataset already has a title (given), not a file's name.
+            left = page.evaluate("() => document.getElementById('others-title').value")
+            page.evaluate("() => { document.getElementById('others-title').value = 'A title left from before'; }")   # in the closed Options
             page.click('#finish')
             s = wait_state(page, lambda s: s.get('action') == 'apply' and s.get('phase') in ('done', 'error'), 120, 'finish')
             summ = page.inner_text('#summary')
@@ -246,6 +250,10 @@ def krisis_case(page, tmp):
     check('match review: Finish (attestations only) saves one attestation of the match, one negated for the different places, none for "not this one"',
           s.get('phase') == 'done' and len(atts) == 2 and len(same) == 1 and len(distinct) == 1
           and not any(('wells', 'welles') in rel(a) for a in atts) and 'Ada Reviewer' in json.dumps(same[0].get('contributor')), s.get('report') or s if not atts else atts)
+    cites = sorted({c.get('source', {}).get('title') for a in atts for c in a.get('citations', [])})
+    check('match review: the title typed for matching is cleared once the review begins, and a title left in the options does not replace the one the review records',
+          left == '' and cites == ['Their places, as given'], {'field after matching': left, 'cited': cites})
+    page.evaluate("() => { const t = document.getElementById('others-title'); if (t) t.value = ''; }")
     check('match review: the file made is the new attestations only, in PLATO JSON, with no @id minted', bool(atts) and out.get('profile') == 'attestation-centric'
           and not any('@id' in a for a in atts), {k: v for k, v in out.items() if k != 'attestations'} if isinstance(out, dict) else out)
     # Resuming: the saved review, opened again, is back where it was, decisions and all.
@@ -303,6 +311,18 @@ def krisis_case(page, tmp):
         except Exception as e: nodata = 'harness-error: ' + str(e).split('\n')[0][:200]
     check('match review: a review resumed with no dataset chosen says that none is chosen, not that the files differ',
           'No dataset is chosen yet' in nodata and 'other files than' not in nodata, nodata)
+    # With files chosen that are not data these tools read, it says that, not that none is chosen.
+    unrec = ''
+    if 'No dataset is chosen yet' in nodata:
+        try:
+            junk = tmp / 'not-data.txt'; junk.write_text('Just some words, not a dataset.')
+            page.set_input_files('#picker', [str(junk)])
+            wait_state(page, lambda s: s.get('phase') in ('unrecognised', 'detected'), 30, 'detection')
+            page.set_input_files('#workfile', [str(tmp / 'saved.krisis.json')])
+            page.wait_for_selector('#review-warning:not([hidden])', timeout=20_000); unrec = page.inner_text('#review-warning')
+        except Exception as e: unrec = 'harness-error: ' + str(e).split('\n')[0][:200]
+    check('match review: a review resumed with files chosen that are not recognised says so, not that none is chosen',
+          'not recognised' in unrec and 'No dataset is chosen' not in unrec, unrec)
 
 def download(page, name, dest):
     with page.expect_download(timeout=600_000) as d:

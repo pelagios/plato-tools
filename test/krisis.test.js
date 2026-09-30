@@ -14,7 +14,7 @@ import { env, res, file, textFile, go, outText } from './engine.js';
 import { detect } from '../src/engine/input.js';
 import { normalise, similarity, similarityNormalised, nameScore, distinctive, expandedScore, oneEdit, jaroWinkler, trigrams } from '../src/engine/krisis/names.js';
 import { NameIndex, BLOCKING } from '../src/engine/krisis/blocking.js';
-import { syntheticNames } from './krisis-synthetic.js';
+import { syntheticNames, random } from './krisis-synthetic.js';
 import { DataError } from '../src/engine/input.js';
 import { Sha256, fileSha256 } from '../src/engine/krisis/digest.js';
 import { match, distanceKm, representativePoint, DEFAULTS, ALGORITHM, SCORING } from '../src/engine/krisis/match.js';
@@ -116,6 +116,36 @@ test('a place\'s point: its first Point, else the centre of a bounding box or sh
   assert.equal(representativePoint({ attestations: [named('x')] }), null);
   assert.equal(Math.round(distanceKm([-0.1276, 51.5072], [2.3522, 48.8566])), 344, 'London to Paris');
 });
+test("a place's point passes over negated and withdrawn attestations", () => {
+  const RETRACTS = 'https://w3id.org/plato#Retracts';
+  const bad = { '@id': 'x#bad', ...at(0, 0) };
+  assert.deepEqual(representativePoint({ attestations: [bad, at(3, 4)] }), [0, 0], 'control: the first point is taken');
+  assert.deepEqual(representativePoint({ attestations: [{ ...bad, negated: true }, at(3, 4)] }), [3, 4], 'a negated one is not');
+  assert.deepEqual(representativePoint({ attestations: [bad, at(3, 4), { meta: { targetAttestation: 'x#bad', metaType: RETRACTS }, sources: [src] }] }), [3, 4], 'nor one the record retracts');
+  assert.deepEqual(representativePoint({ attestations: [bad, at(3, 4)] }, new Map([['x#bad', 'superseded']])), [3, 4], 'nor one withdrawn elsewhere');
+  assert.equal(representativePoint({ attestations: [{ ...bad, negated: true }] }), null);
+});
+test("PLATO's judgements example: Littleworth's retracted point at 0°, 0° is not its point, wherever the retraction sits", async () => {
+  const doc = JSON.parse(readFileSync(JUDGEMENTS, 'utf8'));
+  const lw = doc.spatialEntities.find((p) => p.label === 'Littleworth');
+  const retraction = lw.attestations.find((a) => a.meta);
+  assert.equal(retraction.meta.targetAttestation, lw.attestations.find((a) => a.geometries?.[0]?.geojson?.coordinates?.[0] === 0)['@id'], 'control: the example retracts the point at 0°, 0°');
+  const subjects = { profile: 'place-centric', gazetteer: { '@id': X + 'a', title: 'A' }, spatialEntities: [place('a', 'lw', 'Littleworth', [at(-1.4, 51.6)])] };
+  const m = async (d) => match({ subjects: await detect([json(subjects, 'a.json')]), others: await detect([json(d, 'j.json')]), options: {} }, env());
+  const asIs = (await m(doc)).work;
+  assert.deepEqual(asIs.candidates.map((c) => [c.candidate_candidate, c.distance_km, c.other.point]), [[lw['@id'], null, null]], 'suggested, with no point');
+  // The retraction moved to another place of the dataset: still withdrawn.
+  const moved = structuredClone(doc);
+  const mlw = moved.spatialEntities.find((p) => p.label === 'Littleworth');
+  mlw.attestations = mlw.attestations.filter((a) => !a.meta);
+  moved.spatialEntities.find((p) => p !== mlw).attestations.push(retraction);
+  assert.deepEqual((await m(moved)).work.candidates.map((c) => c.other.point), [null]);
+  // Control: without the retraction, the point is 0°, 0°, over 5,000 km off, and the pair is not suggested.
+  moved.spatialEntities.forEach((p) => { p.attestations = p.attestations.filter((a) => !a.meta); });
+  const kept = await m(moved);
+  assert.deepEqual(kept.work.candidates, []);
+  assert.equal(kept.report.counts.tooFar, 1, 'found, and dropped as too far');
+});
 
 // ---- matching -------------------------------------------------------------------------------------------
 test('matching suggests the near namesakes, the accented and the misspelt, and not the far namesakes', async () => {
@@ -183,6 +213,21 @@ test('the threshold and top K are kept to', async () => {
   assert.equal(one.work.candidates.find((c) => c.candidate_source === A('newton')).candidate_candidate, B('newton'), 'the best is kept: the same score, and nearer');
   await assert.rejects(run({ threshold: 2 }), /threshold/);
   await assert.rejects(run({ topK: 0 }), /whole number/);
+});
+test('the best few: places near the subject come before namesakes with no point, which take only the places left', async () => {
+  // Found in a trial on real data (DEEP): Bromfield, 4 km from Broomfield, lost its place to five Broomfields with no coordinates.
+  const s = { profile: 'place-centric', gazetteer: { '@id': X + 'a', title: 'A' }, spatialEntities: [place('a', 'broomfield', 'Broomfield', [at(-1.0, 52.0)])] };
+  const o = { profile: 'place-centric', gazetteer: { '@id': X + 'b', title: 'B' }, spatialEntities: [
+    ...[1, 2, 3, 4, 5].map((i) => place('b', `nowhere-${i}`, 'Broomfield', [named('Broomfield')])),
+    place('b', 'bromfield', 'Bromfield', [at(-1.05, 52.02)]), place('b', 'bromfield-far', 'Bromfield', [at(-3, 55)])] };
+  const got = (await run({}, s, o)).work.candidates.map((c) => [c.candidate_candidate.split('/').pop(), c.distance_km]);
+  assert.deepEqual(got, [['bromfield', 4.1], ['nowhere-1', null], ['nowhere-2', null], ['nowhere-3', null], ['nowhere-4', null]]);
+  assert.ok(similarity('Broomfield', 'Bromfield') < 1 && similarity('Broomfield', 'Bromfield') >= 0.85, 'control: Bromfield scores under the namesakes, over the threshold');
+  // Control: a subject with no point has no near places to put first, and keeps the best scores.
+  s.spatialEntities[0].attestations = [named('Broomfield')];
+  const none = (await run({}, s, o)).work.candidates.map((c) => c.candidate_candidate.split('/').pop());
+  assert.deepEqual(none, ['nowhere-1', 'nowhere-2', 'nowhere-3', 'nowhere-4', 'nowhere-5']);
+  assert.match(SCORING, /first the places within maxDistanceKm of it, and then, in the places left, those with no point/);
 });
 test('a link another attestation withdrew no longer holds', async () => {
   const s = subjectsDoc();
@@ -549,8 +594,8 @@ test('matching: Saint Maurice is not suggested for Saint Martin, St Martin is; t
     place('b', 'maurice', 'Saint Maurice', [at(2.01, 48.01)]), place('b', 'st-martin', 'St Martin', [at(2.02, 48.02)])] };
   const { work, report } = await run({}, s, o);
   assert.deepEqual(pairs(work), [`${A('martin')} ${B('st-martin')}`]);
-  assert.equal(work.algorithm_version, 'krisis-names 3');
-  assert.equal(ALGORITHM, 'krisis-names 3');
+  assert.equal(work.algorithm_version, 'krisis-names 4');
+  assert.equal(ALGORITHM, 'krisis-names 4');
   assert.match(work.match_parameters.scoring, /do not share/);
   assert.deepEqual({ ...work.match_parameters.blocking, rule: undefined }, { ...BLOCKING, rule: undefined });
   assert.match(work.match_parameters.blocking.rule, /common when more than 1%/);
@@ -565,7 +610,7 @@ test('abbreviations: names alike but for St and Saint, or Mt and Mount, are sugg
   // Letters alone put these under the threshold: the rule is what raises them.
   assert.ok(nameScore('mount pleasant', 'mt pleasant') < 0.85 && nameScore('saint zan', 'st zan') < 0.85, 'control: under the threshold on letters alone');
   // Only an abbreviation is written out, and only when every other word is shared: the rest still lowers.
-  assert.equal(expandedScore('kafr cal', 'kafr carl'), null, 'Cal and Carl: a contraction, not an abbreviation');
+  assert.equal(expandedScore('kafr cal', 'kafr carl'), null, 'Cal and Carl: not a short form on the list');
   assert.equal(expandedScore('saint martin', 'st maurice'), null, 'a word not shared');
   assert.ok(similarity('Saint Martin', 'St Maurice') < 0.85, `Saint Martin and St Maurice: ${similarity('Saint Martin', 'St Maurice')}`);
   assert.ok(similarity('St Martin', 'Saint Martin') >= 0.85, 'control: St Martin and Saint Martin are');
@@ -573,6 +618,20 @@ test('abbreviations: names alike but for St and Saint, or Mt and Mount, are sugg
   const idx = new NameIndex([['Mt Pleasant'], ['St Zan'], ['St Maurice']]);
   assert.ok(idx.best(['Mount Pleasant'], 0.85).has(0) && idx.best(['Saint Zan'], 0.85).has(1));
   assert.ok(!idx.best(['Saint Martin'], 0.85).has(2), 'control: St Maurice is not suggested for Saint Martin');
+});
+test('short forms are a list, St, Ste, Mt, Ft, Pt and on: a word that only contracts another (Dry, Danebury) is not written out, nor counted as shared', () => {
+  // Found in a trial on real data (DEEP): each of these scored 1 when any contraction counted.
+  for (const [a, b] of [['Danebury Hill', 'Dry Hill'], ['Great Baddow', 'Great Bow'], ['Tan Hill', 'Tapton Hill'], ['Cornbury Park', 'By Park'],
+    ['Salt Ives', 'St Ives'], ['Foot Lee', 'Ft Lee'], ['Lake Mans', 'Le Mans']]) {
+    assert.equal(expandedScore(normalise(a), normalise(b)), null, `${a} and ${b} are not written out`);
+    assert.ok(similarity(a, b) < 0.85, `${a} and ${b}: ${similarity(a, b)}`);
+  }
+  // Beside them, the short forms on the list are written out, and raise the pair to 1.
+  for (const [a, b] of [['St Zan', 'Saint Zan'], ['Mt Pleasant', 'Mount Pleasant'], ['Ft Lee', 'Fort Lee'], ['Pt Arthur', 'Port Arthur'], ['Ste Anne', 'Sainte Anne'], ['Stratford on Avon', 'Stratford upon Avon']]) {
+    assert.ok(nameScore(normalise(a), normalise(b)) < 1, `control: ${a} and ${b} differ in their letters`);
+    assert.equal(similarity(a, b), 1, `${a} and ${b}`);
+  }
+  assert.match(SCORING, /only these: St and Saint, Ste and Sainte, Mt and Mount, Ft and Fort, Pt and Port, on and upon/);
 });
 test('three-letter words: one letter is the limit, and a common shared word takes the pair under it, as the work file says', () => {
   // Weights as a gazetteer gives them: Kafr begins many names, Cel, Saba and Sabe one each.
@@ -647,6 +706,24 @@ test('blocking: one mistake in the rare part of a name does not lose it, where t
     assert.ok(idx.best([s], 0.85).has(pair[1]), `${s} finds ${o}`);
   }
 });
+test('blocking at scale: names of a common word and a word of three letters ("San Xyz") are not each compared with the whole dataset', () => {
+  // Every such name has the trigram "an " (or "fr "), so the far key added when the keys fall together
+  // must not be one of those: it would read every such name for every such name.
+  const n = 4000, k = n / 5;
+  for (const head of ['San', 'Kafr']) {
+    const r = random(5), w = () => Array.from({ length: 3 }, () => 'abcdefghijklmnopqrstuvwxyz'[Math.floor(r() * 26)]).join('');
+    const syn = syntheticNames({ n: n - k, seed: 1 }), extra = Array.from({ length: k }, () => `${head} ${w()}`);
+    const others = [...syn.others, ...extra], subjects = [...syn.subjects, ...extra];
+    const idx = new NameIndex(others.map((x) => [x]), subjects.map((x) => [x]));
+    const last = idx.postings[idx.ids.get(head === 'San' ? 'an ' : 'fr ')].length;
+    assert.ok(last > 0.15 * n, `control: ${last} names have the common word's last trigram`);
+    const found = subjects.map((x) => idx.best([x], 0.85));
+    assert.equal(extra.filter((x, i) => found[n - k + i].has(n - k + i)).length, k, `each ${head} name finds itself`);
+    const planted = syn.pairs.filter(([i, j]) => found[i].has(j)).length;
+    assert.ok(planted >= syn.pairs.length * 0.97, `${planted} of ${syn.pairs.length} planted variants found`);
+    assert.ok(idx.comparisons < 0.01 * n * n, `${head}: ${idx.comparisons} pairs compared of ${n * n}`);
+  }
+});
 test('blocking: names that begin alike are compared, though they share fewer trigrams than the rule asks', () => {
   const idx = new NameIndex([['Brussels'], ['Bremen'], ['Bristol']]);
   const t = trigrams('bruxelles'), o = trigrams('brussels'), shared = [...t].filter((g) => o.has(g)).length;
@@ -683,6 +760,31 @@ test('an other dataset with no title of its own is warned of at matching and at 
   const a3 = await apply({ work: decideOne(plain.work), options: { output: 'attestations', othersTitle: 'Dataset B' } }, env());
   assert.ok(!warned(a3));
   assert.deepEqual(cited(a3), ['Dataset B']);
+});
+test('an other dataset in every format with no title of its own is recorded as cited by its file name, and warned of: LPF, whose reader gives it the file name', async () => {
+  const warned = (r) => r.report.items.some((i) => i.kind === 'others-title-is-file-name');
+  const lpf = async (title) => {
+    const d = othersDoc(); if (title) d.gazetteer.title = title; else delete d.gazetteer.title;
+    const c = await go([json(d, 'b.json')], 'convert', 'lpf');
+    const text = outText(c.e, 'b.geojson');
+    const r = await match({ subjects: (await inputs()).subjects, others: await detect([textFile(text, 'campop.geojson')]), options: {} }, env());
+    return { r, text };
+  };
+  const bare = await lpf(null);
+  assert.equal(JSON.parse(bare.text).title, undefined, 'control: the LPF file gives no title of its own');
+  assert.equal(JSON.parse((await lpf('Dataset B')).text).title, 'Dataset B', 'control: and this one does');
+  assert.equal(bare.r.work.others.title, 'campop.geojson');
+  assert.equal(bare.r.work.others.titleFrom, 'file-name');
+  assert.ok(warned(bare.r));
+  // Control: an LPF file with its title is cited by it.
+  const titled = await lpf('Dataset B');
+  assert.deepEqual([titled.r.work.others.title, titled.r.work.others.titleFrom], ['Dataset B', 'gazetteer']);
+  assert.ok(!warned(titled.r));
+  // And the spreadsheet tables, whose reader gives a title of its own making.
+  const s = othersDoc(); delete s.gazetteer.title;
+  const tables = await go([json(s, 'b.json')], 'convert', 'tables');
+  const t = await match({ subjects: (await inputs()).subjects, others: await detect([new File(tables.e.outs['b-tables.zip'], 'b-tables.zip')]), options: { base: X + 'b/' } }, env());
+  assert.equal(t.work.others.titleFrom, 'file-name', t.work.others.title);
 });
 test('matching options out of range are refused in plain words, by the rule the page uses too', () => {
   for (const threshold of [0, 1.5, -1]) assert.throws(() => checkMatchOptions({ threshold }), (e) => e instanceof DataError && /threshold must be above 0 and at most 1/.test(e.message), String(threshold));

@@ -101,7 +101,8 @@ function start(action, earlier) {
     (e) => fail(`the list of places to include could not be read (${e.message || e}).`));
   // Match review (Krisis): the files chosen are the subjects, and `earlier` the other dataset; to finish, the review is applied to them.
   else if (action === 'match') worker.postMessage({ cmd: 'match', subjects: files, others: earlier, options: { ...matchOptions(), base } });
-  else if (action === 'apply') worker.postMessage({ cmd: 'apply', subjects: files, work, options: { output: earlier, reviewer: reviewer(), othersTitle: matchOptions().othersTitle, base } });
+  // The title in the options is cited only when the review has none but a file's name: one left there from an earlier match must not replace the review's own.
+  else if (action === 'apply') worker.postMessage({ cmd: 'apply', subjects: files, work, options: { output: earlier, reviewer: reviewer(), othersTitle: work.others?.titleFrom === 'file-name' ? matchOptions().othersTitle : undefined, base } });
   else worker.postMessage({ cmd: 'run', files, action, target, options: { base, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked,
     // Hermes: the matching of columns shown, as chosen (the same JSON as the command line's --columns).
     ...(isTable(input) && columns ? { columns: { ...columns.mapping } } : {}) } });
@@ -350,11 +351,14 @@ async function resume(file) {
   $('result').hidden = true;
   beginReview(w, file.name);
   // A review made from other files than those chosen now is still opened, with a warning; with none chosen, it says so.
-  if (!files.length || !input?.format) { showWarning(W.noDatasetYet); return; }
+  if (!files.length) { showWarning(W.noDatasetYet); return; }
+  if (!input?.format) { showWarning(W.notRecognisedYet); return; }
   try { const differ = await filesDiffer(w.subjects, files); showWarning(differ.length ? W.differs(differ) : ''); } catch { showWarning(''); }
 }
 function beginReview(w, name) {
   work = w; workName = name || workName; basisFor = null; allDone = false;
+  // The other dataset's title given for a match is in the work file now; put away, it cannot be taken for this review's at finishing.
+  $('others-title').value = '';
   order = reviewPlaces(work);
   cursor = Math.min(Math.max(0, work.cursor || 0), Math.max(0, order.length - 1));
   // A place with no candidates has nothing to review: start at the first that has some.
