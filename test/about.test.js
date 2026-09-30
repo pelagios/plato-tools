@@ -27,7 +27,7 @@ const customsWith = (rows) => readdirSync(CUSTOMS).filter((f) => f !== 'about.cs
 const FULL = {
   title: 'Customs, described in full', description: 'Every column of the about sheet, filled in.',
   creator: 'https://orcid.org/0000-0003-3060-0181;https://ror.org/052gg0110', creator_name: 'Anne Annotator;Bea Builder',
-  contributor: 'https://orcid.org/0000-0002-1234-5678', licence: 'https://creativecommons.org/licenses/by/4.0/', version: '1.2',
+  contributor: 'https://orcid.org/0000-0002-1825-0097', licence: 'https://creativecommons.org/licenses/by/4.0/', version: '1.2',
   status: 'published', keywords: 'customs accounts;ports', spatial: 'http://www.wikidata.org/entity/Q21;http://www.wikidata.org/entity/Q145',
   temporal_from: '1480', temporal_to: '1485-09-29', landing_page: 'https://example.org/customs/about',
   dataset_uri: 'https://example.org/customs/dataset', base_uri: 'https://example.org/customs/',
