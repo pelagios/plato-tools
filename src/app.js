@@ -191,7 +191,7 @@ function onColumns(d) {
   }
   // With no prototype, so that a column called "__proto__" is a column like any other (columns.js).
   const own = (o) => Object.assign(Object.create(null), o);
-  columns = { headers: d.headers, examples: own(d.examples), fields: d.fields, mapping: own(d.mapping), reasons: own(d.reasons) };
+  columns = { headers: d.headers, examples: own(d.examples), fields: d.fields, mapping: own(d.mapping), reasons: own(d.reasons), gazetteer: d.gazetteer || [] };
   // A column the saved matching gives, and the engine took as given, says so in the page's words;
   // one it could not take keeps the engine's reason.
   if (d.saved) for (const h of d.headers) if (d.reasons[h] && d.problems.every((p) => p.example !== h && !String(p.example).startsWith(`${h}: `))) columns.reasons[h] = W.saved;
@@ -225,7 +225,7 @@ function renderColumns() {
   renderColumnWarnings();
 }
 function renderColumnWarnings() {
-  const warnings = columnWarnings(columns.mapping);
+  const warnings = columnWarnings(columns.mapping, columns.gazetteer);
   $('columns-warnings').innerHTML = warnings.map((w) => `<p class="warn">${escapeHtml(w)}</p>`).join('');
   state.columns = { headers: [...columns.headers], mapping: Object.assign(Object.create(null), columns.mapping), reasons: Object.assign(Object.create(null), columns.reasons), examples: columns.examples, warnings, messages: [...columns.messages] };
 }

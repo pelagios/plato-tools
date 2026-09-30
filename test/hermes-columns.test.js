@@ -38,7 +38,7 @@ test('an address column counts only when its values are web addresses; otherwise
     assert.equal(guess([h], [{ [h]: 'https://example.org/p/1' }])[h], 'address', `${h} with addresses`);
     const g = guessColumns([h], [{ [h]: 'Q220' }]);
     assert.equal(g.mapping[h], 'note', `${h} without addresses`);
-    assert.match(g.reasons[h], /not web addresses/);
+    assert.match(g.reasons[h], /its one sampled value is not a web address/);
   }
   // An id column of addresses is the place's address; an id column of words is the id.
   assert.equal(guess(['id'], [{ id: 'https://pleiades.stoa.org/places/579885' }]).id, 'address');
@@ -46,6 +46,40 @@ test('an address column counts only when its values are web addresses; otherwise
   // A heading that names a gazetteer, with a suffix, is read the same way.
   assert.equal(guess(['wikidata_uri'], [{ wikidata_uri: 'http://www.wikidata.org/entity/Q220' }]).wikidata_uri, 'address');
 });
+// Rows of one column: `k` web addresses, then `n - k` values that are not.
+const addressRows = (h, n, k) => Array.from({ length: n }, (_, i) => ({ [h]: i < k ? `https://pleiades.stoa.org/places/${579885 + i}` : `stray ${i}` }));
+test('one stray value does not stop a gazetteer column being the address, and the reason says how many are addresses', () => {
+  for (const h of ['uri', 'pleiades', 'link', 'id']) {
+    const g = guessColumns([h], addressRows(h, 50, 49));
+    assert.equal(g.mapping[h], 'address', `${h}: 49 of 50`);
+    assert.match(g.reasons[h], /49 of its 50 sampled values are web addresses/);
+  }
+  // Control: all of them, said as all.
+  const all = guessColumns(['uri'], addressRows('uri', 3, 3));
+  assert.equal(all.mapping.uri, 'address');
+  assert.match(all.reasons.uri, /all 3 of its sampled values are web addresses/);
+});
+test('a column mostly not of addresses stays a note unless its heading names a gazetteer, and the reason says how many were', () => {
+  // "link" names no gazetteer: under half is not enough.
+  const link = guessColumns(['link'], addressRows('link', 10, 4));
+  assert.equal(link.mapping.link, 'note');
+  assert.match(link.reasons.link, /only 4 of its 10 sampled values are web addresses/);
+  // An id column mostly of local ids is the id.
+  assert.equal(guess(['id'], addressRows('id', 10, 4)).id, 'id');
+  // Control: the same values under a heading that names a gazetteer, and half of them under "link", are the address.
+  assert.equal(guess(['wikidata'], addressRows('wikidata', 10, 1)).wikidata, 'address');
+  assert.equal(guess(['link'], addressRows('link', 10, 5)).link, 'address');
+  // None at all is a note, whatever the heading, and says so.
+  const none = guessColumns(['wikidata'], addressRows('wikidata', 10, 0));
+  assert.equal(none.mapping.wikidata, 'note');
+  assert.match(none.reasons.wikidata, /none of its 10 sampled values is a web address/);
+});
+test('the columns whose headings name a gazetteer are listed, for the warning when none is the address', () => {
+  const g = guessColumns(['name', 'geonames_id', 'gazetteer', 'link', 'wiki (column 3)', FEATURE_ID], [{ name: 'Roma', geonames_id: '3169070' }], { 'wiki (column 3)': 'wikidata' });
+  assert.deepEqual(g.gazetteer, ['geonames_id', 'gazetteer', 'wiki (column 3)']);
+  assert.deepEqual(resolveColumns(['name', 'uri'], [], { name: 'name', uri: 'note' }).gazetteer, ['uri'], 'a saved mapping lists them too');
+});
+
 test('a coordinate column needs a number among its values; one stray word does not stop it', () => {
   assert.equal(guess(['lat'], [{ lat: '51.5' }, { lat: 'north' }]).lat, 'latitude');
   const g = guessColumns(['lat'], [{ lat: 'north' }, { lat: 'south' }]);

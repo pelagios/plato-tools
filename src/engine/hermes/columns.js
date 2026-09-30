@@ -74,8 +74,8 @@ export const FEATURE_ID = '(feature id)';
 /** A column heading reduced for matching: case, accents, spaces and punctuation do not count. */
 export const normaliseHeader = (h) => String(h).normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
-// Column headings, normalised, and the field each reads as. An address column counts only if its
-// values are web addresses; a coordinate only if its values are numbers.
+// Column headings, normalised, and the field each reads as. An address column counts only if enough
+// of its values are web addresses; a coordinate only if one of its values is a number.
 const HEADINGS = {
   name: ['name', 'placename', 'toponym', 'title', 'label', 'placelabel', 'placetitle', 'nametoponym'],
   alternativeNames: ['alternativenames', 'alternativename', 'alternatenames', 'alternatename', 'altnames', 'altname', 'names', 'variants', 'variantnames', 'variantname', 'namevariants', 'othernames', 'aliases', 'alias', 'alsoknownas', 'aka'],
@@ -94,8 +94,12 @@ const HEADINGS = {
 };
 const BY_HEADING = new Map(Object.entries(HEADINGS).flatMap(([f, hs]) => hs.map((h) => [h, f])));
 // A gazetteer's name at the start of a heading (wikidata_uri, pleiades_url, geonames_id) reads as an address column.
-const GAZETTEER_PREFIX = /^(wikidata|pleiades|geonames|whg|tgn)/;
+const GAZETTEER_PREFIX = /^(wikidata|pleiades|geonames|whg|tgn|gazetteer)/;
 const ADDRESS_SUFFIX = /(uri|url|iri)$/;
+// A heading, normalised, that names a gazetteer or a web address: every address heading but "link".
+const namesGazetteer = (n) => GAZETTEER_PREFIX.test(n) || ADDRESS_SUFFIX.test(n);
+/** The columns whose headings name a gazetteer or a web address (uri, wikidata, geonames_id…), which the page and the command line warn of when none is the address. */
+export const gazetteerColumns = (headers, headerText = {}) => headers.filter((h) => h !== FEATURE_ID && namesGazetteer(normaliseHeader(Object.hasOwn(headerText, h) ? headerText[h] : h)));
 
 export const isWebAddress = (s) => typeof s === 'string' && /^https?:\/\/\S+$/i.test(s.trim()) && isAbsoluteIri(s.trim());
 // A value that names a place's address: a web address, or a form addresses.js rewrites into one
@@ -128,9 +132,10 @@ const isField = (f) => typeof f === 'string' && (Object.hasOwn(FIELDS, f) || Obj
 const single = (f) => Object.hasOwn(FIELDS, f) && FIELDS[f].single;
 
 /**
- * Guess which column holds what, from the headings and a few rows. Returns { mapping, reasons }:
+ * Guess which column holds what, from the headings and a few rows. Returns { mapping, reasons, gazetteer }:
  * the mapping as described at the top of this file, and for each column a reason in words, which
- * the page shows beside its guess and the command line prints. `headerText` gives, for a column known
+ * the page shows beside its guess and the command line prints, and the columns whose headings name
+ * a gazetteer (gazetteerColumns). `headerText` gives, for a column known
  * by its heading and place ("name (column 3)", where two columns share a heading), the heading itself.
  */
 export function guessColumns(headers, sampleRows = [], headerText = {}) {
@@ -144,9 +149,13 @@ export function guessColumns(headers, sampleRows = [], headerText = {}) {
     const vs = values(h);
     if (field === 'address' || field === 'id') {
       // A column of web addresses is the place's address, whatever it is called (an id column of
-      // Pleiades addresses included); a column named for one that holds none is only a note.
-      if (vs.length && vs.every(namesAddress)) { field = 'address'; reason = `${reason}, and its values are web addresses`; }
-      else if (field === 'address') { field = 'note'; reason = vs.length ? `the heading "${h}" reads as a web address, but its values are not web addresses (http or https), so it is kept in the notes` : `the heading "${h}" reads as a web address, but it is empty in the rows looked at, so it is kept in the notes`; }
+      // Pleiades addresses included): at least half of its values must name one, or, when its heading
+      // names a gazetteer, one. A stray value then affects only its own row, which becomes a place of
+      // its own or is reported (generic.js), where a gazetteer column read as a note would silently
+      // make every row one. A column named for an address that holds none is only a note.
+      const k = vs.filter(namesAddress).length;
+      if (k && (2 * k >= vs.length || (field === 'address' && namesGazetteer(n)))) { field = 'address'; reason = `${reason}, and ${webAddresses(k, vs.length)}`; }
+      else if (field === 'address') { field = 'note'; reason = vs.length ? `the heading "${h}" reads as a web address, but ${k ? `only ${webAddresses(k, vs.length)}` : `${vs.length === 1 ? 'its one sampled value is not a web address' : `none of its ${vs.length} sampled values is a web address`}`} (http or https), so it is kept in the notes` : `the heading "${h}" reads as a web address, but it is empty in the rows looked at, so it is kept in the notes`; }
     } else if (field === 'latitude' || field === 'longitude') {
       // One number is enough: a stray value that is not one ("north") is then reported, row by row.
       if (!vs.some(isNumber)) { reason = `the heading "${h}" reads as ${field}, but ${vs.length ? 'none of its values is a number in decimal degrees' : 'it is empty in the rows looked at'}, so it is kept in the notes`; field = 'note'; }
@@ -158,12 +167,14 @@ export function guessColumns(headers, sampleRows = [], headerText = {}) {
     if (single(field)) taken.set(field, h);
     mapping[h] = field; reasons[h] = reason;
   }
-  return { mapping, reasons };
+  return { mapping, reasons, gazetteer: gazetteerColumns(headers, headerText) };
 }
+// How many of a column's sampled values are web addresses: "49 of its 50 sampled values are web addresses".
+const webAddresses = (k, n) => (n === 1 ? 'its one sampled value is a web address' : k === n ? `all ${n} of its sampled values are web addresses` : `${k} of its ${n} sampled values ${k === 1 ? 'is a web address' : 'are web addresses'}`);
 
 /**
  * The mapping to use: `saved` (a mapping given, from --columns or the page), checked against the
- * columns there are, else the guess. Returns { mapping, reasons, problems }, each problem
+ * columns there are, else the guess. Returns { mapping, reasons, problems, gazetteer }, each problem
  * { kind, example } of a kind in GENERIC_KINDS. A column the saved mapping leaves out, or maps to
  * something that is not a field, is kept in the notes, so that nothing is lost or claimed.
  */
@@ -196,7 +207,7 @@ export function resolveColumns(headers, sampleRows, saved, headerText) {
     mapping[h] = f; reasons[h] = 'as the mapping given says';
   }
   for (const k of Object.keys(saved)) if (!headers.includes(k)) problems.push({ kind: 'generic-mapping-unknown-column', example: k });
-  return { mapping, reasons, problems };
+  return { mapping, reasons, problems, gazetteer: gazetteerColumns(headers, headerText) };
 }
 
 // ---- one row through the mapping ------------------------------------------------------------------

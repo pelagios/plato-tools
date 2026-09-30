@@ -80,9 +80,9 @@ self.onmessage = async ({ data }) => {
         const input = await detect(data.files);
         const { headers, sample } = await columnsOf(input);
         const examples = Object.fromEntries(headers.map((h) => [h, sample.map((r) => cellText(r?.[h])).filter(Boolean).slice(0, 3)]));
-        const { mapping, reasons, problems } = await mappingOf(input, data.saved);
+        const { mapping, reasons, problems, gazetteer } = await mappingOf(input, data.saved);
         const fields = Object.fromEntries(Object.entries(FIELDS).map(([k, f]) => [k, { single: f.single }]));
-        postMessage({ type: 'columns', id: data.id, headers, examples, mapping, reasons, problems, fields, saved: data.saved !== undefined });
+        postMessage({ type: 'columns', id: data.id, headers, examples, mapping, reasons, problems, gazetteer, fields, saved: data.saved !== undefined });
       } catch (e) {
         postMessage({ type: 'columns', id: data.id, error: String(e && e.message || e) });
       }

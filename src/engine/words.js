@@ -136,15 +136,25 @@ export const COLUMN_WORDS = {
   noIds: 'These places will have no web addresses: they can be checked and converted, but not published or linked until they have ids. Choose a column as the place id, or add one.',
   latOnly: 'A column is read as latitude but none as longitude, so no place will have a location from them. Choose the longitude column too, or keep the latitude as a note.',
   lonOnly: 'A column is read as longitude but none as latitude, so no place will have a location from them. Choose the latitude column too, or keep the longitude as a note.',
+  gazetteerNotAddress: (col, cli) => `The column “${col}” is named for a gazetteer or a web address, but no column is read as the place's web address, so no row will be linked to a gazetteer's place: each is read as a new place. If “${col}” holds the places' addresses, ${cli ? 'map it to "address" in the mapping given with --columns' : 'choose “Place\'s web address” for it'}.`,
 };
-/** The warnings a matching deserves before it is used, in words: no ids or addresses, half a coordinate pair. */
-export function columnWarnings(mapping) {
+/**
+ * The warnings a matching deserves before it is used, in words: a column named for a gazetteer
+ * (`gazetteer`, columns.js's gazetteerColumns) when no column is the address, no ids or addresses,
+ * half a coordinate pair.
+ */
+export function columnWarnings(mapping, gazetteer = []) {
   const fields = new Set(Object.values(mapping || {}));
-  const out = [];
+  const out = gazetteerWarnings(mapping, gazetteer);
   if (!fields.has('address') && !fields.has('id')) out.push(COLUMN_WORDS.noIds);
   if (fields.has('latitude') && !fields.has('longitude')) out.push(COLUMN_WORDS.latOnly);
   if (fields.has('longitude') && !fields.has('latitude')) out.push(COLUMN_WORDS.lonOnly);
   return out;
+}
+/** A warning for each column named for a gazetteer or a web address when no column is read as the address; `cli` words it for the command line. */
+export function gazetteerWarnings(mapping, gazetteer = [], { cli = false } = {}) {
+  if (Object.values(mapping || {}).includes('address')) return [];
+  return gazetteer.filter((h) => Object.hasOwn(mapping || {}, h)).map((h) => COLUMN_WORDS.gazetteerNotAddress(h, cli));
 }
 /** A problem with a saved matching (columns.js, resolveColumns: { kind, example }) in words. */
 export function columnProblem(p) {

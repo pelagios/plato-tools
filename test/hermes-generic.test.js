@@ -18,6 +18,7 @@ import { tableIds } from '../src/formats/tables.js';
 import { genericSource, genericProfile, columnsOf, mappingOf, csvRecords } from '../src/engine/hermes/generic.js';
 import Papa from 'papaparse';
 import { FEATURE_ID } from '../src/engine/hermes/columns.js';
+import { columnWarnings, COLUMN_WORDS } from '../src/engine/words.js';
 import { PLATO_REPO } from './paths.js';
 import { file, textFile, go, outText } from './engine.js';
 
@@ -262,6 +263,43 @@ test('a bare number, or whg:<n>, is never expanded into a WHG address', async ()
     const { mapping } = await mappingOf(await detect([textFile(`name,whg\nA,${v}\n`, 'y.csv')]));
     assert.equal(mapping.whg, 'note', `${v} is not guessed as an address`);
   }
+});
+test('a gazetteer column with one stray value is still the address: the file stays attestation-centric and only that row is lost', async () => {
+  const rows = Array.from({ length: 49 }, (_, i) => `P${i},https://pleiades.stoa.org/places/${579885 + i}`);
+  rows.splice(20, 0, 'Stray,see Barrington 42');
+  const r = await readAll(textFile(`name,pleiades\n${rows.join('\n')}\n`, 'x.csv'));
+  assert.equal(r.doc.profile, 'attestation-centric');
+  assert.equal(r.doc.attestations.length, 49, 'control: every other row is about its address');
+  assert.deepEqual(r.of('generic-address-not-web').examples, ['row 22: see Barrington 42']);
+  assert.ok(!(r.doc.newSpatialEntities || []).length, 'no place is minted');
+  assert.equal(valid(r.doc), null);
+});
+test('the WHG forms with one "whg:5" beside them are still the address, so the WHG refusals are made', async () => {
+  const r = await readAll(textFile(WHG_CSV + ',Code,whg:5\n', 'whg.csv'));
+  assert.equal(r.doc.profile, 'attestation-centric');
+  assert.equal(r.of('generic-whg-record').examples.length, 2);
+  assert.deepEqual(r.of('generic-whg-staging').examples, ['row 5: https://dev.whgazetteer.org/places/99999999/portal/']);
+  assert.deepEqual(r.of('generic-address-not-web').examples, ['row 8: whg:5']);
+  assert.equal(r.doc.attestations[0].about, `${W3ID}place:gn:3169070`, 'control: the reconciliation id is rewritten');
+});
+test('a column named for a gazetteer that is not the address is warned of, on the page and on the command line', async () => {
+  const text = 'name,geonames_id\nRoma,3169070\nAthenae,264371\n';
+  const m = await mappingOf(await detect([textFile(text, 'g.csv')]));
+  assert.equal(m.mapping.geonames_id, 'note');
+  const warn = COLUMN_WORDS.gazetteerNotAddress('geonames_id');
+  assert.ok(columnWarnings(m.mapping, m.gazetteer).includes(warn));
+  // Control: once it is the address, there is no such warning, and a file with no such column has none.
+  assert.ok(!columnWarnings({ ...m.mapping, geonames_id: 'address' }, m.gazetteer).includes(warn));
+  assert.ok(columnWarnings(m.mapping, m.gazetteer).length > columnWarnings(m.mapping, []).length);
+  const d = mkdtempSync(join(tmpdir(), 'plato-tools-hermes-'));
+  try {
+    writeFileSync(join(d, 'g.csv'), text);
+    writeFileSync(join(d, 'u.csv'), 'name,uri\nRoma,https://www.geonames.org/3169070\n');
+    assert.match(cli('check', join(d, 'g.csv')).out, /Note: The column “geonames_id” is named for a gazetteer or a web address, but no column is read as the place's web address.*map it to "address" in the mapping given with --columns/);
+    const u = cli('check', join(d, 'u.csv')).out;
+    assert.match(u, /uri +address/, 'control: an address column is read');
+    assert.doesNotMatch(u, /is named for a gazetteer/);
+  } finally { rmSync(d, { recursive: true, force: true }); }
 });
 
 test('a row whose address is not one, but which has an id, becomes a place of its own, keeping what the address column said', async () => {

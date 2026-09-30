@@ -20,7 +20,7 @@ const { publish, PUBLISH_PARTS } = await import('../src/engine/agora/index.js');
 const { detect, readable } = await import('../src/engine/input.js');
 const { nodeResources, gatherInputs, openFiles, isSystemError, NodeHost } = await import('../src/node/host.js');
 const { toolsCommit } = await import('../src/node/build-info.js');
-const { fmtBytes, fmtTime, formatName, progressText, summary, groups, draftNote, explainedLines } = await import('../src/engine/words.js');
+const { fmtBytes, fmtTime, formatName, progressText, summary, groups, draftNote, explainedLines, gazetteerWarnings } = await import('../src/engine/words.js');
 const { mappingOf } = await import('../src/engine/hermes/generic.js');
 const { FIELDS } = await import('../src/engine/hermes/columns.js');
 
@@ -367,7 +367,7 @@ async function runOne(item, action, o, resources, host, live) {
   if (input.format === 'csv' || input.format === 'geojson') {
     try {
       const m = await mappingOf(input, o.savedColumns);
-      r.columns = m.mapping; r.columnReasons = m.reasons;
+      r.columns = m.mapping; r.columnReasons = m.reasons; r.columnWarnings = gazetteerWarnings(m.mapping, m.gazetteer, { cli: true });
       r.profile = Object.values(m.mapping).includes('address') ? 'attestation-centric' : 'place-centric';
     } catch (e) { if (e?.name !== 'DataError') throw e; /* the run reports what stops the reader */ }
   }
@@ -418,6 +418,7 @@ function columnLines(r) {
     '  Columns read as (to change this, save the JSON below to a file, edit it, and give it with --columns FILE):',
     ...cols.map((c) => `    ${c.padEnd(w)}  ${r.columns[c].padEnd(16)}  ${r.columnReasons?.[c] || ''}`),
     `    ${JSON.stringify(r.columns)}`,
+    ...(r.columnWarnings || []).map((w) => `  Note: ${w}`),
   ];
 }
 function describeTotal(t) {

@@ -138,7 +138,7 @@ readers link to those headings, so keep them.
   from its normalised heading and the first 50 rows; `resolveColumns` checks a saved mapping
   instead. The mapping is the same JSON on the page (the column-matching step in `src/app.js`, via
   `columnsOf`/`mappingOf` in `worker.js`, worded in `words.js`: `COLUMN_CHOICES`, `COLUMN_WORDS`,
-  `columnWarnings`) and on the command line (printed with each input, taken back with
+  `columnWarnings`, which warns of a column named for a gazetteer when no column is the address) and on the command line (printed with each input, taken back with
   `--columns FILE`). An address column makes the rows attestation-centric; otherwise each row is a
   place whose `@id` is minted by `tableIds` from its id under the base address, with the id kept as
   `entityIdentifier`. No id column means no addresses and one `generic-no-ids` warning; a repeated
