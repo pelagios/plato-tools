@@ -5,8 +5,8 @@
 // file just written, in the same run, and must find every earlier attestation unchanged and exactly
 // the drawings added: the save is shown to have kept PLATO's append-only rule, not assumed to.
 //
-// Additions are checked against the pinned JSON Schema here, before anything is written: the
-// pipeline checks what it reads, not what is added to it.
+// Additions are checked against the pinned JSON Schema here, before anything is read: the pipeline
+// checks what it reads, not what options.augment adds to it.
 import { run, explainSchema } from '../pipeline.js';
 import { compare } from '../compare.js';
 import { detect } from '../input.js';
@@ -43,48 +43,16 @@ function appendTo(rec, n, byPlace, placed) {
   return { ...rec, attestations: [...(Array.isArray(rec.attestations) ? rec.attestations : []), ...adds] };
 }
 
-// The PLATO JSON writer of pipeline.js (makeWriter, target 'plato-json'), given each record with its
-// additions: the same header, the places under spatialEntities (newSpatialEntities among them, as
-// there), then identityRelations.
-async function appendingWriter(env, name, byPlace, placed, outputs) {
-  const o = await env.output(name);
-  let buf = [], len = 0;
-  const write = (s) => { buf.push(s); len += s.length; if (len > 1 << 20) flush(); };
-  const flush = () => { if (buf.length) { o.write(buf.join('')); buf = []; len = 0; } };
-  let started = false, inIdrs = false, n = 0;
-  return {
-    header(h) {
-      const s = JSON.stringify({ $schema: 'https://w3id.org/plato/schemas/place-centric.schema.json', ...h, profile: 'place-centric' });
-      write(s.slice(0, -1) + (s.length > 2 ? ',' : '') + '"spatialEntities":[');
-    },
-    event(ev) {
-      // Attestation-centric input reaches a sink regrouped by place, as records.
-      if (ev.type !== 'record' && ev.type !== 'idr') return;
-      if (ev.type === 'idr' && !inIdrs) { write('],"identityRelations":['); inIdrs = true; started = false; }
-      const value = ev.type === 'record' ? appendTo(ev.value, ++n, byPlace, placed) : ev.value;
-      write((started ? ',' : '') + JSON.stringify(value)); started = true;
-    },
-    async close() { write(']}'); flush(); outputs.push(await o.close()); },
-  };
-}
-
 /**
- * Write the dataset with its additions (byPlace: place key -> [attestation]) to `name`. Returns
- * run()'s result, with the output.
- *
- * THE SWITCH TO options.augment: when pipeline.js has the augment hook (session c2, branch
- * pin-plato), this whole function becomes
- *   let n = 0;
- *   return run({ input, action: 'convert', target: 'plato-json',
- *     options: { name, augment: (rec) => appendTo(rec, ++n, byPlace, placed) } }, env);
- * (makeWriter names the file from options.name, so `name` ends .chora.json as now), and
- * appendingWriter above goes. augment is given only 'record' events, in the order a sink is.
+ * Write the dataset with its additions (byPlace: place key -> [attestation]) to `name`: a conversion
+ * to PLATO JSON by run(), whose options.augment is given each place-centric record, in the order a
+ * sink is given them, and puts its additions after its own attestations. The places are counted as
+ * Chora's store counts them (placeKey), so a place without an @id is found by its position here as
+ * there. makeWriter names the file from options.name, so the output is `name`. Returns run()'s result.
  */
-async function writeWithAdditions(input, byPlace, placed, env, name) {
-  const outputs = [];
-  const sink = await appendingWriter(env, name, byPlace, placed, outputs);
-  const r = await run({ input, action: 'check', options: { sink } }, env);
-  return { ...r, outputs };
+function writeWithAdditions(input, byPlace, placed, env, name) {
+  let n = 0;
+  return run({ input, action: 'convert', target: 'plato-json', options: { name, augment: (rec) => appendTo(rec, ++n, byPlace, placed) } }, env);
 }
 
 // What the version check must find for the save to stand: nothing of the earlier version lost or

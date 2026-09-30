@@ -482,17 +482,25 @@ on the main page through IndexedDB), and its engine `src/engine/chora/` (`store.
   so a second tab on the same pool cannot start. Chora's page asks the worker for its own
   (`init` with `pool: 'chora'`, `.opfs-sahpool-chora/`), and saves to `chora-outputs/`, since each
   page clears its outputs folder when it runs: the main page and Chora can be open at once, and
-  neither loses the other's file. Two Chora tabs still share one pool, and the second cannot start.
+  neither loses the other's file. Two Chora tabs still share one pool, and the second cannot start:
+  Chora's `init` takes the pool at once, and when the browser refuses a file another tab holds
+  (`createSyncAccessHandle`, a `NoModificationAllowedError`) the worker's error says `kind:
+  'pool-busy'`, and the page says Chora is open in another tab (`CHORA_TEXT` in `words.js`), not
+  the browser's words.
 - **Saving** writes the whole dataset as PLATO JSON, `<input>.chora.json`, each record as it was
-  read with its drawings appended as new attestations. Drawings are checked against the pinned JSON
-  Schema, and against the places the dataset has, before anything is written.
+  read with its drawings appended as new attestations: one `run()`, a conversion to `plato-json`
+  whose `options.augment` puts each place's drawings after its own attestations. The pipeline does
+  not check what `augment` adds, so drawings are checked against the pinned JSON Schema, and
+  against the places the dataset has, before anything is read or written.
+- **A place's key** is its `@id`, or `#n` (its position among the records) when it has none
+  (`placeKey` in `store.js`). Loading and saving both count the records `run()` gives, in the same
+  order, so a place without an address is found by the same key in each; a place of the tables has
+  the address made from its `place_id`, encoded as PLATO says, the same when read to load and to
+  save.
 - **Mneme is the oracle.** The same run then compares the input with the file written (`verify()`
   in `save.js`): nothing lost or changed, whatever the dataset's status, and exactly as many
   attestations added as were drawn. The append-only rule is shown kept, by the check a publisher
   would run, not assumed.
-- **A stop-gap writer.** `appendingWriter` in `save.js` repeats `pipeline.js`'s PLATO JSON writer
-  with the drawings put in. When `pipeline.js` has `options.augment` (planned), it goes, and saving
-  becomes one `run()` whose `augment` appends; the comment on `writeWithAdditions` gives the code.
 - **Drafts** are kept in the origin private file system, `chora-drafts/`, one file per dataset,
   named by a hash of each input file's name, size and last change.
 - **The basemap** is Natural Earth, served from this site from `public/basemap/`. Every address in

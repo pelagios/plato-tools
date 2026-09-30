@@ -25,9 +25,15 @@ async function sqlitePool() {
   // same one cannot start. A page that may be open beside the main page (Chora's) asks for a pool of
   // its own at init; the main page's is the default, as it always was.
   const own = poolName ? { name: `opfs-sahpool-${poolName}` } : {};
-  pool = { sqlite3, vfs: await sqlite3.installOpfsSAHPoolVfs({ clearOnInit: true, initialCapacity: 8, ...own }) };
+  let vfs;
+  try { vfs = await sqlite3.installOpfsSAHPoolVfs({ clearOnInit: true, initialCapacity: 8, forceReinitIfPreviouslyFailed: true, ...own }); }
+  catch (e) { throw poolBusy(e) ? Object.assign(new Error(e.message), { kind: 'pool-busy' }) : e; }
+  pool = { sqlite3, vfs };
   return pool;
 }
+// The browser's refusal of a file another tab holds open (createSyncAccessHandle, when an access
+// handle to the same file is open elsewhere): the pool is in use in another tab of this browser.
+const poolBusy = (e) => !!e && e.name === 'NoModificationAllowedError';
 async function outputsDir(clear, name = 'outputs') {
   const root = await navigator.storage.getDirectory();
   if (clear) { try { await root.removeEntry(name, { recursive: true }); } catch {} }
@@ -79,6 +85,9 @@ self.onmessage = async ({ data }) => {
       session.base = data.base;   // Chora's country boxes are fetched from the site too
       if (/^[a-z]+$/.test(data.pool || '')) poolName = data.pool;
       resources = prepare(await loadResources(async (f) => { const r = await fetch(base + f); if (!r.ok) throw new Error(`${f}: ${r.status}`); return r.text(); }));
+      // A page with a pool of its own (Chora's) takes it now, so that a second tab of that page is
+      // told at once that it cannot start, not when a file is first opened.
+      if (poolName) await sqlitePool();
       postMessage({ type: 'ready', version: resources.version });
     } else if (data.cmd === 'detect') {
       const input = await detect(data.files);
@@ -162,7 +171,7 @@ self.onmessage = async ({ data }) => {
       await choraCommand(data);
     }
   } catch (e) {
-    postMessage({ type: 'error', message: String(e && e.message || e), stack: String(e && e.stack || '') });
+    postMessage({ type: 'error', message: String(e && e.message || e), stack: String(e && e.stack || ''), ...(e && e.kind ? { kind: e.kind } : {}) });
   }
 };
 

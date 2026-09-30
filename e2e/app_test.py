@@ -1026,6 +1026,36 @@ def chora_checks(pw, url, tmp):
     attempt('Chora and the main page open at once: Chora\'s save leaves the main page\'s unsaved output in place, and it saves',
             lambda: (bool(both) and both['a_out'] and both['a_out'][0] in both['outputs'] and 'antonine-twotabs.chora.json' in both['chora-outputs'] and both['lines'] > 1, both))
 
+    # Chora's working database is in a SQLite pool one tab alone can hold, so a second Chora tab cannot
+    # start. It must say so in words, not show the browser's createSyncAccessHandle error; the first tab
+    # is the control (it still opens a file), and once it is closed the second starts on a reload.
+    ANOTHER_TAB = 'Chora is already open in another tab of this browser. Close it, or use that one.'
+    def another_tab():
+        page.goto('about:blank')                                # no Chora tab but these two
+        one, two = ctx.new_page(), ctx.new_page()
+        try:
+            chora_boot(one, base)                               # brought to the front, and ready
+            two.bring_to_front(); two.goto(NOTOOLS if PROVE else base + 'chora.html')
+            until(two, '() => window.__chora && ["in-another-tab", "error", "ready"].includes(window.__chora.phase)', 60)
+            two.bring_to_front(); s2 = cstate(two); said = two.inner_text('#phase'); shut = two.is_disabled('#picker')
+            one.bring_to_front(); one.set_input_files('#picker', [str(fixture(judgements, 'judgements-another-tab.json', tmp))])
+            until(one, '["loaded", "error", "unrecognised"].includes(window.__chora.phase)'); s1 = cstate(one)
+            one.close()                                         # its worker, and the pool with it, let go
+            two.bring_to_front(); two.reload()
+            until(two, '() => window.__chora && ["in-another-tab", "error", "ready"].includes(window.__chora.phase)', 60)
+            two.bring_to_front(); after = cstate(two)
+            return {'second': s2.get('phase'), 'said': said, 'picker disabled': shut, 'first': s1.get('phase'), 'after closing the first': after.get('phase'), 'error': after.get('error') or s2.get('error')}
+        finally:
+            for p in (one, two):
+                if not p.is_closed(): p.close()
+    tabs = {}
+    def another_tab_run():
+        tabs.update(another_tab()); r = tabs
+        return (r['second'] == 'in-another-tab' and r['said'].strip() == ANOTHER_TAB and 'createSyncAccessHandle' not in r['said']
+                and 'Something went wrong' not in r['said'] and r['picker disabled'] and r['first'] == 'loaded'), r
+    attempt('Chora in a second tab says plainly that Chora is open in another tab, and the first still opens a file', another_tab_run)
+    attempt('Chora in a second tab starts once the first is closed', lambda: (bool(tabs) and tabs['after closing the first'] == 'ready', tabs))
+
     def narrow():
         page.goto('about:blank')
         n = ctx.new_page(); n.set_viewport_size({'width': 390, 'height': 844}); n.bring_to_front()

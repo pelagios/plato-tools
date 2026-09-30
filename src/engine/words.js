@@ -280,6 +280,7 @@ export const CHORA_TEXT = {
   'chora-no-such-place': 'A drawing is for a place this dataset does not have, so nothing was saved. Open the dataset the drawing was made on.',
   'chora-not-placed': 'A drawing did not reach its place in the saved file, so the file must not be used.',
   'chora-unreadable': 'The dataset could not be read to the end, so it was not saved.',
+  'chora-in-another-tab': 'Chora is already open in another tab of this browser. Close it, or use that one.',
   'chora-mneme-failed': 'The version check (Mneme) found that the saved file does not keep every attestation of the dataset exactly as it was, or does not add exactly the drawings. Do not use it.',
 };
 /** A Chora save's outcome in one line, for the page and the command line. */

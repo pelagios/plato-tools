@@ -25,7 +25,7 @@ function request(msg, replyType) {
   const p = queue.then(() => new Promise((resolve, reject) => {
     worker.onmessage = ({ data }) => {
       if (data.type === 'progress') { $('phase').textContent = progressText(data); state.progress = data; }
-      else if (data.type === 'error') reject(new Error(data.message));
+      else if (data.type === 'error') reject(Object.assign(new Error(data.message), { kind: data.kind }));
       else if (data.type === replyType) resolve(data);
     };
     worker.postMessage(msg);
@@ -46,6 +46,7 @@ function startWorker() {
 
 // ---- Opening a dataset ---------------------------------------------------------------------------
 async function open(list) {
+  if (state.phase === 'in-another-tab') return;
   files = [...list];
   if (!files.length) return;
   Object.assign(state, { phase: 'opening', placeId: null, lastSave: null });
@@ -394,6 +395,13 @@ async function useBasemap(b) {
 }
 
 // ---- The rest ------------------------------------------------------------------------------------
+// Chora's working database is in a pool that one tab alone can hold (src/engine/worker.js), so a
+// second Chora tab cannot start: it says so, and offers nothing to open.
+function inAnotherTab() {
+  $('phase').innerHTML = `<span class="warn">${esc(CHORA_TEXT['chora-in-another-tab'])}</span>`;
+  $('picker').disabled = true;
+  Object.assign(state, { phase: 'in-another-tab' });
+}
 function fail(message) {
   $('phase').innerHTML = `<span class="warn">Something went wrong: ${esc(message)}</span>`;
   Object.assign(state, { phase: 'error', error: message });
@@ -438,4 +446,4 @@ startWorker().then(async () => {
     $('open-handoff').onclick = () => { clearHandoff(); open(handed); };
     state.handoff = handed.map((f) => f.name);
   }
-}).catch((e) => fail(e.message));
+}).catch((e) => (e.kind === 'pool-busy' ? inAnotherTab() : fail(e.message)));

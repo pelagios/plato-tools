@@ -9,7 +9,7 @@ import { env, file, textFile } from './engine.js';
 import { detect } from '../src/engine/input.js';
 import { run } from '../src/engine/pipeline.js';
 import { save, verify, savedName } from '../src/engine/chora/save.js';
-import { placeKey } from '../src/engine/chora/store.js';
+import { placeKey, load } from '../src/engine/chora/store.js';
 import { newGeometryAttestation } from '../src/engine/chora/draw.js';
 import { choraDrawingNote, choraSaveText } from '../src/engine/words.js';
 
@@ -157,4 +157,37 @@ test('a dataset that stops part-way is not saved', async () => {
   assert.deepEqual(r.outputs, []);
   assert.equal(r.mneme, null);
   assert.equal(savedName('deep.jsonl.gz'), 'deep.chora.json');
+});
+
+// The key a drawing is saved under is the one Chora's store gave the place when the dataset was
+// opened (load() in store.js): the save reads the dataset again and must find each place by the same
+// key. A place without an @id goes by its position ('#n'), and a place of the tables by its address,
+// made from its place_id with the characters an address cannot hold encoded (RFC 3986).
+async function storeKeys(files) {
+  const e = env();
+  const store = await load(await detect([].concat(files)), e, await e.openDb());
+  return { store, ids: store.search('', 0, 1000).items.map((i) => i.id) };
+}
+test("the keys Chora's store gives places are the keys a save finds them by: places without @id, and tables' encoded addresses", async () => {
+  const doc = JSON.parse(await file(JUDGEMENTS).text());
+  const { '@id': _, ...nameless } = doc.spatialEntities[2];
+  doc.spatialEntities.splice(1, 0, { ...nameless, label: 'Nowhere in particular' });
+  doc.spatialEntities.push({ label: 'Also unnamed', attestations: [] });
+  const json = () => textFile(JSON.stringify(doc), 'nameless.json');
+  const places = (await file(TABLES[1]).text()).trimEnd() + '\nSt Ives (Hunts),Saint Ives,GB\nÆbbe’s tūn,Ebbe’s farm,GB\n';
+  const tables = () => TABLES.map((p, i) => (i === 1 ? textFile(places, 'places.csv') : file(p)));
+  for (const [what, files, want] of [['PLATO JSON', json, ['#2', '#8']], ['tables', tables, [/place\/St%20Ives%20%28Hunts%29$/, /place\/%C3%86bbe%E2%80%99s%20t%C5%ABn$/]]]) {
+    const { store, ids } = await storeKeys(files());
+    const keys = want.map((w) => ids.find((id) => (typeof w === 'string' ? id === w : w.test(id))));
+    assert.ok(keys.every(Boolean), `${what}: the store has ${want.join(', ')} among ${ids.join(', ')}`);
+    const additions = keys.map((k, i) => ({ placeId: k, attestation: drawing(i, i) }));
+    for (const options of [{ name: what }, { name: what, hasPlace: (k) => store.has(k) }]) {
+      const r = await saved(files(), additions, options);
+      assert.equal(r.report.errors, 0, `${what}: ${JSON.stringify(r.report.items)}`);
+      await assertAppendedOnly(r.input, r.text, additions);
+      assert.equal(r.mneme.passed, true, `${what}: ${r.mneme.reasons.join('; ')}`);
+      assert.equal(r.mneme.report.counts.added, 2);
+    }
+    store.close();
+  }
 });
