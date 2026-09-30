@@ -139,7 +139,8 @@ function fail(message) {
 }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
 
-$('picker').onchange = (e) => choose(e.target.files);
+// Cleared once read, so that choosing the same file again (after editing it) is a change too.
+$('picker').onchange = (e) => { choose(e.target.files); e.target.value = ''; };
 const drop = $('drop');
 drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
 drop.ondragleave = () => drop.classList.remove('over');
