@@ -5,7 +5,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { gzipSync, strToU8 } from 'fflate';
 import { detect, lines } from '../src/engine/input.js';
-import { go } from './engine.js';
+import { go, env } from './engine.js';
+import { compare } from '../src/engine/compare.js';
 
 /** A File-like whose stream() yields `size`-byte chunks, as a large file's does. */
 export function chunked(bytes, name, size = 16384) {
@@ -103,4 +104,28 @@ test('a line of PLATO JSON Lines that is not an object is a schema error with it
       assert.equal(r.report.counts.places, 1, `${bad} ${target}`);
     }
   }
+});
+
+test('a line of an LPF sequence that is not a Feature is reported, not dropped in silence', async () => {
+  const fc = JSON.stringify({ type: 'FeatureCollection', '@context': 'https://raw.githubusercontent.com/LinkedPasts/linked-places-format/main/linkedplaces-context-v1.1.jsonld', title: 'T' });
+  const feature = (i) => JSON.stringify({ '@id': `https://example.org/f${i}`, type: 'Feature', properties: { title: `F${i}` }, names: [{ toponym: `F${i}` }] });
+  const f = chunked([fc, feature(1), JSON.stringify({ type: 'Point', coordinates: [0, 0] }), 'null', feature(2)].join('\n') + '\n', 'x.geojsonl');
+  assert.equal((await detect([f])).format, 'lpf-seq');
+  const r = await go([f], 'check');
+  const e = errors(r).filter((i) => i.kind === 'lpf-not-a-feature');
+  assert.equal(e.length, 1, JSON.stringify(errors(r)));
+  assert.deepEqual(e[0].examples, ['line 3', 'line 4']);
+  // The collection's own first line is its header, not a feature out of place; the features are read.
+  assert.equal(errors(r).length, 1, JSON.stringify(errors(r)));
+  assert.equal(r.report.counts.places, 2);
+});
+test('a version with a line that is not a Feature is not read whole, so the version check cannot pass it', async () => {
+  const fc = JSON.stringify({ type: 'FeatureCollection', title: 'T' });
+  const feature = JSON.stringify({ '@id': 'https://example.org/f1', type: 'Feature', properties: { title: 'F1' }, names: [{ toponym: 'F1' }] });
+  const cmp = async (text) => (await compare({ earlier: await detect([chunked(fc + '\n' + feature + '\n', 'a.geojsonl')]), later: await detect([chunked(text, 'b.geojsonl')]) }, env())).report;
+  const bad = await cmp(fc + '\n' + feature + '\n' + JSON.stringify({ type: 'feature', properties: { title: 'F2' } }) + '\n');
+  assert.ok(bad.items.some((i) => i.kind === 'version-not-read'), JSON.stringify(bad.items.map((i) => i.kind)));
+  // Control: the same version without the line is read whole.
+  const good = await cmp(fc + '\n' + feature + '\n');
+  assert.ok(!good.items.some((i) => i.kind === 'version-not-read'), JSON.stringify(good.items.map((i) => i.kind)));
 });

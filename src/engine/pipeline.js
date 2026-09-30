@@ -137,10 +137,14 @@ async function* lpfSource(file, seq, rep) {
   const loss = (l) => rep.loss(l.kind, LOSS_TEXT[l.kind] || l.kind, l.value);
   yield { type: 'header', value: { profile: 'place-centric', gazetteer: collectionToGazetteer(head, file.name, loss) } };
   const each = seq ? (async function* () {
+    let first = true;
     for await (const { line, n } of lines(file)) {
       let v;
-      try { v = JSON.parse(line); } catch (e) { rep.error('json-syntax', 'A line is not valid JSON', `line ${n}: ${e.message}`); continue; }
+      try { v = JSON.parse(line); } catch (e) { first = false; rep.error('json-syntax', 'A line is not valid JSON', `line ${n}: ${e.message}`); continue; }
       if (v && v.type === 'Feature') yield { v, n };
+      // The collection's own line, first, is the header read above; anything else is not read.
+      else if (!(first && v && v.type === 'FeatureCollection')) rep.error('lpf-not-a-feature', 'A line of the GeoJSON sequence is not an LPF feature (its type is not "Feature"), so it is not read', `line ${n}`);
+      first = false;
     }
   })()
     : (async function* () {

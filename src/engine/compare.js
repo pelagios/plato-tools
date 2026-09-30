@@ -43,7 +43,7 @@ const digest = (text) => sha256(text).slice(0, 32);
 // A problem of a version's own that stops part of it being read: the comparison is then of less
 // than the whole, so it cannot pass. Other problems (a record the JSON Schema rejects) are the
 // check's to list; the record was still read.
-const NOT_READ = new Set(['json-syntax', 'rdf-syntax', 'record-failed', 'late-header', 'not-a-list', 'lpf-v2']);
+const NOT_READ = new Set(['json-syntax', 'rdf-syntax', 'record-failed', 'late-header', 'not-a-list', 'lpf-v2', 'lpf-not-a-feature']);
 // What a version holds that has no place in PLATO's RDF: it is not among the statements compared.
 const NOT_IN_RDF = new Set(['unmapped-key', 'relative-iri', 'unconvertible', 'not-in-rdf']);
 // How many changed things of each kind are explained: as many as a report shows examples of.
