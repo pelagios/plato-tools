@@ -124,7 +124,9 @@ test('a list given as something else in Linked Places Format is reported, never 
     const kinds = new Set(before.items.map((i) => i.kind));
     const reported = (report) => report.errors > before.errors || report.items.some((i) => !kinds.has(i.kind));
     const r = await sweep(doc, name, lpfArrays(doc), name, reported);
-    threw.push(...r.threw); silent.push(...r.silent);
+    // null in a list's place is nothing there (LPF writes null where it has no value), so it may pass
+    // silently; it must still never throw. The test below holds both halves of that.
+    threw.push(...r.threw); silent.push(...r.silent.filter((label) => !label.endsWith('=null')));
   }
   assert.deepEqual({ threw, silent }, { threw: [], silent: [] });
 });
