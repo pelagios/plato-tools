@@ -10,31 +10,29 @@ import * as basemaps from './basemaps.js';
 import * as contributors from './contributor.js';
 import { fingerprint, loadDrafts, saveDrafts } from './drafts.js';
 import { take as takeHandoff, clear as clearHandoff } from './handoff.js';
+import { serialQueue } from './queue.js';
 
 const $ = (id) => document.getElementById(id);
 const state = (window.__chora = { phase: 'loading', placeId: null, pendingCount: 0, basemap: null, mapReadyCount: 0, blocked: 0, lastSave: null });
 const PAGE = 50;
 let showing = false;   // true while the drawings shown are being replaced
-let worker, files = [], fp = null, dataset = null, drafts = [], view = null, offset = 0, total = 0, query = '';
+let worker, files = [], fp = null, dataset = null, drafts = [], view = null, total = 0, query = '';
+let starts = [0], nextAfter = null;   // where each page of the list shown so far begins (after which place), and where the next would
 let offered = null;    // the button that saves the file last written, while the drawings are those it holds
 let drawError = null;  // why the last drawing was not kept, shown in the card
 
 // ---- The engine ----------------------------------------------------------------------------------
-// One request at a time: each waits for the reply of its type (or an error), and progress on the way
-// is shown in words.
-let queue = Promise.resolve();
-function request(msg, replyType) {
-  const p = queue.then(() => new Promise((resolve, reject) => {
-    worker.onmessage = ({ data }) => {
-      if (data.type === 'progress') { $('phase').textContent = progressText(data); state.progress = data; }
-      else if (data.type === 'error') reject(Object.assign(new Error(data.message), { kind: data.kind }));
-      else if (data.type === replyType) resolve(data);
-    };
-    worker.postMessage(msg);
-  }));
-  queue = p.catch(() => {});
-  return p;
-}
+// One request at a time (queue.js): each waits for the reply of its type (or an error), and progress
+// on the way is shown in words. A search passed over by a later one before it is sent resolves to null.
+const enqueue = serialQueue(({ msg, replyType }) => new Promise((resolve, reject) => {
+  worker.onmessage = ({ data }) => {
+    if (data.type === 'progress') { $('phase').textContent = progressText(data); state.progress = data; }
+    else if (data.type === 'error') reject(Object.assign(new Error(data.message), { kind: data.kind }));
+    else if (data.type === replyType) resolve(data);
+  };
+  worker.postMessage(msg);
+}));
+const request = (msg, replyType, opts) => enqueue({ msg, replyType }, opts);
 function startWorker() {
   worker = new Worker(new URL('../engine/worker.js', import.meta.url), { type: 'module' });
   worker.onerror = (e) => fail(`The engine stopped: ${e.message || 'unknown error'}`);
@@ -75,27 +73,32 @@ async function open(list) {
   if (dataset.bbox) mapApi.fit(dataset.bbox, 8);
   $('places').hidden = false;
   query = ''; $('q').value = '';
-  await search(0);
+  await search('first');
   showSaving();
   Object.assign(state, { phase: 'loaded', places: dataset.places, pendingCount: drafts.length });
   if (drafts.length) $('dataset').insertAdjacentHTML('beforeend', `<p class="note">${n(drafts.length)} unsaved drawing${drafts.length === 1 ? ' was' : 's were'} kept from last time, and ${drafts.length === 1 ? 'is' : 'are'} shown with ${drafts.length === 1 ? 'its place' : 'their places'}.</p>`);
 }
 
 // ---- The place list ------------------------------------------------------------------------------
-async function search(at) {
-  const r = await request({ cmd: 'chora-search', q: query, offset: at, limit: PAGE }, 'chora-results');
-  offset = at; total = r.total;
-  $('found').textContent = total ? `${query ? `${n(total)} found` : `${n(total)} places`}${total > PAGE ? `, showing ${n(at + 1)}–${n(Math.min(at + PAGE, total))}` : ''}.` : 'No place has that in its name.';
+// A page goes on from the place before it (keyset paging): `starts` holds where each page so far
+// began, so Previous goes back one, and a new query starts again.
+async function search(to = 'first') {
+  const pages = to === 'first' ? [0] : to === 'next' ? [...starts, nextAfter] : to === 'prev' ? starts.slice(0, -1) : starts;
+  const r = await request({ cmd: 'chora-search', q: query, after: pages[pages.length - 1], limit: PAGE }, 'chora-results', { latestOf: 'search' });
+  if (!r) return;   // a later search was asked for before this one was sent
+  starts = pages; nextAfter = r.next; total = r.total;
+  const at = (pages.length - 1) * PAGE;
+  $('found').textContent = total ? `${query ? `${n(total)} found` : `${n(total)} places`}${total > PAGE ? `, showing ${n(at + 1)}–${n(at + r.items.length)}` : ''}.` : 'No place has that in its name.';
   const pending = new Set(drafts.map((d) => d.placeId));
   $('list').innerHTML = r.items.map((p) => `<li><button type="button" class="place${p.id === state.placeId ? ' current' : ''}" data-id="${esc(p.id)}">${esc(p.label || p.id)}`
     + `${p.matched ? ` <span class="also">— also ${esc(p.matched)}</span>` : ''}${p.ccodes?.length ? ` <span class="muted">${esc(p.ccodes.join(', '))}</span>` : ''}${p.hasGeometry ? '' : ' <span class="tag">no location</span>'}${pending.has(p.id) ? ' <span class="tag pending">drawn</span>' : ''}</button></li>`).join('');
-  $('prev').disabled = at === 0; $('next').disabled = at + PAGE >= total;
+  $('prev').disabled = pages.length === 1; $('next').disabled = r.next === null;
   $('prev').parentElement.hidden = total <= PAGE;
 }
 let typing;
-$('q').oninput = () => { clearTimeout(typing); typing = setTimeout(() => { query = $('q').value.trim(); search(0); }, 200); };
-$('prev').onclick = () => search(Math.max(0, offset - PAGE));
-$('next').onclick = () => search(offset + PAGE);
+$('q').oninput = () => { clearTimeout(typing); typing = setTimeout(() => { query = $('q').value.trim(); search('first'); }, 200); };
+$('prev').onclick = () => search('prev');
+$('next').onclick = () => search('next');
 $('list').onclick = (e) => { const b = e.target.closest('button[data-id]'); if (b) selectPlace(b.dataset.id); };
 
 // ---- One place -----------------------------------------------------------------------------------

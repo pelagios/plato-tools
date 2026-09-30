@@ -25,9 +25,12 @@ export function keyer() {
 }
 /**
  * A label or name as the search box compares it: lower case, without accents (Ἑρμῆς finds ερμης,
- * İstanbul finds istanbul), and without U+0001, which joins a place's names in the search table.
+ * İstanbul finds istanbul), letters that are no accented letter spelt out as they are written in
+ * their place (œ oe, æ ae, þ and ð th, ß ss: Brabœuf finds braboeuf, Þanet thanet), and without
+ * U+0001, which joins a place's names in the search table.
  */
-export const fold = (s) => String(s ?? '').normalize('NFD').replace(/[\p{M}\u0001]/gu, '').toLowerCase();
+const SPELT = { 'œ': 'oe', 'æ': 'ae', 'þ': 'th', 'ð': 'th', 'ß': 'ss' };
+export const fold = (s) => String(s ?? '').normalize('NFD').replace(/[\p{M}\u0001]/gu, '').toLowerCase().replace(/[œæþðß]/g, (c) => SPELT[c]);
 /** How many places the overview map is given at most. */
 export const OVERVIEW_CAP = 50000;
 const BATCH = 5000;
@@ -39,13 +42,16 @@ export class ChoraStore {
     // dataset is read (denied ones never go in; withdrawn ones are taken out at the end). sx: each
     // place's label, folded (k = 0, name null), and then its names, toponym and romanized, in
     // attestation order (k = 1, 2, ...; denied ones never go in, withdrawn ones are taken out at the
-    // end). sf: what the search box scans, made from sx at the end: one row per place, its folded
+    // end). sf: what the search box looks in, made from sx at the end: one row per place, its folded
     // label and names joined by U+0001 (which no folded text holds, so a match never spans two), kept
-    // apart from the records so that a search reads little. wd: what the whole dataset withdraws.
+    // apart from the records so that a search reads little; sft, a trigram index of it (FTS5, its text
+    // not copied), for queries of three letters or more; shorter ones scan sf. wd: what the whole
+    // dataset withdraws.
     db.exec(`CREATE TABLE p(n INTEGER PRIMARY KEY, id TEXT NOT NULL, label TEXT, ccodes TEXT, rel TEXT, rec TEXT NOT NULL,
       w REAL, s REAL, e REAL, nn REAL, rx REAL, ry REAL)`);
     db.exec('CREATE TABLE sx(n INTEGER NOT NULL, k INTEGER NOT NULL, att TEXT, fold TEXT NOT NULL, name TEXT, PRIMARY KEY(n, k)) WITHOUT ROWID');
     db.exec('CREATE TABLE sf(n INTEGER PRIMARY KEY, f TEXT NOT NULL)');
+    db.exec("CREATE VIRTUAL TABLE sft USING fts5(f, content='sf', content_rowid='n', tokenize='trigram')");
     db.exec('CREATE TABLE g(n INTEGER NOT NULL, att TEXT, w REAL, s REAL, e REAL, nn REAL, rx REAL, ry REAL)');
     db.exec('CREATE TABLE wd(id TEXT PRIMARY KEY, kind TEXT NOT NULL) WITHOUT ROWID');
     this.loaded = null;
@@ -124,9 +130,11 @@ export class ChoraStore {
     ins.finalize();
     db.exec('CREATE INDEX pid ON p(id)');
     db.exec('CREATE INDEX gn ON g(n)');
+    this.counts = new Map();
     db.exec('DELETE FROM g WHERE att IN (SELECT id FROM wd)');
     db.exec('DELETE FROM sx WHERE att IN (SELECT id FROM wd)');
     db.exec("INSERT INTO sf(n, f) SELECT n, group_concat(fold, char(1)) FROM sx GROUP BY n ORDER BY n");
+    db.exec("INSERT INTO sft(sft) VALUES ('rebuild')");
     const first = (col) => `(SELECT ${col} FROM g WHERE g.n=p.n AND g.rx IS NOT NULL ORDER BY g.rowid LIMIT 1)`;
     db.exec(`UPDATE p SET w=(SELECT MIN(w) FROM g WHERE g.n=p.n), s=(SELECT MIN(s) FROM g WHERE g.n=p.n),
       e=(SELECT MAX(e) FROM g WHERE g.n=p.n), nn=(SELECT MAX(nn) FROM g WHERE g.n=p.n), rx=${first('rx')}, ry=${first('ry')}`);
@@ -141,6 +149,8 @@ export class ChoraStore {
       upd.bind([...unionBbox(boxes), n]).stepReset();
     }
     upd.finalize();
+    // The overview reads this, not the records: every place with a point, in dataset order.
+    db.exec('CREATE INDEX pov ON p(n, id, label, rx, ry) WHERE rx IS NOT NULL');
     db.exec('COMMIT');
   }
 
@@ -155,33 +165,52 @@ export class ChoraStore {
 
   /**
    * Places whose label or a current name (toponym or romanized) holds `q`, case and accents aside, in
-   * dataset order, each once; an empty q gives them all. A place found by a name and not by its label
-   * has `matched`: the first such name, in the order of its attestations.
+   * dataset order, each once; an empty q gives them all. A page is `limit` places after the place
+   * numbered `after` (0: from the start): `next` is what to pass as `after` for the page after this
+   * one, or null when there is none. Going on from a place, not counting past an offset, costs the
+   * same on the last page as the first. `total` is counted once per query (folded), then remembered.
+   * A place found by a name and not by its label has `matched`: the first such name, in the order of
+   * its attestations.
    */
-  search(q = '', offset = 0, limit = 50) {
-    const f = fold(q), page = [Math.max(0, limit | 0), Math.max(0, offset | 0)];
-    const items = [];
-    const item = (r) => ({ id: r.get(0), label: r.get(1), ccodes: JSON.parse(r.get(2)), hasGeometry: !!r.get(3) });
-    if (!f) {
-      for (const r of this.rows('SELECT id, label, ccodes, w IS NOT NULL FROM p ORDER BY n LIMIT ? OFFSET ?', page)) items.push(item(r));
-      return { q, total: this.one('SELECT COUNT(*) FROM p'), items };
-    }
+  search(q = '', { after = 0, limit = 50 } = {}) {
+    const f = fold(q), from = Math.max(0, Number(after) || 0), max = Math.max(0, limit | 0);
     const like = '%' + f.replace(/[\\%_]/g, (c) => '\\' + c) + '%';
-    const total = this.one("SELECT COUNT(*) FROM sf WHERE f LIKE ? ESCAPE '\\'", [like]);
+    // Three letters or more: the trigram index, asked for q as one phrase (every " doubled), which
+    // finds each row holding q as it is, in rowid (dataset) order. Fewer: a scan of sf.
+    const indexed = [...f].length >= 3, phrase = '"' + f.replace(/"/g, '""') + '"';
+    const counts = this.counts || (this.counts = new Map());
+    if (!counts.has(f)) {
+      counts.set(f, !f ? this.one('SELECT COUNT(*) FROM p')
+        : indexed ? this.one('SELECT COUNT(*) FROM sft WHERE sft MATCH ?', [phrase])
+          : this.one("SELECT COUNT(*) FROM sf WHERE f LIKE ? ESCAPE '\\'", [like]));
+    }
+    const rows = [];
+    // One more than the page, to know whether there is a page after it.
+    const hits = indexed ? 'SELECT rowid AS n FROM sft WHERE rowid > ? AND sft MATCH ? ORDER BY rowid LIMIT ?'
+      : "SELECT n FROM sf WHERE n > ? AND f LIKE ? ESCAPE '\\' ORDER BY n LIMIT ?";
+    const sql = f
+      ? `SELECT p.id, p.label, p.ccodes, p.w IS NOT NULL, p.n FROM (${hits}) h JOIN p ON p.n = h.n ORDER BY h.n`
+      : 'SELECT id, label, ccodes, w IS NOT NULL, n FROM p WHERE n > ? ORDER BY n LIMIT ?';
+    for (const r of this.rows(sql, f ? [from, indexed ? phrase : like, max + 1] : [from, max + 1])) {
+      rows.push({ id: r.get(0), label: r.get(1), ccodes: JSON.parse(r.get(2)), hasGeometry: !!r.get(3), n: r.get(4) });
+    }
+    const more = rows.length > max;
+    if (more) rows.pop();
+    const items = [];
     // The name shown is the first that holds q, the label (k = 0, name null) before any.
-    const which = this.db.prepare("SELECT name FROM sx WHERE n = ? AND fold LIKE ? ESCAPE '\\' ORDER BY k LIMIT 1");
+    const which = f ? this.db.prepare("SELECT name FROM sx WHERE n = ? AND fold LIKE ? ESCAPE '\\' ORDER BY k LIMIT 1") : null;
     try {
-      for (const r of this.rows(`SELECT p.id, p.label, p.ccodes, p.w IS NOT NULL, p.n FROM
-        (SELECT n FROM sf WHERE f LIKE ? ESCAPE '\\' ORDER BY n LIMIT ? OFFSET ?) h JOIN p ON p.n = h.n ORDER BY h.n`, [like, ...page])) {
-        const it = item(r);
-        which.bind([r.get(4), like]);
-        const name = which.step() ? which.get(0) : null;
-        which.reset();
-        if (name !== null) it.matched = name;
+      for (const { n, ...it } of rows) {
+        if (which) {
+          which.bind([n, like]);
+          const name = which.step() ? which.get(0) : null;
+          which.reset();
+          if (name !== null) it.matched = name;
+        }
         items.push(it);
       }
-    } finally { which.finalize(); }
-    return { q, total, items };
+    } finally { which?.finalize(); }
+    return { q, total: counts.get(f), items, next: more && rows.length ? rows[rows.length - 1].n : null };
   }
 
   /** Every place with a current geometry, as a point, for the map of the whole dataset: at most `cap`. */

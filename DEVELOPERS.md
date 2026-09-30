@@ -553,13 +553,21 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   searched by, settled at the end of the file, where what is retracted or superseded is known. One
   dataset at a time.
 - **The search box** finds a place by its label or any current name (toponym or romanized; not
-  denied, retracted or superseded), by part of it, case and accents aside (`fold` in `store.js`), in
-  dataset order, each place once. A place found by a name and not its label comes with `matched`,
-  the first such name, which the list shows ("Byzantium — also Konstantinoupolis"). The names go to
-  SQLite as they are read (`sx`, a row per name) and, once withdrawals are known, one row per place
-  holds its folded label and names joined (`sf`), which a search scans with `LIKE`: on 200,000
-  places with three names each, about 40 to 110 ms a search in Node, no slower than the label alone
-  was, since the records are not read.
+  denied, retracted or superseded), by part of it, case and accents aside, and œ, æ, þ, ð and ß as
+  oe, ae, th, th and ss (`fold` in `store.js`), in dataset order, each place once. A place found by a
+  name and not its label comes with `matched`, the first such name, which the list shows ("Byzantium
+  — also Konstantinoupolis"). The names go to SQLite as they are read (`sx`, a row per name) and,
+  once withdrawals are known, one row per place holds its folded label and names joined (`sf`),
+  apart from the records. A query of three letters or more is looked up in an FTS5 trigram index of
+  `sf` (`sft`, which does not copy its text), as one phrase; a shorter one scans `sf` with `LIKE`.
+  A page goes on from the last place of the one before (`after`, and the reply's `next`), not past
+  an offset, and the count is made once per query. The page's queue to the worker (`queue.js`) sends
+  only the latest of the searches waiting, so a place chosen is not kept behind searches nobody will
+  see. On 540,000 synthetic places of about 1.9 KB each, three names each, in a 1.6 GB database on
+  disk (Node's SQLite): a search of three letters or more 0.2 to 15 ms, of one or two letters
+  about 60 to 100 ms, a later page about 1 ms. Labels alone were 450 to 1,000 ms, and a deep offset
+  up to 900 ms. The index adds about 80 MB and 4 s to loading.
+- **The overview** reads a covering index of the places with a point (`pov`), not the records.
 - **A pool and an outputs folder of its own.** A SQLite SAHPool holds every file in its folder open,
   so a second tab on the same pool cannot start. Chora's page asks the worker for its own
   (`init` with `pool: 'chora'`, `.opfs-sahpool-chora/`), and saves to `chora-outputs/`, since each

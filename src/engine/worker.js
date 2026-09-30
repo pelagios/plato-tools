@@ -234,7 +234,7 @@ async function choraCommand(data) {
   }
   if (!session.store) throw new Error('Open a dataset first.');
   if (data.cmd === 'chora-search') {
-    postMessage({ type: 'chora-results', ...session.store.search(data.q || '', data.offset || 0, data.limit ?? 50) });
+    postMessage({ type: 'chora-results', ...session.store.search(data.q || '', { after: data.after || 0, limit: data.limit ?? 50 }) });
   } else if (data.cmd === 'chora-overview') {
     postMessage({ type: 'chora-overview', geojson: session.store.overview() });
   } else if (data.cmd === 'chora-place') {

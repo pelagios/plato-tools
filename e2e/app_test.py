@@ -684,6 +684,12 @@ GL = [] if '--no-gl-flags' in sys.argv else ['--enable-unsafe-swiftshader', '--u
 NOTOOLS = 'data:text/html,<title>no tools here</title><input id=picker type=file multiple>'
 EX = PLATO / 'schemas/examples'
 T = (lambda s: min(s, 6)) if PROVE else (lambda s: s)   # against the page with no tools every wait fails: sooner
+SPELT = {'œ': 'oe', 'æ': 'ae', 'þ': 'th', 'ð': 'th', 'ß': 'ss'}
+def chora_fold(t):
+    """A label or name as Chora's search compares it (fold in store.js): NFD, marks dropped, lower case,
+    œ æ þ ð ß spelt out."""
+    t = ''.join(c for c in unicodedata.normalize('NFD', t) if not unicodedata.combining(c) and c != '\x01').lower()
+    return ''.join(SPELT.get(c, c) for c in t)
 
 def attempt(name, fn):
     """A check made of steps, any of which may raise: a harness error is a failed check, never a crash."""
@@ -886,7 +892,7 @@ def chora_checks(pw, url, tmp):
         chora_boot(page, base, [fixture(ant, 'antonine-search.json', tmp)])
         labels = lambda: sorted(page.eval_on_selector_all('#list button[data-id]', 'bs => bs.map((b) => b.firstChild.textContent.trim())'))
         # What should be found, worked out from the file, folded as the page says it folds (NFD, marks dropped, lower case).
-        fold = lambda t: ''.join(c for c in unicodedata.normalize('NFD', t) if not unicodedata.combining(c)).lower()
+        fold = chora_fold
         want = sorted(p['label'] for p in antj['spatialEntities'] if 'road' in fold(p['label']))
         want_dover = sorted(p['label'] for p in antj['spatialEntities'] if 'dover' in fold(p['label']))
         page.fill('#q', 'ROAD'); until(page, '() => /found/.test(document.getElementById("found").textContent)', 20)
@@ -898,7 +904,7 @@ def chora_checks(pw, url, tmp):
     attempt('Chora: search finds by part of a name, whatever the case and accents, and only those', search)
     def search_names():
         chora_boot(page, base, [fixture(ant, 'antonine-names.json', tmp)])
-        fold = lambda t: ''.join(c for c in unicodedata.normalize('NFD', t) if not unicodedata.combining(c)).lower()
+        fold = chora_fold
         # "Ad portum" is in two places' names (Ad portum Dubris, Ad portum Lemanis) and in no label, so
         # only a search of the names can find them. Worked out from the file, not typed in.
         want = sorted((p['label'], n['toponym']) for p in antj['spatialEntities'] for a in p['attestations'] for n in a.get('names', [])
@@ -908,6 +914,26 @@ def chora_checks(pw, url, tmp):
         got = sorted(page.eval_on_selector_all('#list button[data-id]', 'bs => bs.map((b) => [b.firstChild.textContent.trim(), b.querySelector(".also")?.textContent || null])'))
         return len(want) == 2 and got == [[l, f'— also {n}'] for l, n in want], {'listed': got, 'wanted': want}
     attempt('Chora: search finds a place by a name that is not its label, and shows the name it matched', search_names)
+    def paging():
+        # 120 places, so the list has three pages: 1-50, 51-100, 101-120. Next and Previous go on
+        # from the place before the page, and the count stays that of the whole query.
+        f = tmp / 'chora-files' / 'paging.json'; f.parent.mkdir(exist_ok=True)
+        f.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': 'https://example.org/g', 'title': 'Paging', 'status': 'draft', 'version': '1'},
+            'spatialEntities': [{'@id': f'https://example.org/p/{i}', 'label': f'Stead {i:03d}', 'attestations': []} for i in range(1, 121)]}))
+        chora_boot(page, base, [f])
+        first = lambda: page.eval_on_selector_all('#list button[data-id]', 'bs => [bs.length, bs[0]?.firstChild.textContent.trim(), bs.at(-1)?.firstChild.textContent.trim()]')
+        seen = []
+        for step in ['start', 'next', 'next', 'prev']:
+            was = page.inner_text('#found')
+            if step != 'start':
+                page.click(f'#{step}'); until(page, 'w => document.getElementById("found").textContent !== w', 20, was)
+            seen.append([page.inner_text('#found'), *first(), page.is_disabled('#prev'), page.is_disabled('#next')])
+        want = [['120 places, showing 1–50.', 50, 'Stead 001', 'Stead 050', True, False],
+                ['120 places, showing 51–100.', 50, 'Stead 051', 'Stead 100', False, False],
+                ['120 places, showing 101–120.', 20, 'Stead 101', 'Stead 120', False, True],
+                ['120 places, showing 51–100.', 50, 'Stead 051', 'Stead 100', False, False]]
+        return seen == want, {'seen': seen, 'wanted': want}
+    attempt('Chora: the place list pages forwards and back, each page going on from the one before', paging)
 
     def statuses():
         chora_boot(page, base, [fixture(judgements, 'judgements-card.json', tmp)])
