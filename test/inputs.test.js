@@ -93,7 +93,7 @@ test('the command line checks the tables of a mixed directory, and the other CSV
   assert.match(r.stdout, /\nChecked 2 inputs: /);
 });
 test('the command line checks two ordinary CSV files named one by one as two inputs, each a table of places', () => {
-  const d = dir(false, { 'a.csv': GAUGES, 'b.csv': 'name,lat,lon\nOstia,41.75,12.29\n' });
+  const d = dir(false, { 'a.csv': 'name,lat,lon\nKew,51.48,-0.29\n', 'b.csv': 'name,lat,lon\nOstia,41.75,12.29\n' });
   const run = (...files) => spawnSync(process.execPath, [fileURLToPath(new URL('../bin/plato-tools.mjs', import.meta.url)), 'check', ...files], { encoding: 'utf8' });
   const r = run(join(d, 'a.csv'), join(d, 'b.csv'));
   assert.equal(r.status, 0, r.stdout + r.stderr);
