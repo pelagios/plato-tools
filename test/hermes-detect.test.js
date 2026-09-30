@@ -1,6 +1,7 @@
 // Telling inputs apart (src/engine/input.js, detect) where Hermes added a format or a test: Linked
 // Places Format and plain GeoJSON told apart by their structure, not by words in the text; a IIIF
-// Georeference Annotation (Allmaps) recognised and refused, not read as W3C annotations. The fixtures in
+// Georeference Annotation (Allmaps) recognised and refused, not read as W3C annotations; a places.csv
+// separated by semicolons or tabs still the spreadsheet tables. The fixtures in
 // test/fixtures/hermes-detect/ are described in its README. Every test that asserts an absence
 // asserts, in the same test, a presence it could have missed.
 import { test } from 'node:test';
@@ -87,4 +88,13 @@ test('checking or converting a georeference is refused with the reason, as an in
   }
   const ok = cli('check', 'test/fixtures/annotations/recogito-v1-islandia-map.jsonld');
   assert.ok(!/could not be checked/.test(ok.out) && /Checked 1 input/.test(ok.out), ok.out);
+});
+
+// ---- a places.csv with another delimiter -------------------------------------------------------------
+test('a places.csv separated by semicolons, tabs or bars is still the spreadsheet tables; with a header of its own, a table of places', async () => {
+  for (const d of [';', '\t', '|', ',']) {
+    assert.equal(await kind(['place_id', 'label', 'country_codes'].join(d) + '\n' + ['a', 'A', ''].join(d) + '\n', 'places.csv'), 'tables', JSON.stringify(d));
+    assert.equal(await kind(['name', 'lat', 'lon'].join(d) + '\n' + ['A', '1', '2'].join(d) + '\n', 'places.csv'), 'csv', `control ${JSON.stringify(d)}`);
+  }
+  assert.equal(await kind('title;description\nT;D\n', 'about.csv'), 'tables');
 });

@@ -3,6 +3,7 @@
 // parser that hands over one record at a time. Works on browser File objects and on Node's File.
 // Vendored, with the one change that keeps a U+FEFF inside a string: see src/vendor/streamparser-json/.
 import { JSONParser, TokenType } from '../vendor/streamparser-json/index.js';
+import Papa from 'papaparse';
 
 /**
  * The file's content stopped the reader: JSON that is not well formed or stops early, or
@@ -252,7 +253,9 @@ async function csvSetKind(files, names) {
   if (named.length && files.length > 1) return { format: 'tables', container: 'csv', files };
   if (named.length) {
     let first;
-    try { first = (await head(files[0], 4096)).replace(/^﻿/, '').split(/\r?\n/)[0].split(',')[0].replace(/^"|"$/g, '').trim(); }
+    // The delimiter is guessed as the tables reader guesses it (Papa), so that a places.csv separated
+    // by semicolons or tabs is still the tables.
+    try { const text = (await head(files[0], 4096)).replace(/^﻿/, ''); first = String(Papa.parse(text, { preview: 1, skipEmptyLines: 'greedy' }).data[0]?.[0] ?? '').trim(); }
     catch (e) { if (e instanceof DataError) return { format: 'tables', container: 'csv', files }; throw e; }
     if (first === (SHEET_FIRST_COLUMN[sheets[0]] || 'place_id')) return { format: 'tables', container: 'csv', files };
   }
