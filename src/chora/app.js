@@ -1,0 +1,439 @@
+// Chora's page: open a dataset, find a place, see on the map and in its card everything the
+// attestations say of it over time; draw a point, line or area as a new attestation; save the whole
+// dataset with the drawings added, checked by the version check (Mneme) against what was opened.
+// The engine is the same worker as the main page's (src/engine/worker.js, its chora-* commands). The
+// page publishes its state on window.__chora for automated tests; nothing else reads it.
+import { fmtBytes, progressText, summary, draftNote, choraDrawingNote, choraSaveText, CHORA_TEXT } from '../engine/words.js';
+import { newGeometryAttestation, ROLES, PRECISIONS } from '../engine/chora/draw.js';
+import { createMap, placeFeatures, contextFeatures, STATUS_COLOURS } from './map.js';
+import * as basemaps from './basemaps.js';
+import * as contributors from './contributor.js';
+import { fingerprint, loadDrafts, saveDrafts } from './drafts.js';
+import { take as takeHandoff, clear as clearHandoff } from './handoff.js';
+
+const $ = (id) => document.getElementById(id);
+const state = (window.__chora = { phase: 'loading', placeId: null, pendingCount: 0, basemap: null, mapReadyCount: 0, blocked: 0, lastSave: null });
+const PAGE = 50;
+let showing = false;   // true while the drawings shown are being replaced
+let worker, files = [], fp = null, dataset = null, drafts = [], view = null, offset = 0, total = 0, query = '';
+
+// ---- The engine ----------------------------------------------------------------------------------
+// One request at a time: each waits for the reply of its type (or an error), and progress on the way
+// is shown in words.
+let queue = Promise.resolve();
+function request(msg, replyType) {
+  const p = queue.then(() => new Promise((resolve, reject) => {
+    worker.onmessage = ({ data }) => {
+      if (data.type === 'progress') { $('phase').textContent = progressText(data); state.progress = data; }
+      else if (data.type === 'error') reject(new Error(data.message));
+      else if (data.type === replyType) resolve(data);
+    };
+    worker.postMessage(msg);
+  }));
+  queue = p.catch(() => {});
+  return p;
+}
+function startWorker() {
+  worker = new Worker(new URL('../engine/worker.js', import.meta.url), { type: 'module' });
+  worker.onerror = (e) => fail(`The engine stopped: ${e.message || 'unknown error'}`);
+  return request({ cmd: 'init', base: new URL('./', location.href).href }, 'ready').then(({ version: v }) => {
+    $('plato-version').innerHTML = `${v.versionInfo} at <a href="${v.repository}/tree/${v.commit}">${v.commit.slice(0, 7)}</a>`
+      + (v.draft ? ` <strong class="draft">${draftNote(v)}</strong>` : '');
+    Object.assign(state, { phase: 'ready', platoCommit: v.commit });
+  });
+}
+
+// ---- Opening a dataset ---------------------------------------------------------------------------
+async function open(list) {
+  files = [...list];
+  if (!files.length) return;
+  Object.assign(state, { phase: 'opening', placeId: null, lastSave: null });
+  for (const id of ['places', 'card', 'saving']) $(id).hidden = true;
+  $('handoff').hidden = true; $('save-result').innerHTML = '';
+  $('dataset').hidden = false;
+  $('dataset').innerHTML = `<ul>${files.map((f) => `<li><span class="name">${esc(f.name)}</span> <span class="count">${fmtBytes(f.size)}</span></li>`).join('')}</ul>`;
+  $('phase').textContent = 'Reading…';
+  try {
+    dataset = await request({ cmd: 'chora-load', files }, 'chora-loaded');
+  } catch (e) { return fail(e.message); }
+  if (dataset.failure) { $('phase').innerHTML = `<span class="warn">${esc(dataset.failure)}</span>`; Object.assign(state, { phase: 'unrecognised', reason: dataset.failure }); dataset = null; return; }
+  const h = dataset.header || {};
+  const problems = dataset.report?.errors ? ` <span class="warn">${esc(summary(dataset.report, 'check').problems)} Check it on the <a href="./">main page</a> to see them.</span>` : '';
+  $('phase').textContent = '';
+  $('dataset').innerHTML = `<p class="dataset-title">${esc(h.title || dataset.input?.name || files[0].name)}</p>`
+    + `<p>${n(dataset.places)} place${dataset.places === 1 ? '' : 's'}, ${n(dataset.withGeometry)} with a location on record.${problems}</p>`;
+  fp = fingerprint(files);
+  drafts = await loadDrafts(fp);
+  const ov = await request({ cmd: 'chora-overview' }, 'chora-overview');
+  mapApi.setOverview(ov.geojson);
+  mapApi.setPlace(null); mapApi.setContext(null); showDrafts([]);
+  if (ov.capped || ov.geojson?.capped) $('dataset').insertAdjacentHTML('beforeend', `<p class="muted">The map shows the first ${n(ov.geojson.features.length)} places; find others by name.</p>`);
+  if (dataset.bbox) mapApi.fit(dataset.bbox, 8);
+  $('places').hidden = false;
+  query = ''; $('q').value = '';
+  await search(0);
+  showSaving();
+  Object.assign(state, { phase: 'loaded', places: dataset.places, pendingCount: drafts.length });
+  if (drafts.length) $('dataset').insertAdjacentHTML('beforeend', `<p class="note">${n(drafts.length)} unsaved drawing${drafts.length === 1 ? ' was' : 's were'} kept from last time, and ${drafts.length === 1 ? 'is' : 'are'} shown with ${drafts.length === 1 ? 'its place' : 'their places'}.</p>`);
+}
+
+// ---- The place list ------------------------------------------------------------------------------
+async function search(at) {
+  const r = await request({ cmd: 'chora-search', q: query, offset: at, limit: PAGE }, 'chora-results');
+  offset = at; total = r.total;
+  $('found').textContent = total ? `${query ? `${n(total)} found` : `${n(total)} places`}${total > PAGE ? `, showing ${n(at + 1)}–${n(Math.min(at + PAGE, total))}` : ''}.` : 'No place has that in its name.';
+  const pending = new Set(drafts.map((d) => d.placeId));
+  $('list').innerHTML = r.items.map((p) => `<li><button type="button" class="place${p.id === state.placeId ? ' current' : ''}" data-id="${esc(p.id)}">${esc(p.label || p.id)}`
+    + `${p.ccodes?.length ? ` <span class="muted">${esc(p.ccodes.join(', '))}</span>` : ''}${p.hasGeometry ? '' : ' <span class="tag">no location</span>'}${pending.has(p.id) ? ' <span class="tag pending">drawn</span>' : ''}</button></li>`).join('');
+  $('prev').disabled = at === 0; $('next').disabled = at + PAGE >= total;
+  $('prev').parentElement.hidden = total <= PAGE;
+}
+let typing;
+$('q').oninput = () => { clearTimeout(typing); typing = setTimeout(() => { query = $('q').value.trim(); search(0); }, 200); };
+$('prev').onclick = () => search(Math.max(0, offset - PAGE));
+$('next').onclick = () => search(offset + PAGE);
+$('list').onclick = (e) => { const b = e.target.closest('button[data-id]'); if (b) selectPlace(b.dataset.id); };
+
+// ---- One place -----------------------------------------------------------------------------------
+async function selectPlace(id) {
+  let r;
+  try { r = await request({ cmd: 'chora-place', id }, 'chora-place'); } catch (e) { return fail(e.message); }
+  if (!r.view) return fail(`This dataset has no place ${id}.`);
+  view = r.view;
+  state.placeId = id;
+  for (const b of $('list').querySelectorAll('button[data-id]')) b.classList.toggle('current', b.dataset.id === id);
+  renderCard();
+  $('card').scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  mapApi.setPlace(placeFeatures(view));
+  mapApi.setContext(contextFeatures(view, await countries(view), (view.ccodes || []).map((c) => [c, ccodeBoxes?.[c]]).filter(([, b]) => b)));
+  showDrafts(drafts.filter((d) => d.placeId === id));
+  const mine = drafts.filter((d) => d.placeId === id).map((d) => d.geojson);
+  mapApi.fit(view.fallback?.bbox || (mine.length ? boxOf(mine) : null), view.fallback?.kind === 'ccodes' ? 6 : 9);
+  $('draw-tools').hidden = false;
+  state.phase = 'place';
+}
+
+// The outlines of a place's countries, from Natural Earth on this site, fetched once when first needed.
+let countriesFc = null, ccodeBoxes = null;
+async function countries(v) {
+  if (v.geometries.length || v.fallback?.kind !== 'ccodes' || !v.ccodes?.length) return [];
+  try {
+    countriesFc ??= await (await fetch('./basemap/countries.geojson')).json();
+    ccodeBoxes ??= await (await fetch('./basemap/ccodes.json')).json();
+  } catch { return []; }
+  return countriesFc.features.filter((f) => v.ccodes.includes(f.properties?.iso));
+}
+
+const STATUS_WORDS = { denied: 'denied', doubted: 'doubted', reported: 'reported', tentative: 'tentative' };
+const badge = (s) => (STATUS_WORDS[s] ? ` <span class="status status-${s}" title="${esc(STATUS_TITLES[s])}">${s}</span>` : '');
+const STATUS_TITLES = {
+  denied: 'The source says this is NOT so.', doubted: 'The source reports this, and doubts it.',
+  reported: 'The source reports this as said by others.', tentative: 'The source gives this tentatively.',
+};
+const ROLE_WORDS = { Extent: 'the whole place', FeaturePoint: 'a feature of it', RepresentativePoint: 'a point standing for it', LabelAnchor: 'where its label goes', Itinerary: 'a route' };
+const tailOf = (iri) => (iri ? String(iri).split(/[#/]/).pop() : '');
+
+function renderCard() {
+  const v = view, card = $('card');
+  card.hidden = false;
+  const fb = v.fallback || {};
+  const where = v.geometries.length ? ''
+    : fb.kind === 'related' ? '<p class="note">No location recorded; showing the places it is related to.</p>'
+    : fb.kind === 'ccodes' ? `<p class="note">No location recorded; showing its countr${v.ccodes.length === 1 ? 'y' : 'ies'} (${esc(v.ccodes.join(', '))}).</p>`
+    : '<p class="note">No location recorded, and nothing to place it by.</p>';
+  const list = (items, fn) => (items.length ? `<ul>${items.map((x) => `<li>${fn(x)}</li>`).join('')}</ul>` : '<p class="muted">None recorded.</p>');
+  const mine = drafts.filter((d) => d.placeId === v.id);
+  card.innerHTML = `<h2 id="card-h">${esc(v.label)}</h2>
+    <p class="muted place-id">${esc(v.id)}${v.ccodes.length ? ` · ${esc(v.ccodes.join(', '))}` : ''}</p>${where}
+    <h3>Names</h3>${list(v.names, (x) => `${esc(x.toponym)}${x.language ? ` <span class="muted">(${esc(x.language)})</span>` : ''}${x.romanized ? ` <span class="muted">${esc(x.romanized)}</span>` : ''}${badge(x.status)}`)}
+    <h3>Types</h3>${list(v.types, (x) => `${esc(x.label || '')}${badge(x.status)}`)}
+    <h3>Locations</h3>${list(v.geometries, (g) => `${esc(g.geojson.type)}${g.role ? `, ${esc(ROLE_WORDS[tailOf(g.role)] || tailOf(g.role))}` : ''}${g.precision ? `, ${esc(g.precision.replace('_', ' '))}` : ''}${g.precisionKm != null ? ` (±${g.precisionKm} km)` : ''}${g.timespan?.label || g.timespan?.start ? ` <span class="muted">${esc(g.timespan.label || `${g.timespan.start ?? ''}–${g.timespan.end ?? ''}`)}</span>` : ''}${badge(g.status)}`)}
+    <h3>Related places</h3>${list(v.relations, (r) => `${esc(r.typeLabel || tailOf(r.type))}: ${r.related ? `<a href="#" data-place="${esc(r.related.id)}">${esc(r.label)}</a>` : esc(r.label)}${badge(r.status)}`)}
+    <h3>Over time</h3>${timeline(v.timeline)}
+    <h3>Sources</h3>${list(v.sources, (s) => (s.id && /^https?:/.test(s.id) ? `<a href="${esc(s.id)}" rel="noopener">${esc(s.title || s.id)}</a>` : esc(s.title || s.id)))}
+    ${v.withdrawn ? `<p class="muted">${n(v.withdrawn)} withdrawn attestation${v.withdrawn === 1 ? '' : 's'} not shown.</p>` : ''}
+    <h3>Your drawings</h3>
+    <p class="muted">Draw with the tools on the map. Each drawing is added as a new attestation of this place; nothing already there is changed.</p>
+    <ul class="pending">${mine.map(pendingItem).join('') || '<li class="muted">None yet.</li>'}</ul>`;
+}
+function pendingItem(d) {
+  const opt = (vals, cur, words) => vals.map((x) => `<option value="${x}"${x === cur ? ' selected' : ''}>${esc(words(x))}</option>`).join('');
+  return `<li data-draft="${esc(d.id)}"><span class="kind">${esc(KIND[d.geojson.type] || d.geojson.type)}</span>
+    <label>What it marks <select data-field="role"><option value="">Not said</option>${opt(['Extent', 'FeaturePoint', 'RepresentativePoint'].filter((r) => ROLES.includes(r)), d.role, (r) => ROLE_WORDS[r] || r)}</select></label>
+    <label>How well known <select data-field="precision"><option value="">Not said</option>${opt(PRECISIONS, d.precision, (p) => p.replace('_', ' '))}</select></label>
+    <button type="button" data-remove>Remove</button></li>`;
+}
+const KIND = { Point: 'A point', LineString: 'A line', Polygon: 'An area' };
+
+// The timeline: one row per dated attestation, a bar from its start to its end, in its status's
+// colour. Years only; a date that is not a year is read for its year.
+function timeline(items) {
+  const year = (x) => { const m = x == null ? null : String(x).match(/^(-?\d{1,6})/); return m ? Number(m[1]) : null; };
+  const rows = items.map((t) => ({ ...t, a: year(t.start), b: year(t.end) })).filter((t) => t.a !== null || t.b !== null);
+  const undated = items.length - rows.length;
+  // Dates given only in words ("undated", "in the reign of Henry II"), each once, with how many.
+  const words = () => {
+    const c = new Map();
+    for (const t of items) if ((year(t.start) ?? year(t.end)) === null && t.label) c.set(t.label, (c.get(t.label) || 0) + 1);
+    return [...c].map(([w, k]) => `“${esc(w)}”${k > 1 ? ` (${k})` : ''}`).join(', ');
+  };
+  if (!rows.length) return `<p class="muted">${items.length ? `Dated only in words: ${words()}.` : 'No dates recorded.'}</p>`;
+  let lo = Math.min(...rows.map((t) => t.a ?? t.b)), hi = Math.max(...rows.map((t) => t.b ?? t.a));
+  if (hi === lo) { lo -= 10; hi += 10; }
+  const W = 320, L = 4, R = 4, H = 26, x = (y) => L + ((y - lo) / (hi - lo)) * (W - L - R);
+  const bars = rows.map((t, i) => {
+    const a = t.a ?? t.b, b = t.b ?? t.a, y = i * H;
+    const c = STATUS_COLOURS[t.status] || STATUS_COLOURS.asserted;
+    const when = a === b ? `${a}` : `${a}–${b}`;
+    return `<g><title>${esc(`${t.text || t.facet} (${t.label || when})${STATUS_WORDS[t.status] ? `, ${t.status}` : ''}`)}</title>
+      <text x="${L}" y="${y + 10}" class="tl-text">${esc(trim(`${t.text || t.facet}`, 44))} · ${esc(when)}${STATUS_WORDS[t.status] ? ` · ${t.status}` : ''}</text>
+      <rect x="${x(a)}" y="${y + 14}" width="${Math.max(3, x(b) - x(a))}" height="6" rx="2" fill="${c}"${t.status !== 'asserted' ? ` fill-opacity=".45" stroke="${c}" stroke-dasharray="2 1"` : ''}/></g>`;
+  }).join('');
+  const h = rows.length * H + 16;
+  return `<svg class="timeline" viewBox="0 0 ${W} ${h}" role="img" aria-label="When each attestation applies, from ${lo} to ${hi}">${bars}
+    <text x="${L}" y="${h - 2}" class="tl-axis">${lo}</text><text x="${W - R}" y="${h - 2}" class="tl-axis" text-anchor="end">${hi}</text></svg>`
+    + (undated ? `<p class="muted">Also dated only in words: ${words()}.</p>` : '');
+}
+const trim = (s, k) => (s.length > k ? s.slice(0, k - 1) + '…' : s);
+
+$('card').addEventListener('click', (e) => {
+  const a = e.target.closest('a[data-place]');
+  if (a) { e.preventDefault(); selectPlace(a.dataset.place); return; }
+  const rm = e.target.closest('button[data-remove]');
+  if (rm) removeDraft(rm.closest('[data-draft]').dataset.draft);
+});
+$('card').addEventListener('change', (e) => {
+  const sel = e.target.closest('select[data-field]');
+  if (!sel) return;
+  const d = drafts.find((x) => x.id === sel.closest('[data-draft]').dataset.draft);
+  if (d) { d[sel.dataset.field] = sel.value; keepDrafts(); }
+});
+
+// ---- Drawing -------------------------------------------------------------------------------------
+function onFinish(id, ctx) {
+  const f = mapApi.draw?.getSnapshotFeature(id);
+  if (!f) return;
+  const existing = drafts.find((d) => d.id === String(id));
+  if (existing) { existing.geojson = f.geometry; keepDrafts(); return; }   // moved or reshaped
+  if (ctx?.action && ctx.action !== 'draw') return;
+  if (!state.placeId) { mapApi.draw.removeFeatures([id]); return; }
+  const b = basemaps.current();
+  drafts.push({ id: String(id), placeId: state.placeId, placeLabel: view?.label || '', geojson: f.geometry, role: '', precision: '',
+    basemap: b.local ? 'Natural Earth' : b.name, zoom: mapApi.zoom(), drawnAt: new Date().toISOString() });
+  keepDrafts();
+  renderCard();
+}
+function showDrafts(list) { showing = true; try { mapApi.showDrafts(list); } finally { showing = false; } }
+function removeDraft(id) {
+  drafts = drafts.filter((d) => d.id !== id);
+  try { mapApi.draw?.removeFeatures([id]); } catch {}
+  keepDrafts();
+  renderCard();
+}
+function keepDrafts() {
+  state.pendingCount = drafts.length;
+  if (fp) saveDrafts(fp, drafts);
+  showSaving();
+}
+$('draw-tools').onclick = (e) => {
+  const b = e.target.closest('button[data-mode]');
+  if (!b) return;
+  mapApi.setMode(b.dataset.mode);
+  for (const x of $('draw-tools').querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b && b.dataset.mode !== 'static'));
+};
+
+// ---- Saving --------------------------------------------------------------------------------------
+function showSaving() {
+  if (!dataset) return;
+  $('saving').hidden = false;
+  const places = new Set(drafts.map((d) => d.placeId)).size;
+  $('pending-total').textContent = drafts.length
+    ? `${n(drafts.length)} drawing${drafts.length === 1 ? '' : 's'} of ${n(places)} place${places === 1 ? '' : 's'}, not yet saved. They are kept in this browser until you save.`
+    : 'Nothing drawn yet. Choose a place, and draw on the map.';
+  $('save').disabled = !drafts.length;
+  const c = contributors.load();
+  const line = $('contributor-line');
+  line.hidden = !c;
+  if (c) line.innerHTML = `Saving as <strong>${esc(c.name)}</strong>${c.orcid ? ` (<a href="${esc(c.orcid)}">${esc(c.orcid.replace('https://orcid.org/', ''))}</a>)` : ''} — <a href="#" id="c-change">change</a> / <a href="#" id="c-forget">forget me</a>`;
+}
+$('saving').addEventListener('click', (e) => {
+  if (e.target.id === 'c-change') { e.preventDefault(); askContributor(); }
+  if (e.target.id === 'c-forget') { e.preventDefault(); contributors.forget(); showSaving(); }
+});
+function askContributor() {
+  const c = contributors.load() || {};
+  $('c-name').value = c.name || ''; $('c-orcid').value = c.orcid ? c.orcid.replace('https://orcid.org/', '') : '';
+  $('c-error').hidden = true;
+  $('contributor-form').hidden = false; $('contributor-line').hidden = true;
+  $('c-name').focus();
+}
+let saveAfterAsking = false;
+$('contributor-form').onsubmit = (e) => {
+  e.preventDefault();
+  const c = contributors.fromForm($('c-name').value, $('c-orcid').value);
+  if (c.error) { $('c-error').textContent = c.error; $('c-error').hidden = false; return; }
+  contributors.remember(c);
+  $('contributor-form').hidden = true;
+  showSaving();
+  if (saveAfterAsking) { saveAfterAsking = false; saveDataset(); }
+};
+$('c-cancel').onclick = () => { saveAfterAsking = false; $('contributor-form').hidden = true; showSaving(); };
+$('save').onclick = () => {
+  if (!contributors.load()) { saveAfterAsking = true; askContributor(); return; }
+  saveDataset();
+};
+
+async function saveDataset() {
+  const contributor = contributors.load();
+  let additions;
+  try {
+    additions = drafts.map((d) => ({ placeId: d.placeId, attestation: newGeometryAttestation({
+      geojson: d.geojson, role: d.role || undefined, precision: d.precision || undefined, contributor,
+      created: d.drawnAt, notes: choraDrawingNote({ basemap: d.basemap, zoom: d.zoom }) }) }));
+  } catch (e) { $('save-result').innerHTML = `<p class="warn">${esc(e.message)}</p>`; return; }
+  $('save').disabled = true;
+  $('save-result').innerHTML = '';
+  state.phase = 'saving';
+  let r;
+  try { r = await request({ cmd: 'chora-save', files, additions, contributor }, 'done'); } catch (e) { $('save').disabled = false; return fail(e.message); }
+  $('save').disabled = false;
+  $('phase').textContent = '';
+  const added = r.report?.counts?.['attestations added'] ?? r.mneme?.report?.counts?.added ?? null;
+  const passed = !!r.mneme?.passed;
+  const out = (r.outputs || [])[0];
+  const problems = (r.report?.items || []).filter((i) => i.severity === 'error');
+  // The verdict in the words the command line uses too (src/engine/words.js), and on failure, why.
+  const reasons = [...(r.mneme?.reasons || []), ...problems.map((i) => `${CHORA_TEXT[i.kind] || i.message}${i.examples?.length ? `: ${i.examples.slice(0, 3).join('; ')}` : ''}`)];
+  $('save-result').innerHTML = `<p class="${passed ? 'good' : 'warn'}">${esc(choraSaveText(r))}</p>`
+    + (passed ? '' : reasons.map((x) => `<p class="warn">${esc(x)}</p>`).join(''));
+  if (passed && out) {
+    const b = document.createElement('button'); b.className = 'primary';
+    b.textContent = `Save ${out.name} (${fmtBytes(out.size)})`;
+    b.onclick = async () => {
+      if (await save(out.name)) {
+        // Saved to the user's disk: the drawings are in that file now, and need not be kept here.
+        drafts = []; keepDrafts(); showDrafts([]); if (view) renderCard();
+        $('save-result').insertAdjacentHTML('beforeend', `<p>Saved. To add more, open ${esc(out.name)}.</p>`);
+      }
+    };
+    $('save-result').appendChild(b);
+  }
+  state.lastSave = { passed, added, outputs: r.outputs || [], mneme: r.mneme || null };
+  state.phase = 'saved';
+}
+// The same as the main page's save() (src/app.js), kept here rather than shared so that the main page
+// is not changed for Chora: the output is on the origin private file system, and goes to disk
+// through the save dialogue where there is one, else as a download. True once saved.
+async function save(name) {
+  const root = await navigator.storage.getDirectory();
+  const file = await (await (await root.getDirectoryHandle('outputs')).getFileHandle(name)).getFile();
+  if (window.showSaveFilePicker && !window.__plato_forceDownload) {
+    try {
+      const h = await window.showSaveFilePicker({ suggestedName: name });
+      await file.stream().pipeTo(await h.createWritable());
+      return true;
+    } catch (e) { if (e.name === 'AbortError') return false; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(file); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  return true;
+}
+window.__chora_save = save;
+
+// ---- Basemaps ------------------------------------------------------------------------------------
+let asking = null;   // a basemap waiting for the user to agree to its provider
+function renderBasemaps() {
+  const cur = basemaps.current();
+  $('basemap-name').textContent = cur.name;
+  const groups = new Map();
+  for (const b of basemaps.all()) { if (!groups.has(b.group)) groups.set(b.group, []); groups.get(b.group).push(b); }
+  $('basemap-options').innerHTML = [...groups].map(([g, bs]) => `<fieldset><legend>${esc(g)}</legend>${bs.map((b) => `<label class="${b.disabled ? 'disabled' : ''}">
+      <input type="radio" name="basemap" value="${esc(b.id)}"${b.id === (asking || cur).id ? ' checked' : ''}${b.disabled ? ' disabled' : ''}> ${esc(b.name)}${b.disabled ? ` <small>(${esc(b.disabled)})</small>` : ''}
+      ${b.group === 'Pasted' ? ` <button type="button" class="link" data-unpaste="${esc(b.id)}">remove</button>` : ''}</label>`).join('')}</fieldset>`).join('')
+    + (asking ? `<div class="consent" role="alertdialog" aria-labelledby="consent-text"><p id="consent-text">${esc(basemaps.notice(asking))}</p>
+      <p><button type="button" class="primary" id="consent-yes">Use ${esc(asking.name)}</button> <button type="button" id="consent-no">Keep the current map</button></p></div>` : '')
+    + `<form id="paste-form"><label for="paste">Paste a style address or a tile template</label>
+      <input id="paste" type="url" placeholder="https://…/style.json or https://…/{z}/{x}/{y}.png" autocomplete="off">
+      <small>Kept in this browser only, key and all, and sent to nowhere but that provider.</small>
+      <button type="submit">Add</button> <span id="paste-error" class="warn"></span></form>`
+    + (state.blocked ? `<p class="muted">Refused ${n(state.blocked)} request${state.blocked === 1 ? '' : 's'} to ${esc(state.blockedOrigins.join(', '))}, not the basemap's site.</p>` : '');
+}
+$('basemap-options').addEventListener('change', (e) => {
+  if (e.target.name !== 'basemap') return;
+  const b = basemaps.byId(e.target.value);
+  if (!b || b.disabled) return;
+  if (!b.local && !basemaps.consented(basemaps.originOf(b))) { asking = b; renderBasemaps(); return; }
+  useBasemap(b);
+});
+$('basemap-options').addEventListener('click', (e) => {
+  if (e.target.id === 'consent-yes') { basemaps.consent(basemaps.originOf(asking)); const b = asking; asking = null; useBasemap(b); }
+  else if (e.target.id === 'consent-no') { asking = null; renderBasemaps(); }
+  else if (e.target.dataset.unpaste) {
+    const id = e.target.dataset.unpaste;
+    basemaps.removePasted(id);
+    if (basemaps.current().id === id || state.basemap === id) useBasemap(basemaps.byId('natural-earth')); else renderBasemaps();
+  }
+});
+$('basemap-options').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const b = basemaps.fromPaste($('paste').value);
+  if (!b) { $('paste-error').textContent = 'That is not an https address.'; return; }
+  basemaps.addPasted(b);
+  asking = basemaps.consented(basemaps.originOf(b)) ? null : b;
+  if (asking) renderBasemaps(); else useBasemap(b);
+});
+async function useBasemap(b) {
+  basemaps.choose(b);
+  mapApi.allow([basemaps.originOf(b)]);
+  state.basemap = b.id;
+  try { mapApi.setStyle(await basemaps.styleFor(b)); } catch (e) { console.warn(e); }
+  renderBasemaps();
+}
+
+// ---- The rest ------------------------------------------------------------------------------------
+function fail(message) {
+  $('phase').innerHTML = `<span class="warn">Something went wrong: ${esc(message)}</span>`;
+  Object.assign(state, { phase: 'error', error: message });
+}
+const n = (x) => (x || 0).toLocaleString('en-GB');
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
+function boxOf(geoms) {
+  let w = Infinity, s = Infinity, e = -Infinity, nn = -Infinity;
+  const walk = (c) => { if (typeof c[0] === 'number') { w = Math.min(w, c[0]); e = Math.max(e, c[0]); s = Math.min(s, c[1]); nn = Math.max(nn, c[1]); } else c.forEach(walk); };
+  for (const g of geoms) walk(g.coordinates);
+  return w === Infinity ? null : [w, s, e, nn];
+}
+
+$('picker').onchange = (e) => open(e.target.files);
+const drop = $('drop');
+drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); open(e.dataTransfer.files); };
+
+const mapApi = createMap($('map'), { state, onPlaceClick: (id) => selectPlace(id) });
+mapApi.onDraw({
+  finish: onFinish,
+  // A drawing deleted with the Edit tool (its Delete key) is removed from the drafts too. Clearing
+  // the tool to show another place's drawings also deletes, so only the user's own deletions count.
+  change: (ids, type, ctx) => {
+    if (type !== 'delete' || ctx?.origin === 'api' || showing) return;
+    const gone = new Set(ids.map(String));
+    if (drafts.some((d) => gone.has(d.id))) { drafts = drafts.filter((d) => !gone.has(d.id)); keepDrafts(); if (view) renderCard(); }
+  },
+});
+// The map and the drawing tool, for automated tests; nothing else reads them.
+window.__chora_map = mapApi.map;
+Object.defineProperty(window, '__chora_draw', { get: () => mapApi.draw });
+useBasemap(basemaps.current());
+startWorker().then(async () => {
+  // Files chosen on the main page, offered here.
+  const handed = await takeHandoff();
+  if (handed && !files.length) {
+    const p = $('handoff');
+    p.innerHTML = `<button type="button" class="primary" id="open-handoff">Open ${esc(handed.map((f) => f.name).join(', '))}</button>, chosen on the main page.`;
+    p.hidden = false;
+    $('open-handoff').onclick = () => { clearHandoff(); open(handed); };
+    state.handoff = handed.map((f) => f.name);
+  }
+}).catch((e) => fail(e.message));

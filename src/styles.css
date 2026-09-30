@@ -170,3 +170,64 @@ kbd { font: .8em var(--font-mono); border: 1px solid var(--line); border-bottom-
 .finish { flex-basis: 100%; border: 1px solid var(--line); border-radius: 8px; margin: .25rem 0 0; padding: .5rem .8rem .75rem; display: flex; flex-direction: column; align-items: flex-start; gap: .3rem; }
 .finish legend { font-family: var(--font-headings); padding: 0 .3rem; }
 @media (max-width: 34rem) { #review { padding: .85rem .8rem; } .candidate .acts button { flex: 1 1 auto; } }
+/* ---- Chora (chora.html): the map page ---------------------------------------------------------
+   The page fills the window: a short header, then a panel of the dataset, its places and the chosen
+   place's card beside a map of full height. On a narrow screen the two stack, the map first at half
+   the window's height. The statuses have the same colours here as on the map (src/chora/map.js). */
+body.chora { display: flex; flex-direction: column; height: 100vh; }
+body.chora header.top { max-width: none; padding: .6rem 1.25rem .4rem; }
+body.chora h1 { font-size: 1.6rem; }
+body.chora h1 .label { font-family: var(--font-text); font-size: .8rem; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-left: .5rem; }
+body.chora .privacy { margin: .4rem 0 0; padding: .45rem .8rem; font-size: .92rem; }
+body.chora main.chora-main { max-width: none; width: 100%; margin: 0; padding: 0; flex: 1; display: grid; grid-template-columns: minmax(20rem, 28rem) 1fr; min-height: 0; }
+.chora-panel { overflow-y: auto; padding: 0 .9rem 1rem 1.25rem; }
+.chora-panel section { margin: .8rem 0; padding: .8rem 1rem; }
+.chora-panel h3 { font-size: 1rem; margin: .8rem 0 .2rem; }
+.chora-panel ul { margin: .2rem 0; padding-left: 1.2rem; }
+.chora-mapwrap { position: relative; min-height: 20rem; }
+#map { position: absolute; inset: 0; }
+#map.drawing canvas { cursor: crosshair; }
+body.chora footer { max-width: none; padding: .5rem 1.25rem 1rem; font-size: .8rem; }
+.muted { color: var(--muted); }
+body.chora .note { color: var(--muted); font-size: .92rem; }
+.dataset-title { font-family: var(--font-headings); font-size: 1.1rem; margin: .3rem 0 0; }
+#q { width: 100%; font: inherit; padding: .35rem .5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); }
+.place-list { list-style: none; padding: 0 !important; max-height: 18rem; overflow-y: auto; }
+.place-list button.place { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: .3rem .2rem; background: none; }
+.place-list button.place:hover, .place-list button.place.current { background: var(--bg); color: var(--accent); }
+.tag { font-size: .75rem; border: 1px solid var(--line); border-radius: 999px; padding: 0 .4rem; color: var(--muted); }
+.tag.pending { border-color: var(--gold-edge); background: var(--gold); color: var(--pupil); }
+.pager { margin: .4rem 0 0; }
+.place-id { font: .78rem/1.4 var(--font-mono); overflow-wrap: anywhere; margin: 0; }
+.status { font-size: .72rem; letter-spacing: .04em; text-transform: uppercase; border-radius: 999px; padding: 0 .4rem; border: 1px solid currentColor; cursor: help; }
+.status-denied { color: #c0392b; } .status-doubted { color: #6b7280; } .status-reported { color: #7a4fc9; } .status-tentative { color: #b7791f; }
+@media (prefers-color-scheme: dark) { .status-denied { color: #f08074; } .status-doubted { color: #a5adba; } .status-reported { color: #b79cf0; } .status-tentative { color: #e2b04a; } }
+svg.timeline { width: 100%; height: auto; display: block; }
+svg.timeline .tl-text { font: 10px var(--font-text); fill: var(--fg); }
+svg.timeline .tl-axis { font: 9px var(--font-text); fill: var(--muted); }
+ul.pending { list-style: none; padding: 0 !important; }
+ul.pending li { border: 1px solid var(--line); border-radius: 6px; padding: .4rem .6rem; margin: .3rem 0; display: flex; flex-wrap: wrap; gap: .3rem .8rem; align-items: center; }
+ul.pending .kind { font-weight: 700; }
+ul.pending label { font-size: .88rem; }
+#contributor-form label { display: block; margin-top: .4rem; }
+#contributor-form input, #paste { font: inherit; width: 100%; padding: .3rem .5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); }
+/* The drawing tools and the basemap switcher float over the map. */
+.map-tools { position: absolute; top: .6rem; left: .6rem; display: flex; gap: 2px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 2px; box-shadow: 0 1px 4px rgb(0 0 0 / .15); }
+.map-tools button { padding: .25rem .6rem; border: 0; font-size: .9rem; }
+.map-tools button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); }
+.basemaps { position: absolute; left: .6rem; bottom: 2.2rem; max-width: min(24rem, calc(100% - 1.2rem)); max-height: 70%; overflow-y: auto; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: .3rem .7rem; font-size: .9rem; box-shadow: 0 1px 4px rgb(0 0 0 / .15); }
+.basemaps summary { cursor: pointer; }
+.basemaps fieldset { border: 0; padding: 0; margin: .4rem 0; }
+.basemaps legend { font-weight: 700; font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.basemaps label { display: block; }
+.basemaps label.disabled { color: var(--muted); }
+.basemaps .consent { border: 1px solid var(--gold-edge); background: var(--bg); border-radius: 6px; padding: .4rem .6rem; margin: .4rem 0; }
+.basemaps small { display: block; color: var(--muted); }
+button.link { border: 0; background: none; color: var(--accent); padding: 0; text-decoration: underline; font-size: .85rem; }
+.maplibregl-map { font: inherit; }
+@media (max-width: 52rem) {
+  body.chora { height: auto; }
+  body.chora main.chora-main { display: flex; flex-direction: column-reverse; }
+  .chora-mapwrap { height: 55vh; }
+  .chora-panel { overflow: visible; padding: 0 1rem; }
+}

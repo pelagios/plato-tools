@@ -12,6 +12,8 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: fileURLToPath(new URL('index.html', import.meta.url)),
+        // Chora, the map, is a page of its own, so that the map libraries load only there.
+        chora: fileURLToPath(new URL('chora.html', import.meta.url)),
         spike: fileURLToPath(new URL('spike/index.html', import.meta.url)),
       },
     },

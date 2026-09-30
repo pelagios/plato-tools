@@ -27,9 +27,12 @@
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "fflate": "^0.8.3",
+    "maplibre-gl": "^6.11.2",
     "n3": "^2.7.12",
     "papaparse": "^5.7.0",
     "saxes": "^6.0.0",
+    "terra-draw": "^1.35.0",
+    "terra-draw-maplibre-gl-adapter": "^1.4.1",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
