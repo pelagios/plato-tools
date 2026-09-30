@@ -124,7 +124,7 @@ async function* platoJson(file) {
 }
 // The FeatureCollection's own members that PLATO's gazetteer header holds (collectionToGazetteer).
 const LPF_HEAD = ['@id', 'id', 'title', 'license', 'descriptions'];
-const notAListText = (key, shape) => `The document's ${key} is ${shape}, not a list, so nothing in it is read.`;
+const notAListText = (key, shape) => `The document's ${key} is ${shape}, not a list, so it is not read as one.`;
 async function* lpfSource(file, seq, rep) {
   let head = {};
   if (seq) {

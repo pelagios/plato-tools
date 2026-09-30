@@ -56,7 +56,9 @@ const certaintyWord = (lvl, note) => WORD[lvl] || (note && /LPF certainty: (cert
  * LPF has no JSON Schema in these tools to say so, and the record made from it is valid without it.
  */
 function many(x, key, loss) {
-  if (x === undefined || Array.isArray(x)) return x || [];
+  // null, like a missing key, is nothing there (LPF writes null where it has no value); anything
+  // else that is not a list was something that could not be read.
+  if (x === undefined || x === null || Array.isArray(x)) return x || [];
   loss({ kind: 'lpf-not-a-list', value: key });
   return [];
 }

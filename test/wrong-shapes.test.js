@@ -128,3 +128,11 @@ test('a list given as something else in Linked Places Format is reported, never 
   }
   assert.deepEqual({ threw, silent }, { threw: [], silent: [] });
 });
+
+test('a null list in LPF is nothing there, not a loss; any other non-list is', async () => {
+  const fc = (types) => ({ type: 'FeatureCollection', '@context': 'https://raw.githubusercontent.com/LinkedPasts/linked-places/master/linkedplaces-context-v1.1.jsonld',
+    features: [{ '@id': 'https://example.org/place/a', type: 'Feature', properties: { title: 'A' }, geometry: null, names: [{ toponym: 'A' }], types }] });
+  const run = async (types) => (await go([textFile(JSON.stringify(fc(types)), 'x.lpf.json')], 'convert', 'plato-jsonl')).report.items.some((i) => i.kind === 'lpf-not-a-list');
+  assert.equal(await run(null), false);
+  assert.equal(await run({}), true);       // control: an object where a list belongs is reported
+});

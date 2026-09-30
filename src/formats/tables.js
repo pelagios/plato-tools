@@ -245,7 +245,7 @@ export function gazetteerToAbout(g, loss = () => {}, accepts = () => true) {
     if ((typeof v === 'string' || typeof v === 'number') && !String(v).includes('\n') && accepts('about', col, String(v))) return String(v);
     bad(key, v); return '';
   };
-  const list = (key, col, vs) => (Array.isArray(vs) ? vs : vs === undefined || vs === null ? [] : [vs])
+  const column = (key, col, vs) => (Array.isArray(vs) ? vs : vs === undefined || vs === null ? [] : [vs])
     .filter((v) => { const ok = typeof v === 'string' && v.trim() !== '' && !v.includes(';') && v === v.trim() && accepts('about', col, v); if (!ok && v !== null && v !== undefined) bad(key, v); return ok; }).join(';');
   const addresses = [], names = [];
   for (const c of Array.isArray(g.creator) ? g.creator : g.creator === undefined || g.creator === null ? [] : [g.creator]) {
@@ -260,10 +260,10 @@ export function gazetteerToAbout(g, loss = () => {}, accepts = () => true) {
   dropKeys(t, 'temporal', new Set(['startDate', 'endDate']), loss);
   return {
     title: cell('title', 'title', g.title), description: cell('description', 'description', g.description),
-    creator: list('creator', 'creator', addresses), creator_name: list('creator', 'creator_name', names),
+    creator: column('creator', 'creator', addresses), creator_name: column('creator', 'creator_name', names),
     contributor: cell('contributor', 'contributor', g.contributor), licence: cell('licence', 'licence', g.licence),
     version: cell('version', 'version', g.version), status: cell('status', 'status', g.status),
-    keywords: list('keywords', 'keywords', g.keywords), spatial: list('spatial', 'spatial', g.spatial),
+    keywords: column('keywords', 'keywords', g.keywords), spatial: column('spatial', 'spatial', g.spatial),
     temporal_from: cell('temporal.startDate', 'temporal_from', t.startDate), temporal_to: cell('temporal.endDate', 'temporal_to', t.endDate),
     landing_page: cell('landingPage', 'landing_page', g.landingPage), dataset_uri: cell('@id', 'dataset_uri', g['@id']),
     base_uri: cell('uriSpace', 'base_uri', g.uriSpace),

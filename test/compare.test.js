@@ -458,3 +458,12 @@ test('compare on the command line reads a version in any format: JSON against it
   assert.match(r.out, /Of 3 earlier attestations, 3 unchanged/);
   assert.match(readFileSync(join(dir, 'a.nt'), 'utf8'), /attests_about/);
 });
+
+test('a version whose spatialEntities is not a list was not read whole, so it cannot pass', async () => {
+  const bad = await cmp(v1(), json(doc({}, G2), 'v2.json'));
+  assert.ok(item(bad, 'version-not-read'), kinds(bad, 'error').join());
+  assert.ok(item(bad, 'version-not-read').message.includes('spatialEntities'));
+  // Control: the same comparison with a list is not refused for that.
+  const good = await cmp(v1(), v2());
+  assert.equal(item(good, 'version-not-read'), undefined);
+});
