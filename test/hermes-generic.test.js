@@ -314,6 +314,22 @@ test('a row with an id and no name is reported as having no name; one with neith
   assert.equal(a.doc.attestations.length, 1, 'control: the row with an address is read');
 });
 
+test('a Wikidata Query Service export is read as attestations about its items, named and placed', async () => {
+  const r = await readAll(textFile('item,itemLabel,coord\nhttp://www.wikidata.org/entity/Q220,Rome,Point(12.4828 41.8931)\nhttp://www.wikidata.org/entity/Q90,Paris,Point(2.3514 48.8575)\n', 'query.csv'));
+  assert.equal(r.doc.profile, 'attestation-centric');
+  assert.deepEqual(r.doc.attestations.map((a) => [a.about, a.names[0].toponym, a.geometries[0].wkt]), [['http://www.wikidata.org/entity/Q220', 'Rome', 'Point(12.4828 41.8931)'], ['http://www.wikidata.org/entity/Q90', 'Paris', 'Point(2.3514 48.8575)']]);
+  assert.equal(valid(r.doc), null);
+});
+test('a feature with a geometry and latitude and longitude properties gets one geometry, its own; the properties are notes', async () => {
+  const fc = (geometry) => JSON.stringify({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry, properties: { NAME: 'Rome', LATITUDE: 41.9, LONGITUDE: 12.5, ne_id: 1 } }] });
+  const r = await readAll(textFile(fc({ type: 'Point', coordinates: [12.48, 41.89] }), 'ne.geojson'));
+  const a = r.doc.spatialEntities[0].attestations[0];
+  assert.deepEqual(a.geometries.map((g) => g.geojson.coordinates), [[12.48, 41.89]]);
+  assert.match(a.notes, /LATITUDE: 41\.9/);
+  // Control: with no geometry of its own, the properties are its location.
+  const b = (await readAll(textFile(fc(null), 'ne.geojson'))).doc.spatialEntities[0].attestations[0];
+  assert.deepEqual(b.geometries.map((g) => g.reprPoint), [[12.5, 41.9]]);
+});
 test('a row whose address is not one, but which has an id, becomes a place of its own, keeping what the address column said', async () => {
   const r = await readAll(textFile('id,name,wikidata\nr1,Roma,https://www.wikidata.org/wiki/Q220\nr2,Athenae,Q1524\n', 'x.csv'), { columns: { id: 'id', name: 'name', wikidata: 'address' } });
   assert.deepEqual(r.doc.attestations.map((a) => a.about), ['https://www.wikidata.org/wiki/Q220']);

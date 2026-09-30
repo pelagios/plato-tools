@@ -47,6 +47,7 @@ export const GENERIC_KINDS = {
   'generic-coordinate-range': 'loss',
   'generic-geometry-collection': 'loss',
   'generic-geometry-invalid': 'loss',
+  'generic-wkt-invalid': 'loss',
   'generic-date-invalid': 'loss',
   'generic-language-invalid': 'loss',
   'generic-row-empty': 'loss',
@@ -74,22 +75,23 @@ export const FEATURE_ID = '(feature id)';
 /** A column heading reduced for matching: case, accents, spaces and punctuation do not count. */
 export const normaliseHeader = (h) => String(h).normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
-// Column headings, normalised, and the field each reads as. An address column counts only if enough
+// Column headings, normalised, and the field each reads as (item, itemLabel and coord are the
+// Wikidata Query Service's). An address column counts only if enough
 // of its values are web addresses; a coordinate only if one of its values is a number.
 const HEADINGS = {
-  name: ['name', 'placename', 'toponym', 'title', 'label', 'placelabel', 'placetitle', 'nametoponym'],
+  name: ['name', 'placename', 'toponym', 'title', 'label', 'placelabel', 'placetitle', 'nametoponym', 'itemlabel'],
   alternativeNames: ['alternativenames', 'alternativename', 'alternatenames', 'alternatename', 'altnames', 'altname', 'names', 'variants', 'variantnames', 'variantname', 'namevariants', 'othernames', 'aliases', 'alias', 'alsoknownas', 'aka'],
   latitude: ['lat', 'latitude', 'y', 'reprlat', 'latdd', 'decimallatitude', 'latwgs84'],
   longitude: ['lon', 'lng', 'long', 'longitude', 'x', 'reprlong', 'reprlon', 'londd', 'longdd', 'decimallongitude', 'lonwgs84', 'longwgs84'],
   id: ['id', 'identifier', 'placeid', 'featureid', 'localid', 'recordid'],
-  address: ['uri', 'url', 'iri', 'link', 'placeuri', 'placeurl', 'placeiri', 'wikidata', 'pleiades', 'geonames', 'whg', 'tgn'],
+  address: ['uri', 'url', 'iri', 'link', 'placeuri', 'placeurl', 'placeiri', 'wikidata', 'pleiades', 'geonames', 'whg', 'tgn', 'item'],
   type: ['type', 'types', 'featuretype', 'featuretypes', 'placetype', 'placetypes', 'category', 'categories', 'class', 'fclass', 'featureclass', 'featurecode', 'fcode', 'kind'],
   language: ['language', 'lang', 'languagecode', 'langcode', 'namelanguage', 'namelang'],
   source: ['source', 'sources', 'citation', 'citations', 'reference', 'references', 'bibliography', 'ref', 'bibref'],
   date: ['date', 'dates', 'period', 'when', 'datelabel', 'year'],
   start: ['start', 'from', 'startdate', 'begin', 'begindate', 'mindate', 'earliest', 'notbefore', 'datefrom', 'fromdate', 'yearfrom', 'fromyear', 'startyear'],
   end: ['end', 'to', 'enddate', 'maxdate', 'latest', 'notafter', 'dateto', 'todate', 'yearto', 'toyear', 'endyear', 'until'],
-  wkt: ['wkt', 'geowkt', 'geometrywkt', 'wktgeometry', 'shapewkt'],
+  wkt: ['wkt', 'geowkt', 'geometrywkt', 'wktgeometry', 'shapewkt', 'coord', 'coords', 'coordinates'],
   geometry: ['geometry', 'geom', 'geojson', 'thegeom', 'shape'],
 };
 const BY_HEADING = new Map(Object.entries(HEADINGS).flatMap(([f, hs]) => hs.map((h) => [h, f])));
@@ -138,7 +140,7 @@ const single = (f) => Object.hasOwn(FIELDS, f) && FIELDS[f].single;
  * a gazetteer (gazetteerColumns). `headerText` gives, for a column known
  * by its heading and place ("name (column 3)", where two columns share a heading), the heading itself.
  */
-export function guessColumns(headers, sampleRows = [], headerText = {}) {
+export function guessColumns(headers, sampleRows = [], headerText = {}, { ownGeometry = false } = {}) {
   const mapping = Object.create(null), reasons = Object.create(null), taken = new Map();
   const values = (h) => sampleRows.map((r) => cellText(r?.[h])).filter(Boolean);
   for (const h of headers) {
@@ -156,9 +158,19 @@ export function guessColumns(headers, sampleRows = [], headerText = {}) {
       const k = vs.filter(namesAddress).length;
       if (k && (2 * k >= vs.length || (field === 'address' && namesGazetteer(n)))) { field = 'address'; reason = `${reason}, and ${webAddresses(k, vs.length)}`; }
       else if (field === 'address') { field = 'note'; reason = vs.length ? `the heading "${h}" reads as a web address, but ${k ? `only ${webAddresses(k, vs.length)}` : `${vs.length === 1 ? 'its one sampled value is not a web address' : `none of its ${vs.length} sampled values is a web address`}`} (http or https), so it is kept in the notes` : `the heading "${h}" reads as a web address, but it is empty in the rows looked at, so it is kept in the notes`; }
+    } else if ((field === 'latitude' || field === 'longitude') && ownGeometry) {
+      // GeoJSON features with a geometry of their own: that is the place's location, and a latitude
+      // and longitude beside it would give each place a second one.
+      reason = `the heading "${h}" reads as ${field}, but the features have a geometry of their own, which is the place's location, so it is kept in the notes`; field = 'note';
     } else if (field === 'latitude' || field === 'longitude') {
       // One number is enough: a stray value that is not one ("north") is then reported, row by row.
       if (!vs.some(isNumber)) { reason = `the heading "${h}" reads as ${field}, but ${vs.length ? 'none of its values is a number in decimal degrees' : 'it is empty in the rows looked at'}, so it is kept in the notes`; field = 'note'; }
+    } else if (field === 'wkt') {
+      // At least half of its values must be Well-Known Text of a shape on the earth (wktFault): a
+      // "coord" column of "48.39,4.52" is not, and neither is Wikidata's Point on the Moon.
+      const k = vs.filter((v) => !wktFault(v)).length;
+      if (vs.length && (!k || 2 * k < vs.length)) { reason = `the heading "${h}" reads as ${FIELD_WORDS.wkt}, but ${k ? `only ${k}` : 'none'} of its ${vs.length} sampled values ${k === 1 ? 'is' : 'are'} Well-Known Text of a shape on the earth (such as POINT(12.5 41.9)), so it is kept in the notes`; field = 'note'; }
+      else if (vs.length) reason = `${reason}, and ${k === vs.length ? `all ${k} of its sampled values are` : `${k} of its ${vs.length} sampled values are`} Well-Known Text`;
     } else if (field === 'geometry') {
       if (!vs.length || !vs.every(geometryLike)) { reason = `the heading "${h}" reads as a geometry, but its values are not GeoJSON geometries, so it is kept in the notes`; field = 'note'; }
     }
@@ -178,12 +190,12 @@ const webAddresses = (k, n) => (n === 1 ? 'its one sampled value is a web addres
  * { kind, example } of a kind in GENERIC_KINDS. A column the saved mapping leaves out, or maps to
  * something that is not a field, is kept in the notes, so that nothing is lost or claimed.
  */
-export function resolveColumns(headers, sampleRows, saved, headerText) {
-  if (saved === undefined || saved === null) return { ...guessColumns(headers, sampleRows, headerText), problems: [] };
+export function resolveColumns(headers, sampleRows, saved, headerText, options) {
+  if (saved === undefined || saved === null) return { ...guessColumns(headers, sampleRows, headerText, options), problems: [] };
   const problems = [];
   if (typeof saved !== 'object' || Array.isArray(saved)) {
     problems.push({ kind: 'generic-mapping', example: 'the mapping given is not a JSON object of column names and fields; the guess is used instead' });
-    return { ...guessColumns(headers, sampleRows, headerText), problems };
+    return { ...guessColumns(headers, sampleRows, headerText, options), problems };
   }
   const mapping = Object.create(null), reasons = Object.create(null), taken = new Map();
   for (const h of headers) {
@@ -259,6 +271,58 @@ export function geometryFault(type, coordinates) {
 }
 
 /**
+ * What is wrong with a cell of Well-Known Text, in words, or null when nothing is: it must be a
+ * POINT, MULTIPOINT, LINESTRING, MULTILINESTRING, POLYGON or MULTIPOLYGON (with Z, M or ZM, or
+ * EMPTY; after SRID=4326; if EWKT names one; in any case, as Wikidata writes "Point(12.5 41.9)"),
+ * of well-formed coordinates on the earth, longitude first, as for GeoJSON (geometryFault, whose
+ * `range` it passes on). A GEOMETRYCOLLECTION is refused as a GeoJSON one is; so is a point on
+ * another globe (Wikidata writes the globe's address first).
+ */
+export function wktFault(text) {
+  let t = String(text).trim();
+  if (/^<[^>]*>/.test(t)) return { why: `it names another globe (${t.match(/^<([^>]*)>/)[1]}), not the earth` };
+  const srid = /^SRID=(\d+);/i.exec(t);
+  if (srid) { if (srid[1] !== '4326') return { why: `it is in the reference system SRID ${srid[1]}, not WGS 84 longitude and latitude (4326)` }; t = t.slice(srid[0].length); }
+  const head = /^([A-Za-z]+)\s*(ZM|Z|M)?\s*/i.exec(t);
+  if (!head) return { why: 'it is not Well-Known Text (such as POINT(12.5 41.9))' };
+  const type = head[1].toUpperCase(), dims = (head[2] || '').toUpperCase();
+  const GEO = { POINT: 'Point', MULTIPOINT: 'MultiPoint', LINESTRING: 'LineString', MULTILINESTRING: 'MultiLineString', POLYGON: 'Polygon', MULTIPOLYGON: 'MultiPolygon' };
+  if (type === 'GEOMETRYCOLLECTION') return { why: 'a GEOMETRYCOLLECTION, which PLATO does not take' };
+  if (!GEO[type]) return { why: 'it is not Well-Known Text (such as POINT(12.5 41.9))' };
+  let rest = t.slice(head[0].length);
+  if (/^EMPTY$/i.test(rest)) return { why: `an empty ${type}` };
+  // Nested lists of positions, each position two to four numbers separated by spaces.
+  let i = 0;
+  const bad = () => { throw new Error(); };
+  const space = () => { while (i < rest.length && /\s/.test(rest[i])) i++; };
+  const number = () => { space(); const m = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?/.exec(rest.slice(i)); if (!m) bad(); i += m[0].length; return Number(m[0]); };
+  const position = () => { const p = [number(), number()]; space(); while (i < rest.length && /[\d+.-]/.test(rest[i])) { p.push(number()); space(); } return p; };
+  const list = (item) => {
+    space(); if (rest[i] !== '(') bad(); i++;
+    const out = [item()];
+    for (space(); rest[i] === ','; space()) { i++; out.push(item()); }
+    if (rest[i] !== ')') bad(); i++;
+    return out;
+  };
+  // A MULTIPOINT's points may be written with or without brackets of their own.
+  const point = () => { space(); if (rest[i] === '(') { i++; const p = position(); space(); if (rest[i] !== ')') bad(); i++; return p; } return position(); };
+  let coords;
+  try {
+    const line = () => list(position), poly = () => list(line);
+    coords = { POINT: () => { const l = list(position); if (l.length !== 1) bad(); return l[0]; }, MULTIPOINT: () => list(point), LINESTRING: line, MULTILINESTRING: () => list(line), POLYGON: poly, MULTIPOLYGON: () => list(poly) }[type]();
+    space(); if (i !== rest.length) bad();
+  } catch { return { why: `its ${type} is not written as Well-Known Text writes one (such as POINT(12.5 41.9), longitude first)` }; }
+  // The dimensions said (Z, M, ZM) must be the numbers each position has; only the first two are the place's.
+  const want = dims === 'ZM' ? 4 : dims ? 3 : null;
+  const positions = [];
+  const walk = (c) => (typeof c[0] === 'number' ? positions.push(c) : c.forEach(walk));
+  walk(coords);
+  if (positions.some((p) => p.length > 4 || (want ? p.length !== want : p.length > 3))) return { why: `a position has ${positions.find((p) => p.length > 4 || (want ? p.length !== want : p.length > 3)).length} numbers${want ? `, where ${dims} means ${want}` : ''}` };
+  const flat = (c) => (typeof c[0] === 'number' ? c.slice(0, 2) : c.map(flat));
+  return geometryFault(GEO[type], flat(coords));
+}
+
+/**
  * A GeoJSON geometry -> PLATO geometries: [] for none, or one with its geojson (and, for a point,
  * its reprPoint, as the LPF reader gives it). A GeometryCollection is refused, as PLATO's schema
  * refuses it, and so is anything that is not a GeoJSON geometry, or whose coordinates are not well
@@ -303,7 +367,13 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
       case 'alternativeNames': for (const x of cellList(raw)) if (!alternatives.includes(x)) alternatives.push(x); break;
       case 'latitude': lat = v; break;
       case 'longitude': lon = v; break;
-      case 'wkt': wkt = v; break;
+      case 'wkt': {
+        // Carried as written only when it is Well-Known Text of a shape on the earth (wktFault).
+        const f = wktFault(v);
+        if (f) report(f.range ? 'generic-coordinate-range' : 'generic-wkt-invalid', `${where}, ${col}: ${f.why} (${v.length > 60 ? v.slice(0, 59) + '…' : v})`);
+        else wkt = v;
+        break;
+      }
       case 'geometry': geomCell = { col, v }; break;
       case 'id': id = v; idCol = col; break;
       case 'address': {

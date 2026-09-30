@@ -178,18 +178,18 @@ async function openGeojson(file, input) {
   }
   // The columns are every property any feature has, in the order they are first met, and the
   // feature's own id first when any feature has one.
-  let anyId = false;
+  let anyId = false, ownGeometry = false;
   for await (const f of all()) {
     if (!f || typeof f !== 'object' || f.type !== 'Feature') continue;
     if (f.id !== undefined && f.id !== null) anyId = true;
     if (f.properties && typeof f.properties === 'object') for (const k of Object.keys(f.properties)) add(k);
-    if (sample.length < SAMPLE) sample.push(rowOf(f));
+    if (sample.length < SAMPLE) { sample.push(rowOf(f)); if (f.geometry && typeof f.geometry === 'object') ownGeometry = true; }
   }
   if (anyId) headers.unshift(FEATURE_ID);
   const crs = head.crs?.properties?.name;
   if (head.crs && !(typeof crs === 'string' && WGS84.test(crs))) throw new DataError(`The GeoJSON names a coordinate reference system other than WGS 84 longitude and latitude (${typeof crs === 'string' ? crs : JSON.stringify(head.crs)}), so its coordinates cannot be read as degrees. Convert it to WGS 84 (EPSG:4326) first.`);
   return {
-    headers, sample, head,
+    headers, sample, head, ownGeometry,
     async *rows() {
       let n = 0;
       for await (const f of features()) {
@@ -210,8 +210,8 @@ export async function columnsOf(input) {
 }
 /** The mapping a run of this input uses: { mapping, reasons, problems } (columns.js, resolveColumns). */
 export async function mappingOf(input, saved) {
-  const { headers, sample, headerText } = await open(input);
-  return resolveColumns(headers, sample, saved, headerText);
+  const { headers, sample, headerText, ownGeometry } = await open(input);
+  return resolveColumns(headers, sample, saved, headerText, { ownGeometry });
 }
 /** 'attestation-centric' when a column holds the places' web addresses, else 'place-centric'. */
 export async function genericProfile(input, saved) {
@@ -229,7 +229,7 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
   const file = input.files[0];
   const report = (kind, example) => rep.add(GENERIC_KINDS[kind] || 'loss', kind, LOSS_TEXT[kind] || kind, example);
   const t = await open(input);
-  const { mapping, problems } = resolveColumns(t.headers, t.sample, options.columns, t.headerText);
+  const { mapping, problems } = resolveColumns(t.headers, t.sample, options.columns, t.headerText, { ownGeometry: t.ownGeometry });
   for (const p of [...(t.headProblems || []), ...problems]) report(p.kind, p.example);
   const fields = Object.values(mapping);
   const byAddress = fields.includes('address'), hasId = fields.includes('id');

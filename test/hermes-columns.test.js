@@ -3,7 +3,7 @@
 // Every test that asserts an absence asserts, in the same test, a presence it could have missed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { guessColumns, resolveColumns, applyColumns, normaliseHeader, geometryToPlato, FIELDS, OTHER, GENERIC_KINDS, FEATURE_ID } from '../src/engine/hermes/columns.js';
+import { guessColumns, resolveColumns, applyColumns, normaliseHeader, geometryToPlato, wktFault, FIELDS, OTHER, GENERIC_KINDS, FEATURE_ID } from '../src/engine/hermes/columns.js';
 import { LOSS_TEXT } from '../src/engine/report.js';
 
 // The mapping has no prototype (so that a column called __proto__ is kept): compared as a plain object.
@@ -80,6 +80,46 @@ test('the columns whose headings name a gazetteer are listed, for the warning wh
   assert.deepEqual(resolveColumns(['name', 'uri'], [], { name: 'name', uri: 'note' }).gazetteer, ['uri'], 'a saved mapping lists them too');
 });
 
+test('Well-Known Text is checked: the shapes PLATO takes, well formed, on the earth; anything else says what is wrong', () => {
+  for (const ok of ['Point(12.5 41.9)', 'POINT (12.5 41.9)', 'POINT Z (1 2 3)', 'POINT ZM (1 2 3 4)', 'SRID=4326;POINT(1 2)', 'LINESTRING(0 0, 1 1)', 'POLYGON((0 0, 1 0, 1 1, 0 0))',
+    'MULTIPOINT((1 2), (3 4))', 'MULTIPOINT(1 2, 3 4)', 'MULTILINESTRING((0 0, 1 1), (2 2, 3 3))', 'MULTIPOLYGON(((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))']) assert.equal(wktFault(ok), null, ok);
+  const bad = {
+    '48.39,4.52': /not Well-Known Text/, 'POINT(1, 2)': /not written as Well-Known Text writes one/, 'POINT(1 2), (3 4)': /not written/, 'POINT(1 2': /not written/,
+    'POINT(200 10)': /longitude 200/, 'POINT(10 95)': /latitude 95/, 'LINESTRING(0 0)': /fewer than 2/, 'POLYGON((0 0, 1 0, 1 1, 0 1))': /not closed/,
+    'GEOMETRYCOLLECTION(POINT(1 2))': /GEOMETRYCOLLECTION/, 'SRID=27700;POINT(1 2)': /SRID 27700/, '<http://www.wikidata.org/entity/Q405> Point(1 2)': /another globe/,
+    'POINT EMPTY': /empty/, 'POINT M (1 2)': /M means 3/, 'CIRCLE(1 2)': /not Well-Known Text/,
+  };
+  for (const [t, why] of Object.entries(bad)) assert.match(wktFault(t)?.why || 'passed', why, t);
+  assert.equal(wktFault('POINT(200 10)').range, true);
+});
+test('a WKT cell that is not valid is reported with why, and the rest of the row kept; a valid one is carried as written', () => {
+  const m = { name: 'name', wkt: 'wkt' };
+  const bad = read({ name: 'Troyes', wkt: '48.39,4.52' }, m);
+  assert.deepEqual(bad.reported, [['generic-wkt-invalid', 'row 2, wkt: it is not Well-Known Text (such as POINT(12.5 41.9)) (48.39,4.52)']]);
+  assert.equal(bad.a.attestation.geometries, undefined);
+  assert.equal(bad.a.label, 'Troyes', 'the rest of the row is kept');
+  const off = read({ name: 'X', wkt: 'POINT(200 10)' }, m);
+  assert.ok(off.kinds.has('generic-coordinate-range'));
+  const good = read({ name: 'Troyes', wkt: 'POINT(4.07 48.30)' }, m);
+  assert.deepEqual(good.reported, []);
+  assert.deepEqual(good.a.attestation.geometries, [{ wkt: 'POINT(4.07 48.30)' }]);
+});
+test("the Wikidata Query Service's columns: item is the address, itemLabel the name, coord (Point(lon lat)) WKT; a coord that is not WKT is a note", () => {
+  const rows = [{ item: 'http://www.wikidata.org/entity/Q220', itemLabel: 'Rome', coord: 'Point(12.4828 41.8931)' }, { item: 'http://www.wikidata.org/entity/Q90', itemLabel: 'Paris', coord: 'Point(2.3514 48.8575)' }];
+  const g = guessColumns(['item', 'itemLabel', 'coord'], rows);
+  assert.deepEqual(plain(g.mapping), { item: 'address', itemLabel: 'name', coord: 'wkt' });
+  assert.match(g.reasons.coord, /all 2 of its sampled values are Well-Known Text/);
+  const n = guessColumns(['coord'], [{ coord: '48.39,4.52' }, { coord: '47.1,2.3' }]);
+  assert.equal(n.mapping.coord, 'note');
+  assert.match(n.reasons.coord, /none of its 2 sampled values are Well-Known Text/);
+});
+test('features with a geometry of their own: latitude and longitude properties are guessed as notes, saying why; without one, as coordinates', () => {
+  const rows = [{ NAME: 'Rome', LATITUDE: '41.9', LONGITUDE: '12.5' }];
+  const g = guessColumns(['NAME', 'LATITUDE', 'LONGITUDE'], rows, {}, { ownGeometry: true });
+  assert.deepEqual(plain(g.mapping), { NAME: 'name', LATITUDE: 'note', LONGITUDE: 'note' });
+  assert.match(g.reasons.LATITUDE, /the features have a geometry of their own/);
+  assert.deepEqual(guess(['NAME', 'LATITUDE', 'LONGITUDE'], rows), { NAME: 'name', LATITUDE: 'latitude', LONGITUDE: 'longitude' }, 'control');
+});
 test('a coordinate column needs a number among its values; one stray word does not stop it', () => {
   assert.equal(guess(['lat'], [{ lat: '51.5' }, { lat: 'north' }]).lat, 'latitude');
   const g = guessColumns(['lat'], [{ lat: 'north' }, { lat: 'south' }]);
