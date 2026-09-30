@@ -5,7 +5,7 @@
 // installed), fails here rather than on someone else's machine.
 //   node scripts/install-test.mjs
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync, existsSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -45,6 +45,26 @@ try {
     const r = JSON.parse(sh(bin, ['compare', '--json', 'doc.json', 'doc.nt'], app));
     if (r.status !== 'ok' || r.counts.unchanged !== 1) throw new Error(JSON.stringify(r).slice(0, 400));
     return `${r.counts.unchanged} attestation unchanged`;
+  });
+  // Publishing (Agora), on PLATO's customs tables: from PLATO_REPO, else the checkout CI makes beside
+  // the tools, else a PLATO clone beside this one. Not found is a failure, not a skip.
+  const plato = [process.env.PLATO_REPO, join(root, 'plato-repo'), join(root, '..', 'place-attestation-ontology')]
+    .filter(Boolean).map((d) => resolve(root, d, 'schemas/tables/examples/customs')).find((d) => existsSync(d));
+  step("PLATO's customs tables, to publish", () => { if (!plato) throw new Error('no PLATO checkout: set PLATO_REPO'); cpSync(plato, join(app, 'customs'), { recursive: true }); return plato; });
+  step('plato-tools publish report writes the deposit files', () => {
+    const r = JSON.parse(sh(bin, ['publish', 'report', '--json', '--out', 'out', 'customs'], app));
+    const deposit = join(app, 'out', 'customs-deposit');
+    const missing = ['.zenodo.json', 'CITATION.cff', 'datacite.json'].filter((f) => !existsSync(join(deposit, f)));
+    if (r.status !== 'ok' || missing.length) throw new Error(`missing ${missing.join(', ') || 'nothing'}; ${JSON.stringify(r).slice(0, 400)}`);
+    return `${r.counts.fair.passed} of ${r.counts.fair.of} FAIR checks pass`;
+  });
+  step('plato-tools publish mint gives every attestation an address', () => {
+    const r = JSON.parse(sh(bin, ['publish', 'mint', '--json', '--out', 'out', 'customs'], app));
+    const places = readFileSync(join(app, 'out', 'customs-with-ids.jsonl'), 'utf8').trim().split('\n').slice(1).map((l) => JSON.parse(l));
+    const ids = places.flatMap((p) => p.attestations.map((a) => [p['@id'], a['@id'] || '']));
+    // The count is the presence control: with no attestations at all, "every one" would hold.
+    if (r.status !== 'ok' || ids.length !== 4 || !ids.every(([p, a]) => a.startsWith(`${p}#a-`))) throw new Error(JSON.stringify(ids));
+    return `${ids.length} attestations, each <place>#a-…`;
   });
   step('nothing is left of patch-package', () => { const m = readdirSync(join(app, 'node_modules')); if (m.includes('patch-package')) throw new Error('patch-package is installed'); return ''; });
 } finally { rmSync(dir, { recursive: true, force: true }); }
