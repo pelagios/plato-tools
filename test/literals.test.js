@@ -26,6 +26,16 @@ test('a language tag on an ordinary key is reported lost, and the text kept', as
   assert.equal(l[0].examples[0], `https://x.org/a ${P}notes "une note"@fr`);
   assert.equal(records(r, 'lang.jsonl')[0].attestations[0].notes, 'une note');
 });
+test("a language tag on a name is lost, and the report says the name's language key keeps the language", async () => {
+  const r = await go([textFile(nt(`<https://x.org/a> <${P}attests_name> _:m .\n_:m <${P}toponym> "Londres"@fr .\n_:m <${P}language> "fr" .\n`), 'name.nt')], 'convert', 'plato-jsonl');
+  const l = losses(r, 'literal-language');
+  assert.equal(l.length, 1, JSON.stringify(r.report.items));
+  assert.match(l[0].message, /the tag is lost/);
+  assert.match(l[0].message, /name's "language" key, when given, keeps the language/);
+  // What the message says is so: the name keeps its language by its key, and its text.
+  const names = records(r, 'name.jsonl')[0].attestations[0].names;
+  assert.deepEqual(names.find((n) => n.toponym === 'Londres'), { toponym: 'Londres', language: 'fr' });
+});
 test('a datatype other than the one PLATO JSON writes for the key is reported lost, and the value kept', async () => {
   const r = await go([textFile(nt(`<https://x.org/a> <${P}notes> "n"^^<${XSD}token> .\n<https://x.org/a> <${P}modified> "2021"^^<${XSD}gYear> .\n`), 'dt.nt')], 'convert', 'plato-jsonl');
   const l = losses(r, 'literal-datatype');
