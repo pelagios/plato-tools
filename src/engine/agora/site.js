@@ -68,9 +68,9 @@ export const IDRS_KEPT = 500_000;
 export const UNSERVABLE_SHOWN = 500;
 
 export const TEXT = {
-  'too-big-for-pages': 'The site would be larger than GitHub Pages serves (1 GB a site). Leave out Turtle if it was asked for, publish a subset of the places (--only, a file of the keys of the places to include; the rest are still in the downloads), or build the site with the command line and host it elsewhere.',
+  'too-big-for-pages': 'The site would be larger than GitHub Pages serves (1 GB a site). Leave out Turtle if it was asked for, publish a subset of the places (a file of the keys of the places to include: "Only these places" on the page, --only on the command line; the rest are still in the downloads), or build the site with the command line and host it elsewhere.',
   'too-big-for-pages-cli': 'The site is larger than GitHub Pages serves (1 GB a site), so GitHub will refuse to deploy it. It is written all the same, to serve from somewhere else; for GitHub Pages, leave out Turtle, or publish a subset of the places (--only).',
-  'stopped-at-limit': 'The site grew past what GitHub Pages serves (1 GB) while it was written, beyond its estimate, so no site was made. Publish a subset of the places (--only), or build it with the command line.',
+  'stopped-at-limit': 'The site grew past what GitHub Pages serves (1 GB) while it was written, beyond its estimate, so no site was made. Publish a subset of the places ("Only these places" on the page, --only on the command line), or build it with the command line.',
   'key-not-servable': "A place or source address ends in something a static site cannot serve as a file name (more than one part after place/ or source/, characters other than letters, digits and . _ ~ -, a leading '.', or .jsonld, .ttl or .html, which the w3id rules read as a format), so the address would not lead to its page: it has no page or data file. Give it an identifier of one part, of letters, digits and . _ ~ - only (in the spreadsheets, its place_id or source_id).",
   'keys-differ-in-case': 'Two place or source addresses differ only in the case of their letters. On macOS and Windows, and in many zips, they would be one file, so neither has a page: give them identifiers that differ in more than case.',
   // Published, the addresses are frozen (Round 3, A3): the rest of the site is made, the places are
@@ -84,8 +84,8 @@ export const TEXT = {
   'place-not-under-base': "A place's address is not under the dataset's base address (its place/ part), so this site cannot serve it and it has no page. Its record is still in the downloads.",
   'sources-not-served': "Sources have addresses under the dataset's base address but not of the form <base>source/<id>, so the site has no page for them and their addresses will not lead to one; what the dataset says of them is in the downloads. The example names them.",
   'attestation-address-elsewhere': "An attestation's address is not a fragment of its place's address (<place>#…), so it does not lead to the place's page. The attestation is shown there, but its address will not find it.",
-  'places-left-out': "Places are left out of the site (it holds only those in the --only list). Their addresses still redirect to where their pages would be, where GitHub Pages shows the site's 404 page: it explains, and points to the downloads, which hold every place.",
-  'only-unknown': 'Keys in the --only list match no place of the dataset, so they select nothing.',
+  'places-left-out': "Places are left out of the site (it holds only those in the list of places given). Their addresses still redirect to where their pages would be, where GitHub Pages shows the site's 404 page: it explains, and points to the downloads, which hold every place.",
+  'only-unknown': 'Keys in the list of places given match no place of the dataset, so they select nothing.',
   'duplicate-place': "Two records are the same place: their addresses are the same, or differ only after '#', which a web server never sees. Only the first has a page and a JSON-LD document; what the others say is in the downloads, but not on the site. Make them one record, or give them addresses of their own. The example names the address.",
   // Published, the addresses are frozen (Round 4, B1), as for the unservable ones: the first
   // record's page is written, the place is listed on the home page, and the workflow deploys.
