@@ -151,7 +151,11 @@ export class TeiReader {
     this.captures = [];         // open captures, each with the callback that reads it
     this.scopes = [];           // TEI and teiCorpus elements, innermost last, each with its header
     this.places = new Map();    // xml:id of a <place> -> { uris: [...] }
-    this.pending = [];          // place names waiting for a <place> not yet read
+    // Place names waiting for a <place> not yet read: in the order met (for those still waiting at
+    // the end), and by the id each waits for, so that a <place> finds its own in one look.
+    this.pending = new Set();
+    this.waitingFor = new Map();   // xml:id -> [place name]
+    this.prefixCache = null;       // the prefixDefs in force, innermost first, shared by the place names read under them
     this.placeStack = [];       // open <place> elements
     this.divs = []; this.page = undefined; this.line = undefined; this.milestones = new Map();
     this.headed = false; this.mentions = 0; this.attestations = 0;
@@ -210,7 +214,7 @@ export class TeiReader {
     if (!this.stack.length && !this.scopes.length && !this.sawRoot) throw new DataError('The file holds no XML element, so there is nothing to read.');
     // What is still waiting was pointing at a <place> that never came.
     for (const m of this.pending) this.emit(m, true);
-    this.pending = [];
+    this.pending.clear(); this.waitingFor.clear();
     this.header();
     if (!this.attestations) this.report('tei-none-linked', `${plural(this.mentions, 'place name')} in the text`);
     return this.take();
@@ -291,7 +295,7 @@ export class TeiReader {
     else if (/fileDesc\/sourceDesc\/(listBibl\/)?(bibl|biblStruct|biblFull)$/.test(path)) cap((c) => { const s = norm(c.pref); if (s) h.sourceDescs.push(s); });
     else if (/fileDesc\/sourceDesc\/msDesc\/msIdentifier$/.test(path)) { h.msParts = []; this.stack[this.stack.length - 1].msIdentifier = true; }
     else if (/fileDesc\/sourceDesc\/msDesc\/msIdentifier\/[^/]+$/.test(path) && h.msParts && t.local !== 'altIdentifier') cap((c) => { const s = norm(c.pref); if (s) h.msParts.push(s); });
-    else if (/\/prefixDef$/.test(path)) h.prefixDefs.push({ ident: attr('ident'), match: attr('matchPattern'), replace: attr('replacementPattern') });
+    else if (/\/prefixDef$/.test(path)) { h.prefixDefs.push({ ident: attr('ident'), match: attr('matchPattern'), replace: attr('replacementPattern') }); this.prefixCache = null; }
   }
 
   // ---- the events --------------------------------------------------------------------------------
@@ -318,6 +322,7 @@ export class TeiReader {
 
     if (local === 'TEI' || local === 'teiCorpus') {
       this.scopes.push({ hdr: { titles: [], authors: [], editors: [], idnos: [], licences: [], sourceDescs: [], prefixDefs: [] } });
+      this.prefixCache = null;
       this.page = undefined; this.line = undefined; this.divs = []; this.milestones = new Map();
       return;
     }
@@ -403,7 +408,7 @@ export class TeiReader {
       this.firstHdr ||= scope.hdr;
       this.header();
     }
-    if (el.tei && (el.local === 'TEI' || el.local === 'teiCorpus')) this.scopes.pop();
+    if (el.tei && (el.local === 'TEI' || el.local === 'teiCorpus')) { this.scopes.pop(); this.prefixCache = null; }
     this.stack.pop();
   }
   /** Report each attribute of an element that is not read, once for each attribute and value. */
@@ -440,10 +445,10 @@ export class TeiReader {
     if (pl.names.length) this.report('tei-listplace-names', `${which}: ${pl.names.join(', ')}`);
     if (pl.geo.length) this.report('tei-listplace-geo', `${which}: ${pl.geo.join('; ')}`);
     // Place names waiting for this place can be resolved now.
-    if (pl.id !== undefined && this.pending.length) {
-      const still = [];
-      for (const m of this.pending) { if (m.waiting.includes(pl.id)) m.waiting = m.waiting.filter((x) => x !== pl.id); if (m.waiting.length) still.push(m); else this.emit(m, false); }
-      this.pending = still;
+    const waiting = pl.id !== undefined && this.waitingFor.get(pl.id);
+    if (waiting) {
+      this.waitingFor.delete(pl.id);
+      for (const m of waiting) if (--m.waiting === 0) { this.pending.delete(m); this.emit(m, false); }
     }
   }
 
@@ -471,14 +476,19 @@ export class TeiReader {
         if (LANGUAGE_TAG.test(el.lang)) language = el.lang;
         else this.report('tei-lang-not-tag', el.lang);
       }
+      // Only what the attestation needs, and what is shared (the source, the prefixDefs) by
+      // reference: a place name may wait until the end of the file for a <place>.
       d = { m: {
-        element: t.name, ref, key, xmlId, toponym, printed, language, locator,
-        fileLine, source: this.source(), pointers: norm(ref).split(' '), waiting: [],
-        prefixes: this.scopes.flatMap((s) => s.hdr.prefixDefs).reverse(),   // innermost first
+        element: t.name, key, xmlId, toponym, printed: printed !== toponym ? printed : undefined, language, locator,
+        fileLine, source: this.source(), pointers: norm(ref).split(' '), prefixes: this.prefixes(),
       } };
     }
     d.element = t.name; d.fileLine = fileLine; d.toponym = toponym;
     this.route(d, this.stack.length - 1);
+  }
+  /** The prefixDefs in force, innermost first: one array, made again only when a prefixDef or a TEI element comes or goes. */
+  prefixes() {
+    return (this.prefixCache ||= this.scopes.flatMap((s) => s.hdr.prefixDefs).reverse());
   }
   /**
    * Where a place name goes, looking outwards from the element at stack index `from`: inside an
@@ -503,7 +513,7 @@ export class TeiReader {
     for (const x of el.deferred) {
       if (x.part === taken) continue;
       // The form as printed of a place name the part taken also names, with the same ref.
-      const same = x.part === printed && !x.d.noRef && kept.find((k) => !k.labelled && norm(k.d.m.ref) === norm(x.d.m.ref));
+      const same = x.part === printed && !x.d.noRef && kept.find((k) => !k.labelled && k.d.m.pointers.join(' ') === x.d.m.pointers.join(' '));
       if (same) { same.labelled = true; if (x.d.toponym && x.d.toponym !== same.d.m.toponym) same.d.m.printed = x.d.toponym; continue; }
       this.variant(x.d, x.part);
     }
@@ -512,15 +522,18 @@ export class TeiReader {
   }
   variant(d, part) {
     this.mentions++; this.countOne();
-    this.once('tei-variant', `${part}: ${d.toponym || `<${d.element}>`} (<${d.element}>${d.m ? ` ref="${norm(d.m.ref)}"` : ''} on line ${d.fileLine})`);
+    this.once('tei-variant', `${part}: ${d.toponym || `<${d.element}>`} (<${d.element}>${d.m ? ` ref="${d.m.pointers.join(' ')}"` : ''} on line ${d.fileLine})`);
   }
   deliver(d) {
     this.mentions++; this.countOne();
     if (d.noRef) { this.report('tei-place-no-ref', d.words); return; }
     const m = d.m;
-    for (const p of m.pointers) if (p.startsWith('#') && !this.places.has(p.slice(1))) m.waiting.push(p.slice(1));
-    if (m.waiting.length) this.pending.push(m);
-    else this.emit(m, false);
+    // How many <place>s, not yet read, the place name waits for (each id once, however often it is given).
+    const ids = new Set(m.pointers.filter((p) => p.startsWith('#') && !this.places.has(p.slice(1))).map((p) => p.slice(1)));
+    if (!ids.size) { this.emit(m, false); return; }
+    m.waiting = ids.size;
+    this.pending.add(m);
+    for (const id of ids) { const list = this.waitingFor.get(id); if (list) list.push(m); else this.waitingFor.set(id, [m]); }
   }
   /**
    * One pointer of a ref as { iri } or null, having reported why not. This is where a pointer is

@@ -250,6 +250,18 @@ test('a file with no place name that points to a place says so; one with such na
   assert.deepEqual([m.doc.attestations.length, examples(m, 'tei-none-linked')], [0, ['1 place name in the text']]);
   assert.equal(PROSE.kinds.has('tei-none-linked'), false, 'control');
 });
+test('a place waited for by several place names resolves them all; one waiting for two places, once both are read', () => {
+  const place = (id, n) => `<place xml:id="${id}"><idno type="URI">https://pleiades.stoa.org/places/${n}</idno></place>`;
+  const body = '<p><placeName ref="#a">A1</placeName> <placeName ref="#b">B1</placeName> <placeName ref="#a">A2</placeName> <placeName ref="#a #a">A3</placeName> <placeName ref="#a #b">AB</placeName> <placeName ref="#z">Z</placeName> <placeName ref="#a">A4</placeName></p>';
+  const s = tei(body).replace('</body>', `</body><back><listPlace>${place('a', 1)}${place('b', 2)}</listPlace></back>`);
+  const m = mapped(s);
+  const got = m.doc.attestations.map((a) => [a.names[0].toponym, a.about.split('/').pop()]);
+  assert.deepEqual(got.filter(([w]) => w.startsWith('A') && w !== 'AB'), [['A1', '1'], ['A2', '1'], ['A3', '1'], ['A4', '1']], 'every place name waiting for #a, once each');
+  assert.deepEqual(got.filter(([w]) => w === 'AB').map(([, n]) => n), ['1', '2'], 'resolved once #b is read too');
+  assert.deepEqual(got.filter(([w]) => w === 'B1'), [['B1', '2']]);
+  assert.equal(got.length, 7);
+  assert.deepEqual(examples(m, 'tei-ref-local'), ['#z (no place with this id in the file)'], 'the one that never comes is reported at the end');
+});
 // ---- variant readings: place names inside <app> and <choice> ---------------------------------------
 const PL = (id) => `https://pleiades.stoa.org/places/${id}`;
 const pn = (id, words) => `<placeName ref="${PL(id)}">${words}</placeName>`;
