@@ -381,31 +381,57 @@ test('the deposit files parse, and carry the description', async () => {
 
 // Round 4, B3: a name is split only at a comma; any other is kept whole in every file.
 const WHOLE = ['Ludwig van Beethoven', 'Mao Zedong', 'Plato'];
-test("authors' names are split into family and given only at a comma, and kept whole otherwise, in all three files", async () => {
-  const names = ['Gadd, Stephen', ...WHOLE];
-  const r = await report(doc(edit((g) => { g.creator = names.map((name) => ({ name })); })));
+// Valid ORCIDs (their check digits hold), one for each person below.
+const ORCIDS = ['https://orcid.org/0000-0002-1825-0097', 'https://orcid.org/0000-0003-3060-0181', 'https://orcid.org/0000-0001-5109-3700', 'https://orcid.org/0000-0002-1694-233X'];
+const INSTITUTE = 'University of Nottingham, Institute for Name-Studies';
+const ROR_ORG = { '@id': 'https://ror.org/02mhbdp94', name: 'Universidad de los Andes' };
+/** The authors of every kind: a person with an ORCID, written with a comma and without; one of unknown kind with a comma (an institute, and a person without an ORCID); an organisation by ROR. */
+const MIXED = () => [
+  { '@id': ORCIDS[0], name: 'Gadd, Stephen' },
+  ...WHOLE.map((name, i) => ({ '@id': ORCIDS[i + 1], name })),
+  { name: INSTITUTE }, { name: 'Gadd, Stephen' }, ROR_ORG,
+];
+
+test("authors' names are split only for a person (an ORCID), only at a comma; an author of unknown kind is kept whole and warned of", async () => {
+  const r = await report(doc(edit((g) => { g.creator = MIXED(); })));
   const f = (n) => r.files[`a-test-gazetteer-of-market-towns-deposit/${n}`];
   assert.equal(r.counts.places, 2, 'the records were read');
-  // Zenodo: 'Family, Given' for the one split, the name as given for the rest.
-  assert.deepEqual(JSON.parse(f('.zenodo.json')).creators.map((c) => c.name), names);
-  // CITATION.cff: family-names and given-names for the one split; the whole name in family-names
-  // (its person has no single-name field) and no given-names for the rest.
+  assert.equal(r.errors, 0, JSON.stringify(r.items));
+  // The warning names both authors of unknown kind, and neither the people nor the organisation.
+  const w = item(r, 'creator-kind-unknown');
+  assert.equal(w?.severity, 'warning', kinds(r));
+  assert.equal(w.message, TEXT['creator-kind-unknown']);
+  assert.deepEqual([...new Set(w.examples)].sort(), ['Gadd, Stephen', INSTITUTE]);
+  assert.equal(item(await report(doc(GOOD)), 'creator-kind-unknown'), undefined, 'control: an author with an ORCID raises none');
+  // Zenodo: 'Family, Given' for the person split, the name as given for everyone else.
+  assert.deepEqual(JSON.parse(f('.zenodo.json')).creators.map((c) => c.name), ['Gadd, Stephen', ...WHOLE, INSTITUTE, 'Gadd, Stephen', ROR_ORG.name]);
+  // CITATION.cff: family-names and given-names for the person split; the whole name in family-names
+  // for the other people and the unknown (its person has no single-name field); an entity for the ROR.
   assert.deepEqual(cff(f('CITATION.cff')).authors, [
-    { 'family-names': 'Gadd', 'given-names': 'Stephen' },
-    ...WHOLE.map((n) => ({ 'family-names': n })),
+    { 'family-names': 'Gadd', 'given-names': 'Stephen', orcid: ORCIDS[0] },
+    ...WHOLE.map((n, i) => ({ 'family-names': n, orcid: ORCIDS[i + 1] })),
+    { 'family-names': INSTITUTE }, { 'family-names': 'Gadd, Stephen' },
+    { name: ROR_ORG.name },
   ]);
-  // DataCite: Personal throughout; familyName and givenName only for the one split.
+  // DataCite: Personal and split for the person with a comma; Personal and whole for the others with
+  // an ORCID; a name alone, no nameType and no parts, for the unknown; Organizational for the ROR.
   const d = JSON.parse(f('datacite.json')).data.attributes.creators;
-  assert.deepEqual(d[0], { name: 'Gadd, Stephen', nameType: 'Personal', familyName: 'Gadd', givenName: 'Stephen' });
-  for (const [i, n] of WHOLE.entries()) assert.deepEqual(d[i + 1], { name: n, nameType: 'Personal' }, n);
-  // Nothing split at a space anywhere: no 'Beethoven' or 'Zedong' as a family name on its own.
+  const strip = ({ nameIdentifiers, ...o }) => o;
+  assert.deepEqual(strip(d[0]), { name: 'Gadd, Stephen', nameType: 'Personal', familyName: 'Gadd', givenName: 'Stephen' });
+  for (const [i, n] of WHOLE.entries()) assert.deepEqual(strip(d[i + 1]), { name: n, nameType: 'Personal' }, n);
+  assert.deepEqual(d[4], { name: INSTITUTE });
+  assert.deepEqual(d[5], { name: 'Gadd, Stephen' });
+  assert.deepEqual(strip(d[6]), { name: ROR_ORG.name, nameType: 'Organizational' });
+  // Nothing split at a space anywhere, nor the institute at its comma.
   for (const file of ['.zenodo.json', 'CITATION.cff', 'datacite.json']) {
     assert.match(f(file), /Gadd/, file);
-    assert.doesNotMatch(f(file), /"(Beethoven|Zedong|Beethoven, Ludwig van|Zedong, Mao)"/, file);
+    assert.match(f(file), /Institute for Name-Studies/, file);
+    assert.doesNotMatch(f(file), /"(Beethoven|Zedong|Beethoven, Ludwig van|Zedong, Mao|Institute for Name-Studies)"/, file);
   }
-  // The README says how to have names split.
+  // The README says how to have names split, and that an ORCID is needed for it.
   assert.match(f('README.txt'), /"Family, Given"/);
-  assert.match(f('CITATION.cff'), /only where it is written 'Family, Given'/);
+  assert.match(f('README.txt'), /give each person an ORCID/);
+  assert.match(f('CITATION.cff'), /only for a person \(with an ORCID\)/);
 });
 
 // CITATION.cff against its own JSON schema (1.2.0), which is not kept in this repository (63 KB):
@@ -417,10 +443,10 @@ test('CITATION.cff is valid against the CITATION.cff 1.2.0 schema, whole names a
   const ajv = new Ajv({ allErrors: true, strict: false });
   addFormats(ajv);
   const validate = ajv.compile(JSON.parse(readFileSync(process.env.CFF_SCHEMA, 'utf8')));
-  const g = edit((x) => { x.creator = ['Gadd, Stephen', ...WHOLE].map((name) => ({ name })); x.creator.push({ '@id': 'https://orcid.org/0000-0002-1825-0097', name: 'Josiah Carberry' }, { '@id': 'https://ror.org/02mhbdp94', name: 'Universidad de los Andes' }); });
+  const g = edit((x) => { x.creator = MIXED(); });
   const r = await report(doc(g), { release: 'v2', conceptDoi: '10.5281/zenodo.123', name: 'towns.json' });
   const c = cff(r.files['towns-deposit/CITATION.cff']);
-  assert.equal(c.authors.length, 6, 'the authors were read');
+  assert.equal(c.authors.length, 7, 'the authors were read');
   assert.ok(validate(c), JSON.stringify(validate.errors));
   // Control: the same file with a person's field the schema does not have is refused.
   const bad = structuredClone(c); bad.authors[1].name = 'Ludwig van Beethoven';

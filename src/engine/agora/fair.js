@@ -36,6 +36,7 @@ export const TEXT = {
   'orcid-malformed': 'An ORCID is not written as one: write it as the full address, https://orcid.org/ and four groups of four digits (the last may be X), such as https://orcid.org/0000-0002-1825-0097.',
   'orcid-checksum': "An ORCID's last digit does not match the others (its check digit, ISO 7064 11,2), so it is mistyped and names nobody, or somebody else: copy it again from the author's ORCID record.",
   'ror-malformed': 'A ROR is not written as one: write it as the full address, https://ror.org/ and the nine characters of the identifier, such as https://ror.org/02mhbdp94.',
+  'creator-kind-unknown': "An author has neither an ORCID nor a ROR, so these tools cannot tell whether this is a person or an organisation: the deposit files keep the name whole, as written (not split into family and given names, even at a comma), and do not tell DataCite which it is. Give an ORCID for a person or a ROR for an organisation.",
   'creator-without-name': "An author is given by ORCID only, so the deposit files cannot give their name, which Zenodo and CITATION.cff need: the ORCID stands in for it in .zenodo.json and datacite.json, and CITATION.cff says to fill it in. Replace it with the author's name before depositing. In PLATO JSON give the name beside the ORCID; the about sheet holds one or the other.",
   'no-licence': "The dataset does not say under what licence it may be reused (licence): give the licence's address, such as https://creativecommons.org/licenses/by/4.0/. It is required once status is 'published'.",
   'licence-not-uri': 'The licence is not given as a web address, so no machine can tell what it allows: give the address of the licence, such as https://creativecommons.org/licenses/by/4.0/.',
@@ -119,7 +120,15 @@ export function recogniseLicence(uri) {
 const isUri = (s) => typeof s === 'string' && /^https?:\/\/[^\s/?#]+\S*$/.test(s);
 const str = (s) => (typeof s === 'string' ? s.trim() : typeof s === 'number' ? String(s) : '');
 const list = (v) => (Array.isArray(v) ? v : v === undefined || v === null || v === '' ? [] : [v]);
-const creatorsOf = (g) => list(g.creator).filter((c) => c && typeof c === 'object').map((c) => ({ id: str(c['@id']), name: str(c.name) }));
+const creatorsOf = (g) => list(g.creator).filter((c) => c && typeof c === 'object').map((c) => ({ id: str(c['@id']), name: str(c.name), kind: kindOf(str(c['@id'])) }));
+// Whether an author is a person or an organisation, which only its address says: an ORCID is a
+// person's, a ROR an organisation's. Without either it is 'unknown', and nothing is inferred from
+// the name: 'University of Nottingham, Institute for Name-Studies' has a comma and is no person.
+function kindOf(id) {
+  if (looksOrcid(id)) return 'person';
+  if (looksRor(id)) return 'organisation';
+  return 'unknown';
+}
 const escapeHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 /** Plain text as HTML paragraphs, as Zenodo's description is HTML: a blank line parts paragraphs. */
 const paragraphs = (s) => s.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean).map((p) => `<p>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`).join('');
@@ -139,7 +148,9 @@ function coverage(g) {
  * can hold apart: only at a comma, where the dataset says which is which ('Gadd, Stephen'). A name
  * without one is not guessed at (Round 4, B3): no rule of word order serves 'Ludwig van Beethoven',
  * 'Mao Zedong' and 'Plato' alike, so each file keeps it whole, and the README says to write
- * 'Family, Given' to have names split. Null when there is nothing to split.
+ * 'Family, Given' to have names split. Only a person's name (an author with an ORCID) is split: the
+ * name of an author that may be an organisation is kept whole, comma and all. Null when there is
+ * nothing to split.
  */
 function familyGiven(name) {
   if (!name.includes(',')) return null;
@@ -149,6 +160,8 @@ function familyGiven(name) {
 }
 /** A person's name as Zenodo and DataCite show it: 'Family, Given' when split, else as given. */
 const fmtFamilyGiven = (name) => { const s = familyGiven(name); return !s ? name : s.given ? `${s.family}, ${s.given}` : s.family; };
+/** An author's name as Zenodo and DataCite show it: a person's as fmtFamilyGiven, anyone else's as given. */
+const shownName = (c) => (c.kind === 'person' ? fmtFamilyGiven(c.name) : c.name);
 
 // ---- schema.org, for the landing page ----------------------------------------------------------
 
@@ -308,6 +321,7 @@ function assess(ctx, g, outside) {
   if (!record('creator', 'R1.2-01M', creators.length)) warn('no-creator');
   let identified = creators.length > 0;
   for (const c of creators) {
+    if (c.kind === 'unknown') warn('creator-kind-unknown', c.name || c.id);
     if (!c.id) { identified = false; warn('creator-without-orcid', c.name); continue; }
     if (looksOrcid(c.id)) {
       const p = orcidProblem(c.id);
@@ -433,7 +447,7 @@ function zenodo(g, scheme, lic, release) {
   // (creator-without-name says to replace it).
   z.creators = creatorsOf(g).map((c) => {
     const orcid = orcidId(c.id);
-    const person = { name: c.name ? (looksRor(c.id) ? c.name : fmtFamilyGiven(c.name)) : orcid || c.id };
+    const person = { name: c.name ? shownName(c) : orcid || c.id };
     if (orcid) person.orcid = orcid;
     return person;
   });
@@ -461,8 +475,9 @@ function citation(g, scheme, lic, release, conceptDoi) {
   const q = (s) => JSON.stringify(String(s));
   const lines = [
     '# Citation metadata for the dataset (https://citation-file-format.github.io/).',
-    "# An author's name is split into family and given names only where it is written 'Family, Given';",
-    '# otherwise the whole name is in family-names, as CITATION.cff has no single name for a person.',
+    "# An author's name is split into family and given names only for a person (with an ORCID) and",
+    "# only where it is written 'Family, Given'; otherwise the whole name is in family-names, as",
+    '# CITATION.cff has no single name for a person.',
     'cff-version: 1.2.0',
     'message: "If you use this dataset, please cite it using the metadata from this file."',
     'type: dataset',
@@ -473,11 +488,12 @@ function citation(g, scheme, lic, release, conceptDoi) {
   const creators = creatorsOf(g);
   if (!creators.length) lines.push('  - name: "FILL IN: the authors"');
   for (const c of creators) {
-    if (looksRor(c.id)) { lines.push(`  - name: ${q(c.name || c.id)}`); continue; }
+    if (c.kind === 'organisation') { lines.push(`  - name: ${q(c.name || c.id)}`); continue; }
     if (c.name) {
       // CITATION.cff's person has no field for one whole name (its 'name' is an entity's, an
       // organisation's), so an unsplit name goes whole into family-names, which is what it cites by.
-      const split = familyGiven(c.name);
+      // An author of unknown kind is written as a person too, but never split (creator-kind-unknown).
+      const split = c.kind === 'person' ? familyGiven(c.name) : null;
       lines.push(`  - family-names: ${q(split ? split.family : c.name)}`);
       if (split?.given) lines.push(`    given-names: ${q(split.given)}`);
     } else lines.push(`  - family-names: ${q(`FILL IN: the name for ${c.id}`)}`);
@@ -506,11 +522,14 @@ function datacite(g, scheme, lic, release, conceptDoi, publisher, options) {
   const a = {};
   if (conceptDoi) a.doi = conceptDoi;
   a.creators = creatorsOf(g).map((c) => {
-    const org = looksRor(c.id);
-    const o = { name: c.name ? (org ? c.name : fmtFamilyGiven(c.name)) : orcidId(c.id) || c.id, nameType: org ? 'Organizational' : 'Personal' };
-    // Split only at a comma; otherwise a Personal name with no familyName or givenName, which
-    // DataCite allows (both are optional), rather than a guess at which part is which.
-    const split = c.name && !org ? familyGiven(c.name) : null;
+    const org = c.kind === 'organisation';
+    const o = { name: c.name ? shownName(c) : orcidId(c.id) || c.id };
+    // nameType only where the address says which (it is optional): an author of unknown kind is a
+    // name alone, rather than a guess that would call an institute a person.
+    if (c.kind !== 'unknown') o.nameType = org ? 'Organizational' : 'Personal';
+    // A person's name split only at a comma; otherwise a Personal name with no familyName or
+    // givenName, which DataCite allows (both are optional), rather than a guess at which part is which.
+    const split = c.name && c.kind === 'person' ? familyGiven(c.name) : null;
     if (split) { o.familyName = split.family; if (split.given) o.givenName = split.given; }
     if (looksOrcid(c.id)) o.nameIdentifiers = [{ nameIdentifier: c.id, nameIdentifierScheme: 'ORCID', schemeUri: 'https://orcid.org' }];
     else if (org) o.nameIdentifiers = [{ nameIdentifier: c.id, nameIdentifierScheme: 'ROR', schemeUri: 'https://ror.org' }];
@@ -567,10 +586,13 @@ function readme(g, scheme, lic, release, conceptDoi, publisher) {
     'The period and the part of the world it covers are in the notes of .zenodo.json, as Zenodo',
     'has no field for either that fits.',
     '',
-    "Authors' names: each file splits a name into family and given names only where the dataset",
-    'writes it "Family, Given" (with a comma), as in "Gadd, Stephen"; any other name is kept whole',
-    '(in CITATION.cff, whole in family-names, since it has no single name for a person). To have',
-    'names split, write them "Family, Given" in the dataset\'s creators and make these files again.',
+    "Authors' names: each file splits a person's name (an author with an ORCID) into family and",
+    'given names only where the dataset writes it "Family, Given" (with a comma), as in "Gadd,',
+    'Stephen"; any other name is kept whole (in CITATION.cff, whole in family-names, since it has no',
+    'single name for a person). An author with a ROR is an organisation. An author with neither is',
+    'kept whole, comma and all, and datacite.json does not say whether it is a person or an',
+    'organisation. To have names split, give each person an ORCID, write the name "Family, Given" in',
+    "the dataset's creators, and make these files again.",
     ...(fill.length ? ['', 'To fill in before depositing:', ...fill.map((f) => `  - ${f}`)] : []),
     '',
   ].join('\n');
