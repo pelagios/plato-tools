@@ -149,3 +149,23 @@ test('spreadsheet tables: the base address matched with is kept, and apply with 
   const other = cli('apply', zip, '--review', join(dir, 'review.json'), '--out', scratch(), '--reviewer', 'R', '--output', 'attestations', '--base', `${X}elsewhere/`);
   assert.match(other.out, /The review was made with the base address https:\/\/example\.org\/a\/ for the places of your spreadsheet tables, and https:\/\/example\.org\/elsewhere\/ is given now/);
 });
+test('--others-title: the other dataset\'s title, when it gives none, is kept in the work file and cited; without it, a warning', () => {
+  const dir = fixtures();
+  const b = JSON.parse(readFileSync(join(dir, 'b.json'), 'utf8')); delete b.gazetteer.title;
+  writeFileSync(join(dir, 'b.json'), JSON.stringify(b));
+  const plain = cli('match', join(dir, 'a.json'), '--with', join(dir, 'b.json'), '--out', scratch());
+  assert.equal(plain.code, 0, plain.out + plain.err);
+  assert.match(plain.out, /would cite it as its source by its file's name, b\.json/);
+  const given = cli('match', join(dir, 'a.json'), '--with', join(dir, 'b.json'), '--out', dir, '--others-title', 'Dataset B');
+  assert.equal(given.code, 0, given.out + given.err);
+  assert.doesNotMatch(given.out, /file's name/, 'a title given: no warning');
+  const w = readWork(readFileSync(join(dir, 'a.krisis.json'), 'utf8'));
+  assert.deepEqual([w.others.title, w.others.titleFrom], ['Dataset B', 'given']);
+  decide(w, w.candidates.find((c) => c.candidate_candidate === `${X}b/newton`).id, 'match');
+  writeFileSync(join(dir, 'review.json'), serialiseWork(w));
+  const r = cli('apply', join(dir, 'a.json'), '--review', join(dir, 'review.json'), '--out', dir, '--reviewer', 'R', '--output', 'attestations');
+  assert.equal(r.code, 0, r.out + r.err);
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, 'a.krisis-attestations.json'), 'utf8')).attestations.map((a) => a.citations[0].source.title), ['Dataset B']);
+  assert.equal(cli('match', join(dir, 'a.json'), '--with', join(dir, 'b.json'), '--out', scratch(), '--others-title', ' ').code, 2, 'an empty title is a mistake in the command');
+  assert.equal(cli('check', join(dir, 'a.json'), '--others-title', 'X').code, 2, '--others-title is for match and apply');
+});

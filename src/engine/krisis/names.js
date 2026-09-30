@@ -13,11 +13,17 @@
 // the difference is the whole point. The words both names have (a word also counts as shared with
 // its abbreviation or contraction: St and Saint, Mt and Mount, on and upon) are set aside, and what
 // is left of each name is compared. If what is left is alike (at least DISTINCT_GATE, or one letter
-// added, dropped, changed or two swapped: Kafr Cal and Kafr Cel), the score is
+// added, dropped, changed or two swapped: Kafr Cal and Kafr Cel, though a word of three letters
+// with one changed scores only about 0.8, so such a pair is suggested only if the words shared weigh
+// enough, and not when they are common), the score is
 // the shared words' share of the weight plus the rest's likeness over the remaining weight; if not,
 // only the shared words' share. Words are weighted by how rare they are in the two datasets
 // (inverse document frequency, given by the matcher), so a common word such as Saint or Tell
-// counts for little. The score is never raised by this, only lowered.
+// counts for little. The score is never raised by this, only lowered. The one case that raises a
+// score is two names whose words are all shared, some only as an abbreviation (Mt Pleasant and Mount
+// Pleasant, St Zan and Saint Zan; a contraction of at most three letters, two fewer than the word): the letters of St and Saint differ and would count against a pair
+// that differs in nothing else, so such names are scored again with each short form written out in
+// full, and the higher score is kept (expandedScore()).
 // Trigrams of the normalised name are what matching blocks on (blocking.js).
 
 const SPELT = { ß: 'ss', æ: 'ae', œ: 'oe', ø: 'o', ł: 'l', đ: 'd', ð: 'd', þ: 'th', ı: 'i', ŋ: 'ng', ħ: 'h' };
@@ -85,6 +91,8 @@ export function nameScore(x, y, xs = sortWords(x), ys = sortWords(y)) {
 export function similarityNormalised(x, y, weight) {
   const base = nameScore(x, y);
   if (base === 0 || base === 1) return base;
+  const e = expandedScore(x, y);
+  if (e !== null) return Math.max(base, e);
   const d = distinctive(x, y, weight);
   return d === null ? base : Math.min(base, d);
 }
@@ -98,6 +106,44 @@ function contracts(a, b) {
 }
 const sameWord = (a, b) => a === b || (a.length < b.length ? contracts(a, b) : contracts(b, a));
 
+/** Whether a contraction is short enough to be an abbreviation (St, Ste, Mt, Rd, on for upon): at most three letters, and two fewer than the word. */
+const isAbbreviation = (a, b) => a.length <= 3 && b.length - a.length >= 2;
+
+/**
+ * The words two normalised names share, and those left of each: `shared` (a word and its contraction
+ * counted once, as the longer), `restX`, `restY`, and `long`, the long form of each abbreviation by its short one.
+ */
+function alignWords(wx, wy) {
+  const restY = [...wy], restX = [], shared = [], long = new Map();
+  for (const w of wx) { const i = restY.indexOf(w); if (i >= 0) { shared.push(w); restY.splice(i, 1); } else restX.push(w); }
+  for (let k = restX.length - 1; k >= 0; k--) {
+    const i = restY.findIndex((v) => sameWord(restX[k], v));
+    if (i >= 0) {
+      const [a, b] = restX[k].length > restY[i].length ? [restY[i], restX[k]] : [restX[k], restY[i]];
+      shared.push(b); if (isAbbreviation(a, b)) long.set(a, b); restY.splice(i, 1); restX.splice(k, 1);
+    }
+  }
+  return { shared, restX, restY, long };
+}
+
+/**
+ * When every word of two normalised names is shared, some only as an abbreviation (St Zan and Saint
+ * Zan, Mt Pleasant and Mount Pleasant: a contraction of at most three letters, two fewer than the
+ * word, so not Tel and Tell or Cal and Carl), the name score of the two with each short form written out
+ * in full; otherwise null. The letters of "St" and "Saint" differ, and would otherwise count against
+ * the pair; so this is the one case where the score is raised (the higher of this and the name score).
+ */
+export function expandedScore(x, y) {
+  if (!x.includes(' ') && !y.includes(' ')) return null;
+  if (Math.abs(x.length - y.length) < 2) return null; // an abbreviation is two letters shorter than its word
+  const wx = x.split(' '), wy = y.split(' ');
+  if (wx.length !== wy.length) return null;
+  const { restX, restY, long } = alignWords(wx, wy);
+  if (restX.length || restY.length || !long.size) return null;
+  const full = (ws) => ws.map((w) => long.get(w) ?? w).join(' ');
+  return nameScore(full(wx), full(wy));
+}
+
 /**
  * The score of two normalised names on their distinctive words, or null when it does not apply
  * (they share no word, or every word of one of them is shared). See the top of this file.
@@ -105,12 +151,7 @@ const sameWord = (a, b) => a === b || (a.length < b.length ? contracts(a, b) : c
 export function distinctive(x, y, weight = () => 1) {
   const wx = x.split(' '), wy = y.split(' ');
   if (wx.length < 2 && wy.length < 2) return null;
-  const restY = [...wy], restX = [], shared = [];
-  for (const w of wx) { const i = restY.indexOf(w); if (i >= 0) { shared.push(w); restY.splice(i, 1); } else restX.push(w); }
-  for (let k = restX.length - 1; k >= 0; k--) {
-    const i = restY.findIndex((v) => sameWord(restX[k], v));
-    if (i >= 0) { shared.push(restX[k].length > restY[i].length ? restX[k] : restY[i]); restY.splice(i, 1); restX.splice(k, 1); }
-  }
+  const { shared, restX, restY } = alignWords(wx, wy);
   if (!shared.length || !restX.length || !restY.length) return null;
   const sum = (ws) => ws.reduce((n, w) => n + weight(w), 0);
   const s = sum(shared), share = s / (s + sum(restX) + sum(restY));

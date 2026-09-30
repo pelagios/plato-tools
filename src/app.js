@@ -5,7 +5,7 @@
 import { fmtBytes, formatName, progressText, summary, groups, draftNote, explainedLines } from './engine/words.js';
 import { COLUMN_CHOICES, COLUMN_WORDS, columnWarnings, columnProblem } from './engine/words.js';
 import { review as W } from './engine/words.js';
-import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer } from './engine/krisis/work.js';
+import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions } from './engine/krisis/work.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
 let worker, files = [], input = null, targets = {}, busy = false;
@@ -101,7 +101,7 @@ function start(action, earlier) {
     (e) => fail(`the list of places to include could not be read (${e.message || e}).`));
   // Match review (Krisis): the files chosen are the subjects, and `earlier` the other dataset; to finish, the review is applied to them.
   else if (action === 'match') worker.postMessage({ cmd: 'match', subjects: files, others: earlier, options: { ...matchOptions(), base } });
-  else if (action === 'apply') worker.postMessage({ cmd: 'apply', subjects: files, work, options: { output: earlier, reviewer: reviewer(), base } });
+  else if (action === 'apply') worker.postMessage({ cmd: 'apply', subjects: files, work, options: { output: earlier, reviewer: reviewer(), othersTitle: matchOptions().othersTitle, base } });
   else worker.postMessage({ cmd: 'run', files, action, target, options: { base, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked,
     // Hermes: the matching of columns shown, as chosen (the same JSON as the command line's --columns).
     ...(isTable(input) && columns ? { columns: { ...columns.mapping } } : {}) } });
@@ -300,7 +300,8 @@ $('earlier').onchange = (e) => { const earlier = [...e.target.files]; e.target.v
 $('publish').onclick = () => start('publish');
 $('cancel').onclick = () => { worker.terminate(); busy = false; $('progress').hidden = true; buttons(false); Object.assign(state, { phase: 'cancelled' }); startWorker(); };
 // Matching asks for the other dataset, and starts once it is chosen; resuming asks for a saved review.
-$('match').onclick = () => $('others').click();
+// Options that matching would refuse are said plainly first, before the other dataset is asked for.
+$('match').onclick = () => { const problem = matchProblem(); if (problem) return refuse(problem); $('others').click(); };
 $('others').onchange = (e) => { const others = [...e.target.files]; e.target.value = ''; if (others.length) start('match', others); };
 $('resume').onclick = () => $('workfile').click();
 $('workfile').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) resume(f); };
@@ -333,19 +334,23 @@ function reviewerProblem() {
 }
 function matchOptions() {
   const num = (id) => { const v = parseFloat($(id).value); return Number.isFinite(v) ? v : undefined; };
-  return { threshold: num('threshold'), maxDistanceKm: num('max-distance') };
+  return { threshold: num('threshold'), maxDistanceKm: num('max-distance'), othersTitle: $('others-title').value.trim() || undefined };
+}
+/** What is wrong with the matching options, in the engine's own words (checkMatchOptions), or null. */
+function matchProblem() { try { checkMatchOptions(matchOptions()); return null; } catch (e) { return e.message; } }
+/** Say plainly why something cannot be done, where results are shown. */
+function refuse(message) {
+  $('result').hidden = false; $('saves').innerHTML = ''; $('report').innerHTML = '';
+  $('summary').innerHTML = `<span class="warn">${escapeHtml(message)}</span>`;
+  Object.assign(state, { phase: 'error', error: message });
 }
 async function resume(file) {
   let w;
-  try { w = readWork(await file.text()); } catch (e) {
-    $('result').hidden = false; $('saves').innerHTML = ''; $('report').innerHTML = '';
-    $('summary').innerHTML = `<span class="warn">${escapeHtml(e.message)}</span>`;
-    Object.assign(state, { phase: 'error', error: e.message });
-    return;
-  }
+  try { w = readWork(await file.text()); } catch (e) { refuse(e.message); return; }
   $('result').hidden = true;
   beginReview(w, file.name);
-  // A review made from other files than those chosen now is still opened, with a warning.
+  // A review made from other files than those chosen now is still opened, with a warning; with none chosen, it says so.
+  if (!files.length || !input?.format) { showWarning(W.noDatasetYet); return; }
   try { const differ = await filesDiffer(w.subjects, files); showWarning(differ.length ? W.differs(differ) : ''); } catch { showWarning(''); }
 }
 function beginReview(w, name) {
@@ -413,7 +418,7 @@ function render(focus) {
   if (focus) box.focus({ preventScroll: false });
 }
 function candidateHtml(c, i) {
-  const o = c.other || work.places[c.candidate_candidate] || {}, d = c.decision, id = escapeHtml(c.id);
+  const o = c.other || (Object.hasOwn(work.places, c.candidate_candidate) ? work.places[c.candidate_candidate] : {}), d = c.decision, id = escapeHtml(c.id);
   const btn = (act, text, key) => `<button type="button" data-act="${act}" data-id="${id}" aria-pressed="${d?.kind === act}">${text}${i === current && key ? ` <kbd>${key}</kbd>` : ''}</button>`;
   return `<li class="candidate${i === current ? ' current' : ''}${d ? ' decided' : ''}" data-id="${id}"${i === current ? ' aria-current="true"' : ''}>`
     + `<h4><span class="n">${i + 1}</span>${escapeHtml(o.label || c.candidate_candidate)}</h4>`

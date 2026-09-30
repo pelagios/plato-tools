@@ -294,7 +294,7 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   romanised form, from attestations that are not denials), one point, country codes and types, and
   the identity relations either dataset states are kept, in memory. A place without an `@id` cannot
   be matched, and is reported as a problem.
-- **Scoring** (`names.js`, algorithm `krisis-names 2`). Names are normalised: NFKD, combining marks
+- **Scoring** (`names.js`, algorithm `krisis-names 3`). Names are normalised: NFKD, combining marks
   removed, ß æ œ ø ł đ ð þ ı spelt out, lower-cased, everything but letters and digits a space. Two
   names score their Jaro-Winkler similarity (prefix scale 0.1, up to four letters) or, if higher, that
   of their words sorted, so that "Upper Newton" and "Newton Upper" agree. Two places score the best
@@ -306,33 +306,68 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   as shared with its abbreviation or contraction: its letters in order in the other, ending alike, and
   beginning alike unless it has two letters, so St and Saint, Mt and Mount, on and upon), and what is
   left of each is compared. If the rest is alike (at least 0.85, `DISTINCT_GATE`, or one letter added,
-  dropped, changed or two swapped: Kafr Cal and Kafr Cel), the pair scores the shared words' share of
-  the weight plus the rest's score over the remaining weight; if not, the shared words' share alone
-  (Saint Martin and Saint Maurice now 0.333 with equal weights). Each word weighs its inverse document
-  frequency in the names of both datasets, ln(1 + N / df), so a common word such as Kafr or Tell counts
-  for little. It only ever lowers the name score, and names that share no word, or where every word of
-  one is shared ("Newton", "Upper Newton"), keep it. Respellings, abbreviations and reorderings stay
-  over the threshold (Tell Brak and Tell Barak, St Martin and Saint Martin, Stratford upon Avon and
-  Stratford-on-Avon: the tests hold both lists). Letters alone cannot tell "East" from "West" and a
-  respelling of a word as short, so a pair whose distinctive word is short and differs by more than
-  one letter is not suggested; the limit is deliberate.
+  dropped, changed or two swapped), the pair scores the shared words' share of the weight plus the
+  rest's score over the remaining weight; if not, the shared words' share alone (Saint Martin and
+  Saint Maurice now 0.333 with equal weights). Each word weighs its inverse document frequency in the
+  names of both datasets, ln(1 + N / df), so a common word such as Kafr or Tell counts for little.
+  This only ever lowers the name score, and names that share no word, or where every word of one is
+  shared ("Newton", "Upper Newton"), keep it. Respellings and reorderings stay over the threshold
+  (Tell Brak and Tell Barak, Stratford upon Avon and Stratford-on-Avon: the tests hold both lists).
+  **Words of three letters:** one letter changed scores 0.78 to 0.82 on the letters, so the pair
+  reaches 0.85 only when the words it shares weigh a sixth to a third of all its words. Kafr Cal and
+  Kafr Cel score 0.87 with every word weighed alike, but once Kafr is common in the datasets it weighs
+  little, and they score 0.836 and are not suggested (the tests hold both, with weights as a gazetteer
+  gives them). So for a distinctive word of three letters one letter is already the limit, and a
+  common shared word takes the pair under it; and letters alone cannot tell "East" from "West", so a
+  short distinctive word that differs by more than one letter is never suggested. The limits are
+  deliberate. (Until `krisis-names 3` this file said Kafr Cal and Kafr Cel were suggested; with the
+  weights of a real gazetteer they are not.)
+- **Abbreviations** (`expandedScore()`, new in `krisis-names 3`). Counting St as shared with Saint
+  set the pair's distinctive score aside, but the name score still counted the letters of "st" against
+  "saint": Mount Pleasant and Mt Pleasant scored 0.813 and Saint Zan and St Zan 0.775, not suggested,
+  while Saint Martin and St Martin (0.950) were, so whether St and Saint passed depended on the length
+  of the other word. Now two names whose words are all shared, some only as an abbreviation (a
+  contraction of at most three letters, two fewer than its word: St, Ste, Mt, Ft, Rd, on for upon; not
+  Tel for Tell or Cal for Carl), are scored again with each abbreviation written out in full, and the
+  higher score is kept: such pairs score 1. This is the one case where a score is raised; a pair with a
+  word not shared is still lowered as above (Saint Martin and St Maurice 0.333).
 - **Blocking** (`blocking.js`, `match_parameters.blocking`). The rule until September 2026 (compare
   names sharing 30% of their padded trigrams) let every "Saint …", "San …", "Kafr …" or "Tell …" pass
   against each other, and a short name against every name with its first letter: a review measured
   11 s for 5,000 names with 5,000, and 20,000 with 20,000 did not finish in two minutes. Now the other dataset's names
   are indexed by trigram, and a trigram is **common** when more than 1% of those names have it, and more
   than 50 (so a small dataset has none). A name is looked up only by its trigrams that are not common,
-  or, with fewer than four of those, by its four rarest; the lists of common trigrams are not read. A
-  name found so is compared when the two share at least 40% of the trigrams of the one with fewer
-  (30% before; 40% makes 40% fewer comparisons for the loss of four planted variants in 2,000), and
-  when their lengths let them reach the threshold at all (`canReach()`: a name of two letters cannot
-  reach 0.85 with one of more than four); a name exactly the same is always compared. So a name is
-  compared with at most 1% of the other dataset for each trigram it is looked up by. `e2e/match_scale.mjs
-  [N]` matches two synthetic datasets of N places (half the names beginning with a common word, one in
-  ten of the others a planted variant) with `plato-tools match` and requires it to finish in time and
-  suggest 97% of the planted pairs: on its data, 20,000 with 20,000 took 50.6 s (about 11 million
-  comparisons of names) before, and takes about 9 s (1.7 million) now; the suite runs 4,000 with 4,000 and requires fewer
-  comparisons than 1% of the pairs, where the rule before made more than 2%.
+  or, with fewer than four of those, by its four rarest; the lists of common trigrams are not read.
+  **The keys are spread over the name** (`BLOCKING.spread`, new in `krisis-names 3`): one letter
+  changed, added or dropped, or two swapped, breaks the trigrams beginning at no more than four places
+  in a row, and the rarest trigrams of a name often all fall in its one unusual stretch ("great
+  shunia" was looked up by uni, hun, nia and shu, and "Great Shnuia", 0.963, has none of them). So when
+  the keys all begin within four places of each other, the rarest trigram beginning further off is
+  added ("t s"). A name found so is compared when the two share at least 40% of the trigrams of the one
+  with fewer, **or begin with the same three letters and share at least three trigrams** (new in
+  `krisis-names 3`: Bruxelles and Brussels, 0.864, share 3 of 9, where 40% asks 4; Jaro-Winkler
+  rewards a shared beginning), and when their lengths let them reach the threshold at all
+  (`canReach()`: a name of two letters cannot reach 0.85 with one of more than four; names of the same
+  number of words are let through, as abbreviations can raise them past what letters and lengths
+  bound); a name exactly the same is always compared. So a name is compared with at most 1% of the
+  other dataset for each trigram it is looked up by. `e2e/match_scale.mjs [N]` matches two synthetic
+  datasets of N places (half the names beginning with a common word, one in ten of the others a planted
+  variant) with `plato-tools match` and requires it to finish in time and suggest 97% of the planted
+  pairs: on its data, 20,000 with 20,000 took 50.6 s (about 11 million comparisons of names) before,
+  and takes about 12 s (2.2 million) now: about a fifth longer than before the keys were spread and
+  names beginning alike compared (1.5 million; measured in turn on one busy machine, 11.5 to 15.9 s
+  against 9.6 to 13.3 s), suggesting 1,982 of the 2,000 planted pairs (1,978 before). **Of the 18 not suggested, 17 score under the threshold and one is lost by blocking**: 8
+  pairs whose distinctive word has two or three letters, one changed, after a common word (Nahr Nem
+  and Nahr Nam, Fort Wu and Fort We: see words of three letters above), 6 whole names of two or three
+  letters (Wum and Wem, Ra and Re), and 3 names of six letters with the second changed (Giveia and
+  Geveia, 0.840); blocking loses Chapu and Chpau (0.947), which share only their first two padded
+  trigrams, 2 of 6, where 40% asks 3. (Before, this file put the four planted pairs blocking lost down
+  to the 40% share: all four were lost because every key fell in the one stretch that one mistake
+  broke, so they were never read, and the rule before loses the same four at 30%. Now three are found
+  through the key spread over the name, and Chapu is read but shares too little: at 30% it would be
+  compared, 1,983 found, for 56% more comparisons.)
+  The suite runs 4,000 with 4,000 and requires fewer comparisons than 1% of the pairs, where the rule
+  before made more than 2%.
 - **Filters**, in order, after the threshold (0.85): a pair either dataset already links by an
   identity relation (nested, top-level, or bundled in an attestation not since withdrawn) is not
   suggested, and is counted; so is one either says are different places (a negated identity); a pair
@@ -346,11 +381,17 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   candidate describes the place it suggests itself (`other`), so that a suggestion from a gazetteer's
   reconciliation service fits the same record. It records each dataset's files by name, size and
   SHA-256 (streamed, `digest.js`), so a resumed or finished review can say when the files have
-  changed. `readWork` refuses a file no review could have written: a decision that disagrees with its
+  changed. It records where each dataset's title came from (`titleFrom`: `gazetteer`, `given`, or
+  `file-name` when the dataset gives none), because the other dataset's title is the source every
+  attestation of the review cites, and a published attestation is never changed: a title that is only
+  a file's name is warned of at matching and again at finishing, and the page's option "the other
+  dataset's title" (`--others-title` on the command line) gives the real one, kept in the work file, or
+  given again when finishing. `readWork` refuses a file no review could have written: a decision that disagrees with its
   candidate's status, a candidate for a place it does not list, a denial without a basis, and what
   would only fail later, as a fault in the tools, when the attestations are made: a decision time that
   is not an ISO date-time, a place or a suggestion whose address is not an IRI, the same suggestion
-  twice for one place. The page checks the reviewer's ORCID by the same rule (`checkReviewer`) before
+  twice for one place, a candidate for a place listed only by inheritance (`constructor`: the file's
+  objects are looked in with `Object.hasOwn`). The page checks the reviewer's ORCID by the same rule (`checkReviewer`) before
   it saves or finishes, so it never writes one a resumed review would refuse. The base address given
   for spreadsheet tables is kept in `match_parameters.base`; finishing tables with another warns
   (`base-differs`), as their places' addresses are made from it.
@@ -410,6 +451,11 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   than memory cannot be checked.
 - **A match review keeps the places of both datasets in memory**: their names and points, not their
   attestations, but a gazetteer of millions of places needs a machine with room for them.
+- **Matching finds names alike in their letters, not translations or short respellings**: Köln and
+  Cologne, or Wum and Wem, are not suggested (see Match review for the limits of three-letter words).
+  A pair that shares little but its first three letters (Bruxelles and Brussels) is compared only
+  when blocking finds it at all, through a trigram that is not common in the other dataset; in a large
+  gazetteer, where "bru" is common, it may not be.
 - **RDF output is N-Triples only**, and Linked Places Format v2 is refused until it is specified.
 
 ## Testing

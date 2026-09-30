@@ -14,6 +14,13 @@ Status: IMPLEMENTED; engine and CLI tests pass (test/krisis.test.js, test/krisis
     `https://orcid.org/0000-0000-0000-0000`). The page checks the reviewer with it before saving or
     finishing, and never stores an ORCID it refuses.
   - `DATE_TIME`, `isIri` — the rules `readWork` and `recordIdentity` share.
+  - `checkMatchOptions({ threshold, maxDistanceKm, topK }) -> numbers` (with `MATCH_DEFAULTS` for
+    those not given); throws `DataError` in plain words (a threshold of 0 or above 1, a negative
+    distance). `match()` uses it, and the page checks its options with it before it asks for the
+    other dataset.
+  - `TITLE_FROM` — `['gazetteer', 'given', 'file-name']`, the values of a side's `titleFrom`.
+  - Places and candidates are looked up with `Object.hasOwn`, never `in` (a `candidate_source` of
+    `constructor` is refused as a place the file does not list).
   - `serialiseWork(work) -> string` (JSON, 2-space indent, trailing newline).
   - `decide(work, candidateId, kind, { identityType = 'exactMatch', basis, at = new Date().toISOString() } = {}) -> candidate`
     kind: `'match' | 'not-this' | 'distinct' | null` (null clears the decision). Sets
@@ -30,12 +37,19 @@ Status: IMPLEMENTED; engine and CLI tests pass (test/krisis.test.js, test/krisis
   - `match({ subjects, others, options }, env) -> { report, outputs, work, incomplete? }`
     `subjects`/`others` are inputs as `detect()` returns them. options: `threshold` (0.85),
     `maxDistanceKm` (50), `topK` (5), `base` (spreadsheet tables: the base address of their
-    places; kept in `match_parameters.base`), `reviewer`. Bad options throw `DataError`. Writes output
+    places; kept in `match_parameters.base`), `reviewer`, `othersTitle` (the other dataset's title,
+    which every attestation cites as its source: it replaces the title the dataset gives, and
+    `work.others.titleFrom` becomes `'given'`). When the other dataset gives no title and none is
+    given, its file's name stands in (`titleFrom: 'file-name'`) and the report has a warning
+    `others-title-is-file-name`. Bad options throw `DataError`. Writes output
     `<subjects stem>.krisis.json`. `match_parameters` also holds `blocking` (`BLOCKING` with its
-    `rule` in words) and `scoring` (in words); `algorithm_version` is `krisis-names 2`.
+    `rule` in words) and `scoring` (in words); `algorithm_version` is `krisis-names 3`.
 - `src/engine/krisis/apply.js`:
-  - `apply({ subjects, work, options: { output = 'dataset', reviewer, date, base } }, env) -> { report, outputs, incomplete? }`
-    `work` is a work object or its text. `reviewer` ({ name, orcid? }) overrides `work.reviewer`.
+  - `apply({ subjects, work, options: { output = 'dataset', reviewer, date, base, othersTitle } }, env) -> { report, outputs, incomplete? }`
+    `work` is a work object or its text. `reviewer` ({ name, orcid? }) overrides `work.reviewer`;
+    `othersTitle` overrides `work.others.title` as the title of the source each attestation cites.
+    A title that is only a file's name (`work.others.titleFrom === 'file-name'`, none given now) is
+    warned of (`others-title-is-file-name`): it would be published in every attestation.
     `base`: for spreadsheet tables, the base address given to `match()`; if it differs from the
     review's `match_parameters.base` (tables only), a warning `base-differs`. The page passes the
     Options' base to both `match` and `apply`, as the command line passes `--base`.
@@ -56,18 +70,21 @@ Status: IMPLEMENTED; engine and CLI tests pass (test/krisis.test.js, test/krisis
 - `src/engine/krisis/names.js`: `normalise(s)`, `similarity(a, b, weight?)`,
   `similarityNormalised(x, y, weight?)`, `nameScore(x, y)` (Jaro-Winkler, as written or with the
   words sorted), `distinctive(x, y, weight?)` (the score on the words the names do not share, or
-  null), `oneEdit(a, b)`, `trigrams(normalised)`, `DISTINCT_GATE`. `weight(word)` defaults to 1 for
+  null), `expandedScore(x, y)` (when every word is shared, some only as an abbreviation of at most
+  three letters, two fewer than its word, the name score with the abbreviations written out; else
+  null: the one case that raises a score), `oneEdit(a, b)`, `trigrams(normalised)`, `DISTINCT_GATE`. `weight(word)` defaults to 1 for
   every word; the matcher gives inverse document frequency.
 - `src/engine/krisis/blocking.js`: `new NameIndex(otherPlacesNames, subjectPlacesNames)`;
   `.best(names, threshold) -> Map(other place number -> score)` (only scores reaching the
   threshold), `.candidates(normalised, threshold)`, `.comparisons` (pairs of names scored), `.weight`;
-  `BLOCKING` `{ share: 0.4, commonShare: 0.01, commonFloor: 50, keys: 4 }`, `BLOCKING_RULE`,
+  `BLOCKING` `{ share: 0.4, commonShare: 0.01, commonFloor: 50, keys: 4, spread: 4 }`, `BLOCKING_RULE`,
   `canReach(lengthA, lengthB, threshold)`.
 
 ## Work file (version 1)
 
 See the comment at the top of `work.js`. Candidate `other: { label, names, point, source: { title, uri? }, ccodes?, types? }`;
-`decision: null | { kind, identityType (not for 'not-this'), basis?, decided_at }`. `places` holds only
+`decision: null | { kind, identityType (not for 'not-this'), basis?, decided_at }`. Each side
+(`subjects`, `others`) has `titleFrom`: `'gazetteer'`, `'given'` (by `othersTitle`) or `'file-name'`. `places` holds only
 subject places with at least one candidate, in review order. `reviewer: null | { name, orcid? }`
 (`match` puts `options.reviewer` there if given). `cursor`: index into `reviewPlaces(work)`.
 
@@ -84,6 +101,12 @@ subject places with at least one candidate, in review order. `reviewer: null | {
   schema problems, counted), `dataset-now-plato-json` (input was not a place-centric PLATO JSON
   document), and the conversion's own warnings and losses, passed on (`groups('apply')` has a loss group).
 - For resume: `readWork(text)` then `filesDiffer(work.subjects, files)` / `filesDiffer(work.others, files)`.
+  With no dataset chosen, the page says so (`review.noDatasetYet`) rather than comparing nothing.
+- A `DataError` thrown by `match()` or `apply()` in the worker (options out of range) comes back as
+  a `done` message with `incomplete: true` and one error item of kind `not-possible` carrying its
+  message, so the page shows it plainly, not as "Something went wrong".
+- The page's Options hold "the other dataset's title" (`#others-title`), passed as `othersTitle` to
+  both `match` and `apply`.
 - The review's progress line is `review.progress({ reviewed, total }, at?)` in words.js → "12 of 340
   places reviewed; this is place 13."
 

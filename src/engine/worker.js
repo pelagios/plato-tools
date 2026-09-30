@@ -9,6 +9,7 @@ import { publish } from './agora/index.js';
 import { match } from './krisis/match.js';
 import { apply } from './krisis/apply.js';
 import { review } from './words.js';
+import { DataError } from './input.js';
 import { pragmas } from '../lib/store.js';
 import { detect, readable } from './input.js';
 import { columnsOf, mappingOf } from './hermes/generic.js';
@@ -143,6 +144,10 @@ self.onmessage = async ({ data }) => {
         result = data.cmd === 'match'
           ? await match({ subjects, others, options: data.options || {} }, env)
           : await apply({ subjects, work: data.work, options: data.options || {} }, env);
+      } catch (e) {
+        // A mistake in what was asked (an option out of range) is said plainly, as a finding, not as a fault in the tools.
+        if (!(e instanceof DataError)) throw e;
+        result = { incomplete: true, outputs: [], report: { counts: {}, errors: 1, items: [{ severity: 'error', kind: 'not-possible', count: 1, message: e.message, examples: [] }] } };
       } finally { tidy(); }
       postMessage({ type: 'done', ...result });
     }

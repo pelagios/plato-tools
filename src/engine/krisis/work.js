@@ -7,7 +7,8 @@
 //
 // The shape, version 1 (test/krisis.test.js holds an example of each part):
 //   { krisis: 1, generated_at, algorithm_version, match_parameters: { threshold, maxDistanceKm, topK, base?, blocking, scoring },
-//     subjects: { title, uri?, files: [{ name, size, sha256 }] }, others: { title, uri?, files },
+//     subjects: { title, uri?, titleFrom?, files: [{ name, size, sha256 }] }, others: { title, uri?, titleFrom?, files },
+//     (titleFrom: 'gazetteer', 'given' by the person matching, or 'file-name' when neither gave one)
 //     places: { <subject place IRI>: { label, names, point: [lon, lat] | null, ccodes?, types? } },
 //     candidates: [{ id, candidate_source, candidate_candidate, similarity_score, distance_km: number | null,
 //       candidate_status: 'suggested' | 'confirmed' | 'rejected', generated_at?, algorithm_version?, match_parameters?,
@@ -41,9 +42,29 @@ export function checkReviewer(r, where = 'The reviewer') {
   return r;
 }
 
+/** Matching's options, and their defaults. */
+export const MATCH_DEFAULTS = { threshold: 0.85, maxDistanceKm: 50, topK: 5 };
+/**
+ * Matching's options, as numbers, with the defaults for those not given; a DataError saying which is
+ * wrong otherwise. Here, not in match.js, so that the page checks them by the same rule before it
+ * asks for the other dataset.
+ */
+export function checkMatchOptions(o = {}) {
+  const t = { ...MATCH_DEFAULTS };
+  for (const k of Object.keys(MATCH_DEFAULTS)) if (o[k] !== undefined && o[k] !== null && o[k] !== '') t[k] = Number(o[k]);
+  if (!(t.threshold > 0 && t.threshold <= 1)) throw new DataError(`The threshold must be above 0 and at most 1, not ${o.threshold}.`);
+  if (!(t.maxDistanceKm >= 0)) throw new DataError(`The greatest distance must be a number of kilometres, not ${o.maxDistanceKm}.`);
+  if (!(Number.isInteger(t.topK) && t.topK >= 1)) throw new DataError(`The number of suggestions per place must be a whole number from 1, not ${o.topK}.`);
+  return t;
+}
+
+/** Where a dataset's title in a work file came from: its gazetteer, the person matching, or (neither given) its file's name. */
+export const TITLE_FROM = ['gazetteer', 'given', 'file-name'];
+
 function checkSide(side, word) {
   if (!isObject(side) || typeof side.title !== 'string') throw new DataError(`It does not say which dataset held the ${word} (${word}.title).`);
   if (side.uri !== undefined && typeof side.uri !== 'string') throw new DataError(`The ${word} dataset's address (${word}.uri) must be a web address.`);
+  if (side.titleFrom !== undefined && !TITLE_FROM.includes(side.titleFrom)) throw new DataError(`It does not say where the ${word} dataset's title came from as these tools write it (${word}.titleFrom: ${TITLE_FROM.join(', ')}).`);
   if (!Array.isArray(side.files) || !side.files.every((f) => isObject(f) && typeof f.name === 'string' && Number.isInteger(f.size) && /^[0-9a-f]{64}$/.test(f.sha256)))
     throw new DataError(`The ${word} files are not listed as a name, a size and a SHA-256 digest each (${word}.files).`);
 }
@@ -57,7 +78,7 @@ export function readWork(text) {
   let w;
   try { w = typeof text === 'string' ? JSON.parse(text) : text; }
   catch (e) { throw new DataError(`This is not a Krisis work file: it is not JSON (${e.message}).`); }
-  if (!isObject(w) || !('krisis' in w)) throw new DataError('This is not a Krisis work file: it has no "krisis" version.');
+  if (!isObject(w) || !Object.hasOwn(w, 'krisis')) throw new DataError('This is not a Krisis work file: it has no "krisis" version.');
   if (w.krisis !== WORK_VERSION) throw new DataError(`This work file is of version ${JSON.stringify(w.krisis)}, and these tools read version ${WORK_VERSION}${typeof w.krisis === 'number' && w.krisis > WORK_VERSION ? ': it was made by a later version of the tools' : ''}.`);
   const bad = (m) => { throw new DataError(`This work file cannot be used: ${m}`); };
   if (typeof w.generated_at !== 'string' || typeof w.algorithm_version !== 'string') bad('it does not say when and how its suggestions were made (generated_at, algorithm_version).');
@@ -75,7 +96,7 @@ export function readWork(text) {
     if (!isObject(c) || typeof c.id !== 'string' || !c.id) bad('a candidate has no id.');
     if (ids.has(c.id)) bad(`two candidates have the id ${c.id}.`);
     ids.add(c.id);
-    if (typeof c.candidate_source !== 'string' || !(c.candidate_source in w.places)) bad(`${where} is for a place the file does not list (${c.candidate_source}).`);
+    if (typeof c.candidate_source !== 'string' || !Object.hasOwn(w.places, c.candidate_source)) bad(`${where} is for a place the file does not list (${c.candidate_source}).`);
     if (typeof c.candidate_candidate !== 'string' || !c.candidate_candidate) bad(`${where} does not say which place it suggests (candidate_candidate).`);
     if (!isIri(c.candidate_candidate)) bad(`${where} suggests "${c.candidate_candidate}", which is not a web address (an IRI).`);
     if (c.candidate_candidate === c.candidate_source) bad(`${where} suggests that a place is the same as itself.`);

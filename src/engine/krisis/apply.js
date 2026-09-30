@@ -17,7 +17,7 @@ import { run } from '../pipeline.js';
 import { compare } from '../compare.js';
 import { KRISIS_TEXT } from '../words.js';
 import { readWork, filesDiffer, checkReviewer } from './work.js';
-import { attestationsFrom } from './identity.js';
+import { attestationsFrom, datasetSource } from './identity.js';
 
 export const OUTPUTS = ['attestations', 'dataset'];
 const AC = 'https://w3id.org/plato/schemas/attestation-centric.schema.json';
@@ -39,7 +39,8 @@ const stemOf = (subjects, work, options) => (options.name || subjects?.files?.[0
  * 'dataset' output), `work` a work file's object or text. options: output ('dataset', the default,
  * or 'attestations'), reviewer ({ name, orcid? }, else the work file's), date (to stamp every
  * attestation with, else each is dated by its decisions), name (the stem of the output's name),
- * base (spreadsheet tables: the base address of their places, as given to match()).
+ * base (spreadsheet tables: the base address of their places, as given to match()), othersTitle
+ * (the other dataset's title, for the source the attestations cite, in place of the work file's).
  * Returns { report, outputs, attestations }, with `incomplete` when nothing could be written.
  */
 export async function apply({ subjects, work, options = {} }, env) {
@@ -63,7 +64,11 @@ export async function apply({ subjects, work, options = {} }, env) {
     if (differ.length) rep.add('warning', 'subjects-differ', TEXT['subjects-differ'], differ.join(', '), differ.length);
   }
   progress({ phase: 'applying', elapsedMs: Date.now() - t0 });
-  const made = attestationsFrom(w, { reviewer, date: options.date });
+  // The source the attestations cite: the other dataset, by the title given now, else the work file's.
+  const given = typeof options.othersTitle === 'string' ? options.othersTitle.trim() : '';
+  const others = given ? { ...w.others, title: given, titleFrom: 'given' } : w.others;
+  if (others.titleFrom === 'file-name') rep.warning('others-title-is-file-name', KRISIS_TEXT.othersTitleIsFileName(others.title));
+  const made = attestationsFrom(w, { reviewer, date: options.date, source: datasetSource(others) });
   rep.counts = {
     attestations: made.length,
     matchAttestations: made.filter((m) => !m.attestation.negated).length,

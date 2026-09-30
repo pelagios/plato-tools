@@ -132,6 +132,10 @@ Options:
   --reviewer NAME   match, apply: who reviews, recorded as each attestation's contributor
                     (apply: default, the name in the work file).
   --orcid URL       match, apply: the reviewer's ORCID, as https://orcid.org/0000-0000-0000-0000.
+  --others-title TEXT
+                    match, apply: the other dataset's title, which each attestation cites as its
+                    source (default: the title the other dataset gives; if it gives none, its
+                    file's name, which is warned of). Given to match, it is kept in the work file.
   --json            print one JSON object per input, one per line, then one for the total.
                     Its "columns", for a table of places, is a list of {column, field, reason}
                     to read; --columns takes the object printed without --json instead.
@@ -162,6 +166,7 @@ async function main(argv) {
         columns: { type: 'string' },
         with: { type: 'string' }, threshold: { type: 'string' }, 'max-distance': { type: 'string' }, top: { type: 'string' },
         review: { type: 'string' }, output: { type: 'string' }, reviewer: { type: 'string' }, orcid: { type: 'string' },
+        'others-title': { type: 'string' },
         'work-dir': { type: 'string' }, json: { type: 'boolean', default: false }, brief: { type: 'boolean', default: false },
         release: { type: 'string' }, previous: { type: 'string' }, 'concept-doi': { type: 'string' }, maintainer: { type: 'string', multiple: true, default: [] },
         repo: { type: 'string' }, 'site-url': { type: 'string' }, turtle: { type: 'boolean', default: false },
@@ -183,7 +188,7 @@ async function main(argv) {
   if (action === 'datacube') return datacube(args, o);
   if (action === 'publish') return publishCommand(args, o, resources);
   if (action === 'match' || action === 'apply') return review(action, args, o, resources);
-  if (o.with || o.threshold || o['max-distance'] || o.top || o.review || o.output || o.reviewer || o.orcid) return usage('--with, --threshold, --max-distance, --top, --review, --output, --reviewer and --orcid are for match and apply.');
+  if (o.with || o.threshold || o['max-distance'] || o.top || o.review || o.output || o.reviewer || o.orcid || o['others-title'] !== undefined) return usage('--with, --threshold, --max-distance, --top, --review, --output, --reviewer, --orcid and --others-title are for match and apply.');
   if (action !== 'check' && action !== 'convert' && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, compare, publish, match, apply and datacube.`);
   if (!args.length) return usage(`name at least one input to ${action}.`);
   if (action === 'convert' && !o.to) return usage(`convert needs --to, one of: ${Object.keys(TARGETS).join(', ')}.`);
@@ -477,6 +482,7 @@ async function review(action, args, o, resources) {
   if (o.orcid && !/^https:\/\/orcid\.org\/\d{4}-\d{4}-\d{4}-\d{3}[0-9X]$/.test(o.orcid)) return usage('give the ORCID in full, as https://orcid.org/0000-0000-0000-0000.');
   // The reviewer is checked by the engine's own rule, so that what it would refuse is a mistake in the command, not a fault in the tools.
   if (reviewer) { try { checkReviewer(reviewer, '--reviewer'); } catch (e) { return usage(e.message.replace(/^--reviewer must have a name\.$/, '--reviewer must give a name.')); } }
+  if (o['others-title'] !== undefined && !o['others-title'].trim()) return usage('--others-title must give a title.');
   const items = await gatherInputs(args);
   if (items.length !== 1) return usage(`${action} takes one dataset of places to match; ${items.length} ${items.length === 1 ? 'was' : 'were'} given.`);
   let others = null, work = null, options;
@@ -485,7 +491,7 @@ async function review(action, args, o, resources) {
     if (!o.with) return usage('match needs --with, the other dataset.');
     others = await gatherInputs([o.with]);
     if (others.length !== 1) return usage('--with takes one dataset.');
-    options = { threshold: o.threshold, maxDistanceKm: o['max-distance'], topK: o.top, base: o.base, name: items[0].name, reviewer };
+    options = { threshold: o.threshold, maxDistanceKm: o['max-distance'], topK: o.top, base: o.base, name: items[0].name, reviewer, othersTitle: o['others-title'] };
     for (const [flag, v, ok] of [['--threshold', o.threshold, (x) => x > 0 && x <= 1], ['--max-distance', o['max-distance'], (x) => x >= 0], ['--top', o.top, (x) => Number.isInteger(x) && x >= 1]])
       if (v !== undefined && !(/^\s*[\d.]+\s*$/.test(v) && ok(Number(v)))) return usage(`${flag} ${v} is not allowed; see --help.`);
   } else {
@@ -494,7 +500,7 @@ async function review(action, args, o, resources) {
     if (o.output && !REVIEW_OUTPUTS.includes(o.output)) return usage(`"${o.output}" is not an output; the outputs are ${REVIEW_OUTPUTS.join(' and ')}.`);
     try { work = readFileSync(o.review, 'utf8'); }
     catch (e) { return usage(`the work file ${o.review} cannot be read: ${e.code === 'ENOENT' ? 'there is no such file.' : e.message}`); }
-    options = { output: o.output || 'dataset', reviewer: reviewer || undefined, name: items[0].name, base: o.base };
+    options = { output: o.output || 'dataset', reviewer: reviewer || undefined, name: items[0].name, base: o.base, othersTitle: o['others-title'] };
   }
   const host = new NodeHost({ workDir: o['work-dir'], outDir: o.out, overwrite: o.overwrite });
   process.once('SIGINT', () => { host.abandon(); process.exit(130); });

@@ -159,6 +159,9 @@
         <label for="max-distance">Matching: furthest apart two places may be, in kilometres</label>
         <input id="max-distance" type="number" min="0" step="1" value="50">
         <small>Only where both have coordinates; a place without them is matched by name alone.</small>
+        <label for="others-title">Matching: the other dataset's title</label>
+        <input id="others-title" type="text" size="40">
+        <small>Each attestation you make cites the other dataset as its source, by its title. Leave it empty to use the title the other dataset gives; if it gives none, its file's name would be cited, so give one here.</small>
         <label for="reviewer">Your name, as the reviewer of the matches</label>
         <input id="reviewer" type="text" autocomplete="name" size="30">
         <label for="orcid">Your ORCID (optional)</label>

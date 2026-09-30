@@ -18,11 +18,11 @@ import { Report } from '../report.js';
 import { collectWithdrawn, resolveWithdrawn } from '../../formats/shared.js';
 import { DISTINCT_GATE } from './names.js';
 import { NameIndex, BLOCKING, BLOCKING_RULE } from './blocking.js';
-import { DataError } from '../input.js';
-import { WORK_VERSION, fileRecords, serialiseWork, checkReviewer } from './work.js';
+import { WORK_VERSION, MATCH_DEFAULTS, fileRecords, serialiseWork, checkReviewer, checkMatchOptions } from './work.js';
+import { KRISIS_TEXT } from '../words.js';
 
-export const ALGORITHM = 'krisis-names 2';
-export const DEFAULTS = { threshold: 0.85, maxDistanceKm: 50, topK: 5 };
+export const ALGORITHM = 'krisis-names 3';
+export const DEFAULTS = MATCH_DEFAULTS;
 export { BLOCKING };
 export const SCORING = 'Each name of a place (its label and every toponym and romanised form) is normalised: '
   + 'decomposed (NFKD), combining marks removed, ß æ œ ø ł đ ð þ ı spelt out, lower-cased, and everything but letters and digits made a space. '
@@ -31,6 +31,10 @@ export const SCORING = 'Each name of a place (its label and every toponym and ro
   + 'Each word weighs its inverse document frequency in the names of both datasets, ln(1 + N / df). If the words left of each name score at least '
   + `${DISTINCT_GATE} (as above), or are one letter added, dropped, changed or two swapped apart, the pair scores the shared words' share of the weight of all the words of the two (a shared word counted once), plus the rest's score times the remaining share; `
   + "otherwise the shared words' share alone. The lower of this and the name score is the score. "
+  + 'A distinctive word of three letters with one letter changed scores 0.78 to 0.82 on its letters, so such a pair reaches 0.85 only when the words it shares weigh from a sixth to a third of all its words: '
+  + 'for words of three letters one letter is already the limit, and a common shared word takes the pair under it (Kafr Cal and Kafr Cel score 0.87 with every word weighed alike, and under 0.85 where Kafr is common). '
+  + 'The one exception that raises a score: two names whose words are all shared, some only as an abbreviation (a contraction of at most three letters, two fewer than its word: St and Saint, Mt and Mount), '
+  + 'are scored again with each abbreviation written out in full, and the higher score is kept. '
   + 'Two places score the best of any pair of their names, over the pairs blocking allows (see blocking). '
   + "A place's point is its first Point geometry, else the centre of its first bounding box, else none; "
   + 'a pair whose points are further apart than maxDistanceKm (great-circle distance) is dropped, and a pair without two points is kept, with no distance. '
@@ -108,7 +112,7 @@ function reader(side, rep, word) {
   return {
     header(head) {
       const g = (head && typeof head.gazetteer === 'object' && head.gazetteer) || {};
-      if (typeof g.title === 'string' && g.title) side.title = g.title;
+      if (typeof g.title === 'string' && g.title) { side.title = g.title; side.titleFrom = 'gazetteer'; }
       if (typeof g['@id'] === 'string') side.uri = g['@id'];
     },
     event(ev) {
@@ -120,7 +124,7 @@ function reader(side, rep, word) {
 }
 
 async function readSide(input, word, options, env, rep, progress) {
-  const side = { title: input.files[0]?.name || 'Untitled dataset', uri: undefined, places: new Map(), links: [], withdrawals: new Map(), unaddressed: 0 };
+  const side = { title: input.files[0]?.name || 'Untitled dataset', titleFrom: 'file-name', uri: undefined, places: new Map(), links: [], withdrawals: new Map(), unaddressed: 0 };
   const r = await run({ input, action: 'check', options: { base: options.base, sink: reader(side, rep, word) } },
     { ...env, progress: (p) => progress({ ...p, dataset: word, phase: p.phase === 'done' ? 'read' : p.phase }) });
   if (r.incomplete) return { side, failed: r.report.items.find((i) => i.kind === 'unreadable')?.examples[0] };
@@ -138,29 +142,21 @@ async function readSide(input, word, options, env, rep, progress) {
   return { side };
 }
 
-function checkOptions(o) {
-  const t = { ...DEFAULTS };
-  for (const k of Object.keys(DEFAULTS)) if (o[k] !== undefined && o[k] !== null && o[k] !== '') t[k] = Number(o[k]);
-  if (!(t.threshold > 0 && t.threshold <= 1)) throw new DataError(`The threshold must be above 0 and at most 1, not ${o.threshold}.`);
-  if (!(t.maxDistanceKm >= 0)) throw new DataError(`The greatest distance must be a number of kilometres, not ${o.maxDistanceKm}.`);
-  if (!(Number.isInteger(t.topK) && t.topK >= 1)) throw new DataError(`The number of suggestions per place must be a whole number from 1, not ${o.topK}.`);
-  return t;
-}
-
 const pairKey = (a, b) => (a < b ? a + '\n' + b : b + '\n' + a);
-const sideRecord = (s) => ({ title: s.title, ...(s.uri ? { uri: s.uri } : {}), files: s.files });
+const sideRecord = (s) => ({ title: s.title, titleFrom: s.titleFrom, ...(s.uri ? { uri: s.uri } : {}), files: s.files });
 
 /**
  * Match two datasets. `subjects` and `others` are inputs as detect() describes them; options:
  * threshold (0.85), maxDistanceKm (50), topK (5), base (for spreadsheet tables), name (the stem of
- * the work file's name), now (the time to stamp, for tests). Returns { report, outputs, work }, the
+ * the work file's name), othersTitle (the other dataset's title, which the attestations cite, when
+ * its file gives none or another is wanted), now (the time to stamp, for tests). Returns { report, outputs, work }, the
  * report in the shape run() gives, with `incomplete` set when a dataset could not be read to the end.
  */
 export async function match({ subjects, others, options = {} }, env) {
   const rep = new Report();
   const t0 = Date.now();
   const progress = env.progress || (() => {});
-  const params = checkOptions(options);
+  const params = checkMatchOptions(options);
   if (options.reviewer) checkReviewer(options.reviewer);
   const sides = {};
   for (const [word, input] of [['subjects', subjects], ['others', others]]) {
@@ -172,6 +168,11 @@ export async function match({ subjects, others, options = {} }, env) {
     sides[word] = side;
   }
   const S = sides.subjects, O = sides.others;
+  // The other dataset is the source each attestation of the review cites, by its title: one given
+  // is used; a file's name, when the dataset gives no title, is only a stand-in, and is warned of.
+  const given = typeof options.othersTitle === 'string' ? options.othersTitle.trim() : '';
+  if (given) { O.title = given; O.titleFrom = 'given'; }
+  else if (O.titleFrom === 'file-name') rep.warning('others-title-is-file-name', KRISIS_TEXT.othersTitleIsFileName(O.title));
   for (const [word, side] of [['subjects', S], ['others', O]]) if (!side.places.size) rep.error('no-places', TEXT['no-places'](words(word)));
 
   // What the datasets already say: pairs linked by an identity relation, and pairs said to differ.

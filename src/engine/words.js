@@ -196,6 +196,8 @@ export const review = {
   /** When a resumed review was made from other files than those chosen now. */
   differs: (names) => `This review was made from other files than the ones chosen: ${names.join(', ')}. Its places may no longer match the data.`,
   noDataset: 'Choose the dataset this review was made from first; it is needed to finish.',
+  /** A review resumed before any dataset is chosen. */
+  noDatasetYet: 'No dataset is chosen yet. You can look through the review, but to finish it, choose the dataset it was made from, then resume the review again.',
   /** A dataset given to matching that is not data these tools read ('subjects' or 'others'). */
   notRecognised: (which) => `${which === 'subjects' ? 'Your dataset' : 'The other dataset'} was not recognised as data these tools read, so nothing was matched`,
 };
@@ -246,8 +248,10 @@ export function krisisNote(kind, algorithm) {
     ? `Accepted by the reviewer in a match review (PLATO tools, Krisis), from suggestions made by comparing names (${algorithm}).`
     : `The reviewer judged these to be different places in a match review (PLATO tools, Krisis), rejecting a suggestion made by comparing names (${algorithm}).`;
 }
-/** What finishing a review with the dataset output says (src/engine/krisis/apply.js). */
+/** What finishing a review with the dataset output says (src/engine/krisis/apply.js), and matching's own warnings. */
 export const KRISIS_TEXT = {
+  /** The other dataset gives no title, so the attestations would cite it by its file's name. */
+  othersTitleIsFileName: (name) => `The other dataset does not give its title, so each attestation of this review would cite it as its source by its file's name, ${name}, and a published attestation is never changed. Give the other dataset's title (in the options on the page, or --others-title on the command line) before you finish.`,
   noDataset: 'Choose the dataset this review was made from: the new attestations are added to it. Nothing was written.',
   datasetNotRead: 'The dataset could not be read to the end, so it was not written with the new attestations',
   datasetHasProblems: 'The dataset has problems of its own, which finishing a review does not list or change. The new attestations were still added; check the dataset by itself to see them.',

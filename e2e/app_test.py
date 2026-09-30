@@ -143,6 +143,8 @@ def krisis_case(page, tmp):
         krisis_place(b + 'bath-maine', 'Bath', -69.8203, 43.9109), krisis_place(b + 'welles', 'Welles', -2.6500, 51.2100)]}))
     # The base address in the options (for spreadsheet tables) goes to matching, and is kept in the work file.
     page.evaluate("() => { const b = document.getElementById('base'); if (b) b.value = 'https://example.org/a/'; }")
+    # And the other dataset's title, which each attestation cites, given in the options.
+    page.evaluate("() => { const t = document.getElementById('others-title'); if (t) t.value = 'Their places, as given'; }")
     s = match_case(page, subjects, others)
     page.evaluate("() => { const b = document.getElementById('base'); if (b) b.value = ''; }")
     work = s.get('work') or {}
@@ -155,6 +157,9 @@ def krisis_case(page, tmp):
           s.get('phase') == 'reviewing' and ('bath', 'bathe') in cands and ('bath', 'bath-maine') not in cands, sorted(cands))
     check('match review: the base address in the options is passed to matching and kept in the work file',
           (work.get('match_parameters') or {}).get('base') == 'https://example.org/a/', work.get('match_parameters') or s)
+    check('match review: the other dataset\'s title in the options replaces the one it gives, is kept in the work file, and is what the suggestions cite',
+          (work.get('others') or {}).get('title') == 'Their places, as given' and (work.get('others') or {}).get('titleFrom') == 'given'
+          and bool(work.get('candidates')) and all(c['other']['source']['title'] == 'Their places, as given' for c in work['candidates']), work.get('others') or s)
     ok = s.get('phase') == 'reviewing'; asked = False; focused = None
     try:
         if ok:
@@ -275,6 +280,29 @@ def krisis_case(page, tmp):
         except Exception as e: put = {'error': str(e).split('\n')[0][:200]}
     check('match review: Check puts the review away, and its keys then decide nothing',
           put.get('shown before') is True and put.get('shown after') is False and put.get('before') == put.get('after') and 'match' in (put.get('before') or ''), put)
+    # A threshold matching would refuse is said plainly, before the other dataset is asked for; the one before was taken (above).
+    bad = {}
+    if put.get('shown after') is False:
+        try:
+            page.evaluate("() => { document.getElementById('threshold').value = '0'; }")   # in the closed Options, as a user would have left it
+            page.click('#match')
+            wait_state(page, lambda s: s.get('phase') == 'error', 10, 'refused')
+            bad = {'summary': page.inner_text('#summary'), 'phase': page.evaluate("() => window.__plato.phase"), 'action': page.evaluate("() => window.__plato.action")}
+            page.evaluate("() => { document.getElementById('threshold').value = '0.85'; }")
+        except Exception as e: bad = {'error': str(e).split('\n')[0][:200]}
+    check('match review: a threshold of 0 is refused in plain words, not as something gone wrong, and nothing is matched',
+          'threshold must be above 0 and at most 1' in bad.get('summary', '') and 'Something went wrong' not in bad.get('summary', '') and bad.get('action') == 'check', bad)
+    # Resuming with no dataset chosen says so, not that every file differs; with one chosen, the files are compared (above).
+    nodata = ''
+    if saved.get('krisis') == 1 and 'other files than the ones chosen' in w:
+        try:
+            page.reload()
+            wait_state(page, lambda s: s.get('phase') == 'ready', 30, 'ready')
+            page.set_input_files('#workfile', [str(tmp / 'saved.krisis.json')])
+            page.wait_for_selector('#review-warning:not([hidden])', timeout=20_000); nodata = page.inner_text('#review-warning')
+        except Exception as e: nodata = 'harness-error: ' + str(e).split('\n')[0][:200]
+    check('match review: a review resumed with no dataset chosen says that none is chosen, not that the files differ',
+          'No dataset is chosen yet' in nodata and 'other files than' not in nodata, nodata)
 
 def download(page, name, dest):
     with page.expect_download(timeout=600_000) as d:
