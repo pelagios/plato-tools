@@ -93,8 +93,13 @@ plato:SpatialEntity
         An entity whose identity is bound up with space, whether its spatial
         extent is attested directly, applies notionally (as with the region to
         which a period applies), or is derived from its constituents (as with a
-        collection). A SpatialEntity need not have any attested geometry: lost,
-        imagined and unlocated entities are admissible.
+        route or a network, whose extent is that of its members). A
+        SpatialEntity need not have any attested geometry: lost, imagined and
+        unlocated entities are admissible.
+
+        A curated selection of other places, such as a thematic collection, is
+        not a SpatialEntity: it is a Gazetteer, whose attestations are about
+        the places it selects.
 
         What kind of entity it is (settlement, route, region, administrative
         unit and so on) is not fixed by the class. It is established by
@@ -211,9 +216,12 @@ plato:Timespan
 # -----------------------------------------------------------------------------
 # Type
 # -----------------------------------------------------------------------------
-# A classification drawn from a controlled vocabulary (typically AAT).
-# Types are reusable: "inhabited place" can be referenced by attestations
-# for many different SpatialEntities.
+# A classification drawn from a controlled vocabulary (typically AAT), as one
+# dataset uses it. A Type node is that usage: it is reusable within its dataset
+# ("inhabited place" referenced by attestations for many SpatialEntities), but
+# it is not the vocabulary's concept. Were it the concept's own IRI, every
+# dataset's label, source wording, qualification and scheme_version would land
+# on one shared node in any combined graph, and could no longer be told apart.
 
 plato:Type
     a owl:Class ;
@@ -223,7 +231,12 @@ plato:Type
     rdfs:comment """
         A classification or category for a SpatialEntity, typically drawn from a
         controlled vocabulary such as the Getty Art & Architecture Thesaurus
-        (AAT). Types are independent, reusable entities.
+        (AAT), as one dataset uses it. A Type node stands for that usage and
+        may be reused within its dataset. Its IRI, if it has one, is the
+        dataset's own, or it is a blank node: never the vocabulary concept's
+        IRI, which goes in plato:type_identifier. Otherwise every dataset's
+        label, source wording and plato:scheme_version would merge onto the
+        concept in any combined graph.
     """@en .
 
 
@@ -442,11 +455,25 @@ plato:Gazetteer
     rdfs:subClassOf dcat:Dataset ;
     rdfs:label "Gazetteer"@en ;
     rdfs:comment """
-        A mutable, versioned workspace of SpatialEntities and their associated
-        Attestations, owned by a contributor or team. Replaces the WHG v3
+        A mutable, versioned workspace of SpatialEntities and Attestations,
+        owned by a contributor or team. Replaces the WHG v3
         concepts of Dataset, Dataset Collection, and Place Collection.
         A Gazetteer can be incrementally edited, enriched, and corrected
         without re-ingestion.
+
+        A Gazetteer's attestations need not be about SpatialEntities it
+        defines. It may attest evidence about SpatialEntities defined in other
+        Gazetteers, identified by their IRIs, without redefining them: a
+        correction to another project's place, a link from a record to an
+        existing place, a curator's selection of places for a collection.
+        Such an attestation adds evidence. It does not change the entity's
+        identity or make this Gazetteer its owner, and its source, contributor
+        and status are this Gazetteer's. The append-only rule of a published
+        Gazetteer applies to the attestations it contains, not to everything
+        said elsewhere about its entities. In PLATO JSON such attestations go
+        in an attestation-centric document, whose 'about' gives the entity's
+        IRI; a place-centric document declares every SpatialEntity it lists
+        (plato:contains_entity), so it lists only its own.
 
         As a dcat:Dataset, a Gazetteer is titled with dcterms:title and
         licensed with dcterms:license. Not with plato:authority_title or
@@ -1518,6 +1545,24 @@ plato:IdentityRelation
         between different entities. They are also distinct from Candidates,
         which are algorithm-generated candidates not yet confirmed by
         human review.
+
+        An IdentityRelation is one attributed claim among many, never a
+        canonical statement of fact. A platform must not materialise identity
+        relations into merged records or minted identifiers, nor let one
+        outweigh contrary evidence by fiat: it is weighed like any other
+        evidence, and someone else may say the opposite (an attestation with
+        plato:negated bundling an exactMatch says two entities are not the
+        same).
+
+        Identity relations asserted together, as when a person accepts a
+        cluster of matches, are bundled by one Attestation
+        (plato:attests_identity), which carries their shared provenance and
+        is withdrawn or amended as a unit. A consumer may take the transitive
+        closure of exactMatch relations within one such attestation, and must
+        not chain identity relations across different attestations, nor
+        chain closeMatch, related or unspecified ones at all: A the same as B
+        and B the same as C, asserted by different people, is not anyone's
+        assertion that A is C.
     """@en .
 
 plato:identity_subject
@@ -1628,6 +1673,32 @@ plato:promoted_from
     """@en ;
     rdfs:domain plato:IdentityRelation ;
     rdfs:range plato:Candidate .
+
+# A person who accepts a cluster of matches asserts several identities in one
+# act. Bundling them in one Attestation gives them one provenance (who, when,
+# on what evidence, such as the locus that defined the cluster) and one way to
+# be withdrawn or corrected, by the meta-attestations that already withdraw
+# any attestation. It also lets a denial be stated with plato:negated, so that
+# disagreement accumulates as well as agreement.
+
+plato:attests_identity
+    a owl:ObjectProperty ;
+    rdfs:isDefinedBy <https://w3id.org/plato> ;
+    rdfs:label "attests identity"@en ;
+    rdfs:comment """
+        Links an Attestation to an IdentityRelation it asserts, so that
+        identity relations asserted in one act share its provenance: accepting
+        a cluster of n records is one attestation bundling the n-1 exactMatch
+        relations of the matches actually made, with the person, the time and
+        the cluster's definition as its source. Retracting or superseding the
+        attestation withdraws or amends them together. With plato:negated,
+        bundling one exactMatch relation, it says the two entities are not the
+        same. Closure may be taken within one such attestation only (see
+        plato:IdentityRelation). An IdentityRelation's own identity_asserted_by
+        and identity_sourced_by remain for one asserted on its own.
+    """@en ;
+    rdfs:domain plato:Attestation ;
+    rdfs:range plato:IdentityRelation .
 
 
 # =============================================================================
@@ -2078,7 +2149,17 @@ plato:type_identifier
     a owl:DatatypeProperty ;
     rdfs:isDefinedBy <https://w3id.org/plato> ;
     rdfs:label "type identifier"@en ;
-    rdfs:comment "URI or identifier in a controlled vocabulary (e.g. AAT)."@en ;
+    rdfs:comment """
+        The concept's IRI in a controlled vocabulary: an AAT, Wikidata or
+        GeoNames concept, an OpenStreetMap tag. It should be a full IRI, not a
+        bare code ('PPL', 'Q687188', 'stream') whose vocabulary is known only
+        from somewhere else: that is what lets types from different sources be
+        compared. An OpenStreetMap tag's IRI carries its key
+        (https://wiki.openstreetmap.org/wiki/Tag:waterway=stream), since the
+        value alone is ambiguous. A source's own category that no vocabulary
+        holds is recorded as the Type's label and plato:source_label, with no
+        identifier, rather than as a code made up for it.
+    """@en ;
     rdfs:domain plato:Type ;
     rdfs:range xsd:anyURI .
 
@@ -2087,6 +2168,31 @@ plato:type_label
     rdfs:isDefinedBy <https://w3id.org/plato> ;
     rdfs:label "type label"@en ;
     rdfs:comment "Human-readable label for this type."@en ;
+    rdfs:domain plato:Type ;
+    rdfs:range xsd:string .
+
+# A type identifier usually names its scheme: an AAT IRI is plainly an AAT
+# concept. Some vocabularies have no such IRIs (Koppen climate codes, WWF
+# ecoregion codes, a project's own list), and some change what their terms mean
+# from one version to the next (ecoregions of 2001 and of 2017 share names, not
+# extents). So a Type can say its scheme, with skos:inScheme (a Type is a
+# skos:Concept), and which version of it was used. The version is recorded on
+# the Type, not on the scheme: the scheme's IRI is shared by every dataset that
+# uses it, and versions recorded there by different datasets could no longer be
+# told apart.
+
+plato:scheme_version
+    a owl:DatatypeProperty ;
+    rdfs:isDefinedBy <https://w3id.org/plato> ;
+    rdfs:label "scheme version"@en ;
+    rdfs:comment """
+        The version of the vocabulary (the skos:inScheme of this Type) that the
+        type was taken from: '2017' for the RESOLVE ecoregions, a release date
+        for OpenStreetMap's tag definitions. Needed where a scheme's terms
+        change meaning between versions; otherwise optional. JSON
+        schemeVersion, tables type_scheme_version, beside the scheme (JSON
+        scheme, tables type_scheme).
+    """@en ;
     rdfs:domain plato:Type ;
     rdfs:range xsd:string .
 
@@ -2626,7 +2732,7 @@ plato:contains_entity
     a owl:ObjectProperty ;
     rdfs:isDefinedBy <https://w3id.org/plato> ;
     rdfs:label "contains entity"@en ;
-    rdfs:comment "Links a Gazetteer to a SpatialEntity it contains."@en ;
+    rdfs:comment "Links a Gazetteer to a SpatialEntity it defines. A SpatialEntity defined elsewhere that this Gazetteer only attests evidence about is not contained in it."@en ;
     rdfs:domain plato:Gazetteer ;
     rdfs:range plato:SpatialEntity .
 
@@ -3343,44 +3449,55 @@ plato:SubjectOf
     rdfs:comment "The target is about the subject: an archival file, a site record, a report or a publication, identified by its address. Not a citation of the target as evidence for another statement, which is plato:has_citation."@en .
 
 # -----------------------------------------------------------------------------
-# Types: routes, itineraries, networks and segments
+# Kinds of SpatialEntity: routes, itineraries, networks and segments
 # -----------------------------------------------------------------------------
 # What kind of entity a SpatialEntity is, is a Type attestation, and usually a
 # term from a vocabulary such as the AAT. These four are declared because a
 # platform's behaviour depends on them: it draws a route from its ordered
 # members, computes an itinerary's span, and may leave segments out of lists
-# of places, where "Londinium to Caesaromagus" would be a pseudo-place. A Type
-# attestation points at one with its IRI as the type identifier. The
+# of places, where "Londinium to Caesaromagus" would be a pseudo-place. They are
+# concepts in a scheme, like PLATO's other starter vocabularies, not Type nodes:
+# a Type attestation points at one with its IRI as the type identifier. The
 # distinction between a route and an itinerary is WHG's: a route is a way, and
 # an itinerary is a journey made along one, dated stop by stop.
 
-plato:TypeRoute
-    a plato:Type ;
+plato:EntityKindScheme
+    a skos:ConceptScheme ;
     rdfs:isDefinedBy <https://w3id.org/plato> ;
-    plato:type_label "route"@en ;
-    rdfs:comment "An ordered set of places making a way: a road, a sea lane, a pilgrimage route. Its timespan, if any, is when it was in use, not when anyone travelled it."@en .
+    rdfs:label "kind of spatial entity"@en ;
+    rdfs:comment "Starter concepts for the kinds of SpatialEntity a platform treats specially: routes, itineraries, networks and segments. A Type attestation names one in its type identifier."@en .
+
+plato:TypeRoute
+    a skos:Concept ;
+    rdfs:isDefinedBy <https://w3id.org/plato> ;
+    skos:inScheme plato:EntityKindScheme ;
+    skos:prefLabel "route"@en ;
+    skos:definition "An ordered set of places making a way: a road, a sea lane, a pilgrimage route. Its timespan, if any, is when it was in use, not when anyone travelled it."@en .
 
 plato:TypeItinerary
-    a plato:Type ;
+    a skos:Concept ;
     rdfs:isDefinedBy <https://w3id.org/plato> ;
-    plato:type_label "itinerary"@en ;
-    rdfs:comment "A journey made through places in order, each stop with its own timespan: a traveller's tour, a royal progress, a ship's voyage. Not plato:Itinerary, which is a geometry role (a line tracing a route or journey)."@en .
+    skos:inScheme plato:EntityKindScheme ;
+    skos:prefLabel "itinerary"@en ;
+    skos:definition "A journey made through places in order, each stop with its own timespan: a traveller's tour, a royal progress, a ship's voyage. Not plato:Itinerary, which is a geometry role (a line tracing a route or journey)."@en .
 
 plato:TypeNetwork
-    a plato:Type ;
+    a skos:Concept ;
     rdfs:isDefinedBy <https://w3id.org/plato> ;
-    plato:type_label "network"@en ;
-    rdfs:comment "A set of places and the connections between them, in no single order: a river system, a canal network, a correspondence network."@en .
+    skos:inScheme plato:EntityKindScheme ;
+    skos:prefLabel "network"@en ;
+    skos:definition "A set of places and the connections between them, in no single order: a river system, a canal network, a correspondence network."@en .
 
 plato:TypeSegment
-    a plato:Type ;
+    a skos:Concept ;
     rdfs:isDefinedBy <https://w3id.org/plato> ;
-    plato:type_label "segment"@en ;
-    rdfs:comment "A physical link with an existence of its own: a leg of a route between two stations, a reach of a river between confluences. Platforms may leave segments out of lists and searches of places."@en .
+    skos:inScheme plato:EntityKindScheme ;
+    skos:prefLabel "segment"@en ;
+    skos:definition "A physical link with an existence of its own: a leg of a route between two stations, a reach of a river between confluences. Platforms may leave segments out of lists and searches of places."@en .
 
 
 # =============================================================================
-# Candidates (PLACE clustering candidates)
+# Candidates: suggested matches awaiting review
 # =============================================================================
 # Candidates are algorithm-generated match suggestions, kept strictly separate
 # from confirmed identity assertions. They are not Attestations and they are
@@ -3393,9 +3510,12 @@ plato:Candidate
     rdfs:isDefinedBy <https://w3id.org/plato> ;
     rdfs:label "Candidate"@en ;
     rdfs:comment """
-        An algorithm-generated match candidate between two SpatialEntities, produced
-        by the PLACE clustering engine. Candidates carry a similarity score,
-        algorithm version, and review status. They are explicitly not
+        A match between two SpatialEntities suggested by software, for a
+        person to review: reconciliation against reference gazetteers (as in
+        WHG's Map your Data), record linkage, clustering. Candidates carry a
+        similarity score, the algorithm's version and, optionally, the
+        settings that produced the score (plato:match_parameters), and a
+        review status. They are explicitly not
         IdentityRelations — they become IdentityRelations only when confirmed
         by a human reviewer (linked back via plato:promoted_from).
     """@en .
@@ -3442,3 +3562,18 @@ plato:generated_at
     rdfs:label "generated at"@en ;
     rdfs:domain plato:Candidate ;
     rdfs:range xsd:dateTime .
+
+plato:match_parameters
+    a owl:DatatypeProperty ;
+    rdfs:isDefinedBy <https://w3id.org/plato> ;
+    rdfs:label "match parameters"@en ;
+    rdfs:comment """
+        The settings that produced the Candidate's score, as text (JSON
+        suggested): a threshold, the weights given to name, place and type,
+        the reference sources searched. With plato:algorithm_version it lets
+        a score be reproduced or explained. Optional; its form is the
+        software's own, since it describes a run of that software rather
+        than making a claim about places.
+    """@en ;
+    rdfs:domain plato:Candidate ;
+    rdfs:range xsd:string .

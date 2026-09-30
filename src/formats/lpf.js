@@ -6,7 +6,7 @@
 // Writing LPF from PLATO is lossy by design (bundling, locators, form status, numeric certainty
 // and more have no LPF slot); every loss is reported, with counts.
 import { PLATO, isAbsoluteIri } from '../lib/context.js';
-import { isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey, isComputed, isComputedFacet } from './shared.js';
+import { isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey, isComputed, isComputedFacet, identityBundleLosses } from './shared.js';
 
 // The README's alias table, plus the vocabulary prefixes its own examples use.
 export const LPF_PREFIXES = {
@@ -131,7 +131,7 @@ const KEEPS = {
   gazetteer: new Set(['@id', 'title', 'licence', 'description', 'version', 'status', 'isVersionOf', 'previousVersion']),   // versions: versionLosses
   spatialEntity: new Set(['@id', 'label', 'ccodes', 'attestations', 'identityRelations']),
   // certaintyNote: kept only as LPF's own certainty word, written by the LPF reader
-  attestation: new Set(['about', 'names', 'geometries', 'timespans', 'types', 'properties', 'relations', 'sources', 'citations', 'meta', 'certainty', 'certaintyLevel', 'certaintyNote', 'negated', 'occurrenceCount', 'occurrenceContext', 'formStatus', 'computed']),
+  attestation: new Set(['about', 'names', 'geometries', 'timespans', 'types', 'properties', 'relations', 'sources', 'citations', 'meta', 'certainty', 'certaintyLevel', 'certaintyNote', 'negated', 'occurrenceCount', 'occurrenceContext', 'formStatus', 'computed', 'identities']),
   name: new Set(['toponym', 'language', 'sourceLabel', 'qualification']),
   geometry: new Set(['wkt', 'geojson', 'reprPoint', 'bbox', 'role', 'sourceLabel', 'qualification']),   // reprPoint: only without a shape
   timespan: new Set(['startEarliest', 'startLatest', 'endEarliest', 'endLatest', 'label', 'sourceLabel', 'periodoUri', 'qualification']),
@@ -257,9 +257,12 @@ export function recordToFeature(rec, idrs = [], loss = () => {}, withdrawn = nul
       a[k] = a[k].filter((f) => !isComputedFacet(f));
     }
     dropKeys(a, 'attestation', KEEPS.attestation, loss);
+    // Identities the attestation bundles are never made links: a link states a match on its own, and
+    // in a denial they say that two places are not the same (identityBundleLosses).
+    const bundled = identityBundleLosses(a, rec['@id'], loss);
     // LPF cannot say that a source denies something: a denial written as LPF would assert what its
     // source says is not so. It is left out, and reported (PLATO cf87b78).
-    if (isDenial(a)) { loss({ kind: 'denial', value: rec['@id'] }); continue; }
+    if (isDenial(a)) { if (!bundled) loss({ kind: 'denial', value: rec['@id'] }); continue; }
     const when = platoToWhen(a.timespans, a.certaintyNote, loss);
     // A note on certainty is kept only as LPF's own certainty word, which the LPF reader writes.
     if (a.certaintyNote && !/^LPF certainty: (certain|less-certain|uncertain)$/.test(a.certaintyNote)) dropKey('attestation', 'certaintyNote', loss);

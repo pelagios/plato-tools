@@ -169,6 +169,9 @@ export const WHOLE_LOSS = {
 };
 for (const w of ['lpf', 'lpf-seq', 'tables']) Object.assign(WHOLE_LOSS[w], { dataSets: 'statistical-tables', relationTypes: 'relation-types', 'spatialEntities.attestations.meta': 'meta-attestation' });
 WHOLE_LOSS.tables['spatialEntities.attestations.contributor'] = 'dropped:attestation.contributor';
+// Identities an attestation bundles (PLATO 238d15f) are left out whole by LPF and the tables, and
+// reported: written as standalone matches they would lose the provenance they share.
+for (const w of ['lpf', 'lpf-seq', 'tables']) WHOLE_LOSS[w]['spatialEntities.attestations.identities'] = 'identity-bundle';
 for (const w of ['lpf', 'lpf-seq']) {
   Object.assign(WHOLE_LOSS[w], {
     'spatialEntities.attestations.contributor': 'dropped:attestation.contributor',

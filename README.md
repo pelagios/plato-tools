@@ -64,6 +64,22 @@ A **denial**, where a source states that something is not so (PLATO's `negated`,
 tables carry it. Linked Places Format cannot, so a denied attestation is left out of LPF and
 reported; so is a denial of several things at once in the tables, whose rows deny one thing each.
 
+**Identities an attestation bundles** (PLATO's `identities`, `plato:attests_identity`: the
+matches made in accepting a cluster, say) share that attestation's source, date and certainty, and
+are withdrawn with it. PLATO JSON and RDF carry them, under their attestation and nowhere else.
+Linked Places Format and the spreadsheet tables have no place for a bundle, so they leave it out and
+report it; they never turn it into standalone links or `identities` rows, which would lose what the
+matches share. A denied bundle says that two places are not the same: it is left out of both, whole,
+and reported in words that say so, never written as a match.
+
+**Meta-attestations** need not say what they are about (`plato:attests_about`): the attestation
+they comment on does. From RDF, PLATO JSON nests such a comment beside its target, under the place
+the target is about.
+
+**A type's vocabulary and version** (`scheme`, `schemeVersion`; the tables' `type_scheme` and
+`type_scheme_version`) go to RDF and the tables and back. Linked Places Format has no place for
+them, so they are reported as lost.
+
 **The current state.** A published gazetteer never deletes a claim: a later attestation withdraws
 it (`plato:Retracts`) or replaces it (`plato:Supersedes`). PLATO JSON and RDF keep both, so that an
 earlier state can be recomputed. Linked Places Format and the spreadsheet tables cannot express

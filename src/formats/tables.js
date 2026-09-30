@@ -5,7 +5,7 @@
 // Validation follows the CSVW rules the metadata uses, and is tested against the reference
 // implementation (rdf-tabular, strict mode) on the same good and broken tables.
 import { PLATO } from '../lib/context.js';
-import { isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey, isComputed, isComputedFacet } from './shared.js';
+import { isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey, isComputed, isComputedFacet, identityBundleLosses } from './shared.js';
 
 export const CITO = 'http://purl.org/spar/cito/';
 
@@ -141,7 +141,8 @@ export function rowToAttestation(sheet, row, ids) {
       precisionKm: row.precision_km ? [num(row.precision_km)] : undefined,
     })];
   } else if (sheet === 'types') {
-    a.types = [clean({ identifier: row.type_uri, label: row.type_label })];
+    // The vocabulary the type comes from, and the version used (PLATO 45e4eed).
+    a.types = [clean({ identifier: row.type_uri, scheme: row.type_scheme, schemeVersion: row.type_scheme_version, label: row.type_label })];
   } else if (sheet === 'relations') {
     // The target is a place in the places sheet, or something described elsewhere, by its address
     // (PLATO 0.6.0): a person, an object or an event, named by related_label.
@@ -299,11 +300,11 @@ export const TABLE_KEEPS = {
   // The about sheet (gazetteerToAbout); isVersionOf and previousVersion have no column, so are reported.
   gazetteer: new Set(['@id', 'title', 'description', 'contributor', 'creator', 'licence', 'version', 'status', 'keywords', 'spatial', 'temporal', 'landingPage', 'uriSpace']),
   spatialEntity: new Set(['@id', 'label', 'ccodes', 'entityIdentifier', 'attestations', 'identityRelations']),
-  attestation: new Set(['about', 'names', 'geometries', 'timespans', 'types', 'properties', 'relations', 'sources', 'citations', 'meta', 'certainty', 'certaintyLevel', 'certaintyNote', 'negated', 'sourceStance', 'notes', 'occurrenceCount', 'occurrenceContext', 'formStatus', 'sequence', 'computed']),
+  attestation: new Set(['about', 'names', 'geometries', 'timespans', 'types', 'properties', 'relations', 'sources', 'citations', 'meta', 'certainty', 'certaintyLevel', 'certaintyNote', 'negated', 'sourceStance', 'notes', 'occurrenceCount', 'occurrenceContext', 'formStatus', 'sequence', 'computed', 'identities']),
   name: new Set(['toponym', 'language', 'script', 'romanized', 'nameType', 'sourceLabel', 'qualification']),
   geometry: new Set(['reprPoint', 'geojson', 'wkt', 'role', 'precisionKm', 'sourceLabel', 'qualification']),
   timespan: new Set(['startEarliest', 'startLatest', 'endEarliest', 'endLatest', 'label', 'sourceLabel', 'qualification', 'duration']),
-  type: new Set(['identifier', 'label', 'sourceLabel', 'qualification']),
+  type: new Set(['identifier', 'scheme', 'schemeVersion', 'label', 'sourceLabel', 'qualification']),
   propertyValue: new Set(['property', 'label', 'value', 'unit', 'qualification', 'dataSet', 'dimensions', 'attributes', 'universe']),
   source: new Set(['@id', 'title', 'citation', 'uri', 'timespan', 'derivedFrom', 'licence', 'authorityType']),
   sourceTimespan: new Set(['startEarliest', 'endLatest', 'sourceLabel', 'label']),
@@ -388,9 +389,14 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
     // things together ("no market and no fair here") split into rows would deny each of them on its
     // own, which the source did not say; so it is left out whole, and reported.
     const deny = isDenial(a);
+    // Identities the attestation bundles have no row: the identities sheet states a match on its own
+    // (identityBundleLosses). A denial that bundles them denies them with its facets, so nothing of
+    // it can be written: its facets alone would be denied on their own.
+    const bundled = identityBundleLosses(a, rec['@id'], loss);
+    if (deny && bundled) continue;
     if (deny && facets.reduce((n, k) => n + a[k].length, 0) > 1) { loss({ kind: 'denial-bundled', value: rec['@id'] }); continue; }
     if (facets.length > 1) loss({ kind: 'bundled-attestation', value: facets.join('+') });
-    if (!facets.length) { loss({ kind: 'attestation-without-facet' }); continue; }
+    if (!facets.length) { if (!bundled) loss({ kind: 'attestation-without-facet' }); continue; }
     const spans = a.timespans || [];
     if (spans.length > 1) loss({ kind: 'extra-timespans', value: spans.length - 1 });
     const t = spans[0] || {};
@@ -463,7 +469,8 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
       if (ty.label && ty.sourceLabel && ty.sourceLabel !== ty.label) loss({ kind: 'source-label' });
     }
     for (const pv of a.properties || []) if (!isFigure(pv)) { qualificationLosses(pv.qualification, [], loss); dropKeys(pv, 'propertyValue', TABLE_KEEPS.propertyValue, loss); }
-    for (const ty of a.types || []) rows.types.push({ place_id: pid, type_label: ty.label || ty.sourceLabel || '', type_uri: ty.identifier || '', ...common });
+    for (const ty of a.types || []) rows.types.push({ place_id: pid, type_label: ty.label || ty.sourceLabel || '', type_uri: ty.identifier || '',
+      type_scheme: ty.scheme || '', type_scheme_version: ty.schemeVersion ?? '', ...common });
     for (const r of a.relations || []) {
       dropKeys(r, 'relation', TABLE_KEEPS.relation, loss);
       let rt = local(r.relationType, PLATO);

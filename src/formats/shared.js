@@ -154,6 +154,21 @@ export function dropKeys(obj, where, keeps, loss) {
 /** Report one key as dropped, where the writer decides that case by case. */
 export const dropKey = (where, key, loss) => loss({ kind: 'dropped', key: `${where}.${key}` });
 
+// ---- identities an attestation bundles (plato:attests_identity, PLATO 238d15f) -------------------
+/**
+ * Report the identity relations attestation `a` bundles, which a format without attestations of
+ * identity (LPF, the spreadsheet tables) cannot hold. They are never written as standalone identity
+ * matches (LPF links, identities rows): those would lose the provenance the attestation gives them
+ * together, and could no longer be withdrawn together. In a denial (plato:negated) they say that two
+ * entities are NOT the same: written as a match, that would say the opposite, so the words say so.
+ * Returns true when there were any.
+ */
+export function identityBundleLosses(a, where, loss) {
+  if (!a || !Array.isArray(a.identities) || !a.identities.length) return false;
+  loss({ kind: isDenial(a) ? 'identity-denied' : 'identity-bundle', value: a['@id'] || where });
+  return true;
+}
+
 // ---- routes, itineraries and networks (PLATO 0.6.0) ----------------------------------------------
 const plato = (iri) => (typeof iri === 'string' && iri.startsWith('plato:') ? PLATO + iri.slice(6) : iri);
 /** True when a relation type is plato:MemberOf, written in full or with the context's prefix. */
