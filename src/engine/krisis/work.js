@@ -17,13 +17,23 @@
 //     reviewer: null | { name, orcid? }, cursor }
 // A candidate's own generated_at, algorithm_version and match_parameters, where given, override the
 // file's: a later source of suggestions (a gazetteer's reconciliation service) fits the same record.
+//
+// Version 2 (Krisis: gazetteer lookup) adds, to the above: `others` may be null (places looked up
+// in a gazetteer without a local match); `places` may hold places without candidates (those looked
+// up and not found); `lookups: [{ id, service: { endpoint, title, uri? }, started_at, finished_at,
+// algorithm_version, parameters, attribution, counts, stopped, queries: { <subject place IRI>:
+// { state: 'pending' | 'answered' | 'unanswered' | 'stopped', sent: [name…], found?, added?,
+// refused?, error?, suspect?, scopeNotApplied? } } }]` (see lookup.js); and a candidate from a lookup carries `lookup` (its id) and
+// `gazetteer: { service, id, score, confidence, match, answer_rank, description, namespace, query }`,
+// the service's own figures, kept apart from Krisis's similarity_score. `attribution` is the
+// service's, verbatim (a null stays null). readWork reads version 1 and gives it back as version 2.
 import { DataError } from '../input.js';
 import { fileSha256 } from './digest.js';
 
-export const WORK_VERSION = 1;
 // The problems of a dataset's own that stop part of it being read (the kinds the version check's
 // NOT_READ in compare.js lists): a matching, or a dataset finished, is then of less than the whole.
 export const NOT_READ_KINDS = ['json-syntax', 'rdf-syntax', 'record-failed', 'late-header', 'not-a-list', 'lpf-v2', 'lpf-not-a-feature', 'jsonl-not-an-object'];
+export const WORK_VERSION = 2;
 export const IDENTITY_TYPES = ['exactMatch', 'closeMatch', 'related'];
 export const DECISIONS = ['match', 'not-this', 'distinct'];
 const STATUS_OF = { match: 'confirmed', 'not-this': 'rejected', distinct: 'rejected' };
@@ -89,13 +99,13 @@ export function readWork(text) {
   try { w = typeof text === 'string' ? JSON.parse(text) : text; }
   catch (e) { throw new DataError(`This is not a Krisis work file: it is not JSON (${e.message}).`); }
   if (!isObject(w) || !Object.hasOwn(w, 'krisis')) throw new DataError('This is not a Krisis work file: it has no "krisis" version.');
-  if (w.krisis !== WORK_VERSION) throw new DataError(`This work file is of version ${JSON.stringify(w.krisis)}, and these tools read version ${WORK_VERSION}${typeof w.krisis === 'number' && w.krisis > WORK_VERSION ? ': it was made by a later version of the tools' : ''}.`);
+  if (w.krisis !== WORK_VERSION && !READS.includes(w.krisis)) throw new DataError(`This work file is of version ${JSON.stringify(w.krisis)}, and these tools read version ${WORK_VERSION}${typeof w.krisis === 'number' && w.krisis > WORK_VERSION ? ': it was made by a later version of the tools' : ''}.`);
   const bad = (m) => { throw new DataError(`This work file cannot be used: ${m}`); };
   if (typeof w.generated_at !== 'string' || typeof w.algorithm_version !== 'string') bad('it does not say when and how its suggestions were made (generated_at, algorithm_version).');
   if (!isObject(w.match_parameters)) bad('it does not give the parameters its suggestions were made with (match_parameters).');
   const cols = w.match_parameters.columns;
   if (cols !== undefined && !isColumns(cols)) bad('the mapping of its dataset\'s columns (match_parameters.columns) is not one: it must be {"column name": "field"}.');
-  try { checkSide(w.subjects, 'subjects'); checkSide(w.others, 'others'); } catch (e) { bad(e.message[0].toLowerCase() + e.message.slice(1)); }
+  try { checkSide(w.subjects, 'subjects'); if (!(w.krisis >= 2 && w.others === null)) checkSide(w.others, 'others'); } catch (e) { bad(e.message[0].toLowerCase() + e.message.slice(1)); }
   if (!isObject(w.places)) bad('it lists no places (places).');
   for (const [iri, p] of Object.entries(w.places)) {
     if (!isIri(iri)) bad(`a place is listed by "${iri}", which is not a web address (an IRI).`);
@@ -131,7 +141,38 @@ export function readWork(text) {
   }
   if (w.reviewer !== undefined && w.reviewer !== null) { try { checkReviewer(w.reviewer); } catch (e) { bad(e.message[0].toLowerCase() + e.message.slice(1)); } }
   if (w.cursor !== undefined && !(Number.isInteger(w.cursor) && w.cursor >= 0)) bad('its place in the review (cursor) is not a count.');
-  return { reviewer: null, cursor: 0, ...w };
+  checkLookups(w, bad);
+  return { reviewer: null, cursor: 0, ...w, krisis: WORK_VERSION, lookups: w.lookups ?? [] };
+}
+
+// ---- Krisis: gazetteer lookup (work file version 2) --------------------------------------------------
+/** The versions readWork reads; an earlier one is given back as the current. */
+const READS = [1, 2];
+export const QUERY_STATES = ['pending', 'answered', 'unanswered', 'stopped'];
+/** What version 2 adds, checked: the lookups, and the candidates that come from them. */
+function checkLookups(w, bad) {
+  if (w.krisis < 2) { if (w.lookups !== undefined) bad('it is of version 1, which has no lookups.'); return; }
+  if (!Array.isArray(w.lookups)) bad('it has no list of lookups (lookups).');
+  const ids = new Set();
+  for (const l of w.lookups) {
+    if (!isObject(l) || typeof l.id !== 'string' || !l.id) bad('a lookup has no id.');
+    if (ids.has(l.id)) bad(`two lookups have the id ${l.id}.`);
+    ids.add(l.id);
+    if (!isObject(l.service) || typeof l.service.endpoint !== 'string' || typeof l.service.title !== 'string') bad(`lookup ${l.id} does not say which service it asked (service).`);
+    if (typeof l.started_at !== 'string' || !DATE_TIME.test(l.started_at)) bad(`lookup ${l.id} does not say when it began (started_at).`);
+    if (l.attribution !== null && l.attribution !== undefined && !isObject(l.attribution)) bad(`lookup ${l.id} has an attribution that is not an object.`);
+    if (!isObject(l.queries)) bad(`lookup ${l.id} does not list the places it looked up (queries).`);
+    for (const [iri, q] of Object.entries(l.queries)) {
+      if (!Object.hasOwn(w.places, iri)) bad(`lookup ${l.id} looked up a place the file does not list (${iri}).`);
+      if (!isObject(q) || !QUERY_STATES.includes(q.state)) bad(`lookup ${l.id} has a place whose state is not pending, answered, unanswered or stopped (${iri}).`);
+      if (!isNames(q.sent)) bad(`lookup ${l.id} does not say what it sent for ${iri}.`);
+    }
+  }
+  for (const c of w.candidates) {
+    if (c.lookup === undefined || c.lookup === null) { if (w.others === null) bad(`candidate ${c.id} comes from a local match, but the file names no other dataset.`); continue; }
+    if (!ids.has(c.lookup)) bad(`candidate ${c.id} names a lookup the file does not have (${c.lookup}).`);
+    if (!isObject(c.gazetteer)) bad(`candidate ${c.id} comes from a lookup but has no gazetteer figures (gazetteer).`);
+  }
 }
 
 /** A work file's text. */
@@ -160,7 +201,12 @@ export function decide(work, candidateId, kind, { identityType = 'exactMatch', b
 /** The subject places under review, in order (the cursor counts along this list). */
 export const reviewPlaces = (work) => Object.keys(work.places);
 /** One subject place's candidates, best first. */
-export const candidatesOf = (work, iri) => work.candidates.filter((c) => c.candidate_source === iri).sort((a, b) => b.similarity_score - a.similarity_score || (a.distance_km ?? Infinity) - (b.distance_km ?? Infinity));
+export const candidatesOf = (work, iri) => {
+  const mine = work.candidates.filter((c) => c.candidate_source === iri);
+  const local = mine.filter((c) => !c.lookup).sort((a, b) => b.similarity_score - a.similarity_score || (a.distance_km ?? Infinity) - (b.distance_km ?? Infinity));
+  // Krisis: gazetteer lookup. A lookup's candidates keep the order lookup.js ranked them in (distance first), after the local ones.
+  return [...local, ...mine.filter((c) => c.lookup)];
+};
 /** A place is reviewed once any of its candidates has a decision. */
 export const isReviewed = (work, iri) => work.candidates.some((c) => c.candidate_source === iri && c.decision);
 export function reviewProgress(work) {

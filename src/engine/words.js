@@ -380,3 +380,73 @@ export function choraSaveText(result) {
     ? `Saved, with ${n.toLocaleString('en-GB')} new attestation${n === 1 ? '' : 's'}; the version check (Mneme) confirms that every attestation of the dataset is there as it was.`
     : CHORA_TEXT['chora-mneme-failed'];
 }
+
+// Krisis: gazetteer lookup. What looking places up in a gazetteer says (src/engine/krisis/lookup.js),
+// on the page and the command line.
+/** The note an attestation carries when its judgement is on a candidate a gazetteer's service found. */
+export function krisisLookupNote(kind, title, algorithm) {
+  return kind === 'match'
+    ? `Accepted by the reviewer in a match review (PLATO tools, Krisis), from candidates found by looking the place up in ${title} (${algorithm}).`
+    : `The reviewer judged these to be different places in a match review (PLATO tools, Krisis), rejecting a candidate found by looking the place up in ${title} (${algorithm}).`;
+}
+const STOPPED = {
+  auth: "The lookup stopped: the gazetteer refused the token, or today's allowance of requests is spent. Check the token, and resume the lookup (tomorrow, if the allowance is spent).",
+  quota: "The lookup stopped: the gazetteer's allowance of requests for today is spent. Resume it tomorrow.",
+  rate: 'The lookup stopped: the gazetteer still refused the queries as too many after waiting. Resume it later.',
+  unavailable: 'The lookup stopped: the gazetteer may not pass on what was asked for.',
+  network: 'The lookup stopped: the gazetteer could not be reached. Resume it when it can.',
+  server: 'The lookup stopped: the gazetteer refused or failed a request. Resume it later.',
+  stopped: 'The lookup was stopped. What was answered is kept; resume it to look up the rest.',
+  suspect: 'The lookup stopped: the gazetteer answered nothing at all to any query of the first batch, which is more likely a filter or setting it did not take than places it does not have. Those places are marked not answered, not "no match". Check the filters, and resume the lookup.',
+  fault: 'The lookup stopped because of a fault in the tools (please report it). What was answered before it is kept.',
+};
+export const LOOKUP_WORDS = {
+  /** Why a lookup stopped ({ kind, message } from runLookup), with what the gazetteer said. */
+  stopped: (s) => (STOPPED[s.kind] || STOPPED.server) + (s.message ? ` (${s.message})` : ''),
+  /** The places a lookup takes, as the options name them. */
+  choices: {
+    unmatched: 'places without candidates from the other dataset', all: 'all places',
+    pending: 'places not yet looked up, or not answered', unlinked: 'places not yet linked to the gazetteer',
+  },
+  /** A place answered with no candidates: which names were sent, so that "none" is read for what it is. */
+  notFound: (q) => (q.sent.length > 1 ? `No candidates (label and ${plural(q.sent.length - 1, 'other name')}).` : 'No candidates (label only).'),
+  /** A place the gazetteer did not answer: not "no match". */
+  unanswered: 'The gazetteer did not answer for this place; this is not a finding that it has no match. Look it up again.',
+  far: (km) => `further than ${km.toLocaleString('en-GB')} km`,
+  /** A candidate's licence (lookup.js licenceOf), or that it is not known. */
+  licence: (l) => (!l ? 'licence unknown' : [l.spdx || 'licence not named', l.commercial === false ? 'non-commercial' : '', l.derivatives === false ? 'no derivatives' : '',
+    l.commercial === null || l.derivatives === null ? 'terms partly unknown' : ''].filter(Boolean).join(', ')),
+  gazetteerFigures: 'The gazetteer\'s own score is relative to its best answer for that query, and its confidence measures the name only: neither says the place is the same.',
+  noToken: (variable) => `The World Historical Gazetteer needs a token: set ${variable} in the environment (from your WHG profile). It is never given on the command line.`,
+  tokenOnCommandLine: 'the token is never given on the command line, where it would be kept in the shell\'s history and seen by other programs: set WHG_TOKEN in the environment instead (for another service, name the variable that holds its token with --token-env).',
+  tokenOverHttp: 'a token is never sent over http://, where anyone on the way could read it: give the service\'s https:// address.',
+  tokenEnvMissing: (name) => `--token-env names ${name}, which is not set in the environment.`,
+  linksUnknown: 'The dataset was not read, so candidates it already links to a place, or says are different places, could not be left out.',
+  noPlaces: 'No places to look up with this choice.',
+  /** The preview, before anything is sent: how much is asked, and the first queries exactly. */
+  preview(p, { perDay = null } = {}) {
+    const lines = [`Would look up ${plural(p.places, 'place')} in ${p.service.title}: ${plural(p.queries, 'query', 'queries')} in ${plural(p.requests, 'request')}`
+      + (perDay ? ` (the gazetteer allows ${perDay.toLocaleString('en-GB')} requests a day)` : '') + '.'];
+    lines.push(p.allNames ? 'Each place is looked up by its label and each of its other names, one query for each.' : 'Each place is looked up by its label only.');
+    lines.push(p.filters.length ? `Filters: ${p.filters.map((f) => (f === 'countries' ? "the place's own countries" : `within about ${p.nearKm.toLocaleString('en-GB')} km of its point (answered from the gazetteer's upstream sources only)`)).join(' and ')}. A filter leaves out every candidate outside it, the right one too if the data is wrong.` : 'No filters: nothing is left out by country or distance.');
+    if (p.sendsCoordinates) lines.push("The places' coordinates are sent.");
+    if (p.withoutCountries) lines.push(`${plural(p.withoutCountries, 'place has', 'places have')} no countries, and ${p.withoutCountries === 1 ? 'is' : 'are'} looked up without that filter.`);
+    if (p.withoutPoint) lines.push(`${plural(p.withoutPoint, 'place has', 'places have')} no coordinates, and ${p.withoutPoint === 1 ? 'is' : 'are'} looked up without the distance filter.`);
+    if (p.first.length) lines.push(`The first ${p.first.length === 1 ? 'query' : `${plural(p.first.length, 'query', 'queries')}`}, as sent:`);
+    return lines;
+  },
+  /** The summary of a lookup: what was found, and what was not suggested and why. */
+  summary(c, service) {
+    const skipped = [c.skipped.noIri ? `${plural(c.skipped.noIri, 'candidate')} without a web address` : '', c.skipped.linked ? `${plural(c.skipped.linked, 'candidate')} already linked` : '',
+      c.skipped.denied ? `${plural(c.skipped.denied, 'candidate')} already said to be a different place` : '', c.skipped.decided ? `${plural(c.skipped.decided, 'candidate')} already decided in this review` : '',
+      c.skipped.duplicate ? `${plural(c.skipped.duplicate, 'candidate')} already suggested` : ''].filter(Boolean);
+    const rest = [c.unanswered ? `${plural(c.unanswered, 'place was', 'places were')} not answered, and can be looked up again` : '',
+      c.scopeNotApplied ? `for ${plural(c.scopeNotApplied, 'place')} the gazetteer did not apply the distance filter, so its candidates are not filtered by distance` : '',
+      c.stopped ? `${plural(c.stopped, 'place was', 'places were')} not looked up before the lookup stopped` : ''].filter(Boolean);
+    return {
+      problems: c.added ? `${plural(c.added, 'possible match', 'possible matches')} to review${c.far ? `, ${c.far.toLocaleString('en-GB')} of them far away` : ''}.` : 'No possible matches found.',
+      counted: `Looked up ${plural(c.places, 'place')} in ${service}, with ${plural(c.queries, 'query', 'queries')}; ${plural(c.answered, 'place was', 'places were')} answered, ${c.notFound.toLocaleString('en-GB')} with no candidates.`
+        + (rest.length ? ` ${rest.join('; ')}.` : '') + (skipped.length ? ` Not suggested: ${skipped.join('; ')}.` : ''),
+    };
+  },
+};

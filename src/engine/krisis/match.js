@@ -22,6 +22,7 @@ import { NameIndex, BLOCKING, BLOCKING_RULE } from './blocking.js';
 import { WORK_VERSION, MATCH_DEFAULTS, fileRecords, serialiseWork, checkReviewer, checkMatchOptions, NOT_READ_KINDS, isColumns } from './work.js';
 import { KRISIS_TEXT } from '../words.js';
 import { DataError } from '../input.js';
+import { createIdentityCollector } from './identities.js';
 
 export const ALGORITHM = 'krisis-names 5';
 export const DEFAULTS = MATCH_DEFAULTS;
@@ -170,12 +171,15 @@ function standInTitles(input) {
   return out;
 }
 
-async function readSide(input, word, options, env, rep, progress) {
+async function readSide(input, word, options, env, rep, progress, tap) {
   const side = { title: input.files[0]?.name || 'Untitled dataset', titleFrom: 'file-name', uri: undefined, places: new Map(), links: [], withdrawals: new Map(), unaddressed: 0 };
   // A table of places (CSV, plain GeoJSON) is read by the mapping of its columns chosen for it (Hermes),
   // given for the subjects, the dataset chosen first; the other dataset's columns are guessed.
   const columns = word === 'subjects' ? options.columns : undefined;
-  const r = await run({ input, action: 'check', options: { base: options.base, columns, sink: reader(side, rep, word, standInTitles(input)) } },
+  const sink = reader(side, rep, word, standInTitles(input));
+  // Krisis: gazetteer lookup. `tap` (gather) sees each event too; match() gives none.
+  if (tap) { const event = sink.event; sink.event = (ev) => { event(ev); tap(ev); }; }
+  const r = await run({ input, action: 'check', options: { base: options.base, columns, sink } },
     { ...env, progress: (p) => progress({ ...p, dataset: word, phase: p.phase === 'done' ? 'read' : p.phase }) });
   if (r.incomplete) return { side, failed: r.report.items.find((i) => i.kind === 'unreadable')?.examples[0] };
   let others = 0;
@@ -311,7 +315,7 @@ export async function match({ subjects, others, options = {} }, env) {
     krisis: WORK_VERSION, generated_at, algorithm_version: ALGORITHM,
     match_parameters: { ...params, ...(options.base ? { base: options.base } : {}), ...(options.columns ? { columns: { ...options.columns } } : {}), blocking: { ...BLOCKING, rule: BLOCKING_RULE }, scoring: SCORING },
     subjects: sideRecord(S), others: sideRecord(O),
-    places, candidates, reviewer: options.reviewer || null, cursor: 0,
+    places, candidates, reviewer: options.reviewer || null, cursor: 0, lookups: [],
   };
   const outputs = [];
   const stem = (options.name || subjects.files[0].name).replace(/\.(gz)$/i, '').replace(/\.[^.]+$/, '');
@@ -320,4 +324,31 @@ export async function match({ subjects, others, options = {} }, env) {
   outputs.push(await o.close());
   progress({ phase: 'done', places: i, elapsedMs: Date.now() - t0 });
   return { report: rep.toJSON(), outputs, work };
+}
+
+// ---- Krisis: gazetteer lookup -------------------------------------------------------------------------
+/**
+ * The subject places alone, for a gazetteer lookup (lookup.js) without another dataset: read as
+ * match() reads them. options: base (spreadsheet tables). Returns { report, subjects, places,
+ * incomplete? }: `subjects` the dataset as a work file records it ({ title, uri?, files }), `places`
+ * [{ iri, label, names, point, ccodes?, types?, identities: { linked: [IRI], denied: [IRI] } }] in the
+ * dataset's order, `identities` what the dataset currently says of the place (identities.js).
+ */
+export async function gather({ subjects, options = {} }, env) {
+  const rep = new Report();
+  const t0 = Date.now();
+  const progress = env.progress || (() => {});
+  const ids = createIdentityCollector();
+  const tap = (ev) => { if (ev.type === 'record' && ev.value) ids.add(ev.value); else if (ev.type === 'idr' && ev.value) ids.addRelation(ev.value.subject, ev.value.object); };
+  const { side, failed } = await readSide(subjects, 'subjects', options, env, rep, progress, tap);
+  if (failed !== undefined || !side.files) {
+    rep.error('unreadable', TEXT.unreadable(words('subjects')), failed);
+    return { report: rep.toJSON(), subjects: null, places: [], incomplete: true };
+  }
+  if (!side.places.size) rep.error('no-places', TEXT['no-places'](words('subjects')));
+  const known = ids.result();
+  const places = [...side.places].map(([iri, p]) => ({ iri, ...p, identities: { linked: [...(known.get(iri)?.linked || [])], denied: [...(known.get(iri)?.denied || [])] } }));
+  rep.counts = { subjects: places.length, unaddressed: side.unaddressed };
+  progress({ phase: 'done', places: places.length, elapsedMs: Date.now() - t0 });
+  return { report: rep.toJSON(), subjects: sideRecord(side), places };
 }

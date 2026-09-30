@@ -23,7 +23,7 @@ const { checkReviewer, isColumns } = await import('../src/engine/krisis/work.js'
 const { detect, readable, DataError } = await import('../src/engine/input.js');
 const { nodeResources, gatherInputs, openFiles, isSystemError, NodeHost } = await import('../src/node/host.js');
 const { toolsCommit } = await import('../src/node/build-info.js');
-const { fmtBytes, fmtTime, formatName, progressText, summary, groups, draftNote, explainedLines, gazetteerWarnings } = await import('../src/engine/words.js');
+const { fmtBytes, fmtTime, formatName, progressText, summary, groups, draftNote, explainedLines, gazetteerWarnings, LOOKUP_WORDS } = await import('../src/engine/words.js');
 const { mappingOf } = await import('../src/engine/hermes/generic.js');
 const { FIELDS } = await import('../src/engine/hermes/columns.js');
 
@@ -52,6 +52,11 @@ Usage:
   plato-tools apply [options] SUBJECTS --review WORKFILE
                                             make the decisions of a finished review into PLATO
                                             attestations, added to SUBJECTS (or on their own)
+  plato-tools lookup [options] SUBJECTS [--review WORKFILE]
+                                            look the places of SUBJECTS up in a gazetteer (the
+                                            World Historical Gazetteer by default), and add what
+                                            it finds to a work file for review (this sends each
+                                            place's name to the gazetteer; nothing else unless asked)
   plato-tools datacube [--json] FILE...     check a cube export (convert --to ntriples --cube)
                                             against the RDF Data Cube integrity constraints IC-1,
                                             IC-2, IC-11, IC-12 and IC-14
@@ -146,6 +151,29 @@ Options:
                     match, apply: the other dataset's title, which each attestation cites as its
                     source (default: the title the other dataset gives; if it gives none, its
                     file's name, which is warned of). Given to match, it is kept in the work file.
+  --review FILE     lookup: add to this work file (from match, or an earlier lookup) instead of
+                    beginning one.
+  --gazetteer G     lookup: whg (the default), or the https:// address of another W3C
+                    reconciliation service. WHG's token is read from WHG_TOKEN in the
+                    environment, never from the command line.
+  --token-env NAME  lookup, another service: the environment variable that holds its token.
+                    A token is never sent over http://, nor WHG's to another service.
+  --gazetteer-iri T lookup, another service: how to make a candidate's address from its id,
+                    such as https://www.wikidata.org/entity/{{id}}; without it, a candidate
+                    whose id is not an address is not suggested.
+  --places WHICH    lookup: unmatched (the default: places without candidates from the other
+                    dataset), all, pending (the default with --review after a lookup: not yet
+                    answered), or unlinked (not yet linked to the gazetteer).
+  --all-names       lookup: also send each place's other names, one query each (the label only
+                    by default).
+  --countries       lookup: send each place's own countries as a filter. A filter leaves out
+                    every candidate outside it, the right one too if the data is wrong.
+  --near KM         lookup: send each place's point and a radius of KM kilometres as a filter
+                    (this sends its coordinates). The edge is approximate, and WHG then answers
+                    from its upstream sources only.
+  --limit N         lookup: the most candidates asked for, for each query (default 10).
+  --batch N         lookup: queries in one request, 1 to 50 (default 25).
+  --dry-run         lookup: say what would be sent, and the first queries exactly; send nothing.
   --json            print one JSON object per input, one per line, then one for the total.
                     Its "columns", for a table of places, is a list of {column, field, reason}
                     to read; --columns takes the object printed without --json instead.
@@ -157,7 +185,9 @@ Exit status: 0 if no input has problems, 1 if any has, 2 if the command is wrong
 cannot be read or written. Warnings, and what a conversion cannot carry over, do not count
 as problems. For compare: 0 if nothing was deleted or changed, 1 if something was, 2 if the
 versions could not be compared. For match and apply: 0 if nothing stopped it, 1 if something
-did (a place without an address), 2 if it could not be done.
+did (a place without an address), 2 if it could not be done. For lookup: 0 if every place
+was answered, 1 if some were not or the lookup stopped (the work file still holds what was
+found, to resume from), 2 if it could not be done.
 `;
 
 function usage(message) {
@@ -178,6 +208,9 @@ async function main(argv) {
         review: { type: 'string' }, output: { type: 'string' }, reviewer: { type: 'string' }, orcid: { type: 'string' },
         'others-title': { type: 'string' },
         georef: { type: 'string', multiple: true }, manifest: { type: 'string', multiple: true },
+        gazetteer: { type: 'string' }, places: { type: 'string' }, 'all-names': { type: 'boolean', default: false }, countries: { type: 'boolean', default: false },
+        near: { type: 'string' }, limit: { type: 'string' }, batch: { type: 'string' }, 'dry-run': { type: 'boolean', default: false }, token: { type: 'string' },
+        'token-env': { type: 'string' }, 'gazetteer-iri': { type: 'string' },
         'work-dir': { type: 'string' }, json: { type: 'boolean', default: false }, brief: { type: 'boolean', default: false },
         release: { type: 'string' }, previous: { type: 'string' }, 'concept-doi': { type: 'string' }, maintainer: { type: 'string', multiple: true, default: [] },
         repo: { type: 'string' }, 'site-url': { type: 'string' }, turtle: { type: 'boolean', default: false },
@@ -187,6 +220,7 @@ async function main(argv) {
     });
   } catch (e) { return usage(e.message); }
   const { values: o, positionals } = parsed;
+  if (o.token !== undefined) return usage(LOOKUP_WORDS.tokenOnCommandLine);
   if (o.help) { process.stdout.write(HELP); return 0; }
   const resources = await nodeResources();
   if (o.version) {
@@ -199,6 +233,8 @@ async function main(argv) {
   if (action === 'datacube') return datacube(args, o);
   if (action === 'publish') return publishCommand(args, o, resources);
   if (action === 'match' || action === 'apply') return review(action, args, o, resources);
+  if (action === 'lookup') return lookupCommand(args, o, resources);
+  if (o.gazetteer || o.places || o['all-names'] || o.countries || o.near || o.limit || o.batch || o['dry-run'] || o['token-env'] || o['gazetteer-iri']) return usage('--gazetteer, --token-env, --gazetteer-iri, --places, --all-names, --countries, --near, --limit, --batch and --dry-run are for lookup.');
   if (o.with || o.threshold || o['max-distance'] || o.top || o.review || o.output || o.reviewer || o.orcid || o['others-title'] !== undefined) return usage('--with, --threshold, --max-distance, --top, --review, --output, --reviewer, --orcid and --others-title are for match and apply.');
   if (action !== 'check' && action !== 'convert' && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, compare, publish, match, apply and datacube.`);
   if (!args.length) return usage(`name at least one input to ${action}.`);
@@ -607,4 +643,115 @@ async function datacube(files, o) {
     }
   }
   return code;
+}
+
+// Krisis: gazetteer lookup. `lookup` looks the places of a dataset up in a gazetteer's reconciliation
+// service and adds what it finds to a work file (src/engine/krisis/lookup.js). The token comes from the
+// environment only, and is never printed or written.
+async function lookupCommand(args, o, resources) {
+  const L = LOOKUP_WORDS;
+  if (o.to) return usage('--to is for convert.');
+  if (o.with || o.threshold || o.top || o.output) return usage('--with, --threshold, --top and --output are not for lookup.');
+  if (o.json && o.brief) return usage('choose --json or --brief, not both.');
+  const { createLookup, WHG_ENDPOINT, isWhg } = await import('../src/engine/gazetteer/index.js');
+  const { runLookup, planQueries, selectPlaces, serviceOf, iriFromTemplate, PLACE_CHOICES, WHG_REQUESTS_A_DAY } = await import('../src/engine/krisis/lookup.js');
+  const { gather } = await import('../src/engine/krisis/match.js');
+  const { readWork, serialiseWork, filesDiffer } = await import('../src/engine/krisis/work.js');
+  const { existsSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const endpoint = !o.gazetteer || o.gazetteer === 'whg' ? WHG_ENDPOINT : o.gazetteer;
+  let service;
+  try { service = serviceOf(endpoint); } catch { return usage(`--gazetteer ${o.gazetteer} is not whg or a web address.`); }
+  if (o.places && !PLACE_CHOICES.includes(o.places)) return usage(`"${o.places}" is not a choice of places; they are ${PLACE_CHOICES.join(', ')}.`);
+  const num = (flag, v, ok) => (v === undefined ? undefined : /^\s*\d+(\.\d+)?\s*$/.test(v) && ok(Number(v)) ? Number(v) : NaN);
+  const near = num('--near', o.near, (x) => x > 0 && x <= 20015), limit = num('--limit', o.limit, (x) => Number.isInteger(x) && x >= 1 && x <= 50);
+  const batch = num('--batch', o.batch, (x) => Number.isInteger(x) && x >= 1 && x <= 50), maxDistanceKm = num('--max-distance', o['max-distance'], (x) => x >= 0);
+  for (const [flag, v, raw] of [['--near', near, o.near], ['--limit', limit, o.limit], ['--batch', batch, o.batch], ['--max-distance', maxDistanceKm, o['max-distance']]])
+    if (Number.isNaN(v)) return usage(`${flag} ${raw} is not allowed; see --help.`);
+  // WHG's token comes from WHG_TOKEN and goes only to WHG; another service's from the variable --token-env names, and only over https.
+  const isWhgService = isWhg(endpoint);
+  if (isWhgService && (o['token-env'] || o['gazetteer-iri'])) return usage("--token-env and --gazetteer-iri are for another service; WHG's token is read from WHG_TOKEN.");
+  if (o['token-env'] && !process.env[o['token-env']]) return usage(L.tokenEnvMissing(o['token-env']));
+  const token = (isWhgService ? process.env.WHG_TOKEN : o['token-env'] ? process.env[o['token-env']] : undefined) || undefined;
+  if (token && new URL(endpoint).protocol !== 'https:') return usage(L.tokenOverHttp);
+  if (!o['dry-run'] && isWhgService && !token) return usage(L.noToken('WHG_TOKEN'));
+  let iri;
+  if (o['gazetteer-iri']) { try { iri = iriFromTemplate(o['gazetteer-iri']); } catch { return usage(`--gazetteer-iri ${o['gazetteer-iri']} is not an address with {{id}} in it.`); } }
+  const items = await gatherInputs(args);
+  if (items.length !== 1) return usage(`lookup takes one dataset of places; ${items.length} ${items.length === 1 ? 'was' : 'were'} given.`);
+  let work = null;
+  if (o.review) {
+    try { work = readWork(readFileSync(o.review, 'utf8')); }
+    catch (e) { return usage(`the work file ${o.review} cannot be used: ${e.code === 'ENOENT' ? 'there is no such file.' : e.message}`); }
+  }
+  const name = `${(items[0].name || items[0].paths[0].split(/[\\/]/).pop()).replace(/\.(gz)$/i, '').replace(/\.[^.]+$/, '')}.krisis.json`;
+  if (!o['dry-run'] && !o.overwrite && existsSync(join(o.out, name))) return usage(`${join(o.out, name)} already exists; give --overwrite to replace it, or --out for somewhere else.`);
+
+  const t0 = Date.now();
+  const r = { type: 'lookup', subjects: { input: items[0].label, format: null, profile: null }, service: { endpoint: service.endpoint, title: service.title }, status: 'failed', dryRun: o['dry-run'], counts: {}, items: [], warnings: [], outputs: [], elapsedMs: 0 };
+  const finishUp = () => {
+    r.elapsedMs = Date.now() - t0;
+    r.exitCode = r.status === 'failed' ? 2 : r.status === 'problems' ? 1 : 0;
+    if (o.json) { process.stdout.write(JSON.stringify(r) + '\n'); return r.exitCode; }
+    const lines = [`Places to look up: ${r.subjects.input}${r.subjects.format ? `: ${formatName(r.subjects)}` : ''}`];
+    if (r.message) lines.push(`  Could not be done: ${r.message}`);
+    if (r.preview) { lines.push(...L.preview(r.preview, { perDay: isWhgService ? WHG_REQUESTS_A_DAY : null }).map((l) => `  ${l}`)); for (const q of r.preview.first) lines.push(`    ${JSON.stringify(q)}`); }
+    if (r.summary) lines.push(`  ${r.summary.problems} ${r.summary.counted} (${fmtTime(r.elapsedMs)})`);
+    for (const w of r.warnings) lines.push(`  ${w}`);
+    if (!o.brief) lines.push(...itemLines(r.items, 'match'));
+    for (const x of r.outputs) lines.push(`  Wrote ${x.path} (${fmtBytes(x.size)})`);
+    process.stdout.write(lines.join('\n') + '\n');
+    return r.exitCode;
+  };
+  const { input, message } = await readInput(items[0]);
+  if (!input) { r.message = message; return finishUp(); }
+  Object.assign(r.subjects, { format: input.format, profile: input.profile || null });
+  const host = new NodeHost({ workDir: o['work-dir'], outDir: o.out, overwrite: o.overwrite });
+  const live = process.stderr.isTTY && !o.json;
+  const xlsx = input.container === 'workbook' ? await import('xlsx') : undefined;
+  const g = host.env(resources, { progress: live ? (p) => process.stderr.write(`\r\x1b[K${progressText(p)}`) : undefined, xlsx });
+  let gathered;
+  try { gathered = await gather({ subjects: input, options: { base: o.base } }, g.env); }
+  catch (e) { g.finish(true); host.cleanup(); r.message = isSystemError(e) ? e.message : e instanceof DataError ? e.message : toolsFault(e); return finishUp(); }
+  finally { if (live) process.stderr.write('\r\x1b[K'); }
+  g.finish(false);
+  r.items = gathered.report.items;
+  if (gathered.incomplete) { host.cleanup(); r.message = gathered.report.items.find((i) => i.kind === 'unreadable')?.message; return finishUp(); }
+  if (work) {
+    const differ = await filesDiffer(work.subjects, input.files);
+    if (differ.length) r.warnings.push(`The work file was made from other files than ${differ.join(', ')}: its places may no longer match the data.`);
+  }
+  const options = { service, places: o.places, allNames: o['all-names'], countries: o.countries, nearKm: near, limit, maxDistanceKm,
+    scrub: (text) => (token ? String(text).split(token).join('[token]') : String(text)) };
+  if (o['dry-run']) {
+    const chosen = selectPlaces({ work, places: gathered.places, which: o.places, service });
+    r.preview = planQueries(chosen, { ...options, batchSize: batch ?? 25 }).preview;
+    r.status = 'ok';
+    host.cleanup();
+    return finishUp();
+  }
+  const controller = new AbortController();
+  process.once('SIGINT', () => controller.abort());
+  const lookup = createLookup({ endpoint, token, ...(batch ? { batchSize: batch } : {}), ...(iri ? { iri } : {}) });
+  const progress = live ? ({ done, total }) => process.stderr.write(`\r\x1b[K${done.toLocaleString('en-GB')} of ${total.toLocaleString('en-GB')} places looked up`) : undefined;
+  let result;
+  try { result = await runLookup({ lookup, work, subjects: gathered.subjects, places: gathered.places, options, signal: controller.signal, onBatch: progress }); }
+  catch (e) { host.cleanup(); r.message = toolsFault(e); return finishUp(); }
+  finally { if (live) process.stderr.write('\r\x1b[K'); }
+  const c = result.record.counts;
+  r.counts = c;
+  r.summary = L.summary(c, service.title);
+  if (result.stopped) r.warnings.push(L.stopped(result.stopped));
+  if (!c.places) r.warnings.push(L.noPlaces);
+  const w = host.env(resources, {});
+  try {
+    const out = await w.env.output(name);
+    out.write(serialiseWork(result.work));
+    const x = await out.close();
+    r.outputs.push({ path: x.path, size: x.size });
+    w.finish(false);
+  } catch (e) { w.finish(true); r.message = isSystemError(e) ? e.message : toolsFault(e); host.cleanup(); r.status = 'failed'; return finishUp(); }
+  host.cleanup();
+  r.status = result.stopped || c.unanswered || gathered.report.errors ? 'problems' : 'ok';
+  return finishUp();
 }

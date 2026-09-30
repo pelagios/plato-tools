@@ -939,6 +939,88 @@ publishes its state on `window.__chora` for tests.
 - **Georeferencing** comes from `src/engine/georef/`, which belongs to Hermes; Chora keeps none of
   its own.
 
+## Gazetteer lookup
+
+Krisis can also look the subject places up in a gazetteer, through its W3C reconciliation service (the
+World Historical Gazetteer by default, or any other by its address), and add what it answers to the
+same work file as a local match, for the same review. `src/engine/krisis/lookup.js` holds it; the
+talking to the service is the shared gazetteer module's (`src/engine/gazetteer/`, owned by the Chora
+work, used here and never changed). The command line is `plato-tools lookup` (with `--dry-run` to see
+what would be sent); the page comes later. This sends each place's name to the gazetteer, and its
+coordinates only with `--near`.
+
+- **The token** is never seen by the engine: it is given a lookup made with it (`createLookup`), and
+  nothing writes a token into the work file, a report or an error. The command line reads WHG's from
+  `WHG_TOKEN` only, refuses `--token`, sends another service a token only from the variable
+  `--token-env` names and only over https, and never sends WHG's elsewhere. A query the service refuses
+  inside a good answer comes back with the service's words, which the module does not clean of the
+  token; they are kept (`queries[…].error`) only when the caller, who holds the token, gives `scrub`.
+  The tests look for the token in everything written, beside a control that the service received it
+  (that check found the unscrubbed per-query error before it was fixed).
+- **What is sent.** Each place's label, and only its label, unless `allNames` (`--all-names`) sends its
+  other names too, one query each. WHG's queries always carry its type
+  (`https://whgazetteer.org/static/whg_schema.jsonld#Place`, confirmed from WHG's code: an unknown type,
+  or two in one request, is refused, and a query without one is unsafe); another service's the first of
+  its manifest's `defaultTypes` (`typeFromManifest`), when given. Query properties FILTER, never boost,
+  and a wrong value silently removes the right answer (WHG's country codes are patchy), so none is sent
+  unless asked for: `countries` (the place's own codes, as WHG documents them; not yet confirmed) and
+  `nearKm` (`lat`, `lng` and `radius` in kilometres, which WHG resolves as a disc of H3 cells, so the
+  edge is approximate, and answers from its upstream gateway only; confirmed). An answer whose
+  `scope.applied` is not true is counted and warned of (the filter was not applied). A place's
+  queries are never split across batches (`planQueries` chunks), so each place is answered at once. The
+  preview gives the places, queries and requests, and the first 20 queries exactly as the service
+  receives them (a test compares them with what the fake service received).
+- **Ranking, never accepting.** WHG's score is relative to the best in its own answer (the top is about
+  100 however bad) and its confidence measures the name only, so neither decides anything. Candidates
+  are ranked by distance, then whether the countries agree (yes, unknown, no), then Krisis's own name
+  similarity (`names.js`, which is every candidate's `similarity_score`), then the service's order.
+  A candidate further than `maxDistanceKm` (50) is kept and marked `far`, never dropped (the test has
+  three Newcastles, all 100: GB first, Namibia and Australia marked far). WHG's own figures are kept
+  apart under `gazetteer: { service, id, score, confidence, match, answer_rank, description, namespace,
+  query }`. `candidatesOf` lists a lookup's candidates in this order, after the local ones.
+- **Not suggested, and counted:** a candidate without an address (`iri` null: a WHG id that is not
+  `place:…`, or another service's id with no `--gazetteer-iri` template), one the dataset already links
+  to the place or says is a different place, one the review has already decided, and one already a
+  candidate. What the dataset says is read by `identities.js` (`currentIdentities`, shared with Chora):
+  identities from every attestation and the record's own, negated ones as denials, withdrawn ones
+  dropped (`resolveWithdrawn`), WHG addresses in their w3id form and legacy `/places/<n>/portal/`
+  addresses kept as found. For this comparison only, a WHG candidate also goes by its authority's
+  address (`authorityIris`: `place:gn:2641673` is `https://sws.geonames.org/2641673/`, and likewise
+  Getty TGN, Wikidata, OpenStreetMap); the address a candidate is suggested and attested by is always
+  WHG's w3id.
+- **Which places.** `unmatched` (the default after a match: those without a local candidate), `all`,
+  `pending` (the default once a lookup has run: those a lookup of this service left unanswered,
+  stopped or pending; a place never looked up is not pending) and `unlinked` (not linked to the
+  service, legacy WHG addresses included, and with no confirmed candidate of it). Looking a place up
+  again replaces its undecided candidates from that service and keeps the decided ones.
+- **Answers that are not findings.** `.unanswered` (the gateway did not answer, or the query was
+  refused) makes the place `unanswered`, to be tried again, never "no match"; a place answered with no
+  candidates is labelled with what was sent ("label only"). A first batch of several queries that all
+  come back empty is suspect (a filter or type the service did not take): its places are marked
+  unanswered and the lookup stops (`suspect`). A refused token, a spent allowance, too many queries, no
+  answer or a failure stop the lookup, keep what was answered, and mark the rest `stopped`, as does the
+  signal (Stop); a fault in the tools does the same and is thrown on. The work file can then be saved
+  and the lookup resumed.
+- **Attestations: one per source.** A place with matches accepted from the other dataset and from WHG
+  makes two attestations, same reviewer and date, each citing its own source; the local = WHG link is
+  not stated. WHG is cited as `{ title: 'World Historical Gazetteer', '@id': 'https://whgazetteer.org/',
+  authorityType: 'dataset' }` (`gazetteerSource`); a judgement on a looked-up candidate cites its
+  gazetteer whatever `source` `attestationsFrom` is given, which stands for the other dataset only.
+  **No licence is written into an attestation.** The service's `attribution` is kept in the work file as
+  it came, nulls left null (`lookups[].attribution`), and `licenceOf(attribution, namespace, dataset)`
+  reads a candidate's (its source's; for WHG's own records its dataset's, then WHG's), or null: "licence
+  unknown". No licence value is written in the code.
+- **The work file, version 2** (`work.js`): `others` may be null; `places` may hold places without
+  candidates; `lookups: [{ id, service, started_at, finished_at, algorithm_version, parameters,
+  attribution, counts, stopped, queries: { <place>: { state, sent, found, added, refused?, error?,
+  suspect?, scopeNotApplied? } } }]`; a looked-up candidate has `lookup` and `gazetteer`. `readWork` reads
+  version 1 and gives it back as version 2, so **saving a version 1 file writes version 2**, which
+  earlier tools cannot read. `match()` writes version 2 with `lookups: []`.
+- **Still open** (for the gazetteer module or WHG): the wire form of the `countries` filter; a
+  `manifest()` for another service's `defaultTypes` and `view.url` (the command line has no way to fetch
+  them through the module yet, so it sends no type to another service, and takes `--gazetteer-iri`);
+  and a per-query `error` cleaned of the token by the module itself.
+
 ## Permissions
 
 Nothing goes to another site unless the user allows it, in one panel for the whole toolbox: the

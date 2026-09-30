@@ -122,3 +122,19 @@ words them all.
 ## Words
 
 `summary(report, 'match' | 'apply')`, `groups('match' | 'apply')` in words.js.
+
+## Gazetteer lookup (change 2, phase A)
+
+- `src/engine/krisis/lookup.js` (light; runs on the page's main thread): `runLookup({ lookup, work,
+  subjects, places, options, signal, onBatch, now }) -> { work, record, plan, stopped }`,
+  `planQueries(places, options) -> { queries, chunks, preview }`, `rankGazetteer(place, candidates,
+  { maxDistanceKm })`, `mergeAnswers(work, record, place, lists, opts)`, `startLookup`, `newWork`,
+  `selectPlaces({ work, places, which, service, only })`, `defaultChoice(work)`, `serviceOf(endpoint)`,
+  `licenceOf(attribution, namespace, dataset)`, `lookupCandidatesOf`, `typeFromManifest`,
+  `iriFromTemplate`, `WHG_SERVICE`, `WHG_PLACE_TYPE`, `PLACE_CHOICES`; re-exports `krisisLookupNote`,
+  `authorityIris`, `currentIdentities`.
+- `src/engine/krisis/identities.js`: `currentIdentities(records) -> Map<place IRI, { linked, denied }>`,
+  `createIdentityCollector()`, `linkState(entry, { id, iri })`, `authorityIris(id)`.
+- `src/engine/krisis/identity.js`: `gazetteerSource(service)`, `candidateSource(work, candidate)`.
+- `src/engine/krisis/match.js`: `gather({ subjects, options }, env) -> { report, subjects, places }`.
+- Words: `LOOKUP_WORDS`, `krisisLookupNote` in words.js. DEVELOPERS.md, "Gazetteer lookup".

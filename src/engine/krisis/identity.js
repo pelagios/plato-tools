@@ -14,7 +14,7 @@
 //
 // recordIdentity is shared with the Chora session (gazetteer reconciliation); its signature is agreed.
 import { checkReviewer, DATE_TIME, isIri } from './work.js';
-import { krisisNote } from '../words.js';
+import { krisisNote, krisisLookupNote } from '../words.js';
 
 const TYPES = new Set(['exactMatch', 'closeMatch', 'related', 'unspecified']);
 
@@ -80,29 +80,65 @@ const latest = (dates) => dates.filter(Boolean).sort().at(-1);
  * bundling a relation to each place accepted, and one for each 'distinct' decision, negated. A
  * 'not-this' decision makes nothing. Each is dated when its last decision was made, unless `date`
  * is given. `reviewer` defaults to the work file's, `source` to the dataset of the other places.
+ * `source` is what the judgements on the other dataset's candidates cite; one on a candidate looked
+ * up in a gazetteer cites the gazetteer whatever `source` says (one attestation per source).
  * Returns [{ subject, attestation }], in the order of the review.
  */
-export function attestationsFrom(work, { reviewer = work.reviewer, source = datasetSource(work.others), date } = {}) {
+export function attestationsFrom(work, { reviewer = work.reviewer, source, date } = {}) {
   if (!reviewer) throw new Error('attestationsFrom: the review has no reviewer.');
   const out = [];
   const algorithm = (c) => c.algorithm_version || work.algorithm_version;
+  // `source` stands for the other dataset only: a candidate looked up in a gazetteer always cites the gazetteer.
+  const sourceOf = (c) => (lookupOf(work, c) || !source ? candidateSource(work, c) : source);
   for (const subject of Object.keys(work.places)) {
     const decided = work.candidates.filter((c) => c.candidate_source === subject && c.decision);
-    const matches = decided.filter((c) => c.decision.kind === 'match');
-    if (matches.length) {
+    // One attestation per source (Krisis: gazetteer lookup): matches from the other dataset and from a gazetteer are cited apart.
+    for (const { src, of: matches } of bySource(decided.filter((c) => c.decision.kind === 'match'), sourceOf)) {
       out.push({ subject, attestation: recordIdentity({
-        subject, reviewer, source, date: date || latest(matches.map((c) => c.decision.decided_at)),
+        subject, reviewer, source: src, date: date || latest(matches.map((c) => c.decision.decided_at)),
         targets: matches.map((c) => ({ iri: c.candidate_candidate, label: c.other.label, identityType: c.decision.identityType, basis: c.decision.basis })),
-        notes: krisisNote('match', [...new Set(matches.map(algorithm))].join(', ')),
+        notes: noteOf(work, 'match', matches[0], [...new Set(matches.map(algorithm))].join(', ')),
       }) });
     }
     for (const c of decided.filter((x) => x.decision.kind === 'distinct')) {
       out.push({ subject, attestation: recordIdentity({
-        subject, reviewer, source, date: date || c.decision.decided_at, negated: true,
+        subject, reviewer, source: sourceOf(c), date: date || c.decision.decided_at, negated: true,
         targets: [{ iri: c.candidate_candidate, label: c.other.label, identityType: 'exactMatch', basis: c.decision.basis }],
-        notes: krisisNote('distinct', algorithm(c)),
+        notes: noteOf(work, 'distinct', c, algorithm(c)),
       }) });
     }
   }
   return out;
 }
+
+// ---- Krisis: gazetteer lookup -------------------------------------------------------------------------
+/**
+ * A gazetteer's reconciliation service as a PLATO source, which a judgement on one of its candidates
+ * cites: `service` is a lookup's ({ endpoint, title, uri? }, lookup.js). Its licence is not written
+ * here or anywhere in an attestation: the work file keeps it (lookups[].attribution).
+ */
+export function gazetteerSource(service) {
+  const s = { title: service?.title || service?.endpoint || 'Gazetteer', authorityType: 'dataset' };
+  if (isIri(service?.uri)) s['@id'] = service.uri;
+  return s;
+}
+const lookupOf = (work, c) => (c.lookup ? (work.lookups || []).find((l) => l.id === c.lookup) : null);
+/** What a judgement on candidate `c` rests on: the gazetteer it was looked up in, else the other dataset. */
+export function candidateSource(work, c) {
+  const l = lookupOf(work, c);
+  if (l) return gazetteerSource(l.service);
+  return datasetSource(work.others || c.other?.source || {});
+}
+/** Candidates grouped by the source they cite, in order of first appearance. */
+function bySource(cands, sourceOf) {
+  const groups = new Map();
+  for (const c of cands) {
+    const src = sourceOf(c), key = typeof src === 'string' ? src : JSON.stringify(src);
+    (groups.get(key) || groups.set(key, { src, of: [] }).get(key)).of.push(c);
+  }
+  return [...groups.values()];
+}
+const noteOf = (work, kind, c, algorithm) => {
+  const l = lookupOf(work, c);
+  return l ? krisisLookupNote(kind, l.service.title, algorithm) : krisisNote(kind, algorithm);
+};
