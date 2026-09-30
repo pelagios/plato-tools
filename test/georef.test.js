@@ -8,7 +8,8 @@ import Ajv2020 from 'ajv/dist/2020.js';
 import { addPlatoFormats, strictFormatLogger } from '../src/lib/formats.js';
 import { DataError } from '../src/engine/input.js';
 import {
-  readGeoreference, toWorld, toPixels, georefNote, georefCitation, matchesTarget, containsRegion, SOFTWARE,
+  readGeoreference, toWorld, toPixels, georefNote, georefCitation, matchesTarget, matchTarget, containsRegion, SOFTWARE,
+  allmapsLookupUrl, LABEL_ANCHOR,
 } from '../src/engine/georef/index.js';
 
 const DIR = 'test/fixtures/georef/';
@@ -482,6 +483,60 @@ test('matchesTarget: the canvas or the image, with /info.json and a trailing sla
   assert.equal(matchesTarget(g, undefined), false);
 });
 
+test('matchTarget: a IIIF picture URL of the whole image, unrotated, matches the image service', async () => {
+  const g = await rocque();
+  // Control: the service itself, and the canvas, say how they matched.
+  assert.deepEqual(matchTarget(g, ROCQUE_IMAGE), { match: true, via: 'service' });
+  assert.deepEqual(matchTarget(g, ROCQUE_CANVAS), { match: true, via: 'canvas' });
+  for (const tail of ['full/max/0/default.jpg', 'full/full/0/default.jpg', 'full/1000,/0/color.png', 'full/^!800,600/0.0/gray.webp', 'full/pct:50/0/native.jp2']) {
+    assert.deepEqual(matchTarget(g, `${ROCQUE_IMAGE}/${tail}`), { match: true, via: 'image-url' }, tail);
+    assert.equal(matchesTarget(g, `${ROCQUE_IMAGE}/${tail}`), true, tail);
+  }
+  // Not Image API grammar: no stripping (control above uses the same service).
+  for (const tail of ['full/max/0/default.bmp', 'full/max/0/fancy.jpg', 'whole/max/0/default.jpg', 'full/max/default.jpg']) {
+    assert.deepEqual(matchTarget(g, `${ROCQUE_IMAGE}/${tail}`), { match: false, via: null }, tail);
+  }
+  // Another image's picture URL does not match, and gives no reason.
+  assert.deepEqual(matchTarget(g, 'https://iiif.digitalcommonwealth.org/iiif/2/commonwealth:qr46xn78z/full/max/0/default.jpg'), { match: false, via: null });
+});
+
+test('matchTarget: a cropped or rotated picture URL does not match, and says why', async () => {
+  const g = await rocque();
+  assert.deepEqual(matchTarget(g, `${ROCQUE_IMAGE}/full/max/0/default.jpg`), { match: true, via: 'image-url' }); // control
+  assert.deepEqual(matchTarget(g, `${ROCQUE_IMAGE}/100,200,3000,4000/max/0/default.jpg`), { match: false, via: null, reason: 'cropped' });
+  assert.deepEqual(matchTarget(g, `${ROCQUE_IMAGE}/pct:10,10,50,50/max/0/default.jpg`), { match: false, via: null, reason: 'cropped' });
+  assert.deepEqual(matchTarget(g, `${ROCQUE_IMAGE}/square/max/0/default.jpg`), { match: false, via: null, reason: 'cropped' });
+  assert.deepEqual(matchTarget(g, `${ROCQUE_IMAGE}/full/max/90/default.jpg`), { match: false, via: null, reason: 'rotated' });
+  assert.deepEqual(matchTarget(g, `${ROCQUE_IMAGE}/full/max/!0/default.jpg`), { match: false, via: null, reason: 'rotated' });
+  assert.equal(matchesTarget(g, `${ROCQUE_IMAGE}/full/max/90/default.jpg`), false);
+});
+
+test('matchTarget: a picture URL never matches the canvas id; http is not https; /info.json and a slash still match', async () => {
+  const g = await rocque();
+  // A georeference whose canvas id is the only thing the picture URL's prefix could equal.
+  const canvasOnly = { ...g, imageServiceId: 'https://example.org/iiif/other' };
+  assert.deepEqual(matchTarget(canvasOnly, ROCQUE_CANVAS), { match: true, via: 'canvas' }); // control
+  assert.deepEqual(matchTarget(canvasOnly, `${ROCQUE_CANVAS}/full/max/0/default.jpg`), { match: false, via: null });
+  assert.deepEqual(matchTarget(g, `${ROCQUE_CANVAS}/full/max/0/default.jpg`), { match: false, via: null });
+  // The scheme is kept as given (Allmaps keys by the exact service id).
+  const http = ROCQUE_IMAGE.replace(/^https:/, 'http:');
+  assert.notEqual(http, ROCQUE_IMAGE);
+  assert.deepEqual(matchTarget(g, http), { match: false, via: null });
+  assert.deepEqual(matchTarget(g, `${http}/full/max/0/default.jpg`), { match: false, via: null });
+  assert.deepEqual(matchTarget(g, `${ROCQUE_IMAGE}/info.json`), { match: true, via: 'service' });
+  assert.deepEqual(matchTarget(g, `${ROCQUE_IMAGE}/`), { match: true, via: 'service' });
+});
+
+test('allmapsLookupUrl: the image ids Allmaps itself gives the fixtures', async () => {
+  // Recorded in the fixtures: bpl-rocque-annotation.json's target.source.id, and README.md for the LoC page.
+  assert.equal(await allmapsLookupUrl(ROCQUE_IMAGE), 'https://annotations.allmaps.org/images/125d074cfe08b077');
+  assert.equal(JSON.stringify(ROCQUE).includes('https://annotations.allmaps.org/images/125d074cfe08b077'), true);
+  assert.equal(await allmapsLookupUrl('https://tile.loc.gov/image-services/iiif/service:gmd:gmd384:g3842:g3842c:ct008615'), 'https://annotations.allmaps.org/images/7f2494dd1ad9ed7a');
+  // Control: the exact id matters, as it does for Allmaps.
+  assert.notEqual(await allmapsLookupUrl(`${ROCQUE_IMAGE}/`), 'https://annotations.allmaps.org/images/125d074cfe08b077');
+  await assert.rejects(allmapsLookupUrl(undefined), TypeError);
+});
+
 test('containsRegion: a region inside one map of a sheet is in its mask and not in the other', async () => {
   const left = await readGeoreference(LOC, { index: 0 }), right = await readGeoreference(LOC, { index: 1 });
   const inLeft = { xywh: '1200,4000,800,1500' }, inRight = { xywh: '3000,1000,1500,3000' };
@@ -506,6 +561,20 @@ const load = (f) => JSON.parse(readFileSync(`public/plato/${f}`, 'utf8'));
 const ajv = addPlatoFormats(new Ajv2020({ strict: false, allErrors: true, logger: strictFormatLogger }));
 ajv.addSchema(load('plato.schema.json'), 'https://w3id.org/plato/schemas/plato.schema.json');
 const citationValid = ajv.getSchema('https://w3id.org/plato/schemas/plato.schema.json#/$defs/citation');
+
+test('georefNote: a label anchor says the position is where the name is written; without one, unchanged', async () => {
+  const g = await rocque();
+  const plain = (await toWorld(g, pt([5000, 4000]), { space: 'image' })).record;
+  const anchored = (await toWorld(g, pt([5000, 4000]), { space: 'image', role: 'https://w3id.org/plato#LabelAnchor' })).record;
+  assert.equal(LABEL_ANCHOR, 'https://w3id.org/plato#LabelAnchor');
+  assert.equal(anchored.role, LABEL_ANCHOR);
+  assert.equal('role' in plain, false);
+  const sentence = `Position derived from the map through its georeference ${ROCQUE_ID} (22 control points, thin plate spline transformation), canvas ${ROCQUE_CANVAS} of ${ROCQUE_MANIFEST}.`;
+  assert.equal(georefNote(plain), sentence);
+  assert.equal(georefNote(anchored), `${sentence} The position is where the map writes the name, not necessarily where the place is.`);
+  // Another role: no extra sentence.
+  assert.equal(georefNote({ ...plain, role: 'https://w3id.org/plato#Other' }), sentence);
+});
 
 test('the record, and georefNote: exact sentences', async () => {
   const g = await rocque();

@@ -6,6 +6,53 @@ export function normaliseId(id) {
   if (typeof id !== 'string') return undefined;
   return id.trim().replace(/\/info\.json$/, '').replace(/\/+$/, '');
 }
+// A IIIF Image API 2 or 3 image request: {service}/{region}/{size}/{rotation}/{quality}.{format}.
+// Recogito Studio sometimes records an image as such a picture URL rather than its service.
+const NUM = String.raw`\d+(?:\.\d+)?`;
+const REGION = String.raw`full|square|\d+,\d+,\d+,\d+|pct:${NUM},${NUM},${NUM},${NUM}`;
+const SIZE = String.raw`full|\^?(?:max|\d+,|,\d+|pct:${NUM}|\d+,\d+|!\d+,\d+)`;
+const IMAGE_REQUEST = new RegExp(String.raw`^(.+?)/(${REGION})/(${SIZE})/(!?${NUM})/(default|color|gray|bitonal|native)\.(jpg|tif|png|gif|jp2|pdf|webp)$`);
+
+/**
+ * A IIIF Image API 2/3 image request URL taken apart: { service, region, size, rotation, quality,
+ * format }, with service as normaliseId gives it; undefined when the id is not valid Image API
+ * grammar. The scheme and case are kept exactly as given. The service id this yields may be
+ * compared only with an image service id, never with a canvas id.
+ */
+export function parseImageRequest(id) {
+  if (typeof id !== 'string') return undefined;
+  const m = IMAGE_REQUEST.exec(id.trim());
+  if (!m) return undefined;
+  const service = normaliseId(m[1]);
+  if (!service) return undefined;
+  return { service, region: m[2], size: m[3], rotation: m[4], quality: m[5], format: m[6] };
+}
+
+/**
+ * Why an image request does not show the image service's own pixel frame: 'cropped' (region is
+ * not "full"), 'rotated' (rotation other than 0, or mirrored with "!"), or null when it does.
+ * The size only scales the picture, so it does not count.
+ */
+export function imageRequestFrameChange(parts) {
+  if (parts.region !== 'full') return 'cropped';
+  if (!/^0(?:\.0+)?$/.test(parts.rotation)) return 'rotated';
+  return null;
+}
+
+/**
+ * The URL at which Allmaps' annotation server lists the georeferences of an image:
+ * https://annotations.allmaps.org/images/<first 16 hex digits of sha1(imageServiceId)>, as
+ * @allmaps/id's generateId computes it. Allmaps finds maps by IMAGE SERVICE id only, hashed
+ * exactly as written in the annotation (same scheme, case and slashes), so pass it unaltered.
+ * Async because it uses Web Crypto (Workers and Node 20+). Builds the URL; fetches nothing.
+ */
+export async function allmapsLookupUrl(imageServiceId) {
+  if (typeof imageServiceId !== 'string' || !imageServiceId) throw new TypeError('allmapsLookupUrl needs an image service id.');
+  const digest = await globalThis.crypto.subtle.digest('SHA-1', new TextEncoder().encode(imageServiceId));
+  const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+  return `https://annotations.allmaps.org/images/${hex.slice(0, 16)}`;
+}
+
 const idOf = (o) => (o && typeof o === 'object' ? o.id ?? o['@id'] : typeof o === 'string' ? o : undefined);
 const asArray = (x) => (x === undefined || x === null ? [] : Array.isArray(x) ? x : [x]);
 
