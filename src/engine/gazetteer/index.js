@@ -10,23 +10,30 @@
 //
 // - One request in flight to a service, whoever asks (WHG has 16 slots for the whole site, fans each
 //   batch out itself, and has answered 503 under load). Within one page or worker, createLookup gives
-//   ONE lookup per endpoint, so two tools or callers share its queue and take turns. Across tabs and
-//   workers, where the platform has Web Locks (browsers, and Node 24, which this repo needs), each
-//   job (a request, with its pacing and retries) is done holding an exclusive lock named after the
-//   service's site: 'plato-tools:gazetteer:whgazetteer.org' for WHG however its host is written, else
-//   the host without a leading 'www.'. `shared: false` gives a lookup of its own (for tests), which
-//   still takes the lock.
+//   ONE lookup per endpoint, so two tools or callers share its queue and take turns: a request, with
+//   its retries and the pauses between them, is finished before the next one in the page starts.
+//   Across tabs and workers, where the platform has Web Locks (browsers, and Node 24, which this repo
+//   needs), each TRY of a request is made holding an exclusive lock named after the service's site:
+//   'plato-tools:gazetteer:whgazetteer.org' for WHG however its host is written, else the host
+//   without a leading 'www.'. Held: the pacer's reading and writing of its ledger (and any wait it
+//   asks for), the request, and the reading of its answer. Not held: the pause before a retry (after
+//   a 429, a 5xx or no answer), in which another tab or worker may make its own request. `shared:
+//   false` gives a lookup of its own (for tests), which still takes the lock.
 // - A pacer keeps within WHG's rates: never more than 600 queries in any 60 seconds, nor more than
 //   60 record requests (A3, A10). WHG's window is fixed; any-60-seconds is stricter. What the pacer
 //   has sent is kept in a LEDGER (times and counts per site, nothing else), read and written only
 //   while holding the site's lock. Where there is IndexedDB (a page or a worker), the ledger is kept
 //   there, so every tab and worker of this origin counts against ONE allowance: with both Web Locks
-//   and IndexedDB, all of them together stay within the rates. Without IndexedDB (Node) the ledger
+//   and IndexedDB, all of them together stay within the rates. If IndexedDB cannot be read, refuses,
+//   or leaves opening or a transaction unanswered for `ledgerTimeoutMs` (5 seconds), the lookup warns
+//   once and counts in memory from then on. An entry dated later than now (the clock was stepped
+//   back) is counted as sent now, so it never makes a wait longer than the window. Without IndexedDB (Node) the ledger
 //   is the lookup's own, and so is the allowance; without Web Locks, lookups in different tabs are
 //   neither serialised nor jointly paced. Other origins, and other programs using the same token,
 //   are not counted at all: WHG's 429 is still handled.
 // - A request that has not answered within `timeoutMs` (60 seconds) is abandoned and counts as no
-//   answer (tried again as below), so a hung request holds the lock for at most that long per try.
+//   answer (tried again as below), so a hung request holds the lock for at most that long (plus the
+//   pacer's wait) per try.
 // - Queries go in batches (25 by default, never more than 50), and a batch holds queries of one
 //   type only (A4). Each batch names its queries q0, q1, …, and the answers are put back in the order
 //   the queries were given.
@@ -37,9 +44,9 @@
 //   effect from the next request (for reconcile and extend, the next batch).
 // - 429 (too many queries), and 502, 503, 504 or no answer at all, are tried again after a pause:
 //   the service's Retry-After when it can be read (capped; a page cannot read it from WHG, A6),
-//   else a growing one. 401, 403 and 451 are final at once: a token refused, a day's allowance
-//   spent or a source's terms will not change by asking again, and WHG blocks clients that keep
-//   asking.
+//   else a growing one; the lock is let go for the pause. 401, 403 and 451 are final at once: a
+//   token refused, a day's allowance spent or a source's terms will not change by asking again, and
+//   WHG blocks clients that keep asking.
 // - An AbortSignal stops a lookup: its request in flight, its pause between tries or for the pacer,
 //   its wait for the lock, and its requests still waiting their turn.
 import {
@@ -113,36 +120,51 @@ export function memoryLedger() {
   };
 }
 
+const DEFAULT_LEDGER_TIMEOUT_MS = 5000;
+const warnCountedHere = (e) =>
+  console.warn(`The gazetteer's pacing is counted in this tab only: IndexedDB could not be used (${e?.message ?? e}).`);
+
+/** A promise's outcome, or a rejection once `ms` have passed without one. */
+function within(promise, ms, what) {
+  let timer;
+  const late = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${what} did not answer within ${ms} ms`)), ms); });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+}
+
 /**
  * A ledger in IndexedDB (database 'plato-tools-gazetteer', store 'pacing'), which every tab and
- * worker of this origin shares. If the database cannot be used (a private window may refuse it), it
- * says so once on the console and counts in memory from then on.
- * @param {{indexedDB?: IDBFactory, name?: string}} [o]
+ * worker of this origin shares. If the database cannot be used (a private window may refuse it), or
+ * opening it or a transaction on it has not answered within `timeoutMs` (5 seconds; a browser can
+ * leave a request unanswered for good, and the ledger is used holding the site's lock), it says so
+ * once on the console and counts in memory from then on.
+ * @param {{indexedDB?: IDBFactory, name?: string, timeoutMs?: number}} [o]
  * @returns {Ledger}
  */
-export function indexedDbLedger({ indexedDB = globalThis.indexedDB, name = 'plato-tools-gazetteer' } = {}) {
+export function indexedDbLedger({ indexedDB = globalThis.indexedDB, name = 'plato-tools-gazetteer', timeoutMs = DEFAULT_LEDGER_TIMEOUT_MS } = {}) {
   const STORE = 'pacing';
+  const limit = Number.isFinite(Number(timeoutMs)) && Number(timeoutMs) > 0 ? Number(timeoutMs) : DEFAULT_LEDGER_TIMEOUT_MS;
   let db = null, fallback = null;
   const open = () => (db ??= new Promise((resolve, reject) => {
     const req = indexedDB.open(name, 1);
     req.onupgradeneeded = () => req.result.createObjectStore(STORE);
-    req.onsuccess = () => resolve(req.result);
+    // A connection that arrives after the ledger has given up on it is closed.
+    req.onsuccess = () => { if (fallback) req.result?.close?.(); resolve(req.result); };
     req.onerror = () => reject(req.error);
     req.onblocked = () => reject(new Error('the pacing database is blocked'));
   }));
   const run = async (mode, act) => {
-    const conn = await open();
-    return new Promise((resolve, reject) => {
+    const conn = await within(open(), limit, 'opening the pacing database');
+    return within(new Promise((resolve, reject) => {
       const tx = conn.transaction(STORE, mode);
       const req = act(tx.objectStore(STORE));
       tx.oncomplete = () => resolve(req.result);
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error ?? new Error('aborted'));
-    });
+    }), limit, 'the pacing database');
   };
   const fallBack = (e) => {
     if (!fallback) {
-      console.warn(`The gazetteer's pacing is counted in this tab only: IndexedDB could not be used (${e?.message ?? e}).`);
+      warnCountedHere(e);
       fallback = memoryLedger();
     }
     return fallback;
@@ -159,12 +181,19 @@ export function indexedDbLedger({ indexedDB = globalThis.indexedDB, name = 'plat
   };
 }
 
-// One IndexedDB ledger per IDBFactory, for every lookup of this page or worker.
+// One IndexedDB ledger per IDBFactory, for every lookup of this page or worker (the first one's
+// timeout stands).
 const idbLedgers = new WeakMap();
-function defaultLedger() {
-  const idb = globalThis.indexedDB;
+let warnedNoIndexedDb = false;
+function defaultLedger(timeoutMs) {
+  let idb;
+  // Reading it can throw (Firefox with storage blocked): counted here, said once.
+  try { idb = globalThis.indexedDB; } catch (e) {
+    if (!warnedNoIndexedDb) { warnedNoIndexedDb = true; warnCountedHere(e); }
+    return memoryLedger();
+  }
   if (!idb) return memoryLedger();
-  if (!idbLedgers.has(idb)) idbLedgers.set(idb, indexedDbLedger({ indexedDB: idb }));
+  if (!idbLedgers.has(idb)) idbLedgers.set(idb, indexedDbLedger({ indexedDB: idb, timeoutMs }));
   return idbLedgers.get(idb);
 }
 
@@ -181,9 +210,15 @@ export function createPacer({ limit, windowMs, now = Date.now, sleep = abortable
       if (n > limit) throw new RangeError(`${n} is more than the pacer allows in one window (${limit})`);
       for (;;) {
         const t = now();
-        const sent = (await ledger.read(key)).filter((e) => e.t > t - windowMs).sort((a, b) => a.t - b.t);
+        // An entry later than now was written before the clock was stepped back: it is taken as
+        // sent now, and kept so, so that it is counted but never makes a wait longer than the window.
+        const read = await ledger.read(key);
+        const ahead = read.some((e) => e.t > t);
+        const sent = read.map((e) => (e.t > t ? { t, n: e.n } : e))
+          .filter((e) => e.t > t - windowMs).sort((a, b) => a.t - b.t);
         const used = sent.reduce((a, e) => a + e.n, 0);
         if (used + n <= limit) { sent.push({ t, n }); await ledger.write(key, sent); return; }
+        if (ahead) await ledger.write(key, sent);
         // Wait until enough of the oldest have left the window.
         let freed = 0, until = t;
         for (const e of sent) {
@@ -222,11 +257,14 @@ const NOT_CONFIG = new Set(['endpoint', 'token', 'shared']);
  * @param {number} [o.batchSize]  queries per request, 1 to 50 (default 25)
  * @param {boolean} [o.shared]  true (the default): the one lookup for this endpoint
  * @param {{request: Function}|null} [o.locks]  a Web Locks LockManager (default
- *   globalThis.navigator?.locks; null for none): each job is done holding the exclusive lock
- *   'plato-tools:gazetteer:<site>', so that tabs and workers take turns too
+ *   globalThis.navigator?.locks; null for none): each try of a request (pacing, request, answer) is
+ *   made holding the exclusive lock 'plato-tools:gazetteer:<site>', so that tabs and workers take
+ *   turns too; the pause before a retry is not
  * @param {Ledger|null} [o.ledger]  where the pacer counts (default: IndexedDB where there is one, so
  *   that tabs and workers share one allowance; else this lookup's memory)
  * @param {number} [o.timeoutMs]  how long one try of a request may take (60000)
+ * @param {number} [o.ledgerTimeoutMs]  how long the default IndexedDB ledger waits for the database
+ *   to open or a transaction to finish before counting in memory instead (5000)
  * Optional, beyond the agreed interface: `userAgent` (sent where the platform allows; browsers may
  * drop it; one WHG's bot filter would refuse is refused here), `encoding` ('json', the default, or
  * 'form' for a service that takes only `queries=`), `defaultLimit` (candidates asked for when a
@@ -246,7 +284,7 @@ export function createLookup(options = {}) {
   const found = shared.get(key);
   if (found) {
     if (o.token !== undefined) found.lookup.setToken(o.token);
-    const differ = Object.keys(o).filter((k) => !NOT_CONFIG.has(k) && o[k] !== undefined && !found.warned.has(k) && !sameOption(found.options[k], o[k]));
+    const differ = Object.keys(o).filter((k) => !NOT_CONFIG.has(k) && o[k] !== undefined && !found.warned.has(k) && !sameOption(k, found.options[k], o[k]));
     if (differ.length) {
       differ.forEach((k) => found.warned.add(k));
       console.warn(`createLookup: a later call for ${siteOf(endpoint)} gave ${differ.join(', ')} unlike the first call; the first call's stand, as there is one lookup per endpoint.`);
@@ -266,9 +304,13 @@ function checkKinds({ fetch: f, locks, ledger, token }) {
   if (token != null && typeof token !== 'string') throw new TypeError('token must be a string, or null to clear it');
 }
 
-function sameOption(a, b) {
+// Options that are things with behaviour (a ledger, a LockManager, fetch), not values: the same only
+// if the same object. JSON would see two memoryLedger()s alike, as {}.
+const BY_IDENTITY = new Set(['fetch', 'locks', 'ledger', 'now', 'sleep', 'iri']);
+function sameOption(k, a, b) {
   if (a === b) return true;
-  if (a && b && typeof a === 'object' && typeof b === 'object' && typeof a !== 'function') {
+  if (BY_IDENTITY.has(k)) return false;
+  if (a && b && typeof a === 'object' && typeof b === 'object') {
     try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
   }
   return false;
@@ -296,6 +338,7 @@ function makeLookup({
   userAgent = USER_AGENT, encoding = WHG_ENCODING, defaultLimit = WHG_DEFAULT_LIMIT, iri, entityBase,
   queryRate = WHG_QUERY_RATE, entityRate = WHG_ENTITY_RATE, now = Date.now, sleep = abortableSleep,
   maxRetries = 5, maxRetryAfter = 60, locks = globalThis.navigator?.locks, ledger, timeoutMs = DEFAULT_TIMEOUT_MS,
+  ledgerTimeoutMs = DEFAULT_LEDGER_TIMEOUT_MS,
 }) {
   if (typeof fetchFn !== 'function') throw new TypeError('createLookup needs fetch');
   const size = clampBatch(batchSize);
@@ -327,7 +370,9 @@ function makeLookup({
   setToken(firstToken);
   const scrub = (text, also) => {
     let out = String(text);
-    for (const t of [token, also, ...retired]) if (t) out = out.split(t).join('[token]');
+    // Longest first, so that a token which begins another does not leave the rest of it.
+    const all = [token, also, ...retired].filter(Boolean).sort((a, b) => b.length - a.length);
+    for (const t of all) out = out.split(t).join('[token]');
     return out;
   };
 
@@ -336,12 +381,12 @@ function makeLookup({
   const limitDefault = Math.min(WHG_BATCH_LIMIT, Math.max(1, Math.floor(Number(defaultLimit)) || WHG_DEFAULT_LIMIT));
   const iriOf = iri ?? (whg ? whgIri : (id) => (/^[a-z][a-z0-9+.-]*:\/\//i.test(id) ? id : null));
   const recordsFrom = entityBase ?? (whg ? endpoint : null);
-  const book = ledger ?? defaultLedger();
+  const book = ledger ?? defaultLedger(ledgerTimeoutMs);
   const queryPacer = queryRate ? createPacer({ ...queryRate, now, sleep, ledger: book, key: site + ':queries' }) : null;
   const entityPacer = entityRate ? createPacer({ ...entityRate, now, sleep, ledger: book, key: site + ':entities' }) : null;
 
-  // The shared queue: one job (one request, with its pacing and retries) runs at a time, holding the
-  // site's lock where there is a LockManager.
+  // The shared queue: one job (one request, with its pacing and retries) runs at a time in this page
+  // or worker. Each TRY of it is made holding the site's lock where there is a LockManager (send).
   const queue = [];
   let busy = false;
   function schedule(run, signal) {
@@ -363,10 +408,10 @@ function makeLookup({
     const job = queue.shift();
     busy = true;
     job.detach();
-    try { job.resolve(await exclusive(job.run, job.signal)); } catch (e) { job.reject(e); } finally { busy = false; pump(); }
+    try { job.resolve(await job.run()); } catch (e) { job.reject(e); } finally { busy = false; pump(); }
   }
   // Waiting for the lock ends when the signal aborts, rejecting with its reason; the lock is let go
-  // when the job ends, however it ends. The pacer's ledger is read and written inside (send).
+  // when `run` ends, however it ends.
   async function exclusive(run, signal) {
     if (!locks) return run();
     try {
@@ -390,33 +435,44 @@ function makeLookup({
     return JSON.stringify({ [name]: value });
   }
 
-  async function send({ method, url, payload, auth, pacer, cost }, signal) {
-    // Read once: every try of this request carries the same token.
-    const tok = auth ? token : null;
-    for (let attempt = 0; ; attempt++) {
+  // One try, holding the site's lock: the pacer's take (its ledger, and any wait it asks for), the
+  // request, and reading its body. The lock is let go before any pause between tries.
+  function attempt({ method, url, payload, pacer, cost }, tok, signal) {
+    return exclusive(async () => {
       await pacer?.take(cost, signal);
       const one = trySignal(signal, perTry);
-      let res, text;
       try {
-        res = await settleOrAbort(fetchFn(url, { method, headers: headers(method === 'POST', tok), body: payload, signal: one.signal, credentials: 'omit' }), one.signal);
+        const res = await settleOrAbort(fetchFn(url, { method, headers: headers(method === 'POST', tok), body: payload, signal: one.signal, credentials: 'omit' }), one.signal);
         // The body too, within the same time.
-        text = await settleOrAbort(res.text(), one.signal);
+        const text = await settleOrAbort(res.text(), one.signal);
+        return { res, text };
       } catch (e) {
         if (signal?.aborted) throw signal.reason;
-        if (attempt < maxRetries) { await sleep(backoff(attempt, 1000), signal); continue; }
-        const why = one.timedOut() ? ` within ${perTry / 1000} seconds` : e?.message ? ` (${scrub(e.message, tok)})` : '';
-        throw new GazetteerError(`The gazetteer could not be reached${why}.`, { kind: 'network' });
+        return { failed: e, timedOut: one.timedOut() };
       } finally { one.done(); }
+    }, signal);
+  }
+
+  async function send(request, signal) {
+    // Read once: every try of this request carries the same token.
+    const tok = request.auth ? token : null;
+    for (let tries = 0; ; tries++) {
+      const { res, text, failed, timedOut } = await attempt(request, tok, signal);
+      if (failed !== undefined) {
+        if (tries < maxRetries) { await sleep(backoff(tries, 1000), signal); continue; }
+        const why = timedOut ? ` within ${perTry / 1000} seconds` : failed?.message ? ` (${scrub(failed.message, tok)})` : '';
+        throw new GazetteerError(`The gazetteer could not be reached${why}.`, { kind: 'network' });
+      }
       if (res.ok) {
         try { return JSON.parse(text); } catch {
           throw new GazetteerError('The gazetteer answered with something that is not JSON.', { status: res.status, kind: 'server' });
         }
       }
-      if (RETRY_STATUS.has(res.status) && attempt < maxRetries) {
+      if (RETRY_STATUS.has(res.status) && tries < maxRetries) {
         // Null in a browser talking to WHG, whose CORS does not expose Retry-After (A6).
         const asked = retryAfter(res.headers?.get?.('Retry-After'));
         // Without it, a 429 waits longer: WHG's window is a minute (A3).
-        const wait = asked ?? backoff(attempt, res.status === 429 ? 4000 : 1000);
+        const wait = asked ?? backoff(tries, res.status === 429 ? 4000 : 1000);
         await sleep(Math.min(wait, maxRetryAfter * 1000), signal);
         continue;
       }

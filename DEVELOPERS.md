@@ -550,14 +550,23 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   call's options stand: a later call's differing options are ignored with one `console.warn` each,
   but a later token replaces the token and `token: null` clears it (also `lookup.setToken(t)`,
   `lookup.clearToken()`). A tool reads the token from the one shared store (`src/lib/whg-token.js`)
-  and passes it, rather than keeping a copy of its own. Across tabs and workers, each request is
-  made holding the Web Lock `plato-tools:gazetteer:<site>`. What is guaranteed about WHG's 600
-  queries a minute: the pacer's ledger (times and counts per site only) is kept in IndexedDB and
-  used only holding that lock, so where a platform has both (browsers, pages and workers alike)
-  every tab and worker of an origin shares ONE allowance; in Node, which has no IndexedDB, and
-  wherever there is none, the allowance is per lookup; other origins and programs are not counted.
-  Each try of a request is abandoned after `timeoutMs` (60 s) and counts as no answer, so a hung
-  request cannot hold the lock for longer than that per try. Tests use `shared: false` and
+  and passes it, rather than keeping a copy of its own. What is held when: within a page or
+  worker, the shared lookup's queue runs one request at a time, and a request's retries and the
+  pauses between them finish before the next request in that page starts. Across tabs and workers,
+  each TRY of a request is made holding the Web Lock `plato-tools:gazetteer:<site>`, which covers
+  the pacer's read and write of its ledger (and any wait the pacer asks for), the request, and
+  reading its answer; the lock is let go before the pause that precedes a retry (after a 429, a 5xx
+  or no answer), so another tab or worker may make its request during that pause. What is
+  guaranteed about WHG's 600 queries a minute: the pacer's ledger (times and counts per site only)
+  is kept in IndexedDB and used only holding that lock, so where a platform has both (browsers,
+  pages and workers alike) every tab and worker of an origin shares ONE allowance; in Node, which
+  has no IndexedDB, and wherever there is none, the allowance is per lookup; other origins and
+  programs are not counted. If IndexedDB cannot be read, refuses, or does not answer an open or a
+  transaction within `ledgerTimeoutMs` (5 s), the lookup warns once and counts in that tab's memory
+  from then on. A ledger entry dated after now (a clock stepped back) counts as sent now, so it
+  never makes a wait longer than the window. Each try of a request is abandoned after `timeoutMs`
+  (60 s) and counts as no answer, so a hung request cannot hold the lock for longer than that (plus
+  the pacer's wait) per try. Tests use `shared: false` and
   `locks: null`, or a fake LockManager and a fake `ledger`. Every assumption about the World
   Historical Gazetteer, and whether it is verified, is in `whg.js`, so that a correction is made in
   one place.

@@ -884,7 +884,7 @@ test('token: null clears the token (sent without Authorization from then on); un
   const s = service();
   const first = createLookup({ endpoint: EP, token: 'tok-A-1111', fetch: s.fetch, locks: null });
   await first.reconcile(names(1));
-  createLookup({ endpoint: EP, fetch: s.fetch, locks: null }).reconcile(names(1));
+  await createLookup({ endpoint: EP, fetch: s.fetch, locks: null }).reconcile(names(1));
   await createLookup({ endpoint: EP, token: undefined, fetch: s.fetch, locks: null }).reconcile(names(1));
   await createLookup({ endpoint: EP, token: null, fetch: s.fetch, locks: null }).reconcile(names(1));
   await first.reconcile(names(1));
@@ -1084,25 +1084,29 @@ test('an AbortSignal stops a lookup waiting for the real navigator.locks', { tim
   release(); await other;
 });
 
-test('an AbortSignal during a pause taken holding the real lock lets the lock go', { timeout: 5000 }, async (t) => {
+test('with the real lock: held during a request, not during the pause between tries, and an AbortSignal ends the pause at once', { timeout: 5000 }, async (t) => {
   if (!globalThis.navigator?.locks) return t.skip('no navigator.locks here');
   const NAME = 'plato-tools:gazetteer:abort-in-backoff.example';
+  const heldNow = async () => (await navigator.locks.query()).held.some((l) => l.name === NAME);
   let n = 0;
-  const s = service({ answer: (sent, call) => (++n === 1 ? reply(503, {}) : echo(sent, call)) });
+  const heldInRequest = [];
+  const s = service({ answer: async (sent, call) => { heldInRequest.push(await heldNow()); return ++n === 1 ? reply(503, {}) : echo(sent, call); } });
   const look = createLookup({ endpoint: 'https://abort-in-backoff.example/reconcile', fetch: s.fetch, shared: false }); // real sleep
   const ac = new AbortController();
   const p = look.reconcile(names(1), { signal: ac.signal }).catch((e) => e.name);
   await wait(30);
   assert.equal(s.calls.length, 1);
-  assert.ok((await navigator.locks.query()).held.some((l) => l.name === NAME), 'held during the pause');
+  assert.deepEqual(heldInRequest, [true], 'held while the request was made');
+  assert.equal(await heldNow(), false, 'not held during the pause');
   const aborted = Date.now();
   ac.abort();
   assert.equal(await p, 'AbortError');
   // The pause is at least 750 ms; the abort ends it at once, not when it is over.
   assert.ok(Date.now() - aborted < 500, `stopped ${Date.now() - aborted} ms after the abort`);
-  assert.ok(!(await navigator.locks.query()).held.some((l) => l.name === NAME), 'let go');
+  assert.equal(await heldNow(), false);
   const r = await Promise.race([createLookup({ endpoint: 'https://abort-in-backoff.example/reconcile', fetch: s.fetch, shared: false }).reconcile(names(1)).then(() => 'ran'), wait(1000).then(() => 'HUNG')]);
   assert.equal(r, 'ran');
+  assert.deepEqual(heldInRequest, [true, true]);
 });
 
 // ---- The manifest, and exports ----
@@ -1128,4 +1132,134 @@ test('mergeAttribution and WHG_PLACE_TYPE are exported', () => {
   assert.equal(gz.WHG_PLACE_TYPE, 'Place');
   assert.equal(typeof gz.mergeAttribution, 'function');
   assert.deepEqual(gz.mergeAttribution(null, { sources: { gn: {} } }), { sources: { gn: {} } });
+});
+
+// ---- The second independent review (repros NEW B, C, D, H; the lock's scope; sameOption) ----
+
+/** An IDBFactory whose open() returns a request none of whose events ever fire. */
+const hungOpen = () => ({ opened: 0, open() { this.opened++; return {}; } });
+/** An IDBFactory whose open() succeeds but whose transactions never complete, abort or fail. */
+const hungTransaction = () => ({
+  open() {
+    const req = {};
+    const conn = { transaction: () => ({ objectStore: () => ({ get: () => ({}), put: () => ({}) }) }), close() {} };
+    setTimeout(() => { req.result = conn; req.onsuccess?.(); }, 0);
+    return req;
+  },
+});
+
+test('an IndexedDB that never answers (open, or a transaction) is given up after ledgerTimeoutMs: the lookup goes on and lets the lock go', { timeout: 5000 }, async (t) => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  for (const [what, idb] of [['open', hungOpen()], ['transaction', hungTransaction()]]) {
+    const locks = fakeLocks();
+    const s = service();
+    const look = lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch, locks, ledger: gz.indexedDbLedger({ indexedDB: idb, timeoutMs: 50 }) });
+    const started = Date.now();
+    const r = await Promise.race([look.reconcile([{ query: 'after' }]).then((o) => o[0][0].name), wait(1500).then(() => 'HUNG')]);
+    assert.equal(r, 'after', `${what}: the lookup answered`);
+    assert.ok(Date.now() - started >= 45, `${what}: it did wait for the database first`);
+    assert.equal(s.calls.length, 1, `${what}: the request was sent`);
+    assert.equal(locks.heldNow, 0, `${what}: the lock was let go`);
+    // Counted in memory from then on: a second lookup through the same ledger does not wait again.
+    const again = Date.now();
+    await look.reconcile([{ query: 'again' }]);
+    assert.ok(Date.now() - again < 45, `${what}: not waited for again`);
+  }
+  assert.equal(warn.mock.callCount(), 2, 'one warning per ledger');
+  assert.match(String(warn.mock.calls[0].arguments[0]), /counted in this tab only/);
+  // The same timeout is createLookup's ledgerTimeoutMs for the default (IndexedDB) ledger.
+  const had = Object.getOwnPropertyDescriptor(globalThis, 'indexedDB');
+  globalThis.indexedDB = hungOpen();
+  try {
+    const s = service();
+    const look = lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch, ledgerTimeoutMs: 50 });
+    const r = await Promise.race([look.reconcile([{ query: 'default' }]).then((o) => o[0][0].name), wait(1500).then(() => 'HUNG')]);
+    assert.equal(r, 'default');
+    assert.equal(globalThis.indexedDB.opened, 1, 'the default ledger was the database');
+  } finally {
+    if (had) Object.defineProperty(globalThis, 'indexedDB', had); else delete globalThis.indexedDB;
+  }
+});
+
+test('a ledger entry from a clock since stepped back makes a query wait no longer than the window', async () => {
+  const t = fakeTime();
+  const ledger = gz.memoryLedger();
+  // Written when this machine's clock was an hour ahead, and a full minute's worth.
+  await ledger.write('whgazetteer.org:queries', [{ t: 3_600_000, n: 600 }]);
+  const s = service({ delay: 0 });
+  const look = lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch, ledger, now: t.clock, sleep: t.sleep });
+  assert.equal((await look.reconcile([{ query: 'soon' }]))[0][0].name, 'soon');
+  const waited = t.slept.reduce((a, b) => a + b, 0);
+  // Positive: the entry was counted (it is a full window's worth), so there was a wait…
+  assert.ok(waited > 0, 'the entry was read and counted');
+  // …but no longer than one window.
+  assert.ok(waited <= 60_000, `waited ${waited / 60_000} minutes`);
+});
+
+test('an indexedDB that throws when read (storage blocked) leaves createLookup working, counting in memory, with one warning', async (t) => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  const had = Object.getOwnPropertyDescriptor(globalThis, 'indexedDB');
+  let reads = 0;
+  Object.defineProperty(globalThis, 'indexedDB', { configurable: true, get() { reads++; throw new DOMException('The operation is insecure.', 'SecurityError'); } });
+  try {
+    const s = service();
+    const look = lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch });
+    assert.ok(reads > 0, 'indexedDB was looked for');
+    assert.equal((await look.reconcile([{ query: 'x' }]))[0][0].name, 'x');
+    lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch });
+    assert.equal(warn.mock.callCount(), 1, 'warned once');
+    assert.match(String(warn.mock.calls[0].arguments[0]), /counted in this tab only.*insecure/);
+  } finally {
+    if (had) Object.defineProperty(globalThis, 'indexedDB', had); else delete globalThis.indexedDB;
+  }
+});
+
+test('a token that begins another (current \'abcdef\', retired \'abcdef123456\') is cleaned whole: the longer is replaced first', async () => {
+  const s = service({ answer: () => reply(401, { detail: 'bad: abcdef123456' }) });
+  // The shorter is the current token, the longer one it replaced: the current is cleaned first today.
+  const look = lookup({ endpoint: WHG_ENDPOINT, token: 'abcdef123456', fetch: s.fetch });
+  look.setToken('abcdef');
+  const err = await look.reconcile(names(1)).catch((e) => e);
+  assert.equal(s.calls[0].headers.Authorization, 'Bearer abcdef', 'the shorter is the current token');
+  assert.match(err.message, /bad: \[token\]/);
+  assert.ok(!err.message.includes('123456'), err.message);
+});
+
+test('a later createLookup call with a different ledger or LockManager object warns, naming it; the same object does not', (t) => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  const EP = 'https://later-objects.example/reconcile';
+  const f = service().fetch;
+  const ledger = gz.memoryLedger(), locks = fakeLocks();
+  createLookup({ endpoint: EP, fetch: f, ledger, locks });
+  createLookup({ endpoint: EP, fetch: f, ledger, locks });
+  assert.equal(warn.mock.callCount(), 0, 'the same objects are no cause to warn');
+  createLookup({ endpoint: EP, fetch: f, ledger: gz.memoryLedger(), locks });
+  assert.equal(warn.mock.callCount(), 1);
+  assert.match(String(warn.mock.calls[0].arguments[0]), /gave ledger unlike/);
+  createLookup({ endpoint: EP, fetch: f, ledger, locks: fakeLocks() });
+  assert.equal(warn.mock.callCount(), 2);
+  assert.match(String(warn.mock.calls[1].arguments[0]), /gave locks unlike/);
+});
+
+test('the lock is held for each try, not across the pause between tries: another tab is served during the pause', { timeout: 5000 }, async () => {
+  const locks = fakeLocks();
+  let n = 0, heldInFetch = 0, heldInPause = null, other = null;
+  const s = service({ delay: 1, answer: (sent, call) => (++n === 1 ? reply(503, {}) : echo(sent, call)) });
+  const fetch = (u, i) => { heldInFetch += locks.heldNow; return s.fetch(u, i); };
+  // Another tab (its own lookup, sharing only the LockManager).
+  const tab2 = lookup({ endpoint: WHG_ENDPOINT, fetch, locks });
+  const tab1 = lookup({
+    endpoint: WHG_ENDPOINT, fetch, locks,
+    sleep: async () => {
+      heldInPause = locks.heldNow;
+      other = await Promise.race([tab2.reconcile([{ query: 'other' }]).then((o) => o[0][0].name), wait(500).then(() => 'blocked')]);
+    },
+  });
+  const [r] = await tab1.reconcile([{ query: 'first' }]);
+  assert.equal(r[0].name, 'first', 'the first tab got its answer after the retry');
+  assert.equal(heldInPause, 0, 'the lock was not held during the pause');
+  assert.equal(other, 'other', 'the other tab was served during the pause');
+  assert.deepEqual(s.calls.map((c) => c.sent.queries.q0.query), ['first', 'other', 'first']);
+  assert.equal(heldInFetch, 3, 'every request, the retry too, was made holding the lock');
+  assert.equal(locks.heldNow, 0);
 });
