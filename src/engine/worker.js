@@ -91,7 +91,11 @@ self.onmessage = async ({ data }) => {
       postMessage({ type: 'ready', version: resources.version });
     } else if (data.cmd === 'detect') {
       const input = await detect(data.files);
-      postMessage({ type: 'detected', input: { ...input, files: undefined }, targets: TARGETS });
+      // File objects stay here; the page is told what was found, and the run detects the files again.
+      // A Recogito export chosen with georeferences and manifests (input.js, detectGroup) keeps their
+      // names, for the page to say what it will use.
+      const names = (list) => (list ? list.map((f) => f.name) : undefined);
+      postMessage({ type: 'detected', input: { ...input, files: undefined, georefs: names(input.georefs), manifests: names(input.manifests) }, targets: TARGETS });
     } else if (data.cmd === 'columns') {
       // Hermes: a table of places' columns, three examples of each, and the mapping a run would use
       // (the guess, or `saved`, a matching the page loaded, checked against the columns there are).

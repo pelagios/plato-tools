@@ -349,7 +349,7 @@ export async function detect(files) {
   const names = files.map((f) => base(f.name));
   const csvs = files.filter((f, i) => names[i].endsWith('.csv'));
   if (csvs.length && csvs.length === files.length) return csvSetKind(files);
-  if (files.length !== 1) return { format: null, reason: 'Choose one file, or the ten CSV files of a set of tables.' };
+  if (files.length !== 1) return detectGroup(files);
   const f = files[0], n = names[0];
   if (n.endsWith('.zip')) {
     // A zip is the tables only when a file in it is named after a sheet; one that holds none (a
@@ -398,6 +398,7 @@ export async function detect(files) {
     // A IIIF Georeference Annotation (Allmaps) is an annotation too, so it is told apart first.
     const georef = georefOf(top);
     if (georef) return { format: 'georef', ...georef, reason: GEOREF_REASON, files };
+    if (isManifest(top)) return { format: 'manifest', reason: MANIFEST_REASON, files };
     // The document's own profile, type and @context may come after a long member (a gazetteer, a
     // title), past the head, so its top-level keys are read as far as they go; the head's text is
     // the fallback it always was.
@@ -663,6 +664,39 @@ function georefOf(top) {
     if (typeof id === 'string' && !ids.includes(id)) ids.push(id);
   }
   return { count: maps.length, imageServiceIds: ids };
+}
+
+// ---- A Recogito export with the georeferences of its maps (Hermes: georeferenced regions) ------------
+export const MANIFEST_REASON = 'This is a IIIF manifest (the description of a digitised object, not a dataset): drop it together with the Recogito export whose regions are on it and the georeference of its map.';
+const GROUP_REASON = 'Choose one file, or the ten CSV files of a set of tables, or one Recogito export together with the georeferences (IIIF Georeference Annotations) of the maps its regions are drawn on, and their IIIF manifests if you have them.';
+/** A IIIF Presentation manifest (2 or 3), from the head: its context and its type. */
+function isManifest(top) {
+  if (!top || typeof top !== 'object' || Array.isArray(top)) return false;
+  const iiif = [].concat(top['@context'] ?? []).some((c) => typeof c === 'string' && /^https?:\/\/iiif\.io\/api\/presentation\/[23]\/context\.json$/.test(c));
+  return iiif && [].concat(top.type ?? top['@type'] ?? []).some((t) => t === 'Manifest' || t === 'sc:Manifest');
+}
+/**
+ * Several files that are not a set of tables: one Recogito export (W3C Web Annotations), with the
+ * IIIF Georeference Annotations of the maps its regions are drawn on and, optionally, the maps'
+ * IIIF manifests. Each file is detected on its own; exactly one must be annotations and every other
+ * a georeference or a manifest. Gives the annotations' input, with `georefs` and `manifests` (the
+ * files, in the order chosen); any other mix gives a reason.
+ */
+async function detectGroup(files) {
+  if (!files.length) return { format: null, reason: GROUP_REASON };
+  const each = [];
+  for (const f of files) each.push(await detect([f]));
+  const main = each.filter((d) => d.format === 'w3c-annotations');
+  const georefs = files.filter((f, i) => each[i].format === 'georef');
+  const manifests = files.filter((f, i) => each[i].format === 'manifest');
+  if (main.length === 1 && 1 + georefs.length + manifests.length === files.length) return { ...main[0], georefs, manifests };
+  if (main.length > 1) return { format: null, reason: `${main.length} of the files chosen are annotation exports: choose one export at a time, with the georeferences of its maps. ${GROUP_REASON}` };
+  if (main.length === 1) {
+    const other = files.filter((f, i) => !['w3c-annotations', 'georef', 'manifest'].includes(each[i].format)).map((f) => f.name);
+    return { format: null, reason: `With a Recogito export, only georeferences and IIIF manifests can be chosen, and ${other.join(', ')} ${other.length === 1 ? 'is' : 'are'} neither. ${GROUP_REASON}` };
+  }
+  if (georefs.length || manifests.length) return { format: null, reason: `No Recogito export was chosen with the georeferences or manifests, which are not read on their own. ${GROUP_REASON}` };
+  return { format: null, reason: GROUP_REASON };
 }
 
 /**

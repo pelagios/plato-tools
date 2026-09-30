@@ -7,7 +7,13 @@ FORMAT_NAMES.tei = 'a TEI XML edition';
 FORMAT_NAMES.csv = 'a table of places (CSV), its columns matched to PLATO';
 FORMAT_NAMES.geojson = 'plain GeoJSON (not Linked Places Format), its properties matched to PLATO';
 /** What a detected input is, in words: "PLATO JSON Lines (place-centric)". */
-export const formatName = (input) => FORMAT_NAMES[input.format] + (input.profile ? ` (${input.profile})` : '') + (input.lpfVersion === 2 ? ', version 2' : '');
+export const formatName = (input) => FORMAT_NAMES[input.format] + (input.profile ? ` (${input.profile})` : '') + (input.lpfVersion === 2 ? ', version 2' : '') + withGeorefs(input);
+// Hermes: a Recogito export chosen with the georeferences of its maps, and their manifests (plural is below).
+function withGeorefs({ georefs, manifests }) {
+  if (!georefs?.length && !manifests?.length) return '';
+  const parts = [georefs?.length ? plural(georefs.length, 'georeference', 'georeferences') : '', manifests?.length ? plural(manifests.length, 'IIIF manifest', 'IIIF manifests') : ''].filter(Boolean);
+  return `, with ${parts.join(' and ')} to place its regions`;
+}
 
 // A count in words, singular for one: "1 place", "2 places", "1 identity relation".
 const ONE = { 'earlier attestations': 'earlier attestation', annotations: 'annotation', places: 'place', attestations: 'attestation', 'identity relations': 'identity relation', triples: 'triple', 'triples written': 'triple written', 'table rows': 'table row', observations: 'Data Cube observation' };
