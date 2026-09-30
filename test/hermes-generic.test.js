@@ -15,7 +15,8 @@ import { addPlatoFormats, strictFormatLogger } from '../src/lib/formats.js';
 import { detect, DataError } from '../src/engine/input.js';
 import { Report } from '../src/engine/report.js';
 import { tableIds } from '../src/formats/tables.js';
-import { genericSource, genericProfile, columnsOf, mappingOf } from '../src/engine/hermes/generic.js';
+import { genericSource, genericProfile, columnsOf, mappingOf, csvRecords } from '../src/engine/hermes/generic.js';
+import Papa from 'papaparse';
 import { FEATURE_ID } from '../src/engine/hermes/columns.js';
 import { PLATO_REPO } from './paths.js';
 import { file, textFile, go, outText } from './engine.js';
@@ -314,6 +315,36 @@ test('a column or a property called __proto__ is read like any other, in a CSV f
   assert.deepEqual((await columnsOf(g.input)).headers, [FEATURE_ID, '__proto__', 'name']);
   assert.equal(g.doc.spatialEntities[0].label, 'Roma', 'control');
   assert.equal(g.doc.spatialEntities[0].attestations[0].notes, '__proto__: {"a":1}');
+});
+// ---- streaming: a CSV file is read a chunk at a time, never whole ------------------------------------------
+async function* inChunks(text, size) { for (let i = 0; i < text.length; i += size) yield text.slice(i, i + size); }
+const streamed = async (text, size, opts) => { const out = []; for await (const r of csvRecords(inChunks(text, size), opts)) out.push(r); return out; };
+test('a CSV file read in chunks of any size gives the rows Papa gives reading it whole', async () => {
+  const texts = ['id,name\n1,"Roma\nnova"\n2,"Os""tia"\n\n3,Athenae\n', 'id,name\r\n1,"Ro,ma"\r\n2,"x"\r\n3,""\r\n', 'a;b;c\n1;"2;3";4\n5;6;7', 'one\nA\n\nB\n', 'a,b\n"q ""x"" q","y\r\nz"\nlast,row\n'];
+  let compared = 0;
+  for (const t of texts) {
+    // Past the first ten lines, from which the delimiter and the line break are guessed, the chunks are as small as they are given.
+    const nl = t.includes('\r\n') ? '\r\n' : '\n', [head, ...body] = t.split(nl);
+    const text = [head, ...Array.from({ length: 12 }, () => body.filter(Boolean)).flat()].join(nl) + nl;
+    const whole = Papa.parse(text, { skipEmptyLines: 'greedy' }).data;
+    assert.ok(whole.length >= 3, text);
+    for (const size of [1, 2, 3, 5, 7, 11, 64, 100000]) { assert.deepEqual(await streamed(text, size), whole, `${JSON.stringify(t)} in chunks of ${size}`); compared++; }
+  }
+  assert.equal(compared, 40);
+});
+test('a quotation mark out of place stops the file wherever it is, however the file is cut into chunks, naming its line', async () => {
+  const rows = Array.from({ length: 30000 }, (_, i) => `${i},Place ${i}`);
+  const good = ['id,name', ...rows].join('\n') + '\n';
+  const bad = ['id,name', ...rows.slice(0, 20000), '20000,"Roma', ...rows.slice(20001)].join('\n') + '\n';
+  const stray = ['id,name', ...rows.slice(0, 25000), '25000,"Os"tia"', ...rows.slice(25001)].join('\n') + '\n';
+  for (const size of [1000, 4096, 65536]) {
+    await assert.rejects(streamed(bad, size), (e) => e instanceof DataError && /never closed near line 20002/.test(e.message), `chunks of ${size}`);
+    await assert.rejects(streamed(stray, size), (e) => e instanceof DataError && /stray quotation mark .* near line 25002/.test(e.message), `chunks of ${size}`);
+    assert.equal((await streamed(good, size)).length, 30001, `control, chunks of ${size}`);
+  }
+  // Through the reader, from a file: the rows before are read, and the file is still refused.
+  await assert.rejects(readAll(textFile(bad, 'x.csv')), (e) => e instanceof DataError && /near line 20002/.test(e.message));
+  assert.equal((await readAll(textFile(good, 'x.csv'))).doc.spatialEntities.length, 30000, 'control');
 });
 test('a CSV file with no header, and GeoJSON in another reference system, are refused', async () => {
   await assert.rejects(readAll(textFile('\n\n', 'x.csv')), DataError);

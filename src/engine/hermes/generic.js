@@ -26,16 +26,31 @@ const FEATURE_KEYS = new Set(['type', 'id', 'geometry', 'properties']);
 // reference system in `crs`, and its coordinates would then be read as degrees they are not.
 const WGS84 = /^(urn:ogc:def:crs:OGC:1\.3:CRS84|urn:ogc:def:crs:EPSG::4326|EPSG:4326|CRS84)$/i;
 
-async function wholeText(file) {
+/** The text of a file in chunks, decompressed and decoded, without its byte-order mark; a break in the bytes is a DataError. */
+async function* textChunks(file) {
   const reader = (await textStream(file)).getReader();
+  let first = true;
+  try {
+    for (;;) {
+      let r;
+      try { r = await reader.read(); }
+      catch (e) { throw new DataError(`The file stops, or is damaged, part-way through, so it cannot be read to the end (${String(e && (e.message || e.name) || e).split('\n')[0]}).`); }
+      if (r.done) break;
+      let t = r.value;
+      if (first && t) { t = t.replace(/^\ufeff/, ''); first = false; }
+      if (t) yield t;
+    }
+  } finally { reader.cancel().catch(() => {}); }
+}
+async function wholeText(file) {
   let s = '';
-  try { for (;;) { const { value, done } = await reader.read(); if (done) break; s += value; } }
-  catch (e) { throw new DataError(`The file stops, or is damaged, part-way through, so it cannot be read to the end (${String(e && (e.message || e.name) || e).split('\n')[0]}).`); }
-  return s.replace(/^﻿/, '');
+  for await (const t of textChunks(file)) s += t;
+  return s;
 }
 
-// What has been read of each input, so that finding the profile, the columns and the rows reads the
-// file once (a CSV file is parsed whole, as the spreadsheet tables are).
+// What has been read of each input's start (its columns and first rows), so that finding the
+// profile, the columns and the mapping reads the start once. The rows are never kept: each reading
+// of them streams the file again.
 const opened = new WeakMap();
 
 /**
@@ -49,26 +64,71 @@ async function open(input) {
   opened.set(file, t);
   return t;
 }
-async function openCsv(file, input) {
-  const text = await wholeText(file);
-  // Parsed without Papa's header: it renames a repeated heading (name -> name_1) without saying so,
-  // and loses a heading "__proto__" from its row objects. The header is read here instead.
-  const parsed = Papa.parse(text, { skipEmptyLines: 'greedy', ...(input.delimiter ? { delimiter: input.delimiter } : {}) });
-  const lineOf = (index) => (Number.isInteger(index) ? text.slice(0, index).split('\n').length : undefined);
-  const problems = [];
-  for (const e of parsed.errors) {
-    // A file with one column has no delimiter to detect, which is not a problem.
-    if (e.code === 'UndetectableDelimiter') continue;
-    const line = lineOf(e.index);
-    // A quotation mark out of place moves where Papa thinks a row ends: rows are merged into one cell,
-    // or split, and nothing read after it can be trusted to be the row it seems. Papa's row numbers
-    // for these count differently from its rows, so the line is found from where in the text it is.
-    if (e.type === 'Quotes') {
-      throw new DataError(`The CSV file has ${e.code === 'MissingQuotes' ? 'a quotation mark that opens a cell and is never closed' : 'a stray quotation mark in a quoted cell (a quotation mark inside a quoted cell is written twice: "")'}${line ? ` near line ${line}` : ''}, so where its rows begin and end cannot be told. Correct the quotation marks and try again.`);
+
+/**
+ * The records of CSV text given in chunks, one array of cells at a time, as Papa reads them, with
+ * the rows whose cells are all empty left out (as Papa's skipEmptyLines 'greedy'). Nothing is held
+ * but the chunk being read and the row it breaks off in, so a file of any size streams. The
+ * delimiter is `delimiter`, else guessed (as Papa guesses it) from the start of the text.
+ *
+ * A quotation mark out of place moves where Papa thinks a row ends: rows are merged into one cell,
+ * or split, and nothing read after it can be trusted to be the row it seems. It stops the file with
+ * a DataError naming the line, found from where in the text it is. Any other problem Papa finds is
+ * given to `problem(example)`, never dropped.
+ */
+export async function* csvRecords(chunks, { delimiter, problem = () => {} } = {}) {
+  const it = chunks[Symbol.asyncIterator]();
+  let buf = '', done = false;
+  // Enough of the start to guess the delimiter and the line break from, as Papa guesses them from its
+  // first rows: ten lines, or 64 KB, or the whole file.
+  const lineCount = (t) => { let k = 0, i = -1; while ((i = t.indexOf('\n', i + 1)) !== -1 && k < 11) k++; return k; };
+  while (!done && buf.length < 65536 && lineCount(buf) < 11) { const r = await it.next(); if (r.done) done = true; else buf += r.value; }
+  const guess = Papa.parse(buf.slice(0, 65536), { preview: 10, skipEmptyLines: 'greedy', ...(delimiter ? { delimiter } : {}) }).meta;
+  const newline = guess.linebreak || '\n';
+  const parser = new Papa.Parser({ delimiter: delimiter || guess.delimiter || ',', newline });
+  const count = (s, to) => { let n = 0, i = -1; while ((i = s.indexOf(newline, i + 1)) !== -1 && i < to) n++; return n; };
+  let lines = 0;   // line breaks before the start of `buf`
+  for (;;) {
+    // Papa's own streaming: every row but the last, which may go on in the next chunk, is read.
+    const last = done;
+    const res = parser.parse(buf, 0, !last);
+    const cursor = last ? buf.length : res.meta.cursor;
+    for (const e of res.errors) {
+      // An error in the row left for the next chunk is Papa's view of half a row: it is read again whole.
+      if (!last && Number.isInteger(e.index) && e.index >= cursor) continue;
+      const line = Number.isInteger(e.index) ? lines + count(buf, e.index) + 1 : undefined;
+      if (e.type === 'Quotes') {
+        throw new DataError(`The CSV file has ${e.code === 'MissingQuotes' ? 'a quotation mark that opens a cell and is never closed' : 'a stray quotation mark in a quoted cell (a quotation mark inside a quoted cell is written twice: "")'}${line ? ` near line ${line}` : ''}, so where its rows begin and end cannot be told. Correct the quotation marks and try again.`);
+      }
+      problem(`${e.message}${line ? ` (near line ${line})` : ''}`);
     }
-    problems.push({ kind: 'generic-csv-problem', example: `${e.message}${line ? ` (near line ${line})` : ''}` });
+    for (const cells of res.data) if (!cells.every((c) => c.trim() === '')) yield cells;
+    if (last) return;
+    lines += count(buf, cursor);
+    buf = buf.slice(cursor);
+    const r = await it.next();
+    if (r.done) done = true; else buf += r.value;
   }
-  const [rawHeaders = [], ...data] = parsed.data;
+}
+
+/** A row of cells as an object keyed by column, with no prototype (so that a column called "__proto__" is kept). */
+function rowOfCells(headers, cells) {
+  const row = Object.create(null);
+  headers.forEach((k, j) => { if (j < cells.length) row[k] = cells[j]; });
+  return row;
+}
+async function openCsv(file, input) {
+  const records = (problem) => csvRecords(textChunks(file), { delimiter: input.delimiter, problem });
+  // The header and the first rows, for the guess: the rest of the file is not read here.
+  let rawHeaders = [];
+  const first = [];
+  for await (const cells of records()) {
+    if (!rawHeaders.length) { rawHeaders = cells; continue; }
+    first.push(cells);
+    if (first.length >= SAMPLE) break;
+  }
+  // The header is read here, not by Papa, which renamed a repeated heading (name -> name_1) without
+  // saying so, and lost a heading "__proto__" from its rows.
   if (!rawHeaders.length || rawHeaders.every((h) => String(h).trim() === '')) throw new DataError('The CSV file has no header row naming its columns, so its columns cannot be read.');
   // A heading given to more than one column: each such column is known by the heading and its place,
   // "name (column 3)", in the matching, the notes and the report, and the report says so once.
@@ -77,17 +137,23 @@ async function openCsv(file, input) {
   const headers = rawHeaders.map((h, j) => (uses.get(h).length > 1 ? `${h} (column ${j + 1})` : h));
   const headerText = Object.create(null);
   headers.forEach((k, j) => { headerText[k] = rawHeaders[j]; });
-  for (const [h, cols] of uses) if (cols.length > 1) problems.push({ kind: 'generic-csv-duplicate-header', example: `"${h}": ${cols.length} columns (${cols.join(', ')}), read as ${cols.map((c) => `"${h} (column ${c})"`).join(', ')}` });
-  const rowOf = (cells) => { const row = Object.create(null); headers.forEach((k, j) => { if (j < cells.length) row[k] = cells[j]; }); return row; };
+  const headProblems = [];
+  for (const [h, cols] of uses) if (cols.length > 1) headProblems.push({ kind: 'generic-csv-duplicate-header', example: `"${h}": ${cols.length} columns (${cols.join(', ')}), read as ${cols.map((c) => `"${h} (column ${c})"`).join(', ')}` });
   return {
-    headers, headerText, problems, sample: data.slice(0, SAMPLE).map(rowOf), head: {},
-    *rows() {
-      for (const [i, cells] of data.entries()) {
-        const where = `row ${i + 2}`;   // as a spreadsheet numbers it, the header being row 1
+    headers, headerText, headProblems, sample: first.map((cells) => rowOfCells(headers, cells)), head: {},
+    // Each row, and each problem of the file's as it is found ({ fileProblem }).
+    async *rows() {
+      const problems = [];
+      let i = -1;
+      for await (const cells of records((example) => problems.push({ kind: 'generic-csv-problem', example }))) {
+        if (i++ < 0) continue;   // the header
+        const where = `row ${i + 1}`;   // as a spreadsheet numbers it, the header being row 1
         const extra = cells.length > headers.length ? cells.slice(headers.length) : undefined;
         const problem = cells.length < headers.length ? `${plural(cells.length, 'cell')} where the header has ${plural(headers.length, 'column')}` : undefined;
-        yield { row: rowOf(cells), where, problem, extra };
+        while (problems.length) yield { fileProblem: problems.shift() };
+        yield { row: rowOfCells(headers, cells), where, problem, extra };
       }
+      while (problems.length) yield { fileProblem: problems.shift() };
     },
   };
 }
@@ -161,7 +227,7 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
   const report = (kind, example) => rep.add(GENERIC_KINDS[kind] || 'loss', kind, LOSS_TEXT[kind] || kind, example);
   const t = await open(input);
   const { mapping, problems } = resolveColumns(t.headers, t.sample, options.columns, t.headerText);
-  for (const p of [...(t.problems || []), ...problems]) report(p.kind, p.example);
+  for (const p of [...(t.headProblems || []), ...problems]) report(p.kind, p.example);
   const fields = Object.values(mapping);
   const byAddress = fields.includes('address'), hasId = fields.includes('id');
   const what = input.format === 'csv' ? 'a table of places (CSV)' : 'plain GeoJSON';
@@ -175,10 +241,14 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
   const minted = tableIds(base, () => null);
   let standIn = false;
   const mint = (id) => { if (!options.base && !standIn) { standIn = true; report('generic-stand-in-base', base); } return minted.place(id); };
+  // Each id met, with the number of its row (a number, not the row, so that a large file's ids are
+  // all that is kept).
   const seen = new Map();
+  const whereOf = (k) => (input.format === 'csv' ? `row ${k + 1}` : `feature ${k}`);
   const skipped = new Set();
   let n = 0;
   for await (const r of t.rows()) {
+    if (r.fileProblem) { report(r.fileProblem.kind, r.fileProblem.example); continue; }
     n++;
     rep.count(input.format === 'csv' ? 'rows' : 'features');
     if (r.notFeature) { report('generic-not-feature', r.where); continue; }
@@ -199,8 +269,8 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
     if (!a.label) { report('generic-row-empty', r.where); continue; }
     const rec = {};
     if (a.id !== undefined) {
-      if (seen.has(a.id)) throw new DataError(`The id "${a.id}" is used by more than one ${input.format === 'csv' ? 'row' : 'feature'} (${seen.get(a.id)} and ${r.where}). Each id becomes the web address of a place, so ids must be unique: correct the duplicate, or map another column as the id.`);
-      seen.set(a.id, r.where);
+      if (seen.has(a.id)) throw new DataError(`The id "${a.id}" is used by more than one ${input.format === 'csv' ? 'row' : 'feature'} (${whereOf(seen.get(a.id))} and ${r.where}). Each id becomes the web address of a place, so ids must be unique: correct the duplicate, or map another column as the id.`);
+      seen.set(a.id, n);
       rec['@id'] = mint(a.id);
     } else if (hasId) report('generic-id-empty', r.where);
     rec.label = a.label;
