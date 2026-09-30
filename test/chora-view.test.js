@@ -104,7 +104,7 @@ test('search ignores case and accents and keeps dataset order; the overview hold
   const all = s.search('');
   assert.equal(all.total, 7);
   assert.deepEqual(all.items.map((i) => i.label), ['Ashford', 'Bexley', 'Cray', 'Dene', 'Eyot', 'Fenny', 'Çatalhöyük']);
-  assert.deepEqual(s.search('', 2, 2).items.map((i) => i.label), ['Cray', 'Dene']);
+  assert.deepEqual(s.search('', { after: s.search('', { limit: 2 }).next, limit: 2 }).items.map((i) => i.label), ['Cray', 'Dene']);
   assert.equal(s.search('%').total, 0, 'a wildcard is searched for as itself');
   const o = s.overview();
   assert.deepEqual(o.features.map((f) => f.properties.label), ['Ashford', 'Bexley'], 'Fenny has only a denied geometry');

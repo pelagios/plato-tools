@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { env, textFile, go, outText } from './engine.js';
 import { detect } from '../src/engine/input.js';
-import { load } from '../src/engine/chora/store.js';
+import { load, fold } from '../src/engine/chora/store.js';
 
 const X = 'https://example.org/', P = 'https://w3id.org/plato#';
 const id = (s) => `${X}place/${s}`, att = (s) => `${X}attestation/${s}`;
@@ -109,16 +109,64 @@ test('hits by label and by name come together in dataset order, a place once how
   assert.equal(s.search('%').total, 0, 'a wildcard is searched for as itself in names too');
 });
 
-test('paging with an offset keeps the count, the order and the matched names', async () => {
+test('paging goes on from the last place shown (keyset, not an offset), and keeps the count and the matched names', async () => {
   const s = await open();
-  const all = s.search('villa');
-  assert.equal(all.total, 5);
-  assert.deepEqual(hits(all), [1, 2, 3, 4, 5].map((k) => `Place ${k} — Villa ${k}`));
-  const page = s.search('villa', 2, 2);
-  assert.equal(page.total, 5);
-  assert.deepEqual(hits(page), ['Place 3 — Villa 3', 'Place 4 — Villa 4']);
-  assert.deepEqual(hits(s.search('villa', 4, 2)), ['Place 5 — Villa 5']);
-  assert.deepEqual(s.search('villa', 5, 2).items, []);
+  const first = s.search('villa', { limit: 2 });
+  assert.equal(first.total, 5);
+  assert.deepEqual(hits(first), ['Place 1 — Villa 1', 'Place 2 — Villa 2']);
+  assert.equal(typeof first.next, 'number', 'a page with more after it says where the next begins');
+  const second = s.search('villa', { after: first.next, limit: 2 });
+  assert.equal(second.total, 5);
+  assert.deepEqual(hits(second), ['Place 3 — Villa 3', 'Place 4 — Villa 4']);
+  const last = s.search('villa', { after: second.next, limit: 2 });
+  assert.deepEqual(hits(last), ['Place 5 — Villa 5']);
+  assert.equal(last.next, null, 'the last page has nothing after it');
+  // Exactly a page's worth left: still no next page.
+  assert.equal(s.search('villa', { after: first.next, limit: 3 }).next, null);
+  // The empty query pages the same way.
+  const e1 = s.search('', { limit: 4 });
+  assert.deepEqual(e1.items.map((i) => i.label), ['Conway', 'Byzantium', 'Athens', 'Rome']);
+  assert.deepEqual(s.search('', { after: e1.next, limit: 2 }).items.map((i) => i.label), ['Concord', 'Nameless']);
+});
+
+test('the count is worked out once per query, not again for each page', async () => {
+  const s = await open();
+  const counted = [];
+  const one = s.one.bind(s);
+  s.one = (sql, params) => { if (/COUNT/i.test(sql)) counted.push(params?.[0] ?? ''); return one(sql, params); };
+  const a = s.search('villa', { limit: 2 });
+  s.search('villa', { after: a.next, limit: 2 });
+  s.search('VÍLLA', { after: a.next, limit: 2 });
+  assert.equal(counted.length, 1, `counted ${counted.length} times`);
+  assert.equal(s.search('place', { limit: 2 }).total, 5);
+  assert.equal(counted.length, 2, 'a new query is counted');
+});
+
+test('ligatures and old letters are folded as their spellings: œ, æ, þ, ð, ß', async () => {
+  assert.equal(fold('Brabœuf'), 'braboeuf');
+  assert.equal(fold('ÆTHELNEY'), 'aethelney');
+  assert.equal(fold('Þanet'), 'thanet');
+  assert.equal(fold('Ðorp'), 'thorp');
+  assert.equal(fold('Straße'), 'strasse');
+  assert.equal(fold('STRAẞE'), 'strasse');
+  const ds = dataset();
+  ds.spatialEntities.push({ '@id': id('brabœuf'), label: 'Brabœuf', attestations: [named('l1', { toponym: 'Þanet' })] });
+  const s = await open(ds);
+  assert.deepEqual(hits(s.search('braboeuf')), ['Brabœuf']);
+  assert.deepEqual(hits(s.search('BRABŒUF')), ['Brabœuf'], 'the query is folded as the labels are');
+  assert.deepEqual(hits(s.search('thanet')), ['Brabœuf — Þanet']);
+});
+
+test('the overview reads a covering index of the places with a point, not the records', async () => {
+  const s = await open();
+  const seen = [];
+  const prepare = s.db.prepare.bind(s.db);
+  s.db.prepare = (sql) => { seen.push(sql); return prepare(sql); };
+  s.overview();
+  s.db.prepare = prepare;
+  assert.equal(seen.length, 1);
+  const plan = [...s.rows('EXPLAIN QUERY PLAN ' + seen[0], [1])].map((q) => q.get(3)).join(' | ');
+  assert.match(plan, /COVERING INDEX/, plan);
 });
 
 test('names reach the search from every route: JSON Lines and N-Triples', async () => {
