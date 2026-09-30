@@ -9,7 +9,7 @@ import { addPlatoFormats, strictFormatLogger } from '../src/lib/formats.js';
 import { DataError } from '../src/engine/input.js';
 import {
   readGeoreference, toWorld, toPixels, georefNote, georefCitation, matchesTarget, matchTarget, containsRegion, SOFTWARE,
-  allmapsLookupUrl, LABEL_ANCHOR,
+  allmapsLookupUrl, LABEL_ANCHOR, TRANSFORMATION_WORDS, georefAnnotationCitation,
 } from '../src/engine/georef/index.js';
 
 const DIR = 'test/fixtures/georef/';
@@ -562,46 +562,70 @@ const ajv = addPlatoFormats(new Ajv2020({ strict: false, allErrors: true, logger
 ajv.addSchema(load('plato.schema.json'), 'https://w3id.org/plato/schemas/plato.schema.json');
 const citationValid = ajv.getSchema('https://w3id.org/plato/schemas/plato.schema.json#/$defs/citation');
 
-test('georefNote: a label anchor says the position is where the name is written; without one, unchanged', async () => {
+test('georefNote: a label anchor adds its sentence; without one, unchanged', async () => {
   const g = await rocque();
   const plain = (await toWorld(g, pt([5000, 4000]), { space: 'image' })).record;
   const anchored = (await toWorld(g, pt([5000, 4000]), { space: 'image', role: 'https://w3id.org/plato#LabelAnchor' })).record;
   assert.equal(LABEL_ANCHOR, 'https://w3id.org/plato#LabelAnchor');
   assert.equal(anchored.role, LABEL_ANCHOR);
   assert.equal('role' in plain, false);
-  const sentence = `Position derived from the map through its georeference ${ROCQUE_ID} (22 control points, thin plate spline transformation), canvas ${ROCQUE_CANVAS} of ${ROCQUE_MANIFEST}.`;
-  assert.equal(georefNote(plain), sentence);
-  assert.equal(georefNote(anchored), `${sentence} The position is where the map writes the name, not necessarily where the place is.`);
+  const note = `Georeferenced through ${ROCQUE_ID} (thin plate spline, 22 control points), retrieval date not recorded. On canvas ${ROCQUE_CANVAS} of manifest ${ROCQUE_MANIFEST}.`;
+  assert.equal(georefNote(plain), note);
+  assert.equal(georefNote(anchored), `${note} The position is where the map writes the name, not necessarily where the place is.`);
   // Another role: no extra sentence.
-  assert.equal(georefNote({ ...plain, role: 'https://w3id.org/plato#Other' }), sentence);
+  assert.equal(georefNote({ ...plain, role: 'https://w3id.org/plato#Other' }), note);
 });
 
-test('the record, and georefNote: exact sentences', async () => {
+test('the record, and georefNote: the fixed template, pinned exactly', async () => {
   const g = await rocque();
   const { record } = await toWorld(g, pt([5000, 4000]), { space: 'image' });
   assert.deepEqual(record, {
     direction: 'toWorld', transformation: 'thinPlateSpline', gcps: 22, annotationId: ROCQUE_ID,
     manifestId: ROCQUE_MANIFEST, canvasId: ROCQUE_CANVAS, imageServiceId: ROCQUE_IMAGE, space: 'image',
-    title: ROCQUE_TITLE, software: '@allmaps/transform@1.0.0-beta.53',
+    title: ROCQUE_TITLE, imageSize: { width: 11436, height: 6268 }, canvasSize: { width: 11436, height: 6268 },
+    software: '@allmaps/transform@1.0.0-beta.53',
   });
-  assert.equal(georefNote(record), `Position derived from the map through its georeference ${ROCQUE_ID} (22 control points, thin plate spline transformation), canvas ${ROCQUE_CANVAS} of ${ROCQUE_MANIFEST}.`);
+  // Retrieved at a known time, and not.
+  assert.equal(georefNote(record, { fetched: '2026-09-30T14:05:00Z' }), `Georeferenced through ${ROCQUE_ID} (thin plate spline, 22 control points), retrieved 2026-09-30T14:05:00Z. On canvas ${ROCQUE_CANVAS} of manifest ${ROCQUE_MANIFEST}.`);
+  assert.equal(georefNote(record), `Georeferenced through ${ROCQUE_ID} (thin plate spline, 22 control points), retrieval date not recorded. On canvas ${ROCQUE_CANVAS} of manifest ${ROCQUE_MANIFEST}.`);
+  assert.equal(georefNote(record, {}), georefNote(record));
   const h = await readGeoreference(LYNN, { manifest: LYNN_M, index: 7 });
   const r2 = (await toWorld(h, pt([2000, 1000]), { space: 'image' })).record;
-  assert.equal(georefNote(r2), `Position derived from the map through its georeference https://annotations.allmaps.org/maps/051d059e8d1111fd (23 control points, polynomial order 1 transformation), canvas ${LYNN_CANVAS('jd475s53d')} of ${LYNN_MANIFEST}.`);
-  // No canvas and no manifest: the image; one control point: no plural; the way back.
+  assert.equal(georefNote(r2, { fetched: '2026-09-30T15:00:00.123+01:00' }), `Georeferenced through https://annotations.allmaps.org/maps/051d059e8d1111fd (polynomial order 1, 23 control points), retrieved 2026-09-30T15:00:00.123+01:00. On canvas ${LYNN_CANVAS('jd475s53d')} of manifest ${LYNN_MANIFEST}.`);
+  // Each place sentence; one control point: no plural.
   const bare = { ...record, canvasId: null, manifestId: null, gcps: 1, transformation: 'polynomial' };
-  assert.equal(georefNote(bare), `Position derived from the map through its georeference ${ROCQUE_ID} (1 control point, polynomial order 1 transformation), image ${ROCQUE_IMAGE}.`);
-  assert.equal(georefNote({ ...record, manifestId: null }), `Position derived from the map through its georeference ${ROCQUE_ID} (22 control points, thin plate spline transformation), canvas ${ROCQUE_CANVAS}.`);
+  assert.equal(georefNote(bare), `Georeferenced through ${ROCQUE_ID} (polynomial order 1, 1 control point), retrieval date not recorded. On image ${ROCQUE_IMAGE}.`);
+  assert.equal(georefNote({ ...record, manifestId: null }), `Georeferenced through ${ROCQUE_ID} (thin plate spline, 22 control points), retrieval date not recorded. On canvas ${ROCQUE_CANVAS}.`);
+  assert.equal(georefNote({ ...record, canvasId: null }), `Georeferenced through ${ROCQUE_ID} (thin plate spline, 22 control points), retrieval date not recorded. In manifest ${ROCQUE_MANIFEST}.`);
+  // The way back uses the same template.
   const back = (await toPixels(g, pt([-80, 45]), { space: 'image' })).record;
-  assert.match(georefNote(back), /^Position on the map derived through its georeference /);
+  assert.equal(georefNote(back), georefNote(record));
   assert.doesNotMatch(georefNote(record), /allmaps\/transform/, 'the software is not in the note');
+  // fetched that is not an ISO date-time with a zone is a TypeError; the valid one above is the control.
+  for (const bad of ['2026-09-30', '30/09/2026', '2026-09-30T14:05:00', 'yesterday', 20260930, '2026-13-45T99:99:00Z']) {
+    assert.throws(() => georefNote(record, { fetched: bad }), TypeError, String(bad));
+  }
+});
+
+test('georefNote: the transformation words are a fixed vocabulary, each used as pinned', () => {
+  assert.deepEqual({ ...TRANSFORMATION_WORDS }, {
+    polynomial: 'polynomial order 1', polynomial2: 'polynomial order 2', polynomial3: 'polynomial order 3',
+    thinPlateSpline: 'thin plate spline', projective: 'projective', helmert: 'Helmert', straight: 'straight', linear: 'linear',
+  });
+  assert.ok(Object.isFrozen(TRANSFORMATION_WORDS));
+  const base = { annotationId: 'https://example.org/a', gcps: 5, canvasId: null, manifestId: null, imageServiceId: null };
+  for (const [name, words] of Object.entries(TRANSFORMATION_WORDS)) {
+    assert.equal(georefNote({ ...base, transformation: name }), `Georeferenced through https://example.org/a (${words}, 5 control points), retrieval date not recorded.`);
+  }
+  assert.equal(georefNote({ ...base, transformation: 'polynomial1' }), 'Georeferenced through https://example.org/a (polynomial order 1, 5 control points), retrieval date not recorded.');
+  assert.throws(() => georefNote({ ...base, transformation: 'wobbly' }), TypeError);
 });
 
 test('georefCitation: exact shapes, valid against the pinned PLATO schema (and an invalid one is caught)', async () => {
   const g = await rocque();
   const { record } = await toWorld(g, pt([5000, 4000]), { space: 'image' });
   const c = georefCitation(record);
-  assert.deepEqual(c, { source: { '@id': ROCQUE_MANIFEST, title: ROCQUE_TITLE, authorityType: 'source' }, locator: ROCQUE_CANVAS });
+  assert.deepEqual(c, { source: { '@id': ROCQUE_MANIFEST, title: ROCQUE_TITLE, authorityType: 'source' }, locator: ROCQUE_CANVAS, citationFunction: 'http://purl.org/spar/cito/citesAsDataSource' });
   assert.ok(citationValid(c), JSON.stringify(citationValid.errors));
   // A region in canvas pixels is a fragment of the canvas; in image pixels, of the image.
   const rc = (await toWorld(g, { xywh: 'pixel:3000,3000,2000,1000' }, { space: 'canvas' })).record;
@@ -627,11 +651,65 @@ test('georefCitation: exact shapes, valid against the pinned PLATO schema (and a
   assert.ok(citationValid(georefCitation(rc)));
   // No manifest or title: the image, with an honest title.
   const bare = georefCitation({ ...record, manifestId: null, canvasId: null, title: null });
-  assert.deepEqual(bare, { source: { '@id': ROCQUE_IMAGE, title: `The georeferenced map (IIIF image ${ROCQUE_IMAGE})`, authorityType: 'source' } });
+  assert.deepEqual(bare, { source: { '@id': ROCQUE_IMAGE, title: `The georeferenced map (IIIF image ${ROCQUE_IMAGE})`, authorityType: 'source' }, citationFunction: 'http://purl.org/spar/cito/citesAsDataSource' });
   assert.ok(citationValid(bare), JSON.stringify(citationValid.errors));
   // Control: the validator refuses an inline source without a title, and a source that is not an address.
   assert.equal(citationValid({ source: { '@id': ROCQUE_MANIFEST, authorityType: 'source' } }), false);
   assert.equal(citationValid({ source: 'not an address' }), false);
+});
+
+test('georefCitation with a region: padded 2% (at least 1 px), rounded outwards, on the canvas; it overrides canvasRegion', async () => {
+  const g = await rocque();
+  const img = (await toWorld(g, pt([5000, 4000]), { space: 'image' })).record;
+  const cnv = (await toWorld(g, pt([5000, 4000]), { space: 'canvas' })).record;
+  // 2% of 2000 = 40 on every side.
+  assert.equal(georefCitation(cnv, { region: [3000, 3000, 2000, 1000] }).locator, `${ROCQUE_CANVAS}#xywh=2960,2960,2080,1080`);
+  assert.equal(georefCitation(img, { region: [3000, 3000, 2000, 1000] }).locator, `${ROCQUE_CANVAS}#xywh=2960,2960,2080,1080`);
+  // Fractional edges are rounded outwards: 2% of 10.5 is 0.21, so 1 px (the minimum): 99.5 -> 98, 110.0+1 -> 111.
+  assert.equal(georefCitation(cnv, { region: [99.5, 50, 10.5, 3] }).locator, `${ROCQUE_CANVAS}#xywh=98,49,13,5`);
+  // 2% of 100 = 2 exactly, not rounded out further.
+  assert.equal(georefCitation(cnv, { region: [10, 10, 100, 50] }).locator, `${ROCQUE_CANVAS}#xywh=8,8,104,54`);
+  // Kept within the canvas.
+  assert.equal(georefCitation(cnv, { region: [0, 0, 11436, 6268] }).locator, `${ROCQUE_CANVAS}#xywh=0,0,11436,6268`);
+  // From image pixels on a canvas at half the size: the box is halved, then padded in canvas units.
+  const half = await readGeoreference(ROCQUE, { manifest: scaledManifest(2) });
+  const rh = (await toWorld(half, pt([5000, 4000]), { space: 'image' })).record;
+  assert.equal(georefCitation(rh, { region: [3001, 3001, 2001, 1001] }).locator, `${ROCQUE_CANVAS}#xywh=1480,1480,1042,542`);
+  // It overrides canvasRegion; without it, canvasRegion is the control.
+  const withRegion = (await toWorld(g, { xywh: '3000,3000,2000,1000' }, { space: 'canvas' })).record;
+  assert.equal(georefCitation(withRegion).locator, `${ROCQUE_CANVAS}#xywh=3000,3000,2000,1000`);
+  assert.equal(georefCitation(withRegion, { region: [10, 10, 100, 50] }).locator, `${ROCQUE_CANVAS}#xywh=8,8,104,54`);
+  // No canvas: on the image service, in image pixels.
+  const noCanvas = { ...img, canvasId: null, manifestId: null, canvasSize: null };
+  assert.equal(georefCitation(noCanvas, { region: [3000, 3000, 2000, 1000] }).locator, `${ROCQUE_IMAGE}#xywh=2960,2960,2080,1080`);
+  // Canvas size unknown, box in image pixels: on the image service too.
+  assert.equal(georefCitation({ ...img, canvasSize: null }, { region: [3000, 3000, 2000, 1000] }).locator, `${ROCQUE_IMAGE}#xywh=2960,2960,2080,1080`);
+  for (const c of [georefCitation(cnv, { region: [3000, 3000, 2000, 1000] }), georefCitation(noCanvas, { region: [1, 1, 5, 5] })]) {
+    assert.ok(citationValid(c), JSON.stringify(citationValid.errors));
+  }
+  for (const bad of [[1, 2, 3], [1, 2, 0, 4], [1, 2, 3, -4], ['1', 2, 3, 4], 'x', [1, 2, NaN, 4]]) {
+    assert.throws(() => georefCitation(cnv, { region: bad }), TypeError, JSON.stringify(bad));
+  }
+});
+
+test('georefAnnotationCitation: the annotation, cited for its method; valid against the pinned PLATO schema', async () => {
+  const g = await rocque();
+  const { record } = await toWorld(g, pt([5000, 4000]), { space: 'image' });
+  const c = georefAnnotationCitation(record);
+  assert.deepEqual(c, {
+    source: { '@id': ROCQUE_ID, title: `Georeference of ${ROCQUE_TITLE}`, authorityType: 'source' },
+    citationFunction: 'http://purl.org/spar/cito/usesMethodIn',
+  });
+  assert.ok(citationValid(c), JSON.stringify(citationValid.errors));
+  const untitled = georefAnnotationCitation({ ...record, title: null });
+  assert.equal(untitled.source.title, `Georeference of the map in IIIF manifest ${ROCQUE_MANIFEST}`);
+  assert.equal(georefAnnotationCitation({ ...record, title: null, manifestId: null }).source.title, `Georeference of the map in IIIF image ${ROCQUE_IMAGE}`);
+  assert.ok(citationValid(untitled), JSON.stringify(citationValid.errors));
+  assert.throws(() => georefAnnotationCitation({ ...record, annotationId: null }), TypeError);
+  // Control: the schema refuses a citation function outside CiTO, and the CURIE form of a valid one.
+  assert.equal(citationValid({ ...c, citationFunction: 'http://example.org/usesMethodIn' }), false);
+  assert.equal(citationValid({ ...c, citationFunction: 'cito:usesMethodIn' }), false);
+  assert.equal(citationValid({ ...georefCitation(record), citationFunction: 'cito:citesAsDataSource' }), false);
 });
 
 // ---- Folds: one place, several positions on the map -------------------------------------------
