@@ -27,6 +27,7 @@ itself. How the tools work, and how they are tested, is in [DEVELOPERS.md](DEVEL
 <tr><td nowrap><img src="public/icons/scale.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Krisis</b>: match review</td><td>Suggests the places two datasets share, for you to accept or reject, and records each judgement as a PLATO attestation. So far: two files of your own</td><td><a href="DEVELOPERS.md#match-review">Match review</a></td></tr>
 <tr><td nowrap><img src="public/icons/file-input.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Hermes</b>: readers</td><td>Brings other formats into PLATO: Recogito's annotations, TEI editions, and any CSV or GeoJSON, its columns matched to PLATO</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/annotations.html">Annotations from Recogito</a></td></tr>
 <tr><td nowrap><img src="public/icons/landmark.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Agora</b>: publish</td><td>Reports what a dataset still needs to be FAIR and writes its deposit files, gives every attestation a permanent address, and makes a website and w3id redirects for it</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/tools.html#publishing-your-dataset">Publishing your dataset</a></td></tr>
+<tr><td nowrap><img src="public/icons/map-pinned.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Chora</b>: place on the map</td><td>Shows a dataset's places on a map, and adds a point, line or area drawn there. Next: tracing from georeferenced maps</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/tools.html#chora">Placing on the map</a></td></tr>
 </table>
 
 Still to come, each planned in its own issue, with the plan as a whole in
@@ -34,7 +35,6 @@ Still to come, each planned in its own issue, with the plan as a whole in
 
 <table>
 <tr><th width="290">Tool</th><th>What it will do</th><th>Issue</th></tr>
-<tr><td nowrap><img src="public/icons/map-pinned.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Chora</b>: place on the map</td><td>Point to a place, draw it, or trace it from a georeferenced map</td><td><a href="https://github.com/pelagios/plato-tools/issues/4">#4</a></td></tr>
 <tr><td nowrap><img src="public/icons/file-input.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Hermes</b>: more readers</td><td>Georeferenced map regions, as Recogito marks them</td><td><a href="https://github.com/pelagios/plato-tools/issues/5">#5</a></td></tr>
 <tr><td nowrap><img src="public/icons/scale.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Krisis</b>: more matching</td><td>Find a place in other gazetteers, such as the World Historical Gazetteer</td><td><a href="https://github.com/pelagios/plato-tools/issues/6">#6</a></td></tr>
 </table>

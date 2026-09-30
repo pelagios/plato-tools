@@ -460,6 +460,60 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   place in `about`, and nothing of the places is copied. Each attestation is checked against the schema
   before it is written, and the tests run the checker on the file.
 
+## Chora, the map
+
+What it does is in the guide:
+[Placing on the map](https://pelagios.org/place-attestation-ontology/guide/tools.html#chora).
+It is a page of its own, `chora.html`, a second entry in `vite.config.js`, so that MapLibre GL JS
+and Terra Draw load only there. The page is `src/chora/` (`app.js`; `map.js`, the map, the guard
+and drawing; `basemaps.js`; `contributor.js`; `drafts.js`; `handoff.js`, which passes files chosen
+on the main page through IndexedDB), and its engine `src/engine/chora/` (`store.js`, `view.js`,
+`draw.js`, `save.js`, `geo.js`). It publishes its state on `window.__chora` for tests.
+
+- **The worker** is the main page's, with commands of its own, sent one at a time: `chora-load`,
+  `chora-search`, `chora-overview` (every place's point, at most 50,000), `chora-place` (one
+  place's view) and `chora-save`.
+- **The session database.** `chora-load` reads the dataset with `run()` and `options.sink`, so every
+  format arrives as place-centric records, and writes each to `/chora.sqlite3` on the origin
+  private file system, with a folded label for search and the boxes and points of its current
+  geometries, settled at the end of the file, where what is retracted or superseded is known. One
+  dataset at a time.
+- **Saving** writes the whole dataset as PLATO JSON, `<input>.chora.json`, each record as it was
+  read with its drawings appended as new attestations. Drawings are checked against the pinned JSON
+  Schema, and against the places the dataset has, before anything is written.
+- **Mneme is the oracle.** The same run then compares the input with the file written (`verify()`
+  in `save.js`): nothing lost or changed, whatever the dataset's status, and exactly as many
+  attestations added as were drawn. The append-only rule is shown kept, by the check a publisher
+  would run, not assumed.
+- **A stop-gap writer.** `appendingWriter` in `save.js` repeats `pipeline.js`'s PLATO JSON writer
+  with the drawings put in. When `pipeline.js` has `options.augment` (planned), it goes, and saving
+  becomes one `run()` whose `augment` appends; the comment on `writeWithAdditions` gives the code.
+- **Drafts** are kept in the origin private file system, `chora-drafts/`, one file per dataset,
+  named by a hash of each input file's name, size and last change.
+- **The basemap** is Natural Earth, served from this site from `public/basemap/`. Every address in
+  its `style.json` begins `{base}/`, which the page replaces with the folder's address as text,
+  since `URL()` would escape the braces of the glyph template. `node scripts/build-basemap.mjs`
+  rebuilds it from pinned commits, refusing any download whose sha256 differs, and records inputs
+  and outputs in `sources.json`; on the same pins it reproduces the committed files byte for byte.
+  [public/basemap/README.md](public/basemap/README.md) has the rest.
+- **The privacy guard.** MapLibre's `transformRequest` (`map.js`) refuses any site but this one and
+  that of a basemap the user has agreed to, and counts each refusal (`window.__chora.blocked`). A
+  Content Security Policy in a `<meta>` tag cannot be widened once the page is running, and a pasted
+  basemap may be on any site, so the guard is in code.
+- **Other basemaps** (OpenFreeMap, OpenStreetMap, CARTO, or a pasted style or tile address) are
+  used only after a notice naming who will see the requests. Choices and consents stay in
+  `localStorage`. CARTO's key is given at build time as `VITE_CARTO_API_KEY`, and without it CARTO
+  is shown disabled. It is scoped by referrer to `https://pelagios.org`, so it never works on
+  localhost and no test may need it. Vite writes it into the built page, where anyone can read it:
+  the scope is its protection. Never commit it (`.gitignore` does not cover `.env` files). It is to
+  reach the build from a GitHub Actions variable, which `pages.yml` does not yet pass.
+- **The gazetteer lookup** (`src/engine/gazetteer/`), shared with Krisis, speaks the W3C
+  reconciliation protocol, one request at a time per lookup, with the token in the `Authorization`
+  header only. Every assumption about the World Historical Gazetteer, and whether it is verified,
+  is in `whg.js`, so that a correction is made in one place.
+- **Georeferencing**, for tracing from a georeferenced map, will come from `src/engine/georef/`,
+  which belongs to Hermes. Chora uses it and keeps none of its own.
+
 ## Limits
 
 - **Private windows** keep the browser's file storage in memory and allow it very little, so large
