@@ -343,6 +343,9 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   }
   if (action === 'convert' && options.cube && target !== 'ntriples') rep.warning('cube-not-ntriples', 'The Data Cube export applies to N-Triples output only, so it is not made here.');
   if (action === 'convert') writer = await makeWriter(target, env, rep, { ...options, idrsBySubject, withdrawn }, typing, outputs, input);
+  // The version check (src/engine/compare.js) reads the records itself, as a writer is given them:
+  // every input then reaches it as place-centric records, whatever format it came in.
+  else if (options.sink) writer = options.sink;
 
   // Checking (and writing) records as they stream past.
   // Memberships of routes, itineraries and networks, to find one that contains itself (PLATO 0.6.0).

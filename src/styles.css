@@ -49,6 +49,8 @@ button.primary { background: var(--accent); color: var(--accent-fg); border-colo
 button:disabled { opacity: .5; cursor: default; }
 select { padding: .4rem; border-radius: 6px; max-width: min(100%, 30rem); }
 .or { color: var(--muted); }
+.versions { margin-top: .75rem; }
+.versions small { flex-basis: 100%; color: var(--muted); }
 details#options { margin-top: .75rem; }
 .opt { margin: .6rem 0; }
 .opt small { display: block; color: var(--muted); }
@@ -58,6 +60,7 @@ details#options { margin-top: .75rem; }
 .item { border-top: 1px solid var(--line); padding: .45rem 0; }
 .item summary { cursor: pointer; }
 .count, .item .count { font-variant-numeric: lining-nums tabular-nums; color: var(--muted); margin-left: .35rem; }
+.item ul.changes { list-style: '– '; margin: .15rem 0 .35rem; color: var(--fg); }
 .item ul { margin: .3rem 0 .2rem; padding-left: 1.25rem; font: .8rem/1.5 var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
 .good { color: var(--ok); font-weight: 700; }
 .warn { color: var(--warn); }

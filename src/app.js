@@ -1,7 +1,8 @@
-// The page: choose files, check or convert them, show progress and the report, save the output.
+// The page: choose files, check or convert them, or compare them with an earlier version; show
+// progress and the report, save the output.
 // The work happens in a worker (src/engine/worker.js). The page publishes its own state on
 // window.__plato for automated tests; nothing else reads it.
-import { fmtBytes, formatName, progressText, summary, groups, draftNote } from './engine/words.js';
+import { fmtBytes, formatName, progressText, summary, groups, draftNote, explainedLines } from './engine/words.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
 let worker, files = [], input = null, targets = {}, busy = false;
@@ -64,15 +65,19 @@ async function storageCheck() {
   } catch { w.hidden = true; }
 }
 
-function start(action) {
+const buttons = (disabled) => { for (const id of ['check', 'convert', 'compare']) $(id).disabled = disabled; };
+function start(action, earlier) {
   if (busy || !input?.format) return;
   busy = true;
   const target = action === 'convert' ? $('target').value : null;
   $('progress').hidden = false; $('result').hidden = true;
-  $('check').disabled = $('convert').disabled = true;
+  buttons(true);
   $('phase').textContent = 'Starting…';
   Object.assign(state, { phase: 'running', action, target, report: null, outputs: null, error: null });
-  worker.postMessage({ cmd: 'run', files, action, target, options: { base: $('base').value.trim() || undefined, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked } });
+  const base = $('base').value.trim() || undefined;
+  // The version check: the files chosen are the later version, and `earlier` the one it is compared with.
+  if (action === 'compare') worker.postMessage({ cmd: 'compare', earlier, later: files, options: { base } });
+  else worker.postMessage({ cmd: 'run', files, action, target, options: { base, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked } });
 }
 function onProgress(p) {
   $('phase').textContent = progressText(p);
@@ -80,9 +85,9 @@ function onProgress(p) {
 }
 function onDone({ report, outputs }) {
   busy = false;
-  $('check').disabled = $('convert').disabled = false;
+  buttons(false);
   $('progress').hidden = true; $('result').hidden = false;
-  const { problems, counted } = summary(report);
+  const { problems, counted } = summary(report, state.action);
   $('summary').innerHTML = `<span class="${report.errors ? 'warn' : 'good'}">${problems}</span> ` + escapeHtml(counted);
   const saves = $('saves'); saves.innerHTML = '';
   for (const o of outputs || []) {
@@ -96,13 +101,18 @@ function onDone({ report, outputs }) {
 }
 function renderReport(report) {
   const out = [];
-  for (const { severity: sev, title, intro } of groups(state.action === 'check')) {
+  for (const { severity: sev, title, intro } of groups(state.action)) {
     const items = report.items.filter((i) => i.severity === sev);
     if (!items.length) continue;
     out.push(`<div class="report-group ${sev}"><h3>${title}</h3><p>${intro}</p>` + items.map((i) =>
-      `<details class="item"><summary>${escapeHtml(i.message)}<span class="count">× ${i.count.toLocaleString('en-GB')}</span></summary>${i.examples.length ? `<ul>${i.examples.map((e) => `<li>${escapeHtml(String(e))}</li>`).join('')}</ul>` : ''}</details>`).join('') + '</div>');
+      `<details class="item"><summary>${escapeHtml(i.message)}<span class="count">× ${i.count.toLocaleString('en-GB')}</span></summary>${i.examples.length ? `<ul>${i.examples.map((e) => `<li>${escapeHtml(String(e))}${explained(i, e)}</li>`).join('')}</ul>` : ''}</details>`).join('') + '</div>');
   }
   $('report').innerHTML = out.join('');
+}
+// What changed in an example of a version check: the statements only one version makes.
+function explained(item, example) {
+  const lines = (item.explained || []).filter((x) => x.example === example).flatMap(explainedLines);
+  return lines.length ? `<ul class="changes">${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ul>` : '';
 }
 async function save(name) {
   const root = await navigator.storage.getDirectory();
@@ -121,7 +131,7 @@ async function save(name) {
 window.__plato_save = save;
 function fail(message) {
   busy = false;
-  $('check').disabled = $('convert').disabled = false;
+  buttons(false);
   $('progress').hidden = true; $('result').hidden = false;
   $('summary').innerHTML = `<span class="warn">Something went wrong: ${escapeHtml(message)}</span>`;
   $('saves').innerHTML = ''; $('report').innerHTML = '';
@@ -136,6 +146,9 @@ drop.ondragleave = () => drop.classList.remove('over');
 drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); choose(e.dataTransfer.files); };
 $('check').onclick = () => start('check');
 $('convert').onclick = () => start('convert');
-$('cancel').onclick = () => { worker.terminate(); busy = false; $('progress').hidden = true; $('check').disabled = $('convert').disabled = false; Object.assign(state, { phase: 'cancelled' }); startWorker(); };
+// Comparing asks for one more file, the earlier version, and starts once it is chosen.
+$('compare').onclick = () => $('earlier').click();
+$('earlier').onchange = (e) => { const earlier = [...e.target.files]; e.target.value = ''; if (earlier.length) start('compare', earlier); };
+$('cancel').onclick = () => { worker.terminate(); busy = false; $('progress').hidden = true; buttons(false); Object.assign(state, { phase: 'cancelled' }); startWorker(); };
 $('target').onchange = () => { document.querySelector('[data-for="ntriples-output"]').hidden = $('target').value !== 'ntriples'; };
 startWorker();

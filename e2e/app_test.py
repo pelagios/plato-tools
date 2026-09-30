@@ -42,6 +42,17 @@ def _run_case(page, files, action, target=None, timeout=300):
     page.click('#check' if action == 'check' else '#convert')
     return wait_state(page, lambda s: s.get('phase') in ('done', 'error'), timeout, 'run')
 
+def compare_case(page, later, earlier, timeout=120):
+    """Choose the later version, then give the earlier one to the version check."""
+    try:
+        page.set_input_files('#picker', [str(later)])
+        s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), 60, 'detection')
+        if s.get('phase') != 'detected': return s
+        page.set_input_files('#earlier', [str(earlier)])
+        return wait_state(page, lambda s: s.get('action') == 'compare' and s.get('phase') in ('done', 'error'), timeout, 'comparison')
+    except Exception as e:                       # a harness error is a failed check, never a crash
+        return {'phase': 'harness-error', 'error': str(e).split('\n')[0][:200]}
+
 def download(page, name, dest):
     with page.expect_download(timeout=600_000) as d:
         page.evaluate(f'window.__plato_save({json.dumps(name)})')
@@ -133,6 +144,26 @@ def main():
             png = tmp / 'picture.png'; png.write_bytes(b'\x89PNG\r\n\x1a\n' + b'\0' * 64)
             s = run_case(page, [png], 'check')
             check('an image is not mistaken for data', s.get('phase') == 'unrecognised', s)
+            # The version check: the file chosen is the later version, and the earlier one is asked for.
+            # The same example against itself must compare clean AND say how many attestations it
+            # compared; with one name respelt, that attestation must be named as changed.
+            judgements = PLATO / 'schemas/examples/place-centric-judgements.json'
+            s = compare_case(page, judgements, judgements)
+            shown = page.inner_text('#summary') if s.get('phase') == 'done' else ''
+            check('version check: the example against itself has nothing deleted or changed, all ten attestations compared',
+                  s.get('phase') == 'done' and s['report']['errors'] == 0 and s['report']['counts'].get('unchanged') == 10 and 'Nothing was deleted or changed' in shown, s.get('report') or s)
+            d = json.loads(judgements.read_text()); d['spatialEntities'][1]['attestations'][0]['names'][0]['toponym'] = 'Newton, respelt'
+            edited = tmp / 'judgements-v2.json'; edited.write_text(json.dumps(d))
+            s = compare_case(page, edited, judgements)
+            # text_content, not inner_text: the address is an example, inside a closed <details>.
+            shown = page.text_content('#report') if s.get('phase') == 'done' else ''
+            changed = next((i for i in (s.get('report') or {}).get('items', []) if i['kind'] == 'attestation-changed'), None)
+            check('version check: a respelt name is reported as a changed attestation, by its address, as a breach of the append-only rule',
+                  s.get('phase') == 'done' and s['report']['errors'] == 1 and changed and changed['examples'] == ['https://whgazetteer.org/example/attestation/newton-a']
+                  and 'append-only rule' in shown and 'attestation/newton-a' in shown, s.get('report') or s)
+            check('version check: the page shows what changed in it, the old spelling and the new',
+                  'Only in the earlier version: plato:attests_name [plato:toponym "Neuton"]' in shown
+                  and 'Only in the later version: plato:attests_name [plato:toponym "Newton, respelt"]' in shown, shown[-600:])
             ctx.close()
     finally:
         srv.kill()

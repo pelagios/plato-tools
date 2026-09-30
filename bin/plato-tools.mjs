@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// The command line: check and convert PLATO data in batch, with the engine the browser uses
-// (src/engine/pipeline.js), hosted in Node by src/node/host.js. Exit status: 0 when no input has
-// problems, 1 when any has, 2 when the command is wrong or an input cannot be read or written.
+// The command line: check and convert PLATO data in batch, and compare two versions of a dataset,
+// with the engine the browser uses (src/engine/pipeline.js, src/engine/compare.js), hosted in Node
+// by src/node/host.js. Exit status: 0 when no input has problems, 1 when any has, 2 when the command
+// is wrong or an input cannot be read or written.
 
 // Node's built-in SQLite announces itself as experimental on every run; that says nothing about
 // the data, so it is left out. Every other warning is still shown.
@@ -14,17 +15,22 @@ process.emitWarning = function (warning, ...rest) {
 const { parseArgs } = await import('node:util');
 const { readFileSync } = await import('node:fs');
 const { run, TARGETS, DEFAULT_TABLE_BASE } = await import('../src/engine/pipeline.js');
+const { compare } = await import('../src/engine/compare.js');
 const { detect } = await import('../src/engine/input.js');
 const { nodeResources, gatherInputs, openFiles, isSystemError, NodeHost } = await import('../src/node/host.js');
-const { fmtBytes, fmtTime, formatName, progressText, summary, groups, draftNote } = await import('../src/engine/words.js');
+const { fmtBytes, fmtTime, formatName, progressText, summary, groups, draftNote, explainedLines } = await import('../src/engine/words.js');
 
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
-const HELP = `plato-tools: check and convert PLATO data from the command line.
+const HELP = `plato-tools: check and convert PLATO data, and compare versions of it, from the command line.
 
 Usage:
   plato-tools check [options] INPUT...
   plato-tools convert --to TARGET [--out DIR] [options] INPUT...
+  plato-tools compare [options] EARLIER LATER
+                                            check that a published dataset was only added to:
+                                            every attestation of the EARLIER version must be in
+                                            the LATER one, unchanged (PLATO's append-only rule)
   plato-tools datacube [--json] FILE...     check a cube export (convert --to ntriples --cube)
                                             against the RDF Data Cube integrity constraints IC-1,
                                             IC-2, IC-11, IC-12 and IC-14
@@ -66,7 +72,8 @@ Options:
 
 Exit status: 0 if no input has problems, 1 if any has, 2 if the command is wrong or an input
 cannot be read or written. Warnings, and what a conversion cannot carry over, do not count
-as problems.
+as problems. For compare: 0 if nothing was deleted or changed, 1 if something was, 2 if the
+versions could not be compared.
 `;
 
 function usage(message) {
@@ -96,13 +103,13 @@ async function main(argv) {
     return 0;
   }
   const [action, ...args] = positionals;
-  if (!action) return usage('say what to do: check or convert.');
+  if (!action) return usage('say what to do: check, convert or compare.');
   if (action === 'datacube') return datacube(args, o);
-  if (action !== 'check' && action !== 'convert') return usage(`"${action}" is not a command; the commands are check, convert and datacube.`);
+  if (action !== 'check' && action !== 'convert' && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, compare and datacube.`);
   if (!args.length) return usage(`name at least one input to ${action}.`);
   if (action === 'convert' && !o.to) return usage(`convert needs --to, one of: ${Object.keys(TARGETS).join(', ')}.`);
   if (action === 'convert' && !TARGETS[o.to]) return usage(`"${o.to}" is not a target; the targets are ${Object.keys(TARGETS).join(', ')}.`);
-  if (action === 'check' && (o.to || o.overwrite)) return usage('--to and --overwrite are for convert.');
+  if (action !== 'convert' && (o.to || o.overwrite)) return usage('--to and --overwrite are for convert.');
   if (o.json && o.brief) return usage('choose --json or --brief, not both.');
   if (o.cube && o.to !== 'ntriples') return usage('--cube is for convert --to ntriples.');
 
@@ -118,6 +125,15 @@ async function main(argv) {
   const out = (s) => process.stdout.write(s);
   const live = process.stderr.isTTY && !o.json;
   const results = [];
+  if (action === 'compare') {
+    const items = await gatherInputs(args);
+    if (items.length !== 2) return usage(`compare takes two inputs, the earlier version and then the later one; ${items.length} ${items.length === 1 ? 'was' : 'were'} given.`);
+    let r;
+    try { r = await compareTwo(items, o, resources, host, live); } finally { host.cleanup(); }
+    r.exitCode = r.status === 'failed' ? 2 : r.status === 'problems' ? 1 : 0;
+    out(o.json ? JSON.stringify(r) + '\n' : describeComparison(r, o.brief));
+    return r.exitCode;
+  }
   try {
     for (const item of await gatherInputs(args)) {
       const r = await runOne(item, action, o, resources, host, live);
@@ -143,20 +159,83 @@ function toolsFault(e) {
   return `PLATO tools failed on this input, which is a fault in the tools, not in the data: ${e && e.message || e}${where ? ` (${where})` : ''}. Please report it at https://github.com/pelagios/plato-tools/issues.`;
 }
 
+/** Open one input and find what it is: { input }, or { message } saying why it cannot be read. */
+async function readInput(item) {
+  if (item.failure) return { message: item.failure };
+  let input;
+  try { input = await detect(await openFiles(item.paths)); }
+  catch (e) {
+    if (isSystemError(e)) return { message: e.message };
+    // Detection turns what the data does wrong into a reason itself; anything thrown is the tools' own fault.
+    return { message: toolsFault(e) };
+  }
+  return input.format ? { input } : { message: input.reason };
+}
+
+/** Compare two versions, and say how it went, as an object that --json prints as it is. */
+async function compareTwo(items, o, resources, host, live) {
+  const t0 = Date.now();
+  const r = { type: 'comparison', earlier: null, later: null, status: 'failed', errors: 0, counts: {}, items: [], elapsedMs: 0 };
+  const inputs = [];
+  for (const [word, item] of [['earlier', items[0]], ['later', items[1]]]) {
+    r[word] = { input: item.label, files: item.paths, format: null, profile: null };
+    const { input, message } = await readInput(item);
+    if (!input) { r.message = `${item.label}: ${message}`; r.elapsedMs = Date.now() - t0; return r; }
+    Object.assign(r[word], { format: input.format, profile: input.profile || null });
+    inputs.push(input);
+  }
+  const progress = live ? (p) => process.stderr.write(`\r\x1b[K${progressText(p)}`) : undefined;
+  const xlsx = inputs.some((i) => i.container === 'workbook') ? await import('xlsx') : undefined;
+  const { env, finish } = host.env(resources, { progress, xlsx });
+  let result = null, failure = null;
+  try { result = await compare({ earlier: inputs[0], later: inputs[1], options: { base: o.base } }, env); }
+  catch (e) { failure = e; }
+  if (live) process.stderr.write('\r\x1b[K');
+  finish(true);
+  r.elapsedMs = Date.now() - t0;
+  if (failure) { r.message = isSystemError(failure) ? failure.message : toolsFault(failure); return r; }
+  // A version that could not be read to the end was not compared: that is a failure to compare, not a
+  // finding about the rule, though the report says what stopped the reader.
+  Object.assign(r, { status: result.incomplete ? 'failed' : result.report.errors ? 'problems' : 'ok', errors: result.report.errors, counts: result.report.counts, items: result.report.items });
+  return r;
+}
+function describeComparison(r, brief) {
+  const side = (word, s) => `${word} ${s.input}${s.format ? `: ${formatName(s)}` : ''}\n`;
+  const lines = [side('Earlier:', r.earlier) + (r.later ? side('Later:  ', r.later) : '').replace(/\n$/, '')];
+  if (r.message) lines.push(`  Could not be compared: ${r.message}`);
+  else {
+    const { problems, counted } = summary({ errors: r.errors, counts: r.counts }, 'compare');
+    lines.push(`  ${problems}${counted ? ' ' + counted : ''} (${fmtTime(r.elapsedMs)})`);
+    if (!brief) lines.push(...itemLines(r.items, 'compare'));
+  }
+  return lines.join('\n') + '\n';
+}
+/** A report's findings, group by group, as the lines the terminal shows. */
+function itemLines(all, action) {
+  const lines = [];
+  for (const g of groups(action)) {
+    const items = all.filter((i) => i.severity === g.severity);
+    if (!items.length) continue;
+    lines.push(`  ${g.title}. ${g.intro}`);
+    for (const i of items) {
+      lines.push(`    × ${i.count.toLocaleString('en-GB')}  ${i.message}`);
+      for (const e of i.examples) {
+        lines.push(`        ${String(e)}`);
+        // The version check says what changed in an example: the statements only one version makes.
+        for (const x of (i.explained || []).filter((x) => x.example === e)) for (const l of explainedLines(x)) lines.push(`            ${l}`);
+      }
+    }
+  }
+  return lines;
+}
+
 /** Check or convert one input, and say how it went, as an object that --json prints as it is. */
 async function runOne(item, action, o, resources, host, live) {
   const t0 = Date.now();
   const r = { type: 'input', input: item.label, files: item.paths, format: null, profile: null, action, target: action === 'convert' ? o.to : null,
     status: 'failed', errors: 0, counts: {}, items: [], outputs: [], storeBytes: null, elapsedMs: 0 };
-  if (item.failure) { r.message = item.failure; return r; }
-  let files, input;
-  try { files = await openFiles(item.paths); input = await detect(files); }
-  catch (e) {
-    if (isSystemError(e)) { r.message = e.message; r.elapsedMs = Date.now() - t0; return r; }
-    // Detection turns what the data does wrong into a reason itself; anything thrown is the tools' own fault.
-    input = { format: null, reason: toolsFault(e) };
-  }
-  if (!input.format) { r.message = input.reason; r.elapsedMs = Date.now() - t0; return r; }
+  const { input, message } = await readInput(item);
+  if (!input) { r.message = message; r.elapsedMs = Date.now() - t0; return r; }
   r.format = input.format; r.profile = input.profile || null;
   if (input.lpfVersion) r.lpfVersion = input.lpfVersion;
   const progress = live ? (p) => process.stderr.write(`\r\x1b[K${item.label}: ${progressText(p)}`) : undefined;
@@ -193,17 +272,7 @@ function describe(r, action, brief) {
   if (r.status === 'failed') return `${head}  Could not be ${action === 'check' ? 'checked' : 'converted'}: ${r.message}\n${brief ? '' : '\n'}`;
   const { problems, counted } = summary({ errors: r.errors, counts: r.counts });
   const lines = [head + `  ${problems}${counted ? ' ' + counted : ''}`];
-  if (!brief) {
-    for (const g of groups(action === 'check')) {
-      const items = r.items.filter((i) => i.severity === g.severity);
-      if (!items.length) continue;
-      lines.push(`  ${g.title}. ${g.intro}`);
-      for (const i of items) {
-        lines.push(`    × ${i.count.toLocaleString('en-GB')}  ${i.message}`);
-        for (const e of i.examples) lines.push(`        ${String(e)}`);
-      }
-    }
-  }
+  if (!brief) lines.push(...itemLines(r.items, action));
   if (r.message) lines.push(`  ${r.message}`);
   for (const x of r.outputs) lines.push(`  Wrote ${x.path} (${fmtBytes(x.size)})`);
   return lines.join('\n') + (brief ? '\n' : '\n\n');

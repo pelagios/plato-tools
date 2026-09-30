@@ -41,16 +41,15 @@
         <p class="note">Choose <em>Convert</em> to N-Triples, with the Data Cube option.</p>
       </li>
       <li class="tool">
+        <a class="tool-link" href="#files"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg><span class="why" title="μνήμη: memory. In a published dataset nothing is forgotten or quietly rewritten.">Mneme</span></h3><p class="label">Version check</p></a>
+        <p>Published is published. Compare two versions of your dataset and show that nothing was quietly changed or lost.</p>
+        <p class="note">Choose the new version, then <em>Compare with the earlier version</em>.</p>
+      </li>
+      <li class="tool">
         <span class="badge partly">Partly here</span>
         <a class="tool-link" href="#files"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-1"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M2 15h10"/><path d="m9 18 3-3-3-3"/></svg><span class="why" title="Ἑρμῆς: the messenger and interpreter of the Greek gods, who carried meaning from one world to another, as the readers bring other formats into PLATO.">Hermes</span></h3><p class="label">Readers</p></a>
         <p>Bring in the places you linked in Recogito. Next: TEI editions, and the spreadsheets and GeoJSON you already have.</p>
         <p class="note">Recogito annotations can be read now.</p>
-      </li>
-      <li class="tool coming" aria-disabled="true">
-        <span class="badge">Coming</span>
-        <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg><span class="why" title="μνήμη: memory. In a published dataset nothing is forgotten or quietly rewritten." tabindex="0">Mneme</span></h3><p class="label">Version check</p>
-        <p>Published is published. Compare two versions of your dataset and show that nothing was quietly changed or lost.</p>
-        <a class="follow" href="https://github.com/pelagios/plato-tools/issues/2">Follow its progress</a>
       </li>
       <li class="tool coming" aria-disabled="true">
         <span class="badge">Coming</span>
@@ -84,13 +83,19 @@
   </section>
 
   <section id="action" aria-labelledby="action-h" hidden>
-    <h2 id="action-h"><span class="step">2</span> Check it, or convert it</h2>
+    <h2 id="action-h"><span class="step">2</span> Check it, convert it, or compare it with an earlier version</h2>
     <div class="actions">
       <button id="check" class="primary">Check</button>
       <span class="or">or</span>
       <label for="target" class="visually-hidden">Convert to</label>
       <select id="target"></select>
       <button id="convert">Convert</button>
+    </div>
+    <div class="actions versions">
+      <span class="or">or, if this is a new version of a dataset you have published,</span>
+      <button id="compare">Compare with the earlier version…</button>
+      <input type="file" id="earlier" multiple hidden aria-label="The earlier version">
+      <small>You will be asked for the earlier version's file. Once a dataset is published, its attestations are only added to: this shows that none was deleted or changed.</small>
     </div>
     <details id="options">
       <summary>Options</summary>

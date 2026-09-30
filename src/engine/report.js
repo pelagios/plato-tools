@@ -2,17 +2,24 @@
 // and a handful of examples, however many times it occurs.
 export class Report {
   constructor({ examples = 5 } = {}) { this.examples = examples; this.kinds = new Map(); this.counts = {}; }
-  add(severity, kind, message, example) {
+  add(severity, kind, message, example, n = 1) {
     const key = severity + '\u0001' + kind + '\u0001' + message;
     let k = this.kinds.get(key);
     if (!k) { k = { severity, kind, message, count: 0, examples: [] }; this.kinds.set(key, k); }
-    k.count++;
+    k.count += n;
     if (example !== undefined && k.examples.length < this.examples) k.examples.push(example);
   }
   error(kind, message, example) { this.add('error', kind, message, example); }
   warning(kind, message, example) { this.add('warning', kind, message, example); }
   loss(kind, message, example) { this.add('loss', kind, message, example); }
   count(name, n = 1) { this.counts[name] = (this.counts[name] || 0) + n; }
+  /**
+   * Say what changed in one of a kind's examples (the version check): the statements the earlier
+   * version makes of it that the later does not, and the other way round.
+   */
+  explain(kind, example, earlier, later) {
+    for (const k of this.kinds.values()) if (k.kind === kind) (k.explained ||= []).push({ example, earlier, later });
+  }
   toJSON() {
     const items = [...this.kinds.values()].sort((a, b) => ['error', 'warning', 'loss'].indexOf(a.severity) - ['error', 'warning', 'loss'].indexOf(b.severity) || b.count - a.count);
     return { counts: this.counts, errors: items.filter((i) => i.severity === 'error').reduce((n, i) => n + i.count, 0), items };

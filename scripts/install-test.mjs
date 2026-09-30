@@ -41,6 +41,11 @@ try {
     if (!nt.includes('"﻿Lead"')) throw new Error('the U+FEFF was lost');
     return `${nt.split('\n').filter(Boolean).length} triples`;
   });
+  step('plato-tools compare finds the JSON and its own N-Triples the same', () => {
+    const r = JSON.parse(sh(bin, ['compare', '--json', 'doc.json', 'doc.nt'], app));
+    if (r.status !== 'ok' || r.counts.unchanged !== 1) throw new Error(JSON.stringify(r).slice(0, 400));
+    return `${r.counts.unchanged} attestation unchanged`;
+  });
   step('nothing is left of patch-package', () => { const m = readdirSync(join(app, 'node_modules')); if (m.includes('patch-package')) throw new Error('patch-package is installed'); return ''; });
 } finally { rmSync(dir, { recursive: true, force: true }); }
 if (failed) { console.log('INSTALL TEST FAILED'); process.exit(1); }

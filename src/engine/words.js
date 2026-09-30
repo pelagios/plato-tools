@@ -7,7 +7,7 @@ export const FORMAT_NAMES = { tables: 'PLATO spreadsheet tables', 'plato-json': 
 export const formatName = (input) => FORMAT_NAMES[input.format] + (input.profile ? ` (${input.profile})` : '') + (input.lpfVersion === 2 ? ', version 2' : '');
 
 // A count in words, singular for one: "1 place", "2 places", "1 identity relation".
-const ONE = { annotations: 'annotation', places: 'place', attestations: 'attestation', 'identity relations': 'identity relation', triples: 'triple', 'triples written': 'triple written', 'table rows': 'table row', observations: 'Data Cube observation' };
+const ONE = { 'earlier attestations': 'earlier attestation', annotations: 'annotation', places: 'place', attestations: 'attestation', 'identity relations': 'identity relation', triples: 'triple', 'triples written': 'triple written', 'table rows': 'table row', observations: 'Data Cube observation' };
 const MANY = { observations: 'Data Cube observations' };
 const count = (n, what) => `${n.toLocaleString('en-GB')} ${n === 1 ? ONE[what] || what : MANY[what] || what}`;
 
@@ -23,13 +23,19 @@ export function progressText(p) {
   if (p.triples) bits.push(count(p.triples, 'triples'));
   if (p.places) bits.push(count(p.places, 'places'));
   if (p.attestations) bits.push(count(p.attestations, 'attestations'));
-  const phase = { reading: 'Reading', loading: 'Loading into the working database', indexing: 'Indexing', writing: 'Writing', done: 'Finishing' }[p.phase] || p.phase;
-  return `${phase}${bits.length ? ': ' + bits.join(', ') : ''} (${fmtTime(p.elapsedMs || 0)})`;
+  const phase = { reading: 'Reading', loading: 'Loading into the working database', indexing: 'Indexing', writing: 'Writing', done: 'Finishing', read: 'Read', comparing: 'Comparing the two versions' }[p.phase] || p.phase;
+  // The version check reads two inputs, one after the other, and says which it is on.
+  const which = p.version ? `${p.version === 'earlier' ? 'Earlier' : 'Later'} version${p.again ? ', again, to see what changed' : ''}: ` : '';
+  return `${which}${phase}${bits.length ? ': ' + bits.join(', ') : ''} (${fmtTime(p.elapsedMs || 0)})`;
 }
 
-/** The two halves of a report's summary: "2 problems found." and "Read 3 places, 5 attestations." */
-export function summary(report) {
+/**
+ * The two halves of a report's summary: "2 problems found." and "Read 3 places, 5 attestations."
+ * A comparison of two versions (`action` 'compare') counts other things, in other words.
+ */
+export function summary(report, action) {
   const c = report.counts;
+  if (action === 'compare') return compareSummary(report);
   const counted = ['annotations', 'places', 'attestations', 'identity relations', 'triples', 'triples written', 'table rows', 'observations'].filter((k) => c[k]).map((k) => count(c[k], k)).join(', ');
   const nErr = report.errors;
   return {
@@ -38,8 +44,34 @@ export function summary(report) {
   };
 }
 
-/** The report's groups, in order, with a title and a line saying what each means. */
-export function groups(checking) {
+/** What changed in one example of a version check, a line for each statement only one version makes. */
+export function explainedLines(x) {
+  return [...x.earlier.map((t) => `Only in the earlier version: ${t}`), ...x.later.map((t) => `Only in the later version: ${t}`)];
+}
+
+/** The summary of a version check: whether the append-only rule holds, and what became of the earlier attestations. */
+function compareSummary(report) {
+  const c = report.counts, n = (x) => (x || 0).toLocaleString('en-GB');
+  if (c.earlier === undefined) return { problems: 'The two versions could not be compared.', counted: '' };
+  const parts = [`${n(c.unchanged)} unchanged`];
+  if (c.changed) parts.push(`${n(c.changed)} changed`);
+  if (c.lost) parts.push(`${n(c.lost)} no longer there`);
+  const withdrawn = [c.retracted ? `retracts ${n(c.retracted)}` : '', c.superseded ? `replaces ${n(c.superseded)}` : ''].filter(Boolean).join(' and ');
+  const nErr = report.errors;
+  return {
+    problems: nErr ? `${n(nErr)} problem${nErr === 1 ? '' : 's'} found.`
+      : c.unchanged === c.earlier ? 'Nothing was deleted or changed.' : 'The append-only rule is not broken, but see the warnings.',
+    counted: `Of ${count(c.earlier, 'earlier attestations')}, ${parts.join(', ')}. The later version has ${count(c.later, 'attestations')}, ${n(c.added)} of them new${withdrawn ? `; it ${withdrawn} of the earlier ones` : ''}.`,
+  };
+}
+
+/** The report's groups, in order, with a title and a line saying what each means, for `action` 'check', 'convert' or 'compare'. */
+export function groups(action) {
+  const checking = action === 'check';
+  if (action === 'compare') return [
+    { severity: 'error', title: 'Problems', intro: 'These break the append-only rule: once a dataset is published, its attestations are added to, never deleted or changed.' },
+    { severity: 'warning', title: 'Warnings', intro: 'Worth a look; none of these breaks the rule.' },
+  ];
   return [
     { severity: 'error', title: 'Problems', intro: 'These must be fixed for the data to be valid PLATO.' },
     { severity: 'warning', title: 'Warnings', intro: 'Worth a look; the data can still be used.' },
