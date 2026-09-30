@@ -66,6 +66,12 @@ function facetOf(a) {
  * The fallback says where the map should look: the place's own current geometries; else the places
  * it is related to; else its countries; else nowhere ('none').
  */
+// An uncertainty radius, the first of a location's: a finite number, or nothing. A dataset the schema
+// refuses still opens, so anything else (text, markup) is dropped here, not shown.
+const km = (v) => { const x = Array.isArray(v) ? v[0] : undefined; return typeof x === 'number' && Number.isFinite(x) ? x : null; };
+// A location's precision (the first of its list) and role: text, or nothing, for the same reason.
+const word = (v) => { const x = Array.isArray(v) ? v[0] : undefined; return typeof x === 'string' ? x : null; };
+const text = (v) => (typeof v === 'string' ? v : null);
 export function viewPlace(record, ctx = {}) {
   const rec = record || {};
   const atts = Array.isArray(rec.attestations) ? rec.attestations : [];
@@ -88,7 +94,7 @@ export function viewPlace(record, ctx = {}) {
       const geojson = drawable(g);
       if (!geojson) continue;
       view.geometries.push({
-        geojson, role: g.role ?? null, precision: (g.spatialPrecision || [])[0] ?? null, precisionKm: (g.precisionKm || [])[0] ?? null,
+        geojson, role: text(g.role), precision: word(g.spatialPrecision), precisionKm: km(g.precisionKm),
         status, attestationId, attestationIndex: i, sources: srcs, created, timespan,
       });
     }

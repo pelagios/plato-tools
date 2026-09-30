@@ -39,12 +39,19 @@ export const savedName = (name) => String(name).replace(/\.gz$/i, '').replace(/\
  * keyer()'s: null for a record that is not a place, which is passed through as it is. A place the
  * dataset gives twice under one @id gets its additions once, at the first, as Chora's store shows it.
  */
-function appendTo(rec, key, byPlace, placed) {
+function appendTo(rec, key, byPlace, placed, unlisted) {
   const adds = key === null || placed.has(key) ? null : byPlace.get(key);
   if (!adds) return rec;
+  // Attestations that are not a list cannot have drawings put after them without replacing them: the
+  // record is left as it was, and the save refused (save(), which looks for such a place first).
+  if (!listed(rec)) { unlisted.set(key, rec); return rec; }
   placed.add(key);
-  return { ...rec, attestations: [...(Array.isArray(rec.attestations) ? rec.attestations : []), ...adds] };
+  return { ...rec, attestations: [...(rec.attestations || []), ...adds] };
 }
+/** Whether a record's attestations are a list, or absent (a place with none yet). */
+const listed = (rec) => rec.attestations === undefined || Array.isArray(rec.attestations);
+/** A place refused for its attestations, as the report names it: its label and key. */
+const refuse = (rep, key, rec) => rep.error('chora-attestations-not-a-list', CHORA_TEXT['chora-attestations-not-a-list'], typeof rec?.label === 'string' && rec.label ? `${rec.label} (${key})` : key);
 
 /**
  * Write the dataset with its additions (byPlace: place key -> [attestation]) to `name`: a conversion
@@ -54,9 +61,9 @@ function appendTo(rec, key, byPlace, placed) {
  * here as there. makeWriter names the file from options.name, so the output is `name`. Returns run()'s
  * result.
  */
-function writeWithAdditions(input, byPlace, placed, env, name) {
+function writeWithAdditions(input, byPlace, placed, unlisted, env, name) {
   const keyOf = keyer();
-  return run({ input, action: 'convert', target: 'plato-json', options: { name, augment: (rec) => appendTo(rec, keyOf(rec), byPlace, placed) } }, env);
+  return run({ input, action: 'convert', target: 'plato-json', options: { name, augment: (rec) => appendTo(rec, keyOf(rec), byPlace, placed, unlisted) } }, env);
 }
 
 // What the version check must find for the save to stand: nothing of the earlier version lost or
@@ -96,6 +103,8 @@ export async function verify(input, later, added, env) {
  * - contributor: given to each addition that does not say who made it;
  * - hasPlace(key): whether the dataset has the place, when the caller knows (Chora's store); without
  *   it the dataset is read once first to find out, so that nothing is written for a missing place;
+ * - record(key): the place's record, when the caller has it (Chora's store), so that a place whose
+ *   attestations are not a list is refused before anything is written, as the first reading does;
  * - reopen(output): the written file as a File, for the version check (hosts differ).
  * Returns { report, outputs, mneme: { passed, report, reasons } | null, incomplete? }.
  */
@@ -115,22 +124,35 @@ export async function save(input, additions, env, options = {}) {
   }
   if (rep.toJSON().errors) return fail();
   // A place the dataset does not have: reported now, not found missing in the file afterwards.
+  // And a place whose attestations are not a list (a dataset the schema would refuse, which Chora
+  // still opens): its drawings could only replace them, so nothing is written. The first of a place
+  // given twice is the one looked at, as it is the one the drawings go to.
   let missing;
-  if (options.hasPlace) missing = [...byPlace.keys()].filter((k) => !options.hasPlace(k));
-  else {
+  const unlisted = new Map();
+  if (options.hasPlace) {
+    missing = [...byPlace.keys()].filter((k) => !options.hasPlace(k));
+    if (options.record) for (const k of byPlace.keys()) { const rec = missing.includes(k) ? null : options.record(k); if (rec && !listed(rec)) unlisted.set(k, rec); }
+  } else {
     const seen = new Set(), keyOf = keyer();
-    const r = await run({ input, action: 'check', options: { sink: { header() {}, event(ev) { if (ev.type === 'record') { const k = keyOf(ev.value); if (k !== null && byPlace.has(k)) seen.add(k); } }, async close() {} } } }, env);
+    const r = await run({ input, action: 'check', options: { sink: { header() {}, event(ev) {
+      if (ev.type !== 'record') return;
+      const k = keyOf(ev.value);
+      if (k !== null && byPlace.has(k) && !seen.has(k)) { seen.add(k); if (!listed(ev.value)) unlisted.set(k, ev.value); }
+    }, async close() {} } } }, env);
     if (r.incomplete) { rep.error('chora-unreadable', CHORA_TEXT['chora-unreadable'], r.report.items.find((i) => i.kind === 'unreadable')?.examples[0]); return fail(); }
     missing = [...byPlace.keys()].filter((k) => !seen.has(k));
   }
   for (const k of missing) rep.error('chora-no-such-place', CHORA_TEXT['chora-no-such-place'], k);
-  if (missing.length) return fail();
+  for (const [k, rec] of unlisted) refuse(rep, k, rec);
+  if (missing.length || unlisted.size) return fail();
 
   const name = savedName(options.name || input.name || input.files[0].name);
   const placed = new Set();
-  const w = await writeWithAdditions(input, byPlace, placed, env, name);
+  const w = await writeWithAdditions(input, byPlace, placed, unlisted, env, name);
   const report = w.report;
   const added = [...byPlace.values()].reduce((s, l) => s + l.length, 0);
+  // Found only in the writing (the caller knew the place, not its record): the file written is not offered.
+  if (unlisted.size) { for (const [k, rec] of unlisted) refuse(rep, k, rec); return fail(); }
   if (w.incomplete) return { report, outputs: [], mneme: null, incomplete: true };
   for (const k of byPlace.keys()) if (!placed.has(k)) { report.items.push({ severity: 'error', kind: 'chora-not-placed', message: CHORA_TEXT['chora-not-placed'], count: 1, examples: [k] }); report.errors++; }
   report.counts['attestations added'] = added;

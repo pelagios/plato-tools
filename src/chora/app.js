@@ -9,7 +9,7 @@ import { createMap, placeFeatures, contextFeatures, STATUS_COLOURS } from './map
 import * as basemaps from './basemaps.js';
 import * as contributors from './contributor.js';
 import { fingerprint, loadDrafts, saveDrafts } from './drafts.js';
-import { take as takeHandoff } from './handoff.js';
+import { take as takeHandoff, clear as clearHandoff } from './handoff.js';
 
 const $ = (id) => document.getElementById(id);
 const state = (window.__chora = { phase: 'loading', placeId: null, pendingCount: 0, basemap: null, mapReadyCount: 0, blocked: 0, lastSave: null });
@@ -152,7 +152,7 @@ function renderCard() {
     <p class="muted place-id">${esc(v.id)}${v.ccodes.length ? ` · ${esc(v.ccodes.join(', '))}` : ''}</p>${where}
     <h3>Names</h3>${list(v.names, (x) => `${esc(x.toponym)}${x.language ? ` <span class="muted">(${esc(x.language)})</span>` : ''}${x.romanized ? ` <span class="muted">${esc(x.romanized)}</span>` : ''}${badge(x.status)}`)}
     <h3>Types</h3>${list(v.types, (x) => `${esc(x.label || '')}${badge(x.status)}`)}
-    <h3>Locations</h3>${list(v.geometries, (g) => `${esc(g.geojson.type)}${g.role ? `, ${esc(ROLE_WORDS[tailOf(g.role)] || tailOf(g.role))}` : ''}${g.precision ? `, ${esc(g.precision.replace('_', ' '))}` : ''}${g.precisionKm != null ? ` (±${g.precisionKm} km)` : ''}${g.timespan?.label || g.timespan?.start ? ` <span class="muted">${esc(g.timespan.label || `${g.timespan.start ?? ''}–${g.timespan.end ?? ''}`)}</span>` : ''}${badge(g.status)}`)}
+    <h3>Locations</h3>${list(v.geometries, (g) => `${esc(g.geojson.type)}${g.role ? `, ${esc(ROLE_WORDS[tailOf(g.role)] || tailOf(g.role))}` : ''}${g.precision ? `, ${esc(g.precision.replace('_', ' '))}` : ''}${g.precisionKm != null ? ` (±${esc(g.precisionKm)} km)` : ''}${g.timespan?.label || g.timespan?.start ? ` <span class="muted">${esc(g.timespan.label || `${g.timespan.start ?? ''}–${g.timespan.end ?? ''}`)}</span>` : ''}${badge(g.status)}`)}
     <h3>Related places</h3>${list(v.relations, (r) => `${esc(r.typeLabel || tailOf(r.type))}: ${r.related ? `<a href="#" data-place="${esc(r.related.id)}">${esc(r.label)}</a>` : esc(r.label)}${badge(r.status)}`)}
     <h3>Over time</h3>${timeline(v.timeline)}
     <h3>Sources</h3>${list(v.sources, (s) => (s.id && /^https?:/.test(s.id) ? `<a href="${esc(s.id)}" rel="noopener">${esc(s.title || s.id)}</a>` : esc(s.title || s.id)))}
@@ -236,9 +236,9 @@ function onFinish(id, ctx) {
   if (geojson !== f.geometry) setTimeout(() => { try { mapApi.draw?.updateFeatureGeometry(id, geojson); } catch {} });
   drawError = state.drawError = null;
   if (existing) { existing.geojson = geojson; keepDrafts(); return; }   // moved or reshaped
-  const b = basemaps.current();
+  // The basemap drawn on goes into the published notes: a built-in one by name, a pasted one not (its site may be private).
   drafts.push({ id: String(id), placeId: state.placeId, placeLabel: view?.label || '', geojson, role: '', precision: '',
-    basemap: b.local ? 'Natural Earth' : b.name, zoom: mapApi.zoom(), drawnAt: new Date().toISOString() });
+    basemap: basemaps.drawnOn(basemaps.current()), zoom: mapApi.zoom(), drawnAt: new Date().toISOString() });
   keepDrafts();
   renderCard();
 }
@@ -334,29 +334,45 @@ async function saveDataset() {
   // the same input the same way, cannot see.
   const converted = dataset.input?.format !== 'plato-json' || dataset.input?.profile !== 'place-centric';
   const notes = (r.report?.items || []).filter((i) => i.severity !== 'error');
+  const item = (i) => `<li>${esc(CHORA_TEXT[i.kind] || i.message)}${i.count > 1 ? ` (${n(i.count)})` : ''}${i.examples?.length ? ` <span class="muted">${esc(i.examples.slice(0, 3).join('; '))}</span>` : ''}</li>`;
   $('save-result').innerHTML = `<p class="${passed ? 'good' : 'warn'}">${esc(choraSaveText(r))}</p>`
     + (passed ? `<p>${converted ? `The dataset is ${esc(formatName(dataset.input))}: the saved file is a conversion of it to PLATO JSON (place-centric), with the drawings added.` : 'The saved file is PLATO JSON, as the dataset is, with the drawings added.'}</p>`
-      + (notes.length ? `<p>${converted ? 'The conversion' : 'Writing it'} reported:</p><ul class="notes">${notes.map((i) => `<li>${esc(i.message)}${i.count > 1 ? ` (${n(i.count)})` : ''}${i.examples?.length ? ` <span class="muted">${esc(i.examples.slice(0, 3).join('; '))}</span>` : ''}</li>`).join('')}</ul>` : '')
+      // Problems the writing found (a place the schema refuses, say) are shown even when the version
+      // check passes: Mneme compares the attestations, and says nothing of them.
+      + (problems.length ? `<p class="warn">${converted ? 'The conversion' : 'Writing it'} found problems in the dataset, which the saved file has too:</p><ul class="notes problems">${problems.map(item).join('')}</ul>` : '')
+      + (notes.length ? `<p>${converted ? 'The conversion' : 'Writing it'} reported:</p><ul class="notes">${notes.map(item).join('')}</ul>` : '')
       : reasons.map((x) => `<p class="warn">${esc(x)}</p>`).join(''));
   if (passed && out) {
-    const b = document.createElement('button'); b.className = 'primary';
+    // The file offered, and, once it has gone as a download, the way to let its drawings go: together,
+    // so that both are withdrawn when the drawings change.
+    const box = document.createElement('p'), b = document.createElement('button'); b.className = 'primary';
     b.textContent = `Save ${out.name} (${fmtBytes(out.size)})`;
+    // The drawings in that file need not be kept here once it is on the user's disk; any others still are.
+    const letGo = (said) => {
+      offered = null; box.remove();
+      drafts = drafts.filter((d) => !savedIds.has(d.id)); keepDrafts(); showDrafts(drafts.filter((d) => d.placeId === state.placeId)); if (view) renderCard();
+      $('save-result').insertAdjacentHTML('beforeend', `<p>${said} To add more, open ${esc(out.name)}.</p>`);
+    };
     b.onclick = async () => {
       let done;
       try { done = await save(out.name); } catch (e) {
-        offered = null; b.remove();
+        offered = null; box.remove();
         $('save-result').insertAdjacentHTML('beforeend', `<p class="warn">${esc(out.name)} is no longer there to save (${esc(e.message)}): save again.</p>`);
         return;
       }
-      if (done) {
-        // Saved to the user's disk: the drawings in that file need not be kept here; any others still are.
-        offered = null; b.remove();
-        drafts = drafts.filter((d) => !savedIds.has(d.id)); keepDrafts(); showDrafts(drafts.filter((d) => d.placeId === state.placeId)); if (view) renderCard();
-        $('save-result').insertAdjacentHTML('beforeend', `<p>Saved. To add more, open ${esc(out.name)}.</p>`);
+      if (done === true) letGo('Saved.');
+      else if (done === 'download' && !box.querySelector('[data-clear]')) {
+        // A download cannot be seen to finish: the drawings are kept, and the file still offered,
+        // until the user says the file is on their disk.
+        const c = document.createElement('button'); c.type = 'button'; c.dataset.clear = '';
+        c.textContent = 'The download is complete: let these drawings go';
+        c.onclick = () => letGo('The drawings in that file are no longer kept here.');
+        box.append(' ', c, Object.assign(document.createElement('span'), { className: 'muted', textContent: ' If the download did not complete, save again.' }));
       }
     };
-    $('save-result').appendChild(b);
-    offered = b;
+    box.appendChild(b);
+    $('save-result').appendChild(box);
+    offered = box;
   }
   state.lastSave = { passed, added, outputs: r.outputs || [], mneme: r.mneme || null, report: r.report || null, converted };
   state.phase = 'saved';
@@ -364,7 +380,9 @@ async function saveDataset() {
 // The same as the main page's save() (src/app.js), kept here rather than shared so that the main page
 // is not changed for Chora: the output is on the origin private file system (in chora-outputs/, the
 // worker's directory for Chora, apart from the main page's outputs/), and goes to disk
-// through the save dialogue where there is one, else as a download. True once saved.
+// through the save dialogue where there is one, else as a download. True once saved through the
+// dialogue, which returns when the file is written; 'download' for a download, which cannot be seen
+// to finish; false if the user cancelled.
 async function save(name) {
   const root = await navigator.storage.getDirectory();
   const file = await (await (await root.getDirectoryHandle('chora-outputs')).getFileHandle(name)).getFile();
@@ -378,7 +396,7 @@ async function save(name) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(file); a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 60000);
-  return true;
+  return 'download';
 }
 window.__chora_save = save;
 
@@ -405,11 +423,11 @@ $('basemap-options').addEventListener('change', (e) => {
   if (e.target.name !== 'basemap') return;
   const b = basemaps.byId(e.target.value);
   if (!b || b.disabled) return;
-  if (!b.local && !basemaps.consented(basemaps.originOf(b))) { asking = b; renderBasemaps(); return; }
+  if (!b.local && !basemaps.agreed(b)) { asking = b; renderBasemaps(); return; }
   useBasemap(b);
 });
 $('basemap-options').addEventListener('click', (e) => {
-  if (e.target.id === 'consent-yes') { basemaps.consent(basemaps.originOf(asking)); const b = asking; asking = null; useBasemap(b); }
+  if (e.target.id === 'consent-yes') { basemaps.consent(basemaps.originsOf(asking)); const b = asking; asking = null; useBasemap(b); }
   else if (e.target.id === 'consent-no') { asking = null; renderBasemaps(); }
   else if (e.target.dataset.unpaste) {
     const id = e.target.dataset.unpaste;
@@ -422,15 +440,33 @@ $('basemap-options').addEventListener('submit', (e) => {
   const b = basemaps.fromPaste($('paste').value);
   if (!b) { $('paste-error').textContent = 'That is not an https address.'; return; }
   basemaps.addPasted(b);
-  asking = basemaps.consented(basemaps.originOf(b)) ? null : b;
+  asking = basemaps.agreed(b) ? null : b;
   if (asking) renderBasemaps(); else useBasemap(b);
 });
 async function useBasemap(b) {
   if (!b.local) basemapError = state.basemapError = null;
+  mapApi.allow(basemaps.originsOf(b));
+  let style;
+  try { style = await basemaps.styleFor(b, mapApi.guard); } catch (e) {
+    if (b.local) { console.warn(e); return; }
+    return styleFailed(e.message, b);
+  }
+  // A pasted style says which sites it asks only once it has been read: any the user has not agreed
+  // to are named in the notice, and the map stays as it is (its own sites allowed again) until they agree.
+  if (b.group === 'Pasted' && b.kind === 'style') {
+    const origins = [...new Set([basemaps.originOf(b), ...basemaps.styleOrigins(style, b.url)])];
+    if (origins.join() !== basemaps.originsOf(b).join()) { b = { ...b, origins }; basemaps.addPasted(b); }
+    if (!basemaps.agreed(b)) {
+      const shown = basemaps.byId(state.basemap);
+      asking = b; $('basemaps').open = true;
+      if (shown) { mapApi.allow(basemaps.originsOf(shown)); renderBasemaps(); } else useBasemap(basemaps.byId('natural-earth'));
+      return;
+    }
+    mapApi.allow(origins);
+  }
   basemaps.choose(b);
-  mapApi.allow([basemaps.originOf(b)]);
   state.basemap = b.id;
-  try { mapApi.setStyle(await basemaps.styleFor(b)); } catch (e) { console.warn(e); }
+  mapApi.setStyle(style);
   renderBasemaps();
 }
 
@@ -462,8 +498,7 @@ drop.ondragleave = () => drop.classList.remove('over');
 drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); open(e.dataTransfer.files); };
 
 // A basemap whose style cannot be loaded leaves no map to draw on: Natural Earth, from this site, instead.
-function styleFailed(why) {
-  const b = basemaps.byId(state.basemap);
+function styleFailed(why, b = basemaps.byId(state.basemap)) {
   if (!b || b.local) return;
   basemapError = state.basemapError = `${b.name} could not be loaded from ${basemaps.originOf(b)} (${why}), so the map is back on Natural Earth, from this site.`;
   $('basemaps').open = true;
@@ -494,4 +529,5 @@ startWorker().then(async () => {
     $('open-handoff').onclick = () => open(handed);
     state.handoff = handed.map((f) => f.name);
   }
-}).catch((e) => (e.kind === 'pool-busy' ? inAnotherTab() : fail(e.message)));
+// A second tab offers nothing, so files handed to it are let go there too, not left in the browser.
+}).catch((e) => (e.kind === 'pool-busy' ? clearHandoff().then(inAnotherTab) : fail(e.message)));

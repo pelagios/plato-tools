@@ -196,3 +196,23 @@ test('a geometry across the antimeridian: its box goes the short way round, and 
   assert.deepEqual(s.brief(id('bexley')).bbox, [5, 50, 5, 50]);
   assert.deepEqual(s.getPlace(id('fiji')).fallback, { kind: 'geometry', bbox: [178, -18, -178, -16] });
 });
+
+// ---- The pre-push review of 30 September 2026: each test below failed before its fix. -------------
+test("a location's uncertainty radius is shown only when it is a number: anything else, markup included, is dropped", () => {
+  const km = (v) => viewPlace({ label: 'x', attestations: [{ geometries: [{ ...pt(1, 1), precisionKm: v }] }] }).geometries[0].precisionKm;
+  assert.equal(km([12.5]), 12.5, 'the control: a number is kept');
+  assert.equal(km([0]), 0, 'and nought is a number');
+  for (const bad of [['<img src=x onerror=alert(1)>'], '<img src=x onerror=alert(1)>', ['5'], [null], [NaN], [Infinity], [{}], {}, 7]) {
+    assert.equal(km(bad), null, `dropped: ${JSON.stringify(bad)}`);
+  }
+  assert.equal(km(undefined), null);
+});
+
+test("a location's precision and role are kept only as text: anything else, which the schema refuses, is dropped rather than breaking the card", () => {
+  const g = (extra) => viewPlace({ label: 'x', attestations: [{ geometries: [{ ...pt(1, 1), ...extra }] }] }).geometries[0];
+  for (const bad of [[5], [{}], [['exact']], [null], 'exact']) assert.equal(g({ spatialPrecision: bad }).precision, null, JSON.stringify(bad));
+  for (const bad of [5, {}, ['x']]) assert.equal(g({ role: bad }).role, null, JSON.stringify(bad));
+  // The controls: what the schema allows is kept.
+  assert.equal(g({ spatialPrecision: ['historical_approximate'] }).precision, 'historical_approximate');
+  assert.equal(g({ role: P + 'Extent' }).role, P + 'Extent');
+});

@@ -492,7 +492,10 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   read with its drawings appended as new attestations: one `run()`, a conversion to `plato-json`
   whose `options.augment` puts each place's drawings after its own attestations. The pipeline does
   not check what `augment` adds, so drawings are checked against the pinned JSON Schema, and
-  against the places the dataset has, before anything is read or written.
+  against the places the dataset has, before anything is read or written. A drawing for a place whose
+  `attestations` are not a list (the schema refuses it, and Chora still opens it) is refused, naming
+  the place, since it could only replace them. Problems the writing finds are shown even when Mneme
+  passes, as it compares attestations and nothing else.
 - **A place's key** is its `@id`, or `#n` (its position among the records) when it has none
   (`placeKey` in `store.js`). Loading and saving both count the records `run()` gives, in the same
   order and by one rule (`keyer`: every record counts, and one that is not a place has no key), so a
@@ -512,7 +515,9 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   named by a hash of each input file's name, size and last change. A drawing made on a copy of the
   world (longitudes past 180) is moved back onto it whole (`wrapLongitudes` in `draw.js`), and one
   across the antimeridian is refused when it is finished, in words, as the save would refuse it.
-  The file a save wrote is offered only while the drawings are those it holds.
+  The file a save wrote is offered only while the drawings are those it holds. Saved through the save
+  dialogue, which returns once the file is written, the drawings it holds are let go; saved as a
+  download, which the page cannot see finish, they are kept until the user says the download is complete.
 - **The basemap** is Natural Earth, served from this site from `public/basemap/`. Every address in
   its `style.json` begins `{base}/`, which the page replaces with the folder's address as text,
   since `URL()` would escape the braces of the glyph template. `node scripts/build-basemap.mjs`
@@ -524,10 +529,16 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   Content Security Policy in a `<meta>` tag cannot be widened once the page is running, and a pasted
   basemap may be on any site, so the guard is in code.
 - **Other basemaps** (OpenFreeMap, OpenStreetMap, CARTO, or a pasted style or tile address) are
-  used only after a notice naming who will see the requests. Choices and consents stay in
-  `localStorage`. A basemap whose style cannot be loaded gives way to Natural Earth, and the page
-  says why. A map error goes to the console without the query strings of its addresses, where a key
-  may be. CARTO's key is given at build time as `VITE_CARTO_API_KEY`, and without it CARTO
+  used only after a notice naming every site that will see the requests. A style's sources, glyphs
+  and sprites may be on sites other than its own (CARTO's are on `tiles.basemaps.cartocdn.com`, and
+  its TileJSON's tiles on `tiles-a` to `-d`), so each built-in basemap lists its `origins`, and the
+  guard allows those. A pasted style is read by the page, through the guard, once its own site is
+  agreed to; any further sites it names (`styleOrigins`) are named in the notice, and the map does
+  not use it until they are agreed to too. Sites named only by a TileJSON are not found this way, and
+  are refused. Choices and consents stay in `localStorage`. A basemap whose style cannot be loaded
+  gives way to Natural Earth, and the page says why. A map error goes to the console with only the
+  site of its addresses, since a key may be in the query or the path. A drawing's note names the
+  basemap it was drawn on if it is a built-in one, and a pasted one only as such. CARTO's key is given at build time as `VITE_CARTO_API_KEY`, and without it CARTO
   is shown disabled. It is scoped by referrer to `https://pelagios.org`, so it never works on
   localhost and no test may need it. Vite writes it into the built page, where anyone can read it:
   the scope is its protection. Never commit it (`.gitignore` does not cover `.env` files). It is to

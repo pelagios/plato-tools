@@ -20,9 +20,11 @@ export const STATUS_COLOURS = { asserted: '#2757dd', reported: '#7a4fc9', tentat
 const status = (fallback) => ['match', ['get', 'status'], ...Object.entries(STATUS_COLOURS).flat(), fallback];
 const EMPTY = { type: 'FeatureCollection', features: [] };
 
-// An address's query string may carry a basemap's key (CARTO's api_key, or a pasted one): it is left
-// out of anything written to the console.
-const redact = (s) => String(s).replace(/\?[^\s"'<>()]*/g, '?…');
+// An address may carry a basemap's key, in its query string (CARTO's api_key) or in its path (a pasted
+// one's): nothing of it but its site is written to the console.
+const redact = (s) => String(s).replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s"'<>()]*/gi, (u) => { try { return `${new URL(u).origin}/…`; } catch { return '…'; } });
+/** What a map error was about, in general terms, for the console: a tile, a source's data, or the style. */
+const kindOf = (e) => (e?.tile ? 'a tile' : e?.sourceId ? 'a source' : 'the style or its glyphs and sprites');
 
 /**
  * The map in `container`. `state` is window.__chora: blocked, blockedOrigins and mapReadyCount are
@@ -32,17 +34,19 @@ const redact = (s) => String(s).replace(/\?[^\s"'<>()]*/g, '?…');
 export function createMap(container, { state, onPlaceClick, onStyleError }) {
   const allowed = new Set([location.origin]);
   state.blocked = 0; state.blockedOrigins = [];
+  // The guard: MapLibre's requests, and the page's own fetch of a pasted style, pass through it.
+  function guard(url) {
+    let origin;
+    try { origin = new URL(url, location.href).origin; } catch { origin = 'null'; }
+    if (/^(data|blob):/.test(url) || allowed.has(origin)) return url;
+    state.blocked++;
+    if (!state.blockedOrigins.includes(origin)) state.blockedOrigins.push(origin);
+    throw new Error(`Chora refused a request to ${origin}: it is not this site, nor the basemap's.`);
+  }
   const map = new maplibregl.Map({
     container, style: { version: 8, sources: {}, layers: [{ id: 'blank', type: 'background', paint: { 'background-color': '#dde3ea' } }] },
     center: [10, 30], zoom: 1.2, attributionControl: { compact: false }, maplibreLogo: false,
-    transformRequest(url) {
-      let origin;
-      try { origin = new URL(url, location.href).origin; } catch { origin = 'null'; }
-      if (/^(data|blob):/.test(url) || allowed.has(origin)) return { url };
-      state.blocked++;
-      if (!state.blockedOrigins.includes(origin)) state.blockedOrigins.push(origin);
-      throw new Error(`Chora refused a request to ${origin}: it is not this site, nor the basemap's.`);
-    },
+    transformRequest: (url) => ({ url: guard(url) }),
   });
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
   map.addControl(new maplibregl.ScaleControl(), 'bottom-left');
@@ -54,7 +58,7 @@ export function createMap(container, { state, onPlaceClick, onStyleError }) {
     const why = redact(e?.error?.message || e?.error || 'unknown error');
     if (styleLoading && !e?.sourceId && !e?.tile) { styleLoading = false; onStyleError?.(why); }
     // A refused request surfaces as an error event; it has been counted, and is not a fault.
-    if (!/Chora refused/.test(why)) console.warn('Map:', why);
+    if (!/Chora refused/.test(why)) console.warn(`Map, ${kindOf(e)}:`, why);
   });
 
   // What Chora draws, kept here so that it can be put back when the basemap (the style) changes.
@@ -130,6 +134,8 @@ export function createMap(container, { state, onPlaceClick, onStyleError }) {
     map,
     /** Allow requests to these origins (besides this site's), and no others. */
     allow(origins) { allowed.clear(); allowed.add(location.origin); for (const o of origins) if (o) allowed.add(o); },
+    /** The address, if the guard lets it through; else the refusal is counted, and thrown. */
+    guard,
     /** Change the basemap: `style` is a style object or address. What Chora draws is kept. */
     setStyle(style) {
       if (draw) {

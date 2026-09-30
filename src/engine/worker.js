@@ -221,7 +221,7 @@ async function choraCommand(data) {
     try {
       result = await choraSave(input, data.additions || [], env, {
         name: inputName(input, data.name), contributor: data.contributor || undefined,
-        hasPlace: same ? (id) => session.store.has(id) : undefined,
+        hasPlace: same ? (id) => session.store.has(id) : undefined, record: same ? (id) => session.store.record(id) : undefined,
         reopen: async (o) => (await (await outputsDir(false, CHORA_OUT)).getFileHandle(o.name)).getFile(),
       });
     } finally { tidy(); }

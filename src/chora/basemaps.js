@@ -7,6 +7,7 @@
 // Choices are remembered in this browser only: which basemap (localStorage 'chora-basemap'), which
 // providers were agreed to ('chora-basemap-consent'), and any pasted basemap ('chora-basemaps'),
 // keys and all. A pasted address is sent to nowhere but its own provider.
+import { PASTED_BASEMAP } from '../engine/words.js';
 
 // CARTO's vector basemaps need an API key, scoped by referrer to the published site (so it never
 // works from localhost). It is given at build time as VITE_CARTO_API_KEY, never written in a file
@@ -19,19 +20,23 @@ const OSM_ATTRIBUTION = '© <a href="https://www.openstreetmap.org/copyright">Op
 
 /**
  * Each basemap: {id, name, group, kind: 'style' | 'raster', url (a style address) or tiles (a tile
- * template), attribution?, disabled?: reason}. `local` marks the one served from this site.
+ * template), origins (every site it asks), attribution?, disabled?: reason}. `local` marks the one
+ * served from this site. A style's sources, glyphs and sprites may be on sites other than the
+ * style's own, and a TileJSON's tiles on others again, so each built-in basemap lists them all, as
+ * found in its styles and TileJSON (fetched, without a key, on 30 September 2026).
  */
 export function builtIn() {
   const carto = (name, label) => ({
     id: `carto-${name}`, name: `CARTO ${label}`, group: 'CARTO', kind: 'style',
     url: `https://basemaps.cartocdn.com/gl/${name}-gl-style/style.json${CARTO_KEY ? `?api_key=${encodeURIComponent(CARTO_KEY)}` : ''}`,
+    origins: ['https://basemaps.cartocdn.com', 'https://tiles.basemaps.cartocdn.com', ...'abcd'.split('').map((x) => `https://tiles-${x}.basemaps.cartocdn.com`)],
     disabled: CARTO_KEY ? null : 'needs an API key: not yet configured',
   });
-  const ofm = (name, label) => ({ id: `ofm-${name}`, name: `OpenFreeMap ${label}`, group: 'OpenFreeMap', kind: 'style', url: `https://tiles.openfreemap.org/styles/${name}` });
+  const ofm = (name, label) => ({ id: `ofm-${name}`, name: `OpenFreeMap ${label}`, group: 'OpenFreeMap', kind: 'style', url: `https://tiles.openfreemap.org/styles/${name}`, origins: ['https://tiles.openfreemap.org'] });
   return [
     { id: 'natural-earth', name: 'Natural Earth (this site)', group: 'This site', kind: 'style', url: NE_STYLE, local: true },
     ofm('liberty', 'Liberty'), ofm('bright', 'Bright'), ofm('positron', 'Positron'),
-    { id: 'osm', name: 'OpenStreetMap standard', group: 'OpenStreetMap', kind: 'raster', tiles: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: OSM_ATTRIBUTION, maxzoom: 19 },
+    { id: 'osm', name: 'OpenStreetMap standard', group: 'OpenStreetMap', kind: 'raster', tiles: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', origins: ['https://tile.openstreetmap.org'], attribution: OSM_ATTRIBUTION, maxzoom: 19 },
     carto('positron', 'Positron'), carto('voyager', 'Voyager'), carto('dark-matter', 'Dark Matter'),
   ];
 }
@@ -65,22 +70,58 @@ export function removePasted(id) { put('chora-basemaps', pasted().filter((x) => 
 /** The site a basemap's requests go to: its style's or its tiles' origin; this site's for Natural Earth. */
 export function originOf(b) {
   if (!b || b.local) return location.origin;
-  try { return new URL((b.url || b.tiles).replace(/[{}]/g, '_'), location.href).origin; } catch { return null; }
+  try { return new URL((b.url || b.tiles).replace(/[{}]/g, '_'), globalThis.location?.href).origin; } catch { return null; }
+}
+
+/**
+ * Every site a basemap asks: a built-in one's list; a pasted one's own site, and, once its style has
+ * been read, every site the style names (styleOrigins, kept on it as `origins`); this site for Natural Earth.
+ */
+export function originsOf(b) {
+  if (!b || b.local) return [location.origin];
+  return Array.isArray(b.origins) && b.origins.length ? b.origins : [originOf(b)].filter(Boolean);
+}
+
+/**
+ * The sites a style names (its sources' TileJSON, tiles and data, its glyphs and sprites), each once,
+ * in order; a relative address is on the style's own site, `base`. Not those a TileJSON names in turn.
+ */
+export function styleOrigins(style, base) {
+  const s = resolveStyle(style, base), urls = [];
+  for (const src of Object.values(s.sources || {})) {
+    if (typeof src?.data === 'string') urls.push(src.data);
+    if (typeof src?.url === 'string') urls.push(src.url);
+    if (Array.isArray(src?.tiles)) urls.push(...src.tiles);
+  }
+  urls.push(s.glyphs, ...[].concat(s.sprite || []).map((x) => (typeof x === 'string' ? x : x?.url)));
+  const out = new Set();
+  for (const u of urls) {
+    if (typeof u !== 'string' || /^(data|blob):/i.test(u)) continue;
+    try { out.add(new URL(u.replace(/[{}]/g, '_')).origin); } catch {}
+  }
+  return [...out].filter((o) => o !== 'null').sort();
 }
 
 /** The basemap chosen last in this browser, if it is still on offer (and consented to), else Natural Earth. */
 export function current() {
   const b = byId(get('chora-basemap', 'natural-earth'));
-  return b && !b.disabled && (b.local || consented(originOf(b))) ? b : byId('natural-earth');
+  return b && !b.disabled && (b.local || agreed(b)) ? b : byId('natural-earth');
 }
 export const choose = (b) => put('chora-basemap', b.id);
 export const consented = (origin) => get('chora-basemap-consent', []).includes(origin);
-export const consent = (origin) => put('chora-basemap-consent', [...new Set([...get('chora-basemap-consent', []), origin])]);
+/** Whether the user has agreed to every site a basemap asks. */
+export const agreed = (b) => originsOf(b).every(consented);
+export const consent = (origins) => put('chora-basemap-consent', [...new Set([...get('chora-basemap-consent', []), ...[].concat(origins)])]);
 
-/** The notice shown before a basemap from another site is first used. */
+const listOf = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+/** The notice shown before a basemap from another site is first used, naming every site it asks. */
 export function notice(b) {
-  return `${b.name} is served by ${originOf(b)}. Using it, the map asks that site for the part of the world you are looking at, so the provider sees where you look (and your address on the internet, as any website does). It sees nothing of your data, which stays in this tab.`;
+  const os = originsOf(b), one = os.length === 1;
+  return `${b.name} is served by ${listOf(os)}. Using it, the map asks ${one ? 'that site' : 'those sites'} for the part of the world you are looking at, so ${one ? 'the provider sees' : 'each sees'} where you look (and your address on the internet, as any website does). ${one ? 'It sees' : 'None sees'} nothing of your data, which stays in this tab.`;
 }
+
+/** What a drawing's note says it was drawn on: a built-in basemap's name; never a pasted one's site. */
+export const drawnOn = (b) => (!b || b.local ? 'Natural Earth' : b.group === 'Pasted' ? PASTED_BASEMAP : b.name);
 
 // A style's addresses, made absolute against the style's own address. Natural Earth's style writes
 // each as {base}/..., {base} standing for its folder (public/basemap/README.md); a plain relative
@@ -109,10 +150,11 @@ export function resolveStyle(style, base) {
 /**
  * The style to give MapLibre for a basemap. Natural Earth's is fetched here, from this site, and its
  * addresses made absolute; a raster basemap is wrapped in a style of one layer, so that nothing but
- * its tiles is asked of the provider; another style is given by its address,
- * for MapLibre to fetch (through map.js's guard).
+ * its tiles is asked of the provider; a pasted style is fetched here too, through `guard` (map.js's),
+ * so that the sites it names can be found (styleOrigins) before MapLibre asks any of them; a built-in
+ * one is given by its address, for MapLibre to fetch (through the guard).
  */
-export async function styleFor(b) {
+export async function styleFor(b, guard = (u) => u) {
   if (b.local) {
     const url = new URL(b.url, location.href).href;
     const r = await fetch(url);
@@ -125,6 +167,14 @@ export async function styleFor(b) {
       sources: { basemap: { type: 'raster', tiles: [b.tiles], tileSize: 256, maxzoom: b.maxzoom || 19, attribution: b.attribution || '' } },
       layers: [{ id: 'basemap', type: 'raster', source: 'basemap' }],
     };
+  }
+  if (b.group === 'Pasted') {
+    const r = await fetch(guard(b.url));
+    if (!r.ok) throw new Error(`its style could not be read (${r.status})`);
+    let style;
+    try { style = await r.json(); } catch { throw new Error('its address is not that of a style'); }
+    if (!style || typeof style !== 'object' || style.version !== 8) throw new Error('its address is not that of a style');
+    return resolveStyle(style, b.url);
   }
   return b.url;
 }

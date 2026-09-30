@@ -270,15 +270,18 @@ export const KRISIS_TEXT = {
 // ---- Chora (the map viewer and editor) -----------------------------------------------------------
 /**
  * What a drawing's notes say of how it was made, since PLATO has no term for it: "Drawn by hand on
- * the Natural Earth basemap at zoom 9 in PLATO tools (Chora)".
+ * the Natural Earth basemap at zoom 9 in PLATO tools (Chora)". A pasted basemap is not named: its
+ * site may be a private one, and the notes are published with the dataset.
  */
+export const PASTED_BASEMAP = 'a basemap pasted by the contributor';
 export const choraDrawingNote = ({ basemap = 'Natural Earth', zoom } = {}) =>
-  `Drawn by hand on the ${basemap} basemap${Number.isFinite(zoom) ? ` at zoom ${Math.round(zoom)}` : ''} in PLATO tools (Chora)`;
+  `Drawn by hand on ${basemap === PASTED_BASEMAP ? basemap : `the ${basemap} basemap`}${Number.isFinite(zoom) ? ` at zoom ${Math.round(zoom)}` : ''} in PLATO tools (Chora)`;
 /** What a Chora save reports of itself (src/engine/chora/save.js), by kind. */
 export const CHORA_TEXT = {
   'chora-addition-invalid': 'A drawing could not be added, because PLATO would not accept it as it is, so nothing was saved',
   'chora-no-such-place': 'A drawing is for a place this dataset does not have, so nothing was saved. Open the dataset the drawing was made on.',
   'chora-not-placed': 'A drawing did not reach its place in the saved file, so the file must not be used.',
+  'chora-attestations-not-a-list': 'A drawing is for a place whose attestations are not a list, as PLATO requires, so the drawing could only replace them, and nothing was saved. Correct that place in the dataset first',
   'chora-unreadable': 'The dataset could not be read to the end, so it was not saved.',
   'chora-in-another-tab': 'Chora is already open in another tab of this browser. Close it, or use that one.',
   'chora-mneme-failed': 'The version check (Mneme) found that the saved file does not keep every attestation of the dataset exactly as it was, or does not add exactly the drawings. Do not use it.',

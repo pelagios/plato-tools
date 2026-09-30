@@ -278,3 +278,32 @@ test('Mneme fails a save that changes or drops what identifies or describes a pl
   assert.equal(l.passed, false, JSON.stringify(l.report.items.map((x) => x.kind)));
   assert.match(l.reasons.join(), /description-changed/);
 });
+
+// ---- The pre-push review of 30 September 2026: each test below failed before its fix. -------------
+test('a drawing for a place whose attestations are not a list is refused, naming the place, and nothing is offered; a drawing on a sound place of the same dataset is saved', async () => {
+  for (const bad of ['oops', null]) {
+    const places = [{ '@id': X + 'p/odd', label: 'Oddity', attestations: bad }, named('Sound', { '@id': X + 'p/sound' })];
+    const json = () => textFile(doc(places), 'odd.json');
+    const { store } = await storeKeys(json());
+    // Read to find the place (no hasPlace), found by Chora's store (hasPlace and record), and found by
+    // the store with no record given: the last is refused after writing, and still offers nothing.
+    for (const [how, options] of [['read first', {}], ['store', { hasPlace: (k) => store.has(k), record: (k) => store.record(k) }], ['hasPlace alone', { hasPlace: (k) => store.has(k) }]]) {
+      const r = await saved(json(), [{ placeId: X + 'p/odd', attestation: drawing(1, 1) }], options);
+      const what = `${JSON.stringify(bad)}, ${how}`;
+      const refused = r.report.items.filter((i) => i.kind === 'chora-attestations-not-a-list');
+      assert.equal(refused.length, 1, `${what}: ${JSON.stringify(r.report.items)}`);
+      assert.equal(refused[0].severity, 'error');
+      assert.match(refused[0].message, /attestations/);
+      assert.deepEqual(refused[0].examples, [`Oddity (${X}p/odd)`], what);
+      assert.deepEqual(r.outputs, [], `${what}: no file offered`);
+      assert.equal(r.mneme, null, what);
+      assert.match(choraSaveText(r), /not saved|nothing was saved|must not be used/i, what);
+    }
+    // The control: a drawing on the sound place of the same dataset is saved, and Mneme passes.
+    const ok = await saved(json(), [{ placeId: X + 'p/sound', attestation: drawing(2, 2) }]);
+    assert.equal(ok.report.items.filter((i) => i.kind === 'chora-attestations-not-a-list').length, 0);
+    assert.equal(ok.mneme.passed, true, ok.mneme.reasons.join('; '));
+    assert.equal(ok.outputs.length, 1);
+    store.close();
+  }
+});

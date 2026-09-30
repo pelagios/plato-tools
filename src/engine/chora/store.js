@@ -58,8 +58,10 @@ export class ChoraStore {
         if (key === null) return;
         if (!open) { db.exec('BEGIN'); open = true; }
         n++;
-        collectWithdrawn(rec.attestations, edges);
-        const related = [...new Set((rec.attestations || []).flatMap((a) => (a && Array.isArray(a.relations) ? a.relations : [])).map((r) => r && r.relatesTo).filter((x) => typeof x === 'string'))];
+        // Attestations that are not a list (the schema refuses them, and the place is still shown) are none.
+        const atts = Array.isArray(rec.attestations) ? rec.attestations : [];
+        collectWithdrawn(atts, edges);
+        const related = [...new Set(atts.flatMap((a) => (a && Array.isArray(a.relations) ? a.relations : [])).map((r) => r && r.relatesTo).filter((x) => typeof x === 'string'))];
         const label = typeof rec.label === 'string' ? rec.label : key;
         insP.bind([n, key, label, fold(label), JSON.stringify(Array.isArray(rec.ccodes) ? rec.ccodes : []), JSON.stringify(related), JSON.stringify(rec)]).stepReset();
         // Withdrawn geometries are removed once the whole dataset is known; denied ones never enter.

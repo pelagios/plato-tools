@@ -810,20 +810,25 @@ def chora_checks(pw, url, tmp):
         # Once the basemap is in: sources added before would go with the blank style it replaces.
         until(page, '() => window.__chora_map.getStyle()?.name?.includes("Natural Earth") && window.__chora_map.isStyleLoaded()', 30)
         since = len(said)
-        # A basemap's key travels in its addresses' query string; a failed request must not put it in
-        # the console. Two sources on this site that are not there: one with a key, and its control without.
+        # A basemap's key travels in its addresses, in the query string or in the path; a failed request
+        # must not put it in the console. Three sources on this site that are not there: a key in the
+        # query, a key in the path, and the control without either. Each failure is named by its site alone.
         page.evaluate('''() => { const m = window.__chora_map;
           m.addSource('probe-keyed', { type: 'geojson', data: './basemap/not-here.geojson?api_key=SECRETKEY123' });
           m.addLayer({ id: 'probe-keyed', type: 'line', source: 'probe-keyed' });
+          m.addSource('probe-path', { type: 'geojson', data: './basemap/PATHKEY456/not-here-too.geojson' });
+          m.addLayer({ id: 'probe-path', type: 'line', source: 'probe-path' });
           m.addSource('probe-bare', { type: 'geojson', data: './basemap/not-here-either.geojson' });
           m.addLayer({ id: 'probe-bare', type: 'line', source: 'probe-bare' }); }''')
+        site = base.split('/')[0] + '//' + here
+        named = lambda: [x for x in said[since:] if x.startswith('Map') and (site in x or 'not-here' in x)]
         t0 = time.time()
         # page.wait_for_timeout, not time.sleep: Playwright delivers console events only while it is called.
-        while time.time() - t0 < T(15) and not (any('not-here.geojson' in x for x in said[since:]) and any('not-here-either.geojson' in x for x in said[since:])): page.wait_for_timeout(250)
+        while time.time() - t0 < T(15) and len(named()) < 3: page.wait_for_timeout(250)
         lines = said[since:]
-        return (any('not-here.geojson' in x for x in lines) and any('not-here-either.geojson' in x for x in lines)
-                and not any('SECRETKEY123' in x for x in lines)), {'console': [x[:160] for x in lines]}
-    attempt('Chora: a failed map request is named in the console, without the key in its address', no_key_in_console)
+        return (len(named()) >= 3 and all(site in x for x in named())
+                and not any(k in x for x in lines for k in ('SECRETKEY123', 'PATHKEY456', 'not-here'))), {'console': [x[:160] for x in lines]}
+    attempt('Chora: a failed map request is named in the console by its site alone, without a key from its query or its path', no_key_in_console)
 
     def load_plato():
         s = chora_boot(page, base, [fixture(ant, 'antonine-load.json', tmp)]); loads.append(s['phase'])
@@ -986,11 +991,18 @@ def chora_checks(pw, url, tmp):
                   and all(a.get('contributor') == {'name': 'Ada Test', 'orcid': 'https://orcid.org/0000-0002-1825-0097'} and '@id' not in a
                           and re.match(r'^\d{4}-\d\d-\d\dT', a.get('created', '')) and 'Chora' in a.get('notes', '') and 'Natural Earth' in a.get('notes', '') for _, a in new))
         moved = next((a['geometries'][0]['geojson']['coordinates'] for _, a in new if a['geometries'][0]['geojson']['type'] == 'Point'), None)
-        cleared = soon(page, '() => window.__chora.pendingCount === 0', 10) and kept(page, f.name) == []
+        # A download cannot be seen to finish (__plato_forceDownload): the drafts are kept, the file still
+        # offered, and the page says to save again if it did not complete, until the user lets them go.
+        page.wait_for_timeout(500)
+        after_download = {'pending': cstate(page)['pendingCount'], 'kept': len(kept(page, f.name)), 'offered': page.is_visible('#save-result button.primary'),
+                          'said': page.inner_text('#save-result')}
+        held = after_download['pending'] == 2 and after_download['kept'] == 2 and after_download['offered'] and 'If the download did not complete, save again' in after_download['said']
+        if page.is_visible('#save-result button[data-clear]'): page.click('#save-result button[data-clear]')
+        cleared = soon(page, '() => window.__chora.pendingCount === 0', 10) and kept(page, f.name) == [] and not page.is_visible('#save-result button.primary')
         # The file keeps seven decimals (about a centimetre); the drawing kept in the browser, all of them.
         same_place = moved and draws.get('moved') and all(abs(a - b) < 1e-6 for a, b in zip(moved, draws['moved']))
-        return kept_all and ok_new and same_place and cleared, {'new': new, 'all kept': kept_all, 'point': moved, 'moved to': draws.get('moved'), 'drafts cleared': cleared}
-    attempt('Chora: the saved file has the input as it was, and the two drawings as new attestations with contributor, date and note; the drafts are let go', saved_file)
+        return kept_all and ok_new and same_place and held and cleared, {'new': new, 'all kept': kept_all, 'point': moved, 'moved to': draws.get('moved'), 'after the download': after_download, 'drafts cleared when asked': cleared}
+    attempt('Chora: the saved file has the input as it was, and the two drawings as new attestations with contributor, date and note; after a download the drafts are kept until the user lets them go', saved_file)
     def saved_valid():
         f = draws['file']; m = main_page(ctx, base)
         try:
@@ -1075,6 +1087,12 @@ def chora_checks(pw, url, tmp):
         const r = put ? s.put({ files: [new File(['{}'], 'stale.json')], at: Date.now() - 10 * 60 * 1000 }, 'chora-handoff') : s.get('chora-handoff');
         t.oncomplete = () => { db.close(); resolve(put ? true : r.result ? { names: (r.result.files || []).map((f) => f.name), at: r.result.at } : null); }; t.onerror = () => reject(t.error); };
       q.onerror = () => reject(q.error); })'''
+    IDB_FRESH = '''() => new Promise((resolve, reject) => { const q = indexedDB.open('plato-tools-chora', 1);
+      q.onupgradeneeded = () => q.result.createObjectStore('kv');
+      q.onsuccess = () => { const db = q.result, t = db.transaction('kv', 'readwrite');
+        t.objectStore('kv').put({ files: [new File(['{}'], 'fresh.json')], at: Date.now() }, 'chora-handoff');
+        t.oncomplete = () => { db.close(); resolve(true); }; t.onerror = () => reject(t.error); };
+      q.onerror = () => reject(q.error); })'''
     def handoff_let_go():
         f = fixture(ant, 'antonine-handoff-go.json', tmp)
         page.bring_to_front(); page.goto(NOTOOLS if PROVE else base)
@@ -1126,16 +1144,21 @@ def chora_checks(pw, url, tmp):
         one, two = ctx.new_page(), ctx.new_page()
         try:
             chora_boot(one, base)                               # brought to the front, and ready
+            # Files handed over from the main page, as if the way to Chora had been taken again: the
+            # second tab offers nothing, so it must let them go, not leave them in the browser.
+            one.evaluate(IDB_FRESH); handed = one.evaluate(IDB, False)
             two.bring_to_front(); two.goto(NOTOOLS if PROVE else base + 'chora.html')
             until(two, '() => window.__chora && ["in-another-tab", "error", "ready"].includes(window.__chora.phase)', 60)
             two.bring_to_front(); s2 = cstate(two); said = two.inner_text('#phase'); shut = two.is_disabled('#picker')
+            left = two.evaluate(IDB, False)
             one.bring_to_front(); one.set_input_files('#picker', [str(fixture(judgements, 'judgements-another-tab.json', tmp))])
             until(one, '["loaded", "error", "unrecognised"].includes(window.__chora.phase)'); s1 = cstate(one)
             one.close()                                         # its worker, and the pool with it, let go
             two.bring_to_front(); two.reload()
             until(two, '() => window.__chora && ["in-another-tab", "error", "ready"].includes(window.__chora.phase)', 60)
             two.bring_to_front(); after = cstate(two)
-            return {'second': s2.get('phase'), 'said': said, 'picker disabled': shut, 'first': s1.get('phase'), 'after closing the first': after.get('phase'), 'error': after.get('error') or s2.get('error')}
+            return {'second': s2.get('phase'), 'said': said, 'picker disabled': shut, 'first': s1.get('phase'), 'after closing the first': after.get('phase'), 'error': after.get('error') or s2.get('error'),
+                    'handed over': handed, 'hand-off left': left}
         finally:
             for p in (one, two):
                 if not p.is_closed(): p.close()
@@ -1146,6 +1169,8 @@ def chora_checks(pw, url, tmp):
                 and 'Something went wrong' not in r['said'] and r['picker disabled'] and r['first'] == 'loaded'), r
     attempt('Chora in a second tab says plainly that Chora is open in another tab, and the first still opens a file', another_tab_run)
     attempt('Chora in a second tab starts once the first is closed', lambda: (bool(tabs) and tabs['after closing the first'] == 'ready', tabs))
+    attempt('Chora in a second tab lets go of files handed over from the main page, which it cannot open',
+            lambda: (bool(tabs) and tabs['second'] == 'in-another-tab' and (tabs['handed over'] or {}).get('names') == ['fresh.json'] and tabs['hand-off left'] is None, tabs))
 
     def narrow():
         page.goto('about:blank')
@@ -1161,6 +1186,50 @@ def chora_checks(pw, url, tmp):
                 'scrollWidth, clientWidth, innerWidth': wide, 'panel': panel, 'map': canvas, 'drew': drew}
         finally: n.close()
     attempt('Chora on a phone (390 by 844): no sideways scrolling, the list and the map both usable, a point drawn', narrow)
+
+    # A dataset the schema refuses still opens in Chora, so what it holds is shown as data, never as
+    # markup; a save of it that passes the version check still shows the problems the writing found;
+    # and a drawing for a place whose attestations are not a list is refused before anything is written.
+    def odd_dataset(name):
+        d = tmp / 'chora-files'; d.mkdir(exist_ok=True)
+        src = [{'title': 'A survey'}]
+        places = [
+            {'@id': 'https://example.org/p/trapdoor', 'label': 'Trapdoor', 'attestations': [{'geometries': [
+                {'geojson': {'type': 'Point', 'coordinates': [-0.1, 51.5]}, 'precisionKm': ['<img src=x onerror="window.__pwned = 1">']}], 'sources': src}]},
+            {'@id': 'https://example.org/p/control', 'label': 'Control', 'attestations': [{'geometries': [
+                {'geojson': {'type': 'Point', 'coordinates': [-1.25, 51.75]}, 'precisionKm': [12.5]}], 'sources': src}]},
+            {'@id': 'https://example.org/p/oddity', 'label': 'Oddity', 'attestations': None},
+        ]
+        (d / name).write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': 'https://example.org/g', 'title': 'Odd', 'status': 'published', 'version': '1'}, 'spatialEntities': places}))
+        return d / name
+    def markup_not_run():
+        chora_boot(page, base, [odd_dataset('odd-card.json')]); chora_pick(page, 'trapdoor')
+        page.wait_for_timeout(500)                              # time for an image that errors to run its handler
+        trap = {'imgs': page.eval_on_selector_all('#card img', 'x => x.length'), 'pwned': page.evaluate('() => window.__pwned ?? null'), 'card': page.inner_text('#card')}
+        chora_pick(page, 'control'); ctl = page.inner_text('#card')
+        # The control: a radius that is a number is shown; the subject: the card was the trapdoor's, and holds a location.
+        return (trap['imgs'] == 0 and trap['pwned'] is None and 'Trapdoor' in trap['card'] and 'Point' in trap['card'] and '±' not in trap['card']
+                and '(±12.5 km)' in ctl), {'trapdoor': trap, 'control card': ctl[:300]}
+    attempt('Chora: a place card shows a radius only when it is a number, and markup in a dataset is never run (a numeric one is shown)', markup_not_run)
+    def draw_and_save(name, place):
+        f = odd_dataset(name); chora_boot(page, base, [f]); chora_pick(page, place)
+        page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
+        x, y = map_centre(page); draw(page, 'point', [(x + 50, y + 30)]); page.click('#draw-tools button[data-mode="static"]')
+        until(page, '() => window.__chora.pendingCount === 1', 10)
+        page.click('#save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+        return f, cstate(page), page.inner_text('#save-result')
+    def problems_shown():
+        _, s, text = draw_and_save('odd-problems.json', 'trapdoor'); ls = s.get('lastSave') or {}
+        errs = [i for i in (ls.get('report') or {}).get('items', []) if i['severity'] == 'error']
+        return (ls.get('passed') and errs and all(i['message'] in text for i in errs) and 'found problems' in text), {'passed': ls.get('passed'), 'errors': [i['message'] for i in errs], 'said': text[:400]}
+    attempt('Chora: a save that passes the version check still shows the problems the writing of it found', problems_shown)
+    def not_a_list():
+        f, s, text = draw_and_save('odd-unlisted.json', 'oddity'); ls = s.get('lastSave') or {}
+        written = opfs_names(page, 'chora-outputs')
+        return (ls.get('passed') is False and 'attestations are not a list' in text and 'Oddity (https://example.org/p/oddity)' in text
+                and not page.is_visible('#save-result button.primary') and 'odd-unlisted.chora.json' not in written and s['pendingCount'] == 1), {
+                'save': {k: ls.get(k) for k in ('passed', 'added')}, 'said': text[:300], 'chora-outputs': written, 'pending': s.get('pendingCount')}
+    attempt('Chora: a drawing for a place whose attestations are not a list is refused, naming the place, and no file is written or offered', not_a_list)
 
     # Over everything above: loading, drawing, saving, the hand-off and two tabs.
     attempt('Chora: across all these checks, no request went to any other site, and no page error', lambda: (
@@ -1187,6 +1256,43 @@ def chora_checks(pw, url, tmp):
         return (kept_good and asked and back and drew and 'Natural Earth' in text and 'could not be loaded' in text and s['basemapError'] in text), {
             'the good style kept': kept_good, 'asked for the missing one': asked, 'state': {k: s.get(k) for k in ('basemap', 'basemapError')}, 'said': text[:300]}
     attempt('Chora: a basemap whose style cannot be loaded gives way to Natural Earth, and the page says why (a style that loads is kept)', bad_style)
+    # A pasted style whose sources are on a second site: that site is named in a notice once the style
+    # is read, and asked nothing until the user agrees; then both are allowed, and a third still refused.
+    MULTI, SECOND, THIRD = 'https://multi.example.org', 'https://second.example.net', 'https://third.example.com'
+    MULTI_STYLE = json.dumps({'version': 8, 'name': 'Multi probe', 'sources': {'second': {'type': 'raster', 'tiles': [SECOND + '/{z}/{x}/{y}.png'], 'tileSize': 256}},
+                              'layers': [{'id': 'multi-bg', 'type': 'background', 'paint': {'background-color': '#eee'}}, {'id': 'second', 'type': 'raster', 'source': 'second'}]})
+    PNG = __import__('base64').b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==')
+    hits = {'second': 0}
+    def second(route): hits['second'] += 1; route.fulfill(status=200, content_type='image/png', body=PNG, headers={'Access-Control-Allow-Origin': '*'})
+    ctx.route(MULTI + '/**', lambda route: route.fulfill(status=200, content_type='application/json', body=MULTI_STYLE, headers={'Access-Control-Allow-Origin': '*'}))
+    ctx.route(SECOND + '/**', second)
+    ctx.route(THIRD + '/**', lambda route: route.abort())
+    def multi_origin():
+        chora_boot(page, base); since = len(requests)
+        page.evaluate("() => { document.getElementById('basemaps').open = true; }")
+        page.fill('#paste', MULTI + '/style.json'); page.click('#paste-form button[type=submit]')
+        first = page.inner_text('#consent-text') if page.is_visible('#consent-text') else ''
+        if page.is_visible('#consent-yes'): page.click('#consent-yes')
+        # Once the style is read, a notice naming both sites, and nothing yet asked of the second.
+        asked_both = soon(page, 's => { const t = document.getElementById("consent-text"); return !!t && t.textContent.includes(s); }', 20, SECOND)
+        notice = page.inner_text('#consent-text') if page.is_visible('#consent-text') else ''
+        page.wait_for_timeout(500)
+        read = any(u.startswith(MULTI) for u in requests[since:])
+        before = {'second asked': hits['second'] + len([u for u in requests[since:] if u.startswith(SECOND)]), 'basemap': cstate(page)['basemap'], 'blocked': cstate(page)['blockedOrigins']}
+        if page.is_visible('#consent-yes'): page.click('#consent-yes')
+        used = soon(page, '() => window.__chora_map.getStyle()?.name === "Multi probe"', 20)
+        got = soon(page, '() => window.__chora_map.isSourceLoaded("second")', 20) and hits['second'] > 0
+        # The control: a third site, named by nothing the user agreed to, is still refused.
+        b0 = cstate(page)['blocked']
+        page.evaluate('t => { const m = window.__chora_map; m.addSource("probe-third", { type: "raster", tiles: [t + "/{z}/{x}/{y}.png"], tileSize: 256 }); m.addLayer({ id: "probe-third", type: "raster", source: "probe-third" }); }', THIRD)
+        third = soon(page, 'b => window.__chora.blocked > b', 20, b0)
+        after = cstate(page)
+        return (MULTI in first and asked_both and MULTI in notice and SECOND in notice and read and before['second asked'] == 0 and not before['basemap'].startswith('pasted-')
+                and SECOND not in before['blocked'] and used and got and third and THIRD in after['blockedOrigins'] and SECOND not in after['blockedOrigins']
+                and not any(u.startswith(THIRD) for u in requests[since:])), {
+            'first notice': first, 'second notice': notice, 'style read': read, 'before agreeing': before, 'used': used, 'second fetched': got, 'hits': hits,
+            'third refused': third, 'blocked': after['blockedOrigins']}
+    attempt('Chora: a pasted style on two sites names both before either is asked for tiles; once agreed, both are used, and a third site is still refused', multi_origin)
     ctx.close()
 
 main()
