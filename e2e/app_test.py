@@ -5,13 +5,15 @@
     python3 e2e/app_test.py --prove-it-fails run every check against a page with no tools on it;
                                             every check must fail, or the harness cannot fail
 """
-import json, os, pathlib, shutil, subprocess, sys, tempfile, time, urllib.request
+import json, os, pathlib, shutil, socket, subprocess, sys, tempfile, time, urllib.request
 from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PLATO = pathlib.Path(os.environ.get('PLATO_REPO', ROOT.parent / 'place-attestation-ontology'))
 PROVE = '--prove-it-fails' in sys.argv
-PORT = 4174
+# Another session's preview server on this port would be tested instead of this build, and pass:
+# E2E_PORT chooses another, and a port in use stops the run (main()).
+PORT = int(os.environ.get('E2E_PORT', '4174'))
 results = []
 
 def check(name, cond, detail=''):
@@ -64,6 +66,9 @@ def main():
     if REMOTE:                                    # the deployed site: a green local run is not a green deploy
         srv = subprocess.Popen(['true']); url = REMOTE
     else:
+        with socket.socket() as s:
+            if s.connect_ex(('127.0.0.1', PORT)) == 0:
+                sys.exit(f'Port {PORT} is in use, so the page there is not this build: set E2E_PORT to a free port.')
         subprocess.run(['npx', 'vite', 'build'], cwd=ROOT, check=True, capture_output=True)
         srv = subprocess.Popen(['npx', 'vite', 'preview', '--port', str(PORT), '--strictPort'], cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
         url = f'http://localhost:{PORT}/'
