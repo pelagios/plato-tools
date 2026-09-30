@@ -143,7 +143,10 @@ test('the base is graded: w3id passes, custom warns, a temporary host warns in a
     assert.equal(item(draft, 'base-temporary').examples[0], `${base} (${kind})`);
     assert.equal(item(published, 'base-temporary')?.severity, 'error', base);
     assert.equal(published.errors, 1);
-    assert.equal(published.outputs.length, 1, 'the report still writes the deposit files: FAIR problems are not check problems');
+    // An error of the report's own stops the deposit files, as the dataset's problems do; the draft,
+    // with only the warning, is the control.
+    assert.equal(published.outputs.length, 0, 'a FAIR error stops the deposit files');
+    assert.equal(draft.outputs.length, 1, 'a FAIR warning does not');
   }
 });
 
@@ -218,6 +221,24 @@ test('without a base: the report says so, the same checks are counted, and nothi
   assert.equal(item(good, 'no-base'), undefined);
   assert.equal(r.counts.fair.of, good.counts.fair.of);
   assert.equal(r.outputs.length, 0);
+});
+
+test("the report's own errors stop the deposit files: a mistyped ORCID never reaches them; a warning does not stop them", async () => {
+  const NOT_WRITTEN = 'Deposit files were not written: fix the problems above first.';
+  const bad = await report(doc(edit((g) => { g.creator[0]['@id'] = 'https://orcid.org/0000-0002-1825-0098'; })));
+  assert.ok(item(bad, 'orcid-checksum')?.severity === 'error', kinds(bad));
+  assert.equal(bad.errors, 1, 'the dataset itself has no problems: only the report found one');
+  assert.deepEqual(bad.files, {});
+  assert.equal(bad.outputs.length, 0);
+  assert.ok(bad.counts.said.includes(NOT_WRITTEN), bad.counts.said.join(' '));
+  // The controls: the good description, and one with only a warning, get their files, and are not told so.
+  for (const g of [GOOD, edit((x) => delete x.keywords)]) {
+    const ok = await report(doc(g));
+    assert.equal(ok.errors, 0);
+    assert.equal(ok.outputs.length, 1);
+    assert.ok(Object.keys(ok.files).some((f) => f.endsWith('/datacite.json')));
+    assert.ok(!ok.counts.said.includes(NOT_WRITTEN));
+  }
 });
 
 test('a concept DOI that is not a DOI is refused, and no deposit file carries it', async () => {
@@ -462,7 +483,10 @@ test('publish report on the command line writes the deposit folder, and exits 1 
   assert.match(b.out, /someone\.github\.io\/t\/ \(github\.io\)/);
   const j = JSON.parse(cli('publish', 'report', '--json', '--overwrite', '--out', out, good).out);
   assert.equal(j.counts.fair.passed, j.counts.fair.of);
-  assert.ok(existsSync(join(dir, 'out-bad', 'a-test-gazetteer-of-market-towns-deposit', 'datacite.json')), 'FAIR problems still get deposit files');
+  // A FAIR error (here a temporary base for a published dataset) stops the deposit files, which
+  // would carry it to the repository; the good run's folder above is the control.
+  assert.ok(!existsSync(join(dir, 'out-bad', 'a-test-gazetteer-of-market-towns-deposit')), 'FAIR errors get no deposit files');
+  assert.match(b.out, /Deposit files were not written: fix the problems above first\./);
 });
 
 test("PLATO's examples are reported on without failing", async () => {

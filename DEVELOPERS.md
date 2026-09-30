@@ -161,7 +161,7 @@ version check does, and each part is a module of its own, with its wording in it
   JSON-LD document for every place and source, for GitHub Pages, with the workflow that builds it;
   `w3id` (`w3id.js`, `w3id/`) writes the `.htaccess` for a w3id.org namespace and the addresses to
   test it with. A part that writes something to publish writes nothing from a dataset the check
-  finds problems in.
+  finds problems in; the report writes no deposit files while it finds errors of its own either.
 - **One address scheme.** `address.js` is the only place that says where things live: the address
   of a place, a source, an attestation, a release and a download, and the file the site holds for
   each. The report, minting, the site and the rules all ask it, so the data, the files and the

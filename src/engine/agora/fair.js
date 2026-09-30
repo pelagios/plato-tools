@@ -19,7 +19,9 @@
 // be cited by.
 //
 // The report runs on a dataset the check found problems in (it is a report), and says so; the
-// deposit files are then not written, since they would describe something not fit to deposit.
+// deposit files are then not written, since they would describe something not fit to deposit. Nor
+// are they while the report finds errors of its own (a mistyped ORCID, a temporary base for a
+// published dataset): a deposit is for good, and would carry them to every index that harvests it.
 import { baseKind, doiOf, doiOk, normaliseBase, releaseProblem, servability, sourcesOf, unservableExample } from './address.js';
 import { TEXT as SHARED } from './index.js';
 
@@ -257,6 +259,12 @@ export function create(ctx) {
         // The DOI goes into CITATION.cff, datacite.json and the README: better none than one that names nothing.
         rep.error('bad-doi', SHARED['bad-doi'], String(options.conceptDoi));
         said.push('The deposit files are not written: the concept DOI is not a DOI.');
+      } else if (rep.toJSON().errors > 0) {
+        // The report's own errors are things the deposit files would carry to the repository and to
+        // every citation index that harvests it (an ORCID with a wrong check digit credits nobody,
+        // or somebody else): once deposited they are there for good, so nothing is written until
+        // they are fixed. Warnings are what a depositor may fill in by hand, and do not stop it.
+        said.push('Deposit files were not written: fix the problems above first.');
       } else {
         const name = `${options.name ? slug(String(options.name).replace(/\.[A-Za-z0-9]{1,8}$/, '')) : slug(g.title)}-deposit`;
         const files = deposit(g, ctx.scheme, options, rep);
