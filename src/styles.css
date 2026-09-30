@@ -71,3 +71,26 @@ a:visited { color: var(--accent); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .drop:has(input:focus-visible) { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: 2px; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* The toolbox: one panel per tool, in the colours of PLATO's logo (the pin: cobalt, gold, light
+   blue and the dark pupil). Tools ready to use carry a cobalt band; a tool partly here, a gold label;
+   tools still to come are greyed, with dashed light-blue borders, and are not links, but say what
+   is coming and link to the issue where it is being planned. In the dark scheme the light blue
+   takes cobalt's place, which would not show on a dark ground. */
+:root { --pin: #1f45b8; --gold: #f3c969; --gold-edge: #8a6d1f; --iris: #7cc4f2; --pupil: #101a3a; --tool-band: var(--pin); --soon: #4f8fc4; }
+@media (prefers-color-scheme: dark) { :root { --tool-band: var(--iris); --soon: var(--iris); } }
+#toolbox h2 { margin-bottom: .6rem; }
+.tools { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; grid-template-columns: repeat(auto-fill, minmax(14.5rem, 1fr)); }
+.tool { position: relative; border: 1px solid var(--line); border-top: 4px solid var(--tool-band); border-radius: 8px; padding: .65rem .85rem .75rem; background: var(--bg); }
+.tool h3 { font-family: var(--font-headings); font-weight: 500; font-size: 1.2rem; margin: 0; }
+.tool .label { margin: 0 0 .35rem; font-size: .85rem; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.tool p { margin: 0; font-size: .95rem; }
+.tool .note { margin-top: .35rem; color: var(--muted); font-size: .88rem; }
+.tool-link { color: inherit; text-decoration: none; display: block; }
+.tool-link:hover h3, .tool-link:focus-visible h3 { color: var(--tool-band); text-decoration: underline; }
+.tool:has(.tool-link:hover) { border-color: var(--tool-band); }
+.tool.coming { color: var(--muted); border: 1px dashed var(--soon); background: transparent; }
+.tool.coming h3 { color: var(--muted); }
+.badge { position: absolute; top: .55rem; right: .6rem; font-size: .72rem; letter-spacing: .05em; text-transform: uppercase; border: 1px solid var(--soon); border-radius: 999px; padding: .05rem .5rem; color: var(--soon); }
+.badge.partly { background: var(--gold); border-color: var(--gold-edge); color: var(--pupil); }
+.follow { display: inline-block; margin-top: .45rem; font-size: .88rem; color: var(--soon); }
