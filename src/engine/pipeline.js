@@ -5,7 +5,7 @@
 // go through the on-disk triple store; everything else streams straight through.
 import { Parser } from 'n3';
 import Papa from 'papaparse';
-import { unzipSync, strFromU8 } from 'fflate';
+import { unzipSync } from 'fflate';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { addPlatoFormats, strictFormatLogger } from '../lib/formats.js';
 import { Json2Rdf } from '../formats/json2rdf.js';
@@ -20,7 +20,7 @@ import { validateTables, checkTableRules, checkAboutRules, aboutToGazetteer, gaz
 import { AnnotationReader, ANNOTATION_KINDS } from '../formats/annotations.js';
 import { teiSource } from './hermes/tei.js';
 import { genericSource, genericProfile } from './hermes/generic.js';
-import { lineChunks, lines, jsonDocument, annotationItems, TABLE_SHEETS, DataError } from './input.js';
+import { lineChunks, lines, jsonDocument, annotationItems, TABLE_SHEETS, DataError, decodeUtf8, sheetOf } from './input.js';
 import { Report, LOSS_TEXT, droppedText, FORMAT_WORDS } from './report.js';
 
 export const TARGETS = {
@@ -217,13 +217,14 @@ async function* rdfSource(file, format, rep) {
 // ---- tables: sheets from CSV files, a zip or a workbook -----------------------------------------
 async function readSheets(input, env) {
   const sheets = {};
-  const put = (name, text) => { const b = name.split('/').pop().toLowerCase().replace(/\.csv$/, ''); if (TABLE_SHEETS.includes(b)) sheets[b] = Papa.parse(text.replace(/^﻿/, ''), { header: true, skipEmptyLines: 'greedy' }); };
-  if (input.container === 'csv') for (const f of input.files) put(f.name, await f.text());
+  const put = (name, text) => { const b = sheetOf(name); if (b) sheets[b] = Papa.parse(text.replace(/^﻿/, ''), { header: true, skipEmptyLines: 'greedy' }); };
+  // A sheet's text is UTF-8, strictly (input.js, decodeUtf8), as every other input's is.
+  if (input.container === 'csv') { for (const f of input.files) if (sheetOf(f.name)) put(f.name, decodeUtf8(new Uint8Array(await f.arrayBuffer()), f.name)); }
   else if (input.container === 'zip') {
     let z;
     try { z = unzipSync(new Uint8Array(await input.files[0].arrayBuffer())); }
     catch (e) { throw new DataError(`The zip is damaged or incomplete, so its tables cannot be read (${String(e && e.message || e)}).`); }
-    for (const [name, data] of Object.entries(z)) if (name.toLowerCase().endsWith('.csv')) put(name, strFromU8(data));
+    for (const [name, data] of Object.entries(z)) if (name.toLowerCase().endsWith('.csv') && sheetOf(name)) put(name, decodeUtf8(data, `${name} in ${input.files[0].name}`));
   } else {
     const XLSX = env.xlsx;
     let wb;

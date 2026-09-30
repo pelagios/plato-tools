@@ -6,6 +6,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { gzipSync } from 'node:zlib';
+import { readdirSync, readFileSync } from 'node:fs';
+import { zipSync } from 'fflate';
+import { PLATO_REPO } from './paths.js';
 import { go, outText } from './engine.js';
 import { detect, firstNonUtf8, decodeUtf8, DataError } from '../src/engine/input.js';
 
@@ -71,4 +74,25 @@ test('firstNonUtf8 finds the first byte that is not UTF-8, and passes valid sequ
   assert.equal(firstNonUtf8(b(0x61, 0xe2, 0x82)), -1, 'cut off at the end: not counted here');
   assert.throws(() => decodeUtf8(b(0x61, 0xe2, 0x82), 'x.csv'), (e) => e instanceof DataError && /at its very end/.test(e.message));
   assert.equal(decodeUtf8(Buffer.from('﻿Köln', 'utf8'), 'x.csv'), 'Köln', 'control: a byte-order mark is dropped');
+});
+
+// ---- the spreadsheet tables (src/engine/pipeline.js, readSheets) ------------------------------------
+const CUSTOMS = `${PLATO_REPO}/schemas/tables/examples/customs`;
+/** The customs tables, with places.csv's Bristol renamed Bristöl and written in `encoding`. */
+function customs(encoding) {
+  return Object.fromEntries(readdirSync(CUSTOMS).filter((f) => f.endsWith('.csv')).map((f) => {
+    const text = readFileSync(`${CUSTOMS}/${f}`, 'utf8');
+    return [f, f === 'places.csv' ? Buffer.from(text.replace('bristol,Bristol,', 'bristol,Bristöl,'), encoding) : Buffer.from(text, 'utf8')];
+  }));
+}
+test('a sheet of the tables that is not UTF-8 is unreadable, as CSV files and in a zip; the same in UTF-8 reads', async () => {
+  for (const encoding of ['latin1', 'utf8']) {
+    const sheets = customs(encoding);
+    const csvs = await go(Object.entries(sheets).map(([f, b]) => new File([b], f)), 'check');
+    const zip = await go([new File([zipSync(Object.fromEntries(Object.entries(sheets).map(([f, b]) => [f, new Uint8Array(b)])))], 'customs.zip')], 'check');
+    for (const [r, name] of [[csvs, /^places\.csv is not encoded as UTF-8: the first byte that is not is on line 2 /], [zip, /^places\.csv in customs\.zip is not encoded as UTF-8/]]) {
+      if (encoding === 'latin1') { assert.equal(unreadable(r).length, 1, JSON.stringify(r.report.items)); assert.match(unreadable(r)[0].examples[0], name); }
+      else { assert.deepEqual(unreadable(r), [], 'control: in UTF-8'); assert.equal(r.report.errors, 0, JSON.stringify(r.report.items)); }
+    }
+  }
 });
