@@ -160,8 +160,11 @@ export function rowToAttestation(sheet, row, ids) {
   return a;
 }
 
+// A number as JSON writes one: Number() also reads ' ' as 0, '0x10' as 16, '007' as 7 and 'Infinity'.
+const DECIMAL = /^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$/;
 function propertyValue(row) {
-  const v = row.value !== '' && !Number.isNaN(Number(row.value)) ? Number(row.value) : row.value;
+  const t = typeof row.value === 'string' ? row.value.trim() : '';
+  const v = DECIMAL.test(t) && Number.isFinite(Number(t)) ? Number(t) : row.value;
   return clean({ property: row.property_uri, label: row.property_label, value: v, unit: row.unit_uri });
 }
 

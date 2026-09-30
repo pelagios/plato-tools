@@ -165,3 +165,13 @@ test('a loop of derivations in the sources sheet stops at an address', () => {
   assert.equal(a.derivedFrom.title, 'B');
   assert.equal(a.derivedFrom.derivedFrom, 'https://example.org/loop/source/a');
 });
+
+// A property's value cell is a number only when it is written as one (JSON's number grammar, spaces
+// round it allowed); Number() read " " as 0, "0x10" as 16, "007" as 7 and "Infinity" as a number
+// JSON cannot hold.
+test('a property value cell becomes a number only when it is written as a decimal number', () => {
+  const ids = tableIds('https://example.org/t/', () => ({ title: 'S' }));
+  const value = (cell) => rowToAttestation('properties', { place_id: 'p', source_id: 's', property_uri: 'https://example.org/prop', value: cell }, ids).properties[0].value;
+  for (const [cell, want] of [['42', 42], [' 42 ', 42], ['-3.5', -3.5], ['0', 0], ['0.25', 0.25], ['1e-7', 1e-7], ['2.5E+3', 2500], ['1e+21', 1e21]]) assert.equal(value(cell), want, `${JSON.stringify(cell)} is a number`);
+  for (const cell of [' ', '0x10', '007', 'Infinity', '-Infinity', 'NaN', '+5', '.5', '5.', '1,000', '0b1', '1e', 'twelve']) assert.equal(value(cell), cell, `${JSON.stringify(cell)} is kept as written`);
+});
