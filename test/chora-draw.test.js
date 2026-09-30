@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { env, res, textFile } from './engine.js';
 import { detect } from '../src/engine/input.js';
-import { newGeometryAttestation, checkGeoJSON, roleIri, DrawError } from '../src/engine/chora/draw.js';
+import { newGeometryAttestation, checkGeoJSON, roleIri, DrawError, wrapLongitudes } from '../src/engine/chora/draw.js';
 import { save, checkAddition } from '../src/engine/chora/save.js';
 import { choraDrawingNote } from '../src/engine/words.js';
 
@@ -95,4 +95,18 @@ test('a GeometryCollection given to save() directly never reaches the dataset: n
   const good = newGeometryAttestation({ geojson: { type: 'Point', coordinates: [0, 0] }, contributor: who, created: when });
   const ok = await save(input, [{ placeId: 'https://example.org/place/a', attestation: good }], e, { reopen: (o) => new File(e.outs[o.name], o.name) });
   assert.deepEqual(ok.outputs.map((o) => o.name), ['a.chora.json']);
+});
+
+// The review of 30 September 2026: it failed before its fix.
+test('a drawing on a copy of the world is brought back to it, whole; one across the antimeridian is refused, in words', () => {
+  assert.deepEqual(wrapLongitudes({ type: 'Point', coordinates: [370.5, 10] }), { type: 'Point', coordinates: [10.5, 10] });
+  assert.deepEqual(wrapLongitudes({ type: 'Point', coordinates: [-530, 1] }), { type: 'Point', coordinates: [-170, 1] });
+  // Moved as one, by whole turns: an area drawn two copies east keeps its shape.
+  assert.deepEqual(wrapLongitudes({ type: 'Polygon', coordinates: [[[540, 0], [542, 0], [542, 2], [540, 0]]] }), { type: 'Polygon', coordinates: [[[-180, 0], [-178, 0], [-178, 2], [-180, 0]]] });
+  const plain = { type: 'LineString', coordinates: [[1, 2], [3, 4]] };
+  assert.deepEqual(wrapLongitudes(plain), plain, 'a drawing on the world itself is as drawn');
+  const across = wrapLongitudes({ type: 'LineString', coordinates: [[539, 0], [541, 1]] });
+  assert.deepEqual(across.coordinates, [[-181, 0], [-179, 1]]);
+  assert.throws(() => checkGeoJSON(across), (e) => e instanceof DrawError && /off the map: longitude must be between -180 and 180/.test(e.message));
+  assert.doesNotThrow(() => checkGeoJSON(wrapLongitudes({ type: 'Point', coordinates: [370.5, 10] })));
 });

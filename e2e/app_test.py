@@ -763,6 +763,8 @@ def chora_checks(pw, url, tmp):
     requests, errors, loads = [], [], []
     ctx.on('request', lambda r: requests.append(r.url))
     ctx.on('page', lambda p: p.on('pageerror', lambda e: errors.append(str(e)[:200])))
+    said = []                                                   # what Chora's pages wrote to the console
+    ctx.on('console', lambda m: said.append(m.text))
     # The host the guard must refuse: were a request to reach the network it would be recorded here, then stopped.
     ctx.route('https://tiles.example.net/**', lambda route: route.abort())
     web = lambda since=0: [u for u in requests[since:] if urlparse(u).scheme in ('http', 'https')]
@@ -803,6 +805,25 @@ def chora_checks(pw, url, tmp):
         s = cstate(page); asked = [u for u in web(since) if 'tiles.example.net' in u]; ours = [u for u in web(since) if 'lakes.geojson?probe' in u]
         return counted and fetched and 'https://tiles.example.net' in s['blockedOrigins'] and not asked and ours, {'blocked': s['blocked'], 'origins': s['blockedOrigins'], 'asked': asked, 'fetched here': ours}
     attempt('Chora: the guard refuses a request to another site and counts it, while a request to this site goes through', guard)
+    def no_key_in_console():
+        chora_boot(page, base)
+        # Once the basemap is in: sources added before would go with the blank style it replaces.
+        until(page, '() => window.__chora_map.getStyle()?.name?.includes("Natural Earth") && window.__chora_map.isStyleLoaded()', 30)
+        since = len(said)
+        # A basemap's key travels in its addresses' query string; a failed request must not put it in
+        # the console. Two sources on this site that are not there: one with a key, and its control without.
+        page.evaluate('''() => { const m = window.__chora_map;
+          m.addSource('probe-keyed', { type: 'geojson', data: './basemap/not-here.geojson?api_key=SECRETKEY123' });
+          m.addLayer({ id: 'probe-keyed', type: 'line', source: 'probe-keyed' });
+          m.addSource('probe-bare', { type: 'geojson', data: './basemap/not-here-either.geojson' });
+          m.addLayer({ id: 'probe-bare', type: 'line', source: 'probe-bare' }); }''')
+        t0 = time.time()
+        # page.wait_for_timeout, not time.sleep: Playwright delivers console events only while it is called.
+        while time.time() - t0 < T(15) and not (any('not-here.geojson' in x for x in said[since:]) and any('not-here-either.geojson' in x for x in said[since:])): page.wait_for_timeout(250)
+        lines = said[since:]
+        return (any('not-here.geojson' in x for x in lines) and any('not-here-either.geojson' in x for x in lines)
+                and not any('SECRETKEY123' in x for x in lines)), {'console': [x[:160] for x in lines]}
+    attempt('Chora: a failed map request is named in the console, without the key in its address', no_key_in_console)
 
     def load_plato():
         s = chora_boot(page, base, [fixture(ant, 'antonine-load.json', tmp)]); loads.append(s['phase'])
@@ -983,6 +1004,56 @@ def chora_checks(pw, url, tmp):
         finally: m.close()
     attempt('Chora: the saved file checks clean on the main page, and the version check there finds two added and nothing lost or changed', saved_valid)
 
+    def resave():
+        f = fixture(ant, 'antonine-resave.json', tmp); chora_boot(page, base, [f]); chora_pick(page, 'londinium')
+        page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
+        x, y = map_centre(page); draw(page, 'point', [(x + 90, y + 50)]); page.click('#draw-tools button[data-mode="static"]')
+        until(page, '() => window.__chora.pendingCount === 1', 10)
+        page.click('#save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+        offered = (cstate(page)['lastSave'] or {}).get('passed') and page.is_visible('#save-result button.primary')
+        # A drawing made after the save is not in the file that save wrote.
+        draw(page, 'point', [(x - 90, y - 50)]); page.click('#draw-tools button[data-mode="static"]')
+        until(page, '() => window.__chora.pendingCount === 2', 10)
+        stale = page.is_visible('#save-result button.primary') and page.is_enabled('#save-result button.primary')
+        if stale:                                               # as a user would: saving that file let both drawings go
+            with page.expect_download(timeout=T(60) * 1000): page.click('#save-result button.primary')
+            page.wait_for_timeout(500)
+        left, k, text = cstate(page)['pendingCount'], len(kept(page, f.name)), page.inner_text('#save-result')
+        return offered and not stale and left == 2 and k == 2 and 'save again' in text, {'offered after the save': offered, 'still offered after drawing': stale, 'pending': left, 'kept': k, 'said': text}
+    attempt('Chora: a drawing made after a save withdraws that save\'s file, and no drawing is let go that the file does not hold', resave)
+    def conversion_said():
+        tables = sorted((ROOT / 'test/fixtures/tables-routes').glob('*.csv'))
+        chora_boot(page, base, tables); chora_pick(page, 'cambridge')
+        page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
+        x, y = map_centre(page); draw(page, 'point', [(x + 40, y + 40)]); page.click('#draw-tools button[data-mode="static"]')
+        until(page, '() => window.__chora.pendingCount >= 1', 10)
+        page.click('#save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+        ls = cstate(page)['lastSave'] or {}; text = page.inner_text('#save-result')
+        # The conversion's warnings, from the worker's own report, each shown on the page.
+        warned = [i['message'] for i in (ls.get('report') or {}).get('items', []) if i['severity'] == 'warning']
+        return (ls.get('passed') and warned and all(w in text for w in warned) and 'conversion' in text and 'PLATO JSON' in text and 'spreadsheet tables' in text), {'warnings': warned, 'said': text}
+    attempt('Chora: a save of spreadsheet tables says the file is a conversion to PLATO JSON, and shows what the conversion reported', conversion_said)
+    def world_copy():
+        f = fixture(ant, 'antonine-wrap.json', tmp); chora_boot(page, base, [f]); chora_pick(page, 'londinium')
+        c = page.evaluate('() => window.__chora_map.getCenter().toArray()')
+        page.evaluate('c => window.__chora_map.jumpTo({ center: [c[0] + 360, c[1]] })', c); page.evaluate(SETTLE)
+        x, y = map_centre(page)
+        here = page.evaluate('([x, y]) => { const r = window.__chora_map.getCanvas().getBoundingClientRect(); return window.__chora_map.unproject([x - r.left, y - r.top]).toArray(); }', [x, y])
+        draw(page, 'point', [(x, y)]); page.click('#draw-tools button[data-mode="static"]')
+        got = soon(page, '() => window.__chora.pendingCount === 1', 10)
+        k = kept(page, f.name); lon = k[0]['geojson']['coordinates'][0] if k else None
+        on_copy = here[0] > 180                                   # the point was drawn where longitudes run past 180
+        ok_point = got and len(k) == 1 and lon is not None and -180 <= lon <= 180 and abs(lon - (here[0] - 360)) < 0.01
+        # A line across the antimeridian cannot be a PLATO geometry as drawn: refused, in words, and not kept.
+        page.evaluate('() => window.__chora_map.jumpTo({ center: [180, -17], zoom: 6 })'); page.evaluate(SETTLE)
+        draw(page, 'linestring', [(x - 80, y), (x + 80, y), (x + 80, y)]); page.click('#draw-tools button[data-mode="static"]')
+        refused = soon(page, '() => !!window.__chora.drawError', 10)
+        text = page.inner_text('#card'); k2 = kept(page, f.name)
+        line_gone = soon(page, '() => window.__chora_map.queryRenderedFeatures({ layers: ["td-linestring"] }).length === 0', 5)
+        return (on_copy and ok_point and refused and 'was not kept' in text and 'longitude must be between -180 and 180' in text
+                and len(k2) == 1 and cstate(page)['pendingCount'] == 1 and line_gone), {'drawn at': here, 'kept': [d['geojson'] for d in k2], 'error': cstate(page).get('drawError'), 'line gone': line_gone}
+    attempt('Chora: a point drawn on a copy of the world is kept on the world, and a line across the antimeridian is refused in words', world_copy)
+
     def handoff():
         f = fixture(ant, 'antonine-handoff.json', tmp)
         page.bring_to_front(); page.goto(NOTOOLS if PROVE else base)
@@ -998,6 +1069,26 @@ def chora_checks(pw, url, tmp):
         again = page.is_visible('#handoff') or bool(cstate(page).get('handoff'))
         return f.name in offer and s['phase'] == 'loaded' and s['places'] == ant_places and not again, {'offer': offer, 'state': s, 'offered again': again}
     attempt('Chora: a file chosen on the main page is offered on Chora\'s page, opens there, and is not kept after', handoff)
+    IDB = '''(put) => new Promise((resolve, reject) => { const q = indexedDB.open('plato-tools-chora', 1);
+      q.onupgradeneeded = () => q.result.createObjectStore('kv');
+      q.onsuccess = () => { const db = q.result, t = db.transaction('kv', put ? 'readwrite' : 'readonly'), s = t.objectStore('kv');
+        const r = put ? s.put({ files: [new File(['{}'], 'stale.json')], at: Date.now() - 10 * 60 * 1000 }, 'chora-handoff') : s.get('chora-handoff');
+        t.oncomplete = () => { db.close(); resolve(put ? true : r.result ? { names: (r.result.files || []).map((f) => f.name), at: r.result.at } : null); }; t.onerror = () => reject(t.error); };
+      q.onerror = () => reject(q.error); })'''
+    def handoff_let_go():
+        f = fixture(ant, 'antonine-handoff-go.json', tmp)
+        page.bring_to_front(); page.goto(NOTOOLS if PROVE else base)
+        if wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready').get('phase') != 'ready': raise RuntimeError('the main page did not start')
+        page.set_input_files('#picker', str(f)); until(page, '() => window.__plato.phase === "detected"', 30)
+        page.click('#toolbox a.tool-link[href="./chora.html"]')
+        until(page, '() => window.__chora && window.__chora.handoff', 30)
+        offered = f.name in page.inner_text('#handoff')
+        left = page.evaluate(IDB, False)                         # not opened yet: already let go, held in the page alone
+        # A hand-off older than a few minutes is not offered, and is let go too.
+        page.evaluate(IDB, True); page.reload(); until(page, '() => window.__chora.phase === "ready"', 60); page.wait_for_timeout(500)
+        stale = page.is_visible('#handoff') or bool(cstate(page).get('handoff')); after = page.evaluate(IDB, False)
+        return offered and left is None and not stale and after is None, {'offered': offered, 'left in the browser': left, 'stale offered': stale, 'stale left': after}
+    attempt('Chora: files handed over from the main page are let go by the browser as soon as they are offered, and an old hand-off is not offered', handoff_let_go)
 
     def two_tabs():
         page.goto('about:blank')                                # no other Chora tab: two of those share one pool
@@ -1074,6 +1165,28 @@ def chora_checks(pw, url, tmp):
     # Over everything above: loading, drawing, saving, the hand-off and two tabs.
     attempt('Chora: across all these checks, no request went to any other site, and no page error', lambda: (
         len(web()) > 50 and 'loaded' in loads and not foreign() and not errors, {'requests': len(web()), 'foreign': foreign(), 'errors': errors[:5]}))
+
+    # After that check, since it asks another site (stopped here, by the route) for a style.
+    STYLES = 'https://styles.example.org'
+    GOOD = json.dumps({'version': 8, 'name': 'Probe style', 'sources': {}, 'layers': [{'id': 'probe-bg', 'type': 'background', 'paint': {'background-color': '#f4efe4'}}]})
+    ctx.route(STYLES + '/**', lambda route: route.fulfill(status=200, content_type='application/json', body=GOOD) if route.request.url.endswith('/good.json') else route.fulfill(status=404, body='not here'))
+    def use_pasted(address):
+        page.evaluate("() => { document.getElementById('basemaps').open = true; }")
+        page.fill('#paste', address); page.click('#paste-form button[type=submit]')
+        if page.is_visible('#consent-yes'): page.click('#consent-yes')
+    def bad_style():
+        chora_boot(page, base); since = len(requests)
+        # The control: a style that loads is kept.
+        use_pasted(STYLES + '/good.json')
+        kept_good = soon(page, '() => window.__chora_map.getStyle()?.name === "Probe style"', 20) and cstate(page)['basemap'].startswith('pasted-')
+        use_pasted(STYLES + '/missing.json')
+        back = soon(page, '() => window.__chora.basemap === "natural-earth" && !!window.__chora.basemapError', 20)
+        asked = any(u.endswith('/missing.json') for u in requests[since:])   # it failed for being missing, not for never being asked
+        drew = soon(page, '() => window.__chora_map.getStyle()?.name?.includes("Natural Earth") && window.__chora_map.queryRenderedFeatures({ layers: ["land"] }).length > 0', 30)
+        text = page.inner_text('#basemap-options'); s = cstate(page)
+        return (kept_good and asked and back and drew and 'Natural Earth' in text and 'could not be loaded' in text and s['basemapError'] in text), {
+            'the good style kept': kept_good, 'asked for the missing one': asked, 'state': {k: s.get(k) for k in ('basemap', 'basemapError')}, 'said': text[:300]}
+    attempt('Chora: a basemap whose style cannot be loaded gives way to Natural Earth, and the page says why (a style that loads is kept)', bad_style)
     ctx.close()
 
 main()

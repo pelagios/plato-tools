@@ -3,19 +3,21 @@
 // dataset with the drawings added, checked by the version check (Mneme) against what was opened.
 // The engine is the same worker as the main page's (src/engine/worker.js, its chora-* commands). The
 // page publishes its state on window.__chora for automated tests; nothing else reads it.
-import { fmtBytes, progressText, summary, draftNote, choraDrawingNote, choraSaveText, CHORA_TEXT } from '../engine/words.js';
-import { newGeometryAttestation, ROLES, PRECISIONS } from '../engine/chora/draw.js';
+import { fmtBytes, formatName, progressText, summary, draftNote, choraDrawingNote, choraSaveText, CHORA_TEXT } from '../engine/words.js';
+import { newGeometryAttestation, checkGeoJSON, wrapLongitudes, DrawError, ROLES, PRECISIONS } from '../engine/chora/draw.js';
 import { createMap, placeFeatures, contextFeatures, STATUS_COLOURS } from './map.js';
 import * as basemaps from './basemaps.js';
 import * as contributors from './contributor.js';
 import { fingerprint, loadDrafts, saveDrafts } from './drafts.js';
-import { take as takeHandoff, clear as clearHandoff } from './handoff.js';
+import { take as takeHandoff } from './handoff.js';
 
 const $ = (id) => document.getElementById(id);
 const state = (window.__chora = { phase: 'loading', placeId: null, pendingCount: 0, basemap: null, mapReadyCount: 0, blocked: 0, lastSave: null });
 const PAGE = 50;
 let showing = false;   // true while the drawings shown are being replaced
 let worker, files = [], fp = null, dataset = null, drafts = [], view = null, offset = 0, total = 0, query = '';
+let offered = null;    // the button that saves the file last written, while the drawings are those it holds
+let drawError = null;  // why the last drawing was not kept, shown in the card
 
 // ---- The engine ----------------------------------------------------------------------------------
 // One request at a time: each waits for the reply of its type (or an error), and progress on the way
@@ -51,7 +53,7 @@ async function open(list) {
   if (!files.length) return;
   Object.assign(state, { phase: 'opening', placeId: null, lastSave: null });
   for (const id of ['places', 'card', 'saving']) $(id).hidden = true;
-  $('handoff').hidden = true; $('save-result').innerHTML = '';
+  $('handoff').hidden = true; $('save-result').innerHTML = ''; offered = null;
   $('dataset').hidden = false;
   $('dataset').innerHTML = `<ul>${files.map((f) => `<li><span class="name">${esc(f.name)}</span> <span class="count">${fmtBytes(f.size)}</span></li>`).join('')}</ul>`;
   $('phase').textContent = 'Reading…';
@@ -103,6 +105,7 @@ async function selectPlace(id) {
   if (!r.view) return fail(`This dataset has no place ${id}.`);
   view = r.view;
   state.placeId = id;
+  drawError = state.drawError = null;
   for (const b of $('list').querySelectorAll('button[data-id]')) b.classList.toggle('current', b.dataset.id === id);
   renderCard();
   $('card').scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
@@ -156,6 +159,7 @@ function renderCard() {
     ${v.withdrawn ? `<p class="muted">${n(v.withdrawn)} withdrawn attestation${v.withdrawn === 1 ? '' : 's'} not shown.</p>` : ''}
     <h3>Your drawings</h3>
     <p class="muted">Draw with the tools on the map. Each drawing is added as a new attestation of this place; nothing already there is changed.</p>
+    ${drawError ? `<p class="warn" id="draw-error">${esc(drawError)}</p>` : ''}
     <ul class="pending">${mine.map(pendingItem).join('') || '<li class="muted">None yet.</li>'}</ul>`;
 }
 function pendingItem(d) {
@@ -216,11 +220,24 @@ function onFinish(id, ctx) {
   const f = mapApi.draw?.getSnapshotFeature(id);
   if (!f) return;
   const existing = drafts.find((d) => d.id === String(id));
-  if (existing) { existing.geojson = f.geometry; keepDrafts(); return; }   // moved or reshaped
-  if (ctx?.action && ctx.action !== 'draw') return;
-  if (!state.placeId) { mapApi.draw.removeFeatures([id]); return; }
+  if (!existing && ctx?.action && ctx.action !== 'draw') return;
+  if (!existing && !state.placeId) { mapApi.draw.removeFeatures([id]); return; }
+  // Drawn on a copy of the world, east or west of it, its longitudes run past 180: it is brought back
+  // onto the world, whole, and checked as the save will check it. One across the antimeridian cannot
+  // be a PLATO geometry as drawn; it is not kept (or, moved there, goes back), and the card says why.
+  const geojson = wrapLongitudes(f.geometry);
+  try { checkGeoJSON(geojson); } catch (e) {
+    if (!(e instanceof DrawError)) throw e;
+    drawError = state.drawError = `${KIND[f.geometry.type] || 'A drawing'} ${existing ? 'moved' : 'drawn'} for ${existing?.placeLabel || view?.label || 'this place'} was not kept. ${e.message}`;
+    setTimeout(() => { try { if (existing) mapApi.draw?.updateFeatureGeometry(id, existing.geojson); else mapApi.draw?.removeFeatures([id]); } catch {} });
+    if (view) renderCard();
+    return;
+  }
+  if (geojson !== f.geometry) setTimeout(() => { try { mapApi.draw?.updateFeatureGeometry(id, geojson); } catch {} });
+  drawError = state.drawError = null;
+  if (existing) { existing.geojson = geojson; keepDrafts(); return; }   // moved or reshaped
   const b = basemaps.current();
-  drafts.push({ id: String(id), placeId: state.placeId, placeLabel: view?.label || '', geojson: f.geometry, role: '', precision: '',
+  drafts.push({ id: String(id), placeId: state.placeId, placeLabel: view?.label || '', geojson, role: '', precision: '',
     basemap: b.local ? 'Natural Earth' : b.name, zoom: mapApi.zoom(), drawnAt: new Date().toISOString() });
   keepDrafts();
   renderCard();
@@ -233,6 +250,11 @@ function removeDraft(id) {
   renderCard();
 }
 function keepDrafts() {
+  // The file last written holds the drawings as they were: once they change, it is not offered.
+  if (offered) {
+    offered.remove(); offered = null;
+    $('save-result').insertAdjacentHTML('beforeend', '<p class="warn">The drawings have changed since that file was written, so it is no longer offered: save again to have them all.</p>');
+  }
   state.pendingCount = drafts.length;
   if (fp) saveDrafts(fp, drafts);
   showSaving();
@@ -293,8 +315,9 @@ async function saveDataset() {
       geojson: d.geojson, role: d.role || undefined, precision: d.precision || undefined, contributor,
       created: d.drawnAt, notes: choraDrawingNote({ basemap: d.basemap, zoom: d.zoom }) }) }));
   } catch (e) { $('save-result').innerHTML = `<p class="warn">${esc(e.message)}</p>`; return; }
+  const savedIds = new Set(drafts.map((d) => d.id));
   $('save').disabled = true;
-  $('save-result').innerHTML = '';
+  $('save-result').innerHTML = ''; offered = null;
   state.phase = 'saving';
   let r;
   try { r = await request({ cmd: 'chora-save', files, additions, contributor }, 'done'); } catch (e) { $('save').disabled = false; return fail(e.message); }
@@ -306,21 +329,36 @@ async function saveDataset() {
   const problems = (r.report?.items || []).filter((i) => i.severity === 'error');
   // The verdict in the words the command line uses too (src/engine/words.js), and on failure, why.
   const reasons = [...(r.mneme?.reasons || []), ...problems.map((i) => `${CHORA_TEXT[i.kind] || i.message}${i.examples?.length ? `: ${i.examples.slice(0, 3).join('; ')}` : ''}`)];
+  // What the file is, and on a save that passes, what the writing of it reported: for a dataset that
+  // was not place-centric PLATO JSON, what its conversion could not carry over, which Mneme, reading
+  // the same input the same way, cannot see.
+  const converted = dataset.input?.format !== 'plato-json' || dataset.input?.profile !== 'place-centric';
+  const notes = (r.report?.items || []).filter((i) => i.severity !== 'error');
   $('save-result').innerHTML = `<p class="${passed ? 'good' : 'warn'}">${esc(choraSaveText(r))}</p>`
-    + (passed ? '' : reasons.map((x) => `<p class="warn">${esc(x)}</p>`).join(''));
+    + (passed ? `<p>${converted ? `The dataset is ${esc(formatName(dataset.input))}: the saved file is a conversion of it to PLATO JSON (place-centric), with the drawings added.` : 'The saved file is PLATO JSON, as the dataset is, with the drawings added.'}</p>`
+      + (notes.length ? `<p>${converted ? 'The conversion' : 'Writing it'} reported:</p><ul class="notes">${notes.map((i) => `<li>${esc(i.message)}${i.count > 1 ? ` (${n(i.count)})` : ''}${i.examples?.length ? ` <span class="muted">${esc(i.examples.slice(0, 3).join('; '))}</span>` : ''}</li>`).join('')}</ul>` : '')
+      : reasons.map((x) => `<p class="warn">${esc(x)}</p>`).join(''));
   if (passed && out) {
     const b = document.createElement('button'); b.className = 'primary';
     b.textContent = `Save ${out.name} (${fmtBytes(out.size)})`;
     b.onclick = async () => {
-      if (await save(out.name)) {
-        // Saved to the user's disk: the drawings are in that file now, and need not be kept here.
-        drafts = []; keepDrafts(); showDrafts([]); if (view) renderCard();
+      let done;
+      try { done = await save(out.name); } catch (e) {
+        offered = null; b.remove();
+        $('save-result').insertAdjacentHTML('beforeend', `<p class="warn">${esc(out.name)} is no longer there to save (${esc(e.message)}): save again.</p>`);
+        return;
+      }
+      if (done) {
+        // Saved to the user's disk: the drawings in that file need not be kept here; any others still are.
+        offered = null; b.remove();
+        drafts = drafts.filter((d) => !savedIds.has(d.id)); keepDrafts(); showDrafts(drafts.filter((d) => d.placeId === state.placeId)); if (view) renderCard();
         $('save-result').insertAdjacentHTML('beforeend', `<p>Saved. To add more, open ${esc(out.name)}.</p>`);
       }
     };
     $('save-result').appendChild(b);
+    offered = b;
   }
-  state.lastSave = { passed, added, outputs: r.outputs || [], mneme: r.mneme || null };
+  state.lastSave = { passed, added, outputs: r.outputs || [], mneme: r.mneme || null, report: r.report || null, converted };
   state.phase = 'saved';
 }
 // The same as the main page's save() (src/app.js), kept here rather than shared so that the main page
@@ -346,12 +384,13 @@ window.__chora_save = save;
 
 // ---- Basemaps ------------------------------------------------------------------------------------
 let asking = null;   // a basemap waiting for the user to agree to its provider
+let basemapError = null;   // why the basemap chosen could not be used
 function renderBasemaps() {
   const cur = basemaps.current();
   $('basemap-name').textContent = cur.name;
   const groups = new Map();
   for (const b of basemaps.all()) { if (!groups.has(b.group)) groups.set(b.group, []); groups.get(b.group).push(b); }
-  $('basemap-options').innerHTML = [...groups].map(([g, bs]) => `<fieldset><legend>${esc(g)}</legend>${bs.map((b) => `<label class="${b.disabled ? 'disabled' : ''}">
+  $('basemap-options').innerHTML = (basemapError ? `<p class="warn" role="status">${esc(basemapError)}</p>` : '') + [...groups].map(([g, bs]) => `<fieldset><legend>${esc(g)}</legend>${bs.map((b) => `<label class="${b.disabled ? 'disabled' : ''}">
       <input type="radio" name="basemap" value="${esc(b.id)}"${b.id === (asking || cur).id ? ' checked' : ''}${b.disabled ? ' disabled' : ''}> ${esc(b.name)}${b.disabled ? ` <small>(${esc(b.disabled)})</small>` : ''}
       ${b.group === 'Pasted' ? ` <button type="button" class="link" data-unpaste="${esc(b.id)}">remove</button>` : ''}</label>`).join('')}</fieldset>`).join('')
     + (asking ? `<div class="consent" role="alertdialog" aria-labelledby="consent-text"><p id="consent-text">${esc(basemaps.notice(asking))}</p>
@@ -387,6 +426,7 @@ $('basemap-options').addEventListener('submit', (e) => {
   if (asking) renderBasemaps(); else useBasemap(b);
 });
 async function useBasemap(b) {
+  if (!b.local) basemapError = state.basemapError = null;
   basemaps.choose(b);
   mapApi.allow([basemaps.originOf(b)]);
   state.basemap = b.id;
@@ -421,7 +461,15 @@ drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
 drop.ondragleave = () => drop.classList.remove('over');
 drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); open(e.dataTransfer.files); };
 
-const mapApi = createMap($('map'), { state, onPlaceClick: (id) => selectPlace(id) });
+// A basemap whose style cannot be loaded leaves no map to draw on: Natural Earth, from this site, instead.
+function styleFailed(why) {
+  const b = basemaps.byId(state.basemap);
+  if (!b || b.local) return;
+  basemapError = state.basemapError = `${b.name} could not be loaded from ${basemaps.originOf(b)} (${why}), so the map is back on Natural Earth, from this site.`;
+  $('basemaps').open = true;
+  useBasemap(basemaps.byId('natural-earth'));
+}
+const mapApi = createMap($('map'), { state, onPlaceClick: (id) => selectPlace(id), onStyleError: styleFailed });
 mapApi.onDraw({
   finish: onFinish,
   // A drawing deleted with the Edit tool (its Delete key) is removed from the drafts too. Clearing
@@ -443,7 +491,7 @@ startWorker().then(async () => {
     const p = $('handoff');
     p.innerHTML = `<button type="button" class="primary" id="open-handoff">Open ${esc(handed.map((f) => f.name).join(', '))}</button>, chosen on the main page.`;
     p.hidden = false;
-    $('open-handoff').onclick = () => { clearHandoff(); open(handed); };
+    $('open-handoff').onclick = () => open(handed);
     state.handoff = handed.map((f) => f.name);
   }
 }).catch((e) => (e.kind === 'pool-busy' ? inAnotherTab() : fail(e.message)));

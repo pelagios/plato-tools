@@ -13,7 +13,7 @@ import { detect } from '../input.js';
 import { Report } from '../report.js';
 import { CHORA_TEXT } from '../words.js';
 import { checkGeoJSON, DrawError } from './draw.js';
-import { placeKey } from './store.js';
+import { keyer } from './store.js';
 
 /**
  * Whether an addition may go into a place-centric dataset: null when it may, else why not, in words.
@@ -34,10 +34,13 @@ export function checkAddition(attestation, validators) {
 /** The name of the saved file: the input's, without its extension, then .chora.json. */
 export const savedName = (name) => String(name).replace(/\.gz$/i, '').replace(/\.[^./]+$/, '') + '.chora.json';
 
-/** A record with its additions after its own attestations; the record read is not changed. */
-function appendTo(rec, n, byPlace, placed) {
-  const key = placeKey(rec, n);
-  const adds = byPlace.get(key);
+/**
+ * A record with its additions after its own attestations; the record read is not changed. `key` is
+ * keyer()'s: null for a record that is not a place, which is passed through as it is. A place the
+ * dataset gives twice under one @id gets its additions once, at the first, as Chora's store shows it.
+ */
+function appendTo(rec, key, byPlace, placed) {
+  const adds = key === null || placed.has(key) ? null : byPlace.get(key);
   if (!adds) return rec;
   placed.add(key);
   return { ...rec, attestations: [...(Array.isArray(rec.attestations) ? rec.attestations : []), ...adds] };
@@ -47,18 +50,22 @@ function appendTo(rec, n, byPlace, placed) {
  * Write the dataset with its additions (byPlace: place key -> [attestation]) to `name`: a conversion
  * to PLATO JSON by run(), whose options.augment is given each place-centric record, in the order a
  * sink is given them, and puts its additions after its own attestations. The places are counted as
- * Chora's store counts them (placeKey), so a place without an @id is found by its position here as
- * there. makeWriter names the file from options.name, so the output is `name`. Returns run()'s result.
+ * Chora's store counts them (keyer, in store.js), so a place without an @id is found by its position
+ * here as there. makeWriter names the file from options.name, so the output is `name`. Returns run()'s
+ * result.
  */
 function writeWithAdditions(input, byPlace, placed, env, name) {
-  let n = 0;
-  return run({ input, action: 'convert', target: 'plato-json', options: { name, augment: (rec) => appendTo(rec, ++n, byPlace, placed) } }, env);
+  const keyOf = keyer();
+  return run({ input, action: 'convert', target: 'plato-json', options: { name, augment: (rec) => appendTo(rec, keyOf(rec), byPlace, placed) } }, env);
 }
 
 // What the version check must find for the save to stand: nothing of the earlier version lost or
 // changed, whatever the dataset's status (an unpublished dataset gets these as warnings, and a save
-// must keep them all the same), and exactly the additions added.
-const BREACHES = new Set(['attestation-removed', 'attestation-changed', 'attestation-gone', 'facet-changed', 'facet-removed', 'version-not-read', 'unreadable']);
+// must keep them all the same), and exactly the additions added. Chora adds attestations and nothing
+// else, so what identifies or describes a place (always warnings, since either may be corrected in a
+// new version) must not change either.
+const BREACHES = new Set(['attestation-removed', 'attestation-changed', 'attestation-gone', 'facet-changed', 'facet-removed',
+  'identity-removed', 'identity-changed', 'identity-gone', 'description-changed', 'description-removed', 'version-not-read', 'unreadable']);
 /**
  * Mneme's verdict on a save: `later` (a File: the saved document) against `input`, with `added`
  * attestations expected new. Returns { passed, report, reasons }.
@@ -68,7 +75,11 @@ export async function verify(input, later, added, env) {
   const rep = r.report, c = rep.counts || {};
   const reasons = [];
   if (r.incomplete) reasons.push('a version could not be read to the end');
-  if (rep.errors) reasons.push(`${rep.errors} problem${rep.errors === 1 ? '' : 's'}`);
+  // A dataset with no attestations yet (a list of places to locate) leaves the version check nothing
+  // to compare, which it reports as a problem. For a save that is the one problem allowed: the counts
+  // below must still show exactly the drawings added, and nothing else.
+  const errors = rep.items.filter((i) => i.severity === 'error' && !(i.kind === 'nothing-to-compare' && c.earlier === 0)).reduce((n, i) => n + i.count, 0);
+  if (errors) reasons.push(`${errors} problem${errors === 1 ? '' : 's'}`);
   for (const i of rep.items) if (BREACHES.has(i.kind) && i.severity !== 'error') reasons.push(`${i.kind} (${i.count})`);
   if (c.earlier === undefined) reasons.push('nothing was compared');
   else {
@@ -107,9 +118,8 @@ export async function save(input, additions, env, options = {}) {
   let missing;
   if (options.hasPlace) missing = [...byPlace.keys()].filter((k) => !options.hasPlace(k));
   else {
-    const seen = new Set();
-    let n = 0;
-    const r = await run({ input, action: 'check', options: { sink: { header() {}, event(ev) { if (ev.type === 'record') { const k = placeKey(ev.value, ++n); if (byPlace.has(k)) seen.add(k); } }, async close() {} } } }, env);
+    const seen = new Set(), keyOf = keyer();
+    const r = await run({ input, action: 'check', options: { sink: { header() {}, event(ev) { if (ev.type === 'record') { const k = keyOf(ev.value); if (k !== null && byPlace.has(k)) seen.add(k); } }, async close() {} } } }, env);
     if (r.incomplete) { rep.error('chora-unreadable', CHORA_TEXT['chora-unreadable'], r.report.items.find((i) => i.kind === 'unreadable')?.examples[0]); return fail(); }
     missing = [...byPlace.keys()].filter((k) => !seen.has(k));
   }

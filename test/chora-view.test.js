@@ -8,8 +8,8 @@ import assert from 'node:assert/strict';
 import { env, file, textFile, go, outText } from './engine.js';
 import { detect } from '../src/engine/input.js';
 import { load, fold } from '../src/engine/chora/store.js';
-import { viewPlace, statusOf } from '../src/engine/chora/view.js';
-import { reprPointOf, unionBbox } from '../src/engine/chora/geo.js';
+import { viewPlace, statusOf, tail } from '../src/engine/chora/view.js';
+import { reprPointOf, unionBbox, bboxOf } from '../src/engine/chora/geo.js';
 
 const X = 'https://example.org/', P = 'https://w3id.org/plato#';
 const id = (s) => `${X}place/${s}`, att = (s) => `${X}attestation/${s}`;
@@ -151,4 +151,48 @@ test('representative points and boxes', () => {
   // A country across the antimeridian (west > east) joined with its neighbour stays across it.
   assert.deepEqual(unionBbox([[170, -20, -170, -10], [-175, -25, -172, -22]]), [170, -25, -170, -10]);
   assert.deepEqual(unionBbox([[0, 0, 1, 1], [2, 2, 3, 3]]), [0, 0, 3, 3]);
+});
+
+// ---- The review of 30 September 2026: each test below failed before its fix. ----------------------
+test("a place without an @id is shown under the key its drawings are kept by", async () => {
+  const s = await open(textFile(JSON.stringify({ ...dataset(), spatialEntities: [...dataset().spatialEntities, { label: 'Unnamed', attestations: [{ names: [{ toponym: 'Unnamed' }], sources: [src] }] }] }), 'unnamed.json'));
+  const key = s.search('unnamed').items[0].id;
+  assert.equal(key, '#8');
+  assert.equal(s.getPlace(key).id, key);
+  assert.equal(s.getPlace(id('ashford')).id, id('ashford'), 'and a place with one, under its @id');
+});
+
+test('an address with a stray % is shown as it is written, and its place still opens', async () => {
+  assert.equal(tail('https://example.org/rel/near%'), 'near%');
+  assert.equal(tail('https://example.org/p/100%zz'), '100%zz');
+  assert.equal(tail('https://example.org/p/St%20Ives'), 'St Ives', 'an encoded address is still decoded');
+  const v = viewPlace({ label: 'x', attestations: [{ relations: [{ relatesTo: 'https://example.org/p/50%', relationType: 'https://example.org/rel/near%' }], types: [{ identifier: 'https://example.org/t/%E2' }] }] });
+  assert.deepEqual(v.relations.map((r) => [r.typeLabel, r.label]), [['near%', '50%']]);
+  assert.deepEqual(v.types.map((t) => t.label), ['%E2']);
+});
+
+test('a geometry across the antimeridian: its box goes the short way round, and its point is on it', async () => {
+  const line = { type: 'LineString', coordinates: [[179, -17], [-179, -16]] };
+  const square = { type: 'Polygon', coordinates: [[[178, -18], [-178, -18], [-178, -16], [178, -16], [178, -18]]] };
+  assert.deepEqual(bboxOf(line), [179, -17, -179, -16]);
+  assert.deepEqual(bboxOf(square), [178, -18, -178, -16]);
+  const near180 = (p) => Math.abs(Math.abs(p[0]) - 180) < 1e-9 && p[0] >= -180 && p[0] <= 180;
+  const [lp, sp] = [reprPointOf(line), reprPointOf(square)];
+  assert.ok(near180(lp) && Math.abs(lp[1] + 16.5) < 1e-9, `the line's middle: ${lp}`);
+  assert.ok(near180(sp) && Math.abs(sp[1] + 17) < 1e-9, `the square's centroid: ${sp}`);
+  // The controls: a geometry that does not cross is as it was.
+  assert.deepEqual(bboxOf({ type: 'LineString', coordinates: [[-10, 0], [10, 1]] }), [-10, 0, 10, 1]);
+  assert.deepEqual(reprPointOf({ type: 'Polygon', coordinates: [[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]] }), [1, 1]);
+  // In the store: a place of one such square, and one of two points either side of the line.
+  const s = await open(textFile(JSON.stringify({ ...dataset(), spatialEntities: [
+    { '@id': id('fiji'), label: 'Fiji', attestations: [{ geometries: [{ geojson: square }], sources: [src] }] },
+    { '@id': id('taveuni'), label: 'Taveuni', attestations: [{ geometries: [pt(179.5, -16.8)], sources: [src] }, { geometries: [pt(-179.8, -16.9)], sources: [src] }] },
+    { '@id': id('bexley'), label: 'Bexley', attestations: [{ geometries: [pt(5, 50)], sources: [src] }] },
+  ] }), 'fiji.json'));
+  const f = s.brief(id('fiji'));
+  assert.deepEqual(f.bbox, [178, -18, -178, -16]);
+  assert.ok(near180(f.reprPoint), `Fiji's point: ${f.reprPoint}`);
+  assert.deepEqual(s.brief(id('taveuni')).bbox, [179.5, -16.9, -179.8, -16.8]);
+  assert.deepEqual(s.brief(id('bexley')).bbox, [5, 50, 5, 50]);
+  assert.deepEqual(s.getPlace(id('fiji')).fallback, { kind: 'geometry', bbox: [178, -18, -178, -16] });
 });

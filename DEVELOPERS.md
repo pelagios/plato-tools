@@ -467,7 +467,8 @@ What it does is in the guide:
 It is a page of its own, `chora.html`, a second entry in `vite.config.js`, so that MapLibre GL JS
 and Terra Draw load only there. The page is `src/chora/` (`app.js`; `map.js`, the map, the guard
 and drawing; `basemaps.js`; `contributor.js`; `drafts.js`; `handoff.js`, which passes files chosen
-on the main page through IndexedDB), and its engine `src/engine/chora/` (`store.js`, `view.js`,
+on the main page through IndexedDB, taken out of it as soon as Chora's page starts, and not offered
+if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `view.js`,
 `draw.js`, `save.js`, `geo.js`). It publishes its state on `window.__chora` for tests.
 
 - **The worker** is the main page's, with commands of its own, sent one at a time: `chora-load`,
@@ -494,15 +495,24 @@ on the main page through IndexedDB), and its engine `src/engine/chora/` (`store.
   against the places the dataset has, before anything is read or written.
 - **A place's key** is its `@id`, or `#n` (its position among the records) when it has none
   (`placeKey` in `store.js`). Loading and saving both count the records `run()` gives, in the same
-  order, so a place without an address is found by the same key in each; a place of the tables has
+  order and by one rule (`keyer`: every record counts, and one that is not a place has no key), so a
+  place without an address is found by the same key in each. A place given twice under one `@id`
+  gets its drawings at the first, which is the one Chora shows. A place of the tables has
   the address made from its `place_id`, encoded as PLATO says, the same when read to load and to
   save.
 - **Mneme is the oracle.** The same run then compares the input with the file written (`verify()`
-  in `save.js`): nothing lost or changed, whatever the dataset's status, and exactly as many
-  attestations added as were drawn. The append-only rule is shown kept, by the check a publisher
+  in `save.js`): nothing lost or changed, whatever the dataset's status, nothing that identifies or
+  describes a place changed or removed, and exactly as many attestations added as were drawn. A
+  dataset with no attestations yet, a list of places to locate, leaves Mneme nothing to compare,
+  which it reports as a problem: for a save that is the one problem allowed, and the counts must
+  still show exactly the drawings added. On a save that passes, the page says whether the file is a
+  conversion, and shows what the writing of it reported, which Mneme cannot see. The append-only rule is shown kept, by the check a publisher
   would run, not assumed.
 - **Drafts** are kept in the origin private file system, `chora-drafts/`, one file per dataset,
-  named by a hash of each input file's name, size and last change.
+  named by a hash of each input file's name, size and last change. A drawing made on a copy of the
+  world (longitudes past 180) is moved back onto it whole (`wrapLongitudes` in `draw.js`), and one
+  across the antimeridian is refused when it is finished, in words, as the save would refuse it.
+  The file a save wrote is offered only while the drawings are those it holds.
 - **The basemap** is Natural Earth, served from this site from `public/basemap/`. Every address in
   its `style.json` begins `{base}/`, which the page replaces with the folder's address as text,
   since `URL()` would escape the braces of the glyph template. `node scripts/build-basemap.mjs`
@@ -515,7 +525,9 @@ on the main page through IndexedDB), and its engine `src/engine/chora/` (`store.
   basemap may be on any site, so the guard is in code.
 - **Other basemaps** (OpenFreeMap, OpenStreetMap, CARTO, or a pasted style or tile address) are
   used only after a notice naming who will see the requests. Choices and consents stay in
-  `localStorage`. CARTO's key is given at build time as `VITE_CARTO_API_KEY`, and without it CARTO
+  `localStorage`. A basemap whose style cannot be loaded gives way to Natural Earth, and the page
+  says why. A map error goes to the console without the query strings of its addresses, where a key
+  may be. CARTO's key is given at build time as `VITE_CARTO_API_KEY`, and without it CARTO
   is shown disabled. It is scoped by referrer to `https://pelagios.org`, so it never works on
   localhost and no test may need it. Vite writes it into the built page, where anyone can read it:
   the scope is its protection. Never commit it (`.gitignore` does not cover `.env` files). It is to

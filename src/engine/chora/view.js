@@ -17,8 +17,15 @@ export function statusOf(a) {
   if (isDenial(a)) return 'denied';
   return STANCES[full(a.sourceStance)] || 'asserted';
 }
-/** The last segment of an address, for a label where nothing better is given: plato#ContainedIn -> ContainedIn. */
-export const tail = (iri) => (typeof iri === 'string' ? decodeURIComponent(iri.replace(/[#/]+$/, '').split(/[#/]/).pop() || iri) : '');
+/**
+ * The last segment of an address, for a label where nothing better is given: plato#ContainedIn ->
+ * ContainedIn. Decoded where it can be (St%20Ives -> St Ives); a stray % is shown as it is written.
+ */
+export function tail(iri) {
+  if (typeof iri !== 'string') return '';
+  const t = iri.replace(/[#/]+$/, '').split(/[#/]/).pop() || iri;
+  try { return decodeURIComponent(t); } catch { return t; }
+}
 
 /** A source as the card lists it: its address, its title where the record gives one, and a locator. */
 function sourceRef(s, locator) {

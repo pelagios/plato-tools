@@ -20,11 +20,16 @@ export const STATUS_COLOURS = { asserted: '#2757dd', reported: '#7a4fc9', tentat
 const status = (fallback) => ['match', ['get', 'status'], ...Object.entries(STATUS_COLOURS).flat(), fallback];
 const EMPTY = { type: 'FeatureCollection', features: [] };
 
+// An address's query string may carry a basemap's key (CARTO's api_key, or a pasted one): it is left
+// out of anything written to the console.
+const redact = (s) => String(s).replace(/\?[^\s"'<>()]*/g, '?…');
+
 /**
  * The map in `container`. `state` is window.__chora: blocked, blockedOrigins and mapReadyCount are
- * kept up to date on it. `onPlaceClick(id)` is called when a place on the map is clicked.
+ * kept up to date on it. `onPlaceClick(id)` is called when a place on the map is clicked, and
+ * `onStyleError(why)` when a basemap's style (not a tile of it) cannot be loaded.
  */
-export function createMap(container, { state, onPlaceClick }) {
+export function createMap(container, { state, onPlaceClick, onStyleError }) {
   const allowed = new Set([location.origin]);
   state.blocked = 0; state.blockedOrigins = [];
   const map = new maplibregl.Map({
@@ -42,8 +47,15 @@ export function createMap(container, { state, onPlaceClick }) {
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
   map.addControl(new maplibregl.ScaleControl(), 'bottom-left');
   map.on('idle', () => { state.mapReadyCount = (state.mapReadyCount || 0) + 1; });
-  // A refused request surfaces as an error event; it has been counted, and is not a fault.
-  map.on('error', (e) => { if (!/Chora refused/.test(e?.error?.message || '')) console.warn('Map:', e?.error?.message || e); });
+  // A style being loaded that fails (it is not there, or not a style) never fires style.load: the map
+  // is left with nothing on it, and nothing to draw on. An error with no source or tile is the style's.
+  let styleLoading = false;
+  map.on('error', (e) => {
+    const why = redact(e?.error?.message || e?.error || 'unknown error');
+    if (styleLoading && !e?.sourceId && !e?.tile) { styleLoading = false; onStyleError?.(why); }
+    // A refused request surfaces as an error event; it has been counted, and is not a fault.
+    if (!/Chora refused/.test(why)) console.warn('Map:', why);
+  });
 
   // What Chora draws, kept here so that it can be put back when the basemap (the style) changes.
   const data = { overview: EMPTY, place: EMPTY, context: EMPTY };
@@ -108,6 +120,7 @@ export function createMap(container, { state, onPlaceClick }) {
 
   let styleVersion = 0;
   map.on('style.load', () => {
+    styleLoading = false;
     addOwnLayers();
     startDraw();
     styleVersion++;
@@ -126,6 +139,7 @@ export function createMap(container, { state, onPlaceClick }) {
         try { draw.stop(); } catch {}
         draw = null;
       }
+      styleLoading = true;
       map.setStyle(style, { diff: false });
     },
     get styleVersion() { return styleVersion; },
