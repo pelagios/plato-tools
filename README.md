@@ -24,7 +24,7 @@ itself. How the tools work, and how they are tested, is in [DEVELOPERS.md](DEVEL
 <tr><td nowrap><img src="public/icons/arrow-right-left.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Metaphrasis</b>: convert</td><td>Writes a file in another format, and reports what that format cannot hold</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/tools.html#converting">Converting</a></td></tr>
 <tr><td nowrap><img src="public/icons/chart-column.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Arithmos</b>: statistical figures</td><td>Publishes figures from statistical tables as RDF Data Cube, and checks the result</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/statistics.html">Statistical tables</a></td></tr>
 <tr><td nowrap><img src="public/icons/history.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Mneme</b>: version check</td><td>Shows that a new version of a published dataset deleted and changed nothing</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/tools.html#comparing-two-versions">Comparing two versions</a></td></tr>
-<tr><td nowrap><img src="public/icons/file-input.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Hermes</b>: readers</td><td>Brings other formats into PLATO. So far: Recogito's annotations</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/annotations.html">Annotations from Recogito</a></td></tr>
+<tr><td nowrap><img src="public/icons/file-input.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Hermes</b>: readers</td><td>Brings other formats into PLATO: Recogito's annotations, TEI editions, and any CSV or GeoJSON, its columns matched to PLATO</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/annotations.html">Annotations from Recogito</a></td></tr>
 <tr><td nowrap><img src="public/icons/landmark.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Agora</b>: publish</td><td>Reports what a dataset still needs to be FAIR and writes its deposit files, gives every attestation a permanent address, and makes a website and w3id redirects for it</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/tools.html#publishing-your-dataset">Publishing your dataset</a></td></tr>
 </table>
 
@@ -34,13 +34,13 @@ Still to come, each planned in its own issue, with the plan as a whole in
 <table>
 <tr><th width="290">Tool</th><th>What it will do</th><th>Issue</th></tr>
 <tr><td nowrap><img src="public/icons/map-pinned.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Chora</b>: place on the map</td><td>Point to a place, draw it, or trace it from a georeferenced map</td><td><a href="https://github.com/pelagios/plato-tools/issues/4">#4</a></td></tr>
-<tr><td nowrap><img src="public/icons/file-input.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Hermes</b>: more readers</td><td>TEI, any CSV or GeoJSON, georeferenced Recogito regions</td><td><a href="https://github.com/pelagios/plato-tools/issues/5">#5</a></td></tr>
+<tr><td nowrap><img src="public/icons/file-input.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Hermes</b>: more readers</td><td>Georeferenced map regions, as Recogito marks them</td><td><a href="https://github.com/pelagios/plato-tools/issues/5">#5</a></td></tr>
 <tr><td nowrap><img src="public/icons/scale.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Krisis</b>: match review</td><td>Find a place in other gazetteers, and record each judgement of identity</td><td><a href="https://github.com/pelagios/plato-tools/issues/6">#6</a></td></tr>
 </table>
 
 They read and write PLATO's spreadsheet tables, PLATO JSON and JSON Lines, RDF (N-Triples, N-Quads
 and Turtle, written as N-Triples) and Linked Places Format v1, and read the W3C Web Annotations that
-Recogito exports: [the formats in full](https://pelagios.org/place-attestation-ontology/guide/tools.html#what-it-reads-and-writes).
+Recogito exports, TEI editions, and any other CSV or GeoJSON of places: [the formats in full](https://pelagios.org/place-attestation-ontology/guide/tools.html#what-it-reads-and-writes).
 
 ## From the command line
 

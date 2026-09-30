@@ -48,8 +48,8 @@
       <li class="tool">
         <span class="badge partly">Partly here</span>
         <a class="tool-link" href="#files"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-1"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M2 15h10"/><path d="m9 18 3-3-3-3"/></svg><span class="why" title="Ἑρμῆς: the messenger and interpreter of the Greek gods, who carried meaning from one world to another, as the readers bring other formats into PLATO.">Hermes</span></h3><p class="label">Readers</p></a>
-        <p>Bring in the places you linked in Recogito. Next: TEI editions, and the spreadsheets and GeoJSON you already have.</p>
-        <p class="note">Recogito annotations can be read now.</p>
+        <p>Bring in the places you linked in Recogito, the places named in a TEI edition, and any spreadsheet (CSV) or GeoJSON you already have. Next: the regions you marked on georeferenced maps.</p>
+        <p class="note">Recogito annotations, TEI editions and any CSV or GeoJSON can be read now: you match their columns to PLATO before converting.</p>
       </li>
       <li class="tool">
         <a class="tool-link" href="#files"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 18v-7"/><path d="M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z"/><path d="M14 18v-7"/><path d="M18 18v-7"/><path d="M3 22h18"/><path d="M6 18v-7"/></svg><span class="why" title="ἀγορά: the public square of a Greek city, where things were made known to all.">Agora</span></h3><p class="label">Publish</p></a>
@@ -76,13 +76,15 @@
     <label class="drop" id="drop">
       <input type="file" id="picker" multiple>
       <span>Drop a file here, or <u>choose one</u>.</span>
-      <small>A PLATO JSON or JSON Lines file; RDF in N-Triples, N-Quads or Turtle; Linked Places Format v1; W3C Web Annotations, as Recogito exports them; or a set of PLATO spreadsheet tables (the ten CSV files, a zip of them, or the template workbook). Gzipped files are fine.</small>
+      <small>A PLATO JSON or JSON Lines file; RDF in N-Triples, N-Quads or Turtle; Linked Places Format v1; W3C Web Annotations, as Recogito exports them; a TEI XML edition; a set of PLATO spreadsheet tables (the ten CSV files, a zip of them, or the template workbook); or any other CSV file or GeoJSON of places, whose columns you match to PLATO. Gzipped files are fine.</small>
     </label>
     <div id="chosen" hidden></div>
   </section>
 
   <section id="action" aria-labelledby="action-h" hidden>
     <h2 id="action-h"><span class="step">2</span> Check it, convert it, compare it with an earlier version, or publish it</h2>
+    <!-- Hermes: for a table of places (CSV, or plain GeoJSON), which column holds what, as guessed; filled by src/app.js. -->
+    <div id="columns" class="columns" data-for="generic-input" role="group" aria-labelledby="columns-h" hidden></div>
     <div class="actions">
       <button id="check" class="primary">Check</button>
       <span class="or">or</span>

@@ -104,3 +104,23 @@ a:visited { color: var(--accent); }
    the band's for a tool that is here, the dashed border's for one to come. */
 .tool .icon { width: 1.1em; height: 1.1em; vertical-align: -.16em; margin-right: .4rem; fill: none; stroke: var(--tool-band); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .tool.coming .icon { stroke: var(--soon); }
+
+/* Hermes: the matching of a table's columns (a CSV file, or plain GeoJSON) to PLATO, shown before it
+   is checked or converted. A real table, scrolling sideways on its own on a narrow screen rather
+   than the page; the examples in the data's monospace face; the reason for each guess as text. */
+.columns { margin: 0 0 1rem; }
+.columns h3 { font-size: 1.05rem; margin: 0 0 .4rem; }
+.columns > p { margin: .3rem 0 .6rem; font-size: .95rem; }
+.columns-scroll { overflow-x: auto; }
+.columns-table { border-collapse: collapse; width: 100%; font-size: .92rem; }
+.columns-table caption { text-align: left; color: var(--muted); padding-bottom: .35rem; }
+.columns-table th, .columns-table td { border-top: 1px solid var(--line); padding: .4rem .5rem .4rem 0; text-align: left; vertical-align: top; }
+.columns-table thead th { border-top: 0; font-weight: 700; }
+.columns-table th[scope=row] code { overflow-wrap: anywhere; }
+.columns-table select { max-width: 14rem; }
+.columns-table .examples { list-style: none; margin: 0; padding: 0; font: .8rem/1.45 var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
+.columns-table em { color: var(--muted); }
+.columns-table .why-guess { color: var(--muted); min-width: 12rem; }
+#columns-messages p, #columns-warnings p { margin: .5rem 0 0; }
+.columns-files { margin-top: .6rem; }
+.columns-files small { flex-basis: 100%; color: var(--muted); }

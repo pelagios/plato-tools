@@ -3,6 +3,7 @@
 // The work happens in a worker (src/engine/worker.js). The page publishes its own state on
 // window.__plato for automated tests; nothing else reads it.
 import { fmtBytes, formatName, progressText, summary, groups, draftNote, explainedLines } from './engine/words.js';
+import { COLUMN_CHOICES, COLUMN_WORDS, columnWarnings, columnProblem } from './engine/words.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
 let worker, files = [], input = null, targets = {}, busy = false;
@@ -28,6 +29,7 @@ function onMessage({ data }) {
   } else if (data.type === 'detected') onDetected(data);
   else if (data.type === 'progress') onProgress(data);
   else if (data.type === 'done') onDone(data);
+  else if (data.type === 'columns') onColumns(data);
   else if (data.type === 'error') fail(data.message);
 }
 
@@ -54,6 +56,11 @@ function onDetected({ input: inp, targets: t }) {
     const o = document.createElement('option'); o.value = k; o.textContent = v.label; sel.appendChild(o);
   }
   document.querySelector('[data-for="tables-input"]').hidden = inp.format !== 'tables';
+  // Hermes: a table of places shows which column holds what before it is run, and the web address
+  // its place ids are made under.
+  document.querySelector('[data-for="generic-input"]').hidden = !isTable(inp);
+  columns = null; state.columns = null;
+  if (isTable(inp)) { document.querySelector('[data-for="tables-input"]').hidden = false; requestColumns(); }
   $('action').hidden = false;
   Object.assign(state, { phase: 'detected', format: inp.format, profile: inp.profile || null });
   storageCheck();
@@ -83,7 +90,9 @@ function start(action, earlier) {
   // The version check: the files chosen are the later version, and `earlier` the one it is compared with.
   if (action === 'compare') worker.postMessage({ cmd: 'compare', earlier, later: files, options: { base } });
   else if (action === 'publish') worker.postMessage({ cmd: 'publish', part: $('part').value, files, previous: [...$('previous').files], options: { base, ...publishOptions() } });
-  else worker.postMessage({ cmd: 'run', files, action, target, options: { base, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked } });
+  else worker.postMessage({ cmd: 'run', files, action, target, options: { base, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked,
+    // Hermes: the matching of columns shown, as chosen (the same JSON as the command line's --columns).
+    ...(isTable(input) && columns ? { columns: { ...columns.mapping } } : {}) } });
 }
 // Agora's options, from the Options panel: only those given are sent.
 function publishOptions() {
@@ -158,6 +167,98 @@ function fail(message) {
   $('saves').innerHTML = ''; $('report').innerHTML = '';
   Object.assign(state, { phase: 'error', error: message });
 }
+// ---- Hermes: which column of a table of places holds what -------------------------------------------
+// The worker reads the columns and guesses (src/engine/hermes/columns.js); the page shows the guess,
+// one choice for each column, with three examples and the reason for the guess, and the run is given
+// the matching as it stands. The matching can be saved as JSON and loaded again.
+let columns = null, columnsAsked = 0, columnsFrom;
+const isTable = (inp) => inp?.format === 'csv' || inp?.format === 'geojson';
+function requestColumns(saved, from) {
+  const id = ++columnsAsked;
+  if (saved === undefined) $('columns').innerHTML = `<h3 id="columns-h">${COLUMN_WORDS.heading}</h3><p>${COLUMN_WORDS.looking}</p>`;
+  columnsFrom = from;
+  worker.postMessage({ cmd: 'columns', id, files, saved });
+}
+function onColumns(d) {
+  if (d.id !== columnsAsked) return;                    // an answer about a file no longer chosen
+  const W = COLUMN_WORDS;
+  if (d.error) {
+    $('columns').innerHTML = `<h3 id="columns-h">${W.heading}</h3><p class="warn">${escapeHtml(W.cannotRead(d.error))}</p>`;
+    state.columns = { error: d.error };
+    return;
+  }
+  columns = { headers: d.headers, examples: d.examples, fields: d.fields, mapping: { ...d.mapping }, reasons: { ...d.reasons } };
+  // A column the saved matching gives, and the engine took as given, says so in the page's words;
+  // one it could not take keeps the engine's reason.
+  if (d.saved) for (const h of d.headers) if (d.reasons[h] && d.problems.every((p) => p.example !== h && !String(p.example).startsWith(`${h}: `))) columns.reasons[h] = W.saved;
+  columns.messages = d.saved ? [W.loaded(columnsFrom || ''), ...d.problems.map(columnProblem)] : [];
+  renderColumns();
+}
+function choiceOptions(chosen) {
+  const keys = [...Object.keys(COLUMN_CHOICES).filter((k) => columns.fields[k] || k === 'note' || k === 'skip'),
+    ...Object.keys(columns.fields).filter((k) => !COLUMN_CHOICES[k])];     // a field these words do not yet name
+  return keys.map((k) => `<option value="${k}"${k === chosen ? ' selected' : ''}>${escapeHtml(COLUMN_CHOICES[k] || k)}</option>`).join('');
+}
+function renderColumns() {
+  const W = COLUMN_WORDS, c = columns, geojson = input.format === 'geojson';
+  const rows = c.headers.map((h, i) => {
+    const ex = c.examples[h] || [];
+    return `<tr><th scope="row"><code>${escapeHtml(h)}</code></th>`
+      + `<td>${ex.length ? `<ul class="examples">${ex.map((v) => `<li>${escapeHtml(v.length > 60 ? v.slice(0, 59) + '…' : v)}</li>`).join('')}</ul>` : `<em>${W.noExamples}</em>`}</td>`
+      + `<td><label for="column-${i}" class="visually-hidden">${escapeHtml(W.selectLabel(h))}</label><select id="column-${i}" data-column="${i}" aria-describedby="column-why-${i}">${choiceOptions(c.mapping[h])}</select></td>`
+      + `<td id="column-why-${i}" class="why-guess">${escapeHtml(c.reasons[h] || '')}</td></tr>`;
+  }).join('');
+  $('columns').innerHTML = `<h3 id="columns-h">${W.heading}</h3><p>${escapeHtml(W.intro(geojson))} ${escapeHtml(W.base)}</p>`
+    + `<div class="columns-scroll"><table class="columns-table"><caption>${escapeHtml(W.caption(files[0]?.name || '', geojson))}</caption>`
+    + `<thead><tr><th scope="col">${W.column}</th><th scope="col">${W.examples}</th><th scope="col">${W.readAs}</th><th scope="col">${W.why}</th></tr></thead><tbody>${rows}</tbody></table></div>`
+    + `<div id="columns-messages" aria-live="polite">${c.messages.map((m) => `<p>${escapeHtml(m)}</p>`).join('')}</div>`
+    + `<div id="columns-warnings" aria-live="polite"></div>`
+    + `<div class="actions columns-files"><button type="button" id="columns-save">${W.save}</button><button type="button" id="columns-load">${W.load}</button>`
+    + `<input type="file" id="columns-file" accept=".json,application/json" hidden aria-label="${W.loadLabel}"><small>${escapeHtml(W.saveNote)}</small></div>`;
+  $('columns-save').onclick = saveMatching;
+  $('columns-load').onclick = () => $('columns-file').click();
+  $('columns-file').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) loadMatching(f); };
+  renderColumnWarnings();
+}
+function renderColumnWarnings() {
+  const warnings = columnWarnings(columns.mapping);
+  $('columns-warnings').innerHTML = warnings.map((w) => `<p class="warn">${escapeHtml(w)}</p>`).join('');
+  state.columns = { headers: [...columns.headers], mapping: { ...columns.mapping }, reasons: { ...columns.reasons }, examples: columns.examples, warnings, messages: [...columns.messages] };
+}
+// A choice for one column. A field one column only can be (the name, the id…) is taken from the
+// column that had it, which is then kept as a note, and says why.
+function chooseColumn(i, field) {
+  const W = COLUMN_WORDS, h = columns.headers[i];
+  if (columns.fields[field]?.single) {
+    columns.headers.forEach((other, j) => {
+      if (j === i || columns.mapping[other] !== field) return;
+      columns.mapping[other] = 'note'; columns.reasons[other] = W.movedTo(COLUMN_CHOICES[field] || field, h);
+      $(`column-${j}`).value = 'note'; $(`column-why-${j}`).textContent = columns.reasons[other];
+    });
+  }
+  columns.mapping[h] = field; columns.reasons[h] = W.youChose;
+  $(`column-why-${i}`).textContent = W.youChose;
+  renderColumnWarnings();
+}
+function saveMatching() {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(columns.mapping, null, 2) + '\n'], { type: 'application/json' }));
+  a.download = (files[0]?.name || 'table').replace(/\.gz$/i, '').replace(/\.[^.]+$/, '') + '-columns.json';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+}
+async function loadMatching(file) {
+  let saved;
+  try { saved = JSON.parse(await file.text()); } catch { saved = undefined; }
+  if (!saved || typeof saved !== 'object' || Array.isArray(saved)) {
+    $('columns-messages').innerHTML = `<p class="warn">${escapeHtml(COLUMN_WORDS.notJson(file.name))}</p>`;
+    state.columns = { ...state.columns, messages: [COLUMN_WORDS.notJson(file.name)] };
+    return;
+  }
+  requestColumns(saved, file.name);
+}
+$('columns').addEventListener('change', (e) => { if (e.target.matches('select[data-column]')) chooseColumn(Number(e.target.dataset.column), e.target.value); });
+
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
 
 // Cleared once read, so that choosing the same file again (after editing it) is a change too.

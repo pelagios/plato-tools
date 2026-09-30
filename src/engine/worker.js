@@ -8,6 +8,8 @@ import { compare } from './compare.js';
 import { publish } from './agora/index.js';
 import { pragmas } from '../lib/store.js';
 import { detect } from './input.js';
+import { columnsOf, mappingOf } from './hermes/generic.js';
+import { FIELDS, cellText } from './hermes/columns.js';
 
 let resources = null, pool = null, runs = 0;
 async function sqlitePool() {
@@ -69,6 +71,21 @@ self.onmessage = async ({ data }) => {
     } else if (data.cmd === 'detect') {
       const input = await detect(data.files);
       postMessage({ type: 'detected', input: { ...input, files: undefined }, targets: TARGETS });
+    } else if (data.cmd === 'columns') {
+      // Hermes: a table of places' columns, three examples of each, and the mapping a run would use
+      // (the guess, or `saved`, a matching the page loaded, checked against the columns there are).
+      // What stops the file being read is said here, for the page to show beside the table; the run
+      // reports it again, in full.
+      try {
+        const input = await detect(data.files);
+        const { headers, sample } = await columnsOf(input);
+        const examples = Object.fromEntries(headers.map((h) => [h, sample.map((r) => cellText(r?.[h])).filter(Boolean).slice(0, 3)]));
+        const { mapping, reasons, problems } = await mappingOf(input, data.saved);
+        const fields = Object.fromEntries(Object.entries(FIELDS).map(([k, f]) => [k, { single: f.single }]));
+        postMessage({ type: 'columns', id: data.id, headers, examples, mapping, reasons, problems, fields, saved: data.saved !== undefined });
+      } catch (e) {
+        postMessage({ type: 'columns', id: data.id, error: String(e && e.message || e) });
+      }
     } else if (data.cmd === 'run') {
       const input = await detect(data.files);
       if (!input.format) throw new Error(input.reason);

@@ -99,6 +99,26 @@ def tables_copy(dest, **about):
     with open(dest / 'about.csv', 'w', newline='', encoding='utf-8') as fh: csv.writer(fh).writerows(rows)
     return sorted(dest.glob('*.csv'))
 
+def table_case(page, file, choices=None, action=None, target=None, timeout=120):
+    """Hermes: choose a table of places (CSV or plain GeoJSON), wait for the matching of its columns,
+    make `choices` ({column: field}) through each column's labelled dropdown, then run `action`."""
+    try:
+        # The same file chosen twice fires no change event, and the page would keep the last case's
+        # matching: empty the picker first, and clear the state, so nothing is inherited from before.
+        page.set_input_files('#picker', [])
+        page.evaluate("() => { if (window.__plato) Object.assign(window.__plato, { phase: 'harness-reset', columns: null }); }")
+        page.set_input_files('#picker', [str(file)])
+        s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised') and (s.get('phase') == 'unrecognised' or s.get('columns')), 60, 'columns')
+        if not s.get('columns') or not s['columns'].get('mapping'): return s
+        for col, field in (choices or {}).items():
+            page.get_by_label(f'Read the column \u201c{col}\u201d as', exact=True).select_option(field)
+        if not action: return wait_state(page, lambda s: True, 5)
+        if action == 'convert': page.select_option('#target', target)
+        page.click('#check' if action == 'check' else '#convert')
+        return wait_state(page, lambda s: s.get('phase') in ('done', 'error'), timeout, 'run')
+    except Exception as e:                       # a harness error is a failed check, never a crash
+        return {'phase': 'harness-error', 'error': str(e).split('\n')[0][:200]}
+
 def download(page, name, dest):
     with page.expect_download(timeout=600_000) as d:
         page.evaluate(f'window.__plato_save({json.dumps(name)})')
@@ -286,6 +306,89 @@ def main():
                   'Only in the earlier version: plato:attests_name [plato:toponym "Neuton"]' in shown
                   and 'Only in the later version: plato:attests_name [plato:toponym "Newton, respelt"]' in shown, shown[-600:])
             agora_checks(page, tmp)
+
+            # ---- Hermes: TEI editions, and any CSV or GeoJSON read through a matching of its columns.
+            # These checks need the pipeline hook for the 'tei', 'csv' and 'geojson' inputs in
+            # src/engine/pipeline.js (the dispatch to teiSource and genericSource); without it, they fail.
+            s = run_case(page, [ROOT / 'test/fixtures/tei/isicily-ISic000934.xml'], 'convert', 'plato-json')
+            ok = s.get('phase') == 'done' and s.get('outputs')
+            said = page.inner_text('#chosen') if s.get('format') else ''
+            doc = json.loads(download(page, s['outputs'][0]['name'], tmp / 'isicily.json').read_text()) if ok else {}
+            atts = [a for p in doc.get('spatialEntities', []) for a in p.get('attestations', [])]
+            check('TEI edition -> PLATO JSON: the page says it is TEI, and both place names in the text become attestations about Pleiades 678374',
+                  ok and s.get('format') == 'tei' and 'a TEI XML edition' in said and len(atts) == 2
+                  and [p['@id'] for p in doc['spatialEntities']] == ['https://pleiades.stoa.org/places/678374'], s.get('report') or s)
+
+            # A CSV file with odd headings: the matching is shown as a table, one labelled dropdown for
+            # each column, the guess and its reason in words, three examples of each.
+            odd = ROOT / 'test/fixtures/generic/odd-headers.csv'
+            guess = {'Place Name': 'name', 'LAT': 'latitude', 'Long': 'longitude', 'wikidata': 'address', 'Feature Type': 'type', 'Alt. names': 'alternativeNames', 'Source': 'source', 'Remarks': 'note'}
+            s = table_case(page, odd)
+            cols = s.get('columns') or {}
+            shown = page.inner_text('#columns') if cols else ''
+            a11y = page.evaluate("""() => { const t = document.querySelector('#columns table'); if (!t) return null;
+                const sels = [...t.querySelectorAll('select')];
+                return { caption: t.caption?.textContent || '', selects: sels.length, labelled: sels.filter((x) => x.labels.length === 1 && x.labels[0].textContent.includes('Read the column')).length,
+                         options: [...(sels[0]?.options || [])].map((o) => o.value) }; }""") if cols else None
+            check('odd-headed CSV: the matching table shows the right guess for every column, with its reason and examples, a caption and a label for each dropdown',
+                  s.get('format') == 'csv' and cols.get('mapping') == guess and a11y and a11y['selects'] == 8 and a11y['labelled'] == 8
+                  and 'odd-headers.csv' in a11y['caption'] and 'properties' not in a11y['options'] and 'skip' in a11y['options'] and 'note' in a11y['options']
+                  and 'the heading "LAT" reads as latitude' in shown and 'the heading is not one these tools recognise' in shown
+                  and 'Roma' in shown and 'Athenae' in shown and 'Lutetia' in shown and 'Aquae Sulis' not in shown and cols.get('warnings') == [], {'state': cols, 'a11y': a11y})
+            # The warnings, each seen appearing where it was absent: an address column, then no id and no
+            # address; a latitude with its longitude, then without.
+            noids = 'These places will have no web addresses'
+            before = page.inner_text('#columns-warnings') if cols else None
+            s = table_case(page, odd, {'wikidata': 'note', 'Long': 'note'})
+            after = page.inner_text('#columns-warnings') if s.get('columns') else ''
+            check('odd-headed CSV: with no address or id column, and a latitude without a longitude, the page warns of both',
+                  before == '' and noids in after and 'read as latitude but none as longitude' in after and len((s.get('columns') or {}).get('warnings', [])) == 2, {'before': before, 'after': after})
+
+            # Changing a dropdown changes the output: first the guess, as the control (the types are
+            # carried and the remark kept in the notes), then with Feature Type kept as a note and
+            # Remarks not carried over.
+            def roma(s, name):
+                ok = s.get('phase') == 'done' and s.get('outputs')
+                doc = json.loads(download(page, s['outputs'][0]['name'], tmp / name).read_text()) if ok else {}
+                # Roma's attestation, with the address of the place it is about beside it.
+                return next(({**a, 'place': p.get('@id')} for p in doc.get('spatialEntities', []) for a in p.get('attestations', []) if any(n.get('toponym') == 'Roma' for n in a.get('names', []))), None)
+            s = table_case(page, odd, {}, 'convert', 'plato-json')
+            r1 = roma(s, 'odd-guess.json')
+            check('odd-headed CSV -> PLATO JSON with the guess: Roma is about Wikidata Q220, typed "city", with the remark in its notes, and no column reported as not carried',
+                  r1 is not None and r1['place'] == 'https://www.wikidata.org/wiki/Q220' and [t.get('label') for t in r1.get('types', [])] == ['city']
+                  and 'Remarks: the capital' in r1.get('notes', '') and not any(i['kind'] == 'generic-column-skipped' for i in s['report']['items']), (s.get('report') or s) if r1 is None else r1)
+            s = table_case(page, odd, {'Feature Type': 'note', 'Remarks': 'skip'}, 'convert', 'plato-json')
+            r2 = roma(s, 'odd-chosen.json')
+            skipped = next((i for i in (s.get('report') or {}).get('items', []) if i['kind'] == 'generic-column-skipped'), None)
+            shown = page.text_content('#report') if r2 else ''
+            check('odd-headed CSV with two dropdowns changed: the type is now a note, and Remarks is not carried and is reported by name as not carried over',
+                  r2 is not None and 'types' not in r2 and 'Feature Type: city' in r2.get('notes', '') and 'Remarks' not in r2.get('notes', '')
+                  and skipped and skipped['severity'] == 'loss' and skipped['examples'] == ['Remarks'] and 'Not carried over' in shown and 'Remarks' in shown, (s.get('report') or s) if r2 is None else r2)
+            # Save this matching, then use it again on a fresh choice of the file: the dropdowns come back as saved.
+            try:
+                with page.expect_download(timeout=30_000) as d: page.click('#columns-save')
+                d.value.save_as(tmp / 'matching.json'); saved = json.loads((tmp / 'matching.json').read_text())
+            except Exception as e: saved = {'error': str(e)[:200]}
+            s = table_case(page, odd)
+            fresh = (s.get('columns') or {}).get('mapping')
+            try:
+                page.set_input_files('#columns-file', [str(tmp / 'matching.json')])
+                s = wait_state(page, lambda s: any('Using the matching saved' in m for m in (s.get('columns') or {}).get('messages', [])), 30, 'load')
+            except Exception as e: s = {'error': str(e)[:200]}
+            back = (s.get('columns') or {}).get('mapping')
+            values = page.evaluate("() => [...document.querySelectorAll('#columns select')].map((x) => x.value)") if back else []
+            check('save this matching, then use it again: the JSON saved is the matching chosen, and loading it sets the dropdowns back from the guess',
+                  saved == {**guess, 'Feature Type': 'note', 'Remarks': 'skip'} and fresh == guess and back == saved and values == list(saved.values()), {'saved': saved, 'fresh': fresh, 'back': back})
+
+            # Plain GeoJSON is read as a table of its features' properties; LPF is still LPF.
+            s1 = table_case(page, ROOT / 'test/fixtures/generic/plain.geojson')
+            said1 = page.inner_text('#chosen') if s1.get('format') else ''
+            table1 = page.is_visible('#columns table') if s1.get('columns') else False
+            s2 = run_case(page, [ROOT / 'test/fixtures/lpf-readme-example.json'], 'check')
+            table2 = page.is_visible('#columns') if s2.get('format') else True
+            check('plain GeoJSON is detected as GeoJSON and shows its properties to match, while the LPF example is still LPF and shows none',
+                  s1.get('format') == 'geojson' and 'plain GeoJSON' in said1 and table1 and (s1.get('columns') or {}).get('mapping', {}).get('NAME') == 'name'
+                  and s2.get('format') == 'lpf' and s2.get('phase') == 'done' and table2 is False, {'geojson': s1.get('format'), 'lpf': s2.get('format'), 'table1': table1, 'table2': table2})
             ctx.close()
     finally:
         stop(srv)
