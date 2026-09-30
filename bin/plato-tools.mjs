@@ -13,7 +13,7 @@ process.emitWarning = function (warning, ...rest) {
 };
 
 const { parseArgs } = await import('node:util');
-const { readFileSync } = await import('node:fs');
+const { readFileSync, statSync } = await import('node:fs');
 const { run, TARGETS, DEFAULT_TABLE_BASE } = await import('../src/engine/pipeline.js');
 const { compare } = await import('../src/engine/compare.js');
 const { publish, PUBLISH_PARTS } = await import('../src/engine/agora/index.js');
@@ -92,6 +92,13 @@ Options:
                     ${Object.keys(FIELDS).slice(6).join(', ')};
                     or "note" (kept in the notes as "column: value") or "skip" (not carried
                     over, and reported).
+  --georef FILE     a Recogito export (W3C Web Annotations): the IIIF Georeference Annotation
+                    (from Allmaps) of a map its regions are drawn on. Each region on that map,
+                    inside the georeferenced part, becomes a point, with a radius that holds the
+                    whole region, citing the map and the georeference. Give it once for each
+                    georeference file. Nothing is fetched.
+  --manifest FILE   with --georef: the IIIF manifest of a georeferenced map, which gives the
+                    size of its canvas. Give it once for each manifest file.
   --no-typing       N-Triples output: leave out the node types and typed dates that the DEEP RDF
                     export adds (they are added by default, as in the browser).
   --cube            N-Triples output: also write what the RDF Data Cube vocabulary expects of
@@ -167,6 +174,7 @@ async function main(argv) {
         with: { type: 'string' }, threshold: { type: 'string' }, 'max-distance': { type: 'string' }, top: { type: 'string' },
         review: { type: 'string' }, output: { type: 'string' }, reviewer: { type: 'string' }, orcid: { type: 'string' },
         'others-title': { type: 'string' },
+        georef: { type: 'string', multiple: true }, manifest: { type: 'string', multiple: true },
         'work-dir': { type: 'string' }, json: { type: 'boolean', default: false }, brief: { type: 'boolean', default: false },
         release: { type: 'string' }, previous: { type: 'string' }, 'concept-doi': { type: 'string' }, maintainer: { type: 'string', multiple: true, default: [] },
         repo: { type: 'string' }, 'site-url': { type: 'string' }, turtle: { type: 'boolean', default: false },
@@ -200,6 +208,21 @@ async function main(argv) {
     try { o.savedColumns = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(o.columns))); }
     catch (e) { return usage(`--columns ${o.columns} cannot be read as JSON: ${e.message}`); }
     if (!o.savedColumns || typeof o.savedColumns !== 'object' || Array.isArray(o.savedColumns)) return usage(`--columns ${o.columns} must hold one JSON object, {"column name": "field"}.`);
+  }
+  // Georeferenced regions: the files are opened once and given to each input, which must be a
+  // Recogito export; anything else is a mistake in the command, not in the data.
+  if (o.georef || o.manifest) {
+    if (action === 'compare') return usage('--georef and --manifest are for check and convert.');
+    if (!o.georef) return usage('--manifest is for the manifest of a map given with --georef; give the georeference too.');
+    for (const p of [...o.georef, ...(o.manifest || [])]) {
+      try { if (!statSync(p).isFile()) return usage(`${p}, given with --georef or --manifest, is not a file.`); }
+      catch (e) { if (!isSystemError(e)) throw e; return usage(`${p}, given with --georef or --manifest, cannot be read: ${e.code === 'ENOENT' ? 'there is no such file' : e.message}.`); }
+    }
+    o.georefFiles = await openFiles(o.georef); o.manifestFiles = await openFiles(o.manifest || []);
+    for (const item of await gatherInputs(args)) {
+      const { input } = await readInput(item);
+      if (input && input.format !== 'w3c-annotations') return usage(`--georef and --manifest are for a Recogito export (W3C Web Annotations), and ${item.label} is ${formatName(input)}.`);
+    }
   }
 
   const host = new NodeHost({ workDir: o['work-dir'], outDir: o.out, overwrite: o.overwrite });
@@ -399,6 +422,7 @@ async function runOne(item, action, o, resources, host, live) {
   if (!input) { r.message = message; r.elapsedMs = Date.now() - t0; return r; }
   r.format = input.format; r.profile = input.profile || null;
   if (input.lpfVersion) r.lpfVersion = input.lpfVersion;
+  if (o.georefFiles) { input.georefs = o.georefFiles; input.manifests = o.manifestFiles; r.georefs = o.georef; r.manifests = o.manifest || []; }
   // A table of places: the columns as they are read (the mapping given with --columns, else the
   // guess), printed with the report so that it can be saved, edited and given back.
   if (input.format === 'csv' || input.format === 'geojson') {
