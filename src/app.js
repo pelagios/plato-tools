@@ -38,6 +38,7 @@ function choose(list) {
   if (!files.length) return;
   // A previous release chosen for another dataset is not this one's: it is chosen again, or not.
   $('previous').value = '';
+  $('only').value = '';   // and so is a list of its places to publish
   const c = $('chosen'); c.hidden = false;
   c.innerHTML = `<ul>${files.map((f) => `<li><span class="name">${escapeHtml(f.name)}</span> <span class="count">${fmtBytes(f.size)}</span></li>`).join('')}</ul><p>Looking at it…</p>`;
   $('action').hidden = true; $('result').hidden = true;
@@ -91,7 +92,9 @@ function start(action, earlier) {
   const base = $('base').value.trim() || undefined;
   // The version check: the files chosen are the later version, and `earlier` the one it is compared with.
   if (action === 'compare') worker.postMessage({ cmd: 'compare', earlier, later: files, options: { base } });
-  else if (action === 'publish') worker.postMessage({ cmd: 'publish', part: $('part').value, files, previous: [...$('previous').files], options: { base, ...publishOptions() } });
+  else if (action === 'publish') onlyKeys().then(
+    (only) => worker.postMessage({ cmd: 'publish', part: $('part').value, files, previous: [...$('previous').files], options: { base, ...publishOptions(), only } }),
+    (e) => fail(`the list of places to include could not be read (${e.message || e}).`));
   else worker.postMessage({ cmd: 'run', files, action, target, options: { base, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked,
     // Hermes: the matching of columns shown, as chosen (the same JSON as the command line's --columns).
     ...(isTable(input) && columns ? { columns: { ...columns.mapping } } : {}) } });
@@ -101,6 +104,14 @@ function publishOptions() {
   const v = (id) => $(id).value.trim() || undefined;
   const maintainers = (v('maintainers') || '').split(/[\s,]+/).map((m) => m.replace(/^@/, '')).filter(Boolean);
   return { release: v('release'), conceptDoi: v('concept-doi'), repo: v('repo'), siteUrl: v('site-url'), maintainers, turtle: $('turtle').checked, name: tablesFolder(), toolsCommit: BUILD.commit || undefined };
+}
+// The subset of places for the site (Options, "Only these places"): a text file of place keys, one
+// to a line, read as the command line reads --only (each line trimmed, blank ones skipped), so the
+// engine is given the same array from either. No file chosen is no subset: undefined, not [].
+async function onlyKeys() {
+  const f = $('only').files[0];
+  if (!f) return undefined;
+  return (await f.text()).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 }
 // Spreadsheet tables chosen as a folder (or dropped as one) know its name, as the command line
 // does: the site's zip and the workflow's path are named after it. Chosen file by file they do

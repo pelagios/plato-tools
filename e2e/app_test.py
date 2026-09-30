@@ -67,7 +67,7 @@ def compare_case(page, later, earlier, timeout=120):
 # inherits what an earlier one typed.
 PUBLISH_FIELDS = ('release', 'repo', 'site-url', 'maintainers', 'concept-doi')
 
-def publish_case(page, files, part, fields=None, previous=None, timeout=300):
+def publish_case(page, files, part, fields=None, previous=None, only=None, timeout=300):
     """Choose the dataset, fill in the Options for publishing, choose the part and press Prepare."""
     try:
         # The same files chosen twice running are no change, and the page would not look at them
@@ -79,6 +79,7 @@ def publish_case(page, files, part, fields=None, previous=None, timeout=300):
         page.evaluate("() => { document.getElementById('options').open = true; }")
         for f in PUBLISH_FIELDS: page.fill('#' + f, (fields or {}).get(f, ''))
         page.set_input_files('#previous', [str(p) for p in (previous or [])])
+        page.set_input_files('#only', [str(only)] if only else [])
         page.select_option('#part', part)
         page.click('#publish')
         return wait_state(page, lambda s: s.get('action') == 'publish' and s.get('phase') in ('done', 'error'), timeout, 'publishing')
@@ -167,6 +168,21 @@ def agora_checks(page, tmp):
               and 'DRAFT, not citable' in home and 'noindex' in home, {'zip': sorted(names)[:30], 'state': s.get('phase'), 'report': s.get('report'), 'error': s.get('error')})
     except Exception as e: check('publish site: a zip with index.html, place/bristol/index.html and place/bristol.jsonld, and the draft banner on the home page', False, e)
 
+    # A subset of the places ("Only these places"): a file naming bristol has bristol's page and not
+    # deptford-strand's, which the full site above has. bristol's page is the presence control: a zip
+    # with no places at all would pass the absence alone. The file has a blank line and padding, as
+    # the command line's --only file may.
+    (tmp / 'only.txt').write_text('  bristol  \n\n')
+    s = publish_case(page, [tmp / 'site-in' / 'customs-with-ids.jsonl'], 'site', {'repo': 'someone/customs'}, only=tmp / 'only.txt')
+    try:
+        z = saved_zip(page, s, tmp, '-site.zip')
+        names = set(z.namelist()) if z else set()
+        check('publish site with only bristol: place/bristol/index.html is in the zip, place/deptford-strand/index.html is not',
+              {'index.html', 'place/bristol/index.html', 'place/bristol.jsonld'} <= names
+              and not {'place/deptford-strand/index.html', 'place/deptford-strand.jsonld'} & names,
+              {'zip': sorted(names)[:30], 'state': s.get('phase'), 'report': s.get('report'), 'error': s.get('error')})
+    except Exception as e: check('publish site with only bristol: place/bristol/index.html is in the zip, place/deptford-strand/index.html is not', False, e)
+
     # The w3id folder, for a published dataset under a w3id base, with its maintainer and repository.
     src = tables_copy(tmp / 'w3id-src' / 'customs', base_uri=w3id, dataset_uri=w3id, status='published')
     s = publish_case(page, src, 'w3id', {'repo': 'someone/customs', 'maintainers': 'someone'})
@@ -185,12 +201,18 @@ def agora_checks(page, tmp):
         page.set_input_files('#picker', [str(f) for f in customs])
         wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), 60, 'detection')
         page.set_input_files('#previous', [str(PLATO / 'schemas/examples/place-centric-judgements.json')])
+        page.set_input_files('#only', [str(tmp / 'only.txt')])
         before = page.evaluate(count)
+        only_before = page.evaluate("() => document.getElementById('only').files.length")
         page.set_input_files('#picker', [str(PLATO / 'schemas/examples/place-centric-judgements.json')])
         after_ = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), 60, 'detection')
         after = page.evaluate(count)
+        only_after = page.evaluate("() => document.getElementById('only').files.length")
         check('choosing a new dataset clears the previous release chosen for the last one', before == 1 and after == 0 and after_.get('phase') == 'detected', {'before': before, 'after': after})
-    except Exception as e: check('choosing a new dataset clears the previous release chosen for the last one', False, str(e).split('\n')[0][:200])
+        check('choosing a new dataset clears the list of places to include chosen for the last one', only_before == 1 and only_after == 0 and after_.get('phase') == 'detected', {'before': only_before, 'after': only_after})
+    except Exception as e:
+        check('choosing a new dataset clears the previous release chosen for the last one', False, str(e).split('\n')[0][:200])
+        check('choosing a new dataset clears the list of places to include chosen for the last one', False, str(e).split('\n')[0][:200])
 
 REMOTE = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--url=')), None)
 

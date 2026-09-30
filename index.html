@@ -135,6 +135,9 @@
         <input id="concept-doi" type="text" placeholder="10.5281/zenodo.…" size="24">
         <small>The DOI Zenodo gives to every version of the dataset, once it has given one.</small>
         <label><input id="turtle" type="checkbox"> Also write Turtle for each place and source</label>
+        <label for="only">Only these places</label>
+        <input id="only" type="file" accept=".txt,text/plain">
+        <small>For the website: a text file of the keys of the places to include, one to a line. A place's key is the last part of its address (<code>bristol</code> in <code>…/place/bristol</code>). The addresses of places left out lead to the site's downloads, which hold every place.</small>
       </div>
       <div class="opt" data-for="ntriples-output">
         <label><input id="typing" type="checkbox" checked> Add node types and typed dates, as the DEEP RDF export does</label>

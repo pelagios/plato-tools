@@ -260,7 +260,10 @@ version check does, and each part is a module of its own, with its wording in it
 - **The site's size** is estimated while the dataset is checked, from each record's size and
   factors measured on PLATO's examples (`FACTORS` in `site.js`; `test/agora-site.test.js` fails if
   the estimate ever falls short of what is written), against GitHub Pages' 1 GB. Over it, the page
-  refuses, and the command line writes the site with a warning. DEEP cannot fit whole.
+  refuses, and the command line writes the site with a warning. DEEP cannot fit whole. A subset of
+  the places (`options.only`) keeps a site within it: a text file of place keys, one to a line,
+  given as `--only FILE` or as *Only these places* on the page, and read the same way by both
+  (lines trimmed, blank ones skipped) in `bin/plato-tools.mjs` and `src/app.js`.
 - **The w3id rules in Apache.** `test/agora-w3id.test.js` serves the folder with Apache's own
   `httpd:2.4` image in Docker and asks for every row of `tests.tsv`, as curl would, then shows a
   copy without the `text/html` rule failing. It is skipped, visibly, when Docker or the image is

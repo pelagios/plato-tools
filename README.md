@@ -110,8 +110,9 @@ node bin/plato-tools.mjs publish w3id --repo owner/name --maintainer you --out .
   the site from the committed copy, so CI never mints.
 - **On the command line** a site or a w3id folder is written as a folder; in the browser, as a zip.
   The site's size is estimated first against GitHub Pages' 1 GB: the page refuses a site over it,
-  and the command line writes it with a warning, for hosting elsewhere. For Pages, give `--only`
-  a list of the places to include (the rest are in the site's downloads), or leave out `--turtle`.
+  and the command line writes it with a warning, for hosting elsewhere. For Pages, give a list of
+  the places to include, a text file of their keys one to a line (`--only`, or on the page *Only
+  these places* in Options; the rest are in the site's downloads), or leave out `--turtle`.
 - The w3id folder is for a base address on `w3id.org` and a dataset whose `status` is `published`;
   its `STEPS.md` says how to test the rules and open the pull request.
 - `--overwrite` replaces a whole output folder (such as `<stem>-site`), not single files in it.
