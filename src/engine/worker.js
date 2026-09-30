@@ -14,6 +14,8 @@ import { pragmas } from '../lib/store.js';
 import { detect, readable } from './input.js';
 import { columnsOf, mappingOf } from './hermes/generic.js';
 import { FIELDS, cellText } from './hermes/columns.js';
+import { load as choraLoad } from './chora/store.js';
+import { save as choraSave } from './chora/save.js';
 
 let resources = null, pool = null, runs = 0;
 async function sqlitePool() {
@@ -45,8 +47,8 @@ async function output(dir, name) {
  * of its own): each has its own file, and a finished one is removed before the next is opened, so
  * that they do not pile up on disk. tidy() closes and removes what is left, however the run ended.
  */
-async function runEnv() {
-  const dir = await outputsDir(true);
+async function runEnv({ clearOutputs = true } = {}) {
+  const dir = await outputsDir(clearOutputs);
   const { vfs } = await sqlitePool();
   const opened = [];
   const unlinkClosed = () => { for (const d of opened) if (!d.gone && !d.db.isOpen()) { try { vfs.unlink(d.name); } catch {} d.gone = true; } };
@@ -70,6 +72,7 @@ self.onmessage = async ({ data }) => {
   try {
     if (data.cmd === 'init') {
       const base = data.base + 'plato/';
+      session.base = data.base;   // Chora's country boxes are fetched from the site too
       resources = prepare(await loadResources(async (f) => { const r = await fetch(base + f); if (!r.ok) throw new Error(`${f}: ${r.status}`); return r.text(); }));
       postMessage({ type: 'ready', version: resources.version });
     } else if (data.cmd === 'detect') {
@@ -150,8 +153,72 @@ self.onmessage = async ({ data }) => {
         result = { incomplete: true, outputs: [], report: { counts: {}, errors: 1, items: [{ severity: 'error', kind: 'not-possible', count: 1, message: e.message, examples: [] }] } };
       } finally { tidy(); }
       postMessage({ type: 'done', ...result });
+    } else if (typeof data.cmd === 'string' && data.cmd.startsWith('chora-')) {
+      await choraCommand(data);
     }
   } catch (e) {
     postMessage({ type: 'error', message: String(e && e.message || e), stack: String(e && e.stack || '') });
   }
 };
+
+// ---- Chora (chora.html): the map viewer and editor --------------------------------------------------
+// Chora keeps one working database for the session, /chora.sqlite3 in the same pool as the runs'
+// (src/engine/chora/store.js), holding the dataset last opened; a run's own databases come and go
+// beside it. Saving goes through runEnv like any conversion, so its file is in outputs/.
+const CHORA_DB = '/chora.sqlite3';
+const session = { store: null, fingerprint: null, ccodes: null, base: null };
+const fingerprint = (files) => files.map((f) => `${f.name}|${f.size}|${f.lastModified}`).join('\n');
+// What a set of CSV files is called, having no one file name of its own.
+const inputName = (input, name) => name || (input.container === 'csv' ? 'tables' : input.files[0].name);
+/** Each country's box (public/basemap/ccodes.json), fetched once; none if it cannot be had. */
+async function ccodeBoxes() {
+  if (session.ccodes) return session.ccodes;
+  try { const r = await fetch((session.base || './') + 'basemap/ccodes.json'); session.ccodes = r.ok ? await r.json() : {}; } catch { session.ccodes = {}; }
+  return session.ccodes;
+}
+async function choraCommand(data) {
+  if (data.cmd === 'chora-load') {
+    session.base = data.base || session.base;
+    const input = await detect(data.files);
+    if (!input.format) { postMessage({ type: 'chora-loaded', failure: input.reason }); return; }
+    const { vfs } = await sqlitePool();
+    if (session.store) { session.store.close(); session.store = null; session.fingerprint = null; }
+    try { vfs.unlink(CHORA_DB); } catch { /* none yet */ }
+    const db = new vfs.OpfsSAHPoolDb(CHORA_DB);
+    db.exec(pragmas());
+    // Opening a dataset leaves the last saved file where it is.
+    const { env, tidy } = await runEnv({ clearOutputs: false });
+    let store;
+    try { store = await choraLoad(input, env, db, { name: inputName(input, data.name) }); }
+    catch (e) { try { db.close(); } catch {} throw e; }
+    finally { tidy(); }
+    session.store = store; session.fingerprint = fingerprint(data.files);
+    postMessage({ type: 'chora-loaded', ...store.loaded });
+    return;
+  }
+  if (data.cmd === 'chora-save') {
+    const input = await detect(data.files);
+    if (!input.format) throw new Error(input.reason);
+    const same = session.store && session.fingerprint === fingerprint(data.files);
+    const { env, tidy } = await runEnv();
+    let result;
+    try {
+      result = await choraSave(input, data.additions || [], env, {
+        name: inputName(input, data.name), contributor: data.contributor || undefined,
+        hasPlace: same ? (id) => session.store.has(id) : undefined,
+        reopen: async (o) => (await (await outputsDir(false)).getFileHandle(o.name)).getFile(),
+      });
+    } finally { tidy(); }
+    postMessage({ type: 'done', ...result });
+    return;
+  }
+  if (!session.store) throw new Error('Open a dataset first.');
+  if (data.cmd === 'chora-search') {
+    postMessage({ type: 'chora-results', ...session.store.search(data.q || '', data.offset || 0, data.limit ?? 50) });
+  } else if (data.cmd === 'chora-overview') {
+    postMessage({ type: 'chora-overview', geojson: session.store.overview() });
+  } else if (data.cmd === 'chora-place') {
+    const boxes = data.ccodes || await ccodeBoxes();
+    postMessage({ type: 'chora-place', id: data.id, view: session.store.getPlace(data.id, { ccodeBbox: (c) => (Array.isArray(boxes[c]) ? boxes[c] : null) }) });
+  } else throw new Error(`Unknown command: ${data.cmd}`);
+}
