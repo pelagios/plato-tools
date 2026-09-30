@@ -7,6 +7,7 @@
     --no-gl-flags   start Chora's browser without the software-GL switches, to measure whether the map
                     still draws without them (it did on this machine, Chromium 147, September 2026)
     --chora-only    Chora's checks alone, for work on Chora (a full run is what counts)
+    --maps-only     Chora's historical-map checks alone
 """
 import json, os, pathlib, shutil, signal, socket, subprocess, sys, tempfile, time, urllib.request
 from playwright.sync_api import sync_playwright
@@ -14,7 +15,8 @@ from playwright.sync_api import sync_playwright
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PLATO = pathlib.Path(os.environ.get('PLATO_REPO', ROOT.parent / 'place-attestation-ontology'))
 PROVE = '--prove-it-fails' in sys.argv
-CHORA_ONLY = '--chora-only' in sys.argv
+CHORA_ONLY = '--chora-only' in sys.argv or '--maps-only' in sys.argv
+MAPS_ONLY = '--maps-only' in sys.argv
 # The preview server runs under npx, whose child (node vite preview) outlived a plain kill() and
 # held the port for the next run: it gets a session of its own, and the whole group is stopped.
 def stop(srv):
@@ -183,13 +185,36 @@ def main():
                       'Only in the earlier version: plato:attests_name [plato:toponym "Neuton"]' in shown
                       and 'Only in the later version: plato:attests_name [plato:toponym "Newton, respelt"]' in shown, shown[-600:])
             ctx.close()
-            chora_checks(pw, url, tmp)
+            if not MAPS_ONLY: chora_checks(pw, url, tmp)
+            iiif_checks(pw, url, tmp)
     finally:
         stop(srv)
+        stop_fixtures()
         # The profile and the saved outputs are this run's alone: remove them (they were left in
         # /tmp by every run until now, some 2.7 MB each).
         shutil.rmtree(tmp, ignore_errors=True)
     report()
+
+def free_port():
+    with socket.socket() as s:
+        s.bind(('127.0.0.1', 0)); return s.getsockname()[1]
+
+FIXTURES = {}
+def start_fixtures(tmp):
+    """The IIIF fixture server (e2e/iiif_fixture_server.py) on two free ports: origins A and B, and its census."""
+    a, b = free_port(), free_port()
+    log = tmp / 'iiif-census.jsonl'; log.write_text('')
+    p = subprocess.Popen([sys.executable, str(ROOT / 'e2e/iiif_fixture_server.py'), str(a), str(b), str(log)], start_new_session=True, stdout=subprocess.DEVNULL)
+    for _ in range(50):
+        with socket.socket() as s:
+            if s.connect_ex(('127.0.0.1', a)) == 0 and s.connect_ex(('127.0.0.1', b)) == 0: break
+        time.sleep(0.1)
+    FIXTURES.update(proc=p, A=f'http://127.0.0.1:{a}', B=f'http://127.0.0.1:{b}', log=log)
+    return FIXTURES
+
+def stop_fixtures():
+    p = FIXTURES.get('proc')
+    if p: stop(p)
 
 def report():
     failed = [r for r in results if not r[1]]
@@ -826,6 +851,232 @@ def chora_checks(pw, url, tmp):
                 and len(navs) == 1 and s['resumed']['files'] == [f.name] and s['placeId'] == pid and s['pendingCount'] == 1 and s['blocked'] == 0), {
             'notice': notice, 'tiles before agreeing': before, 'tiles after': len(tile_hits), 'drew': drew, 'navigations': navs, 'state': {k: s.get(k) for k in ('resumed', 'placeId', 'pendingCount', 'blocked', 'blockedOrigins')}}
     attempt('Chora: a pasted style with tiles on another site asks about that site by name, then one reload keeps the dataset, place and drawing, and the tiles load', multi_origin)
+    ctx.close()
+
+# ---- Chora's historical maps (IIIF), against a real second origin ---------------------------------
+# The map's servers are e2e/iiif_fixture_server.py on two ports of 127.0.0.1: origin A, the image
+# server agreed to, and origin B, which must never be asked for anything. The page is on localhost,
+# so both are other sites. What reached each server is read from the server's own log (the census):
+# Playwright's request events also list requests the browser stopped. Allmaps' annotation server is
+# answered by page.route. A browser profile of its own, so that nothing has been agreed to at the start.
+FIX = pathlib.Path(__file__).resolve().parent.parent / 'test/fixtures/chora-iiif'
+ALLMAPS = 'https://annotations.allmaps.org'
+AGREE_JS = """(pts) => { const o = window.__chora_overlays; return Promise.all(o.manager.entries.map(async (e) => {
+  const wm = o.layer.getWarpedMap(e.mapId);
+  const R = 6378137, merc = ([lon, lat]) => [R * lon * Math.PI / 180, R * Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360))];
+  const g = (await o.georef.toWorld(e.g, { type: 'MultiPoint', coordinates: pts }, { space: 'image', precision: 15 })).geojson.coordinates.map(merc);
+  // Where the renderer draws each pixel: its transformer's projected (Web Mercator) coordinates; and its
+  // longitude and latitude (transformToGeo), put into metres by the same formula as georef's.
+  const r = pts.map((p) => wm.projectedTransformer.transformToProjectedGeo(p));
+  const rl = pts.map((p) => merc(wm.projectedTransformer.transformToGeo(p)));
+  const r1 = pts.map((p) => wm.getProjectedTransformer('polynomial1').transformToProjectedGeo(p));
+  const d = (a, b) => Math.max(...a.map((p, i) => Math.hypot(p[0] - b[i][0], p[1] - b[i][1])));
+  return { annotation: e.g.annotationId, type: wm.transformationType, n: pts.length, worst: d(r, g), lonlat: d(rl, g), order1: d(r1, g), self: d(r, r),
+           mapIds: o.layer.getMapIds().includes(e.mapId) }; })); }"""
+
+def iiif_checks(pw, url, tmp):
+    fx = start_fixtures(tmp); A, B, log = fx['A'], fx['B'], fx['log']
+    base = url.rstrip('/') + '/'
+    ctx = pw.chromium.launch_persistent_context(str(tmp / 'iiif-profile'), headless=True, accept_downloads=True, args=GL,
+                                                viewport={'width': 1400, 'height': 900}, reduced_motion='reduce')
+    ctx.add_init_script('window.__plato_forceDownload = true;')
+    errors = []
+    ctx.on('page', lambda p: p.on('pageerror', lambda e: errors.append(str(e)[:200])))
+    page = ctx.pages[0] if ctx.pages else ctx.new_page()
+    page.on('pageerror', lambda e: errors.append(str(e)[:200]))
+    def census(since=0):
+        return [json.loads(l) for l in log.read_text().splitlines()[since:]]
+    def at_origin(rows, o): return [r for r in rows if f"127.0.0.1:{r['port']}" == urlparse(o).netloc]
+    def annotation(name='annotation.json', service=None, id=None):
+        a = json.loads((FIX / name).read_text().replace('https://iiif.example.org', A).replace('https://elsewhere.example.org', B))
+        if service: a['target']['source']['id'] = A + service
+        if id: a['id'] = id
+        return a
+    def paste(p, text):
+        p.fill('#map-input', text if isinstance(text, str) else json.dumps(text)); p.click('#map-form button[type=submit]')
+    def agree_map(p):
+        with p.expect_navigation(timeout=T(30) * 1000): p.click('#map-yes')
+        until(p, '() => window.__chora && window.__chora.mapReadyCount >= 1 && window.__chora.canary !== "pending" && !["loading", "opening", "reloading"].includes(window.__chora.phase)', 60)
+    def shown(p, annotation_id):
+        return soon(p, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.firstTile)', 30, annotation_id)
+    allmaps_hits = []
+    def allmaps_route(route):
+        allmaps_hits.append(route.request.url)
+        u = urlparse(route.request.url)
+        if u.path.startswith('/images/'):
+            body = json.loads((FIX / 'allmaps-images-e564650581f5f6bb.json').read_text().replace('https://iiif.example.org', A))
+            body['items'][0]['id'] = 'https://annotations.allmaps.org/maps/0000000000000003'
+            route.fulfill(status=200, content_type='application/json', headers={'Access-Control-Allow-Origin': '*'}, body=json.dumps(body))
+        else: route.fulfill(status=404, headers={'Access-Control-Allow-Origin': '*'}, body='{}')
+    page.route(ALLMAPS + '/**', allmaps_route)
+    grid_id = 'https://annotations.allmaps.org/maps/0000000000000001'
+
+    def before_consent():
+        chora_boot(page, base); until(page, '() => window.__chora.canary !== "pending"', 15)
+        since = len(census())
+        paste(page, annotation())
+        asked = soon(page, '() => !!document.getElementById("map-yes")', 10)
+        notice = page.inner_text('#map-consent-text') if asked else ''
+        page.wait_for_timeout(1000)                              # time for anything that would be asked, to be asked
+        early = census(since)
+        navs = []; page.on('framenavigated', lambda fr: navs.append(fr.url) if fr == page.main_frame else None)
+        agree_map(page)
+        drew = shown(page, grid_id)
+        rows = census(since); s = cstate(page); c = page.evaluate(CSP_JS)
+        paths = [r['path'] for r in at_origin(rows, A)]
+        return (asked and A in notice and 'sees nothing of your data' in notice and early == [] and len(navs) == 1 and s['canary'] == 'enforced'
+                and drew and '/iiif/grid/info.json' in paths and any(p.endswith('/default.jpg') for p in paths) and at_origin(rows, B) == []
+                and A in c['published']['origins'] and s['overlays'][0]['transformation'] == 'polynomial1'), {
+            'notice': notice, 'asked before agreeing': early, 'navigations': navs, 'census after': [(r['port'], r['status'], r['path']) for r in rows], 'overlays': s['overlays'], 'canary': s['canary']}
+    attempt('Chora maps: nothing is asked of a map\'s server until the user agrees to it by name; then one reload, and its image information and tiles, from it alone', before_consent)
+
+    GRID5 = [[64 + 96 * i, 64 + 96 * j] for i in range(5) for j in range(5)]
+    def agreement_order1():
+        r = page.evaluate(AGREE_JS, GRID5)
+        one = next((x for x in r if x['annotation'] == grid_id), None)
+        return (one and one['n'] == 25 and one['self'] == 0 and one['type'] == 'polynomial1' and one['worst'] <= 1e-7 and one['lonlat'] <= 1e-7), r
+    attempt('Chora maps: where the renderer draws each of 25 pixels of the map is where georef places it, to 1e-7 m (order 1)', agreement_order1)
+    def agreement_order2():
+        o2 = annotation('annotation-order2.json'); since = len(census())
+        paste(page, o2)
+        # In the renderer (its tiles are the grid's, already fetched for the map before).
+        drew = soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id)', 20, o2['id'])
+        r = page.evaluate(AGREE_JS, GRID5)
+        two = next((x for x in r if x['annotation'] == o2['id']), None)
+        # The control: the renderer's own order-1 transformation of the same map disagrees by metres, which
+        # is what it would draw had its transformation not been set from the georeference.
+        return (drew and two and two['mapIds'] and two['self'] == 0 and two['type'] == 'polynomial2' and two['worst'] <= 1e-7 and two['lonlat'] <= 1e-7 and two['order1'] > 1
+                and at_origin(census(since), B) == []), {'order 2': two, 'drew': drew}
+    attempt('Chora maps: an order-2 map is drawn at order 2 (set from its georeference), agreeing with georef to 1e-7 m; order 1 would be metres off', agreement_order2)
+
+    def foreign_id():
+        since = len(census())
+        paste(page, annotation(service='/iiif/foreign', id='https://annotations.allmaps.org/maps/000000000000000f'))
+        refused = soon(page, '() => /not shown/.test(document.getElementById("map-status").textContent)', 20)
+        said = page.inner_text('#map-status'); rows = census(since)
+        # A is asked for the image information (and the manifest the georeference names); B for nothing.
+        return (refused and B in said and '/iiif/foreign/info.json' in [r['path'] for r in at_origin(rows, A)]
+                and not any('default.jpg' in r['path'] for r in at_origin(rows, A)) and at_origin(rows, B) == []
+                and not any(o['annotationId'].endswith('00f') for o in cstate(page)['overlays'])), {'said': said, 'census': [(r['port'], r['path']) for r in rows]}
+    attempt('Chora maps: a map whose image information names an image on another site is refused, in words; that site is asked nothing', foreign_id)
+
+    def redirect():
+        since = len(census())
+        rid = 'https://annotations.allmaps.org/maps/0000000000000302'
+        paste(page, annotation(service='/iiif/redirect', id=rid))
+        admitted = soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id)', 20, rid)
+        page.evaluate("() => { const o = window.__chora_overlays.manager.entries; window.__chora_map.fitBounds(window.__chora_overlays.layer.getMapsBounds(o.map((e) => e.mapId)), { duration: 0 }); }")
+        page.evaluate(SETTLE)
+        failed = soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.tileErrors > 0)', 20, rid)
+        page.wait_for_timeout(1500)
+        rows = census(since); a_paths = [r['path'] for r in at_origin(rows, A)]
+        # In the same run, the honest map on A drew (its tiles reached the renderer).
+        honest = next((o for o in cstate(page)['overlays'] if o['annotationId'] == grid_id), {})
+        said = page.inner_text('#overlay-list')
+        events = cstate(page).get('overlayEvents')
+        return (admitted and failed and any(p.startswith('/iiif/redirect/') and p.endswith('default.jpg') for p in a_paths)
+                and any(r['status'] == 302 for r in at_origin(rows, A)) and at_origin(census(), B) == [] and honest.get('tilesLoaded', 0) > 0
+                and 'could not be loaded' in said), {'failed': failed, 'events': events, 'tile message': 'could not be loaded' in said, 'A': [(r['status'], r['path']) for r in at_origin(rows, A)], 'B, whole run': at_origin(census(), B), 'honest map': honest, 'said': said[-300:], 'failed': failed, 'events': events}
+        # (the order above is kept short enough to read in the one line a failure prints)
+    attempt('Chora maps: a tile answered by a redirect to another site is stopped by the page\'s policy (that site gets no request at all), while the honest map drew', redirect)
+
+    def lookup():
+        since = len(census()); hits = len(allmaps_hits)
+        paste(page, A + '/manifests/grid/manifest')
+        offered = soon(page, '() => !!document.getElementById("map-lookup")', 20)
+        editor = page.get_attribute('#map-status a[href^="https://editor.allmaps.org"]', 'href') if offered else ''
+        before = len(allmaps_hits) - hits                           # nothing asked of Allmaps before the button
+        page.click('#map-lookup')
+        notice = page.inner_text('#map-consent-text') if soon(page, '() => !!document.getElementById("map-yes")', 10) else ''
+        agree_map(page)
+        got = shown(page, 'https://annotations.allmaps.org/maps/0000000000000003')
+        asked = allmaps_hits[hits:]
+        return (offered and before == 0 and 'Allmaps' in notice and got and asked and all('/images/' in u for u in asked)
+                and editor.startswith('https://editor.allmaps.org/images?url=')), {'offered': offered, 'asked before the button': before, 'notice': notice, 'asked': asked, 'editor': editor}
+    attempt('Chora maps: a manifest with no georeference asks nothing of Allmaps until "Look for a georeference" is pressed and Allmaps agreed to; then it finds one by the image', lookup)
+
+    def controls():
+        s = cstate(page); keys = [o['key'] for o in s['overlays']]
+        if not keys: raise RuntimeError('no map shown')
+        k = next(o['key'] for o in s['overlays'] if o['annotationId'] == grid_id)
+        row = f'#overlay-list li[data-overlay="{k}"]'
+        page.fill(f'{row} input[data-opacity]', '40')
+        page.uncheck(f'{row} input[data-show]')
+        o = page.evaluate('k => { const e = window.__chora_overlays.manager.entries.find((x) => x.key === k); const m = window.__chora_overlays.layer.getMapOptions(e.mapId); return { opacity: m.opacity, visible: m.visible }; }', k)
+        page.check(f'{row} input[data-show]')
+        others = [x for x in keys if x != k]
+        for x in others:
+            page.click(f'#overlay-list li[data-overlay="{x}"] button[data-remove-map]')
+            until(page, 'x => !window.__chora.overlays.some((o) => o.key === x)', 10, x)
+        left = page.evaluate('() => window.__chora_overlays.layer.getMapIds()')
+        kept = opfs_names(page, 'chora-overlays')
+        return (abs(o['opacity'] - 0.4) < 1e-9 and o['visible'] is False and len(others) >= 3 and len(left) == 1 and kept == [f'{k}.json']
+                and [x['key'] for x in cstate(page)['overlays']] == [k]), {'map options': o, 'removed': len(others), 'left': left, 'kept': kept}
+    attempt('Chora maps: opacity and show reach the renderer; a map removed leaves the map, the list and the browser\'s store', controls)
+
+    def trace_save():
+        f = tmp / 'chora-files' / 'cambridge.json'; f.parent.mkdir(exist_ok=True)
+        f.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': 'https://example.org/g', 'title': 'Traced'}, 'spatialEntities': [
+            {'@id': 'https://example.org/p/cambridge', 'label': 'Cambridge', 'attestations': [{'names': [{'toponym': 'Cambridge'}], 'sources': [{'title': 's'}]}]}]}))
+        chora_boot(page, base, [f]); pid = chora_pick(page, 'cambridge')
+        until(page, '() => window.__chora.overlays.length === 1 && window.__chora.overlays[0].firstTile', 30)
+        page.click('#overlay-list button[data-fit]'); page.evaluate(SETTLE)
+        page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
+        xy = page.evaluate("""async () => { const e = window.__chora_overlays.manager.entries[0];
+          const w = (await window.__chora_overlays.georef.toWorld(e.g, { type: 'Point', coordinates: [256, 256] }, { space: 'image' })).geojson.coordinates;
+          const p = window.__chora_map.project(w), r = window.__chora_map.getCanvas().getBoundingClientRect(); return [r.left + p.x, r.top + p.y]; }""")
+        draw(page, 'point', [tuple(xy)]); page.click('#draw-tools button[data-mode="static"]')
+        traced = soon(page, '() => window.__chora.lastTrace && window.__chora.lastTrace.key', 15)
+        card = page.inner_text('#card')
+        page.click('#save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+        ls = cstate(page)['lastSave'] or {}
+        if not ls.get('passed'): return False, {'save': ls, 'card': card[-400:]}
+        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#save-result button.primary')
+        out = tmp / 'traced.json'; d.value.save_as(out)
+        new = json.loads(out.read_text())['spatialEntities'][0]['attestations'][-1]
+        cits = new.get('citations', [])
+        fns = [c.get('citationFunction') for c in cits]
+        loc = cits[0].get('locator', '') if cits else ''
+        notes = new.get('notes', '')
+        return (traced and 'Traced from' in card and ls.get('added') == 1
+                and fns == ['http://purl.org/spar/cito/citesAsEvidence', 'http://purl.org/spar/cito/usesMethodIn']
+                and cits[0]['source'].get('@id') == A + '/manifests/grid/manifest' and re.match(re.escape(A + '/manifests/grid/canvas/c1') + r'#xywh=\d+,\d+,\d+,\d+$', loc)
+                and cits[1]['source'].get('@id') == grid_id and cits[1]['source'].get('derivedFrom') == A + '/manifests/grid/manifest'
+                and notes.startswith('Traced by hand from a georeferenced historical map') and f'Georeferenced through {grid_id} (polynomial order 1, 4 control points)' in notes
+                and 'retrieval date not recorded' in notes and '@id' not in new), {'citations': cits, 'notes': notes, 'save': {k: ls.get(k) for k in ('passed', 'added')}}
+    attempt('Chora maps: a point traced from the map is saved citing the map (on its canvas) and the georeference, with the fixed notes, and Mneme passes', trace_save)
+
+    def come_back_and_forget():
+        page.reload(); until(page, '() => window.__chora && window.__chora.phase === "ready" && window.__chora.canary !== "pending"', 60)
+        back = soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.firstTile)', 30, grid_id)
+        since = len(census())
+        with page.expect_navigation(timeout=T(30) * 1000): page.click('#forget-sites')
+        until(page, '() => window.__chora && window.__chora.phase === "ready" && window.__chora.canary !== "pending"', 60)
+        asked = soon(page, '() => !!document.getElementById("map-yes")', 20)
+        notice = page.inner_text('#map-consent-text') if asked else ''
+        page.wait_for_timeout(1000)
+        c = page.evaluate(CSP_JS)
+        return (back and asked and A in notice and census(since) == [] and c['published']['origins'] == [] and cstate(page)['overlays'] == []), {
+            'came back': back, 'notice': notice, 'asked after forgetting': census(since), 'policy': c['published']}
+    attempt('Chora maps: a map shown comes back on the next load; after "Forget the sites", it is asked about again, and nothing is asked of its server', come_back_and_forget)
+
+    def no_policy():
+        # The same page served without its policy script: maps are refused, in words, and nothing is asked.
+        def strip(route):
+            r = route.fetch(); route.fulfill(response=r, body=re.sub(r"<script>\s*// Chora's hard block.*?</script>", '', r.text(), flags=re.S))
+        page.evaluate(f"() => localStorage.setItem('chora-consent', JSON.stringify([{{ origin: '{A}', kind: 'iiif' }}]))")
+        page.route('**/chora.html', strip)
+        try:
+            chora_boot(page, base); until(page, '() => window.__chora.canary !== "pending"', 15)
+            since = len(census())
+            paste(page, annotation(id='https://annotations.allmaps.org/maps/0000000000000011'))
+            said = page.inner_text('#map-status') if soon(page, '() => /cannot be shown in this browser/.test(document.getElementById("map-status").textContent)', 20) else page.inner_text('#map-status')
+            page.wait_for_timeout(1000)
+            rows = census(since); s = cstate(page)
+        finally: page.unroute('**/chora.html', strip)
+        return s['canary'] == 'not-enforced' and 'cannot be shown in this browser' in said and rows == [] and s['overlays'] == [], {'canary': s['canary'], 'said': said, 'census': rows}
+    attempt('Chora maps: with no policy on the page (the canary finds none), maps are refused in words and their server is asked nothing', no_policy)
+    attempt('Chora maps: across these checks, origin B was never asked for anything, and no page error', lambda: (len(census()) > 5 and at_origin(census(), B) == [] and not errors, {'census': len(census()), 'B': at_origin(census(), B), 'errors': errors[:5]}))
     ctx.close()
 
 main()

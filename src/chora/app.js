@@ -635,7 +635,7 @@ async function showMap(a, keptEntry = null) {
   const e = { ...a, key, opacity: keptEntry?.opacity ?? 1, visible: keptEntry?.visible ?? true, added: keptEntry?.added || new Date().toISOString() };
   await layers.add(e);
   if (e.error) { layers.remove(key); throw new Error(e.error); }
-  state.overlays.push({ key, mapId: e.mapId, origin: consents.originOf(a.g.imageServiceId), annotationId: a.g.annotationId, title: a.title,
+  state.overlays.push({ key, mapId: e.mapId, origin: consents.originOf(a.g.imageServiceId), service: a.g.imageServiceId.replace(/\/+$/, ''), annotationId: a.g.annotationId, title: a.title,
     transformation: ov.allmapsTransformationName(a.g), opacity: e.opacity, visible: e.visible, tilesLoaded: 0, tileErrors: 0, firstTile: false });
   ov.keep({ key, item: a.item, manifest: a.manifest, manifestUrl: a.manifestUrl, fetchedAt: a.fetchedAt, opacity: e.opacity, visible: e.visible, added: e.added }).catch((err) => console.warn('Chora: the map could not be kept', err));
   mapStatus = keptEntry ? '' : `${a.title} is on the map.`;
@@ -652,6 +652,7 @@ function fitMap(key) {
   if (b) mapApi.map.fitBounds(b, { padding: 32, duration: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 700 });
 }
 function overlayEvent(type, e) {
+  (state.overlayEvents ||= {})[type] = (state.overlayEvents[type] || 0) + 1;
   const ids = e?.mapIds || (e?.mapId ? [e.mapId] : []);
   for (const o of state.overlays) {
     if (ids.length && !ids.includes(o.mapId)) continue;
@@ -660,6 +661,24 @@ function overlayEvent(type, e) {
     else if (type === 'allrequestedtilesloaded') o.allLoaded = (o.allLoaded || 0) + 1;
     else if (type === 'tilefetcherror' || type === 'imageinfofetcherror') { o.tileErrors++; renderMapsSoon(); }
   }
+}
+// A tile the renderer's worker could not fetch (refused by the page's policy, say, when its server
+// sent the request elsewhere) is reported by the renderer only to the console, as a ResourceFetchError
+// naming the tile's address (@allmaps/render 1.0.0-beta.84, CacheableWorkerImageDataTile: no event is
+// dispatched). So the page listens there, for the tiles of its own maps only, and says so in plain words.
+{
+  const toConsole = console.error.bind(console);
+  console.error = (...args) => {
+    try {
+      for (const a of args) {
+        const m = a && a.name === 'ResourceFetchError' && /(https?:\/\/\S+)/.exec(String(a.message));
+        const tile = m && m[1].replace(/[)(.,]+$/, '');
+        const o = tile && state.overlays.find((x) => tile.startsWith(`${x.service}/`));
+        if (o) { o.tileErrors++; renderMapsSoon(); }
+      }
+    } catch {}
+    toConsole(...args);
+  };
 }
 let rendering = null;
 const renderMapsSoon = () => { rendering ??= setTimeout(() => { rendering = null; renderMaps(); }, 250); };
@@ -719,9 +738,8 @@ $('overlay-list').addEventListener('click', (e) => {
   const key = li.dataset.overlay;
   if (e.target.matches('[data-fit]')) fitMap(key);
   if (e.target.matches('[data-remove-map]')) {
-    layers.remove(key); ov.letGo(key);
-    state.overlays = state.overlays.filter((x) => x.key !== key);
-    renderMaps();
+    layers.remove(key);
+    ov.letGo(key).then(() => { state.overlays = state.overlays.filter((x) => x.key !== key); renderMaps(); });
   }
 });
 async function keepOverlay(o) {
