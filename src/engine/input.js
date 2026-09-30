@@ -232,8 +232,10 @@ function annotationShape(h, array) {
   return typed('Annotation') ? 'annotation' : null;
 }
 // TEI (Hermes): past the XML declaration, processing instructions, comments and a DOCTYPE, the
-// root element is TEI or teiCorpus, and it (or its prefix) is bound to the TEI namespace.
-const XML_PROLOG = /^(?:\s+|<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!DOCTYPE(?:[^[>]|\[[\s\S]*?\])*>)*/;
+// root element is TEI or teiCorpus, and it (or its prefix) is bound to the TEI namespace. In the
+// DOCTYPE, a quoted literal or a comment is passed over whole, so that a ] or > in one does not end
+// the internal subset or the DOCTYPE.
+const XML_PROLOG = /^(?:\s+|<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!DOCTYPE(?:"[^"]*"|'[^']*'|[^[>"']|\[(?:<!--[\s\S]*?-->|"[^"]*"|'[^']*'|<(?!!--)|[^\]"'<])*\])*>)*/;
 const XML_ROOT = /^<(?:([A-Za-z_][\w.-]*):)?([A-Za-z_][\w.-]*)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*\/?>/;
 function isTei(h) {
   const m = XML_ROOT.exec(h.slice(XML_PROLOG.exec(h)[0].length));

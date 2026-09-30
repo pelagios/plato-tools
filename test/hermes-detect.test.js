@@ -116,6 +116,17 @@ test('checking or converting a georeference is refused with the reason, as an in
 });
 
 // ---- a places.csv with another delimiter -------------------------------------------------------------
+// ---- TEI -------------------------------------------------------------------------------------------
+test('a DOCTYPE whose internal subset has ] or > in a comment or a quoted literal does not hide the TEI root', async () => {
+  const body = '<teiHeader/><text><body><p>x</p></body></text>';
+  const tei = (doctype, root = '<TEI xmlns="http://www.tei-c.org/ns/1.0">', end = '</TEI>') => `<?xml version="1.0"?>\n${doctype}${root}${body}${end}\n`;
+  for (const d of ['<!DOCTYPE TEI [ <!-- ] --> <!ENTITY a "b"> ]>', '<!DOCTYPE TEI [ <!ENTITY a "b]"> ]>', "<!DOCTYPE TEI [ <!ENTITY a 'b]>'> ]>", '<!DOCTYPE TEI SYSTEM "tei[1].dtd">', '<!DOCTYPE TEI>']) {
+    assert.equal(await kind(tei(d), 'x.xml'), 'tei', d);
+    // Control: the same prolog before a root that is not TEI's, or not in its namespace, is not TEI.
+    assert.notEqual(await kind(tei(d, '<html xmlns="http://www.w3.org/1999/xhtml">', '</html>'), 'x.xml'), 'tei', `${d} before <html>`);
+    assert.notEqual(await kind(tei(d, '<TEI>'), 'x.xml'), 'tei', `${d} before a TEI with no namespace`);
+  }
+});
 test('a places.csv separated by semicolons, tabs or bars is still the spreadsheet tables; with a header of its own, a table of places', async () => {
   for (const d of [';', '\t', '|', ',']) {
     assert.equal(await kind(['place_id', 'label', 'country_codes'].join(d) + '\n' + ['a', 'A', ''].join(d) + '\n', 'places.csv'), 'tables', JSON.stringify(d));
