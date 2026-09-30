@@ -91,7 +91,8 @@ Options:
                     which folder to publish.
   --work-dir DIR    where the working database for RDF and attestation-centric input is kept
                     while it is in use (default: the system's temporary directory). It needs
-                    room for about 1.5 times the uncompressed input; it is removed afterwards.
+                    room for about 1.2 to 1.5 times the uncompressed size of the input and, with
+                    --previous, of the previous release as well; it is removed afterwards.
   --json            print one JSON object per input, one per line, then one for the total.
   --brief           print one line per input and the total, without the details.
   -h, --help        show this help.

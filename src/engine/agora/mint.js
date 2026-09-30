@@ -54,6 +54,7 @@
 import { compare, attestationLines } from '../compare.js';
 import { sha256 } from '../../lib/sha256.js';
 import { normaliseBase } from './address.js';
+import { Gzip } from 'fflate';
 
 export const TEXT = {
   'base-written': "A base address was given for this run that is not the dataset's own (uriSpace, the about sheet's base_uri): the addresses were made under the base given, and the copy records it as its uriSpace, so that the site and the w3id rules made from the copy use the same one. Put it in the dataset too.",
@@ -72,8 +73,31 @@ const INHERITED = 1, MINTED = 2;
 const hasId = (a) => a && typeof a === 'object' && typeof a['@id'] === 'string' && a['@id'] !== '';
 const n = (x) => x.toLocaleString('en-GB');
 
-/** The name of the copy: the dataset's own name without its extension, then -with-ids.jsonl. */
-export const outputName = (name) => String(name || 'dataset').replace(/\/+$/, '').replace(/\.gz$/i, '').replace(/\.[^./]+$/, '') + '-with-ids.jsonl';
+/**
+ * The name of the copy: the dataset's own name without its extension, then -with-ids.jsonl, and
+ * .gz when the dataset's own name ends in .gz. The copy follows its input: DEEP's is 1.14 GB as text
+ * and 51 MB gzipped, and GitHub refuses a file over 100 MB, so a gzipped input is committed gzipped;
+ * a dataset kept as text keeps a copy whose changes a diff can show.
+ */
+export const outputName = (name) => {
+  const s = String(name || 'dataset').replace(/\/+$/, '');
+  return s.replace(/\.gz$/i, '').replace(/\.[^./]+$/, '') + '-with-ids.jsonl' + (/\.gz$/i.test(s) ? '.gz' : '');
+};
+
+/**
+ * An output that gzips what is written to it, as the site's downloads are gzipped (site/downloads.js):
+ * level 6, and no time in the header, so that the same copy is the same bytes. Text is gathered into
+ * pieces of 64 KB before it is compressed, rather than handed over a line at a time.
+ */
+function gzipped(out) {
+  const enc = new TextEncoder();
+  const gz = new Gzip({ level: 6, mtime: 0 }, (chunk) => out.writeBytes(chunk));
+  let held = '';
+  return {
+    write(s) { held += s; if (held.length >= 1 << 16) { gz.push(enc.encode(held)); held = ''; } },
+    async close() { gz.push(enc.encode(held), true); held = ''; return out.close(); },
+  };
+}
 
 /**
  * The working database. rec: each record (a place or an identity relation) as read, in file order.
@@ -334,7 +358,8 @@ export function create(ctx) {
           const parts = [drafted.removed && `${n(drafted.removed)} of its attestations ${drafted.removed === 1 ? 'is' : 'are'} gone`, drafted.changed && `${n(drafted.changed)} ${drafted.changed === 1 ? 'says' : 'say'} something different`].filter(Boolean);
           rep.counts.said.push(`Against the previous release, which is a draft: ${parts.join(' and ')}. Written, as a draft binds nothing; once it is published, this would be refused (see the warnings).`);
         }
-        const out = await ctx.env.output(name());
+        const raw = await ctx.env.output(name());
+        const out = name().endsWith('.gz') ? gzipped(raw) : raw;
         for (const s of copy()) out.write(s);
         ctx.done(await out.close());
       } finally {

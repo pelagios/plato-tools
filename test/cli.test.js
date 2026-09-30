@@ -92,6 +92,8 @@ test('usage problems exit 2, with a message on stderr and nothing on stdout', ()
   const h = cli('--help');
   assert.equal(h.code, 0);
   for (const t of ['plato-jsonl', 'plato-json', 'ntriples', 'tables', 'lpf-seq', 'lpf']) assert.match(h.out, new RegExp(`\\n  ${t} +\\S`), t);
+  // The working database's room: the input, and with --previous the previous release too (minting holds both).
+  assert.match(h.out.replace(/\s+/g, ' '), /room for about 1\.2 to 1\.5 times the uncompressed size of the input and, with --previous, of the previous release as well/);
 });
 
 // ---- --json -------------------------------------------------------------------------------------

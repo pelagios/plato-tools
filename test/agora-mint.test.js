@@ -17,6 +17,7 @@ import { env, file, textFile, go, outText } from './engine.js';
 import { detect } from '../src/engine/input.js';
 import { publish } from '../src/engine/agora/index.js';
 import { sha256 } from '../src/lib/sha256.js';
+import { gzipSync, gunzipSync } from 'fflate';
 
 const P = 'https://w3id.org/plato#', X = 'https://example.org/';
 const KING_JOHN = `${PLATO_REPO}/schemas/examples/place-centric-king-john.json`;
@@ -300,6 +301,33 @@ test('publish mint on the command line: 0 and the copy; with --previous, 1 and n
   assert.equal(readFileSync(join(out3, 'v2-with-ids.jsonl'), 'utf8').split('\n').slice(1).join('\n'), readFileSync(prev, 'utf8').split('\n').slice(1).join('\n'), 'the same records, with the same addresses');
   const missing = cli('publish', 'mint', '--previous', join(dir, 'nowhere.jsonl'), '--out', out3, write('v3.json', doc(places(), PUB)));
   assert.equal(missing.code, 2, missing.out + missing.err);
+});
+
+test('a gzipped dataset gives a gzipped copy, the same records as the plain one; a plain dataset, a plain copy; a site is made from the gzipped copy', async () => {
+  const text = JSON.stringify(doc(places()));
+  const run = async (f) => {
+    const e = env();
+    const i = await detect([f]);
+    const r = await publish({ part: 'mint', input: i, options: { name: i.files[0].name } }, e);
+    const out = r.outputs[0];
+    return { r, name: out.name, bytes: Buffer.concat(e.outs[out.name].map((p) => Buffer.from(p))) };
+  };
+  const gz = await run(new File([gzipSync(new TextEncoder().encode(text))], 'd.json.gz'));
+  const plain = await run(textFile(text, 'd.json'));
+  assert.equal(gz.r.report.errors, 0, JSON.stringify(gz.r.report.items));
+  assert.equal(gz.name, 'd-with-ids.jsonl.gz');
+  assert.deepEqual([...gz.bytes.subarray(0, 2)], [0x1f, 0x8b]);
+  assert.equal(Buffer.from(gunzipSync(gz.bytes)).toString('utf8'), plain.bytes.toString('utf8'));
+  // Control: the plain dataset's copy is plain text, named without .gz, and has its addresses.
+  assert.equal(plain.name, 'd-with-ids.jsonl');
+  assert.equal(plain.bytes[0], '{'.charCodeAt(0));
+  assert.equal(attestations(plain.bytes.toString('utf8')).filter((a) => HASH8.test(a.id)).length, 3);
+  // The gzipped copy is what gets committed, and the site is made from it.
+  const e = env();
+  const site = await publish({ part: 'site', input: await detect([new File([gz.bytes], gz.name)]), options: { toolsRef: 'abc1234' } }, e);
+  assert.equal(site.report.errors, 0, JSON.stringify(site.report.items.filter((i) => i.severity === 'error')));
+  assert.equal(site.report.counts.places, 2);
+  assert.equal(site.outputs.length, 2);
 });
 
 test('a base given for the run is written into the copy, so the site and the w3id rules use it too', async () => {
