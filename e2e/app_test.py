@@ -728,8 +728,12 @@ def rendered(page, layers):
 
 def kept(page, name):
     """The drawings kept on the origin private file system for the file called `name`: what a reload finds."""
+    # The page may be rewriting a drafts file while it is read (the file listed, then gone): read
+    # again, a few times, rather than fail a check on the harness's own timing.
     return page.evaluate('''async (name) => { let d; try { d = await (await navigator.storage.getDirectory()).getDirectoryHandle('chora-drafts'); } catch { return []; }
-      for await (const h of d.values()) { const x = JSON.parse(await (await h.getFile()).text()); if (x.fingerprint.split('|')[0] === name) return x.drafts; } return []; }''', name)
+      for (let tries = 0; ; tries++) {
+        try { for await (const h of d.values()) { const x = JSON.parse(await (await h.getFile()).text()); if (x.fingerprint.split('|')[0] === name) return x.drafts; } return []; }
+        catch (e) { if (tries >= 5 || !['NotFoundError', 'SyntaxError'].includes(e.name)) throw e; await new Promise((r) => setTimeout(r, 100)); } } }''', name)
 
 def opfs_names(page, directory):
     return page.evaluate('''async (dir) => { try { const d = await (await navigator.storage.getDirectory()).getDirectoryHandle(dir); const n = [];
