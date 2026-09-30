@@ -99,7 +99,7 @@ async function* platoJsonl(file, rep) {
   for await (const { line, n } of lines(file)) {
     let v;
     try { v = JSON.parse(line); } catch (e) { rep.error('json-syntax', 'A line is not valid JSON', `line ${n}: ${e.message}`); continue; }
-    if (!v || typeof v !== 'object' || Array.isArray(v)) { rep.error('schema', 'A line is not a JSON object, so it is neither a place, an attestation nor an identity relation, and is not read', `line ${n}: ${line.slice(0, 80)}`); continue; }
+    if (!v || typeof v !== 'object' || Array.isArray(v)) { rep.error('jsonl-not-an-object', 'A line is not a JSON object, so it is neither a place, an attestation nor an identity relation, and is not read', `line ${n}: ${line.slice(0, 80)}`); continue; }
     if (first) { first = false; if (v.profile) { yield { type: 'header', value: v }; continue; } yield { type: 'header', value: { profile: 'place-centric', gazetteer: { title: file.name } } }; }
     if (v.subject && v.object && v.identityType !== undefined) yield { type: 'idr', value: v, n };
     else if (v.about !== undefined && !v.label && !v.attestations) yield { type: 'attestation', value: v, n };

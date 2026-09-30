@@ -136,13 +136,13 @@ test('detection lets a fault of its own through, and stands on what it found bef
 });
 
 // ---- what a line holds ------------------------------------------------------------------------
-test('a line of PLATO JSON Lines that is not an object is a schema error with its line, and the rest is read', async () => {
+test('a line of PLATO JSON Lines that is not an object is an error with its line, and the rest is read', async () => {
   const head = JSON.stringify({ profile: 'place-centric', gazetteer: { title: 'T' } });
   for (const bad of ['null', '5', '"x"', '[1]', 'true']) {
     const f = chunked([head, bad, onePlace].join('\n') + '\n', 'x.jsonl');
     for (const [action, target] of [['check'], ['convert', 'plato-jsonl'], ['convert', 'ntriples'], ['convert', 'lpf'], ['convert', 'tables']]) {
       const r = await go([f], action, target);
-      const e = errors(r).filter((i) => i.kind === 'schema');
+      const e = errors(r).filter((i) => i.kind === 'jsonl-not-an-object');
       assert.equal(e.length, 1, `${bad} ${target}: ${JSON.stringify(errors(r))}`);
       assert.match(e[0].examples[0], /^line 2: /);
       // Presence beside the absence: the place after the bad line is read.

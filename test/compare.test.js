@@ -383,6 +383,18 @@ test('a version with a line that cannot be read is a problem: the comparison is 
   assert.deepEqual(kinds(r, 'error'), ['version-not-read']);
   assert.match(item(r, 'version-not-read').message, /earlier version could not be read/);
 });
+test('a version with a line that is a record wrapped in a list is not read whole, and says so, as a line not JSON does', async () => {
+  const lines = (d) => [JSON.stringify({ profile: d.profile, gazetteer: d.gazetteer }), ...d.spatialEntities.map((x) => JSON.stringify(x))];
+  const l = lines(doc(places(), G2));
+  assert.equal((await cmp(v1(), textFile(l.join('\n') + '\n', 'v2.jsonl'))).errors, 0, 'control: the same lines, unwrapped, compare clean');
+  l[2] = `[${l[2]}]`;
+  const r = await cmp(v1(), textFile(l.join('\n') + '\n', 'v2.jsonl'));
+  // What the unread line held is compared as missing, as it is for a line not JSON; the report must say it was not read.
+  assert.ok(kinds(r, 'error').includes('version-not-read'), JSON.stringify(r.items));
+  assert.match(item(r, 'version-not-read').message, /later version could not be read.*not a JSON object/);
+  assert.equal(item(r, 'version-not-read').examples[0].slice(0, 9), 'line 3: [');
+  assert.equal(item(r, 'version-has-problems'), undefined, 'not one of the version\'s own problems, for a check to list');
+});
 test("a version's own problems are the check's to list: the comparison says they are there, and still compares", async () => {
   const r = await cmp(v1(), v2((p) => { p[0].notAKey = true; }));
   assert.equal(r.errors, 0);
