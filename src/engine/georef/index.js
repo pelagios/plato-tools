@@ -294,7 +294,7 @@ export async function readGeoreference(annotation, { manifest, canvasId, index }
   // Mercator is refused rather than put somewhere other than where Allmaps draws the map.
   const crs = map.resourceCrs;
   if (crs && !/EPSG:3857\b|EPSG:900913\b|\+proj=merc \+a=6378137 \+b=6378137/.test(`${crs.id ?? ''} ${crs.name ?? ''} ${typeof crs.definition === 'string' ? crs.definition : ''}`)) {
-    throw new DataError(`The georeference ${map.id ?? ''} is made in its own projection (${crs.name || crs.id || 'resourceCrs'}), which these tools cannot yet transform in; positions would not match where Allmaps draws the map.`.replace('  ', ' '));
+    throw new DataError(`This map's georeference${map.id ? ` (${map.id})` : ''} is made in the projection ${crs.name || crs.id || 'that it names'}, which PLATO tools do not support yet. Nothing was changed. Positions worked out without that projection would not match where the map is drawn.`);
   }
   const image = normaliseId(map.resource.id);
   const partOf = partOfCanvases(map.resource);
