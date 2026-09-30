@@ -84,6 +84,9 @@ export function scheme(base) {
     // ids/<w3idPath>/ holds the rules for the top name, and a deeper path is a sub-namespace in it.
     w3idPath: kind === 'w3id' ? u.pathname.replace(/^\/|\/$/g, '') : null,
     host: u.host,
+    // The dataset's short name, for the names of its downloads: the last part of the base's path
+    // (whg-epns for https://w3id.org/whg-epns/), or its host without dots when it has no path.
+    stem: u.pathname.split('/').filter(Boolean).pop() || u.hostname.replace(/\./g, '-'),
     /** The dataset's own address: the base itself. */
     dataset: b,
     place: (id) => b + 'place/' + encodeURIComponent(id),

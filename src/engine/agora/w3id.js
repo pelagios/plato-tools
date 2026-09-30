@@ -136,7 +136,7 @@ export function create(ctx) {
       w3idPath: s.w3idPath, base: s.base, site: t.site, repo, release, turtle: !!options.turtle, maintainers,
       title: g.title, gazetteer: g, examples, counts,
       // The downloads' short name, which the site puts before each download's suffix (SITE.downloads).
-      stem: s.w3idPath.split('/').pop(),
+      stem: s.stem,
     };
   }
 
