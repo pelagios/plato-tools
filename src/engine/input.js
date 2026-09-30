@@ -2,7 +2,7 @@
 // text is cut into lines or parsed incrementally, and JSON documents are parsed with a streaming
 // parser that hands over one record at a time. Works on browser File objects and on Node's File.
 // Vendored, with the one change that keeps a U+FEFF inside a string: see src/vendor/streamparser-json/.
-import { JSONParser, TokenType } from '../vendor/streamparser-json/index.js';
+import { JSONParser, Tokenizer, TokenType } from '../vendor/streamparser-json/index.js';
 import Papa from 'papaparse';
 
 /**
@@ -126,11 +126,11 @@ export async function* lineChunks(file) {
   for (;;) {
     const { value, done } = await readChunk(reader);
     if (done) break;
-    buf += value;
-    const i = buf.lastIndexOf('\n');
-    if (i < 0) continue;
-    yield buf.slice(0, i + 1);
-    buf = buf.slice(i + 1);
+    // Only the new text is searched: a long line, searched whole at every chunk, took quadratic time.
+    const i = value.lastIndexOf('\n');
+    if (i < 0) { buf += value; continue; }
+    yield buf + value.slice(0, i + 1);
+    buf = value.slice(i + 1);
   }
   if (buf) yield buf.endsWith('\n') ? buf : buf + '\n';
 }
@@ -153,6 +153,72 @@ export async function head(file, bytes = 65536) {
   catch (e) { if (!(e instanceof DataError) || !s) throw e; }
   reader.cancel().catch(() => {});
   return s;
+}
+/** How far detection reads, at most, for a first line or a document's top-level keys (characters). */
+export const DETECT_CAP = 16 * 2 ** 20;
+/**
+ * The first line of a file that has one (after any blank lines), read to its end however many
+ * chunks that takes, up to `cap` characters: { line, capped }.
+ */
+export async function firstLine(file, cap = DETECT_CAP) {
+  // Decoded leniently, as head() is: a byte that is not UTF-8 is left to the reader, which says where.
+  const reader = (await textStream(file, { lenient: true })).getReader();
+  // Chunks are kept apart and searched one by one: a string grown and searched whole each time is
+  // copied each time, and a long line took quadratic time.
+  const parts = []; let size = 0, started = false, ended = false;
+  try {
+    for (;;) {
+      const { value, done } = await readChunk(reader);
+      if (done) break;
+      let v = value;
+      if (!started) { v = v.trimStart(); if (!v) continue; started = true; }
+      const nl = v.indexOf('\n');
+      if (nl >= 0) { parts.push(v.slice(0, nl)); ended = true; break; }
+      parts.push(v); size += v.length;
+      if (size >= cap) break;
+    }
+  } catch (e) { if (!(e instanceof DataError) || !parts.length) throw e; }
+  reader.cancel().catch(() => {});
+  return { line: parts.join(''), capped: !ended && size >= cap };
+}
+/**
+ * The string values of the given top-level keys of a JSON document, read token by token (nothing
+ * of the values is held), until all are found, the document's `type` is met (PLATO documents have
+ * none; a FeatureCollection's is read on for its @context, up to its features), the document
+ * closes or breaks, or `cap` characters have been read. Decoded leniently, as head() is: a byte that
+ * is not UTF-8 is left to the reader, which reports it.
+ */
+async function topLevelStrings(file, wanted, cap = DETECT_CAP) {
+  const found = {};
+  const tokenizer = new Tokenizer();
+  let depth = 0, expect = null, key = null;
+  tokenizer.onToken = ({ token, value }) => {
+    if (depth === 1) {
+      if (expect === 'value') {
+        expect = null;
+        if (wanted.includes(key) && token === TokenType.STRING) { found[key] = value; if (key === 'type' && value !== 'FeatureCollection' || 'type' in found && '@context' in found || wanted.every((k) => k in found)) throw STOP; }
+        // A FeatureCollection's @context, which says whether it is LPF, is looked for up to its features.
+        else if (key === 'features' && found.type === 'FeatureCollection') throw STOP;
+      }
+      else if (expect === 'key' && token === TokenType.STRING) { key = value; expect = null; }
+      else if (token === TokenType.COLON) expect = 'value';
+      else if (token === TokenType.COMMA) expect = 'key';
+    }
+    if (token === TokenType.LEFT_BRACE || token === TokenType.LEFT_BRACKET) { if (depth++ === 0) { if (token !== TokenType.LEFT_BRACE) throw STOP; expect = 'key'; } }
+    else if (token === TokenType.RIGHT_BRACE || token === TokenType.RIGHT_BRACKET) { if (--depth === 0) throw STOP; }
+  };
+  const reader = (await textStream(file, { lenient: true })).getReader();
+  let read = 0;
+  try {
+    while (read < cap) {
+      const { value, done } = await readChunk(reader);
+      if (done) break;
+      read += value.length;
+      tokenizer.write(value);
+    }
+  } catch { /* STOP, or the document breaks here: what was found before it stands, and the check reports the break */ }
+  reader.cancel().catch(() => {});
+  return found;
 }
 
 const STOP = Symbol('stop');
@@ -295,11 +361,18 @@ export async function detect(files) {
   try { h = (await head(f)).trimStart(); }
   catch (e) { if (e instanceof DataError) return { format: null, reason: `${e.message} Nothing could be read from it.` }; throw e; }
   if (n.endsWith('.jsonl') || n.endsWith('.ndjson') || n.endsWith('.geojsonl') || n.endsWith('.geojsons') || /^\{[^\n]*\}\s*\n\s*\{/.test(h)) {
-    // The first line as structure, as far as the head goes (a line longer than the head is cut).
-    const line = h.split('\n')[0];
+    // The first line is read whole, however long: gzipped, it may arrive in many chunks.
+    let line = h.split('\n')[0];
+    if (!h.includes('\n')) {
+      let capped;
+      try { ({ line, capped } = await firstLine(f)); }
+      catch (e) { if (e instanceof DataError) return { format: null, reason: `${e.message} Nothing could be read from it.` }; throw e; }
+      if (capped) return { format: null, reason: `This looks like JSON Lines, but its first line is longer than ${DETECT_CAP / 2 ** 20} MB, so what the file is cannot be told from it.` };
+    }
     let first;
-    try { first = JSON.parse(line); } catch { first = jsonHead(line); }
-    if (!first || typeof first !== 'object' || Array.isArray(first)) return { format: null, reason: 'This is JSON Lines, but its first line is not a JSON object, so what it holds cannot be told.' };
+    try { first = JSON.parse(line); }
+    catch (e) { return { format: null, reason: `This looks like JSON Lines, but its first line is not valid JSON (${e.message}), so what the file is cannot be told from it.` }; }
+    if (!first || typeof first !== 'object' || Array.isArray(first)) return { format: null, reason: 'This looks like JSON Lines, but its first line is not a JSON object, so it is neither a PLATO header, an LPF feature nor a W3C Web Annotation.' };
     if (first.profile) return { format: 'plato-jsonl', profile: first.profile, files };
     if (first.type === 'Feature' || first.type === 'FeatureCollection') {
       // Linked Places Format only by its structure, as for a FeatureCollection below: the collection's
@@ -319,11 +392,15 @@ export async function detect(files) {
     // A IIIF Georeference Annotation (Allmaps) is an annotation too, so it is told apart first.
     const georef = georefOf(top);
     if (georef) return { format: 'georef', ...georef, reason: GEOREF_REASON, files };
-    const profile = (h.match(/"profile"\s*:\s*"([a-z-]+)"/) || [])[1];
+    // The document's own profile, type and @context may come after a long member (a gazetteer, a
+    // title), past the head, so its top-level keys are read as far as they go; the head's text is
+    // the fallback it always was.
+    const keys = await topLevelStrings(f, ['profile', 'type', '@context']);
+    const profile = keys.profile ?? (h.match(/"profile"\s*:\s*"([a-z-]+)"/) || [])[1];
     if (profile === 'place-centric' || profile === 'attestation-centric') return { format: 'plato-json', profile, files };
-    if (/"type"\s*:\s*"FeatureCollection"/.test(h)) {
-      if (!isLpf(top)) return { format: 'geojson', shape: 'collection', files };
-      return { format: 'lpf', files, lpfVersion: lpfVersion({ '@context': top?.['@context'] ?? (h.match(/"@context"\s*:\s*"([^"]+)"/) || [])[1] }) };
+    if (keys.type === 'FeatureCollection' || /"type"\s*:\s*"FeatureCollection"/.test(h)) {
+      if (!isLpf(top) && !isLpf({ '@context': keys['@context'] })) return { format: 'geojson', shape: 'collection', files };
+      return { format: 'lpf', files, lpfVersion: lpfVersion({ '@context': keys['@context'] ?? top?.['@context'] ?? (h.match(/"@context"\s*:\s*"([^"]+)"/) || [])[1] }) };
     }
     const shape = annotationShape(h, false);
     if (shape) return { format: 'w3c-annotations', shape, files };

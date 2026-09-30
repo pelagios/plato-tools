@@ -36,3 +36,55 @@ test('line numbers do not drift across chunk boundaries: a bad line 300 is repor
   assert.match(syntax[0].examples[0], /^line 300: /);
   assert.equal(r.report.counts.places, 398);
 });
+
+// ---- detection reads as far as it needs to ------------------------------------------------------
+const longHeader = (extra = {}) => JSON.stringify({ profile: 'place-centric', gazetteer: { title: 'T', description: 'd'.repeat(200_000) }, ...extra });
+const onePlace = JSON.stringify({ '@id': 'https://example.org/p', label: 'P', attestations: [{ names: [{ toponym: 'P' }] }] });
+
+test('a JSON Lines file whose first line is longer than a chunk is detected, gzipped or not', async () => {
+  const text = longHeader() + '\n' + onePlace + '\n';
+  for (const f of [chunked(gzipSync(strToU8(text)), 'long.jsonl.gz'), chunked(text, 'long.jsonl')]) {
+    const d = await detect([f]);
+    assert.equal(d.format, 'plato-jsonl', `${f.name}: ${d.reason}`);
+    assert.equal(d.profile, 'place-centric');
+    const r = await go([f], 'check');
+    assert.deepEqual(errors(r), []);
+    assert.equal(r.report.counts.places, 1);
+  }
+  // Control: a short first line was always detected, and still is.
+  assert.equal((await detect([chunked(JSON.stringify({ profile: 'place-centric', gazetteer: { title: 'T' } }) + '\n' + onePlace + '\n', 'short.jsonl')])).format, 'plato-jsonl');
+});
+test('a JSON Lines first line that is not JSON, or not an object, is a reason, never a fault', async () => {
+  for (const [first, why] of [['{"profile": ', /not valid JSON/], ['null', /not a JSON object/], ['5', /not a JSON object/], ['[1,2]', /not a JSON object/]]) {
+    const d = await detect([chunked(first + '\n' + onePlace + '\n', 'x.jsonl')]);
+    assert.equal(d.format, null, first);
+    assert.match(d.reason, why, first);
+  }
+});
+test('a JSON Lines first line longer than detection reads is refused with a reason that says so', async () => {
+  const d = await detect([chunked(gzipSync(strToU8(JSON.stringify({ profile: 'place-centric', gazetteer: { title: 'x'.repeat(17 * 2 ** 20) } }) + '\n')), 'huge.jsonl.gz', 65536)]);
+  assert.equal(d.format, null);
+  assert.match(d.reason, /first line .* longer than 16 MB/);
+});
+test('a PLATO JSON document whose profile comes after a long gazetteer is detected', async () => {
+  const doc = (profile) => JSON.stringify({ gazetteer: { title: 'T', description: 'd'.repeat(200_000) }, ...profile, spatialEntities: [JSON.parse(onePlace)] });
+  for (const f of [chunked(doc({ profile: 'place-centric' }), 'late.json'), chunked(gzipSync(strToU8(doc({ profile: 'place-centric' }))), 'late.json.gz')]) {
+    const d = await detect([f]);
+    assert.equal(d.format, 'plato-json', `${f.name}: ${d.reason}`);
+    assert.equal(d.profile, 'place-centric');
+    const r = await go([f], 'check');
+    assert.deepEqual(errors(r), []);
+    assert.equal(r.report.counts.places, 1);
+  }
+  // Control: without a profile anywhere, it is not PLATO JSON.
+  assert.equal((await detect([chunked(doc({}), 'none.json')])).format, null);
+  // A profile only nested inside a place is not the document's: control that the scan is at the top level.
+  const nested = JSON.stringify({ gazetteer: { title: 'T', description: 'd'.repeat(200_000) }, spatialEntities: [{ ...JSON.parse(onePlace), profile: 'place-centric' }] });
+  assert.equal((await detect([chunked(nested, 'nested.json')])).format, null);
+});
+test('an LPF FeatureCollection whose type comes after a long member is detected', async () => {
+  const fc = JSON.stringify({ title: 't'.repeat(200_000), type: 'FeatureCollection', '@context': 'https://raw.githubusercontent.com/LinkedPasts/linked-places-format/main/linkedplaces-context-v1.1.jsonld', features: [] });
+  const d = await detect([chunked(fc, 'late.geojson')]);
+  assert.equal(d.format, 'lpf', d.reason);
+  assert.equal(d.lpfVersion, 1);
+});
