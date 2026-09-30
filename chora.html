@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chora: places on the map, in PLATO tools</title>
+  <meta name="description" content="See the places in a PLATO dataset on a map, with everything their attestations say over time, and draw a point, line or area as a new attestation, in your browser. Your files never leave your computer.">
+  <link rel="icon" href="./logo/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="./logo/plato-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="./logo/plato-180.png">
+  <link rel="stylesheet" href="./src/styles.css">
+</head>
+<body class="chora">
+<header class="top">
+  <div class="masthead">
+    <div>
+      <p class="family">Part of <a href="https://pelagios.org/place-attestation-ontology/guide/">PLATO</a>, the Place Attestation Ontology · <a href="./">PLATO tools</a></p>
+      <h1><img class="logo" src="./logo/plato-mark.svg" width="27" height="36" alt="">Chora <span class="label">Place on the map</span></h1>
+    </div>
+  </div>
+  <p class="privacy"><strong>Your files stay on your computer.</strong> Nothing is uploaded: everything happens in this browser tab. The map is served from this site; if you choose another basemap, its provider sees which part of the world you view, and nothing of your data.</p>
+</header>
+<main class="chora-main">
+  <div class="chora-panel" id="panel">
+    <section id="files" aria-labelledby="files-h">
+      <h2 id="files-h"><span class="step">1</span> Choose your data</h2>
+      <p id="handoff" hidden></p>
+      <label class="drop" id="drop">
+        <input type="file" id="picker" multiple>
+        <span>Drop a file here, or <u>choose one</u>.</span>
+        <small>Any dataset PLATO tools reads: PLATO JSON or JSON Lines, RDF, Linked Places Format, Recogito's web annotations, or the PLATO spreadsheet tables.</small>
+      </label>
+      <p id="phase" aria-live="polite"></p>
+      <div id="dataset" hidden></div>
+    </section>
+
+    <section id="places" aria-labelledby="places-h" hidden>
+      <h2 id="places-h"><span class="step">2</span> Places</h2>
+      <label for="q" class="visually-hidden">Find a place by name</label>
+      <input id="q" type="search" placeholder="Find a place by name" autocomplete="off">
+      <p id="found" class="muted"></p>
+      <ul id="list" class="place-list"></ul>
+      <p class="pager"><button id="prev" type="button">Previous</button> <button id="next" type="button">Next</button></p>
+    </section>
+
+    <section id="card" aria-labelledby="card-h" hidden></section>
+
+    <section id="saving" aria-labelledby="saving-h" hidden>
+      <h2 id="saving-h"><span class="step">3</span> Save</h2>
+      <p id="pending-total"></p>
+      <form id="contributor-form" hidden>
+        <p>Your drawings will be saved as attestations made by you. Who are you? This is kept in this browser only, for your next save.</p>
+        <label for="c-name">Your name</label>
+        <input id="c-name" required autocomplete="name">
+        <label for="c-orcid">ORCID iD <small>(optional)</small></label>
+        <input id="c-orcid" placeholder="0000-0002-1825-0097" autocomplete="off">
+        <p id="c-error" class="warn" hidden></p>
+        <p><button class="primary" type="submit">Continue</button> <button type="button" id="c-cancel">Cancel</button></p>
+      </form>
+      <p id="contributor-line" hidden></p>
+      <p><button id="save" class="primary" type="button">Save as PLATO JSON</button></p>
+      <div id="save-result"></div>
+    </section>
+  </div>
+
+  <div class="chora-mapwrap">
+    <div id="map" aria-label="Map"></div>
+    <div class="map-tools" id="draw-tools" role="toolbar" aria-label="Draw" hidden>
+      <button type="button" data-mode="point" title="Draw a point">Point</button>
+      <button type="button" data-mode="linestring" title="Draw a line: click each vertex, and click the last one again to finish">Line</button>
+      <button type="button" data-mode="polygon" title="Draw an area: click each corner, and click the first one again to finish">Area</button>
+      <button type="button" data-mode="select" title="Select a drawing to move or reshape it">Edit</button>
+      <button type="button" data-mode="static" title="Stop drawing">Stop</button>
+    </div>
+    <details class="basemaps" id="basemaps">
+      <summary>Basemap: <span id="basemap-name">Natural Earth (this site)</span></summary>
+      <div id="basemap-options"></div>
+    </details>
+  </div>
+</main>
+<footer>
+  <p>Checked against PLATO <span id="plato-version">…</span>.</p>
+  <p>PLATO: <a href="https://pelagios.org/place-attestation-ontology/guide/">the guide</a> · <a href="https://pelagios.org/place-attestation-ontology/">the ontology reference</a>. PLATO tools: <a href="https://github.com/pelagios/plato-tools">source code</a> (BSD 3-Clause), set in <a href="./fonts/Alegreya-OFL.txt">Alegreya</a> and <a href="./fonts/AlegreyaSans-OFL.txt">Alegreya Sans</a> (SIL Open Font Licence), with icons from <a href="./icons/Lucide-ISC.txt">Lucide</a> (ISC Licence). The map: <a href="https://www.naturalearthdata.com/">Natural Earth</a> (public domain), drawn with <a href="https://maplibre.org/">MapLibre GL JS</a> (BSD 3-Clause), and drawing with <a href="https://terradraw.io/">Terra Draw</a> (MIT). PLATO is published by the <a href="https://pelagios.org">Pelagios Network</a> Place Working Group.</p>
+</footer>
+<script type="module" src="./src/chora/app.js"></script>
+</body>
+</html>

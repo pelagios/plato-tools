@@ -3,6 +3,7 @@
 // The work happens in a worker (src/engine/worker.js). The page publishes its own state on
 // window.__plato for automated tests; nothing else reads it.
 import { fmtBytes, formatName, progressText, summary, groups, draftNote, explainedLines } from './engine/words.js';
+import { stash as stashForChora } from './chora/handoff.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
 let worker, files = [], input = null, targets = {}, busy = false;
@@ -141,6 +142,16 @@ function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&a
 
 // Cleared once read, so that choosing the same file again (after editing it) is a change too.
 $('picker').onchange = (e) => { choose(e.target.files); e.target.value = ''; };
+// Going to Chora's page with files chosen here hands them over (src/chora/handoff.js), and it offers
+// to open them. Only then, not on every choice: the browser may keep a copy of a stored file, and
+// the files here may be of any size.
+document.addEventListener('click', async (e) => {
+  const a = e.target.closest('a[href="./chora.html"]');
+  if (!a || !files.length || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;
+  e.preventDefault();
+  await stashForChora(files);
+  location.href = a.href;
+});
 const drop = $('drop');
 drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
 drop.ondragleave = () => drop.classList.remove('over');
