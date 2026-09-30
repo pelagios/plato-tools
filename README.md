@@ -236,3 +236,9 @@ npm run build    # static site in dist/ (vendors PLATO's files first)
 ## Licence
 
 BSD 3-Clause. PLATO itself is CC BY 4.0.
+
+The page is set in the PLATO guide's type, Alegreya and Alegreya Sans, under the SIL Open Font
+Licence 1.1 (the licences are in `public/fonts/` and served beside the page). The fonts are
+bundled from the Fontsource packages rather than loaded from Google Fonts, so that opening the
+page makes no request to a third party. The drawing of Plato in the header is the guide's
+(`docs/_static/plato-thinking.png` in the PLATO repository), reduced.

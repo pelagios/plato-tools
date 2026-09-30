@@ -31,7 +31,7 @@ function choose(list) {
   files = [...list];
   if (!files.length) return;
   const c = $('chosen'); c.hidden = false;
-  c.innerHTML = `<ul>${files.map((f) => `<li>${escapeHtml(f.name)} <span class="count">${fmtBytes(f.size)}</span></li>`).join('')}</ul><p>Looking at it…</p>`;
+  c.innerHTML = `<ul>${files.map((f) => `<li><span class="name">${escapeHtml(f.name)}</span> <span class="count">${fmtBytes(f.size)}</span></li>`).join('')}</ul><p>Looking at it…</p>`;
   $('action').hidden = true; $('result').hidden = true;
   Object.assign(state, { phase: 'detecting' });
   worker.postMessage({ cmd: 'detect', files });

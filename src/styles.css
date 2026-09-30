@@ -1,23 +1,45 @@
-:root { --fg: #1d2330; --muted: #5a6475; --bg: #fbfbf8; --card: #ffffff; --line: #d9dde3; --accent: #2f5d8a; --accent-fg: #ffffff; --warn: #8a5a00; --err: #a1261b; --ok: #256b2f; }
-@media (prefers-color-scheme: dark) { :root { --fg: #e8eaee; --muted: #a5adba; --bg: #16191f; --card: #1e2229; --line: #353b45; --accent: #7fb0e0; --accent-fg: #0d1117; --warn: #e2b04a; --err: #f08074; --ok: #7ccf88; } }
+/* Type and colour follow the PLATO guide (https://pelagios.org/place-attestation-ontology/guide/),
+   so the tools read as part of the same family: Alegreya 500 for headings and the name, Alegreya
+   Sans for text and controls, and the guide's link blues as the accent. The fonts are served from
+   this site (Fontsource's copies of the Google Fonts files, OFL licences in public/fonts/) rather
+   than from Google: the page promises that nothing leaves the browser, and a font request to a
+   third party on every visit would be a quiet exception to that. Only the weights used are loaded;
+   each weight's file is split by script, so a browser fetches only the scripts it meets. */
+@import '@fontsource/alegreya/500.css';
+@import '@fontsource/alegreya-sans/400.css';
+@import '@fontsource/alegreya-sans/700.css';
+:root { --fg: #1d2330; --muted: #5a6475; --bg: #fbfbf8; --card: #ffffff; --line: #d9dde3; --accent: #2757dd; --accent-fg: #ffffff; --warn: #8a5a00; --err: #a1261b; --ok: #256b2f; }
+@media (prefers-color-scheme: dark) { :root { --fg: #e8eaee; --muted: #a5adba; --bg: #16191f; --card: #1e2229; --line: #353b45; --accent: #5ca5ff; --accent-fg: #0d1117; --warn: #e2b04a; --err: #f08074; --ok: #7ccf88; } }
 * { box-sizing: border-box; }
-body { margin: 0; font: 17px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--fg); background: var(--bg); }
+:root { --font-text: "Alegreya Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-headings: Alegreya, Georgia, "Times New Roman", serif;
+  --font-mono: "SFMono-Regular", Menlo, Consolas, Monaco, "Liberation Mono", "Lucida Console", monospace; }
+/* Alegreya Sans is small on its body for its size; the guide sets it at 108% for the same reason. */
+body { margin: 0; font: 18px/1.5 var(--font-text); color: var(--fg); background: var(--bg); }
 header.top, main, footer { max-width: 52rem; margin: 0 auto; padding: 0 1.25rem; }
 header.top { padding-top: 2rem; }
-h1 { margin: 0 0 .25rem; font-size: 2rem; }
-.lede { margin: 0 0 .75rem; color: var(--muted); }
+h1, h2, h3, .family { font-family: var(--font-headings); font-weight: 500; }
+h1 { margin: 0 0 .25rem; font-size: 2.4rem; line-height: 1.15; }
+/* The name, with the line that says whose it is, and the guide's drawing of Plato small beside it.
+   The drawing is line art on a transparent ground; in the dark scheme its ink is inverted, as in the guide. */
+.masthead { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; }
+.family { margin: 0; font-size: 1.1rem; color: var(--muted); }
+.plato-mark { width: 150px; height: auto; flex: none; margin-bottom: .35rem; }
+@media (prefers-color-scheme: dark) { .plato-mark { filter: invert(1); } }
+@media (max-width: 34rem) { .plato-mark { width: 96px; } }
+.lede { margin: .5rem 0 .75rem; color: var(--muted); }
 .privacy { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: .75rem 1rem; }
 .cli { margin: .6rem 0 0; color: var(--muted); font-size: .95rem; }
 section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.25rem; margin: 1.25rem 0; }
 h2 { font-size: 1.2rem; margin: 0 0 .75rem; display: flex; align-items: center; gap: .5rem; }
-.step { display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--accent); color: var(--accent-fg); font-size: .95rem; }
+.step { font-family: var(--font-text); font-weight: 400; font-variant-numeric: lining-nums; display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--accent); color: var(--accent-fg); font-size: .95rem; }
 .drop { display: block; border: 2px dashed var(--line); border-radius: 10px; padding: 1.5rem; text-align: center; cursor: pointer; }
 .drop.over { border-color: var(--accent); }
 .drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .drop small { display: block; color: var(--muted); margin-top: .5rem; }
 #chosen { margin-top: .75rem; }
 #chosen ul { margin: .25rem 0; padding-left: 1.25rem; }
-.detected { font-weight: 600; }
+.detected { font-weight: 700; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
 button, select, input[type=url] { font: inherit; }
 button { padding: .45rem 1rem; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--fg); cursor: pointer; }
@@ -28,18 +50,22 @@ select { padding: .4rem; border-radius: 6px; max-width: min(100%, 30rem); }
 details#options { margin-top: .75rem; }
 .opt { margin: .6rem 0; }
 .opt small { display: block; color: var(--muted); }
-#phase { font-variant-numeric: tabular-nums; }
+#phase { font-variant-numeric: lining-nums tabular-nums; }
 .report-group h3 { font-size: 1.05rem; margin: 1rem 0 .4rem; }
 .report-group.error h3 { color: var(--err); } .report-group.warning h3 { color: var(--warn); } .report-group.loss h3 { color: var(--muted); }
 .item { border-top: 1px solid var(--line); padding: .45rem 0; }
 .item summary { cursor: pointer; }
-.item .count { font-variant-numeric: tabular-nums; color: var(--muted); margin-left: .35rem; }
-.item ul { margin: .3rem 0 .2rem; padding-left: 1.25rem; font-size: .9rem; color: var(--muted); overflow-wrap: anywhere; }
-.good { color: var(--ok); font-weight: 600; }
+.count, .item .count { font-variant-numeric: lining-nums tabular-nums; color: var(--muted); margin-left: .35rem; }
+.item ul { margin: .3rem 0 .2rem; padding-left: 1.25rem; font: .8rem/1.5 var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
+.good { color: var(--ok); font-weight: 700; }
 .warn { color: var(--warn); }
 footer { color: var(--muted); font-size: .9rem; padding-bottom: 2rem; }
 footer .draft { color: var(--err); }
-code { font-size: .92em; }
+/* Data, file names and code keep a monospace face, as in the guide. */
+code, #chosen li .name { font-family: var(--font-mono); font-size: .85em; }
 a { color: var(--accent); }
 a:visited { color: var(--accent); }
+/* A visible focus ring everywhere, and on the drop zone when its hidden file input has focus. */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.drop:has(input:focus-visible) { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: 2px; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
