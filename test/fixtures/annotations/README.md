@@ -47,3 +47,26 @@ illustrative, and the identifiers are made up.
   flagged as having no match (no value); a rich-text comment as HTML; a tag from a vocabulary as
   `{ label, id }`; a PDF target with a `page=` fragment; an image target with a media-fragment
   region; and an annotation with only a tag.
+
+## The mapping
+
+How `src/formats/annotations.js` reads an annotation, key by key. The PLATO guide explains the same
+for the people who made the annotations:
+[Annotations from Recogito](https://pelagios.org/place-attestation-ontology/guide/annotations.html).
+Each link from a passage to a place becomes one attestation-centric attestation about that place.
+
+| In the annotation | In PLATO | Notes |
+|---|---|---|
+| The place link: Recogito's `identifying` body (the address in its `value`), Studio's `geotagging` body (the `id` of its GeoJSON Feature), or a W3C `identifying` or `linking` body's `source` | `about` | Only a web address; a gazetteer's own id is reported. One passage linked to several places gives one attestation each |
+| The words marked (`TextQuoteSelector` `exact`); for an image, a `transcribing` body | `names[].toponym`, with `formStatus` `plato:Attested` | A transcription beside a quote is a note |
+| The annotated document (the target's `source`, and its `label` as the title) | `citations[].source` | Recogito Studio writes its project's id here: kept as the title, with a warning |
+| The selectors | `citations[].locator`, in words | "characters 1083 to 1092", "region at x 2948, y 4087, 197 by 173 pixels", "row 2" |
+| The link body's `creator` (else the annotation's) | `contributor` | A web address, or a name; an internal user id is reported |
+| `created`, `modified` (of the link body, else the annotation) | `created`, `modified` | Recogito v1 writes only `modified` |
+| The annotation's `id` | `notes` ("From annotation …") | Never the attestation's `@id`: an annotation can be edited and exported again under the same address. A Studio UUID is written as `urn:uuid:` |
+| Comments (`commenting`, `replying`), a place body's `note`, free tags | `notes` | |
+| A tag that is the address of a vocabulary concept | `types[]` | |
+
+A place link with no `creator` was made by Recogito's own name recognition and never saved by a
+person, so it is left out and reported. A `status` on a body (`VERIFIED`, `UNVERIFIED`,
+`NOT_IDENTIFIABLE`) is honoured.
