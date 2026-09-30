@@ -20,6 +20,8 @@ header.top, main, footer { max-width: 52rem; margin: 0 auto; padding: 0 1.25rem;
 header.top { padding-top: 2rem; }
 h1, h2, h3, .family { font-family: var(--font-headings); font-weight: 500; }
 h1 { margin: 0 0 .25rem; font-size: 2.4rem; line-height: 1.15; }
+/* PLATO's logo, the pin, set before the name at about cap height. */
+h1 .logo { height: .9em; width: auto; margin-right: .3em; vertical-align: -.08em; }
 /* The name, with the line that says whose it is, and the guide's drawing of Plato small beside it.
    The drawing is line art on a transparent ground; in the dark scheme its ink is inverted, as in the guide. */
 .masthead { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; }

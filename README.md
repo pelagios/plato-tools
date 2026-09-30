@@ -1,3 +1,5 @@
+<img src="public/logo/plato-mark.svg" alt="" width="40" align="left">
+
 # PLATO tools
 
 Check and convert data about places in the formats of
