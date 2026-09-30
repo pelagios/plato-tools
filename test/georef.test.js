@@ -9,7 +9,7 @@ import { addPlatoFormats, strictFormatLogger } from '../src/lib/formats.js';
 import { DataError } from '../src/engine/input.js';
 import {
   readGeoreference, toWorld, toPixels, georefNote, georefCitation, matchesTarget, matchTarget, containsRegion, SOFTWARE,
-  allmapsLookupUrl, LABEL_ANCHOR, TRANSFORMATION_WORDS, georefAnnotationCitation,
+  allmapsLookupUrl, LABEL_ANCHOR, TRANSFORMATION_WORDS, georefAnnotationCitation, allmapsTransformationName,
 } from '../src/engine/georef/index.js';
 
 const DIR = 'test/fixtures/georef/';
@@ -924,3 +924,96 @@ test('readGeoreference returns g frozen all the way down, and a clone or a sprea
   assert.deepEqual(await at(copy), here);
   assert.deepEqual(await at({ ...g }), here);
 });
+
+// ---- The annotation's transformation, as Allmaps names it -------------------------------------
+
+/** ROCQUE with its own transformation replaced (control points and everything else unchanged). */
+function withTransformation(transformation) {
+  const a = clone(ROCQUE);
+  a.body.transformation = transformation;
+  return a;
+}
+
+test("readGeoreference reads a polynomial's order from the annotation as Allmaps' parser normalises it; order 1 is the control", async () => {
+  const { parseAnnotation } = await import('@allmaps/annotation');
+  for (const [order, name] of [[2, 'polynomial2'], [3, 'polynomial3'], [1, 'polynomial']]) {
+    const a = withTransformation({ type: 'polynomial', options: { order } });
+    // As @allmaps/annotation gives it: type 'polynomial' with the order in options.
+    assert.deepEqual(parseAnnotation(a)[0].transformation, { type: 'polynomial', options: { order } });
+    const g = await readGeoreference(a);
+    assert.equal(g.transformation, name, `order ${order}`);
+    assert.equal((await toWorld(g, pt([5000, 5000]), { space: 'image' })).record.transformation, name);
+  }
+  // No order is order 1.
+  assert.equal((await readGeoreference(withTransformation({ type: 'polynomial' }))).transformation, 'polynomial');
+  // An order Allmaps does not have is refused; the orders above are the control.
+  await assert.rejects(readGeoreference(withTransformation({ type: 'polynomial', options: { order: 4 } })), (e) => isDataError(e) && /order 4, which is not supported/.test(e.message));
+});
+
+test('a bare "polynomial2" in the annotation is order 1, as Allmaps\' parser reads it; { type, options: { order: 2 } } is the control', async () => {
+  const { parseAnnotation } = await import('@allmaps/annotation');
+  for (const bare of ['polynomial2', { type: 'polynomial2' }, 'polynomial3', { type: 'polynomial3' }]) {
+    const a = withTransformation(bare);
+    assert.equal(parseAnnotation(a)[0].transformation, undefined, `Allmaps gives no transformation for ${JSON.stringify(bare)}`);
+    assert.equal((await readGeoreference(a)).transformation, 'polynomial', JSON.stringify(bare));
+  }
+  assert.equal((await readGeoreference(withTransformation({ type: 'polynomial', options: { order: 2 } }))).transformation, 'polynomial2');
+});
+
+test('allmapsTransformationName: the TransformationType Allmaps draws with, for each of ours, as @allmaps/transform converts them', async () => {
+  const g2 = await readGeoreference(withTransformation({ type: 'polynomial', options: { order: 2 } }));
+  assert.equal(allmapsTransformationName(g2), 'polynomial2');
+  assert.equal(allmapsTransformationName(await rocque()), 'thinPlateSpline');
+  assert.equal(allmapsTransformationName(await readGeoreference(DOMINIONS)), 'polynomial1');
+  // A record works too.
+  assert.equal(allmapsTransformationName((await toWorld(g2, pt([5000, 5000]), { space: 'image' })).record), 'polynomial2');
+  // Every name is one of the TransformationType names that setMapTransformationType takes (from
+  // the installed @allmaps/transform's types), and is the name Allmaps' own conversion gives the
+  // annotation's { type, options: { order } }.
+  const types = readFileSync('node_modules/@allmaps/transform/dist/shared/types.d.ts', 'utf8');
+  const accepted = /export type TransformationType = ([^;]+);/.exec(types)[1].split('|').map((t) => t.trim().replace(/'/g, ''));
+  assert.ok(accepted.includes('polynomial2') && accepted.length >= 8, accepted.join());
+  const { typeAndOrderToTransformationType } = await import('@allmaps/transform');
+  // (Given the bare names: its conversion takes { type: 'polynomial', options: { order: 2 } } to
+  // 'polynomial1', since it tests type 'polynomial' before the order, so it cannot be the oracle
+  // for the annotation's form, and Chora must not use it to get the name.)
+  assert.equal(typeAndOrderToTransformationType({ type: 'polynomial', options: { order: 2 } }), 'polynomial1');
+  const annotationForm = { polynomial: { type: 'polynomial1' } };
+  for (const name of Object.keys(TRANSFORMATION_WORDS)) {
+    const a = allmapsTransformationName({ transformation: name });
+    assert.ok(accepted.includes(a), `${name} -> ${a}`);
+    // (Its conversion does not know 'straight', which the TransformationType names above include.)
+    if (name !== 'straight') assert.equal(a, typeAndOrderToTransformationType(annotationForm[name] ?? { type: name }), name);
+  }
+  assert.equal(allmapsTransformationName({ transformation: 'straight' }), 'straight');
+  assert.equal(allmapsTransformationName({ transformation: 'polynomial1' }), 'polynomial1');
+  // Control: the check would catch the name Allmaps' renderer falls back to for an order-2 map.
+  assert.notEqual(allmapsTransformationName(g2), typeAndOrderToTransformationType({ type: 'polynomial' }));
+  // Not a transformation: a TypeError.
+  for (const bad of [{ transformation: 'wobbly' }, { transformation: 'toString' }, {}, null]) {
+    assert.throws(() => allmapsTransformationName(bad), TypeError, JSON.stringify(bad));
+  }
+});
+
+test("an order-2 annotation is placed where Allmaps' renderer draws it at order 2, not where it falls back to order 1", async () => {
+  // No public Allmaps annotation of order 2 or 3 exists (test/fixtures/georef/README.md), so the
+  // real Rocque annotation is given order 2 here. The reference values were computed by
+  // @allmaps/project's ProjectedGcpTransformer with the full type 'polynomial2'.
+  const ref = fixture('allmaps-render-reference.json');
+  const R = 6371008.8, rad = Math.PI / 180;
+  const metres = ([a, b], [c, d]) => 2 * R * Math.asin(Math.sqrt(Math.sin((d - b) * rad / 2) ** 2 + Math.cos(b * rad) * Math.cos(d * rad) * Math.sin((c - a) * rad / 2) ** 2));
+  const g = await readGeoreference(withTransformation({ type: 'polynomial', options: { order: 2 } }));
+  const at2 = ref.cases.find((c) => c.file === 'bpl-rocque-annotation.json' && c.type === 'polynomial2');
+  const at1 = ref.cases.find((c) => c.file === 'bpl-rocque-annotation.json' && c.type === 'polynomial');
+  assert.ok(at2.results.length > 40);
+  let far = 0;
+  for (const { pixel, lonLat } of at2.results) {
+    const { geojson } = await toWorld(g, pt(pixel), { space: 'image', precision: 12 }); // the annotation's own order
+    assert.ok(metres(geojson.coordinates, lonLat) < 0.001, `${pixel}: ${metres(geojson.coordinates, lonLat)} m`);
+    const one = at1.results.find((r) => r.pixel[0] === pixel[0] && r.pixel[1] === pixel[1]);
+    if (one) far = Math.max(far, metres(geojson.coordinates, one.lonLat));
+  }
+  // Control: drawn at order 1 (type alone), the map would be tens of kilometres elsewhere.
+  assert.ok(far > 10000, `${far} m`);
+});
+

@@ -46,9 +46,26 @@ carry no rights statement.
 
 The file names say `bpl` because Digital Commonwealth is run by the Boston Public Library.
 
+## No real annotation of polynomial order 2 or 3
+
+None is stored, because none is public. Allmaps' full export of its maps,
+<https://files.allmaps.org/maps.ndjson> (201,631,727 bytes, last modified 2026-09-29T05:09:01Z,
+read 2026-09-30), holds 64,586 maps: 55,455 of polynomial order 1, 8,433 thin plate splines and 698
+Helmert transformations, and not one of polynomial order 2 or 3 (nor a projective one). Nor did a
+two GitHub code searches, or the test data of the allmaps/allmaps repository (commit `1586076d`), find one. So the order-2
+tests take the real Rocque annotation and give it `{ "type": "polynomial", "options": { "order": 2 } }`
+in memory (see below). Agreement with Allmaps' renderer at orders 2 and 3 is still tested against
+@allmaps/project with the full type: `allmaps-render-reference.json` already has `polynomial2`
+and `polynomial3` cases for all three maps, and one test reads the order-2 Rocque annotation with
+its own transformation and checks it against the `polynomial2` values, and against the order-1
+values that Allmaps' renderer would draw it with if given only the type (tens of km away).
+
 ## Made in the tests, not stored
 
 The canvas-scaling tests make a copy of `bpl-rocque-manifest.json` in memory with the first
 canvas at half (and, for the control, a third) of the image's size. The too-few-control-points
-test removes control points from a copy of a real annotation. The not-a-georeference test uses
+test removes control points from a copy of a real annotation. The transformation tests give a copy of
+`bpl-rocque-annotation.json` another `transformation` (polynomial of order 1, 2, 3 or 4, and bare
+"polynomial2" strings, which Allmaps' parser does not read as a transformation at all); the version
+tests remove or blank `body._allmaps.version` and `modified` in a copy. The not-a-georeference test uses
 `test/fixtures/annotations/recogito-v1-islandia-map.jsonld`.

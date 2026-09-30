@@ -2,12 +2,14 @@
 // Georeference Annotation (as Allmaps makes them), for every PLATO tool that needs it.
 //
 //   import { readGeoreference, toWorld, toPixels, georefNote, georefCitation, georefAnnotationCitation,
-//            matchesTarget, matchTarget, containsRegion, allmapsLookupUrl } from './engine/georef/index.js'
+//            matchesTarget, matchTarget, containsRegion, allmapsLookupUrl,
+//            allmapsTransformationName } from './engine/georef/index.js'
 //
 // ASYNC: readGeoreference, toWorld and toPixels return Promises. The Allmaps libraries they use
 // are loaded by dynamic import() the first time one of them is called, so that a page which never
 // meets a georeference never downloads them. georefNote, georefCitation, georefAnnotationCitation,
-// matchesTarget, matchTarget and containsRegion are synchronous and never load Allmaps.
+// matchesTarget, matchTarget, containsRegion and allmapsTransformationName are synchronous and
+// never load Allmaps.
 // allmapsLookupUrl is async only because it hashes with Web Crypto; it builds a URL and fetches
 // nothing.
 //
@@ -78,7 +80,20 @@ function transformationName(t, where) {
   }
   return n;
 }
-/** An annotation's own transformation ({ type, options: { order } }) in our names. */
+/**
+ * An annotation's own transformation ({ type, options: { order } }) in our names.
+ *
+ * The ANNOTATION's order is authoritative. @allmaps/annotation's parser gives a polynomial of order
+ * 2 or 3 as { type: 'polynomial', options: { order } }, and that order is read here. @allmaps/render's
+ * WarpedMap (1.0.0-beta.84, dist/maps/WarpedMap.js line 209) takes only transformation.type, so
+ * Allmaps' renderer DRAWS such a map at order 1 unless told otherwise; Chora makes it draw what the
+ * annotation says with setMapTransformationType(allmapsTransformationName(g)). So positions here
+ * follow the annotation, and the map drawn follows them.
+ *
+ * A bare "polynomial2" or "polynomial3" in place of { type, options } is not a transformation to
+ * @allmaps/annotation's parser (1.0.0-beta.38 gives none, which Allmaps takes as order 1), and so it
+ * is order 1 here too: what Allmaps reads, not what the text might have meant.
+ */
 function annotationTransformation(t) {
   if (!t || !t.type) return 'polynomial';
   const order = t.options && t.options.order;
@@ -88,6 +103,19 @@ function annotationTransformation(t) {
     throw new DataError(`The georeference names a polynomial transformation of order ${order}, which is not supported (orders 1, 2 and 3 are).`);
   }
   return transformationName(t.type, 'The georeference');
+}
+/**
+ * The name Allmaps gives g's transformation (a record works too), as @allmaps/transform's
+ * TransformationType spells it: 'polynomial1', 'polynomial2', 'polynomial3', 'thinPlateSpline',
+ * 'projective', 'helmert', 'straight' or 'linear'. For @allmaps/maplibre's (WarpedMapLayer's)
+ * setMapTransformationType, so that the map is drawn with the transformation it is read with. A
+ * TypeError when g names no known transformation.
+ */
+export function allmapsTransformationName(g) {
+  const t = g && g.transformation;
+  const name = typeof t === 'string' ? ALIASES[t] ?? t : undefined;
+  if (!name || !Object.hasOwn(TRANSFORMATIONS, name)) throw new TypeError(`The georeference names no known transformation (${JSON.stringify(t ?? null)}).`);
+  return TRANSFORMATIONS[name].allmaps;
 }
 function enoughPoints(g, name) {
   const { min, words } = TRANSFORMATIONS[name];
