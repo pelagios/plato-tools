@@ -10,6 +10,7 @@
 //
 // Everything that comes from the data is escaped. A link is made only of an http(s) address:
 // anything else (javascript:, data:) is shown as text.
+import { doiOf } from '../address.js';
 
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const isWeb = (s) => typeof s === 'string' && /^https?:\/\/[^\s]+$/i.test(s);
@@ -238,7 +239,8 @@ export function landingPage(ctx) {
   row('Version', esc(join([g.version, g.status])));
   row('Keywords', esc(list(g.keywords).join(', ')));
   row('Covers', join([list(g.spatial).map((s) => a(s)).join(', '), g.temporal ? esc(join([g.temporal.startDate, g.temporal.endDate], ' to ')) : ''], '; '));
-  const doi = ctx.conceptDoi ? String(ctx.conceptDoi).replace(/^https?:\/\/(dx\.)?doi\.org\//, '') : null;
+  // doiOf: the same reading of a DOI as the deposit files and the JSON-LD (doi:…, https://doi.org/…).
+  const doi = ctx.conceptDoi ? doiOf(ctx.conceptDoi) : null;
   const cite = `${list(g.creator).map((c) => (typeof c === 'string' ? '' : c?.name)).filter(Boolean).join(', ')}${list(g.creator).some((c) => c?.name) ? '. ' : ''}${g.title || 'Gazetteer'}${g.version ? `, version ${g.version}` : ''}. ${doi ? 'https://doi.org/' + doi : ctx.scheme.dataset}`;
   const dl = ctx.downloads.map((d) => `<li>${a('download/' + d.file, d.file, { internal: true })} <span class="muted">${esc(d.format)}, ${esc(d.sizeText)}</span></li>`).join('');
   const p = ctx.places;

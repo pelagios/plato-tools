@@ -124,7 +124,8 @@ const creatorsOf = (g) => list(g.creator).filter((c) => c && typeof c === 'objec
 // person's, a ROR an organisation's. Without either it is 'unknown', and nothing is inferred from
 // the name: 'University of Nottingham, Institute for Name-Studies' has a comma and is no person.
 function kindOf(id) {
-  if (looksOrcid(id)) return 'person';
+  // A malformed ORCID says nothing sure about who this is (orcidProblem reports it).
+  if (looksOrcid(id) && !orcidProblem(id)) return 'person';
   if (looksRor(id)) return 'organisation';
   return 'unknown';
 }

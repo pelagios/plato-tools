@@ -568,3 +568,11 @@ test("PLATO's examples are reported on without failing", async () => {
     if (paths.length > 1) assert.equal(r.report.items.find((i) => i.kind === 'base-temporary')?.severity, 'warning', paths[0]);
   }
 });
+
+test('a malformed ORCID does not make its author a person on the landing page', () => {
+  const g = { title: 't', creator: [{ '@id': 'https://orcid.org/0000-0002-1825-0098', name: 'Bad, Digit' }, { '@id': 'https://orcid.org/0000-0002-1825-0097', name: 'Carberry, Josiah' }] };
+  const s = schemaOrgDataset(g, scheme(BASE), {});
+  const [bad, good] = s.creator;
+  assert.equal(bad['@type'], undefined, JSON.stringify(bad));     // its check digit is wrong: nothing sure about who it is
+  assert.equal(good['@type'], 'Person', JSON.stringify(good));    // control: a well-formed ORCID is a person
+});

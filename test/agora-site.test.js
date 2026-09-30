@@ -728,3 +728,16 @@ test('a publish site that fails part-way leaves nothing it made, and keeps what 
   assert.ok(existsSync(join(out, 'king-john-site/place/windsor/index.html')));
   assert.notEqual(readFileSync(join(out, 'king-john-repo/.github/workflows/pages.yml'), 'utf8'), 'mine\n');
 });
+
+test('a concept DOI is cited the same way on the landing page, whatever form it was given in', async () => {
+  for (const conceptDoi of ['10.5281/zenodo.1', 'doi:10.5281/zenodo.1', 'https://doi.org/10.5281/zenodo.1']) {
+    const ok = await siteInBrowser([jsonFile(kingJohn({ status: 'published' }))], { conceptDoi });
+    const zip = Object.values(ok.zips).find((z) => z['index.html']);
+    assert.ok(zip, ok.kinds.join());
+    const landing = strFromU8(zip['index.html']);
+    // Only the How to cite paragraph: the page's JSON-LD names the DOI too, correctly, by another route.
+    const cite = landing.split('<h2>How to cite</h2>')[1]?.split('</p>')[0] || '';
+    assert.ok(cite.includes('https://doi.org/10.5281/zenodo.1'), `${conceptDoi}: ${cite}`);
+    assert.ok(!/doi\.org\/(doi:|https?:)/.test(cite), `${conceptDoi}: ${cite}`);
+  }
+});
