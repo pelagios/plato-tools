@@ -296,6 +296,22 @@ test('a choice inside an rdg, and an app inside the part of a choice not taken: 
   assert.deepEqual(about(m), [PL(1), PL(4)]);
   assert.deepEqual(examples(m, 'tei-variant').map((e) => e.split(' (')[0]), ['rdg: Remus', 'orig: Ueii']);
 });
+// ---- entities declared in the file's own DOCTYPE ------------------------------------------------------
+const withDoctype = (decls, body) => tei(body).replace('<TEI ', `<!DOCTYPE TEI [${decls}]>\n<TEI `);
+test('entities the file declares with their text in its DOCTYPE are read; one it does not declare is refused, saying so', () => {
+  const m = mapped(withDoctype('<!ENTITY nbsp "&#160;"><!ENTITY rom "Ro&#x6D;a"><!ENTITY % param "ignored">', `<p>${pn(1, '&rom;&nbsp;Nova')}</p>`));
+  assert.deepEqual(m.doc.attestations.map((a) => a.names[0].toponym), ['Roma Nova']);
+  assert.throws(() => mapped(tei(`<p>${pn(1, 'Roma&nbsp;Nova')}</p>`)), (e) => e instanceof DataError && /does not declare/.test(e.message) && /own DOCTYPE/.test(e.message));
+  assert.throws(() => mapped(withDoctype('<!ENTITY hi "<hi>Roma</hi>">', `<p>${pn(1, '&hi;')}</p>`)), (e) => e instanceof DataError && /not supported yet/.test(e.message));
+});
+test('an external entity is never read: using one stops the file, saying why; declaring one and not using it is harmless', () => {
+  const ext = '<!ENTITY secret SYSTEM "file:///etc/hostname"><!ENTITY web PUBLIC "-//X//EN" "https://example.org/x.ent">';
+  for (const e of ['secret', 'web']) {
+    assert.throws(() => mapped(withDoctype(ext, `<p>${pn(1, `&${e};`)}</p>`)), (x) => x instanceof DataError && x.message.includes(`&${e};`) && /never read, for safety/.test(x.message), e);
+  }
+  const ok = mapped(withDoctype(ext, `<p>${pn(1, 'Roma')}</p>`));
+  assert.deepEqual(ok.doc.attestations.map((a) => a.names[0].toponym), ['Roma'], 'control: the same DOCTYPE, the entities unused');
+});
 test('every kind the reader reports has words, and a severity the report knows', () => {
   for (const [k, sev] of Object.entries(TEI_KINDS)) {
     assert.ok(LOSS_TEXT[k], k);

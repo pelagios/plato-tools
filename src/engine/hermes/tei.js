@@ -158,7 +158,12 @@ export class TeiReader {
     this.inHeader = 0; this.inText = 0; this.inNote = 0; this.inPlaceMention = 0;
     this.seen = new Set();       // (kind, example) pairs reported with once()
     const p = this.parser = new SaxesParser({ xmlns: true, position: true });
-    p.on('error', (e) => { throw new DataError(`The XML is not well formed, so the file cannot be read past that point (${String(e.message).split('\n')[0]}).`); });
+    p.on('error', (e) => {
+      const why = String(e.message).split('\n')[0];
+      if (/undefined entity/.test(why)) throw new DataError(`The XML uses an entity (such as &nbsp;) that the file does not declare, so it cannot be read past that point (${why}). Only entities declared with their text in the file's own DOCTYPE, such as <!ENTITY nbsp "&#160;">, are read; an external DTD is never fetched. Declare the entity, or write the character itself.`);
+      throw new DataError(`The XML is not well formed, so the file cannot be read past that point (${why}).`);
+    });
+    p.on('doctype', (d) => this.doctype(d));
     p.on('xmldecl', (d) => {
       // The file is decoded as UTF-8 (as TextDecoderStream does by default); a file that says it is
       // in another encoding would be read with its letters wrong, silently, so it is refused.
@@ -168,6 +173,36 @@ export class TeiReader {
     p.on('closetag', (t) => this.close_(t));
     p.on('text', (t) => this.text(t));
     p.on('cdata', (t) => this.text(t));
+  }
+  /**
+   * The entities a DOCTYPE declares in the file itself (<!DOCTYPE TEI [<!ENTITY nbsp "&#160;">]>),
+   * given to the parser, so that &nbsp; reads as the text declared. Only an entity whose text is in
+   * the declaration is read, and only text: one whose text holds markup is refused where it is used.
+   * An external entity (SYSTEM or PUBLIC) is never fetched or read, from the web or from the disk,
+   * whatever it names: a file must not be able to make the tools read another file. Using one
+   * stops the file, saying so; declaring one and not using it is harmless.
+   */
+  doctype(text) {
+    const open = text.indexOf('['), close = text.lastIndexOf(']');
+    if (open < 0 || close < open) return;
+    const E = this.parser.ENTITIES;
+    const refuse = (name, why) => Object.defineProperty(E, name, { configurable: true, get: () => { throw new DataError(`The file uses the entity &${name};, ${why}`); } });
+    const DECL = /<!ENTITY\s+(%\s+)?([^\s%"'>]+)\s+(?:"([^"]*)"|'([^']*)'|((?:SYSTEM|PUBLIC)\b[^>]*))\s*>/g;
+    for (const [, param, name, dq, sq, external] of text.slice(open + 1, close).matchAll(DECL)) {
+      // A parameter entity is the DTD's own; the first declaration counts; XML's five are XML's.
+      if (param || Object.hasOwn(E, name) || ['lt', 'gt', 'amp', 'apos', 'quot'].includes(name)) continue;
+      if (external !== undefined) { refuse(name, `which the file's DOCTYPE declares as another file (${norm(external)}). An entity from another file is never read, for safety, so the file cannot be read past it: write the entity's text in its place.`); continue; }
+      let bad = false;
+      const value = (dq ?? sq).replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[^\s&;]+);/g, (all, ref) => {
+        if (ref[0] === '#') { const n = ref[1] === 'x' ? parseInt(ref.slice(2), 16) : parseInt(ref.slice(1), 10); try { return String.fromCodePoint(n); } catch { bad = true; return all; } }
+        const v = Object.getOwnPropertyDescriptor(E, ref)?.value ?? { lt: '<', gt: '>', amp: '&', apos: "'", quot: '"' }[ref];
+        if (typeof v !== 'string') { bad = true; return all; }
+        return v;
+      });
+      // Markup in an entity's text (<hi>…</hi>), or an entity of an entity not declared, is not supported yet.
+      if (bad || /</.test(dq ?? sq)) { refuse(name, 'whose text in the DOCTYPE holds markup or an entity that is not declared, which is not supported yet: write its text in its place.'); continue; }
+      Object.defineProperty(E, name, { value, enumerable: true, configurable: true, writable: true });
+    }
   }
   write(chunk) { this.parser.write(chunk); return this.take(); }
   close() {
