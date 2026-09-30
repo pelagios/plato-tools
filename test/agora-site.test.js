@@ -654,6 +654,22 @@ test('a value that would change what the workflow does is refused, and nothing i
   assert.match(wf, / - "data\/kj\.json"/);
 });
 
+test('a repository not of the form OWNER/NAME, or a concept DOI that is not a DOI, is refused, and nothing is written', async () => {
+  for (const [options, kind] of [[{ repo: 'just-a-name' }, 'bad-repo'], [{ repo: 'owner/name/extra' }, 'bad-repo'], [{ repo: '-owner/name' }, 'bad-repo'],
+    [{ conceptDoi: 'zenodo 123' }, 'bad-doi'], [{ conceptDoi: 'https://doi.org/11.5281/zenodo.1' }, 'bad-doi'], [{ conceptDoi: '10.12/x' }, 'bad-doi']]) {
+    const s = await siteInBrowser([jsonFile(kingJohn())], { toolsRef: 'abc1234', ...options });
+    const i = s.r.report.items.find((x) => x.kind === kind);
+    assert.ok(i && i.severity === 'error', `${JSON.stringify(options)}: ${s.kinds}`);
+    assert.equal(i.examples[0], Object.values(options)[0]);
+    assert.equal(s.r.outputs.length, 0, JSON.stringify(options));
+  }
+  // The control: good ones, in each form a DOI is given in, make both trees and raise neither.
+  for (const conceptDoi of ['10.5281/zenodo.1', 'doi:10.5281/zenodo.1', 'https://doi.org/10.5281/zenodo.1']) {
+    const ok = await siteInBrowser([jsonFile(kingJohn())], { toolsRef: 'abc1234', repo: 'Pelagios/kj.site', conceptDoi });
+    assert.ok(!ok.kinds.includes('bad-repo') && !ok.kinds.includes('bad-doi') && ok.r.outputs.length === 2, ok.kinds.join());
+  }
+});
+
 test('spreadsheet tables chosen file by file in the page: named after the base, and the guessed path is said', async () => {
   const s = await siteInBrowser(tableFiles(TABLES), { base: 'https://w3id.org/test-x/', toolsRef: 'abc1234' });
   assert.ok(s.zips['test-x-site.zip']?.['index.html'], Object.keys(s.zips).join());

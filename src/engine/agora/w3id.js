@@ -15,7 +15,7 @@
 // Only for a dataset that is published (E1): once w3id's maintainers merge the rules, the addresses
 // are public and meant to be cited for good. Only for a w3id base (E2): any other base IS the site's
 // address, and needs no redirects.
-import { releaseProblem, normaliseBase, servability, sourcesOf, unservableExample } from './address.js';
+import { REPO, releaseProblem, normaliseBase, servability, sourcesOf, unservableExample } from './address.js';
 import { htaccess, testRows, toTsv, SITE_FILES } from './w3id/rules.js';
 import { readme, pullRequest, steps, script } from './w3id/texts.js';
 
@@ -57,7 +57,6 @@ export const TEXT = {
 };
 
 const GITHUB_USER = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
-const REPO = /^([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38})\/([A-Za-z0-9._-]{1,100})$/;
 // What may go into a rule's target: nothing Apache would read as syntax (a space, '$', '%', a quote).
 const SITE_URL = /^https?:\/\/[A-Za-z0-9.-]+(:\d+)?(\/[A-Za-z0-9._~/-]*)?$/;
 const SEGMENT_OK = /^[A-Za-z0-9_~-][A-Za-z0-9._~-]*$/;

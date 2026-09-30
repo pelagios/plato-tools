@@ -27,6 +27,7 @@ export const PUBLISH_PARTS = { report: fair, mint, site, w3id };
 export const TEXT = {
   'dataset-has-problems': 'The dataset has problems of its own, which are not listed here; check it to see them. Nothing is written for publishing until they are fixed.',
   'dataset-not-read': 'The dataset could not be read to the end, so nothing was written.',
+  'bad-doi': "The concept DOI (--concept-doi) is not a DOI: give it as 10.<digits>/<suffix>, or as its https://doi.org/ address, as Zenodo shows it. Nothing that would carry it is written.",
   'no-base': "The dataset does not say under what address its places are published: give its base address (the about sheet's base_uri, or uriSpace in PLATO JSON), or give one for this run.",
 };
 

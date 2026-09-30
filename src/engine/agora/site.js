@@ -20,10 +20,11 @@
 // written from what the passes gathered. (RDF and attestation-centric input are the exception: the
 // engine hands their records over from its working database without pausing, so their pages queue
 // in memory until written. At scale, give the site PLATO JSON Lines, as publish mint writes.)
-import { SITE, PARTS, servability, sourcesOf, unservableExample } from './address.js';
+import { SITE, PARTS, REPO, doiOk, servability, sourcesOf, unservableExample } from './address.js';
 import { collectWithdrawn, resolveWithdrawn } from '../../formats/shared.js';
 import { placeDocument, sourceDocument, descriptionDocument, Turtle } from './site/linked.js';
 import { schemaOrgDataset } from './fair.js';
+import { TEXT as SHARED } from './index.js';
 import { siteTarget, TEXT as W3ID_TEXT } from './w3id.js';
 import { placePage, sourcePage, landingPage, placesPage, notFoundPage, citation, PAGE, CSS, CSS_FILE } from './site/html.js';
 import { workflow, readme } from './site/repo.js';
@@ -90,6 +91,7 @@ export const TEXT = {
   // record's page is written, the place is listed on the home page, and the workflow deploys.
   'duplicate-place-published': "Two records are the same place: their addresses are the same, or differ only after '#', which a web server never sees. Only the first has a page and a JSON-LD document. The dataset is published, so its addresses cannot change: the site lists these places on its home page, saying that the downloads hold all their records, and is deployed. The example names the address.",
   'bad-site-url': W3ID_TEXT['bad-site-url'],
+  'bad-repo': W3ID_TEXT['bad-repo'],
   'bad-site-dir': "The site's folder (--site-dir) must be one name of letters, digits and . _ -, not starting with '.'.",
   'unsafe-workflow-value': "A value that goes into the site's workflow could change what the workflow does: it holds a line break, or '${{', which GitHub reads as an expression of its own; or, for the ref of PLATO tools, characters other than letters, digits and . _ / -. Nothing is written: give the value without them. The example names the option.",
   'dataset-path-guessed': "Where the spreadsheet tables are in your repository is not known (the page cannot tell which folder the files were chosen from), so the workflow reads them from the folder the example names. Change the path in .github/workflows/pages.yml (twice) if they are somewhere else, or make the site with the command line, which knows.",
@@ -117,7 +119,7 @@ const SAFE_ANCHOR = /^[A-Za-z][A-Za-z0-9._:~-]*$/;
 export function siteAddress(scheme, options) {
   if (options.siteUrl) return options.siteUrl.endsWith('/') ? options.siteUrl : options.siteUrl + '/';
   if (scheme.kind === 'github.io' || scheme.kind === 'custom') return scheme.base;
-  const m = typeof options.repo === 'string' && options.repo.match(/^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)$/);
+  const m = typeof options.repo === 'string' && REPO.exec(options.repo);
   if (m) {
     const owner = m[1].toLowerCase();
     return m[2].toLowerCase() === `${owner}.github.io` ? `https://${owner}.github.io/` : `https://${owner}.github.io/${m[2]}/`;
@@ -344,6 +346,10 @@ export function create(ctx) {
       const unsafe = Object.entries({ '--repo': options.repo, '--site-url': options.siteUrl, '--tools-ref': toolsRef, '--dataset-path': datasetPath, '--base': options.base, '--concept-doi': options.conceptDoi, '--site-dir': options.siteDir })
         .find(([k, v]) => v !== undefined && v !== null && (/[\r\n]/.test(String(v)) || String(v).includes('${{') || (k === '--tools-ref' && !TOOLS_REF.test(String(v)))));
       if (unsafe) { rep.error('unsafe-workflow-value', TEXT['unsafe-workflow-value'], `${unsafe[0]} ${JSON.stringify(String(unsafe[1]))}`); return; }
+      // The repository names the site's address and goes into the workflow and its README; the DOI
+      // goes onto the landing page and into its Dataset: refused as the w3id rules and the report refuse them.
+      if (options.repo && !REPO.test(String(options.repo))) { rep.error('bad-repo', TEXT['bad-repo'], String(options.repo)); return; }
+      if (options.conceptDoi && !doiOk(options.conceptDoi)) { rep.error('bad-doi', SHARED['bad-doi'], String(options.conceptDoi)); return; }
       if (options.siteDir !== undefined && !SITE_DIR.test(String(options.siteDir))) { rep.error('bad-site-dir', TEXT['bad-site-dir'], String(options.siteDir)); return; }
       const withdrawn = resolveWithdrawn(withdrawals).status;
       const draft = !published;

@@ -220,6 +220,24 @@ test('without a base: the report says so, the same checks are counted, and nothi
   assert.equal(r.outputs.length, 0);
 });
 
+test('a concept DOI that is not a DOI is refused, and no deposit file carries it', async () => {
+  for (const conceptDoi of ['zenodo 123', 'https://doi.org/11.5281/zenodo.1', '10.12/x', '10.5281/']) {
+    const r = await report(doc(GOOD), { conceptDoi });
+    const i = item(r, 'bad-doi');
+    assert.ok(i && i.severity === 'error', `${conceptDoi}: ${kinds(r)}`);
+    assert.equal(i.examples[0], conceptDoi);
+    assert.deepEqual(r.files, {}, conceptDoi);
+    assert.equal(r.outputs.length, 0);
+  }
+  // The control: a DOI in each form it is given in is taken, and written bare.
+  for (const conceptDoi of ['10.5281/zenodo.123', 'doi:10.5281/zenodo.123', 'https://doi.org/10.5281/zenodo.123']) {
+    const r = await report(doc(GOOD), { conceptDoi });
+    assert.equal(item(r, 'bad-doi'), undefined, conceptDoi);
+    assert.equal(r.outputs.length, 1, conceptDoi);
+    assert.equal(JSON.parse(r.files['a-test-gazetteer-of-market-towns-deposit/datacite.json']).data.attributes.doi, '10.5281/zenodo.123');
+  }
+});
+
 // ---- the deposit files ---------------------------------------------------------------------------
 
 /** The top-level keys of a CITATION.cff and their scalar values; list items under their key. No YAML library: the file is written simply enough to read by line. */

@@ -40,6 +40,18 @@ const SAFE_RELEASE = /^[A-Za-z0-9_~-][A-Za-z0-9._~-]*$/;
 // encode one way: they once differed on those five characters, and a place's address did not match.
 export const encodeId = (id) => encodeURIComponent(id).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
 
+// A GitHub repository, OWNER/NAME: the owner a user or organisation name, the name letters, digits
+// and . _ -. The site's workflow and the w3id rules both take one, and must refuse the same.
+export const REPO = /^([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38})\/([A-Za-z0-9._-]{1,100})$/;
+
+/** A DOI as given (bare, doi:…, or its https://doi.org/ address) -> the bare DOI. */
+export const doiOf = (d) => String(d).trim().replace(/^(https?:\/\/(dx\.)?doi\.org\/|doi:)/i, '');
+// What a bare DOI is: the directory 10, a registrant's prefix of digits, '/', and a suffix without
+// spaces. Anything else put into the deposit files or the landing page would name nothing.
+const DOI = /^10\.\d{4,9}\/\S+$/;
+/** Whether a DOI, as given, is one once doiOf() has made it bare. */
+export const doiOk = (d) => DOI.test(doiOf(d));
+
 /** A base address as the scheme uses it: with its closing '/'. Null for one that is not an http(s) URL. */
 export function normaliseBase(base) {
   if (typeof base !== 'string' || !/^https?:\/\/[^/?#\s]+(\/[^?#\s]*)?$/.test(base)) return null;

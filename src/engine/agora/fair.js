@@ -20,7 +20,7 @@
 //
 // The report runs on a dataset the check found problems in (it is a report), and says so; the
 // deposit files are then not written, since they would describe something not fit to deposit.
-import { baseKind, normaliseBase, releaseProblem, servability, sourcesOf, unservableExample } from './address.js';
+import { baseKind, doiOf, doiOk, normaliseBase, releaseProblem, servability, sourcesOf, unservableExample } from './address.js';
 import { TEXT as SHARED } from './index.js';
 
 export const TEXT = {
@@ -121,7 +121,6 @@ const creatorsOf = (g) => list(g.creator).filter((c) => c && typeof c === 'objec
 const escapeHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 /** Plain text as HTML paragraphs, as Zenodo's description is HTML: a blank line parts paragraphs. */
 const paragraphs = (s) => s.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean).map((p) => `<p>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`).join('');
-const doiOf = (d) => String(d).trim().replace(/^(https?:\/\/(dx\.)?doi\.org\/|doi:)/i, '');
 /** A name for a folder: letters and digits joined by '-', without accents. */
 export function slug(s) {
   const t = String(s || '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60).replace(/-+$/, '');
@@ -254,6 +253,10 @@ export function create(ctx) {
         said.push('The deposit files are not written while the dataset has problems.');
       } else if (!ctx.scheme) {
         said.push('The deposit files are not written without a base address.');
+      } else if (options.conceptDoi && !doiOk(options.conceptDoi)) {
+        // The DOI goes into CITATION.cff, datacite.json and the README: better none than one that names nothing.
+        rep.error('bad-doi', SHARED['bad-doi'], String(options.conceptDoi));
+        said.push('The deposit files are not written: the concept DOI is not a DOI.');
       } else {
         const name = `${options.name ? slug(String(options.name).replace(/\.[A-Za-z0-9]{1,8}$/, '')) : slug(g.title)}-deposit`;
         const files = deposit(g, ctx.scheme, options, rep);
