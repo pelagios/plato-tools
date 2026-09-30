@@ -10,11 +10,16 @@
 // Most checks use `lookup()`, a PRIVATE instance with no cross-tab lock (`shared: false, locks: null`),
 // so that no check inherits a queue, a token or a lock from another. The checks of sharing and of
 // locks say so, use endpoints of their own, and each carries a control where overlap is allowed.
+// Pacing across tabs is checked with a fake shared ledger (and with fake-indexeddb for the default
+// one), against a control of two tabs with a ledger each, which the same measure sees cross 600.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createLookup, createPacer, GazetteerError, WHG_ENDPOINT, BLOCKED_AGENTS, USER_AGENT, whgIri, normaliseWhgIri, parseCentroid, parseGeojsonValues,
 } from '../src/engine/gazetteer/index.js';
+// Names added later are read from the namespace, so that a missing one fails its own check only.
+import * as gz from '../src/engine/gazetteer/index.js';
+import { IDBFactory } from 'fake-indexeddb';
 
 const TOKEN = 'tok-5ecret-9f8e7d';
 
@@ -306,9 +311,11 @@ test('an AbortSignal stops the request in flight, and a caller\'s batches still 
   const pending = look.reconcile(names(3), { signal: ac.signal });
   await new Promise((r) => setTimeout(r, 5));
   assert.equal(slow.calls.length, 1);
+  assert.equal(slow.calls[0].init.signal.aborted, false);
   ac.abort();
   await assert.rejects(pending, { name: 'AbortError' });
-  assert.equal(slow.calls[0].init.signal, ac.signal, 'the signal was handed to fetch');
+  // fetch is given a signal of its own (the caller's, or the timeout), which the caller's abort reaches.
+  assert.equal(slow.calls[0].init.signal.aborted, true, "the caller's abort reached fetch");
 
   // Queued: B waits behind A; B is aborted; A finishes; B's request is never sent.
   let release;
@@ -668,8 +675,9 @@ test('createLookup gives one shared lookup per endpoint: one request in flight a
 test('a shared lookup cleans every token it has been given from what it repeats', async () => {
   const FIRST = 'tok-first-77aa', SECOND = 'tok-second-88bb';
   const s = service({ answer: () => reply(401, { detail: `Invalid token ${FIRST} or ${SECOND}` }) });
-  createLookup({ endpoint: 'https://shared-two.example/reconcile', token: FIRST, fetch: s.fetch, locks: null });
-  const look = createLookup({ endpoint: 'https://shared-two.example/reconcile', token: SECOND, fetch: unusedFetch, sleep: noSleep, locks: null });
+  // The first call's options stand, so `sleep` goes there: a later call's would be ignored.
+  createLookup({ endpoint: 'https://shared-two.example/reconcile', token: FIRST, fetch: s.fetch, sleep: noSleep, locks: null });
+  const look = createLookup({ endpoint: 'https://shared-two.example/reconcile', token: SECOND, fetch: s.fetch, locks: null });
   const err = await look.reconcile([{ query: 'a' }]).catch((e) => e);
   assert.equal(s.calls[0].headers.Authorization, `Bearer ${SECOND}`, 'present where it belongs');
   assert.match(err.message, /Invalid token \[token\] or \[token\]/);
@@ -690,7 +698,7 @@ test('with a LockManager, every request (queries, extend, entity, retries) is ma
   assert.equal(unlocked, 0, 'no request was made without the lock');
   assert.ok(locks.requests.length >= 6);
   for (const r of locks.requests) {
-    assert.equal(r.name, 'plato-tools:gazetteer:https://whgazetteer.org');
+    assert.equal(r.name, 'plato-tools:gazetteer:whgazetteer.org');
     assert.equal(r.mode, 'exclusive');
   }
   assert.equal(locks.heldNow, 0, 'every lock let go');
@@ -707,7 +715,7 @@ test('with a LockManager, every request (queries, extend, entity, retries) is ma
 
 test('an AbortSignal stops a lookup waiting for the lock, and the lock is not kept', { timeout: 5000 }, async () => {
   const locks = fakeLocks();
-  const NAME = 'plato-tools:gazetteer:https://whgazetteer.org';
+  const NAME = 'plato-tools:gazetteer:whgazetteer.org';
   // Another tab holds the lock.
   let release;
   const other = locks.request(NAME, { mode: 'exclusive' }, () => new Promise((r) => { release = r; }));
@@ -794,4 +802,330 @@ test('a type WHG does not have is refused before anything is sent', async () => 
     await look.reconcile([{ query: 'fine', type: 'Place' }]);
     assert.equal(s.calls.length, 1);
   }
+});
+
+// ---- Pacing shared across tabs and workers (a ledger read and written holding the lock) ----
+
+/**
+ * A stand-in for a ledger two tabs share (IndexedDB in a browser). It records any read or write made
+ * without the lock held, which is where a shared count could be raced.
+ */
+function sharedLedger(locks) {
+  const map = new Map();
+  const l = { map, reads: 0, writes: 0, unlocked: 0 };
+  l.read = async (key) => { l.reads++; if (locks && locks.heldNow !== 1) l.unlocked++; return structuredClone(map.get(key) ?? []); };
+  l.write = async (key, entries) => { l.writes++; if (locks && locks.heldNow !== 1) l.unlocked++; map.set(key, structuredClone(entries)); };
+  return l;
+}
+const stamped = (svc, t) => (u, i) => { const r = svc.fetch(u, i); svc.calls.at(-1).t = t.now; return r; };
+
+test('two tabs sharing the lock and the ledger send no more than 600 queries in any 60 seconds between them', async () => {
+  const t = fakeTime();
+  const locks = fakeLocks();
+  const ledger = sharedLedger(locks);
+  const s = service({ delay: 0 });
+  const tab = () => lookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: stamped(s, t), batchSize: 50, locks, ledger, now: t.clock, sleep: t.sleep });
+  const [a, b] = await Promise.all([tab().reconcile(names(600, 'a')), tab().reconcile(names(600, 'b'))]);
+  assert.equal(a[599][0].name, 'a599');
+  assert.equal(b[599][0].name, 'b599');
+  assert.equal(s.calls.length, 24);
+  assert.ok(busiestMinute(s.calls) <= 600, `busiest minute: ${busiestMinute(s.calls)}`);
+  assert.ok(t.now >= 60_000, `1,200 queries take at least a minute; took ${t.now} ms`);
+  // The ledger was used, and only while holding the lock.
+  assert.ok(ledger.reads > 0 && ledger.writes > 0);
+  assert.equal(ledger.unlocked, 0, 'read and written only holding the lock');
+  // What it keeps: times and counts, under the site's name; no query, no token.
+  assert.ok(ledger.map.size > 0);
+  for (const [key, entries] of ledger.map) {
+    assert.match(key, /^whgazetteer\.org:/);
+    assert.ok(entries.length > 0);
+    for (const e of entries) assert.deepEqual(Object.keys(e).sort(), ['n', 't']);
+  }
+  const kept = JSON.stringify([...ledger.map]);
+  assert.ok(!kept.includes(TOKEN) && !kept.includes('a0') && !kept.includes('b0'), kept);
+
+  // Control: two tabs with a ledger each (the lock alone) cross the limit, as the same measure sees.
+  const t2 = fakeTime();
+  const locks2 = fakeLocks();
+  const s2 = service({ delay: 0 });
+  const tab2 = () => lookup({ endpoint: WHG_ENDPOINT, fetch: stamped(s2, t2), batchSize: 50, locks: locks2, now: t2.clock, sleep: t2.sleep });
+  await Promise.all([tab2().reconcile(names(600, 'a')), tab2().reconcile(names(600, 'b'))]);
+  assert.equal(busiestMinute(s2.calls), 1200);
+});
+
+test('the IndexedDB ledger is the default where there is indexedDB, and two tabs over one database share it', async () => {
+  assert.equal(typeof gz.indexedDbLedger, 'function', 'indexedDbLedger is exported');
+  const idb = new IDBFactory();
+  const had = Object.getOwnPropertyDescriptor(globalThis, 'indexedDB');
+  globalThis.indexedDB = idb;
+  try {
+    const t = fakeTime();
+    const locks = fakeLocks();
+    const s = service({ delay: 0 });
+    // No `ledger` given: each tab's default is the database.
+    const tab = () => lookup({ endpoint: WHG_ENDPOINT, fetch: stamped(s, t), batchSize: 50, locks, now: t.clock, sleep: t.sleep });
+    await Promise.all([tab().reconcile(names(600, 'a')), tab().reconcile(names(600, 'b'))]);
+    assert.equal(s.calls.length, 24);
+    assert.ok(busiestMinute(s.calls) <= 600, `busiest minute: ${busiestMinute(s.calls)}`);
+    // A third reader of the same database sees times and counts only.
+    const kept = await gz.indexedDbLedger({ indexedDB: idb }).read('whgazetteer.org:queries');
+    assert.ok(kept.length > 0);
+    for (const e of kept) assert.deepEqual(Object.keys(e).sort(), ['n', 't']);
+    assert.equal(kept.reduce((sum, e) => sum + e.n, 0) <= 600, true);
+  } finally {
+    if (had) Object.defineProperty(globalThis, 'indexedDB', had); else delete globalThis.indexedDB;
+  }
+});
+
+// ---- Tokens ----
+
+test('token: null clears the token (sent without Authorization from then on); undefined leaves it; setToken and clearToken', async () => {
+  const EP = 'https://token-clear.example/reconcile';
+  const s = service();
+  const first = createLookup({ endpoint: EP, token: 'tok-A-1111', fetch: s.fetch, locks: null });
+  await first.reconcile(names(1));
+  createLookup({ endpoint: EP, fetch: s.fetch, locks: null }).reconcile(names(1));
+  await createLookup({ endpoint: EP, token: undefined, fetch: s.fetch, locks: null }).reconcile(names(1));
+  await createLookup({ endpoint: EP, token: null, fetch: s.fetch, locks: null }).reconcile(names(1));
+  await first.reconcile(names(1));
+  first.setToken('tok-B-2222');
+  await first.reconcile(names(1));
+  first.clearToken();
+  await first.reconcile(names(1));
+  assert.deepEqual(s.calls.map((c) => c.headers.Authorization ?? null),
+    ['Bearer tok-A-1111', 'Bearer tok-A-1111', 'Bearer tok-A-1111', null, null, 'Bearer tok-B-2222', null]);
+});
+
+test("a request's retries carry the token it started with; the next request carries the new one", async () => {
+  let n = 0;
+  const s = service({ answer: (sent, call) => (++n === 1 ? reply(503, {}) : echo(sent, call)) });
+  let look;
+  // The token changes while the first request waits to be tried again.
+  look = lookup({ endpoint: WHG_ENDPOINT, token: 'tok-old-3333', fetch: s.fetch, sleep: async () => { look.setToken('tok-new-4444'); } });
+  await look.reconcile(names(1));
+  await look.reconcile(names(1));
+  assert.deepEqual(s.calls.map((c) => c.headers.Authorization), ['Bearer tok-old-3333', 'Bearer tok-old-3333', 'Bearer tok-new-4444']);
+});
+
+test("a token changed while a reconcile is in flight is used from that call's next batch", async () => {
+  const EP = 'https://midflight.example/reconcile';
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const s = service({ delay: 0, answer: async (sent, call) => { await gate; return echo(sent, call); } });
+  const look = createLookup({ endpoint: EP, token: 'tok-A-5555', fetch: s.fetch, locks: null, batchSize: 1 });
+  const p = look.reconcile(names(2));
+  await wait(5);
+  assert.equal(s.calls.length, 1, 'the first batch is in flight');
+  createLookup({ endpoint: EP, token: 'tok-B-6666', fetch: s.fetch, locks: null });
+  release();
+  const out = await p;
+  assert.equal(out[1][0].name, 'n1');
+  assert.deepEqual(s.calls.map((c) => c.headers.Authorization), ['Bearer tok-A-5555', 'Bearer tok-B-6666']);
+});
+
+test('the last 8 tokens retired are cleaned from what is repeated, with the current one; older ones are not kept', async () => {
+  const toks = Array.from({ length: 10 }, (_, i) => `tok-${i}-abcdef`);
+  const s = service({ answer: () => reply(401, { detail: toks.join(' ') }) });
+  const look = lookup({ endpoint: WHG_ENDPOINT, token: toks[0], fetch: s.fetch });
+  for (const t of toks.slice(1)) look.setToken(t);
+  const err = await look.reconcile(names(1)).catch((e) => e);
+  assert.equal(s.calls[0].headers.Authorization, `Bearer ${toks[9]}`);
+  // The oldest is no longer held, so it is repeated; the nine since are not.
+  assert.ok(err.message.includes(toks[0]), err.message);
+  for (const t of toks.slice(1)) assert.ok(!err.message.includes(t), `${t} in ${err.message}`);
+  assert.equal(err.message.split('[token]').length - 1, 9);
+});
+
+test("every known token is cleaned from a query's .error", async () => {
+  const OLD = 'tok-old-7777';
+  const s = service({ answer: () => reply(200, { q0: { error: `bad query for ${TOKEN} and ${OLD}`, result: [] } }) });
+  const look = lookup({ endpoint: WHG_ENDPOINT, token: OLD, fetch: s.fetch });
+  look.setToken(TOKEN);
+  const [r] = await look.reconcile([{ query: 'a' }]);
+  assert.equal(r.unanswered, true);
+  assert.equal(r.error, 'bad query for [token] and [token]');
+});
+
+// ---- A request that never answers ----
+
+test('a request that never answers times out (timeoutMs), is retried as network, and lets the lock go', { timeout: 5000 }, async () => {
+  const locks = fakeLocks();
+  let hungCalls = 0;
+  // A fetch that ignores its signal too: the lookup must not depend on it.
+  const hung = lookup({ endpoint: WHG_ENDPOINT, fetch: () => { hungCalls++; return new Promise(() => {}); }, locks, timeoutMs: 60, maxRetries: 1, sleep: noSleep });
+  const s = service();
+  const other = lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch, locks });
+  const started = Date.now();
+  const failed = hung.reconcile(names(1)).catch((e) => e);
+  await wait(5);
+  const answered = other.reconcile([{ query: 'after' }]);
+  await wait(20);
+  assert.equal(locks.waiting, 1, 'the other lookup waits while the hung one holds the lock');
+  assert.equal(s.calls.length, 0);
+  const err = await failed;
+  assert.ok(err instanceof GazetteerError, String(err));
+  assert.equal(err.kind, 'network');
+  assert.equal(hungCalls, 2, 'tried again once, as maxRetries says');
+  assert.ok(Date.now() - started >= 110, 'each try waited its timeout');
+  assert.equal((await answered)[0][0].name, 'after');
+  assert.equal(locks.heldNow, 0);
+});
+
+test('the timeout works without AbortSignal.any and AbortSignal.timeout', { timeout: 5000 }, async () => {
+  const { any, timeout } = AbortSignal;
+  AbortSignal.any = undefined; AbortSignal.timeout = undefined;
+  try {
+    let signal;
+    const look = lookup({ endpoint: WHG_ENDPOINT, fetch: (u, i) => { signal = i.signal; return new Promise(() => {}); }, timeoutMs: 30, maxRetries: 0 });
+    const err = await look.reconcile(names(1)).catch((e) => e);
+    assert.equal(err.kind, 'network', String(err));
+    assert.equal(signal.aborted, true, "fetch's signal was aborted");
+    // A caller's abort still reaches fetch.
+    const ac = new AbortController();
+    let s2;
+    const p = lookup({ endpoint: WHG_ENDPOINT, fetch: (u, i) => { s2 = i.signal; return new Promise(() => {}); }, timeoutMs: 10_000 }).reconcile(names(1), { signal: ac.signal });
+    await wait(5);
+    ac.abort();
+    await assert.rejects(p, { name: 'AbortError' });
+    assert.equal(s2.aborted, true);
+  } finally { AbortSignal.any = any; AbortSignal.timeout = timeout; }
+});
+
+// ---- One site, however written ----
+
+test('whgazetteer.org and www.whgazetteer.org are one lookup and one lock; www. is dropped for any site', async () => {
+  const f = service().fetch;
+  const apex = createLookup({ endpoint: 'https://whgazetteer.org/reconcile', fetch: f, locks: null });
+  assert.equal(createLookup({ endpoint: 'https://www.whgazetteer.org/reconcile', fetch: f, locks: null }), apex);
+  const ex = createLookup({ endpoint: 'https://www.hosts-one.example/reconcile', fetch: f, locks: null });
+  assert.equal(createLookup({ endpoint: 'https://hosts-one.example/reconcile', fetch: f, locks: null }), ex);
+  // Control: another site is another lookup.
+  assert.notEqual(createLookup({ endpoint: 'https://hosts-two.example/reconcile', fetch: f, locks: null }), ex);
+
+  const locks = fakeLocks();
+  for (const endpoint of ['https://whgazetteer.org/reconcile', 'https://www.whgazetteer.org/reconcile', 'https://www.hosts-one.example/reconcile', 'https://hosts-one.example/reconcile', 'https://hosts-two.example/reconcile']) {
+    await lookup({ endpoint, fetch: f, locks }).reconcile(names(1));
+  }
+  assert.deepEqual(locks.requests.map((r) => r.name), [
+    'plato-tools:gazetteer:whgazetteer.org', 'plato-tools:gazetteer:whgazetteer.org',
+    'plato-tools:gazetteer:hosts-one.example', 'plato-tools:gazetteer:hosts-one.example', 'plato-tools:gazetteer:hosts-two.example',
+  ]);
+});
+
+// ---- Later calls to createLookup ----
+
+test('a later createLookup call is still refused a fetch, locks or ledger of the wrong kind', () => {
+  const EP = 'https://later-types.example/reconcile';
+  const first = createLookup({ endpoint: EP, fetch: service().fetch, locks: null });
+  assert.equal(typeof first.reconcile, 'function', 'the first call made a lookup');
+  assert.throws(() => createLookup({ endpoint: EP, fetch: 'not a function' }), TypeError);
+  assert.throws(() => createLookup({ endpoint: EP, locks: 42 }), TypeError);
+  assert.throws(() => createLookup({ endpoint: EP, ledger: {} }), TypeError);
+  // What is allowed still is.
+  assert.equal(createLookup({ endpoint: EP, locks: null }), first);
+});
+
+test('a later createLookup call with differing options warns once per option, naming it', (t) => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  const EP = 'https://later-warn.example/reconcile';
+  const f = service().fetch;
+  createLookup({ endpoint: EP, fetch: f, batchSize: 10, locks: null });
+  createLookup({ endpoint: EP, fetch: f, batchSize: 10, token: 'tok-x-8888', locks: null });
+  assert.equal(warn.mock.callCount(), 0, 'the same options, and a token, are no cause to warn');
+  createLookup({ endpoint: EP, fetch: f, batchSize: 3, locks: null });
+  assert.equal(warn.mock.callCount(), 1);
+  assert.match(String(warn.mock.calls[0].arguments[0]), /batchSize/);
+  assert.doesNotMatch(String(warn.mock.calls[0].arguments[0]), /fetch|token/);
+  createLookup({ endpoint: EP, fetch: f, batchSize: 4, locks: null });
+  assert.equal(warn.mock.callCount(), 1, 'once for batchSize');
+  createLookup({ endpoint: EP, fetch: f, maxRetries: 1, locks: null });
+  assert.equal(warn.mock.callCount(), 2);
+  assert.match(String(warn.mock.calls[1].arguments[0]), /maxRetries/);
+});
+
+test("a type WHG does not have is refused with a message saying what is allowed", async () => {
+  const err = await lookup({ endpoint: WHG_ENDPOINT, fetch: service().fetch }).reconcile([{ query: 'x', type: { id: 'Place' } }]).catch((e) => e);
+  assert.ok(err instanceof TypeError);
+  assert.match(err.message, /a string, 'Place' or 'Period'/);
+});
+
+// ---- Locks: how they are let go (the platform's own navigator.locks) ----
+
+test('an error inside the lock lets the lock go, and another lookup on the site then runs', { timeout: 5000 }, async (t) => {
+  if (!globalThis.navigator?.locks) return t.skip('no navigator.locks here');
+  const endpoint = 'https://lock-error.example/reconcile';
+  const bad = service({ answer: () => reply(401, { detail: 'Invalid token' }) });
+  const err = await createLookup({ endpoint, token: TOKEN, fetch: bad.fetch, shared: false }).reconcile(names(1)).catch((e) => e);
+  assert.equal(err.kind, 'auth');
+  assert.equal(bad.calls.length, 1, 'the request was made, under the lock');
+  const { held } = await navigator.locks.query();
+  assert.ok(!held.some((l) => l.name === 'plato-tools:gazetteer:lock-error.example'), 'not held after the error');
+  const good = service();
+  const r = await Promise.race([createLookup({ endpoint, fetch: good.fetch, shared: false }).reconcile(names(1)), wait(1000).then(() => 'HUNG')]);
+  assert.notEqual(r, 'HUNG');
+  assert.equal(good.calls.length, 1);
+});
+
+test('an AbortSignal stops a lookup waiting for the real navigator.locks', { timeout: 5000 }, async (t) => {
+  if (!globalThis.navigator?.locks) return t.skip('no navigator.locks here');
+  const NAME = 'plato-tools:gazetteer:real-abort.example';
+  let release;
+  const other = navigator.locks.request(NAME, () => new Promise((r) => { release = r; }));
+  const s = service();
+  const ac = new AbortController();
+  const p = createLookup({ endpoint: 'https://real-abort.example/reconcile', fetch: s.fetch, shared: false }).reconcile(names(1), { signal: ac.signal });
+  await wait(10);
+  const { pending } = await navigator.locks.query();
+  assert.ok(pending.some((l) => l.name === NAME), 'waiting for the lock');
+  ac.abort();
+  const r = await Promise.race([p.then(() => 'ran', (e) => e.name), wait(1000).then(() => 'HUNG')]);
+  assert.equal(r, 'AbortError');
+  assert.equal(s.calls.length, 0);
+  release(); await other;
+});
+
+test('an AbortSignal during a pause taken holding the real lock lets the lock go', { timeout: 5000 }, async (t) => {
+  if (!globalThis.navigator?.locks) return t.skip('no navigator.locks here');
+  const NAME = 'plato-tools:gazetteer:abort-in-backoff.example';
+  let n = 0;
+  const s = service({ answer: (sent, call) => (++n === 1 ? reply(503, {}) : echo(sent, call)) });
+  const look = createLookup({ endpoint: 'https://abort-in-backoff.example/reconcile', fetch: s.fetch, shared: false }); // real sleep
+  const ac = new AbortController();
+  const p = look.reconcile(names(1), { signal: ac.signal }).catch((e) => e.name);
+  await wait(30);
+  assert.equal(s.calls.length, 1);
+  assert.ok((await navigator.locks.query()).held.some((l) => l.name === NAME), 'held during the pause');
+  const aborted = Date.now();
+  ac.abort();
+  assert.equal(await p, 'AbortError');
+  // The pause is at least 750 ms; the abort ends it at once, not when it is over.
+  assert.ok(Date.now() - aborted < 500, `stopped ${Date.now() - aborted} ms after the abort`);
+  assert.ok(!(await navigator.locks.query()).held.some((l) => l.name === NAME), 'let go');
+  const r = await Promise.race([createLookup({ endpoint: 'https://abort-in-backoff.example/reconcile', fetch: s.fetch, shared: false }).reconcile(names(1)).then(() => 'ran'), wait(1000).then(() => 'HUNG')]);
+  assert.equal(r, 'ran');
+});
+
+// ---- The manifest, and exports ----
+
+test("manifest: a GET of the endpoint, without the token, through the same queue; a failure is a GazetteerError", async () => {
+  const s = service({ delay: 5, answer: (sent, call) => (call.init.method === 'GET' ? reply(200, { versions: ['0.2'], name: 'WHG' }) : echo(sent, call)) });
+  const look = lookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: s.fetch });
+  assert.equal(typeof look.manifest, 'function');
+  const [m] = await Promise.all([look.manifest(), look.reconcile(names(3))]);
+  assert.deepEqual(m, { versions: ['0.2'], name: 'WHG' });
+  const get = s.calls.find((c) => c.init.method === 'GET');
+  assert.equal(get.url, WHG_ENDPOINT);
+  assert.equal(get.headers.Authorization, undefined, 'no token with the manifest');
+  assert.equal(s.calls.find((c) => c.init.method === 'POST').headers.Authorization, `Bearer ${TOKEN}`, 'present on queries');
+  assert.equal(s.maxInFlight, 1);
+  for (const bad of [() => reply(500, { detail: 'down' }), () => reply(200, '[1]'), () => reply(200, 'not json')]) {
+    const e = await lookup({ endpoint: WHG_ENDPOINT, fetch: service({ answer: bad }).fetch, maxRetries: 0 }).manifest().catch((x) => x);
+    assert.ok(e instanceof GazetteerError, String(e));
+  }
+});
+
+test('mergeAttribution and WHG_PLACE_TYPE are exported', () => {
+  assert.equal(gz.WHG_PLACE_TYPE, 'Place');
+  assert.equal(typeof gz.mergeAttribution, 'function');
+  assert.deepEqual(gz.mergeAttribution(null, { sources: { gn: {} } }), { sources: { gn: {} } });
 });

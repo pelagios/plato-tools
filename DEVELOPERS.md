@@ -546,10 +546,21 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
 - **The gazetteer lookup** (`src/engine/gazetteer/`), shared with Krisis, speaks the W3C
   reconciliation protocol, with the token in the `Authorization` header only. WHG has 16 slots for
   the whole site, so there is one request in flight whoever asks. `createLookup` gives one shared
-  lookup per endpoint in a page or worker, and the first call's options stand (a later token
-  replaces the token). Across tabs, each request is made holding a Web Lock named after the site.
-  Tests use `shared: false` and `locks: null`, or a fake LockManager. Every assumption about the World Historical Gazetteer, and whether it is verified,
-  is in `whg.js`, so that a correction is made in one place.
+  lookup per endpoint in a page or worker (`whgazetteer.org` with or without `www.`), and the first
+  call's options stand: a later call's differing options are ignored with one `console.warn` each,
+  but a later token replaces the token and `token: null` clears it (also `lookup.setToken(t)`,
+  `lookup.clearToken()`). A tool reads the token from the one shared store (`src/lib/whg-token.js`)
+  and passes it, rather than keeping a copy of its own. Across tabs and workers, each request is
+  made holding the Web Lock `plato-tools:gazetteer:<site>`. What is guaranteed about WHG's 600
+  queries a minute: the pacer's ledger (times and counts per site only) is kept in IndexedDB and
+  used only holding that lock, so where a platform has both (browsers, pages and workers alike)
+  every tab and worker of an origin shares ONE allowance; in Node, which has no IndexedDB, and
+  wherever there is none, the allowance is per lookup; other origins and programs are not counted.
+  Each try of a request is abandoned after `timeoutMs` (60 s) and counts as no answer, so a hung
+  request cannot hold the lock for longer than that per try. Tests use `shared: false` and
+  `locks: null`, or a fake LockManager and a fake `ledger`. Every assumption about the World
+  Historical Gazetteer, and whether it is verified, is in `whg.js`, so that a correction is made in
+  one place.
 - **Georeferencing**, for tracing from a georeferenced map, will come from `src/engine/georef/`,
   which belongs to Hermes. Chora uses it and keeps none of its own.
 

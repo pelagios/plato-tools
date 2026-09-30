@@ -20,7 +20,11 @@
 //    "exceed" or "quota" is taken for it too). A query's default `limit` is 100 candidates, so these
 //    tools send one of their own. ONE request in flight, for the whole site has only 16 slots and
 //    WHG fans each batch out itself: one per page or worker (a shared lookup per endpoint), and one
-//    across tabs (a Web Lock per site), not merely one per lookup.
+//    across tabs (a Web Lock per site, 'plato-tools:gazetteer:whgazetteer.org' with or without
+//    www.), not merely one per lookup. The 600 a minute is one allowance for every tab and worker of
+//    an origin where there are Web Locks and IndexedDB (the pacer's ledger is kept there and used
+//    only holding the lock); in Node, and anywhere without IndexedDB, it is per lookup. Other
+//    origins and other programs with the same token are not counted: a 429 is still handled.
 // A4 VERIFIED. Every query in one POST must share a `type`, or the request gets 400. VERIFIED (whg3
 //    production, 2026-09-30): only place and period are types; any other is a 400 for the whole
 //    batch, so it is refused here before anything is sent. "Place", "place" and
@@ -88,15 +92,17 @@ export function isQuotaSpent(detail) {
   return /daily api limit/i.test(d) || (/limit/i.test(d) && /exceed|quota/i.test(d));
 }
 
-const WHG_TYPES = { place: 'Place', period: 'Period' };
+/** The type sent when a query gives none (A4). */
+export const WHG_PLACE_TYPE = 'Place';
+const WHG_TYPES = { place: WHG_PLACE_TYPE, period: 'Period' };
 /**
  * The type WHG is sent for a query's type (A4): 'Place' or 'Period', from any of their forms, and
  * 'Place' when none is given. Any other is a TypeError, for WHG would refuse the whole batch.
  */
 export function whgQueryType(type) {
-  if (type == null || type === '') return 'Place';
+  if (type == null || type === '') return WHG_PLACE_TYPE;
   const t = typeof type === 'string' ? WHG_TYPES[type.slice(type.lastIndexOf('#') + 1).trim().toLowerCase()] : undefined;
-  if (!t) throw new TypeError(`WHG has no type ${JSON.stringify(type)}: only Place and Period`);
+  if (!t) throw new TypeError(`WHG has no type ${JSON.stringify(type)}: a query's type must be a string, 'Place' or 'Period' (or its schema address)`);
   return t;
 }
 
