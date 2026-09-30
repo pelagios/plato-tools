@@ -60,7 +60,8 @@ function onDetected({ input: inp, targets: t }) {
   // Hermes: a table of places shows which column holds what before it is run, and the web address
   // its place ids are made under.
   document.querySelector('[data-for="generic-input"]').hidden = !isTable(inp);
-  columns = null; state.columns = null;
+  // Every detection makes any answer about the columns of an earlier file stale, a table or not.
+  columns = null; state.columns = null; columnsAsked++;
   if (isTable(inp)) { document.querySelector('[data-for="tables-input"]').hidden = false; requestColumns(); }
   $('action').hidden = false;
   Object.assign(state, { phase: 'detected', format: inp.format, profile: inp.profile || null });
@@ -188,7 +189,9 @@ function onColumns(d) {
     state.columns = { error: d.error };
     return;
   }
-  columns = { headers: d.headers, examples: d.examples, fields: d.fields, mapping: { ...d.mapping }, reasons: { ...d.reasons } };
+  // With no prototype, so that a column called "__proto__" is a column like any other (columns.js).
+  const own = (o) => Object.assign(Object.create(null), o);
+  columns = { headers: d.headers, examples: own(d.examples), fields: d.fields, mapping: own(d.mapping), reasons: own(d.reasons) };
   // A column the saved matching gives, and the engine took as given, says so in the page's words;
   // one it could not take keeps the engine's reason.
   if (d.saved) for (const h of d.headers) if (d.reasons[h] && d.problems.every((p) => p.example !== h && !String(p.example).startsWith(`${h}: `))) columns.reasons[h] = W.saved;
@@ -224,7 +227,7 @@ function renderColumns() {
 function renderColumnWarnings() {
   const warnings = columnWarnings(columns.mapping);
   $('columns-warnings').innerHTML = warnings.map((w) => `<p class="warn">${escapeHtml(w)}</p>`).join('');
-  state.columns = { headers: [...columns.headers], mapping: { ...columns.mapping }, reasons: { ...columns.reasons }, examples: columns.examples, warnings, messages: [...columns.messages] };
+  state.columns = { headers: [...columns.headers], mapping: Object.assign(Object.create(null), columns.mapping), reasons: Object.assign(Object.create(null), columns.reasons), examples: columns.examples, warnings, messages: [...columns.messages] };
 }
 // A choice for one column. A field one column only can be (the name, the id…) is taken from the
 // column that had it, which is then kept as a note, and says why.
