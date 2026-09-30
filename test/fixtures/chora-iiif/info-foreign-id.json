@@ -1,0 +1,10 @@
+{
+  "@context": "http://iiif.io/api/image/2/context.json",
+  "@id": "https://elsewhere.example.org/iiif/grid",
+  "protocol": "http://iiif.io/api/image",
+  "width": 512,
+  "height": 512,
+  "profile": ["http://iiif.io/api/image/2/level0.json"],
+  "sizes": [{ "width": 512, "height": 512 }],
+  "tiles": [{ "width": 512, "height": 512, "scaleFactors": [1] }]
+}

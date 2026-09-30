@@ -1,0 +1,128 @@
+{
+  "id": "https://annotations.allmaps.org/images/e564650581f5f6bb",
+  "type": "AnnotationPage",
+  "@context": "http://www.w3.org/ns/anno.jsonld",
+  "items": [
+    {
+      "id": "https://annotations.allmaps.org/maps/0000000000000001",
+      "type": "Annotation",
+      "@context": [
+        "http://iiif.io/api/extension/georef/1/context.json",
+        "http://iiif.io/api/presentation/3/context.json"
+      ],
+      "created": "2026-09-30T00:00:00.000Z",
+      "modified": "2026-09-30T00:00:00.000Z",
+      "motivation": "georeferencing",
+      "target": {
+        "type": "SpecificResource",
+        "source": {
+          "id": "https://iiif.example.org/iiif/grid",
+          "type": "ImageService2",
+          "height": 512,
+          "width": 512,
+          "partOf": [
+            {
+              "id": "https://iiif.example.org/manifests/grid/canvas/c1",
+              "type": "Canvas",
+              "label": {
+                "none": [
+                  "A synthetic grid"
+                ]
+              },
+              "partOf": [
+                {
+                  "id": "https://iiif.example.org/manifests/grid/manifest",
+                  "type": "Manifest",
+                  "label": {
+                    "none": [
+                      "A synthetic grid over Cambridge (test fixture)"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "selector": {
+          "type": "SvgSelector",
+          "value": "<svg width=\"512\" height=\"512\"><polygon points=\"16,16 496,16 496,496 16,496 16,16\" /></svg>"
+        }
+      },
+      "body": {
+        "type": "FeatureCollection",
+        "transformation": {
+          "type": "polynomial",
+          "options": {
+            "order": 1
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                64,
+                64
+              ]
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                0.1,
+                52.22
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                448,
+                64
+              ]
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                0.15,
+                52.22
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                448,
+                448
+              ]
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                0.15,
+                52.19
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "resourceCoords": [
+                64,
+                448
+              ]
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                0.1,
+                52.19
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "@context": "http://iiif.io/api/presentation/2/context.json",
+  "@type": "sc:Manifest",
+  "@id": "https://iiif.example.org/manifests/grid/manifest",
+  "label": "A synthetic grid over Cambridge (test fixture)",
+  "attribution": "A Synthetic Historical Map Collection",
+  "service": {
+    "@context": "http://iiif.io/api/search/1/context.json",
+    "@id": "https://iiif.example.org/services/grid/search",
+    "profile": "http://iiif.io/api/search/1/search"
+  },
+  "sequences": [
+    {
+      "@type": "sc:Sequence",
+      "canvases": [
+        {
+          "@id": "https://iiif.example.org/manifests/grid/canvas/c1",
+          "@type": "sc:Canvas",
+          "label": "A synthetic grid",
+          "description": "",
+          "metadata": [
+            { "label": "Author", "value": "Test fixture" },
+            { "label": "Date", "value": "2026" },
+            { "label": "Short Title", "value": "A synthetic grid." },
+            { "label": "Type", "value": "Map" }
+          ],
+          "thumbnail": {
+            "@id": "https://iiif.example.org/iiif/grid/full/!96,96/0/default.jpg",
+            "format": "image/jpeg"
+          },
+          "images": [
+            {
+              "@type": "oa:Annotation",
+              "motivation": "sc:painting",
+              "resource": {
+                "@id": "https://iiif.example.org/iiif/grid/full/512,/0/default.jpg",
+                "@type": "dctypes:Image",
+                "service": {
+                  "@context": "http://iiif.io/api/image/2/context.json",
+                  "@id": "https://iiif.example.org/iiif/grid",
+                  "profile": "http://iiif.io/api/image/2/level0.json",
+                  "protocol": "http://iiif.io/api/image"
+                },
+                "format": "image/jpeg",
+                "width": 512,
+                "height": 512
+              },
+              "on": "https://iiif.example.org/manifests/grid/canvas/c1"
+            }
+          ],
+          "otherContent": ["https://iiif.example.org/manifests/grid/list/luna"],
+          "width": 512,
+          "height": 512
+        }
+      ]
+    }
+  ],
+  "logo": { "@id": "https://iiif.example.org/logo.png", "format": "image/png" },
+  "related": "https://iiif.example.org/detail/grid"
+}
