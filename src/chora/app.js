@@ -15,6 +15,8 @@ import * as consents from './consent.js';
 import * as ov from './overlays.js';
 import { createGuard, GuardError } from './fetchguard.js';
 import * as georef from '../engine/georef/index.js';
+import * as tracing from '../engine/chora/trace.js';
+import { DataError } from '../engine/input.js';
 
 const $ = (id) => document.getElementById(id);
 const state = (window.__chora = { phase: 'loading', placeId: null, pendingCount: 0, basemap: null, mapReadyCount: 0, blocked: 0, lastSave: null, canary: 'pending', reloads: 0, overlays: [] });
@@ -169,9 +171,16 @@ function renderCard() {
 }
 function pendingItem(d) {
   const opt = (vals, cur, words) => vals.map((x) => `<option value="${x}"${x === cur ? ' selected' : ''}>${esc(words(x))}</option>`).join('');
+  // A drawing traced from a historical map may mark where the map writes the name (a label anchor).
+  const roles = ['Extent', 'FeaturePoint', 'RepresentativePoint', ...(d.trace ? ['LabelAnchor'] : [])].filter((r) => ROLES.includes(r));
+  const from = d.traceOptions?.length || d.trace
+    ? `<label>Traced from <select data-field="tracedFrom">${[...(d.traceOptions || []).filter((o) => o.key !== d.trace?.key), ...(d.trace ? [{ key: d.trace.key, title: d.trace.title }] : [])]
+      .map((o) => `<option value="${esc(o.key)}"${o.key === d.trace?.key ? ' selected' : ''}>${esc(o.title || 'a historical map')}</option>`).join('')}<option value=""${d.trace ? '' : ' selected'}>the basemap</option></select></label>` : '';
   return `<li data-draft="${esc(d.id)}"><span class="kind">${esc(KIND[d.geojson.type] || d.geojson.type)}</span>
-    <label>What it marks <select data-field="role"><option value="">Not said</option>${opt(['Extent', 'FeaturePoint', 'RepresentativePoint'].filter((r) => ROLES.includes(r)), d.role, (r) => ROLE_WORDS[r] || r)}</select></label>
+    ${from}
+    <label>What it marks <select data-field="role"><option value="">Not said</option>${opt(roles, d.role, (r) => (r === 'LabelAnchor' ? 'where the map writes its name' : ROLE_WORDS[r] || r))}</select></label>
     <label>How well known <select data-field="precision"><option value="">Not said</option>${opt(PRECISIONS, d.precision, (p) => p.replace('_', ' '))}</select></label>
+    ${d.traceNote ? `<p class="note" data-trace-note>${esc(d.traceNote)}</p>` : ''}
     <button type="button" data-remove>Remove</button></li>`;
 }
 const KIND = { Point: 'A point', LineString: 'A line', Polygon: 'An area' };
@@ -217,7 +226,14 @@ $('card').addEventListener('change', (e) => {
   const sel = e.target.closest('select[data-field]');
   if (!sel) return;
   const d = drafts.find((x) => x.id === sel.closest('[data-draft]').dataset.draft);
-  if (d) { d[sel.dataset.field] = sel.value; keepDrafts(); }
+  if (!d) return;
+  if (sel.dataset.field === 'tracedFrom') {
+    // Chosen by the user: another map it lies on, or the basemap (no citation of any map).
+    if (sel.value) traceDraft(d, { only: sel.value });
+    else { dropTrace(d, null); keepDrafts(); renderCard(); }
+    return;
+  }
+  d[sel.dataset.field] = sel.value; keepDrafts();
 });
 
 // ---- Drawing -------------------------------------------------------------------------------------
@@ -240,12 +256,70 @@ function onFinish(id, ctx) {
   }
   if (geojson !== f.geometry) setTimeout(() => { try { mapApi.draw?.updateFeatureGeometry(id, geojson); } catch {} });
   drawError = state.drawError = null;
-  if (existing) { existing.geojson = geojson; keepDrafts(); return; }   // moved or reshaped
+  if (existing) {   // moved or reshaped: a traced drawing is traced again from its map, or no longer cites it
+    existing.geojson = geojson; keepDrafts();
+    if (existing.trace) traceDraft(existing, { only: existing.trace.key, reshaped: true });
+    return;
+  }
   const b = basemaps.current();
-  drafts.push({ id: String(id), placeId: state.placeId, placeLabel: view?.label || '', geojson, role: '', precision: '',
-    basemap: b.local ? 'Natural Earth' : b.name, zoom: mapApi.zoom(), drawnAt: new Date().toISOString() });
+  const d = { id: String(id), placeId: state.placeId, placeLabel: view?.label || '', geojson, role: '', precision: '',
+    basemap: b.local ? 'Natural Earth' : b.name, zoom: mapApi.zoom(), drawnAt: new Date().toISOString() };
+  drafts.push(d);
   keepDrafts();
   renderCard();
+  if (layers?.entries.length) traceDraft(d);
+}
+
+// ---- Tracing from a historical map ---------------------------------------------------------------
+// A drawing made over a historical map is traced from it (src/engine/chora/trace.js): the topmost map
+// shown that holds it whole, else the topmost holding part of it (with a warning); the card lets the
+// user choose another map it lies on, or the basemap. Its citations are made when it is saved.
+const tracing_ = new Map();   // draft id -> the latest tracing asked for it (an older answer is let go)
+function dropTrace(d, note) {
+  d.trace = null; d.traceNote = note;
+  if (d.role === 'LabelAnchor') d.role = '';
+}
+async function traceDraft(d, { only = null, reshaped = false } = {}) {
+  const ticket = {}; tracing_.set(d.id, ticket);
+  const shown = layers ? layers.ordered() : [];
+  const maps = shown.map((e) => ({ key: e.key, g: e.g, visible: e.visible, title: e.title }));
+  const was = d.trace;
+  let note = null;
+  try {
+    const pick = await tracing.pickOverlay(only ? maps.filter((m) => m.key === only) : maps, d.geojson);
+    if (tracing_.get(d.id) !== ticket || !drafts.includes(d)) return;
+    if (!only) d.traceOptions = pick.candidates.map((k) => ({ key: k, title: maps.find((m) => m.key === k)?.title || null }));
+    const skipped = pick.skipped.map((x) => `${maps.find((m) => m.key === x.key)?.title || 'a map'}: ${x.reason}`).join(' ');
+    if (!pick.chosen) {
+      if (was) note = `${reshaped ? 'Moved' : 'It lies'} off “${was.title || 'the map'}”, the map it was traced from, so it no longer cites that map${skipped ? ` (${skipped})` : ''}; it is saved as drawn on the basemap.`;
+      else if (skipped) note = `Not cited as traced from a historical map: ${skipped}`;
+      dropTrace(d, note);
+    } else {
+      const e = shown.find((x) => x.key === pick.chosen.key);
+      try {
+        const t = await tracing.traceFor(e.g, d.geojson, { key: e.key, title: e.title, partial: pick.chosen.partial, fetchedAt: e.fetchedAt, licence: e.attribution?.licence || null });
+        if (tracing_.get(d.id) !== ticket || !drafts.includes(d)) return;
+        d.trace = t;
+        d.traceNote = pick.chosen.partial ? `Part of it lies outside “${e.title}”, the map it is cited as traced from.` : null;
+        if (!d.traceOptions?.some((o) => o.key === e.key)) d.traceOptions = [...(d.traceOptions || []), { key: e.key, title: e.title }];
+      } catch (err) {
+        if (err instanceof tracing.TraceError && !reshaped && !was) {
+          // A drawing that cannot be placed back where it was drawn through the map is not kept.
+          drawError = state.drawError = err.message;
+          removeDraft(d.id);
+          return;
+        }
+        if (!(err instanceof tracing.TraceError || err instanceof DataError)) throw err;
+        dropTrace(d, `Not cited as traced from “${e.title}”: ${err.message}`);
+      }
+    }
+  } catch (err) {
+    if (!(err instanceof DataError)) { console.warn('Chora: tracing', err); return; }
+    dropTrace(d, `Not cited as traced from a historical map: ${err.message}`);
+  }
+  state.lastTrace = { draftId: d.id, key: d.trace?.key || null, partial: !!d.trace?.partial, note: d.traceNote || null, options: (d.traceOptions || []).map((o) => o.key) };
+  keepDrafts();
+  if (view) renderCard();
 }
 function showDrafts(list) { showing = true; try { mapApi.showDrafts(list); } finally { showing = false; } }
 function removeDraft(id) {
@@ -316,9 +390,10 @@ async function saveDataset() {
   const contributor = contributors.load();
   let additions;
   try {
+    // A traced drawing cites the map and its georeference, and says so in its notes (trace.js).
     additions = drafts.map((d) => ({ placeId: d.placeId, attestation: newGeometryAttestation({
-      geojson: d.geojson, role: d.role || undefined, precision: d.precision || undefined, contributor,
-      created: d.drawnAt, notes: choraDrawingNote({ basemap: d.basemap, zoom: d.zoom }) }) }));
+      geojson: d.geojson, role: d.role || undefined, precision: d.precision || undefined, contributor, created: d.drawnAt,
+      ...(d.trace ? tracing.tracedParts(d.trace, { zoom: d.zoom, role: d.role }) : { notes: choraDrawingNote({ basemap: d.basemap, zoom: d.zoom }) }) }) }));
   } catch (e) { $('save-result').innerHTML = `<p class="warn">${esc(e.message)}</p>`; return; }
   const savedIds = new Set(drafts.map((d) => d.id));
   $('save').disabled = true;

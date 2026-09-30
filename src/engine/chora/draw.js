@@ -98,12 +98,13 @@ function contributorOf(c) {
  * - role: what it depicts (ROLES, by short name or in full); precision: how well it is known
  *   (PRECISIONS); precisionKm: an uncertainty radius;
  * - contributor: { name, orcid? } or an address; created: when (an ISO date-time, or a Date);
- * - source (a source object, or an address, which becomes a citation) and citation ({ source,
- *   locator, … }): optional;
+ * - source (a source object, or an address, which becomes a citation), citation ({ source,
+ *   locator, … }) and citations (a list of them, after `citation`): optional. A drawing traced from
+ *   a historical map cites the map and its georeference (src/engine/chora/trace.js, tracedParts);
  * - notes: how it was drawn, and on what map.
  * Throws DrawError, in words, for anything PLATO would not accept.
  */
-export function newGeometryAttestation({ geojson, role, precision, precisionKm, contributor, created, source, citation, notes } = {}) {
+export function newGeometryAttestation({ geojson, role, precision, precisionKm, contributor, created, source, citation, citations: more, notes } = {}) {
   const g = checkGeoJSON(geojson);
   // A drawing is between -180 and 180 (wrapLongitudes, checkGeoJSON), so its extent is as drawn.
   const geometry = { geojson: g, reprPoint: reprPointOf(g, { plain: true }).map(round) };
@@ -124,7 +125,12 @@ export function newGeometryAttestation({ geojson, role, precision, precisionKm, 
   // PLATO's `sources` holds source objects (with a title); a source known only by its address is
   // cited instead, which the schema allows either way.
   if (source && typeof source === 'object') a.sources = [source];
-  const citations = [...(source && typeof source !== 'object' ? [{ source }] : []), ...(citation ? [citation] : [])];
+  if (more !== undefined && !Array.isArray(more)) throw new DrawError('The citations must be a list.');
+  for (const c of more || []) {
+    const s = c && typeof c === 'object' ? c.source : undefined;
+    if (!(typeof s === 'string' ? isAbsolute(s) : s && typeof s === 'object' && !Array.isArray(s))) throw new DrawError('Each citation must name its source: a full web address, or a source described.');
+  }
+  const citations = [...(source && typeof source !== 'object' ? [{ source }] : []), ...(citation ? [citation] : []), ...(more || [])];
   if (citations.length) a.citations = citations;
   if (typeof notes === 'string' && notes.trim()) a.notes = notes.trim();
   return a;
