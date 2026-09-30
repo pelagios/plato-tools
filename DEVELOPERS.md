@@ -132,7 +132,9 @@ readers link to those headings, so keep them.
   refused.
 - **Tables of places** (`columns.js`, `generic.js`). `input.js`'s `detect()` sends a lone CSV (or
   `.tsv`/`.tab`) that is not one of the tables' sheets, and a FeatureCollection or Feature whose
-  structure is not LPF's (`isLpf`, on the head read as structure by `jsonHead`), here. A IIIF
+  structure is not LPF's (`isLpf`, on the head read as structure by `jsonHead`), here. A GeoJSON
+  sequence is LPF only by the same test, of its collection line or its first feature; a sequence of
+  plain features is refused (`GEOJSON_SEQ_REASON`), asking for one FeatureCollection. A IIIF
   Georeference Annotation (Allmaps) is detected first, as `georef` with a `reason`, and refused
   like an unrecognised file (`readable()`). `guessColumns` maps each column to one `FIELDS` key, `note` or `skip`
   from its normalised heading and the first 50 rows; `resolveColumns` checks a saved mapping

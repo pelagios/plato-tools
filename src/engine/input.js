@@ -176,7 +176,14 @@ export async function detect(files) {
   if (n.endsWith('.jsonl') || n.endsWith('.ndjson') || n.endsWith('.geojsonl') || n.endsWith('.geojsons') || /^\{[^\n]*\}\s*\n\s*\{/.test(h)) {
     const first = JSON.parse(h.split('\n')[0]);
     if (first.profile) return { format: 'plato-jsonl', profile: first.profile, files };
-    if (first.type === 'Feature' || first.type === 'FeatureCollection') return { format: 'lpf-seq', files, lpfVersion: lpfVersion(first) };
+    if (first.type === 'Feature' || first.type === 'FeatureCollection') {
+      // Linked Places Format only by its structure, as for a FeatureCollection below: the collection's
+      // own line naming LPF's context, or the first feature (the first line, or the first after the
+      // collection's) carrying LPF's own members. A sequence of plain GeoJSON features is not read.
+      const feature = first.type === 'Feature' ? first : h.split('\n').slice(1).map((l) => jsonHead(l.trim())).find((v) => v?.type === 'Feature');
+      if (isLpf(first) || (feature && isLpf(feature))) return { format: 'lpf-seq', files, lpfVersion: lpfVersion(first) };
+      return { format: null, reason: GEOJSON_SEQ_REASON };
+    }
     if (isAnnotation(first)) return { format: 'w3c-annotations', shape: 'jsonl', files };
     return { format: null, reason: 'This is JSON Lines, but its first line is neither a PLATO header, an LPF feature nor a W3C Web Annotation.' };
   }
@@ -210,6 +217,7 @@ export async function detect(files) {
   if (/^(<[^>]+>|_:\S+)\s+<[^>]+>/.test(h)) return { format: 'ntriples', files };
   return { format: null, reason: 'The format of this file could not be recognised.' };
 }
+export const GEOJSON_SEQ_REASON = 'This is a GeoJSON sequence (one feature per line), but not Linked Places Format, and a sequence of plain GeoJSON features is not read. Give the features as one FeatureCollection (a .geojson file), where their properties can be matched to PLATO.';
 // W3C Web Annotations name the Web Annotation context (alone, or in a list of contexts).
 const ANNO_CONTEXT = /"@context"\s*:\s*(?:\[[^\]]*?)?"https?:\/\/www\.w3\.org\/ns\/anno\.jsonld"/;
 const isAnnotation = (o) => !!o && typeof o === 'object' && [].concat(o['@context']).some((c) => typeof c === 'string' && /^https?:\/\/www\.w3\.org\/ns\/anno\.jsonld$/.test(c))

@@ -8,8 +8,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { detect, readable, jsonHead, GEOREF_REASON } from '../src/engine/input.js';
-import { file, textFile } from './engine.js';
+import { detect, readable, jsonHead, GEOREF_REASON, GEOJSON_SEQ_REASON } from '../src/engine/input.js';
+import { file, textFile, go, outText } from './engine.js';
 
 const fc = (features, extra = {}) => JSON.stringify({ type: 'FeatureCollection', ...extra, features });
 const pt = { type: 'Point', coordinates: [12.48, 41.89] };
@@ -35,6 +35,31 @@ test('one Feature on its own: the same tests', async () => {
   assert.equal(await kind(JSON.stringify({ type: 'Feature', geometry: pt, properties: { toponym: 'Roma', '@id': 'x', title: 'y' } })), 'geojson');
   // An LPF Feature on its own is not plain GeoJSON (and, as before, not read: LPF comes as a collection).
   assert.equal(await kind(JSON.stringify({ type: 'Feature', geometry: pt, properties: {}, names: [{ toponym: 'Roma' }] })), null, 'control');
+});
+test('a GeoJSON sequence is LPF only by its structure; a sequence of plain features is refused, saying to give them as one FeatureCollection', async () => {
+  const plain = { type: 'Feature', geometry: pt, properties: { name: 'Roma', toponym: 'Roma' } };
+  const lpf = { type: 'Feature', geometry: pt, properties: { title: 'Roma' }, names: [{ toponym: 'Roma' }] };
+  const seq = (...ls) => ls.map((l) => JSON.stringify(l)).join('\n') + '\n';
+  for (const name of ['x.geojsonl', 'x.json']) {
+    const d = await detect([textFile(seq(plain, plain), name)]);
+    assert.equal(d.format, null, name);
+    assert.equal(d.reason, GEOJSON_SEQ_REASON);
+    assert.match(d.reason, /one FeatureCollection/);
+    assert.equal(await kind(seq(lpf, plain), name), 'lpf-seq', `control: ${name} whose first feature is LPF's`);
+  }
+  // After a collection's own line: LPF's context there, or the first feature, decides.
+  const head = { type: 'FeatureCollection', title: 'T' };
+  assert.equal(await kind(seq(head, plain), 'x.geojsonl'), null);
+  assert.equal(await kind(seq(head, lpf), 'x.geojsonl'), 'lpf-seq', 'control: an LPF feature after the collection line');
+  assert.equal(await kind(seq({ ...head, '@context': 'https://raw.githubusercontent.com/LinkedPasts/linked-places-format/main/linkedplaces-context-v1.1.jsonld' }, plain), 'x.geojsonl'), 'lpf-seq', 'control: the context on the collection line');
+});
+test('an LPF sequence these tools write is still detected as one, and reads back', async () => {
+  const r = await go([file('test/fixtures/lpf-sample-v1.2.2.geojson')], 'convert', 'lpf-seq');
+  const text = outText(r.e, Object.keys(r.e.outs).find((k) => k.endsWith('.geojsonl')));
+  assert.ok(text.split('\n').length > 2, 'control: the sequence has features');
+  const back = await go([textFile(text, 'back.geojsonl')], 'check');
+  assert.equal(back.input.format, 'lpf-seq');
+  assert.equal(back.report.errors, 0);
 });
 test('a FeatureCollection longer than the head read for detection is judged by the features the head holds', async () => {
   const many = Array.from({ length: 3000 }, (_, i) => ({ type: 'Feature', geometry: pt, properties: { name: `p${i}`, toponym: `p${i}` } }));
