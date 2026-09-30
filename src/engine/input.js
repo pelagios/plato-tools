@@ -152,6 +152,27 @@ export async function* annotationItems(file, shape) {
 // ---- detection ----------------------------------------------------------------------------------
 export const TABLE_SHEETS = ['about', 'places', 'sources', 'names', 'locations', 'types', 'relations', 'connections', 'properties', 'identities'];
 const base = (name) => name.replace(/\.gz$/i, '').toLowerCase();
+// The column each sheet begins with, where it is not place_id (csv-metadata.json).
+const SHEET_FIRST_COLUMN = { about: 'title', sources: 'source_id' };
+/** The sheet a CSV file is named after (places.csv, names.csv.gz…), or null. */
+export const sheetOf = (name) => { const s = base(name).split('/').pop().replace(/\.csv$/, ''); return TABLE_SHEETS.includes(s) ? s : null; };
+/**
+ * Which of these CSV files are sheets of one set of PLATO spreadsheet tables: those named after a
+ * sheet when there are several, or the one so named when its header begins with its sheet's first
+ * column (a places.csv of one's own is not the tables). Only that one file's first line is read.
+ */
+export async function tableSheets(files) {
+  const named = files.filter((f) => sheetOf(f.name));
+  if (named.length !== 1) return named;
+  let first;
+  // The delimiter is guessed as the tables reader guesses it (Papa), so that a places.csv separated
+  // by semicolons or tabs is still the tables. A file that cannot be read is left to the tables
+  // reader, which says so; any other error is a fault in the tools, and is not hidden.
+  try { first = String(Papa.parse((await head(named[0], 4096)).replace(/^\uFEFF/, ''), { preview: 1, skipEmptyLines: 'greedy' }).data[0]?.[0] ?? '').trim(); }
+  catch (e) { if (e instanceof DataError) return named; throw e; }
+  const sheet = sheetOf(named[0].name);
+  return first === (SHEET_FIRST_COLUMN[sheet] || 'place_id') ? named : [];
+}
 
 /**
  * Group the chosen files into one input and say what it is:
@@ -161,7 +182,7 @@ const base = (name) => name.replace(/\.gz$/i, '').toLowerCase();
 export async function detect(files) {
   const names = files.map((f) => base(f.name));
   const csvs = files.filter((f, i) => names[i].endsWith('.csv'));
-  if (csvs.length && csvs.length === files.length) return csvSetKind(files, names);
+  if (csvs.length && csvs.length === files.length) return csvSetKind(files);
   if (files.length !== 1) return { format: null, reason: 'Choose one file, or the ten CSV files of a set of tables.' };
   const f = files[0], n = names[0];
   if (n.endsWith('.zip')) return { format: 'tables', container: 'zip', files };
@@ -248,27 +269,15 @@ function lpfVersion(obj) {
 }
 
 // ---- CSV and GeoJSON that are not PLATO's own (Hermes: src/engine/hermes/generic.js) --------------
-// The column each of the ten sheets begins with (csv-metadata.json).
-const SHEET_FIRST_COLUMN = { about: 'title', sources: 'source_id' };
 /**
  * A set of CSV files is PLATO's spreadsheet tables, exactly as before, when any file is named after
  * one of the ten sheets (places.csv, names.csv…), unless it is a single file whose header does not
- * begin with that sheet's first column (a places.csv of one's own). Otherwise one CSV file is a
- * table of places, read through a mapping of its columns ('csv'); several are not a set of tables,
- * and are read one at a time.
+ * begin with that sheet's first column (a places.csv of one's own: tableSheets). Otherwise one CSV
+ * file is a table of places, read through a mapping of its columns ('csv'); several are not a set
+ * of tables, and are read one at a time.
  */
-async function csvSetKind(files, names) {
-  const sheets = names.map((n) => n.split('/').pop().replace(/\.csv$/, ''));
-  const named = sheets.filter((s) => TABLE_SHEETS.includes(s));
-  if (named.length && files.length > 1) return { format: 'tables', container: 'csv', files };
-  if (named.length) {
-    let first;
-    // The delimiter is guessed as the tables reader guesses it (Papa), so that a places.csv separated
-    // by semicolons or tabs is still the tables.
-    try { const text = (await head(files[0], 4096)).replace(/^﻿/, ''); first = String(Papa.parse(text, { preview: 1, skipEmptyLines: 'greedy' }).data[0]?.[0] ?? '').trim(); }
-    catch (e) { if (e instanceof DataError) return { format: 'tables', container: 'csv', files }; throw e; }
-    if (first === (SHEET_FIRST_COLUMN[sheets[0]] || 'place_id')) return { format: 'tables', container: 'csv', files };
-  }
+async function csvSetKind(files) {
+  if (files.length > 1 ? files.some((f) => sheetOf(f.name)) : (await tableSheets(files)).length) return { format: 'tables', container: 'csv', files };
   if (files.length === 1) return { format: 'csv', files };
   return { format: null, reason: 'These CSV files are not a set of PLATO spreadsheet tables (none is named after one of its sheets, such as places.csv), so choose one of them at a time: each is read as a table of places, with its columns matched to PLATO.' };
 }

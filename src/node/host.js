@@ -7,6 +7,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { loadResources } from '../engine/resources.js';
 import { prepare } from '../engine/pipeline.js';
+import { tableSheets } from '../engine/input.js';
 import { openNodeSqlite } from './sqlite.js';
 
 const PLATO_FILES = new URL('../../public/plato/', import.meta.url);
@@ -15,10 +16,13 @@ export async function nodeResources() {
 }
 
 /**
- * Which inputs the arguments name, in the order given. Each file is one input, except:
- * - a directory is one set of spreadsheet tables, made of the CSV files in it;
- * - CSV files named one by one are the sheets of one set of tables per directory, so
- *   `a/*.csv b/*.csv` is two sets.
+ * Which inputs the arguments name, in the order given. Each file is one input, except that the CSV
+ * files that are sheets of PLATO's spreadsheet tables (tableSheets in src/engine/input.js) make one
+ * set of tables per directory:
+ * - a directory is the set of tables made of the sheets in it, and each other CSV file in it is an
+ *   input of its own;
+ * - CSV files named one by one are grouped the same way, per directory, so `a/*.csv b/*.csv` is
+ *   two sets.
  * Returns [{ label, paths, name? }], or { label, failure } for an argument that cannot be read.
  */
 export async function gatherInputs(args) {
@@ -29,17 +33,33 @@ export async function gatherInputs(args) {
     if (st.isDirectory()) {
       const csvs = (await readdir(arg)).filter((f) => /\.csv$/i.test(f)).sort().map((f) => join(arg, f));
       const label = arg.endsWith('/') ? arg : arg + '/';
-      if (!csvs.length) inputs.push({ label, paths: [arg], failure: 'A directory is read as one set of spreadsheet tables, but this one holds no CSV files.' });
-      else inputs.push({ label, paths: csvs, name: basename(resolve(arg)) });
+      if (!csvs.length) inputs.push({ label, paths: [arg], failure: 'A directory is read as its CSV files, but this one holds none.' });
+      else inputs.push({ group: csvs, dir: arg, label, name: basename(resolve(arg)) });
     } else if (/\.csv$/i.test(arg)) {
       const dir = dirname(resolve(arg));
       let set = csvSets.get(dir);
-      if (!set) { set = { label: '', paths: [], name: basename(dir) }; csvSets.set(dir, set); inputs.push(set); }
-      set.paths.push(arg);
-      set.label = set.paths.length === 1 ? arg : `${join(dirname(arg), '*.csv')} (${set.paths.length} files)`;
+      if (!set) { set = { group: [], name: basename(dir) }; csvSets.set(dir, set); inputs.push(set); }
+      set.group.push(arg);
     } else inputs.push({ label: arg, paths: [arg] });
   }
-  return inputs;
+  // Each group of CSV files becomes its set of tables, if any, then each other file on its own.
+  const out = [];
+  for (const item of inputs) {
+    if (!item.group) { out.push(item); continue; }
+    const files = await openFiles(item.group);
+    const sheets = new Set((await tableSheets(files)).map((f) => files.indexOf(f)));
+    const paths = item.group.filter((_, i) => sheets.has(i)), rest = item.group.filter((_, i) => !sheets.has(i));
+    if (paths.length) {
+      // A directory keeps its own name as the label; CSV files named one by one are labelled as before.
+      const dir = item.dir !== undefined ? item.label : join(dirname(paths[0]), '/');
+      const label = !rest.length && item.dir !== undefined ? dir
+        : paths.length === 1 ? paths[0]
+        : rest.length ? `${dir} (${paths.length} sheets of tables)` : `${join(dir, '*.csv')} (${paths.length} files)`;
+      out.push({ label, paths, name: item.name });
+    }
+    for (const p of rest) out.push({ label: p, paths: [p] });
+  }
+  return out;
 }
 
 /** Files as the engine expects them (name, size, slice, stream, text), read from disk lazily. */

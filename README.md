@@ -64,9 +64,11 @@ node bin/plato-tools.mjs compare release-1.jsonl.gz release-2.jsonl.gz  # was an
 | `publish PART INPUT` | Prepares a dataset for publishing: `report`, `mint`, `site` or `w3id` ([below](#publishing)) |
 | `datacube FILE…` | Checks a Data Cube export against Data Cube's integrity constraints ([Statistical tables](https://pelagios.org/place-attestation-ontology/guide/statistics.html#checking-and-standard-data-cube)) |
 
-- **Which files make one input.** Each file is one input, except that a directory is one set of
-  spreadsheet tables (the CSV files in it), and CSV files named one by one are one set per
-  directory, so `a/*.csv b/*.csv` is two sets. A zip of the CSV files, or a workbook, is one set.
+- **Which files make one input.** Each file is one input, except that the sheets of a set of
+  spreadsheet tables (`places.csv`, `names.csv`…) are one input per directory, whether the directory
+  is given or its CSV files are named one by one, so `a/*.csv b/*.csv` is two sets. Any other CSV
+  file in the directory, or named, is an input of its own, and so is a lone sheet whose header does
+  not begin as that sheet's does (a `places.csv` of one's own). A zip of the CSV files, or a workbook, is one set.
 - **Exit status:** 0 if no input has problems, 1 if any has, 2 if the command is wrong or an input
   cannot be read or written (a missing file, an unrecognised format, an output that already
   exists). Warnings, and what a conversion cannot carry over, do not count as problems. For
