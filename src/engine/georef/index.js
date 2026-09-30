@@ -2,12 +2,13 @@
 // Georeference Annotation (as Allmaps makes them), for every PLATO tool that needs it.
 //
 //   import { readGeoreference, toWorld, toPixels, georefNote, georefCitation,
-//            matchesTarget, containsRegion } from './engine/georef/index.js'
+//            matchesTarget, matchTarget, containsRegion, allmapsLookupUrl } from './engine/georef/index.js'
 //
 // ASYNC: readGeoreference, toWorld and toPixels return Promises. The Allmaps libraries they use
 // are loaded by dynamic import() the first time one of them is called, so that a page which never
-// meets a georeference never downloads them. georefNote, georefCitation, matchesTarget and
-// containsRegion are synchronous and never load Allmaps.
+// meets a georeference never downloads them. georefNote, georefCitation, matchesTarget,
+// matchTarget and containsRegion are synchronous and never load Allmaps. allmapsLookupUrl is
+// async only because it hashes with Web Crypto; it builds a URL and fetches nothing.
 //
 // Nothing here fetches anything: the caller fetches the annotation and the manifest.
 // Pure ESM, no DOM: runs in Node and in a Web Worker.
@@ -26,7 +27,7 @@
 // 98 interior points on one real map), because the fitted plane passes its horizon there: those are
 // DataErrors, never a wrong position.
 import { DataError } from '../input.js';
-import { normaliseId, labelText, manifestCanvases, partOfCanvases, manifestId as idOfManifest } from './iiif.js';
+import { normaliseId, parseImageRequest, imageRequestFrameChange, labelText, manifestCanvases, partOfCanvases, manifestId as idOfManifest } from './iiif.js';
 import {
   readGeojson, parseXywh, xywhPolygon, parseSvg, closeRing, openRing, signedArea2, pointInRing,
   segmentsCross, vertices, edges,
@@ -36,6 +37,7 @@ import {
  * The transformation library, as the record names it. A test checks this against
  * node_modules/@allmaps/transform/package.json, so it cannot drift from package.json's pin.
  */
+export { allmapsLookupUrl, parseImageRequest } from './iiif.js';
 export const SOFTWARE = '@allmaps/transform@1.0.0-beta.53';
 
 // ---- Loading Allmaps, lazily ------------------------------------------------------------------
@@ -507,7 +509,7 @@ function pixelGeometry(g, geometry, space) {
   if (geometry && typeof geometry === 'object' && 'svg' in geometry) return { geom: parseSvg(geometry.svg) };
   return { geom: readGeojson(geometry, 'The pixel geometry') };
 }
-function makeRecord(g, direction, name, space, region, canvasRegion) {
+function makeRecord(g, direction, name, space, region, canvasRegion, role) {
   return {
     direction, transformation: name, gcps: g.gcps,
     annotationId: g.annotationId ?? null, manifestId: g.manifestId ?? null, canvasId: g.canvasId ?? null,
@@ -515,6 +517,7 @@ function makeRecord(g, direction, name, space, region, canvasRegion) {
     ...(region ? { region } : {}),
     ...(region && canvasRegion && g.canvasId ? { canvasRegion } : {}),
     title: g.title ?? null,
+    ...(role ? { role } : {}),
     software: SOFTWARE,
   };
 }
@@ -531,9 +534,11 @@ function makeRecord(g, direction, name, space, region, canvasRegion) {
  * @param options.densify Tolerance in pixels: lines and ring edges are split until the curve the
  *   transformation makes is followed to within about this many pixels (Allmaps' midpoint
  *   refinement, measured on the ground and converted at the scale of the middle of the map).
+ * @param options.role Optional: what the geometry is, as an IRI, copied into the record (e.g.
+ *   https://w3id.org/plato#LabelAnchor, which georefNote then mentions).
  * @returns Promise of { geojson (WGS84 [lon, lat]; polygons closed, outer rings counter-clockwise), record }.
  */
-export async function toWorld(g, geometry, { space, transformation, precision, densify } = {}) {
+export async function toWorld(g, geometry, { space, transformation, precision, densify, role } = {}) {
   spaceOf(space);
   const p = precisionOf(precision, 6), tol = densifyOf(densify);
   const name = transformation === undefined ? g.transformation : transformationName(transformation, 'The option');
@@ -556,7 +561,7 @@ export async function toWorld(g, geometry, { space, transformation, precision, d
     line: (l) => t.transformToGeo(l, opts).map(out),
     polygon: (rings) => t.transformToGeo(rings, opts).map((r) => r.map(out)),
   });
-  return { geojson: orient(world), record: makeRecord(g, 'toWorld', name, space, region, canvasRegion) };
+  return { geojson: orient(world), record: makeRecord(g, 'toWorld', name, space, region, canvasRegion, role) };
 }
 
 /**
@@ -595,11 +600,29 @@ export async function toPixels(g, geojson, { space, transformation, densify, pre
 
 // ---- Choosing among georeferences --------------------------------------------------------------
 
-/** Is sourceId (an annotation target's source) this georeference's canvas or image? */
+/** Is sourceId (an annotation target's source) this georeference's canvas or image? See matchTarget. */
 export function matchesTarget(g, sourceId) {
+  return matchTarget(g, sourceId).match;
+}
+
+/**
+ * Whether sourceId is this georeference's canvas or image, and how:
+ * { match, via: 'canvas' | 'service' | 'image-url' | null, reason?: 'cropped' | 'rotated' }.
+ * Ids are compared with a trailing /info.json and trailing slashes ignored, scheme and case as
+ * given. A IIIF Image API picture URL ({service}/full/{size}/0/{quality}.{format}) matches the
+ * image service only (via 'image-url'), never the canvas; one of this image that is cropped or
+ * rotated does not match, and `reason` says why.
+ */
+export function matchTarget(g, sourceId) {
   const s = normaliseId(sourceId);
-  if (!s) return false;
-  return s === normaliseId(g.canvasId) || s === normaliseId(g.imageServiceId);
+  if (!s) return { match: false, via: null };
+  if (s === normaliseId(g.canvasId)) return { match: true, via: 'canvas' };
+  const service = normaliseId(g.imageServiceId);
+  if (s === service) return { match: true, via: 'service' };
+  const parts = parseImageRequest(sourceId);
+  if (!parts || !service || parts.service !== service) return { match: false, via: null };
+  const reason = imageRequestFrameChange(parts);
+  return reason ? { match: false, via: null, reason } : { match: true, via: 'image-url' };
 }
 
 /**
@@ -623,7 +646,10 @@ export function containsRegion(g, geometry, { space } = {}) {
 
 // ---- What is written into PLATO ----------------------------------------------------------------
 
-/** One sentence for PLATO `notes`, the same wherever it is written. */
+export const LABEL_ANCHOR = 'https://w3id.org/plato#LabelAnchor';
+const LABEL_ANCHOR_NOTE = 'The position is where the map writes the name, not necessarily where the place is.';
+
+/** One sentence for PLATO `notes`, the same wherever it is written (two when record.role is LABEL_ANCHOR). */
 export function georefNote(record) {
   const n = record.gcps;
   const words = (TRANSFORMATIONS[ALIASES[record.transformation] ?? record.transformation] || {}).words ?? record.transformation;
@@ -632,7 +658,8 @@ export function georefNote(record) {
       : record.manifestId ? `, in ${record.manifestId}`
         : record.imageServiceId ? `, image ${record.imageServiceId}` : '';
   const lead = record.direction === 'toPixels' ? 'Position on the map derived' : 'Position derived from the map';
-  return `${lead} through its georeference ${record.annotationId ?? '(no identifier)'} (${n} control point${n === 1 ? '' : 's'}, ${words} transformation)${where}.`;
+  const note = `${lead} through its georeference ${record.annotationId ?? '(no identifier)'} (${n} control point${n === 1 ? '' : 's'}, ${words} transformation)${where}.`;
+  return record.role === LABEL_ANCHOR ? `${note} ${LABEL_ANCHOR_NOTE}` : note;
 }
 
 /**
