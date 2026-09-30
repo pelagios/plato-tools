@@ -66,6 +66,9 @@ export const TEXT = {
   'only-unknown': 'Keys in the --only list match no place of the dataset, so they select nothing.',
   'duplicate-place': "Two records are the same place: their addresses are the same, or differ only after '#', which a web server never sees. Only the first has a page and a JSON-LD document; what the others say is in the downloads, but not on the site. Make them one record, or give them addresses of their own. The example names the address.",
   'bad-site-url': W3ID_TEXT['bad-site-url'],
+  'bad-site-dir': "The site's folder (--site-dir) must be one name of letters, digits and . _ -, not starting with '.'.",
+  'unsafe-workflow-value': "A value that goes into the site's workflow could change what the workflow does: it holds a line break, or '${{', which GitHub reads as an expression of its own; or, for the ref of PLATO tools, characters other than letters, digits and . _ / -. Nothing is written: give the value without them. The example names the option.",
+  'dataset-path-guessed': "Where the spreadsheet tables are in your repository is not known (the page cannot tell which folder the files were chosen from), so the workflow reads them from the folder the example names. Change the path in .github/workflows/pages.yml (twice) if they are somewhere else, or make the site with the command line, which knows.",
   'custom-domain-path': "The base address is on a domain of its own but not at its root. GitHub Pages serves a custom domain from the root of one site, so no CNAME file is written: the pages will be at the base address only if this repository is a project site named after the path, under an account whose own Pages site has this domain. Otherwise use a base at the domain's root, or a w3id.org address.",
   'site-address-unknown': "Where the site will be served is not known (give --repo, or --site-url), so the 404 page's links start from the root of the site's domain, which is right for a custom domain but not for a project's address on github.io.",
   'tools-ref-unpinned': "Which commit of PLATO tools made this is not known, so the workflow runs the tag of its version number, which may not exist yet. Give the commit or tag to run (--tools-ref) instead.",
@@ -75,6 +78,10 @@ export const TEXT = {
   'identity-matches-not-shown': "The dataset lists more identity matches apart from their places than the places' pages can gather, so the later ones are not on the pages; all are in the downloads.",
 };
 
+// The ref of PLATO tools the workflow runs (a commit, a tag or a branch), and the name of the site's
+// folder: nothing a shell or YAML would read as more than a word.
+const TOOLS_REF = /^[A-Za-z0-9._/-]+$/;
+const SITE_DIR = /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
 // An element id made from an address's fragment: what HTML allows, and what minted ones are.
 const SAFE_ANCHOR = /^[A-Za-z][A-Za-z0-9._:~-]*$/;
 
@@ -242,11 +249,26 @@ export function create(ctx) {
 
       const input = ctx.input;
       const fileName = input?.files?.[0]?.name || 'dataset';
+      // Spreadsheet tables chosen one by one are named after their folder, which the command line
+      // knows (options.name) and the page may not: then after the dataset's short name.
+      const csvTables = input?.format === 'tables' && input.container === 'csv';
       // The site's folder is named after the dataset's file, as a conversion names its output.
-      const stem = (options.name || fileName).replace(/\.(gz)$/i, '').replace(/\.[^.]+$/, '');
+      const stem = (options.name || (csvTables ? sc.stem : fileName)).replace(/\.(gz)$/i, '').replace(/\.[^.]+$/, '');
+      // What the workflow reads: the file, or for spreadsheet tables, the folder they are in.
+      const datasetPath = options.datasetPath || (csvTables ? stem + '/' : fileName);
+      if (csvTables && !options.name && !options.datasetPath) rep.warning('dataset-path-guessed', TEXT['dataset-path-guessed'], datasetPath);
+      const onlyPath = only ? '.github/plato-site-only.txt' : null;
+      // Everything the workflow is made of, checked before anything is written (site/repo.js quotes
+      // each for YAML and the shell, but a line break or '${{' would be read before any quoting).
+      const unsafe = Object.entries({ '--repo': options.repo, '--site-url': options.siteUrl, '--tools-ref': toolsRef, '--dataset-path': datasetPath, '--base': options.base, '--concept-doi': options.conceptDoi, '--site-dir': options.siteDir })
+        .find(([k, v]) => v !== undefined && v !== null && (/[\r\n]/.test(String(v)) || String(v).includes('${{') || (k === '--tools-ref' && !TOOLS_REF.test(String(v)))));
+      if (unsafe) { rep.error('unsafe-workflow-value', TEXT['unsafe-workflow-value'], `${unsafe[0]} ${JSON.stringify(String(unsafe[1]))}`); return; }
+      if (options.siteDir !== undefined && !SITE_DIR.test(String(options.siteDir))) { rep.error('bad-site-dir', TEXT['bad-site-dir'], String(options.siteDir)); return; }
       const withdrawn = resolveWithdrawn(withdrawals).status;
       const draft = !published;
-      const tree = await ctx.tree(`${stem}-site`);
+      // The workflow names the folder (--site-dir site), so that it can say where to upload it from
+      // whatever the dataset's file is called in the repository.
+      const tree = await ctx.tree(options.siteDir || `${stem}-site`);
       let bytes = 0, files = 0, stopped = false;
       const put = async (path, text) => {
         if (stopped) return;
@@ -365,9 +387,6 @@ export function create(ctx) {
       ctx.done(site);
 
       // What goes into the repository.
-      // What the workflow reads: the file, or for spreadsheet tables, the folder they are in.
-      const datasetPath = options.datasetPath || (input?.format === 'tables' && input.container === 'csv' ? (options.name || '.') + '/' : fileName);
-      const onlyPath = only ? '.github/plato-site-only.txt' : null;
       const repoOpts = { toolsRef, datasetPath, name: stem, base: options.base, repo: options.repo, siteUrl: options.siteUrl, conceptDoi: options.conceptDoi, turtle: !!turtle, onlyPath,
         title: g.title, cname, leftOut: places - served.size };
       const repo = await ctx.tree(`${stem}-repo`);

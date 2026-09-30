@@ -31,6 +31,8 @@ function onMessage({ data }) {
 function choose(list) {
   files = [...list];
   if (!files.length) return;
+  // A previous release chosen for another dataset is not this one's: it is chosen again, or not.
+  $('previous').value = '';
   const c = $('chosen'); c.hidden = false;
   c.innerHTML = `<ul>${files.map((f) => `<li><span class="name">${escapeHtml(f.name)}</span> <span class="count">${fmtBytes(f.size)}</span></li>`).join('')}</ul><p>Looking at it…</p>`;
   $('action').hidden = true; $('result').hidden = true;
@@ -84,7 +86,16 @@ function start(action, earlier) {
 function publishOptions() {
   const v = (id) => $(id).value.trim() || undefined;
   const maintainers = (v('maintainers') || '').split(/[\s,]+/).map((m) => m.replace(/^@/, '')).filter(Boolean);
-  return { release: v('release'), conceptDoi: v('concept-doi'), repo: v('repo'), siteUrl: v('site-url'), maintainers, turtle: $('turtle').checked };
+  return { release: v('release'), conceptDoi: v('concept-doi'), repo: v('repo'), siteUrl: v('site-url'), maintainers, turtle: $('turtle').checked, name: tablesFolder() };
+}
+// Spreadsheet tables chosen as a folder (or dropped as one) know its name, as the command line
+// does: the site's zip and the workflow's path are named after it. Chosen file by file they do
+// not, and the site names them after the dataset's short name instead, and says so.
+function tablesFolder() {
+  if (input?.format !== 'tables' || input.container !== 'csv') return undefined;
+  const dirs = new Set(files.map((f) => (f.webkitRelativePath || '').split('/').slice(0, -1).join('/')));
+  const [dir] = dirs;
+  return dirs.size === 1 && dir ? dir.split('/').pop() : undefined;
 }
 function onProgress(p) {
   $('phase').textContent = progressText(p);

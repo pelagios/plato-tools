@@ -85,6 +85,9 @@ Options:
   --dataset-path P  publish site: where the dataset is in the repository, for the workflow
                     (default: its file name).
   --tools-ref REF   publish site: the commit or tag of PLATO tools the workflow runs.
+  --site-dir NAME   publish site: the name of the site's folder under --out (default: the
+                    dataset's name, then -site). The workflow gives one, so that it knows
+                    which folder to publish.
   --work-dir DIR    where the working database for RDF and attestation-centric input is kept
                     while it is in use (default: the system's temporary directory). It needs
                     room for about 1.5 times the uncompressed input; it is removed afterwards.
@@ -115,7 +118,7 @@ async function main(argv) {
         'work-dir': { type: 'string' }, json: { type: 'boolean', default: false }, brief: { type: 'boolean', default: false },
         release: { type: 'string' }, previous: { type: 'string' }, 'concept-doi': { type: 'string' }, maintainer: { type: 'string', multiple: true, default: [] },
         repo: { type: 'string' }, 'site-url': { type: 'string' }, turtle: { type: 'boolean', default: false },
-        only: { type: 'string' }, 'dataset-path': { type: 'string' }, 'tools-ref': { type: 'string' },
+        only: { type: 'string' }, 'dataset-path': { type: 'string' }, 'tools-ref': { type: 'string' }, 'site-dir': { type: 'string' },
         help: { type: 'boolean', short: 'h', default: false }, version: { type: 'boolean', short: 'V', default: false },
       },
     });
@@ -272,7 +275,7 @@ async function publishCommand(args, o, resources) {
       catch (e) { r.message = `--only ${o.only}: ${e.code === 'ENOENT' ? 'there is no such file.' : e.message}`; return finishPublish(r, o, t0); }
     }
     const options = { base: o.base, release: o.release, conceptDoi: o['concept-doi'], maintainers: o.maintainer, repo: o.repo, siteUrl: o['site-url'], turtle: o.turtle, name: items[0].name,
-      only, datasetPath: o['dataset-path'], toolsRef: o['tools-ref'] };
+      only, datasetPath: o['dataset-path'], toolsRef: o['tools-ref'], siteDir: o['site-dir'] };
     try { result = await publish({ part, input, previous, options }, env); } catch (e) { failure = e; }
     if (live) process.stderr.write('\r\x1b[K');
     const done = finish(!!failure || !!result?.incomplete);

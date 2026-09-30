@@ -12,14 +12,19 @@
 const shq = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
 const yq = (s) => '"' + String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
 
+// The folder the workflow builds the site in, under _build/, whatever the dataset's file is called:
+// given to the command (--site-dir), and the folder uploaded, so that the two cannot differ.
+export const CI_SITE_DIR = 'site';
+
 /**
  * The command the workflow runs and the file it runs it in. `opts`: toolsRef, datasetPath, name
- * (the site's folder is <name>-site, as the command line names it from the dataset's file), base,
- * repo, siteUrl, conceptDoi, turtle, onlyPath.
+ * (the dataset's short name, for the local preview), base, repo, siteUrl, conceptDoi, turtle,
+ * onlyPath. Every value has been checked by the caller (site.js): no line break, no '${{', and a
+ * ref of letters, digits and . _ / - only; each is quoted here besides.
  */
 export function workflow(opts) {
   const args = [
-    `npx --yes github:pelagios/plato-tools#${opts.toolsRef}`, 'publish site', shq(opts.datasetPath), '--out _build',
+    `npx --yes ${shq(`github:pelagios/plato-tools#${opts.toolsRef}`)}`, 'publish site', shq(opts.datasetPath), `--out _build --site-dir ${CI_SITE_DIR}`,
     opts.base ? `--base ${shq(opts.base)}` : '', opts.repo ? `--repo ${shq(opts.repo)}` : '', opts.siteUrl ? `--site-url ${shq(opts.siteUrl)}` : '',
     opts.conceptDoi ? `--concept-doi ${shq(opts.conceptDoi)}` : '', opts.turtle ? '--turtle' : '', opts.onlyPath ? `--only ${shq(opts.onlyPath)}` : '',
   ].filter(Boolean);
@@ -57,14 +62,14 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-      # Checks the dataset and writes the site to _build/${opts.name}-site. It stops (and nothing is
+      # Checks the dataset and writes the site to _build/${CI_SITE_DIR}. It stops (and nothing is
       # published) if the dataset has problems, or if its attestations have no addresses yet.
       - name: Build the site
         run: |
           ${args.join(' ')}
       - uses: actions/upload-pages-artifact@v5
         with:
-          path: _build/${opts.name}-site
+          path: ${yq(`_build/${CI_SITE_DIR}`)}
           # The site holds files whose names start with a dot (.nojekyll), which are left out otherwise.
           include-hidden-files: true
   deploy:

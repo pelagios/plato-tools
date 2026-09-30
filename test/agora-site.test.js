@@ -168,8 +168,8 @@ test("spreadsheet tables under a w3id base: the site's files are where the addre
   assert.ok(Object.keys(unzipSync(readFileSync(join(s.siteDir, 'download/test-x-tables.zip')))).some((f) => f.endsWith('places.csv')));
   // The repository's part: the workflow, pinned, building this dataset under this base.
   const wf = readFileSync(join(s.repoDir, '.github/workflows/pages.yml'), 'utf8');
-  assert.match(wf, /npx --yes github:pelagios\/plato-tools#abc1234 publish site 'king-john\/' --out _build --base 'https:\/\/w3id\.org\/test-x\/'/);
-  assert.match(wf, /path: _build\/king-john-site\n\s+# .*\n\s+include-hidden-files: true/);
+  assert.match(wf, /npx --yes 'github:pelagios\/plato-tools#abc1234' publish site 'king-john\/' --out _build --site-dir site --base 'https:\/\/w3id\.org\/test-x\/'/);
+  assert.match(wf, /path: "_build\/site"\n\s+# .*\n\s+include-hidden-files: true/);
   assert.match(wf, /actions\/deploy-pages@v5/);
   assert.match(wf, /pages: write\n\s+id-token: write/);
   assert.match(readFileSync(join(s.repoDir, 'README-agora.md'), 'utf8'), /publish mint/);
@@ -449,6 +449,69 @@ test('a dataset that cannot be read to the end the second time leaves no site, a
   assert.equal(item.examples[0], join(out, 'flaky-site'));
   assert.ok(cut.done.removed.some((p) => p.endsWith('index.html')));
   assert.equal(existsSync(join(out, 'flaky-site')), false);
+});
+
+// ---- the workflow ------------------------------------------------------------------------------------
+/** The workflow's build step, run here as GitHub would run it, with this checkout for npx's download. */
+function runWorkflow(repoDir, wf) {
+  const cmd = wf.match(/- name: Build the site\n\s+run: \|\n\s+(.*)\n/)[1];
+  const local = cmd.replace(/^npx --yes ('[^']+'|\S+)/, `${JSON.stringify(process.execPath)} ${JSON.stringify(CLI)}`);
+  assert.notEqual(local, cmd);
+  const r = spawnSync('bash', ['-c', local], { cwd: repoDir, encoding: 'utf8' });
+  const path = wf.match(/^\s+path: (.*)$/m)[1];
+  return { ...r, uploads: path.startsWith('"') ? JSON.parse(path) : path };
+}
+
+test("the workflow uploads the folder its own command writes, whatever the dataset's file is called here", async () => {
+  // Made from one file name, and committed (--dataset-path) under another.
+  const doc = kingJohn({ base: 'https://w3id.org/test-kj/' });
+  const s = await site([jsonFile(doc, 'kj-local-copy.json')], { datasetPath: 'data/gazetteer.json', toolsRef: 'abc1234' });
+  const wf = readFileSync(join(s.repoDir, '.github/workflows/pages.yml'), 'utf8');
+  const repoDir = join(dir, 'user-repo');
+  mkdirSync(join(repoDir, 'data'), { recursive: true });
+  writeFileSync(join(repoDir, 'data/gazetteer.json'), JSON.stringify(doc));
+  const r = runWorkflow(repoDir, wf);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(existsSync(join(repoDir, r.uploads, 'index.html')), `${r.uploads} is not what the build wrote: ${readdirSync(join(repoDir, '_build'))}`);
+  assert.ok(existsSync(join(repoDir, r.uploads, 'place/windsor/index.html')));
+  assert.ok(existsSync(join(repoDir, r.uploads, '.nojekyll')));
+});
+
+test('a value that would change what the workflow does is refused, and nothing is written', async () => {
+  const bad = [
+    [{ repo: 'owner/name\n    - run: curl evil' }, '--repo'],
+    [{ siteUrl: 'https://kj.example.org/${{ secrets.TOKEN }}/' }, '--site-url'],
+    [{ toolsRef: 'main; rm -rf ~' }, '--tools-ref'],
+    [{ toolsRef: '${{ github.token }}' }, '--tools-ref'],
+    [{ datasetPath: 'data/kj.json\r\n' }, '--dataset-path'],
+    [{ conceptDoi: '10.5281/zenodo.1\nx' }, '--concept-doi'],
+  ];
+  for (const [options, option] of bad) {
+    const s = await siteInBrowser([jsonFile(kingJohn())], { toolsRef: 'abc1234', ...options });
+    const i = s.r.report.items.find((x) => x.kind === 'unsafe-workflow-value' || x.kind === 'bad-site-url');
+    assert.ok(i && i.severity === 'error', `${option}: ${s.kinds}`);
+    if (i.kind === 'unsafe-workflow-value') assert.ok(i.examples[0].startsWith(option + ' '), i.examples[0]);
+    assert.equal(s.r.outputs.length, 0, option);
+  }
+  // A file name is a value too: the dataset's, when no --dataset-path is given.
+  const named = await siteInBrowser([jsonFile(kingJohn(), 'kj${{ x }}.json')], { toolsRef: 'abc1234' });
+  assert.ok(named.kinds.includes('unsafe-workflow-value'));
+  // The same, with ordinary values: no such finding, and both trees.
+  const ok = await siteInBrowser([jsonFile(kingJohn())], { toolsRef: 'v0.1.0', repo: 'pelagios/kj', siteUrl: 'https://kj.example.org/', datasetPath: 'data/kj.json', conceptDoi: '10.5281/zenodo.1' });
+  assert.ok(!ok.kinds.includes('unsafe-workflow-value') && ok.r.outputs.length === 2, ok.kinds.join());
+  const wf = strFromU8(ok.zips['king-john-repo.zip']['.github/workflows/pages.yml']);
+  assert.match(wf, /npx --yes 'github:pelagios\/plato-tools#v0\.1\.0'/);
+  assert.match(wf, / - "data\/kj\.json"/);
+});
+
+test('spreadsheet tables chosen file by file in the page: named after the base, and the guessed path is said', async () => {
+  const s = await siteInBrowser(tableFiles(TABLES), { base: 'https://w3id.org/test-x/', toolsRef: 'abc1234' });
+  assert.ok(s.zips['test-x-site.zip']?.['index.html'], Object.keys(s.zips).join());
+  assert.equal(s.r.report.items.find((i) => i.kind === 'dataset-path-guessed')?.examples[0], 'test-x/');
+  assert.match(strFromU8(s.zips['test-x-repo.zip']['.github/workflows/pages.yml']), /publish site 'test-x\/'/);
+  // Given the folder's name (as the page does for a folder chosen whole), no guess.
+  const named = await siteInBrowser(tableFiles(TABLES), { base: 'https://w3id.org/test-x/', toolsRef: 'abc1234', name: 'king-john' });
+  assert.ok(named.zips['king-john-site.zip'] && !named.kinds.includes('dataset-path-guessed'));
 });
 
 // ---- the command line -------------------------------------------------------------------------------
