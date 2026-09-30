@@ -4,11 +4,12 @@
 // place-centric records, and each record goes straight to SQLite: nothing but the record in hand,
 // and what the dataset withdraws, is held in memory, so a dataset of any size can be looked at.
 //
-// A place's geometries on the map are its current ones: not denied, and not retracted or superseded.
-// A retraction may come anywhere in the file, even under another place, so what is withdrawn is
-// known only when the whole dataset has been read; the boxes and points are worked out then.
+// A place's geometries on the map, and the names the search box finds it by, are its current ones:
+// not denied, and not retracted or superseded. A retraction may come anywhere in the file, even
+// under another place, so what is withdrawn is known only when the whole dataset has been read; the
+// boxes and points are worked out then, and the withdrawn names taken out.
 import { run } from '../pipeline.js';
-import { collectWithdrawn, resolveWithdrawn } from '../../formats/shared.js';
+import { collectWithdrawn, resolveWithdrawn, isDenial } from '../../formats/shared.js';
 import { viewPlace, currentGeometries } from './view.js';
 import { unionBbox } from './geo.js';
 
@@ -22,8 +23,11 @@ export function keyer() {
   let n = 0;
   return (rec) => { n++; return rec && typeof rec === 'object' && !Array.isArray(rec) ? placeKey(rec, n) : null; };
 }
-/** A label as the search box compares it: lower case, without accents (Ἑρμῆς finds ερμης, İstanbul finds istanbul). */
-export const fold = (s) => String(s ?? '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+/**
+ * A label or name as the search box compares it: lower case, without accents (Ἑρμῆς finds ερμης,
+ * İstanbul finds istanbul), and without U+0001, which joins a place's names in the search table.
+ */
+export const fold = (s) => String(s ?? '').normalize('NFD').replace(/[\p{M}\u0001]/gu, '').toLowerCase();
 /** How many places the overview map is given at most. */
 export const OVERVIEW_CAP = 50000;
 const BATCH = 5000;
@@ -32,10 +36,16 @@ export class ChoraStore {
   constructor(db) {
     this.db = db;
     // p: one row per place, in dataset order. g: the current geometries' boxes and points while the
-    // dataset is read (denied ones never go in; withdrawn ones are taken out at the end). wd: what
-    // the whole dataset withdraws.
-    db.exec(`CREATE TABLE p(n INTEGER PRIMARY KEY, id TEXT NOT NULL, label TEXT, fold TEXT, ccodes TEXT, rel TEXT, rec TEXT NOT NULL,
+    // dataset is read (denied ones never go in; withdrawn ones are taken out at the end). sx: each
+    // place's label, folded (k = 0, name null), and then its names, toponym and romanized, in
+    // attestation order (k = 1, 2, ...; denied ones never go in, withdrawn ones are taken out at the
+    // end). sf: what the search box scans, made from sx at the end: one row per place, its folded
+    // label and names joined by U+0001 (which no folded text holds, so a match never spans two), kept
+    // apart from the records so that a search reads little. wd: what the whole dataset withdraws.
+    db.exec(`CREATE TABLE p(n INTEGER PRIMARY KEY, id TEXT NOT NULL, label TEXT, ccodes TEXT, rel TEXT, rec TEXT NOT NULL,
       w REAL, s REAL, e REAL, nn REAL, rx REAL, ry REAL)`);
+    db.exec('CREATE TABLE sx(n INTEGER NOT NULL, k INTEGER NOT NULL, att TEXT, fold TEXT NOT NULL, name TEXT, PRIMARY KEY(n, k)) WITHOUT ROWID');
+    db.exec('CREATE TABLE sf(n INTEGER PRIMARY KEY, f TEXT NOT NULL)');
     db.exec('CREATE TABLE g(n INTEGER NOT NULL, att TEXT, w REAL, s REAL, e REAL, nn REAL, rx REAL, ry REAL)');
     db.exec('CREATE TABLE wd(id TEXT PRIMARY KEY, kind TEXT NOT NULL) WITHOUT ROWID');
     this.loaded = null;
@@ -44,7 +54,8 @@ export class ChoraStore {
   /** The sink run() writes the dataset to. */
   sink() {
     const db = this.db;
-    const insP = db.prepare('INSERT INTO p(n,id,label,fold,ccodes,rel,rec) VALUES (?,?,?,?,?,?,?)');
+    const insP = db.prepare('INSERT INTO p(n,id,label,ccodes,rel,rec) VALUES (?,?,?,?,?,?)');
+    const insS = db.prepare('INSERT INTO sx(n,k,att,fold,name) VALUES (?,?,?,?,?)');
     const insG = db.prepare('INSERT INTO g(n,att,w,s,e,nn,rx,ry) VALUES (?,?,?,?,?,?,?,?)');
     const edges = new Map(), keyOf = keyer();
     let n = 0, open = false, closed = false;
@@ -63,7 +74,26 @@ export class ChoraStore {
         collectWithdrawn(atts, edges);
         const related = [...new Set(atts.flatMap((a) => (a && Array.isArray(a.relations) ? a.relations : [])).map((r) => r && r.relatesTo).filter((x) => typeof x === 'string'))];
         const label = typeof rec.label === 'string' ? rec.label : key;
-        insP.bind([n, key, label, fold(label), JSON.stringify(Array.isArray(rec.ccodes) ? rec.ccodes : []), JSON.stringify(related), JSON.stringify(rec)]).stepReset();
+        insP.bind([n, key, label, JSON.stringify(Array.isArray(rec.ccodes) ? rec.ccodes : []), JSON.stringify(related), JSON.stringify(rec)]).stepReset();
+        const folded = fold(label);
+        insS.bind([n, 0, null, folded, null]).stepReset();
+        // Its names. One the label already holds adds nothing; a name repeated within an attestation
+        // is one. The same name from another attestation is kept: that one may be withdrawn, this not.
+        let k = 0;
+        for (const a of atts) {
+          if (!a || typeof a !== 'object' || !Array.isArray(a.names) || isDenial(a)) continue;
+          const aid = typeof a['@id'] === 'string' ? a['@id'] : null, seen = new Set([folded]);
+          for (const nm of a.names) {
+            if (!nm || typeof nm !== 'object') continue;
+            for (const t of [nm.toponym, nm.romanized]) {
+              if (typeof t !== 'string' || !t.trim()) continue;
+              const f = fold(t);
+              if (seen.has(f)) continue;
+              seen.add(f);
+              insS.bind([n, ++k, aid, f, t]).stepReset();
+            }
+          }
+        }
         // Withdrawn geometries are removed once the whole dataset is known; denied ones never enter.
         for (const g of currentGeometries(rec, null)) {
           if (!g.bbox) continue;
@@ -77,7 +107,7 @@ export class ChoraStore {
         if (closed) return;
         closed = true;
         if (open) db.exec('COMMIT');
-        insP.finalize(); insG.finalize();
+        insP.finalize(); insG.finalize(); insS.finalize();
         self.edges = edges;
       },
     };
@@ -95,6 +125,8 @@ export class ChoraStore {
     db.exec('CREATE INDEX pid ON p(id)');
     db.exec('CREATE INDEX gn ON g(n)');
     db.exec('DELETE FROM g WHERE att IN (SELECT id FROM wd)');
+    db.exec('DELETE FROM sx WHERE att IN (SELECT id FROM wd)');
+    db.exec("INSERT INTO sf(n, f) SELECT n, group_concat(fold, char(1)) FROM sx GROUP BY n ORDER BY n");
     const first = (col) => `(SELECT ${col} FROM g WHERE g.n=p.n AND g.rx IS NOT NULL ORDER BY g.rowid LIMIT 1)`;
     db.exec(`UPDATE p SET w=(SELECT MIN(w) FROM g WHERE g.n=p.n), s=(SELECT MIN(s) FROM g WHERE g.n=p.n),
       e=(SELECT MAX(e) FROM g WHERE g.n=p.n), nn=(SELECT MAX(nn) FROM g WHERE g.n=p.n), rx=${first('rx')}, ry=${first('ry')}`);
@@ -121,14 +153,34 @@ export class ChoraStore {
   /** Whether the dataset has a place under this key (placeKey). */
   has(id) { return this.one('SELECT 1 FROM p WHERE id=? LIMIT 1', [id]) !== null; }
 
-  /** Places whose label holds `q` (case and accents aside), in dataset order; an empty q gives them all. */
+  /**
+   * Places whose label or a current name (toponym or romanized) holds `q`, case and accents aside, in
+   * dataset order, each once; an empty q gives them all. A place found by a name and not by its label
+   * has `matched`: the first such name, in the order of its attestations.
+   */
   search(q = '', offset = 0, limit = 50) {
-    const like = '%' + fold(q).replace(/[\\%_]/g, (c) => '\\' + c) + '%';
-    const total = this.one("SELECT COUNT(*) FROM p WHERE fold LIKE ? ESCAPE '\\'", [like]);
+    const f = fold(q), page = [Math.max(0, limit | 0), Math.max(0, offset | 0)];
     const items = [];
-    for (const r of this.rows("SELECT id, label, ccodes, w IS NOT NULL FROM p WHERE fold LIKE ? ESCAPE '\\' ORDER BY n LIMIT ? OFFSET ?", [like, Math.max(0, limit | 0), Math.max(0, offset | 0)])) {
-      items.push({ id: r.get(0), label: r.get(1), ccodes: JSON.parse(r.get(2)), hasGeometry: !!r.get(3) });
+    const item = (r) => ({ id: r.get(0), label: r.get(1), ccodes: JSON.parse(r.get(2)), hasGeometry: !!r.get(3) });
+    if (!f) {
+      for (const r of this.rows('SELECT id, label, ccodes, w IS NOT NULL FROM p ORDER BY n LIMIT ? OFFSET ?', page)) items.push(item(r));
+      return { q, total: this.one('SELECT COUNT(*) FROM p'), items };
     }
+    const like = '%' + f.replace(/[\\%_]/g, (c) => '\\' + c) + '%';
+    const total = this.one("SELECT COUNT(*) FROM sf WHERE f LIKE ? ESCAPE '\\'", [like]);
+    // The name shown is the first that holds q, the label (k = 0, name null) before any.
+    const which = this.db.prepare("SELECT name FROM sx WHERE n = ? AND fold LIKE ? ESCAPE '\\' ORDER BY k LIMIT 1");
+    try {
+      for (const r of this.rows(`SELECT p.id, p.label, p.ccodes, p.w IS NOT NULL, p.n FROM
+        (SELECT n FROM sf WHERE f LIKE ? ESCAPE '\\' ORDER BY n LIMIT ? OFFSET ?) h JOIN p ON p.n = h.n ORDER BY h.n`, [like, ...page])) {
+        const it = item(r);
+        which.bind([r.get(4), like]);
+        const name = which.step() ? which.get(0) : null;
+        which.reset();
+        if (name !== null) it.matched = name;
+        items.push(it);
+      }
+    } finally { which.finalize(); }
     return { q, total, items };
   }
 

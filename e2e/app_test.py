@@ -896,6 +896,18 @@ def chora_checks(pw, url, tmp):
         dover = labels()
         return 0 < len(want) < ant_places and roads == want and want_dover and dover == want_dover, {'road': roads, 'wanted': want, 'dóver': dover, 'wanted for dóver': want_dover}
     attempt('Chora: search finds by part of a name, whatever the case and accents, and only those', search)
+    def search_names():
+        chora_boot(page, base, [fixture(ant, 'antonine-names.json', tmp)])
+        fold = lambda t: ''.join(c for c in unicodedata.normalize('NFD', t) if not unicodedata.combining(c)).lower()
+        # "Ad portum" is in two places' names (Ad portum Dubris, Ad portum Lemanis) and in no label, so
+        # only a search of the names can find them. Worked out from the file, not typed in.
+        want = sorted((p['label'], n['toponym']) for p in antj['spatialEntities'] for a in p['attestations'] for n in a.get('names', [])
+                      if 'ad portum' in fold(n['toponym']) and 'ad portum' not in fold(p['label']))
+        was = page.inner_text('#found')                         # "11 places.": the list before the search
+        page.fill('#q', 'AD PÓRTUM'); until(page, 'w => document.getElementById("found").textContent !== w', 20, was)
+        got = sorted(page.eval_on_selector_all('#list button[data-id]', 'bs => bs.map((b) => [b.firstChild.textContent.trim(), b.querySelector(".also")?.textContent || null])'))
+        return len(want) == 2 and got == [[l, f'— also {n}'] for l, n in want], {'listed': got, 'wanted': want}
+    attempt('Chora: search finds a place by a name that is not its label, and shows the name it matched', search_names)
 
     def statuses():
         chora_boot(page, base, [fixture(judgements, 'judgements-card.json', tmp)])

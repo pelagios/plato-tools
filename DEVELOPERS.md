@@ -549,9 +549,17 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   place's view) and `chora-save`.
 - **The session database.** `chora-load` reads the dataset with `run()` and `options.sink`, so every
   format arrives as place-centric records, and writes each to `/chora.sqlite3` on the origin
-  private file system, with a folded label for search and the boxes and points of its current
-  geometries, settled at the end of the file, where what is retracted or superseded is known. One
+  private file system, with the boxes and points of its current geometries and the names it is
+  searched by, settled at the end of the file, where what is retracted or superseded is known. One
   dataset at a time.
+- **The search box** finds a place by its label or any current name (toponym or romanized; not
+  denied, retracted or superseded), by part of it, case and accents aside (`fold` in `store.js`), in
+  dataset order, each place once. A place found by a name and not its label comes with `matched`,
+  the first such name, which the list shows ("Byzantium — also Konstantinoupolis"). The names go to
+  SQLite as they are read (`sx`, a row per name) and, once withdrawals are known, one row per place
+  holds its folded label and names joined (`sf`), which a search scans with `LIKE`: on 200,000
+  places with three names each, about 40 to 110 ms a search in Node, no slower than the label alone
+  was, since the records are not read.
 - **A pool and an outputs folder of its own.** A SQLite SAHPool holds every file in its folder open,
   so a second tab on the same pool cannot start. Chora's page asks the worker for its own
   (`init` with `pool: 'chora'`, `.opfs-sahpool-chora/`), and saves to `chora-outputs/`, since each

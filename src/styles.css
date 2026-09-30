@@ -195,6 +195,7 @@ body.chora .note { color: var(--muted); font-size: .92rem; }
 .place-list { list-style: none; padding: 0 !important; max-height: 18rem; overflow-y: auto; }
 .place-list button.place { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: .3rem .2rem; background: none; }
 .place-list button.place:hover, .place-list button.place.current { background: var(--bg); color: var(--accent); }
+.place-list .also { color: var(--muted); font-style: italic; }
 .tag { font-size: .75rem; border: 1px solid var(--line); border-radius: 999px; padding: 0 .4rem; color: var(--muted); }
 .tag.pending { border-color: var(--gold-edge); background: var(--gold); color: var(--pupil); }
 .pager { margin: .4rem 0 0; }
