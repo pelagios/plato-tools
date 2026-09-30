@@ -2,8 +2,8 @@
 
 Test fixtures for the shared georeference module (`src/engine/georef/`, `test/georef.test.js`).
 IIIF Georeference Annotations made with Allmaps and the IIIF manifests of the maps they georeference,
-real and copied unchanged (fetched on 2026-09-30); one IIIF Presentation 3 manifest constructed from a
-real one; and reference values computed with Allmaps' own code.
+real and copied unchanged (fetched on 2026-09-30); one IIIF Presentation 3 manifest and one
+AnnotationPage constructed from real ones; and reference values computed with Allmaps' own code.
 
 Allmaps states that "georeference data published through the Allmaps project is licensed under the
 [CC0](https://creativecommons.org/publicdomain/zero/1.0/) license" (the Licence section of the
@@ -35,6 +35,14 @@ carry no rights statement.
   `body.service`), for the Presentation 3 path. No public IIIF 3 manifest with a clear licence
   and an Allmaps georeference was found: the Internet Archive's master highway plan, used at
   first, states no licence (its item metadata has no `licenseurl` or `rights`), so it was dropped.
+
+- `loc-chesapeake-overlapping-constructed.json`: `loc-chesapeake-annotationpage.json` with the first
+  map's mask widened from x 2397 to x 3000, so that it overlaps the second's (whose left edge is at
+  x 2683-2697: the real masks do not overlap anywhere), and that map's id, and the page's, changed to
+  `https://example.org/constructed/loc-chesapeake-overlapping/…`, so that the changed mask is never
+  taken for Allmaps' own. Nothing else is changed. For a region inside two maps at once
+  (`test/hermes-regions.test.js`, with annotation 14 of
+  `../annotations/recogito-studio-regions-constructed.json`).
 
 ## Reference values from Allmaps
 

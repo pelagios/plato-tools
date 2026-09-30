@@ -2,7 +2,7 @@
 
 Test fixtures for reading W3C Web Annotations as Recogito exports them
 (`src/formats/annotations.js`, `test/annotations.test.js`). Four are real exports from Recogito v1
-(recogito.pelagios.org), copied unchanged; two are constructed, and say so.
+(recogito.pelagios.org), copied unchanged; three are constructed, and say so.
 
 ## Real exports (Recogito v1)
 
@@ -20,7 +20,7 @@ Recogito v1 names itself as the `generator` of each annotation. Its serialiser i
 ## Constructed
 
 No Recogito Studio export and no Recogito v1 export with every case in it was found published, so
-these two are constructed. Neither is real data: the places, passages and people are invented or
+these three are constructed. Neither is real data: the places, passages and people are invented or
 illustrative, and the identifiers are made up.
 
 - `recogito-v1-constructed.jsonld`: built to the shape of Recogito v1's serialiser (above) and of
@@ -47,6 +47,43 @@ illustrative, and the identifiers are made up.
   flagged as having no match (no value); a rich-text comment as HTML; a tag from a vocabulary as
   `{ label, id }`; a PDF target with a `page=` fragment; an image target with a media-fragment
   region; and an annotation with only a tag.
+- `recogito-studio-regions-constructed.json`: **Constructed**, to stand in for a real Recogito
+  Studio export of regions on the Rocque/Dury map until the maintainer makes one. Written by
+  `make-recogito-studio-regions.mjs` (run it to make the file again), which follows, step by step,
+  how Recogito Studio exports an image annotation: `getAnnotations` in
+  `src/backend/helpers/annotationHelpers.ts` and `src/util/export/w3c/w3cExporter.ts` in
+  [recogito/recogito-client](https://github.com/recogito/recogito-client) (commit
+  `b211f751c19497d37e01e819d47511ed0ed71dac`), and `serializeW3CImageAnnotation`,
+  `serializeFragmentSelector` and `serializeSVGSelector` in
+  [@annotorious/annotorious](https://github.com/annotorious/annotorious) 3.8.10 (the npm package),
+  with `serializeW3CBodies` from @annotorious/core as bundled there. So: the keys in the order those
+  spreads give (`id`, `target`, `motivation`, `@context`, `type`, `created`, `creator`, `body`); no
+  `visibility` for a public annotation (the export reads it as undefined, not false); the target
+  `{ source, type: "SpecificResource", selector }`, its `source` the canvas or picture the region
+  was drawn on; an unrotated rectangle as a `FragmentSelector` `xywh=pixel:…`, and every other
+  shape as an `SvgSelector` in Annotorious's markup (a rotated rectangle with
+  `transform="rotate(…)"`, its angle as JavaScript prints it). The regions are drawn round real
+  printed labels, read off the image (Digital Commonwealth's IIIF image service,
+  `commonwealth:8623qf00m`, public domain), and each is geotagged with the Wikidata item of the
+  place (identifiers looked up on 2026-09-30). The map's Allmaps georeference and manifest are in
+  [../georef](../georef/README.md). What it holds, by annotation number (the last digits of its id):
+  1 `LAKE ERIE`, a rectangle with a transcription; 2 `LAKE ONTARIO`, a polygon with a quote; 3
+  `St Georges Bank`, a rotated rectangle; 4 `LAKE HURON`, an ellipse; 5 Montreal, with a comment
+  and no transcription (no evidence of a label); 6 the town symbol of Worcester, tagged `symbol`;
+  7 the meridian label `120` in the top margin (outside the map); 8 the parallel label `45` in the
+  border, boxed loosely into the map (its centre on the map); 9 Boston, on the image service's
+  `…/full/max/0/default.jpg`; 10 `Boston Harbour`, on a cropped picture; 11 `Nantucket I.`, with a
+  curved outline; 12 `GULF OF MEXICO` on the map's second sheet, which has no georeference; 13 a
+  region on a Recogito v1 document part; 14 a region on the Library of Congress's Chesapeake and
+  Ohio Canal map where its two georeferenced maps meet (for the ambiguous case, with
+  `../georef/loc-chesapeake-overlapping-constructed.json`); 15 the `120` again, boxed loosely down
+  into the map (its centre still off it); 16 Albany, tagged `Label`.
+  **Two departures from what Studio writes**, both to test a path Studio cannot reach: Recogito
+  Studio's own editor writes no transcription (its bodies are commenting, replying, tagging and
+  the geotagging plugin's), so the `transcribing` bodies are shaped as its crosswalk would write
+  one; and Annotorious writes one selector, never a `TextQuoteSelector`, for an image, so
+  annotation 2's quote beside its polygon is not Studio's shape. In a real Studio export the only
+  evidence of a label is the tag `label` (below).
 
 ## The mapping
 
@@ -66,6 +103,10 @@ Each link from a passage to a place becomes one attestation-centric attestation 
 | The annotation's `id` | `notes` ("From annotation …") | Never the attestation's `@id`: an annotation can be edited and exported again under the same address. A Studio UUID is written as `urn:uuid:` |
 | Comments (`commenting`, `replying`), a place body's `note`, free tags | `notes` | |
 | A tag that is the address of a vocabulary concept | `types[]` | |
+| *With georeferences given* (the export dropped with IIIF Georeference Annotations, and optionally the maps' manifests; `--georef`, `--manifest`): a region on an image (a `FragmentSelector` `xywh=…`, or an `SvgSelector`) whose centre is inside exactly one georeferenced map | `geometries[]`: one `Point`, the region's centre (worked out in the image's pixels, then placed through the map's georeference), with `precisionKm` the greatest distance from it to the placed outline, rounded up to 0.01 km | The outline itself is not carried, and is reported. A region reaching beyond the map is placed, with a warning; one whose centre is off the map, or in two maps, or on an image no georeference given is for, is not, and is reported |
+| The same region: the image's citation | Replaced by the map's citation (the manifest, `cito:citesAsEvidence`, the region on the canvas as the locator), then the georeference's (`cito:usesMethodIn`, `derivedFrom` the map) | A rectangle's exact pixels go to the notes ("Drawn on the map: …"), with the georeference's fixed note (its transformation, control points, and "retrieval date not recorded", since the file was given, not fetched) |
+| The same region's role: a transcription, a quote, or a tag `label` (the tag convention: a free tag whose text is `label`, or a vocabulary tag labelled `label` or `map label`, singular or plural, in any case) | `role` `plato:LabelAnchor`, and the note's sentence saying the position is where the map writes the name | Anything else gives no role, a note saying why, and a warning |
+| A tag `symbol` (the same convention: `symbol` or `map symbol`) | No role, for now, with a note | Which role a map's symbol has is the maintainer's to decide (`plato:RepresentativePoint` or `plato:FeaturePoint`) |
 
 A place link with no `creator` was made by Recogito's own name recognition and never saved by a
 person, so it is left out and reported. A `status` on a body (`VERIFIED`, `UNVERIFIED`,
