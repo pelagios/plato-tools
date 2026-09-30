@@ -541,7 +541,7 @@ test("toWorld agrees with Allmaps' renderer to within 1 mm, at control points an
 test('an annotation in its own projection (resourceCrs) is refused; one that names Web Mercator is the control', async () => {
   const own = clone(ROCQUE);
   own.body.resourceCrs = { id: 'https://annotations.allmaps.org/projections/6fe5c97c6d3f1ccc', name: 'EPSG:5679 - DHDN / 3-degree Gauss-Kruger zone 5 (E-N)', definition: '+proj=tmerc +lat_0=0 +lon_0=15 +k=1 +x_0=5500000 +y_0=0 +datum=potsdam +units=m +no_defs' };
-  await assert.rejects(readGeoreference(own), (e) => isDataError(e) && /own projection/.test(e.message));
+  await assert.rejects(readGeoreference(own), (e) => isDataError(e) && /in the projection EPSG:5679 - DHDN .* which PLATO tools do not support yet\. Nothing was changed\./.test(e.message));
   const merc = clone(ROCQUE);
   merc.body.resourceCrs = { id: 'https://example.org/projections/3857', name: 'EPSG:3857 - WGS 84 / Pseudo-Mercator', definition: '+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs' };
   assert.equal((await readGeoreference(merc)).gcps, 22);
