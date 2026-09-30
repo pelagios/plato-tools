@@ -110,6 +110,63 @@ gives the design and the two commands.
 by key, and the fixtures (most of them real exports), are in
 [test/fixtures/annotations](test/fixtures/annotations/README.md#the-mapping).
 
+### Hermes: TEI, and tables of places (CSV and GeoJSON)
+
+The readers are in `src/engine/hermes/`. Each one's mapping, row by row, is in its fixture folder's
+README, under **The mapping**: [test/fixtures/tei](test/fixtures/tei/README.md#the-mapping) and
+[test/fixtures/generic](test/fixtures/generic/README.md#the-mapping). The guide's pages for these
+readers link to those headings, so keep them.
+
+- **TEI** (`tei.js`). Each place name in `<text>` (`placeName`, `settlement`, `region`, `country`,
+  `bloc`, `district`, `geogName`, and `rs` or `name` with `type="place"`) becomes one
+  attestation-centric attestation for each address its `@ref` resolves to: a web address as it is,
+  a prefixed pointer through the header's `<prefixDef>` (the pattern anchored to the whole of what
+  follows the prefix), and `#x` through the one web-address `<idno>` of `<place xml:id="x">` in the
+  same file (several: ambiguous, nothing converted). The file is parsed as a stream with saxes, with
+  no DOM (a Web Worker has none); the only thing held to the end is a place name waiting for a
+  `<place>` later in the file. The edition, from its `teiHeader`, is the source; a place name's
+  `xml:id` is never the attestation's `@id`. A file that declares an encoding other than UTF-8 is
+  refused.
+- **Tables of places** (`columns.js`, `generic.js`). `input.js`'s `detect()` sends a lone CSV (or
+  `.tsv`/`.tab`) that is not one of the tables' sheets, and a FeatureCollection or Feature with no
+  LPF markers (`isLpf`), here. `guessColumns` maps each column to one `FIELDS` key, `note` or `skip`
+  from its normalised heading and the first 50 rows; `resolveColumns` checks a saved mapping
+  instead. The mapping is the same JSON on the page (the column-matching step in `src/app.js`, via
+  `columnsOf`/`mappingOf` in `worker.js`, worded in `words.js`: `COLUMN_CHOICES`, `COLUMN_WORDS`,
+  `columnWarnings`) and on the command line (printed with each input, taken back with
+  `--columns FILE`). An address column makes the rows attestation-centric; otherwise each row is a
+  place whose `@id` is minted by `tableIds` from its id under the base address, with the id kept as
+  `entityIdentifier`. No id column means no addresses and one `generic-no-ids` warning; a repeated
+  id is a `DataError`. An unrecognised column goes to `notes`, never `properties`. A CSV is parsed
+  whole, as the tables are; GeoJSON features are streamed, in more than one pass.
+- **Addresses** (`addresses.js`). `placeAddress(value)` returns `{ iri }`, `{ iri, from }` when it
+  rewrote a WHG form (`place:<ns>:<id>` or an entity page) to `https://w3id.org/whg/id/place:…`,
+  or `{ lost, value }` for a WHG portal address below whg_id 12,345,678 (`whg-portal-record`) or
+  one on dev.whgazetteer.org (`whg-staging`). The Recogito, TEI and CSV/GeoJSON readers all pass
+  every place address through it.
+- **Loss kinds.** Each reader lists its kinds with their severity (`TEI_KINDS` in `tei.js`,
+  `GENERIC_KINDS` in `columns.js`: `loss`, `warning` or `error`), and their words are in
+  `src/engine/report.js`'s `LOSS_TEXT` under the same `tei-*` and `generic-*` names. The tests
+  require a text for every kind.
+- **The pipeline hook** (`pipeline.js`, `runChecked`): `tei` goes to `teiSource`, `csv` and
+  `geojson` to `genericSource`. TEI is attestation-centric, so it goes through the store like
+  annotations; for a table of places `genericProfile` reads the mapping first to decide the profile,
+  and so whether the store is needed, and its records are schema-checked like the tables'.
+
+**Georeferencing** (`src/engine/georef/`, on branch `hermes-georef`, shared with Chora). Positions
+on a map image to positions in the world and back, through a IIIF Georeference Annotation as
+Allmaps makes them. `readGeoreference(annotation, { manifest, canvasId, index })`, `toWorld(g,
+geometry, { space, … })` and `toPixels(g, geojson, { space, … })` are async; `space` (`'canvas'` or
+`'image'`) is required. `matchesTarget`, `containsRegion`, `georefNote` and `georefCitation` are
+synchronous. The Allmaps libraries are loaded by dynamic `import()` on first use, so a page that
+never meets a georeference never downloads them (`test/georef-lazy.test.js` checks this in a fresh
+process). Nothing in the module fetches: the caller supplies the annotation and the manifest. The
+transformation is fitted in Web Mercator, as Allmaps renders it, and results are WGS 84; an
+annotation with its own `resourceCrs` is refused. Where the inverse is undefined or several
+positions fit, it is a `DataError`, never a wrong position. The fixtures, real Allmaps annotations
+and IIIF manifests with reference values from Allmaps' own code, are described in
+`test/fixtures/georef/README.md`.
+
 ## The version check
 
 What it reports, and why, is in the guide:
@@ -269,3 +326,5 @@ A push to `main` runs the tests, builds the site and publishes it to GitHub Page
 - **The PLATO guide links to this repository** in two places: the README's
   `#from-the-command-line`, and `test/fixtures/annotations/README.md#the-mapping`. Keep those
   headings.
+- **The guide's Hermes pages** (proposed, not yet published) add two more links:
+  `test/fixtures/tei/README.md#the-mapping` and `test/fixtures/generic/README.md#the-mapping`.
