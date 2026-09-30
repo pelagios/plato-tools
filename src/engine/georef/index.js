@@ -610,11 +610,11 @@ export function matchesTarget(g, sourceId) {
 
 /**
  * Whether sourceId is this georeference's canvas or image, and how:
- * { match, via: 'canvas' | 'service' | 'image-url' | null, reason?: 'cropped' | 'rotated' }.
+ * { match, via: 'canvas' | 'service' | 'image-url' | null, reason?: 'cropped' | 'rotated' | 'resized' }.
  * Ids are compared with a trailing /info.json and trailing slashes ignored, scheme and case as
  * given. A IIIF Image API picture URL ({service}/full/{size}/0/{quality}.{format}) matches the
- * image service only (via 'image-url'), never the canvas; one of this image that is cropped or
- * rotated does not match, and `reason` says why.
+ * image service only (via 'image-url'), never the canvas, and only at full size ("full" or
+ * "max"); one of this image that is cropped, rotated or scaled does not match, and `reason` says why.
  */
 export function matchTarget(g, sourceId) {
   const s = normaliseId(sourceId);

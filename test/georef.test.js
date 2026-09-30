@@ -488,7 +488,7 @@ test('matchTarget: a IIIF picture URL of the whole image, unrotated, matches the
   // Control: the service itself, and the canvas, say how they matched.
   assert.deepEqual(matchTarget(g, ROCQUE_IMAGE), { match: true, via: 'service' });
   assert.deepEqual(matchTarget(g, ROCQUE_CANVAS), { match: true, via: 'canvas' });
-  for (const tail of ['full/max/0/default.jpg', 'full/full/0/default.jpg', 'full/1000,/0/color.png', 'full/^!800,600/0.0/gray.webp', 'full/pct:50/0/native.jp2']) {
+  for (const tail of ['full/max/0/default.jpg', 'full/full/0/default.jpg', 'full/max/0.0/gray.webp', 'full/full/0/native.jp2']) {
     assert.deepEqual(matchTarget(g, `${ROCQUE_IMAGE}/${tail}`), { match: true, via: 'image-url' }, tail);
     assert.equal(matchesTarget(g, `${ROCQUE_IMAGE}/${tail}`), true, tail);
   }
@@ -508,6 +508,9 @@ test('matchTarget: a cropped or rotated picture URL does not match, and says why
   assert.deepEqual(matchTarget(g, `${ROCQUE_IMAGE}/square/max/0/default.jpg`), { match: false, via: null, reason: 'cropped' });
   assert.deepEqual(matchTarget(g, `${ROCQUE_IMAGE}/full/max/90/default.jpg`), { match: false, via: null, reason: 'rotated' });
   assert.deepEqual(matchTarget(g, `${ROCQUE_IMAGE}/full/max/!0/default.jpg`), { match: false, via: null, reason: 'rotated' });
+  // A scaled picture's pixels are not the image's: it does not match (the whole-size tails above are the control).
+  for (const tail of ['full/1000,/0/color.png', 'full/^!800,600/0.0/gray.webp', 'full/pct:50/0/native.jp2', 'full/,500/0/default.jpg'])
+    assert.deepEqual(matchTarget(g, `${ROCQUE_IMAGE}/${tail}`), { match: false, via: null, reason: 'resized' }, tail);
   assert.equal(matchesTarget(g, `${ROCQUE_IMAGE}/full/max/90/default.jpg`), false);
 });
 
