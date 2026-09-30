@@ -282,6 +282,56 @@ Traps found on the way:
   the run stops if the port is taken. The preview server is started in a session of its own and
   stopped as a group: stopping `npx` alone left `vite` holding the port.
 
+## Match review
+
+Krisis suggests places of one dataset (the subjects) that may be the same as places of another (the
+others), and records the reviewer's judgements as PLATO attestations. `src/engine/krisis/` holds it;
+`README-api.md` there lists what the page calls. Matching two local files sends nothing anywhere.
+
+- **Each dataset is read by `run()`** with `options.sink`, as the version check reads, so every input
+  format is matched alike (the tests match the same places as JSON, Linked Places Format and
+  spreadsheet tables). Of each place only its address, label, names (label, every toponym and
+  romanised form, from attestations that are not denials), one point, country codes and types, and
+  the identity relations either dataset states are kept, in memory. A place without an `@id` cannot
+  be matched, and is reported as a problem.
+- **Scoring** (`names.js`, algorithm `krisis-names 1`). Names are normalised: NFKD, combining marks
+  removed, ß æ œ ø ł đ ð þ ı spelt out, lower-cased, everything but letters and digits a space. Two
+  names score their Jaro-Winkler similarity (prefix scale 0.1, up to four letters) or, if higher, that
+  of their words sorted, so that "Upper Newton" and "Newton Upper" agree. Two places score the best
+  pair of their names. The work file's `match_parameters.scoring` says the same, so that a review can
+  be read without this file.
+- **Blocking.** Two names are compared only when they share at least 30% of the padded trigrams of
+  the one with fewer (`BLOCKING`); the others' names are indexed by trigram first.
+- **Filters**, in order, after the threshold (0.85): a pair either dataset already links by an
+  identity relation (nested, top-level, or bundled in an attestation not since withdrawn) is not
+  suggested, and is counted; so is one either says are different places (a negated identity); a pair
+  whose points (the first Point, else the centre of the first bounding box or shape) are further apart
+  than the greatest distance (50 km) is dropped and counted; a pair without two points is kept, with
+  no distance. Each subject place keeps its best five. A dataset matched with itself suggests each
+  pair once.
+- **The work file** (`work.js`) is the tools' own, not PLATO: PLATO holds what people say, and a
+  suggestion is software's. Its candidate fields are named after `plato:Candidate`'s
+  (`candidate_source`, `candidate_candidate`, `similarity_score`, `candidate_status`, …), and a
+  candidate describes the place it suggests itself (`other`), so that a suggestion from a gazetteer's
+  reconciliation service fits the same record. It records each dataset's files by name, size and
+  SHA-256 (streamed, `digest.js`), so a resumed or finished review can say when the files have
+  changed. `readWork` refuses a file no review could have written: a decision that disagrees with its
+  candidate's status, a candidate for a place it does not list, a denial without a basis.
+- **Decisions.** "Same place" confirms a candidate; "Not this one" rejects it and writes nothing;
+  "Different places" rejects it and writes a negated attestation bundling exactly one exactMatch,
+  with the reviewer's basis. The matches accepted for one place are ONE attestation bundling a
+  relation to each (`identity.js`, `recordIdentity`, whose signature is shared with Chora), so they
+  share provenance and are withdrawn together; a consumer chains exactMatch only within one
+  attestation. Each is dated by its last decision, cites the other dataset as its source
+  (`authorityType: dataset`), names the reviewer as its contributor, and has no `@id` (the saver
+  mints one) and no `promotedFrom` (the candidate is not published).
+- **The output.** `apply` writes a PLATO document of only the new attestations, in the
+  attestation-centric profile, PLATO's profile for attesting about places that exist already: each
+  attestation names its place in `about`, and nothing of the places is copied. Each attestation is
+  checked against the schema before it is written, and the tests run the checker on the file. The
+  subject dataset with the attestations appended, checked by the version check, waits on a hook in
+  the pipeline (`options.augment`) and is marked TODO in `apply.js`.
+
 ## Limits
 
 - **Private windows** keep the browser's file storage in memory and allow it very little, so large
@@ -304,6 +354,8 @@ Traps found on the way:
 - **`datacube` holds the cube's graph in memory** (`graphOfFile` in `src/lib/datacube.js`): the
   file streams in, but every statement is kept until the checks have run, so a cube export larger
   than memory cannot be checked.
+- **A match review keeps the places of both datasets in memory**: their names and points, not their
+  attestations, but a gazetteer of millions of places needs a machine with room for them.
 - **RDF output is N-Triples only**, and Linked Places Format v2 is refused until it is specified.
 
 ## Testing
@@ -331,6 +383,8 @@ python3 e2e/scale_test.py --input deep-plato.nt.gz --target plato-jsonl --out ou
 - Recogito's exports become the attestations designed for them;
 - the version check finds each kind of deletion and change, each made by one edit to a version
   that passes;
+- the match review suggests near namesakes and not far ones, refuses a tampered work file, and
+  writes attestations the checker passes;
 - the command line gives what the engine gives, with the right exit status.
 
 A check that finds nothing is worth something only if it could have found something: each test of
