@@ -1,0 +1,102 @@
+{
+  "@context": "http://iiif.io/api/presentation/3/context.json",
+  "id": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/manifest",
+  "type": "Manifest",
+  "label": {
+    "none": [
+      "A general map of North America; in which is express'd the several new roads, forts, engagements, &c. taken from actual surveys and observations made in the army employ'd there, from the year 1754, to 1761"
+    ]
+  },
+  "requiredStatement": {
+    "label": {
+      "en": [
+        "Attribution"
+      ]
+    },
+    "value": {
+      "en": [
+        "Public Domain/No known restrictions on use. Contact host institution to download image. Contact host institution for more information."
+      ]
+    }
+  },
+  "items": [
+    {
+      "id": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/8623qf00m",
+      "type": "Canvas",
+      "label": {
+        "none": [
+          "image 1"
+        ]
+      },
+      "width": 11436,
+      "height": 6268,
+      "items": [
+        {
+          "id": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/8623qf00m/page/1",
+          "type": "AnnotationPage",
+          "items": [
+            {
+              "id": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/8623qf00m/annotation/1",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://ark.digitalcommonwealth.org/ark:/50959/8623qf00m/large_image",
+                "type": "Image",
+                "format": "image/jpeg",
+                "width": 11436,
+                "height": 6268,
+                "service": [
+                  {
+                    "id": "https://iiif.digitalcommonwealth.org/iiif/2/commonwealth:8623qf00m",
+                    "type": "ImageService2",
+                    "profile": "http://iiif.io/api/image/2/level2.json"
+                  }
+                ]
+              },
+              "target": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/8623qf00m"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/qr46xn78z",
+      "type": "Canvas",
+      "label": {
+        "none": [
+          "image 2"
+        ]
+      },
+      "width": 11680,
+      "height": 6070,
+      "items": [
+        {
+          "id": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/qr46xn78z/page/1",
+          "type": "AnnotationPage",
+          "items": [
+            {
+              "id": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/qr46xn78z/annotation/1",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://ark.digitalcommonwealth.org/ark:/50959/qr46xn78z/large_image",
+                "type": "Image",
+                "format": "image/jpeg",
+                "width": 11680,
+                "height": 6070,
+                "service": [
+                  {
+                    "id": "https://iiif.digitalcommonwealth.org/iiif/2/commonwealth:qr46xn78z",
+                    "type": "ImageService2",
+                    "profile": "http://iiif.io/api/image/2/level2.json"
+                  }
+                ]
+              },
+              "target": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/qr46xn78z"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
