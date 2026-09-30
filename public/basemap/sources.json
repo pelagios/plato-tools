@@ -1,0 +1,57 @@
+{
+  "note": "Written by scripts/build-basemap.mjs. Inputs fetched from pinned commits and checked by sha256.",
+  "naturalEarth": {
+    "repository": "https://github.com/nvkelso/natural-earth-vector",
+    "commit": "ca96624a56bd078437bca8184e78163e5039ad19",
+    "licence": "public domain",
+    "files": {
+      "geojson/ne_50m_land.geojson": "e874b27a51d146452be360cafb3cc50c86001074a67d534113e6534682f9826b",
+      "geojson/ne_50m_admin_0_countries.geojson": "3e458fc036ad0a66411f2c1e6cac49c5d7bfb81cb1123bc513b22511a2b7fdeb",
+      "geojson/ne_50m_admin_0_map_units.geojson": "b8d421aca6e9e08e8cdf09cc26af111cc3e0deba4fe915611d58ade71e8a4db0",
+      "geojson/ne_50m_admin_0_boundary_lines_land.geojson": "2faac4f6b34386f3d21b6e018cf151f241f00e5c936d44dd17d7d9bfb147fa48",
+      "geojson/ne_50m_admin_1_states_provinces_lines.geojson": "72cca93c850d412628a5da4bc5ebfe21ba4d376eb34611bde6b623ee73f0fdcf",
+      "geojson/ne_50m_lakes.geojson": "d350b75978b26fe839b797c2c529b2fb8f47fb3983c03f4964e36d5df9378a52",
+      "geojson/ne_50m_rivers_lake_centerlines.geojson": "f286e0ce978fde999ca2d7a78c764be08542e19b63cded52b05c12d5173ccc51",
+      "geojson/ne_10m_populated_places_simple.geojson": "fd3fa867a320cbd5c5b6bb5bc550afeec2939fb2cef688e508007282a55ac42f"
+    }
+  },
+  "glyphs": {
+    "repository": "https://github.com/openmaptiles/fonts",
+    "font": "Klokantech Noto Sans Regular",
+    "pbfCommit": "025ff2b2f84cc0fdf11f7b1d74b3a784595fe7a4",
+    "licenceCommit": "d48c5fce2fc58b55c98d353558d807cac45e7262",
+    "licence": "SIL Open Font License 1.1",
+    "files": {
+      "Klokantech Noto Sans Regular/0-255.pbf": "2b5324d3fcaa58f93c71d4e6ee70eba532f15585401d764daf99efc427a62693",
+      "Klokantech Noto Sans Regular/256-511.pbf": "052e7e11d0420e7a6772478413f5d2bb910d150f76830bdf17dfabcabe87aaf1",
+      "Klokantech Noto Sans Regular/512-767.pbf": "521d978d95db4d0d0339c8412e74af218218ae8a5967a15dbab8b3aa59b32e5c",
+      "Klokantech Noto Sans Regular/768-1023.pbf": "fc704a0ce14b2d2fbbc67faa588f9653a933930b852c62f643199a89e7bad134",
+      "Klokantech Noto Sans Regular/1024-1279.pbf": "f7777f998395744d9164e46ef1ae8b451bc79938c146daa9ff891590062766cf",
+      "Klokantech Noto Sans Regular/7680-7935.pbf": "ef53e5a0534cef3b320ceb0708422be1b67b97f04860a2c76e86cebad727c142",
+      "Klokantech Noto Sans Regular/7936-8191.pbf": "dc77455acc58cc930bef8f5e2bc647ef31f928fe579b74e6d0fce55021cbd9a7",
+      "Klokantech Noto Sans Regular/8192-8447.pbf": "a62e17817c512a5991bdc2167f952d90633570d1bdf7e76d80a456cfff7fd67a",
+      "noto-sans/LICENSE": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2"
+    }
+  },
+  "mapshaper": "mapshaper@0.7.71",
+  "outputs": {
+    "land.geojson": "8a5361e43afdd4a4782140bbb4bc36aa808bef9d9fd596db1add7b59b1210512",
+    "countries.geojson": "132ad30689809043303ba3a682827a319f65af144d3a4816c8cc36c8446d5e71",
+    "boundaries.geojson": "426ff2c72a18d6031426c16c9d6e625733de42a8d13554a6ec382bda203fab37",
+    "admin1.geojson": "8df67c1eb2bd0ffaf7a9a0a535858e7334860403770acdfa2c9abfbc06588d3c",
+    "lakes.geojson": "fab8e3e86d43ddad347c60d64e5d2017a2bd0b7193540ff70d57c29f7bc57282",
+    "rivers.geojson": "93fc3ea3159c1b3c5dbf7bb38e2046c97b3b2821ca47a0f78283f4cfd9fdbf92",
+    "places.geojson": "62c7d864e84f60a6cfd6868fcd87d474ca4ca19d8232fb11250c0c215bb0fc34",
+    "country-labels.geojson": "7b1bbc77ed7b61d9b8b9c7d81c94c6778e0d70d2e8c021b9541a06c7f7c61a02",
+    "ccodes.json": "126f35eb42b29a44eb18e6b9a2b783139aeda4f36dda967c4ece58cddda720b9",
+    "glyphs/Noto Sans Regular/0-255.pbf": "2b5324d3fcaa58f93c71d4e6ee70eba532f15585401d764daf99efc427a62693",
+    "glyphs/Noto Sans Regular/256-511.pbf": "052e7e11d0420e7a6772478413f5d2bb910d150f76830bdf17dfabcabe87aaf1",
+    "glyphs/Noto Sans Regular/512-767.pbf": "521d978d95db4d0d0339c8412e74af218218ae8a5967a15dbab8b3aa59b32e5c",
+    "glyphs/Noto Sans Regular/768-1023.pbf": "fc704a0ce14b2d2fbbc67faa588f9653a933930b852c62f643199a89e7bad134",
+    "glyphs/Noto Sans Regular/1024-1279.pbf": "f7777f998395744d9164e46ef1ae8b451bc79938c146daa9ff891590062766cf",
+    "glyphs/Noto Sans Regular/7680-7935.pbf": "ef53e5a0534cef3b320ceb0708422be1b67b97f04860a2c76e86cebad727c142",
+    "glyphs/Noto Sans Regular/7936-8191.pbf": "dc77455acc58cc930bef8f5e2bc647ef31f928fe579b74e6d0fce55021cbd9a7",
+    "glyphs/Noto Sans Regular/8192-8447.pbf": "a62e17817c512a5991bdc2167f952d90633570d1bdf7e76d80a456cfff7fd67a",
+    "glyphs/Noto Sans Regular/OFL.txt": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2"
+  }
+}
