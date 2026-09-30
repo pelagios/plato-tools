@@ -71,6 +71,17 @@ test('version 1 of the hash, pinned: the place, then the sorted statements, SHA-
   assert.match(attestations(other.text)[0].id, HASH8);
 });
 
+test('the hash takes the text as given: an NFC and an NFD spelling are different content, with different addresses', async () => {
+  const nfc = 'Z\u00fcrich', nfd = 'Zu\u0308rich';
+  assert.equal(nfc.normalize('NFC'), nfd.normalize('NFC'), 'the same name to a reader');
+  const hashOf = (name) => `${X}place/a#a-` + createHash('sha256').update(`${X}place/a\n${P}attests_about <${X}place/a>\n${P}attests_name [${P}toponym "${name}"]`, 'utf8').digest('hex').slice(0, 8);
+  const [c, d] = [await mint(json(doc([place('a', [{ names: [{ toponym: nfc }] }])]))), await mint(json(doc([place('a', [{ names: [{ toponym: nfd }] }])])))];
+  // Each is the hash of its own bytes, unnormalised; so the two differ.
+  assert.deepEqual(attestations(c.text).map((a) => a.id), [hashOf(nfc)]);
+  assert.deepEqual(attestations(d.text).map((a) => a.id), [hashOf(nfd)]);
+  assert.notEqual(hashOf(nfc), hashOf(nfd));
+});
+
 // ---- addresses given, and kept ---------------------------------------------------------------------------
 test('every attestation without an address is given one under its place; the one it had is not touched', async () => {
   const r = await mint(json(doc(places())));

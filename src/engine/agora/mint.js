@@ -23,6 +23,10 @@
 // THE HASH, version 1 (the 'a-' prefix). Addresses must be reproducible for ever, so exactly:
 //   text = <place IRI> + "\n" + the attestation's lines joined by "\n"
 //   hash = the first 8 (or 12, 16 …) hex digits, lower case, of SHA-256 of text as UTF-8.
+// The text is hashed as the UTF-8 bytes of the characters as the dataset gives them, with no Unicode
+// normalisation: 'Zürich' with a precomposed ü (NFC) and with u and a combining diaeresis (NFD) are
+// different content, with different addresses, as the version check also treats them. Normalising
+// here and not there would let one attestation's address change while the check saw nothing new.
 // The lines are what the version check compares (attestationLines in compare.js): the attestation
 // is turned into RDF with PLATO's JSON-LD context (Json2Rdf), and each of its own statements is one
 // line, "<predicate IRI, bare> <object as N-Triples>", where an object with no address of its own (a
