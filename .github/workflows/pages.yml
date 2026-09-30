@@ -45,6 +45,10 @@ jobs:
         run: node scripts/install-test.mjs
       - name: Build (vendors PLATO's files at the pinned commit)
         run: npm run build
+        # Chora's CARTO basemaps: a key that only works from this site's address, built into the
+        # page, where anyone can read it. Unset, the CARTO basemaps show as not yet available.
+        env:
+          VITE_CARTO_API_KEY: ${{ vars.VITE_CARTO_API_KEY }}
       - name: The vendored files are the pinned commit's
         run: |
           node -e "const v=require('./dist/plato/VERSION.json'), p=require('./package.json'); if (v.commit !== p.plato.commit) { console.error('vendored', v.commit, 'pinned', p.plato.commit); process.exit(1) }"
