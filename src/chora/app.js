@@ -11,9 +11,13 @@ import * as contributors from './contributor.js';
 import { fingerprint, loadDrafts, saveDrafts } from './drafts.js';
 import { take as takeHandoff, keepForReload, takeResume } from './handoff.js';
 import { canary, inPolicy } from './csp.js';
+import * as consents from './consent.js';
+import * as ov from './overlays.js';
+import { createGuard, GuardError } from './fetchguard.js';
+import * as georef from '../engine/georef/index.js';
 
 const $ = (id) => document.getElementById(id);
-const state = (window.__chora = { phase: 'loading', placeId: null, pendingCount: 0, basemap: null, mapReadyCount: 0, blocked: 0, lastSave: null, canary: 'pending', reloads: 0 });
+const state = (window.__chora = { phase: 'loading', placeId: null, pendingCount: 0, basemap: null, mapReadyCount: 0, blocked: 0, lastSave: null, canary: 'pending', reloads: 0, overlays: [] });
 const PAGE = 50;
 let showing = false;   // true while the drawings shown are being replaced
 let worker, files = [], fp = null, dataset = null, drafts = [], view = null, offset = 0, total = 0, query = '';
@@ -483,10 +487,181 @@ async function reloadFor(origins, pending = null) {
     return;
   }
   try { sessionStorage.setItem('chora-reloaded-for', JSON.stringify({ key, at: Date.now() })); } catch {}
+  return reloadNow(pending);
+}
+async function reloadNow(pending = null) {
   state.phase = 'reloading';
   const m = mapApi.map;
   await keepForReload({ files, placeId: state.placeId, camera: { center: m.getCenter().toArray(), zoom: m.getZoom(), bearing: m.getBearing(), pitch: m.getPitch() }, pending });
   location.reload();
+}
+
+
+// ---- Historical maps -----------------------------------------------------------------------------
+// A georeferenced map over the basemap (src/chora/overlays.js has how it gets there, and why each
+// step is guarded). Each site a map needs is asked about, by name, before it is asked for anything;
+// agreeing to a site the page's policy lacks reloads the page once, and the map is then added.
+const guard = createGuard({ state, consented: (o, k) => consents.consented(o, k), inPolicy });
+const deps = { guard, consented: (o, k) => consents.consented(o, k) && inPolicy(o) };
+let mapAsk = null;     // {origins, kind, name, pending}: sites to agree to before a map can go on
+let mapOffer = null;   // {services, manifestUrl, title, text, notFound}: a map with no georeference given
+let mapStatus = '';    // what the page says of the last map added, in words (a warn: prefix is a problem)
+let layers = null;     // the maps' layer on the map (overlays.js createLayerManager), once the map exists
+function initMaps() {
+  layers = ov.createLayerManager(mapApi.map, { onEvent: overlayEvent });
+  mapApi.onStyleLoad(() => { layers.attach().then(syncOverlays, (e) => console.warn('Historical maps:', e)); });
+  // For automated tests; nothing else reads it.
+  window.__chora_overlays = { manager: layers, georef, get layer() { return layers.layer; } };
+  renderMaps();
+}
+
+/** The needs of a step, where "agreed to" also means in the page's policy (else a reload is due). */
+function needFrom(e, pending) {
+  // Agreed to already, but not in this load's policy: the reload is all that is needed.
+  if (e.origins.every((o) => consents.consented(o, e.kind))) return reloadFor(e.origins, { overlay: pending });
+  mapAsk = { origins: e.origins, kind: e.kind, name: e.mapName, pending };
+  renderMaps();
+}
+/** Add a map from what was pasted (pending: {text, lookup}) or kept (pending: {kept}). */
+async function addMap(pending) {
+  mapAsk = null; mapStatus = 'Reading…'; renderMaps();
+  await canaryDone;
+  if (state.canary !== 'enforced') { mapStatus = `warn:${ov.REFUSED}`; state.mapError = ov.REFUSED; renderMaps(); return; }
+  try {
+    let r, keptEntry = null;
+    if (pending.kept) {
+      keptEntry = (await ov.kept()).find((k) => k.key === pending.kept);
+      if (!keptEntry) { mapStatus = ''; renderMaps(); return; }
+      r = await ov.resolve({ kind: 'annotation', annotation: keptEntry.item, manifest: keptEntry.manifest, fetchedAt: keptEntry.fetchedAt }, deps);
+      r.manifestUrl = keptEntry.manifestUrl || r.manifestUrl;
+    } else {
+      r = await ov.resolve(ov.parseInput(pending.text), deps);
+      if (r.services) {
+        if (!pending.lookup) { mapOffer = { ...r, text: pending.text }; mapStatus = ''; renderMaps(); return; }
+        const found = await ov.lookup(r.services, deps);
+        if (!found) { mapOffer = { ...r, text: pending.text, notFound: true }; mapStatus = ''; renderMaps(); return; }
+        r = await ov.resolve({ kind: 'annotation', annotation: found.annotation, fetchedAt: found.fetchedAt, manifest: r.manifest }, deps);
+        r.manifestUrl ||= mapOffer?.manifestUrl || null;
+      }
+    }
+    mapOffer = null;
+    const a = await ov.admit(r, { ...deps, canary: true });
+    await showMap(a, keptEntry);
+  } catch (e) {
+    if (e instanceof ov.NeedConsent) return needFrom(e, pending);
+    if (e instanceof GuardError && e.kind === 'reload') return reloadFor([e.origin], { overlay: pending });
+    mapStatus = `warn:${e.message}`; state.mapError = e.message;
+    renderMaps();
+  }
+}
+async function showMap(a, keptEntry = null) {
+  const key = await ov.keyOf(a.g);
+  if (layers.entries.some((e) => e.key === key)) { mapStatus = `${a.title} is shown already.`; renderMaps(); return; }
+  const e = { ...a, key, opacity: keptEntry?.opacity ?? 1, visible: keptEntry?.visible ?? true, added: keptEntry?.added || new Date().toISOString() };
+  await layers.add(e);
+  if (e.error) { layers.remove(key); throw new Error(e.error); }
+  state.overlays.push({ key, mapId: e.mapId, origin: consents.originOf(a.g.imageServiceId), annotationId: a.g.annotationId, title: a.title,
+    transformation: ov.allmapsTransformationName(a.g), opacity: e.opacity, visible: e.visible, tilesLoaded: 0, tileErrors: 0, firstTile: false });
+  ov.keep({ key, item: a.item, manifest: a.manifest, manifestUrl: a.manifestUrl, fetchedAt: a.fetchedAt, opacity: e.opacity, visible: e.visible, added: e.added }).catch((err) => console.warn('Chora: the map could not be kept', err));
+  mapStatus = keptEntry ? '' : `${a.title} is on the map.`;
+  state.mapError = null;
+  if (!keptEntry) fitMap(key);
+  renderMaps();
+}
+/** The renderer's ids change when the maps are put into a new layer (a new basemap): kept up to date. */
+function syncOverlays() {
+  for (const o of state.overlays) { const e = layers.entries.find((x) => x.key === o.key); if (e) o.mapId = e.mapId; }
+}
+function fitMap(key) {
+  const b = layers.bounds(key);
+  if (b) mapApi.map.fitBounds(b, { padding: 32, duration: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 700 });
+}
+function overlayEvent(type, e) {
+  const ids = e?.mapIds || (e?.mapId ? [e.mapId] : []);
+  for (const o of state.overlays) {
+    if (ids.length && !ids.includes(o.mapId)) continue;
+    if (type === 'maptileloaded') o.tilesLoaded++;
+    else if (type === 'firstmaptileloaded') o.firstTile = true;
+    else if (type === 'allrequestedtilesloaded') o.allLoaded = (o.allLoaded || 0) + 1;
+    else if (type === 'tilefetcherror' || type === 'imageinfofetcherror') { o.tileErrors++; renderMapsSoon(); }
+  }
+}
+let rendering = null;
+const renderMapsSoon = () => { rendering ??= setTimeout(() => { rendering = null; renderMaps(); }, 250); };
+
+function renderMaps() {
+  const shown = new Map(layers.entries.map((e) => [e.key, e]));
+  let html = '';
+  if (mapAsk) {
+    html += `<div class="consent" role="alertdialog" aria-labelledby="map-consent-text"><p id="map-consent-text">${esc(consents.notice(mapAsk.kind, { origins: mapAsk.origins, name: mapAsk.name }))}</p>
+      ${mapAsk.origins.some((o) => !inPolicy(o)) ? '<p class="muted">The page will reload once to let it reach them; your drawings and the dataset open are kept.</p>' : ''}
+      <p><button type="button" class="primary" id="map-yes">${mapAsk.kind === 'allmaps' ? 'Ask Allmaps' : 'Show the map'}</button> <button type="button" id="map-no">Not now</button></p></div>`;
+  }
+  if (mapOffer) {
+    const name = mapOffer.title ? `“${esc(mapOffer.title)}”` : 'This map';
+    html += `<div class="offer"><p>${name} came with no georeference${mapOffer.notFound ? ', and Allmaps has none for it' : ''}.</p>
+      ${mapOffer.notFound ? '' : '<p><button type="button" class="primary" id="map-lookup">Look for a georeference</button> <small class="muted">This asks Allmaps, which learns which map was looked for.</small></p>'}
+      <p>${mapOffer.notFound ? 'You can' : 'Or'} georeference it in the <a href="${esc(ov.editorUrl(mapOffer.manifestUrl, mapOffer.services[0]))}" target="_blank" rel="noopener noreferrer">Allmaps Editor</a> (following the link sends the map's address to Allmaps), and paste here the georeference it makes.</p></div>`;
+  }
+  $('map-status').innerHTML = html + (mapStatus ? `<p class="${mapStatus.startsWith('warn:') ? 'warn' : 'muted'}">${esc(mapStatus.replace(/^warn:/, ''))}</p>` : '');
+  $('overlay-list').innerHTML = state.overlays.map((o) => {
+    const e = shown.get(o.key); if (!e) return '';
+    const a = e.attribution || {};
+    const licence = a.licence ? `<a href="${esc(a.licence)}" target="_blank" rel="noopener noreferrer">${esc(a.licenceLabel || a.licence)}</a>` : '';
+    return `<li data-overlay="${esc(o.key)}"><p class="overlay-title">${esc(o.title)}</p>
+      ${a.credit ? `<p class="muted">${esc(a.credit)}</p>` : ''}
+      ${licence ? `<p class="muted">Licence: ${licence}</p>` : ''}
+      ${a.nonCommercial ? `<p class="note">${esc(ov.nonCommercialLine(a))} ${licence}</p>` : ''}
+      ${(e.notes || []).map((x) => `<p class="muted">${esc(x)}</p>`).join('')}
+      ${o.tileErrors ? `<p class="warn">Some parts of the map's image could not be loaded from ${esc(o.origin)}.</p>` : ''}
+      <p class="overlay-controls"><label>Opacity <input type="range" min="0" max="100" step="5" value="${Math.round(o.opacity * 100)}" data-opacity></label>
+      <label><input type="checkbox" data-show${o.visible ? ' checked' : ''}> Show</label>
+      <button type="button" data-fit>Fit</button> <button type="button" data-remove-map>Remove</button></p>
+      <p><a href="${esc(ov.editorUrl(e.manifestUrl, e.g.imageServiceId))}" target="_blank" rel="noopener noreferrer">Open in the Allmaps Editor</a> <small class="muted">(sends the map's address to Allmaps)</small></p></li>`;
+  }).join('');
+}
+$('map-form').onsubmit = (e) => { e.preventDefault(); mapOffer = null; addMap({ text: $('map-input').value }); };
+$('map-status').addEventListener('click', (e) => {
+  if (e.target.id === 'map-yes' && mapAsk) {
+    const { origins, kind, pending } = mapAsk; mapAsk = null;
+    consents.grant(origins, kind);
+    if (origins.some((o) => !inPolicy(o))) reloadFor(origins, { overlay: pending }); else addMap(pending);
+  } else if (e.target.id === 'map-no') { mapAsk = null; mapStatus = ''; renderMaps(); }
+  else if (e.target.id === 'map-lookup' && mapOffer) addMap({ text: mapOffer.text, lookup: true });
+});
+$('overlay-list').addEventListener('input', (e) => {
+  const li = e.target.closest('[data-overlay]'); if (!li) return;
+  const o = state.overlays.find((x) => x.key === li.dataset.overlay);
+  if (e.target.matches('[data-opacity]')) { o.opacity = Number(e.target.value) / 100; layers.set(o.key, { opacity: o.opacity }); keepOverlay(o); }
+});
+$('overlay-list').addEventListener('change', (e) => {
+  const li = e.target.closest('[data-overlay]'); if (!li) return;
+  const o = state.overlays.find((x) => x.key === li.dataset.overlay);
+  if (e.target.matches('[data-show]')) { o.visible = e.target.checked; layers.set(o.key, { visible: o.visible }); keepOverlay(o); }
+});
+$('overlay-list').addEventListener('click', (e) => {
+  const li = e.target.closest('[data-overlay]'); if (!li) return;
+  const key = li.dataset.overlay;
+  if (e.target.matches('[data-fit]')) fitMap(key);
+  if (e.target.matches('[data-remove-map]')) {
+    layers.remove(key); ov.letGo(key);
+    state.overlays = state.overlays.filter((x) => x.key !== key);
+    renderMaps();
+  }
+});
+async function keepOverlay(o) {
+  const k = (await ov.kept()).find((x) => x.key === o.key);
+  if (k) ov.keep({ ...k, opacity: o.opacity, visible: o.visible }).catch(() => {});
+}
+$('forget-sites').onclick = async () => {
+  // Every site forgotten: the policy of the next load has none of them, and each is asked about again.
+  consents.forget();
+  basemaps.choose(basemaps.byId('natural-earth'));
+  await reloadNow();
+};
+/** The maps kept from last time, admitted afresh (a site forgotten is asked about again). */
+async function readmitKept() {
+  for (const k of await ov.kept()) await addMap({ kept: k.key });
 }
 
 // ---- The rest ------------------------------------------------------------------------------------
@@ -534,6 +709,7 @@ mapApi.onDraw({
     if (drafts.some((d) => gone.has(d.id))) { drafts = drafts.filter((d) => !gone.has(d.id)); keepDrafts(); if (view) renderCard(); }
   },
 });
+initMaps();
 // The map and the drawing tool, for automated tests; nothing else reads them.
 window.__chora_map = mapApi.map;
 Object.defineProperty(window, '__chora_draw', { get: () => mapApi.draw });
@@ -559,8 +735,11 @@ startWorker().then(async () => {
     }
     if (resumed.camera) mapApi.map.jumpTo(resumed.camera);
     state.resumed = { files: (resumed.files || []).map((f) => f.name), placeId: resumed.placeId || null, pending: resumed.pending || null };
+    await readmitKept();
+    if (resumed.pending?.overlay) await addMap(resumed.pending.overlay);
     return;
   }
+  await readmitKept();
   // Files chosen on the main page, offered here.
   const handed = await takeHandoff();
   if (handed && !files.length) {

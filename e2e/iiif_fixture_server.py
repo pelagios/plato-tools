@@ -1,7 +1,9 @@
-"""The IIIF fixture server for the Allmaps spike: two origins (two ports on 127.0.0.1), each
-logging every request it receives as one JSON line, which is the census the spike relies on.
+"""The IIIF fixture server for Chora's browser checks (e2e/app_test.py): two origins (two ports on
+127.0.0.1), each logging every request it receives as one JSON line. That log is the census: the only
+account of what reached a server (Playwright's request events also list requests the browser stopped).
+First written for the Allmaps spike (2026-09-30), whose measurements DEVELOPERS.md keeps.
 
-    python3 spike/allmaps/fixture_server.py PORT_A PORT_B LOGFILE
+    python3 e2e/iiif_fixture_server.py PORT_A PORT_B LOGFILE
 
 Serves test/fixtures/chora-iiif/, rewriting https://iiif.example.org to origin A and
 https://elsewhere.example.org to origin B in the JSON it sends. Every response carries
@@ -13,12 +15,13 @@ Access-Control-Allow-Origin: *.
   /iiif/redirect/info.json      info-v2.json with id .../iiif/redirect on this origin
   /iiif/redirect/<rest>         302 to origin B /iiif/grid/<rest>
   /iiif*/<name>/<...>/default.* grid.jpg
+  /manifests/grid/manifest      manifest-rumsey-shaped.json
 """
 import json, sys, threading, time
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2] / 'test' / 'fixtures' / 'chora-iiif'
+ROOT = Path(__file__).resolve().parents[1] / 'test' / 'fixtures' / 'chora-iiif'
 A, B, LOG = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
 lock = threading.Lock()
 
@@ -76,6 +79,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, body.encode())
         if path.startswith('/iiif/redirect/'):
             return self.send(302, extra=[('Location', origin(B) + '/iiif/grid/' + self.path[len('/iiif/redirect/'):])])
+        if path == '/manifests/grid/manifest':
+            return self.send(200, fixture('manifest-rumsey-shaped.json').replace(origin(A), origin(here)).encode())
         if path.startswith('/iiif') and path.rsplit('/', 1)[-1].startswith('default.'):
             return self.send(200, (ROOT / 'grid.jpg').read_bytes(), 'image/jpeg')
         return self.send(404, b'{"error":"not a fixture"}')

@@ -5,8 +5,9 @@
 // another site unless the basemap chosen is served from it.
 //
 // Choices are remembered in this browser only: which basemap (localStorage 'chora-basemap'), which
-// providers were agreed to ('chora-basemap-consent'), and any pasted basemap ('chora-basemaps'),
-// keys and all. A pasted address is sent to nowhere but its own provider.
+// providers were agreed to (src/chora/consent.js, kind 'basemap'), and any pasted basemap
+// ('chora-basemaps'), keys and all. A pasted address is sent to nowhere but its own provider.
+import * as consents from './consent.js';
 
 // CARTO's vector basemaps need an API key, scoped by referrer to the published site (so it never
 // works from localhost). It is given at build time as VITE_CARTO_API_KEY, never written in a file
@@ -74,18 +75,14 @@ export function current() {
   return b && !b.disabled && (b.local || consented(originOf(b))) ? b : byId('natural-earth');
 }
 export const choose = (b) => put('chora-basemap', b.id);
-export const consented = (origin) => get('chora-basemap-consent', []).includes(origin);
-export const consent = (origin) => put('chora-basemap-consent', [...new Set([...get('chora-basemap-consent', []), origin])]);
+export const consented = (origin) => consents.consented(origin, 'basemap');
+export const consent = (origin) => consents.grant([origin], 'basemap');
 
 /**
  * The notice shown before a basemap's sites are first used: `origins` are the sites it needs that have
  * not been agreed to (by default, the one its address is on).
  */
-export function notice(b, origins = [originOf(b)]) {
-  const sites = origins.length === 1 ? `${origins[0]}` : `${origins.slice(0, -1).join(', ')} and ${origins[origins.length - 1]}`;
-  const what = origins.length === 1 ? 'that site' : 'those sites';
-  return `${b.name} is served by ${sites}. Using it, the map asks ${what} for the part of the world you are looking at, so the provider sees where you look (and your address on the internet, as any website does). It sees nothing of your data, which stays in this tab.`;
-}
+export const notice = (b, origins = [originOf(b)]) => consents.notice('basemap', { origins, name: b.name });
 
 // A style's addresses, made absolute against the style's own address. Natural Earth's style writes
 // each as {base}/..., {base} standing for its folder (public/basemap/README.md); a plain relative
