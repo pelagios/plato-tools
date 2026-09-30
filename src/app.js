@@ -4,6 +4,8 @@
 // window.__plato for automated tests; nothing else reads it.
 import { fmtBytes, formatName, progressText, summary, groups, draftNote, explainedLines } from './engine/words.js';
 import { COLUMN_CHOICES, COLUMN_WORDS, columnWarnings, columnProblem } from './engine/words.js';
+import { review as W } from './engine/words.js';
+import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer } from './engine/krisis/work.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
 let worker, files = [], input = null, targets = {}, busy = false;
@@ -41,7 +43,7 @@ function choose(list) {
   $('only').value = '';   // and so is a list of its places to publish
   const c = $('chosen'); c.hidden = false;
   c.innerHTML = `<ul>${files.map((f) => `<li><span class="name">${escapeHtml(f.name)}</span> <span class="count">${fmtBytes(f.size)}</span></li>`).join('')}</ul><p>Looking at it…</p>`;
-  $('action').hidden = true; $('result').hidden = true;
+  $('action').hidden = true; $('result').hidden = true; $('review').hidden = true;
   Object.assign(state, { phase: 'detecting' });
   worker.postMessage({ cmd: 'detect', files });
 }
@@ -80,7 +82,7 @@ async function storageCheck() {
   } catch { w.hidden = true; }
 }
 
-const buttons = (disabled) => { for (const id of ['check', 'convert', 'compare', 'publish']) $(id).disabled = disabled; };
+const buttons = (disabled) => { for (const id of ['check', 'convert', 'compare', 'publish', 'match', 'resume', 'finish']) $(id).disabled = disabled; };
 function start(action, earlier) {
   if (busy || !input?.format || input.reason !== undefined) return;
   busy = true;
@@ -95,6 +97,9 @@ function start(action, earlier) {
   else if (action === 'publish') onlyKeys().then(
     (only) => worker.postMessage({ cmd: 'publish', part: $('part').value, files, previous: [...$('previous').files], options: { base, ...publishOptions(), only } }),
     (e) => fail(`the list of places to include could not be read (${e.message || e}).`));
+  // Match review (Krisis): the files chosen are the subjects, and `earlier` the other dataset; to finish, the review is applied to them.
+  else if (action === 'match') worker.postMessage({ cmd: 'match', subjects: files, others: earlier, options: matchOptions() });
+  else if (action === 'apply') worker.postMessage({ cmd: 'apply', subjects: files, work, options: { output: earlier, reviewer: reviewer() } });
   else worker.postMessage({ cmd: 'run', files, action, target, options: { base, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked,
     // Hermes: the matching of columns shown, as chosen (the same JSON as the command line's --columns).
     ...(isTable(input) && columns ? { columns: { ...columns.mapping } } : {}) } });
@@ -126,7 +131,7 @@ function onProgress(p) {
   $('phase').textContent = progressText(p);
   Object.assign(state, { progress: p });
 }
-function onDone({ report, outputs }) {
+function onDone({ report, outputs, work: found }) {
   busy = false;
   buttons(false);
   $('progress').hidden = true; $('result').hidden = false;
@@ -141,6 +146,7 @@ function onDone({ report, outputs }) {
   }
   renderReport(report);
   Object.assign(state, { phase: 'done', report, outputs });
+  if (state.action === 'match' && found) beginReview(found, outputs?.find((o) => /\.krisis\.json$/.test(o.name))?.name);
 }
 function renderReport(report) {
   const out = [];
@@ -291,5 +297,191 @@ $('compare').onclick = () => $('earlier').click();
 $('earlier').onchange = (e) => { const earlier = [...e.target.files]; e.target.value = ''; if (earlier.length) start('compare', earlier); };
 $('publish').onclick = () => start('publish');
 $('cancel').onclick = () => { worker.terminate(); busy = false; $('progress').hidden = true; buttons(false); Object.assign(state, { phase: 'cancelled' }); startWorker(); };
+// Matching asks for the other dataset, and starts once it is chosen; resuming asks for a saved review.
+$('match').onclick = () => $('others').click();
+$('others').onchange = (e) => { const others = [...e.target.files]; e.target.value = ''; if (others.length) start('match', others); };
+$('resume').onclick = () => $('workfile').click();
+$('workfile').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) resume(f); };
 $('target').onchange = () => { document.querySelector('[data-for="ntriples-output"]').hidden = $('target').value !== 'ntriples'; };
+
+// Krisis: match review. One subject place at a time, with its candidates; each decision is written
+// into the work object at once (decide() in engine/krisis/work.js), which "Save the review" saves
+// and Finish hands to the engine to make the attestations.
+let work = null, workName = 'review.krisis.json', order = [], cursor = 0, current = 0, basisFor = null, allDone = false;
+const REVIEWER_KEY = 'plato-tools.reviewer';
+function remembered() { try { return JSON.parse(localStorage.getItem(REVIEWER_KEY)) || {}; } catch { return {}; } }
+function remember() { try { localStorage.setItem(REVIEWER_KEY, JSON.stringify(reviewer() || {})); } catch {} }
+/** The reviewer, as a PLATO contributor ({ name, orcid? }), or null until a name is given. */
+function reviewer() {
+  const name = $('reviewer').value.trim();
+  // An ORCID is recorded in full, as a web address; one given as its sixteen digits is written so.
+  let orcid = $('orcid').value.trim();
+  if (/^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/.test(orcid)) orcid = 'https://orcid.org/' + orcid;
+  return name ? { name, ...(orcid ? { orcid } : {}) } : null;
+}
+function matchOptions() {
+  const num = (id) => { const v = parseFloat($(id).value); return Number.isFinite(v) ? v : undefined; };
+  return { threshold: num('threshold'), maxDistanceKm: num('max-distance') };
+}
+async function resume(file) {
+  let w;
+  try { w = readWork(await file.text()); } catch (e) {
+    $('result').hidden = false; $('saves').innerHTML = ''; $('report').innerHTML = '';
+    $('summary').innerHTML = `<span class="warn">${escapeHtml(e.message)}</span>`;
+    Object.assign(state, { phase: 'error', error: e.message });
+    return;
+  }
+  $('result').hidden = true;
+  beginReview(w, file.name);
+  // A review made from other files than those chosen now is still opened, with a warning.
+  try { const differ = await filesDiffer(w.subjects, files); showWarning(differ.length ? W.differs(differ) : ''); } catch { showWarning(''); }
+}
+function beginReview(w, name) {
+  work = w; workName = name || workName; basisFor = null; allDone = false;
+  order = reviewPlaces(work);
+  cursor = Math.min(Math.max(0, work.cursor || 0), Math.max(0, order.length - 1));
+  // A place with no candidates has nothing to review: start at the first that has some.
+  if (order.length && !candidatesOf(work, order[cursor]).length) cursor = Math.max(0, order.findIndex((iri) => candidatesOf(work, iri).length));
+  if (!work.reviewer?.name && !reviewer()) { const r = remembered(); $('reviewer').value = r.name || ''; $('orcid').value = r.orcid || ''; }
+  if (work.reviewer?.name && !reviewer()) { $('reviewer').value = work.reviewer.name; $('orcid').value = work.reviewer.orcid || ''; }
+  $('review').hidden = false; showWarning('');
+  askName(!reviewer() && order.length > 0);
+  goTo(cursor);
+}
+function showWarning(text) { $('review-warning').textContent = text; $('review-warning').hidden = !text; }
+function askName(show, why) {
+  const f = $('review-who'); f.hidden = !show;
+  if (show) { $('review-name').value = $('reviewer').value; if (why) showWarning(why); $('review-name').focus(); }
+}
+const undecided = (iri) => candidatesOf(work, iri).findIndex((c) => !c.decision);
+// A place still to decide has candidates, none of them decided; one with no candidates has nothing to decide.
+const toDecide = (iri) => !isReviewed(work, iri) && candidatesOf(work, iri).length > 0;
+function goTo(i) {
+  cursor = i; basisFor = null;
+  const u = order.length ? undecided(order[cursor]) : -1;
+  current = u < 0 ? 0 : u;
+  render(true);
+}
+/** The next (step 1) or previous (step -1) place the filter shows, or null. */
+function step(dir) {
+  const all = $('review-filter').value === 'all';
+  for (let i = cursor + dir; i >= 0 && i < order.length; i += dir) if (all || toDecide(order[i])) return i;
+  return null;
+}
+function move(dir) {
+  const i = step(dir);
+  allDone = i === null && dir > 0 && $('review-filter').value !== 'all' && !order.some(toDecide);
+  if (i !== null) goTo(i); else render(true);
+}
+function decideOn(id, kind, basis) {
+  const cands = candidatesOf(work, order[cursor]);
+  decide(work, id, kind, { identityType: kind === 'distinct' ? 'exactMatch' : $('identity-type').value, basis });
+  basisFor = null;
+  const u = undecided(order[cursor]);
+  if (kind && u < 0) return move(1);   // every candidate of this place decided: on to the next
+  current = kind ? u : Math.max(0, cands.findIndex((c) => c.id === id));
+  render(true);
+}
+function render(focus) {
+  const box = $('review-place');
+  const p = reviewProgress(work);
+  $('review-progress').textContent = W.progress(p, order.length ? cursor + 1 : 0);
+  $('review-prev').disabled = step(-1) === null; $('review-next').disabled = $('review-skip').disabled = step(1) === null;
+  Object.assign(state, { phase: 'reviewing', work, review: { cursor, subject: order[cursor] || null, current, filter: $('review-filter').value, ...p } });
+  if (!order.length) { box.innerHTML = `<p>${escapeHtml(W.none)}</p>`; return; }
+  const iri = order[cursor], place = work.places[iri] || {}, cands = candidatesOf(work, iri);
+  box.innerHTML = (allDone ? `<p class="good">${escapeHtml(W.allDone)}</p>` : '')
+    + `<div class="subject"><h3 id="review-subject">${escapeHtml(place.label || iri)}</h3>`
+    + (W.names(place.label, place.names) ? `<p>${escapeHtml(W.names(place.label, place.names))}</p>` : '')
+    + `<p>${escapeHtml(W.point(place.point))}</p><p class="iri">${escapeHtml(iri)}</p></div>`
+    + `<p>${escapeHtml(W.candidates(cands.length))}</p><ol class="candidates">`
+    + cands.map((c, i) => candidateHtml(c, i)).join('') + '</ol>';
+  if (basisFor) { $('basis-input')?.focus(); return; }
+  if (focus) box.focus({ preventScroll: false });
+}
+function candidateHtml(c, i) {
+  const o = c.other || work.places[c.candidate_candidate] || {}, d = c.decision, id = escapeHtml(c.id);
+  const btn = (act, text, key) => `<button type="button" data-act="${act}" data-id="${id}" aria-pressed="${d?.kind === act}">${text}${i === current && key ? ` <kbd>${key}</kbd>` : ''}</button>`;
+  return `<li class="candidate${i === current ? ' current' : ''}${d ? ' decided' : ''}" data-id="${id}"${i === current ? ' aria-current="true"' : ''}>`
+    + `<h4><span class="n">${i + 1}</span>${escapeHtml(o.label || c.candidate_candidate)}</h4>`
+    + (W.names(o.label, o.names) ? `<p>${escapeHtml(W.names(o.label, o.names))}</p>` : '')
+    + `<p class="facts">${escapeHtml(W.facts(c))}; ${escapeHtml(W.point(o.point))}</p>`
+    + `<p class="iri">${escapeHtml(c.candidate_candidate)}</p>`
+    + `<p class="decision">${escapeHtml(W.decision(d))}</p>`
+    + `<div class="acts">${btn('match', 'Same place', 'a')}${btn('not-this', 'Not this one', 'n')}${btn('distinct', 'Different places', 'd')}`
+    + (d ? `<button type="button" data-act="undo" data-id="${id}">Undo</button>` : '') + '</div>'
+    + (basisFor === c.id ? `<form class="basis" data-id="${id}"><label for="basis-input">${escapeHtml(W.basisLabel)}</label>`
+      + `<input id="basis-input" type="text" value="${escapeHtml(d?.basis || '')}" autocomplete="off">`
+      + `<button type="submit" class="primary">Record as different places</button><button type="button" data-act="cancel-basis">Cancel</button>`
+      + `<p class="warn" id="basis-warn" hidden>${escapeHtml(W.basisNeeded)}</p></form>` : '')
+    + '</li>';
+}
+function openBasis(id) { basisFor = id; current = Math.max(0, candidatesOf(work, order[cursor]).findIndex((c) => c.id === id)); render(); }
+$('review-place').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-act]'); if (!b || busy) return;
+  const { act, id } = b.dataset;
+  if (act === 'match' || act === 'not-this') decideOn(id, act);
+  else if (act === 'distinct') openBasis(id);
+  else if (act === 'undo') decideOn(id, null);
+  else if (act === 'cancel-basis') { basisFor = null; render(true); }
+});
+$('review-place').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const basis = $('basis-input').value.trim();
+  if (!basis) { $('basis-warn').hidden = false; $('basis-input').focus(); return; }
+  decideOn(e.target.dataset.id, 'distinct', basis);
+});
+$('review-place').addEventListener('keydown', (e) => { if (e.key === 'Escape' && basisFor) { basisFor = null; render(true); } });
+// The keys act only while the review is shown, and never while typing (or choosing from a list).
+document.addEventListener('keydown', (e) => {
+  if ($('review').hidden || busy || !work || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;
+  const cands = order.length ? candidatesOf(work, order[cursor]) : [], c = cands[current];
+  const k = e.key;
+  if (k === 'j' || k === 's') move(1);
+  else if (k === 'k') move(-1);
+  else if (k === 'a' && c) decideOn(c.id, 'match');
+  else if (/^[1-9]$/.test(k) && cands[+k - 1]) { current = +k - 1; decideOn(cands[current].id, 'match'); }
+  else if (k === 'n' && c) decideOn(c.id, 'not-this');
+  else if (k === 'd' && c) openBasis(c.id);
+  else return;
+  e.preventDefault();
+});
+$('review-prev').onclick = () => move(-1);
+$('review-next').onclick = $('review-skip').onclick = () => move(1);
+$('review-filter').onchange = () => { allDone = false; render(); };
+$('review-who').onsubmit = (e) => {
+  e.preventDefault();
+  const name = $('review-name').value.trim(); if (!name) return;
+  $('reviewer').value = name; remember(); askName(false); showWarning(''); render(true);
+};
+for (const id of ['reviewer', 'orcid']) $(id).addEventListener('change', remember);
+{ const r = remembered(); $('reviewer').value = r.name || ''; $('orcid').value = r.orcid || ''; }
+$('save-review').onclick = () => {
+  if (!work) return;
+  work.cursor = cursor;
+  const who = reviewer(); if (who) work.reviewer = who;
+  saveBlob(new Blob([serialiseWork(work)], { type: 'application/json' }), workName);
+  Object.assign(state, { reviewSaved: workName });
+};
+$('finish').onclick = () => {
+  if (!work) return;
+  if (!input?.format) return showWarning(W.noDataset);
+  if (!reviewer()) return askName(true, W.nameNeeded);
+  work.cursor = cursor; work.reviewer = reviewer();
+  start('apply', document.querySelector('input[name="review-output"]:checked').value);
+};
+/** Save something made in the page, not by the engine: as save() does, to disk or as a download. */
+async function saveBlob(blob, name) {
+  if (window.showSaveFilePicker && !window.__plato_forceDownload) {
+    try {
+      const h = await window.showSaveFilePicker({ suggestedName: name });
+      const w = await h.createWritable(); await w.write(blob); await w.close();
+      return;
+    } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+}
 startWorker();

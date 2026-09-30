@@ -165,6 +165,40 @@ export function columnProblem(p) {
   if (p.kind === 'generic-mapping-unknown-column') return COLUMN_WORDS.unknown(p.example);
   return COLUMN_WORDS.unusable(p.example);
 }
+
+// Krisis: review screen
+// What the page says while matches are reviewed one subject place at a time (src/app.js).
+const IDENTITY_WORDS = { exactMatch: 'the same place', closeMatch: 'much the same place', related: 'a related place' };
+export const review = {
+  /** "12 of 340 places reviewed; this is place 13." */
+  progress: ({ reviewed, total }, at) => `${reviewed.toLocaleString('en-GB')} of ${count(total, 'places')} reviewed${at ? `; this is place ${at.toLocaleString('en-GB')}` : ''}.`,
+  /** Coordinates, longitude and latitude, as "51.4545° N, 2.5879° W"; or that there are none. */
+  point: (p) => (Array.isArray(p) && p.length === 2 && p.every(Number.isFinite)
+    ? `${Math.abs(p[1]).toFixed(4)}° ${p[1] < 0 ? 'S' : 'N'}, ${Math.abs(p[0]).toFixed(4)}° ${p[0] < 0 ? 'W' : 'E'}` : 'no coordinates'),
+  /** Other names than the label: "Also: Bristow, Brigstowe"; empty when there are none. */
+  names: (label, names) => { const other = [...new Set((names || []).filter((n) => n && n !== label))]; return other.length ? `Also: ${other.join(', ')}` : ''; },
+  /** How alike and how far: "names 93% alike, 1.2 km apart". */
+  facts: (c) => [`names ${Math.round((c.similarity_score || 0) * 100)}% alike`,
+    Number.isFinite(c.distance_km) ? `${c.distance_km < 10 ? c.distance_km.toFixed(1) : Math.round(c.distance_km).toLocaleString('en-GB')} km apart` : 'distance not known'].join(', '),
+  /** A decision taken, in words: "Decided: the same place (exact match)". */
+  decision: (d) => !d ? 'Not decided yet'
+    : d.kind === 'match' ? `Decided: ${IDENTITY_WORDS[d.identityType] || d.identityType}`
+    : d.kind === 'not-this' ? 'Decided: not this one'
+    : `Decided: different places, because ${d.basis}`,
+  candidates: (n) => (n ? `${n === 1 ? 'One candidate' : `${n} candidates`} in the other dataset:` : 'No candidates in the other dataset.'),
+  basisLabel: 'Why are these different places? Say what shows it: this is recorded with the attestation.',
+  basisNeeded: 'Say why they are different places before recording it.',
+  none: 'No matches were suggested, so there is nothing to review. With a lower threshold for how alike names must be, or a greater distance, there may be some.',
+  allDone: 'Every place has been reviewed. Finish to make the attestations, or choose "all places" to look again.',
+  nameNeeded: 'Give your name first: each attestation records who made it.',
+  saved: (name) => `Saved the review as ${name}.`,
+  /** When a resumed review was made from other files than those chosen now. */
+  differs: (names) => `This review was made from other files than the ones chosen: ${names.join(', ')}. Its places may no longer match the data.`,
+  noDataset: 'Choose the dataset this review was made from first; it is needed to finish.',
+  /** A dataset given to matching that is not data these tools read ('subjects' or 'others'). */
+  notRecognised: (which) => `${which === 'subjects' ? 'Your dataset' : 'The other dataset'} was not recognised as data these tools read, so nothing was matched`,
+};
+
 // Krisis: matching. What the match review (src/engine/krisis/) says, on the page and the command line.
 const KRISIS_PHASES = { matching: 'Comparing the names', applying: 'Making the attestations' };
 const KRISIS_DATASETS = { subjects: 'Places to match', others: 'Other dataset' };

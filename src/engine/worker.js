@@ -6,6 +6,9 @@ import { loadResources } from './resources.js';
 import { prepare, run, TARGETS } from './pipeline.js';
 import { compare } from './compare.js';
 import { publish } from './agora/index.js';
+import { match } from './krisis/match.js';
+import { apply } from './krisis/apply.js';
+import { review } from './words.js';
 import { pragmas } from '../lib/store.js';
 import { detect, readable } from './input.js';
 import { columnsOf, mappingOf } from './hermes/generic.js';
@@ -123,6 +126,24 @@ self.onmessage = async ({ data }) => {
       const { env, tidy } = await runEnv();
       let result;
       try { result = await publish({ part: data.part, input, previous, options: data.options || {} }, env); } finally { tidy(); }
+      postMessage({ type: 'done', ...result });
+    } else if (data.cmd === 'match' || data.cmd === 'apply') {
+      // Match review (Krisis, src/engine/krisis/): 'match' finds candidates for the subjects' places in
+      // the others, and returns the work file; 'apply' turns the decisions in it into attestations.
+      const subjects = await detect(data.subjects), others = data.cmd === 'match' ? await detect(data.others) : null;
+      const unknown = [['subjects', subjects], ['others', others]].find(([, input]) => input && !input.format);
+      if (unknown) {
+        postMessage({ type: 'done', incomplete: true, outputs: [], report: { counts: {}, errors: 1, items: [{ severity: 'error', kind: 'not-recognised', count: 1,
+          message: review.notRecognised(unknown[0]), examples: [unknown[1].reason] }] } });
+        return;
+      }
+      const { env, tidy } = await runEnv();
+      let result;
+      try {
+        result = data.cmd === 'match'
+          ? await match({ subjects, others, options: data.options || {} }, env)
+          : await apply({ subjects, work: data.work, options: data.options || {} }, env);
+      } finally { tidy(); }
       postMessage({ type: 'done', ...result });
     }
   } catch (e) {

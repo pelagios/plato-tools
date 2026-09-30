@@ -62,11 +62,10 @@
         <p>Put a place on the map. Point to it, draw it, trace it from a georeferenced historical map, or take its location from a record you've matched, then see everything the sources say about it, over time.</p>
         <a class="follow" href="https://github.com/pelagios/plato-tools/issues/4">Follow its progress</a>
       </li>
-      <li class="tool coming" aria-disabled="true">
-        <span class="badge">Coming</span>
-        <h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18"/><path d="m19 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M3 7h1a17 17 0 0 0 8-2 17 17 0 0 0 8 2h1"/><path d="m5 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M7 21h10"/></svg><span class="why" title="κρίσις: judgement, the act of deciding between alternatives." tabindex="0">Krisis</span></h3><p class="label">Match review</p>
-        <p>Is this Newton that Newton? Find a place in WHG and other gazetteers, weigh each suggested match, and keep your judgement, for or against, on the record.</p>
-        <a class="follow" href="https://github.com/pelagios/plato-tools/issues/6">Follow its progress</a>
+      <li class="tool">
+        <a class="tool-link" href="#files"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18"/><path d="m19 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M3 7h1a17 17 0 0 0 8-2 17 17 0 0 0 8 2h1"/><path d="m5 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M7 21h10"/></svg><span class="why" title="κρίσις: judgement, the act of deciding between alternatives.">Krisis</span></h3><p class="label">Match review</p></a>
+        <p>Is this Newton that Newton? Find the same places in another dataset, weigh each suggested match, and keep your judgement, for or against, on the record.</p>
+        <p class="note">Choose your dataset, then <em>Match with another dataset</em>. Matching in WHG and other gazetteers is next.</p>
       </li>
     </ul>
   </section>
@@ -110,6 +109,14 @@
       <button id="publish">Prepare</button>
       <small>See <em>Options</em> for the release's name, the previous release, and where the site will be published.</small>
     </div>
+    <div class="actions matching">
+      <span class="or">or, to find the same places in another dataset,</span>
+      <button id="match">Match with another dataset…</button>
+      <input type="file" id="others" multiple hidden aria-label="The other dataset">
+      <button id="resume">Resume a review…</button>
+      <input type="file" id="workfile" hidden accept=".json,application/json" aria-label="A saved review">
+      <small>You will be asked for the other dataset's file. Places whose names are alike, and that are near each other, are suggested as matches, for you to accept or reject one by one; your decisions become attestations of identity. Matching two files on your computer sends nothing anywhere. To carry on with a review you saved, choose the same dataset, then <em>Resume a review</em>.</small>
+    </div>
     <details id="options">
       <summary>Options</summary>
       <div class="opt" data-for="tables-input">
@@ -145,6 +152,19 @@
         <label><input id="cube" type="checkbox"> Add what the RDF Data Cube vocabulary expects of statistical figures</label>
         <small>For figures from a statistical table: each becomes a <code>qb:Observation</code> with its measure as a direct statement, and its place and date as <code>sdmx-dimension:refArea</code> and <code>refPeriod</code>. A date that is not one year or one day is reported, not guessed.</small>
       </div>
+      <div class="opt" data-for="matching">
+        <label for="threshold">Matching: how alike two names must be to be suggested</label>
+        <input id="threshold" type="number" min="0.5" max="1" step="0.01" value="0.85">
+        <small>From 0.5 (loosely alike) to 1 (the same, once accents, capitals and punctuation are set aside).</small>
+        <label for="max-distance">Matching: furthest apart two places may be, in kilometres</label>
+        <input id="max-distance" type="number" min="0" step="1" value="50">
+        <small>Only where both have coordinates; a place without them is matched by name alone.</small>
+        <label for="reviewer">Your name, as the reviewer of the matches</label>
+        <input id="reviewer" type="text" autocomplete="name" size="30">
+        <label for="orcid">Your ORCID (optional)</label>
+        <input id="orcid" type="text" placeholder="0000-0000-0000-0000" size="22">
+        <small>Recorded with each attestation you make, as the one who made it. This browser remembers them for next time; they are not sent anywhere.</small>
+      </div>
     </details>
   </section>
 
@@ -159,6 +179,47 @@
     <p id="summary"></p>
     <div id="saves"></div>
     <div id="report"></div>
+  </section>
+
+  <section id="review" aria-labelledby="review-h" hidden>
+    <h2 id="review-h"><span class="step">5</span> Review the matches</h2>
+    <form id="review-who" class="review-who" hidden>
+      <label for="review-name">Before you start: your name, to record you as the reviewer</label>
+      <input id="review-name" type="text" autocomplete="name" size="30" required>
+      <button type="submit">Use this name</button>
+    </form>
+    <div class="review-bar">
+      <p id="review-progress" aria-live="polite"></p>
+      <label for="review-filter">Show</label>
+      <select id="review-filter">
+        <option value="undecided">places still to decide</option>
+        <option value="all">all places</option>
+      </select>
+      <label for="identity-type">Same place means</label>
+      <select id="identity-type">
+        <option value="exactMatch">the same place (exact match)</option>
+        <option value="closeMatch">much the same place (close match)</option>
+        <option value="related">a related place</option>
+      </select>
+    </div>
+    <p id="review-warning" class="warn" hidden></p>
+    <article id="review-place" tabindex="-1" aria-labelledby="review-subject"></article>
+    <div class="review-nav">
+      <button id="review-prev" type="button">Previous <kbd>k</kbd></button>
+      <button id="review-skip" type="button">Skip <kbd>s</kbd></button>
+      <button id="review-next" type="button">Next <kbd>j</kbd></button>
+    </div>
+    <p class="note review-keys">Keys: <kbd>a</kbd> same place (or <kbd>1</kbd>–<kbd>9</kbd> for that candidate), <kbd>n</kbd> not this one, <kbd>d</kbd> different places, <kbd>s</kbd> skip, <kbd>j</kbd> next, <kbd>k</kbd> previous. They act on the highlighted candidate, and do nothing while you are typing.</p>
+    <div class="review-end">
+      <button id="save-review" type="button">Save the review</button>
+      <small>Saves your decisions so far, to carry on later with <em>Resume a review</em>.</small>
+      <fieldset class="finish">
+        <legend>Finish: what to make of your decisions</legend>
+        <label><input type="radio" name="review-output" value="attestations" checked> A PLATO file of only the new attestations</label>
+        <label class="soon"><input type="radio" name="review-output" value="dataset" disabled> Your dataset with the new attestations added, checked with the version check <span class="coming-note">(coming)</span></label>
+        <button id="finish" type="button" class="primary">Finish</button>
+      </fieldset>
+    </div>
   </section>
 
   <p id="storage-warning" class="warn" hidden></p>

@@ -116,6 +116,109 @@ def table_case(page, file, choices=None, action=None, target=None, timeout=120):
     except Exception as e:                       # a harness error is a failed check, never a crash
         return {'phase': 'harness-error', 'error': str(e).split('\n')[0][:200]}
 
+def match_case(page, subjects, others, timeout=120):
+    """Krisis: choose the subjects, then give the other dataset to Match; wait for the review screen."""
+    try:
+        page.set_input_files('#picker', [str(subjects)])
+        s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), 60, 'detection')
+        if s.get('phase') != 'detected': return s
+        page.set_input_files('#others', [str(others)])
+        return wait_state(page, lambda s: s.get('phase') in ('reviewing', 'error') or (s.get('action') == 'match' and s.get('phase') == 'done'), timeout, 'matching')
+    except Exception as e:                       # a harness error is a failed check, never a crash
+        return {'phase': 'harness-error', 'error': str(e).split('\n')[0][:200]}
+
+def krisis_place(iri, label, lon, lat, *also):
+    return {'@id': iri, 'label': label, 'attestations': [{'names': [{'toponym': n} for n in (label, *also)],
+            'geometries': [{'geojson': {'type': 'Point', 'coordinates': [lon, lat]}}], 'sources': [{'title': 'A survey'}]}]}
+
+def krisis_case(page, tmp):
+    """Krisis, match review: match two small files, decide with the keyboard, save the review, finish, resume."""
+    a, b = 'https://example.org/a/', 'https://example.org/b/'
+    subjects = tmp / 'krisis-subjects.json'; others = tmp / 'krisis-others.json'
+    subjects.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': a, 'title': 'Our places'}, 'spatialEntities': [
+        krisis_place(a + 'bristol', 'Bristol', -2.5879, 51.4545, 'Bristow'), krisis_place(a + 'bath', 'Bath', -2.3590, 51.3811),
+        krisis_place(a + 'wells', 'Wells', -2.6474, 51.2094), krisis_place(a + 'zennor', 'Zennor', -5.5680, 50.1910)]}))
+    others.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': b, 'title': 'Their places'}, 'spatialEntities': [
+        krisis_place(b + 'bristoll', 'Bristoll', -2.5900, 51.4500), krisis_place(b + 'bathe', 'Bathe', -2.3600, 51.3800),
+        krisis_place(b + 'bath-maine', 'Bath', -69.8203, 43.9109), krisis_place(b + 'welles', 'Welles', -2.6500, 51.2100)]}))
+    s = match_case(page, subjects, others)
+    work = s.get('work') or {}
+    cands = {(c['candidate_source'].rsplit('/', 1)[-1], c['candidate_candidate'].rsplit('/', 1)[-1]) for c in work.get('candidates', [])}
+    check('match review: two files matched, the review screen shows the first place with its candidates',
+          s.get('phase') == 'reviewing' and ('bristol', 'bristoll') in cands and ('bath', 'bathe') in cands and ('wells', 'welles') in cands
+          and page.is_visible('#review') and 'Bristol' in page.inner_text('#review-place') and 'Bristoll' in page.inner_text('#review-place'), s.get('review') or s.get('report') or s)
+    # Bath in Maine has Bath's own name but is thousands of kilometres away: not suggested, beside the Bath that is.
+    check('match review: a namesake too far away is not suggested, one near by is',
+          s.get('phase') == 'reviewing' and ('bath', 'bathe') in cands and ('bath', 'bath-maine') not in cands, sorted(cands))
+    ok = s.get('phase') == 'reviewing'; asked = False
+    try:
+        if ok:
+            # The name is asked once, in the page, and remembered by the browser.
+            asked = page.is_visible('#review-name')
+            page.fill('#review-name', 'Ada Reviewer'); page.press('#review-name', 'Enter')
+            asked = asked and not page.is_visible('#review-name')
+            page.keyboard.press('a')                  # Bristol: same place as its first candidate
+            page.keyboard.press('d')                  # Bath: different places, with a basis typed in the field
+            page.keyboard.type('Bathe is a farm; and so near by, just a namesake')   # holds a, n, d, s, j, k: none may act
+            page.keyboard.press('Enter')
+            page.keyboard.press('n')                  # Wells: not this one
+    except Exception as e:
+        ok = False; s = {'phase': 'harness-error', 'error': str(e).split('\n')[0][:200]}
+    s = wait_state(page, lambda s: s.get('phase') == 'reviewing' and s.get('review', {}).get('reviewed') == 3, 10, 'decisions') if ok else s
+    dec = {c['candidate_source'].rsplit('/', 1)[-1] + '>' + c['candidate_candidate'].rsplit('/', 1)[-1]: c.get('decision') for c in (s.get('work') or {}).get('candidates', [])}
+    kinds = {k: (v or {}).get('kind') for k, v in dec.items()}
+    remembered = page.evaluate("() => { try { return localStorage.getItem('plato-tools.reviewer'); } catch { return null; } }") if ok else None
+    check('match review: keys decide (same place, different places with its basis, not this one), and none acts while typing the basis',
+          s.get('phase') == 'reviewing' and kinds.get('bristol>bristoll') == 'match' and kinds.get('wells>welles') == 'not-this'
+          and kinds.get('bath>bathe') == 'distinct' and dec['bath>bathe'].get('basis') == 'Bathe is a farm; and so near by, just a namesake'
+          and sum(1 for v in kinds.values() if v) == 3 and '3 of 3 places reviewed' in page.inner_text('#review-progress'), s.get('review') or s)
+    check('match review: the reviewer\'s name is asked in the page, then put away, and remembered by the browser', ok and asked and 'Ada Reviewer' in (remembered or ''), {'asked then hidden': asked, 'remembered': remembered})
+    saved = {}
+    if s.get('phase') == 'reviewing':
+        try:
+            with page.expect_download(timeout=30_000) as d: page.click('#save-review')
+            d.value.save_as(tmp / 'saved.krisis.json'); saved = json.loads((tmp / 'saved.krisis.json').read_text())
+        except Exception as e: saved = {'error': str(e)[:200]}
+    skinds = {c['candidate_source'].rsplit('/', 1)[-1]: (c.get('decision') or {}).get('kind') for c in saved.get('candidates', []) if c.get('decision')}
+    check('match review: Save the review writes the work file with the decisions and the reviewer',
+          saved.get('krisis') == 1 and skinds == {'bristol': 'match', 'bath': 'distinct', 'wells': 'not-this'} and (saved.get('reviewer') or {}).get('name') == 'Ada Reviewer', saved.get('error') or skinds)
+    out = {}
+    if s.get('phase') == 'reviewing':
+        try:
+            page.click('#finish')
+            s = wait_state(page, lambda s: s.get('action') == 'apply' and s.get('phase') in ('done', 'error'), 120, 'finish')
+            if s.get('phase') == 'done' and s.get('outputs'):
+                out = json.loads(download(page, s['outputs'][0]['name'], tmp / 'krisis-attestations.json').read_text())
+        except Exception as e: s = {'phase': 'harness-error', 'error': str(e).split('\n')[0][:200]}
+    atts = out.get('attestations', []) if isinstance(out, dict) else []
+    rel = lambda a: [(i.get('subject', '').rsplit('/', 1)[-1], i.get('object', '').rsplit('/', 1)[-1]) for i in a.get('identities', [])]
+    same = [a for a in atts if not a.get('negated') and rel(a) == [('bristol', 'bristoll')]]
+    distinct = [a for a in atts if a.get('negated') and rel(a) == [('bath', 'bathe')]]
+    check('match review: Finish (attestations only) saves one attestation of the match, one negated for the different places, none for "not this one"',
+          s.get('phase') == 'done' and len(atts) == 2 and len(same) == 1 and len(distinct) == 1
+          and not any(('wells', 'welles') in rel(a) for a in atts) and 'Ada Reviewer' in json.dumps(same[0].get('contributor')), s.get('report') or s if not atts else atts)
+    check('match review: the file made is the new attestations only, in PLATO JSON, with no @id minted', bool(atts) and out.get('profile') == 'attestation-centric'
+          and not any('@id' in a for a in atts), {k: v for k, v in out.items() if k != 'attestations'} if isinstance(out, dict) else out)
+    # Resuming: the saved review, opened again, is back where it was, decisions and all.
+    r = {}
+    if saved.get('krisis') == 1:
+        try:
+            page.set_input_files('#workfile', [str(tmp / 'saved.krisis.json')])
+            r = wait_state(page, lambda s: s.get('phase') == 'reviewing', 20, 'resume')
+        except Exception as e: r = {'phase': 'harness-error', 'error': str(e).split('\n')[0][:200]}
+    check('match review: a saved review resumes with its decisions', r.get('phase') == 'reviewing' and (r.get('review') or {}).get('reviewed') == 3
+          and not page.is_visible('#review-warning'), r.get('review') or r)
+    # And with another dataset chosen than the one it was made from, it still opens, and says so: the control for the absence above.
+    w = ''
+    if r.get('phase') == 'reviewing':
+        try:
+            page.set_input_files('#picker', [str(others)])
+            wait_state(page, lambda s: s.get('phase') == 'detected', 30, 'detection')
+            page.set_input_files('#workfile', [str(tmp / 'saved.krisis.json')])
+            page.wait_for_selector('#review-warning:not([hidden])', timeout=20_000); w = page.inner_text('#review-warning')
+        except Exception as e: w = 'harness-error: ' + str(e).split('\n')[0][:200]
+    check('match review: a review resumed against other files than it was made from says so', 'other files than the ones chosen' in w and 'krisis-others.json' in w, w)
+
 def download(page, name, dest):
     with page.expect_download(timeout=600_000) as d:
         page.evaluate(f'window.__plato_save({json.dumps(name)})')
@@ -424,6 +527,7 @@ def main():
             check('a IIIF Georeference Annotation is refused on the page with the reason, and offers no check; a Recogito export is still read',
                   s1.get('phase') == 'unrecognised' and 'IIIF Georeference Annotation' in said1 and 'drop it together with the Recogito export' in said1 and acts1 is False
                   and s2.get('format') == 'w3c-annotations' and s2.get('phase') == 'done', {'georef': s1, 'shown': said1, 'actions': acts1, 'recogito': s2.get('format')})
+            krisis_case(page, tmp)
             ctx.close()
     finally:
         stop(srv)
