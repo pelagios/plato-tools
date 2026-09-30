@@ -357,6 +357,23 @@ test('addresses a static site cannot serve, or that differ only in case, are err
   assert.ok(s.has('place/odiham.jsonld'));
 });
 
+test('not one place it can serve (all at <base>p/<id>): an error that writes nothing in a draft; published, the landing page and downloads', async () => {
+  const at = (status) => JSON.parse(JSON.stringify(kingJohn({ status })).replaceAll(KJ_BASE + 'place/', KJ_BASE + 'p/'));
+  const draft = await site([jsonFile(at('draft'))]);
+  assert.equal(draft.item('nothing-to-serve')?.severity, 'error', draft.kinds.join());
+  assert.equal(draft.item('nothing-to-serve').examples[0], '0 of 19');
+  assert.equal(draft.r.outputs.length, 0);
+  assert.ok(!existsSync(join(draft.out, 'king-john-site')) || !existsSync(join(draft.out, 'king-john-site', 'download')));
+  const pub = await site([jsonFile(at('published'))]);
+  assert.equal(pub.item('nothing-to-serve')?.severity, 'warning', pub.kinds.join());
+  assert.equal(pub.r.report.errors, 0, JSON.stringify(pub.r.report.items.filter((i) => i.severity === 'error')));
+  assert.ok(pub.has('index.html') && pub.has('download/king-john.jsonl.gz'), walk(pub.siteDir).join());
+  assert.ok(!walk(pub.siteDir).some((f) => f.startsWith('place/')));
+  // Control: the example as it is has places to serve, and no such finding.
+  const kj = await site([jsonFile(kingJohn())]);
+  assert.ok(!kj.kinds.includes('nothing-to-serve') && kj.has('place/windsor/index.html'), kj.kinds.join());
+});
+
 test('published, with addresses it cannot serve: warnings, not errors; the rest is served and they are listed', async () => {
   const odd = (status) => {
     const doc = kingJohn({ status });

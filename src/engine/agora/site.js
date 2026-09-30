@@ -64,6 +64,8 @@ export const TEXT = {
   // listed on its home page and its 404 page as held in the downloads, and the workflow deploys it.
   'key-not-servable-published': 'A place or source address ends in something a static site cannot serve as a file name, so it has no page or data file. The dataset is published, so its addresses cannot change: the site lists these places on its home page and its 404 page, as held in the downloads, and is deployed without them.',
   'keys-differ-in-case-published': 'Two place or source addresses differ only in the case of their letters, which is one file on macOS and Windows and in many zips, so neither has a page. The dataset is published, so its addresses cannot change: the site lists these places on its home page and its 404 page, as held in the downloads, and is deployed without them.',
+  'nothing-to-serve': "Not one of the dataset's places has an address the site can serve (<base>place/<id>, the id of letters, digits and . _ ~ -), so the site would be a landing page and downloads only, and no place's address would lead to its page. Nothing is written: give the places addresses of that form while the dataset is a draft (the report part says what is wrong with each).",
+  'nothing-to-serve-published': "Not one of the dataset's places has an address the site can serve (<base>place/<id>, the id of letters, digits and . _ ~ -). The dataset is published, so its addresses cannot change: the site is made of the landing page and the downloads, which hold every place.",
   'attestations-without-ids': 'Attestations have no address of their own (@id), so nothing can link to them, retract them or replace them, and no site is made. Give them addresses first: plato-tools publish mint writes a copy of the dataset in which every attestation has one; commit that copy. The site never makes addresses itself.',
   'attestations-without-ids-draft': 'Attestations have no address of their own (@id). That will do for a draft, but before publishing give them addresses (plato-tools publish mint), so that each can be linked to, retracted or replaced.',
   'place-not-under-base': "A place's address is not under the dataset's base address (its place/ part), so this site cannot serve it and it has no page. Its record is still in the downloads.",
@@ -262,6 +264,14 @@ export function create(ctx) {
       }
       if (leftOut) rep.add('warning', 'places-left-out', TEXT['places-left-out'], `${leftOut.toLocaleString('en-GB')} of ${places.toLocaleString('en-GB')}`, leftOut);
       if (idrsDropped) rep.warning('identity-matches-not-shown', TEXT['identity-matches-not-shown']);
+      // Not one place the site can serve (DEEP's places, all at <base>places/…): a site of a landing
+      // page and downloads. A draft is to be fixed first, as with any address it cannot serve; a
+      // published dataset's addresses are frozen (A3), so it is made, and serves the downloads.
+      if (!served.size && places) {
+        const example = `0 of ${places.toLocaleString('en-GB')}`;
+        if (!published) { rep.add('error', 'nothing-to-serve', TEXT['nothing-to-serve'], example); return; }
+        rep.add('warning', 'nothing-to-serve', TEXT['nothing-to-serve-published'], example);
+      }
 
       // The estimate, with the downloads (compressed, of every place) and the pages that list the places.
       const withTables = jsonAll <= TABLES_MAX_JSON;
