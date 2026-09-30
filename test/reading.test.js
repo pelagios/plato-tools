@@ -89,6 +89,27 @@ test('an LPF FeatureCollection whose type comes after a long member is detected'
   assert.equal(d.format, 'lpf', d.reason);
   assert.equal(d.lpfVersion, 1);
 });
+/** A File-like like chunked(), whose stream is pulled chunk by chunk and counts the bytes it hands over. */
+function counted(bytes, name, size = 16384) {
+  if (typeof bytes === 'string') bytes = strToU8(bytes);
+  const f = chunked(bytes, name, size);
+  f.read = 0;
+  f.stream = () => { let i = 0; return new ReadableStream({ pull(c) { if (i >= bytes.length) { c.close(); return; } const b = bytes.slice(i, i + size); i += size; f.read += b.length; c.enqueue(b); } }); };
+  return f;
+}
+test('detecting a PLATO JSON document stops reading once its profile is found', async () => {
+  const many = Array.from({ length: 40_000 }, (_, i) => ({ ...JSON.parse(onePlace), '@id': `https://example.org/p${i}` }));
+  const doc = JSON.stringify({ profile: 'place-centric', gazetteer: { title: 'T' }, spatialEntities: many });
+  assert.ok(doc.length > 2 ** 21, 'the document is megabytes long');
+  const f = counted(doc, 'big.json');
+  assert.equal((await detect([f])).format, 'plato-json');
+  // Detection read the start (64 KB and a little the pipes read ahead), never the whole.
+  assert.ok(f.read < 2 ** 18, `read ${f.read} of ${doc.length}`);
+  // Control that the count counts: a profile after a long gazetteer is still found, and to find it takes reading past the gazetteer.
+  const late = counted(JSON.stringify({ gazetteer: { title: 'T', description: 'd'.repeat(600_000) }, profile: 'place-centric', spatialEntities: many }), 'late.json');
+  assert.equal((await detect([late])).profile, 'place-centric');
+  assert.ok(late.read > 600_000 && late.read < 600_000 + 2 ** 18, `read ${late.read}`);
+});
 
 // ---- what a line holds ------------------------------------------------------------------------
 test('a line of PLATO JSON Lines that is not an object is a schema error with its line, and the rest is read', async () => {

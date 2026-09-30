@@ -183,10 +183,12 @@ export async function firstLine(file, cap = DETECT_CAP) {
 }
 /**
  * The string values of the given top-level keys of a JSON document, read token by token (nothing
- * of the values is held), until all are found, the document's `type` is met (PLATO documents have
- * none; a FeatureCollection's is read on for its @context, up to its features), the document
- * closes or breaks, or `cap` characters have been read. Decoded leniently, as head() is: a byte that
- * is not UTF-8 is left to the reader, which reports it.
+ * of the values is held), until all are found, its `profile` or `type` is met (a PLATO document has
+ * a profile and no type, so the others matter only without one: reading on for them read a large
+ * PLATO document to the cap; a FeatureCollection's type is read on from for its @context, which
+ * says whether it is LPF, up to its features), the document closes or breaks, or `cap` characters
+ * have been read. Decoded leniently, as head() is: a byte that is not UTF-8 is left to the reader,
+ * which reports it.
  */
 async function topLevelStrings(file, wanted, cap = DETECT_CAP) {
   const found = {};
@@ -196,8 +198,7 @@ async function topLevelStrings(file, wanted, cap = DETECT_CAP) {
     if (depth === 1) {
       if (expect === 'value') {
         expect = null;
-        if (wanted.includes(key) && token === TokenType.STRING) { found[key] = value; if (key === 'type' && value !== 'FeatureCollection' || 'type' in found && '@context' in found || wanted.every((k) => k in found)) throw STOP; }
-        // A FeatureCollection's @context, which says whether it is LPF, is looked for up to its features.
+        if (wanted.includes(key) && token === TokenType.STRING) { found[key] = value; if (key === 'profile' || key === 'type' && value !== 'FeatureCollection' || 'type' in found && '@context' in found || wanted.every((k) => k in found)) throw STOP; }
         else if (key === 'features' && found.type === 'FeatureCollection') throw STOP;
       }
       else if (expect === 'key' && token === TokenType.STRING) { key = value; expect = null; }
