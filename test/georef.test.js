@@ -135,6 +135,73 @@ test('readGeoreference: too few control points for the transformation is a DataE
   await toWorld(g, pt([1500, 5000]), { space: 'image', transformation: 'polynomial' });
 });
 
+/** ROCQUE with the given control points ([[x, y], [lon, lat]]) and transformation. */
+function withGcps(gcps, type = 'polynomial') {
+  const a = clone(ROCQUE);
+  a.body.transformation = { type };
+  a.body.features = gcps.map(([r, geo]) => ({ type: 'Feature', properties: { resourceCoords: r }, geometry: { type: 'Point', coordinates: geo } }));
+  return a;
+}
+const SPREAD = [[[1000, 1000], [-80, 40]], [[9000, 1200], [-70, 40.5]], [[5000, 5000], [-75, 30]]];
+
+test('control points on one line are a DataError (on the map or on the ground); spread ones are the control', async () => {
+  const flat = /all on one straight line .*Nothing was changed/;
+  // On the ground: the case that gave [0.2, 0.199989] with no error.
+  const ground = withGcps([[[0, 0], [0, 0]], [[100, 0], [0.1, 0.1]], [[0, 100], [0.2, 0.2]]]);
+  await assert.rejects(readGeoreference(ground), (e) => isDataError(e) && flat.test(e.message) && /on the ground/.test(e.message));
+  // On the map.
+  const map = withGcps([[[0, 0], [-80, 40]], [[100, 100], [-70, 40.5]], [[200, 200], [-75, 30]]]);
+  await assert.rejects(readGeoreference(map), (e) => isDataError(e) && flat.test(e.message) && /on the map/.test(e.message));
+  // Nearly on a line, at the scale of the whole world: still refused (the tolerance is relative).
+  const nearly = withGcps([[[0, 0], [-80, 40]], [[5000, 5000.0001], [-70, 40.5]], [[10000, 10000], [-75, 30]]]);
+  await assert.rejects(readGeoreference(nearly), isDataError);
+  // A thin plate spline cannot take points on a line either; Helmert can (two points fix it).
+  await assert.rejects(readGeoreference(withGcps(map.body.features.map((f) => [f.properties.resourceCoords, f.geometry.coordinates]), 'thinPlateSpline')), isDataError);
+  const helmert = await readGeoreference(withGcps([[[0, 0], [-80, 40]], [[100, 100], [-79, 39]], [[200, 200], [-78, 38]]], 'helmert'));
+  assert.ok((await toWorld(helmert, pt([50, 50]), { space: 'image' })).geojson.coordinates.every(Number.isFinite));
+  // Control: the same annotation with its points spread out.
+  const g = await readGeoreference(withGcps(SPREAD));
+  assert.equal(g.gcps, 3);
+  const { geojson } = await toWorld(g, pt([5000, 5000]), { space: 'image' });
+  assert.ok(dist(geojson.coordinates, [-75, 30]) < 1e-6, 'a control point maps to its own place');
+  // Spread points, but asked for with a transformation that needs more of them.
+  await assert.rejects(toWorld(g, pt([1, 1]), { space: 'image', transformation: 'projective' }), (e) => isDataError(e) && /needs at least 4/.test(e.message));
+});
+
+test('identical control points are a DataError; the same number of distinct ones is the control', async () => {
+  const same = withGcps([[[10, 10], [0, 0]], [[10, 10], [0, 0]], [[10, 10], [0, 0]]]);
+  await assert.rejects(readGeoreference(same), (e) => isDataError(e) && /only 1 different place/.test(e.message) && /Nothing was changed/.test(e.message));
+  // Four points of which only two differ: too few for a polynomial, which needs three.
+  const two = withGcps([...SPREAD.slice(0, 2), ...SPREAD.slice(0, 2)]);
+  await assert.rejects(readGeoreference(two), (e) => isDataError(e) && /only 2 different places/.test(e.message));
+  // A thin plate spline cannot take a repeated point even with enough others (its matrix is singular).
+  const repeated = withGcps([...SPREAD, [[3000, 2000], [-77, 38]], SPREAD[0]], 'thinPlateSpline');
+  await assert.rejects(readGeoreference(repeated), (e) => isDataError(e) && /same place/.test(e.message));
+  // Controls: a repeat is harmless to a least-squares polynomial; and distinct points for the spline.
+  assert.equal((await readGeoreference(withGcps([...SPREAD, [[3000, 2000], [-77, 38]], SPREAD[0]]))).gcps, 5);
+  const tps = await readGeoreference(withGcps([...SPREAD, [[3000, 2000], [-77, 38]]], 'thinPlateSpline'));
+  assert.ok((await toWorld(tps, pt([3000, 2000]), { space: 'image' })).geojson.coordinates.every(Number.isFinite));
+});
+
+test('a control point at the pole, off the globe or not a number is a DataError; one at 85° is the control', async () => {
+  const at = (geo) => withGcps([...SPREAD.slice(0, 2), [[5000, 5000], geo]]);
+  await assert.rejects(readGeoreference(at([-75, 90])), (e) => isDataError(e) && /Control point 3 .* latitude 90, beyond the ±85.0511°.*Nothing was changed/.test(e.message));
+  await assert.rejects(readGeoreference(at([-75, -85.06])), (e) => isDataError(e) && /latitude -85.06/.test(e.message));
+  await assert.rejects(readGeoreference(at([190, 30])), (e) => isDataError(e) && /longitude 190/.test(e.message));
+  const huge = at([-75, 30]); huge.body.features[2].geometry.coordinates = [-75, 1e400];
+  await assert.rejects(readGeoreference(huge), isDataError);
+  // Control: near the limit, but inside it.
+  const g = await readGeoreference(at([-75, 85]));
+  const { geojson } = await toWorld(g, pt([5000, 5000]), { space: 'image' });
+  assert.ok(Math.abs(geojson.coordinates[1] - 85) < 1e-6);
+});
+
+test('toWorld refuses a position that is not a finite number; a finite one is the control', async () => {
+  const g = await readGeoreference(withGcps(SPREAD));
+  await assert.rejects(toWorld(g, pt([1e308, 3000]), { space: 'image' }), (e) => isDataError(e) && /gives no position in the world/.test(e.message));
+  assert.ok((await toWorld(g, pt([5000, 3000]), { space: 'image' })).geojson.coordinates.every(Number.isFinite));
+});
+
 test('readGeoreference: a canvas that does not show the image, or a manifest that does not hold it, is a DataError', async () => {
   const second = 'https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/qr46xn78z';
   await assert.rejects(readGeoreference(ROCQUE, { manifest: ROCQUE_M, canvasId: second }), (e) => isDataError(e) && /does not show/.test(e.message));
@@ -336,6 +403,27 @@ test('svg shapes become closed counter-clockwise polygons; curves are refused, s
   await assert.rejects(W('<svg><g transform="scale(2)"><polygon points="0,0 10,0 10,10"/></g></svg>'), isDataError);
   await assert.rejects(W('<svg><text x="0" y="0">Boston</text></svg>'), isDataError);
   await assert.rejects(W('<svg></svg>'), isDataError);
+});
+
+test('svg: a transform on anything but a shape, or an <svg> inside another, is a DataError; the bare shape is the control', async () => {
+  const g = await rocque();
+  const W = (svg) => toWorld(g, { svg }, { space: 'image' });
+  const poly = '<polygon points="3000,3000 5000,3000 5000,4000"/>';
+  const refused = [
+    `<svg transform="scale(2)">${poly}</svg>`,
+    `<svg><svg transform="translate(10,0)">${poly}</svg></svg>`,
+    `<svg><a href="#" transform="translate(10,0)">${poly}</a></svg>`,
+    `<svg><g><g transform="rotate(5)">${poly}</g></g></svg>`,
+    `<svg><svg viewBox="0 0 10 10">${poly}</svg></svg>`,
+    `<svg><svg x="100">${poly}</svg></svg>`,
+  ];
+  for (const svg of refused) await assert.rejects(W(svg), (e) => isDataError(e) && /Nothing was changed/.test(e.message), svg);
+  // Controls: the same shape bare, inside a plain group and a plain link, and with its own transform.
+  const bare = await W(`<svg>${poly}</svg>`);
+  assert.deepEqual((await W(`<svg><a href="#"><g>${poly}</g></a></svg>`)).geojson, bare.geojson);
+  assert.deepEqual((await W(`<svg viewBox="0 0 11436 6268">${poly}</svg>`)).geojson, bare.geojson);
+  const moved = await W('<svg><polygon points="2990,3000 4990,3000 4990,4000" transform="translate(10,0)"/></svg>');
+  assert.deepEqual(moved.geojson, bare.geojson);
 });
 
 test('precision rounds the output; the default of 6 decimals is the control', async () => {
