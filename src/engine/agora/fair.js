@@ -339,7 +339,7 @@ function assess(ctx, g, outside) {
   // The checks that need a base fail without one, so that the number of checks is always the same.
   if (!scheme) {
     for (const [check, metric] of AFTER_BASE) record(check, metric, false);
-    rep.error('no-base', SHARED['no-base']);
+    ctx.noBase();
     return checks;
   }
   const declared = str(g.uriSpace);

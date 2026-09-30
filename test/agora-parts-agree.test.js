@@ -111,3 +111,25 @@ test('control: the clean dataset has none of these findings in any part, and eve
   }
   assert.ok(existsSync(join(w3id.out, 'w3id-agree-test', 'ids/agree-test/.htaccess')));
 });
+
+test("a base ending in '#' is refused by every part as a fragment base, not as no base at all", async () => {
+  // Every address a fragment of one document, as PLATO allows for spreadsheet tables. The example as
+  // PLATO gives it (a draft, its attestations without addresses, which could not be fragments again),
+  // which the check finds nothing wrong with, so that it is the base that stops each part.
+  const FRAG = 'https://w3id.org/agree-test#';
+  const text = antonineText.replaceAll('https://whgazetteer.org/example/antonine/', FRAG);
+  const fragment = [...await runAll(text), await run('mint', text)];
+  const good = [...await runAll(dataset()), await run('mint', dataset())];
+  const bare = JSON.parse(dataset()); delete bare.gazetteer.uriSpace;
+  const missing = await Promise.all([run('report', JSON.stringify(bare)), run('site', JSON.stringify(bare), { toolsRef: 'abc1234' }), run('mint', JSON.stringify(bare))]);
+  for (const r of fragment) {
+    const i = r.item('base-is-fragment');
+    assert.ok(i && i.severity === 'error', r.kinds.join());
+    assert.equal(i.examples[0], FRAG);
+    assert.ok(!r.kinds.includes('no-base'), r.kinds.join());
+    assert.equal(r.outputs.length, 0, r.kinds.join());
+  }
+  // The controls: no base at all is still 'no-base', and a base ending in '/' raises neither.
+  for (const r of missing) { assert.ok(r.kinds.includes('no-base'), r.kinds.join()); assert.ok(!r.kinds.includes('base-is-fragment')); }
+  for (const r of good) { assert.ok(!r.kinds.includes('no-base') && !r.kinds.includes('base-is-fragment'), r.kinds.join()); assert.ok(r.outputs.length >= 1); }
+});

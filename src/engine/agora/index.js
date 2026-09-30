@@ -13,7 +13,7 @@
 // to be published does not write it from a dataset that has problems.
 import { run } from '../pipeline.js';
 import { Report } from '../report.js';
-import { scheme } from './address.js';
+import { noBaseKind, scheme } from './address.js';
 import { openTree, put } from './tree.js';
 import * as fair from './fair.js';
 import * as mint from './mint.js';
@@ -28,6 +28,7 @@ export const TEXT = {
   'dataset-has-problems': 'The dataset has problems of its own, which are not listed here; check it to see them. Nothing is written for publishing until they are fixed.',
   'dataset-not-read': 'The dataset could not be read to the end, so nothing was written.',
   'bad-doi': "The concept DOI (--concept-doi) is not a DOI: give it as 10.<digits>/<suffix>, or as its https://doi.org/ address, as Zenodo shows it. Nothing that would carry it is written.",
+  'base-is-fragment': "The base address ends in '#', so every place's address would be a fragment of one document (<base>#place/<id>). PLATO allows that, but a web server never sees what follows '#', so a static site cannot give each place a page of its own, nor w3id a rule of its own: nothing is published from it. Give a base that ends in '/' instead (the about sheet's base_uri, or uriSpace in PLATO JSON, or one for this run), while the dataset is a draft.",
   'no-base': "The dataset does not say under what address its places are published: give its base address (the about sheet's base_uri, or uriSpace in PLATO JSON), or give one for this run.",
 };
 
@@ -61,10 +62,16 @@ export async function publish({ part, input, previous, options = {} }, env) {
     put,
     /** Record an output that is finished. */
     done: (o) => { outputs.push(o); return o; },
+    /** Say why there is no scheme: no base at all, or one that ends in '#' (noBaseKind). */
+    noBase() {
+      const base = options.base || ctx.gazetteer.uriSpace;
+      const kind = noBaseKind(base);
+      rep.error(kind, TEXT[kind], kind === 'no-base' ? undefined : base);
+    },
     /** For the parts that write something to publish: stop, and say why, if the dataset cannot be published from. */
     blocked() {
       if (ctx.checkErrors) { rep.add('error', 'dataset-has-problems', TEXT['dataset-has-problems'], undefined, ctx.checkErrors); return true; }
-      if (!ctx.scheme) { rep.error('no-base', TEXT['no-base']); return true; }
+      if (!ctx.scheme) { ctx.noBase(); return true; }
       return false;
     },
   };

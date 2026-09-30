@@ -52,6 +52,16 @@ const DOI = /^10\.\d{4,9}\/\S+$/;
 /** Whether a DOI, as given, is one once doiOf() has made it bare. */
 export const doiOk = (d) => DOI.test(doiOf(d));
 
+/**
+ * Why there is no base address to publish under: 'base-is-fragment' for one that ends in '#' (PLATO
+ * allows it for spreadsheet tables, but every place would then be a fragment of one document, which
+ * a static site cannot serve as pages of their own nor w3id redirect one by one: a server never sees
+ * what follows '#'), otherwise 'no-base'. Asked only when scheme() gave null.
+ */
+export function noBaseKind(base) {
+  return typeof base === 'string' && base.endsWith('#') && normaliseBase(base.slice(0, -1)) ? 'base-is-fragment' : 'no-base';
+}
+
 /** A base address as the scheme uses it: with its closing '/'. Null for one that is not an http(s) URL. */
 export function normaliseBase(base) {
   if (typeof base !== 'string' || !/^https?:\/\/[^/?#\s]+(\/[^?#\s]*)?$/.test(base)) return null;
