@@ -137,7 +137,10 @@ export async function* lineChunks(file) {
 export async function* lines(file) {
   let n = 0;
   for await (const chunk of lineChunks(file)) {
-    for (const line of chunk.split('\n')) { n++; if (line.trim()) yield { line, n }; }
+    // Each chunk ends on a line break, so the part after its last is not a line: counted, it put
+    // every line after a chunk boundary one further on.
+    const parts = chunk.split('\n'); parts.pop();
+    for (const line of parts) { n++; if (line.trim()) yield { line, n }; }
   }
 }
 /** The first `bytes` of a file as text (decompressed, and decoded leniently: textStream), for format detection. */
