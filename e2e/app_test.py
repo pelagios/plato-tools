@@ -2541,6 +2541,9 @@ def chora_checks(pw, url, tmp):
     ctx = pw.chromium.launch_persistent_context(str(tmp / 'chora-profile'), headless=True, accept_downloads=True, args=GL,
                                                 viewport={'width': 1400, 'height': 900}, reduced_motion='reduce')
     ctx.add_init_script('window.__plato_forceDownload = true;')
+    # The storage the browser says it allows, when a check asks for an answer of its own (storage_short).
+    ctx.add_init_script('''(() => { try { const s = localStorage.getItem('e2e-storage-estimate');
+      if (s && navigator.storage) Object.defineProperty(navigator.storage, 'estimate', { value: async () => JSON.parse(s), configurable: true }); } catch {} })();''')
     requests, errors, loads = [], [], []
     ctx.on('request', lambda r: requests.append(r.url))
     ctx.on('page', lambda p: p.on('pageerror', lambda e: errors.append(str(e)[:200])))
@@ -3173,8 +3176,8 @@ def chora_checks(pw, url, tmp):
         return (trap['imgs'] == 0 and trap['pwned'] is None and 'Trapdoor' in trap['card'] and 'Point' in trap['card'] and '±' not in trap['card']
                 and '(±12.5 km)' in ctl), {'trapdoor': trap, 'control card': ctl[:300]}
     attempt('Chora: a place card shows a radius only when it is a number, and markup in a dataset is never run (a numeric one is shown)', markup_not_run)
-    def draw_and_save(name, place):
-        f = odd_dataset(name); chora_boot(page, base, [f]); chora_pick(page, place)
+    def draw_and_save(name, place, make=None):
+        f = (make or odd_dataset)(name); chora_boot(page, base, [f]); chora_pick(page, place)
         page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
         x, y = map_centre(page); draw(page, 'point', [(x + 50, y + 30)]); page.click('#draw-tools button[data-mode="static"]')
         until(page, '() => window.__chora.pendingCount === 1', 10)
@@ -3192,6 +3195,56 @@ def chora_checks(pw, url, tmp):
                 and not page.is_visible('#save-result button.primary') and 'odd-unlisted.chora.json' not in written and s['pendingCount'] == 1), {
                 'save': {k: ls.get(k) for k in ('passed', 'added')}, 'said': text[:300], 'chora-outputs': written, 'pending': s.get('pendingCount')}
     attempt('Chora: a drawing for a place whose attestations are not a list is refused, naming the place, and no file is written or offered', not_a_list)
+
+    # ---- At DEEP's scale (1.4 million attestations; a save of 14 minutes, most of it the version check).
+    def jsonl_dataset(name):
+        d = tmp / 'chora-files'; d.mkdir(exist_ok=True)
+        src = [{'title': 'A survey'}]
+        rows = [{'profile': 'place-centric', 'gazetteer': {'@id': 'https://example.org/g', 'title': 'Lines', 'licence': 'https://creativecommons.org/licenses/by/4.0/', 'status': 'published', 'version': '1'}},
+                {'@id': 'https://example.org/p/first', 'label': 'First', 'attestations': [{'names': [{'toponym': 'First'}], 'sources': src}]},
+                {'subject': 'https://example.org/p/first', 'object': 'https://sws.geonames.org/1/', 'identityType': 'unspecified'},
+                {'@id': 'https://example.org/p/after', 'label': 'After', 'attestations': [{'geometries': [{'geojson': {'type': 'Point', 'coordinates': [-1.25, 51.75]}}], 'sources': src}]}]
+        (d / name).write_text(''.join(json.dumps(r) + '\n' for r in rows)); return d / name
+    def jsonl_saved():
+        # The control first: a PLATO JSON document is saved as one.
+        chora_boot(page, base, [odd_dataset('lines-control.json')]); as_json = page.inner_text('#save')
+        f, s, text = draw_and_save('lines.jsonl', 'after', jsonl_dataset); ls = s.get('lastSave') or {}
+        as_lines = page.inner_text('#save')
+        return (as_json == 'Save as PLATO JSON' and as_lines == 'Save as PLATO JSON Lines' and ls.get('passed') and ls.get('added') == 1
+                and [o['name'] for o in ls.get('outputs', [])] == ['lines.chora.jsonl'] and 'The saved file is PLATO JSON Lines, as the dataset is' in text), {
+            'button, JSON': as_json, 'button, JSON Lines': as_lines, 'save': {k: ls.get(k) for k in ('passed', 'added', 'outputs')}, 'said': text[:300]}
+    attempt('Chora: a JSON Lines dataset is offered and saved as PLATO JSON Lines, and passes the version check; a JSON one as PLATO JSON', jsonl_saved)
+    def save_steps():
+        f, s, text = draw_and_save('steps.json', 'control'); ls = s.get('lastSave') or {}
+        steps = [x['text'] for x in s.get('saveProgress') or []]
+        has = lambda pattern: any(re.search(pattern, t) for t in steps)
+        # The odd dataset has two attestations (Oddity's are not a list); the file written, three.
+        return (ls.get('passed') and has(r'^Saving, step 1 of 2, writing the file: 2 of 2 attestations')
+                and has(r'^Saving, step 2 of 2, the version check \(Mneme\), reading the dataset as opened: 2 of 2 attestations')
+                and has(r'^Saving, step 2 of 2, the version check \(Mneme\), reading the file written: 3 of 3 attestations')
+                and has(r'comparing the two') and not page.is_visible('#save-progress')), {'passed': ls.get('passed'), 'steps': steps, 'still shown': page.is_visible('#save-progress')}
+    attempt('Chora: a save shows each step on the page: writing the file, then the version check reading each version, n of N attestations, then comparing', save_steps)
+    # The browser's storage: navigator.storage.estimate() is answered by the init script from
+    # localStorage, set for these checks alone, so that a browser short of room can be had on demand.
+    STUB = 'e2e-storage-estimate'
+    def storage_short():
+        try:
+            page.evaluate('([k, v]) => localStorage.setItem(k, v)', [STUB, json.dumps({'quota': 1000000, 'usage': 999500})])
+            f, s, text = draw_and_save('storage-short.json', 'control'); ls = s.get('lastSave') or {}
+            load_warning = page.inner_text('#storage-warning') if page.is_visible('#storage-warning') else ''
+            save_warning = page.inner_text('#save-storage-warning') if page.is_visible('#save-storage-warning') else ''
+            short = s.get('storage') or {}
+            # The control: with room, the same kind of file opens with no warning, and the answer given is the stub's.
+            page.evaluate('([k, v]) => localStorage.setItem(k, v)', [STUB, json.dumps({'quota': 1e12, 'usage': 0})])
+            room = chora_boot(page, base, [odd_dataset('storage-room.json')])
+            quiet = not page.is_visible('#storage-warning') and room.get('phase') == 'loaded' and (room.get('storage') or {}).get('quota') == 1e12 and (room.get('storage') or {}).get('short') is False
+            return (short.get('quota') == 1000000 and short.get('short') and 'Opening this dataset needs about' in load_warning and 'only 500 bytes left' in load_warning
+                    and 'Saving needs about' in save_warning and ls.get('passed') and quiet), {
+                'short': short, 'load warning': load_warning, 'save warning': save_warning, 'saved all the same': ls.get('passed'), 'with room': room.get('storage'), 'quiet with room': quiet}
+        finally:
+            try: page.evaluate('k => localStorage.removeItem(k)', STUB)
+            except Exception: pass
+    attempt('Chora: a browser short of storage is warned, plainly, before a dataset is opened and before it is saved; one with room is not', storage_short)
 
     # Over everything above: loading, drawing, saving, the hand-off and two tabs.
     attempt('Chora: across all these checks, no request went to any other site, and no page error', lambda: (

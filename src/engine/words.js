@@ -444,7 +444,50 @@ export const CHORA_TEXT = {
   'chora-unreadable': 'The dataset could not be read to the end, so it was not saved.',
   'chora-in-another-tab': 'Chora is already open in another tab of this browser. Close it, or use that one.',
   'chora-mneme-failed': 'The version check (Mneme) found that the saved file does not keep every attestation of the dataset exactly as it was, or does not add exactly the drawings. Do not use it.',
+  'chora-not-kept': 'The saved file could not hold the dataset exactly as it was read, so it was not checked, kept or offered, and nothing was saved. Why',
 };
+/**
+ * The storage warning, for `when` 'load' or 'save', from storageShort() (src/engine/chora/storage.js):
+ * what is needed, what is left, and what to do about it.
+ */
+export function choraStorageWarning(when, { need, free, quota }) {
+  const left = `this browser has only ${fmtBytes(Math.max(0, Math.round(free)))} left for this site (of the ${fmtBytes(quota)} it allows)`;
+  return when === 'save'
+    ? `Saving needs about ${fmtBytes(Math.round(need))} of the browser's storage, for the file and the version check's working copy, and ${left}. The save may stop part-way. Free some disk space, then save.`
+    : `Opening this dataset needs about ${fmtBytes(Math.round(need))} of the browser's storage, for Chora's working copy of it, and ${left}. It may stop part-way. Free some disk space, or use an ordinary window: a private one keeps its storage in memory and allows very little.`;
+}
+/** What the browser answered when asked to keep Chora's storage for a large dataset: true, false, or null (not asked). */
+export function choraPersistNote(kept) {
+  const what = "Chora's storage (its working copy of the dataset, your drawings not yet saved, and the file last saved)";
+  if (kept === true) return `This dataset is large, so the browser was asked to keep ${what} even when disk space runs low. It agreed: they stay until you clear this site's data.`;
+  if (kept === false) return `This dataset is large, so the browser was asked to keep ${what} even when disk space runs low. It did not agree, so it may clear them when space runs short, and drawings not yet saved would go with them: save often.`;
+  return `This dataset is large, and this browser cannot be asked to keep ${what} when disk space runs low: save your drawings often.`;
+}
+/**
+ * What a Chora save writes, for a dataset as detect() describes it: JSON Lines as JSON Lines, since PLATO
+ * has that format and it keeps each line as it came; anything else as a PLATO JSON document.
+ */
+export function choraSavedFormat(input) {
+  return input?.format === 'plato-jsonl' ? { target: 'plato-jsonl', words: 'PLATO JSON Lines' } : { target: 'plato-json', words: 'PLATO JSON' };
+}
+/**
+ * A step of a Chora save in words, from a progress event that says which (`save`, set by save.js):
+ * "Saving, step 1 of 2, writing the file: 700,000 of 1,414,328 attestations (1 min 5 s)".
+ */
+export function choraSaveProgress(p) {
+  const n = (x) => x.toLocaleString('en-GB');
+  const what = p.attestations !== undefined ? `${n(p.attestations)}${p.total ? ` of ${n(p.total)}` : ''} attestation${p.attestations === 1 && !p.total ? '' : 's'}`
+    : p.triples ? `${p.phase === 'indexing' ? 'indexing' : 'loading'} ${count(p.triples, 'triples')}`
+    : p.places ? count(p.places, 'places') : '';
+  const time = ` (${fmtTime(p.elapsedMs || 0)})`;
+  if (p.save === 'finding') return `Saving: first reading the dataset, to find the places drawn on${what ? `: ${what}` : ''}${time}`;
+  if (p.save === 'writing') return `Saving, step 1 of 2, writing the file${what ? `: ${what}` : ''}${time}`;
+  const check = 'Saving, step 2 of 2, the version check (Mneme)';
+  if (p.phase === 'comparing') return `${check}, comparing the two${time}`;
+  if (p.phase === 'done') return `${check}, finishing${time}`;
+  const which = p.version === 'later' ? 'the file written' : 'the dataset as opened';
+  return `${check}, ${p.again ? 'again, to show what changed, ' : ''}reading ${which}${what ? `: ${what}` : ''}${time}`;
+}
 /** A Chora save's outcome in one line, for the page and the command line. */
 export function choraSaveText(result) {
   const n = result.report?.counts?.['attestations added'] || 0;

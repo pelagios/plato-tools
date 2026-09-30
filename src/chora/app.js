@@ -3,7 +3,8 @@
 // dataset with the drawings added, checked by the version check (Mneme) against what was opened.
 // The engine is the same worker as the main page's (src/engine/worker.js, its chora-* commands). The
 // page publishes its state on window.__chora for automated tests; nothing else reads it.
-import { fmtBytes, formatName, progressText, summary, draftNote, choraDrawingNote, choraSaveText, CHORA_TEXT } from '../engine/words.js';
+import { fmtBytes, formatName, progressText, summary, draftNote, choraDrawingNote, choraSaveText, choraSavedFormat, choraSaveProgress, choraStorageWarning, choraPersistNote, CHORA_TEXT } from '../engine/words.js';
+import { uncompressedSize, loadNeed, saveNeed, storageShort, shouldPersist } from '../engine/chora/storage.js';
 import { newGeometryAttestation, checkGeoJSON, wrapLongitudes, DrawError, ROLES, PRECISIONS } from '../engine/chora/draw.js';
 import { createMap, placeFeatures, contextFeatures, STATUS_COLOURS } from './map.js';
 import * as basemaps from './basemaps.js';
@@ -35,7 +36,7 @@ let drawError = null;  // why the last drawing was not kept, shown in the card
 // on the way is shown in words. A search passed over by a later one before it is sent resolves to null.
 const enqueue = serialQueue(({ msg, replyType }) => new Promise((resolve, reject) => {
   worker.onmessage = ({ data }) => {
-    if (data.type === 'progress') { $('phase').textContent = progressText(data); state.progress = data; }
+    if (data.type === 'progress') { state.progress = data; if (data.save) saveProgress(data); else $('phase').textContent = progressText(data); }
     else if (data.type === 'error') reject(Object.assign(new Error(data.message), { kind: data.kind }));
     else if (data.type === replyType) resolve(data);
   };
@@ -68,6 +69,9 @@ async function open(list) {
   $('dataset').hidden = false;
   $('dataset').innerHTML = `<ul>${files.map((f) => `<li><span class="name">${esc(f.name)}</span> <span class="count">${fmtBytes(f.size)}</span></li>`).join('')}</ul>`;
   $('phase').textContent = 'Reading…';
+  // Whether the browser has room for it, and, for a large one, asked to keep it: before it is read.
+  const bytes = await storageCheck('load', $('storage-warning'));
+  if (shouldPersist(bytes)) await keepStorage();
   try {
     dataset = await request({ cmd: 'chora-load', files }, 'chora-loaded');
   } catch (e) { return fail(e.message); }
@@ -77,6 +81,7 @@ async function open(list) {
   $('phase').textContent = '';
   $('dataset').innerHTML = `<p class="dataset-title">${esc(h.title || dataset.input?.name || files[0].name)}</p>`
     + `<p>${n(dataset.places)} place${dataset.places === 1 ? '' : 's'}, ${n(dataset.withGeometry)} with a location on record.${problems}</p>`;
+  $('save').textContent = `Save as ${choraSavedFormat(dataset.input).words}`;
   fp = fingerprint(files);
   drafts = await loadDrafts(fp);
   const ov = await request({ cmd: 'chora-overview' }, 'chora-overview');
@@ -520,10 +525,13 @@ async function saveDataset() {
   const savedIds = new Set(drafts.map((d) => d.id));
   $('save').disabled = true;
   $('save-result').innerHTML = ''; offered = null;
-  state.phase = 'saving';
+  state.phase = 'saving'; state.saveProgress = [];
+  Object.assign($('save-progress'), { hidden: false, textContent: 'Saving…' });
+  await storageCheck('save', $('save-storage-warning'));
   let r;
-  try { r = await request({ cmd: 'chora-save', files, additions, contributor }, 'done'); } catch (e) { $('save').disabled = false; return fail(e.message); }
+  try { r = await request({ cmd: 'chora-save', files, additions, contributor }, 'done'); } catch (e) { $('save').disabled = false; $('save-progress').hidden = true; return fail(e.message); }
   $('save').disabled = false;
+  $('save-progress').hidden = true;
   $('phase').textContent = '';
   const added = r.report?.counts?.['attestations added'] ?? r.mneme?.report?.counts?.added ?? null;
   const passed = !!r.mneme?.passed;
@@ -534,11 +542,12 @@ async function saveDataset() {
   // What the file is, and on a save that passes, what the writing of it reported: for a dataset that
   // was not place-centric PLATO JSON, what its conversion could not carry over, which Mneme, reading
   // the same input the same way, cannot see.
-  const converted = dataset.input?.format !== 'plato-json' || dataset.input?.profile !== 'place-centric';
+  const saving = choraSavedFormat(dataset.input);
+  const converted = dataset.input?.format !== saving.target || dataset.input?.profile !== 'place-centric';
   const notes = (r.report?.items || []).filter((i) => i.severity !== 'error');
   const item = (i) => `<li>${esc(CHORA_TEXT[i.kind] || i.message)}${i.count > 1 ? ` (${n(i.count)})` : ''}${i.examples?.length ? ` <span class="muted">${esc(i.examples.slice(0, 3).join('; '))}</span>` : ''}</li>`;
   $('save-result').innerHTML = `<p class="${passed ? 'good' : 'warn'}">${esc(choraSaveText(r))}</p>`
-    + (passed ? `<p>${converted ? `The dataset is ${esc(formatName(dataset.input))}: the saved file is a conversion of it to PLATO JSON (place-centric), with the drawings added.` : 'The saved file is PLATO JSON, as the dataset is, with the drawings added.'}</p>`
+    + (passed ? `<p>${converted ? `The dataset is ${esc(formatName(dataset.input))}: the saved file is a conversion of it to ${saving.words} (place-centric), with the drawings added.` : `The saved file is ${saving.words}, as the dataset is, with the drawings added.`}</p>`
       // Problems the writing found (a place the schema refuses, say) are shown even when the version
       // check passes: Mneme compares the attestations, and says nothing of them.
       + (problems.length ? `<p class="warn">${converted ? 'The conversion' : 'Writing it'} found problems in the dataset, which the saved file has too:</p><ul class="notes problems">${problems.map(item).join('')}</ul>` : '')
@@ -581,6 +590,53 @@ async function saveDataset() {
   state.lastSave = { passed, added, outputs: r.outputs || [], mneme: r.mneme || null, report: r.report || null, converted };
   state.phase = 'saved';
 }
+// A save's steps, shown under its button, and kept for tests, one entry for each step and phase.
+function saveProgress(p) {
+  const text = choraSaveProgress(p);
+  $('save-progress').textContent = text;
+  const key = [p.save, p.version || '', p.again ? 'again' : '', p.phase || ''].join('|');
+  const list = (state.saveProgress ||= []);
+  if (list.at(-1)?.key === key) list[list.length - 1].text = text; else if (list.length < 100) list.push({ key, text });
+}
+
+// ---- Storage -------------------------------------------------------------------------------------
+// A dataset is read into the browser's storage, and a save writes the whole of it again beside the
+// version check's working copy: DEEP (1.4 million attestations) needs 1.4 GB to open and 2.4 GB more to
+// save (src/engine/chora/storage.js). The browser is asked how much it allows before either starts, and
+// the page says so plainly when that looks too little. The size read is the files' own, or, gzipped,
+// what their trailers say.
+async function readSize(list) {
+  let bytes = 0;
+  for (const f of list) {
+    let trailer = null;
+    if (/\.gz$/i.test(f.name) && f.size >= 4) { try { trailer = new Uint8Array(await f.slice(f.size - 4).arrayBuffer()); } catch { /* guessed instead */ } }
+    bytes += uncompressedSize(f, trailer);
+  }
+  return bytes;
+}
+async function storageCheck(when, el) {
+  const bytes = await readSize(files), name = files[0]?.name;
+  const need = when === 'load' ? loadNeed({ name, bytes }) : saveNeed({ name, bytes });
+  let estimate = null;
+  try { estimate = await navigator.storage.estimate(); } catch { /* not said: no warning */ }
+  const short = storageShort(need, estimate);
+  state.storage = { when, bytes, need, quota: estimate?.quota ?? null, usage: estimate?.usage ?? null, short: !!short };
+  el.hidden = !short;
+  if (short) el.textContent = choraStorageWarning(when, short);
+  return bytes;
+}
+// A large dataset: the browser is asked, once, to keep this site's storage when disk space runs low,
+// and the page says what it answered and what that means.
+let persistAsked = false;
+async function keepStorage() {
+  if (persistAsked) return;
+  persistAsked = true;
+  let kept = null;
+  try { kept = (await navigator.storage.persisted()) || (await navigator.storage.persist()); } catch { /* not supported */ }
+  state.persist = kept === null ? 'unsupported' : kept ? 'granted' : 'refused';
+  Object.assign($('storage-note'), { hidden: false, textContent: choraPersistNote(kept) });
+}
+
 // The same as the main page's save() (src/app.js), kept here rather than shared so that the main page
 // is not changed for Chora: the output is on the origin private file system (in chora-outputs/, the
 // worker's directory for Chora, apart from the main page's outputs/), and goes to disk

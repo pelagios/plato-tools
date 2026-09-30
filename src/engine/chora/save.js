@@ -1,17 +1,21 @@
-// Saving Chora's drawings (decision D2): the whole dataset as a PLATO JSON document, place-centric,
-// with each drawing appended to its place's attestations as a new attestation. Nothing that was
+// Saving Chora's drawings (decision D2): the whole dataset, place-centric, as PLATO JSON Lines if it
+// was read from them (each line as it came), else as a PLATO JSON document, with each drawing appended
+// to its place's attestations as a new attestation. Nothing that was
 // there is changed: each record is written as it was read, and its attestations with it, with the
 // new ones after them. Then the version check (Mneme, src/engine/compare.js) reads the input and the
 // file just written, in the same run, and must find every earlier attestation unchanged and exactly
 // the drawings added: the save is shown to have kept PLATO's append-only rule, not assumed to.
 //
 // Additions are checked against the pinned JSON Schema here, before anything is read: the pipeline
-// checks what it reads, not what options.augment adds to it.
+// checks what it reads, not what options.augment adds to it. And a file that cannot hold what was read
+// (a line that could not be read, a record that could not be written, a place moved among the identity
+// relations) is refused as soon as that is known, before the version check, which is ~90% of a save's
+// time (14 minutes for DEEP) and could only fail.
 import { run, explainSchema } from '../pipeline.js';
-import { compare } from '../compare.js';
+import { compare, NOT_READ } from '../compare.js';
 import { detect } from '../input.js';
 import { Report } from '../report.js';
-import { CHORA_TEXT } from '../words.js';
+import { CHORA_TEXT, choraSavedFormat } from '../words.js';
 import { checkGeoJSON, DrawError } from './draw.js';
 import { keyer } from './store.js';
 
@@ -31,8 +35,17 @@ export function checkAddition(attestation, validators) {
   return v({ label: 'a place', attestations: [attestation] }) ? null : explainSchema(v.errors, false);
 }
 
-/** The name of the saved file: the input's, without its extension, then .chora.json. */
-export const savedName = (name) => String(name).replace(/\.gz$/i, '').replace(/\.[^./]+$/, '') + '.chora.json';
+/** The name of the saved file: the input's, without its extension, then .chora.json, or .chora.jsonl for `target` 'plato-jsonl'. */
+export const savedName = (name, target = 'plato-json') => String(name).replace(/\.gz$/i, '').replace(/\.[^./]+$/, '') + (target === 'plato-jsonl' ? '.chora.jsonl' : '.chora.json');
+
+// What a run reports when the file it wrote cannot hold what was read: part of the input not read
+// (the kinds the version check calls not read, and a file that stops part-way), or, from the writer,
+// a place moved among the identity relations. Mneme would fail each; the save need not wait for it.
+const NOT_KEPT = new Set([...NOT_READ, 'unreadable', 'order']);
+/** The items of a run's report that mean its output does not hold its input: none, for a save to go on. */
+export const refusalOf = (report) => (report?.items || []).filter((i) => NOT_KEPT.has(i.kind));
+/** The refusal in the save's report: one problem, with what the run said as its examples. */
+const refuseNotKept = (rep, items) => rep.add('error', 'chora-not-kept', CHORA_TEXT['chora-not-kept'], items.map((i) => `${i.message}${i.count > 1 ? ` (${i.count.toLocaleString('en-GB')} times)` : ''}${i.examples?.[0] ? `: ${i.examples[0]}` : ''}`).join(' | ') || undefined);
 
 /**
  * A record with its additions after its own attestations; the record read is not changed. `key` is
@@ -55,15 +68,15 @@ const refuse = (rep, key, rec) => rep.error('chora-attestations-not-a-list', CHO
 
 /**
  * Write the dataset with its additions (byPlace: place key -> [attestation]) to `name`: a conversion
- * to PLATO JSON by run(), whose options.augment is given each place-centric record, in the order a
+ * to `target` (PLATO JSON Lines or JSON) by run(), whose options.augment is given each place-centric record, in the order a
  * sink is given them, and puts its additions after its own attestations. The places are counted as
  * Chora's store counts them (keyer, in store.js), so a place without an @id is found by its position
  * here as there. makeWriter names the file from options.name, so the output is `name`. Returns run()'s
  * result.
  */
-function writeWithAdditions(input, byPlace, placed, unlisted, env, name) {
+function writeWithAdditions(input, byPlace, placed, unlisted, env, name, target) {
   const keyOf = keyer();
-  return run({ input, action: 'convert', target: 'plato-json', options: { name, augment: (rec) => appendTo(rec, keyOf(rec), byPlace, placed, unlisted) } }, env);
+  return run({ input, action: 'convert', target, options: { name, augment: (rec) => appendTo(rec, keyOf(rec), byPlace, placed, unlisted) } }, env);
 }
 
 // What the version check must find for the save to stand: nothing of the earlier version lost or
@@ -105,11 +118,21 @@ export async function verify(input, later, added, env) {
  *   it the dataset is read once first to find out, so that nothing is written for a missing place;
  * - record(key): the place's record, when the caller has it (Chora's store), so that a place whose
  *   attestations are not a list is refused before anything is written, as the first reading does;
- * - reopen(output): the written file as a File, for the version check (hosts differ).
+ * - reopen(output): the written file as a File, for the version check (hosts differ);
+ * - discard(output): remove a file written and refused (hosts differ), so that it holds no storage;
+ * - readReport: the report of the dataset's reading when the caller has it (Chora's store), so that one
+ *   that could not all be read is refused before anything is written;
+ * - attestations: how many the dataset has, when the caller knows, for the progress of the writing.
+ * The file is PLATO JSON Lines for a dataset read from them, else PLATO JSON (choraSavedFormat).
+ * Progress goes to env.progress, each event saying which step of the save it is (`save`: 'finding',
+ * 'writing', 'checking') and, where known, how many attestations that step will read (`total`).
  * Returns { report, outputs, mneme: { passed, report, reasons } | null, incomplete? }.
  */
 export async function save(input, additions, env, options = {}) {
   const rep = new Report();
+  const t0 = Date.now(), progress = env.progress || (() => {});
+  // Each step's progress, marked as the save's, with the time since the save began.
+  const step = (save, total) => ({ ...env, progress: (p) => progress({ ...p, save, ...(total ? { total } : {}), elapsedMs: Date.now() - t0 }) });
   const fail = () => ({ report: rep.toJSON(), outputs: [], mneme: null, incomplete: true });
   // Every addition is checked, and grouped by its place, before anything is read or written.
   const byPlace = new Map();
@@ -138,26 +161,45 @@ export async function save(input, additions, env, options = {}) {
       if (ev.type !== 'record') return;
       const k = keyOf(ev.value);
       if (k !== null && byPlace.has(k) && !seen.has(k)) { seen.add(k); if (!listed(ev.value)) unlisted.set(k, ev.value); }
-    }, async close() {} } } }, env);
+    }, async close() {} } } }, step('finding', options.attestations));
     if (r.incomplete) { rep.error('chora-unreadable', CHORA_TEXT['chora-unreadable'], r.report.items.find((i) => i.kind === 'unreadable')?.examples[0]); return fail(); }
     missing = [...byPlace.keys()].filter((k) => !seen.has(k));
+    options = { ...options, readReport: r.report };
   }
+  // A dataset that could not all be read cannot be saved whole: refused before anything is written.
+  const unread = refusalOf(options.readReport);
+  if (unread.length) { refuseNotKept(rep, unread); return fail(); }
   for (const k of missing) rep.error('chora-no-such-place', CHORA_TEXT['chora-no-such-place'], k);
   for (const [k, rec] of unlisted) refuse(rep, k, rec);
   if (missing.length || unlisted.size) return fail();
 
-  const name = savedName(options.name || input.name || input.files[0].name);
+  const { target } = choraSavedFormat(input);
+  const name = savedName(options.name || input.name || input.files[0].name, target);
   const placed = new Set();
-  const w = await writeWithAdditions(input, byPlace, placed, unlisted, env, name);
+  progress({ save: 'writing', attestations: 0, ...(options.attestations ? { total: options.attestations } : {}), elapsedMs: Date.now() - t0 });
+  const w = await writeWithAdditions(input, byPlace, placed, unlisted, step('writing', options.attestations), name, target);
   const report = w.report;
   const added = [...byPlace.values()].reduce((s, l) => s + l.length, 0);
+  const discard = async () => { if (options.discard) for (const o of w.outputs || []) { try { await options.discard(o); } catch { /* gone already */ } } };
   // Found only in the writing (the caller knew the place, not its record): the file written is not offered.
-  if (unlisted.size) { for (const [k, rec] of unlisted) refuse(rep, k, rec); return fail(); }
-  if (w.incomplete) return { report, outputs: [], mneme: null, incomplete: true };
+  if (unlisted.size) { await discard(); for (const [k, rec] of unlisted) refuse(rep, k, rec); return fail(); }
+  if (w.incomplete) { await discard(); return { report, outputs: [], mneme: null, incomplete: true }; }
+  // A file that does not hold what was read: refused now, not after the version check has read it all.
+  const notKept = refusalOf(report);
+  if (notKept.length) {
+    await discard();
+    refuseNotKept(rep, notKept);
+    const r = rep.toJSON();
+    return { report: { ...report, errors: report.errors + r.errors, items: [...r.items, ...report.items] }, outputs: [], mneme: null, incomplete: true };
+  }
   for (const k of byPlace.keys()) if (!placed.has(k)) { report.items.push({ severity: 'error', kind: 'chora-not-placed', message: CHORA_TEXT['chora-not-placed'], count: 1, examples: [k] }); report.errors++; }
   report.counts['attestations added'] = added;
 
   if (!options.reopen) throw new Error('save() needs options.reopen to read the saved file back for the version check');
-  const mneme = await verify(input, await options.reopen(w.outputs[0]), added, env);
+  const earlier = report.counts.attestations;
+  progress({ save: 'checking', version: 'earlier', phase: 'reading', attestations: 0, ...(earlier ? { total: earlier } : {}), elapsedMs: Date.now() - t0 });
+  // The version check reads the dataset, then the file written, which has the additions besides.
+  const checking = { ...env, progress: (p) => progress({ ...p, save: 'checking', ...(earlier ? { total: p.version === 'later' ? earlier + added : earlier } : {}), elapsedMs: Date.now() - t0 }) };
+  const mneme = await verify(input, await options.reopen(w.outputs[0]), added, checking);
   return { report, outputs: w.outputs, mneme };
 }

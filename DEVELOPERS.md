@@ -1011,14 +1011,33 @@ publishes its state on `window.__chora` for tests.
   (`createSyncAccessHandle`, a `NoModificationAllowedError`) the worker's error says `kind:
   'pool-busy'`, and the page says Chora is open in another tab (`CHORA_TEXT` in `words.js`), not
   the browser's words.
-- **Saving** writes the whole dataset as PLATO JSON, `<input>.chora.json`, each record as it was
-  read with its drawings appended as new attestations: one `run()`, a conversion to `plato-json`
-  whose `options.augment` puts each place's drawings after its own attestations. The pipeline does
-  not check what `augment` adds, so drawings are checked against the pinned JSON Schema, and
+- **Saving** writes the whole dataset as PLATO JSON Lines, `<input>.chora.jsonl`, if it was read
+  from them, and otherwise as PLATO JSON, `<input>.chora.json` (`choraSavedFormat` in `words.js`,
+  which the page's button and its note on the saved file follow too), each record as it was
+  read with its drawings appended as new attestations: one `run()`, a conversion to that format
+  whose `options.augment` puts each place's drawings after its own attestations. JSON Lines keep
+  every line in its place, identity relations among the places included, and are the smaller file.
+  The pipeline does not check what `augment` adds, so drawings are checked against the pinned JSON Schema, and
   against the places the dataset has, before anything is read or written. A drawing for a place whose
   `attestations` are not a list (the schema refuses it, and Chora still opens it) is refused, naming
   the place, since it could only replace them. Problems the writing finds are shown even when Mneme
   passes, as it compares attestations and nothing else.
+- **Refused before the version check.** A run whose report says the file cannot hold what was read
+  (`refusalOf` in `save.js`: the kinds Mneme calls not read, a file that stops part-way, and the
+  writer's `order`) stops the save before Mneme, which is ~90% of a save's time (14 minutes of DEEP's)
+  and could only fail: the file written is removed (`discard`), nothing is offered, and the page says
+  why (`chora-not-kept`). A dataset whose opening already reported such a problem is refused before
+  anything is written. Problems of the data itself (a place the schema refuses) do not stop a save.
+- **Progress** of a save is shown under its button, step by step: each event from `save()` says
+  which (`save`: `finding`, `writing`, `checking`) and, where known, how many attestations that step
+  reads (`total`), in words by `choraSaveProgress`.
+- **Storage.** Before a dataset is opened and before it is saved, the page estimates what it needs
+  (`src/engine/chora/storage.js`, from the full DEEP run: to open, about 1.3 times what is read, and
+  about 2 times for RDF, which needs a triple store beside Chora's database; to save, the file and
+  Mneme's ledger, about 2.3 times the records, and a triple store again for RDF), reading a gzipped
+  file's size from its trailer, and warns plainly when `navigator.storage.estimate()` says too little
+  is left. A dataset over 200 MB read asks the browser once to keep this site's storage
+  (`navigator.storage.persist()`), and the page says what it answered and what that means.
 - **A place's key** is its `@id`, or `#n` (its position among the records) when it has none
   (`placeKey` in `store.js`). Loading and saving both count the records `run()` gives, in the same
   order and by one rule (`keyer`: every record counts, and one that is not a place has no key), so a

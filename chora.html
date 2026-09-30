@@ -45,6 +45,8 @@
         <small>Any dataset PLATO tools reads: PLATO JSON or JSON Lines, RDF, Linked Places Format, Recogito's web annotations, or the PLATO spreadsheet tables.</small>
       </label>
       <p id="phase" aria-live="polite"></p>
+      <p id="storage-warning" class="warn" hidden></p>
+      <p id="storage-note" hidden></p>
       <div id="dataset" hidden></div>
     </section>
 
@@ -86,6 +88,8 @@
       </form>
       <p id="contributor-line" hidden></p>
       <p><button id="save" class="primary" type="button">Save as PLATO JSON</button></p>
+      <p id="save-progress" aria-live="polite" hidden></p>
+      <p id="save-storage-warning" class="warn" hidden></p>
       <div id="save-result"></div>
     </section>
   </div>
