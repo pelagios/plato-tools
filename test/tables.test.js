@@ -175,3 +175,17 @@ test('a property value cell becomes a number only when it is written as a decima
   for (const [cell, want] of [['42', 42], [' 42 ', 42], ['-3.5', -3.5], ['0', 0], ['0.25', 0.25], ['1e-7', 1e-7], ['2.5E+3', 2500], ['1e+21', 1e21]]) assert.equal(value(cell), want, `${JSON.stringify(cell)} is a number`);
   for (const cell of [' ', '0x10', '007', 'Infinity', '-Infinity', 'NaN', '+5', '.5', '5.', '1,000', '0b1', '1e', 'twelve']) assert.equal(value(cell), cell, `${JSON.stringify(cell)} is kept as written`);
 });
+
+test('writing tables, an address with a malformed %-escape keeps its last part as written, and the place is written', async () => {
+  const { go, textFile, outText } = await import('./engine.js');
+  const { unzipSync, strFromU8 } = await import('fflate');
+  const place = (id) => ({ '@id': id, label: 'P', attestations: [{ names: [{ toponym: 'P' }], sources: [{ '@id': 'https://example.org/source/s%E0%A4', title: 'S' }] }] });
+  const doc = { profile: 'place-centric', gazetteer: { title: 't' }, spatialEntities: [place('https://example.org/place/bad%E0%A4'), place('https://example.org/place/good%20one')] };
+  const r = await go([textFile(JSON.stringify(doc), 'pct.json')], 'convert', 'tables');
+  assert.deepEqual(r.report.items.filter((i) => i.severity === 'error'), []);
+  const zip = unzipSync(new Uint8Array(Buffer.concat(r.e.outs['pct-tables.zip'].map((b) => Buffer.from(b)))));
+  const csv = (n) => strFromU8(zip[Object.keys(zip).find((k) => k.endsWith(`${n}.csv`))]);
+  assert.match(csv('places'), /^bad%E0%A4,/m, 'kept as written');
+  assert.match(csv('places'), /^good-one,/m, 'control: a well-formed escape is still decoded');
+  assert.match(csv('sources'), /^s%E0%A4,/m);
+});

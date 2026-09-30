@@ -691,7 +691,9 @@ function tablesWriter(env, rep, options, outputs, stem, loss) {
   let about = null;
   const shortId = (iri, fallback) => {
     let s = (iri || fallback || 'x').replace(/[#/]+$/, '').split(/[#/]/).pop() || fallback || 'x';
-    s = decodeURIComponent(s).replace(/\s+/g, '-');
+    // A %-escape that is not UTF-8 (%E0%A4 alone) cannot be decoded: the part is kept as written.
+    try { s = decodeURIComponent(s); } catch { /* kept as written */ }
+    s = s.replace(/\s+/g, '-');
     let id = s, k = 2; while (usedIds.has(id)) id = `${s}-${k++}`;
     usedIds.add(id); return id;
   };
