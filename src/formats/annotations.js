@@ -32,6 +32,7 @@
 //   - the target's `source` is the Studio project's id, not the document's address.
 import { PLATO, isAbsoluteIri } from '../lib/context.js';
 import { placeAddress } from '../engine/hermes/addresses.js';
+import { readGeoreferences, placeRegions, svgRegionCount, isSymbolTag, isLabelTag } from './regions.js';
 
 export const ANNO_CONTEXT = /^https?:\/\/www\.w3\.org\/ns\/anno\.jsonld$/;
 const ATTESTED = PLATO + 'Attested';
@@ -67,6 +68,19 @@ export const ANNOTATION_KINDS = {
   'annotation-none-linked': 'warning',
   'annotation-more-pages': 'warning',
   'annotation-malformed': 'error',
+  // Georeferenced regions (src/formats/regions.js), only when georeferences are given.
+  'annotation-region-shape': 'loss',
+  'annotation-region-no-georef': 'loss',
+  'annotation-region-outside-map': 'loss',
+  'annotation-region-ambiguous': 'loss',
+  'annotation-region-not-iiif': 'loss',
+  'annotation-region-unplaced': 'loss',
+  'annotation-region-image-url': 'warning',
+  'annotation-region-crosses-map-edge': 'warning',
+  'annotation-region-no-label-evidence': 'warning',
+  'annotation-georef-unused': 'warning',
+  'annotation-manifest-unused': 'warning',
+  'annotation-georef-unreadable': 'error',
 };
 
 const isIri = (s) => typeof s === 'string' && s !== '' && isAbsoluteIri(s);
@@ -170,10 +184,14 @@ function classify(b, v1) {
   return { kind: 'other', what: [type, p.join(' ')].filter(Boolean).join(', ') || 'a body of no stated kind' };
 }
 
-/** The position a selector gives, in words, or undefined; `lost` receives what cannot be said. */
-function selectorWords(s, lost) {
+/**
+ * The position a selector gives, in words, or undefined; `lost` receives what cannot be said. With
+ * `placing` (georeferences were given), an SVG shape is not reported here: AnnotationReader.place
+ * reports each one, placed or not, by a region kind.
+ */
+function selectorWords(s, lost, placing) {
   if (!s || typeof s !== 'object') { lost('annotation-selector', 'a selector that is not an object'); return undefined; }
-  const refined = s.refinedBy ? list(s.refinedBy).map((r) => selectorWords(r, lost)).filter(Boolean) : [];
+  const refined = s.refinedBy ? list(s.refinedBy).map((r) => selectorWords(r, lost, placing)).filter(Boolean) : [];
   const withRefined = (w) => [w, ...refined].filter(Boolean).join(', ');
   switch (s.type) {
     case 'TextQuoteSelector':
@@ -226,7 +244,7 @@ function selectorWords(s, lost) {
     case 'SvgSelector':
       // The shape itself (SVG markup) has no place in a locator: it is reported, and the locator
       // says only that a shape was drawn.
-      lost('annotation-selector', 'SvgSelector: the shape drawn on the image');
+      if (!placing) lost('annotation-selector', SVG_SHAPE);
       return withRefined('a shape drawn on the image');
     default:
       lost('annotation-selector', String(s.type || 'a selector of no stated type'));
@@ -234,8 +252,9 @@ function selectorWords(s, lost) {
   }
 }
 
+const SVG_SHAPE = 'SvgSelector: the shape drawn on the image';
 /** One target as { source, label, quotes, locator }. */
-function readTarget(t, report, keyLoss) {
+function readTarget(t, report, keyLoss, placing) {
   if (typeof t === 'string') return { source: t, quotes: [] };
   if (!t || typeof t !== 'object') return null;
   for (const k of Object.keys(t)) if (!TARGET_KEYS.has(k) && !(k === 'id' && t.source === undefined) && t[k] !== undefined && t[k] !== null) keyLoss(`target.${k}`);
@@ -246,7 +265,7 @@ function readTarget(t, report, keyLoss) {
       if (typeof s.exact === 'string' && s.exact.trim()) quotes.push(s.exact);
       if (s.prefix || s.suffix) report('annotation-quote-context', s.exact);
     }
-    const w = selectorWords(s, report);
+    const w = selectorWords(s, report, placing);
     if (w) words.push(w);
   }
   return { source: typeof src === 'string' ? src : undefined, label: labelText(t.label ?? t.source?.label), quotes, locator: words.join('; ') || undefined };
@@ -260,6 +279,16 @@ export class AnnotationReader {
   constructor(report) {
     this.report = report;
     this.annotations = 0; this.attestations = 0; this.unknownVerification = 0;
+    this.maps = null;
+  }
+  /**
+   * Georeferenced regions: read the georeference files (and manifests) given with the export, once,
+   * so that place() can put the annotations' regions in the world. Until this is called (and when
+   * no georeferences are given it never is) nothing of the georeference module's is loaded, and
+   * annotation() reads regions as it always has: as locators in words.
+   */
+  async useGeoreferences(georefs, manifests) {
+    this.maps = await readGeoreferences(georefs, manifests, this.report);
   }
   /** The document header for the attestations: the gazetteer, described from the export. */
   header(first, fileName, collectionLabel) {
@@ -321,8 +350,14 @@ export class AnnotationReader {
       else report('annotation-no-place', `${where}${read.length ? ` (${[...new Set(read.map((c) => c.kind))].join(', ')})` : ': no body'}`);
       return [];
     }
-    const targets = list(a.target).map((t) => readTarget(t, report, keyLoss)).filter(Boolean);
-    if (!targets.length || targets.some((t) => t.source === undefined)) { report('annotation-malformed', `${where}: no target, or a target that does not say what document it is in`); return []; }
+    const placing = this.maps !== null;
+    const targets = list(a.target).map((t) => readTarget(t, report, keyLoss, placing)).filter(Boolean);
+    if (!targets.length || targets.some((t) => t.source === undefined)) {
+      report('annotation-malformed', `${where}: no target, or a target that does not say what document it is in`);
+      // Not placed, so its SVG shapes are reported as they are without georeferences.
+      if (placing) for (let i = svgRegionCount(a); i > 0; i--) report('annotation-selector', SVG_SHAPE);
+      return [];
+    }
     // What a place link carries besides the place: the rest of the annotation's bodies.
     for (const c of read) {
       if (c.kind === 'person' || c.kind === 'event') report('annotation-body', `${c.kind} beside a place link`);
@@ -381,15 +416,51 @@ export class AnnotationReader {
     this.attestations += out.length;
     return out;
   }
+  /**
+   * Georeferenced regions: place the regions of an annotation that annotation() made `attestations`
+   * of, through the georeferences given to useGeoreferences() (src/formats/regions.js). Adds to each
+   * attestation the point, the citations of the map and of the georeference, and the note; reports
+   * every region by a region kind. Only called when georeferences were given.
+   */
+  async place(a, attestations) {
+    if (this.maps === null || !attestations.length) return;
+    const where = (a.id ?? a['@id']) || 'an annotation';
+    const read = [...list(a.body)].map((b) => classify(b, isRecogitoV1(a)));
+    const tagged = (is) => read.some((c) => (c.kind === 'tag' && is(c.text)) || (c.kind === 'type' && is(c.label)));
+    const symbol = tagged(isSymbolTag);
+    // A label: the label's words (what annotation() takes as the attested name: a quote, else a
+    // transcription), or a tag saying so, which Recogito Studio's editor can write where it can
+    // write neither of the others.
+    const label = tagged(isLabelTag) || attestations.some((att) => Array.isArray(att.names) && att.names.length > 0);
+    await placeRegions(a, attestations, { maps: this.maps, where, v1: isRecogitoV1(a), symbol, label }, this.report);
+  }
   quote(a) {
     for (const t of list(a.target)) for (const s of list(t && t.selector)) if (s && s.type === 'TextQuoteSelector' && typeof s.exact === 'string') return s.exact;
     for (const b of list(a.body)) if (b && purposes(b).includes('transcribing') && typeof b.value === 'string') return b.value;
     return undefined;
   }
   finish() {
+    if (this.maps) for (const m of this.maps) if (!m.used) this.report('annotation-georef-unused', `${[m.g.title, m.g.annotationId].filter(Boolean).join(', ')} (${m.file})`);
     if (this.unknownVerification) this.report('annotation-verification-unknown', `${this.unknownVerification} link${this.unknownVerification === 1 ? '' : 's'}`);
     if (this.annotations && !this.attestations) this.report('annotation-none-linked', `${this.annotations} annotation${this.annotations === 1 ? '' : 's'}`);
   }
+}
+
+/**
+ * The same, with the regions placed through georeferences ({ georefs, manifests }: Files, as the
+ * page and the command line give them): for tests.
+ */
+export async function annotationsToDocumentPlaced(items, fileName, report = () => {}, { georefs = [], manifests = [] } = {}) {
+  const r = new AnnotationReader(report);
+  await r.useGeoreferences(georefs, manifests);
+  const attestations = [];
+  for (const [i, a] of items.entries()) {
+    const atts = r.annotation(a, i + 1);
+    await r.place(a, atts);
+    attestations.push(...atts);
+  }
+  r.finish();
+  return { ...r.header(items[0], fileName), attestations };
 }
 
 /** Every attestation of a list of annotations, and the document: for tests and small inputs. */
