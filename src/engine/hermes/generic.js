@@ -208,10 +208,14 @@ export async function columnsOf(input) {
   const { headers, sample } = await open(input);
   return { headers, sample };
 }
-/** The mapping a run of this input uses: { mapping, reasons, problems } (columns.js, resolveColumns). */
+/**
+ * The mapping a run of this input uses: { mapping, reasons, problems, gazetteer } (columns.js,
+ * resolveColumns), and `headers`, the columns in the file's order (which the mapping, an object,
+ * does not keep for a column whose heading is a number).
+ */
 export async function mappingOf(input, saved) {
   const { headers, sample, headerText, ownGeometry } = await open(input);
-  return resolveColumns(headers, sample, saved, headerText, { ownGeometry });
+  return { ...resolveColumns(headers, sample, saved, headerText, { ownGeometry }), headers };
 }
 /** 'attestation-centric' when a column holds the places' web addresses, else 'place-centric'. */
 export async function genericProfile(input, saved) {

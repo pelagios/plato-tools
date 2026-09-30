@@ -369,7 +369,9 @@ async function runOne(item, action, o, resources, host, live) {
   if (input.format === 'csv' || input.format === 'geojson') {
     try {
       const m = await mappingOf(input, o.savedColumns);
-      r.columns = m.mapping; r.columnReasons = m.reasons; r.columnWarnings = gazetteerWarnings(m.mapping, m.gazetteer, { cli: true });
+      // In the file's order: an object would put a column whose heading is a number first.
+      r.columns = m.headers.map((column) => ({ column, field: m.mapping[column], reason: m.reasons[column] }));
+      r.columnWarnings = gazetteerWarnings(m.mapping, m.gazetteer, { cli: true });
       r.profile = Object.values(m.mapping).includes('address') ? 'attestation-centric' : 'place-centric';
     } catch (e) { if (e?.name !== 'DataError') throw e; /* the run reports what stops the reader */ }
   }
@@ -415,11 +417,12 @@ function describe(r, action, brief) {
 }
 /** How a table of places' columns were read: one line each, with why, then the whole as JSON for --columns. */
 function columnLines(r) {
-  const cols = Object.keys(r.columns), w = Math.min(24, Math.max(...cols.map((c) => c.length)));
+  const w = Math.min(24, Math.max(...r.columns.map((c) => c.column.length)));
   return [
     '  Columns read as (to change this, save the JSON below to a file, edit it, and give it with --columns FILE):',
-    ...cols.map((c) => `    ${c.padEnd(w)}  ${r.columns[c].padEnd(16)}  ${r.columnReasons?.[c] || ''}`),
-    `    ${JSON.stringify(r.columns)}`,
+    ...r.columns.map((c) => `    ${c.column.padEnd(w)}  ${c.field.padEnd(16)}  ${c.reason || ''}`),
+    // The mapping as --columns takes it, written in the file's order.
+    `    {${r.columns.map((c) => `${JSON.stringify(c.column)}:${JSON.stringify(c.field)}`).join(',')}}`,
     ...(r.columnWarnings || []).map((w) => `  Note: ${w}`),
   ];
 }

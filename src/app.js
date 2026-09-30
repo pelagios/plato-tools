@@ -246,7 +246,9 @@ function chooseColumn(i, field) {
 }
 function saveMatching() {
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([JSON.stringify(columns.mapping, null, 2) + '\n'], { type: 'application/json' }));
+  // In the file's order, which an object would not keep for a column whose heading is a number.
+  const text = `{\n${columns.headers.map((h) => `  ${JSON.stringify(h)}: ${JSON.stringify(columns.mapping[h])}`).join(',\n')}\n}\n`;
+  a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
   a.download = (files[0]?.name || 'table').replace(/\.gz$/i, '').replace(/\.[^.]+$/, '') + '-columns.json';
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 60000);

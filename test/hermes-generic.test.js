@@ -501,12 +501,25 @@ test('command line: --columns that is not a JSON object is refused before anythi
     assert.notEqual(cli('check', '--columns', join(d, 'utf8.json'), DIR + 'no-ids.csv').code, 2);
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
+test('command line: columns whose headings are numbers are printed, and given in --json, in the file\'s order', () => {
+  const d = mkdtempSync(join(tmpdir(), 'plato-tools-hermes-'));
+  try {
+    writeFileSync(join(d, 'census.csv'), 'parish,1801,1811,name\nAshby,120,131,Ashby\n');
+    const r = cli('check', join(d, 'census.csv'));
+    assert.ok(r.out.includes('{"parish":"note","1801":"note","1811":"note","name":"name"}'), r.out);
+    assert.match(r.out, / {4}parish +note[^\n]*\n {4}1801 +note[^\n]*\n {4}1811 +note[^\n]*\n {4}name +name/);
+    const j = JSON.parse(cli('check', '--json', join(d, 'census.csv')).out.split('\n')[0]);
+    assert.deepEqual(j.columns.map((c) => c.column), ['parish', '1801', '1811', 'name']);
+    // Control: an object of the same mapping would have put the numbers first.
+    assert.deepEqual(Object.keys({ parish: 1, 1801: 1, 1811: 1, name: 1 }), ['1801', '1811', 'parish', 'name']);
+  } finally { rmSync(d, { recursive: true, force: true }); }
+});
 test('command line: the columns as read are printed with the report, as JSON to save and give back', { skip }, () => {
   const r = cli('check', DIR + 'odd-headers.csv');
   assert.equal(r.code, 0, r.out + r.err);
   assert.match(r.out, /Columns read as/);
   assert.ok(r.out.includes('{"Place Name":"name","LAT":"latitude","Long":"longitude","wikidata":"address"'));
   const j = JSON.parse(cli('check', '--json', DIR + 'odd-headers.csv').out.split('\n')[0]);
-  assert.equal(j.columns.wikidata, 'address');
+  assert.deepEqual(j.columns.find((c) => c.column === 'wikidata'), { column: 'wikidata', field: 'address', reason: 'the heading "wikidata" reads as the place\'s web address, and all 7 of its sampled values are web addresses' });
   assert.equal(j.profile, 'attestation-centric');
 });
