@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { env, file, textFile, go, outText } from './engine.js';
 import { detect } from '../src/engine/input.js';
 import { publish } from '../src/engine/agora/index.js';
+import { TEXT } from '../src/engine/agora/mint.js';
 import { sha256 } from '../src/lib/sha256.js';
 import { gzipSync, gunzipSync } from 'fflate';
 
@@ -192,6 +193,30 @@ test('no base address, or a dataset with problems: nothing is written', async ()
   const bad = await mint(json(doc(broken)));
   assert.deepEqual(kinds(bad, 'error'), ['dataset-has-problems']);
   assert.equal(bad.outputs.length, 0);
+});
+
+test('a published dataset without the previous release: refused when it names a previous version, a warning when it is the first; a draft, neither', async () => {
+  const later = { ...PUB, version: '2', previousVersion: `${X}release/v1` };
+  const refused = await mint(json(doc(places(), later)));
+  assert.deepEqual(kinds(refused, 'error'), ['no-previous-release']);
+  assert.equal(item(refused, 'no-previous-release').message, TEXT['no-previous-release']);
+  assert.deepEqual(item(refused, 'no-previous-release').examples, [`${X}release/v1`]);
+  assert.equal(refused.outputs.length, 0);
+  assert.equal(refused.text, null);
+  // A first publication: written, with the warning that the next must be minted against it.
+  const first = await mint(json(doc(places(), PUB)));
+  assert.equal(first.errors, 0, JSON.stringify(first.items));
+  assert.equal(item(first, 'no-previous-release')?.severity, 'warning');
+  assert.equal(item(first, 'no-previous-release').message, TEXT['no-previous-release-first']);
+  assert.equal(first.outputs.length, 1);
+  // The controls: the same later release with its previous one given is written with neither; a
+  // draft naming a previous version, without it, is written with neither too.
+  const withPrevious = await mint(json(doc(places(), later)), { previous: textFile(first.text, 'v1-with-ids.jsonl') });
+  assert.equal(item(withPrevious, 'no-previous-release'), undefined, withPrevious.items.map((i) => i.kind).join());
+  assert.equal(withPrevious.outputs.length, 1);
+  const draft = await mint(json(doc(places(), { ...G, previousVersion: `${X}release/v1` })));
+  assert.equal(item(draft, 'no-previous-release'), undefined);
+  assert.equal(draft.outputs.length, 1);
 });
 
 // ---- the previous release ---------------------------------------------------------------------------------

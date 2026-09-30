@@ -64,6 +64,8 @@ export const TEXT = {
   'base-written': "A base address was given for this run that is not the dataset's own (uriSpace, the about sheet's base_uri): the addresses were made under the base given, and the copy records it as its uriSpace, so that the site and the w3id rules made from the copy use the same one. Put it in the dataset too.",
   'place-outside-base': "An attestation is about a place whose web address is not under the dataset's base address at all, so it cannot be given an address as a part of its place's, and is left without one. Give the place an address under the base, or give the base its places are under. The example names the place.",
   'previous-not-read': 'The previous release could not be read to the end, so the addresses it gave could not be kept, and nothing was written.',
+  'no-previous-release': "The dataset is published and names a previous version (previousVersion), so this is not its first release, but no previous release was given to mint against: give it (--previous, or Previous release under Options on the page), or addresses already published may change. Nothing was written.",
+  'no-previous-release-first': 'The dataset is published and no previous release was given, so this is taken to be its first release. Mint every later release against this one (--previous, or Previous release under Options on the page), so that the addresses given here are kept.',
   'against-previous': 'Compared with the previous release (the earlier version), the dataset with its addresses (the later one): ',
 };
 
@@ -347,6 +349,20 @@ export function create(ctx) {
     async finish() {
       try {
         if (ctx.blocked()) return;
+        // A published dataset's addresses are for good. Minted afresh, without the release before,
+        // an address made by other means, or one of twins whose order changed, would not be kept
+        // (rule 2 cannot apply), and nothing would say so. A dataset that names its previous version
+        // has one to mint against, so it is refused; one that names none is taken to be a first
+        // release, and told that the next must be minted against it. A draft binds nothing.
+        const g = ctx.gazetteer;
+        if (g.status === 'published' && !ctx.previous) {
+          if (typeof g.previousVersion === 'string' && g.previousVersion.trim()) {
+            rep.error('no-previous-release', TEXT['no-previous-release'], g.previousVersion);
+            rep.counts.said = ['Nothing was written: mint a later release against the previous one.'];
+            return;
+          }
+          rep.warning('no-previous-release', TEXT['no-previous-release-first']);
+        }
         assign();
         Object.assign(rep.counts, counts);
         const gave = counts.minted + counts.inherited;
