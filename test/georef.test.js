@@ -628,7 +628,7 @@ test('georefCitation: exact shapes, valid against the pinned PLATO schema (and a
   const g = await rocque();
   const { record } = await toWorld(g, pt([5000, 4000]), { space: 'image' });
   const c = georefCitation(record);
-  assert.deepEqual(c, { source: { '@id': ROCQUE_MANIFEST, title: ROCQUE_TITLE, authorityType: 'source' }, locator: ROCQUE_CANVAS, citationFunction: 'http://purl.org/spar/cito/citesAsDataSource' });
+  assert.deepEqual(c, { source: { '@id': ROCQUE_MANIFEST, title: ROCQUE_TITLE, authorityType: 'source' }, locator: ROCQUE_CANVAS, citationFunction: 'http://purl.org/spar/cito/citesAsEvidence' });
   assert.ok(citationValid(c), JSON.stringify(citationValid.errors));
   // A region in canvas pixels is a fragment of the canvas; in image pixels, of the image.
   const rc = (await toWorld(g, { xywh: 'pixel:3000,3000,2000,1000' }, { space: 'canvas' })).record;
@@ -654,7 +654,7 @@ test('georefCitation: exact shapes, valid against the pinned PLATO schema (and a
   assert.ok(citationValid(georefCitation(rc)));
   // No manifest or title: the image, with an honest title.
   const bare = georefCitation({ ...record, manifestId: null, canvasId: null, title: null });
-  assert.deepEqual(bare, { source: { '@id': ROCQUE_IMAGE, title: `The georeferenced map (IIIF image ${ROCQUE_IMAGE})`, authorityType: 'source' }, citationFunction: 'http://purl.org/spar/cito/citesAsDataSource' });
+  assert.deepEqual(bare, { source: { '@id': ROCQUE_IMAGE, title: `The georeferenced map (IIIF image ${ROCQUE_IMAGE})`, authorityType: 'source' }, citationFunction: 'http://purl.org/spar/cito/citesAsEvidence' });
   assert.ok(citationValid(bare), JSON.stringify(citationValid.errors));
   // Control: the validator refuses an inline source without a title, and a source that is not an address.
   assert.equal(citationValid({ source: { '@id': ROCQUE_MANIFEST, authorityType: 'source' } }), false);
@@ -700,19 +700,23 @@ test('georefAnnotationCitation: the annotation, cited for its method; valid agai
   const { record } = await toWorld(g, pt([5000, 4000]), { space: 'image' });
   const c = georefAnnotationCitation(record);
   assert.deepEqual(c, {
-    source: { '@id': ROCQUE_ID, title: `Georeference of ${ROCQUE_TITLE}`, authorityType: 'source' },
+    source: { '@id': ROCQUE_ID, title: `Georeference of ${ROCQUE_TITLE}, made in Allmaps`, authorityType: 'source', derivedFrom: ROCQUE_MANIFEST },
     citationFunction: 'http://purl.org/spar/cito/usesMethodIn',
   });
+  // As PLATO's worked example (schemas/examples/place-centric-georeference.json) writes it: derived
+  // from the map; without a manifest, from the image; "made in Allmaps" only for Allmaps' own server.
+  assert.equal(georefAnnotationCitation({ ...record, manifestId: null }).source.derivedFrom, ROCQUE_IMAGE);
+  assert.equal(georefAnnotationCitation({ ...record, annotationId: 'https://example.org/georef/1' }).source.title, `Georeference of ${ROCQUE_TITLE}`);
   assert.ok(citationValid(c), JSON.stringify(citationValid.errors));
   const untitled = georefAnnotationCitation({ ...record, title: null });
-  assert.equal(untitled.source.title, `Georeference of the map in IIIF manifest ${ROCQUE_MANIFEST}`);
-  assert.equal(georefAnnotationCitation({ ...record, title: null, manifestId: null }).source.title, `Georeference of the map in IIIF image ${ROCQUE_IMAGE}`);
+  assert.equal(untitled.source.title, `Georeference of the map in IIIF manifest ${ROCQUE_MANIFEST}, made in Allmaps`);
+  assert.equal(georefAnnotationCitation({ ...record, title: null, manifestId: null }).source.title, `Georeference of the map in IIIF image ${ROCQUE_IMAGE}, made in Allmaps`);
   assert.ok(citationValid(untitled), JSON.stringify(citationValid.errors));
   assert.throws(() => georefAnnotationCitation({ ...record, annotationId: null }), TypeError);
   // Control: the schema refuses a citation function outside CiTO, and the CURIE form of a valid one.
   assert.equal(citationValid({ ...c, citationFunction: 'http://example.org/usesMethodIn' }), false);
   assert.equal(citationValid({ ...c, citationFunction: 'cito:usesMethodIn' }), false);
-  assert.equal(citationValid({ ...georefCitation(record), citationFunction: 'cito:citesAsDataSource' }), false);
+  assert.equal(citationValid({ ...georefCitation(record), citationFunction: 'cito:citesAsEvidence' }), false);
 });
 
 // ---- Folds: one place, several positions on the map -------------------------------------------

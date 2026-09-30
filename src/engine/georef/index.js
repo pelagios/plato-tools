@@ -730,8 +730,10 @@ function regionLocator(record, region) {
 
 /**
  * A PLATO citation of the map: the manifest (else the image) as an inline source, as
- * src/formats/annotations.js writes one ({ '@id', title, authorityType }), cited as a data source
- * (cito:citesAsDataSource), and the canvas as the locator, with "#xywh=…" in canvas units
+ * src/formats/annotations.js writes one ({ '@id', title, authorityType }), cited as the evidence
+ * (cito:citesAsEvidence: PLATO's pattern for georeferenced geometries, ontology.ttl plato:Geometry,
+ * since plato:citation_function tells consumers not to assume evidence unless it is stated), and
+ * the canvas as the locator, with "#xywh=…" in canvas units
  * (record.canvasRegion) when the geometry was a region. Only when there is no canvas, or its size
  * is unknown so the region cannot be converted, is the region given on the image service's id, in
  * image pixels.
@@ -752,21 +754,25 @@ export function georefCitation(record, { region } = {}) {
   else if (record.region && record.canvasId && record.canvasRegion) locator = `${record.canvasId}#xywh=${record.canvasRegion}`;
   else if (record.region && record.space === 'image' && record.imageServiceId) locator = `${record.imageServiceId}#xywh=${record.region}`;
   else if (record.canvasId) locator = record.canvasId;
-  return { source, ...(locator ? { locator } : {}), citationFunction: `${CITO}citesAsDataSource` };
+  return { source, ...(locator ? { locator } : {}), citationFunction: `${CITO}citesAsEvidence` };
 }
 
 /**
  * A PLATO citation of the georeference annotation itself, whose method (its control points and
  * transformation) placed the position: { source: { '@id': annotationId, title: 'Georeference of
- * <map title>', authorityType: 'source' }, citationFunction: cito:usesMethodIn }. A TypeError
- * when the record has no annotation id, since there is then nothing to cite.
+ * <map title>' (", made in Allmaps" when Allmaps' annotation server holds it), authorityType:
+ * 'source', derivedFrom: <the map's source> }, citationFunction: cito:usesMethodIn }, as PLATO's
+ * pattern for georeferenced geometries has it (plato:derived_from covers a work made from a
+ * source). A TypeError when the record has no annotation id, since there is then nothing to cite.
  */
 export function georefAnnotationCitation(record) {
   if (!record.annotationId) throw new TypeError('The georeference has no identifier, so it cannot be cited.');
   const of = record.title
     || (record.manifestId ? `the map in IIIF manifest ${record.manifestId}` : `the map in IIIF image ${record.imageServiceId}`);
+  const allmaps = /^https:\/\/annotations\.allmaps\.org\//.test(record.annotationId) ? ', made in Allmaps' : '';
+  const map = record.manifestId || record.imageServiceId;
   return {
-    source: { '@id': record.annotationId, title: `Georeference of ${of}`, authorityType: 'source' },
+    source: { '@id': record.annotationId, title: `Georeference of ${of}${allmaps}`, authorityType: 'source', ...(map ? { derivedFrom: map } : {}) },
     citationFunction: `${CITO}usesMethodIn`,
   };
 }
