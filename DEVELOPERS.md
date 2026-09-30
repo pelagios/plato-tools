@@ -478,6 +478,11 @@ on the main page through IndexedDB), and its engine `src/engine/chora/` (`store.
   private file system, with a folded label for search and the boxes and points of its current
   geometries, settled at the end of the file, where what is retracted or superseded is known. One
   dataset at a time.
+- **A pool and an outputs folder of its own.** A SQLite SAHPool holds every file in its folder open,
+  so a second tab on the same pool cannot start. Chora's page asks the worker for its own
+  (`init` with `pool: 'chora'`, `.opfs-sahpool-chora/`), and saves to `chora-outputs/`, since each
+  page clears its outputs folder when it runs: the main page and Chora can be open at once, and
+  neither loses the other's file. Two Chora tabs still share one pool, and the second cannot start.
 - **Saving** writes the whole dataset as PLATO JSON, `<input>.chora.json`, each record as it was
   read with its drawings appended as new attestations. Drawings are checked against the pinned JSON
   Schema, and against the places the dataset has, before anything is written.

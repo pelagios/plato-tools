@@ -36,7 +36,8 @@ function request(msg, replyType) {
 function startWorker() {
   worker = new Worker(new URL('../engine/worker.js', import.meta.url), { type: 'module' });
   worker.onerror = (e) => fail(`The engine stopped: ${e.message || 'unknown error'}`);
-  return request({ cmd: 'init', base: new URL('./', location.href).href }, 'ready').then(({ version: v }) => {
+  // A SQLite pool of Chora's own, so that this page and the main page can be open at once.
+  return request({ cmd: 'init', base: new URL('./', location.href).href, pool: 'chora' }, 'ready').then(({ version: v }) => {
     $('plato-version').innerHTML = `${v.versionInfo} at <a href="${v.repository}/tree/${v.commit}">${v.commit.slice(0, 7)}</a>`
       + (v.draft ? ` <strong class="draft">${draftNote(v)}</strong>` : '');
     Object.assign(state, { phase: 'ready', platoCommit: v.commit });
@@ -322,11 +323,12 @@ async function saveDataset() {
   state.phase = 'saved';
 }
 // The same as the main page's save() (src/app.js), kept here rather than shared so that the main page
-// is not changed for Chora: the output is on the origin private file system, and goes to disk
+// is not changed for Chora: the output is on the origin private file system (in chora-outputs/, the
+// worker's directory for Chora, apart from the main page's outputs/), and goes to disk
 // through the save dialogue where there is one, else as a download. True once saved.
 async function save(name) {
   const root = await navigator.storage.getDirectory();
-  const file = await (await (await root.getDirectoryHandle('outputs')).getFileHandle(name)).getFile();
+  const file = await (await (await root.getDirectoryHandle('chora-outputs')).getFileHandle(name)).getFile();
   if (window.showSaveFilePicker && !window.__plato_forceDownload) {
     try {
       const h = await window.showSaveFilePicker({ suggestedName: name });

@@ -180,7 +180,7 @@ body.chora h1 { font-size: 1.6rem; }
 body.chora h1 .label { font-family: var(--font-text); font-size: .8rem; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-left: .5rem; }
 body.chora .privacy { margin: .4rem 0 0; padding: .45rem .8rem; font-size: .92rem; }
 body.chora main.chora-main { max-width: none; width: 100%; margin: 0; padding: 0; flex: 1; display: grid; grid-template-columns: minmax(20rem, 28rem) 1fr; min-height: 0; }
-.chora-panel { overflow-y: auto; padding: 0 .9rem 1rem 1.25rem; }
+.chora-panel { overflow-y: auto; padding: 0 .9rem 1rem 1.25rem; overflow-wrap: anywhere; }   /* a source known only by its address has no space to wrap at */
 .chora-panel section { margin: .8rem 0; padding: .8rem 1rem; }
 .chora-panel h3 { font-size: 1rem; margin: .8rem 0 .2rem; }
 .chora-panel ul { margin: .2rem 0; padding-left: 1.2rem; }

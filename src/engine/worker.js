@@ -17,17 +17,21 @@ import { FIELDS, cellText } from './hermes/columns.js';
 import { load as choraLoad } from './chora/store.js';
 import { save as choraSave } from './chora/save.js';
 
-let resources = null, pool = null, runs = 0;
+let resources = null, pool = null, runs = 0, poolName = null;
 async function sqlitePool() {
   if (pool) return pool;
   const sqlite3 = await sqlite3InitModule();
-  pool = { sqlite3, vfs: await sqlite3.installOpfsSAHPoolVfs({ clearOnInit: true, initialCapacity: 8 }) };
+  // A pool is one tab's alone: it holds every file in its directory open, so a second tab using the
+  // same one cannot start. A page that may be open beside the main page (Chora's) asks for a pool of
+  // its own at init; the main page's is the default, as it always was.
+  const own = poolName ? { name: `opfs-sahpool-${poolName}` } : {};
+  pool = { sqlite3, vfs: await sqlite3.installOpfsSAHPoolVfs({ clearOnInit: true, initialCapacity: 8, ...own }) };
   return pool;
 }
-async function outputsDir(clear) {
+async function outputsDir(clear, name = 'outputs') {
   const root = await navigator.storage.getDirectory();
-  if (clear) { try { await root.removeEntry('outputs', { recursive: true }); } catch {} }
-  return root.getDirectoryHandle('outputs', { create: true });
+  if (clear) { try { await root.removeEntry(name, { recursive: true }); } catch {} }
+  return root.getDirectoryHandle(name, { create: true });
 }
 async function output(dir, name) {
   const h = await (await dir.getFileHandle(name, { create: true })).createSyncAccessHandle();
@@ -47,8 +51,8 @@ async function output(dir, name) {
  * of its own): each has its own file, and a finished one is removed before the next is opened, so
  * that they do not pile up on disk. tidy() closes and removes what is left, however the run ended.
  */
-async function runEnv({ clearOutputs = true } = {}) {
-  const dir = await outputsDir(clearOutputs);
+async function runEnv({ clearOutputs = true, outputs = 'outputs' } = {}) {
+  const dir = await outputsDir(clearOutputs, outputs);
   const { vfs } = await sqlitePool();
   const opened = [];
   const unlinkClosed = () => { for (const d of opened) if (!d.gone && !d.db.isOpen()) { try { vfs.unlink(d.name); } catch {} d.gone = true; } };
@@ -73,6 +77,7 @@ self.onmessage = async ({ data }) => {
     if (data.cmd === 'init') {
       const base = data.base + 'plato/';
       session.base = data.base;   // Chora's country boxes are fetched from the site too
+      if (/^[a-z]+$/.test(data.pool || '')) poolName = data.pool;
       resources = prepare(await loadResources(async (f) => { const r = await fetch(base + f); if (!r.ok) throw new Error(`${f}: ${r.status}`); return r.text(); }));
       postMessage({ type: 'ready', version: resources.version });
     } else if (data.cmd === 'detect') {
@@ -164,8 +169,10 @@ self.onmessage = async ({ data }) => {
 // ---- Chora (chora.html): the map viewer and editor --------------------------------------------------
 // Chora keeps one working database for the session, /chora.sqlite3 in the same pool as the runs'
 // (src/engine/chora/store.js), holding the dataset last opened; a run's own databases come and go
-// beside it. Saving goes through runEnv like any conversion, so its file is in outputs/.
-const CHORA_DB = '/chora.sqlite3';
+// beside it. Saving goes through runEnv like any conversion, but its file is in chora-outputs/, not
+// outputs/: each page clears its own outputs when it runs, and the main page may be open beside this
+// one with a file not yet saved.
+const CHORA_DB = '/chora.sqlite3', CHORA_OUT = 'chora-outputs';
 const session = { store: null, fingerprint: null, ccodes: null, base: null };
 const fingerprint = (files) => files.map((f) => `${f.name}|${f.size}|${f.lastModified}`).join('\n');
 // What a set of CSV files is called, having no one file name of its own.
@@ -187,7 +194,7 @@ async function choraCommand(data) {
     const db = new vfs.OpfsSAHPoolDb(CHORA_DB);
     db.exec(pragmas());
     // Opening a dataset leaves the last saved file where it is.
-    const { env, tidy } = await runEnv({ clearOutputs: false });
+    const { env, tidy } = await runEnv({ clearOutputs: false, outputs: CHORA_OUT });
     let store;
     try { store = await choraLoad(input, env, db, { name: inputName(input, data.name) }); }
     catch (e) { try { db.close(); } catch {} throw e; }
@@ -200,13 +207,13 @@ async function choraCommand(data) {
     const input = await detect(data.files);
     if (!input.format) throw new Error(input.reason);
     const same = session.store && session.fingerprint === fingerprint(data.files);
-    const { env, tidy } = await runEnv();
+    const { env, tidy } = await runEnv({ outputs: CHORA_OUT });
     let result;
     try {
       result = await choraSave(input, data.additions || [], env, {
         name: inputName(input, data.name), contributor: data.contributor || undefined,
         hasPlace: same ? (id) => session.store.has(id) : undefined,
-        reopen: async (o) => (await (await outputsDir(false)).getFileHandle(o.name)).getFile(),
+        reopen: async (o) => (await (await outputsDir(false, CHORA_OUT)).getFileHandle(o.name)).getFile(),
       });
     } finally { tidy(); }
     postMessage({ type: 'done', ...result });
