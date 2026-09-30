@@ -152,6 +152,8 @@ Object.assign(LOSS_TEXT, {
   'generic-date-invalid': 'A start or end date that is not a year (such as 1066 or -0500) or an ISO date (such as 1066-10-14) is not carried; the example names the column. Match the column to "date" instead to keep it as the date the source writes.',
   'generic-language-invalid': 'A language that is not a language code (such as en, la or grc) is not carried, so the name has no language.',
   'generic-wkt-invalid': 'A cell read as Well-Known Text (WKT) is not WKT of a shape PLATO takes (a POINT, LINESTRING, POLYGON or one of their MULTI forms, longitude first), so it is not carried; the rest of the row is. The example says what is wrong.',
+  'generic-nothing-converted': "Not one row became a place or an attestation, so nothing was converted. Check which column holds what (on the page, or with --columns): a row needs a name, or a web address in the column of places' addresses.",
+  'generic-empty': 'The file holds no rows, or no features, so there is nothing in it to check or convert.',
   'generic-row-empty': "A row with neither a name nor a web address in the column of places' addresses is not carried: with no address it is about no place, and with no name it cannot be a place of its own. Give it the address of its place in a gazetteer, or a name.",
   'generic-row-no-name': 'A row with no name (in the column of names or of other names) is not carried, even with an id, as a place needs a name for its label. Give it a name.',
   'generic-no-address': "A row with no web address in the column of places' addresses, and no id to make it a place of its own, has no place to be about, so it is not carried, though it has a name. Give it the address of its place in a gazetteer, or an id.",

@@ -249,7 +249,7 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
   const seen = new Map();
   const whereOf = (k) => (input.format === 'csv' ? `row ${k + 1}` : `feature ${k}`);
   const skipped = new Set();
-  let n = 0;
+  let n = 0, out = 0;
   for await (const r of t.rows()) {
     n++;
     rep.count(input.format === 'csv' ? 'rows' : 'features');
@@ -259,7 +259,7 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
     for (const k of r.keys || []) report('generic-feature-key', k);
     const a = applyColumns(r.row, mapping, { where: r.where, report, fileName: file.name, geometry: r.geometry, idAsNote: byAddress });
     for (const c of a.skipped) skipped.add(c);
-    if (byAddress && a.address) { yield { type: 'attestation', value: { about: a.address, ...a.attestation }, n }; continue; }
+    if (byAddress && a.address) { out++; yield { type: 'attestation', value: { about: a.address, ...a.attestation }, n }; continue; }
     // A row about an address that gives none it can use is still read: with an id, it is a place of
     // its own (a new place, beside the attestations); without one, it has nothing to be about.
     if (byAddress && (a.id === undefined || !a.label)) {
@@ -278,8 +278,19 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
     rec.label = a.label;
     if (a.id !== undefined) rec.entityIdentifier = a.id;
     rec.attestations = [a.attestation];
+    out++;
     yield byAddress ? { type: 'record', value: rec, n, newEntity: true } : { type: 'record', value: rec, n };
   }
   // A skipped column is reported once, by name, if it had a value to lose.
   for (const c of skipped) report('generic-column-skipped', c);
+  // Rows read and nothing made of them is an error, never "No problems found": every row was lost,
+  // most likely because no column is matched as what a row needs.
+  const rows = input.format === 'csv' ? 'rows' : 'features';
+  if (!n) report('generic-empty', `${file.name}: no ${rows}`);
+  else if (!out) {
+    const why = byAddress ? "no row's web address could be used, and none has both an id and a name to make it a place of its own"
+      : !fields.includes('name') && !fields.includes('alternativeNames') ? "no column is matched as the place's name (or its other names), or as its web address"
+        : 'the columns matched as the name are empty in every row';
+    report('generic-nothing-converted', `${n === 1 ? `The one ${rows.slice(0, -1)} did not become` : `None of the ${n.toLocaleString('en-GB')} ${rows} became`} a place: ${why}`);
+  }
 }

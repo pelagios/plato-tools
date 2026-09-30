@@ -44,7 +44,9 @@ as a table to edit. Every column goes to exactly one field, to `note`, or to `sk
 | (chosen) → **skip** | Nothing | Reported once, naming the column |
 
 Two columns with the same heading are each known by the heading and their place, `name (column 3)`,
-in the matching and the notes, and the report says so once. A quotation mark never closed, or stray
+in the matching and the notes, and the report says so once. A file with rows none of which becomes a place
+or an attestation is an error (`generic-nothing-converted`), saying why; one with no rows at all, a
+warning (`generic-empty`). A quotation mark never closed, or stray
 in a quoted cell, stops the file, naming the line. A property of plain GeoJSON called `toponym`,
 `timespans` or `@id` does not make it Linked Places Format: only LPF's context, or features with
 `names` that have a toponym, a `when` with `timespans`, or an `@id` of the feature itself do.

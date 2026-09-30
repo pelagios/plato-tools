@@ -17,7 +17,7 @@ import { Report } from '../src/engine/report.js';
 import { tableIds } from '../src/formats/tables.js';
 import { genericSource, genericProfile, columnsOf, mappingOf, csvRecords } from '../src/engine/hermes/generic.js';
 import Papa from 'papaparse';
-import { FEATURE_ID } from '../src/engine/hermes/columns.js';
+import { FEATURE_ID, GENERIC_KINDS } from '../src/engine/hermes/columns.js';
 import { columnWarnings, COLUMN_WORDS } from '../src/engine/words.js';
 import { PLATO_REPO } from './paths.js';
 import { file, textFile, go, outText } from './engine.js';
@@ -329,6 +329,29 @@ test('a feature with a geometry and latitude and longitude properties gets one g
   // Control: with no geometry of its own, the properties are its location.
   const b = (await readAll(textFile(fc(null), 'ne.geojson'))).doc.spatialEntities[0].attestations[0];
   assert.deepEqual(b.geometries.map((g) => g.reprPoint), [[12.5, 41.9]]);
+});
+test('a file whose every row is lost is an error, saying why, never "No problems found"; an empty one is a warning', async () => {
+  // Nothing matched as the name: every row is lost.
+  const r = await readAll(textFile('code,lat,lon\nA1,51.45,-2.59\nA2,51.5,-0.12\n', 'x.csv'));
+  assert.deepEqual(r.of('generic-nothing-converted').examples, ["None of the 2 rows became a place: no column is matched as the place's name (or its other names), or as its web address"]);
+  assert.equal(GENERIC_KINDS['generic-nothing-converted'], 'error');
+  const g = await readAll(textFile(JSON.stringify({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: null, properties: { name: '' } }] }), 'x.geojson'));
+  assert.deepEqual(g.of('generic-nothing-converted').examples, ['The one feature did not become a place: the columns matched as the name are empty in every row']);
+  const e = await readAll(textFile(JSON.stringify({ type: 'FeatureCollection', features: [] }), 'empty.geojson'));
+  assert.deepEqual(e.of('generic-empty').examples, ['empty.geojson: no features']);
+  assert.ok(!e.kinds.has('generic-nothing-converted'));
+  // Control: one row with a name is enough.
+  const ok = await readAll(textFile('code,name\nA1,Bristol\nA2,\n', 'x.csv'));
+  assert.ok(!ok.kinds.has('generic-nothing-converted') && !ok.kinds.has('generic-empty'));
+  // And on the command line the run has problems, and exits 1.
+  const d = mkdtempSync(join(tmpdir(), 'plato-tools-hermes-'));
+  try {
+    writeFileSync(join(d, 'x.csv'), 'code,lat,lon\nA1,51.45,-2.59\n');
+    const c = cli('check', join(d, 'x.csv'));
+    assert.equal(c.code, 1, c.out);
+    assert.doesNotMatch(c.out, /No problems found/);
+    assert.match(c.out, /The one row did not become a place/);
+  } finally { rmSync(d, { recursive: true, force: true }); }
 });
 test('a row whose address is not one, but which has an id, becomes a place of its own, keeping what the address column said', async () => {
   const r = await readAll(textFile('id,name,wikidata\nr1,Roma,https://www.wikidata.org/wiki/Q220\nr2,Athenae,Q1524\n', 'x.csv'), { columns: { id: 'id', name: 'name', wikidata: 'address' } });

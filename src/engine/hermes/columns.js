@@ -67,6 +67,8 @@ export const GENERIC_KINDS = {
   'generic-mapping-missing-column': 'warning',
   'generic-mapping-unknown-column': 'warning',
   'generic-mapping': 'error',
+  'generic-nothing-converted': 'error',
+  'generic-empty': 'warning',
 };
 
 /** The name of the column that stands for a GeoJSON feature's own id (its `id` member, not a property). */
