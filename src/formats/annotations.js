@@ -32,7 +32,6 @@
 //   - the target's `source` is the Studio project's id, not the document's address.
 import { PLATO, isAbsoluteIri } from '../lib/context.js';
 import { placeAddress } from '../engine/hermes/addresses.js';
-import { readGeoreferences, placeRegions, svgRegionCount, isSymbolTag, isLabelTag } from './regions.js';
 
 export const ANNO_CONTEXT = /^https?:\/\/www\.w3\.org\/ns\/anno\.jsonld$/;
 const ATTESTED = PLATO + 'Attested';
@@ -279,7 +278,7 @@ export class AnnotationReader {
   constructor(report) {
     this.report = report;
     this.annotations = 0; this.attestations = 0; this.unknownVerification = 0;
-    this.maps = null;
+    this.maps = null; this.regions = null;
   }
   /**
    * Georeferenced regions: read the georeference files (and manifests) given with the export, once,
@@ -288,7 +287,10 @@ export class AnnotationReader {
    * annotation() reads regions as it always has: as locators in words.
    */
   async useGeoreferences(georefs, manifests) {
-    this.maps = await readGeoreferences(georefs, manifests, this.report);
+    // Loaded here, not imported above, so that a page that never meets a georeference never
+    // downloads the georeference module (src/engine/georef/), nor Allmaps, which it loads in turn.
+    this.regions = await import('./regions.js');
+    this.maps = await this.regions.readGeoreferences(georefs, manifests, this.report);
   }
   /** The document header for the attestations: the gazetteer, described from the export. */
   header(first, fileName, collectionLabel) {
@@ -355,7 +357,7 @@ export class AnnotationReader {
     if (!targets.length || targets.some((t) => t.source === undefined)) {
       report('annotation-malformed', `${where}: no target, or a target that does not say what document it is in`);
       // Not placed, so its SVG shapes are reported as they are without georeferences.
-      if (placing) for (let i = svgRegionCount(a); i > 0; i--) report('annotation-selector', SVG_SHAPE);
+      if (placing) for (let i = this.regions.svgRegionCount(a); i > 0; i--) report('annotation-selector', SVG_SHAPE);
       return [];
     }
     // What a place link carries besides the place: the rest of the annotation's bodies.
@@ -427,6 +429,7 @@ export class AnnotationReader {
     const where = (a.id ?? a['@id']) || 'an annotation';
     const read = [...list(a.body)].map((b) => classify(b, isRecogitoV1(a)));
     const tagged = (is) => read.some((c) => (c.kind === 'tag' && is(c.text)) || (c.kind === 'type' && is(c.label)));
+    const { isSymbolTag, isLabelTag, placeRegions } = this.regions;
     const symbol = tagged(isSymbolTag);
     // A label: the label's words (what annotation() takes as the attested name: a quote, else a
     // transcription), or a tag saying so, which Recogito Studio's editor can write where it can

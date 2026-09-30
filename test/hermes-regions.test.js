@@ -190,6 +190,12 @@ test('without georeferences Allmaps is never loaded; with them it is, once (in a
   assert.equal(counts.before, 0);
   assert.equal(counts.without, 0, 'no georeferences: nothing of Allmaps loaded');
   assert.equal(counts.with, 1, 'control: the counter moves when a georeference is used');
+  // Nor is the georeference module itself (regions.js, and src/engine/georef/ through it) in the
+  // reader's static imports, so the built page's worker does not carry it.
+  const reader = readFileSync('src/formats/annotations.js', 'utf8');
+  assert.doesNotMatch(reader, /(^|\n)\s*import\b[^;]*?from\s*['"](\.\/regions\.js|\.\.\/engine\/georef\/)/);
+  assert.match(reader, /await import\('\.\/regions\.js'\)/, 'control: the dynamic import is there');
+  assert.match("import { a } from './regions.js';", /(^|\n)\s*import\b[^;]*?from\s*['"](\.\/regions\.js|\.\.\/engine\/georef\/)/, 'control: the pattern finds a static import');
 });
 
 // ---- placed: the Rocque/Dury map, with its manifest -----------------------------------------------------
