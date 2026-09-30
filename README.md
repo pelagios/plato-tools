@@ -25,7 +25,7 @@ itself. How the tools work, and how they are tested, is in [DEVELOPERS.md](DEVEL
 <tr><td nowrap><img src="public/icons/chart-column.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Arithmos</b>: statistical figures</td><td>Publishes figures from statistical tables as RDF Data Cube, and checks the result</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/statistics.html">Statistical tables</a></td></tr>
 <tr><td nowrap><img src="public/icons/history.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Mneme</b>: version check</td><td>Shows that a new version of a published dataset deleted and changed nothing</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/tools.html#comparing-two-versions">Comparing two versions</a></td></tr>
 <tr><td nowrap><img src="public/icons/scale.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Krisis</b>: match review</td><td>Suggests the places two datasets share, for you to accept or reject, and records each judgement as a PLATO attestation. So far: two files of your own</td><td><a href="DEVELOPERS.md#match-review">Match review</a></td></tr>
-<tr><td nowrap><img src="public/icons/file-input.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Hermes</b>: readers</td><td>Brings other formats into PLATO: Recogito's annotations, TEI editions, and any CSV or GeoJSON, its columns matched to PLATO</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/annotations.html">Annotations from Recogito</a></td></tr>
+<tr><td nowrap><img src="public/icons/file-input.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Hermes</b>: readers</td><td>Brings other formats into PLATO: Recogito's annotations (with the regions marked on a georeferenced map placed as points, when the map's georeference is given), TEI editions, and any CSV or GeoJSON, its columns matched to PLATO</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/annotations.html">Annotations from Recogito</a></td></tr>
 <tr><td nowrap><img src="public/icons/landmark.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Agora</b>: publish</td><td>Reports what a dataset still needs to be FAIR and writes its deposit files, gives every attestation a permanent address, and makes a website and w3id redirects for it</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/tools.html#publishing-your-dataset">Publishing your dataset</a></td></tr>
 <tr><td nowrap><img src="public/icons/map-pinned.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Chora</b>: place on the map</td><td>Shows a dataset's places on a map, and adds a point, line or area drawn there. Next: tracing from georeferenced maps</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/tools.html#chora">Placing on the map</a></td></tr>
 </table>
@@ -35,7 +35,6 @@ Still to come, each planned in its own issue, with the plan as a whole in
 
 <table>
 <tr><th width="290">Tool</th><th>What it will do</th><th>Issue</th></tr>
-<tr><td nowrap><img src="public/icons/file-input.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Hermes</b>: more readers</td><td>Georeferenced map regions, as Recogito marks them</td><td><a href="https://github.com/pelagios/plato-tools/issues/5">#5</a></td></tr>
 <tr><td nowrap><img src="public/icons/scale.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Krisis</b>: more matching</td><td>Find a place in other gazetteers, such as the World Historical Gazetteer</td><td><a href="https://github.com/pelagios/plato-tools/issues/6">#6</a></td></tr>
 </table>
 
@@ -88,6 +87,11 @@ node bin/plato-tools.mjs compare release-1.jsonl.gz release-2.jsonl.gz  # was an
   ([web addresses for your identifiers](https://pelagios.org/place-attestation-ontology/guide/tools.html#converting)). `--no-typing` leaves out the
   node types and typed dates that N-Triples output otherwise has. `--cube` adds what Data Cube
   expects of statistical figures.
+- **`--georef FILE`** and **`--manifest FILE`** (each repeatable), for a Recogito export: the IIIF
+  Georeference Annotation of a map its regions are drawn on (from Allmaps), and the map's IIIF
+  manifest if you have it. Each region inside the map becomes a point, citing the map and the
+  georeference ([the mapping](test/fixtures/annotations/README.md#the-mapping)). On the page, choose
+  the files together. Nothing is fetched.
 - **`--work-dir DIR`.** RDF, attestation-centric JSON and comparisons go through a working database
   on disk, as in the browser, so memory stays roughly constant at any size. It is kept in the
   system's temporary directory unless `--work-dir` says otherwise, and removed afterwards. It needs

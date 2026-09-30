@@ -122,6 +122,47 @@ gives the design and the two commands.
 by key, and the fixtures (most of them real exports), are in
 [test/fixtures/annotations](test/fixtures/annotations/README.md#the-mapping).
 
+**Georeferenced regions** (`src/formats/regions.js`, Hermes #5). A Recogito export chosen together
+with IIIF Georeference Annotations, and optionally the maps' IIIF manifests, is one input:
+`detect()` gives the export's input with `georefs` and `manifests` (Files) beside `files`
+(`detectGroup` in `input.js`; any other mix of several files is refused with a reason). On the command
+line they are `--georef FILE` and `--manifest FILE`, both repeatable, for a Recogito export only.
+Nothing is fetched. `annotationSource` (`pipeline.js`) then calls `AnnotationReader.useGeoreferences`,
+which reads each georeference file once (every map of an AnnotationPage), pairing each map with the
+manifest whose id is the one its annotation names, and `place(annotation, attestations)` after each
+`annotation()`, which stays synchronous. Without georeferences neither is called, nothing of
+`src/engine/georef/` is loaded (the test counts Allmaps imports in a process of its own), and the
+output is byte for byte what it was (the test holds the digests).
+
+- **Which map.** The georeferences whose image or canvas the target's source is (`matchTarget`; a
+  IIIF picture address only whole, unrotated and full size, with a warning), in image pixels (as
+  Recogito Studio's regions are); of those, the one whose mask holds the region's centre. None, or
+  more than one, and the region is not placed, and is reported. A region reaching beyond the mask
+  is placed, with a warning.
+- **What is written.** One `Point`: the centre, worked out in pixels (the area centroid; the
+  midpoint by length of a line) and then transformed; `precisionKm` (an array, as the schema has
+  it) the greatest haversine distance from it to the transformed outline's vertices, rounded up to
+  0.01 km (`radiusKm`, where the georeference's own error is to be added once the georeference
+  module estimates it). The outline is reported, not carried. The image's citation is replaced by
+  `georefCitation(record, { region })` and followed by `georefAnnotationCitation(record)`; the
+  notes get `georefNote(record)` (no `fetched`: "retrieval date not recorded"), and a rectangle's
+  pixels in words.
+- **Roles, by evidence only.** `plato:LabelAnchor` for a transcription, a quote, or a tag `label`;
+  otherwise no role, a note and a warning. The tag conventions (`label`, `symbol`, or `map label`,
+  `map symbol`, singular or plural, any case, free or from a vocabulary) are the only evidence
+  Recogito Studio's own editor can write for an image: it has no transcription, and Annotorious
+  writes no quote for an image. A region tagged `symbol` has no role for now: whether a map's
+  symbol is `plato:RepresentativePoint` or `plato:FeaturePoint` is the maintainer's decision (the
+  TODO at `roleOf`).
+- **Reporting.** Every region is reported by exactly one of the `annotation-region-*` kinds, and a
+  placed one also by `annotation-region-shape`; with georeferences an SVG shape is not also
+  reported as `annotation-selector` (it still is when its annotation is not converted at all). A
+  georeference or manifest that cannot be read is an error, and the run goes on without it; one
+  that placed nothing, or a manifest no map uses, is a warning.
+- **The fixture** is constructed until a real Recogito Studio export of regions on the Rocque/Dury
+  map replaces it: `test/fixtures/annotations/make-recogito-studio-regions.mjs` writes it, following
+  Recogito Studio's exporter and Annotorious's serialiser step by step.
+
 ### Hermes: TEI, and tables of places (CSV and GeoJSON)
 
 The readers are in `src/engine/hermes/`. Each one's mapping, row by row, is in its fixture folder's
@@ -593,7 +634,8 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
 - **A document's header comes first.** `dataSets` or `relationTypes` written after the records are
   reported, not read.
 - **Web annotations** give attestations about places the file does not describe, so each place is
-  labelled with its address, with a warning.
+  labelled with its address, with a warning. A region on a georeferenced map is carried as a
+  point, never as its outline.
 - **Finishing a review with the dataset output holds the dataset written in memory** until the
   version check has read it back (the engine's hosts have no way to read an output again): as Blob
   parts, so about the size of the file in UTF-8, on top of what the conversion and the check need. A
