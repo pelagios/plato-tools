@@ -30,12 +30,15 @@ export function parseImageRequest(id) {
 
 /**
  * Why an image request does not show the image service's own pixel frame: 'cropped' (region is
- * not "full"), 'rotated' (rotation other than 0, or mirrored with "!"), or null when it does.
- * The size only scales the picture, so it does not count.
+ * not "full"), 'rotated' (rotation other than 0, or mirrored with "!"), 'resized' (a size other
+ * than "full" or "max"), or null when it does. A static picture's pixels are what an annotation
+ * tool measures on it, so a scaled picture would put every region in the wrong place; "max" is
+ * taken as the whole image, as servers without a size limit serve it.
  */
 export function imageRequestFrameChange(parts) {
   if (parts.region !== 'full') return 'cropped';
   if (!/^0(?:\.0+)?$/.test(parts.rotation)) return 'rotated';
+  if (parts.size !== 'full' && parts.size !== 'max') return 'resized';
   return null;
 }
 
