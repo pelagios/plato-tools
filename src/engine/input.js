@@ -2,7 +2,7 @@
 // text is cut into lines or parsed incrementally, and JSON documents are parsed with a streaming
 // parser that hands over one record at a time. Works on browser File objects and on Node's File.
 // Vendored, with the one change that keeps a U+FEFF inside a string: see src/vendor/streamparser-json/.
-import { JSONParser } from '../vendor/streamparser-json/index.js';
+import { JSONParser, TokenType } from '../vendor/streamparser-json/index.js';
 
 /**
  * The file's content stopped the reader: JSON that is not well formed or stops early, or
@@ -61,14 +61,31 @@ export async function head(file, bytes = 65536) {
 }
 
 const STOP = Symbol('stop');
+const SHAPE = { [TokenType.LEFT_BRACE]: 'an object', [TokenType.STRING]: 'a string', [TokenType.NUMBER]: 'a number', [TokenType.TRUE]: 'true', [TokenType.FALSE]: 'false', [TokenType.NULL]: 'null' };
 /**
  * Stream a JSON document, yielding { path, value } for each element of the arrays named in
- * `arrays` (e.g. ['spatialEntities', 'identityRelations']) and each top-level key in `keys`.
+ * `arrays` (e.g. ['spatialEntities', 'identityRelations']) and each top-level key in `keys`, and
+ * { path, notAList } for one of `arrays` given as something else ('an object', 'a number', …).
  */
 export async function* jsonDocument(file, { arrays = [], keys = [], onlyKeys = false } = {}) {
   const paths = [...arrays.map((a) => `$.${a}.*`), ...keys.map((k) => `$.${k}`)];
   const parser = new JSONParser({ paths, keepStack: false });
   const queue = [];
+  // A list given as something else never matches its elements' path, so it would pass in silence:
+  // the top level's keys are followed token by token, which holds nothing of the values.
+  if (arrays.length && !onlyKeys) {
+    let depth = 0, expect = null, key = null;
+    parser.onToken = ({ token, value }) => {
+      if (depth === 1) {
+        if (expect === 'value') { expect = null; if (arrays.includes(key) && token !== TokenType.LEFT_BRACKET) queue.push({ path: key, notAList: SHAPE[token] }); }
+        else if (expect === 'key' && token === TokenType.STRING) { key = value; expect = null; }
+        else if (token === TokenType.COLON) expect = 'value';
+        else if (token === TokenType.COMMA) expect = 'key';
+      }
+      if (token === TokenType.LEFT_BRACE || token === TokenType.LEFT_BRACKET) { if (depth++ === 0 && token === TokenType.LEFT_BRACE) expect = 'key'; }
+      else if (token === TokenType.RIGHT_BRACE || token === TokenType.RIGHT_BRACKET) depth--;
+    };
+  }
   parser.onValue = ({ value, key, stack, parent }) => {
     const top = stack[1]?.key ?? key;
     if (arrays.includes(top) && typeof key === 'number') { if (onlyKeys) throw STOP; queue.push({ path: top, value }); }

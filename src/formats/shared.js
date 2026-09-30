@@ -9,6 +9,13 @@ import { PLATO } from '../lib/context.js';
  * false counts as a denial, so that a malformed flag ("true", "yes") errs towards leaving a
  * statement out, never towards asserting what the source denies.
  */
+/**
+ * A list, or nothing: what the JSON Schema says is an array but is given as something else (an
+ * object, a string, a number, true, null) is read as holding nothing. The Check reports the wrong
+ * shape (the schema says what each list is); a writer must not stop on it (DEVELOPERS.md, errors).
+ */
+export const list = (x) => (Array.isArray(x) ? x : []);
+
 export const isDenial = (a) => a.negated !== undefined && a.negated !== null && a.negated !== false;
 
 // A meta type may be written in full or with the context's plato: prefix, which expands to it.
@@ -32,7 +39,7 @@ const WITHDRAWING = new Map([[PLATO + 'Retracts', 'retracted'], [PLATO + 'Supers
  * resolveWithdrawn(): whether a target is withdrawn depends on whether its withdrawer still holds.
  */
 export function collectWithdrawn(attestations, into = new Map()) {
-  for (const a of attestations || []) {
+  for (const a of list(attestations)) {
     if (!a || typeof a !== 'object') continue;
     for (const m of [].concat(a.meta || [])) {
       const kind = WITHDRAWING.get(metaType(m));
@@ -91,7 +98,7 @@ export function resolveWithdrawn(edges) {
  * safe. Each attestation left out is reported, as 'retracted' or 'superseded'.
  */
 export function currentAttestations(rec, withdrawn, loss) {
-  const atts = rec.attestations || [];
+  const atts = list(rec.attestations);
   // `withdrawn` is the whole document's resolution (resolveWithdrawn().status); without it, this
   // record's own withdrawals are resolved here.
   const status = withdrawn || resolveWithdrawn(collectWithdrawn(atts)).status;
@@ -180,10 +187,10 @@ export const isMemberOf = (rt) => plato(rt) === PLATO + 'MemberOf';
  * the relation's target. Used to find a route that is, through its members, a member of itself.
  */
 export function collectMembership(attestations, subject, into = new Map()) {
-  for (const a of attestations || []) {
+  for (const a of list(attestations)) {
     if (!a || typeof a !== 'object') continue;
     const member = typeof a.about === 'string' ? a.about : subject;
-    for (const r of a.relations || []) {
+    for (const r of list(a.relations)) {
       if (!r || !isMemberOf(r.relationType) || typeof r.relatesTo !== 'string' || typeof member !== 'string') continue;
       (into.get(member) || into.set(member, new Set()).get(member)).add(r.relatesTo);
     }
