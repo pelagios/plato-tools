@@ -408,7 +408,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       if (ev.type === 'record') { rep.count('places'); rep.count('attestations', list(ev.value?.attestations).length); dry.record(ev.newEntity ? 'newSpatialEntities' : 'spatialEntities', ev.value); }
       else if (ev.type === 'idr') { rep.count('identity relations'); dry.record('identityRelations', ev.value); }
       if (writer) {
-        try { writer.event(augmented(ev)); }
+        try { await writer.event(augmented(ev)); }
         catch (e) { rep.error('record-failed', 'A record could not be written and is left out of the output; the rest of the file was still converted', `${ev.value?.['@id'] || `item ${ev.n}`}: ${e && e.message || e}`); }
       }
       beat('reading');
@@ -473,10 +473,10 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       n++; rep.count('places'); rep.count('attestations', rec.attestations?.length || 0);
       if (isRdf && !V.entity(rec)) rep.error('schema', explainSchema(V.entity.errors, false), `${e}: ${ajvMessage(V.entity.errors)}`);
       collectMembership(rec.attestations, rec['@id'], membership);
-      writer && writer.event(augmented({ type: 'record', value: rec, n }));
+      if (writer) await writer.event(augmented({ type: 'record', value: rec, n }));
       beat('writing', { places: n });
     }
-    for (const i of idrIds) { rep.count('identity relations'); writer && writer.event({ type: 'idr', value: r2j.identityRelation(i) }); }
+    for (const i of idrIds) { rep.count('identity relations'); if (writer) await writer.event({ type: 'idr', value: r2j.identityRelation(i) }); }
     store.close();
   }
   for (const c of membershipCycles(membership)) rep.error('membership-cycle', 'A route, itinerary or network is, through its members, a member of itself (MemberOf, followed round, comes back to where it started)', c);
@@ -550,7 +550,25 @@ async function makeWriter(target, env, rep, options, typing, outputs, input) {
   const loss = (l) => (l.kind === 'dropped' ? rep.loss(`dropped:${l.key}`, droppedText(l.key, FORMAT_WORDS[target]), l.value) : rep.loss(l.kind, LOSS_TEXT[l.kind] || l.kind, l.value));
   if (target === 'plato-jsonl' || target === 'plato-json') {
     const sink = await open(TARGETS[target].ext);
-    let started = false, inIdrs = false;
+    let started = false;
+    // A document holds its places, then its identity relations; a JSON Lines file may mix them (DEEP
+    // does). Identity relations are held back and written after the last place, never with places
+    // inside them: in memory up to a limit, then in a working database, so that any number can wait.
+    const HELD = options.heldIdentities || 10000;   // the tests set it low, to reach the database
+    let held = [], heldDb = null, heldIns = null, heldCount = 0;
+    const hold = async (line) => {
+      heldCount++;
+      if (!heldDb && held.length < HELD) { held.push(line); return; }
+      if (!heldDb) {
+        heldDb = await env.openDb();
+        heldDb.exec('CREATE TABLE held(n INTEGER PRIMARY KEY, line TEXT NOT NULL)');
+        heldIns = heldDb.prepare('INSERT INTO held(line) VALUES (?)');
+        heldDb.exec('BEGIN');
+        for (const l of held) heldIns.bind([l]).stepReset();
+        held = [];
+      }
+      heldIns.bind([line]).stepReset();
+    };
     return {
       header(h) {
         const head = { $schema: 'https://w3id.org/plato/schemas/place-centric.schema.json', ...h, profile: 'place-centric' };
@@ -561,11 +579,28 @@ async function makeWriter(target, env, rep, options, typing, outputs, input) {
         if (ev.type === 'attestation') { rep.warning('attestation-centric', 'Attestation-centric input is regrouped by place for place-centric output'); return; }
         const line = JSON.stringify(ev.value);
         if (target === 'plato-jsonl') { sink.write(line + '\n'); return; }
-        if (ev.type === 'idr' && !inIdrs) { sink.write('],"identityRelations":['); inIdrs = true; started = false; }
-        if (ev.type === 'record' && inIdrs) { rep.warning('order', 'A place came after the identity relations; it is written with them'); }
+        if (ev.type === 'idr') return hold(line);
         sink.write((started ? ',' : '') + line); started = true;
       },
-      async close() { if (target === 'plato-json') sink.write(']}'); outputs.push(await sink.close()); },
+      async close() {
+        if (target === 'plato-json') {
+          sink.write(']');
+          if (heldCount) {
+            sink.write(',"identityRelations":[');
+            let first = true;
+            const put = (l) => { sink.write((first ? '' : ',') + l); first = false; };
+            if (heldDb) {
+              heldIns.finalize(); heldDb.exec('COMMIT');
+              const q = heldDb.prepare('SELECT line FROM held ORDER BY n');
+              try { while (q.step()) put(q.get(0)); } finally { q.finalize(); }
+              heldDb.close();
+            } else for (const l of held) put(l);
+            sink.write(']');
+          }
+          sink.write('}');
+        }
+        outputs.push(await sink.close());
+      },
     };
   }
   if (target === 'ntriples') {
