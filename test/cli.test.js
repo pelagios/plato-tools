@@ -22,7 +22,6 @@ const scratch = () => { const d = mkdtempSync(join(tmpdir(), 'plato-tools-cli-te
 after(() => { for (const d of made) rmSync(d, { recursive: true, force: true }); });
 const EX = `${PLATO_REPO}/schemas/examples`;
 const TABLES = `${PLATO_REPO}/schemas/tables/examples`;
-const DEFAULT_BASE = 'https://example.org/my-dataset/';
 
 /** The customs tables in a directory of their own, with names.csv citing a place that does not exist. */
 function brokenTables() {
@@ -99,8 +98,8 @@ test('--json: one object per input, then the total, and the report is the engine
   const lines = jsonLines(r.out);
   assert.deepEqual(lines.map((l) => [l.type, l.status]), [['input', 'problems'], ['input', 'ok'], ['input', 'failed'], ['total', undefined]]);
   const [bad, good, missing, total] = lines;
-  assert.equal(bad.format, 'tables'); assert.equal(bad.files.length, 9); assert.equal(bad.errors, 1);
-  const engine = await go(readdirSync(broken).map((f) => file(join(broken, f))), 'check', undefined, { base: DEFAULT_BASE, typing: true, name: 'broken' });
+  assert.equal(bad.format, 'tables'); assert.equal(bad.files.length, 10); assert.equal(bad.errors, 1);
+  const engine = await go(readdirSync(broken).map((f) => file(join(broken, f))), 'check', undefined, { typing: true, name: 'broken' });
   assert.deepEqual(bad.items, engine.report.items);
   assert.deepEqual(bad.counts, engine.report.counts);
   assert.equal(good.errors, 0); assert.equal(good.counts.places, 2);
@@ -114,7 +113,7 @@ test('CSV files named one by one are one set of tables per directory', () => {
   const r = cli('check', '--json', ...names('customs'), ...names('survey'));
   assert.equal(r.code, 0, r.out + r.err);
   const lines = jsonLines(r.out).filter((l) => l.type === 'input');
-  assert.deepEqual(lines.map((l) => [l.files.length, l.counts.places]), [[9, 2], [9, 3]]);
+  assert.deepEqual(lines.map((l) => [l.files.length, l.counts.places]), [[10, 2], [10, 3]]);
 });
 test('a workbook, and the zip the command line writes, are each one set of tables', () => {
   const dir = scratch();
@@ -148,7 +147,8 @@ for (const [what, args, files, options, target] of CASES) {
     const r = cli('convert', '--to', target, '--out', out, '--json', ...args);
     assert.equal(r.code, 0, r.out + r.err);
     const [line] = jsonLines(r.out);
-    const engine = await go(files(), 'convert', target, { base: DEFAULT_BASE, typing: true, ...options });
+    // With no --base, the command line gives the engine none: the about sheet's base_uri, else the default.
+    const engine = await go(files(), 'convert', target, { typing: true, ...options });
     const names = Object.keys(engine.e.outs);
     assert.equal(names.length, 1);
     assert.deepEqual(readdirSync(out), names, 'the same output, under the same name');

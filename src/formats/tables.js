@@ -183,6 +183,88 @@ export function checkTableRules(rows, { issue, warn }) {
   return member;
 }
 
+// ---- the about sheet: the dataset described (PLATO's FAIR metadata) -----------------------------
+// One row: the gazetteer header of the document the tables make. Lists are ';'-separated in a cell.
+const parts = (v) => (v ? String(v).split(';').map((x) => x.trim()).filter(Boolean) : []);
+const withSlash = (b) => (b.endsWith('/') || b.endsWith('#') ? b : b + '/');
+
+/**
+ * The about row -> the document's gazetteer. `base` is the address the places and sources are made
+ * under; it is the gazetteer's own address when the row gives no dataset_uri, as before the sheet.
+ * Addresses in creator become {"@id"} and names in creator_name {"name"}: the tables hold each author
+ * as one or the other, since a cell cannot pair them.
+ */
+export function aboutToGazetteer(row, base, fallbackTitle) {
+  return clean({
+    '@id': row.dataset_uri || base, title: row.title || fallbackTitle, description: row.description, contributor: row.contributor,
+    creator: [...parts(row.creator).map((id) => ({ '@id': id })), ...parts(row.creator_name).map((name) => ({ name }))],
+    licence: row.licence, version: row.version, status: row.status,
+    keywords: parts(row.keywords), spatial: parts(row.spatial),
+    temporal: row.temporal_from || row.temporal_to ? clean({ startDate: row.temporal_from, endDate: row.temporal_to }) : undefined,
+    landingPage: row.landing_page, uriSpace: row.base_uri,
+  });
+}
+
+/**
+ * PLATO's rules for the about sheet that CSVW cannot state: exactly one row; a licence once the
+ * dataset is published (and a warning without one before); and a base_uri, without which the
+ * addresses the tools make are not permanent. `rows` is null when the sheet is missing, which
+ * validateTables reports. `base` is a base given for this conversion (--base), which wins.
+ */
+export function checkAboutRules(rows, { issue, warn }, { base } = {}) {
+  if (!rows) return;
+  if (!rows.length) { issue({ table: 'about.csv', message: 'has no row: give one row describing the dataset, with at least its title' }); return; }
+  if (rows.length > 1) issue({ table: 'about.csv', row: 2, message: 'has more than one row: it describes the dataset as a whole, in exactly one row', detail: `has ${rows.length} rows; it describes the dataset as a whole, in exactly one row` });
+  const r = rows[0];
+  if (!r.licence && r.status === 'published') issue({ table: 'about.csv', row: 1, column: 'licence', message: "is empty, but status is 'published': a published dataset must state its licence" });
+  else if (!r.licence) warn({ table: 'about.csv', row: 1, column: 'licence', message: "is empty: say under what licence others may reuse the dataset (it is required once status is 'published')" });
+  if (!r.base_uri) warn({ table: 'about.csv', row: 1, column: 'base_uri', message: base
+    ? 'is empty, so the addresses of places and sources are made from the base given for this conversion, which the tables do not record: they will not be permanent unless the same base is given every time; give it as base_uri'
+    : 'is empty, so the addresses of places and sources are made from a stand-in base and will not be permanent: give a base address you control' });
+  else if (base && withSlash(base) !== withSlash(r.base_uri)) warn({ table: 'about.csv', row: 1, column: 'base_uri', message: 'differs from the base given for this conversion, which is used instead: the addresses of places and sources are not the ones the tables declare',
+    detail: `is ${r.base_uri}, but ${base} was given for this conversion and is used instead` });
+}
+
+/**
+ * The document's gazetteer -> the about row (aboutToGazetteer's inverse). A value its column cannot
+ * hold (a contributor named in words, a list item containing ';') is left out and reported, and so
+ * is every key the sheet has no column for (dropKeys). An author with both an address and a name
+ * keeps the address, as the creator column holds one or the other.
+ */
+export function gazetteerToAbout(g, loss = () => {}, accepts = () => true) {
+  g = g && typeof g === 'object' && !Array.isArray(g) ? g : {};
+  dropKeys(g, 'gazetteer', TABLE_KEEPS.gazetteer, loss);
+  const bad = (key, v) => loss({ kind: 'about-value', value: `${key}: ${typeof v === 'string' ? v : JSON.stringify(v)}` });
+  const cell = (key, col, v) => {
+    if (v === undefined || v === null || v === '') return '';
+    if ((typeof v === 'string' || typeof v === 'number') && !String(v).includes('\n') && accepts('about', col, String(v))) return String(v);
+    bad(key, v); return '';
+  };
+  const list = (key, col, vs) => (Array.isArray(vs) ? vs : vs === undefined || vs === null ? [] : [vs])
+    .filter((v) => { const ok = typeof v === 'string' && v.trim() !== '' && !v.includes(';') && v === v.trim() && accepts('about', col, v); if (!ok && v !== null && v !== undefined) bad(key, v); return ok; }).join(';');
+  const addresses = [], names = [];
+  for (const c of Array.isArray(g.creator) ? g.creator : g.creator === undefined || g.creator === null ? [] : [g.creator]) {
+    if (c && typeof c === 'object' && typeof c['@id'] === 'string') {
+      addresses.push(c['@id']);
+      if (c.name !== undefined && c.name !== null) loss({ kind: 'creator-name', value: `${c['@id']}: ${c.name}` });
+    } else if (c && typeof c === 'object' && typeof c.name === 'string') names.push(c.name);
+    else bad('creator', c);
+  }
+  const t = g.temporal && typeof g.temporal === 'object' ? g.temporal : {};
+  if (g.temporal !== undefined && g.temporal !== null && typeof g.temporal !== 'object') bad('temporal', g.temporal);
+  dropKeys(t, 'temporal', new Set(['startDate', 'endDate']), loss);
+  return {
+    title: cell('title', 'title', g.title), description: cell('description', 'description', g.description),
+    creator: list('creator', 'creator', addresses), creator_name: list('creator', 'creator_name', names),
+    contributor: cell('contributor', 'contributor', g.contributor), licence: cell('licence', 'licence', g.licence),
+    version: cell('version', 'version', g.version), status: cell('status', 'status', g.status),
+    keywords: list('keywords', 'keywords', g.keywords), spatial: list('spatial', 'spatial', g.spatial),
+    temporal_from: cell('temporal.startDate', 'temporal_from', t.startDate), temporal_to: cell('temporal.endDate', 'temporal_to', t.endDate),
+    landing_page: cell('landingPage', 'landing_page', g.landingPage), dataset_uri: cell('@id', 'dataset_uri', g['@id']),
+    base_uri: cell('uriSpace', 'base_uri', g.uriSpace),
+  };
+}
+
 /** Identifier minting for tables: a base address the user chooses, plus the table's own ids. */
 export function tableIds(base, sourcesById) {
   const b = base.endsWith('/') || base.endsWith('#') ? base : base + '/';
@@ -214,7 +296,8 @@ export { ATTESTATION_SHEETS };
 // a key PLATO adds after this was written. Keys the tables hold only in some cases are checked where
 // they are written: a form status only on a name row, a vocabulary value only if it is PLATO's own.
 export const TABLE_KEEPS = {
-  gazetteer: new Set(['version', 'status', 'isVersionOf', 'previousVersion']),   // reported by versionLosses
+  // The about sheet (gazetteerToAbout); isVersionOf and previousVersion have no column, so are reported.
+  gazetteer: new Set(['@id', 'title', 'description', 'contributor', 'creator', 'licence', 'version', 'status', 'keywords', 'spatial', 'temporal', 'landingPage', 'uriSpace']),
   spatialEntity: new Set(['@id', 'label', 'ccodes', 'entityIdentifier', 'attestations', 'identityRelations']),
   attestation: new Set(['about', 'names', 'geometries', 'timespans', 'types', 'properties', 'relations', 'sources', 'citations', 'meta', 'certainty', 'certaintyLevel', 'certaintyNote', 'negated', 'sourceStance', 'notes', 'occurrenceCount', 'occurrenceContext', 'formStatus', 'sequence', 'computed']),
   name: new Set(['toponym', 'language', 'script', 'romanized', 'nameType', 'sourceLabel', 'qualification']),
@@ -243,8 +326,9 @@ export function sourceLosses(s, loss) {
   }
 }
 const GVP_BROADER_PARTITIVE = 'http://vocab.getty.edu/ontology#broaderPartitive';
-// PLATO's relations to people, objects and events: their target is described elsewhere, not a place.
-const EXTERNAL = new Set(['BirthplaceOf', 'DeathplaceOf', 'ResidenceOf', 'FindspotOf', 'SettingOf', 'WorkplaceOf']);
+// PLATO's relations to people, objects and events, and to images and records about a place (DepictedIn,
+// SubjectOf): their target is described elsewhere, not a place, so it goes to related_uri.
+const EXTERNAL = new Set(['BirthplaceOf', 'DeathplaceOf', 'ResidenceOf', 'FindspotOf', 'SettingOf', 'WorkplaceOf', 'DepictedIn', 'SubjectOf']);
 const LEVELS = new Set(['Certain', 'LessCertain', 'Uncertain']);   // the tables' certainty_level values
 const ACCURACY = new Set(['Accurate', 'Inaccurate', 'False']), COMPLETENESS = new Set(['Complete', 'Reconstructable', 'NonReconstructable']);
 const local = (iri, prefix) => (iri && iri.startsWith(prefix) ? iri.slice(prefix.length) : null);

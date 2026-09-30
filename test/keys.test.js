@@ -43,6 +43,10 @@ function hostBase(host, slug) {
     case 'qualification': return {};
     case 'contributorObject': return { name: 'Base contributor' };
     case 'organization': return { name: 'Base organisation' };
+    // The gazetteer's authors and the years it covers (PLATO's FAIR metadata): an author by name, and
+    // a start year, so that each key is tested beside a value the writer already holds.
+    case 'creator': return { name: 'Base creator' };
+    case 'temporal': return { startDate: '1300' };
     default: throw new Error(`no host object for ${host}`);
   }
 }
@@ -173,6 +177,9 @@ for (const w of ['lpf', 'lpf-seq']) {
     'spatialEntities.attestations.citations.source.derivedFrom': 'source-derivation',
     'spatialEntities.identityRelations.source': 'dropped:identityRelation.source',
     'identityRelations.source': 'dropped:identityRelation.source',
+    // LPF v1 has no member for the gazetteer's authors or the years it covers: each is left out whole.
+    'gazetteer.creator': 'dropped:gazetteer.creator',
+    'gazetteer.temporal': 'dropped:gazetteer.temporal',
   });
 }
 

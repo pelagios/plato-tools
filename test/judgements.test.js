@@ -257,8 +257,8 @@ test('tables using every new column are valid, and tables -> JSON -> tables give
     const orig = Papa.parse(readFileSync(`${FIXTURE}/${s}.csv`, 'utf8'), { header: true, skipEmptyLines: true }).data;
     assert.deepEqual(norm(sheet(zip, `${s}.csv`)), norm(orig), `${s} rows differ`);
   }
-  // The tables have no sheet for the gazetteer, so its title and address are reported, and nothing else.
-  assert.deepEqual(lossKinds(b).sort(), ['dropped:gazetteer.@id', 'dropped:gazetteer.title']);
+  // The gazetteer is the about sheet's row, so nothing at all is reported.
+  assert.deepEqual(lossKinds(b).sort(), []);
   const again = await go([new File([zip], 'again.zip')], 'check');
   assert.deepEqual(errors(again), []);
 });

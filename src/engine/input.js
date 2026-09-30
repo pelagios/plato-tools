@@ -96,18 +96,18 @@ export async function* jsonDocument(file, { arrays = [], keys = [], onlyKeys = f
 }
 
 // ---- detection ----------------------------------------------------------------------------------
-export const TABLE_SHEETS = ['places', 'sources', 'names', 'locations', 'types', 'relations', 'connections', 'properties', 'identities'];
+export const TABLE_SHEETS = ['about', 'places', 'sources', 'names', 'locations', 'types', 'relations', 'connections', 'properties', 'identities'];
 const base = (name) => name.replace(/\.gz$/i, '').toLowerCase();
 
 /**
  * Group the chosen files into one input and say what it is:
- *   tables (9 CSVs, a zip or a workbook), plato-json, plato-jsonl, lpf, lpf-seq, ntriples, nquads, turtle.
+ *   tables (10 CSVs, a zip or a workbook), plato-json, plato-jsonl, lpf, lpf-seq, ntriples, nquads, turtle.
  */
 export async function detect(files) {
   const names = files.map((f) => base(f.name));
   const csvs = files.filter((f, i) => names[i].endsWith('.csv'));
   if (csvs.length && csvs.length === files.length) return { format: 'tables', container: 'csv', files };
-  if (files.length !== 1) return { format: null, reason: 'Choose one file, or the nine CSV files of a set of tables.' };
+  if (files.length !== 1) return { format: null, reason: 'Choose one file, or the ten CSV files of a set of tables.' };
   const f = files[0], n = names[0];
   if (n.endsWith('.zip')) return { format: 'tables', container: 'zip', files };
   if (n.endsWith('.xlsx') || n.endsWith('.ods')) return { format: 'tables', container: 'workbook', files };

@@ -63,7 +63,10 @@ export function keyPaths(profile = 'place-centric', { only } = {}) {
       for (const v of variants) {
         const arr = v.s.type === 'array';
         const item = arr ? resolve(v.s.items, v.root) : v;
-        const childHost = item.def || (key === 'gazetteer' ? 'gazetteer' : key === 'structure' ? 'structure' : key === 'components' ? 'component' : null);
+        // An object defined in place rather than in $defs is its own host: the gazetteer, a table's
+        // structure and its components, and the gazetteer's creators and temporal coverage.
+        const childHost = item.def || (key === 'gazetteer' ? 'gazetteer' : key === 'structure' ? 'structure' : key === 'components' ? 'component'
+          : host === 'gazetteer' && (key === 'creator' || key === 'temporal') ? key : null);
         const objectVariant = isObject(item.s) && !WHOLE.has(key);
         const leaf = { path: [...path, key], key, schema: v.s, item: item.s, def: item.def, childHost, host, hosts, variant: ks.oneOf ? (objectVariant ? 'object' : 'value') : null };
         if (!objectVariant) { out.push(leaf); continue; }

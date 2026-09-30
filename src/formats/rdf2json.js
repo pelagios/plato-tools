@@ -95,6 +95,9 @@ export class Rdf2Json {
   }
   _defSchema(def) {
     if (def === '$gazetteer') return this.profile.properties.gazetteer;
+    // An object the gazetteer header defines in place, not in $defs (a creator, the years covered):
+    // '$gazetteer.creator' is the schema of one creator.
+    if (def.startsWith('$gazetteer.')) { const s = this.profile.properties.gazetteer.properties[def.slice(11)]; return s.type === 'array' ? s.items : s; }
     return this.core.$defs[def];
   }
   /** The reverse mapping for one JSON object type in one active context, built once. */
@@ -116,7 +119,12 @@ export class Rdf2Json {
         return;
       }
       if (!term.iri) return;
-      const entry = { key, term, shape: shape(schema, this.core, this.profile), path, ctx: child(active, term) };
+      let sh = shape(schema, this.core, this.profile);
+      // The gazetteer's creators and its temporal coverage are objects defined in place in the header's
+      // schema: each is read as a node of its own (a creator's foaf:name, a period's dcat:startDate).
+      const inner = schema && schema.type === 'array' ? schema.items : schema;
+      if (def === '$gazetteer' && inner && !inner.$ref && inner.type === 'object' && inner.properties) sh = { kind: 'object', def: `$gazetteer.${key}`, array: schema.type === 'array' };
+      const entry = { key, term, shape: sh, path, ctx: child(active, term) };
       const table = term.reverse ? m.rev : m.fwd;
       if (!table.has(term.iri)) table.set(term.iri, entry);
     };

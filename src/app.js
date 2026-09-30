@@ -72,7 +72,7 @@ function start(action) {
   $('check').disabled = $('convert').disabled = true;
   $('phase').textContent = 'Starting…';
   Object.assign(state, { phase: 'running', action, target, report: null, outputs: null, error: null });
-  worker.postMessage({ cmd: 'run', files, action, target, options: { base: $('base').value, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked } });
+  worker.postMessage({ cmd: 'run', files, action, target, options: { base: $('base').value.trim() || undefined, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked } });
 }
 function onProgress(p) {
   $('phase').textContent = progressText(p);

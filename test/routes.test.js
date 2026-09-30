@@ -1,7 +1,9 @@
 // Routes, itineraries and networks, and places in the history of people, objects and events (PLATO
 // 0.6.0): plato:MemberOf with a sequence, the connections sheet, relations to a target described
 // elsewhere (related_uri, relatedLabel), and plato:computed. The fixture test/fixtures/tables-routes
-// was accepted by rdf-tabular (strict, serialize --validate) on 2026-09-29, 345 triples.
+// was accepted by rdf-tabular (strict, serialize --validate) on 2026-09-29, 345 triples, and with its
+// about sheet (a draft with a title only) on 2026-09-30, 350 triples. A set of CSV files is named
+// after the first, which is now about.csv.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -21,8 +23,9 @@ const rowsOf = (text) => Papa.parse(text, { header: true, skipEmptyLines: true }
 test('tables with routes, segments, connections and outside targets are valid, and read as PLATO says', async () => {
   const r = await go(tables(), 'convert', 'plato-jsonl');
   assert.deepEqual(items(r, 'error'), []);
-  assert.deepEqual(items(r, 'warning'), []);
-  const recs = records(r, 'connections.jsonl');
+  // The fixture's about sheet is a draft with only a title: it has no licence and no base_uri, each a warning.
+  assert.deepEqual(items(r, 'warning').map((i) => i.message.split(':')[0]).sort(), ['about.csv, column base_uri', 'about.csv, column licence']);
+  const recs = records(r, 'about.jsonl');
   const atts = (id) => recs.find((x) => x.entityIdentifier === id).attestations;
   const station = atts('bunsty').find((a) => a.relations?.[0].relationType === P + 'MemberOf');
   assert.equal(station.sequence, 3);
@@ -38,7 +41,7 @@ test('tables with routes, segments, connections and outside targets are valid, a
 
 test('tables -> PLATO -> tables gives back every relations and connections row', async () => {
   const a = await go(tables(), 'convert', 'plato-jsonl');
-  const b = await go([textFile(outText(a.e, 'connections.jsonl'), 'routes.jsonl')], 'convert', 'tables');
+  const b = await go([textFile(outText(a.e, 'about.jsonl'), 'routes.jsonl')], 'convert', 'tables');
   assert.deepEqual(items(b, 'error'), []);
   const z = unzipSync(b.e.outs['routes-tables.zip'][0]);
   for (const sheet of ['relations', 'connections']) {
@@ -78,6 +81,31 @@ test('JSON -> RDF: the new keys map to PLATO terms, and RDF -> JSON gives them b
   for (const s of ['"sequence":3', '"relatedLabel":"the Buddha"', '"computed":true']) assert.ok(back.includes(s), `${s} not in ${back}`);
 });
 
+// Images and records about a place (PLATO DepictedIn, SubjectOf): outside targets, like people and
+// events, so they go to related_uri and never become places of their own.
+test('a DepictedIn relation with a label goes JSON -> tables -> JSON through related_uri and related_label, unchanged', async () => {
+  const photo = { relatesTo: 'https://collections.example.org/photo/1234', relatedLabel: 'Aerial photograph of the cave site, 1962', relationType: P + 'DepictedIn' };
+  const record = { relatesTo: 'https://archive.example.org/file/77', relationType: P + 'SubjectOf' };
+  const doc = { profile: 'place-centric', gazetteer: { '@id': 'https://example.org/my-dataset/', title: 't' }, spatialEntities: [{ '@id': 'https://example.org/my-dataset/place/cave', label: 'Cave', entityIdentifier: 'cave', attestations: [
+    { relations: [photo], citations: [{ source: 'https://example.org/my-dataset/source/cat' }] },
+    { relations: [record], citations: [{ source: 'https://example.org/my-dataset/source/cat' }] },
+  ] }] };
+  const t = await go([textFile(JSON.stringify(doc), 'd.json')], 'convert', 'tables');
+  assert.deepEqual(items(t, 'error'), []);
+  assert.ok(!kinds(t, 'loss').includes('relation-type-not-in-plato'), kinds(t, 'loss').join(', '));
+  const z = unzipSync(t.e.outs['d-tables.zip'][0]);
+  const rel = rowsOf(strFromU8(z['relations.csv']));
+  assert.deepEqual(rel.map((r) => [r.relation_type, r.related_place_id, r.related_uri, r.related_label]),
+    [['DepictedIn', '', photo.relatesTo, photo.relatedLabel], ['SubjectOf', '', record.relatesTo, '']]);
+  assert.deepEqual(rowsOf(strFromU8(z['places.csv'])).map((r) => r.place_id), ['cave'], 'the photograph and the file get no place rows');
+  const back = await go([new File([t.e.outs['d-tables.zip'][0]], 'd.zip')], 'convert', 'plato-jsonl');
+  assert.deepEqual(items(back, 'error'), []);
+  // A record named by no label is a warning, as for any outside target; the photograph's has one.
+  assert.deepEqual(items(back, 'warning').filter((i) => /related_label/.test(i.message)).map((i) => i.count), [1]);
+  const [cave] = records(back, 'd.jsonl');
+  assert.deepEqual(cave.attestations.map((a) => a.relations[0]), [photo, record]);
+});
+
 test('a computed value is left out of the tables and of LPF, and reported; never written as evidence', async () => {
   const doc = {
     profile: 'place-centric', gazetteer: { '@id': 'https://example.org/g', title: 't' },
@@ -103,7 +131,7 @@ test('a computed value is left out of the tables and of LPF, and reported; never
 
 test('LPF: a sequence and an outside target\'s name are reported as losses, never dropped silently', async () => {
   const a = await go(tables(), 'convert', 'plato-jsonl');
-  const l = await go([textFile(outText(a.e, 'connections.jsonl'), 'routes.jsonl')], 'convert', 'lpf');
+  const l = await go([textFile(outText(a.e, 'about.jsonl'), 'routes.jsonl')], 'convert', 'lpf');
   const k = kinds(l, 'loss');
   assert.ok(k.includes('dropped:attestation.sequence'), k.join(', '));
   assert.ok(k.includes('dropped:relation.relatedLabel'), k.join(', '));
@@ -157,7 +185,7 @@ test('a duration is checked as rdf-tabular checks it: P42D is one, six weeks and
   const files = (text) => readdirSync(DIR).filter((f) => f !== 'relations.csv').map((f) => file(`${DIR}/${f}`)).concat(textFile(text, 'relations.csv'));
   const good = await go(files(rel), 'convert', 'plato-jsonl');
   assert.deepEqual(items(good, 'error'), []);
-  assert.ok(outText(good.e, 'connections.jsonl').includes('"duration":"P42D"'));
+  assert.ok(outText(good.e, 'about.jsonl').includes('"duration":"P42D"'));
   const bad = await go(files(rel.replace('P42D', 'six weeks')), 'check');
   // The cell, and the record it becomes (the JSON Schema's duration pattern), each report it.
   assert.ok(items(bad, 'error').some((i) => i.kind === 'table' && /duration/.test(i.message)), JSON.stringify(bad.report.items));

@@ -13,13 +13,12 @@ process.emitWarning = function (warning, ...rest) {
 
 const { parseArgs } = await import('node:util');
 const { readFileSync } = await import('node:fs');
-const { run, TARGETS } = await import('../src/engine/pipeline.js');
+const { run, TARGETS, DEFAULT_TABLE_BASE } = await import('../src/engine/pipeline.js');
 const { detect } = await import('../src/engine/input.js');
 const { nodeResources, gatherInputs, openFiles, isSystemError, NodeHost } = await import('../src/node/host.js');
 const { fmtBytes, fmtTime, formatName, progressText, summary, groups, draftNote } = await import('../src/engine/words.js');
 
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-const DEFAULT_BASE = 'https://example.org/my-dataset/';   // as the page's "Web address for your identifiers"
 
 const HELP = `plato-tools: check and convert PLATO data from the command line.
 
@@ -47,7 +46,9 @@ Options:
                     unless --overwrite is given.
   --overwrite       convert: replace outputs that already exist.
   --base URL        spreadsheet tables: the web address under which the identifiers of the
-                    places and sources are made (default: ${DEFAULT_BASE}).
+                    places and sources are made (default: the about sheet's base_uri, or
+                    ${DEFAULT_TABLE_BASE} without one). Given, it is used instead of
+                    base_uri, with a warning if they differ.
   --no-typing       N-Triples output: leave out the node types and typed dates that the DEEP RDF
                     export adds (they are added by default, as in the browser).
   --cube            N-Triples output: also write what the RDF Data Cube vocabulary expects of
@@ -79,7 +80,7 @@ async function main(argv) {
       args: argv, allowPositionals: true, allowNegative: true, strict: true,
       options: {
         to: { type: 'string' }, out: { type: 'string', default: '.' }, overwrite: { type: 'boolean', default: false },
-        base: { type: 'string', default: DEFAULT_BASE }, typing: { type: 'boolean', default: true }, cube: { type: 'boolean', default: false },
+        base: { type: 'string' }, typing: { type: 'boolean', default: true }, cube: { type: 'boolean', default: false },
         'work-dir': { type: 'string' }, json: { type: 'boolean', default: false }, brief: { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h', default: false }, version: { type: 'boolean', short: 'V', default: false },
       },

@@ -49,7 +49,8 @@ const points = (out) => (out.rows ? out.rows.locations.map((l) => `${l.longitude
 const toponyms = (out) => (out.rows ? out.rows.names.map((n) => n.name) : out.features.flatMap((f) => (f.names || []).map((n) => n.toponym)));
 
 // ---- versions ------------------------------------------------------------------------------------
-const VERSIONED = { '@id': 'https://example.org/g/2026-09', title: 't', version: '2026-09', status: 'published',
+// Published, so it states its licence, as the JSON Schema requires since PLATO's FAIR metadata.
+const VERSIONED = { '@id': 'https://example.org/g/2026-09', title: 't', licence: 'https://creativecommons.org/licenses/by/4.0/', version: '2026-09', status: 'published',
   isVersionOf: 'https://example.org/g', previousVersion: 'https://example.org/g/2026-06' };
 
 test('versions: JSON -> RDF writes dcat:version, plato:gazetteer_status, dcat:isVersionOf and dcat:previousVersion', async () => {
@@ -87,7 +88,7 @@ test('versions: the example document keeps its version and status through RDF', 
   const head = JSON.parse(outText(r.e, 'j.jsonl').split('\n')[0]);
   assert.deepEqual([head.gazetteer.version, head.gazetteer.status], ['2026-09', 'published']);
 });
-for (const target of ['lpf', 'lpf-seq', 'tables']) {
+for (const target of ['lpf', 'lpf-seq']) {
   test(`versions: ${target} cannot hold them, so each is reported, and none is written`, async () => {
     const d = placeDoc([place('p', [{ names: [{ toponym: 'P' }], sources: [src] }])], VERSIONED);
     const out = await written(textFile(JSON.stringify(d), 'v.json'), target, 'v.json');
@@ -103,6 +104,19 @@ for (const target of ['lpf', 'lpf-seq', 'tables']) {
     assert.equal(loss(plain.r, 'gazetteer-version'), undefined);
   });
 }
+
+test('versions: the tables hold the version and status in the about sheet, and report isVersionOf and previousVersion', async () => {
+  const d = placeDoc([place('p', [{ names: [{ toponym: 'P' }], sources: [src] }])], VERSIONED);
+  const r = await go([textFile(JSON.stringify(d), 'v.json')], 'convert', 'tables');
+  const [about] = sheet(r.e.outs['v-tables.zip'][0], 'about.csv');
+  assert.deepEqual([about.version, about.status, about.dataset_uri], ['2026-09', 'published', 'https://example.org/g/2026-09']);
+  const kinds = lossKinds(r);
+  assert.ok(kinds.includes('dropped:gazetteer.isVersionOf') && kinds.includes('dropped:gazetteer.previousVersion'), kinds.join(', '));
+  assert.equal(loss(r, 'gazetteer-version'), undefined, 'version and status are carried, not reported');
+  const text = strFromU8(unzipSync(r.e.outs['v-tables.zip'][0])['about.csv']);
+  assert.doesNotMatch(text, /2026-06/, 'the previous version is not written');
+  assert.match(text, /2026-09/, 'a positive control: the version is written');
+});
 
 // ---- retractions: the example --------------------------------------------------------------------
 for (const target of ['lpf', 'lpf-seq', 'tables']) {

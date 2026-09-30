@@ -68,6 +68,21 @@ Object.assign(controls, {
   'a transcription completeness in lower case': () => mutate(judged(), 'names', (r) => { r[0].transcription_completeness = 'complete'; }),
   'a three-digit year beside a deep-time one': () => mutate(judged(), 'relations', (r) => { r[0].from = '921'; }),
 });
+// The about sheet (PLATO's FAIR metadata). rdf-tabular (strict, serialize --validate) rejected each of
+// these on 2026-09-30, and accepted zero rows, two rows and a published row without a licence, which
+// CSVW cannot state and PLATO tools checks beside it (checkAboutRules, test/about.test.js).
+Object.assign(controls, {
+  'about without a title': () => mutate(survey(), 'about', (r) => { r[0].title = ''; }),
+  'about status Published': () => mutate(survey(), 'about', (r) => { r[0].status = 'Published'; }),
+  'about creator written as a name': () => mutate(survey(), 'about', (r) => { r[0].creator = 'Stephen Gadd'; }),
+  'about temporal_from of three digits': () => mutate(survey(), 'about', (r) => { r[0].temporal_from = '921'; }),
+});
+test('the about rules CSVW cannot state are not CSVW errors: zero rows, two rows, published without a licence', async () => {
+  const t = survey();
+  assert.deepEqual(await validate({ ...t, about: t.about.split('\n')[0] + '\n' }), []);
+  assert.deepEqual(await validate(mutate(survey(), 'about', (r) => { r.push({ ...r[0] }); })), []);
+  assert.deepEqual(await validate(mutate(survey(), 'about', (r) => { r[0].status = 'published'; r[0].licence = ''; })), []);
+});
 for (const [name, make] of Object.entries(controls)) {
   test(`broken tables are rejected: ${name}`, async () => {
     const issues = await validate(make());

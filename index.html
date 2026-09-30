@@ -26,7 +26,7 @@
     <label class="drop" id="drop">
       <input type="file" id="picker" multiple>
       <span>Drop a file here, or <u>choose one</u>.</span>
-      <small>A PLATO JSON or JSON Lines file; RDF in N-Triples, N-Quads or Turtle; Linked Places Format v1; or a set of PLATO spreadsheet tables (the nine CSV files, a zip of them, or the template workbook). Gzipped files are fine.</small>
+      <small>A PLATO JSON or JSON Lines file; RDF in N-Triples, N-Quads or Turtle; Linked Places Format v1; or a set of PLATO spreadsheet tables (the ten CSV files, a zip of them, or the template workbook). Gzipped files are fine.</small>
     </label>
     <div id="chosen" hidden></div>
   </section>
@@ -44,8 +44,8 @@
       <summary>Options</summary>
       <div class="opt" data-for="tables-input">
         <label for="base">Web address for your identifiers</label>
-        <input id="base" type="url" value="https://example.org/my-dataset/" size="40">
-        <small>The spreadsheet ids (such as <code>bristol</code>) become web addresses under this one. Use one you control, if you have it.</small>
+        <input id="base" type="url" value="" placeholder="https://example.org/my-dataset/" size="40">
+        <small>The spreadsheet ids (such as <code>bristol</code>) become web addresses under this one. Leave it empty to use the <code>base_uri</code> in the about sheet, which is where it belongs; given here, it is used instead.</small>
       </div>
       <div class="opt" data-for="ntriples-output">
         <label><input id="typing" type="checkbox" checked> Add node types and typed dates, as the DEEP RDF export does</label>

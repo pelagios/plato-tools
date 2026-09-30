@@ -14,9 +14,9 @@ import { tripleNT } from '../lib/ntriples.js';
 import { TripleStore } from '../lib/store.js';
 import { PLATO, RDF } from '../lib/context.js';
 import { featureToRecord, recordToFeature, collectionHead, collectionToGazetteer } from '../formats/lpf.js';
-import { collectWithdrawn, resolveWithdrawn, addWithdrawal, versionLosses, tableLosses, relationTypeLosses, dropKeys, collectMembership, membershipCycles } from '../formats/shared.js';
+import { collectWithdrawn, resolveWithdrawn, addWithdrawal, versionLosses, tableLosses, relationTypeLosses, collectMembership, membershipCycles } from '../formats/shared.js';
 import { CubeExport, CUBE_TEXT } from '../formats/cube.js';
-import { validateTables, checkTableRules, rowToAttestation, tableIds, recordToRows, identityRow, ATTESTATION_SHEETS, tableSchemas, cellChecker, sourceLosses, TABLE_KEEPS } from '../formats/tables.js';
+import { validateTables, checkTableRules, checkAboutRules, aboutToGazetteer, gazetteerToAbout, rowToAttestation, tableIds, recordToRows, identityRow, ATTESTATION_SHEETS, tableSchemas, cellChecker, sourceLosses } from '../formats/tables.js';
 import { lineChunks, lines, jsonDocument, TABLE_SHEETS, DataError } from './input.js';
 import { Report, LOSS_TEXT, droppedText, FORMAT_WORDS } from './report.js';
 
@@ -24,13 +24,14 @@ export const TARGETS = {
   'plato-jsonl': { label: 'PLATO JSON Lines (.jsonl): one place per line', ext: '.jsonl' },
   'plato-json': { label: 'PLATO JSON document (.json), place-centric', ext: '.json' },
   ntriples: { label: 'RDF, N-Triples (.nt)', ext: '.nt' },
-  tables: { label: 'PLATO spreadsheet tables (.zip of nine CSV files)', ext: '.zip' },
+  tables: { label: 'PLATO spreadsheet tables (.zip of ten CSV files)', ext: '.zip' },
   'lpf-seq': { label: 'Linked Places Format v1, GeoJSON sequence (.geojsonl): one feature per line', ext: '.geojsonl' },
   lpf: { label: 'Linked Places Format v1, FeatureCollection (.geojson)', ext: '.geojson' },
 };
 const TYPE = RDF + 'type';
-// The base address for the places and sources of spreadsheet tables, when none is given.
-const DEFAULT_TABLE_BASE = 'https://example.org/dataset/';
+// The base address for the places and sources of spreadsheet tables when neither the conversion
+// (--base, the page's field) nor the about sheet's base_uri gives one: a stand-in, not a permanent one.
+export const DEFAULT_TABLE_BASE = 'https://example.org/my-dataset/';
 
 // ---- resources ------------------------------------------------------------------------------------
 export function prepare(res) {
@@ -208,13 +209,17 @@ async function* tablesSource(input, env, rep, options) {
     issue: (i) => rep.error('table', `${i.table}${i.column ? `, column ${i.column}` : ''}: ${i.message.replace(/'[^']*'/, "'…'")}`, `${i.table}${i.row ? ` row ${i.row + 1}` : ''}${i.column ? ` ${i.column}` : ''}: ${i.message}`),
   });
   // PLATO's own rules for the tables, beyond what CSVW can state (and rdf-tabular checks).
-  const where = (i) => `${i.table}${i.row ? ` row ${i.row + 1}` : ''}${i.column ? ` ${i.column}` : ''}: ${i.message}`;
-  checkTableRules((n) => (sheets[n] ? sheets[n].data : []), {
-    issue: (i) => rep.error('table', `${i.table}, column ${i.column}: ${i.message}`, where(i)),
-    warn: (i) => rep.warning('table', `${i.table}, column ${i.column}: ${i.message}`, where(i)),
-  });
-  const base = options.base || DEFAULT_TABLE_BASE;
-  yield { type: 'header', value: { profile: 'place-centric', gazetteer: { '@id': base, title: options.title || 'Converted from PLATO spreadsheet tables' } } };
+  const where = (i) => `${i.table}${i.row ? ` row ${i.row + 1}` : ''}${i.column ? ` ${i.column}` : ''}: ${i.detail || i.message}`;
+  const said = (i) => `${i.table}${i.column ? `, column ${i.column}` : ''}: ${i.message}`;
+  const rules = { issue: (i) => rep.error('table', said(i), where(i)), warn: (i) => rep.warning('table', said(i), where(i)) };
+  checkTableRules((n) => (sheets[n] ? sheets[n].data : []), rules);
+  // The about sheet: one row describing the dataset, which becomes the document's gazetteer. The base
+  // for the places' and sources' addresses is the one given for this conversion, else its base_uri.
+  const aboutRows = sheets.about ? sheets.about.data : null;
+  checkAboutRules(aboutRows, rules, { base: options.base });
+  const about = (aboutRows && aboutRows[0]) || {};
+  const base = options.base || about.base_uri || DEFAULT_TABLE_BASE;
+  yield { type: 'header', value: { profile: 'place-centric', gazetteer: aboutToGazetteer(about, base, options.title || 'Converted from PLATO spreadsheet tables') } };
   const rows = (n) => (sheets[n] ? sheets[n].data : []);
   const sources = new Map(rows('sources').map((r) => [r.source_id, r]));
   const ids = tableIds(base, (id) => sources.get(id));
@@ -568,8 +573,11 @@ function tablesWriter(env, rep, options, outputs, stem, loss) {
   const places = new Map(), sources = new Map(), usedIds = new Set();
   const accepts = cellChecker(env.csvMeta);
   // Reading the tables back mints each place's and source's address from a base address and its id:
-  // an address that is not the one it would mint is lost (the default base is the one the reader uses).
-  const minted = tableIds(options.base || DEFAULT_TABLE_BASE, () => null);
+  // an address that is not the one it would mint is lost. The base is the one the reader will use: the
+  // one given for this conversion, else the gazetteer's uriSpace (the about sheet's base_uri, set in
+  // header(), which comes before any record), else the reader's default.
+  let minted = tableIds(options.base || DEFAULT_TABLE_BASE, () => null);
+  let about = null;
   const shortId = (iri, fallback) => {
     let s = (iri || fallback || 'x').replace(/[#/]+$/, '').split(/[#/]/).pop() || fallback || 'x';
     s = decodeURIComponent(s).replace(/\s+/g, '-');
@@ -606,8 +614,12 @@ function tablesWriter(env, rep, options, outputs, stem, loss) {
     },
   };
   return {
-    // The tables have no sheet for the gazetteer: each of its keys is reported.
-    header(h) { versionLosses(h.gazetteer, loss); tableLosses(h, loss); relationTypeLosses(h, loss); dropKeys(h.gazetteer, 'gazetteer', TABLE_KEEPS.gazetteer, loss); },
+    // The gazetteer is the about sheet's one row; what it has no column for is reported.
+    header(h) {
+      tableLosses(h, loss); relationTypeLosses(h, loss);
+      about = gazetteerToAbout(h.gazetteer, loss, accepts);
+      if (!options.base && about.base_uri) minted = tableIds(about.base_uri, () => null);
+    },
     event(ev) {
       if (ev.type === 'record') { const rows = recordToRows(ev.value, ids, loss, accepts, options.withdrawn); for (const [k, v] of Object.entries(rows)) buffers[k]?.push(...v); }
       else if (ev.type === 'idr') buffers.identities.push(identityRow(ev.value, ids, loss));
@@ -616,6 +628,7 @@ function tablesWriter(env, rep, options, outputs, stem, loss) {
     async close() {
       buffers.places = [...places.values()].map(({ own, ...r }) => r);
       buffers.sources = [...sources.values()];
+      buffers.about = [about || gazetteerToAbout({}, loss, accepts)];
       const files = {};
       for (const t of schemas) files[t.url] = Papa.unparse({ fields: header[t.name], data: buffers[t.name].map((r) => header[t.name].map((h) => (r[h] === undefined || r[h] === null ? '' : String(r[h])))) }, { newline: '\n' }) + '\n';
       const { zipSync, strToU8 } = await import('fflate');

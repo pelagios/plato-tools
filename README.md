@@ -13,7 +13,7 @@ lives on disk, in the browser's private file storage.
 
 | Format | Read | Write |
 |---|---|---|
-| PLATO spreadsheet tables: the nine CSV files, a zip of them, or the template workbook (`.xlsx`) | yes | yes (a zip of the nine CSV files) |
+| PLATO spreadsheet tables: the ten CSV files, a zip of them, or the template workbook (`.xlsx`) | yes | yes (a zip of the ten CSV files) |
 | PLATO JSON document, place-centric or attestation-centric | yes | yes (place-centric) |
 | PLATO JSON Lines: a header line, then one place per line (the DEEP export's form) | yes | yes |
 | RDF: N-Triples, N-Quads, Turtle | yes | N-Triples |
@@ -35,11 +35,23 @@ LPF sequence, the tables, N-Triples, or PLATO JSON made from RDF) neither carrie
 
 - **LPF** carries the gazetteer's address, title, licence (`license`) and description
   (`descriptions`, as on a feature) as the FeatureCollection's own members, which its context maps,
-  and reads them back; it has no term for the gazetteer's contributor, which is reported. It also
-  carries a location's `bbox` (a GeoJSON member) and a dated timespan's PeriodO period.
-- **The spreadsheet tables** have no gazetteer sheet, so each of its keys is reported. A place's or
-  source's web address survives only when it is the one reading the tables back would make from the
-  base address and its id; otherwise it is reported.
+  and reads them back; it has no term for the gazetteer's contributor, nor for its dataset
+  description (`creator`, `keywords`, `spatial`, `temporal`, `landingPage`, `uriSpace`), each of
+  which is reported. It also carries a location's `bbox` (a GeoJSON member) and a dated timespan's
+  PeriodO period.
+- **The spreadsheet tables** describe the gazetteer in the `about` sheet, one row: its address
+  (`dataset_uri`), title, description, contributor, authors (`creator` for web addresses,
+  `creator_name` for names), licence, version, status, keywords, area (`spatial`), years
+  (`temporal_from`, `temporal_to`), landing page and `base_uri` (`uriSpace`). An author given with
+  both an address and a name keeps the address, and the name is reported; `isVersionOf` and
+  `previousVersion` have no column and are reported. The tables check that the sheet has exactly one
+  row, that a published dataset states its licence, and warn of a draft without one and of a
+  missing `base_uri`. A place's or source's web address survives only when it is the one reading
+  the tables back would make from the base address and its id; otherwise it is reported.
+- **The base address** for the places and sources of a set of tables is the one given for the
+  conversion (`--base`, or the page's "Web address for your identifiers"), else the about sheet's
+  `base_uri`, else the stand-in `https://example.org/my-dataset/`. A base given that differs from
+  `base_uri` is used, with a warning.
 - **RDF.** A value that PLATO's context reads as a web address but that is a name (the gazetteer's
   `contributor`, an identity match's `assertedBy`, which the schema allows as names) cannot be written
   in RDF, and is reported as lost whenever the output is RDF or is made through it.
@@ -57,8 +69,8 @@ earlier state can be recomputed. Linked Places Format and the spreadsheet tables
 either, so they show the current state: every attestation that the file retracts or supersedes,
 wherever in the file that is said, is left out and reported. A withdrawn claim is never written as
 current. A gazetteer's `version`, `status`, `isVersionOf` and `previousVersion` go to RDF and back;
-LPF defines no place for them and the tables have no gazetteer sheet, so there they are reported as
-lost.
+LPF defines no place for them, so there they are reported as lost, and the tables hold `version` and
+`status` in the about sheet and report the other two.
 
 **Numbers in RDF.** JSON-LD writes a number with a fractional part as a canonical `xsd:double` of
 16 significant digits, and these tools write exactly what `jsonld.js` writes. A JavaScript number
@@ -94,7 +106,8 @@ node bin/plato-tools.mjs check --json data/*.json > report.jsonl        # for sc
 - `--json` prints one JSON object per input, one per line (the page's report, with the input's
   format, counts, outputs and status), then one for the total. `--brief` prints one line per input.
 - The page's options are flags with the page's defaults: `--base URL` for the web address under
-  which identifiers from spreadsheet tables are made (`https://example.org/my-dataset/`), and
+  which identifiers from spreadsheet tables are made (by default the about sheet's `base_uri`, else
+  `https://example.org/my-dataset/`), and
   `--no-typing` to leave out the node types and typed dates N-Triples output otherwise has.
 - RDF and attestation-centric JSON go through a working database on disk, as in the browser, so
   memory stays roughly constant at any size. It is kept in the system's temporary directory, or in
