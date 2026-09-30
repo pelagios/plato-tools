@@ -592,6 +592,7 @@ test('the record, and georefNote: the fixed template, pinned exactly', async () 
     annotationVersion: ROCQUE_VERSION, annotationModified: ROCQUE_MODIFIED,
     manifestId: ROCQUE_MANIFEST, canvasId: ROCQUE_CANVAS, imageServiceId: ROCQUE_IMAGE, space: 'image',
     title: ROCQUE_TITLE, imageSize: { width: 11436, height: 6268 }, canvasSize: { width: 11436, height: 6268 },
+    controlPointMisfitKm: null, controlPointMisfitMaxKm: null,
     software: '@allmaps/transform@1.0.0-beta.53',
   });
   // The original template, alone (the version sentence, pinned in its own test, needs a version).
@@ -1109,4 +1110,86 @@ test('georefNote: the version sentence, pinned exactly, after the place and befo
   assert.equal(georefNote(anchored, opts), `${base} Annotation version ${ROCQUE_VERSION}, modified ${ROCQUE_MODIFIED}. The position is where the map writes the name, not necessarily where the place is.`);
   // With no canvas or manifest, after the image sentence.
   assert.equal(georefNote({ ...record, canvasId: null, manifestId: null }), `Georeferenced through ${ROCQUE_ID} (thin plate spline, 22 control points), retrieval date not recorded. On image ${ROCQUE_IMAGE}. Annotation version ${ROCQUE_VERSION}, modified ${ROCQUE_MODIFIED}.`);
+});
+
+// ---- How far the georeference misses its own control points -----------------------------------
+
+/** Independently of the module: RMS and largest great-circle distance (km) between two lists of [lon, lat]. */
+function independentMisfit(fitted, given) {
+  const R = 6371.0088, rad = Math.PI / 180;
+  const d = fitted.map(([a, b], i) => {
+    const [c, e] = given[i];
+    return 2 * R * Math.asin(Math.sqrt(Math.sin((e - b) * rad / 2) ** 2 + Math.cos(b * rad) * Math.cos(e * rad) * Math.sin((c - a) * rad / 2) ** 2));
+  });
+  return { rms: Math.sqrt(d.reduce((s, v) => s + v * v, 0) / d.length), max: Math.max(...d) };
+}
+/** The fixture's own control points, and where Allmaps' renderer puts their pixels (the reference file). */
+function referenceMisfit(file, index, type) {
+  const doc = fixture(file);
+  const a = doc.type === 'AnnotationPage' ? doc.items[index] : doc;
+  const gcps = a.body.features.map((f) => ({ pixel: f.properties.resourceCoords, geo: f.geometry.coordinates }));
+  const c = fixture('allmaps-render-reference.json').cases.find((k) => k.file === file && k.type === type);
+  const fitted = gcps.map((p) => c.results.find((r) => r.pixel[0] === p.pixel[0] && r.pixel[1] === p.pixel[1]).lonLat);
+  return independentMisfit(fitted, gcps.map((p) => p.geo));
+}
+
+test('the record gives the control-point misfit for a least-squares transformation, checked independently; null for a thin plate spline', async () => {
+  const g = await rocque();
+  const at = (transformation) => toWorld(g, pt([5000, 4000]), { space: 'image', transformation }).then((r) => r.record);
+  const p1 = await at('polynomial');
+  // Rocque at polynomial order 1: 136.80 km RMS, at most 360.32 km (computed here from the
+  // reference values of @allmaps/project and the fixture's control points, not by the module).
+  const want = referenceMisfit('bpl-rocque-annotation.json', 0, 'polynomial');
+  assert.equal(p1.controlPointMisfitKm, Math.round(want.rms * 100) / 100);
+  assert.equal(p1.controlPointMisfitMaxKm, Math.round(want.max * 100) / 100);
+  assert.equal(p1.controlPointMisfitKm, 136.8);
+  assert.equal(p1.controlPointMisfitMaxKm, 360.32);
+  for (const [file, index, type] of [['bpl-rocque-annotation.json', 0, 'polynomial2'], ['bpl-rocque-annotation.json', 0, 'helmert'], ['bpl-british-dominions-annotation.json', 0, 'polynomial'], ['lynn-atlas-annotationpage.json', 7, 'polynomial3']]) {
+    const h = await readGeoreference(fixture(file), { index });
+    const r = (await toWorld(h, pt([1000, 1000]), { space: 'image', transformation: type })).record;
+    const m = referenceMisfit(file, index, type);
+    assert.ok(Math.abs(r.controlPointMisfitKm - m.rms) <= 0.005 + 1e-9, `${file} ${type}: ${r.controlPointMisfitKm} vs ${m.rms}`);
+    assert.ok(Math.abs(r.controlPointMisfitMaxKm - m.max) <= 0.005 + 1e-9, `${file} ${type}: ${r.controlPointMisfitMaxKm} vs ${m.max}`);
+  }
+  // The way back gives the same.
+  const back = (await toPixels(g, pt([-80, 45]), { space: 'image', transformation: 'polynomial' })).record;
+  assert.equal(back.controlPointMisfitKm, 136.8);
+  // A thin plate spline passes through its control points: null, not 0.
+  const tps = await at('thinPlateSpline');
+  assert.equal(tps.controlPointMisfitKm, null);
+  assert.equal(tps.controlPointMisfitMaxKm, null);
+  // Control: the independent check would catch a misfit measured in degrees fitted as degrees, or
+  // a mean of distances in place of their root mean square.
+  const { GcpTransformer } = await import('@allmaps/transform');
+  const degrees = new GcpTransformer(g.controlPoints.map((p) => ({ resource: p.resource, geo: p.geo })), 'polynomial1');
+  const wrong = independentMisfit(g.controlPoints.map((p) => degrees.transformToGeo(p.resource)), g.controlPoints.map((p) => p.geo));
+  assert.ok(Math.abs(wrong.rms - want.rms) > 0.5, `${wrong.rms}`);
+  assert.notEqual(p1.controlPointMisfitKm, Math.round(want.rms * 0.9 * 100) / 100);
+});
+
+test('georefNote misfit: only when asked; the two sentences pinned exactly', async () => {
+  const g = await rocque();
+  const p1 = unversioned((await toWorld(g, pt([5000, 4000]), { space: 'image', transformation: 'polynomial' })).record);
+  const tps = unversioned((await toWorld(g, pt([5000, 4000]), { space: 'image' })).record);
+  const base = (words) => `Georeferenced through ${ROCQUE_ID} (${words}, 22 control points), retrieval date not recorded. On canvas ${ROCQUE_CANVAS} of manifest ${ROCQUE_MANIFEST}.`;
+  assert.equal(georefNote(p1, { misfit: true }), `${base('polynomial order 1')} The georeference misses its own control points by 136.80 km on average (root mean square; at most 360.32 km); this is a measure of the georeference, not of this position's accuracy.`);
+  assert.equal(georefNote(tps, { misfit: true }), `${base('thin plate spline')} The georeference passes through its control points exactly, so its error elsewhere is not estimated.`);
+  // Control: not asked for, or asked not to, and there is no misfit sentence.
+  assert.equal(georefNote(p1), base('polynomial order 1'));
+  assert.equal(georefNote(p1, { misfit: false }), base('polynomial order 1'));
+  assert.equal(georefNote(tps), base('thin plate spline'));
+  // Two decimals always (Lynn: a few metres), and last, after the version and label-anchor sentences.
+  const lynn = (await toWorld(await readGeoreference(LYNN, { index: 7 }), pt([2000, 1000]), { space: 'image', role: LABEL_ANCHOR })).record;
+  assert.equal(georefNote(lynn, { misfit: true }), `Georeferenced through https://annotations.allmaps.org/maps/051d059e8d1111fd (polynomial order 1, 23 control points), retrieval date not recorded. On canvas ${LYNN_CANVAS('jd475s53d')} of manifest ${LYNN_MANIFEST}. Annotation version https://annotations.allmaps.org/maps/051d059e8d1111fd@e8405163b4a995bf, modified 2023-06-22T19:44:41.434Z. The position is where the map writes the name, not necessarily where the place is. The georeference misses its own control points by ${lynn.controlPointMisfitKm.toFixed(2)} km on average (root mean square; at most ${lynn.controlPointMisfitMaxKm.toFixed(2)} km); this is a measure of the georeference, not of this position's accuracy.`);
+  assert.equal(lynn.controlPointMisfitKm.toFixed(2), '0.00');
+  assert.equal(lynn.controlPointMisfitMaxKm.toFixed(2), '0.01');
+  // A misfit option that is not a boolean, or a least-squares record with no misfit, is a TypeError;
+  // the records above are the control.
+  for (const bad of ['yes', 1, null]) assert.throws(() => georefNote(p1, { misfit: bad }), TypeError, String(bad));
+  assert.throws(() => georefNote({ ...p1, controlPointMisfitKm: null }, { misfit: true }), (e) => e instanceof TypeError && /no control-point misfit/.test(e.message));
+  const old = { ...p1 }; delete old.controlPointMisfitKm; delete old.controlPointMisfitMaxKm;
+  assert.throws(() => georefNote(old, { misfit: true }), TypeError);
+  assert.equal(georefNote(old), base('polynomial order 1'), 'without the option such a record is fine');
+  // A thin plate spline's sentence does not need a misfit.
+  assert.equal(georefNote({ ...tps, controlPointMisfitKm: undefined }, { misfit: true }), georefNote(tps, { misfit: true }));
 });

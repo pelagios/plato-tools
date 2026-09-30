@@ -270,10 +270,33 @@ async function transformerFor(g, name) {
     // Half a pixel of grace at the edge, so that a point on the mask's edge is not lost to rounding.
     const nearEdge = (p) => mask.some((q, i) => i > 0 && segmentDistance(p, mask[i - 1], q) <= 0.5);
     const inside = mask ? (p) => pointInRing(p, mask) || nearEdge(p) : ([x, y]) => x >= -0.5 && y >= -0.5 && x <= W + 0.5 && y <= H + 0.5;
-    byName.set(name, { t, metresPerPixel: Math.sqrt(Math.abs(det)) || 1, seeds, inside });
+    byName.set(name, { t, metresPerPixel: Math.sqrt(Math.abs(det)) || 1, seeds, inside, misfit: misfitOf(g, name, t) });
   }
   return byName.get(name);
 }
+/** Transformations that pass through every control point exactly (so miss none of them). */
+const INTERPOLATING = new Set(['thinPlateSpline']);
+/** The mean radius of the Earth (IUGG), in km, for distances on the ground. */
+const EARTH_KM = 6371.0088;
+function haversineKm([lon1, lat1], [lon2, lat2]) {
+  const h = Math.sin(((lat2 - lat1) * D2R) / 2) ** 2 + Math.cos(lat1 * D2R) * Math.cos(lat2 * D2R) * Math.sin(((lon2 - lon1) * D2R) / 2) ** 2;
+  return 2 * EARTH_KM * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+const km2 = (v) => Math.round(v * 100) / 100;
+/**
+ * How far the fitted transformation misses its own control points on the ground: each control
+ * point's pixels are transformed (as toWorld does) and measured to its longitude and latitude along
+ * the great circle. { rmsKm, maxKm }, each to 0.01 km; both null for a transformation that passes
+ * through every control point (a thin plate spline), whose misfit there is nothing by construction.
+ * A measure of the georeference, not of the accuracy of any position placed with it.
+ */
+function misfitOf(g, name, t) {
+  if (INTERPOLATING.has(name) || !Array.isArray(g.controlPoints) || !g.controlPoints.length) return { rmsKm: null, maxKm: null };
+  const d = g.controlPoints.map((p) => haversineKm(fromMercator(t.transformToGeo(p.resource)), p.geo));
+  if (!d.every(Number.isFinite)) return { rmsKm: null, maxKm: null };
+  return { rmsKm: km2(Math.sqrt(d.reduce((s, v) => s + v * v, 0) / d.length)), maxKm: km2(Math.max(...d)) };
+}
+
 /** Allmaps' midpoint refinement: split a segment while its midpoint is off by more than `limit`. */
 const refinement = (limit) => ({ maxDepth: MAX_DEPTH, minOffsetRatio: Infinity, minOffsetDistance: limit });
 const MAX_DEPTH = 10;
@@ -586,7 +609,7 @@ function pixelGeometry(g, geometry, space) {
   if (geometry && typeof geometry === 'object' && 'svg' in geometry) return { geom: parseSvg(geometry.svg) };
   return { geom: readGeojson(geometry, 'The pixel geometry') };
 }
-function makeRecord(g, direction, name, space, region, canvasRegion, role) {
+function makeRecord(g, direction, name, space, region, canvasRegion, role, misfit) {
   return {
     direction, transformation: name, gcps: g.gcps,
     annotationId: g.annotationId ?? null,
@@ -599,6 +622,8 @@ function makeRecord(g, direction, name, space, region, canvasRegion, role) {
     imageSize: okSize(g.image) ? { width: g.image.width, height: g.image.height } : null,
     canvasSize: okSize(g.canvas) ? { width: g.canvas.width, height: g.canvas.height } : null,
     ...(role ? { role } : {}),
+    controlPointMisfitKm: misfit ? misfit.rmsKm : null,
+    controlPointMisfitMaxKm: misfit ? misfit.maxKm : null,
     software: SOFTWARE,
   };
 }
@@ -618,8 +643,10 @@ function makeRecord(g, direction, name, space, region, canvasRegion, role) {
  * @param options.role Optional: what the geometry is, as an IRI, copied into the record (e.g.
  *   https://w3id.org/plato#LabelAnchor, which georefNote then mentions).
  * @returns Promise of { geojson (WGS84 [lon, lat]; polygons closed, outer rings counter-clockwise), record }.
- *   The record carries, among the rest, annotationVersion and annotationModified (from g);
- *   toPixels's record has the same.
+ *   The record carries, among the rest, annotationVersion and annotationModified (from g), and
+ *   controlPointMisfitKm and controlPointMisfitMaxKm: the root mean square and the largest distance
+ *   on the ground, in km to 0.01, by which the transformation used misses the control points it was
+ *   fitted to (null for a thin plate spline, which passes through them). toPixels's record has the same.
  */
 export async function toWorld(g, geometry, { space, transformation, precision, densify, role } = {}) {
   spaceOf(space);
@@ -629,7 +656,7 @@ export async function toWorld(g, geometry, { space, transformation, precision, d
   const { geom, region, canvasRegion } = pixelGeometry(g, geometry, space);
   const [sx, sy] = scaleToImage(g, space);
   const inImage = mapPositions(geom, ([x, y]) => [x * sx, y * sy]);
-  const { t, metresPerPixel } = await transformerFor(g, name);
+  const { t, metresPerPixel, misfit } = await transformerFor(g, name);
   const opts = tol ? refinement(tol * metresPerPixel) : undefined;
   const round = roundTo(p);
   const out = (m) => {
@@ -644,7 +671,7 @@ export async function toWorld(g, geometry, { space, transformation, precision, d
     line: (l) => t.transformToGeo(l, opts).map(out),
     polygon: (rings) => t.transformToGeo(rings, opts).map((r) => r.map(out)),
   });
-  return { geojson: orient(world), record: makeRecord(g, 'toWorld', name, space, region, canvasRegion, role) };
+  return { geojson: orient(world), record: makeRecord(g, 'toWorld', name, space, region, canvasRegion, role, misfit) };
 }
 
 /**
@@ -678,7 +705,7 @@ export async function toPixels(g, geojson, { space, transformation, densify, pre
     line: (l) => inverseLine(entry, l, false, tol).map(out),
     polygon: (rings) => rings.map((r) => inverseLine(entry, r, true, tol).map(out)),
   });
-  return { geometry: pixels, record: makeRecord(g, 'toPixels', name, space) };
+  return { geometry: pixels, record: makeRecord(g, 'toPixels', name, space, undefined, undefined, undefined, entry.misfit) };
 }
 
 // ---- Choosing among georeferences --------------------------------------------------------------
@@ -760,15 +787,21 @@ const ISO_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[
  *
  * Sentences added later, each fixed too, the earlier ones unchanged: after the place sentence and
  * before the label-anchor one, the annotation's version when it is known ("Annotation version <v>,
- * modified <d>." | "Annotation version <v>." | "Annotation modified <d>.").
+ * modified <d>." | "Annotation version <v>." | "Annotation modified <d>."); and last, only when
+ * asked for with `misfit: true`, how far the georeference misses its own control points (see
+ * MISFIT_NOTE), which says of itself that it is not the accuracy of the position.
  *
  * @param options.fetched When the annotation was retrieved: an ISO 8601 date-time with an offset
  *   or Z (e.g. 2026-09-30T14:05:00Z). A TypeError otherwise.
+ * @param options.misfit true to add the control-point misfit sentence (default false). A TypeError
+ *   when it is not a boolean, or when the record of a transformation that does not pass through its
+ *   control points carries no misfit (a record not made by toWorld or toPixels).
  */
-export function georefNote(record, { fetched } = {}) {
+export function georefNote(record, { fetched, misfit = false } = {}) {
   if (fetched !== undefined && (typeof fetched !== 'string' || !ISO_DATE_TIME.test(fetched) || Number.isNaN(Date.parse(fetched)))) {
     throw new TypeError(`fetched must be an ISO 8601 date-time with a time zone, such as 2026-09-30T14:05:00Z (it was ${JSON.stringify(fetched)}).`);
   }
+  if (typeof misfit !== 'boolean') throw new TypeError(`misfit must be true or false (it was ${JSON.stringify(misfit)}).`);
   const words = TRANSFORMATION_WORDS[ALIASES[record.transformation] ?? record.transformation];
   if (!words) throw new TypeError(`The record names no known transformation (${JSON.stringify(record.transformation)}).`);
   const n = record.gcps;
@@ -784,7 +817,25 @@ export function georefNote(record, { fetched } = {}) {
   else if (version) sentences.push(`Annotation version ${version}.`);
   else if (modified) sentences.push(`Annotation modified ${modified}.`);
   if (record.role === LABEL_ANCHOR) sentences.push(LABEL_ANCHOR_NOTE);
+  if (misfit) sentences.push(misfitSentence(record));
   return sentences.join(' ');
+}
+
+/**
+ * The misfit sentence (georefNote's `misfit` option), fixed: for a transformation fitted by least
+ * squares, MISFIT_NOTE(rms, max) with the kilometres to two decimals; for one that passes through
+ * its control points, INTERPOLATING_NOTE.
+ */
+const MISFIT_NOTE = (rms, max) => `The georeference misses its own control points by ${rms} km on average (root mean square; at most ${max} km); this is a measure of the georeference, not of this position's accuracy.`;
+const INTERPOLATING_NOTE = 'The georeference passes through its control points exactly, so its error elsewhere is not estimated.';
+function misfitSentence(record) {
+  const name = ALIASES[record.transformation] ?? record.transformation;
+  if (INTERPOLATING.has(name)) return INTERPOLATING_NOTE;
+  const { controlPointMisfitKm: rms, controlPointMisfitMaxKm: max } = record;
+  if (!(Number.isFinite(rms) && Number.isFinite(max) && rms >= 0 && max >= 0)) {
+    throw new TypeError(`The record carries no control-point misfit (controlPointMisfitKm ${JSON.stringify(rms ?? null)}), so the misfit sentence cannot be written: make the record with toWorld or toPixels.`);
+  }
+  return MISFIT_NOTE(rms.toFixed(2), max.toFixed(2));
 }
 
 const okSize = (d) => d && Number.isFinite(d.width) && Number.isFinite(d.height) && d.width > 0 && d.height > 0;
