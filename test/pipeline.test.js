@@ -240,3 +240,26 @@ test('several values where PLATO JSON holds one: a loss, counted once per distin
   assert.equal(items[0].count, 1, 'one title dropped, not one per citing record');
   assert.deepEqual(items[0].examples, ['https://example.org/bib/1']);
 });
+
+// A source cited by two places, and a GeoNames place two identity relations point at, far apart in
+// JSON Lines. With typing (the command line's default) each is typed once in the whole file however
+// many places lie between: the converter once remembered only the last 200,000 to 400,000 named nodes
+// it had typed, so DEEP's export typed 202 such nodes twice, and counted every repeat as a triple.
+test('JSON Lines -> N-Triples: a node shared by distant places is typed once, and the count is the lines', async () => {
+  const E = 'https://example.org/', SRC = 'https://example.org/source/s', GN = 'https://sws.geonames.org/745044/';
+  const shared = (i) => JSON.stringify({ '@id': `${E}p/${i}`, label: `P${i}`, attestations: [{ '@id': `${E}p/${i}#a`, names: [{ toponym: `P${i}` }], sources: [{ '@id': SRC, title: 'S', authorityType: 'source' }] }],
+    identityRelations: [{ object: GN, identityType: 'closeMatch' }] });
+  // Each place between types three named nodes (a place, an attestation, a name): 450,000 in all.
+  const filler = (i) => JSON.stringify({ '@id': `${E}p/${i}`, label: `P${i}`, attestations: [{ '@id': `${E}p/${i}#a`, names: [{ '@id': `${E}n/${i}`, toponym: `P${i}` }] }] });
+  const lines = [JSON.stringify({ profile: 'place-centric', gazetteer: { '@id': `${E}g`, title: 't' } }), shared(0)];
+  for (let i = 1; i <= 150_000; i++) lines.push(filler(i));
+  lines.push(shared(150_001));
+  const r = await go([textFile(lines.join('\n') + '\n', 'far.jsonl')], 'convert', 'ntriples', { typing: true });
+  const nt = outText(r.e, 'far.nt').split('\n').filter(Boolean);
+  const T = '<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>', P = 'https://w3id.org/plato#';
+  const count = (line) => nt.filter((l) => l === line).length;
+  assert.equal(count(`<${SRC}> ${T} <${P}Authority> .`), 1, 'the shared source is typed an Authority once');
+  assert.equal(count(`<${GN}> ${T} <${P}SpatialEntity> .`), 1, 'the GeoNames place is typed a SpatialEntity once');
+  assert.equal(nt.length, new Set(nt).size, 'no line is written twice');
+  assert.equal(r.report.counts['triples written'], nt.length, 'the count reported is the lines written');
+});
