@@ -214,15 +214,15 @@ const bboxOf = (pts) => { const xs = pts.map((p) => p[0]), ys = pts.map((p) => p
 const ring = (pts) => ({ type: 'Polygon', coordinates: [[...pts, pts[0]]] });
 const ONTARIO = [[5524, 5352], [5906, 5350], [5908, 5410], [5522, 5414]];
 const GEORGES = rotated(6932, 5370, 280, 40, -0.2);
-// Each placed region: its centre worked out here, its outline, its role, and its pixel bbox.
+// Each placed region: its centre worked out here, its outline, its role, and its pixel bbox. (St
+// Georges Bank, 3, and the "45" in the border, 8, lie beyond the control points, and are not placed:
+// see annotation-region-beyond-control-points, where the rotated rectangle is placed moved inside.)
 const CASES = {
   1: { what: 'the rectangle round LAKE ERIE, with a transcription', centre: [5120 + 115, 5600 + 36], outline: { xywh: '5120,5600,230,72' }, role: LABEL_ANCHOR, bbox: [5120, 5600, 230, 72] },
   2: { what: 'the polygon round LAKE ONTARIO, with a quote', centre: fanCentroid(ONTARIO), outline: ring(ONTARIO), role: LABEL_ANCHOR, bbox: bboxOf(ONTARIO) },
-  3: { what: 'the rotated rectangle along St Georges Bank', centre: [7072, 5390], outline: ring(GEORGES), role: LABEL_ANCHOR, bbox: bboxOf(GEORGES) },
   4: { what: 'the ellipse round LAKE HURON', centre: [5040, 5170], outline: { svg: item(4).target.selector.value }, role: LABEL_ANCHOR, bbox: [4850, 5138, 380, 64] },
   5: { what: 'Montreal, with no transcription', centre: [6140 + 70, 5074 + 16], outline: { xywh: '6140,5074,140,32' }, role: undefined, bbox: [6140, 5074, 140, 32] },
   6: { what: 'the Worcester symbol, tagged "symbol" (no role for now)', centre: [6358 + 7.5, 5510 + 7.5], outline: { xywh: '6358,5510,15,15' }, role: undefined, note: SYMBOL_NOTE, bbox: [6358, 5510, 15, 15] },
-  8: { what: 'the loose box round "45", whose centre is on the map', centre: [188 + 96, 2190 + 30], outline: { xywh: '188,2190,192,60' }, role: LABEL_ANCHOR, bbox: [188, 2190, 192, 60] },
   9: { what: 'Boston, on the full-size picture', centre: [6278 + 60, 5480 + 15], outline: { xywh: '6278,5480,120,30' }, role: LABEL_ANCHOR, bbox: [6278, 5480, 120, 30] },
   16: { what: 'Albany, tagged "Label"', centre: [6096 + 55, 5482 + 14], outline: { xywh: '6096,5482,110,28' }, role: LABEL_ANCHOR, bbox: [6096, 5482, 110, 28] },
 };
@@ -295,8 +295,9 @@ test('placed: the points differ from each other and lie where the map is (a cont
   const points = doc.attestations.filter((a) => a.geometries).map((a) => a.geometries[0].geojson.coordinates);
   assert.equal(points.length, Object.keys(CASES).length);
   assert.equal(new Set(points.map((p) => p.join())).size, points.length);
-  // (Not the "45" in the border, far from every control point, where the georeference is stretched.)
-  for (const n of Object.keys(CASES).filter((k) => k !== '8')) {
+  // Every one: the "45" in the border, far from every control point, which the georeference put at
+  // about -127.8, 57.4, is no longer placed.
+  for (const n of Object.keys(CASES)) {
     const [lon, lat] = (await MAIN()).attestation(Number(n)).geometries[0].geojson.coordinates;
     assert.ok(lon > -90 && lon < -60 && lat > 40 && lat < 47, `${n}: ${lon}, ${lat}`);
   }
@@ -313,7 +314,7 @@ test('placed: the whole document, and the PLATO JSON converted from it, are vali
   assert.equal(valid(PC, pc), null);
   const geoms = pc.spatialEntities.flatMap((p) => p.attestations.flatMap((a) => a.geometries || []));
   assert.equal(geoms.length, Object.keys(CASES).length);
-  assert.equal(geoms.filter((x) => x.role === LABEL_ANCHOR).length, 7);
+  assert.equal(geoms.filter((x) => x.role === LABEL_ANCHOR).length, 5);
   assert.equal(geoms.filter((x) => x.role !== undefined && x.role !== LABEL_ANCHOR).length, 0);
   const erie = pc.spatialEntities.find((p) => p['@id'] === 'http://www.wikidata.org/entity/Q5492').attestations.find((a) => a.geometries);
   assert.deepEqual(erie.geometries, (await MAIN()).attestation(1).geometries);
@@ -327,7 +328,7 @@ test('placed: the whole document, and the PLATO JSON converted from it, are vali
 // ---- each kind, with its control -----------------------------------------------------------------------
 test('every region kind has words, and a severity the report knows', () => {
   const kinds = Object.keys(ANNOTATION_KINDS).filter((k) => /^annotation-(region|georef|manifest)-/.test(k));
-  assert.equal(kinds.length, 12);
+  assert.equal(kinds.length, 13);
   for (const k of kinds) { assert.ok(LOSS_TEXT[k], k); assert.ok(['loss', 'warning', 'error'].includes(ANNOTATION_KINDS[k]), k); }
 });
 test('annotation-region-shape: once for each placed region, and for nothing else', async () => {
@@ -371,16 +372,76 @@ test('annotation-region-outside-map: a centre outside the mask, wholly or partly
   assert.match(exampleFor(out, 15)[0], /has its centre outside the map .*, though part of it is inside$/);
   assert.equal(attestation(7).geometries, undefined);
   assert.equal(attestation(15).geometries, undefined);
-  assert.ok(attestation(8).geometries, 'control: a region reaching outside with its centre inside is placed');
+  assert.equal(exampleFor(out, 8).length, 0, 'control: a region reaching outside with its centre inside is not reported as outside the map');
 });
-test('annotation-region-crosses-map-edge: the loose box whose centre is on the map, placed; not a region wholly inside', async () => {
-  const { of, attestation } = await MAIN();
-  const x = of('annotation-region-crosses-map-edge');
+test('annotation-region-crosses-map-edge: a box whose centre is inside the mask and the control points, but which reaches beyond the mask, placed; not a region wholly inside', async () => {
+  // The Rocque annotation with its mask's right edge moved in to x 6000, through the control points'
+  // hull, and a box across that edge, its centre (5980, 5020) inside both.
+  const annotation = json(ROCQUE);
+  annotation.target.selector.value = annotation.target.selector.value.replace('10776,6112 10752,976', '6000,6112 6000,976');
+  const cut = textFile(JSON.stringify(annotation), 'rocque-cut.json');
+  const box = { ...item(1), target: { ...item(1).target, selector: { ...item(1).target.selector, value: 'xywh=pixel:5880,5000,200,40' } } };
+  const r = await placed({ georefs: [cut], manifests: [ROCQUE_M] }, [box, item(2)]);
+  const x = r.of('annotation-region-crosses-map-edge');
   assert.equal(x.length, 1);
-  assert.match(x[0], new RegExp(`^${id(8)}: the rectangle xywh=pixel:188,2190,192,60 on .* reaches beyond the map .*56425c69f9cd4f1b$`));
-  assert.ok(attestation(8).geometries);
+  assert.match(x[0], new RegExp(`^${id(1)}: the rectangle xywh=pixel:5880,5000,200,40 on .* reaches beyond the map .*56425c69f9cd4f1b$`));
+  assert.ok(r.attestation(1).geometries, 'it is placed');
   assert.equal(ANNOTATION_KINDS['annotation-region-crosses-map-edge'], 'warning');
-  assert.equal(exampleFor(x, 1).length, 0, 'control: Lake Erie is wholly inside');
+  assert.equal(exampleFor(x, 2).length, 0, 'control: Lake Ontario is wholly inside the cut mask');
+  // Control: the same box with the real mask is wholly inside, and not reported.
+  assert.deepEqual((await placed({ georefs: [ROCQUE], manifests: [ROCQUE_M] }, [box])).of('annotation-region-crosses-map-edge'), []);
+  // The loose box round the "45", reaching beyond the mask, is not placed at all, so not reported.
+  assert.equal(exampleFor((await MAIN()).of('annotation-region-crosses-map-edge'), 8).length, 0);
+});
+test('annotation-region-beyond-control-points: the "45" in the border and St Georges Bank, centres inside the mask but beyond the control points; no geometry', async () => {
+  const { of, attestation } = await MAIN();
+  const b = of('annotation-region-beyond-control-points');
+  assert.deepEqual(b.map((e) => e.slice(0, 36)), [id(3), id(8)]);
+  assert.match(exampleFor(b, 8)[0], new RegExp(`^${id(8)}: the rectangle xywh=pixel:188,2190,192,60 on .* has its centre beyond the control points of the map .*56425c69f9cd4f1b$`));
+  assert.match(exampleFor(b, 3)[0], new RegExp(`^${id(3)}: an SVG shape on .* has its centre beyond the control points of the map .*56425c69f9cd4f1b$`));
+  for (const n of [3, 8]) {
+    assert.equal(attestation(n).geometries, undefined, n);
+    assert.deepEqual(attestation(n).citations, unplaced().attestation(n).citations, `${n}: the image's citation stays`);
+  }
+  assert.equal(exampleFor(b, 1).length, 0, 'control: Lake Erie, inside the control points, is not reported');
+  assert.ok(attestation(1).geometries, 'and is placed');
+  assert.equal(ANNOTATION_KINDS['annotation-region-beyond-control-points'], 'loss');
+  assert.match(LOSS_TEXT['annotation-region-beyond-control-points'], /^A region lies beyond the map's control points, where the georeference can only guess, so no position in the world is given for it\./);
+  // Why: the thin plate spline would put the "45" (centre 284, 2220) far off the map, near -127.8, 57.4.
+  const [lon, lat] = (await toWorld(await rocque(), { type: 'Point', coordinates: [284, 2220] }, { space: 'image' })).geojson.coordinates;
+  assert.ok(Math.abs(lon + 127.8) < 0.1 && Math.abs(lat - 57.4) < 0.1, `${lon}, ${lat}`);
+});
+test('annotation-region-beyond-control-points: near the hull\'s edge, inside or within 1% of its diagonal, placed; farther out, not', async () => {
+  // The Rocque control points' hull has the edge (7274, 5023)-(6351, 5690), its box 3269 by 1515
+  // pixels, so the tolerance is 1% of hypot(3269, 1515), 36.03 pixels. Points off the edge's middle:
+  const [a, b] = [[7274, 5023], [6351, 5690]];
+  const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  const out = [(b[1] - a[1]) / len, -(b[0] - a[0]) / len]; // the outward normal (the hull is up and left of it)
+  const at = (t) => [Math.round((a[0] + b[0]) / 2 + t * out[0]), Math.round((a[1] + b[1]) / 2 + t * out[1])];
+  const beyond = ([x, y]) => (x - a[0]) * out[0] + (y - a[1]) * out[1]; // signed distance outwards, written here
+  assert.ok(Math.abs(0.01 * Math.hypot(7274 - 4005, 5811 - 4296) - 36.03) < 0.01);
+  const g = await rocque();
+  // Inside, 10 pixels from the edge: St Georges Bank's rotated rectangle, moved there, is placed at
+  // toWorld of its centre.
+  const [cx, cy] = at(-10);
+  assert.ok(beyond([cx, cy]) < 0 && beyond([cx, cy]) > -11);
+  const svg = item(3).target.selector.value.replace(/x="6932" y="5370"/, `x="${cx - 140}" y="${cy - 20}"`).replace(' 7072 5390)', ` ${cx} ${cy})`);
+  const moved = { ...item(3), target: { ...item(3).target, selector: { ...item(3).target.selector, value: svg } } };
+  const inside = await placed({ georefs: [ROCQUE], manifests: [ROCQUE_M] }, [moved]);
+  assert.deepEqual(inside.of('annotation-region-beyond-control-points'), []);
+  const pts = rotated(cx - 140, cy - 20, 280, 40, -0.2);
+  const want = await expected(g, [cx, cy], ring(pts), LABEL_ANCHOR, bboxOf(pts));
+  assert.deepEqual(inside.attestation(3).geometries[0].geojson, want.geometry.geojson);
+  // Outside by 25 pixels, within the tolerance: placed. By 60: not.
+  const box = ([x, y]) => ({ ...item(1), target: { ...item(1).target, selector: { ...item(1).target.selector, value: `xywh=pixel:${x - 10},${y - 10},20,20` } } });
+  const near = at(25), far = at(60);
+  assert.ok(beyond(near) > 24 && beyond(near) < 26 && beyond(far) > 59 && beyond(far) < 61);
+  const r = await placed({ georefs: [ROCQUE], manifests: [ROCQUE_M] }, [box(near)]);
+  assert.deepEqual(r.of('annotation-region-beyond-control-points'), []);
+  assert.deepEqual(r.attestation(1).geometries[0].geojson, (await toWorld(g, { type: 'Point', coordinates: near }, { space: 'image', role: LABEL_ANCHOR })).geojson);
+  const f = await placed({ georefs: [ROCQUE], manifests: [ROCQUE_M] }, [box(far)]);
+  assert.equal(f.of('annotation-region-beyond-control-points').length, 1);
+  assert.equal(f.attestation(1).geometries, undefined);
 });
 test('annotation-region-image-url: the picture address, with full size assumed for "max"; not for the canvas', async () => {
   const { of, attestation } = await MAIN();
@@ -420,10 +481,14 @@ test('annotation-region-ambiguous: inside both masks of the constructed page, na
   assert.match(amb[0], new RegExp(`^${id(14)}: the rectangle xywh=pixel:2750,5000,100,40 on .* is inside 2 maps: `));
   assert.ok(amb[0].includes('https://example.org/constructed/loc-chesapeake-overlapping/7b478a66b60e91b3') && amb[0].includes('https://annotations.allmaps.org/maps/d1e107975cac64ec'), amb[0]);
   assert.equal(both.attestation(14).geometries, undefined);
-  // Control: the real page, whose masks do not overlap, places the same region through its second map.
+  // Control: the real page, whose masks do not overlap, finds the same region in its second map
+  // only; but its three control points enclose a small triangle, which the region is beyond.
   const real = await placed({ georefs: [LOC] });
   assert.deepEqual(real.of('annotation-region-ambiguous'), []);
-  const att = real.attestation(14);
+  assert.match(real.of('annotation-region-beyond-control-points')[0], new RegExp(`^${id(14)}: .* beyond the control points of the map .*https://annotations\\.allmaps\\.org/maps/d1e107975cac64ec$`));
+  assert.equal(real.attestation(14).geometries, undefined);
+  // Moved inside that triangle, it is placed through the second map.
+  const att = (await placed({ georefs: [LOC] }, [INSIDE_D1E])).attestation(14);
   assert.equal(att.geometries.length, 1);
   assert.equal('role' in att.geometries[0], false, 'no transcription: no role');
   assert.equal(att.citations[1].source['@id'], 'https://annotations.allmaps.org/maps/d1e107975cac64ec');
@@ -433,8 +498,10 @@ test('annotation-region-ambiguous: inside both masks of the constructed page, na
   const gap = { ...item(14), target: { ...item(14).target, selector: { ...item(14).target.selector, value: 'xywh=pixel:2450,5000,100,40' } } };
   assert.match((await placed({ georefs: [LOC] }, [gap])).of('annotation-region-outside-map')[0], /has its centre outside each of the maps .*7b478a66b60e91b3; .*d1e107975cac64ec, and lies wholly outside$/);
 });
+/** Region 14 moved to the middle of the control points of the Chesapeake page's second map. */
+const INSIDE_D1E = { ...item(14), target: { ...item(14).target, selector: { ...item(14).target.selector, value: 'xywh=pixel:3746,5258,100,40' } } };
 test('annotation-georef-unused: a map that placed nothing is named; the maps that placed something are not', async () => {
-  const r = await placed({ georefs: [ROCQUE, LOC], manifests: [ROCQUE_M] });
+  const r = await placed({ georefs: [ROCQUE, LOC], manifests: [ROCQUE_M] }, [...ITEMS.filter((a) => a !== item(14)), INSIDE_D1E]);
   const unused = r.of('annotation-georef-unused');
   assert.equal(unused.length, 1);
   assert.match(unused[0], /https:\/\/annotations\.allmaps\.org\/maps\/7b478a66b60e91b3 \(loc-chesapeake-annotationpage\.json\)$/);

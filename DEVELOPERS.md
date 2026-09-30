@@ -137,8 +137,12 @@ output is byte for byte what it was (the test holds the digests).
 - **Which map.** The georeferences whose image or canvas the target's source is (`matchTarget`; a
   IIIF picture address only whole, unrotated and full size, with a warning), in image pixels (as
   Recogito Studio's regions are); of those, the one whose mask holds the region's centre. None, or
-  more than one, and the region is not placed, and is reported. A region reaching beyond the mask
-  is placed, with a warning.
+  more than one, and the region is not placed, and is reported. The centre must also lie inside the
+  convex hull of that map's control points in image pixels (`withinControlPoints`, with a tolerance
+  of `HULL_TOLERANCE`, 1% of the hull's bounding-box diagonal), or it is not placed
+  (`annotation-region-beyond-control-points`): beyond them a thin plate spline extrapolates wildly
+  (the fixture's "45" in the border would go to about -127.8, 57.4). A region whose centre is inside
+  both but which reaches beyond the mask is placed, with a warning.
 - **What is written.** One `Point`: the centre, worked out in pixels (the area centroid; the
   midpoint by length of a line) and then transformed; `precisionKm` (an array, as the schema has
   it) the greatest haversine distance from it to the transformed outline's vertices, plus the

@@ -72,6 +72,7 @@ export const ANNOTATION_KINDS = {
   'annotation-region-no-georef': 'loss',
   'annotation-region-outside-map': 'loss',
   'annotation-region-ambiguous': 'loss',
+  'annotation-region-beyond-control-points': 'loss',
   'annotation-region-not-iiif': 'loss',
   'annotation-region-unplaced': 'loss',
   'annotation-region-image-url': 'warning',

@@ -10,7 +10,10 @@
 // `precisionKm` the greatest ground distance from that point to any vertex of the placed outline
 // (so that the radius holds the whole region), plus, for a transformation fitted by least squares,
 // how far the georeference misses its own control points (the root mean square, in the record). The outline itself is not carried, and is reported. A
-// region that reaches beyond the mask is still placed, with a warning.
+// region whose centre is inside the mask but beyond the convex hull of the georeference's control
+// points (in image pixels, with a tolerance of 1% of the hull's diagonal) is not placed, since
+// there the transformation only extrapolates. A region whose centre is inside both, but which
+// reaches beyond the mask, is still placed, with a warning.
 //
 // The citation of the annotated image is REPLACED, for a placed region, by the citation of the map
 // (the manifest, cito:citesAsEvidence, the region on the canvas as the locator), followed by the
@@ -23,9 +26,9 @@
 //     "label" (see isLabelTag), the one of these Recogito Studio's own editor can write;
 //   - else no role, with a note saying why, and a warning. A region tagged "symbol" (isSymbolTag)
 //     is given no role too, for now (see the TODO at roleOf).
-// Everything else (no georeference for the image, a centre outside the map or in two maps, a
-// Recogito v1 document, a georeference that cannot place it) is reported by kind, and the region
-// stays what it was before: a locator in words, in the citation of the image.
+// Everything else (no georeference for the image, a centre outside the map, in two maps or beyond
+// its control points, a Recogito v1 document, a georeference that cannot place it) is reported by
+// kind, and the region stays what it was before: a locator in words, in the citation of the image.
 //
 // The async functions here load Allmaps (through src/engine/georef/); they are only called when
 // georeferences were supplied, so a run without them never loads it.
@@ -275,6 +278,12 @@ export async function placeRegions(a, attestations, ctx, report) {
         }
         const { m } = inside[0];
         const geom = geoms.get(m);
+        // Beyond the control points a georeference extrapolates (a thin plate spline wildly: the
+        // "45" in the Rocque map's border went to about -127.8, 57.4), so such a centre is not placed.
+        if (!withinControlPoints(m.g, centres.get(m))) {
+          report('annotation-region-beyond-control-points', `${where}: ${shape} on ${source} has its centre beyond the control points of ${maps(inside)}`);
+          continue;
+        }
         if (!containsRegion(m.g, geom, { space: 'image' })) report('annotation-region-crosses-map-edge', `${where}: ${shape} on ${source} reaches beyond ${maps(inside)}`);
         await place(m, geom, centres.get(m), attestations, { ...ctx, index, replaced }, report, shape);
       } catch (e) {
@@ -283,6 +292,52 @@ export async function placeRegions(a, attestations, ctx, report) {
       }
     }
   }
+}
+
+/**
+ * The convex hull of pixel positions (Andrew's monotone chain), with every turn positive by the
+ * cross product, without repeated or collinear points: one point, two, or a polygon's vertices.
+ */
+export function convexHull(points) {
+  const p = [...new Map(points.map((q) => [`${q[0]},${q[1]}`, q])).values()].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (p.length < 3) return p;
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const half = (list) => {
+    const h = [];
+    for (const q of list) {
+      while (h.length >= 2 && cross(h[h.length - 2], h[h.length - 1], q) <= 0) h.pop();
+      h.push(q);
+    }
+    h.pop();
+    return h;
+  };
+  return [...half(p), ...half([...p].reverse())];
+}
+/** Distance from a point to the segment a-b. */
+function segmentDistance([x, y], [ax, ay], [bx, by]) {
+  const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+  const t = l2 ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2)) : 0;
+  return Math.hypot(x - (ax + t * dx), y - (ay + t * dy));
+}
+/** Share of the hull's diagonal (its bounding box's) by which a centre may lie outside it. */
+export const HULL_TOLERANCE = 0.01;
+/**
+ * Whether a pixel position lies inside the convex hull of the georeference's control points (in
+ * image pixels), or within HULL_TOLERANCE of the diagonal of the hull's bounding box of it: where the transformation
+ * interpolates between evidence rather than extrapolating beyond it.
+ */
+export function withinControlPoints(g, point) {
+  const hull = convexHull((g.controlPoints || []).map((c) => c.resource));
+  if (!hull.length) return false;
+  const xs = hull.map((q) => q[0]), ys = hull.map((q) => q[1]);
+  const tolerance = HULL_TOLERANCE * Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  if (hull.length >= 3) {
+    const cross = (a, b) => (b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0]);
+    if (hull.every((a, i) => cross(a, hull[(i + 1) % hull.length]) >= 0)) return true;
+  }
+  const d = hull.length === 1 ? Math.hypot(point[0] - hull[0][0], point[1] - hull[0][1])
+    : Math.min(...hull.map((a, i) => segmentDistance(point, a, hull[(i + 1) % hull.length])));
+  return d <= tolerance;
 }
 
 /** The locator annotations.js writes for any SVG shape: it says nothing the canvas locator does not. */

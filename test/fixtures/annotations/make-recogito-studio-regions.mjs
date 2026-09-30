@@ -78,7 +78,7 @@ const out = [
   // 7. The meridian label "120" in the top margin, above the neatline: outside the mask.
   annotation(CANVAS, rectangle({ x: 3718, y: 892, w: 84, h: 36 }), [geotag('http://www.wikidata.org/entity/Q2696926', '120th meridian west', [-120, 45]), transcription('120')]),
   // 8. The parallel label "45" in the left border, drawn round loosely, well into the map: its centre
-  //    is inside the mask, and it reaches beyond it.
+  //    is inside the mask, and it reaches beyond it; but its centre is beyond the control points.
   annotation(CANVAS, rectangle({ x: 188, y: 2190, w: 192, h: 60 }), [geotag('http://www.wikidata.org/entity/Q1256191', '45th parallel north', [-90, 45]), transcription('45')]),
   // 9. "Boston", on the image service's full-size picture rather than the canvas.
   annotation(`${SERVICE}/full/max/0/default.jpg`, rectangle({ x: 6278, y: 5480, w: 120, h: 30 }), [geotag('http://www.wikidata.org/entity/Q100', 'Boston', [-71.06, 42.36]), transcription('Boston')]),

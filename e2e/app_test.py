@@ -654,7 +654,7 @@ def main():
             geoms2 = [g for p in doc2.get('spatialEntities', []) for a in p['attestations'] for g in a.get('geometries', [])]
             anchors = [g for g in geoms1 if g.get('role') == 'https://w3id.org/plato#LabelAnchor' and g.get('geojson', {}).get('type') == 'Point' and g.get('precisionKm')]
             check('a Recogito export dropped with a georeference and its manifest gives LabelAnchor points; the export alone gives none',
-                  ok1 and s1.get('format') == 'w3c-annotations' and 'with 1 georeference and 1 IIIF manifest' in said1 and len(anchors) == 7
+                  ok1 and s1.get('format') == 'w3c-annotations' and 'with 1 georeference and 1 IIIF manifest' in said1 and len(anchors) == 5
                   and any(i['kind'] == 'annotation-region-shape' for i in s1['report']['items'])
                   and ok2 and not geoms2 and len(doc2.get('spatialEntities', [])) == len(doc1.get('spatialEntities', [])) > 0,
                   {'placed': s1.get('phase'), 'shown': said1, 'anchors': len(anchors), 'alone': s2.get('phase'), 'geoms alone': len(geoms2)})
