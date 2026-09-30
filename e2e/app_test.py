@@ -637,6 +637,27 @@ def main():
             check('a IIIF Georeference Annotation is refused on the page with the reason, and offers no check; a Recogito export is still read',
                   s1.get('phase') == 'unrecognised' and 'IIIF Georeference Annotation' in said1 and 'drop it together with the Recogito export' in said1 and acts1 is False
                   and s2.get('format') == 'w3c-annotations' and s2.get('phase') == 'done', {'georef': s1, 'shown': said1, 'actions': acts1, 'recogito': s2.get('format')})
+
+            # Georeferenced regions: the constructed Recogito Studio export dropped together with the
+            # Rocque map's georeference and manifest gives label-anchor points; the same export alone,
+            # the control, gives no geometry at all, and the same places.
+            regions = ROOT / 'test/fixtures/annotations/recogito-studio-regions-constructed.json'
+            geo = ROOT / 'test/fixtures/georef'
+            s1 = run_case(page, [regions, geo / 'bpl-rocque-annotation.json', geo / 'bpl-rocque-manifest.json'], 'convert', 'plato-json')
+            said1 = page.inner_text('#chosen') if s1.get('phase') == 'done' else ''
+            ok1 = s1.get('phase') == 'done' and bool(s1.get('outputs'))
+            doc1 = json.loads(download(page, s1['outputs'][0]['name'], tmp / 'regions-placed.json').read_text()) if ok1 else {}
+            geoms1 = [g for p in doc1.get('spatialEntities', []) for a in p['attestations'] for g in a.get('geometries', [])]
+            s2 = run_case(page, [regions], 'convert', 'plato-json')
+            ok2 = s2.get('phase') == 'done' and bool(s2.get('outputs'))
+            doc2 = json.loads(download(page, s2['outputs'][0]['name'], tmp / 'regions-alone.json').read_text()) if ok2 else {}
+            geoms2 = [g for p in doc2.get('spatialEntities', []) for a in p['attestations'] for g in a.get('geometries', [])]
+            anchors = [g for g in geoms1 if g.get('role') == 'https://w3id.org/plato#LabelAnchor' and g.get('geojson', {}).get('type') == 'Point' and g.get('precisionKm')]
+            check('a Recogito export dropped with a georeference and its manifest gives LabelAnchor points; the export alone gives none',
+                  ok1 and s1.get('format') == 'w3c-annotations' and 'with 1 georeference and 1 IIIF manifest' in said1 and len(anchors) == 7
+                  and any(i['kind'] == 'annotation-region-shape' for i in s1['report']['items'])
+                  and ok2 and not geoms2 and len(doc2.get('spatialEntities', [])) == len(doc1.get('spatialEntities', [])) > 0,
+                  {'placed': s1.get('phase'), 'shown': said1, 'anchors': len(anchors), 'alone': s2.get('phase'), 'geoms alone': len(geoms2)})
             krisis_case(page, tmp)
             ctx.close()
             chora_checks(pw, url, tmp)
