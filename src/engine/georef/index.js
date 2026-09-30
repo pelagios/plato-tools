@@ -176,6 +176,25 @@ function checkControlPoint(p, i, who) {
   }
 }
 
+/**
+ * The control points must lie on one side of the 180° meridian. The shortest span of longitude that
+ * holds them all is found (sorted, the largest gap between neighbours is left out); if that largest
+ * gap is not the one across ±180°, the shortest span crosses it, and Web Mercator would put the
+ * points at either edge of the world: a point between 179.5° and -179.5° came out at [0, 10.1] (as
+ * it does in Allmaps). So such a set is refused. A map that reaches more than half way round the
+ * world with its control points spread evenly can be refused by this too.
+ */
+function checkAntimeridian(points, who) {
+  const lons = points.map((p) => p.geo[0]).sort((a, b) => a - b);
+  if (lons.length < 2) return;
+  const across = lons[0] + 360 - lons[lons.length - 1];
+  let widest = 0, at = 0;
+  for (let i = 1; i < lons.length; i++) if (lons[i] - lons[i - 1] > widest) { widest = lons[i] - lons[i - 1]; at = i; }
+  if (widest > across) {
+    throw new DataError(`${who[0].toUpperCase()}${who.slice(1)} has control points on both sides of the 180° meridian (at longitudes up to ${lons[at - 1]} and from ${lons[at]}), and maps that cross the 180° meridian are not supported yet. Nothing was changed.`);
+  }
+}
+
 // Web Mercator (EPSG:3857 on its sphere), computed exactly as proj4 computes it for Allmaps
 // (proj4's merc.js, with its constants and order of operations), so that the control points
 // Allmaps' renderer fits are the same numbers, bit for bit. That matters: the projective solve is
@@ -319,6 +338,12 @@ function inverseLine(entry, pts, closed, tol) {
  *   the manifest's label (else the label the annotation gives it), or null; `controlPoints` are
  *   [{ resource: [x, y], geo: [lon, lat] }] and `mask` the annotation's mask in image pixels (or
  *   null), carried so that g still works after it is copied or sent to a worker.
+ *
+ * g is IMMUTABLE, and is returned frozen, all the way down: the transformations fitted from it
+ * (control points, image size and mask) are cached by g itself, so a g changed in place would go on
+ * giving the old results. A frozen g still copies (structuredClone, postMessage; the copy is not
+ * frozen, and is fitted afresh) and spreads ({ ...g, … } is a new g); to change a georeference,
+ * make a new object rather than editing this one.
  */
 export async function readGeoreference(annotation, { manifest, canvasId, index } = {}) {
   if (typeof annotation === 'string') {
@@ -336,10 +361,12 @@ export async function readGeoreference(annotation, { manifest, canvasId, index }
   const maps = items.map((item, i) => {
     const id = item && (item.id ?? item['@id']);
     const where = items.length > 1 ? `Annotation ${i + 1} of the page${id ? ` (${id})` : ''}` : `The annotation${id ? ` ${id}` : ''}`;
-    if (!item || item.motivation !== 'georeferencing') {
+    const georeferencing = item && (item.motivation === 'georeferencing' || (Array.isArray(item.motivation) && item.motivation.includes('georeferencing')));
+    if (!georeferencing) {
       throw new DataError(`${where} is not a Georeference Annotation: its motivation is ${JSON.stringify(item && item.motivation || null)}, not "georeferencing".`);
     }
-    try { return parseAnnotation(item)[0]; }
+    // Allmaps' parser takes the motivation only as the string; an array holding it means the same.
+    try { return parseAnnotation(typeof item.motivation === 'string' ? item : { ...item, motivation: 'georeferencing' })[0]; }
     catch (e) { throw new DataError(`${where} is not a Georeference Annotation that can be read (${String(e && e.message || e).split('\n')[0].slice(0, 300)}).`); }
   });
 
@@ -411,7 +438,9 @@ export async function readGeoreference(annotation, { manifest, canvasId, index }
   if (!title) title = partOf.find((p) => !cId || normaliseId(p.id) === normaliseId(cId))?.manifestLabel ?? null;
 
   const controlPoints = map.gcps.map((p) => ({ resource: [p.resource[0], p.resource[1]], geo: [p.geo[0], p.geo[1]] }));
-  controlPoints.forEach((p, i) => checkControlPoint(p, i, `the georeference${map.id ? ` ${map.id}` : ''}`));
+  const who = `the georeference${map.id ? ` ${map.id}` : ''}`;
+  controlPoints.forEach((p, i) => checkControlPoint(p, i, who));
+  checkAntimeridian(controlPoints, who);
   const g = {
     annotationId: map.id ?? null,
     imageServiceId: map.resource.id ?? image,
@@ -426,7 +455,15 @@ export async function readGeoreference(annotation, { manifest, canvasId, index }
     mask: Array.isArray(map.resourceMask) && map.resourceMask.length >= 3 ? map.resourceMask.map((p) => [p[0], p[1]]) : null,
   };
   enoughPoints(g, g.transformation);
-  return g;
+  return deepFreeze(g);
+}
+/** Freeze g and everything in it (see readGeoreference: fitted transformations are cached by g). */
+function deepFreeze(o) {
+  if (o && typeof o === 'object' && !Object.isFrozen(o)) {
+    Object.freeze(o);
+    for (const v of Object.values(o)) deepFreeze(v);
+  }
+  return o;
 }
 
 // ---- Transforming ------------------------------------------------------------------------------
@@ -615,6 +652,10 @@ export function matchesTarget(g, sourceId) {
  * given. A IIIF Image API picture URL ({service}/full/{size}/0/{quality}.{format}) matches the
  * image service only (via 'image-url'), never the canvas, and only at full size ("full" or
  * "max"); one of this image that is cropped, rotated or scaled does not match, and `reason` says why.
+ * A picture at size "max" is matched, but marked `assumedFullSize: true`: on a server that sets a
+ * maxWidth, maxHeight or maxArea, "max" is a scaled picture, whose pixels are not the image's, and
+ * that cannot be told from the URL; so a caller can report that the full size was assumed. "full"
+ * is always the whole image, and is not marked.
  */
 export function matchTarget(g, sourceId) {
   const s = normaliseId(sourceId);
@@ -625,7 +666,8 @@ export function matchTarget(g, sourceId) {
   const parts = parseImageRequest(sourceId);
   if (!parts || !service || parts.service !== service) return { match: false, via: null };
   const reason = imageRequestFrameChange(parts);
-  return reason ? { match: false, via: null, reason } : { match: true, via: 'image-url' };
+  if (reason) return { match: false, via: null, reason };
+  return parts.size === 'max' ? { match: true, via: 'image-url', assumedFullSize: true } : { match: true, via: 'image-url' };
 }
 
 /**
@@ -695,13 +737,20 @@ export function georefNote(record, { fetched } = {}) {
 
 const okSize = (d) => d && Number.isFinite(d.width) && Number.isFinite(d.height) && d.width > 0 && d.height > 0;
 
-/** [x, y, w, h] padded by 2% of its larger side (at least 1), rounded outwards, kept within size when known. */
+/**
+ * [x, y, w, h] padded by 2% of its larger side (at least 1), rounded outwards, then kept within size
+ * when known (and at 0 or more always). A TypeError when nothing of the padded box is left: the
+ * region is not on the canvas (or image) at all, which is the caller's mistake.
+ */
 function paddedXywh([x, y, w, h], size) {
   const pad = Math.max(1, 0.02 * Math.max(w, h));
-  let x0 = Math.floor(x - pad + 1e-9), y0 = Math.floor(y - pad + 1e-9);
-  let x1 = Math.ceil(x + w + pad - 1e-9), y1 = Math.ceil(y + h + pad - 1e-9);
-  x0 = Math.max(0, x0); y0 = Math.max(0, y0);
-  if (okSize(size)) { x1 = Math.min(size.width, x1); y1 = Math.min(size.height, y1); }
+  const clamp = (v, max) => Math.min(Math.max(0, v), max);
+  const W = okSize(size) ? size.width : Infinity, H = okSize(size) ? size.height : Infinity;
+  const x0 = clamp(Math.floor(x - pad + 1e-9), W), y0 = clamp(Math.floor(y - pad + 1e-9), H);
+  const x1 = clamp(Math.ceil(x + w + pad - 1e-9), W), y1 = clamp(Math.ceil(y + h + pad - 1e-9), H);
+  if (x1 - x0 <= 0 || y1 - y0 <= 0) {
+    throw new TypeError(`The region ${JSON.stringify([x, y, w, h])} lies outside the ${Number.isFinite(W) ? `${W} x ${H} ` : ''}picture it is given on, so it cannot be cited there.`);
+  }
   return `${x0},${y0},${x1 - x0},${y1 - y0}`;
 }
 
@@ -742,7 +791,7 @@ function regionLocator(record, region) {
  *   the locator is then the canvas "#xywh=…" of that box padded by 2% of its larger side (at least
  *   1 pixel), rounded outwards and kept within the canvas, in canvas units (converted from image
  *   pixels when needed); on the image service, in image pixels, when there is no canvas or its
- *   size is unknown.
+ *   size is unknown. A TypeError when no part of the padded box is on the canvas (or image).
  */
 export function georefCitation(record, { region } = {}) {
   const id = record.manifestId || record.imageServiceId;

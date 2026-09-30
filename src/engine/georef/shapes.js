@@ -35,6 +35,10 @@ export function pointInRing([x, y], ring) {
   }
   return inside;
 }
+function onRing(p, ring) {
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) if (onSegment(p, ring[i], ring[j])) return true;
+  return false;
+}
 function onSegment(p, a, b) {
   const cross = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
   if (Math.abs(cross) > 1e-9 * Math.max(1, Math.hypot(b[0] - a[0], b[1] - a[1]))) return false;
@@ -200,7 +204,7 @@ function ellipseRing(cx, cy, rx, ry) {
 function pathSubpaths(d) {
   const tokens = String(d).match(/[a-zA-Z]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g) || [];
   const subs = [];
-  let cur = null, pt = [0, 0], start = [0, 0], cmd = null, i = 0;
+  let cur = null, pt = [0, 0], start = [0, 0], cmd = null, i = 0, closedLast = false;
   const num = () => {
     if (i >= tokens.length || /[a-zA-Z]/.test(tokens[i])) throw new DataError(`The SVG path ${JSON.stringify(d)} stops in the middle of a command.`);
     return Number(tokens[i++]);
@@ -213,11 +217,14 @@ function pathSubpaths(d) {
       case 'M': {
         const x = num(), y = num();
         pt = rel ? [pt[0] + x, pt[1] + y] : [x, y];
-        start = pt; cur = { points: [pt], closed: false }; subs.push(cur);
+        start = pt; cur = { points: [pt], closed: false }; subs.push(cur); closedLast = false;
         cmd = rel ? 'l' : 'L'; // pairs after a moveto are linetos
         break;
       }
       case 'L': case 'H': case 'V': {
+        // After Z, the current point is the start of the subpath just closed, and a line from there
+        // begins a new subpath at it (SVG 1.1, 8.3.3).
+        if (!cur && closedLast) { cur = { points: [start], closed: false }; subs.push(cur); closedLast = false; }
         if (!cur) throw new DataError(`The SVG path ${JSON.stringify(d)} draws before it moves to a starting point.`);
         const c = cmd.toUpperCase();
         if (c === 'L') { const x = num(), y = num(); pt = rel ? [pt[0] + x, pt[1] + y] : [x, y]; }
@@ -228,7 +235,7 @@ function pathSubpaths(d) {
       }
       case 'Z':
         if (!cur) throw new DataError(`The SVG path ${JSON.stringify(d)} closes before it starts.`);
-        cur.closed = true; pt = start; cur = null;
+        cur.closed = true; pt = start; cur = null; closedLast = true;
         break;
       default:
         throw new DataError(`The SVG path uses the command "${cmd}", which is not read: only straight lines (M, L, H, V and Z) can be transformed, not curves or arcs.`);
@@ -244,17 +251,45 @@ function ringsToPolygons(rings) {
   const sorted = [...rings].sort((a, b) => Math.abs(signedArea2(b)) - Math.abs(signedArea2(a)));
   const polygons = [];
   for (const r of sorted) {
-    const host = polygons.find((p) => pointInRing(r[0], p[0]));
+    // A vertex off the other ring's edge decides (subpaths after Z share their first point).
+    const host = polygons.find((p) => pointInRing(r.find((q) => !onRing(q, p[0])) ?? r[0], p[0]));
     if (host) host.push(r); else polygons.push([r]);
   }
   return polygons;
 }
 
 /**
+ * The outer <svg>'s own frame must be the pixel frame, since its coordinates are read as pixels.
+ * width and height, if given, must be plain numbers or px. A viewBox must start at 0 0 and, where
+ * width or height is given, be the same size (otherwise it scales or shifts every shape; the size
+ * of the target image is not known here, so that is as far as it can be checked). A viewBox alone,
+ * with no width and height, starting at 0 0, says nothing about the size it is drawn at: it is
+ * taken as pixels, as the rest of the SVG is.
+ */
+function svgFrame(a) {
+  const refuse = (why) => { throw new DataError(`The SVG's <svg> element ${why}, so its shapes would not be read in the image's pixels. Nothing was changed: give the shapes in an <svg> whose frame is the image's pixels (no viewBox, or viewBox="0 0 W H" with width="W" height="H").`); };
+  const size = {};
+  for (const k of ['width', 'height']) {
+    if (a[k] === undefined) continue;
+    const m = /^\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*(px)?\s*$/.exec(a[k]);
+    if (!m || !(Number(m[1]) > 0)) refuse(`has ${k}="${a[k]}", which is not a number of pixels`);
+    size[k] = Number(m[1]);
+  }
+  if (a.viewBox === undefined) return;
+  const v = a.viewBox.trim().split(/[\s,]+/).map((t) => (/^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/.test(t) ? Number(t) : NaN));
+  if (v.length !== 4 || !v.every(Number.isFinite) || !(v[2] > 0 && v[3] > 0)) refuse(`has viewBox="${a.viewBox}", which is not four numbers with a width and height more than 0`);
+  if (v[0] !== 0 || v[1] !== 0) refuse(`has viewBox="${a.viewBox}", which does not start at 0 0`);
+  if ((size.width !== undefined && size.width !== v[2]) || (size.height !== undefined && size.height !== v[3])) {
+    refuse(`has viewBox="${a.viewBox}" and ${['width', 'height'].filter((k) => a[k] !== undefined).map((k) => `${k}="${a[k]}"`).join(' ')}, which differ, so the viewBox scales the shapes`);
+  }
+}
+
+/**
  * An SVG selector (a whole <svg> element or a fragment) as a GeoJSON-shaped pixel geometry.
  * Read: polygon, polyline, line, rect, circle and ellipse (as a polygon of CIRCLE_SIDES sides),
  * and path with straight segments only; a transform attribute on the shape itself is applied.
- * Refused: curves and arcs, a transform on anything but a shape (a group, a link, the <svg>
+ * Refused: curves and arcs (and a rect with rounded corners), an outer <svg> whose viewBox or size
+ * is not the pixel frame (see svgFrame), a transform on anything but a shape (a group, a link, the <svg>
  * itself), an <svg> inside another, text and images, and a mixture of areas and lines.
  */
 export function parseSvg(svg) {
@@ -267,6 +302,7 @@ export function parseSvg(svg) {
     // Only a transform on a shape is applied; one on anything else (the <svg> itself, a group, a
     // link) would move the shapes inside it, and so would a nested <svg> (its x, y and viewBox).
     if (tag === 'svg' && ++svgs > 1) throw new DataError('The SVG has an <svg> inside another, whose position and viewBox are not applied, so its shapes would be put in the wrong place. Nothing was changed: give the shapes in one <svg>.');
+    if (tag === 'svg') svgFrame(a);
     if (a.transform && !SHAPES.includes(tag)) throw new DataError(`The SVG has a transform on ${tag === 'g' ? 'a group (<g>)' : `an <${tag}> element`}, which is not applied, so the shapes inside it would be put in the wrong place. Nothing was changed: give the transform on each shape itself.`);
     if (REFUSED.includes(tag)) throw new DataError(`The SVG has a <${tag}> element, which is not a shape that can be transformed.`);
     if (!SHAPES.includes(tag)) continue;
@@ -289,6 +325,11 @@ export function parseSvg(svg) {
       case 'rect': {
         const x = n('x'), y = n('y'), w = n('width'), h = n('height');
         if (!(w > 0 && h > 0)) throw new DataError('The SVG <rect> has no area: its width and height must be more than 0.');
+        // Rounded corners: a missing rx or ry takes the other's value; the corners are round only
+        // when both are more than 0.
+        const rx = a.rx !== undefined ? n('rx') : a.ry !== undefined ? n('ry') : 0;
+        const ry = a.ry !== undefined ? n('ry') : rx;
+        if (rx > 0 && ry > 0) throw new DataError(`The SVG <rect> has rounded corners (rx="${a.rx ?? a.ry}", ry="${a.ry ?? a.rx}"), which are curves and are not read: only straight lines can be transformed. Nothing was changed: give the rectangle without rx and ry, or as a polygon.`);
         polys.push(ringOf([[x, y], [x + w, y], [x + w, y + h], [x, y + h]])); break;
       }
       case 'circle': { const r = n('r'); if (!(r > 0)) throw new DataError('The SVG <circle> has no radius.'); polys.push(ringOf(ellipseRing(n('cx'), n('cy'), r, r))); break; }
