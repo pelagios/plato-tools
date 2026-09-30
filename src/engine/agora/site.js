@@ -71,6 +71,9 @@ export const TEXT = {
   'places-left-out': "Places are left out of the site (it holds only those in the --only list). Their addresses still redirect to where their pages would be, where GitHub Pages shows the site's 404 page: it explains, and points to the downloads, which hold every place.",
   'only-unknown': 'Keys in the --only list match no place of the dataset, so they select nothing.',
   'duplicate-place': "Two records are the same place: their addresses are the same, or differ only after '#', which a web server never sees. Only the first has a page and a JSON-LD document; what the others say is in the downloads, but not on the site. Make them one record, or give them addresses of their own. The example names the address.",
+  // Published, the addresses are frozen (Round 4, B1), as for the unservable ones: the first
+  // record's page is written, the place is listed on the home page, and the workflow deploys.
+  'duplicate-place-published': "Two records are the same place: their addresses are the same, or differ only after '#', which a web server never sees. Only the first has a page and a JSON-LD document. The dataset is published, so its addresses cannot change: the site lists these places on its home page, saying that the downloads hold all their records, and is deployed. The example names the address.",
   'bad-site-url': W3ID_TEXT['bad-site-url'],
   'bad-site-dir': "The site's folder (--site-dir) must be one name of letters, digits and . _ -, not starting with '.'.",
   'unsafe-workflow-value': "A value that goes into the site's workflow could change what the workflow does: it holds a line break, or '${{', which GitHub reads as an expression of its own; or, for the ref of PLATO tools, characters other than letters, digits and . _ / -. Nothing is written: give the value without them. The example names the option.",
@@ -117,7 +120,7 @@ export function create(ctx) {
   // What the check pass learns: which places and sources are served, and at what cost.
   const served = new Set(), bad = new Set(), onlySeen = new Set();
   // The key of every place met, so that a second record with it is not written over the first.
-  const seenPlace = new Set();
+  const seenPlace = new Map();        // key -> { iri, label, listed } of its first record
   const sources = new Map();          // key -> { iri, obj, n, places: [{ key, label, served }], last }, or null when unservable
   const idrs = new Map();             // place address -> identity matches the dataset lists apart from it
   const withdrawals = new Map();
@@ -129,11 +132,15 @@ export function create(ctx) {
   // hundred at most; the rest are counted).
   const unservable = { list: [], n: 0 };
   const unserved = (iri, label) => { unservable.n++; if (unservable.list.length < UNSERVABLE_SHOWN) unservable.list.push({ iri, label }); };
-  const addKey = (part, key, iri, label) => {
-    // A draft is to be fixed before it is published; a published dataset's addresses are frozen,
-    // and a known, listed gap must not stop the workflow from deploying the rest.
+  // The places given by more than one record (duplicate-place), listed on the home page the same way.
+  const duplicated = { list: [], n: 0 };
+  // A draft is to be fixed before it is published; a published dataset's addresses are frozen,
+  // and a known, listed gap must not stop the workflow from deploying the rest.
+  const say = (kind, example) => {
     const published = ctx.gazetteer?.status === 'published';
-    const say = (kind, example) => rep.add(published ? 'warning' : 'error', kind, TEXT[published ? kind + '-published' : kind], example);
+    rep.add(published ? 'warning' : 'error', kind, TEXT[published ? kind + '-published' : kind], example);
+  };
+  const addKey = (part, key, iri, label) => {
     const problem = keyProblem(key);
     if (problem) {
       say('key-not-servable', `${iri}: its last part ${problem}`); bad.add(part + '/' + key);
@@ -206,8 +213,17 @@ export function create(ctx) {
       const key = sc.placeKey(rec['@id']);
       // A second record for a place's key (the same address, or one that differs after '#'): its
       // files would be written over the first's, or fail because they exist. It is in the downloads.
-      if (key && seenPlace.has(key)) { rep.error('duplicate-place', TEXT['duplicate-place'], rec['@id']); return; }
-      if (key) seenPlace.add(key);
+      if (key && seenPlace.has(key)) {
+        say('duplicate-place', rec['@id']);
+        // Listed once for each place, however many records repeat it, by the first record's address.
+        const first = seenPlace.get(key);
+        if (!first.listed) {
+          first.listed = true; duplicated.n++;
+          if (duplicated.list.length < UNSERVABLE_SHOWN) duplicated.list.push({ iri: first.iri, label: first.label, key: served.has(key) ? key : null });
+        }
+        return;
+      }
+      if (key) seenPlace.set(key, { iri: rec['@id'], label: rec.label, listed: false });
       places++;
       for (const x of atts) {
         if (typeof x['@id'] !== 'string') unidentified++;
@@ -395,7 +411,8 @@ export function create(ctx) {
       const jsonld = schemaOrgDataset(g, sc, { release: options.release, conceptDoi: options.conceptDoi,
         distribution: downloads.map((d) => ({ '@type': 'DataDownload', name: d.file, contentUrl: sc.download(d.file), encodingFormat: d.mime, contentSize: `${d.size} B` })) });
       await put(SITE.landing, landingPage({ gazetteer: g, scheme: sc, draft, conceptDoi: options.conceptDoi, downloads, jsonld, turtle: !!turtle,
-        places: { inline, pages, total: places, served: served.size, leftOut: places - served.size }, unservable }));
+        places: { inline, pages, total: places, served: served.size, leftOut: places - served.size }, unservable,
+        duplicated: { ...duplicated, list: duplicated.list.map((d) => ({ ...d, key: d.key && served.has(d.key) ? d.key : null })) } }));
       await put(SITE.description, JSON.stringify(descriptionDocument(ctx.head), null, 1) + '\n');
       if (turtle) await put(SITE.descriptionTtl, turtle.description(ctx.head));
       await put(CSS_FILE, CSS + '\n');
@@ -421,6 +438,7 @@ export function create(ctx) {
         ...rep.counts, places: served.size, sources: sourcePages, 'left out': places - served.size, unservable: unservable.n, files, estimate: Math.round(estimate), bytes: size, written,
         said: [
           `A site of ${served.size.toLocaleString('en-GB')} place${served.size === 1 ? '' : 's'}${places - served.size ? ` (of ${places.toLocaleString('en-GB')})` : ''} and ${sourcePages.toLocaleString('en-GB')} source${sourcePages === 1 ? '' : 's'}, ${fmtBytes(size)} (estimated ${fmtBytes(Math.round(estimate))}).`,
+          duplicated.n ? `${duplicated.n.toLocaleString('en-GB')} place${duplicated.n === 1 ? ' is' : 's are'} given by more than one record: only the first has a page, and the home page lists ${duplicated.n === 1 ? 'it' : 'them'}.` : '',
           unservable.n ? `${unservable.n.toLocaleString('en-GB')} place${unservable.n === 1 ? ' has an address' : 's have addresses'} it cannot serve, listed on its home page as held in the downloads.` : '',
           draft ? 'Marked as a draft: not to be cited, and kept out of search engines.' : '',
         ].filter(Boolean),

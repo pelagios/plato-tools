@@ -256,7 +256,7 @@ ${ctx.draft ? '<p>This is a draft: do not cite it yet.</p>' : `<p>${esc(cite)}</
 <p class="muted">Its description for machines: ${a('index.jsonld', 'JSON-LD', { internal: true })}${ctx.turtle ? `, ${a('index.ttl', 'Turtle', { internal: true })}` : ''}.</p>
 <h2>Places</h2>
 <p class="muted">${p.served.toLocaleString('en-GB')} place${p.served === 1 ? '' : 's'}${p.leftOut ? ` of ${p.total.toLocaleString('en-GB')}` : ''}.</p>
-${placeList}${unservableList(ctx.unservable, '')}`;
+${placeList}${duplicatedList(ctx.duplicated)}${unservableList(ctx.unservable, '')}`;
   return page({
     title: g.title || 'Gazetteer', root: './', draft: ctx.draft, dataset: g.title,
     head: `<link rel="alternate" type="application/ld+json" href="index.jsonld">\n<script type="application/ld+json">${JSON.stringify(ctx.jsonld).replace(/</g, '\\u003c')}</script>\n`,
@@ -275,6 +275,19 @@ function unservableList(u, root) {
 <h3 id="not-served">Places held only in the downloads</h3>
 <p class="muted">${u.n.toLocaleString('en-GB')} place${u.n === 1 ? ' has an address' : 's have addresses'} this site cannot serve as ${u.n === 1 ? 'a file' : 'files'}, so ${u.n === 1 ? 'it has' : 'they have'} no page here: ${u.n === 1 ? 'it is' : 'they are'} in the ${a(root + '#downloads', 'downloads', { internal: true })}, with every other place.</p>
 <ul>${u.list.map((x) => `<li>${x.label ? esc(x.label) + ' ' : ''}<span class="iri">${esc(x.iri)}</span></li>`).join('')}</ul>${more > 0 ? `<p class="muted">and ${more.toLocaleString('en-GB')} more.</p>` : ''}`;
+}
+/**
+ * The places given by more than one record (the same address, or differing only after '#'): each
+ * has the first record's page, and the downloads hold all the records, which the site does not.
+ */
+function duplicatedList(d) {
+  if (!d || !d.n) return '';
+  const more = d.n - d.list.length;
+  const one = d.n === 1;
+  return `
+<h3 id="duplicated">Places given by more than one record</h3>
+<p class="muted">${d.n.toLocaleString('en-GB')} place${one ? ' is' : 's are'} given by more than one record in the dataset. ${one ? 'Its page shows' : 'Their pages show'} the first record only; the ${a('#downloads', 'downloads', { internal: true })} hold all the records.</p>
+<ul>${d.list.map((x) => `<li>${x.key ? a(`place/${x.key}/`, x.label || x.key, { internal: true }) + ' ' : x.label ? esc(x.label) + ' ' : ''}<span class="iri">${esc(x.iri)}</span></li>`).join('')}</ul>${more > 0 ? `<p class="muted">and ${more.toLocaleString('en-GB')} more.</p>` : ''}`;
 }
 /** How many links a page of the list of places holds. */
 export const PAGE = 1000;

@@ -409,12 +409,19 @@ test('attestations without addresses: a warning in a draft, an error that stops 
   assert.ok(!minted.kinds.includes('attestations-without-ids') && minted.has('index.html'));
 });
 
-test('a place given twice (the same address, or one differing after #) has one page, the first, and is an error', async () => {
-  const doc = kingJohn();
+// King John with Windsor given twice at the same address, and Odiham again at an address differing after '#'.
+function twice(status = 'draft') {
+  const doc = kingJohn({ status });
   const windsor = doc.spatialEntities.find((p) => p['@id'].endsWith('/windsor'));
   const odiham = doc.spatialEntities.find((p) => p['@id'].endsWith('/odiham'));
   doc.spatialEntities.push({ '@id': windsor['@id'], label: 'Windsor the second', attestations: [{ '@id': windsor['@id'] + '#a-2nd00001', names: [{ toponym: 'Windlesora' }] }] });
   doc.spatialEntities.push({ '@id': odiham['@id'] + '#here', label: 'Odiham the second', attestations: [{ '@id': odiham['@id'] + '#a-2nd00002', names: [{ toponym: 'Odiham' }] }] });
+  return doc;
+}
+test('a place given twice (the same address, or one differing after #) has one page, the first, and is an error in a draft', async () => {
+  const doc = twice();
+  const windsor = doc.spatialEntities.find((p) => p['@id'].endsWith('/windsor'));
+  const odiham = doc.spatialEntities.find((p) => p['@id'].endsWith('/odiham'));
   // On the command line's host a second file at the same path was refused (EEXIST) and the run died.
   const s = await site([jsonFile(doc)]);
   assert.equal(s.item('duplicate-place')?.severity, 'error');
@@ -432,6 +439,42 @@ test('a place given twice (the same address, or one differing after #) has one p
   unzipSync(new Uint8Array(Buffer.concat(memOuts(b)['king-john-site.zip'])), { filter: (f) => { names.push(f.name); return false; } });
   assert.equal(names.filter((n) => n === 'place/windsor/index.html').length, 1);
   assert.ok(names.includes('place/odiham.jsonld'));
+  // A draft lists them on its home page too.
+  assert.match(s.read('index.html'), /id="duplicated"/);
+});
+
+test('a place given twice in a published dataset: a warning, the first page, listed on the home page, exit 0', async () => {
+  const pub = await site([jsonFile(twice('published'))]);
+  const it = pub.item('duplicate-place');
+  assert.equal(it?.severity, 'warning');
+  assert.equal(it.count, 2);
+  assert.match(it.message, /published, so its addresses cannot change/);
+  assert.ok(!pub.r.report.items.some((i) => i.severity === 'error'), pub.kinds.join());
+  assert.match(pub.read('place/windsor/index.html'), /<h1>Windsor/);
+  assert.doesNotMatch(pub.read('place/windsor/index.html'), /Windsor the second/);
+  // The home page lists the two places (by the first record's address, linked to its page) and
+  // says the downloads hold every record; a place given once is not in that list.
+  const home = pub.read('index.html');
+  const at = home.indexOf('id="duplicated"');
+  assert.ok(at > 0, 'the list is there');
+  const listed = home.slice(at, home.indexOf('</ul>', at));
+  assert.match(listed, /downloads<\/a> hold all the records/);
+  assert.match(listed, /href="place\/windsor\/"/);
+  assert.match(listed, /href="place\/odiham\/"/);
+  assert.match(home, /href="place\/oxford\/"/);
+  assert.doesNotMatch(listed, /place\/oxford/);
+  assert.ok(pub.r.report.counts.said.some((x) => /2 places are given by more than one record/.test(x)));
+  // The same dataset without the repeats: no finding and no list, with a home page.
+  const clean = await site([jsonFile(kingJohn({ status: 'published' }))]);
+  assert.ok(clean.has('index.html') && !clean.kinds.includes('duplicate-place') && !/id="duplicated"/.test(clean.read('index.html')));
+  // What the workflow sees: exit 0 published, 1 as a draft.
+  for (const [status, code] of [['published', 0], ['draft', 1]]) {
+    const f = join(dir, `twice-${status}.json`);
+    writeFileSync(f, JSON.stringify(twice(status)));
+    const r = cli('publish', 'site', f, '--out', join(dir, `cli-twice-${status}`), '--tools-ref', 'abc1234');
+    assert.equal(r.code, code, status + r.out + r.err);
+    assert.match(r.out + r.err, /duplicate-place|same place/, status);
+  }
 });
 
 test("an attestation's anchor is kept when its place's address has a fragment of its own", async () => {
