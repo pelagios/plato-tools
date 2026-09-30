@@ -164,10 +164,16 @@ async function* lpfSource(file, seq, rep) {
 // W3C Web Annotations (Recogito's export): each annotation that links a passage to a place becomes
 // an attestation-centric attestation about that place (src/formats/annotations.js). The header is
 // written from the first annotation, so it waits for it; every kind the reader reports goes to the
-// report with the severity ANNOTATION_KINDS gives it.
+// report with the severity ANNOTATION_KINDS gives it. With georeferences (input.georefs, and the
+// maps' manifests, input.manifests: dropped with the export, or --georef and --manifest), each
+// annotation's regions are placed in the world (src/formats/regions.js); without them, nothing of
+// the georeference module is loaded and the annotations are read as before.
 async function* annotationSource(input, rep) {
   const file = input.files[0];
   const reader = new AnnotationReader((kind, example) => rep.add(ANNOTATION_KINDS[kind] || 'loss', kind, LOSS_TEXT[kind] || kind, example));
+  const placing = input.georefs?.length > 0;
+  if (placing) await reader.useGeoreferences(input.georefs, input.manifests || []);
+  else for (const m of input.manifests || []) rep.add(ANNOTATION_KINDS['annotation-manifest-unused'], 'annotation-manifest-unused', LOSS_TEXT['annotation-manifest-unused'], m.name);
   const items = input.shape === 'jsonl' ? (async function* () {
     for await (const { line, n } of lines(file)) {
       try { yield { annotation: JSON.parse(line) }; } catch (e) { rep.error('json-syntax', 'A line is not valid JSON', `line ${n}: ${e.message}`); }
@@ -179,7 +185,9 @@ async function* annotationSource(input, rep) {
     if ('next' in it) { rep.warning('annotation-more-pages', LOSS_TEXT['annotation-more-pages'], it.next); continue; }
     if (!headed) { headed = true; yield { type: 'header', value: reader.header(it.annotation, file.name, label) }; }
     n++; rep.count('annotations');
-    for (const a of reader.annotation(it.annotation, n)) yield { type: 'attestation', value: a, n };
+    const attestations = reader.annotation(it.annotation, n);
+    if (placing) await reader.place(it.annotation, attestations);
+    for (const a of attestations) yield { type: 'attestation', value: a, n };
   }
   if (!headed) yield { type: 'header', value: reader.header(null, file.name, label) };
   reader.finish();
