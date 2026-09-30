@@ -136,7 +136,7 @@
         },
         "nameEmbedding": {
           "type": "string",
-          "description": "Vector embedding for phonetic similarity search (format: implementation-specific, typically 256-dimensional vector)."
+          "description": "Vector embedding for phonetic similarity search. Its model and dimension are the producer's and must be stated in the gazetteer's description, since vectors from different models cannot be compared."
         },
         "sourceLabel": {
           "type": "string",
@@ -164,7 +164,7 @@
         },
         "geojson": {
           "type": "object",
-          "description": "GeoJSON Geometry object (Point, Polygon, LineString, etc.). Note: GeometryCollection not supported in some implementations.",
+          "description": "GeoJSON Geometry object (Point, Polygon, LineString, etc.). A GeometryCollection is not accepted: record each geometry separately, several in one attestation when one source gives them all, with a role where they depict different things.",
           "properties": {
             "type": {
               "type": "string",
