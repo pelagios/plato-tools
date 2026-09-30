@@ -228,6 +228,16 @@ function reader(context, out, side = { withdrawals: new Map() }) {
 }
 
 /**
+ * What each attestation says, as the version check compares it, for Agora's minting of attestation
+ * addresses (agora/mint.js), which hashes it: a sink like reader()'s, which calls out(id, lines)
+ * for every attestation of the records it is given, with its address (null for one without) and
+ * its statements as reader() writes them, sorted.
+ */
+export function attestationLines(context, out) {
+  return reader(context, { item: (kind, id, about, lines) => { if (kind === ATTESTATION) out(id, lines); }, statement: () => {}, facet: () => {} });
+}
+
+/**
  * Compare two versions of a dataset. `earlier` and `later` are inputs as detect() describes them.
  * Returns { report, outputs: [] }, the report in the shape run() gives, with `incomplete` set when a
  * version could not be read to the end, so that nothing was compared.

@@ -35,6 +35,8 @@ test('the scheme makes the addresses the tables make, and finds the key in each'
   assert.equal(s.base, 'https://w3id.org/pelagios/customs/');
   assert.equal(s.w3idPath, 'pelagios/customs');
   assert.equal(s.dataset, s.base);
+  assert.equal(s.stem, 'customs');
+  assert.equal(scheme('https://gazetteer.example.ac.uk/').stem, 'gazetteer-example-ac-uk');
   // The same addresses as reading spreadsheet tables makes (formats/tables.js), which PLATO makes normative.
   const t = tableIds(s.base, () => null);
   for (const id of ['bristol', 'St Ives', 'a/b']) {
