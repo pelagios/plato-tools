@@ -185,7 +185,14 @@ never meets a georeference never downloads them (`test/georef-lazy.test.js` chec
 process). Nothing in the module fetches: the caller supplies the annotation and the manifest. The
 transformation is fitted in Web Mercator, as Allmaps renders it, and results are WGS 84; an
 annotation with its own `resourceCrs` is refused. Where the inverse is undefined or several
-positions fit, it is a `DataError`, never a wrong position. The fixtures, real Allmaps annotations
+positions fit, it is a `DataError`, never a wrong position. The annotation's transformation,
+including a polynomial's order, is authoritative: Allmaps' renderer takes only the type and would
+draw an order-2 or order-3 map at order 1, so Chora passes `allmapsTransformationName(g)` to
+`setMapTransformationType`. Records carry the annotation's version and `modified` (which
+`georefNote` states in a sentence of its own) and, for least-squares transformations, how far the
+fit misses its own control points (`controlPointMisfitKm`, `controlPointMisfitMaxKm`; null for a
+thin plate spline), stated in the note only with `{ misfit: true }`. `georefCitation(record, {
+region, pad })` pads a region by `pad` canvas pixels, none by default. The fixtures, real Allmaps annotations
 and IIIF manifests with reference values from Allmaps' own code, are described in
 `test/fixtures/georef/README.md`.
 
