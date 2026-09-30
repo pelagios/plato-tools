@@ -19,6 +19,7 @@ const { compare } = await import('../src/engine/compare.js');
 const { publish, PUBLISH_PARTS } = await import('../src/engine/agora/index.js');
 const { detect } = await import('../src/engine/input.js');
 const { nodeResources, gatherInputs, openFiles, isSystemError, NodeHost } = await import('../src/node/host.js');
+const { toolsCommit } = await import('../src/node/build-info.js');
 const { fmtBytes, fmtTime, formatName, progressText, summary, groups, draftNote, explainedLines } = await import('../src/engine/words.js');
 
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -275,7 +276,9 @@ async function publishCommand(args, o, resources) {
       catch (e) { r.message = `--only ${o.only}: ${e.code === 'ENOENT' ? 'there is no such file.' : e.message}`; return finishPublish(r, o, t0); }
     }
     const options = { base: o.base, release: o.release, conceptDoi: o['concept-doi'], maintainers: o.maintainer, repo: o.repo, siteUrl: o['site-url'], turtle: o.turtle, name: items[0].name,
-      only, datasetPath: o['dataset-path'], toolsRef: o['tools-ref'], siteDir: o['site-dir'] };
+      only, datasetPath: o['dataset-path'], toolsRef: o['tools-ref'], siteDir: o['site-dir'],
+      // The commit these tools are, for the site's workflow to run the same (--tools-ref overrides).
+      toolsCommit: part === 'site' && !o['tools-ref'] ? toolsCommit()?.commit : undefined };
     try { result = await publish({ part, input, previous, options }, env); } catch (e) { failure = e; }
     if (live) process.stderr.write('\r\x1b[K');
     const done = finish(!!failure || !!result?.incomplete);

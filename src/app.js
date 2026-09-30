@@ -7,6 +7,9 @@ const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
 let worker, files = [], input = null, targets = {}, busy = false;
 
+// The commit of PLATO tools this page was built from (scripts/build-info.mjs writes it before the
+// build), for the site's workflow to run the same; absent from a build made without it.
+const BUILD = Object.values(import.meta.glob('./build-info.json', { eager: true, import: 'default' }))[0] || {};
 const INPUT_TO_TARGET = { tables: 'tables', 'plato-json': 'plato-json', 'plato-jsonl': 'plato-jsonl', ntriples: 'ntriples', lpf: 'lpf', 'lpf-seq': 'lpf-seq' };
 
 function startWorker() {
@@ -86,7 +89,7 @@ function start(action, earlier) {
 function publishOptions() {
   const v = (id) => $(id).value.trim() || undefined;
   const maintainers = (v('maintainers') || '').split(/[\s,]+/).map((m) => m.replace(/^@/, '')).filter(Boolean);
-  return { release: v('release'), conceptDoi: v('concept-doi'), repo: v('repo'), siteUrl: v('site-url'), maintainers, turtle: $('turtle').checked, name: tablesFolder() };
+  return { release: v('release'), conceptDoi: v('concept-doi'), repo: v('repo'), siteUrl: v('site-url'), maintainers, turtle: $('turtle').checked, name: tablesFolder(), toolsCommit: BUILD.commit || undefined };
 }
 // Spreadsheet tables chosen as a folder (or dropped as one) know its name, as the command line
 // does: the site's zip and the workflow's path are named after it. Chosen file by file they do

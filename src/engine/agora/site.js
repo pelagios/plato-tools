@@ -77,7 +77,7 @@ export const TEXT = {
   'dataset-path-guessed': "Where the spreadsheet tables are in your repository is not known (the page cannot tell which folder the files were chosen from), so the workflow reads them from the folder the example names. Change the path in .github/workflows/pages.yml (twice) if they are somewhere else, or make the site with the command line, which knows.",
   'custom-domain-path': "The base address is on a domain of its own but not at its root. GitHub Pages serves a custom domain from the root of one site, so no CNAME file is written: the pages will be at the base address only if this repository is a project site named after the path, under an account whose own Pages site has this domain. Otherwise use a base at the domain's root, or a w3id.org address.",
   'site-address-unknown': "Where the site will be served is not known (give --repo, or --site-url), so the 404 page's links start from the root of the site's domain, which is right for a custom domain but not for a project's address on github.io.",
-  'tools-ref-unpinned': "Which commit of PLATO tools made this is not known, so the workflow runs the tag of its version number, which may not exist yet. Give the commit or tag to run (--tools-ref) instead.",
+  'tools-ref-unpinned': "Which commit of PLATO tools made this is not known (these tools are not a clone of their repository, nor installed from it with npm, nor built with a record of it), so the workflow runs the tag of its version number, which may not exist yet. Give the commit or tag to run (--tools-ref) instead.",
   'tables-download-skipped': 'The dataset is too large for its spreadsheet tables to be made in memory, so they are not among the downloads. Convert it to tables with the command line if they are wanted.',
   'download-failed': 'A download could not be made in full; it is left out of the site.',
   'site-not-finished': 'The dataset could not be read to the end the second time, as the site was written, so the site was not finished and what was written of it is removed. The example says where it was.',
@@ -263,7 +263,9 @@ export function create(ctx) {
         else rep.warning('custom-domain-path', TEXT['custom-domain-path'], sc.base);
       }
       if (!url) rep.warning('site-address-unknown', TEXT['site-address-unknown']);
-      let toolsRef = options.toolsRef;
+      // The workflow runs the commit that made this site (options.toolsCommit, which the host finds:
+      // src/node/build-info.js), unless another is asked for; the version's tag only as a last resort.
+      let toolsRef = options.toolsRef || options.toolsCommit;
       if (!toolsRef) { toolsRef = `v${PKG.version}`; rep.warning('tools-ref-unpinned', TEXT['tools-ref-unpinned'], toolsRef); }
 
       const input = ctx.input;
