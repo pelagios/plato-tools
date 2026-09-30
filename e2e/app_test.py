@@ -5,7 +5,7 @@
     python3 e2e/app_test.py --prove-it-fails run every check against a page with no tools on it;
                                             every check must fail, or the harness cannot fail
 """
-import json, os, pathlib, shutil, signal, socket, subprocess, sys, tempfile, time, urllib.request
+import csv, json, os, pathlib, shutil, signal, socket, subprocess, sys, tempfile, time, urllib.request, zipfile
 from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -55,10 +55,118 @@ def compare_case(page, later, earlier, timeout=120):
     except Exception as e:                       # a harness error is a failed check, never a crash
         return {'phase': 'harness-error', 'error': str(e).split('\n')[0][:200]}
 
+# Agora's text fields in Options, all set on every run (to '' when not given), so that no run
+# inherits what an earlier one typed.
+PUBLISH_FIELDS = ('release', 'repo', 'site-url', 'maintainers', 'concept-doi')
+
+def publish_case(page, files, part, fields=None, previous=None, timeout=300):
+    """Choose the dataset, fill in the Options for publishing, choose the part and press Prepare."""
+    try:
+        # The same files chosen twice running are no change, and the page would not look at them
+        # again: the choice is emptied first (which the page ignores), so every run is a fresh one.
+        page.set_input_files('#picker', [])
+        page.set_input_files('#picker', [str(f) for f in files])
+        s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), 60, 'detection')
+        if s.get('phase') != 'detected': return s
+        page.evaluate("() => { document.getElementById('options').open = true; }")
+        for f in PUBLISH_FIELDS: page.fill('#' + f, (fields or {}).get(f, ''))
+        page.set_input_files('#previous', [str(p) for p in (previous or [])])
+        page.select_option('#part', part)
+        page.click('#publish')
+        return wait_state(page, lambda s: s.get('action') == 'publish' and s.get('phase') in ('done', 'error'), timeout, 'publishing')
+    except Exception as e:                       # a harness error is a failed check, never a crash
+        return {'phase': 'harness-error', 'error': str(e).split('\n')[0][:200]}
+
+def saved_zip(page, s, tmp, suffix):
+    """Save the output whose name ends in `suffix` as the page would, and open it as a zip."""
+    o = next((o for o in (s.get('outputs') or []) if o['name'].endswith(suffix)), None)
+    return zipfile.ZipFile(download(page, o['name'], tmp / o['name'])) if o else None
+
+def tables_copy(dest, **about):
+    """PLATO's customs tables, copied into `dest` with the about sheet's columns changed as given."""
+    dest.mkdir(parents=True, exist_ok=True)
+    for f in (PLATO / 'schemas/tables/examples/customs').glob('*.csv'): shutil.copy(f, dest / f.name)
+    with open(dest / 'about.csv', newline='', encoding='utf-8') as fh: rows = list(csv.reader(fh))
+    for k, v in about.items(): rows[1][rows[0].index(k)] = v
+    with open(dest / 'about.csv', 'w', newline='', encoding='utf-8') as fh: csv.writer(fh).writerows(rows)
+    return sorted(dest.glob('*.csv'))
+
 def download(page, name, dest):
     with page.expect_download(timeout=600_000) as d:
         page.evaluate(f'window.__plato_save({json.dumps(name)})')
     d.value.save_as(dest); return pathlib.Path(dest)
+
+def agora_checks(page, tmp):
+    """Agora, the page's publishing action (the part chosen in #part, then Prepare): one check per part,
+    each on a dataset of its own, each finding its output by opening what the page saves."""
+    customs = sorted((PLATO / 'schemas/tables/examples/customs').glob('*.csv'))
+    w3id = 'https://w3id.org/plato-e2e/customs/'
+
+    # The report: the FAIR summary on the page, and the deposit files, in a zip, as the page saves it.
+    s = publish_case(page, customs, 'report')
+    try:
+        shown = page.inner_text('#summary') if s.get('phase') == 'done' else ''
+        buttons = page.eval_on_selector_all('#saves button', 'bs => bs.map((b) => b.textContent)') if shown else []
+        z = saved_zip(page, s, tmp, '-deposit.zip')
+        names = [n.rsplit('/', 1)[-1] for n in z.namelist()] if z else []
+        zenodo = json.loads(z.read(next(n for n in z.namelist() if n.endswith('.zenodo.json')))) if '.zenodo.json' in names else {}
+        check('publish report: the FAIR summary, a Save button for the deposit zip, and .zenodo.json, CITATION.cff and datacite.json in it',
+              ' of 18 FAIR checks pass' in shown and any('-deposit.zip' in b for b in buttons)
+              and {'.zenodo.json', 'CITATION.cff', 'datacite.json'} <= set(names) and zenodo.get('metadata', zenodo).get('upload_type') == 'dataset',
+              {'summary': shown, 'buttons': buttons, 'zip': names, 'state': s.get('phase'), 'error': s.get('error')})
+    except Exception as e: check('publish report: the FAIR summary, a Save button for the deposit zip, and .zenodo.json, CITATION.cff and datacite.json in it', False, e)
+
+    # Minting: every attestation of the tables gets an address under its place's, '#a-' and a digest.
+    # The count is the presence control: an output with no attestations would pass the 'all' alone.
+    s = publish_case(page, customs, 'mint')
+    try:
+        o = next((o for o in (s.get('outputs') or []) if o['name'].endswith('-with-ids.jsonl')), None)
+        lines = download(page, o['name'], tmp / o['name']).read_text().strip().split('\n') if o else []
+        places = [json.loads(l) for l in lines[1:]]
+        ids = [(p['@id'], a.get('@id', '')) for p in places for a in p.get('attestations', [])]
+        check('publish mint: a -with-ids.jsonl in which all four attestations have an address <place>#a-…',
+              s.get('phase') == 'done' and s['report']['errors'] == 0 and len(ids) == 4 and all(a.startswith(p + '#a-') for p, a in ids), ids or s)
+    except Exception as e: check('publish mint: a -with-ids.jsonl in which all four attestations have an address <place>#a-…', False, e)
+
+    # The site, for a draft with a w3id base. A site is made only from a dataset whose attestations
+    # have addresses, so the fixture is the tables minted by the command line (not by the check above,
+    # whose outcome this one must not inherit).
+    src = tables_copy(tmp / 'site-src' / 'customs', base_uri=w3id, dataset_uri=w3id, status='draft')
+    subprocess.run(['node', str(ROOT / 'bin/plato-tools.mjs'), 'publish', 'mint', '--out', str(tmp / 'site-in'), str(src[0].parent)], check=True, capture_output=True)
+    s = publish_case(page, [tmp / 'site-in' / 'customs-with-ids.jsonl'], 'site', {'repo': 'someone/customs'})
+    try:
+        z = saved_zip(page, s, tmp, '-site.zip')
+        names = set(z.namelist()) if z else set()
+        home = z.read('index.html').decode() if 'index.html' in names else ''
+        check('publish site: a zip with index.html, place/bristol/index.html and place/bristol.jsonld, and the draft banner on the home page',
+              {'index.html', 'place/bristol/index.html', 'place/bristol.jsonld', 'place/deptford-strand.jsonld'} <= names
+              and 'DRAFT, not citable' in home and 'noindex' in home, {'zip': sorted(names)[:30], 'state': s.get('phase'), 'report': s.get('report'), 'error': s.get('error')})
+    except Exception as e: check('publish site: a zip with index.html, place/bristol/index.html and place/bristol.jsonld, and the draft banner on the home page', False, e)
+
+    # The w3id folder, for a published dataset under a w3id base, with its maintainer and repository.
+    src = tables_copy(tmp / 'w3id-src' / 'customs', base_uri=w3id, dataset_uri=w3id, status='published')
+    s = publish_case(page, src, 'w3id', {'repo': 'someone/customs', 'maintainers': 'someone'})
+    try:
+        z = saved_zip(page, s, tmp, '.zip')
+        names = set(z.namelist()) if z else set()
+        rules = z.read('ids/plato-e2e/customs/.htaccess').decode() if 'ids/plato-e2e/customs/.htaccess' in names else ''
+        check('publish w3id: a zip with ids/plato-e2e/customs/.htaccess, whose rules send to the repository\'s site',
+              'RewriteRule' in rules and 'someone.github.io/customs' in rules, {'zip': sorted(names), 'state': s.get('phase'), 'report': s.get('report'), 'error': s.get('error')})
+    except Exception as e: check('publish w3id: a zip with ids/plato-e2e/customs/.htaccess, whose rules send to the repository\'s site', False, e)
+
+    # A previous release chosen for one dataset is not the next one's: choosing a new dataset clears it.
+    # It is seen to be chosen first, or its absence afterwards would prove nothing.
+    try:
+        count = "() => document.getElementById('previous').files.length"
+        page.set_input_files('#picker', [str(f) for f in customs])
+        wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), 60, 'detection')
+        page.set_input_files('#previous', [str(PLATO / 'schemas/examples/place-centric-judgements.json')])
+        before = page.evaluate(count)
+        page.set_input_files('#picker', [str(PLATO / 'schemas/examples/place-centric-judgements.json')])
+        after_ = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), 60, 'detection')
+        after = page.evaluate(count)
+        check('choosing a new dataset clears the previous release chosen for the last one', before == 1 and after == 0 and after_.get('phase') == 'detected', {'before': before, 'after': after})
+    except Exception as e: check('choosing a new dataset clears the previous release chosen for the last one', False, str(e).split('\n')[0][:200])
 
 REMOTE = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--url=')), None)
 
@@ -171,6 +279,7 @@ def main():
             check('version check: the page shows what changed in it, the old spelling and the new',
                   'Only in the earlier version: plato:attests_name [plato:toponym "Neuton"]' in shown
                   and 'Only in the later version: plato:attests_name [plato:toponym "Newton, respelt"]' in shown, shown[-600:])
+            agora_checks(page, tmp)
             ctx.close()
     finally:
         try: os.killpg(srv.pid, signal.SIGTERM)
