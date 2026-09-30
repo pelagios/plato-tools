@@ -202,6 +202,55 @@ test('without a base: the report says so, the same checks are counted, and nothi
 // ---- the deposit files ---------------------------------------------------------------------------
 
 /** The top-level keys of a CITATION.cff and their scalar values; list items under their key. No YAML library: the file is written simply enough to read by line. */
+test('places under the base but not at <base>place/<id> are a warning: minted, but not served', async () => {
+  const deep = { '@id': `${BASE}places/p-1`, label: 'deep', attestations: [{ names: [{ toponym: 'Deep' }] }] };
+  const nested = { '@id': `${BASE}place/a/b`, label: 'nested', attestations: [{ names: [{ toponym: 'Nested' }] }] };
+  const other = place('https://example.org/elsewhere/', 'x', BASE);
+  for (const status of ['draft', 'published']) {
+    const r = await report(doc(edit((g) => { g.status = status; }), [place(BASE, 'a'), deep, nested, other]));
+    const i = item(r, 'places-not-served');
+    assert.equal(i?.severity, 'warning', status);
+    assert.equal(i.count, 2);
+    assert.deepEqual(i.examples, [deep['@id'], nested['@id']]);
+    assert.match(i.message, /given addresses \(publish mint\), but the site has no page/);
+    // Outside the base altogether is the other finding, and only that place.
+    assert.deepEqual(item(r, 'places-outside-base').examples, [other['@id']]);
+    assert.equal(r.counts.fairChecks.find((c) => c.check === 'every place and source address served by the site').passed, false);
+  }
+  const good = await report(doc(GOOD));
+  assert.equal(item(good, 'places-not-served'), undefined);
+  assert.equal(good.counts.fairChecks.find((c) => c.check === 'every place and source address served by the site').passed, true);
+});
+
+test('addresses the site cannot serve are an error in a draft, and a warning once published (their addresses are frozen)', async () => {
+  const odd = (status) => doc(edit((g) => { g.status = status; }), [place(BASE, 'a'), place(BASE, 'St%20Ives'), place(BASE, 'A'), place(BASE, 'b', BASE)]);
+  // A source cited by its address alone is served too, so its key counts. (Each place's own source,
+  // source/s-<id>, is as odd as the place: s-St%20Ives, and s-a beside s-A.)
+  const withSource = (status) => { const d = odd(status); d.spatialEntities[0].attestations[0].sources.push(`${BASE}source/.hidden`); return d; };
+  const draft = await report(withSource('draft')), published = await report(withSource('published'));
+  const d = item(draft, 'keys-not-servable');
+  assert.equal(d?.severity, 'error');
+  assert.equal(d.count, 5);
+  assert.match(d.examples.join('\n'), /place\/St%20Ives: its last part has characters other than/);
+  assert.match(d.examples.join('\n'), /place\/a and https:\/\/w3id\.org\/fair-test\/place\/A: they differ only in capital letters/);
+  assert.match(d.examples.join('\n'), /source\/\.hidden: its last part starts with '\.'/);
+  assert.equal(item(published, 'keys-not-servable')?.severity, 'warning');
+  assert.equal(item(published, 'keys-not-servable').count, 5);
+  const good = await report(doc(GOOD));
+  assert.equal(item(good, 'keys-not-servable'), undefined);
+  assert.equal(good.counts.places, 2);
+});
+
+test('.zenodo.json names no base, and no relation at all, for a dataset that is not a release', async () => {
+  const r = await report(doc(GOOD), { name: 'towns.json' });
+  const z = JSON.parse(r.files['towns-deposit/.zenodo.json']);
+  const d = JSON.parse(r.files['towns-deposit/datacite.json']).data.attributes;
+  assert.equal(z.title, GOOD.title);
+  assert.equal(z.related_identifiers, undefined);
+  assert.equal(d.relatedIdentifiers, undefined);
+  assert.doesNotMatch(r.files['towns-deposit/.zenodo.json'], /isDerivedFrom/);
+});
+
 function cff(text) {
   const top = {}; let key = null;
   for (const line of text.split('\n')) {
@@ -231,7 +280,8 @@ test('the deposit files parse, and carry the description', async () => {
   assert.equal(z.license, 'cc-by-4.0');
   assert.deepEqual(z.keywords, GOOD.keywords);
   assert.equal(z.version, '1.0');
-  assert.deepEqual(z.related_identifiers.map((x) => [x.relation, x.identifier]), [['isIdenticalTo', `${BASE}release/v2`], ['isDerivedFrom', BASE], ['isNewVersionOf', `${BASE}release/v1`]]);
+  // The same release, and the one before it, as datacite.json names them; the base only there, as what a release IsVersionOf.
+  assert.deepEqual(z.related_identifiers.map((x) => [x.relation, x.identifier]), [['isIdenticalTo', `${BASE}release/v2`], ['isNewVersionOf', `${BASE}release/v1`]]);
   assert.match(z.notes, /Temporal coverage: 1200\/1500/);
   assert.match(z.notes, /wikidata\.org\/entity\/Q21/);
   assert.equal(z.dates, undefined, "Zenodo's date types do not fit coverage");

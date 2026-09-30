@@ -51,6 +51,8 @@ export const CITED_SHOWN = 200;
 // Identity matches listed apart from their places (DEEP's shape) are kept for the places' pages up
 // to this many; past it the pages show only those given with the place, and the report says so.
 export const IDRS_KEPT = 500_000;
+// The places the site cannot serve are listed by address on its home page and 404 page up to this many.
+export const UNSERVABLE_SHOWN = 500;
 
 export const TEXT = {
   'too-big-for-pages': 'The site would be larger than GitHub Pages serves (1 GB a site). Leave out Turtle if it was asked for, publish a subset of the places (--only, a file of the keys of the places to include; the rest are still in the downloads), or build the site with the command line and host it elsewhere.',
@@ -58,6 +60,10 @@ export const TEXT = {
   'stopped-at-limit': 'The site grew past what GitHub Pages serves (1 GB) while it was written, beyond its estimate, so no site was made. Publish a subset of the places (--only), or build it with the command line.',
   'key-not-servable': 'A place or source address ends in something a static site cannot serve as a file name, so the address would not lead to its page: it has no page or data file. Give it an identifier of letters, digits and . _ ~ - only (in the spreadsheets, its place_id or source_id).',
   'keys-differ-in-case': 'Two place or source addresses differ only in the case of their letters. On macOS and Windows, and in many zips, they would be one file, so neither has a page: give them identifiers that differ in more than case.',
+  // Published, the addresses are frozen (Round 3, A3): the rest of the site is made, the places are
+  // listed on its home page and its 404 page as held in the downloads, and the workflow deploys it.
+  'key-not-servable-published': 'A place or source address ends in something a static site cannot serve as a file name, so it has no page or data file. The dataset is published, so its addresses cannot change: the site lists these places on its home page and its 404 page, as held in the downloads, and is deployed without them.',
+  'keys-differ-in-case-published': 'Two place or source addresses differ only in the case of their letters, which is one file on macOS and Windows and in many zips, so neither has a page. The dataset is published, so its addresses cannot change: the site lists these places on its home page and its 404 page, as held in the downloads, and is deployed without them.',
   'attestations-without-ids': 'Attestations have no address of their own (@id), so nothing can link to them, retract them or replace them, and no site is made. Give them addresses first: plato-tools publish mint writes a copy of the dataset in which every attestation has one; commit that copy. The site never makes addresses itself.',
   'attestations-without-ids-draft': 'Attestations have no address of their own (@id). That will do for a draft, but before publishing give them addresses (plato-tools publish mint), so that each can be linked to, retracted or replaced.',
   'place-not-under-base': "A place's address is not under the dataset's base address (its place/ part), so this site cannot serve it and it has no page. Its record is still in the downloads.",
@@ -119,12 +125,25 @@ export function create(ctx) {
   let estimate = 0;
   let sc = null;
 
-  const addKey = (part, key, iri) => {
+  // The places the site cannot serve, by address, to list on its home page and 404 page (a few
+  // hundred at most; the rest are counted).
+  const unservable = { list: [], n: 0 };
+  const unserved = (iri, label) => { unservable.n++; if (unservable.list.length < UNSERVABLE_SHOWN) unservable.list.push({ iri, label }); };
+  const addKey = (part, key, iri, label) => {
+    // A draft is to be fixed before it is published; a published dataset's addresses are frozen,
+    // and a known, listed gap must not stop the workflow from deploying the rest.
+    const published = ctx.gazetteer?.status === 'published';
+    const say = (kind, example) => rep.add(published ? 'warning' : 'error', kind, TEXT[published ? kind + '-published' : kind], example);
     const problem = keyProblem(key);
-    if (problem) { rep.error('key-not-servable', TEXT['key-not-servable'], `${iri}: its last part ${problem}`); bad.add(part + '/' + key); return false; }
+    if (problem) {
+      say('key-not-servable', `${iri}: its last part ${problem}`); bad.add(part + '/' + key);
+      if (part === 'place') unserved(iri, label);
+      return false;
+    }
     const other = guard.add(part, key);
     if (other) {
-      rep.error('keys-differ-in-case', TEXT['keys-differ-in-case'], `${sc.base}${part}/${other} and ${iri}`);
+      say('keys-differ-in-case', `${sc.base}${part}/${other} and ${iri}`);
+      if (part === 'place') { if (!bad.has('place/' + other)) unserved(sc.base + 'place/' + other, null); if (!bad.has('place/' + key)) unserved(iri, label); }
       bad.add(part + '/' + key); bad.add(part + '/' + other);
       return false;
     }
@@ -195,7 +214,7 @@ export function create(ctx) {
         else if (typeof rec['@id'] === 'string' && !x['@id'].startsWith(rec['@id'].split('#')[0] + '#')) elsewhere++;
       }
       if (!key) { notUnder++; noteSources(rec, null, false); return; }
-      const ok = addKey('place', key, rec['@id']);
+      const ok = addKey('place', key, rec['@id'], rec.label);
       if (only && !only.has(key)) { leftOut++; noteSources(rec, key, false); return; }
       if (only) onlySeen.add(key);
       if (ok) { served.add(key); estimate += placeCost(size, options.turtle); }
@@ -374,11 +393,11 @@ export function create(ctx) {
       const jsonld = schemaOrgDataset(g, sc, { release: options.release, conceptDoi: options.conceptDoi,
         distribution: downloads.map((d) => ({ '@type': 'DataDownload', name: d.file, contentUrl: sc.download(d.file), encodingFormat: d.mime, contentSize: `${d.size} B` })) });
       await put(SITE.landing, landingPage({ gazetteer: g, scheme: sc, draft, conceptDoi: options.conceptDoi, downloads, jsonld, turtle: !!turtle,
-        places: { inline, pages, total: places, served: served.size, leftOut: places - served.size } }));
+        places: { inline, pages, total: places, served: served.size, leftOut: places - served.size }, unservable }));
       await put(SITE.description, JSON.stringify(descriptionDocument(ctx.head), null, 1) + '\n');
       if (turtle) await put(SITE.descriptionTtl, turtle.description(ctx.head));
       await put(CSS_FILE, CSS + '\n');
-      await put(SITE.notFound, notFoundPage({ gazetteer: g, draft, root: url || '/', downloads, leftOut: places - served.size }));
+      await put(SITE.notFound, notFoundPage({ gazetteer: g, draft, root: url || '/', downloads, leftOut, unservable }));
       if (cname) await put('CNAME', cname + '\n');
       // Without Jekyll, Pages serves every file as it is (Jekyll would hide names starting with _ or .).
       await put('.nojekyll', '');
@@ -388,7 +407,7 @@ export function create(ctx) {
 
       // What goes into the repository.
       const repoOpts = { toolsRef, datasetPath, name: stem, base: options.base, repo: options.repo, siteUrl: options.siteUrl, conceptDoi: options.conceptDoi, turtle: !!turtle, onlyPath,
-        title: g.title, cname, leftOut: places - served.size };
+        title: g.title, cname, leftOut };
       const repo = await ctx.tree(`${stem}-repo`);
       await ctx.put(repo, '.github/workflows/pages.yml', workflow(repoOpts));
       if (onlyPath) await ctx.put(repo, onlyPath, [...only].join('\n') + '\n');
@@ -397,9 +416,10 @@ export function create(ctx) {
 
       const size = site.size || bytes;
       rep.counts = {
-        ...rep.counts, places: served.size, sources: sourcePages, 'left out': places - served.size, files, estimate: Math.round(estimate), bytes: size, written,
+        ...rep.counts, places: served.size, sources: sourcePages, 'left out': places - served.size, unservable: unservable.n, files, estimate: Math.round(estimate), bytes: size, written,
         said: [
           `A site of ${served.size.toLocaleString('en-GB')} place${served.size === 1 ? '' : 's'}${places - served.size ? ` (of ${places.toLocaleString('en-GB')})` : ''} and ${sourcePages.toLocaleString('en-GB')} source${sourcePages === 1 ? '' : 's'}, ${fmtBytes(size)} (estimated ${fmtBytes(Math.round(estimate))}).`,
+          unservable.n ? `${unservable.n.toLocaleString('en-GB')} place${unservable.n === 1 ? ' has an address' : 's have addresses'} it cannot serve, listed on its home page as held in the downloads.` : '',
           draft ? 'Marked as a draft: not to be cited, and kept out of search engines.' : '',
         ].filter(Boolean),
       };

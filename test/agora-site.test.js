@@ -357,6 +357,44 @@ test('addresses a static site cannot serve, or that differ only in case, are err
   assert.ok(s.has('place/odiham.jsonld'));
 });
 
+test('published, with addresses it cannot serve: warnings, not errors; the rest is served and they are listed', async () => {
+  const odd = (status) => {
+    const doc = kingJohn({ status });
+    doc.spatialEntities.push({ '@id': KJ_BASE + 'place/St%20Ives', label: 'St Ives', attestations: [{ '@id': KJ_BASE + 'place/St%20Ives#a-1', names: [{ toponym: 'St Ives' }] }] });
+    doc.spatialEntities.push({ '@id': KJ_BASE + 'place/Windsor', label: 'Windsor again', attestations: [{ '@id': KJ_BASE + 'place/Windsor#a-1', names: [{ toponym: 'Windsor' }] }] });
+    return doc;
+  };
+  const pub = await site([jsonFile(odd('published'))]);
+  assert.equal(pub.item('key-not-servable')?.severity, 'warning');
+  assert.equal(pub.item('keys-differ-in-case')?.severity, 'warning');
+  assert.match(pub.item('key-not-servable').message, /published, so its addresses cannot change/);
+  assert.equal(pub.r.report.errors, 0, JSON.stringify(pub.r.report.items.filter((i) => i.severity === 'error')));
+  assert.ok(pub.has('place/odiham/index.html') && !pub.has('place/windsor/index.html') && !pub.has('place/Windsor.jsonld'));
+  assert.equal(pub.r.report.counts.unservable, 3);
+  for (const page of [pub.read('index.html'), pub.read('404.html')]) {
+    const listed = page.slice(page.indexOf('<h3 id="not-served">'));
+    assert.match(listed, /Places held only in the downloads/);
+    assert.match(listed, /St Ives <span class="iri">https:\/\/whgazetteer\.org\/example\/king-john\/place\/St%20Ives<\/span>/);
+    assert.match(listed, /<span class="iri">https:\/\/whgazetteer\.org\/example\/king-john\/place\/windsor<\/span>/);
+    assert.match(listed, /Windsor again <span class="iri">https:\/\/whgazetteer\.org\/example\/king-john\/place\/Windsor<\/span>/);
+    assert.doesNotMatch(listed.slice(0, listed.indexOf('</ul>')), /place\/odiham/);
+  }
+  // A draft: errors, to be fixed before it is published; still listed.
+  const draft = await site([jsonFile(odd('draft'))]);
+  assert.equal(draft.item('key-not-servable')?.severity, 'error');
+  assert.match(draft.read('index.html'), /Places held only in the downloads/);
+  // Nothing unservable: no list.
+  const clean = await site([jsonFile(kingJohn({ status: 'published' }))]);
+  assert.ok(clean.has('index.html') && !/not-served/.test(clean.read('index.html')) && !/not-served/.test(clean.read('404.html')));
+  // On the command line, what the workflow sees: exit 0 for the published dataset, 1 for the draft.
+  for (const [status, code] of [['published', 0], ['draft', 1]]) {
+    const f = join(dir, `odd-${status}.json`);
+    writeFileSync(f, JSON.stringify(odd(status)));
+    const r = cli('publish', 'site', f, '--out', join(dir, `cli-odd-${status}`), '--tools-ref', 'abc1234');
+    assert.equal(r.code, code, status + r.out);
+  }
+});
+
 test('attestations without addresses: a warning in a draft, an error that stops a published site', async () => {
   const draft = await site([jsonFile(kingJohn({ mint: false, retract: false }))]);
   assert.equal(draft.item('attestations-without-ids')?.severity, 'warning');

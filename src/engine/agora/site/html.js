@@ -250,18 +250,31 @@ ${g.description ? `<p>${esc(g.description)}</p>` : ''}
 <h2>How to cite</h2>
 ${ctx.draft ? '<p>This is a draft: do not cite it yet.</p>' : `<p>${esc(cite)}</p>
 <p class="muted">Cite a place by its address and this version: the place's page shows how.</p>`}
-<h2>Downloads</h2>
+<h2 id="downloads">Downloads</h2>
 <p class="muted">The whole dataset${p.leftOut ? `, including the ${p.leftOut.toLocaleString('en-GB')} places this site has no page for` : ''}.</p>
 <ul>${dl || '<li class="muted">None were made.</li>'}</ul>
 <p class="muted">Its description for machines: ${a('index.jsonld', 'JSON-LD', { internal: true })}${ctx.turtle ? `, ${a('index.ttl', 'Turtle', { internal: true })}` : ''}.</p>
 <h2>Places</h2>
 <p class="muted">${p.served.toLocaleString('en-GB')} place${p.served === 1 ? '' : 's'}${p.leftOut ? ` of ${p.total.toLocaleString('en-GB')}` : ''}.</p>
-${placeList}`;
+${placeList}${unservableList(ctx.unservable, '')}`;
   return page({
     title: g.title || 'Gazetteer', root: './', draft: ctx.draft, dataset: g.title,
     head: `<link rel="alternate" type="application/ld+json" href="index.jsonld">\n<script type="application/ld+json">${JSON.stringify(ctx.jsonld).replace(/</g, '\\u003c')}</script>\n`,
     body, footer: `<p>Made with ${a('https://github.com/pelagios/plato-tools', 'PLATO tools')}.</p>`,
   });
+}
+/**
+ * The places whose addresses the site cannot serve as files (an identifier with characters a file
+ * name cannot hold, or two differing only in case): listed by address, since they have no page, and
+ * sent to the downloads, which hold them. `root` leads back to the site's root.
+ */
+function unservableList(u, root) {
+  if (!u || !u.n) return '';
+  const more = u.n - u.list.length;
+  return `
+<h3 id="not-served">Places held only in the downloads</h3>
+<p class="muted">${u.n.toLocaleString('en-GB')} place${u.n === 1 ? ' has an address' : 's have addresses'} this site cannot serve as ${u.n === 1 ? 'a file' : 'files'}, so ${u.n === 1 ? 'it has' : 'they have'} no page here: ${u.n === 1 ? 'it is' : 'they are'} in the ${a(root + '#downloads', 'downloads', { internal: true })}, with every other place.</p>
+<ul>${u.list.map((x) => `<li>${x.label ? esc(x.label) + ' ' : ''}<span class="iri">${esc(x.iri)}</span></li>`).join('')}</ul>${more > 0 ? `<p class="muted">and ${more.toLocaleString('en-GB')} more.</p>` : ''}`;
 }
 /** How many links a page of the list of places holds. */
 export const PAGE = 1000;
@@ -284,7 +297,7 @@ export function notFoundPage(ctx) {
     body: `<h1>Nothing here</h1>
 <p>This site has no page at this address. Either:</p>
 <ul><li>it is the address of a place or source that the dataset holds but this site has no page for${ctx.leftOut ? ` (it leaves out ${ctx.leftOut.toLocaleString('en-GB')} of the dataset's places, to stay within what GitHub Pages will serve)` : ''}: the dataset's downloads hold every one of them; or</li>
-<li>there is no such place: check the address.</li></ul>
+<li>there is no such place: check the address.</li></ul>${unservableList(ctx.unservable, r)}
 <h2>Downloads</h2>
 <ul>${ctx.downloads.map((d) => `<li>${a(r + 'download/' + d.file, d.file, { internal: true })} <span class="muted">${esc(d.format)}</span></li>`).join('')}</ul>
 <p>${a(r, 'The dataset’s home page', { internal: true })}</p>`,

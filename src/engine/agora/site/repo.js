@@ -63,7 +63,9 @@ jobs:
         with:
           node-version: 24
       # Checks the dataset and writes the site to _build/${CI_SITE_DIR}. It stops (and nothing is
-      # published) if the dataset has problems, or if its attestations have no addresses yet.
+      # published) if the dataset has problems, or if its attestations have no addresses yet. Once
+      # the dataset is published, places whose addresses a static site cannot serve are listed on
+      # its home page as held in the downloads, as warnings: they do not stop it.
       - name: Build the site
         run: |
           ${args.join(' ')}
