@@ -181,6 +181,14 @@ test('a place name with no ref is reported, with its key where it has one; one w
   assert.ok(!examples(PROSE, 'tei-place-no-ref').includes('Sikyon'));
   assert.ok(names(PROSE).includes('Sikyon'), 'control: the place name around it is converted');
 });
+test('a place name in <front> or <back> is in the text and converted; one in a <standOff> is reported as outside it, by name', () => {
+  const pn = (id, n) => `<placeName ref="https://pleiades.stoa.org/places/${id}">${n}</placeName>`;
+  const s = tei(`<p>${pn(1, 'Body')}</p>`).replace('<text><body>', `<text><front><p>${pn(2, 'Front')}</p></front><body>`)
+    .replace('</body></text>', `</body><back><p>${pn(3, 'Back')}</p></back></text><standOff><listAnnotation><note>${pn(4, 'Aside')}</note></listAnnotation></standOff>`);
+  const m = mapped(s);
+  assert.deepEqual(names(m), ['Front', 'Body', 'Back']);
+  assert.deepEqual(examples(m, 'tei-place-outside-text'), ['<standOff>: Aside (https://pleiades.stoa.org/places/4)']);
+});
 test('a place name in the teiHeader (where the inscription was found) is reported, not converted; one in the text is', () => {
   assert.deepEqual(examples(ISIC, 'tei-place-outside-text'), [
     'teiHeader: Syracusae (http://pleiades.stoa.org/places/462503)',

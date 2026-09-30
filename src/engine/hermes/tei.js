@@ -429,7 +429,7 @@ export class TeiReader {
     if (PLACE_ELEMENTS.has(t.local)) return true;
     return GENERAL_NAMES.has(t.local) && t.attributes.type?.value === 'place';
   }
-  outsideWhere() { const e = [...this.stack].reverse().find((x) => x.tei && ['standOff', 'facsimile', 'sourceDoc', 'back', 'front'].includes(x.local)); return e ? e.local : this.stack[1]?.local || 'TEI'; }
+  outsideWhere() { const e = [...this.stack].reverse().find((x) => x.tei && ['standOff', 'facsimile', 'sourceDoc'].includes(x.local)); return e ? e.local : this.stack[1]?.local || 'TEI'; }
   verseLine() { for (let i = this.stack.length - 1; i >= 0; i--) if (this.stack[i].verse !== undefined) return this.stack[i].verse; return undefined; }
   /** Where the element stands, apart from its line: divisions, milestones, page, note. */
   where() {
