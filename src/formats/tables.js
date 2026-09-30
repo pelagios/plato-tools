@@ -6,7 +6,7 @@
 // implementation (rdf-tabular, strict mode) on the same good and broken tables.
 import { PLATO } from '../lib/context.js';
 import { encodeId } from '../engine/agora/address.js';
-import { isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey, isComputed, isComputedFacet, identityBundleLosses } from './shared.js';
+import { list, isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey, isComputed, isComputedFacet, identityBundleLosses } from './shared.js';
 
 export const CITO = 'http://purl.org/spar/cito/';
 
@@ -246,7 +246,7 @@ export function gazetteerToAbout(g, loss = () => {}, accepts = () => true) {
     if ((typeof v === 'string' || typeof v === 'number') && !String(v).includes('\n') && accepts('about', col, String(v))) return String(v);
     bad(key, v); return '';
   };
-  const list = (key, col, vs) => (Array.isArray(vs) ? vs : vs === undefined || vs === null ? [] : [vs])
+  const column = (key, col, vs) => (Array.isArray(vs) ? vs : vs === undefined || vs === null ? [] : [vs])
     .filter((v) => { const ok = typeof v === 'string' && v.trim() !== '' && !v.includes(';') && v === v.trim() && accepts('about', col, v); if (!ok && v !== null && v !== undefined) bad(key, v); return ok; }).join(';');
   const addresses = [], names = [];
   for (const c of Array.isArray(g.creator) ? g.creator : g.creator === undefined || g.creator === null ? [] : [g.creator]) {
@@ -261,10 +261,10 @@ export function gazetteerToAbout(g, loss = () => {}, accepts = () => true) {
   dropKeys(t, 'temporal', new Set(['startDate', 'endDate']), loss);
   return {
     title: cell('title', 'title', g.title), description: cell('description', 'description', g.description),
-    creator: list('creator', 'creator', addresses), creator_name: list('creator', 'creator_name', names),
+    creator: column('creator', 'creator', addresses), creator_name: column('creator', 'creator_name', names),
     contributor: cell('contributor', 'contributor', g.contributor), licence: cell('licence', 'licence', g.licence),
     version: cell('version', 'version', g.version), status: cell('status', 'status', g.status),
-    keywords: list('keywords', 'keywords', g.keywords), spatial: list('spatial', 'spatial', g.spatial),
+    keywords: column('keywords', 'keywords', g.keywords), spatial: column('spatial', 'spatial', g.spatial),
     temporal_from: cell('temporal.startDate', 'temporal_from', t.startDate), temporal_to: cell('temporal.endDate', 'temporal_to', t.endDate),
     landing_page: cell('landingPage', 'landing_page', g.landingPage), dataset_uri: cell('@id', 'dataset_uri', g['@id']),
     base_uri: cell('uriSpace', 'base_uri', g.uriSpace),
@@ -337,11 +337,14 @@ const GVP_BROADER_PARTITIVE = 'http://vocab.getty.edu/ontology#broaderPartitive'
 const EXTERNAL = new Set(['BirthplaceOf', 'DeathplaceOf', 'ResidenceOf', 'FindspotOf', 'SettingOf', 'WorkplaceOf', 'DepictedIn', 'SubjectOf']);
 const LEVELS = new Set(['Certain', 'LessCertain', 'Uncertain']);   // the tables' certainty_level values
 const ACCURACY = new Set(['Accurate', 'Inaccurate', 'False']), COMPLETENESS = new Set(['Complete', 'Reconstructable', 'NonReconstructable']);
+// A position's first two coordinates, or nothing when the coordinates are not a list.
+const firstTwo = (c) => (Array.isArray(c) ? c.slice(0, 2) : undefined);
 const local = (iri, prefix) => (iri && iri.startsWith(prefix) ? iri.slice(prefix.length) : null);
 /** GeoJSON geometry -> WKT, for the locations sheet's wkt column. */
 export function geojsonToWkt(g) {
   const pt = (c) => c.slice(0, 2).join(' ');
   const ring = (r) => '(' + r.map(pt).join(', ') + ')';
+  if (!Array.isArray(g.coordinates)) return null;   // a GeometryCollection, or coordinates that are not a list
   switch (g.type) {
     case 'Point': return `POINT(${pt(g.coordinates)})`;
     case 'MultiPoint': return `MULTIPOINT(${g.coordinates.map((c) => '(' + pt(c) + ')').join(', ')})`;
@@ -354,9 +357,9 @@ export function geojsonToWkt(g) {
 }
 function representativePoint(g) {
   if (!g) return null;
-  if (g.type === 'Point') return g.coordinates.slice(0, 2);
-  const flat = []; const walk = (c) => (typeof c[0] === 'number' ? flat.push(c) : c.forEach(walk));
-  walk(g.coordinates || []);
+  if (g.type === 'Point') return Array.isArray(g.coordinates) ? g.coordinates.slice(0, 2) : null;
+  const flat = []; const walk = (c) => (typeof c?.[0] === 'number' ? flat.push(c) : list(c).forEach(walk));
+  walk(g.coordinates);
   if (!flat.length) return null;
   const xs = flat.map((c) => c[0]), ys = flat.map((c) => c[1]);
   return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
@@ -387,7 +390,7 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
     // A connection with figures about it goes to the connections sheet, one row for each figure; a
     // relations row and a properties row would state the figure of the place, not of the connection.
     const rt0 = a.relations?.length === 1 ? local(a.relations[0].relationType, PLATO) : null;
-    const connection = !!rt0 && accepts('connections', 'relation_type', rt0) && (a.properties || []).some((pv) => !isFigure(pv));
+    const connection = !!rt0 && accepts('connections', 'relation_type', rt0) && list(a.properties).some((pv) => !isFigure(pv));
     const facets = ['names', 'geometries', 'types', connection ? null : 'relations', 'properties'].filter((k) => k && a[k]?.length);
     if (a.sequence !== undefined && a.sequence !== null && (!a.relations?.length || connection)) dropKey('attestation', 'sequence', loss);
     // A row states one thing, and its denied column denies that one thing. A denial of several
@@ -402,7 +405,7 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
     if (deny && facets.reduce((n, k) => n + a[k].length, 0) > 1) { loss({ kind: 'denial-bundled', value: rec['@id'] }); continue; }
     if (facets.length > 1) loss({ kind: 'bundled-attestation', value: facets.join('+') });
     if (!facets.length) { if (!bundled) loss({ kind: 'attestation-without-facet' }); continue; }
-    const spans = a.timespans || [];
+    const spans = list(a.timespans);
     if (spans.length > 1) loss({ kind: 'extra-timespans', value: spans.length - 1 });
     const t = spans[0] || {};
     qualificationLosses(t.qualification, [], loss);
@@ -410,14 +413,14 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
     if ((t.startLatest && t.startLatest !== t.startEarliest) || (t.endEarliest && t.endEarliest !== t.endLatest)) loss({ kind: 'four-date-bounds' });
     // Only the relations sheet has a duration column: a stay at a stop on a journey.
     if (t.duration && (!a.relations?.length || connection)) dropKey('timespan', 'duration', loss);
-    const srcs = [...(a.sources || []), ...(a.citations || []).map((c) => c.source)].filter(Boolean);
+    const srcs = [...list(a.sources), ...list(a.citations).map((c) => c.source)].filter(Boolean);
     const unique = [...new Map(srcs.map((s) => [typeof s === 'string' ? s : s['@id'] || s.title, s])).values()];
     if (unique.length > 1) loss({ kind: 'extra-sources', value: unique.length - 1 });
     const src = unique[0] || null;
     if (!src) loss({ kind: 'attestation-without-source' });
     const sid = ids.source(src);
-    const cit = (a.citations || []).find((c) => !src || c.source === src || (c.source?.['@id'] && c.source['@id'] === (src['@id'] || src))) || {};
-    for (const c of a.citations || []) dropKeys(c, 'citation', TABLE_KEEPS.citation, loss);
+    const cit = list(a.citations).find((c) => !src || c.source === src || (c.source?.['@id'] && c.source['@id'] === (src['@id'] || src))) || {};
+    for (const c of list(a.citations)) dropKeys(c, 'citation', TABLE_KEEPS.citation, loss);
     if (t.sourceLabel && t.label && t.sourceLabel !== t.label) loss({ kind: 'period-label', value: t.label });
     const date = t.sourceLabel || t.label || (t.startEarliest || t.endLatest ? [t.startEarliest, t.endLatest].filter(Boolean).join('-') : 'undated');
     const notes = [a.notes, a.certaintyNote && `Certainty: ${a.certaintyNote}`].filter(Boolean).join(' ') || '';
@@ -440,7 +443,7 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
     const vocab = (k, col) => { const w = local(a[k], PLATO); if (a[k] && (!w || !accepts('names', col, w))) { dropKey('attestation', k, loss); return ''; } return w || ''; };
     const formStatus = vocab('formStatus', 'form_status'), occurrenceContext = vocab('occurrenceContext', 'occurrence_context');
     if (!a.names?.length) for (const k of ['formStatus', 'occurrenceContext', 'occurrenceCount']) if (a[k] !== undefined && a[k] !== null && (k === 'occurrenceCount' || local(a[k], PLATO))) dropKey('attestation', k, loss);
-    for (const n of a.names || []) {
+    for (const n of list(a.names)) {
       dropKeys(n, 'name', TABLE_KEEPS.name, loss);
       const q = n.qualification || {};
       qualificationLosses(q, ['transcriptionAccuracy', 'transcriptionCompleteness'], loss);
@@ -448,11 +451,11 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
       // How well the name was read: the names sheet holds PLATO's own judgements, by their words.
       const judged = (iri, words) => { const w = local(iri, PLATO + 'Transcription'); if (iri && !words.has(w)) loss({ kind: 'transcription-value', value: iri }); return words.has(w) ? w : ''; };
       rows.names.push({ place_id: pid, name: n.toponym, language: n.language || '', script: n.script || '', romanized: n.romanized || '',
-        name_type: (n.nameType || []).join(';'), form_status: formStatus, occurrence_context: occurrenceContext,
+        name_type: list(n.nameType).join(';'), form_status: formStatus, occurrence_context: occurrenceContext,
         occurrence_count: a.occurrenceCount ?? '', transcription_accuracy: judged(q.transcriptionAccuracy, ACCURACY),
         transcription_completeness: judged(q.transcriptionCompleteness, COMPLETENESS), ...common, place_id: pid });
     }
-    for (const g of a.geometries || []) {
+    for (const g of list(a.geometries)) {
       let p = g.reprPoint || (g.geojson?.type === 'Point' ? g.geojson.coordinates : null);
       if (!p) { p = representativePoint(g.geojson); if (p) loss({ kind: 'point-derived-from-shape' }); }
       if (!p) { loss({ kind: 'geometry-without-coordinates' }); continue; }
@@ -460,23 +463,23 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
       if (g.sourceLabel) loss({ kind: 'source-label' });
       dropKeys(g, 'geometry', TABLE_KEEPS.geometry, loss);
       // A GeoJSON point beside a different representative point has no column of its own.
-      if (g.reprPoint && g.geojson?.type === 'Point' && JSON.stringify(g.geojson.coordinates?.slice(0, 2)) !== JSON.stringify(g.reprPoint.slice(0, 2))) dropKey('geometry', 'geojson', loss);
-      if ((g.precisionKm || []).length > 1) dropKey('geometry', 'precisionKm', loss);
+      if (g.reprPoint && g.geojson?.type === 'Point' && JSON.stringify(firstTwo(g.geojson.coordinates)) !== JSON.stringify(firstTwo(g.reprPoint))) dropKey('geometry', 'geojson', loss);
+      if (list(g.precisionKm).length > 1) dropKey('geometry', 'precisionKm', loss);
       let role = local(g.role, PLATO) || '';
       if (g.role && (!role || !accepts('locations', 'geometry_role', role))) { dropKey('geometry', 'role', loss); role = ''; }
       rows.locations.push({ place_id: pid, latitude: p[1], longitude: p[0],
         wkt: g.wkt || (g.geojson && g.geojson.type !== 'Point' ? geojsonToWkt(g.geojson) || '' : ''),
-        geometry_role: role, precision_km: (g.precisionKm || [])[0] ?? '', ...common });
+        geometry_role: role, precision_km: list(g.precisionKm)[0] ?? '', ...common });
     }
-    for (const ty of a.types || []) {
+    for (const ty of list(a.types)) {
       qualificationLosses(ty.qualification, [], loss);
       dropKeys(ty, 'type', TABLE_KEEPS.type, loss);
       if (ty.label && ty.sourceLabel && ty.sourceLabel !== ty.label) loss({ kind: 'source-label' });
     }
-    for (const pv of a.properties || []) if (!isFigure(pv)) { qualificationLosses(pv.qualification, [], loss); dropKeys(pv, 'propertyValue', TABLE_KEEPS.propertyValue, loss); }
-    for (const ty of a.types || []) rows.types.push({ place_id: pid, type_label: ty.label || ty.sourceLabel || '', type_uri: ty.identifier || '',
+    for (const pv of list(a.properties)) if (!isFigure(pv)) { qualificationLosses(pv.qualification, [], loss); dropKeys(pv, 'propertyValue', TABLE_KEEPS.propertyValue, loss); }
+    for (const ty of list(a.types)) rows.types.push({ place_id: pid, type_label: ty.label || ty.sourceLabel || '', type_uri: ty.identifier || '',
       type_scheme: ty.scheme || '', type_scheme_version: ty.schemeVersion ?? '', ...common });
-    for (const r of a.relations || []) {
+    for (const r of list(a.relations)) {
       dropKeys(r, 'relation', TABLE_KEEPS.relation, loss);
       let rt = local(r.relationType, PLATO);
       if (!rt && r.relationType === GVP_BROADER_PARTITIVE) rt = 'ContainedIn';   // the alignment plato:ContainedIn declares
@@ -495,12 +498,12 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
     }
     // A statistical figure keeps its own CSVW description (PLATO issue #14, decision 4): the
     // properties sheet has no columns for its table or coordinates, and without them it says something false.
-    for (const pv of a.properties || []) if (isFigure(pv)) loss({ kind: 'statistical-figure', value: pv['@id'] || pv.label || pv.property });
-    if (!connection) for (const pv of (a.properties || []).filter((x) => !isFigure(x))) rows.properties.push({ place_id: pid, property_uri: pv.property, property_label: pv.label || '',
+    for (const pv of list(a.properties)) if (isFigure(pv)) loss({ kind: 'statistical-figure', value: pv['@id'] || pv.label || pv.property });
+    if (!connection) for (const pv of list(a.properties).filter((x) => !isFigure(x))) rows.properties.push({ place_id: pid, property_uri: pv.property, property_label: pv.label || '',
       value: typeof pv.value === 'object' ? JSON.stringify(pv.value) : pv.value, unit_uri: pv.unit || '', ...common });
   }
   // Nested under its place, a relation may leave out its subject (PLATO eb8065a): it is the place.
-  for (const ir of rec.identityRelations || []) rows.identities.push(identityRow(ir, ids, loss, ir.subject || rec['@id']));
+  for (const ir of list(rec.identityRelations)) rows.identities.push(identityRow(ir, ids, loss, ir.subject || rec['@id']));
   return rows;
 }
 export function identityRow(ir, ids, loss = () => {}, subject = ir.subject) {

@@ -88,6 +88,7 @@ export const LOSS_TEXT = {
   'lpf-fclasses-missing': 'LPF requires feature classes (A, H, L, P, R, S, T); none could be derived for some places.',
   'lpf-duration': 'LPF durations (such as P100Y) have no PLATO equivalent and are dropped.',
   'lpf-extra-source-labels': 'Only the first source label of an LPF type fits.',
+  'lpf-not-a-list': 'A member that Linked Places Format gives as a list is not one, so nothing in it is read; the example names the member.',
   'lpf-description-language': 'The language of LPF descriptions is dropped.',
   'lpf-depiction-licence': 'The licence of LPF depictions is dropped.',
   'lpf-link-type': 'An LPF link type PLATO does not know is dropped.',

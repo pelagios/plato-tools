@@ -6,7 +6,7 @@
 // Writing LPF from PLATO is lossy by design (bundling, locators, form status, numeric certainty
 // and more have no LPF slot); every loss is reported, with counts.
 import { PLATO, isAbsoluteIri } from '../lib/context.js';
-import { isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey, isComputed, isComputedFacet, identityBundleLosses } from './shared.js';
+import { list, isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey, isComputed, isComputedFacet, identityBundleLosses } from './shared.js';
 
 // The README's alias table, plus the vocabulary prefixes its own examples use.
 export const LPF_PREFIXES = {
@@ -47,24 +47,38 @@ function level(word) {
   return LEVEL[word] ? { certaintyLevel: LEVEL[word] } : { certaintyNote: `LPF certainty: ${word}` };
 }
 /** A PLATO certainty level (or a note written by an earlier version of these tools) -> an LPF word. */
+// A position's first two coordinates, or nothing when the coordinates are not a list.
+const firstTwo = (c) => (Array.isArray(c) ? c.slice(0, 2) : undefined);
 const certaintyWord = (lvl, note) => WORD[lvl] || (note && /LPF certainty: (certain|less-certain|uncertain)/.exec(note)?.[1]) || undefined;
+
+/**
+ * A member LPF gives as a list: given as something else, it is not read, and reported to `loss`.
+ * LPF has no JSON Schema in these tools to say so, and the record made from it is valid without it.
+ */
+function many(x, key, loss) {
+  // null, like a missing key, is nothing there (LPF writes null where it has no value); anything
+  // else that is not a list was something that could not be read.
+  if (x === undefined || x === null || Array.isArray(x)) return x || [];
+  loss({ kind: 'lpf-not-a-list', value: key });
+  return [];
+}
 
 /** LPF when -> PLATO timespans; the when's certainty qualifies each of its timespans. */
 function whenToPlato(when, loss) {
   if (!when) return {};
-  const spans = (when.timespans || []).map((t) => {
+  const spans = many(when.timespans, 'when.timespans', loss).map((t) => {
     const end = t.end ?? t.start;   // "if end is omitted, the timespan is interpreted as the interval described by the start"
     return clean({ startEarliest: bound(t.start, 'earliest'), startLatest: bound(t.start, 'latest'), endEarliest: bound(end, 'earliest'), endLatest: bound(end, 'latest') });
   });
-  for (const p of when.periods || []) spans.push(clean({ label: p.name, periodoUri: expandLpf(p.uri || p['@id']) }));
+  for (const p of many(when.periods, 'when.periods', loss)) spans.push(clean({ label: p.name, periodoUri: expandLpf(p.uri || p['@id']) }));
   if (when.label && spans.length) spans[0].label = spans[0].label ? spans[0].label + '; ' + when.label : when.label;
   if (when.duration) loss({ kind: 'lpf-duration', value: when.duration });
   const c = level(when.certainty);
   if (c.certaintyLevel && spans.length) { for (const t of spans) t.qualification = { certaintyLevel: c.certaintyLevel }; return { timespans: spans }; }
   return { timespans: spans, ...c };
 }
-function citationsToSources(cits) {
-  return (cits || []).map((c) => clean({
+function citationsToSources(cits, loss) {
+  return many(cits, 'citations', loss).map((c) => clean({
     ...(c['@id'] ? { '@id': expandLpf(c['@id']) } : {}), title: c.label || c['@id'] || 'untitled', authorityType: 'source',
     timespan: c.year !== undefined ? { sourceLabel: String(c.year), startEarliest: pad(String(c.year)), endLatest: pad(String(c.year)) } : undefined,
   }));
@@ -72,51 +86,52 @@ function citationsToSources(cits) {
 function attestation(facets, when, cits, loss, extra = {}) {
   const w = whenToPlato(when, loss);
   const certaintyNote = [w.certaintyNote, extra.certaintyNote].filter(Boolean).join('; ') || undefined;
-  return clean({ ...facets, timespans: w.timespans, sources: citationsToSources(cits), certaintyLevel: extra.certaintyLevel || w.certaintyLevel, certaintyNote });
+  return clean({ ...facets, timespans: w.timespans, sources: citationsToSources(cits, loss), certaintyLevel: extra.certaintyLevel || w.certaintyLevel, certaintyNote });
 }
 
 /** LPF Feature -> PLATO place-centric record. `loss(l)` receives what PLATO JSON cannot hold. */
 export function featureToRecord(f, loss = () => {}) {
-  const rec = { '@id': f['@id'], label: f.properties?.title, ccodes: f.properties?.ccodes, attestations: [], identityRelations: [] };
+  const rec = { '@id': f['@id'], label: f.properties?.title, ccodes: many(f.properties?.ccodes, 'properties.ccodes', loss), attestations: [], identityRelations: [] };
   if (rec['@id'] === undefined) delete rec['@id'];
   if (!rec.ccodes?.length) delete rec.ccodes;
   const A = rec.attestations;
-  for (const c of f.properties?.fclasses || []) A.push({ types: [{ identifier: GN_CLASS + c, label: FCLASS[c] || c }] });
+  for (const c of many(f.properties?.fclasses, 'properties.fclasses', loss)) A.push({ types: [{ identifier: GN_CLASS + c, label: FCLASS[c] || c }] });
   if (f.when) A.push(attestation({}, f.when, [], loss));
-  for (const n of f.names || []) A.push(attestation({ names: [clean({ toponym: n.toponym, language: n.lang })] }, n.when, n.citations, loss));
-  for (const t of f.types || []) {
-    if ((t.sourceLabels || []).length > 1) loss({ kind: 'lpf-extra-source-labels', value: t.sourceLabels.length - 1 });
-    A.push(attestation({ types: [clean({ identifier: expandLpf(t.identifier), label: t.label, sourceLabel: t.sourceLabels?.[0]?.label })] }, t.when, t.citations, loss));
+  for (const n of many(f.names, 'names', loss)) A.push(attestation({ names: [clean({ toponym: n.toponym, language: n.lang })] }, n.when, n.citations, loss));
+  for (const t of many(f.types, 'types', loss)) {
+    const labels = many(t.sourceLabels, 'types.sourceLabels', loss);
+    if (labels.length > 1) loss({ kind: 'lpf-extra-source-labels', value: labels.length - 1 });
+    A.push(attestation({ types: [clean({ identifier: expandLpf(t.identifier), label: t.label, sourceLabel: labels[0]?.label })] }, t.when, t.citations, loss));
   }
-  const geoms = !f.geometry ? [] : f.geometry.type === 'GeometryCollection' ? f.geometry.geometries || [] : [f.geometry];
+  const geoms = !f.geometry ? [] : f.geometry.type === 'GeometryCollection' ? many(f.geometry.geometries, 'geometry.geometries', loss) : [f.geometry];
   for (const g of geoms) {
     const geom = clean({
       geojson: g.coordinates ? { type: g.type, coordinates: g.coordinates } : undefined,
       wkt: g.geowkt,
-      reprPoint: g.type === 'Point' && g.coordinates ? g.coordinates.slice(0, 2) : undefined,
+      reprPoint: g.type === 'Point' && Array.isArray(g.coordinates) ? g.coordinates.slice(0, 2) : undefined,
     });
     // A geometry's certainty qualifies the geometry itself.
     const gc = level(g.certainty);
     if (gc.certaintyLevel) geom.qualification = { certaintyLevel: gc.certaintyLevel };
     A.push(attestation({ geometries: [geom] }, g.when, g.citations, loss, { certaintyNote: gc.certaintyNote }));
   }
-  for (const r of f.relations || []) {
+  for (const r of many(f.relations, 'relations', loss)) {
     A.push(attestation({ relations: [clean({ relatesTo: expandLpf(r.relationTo), relationType: expandLpf(r.relationType), relationLabel: r.label })] }, r.when, r.citations, loss,
       level(r.certainty)));
   }
-  for (const l of f.links || []) {
+  for (const l of many(f.links, 'links', loss)) {
     if (l.type === 'closeMatch' || l.type === 'exactMatch') rec.identityRelations.push({ subject: f['@id'], object: expandLpf(l.identifier), identityType: l.type });
     else if (LINK_PROPERTY[l.type]) A.push({ properties: [{ property: LINK_PROPERTY[l.type], label: l.type, value: expandLpf(l.identifier) }] });
     else loss({ kind: 'lpf-link-type', value: l.type });
   }
-  for (const d of f.descriptions || []) {
+  for (const d of many(f.descriptions, 'descriptions', loss)) {
     const a = { properties: [clean({ property: DCT_DESCRIPTION, label: 'description', value: d.value })] };
     if (d.lang) loss({ kind: 'lpf-description-language', value: d.lang });
     const src = d.source || d['@id'];
     if (src) a.sources = [{ '@id': expandLpf(src), title: expandLpf(src), authorityType: 'source' }];
     A.push(a);
   }
-  for (const d of f.depictions || []) {
+  for (const d of many(f.depictions, 'depictions', loss)) {
     A.push({ properties: [clean({ property: FOAF_DEPICTION, label: d.title || 'depiction', value: expandLpf(d['@id']) })] });
     if (d.license) loss({ kind: 'lpf-depiction-licence', value: d.license });
   }
@@ -150,7 +165,7 @@ export { KEEPS as LPF_KEEPS };
 function platoToWhen(spans, note, loss = () => {}) {
   const ts = [], periods = [], labels = [];
   let lvl;
-  for (const t of spans || []) {
+  for (const t of list(spans)) {
     dropKeys(t, 'timespan', KEEPS.timespan, loss);
     const start = t.startEarliest === t.startLatest || t.startLatest === undefined ? (t.startEarliest !== undefined ? { in: t.startEarliest } : undefined) : clean({ earliest: t.startEarliest, latest: t.startLatest });
     const end = t.endEarliest === t.endLatest || t.endEarliest === undefined ? (t.endLatest !== undefined ? { in: t.endLatest } : undefined) : clean({ earliest: t.endEarliest, latest: t.endLatest });
@@ -187,16 +202,16 @@ function platoToCitations(a, loss) {
   const cited = new Map();
   const asObject = (s) => (typeof s === 'string' ? { '@id': s } : s || {});
   const keyOf = (s) => s['@id'] || s.title;
-  for (const c of a.citations || []) cited.set(keyOf(asObject(c.source)), c);
+  for (const c of list(a.citations)) cited.set(keyOf(asObject(c.source)), c);
   // Every source the attestation names, in `sources` or only in a citation, once each; where one is
   // named both by address and in full, the fuller description is kept.
   const all = new Map();
-  for (const s0 of [...(a.sources || []), ...(a.citations || []).map((c) => c.source)]) {
+  for (const s0 of [...list(a.sources), ...list(a.citations).map((c) => c.source)]) {
     if (!s0) continue;
     const s = asObject(s0), k = keyOf(s), prev = all.get(k);
     if (!prev || Object.keys(s).length > Object.keys(prev).length) all.set(k, s);
   }
-  for (const c of a.citations || []) dropKeys(c, 'citation', KEEPS.citation, loss);
+  for (const c of list(a.citations)) dropKeys(c, 'citation', KEEPS.citation, loss);
   for (const [k, s] of all) {
     const c = cited.get(k);
     if (c?.attributionStatus) loss({ kind: 'attribution-status' });
@@ -228,7 +243,7 @@ export function collectionHead(gazetteer, loss = () => {}) {
  * reported to `loss` and not put where an address belongs. An LPF short form (cc:by/4.0/) expands.
  */
 export function collectionToGazetteer(fc, fallbackTitle, loss = () => {}) {
-  const d = (fc.descriptions || []).map((x) => (typeof x === 'string' ? x : x?.value)).find((x) => typeof x === 'string');
+  const d = many(fc.descriptions, 'descriptions', loss).map((x) => (typeof x === 'string' ? x : x?.value)).find((x) => typeof x === 'string');
   let licence;
   if (typeof fc.license === 'string' && fc.license.trim()) {
     const x = expandLpf(fc.license.trim());
@@ -279,28 +294,28 @@ export function recordToFeature(rec, idrs = [], loss = () => {}, withdrawn = nul
     // Alternative readings are written, each as its own claim: that at most one is right is lost,
     // and said so in its own words, since it changes what the output claims.
     if (a.meta) loss(isAlternative(a.meta) ? { kind: 'alternative-readings', value: a['@id'] } : { kind: 'meta-attestation' });
-    for (const t of a.timespans || []) qualificationLosses(t.qualification, ['certaintyLevel'], loss);
+    for (const t of list(a.timespans)) qualificationLosses(t.qualification, ['certaintyLevel'], loss);
     if (!facets.length && when) { whens.push(when); continue; }
-    for (const n of a.names || []) {
+    for (const n of list(a.names)) {
       qualificationLosses(n.qualification, [], loss);
       if (n.sourceLabel) loss({ kind: 'source-label' });
       dropKeys(n, 'name', KEEPS.name, loss);
       f.names.push(clean({ toponym: n.toponym, lang: n.language, citations: cits.length ? cits : undefined, when }));
     }
-    for (const t of a.types || []) {
+    for (const t of list(a.types)) {
       qualificationLosses(t.qualification, [], loss);
       dropKeys(t, 'type', KEEPS.type, loss);
       if (t.identifier?.startsWith(GN_CLASS)) { fclasses.push(t.identifier.slice(GN_CLASS.length)); continue; }
       f.types.push(clean({ identifier: t.identifier, label: t.label, sourceLabels: t.sourceLabel ? [{ label: t.sourceLabel }] : undefined, when, citations: cits.length ? cits : undefined }));
     }
-    for (const g of a.geometries || []) {
+    for (const g of list(a.geometries)) {
       const gl = g.qualification?.certaintyLevel;
       qualificationLosses(g.qualification, ['certaintyLevel'], loss);
       if (g.sourceLabel) loss({ kind: 'source-label' });
       if (g.role) loss({ kind: 'geometry-role' });
       dropKeys(g, 'geometry', KEEPS.geometry, loss);
       // A representative point beside a shape has no place of its own in a GeoJSON geometry.
-      if (g.geojson && g.reprPoint && !(g.geojson.type === 'Point' && JSON.stringify(g.geojson.coordinates?.slice(0, 2)) === JSON.stringify(g.reprPoint))) dropKey('geometry', 'reprPoint', loss);
+      if (g.geojson && g.reprPoint && !(g.geojson.type === 'Point' && JSON.stringify(firstTwo(g.geojson.coordinates)) === JSON.stringify(g.reprPoint))) dropKey('geometry', 'reprPoint', loss);
       const lg = g.geojson ? { ...g.geojson } : g.reprPoint ? { type: 'Point', coordinates: g.reprPoint } : {};
       if (g.bbox) lg.bbox = g.bbox;   // a GeoJSON member, which LPF's context maps
       if (g.wkt) lg.geowkt = g.wkt;
@@ -309,9 +324,9 @@ export function recordToFeature(rec, idrs = [], loss = () => {}, withdrawn = nul
       const c = certaintyWord(gl || a.certaintyLevel, a.certaintyNote); if (c) lg.certainty = c;
       geoms.push(lg);
     }
-    for (const r of a.relations || []) dropKeys(r, 'relation', KEEPS.relation, loss);
-    for (const r of a.relations || []) f.relations.push(clean({ relationType: r.relationType, relationTo: r.relatesTo, label: r.relationLabel, when, citations: cits.length ? cits : undefined, certainty: certaintyWord(a.certaintyLevel, a.certaintyNote) }));
-    for (const p of a.properties || []) {
+    for (const r of list(a.relations)) dropKeys(r, 'relation', KEEPS.relation, loss);
+    for (const r of list(a.relations)) f.relations.push(clean({ relationType: r.relationType, relationTo: r.relatesTo, label: r.relationLabel, when, citations: cits.length ? cits : undefined, certainty: certaintyWord(a.certaintyLevel, a.certaintyNote) }));
+    for (const p of list(a.properties)) {
       if (isFigure(p)) { loss({ kind: 'statistical-figure', value: p['@id'] || p.label || p.property }); continue; }
       qualificationLosses(p.qualification, [], loss);
       const lpfKind = p.property === DCT_DESCRIPTION ? 'description' : p.property === FOAF_DEPICTION ? 'depiction' : PROPERTY_LINK[p.property];
@@ -324,7 +339,7 @@ export function recordToFeature(rec, idrs = [], loss = () => {}, withdrawn = nul
       else f.links.push({ type: lpfKind, identifier: String(p.value) });
     }
   }
-  for (const ir of [...(rec.identityRelations || []), ...idrs]) {
+  for (const ir of [...list(rec.identityRelations), ...idrs]) {
     dropKeys(ir, 'identityRelation', KEEPS.identityRelation, loss);
     if (ir.identityType === 'exactMatch' || ir.identityType === 'closeMatch') f.links.push({ type: ir.identityType, identifier: ir.object });
     else { f.links.push({ type: 'closeMatch', identifier: ir.object }); loss({ kind: 'identity-type', value: ir.identityType }); }

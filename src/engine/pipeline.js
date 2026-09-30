@@ -14,7 +14,7 @@ import { tripleNT } from '../lib/ntriples.js';
 import { TripleStore } from '../lib/store.js';
 import { PLATO, RDF } from '../lib/context.js';
 import { featureToRecord, recordToFeature, collectionHead, collectionToGazetteer } from '../formats/lpf.js';
-import { collectWithdrawn, resolveWithdrawn, addWithdrawal, versionLosses, tableLosses, relationTypeLosses, collectMembership, membershipCycles } from '../formats/shared.js';
+import { list, collectWithdrawn, resolveWithdrawn, addWithdrawal, versionLosses, tableLosses, relationTypeLosses, collectMembership, membershipCycles } from '../formats/shared.js';
 import { CubeExport, CUBE_TEXT } from '../formats/cube.js';
 import { validateTables, checkTableRules, checkAboutRules, aboutToGazetteer, gazetteerToAbout, rowToAttestation, tableIds, recordToRows, identityRow, ATTESTATION_SHEETS, tableSchemas, cellChecker, sourceLosses } from '../formats/tables.js';
 import { AnnotationReader, ANNOTATION_KINDS } from '../formats/annotations.js';
@@ -112,7 +112,8 @@ async function* platoJson(file) {
   if (!('gazetteer' in head)) for await (const { path, value } of jsonDocument(file, { keys })) head[path] = value;   // header after the arrays: rare
   yield { type: 'header', value: head };
   let n = 0;
-  for await (const { path, value } of jsonDocument(file, { arrays: ['spatialEntities', 'newSpatialEntities', 'attestations', 'identityRelations'], keys: ['dataSets', 'relationTypes'] })) {
+  for await (const { path, value, notAList } of jsonDocument(file, { arrays: ['spatialEntities', 'newSpatialEntities', 'attestations', 'identityRelations'], keys: ['dataSets', 'relationTypes'] })) {
+    if (notAList) { yield { type: 'not-a-list', key: path, shape: notAList }; continue; }
     // The header is read before the records, so dataSets or relationTypes written after them are met only now.
     if (path === 'dataSets' || path === 'relationTypes') { if (!(path in head)) yield { type: 'late-header', key: path }; continue; }
     n++;
@@ -123,6 +124,7 @@ async function* platoJson(file) {
 }
 // The FeatureCollection's own members that PLATO's gazetteer header holds (collectionToGazetteer).
 const LPF_HEAD = ['@id', 'id', 'title', 'license', 'descriptions'];
+const notAListText = (key, shape) => `The document's ${key} is ${shape}, not a list, so it is not read as one.`;
 async function* lpfSource(file, seq, rep) {
   let head = {};
   if (seq) {
@@ -138,7 +140,13 @@ async function* lpfSource(file, seq, rep) {
       if (v && v.type === 'Feature') yield { v, n };
     }
   })()
-    : (async function* () { let n = 0; for await (const { value } of jsonDocument(file, { arrays: ['features'] })) yield { v: value, n: ++n }; })();
+    : (async function* () {
+      let n = 0;
+      for await (const { path, value, notAList } of jsonDocument(file, { arrays: ['features'] })) {
+        if (notAList) { rep.error('not-a-list', notAListText(path, notAList), path); continue; }
+        yield { v: value, n: ++n };
+      }
+    })();
   for await (const { v, n } of each) {
     if (!v['@id']) rep.warning('lpf-no-id', 'An LPF feature has no @id', `feature ${n}`);
     if (!v.properties?.title) rep.warning('lpf-no-title', 'An LPF feature has no properties.title', v['@id'] || `feature ${n}`);
@@ -381,12 +389,14 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     return rep.warning(i.kind, `A key PLATO does not define is dropped: ${i.value}`, i.value);
   };
   const dry = new Json2Rdf(res.context, () => {}, { onIssue: jsonIssue });
+  const notAList = (ev) => rep.error('not-a-list', notAListText(ev.key, ev.shape), ev.key);
   const lateHeader = (ev) => rep.error('late-header', `The document's ${ev.key} come after its records. These tools read a document's header before its records, so ${ev.key} must come before spatialEntities or attestations; as the file is, they are not read at all.`, ev.key);
 
   if (!needsStore) {
     let header = null;
     for await (const ev of source) {
       if (ev.type === 'late-header') { lateHeader(ev); continue; }
+      if (ev.type === 'not-a-list') { notAList(ev); continue; }
       if (ev.type === 'header') {
         header = ev.value;
         if (input.format.startsWith('plato') && !V.header(header)) rep.error('schema', `The document header does not match the PLATO JSON Schema: ${ajvMessage(V.header.errors)}`);
@@ -395,7 +405,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
         continue;
       }
       if (input.format.startsWith('plato') || input.format === 'lpf' || input.format === 'lpf-seq' || input.format === 'tables') checkRecord(ev);
-      if (ev.type === 'record') { rep.count('places'); rep.count('attestations', ev.value?.attestations?.length || 0); dry.record(ev.newEntity ? 'newSpatialEntities' : 'spatialEntities', ev.value); }
+      if (ev.type === 'record') { rep.count('places'); rep.count('attestations', list(ev.value?.attestations).length); dry.record(ev.newEntity ? 'newSpatialEntities' : 'spatialEntities', ev.value); }
       else if (ev.type === 'idr') { rep.count('identity relations'); dry.record('identityRelations', ev.value); }
       if (writer) {
         try { writer.event(augmented(ev)); }
@@ -413,6 +423,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     for await (const ev of source) {
       if (ev.type === 'triple') { store.add(ev.s, ev.p, ev.o); if (++batch % 50000 === 0) { store.endBatch(); store.beginBatch(); beat('loading', { triples: store.count }); } continue; }
       if (ev.type === 'late-header') { lateHeader(ev); continue; }
+      if (ev.type === 'not-a-list') { notAList(ev); continue; }
       if (ev.type === 'header') { header = ev.value; w.header(header); dry.header(header); if (!V.header(header)) rep.error('schema', `The document header does not match the PLATO JSON Schema: ${ajvMessage(V.header.errors)}`); continue; }
       checkRecord(ev);
       w.record(ev.type === 'idr' ? 'identityRelations' : ev.type === 'attestation' ? 'attestations' : ev.newEntity ? 'newSpatialEntities' : 'spatialEntities', ev.value);
@@ -634,7 +645,7 @@ function tablesWriter(env, rep, options, outputs, stem, loss) {
         places.set(iri, p);
         if (typeof iri === 'string' && iri !== minted.place(p.place_id)) loss({ kind: 'place-address', value: iri });
       }
-      if (own) { p.own = true; if (label) p.label = label; if (ccodes?.length) p.country_codes = ccodes.join(';'); }
+      if (own) { p.own = true; if (label) p.label = label; if (list(ccodes).length) p.country_codes = ccodes.join(';'); }
       return p.place_id;
     },
     source(src) {
