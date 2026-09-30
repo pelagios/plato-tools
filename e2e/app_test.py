@@ -103,10 +103,6 @@ def table_case(page, file, choices=None, action=None, target=None, timeout=120):
     """Hermes: choose a table of places (CSV or plain GeoJSON), wait for the matching of its columns,
     make `choices` ({column: field}) through each column's labelled dropdown, then run `action`."""
     try:
-        # The same file chosen twice fires no change event, and the page would keep the last case's
-        # matching: empty the picker first, and clear the state, so nothing is inherited from before.
-        page.set_input_files('#picker', [])
-        page.evaluate("() => { if (window.__plato) Object.assign(window.__plato, { phase: 'harness-reset', columns: null }); }")
         page.set_input_files('#picker', [str(file)])
         s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised') and (s.get('phase') == 'unrecognised' or s.get('columns')), 60, 'columns')
         if not s.get('columns') or not s['columns'].get('mapping'): return s
@@ -389,6 +385,17 @@ def main():
             check('plain GeoJSON is detected as GeoJSON and shows its properties to match, while the LPF example is still LPF and shows none',
                   s1.get('format') == 'geojson' and 'plain GeoJSON' in said1 and table1 and (s1.get('columns') or {}).get('mapping', {}).get('NAME') == 'name'
                   and s2.get('format') == 'lpf' and s2.get('phase') == 'done' and table2 is False, {'geojson': s1.get('format'), 'lpf': s2.get('format'), 'table1': table1, 'table2': table2})
+
+            # A IIIF Georeference Annotation (Allmaps) is recognised and refused with the reason, as a
+            # file that is not recognised is, where it used to be read as place-less annotations; the
+            # Recogito export beside it, the control, is still annotations.
+            s1 = run_case(page, [ROOT / 'test/fixtures/hermes-detect/loc-chesapeake-annotationpage.json'], 'check')
+            said1 = page.inner_text('#chosen') if s1.get('phase') == 'unrecognised' else ''
+            acts1 = page.is_visible('#action') if s1.get('phase') == 'unrecognised' else True
+            s2 = run_case(page, [ROOT / 'test/fixtures/annotations/recogito-v1-islandia-map.jsonld'], 'check')
+            check('a IIIF Georeference Annotation is refused on the page with the reason, and offers no check; a Recogito export is still read',
+                  s1.get('phase') == 'unrecognised' and 'IIIF Georeference Annotation' in said1 and 'drop it together with the Recogito export' in said1 and acts1 is False
+                  and s2.get('format') == 'w3c-annotations' and s2.get('phase') == 'done', {'georef': s1, 'shown': said1, 'actions': acts1, 'recogito': s2.get('format')})
             ctx.close()
     finally:
         stop(srv)
