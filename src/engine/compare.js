@@ -32,6 +32,7 @@ const ABOUT = PLATO + 'attests_about', META_ABOUT = PLATO + 'meta_attestation_ab
 const IDENTITY_SUBJECT = PLATO + 'identity_subject', ATTESTS_IDENTITY = PLATO + 'attests_identity', HAS_CITATION = PLATO + 'has_citation';
 // What an attestation bundles: its facets (plato:attests_name, attests_geometry, …) and its citations.
 const isFacetLink = (p) => p === HAS_CITATION || (p.startsWith(PLATO + 'attests_') && p !== ABOUT);
+const RDFS_LABEL = 'http://www.w3.org/2000/01/rdf-schema#label';
 const EARLIER = 0, LATER = 1, ATTESTATION = 0, IDENTITY = 1;
 const nodeKey = (t) => (t.termType === 'BlankNode' ? '_:' + t.value : t.value);
 const isBlank = (key) => key.startsWith('_:');
@@ -51,6 +52,7 @@ const EXPLAINED = 5;
 const TEXT = {
   'attestation-removed': 'An attestation of the earlier version is not in the later one. A published attestation is never deleted: put it back, and withdraw it with a new attestation that retracts it (plato:Retracts) or replaces it (plato:Supersedes).',
   'attestation-changed': 'An attestation of the earlier version says something different in the later one. A published attestation is never changed: put it back as it was, and record the correction as a new attestation that replaces it (plato:Supersedes).',
+  'attestation-readdressed': 'An attestation of the earlier version is in the later one, saying the same, but without its web address (@id), or under another. Its address is how later attestations point to it, to replace or withdraw it: give it back its address.',
   'attestation-gone': 'An attestation of the earlier version that has no web address of its own (@id) is not in the later one as it was: it was deleted, or changed. Put it back as it was. Without an address the two cannot be told apart, and nothing can retract or replace it; the example names the place it is about.',
   'identity-removed': 'An identity match of the earlier version is not in the later one. The append-only rule is about attestations, so this does not break it, but the match has gone with no record of why.',
   'identity-changed': 'An identity match of the earlier version says something different in the later one. The append-only rule is about attestations, so this does not break it, but nothing records the change.',
@@ -77,14 +79,15 @@ const TEXT = {
 // each of DEEP's identity matches then read every row of the other version. INDEXED BY says which
 // index is meant, and test/compare.test.js reads SQLite's plan for each query.
 export const QUERIES = {
-  // Those with an address: is it in the later version, does it say the same there, and does the
-  // later version say anything else under that address? (The same address twice, once unchanged
+  // Those with an address: is it in the later version, does it say the same there, does the later
+  // version say anything else under that address, and is what it said there without it? (The same address twice, once unchanged
   // and once saying something new, is one node in RDF: a changed attestation.)
   addressed: `SELECT o.k, o.id,
       EXISTS(SELECT 1 FROM a n INDEXED BY ai WHERE n.v=1 AND n.id=o.id),
       EXISTS(SELECT 1 FROM a n INDEXED BY ai WHERE n.v=1 AND n.id=o.id AND n.h=o.h),
-      EXISTS(SELECT 1 FROM a n INDEXED BY ai WHERE n.v=1 AND n.id=o.id AND NOT EXISTS(SELECT 1 FROM a x INDEXED BY ai WHERE x.v=0 AND x.id=n.id AND x.h=n.h))
-    FROM a o INDEXED BY ai WHERE o.v=0 AND o.id IS NOT NULL`,
+      EXISTS(SELECT 1 FROM a n INDEXED BY ai WHERE n.v=1 AND n.id=o.id AND NOT EXISTS(SELECT 1 FROM a x INDEXED BY ai WHERE x.v=0 AND x.id=n.id AND x.h=n.h)),
+      EXISTS(SELECT 1 FROM a n INDEXED BY ah WHERE n.v=1 AND n.h=o.h AND (n.id IS NULL OR n.id<>o.id))
+    FROM a o INDEXED BY ai WHERE o.v=0 AND o.id IS NOT NULL ORDER BY o.id`,
   // Those without, by what they say: how many there were, and how many saying the same the later
   // version has, not counting those under an address the earlier version already had.
   unaddressed: `SELECT o.k, COUNT(*), MIN(o.about),
@@ -102,8 +105,11 @@ export const QUERIES = {
   described: `SELECT o.s, EXISTS(SELECT 1 FROM n x WHERE x.v=1 AND x.s=o.s), EXISTS(SELECT 1 FROM f WHERE f.v=0 AND f.s=o.s), EXISTS(SELECT 1 FROM f WHERE f.v=1 AND f.s=o.s)
     FROM n o WHERE o.v=0 AND NOT EXISTS(SELECT 1 FROM n x WHERE x.v=1 AND x.s=o.s AND x.h=o.h) GROUP BY o.s`,
   // Facets the earlier version describes, of which the later says something the earlier did not.
+  // Facets the earlier version describes, of which the later says something the earlier did not,
+  // and nothing less: one that also lost a statement has changed, which is reported as such.
   facetsAddedTo: `SELECT f.s FROM f WHERE f.v=0 AND EXISTS(SELECT 1 FROM n o WHERE o.v=0 AND o.s=f.s)
-      AND EXISTS(SELECT 1 FROM n x WHERE x.v=1 AND x.s=f.s AND NOT EXISTS(SELECT 1 FROM n o WHERE o.v=0 AND o.s=x.s AND o.h=x.h))`,
+      AND EXISTS(SELECT 1 FROM n x WHERE x.v=1 AND x.s=f.s AND NOT EXISTS(SELECT 1 FROM n o WHERE o.v=0 AND o.s=x.s AND o.h=x.h))
+      AND NOT EXISTS(SELECT 1 FROM n o WHERE o.v=0 AND o.s=f.s AND NOT EXISTS(SELECT 1 FROM n x WHERE x.v=1 AND x.s=o.s AND x.h=o.h))`,
   withAddress: 'SELECT 1 FROM a INDEXED BY ai WHERE v=0 AND id=? LIMIT 1',
 };
 
@@ -170,14 +176,18 @@ function reader(context, out, side = { withdrawals: new Map() }) {
   let triples = [], doc = null;
   const j2r = new Json2Rdf(context, (s, p, o) => triples.push(s, p, o));
   const take = () => {
+    // This record's statements, and only these: whatever happens below, none is left for the next.
+    const batch = triples; triples = [];
     const by = new Map(), bundled = new Set();
-    for (let i = 0; i < triples.length; i += 3) {
-      const k = nodeKey(triples[i]), p = triples[i + 1].value, o = triples[i + 2];
+    for (let i = 0; i < batch.length; i += 3) {
+      const k = nodeKey(batch[i]), p = batch[i + 1].value, o = batch[i + 2];
+      // A place read with no label is given its address as a stand-in (pipeline.js), which is not a
+      // statement of the data's, so it is not compared.
+      if (p === RDFS_LABEL && o.termType === 'Literal' && o.value === batch[i].value) continue;
       (by.get(k) || by.set(k, []).get(k)).push([p, o]);
       // An identity match an attestation bundles is part of what that attestation says.
       if (p === ATTESTS_IDENTITY && o.termType !== 'Literal') bundled.add(nodeKey(o));
     }
-    triples = [];
     // What a node says: its statements, sorted, with each node that has no address written out in
     // place, and each that has one named by it. Blank node labels, which differ from file to file,
     // never appear.
@@ -303,7 +313,8 @@ export async function compare({ earlier, later, options = {} }, env) {
     let last = null;
     for (const q of ledger.rows(QUERIES.addressed)) {
       if (q.get(1) === last) continue;
-      if (!q.get(2)) found(q.get(0), 'removed', (last = q.get(1)));
+      if (!q.get(2) && q.get(5) && q.get(0) === ATTESTATION) { rep.add(breach, 'attestation-readdressed', TEXT['attestation-readdressed'], (last = q.get(1))); changed++; }
+      else if (!q.get(2)) found(q.get(0), 'removed', (last = q.get(1)));
       else if (!q.get(3) || q.get(4)) found(q.get(0), 'changed', (last = q.get(1)));
     }
     // Those without: as many saying the same must be in the later version, not counting those that

@@ -69,7 +69,9 @@ node bin/plato-tools.mjs compare release-1.jsonl.gz release-2.jsonl.gz  # was an
   directory, so `a/*.csv b/*.csv` is two sets. A zip of the CSV files, or a workbook, is one set.
 - **Exit status:** 0 if no input has problems, 1 if any has, 2 if the command is wrong or an input
   cannot be read or written (a missing file, an unrecognised format, an output that already
-  exists). Warnings, and what a conversion cannot carry over, do not count as problems.
+  exists). Warnings, and what a conversion cannot carry over, do not count as problems. For
+  `compare`: 0 if nothing was deleted or changed, 1 if something was, 2 if the two versions could
+  not be compared, including when either cannot be read to the end.
 - **Outputs are never replaced** unless `--overwrite` is given, and an output left incomplete by a
   file that could not be read to the end is removed.
 - `--json` prints one JSON object per input, one per line, then one for the total: the page's
