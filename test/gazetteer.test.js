@@ -6,6 +6,10 @@
 // a message) also asserts in the same test that the thing looked for is there to be seen: the
 // concurrency check is run against two separate lookups too, where it must find two in flight, and
 // the token check finds the token in the Authorization header before it looks everywhere else.
+//
+// Most checks use `lookup()`, a PRIVATE instance with no cross-tab lock (`shared: false, locks: null`),
+// so that no check inherits a queue, a token or a lock from another. The checks of sharing and of
+// locks say so, use endpoints of their own, and each carries a control where overlap is allowed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -13,6 +17,9 @@ import {
 } from '../src/engine/gazetteer/index.js';
 
 const TOKEN = 'tok-5ecret-9f8e7d';
+
+/** A private lookup, with no cross-tab lock: what every check not about sharing uses. */
+const lookup = (o) => createLookup({ shared: false, locks: null, ...o });
 
 /** A JSON response, as fetch gives it. */
 const reply = (status, json, headers = {}) =>
@@ -65,7 +72,7 @@ const names = (n, prefix = 'n') => Array.from({ length: n }, (_, i) => ({ key: `
 
 test('a batch is POSTed as W3C queries q0…qN, JSON, with the token in the Authorization header only', async () => {
   const s = service();
-  const look = createLookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: s.fetch });
+  const look = lookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: s.fetch });
   await look.reconcile([
     { key: 'a', query: 'London', type: 'https://whgazetteer.org/static/whg_schema.jsonld#Place', limit: 3, properties: [{ pid: 'whg:countries_codes', v: 'GB' }] },
     { key: 'b', query: 'Rome', type: 'https://whgazetteer.org/static/whg_schema.jsonld#Place', params: { contained_in: ['un:ita'] } },
@@ -77,15 +84,16 @@ test('a batch is POSTed as W3C queries q0…qN, JSON, with the token in the Auth
   assert.equal(c.headers['Content-Type'], 'application/json');
   assert.equal(c.headers.Authorization, 'Bearer ' + TOKEN);
   assert.match(c.headers['User-Agent'], /^plato-tools\//);
+  // WHG is sent the short form of a type, whichever form it was given in.
   assert.deepEqual(c.sent, { queries: {
-    q0: { query: 'London', type: 'https://whgazetteer.org/static/whg_schema.jsonld#Place', limit: 3, properties: [{ pid: 'whg:countries_codes', v: 'GB' }] },
-    q1: { contained_in: ['un:ita'], query: 'Rome', type: 'https://whgazetteer.org/static/whg_schema.jsonld#Place', limit: 10 },
+    q0: { query: 'London', type: 'Place', limit: 3, properties: [{ pid: 'whg:countries_codes', v: 'GB' }] },
+    q1: { contained_in: ['un:ita'], query: 'Rome', type: 'Place', limit: 10 },
   } });
 });
 
 test("encoding 'form' sends queries= as the W3C protocol and OpenRefine do", async () => {
   const s = service();
-  const look = createLookup({ endpoint: 'https://example.org/reconcile', token: TOKEN, fetch: s.fetch, encoding: 'form' });
+  const look = lookup({ endpoint: 'https://example.org/reconcile', token: TOKEN, fetch: s.fetch, encoding: 'form' });
   await look.reconcile([{ query: 'Paris' }]);
   assert.ok(s.calls[0].init.body instanceof URLSearchParams);
   assert.equal(s.calls[0].headers['Content-Type'], undefined, 'fetch sets the form type itself');
@@ -106,7 +114,7 @@ test('answers go back to the queries in input order, each list with its key, and
       'not a candidate', { name: 'no id' },
     ] },
   }) });
-  const look = createLookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: s.fetch });
+  const look = lookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: s.fetch });
   const [london, nowhere] = await look.reconcile([{ key: 'rec-1', query: 'London' }, { key: 'rec-2', query: 'Xyzzy' }]);
   assert.equal(london.key, 'rec-1');
   assert.equal(nowhere.key, 'rec-2');
@@ -139,7 +147,7 @@ test('a query the service could not search for is marked unanswered, not taken f
     q1: { result: [], scope: { applied: false, containers_unresolved: ['tgn:1'] } },
     // q2 left out altogether
   }) });
-  const look = createLookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch });
+  const look = lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch });
   const [timedOut, scoped, missing] = await look.reconcile([{ query: 'a' }, { query: 'b' }, { query: 'c' }]);
   assert.equal(timedOut.unanswered, true);
   assert.equal(scoped.unanswered, undefined);
@@ -150,7 +158,7 @@ test('a query the service could not search for is marked unanswered, not taken f
 
 test('120 queries in batches of 50 are three POSTs of 50, 50 and 20, answered in order, with progress', async () => {
   const s = service();
-  const look = createLookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: s.fetch, batchSize: 50 });
+  const look = lookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: s.fetch, batchSize: 50 });
   const progress = [];
   const qs = names(120);
   const out = await look.reconcile(qs, { onProgress: (p) => progress.push(p) });
@@ -166,7 +174,7 @@ test('120 queries in batches of 50 are three POSTs of 50, 50 and 20, answered in
 
 test('batch size is 25 by default and held between 1 and 50', () => {
   const f = service().fetch;
-  const at = (batchSize) => createLookup({ endpoint: WHG_ENDPOINT, fetch: f, batchSize }).batchSize;
+  const at = (batchSize) => lookup({ endpoint: WHG_ENDPOINT, fetch: f, batchSize }).batchSize;
   assert.equal(at(undefined), 25);
   assert.equal(at(500), 50);
   assert.equal(at(0), 1);
@@ -177,7 +185,7 @@ test('batch size is 25 by default and held between 1 and 50', () => {
 
 test('no queries, no request', async () => {
   const s = service();
-  const look = createLookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch });
+  const look = lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch });
   const out = await look.reconcile([]);
   assert.equal(out.length, 0);
   assert.equal(s.calls.length, 0);
@@ -185,7 +193,7 @@ test('no queries, no request', async () => {
 
 test('one request in flight at a time across all callers of a lookup (and two lookups do overlap)', async () => {
   const shared = service({ delay: 5 });
-  const look = createLookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: shared.fetch, batchSize: 10 });
+  const look = lookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: shared.fetch, batchSize: 10 });
   const [x, y, z] = await Promise.all([look.reconcile(names(30, 'x')), look.reconcile(names(25, 'y')), look.extend(['place:gn:1'], ['whg:countries_codes'])]);
   assert.equal(shared.calls.length, 3 + 3 + 1);
   assert.equal(shared.maxInFlight, 1);
@@ -198,8 +206,8 @@ test('one request in flight at a time across all callers of a lookup (and two lo
 
   // The same measure, where overlap is allowed, must see it: otherwise the 1 above proves nothing.
   const apart = service({ delay: 5 });
-  const one = createLookup({ endpoint: WHG_ENDPOINT, fetch: apart.fetch });
-  const two = createLookup({ endpoint: WHG_ENDPOINT, fetch: apart.fetch });
+  const one = lookup({ endpoint: WHG_ENDPOINT, fetch: apart.fetch });
+  const two = lookup({ endpoint: WHG_ENDPOINT, fetch: apart.fetch });
   await Promise.all([one.reconcile(names(3)), two.reconcile(names(3))]);
   assert.equal(apart.maxInFlight, 2);
 });
@@ -208,7 +216,7 @@ test('429 waits as long as Retry-After says, capped, then carries on', async () 
   let n = 0;
   const s = service({ answer: (sent) => (++n <= 2 ? reply(429, { detail: 'slow down' }, { 'Retry-After': n === 1 ? '7' : '3600' }) : echo(sent)) });
   const waits = [];
-  const look = createLookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: s.fetch, sleep: async (ms) => { waits.push(ms); } });
+  const look = lookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: s.fetch, sleep: async (ms) => { waits.push(ms); } });
   const [r] = await look.reconcile([{ query: 'Oxford' }]);
   assert.equal(r[0].name, 'Oxford');
   assert.equal(s.calls.length, 3);
@@ -218,7 +226,7 @@ test('429 waits as long as Retry-After says, capped, then carries on', async () 
 test('429 without Retry-After, and 503, back off growing; retries are limited', async () => {
   const s = service({ answer: (_, call) => reply(s.calls.indexOf(call) % 2 ? 503 : 429, {}) });
   const waits = [];
-  const look = createLookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch, maxRetries: 3, sleep: async (ms) => { waits.push(ms); } });
+  const look = lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch, maxRetries: 3, sleep: async (ms) => { waits.push(ms); } });
   const err = await look.reconcile([{ query: 'a' }]).then(() => null, (e) => e);
   assert.ok(err instanceof GazetteerError);
   assert.equal(err.kind, 'server', 'the last answer was 503');
@@ -229,7 +237,7 @@ test('429 without Retry-After, and 503, back off growing; retries are limited', 
   assert.ok(waits[0] >= 3000 && waits[0] <= 4000 && waits[1] >= 1500 && waits[1] <= 2000 && waits[2] >= 12000 && waits[2] <= 16000, `backoff: ${waits}`);
 
   const always = service({ answer: () => reply(429, {}, { 'Retry-After': '1' }) });
-  const e2 = await createLookup({ endpoint: WHG_ENDPOINT, fetch: always.fetch, maxRetries: 2, sleep: noSleep }).reconcile([{ query: 'a' }]).catch((e) => e);
+  const e2 = await lookup({ endpoint: WHG_ENDPOINT, fetch: always.fetch, maxRetries: 2, sleep: noSleep }).reconcile([{ query: 'a' }]).catch((e) => e);
   assert.equal(e2.kind, 'rate');
   assert.equal(e2.status, 429);
   assert.equal(always.calls.length, 3);
@@ -239,7 +247,7 @@ test('401 and 403 are refused at once, as kind auth, with what the service said'
   for (const status of [401, 403]) {
     const s = service({ answer: () => reply(status, { detail: 'Invalid token. Token login failed.' }) });
     let slept = 0;
-    const look = createLookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: s.fetch, sleep: async () => { slept++; } });
+    const look = lookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: s.fetch, sleep: async () => { slept++; } });
     const err = await look.reconcile([{ query: 'a' }]).catch((e) => e);
     assert.ok(err instanceof GazetteerError, String(err));
     assert.equal(err.kind, 'auth');
@@ -262,7 +270,7 @@ test('the token is in the Authorization header and nowhere else: not the address
   ];
   for (const fail of failures) {
     const s = service({ answer: fail });
-    const look = createLookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: s.fetch, maxRetries: 1, sleep: noSleep });
+    const look = lookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: s.fetch, maxRetries: 1, sleep: noSleep });
     const err = await look.reconcile([{ query: 'a' }]).catch((e) => e);
     assert.ok(err instanceof GazetteerError, String(err));
     // Present where it belongs, so that looking for it elsewhere can find it.
@@ -276,13 +284,13 @@ test('the token is in the Authorization header and nowhere else: not the address
     assert.deepEqual(Object.keys(err).sort(), ['kind', 'name', 'status']);
   }
   // Nor on the lookup itself.
-  const look = createLookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: service().fetch });
+  const look = lookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: service().fetch });
   assert.ok(!JSON.stringify(look).includes(TOKEN) && !Object.values(look).some((v) => String(v).includes(TOKEN)));
 });
 
 test('no answer at all is tried again, then reported as kind network', async () => {
   const s = service({ answer: () => { throw new TypeError('fetch failed'); } });
-  const look = createLookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch, maxRetries: 2, sleep: noSleep });
+  const look = lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch, maxRetries: 2, sleep: noSleep });
   const err = await look.reconcile([{ query: 'a' }]).catch((e) => e);
   assert.equal(err.kind, 'network');
   assert.equal(err.status, null);
@@ -293,7 +301,7 @@ test('no answer at all is tried again, then reported as kind network', async () 
 test('an AbortSignal stops the request in flight, and a caller\'s batches still waiting', { timeout: 5000 }, async () => {
   // In flight: the request is cancelled and the lookup rejects with the signal's reason.
   const slow = service({ delay: 10_000 });
-  const look = createLookup({ endpoint: WHG_ENDPOINT, fetch: slow.fetch });
+  const look = lookup({ endpoint: WHG_ENDPOINT, fetch: slow.fetch });
   const ac = new AbortController();
   const pending = look.reconcile(names(3), { signal: ac.signal });
   await new Promise((r) => setTimeout(r, 5));
@@ -306,7 +314,7 @@ test('an AbortSignal stops the request in flight, and a caller\'s batches still 
   let release;
   const gate = new Promise((r) => { release = r; });
   const gated = service({ delay: 0, answer: async (sent) => { await gate; return echo(sent); } });
-  const shared = createLookup({ endpoint: WHG_ENDPOINT, fetch: gated.fetch });
+  const shared = lookup({ endpoint: WHG_ENDPOINT, fetch: gated.fetch });
   const b = new AbortController();
   const aDone = shared.reconcile([{ query: 'A' }]);
   const bDone = shared.reconcile([{ query: 'B' }], { signal: b.signal });
@@ -323,13 +331,13 @@ test('an AbortSignal stops the request in flight, and a caller\'s batches still 
 
   // Already aborted: nothing is sent.
   const none = service();
-  await assert.rejects(createLookup({ endpoint: WHG_ENDPOINT, fetch: none.fetch }).reconcile([{ query: 'x' }], { signal: AbortSignal.abort() }), { name: 'AbortError' });
+  await assert.rejects(lookup({ endpoint: WHG_ENDPOINT, fetch: none.fetch }).reconcile([{ query: 'x' }], { signal: AbortSignal.abort() }), { name: 'AbortError' });
   assert.equal(none.calls.length, 0);
 });
 
 test('an AbortSignal stops a pause between tries', { timeout: 5000 }, async () => {
   const s = service({ answer: () => reply(429, {}, { 'Retry-After': '30' }) });
-  const look = createLookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch }); // the real sleep
+  const look = lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch }); // the real sleep
   const ac = new AbortController();
   const started = Date.now();
   const p = look.reconcile([{ query: 'a' }], { signal: ac.signal });
@@ -349,7 +357,7 @@ test('extend asks for properties of chosen ids and decodes the values', async ()
       other: [{ float: 1.5 }, { id: 'x', name: 'X' }, { bool: false }],
     }])),
   }) });
-  const look = createLookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: s.fetch, batchSize: 2 });
+  const look = lookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: s.fetch, batchSize: 2 });
   const out = await look.extend(['place:gn:1', 'place:gn:2', 'place:osm:r3'], ['whg:geometry_centroid', { id: 'whg:countries_codes' }]);
   assert.deepEqual(s.calls.map((c) => c.sent), [
     { extend: { ids: ['place:gn:1', 'place:gn:2'], properties: [{ id: 'whg:geometry_centroid' }, { id: 'whg:countries_codes' }] } },
@@ -371,7 +379,7 @@ test('WHG helpers: addresses and centroids', () => {
   assert.equal(parseCentroid('not a point'), null);
   assert.deepEqual(parseCentroid(' -33.9 , 151.2 '), [151.2, -33.9]);
   // Another service's ids are kept as addresses only when they are addresses.
-  const other = createLookup({ endpoint: 'https://example.org/reconcile', fetch: service().fetch });
+  const other = lookup({ endpoint: 'https://example.org/reconcile', fetch: service().fetch });
   return other.reconcile([{ query: 'x' }]).then(([r]) => assert.equal(r[0].iri, null));
 });
 
@@ -402,7 +410,7 @@ function busiestMinute(calls) {
 
 test('a query refused inside a 200 has .error and is unanswered, not an empty match', async () => {
   const s = service({ answer: () => reply(200, { q0: { error: 'end must be greater than or equal to start', result: [] }, q1: { result: [] } }) });
-  const [refused, none] = await createLookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch }).reconcile([{ query: 'a', params: { start: 5, end: 1 } }, { query: 'b' }]);
+  const [refused, none] = await lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch }).reconcile([{ query: 'a', params: { start: 5, end: 1 } }, { query: 'b' }]);
   assert.equal(refused.error, 'end must be greater than or equal to start');
   assert.equal(refused.unanswered, true);
   assert.equal(none.error, undefined);
@@ -418,7 +426,7 @@ test('Retry-After is honoured where it can be read (503 too), and a page, which 
       return filtered ? corsFiltered(r) : r;
     } });
     const waits = [];
-    await createLookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch, sleep: async (ms) => { waits.push(ms); } }).reconcile([{ query: 'a' }]);
+    await lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch, sleep: async (ms) => { waits.push(ms); } }).reconcile([{ query: 'a' }]);
     assert.equal(waits.length, 1);
     assert.ok(expect(waits[0]), `${filtered ? 'filtered' : 'readable'}: waited ${waits[0]}`);
   }
@@ -428,7 +436,7 @@ test('the pacer: never more than 600 queries in any 60 seconds, across batches a
   const t = fakeTime();
   const paced = service({ delay: 0 });
   const stamp = (svc) => async (url, init) => { const r = svc.fetch(url, init); svc.calls.at(-1).t = t.now; return r; };
-  const look = createLookup({ endpoint: WHG_ENDPOINT, fetch: stamp(paced), batchSize: 50, now: t.clock, sleep: t.sleep });
+  const look = lookup({ endpoint: WHG_ENDPOINT, fetch: stamp(paced), batchSize: 50, now: t.clock, sleep: t.sleep });
   const [a, b] = await Promise.all([look.reconcile(names(1000, 'a')), look.reconcile(names(300, 'b'))]);
   assert.equal(a[999][0].name, 'a999');
   assert.equal(b[299][0].name, 'b299');
@@ -439,7 +447,7 @@ test('the pacer: never more than 600 queries in any 60 seconds, across batches a
   // Without the pacer the same measure sees the limit crossed: the check above can fail.
   const t2 = fakeTime();
   const unpaced = service({ delay: 0 });
-  const free = createLookup({ endpoint: WHG_ENDPOINT, fetch: (u, i) => { const r = unpaced.fetch(u, i); unpaced.calls.at(-1).t = t2.now; return r; }, batchSize: 50, queryRate: null, now: t2.clock, sleep: t2.sleep });
+  const free = lookup({ endpoint: WHG_ENDPOINT, fetch: (u, i) => { const r = unpaced.fetch(u, i); unpaced.calls.at(-1).t = t2.now; return r; }, batchSize: 50, queryRate: null, now: t2.clock, sleep: t2.sleep });
   await free.reconcile(names(1300));
   assert.equal(busiestMinute(unpaced.calls), 1300);
 });
@@ -459,7 +467,7 @@ test('createPacer waits exactly until enough of the oldest have left the window'
 test("a spent day's allowance is kind quota, told from a refused token by what WHG says", async () => {
   for (const [said, kind] of [['Daily API limit (5000 calls) exceeded', 'quota'], ['Invalid token.', 'auth']]) {
     const s = service({ answer: () => reply(401, { detail: said }) });
-    const err = await createLookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: s.fetch, sleep: noSleep }).reconcile([{ query: 'a' }]).catch((e) => e);
+    const err = await lookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: s.fetch, sleep: noSleep }).reconcile([{ query: 'a' }]).catch((e) => e);
     assert.ok(err instanceof GazetteerError, String(err));
     assert.equal(err.kind, kind, said);
     assert.equal(err.status, 401);
@@ -469,10 +477,10 @@ test("a spent day's allowance is kind quota, told from a refused token by what W
 
 test('a query without a limit asks for 10 candidates, not WHG\'s 100; one with a limit keeps it', async () => {
   const s = service();
-  await createLookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch }).reconcile([{ query: 'a' }, { query: 'b', limit: 3 }]);
+  await lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch }).reconcile([{ query: 'a' }, { query: 'b', limit: 3 }]);
   assert.deepEqual(Object.values(s.calls[0].sent.queries).map((q) => q.limit), [10, 3]);
   const s2 = service();
-  await createLookup({ endpoint: WHG_ENDPOINT, fetch: s2.fetch, defaultLimit: 500 }).reconcile([{ query: 'a' }]);
+  await lookup({ endpoint: WHG_ENDPOINT, fetch: s2.fetch, defaultLimit: 500 }).reconcile([{ query: 'a' }]);
   assert.equal(s2.calls[0].sent.queries.q0.limit, 50, 'a default is never above 50');
 });
 
@@ -481,8 +489,8 @@ test('a batch holds queries of one type only, and the answers still come back in
   const s = service({ answer: (sent, call) => (new Set(Object.values(sent.queries).map((q) => q.type ?? '')).size > 1 ? reply(400, { detail: 'All queries must share a type' }) : echo(sent, call)) });
   const types = [PLACE, undefined, PERIOD, PLACE, PLACE, undefined, PERIOD];
   const qs = types.map((type, i) => ({ key: 'k' + i, query: 'p' + i, type }));
-  const out = await createLookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch, batchSize: 2 }).reconcile(qs);
-  assert.equal(s.calls.length, 4, 'Place 3 (two batches), none 2, Period 2');
+  const out = await lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch, batchSize: 2 }).reconcile(qs);
+  assert.equal(s.calls.length, 4, 'Place 5, none being Place too (three batches), Period 2 (one)');
   out.forEach((list, i) => { assert.equal(list.key, 'k' + i); assert.equal(list[0].name, 'p' + i); });
   // The fake refuses a mixed batch, so the check above can fail.
   const mixed = await s.fetch(WHG_ENDPOINT, { body: JSON.stringify({ queries: { q0: { query: 'x', type: PLACE }, q1: { query: 'y' } } }) });
@@ -491,19 +499,19 @@ test('a batch holds queries of one type only, and the answers still come back in
 
 test('the User-Agent avoids everything WHG\'s bot filter refuses, and one that would be refused is refused here', async () => {
   const s = service();
-  await createLookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch }).reconcile([{ query: 'a' }]);
+  await lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch }).reconcile([{ query: 'a' }]);
   const ua = s.calls[0].headers['User-Agent'];
   assert.equal(ua, USER_AGENT);
   assert.equal(BLOCKED_AGENTS.length, 10);
   for (const b of BLOCKED_AGENTS) assert.ok(!ua.toLowerCase().includes(b.toLowerCase()), `contains ${b}`);
   for (const bad of ['curl/8.5.0', 'Mozilla/5.0 python-requests/2.31', 'my-scrapy-thing']) {
-    assert.throws(() => createLookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch, userAgent: bad }), TypeError, bad);
+    assert.throws(() => lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch, userAgent: bad }), TypeError, bad);
   }
 });
 
 test('entity: a GET of /entity/<id>/api, from any form of the id, with the token only for WHG\'s own records', async () => {
   const s = service();
-  const look = createLookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: s.fetch });
+  const look = lookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: s.fetch });
   const f = await look.entity('place:gn:745044');
   assert.equal(f.type, 'Feature');
   for (const form of ['https://w3id.org/whg/id/place:gn:745044', 'https://whgazetteer.org/entity/place:gn:745044/api']) await look.entity(form);
@@ -522,16 +530,16 @@ test('entity: a GET of /entity/<id>/api, from any form of the id, with the token
   assert.deepEqual(s.calls.map((c) => c.headers.Authorization ?? null), [null, null, null, `Bearer ${TOKEN}`, `Bearer ${TOKEN}`]);
   // No token configured: none sent, even for WHG's own.
   const anon = service();
-  await createLookup({ endpoint: WHG_ENDPOINT, fetch: anon.fetch }).entity('place:whg:1319:277');
+  await lookup({ endpoint: WHG_ENDPOINT, fetch: anon.fetch }).entity('place:whg:1319:277');
   assert.equal(anon.calls[0].headers.Authorization, undefined);
   await assert.rejects(look.entity('12345'), TypeError);
   await assert.rejects(look.entity('https://whgazetteer.org/places/12345/portal/'), TypeError);
-  await assert.rejects(createLookup({ endpoint: 'https://example.org/reconcile', fetch: s.fetch }).entity('place:gn:1'), TypeError);
+  await assert.rejects(lookup({ endpoint: 'https://example.org/reconcile', fetch: s.fetch }).entity('place:gn:1'), TypeError);
 });
 
 test('entity: 451 is kind unavailable at once; 503 with Retry-After: 30 is tried again', async () => {
   const s = service({ answer: () => reply(451, { detail: 'The source does not permit redistribution.', namespace: 'kain_par', source: 'Ancient Parishes' }) });
-  const err = await createLookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch, sleep: noSleep }).entity('place:kain_par:100').catch((e) => e);
+  const err = await lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch, sleep: noSleep }).entity('place:kain_par:100').catch((e) => e);
   assert.ok(err instanceof GazetteerError, String(err));
   assert.equal(err.kind, 'unavailable');
   assert.equal(err.status, 451);
@@ -541,21 +549,21 @@ test('entity: 451 is kind unavailable at once; 503 with Retry-After: 30 is tried
   let n = 0;
   const busy = service({ answer: (sent, call) => (++n === 1 ? reply(503, { detail: 'busy' }, { 'Retry-After': '30' }) : echo(sent, call)) });
   const waits = [];
-  const f = await createLookup({ endpoint: WHG_ENDPOINT, fetch: busy.fetch, sleep: async (ms) => { waits.push(ms); } }).entity('place:gn:1');
+  const f = await lookup({ endpoint: WHG_ENDPOINT, fetch: busy.fetch, sleep: async (ms) => { waits.push(ms); } }).entity('place:gn:1');
   assert.equal(f.type, 'Feature');
   assert.deepEqual(waits, [30_000]);
 });
 
 test('entity: through the same queue as queries, and paced at 60 a minute of its own', async () => {
   const shared = service({ delay: 3 });
-  const look = createLookup({ endpoint: WHG_ENDPOINT, fetch: shared.fetch });
+  const look = lookup({ endpoint: WHG_ENDPOINT, fetch: shared.fetch });
   await Promise.all([look.reconcile(names(60)), look.entity('place:gn:1'), look.entity('place:gn:2'), look.extend(['place:gn:1'], ['whg:countries_codes'])]);
   assert.equal(shared.maxInFlight, 1);
   assert.equal(shared.calls.length, 3 + 2 + 1);
 
   const t = fakeTime();
   const s = service({ delay: 0 });
-  const paced = createLookup({ endpoint: WHG_ENDPOINT, fetch: (u, i) => { const r = s.fetch(u, i); s.calls.at(-1).t = t.now; return r; }, now: t.clock, sleep: t.sleep });
+  const paced = lookup({ endpoint: WHG_ENDPOINT, fetch: (u, i) => { const r = s.fetch(u, i); s.calls.at(-1).t = t.now; return r; }, now: t.clock, sleep: t.sleep });
   for (let i = 0; i < 61; i++) await paced.entity('place:gn:' + i);
   assert.equal(s.calls[59].t, 0);
   assert.equal(s.calls[60].t, 60_000, 'the 61st waits for the minute');
@@ -581,11 +589,209 @@ test('the answers keep the root attribution, merged across batches, with null le
   const s = service({ answer: (sent, call) => echo(sent, call).json().then((j) => reply(200, { ...j, attribution: ++n === 1
     ? { sources: { gn: { license: { spdx_id: 'CC-BY-4.0', permits_commercial: true, no_derivatives: false } } } }
     : { sources: { un: { license: { spdx_id: null, permits_commercial: null, no_derivatives: null } } } } })) });
-  const out = await createLookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch, batchSize: 2 }).reconcile(names(3));
+  const out = await lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch, batchSize: 2 }).reconcile(names(3));
   assert.equal(s.calls.length, 2);
   assert.deepEqual(Object.keys(out.attribution.sources).sort(), ['gn', 'un']);
   assert.equal(out.attribution.sources.un.license.permits_commercial, null);
   assert.equal(out.attribution.sources.un.license.no_derivatives, null);
   assert.equal(out.attribution.sources.gn.license.no_derivatives, false);
   assert.equal(out.length, 3, 'attribution is not among the answers');
+});
+
+// ---- One request in flight across callers, tools and tabs ----
+
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+/** Given to a later call on a shared lookup: never used there, and never reaches the network. */
+const unusedFetch = async () => { throw new TypeError('the later fetch was used'); };
+
+/**
+ * A stand-in for the Web Locks API's LockManager (exclusive mode only), which records who holds a
+ * lock and who waits for one. A request whose signal aborts while it waits is taken off the queue
+ * and rejects with the signal's reason, as the real one does.
+ */
+function fakeLocks() {
+  const held = new Map(), waiting = [];
+  const log = { requests: [], heldNow: 0, maxHeld: 0, get waiting() { return waiting.length; } };
+  log.request = async (name, options, fn) => {
+    if (typeof options === 'function') { fn = options; options = {}; }
+    const signal = options?.signal;
+    log.requests.push({ name, mode: options?.mode, signal });
+    if (signal?.aborted) throw signal.reason;
+    if (held.get(name)) {
+      await new Promise((resolve, reject) => {
+        const w = { name, resolve };
+        waiting.push(w);
+        signal?.addEventListener('abort', () => {
+          const i = waiting.indexOf(w);
+          if (i >= 0) { waiting.splice(i, 1); reject(signal.reason); }
+        }, { once: true });
+      });
+    } else held.set(name, true);
+    log.heldNow++; log.maxHeld = Math.max(log.maxHeld, log.heldNow);
+    try { return await fn({ name, mode: 'exclusive' }); } finally {
+      log.heldNow--;
+      const i = waiting.findIndex((w) => w.name === name);
+      if (i >= 0) waiting.splice(i, 1)[0].resolve(); else held.delete(name);
+    }
+  };
+  return log;
+}
+
+test('createLookup gives one shared lookup per endpoint: one request in flight across both callers (shared:false ones overlap)', async () => {
+  const OTHER = 'tok-other-1a2b3c';
+  const s = service({ delay: 5 });
+  const a = createLookup({ endpoint: 'https://shared-one.example/reconcile', token: TOKEN, fetch: s.fetch, batchSize: 10, locks: null });
+  // The same service written differently, a later token, and a batch size that differs: still the same lookup.
+  const b = createLookup({ endpoint: 'HTTPS://Shared-One.example/reconcile/', token: OTHER, fetch: unusedFetch, batchSize: 3, locks: null });
+  assert.equal(a, b, 'one lookup for one endpoint');
+  assert.equal(b.batchSize, 10, 'the first batch size stands');
+  await Promise.all([a.reconcile(names(30, 'x')), b.reconcile(names(20, 'y')), a.extend(['i'], ['p'])]);
+  assert.equal(s.calls.length, 3 + 2 + 1, 'every request went to the first fetch');
+  assert.equal(s.maxInFlight, 1);
+  assert.ok(s.calls.every((c) => c.headers.Authorization === `Bearer ${OTHER}`), 'the later token is the one sent');
+  // A call with no token leaves the token as it is; the earlier token is still cleaned from messages.
+  const c = createLookup({ endpoint: 'https://shared-one.example/reconcile', fetch: unusedFetch, locks: null });
+  assert.equal(c, a);
+  await c.reconcile([{ query: 'z' }]);
+  assert.equal(s.calls.at(-1).headers.Authorization, `Bearer ${OTHER}`);
+  // A private one is another lookup, even for the same endpoint.
+  assert.notEqual(createLookup({ endpoint: 'https://shared-one.example/reconcile', fetch: s.fetch, shared: false, locks: null }), a);
+
+  // Control: the same measure over two private lookups must see two in flight.
+  const apart = service({ delay: 5 });
+  const one = createLookup({ endpoint: 'https://shared-one.example/reconcile', fetch: apart.fetch, shared: false, locks: null });
+  const two = createLookup({ endpoint: 'https://shared-one.example/reconcile', fetch: apart.fetch, shared: false, locks: null });
+  await Promise.all([one.reconcile(names(3)), two.reconcile(names(3))]);
+  assert.equal(apart.maxInFlight, 2);
+});
+
+test('a shared lookup cleans every token it has been given from what it repeats', async () => {
+  const FIRST = 'tok-first-77aa', SECOND = 'tok-second-88bb';
+  const s = service({ answer: () => reply(401, { detail: `Invalid token ${FIRST} or ${SECOND}` }) });
+  createLookup({ endpoint: 'https://shared-two.example/reconcile', token: FIRST, fetch: s.fetch, locks: null });
+  const look = createLookup({ endpoint: 'https://shared-two.example/reconcile', token: SECOND, fetch: unusedFetch, sleep: noSleep, locks: null });
+  const err = await look.reconcile([{ query: 'a' }]).catch((e) => e);
+  assert.equal(s.calls[0].headers.Authorization, `Bearer ${SECOND}`, 'present where it belongs');
+  assert.match(err.message, /Invalid token \[token\] or \[token\]/);
+  assert.ok(!err.message.includes(FIRST) && !err.message.includes(SECOND), err.message);
+});
+
+test('with a LockManager, every request (queries, extend, entity, retries) is made holding one exclusive lock per site, so two lookups never overlap', async () => {
+  const locks = fakeLocks();
+  let n = 0, unlocked = 0;
+  // The first request is a 503, so a retry is among those checked.
+  const s = service({ delay: 5, answer: (sent, call) => (++n === 1 ? reply(503, {}) : echo(sent, call)) });
+  const fetch = (u, i) => { if (locks.heldNow !== 1) unlocked++; return s.fetch(u, i); };
+  const one = lookup({ endpoint: WHG_ENDPOINT, fetch, locks, sleep: noSleep, batchSize: 5 });
+  const two = lookup({ endpoint: WHG_ENDPOINT, fetch, locks, sleep: noSleep, batchSize: 5 });
+  await Promise.all([one.reconcile(names(10)), two.reconcile(names(10)), one.extend(['place:gn:1'], ['whg:countries_codes']), two.entity('place:gn:1')]);
+  assert.equal(s.calls.length, 1 + 2 + 2 + 1 + 1, 'the retry, four batches, extend and entity');
+  assert.equal(s.maxInFlight, 1);
+  assert.equal(unlocked, 0, 'no request was made without the lock');
+  assert.ok(locks.requests.length >= 6);
+  for (const r of locks.requests) {
+    assert.equal(r.name, 'plato-tools:gazetteer:https://whgazetteer.org');
+    assert.equal(r.mode, 'exclusive');
+  }
+  assert.equal(locks.heldNow, 0, 'every lock let go');
+
+  // Control: without the LockManager, the same two lookups overlap and the same check sees requests
+  // made without a lock.
+  const apart = service({ delay: 5 });
+  let bare = 0;
+  const f2 = (u, i) => { if (locks.heldNow !== 1) bare++; return apart.fetch(u, i); };
+  await Promise.all([lookup({ endpoint: WHG_ENDPOINT, fetch: f2 }).reconcile(names(3)), lookup({ endpoint: WHG_ENDPOINT, fetch: f2 }).reconcile(names(3))]);
+  assert.equal(apart.maxInFlight, 2);
+  assert.equal(bare, 2);
+});
+
+test('an AbortSignal stops a lookup waiting for the lock, and the lock is not kept', { timeout: 5000 }, async () => {
+  const locks = fakeLocks();
+  const NAME = 'plato-tools:gazetteer:https://whgazetteer.org';
+  // Another tab holds the lock.
+  let release;
+  const other = locks.request(NAME, { mode: 'exclusive' }, () => new Promise((r) => { release = r; }));
+  const s = service();
+  const look = lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch, locks });
+  const ac = new AbortController();
+  const pending = look.reconcile(names(2), { signal: ac.signal });
+  await wait(5);
+  assert.equal(locks.waiting, 1, 'waiting for the lock');
+  assert.equal(s.calls.length, 0, 'nothing sent while another holds it');
+  ac.abort();
+  await assert.rejects(pending, { name: 'AbortError' });
+  assert.equal(locks.waiting, 0, 'no longer waiting');
+  release(); await other;
+  assert.equal(locks.heldNow, 0);
+  // The lock and the lookup's queue both still work.
+  assert.equal((await look.reconcile([{ query: 'after' }]))[0][0].name, 'after');
+  assert.equal(s.calls.length, 1, 'the aborted batch was never sent');
+  assert.equal(locks.heldNow, 0);
+});
+
+test("by default the platform's navigator.locks is used (Node has one): two private lookups do not overlap", async (t) => {
+  if (!globalThis.navigator?.locks) return t.skip('no navigator.locks here');
+  const s = service({ delay: 5 });
+  const endpoint = 'https://default-locks.example/reconcile';
+  await Promise.all([createLookup({ endpoint, fetch: s.fetch, shared: false }).reconcile(names(3)), createLookup({ endpoint, fetch: s.fetch, shared: false }).reconcile(names(3))]);
+  assert.equal(s.maxInFlight, 1);
+  // Control: with locks: null they do.
+  const apart = service({ delay: 5 });
+  await Promise.all([createLookup({ endpoint, fetch: apart.fetch, shared: false, locks: null }).reconcile(names(3)), createLookup({ endpoint, fetch: apart.fetch, shared: false, locks: null }).reconcile(names(3))]);
+  assert.equal(apart.maxInFlight, 2);
+});
+
+test('a spent allowance is kind quota however WHG words it, with what it said (token cleaned); a refused token stays auth', async () => {
+  const cases = [
+    [401, `Request limit exceeded for ${TOKEN}`, 'quota'],
+    [403, 'Your API QUOTA limit has been reached', 'quota'],
+    [401, 'Daily API limit (5000 calls) exceeded', 'quota'],
+    [401, 'Invalid token', 'auth'],
+    [403, 'No limit on this page; token refused', 'auth'],
+  ];
+  for (const [status, said, kind] of cases) {
+    const s = service({ answer: () => reply(status, { detail: said }) });
+    const err = await lookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: s.fetch, sleep: noSleep }).reconcile([{ query: 'a' }]).catch((e) => e);
+    assert.ok(err instanceof GazetteerError, String(err));
+    assert.equal(err.kind, kind, said);
+    assert.equal(err.status, status);
+    assert.ok(err.message.includes(said.split(TOKEN).join('[token]')), err.message);
+    assert.ok(!err.message.includes(TOKEN));
+    assert.equal(s.calls.length, 1);
+  }
+});
+
+// ---- Types (whg.js A4) ----
+
+test('WHG is always sent a type: Place when none is given, so a batch of empty queries is not taken for type-guessing', async () => {
+  const s = service({ answer: () => reply(200, { q0: { result: [] }, q1: { result: [] } }) });
+  await lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch }).reconcile([{ query: '', params: { contained_in: ['un:ita'] } }, { params: { countries: ['IT'] } }]);
+  assert.equal(s.calls.length, 1);
+  assert.deepEqual(Object.values(s.calls[0].sent.queries).map((q) => q.type), ['Place', 'Place']);
+  // Another service is sent no type it was not given.
+  const o = service();
+  await lookup({ endpoint: 'https://example.org/reconcile', fetch: o.fetch }).reconcile([{ query: '' }]);
+  assert.equal(o.calls[0].sent.queries.q0.type, undefined);
+});
+
+test("'Place', 'place' and the schema address are one type, and go in one batch; Period in another", async () => {
+  const s = service();
+  const out = await lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch }).reconcile([
+    { key: 'a', query: 'a', type: 'Place' }, { key: 'b', query: 'b', type: PERIOD }, { key: 'c', query: 'c', type: PLACE }, { key: 'd', query: 'd', type: 'place' }, { key: 'e', query: 'e', type: 'Period' },
+  ]);
+  assert.equal(s.calls.length, 2);
+  assert.deepEqual(s.calls.map((c) => Object.values(c.sent.queries).map((q) => `${q.query}:${q.type}`)), [['a:Place', 'c:Place', 'd:Place'], ['b:Period', 'e:Period']]);
+  out.forEach((list, i) => assert.equal(list[0].name, 'abcde'[i]));
+});
+
+test('a type WHG does not have is refused before anything is sent', async () => {
+  for (const type of ['Person', 'https://whgazetteer.org/static/whg_schema.jsonld#Thing', { id: 'Place' }]) {
+    const s = service();
+    const look = lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch });
+    await assert.rejects(look.reconcile([{ query: 'fine', type: 'Place' }, { query: 'x', type }]), TypeError, JSON.stringify(type));
+    assert.equal(s.calls.length, 0, 'not even the valid one');
+    // Positive: the same lookup does send a valid batch.
+    await look.reconcile([{ query: 'fine', type: 'Place' }]);
+    assert.equal(s.calls.length, 1);
+  }
 });

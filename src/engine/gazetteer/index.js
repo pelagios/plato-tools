@@ -8,9 +8,13 @@
 // Pure engine code: no page, no storage. It runs in a Web Worker and in Node, and is given `fetch`
 // so that tests can stand in for the service.
 //
-// - One request at a time per lookup, whoever asks: callers share one queue, and a caller's batches
-//   take their turn with everyone else's. WHG asks for this (it fans each batch out itself, and has
-//   answered 503 under load).
+// - One request in flight to a service, whoever asks (WHG has 16 slots for the whole site, fans each
+//   batch out itself, and has answered 503 under load). Within one page or worker, createLookup gives
+//   ONE lookup per endpoint, so two tools or callers share its queue and take turns. Across tabs and
+//   workers, where the platform has Web Locks (browsers, and Node 24, which this repo needs), each
+//   job (a request, with its pacing and retries) is done holding an exclusive lock named after the
+//   service's site.
+//   `shared: false` gives a lookup of its own (for tests), which still takes the lock.
 // - A pacer on the queue keeps within WHG's rates: never more than 600 queries in any 60 seconds,
 //   nor more than 60 record requests (A3, A10). WHG's window is fixed; any-60-seconds is stricter, so
 //   the lookup is never the one to cross it.
@@ -28,7 +32,7 @@
 //   and its requests still waiting their turn.
 import {
   isWhg, whgIri, reprPoint, candidateCcodes, answerStatus, mergeAttribution, namespaceOf, entityRequest,
-  isBlockedAgent, isQuotaSpent, WHG_BATCH_LIMIT, WHG_DEFAULT_LIMIT, WHG_ENCODING, WHG_QUERY_RATE, WHG_ENTITY_RATE,
+  isBlockedAgent, isQuotaSpent, whgQueryType, WHG_BATCH_LIMIT, WHG_DEFAULT_LIMIT, WHG_ENCODING, WHG_QUERY_RATE, WHG_ENTITY_RATE,
 } from './whg.js';
 
 export {
@@ -97,13 +101,28 @@ export function createPacer({ limit, windowMs, now = Date.now, sleep = abortable
   };
 }
 
+// The lookups of this page or worker, one per endpoint, each with the means to change its token.
+const shared = new Map();
+
 /**
- * A lookup against one reconciliation service.
+ * The lookup against one reconciliation service: the SAME one for every call with the same endpoint
+ * (written in any way that is the same address) within this page or worker, so that its requests
+ * are made one at a time whoever asks.
+ * - A later call with a token changes the token of the shared lookup, for every caller; one with none
+ *   leaves it. Every token it has had is cleaned from what it repeats.
+ * - Every other option is the first call's: a later call's differing values (fetch, batchSize, rates,
+ *   …) are ignored, without an error, as a second queue is what is to be avoided. A later call is
+ *   still refused a blocked User-Agent or a missing endpoint.
+ * - `shared: false` makes a lookup of its own, apart from the shared one (for tests).
  * @param {object} o
  * @param {string} o.endpoint  the service's address, e.g. WHG_ENDPOINT
  * @param {string} [o.token]  sent as `Authorization: Bearer`, and only so
  * @param {typeof fetch} [o.fetch]
  * @param {number} [o.batchSize]  queries per request, 1 to 50 (default 25)
+ * @param {boolean} [o.shared]  true (the default): the one lookup for this endpoint
+ * @param {{request: Function}|null} [o.locks]  a Web Locks LockManager (default
+ *   globalThis.navigator?.locks; null for none): each job is done holding the exclusive lock
+ *   'plato-tools:gazetteer:<the endpoint's origin>', so that tabs and workers take turns too
  * Optional, beyond the agreed interface: `userAgent` (sent where the platform allows; browsers may
  * drop it; one WHG's bot filter would refuse is refused here), `encoding` ('json', the default, or
  * 'form' for a service that takes only `queries=`), `defaultLimit` (candidates asked for when a
@@ -112,30 +131,67 @@ export function createPacer({ limit, windowMs, now = Date.now, sleep = abortable
  * for none), `now()` and `sleep(ms, signal)` (for tests), `maxRetries` (5) and `maxRetryAfter`
  * (seconds a pause may last, 60).
  */
-export function createLookup({
-  endpoint, token, fetch: fetchFn = globalThis.fetch, batchSize = DEFAULT_BATCH,
+export function createLookup(options = {}) {
+  const { endpoint, token, userAgent = USER_AGENT, shared: isShared = true } = options ?? {};
+  if (typeof endpoint !== 'string' || !endpoint) throw new TypeError('createLookup needs an endpoint');
+  if (userAgent && isBlockedAgent(userAgent)) throw new TypeError(`WHG refuses the User-Agent "${userAgent}" as a bot`);
+  if (!isShared) return makeLookup(options).lookup;
+  const key = sameAddress(endpoint);
+  const found = shared.get(key);
+  if (found) {
+    if (token) found.setToken(token);
+    return found.lookup;
+  }
+  const made = makeLookup(options);
+  shared.set(key, made);
+  return made.lookup;
+}
+
+/** An endpoint written one way: scheme and host in lower case, no fragment, no trailing slash. */
+function sameAddress(endpoint) {
+  try {
+    const u = new URL(endpoint.trim());
+    u.hash = '';
+    u.pathname = u.pathname.replace(/\/+$/, '') || '/';
+    return u.href;
+  } catch { return endpoint.trim(); }
+}
+
+function makeLookup({
+  endpoint, token: firstToken, fetch: fetchFn = globalThis.fetch, batchSize = DEFAULT_BATCH,
   userAgent = USER_AGENT, encoding = WHG_ENCODING, defaultLimit = WHG_DEFAULT_LIMIT, iri, entityBase,
   queryRate = WHG_QUERY_RATE, entityRate = WHG_ENTITY_RATE, now = Date.now, sleep = abortableSleep,
-  maxRetries = 5, maxRetryAfter = 60,
-} = {}) {
-  if (typeof endpoint !== 'string' || !endpoint) throw new TypeError('createLookup needs an endpoint');
+  maxRetries = 5, maxRetryAfter = 60, locks = globalThis.navigator?.locks,
+}) {
   if (typeof fetchFn !== 'function') throw new TypeError('createLookup needs fetch');
-  if (userAgent && isBlockedAgent(userAgent)) throw new TypeError(`WHG refuses the User-Agent "${userAgent}" as a bot`);
+  if (locks != null && typeof locks.request !== 'function') throw new TypeError('locks must be a LockManager');
   const size = clampBatch(batchSize);
+  const whg = isWhg(endpoint);
+  let token = firstToken || null;
+  const tokens = new Set(token ? [token] : []);
+  const setToken = (t) => { token = t; tokens.add(t); };
+  let site;
+  try { site = new URL(endpoint).origin; } catch { site = endpoint; }
+  const lockName = 'plato-tools:gazetteer:' + site;
   const limitDefault = Math.min(WHG_BATCH_LIMIT, Math.max(1, Math.floor(Number(defaultLimit)) || WHG_DEFAULT_LIMIT));
-  const iriOf = iri ?? (isWhg(endpoint) ? whgIri : (id) => (/^[a-z][a-z0-9+.-]*:\/\//i.test(id) ? id : null));
-  const recordsFrom = entityBase ?? (isWhg(endpoint) ? endpoint : null);
-  const scrub = (text) => (token ? String(text).split(token).join('[token]') : String(text));
+  const iriOf = iri ?? (whg ? whgIri : (id) => (/^[a-z][a-z0-9+.-]*:\/\//i.test(id) ? id : null));
+  const recordsFrom = entityBase ?? (whg ? endpoint : null);
+  const scrub = (text) => {
+    let out = String(text);
+    for (const t of tokens) out = out.split(t).join('[token]');
+    return out;
+  };
   const queryPacer = queryRate ? createPacer({ ...queryRate, now, sleep }) : null;
   const entityPacer = entityRate ? createPacer({ ...entityRate, now, sleep }) : null;
 
-  // The shared queue: one job (one request, with its pacing and retries) runs at a time.
+  // The shared queue: one job (one request, with its pacing and retries) runs at a time, holding the
+  // site's lock where there is a LockManager.
   const queue = [];
   let busy = false;
   function schedule(run, signal) {
     return new Promise((resolve, reject) => {
       if (signal?.aborted) return reject(signal.reason);
-      const job = { run, resolve, reject };
+      const job = { run, signal, resolve, reject };
       const onAbort = () => {
         const i = queue.indexOf(job);
         if (i >= 0) { queue.splice(i, 1); reject(signal.reason); }
@@ -151,7 +207,17 @@ export function createLookup({
     const job = queue.shift();
     busy = true;
     job.detach();
-    try { job.resolve(await job.run()); } catch (e) { job.reject(e); } finally { busy = false; pump(); }
+    try { job.resolve(await exclusive(job.run, job.signal)); } catch (e) { job.reject(e); } finally { busy = false; pump(); }
+  }
+  // Waiting for the lock ends when the signal aborts, rejecting with its reason; the lock is let go
+  // when the job ends, however it ends.
+  async function exclusive(run, signal) {
+    if (!locks) return run();
+    try {
+      return await locks.request(lockName, signal ? { mode: 'exclusive', signal } : { mode: 'exclusive' }, () => run());
+    } catch (e) {
+      throw signal?.aborted ? signal.reason : e;
+    }
   }
 
   function headers(post, auth) {
@@ -222,12 +288,15 @@ export function createLookup({
    */
   async function reconcile(queries, { signal, onProgress } = {}) {
     const list = Array.from(queries ?? []);
+    // WHG is always sent a type, in one form, and is sent none it would refuse (A4): all are read
+    // before anything is sent.
+    const types = whg ? list.map((q) => whgQueryType(q?.type ?? q?.params?.type)) : null;
     const out = new Array(list.length);
     out.attribution = null;
     // One type to a batch (A4): group by type, in order of first appearance, then cut to size.
     const byType = new Map();
     list.forEach((q, i) => {
-      const t = q?.type == null ? '' : JSON.stringify(q.type);
+      const t = types ? types[i] : q?.type == null ? '' : JSON.stringify(q.type);
       if (!byType.has(t)) byType.set(t, []);
       byType.get(t).push(i);
     });
@@ -236,7 +305,7 @@ export function createLookup({
       for (let start = 0; start < indices.length; start += size) {
         const batch = indices.slice(start, start + size);
         const sent = {};
-        batch.forEach((i, j) => { sent['q' + j] = encodeQuery(list[i], limitDefault); });
+        batch.forEach((i, j) => { sent['q' + j] = encodeQuery(list[i], limitDefault, types?.[i]); });
         const answer = await schedule(() => post(body('queries', sent), batch.length, signal), signal);
         batch.forEach((i, j) => { out[i] = readResult(answer?.['q' + j], list[i], iriOf); });
         if (isObject(answer)) out.attribution = mergeAttribution(out.attribution, answer.attribution);
@@ -286,7 +355,7 @@ export function createLookup({
     return feature;
   }
 
-  return { reconcile, extend, entity, batchSize: size };
+  return { lookup: { reconcile, extend, entity, batchSize: size }, setToken };
 }
 
 function clampBatch(n) {
@@ -296,11 +365,12 @@ function clampBatch(n) {
 
 const isObject = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
 
-function encodeQuery(q, limitDefault) {
+function encodeQuery(q, limitDefault, type) {
   const out = {};
   if (q?.params && isObject(q.params)) Object.assign(out, q.params);
   if (q?.query != null) out.query = String(q.query);
-  if (q?.type != null) out.type = q.type;
+  if (type != null) out.type = type;
+  else if (q?.type != null) out.type = q.type;
   out.limit = q?.limit ?? out.limit ?? limitDefault;
   if (Array.isArray(q?.properties) && q.properties.length) out.properties = q.properties;
   return out;

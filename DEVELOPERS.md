@@ -544,8 +544,11 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   the scope is its protection. Never commit it (`.gitignore` does not cover `.env` files). It is to
   reach the build from a GitHub Actions variable, which `pages.yml` does not yet pass.
 - **The gazetteer lookup** (`src/engine/gazetteer/`), shared with Krisis, speaks the W3C
-  reconciliation protocol, one request at a time per lookup, with the token in the `Authorization`
-  header only. Every assumption about the World Historical Gazetteer, and whether it is verified,
+  reconciliation protocol, with the token in the `Authorization` header only. WHG has 16 slots for
+  the whole site, so there is one request in flight whoever asks. `createLookup` gives one shared
+  lookup per endpoint in a page or worker, and the first call's options stand (a later token
+  replaces the token). Across tabs, each request is made holding a Web Lock named after the site.
+  Tests use `shared: false` and `locks: null`, or a fake LockManager. Every assumption about the World Historical Gazetteer, and whether it is verified,
   is in `whg.js`, so that a correction is made in one place.
 - **Georeferencing**, for tracing from a georeferenced map, will come from `src/engine/georef/`,
   which belongs to Hermes. Chora uses it and keeps none of its own.

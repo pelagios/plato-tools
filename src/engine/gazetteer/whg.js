@@ -15,10 +15,19 @@
 // A3 VERIFIED. Limits. At most 50 queries a POST: more is refused with 400 and nothing is processed.
 //    600 queries a minute per user, in a fixed window, counting QUERIES, not requests; beyond it,
 //    429 with Retry-After. 5,000 REQUESTS a day; spent, it is a 401 whose detail is "Daily API limit
-//    (5000 calls) exceeded" (kind 'quota', told from a refused token by that text). A query's
-//    default `limit` is 100 candidates, so these tools send one of their own. One request in flight
-//    is enough: WHG fans each batch out itself.
-// A4 VERIFIED. Every query in one POST must share a `type`, or the request gets 400.
+//    (5000 calls) exceeded" (kind 'quota', told from a refused token by that text; so that a
+//    rewording is not taken for a refused token, a 401 or 403 whose detail says "limit" with
+//    "exceed" or "quota" is taken for it too). A query's default `limit` is 100 candidates, so these
+//    tools send one of their own. ONE request in flight, for the whole site has only 16 slots and
+//    WHG fans each batch out itself: one per page or worker (a shared lookup per endpoint), and one
+//    across tabs (a Web Lock per site), not merely one per lookup.
+// A4 VERIFIED. Every query in one POST must share a `type`, or the request gets 400. VERIFIED (whg3
+//    production, 2026-09-30): only place and period are types; any other is a 400 for the whole
+//    batch, so it is refused here before anything is sent. "Place", "place" and
+//    https://whgazetteer.org/static/whg_schema.jsonld#Place are one type (WHG reads the part after
+//    the last '#', in lower case), so batches are made by that. A type is ALWAYS sent, Place when
+//    none is given: a batch whose queries have no text and no type is taken for OpenRefine's type
+//    guessing, answered with dummies, and its filters ignored, which breaks a search by area alone.
 // A5 VERIFIED. Encoding: a JSON body `{"queries": {...}}` / `{"extend": {...}}`, as WHG documents.
 //    Form-encoded `queries=` (the W3C protocol's) is accepted too, but WHG decodes a form-encoded
 //    `extend` twice (Django, then unquote_plus), turning a `+` into a space, so JSON is the default.
@@ -73,8 +82,23 @@ export const BLOCKED_AGENTS = ['curl', 'python-requests', 'Go-http-client', 'nod
 /** Would WHG's bot filter refuse this User-Agent (A6)? */
 export const isBlockedAgent = (ua) => BLOCKED_AGENTS.some((b) => String(ua).toLowerCase().includes(b.toLowerCase()));
 
-/** Is a 401's detail the spent daily allowance rather than a refused token (A3)? */
-export const isQuotaSpent = (detail) => /daily api limit/i.test(String(detail ?? ''));
+/** Is a 401's or 403's detail a spent allowance rather than a refused token (A3)? */
+export function isQuotaSpent(detail) {
+  const d = String(detail ?? '');
+  return /daily api limit/i.test(d) || (/limit/i.test(d) && /exceed|quota/i.test(d));
+}
+
+const WHG_TYPES = { place: 'Place', period: 'Period' };
+/**
+ * The type WHG is sent for a query's type (A4): 'Place' or 'Period', from any of their forms, and
+ * 'Place' when none is given. Any other is a TypeError, for WHG would refuse the whole batch.
+ */
+export function whgQueryType(type) {
+  if (type == null || type === '') return 'Place';
+  const t = typeof type === 'string' ? WHG_TYPES[type.slice(type.lastIndexOf('#') + 1).trim().toLowerCase()] : undefined;
+  if (!t) throw new TypeError(`WHG has no type ${JSON.stringify(type)}: only Place and Period`);
+  return t;
+}
 
 /**
  * What a query's answer says beyond its candidates (A9): `error` when it was refused, `unanswered`
