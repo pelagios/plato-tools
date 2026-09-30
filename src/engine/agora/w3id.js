@@ -44,7 +44,7 @@ export const TEXT = {
   'bad-w3id-path': "The w3id name (the base address's path) has characters other than letters, digits and . _ ~ -, or a part starting with '.', which w3id's folders cannot hold.",
   'w3id-path-case': "The w3id name has capital letters. w3id's folders are compared ignoring case on some systems, and addresses are mostly typed in lower case: a lower-case name is safer.",
   'bad-release': "The release name is not one the rules can reach: letters, digits and . _ ~ -, not starting with '.'.",
-  'release-without-repo': 'A release is named, but not the GitHub repository it is published in (--repo), so there are no rules for releases and its address would answer 404.',
+  'release-without-repo': 'A release is named (--release), but not the GitHub repository it is published in, so there could be no rules for releases and its address would answer 404. Nothing is written. Either give the repository (--repo OWNER/NAME), or leave out --release, which gives rules without releases.',
   'key-unreachable': "The address of a place or source cannot be served by the rules or the site: its last part is empty or more than one part, has characters other than letters, digits and . _ ~ -, or starts with '.'. Give it an address of those characters only; the example names it and says what is wrong.",
   'key-suffix': "The address of a place or source ends in .jsonld, .ttl or .html, which the rules read as a request for another key's file in that format, so its own address would go to the wrong place. Give it an address without that ending.",
   'key-case': 'Two places or two sources have addresses that differ only in capital letters. On macOS and Windows these are one file, so the site would serve one for both. Give one of them another address; the example names both.',
@@ -130,7 +130,9 @@ export function create(ctx) {
     if (repo && options.siteUrl && !REPO.test(repo)) rep.add('error', 'bad-repo', TEXT['bad-repo'], repo);
     let release = options.release || null;
     if (release && releaseProblem(release)) { rep.add('error', 'bad-release', TEXT['bad-release'], release); release = null; }
-    if (release && !repo) rep.add('warning', 'release-without-repo', TEXT['release-without-repo'], release);
+    // Round 4, B2: a release named is one meant to resolve; rules that answer 404 for it are not
+    // what was asked for, so nothing is written until the one or the other is settled.
+    if (release && !repo) rep.add('error', 'release-without-repo', TEXT['release-without-repo'], release);
     if (rep.toJSON().errors) return null;
     return {
       w3idPath: s.w3idPath, base: s.base, site: t.site, repo, release, turtle: !!options.turtle, maintainers,

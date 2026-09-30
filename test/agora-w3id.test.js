@@ -213,9 +213,34 @@ test('maintainers and the site are required, and checked', async () => {
   for (const r of [none, noSite, bad]) assert.equal(r.outputs.length, 0);
   const self = await run(antonine(), { maintainers: ['docuracy'], siteUrl: BASE });
   assert.deepEqual(self.kinds, ['site-is-base']);
-  const noRepoRelease = await run(antonine(), { maintainers: ['docuracy'], siteUrl: 'https://data.example.net/antonine/', release: 'v1' });
-  assert.deepEqual(noRepoRelease.kinds, ['release-without-repo']);
-  assert.equal(noRepoRelease.outputs.length, 1);
+});
+
+test('a release without its repository is an error and writes nothing; control: with --repo, or without --release, the rules are written', async () => {
+  const site = 'https://data.example.net/antonine/';
+  const noRepo = await run(antonine(), { maintainers: ['docuracy'], siteUrl: site, release: 'v1' });
+  assert.deepEqual(noRepo.kinds, ['release-without-repo']);
+  const it = noRepo.item('release-without-repo');
+  assert.equal(it.severity, 'error');
+  assert.deepEqual(it.examples, ['v1']);
+  assert.match(it.message, /--repo OWNER\/NAME/);
+  assert.match(it.message, /leave out --release, which gives rules without releases/);
+  assert.equal(noRepo.outputs.length, 0);
+  // Either fix: the repository given (release rules), or the release left out (none).
+  const withRepo = await run(antonine(), { maintainers: ['docuracy'], siteUrl: site, repo: 'Pelagios/antonine', release: 'v1' });
+  assert.ok(!withRepo.kinds.includes('release-without-repo') && withRepo.outputs.length === 1, withRepo.kinds.join());
+  assert.match(read(withRepo, 'ids/antonine-test/.htaccess'), /\^release\//);
+  const noRelease = await run(antonine(), { maintainers: ['docuracy'], siteUrl: site });
+  assert.ok(!noRelease.kinds.includes('release-without-repo') && noRelease.outputs.length === 1, noRelease.kinds.join());
+  assert.doesNotMatch(read(noRelease, 'ids/antonine-test/.htaccess'), /\^release\//);
+  // On the command line: exit 1 and no folder; with --repo, exit 0 and the folder.
+  const data = join(dir, 'release.json'); writeFileSync(data, antonine());
+  for (const [extra, code] of [[[], 1], [['--repo', 'pelagios/antonine'], 0]]) {
+    const out = join(dir, `release-out-${code}`); mkdirSync(out);
+    const r = cli('publish', 'w3id', '--maintainer', 'docuracy', '--site-url', site, '--release', 'v1', ...extra, '--out', out, data);
+    assert.equal(r.code, code, r.out + r.err);
+    assert.equal(existsSync(join(out, 'w3id-antonine-test', 'ids', 'antonine-test', '.htaccess')), code === 0);
+    if (code === 1) assert.match(r.out + r.err, /release-without-repo|leave out --release/);
+  }
 });
 
 test('addresses the rules cannot reach are found: bad characters, a deeper path, a suffix, a case twin; control: none in the clean dataset', async () => {
