@@ -283,6 +283,11 @@ async function publishCommand(args, o, resources) {
     }
     Object.assign(r, { status: result.incomplete ? 'failed' : result.report.errors ? 'problems' : 'ok', errors: result.report.errors, counts: result.report.counts, items: result.report.items,
       outputs: result.outputs.map(({ name, path, size, files }) => ({ path: path || name, size, files })) });
+    // Stopped part-way (a dataset that could not be read to the end): what it had begun is removed.
+    if (result.incomplete) {
+      r.outputs = [];
+      r.message = (result.report.items.find((i) => i.severity === 'error')?.message || 'It could not be finished.') + (done.removed.length ? ` Nothing was written: the incomplete ${done.removed.length === 1 ? 'file was' : 'files were'} removed.` : '');
+    }
     return finishPublish(r, o, t0);
   } finally { host.cleanup(); }
 }

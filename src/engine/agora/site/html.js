@@ -72,7 +72,8 @@ function timespan(t) {
   const start = t.startEarliest ?? t.startLatest, end = t.endLatest ?? t.endEarliest;
   const range = start !== undefined && end !== undefined ? (start === end ? String(start) : `${start} to ${end}`) : start !== undefined ? `from ${start}` : end !== undefined ? `until ${end}` : '';
   const said = t.label || t.sourceLabel;
-  return esc(join([range, said && said !== range ? `“${said}”` : '', t.periodoUri ? a(t.periodoUri, 'PeriodO') : '', t.edtfString ? `EDTF ${t.edtfString}` : '']));
+  // Each part escaped on its own: the PeriodO link is HTML already, and escaping it again would show its tags.
+  return join([esc(range), said && said !== range ? esc(`“${said}”`) : '', t.periodoUri ? a(t.periodoUri, 'PeriodO') : '', t.edtfString ? esc(`EDTF ${t.edtfString}`) : '']);
 }
 function geometry(g) {
   if (!g || typeof g !== 'object') return '';

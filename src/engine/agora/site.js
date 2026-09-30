@@ -24,6 +24,7 @@ import { SITE, PARTS, keyProblem, caseGuard } from './address.js';
 import { collectWithdrawn, resolveWithdrawn } from '../../formats/shared.js';
 import { placeDocument, sourceDocument, descriptionDocument, Turtle } from './site/linked.js';
 import { schemaOrgDataset } from './fair.js';
+import { siteTarget, TEXT as W3ID_TEXT } from './w3id.js';
 import { placePage, sourcePage, landingPage, placesPage, notFoundPage, citation, PAGE, CSS, CSS_FILE } from './site/html.js';
 import { workflow, readme } from './site/repo.js';
 import { DOWNLOADS, writeDownload } from './site/downloads.js';
@@ -63,11 +64,14 @@ export const TEXT = {
   'attestation-address-elsewhere': "An attestation's address is not a fragment of its place's address (<place>#…), so it does not lead to the place's page. The attestation is shown there, but its address will not find it.",
   'places-left-out': "Places are left out of the site (it holds only those in the --only list). Their addresses still redirect to where their pages would be, where GitHub Pages shows the site's 404 page: it explains, and points to the downloads, which hold every place.",
   'only-unknown': 'Keys in the --only list match no place of the dataset, so they select nothing.',
+  'duplicate-place': "Two records are the same place: their addresses are the same, or differ only after '#', which a web server never sees. Only the first has a page and a JSON-LD document; what the others say is in the downloads, but not on the site. Make them one record, or give them addresses of their own. The example names the address.",
+  'bad-site-url': W3ID_TEXT['bad-site-url'],
   'custom-domain-path': "The base address is on a domain of its own but not at its root. GitHub Pages serves a custom domain from the root of one site, so no CNAME file is written: the pages will be at the base address only if this repository is a project site named after the path, under an account whose own Pages site has this domain. Otherwise use a base at the domain's root, or a w3id.org address.",
   'site-address-unknown': "Where the site will be served is not known (give --repo, or --site-url), so the 404 page's links start from the root of the site's domain, which is right for a custom domain but not for a project's address on github.io.",
   'tools-ref-unpinned': "Which commit of PLATO tools made this is not known, so the workflow runs the tag of its version number, which may not exist yet. Give the commit or tag to run (--tools-ref) instead.",
   'tables-download-skipped': 'The dataset is too large for its spreadsheet tables to be made in memory, so they are not among the downloads. Convert it to tables with the command line if they are wanted.',
   'download-failed': 'A download could not be made in full; it is left out of the site.',
+  'site-not-finished': 'The dataset could not be read to the end the second time, as the site was written, so the site was not finished and what was written of it is removed. The example says where it was.',
   'identity-matches-not-shown': "The dataset lists more identity matches apart from their places than the places' pages can gather, so the later ones are not on the pages; all are in the downloads.",
 };
 
@@ -99,6 +103,8 @@ export function create(ctx) {
   const guard = caseGuard();
   // What the check pass learns: which places and sources are served, and at what cost.
   const served = new Set(), bad = new Set(), onlySeen = new Set();
+  // The key of every place met, so that a second record with it is not written over the first.
+  const seenPlace = new Set();
   const sources = new Map();          // key -> { iri, obj, n, places: [{ key, label, served }], last }, or null when unservable
   const idrs = new Map();             // place address -> identity matches the dataset lists apart from it
   const withdrawals = new Map();
@@ -171,12 +177,16 @@ export function create(ctx) {
       collectWithdrawn(atts, withdrawals);
       const size = JSON.stringify(rec).length;
       jsonAll += size;
+      const key = sc.placeKey(rec['@id']);
+      // A second record for a place's key (the same address, or one that differs after '#'): its
+      // files would be written over the first's, or fail because they exist. It is in the downloads.
+      if (key && seenPlace.has(key)) { rep.error('duplicate-place', TEXT['duplicate-place'], rec['@id']); return; }
+      if (key) seenPlace.add(key);
       places++;
       for (const x of atts) {
         if (typeof x['@id'] !== 'string') unidentified++;
         else if (typeof rec['@id'] === 'string' && !x['@id'].startsWith(rec['@id'].split('#')[0] + '#')) elsewhere++;
       }
-      const key = sc.placeKey(rec['@id']);
       if (!key) { notUnder++; noteSources(rec, null, false); return; }
       const ok = addKey('place', key, rec['@id']);
       if (only && !only.has(key)) { leftOut++; noteSources(rec, key, false); return; }
@@ -186,6 +196,9 @@ export function create(ctx) {
     },
     async finish() {
       if (ctx.blocked()) return;
+      // The same test as the w3id rules' target: an http(s) address and nothing a page or a
+      // workflow could read as more than an address (javascript:, a quote, a space).
+      if (options.siteUrl && siteTarget({ siteUrl: options.siteUrl }).error) { rep.error('bad-site-url', TEXT['bad-site-url'], String(options.siteUrl)); return; }
       // A place that collided in case with a later one was counted as served before the collision was seen.
       for (const b of bad) if (b.startsWith('place/')) served.delete(b.slice(6));
       const g = ctx.gazetteer;
@@ -276,15 +289,20 @@ export function create(ctx) {
         await put(`places/${pageNo}.html`, placesPage(pageNo, pages, listed, { gazetteer: g, draft }));
         listed = [];
       };
+      const writtenPlace = new Set();
       const writePlace = async (rec) => {
         const iri = rec['@id'];
         const key = sc.placeKey(iri);
-        if (!key || !served.has(key)) return;
+        // The first record of a place only (duplicate-place): its files are written once.
+        if (!key || !served.has(key) || writtenPlace.has(key)) return;
+        writtenPlace.add(key);
         const f = sc.files(PARTS.place, key);
         const doc = placeDocument(rec, g);
         // Unindented: indentation adds a third to a record, and a machine reads it either way.
         await put(f.jsonld, JSON.stringify(doc) + '\n');
-        const prefix = iri + '#';
+        // An attestation's address is <place>#…; a place's own address may carry a fragment of its
+        // own, which is not part of what its attestations' addresses start with.
+        const prefix = iri.split('#')[0] + '#';
         const anchor = (att) => {
           const id = att['@id'];
           if (typeof id !== 'string' || !id.startsWith(prefix)) return null;
@@ -309,7 +327,13 @@ export function create(ctx) {
       });
       await queue;
       if (failure) throw failure;
-      if (r.incomplete) { await tree.close(); rep.error('dataset-not-read', 'The dataset could not be read to the end the second time, so the site was not finished.'); return; }
+      if (r.incomplete) {
+        // Half a site is no site: say so, and let the host take back what was written (publish()
+        // returns incomplete, as when the first reading fails).
+        const partial = await tree.close();
+        rep.error('dataset-not-read', TEXT['site-not-finished'], partial.path || partial.name);
+        return { incomplete: true };
+      }
       await flushList(true);
 
       // The sources, from what the check pass gathered.

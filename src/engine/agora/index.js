@@ -86,6 +86,9 @@ export async function publish({ part, input, previous, options = {} }, env) {
   }
   ctx.checkErrors = r.report.errors;
   ctx.checked = r.report;
-  await p.finish();
+  // A part that could not finish what it began (a second reading that stopped) says so, and the
+  // host then removes what it wrote, as after a failure.
+  const f = await p.finish();
+  if (f && f.incomplete) return { report: rep.toJSON(), outputs, incomplete: true };
   return { report: rep.toJSON(), outputs };
 }

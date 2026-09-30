@@ -57,8 +57,9 @@ async function siteInBrowser(files, options = {}) {
   const e = memEnv();
   const r = await publish({ part: 'site', input: await detect(files), options }, e);
   const zips = Object.fromEntries(Object.entries(e.outs).map(([k, parts]) => [k, unzipSync(new Uint8Array(Buffer.concat(parts.map((p) => (typeof p === 'string' ? Buffer.from(p) : Buffer.from(p))))))]));
-  return { r, zips, kinds: r.report.items.map((i) => i.kind) };
+  return { r, e, zips, kinds: r.report.items.map((i) => i.kind) };
 }
+const memOuts = (b) => Object.fromEntries(Object.entries(b.e.outs).map(([k, parts]) => [k, parts.map((p) => Buffer.from(p))]));
 /** Every file under a folder, as paths relative to it. */
 function walk(root, at = '') {
   return readdirSync(join(root, at), { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walk(root, join(at, d.name)) : [join(at, d.name)]));
@@ -368,6 +369,86 @@ test('attestations without addresses: a warning in a draft, an error that stops 
   // Minted, the same published dataset has no such finding, and a site.
   const minted = await site([jsonFile(kingJohn({ status: 'published', retract: false }))]);
   assert.ok(!minted.kinds.includes('attestations-without-ids') && minted.has('index.html'));
+});
+
+test('a place given twice (the same address, or one differing after #) has one page, the first, and is an error', async () => {
+  const doc = kingJohn();
+  const windsor = doc.spatialEntities.find((p) => p['@id'].endsWith('/windsor'));
+  const odiham = doc.spatialEntities.find((p) => p['@id'].endsWith('/odiham'));
+  doc.spatialEntities.push({ '@id': windsor['@id'], label: 'Windsor the second', attestations: [{ '@id': windsor['@id'] + '#a-2nd00001', names: [{ toponym: 'Windlesora' }] }] });
+  doc.spatialEntities.push({ '@id': odiham['@id'] + '#here', label: 'Odiham the second', attestations: [{ '@id': odiham['@id'] + '#a-2nd00002', names: [{ toponym: 'Odiham' }] }] });
+  // On the command line's host a second file at the same path was refused (EEXIST) and the run died.
+  const s = await site([jsonFile(doc)]);
+  assert.equal(s.item('duplicate-place')?.severity, 'error');
+  assert.equal(s.item('duplicate-place').count, 2);
+  assert.deepEqual(s.item('duplicate-place').examples, [windsor['@id'], odiham['@id'] + '#here']);
+  const page = s.read('place/windsor/index.html');
+  assert.match(page, new RegExp(`<h1>${windsor.label}`));
+  assert.doesNotMatch(page, /Windsor the second|Windlesora/);
+  assert.doesNotMatch(s.read('place/odiham/index.html'), /Odiham the second/);
+  assert.equal(s.r.report.counts.places, 19);
+  // In the browser's zip, one entry for the place, not two.
+  const b = await siteInBrowser([jsonFile(doc)]);
+  assert.ok(b.kinds.includes('duplicate-place'));
+  const names = [];
+  unzipSync(new Uint8Array(Buffer.concat(memOuts(b)['king-john-site.zip'])), { filter: (f) => { names.push(f.name); return false; } });
+  assert.equal(names.filter((n) => n === 'place/windsor/index.html').length, 1);
+  assert.ok(names.includes('place/odiham.jsonld'));
+});
+
+test("an attestation's anchor is kept when its place's address has a fragment of its own", async () => {
+  const doc = kingJohn({ retract: false });
+  const place = KJ_BASE + 'place/frag-town';
+  doc.spatialEntities.push({ '@id': place + '#this', label: 'Frag Town', attestations: [{ '@id': place + '#a-0000abcd', names: [{ toponym: 'Frag Town' }] }] });
+  const s = await site([jsonFile(doc)]);
+  assert.match(s.read('place/frag-town/index.html'), /<article class="att" id="a-0000abcd">/);
+  assert.match(s.read('place/windsor/index.html'), /<article class="att" id="a-/);
+});
+
+test('a PeriodO link on a page is a link, not its markup shown as text', async () => {
+  const doc = kingJohn({ retract: false });
+  const windsor = doc.spatialEntities.find((p) => p['@id'].endsWith('/windsor'));
+  windsor.attestations[0].timespans = [{ startEarliest: '1215', endLatest: '1216', label: 'reign of <John>', periodoUri: 'http://n2t.net/ark:/99152/p0qhb66' }];
+  const page = (await site([jsonFile(doc)])).read('place/windsor/index.html');
+  assert.match(page, /1215 to 1216, “reign of &lt;John&gt;”, <a href="http:\/\/n2t\.net\/ark:\/99152\/p0qhb66">PeriodO<\/a>/);
+  assert.doesNotMatch(page, /&lt;a href/);
+});
+
+test('a site address that is not an http(s) address is refused, as the w3id rules refuse it', async () => {
+  for (const bad of ['javascript:alert(1)//', 'ftp://example.org/', 'https://example.org/"><script>']) {
+    const s = await siteInBrowser([jsonFile(kingJohn())], { siteUrl: bad });
+    assert.equal(s.r.report.items.find((i) => i.kind === 'bad-site-url')?.severity, 'error', bad);
+    assert.equal(s.r.outputs.length, 0, bad);
+  }
+  const ok = await siteInBrowser([jsonFile(kingJohn())], { siteUrl: 'https://kj.example.ac.uk/site/' });
+  assert.ok(!ok.kinds.includes('bad-site-url') && ok.r.outputs.length === 2);
+});
+
+test('a dataset that cannot be read to the end the second time leaves no site, and says where it was', async () => {
+  const text = readFileSync(KING_JOHN, 'utf8');
+  // Read whole until the site's second reading of the places (its last), then cut short.
+  class Flaky extends File { constructor(from) { super([text], 'flaky.json'); this.from = from; this.n = 0; } stream() { return ++this.n >= this.from ? new Blob([text.slice(0, text.length / 2)]).stream() : super.stream(); } }
+  const out = join(dir, 'flaky');
+  const runOn = async (from) => {
+    const host = new NodeHost({ outDir: out, overwrite: true });
+    const { env, finish } = host.env(res);
+    const f = new Flaky(from);
+    const r = await publish({ part: 'site', input: await detect([f]), options: {} }, env);
+    const done = finish(!!r.incomplete);
+    host.cleanup();
+    return { r, done, reads: f.n };
+  };
+  const whole = await runOn(Infinity);
+  assert.ok(!whole.r.incomplete && existsSync(join(out, 'flaky-site/place/windsor/index.html')));
+  rmSync(out, { recursive: true, force: true });
+  // The last reading is the second of the places, after the downloads (each a reading of its own).
+  const cut = await runOn(whole.reads);
+  assert.equal(cut.r.incomplete, true);
+  const item = cut.r.report.items.find((i) => i.kind === 'dataset-not-read');
+  assert.match(item.message, /second time/);
+  assert.equal(item.examples[0], join(out, 'flaky-site'));
+  assert.ok(cut.done.removed.some((p) => p.endsWith('index.html')));
+  assert.equal(existsSync(join(out, 'flaky-site')), false);
 });
 
 // ---- the command line -------------------------------------------------------------------------------
