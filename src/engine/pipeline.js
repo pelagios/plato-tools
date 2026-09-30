@@ -17,7 +17,8 @@ import { featureToRecord, recordToFeature, collectionHead, collectionToGazetteer
 import { collectWithdrawn, resolveWithdrawn, addWithdrawal, versionLosses, tableLosses, relationTypeLosses, collectMembership, membershipCycles } from '../formats/shared.js';
 import { CubeExport, CUBE_TEXT } from '../formats/cube.js';
 import { validateTables, checkTableRules, checkAboutRules, aboutToGazetteer, gazetteerToAbout, rowToAttestation, tableIds, recordToRows, identityRow, ATTESTATION_SHEETS, tableSchemas, cellChecker, sourceLosses } from '../formats/tables.js';
-import { lineChunks, lines, jsonDocument, TABLE_SHEETS, DataError } from './input.js';
+import { AnnotationReader, ANNOTATION_KINDS } from '../formats/annotations.js';
+import { lineChunks, lines, jsonDocument, annotationItems, TABLE_SHEETS, DataError } from './input.js';
 import { Report, LOSS_TEXT, droppedText, FORMAT_WORDS } from './report.js';
 
 export const TARGETS = {
@@ -144,6 +145,29 @@ async function* lpfSource(file, seq, rep) {
     if (!v.names?.length) rep.warning('lpf-no-names', 'An LPF feature has no names (LPF requires at least one)', v['@id'] || `feature ${n}`);
     yield { type: 'record', value: featureToRecord(v, loss), n };
   }
+}
+// W3C Web Annotations (Recogito's export): each annotation that links a passage to a place becomes
+// an attestation-centric attestation about that place (src/formats/annotations.js). The header is
+// written from the first annotation, so it waits for it; every kind the reader reports goes to the
+// report with the severity ANNOTATION_KINDS gives it.
+async function* annotationSource(input, rep) {
+  const file = input.files[0];
+  const reader = new AnnotationReader((kind, example) => rep.add(ANNOTATION_KINDS[kind] || 'loss', kind, LOSS_TEXT[kind] || kind, example));
+  const items = input.shape === 'jsonl' ? (async function* () {
+    for await (const { line, n } of lines(file)) {
+      try { yield { annotation: JSON.parse(line) }; } catch (e) { rep.error('json-syntax', 'A line is not valid JSON', `line ${n}: ${e.message}`); }
+    }
+  })() : annotationItems(file, input.shape);
+  let label, headed = false, n = 0;
+  for await (const it of items) {
+    if ('label' in it) { label = it.label; continue; }
+    if ('next' in it) { rep.warning('annotation-more-pages', LOSS_TEXT['annotation-more-pages'], it.next); continue; }
+    if (!headed) { headed = true; yield { type: 'header', value: reader.header(it.annotation, file.name, label) }; }
+    n++; rep.count('annotations');
+    for (const a of reader.annotation(it.annotation, n)) yield { type: 'attestation', value: a, n };
+  }
+  if (!headed) yield { type: 'header', value: reader.header(null, file.name, label) };
+  reader.finish();
 }
 async function* rdfSource(file, format, rep) {
   if (format === 'turtle') {
@@ -281,6 +305,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     : input.format === 'plato-json' ? platoJson(input.files[0])
     : input.format === 'lpf' || input.format === 'lpf-seq' ? lpfSource(input.files[0], input.format === 'lpf-seq', rep)
     : input.format === 'tables' ? tablesSource(input, env, rep, options)
+    : input.format === 'w3c-annotations' ? annotationSource(input, rep)
     : ['ntriples', 'nquads', 'turtle'].includes(input.format) ? rdfSource(input.files[0], input.format, rep) : null;
   if (!source) throw new Error(`Unsupported input: ${input.format}`);
   if ((input.format === 'lpf' || input.format === 'lpf-seq') && input.lpfVersion === 2) {
@@ -288,9 +313,10 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     return { report: rep.toJSON(), outputs: [] };
   }
   const isRdf = ['ntriples', 'nquads', 'turtle'].includes(input.format);
-  const needsStore = isRdf || input.profile === 'attestation-centric';
+  // Annotations become attestation-centric attestations, which are gathered by place like any others.
+  const needsStore = isRdf || input.profile === 'attestation-centric' || input.format === 'w3c-annotations';
   const typing = options.typing ? { types: res.types, typedBounds: true, wktPoints: true } : {};
-  const profileName = input.profile || 'place-centric';
+  const profileName = input.profile || (input.format === 'w3c-annotations' ? 'attestation-centric' : 'place-centric');
   const V = res.validators[profileName] || res.validators['place-centric'];
 
   // Where the records go: a writer for the target, or nothing when checking.

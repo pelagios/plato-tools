@@ -95,13 +95,50 @@ export async function* jsonDocument(file, { arrays = [], keys = [], onlyKeys = f
   } finally { reader.releaseLock?.(); }
 }
 
+/**
+ * Stream the W3C Web Annotations of a JSON document, one at a time, whatever its shape: a JSON
+ * array of annotations (as Recogito and Recogito Studio export them), an AnnotationPage (its items),
+ * an AnnotationCollection (its first page's items), or one annotation. Yields { annotation } for
+ * each, and { label } or { next } for what the collection or page says of itself.
+ */
+export async function* annotationItems(file, shape) {
+  const paths = shape === 'array' ? ['$.*'] : shape === 'page' ? ['$.items.*', '$.label', '$.next']
+    : shape === 'collection' ? ['$.first.items.*', '$.items.*', '$.label', '$.first', '$.first.next'] : ['$'];
+  const parser = new JSONParser({ paths, keepStack: false });
+  const queue = [];
+  parser.onValue = ({ value, key, stack }) => {
+    const top = stack[1]?.key;
+    if (shape === 'array' || shape === 'annotation') { if (stack.length <= 1) queue.push({ annotation: value }); return; }
+    if (typeof key === 'number') { queue.push({ annotation: value }); return; }
+    if (key === 'label' && stack.length === 1) queue.push({ label: value });
+    else if (key === 'next' && typeof value === 'string') queue.push({ next: value });
+    else if (key === 'first' && top === undefined && typeof value === 'string') queue.push({ next: value });
+  };
+  const reader = (await textStream(file)).getReader();
+  try {
+    for (;;) {
+      const { value, done } = await readChunk(reader);
+      if (done) break;
+      try { parser.write(value); } catch (e) {
+        throw new DataError(`The JSON is not well formed, so the file cannot be read past that point (${String(e && e.message || e).split('\n')[0]}).`);
+      }
+      while (queue.length) yield queue.shift();
+    }
+    if (!parser.isEnded) {
+      try { parser.end(); } catch (e) { throw new DataError(`The JSON document stops before it is complete, so the file may have been cut short (${String(e.message).split('.')[0]}).`); }
+    }
+    while (queue.length) yield queue.shift();
+  } finally { reader.releaseLock?.(); }
+}
+
 // ---- detection ----------------------------------------------------------------------------------
 export const TABLE_SHEETS = ['about', 'places', 'sources', 'names', 'locations', 'types', 'relations', 'connections', 'properties', 'identities'];
 const base = (name) => name.replace(/\.gz$/i, '').toLowerCase();
 
 /**
  * Group the chosen files into one input and say what it is:
- *   tables (10 CSVs, a zip or a workbook), plato-json, plato-jsonl, lpf, lpf-seq, ntriples, nquads, turtle.
+ *   tables (10 CSVs, a zip or a workbook), plato-json, plato-jsonl, lpf, lpf-seq, ntriples, nquads, turtle,
+ *   w3c-annotations (W3C Web Annotations, as Recogito exports them; `shape` says how they are held).
  */
 export async function detect(files) {
   const names = files.map((f) => base(f.name));
@@ -121,17 +158,37 @@ export async function detect(files) {
     const first = JSON.parse(h.split('\n')[0]);
     if (first.profile) return { format: 'plato-jsonl', profile: first.profile, files };
     if (first.type === 'Feature' || first.type === 'FeatureCollection') return { format: 'lpf-seq', files, lpfVersion: lpfVersion(first) };
-    return { format: null, reason: 'This is JSON Lines, but its first line is neither a PLATO header nor an LPF feature.' };
+    if (isAnnotation(first)) return { format: 'w3c-annotations', shape: 'jsonl', files };
+    return { format: null, reason: 'This is JSON Lines, but its first line is neither a PLATO header, an LPF feature nor a W3C Web Annotation.' };
   }
   if (h.startsWith('{')) {
     const profile = (h.match(/"profile"\s*:\s*"([a-z-]+)"/) || [])[1];
     if (profile === 'place-centric' || profile === 'attestation-centric') return { format: 'plato-json', profile, files };
     if (/"type"\s*:\s*"FeatureCollection"/.test(h)) return { format: 'lpf', files, lpfVersion: lpfVersion({ '@context': (h.match(/"@context"\s*:\s*"([^"]+)"/) || [])[1] }) };
-    return { format: null, reason: 'This JSON document is neither a PLATO submission (it has no "profile") nor an LPF FeatureCollection.' };
+    const shape = annotationShape(h, false);
+    if (shape) return { format: 'w3c-annotations', shape, files };
+    return { format: null, reason: 'This JSON document is neither a PLATO submission (it has no "profile"), an LPF FeatureCollection, nor W3C Web Annotations.' };
+  }
+  if (h.startsWith('[')) {
+    if (annotationShape(h, true)) return { format: 'w3c-annotations', shape: 'array', files };
+    return { format: null, reason: 'This JSON array is not a list of W3C Web Annotations (as Recogito exports them): the first annotations do not name the Web Annotation context.' };
   }
   if (/^(@prefix|@base|PREFIX|BASE)\b/i.test(h)) return { format: 'turtle', files };
   if (/^(<[^>]+>|_:\S+)\s+<[^>]+>/.test(h)) return { format: 'ntriples', files };
   return { format: null, reason: 'The format of this file could not be recognised.' };
+}
+// W3C Web Annotations name the Web Annotation context (alone, or in a list of contexts).
+const ANNO_CONTEXT = /"@context"\s*:\s*(?:\[[^\]]*?)?"https?:\/\/www\.w3\.org\/ns\/anno\.jsonld"/;
+const isAnnotation = (o) => !!o && typeof o === 'object' && [].concat(o['@context']).some((c) => typeof c === 'string' && /^https?:\/\/www\.w3\.org\/ns\/anno\.jsonld$/.test(c))
+  && [].concat(o.type).includes('Annotation');
+/** How a JSON document that begins `h` holds annotations: 'array' | 'collection' | 'page' | 'annotation' | null. */
+function annotationShape(h, array) {
+  if (!ANNO_CONTEXT.test(h)) return null;
+  const typed = (t) => new RegExp(`"type"\\s*:\\s*(?:\\[[^\\]]*?)?"${t}"`).test(h);
+  if (array) return typed('Annotation') ? 'array' : null;
+  if (typed('AnnotationCollection')) return 'collection';
+  if (typed('AnnotationPage')) return 'page';
+  return typed('Annotation') ? 'annotation' : null;
 }
 function lpfVersion(obj) {
   const c = JSON.stringify(obj['@context'] || '');

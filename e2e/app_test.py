@@ -90,6 +90,14 @@ def main():
             ok = s.get('phase') == 'done' and s.get('outputs')
             doc = json.loads(download(page, s['outputs'][0]['name'], tmp / 'abingdon.json').read_text()) if ok else {}
             check('LPF README example -> PLATO JSON: one place, its losses reported', ok and len(doc.get('spatialEntities', [])) == 1 and any(i['kind'] == 'lpf-duration' for i in s['report']['items']), s if not ok else doc.keys())
+            # Recogito's web annotations: the confirmed links become attestations, and the link
+            # software suggested and nobody confirmed (Lechaeum) is reported, not converted.
+            s = run_case(page, [ROOT / 'test/fixtures/annotations/recogito-v1-constructed.jsonld'], 'convert', 'plato-json')
+            ok = s.get('phase') == 'done' and s.get('outputs')
+            doc = json.loads(download(page, s['outputs'][0]['name'], tmp / 'annotations.json').read_text()) if ok else {}
+            names = [n['toponym'] for p in doc.get('spatialEntities', []) for a in p['attestations'] for n in a.get('names', [])]
+            check('Recogito annotations -> PLATO JSON: linked places converted, the unconfirmed link reported',
+                  ok and s.get('format') == 'w3c-annotations' and 'Corinthus' in names and 'Lechaeum' not in names and any(i['kind'] == 'annotation-unverified' for i in s['report']['items']), s if not ok else names)
             s = run_case(page, [PLATO / 'schemas/examples/place-centric-constantinople.json'], 'convert', 'ntriples')
             ok = s.get('phase') == 'done' and s.get('outputs')
             nt = download(page, s['outputs'][0]['name'], tmp / 'c.nt').read_text() if ok else ''

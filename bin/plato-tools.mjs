@@ -34,7 +34,8 @@ Each INPUT is one file, or one set of spreadsheet tables:
   - CSV files named one by one are one set of tables per directory they are in;
   - a zip of the CSV files, or a workbook (.xlsx), is one set of tables.
 Everything else is read as the format it turns out to be: PLATO JSON or JSON Lines, RDF
-(N-Triples, N-Quads, Turtle) or Linked Places Format v1. Gzipped files are read directly.
+(N-Triples, N-Quads, Turtle), Linked Places Format v1, or W3C Web Annotations as Recogito exports
+them (read only). Gzipped files are read directly.
 
 Targets for --to:
 ${Object.entries(TARGETS).map(([k, v]) => `  ${k.padEnd(12)} ${v.label}`).join('\n')}

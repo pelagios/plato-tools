@@ -1,0 +1,1818 @@
+[ {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/dff95cf2-02a0-4ab7-9777-15efb4ce891d",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/442518",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 17.75, 40.75 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:47:22+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=2"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/0d59aafc-87df-4d7d-a56b-59f4ac53976e",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/423013",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:52:12+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:52:12+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 12.89207, 41.839064 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:52:12+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=16"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/36be14c1-12ae-4627-a69c-1d06f6014c8a",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/442815",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 15.23548, 41.77125 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:53:13+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=21"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/d58e03e8-196d-4de4-b697-c26e22710c17",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/433175",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 13.25, 41.25 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:50:15+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=9"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/cadbb5a6-cefd-411e-9bd3-dca5580ad56e",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/991350",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "MultiPolygon",
+      "coordinates" : [ [ [ [ 14.275731827781, 40.543778915542 ], [ 14.269003162146, 40.540850317625 ], [ 14.259119809174, 40.540159714194 ], [ 14.245531168663, 40.539208508825 ], [ 14.235118894956, 40.554591966193 ], [ 14.231355984681, 40.567663919349 ], [ 14.249651364088, 40.58214371909 ], [ 14.269303376589, 40.576293236088 ], [ 14.285602728291, 40.566455171747 ], [ 14.290290059, 40.550112680448 ], [ 14.277594169033, 40.54458935101 ], [ 14.275731827781, 40.543778915542 ] ] ], [ [ [ 14.059852804539, 40.729912473202 ], [ 14.054186550954, 40.72864914214 ], [ 14.046391004505, 40.739905117759 ], [ 14.042571042625, 40.752976610217 ], [ 14.057376068809, 40.769195257161 ], [ 14.075202388604, 40.759629526766 ], [ 14.075348069301, 40.733365271749 ], [ 14.061195016767, 40.730211672056 ], [ 14.059852804539, 40.729912473202 ] ] ], [ [ [ 13.972910934313, 40.713734919217 ], [ 13.944611302106, 40.707778898473 ], [ 13.92415027608, 40.709641852176 ], [ 13.923406929531, 40.709709448686 ], [ 13.918365603913, 40.710167727529 ], [ 13.914196793342, 40.724321770986 ], [ 13.915258411696, 40.746229577094 ], [ 13.921901186947, 40.764514968134 ], [ 13.947060535004, 40.760792220894 ], [ 13.97779205507, 40.753436001916 ], [ 13.988147826005, 40.743760176266 ], [ 13.991506179091, 40.727181140516 ], [ 13.972910934313, 40.713734919217 ] ] ], [ [ [ 13.482088006212, 40.764217614795 ], [ 13.480355982462, 40.76369876709 ], [ 13.47389064662, 40.764461986306 ], [ 13.462001682944, 40.765864265812 ], [ 13.455383725243, 40.776007273758 ], [ 13.457142674341, 40.786543329907 ], [ 13.462626314127, 40.791811147889 ], [ 13.473386693772, 40.793696670911 ], [ 13.491077203577, 40.791411140199 ], [ 13.492620576701, 40.779301728453 ], [ 13.493336254224, 40.767586179149 ], [ 13.482295509168, 40.764279772004 ], [ 13.482088006212, 40.764217614795 ] ] ], [ [ [ 13.446074722448, 40.778680293763 ], [ 13.438423925717, 40.766571023848 ], [ 13.425970266619, 40.765357906347 ], [ 13.424670873315, 40.765231235825 ], [ 13.413989195804, 40.76656968514 ], [ 13.412157186354, 40.766799116519 ], [ 13.402685614401, 40.776976554523 ], [ 13.400867666818, 40.785270784591 ], [ 13.407173813812, 40.790149053436 ], [ 13.423983775222, 40.793104355442 ], [ 13.440797158104, 40.789058653384 ], [ 13.446074722448, 40.778680293763 ] ] ], [ [ [ 13.45226615498, 40.795861290413 ], [ 13.451142261112, 40.794642218771 ], [ 13.431586993986, 40.796055057633 ], [ 13.419894541665, 40.797231117065 ], [ 13.417561493376, 40.804896895675 ], [ 13.418435520859, 40.813664904541 ], [ 13.424536612601, 40.823889640263 ], [ 13.433594307812, 40.824403107077 ], [ 13.448863356004, 40.825466697352 ], [ 13.452653170573, 40.820910378876 ], [ 13.455839711221, 40.817078698891 ], [ 13.456678733015, 40.816069712027 ], [ 13.456470946438, 40.800421613261 ], [ 13.45226615498, 40.795861290413 ] ] ], [ [ [ 12.983735320847, 40.866451895495 ], [ 12.97352857991, 40.864610537925 ], [ 12.967923439744, 40.864814431491 ], [ 12.962284169414, 40.865019235267 ], [ 12.957392373587, 40.865196623532 ], [ 12.953155204408, 40.872830387435 ], [ 12.955110360288, 40.887182750664 ], [ 12.963009035515, 40.891408770131 ], [ 12.973277724973, 40.89396167434 ], [ 12.983918764902, 40.892380928802 ], [ 12.986614631636, 40.883768156008 ], [ 12.983735320847, 40.866451895495 ] ] ], [ [ [ 12.994213479516, 40.917337109099 ], [ 12.99337167699, 40.912282350251 ], [ 12.984323518462, 40.91198575527 ], [ 12.96962664818, 40.911502177117 ], [ 12.962228764363, 40.926267829804 ], [ 12.967848401851, 40.937782024842 ], [ 12.983204678899, 40.944749910844 ], [ 13.000713521763, 40.936002571032 ], [ 12.995294617807, 40.923827744633 ], [ 12.994213479516, 40.917337109099 ] ] ], [ [ [ 13.081480645619, 40.94966767558 ], [ 13.077165912589, 40.948328551789 ], [ 13.057408702536, 40.952486320423 ], [ 13.056397359993, 40.955728267038 ], [ 13.053686372504, 40.964416792659 ], [ 13.060156155574, 40.973275499545 ], [ 13.079762405739, 40.972587873619 ], [ 13.0900624231, 40.963233774078 ], [ 13.093157871139, 40.953290558008 ], [ 13.081480645619, 40.94966767558 ] ] ], [ [ [ 12.901198975072, 40.938341207963 ], [ 12.89451119345, 40.927327292141 ], [ 12.889072128892, 40.92634177883 ], [ 12.879664789704, 40.924636444701 ], [ 12.8777184748, 40.924499079423 ], [ 12.867021586858, 40.92374340974 ], [ 12.863678168664, 40.93434082006 ], [ 12.861834211586, 40.943109889695 ], [ 12.874804482321, 40.951765207618 ], [ 12.891575440106, 40.951303088128 ], [ 12.899321646915, 40.944303139668 ], [ 12.901198975072, 40.938341207963 ] ] ], [ [ [ 14.293934668595, 41.457744301498 ], [ 14.502866535706, 41.383567966624 ], [ 14.589432286142, 41.354940907584 ], [ 14.547353415384, 41.318689884568 ], [ 14.523174764932, 41.237289195115 ], [ 14.522247455725, 41.129888573764 ], [ 14.570157282075, 41.072160147783 ], [ 14.670588608876, 41.022932055754 ], [ 14.776764010994, 40.9805074601 ], [ 14.886316208523, 40.896902150164 ], [ 14.978978537006, 40.816510289845 ], [ 15.063884170581, 40.734865330833 ], [ 15.110889830975, 40.676934464315 ], [ 15.081243936198, 40.642558960071 ], [ 15.084892569156, 40.571868152761 ], [ 15.032936257174, 40.533944490176 ], [ 14.9961926657, 40.487624658708 ], [ 14.991307054816, 40.494658374852 ], [ 14.958790620054, 40.532625369676 ], [ 14.938622675806, 40.561305652526 ], [ 14.898696245148, 40.581195462779 ], [ 14.887043714461, 40.605607773615 ], [ 14.833520126486, 40.64771091892 ], [ 14.824553877584, 40.680069969355 ], [ 14.794356886829, 40.673334722566 ], [ 14.773248668818, 40.660542861523 ], [ 14.754509784067, 40.648127988457 ], [ 14.736280143734, 40.633912808683 ], [ 14.671093015278, 40.628979582573 ], [ 14.640096280268, 40.616423571817 ], [ 14.503047243314, 40.61279102629 ], [ 14.47394419964, 40.602364787959 ], [ 14.45344639681, 40.587709764476 ], [ 14.420479844138, 40.582265414199 ], [ 14.390693422577, 40.582974805228 ], [ 14.367249175499, 40.596006962589 ], [ 14.374719401106, 40.621685440354 ], [ 14.403922744256, 40.649080210057 ], [ 14.437557135146, 40.669674461946 ], [ 14.466497617861, 40.689481692752 ], [ 14.472366081146, 40.703606547019 ], [ 14.474156754641, 40.732101101116 ], [ 14.465350249533, 40.745694392691 ], [ 14.430556226509, 40.755009356749 ], [ 14.40519910571, 40.765871877662 ], [ 14.378804598701, 40.780319922539 ], [ 14.365546668802, 40.800699416569 ], [ 14.351459877916, 40.815299022165 ], [ 14.297394721687, 40.813860340868 ], [ 14.272950677538, 40.804151982274 ], [ 14.258709066372, 40.784846588806 ], [ 14.235839610217, 40.769743777851 ], [ 14.187583174936, 40.765441126862 ], [ 14.144635476988, 40.794001630275 ], [ 14.08535120819, 40.793445646783 ], [ 14.080173139381, 40.819684097999 ], [ 14.075199848901, 40.845206375136 ], [ 14.060508865939, 40.895458835117 ], [ 14.054204562098, 40.916997106573 ], [ 14.021065845112, 40.945313863394 ], [ 13.999220845698, 40.960463607866 ], [ 13.977088871518, 40.984983636143 ], [ 13.948578771343, 41.031038496899 ], [ 13.923493742548, 41.056944591308 ], [ 13.888315657456, 41.099989240422 ], [ 13.86156950548, 41.13126930491 ], [ 13.827667844467, 41.161331351023 ], [ 13.800627166549, 41.185015237049 ], [ 13.731010095333, 41.208962531427 ], [ 13.725080270451, 41.228703154106 ], [ 13.692775085694, 41.236374816831 ], [ 13.657120410381, 41.230249419693 ], [ 13.631313834377, 41.216369390947 ], [ 13.618686695321, 41.208530020992 ], [ 13.616986168248, 41.189361973944 ], [ 13.616033909697, 41.17598590013 ], [ 13.591208843229, 41.175472795585 ], [ 13.565692247361, 41.193710509097 ], [ 13.541793977525, 41.206561877049 ], [ 13.520613739807, 41.21044073165 ], [ 13.489384616628, 41.214457140702 ], [ 13.46856708694, 41.233496862434 ], [ 13.430744042795, 41.234460807713 ], [ 13.401320019538, 41.240656398075 ], [ 13.334221822133, 41.255356189311 ], [ 13.306598008859, 41.263732639462 ], [ 13.256320644924, 41.264332794209 ], [ 13.214685726247, 41.253203356965 ], [ 13.178639579019, 41.224140934899 ], [ 13.152399266097, 41.211924969205 ], [ 13.119193119454, 41.206022835247 ], [ 13.06840616513, 41.208316266825 ], [ 13.035711484372, 41.232731957441 ], [ 12.98367797664, 41.270703061149 ], [ 12.981432292186, 41.293758102612 ], [ 12.98053929026, 41.312516615348 ], [ 12.954871620219, 41.338188263449 ], [ 12.929179973681, 41.363854889215 ], [ 12.879583579917, 41.377648416994 ], [ 12.828155076292, 41.389197443142 ], [ 12.780797693628, 41.395779993638 ], [ 12.735637980875, 41.387589849581 ], [ 12.70015333759, 41.396290311762 ], [ 12.680221188849, 41.419180281038 ], [ 12.667833719237, 41.426395270648 ], [ 12.631736277927, 41.436861136854 ], [ 12.60231238684, 41.465592247212 ], [ 12.562758887899, 41.494362473419 ], [ 12.535592226006, 41.515920417573 ], [ 12.525820479235, 41.561524759095 ], [ 12.496805868252, 41.580849302017 ], [ 12.460035909649, 41.600639720142 ], [ 12.422067772046, 41.623995206731 ], [ 12.38641624873, 41.640181885834 ], [ 12.33767007583, 41.665322177919 ], [ 12.296014043375, 41.684171358817 ], [ 12.247762847979, 41.699883744736 ], [ 12.239279079363, 41.710263577931 ], [ 12.31448798507, 41.761066608324 ], [ 12.449911410856, 41.786034533575 ], [ 12.505885485328, 41.821585010895 ], [ 12.500206057335, 41.864811318286 ], [ 12.552397999564, 41.912277599728 ], [ 12.713691841804, 41.896733502023 ], [ 12.873669801626, 41.85279617354 ], [ 13.013367491512, 41.857859655959 ], [ 13.18458983796, 41.874851714895 ], [ 13.439378558417, 41.849945404521 ], [ 13.630189959778, 41.816809787442 ], [ 13.802272304878, 41.757138901778 ], [ 13.967039695587, 41.676276819464 ], [ 14.106719480059, 41.574633985257 ], [ 14.193136500889, 41.473956452488 ], [ 14.293934668595, 41.457744301498 ] ] ] ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:48:00+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=4"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/8401d751-2630-4cb8-ad6e-23b93581c7a4",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/452371",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 16.25, 39.75 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:47:09+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=0"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/3e3d99e0-ec14-46ab-842e-98f37d125d32",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/432695",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 13.69905, 41.49251 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:52:25+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=17"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/03a1a760-f0a5-4297-9eb6-e6a7b553184e",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/442592",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 17.25, 40.75 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Georgics",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:56:47+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=36"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/61cee9bf-95ab-4dbb-96a0-f1c0ed9b1806",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/432711",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 13.75, 41.25 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Aeneid 7",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:55:28+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=29"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/93c282d9-efd1-408e-adec-9587af38a211",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/422844",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 12.6726413, 41.7211083 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Aeneid 7",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:55:56+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=32"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/f778aeb0-4494-4509-aa4d-993f17b6c637",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/432754",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:56:30+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:56:30+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 14.2130486, 41.1061258 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Georgics",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:56:30+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=34"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/1e3c1bc9-8e2a-4dc0-8942-563d8e35e098",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/432695",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 13.69905, 41.49251 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Silius Italicus",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:57:11+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=38"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/12fe38c5-6e78-4831-9f60-3365b93728d4",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/433102",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 14.4708346, 40.7285981 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:50:28+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=10"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/e6cda48c-aa93-4d88-8b7a-88e6ab6b5e48",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/433185",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 14.0461111, 41.4845555 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:53:32+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=23"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/aa8677d6-b6e6-4159-b34f-3293540c7c46",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/433146",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:53:06+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:53:06+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 14.072625, 41.248206 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:53:06+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=20"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/e9a5abf9-3556-41b0-852a-64df33c419b3",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/422843",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 12.54968, 41.61126 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Aeneid 7",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:54:34+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=26"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/966b9a0a-ab00-4d5a-9e92-293cead680e1",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/432739",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 12.648528, 43.546796 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:52:55+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=19"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/9969c411-d7f8-49d9-b393-c52f4e14b269",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/433102",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 14.4708346, 40.7285981 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Aeneid 7",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:55:47+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=31"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/e1bc65c2-7e9d-44fd-855e-79ce37ef8211",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/452371",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 16.25, 39.75 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Silius Italicus",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:57:32+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=40"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/d2cddeb6-683a-4722-b827-cba17ec85640",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/432931",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:55:20+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:55:20+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 13.9183333, 41.1636111 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Aeneid 7",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:55:20+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=28"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/534402b5-4982-4f1d-8266-5d51f3e6ff5c",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/433175",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 13.25, 41.25 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Aeneid 7",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:56:03+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=33"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/5cf4e141-a86a-4c2d-aaea-c081b0d8e6c0",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/432739",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 12.648528, 43.546796 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Aeneid 7",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:55:37+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=30"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/7f826fe5-4222-481e-abd6-974640750b73",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/432711",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 13.75, 41.25 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:53:24+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=22"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/ec918f49-26d0-4d01-86bb-e1a24daca2b2",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/432708",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:51:26+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:51:26+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 13.798223, 41.620477 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:51:26+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=13"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/3c8e5ac3-733b-424c-8977-18685ef81b66",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/442765",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 14.75, 41.25 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:53:42+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=24"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/41e03e48-783b-42b4-9c44-1592ba6fea8b",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/422843",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 12.54968, 41.61126 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:52:41+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=18"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/e122e8c7-c90d-4e0d-8a12-b56849a5ea3b",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/432931",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:46:12+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:46:12+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 13.9183333, 41.1636111 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:46:12+00:00",
+    "purpose" : "tagging"
+  }, {
+    "type" : "SpecificResource",
+    "value" : "PLACE",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:46:12+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:46:12+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 13.9183333, 41.1636111 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=8"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/b5936964-c1ad-459e-af39-1596474beafe",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/432900",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 12.7621, 41.7909 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:47:34+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=3"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/9efea849-032a-4c34-bbae-400b605b7101",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/442592",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 17.25, 40.75 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:50:47+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=12"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/04cd9223-6986-489a-962e-a16620ee0682",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/465960",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing"
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:49:53+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=6"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/3574121d-5f25-446a-a369-842349bfe972",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/432861",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 14.109, 40.8445 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Silius Italicus",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:57:20+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=39"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/50f8a344-e371-4c40-86f5-5df9d5f6aa96",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/442518",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 17.75, 40.75 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Silius Italicus",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:57:46+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=41"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/7db39c15-0bb4-4c3f-9e6b-6a1c08b12dd5",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/423025",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 12.4843457, 41.89262 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:51:43+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=15"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/e403fd46-aec6-4d52-bdc4-ef988f2b1c1b",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/423013",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 12.89207, 41.839064 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Aeneid 7",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:55:06+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=27"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/c46c7bf7-c1fa-4126-bd29-6b2e35a558c9",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/432708",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:54:12+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:54:12+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 13.798223, 41.620477 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Aeneid 7",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:54:12+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=25"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/106e46ad-cd46-450f-8761-d635c1a629fb",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/422844",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 12.6726413, 41.7211083 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:51:36+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=14"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/ac151a03-42c0-467a-b98e-140f154aa5ad",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/442469",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 15.75, 41.25 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:47:17+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=1"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/e3233d6a-109b-49d9-98e0-38a5c163d72c",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/442809",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 15.75, 40.25 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:50:40+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=11"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/cf5595c7-0aa7-4aff-a801-a0b579a5d215",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/432861",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 14.109, 40.8445 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:50:03+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=7"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/1c7e086f-f940-47df-aaad-bd1ac3960828",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/432754",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:49:36+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:49:36+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 14.2130486, 41.1061258 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Paulinus of Nola",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:49:36+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=5"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/e383e037-5fcb-4433-8f06-3a29d14682d2",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/442809",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 15.75, 40.25 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Georgics",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:56:38+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=35"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/0d360705-5d0b-46bd-9060-8dca43da9d33",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2026-06-16T21:59:56+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/433185",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-03T13:45:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 14.0461111, 41.4845555 ]
+    }
+  }, {
+    "type" : "TextualBody",
+    "value" : "Silius Italicus",
+    "creator" : "https://recogito.pelagios.org/HKA",
+    "modified" : "2026-06-16T21:57:01+00:00",
+    "purpose" : "tagging"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/25262957-0e37-4fba-80ed-19db36c8ef60",
+    "type" : "Dataset",
+    "label" : "Paul Nol carm 14.csv",
+    "selector" : [ {
+      "type" : "FragmentSelector",
+      "conformsTo" : "https://tools.ietf.org/html/rfc7111",
+      "value" : "row=37"
+    } ]
+  }
+} ]

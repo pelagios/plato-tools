@@ -19,6 +19,7 @@ lives on disk, in the browser's private file storage.
 | RDF: N-Triples, N-Quads, Turtle | yes | N-Triples |
 | Linked Places Format v1: FeatureCollection, or one feature per line | yes | yes |
 | Linked Places Format v2 | not yet: it is not yet specified | not yet |
+| W3C Web Annotations, as Recogito and Recogito Studio export them: a JSON array, an AnnotationPage or AnnotationCollection, one annotation, or JSON Lines | yes: each link from a passage to a place becomes an attestation ([below](#web-annotations-recogito)) | no |
 
 Gzipped files are read directly. **Check** validates a file against PLATO: its JSON Schemas, its
 spreadsheet table definitions, or, for RDF, the terms the ontology declares. **Convert** writes any
@@ -78,6 +79,38 @@ can need 17 digits to be told apart from its neighbour, and such a number comes 
 unit in its last place away: a longitude of `106.82041100000001` becomes
 `"1.06820411E2"^^xsd:double` and is read back as `106.820411`. Numbers of 16 significant digits or
 fewer, and whole numbers below 10²¹, come back exactly. `test/roundtrip.test.js` pins this behaviour.
+
+## Web annotations (Recogito)
+
+Annotations made with [Recogito](https://recogito.pelagios.org/) or
+[Recogito Studio](https://recogitostudio.org/), downloaded as W3C Web Annotations (JSON-LD), are read
+as attestation-centric PLATO: every annotation that links a passage of a document to a place in a
+gazetteer becomes one attestation about that place, and can then be written in any of the formats
+above. `src/formats/annotations.js` holds the mapping, and says why at each choice.
+
+| In the annotation | In PLATO | Notes |
+|---|---|---|
+| The place link: Recogito's `identifying` body (the address in its `value`), Studio's `geotagging` body (the `id` of its GeoJSON Feature), or a W3C `identifying` or `linking` body's `source` | `about` | Only a web address; a gazetteer's own id (a Core Data record) is reported. An annotation linking one passage to several places gives one attestation each, with a note naming the others |
+| The words marked (`TextQuoteSelector` `exact`); for an image, a `transcribing` body | `names[].toponym`, with `formStatus` `plato:Attested` | A transcription beside a quote is a note |
+| The annotated document (the target's `source`, and its `label` as the title) | `citations[].source` | Recogito Studio writes its project's id here, not the document's address: kept as the title, with a warning |
+| Where in the document (the selectors) | `citations[].locator`, in words | "characters 1083 to 1092", "XPath /TEI[1]/text[1]/body[1]/div[1]/p[2]", "region at x 2948, y 4087, 197 by 173 pixels", "page 3", "row 2" |
+| The link body's `creator` (else the annotation's) | `contributor` | A web address, or a name; an internal user id is reported |
+| `created`, `modified` (of the link body, else the annotation) | `created`, `modified` | Recogito v1 writes only `modified` |
+| The annotation's `id` | `notes` ("From annotation …") | Never the attestation's `@id`: an annotation can be edited and exported again under the same address, and a published attestation must not change. A Studio UUID is written as `urn:uuid:` |
+| Comments (`commenting`, `replying`), a place body's `note`, free tags | `notes` | "Comment: …", "Note: …", "Tag: …" |
+| A tag that is the address of a vocabulary concept | `types[]` (`identifier`, `label`) | |
+
+Not converted, and reported: an annotation with no place link, a mention marked as a place but
+never linked, a person or event, a link suggested by software and never confirmed, the
+gazetteer's own coordinates and title copied into the export, the shape of an area drawn on an
+image, and every key and body kind PLATO has no place for.
+
+**Confirmed links.** Recogito v1 records whether a person confirmed a place link, but its W3C export
+does not say. A link made by its named-entity recognition and never touched by a person has no
+`creator`, since Recogito stamps a body's creator whenever a person saves it; such a link is left
+out and reported, being a machine's suggestion and nobody's statement. A link a person added with
+Recogito's automatic match and never confirmed cannot be told from a confirmed one, and the report
+warns of it. A `status` written on a body (`VERIFIED`, `UNVERIFIED`, `NOT_IDENTIFIABLE`) is honoured.
 
 ## From the command line
 
@@ -217,6 +250,8 @@ worded once, in `src/engine/words.js`, for both.
   files fail there. The page warns when the storage allowance looks too small.
 - **Spreadsheet tables** are read into memory, which suits them: a spreadsheet holds at most about a
   million rows per sheet. The JSON, JSON Lines, LPF and RDF routes stream at any size.
+- **Web annotations** give attestations about places the file does not describe, so each place is
+  labelled with its address, with a warning.
 - **Identity relations listed at the end of a JSON Lines file** (as DEEP does) are gathered in a
   first pass when writing LPF, so that each feature carries its links.
 
@@ -234,7 +269,9 @@ node e2e/verify_jsonl.mjs out.jsonl 539372 13032 deep-plato.jsonl.gz <entity IRI
 
 The Node tests check that JSON to RDF gives exactly the graph `jsonld.js` gives, that JSON to RDF to
 JSON loses nothing (on every PLATO example and on a sample of DEEP), that the table validator agrees
-with the reference CSVW implementation on good and broken tables, and that LPF round-trips. Tests
+with the reference CSVW implementation on good and broken tables, that LPF round-trips, and that
+Recogito's annotation exports ([test/fixtures/annotations](test/fixtures/annotations/README.md))
+become the attestations designed for them. Tests
 that need the DEEP exports (from [WorldHistoricalGazetteer/epns](https://github.com/WorldHistoricalGazetteer/epns))
 run when they are present and are skipped, visibly, when not. [spike/](spike/README.md) records how
 the any-size claim was established on DEEP's 24.8 million triples.
