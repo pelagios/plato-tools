@@ -369,6 +369,8 @@ export function createInk({ mapApi, state, overlayAt, onAccept, panel }) {
       if (snapOn) buildSnap(); else { snapWorld = null; snapIndex = null; }
     },
     get snapEntry() { return snapEntry; },
+    /** How many fetched tiles the page keeps now (for tests: none from a site once its permission is withdrawn). */
+    get cachedTiles() { return fetcher.size; },
     snapNow: buildSnap,
     /** Where a vertex at these container pixels would snap (for tests and the budget's timing). */
     snapAt: (x, y) => snapHook({ containerX: x, containerY: y, heldKeys: [] }),

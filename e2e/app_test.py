@@ -2070,7 +2070,7 @@ def chora_checks(pw, url, tmp):
     except Exception as e: print('  (Chora tooltips: the page did not open the dataset:', str(e).split('\n')[0][:200], ')')
     tooltip_checks(page, 'Chora tooltips', ('#card .status-reported', 'as said by others'), ('#card .status-doubted', 'and doubts it'),
                    ('.maplibregl-ctrl-zoom-in', 'Zoom in', 'right', '.maplibregl-ctrl-zoom-out'))
-    no_titles(page, 'Chora tooltips', ['Draw a point', 'Stop drawing', 'Zoom in', 'Zoom out', 'The source reports this as said by others.', 'market (1673), reported', 'being built in the open'])
+    no_titles(page, 'Chora tooltips', ['Draw a point', 'Stop drawing', 'Show a historical map to trace from it', "goes onto it (hold Alt not to)", 'Zoom in', 'Zoom out', 'The source reports this as said by others.', 'market (1673), reported', 'being built in the open'])
     def withdrawn():
         chora_boot(page, base, [fixture(judgements, 'judgements-withdrawn.json', tmp)])
         chora_pick(page, 'littleworth')
@@ -2896,15 +2896,16 @@ def free_port():
 
 FIXTURES = {}
 def start_fixtures(tmp):
-    """The IIIF fixture server (e2e/iiif_fixture_server.py) on two free ports: origins A and B, and its census."""
-    a, b = free_port(), free_port()
+    """The IIIF fixture server (e2e/iiif_fixture_server.py) on three free ports: origins A and B, and C, which
+    lets no other site read what it sends (no CORS header); and its census."""
+    a, b, c = free_port(), free_port(), free_port()
     log = tmp / 'iiif-census.jsonl'; log.write_text('')
-    p = subprocess.Popen([sys.executable, str(ROOT / 'e2e/iiif_fixture_server.py'), str(a), str(b), str(log)], start_new_session=True, stdout=subprocess.DEVNULL)
+    p = subprocess.Popen([sys.executable, str(ROOT / 'e2e/iiif_fixture_server.py'), str(a), str(b), str(log), str(c)], start_new_session=True, stdout=subprocess.DEVNULL)
     for _ in range(50):
-        with socket.socket() as s1, socket.socket() as s2:
-            if s1.connect_ex(('127.0.0.1', a)) == 0 and s2.connect_ex(('127.0.0.1', b)) == 0: break
+        with socket.socket() as s1, socket.socket() as s2, socket.socket() as s3:
+            if s1.connect_ex(('127.0.0.1', a)) == 0 and s2.connect_ex(('127.0.0.1', b)) == 0 and s3.connect_ex(('127.0.0.1', c)) == 0: break
         time.sleep(0.1)
-    FIXTURES.update(proc=p, A=f'http://127.0.0.1:{a}', B=f'http://127.0.0.1:{b}', log=log)
+    FIXTURES.update(proc=p, A=f'http://127.0.0.1:{a}', B=f'http://127.0.0.1:{b}', C=f'http://127.0.0.1:{c}', log=log)
     return FIXTURES
 
 def stop_fixtures():
@@ -3417,8 +3418,324 @@ def iiif_checks(pw, url, tmp):
             ctx.unroute(page_url, strip_head)
         return (s['canary'] == 'not-enforced' and not meta and said and rows == [] and s['overlays'] == []), {'canary': s['canary'], 'said': text, 'census': rows, 'overlays': s['overlays']}
     attempt('Chora maps: on a page without its policy (the canary finds none), maps are refused in words, those kept included, and their server is asked nothing, though it is allowed', no_policy)
+    ink_checks(page, base, tmp, {'census': census, 'at_origin': at_origin, 'annotation': annotation, 'paste': paste, 'line': line, 'panel_set': panel_set, 'fx': fx})
     attempt('Chora maps: across these checks, origin B was never asked for anything, and no page error', lambda: (len(census()) > 5 and at_origin(census(), B) == [] and not errors, {'census': len(census()), 'B': at_origin(census(), B), 'errors': errors[:5]}))
     ctx.close()
     stop_fixtures()
+
+# ---- Assisted ink tracing, on the same fixture server ---------------------------------------------
+# ink.png (test/fixtures/chora-iiif/make-ink.py) served as IIIF tiles: JPEG at /iiif/ink, PNG at
+# /iiif/inkpng, its full-resolution tiles refused (403) at /iiif/ink403, and the same from origin C, which
+# lets no other site read it. Its features in image pixels, IIIF's corner convention (PIL draws by pixel
+# index: half a pixel added to what make-ink.py prints). Every permission is allowed in the panel, from
+# the "Needs permission" line, as a user would; the census is the fixture server's own log.
+import math
+INK_RIVER = [(90 + 8 * k + 0.5, 560 - 300 * math.sin(math.pi * k / 100) * (0.4 + 0.6 * k / 100) + 0.5) for k in range(101)]
+INK_WASH = [(x + 0.5, y + 0.5) for x, y in [(420, 90), (610, 120), (650, 260), (560, 330), (430, 300), (380, 180)]]
+INK_ROAD = [(120.5, 640.5), (900.5, 610.5)]
+def _seg(p, a, b):
+    dx, dy = b[0] - a[0], b[1] - a[1]; L = dx * dx + dy * dy
+    t = max(0, min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L)) if L else 0
+    return math.hypot(a[0] + t * dx - p[0], a[1] + t * dy - p[1])
+def dist_line(p, pts): return min(_seg(p, pts[k], pts[k + 1]) for k in range(len(pts) - 1))
+def dense(pts, step=0.5):
+    out = []
+    for k in range(len(pts) - 1):
+        a, b = pts[k], pts[k + 1]; n = max(1, int(math.hypot(b[0] - a[0], b[1] - a[1]) / step))
+        out += [(a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n) for i in range(n)]
+    return out + [pts[-1]]
+def hausdorff(A, B): return max(max(dist_line(p, B) for p in dense(A)), max(dist_line(p, A) for p in dense(B)))
+
+# Image pixels of a map shown (by its annotation's id) to the page's pixels, and back: through the
+# page's own georeference module, as the drawing is placed.
+INK_TO_SCREEN = """async ([id, pts]) => { const e = window.__chora_overlays.manager.entries.find((x) => x.g.annotationId === id);
+  const w = (await window.__chora_overlays.georef.toWorld(e.g, { type: 'MultiPoint', coordinates: pts }, { space: 'image' })).geojson.coordinates;
+  const r = window.__chora_map.getCanvas().getBoundingClientRect(); return w.map((c) => { const p = window.__chora_map.project(c); return [r.left + p.x, r.top + p.y]; }); }"""
+INK_TO_IMAGE = """async ([id, geometry]) => { const e = window.__chora_overlays.manager.entries.find((x) => x.g.annotationId === id);
+  return (await window.__chora_overlays.georef.toPixels(e.g, geometry, { space: 'image' })).geometry; }"""
+PROPOSAL_DRAWN = '() => window.__chora_map.queryRenderedFeatures({ layers: ["chora-ink-proposal"] }).length > 0'
+TRACE_TIP = '() => [...document.querySelectorAll("#draw-tools button[data-trace]")].map((b) => [b.getAttribute("aria-disabled"), b.disabled, b.dataset.tip, b.hasAttribute("title")])'
+
+def ink_checks(page, base, tmp, h):
+    """The checks of tracing with assistance. `h`: the iiif checks' helpers (census, at_origin, annotation,
+    paste, line, panel_set, fx)."""
+    census, at_origin, annotation, paste, line, panel_set, fx = (h[k] for k in ('census', 'at_origin', 'annotation', 'paste', 'line', 'panel_set', 'fx'))
+    A, B, C = fx['A'], fx['B'], fx['C']
+    IA, IC = f'iiif:{A}', f'iiif:{C}'
+    ids = {k: f'https://annotations.allmaps.org/maps/00000000000000{k}' for k in ('e1', 'e2', 'e3', 'e4', 'e5')}
+    def ink_annotation(path, key, origin=None):
+        a = annotation('annotation-ink.json', id=ids[key])
+        a['target']['source']['id'] = (origin or A) + path
+        return a
+    def place_file(name):
+        f = tmp / 'chora-files' / name; f.parent.mkdir(exist_ok=True)
+        f.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': 'https://example.org/g', 'title': 'Ink'}, 'spatialEntities': [
+            {'@id': 'https://example.org/p/cambridge', 'label': 'Cambridge', 'attestations': [{'names': [{'toponym': 'Cambridge'}], 'sources': [{'title': 's'}]}]}]}))
+        return f
+    def only_map(id_):
+        """Every other map shown let go (each check stands on its own), this one fitted and settled."""
+        for o in cstate(page)['overlays']:
+            if o['annotationId'] != id_:
+                page.click(f'#overlay-list li[data-overlay="{o["key"]}"] button[data-remove-map]')
+                until(page, 'k => !window.__chora.overlays.some((o) => o.key === k)', 10, o['key'])
+        key = next(o['key'] for o in cstate(page)['overlays'] if o['annotationId'] == id_)
+        page.click(f'#overlay-list li[data-overlay="{key}"] button[data-fit]'); page.evaluate(SETTLE)
+        return key
+    def show(a):
+        """Paste a map whose server is allowed already: it is drawn, with no "Needs permission" line."""
+        paste(a)
+        return soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.firstTile)', 40, a['id'])
+    def click_image(id_, px, modifiers=None):
+        [[x, y]] = page.evaluate(INK_TO_SCREEN, [id_, [list(px)]])
+        page.mouse.move(x - 2, y - 2); page.mouse.move(x, y)
+        if modifiers: page.keyboard.down(modifiers)
+        page.mouse.down(); page.mouse.up()
+        if modifiers: page.keyboard.up(modifiers)
+        return x, y
+    def no_maps_kept():
+        page.evaluate("() => navigator.storage.getDirectory().then((r) => r.removeEntry('chora-overlays', { recursive: true })).catch(() => {})")
+
+    def trace_line_save():
+        # No map kept, and the map's server not allowed: the tools are there, not offered, and say why in a tooltip.
+        chora_boot(page, base); no_maps_kept()
+        if not page.evaluate("k => (JSON.parse(localStorage.getItem('plato-tools.permissions') || '{}').grants || {})[k]?.state !== 'allowed'", IA): panel_set([IA], 'undecided')
+        f = place_file('ink-line.json'); chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
+        page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
+        buttons = page.evaluate(TRACE_TIP)
+        page.mouse.move(1, 1); page.hover('#draw-tools button[data-trace="line"]')
+        tip_before = [t['text'] for t in shown_tips(page, 'Show a historical map to trace from it')]
+        waiting = (cstate(page).get('traceReady') is False and all(b[0] == 'true' and b[1] is False and not b[3] for b in buttons) and tip_before == ['Show a historical map to trace from it'])
+        # Clicked while not offered, it does nothing.
+        page.click('#draw-tools button[data-trace="line"]'); page.wait_for_timeout(300)
+        inert = page.get_attribute('#draw-tools button[data-trace="line"]', 'aria-pressed') != 'true' and not page.evaluate('() => !!window.__chora_ink?.mode')
+        since = len(census())
+        a = ink_annotation('/iiif/inkpng', 'e1'); paste(a)
+        said = line(IA)
+        page.wait_for_timeout(800); early = [r['path'] for r in census(since)]
+        if said: panel_set([IA], reload=True, via=IA)
+        if cstate(page)['phase'] != 'place': chora_pick(page, 'cambridge')
+        if not soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.firstTile)', 40, a['id']): raise RuntimeError('the map did not draw')
+        only_map(a['id'])
+        buttons_after = page.evaluate(TRACE_TIP)
+        offered = cstate(page).get('traceReady') is True and all(b[0] == 'false' for b in buttons_after) and 'followed both ways' in buttons_after[1][2]
+        before = cstate(page)['pendingCount']
+        page.click('#draw-tools button[data-trace="line"]')
+        click_image(a['id'], INK_RIVER[50])
+        until(page, '() => ["proposed", "error"].includes(window.__chora.ink?.phase)', 60)
+        ink = cstate(page)['ink']
+        if ink['phase'] != 'proposed': return False, {'ink': ink}
+        drawn = soon(page, PROPOSAL_DRAWN, 10)
+        proposed = [tuple(p) for p in ink['last']['image']['coordinates']]
+        hd = hausdorff(proposed, INK_RIVER)
+        ends = sorted([proposed[0], proposed[-1]])
+        # Shift-click carries the line on: here, onto the road (the line proposed then holds both).
+        n = ink['proposals']
+        road_y = lambda x: INK_ROAD[0][1] + (INK_ROAD[1][1] - INK_ROAD[0][1]) * (x - INK_ROAD[0][0]) / (INK_ROAD[1][0] - INK_ROAD[0][0])
+        click_image(a['id'], (700, road_y(700)), 'Shift')
+        until(page, 'n => window.__chora.ink.proposals > n && window.__chora.ink.phase === "proposed"', 60, n)
+        joined = [tuple(p) for p in cstate(page)['ink']['last']['image']['coordinates']]
+        carried = cstate(page)['ink']['last']['extended'] and any(dist_line(p, INK_ROAD) <= 1.5 for p in joined) and sum(dist_line(p, INK_RIVER) <= 1.5 for p in joined) >= len(proposed) - 2
+        # Carried on, only the new click is traced: the river already proposed is kept as it was.
+        traced_again = cstate(page)['ink']['last'].get('seedsTraced')
+        page.keyboard.press('Enter')
+        until(page, 'n => window.__chora.pendingCount === n + 1 && window.__chora.lastTrace && window.__chora.lastTrace.key', 20, before)
+        card = page.inner_text('#card')
+        page.click('#save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+        ls = cstate(page)['lastSave'] or {}
+        if not ls.get('passed'): return False, {'save': ls, 'card': card[-300:]}
+        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#save-result button.primary')
+        out = tmp / 'ink-line-saved.json'; d.value.save_as(out)
+        new = json.loads(out.read_text())['spatialEntities'][0]['attestations'][-1]
+        cits = new.get('citations', []); notes = new.get('notes', '')
+        rows = census(since); paths = [r['path'] for r in at_origin(rows, A)]
+        return (waiting and inert and f'Needs permission: {urlparse(A).netloc}' in said and early == [] and offered and drawn and carried and traced_again == 1 and hd <= 2
+                and math.hypot(ends[0][0] - INK_RIVER[0][0], ends[0][1] - INK_RIVER[0][1]) <= 4
+                and math.hypot(ends[1][0] - INK_RIVER[-1][0], ends[1][1] - INK_RIVER[-1][1]) <= 4 and 'Traced with assistance from' in card
+                and ls.get('added') == 1 and [c.get('citationFunction') for c in cits] == ['http://purl.org/spar/cito/citesAsEvidence', 'http://purl.org/spar/cito/usesMethodIn']
+                and cits[0]['source'].get('@id') == A + '/iiif/inkpng' and cits[1]['source'].get('@id') == a['id']
+                and notes.startswith(f'Georeferenced through {a["id"]}') and ' Traced with assistance in PLATO tools (Chora)' in notes and 'by following a line' in notes
+                and notes.endswith('then accepted as proposed.') and new['geometries'][0]['geojson']['type'] == 'LineString'
+                and any(p.startswith('/iiif/inkpng/') and p.endswith('default.jpg') for p in paths) and at_origin(rows, B) == [] and at_origin(rows, C) == []
+                and len(rows) == len(at_origin(rows, A))), {
+            'buttons before a map': buttons, 'tooltip before': tip_before, 'inert': inert, 'line': said, 'asked before allowing': early, 'buttons after': buttons_after,
+            'hausdorff px': round(hd, 2), 'ends': ends, 'notes': notes[:220], 'citations': [c.get('citationFunction') for c in cits],
+            'carried on': carried, 'clicks traced when carried on': traced_again, 'census': sorted({(r['port'], r['path'].split('/')[2] if r['path'].count('/') > 2 else r['path']) for r in rows}), 'ink': {k: ink['last'].get(k) for k in ('scale', 'grown', 'vertices', 'gaps')}}
+    attempt('Chora ink: "Trace line" is not offered before a map is drawn, and says why in its tooltip (aria-disabled, no title); the map\'s server asked nothing until allowed in the panel; a click proposes the river (within 2 px, end to end) from that server\'s tiles alone; Shift-click carries it on (tracing the new click alone); Enter makes it a drawing; saved, it cites the map and the georeference, says it was traced with assistance and accepted as proposed, and Mneme passes', trace_line_save)
+
+    def trace_area_esc():
+        f = place_file('ink-area.json'); chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
+        since = len(census())
+        a = ink_annotation('/iiif/ink', 'e2')
+        if not show(a): raise RuntimeError('the JPEG map did not draw')
+        only_map(a['id'])
+        before = cstate(page)['pendingCount']
+        page.click('#draw-tools button[data-trace="area"]')
+        click_image(a['id'], (520, 210))
+        until(page, '() => ["proposed", "error"].includes(window.__chora.ink?.phase)', 60)
+        ink = cstate(page)['ink']
+        if ink['phase'] != 'proposed': return False, {'ink': ink}
+        ring = [tuple(p) for p in ink['last']['image']['coordinates'][0]]
+        hd = hausdorff(ring, INK_WASH + [INK_WASH[0]])
+        drawn = soon(page, PROPOSAL_DRAWN, 10)
+        # A slider moved proposes again from the window already read: the server is asked for nothing more.
+        n, asked_before = ink['proposals'], len(census())
+        page.fill('#ink-panel input[data-p="tolerance"]', '22')
+        rerun = soon(page, 'n => window.__chora.ink.proposals > n && window.__chora.ink.phase === "proposed"', 20, n)
+        page.wait_for_timeout(300)
+        quiet = census(asked_before) == []
+        page.keyboard.press('Escape')
+        gone = soon(page, '() => window.__chora_map.queryRenderedFeatures({ layers: ["chora-ink-proposal"] }).length === 0', 10)
+        page.wait_for_timeout(500)
+        after = cstate(page)
+        rows = census(since)
+        return (drawn and rerun and quiet and hd <= 2.5 and gone and after['pendingCount'] == before and after['ink']['phase'] == 'idle' and at_origin(rows, B) == []
+                and any(r['path'].startswith('/iiif/ink/') and r['path'].endswith('default.jpg') for r in at_origin(rows, A))), {'hausdorff px': round(hd, 2), 'drawn': drawn, 'slider re-run': rerun, 'asked after the slider': census(asked_before)[:3], 'gone': gone, 'pending': [before, after['pendingCount']], 'ink': after['ink'].get('phase')}
+    attempt('Chora ink: "Trace area" proposes the wash (within 2.5 px) from JPEG tiles; a slider moved proposes again asking the server nothing; Esc lets it go, and nothing is drawn', trace_area_esc)
+
+    def withdrawn_lets_go():
+        # The map of the check before, traced again: its tiles are kept by the page. Withdrawn in the panel, every
+        # tile read from that server is let go at once, with the proposal made from them; allowed again, it is kept.
+        a_id = ids['e2']
+        if not any(o['annotationId'] == a_id and o['firstTile'] for o in cstate(page)['overlays']): raise RuntimeError('the map of the check before is not shown')
+        page.click('#draw-tools button[data-trace="area"]') if page.get_attribute('#draw-tools button[data-trace="area"]', 'aria-pressed') != 'true' else None
+        n = cstate(page)['ink']['proposals']
+        click_image(a_id, (520, 210))
+        until(page, 'n => window.__chora.ink.proposals > n && window.__chora.ink.phase === "proposed"', 60, n)
+        cached = page.evaluate('() => window.__chora_ink.cachedTiles'); let_go = cstate(page)['ink'].get('letGo') or 0
+        drawn = soon(page, PROPOSAL_DRAWN, 10)
+        panel_set([IA], 'undecided')
+        emptied = soon(page, 'n => window.__chora_ink.cachedTiles === 0 && (window.__chora.ink.letGo || 0) > n', 10, let_go)
+        s = cstate(page); after = page.evaluate('() => window.__chora_ink.cachedTiles')
+        gone = soon(page, '() => window.__chora_map.queryRenderedFeatures({ layers: ["chora-ink-proposal"] }).length === 0', 10)
+        buttons = page.evaluate(TRACE_TIP)
+        panel_set([IA], 'allowed')                               # for the checks after this one
+        return (cached > 0 and drawn and emptied and after == 0 and gone and s['ink']['phase'] == 'idle' and s.get('traceReady') is False and all(b[0] == 'true' for b in buttons)), {
+            'tiles kept before': cached, 'after': after, 'let go': s['ink'].get('letGo'), 'ink': s['ink'].get('phase'), 'proposal gone': gone, 'buttons': buttons}
+    attempt('Chora ink: a map\'s server withdrawn in the panel lets go at once of every tile read from it for tracing (there were some), and of the proposal made from them; the trace tools are no longer offered', withdrawn_lets_go)
+
+    def trace_area_hole_save():
+        f = place_file('ink-hole.json'); chora_boot(page, base, [f])
+        page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
+        a = ink_annotation('/iiif/inkpng', 'e5')
+        if not show(a): raise RuntimeError('the map did not draw')
+        only_map(a['id'])
+        before = cstate(page)['pendingCount']
+        page.click('#draw-tools button[data-trace="area"]')
+        click_image(a['id'], (520, 210))
+        until(page, '() => ["proposed", "error"].includes(window.__chora.ink?.phase)', 60)
+        ink = cstate(page)['ink']
+        if ink['phase'] != 'proposed': return False, {'ink': ink}
+        holes = ink['last']['holes']
+        # No place chosen yet: Enter keeps the proposal and says to choose a place; nothing is drawn.
+        page.evaluate('() => document.activeElement && document.activeElement.blur()')
+        page.keyboard.press('Enter'); page.wait_for_timeout(500)
+        s0 = cstate(page); status0 = page.inner_text('#ink-panel [data-ink-status]')
+        kept_ = s0['ink']['phase'] == 'proposed' and s0['pendingCount'] == before and soon(page, PROPOSAL_DRAWN, 10)
+        chora_pick(page, 'cambridge')
+        page.evaluate('() => document.activeElement && document.activeElement.blur()')
+        page.keyboard.press('Enter')
+        until(page, 'n => window.__chora.pendingCount === n + 1 && window.__chora.lastTrace && window.__chora.lastTrace.key', 20, before)
+        lt = cstate(page)['lastTrace']; card = page.inner_text('#card')
+        page.click('#save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+        ls = cstate(page)['lastSave'] or {}
+        if not ls.get('passed'): return False, {'save': ls, 'card': card[-300:]}
+        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#save-result button.primary')
+        out = tmp / 'ink-hole-saved.json'; d.value.save_as(out)
+        new = json.loads(out.read_text())['spatialEntities'][0]['attestations'][-1]
+        cits = new.get('citations', []); notes = new.get('notes', ''); geom = new['geometries'][0]['geojson']
+        return (holes == 1 and kept_ and 'Choose a place first' in status0
+                and 'hole was left out' in (lt.get('note') or '') and 'hole was left out' in card
+                and ls.get('added') == 1 and geom['type'] == 'Polygon' and len(geom['coordinates']) == 1
+                and [c.get('citationFunction') for c in cits] == ['http://purl.org/spar/cito/citesAsEvidence', 'http://purl.org/spar/cito/usesMethodIn']
+                and cits[0]['source'].get('@id') == A + '/iiif/inkpng' and cits[1]['source'].get('@id') == a['id']
+                and notes.startswith(f'Georeferenced through {a["id"]}') and ' Traced with assistance in PLATO tools (Chora)' in notes and 'by filling an area' in notes
+                and notes.endswith('; its 1 hole left out, as drawings are outlines; then accepted as proposed.')), {
+            'holes proposed': holes, 'kept with no place': kept_, 'said': status0[:120], 'card note': lt.get('note'), 'notes': notes[:400], 'rings saved': len(geom['coordinates']),
+            'citations': [c.get('citationFunction') for c in cits], 'mneme': ls.get('passed')}
+    attempt('Chora ink: an area with a hole, accepted with Enter before a place is chosen, is kept as proposed and the page says to choose a place; chosen, Enter makes it a drawing (an outline, its hole left out and said so on its card); saved, it cites the map and the georeference, its notes say the hole was left out, and Mneme passes', trace_area_hole_save)
+
+    def snap_to_ink():
+        f = place_file('ink-snap.json'); chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
+        a = ink_annotation('/iiif/inkpng', 'e1')
+        if not any(o['annotationId'] == a['id'] for o in cstate(page)['overlays']) and not show(a): raise RuntimeError('the map did not draw')
+        until(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.firstTile)', 40, a['id'])
+        only_map(a['id'])
+        page.click('#draw-tools button[data-mode="linestring"]')
+        offered = page.is_visible('#snap-ink')
+        page.mouse.move(1, 1); page.hover('#snap-ink')
+        tip = [t['text'] for t in shown_tips(page, 'goes onto it')]
+        page.check('#snap-ink')
+        until(page, '() => window.__chora.ink && window.__chora.ink.snapBuilds >= 1 && window.__chora.ink.snapPoints > 0', 30)
+        # 5 screen pixels above the road at image x 300, then a second vertex, then the last again to finish.
+        road_y = lambda x: INK_ROAD[0][1] + (INK_ROAD[1][1] - INK_ROAD[0][1]) * (x - INK_ROAD[0][0]) / (INK_ROAD[1][0] - INK_ROAD[0][0])
+        [[x, y], [x2, y2]] = page.evaluate(INK_TO_SCREEN, [a['id'], [[300, road_y(300)], [600, 420]]])
+        before = cstate(page)['pendingCount']
+        for (px, py) in [(x, y - 5), (x2, y2), (x2, y2)]: tap(page, px, py)
+        until(page, 'n => window.__chora.pendingCount === n + 1', 15, before)
+        # The drawing is kept on the private file system a moment after it is counted: read until it is there.
+        def lines_kept(n):
+            ls = []
+            for _ in range(40):
+                ls = [k for k in kept(page, f.name) if k['geojson']['type'] == 'LineString']
+                if len(ls) >= n: return ls
+                page.wait_for_timeout(250)
+            raise RuntimeError(f'{n} line(s) drawn, {len(ls)} kept after 10 s')
+        d = lines_kept(1)[-1]
+        img = page.evaluate(INK_TO_IMAGE, [a['id'], d['geojson']])
+        first = img['coordinates'][0]; snapped = dist_line(first, INK_ROAD)
+        # The control: the same, with Alt held, is not snapped.
+        page.click('#draw-tools button[data-mode="linestring"]')
+        page.keyboard.down('Alt'); tap(page, x, y - 5); page.keyboard.up('Alt')
+        for (px, py) in [(x2 + 40, y2), (x2 + 40, y2)]: tap(page, px, py)
+        until(page, 'n => window.__chora.pendingCount === n + 2', 15, before)
+        d2 = lines_kept(2)[-1]
+        free = dist_line(page.evaluate(INK_TO_IMAGE, [a['id'], d2['geojson']])['coordinates'][0], INK_ROAD)
+        per = page.evaluate("""async ([id, x, y]) => { const e = window.__chora_overlays.manager.entries.find((v) => v.g.annotationId === id); const m = window.__chora_map, r = m.getCanvas().getBoundingClientRect();
+          const a = (await window.__chora_overlays.georef.toPixels(e.g, { type: 'Point', coordinates: m.unproject([x - r.left, y - r.top]).toArray() }, { space: 'image' })).geometry.coordinates;
+          const b = (await window.__chora_overlays.georef.toPixels(e.g, { type: 'Point', coordinates: m.unproject([x - r.left, y - r.top + 10]).toArray() }, { space: 'image' })).geometry.coordinates;
+          return Math.hypot(b[0] - a[0], b[1] - a[1]) / 10; }""", [a['id'], x, y])
+        return (offered and len(tip) == 1 and 'hold Alt not to' in tip[0] and snapped <= max(0.5, 0.5 * per) and free > 2 * per), {
+            'tooltip': tip, 'snapped px': round(snapped, 3), 'unsnapped (Alt) px': round(free, 3), 'image px per screen px': round(per, 3), 'snap points': cstate(page)['ink']['snapPoints']}
+    attempt('Chora ink: "Snap to ink" says what it does in its tooltip, and puts a vertex drawn by hand 5 px from the road onto its centre (to half a pixel of the image read); with Alt held it is not snapped', snap_to_ink)
+
+    def cors_refused():
+        f = place_file('ink-cors.json'); chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
+        since = len(census()); before = cstate(page)['pendingCount']
+        a = ink_annotation('/iiif/ink', 'e3', origin=C)
+        paste(a)
+        said = line(IC)
+        page.wait_for_timeout(800); early = at_origin(census(since), C)
+        if said: panel_set([IC], reload=True, via=IC)
+        refused = soon(page, '() => /may not allow other sites to read it/.test(document.getElementById("map-status").textContent)', 30)
+        text = page.inner_text('#map-status')
+        rows = census(since); s = cstate(page)
+        return (f'Needs permission: {urlparse(C).netloc}' in said and early == [] and refused and urlparse(C).netloc in text and at_origin(rows, C)
+                and all(r['path'] == '/iiif/ink/info.json' for r in at_origin(rows, C))
+                and not any(o['annotationId'] == a['id'] for o in s['overlays']) and s['pendingCount'] == before), {
+            'line': said, 'asked before allowing': early, 'said': text[:300], 'C asked': [(r['status'], r['path']) for r in at_origin(rows, C)], 'pending': s['pendingCount']}
+    attempt('Chora ink: a map on a server that lets no other site read it (no CORS header), once allowed, is refused in words, after asking it only for its image information; nothing is drawn', cors_refused)
+
+    def refused_403():
+        f = place_file('ink-403.json'); chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
+        since = len(census()); before = cstate(page)['pendingCount']
+        a = ink_annotation('/iiif/ink403', 'e4')
+        paste(a)
+        until(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id)', 30, a['id'])
+        only_map(a['id'])
+        # Drawn from its coarser tiles (zoomed out), then traced close up, at full resolution, which is refused.
+        page.evaluate('() => window.__chora_map.zoomTo(window.__chora_map.getZoom() - 2, { duration: 0 })'); page.evaluate(SETTLE)
+        if not soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.firstTile)', 30, a['id']):
+            return False, {'not drawn; asked': [(r['status'], r['path']) for r in at_origin(census(since), A)][-6:], 'events': cstate(page).get('overlayEvents')}
+        page.evaluate('() => window.__chora_map.zoomTo(window.__chora_map.getZoom() + 3, { duration: 0 })'); page.evaluate(SETTLE)
+        page.click('#draw-tools button[data-trace="line"]')
+        click_image(a['id'], INK_RIVER[50])
+        until(page, '() => ["proposed", "error"].includes(window.__chora.ink?.phase)', 60)
+        s = cstate(page); panel = page.inner_text('#ink-panel')
+        page.keyboard.press('Enter'); page.wait_for_timeout(500)
+        rows = census(since)
+        return (s['ink']['phase'] == 'error' and '403' in (s['ink']['lastError'] or '') and 'IIIF Auth' in s['ink']['lastError'] and '403' in panel
+                and cstate(page)['pendingCount'] == before and any(r['status'] == 403 for r in at_origin(rows, A)) and at_origin(rows, B) == []), {
+            'ink': s['ink'].get('lastError'), 'panel': panel[:200], 'statuses': sorted({r['status'] for r in at_origin(rows, A)})}
+    attempt('Chora ink: a server that refuses the map\'s pixels (403) is said so in words (IIIF Auth is not supported), and nothing is drawn', refused_403)
 
 if __name__ == '__main__': main()
