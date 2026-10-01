@@ -3245,6 +3245,32 @@ def chora_checks(pw, url, tmp):
             try: page.evaluate('k => localStorage.removeItem(k)', STUB)
             except Exception: pass
     attempt('Chora: a browser short of storage is warned, plainly, before a dataset is opened and before it is saved; one with room is not', storage_short)
+    # A large dataset (over 200 MB read) has the browser asked to keep this site's storage, and a note
+    # says what it answered: the note is that dataset's, not the next one's. The large one is a gzip of
+    # 1 MB or so whose trailer says 210 MB (a PLATO document, then that much blank space).
+    def big_dataset(name):
+        import gzip
+        d = tmp / 'chora-files'; d.mkdir(exist_ok=True)
+        doc = json.loads(odd_dataset('big-src.json').read_text())
+        with gzip.open(d / name, 'wb', compresslevel=9) as g:
+            g.write(json.dumps(doc).encode()); chunk = b' ' * (1 << 20)
+            for _ in range(210): g.write(chunk)
+        return d / name
+    def storage_note():
+        note = lambda: {'shown': page.is_visible('#storage-note'), 'text': page.inner_text('#storage-note') if page.is_visible('#storage-note') else '', 'bytes': (cstate(page).get('storage') or {}).get('bytes'), 'phase': cstate(page).get('phase')}
+        big = big_dataset('big-note.json.gz')
+        chora_boot(page, base, [big]); large = note()
+        # The next dataset opened in the same page (no navigation, which would hide the note anyway) is small.
+        page.set_input_files('#picker', [str(odd_dataset('small-after-big.json'))])
+        until(page, '() => window.__chora.phase === "loaded" && window.__chora.storage && window.__chora.storage.bytes < 1e6', 120)
+        small = note()
+        # And a large one again has the note again: the browser was asked once, and its answer still holds.
+        page.set_input_files('#picker', [str(big)])
+        until(page, '() => ["loaded", "error"].includes(window.__chora.phase) && window.__chora.storage && window.__chora.storage.bytes > 2e8', 120)
+        again = note()
+        return (large['shown'] and large['bytes'] > 2e8 and 'storage' in large['text'].lower() and small['phase'] == 'loaded' and not small['shown']
+                and again['shown']), {'large': large, 'small after it': small, 'large again': again}
+    attempt('Chora: the note on keeping storage is shown for a large dataset, and not for a small one opened after it', storage_note)
 
     # Over everything above: loading, drawing, saving, the hand-off and two tabs.
     attempt('Chora: across all these checks, no request went to any other site, and no page error', lambda: (

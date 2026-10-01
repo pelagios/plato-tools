@@ -3,8 +3,9 @@
 // dataset with the drawings added, checked by the version check (Mneme) against what was opened.
 // The engine is the same worker as the main page's (src/engine/worker.js, its chora-* commands). The
 // page publishes its state on window.__chora for automated tests; nothing else reads it.
-import { fmtBytes, formatName, progressText, summary, draftNote, choraDrawingNote, choraSaveText, choraSavedFormat, choraSaveProgress, choraStorageWarning, choraPersistNote, CHORA_TEXT } from '../engine/words.js';
-import { uncompressedSize, loadNeed, saveNeed, storageShort, shouldPersist } from '../engine/chora/storage.js';
+import { fmtBytes, formatName, progressText, summary, draftNote, choraDrawingNote, choraSaveText, choraSavedFormat, choraSaveProgress, choraStorageWarning, choraPersistNote, choraProblemText, CHORA_TEXT } from '../engine/words.js';
+import { sizeRead, loadNeed, saveNeed, storageShort, shouldPersist } from '../engine/chora/storage.js';
+import { detect } from '../engine/input.js';
 import { newGeometryAttestation, checkGeoJSON, wrapLongitudes, DrawError, ROLES, PRECISIONS } from '../engine/chora/draw.js';
 import { createMap, placeFeatures, contextFeatures, STATUS_COLOURS } from './map.js';
 import * as basemaps from './basemaps.js';
@@ -69,7 +70,9 @@ async function open(list) {
   $('dataset').hidden = false;
   $('dataset').innerHTML = `<ul>${files.map((f) => `<li><span class="name">${esc(f.name)}</span> <span class="count">${fmtBytes(f.size)}</span></li>`).join('')}</ul>`;
   $('phase').textContent = 'Reading…';
-  // Whether the browser has room for it, and, for a large one, asked to keep it: before it is read.
+  // Whether the browser has room for it, and, for a large one, asked to keep it: before it is read. The
+  // note on keeping storage is the last dataset's until this one is known to need it.
+  $('storage-note').hidden = true;
   const bytes = await storageCheck('load', $('storage-warning'));
   if (shouldPersist(bytes)) await keepStorage();
   try {
@@ -538,7 +541,7 @@ async function saveDataset() {
   const out = (r.outputs || [])[0];
   const problems = (r.report?.items || []).filter((i) => i.severity === 'error');
   // The verdict in the words the command line uses too (src/engine/words.js), and on failure, why.
-  const reasons = [...(r.mneme?.reasons || []), ...problems.map((i) => `${CHORA_TEXT[i.kind] || i.message}${i.examples?.length ? `: ${i.examples.slice(0, 3).join('; ')}` : ''}`)];
+  const reasons = [...(r.mneme?.reasons || []), ...problems.map(choraProblemText)];
   // What the file is, and on a save that passes, what the writing of it reported: for a dataset that
   // was not place-centric PLATO JSON, what its conversion could not carry over, which Mneme, reading
   // the same input the same way, cannot see.
@@ -603,20 +606,20 @@ function saveProgress(p) {
 // A dataset is read into the browser's storage, and a save writes the whole of it again beside the
 // version check's working copy: DEEP (1.4 million attestations) needs 1.4 GB to open and 2.4 GB more to
 // save (src/engine/chora/storage.js). The browser is asked how much it allows before either starts, and
-// the page says so plainly when that looks too little. The size read is the files' own, or, gzipped,
-// what their trailers say.
+// the page says so plainly when that looks too little. The size read is the files' own, or, gzipped
+// (known by their first bytes), what their trailers say when it can be believed (sizeRead). How the
+// dataset is read (through a triple store or not) is from its format: detected here before it is
+// opened, and the one it was opened as when it is saved.
 async function readSize(list) {
   let bytes = 0;
-  for (const f of list) {
-    let trailer = null;
-    if (/\.gz$/i.test(f.name) && f.size >= 4) { try { trailer = new Uint8Array(await f.slice(f.size - 4).arrayBuffer()); } catch { /* guessed instead */ } }
-    bytes += uncompressedSize(f, trailer);
-  }
+  for (const f of list) bytes += await sizeRead(f);
   return bytes;
 }
 async function storageCheck(when, el) {
   const bytes = await readSize(files), name = files[0]?.name;
-  const need = when === 'load' ? loadNeed({ name, bytes }) : saveNeed({ name, bytes });
+  let input = when === 'save' ? dataset?.input : null;
+  if (!input) { try { input = await detect(files); } catch { /* from the name instead */ } }
+  const need = when === 'load' ? loadNeed({ name, bytes, input }) : saveNeed({ name, bytes, input });
   let estimate = null;
   try { estimate = await navigator.storage.estimate(); } catch { /* not said: no warning */ }
   const short = storageShort(need, estimate);
@@ -629,7 +632,7 @@ async function storageCheck(when, el) {
 // and the page says what it answered and what that means.
 let persistAsked = false;
 async function keepStorage() {
-  if (persistAsked) return;
+  if (persistAsked) { $('storage-note').hidden = false; return; }
   persistAsked = true;
   let kept = null;
   try { kept = (await navigator.storage.persisted()) || (await navigator.storage.persist()); } catch { /* not supported */ }

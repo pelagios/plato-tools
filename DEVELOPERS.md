@@ -1023,21 +1023,36 @@ publishes its state on `window.__chora` for tests.
   the place, since it could only replace them. Problems the writing finds are shown even when Mneme
   passes, as it compares attestations and nothing else.
 - **Refused before the version check.** A run whose report says the file cannot hold what was read
-  (`refusalOf` in `save.js`: the kinds Mneme calls not read, a file that stops part-way, and the
-  writer's `order`) stops the save before Mneme, which is ~90% of a save's time (14 minutes of DEEP's)
-  and could only fail: the file written is removed (`discard`), nothing is offered, and the page says
-  why (`chora-not-kept`). A dataset whose opening already reported such a problem is refused before
-  anything is written. Problems of the data itself (a place the schema refuses) do not stop a save.
+  (`refusalOf` in `save.js`: the kinds Mneme calls not read, a line that could not be read, and, in the
+  report of the writing only, the writer's `order` and `attestation-centric`, an attestation-shaped
+  line of a place-centric file, which the PLATO JSON (Lines) writer drops) stops the save before Mneme,
+  which is ~90% of a save's time (14 minutes of DEEP's) and could only fail: the file written is
+  removed (`discard`), nothing is offered, and the page says why (`chora-not-kept`). A dataset whose
+  opening already reported such a problem is refused before anything is written. Problems of the data
+  itself (a place the schema refuses) do not stop a save.
+- **A write that stops part-way** (a gzip cut short: `run()` catches the `DataError` and returns no
+  outputs) leaves the file it was writing, and leaves it open: `run()` does not close its writer then,
+  and the browser cannot remove a file whose access handle is open. `save()` gives the run an
+  `env.output` that keeps each file it opens, closes any the run left open, and removes the file by
+  the name it was opened under (and the name expected) when there are no outputs to go by. Only
+  `save()`'s own outputs (`chora-outputs/`) are handled so; the main page's runs are as they were.
 - **Progress** of a save is shown under its button, step by step: each event from `save()` says
   which (`save`: `finding`, `writing`, `checking`) and, where known, how many attestations that step
   reads (`total`), in words by `choraSaveProgress`.
 - **Storage.** Before a dataset is opened and before it is saved, the page estimates what it needs
   (`src/engine/chora/storage.js`, from the full DEEP run: to open, about 1.3 times what is read, and
   about 2 times for RDF, which needs a triple store beside Chora's database; to save, the file and
-  Mneme's ledger, about 2.3 times the records, and a triple store again for RDF), reading a gzipped
-  file's size from its trailer, and warns plainly when `navigator.storage.estimate()` says too little
-  is left. A dataset over 200 MB read asks the browser once to keep this site's storage
-  (`navigator.storage.persist()`), and the page says what it answered and what that means.
+  Mneme's ledger, about 2.3 times the records, and a triple store again for RDF), and warns plainly
+  when `navigator.storage.estimate()` says too little is left. A triple store is counted wherever the
+  pipeline uses one (its `needsStore`: RDF, attestation-centric PLATO, W3C annotations), from the
+  format detected, not the name. A file is gzipped when its first two bytes say so, whatever its name.
+  A gzip of one member is read at the size its trailer gives (ISIZE, the size modulo 4 GB), unless
+  that is less than 4 times the compressed size, when the larger of it and 20 times (DEEP's ratio) is
+  taken; a gzip of several members (bgzip, known by its first header, or any whose last 64 KiB holds
+  another member's header) has only its last member's size there, so the same fallback is taken.
+  A dataset over 200 MB read asks the browser once to keep this site's storage
+  (`navigator.storage.persist()`), and the page says what it answered and what that means, for that
+  dataset: the note is hidden when the next is opened, and shown again for a large one.
 - **A place's key** is its `@id`, or `#n` (its position among the records) when it has none
   (`placeKey` in `store.js`). Loading and saving both count the records `run()` gives, in the same
   order and by one rule (`keyer`: every record counts, and one that is not a place has no key), so a

@@ -42,8 +42,14 @@ export const savedName = (name, target = 'plato-json') => String(name).replace(/
 // (the kinds the version check calls not read, and a file that stops part-way), or, from the writer,
 // a place moved among the identity relations. Mneme would fail each; the save need not wait for it.
 const NOT_KEPT = new Set([...NOT_READ, 'unreadable', 'order']);
-/** The items of a run's report that mean its output does not hold its input: none, for a save to go on. */
-export const refusalOf = (report) => (report?.items || []).filter((i) => NOT_KEPT.has(i.kind));
+// And, in the report of the writing only: the PLATO JSON (Lines) writer drops an attestation-shaped
+// line of a place-centric file ('attestation-centric'), so the file written has not got it.
+const NOT_WRITTEN = new Set([...NOT_KEPT, 'attestation-centric']);
+/**
+ * The items of a run's report that mean its output does not hold its input: none, for a save to go on.
+ * `written`: the report is of the writing of the file, not of a reading.
+ */
+export const refusalOf = (report, { written = false } = {}) => (report?.items || []).filter((i) => (written ? NOT_WRITTEN : NOT_KEPT).has(i.kind));
 /** The refusal in the save's report: one problem, with what the run said as its examples. */
 const refuseNotKept = (rep, items) => rep.add('error', 'chora-not-kept', CHORA_TEXT['chora-not-kept'], items.map((i) => `${i.message}${i.count > 1 ? ` (${i.count.toLocaleString('en-GB')} times)` : ''}${i.examples?.[0] ? `: ${i.examples[0]}` : ''}`).join(' | ') || undefined);
 
@@ -77,6 +83,18 @@ const refuse = (rep, key, rec) => rep.error('chora-attestations-not-a-list', CHO
 function writeWithAdditions(input, byPlace, placed, unlisted, env, name, target) {
   const keyOf = keyer();
   return run({ input, action: 'convert', target, options: { name, augment: (rec) => appendTo(rec, keyOf(rec), byPlace, placed, unlisted) } }, env);
+}
+/**
+ * env, with each output it opens kept in `opened` ({ name, out, closed }), so that one a run leaves
+ * open can be closed: a run stopped part-way (a DataError) returns no outputs and does not close its
+ * writer, and the browser cannot remove a file whose access handle is still open.
+ */
+function tracking(env, opened) {
+  return { ...env, output: async (name) => {
+    const out = await env.output(name), o = { name, out, closed: false };
+    opened.push(o);
+    return { ...out, close: async () => { o.closed = true; return out.close(); } };
+  } };
 }
 
 // What the version check must find for the save to stand: nothing of the earlier version lost or
@@ -177,15 +195,24 @@ export async function save(input, additions, env, options = {}) {
   const name = savedName(options.name || input.name || input.files[0].name, target);
   const placed = new Set();
   progress({ save: 'writing', attestations: 0, ...(options.attestations ? { total: options.attestations } : {}), elapsedMs: Date.now() - t0 });
-  const w = await writeWithAdditions(input, byPlace, placed, unlisted, step('writing', options.attestations), name, target);
+  const opened = [];
+  const w = await writeWithAdditions(input, byPlace, placed, unlisted, tracking(step('writing', options.attestations), opened), name, target);
   const report = w.report;
   const added = [...byPlace.values()].reduce((s, l) => s + l.length, 0);
-  const discard = async () => { if (options.discard) for (const o of w.outputs || []) { try { await options.discard(o); } catch { /* gone already */ } } };
+  // The files written, or, from a write that stopped part-way (no outputs), the file it was writing:
+  // by the name it was opened under, and the name expected, closed first if the run left it open.
+  const discard = async () => {
+    for (const o of opened) if (!o.closed) { try { o.closed = true; await o.out.close(); } catch { /* closed already */ } }
+    if (!options.discard) return;
+    const names = new Set((w.outputs || []).map((o) => o.name));
+    if (!names.size) { for (const o of opened) names.add(o.name); names.add(name); }
+    for (const n of names) { try { await options.discard({ name: n }); } catch { /* gone already, or never made */ } }
+  };
   // Found only in the writing (the caller knew the place, not its record): the file written is not offered.
   if (unlisted.size) { await discard(); for (const [k, rec] of unlisted) refuse(rep, k, rec); return fail(); }
   if (w.incomplete) { await discard(); return { report, outputs: [], mneme: null, incomplete: true }; }
   // A file that does not hold what was read: refused now, not after the version check has read it all.
-  const notKept = refusalOf(report);
+  const notKept = refusalOf(report, { written: true });
   if (notKept.length) {
     await discard();
     refuseNotKept(rep, notKept);

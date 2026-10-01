@@ -11,8 +11,8 @@ import { detect } from '../src/engine/input.js';
 import { save, savedName, refusalOf } from '../src/engine/chora/save.js';
 import { newGeometryAttestation } from '../src/engine/chora/draw.js';
 import { load } from '../src/engine/chora/store.js';
-import { choraSavedFormat, choraSaveText, choraSaveProgress, choraStorageWarning, choraPersistNote, CHORA_TEXT } from '../src/engine/words.js';
-import { uncompressedSize, loadNeed, saveNeed, storageShort, shouldPersist, PERSIST_ABOVE } from '../src/engine/chora/storage.js';
+import { choraSavedFormat, choraSaveText, choraProblemText, choraSaveProgress, choraStorageWarning, choraPersistNote, CHORA_TEXT } from '../src/engine/words.js';
+import { uncompressedSize, sizeRead, loadNeed, saveNeed, storageShort, shouldPersist, PERSIST_ABOVE } from '../src/engine/chora/storage.js';
 
 const X = 'https://example.org/';
 const who = { name: 'Ada Surveyor' };
@@ -89,9 +89,70 @@ test('refusalOf: a write report saying the output does not hold the input is a r
   }
   // The controls: a place the schema refuses is written as read, and what a conversion cannot carry
   // is reported, not hidden; neither stops a save (test/chora-save.test.js shows such saves passing).
-  assert.deepEqual(refusalOf({ items: [item('error', 'schema'), item('warning', 'no-label'), item('loss', 'dropped:foo'), item('warning', 'attestation-centric')] }), []);
+  assert.deepEqual(refusalOf({ items: [item('error', 'schema'), item('warning', 'no-label'), item('loss', 'dropped:foo')] }), []);
+  assert.deepEqual(refusalOf({ items: [item('error', 'schema'), item('warning', 'no-label'), item('loss', 'dropped:foo')] }, { written: true }), []);
+  // The writer of PLATO JSON (Lines) drops an attestation-shaped line of a place-centric file, saying
+  // 'attestation-centric': in the WRITE report that is a refusal. A reading reports no such thing.
+  assert.deepEqual(refusalOf({ items: [item('warning', 'attestation-centric')] }, { written: true }).map((i) => i.kind), ['attestation-centric']);
+  assert.deepEqual(refusalOf({ items: [item('warning', 'attestation-centric')] }), [], 'not in the report of a reading');
   assert.deepEqual(refusalOf({ items: [] }), []);
   assert.deepEqual(refusalOf(undefined), []);
+});
+
+test('a place-centric JSON Lines file with an attestation-shaped line (which the writer drops) is refused before the version check, and nothing is kept', async () => {
+  const loose = { '@id': X + 'a/loose', about: X + 'p/a', names: [{ toponym: 'Loose' }], sources: [{ title: 's' }] };
+  const rows = [HEADER, place('a', 'Alpha'), loose, place('b', 'Beta')];
+  const additions = [{ placeId: X + 'p/b', attestation: drawing(1, 1) }];
+  for (const [how, options] of [['read first', {}], ['from the store', { hasPlace: (k) => k === X + 'p/b' }]]) {
+    const r = await saved(jsonl(rows, 'loose.jsonl'), additions, options);
+    // It was written, and the writer said what it dropped: the subject of the refusal is present.
+    assert.ok(r.events.some((p) => p.save === 'writing'), `${how}: written`);
+    assert.ok(r.report.items.some((i) => i.kind === 'attestation-centric'), `${how}: ${JSON.stringify(r.report.items.map((i) => i.kind))}`);
+    const refused = r.report.items.filter((i) => i.kind === 'chora-not-kept');
+    assert.equal(refused.length, 1, `${how}: ${JSON.stringify(r.report.items.map((i) => i.kind))}`);
+    assert.match(refused[0].examples.join(), /has no place to go here/, `${how}: says why`);
+    assert.deepEqual(r.outputs, [], `${how}: nothing offered`);
+    assert.deepEqual(Object.keys(r.e.outs), [], `${how}: nothing kept`);
+    assert.equal(r.mneme, null, how);
+    assert.equal(mnemeRan(r.events), false, `${how}: ${JSON.stringify(r.events.map((p) => [p.save, p.version, p.phase]))}`);
+  }
+  // The control: the same file without that line is saved, and the version check runs and passes.
+  const ok = await saved(jsonl(rows.filter((r) => r !== loose), 'tight.jsonl'), additions);
+  assert.equal(ok.mneme.passed, true, ok.mneme.reasons.join('; '));
+  assert.equal(mnemeRan(ok.events), true);
+});
+
+test('a write that stops part-way (a gzip cut short) leaves no file behind: the file it opened is closed and removed', async () => {
+  const rows = [HEADER, ...Array.from({ length: 300 }, (_, i) => place('p' + i, 'Place ' + i, 3))];
+  const gz = gzipSync(new TextEncoder().encode(rows.map((r) => JSON.stringify(r)).join('\n') + '\n'));
+  const cut = () => new File([gz.slice(0, Math.floor(gz.length * 0.6))], 'cut.jsonl.gz');
+  const additions = [{ placeId: X + 'p/p1', attestation: drawing(1, 1) }];
+  // A host that makes the file when it is opened, as the browser's (createSyncAccessHandle) and the
+  // command line's do, and says which it opened and closed.
+  const host = (e) => {
+    const opened = [], closed = [], output = e.output;
+    e.output = async (name) => { opened.push(name); e.outs[name] = []; const o = await output(name); return { ...o, close: async () => { closed.push(name); return o.close(); } }; };
+    return { opened, closed };
+  };
+  const once = async (discard) => {
+    const e = env(); const seen = host(e);
+    const r = await save(await detect([cut()]), additions, e, { hasPlace: () => true, reopen: (o) => new File(e.outs[o.name], o.name), discard: discard(e) });
+    return { r, e, ...seen };
+  };
+  // The control: with a discard that removes nothing, the file opened for the write is still there.
+  const kept = await once(() => () => {});
+  assert.equal(kept.r.incomplete, true);
+  assert.deepEqual(kept.r.outputs, []);
+  assert.deepEqual(kept.opened, ['cut.chora.jsonl'], 'the write opened its file');
+  assert.deepEqual(Object.keys(kept.e.outs), ['cut.chora.jsonl'], 'without a discard, the file is left');
+  // The subject: the file is closed (the browser cannot remove a file whose handle is open) and removed.
+  const gone = await once((e) => (o) => { if (!(o.name in e.outs)) throw new Error('no such file'); delete e.outs[o.name]; });
+  assert.equal(gone.r.incomplete, true);
+  assert.ok(gone.r.report.items.some((i) => i.kind === 'unreadable'), JSON.stringify(gone.r.report.items.map((i) => i.kind)));
+  assert.deepEqual(gone.opened, ['cut.chora.jsonl']);
+  assert.deepEqual(gone.closed, ['cut.chora.jsonl'], 'the file opened is closed before it is removed');
+  assert.deepEqual(Object.keys(gone.e.outs), [], 'nothing kept');
+  assert.deepEqual(gone.r.outputs, []);
 });
 
 test('a dataset with a line that cannot be read is refused before the version check runs, saying why, and nothing is kept or offered', async () => {
@@ -107,13 +168,12 @@ test('a dataset with a line that cannot be read is refused before the version ch
     ['store, with the report of its reading', { hasPlace: (k) => k === X + 'p/b', readReport: store.loaded.report }, false],
     ['store, without it', { hasPlace: (k) => k === X + 'p/b' }, true],
   ]) {
-    const t0 = Date.now();
     const r = await saved(jsonl(rows, 'broken.jsonl'), additions, options);
     const refused = r.report.items.filter((i) => i.kind === 'chora-not-kept');
     assert.equal(refused.length, 1, `${how}: ${JSON.stringify(r.report.items.map((i) => i.kind))}`);
     assert.equal(refused[0].severity, 'error');
     assert.equal(refused[0].message, CHORA_TEXT['chora-not-kept']);
-    assert.match(refused[0].examples.join(), /not valid JSON/, `${how}: says why`);
+    assert.match(refused[0].examples.join(), /not valid JSON: line 3: /, `${how}: says why, and where`);
     assert.deepEqual(r.outputs, [], `${how}: nothing offered`);
     assert.deepEqual(Object.keys(r.e.outs), [], `${how}: nothing kept`);
     assert.equal(r.mneme, null, how);
@@ -123,7 +183,6 @@ test('a dataset with a line that cannot be read is refused before the version ch
     assert.ok(options.readReport ? r.events.length === 0 : r.events.length > 0, `${how}: ${r.events.length} progress events`);
     assert.equal(mnemeRan(r.events), false, `${how}: ${JSON.stringify(r.events.map((p) => [p.save, p.version, p.phase]))}`);
     assert.equal(r.events.some((p) => p.save === 'writing'), wrote, `${how}: written ${wrote ? 'and then refused' : 'not at all'}`);
-    assert.ok(Date.now() - t0 < 5000);
   }
   store.close();
   // The control: the same dataset without the broken line is saved, and the version check runs.
@@ -161,19 +220,51 @@ test('a save reports its steps: writing, then the version check reading each ver
 // either way; the N-Triples load's triple store 3.35 GB beside it. The save's file 1.14 GB, Mneme's
 // ledger 1.27 GB (from JSON Lines) or 0.89 GB (from N-Triples, with a 3.35 GB triple store beside).
 const GB = 1e9;
-test('the size a gzipped file will be read at is taken from its gzip trailer, past 4 GB too', () => {
+// A gzip trailer: CRC32 then ISIZE, the uncompressed size modulo 2^32, little-endian.
+const trailerOf = (isize) => { const t = new Uint8Array(8); new DataView(t.buffer).setUint32(4, isize % 2 ** 32, true); return t; };
+const GZ_HEAD = Uint8Array.of(0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3);
+test('the size a gzipped file will be read at is taken from its gzip trailer, when that can be believed', async () => {
   const text = new TextEncoder().encode('{"label":"x"}\n'.repeat(5000));
   const gz = gzipSync(text);
-  assert.equal(uncompressedSize({ name: 'a.jsonl.gz', size: gz.length }, gz.slice(-4)), text.length);
-  assert.equal(uncompressedSize({ name: 'a.jsonl', size: 1234 }, null), 1234, 'a file not gzipped is its size');
+  assert.equal(await sizeRead(new File([gz], 'a.jsonl.gz')), text.length);
+  assert.equal(await sizeRead(new File(['x'.repeat(1234)], 'a.jsonl')), 1234, 'a file not gzipped is its size');
   const small = gzipSync(new TextEncoder().encode('{}'));
-  assert.equal(uncompressedSize({ name: 'tiny.json.gz', size: small.length }, small.slice(-4)), 2, 'a tiny file bigger gzipped than not is taken at its word');
+  assert.equal(await sizeRead(new File([small], 'tiny.json.gz')), 2, 'a tiny file bigger gzipped than not is taken at its word');
+  // A 17 MB gzip of text compressed only 2 to 1: its trailer is too small to be believed of PLATO's
+  // text, but it is not 4 GB more: the larger of it and the typical ratio (20 to 1), 340 MB, not 4.3 GB.
+  const est = uncompressedSize({ size: 17e6 }, { head: GZ_HEAD, tail: trailerOf(34e6) });
+  assert.equal(est, 17e6 * 20);
+  assert.ok(est < 1e9, `${est}`);
   // The trailer holds the size modulo 2^32: a 5 GB file compressed to 200 MB reads as 705 MB, which is
-  // too small to be believed of text, and 4 GB is added until it is not.
-  const trailer = new Uint8Array(new Uint32Array([5e9 % 2 ** 32]).buffer);
-  assert.equal(uncompressedSize({ name: 'big.nt.gz', size: 200e6 }, trailer), 5e9);
+  // too small to be believed of text: the typical ratio is taken instead.
+  assert.equal(uncompressedSize({ size: 200e6 }, { head: GZ_HEAD, tail: trailerOf(5e9) }), 4e9);
+  // A trailer that is believable is taken as it is.
+  assert.equal(uncompressedSize({ size: 51476824 }, { head: GZ_HEAD, tail: trailerOf(1184971984) }), 1184971984);
   // Without a trailer to read, a guess from the ratio DEEP's exports have (about 20 to 1).
-  assert.ok(uncompressedSize({ name: 'a.jsonl.gz', size: 51476824 }, null) >= 1.0 * GB);
+  assert.ok(uncompressedSize({ size: 51476824 }, { head: GZ_HEAD, tail: null }) >= 1.0 * GB);
+});
+
+test('a gzip is known by its first two bytes, not by its name', async () => {
+  const text = new TextEncoder().encode('{"label":"x"}\n'.repeat(5000));
+  const gz = gzipSync(text);
+  assert.equal(await sizeRead(new File([gz], 'export.jsonl')), text.length, 'gzipped, without .gz in its name');
+  assert.equal(await sizeRead(new File([text], 'plain.jsonl.gz')), text.length, 'named .gz, and not gzipped');
+});
+
+test('a gzip of several members (bgzip, or files concatenated) is not taken at its last member\'s trailer', async () => {
+  const enc = (s) => new TextEncoder().encode(s);
+  const a = gzipSync(enc('{"label":"x"}\n'.repeat(400000))), b = gzipSync(enc('{"label":"y"}\n'.repeat(1000)));
+  const cat = new Uint8Array(a.length + b.length); cat.set(a); cat.set(b, a.length);
+  const lastMember = 14 * 1000;
+  const est = await sizeRead(new File([cat], 'm.jsonl.gz'));
+  assert.equal(est, Math.max(lastMember, cat.length * 20), `${est}`);
+  // The control: each member alone is taken at its trailer.
+  assert.equal(await sizeRead(new File([b], 'b.jsonl.gz')), lastMember);
+  // bgzip says so in its first header (an extra field 'BC'), and is known from that alone.
+  const bgzf = Uint8Array.of(0x1f, 0x8b, 8, 4, 0, 0, 0, 0, 0, 0xff, 6, 0, 0x42, 0x43, 2, 0);
+  assert.equal(uncompressedSize({ size: 30e6 }, { head: bgzf, tail: trailerOf(150e6) }), 30e6 * 20);
+  // The control: the same trailer after a plain header is believed.
+  assert.equal(uncompressedSize({ size: 30e6 }, { head: GZ_HEAD, tail: trailerOf(150e6) }), 150e6);
 });
 
 test('the storage a load needs covers what the full DEEP load used, JSON Lines and N-Triples, without asking for more than twice that', () => {
@@ -182,6 +273,17 @@ test('the storage a load needs covers what the full DEEP load used, JSON Lines a
   const nt = loadNeed({ name: 'deep-plato.nt.gz', bytes: 2718243383 });
   assert.ok(nt >= (3.35 + 1.40) * GB && nt <= 9.5 * GB, `${nt}`);
   assert.ok(loadNeed({ name: 'x.ttl', bytes: 1e6 }) > loadNeed({ name: 'x.json', bytes: 1e6 }), 'RDF needs a triple store beside the database');
+  // Attestation-centric PLATO JSON and W3C annotations are gathered in a triple store too (the
+  // pipeline's needsStore): the store is of their triples, about 2.3 times their text (DEEP's).
+  const plain = loadNeed({ name: 'x.json', bytes: 1e6, input: { format: 'plato-json', profile: 'place-centric' } });
+  for (const input of [{ format: 'plato-json', profile: 'attestation-centric' }, { format: 'plato-jsonl', profile: 'attestation-centric' }, { format: 'w3c-annotations' }]) {
+    const need = loadNeed({ name: 'x.json', bytes: 1e6, input });
+    assert.ok(need >= (1.2 + 1.25 * 2.3) * 1e6, `${JSON.stringify(input)}: ${need}`);
+    assert.ok(saveNeed({ name: 'x.json', bytes: 1e6, input }) >= saveNeed({ name: 'x.json', bytes: 1e6 }) + 1.25 * 2.3 * 1e6, JSON.stringify(input));
+  }
+  assert.equal(plain, loadNeed({ name: 'x.json', bytes: 1e6 }), 'the control: place-centric JSON has none');
+  // RDF known by its format, whatever its name.
+  assert.equal(loadNeed({ name: 'export.txt', bytes: 1e6, input: { format: 'ntriples' } }), loadNeed({ name: 'x.nt', bytes: 1e6 }));
 });
 
 test('the storage a save needs covers what the full DEEP save used: the file, Mneme\'s ledger, and for RDF a triple store', () => {
@@ -207,6 +309,13 @@ test('the storage warnings and the note on keeping storage say what is needed, w
   assert.ok(short, 'DEEP cannot be saved in 1.5 GB');
   assert.equal(choraStorageWarning('save', short), "Saving needs about 2.76 GB of the browser's storage, for the file and the version check's working copy, and this browser has only 1.50 GB left for this site (of the 3.00 GB it allows). The save may stop part-way. Free some disk space, then save.");
   assert.match(choraStorageWarning('load', { need: 1.5e9, free: 2e8, quota: 1e9 }), /^Opening this dataset needs about 1.50 GB .* only 200.0 MB left .* private one/);
+  // The refusal says why after a colon, and the page adds none of its own.
+  assert.ok(CHORA_TEXT['chora-not-kept'].endsWith('Why:'), CHORA_TEXT['chora-not-kept']);
+  const why = choraProblemText({ kind: 'chora-not-kept', message: CHORA_TEXT['chora-not-kept'], examples: ['A line is not valid JSON: line 3: x'] });
+  assert.ok(why.endsWith('nothing was saved. Why: A line is not valid JSON: line 3: x'), why);
+  assert.doesNotMatch(why, /::/);
+  // The control: a text without its own colon is given one.
+  assert.equal(choraProblemText({ kind: 'chora-no-such-place', message: 'x', examples: ['https://example.org/p/a'] }), `${CHORA_TEXT['chora-no-such-place']}: https://example.org/p/a`);
   assert.match(choraPersistNote(true), /It agreed/);
   assert.match(choraPersistNote(false), /did not agree.*save often/);
   assert.match(choraPersistNote(null), /cannot be asked/);

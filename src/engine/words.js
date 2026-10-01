@@ -444,8 +444,16 @@ export const CHORA_TEXT = {
   'chora-unreadable': 'The dataset could not be read to the end, so it was not saved.',
   'chora-in-another-tab': 'Chora is already open in another tab of this browser. Close it, or use that one.',
   'chora-mneme-failed': 'The version check (Mneme) found that the saved file does not keep every attestation of the dataset exactly as it was, or does not add exactly the drawings. Do not use it.',
-  'chora-not-kept': 'The saved file could not hold the dataset exactly as it was read, so it was not checked, kept or offered, and nothing was saved. Why',
+  'chora-not-kept': 'The saved file could not hold the dataset exactly as it was read, so it was not checked, kept or offered, and nothing was saved. Why:',
 };
+/**
+ * A problem of a save, in words for the page: its text (CHORA_TEXT, else its message), then its first
+ * examples after a colon, unless the text ends with one of its own.
+ */
+export function choraProblemText(i) {
+  const text = CHORA_TEXT[i.kind] || i.message;
+  return i.examples?.length ? `${text}${text.endsWith(':') ? ' ' : ': '}${i.examples.slice(0, 3).join('; ')}` : text;
+}
 /**
  * The storage warning, for `when` 'load' or 'save', from storageShort() (src/engine/chora/storage.js):
  * what is needed, what is left, and what to do about it.
