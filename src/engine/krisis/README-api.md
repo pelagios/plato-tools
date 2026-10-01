@@ -147,8 +147,11 @@ words them all.
 
 ## Gazetteer lookup on the page (change 2, phase B)
 
-- `src/lib/whg-token.js`: `get()`, `set(token)`, `forget()`, `onChange(fn(hasToken))`; sessionStorage,
-  memory fallback, no localStorage. Shared with Chora; no Krisis UI in it.
-- worker.js `cmd: 'places'` `{ subjects, options: { base } }` → `{ type: 'places', subjects, places, report }`
+- The token's keeper is `permissions.token` (src/lib/permissions.js): `get()`, `set(token)`, `forget()`,
+  `onChange(fn(hasToken))`, `remember(on)`, `remembered()`; the panel states where it is kept.
+- lookup.js `gazetteerPermission(endpoint)` → `'whg'` or the service's site; `permittedFetch(ask,
+  onRefused)` → a fetch for createLookup through `permissions.fetch` (category 'gazetteer'); a refusal
+  stops runLookup with `stopped: { kind: 'permission', refused }`.
+- worker.js `cmd: 'places'` `{ subjects, options: { base, columns? } }` → `{ type: 'places', subjects, places, report }`
   (`gather()`), for `runLookup`'s `places`; the lookup itself runs on the page's thread.
 - words.js `lookupPage` (the panel, progress, the review screen's additions, what Finish cites).

@@ -1054,11 +1054,23 @@ matching (below). This sends each place's name to the gazetteer, and its coordin
   earlier tools cannot read. `match()` writes version 2 with `lookups: []`.
 - **On the page** (`src/app.js`, Krisis's lookup block), the lookup runs on the page's own thread,
   never in the worker, so that the token never crosses to it; the worker only reads the dataset's places
-  and the links it states (`cmd: 'places'`, `gather()`). The token has one keeper, `src/lib/whg-token.js`
-  (shared with Chora; `get`, `set`, `forget`, `onChange`): sessionStorage (this tab only) with memory as
-  the fallback, and no "remember in this browser", because the tools are served on the shared
-  pelagios.org origin, where localStorage is readable by every page of the site (whether to move them is
-  a maintainer's decision still to be taken; the keeper has a one-line switch for it). The page keeps no
+  and the links it states (`cmd: 'places'`, `gather()`, a table of places read by the columns chosen).
+  **Every request goes through the permissions module** (see [Permissions](#permissions)): the lookups
+  are made with `permittedFetch(permissions.fetch, onRefused)` (lookup.js), which asks
+  `permissions.fetch(url, { cat: 'gazetteer', subj, …init })`, `subj` being `gazetteerPermission(url)`:
+  `'whg'` for WHG, else the service's site. Send (and, on the review screen, Find, Look it up again and
+  Try its other names) is offered only while `permissions.allowed('gazetteer', subj)`; otherwise the
+  module's one line (`permissions.needs(el, …)`, whose button opens the panel at that permission) is
+  shown in its place, nothing is sent, and the preview of what would be sent is still shown (it is
+  information, not consent). There is no inline privacy note: what a gazetteer learns, and where the
+  token is kept, are said in the panel. A request the module refuses (`PermissionError`) stops the
+  lookup: `onRefused` aborts it with the error, and runLookup records `stopped: { kind: 'permission',
+  refused: <the error's kind> }`, worded by `LOOKUP_WORDS.refused` (address, never, undecided, reload,
+  unprotected, moved, network); `network` is left to the gazetteer module's retries, as any failure to
+  reach the service is, and stops as its `network`. The token has one keeper, `permissions.token`
+  (`get`, `set`, `forget`, `onChange`, `remember(on)`, `remembered()`): kept for the tab unless the user
+  chooses, in the Permissions panel, to remember it in this browser, where the panel states its scope.
+  The page keeps no
   copy: the field is emptied once the token is given, and the keeper's token is handed to the shared
   WHG lookup at start and on every change (`setToken`, through the keeper's `onChange`); Forget calls
   the lookup's `clearToken()` and the keeper's `forget()`, and no `createLookup` call carries a token. No

@@ -419,7 +419,6 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; tex
 .lookup input[type=url], .lookup input[type=text], .lookup input[type=password], .lookup input[type=number], .find-form input { font: inherit; padding: .3rem .4rem; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); max-width: 100%; }
 .lookup input[type=number] { width: 7rem; }
 .lookup select { max-width: 100%; }
-.lookup-privacy { border-left: 4px solid var(--gold); padding-left: .6rem; }
 .lookup-other[hidden] { display: none; }
 #lookup-preview p { margin: .5rem 0 .25rem; }
 .lookup-queries { margin: 0; padding-left: 2rem; max-height: 14rem; overflow: auto; font-size: .85rem; }

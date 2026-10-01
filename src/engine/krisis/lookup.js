@@ -61,6 +61,33 @@ export const WHG_SERVICE = { endpoint: WHG_ENDPOINT, title: 'World Historical Ga
  * code, 30 September 2026).
  */
 export { WHG_PLACE_TYPE };
+/**
+ * The permission a lookup of a service is made under (src/lib/permissions.js, category 'gazetteer'):
+ * 'whg' for WHG, else the service's site (its origin, e.g. https://example.org), or null for an address
+ * that has none. Pure: the page asks the permissions module with it.
+ */
+export function gazetteerPermission(endpoint) {
+  if (isWhg(endpoint)) return 'whg';
+  try { const u = new URL(String(endpoint)); return u.protocol === 'https:' || u.protocol === 'http:' ? u.origin : null; } catch { return null; }
+}
+/**
+ * A fetch for createLookup that makes every request through the permissions module: `ask` is its
+ * fetch(url, { cat, subj, ...init }), which refuses (PermissionError) a site not allowed, not in the
+ * page's policy, a redirect, and the rest. A refusal that will not change by asking again calls
+ * onRefused(error), with which the page stops the lookup at once (it aborts the lookup's signal with the
+ * error, which runLookup then words as 'permission'); 'network', a service that could not be reached,
+ * is left to the gazetteer module's retries, as any failure to reach it is. Each request is asked under
+ * the permission of its own address (gazetteerPermission), so a service's request to another site is
+ * refused as not covered.
+ */
+export function permittedFetch(ask, onRefused) {
+  return async (url, init = {}) => {
+    try { return await ask(url, { cat: 'gazetteer', subj: gazetteerPermission(url), ...init }); } catch (e) {
+      if (e?.name === 'PermissionError' && e.kind !== 'network') onRefused?.(e);
+      throw e;
+    }
+  };
+}
 /** The type to send another service: the first of its manifest's defaultTypes, or null (none sent). */
 export function typeFromManifest(manifest) {
   const t = Array.isArray(manifest?.defaultTypes) ? manifest.defaultTypes[0] : null;
@@ -446,7 +473,8 @@ export function planLookup({ lookup, work = null, places = null, options = {} })
  *   signal     stops it: what was answered is kept, the rest marked 'stopped'
  *   onBatch    ({ done, total, record, work }) after each batch of places, to show progress or save
  * Returns { work, record, plan, stopped }: `stopped` null, or { kind, status, message } (kind as
- * GazetteerError's; 'stopped' when signalled; 'suspect' when the first batch of several queries came
+ * GazetteerError's; 'stopped' when signalled; 'permission', with `refused` its PermissionError's kind,
+ * when the permissions module refused a request (signalled with that error, or thrown); 'suspect' when the first batch of several queries came
  * back empty for every one with a filter or another service's type in play, whose places are then
  * 'unanswered' and marked `suspect`, not "no match"; the same places asked the same way again are
  * accepted as genuinely not found). Anything else thrown
@@ -481,7 +509,10 @@ export async function runLookup({ lookup, work = null, subjects = null, places =
       answers = await lookup.reconcile(chunk.queries, { signal });
     } catch (e) {
       stopRest(i);
-      if (signal?.aborted) record.stopped = { kind: 'stopped', status: null, message: null };
+      // Refused by the permissions module (permittedFetch): kind 'permission', and why (PermissionError's kind).
+      const refused = [signal?.aborted ? signal.reason : null, e].find((x) => x?.name === 'PermissionError');
+      if (refused) record.stopped = { kind: 'permission', refused: refused.kind, status: null, message: null };
+      else if (signal?.aborted) record.stopped = { kind: 'stopped', status: null, message: null };
       else if (e?.name === 'GazetteerError') record.stopped = { kind: e.kind, status: e.status ?? null, message: e.message };
       else throw e;
       return { work, record, plan, stopped: record.stopped };

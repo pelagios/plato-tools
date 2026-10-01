@@ -525,9 +525,10 @@ LOOKUP_ANSWERS = {
     'Zennor Churchtown': [{'id': 'place:gn:2633485', 'name': 'Zennor', 'score': 100, 'match': False, 'ccodes': ['GB'], 'repr_point': [-5.566, 50.191], 'namespace': 'gn'}],
 }
 
-def krisis_lookup_case(page, tmp):
-    """Krisis, gazetteer lookup: the panel, the preview, a quota stop and Resume, the review screen's additions, one
-    place looked up, Finish citing WHG; and the token nowhere but the Authorization header."""
+def krisis_lookup_case(page, tmp, url):
+    """Krisis, gazetteer lookup: not allowed, one line to the Permissions panel and nothing sent; allowed, the panel,
+    the preview, a quota stop and Resume, the review screen's additions, one place looked up, Finish citing WHG;
+    a permission withdrawn and a redirect refused; and the token nowhere but the Authorization header."""
     import re
     from collections import Counter
     a = 'https://example.org/l/'
@@ -538,12 +539,14 @@ def krisis_lookup_case(page, tmp):
     subjects.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': a, 'title': 'Places to look up'}, 'spatialEntities': places}))
     calls, consoled, quota_on = [], [], {'n': 2}
     held = {'on': False, 'routes': []}   # while on, requests are held, to be answered by the test (answer_whg)
+    redirect = {'on': False}   # while on, WHG answers by sending the request elsewhere (302)
     cors = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
             'Access-Control-Allow-Headers': 'authorization, content-type, accept, user-agent'}
     def fake_whg(route):
         req = route.request
         if req.method == 'OPTIONS': return route.fulfill(status=204, headers=cors)
         calls.append({'url': req.url, 'headers': req.all_headers(), 'body': req.post_data or ''})
+        if redirect['on']: return route.fulfill(status=302, headers={**cors, 'Location': 'https://elsewhere.example/reconcile'}, body='')
         if held['on']: held['routes'].append(route); return
         answer_whg(route)
     def answer_whg(route, status=200):
@@ -559,30 +562,97 @@ def krisis_lookup_case(page, tmp):
         route.fulfill(status=200, headers={**cors, 'Content-Type': 'application/json'}, body=json.dumps(out))
     page.route(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'), fake_whg)
     page.on('console', lambda m: consoled.append(m.text))
+    asked = []   # every request the page made to WHG, whether or not it reached the route (the policy may stop it first)
+    page.on('request', lambda r: asked.append(r.url) if 'whgazetteer.org' in r.url else None)
     has = lambda hay: LOOKUP_TOKEN in (hay if isinstance(hay, str) else json.dumps(hay))
     lk = lambda s: s.get('lookup') or {}
     def step(fn, default):
         try: return fn()
         except Exception as e: return {**(default if isinstance(default, dict) else {}), 'error': str(e).split('\n')[0][:200]}
 
-    # The panel, the token, the preview.
-    def open_panel():
+    # Not allowed: from a clean slate (no permission, no token, a page loaded with neither), the panel
+    # shows the preview (what would be sent is information), ONE line to the Permissions panel in place
+    # of Send, no privacy paragraph of its own, and nothing is sent, even if Send is clicked by script.
+    PERM = '#lookup-permission'
+    def choose():
         page.set_input_files('#picker', [str(subjects)])
         s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), 60, 'detection')
-        if s.get('phase') != 'detected': return {'phase': s.get('phase')}
+        if s.get('phase') != 'detected': return s
         page.evaluate("() => { const r = document.getElementById('reviewer'); if (!r.value) { r.value = 'Lu Reviewer'; r.dispatchEvent(new Event('change')); } }")
-        page.click('#lookup > summary')
+        if not page.evaluate("() => document.getElementById('lookup').open"): page.click('#lookup > summary')
+        return s
+    def not_allowed():
+        page.goto(NOTOOLS if PROVE else url)
+        page.evaluate("() => { localStorage.removeItem('plato-tools.permissions'); sessionStorage.clear(); }")
+        page.goto(NOTOOLS if PROVE else url)
+        r = wait_state(page, lambda s: s.get('phase') == 'ready' and s.get('canary') in ('enforced', 'not-enforced'), T(30), 'ready')
+        if choose().get('phase') != 'detected': return {'phase': 'not detected', 'canary': r.get('canary')}
+        page.fill('#whg-token', LOOKUP_TOKEN); page.press('#whg-token', 'Tab')
+        page.wait_for_function("() => /Would look up 30 places/.test(document.getElementById('lookup-preview').textContent)", timeout=60_000)
+        page.wait_for_function("() => !document.getElementById('lookup-permission').hidden", timeout=10_000)
+        before = len(calls) + len(asked)
+        page.evaluate("() => document.getElementById('lookup-send').click()")   # hidden: a script's click, which must send nothing either
+        page.wait_for_timeout(1500)
+        out = {'phase': 'shown', 'canary': r.get('canary'), 'policy': page.evaluate('() => (window.__platoCsp || {}).origins || null'),
+               'line': page.inner_text(PERM), 'lines': page.eval_on_selector_all('#lookup .needs-permission', 'els => els.filter((e) => !e.hidden).length'),
+               'send shown': page.is_visible('#lookup-send'), 'preview': page.inner_text('#lookup-preview'),
+               'first': page.eval_on_selector_all('.lookup-queries code', 'els => els.map((e) => e.textContent)'),
+               'privacy': page.eval_on_selector_all('#lookup .lookup-privacy', 'els => els.length'), 'panel text': page.inner_text('#lookup'),
+               'sent': len(calls) + len(asked) - before, 'focus after send': page.evaluate('() => document.activeElement && document.activeElement.closest("#lookup-permission") ? "line" : null')}
+        # The line's button opens the Permissions panel at WHG's entry, where the token's scope is stated.
+        page.click(PERM + ' button')
+        until(page, '() => document.getElementById("permissions-panel")?.open', 10)
+        out['opened'] = page.evaluate(PANEL_STATE)
+        out['permissions panel'] = page.inner_text('#permissions-panel')
+        return out
+    na = step(not_allowed, {})
+    nfirst = [json.loads(x) for x in na.get('first', [])]
+    check('lookup, not allowed: the page loaded with no gazetteer allowed shows ONE line, "Needs permission: World Historical Gazetteer", in place of Send',
+          na.get('canary') == 'enforced' and na.get('policy') == [] and na.get('line', '').startswith('Needs permission: World Historical Gazetteer')
+          and 'Permissions' in na.get('line', '') and na.get('lines') == 1 and na.get('send shown') is False, na)
+    check('lookup, not allowed: the preview of exactly what would be sent is still shown (information, not consent)',
+          'Would look up 30 places in World Historical Gazetteer' in na.get('preview', '') and len(nfirst) == 20 and nfirst[0] == {'query': 'Newcastle', 'type': 'Place', 'limit': 10}, na)
+    check('lookup, not allowed: Send pressed by script sends nothing (no request to WHG made, routed or not), and the line takes the focus',
+          na.get('phase') == 'shown' and na.get('sent') == 0 and not calls and not asked and na.get('focus after send') == 'line', {k: na.get(k) for k in ('phase', 'sent', 'focus after send', 'error')})
+    check("lookup: no privacy paragraph or consent of its own in the lookup panel (the panel's own text is there, the control)",
+          na.get('privacy') == 0 and 'Which places' in na.get('panel text', '') and 'Your WHG token' in na.get('panel text', '')
+          and 'optional and goes online' not in na.get('panel text', '') and 'this tab' not in na.get('panel text', '') and 'No token is sent' not in na.get('panel text', ''), na.get('panel text', na))
+    check("lookup, not allowed: the line's button opens the Permissions panel at the World Historical Gazetteer's entry",
+          (na.get('opened') or {}).get('open') is True and (na.get('opened') or {}).get('focusKey') == 'gazetteer:whg', na.get('opened') or na)
+    pt = na.get('permissions panel', '')
+    check("lookup: the token's scope is stated in the Permissions panel (kept for the tab unless remembered, what remembering means), not in the lookup panel",
+          'World Historical Gazetteer token' in pt and 'A token is held' in pt and 'Remember my token in this browser' in pt
+          and 'forgotten when the tab is closed' in pt and 'any Pelagios site' in pt and 'forgotten when' not in na.get('panel text', 'forgotten when'), pt[:600])
+
+    # Allowed in the panel: a permission allowed since the page loaded is used from the next load, so the
+    # panel offers the reload (asking first, as the files chosen would be lost); the token is kept for the tab.
+    def allow():
+        page.check('#permissions-panel fieldset.perm[data-key="gazetteer:whg"] input[value="allowed"]')
+        page.click('#permissions-panel [data-reload]')
+        confirm = page.is_visible('#permissions-panel [data-reload-confirmed]')
+        with page.expect_navigation(timeout=30_000): page.click('#permissions-panel [data-reload-confirmed]')
+        s = wait_state(page, lambda s: s.get('phase') == 'ready' and s.get('canary') in ('enforced', 'not-enforced'), T(30), 'ready')
+        return {'confirm': confirm, 'canary': s.get('canary'), 'policy': page.evaluate('() => (window.__platoCsp || {}).origins || null'),
+                'kept token': page.evaluate("() => !!sessionStorage.getItem('plato-tools.whg-token')"), 'sent': len(calls) + len(asked)}
+    al = step(allow, {}) if na.get('opened') else {}
+    check('lookup: allowed in the panel, and the page reloaded (asked first, the files chosen being lost), WHG is in its policy; still nothing sent',
+          al.get('confirm') is True and al.get('canary') == 'enforced' and 'https://whgazetteer.org' in (al.get('policy') or []) and al.get('kept token') is True and al.get('sent') == 0, al)
+
+    # The panel, the token, the preview, once allowed.
+    def open_panel():
+        s = choose()
+        if s.get('phase') != 'detected': return {'phase': s.get('phase')}
         page.fill('#whg-token', LOOKUP_TOKEN); page.press('#whg-token', 'Tab')
         page.wait_for_function("() => /^Send 30 queries to WHG$/.test(document.getElementById('lookup-send').textContent) && !document.getElementById('lookup-send').disabled", timeout=60_000)
-        return {'phase': 'open', 'privacy': page.inner_text('.lookup-privacy'), 'field': page.input_value('#whg-token'),
+        return {'phase': 'open', 'line hidden': page.evaluate("() => document.getElementById('lookup-permission').hidden"), 'send shown': page.is_visible('#lookup-send'),
+                'field': page.input_value('#whg-token'),
                 'session': page.evaluate("() => sessionStorage.getItem('plato-tools.whg-token')"),
                 'local': page.evaluate("() => localStorage.getItem('plato-tools.whg-token')"), 'tokenState': page.inner_text('#whg-token-state'),
                 'preview': page.inner_text('#lookup-preview'), 'first': page.eval_on_selector_all('.lookup-queries code', 'els => els.map((e) => e.textContent)'),
                 'send': page.inner_text('#lookup-send'), 'filters': page.evaluate("() => ['lookup-countries', 'lookup-near', 'lookup-all-names'].map((id) => document.getElementById(id).checked)")}
-    o = step(open_panel, {})
-    check('lookup: the panel says it is optional and goes online, and what WHG receives', 'optional and goes online' in o.get('privacy', '')
-          and 'forgotten when you close this tab' in o.get('privacy', '') and 'never saved in your files' in o.get('privacy', ''), o)
-    check('lookup: the token is kept in this tab only (sessionStorage), not in the field and not in localStorage',
+    o = step(open_panel, {}) if al.get('canary') == 'enforced' else {}
+    check('lookup, allowed: Send is offered and the line is gone', o.get('phase') == 'open' and o.get('line hidden') is True and o.get('send shown') is True, o)
+    check('lookup: the token is kept for the tab (sessionStorage), not in the field and not in localStorage unless remembered',
           o.get('session') == LOOKUP_TOKEN and o.get('local') is None and o.get('field') == '' and 'A token is given' in o.get('tokenState', ''), {k: v for k, v in o.items() if k in ('field', 'local', 'tokenState', 'error')})
     first = [json.loads(x) for x in o.get('first', [])]
     check('lookup: the preview gives places, queries, requests and the share of the allowance, filters off, and the first 20 queries exactly',
@@ -598,6 +668,7 @@ def krisis_lookup_case(page, tmp):
     s = step(send, {}) if o.get('phase') == 'open' else {}
     q1 = ((s.get('work') or {}).get('lookups') or [{}])[0].get('queries', {})
     states = dict(Counter(v['state'] for v in q1.values()))
+    check('lookup, allowed: the request IS sent (the positive control for "nothing sent" above)', o.get('phase') == 'open' and len(calls) >= 1 and len(asked) >= 1 and na.get('sent') == 0, {'calls': len(calls), 'asked': len(asked)})
     check('lookup: the first 20 queries in the preview are those WHG received', bool(calls) and bool(first) and list(json.loads(calls[0]['body'])['queries'].values())[:20] == first, calls[:1])
     check('lookup: a quota stop keeps what was answered, says so in words, and offers Resume',
           lk(s).get('stopped') == 'quota' and states == {'answered': 24, 'unanswered': 1, 'stopped': 5} and "allowance of requests for today is spent" in s.get('progress', '')
@@ -687,6 +758,46 @@ def krisis_lookup_case(page, tmp):
           and not any(has(c['url']) or has(c['body']) for c in calls) and not has(wh.get('plato', LOOKUP_TOKEN)) and not has(wh.get('text', LOOKUP_TOKEN))
           and not has(wh.get('html', LOOKUP_TOKEN)) and not has(wh.get('url', LOOKUP_TOKEN)) and not has(consoled) and not has(f.get('saved', LOOKUP_TOKEN)),
           {'in': [k for k, v in {**wh, 'console': consoled, 'saved': f.get('saved', '')}.items() if has(v)], 'error': wh.get('error')})
+
+    # Withdrawn in the panel ("Not decided"): at once, the review screen's place offers no button that
+    # would send, only the module's line; allowed again (it is still in this load's policy), Find is back.
+    def set_to(v):
+        page.click('#permissions-button')
+        until(page, '() => document.getElementById("permissions-panel")?.open', 10)
+        page.check(f'#permissions-panel fieldset.perm[data-key="gazetteer:whg"] input[value="{v}"]')
+        page.keyboard.press('Escape')
+        until(page, '() => !document.getElementById("permissions-panel").open', 10)
+    def withdraw():
+        before = len(calls)
+        set_to('undecided')
+        page.wait_for_function("() => !!document.querySelector('#review-place .find .needs-permission:not([hidden])')", timeout=10_000)
+        off = {'line': page.inner_text('#review-place .find .needs-permission'), 'buttons': page.eval_on_selector_all('#review-place button[data-look]', 'bs => bs.length'),
+               'send hidden': page.evaluate("() => document.getElementById('lookup-send').hidden")}
+        set_to('allowed')
+        page.wait_for_function("() => !!document.querySelector('#review-place button[data-look=\"find\"]')", timeout=10_000)
+        on = {'lines': page.eval_on_selector_all('#review-place .needs-permission:not([hidden])', 'els => els.length'),
+              'buttons': page.eval_on_selector_all('#review-place button[data-look]', 'bs => bs.length'), 'send hidden': page.evaluate("() => document.getElementById('lookup-send').hidden")}
+        return {'off': off, 'on': on, 'sent': len(calls) - before}
+    wd = step(withdraw, {}) if f.get('saved') else {}
+    off, on = wd.get('off') or {}, wd.get('on') or {}
+    check('lookup: a permission withdrawn in the panel takes the review screen\'s lookup buttons away at once, for the one line; allowed again, they are back',
+          off.get('line', '').startswith('Needs permission: World Historical Gazetteer') and off.get('buttons') == 0 and off.get('send hidden') is True
+          and on.get('lines') == 0 and (on.get('buttons') or 0) >= 1 and on.get('send hidden') is False and wd.get('sent') == 0, wd)
+
+    # A redirect is refused by the permissions module (never followed), and stops the lookup in words.
+    def redirected():
+        before = len(calls)
+        redirect['on'] = True
+        try:
+            page.click('#review-place button[data-look="find"]')
+            page.fill('#find-query', 'Zennor'); page.press('#find-query', 'Enter')
+            s = wait_state(page, lambda s: lk(s).get('running') is False and lk(s).get('single') is True and lk(s).get('stopped'), 30, 'redirect')
+        finally:
+            redirect['on'] = False
+        return {'stopped': lk(s).get('stopped'), 'refused': ((s.get('work') or {}).get('lookups') or [{}])[-1].get('stopped'), 'said': page.inner_text('#lookup-progress'), 'sent': len(calls) - before}
+    rd = step(redirected, {}) if on.get('buttons') else {}
+    check('lookup: WHG answering with a redirect is refused, not followed, and stops the lookup in words, once (not retried)',
+          rd.get('stopped') == 'permission' and (rd.get('refused') or {}).get('refused') == 'moved' and 'sent the request on elsewhere' in rd.get('said', '') and rd.get('sent') == 1, rd)
 
     # A lookup running: the actions that would take the review away are disabled; a batch redrawing the
     # place keeps what is being typed in the find form; a refused token opens the closed panel to focus its
@@ -1383,7 +1494,9 @@ def main():
                   half.get('held again') == 2 and refused(half.get('refused again'))
                   and done(half.get('second meanwhile')) and done(half.get('first after')), half)
             main_permissions(ctx, page, url, main_requests)
-            krisis_lookup_case(page, tmp)
+            # After main_permissions, whose first check is that nothing above asked another site: the
+            # lookup asks (a fake) WHG once it is allowed.
+            krisis_lookup_case(page, tmp, url)
             ctx.close()
             front = pw.chromium.launch(headless=True)
             try: front_page_checks(front, url); theme_checks(front, url)

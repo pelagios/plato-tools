@@ -400,9 +400,22 @@ const STOPPED = {
   suspect: 'The lookup stopped: the gazetteer answered nothing at all to any query of the first batch, which is more likely a filter or setting it did not take than places it does not have. Those places are marked not answered, not "no match". Check the filters and settings. If they are right, send the same places again with the same settings (resume the lookup): their empty answers are then accepted as genuine, and the lookup goes on.',
   fault: 'The lookup stopped because of a fault in the tools (please report it). What was answered before it is kept.',
 };
+/** Why a lookup stopped when the permissions module refused a request (src/lib/permissions.js, PermissionError's kind). */
+const REFUSED_LOOKUP = {
+  address: 'The lookup stopped: the service asked for something from a site its permission does not cover, so nothing was sent there.',
+  never: 'The lookup stopped: this gazetteer is set to Never in Permissions, so nothing more was sent.',
+  undecided: 'The lookup stopped: this gazetteer is not allowed in Permissions now, so nothing more was sent. Allow it there, then resume the lookup.',
+  reload: 'The lookup stopped: this gazetteer was allowed after the page loaded, and can be asked once the page is reloaded. Save the review, reload the page, and resume it.',
+  unprotected: "The lookup stopped: this browser did not show that it enforces the page's protection, so no other site is asked from this page.",
+  moved: 'The lookup stopped: the gazetteer sent the request on elsewhere, which is not followed, so its answer was not used.',
+  network: 'The lookup stopped: the gazetteer could not be reached; it may not allow other sites to read it. Resume it when it can.',
+};
+
 export const LOOKUP_WORDS = {
   /** Why a lookup stopped ({ kind, message } from runLookup), with what the gazetteer said. */
-  stopped: (s) => (STOPPED[s.kind] || STOPPED.server) + (s.message ? ` (${s.message})` : ''),
+  stopped: (s) => (s.kind === 'permission' ? REFUSED_LOOKUP[s.refused] || REFUSED_LOOKUP.undecided : (STOPPED[s.kind] || STOPPED.server) + (s.message ? ` (${s.message})` : '')),
+  /** The same, for each kind of refusal by the permissions module. */
+  refused: REFUSED_LOOKUP,
   /** The places a lookup takes, as the options name them. */
   choices: {
     unmatched: 'places without candidates from the other dataset', all: 'all places',
@@ -464,9 +477,9 @@ export const lookupPage = {
   placesNotRead: 'The places of your dataset could not be read, so there is nothing to look up.',
   busy: 'Wait for the work in hand to finish, then look up.',
   needToken: 'Give your WHG token first: WHG answers only queries that carry one.',
-  tokenGiven: 'A token is given for this tab',
+  tokenGiven: 'A token is given',
   tokenNone: 'No token given yet',
-  forgotten: 'The token is forgotten in this tab. If it may have been seen anywhere else, regenerate it in WHG: that is the only way to revoke it.',
+  forgotten: 'The token is forgotten. If it may have been seen anywhere else, regenerate it in WHG: that is the only way to revoke it.',
   badEndpoint: "Give the reconciliation service's address, beginning https://.",
   badTemplate: "Give how to make a candidate's address from its id, with {{id}} in it, such as https://www.wikidata.org/wiki/{{id}}; or leave it empty.",
   /** The share of WHG's daily allowance a lookup would use. */

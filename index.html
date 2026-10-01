@@ -100,7 +100,6 @@
     <!-- Krisis: gazetteer lookup (online, optional). Runs on the page's thread (src/app.js), never in the worker. -->
     <details id="lookup" class="lookup">
       <summary>Look up in a gazetteer (online, optional)</summary>
-      <p class="note lookup-privacy">Looking up is optional and goes online. WHG (or the service you choose) receives only what the preview shows: the names of your places, and their coordinates or countries only if you turn those filters on. Your token is sent to WHG with each request and nowhere else: it is never saved in your files, and forgotten when you close this tab.</p>
       <p class="lookup-how">What is found is added to the review below, if one is open, for you to decide on as any other match; otherwise a new review begins. Nothing is accepted for you.</p>
       <fieldset class="lookup-service">
         <legend>Service</legend>
@@ -111,15 +110,13 @@
           <input id="lookup-endpoint" type="url" placeholder="https://example.org/reconcile" size="40">
           <label for="lookup-iri">How to make a candidate's address from its id (if its ids are not addresses)</label>
           <input id="lookup-iri" type="text" placeholder="https://www.wikidata.org/wiki/{{id}}" size="40">
-          <small>No token is sent to another service.</small>
         </div>
       </fieldset>
       <div class="lookup-token">
-        <label for="whg-token">Your WHG token, from your profile on whgazetteer.org. It stays in this tab only.</label>
+        <label for="whg-token">Your WHG token, from your profile on whgazetteer.org</label>
         <input id="whg-token" type="password" autocomplete="off" spellcheck="false" size="30">
         <button id="whg-forget" type="button">Forget the token</button>
         <small id="whg-token-state">No token given yet</small>
-        <small>Forgetting it clears it from this tab. Regenerating it in WHG is the only real way to revoke it.</small>
       </div>
       <label for="lookup-places">Which places</label>
       <select id="lookup-places"></select>
@@ -132,6 +129,7 @@
         <input id="lookup-near-km" type="number" min="1" max="20015" step="1" value="25">
       </fieldset>
       <div id="lookup-preview"></div>
+      <p id="lookup-permission" hidden></p>
       <div class="lookup-go">
         <button id="lookup-send" type="button" class="primary" disabled>Send to WHG</button>
         <button id="lookup-stop" type="button" hidden>Stop</button>

@@ -12,11 +12,11 @@ import { stash as stashForChora, dropStale as dropStaleHandoff } from './chora/h
 import { storageNeed } from './engine/storage.js';
 import * as permissions from './lib/permissions.js';
 import { RELOAD_LOSES } from './lib/permission-words.js';
-// Krisis: gazetteer lookup, run on this thread (never the worker), with the token from its one keeper.
+// Krisis: gazetteer lookup, run on this thread (never the worker), through the permissions module, with
+// the token from its one keeper (permissions.token).
 import { LOOKUP_WORDS, lookupPage as LW } from './engine/words.js';
-import * as whgToken from './lib/whg-token.js';
 import { createLookup, WHG_ENDPOINT, isWhg } from './engine/gazetteer/index.js';
-import { runLookup, planLookup, serviceOf, iriFromTemplate, iriVia, manifestSettings, newWork, defaultChoice, licenceOf, PLACE_CHOICES, WHG_REQUESTS_A_DAY } from './engine/krisis/lookup.js';
+import { runLookup, planLookup, gazetteerPermission, permittedFetch, serviceOf, iriFromTemplate, iriVia, manifestSettings, newWork, defaultChoice, licenceOf, PLACE_CHOICES, WHG_REQUESTS_A_DAY } from './engine/krisis/lookup.js';
 import { candidateSource } from './engine/krisis/identity.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
@@ -600,6 +600,7 @@ function render(focus) {
     + (hasLookups() ? groupedHtml(cands)
       : `<p>${escapeHtml(W.candidates(cands.length))}</p><ol class="candidates">` + cands.map((c, i) => candidateHtml(c, i)).join('') + '</ol>');
   restoreTyped(typed);
+  drawPermission();   // Krisis: gazetteer lookup
   // A form newly opened takes the focus; one redrawn (by a lookup's batch) has it back only if it had it.
   if (findFor === iri) { if (!typed.find || typed.find.focused) $('find-query')?.focus(); return; }
   if (basisFor) { if (!typed.basis || typed.basis.focused) $('basis-input')?.focus(); return; }
@@ -728,48 +729,62 @@ permissions.onBeforeReload(() => {}, { loses: () => (busy ? RELOAD_LOSES.running
 permissions.onBeforeReload(() => {}, { loses: () => (work && unsaved ? RELOAD_LOSES.review(unsaved) : null) });
 // Krisis: gazetteer lookup (online, optional). The places of the dataset are looked up in WHG, or
 // another reconciliation service, and what is found is added to the review on screen (or begins one).
-// It runs HERE, on the page's thread, never in the worker, so that the token (src/lib/whg-token.js,
-// its one keeper; the page holds no copy) goes nowhere but the Authorization header of a request to
-// WHG: not into window.__plato, a work file, an address, the console or the words of an error. The
-// page hands it to the shared WHG lookup when it changes (setToken; Forget calls clearToken), and
-// never passes it anywhere else. The answers are merged into the work object after each batch, so
-// "Save the review" works at any moment.
+// It runs HERE, on the page's thread, never in the worker (which is not under the page's policy), so
+// that every request goes through the permissions module, and the token (permissions.token, its one
+// keeper; the page holds no copy) goes nowhere but the Authorization header of a request to WHG: not
+// into window.__plato, a work file, an address, the console or the words of an error. The page hands
+// it to the shared WHG lookup when it changes (setToken; Forget calls clearToken), and never passes it
+// anywhere else. The answers are merged into the work object after each batch, so "Save the review"
+// works at any moment.
+// Send is offered only once the service's permission ('gazetteer', 'whg' or its site) is allowed;
+// until then the module's one line ("Needs permission: …", which opens the Permissions panel) is shown
+// in its place, and the preview of what would be sent is still shown. A request the module refuses
+// stops the lookup (permittedFetch aborts it with the PermissionError, runLookup words it).
 let gathered = null, placesWaiting = null, looking = null, findFor = null, afterStop = null;
 // What another service's manifest said (manifestSettings), by its address, once a lookup has read it: the preview then shows its type.
 const manifests = new Map();
-/** WHG's lookup: the one shared in the page with Chora (one request in flight, whoever asks). */
-const whgLookup = () => createLookup({ endpoint: WHG_ENDPOINT });
-/** The shared lookup takes the keeper's token, or none: at start (a token kept in this tab from before) and on every change. */
-const passToken = () => { const t = whgToken.get(); if (t) whgLookup().setToken(t); else whgLookup().clearToken(); };
-const showTokenState = () => { $('whg-token-state').textContent = whgToken.get() ? LW.tokenGiven : LW.tokenNone; };
+const token = permissions.token;
+/** The fetch every lookup is made with, the same function for all (the shared lookup keeps its first). */
+const gazetteerFetch = permittedFetch(permissions.fetch, (e) => looking?.abort(e));
+/** WHG's lookup: the one shared in the page (one request in flight, whoever asks). */
+const whgLookup = () => createLookup({ endpoint: WHG_ENDPOINT, fetch: gazetteerFetch });
+/** Whether the permissions module allows a lookup of this service now (allowed, and in this load's policy). */
+const mayLookUp = (svc) => !svc.problem && permissions.allowed('gazetteer', gazetteerPermission(svc.service.endpoint));
+/** The module's one line for this service's permission, in `el` (nothing shown once it is allowed). */
+const needsLine = (el, svc) => { if (svc.problem) permissions.unneed(el); else permissions.needs(el, 'gazetteer', gazetteerPermission(svc.service.endpoint), { name: svc.whg ? undefined : svc.service.title }); };
+/** The shared lookup takes the keeper's token, or none: at start (a token kept from before) and on every change. */
+const passToken = () => { const t = token.get(); if (t) whgLookup().setToken(t); else whgLookup().clearToken(); };
+const showTokenState = () => { $('whg-token-state').textContent = token.get() ? LW.tokenGiven : LW.tokenNone; };
 /** The review on screen, which a lookup adds to; null when none is (a lookup then begins one). */
 const reviewWork = () => (work && !$('review').hidden ? work : null);
 const hasLookups = () => !!work && ((work.lookups || []).length > 0 || work.others === null);
 const shortName = (service) => (isWhg(service.endpoint) ? LW.whg : service.title);
 const lookupOf = (id) => (work.lookups || []).find((l) => l.id === id);
 /** Text cleaned of the token, for what the gazetteer module does not word itself (a fault's stack). The module cleans its own errors and a query's. */
-const scrub = (text) => { const t = whgToken.get(); return t ? String(text).split(t).join('[token]') : String(text); };
+const scrub = (text) => { const t = token.get(); return t ? String(text).split(t).join('[token]') : String(text); };
 function lookupSay(text, warn = false) { const p = $('lookup-progress'); p.textContent = text; p.classList.toggle('warn', warn); }
 function lookupState(more) { state.lookup = { ...(state.lookup || {}), ...more }; }
 
 // The places of the dataset, with the links it states, read by the worker (gather()); once per choice of files.
 function gatherPlaces() {
   const base = $('base').value.trim() || undefined;
-  if (gathered && gathered.files === files && gathered.base === base) return Promise.resolve(gathered);
+  // A table of places is read by the matching of its columns chosen, as Match reads it.
+  const cols = isTable(input) && columns ? { ...columns.mapping } : undefined, colsText = cols ? mappingText(cols) : undefined;
+  if (gathered && gathered.files === files && gathered.base === base && gathered.cols === colsText) return Promise.resolve(gathered);
   if (placesWaiting) return placesWaiting.promise;
-  if (busy || !input?.format) return Promise.resolve(null);
+  if (busy || !readable(input)) return Promise.resolve(null);
   busy = true; buttons(true);
   lookupSay(LW.reading);
   let resolve;
   const promise = new Promise((r) => { resolve = r; });
-  placesWaiting = { promise, resolve, files, base };
-  worker.postMessage({ cmd: 'places', subjects: files, options: { base } });
+  placesWaiting = { promise, resolve, files, base, cols: colsText };
+  worker.postMessage({ cmd: 'places', subjects: files, options: { base, ...(cols ? { columns: cols } : {}) } });
   return promise;
 }
 function onPlaces(data) {
   const w = placesWaiting; placesWaiting = null;
   busy = false; buttons(!!looking);   // a lookup running keeps them disabled
-  gathered = { files: w.files, base: w.base, subjects: data.subjects || null, places: data.places || null };
+  gathered = { files: w.files, base: w.base, cols: w.cols, subjects: data.subjects || null, places: data.places || null };
   lookupSay('');
   w.resolve(gathered);
 }
@@ -811,8 +826,11 @@ async function refreshPreview() {
   if (!$('lookup').open) return;
   const svc = lookupService();
   send.disabled = true;
+  // Send is offered once the permission allows it; until then, the module's one line in its place.
+  needsLine($('lookup-permission'), svc);
+  send.hidden = !mayLookUp(svc);
   if (svc.problem) { box.innerHTML = `<p class="warn">${escapeHtml(svc.problem)}</p>`; return; }
-  if (!input?.format && !reviewWork()) { box.innerHTML = `<p>${escapeHtml(LW.noDataset)}</p>`; return; }
+  if (!readable(input) && !reviewWork()) { box.innerHTML = `<p>${escapeHtml(LW.noDataset)}</p>`; return; }
   const g = await gatherPlaces();
   const places = g?.places ?? null;
   if (!places && !reviewWork()) { box.innerHTML = `<p class="warn">${escapeHtml(busy ? LW.busy : LW.placesNotRead)}</p>`; return; }
@@ -836,11 +854,18 @@ async function lookUp({ only = null, query = null, allNames, which } = {}) {
   if ($('whg-token').value.trim()) commitToken();
   const svc = lookupService();
   if (svc.problem) { $('lookup').open = true; return lookupSay(svc.problem, true); }
-  if (svc.whg && !whgToken.get()) { $('lookup').open = true; lookupSay(LW.needToken, true); $('whg-token').focus(); return; }
+  // Not allowed (or not decided): nothing is sent; the panel shows the one line, whose button opens Permissions.
+  if (!mayLookUp(svc)) {
+    $('lookup').open = true; lookupSay('');
+    needsLine($('lookup-permission'), svc);
+    $('lookup-permission').querySelector('button')?.focus();
+    return;
+  }
+  if (svc.whg && !token.get()) { $('lookup').open = true; lookupSay(LW.needToken, true); $('whg-token').focus(); return; }
   const g = await gatherPlaces();
   const places = g?.places ?? null;
   const existing = reviewWork();
-  if (!existing && !g?.subjects) return lookupSay(input?.format ? LW.placesNotRead : LW.noDataset, true);
+  if (!existing && !g?.subjects) return lookupSay(readable(input) ? LW.placesNotRead : LW.noDataset, true);
   // A name typed for one place is sent instead of its label, and what it finds is added beside the place's candidates (runLookup's query).
   const opts = lookupOptions({ ...(which ? { places: which } : {}), ...(only ? { places: 'all', only } : {}), ...(allNames !== undefined ? { allNames } : {}), ...(only && query ? { query } : {}) });
   let lookup;
@@ -848,7 +873,7 @@ async function lookUp({ only = null, query = null, allNames, which } = {}) {
   const template = { template: svc.template ?? null };
   try {
     // WHG's is the shared lookup, which already has the token (passToken); another service is sent none.
-    lookup = svc.whg ? whgLookup() : createLookup({ endpoint: svc.service.endpoint, token: null, shared: false, iri: iriVia(template) });
+    lookup = svc.whg ? whgLookup() : createLookup({ endpoint: svc.service.endpoint, token: null, shared: false, iri: iriVia(template), fetch: gazetteerFetch });
   } catch (e) { return lookupSay(scrub(e.message), true); }
   const w = existing || newWork(g.subjects, { reviewer: reviewer() });
   const name = existing ? workName : `${(files[0]?.name || 'review').replace(/\.gz$/i, '').replace(/\.[^.]+$/, '')}.krisis.json`;
@@ -909,7 +934,7 @@ async function offerResume(svc) {
 function commitToken() {
   const f = $('whg-token');
   if (!f.value.trim()) return;
-  whgToken.set(f.value);
+  token.set(f.value);
   f.value = '';   // the token is kept by its keeper only, not in the field
 }
 
@@ -923,13 +948,17 @@ function lastQuery(iri) {
 function lookupPlaceHtml(iri, place) {
   const svc = lookupService(), service = svc.problem ? LW.whg : shortName(svc.service), last = lastQuery(iri);
   const cands = candidatesOf(work, iri).filter((c) => c.lookup && lookupOf(c.lookup)?.service.endpoint === last?.l.service.endpoint);
+  // Not allowed (or not decided): no button that would send, and in their place the module's one line,
+  // drawn by drawPermission() once the place is on screen. (A service mistyped says so when Find is pressed.)
+  const may = !!svc.problem || mayLookUp(svc);
   let out = '';
   if (last && !(last.q.state === 'answered' && cands.length)) {
     out += `<p class="lookup-state${last.q.state === 'answered' ? '' : ' warn'}">${escapeHtml(LW.state(shortName(last.l.service), last.q))}</p>`;
     const others = [...new Set((place.names || []).filter((n) => n && n.trim().toLowerCase() !== (place.label || '').trim().toLowerCase()))];
-    if (last.q.state === 'answered' && !last.q.found && last.q.sent.length === 1 && others.length) out += `<button type="button" data-look="names">${escapeHtml(LW.tryNames(1 + others.length))}</button> `;
-    if (last.q.state !== 'answered') out += `<button type="button" data-look="again">${escapeHtml(LW.again)}</button> `;
+    if (may && last.q.state === 'answered' && !last.q.found && last.q.sent.length === 1 && others.length) out += `<button type="button" data-look="names">${escapeHtml(LW.tryNames(1 + others.length))}</button> `;
+    if (may && last.q.state !== 'answered') out += `<button type="button" data-look="again">${escapeHtml(LW.again)}</button> `;
   }
+  if (!may) return `<div class="find">${out}<p class="lookup-permission"></p></div>`;
   out += `<button type="button" data-look="find">${escapeHtml(LW.find(service))}</button>`;
   if (findFor === iri) {
     out += `<form class="find-form" data-for="${escapeHtml(iri)}"><label for="find-query">${escapeHtml(LW.findLabel)}</label>`
@@ -937,6 +966,11 @@ function lookupPlaceHtml(iri, place) {
       + `<button type="submit" class="primary">${escapeHtml(LW.findSend)}</button><button type="button" data-look="cancel">Cancel</button></form>`;
   }
   return `<div class="find">${out}</div>`;
+}
+/** The module's one line on the review screen, where lookupPlaceHtml() left room for it. */
+function drawPermission() {
+  const el = $('review-place').querySelector('.find .lookup-permission');
+  if (el) needsLine(el, lookupService());
 }
 /** Candidates grouped by where they came from, each group in the order it was ranked in (never by name). */
 function groupedHtml(cands) {
@@ -997,9 +1031,15 @@ $('lookup').addEventListener('change', (e) => {
 });
 $('lookup').addEventListener('input', (e) => { if (e.target.type === 'number' || e.target.type === 'url' || e.target.id === 'lookup-iri') refreshPreview(); });
 // Forget: the shared lookup sends no token from its next request, and the keeper forgets it.
-$('whg-forget').onclick = () => { $('whg-token').value = ''; whgLookup().clearToken(); whgToken.forget(); lookupSay(LW.forgotten); };
-// A token given or forgotten (here, or by Chora through the same keeper) goes to the shared lookup.
-whgToken.onChange(() => { showTokenState(); passToken(); });
+$('whg-forget').onclick = () => { $('whg-token').value = ''; whgLookup().clearToken(); token.forget(); lookupSay(LW.forgotten); };
+// A token given or forgotten (here, in the Permissions panel, or in another tab) goes to the shared lookup.
+token.onChange(() => { showTokenState(); passToken(); });
+// A permission allowed or withdrawn (in the panel, or another tab): Send, and the review screen's buttons, follow.
+permissions.onChange(() => {
+  if (looking) return;
+  refreshPreview();
+  if (work && !$('review').hidden && order.length) render(false);
+});
 showTokenState();
 passToken();
 $('lookup-send').onclick = () => lookUp();
