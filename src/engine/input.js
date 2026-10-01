@@ -524,6 +524,7 @@ export async function zipEntries(file) {
  * as UTF-8 strictly (notUtf8 names it `label`). Only the entry's own bytes are read, by the sizes
  * the central directory gives; text that does not come to the size it gives is damaged.
  */
+const PIECE = 2 ** 20;
 export async function zipEntryText(file, entry, label) {
   const damaged = (why) => new DataError(`${label} is damaged, so it cannot be read (${why}).`);
   if (entry.flags & 1) throw new DataError(`${label} is encrypted, so it cannot be read. Zip the tables without a password.`);
@@ -538,7 +539,12 @@ export async function zipEntryText(file, entry, label) {
     const { Inflate } = await import('fflate');
     let inflate;
     bytes = bytes.pipeThrough(new TransformStream({
-      start(ctl) { inflate = new Inflate((chunk) => { if (chunk.length) ctl.enqueue(chunk); }); },
+      // What one chunk of the zip inflates to is given on in pieces of at most a megabyte (views of
+      // it, not copies). Given on whole, a chunk was a sheet's text, or much of it (17.7 MB of
+      // names.csv at 200,000 places), which the CSV reader parsed into rows all at once: the page
+      // took 790 MB loading a zip of tables, and 500 MB loading the same tables as CSV files, which
+      // the browser reads in chunks of 2 MB.
+      start(ctl) { inflate = new Inflate((chunk) => { for (let i = 0; i < chunk.length; i += PIECE) ctl.enqueue(chunk.subarray(i, i + PIECE)); }); },
       transform(chunk) { try { inflate.push(chunk, false); } catch (e) { throw damaged(String(e && e.message || e)); } },
       flush() { try { inflate.push(new Uint8Array(0), true); } catch (e) { throw damaged(String(e && e.message || e)); } },
     }));

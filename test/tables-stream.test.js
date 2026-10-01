@@ -17,7 +17,7 @@ import { run } from '../src/engine/pipeline.js';
 import { csvRecords, papaRecords, papaRow } from '../src/formats/csv.js';
 import { TableStore, openSqlite } from '../src/lib/store.js';
 import { storageNeed } from '../src/engine/storage.js';
-import { detect } from '../src/engine/input.js';
+import { detect, zipEntries, zipEntryText } from '../src/engine/input.js';
 import { openNodeSqlite } from '../src/node/sqlite.js';
 
 const EX = `${PLATO_REPO}/schemas/tables/examples`;
@@ -283,6 +283,32 @@ test('a sheet in a zip that is damaged is unreadable on its own; a zip with no c
   const cut = await go([new File([zip.slice(0, zip.length - 30)], 'survey.zip')], 'check');
   assert.equal(cut.incomplete, true);
   assert.match(cut.report.items.find((i) => i.kind === 'unreadable')?.examples[0] || '', /The zip is damaged or incomplete/);
+});
+
+test('a sheet in a zip is inflated a megabyte at a time, not whole, and its text is unchanged, a character split between pieces too', async () => {
+  // 3 MB of rows of € (three bytes each), which deflate shrinks to a few kilobytes: one chunk of the
+  // zip inflates to all of it, which was given on whole, as one string of the sheet's text, and
+  // parsed into rows all at once (the page took 790 MB loading 200,000 places from a zip).
+  const text = 'place_id,label\n' + Array.from({ length: 1000 }, (_, i) => `p${i},${'€'.repeat(1100)}`).join('\n') + '\n';
+  const bytes = strToU8(text);
+  assert.ok(bytes.length > 3 * 2 ** 20 && (bytes[2 ** 20] & 0xc0) === 0x80, 'the first megabyte ends inside a character');
+  const zip = new File([zipSync({ 'places.csv': bytes }, { level: 9 })], 't.zip');
+  assert.ok(zip.size < 64 * 1024, `the zip is ${zip.size} bytes: one chunk of it`);
+  const [entry] = await zipEntries(zip);
+  const reader = (await zipEntryText(zip, entry, 'places.csv in t.zip')).getReader();
+  const got = [];
+  for (let r; !(r = await reader.read()).done;) got.push(r.value);
+  assert.equal(got.join(''), text);
+  const longest = Math.max(...got.map((t) => t.length));
+  assert.ok(got.length >= 4 && longest <= 2 ** 20, `${got.length} chunks, the longest ${longest} characters`);
+  // Read as tables, a zip whose places.csv inflates to megabytes gives the records the CSV files give.
+  const s = sheetsOf(`${EX}/survey`);
+  s['places.csv'] += Array.from({ length: 3000 }, (_, i) => `x${i},${'€'.repeat(400)}`).join('\n') + '\n';
+  const z = await go([new File([zipSync(Object.fromEntries(Object.entries(s).map(([f, t]) => [f, strToU8(t)])), { level: 9 })], 'big.zip')], 'convert', 'plato-jsonl');
+  const c = await go(filesOf(s), 'convert', 'plato-jsonl');
+  const zr = records(z, z.outputs[0].name), cr = records(c, c.outputs[0].name);
+  assert.equal(zr.length, 3003);
+  assert.deepEqual(zr, cr);
 });
 
 // ---- the page's storage estimate -------------------------------------------------------------------
