@@ -290,7 +290,15 @@ readers link to those headings, so keep them.
   converted as the source's words in the editors' parts, and those parts' div types, counted in `late`).
   Everything else is emitted at once, so a held name comes out after the names read after it. The reading
   options that convert the editors' words (`commentaryPlaces`, `headerPlaces`) are refused while
-  `EDITORIAL_IRI` is null (`teiReadingRefusal`); tests set it with `setEditorialIriForTests`. With `listPlaces`, a `<place>` gives a Headword
+  `EDITORIAL_IRI` is null (`teiReadingRefusal`); tests set it with `setEditorialIriForTests`. In any
+  file, edition div or not, a `<note>` marked as the editors' (`noteMark`: `@type` editorial,
+  commentary or translator, or a `@resp` that is not the work's author's) is the editors' at once,
+  never held, its example naming the mark (`note (resp="editor")`). A `@resp` is the author's when
+  each of its pointers is `#x` for an `xml:id` on the titleStmt's `<author>` (or inside it) or on a
+  titleStmt or editionStmt `<respStmt>` (or inside it) whose `<resp>` is "author" or "aut", or the
+  whole `@resp` is such an author's or respStmt name's text, case ignored (`authorField`,
+  `isAuthor`); anything else (an editor's id, an id not in the header, a URI) is the editors'.
+  Unmarked notes in a file with no edition div stay the source's. With `listPlaces`, a `<place>` gives a Headword
   attestation (`listPlace()`), from its own names (a name that is the `<place>`'s child) and its own `<location>`s (not one whose type says it is another place's, `OTHER_PLACE_LOCATION`, such as Schnitzler's `located_in_place`: `tei-listplace-geo-other-place`), its `<geo>` read by `parseGeo`; one in the teiHeader goes on the header's `queue`, run at
   `</teiHeader>` after `header()`, so that the source, the own host and the `geoDecl` are read from
   the whole header. With `headerPlaces` (held), a findspot (a `provenance type="found"` with no subtype, or one meaning found, `FOUND_SUBTYPE`; another subtype, such as I.Sicily's `first-seen`, is a plain attestation with a note, `tei-provenance-other`) or place of origin in the header (a `<geo>` there is reported, `tei-header-geo`, with the option or without)
