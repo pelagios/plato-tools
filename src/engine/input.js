@@ -56,7 +56,9 @@ export function notUtf8(name, at = '') {
 const AT_END = 'at its very end, where a character stops part-way';
 /**
  * Where the first byte of `b` that is not UTF-8 is, in words, given the bytes and lines before `b`
- * (`whole` when `b` is all there is). A fault begun in the bytes before `b` is placed at its start.
+ * (`whole` when `b` is all there is). `b` begins with the bytes of a character the bytes before it
+ * left unfinished, if any, so that a character begun in one chunk and broken in the next is placed
+ * at its first byte.
  */
 function whereNotUtf8(b, bytes, lines, whole = false) {
   const found = firstNonUtf8(b);
@@ -66,16 +68,33 @@ function whereNotUtf8(b, bytes, lines, whole = false) {
   for (let k = 0; k < i; k++) if (b[k] === 0x0a) n++;
   return `on line ${n.toLocaleString('en-GB')} (byte ${(bytes + i + 1).toLocaleString('en-GB')})`;
 }
+/** How many bytes at the end of `b` (valid UTF-8 so far) are a character not yet finished: 0 to 3. */
+function unfinished(b) {
+  for (let k = 1; k <= Math.min(3, b.length); k++) {
+    const x = b[b.length - k];
+    if (x >= 0x80 && x <= 0xbf) continue;
+    return (x >= 0xf0 ? 4 : x >= 0xe0 ? 3 : x >= 0xc0 ? 2 : 1) > k ? k : 0;
+  }
+  return 0;
+}
 /** Bytes -> text, strictly: a TransformStream that stops with notUtf8, saying where, at the first byte that is not UTF-8. */
 function strictUtf8(name) {
   const dec = new TextDecoder('utf-8', { fatal: true });
-  let bytes = 0, lines = 1;
+  // `carry`: the bytes of a character the chunks so far left unfinished (no line break among them).
+  let bytes = 0, lines = 1, carry = new Uint8Array(0);
   return new TransformStream({
     transform(chunk, ctl) {
       let t;
-      try { t = dec.decode(chunk, { stream: true }); } catch { throw notUtf8(name, whereNotUtf8(chunk, bytes, lines)); }
+      try { t = dec.decode(chunk, { stream: true }); }
+      catch {
+        const all = carry.length ? new Uint8Array(carry.length + chunk.length) : chunk;
+        if (carry.length) { all.set(carry); all.set(chunk, carry.length); }
+        throw notUtf8(name, whereNotUtf8(all, bytes - carry.length, lines));
+      }
       bytes += chunk.length;
       for (let k = 0; k < chunk.length; k++) if (chunk[k] === 0x0a) lines++;
+      const tail = chunk.length >= 3 ? chunk.subarray(chunk.length - 3) : Uint8Array.of(...carry, ...chunk).slice(-3);
+      carry = tail.slice(tail.length - unfinished(tail));
       if (t) ctl.enqueue(t);
     },
     flush(ctl) {

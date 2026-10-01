@@ -131,3 +131,32 @@ test('the sheets of the tables compressed with gzip read as the same sheets unco
     assert.match(unreadable(r)[0].examples[0], at);
   }
 });
+test('a character begun at the very end of one chunk and broken in the next is placed at its first byte, however the file is cut', async () => {
+  // A Latin-1 é (0xe9) begins a three-byte character in UTF-8, so it is a fault only once the next
+  // byte is seen: a part that ends on it leaves it unfinished, and the fault shows in the next part.
+  // A € cut short (0xe2 0x82, then a comma) is the same, two bytes before the next part.
+  const head = 'name,lat,lon\nRoma,41.9,12.5\n';
+  const cases = [
+    ['é', Buffer.concat([Buffer.from(head + 'Caf'), Buffer.from([0xe9]), Buffer.from(',50.9,6.9\nKöln,50.9,6.9\n')])],
+    ['€ cut short', Buffer.concat([Buffer.from(head + 'Caf'), Buffer.from([0xe2, 0x82]), Buffer.from(',50.9,6.9\nKöln,50.9,6.9\n')])],
+  ];
+  for (const [what, bad] of cases) {
+    const at = Buffer.byteLength(head + 'Caf');   // 0-based: the lead byte, on line 3
+    const want = new RegExp(`on line 3 \\(byte ${at + 1}\\)`);
+    const sizes = [at + 1, at, at + 2, (at + 1) / 2, 15, 16, 1, 2, 3, 4099];
+    assert.ok(sizes.some((n) => Number.isInteger(n) && (at + 1) % n === 0), 'some parts end on the lead byte');
+    for (const size of sizes.filter(Number.isInteger)) {
+      const r = await go([inParts(bad, 'x.csv', size)], 'check');
+      assert.match(unreadable(r)[0]?.examples[0] || 'none', want, `${what}, parts of ${size}`);
+    }
+    // Control: the whole file at once (decodeUtf8's path is not this one, but the reader's is, unparted).
+    assert.match(unreadable(await go([new File([bad], 'x.csv')], 'check'))[0].examples[0], want, `${what}, whole`);
+  }
+  // Control: the same text in UTF-8, cut the same ways (é and ö cut in two by some), reads.
+  const good = Buffer.from(head + 'Café,50.9,6.9\nKöln,50.9,6.9\n', 'utf8');
+  for (const size of [1, 2, 3, 15, 16, 31, 32, 33]) {
+    const ok = await go([inParts(good, 'x.csv', size)], 'check');
+    assert.deepEqual(unreadable(ok), [], `control, parts of ${size}`);
+    assert.equal(ok.report.counts.rows, 3, `control, parts of ${size}`);
+  }
+});
