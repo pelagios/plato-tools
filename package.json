@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Browser and command-line tools that validate and convert PLATO data locally, at any scale.",
+  "description": "Tools that check and convert PLATO data on your own computer, in the browser or on the command line.",
   "bin": {
     "plato-tools": "bin/plato-tools.mjs"
   },

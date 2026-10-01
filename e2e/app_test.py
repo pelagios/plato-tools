@@ -1522,6 +1522,20 @@ def front_page_checks(browser, url):
                 and s['drawing'] and not h['drawing'] and s['chora']), out
     attempt('front page at 390 px: one column of the eight tools, step 2 with Chora\'s row, and no sideways scroll, with the introduction shown or hidden', phone)
 
+    # The acknowledgement of ISHI ends the footer of both pages: a rebase once dropped it unseen.
+    ISHI = 'Development has been supported by the Institute for Spatial History Innovation (ISHI) at the University of Pittsburgh.'
+    def acknowledged():
+        found = {}
+        for name in ('', 'chora.html'):
+            ctx = browser.new_context(); page = ctx.new_page(); page.set_default_timeout(T(8) * 1000)
+            try:
+                page.goto(NOTOOLS if PROVE else url + name)
+                found[name or 'index.html'] = page.evaluate("""() => { const f = document.querySelector('footer'), a = f?.querySelector('a[href="https://www.ishi.pitt.edu/"]');
+                  return { text: (f?.textContent || '').replace(/\\s+/g, ' '), link: a ? a.textContent.trim() : null }; }""")
+            finally: ctx.close()
+        return (len(found) == 2 and all(ISHI in v['text'] and v['link'] == 'Institute for Spatial History Innovation (ISHI)' for v in found.values())), found
+    attempt('both pages: the footer acknowledges ISHI, with its link', acknowledged)
+
 def chora_checks(pw, url, tmp):
     base = url.rstrip('/') + '/'; here = urlparse(base).netloc
     ctx = pw.chromium.launch_persistent_context(str(tmp / 'chora-profile'), headless=True, accept_downloads=True, args=GL,
