@@ -12,17 +12,17 @@
 //
 // A pair is suggested when its best name score reaches the threshold, the two are not further apart
 // than the greatest distance (when both have a point), and the datasets do not already link them,
-// or say that they are different places. Each subject place keeps its best few,
-// those near it before those with no point.
+// or say that they are different places. Each subject place keeps its best few, the places near it
+// and those with no point taking turns (bestFew()).
 import { run } from '../pipeline.js';
 import { Report } from '../report.js';
-import { collectWithdrawn, resolveWithdrawn, currentAttestations } from '../../formats/shared.js';
+import { collectWithdrawn, resolveWithdrawn } from '../../formats/shared.js';
 import { DISTINCT_GATE } from './names.js';
 import { NameIndex, BLOCKING, BLOCKING_RULE } from './blocking.js';
 import { WORK_VERSION, MATCH_DEFAULTS, fileRecords, serialiseWork, checkReviewer, checkMatchOptions } from './work.js';
 import { KRISIS_TEXT } from '../words.js';
 
-export const ALGORITHM = 'krisis-names 4';
+export const ALGORITHM = 'krisis-names 5';
 export const DEFAULTS = MATCH_DEFAULTS;
 export { BLOCKING };
 export const SCORING = 'Each name of a place (its label and every toponym and romanised form) is normalised: '
@@ -40,8 +40,9 @@ export const SCORING = 'Each name of a place (its label and every toponym and ro
   + "A place's point is the first Point geometry of its attestations, else the centre of the first bounding box, else none, passing over attestations that are negated or withdrawn (retracted or superseded); "
   + 'a pair whose points are further apart than maxDistanceKm (great-circle distance) is dropped, and a pair without two points is kept, with no distance. '
   + 'Pairs that either dataset already links by an identity relation, or says are different places, are not suggested. '
-  + 'Each subject place keeps its topK best: when it has a point, first the places within maxDistanceKm of it, and then, in the places left, those with no point; '
-  + 'each group by score, then distance.';
+  + 'Each subject place keeps its topK best. When it has a point, the places within maxDistanceKm of it (by score, then distance) and those with no point (by score) are chosen taking turns, '
+  + 'starting with the group whose best scores higher (the places with a point on a tie), and when one group runs out the other fills the rest; '
+  + 'when it has none, by score.';
 
 // A problem of a dataset's own that stops part of it being read: the matching is then of less than the whole.
 const NOT_READ = new Set(['json-syntax', 'rdf-syntax', 'record-failed', 'late-header', 'lpf-v2']);
@@ -81,13 +82,13 @@ function pointOf(g) {
 /**
  * The points a place's attestations give, in order, as { att (the attestation's @id, or null),
  * point, exact (false for the centre of a bounding box) }. A negated attestation ("not here") gives
- * none, nor one that the record itself withdraws (plato:Retracts, plato:Supersedes): a bad import
- * at 0°, 0° that was retracted is not where the place is. Withdrawals made elsewhere in the dataset
- * are applied by pickPoint().
+ * none. Withdrawals (plato:Retracts, plato:Supersedes) are left to pickPoint(), which applies the
+ * whole dataset's resolution of them: a retraction in this record may itself be retracted elsewhere,
+ * and then the point it withdrew is the place's again.
  */
 function attestationPoints(record) {
   const out = [];
-  for (const a of currentAttestations(record, null, () => {})) {
+  for (const a of Array.isArray(record.attestations) ? record.attestations : []) {
     if (!a || typeof a !== 'object' || a.negated) continue;
     const att = typeof a['@id'] === 'string' ? a['@id'] : null;
     for (const g of Array.isArray(a.geometries) ? a.geometries : []) {
@@ -107,11 +108,12 @@ function pickPoint(points, withdrawn = null) {
 }
 /**
  * A place's representative point: the first Point of its current attestations, else the centre of
- * the first bounding box, else null. Negated and withdrawn attestations are passed over; `withdrawn`
- * (@id -> kind, resolveWithdrawn().status) adds what the rest of the dataset withdraws.
+ * the first bounding box, else null. Negated and withdrawn attestations are passed over. `withdrawn`
+ * (@id -> kind) is the whole dataset's resolution of its withdrawals (resolveWithdrawn().status),
+ * which already takes in this record's own; without it, the record's withdrawals are resolved alone.
  */
 export function representativePoint(record, withdrawn = null) {
-  return pickPoint(attestationPoints(record), withdrawn);
+  return pickPoint(attestationPoints(record), withdrawn || resolveWithdrawn(collectWithdrawn(record.attestations)).status);
 }
 
 /** What the pipeline writes one dataset's records to: the places, and the identity links it states. */
@@ -188,6 +190,29 @@ async function readSide(input, word, options, env, rep, progress) {
   return { side };
 }
 
+/**
+ * The topK best of `found` ({ oiri, score, distance_km }). For a subject with a point, the places
+ * within reach of it (by score, then distance) and those with no point (by score) take turns, the
+ * group with the better head first, the near places on a tie; when one group runs out, the other
+ * fills the rest. Neither can crowd the other out: five namesakes with no point, at 1, do not push
+ * out a variant 4 km away, nor five near places that only resemble the name an exact match with no
+ * point (most places of some gazetteers have none). For a subject with no point, by score.
+ */
+function bestFew(found, located, topK) {
+  const byScore = (a, b) => b.score - a.score || (a.distance_km ?? Infinity) - (b.distance_km ?? Infinity) || (a.oiri < b.oiri ? -1 : 1);
+  if (!located) return found.sort(byScore).slice(0, topK);
+  const near = found.filter((f) => f.distance_km !== null).sort(byScore);
+  const none = found.filter((f) => f.distance_km === null).sort(byScore);
+  const kept = [];
+  let i = 0, j = 0, turn = none.length && (!near.length || none[0].score > near[0].score) ? 1 : 0;
+  while (kept.length < topK && (i < near.length || j < none.length)) {
+    if ((turn === 0 && i < near.length) || j >= none.length) kept.push(near[i++]);
+    else kept.push(none[j++]);
+    turn ^= 1;
+  }
+  return kept;
+}
+
 const pairKey = (a, b) => (a < b ? a + '\n' + b : b + '\n' + a);
 const sideRecord = (s) => ({ title: s.title, titleFrom: s.titleFrom, ...(s.uri ? { uri: s.uri } : {}), files: s.files });
 
@@ -258,12 +283,7 @@ export async function match({ subjects, others, options = {} }, env) {
       }
       found.push({ oiri, op, score: round(score, 3), distance_km });
     }
-    // When the subject has a point, the places near it come first, and those with no point take only
-    // the places left: otherwise namesakes with no point, at 1, crowd out a variant 4 km away. Then by
-    // score, then distance.
-    const unplaced = (f) => (sp.point && f.distance_km === null ? 1 : 0);
-    found.sort((a, b) => unplaced(a) - unplaced(b) || b.score - a.score || (a.distance_km ?? Infinity) - (b.distance_km ?? Infinity) || (a.oiri < b.oiri ? -1 : 1));
-    const kept = found.slice(0, params.topK);
+    const kept = bestFew(found, !!sp.point, params.topK);
     if (!kept.length) continue;
     places[iri] = sp;
     counts.suggestedFor++;

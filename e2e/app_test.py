@@ -213,8 +213,8 @@ def krisis_case(page, tmp):
     if s.get('phase') == 'reviewing':
         try:
             default = page.evaluate("() => { const r = document.querySelector('input[name=\"review-output\"]:checked'); return r && !r.disabled ? r.value : null; }")
-            # The title given for matching was put away when the review began; one typed in now is not
-            # cited, as the review's other dataset already has a title (given), not a file's name.
+            # The title given for matching is kept in the field, to match again with; one typed in now is
+            # not cited, as the review's other dataset already has a title (given), not a file's name.
             left = page.evaluate("() => document.getElementById('others-title').value")
             page.evaluate("() => { document.getElementById('others-title').value = 'A title left from before'; }")   # in the closed Options
             page.click('#finish')
@@ -251,9 +251,10 @@ def krisis_case(page, tmp):
           s.get('phase') == 'done' and len(atts) == 2 and len(same) == 1 and len(distinct) == 1
           and not any(('wells', 'welles') in rel(a) for a in atts) and 'Ada Reviewer' in json.dumps(same[0].get('contributor')), s.get('report') or s if not atts else atts)
     cites = sorted({c.get('source', {}).get('title') for a in atts for c in a.get('citations', [])})
-    check('match review: the title typed for matching is cleared once the review begins, and a title left in the options does not replace the one the review records',
-          left == '' and cites == ['Their places, as given'], {'field after matching': left, 'cited': cites})
-    page.evaluate("() => { const t = document.getElementById('others-title'); if (t) t.value = ''; }")
+    check('match review: the title typed for matching is kept after the match, to match again with, and a title left in the options does not replace the one the review records',
+          left == 'Their places, as given' and cites == ['Their places, as given'], {'field after matching': left, 'cited': cites})
+    # A title left in the field is not a resumed review's: resuming clears it (checked below).
+    page.evaluate("() => { const t = document.getElementById('others-title'); if (t) t.value = 'A title for another review'; }")
     check('match review: the file made is the new attestations only, in PLATO JSON, with no @id minted', bool(atts) and out.get('profile') == 'attestation-centric'
           and not any('@id' in a for a in atts), {k: v for k, v in out.items() if k != 'attestations'} if isinstance(out, dict) else out)
     # Resuming: the saved review, opened again, is back where it was, decisions and all.
@@ -265,6 +266,8 @@ def krisis_case(page, tmp):
         except Exception as e: r = {'phase': 'harness-error', 'error': str(e).split('\n')[0][:200]}
     check('match review: a saved review resumes with its decisions', r.get('phase') == 'reviewing' and (r.get('review') or {}).get('reviewed') == 3
           and not page.is_visible('#review-warning'), r.get('review') or r)
+    kept_title = page.evaluate("() => document.getElementById('others-title').value") if r.get('phase') == 'reviewing' else None
+    check('match review: resuming a review clears a title left in the options from before', kept_title == '', kept_title)
     # And with another dataset chosen than the one it was made from, it still opens, and says so: the control for the absence above.
     w = ''
     if r.get('phase') == 'reviewing':

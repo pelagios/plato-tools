@@ -293,10 +293,11 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   spreadsheet tables). Of each place only its address, label, names (label, every toponym and
   romanised form, from attestations that are not denials), one point (from attestations that are
   neither denials nor withdrawn: PLATO's judgements example retracts a bad import that put
-  Littleworth at 0°, 0°, and that point is not Littleworth's), country codes and types, and
+  Littleworth at 0°, 0°, and that point is not Littleworth's; withdrawals are resolved over the whole
+  dataset, so a retraction that is itself retracted elsewhere restores the point), country codes and types, and
   the identity relations either dataset states are kept, in memory. A place without an `@id` cannot
   be matched, and is reported as a problem.
-- **Scoring** (`names.js`, algorithm `krisis-names 4`). Names are normalised: NFKD, combining marks
+- **Scoring** (`names.js`, algorithm `krisis-names 5`). Names are normalised: NFKD, combining marks
   removed, ß æ œ ø ł đ ð þ ı spelt out, lower-cased, everything but letters and digits a space. Two
   names score their Jaro-Winkler similarity (prefix scale 0.1, up to four letters) or, if higher, that
   of their words sorted, so that "Upper Newton" and "Newton Upper" agree. Two places score the best
@@ -395,11 +396,20 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   whose points (the first Point, else the centre of the first bounding box or shape, of attestations
   neither negated nor withdrawn) are further apart than the greatest distance (50 km) is dropped and
   counted; a pair without two points is kept, with no distance. Each subject place keeps its best
-  five, and **when it has a point, the places within the greatest distance come first**, then those
-  with no point in the places left, each by score and then distance (new in `krisis-names 4`). Before,
-  namesakes with no point, at 1, crowded out a variant near by: in the DEEP trial Broomfield lost
-  Bromfield, 4 km away, to five Broomfields with no coordinates, and 616 of the 830 places whose
-  planted original was missed had scored it over the threshold. A dataset matched with itself suggests
+  five, and **when it has a point, the places within the greatest distance (by score, then distance)
+  and those with no point (by score) take turns**, the group whose best scores higher first (the
+  places with a point on a tie), and when one runs out the other fills the rest (new in
+  `krisis-names 5`; a subject with no point keeps the best scores). Neither group can crowd the other
+  out. Before `krisis-names 4`, namesakes with no point, at 1, crowded out a variant near by: in the
+  DEEP trial Broomfield lost Bromfield, 4 km away, to five Broomfields with no coordinates.
+  `krisis-names 4` put every near place first, which turned the fault round: an exact match with no
+  point lost its place to five near places that only resembled it, and that is the common case, as
+  95.7% of DEEP's places have no point (in the trial, 28% of the subjects with a point had five near
+  candidates already). Measured on 23,448 perturbed copies of DEEP's located places, matched with
+  DEEP (the true match located): 99.1% of the originals suggested by `krisis-names 4`, 98.4% now (the
+  166 lost had ranked third to fifth among the near places, behind a better place with no point). On
+  half of them, 11,682, with the true match's point removed from DEEP (the true match unlocated, the
+  case that dominates real use): 82.8% before, 89.2% now. A dataset matched with itself suggests
   each pair once.
 - **The work file** (`work.js`) is the tools' own, not PLATO: PLATO holds what people say, and a
   suggestion is software's. Its candidate fields are named after `plato:Candidate`'s

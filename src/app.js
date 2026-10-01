@@ -349,6 +349,8 @@ async function resume(file) {
   let w;
   try { w = readWork(await file.text()); } catch (e) { refuse(e.message); return; }
   $('result').hidden = true;
+  // The other dataset's title typed for an earlier match is not this review's: put away, it cannot be taken for this one's at finishing.
+  $('others-title').value = '';
   beginReview(w, file.name);
   // A review made from other files than those chosen now is still opened, with a warning; with none chosen, it says so.
   if (!files.length) { showWarning(W.noDatasetYet); return; }
@@ -357,8 +359,6 @@ async function resume(file) {
 }
 function beginReview(w, name) {
   work = w; workName = name || workName; basisFor = null; allDone = false;
-  // The other dataset's title given for a match is in the work file now; put away, it cannot be taken for this review's at finishing.
-  $('others-title').value = '';
   order = reviewPlaces(work);
   cursor = Math.min(Math.max(0, work.cursor || 0), Math.max(0, order.length - 1));
   // A place with no candidates has nothing to review: start at the first that has some.

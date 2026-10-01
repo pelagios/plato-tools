@@ -123,6 +123,10 @@ test("a place's point passes over negated and withdrawn attestations", () => {
   assert.deepEqual(representativePoint({ attestations: [{ ...bad, negated: true }, at(3, 4)] }), [3, 4], 'a negated one is not');
   assert.deepEqual(representativePoint({ attestations: [bad, at(3, 4), { meta: { targetAttestation: 'x#bad', metaType: RETRACTS }, sources: [src] }] }), [3, 4], 'nor one the record retracts');
   assert.deepEqual(representativePoint({ attestations: [bad, at(3, 4)] }, new Map([['x#bad', 'superseded']])), [3, 4], 'nor one withdrawn elsewhere');
+  // A retraction in the record that is itself retracted elsewhere no longer holds: the point is restored.
+  const retraction = { '@id': 'x#r', meta: { targetAttestation: 'x#bad', metaType: RETRACTS }, sources: [src] };
+  assert.deepEqual(representativePoint({ attestations: [bad, at(3, 4), retraction] }, new Map([['x#r', 'retracted']])), [0, 0], 'restored elsewhere');
+  assert.deepEqual(representativePoint({ attestations: [bad, at(3, 4), retraction] }, new Map([['x#bad', 'retracted']])), [3, 4], 'control: the retraction holding');
   assert.equal(representativePoint({ attestations: [{ ...bad, negated: true }] }), null);
 });
 test("PLATO's judgements example: Littleworth's retracted point at 0°, 0° is not its point, wherever the retraction sits", async () => {
@@ -145,6 +149,12 @@ test("PLATO's judgements example: Littleworth's retracted point at 0°, 0° is n
   const kept = await m(moved);
   assert.deepEqual(kept.work.candidates, []);
   assert.equal(kept.report.counts.tooFar, 1, 'found, and dropped as too far');
+  // The retraction, left in place, and itself retracted by an attestation of another place: the point is restored.
+  const restored = structuredClone(doc);
+  restored.spatialEntities.find((p) => p.label !== 'Littleworth').attestations.push({ '@id': X + 'restore', meta: { targetAttestation: retraction['@id'], metaType: retraction.meta.metaType }, sources: [src] });
+  const back = await m(restored);
+  assert.deepEqual(back.work.candidates, [], 'restored elsewhere: 0°, 0° again, too far');
+  assert.equal(back.report.counts.tooFar, 1);
 });
 
 // ---- matching -------------------------------------------------------------------------------------------
@@ -214,20 +224,43 @@ test('the threshold and top K are kept to', async () => {
   await assert.rejects(run({ threshold: 2 }), /threshold/);
   await assert.rejects(run({ topK: 0 }), /whole number/);
 });
-test('the best few: places near the subject come before namesakes with no point, which take only the places left', async () => {
+test('the best few: an exact match with no point is not crowded out by near places that only resemble it', async () => {
+  // DEEP gives most of its places no point: the true match with none must not lose its place to five near-namesakes.
+  const s = { profile: 'place-centric', gazetteer: { '@id': X + 'a', title: 'A' }, spatialEntities: [place('a', 'ashford', 'Ashford', [at(-1.0, 52.0)])] };
+  const near = ['Ashfield', 'Ashforth', 'Ashfold', 'Ashfort', 'Ashferd'];
+  const o = { profile: 'place-centric', gazetteer: { '@id': X + 'b', title: 'B' }, spatialEntities: [
+    ...near.map((n, i) => place('b', n.toLowerCase(), n, [at(-1.0 + 0.01 * (i + 1), 52.0)])), place('b', 'ashford', 'Ashford', [named('Ashford')])] };
+  const got = (await run({}, s, o)).work.candidates.map((c) => [c.candidate_candidate.split('/').pop(), c.similarity_score, c.distance_km]);
+  assert.equal(got.length, 5);
+  assert.deepEqual(got[0], ['ashford', 1, null], 'the exact match, with no point, is kept, and first: it scores higher');
+  assert.equal(got.filter(([, , d]) => d !== null).length, 4, 'and the near places fill the rest');
+  // Control: the five near places are all found, over the threshold and under 1, and all kept when there is room.
+  const all = (await run({ topK: 6 }, s, o)).work.candidates;
+  assert.deepEqual(all.filter((c) => c.distance_km !== null).map((c) => c.candidate_candidate.split('/').pop()).sort(), near.map((n) => n.toLowerCase()).sort());
+  assert.ok(all.every((c) => c.distance_km === null || (c.similarity_score >= 0.85 && c.similarity_score < 1)));
+});
+test('the best few: a near variant is not crowded out by namesakes with no point', async () => {
   // Found in a trial on real data (DEEP): Bromfield, 4 km from Broomfield, lost its place to five Broomfields with no coordinates.
   const s = { profile: 'place-centric', gazetteer: { '@id': X + 'a', title: 'A' }, spatialEntities: [place('a', 'broomfield', 'Broomfield', [at(-1.0, 52.0)])] };
   const o = { profile: 'place-centric', gazetteer: { '@id': X + 'b', title: 'B' }, spatialEntities: [
     ...[1, 2, 3, 4, 5].map((i) => place('b', `nowhere-${i}`, 'Broomfield', [named('Broomfield')])),
     place('b', 'bromfield', 'Bromfield', [at(-1.05, 52.02)]), place('b', 'bromfield-far', 'Bromfield', [at(-3, 55)])] };
   const got = (await run({}, s, o)).work.candidates.map((c) => [c.candidate_candidate.split('/').pop(), c.distance_km]);
-  assert.deepEqual(got, [['bromfield', 4.1], ['nowhere-1', null], ['nowhere-2', null], ['nowhere-3', null], ['nowhere-4', null]]);
+  // The two groups take turns, the better first: a namesake at 1, the near variant, then the namesakes left.
+  assert.deepEqual(got, [['nowhere-1', null], ['bromfield', 4.1], ['nowhere-2', null], ['nowhere-3', null], ['nowhere-4', null]]);
   assert.ok(similarity('Broomfield', 'Bromfield') < 1 && similarity('Broomfield', 'Bromfield') >= 0.85, 'control: Bromfield scores under the namesakes, over the threshold');
-  // Control: a subject with no point has no near places to put first, and keeps the best scores.
-  s.spatialEntities[0].attestations = [named('Broomfield')];
+  assert.match(SCORING, /taking turns/);
+});
+test('the best few: a subject with no point keeps the best scores, as before', async () => {
+  const s = { profile: 'place-centric', gazetteer: { '@id': X + 'a', title: 'A' }, spatialEntities: [place('a', 'broomfield', 'Broomfield', [named('Broomfield')])] };
+  const o = { profile: 'place-centric', gazetteer: { '@id': X + 'b', title: 'B' }, spatialEntities: [
+    place('b', 'bromfield', 'Bromfield', [at(-1.05, 52.02)]), place('b', 'broomfeld', 'Broomfeld', [at(-3, 55)]),
+    ...[1, 2, 3, 4, 5].map((i) => place('b', `nowhere-${i}`, 'Broomfield', [named('Broomfield')]))] };
   const none = (await run({}, s, o)).work.candidates.map((c) => c.candidate_candidate.split('/').pop());
   assert.deepEqual(none, ['nowhere-1', 'nowhere-2', 'nowhere-3', 'nowhere-4', 'nowhere-5']);
-  assert.match(SCORING, /first the places within maxDistanceKm of it, and then, in the places left, those with no point/);
+  // Control: with room, the places with points are found too, by score, with no distance.
+  const more = (await run({ topK: 7 }, s, o)).work.candidates;
+  assert.deepEqual(more.slice(5).map((c) => [c.candidate_candidate.split('/').pop(), c.distance_km]).sort(), [['bromfield', null], ['broomfeld', null]]);
 });
 test('a link another attestation withdrew no longer holds', async () => {
   const s = subjectsDoc();
@@ -238,6 +271,10 @@ test('a link another attestation withdrew no longer holds', async () => {
   s.spatialEntities[3].attestations.push({ '@id': A('kingsbury#retract'), meta: { targetAttestation: A('kingsbury#link'), metaType: 'https://w3id.org/plato#Retracts' }, sources: [src] });
   const retracted = await run({}, s);
   assert.ok(has(retracted.work, A('kingsbury'), B('kingsbury')));
+  // And the retraction, itself retracted in another place: the link holds again.
+  s.spatialEntities[2].attestations.push({ '@id': A('springfield#restore'), meta: { targetAttestation: A('kingsbury#retract'), metaType: 'https://w3id.org/plato#Retracts' }, sources: [src] });
+  const restored = await run({}, s);
+  assert.ok(!has(restored.work, A('kingsbury'), B('kingsbury')), 'restored elsewhere');
 });
 test("PLATO's judgements example matched with itself: the Newtons it says are different places are not suggested", async () => {
   const e = env();
@@ -594,8 +631,8 @@ test('matching: Saint Maurice is not suggested for Saint Martin, St Martin is; t
     place('b', 'maurice', 'Saint Maurice', [at(2.01, 48.01)]), place('b', 'st-martin', 'St Martin', [at(2.02, 48.02)])] };
   const { work, report } = await run({}, s, o);
   assert.deepEqual(pairs(work), [`${A('martin')} ${B('st-martin')}`]);
-  assert.equal(work.algorithm_version, 'krisis-names 4');
-  assert.equal(ALGORITHM, 'krisis-names 4');
+  assert.equal(work.algorithm_version, 'krisis-names 5');
+  assert.equal(ALGORITHM, 'krisis-names 5');
   assert.match(work.match_parameters.scoring, /do not share/);
   assert.deepEqual({ ...work.match_parameters.blocking, rule: undefined }, { ...BLOCKING, rule: undefined });
   assert.match(work.match_parameters.blocking.rule, /common when more than 1%/);
