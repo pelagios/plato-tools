@@ -84,6 +84,19 @@ test('relativeTo: two anchors come back as a list of both, and one anchor as a s
   const listOfOne = qualificationBack(placeWith({ relativeQualifier: 'https://w3id.org/plato#Near', relativeTo: ['https://example.org/x'] }));
   assert.equal(listOfOne.relativeTo, 'https://example.org/x');
 });
+// PLATO 7720890 (#18): a relation may name its target by relatedLabel alone; Trismegistos place 60 is "in the Delta".
+test('a relation named by relatedLabel alone, with no relatesTo, comes back as it went in (Trismegistos place 60)', () => {
+  const doc = JSON.parse(readFileSync(`${EXAMPLES}/place-centric-trismegistos.json`, 'utf8'));
+  const place = (d) => d.spatialEntities.find((e) => e['@id'] === 'https://www.trismegistos.org/place/60');
+  const relationsOf = (e) => e.attestations.flatMap((a) => a.relations || []);
+  const delta = relationsOf(place(doc)).filter((r) => r.relatesTo === undefined);
+  assert.deepEqual(delta, [{ relationType: 'https://w3id.org/plato#ContainedIn', relatedLabel: 'the Delta', relationLabel: 'in the Delta' }], 'the example has the relation');
+  const first = toRdf(doc);
+  assert.match(first.nt, /<https:\/\/w3id\.org\/plato#related_label> "the Delta"/);
+  const { doc: back, losses } = toJson(first.g, first.docNode, 'place-centric');
+  assert.deepEqual(losses, []);
+  assert.deepEqual(relationsOf(place(back)).filter((r) => r.relatesTo === undefined), delta);
+});
 test('control: the comparison notices a dropped attestation', async () => {
   const doc = JSON.parse(readFileSync(`${EXAMPLES}/place-centric-constantinople.json`, 'utf8'));
   const first = toRdf(doc);

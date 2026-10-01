@@ -129,6 +129,23 @@ test('a computed value is left out of the tables and of LPF, and reported; never
   assert.equal(items(l, 'loss').find((i) => i.kind === 'computed').count, 2);
 });
 
+// PLATO 7720890 (#18): a target there is nothing to point at, named by related_label alone.
+test('a relation named by relatedLabel alone goes JSON -> tables -> JSON unchanged, with both ids empty', async () => {
+  const delta = { relatedLabel: 'the Delta', relationType: P + 'ContainedIn' };
+  const doc = { profile: 'place-centric', gazetteer: { '@id': 'https://example.org/my-dataset/', title: 't' }, spatialEntities: [{ '@id': 'https://example.org/my-dataset/place/p60', label: 'P60', entityIdentifier: 'p60', attestations: [
+    { relations: [delta], citations: [{ source: 'https://example.org/my-dataset/source/tm' }] },
+  ] }] };
+  const t = await go([textFile(JSON.stringify(doc), 'd.json')], 'convert', 'tables');
+  assert.deepEqual(items(t, 'error'), []);
+  const z = unzipSync(t.e.outs['d-tables.zip'][0]);
+  assert.deepEqual(rowsOf(strFromU8(z['relations.csv'])).map((r) => [r.relation_type, r.related_place_id, r.related_uri, r.related_label]), [['ContainedIn', '', '', 'the Delta']]);
+  assert.deepEqual(rowsOf(strFromU8(z['places.csv'])).map((r) => r.place_id), ['p60'], 'the Delta gets no place row');
+  const back = await go([new File([t.e.outs['d-tables.zip'][0]], 'd.zip')], 'convert', 'plato-jsonl');
+  assert.deepEqual(items(back, 'error'), []);
+  const [p60] = records(back, 'd.jsonl');
+  assert.deepEqual(p60.attestations.map((a) => a.relations[0]), [delta]);
+});
+
 test('LPF: a sequence and an outside target\'s name are reported as losses, never dropped silently', async () => {
   const a = await go(tables(), 'convert', 'plato-jsonl');
   const l = await go([textFile(outText(a.e, 'about.jsonl'), 'routes.jsonl')], 'convert', 'lpf');
