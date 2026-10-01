@@ -629,7 +629,7 @@ permissions.onChange(() => {
 // (they stay kept, and come back once it is allowed again); one set to Never is done without, and
 // nothing is said of it, but for a map just pasted, where the status line says why it is not shown.
 const deps = { fetchJson: (u) => remote.fetchJson(u), allowed: (c, s) => permissions.allowed(c, s), state: (c, s) => permissions.state(c, s) };
-let mapNeed = null;    // {subjects, pending, maps?}: the permissions a map waits on, and what to do once they are allowed
+let mapNeed = null;    // {subjects, pending, maps, pasted, kept}: the permissions the map pasted and the maps kept wait on (overlays.js withNeed)
 let mapOffer = null;   // {services, manifestUrl, title, text, notFound}: a map with no georeference given
 let mapChoice = null;  // {choices, chosen, parsed, manifestUrl}: a georeference of several maps, one to choose
 let mapStatus = '';    // what the page says of the last map added, in words (a warn: prefix is a problem)
@@ -652,12 +652,14 @@ const setStatus = (text, link = null) => { mapStatus = text; mapLink = link; sta
 /** A step needs permissions: a line for each not yet allowed, or, if one is set to Never, why the map is not shown. */
 function needFor(e, pending, { quiet = false } = {}) {
   const never = e.subjects.filter(([c, s]) => permissions.state(c, s) === 'never');
+  // The map pasted and the maps kept wait apart, together: each replaces its own part only.
+  const part = pending.readmit ? 'kept' : 'pasted';
   if (never.length) {
-    mapNeed = null;
+    mapNeed = ov.withNeed(mapNeed, { [part]: null });
     // Never: the feature does without. Only a map just asked for is told why (a map kept says nothing).
     setStatus(quiet ? '' : `warn:${never.map(([c, s]) => PERMISSION_REFUSED.never(permissions.nameOf(c, s))).join(' ')}`);
   } else {
-    mapNeed = { subjects: e.subjects, pending, maps: e.maps || 1 };
+    mapNeed = ov.withNeed(mapNeed, { [part]: part === 'kept' ? { subjects: e.subjects, maps: e.maps || 1 } : { subjects: e.subjects, pending, maps: e.maps || 1 } });
     // The maps kept (quiet) leave what is said of the last map pasted as it is.
     if (!quiet) setStatus('');
   }
@@ -670,7 +672,7 @@ function needFor(e, pending, { quiet = false } = {}) {
  */
 async function addMapNow(pending, { collect = false } = {}) {
   if (pending.readmit) return readmitKept();
-  if (!collect) { mapNeed = null; mapChoice = null; setStatus('Reading…'); renderMaps(); }
+  if (!collect) { mapNeed = ov.withNeed(mapNeed, { pasted: null }); mapChoice = null; setStatus('Reading…'); renderMaps(); }
   // Where the page's policy was not shown to be enforced, no map is shown: its tiles could go anywhere.
   if (!(await permissions.enforced())) { setStatus(`warn:${ov.REFUSED}`); renderMaps(); return null; }
   try {
@@ -870,7 +872,7 @@ async function readmitKept() {
     for (const sj of need.subjects) if (!subjects.some((x) => x[0] === sj[0] && x[1] === sj[1])) subjects.push(sj);
   }
   if (subjects.length) needFor({ subjects, maps }, { readmit: true }, { quiet: true });
-  else if (mapNeed?.pending?.readmit) { mapNeed = null; renderMaps(); }
+  else if (mapNeed?.kept) { mapNeed = ov.withNeed(mapNeed, { kept: null }); renderMaps(); }
 }
 /**
  * A permission changed, here or in another tab: a map whose permission is no longer allowed is taken
@@ -885,11 +887,12 @@ function permissionsChanged() {
   // Withdrawn, not refused: its line is drawn now, before the panel is (the module tells the page first),
   // so that the permission stays in the panel's list, where it was just changed. The maps kept refine it.
   const undecided = gone.map((o) => o.permission.split(/:(.*)/s).slice(0, 2)).filter(([c, sj]) => permissions.state(c, sj) === 'undecided');
-  if (undecided.length && !mapNeed) mapNeed = { subjects: undecided.filter((x, i) => undecided.findIndex((y) => y[1] === x[1]) === i), pending: { readmit: true } };
-  const waiting = mapNeed;
+  if (undecided.length && !mapNeed?.kept) mapNeed = ov.withNeed(mapNeed, { kept: { subjects: undecided.filter((x, i) => undecided.findIndex((y) => y[1] === x[1]) === i), maps: gone.length } });
+  const waiting = mapNeed?.pasted;
   // A map pasted, waiting on a permission now set to Never: its line goes, and the status says why.
   if (ov.waitRefused(waiting, (c, s) => permissions.state(c, s))) { needFor(waiting, waiting.pending); inTurn(() => readmitKept()); }
-  else if (waiting && !waiting.pending.readmit && waiting.subjects.every(([c, s]) => permissions.allowed(c, s))) { mapNeed = null; addMap(waiting.pending); }
+  else if (waiting && waiting.subjects.every(([c, s]) => permissions.allowed(c, s))) { mapNeed = ov.withNeed(mapNeed, { pasted: null }); addMap(waiting.pending); inTurn(() => readmitKept()); }
+  // Otherwise the maps kept are looked at again: what they wait on is joined to the map pasted's, never put in its place.
   else inTurn(() => readmitKept());
   renderMaps();
 }
@@ -960,9 +963,10 @@ permissions.onBeforeReload(async () => {
   state.phase = 'reloading';
   await draftsWritten();
   const m = mapApi.map;
-  // And the historical map waiting on the permissions (it is added after the reload), and what is typed in its box.
+  // And the historical map pasted waiting on the permissions (it is added after the reload), whether maps
+  // kept wait too (they are looked at again after every load), and what is typed in its box.
   await keepForReload({ files, placeId: state.placeId, camera: { center: m.getCenter().toArray(), zoom: m.getZoom(), bearing: m.getBearing(), pitch: m.getPitch() },
-    maps: { pending: mapNeed?.pending || null, typed: $('map-input').value || '' } });
+    maps: { ...ov.reloadHandOver(mapNeed), typed: $('map-input').value || '' } });
 });
 // What the reload keeps not: a line or area still being drawn (finished drawings are kept), an
 // address in the paste box not yet added, a save running. Each is said in the panel first, with Cancel.
@@ -984,7 +988,7 @@ startWorker().then(async () => {
     state.resumed = { files: (resumed.files || []).map((f) => f.name), placeId: resumed.placeId || null, maps: resumed.maps || null };
     if (resumed.maps?.typed) $('map-input').value = resumed.maps.typed;
     await inTurn(() => readmitKept());
-    // The map that was waiting on the permissions just allowed (the maps kept are back already).
+    // The map pasted that was waiting on the permissions just allowed (the maps kept are back already).
     const pending = resumed.maps?.pending;
     if (pending && !pending.readmit) await addMap(pending);
     return;

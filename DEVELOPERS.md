@@ -769,7 +769,12 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   for Allmaps' annotation server) is named at once (`NeedPermission`), before anything is fetched,
   each in a "Needs permission" line under the paste box, so that one reload brings them all; a
   manifest is one step and its images the next. The map waiting, and what is typed in the box, are
-  kept across that reload (`keepForReload`) and the map is added after it. A permission set to Never
+  kept across that reload (`keepForReload`) and the map is added after it. A map pasted and maps kept
+  (from the last visit, or withdrawn) can wait at once: what they wait on (`mapNeed`) is built by
+  `withNeed` from the two parts, each replaced only by its own, so the maps kept, looked at again on
+  every change of permission, never take the place of the map pasted; the reload hands over both
+  (`reloadHandOver`: the map pasted, and whether maps kept wait), and after it the maps kept are
+  admitted again and then the map pasted is added. A permission set to Never
   is done without: the maps that need it are not shown, and nothing is said of them, but a map just
   pasted says it is set to Never. With no georeference, Allmaps is asked only from "Look for a
   georeference", which shows no notice: it needs `allmaps:allmaps`, and its line, like any other.
@@ -781,7 +786,11 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   **Fetching** (`remote.js`): every document through `permissions.fetch`, which follows no redirect;
   the redirects measured (see [Permissions](#permissions)) are avoided before asking: http is asked
   over https, an image's information at `{id}/info.json` with no trailing slash, Allmaps at
-  `/images/<id>` computed here (never `?url=`). An address that still forwards (an ARK resolver) is
+  `/images/<id>` computed here (never `?url=`). Allmaps' own `?url=` address for an image
+  (`annotations.allmaps.org/?url=<image id or info.json>`, which forwards) is read by `parseInput` as
+  that image (`allmaps-image`) and asked at `/images/<id>`, as "Look for a georeference" asks, under
+  `allmaps:allmaps`; its `?url=` of anything else (a manifest) is fetched as written, and refused as
+  forwarding. An address that still forwards (an ARK resolver) is
   refused with "This address forwards to another one, which PLATO tools does not follow. Open it in a
   new tab, and paste the address it ends at.", and the address offered as a link to a new tab.
   **Admission** (`admit`): only where the page's policy was shown to be enforced
@@ -933,8 +942,8 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   be withdrawn, and the policy admits only plain sites. The panel says this in words. Moving the
   tools to an origin of their own was considered and not done (2026-10-01).
 - **Working data.** "Keep my working data between visits" (on by default,
-  `plato-tools.keep-working-data` is `no` when off): off, Chora clears its drawings not saved and its
-  last output at the next load (not at a reload for a permission), and the output once saved to disk.
+  `plato-tools.keep-working-data` is `no` when off): off, Chora clears its drawings not saved, its
+  last output and the historical maps it keeps (`chora-overlays/`) at the next load (not at a reload for a permission), and the output once saved to disk.
   The dataset's working copy, in Chora's SQLite pool, is cleared at every start anyway (`clearOnInit`).
   The historical maps shown (`chora-overlays/`) are cleared with the drawings.
 - **Persistent storage.** "Keep large datasets' working files (ask the browser for persistent
@@ -960,7 +969,7 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   | http manifest or info.json | Rumsey, DC, LoC, Gallica, Stanford, Bodleian over http | 301 or 302 | → https, same host and path | Scheme only |
   | Image id without /info.json | Rumsey (relative Location), DC (303), LoC (scheme-relative `//tile.loc.gov/…`) | 302 or 303 | → `{id}/info.json` | Yes |
   | Image id with a trailing slash | DC | 301 | → without the slash | Yes |
-  | Allmaps `?url=<image id or info.json>` | `annotations.allmaps.org/?url=…` | 301 | → `/images/<id>` (404 when there is no georeference) | Yes |
+  | Allmaps `?url=<image id or info.json>` | `annotations.allmaps.org/?url=…` | 301 | → `/images/<id>` (404 when there is no georeference); pasted, it is asked there instead | Yes |
   | Canonical https manifest, info.json or tile | every server tested | 200 | — | — |
 
   The decision (c2, 1 October 2026): `permissions.fetch` stays strict and refuses every redirect.
@@ -1062,14 +1071,14 @@ The browser checks run every page under its Content Security Policy, and check t
 allowed neither page asks another site; that a permission allowed in the panel, from its "Needs
 permission" line, is used after the reload and refused at once when withdrawn; that a page served
 without its policy is found unprotected by the canary and asks nothing; and that turning off "Keep
-my working data" clears Chora's drawings at the next load.
+my working data" clears Chora's drawings, and the historical maps it keeps, at the next load.
 
 Chora's historical maps are checked against a real second origin: `e2e/iiif_fixture_server.py`
 serves `test/fixtures/chora-iiif/` on two free ports, A (the image server allowed) and B (never to
 be asked), and logs every request it receives. That log is the census: Playwright's request events
 also list requests the browser stopped. Allmaps' annotation server is answered by `page.route`.
 The checks include nothing asked of A before its permission is allowed in the panel, and the map
-pasted then added after the one reload; a tile answered with a redirect to B, in the built page's
+pasted then added after the one reload, also when a map kept waits on A too (both come back); a tile answered with a redirect to B, in the built page's
 tile workers (B must get nothing in the whole run, and is not in `window.__platoCsp.origins`,
 while the honest map on A draws); an `info.json` naming B; an address on A forwarding to B; Allmaps
 asked nothing until its permission is allowed from "Look for a georeference", then at `/images/<id>`

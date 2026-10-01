@@ -283,6 +283,37 @@ test('a manifest leads to its images, and nothing is looked for until asked; the
   assert.equal(ov.editorUrl(null, `${A}/iiif/grid/`), `https://editor.allmaps.org/images?url=${encodeURIComponent(`${A}/iiif/grid/info.json`)}`);
 });
 
+test('Allmaps\' ?url= address for an image is asked at /images/<id>, under Allmaps\' permission; any other address that forwards is still refused', async () => {
+  const id = `${A}/iiif/grid`;
+  const byId = await georef.allmapsLookupUrl(id);
+  // The image's information, and its id alone, each become the lookup Look for a georeference makes.
+  const viaInfo = `https://annotations.allmaps.org/?url=${encodeURIComponent(`${id}/info.json`)}`;
+  assert.deepEqual(ov.parseInput(viaInfo), { kind: 'allmaps-image', serviceId: id });
+  assert.deepEqual(ov.parseInput(`https://annotations.allmaps.org/?url=${encodeURIComponent(id)}`), { kind: 'allmaps-image', serviceId: id });
+  // Not yet allowed: Allmaps' permission is needed, and nothing is asked.
+  const net = network({ [byId]: json('allmaps-images-e564650581f5f6bb.json') });
+  await assert.rejects(ov.resolve(ov.parseInput(viaInfo), { ...net, now: NOW }), needs(ALLMAPS));
+  assert.deepEqual(net.calls, []);
+  // Allowed: /images/<id>, never ?url=, and the georeference found there read as one fetched.
+  const net2 = network({ [byId]: json('allmaps-images-e564650581f5f6bb.json'), [`${A}/manifests/grid/manifest`]: MANIFEST }, { allowed: [ALLMAPS, ['iiif', A]] });
+  const r = await ov.resolve(ov.parseInput(viaInfo), { ...net2, now: NOW });
+  assert.equal(r.fetchedAt, NOW()); assert.ok(r.annotation); assert.equal(r.manifestUrl, `${A}/manifests/grid/manifest`);
+  assert.deepEqual(net2.calls, [byId, `${A}/manifests/grid/manifest`]);
+  // Allmaps has none: said in words, not as an address that forwards.
+  const net3 = network({}, { allowed: [ALLMAPS] });
+  await assert.rejects(ov.resolve(ov.parseInput(viaInfo), { ...net3, now: NOW }), (e) => e instanceof DataError && /Allmaps has no georeference/.test(e.message));
+  assert.deepEqual(net3.calls, [byId]);
+  // Controls: Allmaps' own addresses are as they were, and ?url= of a manifest is not rewritten (it forwards, and is refused).
+  assert.deepEqual(ov.parseInput('https://annotations.allmaps.org/images/e564650581f5f6bb'), { kind: 'annotation-url', url: 'https://annotations.allmaps.org/images/e564650581f5f6bb' });
+  const viaManifest = `https://annotations.allmaps.org/?url=${encodeURIComponent(`${A}/manifests/grid/manifest`)}`;
+  assert.equal(ov.parseInput(viaManifest).kind, 'annotation-url');
+  const net4 = network({ [viaManifest]: { redirect: true } }, { allowed: [ALLMAPS] });
+  await assert.rejects(ov.resolve(ov.parseInput(viaManifest), { ...net4, now: NOW }), (e) => e instanceof remote.RemoteError && e.kind === 'moved' && e.message === remote.FORWARDS);
+  const ark = 'https://ark.example.org/ark:/50959/ks65px29g/manifest';
+  const net5 = network({ [ark]: { redirect: true } }, { allowed: [['iiif', 'https://ark.example.org']] });
+  await assert.rejects(ov.resolve(ov.parseInput(ark), { ...net5, now: NOW }), (e) => e instanceof remote.RemoteError && e.kind === 'moved' && e.message === remote.FORWARDS);
+});
+
 test('an address that answers with a redirect: an image\'s id is asked again at its info.json; anything else is refused in c2\'s words, with the address to open', async () => {
   const id = `${A}/iiif/grid`;
   const net = network({ [id]: { redirect: true }, [`${id}/info.json`]: json('info-v2.json') });
@@ -545,6 +576,41 @@ test('a pasted map waiting on a permission set to Never since is said to be refu
   assert.equal(ov.waitRefused({ ...pasted, pending: { readmit: true } }, st([`iiif:${A}`])), false, 'maps kept say nothing');
   assert.equal(ov.waitRefused({ ...pasted, pending: { kept: 'k' } }, st([`iiif:${A}`])), false);
   assert.equal(ov.waitRefused(null, st([`iiif:${A}`])), false);
+});
+
+test('a map pasted and the maps kept wait together: the maps kept never take the place of the map pasted, and the reload brings back both', () => {
+  const pastedA = { subjects: [['iiif', A]], pending: { text: `${A}/iiif/grid/info.json` }, maps: 1 };
+  const keptB = { subjects: [['iiif', B], ['iiif', A]], maps: 2 };
+  // The case found in review: a map pasted waits on A; the maps kept, looked at again, wait on B (and A).
+  const both = ov.withNeed(ov.withNeed(null, { pasted: pastedA }), { kept: keptB });
+  assert.deepEqual(both.pending, pastedA.pending, 'the map pasted is still what is added once allowed');
+  assert.deepEqual(both.subjects, [['iiif', A], ['iiif', B]], 'one line for each site, A once');
+  assert.equal(both.maps, 3);
+  assert.deepEqual(ov.reloadHandOver(both), { pending: pastedA.pending, readmit: true });
+  // In the other order, the same.
+  assert.deepEqual(ov.withNeed(ov.withNeed(null, { kept: keptB }), { pasted: pastedA }), both);
+  // Control: the maps kept alone wait as before, as { readmit }, and the hand-over says so.
+  const kept = ov.withNeed(null, { kept: keptB });
+  assert.deepEqual(kept.pending, { readmit: true });
+  assert.deepEqual(kept.subjects, keptB.subjects);
+  assert.deepEqual(ov.reloadHandOver(kept), { pending: null, readmit: true });
+  // Control: a map pasted alone hands over itself, and nothing kept.
+  assert.deepEqual(ov.reloadHandOver(ov.withNeed(null, { pasted: pastedA })), { pending: pastedA.pending, readmit: false });
+  assert.deepEqual(ov.reloadHandOver(null), { pending: null, readmit: false });
+  // Each part is let go alone: the maps kept shown leave the map pasted waiting, and the other way about.
+  assert.deepEqual(ov.withNeed(both, { kept: null }), ov.withNeed(null, { pasted: pastedA }));
+  assert.deepEqual(ov.withNeed(both, { pasted: null }), kept);
+  assert.equal(ov.withNeed(kept, { kept: null }), null);
+  // A map pasted again replaces the map pasted, never the maps kept.
+  const pastedB = { subjects: [['iiif', B]], pending: { text: 'other' }, maps: 1 };
+  const again = ov.withNeed(both, { pasted: pastedB });
+  assert.deepEqual(again.pending, pastedB.pending);
+  assert.deepEqual(again.kept, keptB);
+  // A permission set to Never among the maps kept's says nothing of the map pasted; among its own, it does.
+  const st = (never) => (c, s) => (never.includes(`${c}:${s}`) ? 'never' : 'undecided');
+  assert.equal(ov.waitRefused(both, st([`iiif:${B}`])), false);
+  assert.equal(ov.waitRefused(both, st([`iiif:${A}`])), true);
+  assert.equal(ov.waitRefused(kept, st([`iiif:${B}`])), false);
 });
 
 test('the Allmaps Editor link is offered unless Allmaps is set to Never, and says what following it sends (Stephen, R4)', () => {

@@ -105,6 +105,8 @@ const isImageInfo = (o) => !!o && typeof o === 'object' && (/^ImageService[23]$/
  *   with a map id, or one given to Allmaps' viewer);
  * - 'manifest' { url }: a manifest's address;
  * - 'service' { serviceId }: an image service (its address, its info.json, or a picture of it);
+ * - 'allmaps-image' { serviceId }: Allmaps' ?url= address for an image (its id or info.json), which
+ *   Allmaps answers by forwarding: asked instead where it forwards to, /images/<id>, as lookup asks;
  * - 'url' { url }: an address that is none of those by its look: fetched, and read for what it is;
  * - 'error' { message }.
  */
@@ -125,7 +127,13 @@ export function parseInput(text) {
   if (!/^https?:$/.test(u.protocol)) return { kind: 'error', message: 'Only http and https addresses can be used.' };
   // Asked over https (an http address is redirected there by every server measured), but for this computer's.
   u = new URL(upgrade(u.href));
-  if (u.origin === ALLMAPS_ANNOTATIONS) return { kind: 'annotation-url', url: u.href };
+  if (u.origin === ALLMAPS_ANNOTATIONS) {
+    // ?url= of an image forwards to /images/<id>, computed here; of anything else, it is fetched as it is (and refused as forwarding).
+    const inner = u.pathname === '/' && u.searchParams.get('url') ? parseInput(u.searchParams.get('url')) : null;
+    if (inner?.kind === 'service') return { kind: 'allmaps-image', serviceId: inner.serviceId };
+    if (inner?.kind === 'url') return { kind: 'allmaps-image', serviceId: normaliseId(inner.url) };
+    return { kind: 'annotation-url', url: u.href };
+  }
   // Allmaps' viewer and editor take the map's address in ?url=.
   if (/^(viewer|editor)\.allmaps\.org$/.test(u.hostname) && u.searchParams.get('url')) {
     const inner = parseInput(u.searchParams.get('url'));
@@ -188,6 +196,12 @@ export async function resolve(parsed, deps) {
     const annotation = await fetchJson(parsed.url);
     if (!isAnnotation(annotation)) throw new DataError(`${parsed.url} is not a georeference (a IIIF Georeference Annotation).`);
     return resolve({ kind: 'annotation', annotation, fetchedAt: now(), url: parsed.url }, deps);
+  }
+  if (parsed.kind === 'allmaps-image') {
+    // Asked as "Look for a georeference" asks, under Allmaps' permission.
+    const found = await lookup([parsed.serviceId], deps);
+    if (!found) throw new DataError(`Allmaps has no georeference of the image ${parsed.serviceId}.`);
+    return resolve({ kind: 'annotation', annotation: found.annotation, fetchedAt: found.fetchedAt, url: found.url }, deps);
   }
   if (parsed.kind === 'annotation') {
     // A page of several: one is chosen first (nothing is fetched until then), and that one alone goes on.
@@ -379,12 +393,33 @@ export function attributionOf(manifest, serviceId) {
 export const nonCommercialLine = (a) => `The map image is licensed ${a.licenceLabel || 'for non-commercial use'}; this may bear on how what you trace from it can be reused.`;
 
 /**
- * Whether a map pasted (not one kept) that waits on permissions (app.js's mapNeed: { subjects, pending })
- * now waits on one set to Never (`state(category, subject)`), so that the page says why it is not shown.
+ * What the maps wait on (app.js's mapNeed), from its two parts, which can wait at once: the map pasted
+ * (`pasted`: { subjects, pending, maps }, pending what to add once they are allowed) and the maps kept
+ * (`kept`: { subjects, maps }). `part` replaces one of them ({ pasted } or { kept }, null to let it go),
+ * and the other stays: the maps kept never take the place of a map pasted, nor it theirs. Returns
+ * { subjects: each of both once, a line each; pending: the map pasted's, else { readmit: true };
+ * maps; pasted; kept }, or null when nothing waits.
+ */
+export function withNeed(need, part) {
+  const pasted = 'pasted' in part ? part.pasted : need?.pasted ?? null;
+  const kept = 'kept' in part ? part.kept : need?.kept ?? null;
+  if (!pasted && !kept) return null;
+  const subjects = [];
+  for (const sj of [...(pasted?.subjects || []), ...(kept?.subjects || [])]) if (!subjects.some((x) => x[0] === sj[0] && x[1] === sj[1])) subjects.push(sj);
+  return { subjects, pending: pasted ? pasted.pending : { readmit: true }, maps: (pasted ? pasted.maps || 1 : 0) + (kept ? kept.maps || 1 : 0), pasted, kept };
+}
+/** What a reload for a permission hands over of what waits: the map pasted, to add after it, and whether maps kept wait too. */
+export const reloadHandOver = (need) => ({ pending: need?.pasted?.pending || null, readmit: !!need?.kept });
+
+/**
+ * Whether a map pasted (not one kept) that waits on permissions (app.js's mapNeed, or one part of it:
+ * { subjects, pending }) now waits on one of its own set to Never (`state(category, subject)`), so that
+ * the page says why it is not shown. The maps kept's permissions say nothing of it.
  */
 export function waitRefused(need, state) {
-  if (!need || need.pending?.readmit || need.pending?.kept) return false;
-  return need.subjects.some(([c, s]) => state(c, s) === 'never');
+  const p = need && 'pasted' in need ? need.pasted : need;
+  if (!p || p.pending?.readmit || p.pending?.kept) return false;
+  return p.subjects.some(([c, s]) => state(c, s) === 'never');
 }
 
 // ---- Keeping the maps shown --------------------------------------------------------------------

@@ -3112,6 +3112,35 @@ def iiif_checks(pw, url, tmp):
             'both lines': both_lines, 'both back': both, 'navigations': navs, 'overlays': [o['annotationId'] for o in cstate(page)['overlays']]}
     attempt('Chora maps: maps kept on two sites not allowed say "Needs permission" for both at once, and come back after one reload', kept_together)
 
+    def kept_and_pasted():
+        # A map kept waits on A (withdrawn, and reloaded, so A is not in this load's policy). A map pasted on A
+        # waits too; A allowed from its line, the maps kept are looked at again (and still wait on A): what
+        # they wait on is joined to the map pasted's, never put in its place, so the reload brings back both.
+        kid, pid = 'https://annotations.allmaps.org/maps/00000000000000k1', 'https://annotations.allmaps.org/maps/00000000000000p1'
+        key = lambda i: hashlib.sha256(i.encode()).hexdigest()[:24]
+        entry = {'version': 1, 'key': key(kid), 'item': annotation(id=kid), 'manifest': None, 'manifestUrl': None, 'fetchedAt': None,
+                 'opacity': 1, 'visible': True, 'added': '2026-10-01T00:00:02.000Z'}
+        page.evaluate("""async (e) => { const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('chora-overlays', { create: true });
+          const w = await (await d.getFileHandle(e.key + '.json', { create: true })).createWritable(); await w.write(JSON.stringify(e)); await w.close(); }""", entry)
+        panel_set([IA], 'undecided')
+        page.reload(); ready()
+        # The control: the map kept is there, waiting on A, and not shown; the map pasted is not shown before the reload.
+        waiting = soon(page, 'k => window.__chora.mapNeeds?.includes(k)', 30, IA) and not any(o['annotationId'] == kid for o in cstate(page)['overlays'])
+        text = json.dumps(annotation(id=pid))
+        paste(text)
+        said = line(IA)
+        before = [o['annotationId'] for o in cstate(page)['overlays']]
+        if said: panel_set([IA], reload=True, via=IA)
+        both = soon(page, 'ids => ids.every((id) => window.__chora.overlays.some((o) => o.annotationId === id))', 40, [kid, pid])
+        s = cstate(page); handed = (s.get('resumed') or {}).get('maps') or {}
+        for i in (kid, pid):
+            page.evaluate("k => navigator.storage.getDirectory().then((r) => r.getDirectoryHandle('chora-overlays')).then((d) => d.removeEntry(k + '.json')).catch(() => {})", key(i))
+        return (waiting and f'Needs permission: {urlparse(A).netloc}' in said and kid not in before and pid not in before and both
+                and (handed.get('pending') or {}).get('text') == text and handed.get('readmit') is True), {
+            'kept map waiting': waiting, 'line': said, 'shown before': before, 'both shown': both, 'handed over': {k: v for k, v in handed.items() if k != 'typed'},
+            'overlays': [o['annotationId'] for o in s['overlays']]}
+    attempt('Chora maps: a map kept waiting on a withdrawn site and a map pasted on it: allowed from the line, one reload brings back both (the maps kept never take the place of the map pasted)', kept_and_pasted)
+
     KEPT_ITEMS = """async () => { const out = {}; try { const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('chora-overlays');
       for await (const h of d.values()) out[h.name] = JSON.parse(await (await h.getFile()).text()).item; } catch {} return out; }"""
     def kept_as_written():
