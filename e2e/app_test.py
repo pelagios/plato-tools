@@ -782,7 +782,7 @@ def main():
             except Exception: pass
             tooltip_checks(page, 'tooltips', ('#toolbox .tools > li:nth-child(2) .why', 'μετάφρασις'), ('.dev-badge', 'being built in the open'),
                            ('.dev-badge', 'being built in the open', side))
-            no_titles(page, 'tooltips', ['ἔλεγχος', 'μετάφρασις', 'ἀριθμός', 'μνήμη', 'Ἑρμῆς', 'ἀγορά', 'χώρα', 'κρίσις', 'checked against PLATO at the commit'])
+            no_titles(page, 'tooltips', ['ἔλεγχος', 'μετάφρασις', 'ἀριθμός', 'μνήμη', 'Ἑρμῆς', 'ἀγορά', 'χώρα', 'κρίσις', 'περιπλέω', 'checked against PLATO at the commit'])
             tooltip_upkeep(page, 'tooltips')
             page.set_viewport_size({'width': 1280, 'height': 720})
 
@@ -1518,9 +1518,27 @@ def front_page_checks(browser, url):
                   drawing: !!document.querySelector('#intro .plato-mark')?.offsetWidth, chora: !!document.getElementById('to-chora')?.offsetWidth })''')
             finally: ctx.close()
         s, h = out.get('shown', {}), out.get('hidden', {})
-        return (s and h and s['scroll'] <= 390 and h['scroll'] <= 390 and len(s['cards']) == 8 and len(set(s['cards'])) == 1
+        return (s and h and s['scroll'] <= 390 and h['scroll'] <= 390 and len(s['cards']) == 9 and len(set(s['cards'])) == 1
                 and s['drawing'] and not h['drawing'] and s['chora']), out
-    attempt('front page at 390 px: one column of the eight tools, step 2 with Chora\'s row, and no sideways scroll, with the introduction shown or hidden', phone)
+    attempt('front page at 390 px: one column of the nine cards, step 2 with Chora\'s row, and no sideways scroll, with the introduction shown or hidden', phone)
+
+    def planned():
+        # Peripleo is planned, not here: its card says so, links nowhere, and choosing it changes nothing.
+        ctx, page = fresh()
+        try:
+            page.set_input_files('#picker', str(FRONT_FILE))
+            wait_state(page, lambda s: s.get('phase') == 'detected', T(60), 'detection')
+            before = page.evaluate(VISIBLE, ACTIONS)
+            card = page.evaluate("""() => { const c = [...document.querySelectorAll('#toolbox .tool')].find((t) => t.querySelector('h3')?.textContent.trim() === 'Peripleo');
+              return c && { badge: c.querySelector('.badge')?.textContent.trim(), label: c.querySelector('.label')?.textContent.trim(), coming: c.classList.contains('coming'),
+                links: c.querySelectorAll('a, button').length, choose: /Choose/.test(c.textContent), visible: !!c.offsetWidth }; }""")
+            page.click('#toolbox .tool.coming h3')
+            after = page.evaluate(VISIBLE, ACTIONS)
+            hash, tool, current = page.evaluate('location.hash'), page.evaluate('window.__plato.tool ?? null'), page.eval_on_selector_all('#toolbox [aria-current]', 'es => es.length')
+            return (bool(card) and card['visible'] and card['coming'] and card['badge'] == 'Planned' and card['label'] == 'Visualisation' and card['links'] == 0 and not card['choose']
+                    and all(before.values()) and after == before and hash == '' and tool is None and current == 0), {'card': card, 'before': before, 'after': after, 'hash': hash, 'tool': tool}
+        finally: ctx.close()
+    attempt('front page: Peripleo\'s card says it is planned, is not a link and offers no Choose, and choosing it leaves step 2 as it was', planned)
 
     # The acknowledgement of ISHI ends the footer of both pages: a rebase once dropped it unseen.
     ISHI = 'Development has been supported by the Institute for Spatial History Innovation (ISHI) at the University of Pittsburgh.'

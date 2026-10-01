@@ -186,6 +186,10 @@ a:visited { color: var(--accent); }
    the band's for a tool that is here, the dashed border's for one to come. */
 .tool .icon { width: 1.1em; height: 1.1em; vertical-align: -.16em; margin-right: .4rem; fill: none; stroke: var(--tool-band); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .tool.coming .icon { stroke: var(--soon); }
+/* A planned tool among the cards (Peripleo): not a link, so it carries the padding a card's link does. */
+.tools.choose .tool.coming { padding: .65rem .85rem .75rem; }
+/* Its badge's words in the muted text colour, which is legible at that size (the light blue alone is not, at 3.3:1). */
+.tool.coming .badge { color: var(--muted); }
 
 /* Hermes: the matching of a table's columns (a CSV file, or plain GeoJSON) to PLATO, shown before it
    is checked or converted. A real table, scrolling sideways on its own on a narrow screen rather
