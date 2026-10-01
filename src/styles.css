@@ -275,6 +275,11 @@ a:visited { color: var(--accent); }
 .columns h3 { font-size: 1.05rem; margin: 0 0 .4rem; }
 .columns > p { margin: .3rem 0 .6rem; font-size: .95rem; }
 .columns-scroll { overflow-x: auto; }
+/* Hermes: the preview of the first records (src/app.js), its JSON in a box of its own that scrolls. */
+.preview { margin: .8rem 0; }
+.preview h3 { font-size: 1.05rem; margin: .6rem 0 .3rem; }
+.preview h4 { font-size: 1rem; margin: .8rem 0 .2rem; }
+.preview-json { font-family: var(--font-mono); font-size: .8rem; max-height: 26rem; overflow: auto; padding: .6rem .8rem; background: var(--card); border: 1px solid var(--line); border-radius: 4px; white-space: pre; }
 .columns-table { border-collapse: collapse; width: 100%; font-size: .92rem; }
 .columns-table caption { text-align: left; color: var(--muted); padding-bottom: .35rem; }
 .columns-table th, .columns-table td { border-top: 1px solid var(--line); padding: .4rem .5rem .4rem 0; text-align: left; vertical-align: top; }

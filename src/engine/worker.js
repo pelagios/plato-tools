@@ -15,6 +15,7 @@ import { detect, readable } from './input.js';
 import { columnsOf, mappingOf, withSheet } from './hermes/generic.js';
 import { FIELDS, cellText } from './hermes/columns.js';
 import { teiKeyPrefixes, EDITORIAL_IRI } from './hermes/tei.js';
+import { preview, previewLine, PREVIEW_LIMIT } from './hermes/preview.js';
 import { load as choraLoad } from './chora/store.js';
 import { save as choraSave } from './chora/save.js';
 
@@ -215,6 +216,19 @@ self.onmessage = async ({ data }) => {
         postMessage({ type: 'tei-keys', id: data.id, prefixes: await teiKeyPrefixes(input) });
       } catch (e) {
         postMessage({ type: 'tei-keys', id: data.id, error: String(e && e.message || e) });
+      }
+    } else if (data.cmd === 'preview') {
+      // Hermes: the first records of the input, read as a run reads them (src/engine/hermes/preview.js),
+      // with no database and nothing written, so it takes up none of the working files. `id` is the
+      // page's: an answer about a matching or options changed since is set aside. A format not
+      // previewed, or a file that cannot be read, is said in words, beside the button.
+      try {
+        const input = await detect(data.files);
+        if (!readable(input)) throw new DataError(input.reason);
+        const result = await preview({ input, options: data.options || {}, limit: data.limit ?? PREVIEW_LIMIT }, { resources, xlsx: XLSX });
+        postMessage({ type: 'preview', id: data.id, ...result, line: previewLine(result) });
+      } catch (e) {
+        postMessage({ type: 'preview', id: data.id, error: String(e && e.message || e) });
       }
     } else if (data.cmd === 'run') {
       const input = await detect(data.files);

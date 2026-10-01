@@ -226,6 +226,8 @@ export const PREVIEW_WORDS = {
   losses: 'Losses so far',
   noLosses: 'Nothing has been lost from what was read so far.',
   none: 'No records were read.',
+  pending: 'Reading the first records…',
+  jsonLabel: 'The records, as PLATO JSON',
   /**
    * The line above a preview: "first N of M records" where the whole input was read (so M is known),
    * else "the first N records read; the rest not read". The input is never read to the end to count it.

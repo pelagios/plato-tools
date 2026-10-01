@@ -69,6 +69,11 @@
       <select id="target" data-tools="convert figures"></select>
       <button id="convert" data-tools="convert figures">Convert</button>
     </div>
+    <!-- Hermes: the preview of the first records, for a table of places, a TEI edition or annotations; filled by src/app.js, worded in src/engine/words.js (PREVIEW_WORDS). -->
+    <div class="actions previewing" hidden>
+      <button id="preview" type="button"></button>
+    </div>
+    <div id="preview-result" class="preview" aria-live="polite" hidden></div>
     <div class="actions versions" data-tools="versions">
       <span class="or">or, if this is a new version of a dataset you have published,</span>
       <button id="compare">Compare with the earlier version…</button>

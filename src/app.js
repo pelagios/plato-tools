@@ -5,7 +5,7 @@
 import { fmtBytes, formatName, progressText, summary, groups, draftNote, explainedLines } from './engine/words.js';
 import { COLUMN_CHOICES, COLUMN_WORDS, columnWarnings, columnProblem, READING_WORDS } from './engine/words.js';
 import { mappingToSave } from './engine/hermes/columns.js';
-import { review as W, POOL_BUSY, POOL_STUCK } from './engine/words.js';
+import { review as W, POOL_BUSY, POOL_STUCK, PREVIEW_WORDS } from './engine/words.js';
 const REVIEW_WORDS = W;   // the review's words, where W names the words for the columns
 import { readable } from './engine/input.js';
 import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions } from './engine/krisis/work.js';
@@ -49,6 +49,7 @@ function onMessage({ data }) {
   else if (data.type === 'tei-keys') onTeiKeys(data);
   else if (data.type === 'places') onPlaces(data);   // Krisis: gazetteer lookup
   else if (data.type === 'error' && placesWaiting) onPlaces({ subjects: null, places: null, reason: data.message });
+  else if (data.type === 'preview') onPreview(data);
   // Another tab of the main page is running: said in words, and the run may be tried again.
   else if (data.type === 'error' && data.kind === 'pool-busy') fail(data.message, POOL_BUSY);
   // This tab could not let go of the working files: no other tab is to blame, and a reload frees them.
@@ -65,6 +66,7 @@ function choose(list) {
   const c = $('chosen'); c.hidden = false;
   c.innerHTML = `<ul>${files.map((f) => `<li><span class="name">${escapeHtml(f.name)}</span> <span class="count">${fmtBytes(f.size)}</span></li>`).join('')}</ul><p>Looking at it…</p>`;
   $('action').hidden = true; $('result').hidden = true; $('review').hidden = true;
+  clearPreview();
   Object.assign(state, { phase: 'detecting' });
   worker.postMessage({ cmd: 'detect', files });
 }
@@ -92,6 +94,7 @@ function onDetected({ input: inp, targets: t }) {
   // The reading options this format has, if any, all off; a TEI file's keys are looked for.
   renderReading();
   if (inp.format === 'tei') requestTeiKeys();
+  clearPreview();
   gateOnColumns();
   $('action').hidden = false;
   Object.assign(state, { phase: 'detected', format: inp.format, profile: inp.profile || null });
@@ -108,11 +111,11 @@ async function storageCheck() {
   } catch { w.hidden = true; }
 }
 
-const buttons = (disabled) => { for (const id of ['check', 'convert', 'compare', 'publish', 'match', 'resume', 'finish']) $(id).disabled = disabled; if (!disabled) gateOnColumns(); };
+const buttons = (disabled) => { for (const id of ['check', 'convert', 'compare', 'publish', 'match', 'resume', 'finish', 'preview']) $(id).disabled = disabled; if (!disabled) gateOnColumns(); };
 // Krisis: a table of places is matched, and its review finished, by the matching of its columns: until
 // the worker's answer about them arrives, Match and Finish wait, or the table would be read by the guess.
 const columnsPending = () => isTable(input) && !columns && !state.columns?.error;
-function gateOnColumns() { if (busy) return; const wait = columnsPending(); $('match').disabled = wait; $('finish').disabled = wait; state.columnsPending = wait; }
+function gateOnColumns() { if (busy) return; const wait = columnsPending(); $('match').disabled = wait; $('finish').disabled = wait; state.columnsPending = wait; gatePreview(); }
 function start(action, earlier) {
   if (busy || looking || !input?.format || input.reason !== undefined) return;   // Krisis: nor while a lookup runs
   // A reading option that cannot be used is said plainly, and nothing is run.
@@ -188,15 +191,17 @@ function onDone({ report, outputs, work: found }) {
   Object.assign(state, { phase: 'done', report, outputs });
   if (state.action === 'match' && found) beginReview(found, outputs?.find((o) => /\.krisis\.json$/.test(o.name))?.name);
 }
-function renderReport(report) {
+function renderReport(report) { $('report').innerHTML = reportHtml(report, state.action); }
+/** A report's findings, group by group, as the page shows them. */
+function reportHtml(report, action) {
   const out = [];
-  for (const { severity: sev, title, intro } of groups(state.action)) {
+  for (const { severity: sev, title, intro } of groups(action)) {
     const items = report.items.filter((i) => i.severity === sev);
     if (!items.length) continue;
     out.push(`<div class="report-group ${sev}"><h3>${title}</h3><p>${intro}</p>` + items.map((i) =>
       `<details class="item"><summary>${escapeHtml(i.message)}<span class="count">× ${i.count.toLocaleString('en-GB')}</span></summary>${i.examples.length ? `<ul>${i.examples.map((e) => `<li>${escapeHtml(String(e))}${explained(i, e)}</li>`).join('')}</ul>` : ''}</details>`).join('') + '</div>');
   }
-  $('report').innerHTML = out.join('');
+  return out.join('');
 }
 // What changed in an example of a version check: the statements only one version makes.
 function explained(item, example) {
@@ -254,6 +259,7 @@ function requestColumns(saved, from) {
   if (saved === undefined) $('columns').innerHTML = `<h3 id="columns-h">${COLUMN_WORDS.heading}</h3>${sheetControl()}<p>${COLUMN_WORDS.looking}</p>`;
   columnsFrom = from; columnsSaved = saved;
   state.sheet = sheetOption().sheet ?? null;
+  clearPreview();   // the matching is being read again (another sheet, a matching loaded)
   worker.postMessage({ cmd: 'columns', id, files, saved, ...sheetOption() });
 }
 function onColumns(d) {
@@ -354,6 +360,7 @@ function chooseColumn(i, field) {
     });
   }
   columns.mapping[h] = field; columns.reasons[h] = W.youChose;
+  clearPreview();
   $(`column-why-${i}`).textContent = W.youChose;
   // A pattern makes web addresses: it goes with the address, and with nothing else.
   if (field !== 'address') dropPattern(h, i);
@@ -405,7 +412,7 @@ async function loadMatching(file) {
 $('columns').addEventListener('change', (e) => {
   if (e.target.id === 'columns-sheet') chooseSheet(e.target.value);
   else if (e.target.matches('select[data-column]')) chooseColumn(Number(e.target.dataset.column), e.target.value);
-  else if (e.target.matches('input[data-pattern-column]')) choosePattern(Number(e.target.dataset.patternColumn), e.target.checked);
+  else if (e.target.matches('input[data-pattern-column]')) { choosePattern(Number(e.target.dataset.patternColumn), e.target.checked); clearPreview(); }
 });
 
 // ---- Hermes: Reading options --------------------------------------------------------------------
@@ -438,6 +445,7 @@ function onTeiKeys(d) {
   const R = READING_WORDS;
   // A file whose keys cannot be read: said here, briefly; the run reports what stops it, in full.
   teiKeys = d.error ? [] : d.prefixes;
+  gatePreview();   // the keys are known: the preview may be made
   if (d.error) $('reading-keys').innerHTML = `<p class="warn" id="reading-keys-message">${escapeHtml(R.keysUnread(firstSentence(d.error)))}</p>`;
   else if (teiKeys.length) {
     const rows = teiKeys.map((k, i) => `<tr><th scope="row">${k.prefix ? `<code>${escapeHtml(k.prefix)}</code>` : `<em>${escapeHtml(R.noPrefix)}</em>`}</th>`
@@ -492,10 +500,78 @@ function readingState() {
   };
 }
 $('reading').addEventListener('change', (e) => {
+  clearPreview();
   if (e.target.id === 'reading-sameId' && e.target.checked && !hasIdColumn()) { e.target.checked = false; readingMessage(READING_WORDS.sameIdNoId); return; }
   readingMessage('');
 });
-$('reading').addEventListener('input', () => readingState());
+$('reading').addEventListener('input', () => { clearPreview(); readingState(); });
+
+// ---- Hermes: the preview of the first records -------------------------------------------------------
+// For a table of places, a TEI edition or W3C Web Annotations (the formats src/engine/hermes/preview.js
+// previews, named here so that the page need not load the engine to know them): the first records as
+// a run reads them, shown as escaped JSON, with the losses so far, grouped as the report groups them.
+// The worker writes nothing and opens no database for it. It waits for the columns to be answered (a
+// table) or the keys looked for (TEI), and is cleared whenever the matching, the sheet, the reading
+// options or the base address change, so that what it shows is never of another reading.
+const PREVIEWED = new Set(['csv', 'geojson', 'tei', 'w3c-annotations']);
+const PREVIEW_N = 10;
+let previewAsked = 0;
+const previewable = () => PREVIEWED.has(input?.format) && input.reason === undefined;
+function previewReady() {
+  if (!previewable()) return false;
+  if (isTable(input)) return !!columns;
+  if (input.format === 'tei') return teiKeys !== null;
+  return true;
+}
+function gatePreview() {
+  const b = $('preview');
+  b.textContent = PREVIEW_WORDS.button(PREVIEW_N);
+  b.setAttribute('data-tip', PREVIEW_WORDS.tip);
+  b.closest('.previewing').hidden = !previewable();
+  b.disabled = busy || !!looking || !!state.previewPending || !previewReady();   // Krisis: nor while a lookup runs
+  state.previewReady = !b.disabled;
+}
+function clearPreview() {
+  previewAsked++;
+  state.previewPending = false; state.preview = null;
+  const box = $('preview-result'); box.hidden = true; box.innerHTML = '';
+  gatePreview();
+}
+function startPreview() {
+  if (busy || looking || state.previewPending || !previewReady()) return;
+  const refused = readingProblem();
+  if (refused) { readingMessage(refused); return; }
+  clearPreview();
+  const id = previewAsked;
+  state.previewPending = true;
+  const box = $('preview-result'); box.hidden = false; box.innerHTML = `<p>${escapeHtml(PREVIEW_WORDS.pending)}</p>`;
+  gatePreview();
+  const base = $('base').value.trim() || undefined;
+  worker.postMessage({ cmd: 'preview', id, files, limit: PREVIEW_N,
+    options: { base, ...(isTable(input) && columns ? { columns: columnOptions() } : {}), ...sheetOption(), ...readingOptions() } });
+}
+function onPreview(d) {
+  if (d.id !== previewAsked) return;              // an answer about a reading changed since
+  state.previewPending = false;
+  const box = $('preview-result'), P = PREVIEW_WORDS;
+  if (d.error) {
+    box.innerHTML = `<p class="warn">${escapeHtml(P.failed(d.error))}</p>`;
+    state.preview = { error: d.error };
+    gatePreview();
+    return;
+  }
+  const values = d.items.map((ev) => ev.value);
+  // The notice that the preview is partial is its why, said under the heading: not said twice.
+  const losses = { ...d.report, items: d.report.items.filter((i) => i.kind !== 'preview-partial') };
+  box.innerHTML = `<h3 id="preview-h">${escapeHtml(P.heading)}: ${escapeHtml(d.line)}</h3>`
+    + (d.why ? `<p id="preview-why">${escapeHtml(d.why)}</p>` : '')
+    + (values.length ? `<pre class="preview-json" tabindex="0" aria-label="${escapeHtml(P.jsonLabel)}">${escapeHtml(JSON.stringify(values, null, 2))}</pre>` : `<p>${escapeHtml(P.none)}</p>`)
+    + `<h4>${escapeHtml(P.losses)}</h4><div id="preview-losses">${losses.items.length ? reportHtml(losses, 'check') : `<p>${escapeHtml(P.noLosses)}</p>`}</div>`;
+  state.preview = { line: d.line, complete: d.complete, total: d.total, why: d.why, read: d.read, profile: d.profile, header: d.header, items: values, report: d.report };
+  gatePreview();
+}
+$('preview').onclick = startPreview;
+$('base').addEventListener('input', clearPreview);
 
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
 
@@ -527,7 +603,7 @@ $('convert').onclick = () => start('convert');
 $('compare').onclick = () => $('earlier').click();
 $('earlier').onchange = (e) => { const earlier = [...e.target.files]; e.target.value = ''; if (earlier.length) start('compare', earlier); };
 $('publish').onclick = () => start('publish');
-$('cancel').onclick = () => { worker.terminate(); busy = false; $('progress').hidden = true; buttons(false); Object.assign(state, { phase: 'cancelled' }); startWorker();
+$('cancel').onclick = () => { worker.terminate(); busy = false; $('progress').hidden = true; clearPreview(); buttons(false); Object.assign(state, { phase: 'cancelled' }); startWorker();
   // Krisis: an answer about the columns still being worked out went with the worker: it is asked for again, as it was
   // (for a resumed review, by the matching the review was made with), or Match and Finish would wait for it for ever.
   if (columnsPending()) { const forReview = reviewColumnsAsked === columnsAsked; requestColumns(columnsSaved, columnsFrom); if (forReview) reviewColumnsAsked = columnsAsked; } };
