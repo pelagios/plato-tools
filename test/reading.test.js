@@ -280,3 +280,52 @@ test('a conversion stopped part-way by a gzip cut short closes its output and re
   assert.equal(cut.closed, 1, 'and is closed although the run stopped');
   assert.deepEqual(cut.r.outputs, []);
 });
+
+// ---- Detection past the head: the top level's own type, not a match anywhere in the head --------
+const ANNO = 'http://www.w3.org/ns/anno.jsonld';
+const feature = (i) => ({ type: 'Feature', properties: { name: `Place ${i}` }, geometry: { type: 'Point', coordinates: [i / 1000, i / 1000] } });
+test('a FeatureCollection whose features come first and whose type lies past the cap is refused, naming the cap, not taken for one Feature', async () => {
+  const fc = (n) => `{"features":[${Array.from({ length: n }, (_, i) => JSON.stringify(feature(i))).join(',')}],"type":"FeatureCollection"}`;
+  const big = counted(fc(200_000), 'big.geojson', 65536);
+  assert.ok(big.size > 16 * 2 ** 20, 'the type lies past the 16 MB cap');
+  const d = await detect([big]);
+  assert.equal(d.format, null, `detected as ${d.format} ${d.shape}`);
+  assert.match(d.reason, /16 MB/);
+  assert.ok(big.read < 17 * 2 ** 20, `read ${big.read}: detection stops at the cap`);
+  // Controls: within the cap, the same features-first collection is a collection, read as a table;
+  // and a Feature on its own, whose type comes after a long member, is still a Feature.
+  assert.deepEqual(await detect([counted(fc(20_000), 'mid.geojson', 65536)]).then((x) => [x.format, x.shape]), ['geojson', 'collection']);
+  const one = JSON.stringify({ properties: { note: 'n'.repeat(200_000) }, geometry: { type: 'Point', coordinates: [1, 2] }, type: 'Feature' });
+  assert.deepEqual(await detect([chunked(one, 'one.geojson')]).then((x) => [x.format, x.shape]), ['geojson', 'feature']);
+});
+test('the scan of top-level keys stops at a type that is not a string (an AnnotationPage typed as a list)', async () => {
+  const items = Array.from({ length: 20_000 }, (_, i) => ({ id: `https://example.org/a${i}`, type: 'Annotation', body: { value: 'x'.repeat(100) }, target: 'https://example.org/t' }));
+  const page = counted(JSON.stringify({ '@context': ANNO, type: ['AnnotationPage'], items }), 'page.json');
+  assert.ok(page.size > 2 ** 21, 'the page is megabytes long');
+  assert.deepEqual(await detect([page]).then((x) => [x.format, x.shape]), ['w3c-annotations', 'page']);
+  assert.ok(page.read < 2 ** 18, `read ${page.read} of ${page.size}`);
+  // Control that the count counts: a type after the items is found, and only by reading past them.
+  const late = counted(JSON.stringify({ '@context': ANNO, items, type: 'AnnotationPage' }), 'late.json');
+  assert.equal((await detect([late])).format, 'w3c-annotations');
+  assert.ok(late.read > 2 ** 21, `read ${late.read}`);
+});
+test('an AnnotationCollection whose @context and type lie past the head is recognised', async () => {
+  const coll = (extra) => JSON.stringify({ id: 'https://example.org/c', label: 'l'.repeat(200_000), ...extra, type: 'AnnotationCollection', total: 0 });
+  assert.deepEqual(await detect([chunked(coll({ '@context': ANNO }), 'c.json')]).then((x) => [x.format, x.shape]), ['w3c-annotations', 'collection']);
+  // Control: without the Web Annotation context it is not taken for annotations.
+  assert.equal((await detect([chunked(coll({}), 'c.json')])).format, null);
+});
+test('JSON Lines whose only line stops part-way says the file may be cut short', async () => {
+  const line = JSON.stringify({ profile: 'place-centric', gazetteer: { title: 'T', description: 'd'.repeat(200_000) } });
+  const d = await detect([chunked(line.slice(0, 150_000), 'cut.jsonl')]);
+  assert.equal(d.format, null);
+  assert.match(d.reason, /cut short/);
+  // Controls: a first line that is wrong, not short, says it is not valid JSON, not that the file is cut short;
+  // and the whole line is detected.
+  const bad = await detect([chunked('{"profile" "place-centric"}\n{}\n', 'bad.jsonl')]);
+  assert.match(bad.reason, /not valid JSON/);
+  assert.doesNotMatch(bad.reason, /cut short/);
+  const garbage = await detect([chunked(line + ' x', 'tail.jsonl')]);
+  assert.doesNotMatch(garbage.reason, /cut short/);
+  assert.equal((await detect([chunked(line + '\n', 'whole.jsonl')])).format, 'plato-jsonl');
+});
