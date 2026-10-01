@@ -828,9 +828,9 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   a point's box padded by 32 canvas pixels with georef's `pad`; `cito:citesAsEvidence`) and the
   georeference (`georefAnnotationCitation`, `cito:usesMethodIn`, derived from the map), and its
   notes are `choraTracingNote` then `georefNote` with the date the georeference was fetched (PLATO
-  3acab8e's pattern; the tests compare with a copy of its example, which the pinned PLATO predates
-  and its schema already accepts). Moved or reshaped, it is traced again, or no longer cites the map
-  and says so, and loses the traced point's defaults. The geometry saved is the one drawn.
+  3acab8e's pattern; the tests compare with its example, read from the pinned PLATO). Moved or
+  reshaped, it is traced again, or no longer cites the map and says so, and loses the traced
+  point's defaults. The geometry saved is the one drawn.
 - **Georeferencing** comes from `src/engine/georef/`, which belongs to Hermes; Chora keeps none of
   its own.
 

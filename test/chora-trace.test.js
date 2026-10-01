@@ -1,7 +1,7 @@
 // Tracing from a historical map (src/engine/chora/trace.js): which map a drawing was traced from, its
 // place on that map in pixels, the guard that the georeference takes it back to where it was drawn,
 // and the attestation it becomes, citing the map and the georeference as PLATO's pattern does
-// (PLATO 3acab8e, schemas/examples/place-centric-georeference.json).
+// (PLATO 3acab8e, schemas/examples/place-centric-georeference.json, read from the pinned PLATO).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -12,6 +12,7 @@ import * as trace from '../src/engine/chora/trace.js';
 import { newGeometryAttestation, DrawError } from '../src/engine/chora/draw.js';
 import { checkAddition } from '../src/engine/chora/save.js';
 import { choraTracingNote } from '../src/engine/words.js';
+import { PLATO_REPO } from './paths.js';
 
 const fx = (f) => JSON.parse(readFileSync(f, 'utf8'));
 const GRID = fx('test/fixtures/chora-iiif/annotation.json'), MANIFEST = fx('test/fixtures/chora-iiif/manifest-rumsey-shaped.json');
@@ -24,6 +25,8 @@ const dominions = await georef.readGeoreference(fx('test/fixtures/georef/bpl-bri
 const at = async (g, x, y) => (await georef.toWorld(g, { type: 'Point', coordinates: [x, y] }, { space: 'image', precision: 12 })).geojson.coordinates;
 const P = 'https://w3id.org/plato#';
 const who = { name: 'Ada Surveyor' };
+/** PLATO's worked example of a geometry traced from a georeferenced map, at the pinned commit. */
+const GEOREF_EXAMPLE = `${PLATO_REPO}/schemas/examples/place-centric-georeference.json`;
 
 test('pickOverlay: the map the drawing lies on; none when it lies on none; the topmost that holds it whole, else the topmost that holds part, with a warning', async () => {
   const inside = { type: 'Point', coordinates: await at(grid, 200, 200) };
@@ -156,9 +159,11 @@ test('a traced drawing becomes an attestation citing the map as evidence, on the
   const a = newGeometryAttestation({ geojson: drawn, ...trace.TRACED_POINT_DEFAULTS, contributor: who, created: '2026-09-30T14:00:00Z', ...parts });
   assert.equal(checkAddition(a, res.validators), null);
   // The shape of PLATO's worked example.
-  // A copy of PLATO's example (test/fixtures/chora-iiif/README.md): the pinned PLATO predates it.
-  const example = fx('test/fixtures/chora-iiif/plato-3acab8e-place-centric-georeference.json');
+  const example = fx(GEOREF_EXAMPLE);
   const want = example.spatialEntities[0].attestations[0];
+  // The traced point's role and precision are the example's (a representative point, approximate).
+  assert.equal(a.geometries[0].role, want.geometries[0].role);
+  assert.deepEqual(a.geometries[0].spatialPrecision, want.geometries[0].spatialPrecision);
   assert.deepEqual(a.citations.map((c) => Object.keys(c).sort()), want.citations.map((c) => Object.keys(c).sort()));
   assert.deepEqual(a.citations.map((c) => c.citationFunction), want.citations.map((c) => c.citationFunction));
   assert.deepEqual(Object.keys(a.citations[1].source).sort(), Object.keys(want.citations[1].source).sort());
@@ -229,14 +234,12 @@ test('a point traced from a historical map is, by default, a representative poin
   assert.equal(checkAddition(a, res.validators), null);
 });
 
-// PLATO is pinned at 8404593 here, which predates its georeference example (3acab8e). The example's
-// attestation is checked by the save's own check against the pinned schema: the citations it uses
-// (citesAsEvidence on the map, usesMethodIn and derivedFrom on the georeference) are already accepted.
-// When PLATO is re-pinned to 3acab8e or later, this can read the example from PLATO_REPO instead.
-test('PLATO 3acab8e\'s georeference example passes the save\'s check under the pinned schema', () => {
-  const example = fx('test/fixtures/chora-iiif/plato-3acab8e-place-centric-georeference.json');
+// The pinned PLATO's georeference example, checked by the save's own check against the pinned schema:
+// the citations it uses (citesAsEvidence on the map, usesMethodIn and derivedFrom on the georeference).
+test('PLATO\'s georeference example passes the save\'s check under the pinned schema', () => {
+  const example = fx(GEOREF_EXAMPLE);
   const want = example.spatialEntities[0].attestations[0];
-  assert.ok(want.citations.some((c) => c.source?.derivedFrom), 'the copy has the georeference citation');
+  assert.ok(want.citations.some((c) => c.source?.derivedFrom), 'the example has the georeference citation');
   assert.equal(checkAddition(want, res.validators), null);
   // The control: the same attestation with its georeference's derivedFrom made a number is refused.
   const bad = structuredClone(want); bad.citations.find((c) => c.source?.derivedFrom).source.derivedFrom = 42;
