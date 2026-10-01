@@ -1455,9 +1455,13 @@ def main():
             said = page.inner_text('#chosen') if s.get('format') else ''
             doc = json.loads(download(page, s['outputs'][0]['name'], tmp / 'isicily.json').read_text()) if ok else {}
             atts = [a for p in doc.get('spatialEntities', []) for a in p.get('attestations', [])]
-            check('TEI edition -> PLATO JSON: the page says it is TEI, and both place names in the text become attestations about Pleiades 678374',
-                  ok and s.get('format') == 'tei' and 'a TEI XML edition' in said and len(atts) == 2
-                  and [p['@id'] for p in doc['spatialEntities']] == ['https://pleiades.stoa.org/places/678374'], s.get('report') or s)
+            # The name in the English commentary is the editors' words (the file has a div type="edition"),
+            # reported and not converted until PLATO pins its Editorial form status; the inscription's is converted.
+            editorial = next((i for i in (s.get('report') or {}).get('items', []) if i['kind'] == 'tei-place-editorial'), None)
+            check('TEI edition -> PLATO JSON: the page says it is TEI; the place name in the inscription becomes an attestation about Pleiades 678374, the one in the commentary is reported as the editors\' words',
+                  ok and s.get('format') == 'tei' and 'a TEI XML edition' in said and len(atts) == 1
+                  and [p['@id'] for p in doc['spatialEntities']] == ['https://pleiades.stoa.org/places/678374']
+                  and editorial is not None and any(e.startswith('commentary: Sarepta') for e in editorial['examples']), s.get('report') or s)
 
             # A CSV file with odd headings: the matching is shown as a table, one labelled dropdown for
             # each column, the guess and its reason in words, three examples of each.
