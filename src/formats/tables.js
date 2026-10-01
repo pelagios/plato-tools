@@ -6,7 +6,7 @@
 // implementation (rdf-tabular, strict mode) on the same good and broken tables.
 import { PLATO } from '../lib/context.js';
 import { encodeId } from '../engine/agora/address.js';
-import { list, isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey, isComputed, isComputedFacet, identityBundleLosses } from './shared.js';
+import { list, isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey, isComputed, isComputedFacet, identityBundleLosses, evidenceSpanLosses } from './shared.js';
 
 export const CITO = 'http://purl.org/spar/cito/';
 
@@ -346,7 +346,7 @@ export const TABLE_KEEPS = {
   // The about sheet (gazetteerToAbout); isVersionOf and previousVersion have no column, so are reported.
   gazetteer: new Set(['@id', 'title', 'description', 'contributor', 'creator', 'licence', 'version', 'status', 'keywords', 'spatial', 'temporal', 'landingPage', 'uriSpace']),
   spatialEntity: new Set(['@id', 'label', 'ccodes', 'entityIdentifier', 'attestations', 'identityRelations']),
-  attestation: new Set(['about', 'names', 'geometries', 'timespans', 'types', 'properties', 'relations', 'sources', 'citations', 'meta', 'certainty', 'certaintyLevel', 'certaintyNote', 'negated', 'sourceStance', 'notes', 'occurrenceCount', 'occurrenceContext', 'formStatus', 'sequence', 'computed', 'identities']),
+  attestation: new Set(['about', 'names', 'geometries', 'timespans', 'types', 'properties', 'relations', 'sources', 'citations', 'meta', 'certainty', 'certaintyLevel', 'certaintyNote', 'negated', 'sourceStance', 'notes', 'occurrenceCount', 'occurrenceContext', 'formStatus', 'sequence', 'computed', 'identities', 'timespanRole']),   // timespanRole: evidenceSpanLosses
   name: new Set(['toponym', 'language', 'script', 'romanized', 'nameType', 'sourceLabel', 'qualification']),
   geometry: new Set(['reprPoint', 'geojson', 'wkt', 'role', 'precisionKm', 'sourceLabel', 'qualification']),
   timespan: new Set(['startEarliest', 'startLatest', 'endEarliest', 'endLatest', 'label', 'sourceLabel', 'qualification', 'duration']),
@@ -427,6 +427,10 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
       loss({ kind: 'computed', value: `${whole['@id'] || rec['@id']} (${k})` });
       a[k] = a[k].filter((f) => !isComputedFacet(f));
     }
+    // An evidence span (timespanRole EvidenceSpan) dates the documents, not the place, and the
+    // tables have no column to say so: in the date columns it would date the place, so it is left
+    // out, and reported (PLATO 7720890, #20).
+    const evidenceSpan = evidenceSpanLosses(a, whole['@id'] || rec['@id'], loss);
     dropKeys(a, 'attestation', TABLE_KEEPS.attestation, loss);
     // A connection with figures about it goes to the connections sheet, one row for each figure; a
     // relations row and a properties row would state the figure of the place, not of the connection.
@@ -445,7 +449,7 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
     if (deny && bundled) continue;
     if (deny && facets.reduce((n, k) => n + a[k].length, 0) > 1) { loss({ kind: 'denial-bundled', value: rec['@id'] }); continue; }
     if (facets.length > 1) loss({ kind: 'bundled-attestation', value: facets.join('+') });
-    if (!facets.length) { if (!bundled) loss({ kind: 'attestation-without-facet' }); continue; }
+    if (!facets.length) { if (!bundled && !evidenceSpan) loss({ kind: 'attestation-without-facet' }); continue; }
     const spans = list(a.timespans);
     if (spans.length > 1) loss({ kind: 'extra-timespans', value: spans.length - 1 });
     const t = spans[0] || {};

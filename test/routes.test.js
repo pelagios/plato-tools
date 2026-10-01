@@ -164,6 +164,37 @@ test('the tables report a row with two targets, and one with none, as problems; 
   assert.ok(relations.includes('bunsty,ContainedIn,buckinghamshire,,,'), 'the row the control edits is there');
 });
 
+// PLATO 7720890 (#20): timespanRole EvidenceSpan dates the evidence (the documents that mention the
+// place), not the place. Written as LPF's when, or in the tables' date columns, it would date the place.
+test('an evidence span is not written as the place\'s dates in LPF or the tables, and is reported', async () => {
+  const window = { timespanRole: P + 'EvidenceSpan', timespans: [{ startEarliest: '-0250', endLatest: '0150' }], citations: [{ source: 'https://example.org/s/tm' }] };
+  const named = { timespanRole: P + 'EvidenceSpan', names: [{ toponym: 'Syene' }], timespans: [{ startEarliest: '-0200', endLatest: '0100' }], citations: [{ source: 'https://example.org/s/tm' }] };
+  const doc = (atts) => JSON.stringify({ profile: 'place-centric', gazetteer: { '@id': 'https://example.org/g', title: 't' },
+    spatialEntities: [{ '@id': 'https://example.org/e/syene', label: 'Syene', attestations: atts }] });
+  const l = await go([textFile(doc([window, named]), 'w.json')], 'convert', 'lpf');
+  const f = JSON.parse(outText(l.e, 'w.geojson')).features[0];
+  assert.equal(f.when, undefined, `the window is not the place's when: ${JSON.stringify(f.when)}`);
+  assert.deepEqual(f.names.map((n) => [n.toponym, n.when]), [['Syene', undefined]], 'the name is written, without the evidence span as its dates');
+  const ll = items(l, 'loss').find((i) => i.kind === 'evidence-span');
+  assert.equal(ll?.count, 2, JSON.stringify(kinds(l, 'loss')));
+  assert.match(ll.message, /dates of the place/);
+  // A control: the same attestations with no role are dated as the source says.
+  const plain = (a) => { const { timespanRole, ...rest } = a; return rest; };
+  const c = await go([textFile(doc([plain(window), plain(named)]), 'w.json')], 'convert', 'lpf');
+  const cf = JSON.parse(outText(c.e, 'w.geojson')).features[0];
+  assert.ok(cf.when && cf.names[0].when, JSON.stringify(cf));
+  assert.equal(items(c, 'loss').find((i) => i.kind === 'evidence-span'), undefined);
+  const t = await go([textFile(doc([window, named]), 'w.json')], 'convert', 'tables');
+  const z = unzipSync(t.e.outs['w-tables.zip'][0]);
+  const names = rowsOf(strFromU8(z['names.csv']));
+  assert.deepEqual(names.map((r) => [r.name, r.date, r.from, r.to]), [['Syene', 'undated', '', '']]);
+  assert.equal(items(t, 'loss').find((i) => i.kind === 'evidence-span')?.count, 2, JSON.stringify(kinds(t, 'loss')));
+  assert.ok(!kinds(t, 'loss').includes('attestation-without-facet'), 'the window is reported once, as an evidence span');
+  const ct = await go([textFile(doc([plain(window), plain(named)]), 'w.json')], 'convert', 'tables');
+  const cnames = rowsOf(strFromU8(unzipSync(ct.e.outs['w-tables.zip'][0])['names.csv']));
+  assert.deepEqual(cnames.map((r) => [r.from, r.to]), [['-0200', '0100']], 'a control: without the role the name is dated');
+});
+
 test('a route that is, through its members, a member of itself is an error; a chain is not', async () => {
   const att = (about, whole) => ({ about, relations: [{ relatesTo: whole, relationType: P + 'MemberOf' }], citations: [{ source: 'https://example.org/s' }] });
   const doc = (atts) => JSON.stringify({ profile: 'attestation-centric', gazetteer: { '@id': 'https://example.org/g', title: 't' }, attestations: atts });

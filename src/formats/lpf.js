@@ -6,7 +6,7 @@
 // Writing LPF from PLATO is lossy by design (bundling, locators, form status, numeric certainty
 // and more have no LPF slot); every loss is reported, with counts.
 import { PLATO, isAbsoluteIri } from '../lib/context.js';
-import { list, isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey, isComputed, isComputedFacet, identityBundleLosses } from './shared.js';
+import { list, isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey, isComputed, isComputedFacet, identityBundleLosses, evidenceSpanLosses } from './shared.js';
 
 // The README's alias table, plus the vocabulary prefixes its own examples use.
 export const LPF_PREFIXES = {
@@ -146,7 +146,8 @@ const KEEPS = {
   gazetteer: new Set(['@id', 'title', 'licence', 'description', 'version', 'status', 'isVersionOf', 'previousVersion']),   // versions: versionLosses
   spatialEntity: new Set(['@id', 'label', 'ccodes', 'attestations', 'identityRelations']),
   // certaintyNote: kept only as LPF's own certainty word, written by the LPF reader
-  attestation: new Set(['about', 'names', 'geometries', 'timespans', 'types', 'properties', 'relations', 'sources', 'citations', 'meta', 'certainty', 'certaintyLevel', 'certaintyNote', 'negated', 'occurrenceCount', 'occurrenceContext', 'formStatus', 'computed', 'identities']),
+  // timespanRole: an evidence span is never written as a when (evidenceSpanLosses)
+  attestation: new Set(['about', 'names', 'geometries', 'timespans', 'types', 'properties', 'relations', 'sources', 'citations', 'meta', 'certainty', 'certaintyLevel', 'certaintyNote', 'negated', 'occurrenceCount', 'occurrenceContext', 'formStatus', 'computed', 'identities', 'timespanRole']),
   name: new Set(['toponym', 'language', 'sourceLabel', 'qualification']),
   geometry: new Set(['wkt', 'geojson', 'reprPoint', 'bbox', 'role', 'sourceLabel', 'qualification']),   // reprPoint: only without a shape
   timespan: new Set(['startEarliest', 'startLatest', 'endEarliest', 'endLatest', 'label', 'sourceLabel', 'periodoUri', 'qualification']),
@@ -271,6 +272,9 @@ export function recordToFeature(rec, idrs = [], loss = () => {}, withdrawn = nul
       loss({ kind: 'computed', value: `${whole['@id'] || rec['@id']} (${k})` });
       a[k] = a[k].filter((f) => !isComputedFacet(f));
     }
+    // An evidence span (timespanRole EvidenceSpan) dates the documents, not the place: as a when it
+    // would date the place, so it is left out, and reported (PLATO 7720890, #20).
+    evidenceSpanLosses(a, whole['@id'] || rec['@id'], loss);
     dropKeys(a, 'attestation', KEEPS.attestation, loss);
     // Identities the attestation bundles are never made links: a link states a match on its own, and
     // in a denial they say that two places are not the same (identityBundleLosses).

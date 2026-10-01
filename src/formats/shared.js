@@ -223,3 +223,29 @@ export function membershipCycles(edges) {
 export const isComputed = (x) => !!x && typeof x === 'object' && x.computed !== undefined && x.computed !== null && x.computed !== false;
 /** A facet is computed when its qualification says so. */
 export const isComputedFacet = (f) => !!f && typeof f === 'object' && isComputed(f.qualification);
+
+// ---- what an attestation's timespans date (plato:timespan_role, PLATO 7720890, #20) --------------
+/**
+ * True when an attestation's timespans date something other than what it records: the span of the
+ * evidence (plato:EvidenceSpan, the earliest and latest documents that mention the place), not the
+ * dates of the place. Only plato:WhenTrue, the default, dates the place; as with a denial, any other
+ * value errs towards leaving the dates out.
+ */
+export const datesTheEvidence = (a) => {
+  const r = a && a.timespanRole;
+  if (r === undefined || r === null) return false;
+  return !(r === PLATO + 'WhenTrue' || r === 'plato:WhenTrue');
+};
+/**
+ * A writer whose dates are the place's dates (LPF's when, the tables' date columns) cannot carry an
+ * evidence span: it takes `a` (a copy of the attestation) without its timespans, and reports the loss.
+ * True when it did.
+ */
+export function evidenceSpanLosses(a, id, loss) {
+  if (!datesTheEvidence(a)) return false;
+  // A role with no timespans dates nothing, but is still not carried.
+  if (!list(a.timespans).length) { dropKey('attestation', 'timespanRole', loss); return false; }
+  loss({ kind: 'evidence-span', value: id });
+  a.timespans = [];
+  return true;
+}

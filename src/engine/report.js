@@ -62,6 +62,7 @@ export const LOSS_TEXT = {
   'geometry-without-coordinates': 'A geometry with neither coordinates nor a shape is dropped.',
   'relation-type-not-in-plato': 'A relation whose type is not in PLATO\'s vocabulary cannot go in the tables and is dropped.',
   'relation-label': 'Relation labels are dropped.',
+  'evidence-span': "The span of the evidence for a place (timespanRole EvidenceSpan: the earliest and latest documents that mention it) is not the dates of the place, and cannot be marked as such here, so those dates are left out: written here they would read as the dates of the place.",
   computed: "A value worked out by software rather than taken from a source (computed), such as an itinerary's span from its stops, is left out: it is not evidence, and written here it would read as a source's statement.",
   'source-label': 'A value as the source wrote it (a name, location or type, before it was normalised) has no column or field here, so it is dropped; the normalised value is kept.',
   'period-label': 'A timespan with both a period name and the date as written keeps only the date as written.',
