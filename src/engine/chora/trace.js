@@ -185,3 +185,23 @@ export function uncitedParts(assisted, { zoom, geometry, version } = {}) {
   const { from = null, ...a } = assisted;
   return { notes: choraAssistedNote(a, geometry ? countEdits(a.proposed, geometry) : null, { version, zoom, uncited: from || '' }) };
 }
+
+/** What a point traced from a map is taken to mark until the user says otherwise (a maintainer's decision). */
+export const TRACED_POINT = { role: 'RepresentativePoint', precision: 'approximate' };
+/**
+ * A draft's role and precision once it is (`traced`) or is no longer traced from a map. A point traced from
+ * a map's symbol stands for the place, approximately: a RepresentativePoint, 'approximate', not a
+ * FeaturePoint (unless the user says the map draws the feature itself, choosing it). Off the map these
+ * defaults go back to a basemap point's (none said). What the user chose (`d.chosen[field]`) stands; lines
+ * and areas are left as they are. Returns { role, precision }.
+ */
+export function pointDefaults(d, traced) {
+  const out = { role: d.role ?? '', precision: d.precision ?? '' };
+  if (d.geojson?.type !== 'Point') return out;
+  for (const f of ['role', 'precision']) {
+    if (d.chosen?.[f]) continue;
+    if (traced) out[f] = TRACED_POINT[f];
+    else if (out[f] === TRACED_POINT[f]) out[f] = '';
+  }
+  return out;
+}

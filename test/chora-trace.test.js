@@ -263,3 +263,17 @@ test('13. a shape traced with assistance whose map is no longer cited (moved off
   // The control: cited, nothing said of it.
   assert.ok(!/not cited/.test(choraAssistedNote(a, null, { zoom: 12 })));
 });
+
+test('a point traced from a map stands for the place (a representative point, approximate) unless the user said otherwise; off the map, or a line or an area, nothing is said by default', () => {
+  const pt = { geojson: { type: 'Point', coordinates: [0.1, 52.2] }, role: '', precision: '' };
+  assert.deepEqual(trace.pointDefaults(pt, true), { role: 'RepresentativePoint', precision: 'approximate' });
+  // Moved off the map: back to a basemap point's (none), the defaults being only defaults.
+  assert.deepEqual(trace.pointDefaults({ ...pt, role: 'RepresentativePoint', precision: 'approximate' }, false), { role: '', precision: '' });
+  // What the user chose stands, traced or not.
+  const chosen = { ...pt, role: 'FeaturePoint', precision: 'exact', chosen: { role: true, precision: true } };
+  assert.deepEqual(trace.pointDefaults(chosen, true), { role: 'FeaturePoint', precision: 'exact' });
+  assert.deepEqual(trace.pointDefaults(chosen, false), { role: 'FeaturePoint', precision: 'exact' });
+  assert.deepEqual(trace.pointDefaults({ ...pt, role: 'LabelAnchor', chosen: { role: true } }, true), { role: 'LabelAnchor', precision: 'approximate' });
+  // Lines and areas: unchanged.
+  for (const type of ['LineString', 'Polygon']) assert.deepEqual(trace.pointDefaults({ geojson: { type }, role: '', precision: '' }, true), { role: '', precision: '' });
+});

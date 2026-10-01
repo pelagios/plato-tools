@@ -236,7 +236,7 @@ $('card').addEventListener('change', (e) => {
     else { dropTrace(d, null); keepDrafts(); renderCard(); }
     return;
   }
-  d[sel.dataset.field] = sel.value; keepDrafts();
+  d[sel.dataset.field] = sel.value; d.chosen = { ...d.chosen, [sel.dataset.field]: true }; keepDrafts();
 });
 
 // ---- Drawing -------------------------------------------------------------------------------------
@@ -293,6 +293,7 @@ function dropTrace(d, note) {
   delete d.assistedPending;
   d.trace = null; d.traceNote = joinNotes(d, note);
   if (d.role === 'LabelAnchor') d.role = '';
+  Object.assign(d, tracing.pointDefaults(d, false));
 }
 async function traceDraft(d, { only = null, reshaped = false } = {}) {
   const ticket = {}; tracing_.set(d.id, ticket);
@@ -318,6 +319,8 @@ async function traceDraft(d, { only = null, reshaped = false } = {}) {
         const back = d.assistedUncited ? (({ from, ...rest }) => rest)(d.assistedUncited) : null;
         const assisted = was?.assisted || d.assistedPending || back || null;
         d.trace = assisted ? { ...t, assisted } : t;
+        // A point traced from a map's symbol: a representative point, approximate, unless the user said otherwise.
+        Object.assign(d, tracing.pointDefaults(d, true));
         delete d.assistedPending; delete d.assistedUncited;
         d.traceNote = joinNotes(d, pick.chosen.partial ? `Part of it lies outside “${e.title}”, the map it is cited as traced from.` : null);
         if (!d.traceOptions?.some((o) => o.key === e.key)) d.traceOptions = [...(d.traceOptions || []), { key: e.key, title: e.title }];

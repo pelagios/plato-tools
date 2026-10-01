@@ -1144,6 +1144,10 @@ def iiif_checks(pw, url, tmp):
         draw(page, 'point', [tuple(xy)]); page.click('#draw-tools button[data-mode="static"]')
         traced = soon(page, '() => window.__chora.lastTrace && window.__chora.lastTrace.key', 15)
         card = page.inner_text('#card')
+        # A point traced from a map's symbol stands for the place: a representative point, approximate (the
+        # user may say otherwise); the card shows it so before the save.
+        sel = lambda f: page.eval_on_selector(f'#card [data-draft] select[data-field="{f}"]', 'e => e.value')
+        shown = (sel('role'), sel('precision'))
         page.click('#save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
         ls = cstate(page)['lastSave'] or {}
         if not ls.get('passed'): return False, {'save': ls, 'card': card[-400:]}
@@ -1159,8 +1163,12 @@ def iiif_checks(pw, url, tmp):
                 and cits[0]['source'].get('@id') == A + '/manifests/grid/manifest' and re.match(re.escape(A + '/manifests/grid/canvas/c1') + r'#xywh=\d+,\d+,\d+,\d+$', loc)
                 and cits[1]['source'].get('@id') == grid_id and cits[1]['source'].get('derivedFrom') == A + '/manifests/grid/manifest'
                 and notes.startswith('Traced by hand from a georeferenced historical map') and f'Georeferenced through {grid_id} (polynomial order 1, 4 control points)' in notes
-                and 'retrieval date not recorded' in notes and '@id' not in new), {'citations': cits, 'notes': notes, 'save': {k: ls.get(k) for k in ('passed', 'added')}}
-    attempt('Chora maps: a point traced from the map is saved citing the map (on its canvas) and the georeference, with the fixed notes, and Mneme passes', trace_save)
+                and 'retrieval date not recorded' in notes and '@id' not in new
+                and shown == ('RepresentativePoint', 'approximate') and str(new['geometries'][0].get('role', '')).endswith('RepresentativePoint')
+                and new['geometries'][0].get('spatialPrecision') == ['approximate']), {
+            'role, precision shown': shown, 'saved': {k: new['geometries'][0].get(k) for k in ('role', 'spatialPrecision')},
+            'citations': cits, 'notes': notes, 'save': {k: ls.get(k) for k in ('passed', 'added')}}
+    attempt('Chora maps: a point traced from the map is a representative point, approximate, unless said otherwise; saved citing the map (on its canvas) and the georeference, with the fixed notes, and Mneme passes', trace_save)
 
     def moved_off():
         # A traced point moved off the map with the Edit tool no longer cites the map, and says so; the
@@ -1175,6 +1183,7 @@ def iiif_checks(pw, url, tmp):
         draw(page, 'point', [(x, y)]); page.click('#draw-tools button[data-mode="static"]')
         traced = soon(page, '() => window.__chora.lastTrace && window.__chora.lastTrace.key && window.__chora.pendingCount === 1', 15)
         first = cstate(page).get('lastTrace')
+        roles_before = page.evaluate('() => [...document.querySelectorAll("#card [data-draft]")].map((li) => [li.querySelector("select[data-field=role]").value, li.querySelector("select[data-field=precision]").value])')
         tx, ty = page.evaluate(PX, [504, 256])                  # on the image, outside the mask (16 to 496)
         page.click('#draw-tools button[data-mode="select"]')
         tap(page, x, y)
@@ -1183,8 +1192,17 @@ def iiif_checks(pw, url, tmp):
         dropped = soon(page, '() => window.__chora.lastTrace && !window.__chora.lastTrace.key', 15)
         note = page.inner_text('#card [data-trace-note]') if page.query_selector('#card [data-trace-note]') else ''
         kept = page.evaluate(KEPT)
-        return (traced and first and first.get('key') and dropped and 'no longer cites that map' in note and kept == [False]), {'first': first, 'after': cstate(page).get('lastTrace'), 'note': note, 'kept traced': kept}
-    attempt('Chora maps: a traced point moved off its map with the Edit tool no longer cites the map, and the card says so', moved_off)
+        roles = lambda: page.evaluate('() => [...document.querySelectorAll("#card [data-draft]")].map((li) => [li.querySelector("select[data-field=role]").value, li.querySelector("select[data-field=precision]").value])')
+        # On the map, a representative point, approximate; moved off it, back to what a point on the basemap has.
+        off_map = roles()
+        # A point drawn on the basemap, never on a map, keeps what it always had: nothing said.
+        draw(page, 'point', [(tx + 30, ty + 30)]); page.click('#draw-tools button[data-mode="static"]')
+        until(page, '() => window.__chora.pendingCount === 2', 15)
+        plain = roles()
+        return (traced and first and first.get('key') and dropped and 'no longer cites that map' in note and kept == [False]
+                and roles_before == [['RepresentativePoint', 'approximate']] and off_map == [['', '']] and plain == [['', ''], ['', '']]), {
+            'role, precision on the map': roles_before, 'moved off': off_map, 'with a basemap point': plain, 'first': first, 'after': cstate(page).get('lastTrace'), 'note': note, 'kept traced': kept}
+    attempt('Chora maps: a traced point moved off its map with the Edit tool no longer cites the map, and the card says so; its role and precision go back to a basemap point\'s (none), as a point drawn on the basemap has', moved_off)
 
     def come_back_and_forget():
         page.reload(); until(page, '() => window.__chora && window.__chora.phase === "ready" && window.__chora.canary !== "pending"', 60)
