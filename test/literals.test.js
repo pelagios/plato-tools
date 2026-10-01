@@ -136,7 +136,8 @@ test("PLATO's Turtle examples: a name's tag that its language key matches, and a
   }
   // Presence: the converter still reads these examples' tags and datatypes, and still reports
   // what it cannot keep (labels in English, a decimal precision of 0.01). The float control is the
-  // synthetic test above: the examples' one float (a similarity score) has no key in PLATO JSON.
+  // synthetic test above: the examples' one float (a similarity score) is a candidate's, in a candidate
+  // set, which converting the example's dataset reports as not written.
   assert.ok(all.lang.some((x) => x.includes('#label "')), all.lang.join('\n'));
   assert.ok(all.dt.some((x) => /"0\.0?[1-9]+"\^\^<http:\/\/www.w3.org\/2001\/XMLSchema#decimal>$/.test(x)), all.dt.join('\n'));
   // Absence: Bristowe@enm with language "enm", Grantanbrycg@ang, Athlone@en; certainty 1.0.

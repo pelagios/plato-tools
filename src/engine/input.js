@@ -421,7 +421,8 @@ export async function detect(files) {
     // the fallback it always was.
     const { found: keys, seen, capped } = await topLevelStrings(f, ['profile', 'type', '@context']);
     const profile = keys.profile ?? (h.match(/"profile"\s*:\s*"([a-z-]+)"/) || [])[1];
-    if (profile === 'place-centric' || profile === 'attestation-centric') return { format: 'plato-json', profile, files };
+    // A dataset, or a candidate set (PLATO 53c5a40): matches software suggested for a dataset's places.
+    if (profile === 'place-centric' || profile === 'attestation-centric' || profile === 'candidate-set') return { format: 'plato-json', profile, files };
     // The document's own type, at its top level: a "type" anywhere in the head may be a feature's,
     // within features that come before the collection's own type.
     const type = keys.type ?? (typeof top?.type === 'string' ? top.type : undefined);
@@ -437,7 +438,7 @@ export async function detect(files) {
     if (shape) return { format: 'w3c-annotations', shape, files };
     // One GeoJSON Feature on its own (tested after the annotations, whose bodies may hold Features).
     if (type === 'Feature' && !isLpf(top)) return { format: 'geojson', shape: 'feature', files };
-    return { format: null, reason: 'This JSON document is neither a PLATO submission (it has no "profile"), an LPF FeatureCollection, nor W3C Web Annotations.' };
+    return { format: null, reason: 'This JSON document is neither a PLATO document (a dataset or a candidate set: it has no "profile"), an LPF FeatureCollection, nor W3C Web Annotations.' };
   }
   if (h.startsWith('[')) {
     if (annotationShape(h, true)) return { format: 'w3c-annotations', shape: 'array', files };

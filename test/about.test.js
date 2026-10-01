@@ -180,7 +180,10 @@ test('about: a missing base_uri is a warning that the addresses will not be perm
 
 // ---- the JSON Schema -------------------------------------------------------------------------------
 test('about: the JSON Schema rejects a published gazetteer without a licence, and accepts a draft', () => {
-  for (const [name, v] of Object.entries(res.validators)) {
+  // The dataset profiles: a candidate set (PLATO 53c5a40) has no gazetteer.
+  const datasets = Object.entries(res.validators).filter(([name]) => name !== 'candidate-set');
+  assert.deepEqual(datasets.map(([name]) => name).sort(), ['attestation-centric', 'place-centric']);
+  for (const [name, v] of datasets) {
     const ok = (g) => v.header({ profile: name, gazetteer: g });
     assert.equal(ok({ title: 't', status: 'published' }), false, `${name}: published, no licence`);
     assert.match(JSON.stringify(v.header.errors), /licence/);

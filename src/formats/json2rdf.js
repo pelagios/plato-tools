@@ -124,12 +124,17 @@ export class Json2Rdf {
   }
   _null(where) { this.issues({ kind: 'null-value', where }); }
 
-  /** Start a document from its header (everything except the record arrays); returns the document node. */
+  /**
+   * Start a document from its header (everything except the record arrays); returns the document node.
+   * The document node is a dataset's gazetteer, or a candidate set's candidateSet (PLATO 53c5a40): both
+   * are nesting keys, whose @id is the document's own.
+   */
   header(head) {
     this._begin();
-    const gz = head && typeof head.gazetteer === 'object' && head.gazetteer || {};
-    if (gz['@id'] === null) this._null('gazetteer.@id');
-    const doc = (gz['@id'] !== undefined && gz['@id'] !== null && this._id(gz['@id'], 'gazetteer.@id')) || this._blank();
+    const own = head && typeof head === 'object' && !Array.isArray(head) && head.gazetteer === undefined && head.candidateSet !== undefined ? 'candidateSet' : 'gazetteer';
+    const gz = head && typeof head[own] === 'object' && !Array.isArray(head[own]) && head[own] || {};
+    if (gz['@id'] === null) this._null(`${own}.@id`);
+    const doc = (gz['@id'] !== undefined && gz['@id'] !== null && this._id(gz['@id'], `${own}.@id`)) || this._blank();
     this.doc = doc;
     // Whatever a document holds, conversion goes on and says what it could not use: a check must
     // always end with a report, never with an exception.
@@ -137,7 +142,7 @@ export class Json2Rdf {
     catch (e) { this.issues({ kind: 'record-failed', value: 'the document header', error: String(e && e.message || e) }); }
     return doc;
   }
-  /** One record from a top-level array: 'spatialEntities', 'newSpatialEntities', 'attestations' or 'identityRelations'. */
+  /** One record from a top-level array: 'spatialEntities', 'newSpatialEntities', 'attestations', 'identityRelations', or a candidate set's 'candidates'. */
   record(arrayKey, obj) {
     this._begin();
     if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) {
@@ -199,6 +204,9 @@ export class Json2Rdf {
       for (const v of [].concat(val)) {
         if (v === null || v === undefined) { this._null(key); continue; }
         if (term.reverse) {
+          // A reverse term coerced to @id (a gazetteer's candidateSets, PLATO 53c5a40) takes addresses:
+          // each is the subject of the triple, as jsonld.js reads it.
+          if (typeof v === 'string' && term.type === '@id') { const n = this._id(v, key); if (n) this._out(n, p, subj); continue; }
           if (typeof v !== 'object') { this.issues({ kind: 'unconvertible', value: JSON.stringify(v), where: key }); continue; }
           const n = this._nodeId(v); if (!n) continue;
           this._out(n, p, subj); this._walk(v, c, n); continue;

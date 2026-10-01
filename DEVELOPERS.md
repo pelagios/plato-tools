@@ -53,6 +53,20 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   `"1.0"^^xsd:decimal` (back as `"1"^^xsd:integer`) and `"0.5"^^xsd:decimal` are silent, and
   `"0.1"^^xsd:decimal` and `"0.93"^^xsd:float` are reported. `test/literals.test.js` holds the
   cases, PLATO's own Turtle examples among them.
+- **Candidate sets** (PLATO 53c5a40: `schemas/candidate-set.schema.json`, loaded as
+  `profiles['candidate-set']`). The matches one run of matching software suggested for a dataset's
+  places, published apart from the dataset. `runCandidateSet` in `pipeline.js` checks one against its
+  profile and writes it as PLATO JSON, JSON Lines (the header, then a candidate a line) or N-Triples;
+  the tables and Linked Places Format refuse it in words (`candidate-set-target`), as do the tools that
+  read a dataset's records through `options.sink` (`candidate-set-not-a-dataset`). From RDF, a graph
+  with a candidate set and no dataset (no gazetteer, place, attestation or identity relation with
+  anything said of it beyond its type, since typed N-Triples type a candidate's places and dataset) is
+  written as the candidate set; a graph with both is written as the dataset, and the candidate set is
+  reported as not written (`candidate-set-not-written`). A dataset's `gazetteer.candidateSets` is the
+  reverse of `plato:candidates_for`, written and read back as such. Not done yet (the candidate set
+  specification's section 13): the checks no schema can make (ids under their set, the mint rule,
+  duplicates, across sets, `promotedFrom` against a set given beside a dataset), the version check of a
+  candidate set, and Krisis's export of one.
 - **The other formats** are in `src/formats/`: `tables.js`, `lpf.js`, `annotations.js`, `cube.js`,
   and `shared.js` for the rules the lossy writers share (denials, the current state, computed
   values, figures, bundled identities).

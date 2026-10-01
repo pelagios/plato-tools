@@ -95,11 +95,12 @@ export class Rdf2Json {
    * as a loss. A blank-node attestation has no @id in JSON, so this is the one place it can be
    * recognised. Left null for PLATO JSON, which keeps everything.
    */
-  constructor({ context, core, profile, types = null }, graph, { onLoss = () => {}, onIssue = () => {}, withdrawn = null } = {}) {
+  /** candidateProfile: the candidate set's profile (PLATO 53c5a40), to read a candidate set's header (candidateSetHeader). */
+  constructor({ context, core, profile, candidateProfile = null, types = null }, graph, { onLoss = () => {}, onIssue = () => {}, withdrawn = null } = {}) {
     this.withdrawn = withdrawn && withdrawn.size ? withdrawn : null;
     this.types = types;   // the ontology's domains and ranges, to recognise a node's other roles
     this.root = compileContext(context);
-    this.core = core; this.profile = profile;
+    this.core = core; this.profile = profile; this.candidateProfile = candidateProfile;
     this.g = graph; this.loss = onLoss; this.issue = onIssue;
     this.inv = new Map();
     this.inlined = new Set();   // shared nodes with blank-node children already written in full
@@ -140,10 +141,12 @@ export class Rdf2Json {
     return false;
   }
   _defSchema(def) {
-    if (def === '$gazetteer') return this.profile.properties.gazetteer;
-    // An object the gazetteer header defines in place, not in $defs (a creator, the years covered):
+    // A document's own node: a dataset's gazetteer, or a candidate set's candidateSet.
+    const head = (d) => (d === '$candidateSet' ? this.candidateProfile.properties.candidateSet : this.profile.properties.gazetteer);
+    if (def === '$gazetteer' || def === '$candidateSet') return head(def);
+    // An object the header defines in place, not in $defs (a creator, the years covered):
     // '$gazetteer.creator' is the schema of one creator.
-    if (def.startsWith('$gazetteer.')) { const s = this.profile.properties.gazetteer.properties[def.slice(11)]; return s.type === 'array' ? s.items : s; }
+    if (def.startsWith('$')) { const [d, key] = def.split('.'); const s = head(d).properties[key]; return s.type === 'array' ? s.items : s; }
     return this.core.$defs[def];
   }
   /** The reverse mapping for one JSON object type in one active context, built once. */
@@ -169,7 +172,7 @@ export class Rdf2Json {
       // The gazetteer's creators and its temporal coverage are objects defined in place in the header's
       // schema: each is read as a node of its own (a creator's foaf:name, a period's dcat:startDate).
       const inner = schema && schema.type === 'array' ? schema.items : schema;
-      if (def === '$gazetteer' && inner && !inner.$ref && inner.type === 'object' && inner.properties) sh = { kind: 'object', def: `$gazetteer.${key}`, array: schema.type === 'array' };
+      if ((def === '$gazetteer' || def === '$candidateSet') && inner && !inner.$ref && inner.type === 'object' && inner.properties) sh = { kind: 'object', def: `${def}.${key}`, array: schema.type === 'array' };
       const entry = { key, term, shape: sh, path, ctx: child(active, term) };
       const table = term.reverse ? m.rev : m.fwd;
       if (!table.has(term.iri)) table.set(term.iri, entry);
@@ -320,6 +323,7 @@ export class Rdf2Json {
         if (p === RDF_TYPE) { if (o.termType === 'NamedNode') this._type(id, this.g.out(id), o.value); continue; }   // structure implies the PLATO types; any other is reported
         if (this._otherRole(id, p)) continue;               // e.g. a toponym on a place that is also a name
         if (def === '$gazetteer' && DOC_LINKS.has(p)) continue;   // the records, read by the driver
+        if (def === '$candidateSet' && p === PLATO + 'contains_candidate') continue;   // the candidates, read by the driver
         if (def === '$gazetteer' && (p === this.dataSetsIri || p === this.relationTypesIri)) continue;   // tables and relation types, read by header()
         if (def === 'propertyValue') {
           const where = this._figure(id, p, o);
@@ -369,6 +373,9 @@ export class Rdf2Json {
         // as a match.
         if (e.key === 'identityRelations' && this.g.in(PLATO + 'attests_identity', sid).length) continue;
         if (e.key === 'attestations' && this.withdrawn) { const kind = this.withdrawn.get(sid); if (kind) { this.loss({ kind, value: sid }); continue; } }
+        // A reverse key whose values are addresses (a gazetteer's candidateSets, the reverse of
+        // plato:candidates_for): the address of each node that points here, not the node described.
+        if (e.shape.kind === 'uri') { if (!sid.startsWith('_:')) (obj[e.key] ||= []).push(sid); else this.loss({ kind: 'value-is-node', value: `${sid} ${p}` }); continue; }
         // The place-centric profile forbids repeating `about` on a nested attestation; identity
         // relations keep their `subject`, which the schema requires even when nested.
         const back = p === PLATO + 'attests_about' ? { p, id } : null;
@@ -524,6 +531,16 @@ export class Rdf2Json {
   identityRelation(id) {
     const term = this.root.terms.get('identityRelations');
     const rec = this.node(id, 'identityRelation', child(this.root, term));
+    return id.startsWith('_:') ? rec : { '@id': id, ...rec };
+  }
+  /** A candidate set's header: its profile and the candidateSet that describes it (PLATO 53c5a40). */
+  candidateSetHeader(id) {
+    const c = this.node(id, '$candidateSet', this.root);
+    return { profile: 'candidate-set', candidateSet: id.startsWith('_:') ? c : { '@id': id, ...c } };
+  }
+  /** One candidate of a candidate set. */
+  candidate(id) {
+    const rec = this.node(id, 'candidate', child(this.root, this.root.terms.get('candidates')));
     return id.startsWith('_:') ? rec : { '@id': id, ...rec };
   }
   attestation(id) {

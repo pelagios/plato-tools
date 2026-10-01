@@ -62,11 +62,18 @@ async function sweep(doc, name, arrays, fileName, reported) {
 }
 
 // Presence control: the example as it is converts, with records, to every target, and (a PLATO
-// example) checks with no errors, so that an error after a change is the change's.
+// example) checks with no errors, so that an error after a change is the change's. A candidate set
+// (PLATO 53c5a40) has no place in the tables or Linked Places Format: those refuse it, in words.
+const REFUSE_CANDIDATES = new Set(['tables', 'lpf', 'lpf-seq']);
 async function control(text, fileName, clean) {
   if (clean) assert.equal((await go([textFile(text, fileName)], 'check', null)).report.errors, 0, `${fileName} has errors of its own`);
+  const candidates = JSON.parse(text).profile === 'candidate-set';
   for (const target of Object.keys(TARGETS)) {
     const r = await go([textFile(text, fileName)], 'convert', target);
+    if (candidates && REFUSE_CANDIDATES.has(target)) {
+      assert.ok(r.incomplete && !r.outputs.length && r.report.items.some((i) => i.kind === 'candidate-set-target'), `${fileName} -> ${target}: not refused`);
+      continue;
+    }
     assert.ok(!r.incomplete && r.outputs.length > 0, `${fileName} -> ${target}: no output`);
     assert.ok(Object.values(r.report.counts).some((n) => n > 0), `${fileName} -> ${target}: nothing counted ${show(r.report.counts)}`);
   }
@@ -86,7 +93,9 @@ for (const f of examples) {
     const doc = JSON.parse(text);
     await control(text, f, true);
     const arrays = firstArrays(doc);
-    assert.ok(arrays.size >= 3, `only ${arrays.size} arrays found`);
+    // A candidate set has two lists only, its candidates and its authors: both must be found.
+    if (doc.profile === 'candidate-set') assert.deepEqual([...arrays.keys()].sort(), ['candidates', 'creator']);
+    else assert.ok(arrays.size >= 3, `only ${arrays.size} arrays found`);
     const reported = (report, key) => report.errors > 0 || report.items.some((i) => JSON.stringify(i).includes(key));
     const { threw, silent } = await sweep(doc, f, arrays, f, reported);
     // silent: neither an error nor an item naming the key in the check's report.

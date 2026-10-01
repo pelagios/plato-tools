@@ -14,7 +14,7 @@ import { PLATO } from '../src/lib/context.js';
 
 const load = (f) => JSON.parse(readFileSync(`public/plato/${f}`, 'utf8'));
 const CTX = load('plato.context.jsonld'), CORE = load('plato.schema.json');
-const PROFILES = { 'place-centric': load('place-centric.schema.json'), 'attestation-centric': load('attestation-centric.schema.json') };
+const PROFILES = { 'place-centric': load('place-centric.schema.json'), 'attestation-centric': load('attestation-centric.schema.json'), 'candidate-set': load('candidate-set.schema.json') };
 const EXAMPLES = `${PLATO_REPO}/schemas/examples`;
 const dedupe = (nq) => [...new Set(nq.split('\n').filter(Boolean))].join('\n') + '\n';
 const canon = (nq) => jsonld.canonize(dedupe(nq), { algorithm: 'URDNA2015', inputFormat: 'application/n-quads', format: 'application/n-quads', safe: false });
@@ -29,11 +29,16 @@ function toRdf(doc) {
 }
 function toJson(g, docNode, profileName) {
   const losses = [];
-  const r = new Rdf2Json({ context: CTX, core: CORE, profile: PROFILES[profileName] }, g, { onLoss: (l) => losses.push(l) });
+  const r = new Rdf2Json({ context: CTX, core: CORE, profile: PROFILES[profileName === 'candidate-set' ? 'place-centric' : profileName], candidateProfile: PROFILES['candidate-set'] }, g, { onLoss: (l) => losses.push(l) });
   const id = docNode.termType === 'BlankNode' ? '_:' + docNode.value : docNode.value;
+  const kids = (p) => g.out(id).filter((t) => t.p === PLATO + p).map((t) => (t.o.termType === 'BlankNode' ? '_:' + t.o.value : t.o.value));
+  // A candidate set (PLATO 53c5a40): its header, then its candidates.
+  if (profileName === 'candidate-set') {
+    const doc = { $schema: 'https://w3id.org/plato/schemas/candidate-set.schema.json', ...r.candidateSetHeader(id), candidates: kids('contains_candidate').map((c) => r.candidate(c)) };
+    return { doc, losses };
+  }
   const head = r.header(id);
   const doc = { $schema: `https://w3id.org/plato/schemas/${profileName}.schema.json`, ...head, profile: profileName };
-  const kids = (p) => g.out(id).filter((t) => t.p === PLATO + p).map((t) => (t.o.termType === 'BlankNode' ? '_:' + t.o.value : t.o.value));
   if (profileName === 'place-centric') doc.spatialEntities = kids('contains_entity').map((e) => r.entity(e));
   else {
     doc.attestations = kids('contains_attestation').map((a) => r.attestation(a));

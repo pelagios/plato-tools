@@ -1,5 +1,5 @@
 // Every key the PLATO JSON Schema allows, at every level, as the paths the audit of the writers
-// runs over (test/keys.test.js). Walks the two profiles through $ref, allOf and oneOf, so that a
+// runs over (test/keys.test.js). Walks the three profiles through $ref, allOf and oneOf, so that a
 // key PLATO adds is enumerated the moment the tools are re-pinned, with no list to keep up to date.
 import { readFileSync } from 'node:fs';
 
@@ -9,7 +9,8 @@ const load = (f) => JSON.parse(readFileSync(new URL(`../public/plato/${f}`, impo
 const absolute = (x) => (Array.isArray(x) ? x.map(absolute) : x && typeof x === 'object'
   ? Object.fromEntries(Object.entries(x).map(([k, v]) => [k, k === '$ref' && v.startsWith('#') ? 'plato.schema.json' + v : absolute(v)])) : x);
 export const CORE = absolute(load('plato.schema.json'));
-export const PROFILES = { 'place-centric': load('place-centric.schema.json'), 'attestation-centric': load('attestation-centric.schema.json') };
+export const PROFILES = { 'place-centric': load('place-centric.schema.json'), 'attestation-centric': load('attestation-centric.schema.json'),
+  'candidate-set': load('candidate-set.schema.json') };
 
 /** Resolve $ref and merge allOf: { s, def } where def names the $defs entry reached, if any. */
 function resolve(s0, root) {
@@ -63,10 +64,11 @@ export function keyPaths(profile = 'place-centric', { only } = {}) {
       for (const v of variants) {
         const arr = v.s.type === 'array';
         const item = arr ? resolve(v.s.items, v.root) : v;
-        // An object defined in place rather than in $defs is its own host: the gazetteer, a table's
-        // structure and its components, and the gazetteer's creators and temporal coverage.
-        const childHost = item.def || (key === 'gazetteer' ? 'gazetteer' : key === 'structure' ? 'structure' : key === 'components' ? 'component'
-          : host === 'gazetteer' && (key === 'creator' || key === 'temporal') ? key : null);
+        // An object defined in place rather than in $defs is its own host: the gazetteer (a candidate
+        // set's candidateSet), a table's structure and its components, and the gazetteer's (or the
+        // candidate set's) creators and temporal coverage.
+        const childHost = item.def || (key === 'gazetteer' || key === 'candidateSet' ? key : key === 'structure' ? 'structure' : key === 'components' ? 'component'
+          : (host === 'gazetteer' || host === 'candidateSet') && (key === 'creator' || key === 'temporal') ? key : null);
         const objectVariant = isObject(item.s) && !WHOLE.has(key);
         const leaf = { path: [...path, key], key, schema: v.s, item: item.s, def: item.def, childHost, host, hosts, variant: ks.oneOf ? (objectVariant ? 'object' : 'value') : null };
         if (!objectVariant) { out.push(leaf); continue; }

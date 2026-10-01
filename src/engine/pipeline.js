@@ -44,7 +44,7 @@ export function prepare(res) {
   for (const p of Object.values(res.profiles)) ajv.addSchema(p);
   const v = {};
   for (const [name, p] of Object.entries(res.profiles)) {
-    const arrays = new Set(['spatialEntities', 'newSpatialEntities', 'attestations', 'identityRelations']);
+    const arrays = new Set(['spatialEntities', 'newSpatialEntities', 'attestations', 'identityRelations', 'candidates']);
     const headSchema = { ...p, $id: p.$id.replace('.schema.json', '.header.schema.json'), required: (p.required || []).filter((k) => !arrays.has(k)),
       properties: Object.fromEntries(Object.entries(p.properties).filter(([k]) => !arrays.has(k))) };
     v[name] = {
@@ -52,6 +52,7 @@ export function prepare(res) {
       entity: p.properties.spatialEntities ? ajv.getSchema(p.$id + '#/properties/spatialEntities/items') : null,
       newEntity: p.properties.newSpatialEntities ? ajv.getSchema(p.$id + '#/properties/newSpatialEntities/items') : null,
       attestation: p.properties.attestations ? ajv.getSchema(p.$id + '#/properties/attestations/items') : null,
+      candidate: p.properties.candidates ? ajv.getSchema(p.$id + '#/properties/candidates/items') : null,
       identity: ajv.getSchema('https://w3id.org/plato/schemas/plato.schema.json#/$defs/identityRelation'),
     };
   }
@@ -491,7 +492,9 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   // src/formats/shared.js): what the document retracts or supersedes is left out, and reported.
   const currentOnly = action === 'convert' && (lpfTarget || target === 'tables');
   let withdrawn = null;
-  if (currentOnly && !needsStore && input.format.startsWith('plato')) {
+  // A candidate set (PLATO 53c5a40) is read and written apart from a dataset (runCandidateSet, below).
+  const candidateSet = input.profile === 'candidate-set';
+  if (currentOnly && !needsStore && !candidateSet && input.format.startsWith('plato')) {
     // One pass first, because a retraction can come anywhere in the file, even after what it
     // withdraws, and under another place. DEEP-style files also list identity relations after
     // every place, and LPF needs them on the feature.
@@ -505,7 +508,10 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     withdrawn = resolved(withdrawn, rep);
   }
   if (action === 'convert' && options.cube && target !== 'ntriples') rep.warning('cube-not-ntriples', 'The Data Cube export applies to N-Triples output only, so it is not made here.');
-  if (action === 'convert') writer = await makeWriter(target, env, rep, { ...options, idrsBySubject, withdrawn }, typing, outputs, input);
+  // RDF may hold a dataset or a candidate set, which are written by different writers: its writer is
+  // made once the graph has been read and it is known which.
+  const writerFor = () => makeWriter(target, env, rep, { ...options, idrsBySubject, withdrawn }, typing, outputs, input);
+  if (action === 'convert' && !isRdf && !candidateSet) writer = await writerFor();
   // The version check (src/engine/compare.js) reads the records itself, as a writer is given them:
   // every input then reaches it as place-centric records, whatever format it came in.
   else if (options.sink) writer = options.sink;
@@ -546,6 +552,13 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   };
   const dry = new Json2Rdf(res.context, () => {}, { onIssue: jsonIssue });
   const notAList = (ev) => rep.error('not-a-list', notAListText(ev.key, ev.shape), ev.key);
+  if (candidateSet) {
+    const refused = refuseCandidateSet({ action, target, options }, rep);
+    if (refused) return refused;
+    const w = action === 'convert' ? await candidateSetWriter(target, env, rep, typing, outputs, input, options) : null;
+    await runCandidateSet(candidateSetSource(input, rep), { V, rep, writer: w, dry, notAList });
+    return { report: rep.toJSON(), outputs };
+  }
   const lateHeader = (ev) => rep.error('late-header', `The document's ${ev.key} come after its records. These tools read a document's header before its records, so ${ev.key} must come before spatialEntities or attestations; as the file is, they are not read at all.`, ev.key);
 
   // A reader that read on past part of its input it could not read (a sheet of the tables) says so.
@@ -609,13 +622,46 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       if (first && seenNode.size < CAP) seenNode.add(nk);
       rep.loss('multiple-values', `A value that PLATO JSON holds once has several different values here; the first is kept and the others are left out (${i.key})`, first ? i.node : undefined);
     };
-    const r2j = new Rdf2Json({ context: res.context, core: res.core, profile: res.profiles['place-centric'], types: res.types }, store, {
+    const r2j = new Rdf2Json({ context: res.context, core: res.core, profile: res.profiles['place-centric'], candidateProfile: res.profiles['candidate-set'], types: res.types }, store, {
       withdrawn: currentOnly ? withdrawnInStore(store, rep) : null,
       onLoss: (l) => rep.loss(l.kind, `${LOSS_TEXT[l.kind] || l.kind}`, l.predicate || l.value),
       onIssue: (i) => (i.kind === 'multiple-values' ? multipleValues(i) : rep.warning(i.kind, ISSUE_TEXT[i.kind] || i.kind, i.kind === 'figure-undeclared' ? i.key : i.node)),
     });
     const docs = [...store.subjects(TYPE, PLATO + 'Gazetteer')];
     const docId = docs[0] || firstSubjectWith(store, PLATO + 'contains_entity') || firstSubjectWith(store, PLATO + 'contains_attestation');
+    // Candidate sets (PLATO 53c5a40), and candidates in none. A graph with no dataset in it (no
+    // gazetteer, place, attestation or identity relation) and a candidate set is written as that
+    // candidate set; otherwise the dataset is written, and the candidates are reported as not written,
+    // never merged into it.
+    const sets = [...new Set([...store.subjects(TYPE, PLATO + 'CandidateSet'), ...distinctSubjectsWith(store, PLATO + 'contains_candidate')])];
+    // A gazetteer or a place counts only if something is said of it beyond its type: typed N-Triples
+    // type the dataset a candidate set is for as plato:Gazetteer (the range of candidates_for), and a
+    // candidate's two places as plato:SpatialEntity (the range of candidate_source and candidate_candidate).
+    const described = (id) => store.out(id).some((t) => t.p !== TYPE);
+    const isDataset = !!(docs.some(described) || firstSubjectWith(store, PLATO + 'contains_entity') || firstSubjectWith(store, PLATO + 'contains_attestation')
+      || firstSubjectWith(store, PLATO + 'attests_about') || describedEntity(store) || store.subjects(TYPE, PLATO + 'IdentityRelation').next().value || firstSubjectWith(store, PLATO + 'identity_subject'));
+    const looseCandidates = (keep) => [...new Set([...store.subjects(TYPE, PLATO + 'Candidate'), ...distinctSubjectsWith(store, PLATO + 'candidate_source')])].filter((c) => !keep.has(c));
+    const notWritten = (v) => rep.loss('candidate-set-not-written', LOSS_TEXT['candidate-set-not-written'], v);
+    if (!isDataset && (sets.length || looseCandidates(new Set()).length)) {
+      const refused = refuseCandidateSet({ action, target, options }, rep);
+      if (refused) { store.close(); return refused; }
+      const setId = sets[0];
+      const ids = setId ? [...objectsOf(store, setId, PLATO + 'contains_candidate')] : looseCandidates(new Set());
+      for (const other of sets.slice(1)) notWritten(other);
+      if (setId) for (const c of looseCandidates(new Set(ids))) notWritten(c);
+      const w = action === 'convert' ? await candidateSetWriter(target, env, rep, typing, outputs, input, options) : null;
+      const events = (function* () {
+        yield { type: 'header', value: setId ? { $schema: CANDIDATE_SET_SCHEMA, ...r2j.candidateSetHeader(setId) } : { $schema: CANDIDATE_SET_SCHEMA, profile: 'candidate-set', candidateSet: {} } };
+        let n = 0;
+        for (const c of ids) yield { type: 'candidate', value: r2j.candidate(c), n: ++n };
+      })();
+      await runCandidateSet(events, { V: res.validators['candidate-set'], rep, writer: w, dry: null, notAList });
+      store.close();
+      return { report: rep.toJSON(), outputs };
+    }
+    for (const set of sets) notWritten(set);
+    for (const c of looseCandidates(new Set(sets.flatMap((x) => [...objectsOf(store, x, PLATO + 'contains_candidate')])))) notWritten(c);
+    if (action === 'convert' && isRdf) writer = await writerFor();
     const head = docId ? { $schema: 'https://w3id.org/plato/schemas/place-centric.schema.json', ...r2j.header(docId) } : { profile: 'place-centric', gazetteer: { title: input.files[0].name } };
     head.profile = 'place-centric';
     writer && writer.header(head);
@@ -673,6 +719,17 @@ const ISSUE_TEXT = {
   'structure-without-address': "A table's structure has no web address; PLATO JSON requires one for a structure whose components are listed.",
   'component-several': "A component of a table's structure names more than one dimension, measure or attribute; PLATO JSON gives each its own component.",
 };
+/** A place (typed plato:SpatialEntity) with a statement other than its type, or null. */
+function describedEntity(store) {
+  const tp = store.pid.get(TYPE); if (tp === undefined) return null;
+  const q = store.db.prepare('SELECT s FROM t WHERE p<>? AND s IN (SELECT s FROM t WHERE p=? AND o=?) LIMIT 1');
+  try { q.bind([tp, tp, PLATO + 'SpatialEntity']); return q.step() ? q.get(0) : null; } finally { q.finalize(); }
+}
+function* distinctSubjectsWith(store, p) {
+  const i = store.pid.get(p); if (i === undefined) return;
+  const q = store.db.prepare('SELECT DISTINCT s FROM t WHERE p=?');
+  try { q.bind([i]); while (q.step()) yield q.get(0); } finally { q.finalize(); }
+}
 function firstSubjectWith(store, p) {
   const q = store.db.prepare('SELECT s FROM t WHERE p=? LIMIT 1');
   try { const i = store.pid.get(p); if (i === undefined) return null; q.bind([i]); return q.step() ? q.get(0) : null; } finally { q.finalize(); }
@@ -706,6 +763,95 @@ function checkGraph(store, res, rep) {
     const c = store.db.prepare('SELECT s FROM t WHERE p=? AND o=? AND s NOT IN (SELECT s FROM t WHERE p=?) AND s NOT IN (SELECT s FROM t WHERE p=?) LIMIT 5');
     try { c.bind([tp, PLATO + 'Attestation', ab ?? -1, mab ?? -1]); while (c.step()) rep.error('attestation-without-subject', 'An attestation does not say what it is about (plato:attests_about)', c.get(0)); } finally { c.finalize(); }
   }
+}
+
+// ---- candidate sets (PLATO 53c5a40) -------------------------------------------------------------------
+// The matches one run of matching software suggested for a dataset's places, published apart from the
+// dataset: a header (profile, candidateSet) and its candidates. Read from PLATO JSON or JSON Lines (one
+// candidate a line, after the header) or from RDF; checked against the candidate set's profile; written
+// as PLATO JSON, JSON Lines or N-Triples. The tables and Linked Places Format have no place for it.
+const CANDIDATE_SET_SCHEMA = 'https://w3id.org/plato/schemas/candidate-set.schema.json';
+export const CANDIDATE_SET_TEXT = {
+  'candidate-set-target': 'A candidate set cannot be written as spreadsheet tables or Linked Places Format: neither has a place for suggestions made by software, which are claims by no one. Keep it as PLATO JSON or RDF.',
+  'candidate-set-not-a-dataset': 'This is a candidate set, not a dataset: it holds matches suggested by software, and no places, attestations or identity relations, which are what this tool reads. A candidate set can be checked, and converted to PLATO JSON or RDF, on its own.',
+};
+/**
+ * A run on a candidate set that cannot go ahead, else null: a target that cannot hold one, or a tool
+ * that reads a dataset's records through options.sink (the version check, match review, Chora).
+ */
+function refuseCandidateSet({ action, target, options }, rep) {
+  const kind = options.sink ? 'candidate-set-not-a-dataset' : action === 'convert' && (target === 'tables' || target === 'lpf' || target === 'lpf-seq') ? 'candidate-set-target' : null;
+  if (!kind) return null;
+  rep.error(kind, CANDIDATE_SET_TEXT[kind]);
+  return { report: rep.toJSON(), outputs: [], incomplete: true };
+}
+async function* candidateSetSource(input, rep) {
+  const file = input.files[0];
+  if (input.format === 'plato-jsonl') {
+    let first = true, n = 0;
+    for await (const { line, n: at } of lines(file)) {
+      let v;
+      try { v = JSON.parse(line); } catch (e) { rep.error('json-syntax', 'A line is not valid JSON', `line ${at}: ${e.message}`); continue; }
+      if (!v || typeof v !== 'object' || Array.isArray(v)) { rep.error('jsonl-not-an-object', 'A line is not a JSON object, so it is neither the header nor a candidate, and is not read', `line ${at}: ${line.slice(0, 80)}`); continue; }
+      if (first) { first = false; yield { type: 'header', value: v }; continue; }
+      yield { type: 'candidate', value: v, n: ++n };
+    }
+    return;
+  }
+  const keys = ['$schema', '@context', 'profile', 'candidateSet'];
+  const head = {};
+  for await (const { path, value } of jsonDocument(file, { arrays: ['candidates'], keys, onlyKeys: true })) head[path] = value;
+  if (!('candidateSet' in head)) for await (const { path, value } of jsonDocument(file, { keys })) head[path] = value;   // after the candidates: rare
+  yield { type: 'header', value: head };
+  let n = 0;
+  for await (const { path, value, notAList } of jsonDocument(file, { arrays: ['candidates'] })) {
+    if (notAList) { yield { type: 'not-a-list', key: path, shape: notAList }; continue; }
+    yield { type: 'candidate', value, n: ++n };
+  }
+}
+/** Check each event of a candidate set against its profile, and write it if there is a writer. */
+async function runCandidateSet(events, { V, rep, writer, dry, notAList }) {
+  for await (const ev of events) {
+    if (ev.type === 'not-a-list') { notAList(ev); continue; }
+    if (ev.type === 'header') {
+      if (!V.header(ev.value)) rep.error('schema', `The document header does not match the PLATO JSON Schema: ${ajvMessage(V.header.errors)}`);
+      if (dry) dry.header(ev.value);
+      if (writer) writer.header(ev.value);
+      continue;
+    }
+    rep.count('candidates');
+    if (!V.candidate(ev.value)) rep.error('schema', explainSchema(V.candidate.errors, false), `${ev.value?.['@id'] || `candidate ${ev.n}`}: ${ajvMessage(V.candidate.errors)}`);
+    if (dry) dry.record('candidates', ev.value);
+    if (writer) {
+      try { writer.candidate(ev.value); }
+      catch (e) { rep.error('record-failed', 'A record could not be written and is left out of the output; the rest of the file was still converted', `${ev.value?.['@id'] || `candidate ${ev.n}`}: ${e && e.message || e}`); }
+    }
+  }
+  if (writer) await writer.close();
+}
+async function candidateSetWriter(target, env, rep, typing, outputs, input, options) {
+  const stem = (options.name || input.files[0].name).replace(/\.(gz)$/i, '').replace(/\.[^.]+$/, '');
+  const sink = new TextSink(await env.output(stem + TARGETS[target].ext));
+  if (target === 'ntriples') {
+    let triples = 0;
+    const w = new Json2Rdf(env.resources.context, (s, p, o) => { triples++; sink.write(tripleNT(s, p, o)); }, { ...typing, onIssue: () => {} });
+    return {
+      header(h) { w.header(h); },
+      candidate(c) { w.record('candidates', c); },
+      async close() { rep.count('triples written', triples); outputs.push(await sink.close()); },
+    };
+  }
+  const lines = target === 'plato-jsonl';
+  let first = true;
+  return {
+    header(h) {
+      const head = { $schema: CANDIDATE_SET_SCHEMA, ...h, profile: 'candidate-set' };
+      const s = JSON.stringify(head);
+      sink.write(lines ? s + '\n' : s.slice(0, -1) + (s.length > 2 ? ',' : '') + '"candidates":[');
+    },
+    candidate(c) { sink.write(lines ? JSON.stringify(c) + '\n' : (first ? '' : ',') + JSON.stringify(c)); first = false; },
+    async close() { if (!lines) sink.write(']}'); outputs.push(await sink.close()); },
+  };
 }
 
 // ---- writers ---------------------------------------------------------------------------------

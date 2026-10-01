@@ -257,13 +257,60 @@ async function judgeAc(writer, entry, n) {
   return 'FAIL: neither carried nor reported';
 }
 
+// ---- a candidate set (PLATO 53c5a40): its own keys, in the writers that can hold one --------------------
+// A candidate set is written as PLATO JSON or RDF only: the tables and Linked Places Format have no place
+// for suggestions made by software, and refuse it whole (tested below), so it has no keys to audit there.
+const CS_WRITERS = new Set(['ntriples', 'rdf-json']);
+// The audit's base has the keys a candidate must have to be written at all, so that each other key is
+// set beside them; `valid` adds the rest the profile requires, for the refusal test's control.
+const csDoc = (valid = false) => ({
+  profile: 'candidate-set',
+  candidateSet: { '@id': E + 'candidates/base', title: 'Keys candidates', issued: '2026-09-09', candidatesFor: E + 'gazetteer/base' },
+  candidates: [{ '@id': E + 'candidates/base#c-0000aaaa', subject: E + 'place/base', object: E + 'place/other',
+    ...(valid ? { similarityScore: 0.5, algorithmVersion: 'keys matcher 1', generatedAt: '2026-09-09T18:00:00Z', status: 'suggested' } : {}) }],
+});
+export function csCases() {
+  const out = [];
+  let n = 3000;
+  for (const e of keyPaths('candidate-set')) {
+    if ((NOT_DATA.has(e.key) || READ_AS.has(e.key)) && e.path.length === 1) continue;
+    if (e.path.length === 1) continue;   // candidateSet and candidates: containers, tested through their keys
+    out.push({ e, n: n++ });
+  }
+  return out;
+}
+function buildCs(entry, value) {
+  const doc = csDoc();
+  const segs = entry.path.filter((x) => x !== 0);
+  let cur = segs[0] === 'candidates' ? doc.candidates[0] : doc.candidateSet;
+  // An author: the base one, by name, to set the key beside.
+  if (segs[1] === 'creator' && segs.length === 3) { cur.creator = [hostBase('creator')]; cur = cur.creator[0]; }
+  const leaf = segs.at(-1);
+  if (value === undefined) { if (!(leaf in csDoc().candidateSet && segs[0] === 'candidateSet' && segs.length === 2) && !(leaf in csDoc().candidates[0] && segs[0] === 'candidates') && !(leaf === 'name' && segs[1] === 'creator')) delete cur[leaf]; }
+  else cur[leaf] = value;
+  return doc;
+}
+async function judgeCs(writer, entry, n) {
+  const without = await convert(writer, buildCs(entry, undefined));
+  const value = sample(entry, n);
+  const withKey = await convert(writer, buildCs(entry, value));
+  const newLoss = [...withKey.losses].filter(([k, c]) => { const w = without.losses.get(k); return !w || w.count < c.count || [...c.examples].some((x) => !w.examples.has(x)); });
+  if (newLoss.length) return 'reported:' + newLoss.map(([k]) => k.split('\u0001')[0]).join(',');
+  const m = marker(value, entry);
+  if (withKey.out !== without.out && (!m || withKey.out.includes(m))) return 'carried';
+  return 'FAIL: neither carried nor reported';
+}
+
 // ---- the tests ---------------------------------------------------------------------------------------
 test('the enumeration reaches every object PLATO defines, and every key of each', () => {
   const paths = keyPaths('place-centric');
+  // A candidate (PLATO 53c5a40) is in a candidate set only, never in a dataset: its keys are reached there.
+  const csPaths = keyPaths('candidate-set');
+  assert.ok(csPaths.some((e) => e.path.join('.') === 'candidates.0.similarityScore'), 'the candidate set\'s candidates are walked');
   // Every key along every path, with the object it is a key of: containers (a name's qualification)
   // are entered rather than tested as values, so they appear only on the way to their own keys.
   const pairs = new Set();
-  for (const e of paths) e.path.filter((x) => x !== 0).forEach((k, i) => pairs.add(`${[...e.hosts, e.childHost][i]}\u0001${String(k).replace('{}', '')}`));
+  for (const e of [...paths, ...csPaths]) e.path.filter((x) => x !== 0).forEach((k, i) => pairs.add(`${[...e.hosts, e.childHost][i]}\u0001${String(k).replace('{}', '')}`));
   for (const [name, def] of Object.entries(CORE.$defs)) {
     if (def.type !== 'object' || !def.properties) continue;
     const seen = new Set([...pairs].filter((x) => x.startsWith(name + '\u0001')).map((x) => x.split('\u0001')[1]));
@@ -293,9 +340,31 @@ for (const writer of WRITERS) {
       const r = await judgeAc(writer, e, n);
       if (r.startsWith('FAIL')) failures.push(`attestation-centric ${e.path.join('.')}: ${r}`);
     }
+    if (CS_WRITERS.has(writer)) {
+      const cs = csCases();
+      assert.ok(cs.length >= 12, `only ${cs.length} candidate set keys`);
+      for (const { e, n } of cs) {
+        const r = await judgeCs(writer, e, n);
+        if (r.startsWith('FAIL')) failures.push(`candidate-set ${e.path.join('.')}: ${r}`);
+      }
+    }
     assert.deepEqual(failures, [], `${failures.length} keys dropped silently:\n${failures.join('\n')}`);
   });
 }
+test('a candidate set is refused whole by the tables and Linked Places Format, in words, and nothing is written', async () => {
+  for (const target of ['tables', 'lpf', 'lpf-seq']) {
+    const r = await go([textFile(JSON.stringify(csDoc(true)), 'k.json')], 'convert', target);
+    assert.equal(r.incomplete, true, target);
+    assert.deepEqual(r.outputs, [], target);
+    assert.deepEqual(r.report.items.filter((i) => i.severity === 'error').map((i) => i.kind), ['candidate-set-target'], target);
+  }
+  // The control: the same candidate set is written as N-Triples and as PLATO JSON.
+  for (const target of ['ntriples', 'plato-json']) {
+    const r = await go([textFile(JSON.stringify(csDoc(true)), 'k.json')], 'convert', target);
+    assert.equal(r.report.errors, 0, `${target}: ${JSON.stringify(r.report.items)}`);
+    assert.equal(r.outputs.length, 1, target);
+  }
+});
 
 // KEYS_REPORT=lpf,tables node test/keys.test.js prints each key's verdict (KEYS_ALL=1: every one).
 if (process.env.KEYS_REPORT) {

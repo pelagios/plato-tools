@@ -66,7 +66,10 @@ for (const f of readdirSync(EX).filter((f) => f.endsWith('.json'))) {
     const doc = JSON.parse(readFileSync(`${EX}/${f}`, 'utf8'));
     // Inside a GeoJSON value a null is kept, as JSON, in the RDF literal: nothing is lost there.
     const all = positions(doc).filter((p) => p[0] !== '$schema' && p[0] !== '@context' && !p.slice(0, -1).includes('geojson'));
-    assert.ok(all.length > 50, `only ${all.length} positions`);
+    // The sweep reaches into every part of the document. (It once asked for more than 50 positions,
+    // which PLATO's smaller examples, a candidate set of two candidates among them, do not have.)
+    for (const [k, v] of Object.entries(doc)) if (v && typeof v === 'object' && k !== '@context') assert.ok(all.some((p) => p[0] === k && p.length >= 2), `nothing swept under ${k}`);
+    assert.ok(all.length > 25, `only ${all.length} positions`);
     let compared = 0;
     const silent = [], differ = [];
     for (const path of all) {

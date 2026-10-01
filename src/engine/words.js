@@ -16,7 +16,7 @@ function withGeorefs({ georefs, manifests }) {
 }
 
 // A count in words, singular for one: "1 place", "2 places", "1 identity relation".
-const ONE = { 'earlier attestations': 'earlier attestation', annotations: 'annotation', places: 'place', attestations: 'attestation', 'identity relations': 'identity relation', triples: 'triple', 'triples written': 'triple written', 'table rows': 'table row', observations: 'Data Cube observation' };
+const ONE = { 'earlier attestations': 'earlier attestation', annotations: 'annotation', places: 'place', attestations: 'attestation', 'identity relations': 'identity relation', candidates: 'candidate', triples: 'triple', 'triples written': 'triple written', 'table rows': 'table row', observations: 'Data Cube observation' };
 const MANY = { observations: 'Data Cube observations' };
 ONE['place names'] = 'place name';
 ONE.rows = 'row'; ONE.features = 'feature';
@@ -51,7 +51,7 @@ export function summary(report, action) {
   if (action === 'publish') return publishSummary(report);
   if (action === 'match') return matchSummary(report);
   if (action === 'apply') return applySummary(report);
-  const counted = ['annotations', 'place names', 'rows', 'features', 'places', 'attestations', 'identity relations', 'triples', 'triples written', 'table rows', 'observations'].filter((k) => c[k]).map((k) => count(c[k], k)).join(', ');
+  const counted = ['annotations', 'place names', 'rows', 'features', 'places', 'attestations', 'identity relations', 'candidates', 'triples', 'triples written', 'table rows', 'observations'].filter((k) => c[k]).map((k) => count(c[k], k)).join(', ');
   const nErr = report.errors;
   return {
     problems: nErr ? `${nErr.toLocaleString('en-GB')} problem${nErr === 1 ? '' : 's'} found.` : 'No problems found.',
