@@ -1,22 +1,24 @@
-// Chora's ink-tracing worker: runs a trace (src/engine/chora/ink/job.js) away from the page, so that the
-// map keeps moving while it works. Started from a blob: that imports it (src/chora/csp.js blobWorkerUrl),
+// Chora's ink-tracing worker: does the pixel work of a trace (src/engine/chora/ink/step.js: a window
+// composed from its tiles, made ready, the shape proposed; or the ink's pixels for snapping) away from the
+// page, so that the map keeps moving while it works. The page plans (job.js: the scale, the window, its
+// tiles, its growth) and sends one window at a time. Started from a blob: that imports it (src/chora/csp.js blobWorkerUrl),
 // so that it is under the page's Content Security Policy, as MapLibre's and the historical maps' are; it
 // fetches nothing itself: the page fetches every tile through its guard (src/chora/inkfetch.js) and hands
 // over the decoded bitmap, which this worker reads (OffscreenCanvas) and keeps for a while.
 //
-// Messages in: { type: 'trace' | 'snap', channel, gen, … } a job; { type: 'cancel', channel, gen } let go
+// Messages in: { type: 'trace' | 'snap', channel, gen, frame, tiles, seed, mode, params } a window's work; { type: 'cancel', channel, gen } let go
 // of every job of that channel older than gen (a new click, Esc); { type: 'tiles', channel, gen, tiles:
 // [{ url, bitmap }] } and { type: 'tile-error', channel, gen, message, kind } the page's answer to a need.
 // Messages out: { type: 'need', channel, gen, urls }, { type: 'result', channel, gen, result }, { type:
 // 'error', channel, gen, message, kind }. Each channel ('trace', 'snap') runs its latest job alone.
-import { runTrace, runSnap, createPrepCache } from '../engine/chora/ink/job.js';
+import { traceStep, snapStep, createPrepCache } from '../engine/chora/ink/step.js';
 
 const TILE_BYTES = 24 * 1024 * 1024;
 const tiles = new Map();          // url -> { width, height, data } (RGBA), the most recently used last
 let tileBytes = 0;
 const latest = { trace: 0, snap: 0 };
 const waiting = new Map();        // `${channel}:${gen}` -> { resolve, reject }
-const caches = { trace: createPrepCache(), snap: createPrepCache() };
+const cache = createPrepCache();
 
 function keep(url, t) {
   if (tiles.has(url)) { tileBytes -= tiles.get(url).data.length; tiles.delete(url); }
@@ -56,15 +58,15 @@ async function job(m) {
     return out;
   };
   try {
-    const result = m.type === 'trace'
-      ? await runTrace({ info: m.info, seedImg: m.seedImg, mode: m.mode, params: m.params, pxPerScreen: m.pxPerScreen, getTiles, isCurrent, cache: caches.trace })
-      : await runSnap({ info: m.info, box: m.box, pxPerScreen: m.pxPerScreen, getTiles, isCurrent });
+    const got = await getTiles(m.tiles);
+    if (!isCurrent()) return;
+    const result = m.type === 'trace' ? traceStep({ frame: m.frame, tiles: got, seed: m.seed, mode: m.mode, params: m.params }, cache) : snapStep({ frame: m.frame, tiles: got });
     if (!isCurrent()) return;
     const transfer = m.type === 'snap' ? [result.ridges.buffer, result.edges.buffer] : [];
     postMessage({ type: 'result', channel, gen, result }, transfer);
   } catch (e) {
     if (!isCurrent() && e?.kind === 'cancelled') return;
-    postMessage({ type: 'error', channel, gen, message: e?.message || String(e), kind: e?.kind || 'other' });
+    postMessage({ type: 'error', channel, gen, message: e?.message || String(e), kind: e?.kind || 'other', reason: e?.reason || null });
   } finally { waiting.delete(`${channel}:${gen}`); }
 }
 

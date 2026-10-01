@@ -29,20 +29,14 @@ import { zhangSuen } from './thin.js';
 import { skeletonGraph, pruneSpurs, live } from './graph.js';
 import { refinePath, darkness, maskInk } from './refine.js';
 import { follow, DIRECTION_SPAN, JUMP_REACH, JUMP_CONE } from './follow.js';
-import { simplifyAll, EPSILON } from './simplify.js';
+import { simplifyAll } from './simplify.js';
+
+import { DEFAULTS, InkError } from './params.js';
 
 export { EPSILON } from './simplify.js';
+export { DEFAULTS, InkError } from './params.js';
 /** The most components of ink a line is followed through (each a gap jumped, at most). */
 export const MAX_COMPONENTS = 2000;
-export const DEFAULTS = {
-  area: { tolerance: 12, bridge: 0, dropSmallHoles: true, detail: EPSILON },
-  line: { colour: false, tolerance: 12, band: [0.5, 2], jumps: true, detail: EPSILON, seedRadius: 6 },
-};
-
-/** Why nothing could be proposed, in words (the page shows the message). */
-export class InkError extends Error {
-  constructor(message, kind) { super(message); this.name = 'InkError'; this.kind = kind; }
-}
 
 /**
  * The window's pixels made ready for one kind of tracing, cached by the caller while the window stands
