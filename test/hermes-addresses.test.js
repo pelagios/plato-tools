@@ -224,3 +224,13 @@ test('the Recogito fixtures: every Pleiades and GeoNames address written with ht
   assert.equal(other, 7, 'control: the addresses of other gazetteers are there, and carried as written');
 });
 
+test('DEVELOPERS.md names the rules version the code has, with a row for every rule', () => {
+  const doc = readFileSync('DEVELOPERS.md', 'utf8');
+  // Read any version, so that a change to either side fails here rather than going unread.
+  const m = /^#+ Address rules, (hermes-addresses \d+) \((\d{4}-\d{2}-\d{2})\)$/m.exec(doc);
+  assert.ok(m, 'DEVELOPERS.md has the table "Address rules, hermes-addresses <n> (<date>)"');
+  assert.equal(m[1], ADDRESS_RULES);
+  const section = doc.slice(m.index + m[0].length).split(/^#+ /m)[0];
+  const named = [...section.matchAll(/^\| `([a-z-]+)` \|/gm)].map((x) => x[1]);
+  assert.deepEqual(named.sort(), RULES.map(([r]) => r).sort());
+});

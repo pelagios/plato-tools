@@ -301,19 +301,54 @@ readers link to those headings, so keep them.
   and rows have no prototype, so a column called `__proto__` is kept. A CSV streams through Papa's
   chunk parser (`csvRecords`): the columns and guess read its header and first 50 rows, and the rows
   are read again, never kept. A FeatureCollection streams too, read twice (columns, then rows).
-- **Addresses** (`addresses.js`). `placeAddress(value)` returns `{ iri }`, `{ iri, from }` when it
-  rewrote a WHG form (`place:<ns>:<id>` or an entity page) to `https://w3id.org/whg/id/place:…`,
-  or `{ lost, value }` for a WHG portal address below whg_id 12,345,678 (`whg-portal-record`) or
-  one on dev.whgazetteer.org (`whg-staging`). The Recogito, TEI and CSV/GeoJSON readers all pass
-  every place address through it.
+- **Addresses** (`addresses.js`). `placeAddress(value)` returns `{ iri }`; `{ iri, from, rules }`
+  when it rewrote the address by the rules below (`from` is what the source wrote); `{ iri, part }`
+  for part of a Pleiades place's record, carried as given and reported (`address-pleiades-part`, a
+  warning in all three readers); or `{ lost, value }` for a WHG portal address below whg_id
+  12,345,678 (`whg-portal-record`) or one on dev.whgazetteer.org (`whg-staging`). It applies the
+  canonical rules (`canonicalAddress`) first, then WHG's; no address matches both, so the order
+  cannot change a result. The Recogito, TEI and CSV/GeoJSON readers all pass every place address
+  through it, and a rewritten address gets the note `addressNote` words: "Place address given as X
+  (rule <name>, hermes-addresses 1)".
 - **Loss kinds.** Each reader lists its kinds with their severity (`TEI_KINDS` in `tei.js`,
   `GENERIC_KINDS` in `columns.js`: `loss`, `warning` or `error`), and their words are in
-  `src/engine/report.js`'s `LOSS_TEXT` under the same `tei-*` and `generic-*` names. The tests
+  `src/engine/report.js`'s `LOSS_TEXT` under the same `tei-*` and `generic-*` names, with
+  `address-pleiades-part` shared by all three readers that take place addresses. The tests
   require a text for every kind.
 - **The pipeline hook** (`pipeline.js`, `runChecked`): `tei` goes to `teiSource`, `csv` and
   `geojson` to `genericSource`. TEI is attestation-centric, so it goes through the store like
   annotations; for a table of places `genericProfile` reads the mapping first to decide the profile,
   and so whether the store is needed, and its records are schema-checked like the tables'.
+
+#### Address rules, hermes-addresses 1 (2026-10-01)
+
+| Rule | Written as | Carried as |
+| --- | --- | --- |
+| `pleiades-https` | `http://pleiades.stoa.org/places/<n>` | `https://pleiades.stoa.org/places/<n>` |
+| `pleiades-slash` | `https://pleiades.stoa.org/places/<n>/` | `https://pleiades.stoa.org/places/<n>` |
+| `geonames-page` | a GeoNames page: `http(s)://(www.)geonames.org/<n>`, with or without a closing `/` and a name (`/<n>/siracusa.html`) | `https://sws.geonames.org/<n>/` |
+| `geonames-https` | `https://sws.geonames.org/<n>`, without its closing slash | `https://sws.geonames.org/<n>/` |
+| `geonames-sws-https` | `http://sws.geonames.org/<n>`, with or without its closing slash | `https://sws.geonames.org/<n>/` |
+| `wikidata-page` | `http(s)://(www.)wikidata.org/wiki/Q<n>` | `http://www.wikidata.org/entity/Q<n>` |
+| `wikidata-https` | `https://www.wikidata.org/entity/Q<n>` | `http://www.wikidata.org/entity/Q<n>` |
+| `whg-record-id` | `place:<ns>:<id>` (with no `prefixDef` for `place`, in TEI) | `https://w3id.org/whg/id/place:<ns>:<id>` |
+| `whg-entity-page` | `http(s)://(www.)whgazetteer.org/entity/place:<ns>:<id>[/api][/]` | `https://w3id.org/whg/id/place:<ns>:<id>` |
+
+Both Pleiades rules can apply to one address (`http://…/places/<n>/`); its note names both. Each
+gazetteer's canonical form is the one it gives as its place's address: Pleiades' https address, and
+GeoNames' and Wikidata's RDF addresses (GeoNames' `https://sws.geonames.org/<n>/`, slash included;
+Wikidata's `http://www.wikidata.org/entity/Q<n>`, http included). Anything else is carried as
+written. A Pleiades address that names part of a place's record (`/places/<n>/<slug>`, a location or
+a name; `/places/<n>/json`) or the place in Pleiades' own data (`/places/<n>#this`) is carried as
+given and reported as `address-pleiades-part`, never rewritten to the place's address.
+
+Any change to a rule, or a new one, is a new version: change `ADDRESS_RULES` and this heading
+together (`test/hermes-addresses.test.js` fails when they differ, or when the table and the tests'
+rules differ), since every note names the version. **The version check** will show attestations an
+earlier version converted, and this one rewrites, as changed (their `about` and their notes differ),
+and the version in the notes says why. Agora mints addresses only for attestations about places under the
+dataset's own base address (an attestation about a Pleiades, GeoNames or Wikidata place is left
+without one, `place-outside-base`), so releases already published are mostly untouched.
 
 **Georeferencing** (`src/engine/georef/`, on branch `hermes-georef`, shared with Chora). Positions
 on a map image to positions in the world and back, through a IIIF Georeference Annotation as
