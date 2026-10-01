@@ -667,18 +667,24 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   rebuilds it from pinned commits, refusing any download whose sha256 differs, and records inputs
   and outputs in `sources.json`; on the same pins it reproduces the committed files byte for byte.
   [public/basemap/README.md](public/basemap/README.md) has the rest.
-- **The privacy guard.** MapLibre's `transformRequest` (`map.js`) refuses any site but this one and
-  that of a basemap the user has agreed to, and counts each refusal (`window.__chora.blocked`). A
-  Content Security Policy in a `<meta>` tag cannot be widened once the page is running, and a pasted
-  basemap may be on any site, so the guard is in code.
+- **The privacy guard.** MapLibre's `transformRequest` is the permissions module's (see
+  [Permissions](#permissions)): it refuses any site but this one and those of the basemap shown whose
+  permission is allowed, at every request, and Chora counts each refusal (`window.__chora.blocked`).
+  Beneath it is the page's Content Security Policy, and MapLibre's worker is made from a `blob:`
+  (`blobWorkerUrl`) so that its requests are under the policy too.
 - **Other basemaps** (OpenFreeMap, OpenStreetMap, CARTO, or a pasted style or tile address) are
-  used only after a notice naming every site that will see the requests. A style's sources, glyphs
-  and sprites may be on sites other than its own (CARTO's are on `tiles.basemaps.cartocdn.com`, and
-  its TileJSON's tiles on `tiles-a` to `-d`), so each built-in basemap lists its `origins`, and the
-  guard allows those. A pasted style is read by the page, through the guard, once its own site is
-  agreed to; any further sites it names (`styleOrigins`) are named in the notice, and the map does
-  not use it until they are agreed to too. Sites named only by a TileJSON are not found this way, and
-  are refused. Choices and consents stay in `localStorage`. A basemap whose style cannot be loaded
+  used only once their permission is allowed: `basemap:<provider>` for a built-in one, whose sites
+  are all in the module's `REGISTRY` (a style's sources, glyphs and sprites may be on sites other
+  than its own: CARTO's are on `tiles.basemaps.cartocdn.com`, and its TileJSON's tiles on `tiles-a`
+  to `-d`), and `basemap:<site>` for each site of a pasted one. Chosen before then, the basemap is
+  remembered as the one wanted (`basemaps.wanted()`), the map stays as it is, and one "Needs
+  permission" line opens the panel at it; allowed, it is used from the next load, and the page
+  reloads with the files, the place and the view kept (`keepForReload` and `takeResume` in
+  `handoff.js`). Withdrawn, the map goes back to Natural Earth at once; set to Never, the basemap is
+  not offered. A pasted style is read by the page, through the module's `fetch`, once its own site
+  is allowed; any further sites it names (`styleOrigins`) each get a line, and the map does not use
+  it until they are allowed too. Sites named only by a TileJSON are not found this way, and are
+  refused. The chosen basemap and pasted ones stay in `localStorage`. A basemap whose style cannot be loaded
   gives way to Natural Earth, and the page says why. A map error goes to the console with only the
   site of its addresses, since a key may be in the query or the path. A drawing's note names the
   basemap it was drawn on if it is a built-in one, and a pasted one only as such. CARTO's key is given at build time as `VITE_CARTO_API_KEY`, and without it CARTO
@@ -692,7 +698,7 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   lookup per endpoint in a page or worker (`whgazetteer.org` with or without `www.`), and the first
   call's options stand: a later call's differing options are ignored with one `console.warn` each,
   but a later token replaces the token and `token: null` clears it (also `lookup.setToken(t)`,
-  `lookup.clearToken()`). A tool reads the token from the one shared store (`src/lib/whg-token.js`)
+  `lookup.clearToken()`). A tool reads the token from its one keeper (`token` in `src/lib/permissions.js`)
   and passes it, rather than keeping a copy of its own. What is held when: within a page or
   worker, the shared lookup's queue runs one request at a time, and a request's retries and the
   pauses between them finish before the next request in that page starts. Across tabs and workers,
@@ -715,6 +721,78 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   one place.
 - **Georeferencing**, for tracing from a georeferenced map, will come from `src/engine/georef/`,
   which belongs to Hermes. Chora uses it and keeps none of its own.
+
+## Permissions
+
+Nothing goes to another site unless the user allows it, in one panel for the whole toolbox: the
+header's **Permissions** button, on both pages. `src/lib/permissions.js` is the only way a tool asks
+another site, and `src/lib/permissions-panel.js` the panel; its words are in
+`src/lib/permission-words.js`.
+
+- **A permission is (category, subject)**, categories by what the site learns: `basemap` (a provider
+  of the `REGISTRY`, `openfreemap`, `osm` or `carto`, each declaring every site it asks, or a pasted
+  basemap's site), `iiif` (a historical map's host), `allmaps` (the service), `gazetteer` (`whg`, or
+  another service's site), `linked` (a host). Its state is Allowed, Never, or Not decided (nothing
+  recorded, the default). Not decided, a feature shows one line, "Needs permission: <name> —
+  Permissions…", which opens the panel at that entry, where it can also be allowed for this tab only;
+  Never, the feature does without, and says nothing. Never beats allowing for the tab. Everything
+  decided is remembered (`localStorage` `plato-tools.permissions`), a site the user typed marked as
+  added, with the date; Forget all forgets them. Tabs keep in step through the storage event.
+- **The API.** The pure core, `src/lib/permissions-core.js`, re-exported by the module: `CATEGORIES`,
+  `REGISTRY`, `parse`, `originsFor`, `check(grants, cat, subj, tab)`, `allowedOrigins`, `policyFor`,
+  `fromFlags`. The page's side: `state(cat, subj)` (`'allowed' | 'never' | 'undecided'`),
+  `allowed(cat, subj)` (allowed and in this load's policy: may be asked now), `waitsForReload`,
+  `set(cat, subj, state)`, `allowOnce`, `forget`, `forgetAll`, `list()` (never the token),
+  `onChange(fn)`; `fetch(url, { cat, subj, …init })`, which asks only that permission's sites, never
+  with credentials, refuses an answer that a redirect brought from another site, and throws a
+  `PermissionError` whose `kind` is `address`, `undecided`, `never`, `reload`, `unprotected`, `moved`
+  or `network`, and whose message names the site, never the address (a key may be in it);
+  `transformRequest(() => [[cat, subj], …], { onBlocked })` for MapLibre; `needs(el, cat, subj)` for
+  the one line; `open({ focus: 'cat:subj' })`; `onBeforeReload(fn)` and `reload()`; `mount({ state })`
+  for the header button and the canary; `keepWorkingData()`; and `token`, the World Historical
+  Gazetteer token's keeper (`get`, `set`, `forget`, `onChange`, as `src/lib/whg-token.js` had them,
+  and `remember(on)`, `remembered()`: kept for the tab unless the user chooses to remember it).
+- **The Content Security Policy.** The first script in each page's `<head>` is the pure core, its
+  `export`s removed, and `src/lib/csp-head.js`, put there inline by `scripts/vite-csp.mjs` at the
+  page's `<!-- plato:csp -->` (a page without the mark fails the build). It writes, from the grants,
+  before the page asks for anything: `default-src 'self'; script-src 'self'; style-src 'self'
+  'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: <sites>; connect-src 'self'
+  blob: <sites>; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'`,
+  where `<sites>` are the sites of the permissions allowed, each checked against a strict origin rule
+  twice, so nothing kept in storage can add a directive. Storage that cannot be read gives the policy
+  of nothing allowed. With nothing allowed it is the same on both pages. The policy cannot be widened
+  while the page runs: a permission allowed takes effect from the next load (the panel offers the
+  reload, and Chora keeps what is open); one withdrawn is refused at once by `fetch` and
+  `transformRequest`. No `'wasm-unsafe-eval'` is needed: SQLite's WebAssembly runs in the engine's
+  worker, which is made from this site's address and so takes no policy from the page (it fetches
+  only this site's files; any request to another site belongs on the page, through the module).
+  MapLibre's worker is made from a `blob:`, and is under the policy.
+- **The canary** (`src/lib/csp.js`): at start, a worker made from a `blob:` asks
+  `https://canary.invalid/`, and the policy must stop it. Unless it does, the module asks no other
+  site at all (`unprotected`), whatever is allowed, and Chora stays on Natural Earth and says why.
+  WebKit enforces the policy but raises no event, so there nothing is asked. Playwright evaluates a
+  bare expression with `eval()`, which the policy forbids: the browser checks give it functions.
+- **The shared origin, plainly.** The tools are served on `pelagios.org`, which other Pelagios sites
+  share. Everything the tools keep in this browser, permissions, choices, a pasted basemap's address
+  and key, the WHG token if remembered, a reviewer's name, the working data (Chora's drafts, its
+  last output), can be read and changed by any page of `pelagios.org`, on that computer only. A
+  page there could forge a grant; the panel lists whatever is kept, so a forged grant is seen and can
+  be withdrawn, and the policy admits only plain sites. The panel says this in words. Moving the
+  tools to an origin of their own was considered and not done (2026-10-01).
+- **Working data.** "Keep my working data between visits" (on by default,
+  `plato-tools.keep-working-data` is `no` when off): off, Chora clears its drawings not saved and its
+  last output at the next load (not at a reload for a permission), and the output once saved to disk.
+  The dataset's working copy, in Chora's SQLite pool, is cleared at every start anyway (`clearOnInit`).
+- **Chora's old consents** (`chora-basemap-consent`, a list of sites) are carried over once, by the
+  head script and the module alike: a provider all of whose sites are listed becomes
+  `basemap:<provider>`, every other site `basemap:<site>`, and the old key goes.
+- **The command line has no settings: the flag is the consent.** A command that asks another site
+  takes `--gazetteer` (`whg` or a service's address) and repeatable `--allow-host`, makes grants for
+  that run with `fromFlags`, and asks `check()` before each request; tokens come from the
+  environment, never from a file the tools write. No command asks another site yet.
+- **Adopting it.** Chora's basemaps use it now. Chora's historical maps (`iiif`, `allmaps`) and
+  Krisis's gazetteer lookup (`allowed('gazetteer', 'whg')` before sending; `token` for the token) move
+  onto it in their own branches, and Hermes's linked sites (`linked`, per host) when it fetches.
 
 ## Limits
 
@@ -783,7 +861,15 @@ python3 e2e/scale_test.py --input deep-plato.nt.gz --target plato-jsonl --out ou
   that passes;
 - the match review suggests near namesakes and not far ones, refuses a tampered work file, and
   writes attestations the checker passes;
-- the command line gives what the engine gives, with the right exit status.
+- the command line gives what the engine gives, with the right exit status;
+- nothing is asked of another site without its permission, Never beats allowing for the tab, a forged
+  or injected grant cannot reach the policy, and the token is in no list and no error.
+
+The browser checks run every page under its Content Security Policy, and check that with nothing
+allowed neither page asks another site; that a permission allowed in the panel, from its "Needs
+permission" line, is used after the reload and refused at once when withdrawn; that a page served
+without its policy is found unprotected by the canary and asks nothing; and that turning off "Keep
+my working data" clears Chora's drawings at the next load.
 
 A check that finds nothing is worth something only if it could have found something: each test of
 an absence has a presence beside it, or a control that finds the same thing when it is there.

@@ -10,6 +10,7 @@ files at a time.
 Your files are never uploaded. Everything happens in the browser tab, at any size your disk can
 hold: memory stays roughly constant while the working data lives on disk, in the browser's private
 file storage.
+Nothing is sent to any other site unless you allow it, in the **Permissions** panel at the top of each page, which also shows what this browser remembers for the tools and lets you forget it.
 
 **How to use them is in the PLATO guide**:
 [Checking, converting and comparing](https://pelagios.org/place-attestation-ontology/guide/tools.html) says what each check looks at, what each format keeps
