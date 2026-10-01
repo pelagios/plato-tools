@@ -1134,6 +1134,9 @@ def main():
                   and done(half.get('second meanwhile')) and done(half.get('first after')), half)
             main_permissions(ctx, page, url, main_requests)
             ctx.close()
+            front = pw.chromium.launch(headless=True)
+            try: front_page_checks(front, url)
+            finally: front.close()
             chora_checks(pw, url, tmp)
     finally:
         stop(srv)
@@ -1370,6 +1373,150 @@ def main_page(ctx, base):
     p = ctx.new_page(); p.bring_to_front(); p.goto(NOTOOLS if PROVE else base)
     if wait_state(p, lambda s: s.get('phase') == 'ready', T(30), 'ready').get('phase') != 'ready': raise RuntimeError('the main page did not start')
     return p
+
+# ---- The front page: the introduction, the tools chosen first or not at all ---------------------
+# Each check finds what it looks for before it trusts an absence, and was seen to fail on the page as
+# it was before (no introduction button, the tools in a panel of their own, no Chora row in step 2).
+FRONT_FILE = ROOT / 'test/fixtures/lpf-readme-example.json'
+VISIBLE = '''(ids) => Object.fromEntries(ids.map((id) => { const e = document.getElementById(id);
+  return [id, !!e && !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length)]; }))'''
+ACTIONS = ['check', 'convert', 'compare', 'publish', 'match', 'to-chora']
+# Storage refused, as in a private window with site data blocked: every use of localStorage throws.
+REFUSE_STORAGE = '''Object.defineProperty(window, 'localStorage', { configurable: true, get() { throw new DOMException('The operation is insecure.', 'SecurityError'); } });'''
+# Whether the introduction was already hidden when it was first parsed, before any paint: an observer
+# set before the page's own scripts notes the <html> class at the moment #intro is added.
+AT_PARSE = '''window.__introAtParse = null;
+new MutationObserver((ms, o) => { const i = document.getElementById('intro'); if (!i) return;
+  window.__introAtParse = { htmlHidden: document.documentElement.classList.contains('intro-hidden'), modulesRun: !!window.__plato }; o.disconnect(); })
+  .observe(document, { childList: true, subtree: true });'''
+
+def front_page_checks(browser, url):
+    def fresh(width=1280, init=(), hash=''):
+        ctx = browser.new_context(viewport={'width': width, 'height': 900})
+        for s in init: ctx.add_init_script(s)
+        page = ctx.new_page(); page.set_default_timeout(T(8) * 1000)
+        page.goto(NOTOOLS if PROVE else url + hash)
+        if wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready').get('phase') != 'ready': raise RuntimeError('the main page did not start')
+        return ctx, page
+    def intro_state(page):
+        return page.evaluate('''() => { const i = document.getElementById('intro'), b = document.getElementById('intro-toggle');
+          const vis = (e) => !!e && !!(e.offsetWidth || e.offsetHeight);
+          return { button: b ? b.innerText.trim() : null, expanded: b?.getAttribute('aria-expanded'), controls: b?.getAttribute('aria-controls'),
+                   lede: vis(i?.querySelector('.lede')), drawing: vis(i?.querySelector('.plato-mark')), title: vis(document.querySelector('h1')),
+                   stored: (() => { try { return localStorage.getItem('plato-tools.intro'); } catch { return 'refused'; } })() }; }''')
+
+    def toggle_persists():
+        ctx, page = fresh()
+        try:
+            first = intro_state(page)
+            page.focus('#intro-toggle'); page.keyboard.press('Enter'); hidden = intro_state(page)
+            page.reload(); wait_state(page, lambda s: s.get('phase') == 'ready', T(30)); after = intro_state(page)
+            page.click('#intro-toggle'); shown = intro_state(page)
+            ok = (first['button'] == 'Hide introduction' and first['expanded'] == 'true' and first['controls'] == 'intro' and first['lede'] and first['drawing']
+                  and hidden['button'] == 'Show introduction' and hidden['expanded'] == 'false' and not hidden['lede'] and not hidden['drawing'] and hidden['title'] and hidden['stored'] == 'hidden'
+                  and after['button'] == 'Show introduction' and after['expanded'] == 'false' and not after['lede'] and after['title']
+                  and shown['lede'] and shown['drawing'] and shown['expanded'] == 'true' and shown['stored'] is None)
+            return ok, {'first': first, 'hidden': hidden, 'after reload': after, 'shown again': shown}
+        finally: ctx.close()
+    attempt('front page: "Hide introduction" hides the paragraph and the drawing, not the title, and they stay hidden after a reload until shown again', toggle_persists)
+
+    def before_paint():
+        ctx, page = fresh(init=[AT_PARSE, "try { localStorage.setItem('plato-tools.intro', 'hidden'); } catch {}"])
+        try:
+            at = page.evaluate('() => window.__introAtParse')
+            heads = page.evaluate('''() => ({ classic: [...document.head.querySelectorAll('script[src]')].filter((s) => !s.type || s.type === 'text/javascript').map((s) => new URL(s.src).pathname),
+              inline: [...document.querySelectorAll('script:not([src])')].filter((s) => s.textContent.trim()).length })''')
+            same_origin = all(p.endswith('/intro.js') for p in heads['classic']) and len(heads['classic']) == 1
+            return (bool(at) and at['htmlHidden'] is True and at['modulesRun'] is False and same_origin and heads['inline'] == 0), {'when #intro was parsed': at, 'scripts': heads}
+        finally: ctx.close()
+    attempt('front page: a hidden introduction is hidden as the page is parsed, before its modules run, by a script of its own (none inline)', before_paint)
+
+    def refused():
+        ctx, page = fresh(init=[REFUSE_STORAGE])
+        try:
+            errors = []; page.on('pageerror', lambda e: errors.append(str(e)))
+            first = intro_state(page); page.click('#intro-toggle'); hidden = intro_state(page)
+            page.reload(); wait_state(page, lambda s: s.get('phase') == 'ready', T(30)); after = intro_state(page)
+            return (first['stored'] == 'refused' and first['lede'] and hidden['button'] == 'Show introduction' and not hidden['lede'] and hidden['expanded'] == 'false'
+                    and after['lede'] and after['button'] == 'Hide introduction' and not errors), {'first': first, 'hidden': hidden, 'after reload': after, 'errors': errors}
+        finally: ctx.close()
+    attempt('front page: with storage refused, the introduction is shown, still hides when asked, is shown again after a reload, and nothing fails', refused)
+
+    def all_actions():
+        ctx, page = fresh()
+        try:
+            text = FRONT_FILE.read_text()
+            page.evaluate('''(text) => { const dt = new DataTransfer(); dt.items.add(new File([text], 'dropped.json', { type: 'application/json' }));
+              document.getElementById('drop').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true })); }''', text)
+            s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'detection')
+            vis = page.evaluate(VISIBLE, ACTIONS + ['for-tool'])
+            chora = page.evaluate("() => { const a = document.getElementById('to-chora'); return a ? [a.getAttribute('href'), a.textContent.trim()] : null; }")
+            current = page.eval_on_selector_all('#toolbox [aria-current]', 'es => es.length')
+            return (s.get('phase') == 'detected' and all(vis[a] for a in ACTIONS) and not vis['for-tool'] and current == 0
+                    and chora and chora[0] == './chora.html' and 'Show on the map (Chora)' in chora[1]), {'state': s.get('phase'), 'visible': vis, 'chora': chora, 'cards marked': current}
+        finally: ctx.close()
+    attempt('front page: a file dropped with no tool chosen offers every action, Chora\'s map included, and marks no tool', all_actions)
+
+    def narrowed():
+        ctx, page = fresh()
+        try:
+            page.set_input_files('#picker', str(FRONT_FILE))
+            wait_state(page, lambda s: s.get('phase') == 'detected', T(60), 'detection')
+            seen, n0 = {}, page.evaluate('history.length')
+            for key, shown in (('check', ['check']), ('convert', ['convert']), ('figures', ['convert']), ('versions', ['compare']), ('publish', ['publish']), ('match', ['match'])):
+                page.click(f'#toolbox .tool-link[href="#tool={key}"]')
+                vis = page.evaluate(VISIBLE, ACTIONS)
+                seen[key] = {'shown': [a for a in ACTIONS if vis[a]], 'hash': page.evaluate('location.hash'), 'focus': page.evaluate('document.activeElement?.id'),
+                             'current': page.eval_on_selector_all('#toolbox [aria-current]', 'es => es.map((e) => e.getAttribute("href"))'),
+                             'note': page.inner_text('#for-tool'), 'target': page.input_value('#target'), 'cube': page.is_checked('#cube')}
+                seen[key]['ok'] = seen[key]['shown'] == shown and seen[key]['hash'] == f'#tool={key}' and seen[key]['current'] == [f'#tool={key}']
+            fig = seen['figures']; fig['ok'] = fig['ok'] and fig['target'] == 'ntriples' and fig['cube'] and 'Arithmos' in fig['note']
+            page.click('#every-action'); back = page.evaluate(VISIBLE, ACTIONS); hash_after = page.evaluate('location.hash')
+            return (all(v['ok'] for v in seen.values()) and all(back.values()) and hash_after == '' and page.evaluate('history.length') == n0), {'per tool': seen, 'every action again': back, 'hash': hash_after}
+        finally: ctx.close()
+    attempt('front page: choosing a tool\'s card narrows step 2 to that tool (Arithmos: N-Triples with the Data Cube option), and "Show every action" undoes it', narrowed)
+
+    def focus_step1():
+        ctx, page = fresh()
+        try:
+            page.focus('#toolbox .tool-link[href="#tool=check"]'); page.keyboard.press('Enter')
+            el = page.evaluate('''() => { const a = document.activeElement; return { id: a?.id, tabindex: a?.getAttribute('tabindex'), text: a?.textContent.trim(),
+              top: Math.round(a?.getBoundingClientRect().top ?? -1) }; }''')
+            hermes = None
+            page.click('#toolbox .tool-link[data-tool="read"]')
+            hermes = {'focus': page.evaluate('document.activeElement?.id'), 'hash': page.evaluate('location.hash'), 'current': page.eval_on_selector_all('#toolbox [aria-current]', 'es => es.length')}
+            return (el['id'] == 'files-h' and el['tabindex'] == '-1' and 'Choose your data' in el['text'] and 0 <= el['top'] < 900
+                    and hermes['focus'] == 'picker' and hermes['hash'] == '' and hermes['current'] == 0), {'after a card': el, 'after Hermes': hermes}
+        finally: ctx.close()
+    attempt('front page: a card chosen by keyboard moves focus to step 1\'s heading, in view; Hermes\'s card goes to the drop zone and narrows nothing', focus_step1)
+
+    def by_address():
+        ctx, page = fresh(hash='#tool=publish')
+        try:
+            page.set_input_files('#picker', str(FRONT_FILE))
+            wait_state(page, lambda s: s.get('phase') == 'detected', T(60), 'detection')
+            vis = page.evaluate(VISIBLE, ACTIONS)
+            heading = page.inner_text('#action-h')
+            page.evaluate("location.hash = '#tool=nonsense'"); page.wait_for_timeout(200)
+            unknown = page.evaluate(VISIBLE, ACTIONS)
+            return (vis['publish'] and not any(vis[a] for a in ACTIONS if a != 'publish') and 'publishing' in heading and all(unknown.values())), {'#tool=publish': vis, 'heading': heading, '#tool=nonsense': unknown}
+        finally: ctx.close()
+    attempt('front page: the address #tool=publish narrows step 2 to publishing when the page opens, and an unknown tool narrows nothing', by_address)
+
+    def phone():
+        out = {}
+        for state in ('shown', 'hidden'):
+            ctx, page = fresh(390, init=[] if state == 'shown' else ["try { localStorage.setItem('plato-tools.intro', 'hidden'); } catch {}"])
+            try:
+                page.set_input_files('#picker', str(FRONT_FILE)); wait_state(page, lambda s: s.get('phase') == 'detected', T(60), 'detection')
+                out[state] = page.evaluate('''() => ({ scroll: document.documentElement.scrollWidth, width: document.documentElement.clientWidth,
+                  cards: [...document.querySelectorAll('#toolbox .tool')].map((t) => Math.round(t.getBoundingClientRect().left)),
+                  drawing: !!document.querySelector('#intro .plato-mark')?.offsetWidth, chora: !!document.getElementById('to-chora')?.offsetWidth })''')
+            finally: ctx.close()
+        s, h = out.get('shown', {}), out.get('hidden', {})
+        return (s and h and s['scroll'] <= 390 and h['scroll'] <= 390 and len(s['cards']) == 8 and len(set(s['cards'])) == 1
+                and s['drawing'] and not h['drawing'] and s['chora']), out
+    attempt('front page at 390 px: one column of the eight tools, step 2 with Chora\'s row, and no sideways scroll, with the introduction shown or hidden', phone)
 
 def chora_checks(pw, url, tmp):
     base = url.rstrip('/') + '/'; here = urlparse(base).netloc
@@ -1809,6 +1956,22 @@ def chora_checks(pw, url, tmp):
         again = page.is_visible('#handoff') or bool(cstate(page).get('handoff'))
         return f.name in offer and s['phase'] == 'loaded' and s['places'] == ant_places and not again, {'offer': offer, 'state': s, 'offered again': again}
     attempt('Chora: a file chosen on the main page is offered on Chora\'s page, opens there, and is not kept after', handoff)
+
+    def handoff_from_step2():
+        # The same hand-over from step 2's "Show on the map (Chora)", offered with no tool chosen; with a
+        # tool chosen it is not offered (the presence first, so that its absence after means something).
+        f = fixture(ant, 'antonine-step2.json', tmp)
+        page.bring_to_front(); page.goto(NOTOOLS if PROVE else base)
+        if wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready').get('phase') != 'ready': raise RuntimeError('the main page did not start')
+        page.set_input_files('#picker', str(f))
+        until(page, '() => window.__plato.phase === "detected"', 30)
+        offered = page.is_visible('#to-chora')
+        page.click('#toolbox .tool-link[href="#tool=check"]'); narrowed = page.is_visible('#to-chora')
+        page.click('#every-action'); page.click('#to-chora')
+        until(page, '() => window.__chora && window.__chora.handoff', 30)
+        offer = page.inner_text('#handoff')
+        return offered and not narrowed and f.name in offer and page.url.endswith('chora.html'), {'offered': offered, 'with Elenchos chosen': narrowed, 'offer': offer, 'url': page.url}
+    attempt('Chora: step 2\'s "Show on the map (Chora)" hands the chosen file to Chora\'s page, and is not offered once a tool is chosen', handoff_from_step2)
     IDB = '''(put) => new Promise((resolve, reject) => { const q = indexedDB.open('plato-tools-chora', 1);
       q.onupgradeneeded = () => q.result.createObjectStore('kv');
       q.onsuccess = () => { const db = q.result, t = db.transaction('kv', put ? 'readwrite' : 'readonly'), s = t.objectStore('kv');
