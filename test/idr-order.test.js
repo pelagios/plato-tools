@@ -38,3 +38,54 @@ test('with no identity relations the document has no identityRelations key', asy
   assert.equal(doc.spatialEntities.length, 1);
   assert.equal(doc.identityRelations, undefined);
 });
+
+// ---- when the working database cannot be had --------------------------------------------------------
+// Held in memory up to options.heldIdentities, then in a database from env.openDb(). Where that fails
+// (it cannot be opened, given its table, or written to), the run is not broken by a TypeError at
+// close(), and every identity relation not in the output is reported, by count.
+import { env as testEnv } from './engine.js';
+import { run } from '../src/engine/pipeline.js';
+import { detect } from '../src/engine/input.js';
+async function goWith(openDb, options) {
+  const e = testEnv();
+  const base = e.openDb;
+  e.openDb = (...a) => openDb(base, ...a);
+  const r = await run({ input: await detect([textFile(lines(10), 'mixed.jsonl')]), action: 'convert', target: 'plato-json', options }, e);
+  return { r, doc: JSON.parse(outText(e, Object.keys(e.outs)[0])) };
+}
+const lostItem = (r) => r.report.items.find((i) => i.kind === 'identity-relations-lost');
+const failing = {
+  'it cannot be opened': async () => { throw new Error('no room'); },
+  'its insert cannot be prepared': async (base) => { const db = await base(); const p = db.prepare.bind(db); db.prepare = (sql) => (/INSERT/.test(sql) ? (() => { throw new Error('no insert'); })() : p(sql)); return db; },
+};
+for (const [what, openDb] of Object.entries(failing)) {
+  test(`identity relations that cannot be held in the database are reported lost, by count (${what})`, async () => {
+    const { r, doc } = await goWith(openDb, { heldIdentities: 2 });
+    assert.equal(doc.spatialEntities.length, 10);
+    assert.equal(doc.identityRelations.length, 2, 'the two held in memory are still written');
+    const item = lostItem(r);
+    assert.ok(item, JSON.stringify(r.report.items));
+    assert.equal(item.severity, 'error');
+    assert.match(item.message, /3 of the 5 identity relations are not in the output/);
+    assert.ok(!r.report.items.some((i) => /TypeError|Cannot read/.test(JSON.stringify(i))), JSON.stringify(r.report.items));
+  });
+}
+test('identity relations written to the database and then lost there are all counted', async () => {
+  // The database opens and takes the first three, then refuses: none of the five is in the output.
+  let n = 0;
+  const { r, doc } = await goWith(async (base) => {
+    const db = await base(); const p = db.prepare.bind(db);
+    db.prepare = (sql) => { const st = p(sql); if (/INSERT/.test(sql)) { const s = st.stepReset.bind(st); st.stepReset = () => { if (++n > 3) throw new Error('disk full'); return s(); }; } return st; };
+    return db;
+  }, { heldIdentities: 2 });
+  assert.equal(doc.spatialEntities.length, 10);
+  assert.equal(doc.identityRelations.length, 0);
+  assert.match(lostItem(r).message, /5 of the 5 /);
+  assert.deepEqual(lostItem(r).examples, ['disk full']);
+});
+test('control: with a working database nothing is reported lost', async () => {
+  const { r, doc } = await goWith((base) => base(), { heldIdentities: 2 });
+  assert.equal(doc.identityRelations.length, 5);
+  assert.equal(lostItem(r), undefined);
+  assert.equal(r.report.errors, 0);
+});

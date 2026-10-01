@@ -579,19 +579,30 @@ async function makeWriter(target, env, rep, options, typing, outputs, input) {
     // does). Identity relations are held back and written after the last place, never with places
     // inside them: in memory up to a limit, then in a working database, so that any number can wait.
     const HELD = options.heldIdentities || 10000;   // the tests set it low, to reach the database
-    let held = [], heldDb = null, heldIns = null, heldCount = 0;
+    let held = [], heldDb = null, heldIns = null, heldCount = 0, heldFailed = null;
+    // Where the working database cannot be had (opened, given its table, or written to), those already
+    // held in memory are kept and written, and every one after is lost: reported once, with a count at
+    // close(), never a TypeError and never silently.
+    const holdingFailed = (e) => {
+      heldFailed = e && e.message || String(e);
+      if (heldDb) { try { heldDb.close(); } catch { /* closed already */ } }
+      heldDb = null; heldIns = null;
+    };
     const hold = async (line) => {
       heldCount++;
+      if (heldFailed) return;
       if (!heldDb && held.length < HELD) { held.push(line); return; }
-      if (!heldDb) {
-        heldDb = await env.openDb();
-        heldDb.exec('CREATE TABLE held(n INTEGER PRIMARY KEY, line TEXT NOT NULL)');
-        heldIns = heldDb.prepare('INSERT INTO held(line) VALUES (?)');
-        heldDb.exec('BEGIN');
-        for (const l of held) heldIns.bind([l]).stepReset();
-        held = [];
-      }
-      heldIns.bind([line]).stepReset();
+      try {
+        if (!heldDb) {
+          heldDb = await env.openDb();
+          heldDb.exec('CREATE TABLE held(n INTEGER PRIMARY KEY, line TEXT NOT NULL)');
+          heldIns = heldDb.prepare('INSERT INTO held(line) VALUES (?)');
+          heldDb.exec('BEGIN');
+          for (const l of held) heldIns.bind([l]).stepReset();
+          held = [];
+        }
+        heldIns.bind([line]).stepReset();
+      } catch (e) { holdingFailed(e); }
     };
     return {
       header(h) {
@@ -615,13 +626,21 @@ async function makeWriter(target, env, rep, options, typing, outputs, input) {
             sink.write(',"identityRelations":[');
             let first = true;
             const put = (l) => { sink.write((first ? '' : ',') + l); first = false; };
-            if (heldDb) {
-              heldIns.finalize(); heldDb.exec('COMMIT');
-              const q = heldDb.prepare('SELECT line FROM held ORDER BY n');
-              try { while (q.step()) put(q.get(0)); } finally { q.finalize(); }
-              heldDb.close();
-            } else for (const l of held) put(l);
+            let written = 0;
+            if (heldDb && heldIns) {
+              try {
+                heldIns.finalize(); heldDb.exec('COMMIT');
+                const q = heldDb.prepare('SELECT line FROM held ORDER BY n');
+                try { while (q.step()) { put(q.get(0)); written++; } } finally { q.finalize(); }
+              } catch (e) { heldFailed = heldFailed || (e && e.message || String(e)); }
+              try { heldDb.close(); } catch { /* closed already */ }
+            } else {
+              if (heldDb) { heldFailed = heldFailed || 'the working database was opened but could not be written to'; try { heldDb.close(); } catch { /* closed already */ } }
+              for (const l of held) { put(l); written++; }
+            }
             sink.write(']');
+            const lost = heldCount - written;
+            if (lost) rep.error('identity-relations-lost', `Identity relations are held back to be written after the last place, in a working database once there are many; it could not be used, so ${lost} of the ${heldCount} identity relations are not in the output`, heldFailed);
           }
           sink.write('}');
         }
