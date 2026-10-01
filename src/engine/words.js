@@ -298,6 +298,9 @@ export const choraDrawingNote = ({ basemap = 'Natural Earth', zoom } = {}) =>
 export const POOL_BUSY = 'Another tab of PLATO tools in this browser is working on a file. Wait for it to finish, or close it, then try again.';
 /** This tab could not let go of the working files it was granted in part (worker.js, letGo). */
 export const POOL_STUCK = 'PLATO tools could not free its storage in this tab. Reload the page and try again.';
+/** How a drawing traced from a historical map was made; georefNote's sentences follow it (src/engine/chora/trace.js). */
+export const choraTracingNote = ({ zoom } = {}) =>
+  `Traced by hand from a georeferenced historical map${Number.isFinite(zoom) ? ` at zoom ${Math.round(zoom)}` : ''} in PLATO tools (Chora).`;
 /** What a Chora save reports of itself (src/engine/chora/save.js), by kind. */
 export const CHORA_TEXT = {
   'chora-addition-invalid': 'A drawing could not be added, because PLATO would not accept it as it is, so nothing was saved',

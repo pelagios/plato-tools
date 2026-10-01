@@ -1,8 +1,8 @@
 # Chora's historical-map fixtures
 
 Fixtures for Chora's IIIF overlays and tracing: `test/chora-iiif.test.js` and the browser checks.
-**Everything here is synthetic**, made for these tests on 2026-09-30; nothing was copied from a real
-collection, so there is no third-party licence to state. Where a file imitates the shape of a real
+**Everything here is synthetic**, made for these tests on 2026-09-30, except one copy from PLATO named
+below; nothing was copied from a real collection, so there is no third-party licence to state. Where a file imitates the shape of a real
 service's response, the real response it was modelled on is named below.
 
 ## Addresses
@@ -25,6 +25,8 @@ up by its served address must match the request by path, not by that id.
 | `info-v3.json` | The same as Image API 3 (`ImageService3`), at `/iiif3/grid` | written by hand |
 | `info-foreign-id.json` | `info-v2.json` with its `@id` on origin B, same path: the image-information document that points the tiles somewhere else, which admission must refuse | written by hand |
 | `annotation.json` | A IIIF Georeference Annotation in the form Allmaps publishes (compare `test/fixtures/georef/`): four control points at the pixels (64,64), (448,64), (448,448), (64,448), polynomial order 1, a mask inset 16 pixels. It lays the grid over Cambridge (`https://whgazetteer.org/example/entity/cambridge` in `test/fixtures/chora/attestation-centric-survey.json`), 0.10° to 0.15° E, 52.19° to 52.22° N | written by hand; the id `https://annotations.allmaps.org/maps/0000000000000001` is made up |
+| `annotation-order2.json` | `annotation.json` with polynomial order 2 and nine control points on a 3 × 3 grid of pixels (64, 256, 448), the middle row pushed 0.0025° east and the middle column 0.0015° north, a bend no affine transformation follows: so order 1 and order 2 put the same pixel in different places, which is what the browser check of the renderer against `src/engine/georef/` needs (Allmaps' own export has no order-2 annotation). The id `…/maps/0000000000000002` is made up | written by a few lines of Python from `annotation.json`, 2026-10-01 |
+| `plato-3acab8e-place-centric-georeference.json` | PLATO's worked example of a geometry traced from a georeferenced map (issue #15): the shape a traced attestation must have, which `test/chora-trace.test.js` compares with. Copied here because the pinned PLATO commit predates it | `git show 3acab8e:schemas/examples/place-centric-georeference.json` in pelagios/place-attestation-ontology, unchanged; PLATO is CC BY 4.0 (its LICENSE.md), Pelagios Network Place Working Group |
 | `manifest-rumsey-shaped.json` | IIIF Presentation 2.1 manifest of one canvas (512 × 512) painted with the grid, shaped as David Rumsey's are: `attribution` (a credit) but no `license`, no `rights` and no `requiredStatement`; `logo`, `related`, a search `service`, `otherContent`, canvas `metadata` | modelled on `https://www.davidrumsey.com/luna/servlet/iiif/m/RUMSEY~8~1~200375~3001080/manifest` (fetched 2026-09-30), keeping its keys and replacing every value |
 | `allmaps-images-e564650581f5f6bb.json` | What `https://annotations.allmaps.org/images/<id>` answers: an `AnnotationPage` whose one item is `annotation.json` | the shape of `test/fixtures/georef/loc-chesapeake-annotationpage.json`; the id is `allmapsLookupUrl('https://iiif.example.org/iiif/grid')` (agrees with `@allmaps/id` 1.0.0-beta.39's `generateId`) |
 
