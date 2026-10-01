@@ -43,8 +43,8 @@ const VERSE = mapped(text('verse-constructed.xml'), 'verse-constructed.xml');
 const PTR = mapped(text('pointers-constructed.xml'), 'pointers-constructed.xml');
 const WHG = mapped(text('whg-constructed.xml'), 'whg-constructed.xml');
 
-test('there are fixtures: a real EpiDoc edition and the six constructed ones (one of them TEI P4)', () => {
-  assert.deepEqual(FIXTURES, ['isicily-ISic000934.xml', 'keys-constructed.xml', 'p4-constructed.xml', 'pointers-constructed.xml', 'prose-constructed.xml', 'verse-constructed.xml', 'whg-constructed.xml']);
+test('there are fixtures: a real EpiDoc edition and the seven constructed ones (two of them TEI P4)', () => {
+  assert.deepEqual(FIXTURES, ['isicily-ISic000934.xml', 'keys-constructed.xml', 'p4-boilerplate-constructed.xml', 'p4-constructed.xml', 'pointers-constructed.xml', 'prose-constructed.xml', 'verse-constructed.xml', 'whg-constructed.xml']);
 });
 
 for (const f of FIXTURES) {
@@ -52,8 +52,8 @@ for (const f of FIXTURES) {
     const input = await detect([file(f)]);
     assert.equal(input.format, 'tei');
     assert.equal(formatName(input), 'a TEI XML edition');
-    // The P4 fixture's place names have keys only (Perseus's tgn,…), converted with TGN's pattern.
-    const { doc } = f === 'p4-constructed.xml' ? { doc: teiToDocument(text(f), f, () => {}, { keyPatterns: { tgn: 'http://vocab.getty.edu/tgn/{id}' } }) } : mapped(text(f), f);
+    // The P4 fixtures' place names have keys only (Perseus's tgn,…), converted with TGN's pattern.
+    const { doc } = f.startsWith('p4-') ? { doc: teiToDocument(text(f), f, () => {}, { keyPatterns: { tgn: 'http://vocab.getty.edu/tgn/{id}' } }) } : mapped(text(f), f);
     assert.equal(doc.profile, 'attestation-centric');
     assert.ok(doc.attestations.length > 0);
     assert.equal(valid(doc), null);
