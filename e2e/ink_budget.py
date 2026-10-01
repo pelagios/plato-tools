@@ -143,6 +143,7 @@ def main():
                 afresh.append(trace('area', BIG_WASH_CENTRE)['lastMs'])
             out['area: tiles kept, windows made afresh (ms, median)'] = round(statistics.median(afresh))
             out['area: windows made afresh, its steps (the last run)'] = page.evaluate('() => window.__chora.ink.steps')
+            out['area: windows made afresh, into the world (ms)'] = page.evaluate('() => window.__chora.ink.last.worldMs')
             page.evaluate('() => window.__chora_ink.discard()')
             page.click('#draw-tools button[data-trace="line"]')
             out['line: first click, tiles fetched (ms)'] = round(line_first[0])

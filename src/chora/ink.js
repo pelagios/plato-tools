@@ -153,12 +153,13 @@ export function createInk({ mapApi, guard, state, overlayAt, onAccept, panel }) 
         gaps = results.flatMap((r) => r.gaps);
       }
       p.image = geometry; p.results = results;
+      const tw = performance.now();
       p.world = await toWorld(p.entry.g, geometry);
       p.worldGaps = await Promise.all(gaps.map((gp) => toWorld(p.entry.g, { type: 'LineString', coordinates: gp })));
       p.seedsWorld = await Promise.all(p.seeds.map((s) => toWorld(p.entry.g, { type: 'Point', coordinates: s.seedImg })));
       if (proposal !== p) return;
-      const ms = performance.now() - t0;
-      Object.assign(ink, { phase: 'proposed', proposals: ink.proposals + 1, lastMs: ms, last: { mode: p.mode, scale: last.scale, grown: last.grown, coarser: last.coarser, frame: last.frame, epsilon: last.epsilon, vertices: p.mode === 'area' ? last.rings[0].length - 1 : geometry.coordinates.length, holes: p.mode === 'area' ? last.rings.length - 1 : 0, gaps: gaps.length, ends: last.ends || null, extended: extend, image: geometry } });
+      const ms = performance.now() - t0, worldMs = performance.now() - tw;
+      Object.assign(ink, { phase: 'proposed', proposals: ink.proposals + 1, lastMs: ms, last: { mode: p.mode, scale: last.scale, grown: last.grown, coarser: last.coarser, frame: last.frame, epsilon: last.epsilon, vertices: p.mode === 'area' ? last.rings[0].length - 1 : geometry.coordinates.length, holes: p.mode === 'area' ? last.rings.length - 1 : 0, gaps: gaps.length, ends: last.ends || null, extended: extend, image: geometry, worldMs } });
       ink.timings.push({ ms, mode: p.mode, seeds: p.seeds.length, requests: fetcher.stats.requests, fromCache: fetcher.stats.fromCache });
       draw();
       const holes = p.mode === 'area' ? last.rings.length - 1 : 0;
