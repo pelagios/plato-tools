@@ -409,9 +409,10 @@ function requestTeiKeys() {
 function onTeiKeys(d) {
   if (d.id !== columnsAsked || input?.format !== 'tei') return;   // an answer about a file no longer chosen
   const R = READING_WORDS;
-  // A file whose keys cannot be read: the run reports what stops it, in full.
+  // A file whose keys cannot be read: said here, briefly; the run reports what stops it, in full.
   teiKeys = d.error ? [] : d.prefixes;
-  if (teiKeys.length) {
+  if (d.error) $('reading-keys').innerHTML = `<p class="warn" id="reading-keys-message">${escapeHtml(R.keysUnread(firstSentence(d.error)))}</p>`;
+  else if (teiKeys.length) {
     const rows = teiKeys.map((k, i) => `<tr><th scope="row">${k.prefix ? `<code>${escapeHtml(k.prefix)}</code>` : `<em>${escapeHtml(R.noPrefix)}</em>`}</th>`
       + `<td>${k.count.toLocaleString('en-GB')}</td>`
       + `<td><ul class="examples">${k.examples.map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul></td>`
@@ -422,6 +423,8 @@ function onTeiKeys(d) {
   }
   readingState();
 }
+/** The first sentence of a message, for a short note (the report gives the rest). */
+const firstSentence = (m) => { const t = String(m).split('\n')[0]; return (/^.*?\.(?=\s|$)/.exec(t) || [t])[0]; };
 /** The patterns ticked for the keys' prefixes, as { prefix: pattern }. */
 function keyPatterns() {
   const out = Object.create(null);
@@ -458,6 +461,7 @@ function readingState() {
     controls: [...box.querySelectorAll('input[data-reading]')].map((x) => ({ id: x.dataset.reading, checked: x.checked })),
     keys: teiKeys && teiKeys.map((k, i) => ({ prefix: k.prefix, count: k.count, suggested: k.suggested || null, pattern: $(`key-pattern-${i}`)?.value ?? null, use: !!$(`key-use-${i}`)?.checked })),
     message: $('reading-message')?.textContent || '',
+    keysMessage: $('reading-keys-message')?.textContent || '',
   };
 }
 $('reading').addEventListener('change', (e) => {

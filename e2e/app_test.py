@@ -158,6 +158,7 @@ READING_DOM = """() => { const f = document.getElementById('reading'); if (!f) r
     boxes: [...f.querySelectorAll('input[data-reading]')].map((x) => ({ id: x.id, checked: x.checked, label: x.labels[0]?.textContent.trim() || '' })),
     keyRows: [...f.querySelectorAll('table.reading-keys tbody tr')].map((r) => ({ prefix: r.querySelector('th').textContent, pattern: r.querySelector('input[type=text]').value, use: r.querySelector('input[type=checkbox]').checked })),
     message: document.getElementById('reading-message')?.textContent || '',
+    keysMessage: document.getElementById('reading-keys-message')?.textContent || '',
     titles: document.querySelectorAll('#action [title]').length }; }"""
 
 def reading_case(page, file, keys=False, columns=False):
@@ -201,7 +202,20 @@ def reading_checks(page, tmp):
           s1.get('format') == 'lpf' and d1 and d1['hidden'] and not d1['shown']
           and s2.get('format') == 'tei' and d2 and d2['shown'] and d2['legend'] == 'Reading options' and d2['after'] == 'columns'
           and [b['id'] for b in d2['boxes']] == ['reading-listPlaces'] and not d2['boxes'][0]['checked'] and 'list of places' in d2['boxes'][0]['label']
-          and (s2.get('reading') or {}).get('keys') == [] and d2['keyRows'] == [] and d2['titles'] == 0, {'lpf': d1, 'tei': d2, 'state': s2.get('reading')})
+          and (s2.get('reading') or {}).get('keys') == [] and d2['keyRows'] == [] and d2['keysMessage'] == '' and d2['titles'] == 0, {'lpf': d1, 'tei': d2, 'state': s2.get('reading')})
+
+    # A TEI file whose keys cannot be read (an entity it does not declare, past its head): the Reading
+    # options say so in a short message, beside the box still shown; the file above, read, says nothing.
+    broken = tmp / 'keys-unreadable.xml'
+    broken.write_text('<?xml version="1.0" encoding="UTF-8"?>\n<TEI xmlns="http://www.tei-c.org/ns/1.0"><teiHeader><fileDesc><titleStmt><title>T</title></titleStmt>'
+                      '<publicationStmt><p>x</p></publicationStmt><sourceDesc><p>x</p></sourceDesc></fileDesc></teiHeader>'
+                      '<text><body><p><placeName key="tgn,1">A</placeName>&nbsp;</p></body></text></TEI>\n', encoding='utf-8')
+    s3 = reading_case(page, broken, keys=True)
+    d3 = page.evaluate(READING_DOM) if s3.get('format') else None
+    check('Reading options: a TEI file whose keys cannot be read says so in the Reading options, with the box still shown; no key table, no title attributes',
+          s3.get('format') == 'tei' and d3 and d3['shown'] and [b['id'] for b in d3['boxes']] == ['reading-listPlaces']
+          and d3['keysMessage'].startswith('The keys could not be read: ') and 'entity' in d3['keysMessage'] and (s3.get('reading') or {}).get('keysMessage') == d3['keysMessage']
+          and d3['keyRows'] == [] and d3['titles'] == 0, {'dom': d3, 'state': s3.get('reading') or s3})
 
     # A file with keys: the key table appears, each suggested pattern filled in and unticked. Converted
     # as it is, no key is made an address; with the tgn row ticked, its three keys are.
