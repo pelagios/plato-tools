@@ -18,6 +18,10 @@ const NEST_DEF = { qualification: 'qualification', relations: 'relation', meta: 
 const DOC_LINKS = new Set(['contains_entity', 'contains_attestation', 'contains_identity_relation'].map((x) => PLATO + x));
 const XSD_STRING = XSD + 'string', XSD_BOOLEAN = XSD + 'boolean';
 const BOUNDS = new Set(['start_earliest', 'start_latest', 'end_earliest', 'end_latest'].map((x) => PLATO + x));
+// A name's text keys, whose language tags are weighed against its language key (_nameTags), in the
+// order they are weighed; the toponym and the source's form may give the key its value.
+const NAME_TEXT_ORDER = ['toponym', 'sourceLabel', 'romanized', 'ipa'];
+const NAME_TEXT = new Set(NAME_TEXT_ORDER), NAME_FILLS = new Set(['toponym', 'sourceLabel']);
 const COMPONENT = { [QB + 'dimension']: 'dimension', [QB + 'measure']: 'measure', [QB + 'attribute']: 'attribute' };
 
 /** Resolve a schema fragment's $ref / oneOf into { kind: 'object'|'uri'|'scalar'|'either', def, array }. */
@@ -43,6 +47,44 @@ function shape(schema, core, profile) {
   if (name && deref(s).type === 'object') return { kind: 'object', def: name, array };
   const r = deref(s) || {};
   return { kind: 'scalar', type: r.type, array };
+}
+
+/**
+ * The exact value of a numeric literal, as a canonical decimal string ("-12.25", "1", "0"), or null
+ * when the lexical form is not a number. xsd:decimal and the integer types are exact as written;
+ * xsd:double is the nearest double, and xsd:float the nearest single (taken via the double, which
+ * differs from rounding straight to a single only when the double falls exactly halfway between
+ * two singles), each expanded to all its digits: every binary fraction is a finite decimal.
+ */
+export function exactValue(lex, dt) {
+  const s = lex.trim();
+  if (dt === XSD + 'double' || dt === XSD + 'float') {
+    if (!/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(s)) return null;
+    let n = Number(s); if (dt === XSD + 'float') n = Math.fround(n);
+    return Number.isFinite(n) ? doubleDecimal(n) : null;
+  }
+  const m = s.match(/^([+-]?)(\d*)(?:\.(\d*))?$/);
+  if (!m || (m[2] + (m[3] || '')) === '') return null;
+  return canonicalDecimal(m[1] === '-', m[2] + (m[3] || ''), (m[3] || '').length);
+}
+/** Sign, digits and the number of them after the point, as "-0.125", "40", "0". */
+function canonicalDecimal(neg, digits, scale) {
+  digits = digits.padStart(scale + 1, '0');
+  const int = digits.slice(0, digits.length - scale).replace(/^0+/, '');
+  const frac = digits.slice(digits.length - scale).replace(/0+$/, '');
+  if (!int && !frac) return '0';
+  return (neg ? '-' : '') + (int || '0') + (frac ? '.' + frac : '');
+}
+/** Every digit of a finite double: mantissa * 2^exp, and 2^-k = 5^k / 10^k. */
+function doubleDecimal(n) {
+  if (n === 0) return '0';
+  const view = new DataView(new ArrayBuffer(8)); view.setFloat64(0, n);
+  const bits = view.getBigUint64(0);
+  const neg = bits >> 63n === 1n, e = Number((bits >> 52n) & 0x7ffn);
+  let mant = bits & 0xfffffffffffffn, exp;
+  if (e === 0) exp = -1074; else { mant |= 1n << 52n; exp = e - 1075; }
+  if (exp >= 0) return canonicalDecimal(neg, (mant << BigInt(exp)).toString(), 0);
+  return canonicalDecimal(neg, (mant * 5n ** BigInt(-exp)).toString(), -exp);
 }
 
 export class Rdf2Json {
@@ -181,17 +223,55 @@ export class Rdf2Json {
   /**
    * What PLATO JSON cannot hold of a literal read into value v: a language tag, or a datatype other
    * than the one the key's value is written back with (the context's type for the key, else the
-   * one its JSON value gives). The value is kept; the tag or datatype is reported lost.
+   * one its JSON value gives). The value is kept; the tag or datatype is reported lost. A tag on a
+   * name's text is not decided here but by _nameTags, once the name's own language key is known:
+   * it is collected into `tags` instead.
    */
-  _literalLoss(id, p, o, v, term) {
-    if (o.language) { this.loss({ kind: 'literal-language', value: `${id} ${p} "${o.value}"@${o.language}` }); return; }
+  _literalLoss(id, p, o, v, term, tags = null, key = null) {
+    if (o.language) {
+      if (tags && NAME_TEXT.has(key)) { tags.push({ key, p, o }); return; }
+      this.loss({ kind: 'literal-language', value: `${id} ${p} "${o.value}"@${o.language}` }); return;
+    }
     const dt = o.datatype || XSD_STRING;
     const again = term.type && !term.type.startsWith('@') ? term.type
       : typeof v === 'number' ? numberLiteral(v).datatype : typeof v === 'boolean' ? XSD_BOOLEAN : XSD_STRING;
     if (dt === again) return;
     // A bound typed by its shape (xsd:gYear, xsd:date) is what a typed export writes, and writes again.
     if (BOUNDS.has(p) && typeof v === 'string' && boundDatatype(v) === dt) return;
+    // A number written back in another numeric datatype loses nothing when it is exactly the same
+    // number ("1.0"^^xsd:decimal read as 1, written "1"^^xsd:integer). It is compared exactly, as
+    // decimals: "0.1"^^xsd:decimal is not the double 0.1, which is 0.1000000000000000055511151231257827....
+    if (typeof v === 'number' && NUMERIC.has(dt) && NUMERIC.has(again)) {
+      const back = term.type && !term.type.startsWith('@') ? String(v) : numberLiteral(v).value;
+      const a = exactValue(o.value, dt), b = exactValue(back, again);
+      if (a !== null && a === b) return;
+    }
     this.loss({ kind: 'literal-datatype', value: `${id} ${p} "${o.value}"^^<${dt}>` });
+  }
+  /**
+   * The language tags on a name's text (toponym, sourceLabel, romanized, ipa), against the name's
+   * language key. A tag that the key already says (BCP 47 tags ignore case) loses nothing. With no
+   * key, a tag on the toponym or the source's form (which are in the name's language) becomes the
+   * key when PLATO's languageTag pattern admits it, and is then no loss either. Anything else, a
+   * tag that differs from the key, one the key cannot hold, one on a romanised or phonetic form
+   * (whose tag, grc-Latn or en-fonipa, says more than the name's language), is reported.
+   */
+  _nameTags(id, obj, tags) {
+    tags.sort((x, y) => NAME_TEXT_ORDER.indexOf(x.key) - NAME_TEXT_ORDER.indexOf(y.key));
+    for (const { key, p, o } of tags) {
+      const tag = o.language;
+      if (obj.language === undefined && NAME_FILLS.has(key) && this._languageFits(tag)) obj.language = tag;
+      if (typeof obj.language === 'string' && obj.language.toLowerCase() === tag.toLowerCase()) continue;
+      this.loss({ kind: 'literal-language', value: `${id} ${p} "${o.value}"@${tag}` });
+    }
+  }
+  _languageFits(tag) {
+    if (this.languagePattern === undefined) {
+      let s = this.core.$defs.name && this.core.$defs.name.properties.language;
+      if (s && s.$ref) s = this.core.$defs[s.$ref.split('/').pop()];
+      this.languagePattern = s && s.type === 'string' ? (s.pattern ? new RegExp(s.pattern, 'u') : /^/) : null;
+    }
+    return !!this.languagePattern && this.languagePattern.test(tag);
   }
 
   /** Build the JSON object for node `id` as JSON type `def` in context `active`. */
@@ -216,6 +296,7 @@ export class Rdf2Json {
       else if (JSON.stringify(tgt[k]) !== JSON.stringify(value)) this.issue({ kind: 'multiple-values', key: k, node: id, value: JSON.stringify(value) });
     };
     let lat, long;
+    const nameTags = def === 'name' ? [] : null;
     for (const { p, o } of this.g.out(id)) {
       // Nested under its parent through a reverse property (an attestation under its entity):
       // the link back to the parent is what the nesting says, so it is not repeated.
@@ -253,7 +334,7 @@ export class Rdf2Json {
       if (t.type === '@vocab') { const key = [...e.ctx.terms.entries()].find(([, v]) => v.iri === o.value); if (key) put(e, key[0]); else if (!o.value.startsWith(PLATO)) this.loss({ kind: 'unmapped-type', value: o.value }); continue; }
       if (t.container === '@list') { if (o.termType === 'Literal') { const xy = o.value.match(/POINT\s*\(\s*(\S+)\s+(\S+)\s*\)/i); if (xy) put({ ...e, shape: { ...e.shape, array: false } }, [Number(xy[1]), Number(xy[2])]); } else put({ ...e, shape: { ...e.shape, array: false } }, this._list(o)); continue; }
       if (t.type === '@json') { put(e, this._scalar(o, e.shape)); continue; }
-      if (o.termType === 'Literal') { const v = this._scalar(o, e.shape); this._literalLoss(id, p, o, v, t); put(e, v); continue; }
+      if (o.termType === 'Literal') { const v = this._scalar(o, e.shape); this._literalLoss(id, p, o, v, t, nameTags, e.path ? null : e.key); put(e, v); continue; }
       const oid = this._key(o);
       const sh = e.shape;
       // A shared node with its own IRI (a source cited by many places) is written out in full
@@ -272,6 +353,7 @@ export class Rdf2Json {
         this.loss({ kind: 'value-is-node', value: `${id} ${p}` });
       } else put(e, o.value);
     }
+    if (nameTags && nameTags.length) this._nameTags(id, obj, nameTags);
     if (def === 'geometry' && lat !== undefined && long !== undefined) {
       if (!obj.reprPoint) obj.reprPoint = [long, lat];
       if (!obj.geojson && !obj.wkt) obj.geojson = { type: 'Point', coordinates: [long, lat] };

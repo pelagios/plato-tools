@@ -39,6 +39,20 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   temporary space. At scale (`SCALE=1 node --test test/tables-stream.test.js`, 512 MB of heap):
   1 million places, 6 million rows, 296 MB of CSV became 2.0 GB of PLATO JSON Lines in 6 min 38 s
   on the command line, with a peak RSS of 367 MB and a working database of 589 MB.
+- **Language tags and datatypes, RDF to JSON.** PLATO JSON has no place for a literal's language
+  tag or for a datatype other than the one it writes for the key; `_literalLoss` in `rdf2json.js`
+  reports each as `literal-language` or `literal-datatype`, except where nothing is lost (the
+  maintainer's decision of 2026-10-01). A tag on a name's toponym or `sourceLabel` fills the
+  name's empty `language` key when PLATO's `languageTag` pattern admits it (`grc-Latn` does; the
+  pattern is read from the schema, not written here); a tag on a name's text that equals its
+  `language` key, ignoring case, is silent. A tag that differs from the key, cannot be one, or is
+  on other text (labels, notes, titles) is reported. A number written back in another numeric
+  datatype is silent when it is exactly the same number: `exactValue` expands the literal (as
+  written for `xsd:decimal` and the integers, as the nearest double or single for `xsd:double` and
+  `xsd:float`) and what is written back to every digit, and compares the strings, never `==`. So
+  `"1.0"^^xsd:decimal` (back as `"1"^^xsd:integer`) and `"0.5"^^xsd:decimal` are silent, and
+  `"0.1"^^xsd:decimal` and `"0.93"^^xsd:float` are reported. `test/literals.test.js` holds the
+  cases, PLATO's own Turtle examples among them.
 - **The other formats** are in `src/formats/`: `tables.js`, `lpf.js`, `annotations.js`, `cube.js`,
   and `shared.js` for the rules the lossy writers share (denials, the current state, computed
   values, figures, bundled identities).
