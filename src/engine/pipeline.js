@@ -20,7 +20,7 @@ import { validateTables, checkTableRules, checkAboutRules, aboutToGazetteer, gaz
 import { AnnotationReader, ANNOTATION_KINDS } from '../formats/annotations.js';
 import { teiSource } from './hermes/tei.js';
 import { genericSource, genericProfile } from './hermes/generic.js';
-import { lineChunks, lines, jsonDocument, annotationItems, TABLE_SHEETS, DataError, decodeUtf8, sheetOf } from './input.js';
+import { lineChunks, lines, jsonDocument, annotationItems, TABLE_SHEETS, DataError, decodeUtf8, sheetOf, textStream } from './input.js';
 import { Report, LOSS_TEXT, droppedText, FORMAT_WORDS } from './report.js';
 
 export const TARGETS = {
@@ -215,11 +215,17 @@ async function* rdfSource(file, format, rep) {
 }
 
 // ---- tables: sheets from CSV files, a zip or a workbook -----------------------------------------
+/** A whole file's text, decompressed and decoded as UTF-8 strictly (input.js, textStream). */
+async function readText(f) {
+  try { let t = ''; for await (const chunk of await textStream(f)) t += chunk; return t; }
+  catch (e) { throw e instanceof DataError ? e : new DataError(`${f.name} stops, or is damaged, part-way through, so it cannot be read to the end (${String(e && (e.message || e.name) || e).split('\n')[0]}).`); }
+}
 async function readSheets(input, env) {
   const sheets = {};
   const put = (name, text) => { const b = sheetOf(name); if (b) sheets[b] = Papa.parse(text.replace(/^﻿/, ''), { header: true, skipEmptyLines: 'greedy' }); };
-  // A sheet's text is UTF-8, strictly (input.js, decodeUtf8), as every other input's is.
-  if (input.container === 'csv') { for (const f of input.files) if (sheetOf(f.name)) put(f.name, decodeUtf8(new Uint8Array(await f.arrayBuffer()), f.name)); }
+  // A sheet's text is UTF-8, strictly (input.js, textStream and decodeUtf8), as every other input's
+  // is; a sheet compressed with gzip (places.csv.gz) is decompressed first, as every other input is.
+  if (input.container === 'csv') { for (const f of input.files) if (sheetOf(f.name)) put(f.name, await readText(f)); }
   else if (input.container === 'zip') {
     let z;
     try { z = unzipSync(new Uint8Array(await input.files[0].arrayBuffer())); }
