@@ -3,8 +3,8 @@
 // dataset with the drawings added, checked by the version check (Mneme) against what was opened.
 // The engine is the same worker as the main page's (src/engine/worker.js, its chora-* commands). The
 // page publishes its state on window.__chora for automated tests; nothing else reads it.
-import { fmtBytes, formatName, progressText, summary, draftNote, choraDrawingNote, choraSaveText, choraSavedFormat, choraSaveProgress, choraStorageWarning, choraPersistNote, choraProblemText, CHORA_TEXT } from '../engine/words.js';
-import { sizeRead, loadNeed, saveNeed, storageShort, shouldPersist } from '../engine/chora/storage.js';
+import { fmtBytes, formatName, progressText, summary, draftNote, choraDrawingNote, choraSaveText, choraSavedFormat, choraSaveProgress, choraStorageWarning, choraProblemText, CHORA_TEXT } from '../engine/words.js';
+import { sizeRead, loadNeed, saveNeed, storageShort } from '../engine/chora/storage.js';
 import { detect } from '../engine/input.js';
 import { newGeometryAttestation, checkGeoJSON, wrapLongitudes, DrawError, ROLES, PRECISIONS } from '../engine/chora/draw.js';
 import { createMap, placeFeatures, contextFeatures, STATUS_COLOURS } from './map.js';
@@ -70,11 +70,9 @@ async function open(list) {
   $('dataset').hidden = false;
   $('dataset').innerHTML = `<ul>${files.map((f) => `<li><span class="name">${esc(f.name)}</span> <span class="count">${fmtBytes(f.size)}</span></li>`).join('')}</ul>`;
   $('phase').textContent = 'Reading…';
-  // Whether the browser has room for it, and, for a large one, asked to keep it: before it is read. The
-  // note on keeping storage is the last dataset's until this one is known to need it.
-  $('storage-note').hidden = true;
-  const bytes = await storageCheck('load', $('storage-warning'));
-  if (shouldPersist(bytes)) await keepStorage();
+  // Whether the browser has room for it, before it is read.
+  // Persistent storage (navigator.storage) is not asked for here: it is to be offered in the toolbox's Permissions window.
+  await storageCheck('load', $('storage-warning'));
   try {
     dataset = await request({ cmd: 'chora-load', files }, 'chora-loaded');
   } catch (e) { return fail(e.message); }
@@ -627,17 +625,6 @@ async function storageCheck(when, el) {
   el.hidden = !short;
   if (short) el.textContent = choraStorageWarning(when, short);
   return bytes;
-}
-// A large dataset: the browser is asked, once, to keep this site's storage when disk space runs low,
-// and the page says what it answered and what that means.
-let persistAsked = false;
-async function keepStorage() {
-  if (persistAsked) { $('storage-note').hidden = false; return; }
-  persistAsked = true;
-  let kept = null;
-  try { kept = (await navigator.storage.persisted()) || (await navigator.storage.persist()); } catch { /* not supported */ }
-  state.persist = kept === null ? 'unsupported' : kept ? 'granted' : 'refused';
-  Object.assign($('storage-note'), { hidden: false, textContent: choraPersistNote(kept) });
 }
 
 // The same as the main page's save() (src/app.js), kept here rather than shared so that the main page

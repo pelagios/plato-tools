@@ -13,8 +13,8 @@ import { save, savedName, refusalOf } from '../src/engine/chora/save.js';
 import { newGeometryAttestation } from '../src/engine/chora/draw.js';
 import { load, keyer } from '../src/engine/chora/store.js';
 import { run } from '../src/engine/pipeline.js';
-import { choraSavedFormat, choraSaveText, choraProblemText, choraSaveProgress, choraStorageWarning, choraPersistNote, CHORA_TEXT } from '../src/engine/words.js';
-import { uncompressedSize, sizeRead, loadNeed, saveNeed, storageShort, shouldPersist, PERSIST_ABOVE } from '../src/engine/chora/storage.js';
+import { choraSavedFormat, choraSaveText, choraProblemText, choraSaveProgress, choraStorageWarning, CHORA_TEXT } from '../src/engine/words.js';
+import { uncompressedSize, sizeRead, loadNeed, saveNeed, storageShort } from '../src/engine/chora/storage.js';
 
 const X = 'https://example.org/';
 const who = { name: 'Ada Surveyor' };
@@ -353,12 +353,9 @@ test('storage is short when what is needed is more than the browser has left; un
   assert.equal(storageShort(1 * GB, { quota: 10 * GB }), null, 'no usage given: all of it free');
   assert.equal(storageShort(1 * GB, null), null);
   assert.equal(storageShort(1 * GB, {}), null);
-  assert.equal(PERSIST_ABOVE, 200e6);
-  assert.equal(shouldPersist(250e6), true);
-  assert.equal(shouldPersist(150e6), false);
 });
 
-test('the storage warnings and the note on keeping storage say what is needed, what is left, and what to do', () => {
+test('the storage warnings say what is needed, what is left, and what to do', () => {
   const short = storageShort(saveNeed({ name: 'deep-plato.jsonl.gz', bytes: 1184971984 }), { quota: 3 * GB, usage: 1.5 * GB });
   assert.ok(short, 'DEEP cannot be saved in 1.5 GB');
   assert.equal(choraStorageWarning('save', short), "Saving needs about 2.76 GB of the browser's storage, for the file and the version check's working copy, and this browser has only 1.50 GB left for this site (of the 3.00 GB it allows). The save may stop part-way. Free some disk space, then save.");
@@ -370,7 +367,21 @@ test('the storage warnings and the note on keeping storage say what is needed, w
   assert.doesNotMatch(why, /::/);
   // The control: a text without its own colon is given one.
   assert.equal(choraProblemText({ kind: 'chora-no-such-place', message: 'x', examples: ['https://example.org/p/a'] }), `${CHORA_TEXT['chora-no-such-place']}: https://example.org/p/a`);
-  assert.match(choraPersistNote(true), /It agreed/);
-  assert.match(choraPersistNote(false), /did not agree.*save often/);
-  assert.match(choraPersistNote(null), /cannot be asked/);
+});
+
+// navigator.storage.persist() makes Firefox show a permission prompt, and the tools are to ask for no
+// permission of their own (persistent storage is to be offered in the toolbox's Permissions window):
+// nothing the page runs calls it, or persisted(). The control: the same scan of the same files finds
+// the storage estimate Chora does ask for, and the pattern finds a call written as it was.
+test('no page asks the browser to keep its storage (persist() is never called); the estimate still is', () => {
+  const files = [];
+  const walk = (dir) => { for (const e of readdirSync(dir, { withFileTypes: true })) { const p = `${dir}/${e.name}`; if (e.isDirectory()) walk(p); else if (p.endsWith('.js')) files.push(p); } };
+  walk(new URL('../src', import.meta.url).pathname);
+  const CALL = /\.persist(ed)?\s*\(/;
+  assert.match('try { kept = (await navigator.storage.persisted()) || (await navigator.storage.persist()); }', CALL, 'the pattern finds a call');
+  const chora = files.find((f) => f.endsWith('/src/chora/app.js'));
+  assert.ok(chora && files.length > 50, `${files.length} files, Chora's page among them`);
+  assert.match(readFileSync(chora, 'utf8'), /navigator\.storage\.estimate\(\)/, 'the same scan sees the estimate');
+  const calls = files.filter((f) => CALL.test(readFileSync(f, 'utf8')));
+  assert.deepEqual(calls, []);
 });

@@ -127,7 +127,3 @@ export function storageShort(need, estimate) {
   const free = estimate.quota - (Number.isFinite(estimate.usage) ? estimate.usage : 0);
   return need > free ? { need, free, quota: estimate.quota } : null;
 }
-
-/** Above this size read, the browser is asked to keep Chora's storage (navigator.storage.persist()). */
-export const PERSIST_ABOVE = 200e6;
-export const shouldPersist = (bytes) => bytes > PERSIST_ABOVE;

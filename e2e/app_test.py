@@ -2544,6 +2544,9 @@ def chora_checks(pw, url, tmp):
     # The storage the browser says it allows, when a check asks for an answer of its own (storage_short).
     ctx.add_init_script('''(() => { try { const s = localStorage.getItem('e2e-storage-estimate');
       if (s && navigator.storage) Object.defineProperty(navigator.storage, 'estimate', { value: async () => JSON.parse(s), configurable: true }); } catch {} })();''')
+    # Any call of navigator.storage.persist() or persisted() is recorded, and answered without asking the browser.
+    ctx.add_init_script('''(() => { try { window.__e2e_persistCalls = []; for (const k of ['persist', 'persisted'])
+      Object.defineProperty(navigator.storage, k, { value: async () => { window.__e2e_persistCalls.push(k); return false; }, configurable: true }); } catch {} })();''')
     requests, errors, loads = [], [], []
     ctx.on('request', lambda r: requests.append(r.url))
     ctx.on('page', lambda p: p.on('pageerror', lambda e: errors.append(str(e)[:200])))
@@ -3245,9 +3248,13 @@ def chora_checks(pw, url, tmp):
             try: page.evaluate('k => localStorage.removeItem(k)', STUB)
             except Exception: pass
     attempt('Chora: a browser short of storage is warned, plainly, before a dataset is opened and before it is saved; one with room is not', storage_short)
-    # A large dataset (over 200 MB read) has the browser asked to keep this site's storage, and a note
-    # says what it answered: the note is that dataset's, not the next one's. The large one is a gzip of
-    # 1 MB or so whose trailer says 210 MB (a PLATO document, then that much blank space).
+    # A large dataset (over 200 MB read) does not have the browser asked to keep this site's storage:
+    # navigator.storage.persist() shows a permission prompt in Firefox, and persistent storage is to be
+    # offered in the toolbox's Permissions window, not by Chora. The init script records any call of
+    # persist() or persisted(). The large one is a gzip of 1 MB or so whose trailer says 210 MB (a PLATO
+    # document, then that much blank space). Presence: it is read at that size, the plain space warning is
+    # shown for it when the browser is short (and the dataset opens all the same), and the recorder is seen
+    # to record a call made directly.
     def big_dataset(name):
         import gzip
         d = tmp / 'chora-files'; d.mkdir(exist_ok=True)
@@ -3256,21 +3263,25 @@ def chora_checks(pw, url, tmp):
             g.write(json.dumps(doc).encode()); chunk = b' ' * (1 << 20)
             for _ in range(210): g.write(chunk)
         return d / name
-    def storage_note():
-        note = lambda: {'shown': page.is_visible('#storage-note'), 'text': page.inner_text('#storage-note') if page.is_visible('#storage-note') else '', 'bytes': (cstate(page).get('storage') or {}).get('bytes'), 'phase': cstate(page).get('phase')}
-        big = big_dataset('big-note.json.gz')
-        chora_boot(page, base, [big]); large = note()
-        # The next dataset opened in the same page (no navigation, which would hide the note anyway) is small.
-        page.set_input_files('#picker', [str(odd_dataset('small-after-big.json'))])
-        until(page, '() => window.__chora.phase === "loaded" && window.__chora.storage && window.__chora.storage.bytes < 1e6', 120)
-        small = note()
-        # And a large one again has the note again: the browser was asked once, and its answer still holds.
-        page.set_input_files('#picker', [str(big)])
-        until(page, '() => ["loaded", "error"].includes(window.__chora.phase) && window.__chora.storage && window.__chora.storage.bytes > 2e8', 120)
-        again = note()
-        return (large['shown'] and large['bytes'] > 2e8 and 'storage' in large['text'].lower() and small['phase'] == 'loaded' and not small['shown']
-                and again['shown']), {'large': large, 'small after it': small, 'large again': again}
-    attempt('Chora: the note on keeping storage is shown for a large dataset, and not for a small one opened after it', storage_note)
+    def no_persist():
+        try:
+            big = big_dataset('big-no-persist.json.gz')
+            page.evaluate('([k, v]) => localStorage.setItem(k, v)', [STUB, json.dumps({'quota': 1e8, 'usage': 0})])
+            s = chora_boot(page, base, [big]); st = s.get('storage') or {}
+            calls = page.evaluate('() => window.__e2e_persistCalls')
+            warning = page.inner_text('#storage-warning') if page.is_visible('#storage-warning') else ''
+            note = page.query_selector('#storage-note')
+            # The control: the recorder sees a call made directly.
+            page.evaluate('() => navigator.storage.persist()')
+            seen = page.evaluate('() => window.__e2e_persistCalls')
+            return (st.get('bytes', 0) > 2e8 and st.get('short') and 'Opening this dataset needs about' in warning and s.get('phase') == 'loaded'
+                    and calls == [] and 'persist' not in s and (note is None or not note.is_visible()) and seen == ['persist']), {
+                'storage': st, 'phase': s.get('phase'), 'calls during the open': calls, 'warning': warning[:120], 'state.persist': s.get('persist'),
+                'note shown': bool(note and note.is_visible()), 'recorder control': seen}
+        finally:
+            try: page.evaluate('k => localStorage.removeItem(k)', STUB)
+            except Exception: pass
+    attempt('Chora: a large dataset opens without asking the browser to keep its storage (no persist(), no note), and the plain space warning is still given', no_persist)
 
     # Over everything above: loading, drawing, saving, the hand-off and two tabs.
     attempt('Chora: across all these checks, no request went to any other site, and no page error', lambda: (

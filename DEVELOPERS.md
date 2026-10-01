@@ -1054,9 +1054,11 @@ publishes its state on `window.__chora` for tests.
   that is less than 4 times the compressed size, when the larger of it and 20 times (DEEP's ratio) is
   taken; a gzip of several members (bgzip, known by its first header, or any whose last 64 KiB holds
   another member's header) has only its last member's size there, so the same fallback is taken.
-  A dataset over 200 MB read asks the browser once to keep this site's storage
-  (`navigator.storage.persist()`), and the page says what it answered and what that means, for that
-  dataset: the note is hidden when the next is opened, and shown again for a large one.
+  Chora does not ask the browser to keep its storage (`navigator.storage.persist()`), whatever the
+  dataset's size: Firefox shows a permission prompt for it, and the tools add no consent prompts of
+  their own. Persistent storage is to be offered in the toolbox's Permissions window. A unit test
+  (`test/chora-scale.test.js`) finds no call of it in `src/`, and an e2e check records none while a
+  dataset read at 210 MB opens, with its space warning given.
 - **A place's key** is its `@id`, or `#n` (its position among the records) when it has none
   (`placeKey` in `store.js`). Loading and saving both count the records `run()` gives, in the same
   order and by one rule (`keyer`: every record counts, and one that is not a place has no key), so a

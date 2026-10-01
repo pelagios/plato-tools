@@ -464,13 +464,6 @@ export function choraStorageWarning(when, { need, free, quota }) {
     ? `Saving needs about ${fmtBytes(Math.round(need))} of the browser's storage, for the file and the version check's working copy, and ${left}. The save may stop part-way. Free some disk space, then save.`
     : `Opening this dataset needs about ${fmtBytes(Math.round(need))} of the browser's storage, for Chora's working copy of it, and ${left}. It may stop part-way. Free some disk space, or use an ordinary window: a private one keeps its storage in memory and allows very little.`;
 }
-/** What the browser answered when asked to keep Chora's storage for a large dataset: true, false, or null (not asked). */
-export function choraPersistNote(kept) {
-  const what = "Chora's storage (its working copy of the dataset, your drawings not yet saved, and the file last saved)";
-  if (kept === true) return `This dataset is large, so the browser was asked to keep ${what} even when disk space runs low. It agreed: they stay until you clear this site's data.`;
-  if (kept === false) return `This dataset is large, so the browser was asked to keep ${what} even when disk space runs low. It did not agree, so it may clear them when space runs short, and drawings not yet saved would go with them: save often.`;
-  return `This dataset is large, and this browser cannot be asked to keep ${what} when disk space runs low: save your drawings often.`;
-}
 /**
  * What a Chora save writes, for a dataset as detect() describes it: JSON Lines as JSON Lines, since PLATO
  * has that format and it keeps each line as it came; anything else as a PLATO JSON document.
