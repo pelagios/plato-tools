@@ -151,6 +151,135 @@ def match_case(page, subjects, others, timeout=120):
     except Exception as e:                       # a harness error is a failed check, never a crash
         return {'phase': 'harness-error', 'error': str(e).split('\n')[0][:200]}
 
+# ---- Hermes: Reading options (one fieldset after the column table, src/app.js renderReading) -------
+READING_DOM = """() => { const f = document.getElementById('reading'); if (!f) return null;
+  return { hidden: f.hidden, shown: f.getClientRects().length > 0, legend: f.querySelector('legend')?.textContent || '',
+    after: f.previousElementSibling?.id || null,
+    boxes: [...f.querySelectorAll('input[data-reading]')].map((x) => ({ id: x.id, checked: x.checked, label: x.labels[0]?.textContent.trim() || '' })),
+    keyRows: [...f.querySelectorAll('table.reading-keys tbody tr')].map((r) => ({ prefix: r.querySelector('th').textContent, pattern: r.querySelector('input[type=text]').value, use: r.querySelector('input[type=checkbox]').checked })),
+    message: document.getElementById('reading-message')?.textContent || '',
+    titles: document.querySelectorAll('#action [title]').length }; }"""
+
+def reading_case(page, file, keys=False, columns=False):
+    """Choose a file and wait for its detection, and for a TEI file's keys or a table's columns to be answered."""
+    try:
+        page.set_input_files('#picker', [])
+        page.set_input_files('#picker', [str(file)])
+        return wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised') and (not keys or (s.get('reading') or {}).get('keys') is not None)
+                          and (not columns or bool(s.get('columns'))), 60, 'reading options')
+    except Exception as e:                       # a harness error is a failed check, never a crash
+        return {'phase': 'harness-error', 'error': str(e).split('\n')[0][:200]}
+
+def reading_run(page, target='plato-json', timeout=120):
+    """Convert the file chosen, with the reading options as they are set, and wait for the result."""
+    try:
+        page.select_option('#target', target)
+        page.click('#convert')
+        return wait_state(page, lambda s: s.get('phase') in ('done', 'error'), timeout, 'run')
+    except Exception as e:
+        return {'phase': 'harness-error', 'error': str(e).split('\n')[0][:200]}
+
+def reading_doc(page, s, tmp, name):
+    """The PLATO JSON document a run wrote, saved as the page saves it, or {}."""
+    ok = s.get('phase') == 'done' and s.get('outputs')
+    return json.loads(download(page, s['outputs'][0]['name'], tmp / name).read_text()) if ok else {}
+
+def abouts(doc):
+    return sorted(p['@id'] for p in doc.get('spatialEntities', []) for a in p.get('attestations', []))
+
+def reading_checks(page, tmp):
+    """Hermes: the Reading options area, for TEI and for a table of places. Every check pairs an absence
+    with a presence found in the same call, and a converted result with a run without the option."""
+    fx = ROOT / 'test/fixtures'
+    # A format with no reading options shows none; TEI shows the one that is not held, off, after the
+    # column table, and not the two held until PLATO pins its Editorial form status.
+    s1 = reading_case(page, fx / 'lpf-readme-example.json')
+    d1 = page.evaluate(READING_DOM) if s1.get('format') else None
+    s2 = reading_case(page, fx / 'tei/isicily-ISic000934.xml', keys=True)
+    d2 = page.evaluate(READING_DOM) if s2.get('format') else None
+    check('Reading options: none for LPF; for a TEI edition one box, the list of places, off, after the column table; the held two absent; no key table for a file with no keys; no title attributes',
+          s1.get('format') == 'lpf' and d1 and d1['hidden'] and not d1['shown']
+          and s2.get('format') == 'tei' and d2 and d2['shown'] and d2['legend'] == 'Reading options' and d2['after'] == 'columns'
+          and [b['id'] for b in d2['boxes']] == ['reading-listPlaces'] and not d2['boxes'][0]['checked'] and 'list of places' in d2['boxes'][0]['label']
+          and (s2.get('reading') or {}).get('keys') == [] and d2['keyRows'] == [] and d2['titles'] == 0, {'lpf': d1, 'tei': d2, 'state': s2.get('reading')})
+
+    # A file with keys: the key table appears, each suggested pattern filled in and unticked. Converted
+    # as it is, no key is made an address; with the tgn row ticked, its three keys are.
+    keys = fx / 'tei/keys-constructed.xml'
+    s = reading_case(page, keys, keys=True)
+    d = page.evaluate(READING_DOM) if s.get('format') else None
+    rows = {r['prefix']: r for r in (d or {}).get('keyRows', [])}
+    check('Reading options: a TEI file with keys shows a row for each prefix, with the suggested pattern filled in and every row unticked',
+          d and set(rows) >= {'tgn', 'pleiades', 'perseus'} and rows['tgn']['pattern'] == 'http://vocab.getty.edu/tgn/{id}'
+          and rows['pleiades']['pattern'] == 'https://pleiades.stoa.org/places/{id}' and rows['perseus']['pattern'] == ''
+          and not any(r['use'] for r in rows.values()) and not any(b['checked'] for b in d['boxes']), d)
+    r0 = reading_run(page)
+    doc0 = reading_doc(page, r0, tmp, 'keys-off.json')
+    s = reading_case(page, keys, keys=True)
+    try: page.get_by_label('Use the pattern for keys with the prefix “tgn”', exact=True).check(); ticked = True
+    except Exception as e: ticked = str(e).split('\n')[0][:200]
+    r1 = reading_run(page)
+    doc1 = reading_doc(page, r1, tmp, 'keys-tgn.json')
+    tgn = lambda doc: [a for a in abouts(doc) if a.startswith('http://vocab.getty.edu/tgn/')]
+    check('Reading options: a confirmed key pattern makes addresses: none from tgn keys unticked (reported, with the pattern to try), three once ticked',
+          ticked is True and abouts(doc0) and tgn(doc0) == [] and any(i['kind'] == 'tei-key-no-pattern' for i in r0['report']['items'])
+          and tgn(doc1) == ['http://vocab.getty.edu/tgn/7001393', 'http://vocab.getty.edu/tgn/7010720', 'http://vocab.getty.edu/tgn/7011179'],
+          {'ticked': ticked, 'off': abouts(doc0), 'on': abouts(doc1), 'r1': r1.get('report') or r1})
+
+    # A table of places: one box, rows with the same id as one place. Unticked, the repeated id is
+    # refused, naming the option; ticked, place a has an attestation from each of its two rows.
+    dup = fx / 'generic/duplicate-ids.csv'
+    s = reading_case(page, dup, columns=True)
+    d = page.evaluate(READING_DOM) if s.get('columns') else None
+    r0 = reading_run(page)
+    refusal = ' '.join(e for i in (r0.get('report') or {}).get('items', []) if i['severity'] == 'error' for e in i['examples'])
+    s = reading_case(page, dup, columns=True)
+    try: page.get_by_label('Rows with the same id are one place', exact=True).check(); ticked = True
+    except Exception as e: ticked = str(e).split('\n')[0][:200]
+    r1 = reading_run(page)
+    doc1 = reading_doc(page, r1, tmp, 'same-id.json')
+    a = next((p for p in doc1.get('spatialEntities', []) if p['@id'].endswith('/a')), None)
+    check('Reading options: a CSV shows only "rows with the same id are one place", off; unticked the repeated id is refused naming it, ticked place a has two attestations',
+          d and [(b['id'], b['checked']) for b in d['boxes']] == [('reading-sameId', False)] and 'Reading options, or --same-id' in refusal
+          and ticked is True and r1.get('phase') == 'done' and a is not None and len(a['attestations']) == 2, {'dom': d, 'refusal': refusal[-200:], 'ticked': ticked, 'a': a, 'r1': r1.get('report') or r1})
+    # With no id column, ticking it is refused in plain words and the box does not stay ticked.
+    s = reading_case(page, fx / 'generic/no-ids.csv', columns=True)
+    try: page.get_by_label('Rows with the same id are one place', exact=True).click(); clicked = True
+    except Exception as e: clicked = str(e).split('\n')[0][:200]
+    d = page.evaluate(READING_DOM) if s.get('columns') else None
+    check('Reading options: "rows with the same id are one place" with no id column is refused with a message, and stays unticked',
+          clicked is True and d and [(b['id'], b['checked']) for b in d['boxes']] == [('reading-sameId', False)] and 'when a column is read as the place id' in d['message'], {'clicked': clicked, 'dom': d})
+
+    # A column of a gazetteer's ids: its row offers the suggested pattern, unticked, and the warning
+    # points at it. Converted as it is, no Pleiades address; ticked, the ids are made into addresses,
+    # and the matching saved holds the pattern in its object form.
+    gaz = fx / 'generic/gazetteer-ids.csv'
+    pattern = 'https://pleiades.stoa.org/places/{id}'
+    s = reading_case(page, gaz, columns=True)
+    box = page.evaluate("""() => { const b = document.querySelector('#columns input[data-pattern-column]'); if (!b) return null;
+        const row = b.closest('tr'); return { column: row.querySelector('th').textContent, checked: b.checked, label: b.labels[0]?.textContent.trim() || '',
+        select: row.querySelector('select').value, warnings: document.getElementById('columns-warnings').textContent }; }""") if s.get('columns') else None
+    r0 = reading_run(page)
+    doc0 = reading_doc(page, r0, tmp, 'gaz-off.json')
+    s = reading_case(page, gaz, columns=True)
+    try: page.locator('#columns input[data-pattern-column]').check(); ticked = True
+    except Exception as e: ticked = str(e).split('\n')[0][:200]
+    st = wait_state(page, lambda s: True, 5)
+    try:
+        with page.expect_download(timeout=30_000) as dl: page.click('#columns-save')
+        dl.value.save_as(tmp / 'gaz-matching.json'); saved = json.loads((tmp / 'gaz-matching.json').read_text())
+    except Exception as e: saved = {'error': str(e)[:200]}
+    r1 = reading_run(page)
+    doc1 = reading_doc(page, r1, tmp, 'gaz-on.json')
+    pleiades = lambda doc: [x for x in abouts(doc) if x.startswith('https://pleiades.stoa.org/')]
+    check('column table: a suggested gazetteer pattern is offered unticked with a warning naming it; unticked no Pleiades address is made, ticked the ids become addresses and the saved matching has the object form',
+          box and box['column'] == 'pleiades_id' and not box['checked'] and pattern in box['label'] and box['select'] == 'note' and pattern in box['warnings']
+          and len(doc0.get('spatialEntities', [])) == 6 and pleiades(doc0) == []
+          and ticked is True and (st.get('columns') or {}).get('patterns') == {'pleiades_id': pattern} and (st.get('columns') or {}).get('mapping', {}).get('pleiades_id') == 'address'
+          and saved.get('pleiades_id') == {'field': 'address', 'pattern': pattern} and saved.get('name') == 'name'
+          and 'https://pleiades.stoa.org/places/579885' in pleiades(doc1), {'box': box, 'off': abouts(doc0), 'on': abouts(doc1), 'saved': saved, 'state': st.get('columns')})
+
+
 def krisis_place(iri, label, lon, lat, *also):
     return {'@id': iri, 'label': label, 'attestations': [{'names': [{'toponym': n} for n in (label, *also)],
             'geometries': [{'geojson': {'type': 'Point', 'coordinates': [lon, lat]}}], 'sources': [{'title': 'A survey'}]}]}
@@ -1433,6 +1562,7 @@ def main():
                   and any(i['kind'] == 'annotation-region-shape' for i in s1['report']['items'])
                   and ok2 and not geoms2 and len(doc2.get('spatialEntities', [])) == len(doc1.get('spatialEntities', [])) > 0,
                   {'placed': s1.get('phase'), 'shown': said1, 'anchors': len(anchors), 'alone': s2.get('phase'), 'geoms alone': len(geoms2)})
+            reading_checks(page, tmp)
             krisis_case(page, tmp)
 
             # The storage warning (src/app.js, storageCheck): shown when the browser's quota is below
