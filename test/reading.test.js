@@ -237,3 +237,30 @@ test('every writer says truly what becomes of an attestation on its own in place
   assert.ok(!r.report.items.some((i) => i.kind === 'attestation-centric' && i.severity === 'loss'));
   assert.match(r.e.outs['loose.nt'].join(''), /<https:\/\/example.org\/a\/loose> <https:\/\/w3id.org\/plato#attests_about> <https:\/\/example.org\/p>/);
 });
+
+// ---- a run stopped part-way closes what it opened ------------------------------------------------
+// A DataError part-way (a gzip cut short) ends the run with no outputs; the writer's output must still
+// be closed, or a host cannot remove it (in the browser an open OPFS access handle keeps the file).
+test('a conversion stopped part-way by a gzip cut short closes its output and records none', async () => {
+  const X = 'https://example.org/';
+  const rows = [{ profile: 'place-centric', gazetteer: { title: 't' } }];
+  for (let i = 0; i < 3000; i++) rows.push({ '@id': `${X}place/p${i}`, label: 'p' + i, attestations: [{ sources: [{ '@id': X + 'source/s', title: 'S' }], names: [{ toponym: 'p' + i }] }] });
+  const gz = gzipSync(strToU8(rows.map((o) => JSON.stringify(o)).join('\n') + '\n'));
+  const convert = async (bytes) => {
+    const e = env(); const base = e.output; let opened = 0, closed = 0;
+    e.output = async (...a) => { const o = await base(...a); opened++; const c = o.close; o.close = async () => { closed++; return c(); }; return o; };
+    const { run } = await import('../src/engine/pipeline.js');
+    const r = await run({ input: await detect([chunked(bytes, 'places.jsonl.gz')]), action: 'convert', target: 'plato-jsonl' }, e);
+    return { r, opened, closed };
+  };
+  // Control: the whole file opens one output, closes it, and records it.
+  const whole = await convert(gz);
+  assert.ok(!whole.r.incomplete);
+  assert.deepEqual([whole.opened, whole.closed, whole.r.outputs.length], [1, 1, 1]);
+  const cut = await convert(gz.slice(0, Math.floor(gz.length / 2)));
+  assert.equal(cut.r.incomplete, true, JSON.stringify(cut.r.report.items));
+  assert.ok(cut.r.report.items.some((i) => i.kind === 'unreadable'));
+  assert.equal(cut.opened, 1, 'the output was opened before the reader stopped');
+  assert.equal(cut.closed, 1, 'and is closed although the run stopped');
+  assert.deepEqual(cut.r.outputs, []);
+});

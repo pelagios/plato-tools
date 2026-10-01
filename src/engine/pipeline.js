@@ -312,8 +312,19 @@ class TextSink {
  */
 export async function run(job, env) {
   const rep = new Report();
-  try { return await runChecked(job, env, rep); }
+  // Every output the run opens and has not closed. A run that stops part-way closes them, recording
+  // none as an output, so that a host can remove them: in the browser an output left open keeps its
+  // file's access handle, and the half-written file cannot be removed.
+  const open = new Set();
+  const output = async (...a) => {
+    const o = await env.output(...a), close = o.close;
+    open.add(o);
+    o.close = async (...b) => { open.delete(o); return close.apply(o, b); };
+    return o;
+  };
+  try { return await runChecked(job, { ...env, output }, rep); }
   catch (e) {
+    for (const o of open) { try { await o.close(); } catch { /* closed as far as it can be */ } }
     if (!(e instanceof DataError)) throw e;
     rep.error('unreadable', 'The file could not be read to the end, so only the part before the problem was checked', e.message);
     return { report: rep.toJSON(), outputs: [], incomplete: true };

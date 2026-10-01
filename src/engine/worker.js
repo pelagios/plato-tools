@@ -92,6 +92,8 @@ self.onmessage = async ({ data }) => {
       const { env, tidy } = await runEnv();
       let result;
       try { result = await run({ input, action: data.action, target: data.target, options: data.options || {} }, env); } finally { tidy(); }
+      // Stopped part-way: what it had begun writing (closed by run()) is not kept.
+      if (result.incomplete) await outputsDir(true);
       postMessage({ type: 'done', ...result });
     } else if (data.cmd === 'compare') {
       // The version check: two inputs, the earlier version and the later one (src/engine/compare.js).
