@@ -271,7 +271,8 @@ self.onmessage = async ({ data }) => {
       // Krisis: gazetteer lookup. The places of the dataset, with the links it states, for a lookup the
       // page runs on its own thread (src/engine/krisis/lookup.js), so that the token never comes here.
       const subjects = await detect(data.subjects);
-      if (!subjects.format) { postMessage({ type: 'places', subjects: null, places: null, reason: subjects.reason }); return; }
+      // Not recognised, or recognised and refused with its reason (a IIIF Georeference Annotation): readable(), as for every other command.
+      if (!readable(subjects)) { postMessage({ type: 'places', subjects: null, places: null, reason: subjects.reason }); return; }
       const { env, tidy } = await runEnv();
       let result;
       try { result = await gather({ subjects, options: data.options || {} }, env); } finally { tidy(); }

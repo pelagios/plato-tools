@@ -329,7 +329,8 @@ export async function match({ subjects, others, options = {} }, env) {
 // ---- Krisis: gazetteer lookup -------------------------------------------------------------------------
 /**
  * The subject places alone, for a gazetteer lookup (lookup.js) without another dataset: read as
- * match() reads them. options: base (spreadsheet tables). Returns { report, subjects, places,
+ * match() reads them. options: base (spreadsheet tables), columns (the mapping of a table of places'
+ * columns, as match() takes it). Returns { report, subjects, places,
  * incomplete? }: `subjects` the dataset as a work file records it ({ title, uri?, files }), `places`
  * [{ iri, label, names, point, ccodes?, types?, identities: { linked: [IRI], denied: [IRI] } }] in the
  * dataset's order, `identities` what the dataset currently says of the place (identities.js).
@@ -338,6 +339,7 @@ export async function gather({ subjects, options = {} }, env) {
   const rep = new Report();
   const t0 = Date.now();
   const progress = env.progress || (() => {});
+  if (options.columns !== undefined && options.columns !== null && !isColumns(options.columns)) throw new DataError(KRISIS_TEXT.columnsNotAMapping);
   const ids = createIdentityCollector();
   const tap = (ev) => { if (ev.type === 'record' && ev.value) ids.add(ev.value); else if (ev.type === 'idr' && ev.value) ids.addRelation(ev.value.subject, ev.value.object); };
   const { side, failed } = await readSide(subjects, 'subjects', options, env, rep, progress, tap);
