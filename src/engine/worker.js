@@ -18,25 +18,66 @@ import { load as choraLoad } from './chora/store.js';
 import { save as choraSave } from './chora/save.js';
 
 let resources = null, pool = null, runs = 0, poolName = null;
+// A take-up of the main page's pool is under way (unpauseVfs): it is not to be let go meanwhile.
+let takingUp = false;
+const busyError = (message) => Object.assign(new Error(message), { kind: 'pool-busy' });
+/**
+ * Let go of the main page's pool if it is left half-taken; true if it holds nothing, or is whole.
+ *
+ * A take-up refused part-way leaves the pool neither paused nor usable: sqlite-wasm asks for every
+ * file's access handle at once, gives up at the first refused, and keeps those granted after that,
+ * so the pool holds some files (keeping other tabs out) with its VFS unregistered, and does not try
+ * again (it is not paused), so that every database opened after says "no such vfs" for the page's
+ * life. pauseVfs alone cannot mend that: it unregisters the VFS first, which throws, and lets
+ * nothing go. So the VFS is registered again, from where it was installed, and paused, which lets
+ * the stray handles go (probed with two tabs of headless Chromium, another holding two of the
+ * pool's four files, 1 October 2026). Where that fails, the pool is marked half-taken, and no run
+ * is begun on it until a later mend succeeds: a run on some of its files would not be sound.
+ */
+function letGo() {
+  const { capi } = pool.sqlite3, { vfs } = pool;
+  const registered = !!capi.sqlite3_vfs_find(vfs.vfsName);
+  if (!pool.half && (vfs.isPaused() || registered)) return true;
+  try {
+    if (!registered) capi.sqlite3_vfs_register(pool.cVfs, 0);
+    vfs.pauseVfs();
+    pool.half = false;
+    return true;
+  } catch (e) {
+    pool.half = true;
+    console.warn('PLATO tools: the working files, half taken up, could not be let go', e);
+    return false;
+  }
+}
+/**
+ * After a refused take-up, let go of what it was granted, at once and again later: its requests for
+ * the other files are still in flight when the refusal comes, and a grant arriving after the first
+ * mend would be held until the next run, keeping other tabs out meanwhile. Two tabs refused at once
+ * would then each be kept out by the other's strays, every time either tried again. The grants came
+ * within 200 ms in the probe; the mends at 0.1, 1 and 5 s cover that with room, and one arriving
+ * later still is let go at the next run. None is made while a take-up is under way, which it would
+ * cut off.
+ */
+function letGoNowAndLater() {
+  letGo();
+  for (const ms of [100, 1000, 5000]) setTimeout(() => { if (!takingUp) letGo(); }, ms);
+}
 async function sqlitePool() {
   if (pool) {
     // The main page's pool is let go between runs (tidy, in runEnv), and taken up again here. Another
     // tab of the main page may have taken it meanwhile and be running: that is said as for a pool in
-    // use at install, and nothing is changed, so the next run may try again.
-    // A take-up refused part-way leaves the pool neither paused nor usable: sqlite-wasm asks for every
-    // file's access handle at once, gives up at the first refused, and keeps those granted after that,
-    // so the pool holds some files (keeping other tabs out) with its VFS unregistered, and does not
-    // try again (it is not paused), so that every database opened after says "no such vfs" for the
-    // page's life. pauseVfs alone cannot mend that: it unregisters the VFS first, which throws, and
-    // lets nothing go. So the VFS is registered again, from where it was installed, and paused, which
-    // lets the stray handles go, and the take-up is tried again in full (probed with two tabs of
-    // headless Chromium, another holding two of the pool's four files, 1 October 2026).
-    const { capi } = pool.sqlite3;
-    if (!poolName && !pool.vfs.isPaused() && !capi.sqlite3_vfs_find(pool.vfs.vfsName)) {
-      try { capi.sqlite3_vfs_register(pool.cVfs, 0); pool.vfs.pauseVfs(); } catch { /* tried again at the next run */ }
-    }
+    // use at install, the pool is let go of whatever it was granted, and the next run may try again.
+    // No second command reaches the pool while this one awaits: the page sends none while it is busy
+    // (src/app.js, start). Chora's pool is never let go (runEnv), so never half taken.
+    if (!poolName && !letGo()) throw busyError('The working files are half taken up and could not be let go.');
     if (pool.vfs.isPaused()) {
-      try { await pool.vfs.unpauseVfs(); } catch (e) { throw poolBusy(e) ? Object.assign(new Error(e.message), { kind: 'pool-busy' }) : e; }
+      takingUp = true;
+      try { await pool.vfs.unpauseVfs(); }
+      catch (e) {
+        takingUp = false;
+        if (!poolName) letGoNowAndLater();
+        throw poolBusy(e) ? busyError(e.message) : e;
+      } finally { takingUp = false; }
     }
     return pool;
   }
@@ -47,8 +88,8 @@ async function sqlitePool() {
   const own = poolName ? { name: `opfs-sahpool-${poolName}` } : {};
   let vfs;
   try { vfs = await sqlite3.installOpfsSAHPoolVfs({ clearOnInit: true, initialCapacity: 8, forceReinitIfPreviouslyFailed: true, ...own }); }
-  catch (e) { throw poolBusy(e) ? Object.assign(new Error(e.message), { kind: 'pool-busy' }) : e; }
-  // Where the VFS lives, kept for registering it again (above): sqlite-wasm keeps its own to itself.
+  catch (e) { throw poolBusy(e) ? busyError(e.message) : e; }
+  // Where the VFS lives, kept for registering it again (letGo): sqlite-wasm keeps its own to itself.
   pool = { sqlite3, vfs, cVfs: sqlite3.capi.sqlite3_vfs_find(vfs.vfsName) };
   return pool;
 }

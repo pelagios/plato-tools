@@ -99,7 +99,7 @@ function start(action, earlier) {
   $('progress').hidden = false; $('result').hidden = true;
   buttons(true);
   $('phase').textContent = 'Starting…';
-  Object.assign(state, { phase: 'running', action, target, report: null, outputs: null, error: null });
+  Object.assign(state, { phase: 'running', action, target, report: null, outputs: null, error: null, said: null });
   const base = $('base').value.trim() || undefined;
   // Krisis: a review on the page is put away (and its keys with it) while anything but its own finishing runs.
   if (action !== 'apply') { $('review').hidden = true; lockColumns(); }

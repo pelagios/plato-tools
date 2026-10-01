@@ -896,6 +896,73 @@ def main():
             check('the same run in the second tab alone, before and after, says nothing of another tab',
                   busy.get('alone') == 'done' and busy.get('after') == 'done'
                   and busy.get('alone said', '') and POOL_BUSY not in busy.get('alone said', '') + busy.get('after said', 'x'), busy)
+
+            # Half taken: a tab whose take-up of the working files is refused part-way (another holds
+            # some of them, not all) is granted the rest, and must let them go, or every later run in
+            # it fails ("no such vfs") and the files it holds keep other tabs out. Here a page holds two
+            # of the pool's files itself (createSyncAccessHandle, in a worker of its own), the main page
+            # is refused, and, those two let go, it runs again. Refused once more, it must let go at once,
+            # not at its next run, so that a second tab can run while it waits.
+            HOLDER = """async (n) => {
+              const src = `let held = []; onmessage = async ({ data }) => {
+                if (data === 'release') { for (const h of held) h.close(); held = []; postMessage(0); return; }
+                const o = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('.opfs-sahpool')).getDirectoryHandle('.opaque');
+                for await (const [, h] of o) if (h.kind === 'file' && held.length < data) held.push(await h.createSyncAccessHandle());
+                postMessage(held.length); };`;
+              window.holder = window.holder || new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+              return new Promise((res) => { holder.onmessage = (e) => res(e.data); holder.postMessage(n); });
+            }"""
+            def half_taken():
+                small = sorted((ex / 'customs').glob('*.csv'))
+                said = lambda p: p.evaluate("() => document.getElementById('summary')?.textContent || ''")
+                def choose(p):
+                    p.set_input_files('#picker', [])   # the same files again: emptied first, or the page would not look at them
+                    p.set_input_files('#picker', [str(f) for f in small])
+                    return wait_state(p, lambda s: s.get('phase') == 'detected', 60, 'detection').get('phase') == 'detected'
+                def ran(p):
+                    s = wait_state(p, lambda s: s.get('phase') in ('done', 'error'), 60, 'run')
+                    return {'phase': s.get('phase'), 'said': said(p), 'state said': s.get('said')}
+                holder, two = ctx.new_page(), ctx.new_page()
+                r = {}
+                try:
+                    for p in (holder, two):
+                        p.goto('data:text/html,<title>no tools here</title><input id=picker type=file multiple>' if PROVE else url)
+                        if wait_state(p, lambda s: s.get('phase') == 'ready', 30, 'ready').get('phase') != 'ready': return None
+                    # Both main pages have their pool, let go between runs, so the holder can take some of it.
+                    r['first alone'] = run_case(page, small, 'check').get('phase')
+                    r['second alone'] = run_case(two, small, 'check').get('phase')
+                    r['held'] = holder.evaluate(HOLDER, 2)
+                    if not choose(page): return {**r, 'first': 'not detected'}
+                    page.click('#check'); r['refused'] = ran(page)
+                    r['released'] = holder.evaluate(HOLDER, 'release')
+                    if not choose(page): return {**r, 'first': 'not detected'}
+                    page.click('#check'); r['again'] = ran(page)
+                    # Refused again, the tab must hold none of the files while it waits (not until its own next
+                    # run): another tab runs meanwhile, and then it runs too. Were it to keep what it was
+                    # granted, the other would be refused on those, and keep some itself, each tab then
+                    # keeping the other out each time either tried again.
+                    r['held again'] = holder.evaluate(HOLDER, 2)
+                    if not choose(page): return {**r, 'first': 'not detected'}
+                    page.click('#check'); r['refused again'] = ran(page)
+                    r['released again'] = holder.evaluate(HOLDER, 'release')
+                    for k, p in (('second meanwhile', two), ('first after', page)):
+                        if not choose(p): return {**r, k: 'not detected'}
+                        p.click('#check'); r[k] = ran(p)
+                    return r
+                except Exception as e:
+                    return {**r, 'error': str(e).split('\n')[0][:200]}
+                finally:
+                    holder.close(); two.close()
+            half = half_taken() or {}
+            refused = lambda x: (x or {}).get('phase') == 'error' and (x or {}).get('said') == POOL_BUSY
+            # A run after a refusal is not left marked as refused (window.__plato.said, reset at each run).
+            done = lambda x: (x or {}).get('phase') == 'done' and POOL_BUSY not in (x or {}).get('said', POOL_BUSY) and (x or {}).get('state said', 'x') is None
+            check('a tab refused part of the working files (another holds two) says so, and runs once they are let go',
+                  half.get('first alone') == 'done' and half.get('second alone') == 'done' and half.get('held') == 2
+                  and refused(half.get('refused')) and done(half.get('again')), half)
+            check('a tab refused part of the working files holds none of them while it waits: another tab runs meanwhile, and then it runs',
+                  half.get('held again') == 2 and refused(half.get('refused again'))
+                  and done(half.get('second meanwhile')) and done(half.get('first after')), half)
             ctx.close()
             chora_checks(pw, url, tmp)
     finally:
