@@ -326,3 +326,28 @@ test('13. a shape traced with assistance whose map is no longer cited (moved off
   // The control: cited, nothing said of it.
   assert.ok(!/not cited/.test(choraAssistedNote(a, null, { zoom: 12 })));
 });
+
+test('13. a shape proposed from one map\'s ink and cited from another (moved onto it) names the map it was proposed from; cited from its own map, it does not', async () => {
+  const drawn = { type: 'LineString', coordinates: [await at(grid, 100, 100), await at(grid, 200, 150), await at(grid, 300, 120)] };
+  const a = { mode: 'line', params: { colour: false }, scale: 1, epsilon: 0.75, gaps: 0, proposed: drawn, from: 'Rocque 1746', fromKey: 'rocque' };
+  // The note's words, given the map it was proposed from.
+  assert.match(choraAssistedNote(a, null, { proposedFrom: 'Rocque 1746' }), /: proposed from the ink of “Rocque 1746” by following a line/);
+  assert.match(choraAssistedNote(a, null, { proposedFrom: '' }), /: proposed from the ink of another map by following a line/);
+  assert.match(choraAssistedNote(a, null), /: proposed from the map's ink by following a line/);
+  // As saved: cited from another map (key 'grid'), the source named; from its own, the map's ink (the control).
+  const elsewhere = await trace.traceFor(grid, drawn, { key: 'grid', title: 'Grid' });
+  const there = trace.tracedParts({ ...elsewhere, assisted: a }, { geometry: drawn }).notes;
+  assert.ok(there.includes('proposed from the ink of “Rocque 1746” by following a line'), there);
+  const own = await trace.traceFor(grid, drawn, { key: 'rocque', title: 'Rocque 1746' });
+  const here = trace.tracedParts({ ...own, assisted: a }, { geometry: drawn }).notes;
+  assert.ok(here.includes('proposed from the map\'s ink by following a line') && !here.includes('Rocque'), here);
+  // A shape accepted before its source was recorded (no fromKey) is not said to be from another map.
+  const old = trace.tracedParts({ ...elsewhere, assisted: { ...a, fromKey: undefined } }, { geometry: drawn }).notes;
+  assert.ok(old.includes('proposed from the map\'s ink'), old);
+  // Uncited after being cited from another map: the dropped citation is that map's, the ink Rocque's.
+  const u = trace.uncitedParts({ ...a, cited: 'Grid', citedKey: 'grid' }, { geometry: drawn }).notes;
+  assert.ok(u.includes('proposed from the ink of “Rocque 1746”') && u.includes('Its citation of the map it was traced from (“Grid”) was dropped'), u);
+  // Uncited from its own map (the control): as before, the map's ink, its own title the dropped citation.
+  const u2 = trace.uncitedParts({ ...a, cited: 'Rocque 1746', citedKey: 'rocque' }, { geometry: drawn }).notes;
+  assert.ok(u2.includes('proposed from the map\'s ink') && u2.includes('(“Rocque 1746”) was dropped'), u2);
+});

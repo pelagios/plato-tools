@@ -3602,16 +3602,61 @@ def ink_checks(page, base, tmp, h):
         click_image(a_id, (520, 210))
         until(page, 'n => window.__chora.ink.proposals > n && window.__chora.ink.phase === "proposed"', 60, n)
         cached = page.evaluate('() => window.__chora_ink.cachedTiles'); let_go = cstate(page)['ink'].get('letGo') or 0
+        # The worker's own tiles, asked of the worker itself (a 'count' message): some, before (the presence).
+        in_worker = page.evaluate('() => window.__chora_ink.workerTiles()')
         drawn = soon(page, PROPOSAL_DRAWN, 10)
         panel_set([IA], 'undecided')
         emptied = soon(page, 'n => window.__chora_ink.cachedTiles === 0 && (window.__chora.ink.letGo || 0) > n', 10, let_go)
         s = cstate(page); after = page.evaluate('() => window.__chora_ink.cachedTiles')
+        # The forget is a message to the worker: asked after it (messages are taken in order), it holds none.
+        in_worker_after = page.evaluate('() => window.__chora_ink.workerTiles()')
         gone = soon(page, '() => window.__chora_map.queryRenderedFeatures({ layers: ["chora-ink-proposal"] }).length === 0', 10)
         buttons = page.evaluate(TRACE_TIP)
         panel_set([IA], 'allowed')                               # for the checks after this one
-        return (cached > 0 and drawn and emptied and after == 0 and gone and s['ink']['phase'] == 'idle' and s.get('traceReady') is False and all(b[0] == 'true' for b in buttons)), {
-            'tiles kept before': cached, 'after': after, 'let go': s['ink'].get('letGo'), 'ink': s['ink'].get('phase'), 'proposal gone': gone, 'buttons': buttons}
-    attempt('Chora ink: a map\'s server withdrawn in the panel lets go at once of every tile read from it for tracing (there were some), and of the proposal made from them; the trace tools are no longer offered', withdrawn_lets_go)
+        return (cached > 0 and in_worker > 0 and drawn and emptied and after == 0 and in_worker_after == 0 and gone and s['ink']['phase'] == 'idle' and s.get('traceReady') is False and all(b[0] == 'true' for b in buttons)), {
+            'tiles kept before': cached, 'after': after, 'worker tiles before': in_worker, 'worker tiles after': in_worker_after, 'let go': s['ink'].get('letGo'), 'ink': s['ink'].get('phase'), 'proposal gone': gone, 'buttons': buttons}
+    attempt('Chora ink: a map\'s server withdrawn in the panel lets go at once of every tile read from it for tracing (there were some, on the page and in the worker), here and in the worker, and of the proposal made from them; the trace tools are no longer offered', withdrawn_lets_go)
+
+    def keys_are_the_controls():
+        # With a proposal live, Enter on a focused control is the control's (Save saves; nothing accepted), and
+        # Esc in the permissions dialog closes the dialog (the proposal kept). The controls: Enter with nothing
+        # focused accepts, and Esc with nothing focused lets go, so the keys do reach the proposal.
+        f = place_file('ink-keys.json'); chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
+        page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
+        a = ink_annotation('/iiif/ink', 'e2')
+        if not any(o['annotationId'] == a['id'] and o['firstTile'] for o in cstate(page)['overlays']) and not show(a): raise RuntimeError('the map did not draw')
+        only_map(a['id'])
+        blur = '() => document.activeElement && document.activeElement.blur()'
+        def propose():
+            n = cstate(page)['ink']['proposals']
+            if page.get_attribute('#draw-tools button[data-trace="area"]', 'aria-pressed') != 'true': page.click('#draw-tools button[data-trace="area"]')
+            click_image(a['id'], (520, 210))
+            until(page, 'n => window.__chora.ink.proposals > n && window.__chora.ink.phase === "proposed"', 60, n)
+        # Enter with nothing focused accepts (the positive control; it also makes a drawing, so Save can be used).
+        propose()
+        acc0 = cstate(page)['ink']['accepted']; page.evaluate(blur); page.keyboard.press('Enter')
+        accepted = soon(page, 'n => window.__chora.ink.accepted === n + 1', 10, acc0)
+        # Enter on Save, a proposal live: Save saves, and the proposal is not accepted.
+        propose()
+        acc1 = cstate(page)['ink']['accepted']
+        page.focus('#save'); page.keyboard.press('Enter')
+        saved = soon(page, '() => !!window.__chora.lastSave || window.__chora.phase === "saving"', 60)
+        page.wait_for_timeout(300)
+        s1 = cstate(page)
+        # Counted by the ink itself (a save may change the drawings pending, so they are not counted here).
+        not_accepted = s1['ink']['accepted'] == acc1 and s1['ink']['phase'] == 'proposed'
+        # Esc in the permissions dialog closes it, and the proposal is kept.
+        page.click('#permissions-button'); until(page, '() => document.getElementById("permissions-panel")?.open', 10)
+        page.keyboard.press('Escape')
+        closed = soon(page, '() => !document.getElementById("permissions-panel").open', 5)
+        kept = cstate(page)['ink']['phase'] == 'proposed' and soon(page, PROPOSAL_DRAWN, 5)
+        # Esc with nothing focused lets it go (the control).
+        page.evaluate(blur); page.keyboard.press('Escape')
+        let_go = soon(page, '() => window.__chora.ink.phase === "idle"', 5)
+        return (accepted and saved and not_accepted and closed and kept and let_go), {
+            'enter accepts (control)': accepted, 'save ran': saved, 'not accepted on Save': not_accepted, 'ink after Save': s1['ink'].get('phase'),
+            'dialog closed by Esc': closed, 'proposal kept': kept, 'esc lets go (control)': let_go}
+    attempt('Chora ink: with a proposal live, Enter on Save saves and accepts nothing, and Esc in the permissions dialog closes it and keeps the proposal; with nothing focused, Enter accepts and Esc lets go', keys_are_the_controls)
 
     def trace_area_hole_save():
         f = place_file('ink-hole.json'); chora_boot(page, base, [f])
@@ -3697,6 +3742,68 @@ def ink_checks(page, base, tmp, h):
         return (offered and len(tip) == 1 and 'hold Alt not to' in tip[0] and snapped <= max(0.5, 0.5 * per) and free > 2 * per), {
             'tooltip': tip, 'snapped px': round(snapped, 3), 'unsnapped (Alt) px': round(free, 3), 'image px per screen px': round(per, 3), 'snap points': cstate(page)['ink']['snapPoints']}
     attempt('Chora ink: "Snap to ink" says what it does in its tooltip, and puts a vertex drawn by hand 5 px from the road onto its centre (to half a pixel of the image read); with Alt held it is not snapped', snap_to_ink)
+
+    def snap_withdrawn_while_building():
+        # A permission withdrawn while a site's FIRST snapping is being built: the build is let go, and nothing
+        # read for it is kept (no snapping, no tile on the page or in the worker). The tiles it asks for are held
+        # at the network until the permission is withdrawn: that they were asked for is the presence.
+        f = place_file('ink-snap-wd.json'); chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
+        a = ink_annotation('/iiif/inkpng', 'e1')
+        if not any(o['annotationId'] == a['id'] for o in cstate(page)['overlays']) and not show(a): raise RuntimeError('the map did not draw')
+        until(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.firstTile)', 40, a['id'])
+        only_map(a['id'])
+        held = []
+        # The map's own tiles are drawn by MapLibre (already drawn, settled): the snap's are the requests now.
+        pattern = A + '/iiif/inkpng/**'
+        page.route(pattern, lambda r: held.append(r))
+        try:
+            page.click('#draw-tools button[data-mode="linestring"]')
+            builds = (cstate(page).get('ink') or {}).get('snapBuilds', 0)
+            page.check('#snap-ink')
+            for _ in range(80):
+                if held: break
+                page.wait_for_timeout(100)
+            asked = len(held)
+            panel_set([IA], 'undecided')
+            for r in held:
+                try: r.continue_()
+                except Exception: pass
+        finally:
+            page.unroute(pattern)
+        page.wait_for_timeout(1500)
+        s = cstate(page)['ink']
+        tiles_page = page.evaluate('() => window.__chora_ink.cachedTiles')
+        tiles_worker = page.evaluate('() => window.__chora_ink.workerTiles()')
+        entry = page.evaluate('() => !!window.__chora_ink.snapEntry')
+        snapped = page.evaluate('() => { const c = window.__chora_map.getCanvas(); return window.__chora_ink.snapAt(c.clientWidth / 2, c.clientHeight / 2) || null; }')
+        panel_set([IA], 'allowed')                               # for the checks after this one
+        return (asked > 0 and s.get('snapBuilds', 0) == builds and s.get('snapPoints') == 0 and not entry and snapped is None
+                and tiles_page == 0 and tiles_worker == 0 and (s.get('letGo') or 0) > 0), {
+            'tiles asked for while building': asked, 'builds': [builds, s.get('snapBuilds')], 'snap points': s.get('snapPoints'), 'entry kept': entry,
+            'snapped at the centre': snapped, 'page tiles': tiles_page, 'worker tiles': tiles_worker, 'let go': s.get('letGo'), 'snap error': s.get('snapError')}
+    attempt('Chora ink: a map\'s server withdrawn while its first snapping is being built lets the build go: no snapping is made, and no tile read for it is kept on the page or in the worker', snap_withdrawn_while_building)
+
+    def snap_not_rebuilt_while_hidden():
+        # Snapping is built again as the map moves only while a line or an area is drawn by hand. The control:
+        # moved while drawing a line, it is built again.
+        f = place_file('ink-snap-hidden.json'); chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
+        a = ink_annotation('/iiif/inkpng', 'e1')
+        if not any(o['annotationId'] == a['id'] for o in cstate(page)['overlays']) and not show(a): raise RuntimeError('the map did not draw')
+        until(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.firstTile)', 40, a['id'])
+        only_map(a['id'])
+        page.click('#draw-tools button[data-mode="linestring"]'); page.check('#snap-ink')
+        until(page, '() => window.__chora.ink && window.__chora.ink.snapBuilds >= 1 && window.__chora.ink.snapPoints > 0', 30)
+        pan = '([dx]) => window.__chora_map.panBy([dx, 0], { duration: 0 })'
+        n0 = cstate(page)['ink']['snapBuilds']
+        page.evaluate(pan, [40]); page.evaluate(SETTLE)
+        rebuilt = soon(page, 'n => window.__chora.ink.snapBuilds > n', 15, n0)
+        page.click('#draw-tools button[data-mode="point"]')
+        hidden = page.is_hidden('#snap-ink-label')
+        n1 = cstate(page)['ink']['snapBuilds']
+        page.evaluate(pan, [-40]); page.evaluate(SETTLE); page.wait_for_timeout(1000)
+        quiet = cstate(page)['ink']['snapBuilds'] == n1
+        return (rebuilt and hidden and quiet), {'rebuilt while drawing a line (control)': rebuilt, 'offered while drawing a point': not hidden, 'builds while hidden': [n1, cstate(page)['ink']['snapBuilds']]}
+    attempt('Chora ink: snapping is built again as the map moves while a line is drawn by hand, and not while it is not offered (drawing a point)', snap_not_rebuilt_while_hidden)
 
     def cors_refused():
         f = place_file('ink-cors.json'); chora_boot(page, base, [f]); chora_pick(page, 'cambridge')

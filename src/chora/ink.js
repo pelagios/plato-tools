@@ -17,6 +17,8 @@ import { createTileFetcher, TileError } from './inkfetch.js';
 import { binPoints, nearestInk, SNAP_RADIUS } from '../engine/chora/ink/snap.js';
 import { DEFAULTS } from '../engine/chora/ink/params.js';
 import { runTrace, runSnap } from '../engine/chora/ink/job.js';
+import { createJobs } from './inkjobs.js';
+import { keyAction } from './inkkeys.js';
 import * as georef from '../engine/georef/index.js';
 
 const ORANGE = '#e8590c';
@@ -36,36 +38,17 @@ export function createInk({ mapApi, state, overlayAt, onAccept, panel }) {
   const ink = (state.ink = { phase: 'idle', mode: null, proposals: 0, accepted: 0, lastMs: null, lastError: null, snapPoints: 0, snapBuilds: 0, timings: [], steps: [] });
   // A site's tiles are kept only while its permission is allowed (inkfetch.js).
   const fetcher = createTileFetcher({ allowed: (o) => permissions.allowed('iiif', o) });
-  let worker = null;
-  const gens = { trace: 0, snap: 0 };
-  const pending = new Map();   // `${channel}:${gen}` -> { resolve, reject, entry }
-  function startWorker() {
-    if (worker) return worker;
-    // From a blob: that imports it, so that it is under the page's policy (as MapLibre's worker is).
-    worker = new Worker(permissions.blobWorkerUrl(inkWorkerUrl), { type: 'module' });
-    worker.onmessage = async ({ data: m }) => {
-      const key = `${m.channel}:${m.gen}`, job = pending.get(key);
-      if (m.type === 'need') {
-        if (!job) return;
-        try {
-          const site = siteOf(job.entry);
-          sitesRead.add(site);
-          const got = await fetcher.fetch(m.urls, { origin: site, isCurrent: () => gens[m.channel] === m.gen });
-          worker.postMessage({ type: 'tiles', channel: m.channel, gen: m.gen, tiles: got }, got.map((t) => t.bitmap));
-        } catch (e) {
-          const t = e instanceof TileError ? e : new TileError(e.message, 'other');
-          worker.postMessage({ type: 'tile-error', channel: m.channel, gen: m.gen, message: t.message, kind: t.kind });
-        }
-        return;
-      }
-      if (!job) return;
-      pending.delete(key);
-      if (m.type === 'result' || m.timing) ink.steps.push({ ...(m.type === 'result' ? m.result.timing : m.timing), kind: m.type === 'result' ? 'ok' : m.kind });
-      if (m.type === 'result') job.resolve(m.result); else job.reject(Object.assign(new Error(m.message), { kind: m.kind, reason: m.reason }));
-    };
-    worker.onerror = (e) => { for (const j of pending.values()) j.reject(new Error(`The tracing stopped (${e.message || 'an error in its worker'}).`)); pending.clear(); };
-    return worker;
-  }
+  // The worker's jobs (inkjobs.js): a tile it needs is fetched here, under the map's site's permission.
+  const jobs = createJobs({
+    makeWorker: () => new Worker(permissions.blobWorkerUrl(inkWorkerUrl), { type: 'module' }),   // from a blob: that imports it, so that it is under the page's policy (as MapLibre's worker is)
+    onNeed: async (m, entry, isCurrent) => {
+      const site = siteOf(entry);
+      sitesRead.add(site);
+      try { return await fetcher.fetch(m.urls, { origin: site, isCurrent }); } catch (e) { throw e instanceof TileError ? e : new TileError(e.message, 'other'); }
+    },
+    onStep: (timing, kind) => ink.steps.push({ ...timing, kind }),
+  });
+  const newGen = jobs.newGen;
   // The site of a map's image server: its `iiif` permission's subject (admission's), else its image's id.
   const siteOf = (entry) => entry.subject?.[1] ?? permissions.originOf(entry.info?.id ?? entry.info?.['@id'] ?? entry.g.imageServiceId);
   const sitesRead = new Set();   // the sites tiles were read from in this load
@@ -73,26 +56,18 @@ export function createInk({ mapApi, state, overlayAt, onAccept, panel }) {
   function letGoOf(site) {
     sitesRead.delete(site);
     fetcher.forget(site);
-    worker?.postMessage({ type: 'forget', origin: site });
+    jobs.forget(site);
     if (lastWindow && lastWindow.site === site) lastWindow = null;
     if (proposal && siteOf(proposal.entry) === site) discard();
-    if (snapEntry && siteOf(snapEntry) === site) { newGen('snap'); snapWorld = null; snapIndex = null; snapEntry = null; ink.snapPoints = 0; }
+    // The snapping is let go whichever map it is from, and a build under way with it (its map may be the
+    // site's, and is not known to be until the build ends): it is built again on the next move of the map.
+    ink.snapLetGo = snapBuilding ? siteOf(snapBuilding) : snapEntry ? siteOf(snapEntry) : null;
+    newGen('snap'); snapWorld = null; snapIndex = null; snapEntry = null; snapBuilding = null; ink.snapPoints = 0;
     ink.letGo = (ink.letGo || 0) + 1;
   }
   permissions.onChange(() => { for (const site of [...sitesRead]) if (!permissions.allowed('iiif', site)) letGoOf(site); });
-  /** A new job on a channel: every older one is let go (a new click, or Esc). Its generation. */
-  function newGen(channel) {
-    const gen = ++gens[channel];
-    worker?.postMessage({ type: 'cancel', channel, gen });
-    for (const [k, j] of pending) if (k.startsWith(`${channel}:`)) { pending.delete(k); j.reject(Object.assign(new Error('Cancelled.'), { kind: 'cancelled' })); }
-    return gen;
-  }
   /** One window's pixel work, in the worker (step.js), for job.js's plan. */
-  const stepper = (channel, gen, entry) => (args) => {
-    startWorker();
-    if (gens[channel] !== gen) return Promise.reject(Object.assign(new Error('Cancelled.'), { kind: 'cancelled' }));
-    return new Promise((resolve, reject) => { pending.set(`${channel}:${gen}`, { resolve, reject, entry }); worker.postMessage({ type: channel, channel, gen, ...args }); });
-  };
+  const stepper = jobs.step;
 
   // ---- Where a click is on the map's image -------------------------------------------------------
   const pointOf = (lngLat) => ({ type: 'Point', coordinates: [lngLat.lng, lngLat.lat] });
@@ -159,7 +134,7 @@ export function createInk({ mapApi, state, overlayAt, onAccept, panel }) {
         const start = again ? p.results?.[k]?.frame || null : null;
         // A new click well inside the window last read (same map, same kind) begins from it: it is made ready.
         const near = !again && lastWindow?.key === p.entry.key && lastWindow.colour === (p.mode === 'area' || !!params[p.mode].colour) ? lastWindow.frame : null;
-        const r = await runTrace({ info: p.entry.info, seedImg: s.seedImg, pxPerScreen: s.pxPerScreen, mode: p.mode, params: { ...params[p.mode] }, step, isCurrent: () => gens.trace === gen, start, near });
+        const r = await runTrace({ info: p.entry.info, seedImg: s.seedImg, pxPerScreen: s.pxPerScreen, mode: p.mode, params: { ...params[p.mode] }, step, isCurrent: () => jobs.current('trace', gen), start, near });
         lastWindow = { key: p.entry.key, site: siteOf(p.entry), colour: p.mode === 'area' || !!params[p.mode].colour, frame: r.frame };
         results.push(r); traced++;
       }
@@ -195,6 +170,8 @@ export function createInk({ mapApi, state, overlayAt, onAccept, panel }) {
 
   async function click(lngLat, point, shift) {
     if (!mode) return;
+    // The map clicked has the keyboard (Enter then accepts: on the Trace button left focused, it would press it).
+    if (!map.getContainer().contains(document.activeElement)) try { map.getCanvas().focus({ preventScroll: true }); } catch {}
     const entry = await overlayAt(lngLat);
     if (!entry) { say('Click on a historical map shown on the map: the shape is proposed from its ink.', true); return; }
     let seedImg, per;
@@ -231,7 +208,7 @@ export function createInk({ mapApi, state, overlayAt, onAccept, panel }) {
     const assisted = {
       mode: p.mode, scale: last.scale, scales: p.results.map((r) => r.scale), epsilon: Math.max(...p.results.map((r) => r.epsilon)), gaps: p.results.reduce((n, r) => n + (r.gaps?.length || 0), 0),
       params: Object.fromEntries(Object.entries(params[p.mode]).filter(([k]) => ['tolerance', 'colour', 'bridge', 'band', 'jumps', 'detail', 'dropSmallHoles'].includes(k))),
-      seeds: p.seeds.map((s) => s.seedImg), window: [last.frame.w, last.frame.h], proposed: geometry, from: p.entry.title || null,
+      seeds: p.seeds.map((s) => s.seedImg), window: [last.frame.w, last.frame.h], proposed: geometry, from: p.entry.title || null, fromKey: p.entry.key ?? null,
       ...(p.mode === 'area' ? { holes: { dropped } } : {}),
     };
     // Not a drawing unless the page took it (a place must be chosen first): the proposal is kept, and why said.
@@ -285,18 +262,24 @@ export function createInk({ mapApi, state, overlayAt, onAccept, panel }) {
     if (e.target.dataset.ink === 'accept') accept();
     if (e.target.dataset.ink === 'discard') discard();
   });
+  // Enter accepts and Esc lets go only where the key is not another control's (inkkeys.js): Enter on Save
+  // saves, and Esc in the permissions dialog closes it.
+  const modalOpen = () => { try { return !!document.querySelector('dialog[open]:modal'); } catch { return !!document.querySelector('dialog[open]'); } };
   document.addEventListener('keydown', (e) => {
     if (!mode && !proposal) return;
-    const t = e.target;
-    if (t && (t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && !['range', 'checkbox', 'radio', 'button'].includes(t.type)) || t.isContentEditable)) return;
-    if (e.key === 'Enter' && proposal?.world) { e.preventDefault(); accept(); }
-    else if (e.key === 'Escape') { e.preventDefault(); discard(); }
+    const { action, prevent } = keyAction(e, { panel, mapContainer: map.getContainer(), mode, proposal: !!proposal, proposed: !!proposal?.world, dialogOpen: modalOpen() });
+    if (prevent) e.preventDefault();
+    if (action === 'accept') accept(); else if (action === 'discard') discard();
   });
 
   // ---- Snapping to the ink, for drawing by hand --------------------------------------------------
   // Two sets of points: the ridges (a line's centre) and the edges (an area's edge). A ridge within reach
   // wins over a nearer edge (snap.js nearestInk): a vertex drawn near a line goes onto its middle, not onto its side.
   let snapOn = false, snapWorld = null, snapIndex = null, snapEntry = null, snapTimer = null;
+  let snapBuilding = null;   // the map a snapping is being built from, until it is (or is let go)
+  // Snapping is used while drawing a line or an area by hand (Terra Draw's modes that ask for it), and not
+  // while tracing: otherwise it is not built again as the map moves.
+  const snapWanted = () => snapOn && !mode && ['linestring', 'polygon'].includes(mapApi.draw?.getMode?.());
   function reproject() {
     if (!snapWorld) { snapIndex = null; return; }
     const t0 = performance.now();
@@ -316,17 +299,22 @@ export function createInk({ mapApi, state, overlayAt, onAccept, panel }) {
   addEventListener('blur', () => { alt = false; });
   async function buildSnap() {
     if (!snapOn) return;
+    // Its generation from the start: a newer build, or a permission withdrawn meanwhile (letGoOf), lets this one go.
+    const gen = newGen('snap');
+    const current = () => jobs.current('snap', gen);
     const c = map.getCanvas(), w = c.clientWidth, h = c.clientHeight;
     const entry = (await overlayAt(map.getCenter())) || (await overlayAt(map.unproject([w / 4, h / 4]))) || (await overlayAt(map.unproject([(3 * w) / 4, (3 * h) / 4])));
-    if (!entry) { snapWorld = null; snapIndex = null; ink.snapPoints = 0; return; }
+    if (!current()) return;
+    if (!entry) { snapWorld = null; snapIndex = null; snapEntry = null; ink.snapPoints = 0; return; }
+    snapBuilding = entry;
     try {
       const corners = await Promise.all([[0, 0], [w, 0], [w, h], [0, h]].map(([x, y]) => imagePx(entry.g, map.unproject([x, y])).catch(() => null)));
       const ok = corners.filter(Boolean);
-      if (!ok.length) return;
+      if (!ok.length || !current()) return;
       const box = [Math.min(...ok.map((p) => p[0])), Math.min(...ok.map((p) => p[1])), Math.max(...ok.map((p) => p[0])), Math.max(...ok.map((p) => p[1]))];
       const per = await pxPerScreen(entry.g, [w / 2, h / 2]);
-      const gen = newGen('snap');
-      const r = await runSnap({ info: entry.info, box, pxPerScreen: per, step: stepper('snap', gen, entry), isCurrent: () => gens.snap === gen });
+      if (!current()) return;
+      const r = await runSnap({ info: entry.info, box, pxPerScreen: per, step: stepper('snap', gen, entry), isCurrent: current });
       // Into the world exactly, through the georeference, each set as one MultiPoint.
       const world = async (pts) => {
         const coords = []; for (let k = 0; k < pts.length; k += 2) coords.push([pts[k], pts[k + 1]]);
@@ -335,18 +323,21 @@ export function createInk({ mapApi, state, overlayAt, onAccept, panel }) {
       const tw = performance.now();
       const [ridges, edges] = await Promise.all([world(r.ridges), world(r.edges)]);
       const worldMs = performance.now() - tw;
+      // Let go meanwhile (a permission withdrawn, a newer build): what was read is not kept.
+      if (!current()) return;
       snapEntry = entry;
       snapWorld = { ridges, edges };
       ink.snapPoints = (ridges.length + edges.length) / 2; ink.snapRidges = ridges.length / 2; ink.snapBuilds++;
       reproject();
       // The main thread's work for a build: into the world through the georeference, then onto the screen.
       ink.snapBuild = { points: ink.snapPoints, worldMs, reprojectMs: ink.snapReprojectMs, mainMs: worldMs + ink.snapReprojectMs, scale: r.frame?.s ?? null, window: r.frame ? [r.frame.w, r.frame.h] : null };
-    } catch (e) { if (e.kind !== 'cancelled') { ink.snapError = e.message; } }
+    } catch (e) { if (e.kind !== 'cancelled' && current()) { ink.snapError = e.message; } }
+    finally { if (current() && snapBuilding === entry) snapBuilding = null; }
   }
   map.on('moveend', () => {
-    if (!snapOn) return;
+    if (!snapWanted()) return;
     reproject();
-    clearTimeout(snapTimer); snapTimer = setTimeout(buildSnap, 250);
+    clearTimeout(snapTimer); snapTimer = setTimeout(() => { if (snapWanted()) buildSnap(); }, 250);
   });
   const snapHook = (event) => {
     if (!snapOn || !snapIndex || alt || event.heldKeys?.includes('Alt')) return undefined;
@@ -366,11 +357,13 @@ export function createInk({ mapApi, state, overlayAt, onAccept, panel }) {
     get proposal() { return proposal; },
     setSnap(on) {
       snapOn = !!on; ink.snap = snapOn;
-      if (snapOn) buildSnap(); else { snapWorld = null; snapIndex = null; }
+      if (snapOn) { reproject(); buildSnap(); } else { clearTimeout(snapTimer); newGen('snap'); snapWorld = null; snapIndex = null; snapEntry = null; snapBuilding = null; }
     },
     get snapEntry() { return snapEntry; },
     /** How many fetched tiles the page keeps now (for tests: none from a site once its permission is withdrawn). */
     get cachedTiles() { return fetcher.size; },
+    /** How many tiles the worker holds now (a promise; for tests: none from a site once its permission is withdrawn). */
+    workerTiles: () => jobs.workerTiles(),
     snapNow: buildSnap,
     /** Where a vertex at these container pixels would snap (for tests and the budget's timing). */
     snapAt: (x, y) => snapHook({ containerX: x, containerY: y, heldKeys: [] }),

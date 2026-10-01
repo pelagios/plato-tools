@@ -10,9 +10,10 @@
 //
 // Messages in: { type: 'trace' | 'snap', channel, gen, frame, tiles, seed, mode, params } a window's work; { type: 'cancel', channel, gen } let go
 // of every job of that channel older than gen (a new click, Esc); { type: 'tiles', channel, gen, tiles:
-// [{ url, bitmap }] } and { type: 'tile-error', channel, gen, message, kind } the page's answer to a need.
+// [{ url, bitmap }] } and { type: 'tile-error', channel, gen, message, kind } the page's answer to a need;
+// { type: 'forget', origin } let go of a site's tiles; { type: 'count', id } how many tiles are kept.
 // Messages out: { type: 'need', channel, gen, urls }, { type: 'result', channel, gen, result }, { type:
-// 'error', channel, gen, message, kind }. Each channel ('trace', 'snap') runs its latest job alone.
+// 'error', channel, gen, message, kind }, { type: 'count', id, tiles }. Each channel ('trace', 'snap') runs its latest job alone.
 import { traceStep, snapStep, createPrepCache } from '../engine/chora/ink/step.js';
 
 // Tiles kept beyond those a window needs now (at 2048², 16 MB, kept whatever this says).
@@ -96,5 +97,7 @@ self.onmessage = ({ data: m }) => {
     cache.clear();
     return;
   }
+  // How many tiles are kept (for tests: none from a site once its permission is withdrawn).
+  if (m.type === 'count') { postMessage({ type: 'count', id: m.id, tiles: tiles.size }); return; }
   if (m.type === 'tile-error') waiting.get(`${m.channel}:${m.gen}`)?.reject(Object.assign(new Error(m.message), { kind: m.kind }));
 };

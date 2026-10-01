@@ -317,9 +317,11 @@ export const choraLoadFailure = (input) => (input?.format === 'georef' ? CHORA_G
  * scales (each part's, a line carried on from several clicks), epsilon (image pixels), gaps (a line's,
  * jumped), holes: { dropped } (an area's holes left out when it was accepted: a drawing is an outline) };
  * `edits` countEdits' { moved, added, removed, proposed }; `version` the tools'; `uncited`, the title of
- * the map it was proposed from when it has since been moved off that map (so the map is not cited).
+ * the map it was proposed from when it has since been moved off that map (so the map is not cited);
+ * `proposedFrom`, the title of the map it was proposed from when that is not the map cited (or the one whose
+ * citation was dropped): it was moved onto another map and traced from that ('' when its title is not known).
  */
-export function choraAssistedNote(a, edits, { version, zoom, uncited = null } = {}) {
+export function choraAssistedNote(a, edits, { version, zoom, uncited = null, proposedFrom = null } = {}) {
   const p = a.params || {};
   const by = a.mode === 'area' ? 'filling an area' : 'following a line';
   const tol = a.mode === 'area' || p.colour ? `tolerance ${fmt(p.tolerance)}` : 'by its darkness';
@@ -336,7 +338,7 @@ export function choraAssistedNote(a, edits, { version, zoom, uncited = null } = 
     ? 'accepted as proposed'
     : `edited by hand: moved ${edits.moved}, added ${edits.added}, removed ${edits.removed}, of ${edits.proposed} proposed`;
   const off = uncited !== null ? ` Its citation of the map it was traced from${uncited ? ` (“${uncited}”)` : ''} was dropped: the drawing was moved off that map, or that map could not place it, or the basemap was chosen instead.` : '';
-  return `Traced with assistance in PLATO tools (Chora)${version ? ` ${version}` : ''}${Number.isFinite(zoom) ? ` at zoom ${Math.round(zoom)}` : ''}: proposed from the map's ink by ${by} (${tol}, ${at} of full resolution, ${eps}${gaps})${holes} then ${done}.${off}`;
+  return `Traced with assistance in PLATO tools (Chora)${version ? ` ${version}` : ''}${Number.isFinite(zoom) ? ` at zoom ${Math.round(zoom)}` : ''}: proposed from ${proposedFrom === null ? 'the map\'s ink' : proposedFrom ? `the ink of “${proposedFrom}”` : 'the ink of another map'} by ${by} (${tol}, ${at} of full resolution, ${eps}${gaps})${holes} then ${done}.${off}`;
 }
 const fmt = (x) => (Number.isFinite(x) ? String(Math.round(x * 100) / 100) : '?');
 /** What a Chora save reports of itself (src/engine/chora/save.js), by kind. */

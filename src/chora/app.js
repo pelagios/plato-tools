@@ -201,7 +201,7 @@ function pendingItem(d) {
     ${from}
     <label>What it marks <select data-field="role"><option value="">Not said</option>${opt(roles, d.role, (r) => (r === 'LabelAnchor' ? 'where the map writes its name' : ROLE_WORDS[r] || r))}</select></label>
     <label>How well known <select data-field="precision"><option value="">Not said</option>${opt(PRECISIONS, d.precision, (p) => p.replace('_', ' '))}</select></label>
-    ${d.trace?.assisted ? `<p class="muted" data-assisted>Traced with assistance from: ${esc(d.trace.title || 'a historical map')}</p>` : d.assistedUncited ? `<p class="muted" data-assisted>Proposed from the ink of: ${esc(d.assistedUncited.from || 'a historical map')} (not cited)</p>` : ''}
+    ${d.trace?.assisted ? `<p class="muted" data-assisted>Traced with assistance from: ${esc(d.trace.title || 'a historical map')}${d.trace.assisted.fromKey != null && d.trace.assisted.fromKey !== d.trace.key ? ` (proposed from the ink of: ${esc(d.trace.assisted.from || 'another map')})` : ''}</p>` : d.assistedUncited ? `<p class="muted" data-assisted>Proposed from the ink of: ${esc(d.assistedUncited.from || 'a historical map')} (not cited)</p>` : ''}
     ${d.traceNote ? `<p class="note" data-trace-note>${esc(d.traceNote)}</p>` : ''}
     <button type="button" data-remove>Remove</button></li>`;
 }
@@ -312,7 +312,8 @@ function dropTrace(d, note) {
   // A shape proposed from a map's ink is still that, cited from the map or not: what was proposed is kept
   // (its notes say it, and that the map is not cited), and is cited again if it is traced from the map again.
   const assisted = d.trace?.assisted || d.assistedPending || d.assistedUncited || null;
-  if (assisted) d.assistedUncited = { ...assisted, from: d.trace?.title ?? assisted.from ?? null };
+  // `from` is the map it was proposed from (kept as it is); `cited` the map whose citation is dropped.
+  if (assisted) d.assistedUncited = { ...assisted, from: assisted.from ?? d.trace?.title ?? null, cited: d.trace?.title ?? assisted.cited ?? null, citedKey: d.trace?.key ?? assisted.citedKey ?? null };
   delete d.assistedPending;
   d.trace = null; d.traceNote = joinNotes(d, note);
   if (d.role === 'LabelAnchor') d.role = '';
@@ -348,7 +349,7 @@ async function traceDraft(d, { only = null, reshaped = false } = {}) {
         const t = await tracing.traceFor(e.g, d.geojson, { key: e.key, title: e.title, partial: pick.chosen.partial, fetchedAt: e.fetchedAt, licence: e.attribution?.licence || null });
         if (traceTickets.get(d.id) !== ticket || !drafts.includes(d)) return;
         // A shape traced with assistance keeps what was proposed, traced again or not (its notes count the edits).
-        const back = d.assistedUncited ? (({ from, ...rest }) => rest)(d.assistedUncited) : null;
+        const back = d.assistedUncited ? (({ cited, citedKey, ...rest }) => rest)(d.assistedUncited) : null;
         const assisted = was?.assisted || d.assistedPending || back || null;
         d.trace = assisted ? { ...t, assisted } : t;
         delete d.assistedPending; delete d.assistedUncited;
@@ -402,6 +403,8 @@ $('draw-tools').onclick = (e) => {
   for (const x of $('draw-tools').querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b && b.dataset.mode !== 'static'));
   // Snapping to the ink is offered while drawing a line or an area by hand over a historical map.
   $('snap-ink-label').hidden = !['linestring', 'polygon'].includes(b.dataset.mode) || !traceReady();
+  // Snapping is not built again while it is not offered (ink.js): back to drawing with it on, it is built for this view.
+  if (!$('snap-ink-label').hidden && $('snap-ink').checked && inkTools) inkTools.setSnap(true);
 };
 
 // ---- Tracing with assistance (src/chora/ink.js, loaded when first wanted) ------------------------------

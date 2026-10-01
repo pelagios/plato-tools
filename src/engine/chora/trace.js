@@ -169,7 +169,7 @@ export function tracedParts(trace, { zoom, role, geometry, version } = {}) {
   // Traced with assistance (a shape proposed from the map's ink, then accepted): said so, with what was
   // done to it by hand, counted against the proposal (`geometry`, the drawing as saved).
   const how = trace.assisted
-    ? choraAssistedNote(trace.assisted, geometry ? countEdits(trace.assisted.proposed, geometry) : null, { version, zoom })
+    ? choraAssistedNote(trace.assisted, geometry ? countEdits(trace.assisted.proposed, geometry) : null, { version, zoom, proposedFrom: proposedElsewhere(trace.assisted, trace.key) })
     : choraTracingNote({ zoom });
   // georefNote's fixed template comes first, as Hermes writes it and PLATO's example has it; Chora's
   // own sentence is appended after, as the template's contract requires.
@@ -178,12 +178,23 @@ export function tracedParts(trace, { zoom, role, geometry, version } = {}) {
 }
 
 /**
- * The notes of a shape traced with assistance that has since been moved off the map it was proposed from
- * (`assisted.from`, that map's title): no citation (the map no longer holds it), and the notes saying how
- * it was proposed, its edits counted against `geometry`, and that the map is not cited. It is not passed off
- * as drawn by hand.
+ * The title of the map a shape was proposed from (`assisted.from`, keyed `assisted.fromKey`) when the map
+ * keyed `citedKey` is another (it was moved onto that map and traced from it), else null. '' when that
+ * title is not known. A shape whose source was not recorded (no fromKey) is not said to be from elsewhere.
+ */
+function proposedElsewhere(assisted, citedKey) {
+  return assisted.fromKey != null && citedKey != null && assisted.fromKey !== citedKey ? assisted.from || '' : null;
+}
+
+/**
+ * The notes of a shape traced with assistance that has since been moved off the map it was cited from
+ * (`assisted.cited`, keyed `citedKey`; before these were kept, `assisted.from`, the map it was proposed from):
+ * no citation (the map no longer holds it), and the notes saying how it was proposed (and from which map,
+ * when that is not the one whose citation was dropped), its edits counted against `geometry`, and that the
+ * map is not cited. It is not passed off as drawn by hand.
  */
 export function uncitedParts(assisted, { zoom, geometry, version } = {}) {
-  const { from = null, ...a } = assisted;
-  return { notes: choraAssistedNote(a, geometry ? countEdits(a.proposed, geometry) : null, { version, zoom, uncited: from || '' }) };
+  const { from = null, cited = null, citedKey = null, ...a } = assisted;
+  return { notes: choraAssistedNote(a, geometry ? countEdits(a.proposed, geometry) : null, {
+    version, zoom, uncited: cited ?? from ?? '', proposedFrom: proposedElsewhere(assisted, citedKey) }) };
 }
