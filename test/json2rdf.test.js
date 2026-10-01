@@ -33,7 +33,12 @@ function departures(v, at = '$', out = []) {
   else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) departures(x, `${at}.${k}`, out);
   return out;
 }
-for (const f of readdirSync(EXAMPLES).filter((f) => f.endsWith('.json'))) {
+const JSON_EXAMPLES = readdirSync(EXAMPLES).filter((f) => f.endsWith('.json'));
+test('the examples compared with jsonld.js are there to compare', () => {
+  for (const f of ['attestation-centric-customs.json', 'candidate-set-judgements.json', 'place-centric-constantinople.json', 'place-centric-river-idle.json'])
+    assert.ok(JSON_EXAMPLES.includes(f), `${f} is not among ${JSON_EXAMPLES.join(', ')}`);
+});
+for (const f of JSON_EXAMPLES) {
   test(`same graph as jsonld.js: ${f}`, async () => {
     const doc = JSON.parse(readFileSync(`${EXAMPLES}/${f}`, 'utf8'));
     // Such a number would make the graphs differ by design: none is here, so the comparison is whole.

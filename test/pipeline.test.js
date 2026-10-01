@@ -20,7 +20,12 @@ test('place-centric JSON -> N-Triples: exactly the graph jsonld.js gives', async
   assert.equal(await canon(outText(r.e, 'place-centric-constantinople.nt')), await canon(ref));
 });
 
-for (const f of readdirSync(EX).filter((f) => f.startsWith('attestation-centric'))) {
+const ATTESTATION_CENTRIC = readdirSync(EX).filter((f) => f.startsWith('attestation-centric'));
+test('the attestation-centric examples are there to regroup', () => {
+  for (const f of ['attestation-centric-citations.json', 'attestation-centric-customs.json', 'attestation-centric-judgements.json', 'attestation-centric-survey.json'])
+    assert.ok(ATTESTATION_CENTRIC.includes(f), `${f} is not among ${ATTESTATION_CENTRIC.join(', ')}`);
+});
+for (const f of ATTESTATION_CENTRIC) {
   test(`attestation-centric JSON -> JSON Lines (regrouped through the store) is valid: ${f}`, async () => {
     const r = await go([file(`${EX}/${f}`)], 'convert', 'plato-jsonl');
     assert.deepEqual(errors(r), []);
@@ -105,6 +110,10 @@ test('Turtle examples from the PLATO repository -> JSON Lines', async () => {
   const expected = (ttl.match(/\ba plato:Attestation\b/g) || []).length;
   assert.ok(expected > 0);
   assert.equal(r.report.counts.attestations, expected, JSON.stringify(r.report.counts));
+  // What was read is counted above; what was written is counted here, the header line apart.
+  const recs = outText(r.e, 'survey-attestations.jsonl').trim().split('\n').slice(1).map((l) => JSON.parse(l));
+  assert.ok(recs.length > 0, 'the JSON Lines hold a place');
+  assert.equal(recs.reduce((n, p) => n + (p.attestations || []).length, 0), expected, 'every attestation is written under its place');
 });
 
 // Controls: each broken input must be reported, with where.

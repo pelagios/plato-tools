@@ -34,7 +34,12 @@ const mutate = (tables, sheet, fn) => {
   return { ...tables, [sheet]: Papa.unparse(p.data, { columns: p.meta.fields, newline: '\n' }) + '\n' };
 };
 
-for (const ex of readdirSync(EX)) {
+const TABLE_EXAMPLES = readdirSync(EX);
+test('the example tables are there to accept', () => {
+  for (const ex of ['antonine', 'customs', 'datini', 'king-john', 'river-idle', 'survey'])
+    assert.ok(TABLE_EXAMPLES.includes(ex), `${ex} is not among ${TABLE_EXAMPLES.join(', ')}`);
+});
+for (const ex of TABLE_EXAMPLES) {
   test(`valid tables are accepted: ${ex}`, async () => {
     const issues = await validate(loadDir(`${EX}/${ex}`));
     assert.deepEqual(issues, []);

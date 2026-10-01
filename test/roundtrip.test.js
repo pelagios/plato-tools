@@ -51,7 +51,12 @@ const ajv = addPlatoFormats(new Ajv2020({ strict: false, allErrors: true, logger
 ajv.addSchema(CORE, 'https://w3id.org/plato/schemas/plato.schema.json');
 for (const p of Object.values(PROFILES)) ajv.addSchema(p);
 
-for (const f of readdirSync(EXAMPLES).filter((f) => f.endsWith('.json'))) {
+const JSON_EXAMPLES = readdirSync(EXAMPLES).filter((f) => f.endsWith('.json'));
+test('the examples taken through RDF and back are there to take', () => {
+  for (const f of ['attestation-centric-customs.json', 'candidate-set-judgements.json', 'place-centric-constantinople.json', 'place-centric-river-idle.json'])
+    assert.ok(JSON_EXAMPLES.includes(f), `${f} is not among ${JSON_EXAMPLES.join(', ')}`);
+});
+for (const f of JSON_EXAMPLES) {
   test(`JSON -> RDF -> JSON is lossless and valid: ${f}`, async () => {
     const doc = JSON.parse(readFileSync(`${EXAMPLES}/${f}`, 'utf8'));
     const first = toRdf(doc);

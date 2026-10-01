@@ -61,7 +61,12 @@ function withNull(doc, path) {
   for (const k of path.slice(0, -1)) o = o[k];
   o[path.at(-1)] = null; return d;
 }
-for (const f of readdirSync(EX).filter((f) => f.endsWith('.json'))) {
+const JSON_EXAMPLES = readdirSync(EX).filter((f) => f.endsWith('.json'));
+test('the examples swept for nulls are there to sweep', () => {
+  for (const f of ['attestation-centric-customs.json', 'candidate-set-judgements.json', 'place-centric-constantinople.json', 'place-centric-river-idle.json'])
+    assert.ok(JSON_EXAMPLES.includes(f), `${f} is not among ${JSON_EXAMPLES.join(', ')}`);
+});
+for (const f of JSON_EXAMPLES) {
   test(`sweep: a null in any position of ${f} is reported, never thrown`, async () => {
     const doc = JSON.parse(readFileSync(`${EX}/${f}`, 'utf8'));
     // Inside a GeoJSON value a null is kept, as JSON, in the RDF literal: nothing is lost there.
