@@ -603,12 +603,13 @@ What it does is in the guide:
 [Placing on the map](https://pelagios.org/place-attestation-ontology/guide/tools.html#chora).
 It is a page of its own, `chora.html`, a second entry in `vite.config.js`, so that MapLibre GL JS,
 Terra Draw and Allmaps load only there. The page is `src/chora/` (`app.js`; `map.js`, the map, the
-guard and drawing; `basemaps.js`; `overlays.js` and `remote.js`, the historical maps;
-`contributor.js`; `drafts.js`; `handoff.js`, which passes files chosen
-on the main page through IndexedDB, taken out of it as soon as Chora's page starts, not offered if
-older than two minutes, and let go by the main page too, when it starts, is shown again or is left,
-once it is that old), and its engine `src/engine/chora/` (`store.js`, `view.js`,
-`draw.js`, `save.js`, `geo.js`, `trace.js`). It publishes its state on `window.__chora` for tests.
+guard and drawing; `basemaps.js`; `overlays.js` and `remote.js`, the historical maps; `ink.js`,
+`ink.worker.js` and `inkfetch.js`, tracing with assistance; `contributor.js`; `drafts.js`; `handoff.js`,
+which passes files chosen on the main page through IndexedDB, taken out of it as soon as Chora's page
+starts, not offered if older than two minutes, and let go by the main page too, when it starts, is shown
+again or is left, once it is that old), and its engine `src/engine/chora/` (`store.js`, `view.js`,
+`draw.js`, `save.js`, `geo.js`, `trace.js`, and `ink/`, the pixel work of tracing with assistance). It
+publishes its state on `window.__chora` for tests.
 
 - **The worker** is the main page's, with commands of its own, sent one at a time: `chora-load`,
   `chora-search`, `chora-overview` (every place's point, at most 50,000), `chora-place` (one
@@ -852,6 +853,65 @@ once it is that old), and its engine `src/engine/chora/` (`store.js`, `view.js`,
   3acab8e's pattern; the tests compare with its example, read from the pinned PLATO). Moved or
   reshaped, it is traced again, or no longer cites the map and says so, and loses the traced
   point's defaults. The geometry saved is the one drawn.
+- **Tracing with assistance** ("Trace area", "Trace line", "Snap to ink"; `src/chora/ink.js`, loaded only
+  when first wanted, in a chunk of its own): a shape proposed from a historical map's own pixels, which the
+  user accepts (Enter), edits like any drawing, or lets go (Esc). The design is `ink-tracing-design.md` with
+  its amendments.
+  - **Where the pixels come from.** The IIIF tiles of the map's image, asked for exactly as the renderer
+    asks (`@allmaps/iiif-parser`'s `getTileImageRequest` and `getImageUrl`), fetched by the page through
+    `inkfetch.js` and `remote.js`'s `fetchImage`, that is through `permissions.fetch` under the map's
+    `iiif:<site>` permission (no credentials, no redirect followed, from the map's own image server only;
+    two at a time; a 429 waited out as Retry-After says; a refusal said in words: 401 or 403, IIIF Auth
+    being unsupported, CORS or no answer, a redirect, or the permission's own words), and decoded with
+    `createImageBitmap` (no colour-space conversion, no premultiplied alpha). A level-0 server gives its
+    `tiles`; a level-1 or 2 server without them gives the parser's default regions. The window is 512
+    working pixels each way at the scale factor read (the smallest offered at least half the image pixels
+    per screen pixel), grown when a line followed or a fill reaches its edge, to 2048, then once at one
+    scale coarser, then "too large" in words. An edge tile is not at its scale factor: each tile is placed
+    by its region and scaled by its region over its bitmap's size (`compose`).
+  - **A permission withdrawn** (any change seen through `permissions.onChange` that leaves a site no longer
+    allowed) lets go at once of everything read from that site for tracing: the page's cache of fetched
+    tiles (which keeps a tile only while its site is allowed), the worker's tiles and the window it made
+    ready (`{ type: 'forget', origin }`), and any proposal or snapping made from them. The map itself goes
+    from the map as any map does.
+  - **Who does what.** The page plans (`ink/job.js`: the scale, the window, its tiles, its growth) and
+    carries the proposal into the world through the map's georeference (`toWorld`, no densifying); the
+    worker (`ink.worker.js`, made from a `blob:` with the permissions module's `blobWorkerUrl`, so under
+    the page's policy, and fetching nothing) does one window's pixel work (`ink/step.js`), and keeps the
+    window made ready so that a slider re-proposes without reading it again. Jobs carry a generation id:
+    a new click or Esc lets the older go.
+  - **The engine** (`src/engine/chora/ink/`, pure, tested in Node on synthetic maps): the 3×3 median of
+    CIELAB (an area) or of L* alone (a line), L* as Float32 and a*, b* as Int8, the RGBA let go once
+    converted. An area: ΔE76 from the clicked colour, a scanline fill (gaps bridged by growing the
+    boundary, filling, and growing the fill back), refused when it reaches the window's edge or covers
+    more than 60% of it; outlined by d3-contour (ISC), each edge pixel placed within the pixels by its
+    cover (1 − ΔE over the local contrast), holes smaller than (4 × the map's pen stroke)² left out. A
+    line: Sauvola's adaptive threshold on L* (or ΔE, "match the colour"), the seed on the darkest pixel
+    within 6 screen pixels, the component under it and those across gaps ahead taken in, each thinned in
+    its own box (exact distance transform, Felzenszwalb–Huttenlocher; Zhang–Suen), the skeleton kept
+    within a thickness band, read as a graph (junction pixels within 2 px one node, spurs pruned),
+    followed both ways by the least turn (direction over 2 widths, stopping past 60°), gaps jumped up to
+    3 widths ahead in a ±20° cone, never into a chain used; each point moved across the line to the
+    ink's centre, the ends carried to where the ink stops. Douglas–Peucker in image pixels, corners kept,
+    ε halved while the result crosses itself, down to 0.1. **Half pixels**: a contour's coordinates are
+    pixel corners (IIIF's convention; no half pixel added); a skeleton's are pixel centres (+0.5).
+  - **Accepted**, a proposal is an ordinary Terra Draw drawing (an area as its outline: Terra Draw takes
+    no holes, and the page says they were left out), cited from the map it was traced from exactly as one
+    traced by hand is, its round trip checked. With no place chosen, Enter keeps the proposal and says to
+    choose one. The draft keeps what was proposed and how (`trace.assisted`); its notes are
+    `choraAssistedNote` (`words.js`, the one place they are made) and then georefNote's: how it was
+    proposed (ε in image pixels, the gaps bridged, the holes left out) and "accepted as proposed" or
+    "edited by hand: moved k, added a, removed d, of n proposed", counted against the proposal
+    (`ink/edits.js`). Attested, not computed: a person accepted it. Moved off its map, it keeps saying it
+    was proposed from that map's ink, and that the citation was dropped (`uncitedParts`).
+  - **Offered** once a map shown has drawn a tile (`maptileloaded`: the renderer's `firstmaptileloaded`
+    comes only when the first tile it asked for loads, and never when that one is refused). Until then
+    the buttons are `aria-disabled` (not `disabled`, so that they can be focused) and their tooltip says
+    why. A server that lets no other site read it is refused at admission (the image information).
+  - **Snap to ink**: Terra Draw asks for a snapped position on every move, synchronously, so on each
+    `moveend` the worker finds the ink's ridges (a line's centre) and edges over the view, the page
+    carries them into the world through the georeference as one MultiPoint, and bins them by screen
+    pixel; a vertex within 10 screen pixels goes to the nearest ridge, else edge. Alt held: no snapping.
 - **Georeferencing** comes from `src/engine/georef/`, which belongs to Hermes; Chora keeps none of
   its own.
 
@@ -1073,6 +1133,8 @@ npm test                                  # the engine and the command line, in 
 python3 e2e/app_test.py                   # the page itself, in Playwright's bundled Chromium
 python3 e2e/app_test.py --url=https://pelagios.org/plato-tools/   # the deployed page
 python3 e2e/app_test.py --prove-it-fails  # every check pointed at a page with no tools: all must fail
+python3 e2e/ink_budget.py                 # the budget of tracing with assistance, timed in the page
+node e2e/ink_memory.mjs                   # the tracing worker's memory, for its budget
 node scripts/install-test.mjs             # install the packed tools as npx does, and run the command
 node e2e/compare_scale.mjs deep-plato.jsonl.gz --work-dir DIR   # the version check at full scale
 python3 e2e/scale_test.py --input deep-plato.nt.gz --target plato-jsonl --out out.jsonl
@@ -1095,7 +1157,12 @@ python3 e2e/scale_test.py --input deep-plato.nt.gz --target plato-jsonl --out ou
   writes attestations the checker passes;
 - the command line gives what the engine gives, with the right exit status;
 - nothing is asked of another site without its permission, Never beats allowing for the tab, a forged
-  or injected grant cannot reach the policy, and the token is in no list and no error.
+  or injected grant cannot reach the policy, and the token is in no list and no error;
+- tracing with assistance proposes known shapes from synthetic maps drawn in code (`test/ink-synth.js`,
+  seeded; non-square windows, off-centre asymmetric shapes, a 1001 × 701 image tiled at an odd size):
+  outlines and centrelines within a pixel, the half-pixel conventions, faint ink on a vignette (where one
+  threshold fails), specks and JPEG blocks, gaps, colours, the seam between tiles; and its tiles are
+  asked only through the permissions, and let go once a site's permission is withdrawn.
 
 The browser checks run every page under its Content Security Policy, and check that with nothing
 allowed neither page asks another site; that a permission allowed in the panel, from its "Needs
@@ -1108,8 +1175,10 @@ most, and a data link nothing; that a planted ORCID is dropped on load; and that
 let go by the main page.
 
 Chora's historical maps are checked against a real second origin: `e2e/iiif_fixture_server.py`
-serves `test/fixtures/chora-iiif/` on two free ports, A (the image server allowed) and B (never to
-be asked), and logs every request it receives. That log is the census: Playwright's request events
+serves `test/fixtures/chora-iiif/` on three free ports, A (the image server allowed), B (never to
+be asked) and C (which sends no CORS header), and logs every request it receives. It serves `ink.png`,
+a synthetic map for tracing with assistance, as IIIF tiles cut and scaled with Pillow (JPEG, PNG, and
+with its full-resolution tiles refused, 403). That log is the census: Playwright's request events
 also list requests the browser stopped. Allmaps' annotation server is answered by `page.route`.
 The checks include nothing asked of A before its permission is allowed in the panel, and the map
 pasted then added after the one reload, also when a map kept waits on A too (both come back); a tile answered with a redirect to B, in the built page's
@@ -1118,7 +1187,10 @@ while the honest map on A draws); an `info.json` naming B; an address on A forwa
 asked nothing until its permission is allowed from "Look for a georeference", then at `/images/<id>`
 only; the renderer's own transformation of 25 pixels against `src/engine/georef/`'s, to 1e-7 m, at
 order 1 and 2, with the renderer's order-1 transformation of the order-2 map as the control; a
-permission withdrawn, and set to Never; and maps refused on a page without its policy.
+permission withdrawn, and set to Never; maps refused on a page without its policy; and tracing with
+assistance: a line and an area proposed, carried on, accepted, saved and cited, a slider asking
+nothing more, a permission withdrawn letting go of the tiles read, Snap to ink, and a server without
+CORS or refusing the pixels (403).
 
 A check that finds nothing is worth something only if it could have found something: each test of
 an absence has a presence beside it, or a control that finds the same thing when it is there.

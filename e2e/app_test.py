@@ -1690,7 +1690,7 @@ def front_page_checks(browser, url):
             ok = (len(closed) == 9 and all(c['has'] and not c['open'] and c['said'] == 'More' and c['body'] == 0 and c['named'] and not c['insideLink'] for c in closed)
                   and all(c['open'] and c['said'] == 'Less' and c['body'] > 60 for c in opened) and kept
                   and all(c['links'] and c['links'][-1].startswith(guide) for c in opened if c['name'] != 'Peripleo') and peripleo.get('links') == []
-                  and chora.get('coming') == [] and 'and trace places from it by hand: what you trace cites the map' in chora.get('rest', '')
+                  and chora.get('coming') == [] and 'and trace places from it by hand or with assistance from its ink: what you trace cites the map' in chora.get('rest', '')
                   and len(krisis.get('coming', [])) == 1 and 'World Historical Gazetteer' in krisis['coming'][0] and 'World Historical' not in krisis.get('rest', 'World Historical')
                   and not again['open'] and again['said'] == 'More')
             return ok, {'closed': closed, 'opened': opened, 'step 2 and #tool kept': kept, 'before': before, 'first, closed by Enter': again}
