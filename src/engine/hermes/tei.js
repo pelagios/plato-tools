@@ -164,6 +164,10 @@ const PRINTED = ['orig', 'abbr', 'sic', 'lem'];
 // ("face a"); a <div> with neither type nor n says nothing a reader could find it by.
 const DIVS = /^div[1-7]?$/;
 const BREAKS = new Set(['lb', 'pb', 'cb']);
+// The types of an edition's own editorial divs (EpiDoc's): one of these before the edition div may be
+// waiting for it. Any other top-level div, or a place name outside the divs, says the text is not
+// divided as such an edition is.
+const EDITORIAL_DIVS = new Set(['commentary', 'translation', 'apparatus', 'bibliography', 'notes']);
 // What placeAddress (./addresses.js) says of an address that must not be carried, as a kind here.
 const WHG_LOST = { 'whg-portal-record': 'tei-whg-record', 'whg-staging': 'tei-whg-staging' };
 // The attributes of a place name that are read (xml:lang for the name's language; type only where it
@@ -260,6 +264,7 @@ export class TeiReader {
     // The editors' parts of an edition (below, "Whose words"): whether the <text> being read has a
     // top-level div type="edition", and whether that is known yet; the top-level div open now.
     this.editionSeen = false; this.editionDecided = false; this.topDiv = null;
+    this.held = [];              // place names whose words may be the editors', until that is known
     const p = this.parser = new SaxesParser({ xmlns: true, position: true });
     p.on('error', (e) => {
       const why = String(e.message).split('\n')[0];
@@ -325,12 +330,7 @@ export class TeiReader {
     if (!this.attestations) this.report('tei-none-linked', `${plural(this.mentions, 'place name')} in the text`);
     return this.take();
   }
-  /** The events read so far, up to the first place name held until it is known whose words it is (below). */
-  take() {
-    const i = this.out.findIndex((e) => e.type === 'held');
-    if (i < 0) { const o = this.out; this.out = []; return o; }
-    const o = this.out.slice(0, i); this.out = this.out.slice(i); return o;
-  }
+  take() { const o = this.out; this.out = []; return o; }
 
   // ---- whose words ---------------------------------------------------------------------------------
   // An edition that has a top-level div type="edition" (EpiDoc's, Perseus's) says that the source's
@@ -343,20 +343,22 @@ export class TeiReader {
   // its notes, commentary and translations are the edition's text.
   //
   // Where such a place name comes before any edition div has been seen, whether the file has one is
-  // not known yet. It is held, in its place among the events, until an edition div opens (it is the
-  // editors') or the <text> ends without one (it is read as before); the events after it wait with
-  // it, so the order of the output is the order of the file either way.
+  // not known yet. It alone is held (in `held`), until an edition div opens (it is the editors'), or
+  // the text shows it is not divided as an edition is (a top-level div of another type than
+  // EDITORIAL_DIVS, or a place name outside the divs and the notes), or the <text> ends; then it is
+  // read as before, emitted out of the file's order, as a name waiting for a <place> is. Everything
+  // else is emitted at once, so what is held is only such names, and in a text with no edition div
+  // only those before its first div of its own.
   /** The editors' part a place name opened now would be in, if the file has an edition div: the top-level div's type, else 'note'. */
   editorialPart() {
     if (this.topDiv && this.topDiv.type !== 'edition') return this.topDiv.type || 'div';
     return this.inNote ? 'note' : undefined;
   }
-  /** Whether the <text> has an edition div is now known: the place names held are placed, in order. */
+  /** Whether the <text> has an edition div is now known: the place names held are placed, in the order read. */
   decide(hasEdition) {
     this.editionDecided = true;
-    if (!this.out.some((e) => e.type === 'held')) return;
-    const evs = this.out; this.out = [];
-    for (const e of evs) if (e.type === 'held') this.place(e.d, hasEdition ? e.d.editorial : undefined); else this.out.push(e);
+    const held = this.held; this.held = [];
+    for (const d of held) this.place(d, hasEdition ? d.editorial : undefined);
   }
 
   // ---- the header ------------------------------------------------------------------------------
@@ -493,6 +495,9 @@ export class TeiReader {
         if (!this.divs.length) {
           el.topDiv = true; this.topDiv = { type };
           if (type === 'edition') { this.editionSeen = true; this.decide(true); }
+          // A top-level div of the text's own (a chapter, a letter, a div with no type) is not an
+          // edition's editorial part: the text is not divided as an edition is, so nothing waits.
+          else if (!this.editionDecided && !EDITORIAL_DIVS.has(type)) this.decide(false);
         }
         this.divs.push(label); el.div = true; this.line = undefined; this.milestones = new Map();
       } else if (local === 'pb') { this.page = attr('n'); this.line = undefined; }
@@ -561,6 +566,8 @@ export class TeiReader {
     const startLine = el.verse ?? this.verseLine() ?? this.line;
     const fileLine = this.parser.line;
     const editorial = this.editorialPart();
+    // So too a place name in the text outside any top-level div and outside a note.
+    if (editorial === undefined && !this.topDiv && !this.editionDecided) this.decide(false);
     this.capture((c) => this.mention(t, c, { where, startLine, nested, fileLine, editorial }), { hasRef: false });
   }
   close_(t) {
@@ -870,7 +877,7 @@ export class TeiReader {
     const m = d.m;
     // A place name with no words (<placeName ref="…"/>) gives no name to attest.
     if (!m.toponym) { this.report('tei-place-empty', `<${m.element}${m.pointers.length ? ` ref="${m.pointers.join(' ')}"` : ` ${m.pointerWords}`}> on line ${m.fileLine}`); return; }
-    if (d.editorial && !this.editionSeen && !this.editionDecided) { this.out.push({ type: 'held', d }); return; }
+    if (d.editorial && !this.editionSeen && !this.editionDecided) { this.held.push(d); return; }
     this.place(d, this.editionSeen ? d.editorial : undefined);
   }
   /** A place name with words and a ref, whose words are known to be the source's (editorial undefined) or the editors' (the part they are in). */

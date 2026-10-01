@@ -277,8 +277,10 @@ readers link to those headings, so keep them.
   `<choice>` not taken, is a variant (`tei-variant`): one in a part of a `<choice>` waits until the
   `<choice>` closes. In a `<text>` with a top-level `div type="edition"`, every other top-level div
   and every `<note>` is the editors' (`tei-place-editorial`); a place name there that comes before
-  the edition div is held, as a `held` event in its place in `out`, until the edition div opens or
-  the `<text>` ends, and `take()` stops at it, so the output keeps the file's order. The reading
+  the edition div is held (only it, in `held`) until the edition div opens, a top-level div of
+  another type than `EDITORIAL_DIVS` opens or a place name is read outside the divs and notes (no
+  edition div, then), or the `<text>` ends;
+  everything else is emitted at once, so a held name comes out after the names read after it. The reading
   options that convert the editors' words (`commentaryPlaces`, `headerPlaces`) are refused while
   `EDITORIAL_IRI` is null (`teiReadingRefusal`); tests set it with `setEditorialIriForTests`. With `listPlaces`, a `<place>` gives a Headword
   attestation (`listPlace()`); one in the teiHeader goes on the header's `queue`, run at

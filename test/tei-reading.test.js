@@ -376,3 +376,42 @@ test('teiKeyPrefixes reads the file as a stream and gives each prefix with its c
   // a file with no keys gives none (control above: the same call on a file with keys gives four)
   assert.deepEqual(await teiKeyPrefixes({ format: 'tei', files: [new File([readFileSync(DIR + ISIC)], ISIC)] }), []);
 });
+
+// ---- what is held stays small ------------------------------------------------------------------
+// The garbage collector, so that the heap measured is what is still held, not what a test before left.
+import v8 from 'node:v8';
+import vm from 'node:vm';
+v8.setFlagsFromString('--expose-gc');
+const gc = vm.runInNewContext('gc');
+/** Read a constructed file of `n` lines, each a place name and one in a note, after an early note, a chunk at a time, keeping nothing but counts. */
+function readLarge(n, { divs }) {
+  const r = new TeiReader(() => {}, { fileName: 'large.xml' });
+  let maxHeld = 0, attestations = 0, early = 0;
+  gc();
+  const heap0 = process.memoryUsage().heapUsed;
+  let peak = heap0;
+  const take = (evs) => {
+    for (const e of evs) if (e.type === 'attestation') { attestations++; if (e.value.names[0].toponym === 'Early') early++; }
+    maxHeld = Math.max(maxHeld, r.held.length);
+  };
+  take(r.write(`<?xml version="1.0" encoding="UTF-8"?>\n<TEI xmlns="http://www.tei-c.org/ns/1.0">${HEADER}<text><body><p>Before: <note>${pn(1, 'Early')}</note></p>${divs ? '<div type="letter">' : ''}`));
+  const line = `<p>${pn(2, 'Place')}<note>${pn(3, 'Noted')}</note></p>\n`;
+  for (let i = 0; i < n; i += 1000) {
+    take(r.write(line.repeat(Math.min(1000, n - i))));
+    if (i % 20000 === 0) { gc(); peak = Math.max(peak, process.memoryUsage().heapUsed); }
+  }
+  take(r.write(`${divs ? '</div>' : ''}</body></text></TEI>\n`));
+  take(r.close());
+  return { maxHeld, attestations, early, growthMB: (peak - heap0) / 1e6 };
+}
+
+for (const divs of [true, false]) {
+  test(`200,000 lines of place names and notes after an early note, no edition div${divs ? ', in a top-level div of the text' : ', no divs'}: at most one name is held, and the held names are still emitted`, () => {
+    const got = readLarge(200000, { divs });
+    assert.equal(got.attestations, 400001);
+    assert.equal(got.early, 1, 'the held name is emitted, as an ordinary attestation');
+    assert.ok(got.maxHeld <= 1, `held ${got.maxHeld}`);
+    // holding every attestation would be hundreds of MB; reading as a stream stays well under this
+    assert.ok(got.growthMB < 50, `heap grew ${got.growthMB.toFixed(1)} MB`);
+  });
+}
