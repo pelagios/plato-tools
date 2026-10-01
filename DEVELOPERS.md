@@ -600,12 +600,13 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
 
 What it does is in the guide:
 [Placing on the map](https://pelagios.org/place-attestation-ontology/guide/tools.html#chora).
-It is a page of its own, `chora.html`, a second entry in `vite.config.js`, so that MapLibre GL JS
-and Terra Draw load only there. The page is `src/chora/` (`app.js`; `map.js`, the map, the guard
-and drawing; `basemaps.js`; `contributor.js`; `drafts.js`; `handoff.js`, which passes files chosen
+It is a page of its own, `chora.html`, a second entry in `vite.config.js`, so that MapLibre GL JS,
+Terra Draw and Allmaps load only there. The page is `src/chora/` (`app.js`; `map.js`, the map, the
+guard and drawing; `basemaps.js`; `overlays.js` and `remote.js`, the historical maps;
+`contributor.js`; `drafts.js`; `handoff.js`, which passes files chosen
 on the main page through IndexedDB, taken out of it as soon as Chora's page starts, and not offered
 if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `view.js`,
-`draw.js`, `save.js`, `geo.js`). It publishes its state on `window.__chora` for tests.
+`draw.js`, `save.js`, `geo.js`, `trace.js`). It publishes its state on `window.__chora` for tests.
 
 - **The worker** is the main page's, with commands of its own, sent one at a time: `chora-load`,
   `chora-search`, `chora-overview` (every place's point, at most 50,000), `chora-place` (one
@@ -760,8 +761,77 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   `locks: null`, or a fake LockManager and a fake `ledger`. Every assumption about the World
   Historical Gazetteer, and whether it is verified, is in `whg.js`, so that a correction is made in
   one place.
-- **Georeferencing**, for tracing from a georeferenced map, will come from `src/engine/georef/`,
-  which belongs to Hermes. Chora uses it and keeps none of its own.
+- **Historical maps** (`src/chora/overlays.js`, `remote.js`): a IIIF image placed by a IIIF
+  Georeference Annotation, drawn by `@allmaps/maplibre` (pinned exactly, with a test that the one
+  `@allmaps/transform` installed is the version `src/engine/georef/` names; loaded only when a map is
+  shown, in a chunk of its own). What is pasted (`parseInput`) is followed to a georeference
+  (`resolve`). Every permission a step needs (`iiif:<site>` for a map's servers, `allmaps:allmaps`
+  for Allmaps' annotation server) is named at once (`NeedPermission`), before anything is fetched,
+  each in a "Needs permission" line under the paste box, so that one reload brings them all; a
+  manifest is one step and its images the next. The map waiting, and what is typed in the box, are
+  kept across that reload (`keepForReload`) and the map is added after it. A permission set to Never
+  is done without: the maps that need it are not shown, and nothing is said of them, but a map just
+  pasted says it is set to Never. With no georeference, Allmaps is asked only from "Look for a
+  georeference", which shows no notice: it needs `allmaps:allmaps`, and its line, like any other.
+  The Allmaps Editor is linked only once `allmaps:allmaps` is allowed, since following the link sends
+  Allmaps the map's address (provisional, pending Stephen's ruling). A georeference of several maps
+  (Allmaps' `/images/<id>` often holds several of one image) is a choice (`NeedChoice`): each with its
+  label, date and number of control points, the most recently `modified` offered first.
+  **Fetching** (`remote.js`): every document through `permissions.fetch`, which follows no redirect;
+  the redirects measured (see [Permissions](#permissions)) are avoided before asking: http is asked
+  over https, an image's information at `{id}/info.json` with no trailing slash, Allmaps at
+  `/images/<id>` computed here (never `?url=`). An address that still forwards (an ARK resolver) is
+  refused with "This address forwards to another one, which PLATO tools does not follow. Open it in a
+  new tab, and paste the address it ends at.", and the address offered as a link to a new tab.
+  **Admission** (`admit`): only where the page's policy was shown to be enforced
+  (`permissions.enforced()`; otherwise maps are refused in words, since their tiles could go
+  anywhere); the page fetches the image's `info.json` itself and refuses the map unless the id it
+  gives IS the image the georeference names (the renderer builds tile addresses from that id); it
+  then gives the renderer the information (`addImageInfos`, so the renderer asks for none) and the
+  annotation, naming the image by the id the information gives exactly, over https (the renderer
+  looks it up as written, so `…/grid/` against `…/grid` would have it fetch the information again
+  itself), and sets the map's transformation from the georeference (`setMapTransformationType` with
+  georef's `allmapsTransformationName`): the renderer takes the transformation's type but not a
+  polynomial's order, and would draw an order-2 map at order 1. Maps shown are kept in OPFS
+  (`chora-overlays/`, working data: cleared at the next load when the user keeps none) and admitted
+  afresh on the next load; a change of basemap puts them back in a new layer without fetching
+  anything. **A permission withdrawn** takes its maps off the map at once (they stay kept, and come
+  back once it is allowed again); tiles the renderer has already asked for cannot be called back.
+  Each map's row names its image's site, with a "Permissions…" button that opens the panel there.
+- **Why tiles cannot be guarded request by request** (the spike of 2026-09-30, @allmaps/maplibre
+  1.0.0-beta.44, render beta.84): tiles are fetched in a pool of five workers, each made from a
+  `blob:` (the renderer's own code, kept so by the build: the built chunk makes them with
+  `createObjectURL`), so they are under the page's policy. A `fetchFn` cannot be passed to them (a
+  function cannot be cloned: `DataCloneError`, logged only, and no tile loads), so the page sees no
+  tile request. A map admitted for site A reached site B two ways: an `info.json` whose id is on B
+  (the tiles are built from it: refused at admission), and a tile answered with a redirect to B,
+  which the worker follows after admission. Only the policy stops the second (CSP Level 3 checks
+  every hop); the browser checks run it against the built page. The renderer reports a tile its
+  worker could not fetch only to the console (a `ResourceFetchError` naming the tile; no event), so
+  the page listens there, for its own maps' tiles, and says in plain words that part of the map could
+  not be loaded.
+- **Attribution**: the manifest's credit and licence (Presentation 3 `requiredStatement` and
+  `rights`, 2 `attribution` and `license`), as text only; the manifest's logo, thumbnail,
+  rendering, homepage and seeAlso are never used. David Rumsey's manifests carry no licence, so it
+  comes from a table by site (`HOSTS`). A non-commercial licence gets one neutral line, and the
+  licence is linked in the traced attestation's citation of the map (`source.licence`).
+- **Tracing** (`src/engine/chora/trace.js`): a drawing made over a map is traced from the topmost
+  map shown whose mask holds it whole, else the topmost holding part of it (with a warning); a
+  georeference that cannot place it (a fold) passes to the next. It keeps georef's `toPixels`
+  record and its box of image pixels (at least 1 px each way), and must come back through the
+  georeference to within 0.05 of the map's pixels there (georef's `metresPerPixel`), or it is not
+  kept. A point traced is, until the user chooses otherwise, a `RepresentativePoint` whose
+  `spatialPrecision` is `approximate`: a map's symbol stands for the place, and is not the feature
+  (a `FeaturePoint` only where the map draws the feature itself); a traced drawing may also be a
+  `LabelAnchor`. Saved, it cites the map (`georefCitation`, the canvas and the box as the locator,
+  a point's box padded by 32 canvas pixels with georef's `pad`; `cito:citesAsEvidence`) and the
+  georeference (`georefAnnotationCitation`, `cito:usesMethodIn`, derived from the map), and its
+  notes are `choraTracingNote` then `georefNote` with the date the georeference was fetched (PLATO
+  3acab8e's pattern; the tests compare with a copy of its example, which the pinned PLATO predates
+  and its schema already accepts). Moved or reshaped, it is traced again, or no longer cites the map
+  and says so, and loses the traced point's defaults. The geometry saved is the one drawn.
+- **Georeferencing** comes from `src/engine/georef/`, which belongs to Hermes; Chora keeps none of
+  its own.
 
 ## Permissions
 
@@ -864,7 +934,7 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   `plato-tools.keep-working-data` is `no` when off): off, Chora clears its drawings not saved and its
   last output at the next load (not at a reload for a permission), and the output once saved to disk.
   The dataset's working copy, in Chora's SQLite pool, is cleared at every start anyway (`clearOnInit`).
-  The historical maps shown (`chora-overlays/`) are cleared with the drawings, once Chora keeps them.
+  The historical maps shown (`chora-overlays/`) are cleared with the drawings.
 - **Persistent storage.** "Keep large datasets' working files (ask the browser for persistent
   storage)" calls `navigator.storage.persist()` once, when the user ticks it, never on load (Firefox
   asks the user, which is why Chora no longer calls it itself), and remembers the browser's answer
@@ -878,6 +948,26 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   the hash of the image's address rather than through its redirect. A redirect to another host (an
   ARK resolver, say) is refused with words, never followed: allowing the resolver's site would not
   say where it sends the user next.
+  Measured on 1 October 2026, with 37 curl requests, without `-L`,
+  sending `Origin: https://pelagios.org`:
+
+  | Case | Request | Status | From → to | Same origin? |
+  |---|---|---|---|---|
+  | Digital Commonwealth ARK manifest | `https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/manifest` | 302, then 301 | → `digitalcommonwealth.org/search/commonwealth:ks65px29g/manifest` → `www.digitalcommonwealth.org/…` | No: 2 hops, 3 hosts |
+  | n2t resolver | `https://n2t.net/ark:/50959/ks65px29g` | 302 | → `https://arks.org/ark:/…` | No |
+  | http manifest or info.json | Rumsey, DC, LoC, Gallica, Stanford, Bodleian over http | 301 or 302 | → https, same host and path | Scheme only |
+  | Image id without /info.json | Rumsey (relative Location), DC (303), LoC (scheme-relative `//tile.loc.gov/…`) | 302 or 303 | → `{id}/info.json` | Yes |
+  | Image id with a trailing slash | DC | 301 | → without the slash | Yes |
+  | Allmaps `?url=<image id or info.json>` | `annotations.allmaps.org/?url=…` | 301 | → `/images/<id>` (404 when there is no georeference) | Yes |
+  | Canonical https manifest, info.json or tile | every server tested | 200 | — | — |
+
+  The decision (c2, 1 October 2026): `permissions.fetch` stays strict and refuses every redirect.
+  Callers avoid the same-origin cases: upgrade to https, use `{id}/info.json` without a trailing
+  slash, and compute the Allmaps `/images/<hash>` themselves (Chora's `remote.js`). Cross-host
+  forwarding (ARKs) is refused with words that ask the user to open the address in a new tab and paste
+  the address it ends at. A test shows the module never reads a `Location`, so a relative or
+  scheme-relative one needs no resolving. Following redirects whose final address stays within the
+  same permission's sites (option b) could be reconsidered with this table to hand.
 - **Chora's old consents** (`chora-basemap-consent`, a list of sites) are carried over by the head
   script at load, by the module at its first read, and by the module again when another tab writes
   the old key (the storage event): a provider all of whose sites are listed becomes
@@ -891,9 +981,9 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   refused when the command gives none. **Changed on 1 October 2026:** a site given to `--allow-host`
   used to be granted for `iiif` and `linked` both. No command asks another site yet, so nothing that
   runs today changes; a command written against the old rule must now say its `hostCategory`.
-- **Adopting it.** Chora's basemaps use it now. Chora's historical maps (`iiif`, `allmaps`) and
-  Krisis's gazetteer lookup (`allowed('gazetteer', 'whg')` before sending; `token` for the token) move
-  onto it in their own branches, and Hermes's linked sites (`linked`, per host) when it fetches.
+- **Adopting it.** Chora's basemaps and historical maps (`iiif`, `allmaps`) use it now. Krisis's
+  gazetteer lookup (`allowed('gazetteer', 'whg')` before sending; `token` for the token) moves onto
+  it in its own branch, and Hermes's linked sites (`linked`, per host) when it fetches.
 
 ## Limits
 
@@ -971,6 +1061,19 @@ allowed neither page asks another site; that a permission allowed in the panel, 
 permission" line, is used after the reload and refused at once when withdrawn; that a page served
 without its policy is found unprotected by the canary and asks nothing; and that turning off "Keep
 my working data" clears Chora's drawings at the next load.
+
+Chora's historical maps are checked against a real second origin: `e2e/iiif_fixture_server.py`
+serves `test/fixtures/chora-iiif/` on two free ports, A (the image server allowed) and B (never to
+be asked), and logs every request it receives. That log is the census: Playwright's request events
+also list requests the browser stopped. Allmaps' annotation server is answered by `page.route`.
+The checks include nothing asked of A before its permission is allowed in the panel, and the map
+pasted then added after the one reload; a tile answered with a redirect to B, in the built page's
+tile workers (B must get nothing in the whole run, and is not in `window.__platoCsp.origins`,
+while the honest map on A draws); an `info.json` naming B; an address on A forwarding to B; Allmaps
+asked nothing until its permission is allowed from "Look for a georeference", then at `/images/<id>`
+only; the renderer's own transformation of 25 pixels against `src/engine/georef/`'s, to 1e-7 m, at
+order 1 and 2, with the renderer's order-1 transformation of the order-2 map as the control; a
+permission withdrawn, and set to Never; and maps refused on a page without its policy.
 
 A check that finds nothing is worth something only if it could have found something: each test of
 an absence has a presence beside it, or a control that finds the same thing when it is there.
