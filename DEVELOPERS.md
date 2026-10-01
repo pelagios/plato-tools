@@ -270,7 +270,8 @@ readers link to those headings, so keep them.
 
 - **TEI** (`tei.js`). Each place name in `<text>` (`placeName`, `settlement`, `region`, `country`,
   `bloc`, `district`, `geogName`, and `rs` or `name` with `type="place"`) becomes one
-  attestation-centric attestation for each address its `@ref` resolves to: a web address as it is,
+  attestation-centric attestation for each address its `@ref` resolves to (its words leave out a
+  `<geo>`, `<location>`, `<idno>` or `<note>` inside it, `ASIDE`; a `<geo>` there is `tei-place-geo`): a web address as it is,
   a prefixed pointer through the header's `<prefixDef>` (the pattern anchored to the whole of what
   follows the prefix), and `#x` through the one web-address `<idno>` of `<place xml:id="x">` in the
   same file (several: ambiguous, nothing converted). A place name in an `<rdg>`, or in the part of a

@@ -64,3 +64,23 @@ test('a listed place with a variant name as its own child still reports it; a lo
   assert.deepEqual(m.doc.attestations[0].geometries.map((g) => g.reprPoint), [[2, 1], [4, 3]]);
   assert.deepEqual(examples(m, 'tei-listplace-geo-other-place'), ['#a: located_in_place: Parent (5 6)']);
 });
+
+// ---- words inside a place name that are not the name (IIP-like; IIP is CC BY-NC, so constructed) ------
+test('a <geo>, <location>, <idno> or <note> inside a place name is left out of the name; a <geo> in the text is reported once as tei-place-geo', () => {
+  // An equivalent of what IIP writes (a <geo> inside the place name), constructed, not copied.
+  const m = mapped(tei('<p><placeName ref="https://pleiades.stoa.org/places/687966">Beth Loya<geo>31.563611,34.928056</geo></placeName> and '
+    + '<placeName ref="https://pleiades.stoa.org/places/678006">Gaza<location><geo>31.5 34.46</geo></location><idno type="URI">https://example.org/gaza</idno><note>the port</note></placeName></p>'));
+  assert.deepEqual(m.doc.attestations.map((a) => a.names[0].toponym), ['Beth Loya', 'Gaza']);
+  assert.deepEqual(examples(m, 'tei-place-geo'), ['31.563611,34.928056 on line 2', '31.5 34.46 on line 2']);
+  // control: the words of a place name around other markup (a <choice>, an <hi>) are still the name
+  const c = mapped(tei('<p><placeName ref="https://pleiades.stoa.org/places/687966">Beth <hi>Loya</hi></placeName></p>'));
+  assert.deepEqual(c.doc.attestations.map((a) => a.names[0].toponym), ['Beth Loya']);
+  assert.ok(!c.kinds.has('tei-place-geo'));
+  assert.equal(TEI_KINDS['tei-place-geo'], 'loss');
+  assert.ok(LOSS_TEXT['tei-place-geo']);
+});
+
+test('a listed place\'s <location> words still hold its <geo> (the place name rule does not reach a list of places)', () => {
+  const s = tei('<p>x</p>').replace('</body>', '</body><back><listPlace><place xml:id="a"><placeName>A</placeName><location><geo>1 2</geo></location></place></listPlace></back>');
+  assert.deepEqual(examples(mapped(s), 'tei-listplace-geo'), ['#a: 1 2']);
+});

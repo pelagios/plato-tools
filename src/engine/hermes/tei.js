@@ -140,6 +140,7 @@ export const TEI_KINDS = {
   'tei-listplace-geo-datum': 'loss',
   'tei-listplace-geo-invalid': 'loss',
   'tei-listplace-geo-other-place': 'loss',
+  'tei-place-geo': 'loss',
   'tei-lang-not-tag': 'loss',
   'tei-licence-not-address': 'loss',
   'tei-sourcedesc-several': 'loss',
@@ -198,6 +199,8 @@ const WHG_LOST = { 'whg-portal-record': 'tei-whg-record', 'whg-staging': 'tei-wh
 const READ_ATTRIBUTES = new Set(['ref', 'key', 'xml:id', 'xml:lang', 'xml:space']);
 // The children of a <place> in a list of places that are read (idno) or reported by a kind of their
 // own (its names, its location); a nested <place> is read as a place. Any other child is reported.
+// Elements inside a place name whose words are not part of the name.
+const ASIDE = new Set(['geo', 'location', 'idno', 'note']);
 const PLACE_CHILDREN = new Set(['idno', 'location', 'place', ...PLACE_ELEMENTS]);
 // A <location> type that says the location is another place's (the place this one is in), not this place's own.
 const OTHER_PLACE_LOCATION = /located[_ -]?in|parent|part[_ -]?of|within|in[_ -]?place|broader/i;
@@ -281,6 +284,7 @@ export class TeiReader {
     this.divs = []; this.page = undefined; this.line = undefined; this.milestones = new Map();
     this.headed = false; this.mentions = 0; this.attestations = 0;
     this.inHeader = 0; this.inText = 0; this.inNote = 0; this.inPlaceMention = 0;
+    this.inAside = 0;          // open <geo>, <location>, <idno> or <note> elements inside a place name (ASIDE), whose words are not the name's
     this.seen = new Set();       // (kind, example) pairs reported with once()
     // The editors' parts of an edition (below, "Whose words"): whether the <text> being read has a
     // top-level div type="edition", and whether that is known yet; the top-level div open now.
@@ -470,10 +474,10 @@ export class TeiReader {
   }
 
   // ---- the events --------------------------------------------------------------------------------
-  capture(onDone, extra = {}) { const c = new Capture(this.stack.length); c.onDone = onDone; c.inNoteFrom = this.inNote + 1; Object.assign(c, extra); this.captures.push(c); return c; }
+  capture(onDone, extra = {}) { const c = new Capture(this.stack.length); c.onDone = onDone; c.inNoteFrom = this.inNote + 1; c.asideFrom = this.inAside + 1; Object.assign(c, extra); this.captures.push(c); return c; }
   text(t) {
     if (this.inPunctuation) t = ' ';
-    for (const c of this.captures) if (this.inNote < c.inNoteFrom) c.text(t);
+    for (const c of this.captures) if (this.inNote < c.inNoteFrom && this.inAside < c.asideFrom) c.text(t);
   }
   open(t) {
     const tei = t.uri === TEI_NS, local = t.local;
@@ -494,10 +498,18 @@ export class TeiReader {
     if (tei && local === 'note') { this.inNote++; el.note = true; }
     if (tei && local === 'g' && PUNCTUATION_GLYPH.test(`${(attr('ref') || '').split(/[#/]/).pop()} ${attr('type') || ''}`)) {
       this.inPunctuation = (this.inPunctuation || 0) + 1; el.punctuation = true;
-      for (const c of this.captures) if (this.inNote < c.inNoteFrom) c.text(' ');
+      for (const c of this.captures) if (this.inNote < c.inNoteFrom && this.inAside < c.asideFrom) c.text(' ');
     }
     if (tei && BREAKS.has(local)) for (const c of this.captures) c.brk(attr('break') === 'no');
     if (!tei) return;
+    // Inside a place name, a <geo>, <location>, <idno> or <note> says something about the place, not
+    // its name: its words are left out of the name ("Beth Loya<geo>31.56,34.93</geo>" is "Beth Loya").
+    // A <geo> in a place name in the text is reported, once each, and not carried.
+    if (this.isPlace(t)) el.placeName = true;
+    if (ASIDE.has(local) && this.stack.slice(0, -1).some((e) => e.placeName)) {
+      el.aside = true; this.inAside++;
+      if (local === 'geo' && this.inText && !this.inHeader) { const line = this.parser.line; this.capture((c) => this.report('tei-place-geo', `${norm(c.pref) || 'an empty geo'} on line ${line}`)); }
+    }
 
     if (local === 'TEI' || local === 'teiCorpus') {
       this.scopes.push({ hdr: { titles: [], authors: [], editors: [], idnos: [], licences: [], sourceDescs: [], prefixDefs: [], geoDecls: [], queue: [] } });
@@ -627,6 +639,7 @@ export class TeiReader {
     if (el.choice && el.deferred.length) this.choiceDone(el);
     if (el.part) for (const c of this.captures) c.partClose(depth);
     if (el.note) this.inNote--;
+    if (el.aside) this.inAside--;
     if (el.punctuation) this.inPunctuation--;
     if (el.mention) this.inPlaceMention--;
     if (el.div) { this.divs.pop(); this.line = undefined; this.milestones = new Map(); }
