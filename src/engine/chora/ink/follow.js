@@ -39,6 +39,17 @@ export function follow(g, start, { width, widthAt = () => width, jumps = true, m
   const gaps = [];
   const dirOf = (px) => { const a = xy(px[0]), b = xy(px[Math.min(px.length - 1, K)]); return [b[0] - a[0], b[1] - a[1]]; };
 
+  // The direction a run of pixels runs (least squares, from its first towards its last).
+  function runDir(px) {
+    let mx = 0, my = 0;
+    for (const p of px) { const [x, y] = xy(p); mx += x; my += y; }
+    mx /= px.length; my /= px.length;
+    let sxx = 0, sxy = 0, syy = 0;
+    for (const p of px) { const [x, y] = xy(p), dx = x - mx, dy = y - my; sxx += dx * dx; sxy += dx * dy; syy += dy * dy; }
+    const th = 0.5 * Math.atan2(2 * sxy, sxx - syy), u = [Math.cos(th), Math.sin(th)], a = xy(px[0]), b = xy(px.at(-1));
+    return u[0] * (b[0] - a[0]) + u[1] * (b[1] - a[1]) < 0 ? [-u[0], -u[1]] : u;
+  }
+
   // A way on from a node, `need` pixels long if it can be: the chain, and on from its far end along the chain
   // that turns least (thinning can leave a fork as two junctions a few pixels apart).
   function onward(o, need) {
@@ -93,8 +104,12 @@ export function follow(g, start, { width, widthAt = () => width, jumps = true, m
           const nd = g.nodes[node];
           if (din[0] || din[1]) {
             for (const o of options) {
+              // o.dir, the way's own direction: the line fitted to its pixels from Lb on along it to 2Lb on, clear of the
+              // junction (thinning sets the node back towards the stem, so that the node's directions to the two ways are
+              // wider apart than the ways are, by 3° at 28°).
               const run = onward(o, 2 * Lb), Q = xy(run[Math.min(run.length - 1, 2 * Lb)]);
-              o.long = angle(din, [Q[0] - P[0], Q[1] - P[1]]); o.dir = [Q[0] - nd.x, Q[1] - nd.y];
+              o.long = angle(din, [Q[0] - P[0], Q[1] - P[1]]);
+              o.dir = run.length > Lb + 2 ? runDir(run.slice(Lb, 2 * Lb + 1)) : [Q[0] - nd.x, Q[1] - nd.y];
             }
             const byLong = [...options].sort((p, q) => p.long - q.long), [o1, o2] = byLong;
             const split = angle(o1.dir, o2.dir);
@@ -135,7 +150,9 @@ export function follow(g, start, { width, widthAt = () => width, jumps = true, m
         continue;
       }
       const why = options.length ? 'turn' : node !== undefined && live(g, node).length > 1 ? 'used' : 'end';
-      if (!jumps) return why;
+      // A jump is for a break in the ink: not where the line meets ink that turns too far (a T, a line ending on a road
+      // across it), whose own pixels a jump would find a pixel or two ahead and run along.
+      if (!jumps || why === 'turn') return why;
       // A jump across a gap: the nearest unused pixel ahead, within reach and the cone.
       const e = xy(path.at(-1));
       let best = null, bd = Infinity;

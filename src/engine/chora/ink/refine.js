@@ -50,16 +50,62 @@ export const darkness = (L, w, h) => (x, y) => { const v = at(L, w, h, x, y); re
 export const maskInk = (M, w, h) => (x, y) => at(M, w, h, x, y);
 
 /**
+ * The median of the values of `v` within `M` places either way of each (NaN, not measured, left out; NaN where none
+ * is), by a window kept sorted as it slides: each step one value in and one out, not a sort a place.
+ */
+export function windowMedians(v, M) {
+  const n = v.length, out = new Float64Array(n).fill(NaN), win = [];
+  const find = (x) => { let lo = 0, hi = win.length; while (lo < hi) { const m = (lo + hi) >> 1; if (win[m] < x) lo = m + 1; else hi = m; } return lo; };
+  const put = (x) => { if (!Number.isNaN(x)) win.splice(find(x), 0, x); };
+  const drop = (x) => { if (!Number.isNaN(x)) win.splice(find(x), 1); };
+  for (let j = 0; j <= Math.min(n - 1, M); j++) put(v[j]);
+  for (let k = 0; k < n; k++) {
+    if (win.length) out[k] = win[win.length >> 1];
+    if (k + M + 1 < n) put(v[k + M + 1]);
+    if (k - M >= 0) drop(v[k - M]);
+  }
+  return out;
+}
+
+/**
+ * The angle (degrees) the path `pts` turns through at each point, from the chord `T` points back to the chord as far on;
+ * nearer an end than T, over as many points as there are to the end (0 nearer than `least`).
+ */
+export function turns(pts, T, least = T) {
+  const n = pts.length, out = new Float64Array(n);
+  for (let k = least; k < n - least; k++) {
+    const t = Math.min(T, k, n - 1 - k), a = pts[k - t], b = pts[k], c = pts[k + t];
+    const ux = b[0] - a[0], uy = b[1] - a[1], vx = c[0] - b[0], vy = c[1] - b[1], L = Math.hypot(ux, uy) * Math.hypot(vx, vy);
+    out[k] = L ? (Math.acos(Math.max(-1, Math.min(1, (ux * vx + uy * vy) / L))) * 180) / Math.PI : 0;
+  }
+  return out;
+}
+
+/**
+ * Where a path turns by more than CORNER_TURN degrees (from the chord CORNER_SPAN × `span` points back to the chord as
+ * far on, and over twice that; nearer the path's end, as far as the end), its points are not let go as burrs (refinePath): a corner's points are all off their
+ * chords and its cross-section is wide, by its shape. Measured on lines at seeded slants (over CORNER_SPAN × `span`):
+ * a drawn 30° corner 3 px wide turns by less than 25° by its skeleton (thinning rounds it), and the kinks burrs make
+ * by 15° at most (at 10°, burrs' kinks are kept).
+ */
+export const CORNER_TURN = 20, CORNER_SPAN = 3;
+
+/**
  * Points [[x, y]] of a path (centre convention), each moved across the path to the ink's centre, except
- * those `skip(p)` says to leave (near a junction). The normal is the path's own, over `span` points
- * either way. Moves of more than `limit` are not made. With `wide`, a point whose cross-section of ink is
- * wider than the line about it (the median over `span` × 6 points either way) by more than `wide` pixels, or
- * with none to measure, is let go: a burr or a blot on one side, which would draw it aside. Not the path's first or last point.
+ * those `skip(p)` says to leave (near a junction), which are kept as they are. The normal is the path's own, over `span` points
+ * either way. Moves of more than `limit` are not made. With `wide`, two passes let points go, neither at a corner
+ * (where the path turns by more than CORNER_TURN over CORNER_SPAN × `span` points either way, and twice that: a corner's cross-section is
+ * wide, and its points are off their chords, by its shape) nor at the path's first or last point:
+ * - a point whose cross-section of ink is wider than the line about it (the median over `span` × 6 points either
+ *   way) by more than `wide` pixels, or with none to measure: a burr or a blot on one side, which would draw it aside;
+ * - then a point off the chord of the points `span` either side of it by more than `wide` more than the points
+ *   within `span` of it are (their median): a kink where a burr too short to branch bent the line, and its ink is
+ *   not wide enough to tell. A curve's points are all off their chords alike, and kept.
  */
 export function refinePath(pts, ink, { half, span = 2, limit = 1, skip = () => false, wide = Infinity } = {}) {
-  const runs = new Float64Array(pts.length).fill(NaN);
+  const runs = new Float64Array(pts.length).fill(NaN), left = new Uint8Array(pts.length);
   const moved = pts.map((p, k) => {
-    if (skip(p)) return p;
+    if (skip(p)) { left[k] = 1; return p; }
     const a = pts[Math.max(0, k - span)], b = pts[Math.min(pts.length - 1, k + span)];
     const tx = b[0] - a[0], ty = b[1] - a[1], L = Math.hypot(tx, ty);
     if (!L) return p;
@@ -70,34 +116,24 @@ export function refinePath(pts, ink, { half, span = 2, limit = 1, skip = () => f
     return d === null || Math.abs(d) > limit ? p : [p[0] + d * nx, p[1] + d * ny];
   });
   if (!Number.isFinite(wide)) return moved;
-  const M = 6 * span, keep = [];
+  // Kept as they are: the points skipped, and a corner's. A corner turns over the longer baseline too; the bend thinning
+  // gives a line where a narrow fork's ink joins it does not.
+  const turn = turns(pts, CORNER_SPAN * span, 2 * span), turn2 = turns(pts, 2 * CORNER_SPAN * span, 2 * span), corner = (k) => left[k] === 1 || (turn[k] > CORNER_TURN && turn2[k] > CORNER_TURN);
+  // Only where most of the points about it were measured (their median a width): a line whose cross-sections
+  // are mostly not measured keeps its points.
+  const runMed = windowMedians(runs, 6 * span), keep = [], at = [];
   for (let k = 0; k < moved.length; k++) {
-    // Only where most of the points about it were measured (their median a width): a line whose cross-sections
-    // are mostly not measured keeps its points.
-    if (k > 0 && k < moved.length - 1 && !Number.isNaN(runs[k])) {
-      const near = [];
-      for (let j = Math.max(0, k - M); j <= Math.min(moved.length - 1, k + M); j++) if (!Number.isNaN(runs[j])) near.push(runs[j]);
-      near.sort((p, q) => p - q);
-      if (runs[k] > near[near.length >> 1] + wide) continue;
-    }
-    keep.push(moved[k]);
+    if (k > 0 && k < moved.length - 1 && !Number.isNaN(runs[k]) && !corner(k) && runs[k] > runMed[k] + wide) continue;
+    keep.push(moved[k]); at.push(k);
   }
-  // And a point off the chord of the points `span` either side of it by more than `wide` more than the points
-  // about it are (a kink where a burr too short to branch bent the line, and its ink is not wide enough to tell):
-  // let go. A curve's points are all off their chords alike, and kept.
   const n = keep.length, dev = new Float64Array(n).fill(NaN);
   for (let k = span; k < n - span; k++) {
     const a = keep[k - span], b = keep[k + span], tx = b[0] - a[0], ty = b[1] - a[1], L = Math.hypot(tx, ty);
     if (L) dev[k] = ((keep[k][0] - a[0]) * ty - (keep[k][1] - a[1]) * tx) / L;
   }
-  const out = [];
+  const devMed = windowMedians(dev, span), out = [];
   for (let k = 0; k < n; k++) {
-    if (!Number.isNaN(dev[k])) {
-      const near = [];
-      for (let j = Math.max(0, k - M); j <= Math.min(n - 1, k + M); j++) if (!Number.isNaN(dev[j])) near.push(dev[j]);
-      near.sort((p, q) => p - q);
-      if (Math.abs(dev[k] - near[near.length >> 1]) > wide) continue;
-    }
+    if (!Number.isNaN(dev[k]) && !corner(at[k]) && Math.abs(dev[k] - devMed[k]) > wide) continue;
     out.push(keep[k]);
   }
   return out;
