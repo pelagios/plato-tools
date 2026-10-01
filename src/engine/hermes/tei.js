@@ -142,6 +142,7 @@ export const TEI_KINDS = {
   'address-pleiades-part': 'warning',
   'tei-source-no-address': 'warning',
   'tei-none-linked': 'warning',
+  'tei-editorial-undecided': 'warning',
 };
 
 // The elements read as place names. <placeName> is TEI's place name; <settlement>, <region>,
@@ -165,10 +166,9 @@ const PRINTED = ['orig', 'abbr', 'sic', 'lem'];
 // ("face a"); a <div> with neither type nor n says nothing a reader could find it by.
 const DIVS = /^div[1-7]?$/;
 const BREAKS = new Set(['lb', 'pb', 'cb']);
-// The types of an edition's own editorial divs (EpiDoc's): one of these before the edition div may be
-// waiting for it. Any other top-level div, or a place name outside the divs, says the text is not
-// divided as such an edition is.
-const EDITORIAL_DIVS = new Set(['commentary', 'translation', 'apparatus', 'bibliography', 'notes']);
+// The most place names held while it is not known whether the <text> has an edition div (below,
+// "Whose words"): past it, the text is read as having none, and that is reported.
+export const HOLD_CAP = 10000;
 // What placeAddress (./addresses.js) says of an address that must not be carried, as a kind here.
 const WHG_LOST = { 'whg-portal-record': 'tei-whg-record', 'whg-staging': 'tei-whg-staging' };
 // The attributes of a place name that are read (xml:lang for the name's language; type only where it
@@ -343,13 +343,14 @@ export class TeiReader {
   // edition (textparts) are the edition. A file with no edition div is read as it always was:
   // its notes, commentary and translations are the edition's text.
   //
-  // Where such a place name comes before any edition div has been seen, whether the file has one is
-  // not known yet. It alone is held (in `held`), until an edition div opens (it is the editors'), or
-  // the text shows it is not divided as an edition is (a top-level div of another type than
-  // EDITORIAL_DIVS, or a place name outside the divs and the notes), or the <text> ends; then it is
-  // read as before, emitted out of the file's order, as a name waiting for a <place> is. Everything
-  // else is emitted at once, so what is held is only such names, and in a text with no edition div
-  // only those before its first div of its own.
+  // Where such a place name (in any top-level div that is not the edition, of whatever type, or in a
+  // note) comes before any edition div has been read, whether the file has one is not known yet. It
+  // is held (in `held`) until an edition div opens (it is the editors'), or a place name is read
+  // outside every top-level div and note (the text has no edition div), or the <text> ends; then it
+  // is read as before, emitted out of the file's order, as a name waiting for a <place> is. Held
+  // names are at most HOLD_CAP: the next is read as if the text had no edition div, the names held
+  // are emitted as ordinary, and that is reported once (tei-editorial-undecided). Everything else is
+  // emitted at once.
   /** The editors' part a place name opened now would be in, if the file has an edition div: the top-level div's type, else 'note'. */
   editorialPart() {
     if (this.topDiv && this.topDiv.type !== 'edition') return this.topDiv.type || 'div';
@@ -495,10 +496,9 @@ export class TeiReader {
         const type = attr('type'), label = [type === 'textpart' ? attr('subtype') || type : type, attr('n')].filter(Boolean).join(' ');
         if (!this.divs.length) {
           el.topDiv = true; this.topDiv = { type };
+          // Any other top-level div, of whatever type, may come before an edition div: its place
+          // names wait for it (deliver).
           if (type === 'edition') { this.editionSeen = true; this.decide(true); }
-          // A top-level div of the text's own (a chapter, a letter, a div with no type) is not an
-          // edition's editorial part: the text is not divided as an edition is, so nothing waits.
-          else if (!this.editionDecided && !EDITORIAL_DIVS.has(type)) this.decide(false);
         }
         this.divs.push(label); el.div = true; this.line = undefined; this.milestones = new Map();
       } else if (local === 'pb') { this.page = attr('n'); this.line = undefined; }
@@ -880,7 +880,12 @@ export class TeiReader {
     const m = d.m;
     // A place name with no words (<placeName ref="…"/>) gives no name to attest.
     if (!m.toponym) { this.report('tei-place-empty', `<${m.element}${m.pointers.length ? ` ref="${m.pointers.join(' ')}"` : ` ${m.pointerWords}`}> on line ${m.fileLine}`); return; }
-    if (d.editorial && !this.editionSeen && !this.editionDecided) { this.held.push(d); return; }
+    if (d.editorial && !this.editionSeen && !this.editionDecided) {
+      if (this.held.length < HOLD_CAP) { this.held.push(d); return; }
+      // Too many to hold: read as a text with no edition div, from here on.
+      if (!this.undecidedReported) { this.undecidedReported = true; this.report('tei-editorial-undecided', `${HOLD_CAP.toLocaleString('en')} place names held, the next on line ${m.fileLine}`); }
+      this.decide(false);
+    }
     this.place(d, this.editionSeen ? d.editorial : undefined);
   }
   /** A place name with words and a ref, whose words are known to be the source's (editorial undefined) or the editors' (the part they are in). */

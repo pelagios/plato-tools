@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { addPlatoFormats, strictFormatLogger } from '../src/lib/formats.js';
-import { teiToDocument, TeiReader, TEI_KINDS, EDITORIAL_IRI, setEditorialIriForTests, teiReadingRefusal, teiKeyPrefixes, splitKey } from '../src/engine/hermes/tei.js';
+import { teiToDocument, TeiReader, TEI_KINDS, HOLD_CAP, EDITORIAL_IRI, setEditorialIriForTests, teiReadingRefusal, teiKeyPrefixes, splitKey } from '../src/engine/hermes/tei.js';
 import { addressFromPattern, patternFault } from '../src/engine/hermes/addresses.js';
 import { DataError } from '../src/engine/input.js';
 import { LOSS_TEXT } from '../src/engine/report.js';
@@ -108,6 +108,19 @@ test('a commentary BEFORE the edition div is held until the edition opens, then 
   assert.deepEqual(evs.map((e) => e.type), ['header', 'attestation'], 'only events, never a place name still held');
   assert.equal(evs[1].value.names[0].toponym, 'Text');
   assert.ok(kinds.includes('tei-place-editorial'));
+});
+
+test('a top-level div of any type is the editors\' in a file with an edition div, before it as after it (an introduction both sides of the edition)', () => {
+  const s = tei(`<div type="introduction"><p>${pn(1, 'Before')}</p></div><div type="edition"><ab>${pn(2, 'Text')}</ab></div><div type="introduction"><p>${pn(3, 'After')}</p></div>`);
+  const m = mapped(s);
+  assert.deepEqual(names(m), ['Text'], 'control: the edition\'s name is converted');
+  assert.deepEqual(examples(m, 'tei-place-editorial'), [
+    'introduction: Before (https://pleiades.stoa.org/places/1) on line 2',
+    'introduction: After (https://pleiades.stoa.org/places/3) on line 2',
+  ]);
+  assert.ok(!m.kinds.has('tei-editorial-undecided'));
+  withEditorial(() => assert.deepEqual(mapped(s, { commentaryPlaces: true }).doc.attestations.map((a) => [a.names[0].toponym, a.formStatus.replace(PLATO, '')]),
+    [['Before', 'Editorial'], ['Text', 'Attested'], ['After', 'Editorial']]));
 });
 
 test('with no edition div, notes, commentary and translations are read as before, in the file\'s order', () => {
@@ -405,8 +418,9 @@ import vm from 'node:vm';
 v8.setFlagsFromString('--expose-gc');
 const gc = vm.runInNewContext('gc');
 /** Read a constructed file of `n` lines, each a place name and one in a note, after an early note, a chunk at a time, keeping nothing but counts. */
-function readLarge(n, { divs }) {
-  const r = new TeiReader(() => {}, { fileName: 'large.xml' });
+function readLarge(n, { divs, translation }) {
+  const reported = [];
+  const r = new TeiReader((k, e) => reported.push([k, e]), { fileName: 'large.xml' });
   let maxHeld = 0, attestations = 0, early = 0;
   gc();
   const heap0 = process.memoryUsage().heapUsed;
@@ -415,24 +429,41 @@ function readLarge(n, { divs }) {
     for (const e of evs) if (e.type === 'attestation') { attestations++; if (e.value.names[0].toponym === 'Early') early++; }
     maxHeld = Math.max(maxHeld, r.held.length);
   };
-  take(r.write(`<?xml version="1.0" encoding="UTF-8"?>\n<TEI xmlns="http://www.tei-c.org/ns/1.0">${HEADER}<text><body><p>Before: <note>${pn(1, 'Early')}</note></p>${divs ? '<div type="letter">' : ''}`));
-  const line = `<p>${pn(2, 'Place')}<note>${pn(3, 'Noted')}</note></p>\n`;
+  const start = translation ? '<div type="translation">' : `<p>Before: <note>${pn(1, 'Early')}</note></p>${divs ? '<div type="letter">' : ''}`;
+  take(r.write(`<?xml version="1.0" encoding="UTF-8"?>\n<TEI xmlns="http://www.tei-c.org/ns/1.0">${HEADER}<text><body>${start}`));
+  const line = translation ? `<p>${pn(2, 'Place')}</p>\n` : `<p>${pn(2, 'Place')}<note>${pn(3, 'Noted')}</note></p>\n`;
   for (let i = 0; i < n; i += 1000) {
     take(r.write(line.repeat(Math.min(1000, n - i))));
     if (i % 20000 === 0) { gc(); peak = Math.max(peak, process.memoryUsage().heapUsed); }
   }
-  take(r.write(`${divs ? '</div>' : ''}</body></text></TEI>\n`));
+  take(r.write(`${divs || translation ? '</div>' : ''}</body></text></TEI>\n`));
   take(r.close());
-  return { maxHeld, attestations, early, growthMB: (peak - heap0) / 1e6 };
+  return { maxHeld, attestations, early, growthMB: (peak - heap0) / 1e6, undecided: reported.filter(([k]) => k === 'tei-editorial-undecided').map(([, e]) => e), editorial: reported.filter(([k]) => k === 'tei-place-editorial').length };
 }
 
-for (const divs of [true, false]) {
-  test(`200,000 lines of place names and notes after an early note, no edition div${divs ? ', in a top-level div of the text' : ', no divs'}: at most one name is held, and the held names are still emitted`, () => {
-    const got = readLarge(200000, { divs });
-    assert.equal(got.attestations, 400001);
-    assert.equal(got.early, 1, 'the held name is emitted, as an ordinary attestation');
-    assert.ok(got.maxHeld <= 1, `held ${got.maxHeld}`);
-    // holding every attestation would be hundreds of MB; reading as a stream stays well under this
+test('200,000 lines of place names and notes after an early note, no edition div, no divs: at most one name is held, and the held name is still emitted', () => {
+  const got = readLarge(200000, { divs: false });
+  assert.equal(got.attestations, 400001);
+  assert.equal(got.early, 1, 'the held name is emitted, as an ordinary attestation');
+  assert.ok(got.maxHeld <= 1, `held ${got.maxHeld}`);
+  assert.deepEqual(got.undecided, [], 'a name outside the divs and notes decides it: nothing to report');
+  // holding every attestation would be hundreds of MB; reading as a stream stays well under this
+  assert.ok(got.growthMB < 50, `heap grew ${got.growthMB.toFixed(1)} MB`);
+});
+// A top-level div of any type may come before an edition div, so its names are held, but never more
+// than HOLD_CAP: then the text is read as having no edition div, said once, and every name emitted.
+for (const [what, opts, n, total] of [['a top-level div of the text (a letter), after an early note', { divs: true }, 200000, 400001], ['a translation only (no edition div)', { translation: true }, 100000, 100000]]) {
+  test(`${n.toLocaleString('en')} lines of place names in ${what}: at most ${HOLD_CAP.toLocaleString('en')} names are held, reported once, and every name is emitted as the source's words`, () => {
+    const got = readLarge(n, opts);
+    assert.equal(HOLD_CAP, 10000);
+    assert.equal(got.attestations, total, 'every name is emitted');
+    assert.ok(got.maxHeld <= HOLD_CAP, `held ${got.maxHeld}`);
+    assert.ok(got.maxHeld >= HOLD_CAP / 2, `control: names were held (${got.maxHeld}), so the cap was what stopped it`);
+    assert.equal(got.undecided.length, 1);
+    assert.match(got.undecided[0], /^10,000 place names held, the next on line \d+$/);
+    assert.equal(got.editorial, 0, 'none is taken for the editors\'');
+    assert.equal(TEI_KINDS['tei-editorial-undecided'], 'warning');
+    assert.match(LOSS_TEXT['tei-editorial-undecided'], /^No edition part was found among the first 10,000 place names/);
     assert.ok(got.growthMB < 50, `heap grew ${got.growthMB.toFixed(1)} MB`);
   });
 }

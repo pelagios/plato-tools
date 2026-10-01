@@ -275,12 +275,17 @@ readers link to those headings, so keep them.
   follows the prefix), and `#x` through the one web-address `<idno>` of `<place xml:id="x">` in the
   same file (several: ambiguous, nothing converted). A place name in an `<rdg>`, or in the part of a
   `<choice>` not taken, is a variant (`tei-variant`): one in a part of a `<choice>` waits until the
-  `<choice>` closes. In a `<text>` with a top-level `div type="edition"`, every other top-level div
-  and every `<note>` is the editors' (`tei-place-editorial`); a place name there that comes before
-  the edition div is held (only it, in `held`) until the edition div opens, a top-level div of
-  another type than `EDITORIAL_DIVS` opens or a place name is read outside the divs and notes (no
-  edition div, then), or the `<text>` ends;
-  everything else is emitted at once, so a held name comes out after the names read after it. The reading
+  `<choice>` closes. In a `<text>` with a top-level `div type="edition"`, every other top-level div,
+  of whatever type (an introduction as much as a commentary), before the edition div as after it,
+  and every `<note>` is the editors' (`tei-place-editorial`). A place name in a top-level div that
+  is not the edition, or in a note, read before any edition div is held (only it, in `held`) until
+  the edition div opens (it is the editors'), a place name is read outside every top-level div and
+  note, or the `<text>` ends (no edition div, then: it is the source's words). At most `HOLD_CAP`
+  (10,000) names are held: the next decides the `<text>` as having no edition div, the held names
+  are emitted as ordinary, and `tei-editorial-undecided` (a warning) is reported once, so a
+  translation-only or commentary-only file holds no more than that; an edition div found after
+  that makes only the names after it the editors'.
+  Everything else is emitted at once, so a held name comes out after the names read after it. The reading
   options that convert the editors' words (`commentaryPlaces`, `headerPlaces`) are refused while
   `EDITORIAL_IRI` is null (`teiReadingRefusal`); tests set it with `setEditorialIriForTests`. With `listPlaces`, a `<place>` gives a Headword
   attestation (`listPlace()`); one in the teiHeader goes on the header's `queue`, run at
