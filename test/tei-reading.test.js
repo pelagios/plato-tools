@@ -294,6 +294,23 @@ test('headerPlaces: a prefixDef declared after the msDesc still resolves a finds
   });
 });
 
+test('headerPlaces: a findspot whose ref points to a <place> in <back>, read after the header, waits for it and resolves', () => {
+  withEditorial(() => {
+    const h = msHeader({ provenance: '<placeName ref="#athens">Athens</placeName>' });
+    const s = tei(`<p>${pn(9, 'Text')}</p>`, h).replace('</body>', '</body><back><listPlace><place xml:id="athens"><placeName>Athenae</placeName><idno type="URI">https://pleiades.stoa.org/places/579885</idno></place></listPlace></back>');
+    const m = mapped(s, { headerPlaces: true });
+    const found = m.doc.attestations.filter((a) => a.citations[0].locator === 'teiHeader, provenance (found)');
+    assert.deepEqual(found.map((a) => [a.about, a.names[0].toponym, a.formStatus]), [['https://pleiades.stoa.org/places/579885', 'Athens', EDITORIAL]]);
+    assert.equal(found[0].relations[0].relatesTo, 'https://example.org/e');
+    assert.match(found[0].notes, /ref="#athens"/);
+    assert.ok(!m.kinds.has('tei-ref-local'), examples(m, 'tei-ref-local').join('; '));
+    assert.ok(names(m).includes('Text'), 'control: the text is read');
+    // control: a ref to a place that is in no part of the file is still reported, at the end
+    const none = mapped(tei(`<p>${pn(9, 'Text')}</p>`, h), { headerPlaces: true });
+    assert.deepEqual(examples(none, 'tei-ref-local'), ['#athens (no place with this id in the file)']);
+  });
+});
+
 // ---- Q3: keys ------------------------------------------------------------------------------------
 const KEYS = 'keys-constructed.xml';
 const TGN = 'http://vocab.getty.edu/tgn/{id}';

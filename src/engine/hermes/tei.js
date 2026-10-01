@@ -761,7 +761,8 @@ export class TeiReader {
       m.extraNotes = ["The edition's header gives this as the place of origin (where the object was made, or the text composed or inscribed); PLATO has no relation for a place of origin."];
       this.report('tei-header-origin', words);
     }
-    this.emit(m, true);
+    // As a name in the text: one whose ref points to a <place> not read yet (in <back>, say) waits for it.
+    this.place({ m }, undefined);
   }
 
   /** The host of the edition's own address (its publicationStmt idno of type URI or URL), or undefined: a DOI is a deposit, not the edition's site. */
