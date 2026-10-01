@@ -69,7 +69,7 @@ function onDetected({ input: inp, targets: t }) {
     if (k === INPUT_TO_TARGET[inp.format]) continue;
     const o = document.createElement('option'); o.value = k; o.textContent = v.label; sel.appendChild(o);
   }
-  if (tool === 'figures') presetFigures();   // Arithmos chosen first: N-Triples, now that it is offered
+  if (tool) chooseTool(tool);   // a tool chosen first: narrowed again for this file (Arithmos: N-Triples, now that it is offered)
   document.querySelector('[data-for="tables-input"]').hidden = inp.format !== 'tables';
   // Hermes: a table of places shows which column holds what before it is run, and the web address
   // its place ids are made under.
@@ -330,6 +330,7 @@ $('picker').onchange = (e) => { choose(e.target.files); e.target.value = ''; };
 // to open them. Only then, not on every choice: the browser may keep a copy of a stored file, and
 // the files here may be of any size.
 document.addEventListener('click', async (e) => {
+  if (e.defaultPrevented) return;   // a first tap that showed a tooltip, not a choice of the way
   const a = e.target.closest('a[href="./chora.html"]');
   if (!a || !files.length || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;
   e.preventDefault();
@@ -380,11 +381,17 @@ let tool = null;
 const toolFromHash = () => { const m = /^#tool=([a-z]+)$/.exec(location.hash); return m && TOOLS[m[1]] ? m[1] : null; };
 const reduceMotion = () => !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 function chooseTool(key) {
+  const was = tool;
   tool = TOOLS[key] ? key : null;
-  for (const el of document.querySelectorAll('#action [data-tools]')) el.hidden = !!tool && !el.dataset.tools.split(' ').includes(tool);
+  if (was === 'figures' && tool !== 'figures') leaveFigures();
+  // Arithmos with a file that is already N-Triples: there is nothing to convert it to that carries the
+  // Data Cube, so the step offers the check instead, and says why.
+  const asCheck = tool === 'figures' && input?.format === 'ntriples';
+  const shownFor = asCheck ? 'check' : tool;
+  for (const el of document.querySelectorAll('#action [data-tools]')) el.hidden = !!tool && !el.dataset.tools.split(' ').includes(shownFor);
   // Convert stands alone when Check is not shown, and is then the step's main button.
-  $('convert').classList.toggle('primary', tool === 'convert' || tool === 'figures');
-  $('action-what').textContent = tool ? TOOLS[tool].heading : EVERY_ACTION;
+  $('convert').classList.toggle('primary', shownFor === 'convert' || shownFor === 'figures');
+  $('action-what').textContent = asCheck ? 'Check it: it is already N-Triples' : tool ? TOOLS[tool].heading : EVERY_ACTION;
   $('action').classList.toggle('narrowed', !!tool);
   for (const a of document.querySelectorAll('#toolbox .tool-link[data-tool]')) {
     if (a.dataset.tool === tool) a.setAttribute('aria-current', 'true'); else a.removeAttribute('aria-current');
@@ -399,16 +406,29 @@ function chooseTool(key) {
     all.type = 'button'; all.className = 'link'; all.id = 'every-action'; all.textContent = 'Show every action';
     all.onclick = () => { chooseTool(null); setHash(null); focusStep1(); };
     note.appendChild(all);
-    if (tool === 'figures') presetFigures();
+    if (tool === 'figures' && !asCheck) presetFigures();
   }
   Object.assign(state, { tool });
 }
 // Arithmos: Convert to N-Triples, with the Data Cube option (in Options) ticked. Applied again when a
-// file is detected, since the list of formats to convert to is made then.
+// file is detected, since the list of formats to convert to is made then. Leaving Arithmos for another
+// tool, or for every action, undoes both: the format chosen before it (or the first offered) comes
+// back, and the Data Cube option is cleared, so that a later conversion adds no Data Cube unasked.
+let beforeFigures = null;
 function presetFigures() {
   const sel = $('target');
+  if (beforeFigures === null) beforeFigures = sel.value;
   if ([...sel.options].some((o) => o.value === 'ntriples')) { sel.value = 'ntriples'; sel.onchange(); }
   $('cube').checked = true;
+}
+function leaveFigures() {
+  const sel = $('target');
+  $('cube').checked = false;
+  if (sel.options.length) {
+    sel.value = [...sel.options].some((o) => o.value === beforeFigures) ? beforeFigures : sel.options[0].value;
+    sel.onchange();
+  }
+  beforeFigures = null;
 }
 function setHash(key) {
   try { history.replaceState(history.state, '', location.pathname + location.search + (key ? `#tool=${key}` : '')); } catch {}
@@ -419,6 +439,8 @@ function focusStep1() {
   h.focus({ preventScroll: true });
 }
 $('toolbox').addEventListener('click', (e) => {
+  // A first tap on a card's name shows its tooltip, and goes no further (src/lib/tooltip.js).
+  if (e.defaultPrevented) return;
   const a = e.target.closest('.tool-link[data-tool]');
   if (!a || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;
   e.preventDefault();

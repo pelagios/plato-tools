@@ -1486,10 +1486,51 @@ def front_page_checks(browser, url):
                              'note': page.inner_text('#for-tool'), 'target': page.input_value('#target'), 'cube': page.is_checked('#cube')}
                 seen[key]['ok'] = seen[key]['shown'] == shown and seen[key]['hash'] == f'#tool={key}' and seen[key]['current'] == [f'#tool={key}']
             fig = seen['figures']; fig['ok'] = fig['ok'] and fig['target'] == 'ntriples' and fig['cube'] and 'Arithmos' in fig['note']
+            # Leaving Arithmos undoes its preset: the format chosen before it, and no Data Cube option.
+            left = seen['versions']; left['ok'] = left['ok'] and left['target'] == seen['convert']['target'] != 'ntriples' and not left['cube']
+            # And so does "Show every action", straight from Arithmos.
+            page.click('#toolbox .tool-link[href="#tool=figures"]'); again = (page.input_value('#target'), page.is_checked('#cube'))
             page.click('#every-action'); back = page.evaluate(VISIBLE, ACTIONS); hash_after = page.evaluate('() => location.hash')
-            return (all(v['ok'] for v in seen.values()) and all(back.values()) and hash_after == '' and page.evaluate('() => history.length') == n0), {'per tool': seen, 'every action again': back, 'hash': hash_after}
+            after_all = (page.input_value('#target'), page.is_checked('#cube'))
+            return (all(v['ok'] for v in seen.values()) and all(back.values()) and hash_after == '' and page.evaluate('() => history.length') == n0
+                    and again == ('ntriples', True) and after_all == (seen['convert']['target'], False)), {'per tool': seen, 'every action again': back, 'hash': hash_after, 'Arithmos again': again, 'after every action': after_all}
         finally: ctx.close()
-    attempt('front page: choosing a tool\'s card narrows step 2 to that tool (Arithmos: N-Triples with the Data Cube option), and "Show every action" undoes it', narrowed)
+    attempt('front page: choosing a tool\'s card narrows step 2 to that tool (Arithmos: N-Triples with the Data Cube option, undone on leaving it), and "Show every action" undoes it', narrowed)
+
+    def figures_on_ntriples():
+        # Arithmos with a file that is already N-Triples: the step offers the check and says why, rather
+        # than a heading about converting over a list without N-Triples in it.
+        ctx, page = fresh(hash='#tool=figures')
+        try:
+            nt = '<https://example.org/p/a> <http://www.w3.org/2000/01/rdf-schema#label> "A" .\n'
+            page.evaluate('''(text) => { const dt = new DataTransfer(); dt.items.add(new File([text], 'figures.nt', { type: 'application/n-triples' }));
+              document.getElementById('drop').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true })); }''', nt)
+            s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'detection')
+            vis = page.evaluate(VISIBLE, ACTIONS); heading = page.inner_text('#action-h')
+            return (s.get('format') == 'ntriples' and vis['check'] and not vis['convert'] and 'already N-Triples' in heading
+                    and not any(vis[a] for a in ACTIONS if a != 'check')), {'state': s.get('format'), 'visible': vis, 'heading': heading}
+        finally: ctx.close()
+    attempt('front page: Arithmos with a file already in N-Triples offers the check, and says it is already N-Triples', figures_on_ntriples)
+
+    def touch():
+        # On a touch screen a first tap on a card's name shows its tooltip and chooses nothing (and Chora's
+        # takes no one to its page); a second tap chooses.
+        ctx = browser.new_context(viewport={'width': 390, 'height': 844}, has_touch=True, is_mobile=True)
+        page = ctx.new_page(); page.set_default_timeout(T(8) * 1000)
+        try:
+            page.goto(NOTOOLS if PROVE else url)
+            if wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready').get('phase') != 'ready': raise RuntimeError('the main page did not start')
+            name = '#toolbox .tool-link[href="#tool=check"] .why'
+            page.tap(name); page.wait_for_timeout(300)
+            first = {'tip': shown_tips(page, 'ἔλεγχος', 3), 'hash': page.evaluate('() => location.hash'), 'tool': page.evaluate('() => window.__plato.tool ?? null')}
+            page.tap(name); page.wait_for_timeout(300)
+            second = {'hash': page.evaluate('() => location.hash'), 'tool': page.evaluate('() => window.__plato.tool ?? null')}
+            page.tap('#toolbox .tool-link[href="./chora.html"] .why'); page.wait_for_timeout(500)
+            chora = {'tip': shown_tips(page, 'χώρα', 3), 'url': page.url}
+            return (len(first['tip']) == 1 and first['hash'] == '' and first['tool'] is None and second['hash'] == '#tool=check' and second['tool'] == 'check'
+                    and len(chora['tip']) == 1 and not chora['url'].endswith('chora.html')), {'first tap': first, 'second tap': second, 'Chora first tap': chora}
+        finally: ctx.close()
+    attempt('front page on a touch screen: a first tap on a card\'s name shows its tooltip and chooses nothing; a second tap chooses', touch)
 
     def focus_step1():
         ctx, page = fresh()

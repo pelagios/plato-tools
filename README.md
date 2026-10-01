@@ -39,12 +39,13 @@ also in this repository, in [`public/try/`](public/try/).
 <tr><td nowrap><img src="public/icons/map-pinned.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Chora</b>: place on the map</td><td>Shows a dataset's places on a map, and adds a point, line or area drawn there. Next: tracing from georeferenced maps</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/tools.html#chora">Placing on the map</a></td></tr>
 </table>
 
-Still to come, each planned in its own issue, with the plan as a whole in
-[#1](https://github.com/pelagios/plato-tools/issues/1):
+Still to come, with the plan as a whole in [#1](https://github.com/pelagios/plato-tools/issues/1),
+and the issue for each where it has one:
 
 <table>
 <tr><th width="290">Tool</th><th>What it will do</th><th>Issue</th></tr>
 <tr><td nowrap><img src="public/icons/scale.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Krisis</b>: more matching</td><td>Find a place in other gazetteers, such as the World Historical Gazetteer</td><td><a href="https://github.com/pelagios/plato-tools/issues/6">#6</a></td></tr>
+<tr><td nowrap><img src="public/icons/telescope.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Peripleo</b>: visualisation</td><td>Peripleo, the Pelagios map viewer, for visualisation: planned</td><td></td></tr>
 </table>
 
 They read and write PLATO's spreadsheet tables, PLATO JSON and JSON Lines, RDF (N-Triples, N-Quads
@@ -102,7 +103,7 @@ node bin/plato-tools.mjs compare release-1.jsonl.gz release-2.jsonl.gz  # was an
   georeference ([the mapping](test/fixtures/annotations/README.md#the-mapping)). On the page, choose
   the files together. Nothing is fetched.
 - **`--work-dir DIR`.** RDF, attestation-centric JSON, spreadsheet tables and comparisons go through
-  a working database on disk, as in the browser, so memory stays roughly constant at any size. It is
+  a working database on disk, as in the browser, so memory stays roughly constant as the input grows. It is
   kept in the system's temporary directory unless `--work-dir` says otherwise, and removed
   afterwards. It needs room for about one and a half times the uncompressed input (twice the text,
   for spreadsheet tables). If the temporary directory is held in
