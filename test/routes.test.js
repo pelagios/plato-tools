@@ -137,24 +137,31 @@ test('LPF: a sequence and an outside target\'s name are reported as losses, neve
   assert.ok(k.includes('dropped:relation.relatedLabel'), k.join(', '));
 });
 
-test('PLATO\'s own table rules: exactly one target, a name for an address, a sequence only on MemberOf', () => {
+test('PLATO\'s own table rules: at most one target, a name for an address or alone, a sequence only on MemberOf', () => {
   const run = (rows) => { const issues = [], warns = []; checkTableRules((n) => (n === 'relations' ? rows : []), { issue: (i) => issues.push(i), warn: (i) => warns.push(i) }); return { issues, warns }; };
   const base = { place_id: 'a', relation_type: 'ContainedIn', related_place_id: 'b', related_uri: '', related_label: '', sequence: '' };
   assert.deepEqual(run([base]), { issues: [], warns: [] }, 'a positive control');
   assert.equal(run([{ ...base, related_uri: 'http://www.wikidata.org/entity/Q1', related_label: 'x' }]).issues.length, 1, 'both targets');
-  assert.equal(run([{ ...base, related_place_id: '' }]).issues.length, 1, 'no target');
+  assert.equal(run([{ ...base, related_place_id: '' }]).issues.length, 1, 'no target and no name');
+  // PLATO 7720890 (#18): a name alone, for something the source gives no address for ('in the Delta').
+  assert.deepEqual(run([{ ...base, related_place_id: '', related_label: 'the Delta' }]), { issues: [], warns: [] }, 'a name alone');
   assert.deepEqual(run([{ ...base, relation_type: 'BirthplaceOf', related_place_id: '', related_uri: 'http://www.wikidata.org/entity/Q1' }]).warns.map((w) => w.column), ['related_label']);
   assert.deepEqual(run([{ ...base, sequence: '2' }]).warns.map((w) => w.column), ['sequence']);
 });
 
-test('the tables report a row with two targets, and one with none, as problems', async () => {
-  const text = readFileSync(`${DIR}/relations.csv`, 'utf8').replace('lumbini,BirthplaceOf,,', 'lumbini,BirthplaceOf,cambridge,').replace('bunsty,MemberOf,iter2,', 'bunsty,MemberOf,,');
-  const files = readdirSync(DIR).filter((f) => f !== 'relations.csv').map((f) => file(`${DIR}/${f}`)).concat(textFile(text, 'relations.csv'));
-  const r = await go(files, 'check');
+test('the tables report a row with two targets, and one with none, as problems; a row with only a name is not', async () => {
+  const relations = readFileSync(`${DIR}/relations.csv`, 'utf8');
+  const withRows = (text) => go(readdirSync(DIR).filter((f) => f !== 'relations.csv').map((f) => file(`${DIR}/${f}`)).concat(textFile(text, 'relations.csv')), 'check');
+  const twoAndNone = relations.replace('lumbini,BirthplaceOf,,', 'lumbini,BirthplaceOf,cambridge,').replace('bunsty,MemberOf,iter2,', 'bunsty,MemberOf,,');
+  const r = await withRows(twoAndNone);
   const msgs = items(r, 'error').map((i) => i.message);
-  // The row with no target is also an attestation with no relatesTo, which the schema reports too.
+  // The row with no target is also an attestation with neither relatesTo nor relatedLabel, which the schema reports too.
   assert.equal(r.report.errors, 3, JSON.stringify(msgs));
   assert.ok(msgs.some((m) => /fill in one of them/.test(m)) && msgs.some((m) => /gives no related place/.test(m)), JSON.stringify(msgs));
+  // PLATO 7720890 (#18): the same row naming its target in related_label alone ("in the Delta") passes.
+  const nameAlone = await withRows(relations.replace('bunsty,ContainedIn,buckinghamshire,,,', 'bunsty,ContainedIn,,,the Delta,'));
+  assert.deepEqual(items(nameAlone, 'error').map((i) => i.message), []);
+  assert.ok(relations.includes('bunsty,ContainedIn,buckinghamshire,,,'), 'the row the control edits is there');
 });
 
 test('a route that is, through its members, a member of itself is an error; a chain is not', async () => {

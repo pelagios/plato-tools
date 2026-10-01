@@ -170,7 +170,8 @@ function propertyValue(row) {
 
 /**
  * PLATO's rules for the tables that CSVW cannot state, so rdf-tabular does not check them: a relations
- * row names exactly one target, a place or an address; an address has a name to show it by; and no
+ * row names at most one target, a place or an address, and with neither names it in related_label
+ * (PLATO 7720890, #18: "in the Delta"); an address has a name to show it by; and no
  * route, itinerary or network is, through its members, a member of itself. Reports through `issue`
  * (errors) and `warn`.
  */
@@ -180,7 +181,8 @@ export function checkTableRules(rows, { issue, warn }) {
   for (const r of rows('relations')) {
     n++;
     const place = !!r.related_place_id, uri = !!r.related_uri;
-    if (place === uri) issue({ table: 'relations.csv', row: n, column: 'related_place_id', message: place ? 'gives both a related place and a related_uri: fill in one of them' : 'gives no related place: fill in related_place_id or related_uri' });
+    if (place && uri) issue({ table: 'relations.csv', row: n, column: 'related_place_id', message: 'gives both a related place and a related_uri: fill in one of them' });
+    else if (!place && !uri && !r.related_label) issue({ table: 'relations.csv', row: n, column: 'related_place_id', message: 'gives no related place: fill in related_place_id or related_uri, or, when the source only names it, related_label' });
     if (uri && !r.related_label) warn({ table: 'relations.csv', row: n, column: 'related_label', message: 'has a related_uri but no related_label to show it by' });
     if (r.sequence && r.relation_type !== 'MemberOf') warn({ table: 'relations.csv', row: n, column: 'sequence', message: `gives a sequence on a ${r.relation_type} row; a sequence orders the members of a route (MemberOf)` });
     if (r.relation_type === 'MemberOf' && place) (member.get(r.place_id) || member.set(r.place_id, new Set()).get(r.place_id)).add(r.related_place_id);
