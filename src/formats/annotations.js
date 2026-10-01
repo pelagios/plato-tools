@@ -81,6 +81,8 @@ export const ANNOTATION_KINDS = {
   'annotation-georef-unused': 'warning',
   'annotation-georef-duplicate': 'warning',
   'annotation-manifest-unused': 'warning',
+  'annotation-manifest-matched-by-image': 'warning',
+  'annotation-manifest-mismatch': 'warning',
   'annotation-georef-unreadable': 'error',
 };
 

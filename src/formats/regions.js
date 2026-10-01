@@ -36,7 +36,7 @@ import { DataError, textStream } from '../engine/input.js';
 import {
   readGeoreference, toWorld, matchTarget, containsRegion, georefNote, georefCitation, georefAnnotationCitation, LABEL_ANCHOR,
 } from '../engine/georef/index.js';
-import { normaliseId, manifestId } from '../engine/georef/iiif.js';
+import { normaliseId, manifestId, manifestCanvases } from '../engine/georef/iiif.js';
 import { parseXywh, xywhPolygon, parseSvg, vertices, openRing, signedArea2 } from '../engine/georef/shapes.js';
 
 /** The note on a placed region that nothing marks as a label. */
@@ -85,7 +85,9 @@ const message = (e) => String(e && e.message || e).replace(/\.$/, '');
 
 /**
  * Read the georeference files once each, and the manifests, pairing each map with the manifest
- * whose id is the manifest its annotation says it is part of. An AnnotationPage gives one map for
+ * whose id is the manifest its annotation says it is part of, when that manifest shows the map's
+ * image (else it is reported, 'annotation-manifest-mismatch', a warning, and not used for it); failing
+ * that, with a manifest given that shows the map's image ('annotation-manifest-matched-by-image'). An AnnotationPage gives one map for
  * each of its annotations. A file that cannot be read, or a map in it that cannot, is reported
  * ('annotation-georef-unreadable', an error) and left out; the rest are used. A map given twice
  * (by its annotation's id) is used once ('annotation-georef-duplicate'): of the same version, or
@@ -143,7 +145,21 @@ export async function readGeoreferences(georefFiles, manifestFiles, report) {
         if (!later) continue;
         maps.splice(held, 1);
       }
-      const m = g.manifestId ? manifests.find((x) => x.id === normaliseId(g.manifestId)) : undefined;
+      // The map's manifest: the one given whose id is the manifest the annotation names, if it
+      // shows the map's image; else one given that shows it (an id written another way, http for
+      // https, say), with a warning.
+      const image = normaliseId(g.imageServiceId), canvas = normaliseId(g.canvasId);
+      const shows = (x) => manifestCanvases(x.json).some((c) => c.services.includes(image) || (canvas && normaliseId(c.id) === canvas));
+      let m = g.manifestId ? manifests.find((x) => x.id === normaliseId(g.manifestId)) : undefined;
+      if (m && !shows(m)) {
+        report('annotation-manifest-mismatch', `${m.name}, with ${where}: the manifest given does not show this map's image (${g.imageServiceId})`);
+        m.mismatched = true;
+        m = undefined;
+      }
+      if (!m) {
+        m = manifests.find(shows);
+        if (m) report('annotation-manifest-matched-by-image', `${where} names the manifest ${g.manifestId ?? '(none)'}; ${m.name}, the manifest ${m.id}, shows its image ${g.imageServiceId}, and is used`);
+      }
       if (m) {
         // The manifest gives the canvas's size; one that does not fit the map is reported, and the
         // map is used without it.
@@ -155,7 +171,8 @@ export async function readGeoreferences(georefFiles, manifestFiles, report) {
       maps.push({ g, file: f.name, where, used: 0 });
     }
   }
-  for (const m of manifests) if (!m.used) report('annotation-manifest-unused', m.name);
+  // A manifest reported as not showing its map's image is not reported again as unused.
+  for (const m of manifests) if (!m.used && !m.mismatched) report('annotation-manifest-unused', m.name);
   return maps;
 }
 

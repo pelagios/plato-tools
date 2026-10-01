@@ -332,7 +332,7 @@ test('placed: the whole document, and the PLATO JSON converted from it, are vali
 // ---- each kind, with its control -----------------------------------------------------------------------
 test('every region kind has words, and a severity the report knows', () => {
   const kinds = Object.keys(ANNOTATION_KINDS).filter((k) => /^annotation-(region|georef|manifest)-/.test(k));
-  assert.equal(kinds.length, 14);
+  assert.equal(kinds.length, 16);
   for (const k of kinds) { assert.ok(LOSS_TEXT[k], k); assert.ok(['loss', 'warning', 'error'].includes(ANNOTATION_KINDS[k]), k); }
 });
 test('annotation-region-shape: once for each placed region, and for nothing else', async () => {
@@ -599,6 +599,38 @@ test('annotation-manifest-unused: a manifest of another object; the map\'s own m
   const alone = await go([file(REGIONS), file(ROCQUE_M)], 'check');
   assert.deepEqual(alone.report.items.find((i) => i.kind === 'annotation-manifest-unused')?.examples, ['bpl-rocque-manifest.json']);
   assert.equal(alone.report.items.filter((i) => i.kind.startsWith('annotation-region')).length, 0);
+});
+test('annotation-manifest-matched-by-image: a manifest whose id differs (http for https) but which shows the map\'s image is used, naming both ids; the exact manifest is not reported', async () => {
+  const manifest = json(ROCQUE_M);
+  manifest['@id'] = manifest['@id'].replace(/^https:/, 'http:');
+  const r = await placed({ georefs: [ROCQUE], manifests: [textFile(JSON.stringify(manifest), 'rocque-http.json')] });
+  assert.deepEqual(r.of('annotation-manifest-matched-by-image'), ['bpl-rocque-annotation.json names the manifest https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/manifest; rocque-http.json, the manifest http://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/manifest, shows its image https://iiif.digitalcommonwealth.org/iiif/2/commonwealth:8623qf00m, and is used']);
+  assert.equal(ANNOTATION_KINDS['annotation-manifest-matched-by-image'], 'warning');
+  assert.deepEqual(r.of('annotation-manifest-unused'), []);
+  assert.match(r.attestation(1).notes, /of manifest http:\/\/ark\.digitalcommonwealth\.org\/ark:\/50959\/ks65px29g\/manifest\./);
+  assert.deepEqual(r.attestation(1).geometries, (await MAIN()).attestation(1).geometries);
+  // Control: the manifest whose id is the one named is paired by id, with no warning.
+  assert.deepEqual((await MAIN()).of('annotation-manifest-matched-by-image'), []);
+  // Control: a manifest of another object is not matched by image.
+  assert.deepEqual((await placed({ georefs: [ROCQUE], manifests: [G + 'lynn-atlas-manifest.json'] }, [item(1)])).of('annotation-manifest-matched-by-image'), []);
+});
+test('annotation-manifest-mismatch: a manifest with the id named but not showing the map\'s image is reported once, as a warning; the map is placed without it, and the run has no errors', async () => {
+  const manifest = json(ROCQUE_M);
+  const canvas = manifest.sequences[0].canvases[0];
+  canvas['@id'] = 'https://example.org/constructed/another-canvas';
+  canvas.images[0].resource.service['@id'] = 'https://example.org/constructed/another-image';
+  const wrong = textFile(JSON.stringify(manifest), 'rocque-wrong.json');
+  const r = await placed({ georefs: [ROCQUE], manifests: [wrong] }, [item(1)]);
+  assert.deepEqual(r.of('annotation-manifest-mismatch'), ["rocque-wrong.json, with bpl-rocque-annotation.json: the manifest given does not show this map's image (https://iiif.digitalcommonwealth.org/iiif/2/commonwealth:8623qf00m)"]);
+  assert.equal(ANNOTATION_KINDS['annotation-manifest-mismatch'], 'warning');
+  assert.deepEqual(r.of('annotation-georef-unreadable'), [], 'not also an error');
+  assert.deepEqual(r.of('annotation-manifest-unused'), [], 'not also unused');
+  assert.ok(r.attestation(1).geometries, 'placed without the manifest');
+  const run = await go([file(REGIONS), file(ROCQUE), wrong], 'check');
+  assert.equal(run.report.errors, 0, JSON.stringify(run.report.items.filter((i) => i.severity === 'error')));
+  assert.ok(run.report.items.some((i) => i.kind === 'annotation-manifest-mismatch'));
+  // Control: the right manifest is not reported.
+  assert.deepEqual((await MAIN()).of('annotation-manifest-mismatch'), []);
 });
 test('with georeferences, an SVG shape is reported by its region kind, never also as annotation-selector, and never dropped', async () => {
   const { of, reported } = await MAIN();
