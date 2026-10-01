@@ -308,13 +308,18 @@ readers link to those headings, so keep them.
   from its normalised heading and the first 50 rows; `resolveColumns` checks a saved mapping
   instead. The mapping is the same JSON on the page (the column-matching step in `src/app.js`, via
   `columnsOf`/`mappingOf` in `worker.js`, worded in `words.js`: `COLUMN_CHOICES`, `COLUMN_WORDS`,
-  `columnWarnings`, which warns of a column named for a gazetteer when no column is the address) and on the command line (printed with each input, taken back with
+  `columnWarnings`, which warns of a column named for a gazetteer when no column is the address,
+  and points at the pattern suggested for a column of a gazetteer's ids until it is confirmed) and on
+  the command line (printed with each input, taken back with
   `--columns FILE`). A mapping value may also be `{"field": "address", "pattern": "…{id}…"}`, a
-  column of a gazetteer's ids made into addresses (`addresses.js`: `addressFromPattern(value,
-  pattern, { shape })` returns `placeAddress`'s result or `{ lost: 'shape', value }`;
-  `patternProblem(pattern)` refuses a pattern without `{id}` once, one that makes no web address,
-  and any World Historical Gazetteer one; `GAZETTEER_PATTERNS` has Pleiades', GeoNames' and
-  Wikidata's patterns and id shapes). `guessColumns`/`resolveColumns` return `{ mapping, patterns,
+  column of a gazetteer's ids made into addresses (`addresses.js`, shared with TEI's keys:
+  `addressFromPattern(value, pattern, { shape })` returns `placeAddress`'s result, `{ lost: 'shape',
+  value }` for an id of the wrong shape or any `whg:` code, or `{ error }` for a pattern that cannot
+  be used; `patternFault(pattern)` gives `'placeholder'`, `'not-web'` or `'whg'` (TEI words these
+  itself) and `patternProblem(pattern)` the same verdict in words, refusing a pattern without `{id}`
+  (or `{key}`) once, one that makes no web address, and any World Historical Gazetteer one;
+  `GAZETTEER_PATTERNS` has Pleiades', GeoNames' and Wikidata's patterns and id shapes, and
+  `patternShape` the shape a pattern takes). `guessColumns`/`resolveColumns` return `{ mapping, patterns,
   suggested, reasons, problems, gazetteer }`: `mapping` is fields as strings, `patterns` is
   `{ column: pattern }` (only from a saved mapping; the guess never makes one), and
   `suggested[column]` is `{ field: 'address', pattern, gazetteer, fit, sampled }` for a column named
@@ -322,8 +327,9 @@ readers link to those headings, so keep them.
   shape, when no other column is the address; the column stays `note`, and its reason names the
   pattern, until the user confirms it. `mappingToSave(mapping, patterns)` gives the one JSON object
   to save (the object form for a pattern column). `mappingOf` (the worker's `columns` reply) passes
-  `patterns` and `suggested` through; the page and the command line are to send the object form
-  back as `options.columns`, and `words.js`'s `columnWarnings` is to point at a suggested pattern.
+  `patterns` and `suggested` through; the page shows a *Make web addresses* box in a suggested
+  column's row (`patternControl`), and sends, and saves, `mappingToSave(mapping, patterns)`; the
+  command line prints the object form, and `--json` gives `pattern` beside `field`.
   An address column makes the rows attestation-centric; otherwise each row is a
   place whose `@id` is minted by `tableIds` from its id under the base address, with the id kept as
   `entityIdentifier`. No id column means no addresses and one `generic-no-ids` warning; a repeated
@@ -335,11 +341,29 @@ readers link to those headings, so keep them.
   attestations. The reader holds only `Map(id → { names: Set })` (about 300 bytes an id, measured
   in `test/hermes-generic-same-id-large.test.js`), never a row. Names that agree are the label;
   names that differ make the id the label (`generic-same-id-label`); a row with no id is a loss
-  (`generic-same-id-empty`). The page's Reading options and the command line's `--same-id` (step D)
-  set `options.sameId: true`. An unrecognised column goes to `notes`, never `properties`. The mapping, reasons
+  (`generic-same-id-empty`). The page's Reading options and the command line's `--same-id`
+  set `options.sameId: true`, and both refuse it in plain words when no column is the id. An unrecognised column goes to `notes`, never `properties`. The mapping, reasons
   and rows have no prototype, so a column called `__proto__` is kept. A CSV streams through Papa's
   chunk parser (`csvRecords`): the columns and guess read its header and first 50 rows, and the rows
   are read again, never kept. A FeatureCollection streams too, read twice (columns, then rows).
+- **Reading options** (the page and the command line). The page has one `<fieldset id="reading">`
+  after `#columns`, filled by `src/app.js` (`renderReading`) in `words.js`'s `READING_WORDS`, shown
+  only for TEI or a table of places, every control off: TEI's `listPlaces`, and a table of the keys'
+  prefixes from the worker's `tei-keys` command (`teiKeyPrefixes`; its reply carries the page's
+  `columnsAsked` id, as `columns` does, and a stale one is dropped), each with its suggested pattern
+  filled in and unticked; a table's `sameId`. The worker's `ready` says whether the options for the
+  editors' words may be shown (`reading.editorial`, `EDITORIAL_IRI !== null`); while it is null,
+  `headerPlaces` and `commentaryPlaces` are not shown. `readingOptions()` adds only the options that
+  are on to the run's `options` (`keyPatterns` as `{ prefix: pattern }`, `''` for keys with no
+  prefix). No `title` attributes and no explanatory prose: hints await the shared tooltip module (a
+  TODO in `app.js`), and the report says what each option does. The command line's `--list-places`,
+  `--key-pattern [PREFIX=]PATTERN` (repeatable; a prefix has no `:`, `,` or `/`, so a pattern with an
+  `=` of its own is read whole), `--header-places`, `--commentary-places` (refused with
+  `teiReadingRefusal`'s words while held) and `--same-id` are for `check` and `convert`. Each input is
+  detected first when one is given, and a flag that applies to none of them, or `--same-id` for a
+  table with no id column, is a usage error (exit 2). TEI options go only to TEI inputs and `sameId`
+  only to tables; `--json` gives a TEI input's `keyPatterns`. `test/cli-reading.test.js` and the
+  Reading options checks in `e2e/app_test.py` cover both.
 - **Addresses** (`addresses.js`). `placeAddress(value)` returns `{ iri }`; `{ iri, from, rules }`
   when it rewrote the address by the rules below (`from` is what the source wrote); `{ iri, part }`
   for part of a Pleiades place's record, carried as given and reported (`address-pleiades-part`, a

@@ -25,10 +25,14 @@ GeoJSON that names a coordinate reference system other than WGS 84.
 
 Which column holds what is guessed from its heading (case, spaces and punctuation do not count)
 and from the values in the first 50 rows. The guess is a plain JSON object, `{"column": "field"}`,
-which the command line prints and takes back with `--columns FILE`, and which the page will show
-as a table to edit. Every column goes to exactly one field, to `note`, or to `skip`. A column whose
-addresses are made from ids is given as `{"column": {"field": "address", "pattern": "…{id}…"}}`;
-plain strings still load.
+which the command line prints and takes back with `--columns FILE`, and which the page shows as
+a table to edit, saved and loaded as the same JSON. Every column goes to exactly one field, to
+`note`, or to `skip`. A column whose addresses are made from ids is given as
+`{"column": {"field": "address", "pattern": "…{id}…"}}` (on the page, by ticking *Make web
+addresses* in its row; the command line prints it so, and `--json` gives the `pattern`); plain
+strings still load. Rows with the same id are read as one place only with the reading option
+`sameId` (*Rows with the same id are one place* on the page, `--same-id` on the command line),
+which is refused when no column is the id.
 
 | Column guessed as | In PLATO | Notes |
 |---|---|---|

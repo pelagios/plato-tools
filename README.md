@@ -51,6 +51,17 @@ They read and write PLATO's spreadsheet tables, PLATO JSON and JSON Lines, RDF (
 and Turtle, written as N-Triples) and Linked Places Format v1, and read the W3C Web Annotations that
 Recogito exports, TEI editions, and any other CSV or GeoJSON of places: [the formats in full](https://pelagios.org/place-attestation-ontology/guide/tools.html#what-it-reads-and-writes).
 
+A TEI edition and a table of places have **reading options**, each off until chosen: on the page in
+*Reading options*, below the column table, and on the command line as flags (below).
+
+| Format | Reading option | Page | Command line |
+|---|---|---|---|
+| TEI | Read the `<listPlace>`: each `<place>` with a web address as an attestation, its first name the edition's headword, with its coordinates where the address is on the edition's own site | Read the list of places | `--list-places` |
+| TEI | Make a place's address from its `@key` (with no ref), with a pattern for the key's prefix: `tgn,7011179` with `http://vocab.getty.edu/tgn/{id}` | A row for each prefix found, its suggested pattern filled in, unticked until you tick *Use* | `--key-pattern [PREFIX=]PATTERN`, repeatable; no prefix for keys with none |
+| TEI | Places in the header (where the object was found or made), and place names in an edition's commentary, translation and notes, as the editors' words | Not shown | `--header-places`, `--commentary-places`: refused until PLATO pins its Editorial form status |
+| CSV, GeoJSON | Rows with the same id are evidence about one place, an attestation each, where a repeated id is otherwise a problem; needs a column read as the place id | Rows with the same id are one place | `--same-id` |
+| CSV, GeoJSON | A column of a gazetteer's ids (`pleiades_id: 579885`) made into web addresses with a pattern, suggested for Pleiades, GeoNames and Wikidata, never used until confirmed | In the column table, *Make web addresses* in the column's row | `--columns` with `{"field": "address", "pattern": "https://pleiades.stoa.org/places/{id}"}` for the column |
+
 ## From the command line
 
 The same engine runs in a terminal, with Node.js 24 or later, and says the same things in the same
@@ -93,6 +104,9 @@ node bin/plato-tools.mjs compare release-1.jsonl.gz release-2.jsonl.gz  # was an
   `{column, field, pattern, reason}` (`pattern` only for a column given one), to read; `--columns`
   takes the object printed without `--json` instead. For a TEI edition, `keyPatterns` holds the
   `--key-pattern` patterns. `--brief` prints one line per input.
+- **Reading options** (the table above) are for `check` and `convert`. One that applies to none of
+  the inputs (`--list-places` with no TEI edition among them), or `--same-id` for a table with no
+  id column, is a mistake in the command: exit 2, with the reason, and nothing is read.
 - `--base URL` gives the base for the web addresses of spreadsheet identifiers
   ([web addresses for your identifiers](https://pelagios.org/place-attestation-ontology/guide/tools.html#converting)). `--no-typing` leaves out the
   node types and typed dates that N-Triples output otherwise has. `--cube` adds what Data Cube
