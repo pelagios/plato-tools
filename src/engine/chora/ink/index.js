@@ -49,12 +49,19 @@ export class InkError extends Error {
  * (a slider re-runs only what follows): the 3×3 median of CIELAB (an area, or a line by its colour), or
  * of L* alone (a line by its darkness). `rgba` is not kept: the caller may let it go.
  */
-export function prepare({ w, h, rgba }, { colour = true } = {}) {
+export function prepare(win, { colour = true } = {}) {
+  const { w, h } = win;
+  // The RGBA is let go as soon as it is converted (taken off `win` too), and each channel's unfiltered
+  // copy as soon as it is filtered: at 2048² the RGBA alone is 16 MB.
+  let rgba = win.rgba; win.rgba = null;
   if (colour) {
-    const c = lab(rgba, w, h);
-    return { w, h, L: median3(c.L, w, h), a: median3(c.a, w, h), b: median3(c.b, w, h) };
+    const c = lab(rgba, w, h); rgba = null;
+    const L = median3(c.L, w, h); c.L = null;
+    const a = median3(c.a, w, h); c.a = null;
+    return { w, h, L, a, b: median3(c.b, w, h) };
   }
-  return { w, h, L: median3(lightness(rgba, w, h), w, h) };
+  const L0 = lightness(rgba, w, h); rgba = null;
+  return { w, h, L: median3(L0, w, h) };
 }
 
 const toImage = (frame) => ([x, y]) => [frame.x0 + x * frame.s, frame.y0 + y * frame.s];

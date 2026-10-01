@@ -90,6 +90,30 @@ export const choraDrawingNote = ({ basemap = 'Natural Earth', zoom } = {}) =>
 /** How a drawing traced from a historical map was made; georefNote's sentences follow it (src/engine/chora/trace.js). */
 export const choraTracingNote = ({ zoom } = {}) =>
   `Traced by hand from a georeferenced historical map${Number.isFinite(zoom) ? ` at zoom ${Math.round(zoom)}` : ''} in PLATO tools (Chora).`;
+/**
+ * How a drawing traced WITH ASSISTANCE from a historical map was made: a shape proposed from the map's
+ * ink, then accepted or edited by hand. This is the one place its words are made (a citation of the
+ * software may later be added beside it); georefNote's sentences follow it (src/engine/chora/trace.js).
+ * The shape is attested, not computed: a person accepted it. `a` is the draft's trace.assisted: { mode
+ * 'area' | 'line', params (tolerance, colour, bridge), scale (1/s of full resolution), epsilon (image
+ * pixels), gaps (a line's, jumped) }; `edits` countEdits' { moved, added, removed, proposed }; `version`
+ * the tools'.
+ */
+export function choraAssistedNote(a, edits, { version, zoom } = {}) {
+  const p = a.params || {};
+  const by = a.mode === 'area' ? 'filling an area' : 'following a line';
+  const tol = a.mode === 'area' || p.colour ? `tolerance ${fmt(p.tolerance)}` : 'by its darkness';
+  const eps = a.epsilon > 0 ? `simplified to within ${fmt(a.epsilon)} image pixels` : 'not simplified';
+  const gaps = a.mode === 'area'
+    ? (p.bridge > 0 ? `, gaps of up to ${fmt(p.bridge * a.scale)} image pixels bridged` : '')
+    : `, ${a.gaps || 0} gap${a.gaps === 1 ? '' : 's'} bridged`;
+  const done = !edits || (!edits.moved && !edits.added && !edits.removed)
+    ? 'accepted as proposed'
+    : `edited by hand: moved ${edits.moved}, added ${edits.added}, removed ${edits.removed}, of ${edits.proposed} proposed`;
+  return `Traced with assistance in PLATO tools (Chora)${version ? ` ${version}` : ''}${Number.isFinite(zoom) ? ` at zoom ${Math.round(zoom)}` : ''}: proposed from the map's ink by ${by} (${tol}, at 1/${a.scale} of full resolution, ${eps}${gaps}), then ${done}.`;
+}
+const fmt = (x) => (Number.isFinite(x) ? String(Math.round(x * 100) / 100) : '?');
+
 /** What a Chora save reports of itself (src/engine/chora/save.js), by kind. */
 export const CHORA_TEXT = {
   'chora-addition-invalid': 'A drawing could not be added, because PLATO would not accept it as it is, so nothing was saved',

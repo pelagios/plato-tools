@@ -13,7 +13,8 @@
 // readGeoreference), topmost first.
 import * as georef from '../georef/index.js';
 import { DataError } from '../input.js';
-import { choraTracingNote } from '../words.js';
+import { choraTracingNote, choraAssistedNote } from '../words.js';
+import { countEdits } from './ink/edits.js';
 
 /** Canvas pixels of context around a traced point, in the citation's box. */
 export const POINT_CONTEXT_PX = 32;
@@ -153,10 +154,11 @@ export async function traceFor(g, drawn, meta = {}) {
  * The citations and notes of a traced drawing, when it is saved: the map (georefCitation, the
  * region padded as `trace.pad` says, the map's licence linked in its source) and the georeference
  * (georefAnnotationCitation: when it has an address; otherwise there is nothing to cite), and the notes:
- * how it was drawn, then georefNote's fixed sentences (with the date the georeference was fetched, and
- * the label-anchor sentence when the role is LabelAnchor).
+ * how it was drawn (by hand, or with assistance: trace.assisted, its edits counted against `geometry`),
+ * then georefNote's fixed sentences (with the date the georeference was fetched, and the label-anchor
+ * sentence when the role is LabelAnchor).
  */
-export function tracedParts(trace, { zoom, role } = {}) {
+export function tracedParts(trace, { zoom, role, geometry, version } = {}) {
   const anchor = role === 'LabelAnchor' || role === georef.LABEL_ANCHOR;
   const record = anchor ? { ...trace.record, role: georef.LABEL_ANCHOR } : trace.record;
   // The context is put into the region here, and no pad is passed: georefCitation's own padding (2% of
@@ -164,6 +166,11 @@ export function tracedParts(trace, { zoom, role } = {}) {
   const map = georef.georefCitation(record, { region: withContext(trace.region, trace.pad, record) });
   if (trace.licence) map.source = { ...map.source, licence: trace.licence };
   const citations = [map, ...(record.annotationId ? [georef.georefAnnotationCitation(record)] : [])];
-  const notes = `${choraTracingNote({ zoom })} ${georef.georefNote(record, trace.fetchedAt ? { fetched: trace.fetchedAt } : {})}`;
+  // Traced with assistance (a shape proposed from the map's ink, then accepted): said so, with what was
+  // done to it by hand, counted against the proposal (`geometry`, the drawing as saved).
+  const how = trace.assisted
+    ? choraAssistedNote(trace.assisted, geometry ? countEdits(trace.assisted.proposed, geometry) : null, { version, zoom })
+    : choraTracingNote({ zoom });
+  const notes = `${how} ${georef.georefNote(record, trace.fetchedAt ? { fetched: trace.fetchedAt } : {})}`;
   return { citations, notes };
 }

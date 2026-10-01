@@ -185,3 +185,54 @@ test('newGeometryAttestation takes a list of citations, and refuses one that is 
   const wrong = { ...a, citations: [{ source: { '@id': 'https://example.org/georef', title: 'G', derivedFrom: 42 } }] };
   assert.notEqual(checkAddition(wrong, res.validators), null);
 });
+
+// ---- Traced with assistance (src/engine/chora/ink/): the notes, and what was done by hand ----------
+
+import { countEdits } from '../src/engine/chora/ink/edits.js';
+import { choraAssistedNote } from '../src/engine/words.js';
+
+test('13. the notes of a shape traced with assistance: how it was proposed (ε in image pixels, the gaps bridged), and "accepted as proposed" or the edits, counted', () => {
+  const line = { mode: 'line', params: { colour: false }, scale: 2, epsilon: 1.5, gaps: 2 };
+  assert.equal(choraAssistedNote(line, { moved: 0, added: 0, removed: 0, proposed: 9 }, { version: '0.1.0', zoom: 14.4 }),
+    'Traced with assistance in PLATO tools (Chora) 0.1.0 at zoom 14: proposed from the map\'s ink by following a line (by its darkness, at 1/2 of full resolution, simplified to within 1.5 image pixels, 2 gaps bridged), then accepted as proposed.');
+  const area = { mode: 'area', params: { tolerance: 12, bridge: 4 }, scale: 4, epsilon: 3, gaps: 0 };
+  assert.equal(choraAssistedNote(area, { moved: 2, added: 1, removed: 3, proposed: 40 }, { version: '0.1.0' }),
+    'Traced with assistance in PLATO tools (Chora) 0.1.0: proposed from the map\'s ink by filling an area (tolerance 12, at 1/4 of full resolution, simplified to within 3 image pixels, gaps of up to 16 image pixels bridged), then edited by hand: moved 2, added 1, removed 3, of 40 proposed.');
+  assert.match(choraAssistedNote({ mode: 'line', params: { colour: true, tolerance: 8 }, scale: 1, epsilon: 0.75, gaps: 1 }, null), /\(tolerance 8, at 1\/1 of full resolution, simplified to within 0\.75 image pixels, 1 gap bridged\), then accepted as proposed\.$/);
+});
+
+test('13. the edits to a proposal are counted: unchanged, a vertex moved, one added (a midpoint), one removed, and a ring that starts elsewhere', () => {
+  const L = { type: 'LineString', coordinates: [[0, 0], [1, 0], [2, 1], [3, 1], [4, 0]] };
+  assert.deepEqual(countEdits(L, L), { moved: 0, added: 0, removed: 0, proposed: 5, unchanged: 5 });
+  const moved = { type: 'LineString', coordinates: [[0, 0], [1, 0], [2, 1.2], [3, 1], [4, 0]] };
+  assert.deepEqual(countEdits(L, moved), { moved: 1, added: 0, removed: 0, proposed: 5, unchanged: 4 });
+  const added = { type: 'LineString', coordinates: [[0, 0], [0.5, 0.1], [1, 0], [2, 1], [3, 1], [4, 0]] };
+  assert.deepEqual(countEdits(L, added), { moved: 0, added: 1, removed: 0, proposed: 5, unchanged: 5 });
+  const removed = { type: 'LineString', coordinates: [[0, 0], [1, 0], [3, 1], [4, 0]] };
+  assert.deepEqual(countEdits(L, removed), { moved: 0, added: 0, removed: 1, proposed: 5, unchanged: 4 });
+  // Terra Draw's nine decimals are not an edit.
+  const rounded = { type: 'LineString', coordinates: L.coordinates.map(([x, y]) => [x + 3e-10, y - 4e-10]) };
+  assert.equal(countEdits(L, rounded).unchanged, 5);
+  const ring = { type: 'Polygon', coordinates: [[[0, 0], [4, 0], [4, 3], [2, 4], [0, 3], [0, 0]]] };
+  const turned = { type: 'Polygon', coordinates: [[[4, 3], [2, 4], [0, 3], [0, 0], [4, 0], [4, 3]]] };
+  assert.deepEqual(countEdits(ring, turned), { moved: 0, added: 0, removed: 0, proposed: 5, unchanged: 5 });
+  const turnedMoved = { type: 'Polygon', coordinates: [[[4, 3], [2, 5], [0, 3], [0, 0], [4, 0], [4, 3]]] };
+  assert.equal(countEdits(ring, turnedMoved).moved, 1);
+});
+
+test('13. a line traced with assistance is saved as a traced one is (both citations, not computed), its notes saying so, with its edits', async () => {
+  const drawn = { type: 'LineString', coordinates: [await at(grid, 100, 100), await at(grid, 200, 150), await at(grid, 300, 120)] };
+  const t = await trace.traceFor(grid, drawn, { key: 'grid', fetchedAt: '2026-09-30T13:55:00.000Z' });
+  const assisted = { mode: 'line', params: { colour: false }, scale: 1, epsilon: 0.75, gaps: 0, proposed: drawn };
+  const asIs = trace.tracedParts({ ...t, assisted }, { zoom: 14, geometry: drawn, version: '0.1.0' });
+  const hand = trace.tracedParts(t, { zoom: 14 });
+  assert.deepEqual(asIs.citations, hand.citations, 'the same citations as tracing by hand');
+  assert.ok(asIs.notes.startsWith('Traced with assistance in PLATO tools (Chora) 0.1.0 at zoom 14: proposed from the map\'s ink by following a line'), asIs.notes);
+  assert.ok(asIs.notes.includes('then accepted as proposed.') && asIs.notes.includes(`Georeferenced through ${GRID.id}`), asIs.notes);
+  assert.ok(!asIs.notes.includes('Traced by hand'));
+  const edited = { ...drawn, coordinates: [drawn.coordinates[0], [drawn.coordinates[1][0] + 1e-4, drawn.coordinates[1][1]], drawn.coordinates[2]] };
+  assert.ok(trace.tracedParts({ ...t, assisted }, { zoom: 14, geometry: edited }).notes.includes('edited by hand: moved 1, added 0, removed 0, of 3 proposed'));
+  const a = newGeometryAttestation({ geojson: drawn, contributor: who, created: '2026-09-30T14:00:00Z', ...asIs });
+  assert.equal(checkAddition(a, res.validators), null);
+  assert.ok(!('computed' in a) && !('computed' in a.geometries[0]), 'attested, not computed');
+});
