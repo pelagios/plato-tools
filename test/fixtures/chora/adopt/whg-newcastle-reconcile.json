@@ -1,0 +1,17 @@
+{
+  "q0": {
+    "result": [
+      { "id": "place:tgn:7011781", "name": "Newcastle", "score": 100, "match": true, "description": "Country: NA", "type": [{ "id": "inhabited places", "name": "inhabited places" }], "ccodes": ["NA"], "repr_point": [17.1, -22.6], "has_geom": false, "namespace": "tgn", "alt_names": ["Newcastle"], "confidence": 100, "place_types": ["inhabited places"], "wikipedia": null },
+      { "id": "place:gn:2641591", "name": "Newcastle", "score": 100, "match": true, "description": "Country: GB", "type": [{ "id": "P.PPL", "name": "populated place" }], "ccodes": ["GB"], "repr_point": [-3.0, 52.43], "has_geom": false, "namespace": "gn", "alt_names": ["Newcastle", "newcastle"], "confidence": 100, "place_types": ["populated place"], "wikipedia": null },
+      { "id": "place:gn:2155472", "name": "Newcastle", "score": 100, "match": true, "description": "Country: AU", "type": [{ "id": "P.PPLA2", "name": "seat of a second-order administrative division" }], "ccodes": ["AU"], "repr_point": [151.77647, -32.92953], "has_geom": false, "namespace": "gn", "alt_names": ["Newcastle"], "confidence": 100, "place_types": ["populated place"], "wikipedia": null },
+      { "id": "place:gn:2641673", "name": "Newcastle upon Tyne", "score": 92, "match": false, "description": "Country: GB", "type": [{ "id": "P.PPLA2", "name": "seat of a second-order administrative division" }], "ccodes": ["GB"], "repr_point": [-1.61396, 54.97328], "has_geom": true, "namespace": "gn", "alt_names": ["Newcastle", "Novocastria", "Pons Aelius"], "confidence": 88, "place_types": ["populated place"], "wikipedia": "https://en.wikipedia.org/wiki/Newcastle_upon_Tyne" }
+    ]
+  },
+  "attribution": {
+    "whg": { "name": "World Historical Gazetteer", "license": { "spdx_id": "CC-BY-4.0", "permits_commercial": true, "no_derivatives": false } },
+    "sources": {
+      "gn": { "name": "GeoNames", "license": { "spdx_id": "CC-BY-4.0", "permits_commercial": true, "no_derivatives": false }, "redistributable": true },
+      "tgn": { "name": "Getty Thesaurus of Geographic Names (illustrative licence)", "license": { "spdx_id": "CC-BY-NC-4.0", "permits_commercial": false, "no_derivatives": null }, "redistributable": true }
+    }
+  }
+}

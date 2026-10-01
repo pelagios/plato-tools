@@ -1,0 +1,17 @@
+{
+  "@id": "https://whgazetteer.org/entity/place:gn:2641673/api",
+  "type": "Feature",
+  "properties": { "title": "Newcastle upon Tyne", "ccodes": ["GB"] },
+  "geometry": {
+    "type": "GeometryCollection",
+    "geometries": [
+      {
+        "type": "Polygon",
+        "coordinates": [[[-1.70, 54.95], [-1.55, 54.95], [-1.55, 55.02], [-1.70, 55.02], [-1.70, 54.95]]],
+        "when": { "timespans": [{ "start": { "earliest": "1835", "latest": "1840" }, "end": { "in": "1974" } }], "periods": [{ "name": "Victorian", "uri": "http://n2t.net/ark:/99152/p0example" }] }
+      },
+      { "type": "Point", "coordinates": [-1.61396, 54.97328] },
+      { "type": "GeometryCollection", "geometries": [{ "type": "Point", "coordinates": [-1.6, 54.97] }] }
+    ]
+  }
+}
