@@ -83,17 +83,39 @@ export const live = (g, node) => g.nodes[node].chains.filter((c) => !g.chains[c]
 /**
  * Spurs pruned: a chain from an end (a node of degree 1) to a junction, shorter than `minLength`
  * pixels, is removed (a burr of the thinning, or a serif), unless it holds pixel `keep`. Repeated
- * until none is left.
+ * until none is left. Of the spurs at one junction, the one that turns most from the chains through
+ * it goes first: where a burr leaves a line near its end, the line's own last few pixels are a spur
+ * too, and are kept (the junction, down to two chains, is then passed through). Each node a spur was
+ * pruned from is listed in `g.pruned` (where thinning bent the line towards the burr).
  */
 export function pruneSpurs(g, minLength, keep = -1) {
-  let pruned = 0, again = true;
-  while (again) {
-    again = false;
+  const { w } = g, span = Math.max(3, Math.round(minLength / 2));
+  // A chain's way out of a node, over `span` pixels of it.
+  const out = (c, node) => {
+    const px = g.nodeOf.get(c.px[0]) === node ? c.px : [...c.px].reverse(), b = px[Math.min(px.length - 1, span)];
+    const n = g.nodes[node];
+    return [(b % w) - n.x, ((b / w) | 0) - n.y];
+  };
+  const cos = (u, v) => { const n = Math.hypot(...u) * Math.hypot(...v); return n ? (u[0] * v[0] + u[1] * v[1]) / n : 1; };
+  g.pruned = g.pruned || [];
+  let pruned = 0;
+  for (;;) {
+    let worst = null, wc = Infinity;
     for (const c of g.chains) {
       if (c.removed || c.a === c.b || c.px.length >= minLength || c.px.includes(keep)) continue;
       const da = live(g, c.a).length, db = live(g, c.b).length;
-      if ((da === 1 && db >= 3) || (db === 1 && da >= 3)) { c.removed = true; pruned++; again = true; }
+      const node = da === 1 && db >= 3 ? c.b : db === 1 && da >= 3 ? c.a : -1;
+      if (node < 0) continue;
+      // How straight on from another chain at the junction this spur runs: the best of cos(its way out, the way
+      // into the junction along the other); the spur running least straight on is pruned first.
+      const v = out(c, node);
+      let straight = -1;
+      for (const id of live(g, node)) if (id !== c.id) { const u = out(g.chains[id], node); straight = Math.max(straight, -cos(u, v)); }
+      if (straight < wc) { wc = straight; worst = { c, node }; }
     }
+    if (!worst) break;
+    worst.c.removed = true; pruned++;
+    if (!g.pruned.includes(worst.node)) g.pruned.push(worst.node);
   }
   return pruned;
 }

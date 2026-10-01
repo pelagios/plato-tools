@@ -48,6 +48,13 @@ export const MAX_COMPONENTS = 2000;
  * and any other is placed as a round one, as it always was.
  */
 export const FLAT_END = 0.84, FLAT_END_NARROW = 0.97, NARROW_END = 5;
+/** A point at a line's end off the line fitted behind it by more than this share of the width (and a pixel) is a hook into a burr. */
+export const HOOK_OFF = 0.25;
+/**
+ * A point of a line whose cross-section of ink is wider than the line's about it by more than this (pixels) is
+ * let go (refine.js): a burr, a blot or a branch's joined ink on one side would draw it aside.
+ */
+export const WIDE_RUN = 0.5;
 
 /**
  * The window's pixels made ready for one kind of tracing, cached by the caller while the window stands
@@ -92,6 +99,85 @@ export function prepareTiles(frame, tiles, { colour = true } = {}) {
   composeEach(frame, tiles, lightnessWriter(q));
   // The unfiltered L* is kept (at 1/64, 2 bytes a pixel) for where a line's ink ends (traceLine).
   return { w, h, L: L16(q), raw: q };
+}
+
+/**
+ * The line at one end of a path: { u, at, hook }, the way it runs (a unit vector, outwards) and the end point
+ * `pts[end]` moved across onto it. Fitted (least squares) to the points from half a width short of the end to
+ * three widths back (at least 10 points); while the nearest of those is off the fit by more than HOOK_OFF (a
+ * quarter width, and a pixel at least), the end runs off into a burr (a stub thinning took the line's end into,
+ * or a serif): it is left out and the line fitted again (`hook` true), to two widths back at most. `chord`
+ * itself, and the end as it is, when there are too few points to fit.
+ */
+export function endLine(pts, end, width, chord) {
+  const step = end === 0 ? 1 : -1, n = pts.length, tol = Math.max(1, HOOK_OFF * width);
+  let k0 = Math.ceil(width / 2) + 1;
+  const k1 = Math.min(n - 1, Math.max(k0 + 5, 10, Math.round(3 * width)));
+  const p = pts[end];
+  if (k1 - k0 < 3) return { u: chord, at: p, hook: false };
+  const fit = (from, to) => {
+    let mx = 0, my = 0, m = 0;
+    for (let k = from; k <= to; k++) { const q = pts[end + step * k]; mx += q[0]; my += q[1]; m++; }
+    mx /= m; my /= m;
+    let sxx = 0, sxy = 0, syy = 0;
+    for (let k = from; k <= to; k++) { const q = pts[end + step * k], dx = q[0] - mx, dy = q[1] - my; sxx += dx * dx; sxy += dx * dy; syy += dy * dy; }
+    const th = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+    let ux = Math.cos(th), uy = Math.sin(th);
+    // Outwards: from the farthest point fitted towards the nearest.
+    const qa = pts[end + step * to], qb = pts[end + step * from];
+    if (ux * (qb[0] - qa[0]) + uy * (qb[1] - qa[1]) < 0) { ux = -ux; uy = -uy; }
+    return { mx, my, ux, uy };
+  };
+  const off = (f, q) => Math.abs((q[0] - f.mx) * f.uy - (q[1] - f.my) * f.ux);
+  let f = fit(k0, k1), hook = false;
+  while (k1 - k0 > 5 && k0 < 2 * width + 1 && off(f, pts[end + step * k0]) > tol) { k0++; f = fit(k0, k1); hook = true; }
+  const along = (p[0] - f.mx) * f.ux + (p[1] - f.my) * f.uy;
+  return { u: [f.ux, f.uy], at: [f.mx + along * f.ux, f.my + along * f.uy], hook };
+}
+
+/**
+ * Where a line's end is along it, to a fraction of a pixel, and how well its cap fits: `cells` the pixels about the
+ * end ([along, across (unsigned), ink 0 | 1] flat, along and across the line from a point on its centreline), the
+ * cap flat or (`round`) a half disc of radius q, the end E. E is tried within 2.5 px of `E0` (every 0.05 px) and q
+ * within [r − 0.75, r + 0.25] (every 1/8: drawn in whole pixels, a line's width is known to within a pixel), and
+ * each pixel on the wrong side of the cap's outline (on it counts as inside, as a pixel is painted) costs a quarter
+ * and its distance from the outline, to one at most, so that the best place is not a knife edge. Returns [E, cost]:
+ * the mean of the places of least cost, and that cost. Places to 1/1024 px, and E on a grid from E0, so that the
+ * same ink at either end of a line, or either way round, is fitted alike, not by the last bit of a direction.
+ */
+export function fitCap(cells, E0, r, width, round) {
+  const Q = (v) => Math.round(v * 1024) / 1024;
+  const e0 = Q(E0), r0 = Q(r), lo = e0 - 1.5 * width - 3, hi = e0 + r0 + 4, eMin = e0 - 2.5;
+  const cost = (sd, ink) => (ink ? (sd < 0 ? Math.min(1, 0.25 - sd) : 0) : sd >= 0 ? Math.min(1, 0.25 + sd) : 0);
+  // The shaft (more than a pixel behind every E tried) is the same for every E: q − c from its edge, either cap.
+  const shaft = [], cap = [];
+  for (let k = 0; k < cells.length; k += 3) {
+    const a = Q(cells[k]), c = Q(cells[k + 1]);
+    if (a >= lo && a <= hi) (a < eMin - 1 ? shaft : cap).push(a, c, cells[k + 2]);
+  }
+  const perQ = [];
+  for (let j = 0; j <= 8; j++) {
+    const q = r0 - 0.75 + j / 8;
+    let base = 0, best = Infinity, sum = 0, n = 0;
+    for (let k = 0; k < shaft.length; k += 3) base += cost(q - shaft[k + 1], shaft[k + 2]);
+    for (let i = -50; i <= 50; i++) {
+      const E = e0 + i / 20;
+      let total = base;
+      for (let k = 0; k < cap.length; k += 3) {
+        const a = cap[k], c = cap[k + 1], da = a - E;
+        const sd = round ? q - (da <= 0 ? c : Math.sqrt(da * da + c * c))
+          : da <= 0 && c <= q ? Math.min(-da, q - c) : -Math.sqrt(Math.max(0, da) ** 2 + Math.max(0, c - q) ** 2);
+        total += cost(sd, cap[k + 2]);
+      }
+      if (total < best - 1e-9) { best = total; sum = E; n = 1; } else if (total <= best + 1e-9) { sum += E; n++; }
+    }
+    perQ.push({ q, best, sum, n });
+  }
+  // The radius measured (r) when it fits as well as any (a narrower cap set farther on can match a narrow line's few
+  // pixels as well, and is not what was drawn); otherwise the mean of every place of least cost, at every radius.
+  const least = Math.min(...perQ.map((v) => v.best)), own = perQ[6];
+  const fits = own.best <= least + 1e-9 ? [own] : perQ.filter((v) => v.best <= least + 1e-9);
+  return [fits.reduce((t, v) => t + v.sum, 0) / fits.reduce((t, v) => t + v.n, 0), least];
 }
 
 const toImage = (frame) => ([x, y]) => [frame.x0 + x * frame.s, frame.y0 + y * frame.s];
@@ -307,15 +393,35 @@ export function traceLine(prep, seed, frame, params = {}) {
   const junctions = g.nodes.filter((n) => live(g, n.id).length >= 3).map((n) => [n.x + 0.5, n.y + 0.5]);
   const nearJunction = (q) => junctions.some(([x, y]) => (q[0] - x) ** 2 + (q[1] - y) ** 2 <= (2 * width + 1) ** 2);
   const inkOf = p.colour ? maskInk(ink, w, h) : darkness(prep.L, w, h);
-  const work = refinePath(f.px.map(centre), inkOf, { half: width / 2 + 2, span: Math.max(2, Math.round(width)), limit: 1, skip: nearJunction });
+  const work = refinePath(f.px.map(centre), inkOf, { half: width / 2 + 2, span: Math.max(2, Math.round(width)), limit: 1, skip: nearJunction, wide: WIDE_RUN });
+  // Where a burr was pruned off the line, thinning bent the line towards it, and the burr's ink draws the points
+  // there aside: those within a width and a pixel of where it left are let go, and the line runs straight between
+  // the points either side (their own cross-sections clear of the burr). Not a path's first or last point.
+  const burrs = (g.pruned || []).filter((id) => live(g, id).length === 2).map((id) => [g.nodes[id].x + 0.5, g.nodes[id].y + 0.5]);
+  if (burrs.length) {
+    const R2 = (width + 1) ** 2;
+    for (let k = work.length - 2; k >= 1; k--) if (burrs.some(([x, y]) => (work[k][0] - x) ** 2 + (work[k][1] - y) ** 2 <= R2)) work.splice(k, 1);
+  }
   // Thinning wears a line's ends away by about half its width: an end that is the ink's end is carried on,
   // the way the line runs, to half a width short of where the ink stops.
   if (!f.closed && work.length > 1) {
     const K = Math.max(3, Math.round(2 * width));
     const extendEnd = (at, from, px) => {
-      const [ax, ay] = work[from], [bx, by] = work[at], L = Math.hypot(bx - ax, by - ay);
+      const [ax, ay] = work[from], L = Math.hypot(work[at][0] - ax, work[at][1] - ay);
       if (!L) return;
-      const ux = (bx - ax) / L, uy = (by - ay) / L, id = labels[px];
+      // The way the line runs at its end, and where its centreline is: a line fitted to the points from three
+      // widths back to the cap (thinning bends a skeleton's last few pixels, so the chord from one point K back
+      // to the last is a degree or two off, and the last point a little aside), the end projected onto it.
+      const { u: [ux, uy], at: [bx, by] } = endLine(work, at, width, [(work[at][0] - ax) / L, (work[at][1] - ay) / L]);
+      // Points off that line by more than a quarter width (and a pixel) at the end are a hook into a burr: let go.
+      const off = (q) => Math.abs((q[0] - bx) * uy - (q[1] - by) * ux) > Math.max(1, HOOK_OFF * width);
+      for (let k = 0; k < 2 * width + 2 && work.length > 2; k++) {
+        const j = at > 0 ? work.length - 2 : 1;
+        if (!off(work[j])) break;
+        work.splice(j, 1);
+      }
+      if (at > 0) at = work.length - 1;
+      const id = labels[px];
       // The ink about the end, as it was before the 3×3 median (which wears a flat end's corners away and
       // takes a round end's tip off, so that, a few pixels wide, the two look alike): the pixels darker than
       // halfway from the line's lightness to the paper's, in the component or touching it. Without the
@@ -336,31 +442,61 @@ export function traceLine(prep, seed, frame, params = {}) {
       // Each ink pixel within half a width (and a pixel) of the line carried on: how far along, and across.
       // t, the farthest ink ahead; tMed, the same in the component (after the median: where a round end has
       // always been placed from, its tip pixel worn away).
-      // tWide: where ink wider than the line begins about the end (a thicker road across it, which the thickness
-      // band cut the line at): the line ends at that ink's edge, not carried into it (and drawn back to it when
-      // the skeleton ran a little way in).
-      let t = 0, tMed = 0, tWide = Infinity;
-      const along_ = [];
+      // tWide: where ink wider than the line begins about the end, on both sides of it (a thicker road across it,
+      // which the thickness band cut the line at): the line ends at that ink's edge, not carried into it (and drawn
+      // back to it when the skeleton ran a little way in). A burr or a branch off one side is no road: not cut there.
+      // The line's ink is taken to within `half` of it across: three quarters of the width at the click and a pixel
+      // and a half (that width, the ink's area near the click over its centreline's length, is short of the
+      // drawn width on a wide line, by 3 px at 14). `cells`: every pixel within that, ink or not, for the cap's fit.
+      const half = 0.75 * width + 1.5;
+      let t = 0, tMed = 0;
+      const wide = [Infinity, Infinity], inks = [], cells = [];
       for (let y = Y0; y <= Y1; y++) for (let x = X0; x <= X1; x++) {
         const i = y * w + x, mine = labels[i] === id, ink = isInk(i);
+        const dx = x + 0.5 - bx, dy = y + 0.5 - by, along = dx * ux + dy * uy, side = dx * uy - dy * ux, across = Math.abs(side);
+        if (across <= half && along > -2 * width - 4) cells.push(along, side, ink ? 1 : 0);
         if (!mine && !ink) continue;
-        const dx = x + 0.5 - bx, dy = y + 0.5 - by, along = dx * ux + dy * uy, across = Math.abs(dx * uy - dy * ux);
-        if (mine && along > -2 * width && along <= 2 * width + 1 && across > width + 1) tWide = Math.min(tWide, along - 0.5);
-        if (across > width / 2 + 1) continue;
+        if (mine && along > -2 * width && along <= 2 * width + 1 && across > width + 1) { const k = side > 0 ? 0 : 1; wide[k] = Math.min(wide[k], along - 0.5); }
+        if (across > half) continue;
         if (mine && along > 0) tMed = Math.max(tMed, along + 0.5);
         if (!ink) continue;
-        along_.push(along);
+        inks.push(along, side);
         if (along > 0) t = Math.max(t, along + 0.5);
       }
-      const share = (a, b) => { let n = 0; for (const v of along_) n += Math.max(0, Math.min(b, v + 0.5) - Math.max(a, v - 0.5)); return n; };
+      const tWide = Number.isFinite(wide[0]) && Number.isFinite(wide[1]) ? Math.max(wide[0], wide[1]) : Infinity;
       const aRef = t - (1.5 * width + 1), Lr = Math.max(4, 2 * width);
+      // A burr (or a branch) off one side of the line near its end adds ink beyond the line's edge on that side: the
+      // end is then measured from the other side alone (the line is symmetric about its centreline), each pixel
+      // weighed by its share on that side, twice. Only when the two sides are alike within the line's edge over the
+      // stretch behind the end (a curving line's ink leaves one side of a straight band, and is no burr).
+      const edge = width / 2 + 1, excess = [0, 0], within = [0, 0];
+      for (let k = 0; k < inks.length; k += 2) {
+        if (inks[k] <= aRef - Lr) continue;
+        const sd = inks[k + 1] > 0 ? 0 : 1;
+        if (Math.abs(inks[k + 1]) > edge) excess[sd]++; else if (inks[k] <= aRef) within[sd]++;
+      }
+      const alike = Math.abs(within[0] - within[1]) <= 0.15 * Math.max(within[0], within[1]);
+      const clean = !alike ? 0 : excess[0] > excess[1] + 1 ? -1 : excess[1] > excess[0] + 1 ? 1 : 0;
+      const weight = (sd) => (clean ? 2 * Math.max(0, Math.min(1, 0.5 + clean * sd)) : 1);
+      const share = (a, b) => { let n = 0; for (let k = 0; k < inks.length; k += 2) { const v = inks[k]; n += weight(inks[k + 1]) * Math.max(0, Math.min(b, v + 0.5) - Math.max(a, v - 0.5)); } return n; };
       const wRef = share(aRef - Lr, aRef) / Lr, T = aRef + share(aRef, Infinity) / wRef, r = wRef / 2;
       // The end's shape: a flat (butt) end is at its full width over the last half width; a round one tapers
       // there (to π/4 of the full width, ideally). Flat, the line runs to where the ink stops; round, to the
       // centre of its cap, half a width short of it.
-      const flat = wRef > 0 && share(t - r, t) / (r * wRef) >= (width < NARROW_END ? FLAT_END_NARROW : FLAT_END);
-      const go = Number.isFinite(tWide) ? tWide : flat ? T : tMed - width / 2;
-      if (!(go > 0 || Number.isFinite(tWide))) return;
+      const square = wRef > 0 && share(t - r, t) / (r * wRef) >= (width < NARROW_END ? FLAT_END_NARROW : FLAT_END);
+      // Where the end is, to a fraction of a pixel: the cap (flat, or a half disc) placed along the line where it
+      // best matches the ink's pixels (on the clean side alone, when there is one), near where its area puts it.
+      const capCells = [];
+      for (let k = 0; k < cells.length; k += 3) if (!clean || clean * cells[k + 1] >= -0.5) capCells.push(cells[k], Math.abs(cells[k + 1]), cells[k + 2]);
+      const asFlat = wRef > 0 ? fitCap(capCells, T, r, width, false) : [T, Infinity];
+      const asRound = wRef > 0 ? fitCap(capCells, T - (Math.PI * wRef) / 8, r, width, true) : [T, Infinity];
+      // Flat only when the ink fills the end's full width (above) and a flat cap fits its pixels as well as a round
+      // one: a round cap drawn square to the pixels (a line on a pixel's edge) fills it too. With a burr at the end,
+      // whose ink fills a corner, and half the cap to fit, only when a flat cap fits clearly better (by half a pixel).
+      const flat = square && asFlat[1] <= asRound[1] + 1e-6 - (clean ? 0.5 : 0);
+      const go = Number.isFinite(tWide) ? tWide : flat ? asFlat[0] : wRef > 0 ? asRound[0] : tMed - width / 2;
+      // Drawn back too (to a width at most) when the end placed is short of the last point: thinning can run on into a burr.
+      if (!(go > -width || Number.isFinite(tWide))) return;
       const e = [bx + go * ux, by + go * uy];
       work[at] = e;
       // Drawn back, the points beyond the new end are let go (the line does not fold back on itself).

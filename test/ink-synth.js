@@ -116,3 +116,23 @@ export function centroid(r) {
   return [cx / (3 * a), cy / (3 * a)];
 }
 export { closedRing };
+
+/**
+ * `n` straight lines at seeded slants (8° to 82° off the axes, either way), each off-centre in a w × h window
+ * with 25 px clear of its edges: [[a, b], seed], the seed a point on the line a little past its middle (not a
+ * pixel's centre). For the lines' ends, burrs and forks, where an axis-aligned line would hide half a pixel.
+ */
+export function slantedLines(seed, n, w, h) {
+  const g = rng(seed), out = [];
+  while (out.length < n) {
+    const ang = ((8 + 74 * g()) * (g() < 0.5 ? 1 : -1) * Math.PI) / 180, L = 200 + 100 * g();
+    const c = [230 + 240 * g(), 180 + 100 * g()], u = [Math.cos(ang), Math.sin(ang)], f = 0.35 + 0.2 * g();
+    const a = [c[0] - u[0] * L * f, c[1] - u[1] * L * f], b = [c[0] + u[0] * L * (1 - f), c[1] + u[1] * L * (1 - f)];
+    const inside = (p) => p[0] >= 25 && p[1] >= 25 && p[0] <= w - 25 && p[1] <= h - 25;
+    if (inside(a) && inside(b)) out.push([[a, b], [c[0] + 0.3, c[1] - 0.2]]);
+  }
+  return out;
+}
+/** The unit vector from a to b, and the point a fraction t of the way. */
+export const unit = (a, b) => { const L = Math.hypot(b[0] - a[0], b[1] - a[1]); return [(b[0] - a[0]) / L, (b[1] - a[1]) / L]; };
+export const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
