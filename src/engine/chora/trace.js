@@ -153,8 +153,8 @@ export async function traceFor(g, drawn, meta = {}) {
  * The citations and notes of a traced drawing, when it is saved: the map (georefCitation, the
  * region padded as `trace.pad` says, the map's licence linked in its source) and the georeference
  * (georefAnnotationCitation: when it has an address; otherwise there is nothing to cite), and the notes:
- * how it was drawn, then georefNote's fixed sentences (with the date the georeference was fetched, and
- * the label-anchor sentence when the role is LabelAnchor).
+ * georefNote's fixed sentences (with the date the georeference was fetched, and the label-anchor
+ * sentence when the role is LabelAnchor), then how it was drawn.
  */
 export function tracedParts(trace, { zoom, role } = {}) {
   const anchor = role === 'LabelAnchor' || role === georef.LABEL_ANCHOR;

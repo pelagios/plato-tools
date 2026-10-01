@@ -298,9 +298,16 @@ export const choraDrawingNote = ({ basemap = 'Natural Earth', zoom } = {}) =>
 export const POOL_BUSY = 'Another tab of PLATO tools in this browser is working on a file. Wait for it to finish, or close it, then try again.';
 /** This tab could not let go of the working files it was granted in part (worker.js, letGo). */
 export const POOL_STUCK = 'PLATO tools could not free its storage in this tab. Reload the page and try again.';
-/** How a drawing traced from a historical map was made; georefNote's sentences follow it (src/engine/chora/trace.js). */
+/** How a drawing traced from a historical map was made; it follows georefNote's fixed template, after it (src/engine/chora/trace.js). */
 export const choraTracingNote = ({ zoom } = {}) =>
   `Traced by hand from a georeferenced historical map${Number.isFinite(zoom) ? ` at zoom ${Math.round(zoom)}` : ''} in PLATO tools (Chora).`;
+/**
+ * Why Chora does not open what was chosen as a dataset (src/engine/worker.js, chora-load): the readers'
+ * reason, but for a georeference, whose reason on the main page (input.js GEOREF_REASON) is to drop it
+ * with the Recogito export it places; on Chora it is shown under Historical maps.
+ */
+export const CHORA_GEOREF_REASON = "This is a IIIF Georeference Annotation (a map's georeference, not a dataset): to show the map, paste it, or its address, under Historical maps, and open a dataset here to draw on.";
+export const choraLoadFailure = (input) => (input?.format === 'georef' ? CHORA_GEOREF_REASON : input?.reason);
 /** What a Chora save reports of itself (src/engine/chora/save.js), by kind. */
 export const CHORA_TEXT = {
   'chora-addition-invalid': 'A drawing could not be added, because PLATO would not accept it as it is, so nothing was saved',

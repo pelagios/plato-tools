@@ -621,3 +621,24 @@ test('the Allmaps Editor link is offered unless Allmaps is set to Never, and say
   assert.match(ov.EDITOR_LINK_TEXT, /Allmaps Editor/);
   assert.match(ov.EDITOR_LINK_TEXT, /sends this map's address/);
 });
+
+// ---- A georeference opened as a dataset (src/engine/worker.js chora-load) ---------------------------
+import { detect, readable, GEOREF_REASON } from '../src/engine/input.js';
+import { choraLoadFailure, CHORA_GEOREF_REASON } from '../src/engine/words.js';
+import { file, textFile } from './engine.js';
+
+test('a georeference opened on Chora as a dataset is refused with Chora\'s advice (paste it under Historical maps); the main page\'s reason, and every other, are as they were', async () => {
+  const georefInput = await detect([file('test/fixtures/hermes-detect/bpl-rocque-annotation.json')]);
+  assert.equal(georefInput.format, 'georef'); assert.equal(readable(georefInput), false);
+  assert.equal(choraLoadFailure(georefInput), CHORA_GEOREF_REASON);
+  assert.match(CHORA_GEOREF_REASON, /IIIF Georeference Annotation/);
+  assert.match(CHORA_GEOREF_REASON, /under Historical maps/);
+  assert.doesNotMatch(CHORA_GEOREF_REASON, /Recogito/);
+  // Controls: the main page keeps its reason (drop it with the Recogito export), and another refusal is passed on as it is.
+  assert.equal(georefInput.reason, GEOREF_REASON);
+  assert.match(GEOREF_REASON, /Recogito export/);
+  const other = await detect([textFile('neither JSON nor a table', 'notes.txt')]);
+  assert.equal(readable(other), false); assert.ok(other.reason);
+  assert.equal(choraLoadFailure(other), other.reason);
+  assert.equal(choraLoadFailure({ format: 'unknown', reason: 'Unsupported input.' }), 'Unsupported input.');
+});

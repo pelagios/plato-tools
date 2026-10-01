@@ -1923,10 +1923,12 @@ def chora_checks(pw, url, tmp):
         # The control: the same page then opens a dataset.
         s = chora_boot(page, base, [ROOT / 'test/fixtures/hermes-detect/bpl-rocque-annotation.json'])
         said = page.inner_text('#phase')
-        ok = s['phase'] == 'unrecognised' and 'IIIF Georeference Annotation' in said and 'Unsupported input' not in said
+        # On Chora the advice is to paste it under Historical maps, not the main page's (drop it with the Recogito export).
+        ok = (s['phase'] == 'unrecognised' and 'IIIF Georeference Annotation' in said and 'Unsupported input' not in said
+              and 'under Historical maps' in said and 'Recogito' not in said)
         s2 = chora_boot(page, base, [ant])
         return ok and s2['phase'] == 'loaded', {'state': s, 'said': said[:300], 'then': s2.get('phase')}
-    attempt('Chora: a IIIF Georeference Annotation is refused as a dataset with the reason the readers give', georef_said)
+    attempt('Chora: a IIIF Georeference Annotation is refused as a dataset, saying to paste it under Historical maps (not the main page\'s advice)', georef_said)
 
     def search():
         chora_boot(page, base, [fixture(ant, 'antonine-search.json', tmp)])

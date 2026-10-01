@@ -270,7 +270,8 @@ readers link to those headings, so keep them.
   sequence is LPF only by the same test, of its collection line or its first feature; a sequence of
   plain features is refused (`GEOJSON_SEQ_REASON`), asking for one FeatureCollection. A IIIF
   Georeference Annotation (Allmaps) is detected first, as `georef` with a `reason`, and refused
-  like an unrecognised file (`readable()`). `guessColumns` maps each column to one `FIELDS` key, `note` or `skip`
+  like an unrecognised file (`readable()`); opened on Chora as a dataset, it is refused with Chora's
+  own advice instead, to paste it under Historical maps (`words.js` `choraLoadFailure`). `guessColumns` maps each column to one `FIELDS` key, `note` or `skip`
   from its normalised heading and the first 50 rows; `resolveColumns` checks a saved mapping
   instead. The mapping is the same JSON on the page (the column-matching step in `src/app.js`, via
   `columnsOf`/`mappingOf` in `worker.js`, worded in `words.js`: `COLUMN_CHOICES`, `COLUMN_WORDS`,

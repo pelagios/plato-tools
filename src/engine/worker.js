@@ -8,7 +8,7 @@ import { compare } from './compare.js';
 import { publish } from './agora/index.js';
 import { match } from './krisis/match.js';
 import { apply } from './krisis/apply.js';
-import { review } from './words.js';
+import { review, choraLoadFailure } from './words.js';
 import { DataError } from './input.js';
 import { pragmas } from '../lib/store.js';
 import { detect, readable } from './input.js';
@@ -293,7 +293,8 @@ async function choraCommand(data) {
   if (data.cmd === 'chora-load') {
     session.base = data.base || session.base;
     const input = await detect(data.files);
-    if (!readable(input)) { postMessage({ type: 'chora-loaded', failure: input.reason }); return; }
+    // Refused in the readers' words, but a georeference: on Chora it goes under Historical maps (words.js).
+    if (!readable(input)) { postMessage({ type: 'chora-loaded', failure: choraLoadFailure(input) }); return; }
     const { vfs } = await sqlitePool();
     if (session.store) { session.store.close(); session.store = null; session.fingerprint = null; }
     try { vfs.unlink(CHORA_DB); } catch { /* none yet */ }
