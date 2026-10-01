@@ -157,11 +157,9 @@ every test and what it proves, and the conventions to keep.
 
 ## Acknowledgements
 
-The development of PLATO tools has been supported by the
+Development has been supported by the
 [Institute for Spatial History Innovation (ISHI)](https://www.ishi.pitt.edu/) at the University of
-Pittsburgh, through Stephen Gadd's work as a contractor for the
-[World Historical Gazetteer](https://whgazetteer.org), and through ISHI's collaboration with the
-[Pelagios Network](https://pelagios.org).
+Pittsburgh.
 
 ## Licence
 
