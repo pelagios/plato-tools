@@ -76,7 +76,8 @@ const PATTERN_WHY = {
 /** A key's prefix and the rest. */
 export function splitKey(key) {
   const k = norm(key), i = k.search(/[:,]/);
-  return i < 0 ? { prefix: '', rest: k } : { prefix: k.slice(0, i), rest: k.slice(i + 1) };
+  // Spaces around the ':' or ',' (key=" tgn , 7011179") are not part of the prefix or the id.
+  return i < 0 ? { prefix: '', rest: k } : { prefix: k.slice(0, i).trim(), rest: k.slice(i + 1).trim() };
 }
 // The patterns suggested for a prefix, by the gazetteer it names, where most of its keys fit (the
 // user still confirms each). Getty's TGN is Perseus's; its ids are digits.

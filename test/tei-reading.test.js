@@ -322,6 +322,12 @@ test('a key is split at its first ":" or ","; a key with neither has the prefix 
   assert.deepEqual(splitKey('pleiades:579885'), { prefix: 'pleiades', rest: '579885' });
   assert.deepEqual(splitKey('a:b,c'), { prefix: 'a', rest: 'b,c' });
   assert.deepEqual(splitKey('Q1524'), { prefix: '', rest: 'Q1524' });
+  // spaces around the separator belong to neither part
+  assert.deepEqual(splitKey(' tgn , 7011179'), { prefix: 'tgn', rest: '7011179' });
+  assert.deepEqual(splitKey('pleiades :  579885 '), { prefix: 'pleiades', rest: '579885' });
+  const m = mapped(tei('<p><placeName key=" tgn , 7011179">Athens</placeName><placeName key="tgn,7010720">Sparta</placeName></p>'), { keyPatterns: { tgn: TGN } });
+  assert.deepEqual(m.doc.attestations.map((a) => a.about), ['http://vocab.getty.edu/tgn/7011179', 'http://vocab.getty.edu/tgn/7010720'], 'the spaced key is used, as the plain one is (control)');
+  assert.ok(!m.kinds.has('tei-key-shape') && !m.kinds.has('tei-key-no-pattern'));
 });
 
 test('addressFromPattern: the shape is checked, the id put in, and the address made goes through placeAddress', () => {
