@@ -329,7 +329,8 @@ readers link to those headings, so keep them.
   `<language id>`, resolved by `languageTag` to the `<language>`'s `ident` where that is a tag,
   else to the id where that is one (`<language id="la">`), else `tei-lang-not-tag` naming the
   `<language>`; a place name's `@reg` (the editors' regularised form) is `tei-reg`, a loss, and the
-  name is the text's; a name whose language is Greek (`isGreek`: its tag `grc`/`el`, or its
+  name is the text's (in P5 it is an attribute not read, `tei-attribute`, beside a ref or, on a name
+  with a key and no ref, alone); a name whose language is Greek (`isGreek`: its tag `grc`/`el`, or its
   `<language>`'s words or id naming Greek) and whose text is ASCII with a letter is Beta Code:
   `tei-p4-beta-code`, a loss naming the string, and the attestation carries no `names` (and so no
   `formStatus`), with a note (decided 2026-10-01: reported, not converted; a later opt-in only with
@@ -349,8 +350,24 @@ readers link to those headings, so keep them.
   declaration is first), and an in-file entity whose text uses a table name counts it each time it
   is used. At `close()`, each set used is reported once (`tei-entity-iso`, a warning: "isogrk1: agr
   (3), bgr (1)"), since some names were remapped over the years (the 2007 sets have `phiv` U+03D5,
-  `epsiv` U+03F5 and no `phis`). A name in neither the file nor the table is an error, named (a
-  `Proxy` on `ENTITIES` remembers the last name looked up). `teiSource` and `teiKeyPrefixes` read
+  `epsiv` U+03F5 and no `phis`). A `Proxy` on `ENTITIES` remembers the last name looked up, so that
+  an error can name it. **A name in neither the file nor the table** (decided 2026-10-02) is, in such
+  a file only, left out with nothing in its place, and reported once with each name and its count
+  (`tei-entity-unknown`, a warning, saying the DTD was never read). saxes 6 has no hook for an
+  unresolved entity (`parseEntity` reads `this.ENTITIES[name]` and fails on `undefined`), so the
+  same `Proxy` answers such a name with a marker, U+FDD0 name U+FDD1 (noncharacters, which no XML
+  name can hold), which saxes puts into the text or attribute value as the entity's text. `open()`
+  strips markers from attribute values, keeping which attribute held which names
+  (`t.unknownAttrs`); text keeps them until it is read, where `norm()` strips them, so a capture's
+  raw `pref`/`printed` still shows them (`unknownIn`). A place name whose words (taken or printed),
+  `ref` or `key` held one is not converted (`tei-place-entity-unknown`, a loss, with the entity and
+  the words as read without it); so is a listed `<place>` whose `idno` or link target held one (and
+  every name pointing to it), or whose headword did, with `listPlaces`; and a header place name with
+  `headerPlaces`. The source's title (`mainTitle`'s) or the edition's address (the `idno` `source()`
+  uses: type URI or URL, else a DOI) holding one stops the file (`checkSourceEntities`, at the end of
+  each `teiHeader`), naming it, since every citation would be incomplete. A file naming no outside
+  DTD refuses any undeclared entity, as before. A literal U+FDD0…U+FDD1 pair in a file would be read
+  as a marker; noncharacters have no place in a TEI text. `teiSource` and `teiKeyPrefixes` read
   the file's first 64 KB (`headed`) and load the table (`loadIsoEntities`, a dynamic JSON import,
   cached) only when a DOCTYPE there has `SYSTEM` or `PUBLIC`; `teiToDocument` takes it as the option
   `entities`, or uses the cached one. The table is built by `node scripts/make-entities.mjs`
@@ -360,8 +377,8 @@ readers link to those headings, so keep them.
   systems); it writes `src/vendor/iso-entities.NOTICE`, with the W3C Software Notice and License and
   the ISO 1986 and 1991 notices verbatim, and puts the same text in the JSON's `licence`, so the
   notice travels into the built site. Real Perseus P4 files also use their own DTD's entities in the
-  header (`&responsibility;`, `&fund.NEH;`, `&Perseus.publish;`), which are not ISO's: such a file
-  stops there, with the entity named. `scripts/check-perseus-p4.mjs` checks the reading against a
+  header (`&responsibility;`, `&fund.NEH;`, `&Perseus.publish;`), which are not ISO's: they are left
+  out and reported, as above (`test/fixtures/tei/p4-boilerplate-constructed.xml`). `scripts/check-perseus-p4.mjs` checks the reading against a
   local Perseus file (opt-in, `PERSEUS_P4_FILE`; Perseus's texts are CC BY-SA and none is committed).
 - **Tables of places** (`columns.js`, `generic.js`). `input.js`'s `detect()` sends a lone CSV (or
   `.tsv`/`.tab`) that is not one of the tables' sheets, and a FeatureCollection or Feature whose
