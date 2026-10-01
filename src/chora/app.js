@@ -293,7 +293,7 @@ function showSaving() {
   $('saving').hidden = false;
   const places = new Set(drafts.map((d) => d.placeId)).size;
   $('pending-total').textContent = drafts.length
-    ? `${n(drafts.length)} drawing${drafts.length === 1 ? '' : 's'} of ${n(places)} place${places === 1 ? '' : 's'}, not yet saved. They are kept in this browser until you save.`
+    ? `${n(drafts.length)} drawing${drafts.length === 1 ? '' : 's'} of ${n(places)} place${places === 1 ? '' : 's'}, not yet saved. ${permissions.keepWorkingData() ? 'They are kept in this browser until you save.' : 'Save them before you leave: you chose not to keep working data between visits.'}`
     : 'Nothing drawn yet. Choose a place, and draw on the map.';
   $('save').disabled = !drafts.length;
   const c = contributors.load();
@@ -445,7 +445,6 @@ function renderBasemaps() {
     + '<div id="basemap-needs"></div>'
     + `<form id="paste-form"><label for="paste">Paste a style address or a tile template</label>
       <input id="paste" type="url" placeholder="https://…/style.json or https://…/{z}/{x}/{y}.png" autocomplete="off">
-      <small>Kept in this browser, key and all, and sent to nowhere but that provider.</small>
       <button type="submit">Add</button> <span id="paste-error" class="warn"></span></form>`
     + (state.blocked ? `<p class="muted">Refused ${n(state.blocked)} request${state.blocked === 1 ? '' : 's'} to ${esc(state.blockedOrigins.join(', '))}, not the basemap's site.</p>` : '');
   // One line for each permission the basemap wanted still needs (a pasted style may name several sites).

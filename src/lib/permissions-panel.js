@@ -8,7 +8,7 @@ import { PROMISE, PANEL, CATEGORY_WORDS } from './permission-words.js';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const date = (at) => { try { const d = new Date(at); return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }); } catch { return ''; } };
 
-let dialog = null, opener = null;
+let dialog = null, opener = null, confirming = false;
 
 /** What a remembered value is, briefly: a person's name (and ORCID), or the hosts of pasted basemaps. Never an address or a key. */
 function summary(v) {
@@ -36,6 +36,18 @@ function entry(x) {
   </fieldset>`;
 }
 
+// The reload, and, when it would lose something, the question first: what would be lost, and Cancel.
+function reloadPart(api) {
+  const losses = api.reloadLosses();
+  if (confirming && losses.length) {
+    return `<div class="perm-reload perm-confirm" role="group" aria-labelledby="perm-confirm-h">
+      <p id="perm-confirm-h"><strong>${esc(PANEL.reloadLoses)}</strong></p>
+      <ul>${losses.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>
+      <p><button type="button" class="primary" data-reload-confirmed>${esc(PANEL.reloadAnyway)}</button> <button type="button" data-reload-cancel>${esc(PANEL.reloadCancel)}</button></p></div>`;
+  }
+  return `<p class="perm-reload"><button type="button" class="primary" data-reload>${esc(PANEL.reload)}</button> ${esc(losses.length ? PANEL.reloadAsks : PANEL.reloadKept)}</p>`;
+}
+
 function render(api) {
   const all = api.list(), cats = [...new Set(all.map((x) => x.cat))];
   const canary = api.canaryState();
@@ -50,7 +62,7 @@ function render(api) {
       <h3 id="perm-sites-h">${esc(PANEL.sitesHeading)}</h3>
       <p class="muted">${esc(PANEL.sitesIntro)}</p>
       ${cats.map((c) => `<h4>${esc(CATEGORY_WORDS[c].heading)}</h4><p class="muted">${esc(CATEGORY_WORDS[c].learns)}</p>${all.filter((x) => x.cat === c).map(entry).join('')}`).join('')}
-      ${reload ? `<p class="perm-reload"><button type="button" class="primary" data-reload>${esc(PANEL.reload)}</button> ${esc(PANEL.reloadKept)}</p>` : ''}
+      ${reload || confirming ? reloadPart(api) : ''}
       <p><button type="button" data-forget-all>${esc(PANEL.forgetAll)}</button> <span class="muted" role="status" id="perm-forgot"></span></p>
     </section>
     <section aria-labelledby="perm-token-h">
@@ -90,13 +102,15 @@ function create(api) {
     const b = e.target.closest('button');
     if (!b) return;
     if (b.dataset.tab) { const key = b.dataset.tab, i = key.indexOf(':'); api.allowOnce(key.slice(0, i), key.slice(i + 1)); }
-    else if (b.hasAttribute('data-reload')) api.reload();
+    else if (b.hasAttribute('data-reload')) { if (api.reloadLosses().length) { confirming = true; refreshPanel(api); dialog.querySelector('[data-reload-cancel]')?.focus(); } else api.reload({ confirmed: true }); }
+    else if (b.hasAttribute('data-reload-confirmed')) api.reload({ confirmed: true });
+    else if (b.hasAttribute('data-reload-cancel')) { confirming = false; refreshPanel(api); dialog.querySelector('[data-reload]')?.focus(); }
     else if (b.hasAttribute('data-forget-all')) { api.forgetAll(); const s = dialog.querySelector('#perm-forgot'); if (s) s.textContent = PANEL.forgotAll; }
     else if (b.hasAttribute('data-token-forget')) api.token.forget();
     else if (b.dataset.forget) api.forgetRemembered(b.dataset.forget);
   });
   // The focus goes back to what opened the panel, however it was closed (Esc, Close).
-  dialog.addEventListener('close', () => { if (opener?.isConnected) opener.focus(); opener = null; });
+  dialog.addEventListener('close', () => { confirming = false; if (opener?.isConnected) opener.focus(); opener = null; });
   document.body.appendChild(dialog);
 }
 
@@ -116,15 +130,18 @@ export function refreshPanel(api) {
 }
 
 /** Open the panel at its heading, or at the permission `focus` ('cat:subj'): its chosen state has the focus. */
-export function openPanel(api, { focus } = {}) {
+export function openPanel(api, { focus, confirmReload } = {}) {
   if (!dialog) create(api);
+  confirming = !!confirmReload;
+  if (dialog.open && confirmReload) refreshPanel(api);
   if (!dialog.open) {
     opener = document.activeElement && document.activeElement !== document.body ? document.activeElement : null;
     dialog.innerHTML = render(api);
     dialog.showModal();
   }
   const set = focus ? [...dialog.querySelectorAll('fieldset.perm')].find((f) => f.dataset.key === focus) : null;
-  const target = set ? (set.querySelector('input:checked') || set.querySelector('input')) : dialog.querySelector('#permissions-h');
+  const target = set ? (set.querySelector('input:checked') || set.querySelector('input'))
+    : confirmReload ? dialog.querySelector('[data-reload-cancel]') || dialog.querySelector('#permissions-h') : dialog.querySelector('#permissions-h');
   target?.focus();
   set?.scrollIntoView({ block: 'center' });
   return dialog;

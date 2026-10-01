@@ -282,13 +282,30 @@ function renderLines() { for (const el of [...lines.keys()]) { if (el.isConnecte
 /** Open the panel: at its heading, or at one permission's entry (`focus`: its 'cat:subj' key). */
 export function open({ focus } = {}) { return openPanel(api, { focus }); }
 
-const reloadHooks = new Set();
-/** Call fn() (it may be async) before the page reloads for a permission, to keep what the user has open. */
-export function onBeforeReload(fn) { reloadHooks.add(fn); return () => reloadHooks.delete(fn); }
-/** Reload the page, so that permissions allowed since it loaded are in its policy. */
-export async function reload() {
-  for (const fn of reloadHooks) { try { await fn(); } catch (e) { console.warn('Permissions: keeping the page before reloading failed', e); } }
+const reloadHooks = new Map();   // fn -> loses
+/**
+ * Before the page reloads for a permission: fn() (it may be async) keeps what it can of what the user
+ * has open; loses(), if given, says in words what a reload would still lose (the files chosen, a review
+ * not saved), or null when nothing. While anything would be lost, the reload is asked about first, in
+ * the panel, and the user may cancel it. Returns a function that stops it.
+ */
+export function onBeforeReload(fn, { loses } = {}) { reloadHooks.set(fn, loses || null); return () => reloadHooks.delete(fn); }
+/** What a reload now would lose, in words: one entry for each page part that says so. */
+export function reloadLosses() {
+  const out = [];
+  for (const loses of reloadHooks.values()) { try { const w = loses?.(); if (w) out.push(String(w)); } catch { /* says nothing */ } }
+  return out;
+}
+/**
+ * Reload the page, so that permissions allowed since it loaded are in its policy. If it would lose
+ * something (reloadLosses) and is not `confirmed`, the panel asks first, and nothing happens until the
+ * user chooses; returns false then.
+ */
+export async function reload({ confirmed = false } = {}) {
+  if (!confirmed && reloadLosses().length) { openPanel(api, { confirmReload: true }); return false; }
+  for (const fn of reloadHooks.keys()) { try { await fn(); } catch (e) { console.warn('Permissions: keeping the page before reloading failed', e); } }
   location.reload();
+  return true;
 }
 
 /**
@@ -388,4 +405,4 @@ export const token = {
 
 // What the panel is given: the module's own functions, so that it has no import of its own here.
 const api = { list, state, set, allowOnce, forget, forgetAll, token, keepWorkingData, setKeepWorkingData, remembered, forgetRemembered,
-  reload, canaryState: () => canaryResult, waitsForReload };
+  reload, reloadLosses, canaryState: () => canaryResult, waitsForReload };

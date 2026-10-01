@@ -11,6 +11,7 @@ import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed
 import { stash as stashForChora } from './chora/handoff.js';
 import { storageNeed } from './engine/storage.js';
 import * as permissions from './lib/permissions.js';
+import { RELOAD_LOSES } from './lib/permission-words.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
 let worker, files = [], input = null, targets = {}, busy = false;
@@ -564,4 +565,10 @@ async function saveBlob(blob, name) {
 // The Permissions panel, from the header's button; and the proof that the page's policy is enforced
 // (state.canary), without which no other site is asked from this page.
 permissions.mount({ state });
+// A reload for a permission cannot keep the files chosen here (the browser gives a page no way back to
+// a file without the user choosing it again): it says so in the panel first, and may be cancelled.
+// A tool that keeps more (Krisis's review) says what it would lose the same way, with onBeforeReload.
+permissions.onBeforeReload(() => {}, { loses: () => (files.length ? RELOAD_LOSES.files(files.map((f) => f.name)) : null) });
+permissions.onBeforeReload(() => {}, { loses: () => (busy ? RELOAD_LOSES.running : null) });
+permissions.onBeforeReload(() => {}, { loses: () => (state.phase === 'reviewing' ? RELOAD_LOSES.review : null) });
 startWorker();

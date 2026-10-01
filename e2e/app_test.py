@@ -1204,6 +1204,30 @@ def main_permissions(ctx, page, url, requests):
         back = wait_state(page, lambda s: s.get('canary') in ('enforced', 'not-enforced'), T(15), 'canary')
         return s.get('canary') == 'not-enforced' and not meta and back.get('canary') == 'enforced', {'without': s.get('canary'), 'why': s.get('canaryWhy'), 'meta': meta, 'with it again': back.get('canary')}
     attempt('main page: served without the script that writes its policy, the canary says it is not enforced (and with it again, enforced)', no_policy)
+    def reload_asks():
+        page.goto(NOTOOLS if PROVE else url)
+        wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+        page.set_input_files('#picker', [str(PLATO / 'schemas/examples/place-centric-judgements.json')])
+        wait_state(page, lambda s: s.get('phase') == 'detected', T(30), 'detected')
+        page.evaluate('() => { window.__plato_kept_marker = true; }')   # gone only if the page reloads
+        page.click('#permissions-button')
+        until(page, '() => document.getElementById("permissions-panel")?.open', 10)
+        page.check('#permissions-panel fieldset.perm[data-key="gazetteer:whg"] input[value="allowed"]')
+        page.click('#permissions-panel [data-reload]')
+        asked = page.inner_text('#permissions-panel .perm-confirm') if page.is_visible('#permissions-panel .perm-confirm') else ''
+        focus = page.evaluate('() => document.activeElement && document.activeElement.hasAttribute("data-reload-cancel")')
+        page.click('#permissions-panel [data-reload-cancel]')
+        page.wait_for_timeout(500)
+        kept = page.evaluate('() => window.__plato.phase') == 'detected' and page.evaluate('() => window.__plato_kept_marker === true')
+        page.click('#permissions-panel [data-reload]')
+        with page.expect_navigation(timeout=30_000): page.click('#permissions-panel [data-reload-confirmed]')
+        s = wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+        csp = page.evaluate('() => window.__platoCsp')
+        reloaded = page.evaluate('() => !window.__plato_kept_marker')
+        page.evaluate("() => localStorage.removeItem('plato-tools.permissions')")
+        return ('place-centric-judgements.json' in asked and focus and kept and reloaded and 'https://whgazetteer.org' in csp['origins']), {
+            'asked': asked, 'cancel focused': focus, 'kept after cancel': kept, 'reloaded': reloaded, 'policy': csp['origins']}
+    attempt('main page: a reload for a permission that would lose the files chosen says so in the panel first; Cancel keeps the page, Reload anyway reloads it with the site in its policy', reload_asks)
 
 # ---- Chora (chora.html): the map page ------------------------------------------------------------
 # Chora has a browser profile of its own, so that its storage (the drawings kept, the contributor

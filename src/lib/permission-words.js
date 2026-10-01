@@ -55,6 +55,10 @@ export const PANEL = {
   reloadNote: 'Allowed: it can be used once the page is reloaded.',
   reload: 'Reload the page now',
   reloadKept: 'What you have open is kept.',
+  reloadAsks: 'Something you have open would be lost: you will be asked first.',
+  reloadLoses: 'Reloading the page now would lose:',
+  reloadAnyway: 'Reload anyway',
+  reloadCancel: 'Cancel',
   forgetAll: 'Forget all permissions',
   forgotAll: 'All permissions are forgotten.',
   none: 'No other site has been allowed.',
@@ -80,6 +84,13 @@ export const REMEMBERED = {
   'plato-tools.reviewer': { label: 'Your name and ORCID, as the reviewer of matches (Krisis)' },
   'chora-contributor': { label: 'Your name and ORCID, as the one drawing (Chora)' },
   'chora-basemaps': { label: 'The basemaps you pasted (Chora). Their addresses may hold an API key.' },
+};
+
+/** What a reload would lose on the main page, said in the panel before it reloads. */
+export const RELOAD_LOSES = {
+  files: (names) => `The file${names.length === 1 ? '' : 's'} you chose (${names.join(', ')}): you would choose ${names.length === 1 ? 'it' : 'them'} again.`,
+  running: 'The check, conversion or comparison running now, and its result.',
+  review: 'Your match review’s decisions since you last saved it: save the review first.',
 };
 
 /** The one line a feature shows while it waits for a permission. */
