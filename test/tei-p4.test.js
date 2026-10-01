@@ -139,8 +139,8 @@ test('a file naming no outside DTD still refuses an entity it does not declare',
   for (const d of ['<!DOCTYPE TEI SYSTEM "tei_all.dtd">', '<!DOCTYPE TEI [<!ENTITY % ISOgrk1 PUBLIC "ISO 8879:1986//ENTITIES Greek Letters//EN//XML" "isogrk1.ent"> %ISOgrk1;]>']) {
     assert.deepEqual(names(mapped(P5(d, pn('&agr;')))), ['α'], d);
   }
-  // And a name in neither the file nor the table is an error there too.
-  assert.throws(() => mapped(P5('<!DOCTYPE TEI SYSTEM "tei_all.dtd">', pn('&nosuchname;'))), (e) => e instanceof DataError && /nosuchname/.test(e.message));
+  // A name in neither the file nor the table is refused, named, here; with an outside DTD it is left out (below).
+  assert.throws(() => mapped(P5('<!DOCTYPE TEI>', pn('&nosuchname;'))), (e) => e instanceof DataError && /nosuchname/.test(e.message));
 });
 test('the table is installed for a DOCTYPE with no internal subset (before doctype()\'s early return)', () => {
   const m = mapped('<?xml version="1.0"?>\n<!DOCTYPE TEI.2 SYSTEM "tei2.dtd">\n<TEI.2><teiHeader><fileDesc><titleStmt><title>T</title></titleStmt></fileDesc></teiHeader><text><body><p><placeName key="tgn,1">&Agr;&thgr;&eegr;&ngr;&agr;&igr;</placeName></p></body></text></TEI.2>', { keyPatterns: { tgn: TGN } });
@@ -170,7 +170,7 @@ test('TEI with no namespace is P5 without its xmlns: xml:id and xml:lang are rea
   assert.deepEqual(names(mixed), ['Roma']);
 });
 test('the P5 fixtures give no P4, no-namespace or ISO entity warning', () => {
-  const p5 = readdirSync(DIR).filter((f) => f.endsWith('.xml') && f !== 'p4-constructed.xml');
+  const p5 = readdirSync(DIR).filter((f) => f.endsWith('.xml') && !f.startsWith('p4-'));
   assert.ok(p5.length >= 6);
   for (const f of p5) {
     const m = mapped(text(f), {}, f);
@@ -183,4 +183,75 @@ test('the P5 fixtures give no P4, no-namespace or ISO entity warning', () => {
 test('the new kinds have words and the severities agreed', () => {
   const want = { 'tei-p4': 'warning', 'tei-no-namespace': 'warning', 'tei-entity-iso': 'warning', 'tei-p4-beta-code': 'loss', 'tei-reg': 'loss' };
   for (const [k, sev] of Object.entries(want)) { assert.equal(TEI_KINDS[k], sev, k); assert.ok(LOSS_TEXT[k], k); }
+});
+
+// ---- entities that only the outside DTD declares (decided 2026-10-02) ---------------------------------------
+// In a file naming an outside DTD, an entity in neither the file nor the ISO table is left out, with
+// nothing in its place, and reported (tei-entity-unknown); a place name holding one is not converted
+// (tei-place-entity-unknown); a source title or edition address holding one stops the file. The
+// fixture is constructed in the manner of a digital library's header boilerplate.
+const boiler = () => text('p4-boilerplate-constructed.xml');
+const KEYS = { keyPatterns: { tgn: TGN } };
+test('header boilerplate in entities only the outside DTD declares: left out, reported once with names and counts, and the file converts', () => {
+  const m = mapped(boiler(), KEYS, 'p4-boilerplate-constructed.xml');
+  assert.equal(valid(m.doc), null);
+  assert.deepEqual(names(m), ['Romam', 'Athenas']);
+  const reported = examples(m, 'tei-entity-unknown');
+  assert.equal(reported.length, 1);
+  assert.match(reported[0], /^&responsibility; \(2\), &fund\.NEH; \(1\), &Perseus\.publish; \(1\): left out/);
+  assert.match(reported[0], /never read/);
+  assert.equal(TEI_KINDS['tei-entity-unknown'], 'warning');
+  assert.ok(LOSS_TEXT['tei-entity-unknown']);
+  // Nothing is put in an entity's place, not even its name.
+  assert.ok(!/responsibility|fund\.NEH|Perseus\.publish|﷐|﷑/.test(JSON.stringify(m.doc)));
+  assert.ok(!m.kinds.has('tei-place-entity-unknown'));
+  // Control: the same file with the entities declared in its own DOCTYPE gives no such report.
+  const declared = boiler().replace('%PersProse;\n', '%PersProse;\n<!ENTITY responsibility "encoded by"><!ENTITY fund.NEH "a foundation"><!ENTITY Perseus.publish "">\n');
+  const c = mapped(declared, KEYS);
+  assert.deepEqual(names(c), ['Romam', 'Athenas']);
+  assert.ok(!c.kinds.has('tei-entity-unknown'));
+});
+test('a place name with an unknown entity (in its words, ref or key) is not converted and is reported; the others convert', () => {
+  const cases = {
+    words: ['<placeName key="tgn,7000874">Ro&lacuna;mam</placeName>', /^&lacuna; in "Romam" \(<placeName key="tgn,7000874">\) on line \d+$/],
+    key: ['<placeName key="tgn,&roma.key;">Romam</placeName>', /^&roma\.key; in "Romam" \(<placeName key="tgn,">\)/],
+    ref: ['<placeName ref="http://vocab.getty.edu/tgn/&roma.id;">Romam</placeName>', /^&roma\.id; in "Romam" \(<placeName ref="http:\/\/vocab\.getty\.edu\/tgn\/">\)/],
+  };
+  for (const [what, [pn, want]] of Object.entries(cases)) {
+    const m = mapped(boiler().replace('<placeName key="tgn,7000874">Romam</placeName>', pn), KEYS);
+    assert.deepEqual(names(m), ['Athenas'], what);
+    const r = examples(m, 'tei-place-entity-unknown');
+    assert.equal(r.length, 1, what);
+    assert.match(r[0], want, what);
+    assert.ok(!m.kinds.has('tei-key-shape') && !m.kinds.has('tei-ref-relative'), what);
+  }
+  assert.equal(TEI_KINDS['tei-place-entity-unknown'], 'loss');
+  assert.ok(LOSS_TEXT['tei-place-entity-unknown']);
+  // A listed place whose address holds one: names pointing to it are not converted either.
+  const listed = boiler().replace('<div1 type="book" n="1">', '<div1 type="book" n="1"><p><placeName ref="#r">Roma</placeName></p>').replace('</body>', '</body><back><listPlace><place id="r"><placeName>Roma</placeName><idno>http://vocab.getty.edu/tgn/&roma.id;</idno></place></listPlace></back>');
+  const l = mapped(listed, KEYS);
+  assert.deepEqual(names(l), ['Romam', 'Athenas']);
+  assert.equal(examples(l, 'tei-place-entity-unknown').length, 2);
+  assert.ok(!l.kinds.has('tei-ref-local'));
+  // Control: the same file with no entity in the names converts all three.
+  const ok = mapped(listed.replace('&roma.id;', '7000874'), KEYS);
+  assert.deepEqual(names(ok), ['Roma', 'Romam', 'Athenas']);
+  assert.ok(!ok.kinds.has('tei-place-entity-unknown'));
+});
+test('an unknown entity in the source title, or in the edition\'s address, stops the file, naming the entity', () => {
+  assert.throws(() => mapped(boiler().replace('<title>De Locis Fictis</title>', '<title>De Locis &title.suffix;</title>'), KEYS),
+    (e) => e instanceof DataError && /&title\.suffix;/.test(e.message) && /title/.test(e.message) && /never read/.test(e.message));
+  assert.throws(() => mapped(boiler().replace('de-locis-fictis</idno>', '&text.id;</idno>'), KEYS),
+    (e) => e instanceof DataError && /&text\.id;/.test(e.message) && /address/.test(e.message));
+  // Control: one in a sub-title the reader does not use, or in another header field, does not stop it.
+  const sub = mapped(boiler().replace('<title>De Locis Fictis</title>', '<title>De Locis Fictis</title><title type="sub">&title.suffix;</title>'), KEYS);
+  assert.deepEqual(names(sub), ['Romam', 'Athenas']);
+  assert.equal(sub.doc.attestations[0].citations[0].source.title, 'De Locis Fictis');
+});
+test('a file naming no outside DTD still refuses an undeclared entity, in the header or a place name', () => {
+  const noDtd = boiler().replace(/<!DOCTYPE[\s\S]*?\]>\n/, '');
+  assert.throws(() => mapped(noDtd, KEYS), (e) => e instanceof DataError && /&responsibility;/.test(e.message));
+  assert.throws(() => mapped(noDtd.replace(/&[\w.]+;/g, '').replace('Romam', 'Ro&lacuna;mam'), KEYS), (e) => e instanceof DataError && /&lacuna;/.test(e.message));
+  // Control: without the entities, it converts.
+  assert.deepEqual(names(mapped(noDtd.replace(/&[\w.]+;/g, ''), KEYS)), ['Romam', 'Athenas']);
 });

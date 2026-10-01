@@ -168,6 +168,8 @@ export const TEI_KINDS = {
   'tei-p4': 'warning',
   'tei-no-namespace': 'warning',
   'tei-entity-iso': 'warning',
+  'tei-entity-unknown': 'warning',
+  'tei-place-entity-unknown': 'loss',
   'tei-reg': 'loss',
   'tei-p4-beta-code': 'loss',
 };
@@ -253,8 +255,23 @@ const BETA_CODE = /^(?=.*[A-Za-z])[\x20-\x7e]+$/;
 // scripts/make-entities.mjs from the W3C's files) are given to the parser before the file's own
 // declarations, which win. Each name read from them is counted, and each set used is reported once
 // with its names and counts (tei-entity-iso): some ISO names were remapped over the years (ISOgrk3's
-// phiv and epsiv), so what was read is said. A name in neither is an error, as in any file. The
-// table is loaded lazily (loadIsoEntities), only when the head of a file may name an outside DTD.
+// phiv and epsiv), so what was read is said. The table is loaded lazily (loadIsoEntities), only
+// when the head of a file may name an outside DTD.
+//
+// A name in neither the file nor the table (Perseus's own &responsibility;, &fund.NEH;,
+// &Perseus.publish;, which only its DTD declares) is, in such a file only (decided 2026-10-02), left
+// out, with nothing in its place, and reported once with each name and its count
+// (tei-entity-unknown). saxes has no hook for an entity it cannot resolve: it looks each name up in
+// its ENTITIES map (parseEntity) and fails on undefined. So the Proxy on that map (in the
+// constructor) answers such a name with a marker, UNKNOWN_OPEN name UNKNOWN_CLOSE (two Unicode
+// noncharacters, which no XML name can hold), which saxes puts into the text or the attribute value
+// as an entity's text. Attribute values are stripped of markers as each element opens, remembering
+// which attribute held which names (t.unknownAttrs); text keeps them until it is read, where norm()
+// strips them, so that a capture's raw text (c.pref, c.printed) still shows them (unknownIn). A place
+// name whose words, ref or key held one is not converted (tei-place-entity-unknown), nor is a place
+// in a list of places whose address or headword held one; a source title, or the edition's address
+// (the idno source() uses), that held one stops the file, since every citation would be incomplete.
+// A file naming no outside DTD refuses such a name, as before.
 let isoTable;
 /** The ISO entity table, loaded once, when a file first needs it. */
 export async function loadIsoEntities() {
@@ -274,7 +291,15 @@ export function namesOutsideDtd(text) {
 const HEAD = 65536;
 const mayNameOutsideDtd = (head) => { const i = head.indexOf('<!DOCTYPE'); return i >= 0 && /\b(SYSTEM|PUBLIC)\b/.test(head.slice(i)); };
 
-const norm = (s) => s.replace(/\s+/g, ' ').trim();
+const UNKNOWN_OPEN = '\uFDD0', UNKNOWN_CLOSE = '\uFDD1';
+const UNKNOWN = /\uFDD0([^\uFDD0\uFDD1]*)\uFDD1/g;
+// What saxes would take as an entity name (its isName, near enough): anything else it refuses itself.
+const ENTITY_NAME = /^[^\s\d.\-&;#<>"'\uFDD0\uFDD1][^\s&;<>"'\uFDD0\uFDD1]*$/u;
+/** The names of the unknown entities left out of a string as read (the markers in it), in order. */
+const unknownIn = (s) => (s && s.includes(UNKNOWN_OPEN) ? [...s.matchAll(UNKNOWN)].map((m) => m[1]) : []);
+const stripUnknown = (s) => (s.includes(UNKNOWN_OPEN) ? s.replace(UNKNOWN, '') : s);
+const entities = (names) => [...new Set(names)].map((n) => `&${n};`).join(', ');
+const norm = (s) => stripUnknown(s).replace(/\s+/g, ' ').trim();
 const isWeb = (s) => typeof s === 'string' && WEB.test(s) && isAbsoluteIri(s);
 const hostOf = (iri) => { try { return new URL(iri).hostname.toLowerCase(); } catch { return undefined; } };
 const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
@@ -342,6 +367,7 @@ export class TeiReader {
     this.languages = new Map();    // P4: <language id> -> { ident, text }
     this.isoNames = null;          // name -> { set, value }, once the ISO table is installed
     this.isoUsed = new Map();      // set -> Map(name -> count), in the order first used
+    this.unknownUsed = new Map();  // name -> count: entities in neither the file nor the ISO table, left out (tei-entity-unknown)
     this.onKey = onKey;            // onKey(prefix, key, rest): each key of a place name with no ref (teiKeyPrefixes)
     this.keysWithout = new Map();  // prefix -> { count, examples, rests }: keys with no pattern, for tei-key-no-pattern
     const refused = teiReadingRefusal(reading);
@@ -370,7 +396,16 @@ export class TeiReader {
     const p = this.parser = new SaxesParser({ xmlns: true, position: true });
     // Each entity name looked up, so that an undefined one can be named.
     const E = p.ENTITIES;
-    p.ENTITIES = new Proxy(E, { get: (target, k) => { if (typeof k === 'string') this.lastEntity = k; return target[k]; } });
+    // In a file naming an outside DTD (the ISO table installed), a name declared nowhere is answered
+    // with a marker, found and stripped where the text is read (the ISO entity sets, above).
+    p.ENTITIES = new Proxy(E, { get: (target, k) => {
+      if (typeof k !== 'string') return target[k];
+      this.lastEntity = k;
+      const v = target[k];
+      if (v !== undefined || !this.isoNames || !ENTITY_NAME.test(k)) return v;
+      this.unknownUsed.set(k, (this.unknownUsed.get(k) || 0) + 1);
+      return UNKNOWN_OPEN + k + UNKNOWN_CLOSE;
+    } });
     p.on('error', (e) => {
       const why = String(e.message).split('\n')[0];
       const ent = this.lastEntity ? `&${this.lastEntity};` : 'an entity';
@@ -461,6 +496,7 @@ export class TeiReader {
     }
     if (!this.attestations) this.report('tei-none-linked', `${plural(this.mentions, 'place name')} in the text`);
     for (const [set, used] of this.isoUsed) this.report('tei-entity-iso', `${set}: ${[...used].map(([n, c]) => `${n} (${c})`).join(', ')}`);
+    if (this.unknownUsed.size) this.report('tei-entity-unknown', `${[...this.unknownUsed].map(([n, c]) => `&${n}; (${c})`).join(', ')}: left out, with nothing in their place; the outside DTD that may declare them was never read`);
     return this.take();
   }
   take() { const o = this.out; this.out = []; return o; }
@@ -517,6 +553,21 @@ export class TeiReader {
       },
     } });
   }
+  /**
+   * A teiHeader just read: its title, or the edition's address source() would use (an idno of type
+   * URI or URL, else a DOI), holding an entity neither the file nor the ISO table declares stops the
+   * file, since every citation of the edition would be incomplete.
+   */
+  checkSourceEntities(h) {
+    const stop = (what, text, unknown) => { throw new DataError(`The edition's ${what} (${text ? `"${text}"` : 'empty'}) uses ${entities(unknown)}, which neither the file's own DOCTYPE nor the ISO entity sets declare: the file names an outside DTD, which is never read, so the ${what} cannot be read whole, and every citation of the edition would be incomplete. Declare the entity in the file's DOCTYPE, or write its text in its place.`); };
+    const title = h.titles.find((x) => x.type === 'main') || h.titles[0];
+    if (title?.unknown.length) stop('title', title.text, title.unknown);
+    const idno = (types) => h.idnos.find((i) => types.includes((i.type || '').toLowerCase()) && (i.text || i.unknown.length));
+    const uri = idno(['uri', 'url']);
+    if (uri?.unknown.length) stop('address', uri.text, uri.unknown);
+    const doi = uri && isWeb(uri.text) ? undefined : idno(['doi']);
+    if (doi?.unknown.length) stop('DOI', doi.text, doi.unknown);
+  }
   mainTitle(h) { const t = h.titles.find((x) => x.type === 'main') || h.titles[0]; return t && t.text; }
   /**
    * The source the attestations cite: the TEI edition itself, as its teiHeader describes it. The
@@ -563,12 +614,12 @@ export class TeiReader {
     if (!h) return;
     const attr = (n) => t.attributes[n]?.value;
     const cap = (fn) => this.capture(fn);
-    if (/fileDesc\/titleStmt\/title$/.test(path)) cap((c) => { const s = norm(c.pref); if (s) h.titles.push({ type: attr('type'), text: s }); });
+    if (/fileDesc\/titleStmt\/title$/.test(path)) cap((c) => { const s = norm(c.pref), unknown = unknownIn(c.pref); if (s || unknown.length) h.titles.push({ type: attr('type'), text: s, unknown }); });
     else if (/fileDesc\/titleStmt\/author$/.test(path)) cap((c) => { const s = norm(c.pref); if (s) h.authors.push(s); });
     else if (/fileDesc\/titleStmt\/editor$/.test(path)) cap((c) => { const s = norm(c.pref); if (s) h.editors.push(s); });
     else if (/fileDesc\/publicationStmt\/publisher$/.test(path)) cap((c) => { h.publisher ||= norm(c.pref) || undefined; });
     else if (/fileDesc\/publicationStmt\/date$/.test(path)) cap((c) => { h.date ||= norm(c.pref) || attr('when') || undefined; });
-    else if (/fileDesc\/publicationStmt\/idno$/.test(path)) cap((c) => h.idnos.push({ type: attr('type'), text: norm(c.pref) }));
+    else if (/fileDesc\/publicationStmt\/idno$/.test(path)) cap((c) => h.idnos.push({ type: attr('type'), text: norm(c.pref), unknown: unknownIn(c.pref) }));
     else if (/fileDesc\/publicationStmt\/availability\/licence$/.test(path)) cap((c) => h.licences.push({ target: attr('target'), text: norm(c.pref) }));
     // The original the edition was made from: a bibliographic description, or a manuscript's (or an
     // inscribed object's) identifier: where it is kept and its number. A <p> ("born digital") is not
@@ -657,6 +708,11 @@ export class TeiReader {
     // An element is TEI's when its namespace is the root's.
     const tei = (t.uri || '') === this.ns;
     if (tei && this.teiVariant === 'p4') P4Attributes(t);
+    // An unknown entity's marker in an attribute value: stripped, and which names it held remembered.
+    for (const a of Object.values(t.attributes)) {
+      const names = unknownIn(a.value);
+      if (names.length) { (t.unknownAttrs ||= new Map()).set(a.name, names); a.value = stripUnknown(a.value); }
+    }
     const lang = attr('xml:lang') ?? parent?.lang;
     const el = { local, tei, lang, name: t.name };
     if (local === 'provenance') { el.provenance = attr('type') || ''; el.provenanceSubtype = attr('subtype'); }
@@ -726,7 +782,7 @@ export class TeiReader {
 
     // A list of places: a <place>, its id, its web address, and what is not read from it.
     if (local === 'place') {
-      const pl = { id: attr('xml:id'), uris: [], names: [], geo: [], geos: [], fileLine: this.parser.line }; this.placeStack.push(pl); el.place = pl;
+      const pl = { id: attr('xml:id'), uris: [], names: [], geo: [], geos: [], unknown: [], fileLine: this.parser.line }; this.placeStack.push(pl); el.place = pl;
       this.attributes(t, new Set(['xml:id', 'xml:lang', 'xml:space']));
       return;
     }
@@ -736,6 +792,7 @@ export class TeiReader {
       const type = attr('type');
       if (local !== 'link') this.once('tei-place-content', `${which}: <linkGrp>/<${local}>`);
       else if (type !== undefined && type !== 'normal') this.once('tei-place-content', `${which}: <link type="${type}"> ${norm(attr('target') || '')}`);
+      else if (t.unknownAttrs?.has('target')) { const unknown = t.unknownAttrs.get('target'); pl.unknown.push(...unknown); this.report('tei-place-entity-unknown', `${entities(unknown)} in the address of ${which}: <link target="${norm(attr('target') || '')}">`); }
       else for (const target of norm(attr('target') || '').split(' ').filter(Boolean)) {
         if (!/^https?:\/\//i.test(target) || !this.placeUri(pl, target)) this.once('tei-place-content', `${which}: <link target="${target}">`);
       }
@@ -747,6 +804,8 @@ export class TeiReader {
       if (local === 'idno') {
         this.capture((c) => {
           const s = norm(c.pref);
+          const unknown = unknownIn(c.pref);
+          if (unknown.length) { pl.unknown.push(...unknown); this.report('tei-place-entity-unknown', `${entities(unknown)} in the address of ${pl.id !== undefined ? `#${pl.id}` : 'a place with no xml:id'}: <idno> ${s || '(empty)'}`); return; }
           if (!this.placeUri(pl, s)) this.report('tei-place-content', `${pl.id !== undefined ? `#${pl.id}` : 'a place with no xml:id'}: <idno${t.attributes.type ? ` type="${t.attributes.type.value}"` : ''}> ${s}`);
         });
         return;
@@ -794,7 +853,7 @@ export class TeiReader {
     // Only a name that is the place's own child is its name: one in a <location> is part of that
     // location (its own, read as words, or another place's, reported above), not a name of this place.
     if (pl && parent?.otherLocation) { const o = parent.otherLocation; this.capture((c) => { const s = norm(c.pref); if (s) o.names.push(s); }); return; }
-    if (pl) { if (parent?.place === pl) this.capture((c) => { const s = norm(c.pref); if (s) pl.names.push({ text: s, lang: this.stack[this.stack.length - 1].lang }); }); return; }
+    if (pl) { if (parent?.place === pl) this.capture((c) => { const s = norm(c.pref); if (s) pl.names.push({ text: s, lang: this.stack[this.stack.length - 1].lang, unknown: unknownIn(c.pref) }); }); return; }
     // A place name outside the text (in the teiHeader, where EpiDoc says where an inscription was
     // found; in a <standOff>, a <facsimile>) is the edition's description of the document, not a
     // name the text attests. It is reported where it points to a place; without a ref (a
@@ -847,6 +906,7 @@ export class TeiReader {
       this.inHeader--;
       const scope = this.scopes[this.scopes.length - 1];
       scope.hdr.read = true;
+      this.checkSourceEntities(scope.hdr);
       this.firstHdr ||= scope.hdr;
       this.header();
       // What waited for the whole header (a list of places, the places it describes), now that it is read.
@@ -918,7 +978,7 @@ export class TeiReader {
   }
   placeDone(pl) {
     this.placeStack.pop();
-    if (pl.id !== undefined) this.places.set(pl.id, { uris: pl.uris });
+    if (pl.id !== undefined) this.places.set(pl.id, { uris: pl.uris, unknown: pl.unknown });
     const which = pl.id !== undefined ? `#${pl.id}` : 'a place with no xml:id';
     if (!this.reading.listPlaces) {
       if (pl.names.length) this.report('tei-listplace-names', `${which}: ${pl.names.map((n) => n.text).join(', ')}`);
@@ -948,6 +1008,9 @@ export class TeiReader {
   listPlace(pl) {
     const which = pl.id !== undefined ? `#${pl.id}` : 'a place with no xml:id';
     const words = pl.names.map((n) => n.text).join(', ') || 'no name';
+    // An address with an unknown entity was reported as it was read; a headword with one is incomplete.
+    if (pl.unknown.length) return;
+    if (pl.names[0]?.unknown.length) { this.report('tei-place-entity-unknown', `${entities(pl.names[0].unknown)} in the name of ${which}: ${pl.names[0].text || '(empty)'}`); return; }
     if (!pl.uris.length) { this.report('tei-listplace-no-address', `${which}: ${words}`); return; }
     // Several different addresses: one is preferred (severalIds), unless two are from one gazetteer,
     // when which place is meant cannot be told, as for a ref to it (tei-ref-ambiguous). Two forms of
@@ -1038,6 +1101,8 @@ export class TeiReader {
     this.attributes(t, READ_ATTRIBUTES, GENERAL_NAMES.has(t.local) ? 'type' : undefined);
     this.capture((c) => {
       const toponym = norm(c.pref), printed = norm(c.printed), ref = norm(attr('ref'));
+      const unknown = [...unknownIn(c.pref), ...unknownIn(c.printed), ...(t.unknownAttrs?.get('ref') || []), ...(t.unknownAttrs?.get('key') || [])];
+      if (unknown.length) { this.report('tei-place-entity-unknown', `${entities(unknown)} in ${toponym ? `"${toponym}"` : 'an empty name'} (<${t.name} ref="${ref}">, teiHeader) on line ${fileLine}`); return; }
       if (!toponym) { this.report('tei-place-empty', `<${t.name} ref="${ref}"> on line ${fileLine}`); return; }
       const el = this.stack[this.stack.length - 1];
       const language = this.languageTag(el.lang);
@@ -1094,18 +1159,24 @@ export class TeiReader {
     if (this.teiVariant === 'p4' && attr('reg') !== undefined) this.report('tei-reg', `${toponym || `<${t.name}>`} (reg="${attr('reg')}") on line ${fileLine}`);
     let d, made;
     const hasRef = ref !== undefined && !!norm(ref);
+    // An unknown entity in its words (as taken, or as printed), its ref or its key: the name is incomplete.
+    const unknown = [...unknownIn(c.pref), ...unknownIn(c.printed), ...(t.unknownAttrs?.get('ref') || []), ...(t.unknownAttrs?.get('key') || [])];
+    const unknownWords = () => `${entities(unknown)} in ${toponym ? `"${toponym}"` : 'an empty name'} (<${t.name}${hasRef ? ` ref="${norm(ref)}"` : key ? ` key="${norm(key)}"` : ''}>) on line ${fileLine}`;
     if (!hasRef) {
       // A place name with no ref points to no place. One inside another place name is part of that
       // name ("<placeName><settlement>Roma</settlement></placeName>"), and one around a place name
       // that has a ref is only its wrapping: neither is reported. Its key, with a pattern for the
       // key's prefix, can make its address.
       if (nested || c.hasRef) return;
-      made = key !== undefined && norm(key) ? this.fromKey(key) : undefined;
-      if (!made) d = { noRef: true, words: `${toponym || `<${t.name}>`}${key ? ` (key ${key})` : ''}` };
-      else if (made.lost) d = { lost: true };
+      // (A key with an unknown entity in it, or in the name, is not looked at: the name is not converted, below.)
+      const keyed = key !== undefined && !!norm(key);
+      made = keyed && !unknown.length ? this.fromKey(key) : undefined;
+      if (!made && !(keyed && unknown.length)) d = { noRef: true, words: `${toponym || `<${t.name}>`}${key ? ` (key ${key})` : ''}` };
+      else if (made?.lost) d = { lost: true };
     }
+    if (!d) for (const o of this.captures) if (o.hasRef !== undefined) o.hasRef = true;
+    if (!d && unknown.length) d = { entityUnknown: true, words: unknownWords() };
     if (!d) {
-      for (const o of this.captures) if (o.hasRef !== undefined) o.hasRef = true;
       const line = el.verse ?? this.verseLine() ?? this.line;
       const lineWords = el.verse !== undefined || this.verseLine() !== undefined ? `line ${line}`
         : startLine !== undefined && line !== undefined && startLine !== line ? `lines ${startLine} to ${line}` : line !== undefined ? `line ${line}` : undefined;
@@ -1191,6 +1262,7 @@ export class TeiReader {
   deliver(d) {
     this.mentions++; this.countOne();
     if (d.noRef) { this.report('tei-place-no-ref', d.words); return; }
+    if (d.entityUnknown) { this.report('tei-place-entity-unknown', d.words); return; }
     if (d.lost) return;
     const m = d.m;
     // A place name with no words (<placeName ref="…"/>) gives no name to attest.
@@ -1282,6 +1354,9 @@ export class TeiReader {
   emit(m, final) {
     // Every address the ref gives (a #x its place's, all of them), each once: one place, about the
     // preferred one, with identity relations to the others (severalIds); two from one gazetteer: ambiguous.
+    // A pointer to a listed place whose address held an unknown entity: which place is meant is not known.
+    const tainted = m.pointers.filter((p) => p.startsWith('#') && this.places.get(p.slice(1))?.unknown.length);
+    if (tainted.length) { this.report('tei-place-entity-unknown', `${entities(tainted.flatMap((p) => this.places.get(p.slice(1)).unknown))} in the address of the place ${tainted.join(' ')}, for "${m.toponym}" (<${m.element}>) on line ${m.fileLine}`); return; }
     const resolved = [];
     const add = (r) => { if (!resolved.some((x) => x.iri === r.iri)) resolved.push(r); };
     for (const p of m.pointers) { const r = this.resolve(p, m, final); if (r) { const { others = [], ...one } = r; add(one); others.forEach(add); } }
