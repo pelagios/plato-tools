@@ -50,7 +50,8 @@ test('the pages give no element a title attribute, and their tooltips are there 
   // Only the document's own <title> in each.
   assert.deepEqual(titles(index).map((m) => m[0]), ['<title>']);
   assert.deepEqual(titles(chora).map((m) => m[0]), ['<title>']);
-  assert.equal(tipsIn(index).length, 8);
+  assert.equal(tipsIn(index).length, 9);   // the nine tools' names, Peripleo's (planned) included
+  assert.ok(tipsIn(index).some((t) => t.startsWith('περιπλέω')));
   assert.ok(tipsIn(index).some((t) => t.startsWith('ἔλεγχος')));
   assert.deepEqual(tipsIn(chora).slice(0, 1), ['Draw a point']);
   for (const page of [index, chora]) {
