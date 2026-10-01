@@ -322,6 +322,26 @@ test('a WHG pattern, a pattern for the prefix "whg", and a pattern with no place
   assert.equal(teiReadingRefusal({ keyPatterns: { tgn: TGN, '': PLEIADES } }), null);
 });
 
+test('a key pattern whose key stands in the address\'s host is refused, so a key cannot choose the host; a pattern with the key after the host is taken', () => {
+  // with the key whgazetteer.org, https://{id}/entity/place:gn:1 would make a WHG record's address
+  const BAD = ['https://{id}/entity/place:gn:1', 'https://{key}.example.org/p', 'https://example.org{id}/p', 'http{id}://example.org/'];
+  for (const p of BAD) {
+    assert.equal(patternFault(p), 'not-web', p);
+    assert.match(teiReadingRefusal({ keyPatterns: { w: p } }), /the id must come after the address's host/, p);
+    assert.throws(() => new TeiReader(() => {}, { keyPatterns: { w: p } }), DataError, p);
+  }
+  assert.deepEqual(addressFromPattern('whgazetteer.org', BAD[0]), { error: 'not-web' });
+  // control: the same key through a pattern with it after the host is a key like any other
+  const GOOD = { w: 'https://example.org/entity/{id}', x: 'https://example.org?p={id}', y: 'https://example.org#{key}' };
+  assert.equal(teiReadingRefusal({ keyPatterns: GOOD }), null);
+  const m = mapped(tei(`<p><placeName key="w:abc">Abc</placeName><placeName key="w:whgazetteer.org">W</placeName></p>`), { keyPatterns: GOOD });
+  assert.deepEqual(m.doc.attestations.map((a) => a.about), ['https://example.org/entity/abc', 'https://example.org/entity/whgazetteer.org']);
+  // an id with '/', '?', '#' or '@' in it never fits a pattern of the user's own: it could reach past the path
+  const odd = mapped(tei(['a/b', 'a?b', 'a#b', 'a@b'].map((k) => `<p><placeName key="w:${k}">K</placeName></p>`).join('') + '<p><placeName key="w:ab">Ab</placeName></p>'), { keyPatterns: GOOD });
+  assert.deepEqual(examples(odd, 'tei-key-shape'), ['w:a/b', 'w:a?b', 'w:a#b', 'w:a@b'].map((k) => `${k} (pattern ${GOOD.w})`));
+  assert.deepEqual(odd.doc.attestations.map((a) => a.about), ['https://example.org/entity/ab'], 'control: a plain id is taken');
+});
+
 test('with no pattern, keys are reported by prefix with a count, examples and a suggested pattern; a key beside a ref is not counted', () => {
   const m = keyed({});
   assert.deepEqual(names(m), ['Argos'], 'control: the place name with a ref is converted');

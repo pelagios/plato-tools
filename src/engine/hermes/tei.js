@@ -63,7 +63,7 @@ export function teiReadingRefusal(reading = {}) {
 }
 const PATTERN_WHY = {
   placeholder: 'must hold the place of the key, {id}, exactly once, such as https://pleiades.stoa.org/places/{id}.',
-  'not-web': 'must make a web address (http:// or https://), with no spaces.',
+  'not-web': "must make a web address (http:// or https://), with no spaces, and the id must come after the address's host.",
   whg: "makes a World Historical Gazetteer address, which is never made from a key: WHG's codes are not its records' addresses. Give each place's https://w3id.org/whg/id/place:… address in its ref instead.",
 };
 

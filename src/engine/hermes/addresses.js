@@ -124,15 +124,26 @@ export function patternShape(pattern) {
   return PATTERN_SHAPE;
 }
 
+/** Whether a pattern's placeholder stands before the end of its address's host (in the scheme, or in the host itself). */
+function idBeforeHost(p) {
+  const i = p.search(PLACEHOLDER);
+  return i >= 0 && !/^https?:\/\/[^/?#]+[/?#]/i.test(p.slice(0, i));
+}
+
 /**
  * What is wrong with a pattern, as a code, or null: 'placeholder' (not text, or not exactly one {id}
- * or {key}), 'not-web' (it does not make a web address, or has a space), 'whg' (it makes a World
+ * or {key}), 'not-web' (it does not make a web address, or has a space, or its placeholder is not
+ * after the whole of the address's scheme and host), 'whg' (it makes a World
  * Historical Gazetteer address, which is never made from an id: WHG's codes are not its records'
  * addresses). patternProblem gives the same in words.
  */
 export function patternFault(pattern) {
   if (typeof pattern !== 'string' || !pattern.trim() || (pattern.match(PLACEHOLDER) || []).length !== 1) return 'placeholder';
-  const sample = pattern.trim().replace(PLACEHOLDER, '1');
+  const p = pattern.trim();
+  // Everything before the placeholder must be a whole scheme and host, so that no id can change the
+  // host (https://{id}/… with the id whgazetteer.org would make a WHG address).
+  if (idBeforeHost(p)) return 'not-web';
+  const sample = p.replace(PLACEHOLDER, '1');
   let url;
   try { url = new URL(sample); } catch { return 'not-web'; }
   if (!/^https?:$/.test(url.protocol) || /\s/.test(sample) || !/^https?:\/\/[^\s/?#]+\S*$/i.test(sample)) return 'not-web';
@@ -154,7 +165,9 @@ export function patternProblem(pattern) {
     const n = (pattern.match(PLACEHOLDER) || []).length;
     return `the pattern ${pattern} has ${n ? 'more than one' : 'no'} {id} in it, where it needs one, which the id replaces`;
   }
-  if (fault === 'not-web') return `the pattern ${pattern} does not make a web address (http or https)`;
+  if (fault === 'not-web') return idBeforeHost(pattern.trim()) && /^https?:\/\//i.test(pattern.trim())
+    ? `the pattern ${pattern} puts the id in the address's host: the id must come after the address's host`
+    : `the pattern ${pattern} does not make a web address (http or https)`;
   return `the pattern ${pattern} is the World Historical Gazetteer's, whose addresses are never made from an id (a number, or whg: and a number, names no one record)`;
 }
 

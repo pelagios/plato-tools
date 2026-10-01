@@ -60,6 +60,24 @@ test('patternProblem: a pattern needs {id} once, must make a web address, and is
     assert.match(patternProblem(p), /World Historical Gazetteer/, p);
 });
 
+test('a pattern whose id stands in the address\'s host is refused in a mapping, so an id cannot choose the host; one with the id after the host is used', async () => {
+  const BAD = ['https://{id}/entity/place:gn:1', 'https://{id}.example.org/p', 'https://ex.org{id}/p'];
+  for (const p of BAD) assert.match(patternProblem(p), /the id must come after the address's host/, p);
+  assert.deepEqual(addressFromPattern('w3id.org', 'https://{id}/whg/id/place:gn:1'), { error: 'not-web' });
+  const csv = 'id,name,g\na,Abc,whgazetteer.org\nb,Def,def\n';
+  const bad = await readAll(textFile(csv, 'x.csv'), { columns: { id: 'id', name: 'name', g: { field: 'address', pattern: BAD[0] } } });
+  const abouts = bad.attestations.map((a) => a.about).concat(bad.records.map((r) => r['@id']));
+  assert.ok(abouts.length > 0, 'the rows are read (the column kept as a note)');
+  assert.ok(!abouts.some((a) => /w3id\.org\/whg|whgazetteer/.test(a)), `no WHG address is made from the id: ${abouts}`);
+  assert.match(bad.of('generic-mapping').examples.join(' '), /the id must come after the address's host/);
+  // control: the same table, the id after the host, gives an attestation for each row
+  const good = await readAll(textFile(csv, 'x.csv'), { columns: { id: 'id', name: 'name', g: { field: 'address', pattern: 'https://ex.org/p/{id}' } } });
+  assert.deepEqual(good.attestations.map((a) => a.about), ['https://ex.org/p/whgazetteer.org', 'https://ex.org/p/def']);
+  // An id holding '/', '?', '#' or '@' does not fit a pattern of the user's own; a plain one does (control).
+  for (const v of ['a/b', 'a?b', 'a#b', 'a@b']) assert.deepEqual(addressFromPattern(v, 'https://ex.org/p/{id}'), { lost: 'shape', value: v }, v);
+  assert.deepEqual(addressFromPattern('ab', 'https://ex.org/p/{id}'), { iri: 'https://ex.org/p/ab' });
+});
+
 // ---- the guess --------------------------------------------------------------------------------------
 test('the guess suggests a gazetteer\'s pattern for a column of its ids, but keeps the column a note', () => {
   const rows = [{ pleiades_id: '579885', geonames: '2988507', 'Wikidata ID': 'Q90', id: '579885' }, { pleiades_id: '423025', geonames: '3169070', 'Wikidata ID': 'Q220', id: '423025' }];
