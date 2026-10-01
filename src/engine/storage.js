@@ -2,12 +2,15 @@
 // storageCheck): an estimate, generous on purpose, made before the action is chosen.
 //
 // Most inputs need room for a working database and an output about the size of the input, or, gzipped,
-// of the input decompressed (taken as ten times it). The spreadsheet tables need more: their working
-// database (TableStore) was twice the size of the tables' text, measured on generated tables of
-// 200,000 and 1,000,000 places of short rows, and the pool of database files on the origin private
-// file system does not shrink, so a tenth more is allowed; their output is larger than they are, since
-// each attestation carries its source in full (PLATO JSON Lines was seven times the tables' text).
-const TABLES_DATABASE = 2 * 1.1, TABLES_OUTPUT = 7;
+// of the input decompressed (taken as ten times it). The spreadsheet tables need more, measured in the
+// page (headless Chromium, navigator.storage.estimate, generated tables of short rows; 1 October 2026).
+// Their working database (TableStore) is twice the size of the tables' text on disk, but the browser
+// counts more of it against the quota while it is open, since an access handle is given room ahead of
+// its writes: 2.44 times the text at 200,000 places (58 MB of text), 2.74 times at 1,000,000 (296 MB).
+// Their output is larger than they are, since each attestation carries its source in full: PLATO JSON
+// Lines was 6.88 and 6.78 times the text. A conversion holds both at its end, so its peak was 9.5 times
+// the text at a million places (2.8 GB). Allowed: 3 and 8 times, 11 in all, a sixth over that peak.
+const TABLES_DATABASE = 3, TABLES_OUTPUT = 8;
 
 /**
  * The bytes a run on `files` (as detected: `input`) may need. The tables' text is the size of the

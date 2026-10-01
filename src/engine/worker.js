@@ -60,6 +60,7 @@ async function output(dir, name) {
 async function runEnv({ clearOutputs = true, outputs = 'outputs' } = {}) {
   const dir = await outputsDir(clearOutputs, outputs);
   const { vfs } = await sqlitePool();
+  if (vfs.isPaused()) await vfs.unpauseVfs();
   const opened = [];
   const unlinkClosed = () => { for (const d of opened) if (!d.gone && !d.db.isOpen()) { try { vfs.unlink(d.name); } catch {} d.gone = true; } };
   const env = {
@@ -75,7 +76,19 @@ async function runEnv({ clearOutputs = true, outputs = 'outputs' } = {}) {
     output: (name) => output(dir, name),
     progress: (p) => postMessage({ type: 'progress', ...p }),
   };
-  return { env, tidy: () => { for (const d of opened) if (!d.gone) { try { d.db.close(); } catch {} } unlinkClosed(); } };
+  // Between runs the pool's files are let go (pauseVfs closes their access handles). A removed
+  // database is cut to its header at once, on disk, but the browser counts the space a file's
+  // access handle took against the page's quota until the handle is closed: with the handles held,
+  // after a check of 200,000 places the page's usage stayed at 142 MB with the files empty on disk,
+  // and the conversion that followed peaked at 675 MB; let go, usage fell to 0 after the check and
+  // the conversion peaked at 401 MB (1 October 2026). At a million places the check's 0.8 GB was
+  // still counted when the conversion ended, at 3.6 GB.
+  const tidy = () => {
+    for (const d of opened) if (!d.gone) { try { d.db.close(); } catch {} }
+    unlinkClosed();
+    try { vfs.pauseVfs(); } catch { /* a database still open: let go at the next run's end */ }
+  };
+  return { env, tidy };
 }
 
 self.onmessage = async ({ data }) => {

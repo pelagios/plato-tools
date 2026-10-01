@@ -823,6 +823,30 @@ def main():
                   and ok2 and not geoms2 and len(doc2.get('spatialEntities', [])) == len(doc1.get('spatialEntities', [])) > 0,
                   {'placed': s1.get('phase'), 'shown': said1, 'anchors': len(anchors), 'alone': s2.get('phase'), 'geoms alone': len(geoms2)})
             krisis_case(page, tmp)
+
+            # The storage warning (src/app.js, storageCheck): shown when the browser's quota is below
+            # what the tables need, and hidden, the control, with the same tables and the real quota.
+            # Each page counts its calls of navigator.storage.estimate, so that the hidden warning is
+            # read after the page has asked, not before; one page is told its quota is 1,000 bytes.
+            def storage_warning(quota):
+                p = ctx.new_page()
+                try:
+                    p.add_init_script('''(() => { const real = navigator.storage.estimate.bind(navigator.storage); window.__estimates = 0;
+                      navigator.storage.estimate = async () => { const e = await real(); window.__estimates++; return %s; }; })()''' % ('{ ...e, quota: %d }' % quota if quota else 'e'))
+                    p.goto('data:text/html,<title>no tools here</title><input id=picker type=file multiple>' if PROVE else url)
+                    if wait_state(p, lambda s: s.get('phase') == 'ready', 30, 'ready').get('phase') != 'ready': return None
+                    p.set_input_files('#picker', [str(f) for f in sorted((ex / 'customs').glob('*.csv'))])
+                    if wait_state(p, lambda s: s.get('phase') == 'detected', 60, 'detection').get('phase') != 'detected': return None
+                    p.wait_for_function('window.__estimates > 0', timeout=10_000); p.wait_for_timeout(300)
+                    return {'visible': p.is_visible('#storage-warning'), 'text': p.inner_text('#storage-warning')}
+                except Exception as e:
+                    return {'error': str(e).split('\n')[0][:200]}
+                finally:
+                    p.close()
+            low, normal = storage_warning(1000), storage_warning(None)
+            check('the storage warning shows when the quota is below what the tables need, naming the quota, and not with the real quota',
+                  (low or {}).get('visible') is True and 'allows the page only 1000 bytes of storage' in low.get('text', '')
+                  and (normal or {}).get('visible') is False, {'low': low, 'normal': normal})
             ctx.close()
             chora_checks(pw, url, tmp)
     finally:

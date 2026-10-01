@@ -293,9 +293,9 @@ test('the storage the page asks for allows for the tables\' working database and
   const z = await detect([zip]);
   assert.equal(z.textBytes, text, 'the sheets\' size, from the central directory');
   assert.notEqual(zip.size, text, 'the zip is not the size of its text');
-  assert.equal(storageNeed(z, [zip]), text * (2.2 + 7));
+  assert.equal(storageNeed(z, [zip]), text * (3 + 8));
   const csvs = filesOf(s);
-  assert.equal(storageNeed(await detect(csvs), csvs), text * (2.2 + 7));
+  assert.equal(storageNeed(await detect(csvs), csvs), text * (3 + 8));
   // The control: any other input, as before, four times its size (forty, gzipped).
   const jsonl = [new File(['{"profile":"place-centric"}\n'], 'x.jsonl')];
   assert.equal(storageNeed(await detect(jsonl), jsonl), jsonl[0].size * 4);
