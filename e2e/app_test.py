@@ -773,11 +773,15 @@ def main():
                   ready.get('phase') == 'ready' and ready.get('platoCommit') == served['commit'] and served['commit'][:7] in footer
                   and ('DRAFT' in footer) == bool(served.get('draft')), {'footer': footer, 'served': served})
             # The tooltips and the "Under development" badge's, at a phone's width, where the badge's
-            # tooltip is wider than the room to the badge's left. (No tooltip on this page is by the
-            # right edge, at any width: Chora's zoom buttons are, below.)
+            # tooltip is wider than the room on one side of the badge: the badge sits beside the name,
+            # by the window's right edge, or wrapped below it, by the left, as the fonts fall; the
+            # check is made at whichever edge it is by. (Chora's zoom buttons are by the right, below.)
             page.set_viewport_size({'width': 390, 'height': 844})
+            side = 'left'
+            try: side = 'right' if page.eval_on_selector('.dev-badge', 'e => e.getBoundingClientRect().right > innerWidth - 60') else 'left'
+            except Exception: pass
             tooltip_checks(page, 'tooltips', ('#toolbox .tools > li:nth-child(2) .why', 'μετάφρασις'), ('.dev-badge', 'being built in the open'),
-                           ('.dev-badge', 'being built in the open', 'left'))
+                           ('.dev-badge', 'being built in the open', side))
             no_titles(page, 'tooltips', ['ἔλεγχος', 'μετάφρασις', 'ἀριθμός', 'μνήμη', 'Ἑρμῆς', 'ἀγορά', 'χώρα', 'κρίσις', 'checked against PLATO at the commit'])
             tooltip_upkeep(page, 'tooltips')
             page.set_viewport_size({'width': 1280, 'height': 720})
