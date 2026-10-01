@@ -67,6 +67,9 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   specification's section 13): the checks no schema can make (ids under their set, the mint rule,
   duplicates, across sets, `promotedFrom` against a set given beside a dataset), the version check of a
   candidate set, and Krisis's export of one.
+- **The about sheet's authors.** Each item of `creator` is `Name <address>`, an address alone, or a
+  name alone (PLATO 8385472; `creatorOf` in `tables.js`); `creator_name`, deprecated, is still read
+  and warned of. The writer puts every author in `creator` and leaves `creator_name` empty.
 - **The other formats** are in `src/formats/`: `tables.js`, `lpf.js`, `annotations.js`, `cube.js`,
   and `shared.js` for the rules the lossy writers share (denials, the current state, computed
   values, figures, bundled identities).
