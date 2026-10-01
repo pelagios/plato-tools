@@ -27,6 +27,8 @@ const { fmtBytes, fmtTime, formatName, progressText, summary, groups, draftNote,
 const { mappingOf, withSheet } = await import('../src/engine/hermes/generic.js');
 const { FIELDS } = await import('../src/engine/hermes/columns.js');
 const { teiReadingRefusal } = await import('../src/engine/hermes/tei.js');
+const { preview, previewRefusal, previewLine, PREVIEW_LIMIT } = await import('../src/engine/hermes/preview.js');
+const { PREVIEW_WORDS } = await import('../src/engine/words.js');
 
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -35,6 +37,14 @@ const HELP = `plato-tools: check and convert PLATO data, and compare versions of
 Usage:
   plato-tools check [options] INPUT...
   plato-tools convert --to TARGET [--out DIR] [options] INPUT...
+  plato-tools preview [--limit N] [--columns FILE] [--sheet NAME] [reading options] INPUT
+                                            show the first N records (default ${PREVIEW_LIMIT}) of a table of
+                                            places (CSV, plain GeoJSON, a sheet of a workbook), a
+                                            TEI edition or W3C Web Annotations, as they would be
+                                            read: the records as JSON Lines to stdout, what was
+                                            lost from them so far to stderr (both, as one JSON
+                                            object, with --json). Nothing is checked as a whole,
+                                            and nothing is written.
   plato-tools compare [options] EARLIER LATER
                                             check that a published dataset was only added to:
                                             every attestation of the EARLIER version must be in
@@ -105,7 +115,9 @@ Options:
                     addresses with {"field": "address", "pattern": "https://pleiades.stoa.org/places/{id}"},
                     the id replacing {id}; a pattern is suggested for such a column, never
                     used until it is given here.
-  --sheet NAME      check, convert: the sheet of a workbook to read as a table of places,
+  --limit N         preview: how many records to show (default ${PREVIEW_LIMIT}). Reading stops at the
+                    first record past them; a file is never read to its end to count it.
+  --sheet NAME      check, convert, preview: the sheet of a workbook to read as a table of places,
                     instead of its first sheet that is not hidden. A name the workbook does
                     not have is refused, naming the sheets it has.
   --georef FILE     a Recogito export (W3C Web Annotations): the IIIF Georeference Annotation
@@ -116,7 +128,7 @@ Options:
   --manifest FILE   with --georef: the IIIF manifest of a georeferenced map, which gives the
                     size of its canvas. Give it once for each manifest file.
 
-Reading options (check and convert; each is off unless given, and is refused for an input it
+Reading options (check, convert and preview; each is off unless given, and is refused for an input it
 does not apply to):
   --same-id         a table of places: rows with the same id are evidence about one place, each
                     row an attestation about it, rather than a repeated id being a problem.
@@ -216,7 +228,9 @@ does not apply to):
 
 Exit status: 0 if no input has problems, 1 if any has, 2 if the command is wrong or an input
 cannot be read or written. Warnings, and what a conversion cannot carry over, do not count
-as problems. For compare: 0 if nothing was deleted or changed, 1 if something was, 2 if the
+as problems. For preview: 0 if the records read have no problems, 1 if they have, 2 if no
+preview could be made (the command is wrong, the input cannot be read, or its format is not
+one a preview is made of). For compare: 0 if nothing was deleted or changed, 1 if something was, 2 if the
 versions could not be compared. For match and apply: 0 if nothing stopped it, 1 if something
 did (a place without an address), 2 if it could not be done. For lookup: 0 if every place
 was answered, 1 if some were not or the lookup stopped (the work file still holds what was
@@ -261,7 +275,7 @@ async function main(argv) {
       options: {
         to: { type: 'string' }, out: { type: 'string', default: '.' }, overwrite: { type: 'boolean', default: false },
         base: { type: 'string' }, typing: { type: 'boolean', default: true }, cube: { type: 'boolean', default: false },
-        columns: { type: 'string' }, sheet: { type: 'string' },
+        columns: { type: 'string' }, sheet: { type: 'string' }, limit: { type: 'string' },
         'same-id': { type: 'boolean', default: false }, 'list-places': { type: 'boolean', default: false },
         'header-places': { type: 'boolean', default: false }, 'commentary-places': { type: 'boolean', default: false },
         'key-pattern': { type: 'string', multiple: true, default: [] },
@@ -290,10 +304,13 @@ async function main(argv) {
     return 0;
   }
   const [action, ...args] = positionals;
-  if (!action) return usage('say what to do: check, convert, compare, publish, match or apply.');
-  // The reading options are the readers' (TEI, a table of places), for check and convert only.
+  if (!action) return usage('say what to do: check, convert, preview, compare, publish, match or apply.');
+  // The reading options are the readers' (TEI, a table of places), for check, convert and preview only.
   const readingFlags = READING_FLAGS.filter((f) => f === 'key-pattern' ? o[f].length : o[f]);
-  if (readingFlags.length && action !== 'check' && action !== 'convert') return usage(`${readingFlags.map((f) => `--${f}`).join(', ')} ${readingFlags.length === 1 ? 'is' : 'are'} for check and convert.`);
+  const reads = action === 'check' || action === 'convert' || action === 'preview';
+  if (readingFlags.length && !reads) return usage(`${readingFlags.map((f) => `--${f}`).join(', ')} ${readingFlags.length === 1 ? 'is' : 'are'} for check, convert and preview.`);
+  if (o.limit !== undefined && action !== 'preview') return usage('--limit is for preview.');
+  if (o.limit !== undefined && !(/^\s*\d+\s*$/.test(o.limit) && Number(o.limit) >= 1)) return usage(`--limit ${o.limit}: ${PREVIEW_WORDS.limit(o.limit)}`);
   if (readingFlags.length) {
     const reading = readingOf(o);
     if (typeof reading === 'string') return usage(reading);
@@ -301,13 +318,14 @@ async function main(argv) {
   }
   if (action === 'datacube') return datacube(args, o);
   if (action === 'publish') return publishCommand(args, o, resources);
-  if (o.sheet !== undefined && action !== 'check' && action !== 'convert') return usage('--sheet is for check and convert.');
+  if (o.sheet !== undefined && !reads) return usage('--sheet is for check, convert and preview.');
   if (action === 'match' || action === 'apply') return review(action, args, o, resources);
   if (action === 'lookup') return lookupCommand(args, o, resources);
   if (o.gazetteer || o.places || o['all-names'] || o.countries || o.near || o.limit || o.batch || o['dry-run'] || o['token-env'] || o['gazetteer-iri']) return usage('--gazetteer, --token-env, --gazetteer-iri, --places, --all-names, --countries, --near, --limit, --batch and --dry-run are for lookup.');
   if (o.with || o.threshold || o['max-distance'] || o.top || o.review || o.output || o.reviewer || o.orcid || o['others-title'] !== undefined) return usage('--with, --threshold, --max-distance, --top, --review, --output, --reviewer, --orcid and --others-title are for match and apply.');
-  if (action !== 'check' && action !== 'convert' && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, compare, publish, match, apply and datacube.`);
-  if (!args.length) return usage(`name at least one input to ${action}.`);
+  if (!reads && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, preview, compare, publish, match, apply and datacube.`);
+  if (!args.length) return usage(`name ${action === 'preview' ? 'the input' : 'at least one input'} to ${action}.`);
+  if (action === 'preview' && o.brief) return usage('--brief is for check and convert; a preview prints its records, and --json prints them with the rest.');
   if (action === 'convert' && !o.to) return usage(`convert needs --to, one of: ${Object.keys(TARGETS).join(', ')}.`);
   if (action === 'convert' && !TARGETS[o.to]) return usage(`"${o.to}" is not a target; the targets are ${Object.keys(TARGETS).join(', ')}.`);
   if (action !== 'convert' && (o.to || o.overwrite)) return usage('--to and --overwrite are for convert.');
@@ -386,6 +404,8 @@ async function main(argv) {
       }
     }
   }
+  // A preview writes nothing, and needs no working files: it is made here, on its own.
+  if (action === 'preview') return previewCommand(items, o, resources, seen);
   try {
     for (const item of items) {
       const r = await runOne(item, action, o, resources, host, live, seen.get(item));
@@ -551,6 +571,54 @@ function itemLines(all, action) {
     }
   }
   return lines;
+}
+
+/**
+ * Hermes: the preview of one input's first records (src/engine/hermes/preview.js). The records go to
+ * stdout as JSON Lines, and what the preview is, why it is partial, and the losses so far to stderr;
+ * with --json, one object to stdout. Exit 0 when the records read have no problems, 1 when they have,
+ * 2 when no preview could be made.
+ */
+async function previewCommand(items, o, resources, seen) {
+  if (items.length !== 1) return usage(`preview takes one input; ${items.length} were given.`);
+  const [item] = items;
+  const limit = o.limit === undefined ? PREVIEW_LIMIT : Number(o.limit);
+  const r = { type: 'preview', input: item.label, files: item.paths, format: null, profile: null, status: 'failed', errors: 0 };
+  const failed = (message) => {
+    r.message = message; r.exitCode = 2;
+    if (o.json) process.stdout.write(JSON.stringify(r) + '\n');
+    else process.stderr.write(`${item.label}: no preview could be made: ${message}\n`);
+    return 2;
+  };
+  const { input, message } = seen.get(item) || await readInput(item);
+  if (!input) return failed(message);
+  r.format = input.format;
+  const refusal = previewRefusal(input);
+  if (refusal) return failed(refusal);
+  const table = input.format === 'csv' || input.format === 'geojson';
+  const reading = input.format === 'tei' ? { ...o.reading?.tei } : table && o.reading?.sameId ? { sameId: true } : {};
+  if (input.container === 'workbook' && input.format === 'csv') { r.sheet = o.sheet ?? input.sheet ?? null; r.sheets = input.sheets.map((s) => s.name); }
+  if (o.georefFiles) { input.georefs = o.georefFiles; input.manifests = o.manifestFiles; }
+  const xlsx = input.container === 'workbook' ? await import('xlsx') : undefined;
+  let result;
+  try { result = await preview({ input, options: { base: o.base, columns: o.savedColumns, ...(o.sheet !== undefined ? { sheet: o.sheet } : {}), ...reading }, limit }, { resources, xlsx }); }
+  catch (e) {
+    if (e?.name === 'DataError' || isSystemError(e)) return failed(e.message);
+    return failed(toolsFault(e));
+  }
+  Object.assign(r, { profile: result.profile, status: result.report.errors ? 'problems' : 'ok', errors: result.report.errors, line: previewLine(result), complete: result.complete,
+    total: result.total, read: result.read, why: result.why, header: result.header, items: result.items, report: result.report });
+  r.exitCode = r.status === 'problems' ? 1 : 0;
+  if (o.json) { process.stdout.write(JSON.stringify(r) + '\n'); return r.exitCode; }
+  for (const ev of result.items) process.stdout.write(JSON.stringify(ev.value) + '\n');
+  const lines = [`${item.label}: ${formatName({ ...input, profile: null })} (${result.profile}): ${r.line}`];
+  if (r.why) lines.push(`  ${r.why}`);
+  lines.push(`  ${PREVIEW_WORDS.losses}:`);
+  // The notice that the preview is partial is the line above (its why): not said twice.
+  const found = itemLines(result.report.items.filter((i) => i.kind !== 'preview-partial'), 'check');
+  lines.push(...(found.length ? found : [`    ${PREVIEW_WORDS.noLosses}`]));
+  process.stderr.write(lines.join('\n') + '\n');
+  return r.exitCode;
 }
 
 /** Check or convert one input, and say how it went, as an object that --json prints as it is. */
