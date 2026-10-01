@@ -101,6 +101,12 @@
       <button id="preview" type="button"></button>
     </div>
     <div id="preview-result" class="preview" aria-live="polite" hidden></div>
+    <div class="actions candidates" data-tools="check">
+      <span class="or">or, with the candidate sets that suggest matches for it (or for one candidate set, with the others),</span>
+      <button id="check-candidates">Check with candidate sets…</button>
+      <input type="file" id="candidate-sets" multiple hidden aria-label="The candidate sets">
+      <small>You will be asked for the candidate sets' files, one file for each set. Each is checked against its profile; a later set must leave out what an earlier one published; and a dataset's answers to candidates (promotedFrom) must find them in the sets. Nothing is fetched.</small>
+    </div>
     <div class="actions versions" data-tools="versions">
       <span class="or">or, if this is a new version of a dataset you have published,</span>
       <button id="compare">Compare with the earlier version…</button>

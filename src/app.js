@@ -129,7 +129,7 @@ async function storageCheck() {
   } catch { w.hidden = true; }
 }
 
-const buttons = (disabled) => { for (const id of ['check', 'convert', 'compare', 'publish', 'match', 'resume', 'finish', 'preview']) $(id).disabled = disabled; if (!disabled) gateOnColumns(); };
+const buttons = (disabled) => { for (const id of ['check', 'check-candidates', 'convert', 'compare', 'publish', 'match', 'resume', 'finish', 'preview']) $(id).disabled = disabled; if (!disabled) gateOnColumns(); };
 // Krisis: a table of places is matched, and its review finished, by the matching of its columns: until
 // the worker's answer about them arrives, Match and Finish wait, or the table would be read by the guess.
 const columnsPending = () => isTable(input) && !columns && !state.columns?.error;
@@ -165,7 +165,8 @@ function start(action, earlier) {
     candidates: [exportedSet, ...earlierSets].filter(Boolean),
     // A table is finished by the review's own matching of its columns, unless another has been loaded since: that is sent, and said to differ.
     ...(isTable(input) && columns && reviewMapping !== undefined && mappingText(columnOptions()) !== reviewMapping ? { columns: columnOptions() } : {}) } });
-  else worker.postMessage({ cmd: 'run', files, action, target, options: { base, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked,
+  // Elenchos: a check given candidate sets (`earlier`), one file for each, to check the files chosen with.
+  else worker.postMessage({ cmd: 'run', files, action, target, candidates: action === 'check' && earlier?.length ? earlier : undefined, options: { base, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked,
     // Hermes: the matching of columns shown, as chosen (the same JSON as the command line's --columns,
     // a pattern column in its object form), and the reading options chosen.
     ...(isTable(input) && columns ? { columns: columnOptions() } : {}), ...sheetOption(), ...readingOptions(), ...(isTable(input) ? spellings.options() : {}) } });
@@ -763,6 +764,9 @@ $('check').onclick = () => start('check');
 $('convert').onclick = () => start('convert');
 // Comparing asks for one more file, the earlier version, and starts once it is chosen.
 $('compare').onclick = () => $('earlier').click();
+// Checking with candidate sets asks for them, and starts once they are chosen.
+$('check-candidates').onclick = () => $('candidate-sets').click();
+$('candidate-sets').onchange = (e) => { const sets = [...e.target.files]; e.target.value = ''; if (sets.length) start('check', sets); };
 $('earlier').onchange = (e) => { const earlier = [...e.target.files]; e.target.value = ''; if (earlier.length) start('compare', earlier); };
 $('publish').onclick = () => start('publish');
 $('cancel').onclick = () => { worker.terminate(); busy = false; if (runOp) { methodos.ended({ op: runOp, cancelled: true }); runOp = null; } $('progress').hidden = true; clearPreview(); buttons(false); Object.assign(state, { phase: 'cancelled' }); startWorker();

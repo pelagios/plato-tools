@@ -87,6 +87,18 @@ def compare_case(page, later, earlier, timeout=120):
     except Exception as e:                       # a harness error is a failed check, never a crash
         return {'phase': 'harness-error', 'error': str(e).split('\n')[0][:200]}
 
+def candidates_case(page, main, sets, timeout=120):
+    """Choose a file, then give candidate sets to Check with candidate sets (Elenchos)."""
+    try:
+        page.set_input_files('#picker', [])   # the same file again: emptied first, or the page would not look at it
+        page.set_input_files('#picker', [str(main)])
+        s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), 60, 'detection')
+        if s.get('phase') != 'detected': return s
+        page.set_input_files('#candidate-sets', [str(f) for f in sets])
+        return wait_state(page, lambda s: s.get('action') == 'check' and s.get('phase') in ('done', 'error'), timeout, 'check with candidate sets')
+    except Exception as e:                       # a harness error is a failed check, never a crash
+        return {'phase': 'harness-error', 'error': str(e).split('\n')[0][:200]}
+
 # Agora's text fields in Options, all set on every run (to '' when not given), so that no run
 # inherits what an earlier one typed.
 PUBLISH_FIELDS = ('release', 'repo', 'site-url', 'maintainers', 'concept-doi')
@@ -1753,6 +1765,22 @@ def main():
             check('version check: the page shows what changed in it, the old spelling and the new',
                   'Only in the earlier version: plato:attests_name [plato:toponym "Neuton"]' in shown
                   and 'Only in the later version: plato:attests_name [plato:toponym "Newton, respelt"]' in shown, shown[-600:])
+            # Elenchos: a dataset checked with its candidate set reads the set and finds nothing; with a set
+            # made for another dataset, the two ends of the link disagree, and the page says so.
+            ac = PLATO / 'schemas/examples/attestation-centric-judgements.json'
+            cs = PLATO / 'schemas/examples/candidate-set-judgements.json'
+            s = candidates_case(page, ac, [cs])
+            items = (s.get('report') or {}).get('items', [])
+            check('candidate sets: the dataset with its own set has no problems, and the set is read',
+                  s.get('phase') == 'done' and s['report']['errors'] == 0 and s['report']['counts'].get('candidates given') == 2
+                  and not any(i['kind'].startswith('promoted-from') for i in items), s.get('report') or s)
+            d = json.loads(cs.read_text()); d['candidateSet']['candidatesFor'] = 'https://whgazetteer.org/example/gazetteer/elsewhere'
+            elsewhere = tmp / 'elsewhere-set.json'; elsewhere.write_text(json.dumps(d))
+            s = candidates_case(page, ac, [elsewhere])
+            shown = page.text_content('#report') if s.get('phase') == 'done' else ''
+            check('candidate sets: a listed set made for another dataset is a problem, shown in words',
+                  s.get('phase') == 'done' and [i['kind'] for i in s['report']['items'] if i['severity'] == 'error'] == ['ends-disagree']
+                  and 'says it is for another dataset' in shown, s.get('report') or s)
             agora_checks(page, tmp)
 
             # ---- Hermes: TEI editions, and any CSV or GeoJSON read through a matching of its columns.

@@ -21,7 +21,8 @@ import { teiSource } from './hermes/tei.js';
 import { genericSource, genericProfile } from './hermes/generic.js';
 import { lineChunks, lines, jsonDocument, annotationItems, TABLE_SHEETS, DataError, sheetOf, zipEntries, zipEntryText } from './input.js';
 import { csvRecords, textChunks, papaRecords, papaRow } from '../formats/csv.js';
-import { Report, LOSS_TEXT, droppedText, FORMAT_WORDS, WORKBOOK_TEXT, dateTimeWords } from './report.js';
+import { Report, LOSS_TEXT, droppedText, FORMAT_WORDS, WORKBOOK_TEXT, dateTimeWords, CANDIDATE_CHECK_TEXT, candidatesNotGivenText } from './report.js';
+import { slimSet, checkSet, checkAcross, checkEnds, candidateIndex, answers, checkAnswer } from './candidates.js';
 
 export const TARGETS = {
   'plato-jsonl': { label: 'PLATO JSON Lines (.jsonl): one place per line', ext: '.jsonl' },
@@ -95,6 +96,9 @@ export function explainSchema(errs, fromTables) {
   if (e.keyword === 'minItems' && /attestations$/.test(at)) return 'A place has no evidence about it: PLATO JSON needs at least one attestation per place.' + (fromTables ? ' Give it at least one row in names, locations, types, relations or properties.' : '');
   if (e.keyword === 'additionalProperties') return `A key PLATO does not define: ${e.params.additionalProperty}.`;
   if (e.keyword === 'format' && ['uri', 'iri', 'iri-reference'].includes(e.params.format)) return 'A value that must be a full web address is not one.';
+  // A candidate (PLATO 05cf78a): the form of its address, and its one status, in words.
+  if (e.keyword === 'pattern' && /#c-/.test(e.params.pattern || '')) return "A candidate's address is not in the form PLATO gives it: its candidate set's address, then #c- and 8, 12, 16 … lower-case hex digits (the hash of what it says); #a- is an attestation's.";
+  if (e.keyword === 'enum' && /(^|\/)status$/.test(at) && (e.params.allowedValues || []).join() === 'suggested') return "A candidate's status is not 'suggested', the only status a candidate has: it is its status when the set was issued, never updated. 'confirmed' and 'rejected' are no longer statuses: a match accepted without review is published as an identity attestation, and what became of a candidate is read from the attestations that answer it.";
   if (e.keyword === 'enum') return `A value is not one of those allowed: ${(e.params.allowedValues || []).join(', ')}.`;
   if (e.keyword === 'not' && /attestations\/\d+$/.test(at)) return 'An attestation nested under its place also says what it is about; in place-centric JSON that is implied, and must be left out.';
   return 'does not match the PLATO JSON Schema: ' + ajvMessage(errs).replace(/"[^"]*"/g, '…');
@@ -591,6 +595,10 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   const typing = options.typing ? { types: res.types, typedBounds: true, wktPoints: true } : {};
   const profileName = input.profile || generic || (input.format === 'w3c-annotations' || input.format === 'tei' ? 'attestation-centric' : 'place-centric');
   const V = res.validators[profileName] || res.validators['place-centric'];
+  // Elenchos: the candidate sets given with the input (options.candidates: the command line's
+  // --candidates, the page's "Check with candidate sets"), read before it, and the rules no schema
+  // can make of candidate sets (src/engine/candidates.js). Checking only.
+  const cands = action === 'check' ? await candidateCheck(options.candidates, res, rep) : null;
 
   // Where the records go: a writer for the target, or nothing when checking.
   const outputs = [];
@@ -667,7 +675,8 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     const refused = refuseCandidateSet({ action, target, options }, rep);
     if (refused) return refused;
     const w = action === 'convert' ? await candidateSetWriter(target, env, rep, typing, outputs, input, options) : readsCandidates(options);
-    await runCandidateSet(candidateSetSource(input, rep), { V, rep, writer: w, dry, notAList });
+    await runCandidateSet(candidateSetSource(input, rep), { V, rep, writer: w, dry, notAList, collect: cands?.set });
+    cands?.finish();
     return { report: rep.toJSON(), outputs };
   }
   const lateHeader = (ev) => rep.error('late-header', `The document's ${ev.key} come after its records. These tools read a document's header before its records, so ${ev.key} must come before spatialEntities or attestations; as the file is, they are not read at all.`, ev.key);
@@ -685,8 +694,10 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
         if (input.format.startsWith('plato') && !V.header(header)) rep.error('schema', `The document header does not match the PLATO JSON Schema: ${ajvMessage(V.header.errors)}`);
         dry.header(header);
         writer && writer.header(header);
+        cands?.dataset(header);
         continue;
       }
+      if (cands && ev.value) cands.record(ev.value);
       if (input.format.startsWith('plato') || input.format === 'lpf' || input.format === 'lpf-seq' || input.format === 'tables' || generic) checkRecord(ev);
       if (ev.type === 'record') { rep.count('places'); rep.count('attestations', list(ev.value?.attestations).length); dry.record(ev.newEntity ? 'newSpatialEntities' : 'spatialEntities', ev.value); }
       // Only attestation-centric input is read through the store and regrouped by place; here the
@@ -724,9 +735,10 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       if (ev.type === 'triple') { store.add(ev.s, ev.p, ev.o); if (++batch % 50000 === 0) { store.endBatch(); store.beginBatch(); beat('loading', { triples: store.count }); } continue; }
       if (ev.type === 'late-header') { lateHeader(ev); continue; }
       if (ev.type === 'not-a-list') { notAList(ev); continue; }
-      if (ev.type === 'header') { header = ev.value; w.header(header); dry.header(header); if (!V.header(header)) rep.error('schema', `The document header does not match the PLATO JSON Schema: ${ajvMessage(V.header.errors)}`); continue; }
+      if (ev.type === 'header') { header = ev.value; w.header(header); dry.header(header); cands?.dataset(header); if (!V.header(header)) rep.error('schema', `The document header does not match the PLATO JSON Schema: ${ajvMessage(V.header.errors)}`); continue; }
       checkRecord(ev);
       keepWithin(ev);
+      if (cands && ev.value) cands.record(ev.value);
       w.record(ev.type === 'idr' ? 'identityRelations' : ev.type === 'attestation' ? 'attestations' : ev.newEntity ? 'newSpatialEntities' : 'spatialEntities', ev.value);
       if (++batch % 5000 === 0) { store.endBatch(); store.beginBatch(); beat('loading', { triples: store.count }); }
     }
@@ -786,8 +798,9 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
         let n = 0;
         for (const c of ids) yield { type: 'candidate', value: r2j.candidate(c), n: ++n };
       })();
-      await runCandidateSet(events, { V: res.validators['candidate-set'], rep, writer: w, dry: null, notAList });
+      await runCandidateSet(events, { V: res.validators['candidate-set'], rep, writer: w, dry: null, notAList, collect: cands?.set });
       store.close();
+      cands?.finish();
       return { report: rep.toJSON(), outputs };
     }
     for (const set of sets) notWritten(set);
@@ -807,6 +820,9 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     const head = docId ? { $schema: 'https://w3id.org/plato/schemas/place-centric.schema.json', ...r2j.header(docId) } : { profile: 'place-centric', gazetteer: { title: input.files[0].name } };
     head.profile = 'place-centric';
     writer && writer.header(head);
+    // From RDF, what the candidate set rules read is in the records as they are read back.
+    const fromGraph = isRdf && cands;
+    if (fromGraph) cands.dataset(head);
     // Without a document node, every identity relation is one of the document's own, except those an
     // attestation bundles (plato:attests_identity), which are read under their attestation.
     const idrIds = docId ? [...objectsOf(store, docId, PLATO + 'contains_identity_relation')]
@@ -827,12 +843,19 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       n++; rep.count('places'); rep.count('attestations', rec.attestations?.length || 0);
       if (isRdf && !V.entity(rec)) rep.error('schema', explainSchema(V.entity.errors, false), `${e}: ${ajvMessage(V.entity.errors)}`);
       collectMembership(rec.attestations, rec['@id'], membership);
+      if (fromGraph) cands.record(rec);
       if (writer) await writer.event(augmented({ type: 'record', value: rec, n, ...withinByPlace.get(e) }));
       beat('writing', { places: n });
     }
-    for (const i of idrIds) { rep.count('identity relations'); if (writer) await writer.event({ type: 'idr', value: r2j.identityRelation(i) }); }
+    for (const i of idrIds) {
+      rep.count('identity relations');
+      const value = writer || fromGraph ? r2j.identityRelation(i) : null;
+      if (fromGraph) cands.record(value);
+      if (writer) await writer.event({ type: 'idr', value });
+    }
     store.close();
   }
+  cands?.finish();
   for (const c of membershipCycles(membership)) rep.error('membership-cycle', 'A route, itinerary or network is, through its members, a member of itself (MemberOf, followed round, comes back to where it started)', c);
   if (writer) await writer.close();
   progress({ phase: 'done', ...rep.counts, elapsedMs: Date.now() - t0 });
@@ -999,16 +1022,18 @@ async function* candidateSetSource(input, rep) {
   }
 }
 /** Check each event of a candidate set against its profile, and write it if there is a writer. */
-async function runCandidateSet(events, { V, rep, writer, dry, notAList }) {
+async function runCandidateSet(events, { V, rep, writer, dry, notAList, collect }) {
   for await (const ev of events) {
     if (ev.type === 'not-a-list') { notAList(ev); continue; }
     if (ev.type === 'header') {
       if (!V.header(ev.value)) rep.error('schema', `The document header does not match the PLATO JSON Schema: ${ajvMessage(V.header.errors)}`);
       if (dry) dry.header(ev.value);
       if (writer) writer.header(ev.value);
+      if (collect) collect.header(ev.value);
       continue;
     }
     rep.count('candidates');
+    if (collect) collect.candidate(ev.value);
     if (!V.candidate(ev.value)) rep.error('schema', explainSchema(V.candidate.errors, false), `${ev.value?.['@id'] || `candidate ${ev.n}`}: ${ajvMessage(V.candidate.errors)}`);
     if (dry) dry.record('candidates', ev.value);
     if (writer) {
@@ -1017,6 +1042,77 @@ async function runCandidateSet(events, { V, rep, writer, dry, notAList }) {
     }
   }
   if (writer) await writer.close();
+}
+
+/**
+ * Elenchos's candidate set rules for one check (section 13.3 of the candidate set specification). The
+ * sets given (`given`, detected inputs) are read and checked against their profile first, each problem
+ * said to be in that set; then the input is read, and gives this what the rules need as it goes: a
+ * candidate set its candidates (`set`), a dataset its header (`dataset`) and each record (`record`),
+ * whose answers to candidates (promotedFrom) are checked against the sets given as they pass, so that
+ * only the candidates are held. `finish` makes the rules that need everything read.
+ */
+async function candidateCheck(given, res, rep) {
+  const V = res.validators['candidate-set'];
+  const say = (f) => rep.add(f.severity, f.kind, CANDIDATE_CHECK_TEXT[f.kind], f.example);
+  const sets = [];
+  for (const input of given || []) {
+    const label = input.files?.[0]?.name || 'given';
+    if (input.profile !== 'candidate-set') {
+      say({ severity: 'error', kind: 'candidates-not-a-candidate-set', example: `${label}: ${input.reason ?? `${input.format}${input.profile ? ` (${input.profile})` : ''}`}` });
+      continue;
+    }
+    const sub = new Report(), head = {}, list = [];
+    const collect = { header: (h) => Object.assign(head, h), candidate: (c) => list.push(c) };
+    try {
+      await runCandidateSet(candidateSetSource(input, sub), { V, rep: sub, writer: null, dry: null, collect,
+        notAList: (ev) => sub.error('not-a-list', notAListText(ev.key, ev.shape), ev.key) });
+    } catch (e) {
+      if (!(e instanceof DataError)) throw e;
+      sub.error('unreadable', 'The file could not be read to the end, so only the part before the problem was checked', e.message);
+    }
+    // Its own problems, said to be in it: one line for each, with its examples.
+    for (const i of sub.toJSON().items) {
+      const message = `In the candidate set ${label}: ${i.message}`;
+      rep.add(i.severity, i.kind, message, i.examples[0], i.count);
+      for (const x of i.examples.slice(1)) rep.add(i.severity, i.kind, message, x, 0);
+    }
+    rep.count('candidates given', list.length);
+    sets.push(slimSet(head, list, label));
+  }
+  const index = candidateIndex(sets);
+  let mainHead = null, gazetteer = null, answered = 0;
+  const mainCandidates = [];
+  return {
+    // A candidate set checked: its candidates are held, for the rules within it and across the sets.
+    set: { header: (h) => { mainHead = h; }, candidate: (c) => mainCandidates.push(c) },
+    dataset(h) { if (h && typeof h === 'object' && h.gazetteer && typeof h.gazetteer === 'object') gazetteer = h.gazetteer; },
+    record(value) {
+      for (const a of answers(value)) {
+        answered++;
+        if (given?.length) { const f = checkAnswer(a, index); if (f) say(f); }
+      }
+    },
+    finish() {
+      if (mainHead) {
+        // The set checked first: its rules are made once for each set, a copy of one given only once.
+        const all = [slimSet(mainHead, mainCandidates, 'checked'), ...sets], seen = new Set();
+        for (const s of all) { if (s.id !== undefined && seen.has(s.id)) continue; seen.add(s.id); checkSet(s).forEach(say); }
+        checkAcross(all).forEach(say);
+        return;
+      }
+      const seen = new Set();
+      for (const s of sets) { if (s.id !== undefined && seen.has(s.id)) continue; seen.add(s.id); checkSet(s).forEach(say); }
+      if (sets.length) checkAcross(sets).forEach(say);
+      if (given?.length) { if (gazetteer) checkEnds(gazetteer, sets).forEach(say); return; }
+      // No set given: one line, not one warning for each relation, and the sets the dataset lists, to give.
+      const listed = Array.isArray(gazetteer?.candidateSets) ? gazetteer.candidateSets.filter((x) => typeof x === 'string') : [];
+      if (answered || listed.length) {
+        rep.note('candidates-not-given', candidatesNotGivenText(answered, listed.length > 0), listed[0]);
+        for (const x of listed.slice(1)) rep.add('note', 'candidates-not-given', candidatesNotGivenText(answered, true), x, 0);
+      }
+    },
+  };
 }
 async function candidateSetWriter(target, env, rep, typing, outputs, input, options) {
   const stem = (options.name || input.files[0].name).replace(/\.(gz)$/i, '').replace(/\.[^.]+$/, '');

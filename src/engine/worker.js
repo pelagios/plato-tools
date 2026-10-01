@@ -251,9 +251,11 @@ self.onmessage = async ({ data }) => {
     } else if (data.cmd === 'run') {
       const input = await detect(data.files);
       if (!readable(input)) throw new Error(input.reason);
+      // Elenchos: the candidate sets given with a check, each file one set (src/engine/candidates.js).
+      const candidates = data.candidates ? await Promise.all(data.candidates.map((f) => detect([f]))) : undefined;
       const { env, tidy } = await runEnv();
       let result;
-      try { result = await run({ input, action: data.action, target: data.target, options: data.options || {} }, env); } finally { tidy(); }
+      try { result = await run({ input, action: data.action, target: data.target, options: { ...(data.options || {}), candidates } }, env); } finally { tidy(); }
       // Stopped part-way: what it had begun writing (closed by run()) is not kept.
       if (result.incomplete) await outputsDir(true);
       postMessage({ type: 'done', ...result });

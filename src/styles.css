@@ -120,7 +120,7 @@ details#options { margin-top: .75rem; }
 .opt small { display: block; color: var(--muted); }
 #phase { font-variant-numeric: lining-nums tabular-nums; }
 .report-group h3 { font-size: 1.05rem; margin: 1rem 0 .4rem; }
-.report-group.error h3 { color: var(--err); } .report-group.warning h3 { color: var(--warn); } .report-group.loss h3 { color: var(--muted); }
+.report-group.error h3 { color: var(--err); } .report-group.warning h3 { color: var(--warn); } .report-group.loss h3, .report-group.note h3 { color: var(--muted); }
 .item { border-top: 1px solid var(--line); padding: .45rem 0; }
 .item summary { cursor: pointer; }
 .count, .item .count { font-variant-numeric: lining-nums tabular-nums; color: var(--muted); margin-left: .35rem; }

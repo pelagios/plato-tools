@@ -39,6 +39,10 @@ const HELP = `plato-tools: check and convert PLATO data, and compare versions of
 
 Usage:
   plato-tools check [options] INPUT...
+  plato-tools check --candidates SET [--candidates SET...] [INPUT...]
+                                            check with candidate sets: candidates against each
+                                            other, across the sets, and against a dataset's
+                                            answers to them (promotedFrom) and its candidateSets
   plato-tools convert --to TARGET [--out DIR] [options] INPUT...
   plato-tools preview [--limit N] [--columns FILE] [--split …] [--sheet NAME] [reading options] INPUT
                                             show the first N records (default ${PREVIEW_LIMIT}) of a table of
@@ -430,6 +434,10 @@ async function main(argv) {
   if (o.gazetteer || o.places || o['all-names'] || o.countries || o.near || o.batch || o['dry-run'] || o['token-env'] || o['gazetteer-iri']) return usage('--gazetteer, --token-env, --gazetteer-iri, --places, --all-names, --countries, --near, --batch and --dry-run are for lookup.');
   if (o.with || o.threshold || o['max-distance'] || o.top || o.review || o.output || o.reviewer || o.orcid || o['others-title'] !== undefined) return usage('--with, --threshold, --max-distance, --top, --review, --output, --reviewer, --orcid and --others-title are for match and apply.');
   if (!reads && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, preview, cluster, compare, publish, match, apply, lookup, candidates and datacube.`);
+  // Elenchos: candidate sets checked together, with no other input: the first is checked, with the others
+  // (each is first made sure of below, so that a dataset given with --candidates is refused, not checked).
+  const alone = action === 'check' && !args.length && !!o.candidates;
+  if (alone) args.push(o.candidates[0]);
   if (!args.length) return usage(`name ${action === 'preview' ? 'the input' : 'at least one input'} to ${action}.`);
   if (action === 'preview' && o.brief) return usage('--brief is for check and convert; a preview prints its records, and --json prints them with the rest.');
   if (action === 'convert' && !o.to) return usage(`convert needs --to, one of: ${Object.keys(TARGETS).join(', ')}.`);
@@ -437,7 +445,8 @@ async function main(argv) {
   if (action !== 'convert' && (o.to || o.overwrite)) return usage('--to and --overwrite are for convert.');
   if (o.json && o.brief) return usage('choose --json or --brief, not both.');
   if (o.cube && o.to !== 'ntriples') return usage('--cube is for convert --to ntriples.');
-  // Candidate sets, for LPF's region matches (PLATO 1d2cf6e, #23): each must be one, or the command is wrong.
+  // Candidate sets, for LPF's region matches (PLATO 1d2cf6e, #23) or to check with each input (Elenchos):
+  // each must be one, or the command is wrong.
   if (o.candidates) {
     o.candidateInputs = [];
     for (const p of o.candidates) {
@@ -448,6 +457,7 @@ async function main(argv) {
       if (input.profile !== 'candidate-set') return usage(`${p}, given with --candidates, is ${formatName(input)}, not a candidate set (PLATO JSON or JSON Lines with the profile candidate-set).`);
       o.candidateInputs.push(input);
     }
+    if (alone) o.candidateInputs.shift();
   }
   if (o.columns) {
     try { o.savedColumns = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(o.columns))); }

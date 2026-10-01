@@ -12,6 +12,8 @@ export class Report {
   error(kind, message, example) { this.add('error', kind, message, example); }
   warning(kind, message, example) { this.add('warning', kind, message, example); }
   loss(kind, message, example) { this.add('loss', kind, message, example); }
+  // Not a problem, and nothing to fix: something the check could not do as given, and how to let it.
+  note(kind, message, example) { this.add('note', kind, message, example); }
   count(name, n = 1) { this.counts[name] = (this.counts[name] || 0) + n; }
   /**
    * Say what changed in one of a kind's examples (the version check): the statements the earlier
@@ -21,7 +23,8 @@ export class Report {
     for (const k of this.kinds.values()) if (k.kind === kind) (k.explained ||= []).push({ example, earlier, later });
   }
   toJSON() {
-    const items = [...this.kinds.values()].sort((a, b) => ['error', 'warning', 'loss'].indexOf(a.severity) - ['error', 'warning', 'loss'].indexOf(b.severity) || b.count - a.count);
+    const order = ['error', 'warning', 'loss', 'note'];
+    const items = [...this.kinds.values()].sort((a, b) => order.indexOf(a.severity) - order.indexOf(b.severity) || b.count - a.count);
     return { counts: this.counts, errors: items.filter((i) => i.severity === 'error').reduce((n, i) => n + i.count, 0), items };
   }
 }
@@ -361,3 +364,28 @@ export const WORKBOOK_TEXT = {
 };
 /** One date of 'workbook-date-time': where it is, what the workbook holds, and what it was read as. */
 export const dateTimeWords = (sheet, row, column, given, date) => `${sheet} row ${row}, ${column}: ${given} was read as the date ${date}; check the date.`;
+
+// ---- candidate sets, checked together and with their dataset (src/engine/candidates.js) -------------
+// What the check says of each kind the candidate set rules raise (section 13.3 of the candidate set
+// specification). The examples name the candidate, or the identity relation, and what is wrong with it.
+export const CANDIDATE_CHECK_TEXT = {
+  'duplicate-id': "Two candidates in one candidate set have the same web address (@id). A candidate's address is made from what it says, so two candidates with one address are one candidate listed twice, or one address given wrongly.",
+  'same-candidate-twice': 'One candidate is listed twice in a candidate set: the same subject, object, algorithmVersion and matchParameters make the same candidate, whatever its score or time. List it once.',
+  'id-not-under-set': "A candidate's web address is not under its candidate set's: a candidate's address is its candidate set's address, then #c- and the hash of what it says. An address under the place it is a match for, or under another set, is not one; the example names the candidate and its set.",
+  'id-not-minted': "A candidate's address does not begin with the hash of what it says (the SHA-256 of [subject, object, algorithmVersion, matchParameters], in the JSON Canonicalization Scheme), so it was not made by PLATO's rule, or what the candidate says was changed after it was made. The example names the candidate and how its hash begins.",
+  'subject-is-object': 'A candidate suggests that a place is the same as itself (its subject and object are one address).',
+  'already-published': 'A candidate in a later candidate set was already published in an earlier one: the same subject, object, algorithmVersion and matchParameters. A candidate keeps the one address the first set gave it, and the answers to it point there, so a new set leaves it out. The example names it, and its address in the earlier set.',
+  'described-differently': 'One candidate address is described two ways: two copies of one candidate set (the same set @id) disagree. A candidate set is frozen once issued, so one of the copies has been changed; publish a new set for a new run. The example names the candidate and the keys that differ.',
+  'not-distinct': "A candidate's address is too short: its hex digits begin another candidate's hash, in its own set or in an earlier set under the same base address, and should have been lengthened by 4 until they did not. This may be wrong where the set was made without the earlier sets given here: only the software that made it knows which it was given.",
+  'ends-disagree': "A candidate set that the dataset lists (candidateSets) says it is for another dataset (its candidatesFor is not the dataset's @id). The two ends of the link must agree; the example names the set and the dataset it says it is for.",
+  'set-not-listed': "A candidate set given here is for this dataset (its candidatesFor is the dataset's @id), but the dataset's candidateSets does not list it.",
+  'promoted-from-unresolved': 'An identity match or denial says it answers a candidate (promotedFrom) that is in none of the candidate sets given. Give the candidate set that holds it, or correct the address; the example names the identity relation and the candidate it names.',
+  'promoted-from-other-pair': 'An identity match or denial answers a candidate (promotedFrom) that matches two other places: the relation\'s subject and object are not the candidate\'s, in either order. It is still an answer to that candidate; the example names the relation, the candidate, and the two places the candidate matches.',
+  'candidates-not-a-candidate-set': 'A file given as a candidate set is not one (a PLATO JSON or JSON Lines document with the profile candidate-set), so it was not read; the example says what it is.',
+};
+/** The note for a dataset whose candidates were not checked, since no candidate set was given. */
+export function candidatesNotGivenText(answers, listed) {
+  const n = answers.toLocaleString('en-GB');
+  if (answers) return `${answers === 1 ? 'One identity relation answers a candidate' : `${n} identity relations answer candidates`} (promotedFrom); give the candidate sets to check that ${answers === 1 ? 'it exists' : 'they exist'}${listed ? ': the dataset lists those in the examples (candidateSets)' : ''}. Nothing is fetched.`;
+  return 'The dataset lists candidate sets (candidateSets); give them to check that they say they are for this dataset. Nothing is fetched.';
+}

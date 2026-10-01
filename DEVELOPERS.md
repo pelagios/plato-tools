@@ -68,10 +68,9 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   reverse of `plato:candidates_for`, written and read back as such (`test/candidates.test.js` checks
   the triples against jsonld.js's); the tables and LPF leave it out and report it
   (`dropped:gazetteer.candidateSets`). Where the tools stand: a candidate set is read, checked against
-  its profile and converted. Krisis exports one and writes `promotedFrom` (see Match review). Later: the checks
-  no schema can make (ids under their set, the mint rule, duplicates, across sets, `promotedFrom`
-  against a set given beside a dataset), which the candidate set specification's section 13 lists.
-  The version check of a candidate set is done (see the version check, below). An edge case to keep: a candidate's score records what the software
+  its profile and by the rules no schema can make (see Candidate sets, checked together, below), and
+  converted. Krisis exports one and writes `promotedFrom` (see Match review), and the version check
+  holds a candidate set frozen (see the version check, below). An edge case to keep: a candidate's score records what the software
   said when it first suggested the pair. A candidate is frozen once issued, and a later set leaves out
   any pair already published, so if the places' names change and the same algorithm with the same
   settings would now score the pair differently, the first score stands. A different
@@ -115,6 +114,35 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   on the first. `test/lpf-regions.test.js` has each case on PLATO's `place-centric-regions.json` and
   `candidate-set-regions.json`, and that example exported as tables, compared with the same tables read
   as PLATO JSON first.
+- **Candidate sets, checked together** (Elenchos; the candidate set specification's section 13.3).
+  `src/engine/candidates.js` holds the rules no schema can make, ported rule for rule from the
+  specification's prototype (`elenchos.py`, tested by `neg.py`); `candidateCheck` in `pipeline.js`
+  feeds them, and `CANDIDATE_CHECK_TEXT` in `report.js` words each kind. The sets are given with
+  `options.candidates` (detected inputs, one per set): `plato-tools check --candidates SET`, once for
+  each set, with a dataset or a candidate set as the input, or with no input, when the first set is
+  checked with the others; on the page, *Check with candidate sets…* asks for the files. The sets
+  given are read before the input and checked against their profile, each problem said to be in that
+  set; only their candidates are held. A candidate's `@id` is `<set IRI>#c-` and a prefix of the
+  SHA-256 of `JSON.stringify([subject, object, algorithmVersion, matchParameters ?? ''])`.
+  Within a set: `duplicate-id` and `same-candidate-twice` (the same four inputs under two ids) are
+  errors, as is `id-not-under-set` (which refuses the withdrawn `<subject IRI>#c-` form); an id whose
+  hex is not its hash's beginning is `id-not-minted` and a place matched with itself
+  `subject-is-object`, both warnings. An id not in the `#c-` form at all is the schema's refusal, worded
+  by `explainSchema` (as is a status other than `suggested`), and the id rules leave it alone, so that
+  one fault is not two problems. Across the sets, earliest `issued` first (ties: the order given, the
+  input first): `already-published` (a later set lists a candidate an earlier one published) and
+  `described-differently` (two copies of one set disagree; identical copies are not reported) are
+  errors; `not-distinct` (an id not lengthened past another hash in its set or an earlier set) is a
+  warning, and compares only sets under the same base (the set IRI up to its last `/`), since only
+  the minter knew what it was given. With a dataset, each answer (`promotedFrom`, wherever it is, with
+  the subject its relation, attestation or place gives) is checked as it streams past:
+  `promoted-from-unresolved` and `promoted-from-other-pair` are warnings; `ends-disagree` (a listed set
+  made for another dataset) is an error and `set-not-listed` a warning. From RDF, the same is read from
+  the records as they are read back from the graph. With no set given, a dataset that answers
+  candidates or lists candidate sets gets one note (`candidates-not-given`, a report severity of its
+  own, shown under *Notes* by a check only), naming the sets it lists; nothing is fetched.
+  `test/elenchos-candidates.test.js` gives each rule a case that must raise it and a control that must
+  not, on PLATO's examples and schema-valid copies of them.
 - **The about sheet's authors.** Each item of `creator` is `Name <address>`, an address alone, or a
   name alone (PLATO 8385472; `creatorOf` in `tables.js`). An item alone is an address only with a
   scheme and `//`, or a `urn:`, `tag:`, `mailto:`, `doi:` or `info:` scheme, so that `Re:Place` is a

@@ -22,6 +22,8 @@ const ONE = { 'earlier attestations': 'earlier attestation', 'earlier candidates
 const MANY = { observations: 'Data Cube observations' };
 ONE['place names'] = 'place name';
 ONE.rows = 'row'; ONE.features = 'feature';
+// The candidates of the candidate sets given with a check (Elenchos: --candidates), read beside its input.
+ONE['candidates given'] = 'candidate in the candidate sets given'; MANY['candidates given'] = 'candidates in the candidate sets given';
 const count = (n, what) => `${n.toLocaleString('en-GB')} ${n === 1 ? ONE[what] || what : MANY[what] || what}`;
 
 /**
@@ -56,7 +58,7 @@ export function summary(report, action) {
   if (action === 'candidates') return candidatesSummary(report);
   // The regions a table's places lie in, minted as places (Hermes, generic.js), are among the places, and said apart.
   const regions = (k) => (k === 'places' && c.regions ? ` (${c.regions.toLocaleString('en-GB')} of them ${c.regions === 1 ? 'a region' : 'regions'})` : '');
-  const counted = ['annotations', 'place names', 'rows', 'features', 'places', 'attestations', 'identity relations', 'candidates', 'triples', 'triples written', 'table rows', 'observations'].filter((k) => c[k]).map((k) => count(c[k], k) + regions(k)).join(', ');
+  const counted = ['annotations', 'place names', 'rows', 'features', 'places', 'attestations', 'identity relations', 'candidates', 'candidates given', 'triples', 'triples written', 'table rows', 'observations'].filter((k) => c[k]).map((k) => count(c[k], k) + regions(k)).join(', ');
   const nErr = report.errors;
   return {
     problems: nErr ? `${nErr.toLocaleString('en-GB')} problem${nErr === 1 ? '' : 's'} found.` : 'No problems found.',
@@ -118,6 +120,7 @@ export function groups(action) {
     { severity: 'warning', title: 'Warnings', intro: 'Worth a look; the data can still be used.' },
     { severity: 'loss', title: checking ? 'Would not be carried over' : 'Not carried over',
       intro: checking ? 'PLATO JSON has no place for these, so a conversion to it would leave them out.' : 'The target format has no place for these, so they are left out.' },
+    ...(checking ? [{ severity: 'note', title: 'Notes', intro: 'Not problems: what this check could not do with what it was given, and how to let it.' }] : []),
   ];
 }
 
