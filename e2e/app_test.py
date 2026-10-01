@@ -2913,7 +2913,7 @@ def chora_checks(pw, url, tmp):
         ctl = page.evaluate('() => { const s = document.querySelector("#card svg.timeline"); return s ? { text: s.textContent, bars: s.querySelectorAll("rect").length, evidence: s.querySelectorAll("rect.tl-evidence").length, legend: s.querySelectorAll(".tl-legend").length } : null; }')
         return (rel and 'ContainedIn: the Delta' in rel['text'] and rel['links'] == 0
                 and 'Located only relative to other places; showing its country (EG)' in note
-                and locs and 'between Kom Control and 1767 (relative; not drawn)' in locs['text'] and locs['links'] == ['https://example.org/p/kom'] and drawn == 0
+                and locs and 'between Kom Control and 1767, as written “between Kom and Philai” (relative; not drawn)' in locs['text'] and locs['links'] == ['https://example.org/p/kom'] and drawn == 0
                 and ctl_locs == 'Point' and ctl_drawn > 0
                 and tl and 'mentioned in texts dated 15–540' in tl['text'] and tl['evidence'] == 1 and tl['legend'] == 1
                 and ctl_rel == 1 and ctl and 'Kom Control · 100–200' in ctl['text'] and 'mentioned' not in ctl['text']

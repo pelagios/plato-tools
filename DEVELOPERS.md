@@ -1089,9 +1089,11 @@ and reaches nothing.
   legend only when there is one, and it is never a location's own date. `WhenTrue`, the default,
   and any role PLATO does not define are shown as the date of the claim. A location given only
   relative to other places (a `qualification` with `relativeQualifier` or `relativeTo`, one anchor
-  or a list, #19, and no coordinates) is a line under Locations in words: "between Assuan and 1767
-  (relative; not drawn)", with its distance and bearing when given. An anchor that is a place of the
-  dataset is a link to it, any other its address's last segment. It is never drawn and never places
+  or a list, #19, and no coordinates) is a line under Locations in words: "between Assuan and 1767,
+  as written “between U01 Assuan (2207) and U01 Philai (1767)” (relative; not drawn)", with its
+  distance and bearing when given. An anchor that is a place of the dataset is a link to it, any
+  other its address's last segment, so the source's own words follow where it gives them. It is
+  never drawn and never places
   the place on the map. A location with coordinates and a qualification is drawn, as before; one
   with coordinates Chora cannot draw (a WKT polygon) and a qualification is not "only relative",
   and is left out as it was. A name

@@ -39,7 +39,8 @@ const metres = (m) => (m >= 1000 ? `${+(m / 1000).toFixed(1)} km` : `${+m.toFixe
 /**
  * A location given only relative to other places (PLATO #19), in words: "between Assuan and Philai
  * (relative; not drawn)". An anchor that is a place of the dataset is a link to it; any other is its
- * address's last segment, as text. Never drawn.
+ * address's last segment, as text, so the source's own words follow where it gives them ("between
+ * 2207 and 1767, as written “between U01 Assuan (2207) and U01 Philai (1767)”"). Never drawn.
  */
 export function relativeItem(r) {
   const notes = [];
@@ -47,7 +48,8 @@ export function relativeItem(r) {
   if (r.bearing != null) notes.push(`bearing ${+r.bearing.toFixed(1)}°`);
   notes.push('relative; not drawn');
   const anchors = andList((r.anchors || []).map(anchorLink));
-  return `${esc(r.qualifierLabel)}${anchors ? ` ${anchors}` : ''} <span class="muted">(${notes.join('; ')})</span>${dated(r.timespan)}${badge(r.status)}`;
+  const written = r.sourceLabel ? `, as written <span class="muted">“${esc(r.sourceLabel)}”</span>` : '';
+  return `${esc(r.qualifierLabel)}${anchors ? ` ${anchors}` : ''}${written} <span class="muted">(${notes.join('; ')})</span>${dated(r.timespan)}${badge(r.status)}`;
 }
 /** The card's Locations: those drawn, then those given only relative to other places. */
 export function locations(v) {

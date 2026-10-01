@@ -67,6 +67,8 @@ test('#19: a location relative to other places is a line under Locations, its an
   const near = { qualifierLabel: 'near', anchors: [{ id: 'x', label: '<i>X</i>', place: false }], distance: 1500, bearing: 45, status: 'denied', timespan: null };
   assert.match(relativeItem(near), /^near &lt;i&gt;X&lt;\/i&gt; <span class="muted">\(1\.5 km away; bearing 45°; relative; not drawn\)<\/span> <span class="status status-denied"/);
   assert.equal(relativeItem({ ...near, anchors: [{ id: 'x', label: 'A' }, { id: 'y', label: 'B' }, { id: 'z', label: 'C' }], distance: 500, bearing: null, status: 'asserted' }), 'near A, B and C <span class="muted">(500 m away; relative; not drawn)</span>');
+  // The source's own words follow the anchors where it gives them, as text.
+  assert.equal(relativeItem({ ...between, sourceLabel: 'between <Assuan> & Philai' }), 'between <a href="#" data-place="https://example.org/p/assuan">Assuan</a> and 1767, as written <span class="muted">“between &lt;Assuan&gt; &amp; Philai”</span> <span class="muted">(relative; not drawn)</span>');
   // The list: a drawn location and a relative one together; and with neither, none recorded.
   const v = { geometries: [{ geojson: { type: 'Point' }, role: null, precision: null, precisionKm: null, timespan: null, status: 'asserted' }], relative: [between] };
   const html = locations(v);
@@ -113,13 +115,15 @@ test('Trismegistos #19: under Locations, Setis has its point and a line "between
   const ex = example();
   const between = facet(ex, 'Setis', 'between').geometries[0].qualification;
   assert.deepEqual(between.relativeTo.map((x) => x.split('/').pop()), ['2207', '1767'], 'the anchors in the example');
-  assert.equal(locations(place(ex, 'Setis')), '<ul><li>Point</li><li>between 2207 and 1767 <span class="muted">(relative; not drawn)</span></li></ul>');
+  assert.equal(facet(ex, 'Setis', 'between').geometries[0].sourceLabel, 'between U01 Assuan (2207) and U01 Philai (1767)', "the source's words in the example");
+  assert.equal(locations(place(ex, 'Setis')), '<ul><li>Point</li><li>between 2207 and 1767, as written <span class="muted">“between U01 Assuan (2207) and U01 Philai (1767)”</span> <span class="muted">(relative; not drawn)</span></li></ul>');
   assert.equal(facet(ex, 'Agrianes', 'valley').geometries[0].qualification.relativeTo.split('/').pop(), '11828');
-  assert.equal(locations(place(ex, 'Agrianes')), '<ul><li>near 11828 <span class="muted">(relative; not drawn)</span></li></ul>');
+  assert.equal(locations(place(ex, 'Agrianes')), '<ul><li>near 11828, as written <span class="muted">“in the upper valley of the river Strymon (Struma) (11828)”</span> <span class="muted">(relative; not drawn)</span></li></ul>');
   // The control, with the same lookup: an anchor that IS a place of the dataset is a link, as Aegyptus is under Related places.
   const doctored = structuredClone(ex);
   facet(doctored, 'Agrianes', 'valley').geometries[0].qualification.relativeTo = 'https://example.org/plato-examples/trismegistos/province/Thracia';
-  assert.equal(locations(place(doctored, 'Agrianes')), '<ul><li>near <a href="#" data-place="https://example.org/plato-examples/trismegistos/province/Thracia">Thracia</a> <span class="muted">(relative; not drawn)</span></li></ul>');
+  facet(doctored, 'Agrianes', 'valley').geometries[0].sourceLabel = undefined;
+  assert.equal(locations(place(doctored, 'Agrianes')), '<ul><li>near <a href="#" data-place="https://example.org/plato-examples/trismegistos/province/Thracia">Thracia</a> <span class="muted">(relative; not drawn)</span></li></ul>', 'and no words where the source gives none');
   assert.equal(locations(place(ex, 'Aegyptus')), '<p class="muted">None recorded.</p>');
 });
 
