@@ -962,6 +962,40 @@ def chora_checks(pw, url, tmp):
         after = page.inner_text('#found'); first = page.eval_on_selector_all('#list button[data-id]', 'bs => bs[0]?.firstChild.textContent.trim()')
         return before == '120 places, showing 1–50.' and got and first == 'Holm 101', {'before': before, 'after': after, 'first': first}
     attempt('Chora: Next clicked twice goes on two pages', paging_twice)
+    def paging_then_typed():
+        # Next clicked while the worker is busy, then a new query typed and settled before Next is sent:
+        # Next sends nothing (a page of the new query worked out from the old query's pages would be
+        # neither's), and the new query is asked for from its first page. The worker is held busy by
+        # holding back the commands the page posts to it (Worker.prototype.postMessage, here only; the
+        # map's workers, posting no commands, pass); every command posted is recorded, so what was
+        # asked for is read, not inferred from what is shown.
+        f = tmp / 'chora-files' / 'paging-typed.json'; f.parent.mkdir(exist_ok=True)
+        f.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': 'https://example.org/g3', 'title': 'Paging, then typed', 'status': 'draft', 'version': '1'},
+            'spatialEntities': [{'@id': f'https://example.org/t/{i}', 'label': f'Holm {i:03d}', 'attestations': []} for i in range(1, 121)]}))
+        chora_boot(page, base, [f])
+        before = page.inner_text('#found')
+        page.evaluate("""() => { window.__sent = []; window.__held = []; window.__hold = true;
+          const post = Worker.prototype.postMessage;
+          Worker.prototype.postMessage = function (m, ...rest) {
+            if (!m || typeof m.cmd !== 'string') return post.call(this, m, ...rest);   // the map's own workers
+            window.__sent.push(m.cmd === 'chora-search' ? [m.cmd, m.q, m.after] : [m.cmd]);
+            if (window.__hold) window.__held.push([this, m]); else post.call(this, m);
+          };
+          window.__release = () => { window.__hold = false; for (const [w, m] of window.__held.splice(0)) post.call(w, m); }; }""")
+        page.evaluate('() => document.querySelector("#list button[data-id]").click()')   # chora-place: held, so the worker is busy
+        until(page, '() => window.__sent.length === 1', 10)
+        page.click('#next')                                                                  # for "", from page 1: waits behind it
+        page.fill('#q', 'HOLM 1')                                                            # then typed ...
+        page.wait_for_timeout(600)                                                           # ... and settled (200 ms) while still held
+        page.evaluate('() => window.__release()')
+        got = soon(page, '() => /found/.test(document.getElementById("found").textContent)', 20)
+        page.wait_for_timeout(300)
+        sent = page.evaluate('() => window.__sent')
+        found, ls = page.inner_text('#found'), cstate(page).get('lastSearch') or {}
+        searches = [x for x in sent if x[0] == 'chora-search']
+        return (before == '120 places, showing 1–50.' and got and sent[0] == ['chora-place'] and searches == [['chora-search', 'HOLM 1', 0]]
+                and found == '21 found.' and ls.get('after') == 0), {'before': before, 'sent': sent, 'found': found, 'lastSearch after': ls.get('after')}
+    attempt('Chora: Next clicked, then a new query typed before Next is sent: Next asks for nothing, the new query its first page', paging_then_typed)
 
     def statuses():
         chora_boot(page, base, [fixture(judgements, 'judgements-card.json', tmp)])

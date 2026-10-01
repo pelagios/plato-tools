@@ -10,8 +10,7 @@ import * as basemaps from './basemaps.js';
 import * as contributors from './contributor.js';
 import { fingerprint, loadDrafts, saveDrafts } from './drafts.js';
 import { take as takeHandoff, clear as clearHandoff } from './handoff.js';
-import { serialQueue } from './queue.js';
-import { fold } from '../engine/chora/fold.js';
+import { serialQueue, pageRequest, answers } from './queue.js';
 
 const $ = (id) => document.getElementById(id);
 const state = (window.__chora = { phase: 'loading', placeId: null, pendingCount: 0, basemap: null, mapReadyCount: 0, blocked: 0, lastSave: null });
@@ -33,8 +32,11 @@ const enqueue = serialQueue(({ msg, replyType }) => new Promise((resolve, reject
   };
   worker.postMessage(msg);
 }));
-// `msg` may be a function that makes the command when it is sent (queue.js).
-const request = (msg, replyType, opts) => enqueue(() => ({ msg: typeof msg === 'function' ? msg() : msg, replyType }), opts);
+// `msg` may be a function that makes the command when it is sent, or null to send nothing (queue.js).
+const request = (msg, replyType, opts) => enqueue(() => {
+  const m = typeof msg === 'function' ? msg() : msg;
+  return m === null ? null : { msg: m, replyType };
+}, opts);
 function startWorker() {
   worker = new Worker(new URL('../engine/worker.js', import.meta.url), { type: 'module' });
   worker.onerror = (e) => fail(`The engine stopped: ${e.message || 'unknown error'}`);
@@ -85,21 +87,24 @@ async function open(list) {
 // A page goes on from the place before it (keyset paging): `starts` holds where each page so far
 // began, so Previous goes back one, and a new query starts again. Which page to ask for is worked out
 // when the request is sent, from the page the reply before it showed, so that Next clicked twice
-// goes on two pages. A new query is sent only if no later one was typed before it could be; Next and
-// Previous are each sent. A reply for a query that is no longer the one in the box (folded, as the
-// search compares) is not shown.
+// goes on two pages (pageRequest in queue.js). A new query is sent only if no later one was typed
+// before it could be; Next and Previous are each sent, for the query there when they were clicked,
+// unless the box holds another by then. A reply is shown only if it is for the query its request was
+// made for, and that is the query in the box (folded, as the search compares).
 async function search(to = 'first') {
-  let pages;
+  const asked = query;
+  let req = null;
   const r = await request(() => {
-    pages = to === 'first' ? [0] : to === 'next' ? (nextAfter === null ? starts : [...starts, nextAfter]) : to === 'prev' ? (starts.length > 1 ? starts.slice(0, -1) : starts) : starts;
-    return { cmd: 'chora-search', q: query, after: pages[pages.length - 1], limit: PAGE };
+    req = pageRequest(to, { asked, box: $('q').value, starts, nextAfter });
+    return req && { cmd: 'chora-search', q: req.q, after: req.pages[req.pages.length - 1], limit: PAGE };
   }, 'chora-results', to === 'first' ? { latestOf: 'search' } : undefined);
-  if (!r) return;   // a later search was asked for before this one was sent
-  if (fold(r.q) !== fold($('q').value.trim())) return;   // the box holds another query now
+  if (!r) return;   // a later search was asked for before this one was sent, or the box changed first
+  if (!answers(r, req.q, $('q').value)) return;   // not for this request, or the box holds another query now
+  const pages = req.pages;
   starts = pages; nextAfter = r.next; total = r.total;
   state.lastSearch = { q: r.q, after: pages[pages.length - 1], next: r.next, total: r.total, shown: r.items.map((p) => p.id) };
   const at = (pages.length - 1) * PAGE;
-  $('found').textContent = total ? `${query ? `${n(total)} found` : `${n(total)} places`}${total > PAGE ? `, showing ${n(at + 1)}–${n(at + r.items.length)}` : ''}.` : 'No place has that in its name.';
+  $('found').textContent = total ? `${req.q ? `${n(total)} found` : `${n(total)} places`}${total > PAGE ? `, showing ${n(at + 1)}–${n(at + r.items.length)}` : ''}.` : 'No place has that in its name.';
   const pending = new Set(drafts.map((d) => d.placeId));
   $('list').innerHTML = r.items.map((p) => `<li><button type="button" class="place${p.id === state.placeId ? ' current' : ''}" data-id="${esc(p.id)}">${esc(p.label || p.id)}`
     + `${p.matched ? ` <span class="also">— also ${esc(p.matched)}</span>` : ''}${p.ccodes?.length ? ` <span class="muted">${esc(p.ccodes.join(', '))}</span>` : ''}${p.hasGeometry ? '' : ' <span class="tag">no location</span>'}${pending.has(p.id) ? ' <span class="tag pending">drawn</span>' : ''}</button></li>`).join('');

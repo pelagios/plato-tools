@@ -4,12 +4,13 @@
 // are each sent, whatever follows them.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { serialQueue } from '../src/chora/queue.js';
+import { serialQueue, pageRequest, answers } from '../src/chora/queue.js';
 
 function worker() {
   const sent = [], waiting = [];
   const send = (msg) => { sent.push(msg); return new Promise((resolve) => waiting.push(() => resolve({ reply: msg }))); };
-  const answer = async () => { while (waiting.length) { waiting.shift()(); await new Promise((r) => setTimeout(r, 0)); } };
+  // Waits a turn first, so that a command asked for just now has been sent.
+  const answer = async () => { await new Promise((r) => setTimeout(r, 0)); while (waiting.length) { waiting.shift()(); await new Promise((r) => setTimeout(r, 0)); } };
   return { sent, send, answer };
 }
 
@@ -90,4 +91,88 @@ test('a command given as a function and passed over by a later one is never made
   assert.equal(await a, null);
   assert.deepEqual(await b, { reply: { cmd: 'chora-search', q: 'b' } });
   await busy;
+});
+
+test('a command given as a function that makes nothing (null) is not sent, and resolves to null; the queue goes on', { timeout: 5000 }, async () => {
+  const w = worker(), request = serialQueue(w.send);
+  const none = request(() => null);
+  const after = request({ cmd: 'chora-place', id: 'x' });
+  await w.answer();
+  assert.equal(await none, null);
+  assert.deepEqual(w.sent, [{ cmd: 'chora-place', id: 'x' }], 'nothing was sent for it; the command after it was');
+  assert.deepEqual(await after, { reply: { cmd: 'chora-place', id: 'x' } });
+});
+
+// The page's list as app.js's search() keeps it: the query in the box, the query last searched for
+// (set when typing settles), and where its pages begin. Next and Previous capture the query when
+// clicked; the search box's new query is sent as the latest of its kind.
+function list(send) {
+  const request = serialQueue(send);
+  const ui = { box: 'a', query: 'a', starts: [0], nextAfter: 50, shown: [] };
+  async function search(to) {
+    const asked = ui.query;
+    let req = null;
+    const r = await request(() => {
+      req = pageRequest(to, { asked, box: ui.box, starts: ui.starts, nextAfter: ui.nextAfter });
+      return req && { cmd: 'chora-search', q: req.q, after: req.pages[req.pages.length - 1] };
+    }, to === 'first' ? { latestOf: 'search' } : undefined);
+    if (!r || !answers(r.reply, req.q, ui.box)) return;
+    ui.starts = req.pages; ui.nextAfter = r.reply.after + 50; ui.shown.push([r.reply.q, r.reply.after]);
+  }
+  const type = (q) => { ui.box = q; };
+  const settle = () => { ui.query = ui.box.trim(); return search('first'); };
+  return { ui, search, type, settle };
+}
+
+test('Next clicked, then a new query typed before Next is sent: Next sends nothing, and the new query its first page', { timeout: 5000 }, async () => {
+  const w = worker(), l = list(w.send);
+  const next = l.search('next');      // clicked for "a", page 2 ...
+  l.type('b');                        // ... then "b" typed, and typing settles before Next is sent
+  const first = l.settle();
+  await w.answer(); await w.answer(); await next; await first;
+  assert.deepEqual(w.sent.map((m) => [m.q, m.after]), [['b', 0]], 'no page 2 of "b" asked for from where the list of "a" was');
+  assert.deepEqual(l.ui.shown, [['b', 0]]);
+  assert.deepEqual(l.ui.starts, [0]);
+  // The control: Next with the box unchanged is sent, from where the list is.
+  const v = worker(), c = list(v.send);
+  const n2 = c.search('next');
+  await v.answer(); await n2;
+  assert.deepEqual(v.sent.map((m) => [m.q, m.after]), [['a', 50]]);
+  assert.deepEqual(c.ui.shown, [['a', 50]]);
+});
+
+test('the query in the box folded as the search folds it: Next is still sent when only case or accents differ', { timeout: 5000 }, async () => {
+  const w = worker(), l = list(w.send);
+  l.ui.query = 'Áb'; l.type('ab ');
+  const next = l.search('next');
+  await w.answer(); await next;
+  assert.deepEqual(w.sent.map((m) => [m.q, m.after]), [['Áb', 50]]);
+  assert.equal(l.ui.shown.length, 1);
+});
+
+test('a reply whose q is not the q its request was made for is not shown, even if the box holds that q', { timeout: 5000 }, async () => {
+  // A worker that answers every search with the query "b".
+  const sent = [], send = (msg) => { sent.push(msg); return Promise.resolve({ reply: { ...msg, q: 'b' } }); };
+  const l = list(send);
+  l.ui.box = 'b';            // the box holds "b", and the request was made for "a" (pageRequest refuses it)
+  assert.equal(pageRequest('next', { asked: 'a', box: 'b', starts: [0], nextAfter: 50 }), null);
+  assert.equal(answers({ q: 'b' }, 'a', 'b'), false, 'made for "a", answered for "b": not shown');
+  assert.equal(answers({ q: 'a' }, 'a', 'b'), false, 'answered for "a", the box now "b": not shown');
+  assert.equal(answers({ q: 'A' }, 'á', ' a'), true, 'the same query folded: shown');
+  l.ui.box = 'a';
+  await l.search('first');
+  assert.deepEqual(sent.map((m) => m.q), ['a']);
+  assert.deepEqual(l.ui.shown, [], 'the reply said "b" to a request for "a"');
+});
+
+test('pageRequest: which page each of first, next and previous asks for', () => {
+  const at = { asked: 'a', box: 'a', starts: [0, 50], nextAfter: 100 };
+  assert.deepEqual(pageRequest('first', at), { q: 'a', pages: [0] });
+  assert.deepEqual(pageRequest('next', at), { q: 'a', pages: [0, 50, 100] });
+  assert.deepEqual(pageRequest('prev', at), { q: 'a', pages: [0] });
+  assert.deepEqual(pageRequest('next', { ...at, nextAfter: null }), { q: 'a', pages: [0, 50] });
+  assert.deepEqual(pageRequest('prev', { ...at, starts: [0] }), { q: 'a', pages: [0] });
+  // A new query is sent whatever the box holds now: the latest of them is the one that counts.
+  assert.deepEqual(pageRequest('first', { ...at, box: 'zz' }), { q: 'a', pages: [0] });
+  assert.equal(pageRequest('prev', { ...at, box: 'zz' }), null);
 });

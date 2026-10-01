@@ -573,8 +573,11 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   it costs what the hits cost, so the first page of a query that matches many places is the slow
   one. The page's queue to the worker (`queue.js`) sends only the latest of the new queries waiting,
   so a place chosen is not kept behind searches nobody will see; Next and Previous are each sent, the
-  page they ask for worked out when they are sent (so Next clicked twice goes on two pages), and a
-  reply for a query no longer in the box is not shown. The list's state is `window.__chora.lastSearch`.
+  page they ask for worked out when they are sent (so Next clicked twice goes on two pages), for the
+  query there when they were clicked: if the box holds another by the time they would be sent, they
+  send nothing (`pageRequest`), since a page of the new query worked out from the pages of the old
+  would be neither's. A reply is shown only if it is for the query its request was made for and that
+  query is still in the box (`answers`). The list's state is `window.__chora.lastSearch`.
   - *Measured*, on synthetic places made by a script (three attestations each, two names and a
     romanized form in each, one attestation in fifty retracted), read into an in-memory database by
     sqlite-wasm under Node: at 50,000 places, dropping the attestation ids from `sx` took it from
