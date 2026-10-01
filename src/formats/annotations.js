@@ -186,12 +186,14 @@ function classify(b, v1) {
 
 /**
  * The position a selector gives, in words, or undefined; `lost` receives what cannot be said. With
- * `placing` (georeferences were given), an SVG shape is not reported here: AnnotationReader.place
- * reports each one, placed or not, by a region kind.
+ * `placing` (georeferences were given), a target's own SVG shape is not reported here:
+ * AnnotationReader.place reports each one, placed or not, by a region kind. A shape nested in
+ * `refinedBy` is never placed (regions.js reads a target's own selectors only), so it is reported
+ * here as it is without georeferences.
  */
 function selectorWords(s, lost, placing) {
   if (!s || typeof s !== 'object') { lost('annotation-selector', 'a selector that is not an object'); return undefined; }
-  const refined = s.refinedBy ? list(s.refinedBy).map((r) => selectorWords(r, lost, placing)).filter(Boolean) : [];
+  const refined = s.refinedBy ? list(s.refinedBy).map((r) => selectorWords(r, lost, false)).filter(Boolean) : [];
   const withRefined = (w) => [w, ...refined].filter(Boolean).join(', ');
   switch (s.type) {
     case 'TextQuoteSelector':

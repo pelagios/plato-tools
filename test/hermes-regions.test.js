@@ -544,6 +544,18 @@ test('with georeferences, an SVG shape is reported by its region kind, never als
   assert.deepEqual(r.of('annotation-selector'), ['SvgSelector: the shape drawn on the image']);
   assert.equal(r.of('annotation-malformed').length, 1);
 });
+test('with georeferences, an SVG shape nested in refinedBy (never placed) is reported as annotation-selector, as without them; a target\'s own shape is not', async () => {
+  const nested = { ...item(1), target: { ...item(1).target, selector: { ...item(1).target.selector, refinedBy: { type: 'SvgSelector', value: '<svg><polygon points="5130,5610 5300,5610 5300,5660" /></svg>' } } } };
+  const r = await placed({ georefs: [ROCQUE], manifests: [ROCQUE_M] }, [nested]);
+  assert.deepEqual(r.of('annotation-selector'), ['SvgSelector: the shape drawn on the image'], 'the nested shape is not dropped silently');
+  assert.ok(r.attestation(1).geometries, 'the rectangle it refines is placed');
+  assert.equal(r.reported.filter(([k]) => k.startsWith('annotation-region') && k !== 'annotation-region-shape').length, 0);
+  const plain = [];
+  assert.equal(annotationsToDocument([nested], 'n.json', (k, e) => plain.push([k, e])).attestations.length, 1);
+  assert.deepEqual(plain.filter(([k]) => k === 'annotation-selector').map(([, e]) => e), r.of('annotation-selector'), 'control: the same report without georeferences');
+  // Control: a target's own SVG shape, placed, is reported by its region kind only.
+  assert.deepEqual((await placed({ georefs: [ROCQUE], manifests: [ROCQUE_M] }, [item(2)])).of('annotation-selector'), []);
+});
 test('an annotation linking one region to two places gives both attestations the point, and reports the shape once', async () => {
   const one = item(1);
   const two = { ...one, body: [...one.body, { ...one.body[0], value: { ...one.body[0].value, id: 'http://www.wikidata.org/entity/Q1163' } }] };
