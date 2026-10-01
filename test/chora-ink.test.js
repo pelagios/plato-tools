@@ -402,6 +402,12 @@ test('the job: a trace let go asks for no more tiles; a second trace of the same
   const madeFirst = made;
   await runTrace({ info: ODD, seedImg: [805, 420], mode: 'line', params: { jumps: false }, step: localSteps(servedBy(img, []), c2).trace, size: 128, max: 512, start: first.frame });
   assert.ok(madeFirst >= 3 && made === madeFirst, `made ${madeFirst}, then ${made - madeFirst} more`);
+  // A new click well inside that window, at the same scale, begins there too; one near its edge does not.
+  const again = await runTrace({ info: ODD, seedImg: [806, 421], mode: 'line', step: localSteps(servedBy(img, []), c2).trace, size: 128, max: 512, pxPerScreen: 4, near: first.frame });
+  assert.equal(made, madeFirst, 'made ready again');
+  assert.deepEqual(again.frame, first.frame);
+  const edge = await runTrace({ info: ODD, seedImg: [985.5, 669.8], mode: 'line', step: localSteps(servedBy(img, []), c2).trace, size: 128, max: 512, pxPerScreen: 4, near: first.frame });
+  assert.ok(made > madeFirst, 'a click near the edge of the last window begins afresh');
 });
 
 test('the job: snapping\'s ridge pixels over the view, in image pixels, on the line', async () => {

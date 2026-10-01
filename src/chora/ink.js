@@ -88,6 +88,7 @@ export function createInk({ mapApi, guard, state, overlayAt, onAccept, panel }) 
   // ---- The proposal ----------------------------------------------------------------------------
   let mode = null;            // 'area' | 'line' | null
   let proposal = null;        // { entry, mode, seeds: [{ seedImg, pxPerScreen }], image: result(s), world, gaps }
+  let lastWindow = null;      // { key, colour, frame }: the window the worker last made ready
   const params = { area: { ...DEFAULTS.area }, line: { ...DEFAULTS.line } };
   function draw() {
     const src = map.getSource(SOURCE);
@@ -134,7 +135,11 @@ export function createInk({ mapApi, guard, state, overlayAt, onAccept, panel }) 
       for (const [k, s] of p.seeds.entries()) {
         // Again from the same clicks (a slider moved): each from the window its last proposal ended in.
         const start = again ? p.results?.[k]?.frame || null : null;
-        results.push(await runTrace({ info: p.entry.info, seedImg: s.seedImg, pxPerScreen: s.pxPerScreen, mode: p.mode, params: { ...params[p.mode] }, step, isCurrent: () => gens.trace === gen, start }));
+        // A new click well inside the window last read (same map, same kind) begins from it: it is made ready.
+        const near = !again && lastWindow?.key === p.entry.key && lastWindow.colour === (p.mode === 'area' || !!params[p.mode].colour) ? lastWindow.frame : null;
+        const r = await runTrace({ info: p.entry.info, seedImg: s.seedImg, pxPerScreen: s.pxPerScreen, mode: p.mode, params: { ...params[p.mode] }, step, isCurrent: () => gens.trace === gen, start, near });
+        lastWindow = { key: p.entry.key, colour: p.mode === 'area' || !!params[p.mode].colour, frame: r.frame };
+        results.push(r);
       }
       if (proposal !== p) return;
       const last = results.at(-1);

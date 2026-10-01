@@ -9,6 +9,8 @@ import { DEFAULTS, InkError } from './params.js';
 import { chooseScale, frameAround, grow, tilesFor, scaleFactors, WINDOW, MAX_WINDOW } from './window.js';
 
 export const TOO_LARGE = 'Too large to trace at once: zoom out, or trace it in parts.';
+/** How far inside the last window a new click must be for the trace to begin from that window. */
+export const NEAR_EDGE = 32;
 
 /** The image's information read as the renderer reads it, or an InkError in words. */
 export function imageOf(info) {
@@ -24,17 +26,21 @@ const cancelled = () => new InkError('Cancelled.', 'cancelled');
  * the engine's, `pxPerScreen` image pixels per screen pixel at the view (for the scale and the seed's
  * reach). `step({ frame, tiles, seed, mode, params })` -> the proposal for one window (tiles as tilesFor
  * gives them), or throws (a fill's leak to the window's edge: kind 'leak', reason 'edge'); `isCurrent()`
- * false once the trace is let go; `start`, a window to begin from (the last proposal's, for a slider moved).
+ * false once the trace is let go; `start`, a window to begin from (the last proposal's, for a slider moved);
+ * `near`, the last window read, begun from when the click is well inside it at the same scale.
  * Returns the proposal with { frame, scale, grown, coarser, params }.
  */
-export async function runTrace({ info, seedImg, mode, params = {}, pxPerScreen = 1, step, isCurrent = () => true, size = WINDOW, max = MAX_WINDOW, start = null }) {
+export async function runTrace({ info, seedImg, mode, params = {}, pxPerScreen = 1, step, isCurrent = () => true, size = WINDOW, max = MAX_WINDOW, start = null, near = null }) {
   const image = imageOf(info);
   const sfs = scaleFactors(image);
   let s = chooseScale(image, pxPerScreen), coarser = false, grown = 0;
   let frame = frameAround(image, seedImg, s, size);
   // Proposed again from the same click (a slider moved): from the window the last proposal ended in, which
-  // the worker has made ready already, rather than growing to it again.
+  // the worker has made ready already, rather than growing to it again. A new click inside that window,
+  // read at the same scale, begins there too (`near`), at least NEAR_EDGE working pixels from its edge.
+  const inside = (f) => f && f.s === s && seedImg[0] >= f.x0 + NEAR_EDGE * s && seedImg[1] >= f.y0 + NEAR_EDGE * s && seedImg[0] < f.x0 + (f.w - NEAR_EDGE) * s && seedImg[1] < f.y0 + (f.h - NEAR_EDGE) * s;
   if (start) { frame = start; coarser = start.s !== s; s = start.s; }
+  else if (inside(near) && near.w * near.h > frame.w * frame.h) frame = near;
   const p = { ...(mode === 'area' ? DEFAULTS.area : DEFAULTS.line), ...params };
   // The seed's reach (a line): six screen pixels, in working pixels.
   const reach = () => { if (mode === 'line') p.seedRadius = Math.max(1, (6 * pxPerScreen) / s); };

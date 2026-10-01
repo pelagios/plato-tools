@@ -17,6 +17,32 @@ function inRing([x, y], r) {
 }
 export { ringArea, inRing };
 
+/** A mask (any values: set when not 0) grown by r pixels each way, square (Chebyshev), as a new mask. */
+function grow(m, w, h, r) {
+  // Running counts of the set pixels within r, across and then down.
+  const a = new Uint8Array(w * h), b = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const o = y * w;
+    let k = 0;
+    for (let x = 0; x < Math.min(r, w); x++) if (m[o + x]) k++;
+    for (let x = 0; x < w; x++) {
+      if (x + r < w && m[o + x + r]) k++;
+      if (x - r - 1 >= 0 && m[o + x - r - 1]) k--;
+      a[o + x] = k ? 1 : 0;
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let k = 0;
+    for (let y = 0; y < Math.min(r, h); y++) if (a[y * w + x]) k++;
+    for (let y = 0; y < h; y++) {
+      if (y + r < h && a[(y + r) * w + x]) k++;
+      if (y - r - 1 >= 0 && a[(y - r - 1) * w + x]) k--;
+      b[y * w + x] = k ? 1 : 0;
+    }
+  }
+  return b;
+}
+
 /**
  * The outline of region (1 = filled) within bbox [x0, y0, x1, y1] (inclusive) of a w-wide grid, as the
  * polygon holding the point `at` (else the largest): { outer, holes } in window corner coordinates,
@@ -33,23 +59,24 @@ export function outline(region, w, bbox, at, cover = null) {
   // more than half covered just inside). A pixel farther from the region is never taken above a half:
   // like-coloured ink beyond a line stays out. A hard edge (cover 1 against 0) stays on the pixels' edge.
   if (cover) {
-    for (let y = Math.max(0, y0 - 1); y <= y1 + 1; y++) for (let x = Math.max(0, x0 - 1); x <= x1 + 1; x++) {
-      if (x >= w || y >= region.length / w) continue;
-      const gi = (y - y0 + 1) * cw + (x - x0 + 1);
-      if (gi < 0 || gi >= grid.length || x - x0 + 1 >= cw) continue;
-      const inR = (xx, yy) => xx >= x0 && xx <= x1 && yy >= y0 && yy <= y1 && region[yy * w + xx] === 1;
-      // Only pixels near the region's edge are placed by their cover (within two pixels: an edge blurred by
-      // a scan or by resampling spans that many); within the region they are 1, away from it 0.
-      const self = inR(x, y);
-      let near = self, beside = self, all = self;
-      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
-        if (!dx && !dy) continue;
-        const v = inR(x + dx, y + dy);
-        near ||= v; all &&= v;
-        if (dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1) beside ||= v;
-      }
-      const c = all ? 1 : near ? Math.max(0, Math.min(1, cover(x, y))) : 0;
-      grid[gi] = beside ? c : Math.min(0.5 - 1e-6, c);
+    // Which pixels are near the edge, by masks over the grid (a pixel's 25 neighbours read one by one cost
+    // more than the rest of the trace): the edge, where a pixel and its neighbour right or below differ;
+    // `near`, within two pixels of it (an edge blurred by a scan or by resampling spans that many); and
+    // `beside`, within one pixel of the region.
+    const n = cw * ch, edge = new Uint8Array(n);
+    for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
+      const i = y * cw + x, v = grid[i];
+      if (x + 1 < cw && grid[i + 1] !== v) { edge[i] = 1; edge[i + 1] = 1; }
+      if (y + 1 < ch && grid[i + cw] !== v) { edge[i] = 1; edge[i + cw] = 1; }
+    }
+    const near = grow(edge, cw, ch, 2), beside = grow(grid, cw, ch, 1);
+    for (let gy = 0; gy < ch; gy++) for (let gx = 0; gx < cw; gx++) {
+      const gi = gy * cw + gx;
+      if (!near[gi]) continue;   // within the region 1, away from it 0, as already set
+      const x = gx + x0 - 1, y = gy + y0 - 1;
+      if (x < 0 || y < 0 || x >= w || y >= region.length / w) continue;
+      const c = Math.max(0, Math.min(1, cover(x, y)));
+      grid[gi] = beside[gi] ? c : Math.min(0.5 - 1e-6, c);
     }
   }
   const [mp] = contours().size([cw, ch]).thresholds([0.5])(grid).map((c) => c.coordinates);
