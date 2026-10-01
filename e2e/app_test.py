@@ -1487,7 +1487,14 @@ def ink_checks(page, base, tmp, census, at_origin, annotation, paste, agree_map,
         before = cstate(page)['pendingCount']
         for (px, py) in [(x, y - 5), (x2, y2), (x2, y2)]: tap(page, px, py)
         until(page, 'n => window.__chora.pendingCount === n + 1', 15, before)
-        d = [k for k in kept(page, f.name) if k['geojson']['type'] == 'LineString'][-1]
+        # The drawing is kept on the private file system a moment after it is counted: read until it is there.
+        def lines_kept(n):
+            for _ in range(40):
+                ls = [k for k in kept(page, f.name) if k['geojson']['type'] == 'LineString']
+                if len(ls) >= n: return ls
+                page.wait_for_timeout(250)
+            raise RuntimeError(f'{n} line(s) drawn, {len(ls)} kept after 10 s')
+        d = lines_kept(1)[-1]
         img = page.evaluate(INK_TO_IMAGE, [a['id'], d['geojson']])
         first = img['coordinates'][0]; snapped = dist_line(first, INK_ROAD)
         # The control: the same, with Alt held, is not snapped.
@@ -1495,7 +1502,7 @@ def ink_checks(page, base, tmp, census, at_origin, annotation, paste, agree_map,
         page.keyboard.down('Alt'); tap(page, x, y - 5); page.keyboard.up('Alt')
         for (px, py) in [(x2 + 40, y2), (x2 + 40, y2)]: tap(page, px, py)
         until(page, 'n => window.__chora.pendingCount === n + 2', 15, before)
-        d2 = [k for k in kept(page, f.name) if k['geojson']['type'] == 'LineString'][-1]
+        d2 = lines_kept(2)[-1]
         free = dist_line(page.evaluate(INK_TO_IMAGE, [a['id'], d2['geojson']])['coordinates'][0], INK_ROAD)
         per = page.evaluate("""async ([id, x, y]) => { const e = window.__chora_overlays.manager.entries.find((v) => v.g.annotationId === id); const m = window.__chora_map, r = m.getCanvas().getBoundingClientRect();
           const a = (await window.__chora_overlays.georef.toPixels(e.g, { type: 'Point', coordinates: m.unproject([x - r.left, y - r.top]).toArray() }, { space: 'image' })).geometry.coordinates;
