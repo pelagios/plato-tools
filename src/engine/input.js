@@ -354,9 +354,13 @@ export async function detect(files) {
   if (n.endsWith('.zip')) {
     // A zip is the tables only when a file in it is named after a sheet; one that holds none (a
     // gazetteer's download, say) is refused, saying what it holds.
-    const inside = await zipNames(f);
+    let entries = null;
+    try { entries = await zipEntries(f); } catch (e) { if (!(e instanceof DataError)) throw e; }
+    const inside = entries && entries.map((x) => x.name).filter((x) => !x.endsWith('/'));
     if (inside && !inside.some((x) => sheetOf(x))) return { format: null, reason: zipReason(inside) };
-    return { format: 'tables', container: 'zip', files };
+    // The size of the sheets' text, from the central directory, for the page's storage estimate (storage.js).
+    const textBytes = entries ? entries.filter((x) => x.name.toLowerCase().endsWith('.csv') && sheetOf(x.name)).reduce((n, x) => n + x.usize, 0) : undefined;
+    return { format: 'tables', container: 'zip', files, ...(textBytes !== undefined ? { textBytes } : {}) };
   }
   if (n.endsWith('.xlsx') || n.endsWith('.ods')) return { format: 'tables', container: 'workbook', files };
   if (n.endsWith('.tsv') || n.endsWith('.tab')) return (await headerless(f, '\t')) ? { format: null, reason: HEADERLESS_REASON } : { format: 'csv', delimiter: '\t', files };
@@ -491,14 +495,6 @@ export async function zipEntries(file) {
     i += 46 + len + extra + note;
   }
   return entries;
-}
-/**
- * The names of the files in a zip (zipEntries), or null when they cannot be listed (not a zip, or a
- * Zip64 archive): the tables reader then says what is wrong.
- */
-export async function zipNames(file) {
-  try { return (await zipEntries(file)).map((x) => x.name).filter((x) => !x.endsWith('/')); }
-  catch { return null; }
 }
 /**
  * One entry of a zip (from zipEntries) as a stream of text, decompressed as it is read and decoded

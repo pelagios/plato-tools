@@ -9,6 +9,7 @@ const REVIEW_WORDS = W;   // the review's words, where W names the words for the
 import { readable } from './engine/input.js';
 import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions } from './engine/krisis/work.js';
 import { stash as stashForChora } from './chora/handoff.js';
+import { storageNeed } from './engine/storage.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
 let worker, files = [], input = null, targets = {}, busy = false;
@@ -78,9 +79,7 @@ async function storageCheck() {
   const w = $('storage-warning');
   try {
     const { quota } = await navigator.storage.estimate();
-    const size = files.reduce((n, f) => n + f.size, 0);
-    const gz = /\.gz$/i.test(files[0]?.name || '');
-    const need = size * (gz ? 40 : 4);   // room for the working database and the output, generously
+    const need = storageNeed(input, files);   // room for the working database and the output, generously
     w.hidden = quota > need;
     if (!w.hidden) w.textContent = `This browser allows the page only ${fmtBytes(quota)} of storage, which may not be enough for this file. A private window keeps its storage in memory and allows very little; for large files, use an ordinary window.`;
   } catch { w.hidden = true; }

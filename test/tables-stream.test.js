@@ -15,6 +15,8 @@ import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { go, outText } from './engine.js';
 import { csvRecords, papaRecords, papaRow } from '../src/formats/csv.js';
 import { TableStore, openSqlite } from '../src/lib/store.js';
+import { storageNeed } from '../src/engine/storage.js';
+import { detect } from '../src/engine/input.js';
 import { openNodeSqlite } from '../src/node/sqlite.js';
 
 const EX = `${PLATO_REPO}/schemas/tables/examples`;
@@ -224,6 +226,22 @@ test('a sheet in a zip that is damaged is unreadable on its own; a zip with no c
   const cut = await go([new File([zip.slice(0, zip.length - 30)], 'survey.zip')], 'check');
   assert.equal(cut.incomplete, true);
   assert.match(cut.report.items.find((i) => i.kind === 'unreadable')?.examples[0] || '', /The zip is damaged or incomplete/);
+});
+
+// ---- the page's storage estimate -------------------------------------------------------------------
+test('the storage the page asks for allows for the tables\' working database and output, from the size of their text', async () => {
+  const s = sheetsOf(`${EX}/survey`);
+  const text = Object.values(s).reduce((n, t) => n + Buffer.byteLength(t), 0);
+  const zip = new File([zipSync(Object.fromEntries(Object.entries(s).map(([f, t]) => [f, strToU8(t)])), { level: 9 })], 'survey.zip');
+  const z = await detect([zip]);
+  assert.equal(z.textBytes, text, 'the sheets\' size, from the central directory');
+  assert.notEqual(zip.size, text, 'the zip is not the size of its text');
+  assert.equal(storageNeed(z, [zip]), text * (2.2 + 7));
+  const csvs = filesOf(s);
+  assert.equal(storageNeed(await detect(csvs), csvs), text * (2.2 + 7));
+  // The control: any other input, as before, four times its size (forty, gzipped).
+  const jsonl = [new File(['{"profile":"place-centric"}\n'], 'x.jsonl')];
+  assert.equal(storageNeed(await detect(jsonl), jsonl), jsonl[0].size * 4);
 });
 
 // ---- at scale (SCALE=1) -------------------------------------------------------------------------------
