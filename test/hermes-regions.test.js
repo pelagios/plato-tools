@@ -810,6 +810,16 @@ test('annotation-target-no-source: a target with a selector and no source is con
   // Control: a target with neither a source nor a selector says nothing, and is still malformed.
   const empty = plainRun([{ ...gen(9), target: { type: 'SpecificResource' } }]);
   assert.deepEqual([empty.of('annotation-malformed').length, empty.doc.attestations.length, empty.of('annotation-target-no-source').length], [1, 0, 0]);
+  // A selector that gives no position (an empty one, or "xywh=…" as a string) is no position in
+  // an unnamed document: still malformed, with no source of a title alone.
+  for (const selector of [{}, 'xywh=pixel:6278,5480,120,30', []]) {
+    const bad = plainRun([{ ...gen(9), target: { type: 'SpecificResource', selector } }]);
+    assert.deepEqual([bad.of('annotation-malformed').length, bad.doc.attestations.length, bad.of('annotation-target-no-source').length], [1, 0, 0], JSON.stringify(selector));
+  }
+  // Control: the same target with a real xywh selector and no source converts, with its locator.
+  const real = plainRun([{ ...gen(9), target: { type: 'SpecificResource', selector: { type: 'FragmentSelector', conformsTo: 'http://www.w3.org/TR/media-frags/', value: 'xywh=pixel:6278,5480,120,30' } } }]);
+  assert.deepEqual([real.of('annotation-malformed').length, real.doc.attestations.length, real.of('annotation-target-no-source').length], [0, 1, 1]);
+  assert.equal(real.attestation(9).citations[0].locator, 'region at x 6278, y 5480, 120 by 30 pixels');
   // The whole run: warnings, no errors.
   const run = await go([file(GENERATED)], 'check');
   assert.equal(run.report.errors, 0, JSON.stringify(run.report.items.filter((i) => i.severity === 'error')));

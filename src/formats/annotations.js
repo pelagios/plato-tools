@@ -265,7 +265,7 @@ function selectorWords(s, lost, placing) {
 const SVG_SHAPE = 'SvgSelector: the shape drawn on the image';
 /**
  * One target as { source, label, quotes, locator, unnamed }. `unnamed` is a target with a selector
- * and no source: a position in a document the export does not name (Recogito Studio writes no
+ * that gives a position, and no source: a position in a document the export does not name (Recogito Studio writes no
  * source for an image that is not part of a IIIF manifest). A target with neither says nothing.
  */
 function readTarget(t, report, keyLoss, placing) {
@@ -283,7 +283,10 @@ function readTarget(t, report, keyLoss, placing) {
     if (w) words.push(w);
   }
   const source = typeof src === 'string' ? src : undefined;
-  const unnamed = source === undefined && (t.source === undefined || t.source === null) && t.selector !== undefined && t.selector !== null;
+  // Unnamed only when the selector gives a position: an empty selector, or one that is not an
+  // object ("xywh=…" as a string), gives none, and the target stays malformed. Every region that
+  // regions.js's regionsOf reads (an SvgSelector, an xywh FragmentSelector) gives words here too.
+  const unnamed = source === undefined && (t.source === undefined || t.source === null) && words.length > 0;
   return { source, label: labelText(t.label ?? t.source?.label), quotes, locator: words.join('; ') || undefined, unnamed };
 }
 
