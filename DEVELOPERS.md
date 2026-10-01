@@ -280,7 +280,10 @@ readers link to those headings, so keep them.
   the edition div is held, as a `held` event in its place in `out`, until the edition div opens or
   the `<text>` ends, and `take()` stops at it, so the output keeps the file's order. The reading
   options that convert the editors' words (`commentaryPlaces`, `headerPlaces`) are refused while
-  `EDITORIAL_IRI` is null (`teiReadingRefusal`); tests set it with `setEditorialIriForTests`. Entities declared with their text in the file's own DOCTYPE are given to
+  `EDITORIAL_IRI` is null (`teiReadingRefusal`); tests set it with `setEditorialIriForTests`. With `listPlaces`, a `<place>` gives a Headword
+  attestation (`listPlace()`); one in the teiHeader goes on the header's `queue`, run at
+  `</teiHeader>` after `header()`, so that the source, the own host and the `geoDecl` are read from
+  the whole header. Entities declared with their text in the file's own DOCTYPE are given to
   saxes' `ENTITIES`; an external entity is never read. The file is parsed as a stream with saxes, with
   no DOM (a Web Worker has none); the only thing held to the end is a place name waiting for a
   `<place>` later in the file, indexed by the id it waits for. The edition, from its `teiHeader`, is the source; a place name's

@@ -123,3 +123,95 @@ test('with no edition div, notes, commentary and translations are read as before
   assert.deepEqual(evs.filter((e) => e.type === 'attestation').map((e) => e.value.names[0].toponym), ['One', 'Two', 'Three', 'Four']);
   assert.equal(evs.filter((e) => e.type === 'header').length, 1);
 });
+
+// ---- Q1: places in a list of places ------------------------------------------------------------
+const LIST = (places, header = HEADER) => tei(`<p>${pn(9, 'Text')}</p>`, header).replace('</body>', `</body><back><listPlace>${places}</listPlace></back>`);
+const OWN = 'https://example.org/places/athens';
+
+test('listPlaces off: a listed place\'s names and location are reported as before; on: one Headword attestation for it', () => {
+  const s = LIST(`<place xml:id="athens"><placeName xml:lang="la">Athenae</placeName><placeName xml:lang="grc">Ἀθῆναι</placeName><idno type="URI">https://pleiades.stoa.org/places/579885</idno></place>`);
+  const off = mapped(s);
+  assert.deepEqual(names(off), ['Text'], 'off: only the text\'s name (control)');
+  assert.deepEqual(examples(off, 'tei-listplace-names'), ['#athens: Athenae, Ἀθῆναι']);
+  const on = mapped(s, { listPlaces: true });
+  assert.deepEqual(on.doc.attestations[1], {
+    about: 'https://pleiades.stoa.org/places/579885',
+    names: [{ toponym: 'Athenae', language: 'la' }],
+    formStatus: PLATO + 'Headword',
+    citations: [{ source: { '@id': 'https://example.org/e', title: 'T', authorityType: 'source' }, locator: 'list of places, place athens' }],
+    notes: 'From TEI element <place xml:id="athens"> on line 2 of test.xml',
+  });
+  // the main name is converted (presence), the variant is not (absence), and it is reported
+  assert.deepEqual(names(on), ['Text', 'Athenae']);
+  assert.ok(!names(on).includes('Ἀθῆναι'));
+  assert.deepEqual(examples(on, 'tei-listplace-variant'), ['#athens: Ἀθῆναι']);
+  assert.ok(!on.kinds.has('tei-listplace-names'));
+  assert.equal(valid(on.doc), null);
+});
+
+test('listPlaces: coordinates are kept for an address on the edition\'s own site, not for a gazetteer\'s; a comma between them is read', () => {
+  const s = LIST(`<place xml:id="a"><placeName>Own</placeName><idno type="URI">${OWN}</idno><location><geo>37.08415, 15.27628</geo></location></place>`
+    + `<place xml:id="b"><placeName>Pleiad</placeName><idno type="URI">https://pleiades.stoa.org/places/579885</idno><location><geo>37.97 23.72</geo></location></place>`);
+  const m = mapped(s, { listPlaces: true });
+  const [own, gaz] = m.doc.attestations.slice(1);
+  assert.deepEqual(own.geometries, [{ reprPoint: [15.27628, 37.08415], geojson: { type: 'Point', coordinates: [15.27628, 37.08415] }, sourceLabel: '37.08415, 15.27628' }]);
+  assert.equal(gaz.geometries, undefined);
+  assert.deepEqual(gaz.names, [{ toponym: 'Pleiad' }], 'control: the gazetteer\'s place is still converted');
+  assert.deepEqual(examples(m, 'tei-listplace-geo-gazetteer'), ['#b: 37.97 23.72 (https://pleiades.stoa.org/places/579885)']);
+  assert.equal(valid(m.doc), null);
+});
+
+test('listPlaces: an edition known only by its DOI never has its coordinates converted', () => {
+  const doiOnly = HEADER.replace('<idno type="URI">https://example.org/e</idno>', '<idno type="DOI">10.5281/zenodo.1</idno>');
+  const s = LIST(`<place xml:id="a"><placeName>Own</placeName><idno type="URI">https://doi.org/10.5281/zenodo.1#a</idno><location><geo>37 15</geo></location></place>`, doiOnly);
+  const m = mapped(s, { listPlaces: true });
+  assert.deepEqual(names(m), ['Text', 'Own'], 'control: the place is converted');
+  assert.equal(m.doc.attestations[1].geometries, undefined);
+  assert.deepEqual(examples(m, 'tei-listplace-geo-gazetteer'), ['#a: 37 15 (https://doi.org/10.5281/zenodo.1#a)']);
+  assert.match(LOSS_TEXT['tei-listplace-geo-gazetteer'], /DOI never has its coordinates converted/);
+});
+
+test('listPlaces: a datum other than WGS84 gives no geometry; WGS84, or no geoDecl, gives one', () => {
+  const place = `<place xml:id="a"><placeName>Own</placeName><idno type="URI">${OWN}</idno><location><geo>51.5 -0.12</geo></location></place>`;
+  const withDecl = (decl) => HEADER.replace('</fileDesc>', `</fileDesc><encodingDesc>${decl}</encodingDesc>`);
+  const geo = (header) => mapped(LIST(place, header), { listPlaces: true });
+  const osgb = geo(withDecl('<geoDecl datum="OSGB36">x</geoDecl>'));
+  assert.equal(osgb.doc.attestations[1].geometries, undefined);
+  assert.deepEqual(examples(osgb, 'tei-listplace-geo-datum'), ['#a: 51.5 -0.12 (datum OSGB36)']);
+  for (const h of [withDecl('<geoDecl datum="WGS84">x</geoDecl>'), withDecl('<geoDecl>x</geoDecl>'), HEADER]) {
+    const m = geo(h);
+    assert.deepEqual(m.doc.attestations[1].geometries?.[0].reprPoint, [-0.12, 51.5]);
+    assert.ok(!m.kinds.has('tei-listplace-geo-datum'));
+  }
+});
+
+test('listPlaces: coordinates that are not a latitude and a longitude are reported; a place with no web address is reported', () => {
+  const s = LIST(`<place xml:id="a"><placeName>Own</placeName><idno type="URI">${OWN}</idno><location><geo>95 10</geo></location></place>`
+    + `<place xml:id="c"><placeName>Own2</placeName><idno type="URI">${OWN}2</idno><location><geo>somewhere</geo></location></place>`
+    + `<place xml:id="n"><placeName>Nowhere</placeName><idno type="local">n1</idno></place>`);
+  const m = mapped(s, { listPlaces: true });
+  assert.deepEqual(names(m), ['Text', 'Own', 'Own2']);
+  assert.deepEqual(examples(m, 'tei-listplace-geo-invalid'), ['#a: 95 10', '#c: somewhere']);
+  assert.deepEqual(examples(m, 'tei-listplace-no-address'), ['#n: Nowhere']);
+});
+
+test('listPlaces: a list of places in the teiHeader is converted after the whole header is read: a geoDecl after it still counts', () => {
+  // the listPlace is in the sourceDesc, before the encodingDesc that declares the datum
+  const header = `<teiHeader><fileDesc><titleStmt><title>Header places</title></titleStmt><publicationStmt><idno type="URI">https://example.org/e</idno></publicationStmt>`
+    + `<sourceDesc><listPlace><place xml:id="a"><placeName>Early</placeName><idno type="URI">${OWN}</idno><location><geo>51.5 -0.12</geo></location></place></listPlace></sourceDesc></fileDesc>`
+    + `<encodingDesc><geoDecl datum="OSGB36">x</geoDecl></encodingDesc></teiHeader>`;
+  const m = mapped(tei(`<p>${pn(9, 'Text')}</p>`, header), { listPlaces: true });
+  assert.deepEqual(m.doc.attestations.map((a) => [a.names[0].toponym, a.citations[0].source.title]), [['Early', 'Header places'], ['Text', 'Header places']]);
+  assert.equal(m.doc.attestations[0].geometries, undefined);
+  assert.deepEqual(examples(m, 'tei-listplace-geo-datum'), ['#a: 51.5 -0.12 (datum OSGB36)']);
+  assert.equal(m.doc.gazetteer.title, 'Place names in Header places');
+});
+
+test('the pointers fixture with listPlaces: its listed places with one or more web addresses become Headword attestations', () => {
+  const off = mapped(text('pointers-constructed.xml'), {}, 'pointers-constructed.xml');
+  const on = mapped(text('pointers-constructed.xml'), { listPlaces: true }, 'pointers-constructed.xml');
+  const heads = on.doc.attestations.filter((a) => a.formStatus === PLATO + 'Headword');
+  assert.ok(heads.length > 0);
+  assert.deepEqual(on.doc.attestations.filter((a) => a.formStatus !== PLATO + 'Headword'), off.doc.attestations, 'the text\'s attestations are as before');
+  assert.equal(valid(on.doc), null);
+});

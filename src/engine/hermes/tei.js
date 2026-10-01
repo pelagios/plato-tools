@@ -25,6 +25,10 @@ import { placeAddress, addressNote } from './addresses.js';
 
 export const TEI_NS = 'http://www.tei-c.org/ns/1.0';
 const ATTESTED = PLATO + 'Attested';
+const HEADWORD = PLATO + 'Headword';
+// Coordinates in a <geo>: a latitude and a longitude in degrees, between them a comma, spaces, or both
+// (TEI's default "37.97 23.72"; I.Sicily writes "37.08415, 15.27628").
+const GEO = /^([-+]?\d+(?:\.\d+)?)\s*(?:,\s*|\s+)([-+]?\d+(?:\.\d+)?)$/;
 
 /**
  * The form status of words that are the editors' own, not the source's: a place name in an
@@ -75,6 +79,11 @@ export const TEI_KINDS = {
   'tei-ref-not-web': 'loss',
   'tei-listplace-names': 'loss',
   'tei-listplace-geo': 'loss',
+  'tei-listplace-variant': 'loss',
+  'tei-listplace-no-address': 'loss',
+  'tei-listplace-geo-gazetteer': 'loss',
+  'tei-listplace-geo-datum': 'loss',
+  'tei-listplace-geo-invalid': 'loss',
   'tei-lang-not-tag': 'loss',
   'tei-licence-not-address': 'loss',
   'tei-sourcedesc-several': 'loss',
@@ -133,6 +142,7 @@ const PUNCTUATION_GLYPH = /punct|middot|hedera|divider|separator/i;
 
 const norm = (s) => s.replace(/\s+/g, ' ').trim();
 const isWeb = (s) => typeof s === 'string' && WEB.test(s) && isAbsoluteIri(s);
+const hostOf = (iri) => { try { return new URL(iri).hostname.toLowerCase(); } catch { return undefined; } };
 const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
 
 /**
@@ -372,6 +382,8 @@ export class TeiReader {
     else if (/fileDesc\/sourceDesc\/(listBibl\/)?(bibl|biblStruct|biblFull)$/.test(path)) cap((c) => { const s = norm(c.pref); if (s) h.sourceDescs.push(s); });
     else if (/fileDesc\/sourceDesc\/msDesc\/msIdentifier$/.test(path)) { h.msParts = []; this.stack[this.stack.length - 1].msIdentifier = true; }
     else if (/fileDesc\/sourceDesc\/msDesc\/msIdentifier\/[^/]+$/.test(path) && h.msParts && t.local !== 'altIdentifier') cap((c) => { const s = norm(c.pref); if (s) h.msParts.push(s); });
+    // The datum of the header's coordinates: TEI's default, where geoDecl gives none, is WGS84.
+    else if (/encodingDesc\/geoDecl$/.test(path)) h.geoDecls.push(attr('datum') || 'WGS84');
     else if (/\/prefixDef$/.test(path)) { h.prefixDefs.push({ ident: attr('ident'), match: attr('matchPattern'), replace: attr('replacementPattern') }); this.prefixCache = null; }
   }
 
@@ -405,7 +417,7 @@ export class TeiReader {
     if (!tei) return;
 
     if (local === 'TEI' || local === 'teiCorpus') {
-      this.scopes.push({ hdr: { titles: [], authors: [], editors: [], idnos: [], licences: [], sourceDescs: [], prefixDefs: [] } });
+      this.scopes.push({ hdr: { titles: [], authors: [], editors: [], idnos: [], licences: [], sourceDescs: [], prefixDefs: [], geoDecls: [], queue: [] } });
       this.prefixCache = null;
       this.page = undefined; this.line = undefined; this.divs = []; this.milestones = new Map();
       return;
@@ -434,11 +446,12 @@ export class TeiReader {
 
     // A list of places: a <place>, its id, its web address, and what is not read from it.
     if (local === 'place') {
-      const pl = { id: attr('xml:id'), uris: [], names: [], geo: [] }; this.placeStack.push(pl); el.place = pl;
+      const pl = { id: attr('xml:id'), uris: [], names: [], geo: [], geos: [], fileLine: this.parser.line }; this.placeStack.push(pl); el.place = pl;
       this.attributes(t, new Set(['xml:id', 'xml:lang', 'xml:space']));
       return;
     }
     const pl = this.placeStack[this.placeStack.length - 1];
+    if (pl && local === 'geo' && parent?.location === pl) { this.capture((c) => pl.geos.push(norm(c.pref))); return; }
     if (pl && parent?.place === pl) {
       if (local === 'idno') {
         this.capture((c) => {
@@ -471,7 +484,7 @@ export class TeiReader {
       return;
     }
     // A place name in a list of places describes the place listed, not a passage that names it.
-    if (pl) { this.capture((c) => { const s = norm(c.pref); if (s) pl.names.push(s); }); return; }
+    if (pl) { this.capture((c) => { const s = norm(c.pref); if (s) pl.names.push({ text: s, lang: this.stack[this.stack.length - 1].lang }); }); return; }
     // A place name outside the text (in the teiHeader, where EpiDoc says where an inscription was
     // found; in a <standOff>, a <facsimile>) is the edition's description of the document, not a
     // name the text attests. It is reported where it points to a place; without a ref (a
@@ -516,6 +529,8 @@ export class TeiReader {
       scope.hdr.read = true;
       this.firstHdr ||= scope.hdr;
       this.header();
+      // What waited for the whole header (a list of places, the places it describes), now that it is read.
+      for (const q of scope.hdr.queue.splice(0)) q();
     }
     if (el.tei && (el.local === 'TEI' || el.local === 'teiCorpus')) { this.scopes.pop(); this.prefixCache = null; }
     this.stack.pop();
@@ -551,14 +566,78 @@ export class TeiReader {
     this.placeStack.pop();
     if (pl.id !== undefined) this.places.set(pl.id, { uris: pl.uris });
     const which = pl.id !== undefined ? `#${pl.id}` : 'a place with no xml:id';
-    if (pl.names.length) this.report('tei-listplace-names', `${which}: ${pl.names.join(', ')}`);
-    if (pl.geo.length) this.report('tei-listplace-geo', `${which}: ${pl.geo.join('; ')}`);
+    if (!this.reading.listPlaces) {
+      if (pl.names.length) this.report('tei-listplace-names', `${which}: ${pl.names.map((n) => n.text).join(', ')}`);
+      if (pl.geo.length) this.report('tei-listplace-geo', `${which}: ${pl.geo.join('; ')}`);
+    } else if (this.inHeader) {
+      // A list of places in the teiHeader (a settingDesc, a sourceDesc) waits for the end of the
+      // header: the header's title, address and geoDecl may come after it, and the source is built
+      // once, from the header as read.
+      this.scopes[this.scopes.length - 1].hdr.queue.push(() => this.listPlace(pl));
+    } else this.listPlace(pl);
     // Place names waiting for this place can be resolved now.
     const waiting = pl.id !== undefined && this.waitingFor.get(pl.id);
     if (waiting) {
       this.waitingFor.delete(pl.id);
       for (const m of waiting) if (--m.waiting === 0) { this.pending.delete(m); this.emit(m, false); }
     }
+  }
+
+  /**
+   * A place in a list of places, read with the reading option listPlaces: one attestation for each
+   * web address its idnos give, its first name the headword (formStatus Headword: the form the edition
+   * files the place under), its other names reported. Its coordinates are carried only where they can
+   * be the editors' own: the place's address is on the edition's own site (the host of the
+   * publicationStmt's idno of type URI, never a DOI), and the header declares no datum but WGS84.
+   */
+  listPlace(pl) {
+    const which = pl.id !== undefined ? `#${pl.id}` : 'a place with no xml:id';
+    const words = pl.names.map((n) => n.text).join(', ') || 'no name';
+    if (!pl.uris.length) { this.report('tei-listplace-no-address', `${which}: ${words}`); return; }
+    if (!pl.names.length) { if (pl.geo.length) this.report('tei-listplace-geo', `${which}: ${pl.geo.join('; ')}`); return; }
+    const [head, ...variants] = pl.names;
+    if (variants.length) this.report('tei-listplace-variant', `${which}: ${variants.map((n) => n.text).join(', ')}`);
+    const name = { toponym: head.text };
+    if (head.lang !== undefined && head.lang !== '') {
+      if (LANGUAGE_TAG.test(head.lang)) name.language = head.lang;
+      else this.report('tei-lang-not-tag', head.lang);
+    }
+    const source = this.source();
+    // The coordinates, if any can be carried: parsed, and in a datum PLATO's coordinates can take.
+    let points = [];
+    if (pl.geos.length) {
+      const datum = this.scopes.flatMap((s) => s.hdr.geoDecls).find((d) => d.toUpperCase() !== 'WGS84');
+      for (const g of pl.geos) {
+        const m = GEO.exec(g), lat = m && Number(m[1]), lon = m && Number(m[2]);
+        if (!m || Math.abs(lat) > 90 || Math.abs(lon) > 180) { this.report('tei-listplace-geo-invalid', `${which}: ${g || 'an empty geo'}`); continue; }
+        if (datum) { this.report('tei-listplace-geo-datum', `${which}: ${g} (datum ${datum})`); continue; }
+        points.push({ lat, lon, label: g });
+      }
+    } else if (pl.geo.length) this.report('tei-listplace-geo', `${which}: ${pl.geo.join('; ')}`);
+    const own = this.ownHost();
+    const locator = `list of places${pl.id !== undefined ? `, place ${pl.id}` : ''}`;
+    if (!this.headed) this.header();
+    for (const u of pl.uris) {
+      const att = { about: u.iri, names: [{ ...name }], formStatus: HEADWORD };
+      if (points.length) {
+        if (own && hostOf(u.iri) === own) att.geometries = points.map((p) => ({ reprPoint: [p.lon, p.lat], geojson: { type: 'Point', coordinates: [p.lon, p.lat] }, sourceLabel: p.label }));
+        else this.report('tei-listplace-geo-gazetteer', `${which}: ${points.map((p) => p.label).join('; ')} (${u.iri})`);
+      }
+      att.citations = [{ source, locator }];
+      const notes = [];
+      if (pl.uris.length > 1) notes.push(`The list of places gives ${pl.uris.length} addresses for this place, each an attestation of its own: ${pl.uris.map((x) => x.iri).join(', ')}.`);
+      if (u.from) notes.push(addressNote(u));
+      notes.push(`From TEI element <place${pl.id !== undefined ? ` xml:id="${pl.id}"` : ''}> on line ${pl.fileLine} of ${this.fileName}`);
+      att.notes = notes.join('\n');
+      this.attestations++;
+      this.out.push({ type: 'attestation', value: att });
+    }
+  }
+  /** The host of the edition's own address (its publicationStmt idno of type URI or URL), or undefined: a DOI is a deposit, not the edition's site. */
+  ownHost() {
+    const scope = [...this.scopes].reverse().find((s) => s.hdr.read) || this.scopes[this.scopes.length - 1];
+    const uri = scope?.hdr.idnos.find((i) => ['uri', 'url'].includes((i.type || '').toLowerCase()) && isWeb(i.text));
+    return uri ? hostOf(uri.text) : undefined;
   }
 
   // ---- one place name ------------------------------------------------------------------------------
