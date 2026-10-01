@@ -182,7 +182,7 @@ function pendingItem(d) {
     ${from}
     <label>What it marks <select data-field="role"><option value="">Not said</option>${opt(roles, d.role, (r) => (r === 'LabelAnchor' ? 'where the map writes its name' : ROLE_WORDS[r] || r))}</select></label>
     <label>How well known <select data-field="precision"><option value="">Not said</option>${opt(PRECISIONS, d.precision, (p) => p.replace('_', ' '))}</select></label>
-    ${d.trace?.assisted ? `<p class="muted" data-assisted>Traced with assistance from: ${esc(d.trace.title || 'a historical map')}</p>` : ''}
+    ${d.trace?.assisted ? `<p class="muted" data-assisted>Traced with assistance from: ${esc(d.trace.title || 'a historical map')}</p>` : d.assistedUncited ? `<p class="muted" data-assisted>Proposed from the ink of: ${esc(d.assistedUncited.from || 'a historical map')} (not cited)</p>` : ''}
     ${d.traceNote ? `<p class="note" data-trace-note>${esc(d.traceNote)}</p>` : ''}
     <button type="button" data-remove>Remove</button></li>`;
 }
@@ -283,8 +283,15 @@ function newDraft(id, geojson, extra = {}) {
 // shown that holds it whole, else the topmost holding part of it (with a warning); the card lets the
 // user choose another map it lies on, or the basemap. Its citations are made when it is saved.
 const tracing_ = new Map();   // draft id -> the latest tracing asked for it (an older answer is let go)
+/** The notes shown on a drawing's card: what accepting it did, then what tracing it says (either may be none). */
+const joinNotes = (d, note) => [d.acceptNote, note].filter(Boolean).join(' ') || null;
 function dropTrace(d, note) {
-  d.trace = null; d.traceNote = note;
+  // A shape proposed from a map's ink is still that, cited from the map or not: what was proposed is kept
+  // (its notes say it, and that the map is not cited), and is cited again if it is traced from the map again.
+  const assisted = d.trace?.assisted || d.assistedPending || d.assistedUncited || null;
+  if (assisted) d.assistedUncited = { ...assisted, from: d.trace?.title ?? assisted.from ?? null };
+  delete d.assistedPending;
+  d.trace = null; d.traceNote = joinNotes(d, note);
   if (d.role === 'LabelAnchor') d.role = '';
 }
 async function traceDraft(d, { only = null, reshaped = false } = {}) {
@@ -299,7 +306,7 @@ async function traceDraft(d, { only = null, reshaped = false } = {}) {
     if (!only) d.traceOptions = pick.candidates.map((k) => ({ key: k, title: maps.find((m) => m.key === k)?.title || null }));
     const skipped = pick.skipped.map((x) => `${maps.find((m) => m.key === x.key)?.title || 'a map'}: ${x.reason}`).join(' ');
     if (!pick.chosen) {
-      if (was) note = `${reshaped ? 'Moved' : 'It lies'} off “${was.title || 'the map'}”, the map it was traced from, so it no longer cites that map${skipped ? ` (${skipped})` : ''}; it is saved as drawn on the basemap.`;
+      if (was) note = `${reshaped ? 'Moved' : 'It lies'} off “${was.title || 'the map'}”, the map it was traced from, so it no longer cites that map${skipped ? ` (${skipped})` : ''}; ${was.assisted ? 'its notes say it was proposed from that map\'s ink, and that the map is not cited.' : 'it is saved as drawn on the basemap.'}`;
       else if (skipped) note = `Not cited as traced from a historical map: ${skipped}`;
       dropTrace(d, note);
     } else {
@@ -308,10 +315,11 @@ async function traceDraft(d, { only = null, reshaped = false } = {}) {
         const t = await tracing.traceFor(e.g, d.geojson, { key: e.key, title: e.title, partial: pick.chosen.partial, fetchedAt: e.fetchedAt, licence: e.attribution?.licence || null });
         if (tracing_.get(d.id) !== ticket || !drafts.includes(d)) return;
         // A shape traced with assistance keeps what was proposed, traced again or not (its notes count the edits).
-        const assisted = was?.assisted || d.assistedPending || null;
+        const back = d.assistedUncited ? (({ from, ...rest }) => rest)(d.assistedUncited) : null;
+        const assisted = was?.assisted || d.assistedPending || back || null;
         d.trace = assisted ? { ...t, assisted } : t;
-        delete d.assistedPending;
-        d.traceNote = pick.chosen.partial ? `Part of it lies outside “${e.title}”, the map it is cited as traced from.` : null;
+        delete d.assistedPending; delete d.assistedUncited;
+        d.traceNote = joinNotes(d, pick.chosen.partial ? `Part of it lies outside “${e.title}”, the map it is cited as traced from.` : null);
         if (!d.traceOptions?.some((o) => o.key === e.key)) d.traceOptions = [...(d.traceOptions || []), { key: e.key, title: e.title }];
       } catch (err) {
         if (err instanceof tracing.TraceError && !reshaped && !was) {
@@ -400,12 +408,15 @@ async function setTraceMode(m) {
 }
 $('snap-ink').onchange = async (e) => { try { (await loadInk()).setSnap(e.target.checked); } catch {} };
 /** A proposal accepted: an ordinary drawing, cited from the map it was traced from, its round trip checked. */
+/** Returns null when it is a drawing now, else why not in words (the proposal is then kept). */
 function acceptTraced({ geometry, key, assisted, note }) {
-  if (!state.placeId) { drawError = state.drawError = 'Choose a place first: a drawing is added to the place chosen.'; return; }
+  if (!state.placeId) return 'Choose a place first (a drawing is added to the place chosen), then press Enter again: the proposal is kept until then.';
   const [res] = mapApi.draw.addFeatures([{ type: 'Feature', geometry, properties: { mode: geometry.type === 'Polygon' ? 'polygon' : 'linestring' } }]);
-  if (!res?.valid) { drawError = state.drawError = `The shape could not be made a drawing (${res?.reason || 'refused'}).`; if (view) renderCard(); return; }
-  const d = newDraft(res.id, geometry, { assistedPending: assisted, ...(note ? { traceNote: note } : {}) });
+  if (!res?.valid) { drawError = state.drawError = `The shape could not be made a drawing (${res?.reason || 'refused'}).`; if (view) renderCard(); return drawError; }
+  // What accepting did to it (its holes left out) is kept apart from what tracing says, so neither replaces the other.
+  const d = newDraft(res.id, geometry, { assistedPending: assisted, ...(note ? { acceptNote: note, traceNote: note } : {}) });
   traceDraft(d, { only: key });
+  return null;
 }
 
 // ---- Saving --------------------------------------------------------------------------------------
@@ -456,7 +467,9 @@ async function saveDataset() {
     // A traced drawing cites the map and its georeference, and says so in its notes (trace.js).
     additions = drafts.map((d) => ({ placeId: d.placeId, attestation: newGeometryAttestation({
       geojson: d.geojson, role: d.role || undefined, precision: d.precision || undefined, contributor, created: d.drawnAt,
-      ...(d.trace ? tracing.tracedParts(d.trace, { zoom: d.zoom, role: d.role, geometry: d.geojson, version: toolsVersion }) : { notes: choraDrawingNote({ basemap: d.basemap, zoom: d.zoom }) }) }) }));
+      ...(d.trace ? tracing.tracedParts(d.trace, { zoom: d.zoom, role: d.role, geometry: d.geojson, version: toolsVersion })
+        : d.assistedUncited ? tracing.uncitedParts(d.assistedUncited, { zoom: d.zoom, geometry: d.geojson, version: toolsVersion })
+        : { notes: choraDrawingNote({ basemap: d.basemap, zoom: d.zoom }) }) }) }));
   } catch (e) { $('save-result').innerHTML = `<p class="warn">${esc(e.message)}</p>`; return; }
   const savedIds = new Set(drafts.map((d) => d.id));
   $('save').disabled = true;

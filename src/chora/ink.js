@@ -27,7 +27,7 @@ const roundCoords = (c) => (typeof c[0] === 'number' ? c.map(round9) : c.map(rou
 /**
  * The tools. `mapApi` (map.js's), `guard` (the page's fetch guard), `state` (window.__chora: its `ink` is
  * kept up to date for tests), `overlayAt(lngLat)` -> (a promise of) the map shown there (an entry of the
- * layer manager: { key, g, info, title }) or null, `onAccept({ geometry, key, assisted, note })` makes the drawing, and
+ * layer manager: { key, g, info, title }) or null, `onAccept({ geometry, key, assisted, note })` makes the drawing (or returns why not, in words: the proposal is then kept), and
  * `panel` the element the parameters are shown in.
  */
 export function createInk({ mapApi, guard, state, overlayAt, onAccept, panel }) {
@@ -133,14 +133,17 @@ export function createInk({ mapApi, guard, state, overlayAt, onAccept, panel }) 
     ink.phase = 'tracing'; ink.lastError = null; ink.steps = []; say('Reading the map…');
     try {
       const results = [], gen = newGen('trace'), step = stepper('trace', gen, p.entry);
+      let traced = 0;   // the clicks traced this time (for tests: carried on, the earlier ones are not)
       for (const [k, s] of p.seeds.entries()) {
+        // Carried on (Shift-click): the parts already proposed are kept as they are; only the new click is traced.
+        if (extend && p.results?.[k]) { results.push(p.results[k]); continue; }
         // Again from the same clicks (a slider moved): each from the window its last proposal ended in.
         const start = again ? p.results?.[k]?.frame || null : null;
         // A new click well inside the window last read (same map, same kind) begins from it: it is made ready.
         const near = !again && lastWindow?.key === p.entry.key && lastWindow.colour === (p.mode === 'area' || !!params[p.mode].colour) ? lastWindow.frame : null;
         const r = await runTrace({ info: p.entry.info, seedImg: s.seedImg, pxPerScreen: s.pxPerScreen, mode: p.mode, params: { ...params[p.mode] }, step, isCurrent: () => gens.trace === gen, start, near });
         lastWindow = { key: p.entry.key, colour: p.mode === 'area' || !!params[p.mode].colour, frame: r.frame };
-        results.push(r);
+        results.push(r); traced++;
       }
       if (proposal !== p) return;
       const last = results.at(-1);
@@ -159,7 +162,7 @@ export function createInk({ mapApi, guard, state, overlayAt, onAccept, panel }) 
       p.seedsWorld = await Promise.all(p.seeds.map((s) => toWorld(p.entry.g, { type: 'Point', coordinates: s.seedImg })));
       if (proposal !== p) return;
       const ms = performance.now() - t0, worldMs = performance.now() - tw;
-      Object.assign(ink, { phase: 'proposed', proposals: ink.proposals + 1, lastMs: ms, last: { mode: p.mode, scale: last.scale, grown: last.grown, coarser: last.coarser, frame: last.frame, epsilon: last.epsilon, vertices: p.mode === 'area' ? last.rings[0].length - 1 : geometry.coordinates.length, holes: p.mode === 'area' ? last.rings.length - 1 : 0, gaps: gaps.length, ends: last.ends || null, extended: extend, image: geometry, worldMs } });
+      Object.assign(ink, { phase: 'proposed', proposals: ink.proposals + 1, lastMs: ms, last: { mode: p.mode, scale: last.scale, grown: last.grown, coarser: last.coarser, frame: last.frame, epsilon: last.epsilon, vertices: p.mode === 'area' ? last.rings[0].length - 1 : geometry.coordinates.length, holes: p.mode === 'area' ? last.rings.length - 1 : 0, gaps: gaps.length, ends: last.ends || null, extended: extend, seedsTraced: traced, scales: results.map((r) => r.scale), image: geometry, worldMs } });
       ink.timings.push({ ms, mode: p.mode, seeds: p.seeds.length, requests: fetcher.stats.requests, fromCache: fetcher.stats.fromCache });
       draw();
       const holes = p.mode === 'area' ? last.rings.length - 1 : 0;
@@ -198,21 +201,26 @@ export function createInk({ mapApi, guard, state, overlayAt, onAccept, panel }) 
     const p = proposal;
     if (!p?.world) return false;
     let geometry = { type: p.world.type, coordinates: roundCoords(p.world.coordinates) };
-    let note = null;
+    let note = null, dropped = 0;
     if (geometry.type === 'Polygon' && geometry.coordinates.length > 1) {
-      // A drawing is edited as an outline alone (Terra Draw takes no holes): the holes are left out, and said so.
-      note = `The ${geometry.coordinates.length - 1} hole${geometry.coordinates.length === 2 ? ' was' : 's were'} left out: drawings are outlines without holes.`;
+      // A drawing is edited as an outline alone (Terra Draw takes no holes): the holes are left out, and said
+      // so here and in the attestation's notes (assisted.holes).
+      dropped = geometry.coordinates.length - 1;
+      note = `The ${dropped} hole${dropped === 1 ? ' was' : 's were'} left out: drawings are outlines without holes.`;
       geometry = { type: 'Polygon', coordinates: [geometry.coordinates[0]] };
     }
     const last = p.results.at(-1);
     const assisted = {
-      mode: p.mode, scale: last.scale, epsilon: Math.max(...p.results.map((r) => r.epsilon)), gaps: p.results.reduce((n, r) => n + (r.gaps?.length || 0), 0),
+      mode: p.mode, scale: last.scale, scales: p.results.map((r) => r.scale), epsilon: Math.max(...p.results.map((r) => r.epsilon)), gaps: p.results.reduce((n, r) => n + (r.gaps?.length || 0), 0),
       params: Object.fromEntries(Object.entries(params[p.mode]).filter(([k]) => ['tolerance', 'colour', 'bridge', 'band', 'jumps', 'detail', 'dropSmallHoles'].includes(k))),
-      seeds: p.seeds.map((s) => s.seedImg), window: [last.frame.w, last.frame.h], proposed: geometry,
+      seeds: p.seeds.map((s) => s.seedImg), window: [last.frame.w, last.frame.h], proposed: geometry, from: p.entry.title || null,
+      ...(p.mode === 'area' ? { holes: { dropped } } : {}),
     };
+    // Not a drawing unless the page took it (a place must be chosen first): the proposal is kept, and why said.
+    const refused = onAccept({ geometry, key: p.entry.key, assisted, note });
+    if (refused) { say(refused, true); return false; }
     proposal = null; draw();
     ink.accepted++; ink.phase = 'accepted';
-    onAccept({ geometry, key: p.entry.key, assisted, note });
     say(note ? `Accepted. ${note}` : 'Accepted: it is a drawing now, to edit or remove like any other.');
     return true;
   }

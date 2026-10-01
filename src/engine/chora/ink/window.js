@@ -96,8 +96,10 @@ export function composeEach(frame, tiles, put) {
   for (const t of tiles) {
     const { x: rx, y: ry, width: rw, height: rh } = t.region;
     const kx = t.width / rw, ky = t.height / rh;
-    // The working pixels this region overlaps. Tiles meet on the working grid (their regions are
-    // multiples of s), so only a pixel at the image's own edge, part off the image, is shared by none.
+    // The working pixels this region overlaps. Tiles meet on the working grid (their regions begin at
+    // multiples of s), so each working pixel lies in one tile's region alone; a pixel at the image's own
+    // edge, part off the image, lies in the edge tile's (the ceiling below), which gives it from its last
+    // column or row (clamped). So every pixel of a window on the image is given once (test 10: covered 1).
     const i0 = Math.max(0, Math.floor((rx - x0) / s)), i1 = Math.min(w - 1, Math.ceil((rx + rw - x0) / s) - 1);
     const j0 = Math.max(0, Math.floor((ry - y0) / s)), j1 = Math.min(h - 1, Math.ceil((ry + rh - y0) / s) - 1);
     // A tile that is its region at scale s exactly, on the working grid: its pixels are the window's, as

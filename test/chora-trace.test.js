@@ -236,3 +236,30 @@ test('13. a line traced with assistance is saved as a traced one is (both citati
   assert.equal(checkAddition(a, res.validators), null);
   assert.ok(!('computed' in a) && !('computed' in a.geometries[0]), 'attested, not computed');
 });
+
+test('13. the notes say what accepting left out and how each part was read: an area\'s holes left out (drawings are outlines), a line carried on at two scales', () => {
+  const area = { mode: 'area', params: { tolerance: 12, bridge: 0 }, scale: 1, epsilon: 0.75, gaps: 0, holes: { dropped: 2 } };
+  assert.equal(choraAssistedNote(area, null),
+    'Traced with assistance in PLATO tools (Chora): proposed from the map\'s ink by filling an area (tolerance 12, at 1/1 of full resolution, simplified to within 0.75 image pixels); its 2 holes left out, as drawings are outlines; then accepted as proposed.');
+  assert.match(choraAssistedNote({ ...area, holes: { dropped: 1 } }, null), /; its 1 hole left out, as drawings are outlines; then accepted as proposed\.$/);
+  // The control: no hole left out, nothing said of holes.
+  assert.ok(!/hole/.test(choraAssistedNote({ ...area, holes: { dropped: 0 } }, null)) && !/hole/.test(choraAssistedNote({ ...area, holes: undefined }, null)));
+  const line = { mode: 'line', params: { colour: false }, scale: 2, scales: [1, 2], epsilon: 1.5, gaps: 0 };
+  assert.match(choraAssistedNote(line, null), /\(by its darkness, at 1\/1 to 1\/2 of full resolution, simplified/);
+  assert.match(choraAssistedNote({ ...line, scales: [2, 2] }, null), /\(by its darkness, at 1\/2 of full resolution, simplified/);
+});
+
+test('13. a shape traced with assistance whose map is no longer cited (moved off it) keeps saying it was proposed from that map\'s ink, and that the citation was dropped', () => {
+  const a = { mode: 'line', params: { colour: false }, scale: 1, epsilon: 0.75, gaps: 0 };
+  const n = choraAssistedNote(a, { moved: 3, added: 0, removed: 0, proposed: 9 }, { zoom: 12, uncited: 'Rocque 1746' });
+  assert.ok(n.startsWith('Traced with assistance in PLATO tools (Chora) at zoom 12: proposed from the map\'s ink by following a line'), n);
+  assert.ok(n.endsWith('then edited by hand: moved 3, added 0, removed 0, of 9 proposed. Its citation of the map it was traced from (“Rocque 1746”) was dropped: the drawing was moved off that map, or that map could not place it, or the basemap was chosen instead.'), n);
+  // As saved (trace.js uncitedParts): no citation, these notes, the edits counted against the proposal.
+  const proposed = { type: 'LineString', coordinates: [[0, 0], [1, 0], [2, 1]] }, moved = { type: 'LineString', coordinates: [[0, 0], [1, 0.5], [2, 1]] };
+  const parts = trace.uncitedParts({ ...a, proposed, from: 'Rocque 1746' }, { zoom: 12, geometry: moved, version: '0.1.0' });
+  assert.deepEqual(Object.keys(parts), ['notes']);
+  assert.ok(parts.notes.startsWith('Traced with assistance in PLATO tools (Chora) 0.1.0 at zoom 12') && parts.notes.includes('moved 1, added 0, removed 0, of 3 proposed. Its citation of the map it was traced from (“Rocque 1746”) was dropped'), parts.notes);
+  assert.ok(!/Drawn by hand|Traced by hand/.test(parts.notes));
+  // The control: cited, nothing said of it.
+  assert.ok(!/not cited/.test(choraAssistedNote(a, null, { zoom: 12 })));
+});

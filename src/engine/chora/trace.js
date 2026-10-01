@@ -174,3 +174,14 @@ export function tracedParts(trace, { zoom, role, geometry, version } = {}) {
   const notes = `${how} ${georef.georefNote(record, trace.fetchedAt ? { fetched: trace.fetchedAt } : {})}`;
   return { citations, notes };
 }
+
+/**
+ * The notes of a shape traced with assistance that has since been moved off the map it was proposed from
+ * (`assisted.from`, that map's title): no citation (the map no longer holds it), and the notes saying how
+ * it was proposed, its edits counted against `geometry`, and that the map is not cited. It is not passed off
+ * as drawn by hand.
+ */
+export function uncitedParts(assisted, { zoom, geometry, version } = {}) {
+  const { from = null, ...a } = assisted;
+  return { notes: choraAssistedNote(a, geometry ? countEdits(a.proposed, geometry) : null, { version, zoom, uncited: from || '' }) };
+}

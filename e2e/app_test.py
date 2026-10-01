@@ -1271,6 +1271,7 @@ import math
 INK_RIVER = [(90 + 8 * k + 0.5, 560 - 300 * math.sin(math.pi * k / 100) * (0.4 + 0.6 * k / 100) + 0.5) for k in range(101)]
 INK_WASH = [(x + 0.5, y + 0.5) for x, y in [(420, 90), (610, 120), (650, 260), (560, 330), (430, 300), (380, 180)]]
 INK_ROAD = [(120.5, 640.5), (900.5, 610.5)]
+INK_ISLAND = (440, 130, 501, 181)   # a hole in the wash (paper), corner coordinates: pixels 440..500 by 130..180
 def _seg(p, a, b):
     dx, dy = b[0] - a[0], b[1] - a[1]; L = dx * dx + dy * dy
     t = max(0, min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L)) if L else 0
@@ -1294,7 +1295,7 @@ INK_TO_IMAGE = """async ([id, geometry]) => { const e = window.__chora_overlays.
 
 def ink_checks(page, base, tmp, census, at_origin, annotation, paste, agree_map, fx):
     A, B, C = fx['A'], fx['B'], fx['C']
-    ids = {k: f'https://annotations.allmaps.org/maps/00000000000000{k}' for k in ('e1', 'e2', 'e3', 'e4')}
+    ids = {k: f'https://annotations.allmaps.org/maps/00000000000000{k}' for k in ('e1', 'e2', 'e3', 'e4', 'e5')}
     def ink_annotation(path, key, origin=None):
         a = annotation('annotation-ink.json', id=ids[key])
         a['target']['source']['id'] = (origin or A) + path
@@ -1356,6 +1357,8 @@ def ink_checks(page, base, tmp, census, at_origin, annotation, paste, agree_map,
         until(page, 'n => window.__chora.ink.proposals > n && window.__chora.ink.phase === "proposed"', 60, n)
         joined = [tuple(p) for p in cstate(page)['ink']['last']['image']['coordinates']]
         carried = cstate(page)['ink']['last']['extended'] and any(dist_line(p, INK_ROAD) <= 1.5 for p in joined) and sum(dist_line(p, INK_RIVER) <= 1.5 for p in joined) >= len(proposed) - 2
+        # Carried on, only the new click is traced: the river already proposed is kept as it was.
+        traced_again = cstate(page)['ink']['last'].get('seedsTraced')
         page.keyboard.press('Enter')
         until(page, 'n => window.__chora.pendingCount === n + 1 && window.__chora.lastTrace && window.__chora.lastTrace.key', 20, before)
         card = page.inner_text('#card')
@@ -1367,7 +1370,7 @@ def ink_checks(page, base, tmp, census, at_origin, annotation, paste, agree_map,
         new = json.loads(out.read_text())['spatialEntities'][0]['attestations'][-1]
         cits = new.get('citations', []); notes = new.get('notes', '')
         rows = census(since); paths = [r['path'] for r in at_origin(rows, A)]
-        return (waiting and asked and early == [] and offered and drawn and carried and hd <= 2 and math.hypot(ends[0][0] - INK_RIVER[0][0], ends[0][1] - INK_RIVER[0][1]) <= 4
+        return (waiting and asked and early == [] and offered and drawn and carried and traced_again == 1 and hd <= 2 and math.hypot(ends[0][0] - INK_RIVER[0][0], ends[0][1] - INK_RIVER[0][1]) <= 4
                 and math.hypot(ends[1][0] - INK_RIVER[-1][0], ends[1][1] - INK_RIVER[-1][1]) <= 4 and 'Traced with assistance from' in card
                 and ls.get('added') == 1 and [c.get('citationFunction') for c in cits] == ['http://purl.org/spar/cito/citesAsEvidence', 'http://purl.org/spar/cito/usesMethodIn']
                 and cits[0]['source'].get('@id') == A + '/iiif/inkpng' and cits[1]['source'].get('@id') == a['id']
@@ -1376,8 +1379,8 @@ def ink_checks(page, base, tmp, census, at_origin, annotation, paste, agree_map,
                 and any(p.startswith('/iiif/inkpng/') and p.endswith('default.jpg') for p in paths) and at_origin(rows, B) == [] and at_origin(rows, C) == []
                 and len(rows) == len(at_origin(rows, A))), {
             'offered before the map': not waiting, 'asked before agreeing': early, 'hausdorff px': round(hd, 2), 'ends': ends, 'notes': notes[:220], 'citations': [c.get('citationFunction') for c in cits],
-            'carried on': carried, 'census': sorted({(r['port'], r['path'].split('/')[2] if r['path'].count('/') > 2 else r['path']) for r in rows}), 'ink': {k: ink['last'].get(k) for k in ('scale', 'grown', 'vertices', 'gaps')}}
-    attempt('Chora ink: "Trace line" waits for a map drawn; a click proposes the river (within 2 px, end to end) from tiles of the map\'s server alone, asked only after it was agreed to; Shift-click carries it on; Enter makes it a drawing; saved, it cites the map and the georeference, says it was traced with assistance and accepted as proposed, and Mneme passes', trace_line_save)
+            'carried on': carried, 'clicks traced when carried on': traced_again, 'census': sorted({(r['port'], r['path'].split('/')[2] if r['path'].count('/') > 2 else r['path']) for r in rows}), 'ink': {k: ink['last'].get(k) for k in ('scale', 'grown', 'vertices', 'gaps')}}
+    attempt('Chora ink: "Trace line" waits for a map drawn; a click proposes the river (within 2 px, end to end) from tiles of the map\'s server alone, asked only after it was agreed to; Shift-click carries it on (tracing the new click alone); Enter makes it a drawing; saved, it cites the map and the georeference, says it was traced with assistance and accepted as proposed, and Mneme passes', trace_line_save)
 
     def trace_area_esc():
         f = place_file('ink-area.json'); chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
@@ -1408,6 +1411,47 @@ def ink_checks(page, base, tmp, census, at_origin, annotation, paste, agree_map,
         return (drawn and rerun and quiet and hd <= 2.5 and gone and after['pendingCount'] == before and after['ink']['phase'] == 'idle' and at_origin(rows, B) == []
                 and any(r['path'].startswith('/iiif/ink/') and r['path'].endswith('default.jpg') for r in at_origin(rows, A))), {'hausdorff px': round(hd, 2), 'drawn': drawn, 'slider re-run': rerun, 'asked after the slider': census(asked_before)[:3], 'gone': gone, 'pending': [before, after['pendingCount']], 'ink': after['ink'].get('phase')}
     attempt('Chora ink: "Trace area" proposes the wash (within 2.5 px) from JPEG tiles; a slider moved proposes again asking the server nothing; Esc lets it go, and nothing is drawn', trace_area_esc)
+
+    def trace_area_hole_save():
+        f = place_file('ink-hole.json'); chora_boot(page, base, [f])
+        page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
+        a = ink_annotation('/iiif/inkpng', 'e5')
+        if not show(a): raise RuntimeError('the map did not draw')
+        only_map(a['id'])
+        before = cstate(page)['pendingCount']
+        page.click('#draw-tools button[data-trace="area"]')
+        click_image(a['id'], (520, 210))
+        until(page, '() => ["proposed", "error"].includes(window.__chora.ink?.phase)', 60)
+        ink = cstate(page)['ink']
+        if ink['phase'] != 'proposed': return False, {'ink': ink}
+        holes = ink['last']['holes']
+        # No place chosen yet: Enter keeps the proposal and says to choose a place; nothing is drawn.
+        page.evaluate('() => document.activeElement && document.activeElement.blur()')
+        page.keyboard.press('Enter'); page.wait_for_timeout(500)
+        s0 = cstate(page); status0 = page.inner_text('#ink-panel [data-ink-status]')
+        kept = s0['ink']['phase'] == 'proposed' and s0['pendingCount'] == before and soon(page, '() => window.__chora_map.queryRenderedFeatures({ layers: ["chora-ink-proposal"] }).length > 0', 10)
+        chora_pick(page, 'cambridge')
+        page.evaluate('() => document.activeElement && document.activeElement.blur()')
+        page.keyboard.press('Enter')
+        until(page, 'n => window.__chora.pendingCount === n + 1 && window.__chora.lastTrace && window.__chora.lastTrace.key', 20, before)
+        lt = cstate(page)['lastTrace']; card = page.inner_text('#card')
+        page.click('#save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+        ls = cstate(page)['lastSave'] or {}
+        if not ls.get('passed'): return False, {'save': ls, 'card': card[-300:]}
+        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#save-result button.primary')
+        out = tmp / 'ink-hole-saved.json'; d.value.save_as(out)
+        new = json.loads(out.read_text())['spatialEntities'][0]['attestations'][-1]
+        cits = new.get('citations', []); notes = new.get('notes', ''); geom = new['geometries'][0]['geojson']
+        return (holes == 1 and kept and 'Choose a place first' in status0
+                and 'hole was left out' in (lt.get('note') or '') and 'hole was left out' in card
+                and ls.get('added') == 1 and geom['type'] == 'Polygon' and len(geom['coordinates']) == 1
+                and [c.get('citationFunction') for c in cits] == ['http://purl.org/spar/cito/citesAsEvidence', 'http://purl.org/spar/cito/usesMethodIn']
+                and cits[0]['source'].get('@id') == A + '/iiif/inkpng' and cits[1]['source'].get('@id') == a['id']
+                and notes.startswith('Traced with assistance in PLATO tools (Chora)') and 'by filling an area' in notes
+                and '; its 1 hole left out, as drawings are outlines; then accepted as proposed.' in notes and f'Georeferenced through {a["id"]}' in notes), {
+            'holes proposed': holes, 'kept with no place': kept, 'said': status0[:120], 'card note': lt.get('note'), 'notes': notes[:400], 'rings saved': len(geom['coordinates']),
+            'citations': [c.get('citationFunction') for c in cits], 'mneme': ls.get('passed')}
+    attempt('Chora ink: an area with a hole, accepted with Enter before a place is chosen, is kept as proposed and the page says to choose a place; chosen, Enter makes it a drawing (an outline, its hole left out and said so on its card); saved, it cites the map and the georeference, its notes say the hole was left out, and Mneme passes', trace_area_hole_save)
 
     def snap_to_ink():
         f = place_file('ink-snap.json'); chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
