@@ -16,7 +16,11 @@
 //   3. Otherwise it is minted from the hash. Attestations of one place that say exactly the same
 //      (twins) are told apart by a counter in file order: the first has the bare hash, the next -2,
 //      then -3. Two that say different things but whose hashes begin alike (8 hex digits: about one
-//      pair in four thousand million within one place) both get 12 digits, or 16, until they differ,
+//      pair in four thousand million within one place) are told apart by length: an attestation being
+//      minted gets 12 digits, or 16, until its hash differs from every other of its place's, those
+//      with addresses already included. Only the address being minted is lengthened: one that an
+//      attestation has, or inherits, is never changed (rules 1 and 2), so the two may end up 8 and 12
+//      digits long. Two minted together are each lengthened against the other, so both get 12,
 //      whatever order they come in. An address already in use in the dataset is never given again:
 //      the next counter is taken.
 //
