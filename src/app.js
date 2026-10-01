@@ -387,8 +387,8 @@ $('columns').addEventListener('change', (e) => {
 // place). Every control is off until chosen. The options held until PLATO pins its Editorial form
 // status (TEI header places and commentary places, tei.js EDITORIAL_IRI) are not shown until then:
 // the worker says which, when it is ready.
-// TODO(tooltips): a hint for each option belongs in the shared tooltip module being built on another
-// branch, never a title attribute; until then the report says what each does.
+// A hint for an option, if one is ever added, is a data-tip (src/lib/tooltip.js), never a title
+// attribute; for now the report says what each does.
 let readingCaps = { editorial: false }, teiKeys = null;
 const hasIdColumn = () => !!columns && Object.values(columns.mapping).includes('id');
 function renderReading() {
