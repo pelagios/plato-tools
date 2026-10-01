@@ -82,6 +82,9 @@ test("a stance that is not one of PLATO's words is reported by the tables, not w
   const r = await go([textFile(JSON.stringify(d), 's.json')], 'convert', 'tables');
   assert.ok(kinds(r, 'loss').includes('dropped:attestation.sourceStance'), kinds(r, 'loss'));
   const zip = unzipSync(r.e.outs['s-tables.zip'][0]);
+  // Both of Kingsbury's markets are written: this one without its stance, the other with PLATO's word.
+  const types = Papa.parse(strFromU8(zip['types.csv']), { header: true, skipEmptyLines: true }).data;
+  assert.deepEqual(types.filter((x) => x.place_id === 'kingsbury').map((x) => [x.type_label, x.stance]), [['market', ''], ['market', 'Doubted']]);
   assert.doesNotMatch(strFromU8(zip['types.csv']), /hearsay/);
 });
 

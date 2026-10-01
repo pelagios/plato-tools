@@ -151,6 +151,8 @@ test('tables: a denial that bundles identities with a facet is left out whole, n
   const d = one(bundle({ negated: true, types: [{ label: 'market' }] }));
   const r = await go([textFile(JSON.stringify(d), 'n.json')], 'convert', 'tables');
   const zip = r.e.outs['n-tables.zip'][0];
+  // The empty sheets mean something only beside one that is not: the other place's name is written.
+  assert.deepEqual(sheet(zip, 'names.csv').map((x) => [x.place_id, x.name]), [['q', 'Q']]);
   assert.deepEqual(sheet(zip, 'types.csv'), []);
   assert.deepEqual(sheet(zip, 'identities.csv'), []);
   assert.ok(loss(r, 'identity-denied'));

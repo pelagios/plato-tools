@@ -258,8 +258,11 @@ for (const target of ['lpf', 'tables']) {
     assert.equal(loss(r, 'statistical-figure')?.count, 5, JSON.stringify(losses(r).map((l) => l.kind)));
     assert.equal(loss(r, 'statistical-tables')?.count, 1);
     const out = Object.values(r.e.outs)[0].map((x) => (typeof x === 'string' ? x : new TextDecoder().decode(x))).join('');
-    if (target === 'lpf') assert.doesNotMatch(out, /measure\/persons|"280"|:280\b/);
-    else {
+    // The absences below mean something only beside a presence: the county is written.
+    if (target === 'lpf') {
+      assert.ok(out.includes('"features":[{"@id":"https://whgazetteer.org/example/entity/example-county"'), out.slice(0, 500));
+      assert.doesNotMatch(out, /measure\/persons|"280"|:280\b/);
+    } else {
       const { unzipSync, strFromU8 } = await import('fflate');
       const props = strFromU8(unzipSync(r.e.outs['place-centric-statistics-tables.zip'][0])['properties.csv']);
       assert.equal(props.trim().split('\n').length, 1, 'the properties sheet has its header and no rows');
@@ -268,6 +271,11 @@ for (const target of ['lpf', 'tables']) {
     const d = doc(); const f = figures(d)[2]; for (const k of ['dataSet', 'dimensions', 'universe']) delete f[k];
     const c = await go([textFile(JSON.stringify(d), 'c.json')], 'convert', target);
     assert.equal(loss(c, 'statistical-figure')?.count, 4);
+    if (target === 'tables') {
+      const { unzipSync, strFromU8 } = await import('fflate');
+      const props = strFromU8(unzipSync(c.e.outs['c-tables.zip'][0])['properties.csv']);
+      assert.match(props, /\nexample-county,https:\/\/whgazetteer\.org\/example\/measure\/persons,persons,280,/, 'the same sheet holds the value once it is not a figure');
+    }
   });
 }
 
