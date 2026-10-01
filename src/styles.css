@@ -338,12 +338,18 @@ body.chora .note { color: var(--muted); font-size: .92rem; }
 .pager { margin: .4rem 0 0; }
 .place-id { font: .78rem/1.4 var(--font-mono); overflow-wrap: anywhere; margin: 0; }
 .status { font-size: .72rem; letter-spacing: .04em; text-transform: uppercase; border-radius: 999px; padding: 0 .4rem; border: 1px solid currentColor; cursor: help; }
-.status-denied { color: #c0392b; } .status-doubted { color: #6b7280; } .status-reported { color: #7a4fc9; } .status-tentative { color: #b7791f; }
-@media (prefers-color-scheme: dark) { :where(:root:not([data-theme="light"])) .status-denied { color: #f08074; } :where(:root:not([data-theme="light"])) .status-doubted { color: #a5adba; } :where(:root:not([data-theme="light"])) .status-reported { color: #b79cf0; } :where(:root:not([data-theme="light"])) .status-tentative { color: #e2b04a; } }
-:where(:root[data-theme="dark"]) .status-denied { color: #f08074; } :where(:root[data-theme="dark"]) .status-doubted { color: #a5adba; } :where(:root[data-theme="dark"]) .status-reported { color: #b79cf0; } :where(:root[data-theme="dark"]) .status-tentative { color: #e2b04a; }
+/* The statuses' colours, on the card's labels and its timeline's bars alike; in the light scheme as on the
+   map, lighter in the dark, where the map's would not stand off the panel. */
+:root { --status-asserted: var(--accent); --status-denied: #c0392b; --status-doubted: #6b7280; --status-reported: #7a4fc9; --status-tentative: #b7791f; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --status-asserted: var(--accent); --status-denied: #f08074; --status-doubted: #a5adba; --status-reported: #b79cf0; --status-tentative: #e2b04a; } }
+:root[data-theme="dark"] { --status-asserted: var(--accent); --status-denied: #f08074; --status-doubted: #a5adba; --status-reported: #b79cf0; --status-tentative: #e2b04a; }
+.status-denied { color: var(--status-denied); } .status-doubted { color: var(--status-doubted); } .status-reported { color: var(--status-reported); } .status-tentative { color: var(--status-tentative); }
 svg.timeline { width: 100%; height: auto; display: block; }
 svg.timeline .tl-text { font: 10px var(--font-text); fill: var(--fg); }
 svg.timeline .tl-axis { font: 9px var(--font-text); fill: var(--muted); }
+svg.timeline .tl-bar { fill: var(--status-asserted); }
+svg.timeline .tl-denied { fill: var(--status-denied); stroke: var(--status-denied); } svg.timeline .tl-doubted { fill: var(--status-doubted); stroke: var(--status-doubted); }
+svg.timeline .tl-reported { fill: var(--status-reported); stroke: var(--status-reported); } svg.timeline .tl-tentative { fill: var(--status-tentative); stroke: var(--status-tentative); }
 ul.pending { list-style: none; padding: 0 !important; }
 ul.pending li { border: 1px solid var(--line); border-radius: 6px; padding: .4rem .6rem; margin: .3rem 0; display: flex; flex-wrap: wrap; gap: .3rem .8rem; align-items: center; }
 ul.pending .kind { font-weight: 700; }

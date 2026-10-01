@@ -1994,6 +1994,22 @@ def chora_checks(pw, url, tmp):
         # Kingsbury's two markets: one reported, one doubted, each dated; Littleworth's market is denied.
         return kb == ['doubted', 'reported'] and bars == 2 and lw == ['denied'], {'kingsbury': kb, 'bars': bars, 'littleworth': lw}
     attempt('Chora: the place card labels what a source reports, doubts and denies, and dates them on its timeline', statuses)
+
+    def timeline_theme():
+        # The timeline's bars take their status's colour from the stylesheet, as the labels do, so they
+        # follow the theme: a doubted bar is the doubted label's grey, darker in Light, lighter in Dark.
+        BAR = """() => { const r = document.querySelector('#card svg.timeline rect.tl-doubted'), s = document.querySelector('#card .status-doubted');
+          return r && s ? { bar: getComputedStyle(r).fill, edge: getComputedStyle(r).stroke, label: getComputedStyle(s).color, theme: document.documentElement.getAttribute('data-theme') } : null; }"""
+        chora_boot(page, base, [fixture(judgements, 'judgements-theme.json', tmp)])
+        chora_pick(page, 'kingsbury')
+        try:
+            page.click('#theme-switch label:has(input[value="light"])'); light = page.evaluate(BAR)
+            page.click('#theme-switch label:has(input[value="dark"])'); dark = page.evaluate(BAR)
+        finally:
+            page.click('#theme-switch label:has(input[value="auto"])')     # this profile's later checks start in Auto
+        return (bool(light) and bool(dark) and light['bar'] == light['label'] == light['edge'] == 'rgb(107, 114, 128)'
+                and dark['bar'] == dark['label'] == dark['edge'] == 'rgb(165, 173, 186)' and dark['theme'] == 'dark'), {'light': light, 'dark': dark}
+    attempt('Chora: a timeline bar is in its status\'s colour from the stylesheet, as its label is, and follows the theme (a doubted bar, Light then Dark)', timeline_theme)
     # The tooltips: those the page writes (a status's meaning, on the card), MapLibre's (its zoom
     # buttons, at the window's right edge, given title attributes by the library), and the badge's.
     try:

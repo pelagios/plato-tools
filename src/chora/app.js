@@ -210,12 +210,13 @@ function timeline(items) {
   const W = 320, L = 4, R = 4, H = 26, x = (y) => L + ((y - lo) / (hi - lo)) * (W - L - R);
   const bars = rows.map((t, i) => {
     const a = t.a ?? t.b, b = t.b ?? t.a, y = i * H;
-    const c = STATUS_COLOURS[t.status] || STATUS_COLOURS.asserted;
+    // In its status's colour, from the stylesheet (svg.timeline .tl-…), so that it follows the colour theme.
+    const s = STATUS_COLOURS[t.status] ? t.status : 'asserted';
     const when = a === b ? `${a}` : `${a}–${b}`;
     // Its whole text, shown on hover by src/lib/tooltip.js (the row's own text may be cut short).
     return `<g data-tip="${esc(`${t.text || t.facet} (${t.label || when})${STATUS_WORDS[t.status] ? `, ${t.status}` : ''}`)}">
       <text x="${L}" y="${y + 10}" class="tl-text">${esc(trim(`${t.text || t.facet}`, 44))} · ${esc(when)}${STATUS_WORDS[t.status] ? ` · ${t.status}` : ''}</text>
-      <rect x="${x(a)}" y="${y + 14}" width="${Math.max(3, x(b) - x(a))}" height="6" rx="2" fill="${c}"${t.status !== 'asserted' ? ` fill-opacity=".45" stroke="${c}" stroke-dasharray="2 1"` : ''}/></g>`;
+      <rect x="${x(a)}" y="${y + 14}" width="${Math.max(3, x(b) - x(a))}" height="6" rx="2" class="tl-bar tl-${s}"${s !== 'asserted' ? ' fill-opacity=".45" stroke-dasharray="2 1"' : ''}/></g>`;
   }).join('');
   const h = rows.length * H + 16;
   return `<svg class="timeline" viewBox="0 0 ${W} ${h}" role="img" aria-label="When each attestation applies, from ${lo} to ${hi}">${bars}

@@ -981,8 +981,10 @@ A push to `main` runs the tests, builds the site and publishes it to GitHub Page
   made in another tab. In `src/styles.css` every dark rule is written twice, under
   `@media (prefers-color-scheme: dark)` for `:root:not([data-theme="light"])` and again for
   `:root[data-theme="dark"]`, word for word; `test/theme.test.js` fails if a twin is missing or
-  differs, so add a colour to both. Chora's map (its basemaps and drawn layers) does not change
-  with the theme.
+  differs, so add a colour to both. The statuses' colours are tokens (`--status-…`), used by the
+  card's labels and its timeline's bars alike. What does not change with the theme is the map: its
+  basemaps, the places drawn on it (`STATUS_COLOURS` in `src/chora/map.js`), and its controls
+  (MapLibre's own white control group).
 - **Tooltips** are the site's own (`src/lib/tooltip.js`, loaded by each page; its styles are the
   commented block in `src/styles.css`), never the browser's: give an element `data-tip="…"`, or
   `data-tip-template="id"` for a `<template>` of rich text (no links or controls: a tooltip cannot
