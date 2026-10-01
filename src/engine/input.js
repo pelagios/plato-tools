@@ -78,7 +78,7 @@ function unfinished(b) {
   return 0;
 }
 /** Bytes -> text, strictly: a TransformStream that stops with notUtf8, saying where, at the first byte that is not UTF-8. */
-function strictUtf8(name) {
+export function strictUtf8(name) {
   const dec = new TextDecoder('utf-8', { fatal: true });
   // `carry`: the bytes of a character the chunks so far left unfinished (no line break among them).
   let bytes = 0, lines = 1, carry = new Uint8Array(0);

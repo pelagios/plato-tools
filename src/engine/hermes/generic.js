@@ -13,11 +13,14 @@
 //     address at all, and the report says once how to give it one: no address is ever made from a
 //     row's number or its name, since such an address would change whenever the file did.
 // A GeoJSON feature's own id counts as a column (FEATURE_ID), and its geometry is always carried.
-import Papa from 'papaparse';
-import { textStream, jsonDocument, DataError } from '../input.js';
+import { jsonDocument, DataError } from '../input.js';
+import { csvRecords, textChunks } from '../../formats/csv.js';
 import { LOSS_TEXT } from '../report.js';
 import { tableIds } from '../../formats/tables.js';
 import { resolveColumns, applyColumns, GENERIC_KINDS, FEATURE_ID } from './columns.js';
+
+// The CSV reader is shared with the spreadsheet tables (src/formats/csv.js); exported here as before.
+export { csvRecords };
 
 const SAMPLE = 50;
 const NOT_A_LIST = Symbol('not a list');
@@ -27,22 +30,6 @@ const FEATURE_KEYS = new Set(['type', 'id', 'geometry', 'properties']);
 // reference system in `crs`, and its coordinates would then be read as degrees they are not.
 const WGS84 = /^(urn:ogc:def:crs:OGC:1\.3:CRS84|urn:ogc:def:crs:EPSG::4326|EPSG:4326|CRS84)$/i;
 
-/** The text of a file in chunks, decompressed and decoded, without its byte-order mark; a break in the bytes is a DataError. */
-async function* textChunks(file) {
-  const reader = (await textStream(file)).getReader();
-  let first = true;
-  try {
-    for (;;) {
-      let r;
-      try { r = await reader.read(); }
-      catch (e) { throw e instanceof DataError ? e : new DataError(`The file stops, or is damaged, part-way through, so it cannot be read to the end (${String(e && (e.message || e.name) || e).split('\n')[0]}).`); }
-      if (r.done) break;
-      let t = r.value;
-      if (first && t) { t = t.replace(/^\ufeff/, ''); first = false; }
-      if (t) yield t;
-    }
-  } finally { reader.cancel().catch(() => {}); }
-}
 async function wholeText(file) {
   let s = '';
   for await (const t of textChunks(file)) s += t;
@@ -64,53 +51,6 @@ async function open(input) {
   const t = input.format === 'csv' ? await openCsv(file, input) : await openGeojson(file, input);
   opened.set(file, t);
   return t;
-}
-
-/**
- * The records of CSV text given in chunks, one array of cells at a time, as Papa reads them, with
- * the rows whose cells are all empty left out (as Papa's skipEmptyLines 'greedy'). Nothing is held
- * but the chunk being read and the row it breaks off in, so a file of any size streams. The
- * delimiter is `delimiter`, else guessed (as Papa guesses it) from the start of the text.
- *
- * A quotation mark out of place moves where Papa thinks a row ends: rows are merged into one cell,
- * or split, and nothing read after it can be trusted to be the row it seems. It stops the file with
- * a DataError naming the line, found from where in the text it is. Papa's chunk parser reports no
- * other kind of error (its delimiter and field-count errors are Papa.parse's, which this does not
- * use); one it came to report would stop the file too, never be dropped.
- */
-export async function* csvRecords(chunks, { delimiter } = {}) {
-  const it = chunks[Symbol.asyncIterator]();
-  let buf = '', done = false;
-  // Enough of the start to guess the delimiter and the line break from, as Papa guesses them from its
-  // first rows: ten lines, or 64 KB, or the whole file.
-  const lineCount = (t) => { let k = 0, i = -1; while ((i = t.indexOf('\n', i + 1)) !== -1 && k < 11) k++; return k; };
-  while (!done && buf.length < 65536 && lineCount(buf) < 11) { const r = await it.next(); if (r.done) done = true; else buf += r.value; }
-  const guess = Papa.parse(buf.slice(0, 65536), { preview: 10, skipEmptyLines: 'greedy', ...(delimiter ? { delimiter } : {}) }).meta;
-  const newline = guess.linebreak || '\n';
-  const parser = new Papa.Parser({ delimiter: delimiter || guess.delimiter || ',', newline });
-  const count = (s, to) => { let n = 0, i = -1; while ((i = s.indexOf(newline, i + 1)) !== -1 && i < to) n++; return n; };
-  let lines = 0;   // line breaks before the start of `buf`
-  for (;;) {
-    // Papa's own streaming: every row but the last, which may go on in the next chunk, is read.
-    const last = done;
-    const res = parser.parse(buf, 0, !last);
-    const cursor = last ? buf.length : res.meta.cursor;
-    for (const e of res.errors) {
-      // An error in the row left for the next chunk is Papa's view of half a row: it is read again whole.
-      if (!last && Number.isInteger(e.index) && e.index >= cursor) continue;
-      const line = Number.isInteger(e.index) ? lines + count(buf, e.index) + 1 : undefined;
-      if (e.type === 'Quotes') {
-        throw new DataError(`The CSV file has ${e.code === 'MissingQuotes' ? 'a quotation mark that opens a cell and is never closed' : 'a stray quotation mark in a quoted cell (a quotation mark inside a quoted cell is written twice: "")'}${line ? ` near line ${line}` : ''}, so where its rows begin and end cannot be told. Correct the quotation marks and try again.`);
-      }
-      throw new DataError(`The CSV file cannot be read${line ? ` near line ${line}` : ''} (${e.message}).`);
-    }
-    for (const cells of res.data) if (!cells.every((c) => c.trim() === '')) yield cells;
-    if (last) return;
-    lines += count(buf, cursor);
-    buf = buf.slice(cursor);
-    const r = await it.next();
-    if (r.done) done = true; else buf += r.value;
-  }
 }
 
 /** A row of cells as an object keyed by column, with no prototype (so that a column called "__proto__" is kept). */
