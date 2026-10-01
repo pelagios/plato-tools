@@ -31,10 +31,7 @@
 // - The service's `attribution` (the licences of the sources searched) is kept as it came, a null
 //   left null, on the lookup record, so the page can show each candidate's licence. No licence is ever
 //   written into an attestation, and none is assumed here.
-import { WHG_ENDPOINT, isWhg, normaliseWhgIri } from '../gazetteer/index.js';
-// TODO: take mergeAttribution (and whgQueryType's canonical type) from index.js once the gazetteer
-// module re-exports them there, as its owner plans; whg.js is imported directly until then.
-import { mergeAttribution, whgQueryType } from '../gazetteer/whg.js';
+import { WHG_ENDPOINT, WHG_PLACE_TYPE, isWhg, normaliseWhgIri, mergeAttribution } from '../gazetteer/index.js';
 import { similarity } from './names.js';
 import { WORK_VERSION } from './work.js';
 import { linkState } from './identities.js';
@@ -53,17 +50,39 @@ export const WHG_REQUESTS_A_DAY = 5000;
 /** WHG, as the source a judgement on one of its candidates cites (identity.js gazetteerSource). */
 export const WHG_SERVICE = { endpoint: WHG_ENDPOINT, title: 'World Historical Gazetteer', uri: 'https://whgazetteer.org/' };
 /**
- * The type every query to WHG is sent as, always, in the form the gazetteer module sends it (its
- * whgQueryType, which writes every form of Place as "Place"), so that the preview is what WHG
- * receives. WHG refuses an unknown type or two types in one request (400), and a query without one is
- * unsafe (confirmed from WHG's production code, 30 September 2026).
- * TODO: use whg.js's own constant when the gazetteer module has one (its owner plans to move it there).
+ * The type every query to WHG is sent as, always: the gazetteer module's own (it writes every form of
+ * Place as "Place"), so that the preview is what WHG receives. WHG refuses an unknown type or two
+ * types in one request (400), and a query without one is unsafe (confirmed from WHG's production
+ * code, 30 September 2026).
  */
-export const WHG_PLACE_TYPE = whgQueryType(null);
+export { WHG_PLACE_TYPE };
 /** The type to send another service: the first of its manifest's defaultTypes, or null (none sent). */
 export function typeFromManifest(manifest) {
   const t = Array.isArray(manifest?.defaultTypes) ? manifest.defaultTypes[0] : null;
   return typeof t?.id === 'string' && t.id ? t.id : null;
+}
+/**
+ * What another service's manifest says Krisis uses, read through the lookup (lookup.manifest(), which
+ * never sends a token): `type`, the first of its defaultTypes (typeFromManifest), and `template`, its
+ * view.url when that is an address template with {{id}} in it. `read` is false, and both null, when
+ * the manifest could not be had (the lookup then goes on without them, as before); stopping (signal)
+ * is thrown on.
+ */
+export async function manifestSettings(lookup, { signal } = {}) {
+  let m;
+  try { m = await lookup.manifest({ signal }); } catch (e) { if (signal?.aborted) throw e; return { read: false, type: null, template: null }; }
+  const url = m?.view?.url;
+  let template = null;
+  try { iriFromTemplate(url); template = url; } catch { /* not a template: none */ }
+  return { read: true, type: typeFromManifest(m), template };
+}
+/**
+ * iri(id) for createLookup, for another service whose template may be learnt after the lookup is
+ * made (from its manifest): by `holder.template` when there is one, else the id when it is already
+ * an address, as the gazetteer module does without a template.
+ */
+export function iriVia(holder) {
+  return (id) => (holder.template ? iriFromTemplate(holder.template)(id) : typeof id === 'string' && /^[a-z][a-z0-9+.-]*:\/\//i.test(id) ? id : null);
 }
 /**
  * A candidate's address from an IRI template (the manifest's view.url, or one given), for a service
@@ -169,7 +188,7 @@ function namesToSend(place, allNames) {
 
 /**
  * The queries for `places`, and a preview of them. options: allNames, limit (10), countries (false),
- * nearKm (null), batchSize (the lookup's: 25), service, type (another service's: typeFromManifest();
+ * nearKm (null), batchSize (the lookup's: 25), service, type (another service's: manifestSettings();
  * WHG's is always WHG_PLACE_TYPE). Returns { queries,
  * chunks, preview }: `queries` [{ key: [iri, name], query, limit, type?, params? }] in place order;
  * `chunks` the places in groups whose queries fill one batch (a place's queries are never split
@@ -272,17 +291,16 @@ export function startLookup(work, { service, parameters, plan, now = new Date().
  * never "no match"); only an answered place has its earlier undecided candidates from this service
  * replaced. Returns the place's query record.
  */
-export function mergeAnswers(work, record, place, lists, { now = new Date().toISOString(), maxDistanceKm = record.parameters?.maxDistanceKm ?? LOOKUP_DEFAULTS.maxDistanceKm, scrub, scoped = false } = {}) {
+export function mergeAnswers(work, record, place, lists, { now = new Date().toISOString(), maxDistanceKm = record.parameters?.maxDistanceKm ?? LOOKUP_DEFAULTS.maxDistanceKm, scoped = false } = {}) {
   const iri = place.iri, c = record.counts, q = record.queries[iri] || (record.queries[iri] = { state: 'pending', sent: lists.map((l) => l.key?.[1]).filter(Boolean) });
   if (!work.places[iri]) work.places[iri] = placeRecord(place);
   const unanswered = lists.filter((l) => l.unanswered);
   // The state is set last, so that a fault part-way leaves the place as it was ('pending', then 'stopped').
   const state = unanswered.length ? 'unanswered' : 'answered';
-  // A query the service refused (a malformed filter, say) inside a good answer. Its words are kept only
-  // when the caller, who holds the token, gives `scrub` to clean them of it: the module cleans only the
-  // errors of a request, and the engine never sees the token.
+  // A query the service refused (a malformed filter, say) inside a good answer, with the service's
+  // words: the gazetteer module has already cleaned them of the token (and of the ones it replaced).
   const errors = unanswered.map((l) => l.error).filter((e) => e != null);
-  if (errors.length) { q.refused = true; if (typeof scrub === 'function') q.error = scrub(errors.join('; ')); else delete q.error; }
+  if (errors.length) { q.refused = true; q.error = errors.join('; '); }
   else { delete q.refused; delete q.error; }
   // A filter by distance sent and not applied (WHG says so in `scope.applied`): the answer is not filtered.
   if (scoped && lists.some((l) => !l.unanswered && l.scope?.applied !== true)) { q.scopeNotApplied = true; c.scopeNotApplied = (c.scopeNotApplied || 0) + 1; }
@@ -369,9 +387,8 @@ const suspect = (chunk, answers) => chunk.queries.length > 1 && answers.every((l
  *   subjects   gather()'s record of the dataset ({ title, uri?, files }), when `work` is null
  *   places     gather()'s places, with the links the dataset states; else the work file's (links not known)
  *   options    service (serviceOf(): WHG's by default), places (PLACE_CHOICES; default defaultChoice()),
- *              only (IRIs), allNames, limit, countries, nearKm, maxDistanceKm, type (another service's),
- *              scrub (text => text cleaned of the token, from the caller who holds it: a query's error
- *              is kept only when it is given)
+ *              only (IRIs), allNames, limit, countries, nearKm, maxDistanceKm, type (another service's:
+ *              manifestSettings())
  *   signal     stops it: what was answered is kept, the rest marked 'stopped'
  *   onBatch    ({ done, total, record, work }) after each batch of places, to show progress or save
  * Returns { work, record, plan, stopped }: `stopped` null, or { kind, status, message } (kind as
@@ -421,7 +438,7 @@ export async function runLookup({ lookup, work = null, subjects = null, places =
     try {
       for (const p of chunk.places) {
         const k = record.queries[p.iri].sent.length;
-        mergeAnswers(work, record, p, answers.slice(at, at + k), { now: stamp, maxDistanceKm: o.maxDistanceKm, scrub: o.scrub, scoped: o.nearKm > 0 && Array.isArray(p.point) });
+        mergeAnswers(work, record, p, answers.slice(at, at + k), { now: stamp, maxDistanceKm: o.maxDistanceKm, scoped: o.nearKm > 0 && Array.isArray(p.point) });
         at += k;
       }
     } catch (e) {

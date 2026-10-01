@@ -33,15 +33,21 @@ const certDir = scratch(), certFile = join(certDir, 'cert.pem'), keyFile = join(
 const made_cert = spawnSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', keyFile, '-out', certFile, '-days', '1', '-subj', '/CN=127.0.0.1', '-addext', 'subjectAltName=IP:127.0.0.1'], { encoding: 'utf8' });
 const NO_TLS = made_cert.status === 0 ? false : 'openssl could not make a certificate for the test service, so the lookups against it are not run';
 
-// The service: answers each query by its name, as `reply` says; every request is kept.
+// The service: answers each query by its name, as `reply` says, and a GET with its manifest, as
+// `manifest` says; every request is kept.
 const requests = [];
+const MANIFEST = { name: 'Test gazetteer', defaultTypes: [{ id: 'place', name: 'Place' }] };
 let reply = () => ({ status: 200 });
+let manifest = () => ({ status: 200, body: MANIFEST });
+const posts = () => requests.filter((r) => r.method === 'POST');
+const gets = () => requests.filter((r) => r.method === 'GET');
 const server = NO_TLS ? null : createServer({ cert: readFileSync(certFile), key: readFileSync(keyFile) }, (req, res) => {
   let body = '';
   req.on('data', (d) => { body += d; });
   req.on('end', () => {
     const sent = JSON.parse(body || '{}');
-    requests.push({ headers: req.headers, body: sent, url: req.url });
+    requests.push({ method: req.method, headers: req.headers, body: sent, url: req.url });
+    if (req.method === 'GET') { const m = manifest(); res.writeHead(m.status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(m.body)); return; }
     const r = reply(sent);
     if (r.status !== 200) { res.writeHead(r.status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(r.body)); return; }
     const out = { attribution: { sources: { ex: { license: { spdx_id: 'CC-BY-4.0', permits_commercial: true, no_derivatives: null } } } } };
@@ -82,8 +88,11 @@ test('a dry run says what would be sent and sends nothing; the run sends it', { 
   assert.ok(!existsSync(join(dir, 'a.krisis.json')), 'nothing written');
   const run = await cli(['lookup', join(dir, 'a.json'), '--gazetteer', endpoint, '--token-env', 'MY_TOKEN', '--out', dir], { MY_TOKEN: TOKEN });
   assert.equal(run.code, 0, run.out + run.err);
-  assert.equal(requests.length, 1, 'control: the run sends');
-  assert.equal(requests[0].headers.authorization, `Bearer ${TOKEN}`, 'control: the token went, in the header');
+  assert.equal(posts().length, 1, 'control: the run sends');
+  assert.equal(posts()[0].headers.authorization, `Bearer ${TOKEN}`, 'control: the token went, in the header');
+  assert.equal(gets().length, 1, 'the manifest was asked for');
+  assert.equal(gets()[0].headers.authorization, undefined, 'and without the token, beside the control above');
+  assert.ok(Object.values(posts()[0].body.queries).every((q) => q.type === 'place'), 'the type from the manifest was sent');
   assert.match(run.out, /1 possible match to review\. Looked up 2 places in 127\.0\.0\.1:\d+, with 2 queries; 2 places were answered, 1 with no candidates\. Not suggested: 1 candidate without a web address\./);
   const w = readWork(readFileSync(join(dir, 'a.krisis.json'), 'utf8'));
   assert.equal(w.others, null);
@@ -103,8 +112,8 @@ test('the token is refused on the command line, and WHG without one is refused; 
   requests.length = 0;
   const elsewhere = await cli(['lookup', join(dir, 'a.json'), '--gazetteer', endpoint, '--out', dir], { WHG_TOKEN: TOKEN });
   assert.equal(elsewhere.code, 0, elsewhere.out + elsewhere.err);
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0].headers.authorization, undefined, 'WHG\'s token is not sent to another service');
+  assert.equal(posts().length, 1);
+  assert.equal(posts()[0].headers.authorization, undefined, 'WHG\'s token is not sent to another service (the run above is the control that a token given is sent)');
   noToken(elsewhere, dir);
   requests.length = 0;
   const http = await cli(['lookup', join(dir, 'a.json'), '--gazetteer', endpoint.replace('https:', 'http:'), '--token-env', 'MY_TOKEN', '--out', dir, '--overwrite'], { MY_TOKEN: TOKEN });
@@ -118,6 +127,30 @@ test('the token is refused on the command line, and WHG without one is refused; 
   const whgEnv = await cli(['lookup', join(dir, 'a.json'), '--token-env', 'MY_TOKEN'], { MY_TOKEN: TOKEN });
   assert.equal(whgEnv.code, 2);
   assert.match(whgEnv.err, /WHG's token is read from WHG_TOKEN/);
+});
+test('another service\'s manifest gives its type and, unless --gazetteer-iri does, its candidates\' addresses; unread, the lookup goes on without them', { skip: NO_TLS }, async () => {
+  const dir = fixture();
+  const view = { status: 200, body: { ...MANIFEST, view: { url: 'https://gaz.example.org/view/{{id}}' } } };
+  manifest = () => view;
+  try {
+    const byView = await cli(['lookup', join(dir, 'a.json'), '--gazetteer', endpoint, '--out', dir, '--overwrite']);
+    assert.equal(byView.code, 0, byView.out + byView.err);
+    const cands = (d) => readWork(readFileSync(join(d, 'a.krisis.json'), 'utf8')).candidates.map((c) => c.candidate_candidate).sort();
+    // A template makes every id an address, as --gazetteer-iri always has.
+    assert.ok(cands(dir).includes('https://gaz.example.org/view/relative-id'), 'the id that is not an address is made one by view.url');
+    const given = await cli(['lookup', join(dir, 'a.json'), '--gazetteer', endpoint, '--gazetteer-iri', 'https://given.example.org/{{id}}', '--out', dir, '--overwrite']);
+    assert.equal(given.code, 0, given.out + given.err);
+    assert.ok(cands(dir).includes('https://given.example.org/relative-id'), 'the template given is used');
+    assert.ok(!cands(dir).some((c) => c.includes('/view/')), 'and stands before the manifest\'s');
+    manifest = () => ({ status: 500, body: { detail: 'down' } });
+    requests.length = 0;
+    const unread = await cli(['lookup', join(dir, 'a.json'), '--gazetteer', endpoint, '--out', dir, '--overwrite']);
+    assert.equal(unread.code, 0, unread.out + unread.err);
+    assert.match(unread.out, /manifest \(what it says of itself\) could not be read/);
+    assert.ok(!/manifest/.test(given.out), 'control: not said when it was read');
+    assert.deepEqual(cands(dir), ['https://gaz.example.org/p/1'], 'without a template, the id that is not an address is not suggested');
+    assert.ok(Object.values(posts()[0].body.queries).every((q) => q.type === undefined), 'and no type is sent');
+  } finally { manifest = () => ({ status: 200, body: MANIFEST }); }
 });
 test('a refusal stops the lookup with exit 1; the work file keeps it, and the message does not repeat the token', { skip: NO_TLS }, async () => {
   const dir = fixture();
@@ -143,7 +176,7 @@ test('--review adds to a work file from match; wrong commands exit 2', { skip: N
   requests.length = 0;
   const r = await cli(['lookup', join(dir, 'a.json'), '--review', join(dir, 'a.krisis.json'), '--gazetteer', endpoint, '--out', dir, '--overwrite']);
   assert.equal(r.code, 0, r.out + r.err);
-  assert.deepEqual(Object.values(requests[0].body.queries).map((q) => q.query), ['Newcastle'], 'York had a local candidate');
+  assert.deepEqual(Object.values(posts()[0].body.queries).map((q) => q.query), ['Newcastle'], 'York had a local candidate');
   const w = readWork(readFileSync(join(dir, 'a.krisis.json'), 'utf8'));
   assert.equal(w.others.title, 'Dataset B');
   assert.deepEqual(w.candidates.map((c) => c.lookup ?? 'local'), ['local', 'l1']);

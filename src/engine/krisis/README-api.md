@@ -131,7 +131,8 @@ words them all.
   { maxDistanceKm })`, `mergeAnswers(work, record, place, lists, opts)`, `startLookup`, `newWork`,
   `selectPlaces({ work, places, which, service, only })`, `defaultChoice(work)`, `serviceOf(endpoint)`,
   `licenceOf(attribution, namespace, dataset)`, `lookupCandidatesOf`, `typeFromManifest`,
-  `iriFromTemplate`, `WHG_SERVICE`, `WHG_PLACE_TYPE`, `PLACE_CHOICES`; re-exports `krisisLookupNote`,
+  `manifestSettings(lookup, { signal }) -> { read, type, template }`, `iriVia(holder)`,
+  `iriFromTemplate`, `WHG_SERVICE`, `WHG_PLACE_TYPE` (the gazetteer module's), `PLACE_CHOICES`; re-exports `krisisLookupNote`,
   `authorityIris`, `currentIdentities`.
 - `src/engine/krisis/identities.js`: `currentIdentities(records) -> Map<place IRI, { linked, denied }>`,
   `createIdentityCollector()`, `linkState(entry, { id, iri })`, `authorityIris(id)`.

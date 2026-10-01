@@ -159,8 +159,9 @@ Options:
   --token-env NAME  lookup, another service: the environment variable that holds its token.
                     A token is never sent over http://, nor WHG's to another service.
   --gazetteer-iri T lookup, another service: how to make a candidate's address from its id,
-                    such as https://www.wikidata.org/entity/{{id}}; without it, a candidate
-                    whose id is not an address is not suggested.
+                    such as https://www.wikidata.org/entity/{{id}}; without it, the service's
+                    own (its manifest's view.url), and without either, a candidate whose id
+                    is not an address is not suggested.
   --places WHICH    lookup: unmatched (the default: places without candidates from the other
                     dataset), all, pending (the default with --review after a lookup: not yet
                     answered), or unlinked (not yet linked to the gazetteer).
@@ -654,7 +655,7 @@ async function lookupCommand(args, o, resources) {
   if (o.with || o.threshold || o.top || o.output) return usage('--with, --threshold, --top and --output are not for lookup.');
   if (o.json && o.brief) return usage('choose --json or --brief, not both.');
   const { createLookup, WHG_ENDPOINT, isWhg } = await import('../src/engine/gazetteer/index.js');
-  const { runLookup, planQueries, selectPlaces, serviceOf, iriFromTemplate, PLACE_CHOICES, WHG_REQUESTS_A_DAY } = await import('../src/engine/krisis/lookup.js');
+  const { runLookup, planQueries, selectPlaces, serviceOf, iriFromTemplate, iriVia, manifestSettings, PLACE_CHOICES, WHG_REQUESTS_A_DAY } = await import('../src/engine/krisis/lookup.js');
   const { gather } = await import('../src/engine/krisis/match.js');
   const { readWork, serialiseWork, filesDiffer } = await import('../src/engine/krisis/work.js');
   const { existsSync } = await import('node:fs');
@@ -675,8 +676,9 @@ async function lookupCommand(args, o, resources) {
   const token = (isWhgService ? process.env.WHG_TOKEN : o['token-env'] ? process.env[o['token-env']] : undefined) || undefined;
   if (token && new URL(endpoint).protocol !== 'https:') return usage(L.tokenOverHttp);
   if (!o['dry-run'] && isWhgService && !token) return usage(L.noToken('WHG_TOKEN'));
-  let iri;
-  if (o['gazetteer-iri']) { try { iri = iriFromTemplate(o['gazetteer-iri']); } catch { return usage(`--gazetteer-iri ${o['gazetteer-iri']} is not an address with {{id}} in it.`); } }
+  // Another service's candidates' addresses: by --gazetteer-iri, else by its manifest's view.url (read below).
+  const template = { template: null };
+  if (o['gazetteer-iri']) { try { iriFromTemplate(o['gazetteer-iri']); template.template = o['gazetteer-iri']; } catch { return usage(`--gazetteer-iri ${o['gazetteer-iri']} is not an address with {{id}} in it.`); } }
   const items = await gatherInputs(args);
   if (items.length !== 1) return usage(`lookup takes one dataset of places; ${items.length} ${items.length === 1 ? 'was' : 'were'} given.`);
   let work = null;
@@ -721,8 +723,7 @@ async function lookupCommand(args, o, resources) {
     const differ = await filesDiffer(work.subjects, input.files);
     if (differ.length) r.warnings.push(`The work file was made from other files than ${differ.join(', ')}: its places may no longer match the data.`);
   }
-  const options = { service, places: o.places, allNames: o['all-names'], countries: o.countries, nearKm: near, limit, maxDistanceKm,
-    scrub: (text) => (token ? String(text).split(token).join('[token]') : String(text)) };
+  const options = { service, places: o.places, allNames: o['all-names'], countries: o.countries, nearKm: near, limit, maxDistanceKm };
   if (o['dry-run']) {
     const chosen = selectPlaces({ work, places: gathered.places, which: o.places, service });
     r.preview = planQueries(chosen, { ...options, batchSize: batch ?? 25 }).preview;
@@ -732,7 +733,15 @@ async function lookupCommand(args, o, resources) {
   }
   const controller = new AbortController();
   process.once('SIGINT', () => controller.abort());
-  const lookup = createLookup({ endpoint, token, ...(batch ? { batchSize: batch } : {}), ...(iri ? { iri } : {}) });
+  const lookup = createLookup({ endpoint, token, ...(batch ? { batchSize: batch } : {}), ...(isWhgService ? {} : { iri: iriVia(template) }) });
+  if (!isWhgService) {
+    // Its type, and its address template unless one was given, from its manifest (sent without the token).
+    let m;
+    try { m = await manifestSettings(lookup, { signal: controller.signal }); } catch { host.cleanup(); r.warnings.push(L.stopped({ kind: 'stopped' })); return finishUp(); }
+    if (!m.read) r.warnings.push(L.noManifest);
+    if (m.type) options.type = m.type;
+    if (!template.template && m.template) template.template = m.template;
+  }
   const progress = live ? ({ done, total }) => process.stderr.write(`\r\x1b[K${done.toLocaleString('en-GB')} of ${total.toLocaleString('en-GB')} places looked up`) : undefined;
   let result;
   try { result = await runLookup({ lookup, work, subjects: gathered.subjects, places: gathered.places, options, signal: controller.signal, onBatch: progress }); }

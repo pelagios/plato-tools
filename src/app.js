@@ -16,7 +16,7 @@ import { RELOAD_LOSES } from './lib/permission-words.js';
 import { LOOKUP_WORDS, lookupPage as LW } from './engine/words.js';
 import * as whgToken from './lib/whg-token.js';
 import { createLookup, WHG_ENDPOINT, isWhg } from './engine/gazetteer/index.js';
-import { runLookup, planQueries, selectPlaces, serviceOf, iriFromTemplate, newWork, defaultChoice, licenceOf, PLACE_CHOICES, WHG_REQUESTS_A_DAY } from './engine/krisis/lookup.js';
+import { runLookup, planQueries, selectPlaces, serviceOf, iriFromTemplate, iriVia, manifestSettings, newWork, defaultChoice, licenceOf, PLACE_CHOICES, WHG_REQUESTS_A_DAY } from './engine/krisis/lookup.js';
 import { candidateSource } from './engine/krisis/identity.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
@@ -710,15 +710,23 @@ permissions.onBeforeReload(() => {}, { loses: () => (work && unsaved ? RELOAD_LO
 // It runs HERE, on the page's thread, never in the worker, so that the token (src/lib/whg-token.js,
 // its one keeper; the page holds no copy) goes nowhere but the Authorization header of a request to
 // WHG: not into window.__plato, a work file, an address, the console or the words of an error. The
-// answers are merged into the work object after each batch, so "Save the review" works at any moment.
+// page hands it to the shared WHG lookup when it changes (setToken; Forget calls clearToken), and
+// never passes it anywhere else. The answers are merged into the work object after each batch, so
+// "Save the review" works at any moment.
 let gathered = null, placesWaiting = null, looking = null, findFor = null, afterStop = null;
+// What another service's manifest said (manifestSettings), by its address, once a lookup has read it: the preview then shows its type.
+const manifests = new Map();
+/** WHG's lookup: the one shared in the page with Chora (one request in flight, whoever asks). */
+const whgLookup = () => createLookup({ endpoint: WHG_ENDPOINT });
+/** The shared lookup takes the keeper's token, or none: at start (a token kept in this tab from before) and on every change. */
+const passToken = () => { const t = whgToken.get(); if (t) whgLookup().setToken(t); else whgLookup().clearToken(); };
 const showTokenState = () => { $('whg-token-state').textContent = whgToken.get() ? LW.tokenGiven : LW.tokenNone; };
 /** The review on screen, which a lookup adds to; null when none is (a lookup then begins one). */
 const reviewWork = () => (work && !$('review').hidden ? work : null);
 const hasLookups = () => !!work && ((work.lookups || []).length > 0 || work.others === null);
 const shortName = (service) => (isWhg(service.endpoint) ? LW.whg : service.title);
 const lookupOf = (id) => (work.lookups || []).find((l) => l.id === id);
-/** Text cleaned of the token, whatever the service said. The gazetteer module cleans its own errors too. */
+/** Text cleaned of the token, for what the gazetteer module does not word itself (a fault's stack). The module cleans its own errors and a query's. */
 const scrub = (text) => { const t = whgToken.get(); return t ? String(text).split(t).join('[token]') : String(text); };
 function lookupSay(text, warn = false) { const p = $('lookup-progress'); p.textContent = text; p.classList.toggle('warn', warn); }
 function lookupState(more) { state.lookup = { ...(state.lookup || {}), ...more }; }
@@ -749,12 +757,12 @@ function onPlaces(data) {
 function lookupService() {
   if (document.querySelector('input[name="lookup-service"]:checked')?.value !== 'other') return { service: serviceOf(WHG_ENDPOINT), whg: true };
   const endpoint = $('lookup-endpoint').value.trim();
-  let service, iri;
+  let service;
   try { if (!/^https:\/\//i.test(endpoint)) throw new Error(); service = serviceOf(endpoint); } catch { return { problem: LW.badEndpoint }; }
   if (isWhg(endpoint)) return { service: serviceOf(WHG_ENDPOINT), whg: true };
   const t = $('lookup-iri').value.trim();
-  if (t) { try { iri = iriFromTemplate(t); } catch { return { problem: LW.badTemplate }; } }
-  return { service, whg: false, iri };
+  if (t) { try { iriFromTemplate(t); } catch { return { problem: LW.badTemplate }; } }
+  return { service, whg: false, template: t || null };
 }
 function lookupOptions(extra = {}) {
   const km = parseFloat($('lookup-near-km').value);
@@ -764,7 +772,7 @@ function lookupOptions(extra = {}) {
 /** The places a lookup would take and what it would send, as runLookup() will plan it. */
 function planFor(svc, opts, places) {
   const chosen = selectPlaces({ work: reviewWork(), places, which: opts.places, service: svc.service, only: opts.only });
-  return planQueries(chosen, { ...opts, service: svc.service, batchSize: 25 });
+  return planQueries(chosen, { ...opts, service: svc.service, batchSize: 25, type: svc.whg ? undefined : manifests.get(svc.service.endpoint)?.type || undefined });
 }
 const workPlaces = () => Object.entries(reviewWork()?.places || {}).map(([iri, p]) => ({ iri, ...p }));
 
@@ -816,10 +824,11 @@ async function lookUp({ only = null, query = null, allNames, which } = {}) {
     opts.allNames = false;
   }
   let lookup;
+  // Another service's candidates' addresses: by the template given, else by its manifest's view.url (read below).
+  const template = { template: svc.template ?? null };
   try {
-    // WHG's lookup is the one shared in the page (one request in flight, whoever asks), given the token on every call.
-    lookup = svc.whg ? createLookup({ endpoint: WHG_ENDPOINT, token: whgToken.get() })
-      : createLookup({ endpoint: svc.service.endpoint, token: null, shared: false, ...(svc.iri ? { iri: svc.iri } : {}) });
+    // WHG's is the shared lookup, which already has the token (passToken); another service is sent none.
+    lookup = svc.whg ? whgLookup() : createLookup({ endpoint: svc.service.endpoint, token: null, shared: false, iri: iriVia(template) });
   } catch (e) { return lookupSay(scrub(e.message), true); }
   const w = existing || newWork(g.subjects, { reviewer: reviewer() });
   const name = existing ? workName : `${(files[0]?.name || 'review').replace(/\.gz$/i, '').replace(/\.[^.]+$/, '')}.krisis.json`;
@@ -831,9 +840,15 @@ async function lookUp({ only = null, query = null, allNames, which } = {}) {
   lookupSay(LW.sending(service));
   lookupState({ running: true, done: 0, total: null, stopped: null, summary: null, single: !!only });
   const show = () => { if (work !== w || $('review').hidden) beginReview(w, name, { focus: false }); else { order = reviewPlaces(work); render(false); } };
-  let result = null, fault = false;
+  let result = null, fault = false, settings = null;
+  if (!svc.whg) {
+    // Its type, and its address template unless one was given, from its manifest (asked for without a token).
+    try { settings = await manifestSettings(lookup, { signal: looking.signal }); } catch { settings = null; }
+    if (settings?.read) manifests.set(svc.service.endpoint, settings);
+    if (settings?.template && !template.template) template.template = settings.template;
+  }
   try {
-    result = await runLookup({ lookup, work: w, places, options: { ...opts, service: svc.service, scrub }, signal: looking.signal,
+    result = await runLookup({ lookup, work: w, places, options: { ...opts, service: svc.service, ...(settings?.type ? { type: settings.type } : {}) }, signal: looking.signal,
       onBatch: ({ done, total }) => { lookupSay(LW.progress({ done, total }, service)); lookupState({ done, total }); show(); } });
   } catch (e) {
     fault = true;
@@ -845,8 +860,10 @@ async function lookUp({ only = null, query = null, allNames, which } = {}) {
   show();
   const stopped = fault ? { kind: 'fault', message: null } : result.stopped;
   const said = [];
+  if (settings && !settings.read) said.push(LOOKUP_WORDS.noManifest);
   if (result) { const sum = LOOKUP_WORDS.summary(result.record.counts, svc.service.title); said.push(sum.problems, sum.counted); }
-  if (stopped) said.push(LOOKUP_WORDS.stopped({ ...stopped, message: stopped.message ? scrub(stopped.message) : null }), LW.kept);
+  // A stop's message is the gazetteer module's, which it has cleaned of the token.
+  if (stopped) said.push(LOOKUP_WORDS.stopped(stopped), LW.kept);
   lookupSay(said.join(' '), !!stopped);
   lookupState({ running: false, stopped: stopped?.kind || null, summary: said.join(' '), counts: result?.record.counts || null });
   fillChoices();
@@ -957,13 +974,12 @@ $('lookup').addEventListener('change', (e) => {
   refreshPreview();
 });
 $('lookup').addEventListener('input', (e) => { if (e.target.type === 'number' || e.target.type === 'url' || e.target.id === 'lookup-iri') refreshPreview(); });
-$('whg-forget').onclick = () => { $('whg-token').value = ''; whgToken.forget(); lookupSay(LW.forgotten); };
-whgToken.onChange((has) => {
-  showTokenState();
-  // The shared lookup forgets it too (token null clears it, where the gazetteer module can; clearToken if it has it).
-  if (!has) { try { const l = createLookup({ endpoint: WHG_ENDPOINT, token: null }); l.clearToken?.(); } catch { /* nothing to clear */ } }
-});
+// Forget: the shared lookup sends no token from its next request, and the keeper forgets it.
+$('whg-forget').onclick = () => { $('whg-token').value = ''; whgLookup().clearToken(); whgToken.forget(); lookupSay(LW.forgotten); };
+// A token given or forgotten (here, or by Chora through the same keeper) goes to the shared lookup.
+whgToken.onChange(() => { showTokenState(); passToken(); });
 showTokenState();
+passToken();
 $('lookup-send').onclick = () => lookUp();
 $('lookup-stop').onclick = () => looking?.abort();
 $('lookup-resume').onclick = () => { $('lookup-resume').hidden = true; if (afterStop) lookUp({ which: 'pending' }); };

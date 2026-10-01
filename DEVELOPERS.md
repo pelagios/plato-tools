@@ -953,10 +953,10 @@ matching (below). This sends each place's name to the gazetteer, and its coordin
   nothing writes a token into the work file, a report or an error. The command line reads WHG's from
   `WHG_TOKEN` only, refuses `--token`, sends another service a token only from the variable
   `--token-env` names and only over https, and never sends WHG's elsewhere. A query the service refuses
-  inside a good answer comes back with the service's words, which the module does not clean of the
-  token; they are kept (`queries[…].error`) only when the caller, who holds the token, gives `scrub`.
-  The tests look for the token in everything written, beside a control that the service received it
-  (that check found the unscrubbed per-query error before it was fixed).
+  inside a good answer comes back with the service's words, which the module cleans of the token (and
+  of the ones it replaced), and Krisis keeps them as they come (`queries[…].error`). The tests look for
+  the token in everything written, beside a control that the service received it and that the query's
+  words are kept, cleaned (that check found an unscrubbed per-query error before the module cleaned it).
 - **One request in flight.** Krisis relies on the gazetteer module for it and keeps no queue of its
   own: `createLookup` gives one shared lookup per endpoint in a page or worker, so Krisis's and
   Chora's lookups in one page share its queue and one request is in flight whoever asks, and across
@@ -965,14 +965,19 @@ matching (below). This sends each place's name to the gazetteer, and its coordin
   plan follows), so it works the same with the shared one; a later `createLookup` with a token
   changes the shared lookup's token, and its other options are the first call's (the command line
   makes one lookup a run, so its `--batch` and `--gazetteer-iri` stand). The tests make private
-  lookups (`shared: false`, `locks: null`, as Node 24 has `navigator.locks`): shared, each test was
-  answered by the first test's fake.
+  lookups (`shared: false`, `locks: null`, as Node 24 has `navigator.locks`, and a `memoryLedger()`
+  of their own): shared, each test was answered by the first test's fake.
 - **What is sent.** Each place's label, and only its label, unless `allNames` (`--all-names`) sends its
   other names too, one query each. WHG's queries always carry its type, `Place`, in the form the
-  module sends it (`whgQueryType`, which writes every form of Place so, and refuses any type but Place
+  module sends it (its `WHG_PLACE_TYPE`, which Krisis re-exports; the module refuses any type but Place
   or Period before a request), so that the preview is what WHG receives (confirmed from WHG's code: an
   unknown type, or two in one request, is refused, and a query without one is unsafe); another service's the first of
-  its manifest's `defaultTypes` (`typeFromManifest`), when given. Query properties FILTER, never boost,
+  its manifest's `defaultTypes`. The page and the command line read another service's manifest
+  through the lookup (`manifestSettings`, the module's `manifest()`, which never sends a token) before
+  its first query: its type, and its `view.url` as the template for its candidates' addresses unless
+  one is given (`--gazetteer-iri`, or the panel's field). A manifest that cannot be read is said, and
+  the lookup goes on without them. A dry run sends nothing, so its preview shows no type for another
+  service; on the page, the preview shows it once a lookup has read the manifest. Query properties FILTER, never boost,
   and a wrong value silently removes the right answer (WHG's country codes are patchy), so none is sent
   unless asked for: `countries` (the place's own codes as a JSON list of ISO 3166-1 alpha-2 codes, in
   capitals, as the module's owner confirmed; a code not of two letters is not sent) and
@@ -1037,9 +1042,12 @@ matching (below). This sends each place's name to the gazetteer, and its coordin
   the fallback, and no "remember in this browser", because the tools are served on the shared
   pelagios.org origin, where localStorage is readable by every page of the site (whether to move them is
   a maintainer's decision still to be taken; the keeper has a one-line switch for it). The page keeps no
-  copy: the field is emptied once the token is given, and every `createLookup` call is given the
-  keeper's token (Forget passes `token: null`, and calls `clearToken()` where the module has it). No
-  token is sent to another service. The panel previews places, queries, requests, the share of WHG's
+  copy: the field is emptied once the token is given, and the keeper's token is handed to the shared
+  WHG lookup at start and on every change (`setToken`, through the keeper's `onChange`); Forget calls
+  the lookup's `clearToken()` and the keeper's `forget()`, and no `createLookup` call carries a token. No
+  token is sent to another service. What the service says (a stop's message, a query's `error`) is
+  cleaned of the token by the module, and Krisis keeps it as it comes; only a fault's stack, which is
+  not the module's, is cleaned on the page before the console. The panel previews places, queries, requests, the share of WHG's
   5,000 requests a day, and the first 20 queries exactly as sent (the e2e compares them with what the
   fake WHG received); filters are off by default and say they hide the right answer too. Answers are
   merged into the review's work object after each batch, so "Save the review" works at any moment; a
@@ -1055,11 +1063,6 @@ matching (below). This sends each place's name to the gazetteer, and its coordin
   will cite. The e2e (`krisis_lookup_case`) answers for WHG with `page.route`, never the real service,
   and looks for the token in window.__plato, the page, the console, request addresses and bodies, and
   the saved work file, beside the control that it is in every request's Authorization header.
-- **Still open** (for the gazetteer module, whose owner plans them): a `manifest()` for another
-  service's `defaultTypes` and `view.url` (the command line has no way to fetch them through the module
-  yet, so it sends no type to another service, and takes `--gazetteer-iri`); a per-query `error` cleaned
-  of the token by the module itself; WHG's type as a constant of `whg.js`; and `mergeAttribution`
-  exported from `index.js` (Krisis imports it and `whgQueryType` from `whg.js` until then).
 
 ## Permissions
 

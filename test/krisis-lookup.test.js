@@ -9,14 +9,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { env, textFile } from './engine.js';
 import { detect } from '../src/engine/input.js';
-import { createLookup, WHG_ENDPOINT } from '../src/engine/gazetteer/index.js';
+import { createLookup, memoryLedger, WHG_ENDPOINT, WHG_PLACE_TYPE as MODULE_PLACE_TYPE } from '../src/engine/gazetteer/index.js';
 import { match, gather, distanceKm as matchDistance } from '../src/engine/krisis/match.js';
 import { readWork, serialiseWork, decide, WORK_VERSION } from '../src/engine/krisis/work.js';
 import { attestationsFrom, gazetteerSource } from '../src/engine/krisis/identity.js';
 import { apply } from '../src/engine/krisis/apply.js';
 import {
   planQueries, rankGazetteer, runLookup, selectPlaces, mergeAnswers, startLookup, newWork, serviceOf, licenceOf, lookupCandidatesOf,
-  distanceKm, WHG_SERVICE, PREVIEW_QUERIES, LOOKUP_ALGORITHM, authorityIris, typeFromManifest, iriFromTemplate,
+  distanceKm, WHG_SERVICE, PREVIEW_QUERIES, LOOKUP_ALGORITHM, authorityIris, typeFromManifest, iriFromTemplate, manifestSettings, iriVia, WHG_PLACE_TYPE,
 } from '../src/engine/krisis/lookup.js';
 import { LOOKUP_WORDS, krisisLookupNote } from '../src/engine/words.js';
 import { currentIdentities, linkState } from '../src/engine/krisis/identities.js';
@@ -59,10 +59,11 @@ function fakeWhg(answer = () => ({ result: [] }), { attribution = ATTRIBUTION } 
   return { fetch, calls };
 }
 const byName = (table) => (q) => ({ result: table[q.query] ?? [] });
-// Each test's lookup is its own (shared: false), and takes no Web Lock (locks: null; Node 24 has
-// navigator.locks): createLookup otherwise gives every caller of this process one lookup per endpoint,
-// with the first caller's fetch, so a test would be answered by an earlier test's fake.
-const PRIVATE = { shared: false, locks: null };
+// Each test's lookup is its own (shared: false), takes no Web Lock (locks: null; Node 24 has
+// navigator.locks) and counts in a ledger of its own: createLookup otherwise gives every caller of this
+// process one lookup per endpoint, with the first caller's fetch, so a test would be answered by an
+// earlier test's fake. A getter, so that no two lookups share a ledger.
+const PRIVATE = { get shared() { return false; }, get locks() { return null; }, get ledger() { return memoryLedger(); } };
 const lookupWith = (fake, more = {}) => createLookup({ endpoint: WHG_ENDPOINT, token: 'test-token', fetch: fake.fetch, sleep: () => Promise.resolve(), queryRate: null, ...PRIVATE, ...more });
 
 // ---- datasets ------------------------------------------------------------------------------------------
@@ -299,16 +300,18 @@ test('the token never reaches the work file, the stop message or the summary (wi
   const leaks = (s) => String(s).includes(TOKEN);
   assert.ok(leaks(JSON.stringify({ a: `Bearer ${TOKEN}` })), 'control: the search finds the token where it is');
   const g = await gathered([tyne(), place('york', 'York', [at(-1.08, 53.96)])]);
+  const refusing = () => ({ result: [], error: `bad query from ${TOKEN}` });
   for (const answer of [
     byName({ Newcastle: NEWCASTLES }),
     () => new Response(JSON.stringify({ detail: `Token ${TOKEN} is not valid` }), { status: 403 }),
     () => new Error(`connect failed for ${TOKEN}`),
-    (q) => ({ result: [], error: `bad query from ${TOKEN}` }),
+    refusing,
   ]) {
     const fake = fakeWhg(answer);
     const r = await runLookup({ lookup: createLookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: fake.fetch, sleep: () => Promise.resolve(), queryRate: null, maxRetries: 0, ...PRIVATE }), subjects: g.subjects, places: g.places, now: clock() });
     assert.ok(leaks(fake.calls[0].headers.Authorization), 'control: the token was in play, in the header');
     assert.ok(!leaks(serialiseWork(r.work)), 'not in the work file');
+    if (answer === refusing) assert.ok(Object.values(r.record.queries).some((q) => q.error === 'bad query from [token]'), 'control: the query\'s words are kept, cleaned');
     assert.ok(!leaks(JSON.stringify(r.stopped)) && !leaks(r.stopped ? LOOKUP_WORDS.stopped(r.stopped) : ''), 'not in the stop');
     assert.ok(!leaks(JSON.stringify(r.plan)) && !leaks(JSON.stringify(LOOKUP_WORDS.summary(r.record.counts, 'x'))), 'not in the plan or summary');
     assert.ok(!fake.calls.some((c) => leaks(c.url) || leaks(JSON.stringify(c.body))), 'not in an address or a body');
@@ -388,16 +391,17 @@ test('another reconciliation service is cited by its address; mergeAnswers and s
   assert.equal(work.candidates.length, 1);
   assert.deepEqual(attestationsFrom((decide(work, work.candidates[0].id, 'match', { at: NOW }), work), { reviewer: REVIEWER })[0].attestation.citations, [{ source: gazetteerSource(s) }]);
 });
-test('a query the service refuses inside a good answer is unanswered and marked refused, without the service\'s words', async () => {
+test('a query the service refuses inside a good answer is unanswered and marked refused, with the service\'s words as the module cleaned them', async () => {
   const g = await gathered([tyne(), place('york', 'York', [at(-1.08, 53.96)])]);
   const r = await runLookup({ lookup: lookupWith(fakeWhg((q) => (q.query === 'York' ? { result: [], error: 'start after end' } : { result: [] }))), subjects: g.subjects, places: g.places, now: clock() });
-  assert.deepEqual(r.record.queries[A('york')], { state: 'unanswered', sent: ['York'], refused: true, found: 0, added: 0 });
+  assert.deepEqual(r.record.queries[A('york')], { state: 'unanswered', sent: ['York'], refused: true, error: 'start after end', found: 0, added: 0 });
   assert.deepEqual(r.record.queries[A('newcastle')], { state: 'answered', sent: ['Newcastle'], found: 0, added: 0 }, 'control');
-  assert.ok(!serialiseWork(r.work).includes('start after end'));
-  // Given a scrub by the caller who holds the token, the service's words are kept, cleaned.
-  const fake = fakeWhg((q) => (q.query === 'York' ? { result: [], error: 'bad scope for T0K' } : { result: [] }));
-  const kept = await runLookup({ lookup: lookupWith(fake), subjects: g.subjects, places: g.places, options: { scrub: (t) => t.split('T0K').join('[token]') }, now: clock() });
+  // The words carry the token (lookupWith's 'test-token'): the gazetteer module cleans them, and Krisis keeps them as cleaned.
+  const fake = fakeWhg((q) => (q.query === 'York' ? { result: [], error: 'bad scope for test-token' } : { result: [] }));
+  const kept = await runLookup({ lookup: lookupWith(fake), subjects: g.subjects, places: g.places, now: clock() });
+  assert.equal(fake.calls[0].headers.Authorization, 'Bearer test-token', 'control: that token was in play');
   assert.equal(kept.record.queries[A('york')].error, 'bad scope for [token]');
+  assert.ok(!serialiseWork(kept.work).includes('test-token'), 'not in the work file');
   assert.equal(kept.record.queries[A('york')].state, 'unanswered', 'still not "no match"');
 });
 
@@ -466,6 +470,44 @@ test('another service: its ids made into addresses by a template, and its type f
   assert.equal(Object.values(fake.calls[0].body.queries)[0].type, 'Q486972');
   assert.equal(typeFromManifest({}), null);
   assert.throws(() => iriFromTemplate('https://example.org/'), /\{\{id\}\}/);
+});
+test('manifestSettings reads another service\'s type and view.url through the lookup, without the token; iriVia follows a template learnt later', async () => {
+  const calls = [];
+  const serve = (manifest) => async (url, init) => {
+    calls.push({ method: init.method, headers: init.headers });
+    if (init.method === 'GET') return manifest instanceof Response ? manifest : new Response(JSON.stringify(manifest), { status: 200 });
+    const out = {};
+    for (const k of Object.keys(JSON.parse(init.body).queries)) out[k] = { result: [{ id: 'Q1425428', name: 'Newcastle upon Tyne', score: 30 }] };
+    return new Response(JSON.stringify(out), { status: 200 });
+  };
+  const endpoint = 'https://wd.example.org/reconcile';
+  const holder = { template: null };
+  const lookup = createLookup({ endpoint, token: 'other-token', fetch: serve({ name: 'x', defaultTypes: [{ id: 'Q486972', name: 'human settlement' }], view: { url: 'https://www.wikidata.org/entity/{{id}}' } }), queryRate: null, iri: iriVia(holder), ...PRIVATE });
+  const m = await manifestSettings(lookup);
+  assert.deepEqual(m, { read: true, type: 'Q486972', template: 'https://www.wikidata.org/entity/{{id}}' });
+  assert.equal(calls[0].headers.Authorization, undefined, 'the manifest is asked for without the token');
+  const s = serviceOf(endpoint);
+  const g = await gathered([place('newcastle', 'Newcastle', [at(-1.61, 54.97)])]);
+  const before = await runLookup({ lookup, subjects: g.subjects, places: g.places, options: { service: s, type: m.type }, now: clock() });
+  assert.equal(calls[1].headers.Authorization, 'Bearer other-token', 'control: a query carries it');
+  assert.equal(before.record.counts.skipped.noIri, 1, 'no template yet: the id is not an address');
+  holder.template = m.template;
+  const after = await runLookup({ lookup, subjects: g.subjects, places: g.places, options: { service: s, type: m.type }, now: clock() });
+  assert.deepEqual(after.work.candidates.map((c) => c.candidate_candidate), ['https://www.wikidata.org/entity/Q1425428'], 'the template learnt later is used');
+  assert.equal(iriVia({ template: null })('https://x.example.org/1'), 'https://x.example.org/1', 'an id that is an address is its own');
+  // Unread, or with a view.url that is not a template: nothing taken from it, and no throw.
+  const refused = createLookup({ endpoint, fetch: serve(new Response('{}', { status: 500 })), queryRate: null, maxRetries: 0, ...PRIVATE });
+  assert.deepEqual(await manifestSettings(refused), { read: false, type: null, template: null });
+  const odd = createLookup({ endpoint, fetch: serve({ name: 'x', view: { url: 'https://example.org/' } }), queryRate: null, ...PRIVATE });
+  assert.deepEqual(await manifestSettings(odd), { read: true, type: null, template: null });
+});
+test('WHG\'s type is the gazetteer module\'s own, and every WHG query carries it', async () => {
+  assert.equal(WHG_PLACE_TYPE, MODULE_PLACE_TYPE);
+  assert.equal(WHG_PLACE_TYPE, 'Place');
+  const g = await gathered([tyne()]);
+  const fake = fakeWhg();
+  await runLookup({ lookup: lookupWith(fake), subjects: g.subjects, places: g.places, now: clock() });
+  assert.deepEqual(Object.values(fake.calls[0].body.queries).map((q) => q.type), ['Place']);
 });
 test('--near sends a point and radius; an answer that says the filter was not applied is warned of', async () => {
   const g = await gathered([tyne(), place('york', 'York', [at(-1.08, 53.96)])]);

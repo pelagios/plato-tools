@@ -422,6 +422,8 @@ export const LOOKUP_WORDS = {
   tokenOnCommandLine: 'the token is never given on the command line, where it would be kept in the shell\'s history and seen by other programs: set WHG_TOKEN in the environment instead (for another service, name the variable that holds its token with --token-env).',
   tokenOverHttp: 'a token is never sent over http://, where anyone on the way could read it: give the service\'s https:// address.',
   tokenEnvMissing: (name) => `--token-env names ${name}, which is not set in the environment.`,
+  /** Another service whose manifest could not be read (lookup.js manifestSettings). */
+  noManifest: "The service's manifest (what it says of itself) could not be read, so queries are sent to it without a type, and a candidate's id is made into a web address only by the template given, if any.",
   linksUnknown: 'The dataset was not read, so candidates it already links to a place, or says are different places, could not be left out.',
   noPlaces: 'No places to look up with this choice.',
   /** The preview, before anything is sent: how much is asked, and the first queries exactly. */
