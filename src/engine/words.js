@@ -414,6 +414,18 @@ export function krisisNote(kind, algorithm) {
     ? `Accepted by the reviewer in a match review (PLATO tools, Krisis), from suggestions made by comparing names (${algorithm}).`
     : `The reviewer judged these to be different places in a match review (PLATO tools, Krisis), rejecting a suggestion made by comparing names (${algorithm}).`;
 }
+/**
+ * The note an attestation made from a language model's suggestion carries (src/engine/hermes/text/
+ * attest.js): who suggested it, with which prompt and when, and that a person confirmed and linked it;
+ * the model's guess at the kind of place when the reviewer did not confirm one; and the span the model
+ * gave when the reviewer adjusted it.
+ */
+export function hermesTextNote({ model, provider, prompt, date, kindGuess, adjustedFrom }) {
+  let n = `Suggested by ${model} (${provider}), prompt ${prompt}, ${date}; confirmed and linked by the contributor.`;
+  if (kindGuess) n += ` The model's guess at the kind of place, not confirmed: ${kindGuess}.`;
+  if (adjustedFrom) n += ` The contributor adjusted the span from characters ${adjustedFrom[0]} to ${adjustedFrom[1]}.`;
+  return n;
+}
 /** What finishing a review with the dataset output says (src/engine/krisis/apply.js), and matching's own warnings. */
 export const KRISIS_TEXT = {
   /** The other dataset gives no title, so the attestations would cite it by its file's name. */

@@ -259,6 +259,18 @@ Object.assign(LOSS_TEXT, {
   'preview-partial': 'This is a preview of the first records only: the rest of the file was not read, and nothing was checked as a whole or written. The example says why the records shown may not be all there are, or not in the order a conversion writes them. Check or convert the file to read all of it.',
   'workbook-whole': 'A workbook is read whole into memory, so a very large one may not fit: save the sheet as CSV (UTF-8) and choose the CSV file, which is read a row at a time.',
   'generic-same-id-label': "The rows read as one place, as they share an id, give different names, so none is picked as the place's label: the label is the id, and every name stays in its own row's attestation. The example gives the id and the names. If the rows are not one place, give them ids of their own.",
+  // Hermes, place names in a text (src/engine/hermes/text/validate.js, TEXT_KINDS): what a language model's reply had that the tools did not take.
+  'text-reply-not-json': "The model's reply to a part of the text is not JSON, so nothing was taken from it. That part has no result, and is sent again if the run is resumed.",
+  'text-reply-not-mentions': "The model's reply to a part of the text is JSON, but not the list of place names asked for, so nothing was taken from it. That part has no result, and is sent again if the run is resumed. The example says what was wrong.",
+  'text-reply-too-large': "The model's reply to a part of the text was far longer than any list of place names could be, so it was not read. That part has no result, and is sent again if the run is resumed.",
+  'text-reply-cut-off': "The model's reply to a part of the text was cut off at the most it may write, so it was not read: the part was cut in two and each half sent instead. A reply still cut off for a part too short to cut again leaves that part with no result.",
+  'text-reply-refused': 'The model declined to answer for a part of the text, so that part has no result. The example gives what the provider said.',
+  'text-mention-invalid': "A name in the model's reply is not given as asked (the name, the words before and after it, its position and its kind), or is empty, so it is not suggested. The example says what was wrong.",
+  'text-mention-too-long': 'A name in the reply is longer than any place name (more than 200 characters), so it is not suggested.',
+  'text-not-in-text': "A name in the reply does not occur in that part of the text, character for character, so it is not suggested: the model invented or altered it, or the text held instructions that planted it. Only words that are in the text are ever suggested. The example gives the name.",
+  'text-mention-repeated': "A name in the reply is a second answer for an occurrence already given, so it is not suggested twice. The example gives the name.",
+  'text-too-many': 'The reply lists more than 2,000 names for one part of the text, more than it could hold; those after the first 2,000 are not suggested.',
+  'text-kind-unknown': "A name's kind of place in the reply is not one of those asked for, so it is suggested as \"other\". The kind is only the model's guess in any case, until the reviewer confirms one. The example gives the kind.",
 });
 
 // ---- a key a format has no place for, in words ------------------------------------------------------
