@@ -58,7 +58,8 @@ input[type=radio], input[type=checkbox] { accent-color: var(--accent); }
 .intro-toggle .if-hidden, html.intro-hidden .intro-toggle .if-shown { display: none; }
 html.intro-hidden .intro-toggle .if-hidden { display: inline; }
 .plato-mark { height: auto; }
-.intro .plato-mark { float: right; width: 150px; margin: 0 0 .25rem 1rem; }
+/* Wide enough for the words in Plato's thought bubble to be read (250px on a desktop screen). */
+.intro .plato-mark { float: right; width: 250px; margin: 0 0 .25rem 1rem; }
 @media (prefers-color-scheme: dark) { .plato-mark { filter: invert(1); } }
 .lede { margin: 0; color: var(--fg); }
 .lede .promise { font-weight: 700; }
@@ -356,7 +357,7 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; tex
   h1 { font-size: 2rem; }
   .masthead { flex-wrap: wrap; align-items: flex-end; }
   .masthead-side { flex-wrap: wrap; gap: .4rem; }
-  .intro .plato-mark { width: 92px; margin-left: .6rem; }
+  .intro .plato-mark { float: none; display: block; width: min(250px, 75%); margin: 0 auto .6rem; }
   .tools { grid-template-columns: 1fr; }
   section { padding: .9rem 1rem; }
 }
