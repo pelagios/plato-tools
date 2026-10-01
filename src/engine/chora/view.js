@@ -119,9 +119,12 @@ export function viewPlace(record, ctx = {}) {
     for (const g of a.geometries || []) {
       const geojson = drawable(g);
       // A location given only relative to other places (PLATO #19: "between Assuan and Philai"): kept in
-      // words, with its anchors (one, or a list), never drawn and never used to place the place.
+      // words, with its anchors (one, or a list), never drawn and never used to place the place. Only
+      // where no coordinates are given at all: one with coordinates Chora cannot draw (a WKT polygon)
+      // and a qualification is not "only relative", and is left out as it was.
       const q = g && typeof g === 'object' && g.qualification && typeof g.qualification === 'object' ? g.qualification : null;
-      if (!geojson && q && (q.relativeQualifier !== undefined || q.relativeTo !== undefined)) {
+      const coordinates = g && typeof g === 'object' && (g.geojson !== undefined || g.reprPoint !== undefined || g.wkt !== undefined);
+      if (!geojson && !coordinates && q && (q.relativeQualifier !== undefined || q.relativeTo !== undefined)) {
         const anchors = [].concat(q.relativeTo ?? []).filter((x) => typeof x === 'string' && x).map((x) => {
           const other = place(x);
           return other ? { id: other.id, label: other.label || tail(x), place: true } : { id: x, label: tail(x), place: false };

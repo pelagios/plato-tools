@@ -1092,7 +1092,9 @@ and reaches nothing.
   or a list, #19, and no coordinates) is a line under Locations in words: "between Assuan and 1767
   (relative; not drawn)", with its distance and bearing when given. An anchor that is a place of the
   dataset is a link to it, any other its address's last segment. It is never drawn and never places
-  the place on the map. A location with coordinates and a qualification is drawn, as before. A name
+  the place on the map. A location with coordinates and a qualification is drawn, as before; one
+  with coordinates Chora cannot draw (a WKT polygon) and a qualification is not "only relative",
+  and is left out as it was. A name
   is written with its language tag (else its script), its romanised form, and the system of
   transliteration where one is named (#21: "Sṯt (egy-Latn-t-egy-egyd) in Egyptological
   transliteration" for a Demotic name known only so; with a romanised form the system is that

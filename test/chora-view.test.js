@@ -416,3 +416,15 @@ test('Trismegistos #21, #22: a name known only in transliteration says so, with 
   const home = viewPlace({ label: 'x', attestations: [{ relations: [{ relationType: P + 'HomelandOf', relatesTo: 'https://example.org/people/agrianes', relatedLabel: 'the Agrianes' }] }] });
   assert.deepEqual(home.relations.map((r) => [r.typeLabel, r.label, r.related]), [['HomelandOf', 'the Agrianes', null]]);
 });
+
+// ---- The self-review of 1 October 2026: failed before its fix. ---------------------------------
+test('#19: a location with coordinates Chora cannot draw (a WKT polygon) and a qualification is neither drawn nor written as relative: it is not "only relative"', () => {
+  const q = { relativeQualifier: P + 'Near', relativeTo: id('assuan') };
+  const wkt = viewPlace({ label: 'x', attestations: [{ geometries: [{ wkt: 'POLYGON ((0 0, 1 0, 1 1, 0 0))', qualification: q }] }] });
+  assert.deepEqual([wkt.geometries, wkt.relative], [[], []]);
+  // The controls: the same qualification with no coordinates at all is relative; with a WKT point it is drawn.
+  const none = viewPlace({ label: 'x', attestations: [{ geometries: [{ sourceLabel: 'near Assuan', qualification: q }] }] });
+  assert.deepEqual(none.relative.map((r) => r.qualifierLabel), ['near']);
+  const point = viewPlace({ label: 'x', attestations: [{ geometries: [{ wkt: 'POINT (1 2)', qualification: q }] }] });
+  assert.deepEqual([point.geometries.map((g) => g.geojson.coordinates), point.relative], [[[1, 2]], []]);
+});
