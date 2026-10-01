@@ -755,7 +755,8 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   `transformRequest(() => [[cat, subj], …], { onBlocked })` for MapLibre; `needs(el, cat, subj)` for
   the one line; `open({ focus: 'cat:subj' })`; `onBeforeReload(fn, { loses })`, `reloadLosses()` and `reload({ confirmed })` (a part of the page that
   cannot keep something across the reload says so in `loses()`, and the panel then asks first, with
-  Cancel: the main page names the files chosen, a run in progress and a review open); `mount({ state })`
+  Cancel: the main page names the files chosen, a run in progress and the review decisions not yet
+  saved; Chora a line or area still being drawn, an address typed in the paste box and a save running); `mount({ state })`
   for the header button and the canary; `keepWorkingData()`; and `token`, the World Historical
   Gazetteer token's keeper (`get`, `set`, `forget`, `onChange`, as `src/lib/whg-token.js` had them,
   and `remember(on)`, `remembered()`: kept for the tab unless the user chooses to remember it).

@@ -21,6 +21,9 @@ maplibregl.setWorkerUrl(blobWorkerUrl(mapWorkerUrl));
 export const STATUS_COLOURS = { asserted: '#2757dd', reported: '#7a4fc9', tentative: '#b7791f', doubted: '#6b7280', denied: '#c0392b' };
 const status = (fallback) => ['match', ['get', 'status'], ...Object.entries(STATUS_COLOURS).flat(), fallback];
 const EMPTY = { type: 'FeatureCollection', features: [] };
+// On a narrow screen the attribution, written out, runs over the scale bar: there it is MapLibre's
+// compact one, a button that shows it in full.
+const NARROW = () => globalThis.matchMedia?.('(max-width: 40rem)').matches ?? false;
 
 // An address may carry a basemap's key, in its query string (CARTO's api_key) or in its path (a pasted
 // one's): nothing of it but its site is written to the console.
@@ -42,11 +45,13 @@ export function createMap(container, { state, onPlaceClick, onStyleError }) {
   } });
   const map = new maplibregl.Map({
     container, style: { version: 8, sources: {}, layers: [{ id: 'blank', type: 'background', paint: { 'background-color': '#dde3ea' } }] },
-    center: [10, 30], zoom: 1.2, attributionControl: { compact: false }, maplibreLogo: false,
+    center: [10, 30], zoom: 1.2, attributionControl: { compact: NARROW() }, maplibreLogo: false,
     transformRequest: guard,
   });
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
   map.addControl(new maplibregl.ScaleControl(), 'bottom-left');
+  // MapLibre opens the compact attribution at first: closed here, it is one button beside the scale.
+  if (NARROW()) map.once('idle', () => { const a = container.querySelector('.maplibregl-ctrl-attrib'); a?.classList.remove('maplibregl-compact-show'); a?.removeAttribute('open'); });
   map.on('idle', () => { state.mapReadyCount = (state.mapReadyCount || 0) + 1; });
   // A style being loaded that fails (it is not there, or not a style) never fires style.load: the map
   // is left with nothing on it, and nothing to draw on. An error with no source or tile is the style's.

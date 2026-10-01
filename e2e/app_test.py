@@ -2043,6 +2043,19 @@ def chora_checks(pw, url, tmp):
                 and used and got and OSM in csp['origins'] and (after.get('resumed') or {}).get('files') == ['antonine-allow.json'] and after.get('places') == ant_places), {
             'line': line, 'before': before, 'panel focus': at, 'used': used, 'tiles': hits['osm'] - h0, 'policy': csp['origins'], 'resumed': after.get('resumed')}
     attempt('Chora: OpenStreetMap chosen asks nothing and says "Needs permission"; its button opens the panel at that permission; allowed and reloaded, its tiles are fetched, with the dataset still open', allow_reload)
+    def chora_asks():
+        fresh(); choose('osm')
+        page.fill('#paste', 'https://tiles.example.org/style.json')   # typed, not yet added
+        page.click('[data-permission="basemap:osm"] button')
+        until(page, '() => document.getElementById("permissions-panel")?.open', 10)
+        page.check('#permissions-panel fieldset.perm[data-key="basemap:osm"] input[value="allowed"]')
+        page.click('#permissions-panel [data-reload]')
+        asked = page.inner_text('#permissions-panel .perm-confirm') if page.is_visible('#permissions-panel .perm-confirm') else ''
+        page.click('#permissions-panel [data-reload-cancel]'); page.keyboard.press('Escape')
+        kept = page.input_value('#paste') if page.is_visible('#paste') else ''
+        page.evaluate(RESET, [None, None])
+        return 'pasting a basemap, not yet added' in asked and kept == 'https://tiles.example.org/style.json', {'asked': asked, 'kept': kept}
+    attempt('Chora: a reload for a permission while an address waits in the paste box says so first, and Cancel keeps it', chora_asks)
     PROBE = 'u => { const m = window.__chora_map; const id = "probe-" + Math.random().toString(36).slice(2); m.addSource(id, { type: "raster", tiles: [u + "/{z}/{x}/{y}.png?" + id], tileSize: 256 }); m.addLayer({ id, type: "raster", source: id }); }'
     def revoke():
         fresh({'basemap:osm': {'state': 'allowed'}}, 'osm')

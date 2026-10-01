@@ -361,6 +361,7 @@ $('target').onchange = () => { document.querySelector('[data-for="ntriples-outpu
 // into the work object at once (decide() in engine/krisis/work.js), which "Save the review" saves
 // and Finish hands to the engine to make the attestations.
 let work = null, workName = 'review.krisis.json', order = [], cursor = 0, current = 0, basisFor = null, allDone = false;
+let unsaved = 0;   // decisions made since the review began or was last saved (a reload would lose them)
 const REVIEWER_KEY = 'plato-tools.reviewer';
 function remembered() { try { return JSON.parse(localStorage.getItem(REVIEWER_KEY)) || {}; } catch { return {}; } }
 function remember() {
@@ -409,7 +410,7 @@ async function resume(file) {
   try { const differ = await filesDiffer(w.subjects, files); showWarning(differ.length ? W.differs(differ) : ''); } catch { showWarning(''); }
 }
 function beginReview(w, name) {
-  work = w; workName = name || workName; basisFor = null; allDone = false;
+  work = w; workName = name || workName; basisFor = null; allDone = false; unsaved = 0;
   order = reviewPlaces(work);
   cursor = Math.min(Math.max(0, work.cursor || 0), Math.max(0, order.length - 1));
   // A place with no candidates has nothing to review: start at the first that has some.
@@ -451,6 +452,7 @@ function move(dir) {
 function decideOn(id, kind, basis) {
   const cands = candidatesOf(work, order[cursor]);
   decide(work, id, kind, { identityType: kind === 'distinct' ? 'exactMatch' : $('identity-type').value, basis });
+  unsaved++;
   basisFor = null;
   const u = undecided(order[cursor]);
   if (kind && u < 0) return move(1);   // every candidate of this place decided: on to the next
@@ -540,6 +542,7 @@ $('save-review').onclick = () => {
   const who = reviewer(); if (who) work.reviewer = who;
   saveBlob(new Blob([serialiseWork(work)], { type: 'application/json' }), workName);
   Object.assign(state, { reviewSaved: workName });
+  unsaved = 0;
 };
 $('finish').onclick = () => {
   if (!work) return;
@@ -570,5 +573,5 @@ permissions.mount({ state });
 // A tool that keeps more (Krisis's review) says what it would lose the same way, with onBeforeReload.
 permissions.onBeforeReload(() => {}, { loses: () => (files.length ? RELOAD_LOSES.files(files.map((f) => f.name)) : null) });
 permissions.onBeforeReload(() => {}, { loses: () => (busy ? RELOAD_LOSES.running : null) });
-permissions.onBeforeReload(() => {}, { loses: () => (state.phase === 'reviewing' ? RELOAD_LOSES.review : null) });
+permissions.onBeforeReload(() => {}, { loses: () => (work && unsaved ? RELOAD_LOSES.review(unsaved) : null) });
 startWorker();

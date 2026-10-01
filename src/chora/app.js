@@ -12,6 +12,7 @@ import { fingerprint, loadDrafts, saveDrafts, draftsWritten, forgetAllDrafts } f
 import { take as takeHandoff, clear as clearHandoff, keepForReload, takeResume } from './handoff.js';
 import { serialQueue, pageRequest, answers } from './queue.js';
 import * as permissions from '../lib/permissions.js';
+import { RELOAD_LOSES } from '../lib/permission-words.js';
 
 const $ = (id) => document.getElementById(id);
 const state = (window.__chora = { phase: 'loading', placeId: null, pendingCount: 0, basemap: null, mapReadyCount: 0, blocked: 0, lastSave: null });
@@ -439,6 +440,8 @@ function renderBasemaps() {
   const groups = new Map();
   // A basemap set to Never in Permissions is not offered (and nothing says why: that is Never).
   for (const b of basemaps.all()) { if (basemaps.refused(b)) continue; if (!groups.has(b.group)) groups.set(b.group, []); groups.get(b.group).push(b); }
+  // What is typed in the paste box survives the list being drawn again (a permission changed, say).
+  const typed = $('paste')?.value || '';
   // The line asking for permission goes first, where it is seen without scrolling the list.
   $('basemap-options').innerHTML = (basemapError ? `<p class="warn" role="status">${esc(basemapError)}</p>` : '') + '<div id="basemap-needs"></div>' + [...groups].map(([g, bs]) => `<fieldset><legend>${esc(g)}</legend>${bs.map((b) => `<label class="${b.disabled ? 'disabled' : ''}">
       <input type="radio" name="basemap" value="${esc(b.id)}"${b.id === (waiting || cur).id ? ' checked' : ''}${b.disabled ? ' disabled' : ''}> ${esc(b.name)}${b.disabled ? ` <small>(${esc(b.disabled)})</small>` : ''}
@@ -447,6 +450,7 @@ function renderBasemaps() {
       <input id="paste" type="url" placeholder="https://…/style.json or https://…/{z}/{x}/{y}.png" autocomplete="off">
       <button type="submit">Add</button> <span id="paste-error" class="warn"></span></form>`
     + (state.blocked ? `<p class="muted">Refused ${n(state.blocked)} request${state.blocked === 1 ? '' : 's'} to ${esc(state.blockedOrigins.join(', '))}, not the basemap's site.</p>` : '');
+  if (typed) $('paste').value = typed;
   // One line for each permission the basemap wanted still needs (a pasted style may name several sites).
   state.basemapWaiting = waiting?.id || null;
   if (waiting) {
@@ -480,6 +484,7 @@ $('basemap-options').addEventListener('submit', (e) => {
   const b = basemaps.fromPaste($('paste').value);
   if (!b) { $('paste-error').textContent = 'That is not an https address.'; return; }
   basemaps.addPasted(b);
+  $('paste').value = '';   // added: nothing waits in the box now
   want(b);
 });
 async function useBasemap(b) {
@@ -587,6 +592,13 @@ permissions.onBeforeReload(async () => {
   const m = mapApi.map;
   await keepForReload({ files, placeId: state.placeId, camera: { center: m.getCenter().toArray(), zoom: m.getZoom(), bearing: m.getBearing(), pitch: m.getPitch() } });
 });
+// What the reload keeps not: a line or area still being drawn (finished drawings are kept), an
+// address in the paste box not yet added, a save running. Each is said in the panel first, with Cancel.
+permissions.onBeforeReload(() => {}, { loses: () => {
+  try { return mapApi.draw?.getSnapshot().some((f) => f.properties?.currentlyDrawing) ? RELOAD_LOSES.drawing : null; } catch { return null; }
+} });
+permissions.onBeforeReload(() => {}, { loses: () => ($('paste')?.value.trim() ? RELOAD_LOSES.pasted : null) });
+permissions.onBeforeReload(() => {}, { loses: () => (state.phase === 'saving' ? RELOAD_LOSES.saving : null) });
 useBasemap(basemaps.current());
 startWorker().then(async () => {
   // Back from a reload for a permission: the dataset, the place and the view as they were.

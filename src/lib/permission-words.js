@@ -90,7 +90,10 @@ export const REMEMBERED = {
 export const RELOAD_LOSES = {
   files: (names) => `The file${names.length === 1 ? '' : 's'} you chose (${names.join(', ')}): you would choose ${names.length === 1 ? 'it' : 'them'} again.`,
   running: 'The check, conversion or comparison running now, and its result.',
-  review: 'Your match review’s decisions since you last saved it: save the review first.',
+  review: (n) => `${n} decision${n === 1 ? '' : 's'} in your match review not yet saved: save the review first.`,
+  drawing: 'The line or area you are drawing, not yet finished.',
+  pasted: 'The address in the box for pasting a basemap, not yet added.',
+  saving: 'The save running now.',
 };
 
 /** The one line a feature shows while it waits for a permission. */
