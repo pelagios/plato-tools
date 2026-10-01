@@ -1087,9 +1087,12 @@ and reaches nothing.
   `timespanRole` is `EvidenceSpan` (PLATO #20) dates the texts that mention the place: its timeline
   entries are `evidence: true`, written "mentioned in texts dated …" and drawn hatched, with a
   legend only when there is one, and it is never a location's own date. `WhenTrue`, the default,
-  and any role PLATO does not define are shown as the date of the claim. Qualifications
-  (`relativeTo`, #19) are not shown: a location given only relative to other places has nothing
-  to draw, and is not on the card.
+  and any role PLATO does not define are shown as the date of the claim. A location given only
+  relative to other places (a `qualification` with `relativeQualifier` or `relativeTo`, one anchor
+  or a list, #19, and no coordinates) is a line under Locations in words: "between Assuan and 1767
+  (relative; not drawn)", with its distance and bearing when given. An anchor that is a place of the
+  dataset is a link to it, any other its address's last segment. It is never drawn and never places
+  the place on the map. A location with coordinates and a qualification is drawn, as before.
 - **The overview** reads a covering index of the places with a point (`pov`), not the records.
 - **A pool and an outputs folder of its own.** A SQLite SAHPool holds every file in its folder open,
   so a second tab on the same pool cannot start. Chora's page asks the worker for its own

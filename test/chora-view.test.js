@@ -268,3 +268,34 @@ test('#20: a timespan an attestation gives as EvidenceSpan is the span of the te
   const u = viewPlace({ label: 'x', attestations: [{ timespans: [{ startEarliest: '1000' }], timespanRole: 'https://example.org/role/Other' }] });
   assert.deepEqual(u.timeline.map((t) => t.evidence), [false]);
 });
+
+test('#19: a location given only relative to other places is kept, in words, with its anchors; it is never drawn and never places the place', () => {
+  const places = { [id('assuan')]: { id: id('assuan'), label: 'Assuan', reprPoint: [32.9, 24.1], bbox: [32.9, 24.1, 32.9, 24.1] } };
+  const lookup = (x) => places[x] || null;
+  const v = viewPlace({ label: 'Hiera Sykaminos', ccodes: ['EG'], attestations: [
+    { '@id': att('between'), geometries: [{ sourceLabel: 'between Assuan and Philai', qualification: { relativeQualifier: P + 'BetweenXAndY', relativeTo: [id('assuan'), 'https://www.trismegistos.org/place/1767'] } }], sources: [src] },
+    { geometries: [{ qualification: { relativeQualifier: 'plato:Near', relativeTo: id('assuan'), relativeDistance: 500, relativeBearing: 45 } }], negated: true, sources: [src] },
+  ] }, { lookup, ccodeBbox: () => GB });
+  assert.deepEqual(v.relative.map((r) => [r.qualifierLabel, r.anchors, r.distance, r.bearing, r.sourceLabel, r.status]), [
+    ['between', [{ id: id('assuan'), label: 'Assuan', place: true }, { id: 'https://www.trismegistos.org/place/1767', label: '1767', place: false }], null, null, 'between Assuan and Philai', 'asserted'],
+    ['near', [{ id: id('assuan'), label: 'Assuan', place: true }], 500, 45, null, 'denied'],
+  ]);
+  assert.equal(v.relative[0].attestationId, att('between'));
+  assert.deepEqual(v.geometries, [], 'nothing to draw');
+  assert.deepEqual(v.fallback, { kind: 'ccodes', bbox: GB }, 'the anchors do not place it');
+  // The control: a location with coordinates and a qualification is drawn, as before, and is not in words.
+  const c = viewPlace({ label: 'x', attestations: [{ geometries: [{ ...pt(1, 1), qualification: { relativeQualifier: P + 'Near', relativeTo: id('assuan') } }] }] }, { lookup });
+  assert.equal(c.geometries.length, 1);
+  assert.deepEqual(c.relative, []);
+  assert.deepEqual(c.fallback, { kind: 'geometry', bbox: [1, 1, 1, 1] });
+  // Words for each qualifier PLATO defines; one it does not, by its address's last segment; none, "relative to".
+  const word = (q) => viewPlace({ label: 'x', attestations: [{ geometries: [{ qualification: { ...(q ? { relativeQualifier: q } : {}), relativeTo: id('a') } }] }] }).relative[0].qualifierLabel;
+  assert.deepEqual(['Near', 'Within', 'Beyond', 'UpstreamOf', 'BetweenXAndY'].map((k) => word(P + k)), ['near', 'within', 'beyond', 'upstream of', 'between']);
+  assert.equal(word('https://example.org/q/DownstreamOf'), 'DownstreamOf');
+  assert.equal(word(undefined), 'relative to');
+  // What the schema refuses is dropped, not shown: an anchor that is not an address, a distance that is not a number.
+  const bad = viewPlace({ label: 'x', attestations: [{ geometries: [{ qualification: { relativeQualifier: P + 'Near', relativeTo: [id('a'), 5, '<b>'], relativeDistance: '500', relativeBearing: NaN } }] }] }).relative[0];
+  assert.deepEqual([bad.anchors.map((a) => a.label), bad.distance, bad.bearing], [['a', '<b>'], null, null]);
+  // A location that is neither drawable nor relative is still not shown.
+  assert.deepEqual(viewPlace({ label: 'x', attestations: [{ geometries: [{ sourceLabel: '??', qualification: { certainty: 0.5 } }] }] }).relative, []);
+});

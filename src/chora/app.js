@@ -8,7 +8,7 @@ import { sizeRead, loadNeed, saveNeed, storageShort } from '../engine/chora/stor
 import { detect } from '../engine/input.js';
 import { newGeometryAttestation, checkGeoJSON, wrapLongitudes, DrawError, ROLES, PRECISIONS } from '../engine/chora/draw.js';
 import { createMap, placeFeatures, contextFeatures } from './map.js';
-import { esc, badge, tailOf, relationItem, timeline } from './card.js';
+import { esc, badge, relationItem, timeline, locations, ROLE_WORDS } from './card.js';
 import * as basemaps from './basemaps.js';
 import * as contributors from './contributor.js';
 import { fingerprint, loadDrafts, saveDrafts, draftsWritten, forgetAllDrafts } from './drafts.js';
@@ -171,23 +171,23 @@ async function countries(v) {
   return countriesFc.features.filter((f) => v.ccodes.includes(f.properties?.iso));
 }
 
-const ROLE_WORDS = { Extent: 'the whole place', FeaturePoint: 'a feature of it', RepresentativePoint: 'a point standing for it', LabelAnchor: 'where its label goes', Itinerary: 'a route' };
-
 function renderCard() {
   const v = view, card = $('card');
   card.hidden = false;
   const fb = v.fallback || {};
+  // A location given only relative to other places is recorded, and has nothing to draw.
+  const none = v.relative?.length ? 'Located only relative to other places' : 'No location recorded';
   const where = v.geometries.length ? ''
-    : fb.kind === 'related' ? '<p class="note">No location recorded; showing the places it is related to.</p>'
-    : fb.kind === 'ccodes' ? `<p class="note">No location recorded; showing its countr${v.ccodes.length === 1 ? 'y' : 'ies'} (${esc(v.ccodes.join(', '))}).</p>`
-    : '<p class="note">No location recorded, and nothing to place it by.</p>';
+    : fb.kind === 'related' ? `<p class="note">${none}; showing the places it is related to.</p>`
+    : fb.kind === 'ccodes' ? `<p class="note">${none}; showing its countr${v.ccodes.length === 1 ? 'y' : 'ies'} (${esc(v.ccodes.join(', '))}).</p>`
+    : `<p class="note">${none}, and nothing to place it by.</p>`;
   const list = (items, fn) => (items.length ? `<ul>${items.map((x) => `<li>${fn(x)}</li>`).join('')}</ul>` : '<p class="muted">None recorded.</p>');
   const mine = drafts.filter((d) => d.placeId === v.id);
   card.innerHTML = `<h2 id="card-h">${esc(v.label)}</h2>
     <p class="muted place-id">${esc(v.id)}${v.ccodes.length ? ` · ${esc(v.ccodes.join(', '))}` : ''}</p>${where}
     <h3>Names</h3>${list(v.names, (x) => `${esc(x.toponym)}${x.language ? ` <span class="muted">(${esc(x.language)})</span>` : ''}${x.romanized ? ` <span class="muted">${esc(x.romanized)}</span>` : ''}${badge(x.status)}`)}
     <h3>Types</h3>${list(v.types, (x) => `${esc(x.label || '')}${badge(x.status)}`)}
-    <h3>Locations</h3>${list(v.geometries, (g) => `${esc(g.geojson.type)}${g.role ? `, ${esc(ROLE_WORDS[tailOf(g.role)] || tailOf(g.role))}` : ''}${g.precision ? `, ${esc(g.precision.replace('_', ' '))}` : ''}${g.precisionKm != null ? ` (±${esc(g.precisionKm)} km)` : ''}${g.timespan?.label || g.timespan?.start ? ` <span class="muted">${esc(g.timespan.label || `${g.timespan.start ?? ''}–${g.timespan.end ?? ''}`)}</span>` : ''}${badge(g.status)}`)}
+    <h3>Locations</h3>${locations(v)}
     <h3>Related places</h3>${list(v.relations, relationItem)}
     <h3>Over time</h3>${timeline(v.timeline)}
     <h3>Sources</h3>${list(v.sources, (s) => (s.id && /^https?:/.test(s.id) ? `<a href="${esc(s.id)}" rel="noopener noreferrer">${esc(s.title || s.id)}</a>` : esc(s.title || s.id)))}

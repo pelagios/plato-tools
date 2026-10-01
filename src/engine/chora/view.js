@@ -78,6 +78,15 @@ const km = (v) => { const x = Array.isArray(v) ? v[0] : undefined; return typeof
 // A location's precision (the first of its list) and role: text, or nothing, for the same reason.
 const word = (v) => { const x = Array.isArray(v) ? v[0] : undefined; return typeof x === 'string' ? x : null; };
 const text = (v) => (typeof v === 'string' ? v : null);
+const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+// The relative qualifiers PLATO defines (plato:RelativeQualifierScheme), in words. DuringReignOf and
+// VariantOf qualify a timespan and a name, not a location, and are worded only in case one is used.
+const QUALIFIERS = { Near: 'near', Within: 'within', Beyond: 'beyond', UpstreamOf: 'upstream of', BetweenXAndY: 'between', DuringReignOf: 'during the reign of', VariantOf: 'a variant of' };
+const qualifierWords = (q) => {
+  const f = full(q);
+  if (typeof f !== 'string' || !f) return 'relative to';
+  return f.startsWith(PLATO) && QUALIFIERS[f.slice(PLATO.length)] ? QUALIFIERS[f.slice(PLATO.length)] : tail(f);
+};
 export function viewPlace(record, ctx = {}) {
   const rec = record || {};
   const atts = Array.isArray(rec.attestations) ? rec.attestations : [];
@@ -85,10 +94,11 @@ export function viewPlace(record, ctx = {}) {
   const lookup = ctx.lookup || (() => null);
   const view = {
     id: rec['@id'] ?? null, label: rec.label ?? rec['@id'] ?? '', ccodes: Array.isArray(rec.ccodes) ? rec.ccodes : [],
-    names: [], geometries: [], types: [], relations: [], timeline: [], sources: [], withdrawn: 0, fallback: null,
+    names: [], geometries: [], relative: [], types: [], relations: [], timeline: [], sources: [], withdrawn: 0, fallback: null,
   };
   const seenSources = new Set();
   const related = new Map();
+  const place = (x) => { if (!related.has(x)) related.set(x, lookup(x) || null); return related.get(x); };
   for (const [i, a] of atts.entries()) {
     if (!a || typeof a !== 'object') continue;
     if (typeof a['@id'] === 'string' && withdrawn.get(a['@id'])) { view.withdrawn++; continue; }
@@ -99,6 +109,21 @@ export function viewPlace(record, ctx = {}) {
     for (const n of a.names || []) if (n && n.toponym) view.names.push({ toponym: n.toponym, language: n.language ?? null, romanized: n.romanized ?? null, status, attestationIndex: i });
     for (const g of a.geometries || []) {
       const geojson = drawable(g);
+      // A location given only relative to other places (PLATO #19: "between Assuan and Philai"): kept in
+      // words, with its anchors (one, or a list), never drawn and never used to place the place.
+      const q = g && typeof g === 'object' && g.qualification && typeof g.qualification === 'object' ? g.qualification : null;
+      if (!geojson && q && (q.relativeQualifier !== undefined || q.relativeTo !== undefined)) {
+        const anchors = [].concat(q.relativeTo ?? []).filter((x) => typeof x === 'string' && x).map((x) => {
+          const other = place(x);
+          return other ? { id: other.id, label: other.label || tail(x), place: true } : { id: x, label: tail(x), place: false };
+        });
+        view.relative.push({
+          qualifier: text(q.relativeQualifier), qualifierLabel: qualifierWords(q.relativeQualifier), anchors,
+          distance: num(q.relativeDistance), bearing: num(q.relativeBearing), sourceLabel: text(g.sourceLabel),
+          status, attestationId, attestationIndex: i, sources: srcs, timespan,
+        });
+        continue;
+      }
       if (!geojson) continue;
       view.geometries.push({
         geojson, role: text(g.role), precision: word(g.spatialPrecision), precisionKm: km(g.precisionKm),
@@ -116,8 +141,7 @@ export function viewPlace(record, ctx = {}) {
         }
         continue;
       }
-      if (!related.has(r.relatesTo)) related.set(r.relatesTo, lookup(r.relatesTo) || null);
-      const other = related.get(r.relatesTo);
+      const other = place(r.relatesTo);
       view.relations.push({
         type: r.relationType ?? null, typeLabel: tail(r.relationType), relatesTo: r.relatesTo,
         label: r.relatedLabel ?? other?.label ?? r.relationLabel ?? tail(r.relatesTo),

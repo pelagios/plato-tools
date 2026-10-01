@@ -14,6 +14,33 @@ export const badge = (s) => (STATUS_WORDS[s] ? ` <span class="status status-${s}
 export const tailOf = (iri) => (iri ? String(iri).split(/[#/]/).pop() : '');
 const trim = (s, k) => (s.length > k ? s.slice(0, k - 1) + '…' : s);
 
+export const ROLE_WORDS = { Extent: 'the whole place', FeaturePoint: 'a feature of it', RepresentativePoint: 'a point standing for it', LabelAnchor: 'where its label goes', Itinerary: 'a route' };
+const dated = (t) => (t?.label || t?.start ? ` <span class="muted">${esc(t.label || `${t.start ?? ''}–${t.end ?? ''}`)}</span>` : '');
+/** One location drawn on the map: its kind, what it marks, how well it is known, and its date. */
+export const geometryItem = (g) => `${esc(g.geojson.type)}${g.role ? `, ${esc(ROLE_WORDS[tailOf(g.role)] || tailOf(g.role))}` : ''}${g.precision ? `, ${esc(g.precision.replace('_', ' '))}` : ''}${g.precisionKm != null ? ` (±${esc(g.precisionKm)} km)` : ''}${dated(g.timespan)}${badge(g.status)}`;
+
+const anchorLink = (a) => (a.place ? `<a href="#" data-place="${esc(a.id)}">${esc(a.label)}</a>` : esc(a.label));
+const andList = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+const metres = (m) => (m >= 1000 ? `${+(m / 1000).toFixed(1)} km` : `${+m.toFixed(0)} m`);
+/**
+ * A location given only relative to other places (PLATO #19), in words: "between Assuan and Philai
+ * (relative; not drawn)". An anchor that is a place of the dataset is a link to it; any other is its
+ * address's last segment, as text. Never drawn.
+ */
+export function relativeItem(r) {
+  const notes = [];
+  if (r.distance != null) notes.push(`${metres(r.distance)} away`);
+  if (r.bearing != null) notes.push(`bearing ${+r.bearing.toFixed(1)}°`);
+  notes.push('relative; not drawn');
+  const anchors = andList((r.anchors || []).map(anchorLink));
+  return `${esc(r.qualifierLabel)}${anchors ? ` ${anchors}` : ''} <span class="muted">(${notes.join('; ')})</span>${dated(r.timespan)}${badge(r.status)}`;
+}
+/** The card's Locations: those drawn, then those given only relative to other places. */
+export function locations(v) {
+  const items = [...(v.geometries || []).map(geometryItem), ...(v.relative || []).map(relativeItem)];
+  return items.length ? `<ul>${items.map((x) => `<li>${x}</li>`).join('')}</ul>` : '<p class="muted">None recorded.</p>';
+}
+
 /**
  * One related place: a link to it when it is a place of the dataset; otherwise its name as text. A
  * relation that names its target only (relatedLabel with no relatesTo, PLATO #18: "in the Delta") has

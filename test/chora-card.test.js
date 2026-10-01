@@ -3,7 +3,7 @@
 // here has its presence beside it, so that none of these checks could pass by writing nothing.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { relationItem, timeline, esc } from '../src/chora/card.js';
+import { relationItem, timeline, esc, relativeItem, locations } from '../src/chora/card.js';
 import { viewPlace } from '../src/engine/chora/view.js';
 
 const P = 'https://w3id.org/plato#';
@@ -57,4 +57,18 @@ test('#20: an evidence span given only in words is written as a mention too, and
 test('esc writes every character markup could use as text', () => {
   assert.equal(esc(`<a href="x" onclick='y'>&</a>`), '&lt;a href=&quot;x&quot; onclick=&#39;y&#39;&gt;&amp;&lt;/a&gt;');
   assert.equal(esc(null), '');
+});
+
+test('#19: a location relative to other places is a line under Locations, its anchors linked when they are places of the dataset', () => {
+  const between = { qualifierLabel: 'between', anchors: [{ id: 'https://example.org/p/assuan', label: 'Assuan', place: true }, { id: 'https://www.trismegistos.org/place/1767', label: '1767', place: false }], distance: null, bearing: null, status: 'asserted', timespan: null };
+  assert.equal(relativeItem(between), 'between <a href="#" data-place="https://example.org/p/assuan">Assuan</a> and 1767 <span class="muted">(relative; not drawn)</span>');
+  const near = { qualifierLabel: 'near', anchors: [{ id: 'x', label: '<i>X</i>', place: false }], distance: 1500, bearing: 45, status: 'denied', timespan: null };
+  assert.match(relativeItem(near), /^near &lt;i&gt;X&lt;\/i&gt; <span class="muted">\(1\.5 km away; bearing 45°; relative; not drawn\)<\/span> <span class="status status-denied"/);
+  assert.equal(relativeItem({ ...near, anchors: [{ id: 'x', label: 'A' }, { id: 'y', label: 'B' }, { id: 'z', label: 'C' }], distance: 500, bearing: null, status: 'asserted' }), 'near A, B and C <span class="muted">(500 m away; relative; not drawn)</span>');
+  // The list: a drawn location and a relative one together; and with neither, none recorded.
+  const v = { geometries: [{ geojson: { type: 'Point' }, role: null, precision: null, precisionKm: null, timespan: null, status: 'asserted' }], relative: [between] };
+  const html = locations(v);
+  assert.match(html, /^<ul><li>Point<\/li><li>between <a /);
+  assert.equal(locations({ geometries: [], relative: [] }), '<p class="muted">None recorded.</p>');
+  assert.equal(locations({ geometries: v.geometries, relative: [] }), '<ul><li>Point</li></ul>', 'the control: no relative line where there is none');
 });
