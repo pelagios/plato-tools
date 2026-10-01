@@ -13,6 +13,7 @@
 //     places: { <subject place IRI>: { label, names, point: [lon, lat] | null, ccodes?, types? } },
 //     candidates: [{ id, candidate_source, candidate_candidate, similarity_score, distance_km: number | null,
 //       candidate_status: 'suggested' | 'confirmed' | 'rejected', generated_at?, algorithm_version?, match_parameters?,
+//       rule?: 'qualifier', qualifier?: 'Chipping' (only the qualifier rule suggested it, and by which qualifiers; from krisis-names 7),
 //       other: { label, names, point, source: { title, uri? }, ccodes?, types? },
 //       decision: null | { kind: 'match' | 'not-this' | 'distinct', identityType, basis?, decided_at } }],
 //     reviewer: null | { name, orcid? }, cursor,
@@ -59,6 +60,7 @@
 import { DataError } from '../input.js';
 import { REGION_WORDS } from '../words.js';
 import { fileSha256 } from './digest.js';
+import { qualifierIds } from './qualifiers.js';
 import { isWhg, WHG_ENDPOINT } from '../gazetteer/index.js';
 
 /**
@@ -97,9 +99,10 @@ export function checkReviewer(r, where = 'The reviewer') {
 /** Matching's options, and their defaults. */
 export const MATCH_DEFAULTS = { threshold: 0.85, maxDistanceKm: 50, topK: 5 };
 /**
- * Matching's options, as numbers, with the defaults for those not given; a DataError saying which is
- * wrong otherwise. Here, not in match.js, so that the page checks them by the same rule before it
- * asks for the other dataset.
+ * Matching's options, as numbers, with the defaults for those not given, and `qualifiers`, the ids of
+ * the lists of qualifiers chosen (qualifiers.js, qualifierIds(): by default the measured English,
+ * Welsh and Latin list); a DataError saying which is wrong otherwise. Here, not in match.js, so that
+ * the page checks them by the same rule before it asks for the other dataset.
  */
 export function checkMatchOptions(o = {}) {
   const t = { ...MATCH_DEFAULTS };
@@ -107,6 +110,7 @@ export function checkMatchOptions(o = {}) {
   if (!(t.threshold > 0 && t.threshold <= 1)) throw new DataError(`The threshold must be above 0 and at most 1, not ${o.threshold}.`);
   if (!(t.maxDistanceKm >= 0)) throw new DataError(`The greatest distance must be a number of kilometres, not ${o.maxDistanceKm}.`);
   if (!(Number.isInteger(t.topK) && t.topK >= 1)) throw new DataError(`The number of suggestions per place must be a whole number from 1, not ${o.topK}.`);
+  t.qualifiers = qualifierIds(o.qualifiers);
   return t;
 }
 
@@ -181,6 +185,10 @@ export function readWork(text) {
     pairs.add(pair);
     if (typeof c.similarity_score !== 'number' || !(c.similarity_score >= 0 && c.similarity_score <= 1)) bad(`${where} has a score that is not between 0 and 1.`);
     if (c.distance_km !== undefined && c.distance_km !== null && !(typeof c.distance_km === 'number' && c.distance_km >= 0)) bad(`${where} has a distance that is not a number of kilometres.`);
+    // Which rule alone suggested it (from krisis-names 7; a work file made before has neither field).
+    if (c.rule !== undefined && c.rule !== 'qualifier') bad(`${where} says it was suggested by a rule these tools do not have ("${c.rule}"; the one there is: qualifier).`);
+    if (c.rule === 'qualifier' && !(typeof c.qualifier === 'string' && c.qualifier.trim())) bad(`${where} says the qualifier rule suggested it, but not which qualifier (qualifier).`);
+    if (c.rule === undefined && c.qualifier !== undefined) bad(`${where} names a qualifier (qualifier) without saying the qualifier rule suggested it (rule).`);
     if (!isObject(c.other) || typeof c.other.label !== 'string' || !isNames(c.other.names) || !isPoint(c.other.point ?? null)) bad(`${where} does not describe the place it suggests (other).`);
     if (!['suggested', 'confirmed', 'rejected'].includes(c.candidate_status)) bad(`${where} has a status that is not suggested, confirmed or rejected.`);
     // Its address in the candidate set last exported (candidates.js), or in an earlier set that published it.

@@ -30,9 +30,10 @@
 // name made only of common trigrams reads its four rarest lists, and one more when they fall
 // together), where before, every name that shared a first letter or a common word was read.
 //
-// Names that may differ only by qualifiers (names.js, qualifierScore(): Marlow and Great Marlow).
+// Names that may differ only by qualifiers (names.js, qualifierScore(): Ongar and Chipping Ongar),
+// by the lists of qualifiers chosen (the index's `Q`).
 // A subject name finds an other name that is it with qualifiers added through its keys as they are:
-// Great Marlow has every trigram of "marlow" but its first, padded one ("  m", common in any large
+// Market Warsop has every trigram of "warsop" but its first, padded one ("  w", common in any large
 // dataset, so a key only when the name has no more than four trigrams, and then one of four). The
 // other way round it may not: Chipping Ongar may be looked up only by trigrams of "chipping" and
 // "g o", when those of "ongar" are common, and miss Ongar. So a subject name with qualifiers is
@@ -43,7 +44,7 @@
 //
 // Scoring is names.js's, and each word is weighted by its inverse document frequency in the names of
 // both datasets, ln(1 + N / df), so that a common word counts for little.
-import { normalise, nameScore, distinctive, expandedScore, sortWords, trigrams, qualifiers, qualifierScore, QUALIFIER_CAP, QUALIFIER_RARE } from './names.js';
+import { normalise, nameScore, distinctive, expandedScore, sortWords, trigrams, qualifiers, qualifierScore, compileQualifiers, QUALIFIER_CAP, QUALIFIER_RARE } from './names.js';
 
 export const BLOCKING = { share: 0.4, commonShare: 0.01, commonFloor: 50, keys: 4, spread: 4, far: 10 };
 export const BLOCKING_RULE = 'The names of the other dataset are indexed by their trigrams (normalised, padded with two spaces before and one after). '
@@ -58,9 +59,11 @@ export const BLOCKING_RULE = 'The names of the other dataset are indexed by thei
 export class NameIndex {
   /**
    * `places`: for each other place, its names (as written). `subjectPlaces`: the subjects' names,
-   * counted with the others' for the words' weights.
+   * counted with the others' for the words' weights. `Q`: the lists of qualifiers in use
+   * (names.js, compileQualifiers(); by default, the measured English, Welsh and Latin list).
    */
-  constructor(places, subjectPlaces = []) {
+  constructor(places, subjectPlaces = [], Q = compileQualifiers()) {
+    this.Q = Q;
     this.ids = new Map();        // trigram → number
     this.names = [];             // { pi, n, t: sorted trigram numbers }
     this.postings = [];          // trigram number → [name number]
@@ -76,7 +79,7 @@ export class NameIndex {
           this.postings[id].push(ni);
           t.push(id);
         }
-        const q = qualifiers(n);
+        const q = qualifiers(n, Q);
         this.names.push({ pi, n, t: Int32Array.from(t), sorted: sortWords(n), words: n.split(' ').length, q });
         (this.exact.get(n) || this.exact.set(n, []).get(n)).push(ni);
       }
@@ -154,15 +157,25 @@ export class NameIndex {
   /**
    * The best score of each other place (by number) against any of `names`, the names of one subject
    * place, where it reaches `threshold`. (Below it, the lowering by distinctive words is not worked
-   * out: it cannot raise a score.)
+   * out: it cannot raise a score.) The map's `rule` holds, for each other place whose best score only
+   * the qualifier rule reached the threshold with, the qualifiers that made the difference (their
+   * labels: "Chipping", "on thames") and the two names, normalised: { added, names: [subject, other] }.
    */
   best(names, threshold = 0) {
-    const best = new Map();
-    const byQualifier = threshold <= QUALIFIER_CAP;
+    const best = new Map(), rule = new Map();
+    best.rule = rule;
+    // Keep a pair's score if it is the best for its place; on a tie, one found without the rule.
+    const keep = (pi, score, by) => {
+      const was = best.get(pi);
+      if (score < threshold || (was !== undefined && (score < was || (score === was && (by || !rule.has(pi)))))) return;
+      best.set(pi, score);
+      if (by) rule.set(pi, by); else rule.delete(pi);
+    };
+    const byQualifier = threshold <= QUALIFIER_CAP && !this.Q.none;
     for (const s of new Set(names.map(normalise))) {
       if (!s) continue;
-      const ss = sortWords(s), sw = s.split(' ').length, sq = qualifiers(s);
-      // A name with qualifiers is looked up by its core too (Great Marlow by "marlow"), each other name once.
+      const ss = sortWords(s), sw = s.split(' ').length, sq = qualifiers(s, this.Q);
+      // A name with qualifiers is looked up by its core too (Chipping Ongar by "ongar"), each other name once.
       let found = this.candidates(s, threshold, sq.core);
       if (byQualifier && sq.units.length) {
         found = new Set(found);
@@ -184,14 +197,16 @@ export class NameIndex {
             // core, the lower of the score as below and its share. Under the threshold the score as
             // below cannot matter: the cores' then decides whether the pair is kept.
             if (score >= threshold && e === null) { const d = distinctive(s, o.n, this.weight); if (d !== null && d < score) score = d; }
+            // Only the rule reached the threshold (the review says so, and names the qualifiers).
+            const by = !q.common && score < threshold && q.score >= threshold ? { added: q.added, names: [s, o.n] } : null;
             score = q.common ? Math.min(score, q.score) : Math.min(QUALIFIER_CAP, Math.max(score, q.score));
-            if (score >= threshold && score > (best.get(o.pi) ?? -1)) best.set(o.pi, score);
+            keep(o.pi, score, by);
             continue;
           }
         }
         if (e !== null) { /* raised above, and not lowered */ } else if (score < threshold) continue;
         else if (score < 1) { const d = distinctive(s, o.n, this.weight); if (d !== null && d < score) score = d; }
-        if (score >= threshold && score > (best.get(o.pi) ?? -1)) best.set(o.pi, score);
+        keep(o.pi, score, null);
       }
     }
     return best;

@@ -14,9 +14,9 @@ Status: IMPLEMENTED; engine and CLI tests pass (test/krisis.test.js, test/krisis
     `https://orcid.org/0000-0000-0000-0000`). The page checks the reviewer with it before saving or
     finishing, and never stores an ORCID it refuses.
   - `DATE_TIME`, `isIri` — the rules `readWork` and `recordIdentity` share.
-  - `checkMatchOptions({ threshold, maxDistanceKm, topK }) -> numbers` (with `MATCH_DEFAULTS` for
-    those not given); throws `DataError` in plain words (a threshold of 0 or above 1, a negative
-    distance). `match()` uses it, and the page checks its options with it before it asks for the
+  - `checkMatchOptions({ threshold, maxDistanceKm, topK, qualifiers }) -> { numbers, qualifiers: [ids] }` (with `MATCH_DEFAULTS` for
+    those not given, and the default lists of qualifiers); throws `DataError` in plain words (a threshold of 0 or above 1, a negative
+    distance, a list of qualifiers that is not one). `match()` uses it, and the page checks its options with it before it asks for the
     other dataset.
   - `TITLE_FROM` — `['gazetteer', 'given', 'file-name']`, the values of a side's `titleFrom`.
   - Places and candidates are looked up with `Object.hasOwn`, never `in` (a `candidate_source` of
@@ -37,14 +37,17 @@ Status: IMPLEMENTED; engine and CLI tests pass (test/krisis.test.js, test/krisis
 - `src/engine/krisis/match.js`:
   - `match({ subjects, others, options }, env) -> { report, outputs, work, incomplete? }`
     `subjects`/`others` are inputs as `detect()` returns them. options: `threshold` (0.85),
-    `maxDistanceKm` (50), `topK` (5), `base` (spreadsheet tables: the base address of their
+    `maxDistanceKm` (50), `topK` (5), `qualifiers` (ids of lists in `qualifiers.js`, an array or text
+    separated by commas, `'none'` or `[]` for none; default `['en-cy-la']`), `base` (spreadsheet tables: the base address of their
     places; kept in `match_parameters.base`), `reviewer`, `othersTitle` (the other dataset's title,
     which every attestation cites as its source: it replaces the title the dataset gives, and
     `work.others.titleFrom` becomes `'given'`). When the other dataset gives no title and none is
     given, its file's name stands in (`titleFrom: 'file-name'`) and the report has a warning
     `others-title-is-file-name`. Bad options throw `DataError`. Writes output
     `<subjects stem>.krisis.json`. `match_parameters` also holds `blocking` (`BLOCKING` with its
-    `rule` in words) and `scoring` (in words); `algorithm_version` is `krisis-names 5` (`ALGORITHM`). A candidate from a
+    `rule` in words), `qualifiers` (`{ table, lists, definitions, cap, rare }`) and `scoring` (in words);
+    `algorithm_version` is `krisis-names 7` (`ALGORITHM`). A candidate only the qualifier rule suggested has
+    `rule: 'qualifier'` and `qualifier` (the qualifiers, as written: `'Chipping'`). A candidate from a
     lookup carries its own, `krisis-lookup 1` (`LOOKUP_ALGORITHM`), which overrides the file's.
 - `src/engine/krisis/apply.js`:
   - `apply({ subjects, work, options: { output = 'dataset', reviewer, date, base, othersTitle } }, env) -> { report, outputs, incomplete? }`
@@ -97,9 +100,14 @@ Status: IMPLEMENTED; engine and CLI tests pass (test/krisis.test.js, test/krisis
   three letters, two fewer than its word, the name score with the abbreviations written out; else
   null: the one case that raises a score), `oneEdit(a, b)`, `trigrams(normalised)`, `DISTINCT_GATE`. `weight(word)` defaults to 1 for
   every word; the matcher gives inverse document frequency.
-- `src/engine/krisis/blocking.js`: `new NameIndex(otherPlacesNames, subjectPlacesNames)`;
+- `src/engine/krisis/qualifiers.js`: `QUALIFIER_LISTS` (the lists of qualifiers, one per language:
+  `{ id, language, label, description, status, on, front, behind, phrases, same, evidence }`),
+  `DEFAULT_QUALIFIER_LISTS`, `QUALIFIER_TABLE_VERSION`, `qualifierIds(given) -> [ids]` (throws
+  `DataError` for an id that is not a list's), `qualifierRecord(ids)`. `names.js`'s
+  `compileQualifiers(ids)` makes them ready for `qualifiers(name, Q)` and `similarity(a, b, weight, Q)`.
+- `src/engine/krisis/blocking.js`: `new NameIndex(otherPlacesNames, subjectPlacesNames, Q)`;
   `.best(names, threshold) -> Map(other place number -> score)` (only scores reaching the
-  threshold), `.candidates(normalised, threshold)`, `.comparisons` (pairs of names scored), `.weight`;
+  threshold; its `.rule` maps each place only the qualifier rule reached to `{ added, names }`), `.candidates(normalised, threshold)`, `.comparisons` (pairs of names scored), `.weight`;
   `BLOCKING` `{ share: 0.4, commonShare: 0.01, commonFloor: 50, keys: 4, spread: 4 }`, `BLOCKING_RULE`,
   `canReach(lengthA, lengthB, threshold)`.
 

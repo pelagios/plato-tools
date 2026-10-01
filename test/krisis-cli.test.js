@@ -213,3 +213,25 @@ test('match: a IIIF Georeference Annotation as the other dataset is refused with
   assert.doesNotMatch(r.out + r.err, /fault in the tools/);
   assert.equal(cli('match', join(dir, 'a.json'), '--with', join(dir, 'b.json'), '--out', scratch()).code, 0, 'control: the PLATO JSON beside it is matched');
 });
+test('--qualifiers: the lists chosen are used and kept in the work file; none switches them off; an id that is not one exits 2', () => {
+  const dir = scratch();
+  writeFileSync(join(dir, 'a.json'), JSON.stringify(doc('a', [['bar', 'Bar', [4.7, 48.23]], ['ongar', 'Ongar', [0.24, 51.71]]])));
+  writeFileSync(join(dir, 'b.json'), JSON.stringify(doc('b', [['bar-sur-aube', 'Bar-sur-Aube', [4.71, 48.233]], ['chipping-ongar', 'Chipping Ongar', [0.245, 51.705]]])));
+  const go = (...q) => {
+    const r = cli('match', join(dir, 'a.json'), '--with', join(dir, 'b.json'), '--out', dir, '--overwrite', ...q);
+    assert.equal(r.code, 0, r.out + r.err);
+    const w = readWork(readFileSync(join(dir, 'a.krisis.json'), 'utf8'));
+    return { lists: w.match_parameters.qualifiers.lists, found: w.candidates.map((c) => `${c.candidate_candidate.split('/').pop()} ${c.rule ?? ''} ${c.qualifier ?? ''}`.trim()).sort() };
+  };
+  assert.deepEqual(go(), { lists: ['en-cy-la'], found: ['chipping-ongar qualifier Chipping'] }, 'the default: the measured list');
+  assert.deepEqual(go('--qualifiers', 'en-cy-la,fr'), { lists: ['en-cy-la', 'fr'], found: ['bar-sur-aube qualifier sur Aube', 'chipping-ongar qualifier Chipping'] });
+  assert.deepEqual(go('--qualifiers', 'fr'), { lists: ['fr'], found: ['bar-sur-aube qualifier sur Aube'] });
+  assert.deepEqual(go('--qualifiers', 'none'), { lists: [], found: [] });
+  const bad = cli('match', join(dir, 'a.json'), '--with', join(dir, 'b.json'), '--out', dir, '--overwrite', '--qualifiers', 'nl');
+  assert.equal(bad.code, 2, bad.out + bad.err);
+  assert.match(bad.err, /--qualifiers nl: There is no list of qualifiers "nl": the lists are en-cy-la, fr, de, or none\./);
+  const notForCheck = cli('check', join(dir, 'a.json'), '--qualifiers', 'fr');
+  assert.equal(notForCheck.code, 2);
+  assert.match(notForCheck.err, /--qualifiers/);
+  assert.match(cli('--help').out, /--qualifiers IDS[\s\S]*en-cy-la: English, Welsh and Latin \(the default\)[\s\S]*fr: French, unmeasured/);
+});

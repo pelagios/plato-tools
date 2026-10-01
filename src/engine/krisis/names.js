@@ -25,27 +25,31 @@
 // that differs in nothing else, so such names are scored again with each short form written out in
 // full, and the higher score is kept (expandedScore()).
 //
-// A name may differ from another only by QUALIFIERS (qualifierScore(), new in krisis-names 6): Great
-// Marlow and Marlow, Chipping Ongar and Ongar, Abingdon and Abingdon-on-Thames. Letters score these
-// low when the qualifier is in front (0.333 and 0.514), and the distinctive words cannot help, as
-// all the words of one are shared. A qualifier is a word on a fixed list (QUALIFIERS: Great, Little,
-// North, Upper, Nether, Market, Chipping, King's and the like in front; Welsh, Cornish and Latin ones
-// such as Fawr, Isaf, Vean and Magna behind; St and Saint), or a phrase at the end beginning with a
-// joining word (on, upon, under, next, by, le, en, in, super, juxta: "on Thames", "next the Sea",
-// "le Street"). When one name is the other's core with qualifiers added, and the other's qualifiers
-// are all among them (Marlow, or Great Marlow against Great Marlow on Thames), the pair scores
-// QUALIFIER_CAP (0.88), and never more: a qualifier is a real difference (Great Marlow and Little
-// Marlow are two places), so such a pair is suggested, but below a pair the same but for its
+// A name may differ from another only by QUALIFIERS (qualifierScore(), new in krisis-names 6, the
+// lists chosen per language in krisis-names 7): Chipping Ongar and Ongar, Market Warsop and Warsop,
+// Abingdon and Abingdon-on-Thames. Letters score these low when the qualifier is in front (Chipping
+// Ongar and Ongar 0.514), and the distinctive words cannot help, as all the words of one are shared.
+// A qualifier is a word or phrase on one of the lists chosen (qualifiers.js; by default the measured
+// English, Welsh and Latin list: Chipping and Market in front, Magna, Parva, Regis, Fawr and Bach
+// behind, and "on", "upon", "under", "next", "juxta" or "super" and a river or short phrase at the
+// end): only words that RARELY mark a separate place, so not Old (Old Windsor is not Windsor), Long,
+// High, Great or Little (Great and Little Marlow are two places). When one name is the other's core
+// with qualifiers added, and the other's qualifiers are all among them (Ongar, or Chipping Ongar
+// against Chipping Ongar on Roding), the pair scores QUALIFIER_CAP (0.88), and never more: a
+// qualifier is still a difference, so such a pair is suggested, but below a pair the same but for its
 // spelling. The cores must be the same (score 1: the same words, but for their order or a short
-// form): in a trial on real data, a core respelt raised only wrong pairs (Burnley and Burley in
-// Wharfedale, Bradfield and Great Bardfield, near 0.85 as 0.88 times their cores' 0.966). A pair whose cores differ keeps the score as above, at most the cap. When each name has a qualifier the other has not (Great and Little Marlow, East
-// and West Ham), this does not apply, and they score as above, low. And a common core is not
-// evidence of a place: when a qualifier word added (a joining phrase counted by its joining word)
-// weighs more than the core's words, the pair scores the core's share of the weight of the two,
-// as distinctive() scores the words shared, if that is lower: in a gazetteer where Farm is in more
-// names than Little, Little Farm is not Farm (0.873 on letters, under a half so). A core whose words
-// are in no more than QUALIFIER_RARE (50) names is never common: in a small dataset Great is rare too.
+// form): in a trial on real data, a core respelt raised only wrong pairs (Bradfield and Great
+// Bardfield, near 0.85 as 0.88 times their cores' 0.966). A pair whose cores differ keeps the score
+// as above, at most the cap. When each name has a qualifier the other has not (Aston Magna and Aston
+// Parva, Chipping Ongar and Market Ongar), this does not apply, and they score as above, low. And a
+// common core is not evidence of a place: when a qualifier word added (a phrase counted by its
+// joining word) weighs more than the core's words, the pair scores the core's share of the weight of
+// the two, as distinctive() scores the words shared, if that is lower: in a gazetteer where Farm is
+// in more names than Market, Market Farm is not Farm. A core whose words are in no more than
+// QUALIFIER_RARE (50) names is never common: in a small dataset Market is rare too.
 // Trigrams of the normalised name are what matching blocks on (blocking.js).
+
+import { QUALIFIER_LISTS, DEFAULT_QUALIFIER_LISTS, qualifierIds } from './qualifiers.js';
 
 const SPELT = { ß: 'ss', æ: 'ae', œ: 'oe', ø: 'o', ł: 'l', đ: 'd', ð: 'd', þ: 'th', ı: 'i', ŋ: 'ng', ħ: 'h' };
 
@@ -93,9 +97,9 @@ export const sortWords = (s) => (s.includes(' ') ? s.split(' ').sort().join(' ')
 export const DISTINCT_GATE = 0.85;
 
 /** How alike two names are, from 0 to 1 (see the top of this file). `weight` as for similarityNormalised(). */
-export function similarity(a, b, weight) {
+export function similarity(a, b, weight, Q) {
   const x = normalise(a), y = normalise(b);
-  return similarityNormalised(x, y, weight);
+  return similarityNormalised(x, y, weight, Q);
 }
 /** Jaro-Winkler of two normalised names, as written or with their words sorted (xs, ys, if known), whichever is higher. */
 export function nameScore(x, y, xs = sortWords(x), ys = sortWords(y)) {
@@ -107,12 +111,13 @@ export function nameScore(x, y, xs = sortWords(x), ys = sortWords(y)) {
 /**
  * similarity() of names already normalised: nameScore(), lowered by distinctive() when the names
  * share a word. `weight(word)` is how much a word counts (the matcher gives its inverse document
- * frequency in the two datasets); by default every word counts alike.
+ * frequency in the two datasets); by default every word counts alike. `Q`: the lists of qualifiers
+ * in use (compileQualifiers(); by default, the measured English, Welsh and Latin list).
  */
-export function similarityNormalised(x, y, weight) {
+export function similarityNormalised(x, y, weight, Q = compileQualifiers()) {
   const plain = plainScore(x, y, weight);
   if (plain === 1) return plain;
-  const q = qualifierScore(x, y, weight);
+  const q = qualifierScore(x, y, weight, qualifiers(x, Q), qualifiers(y, Q));
   if (q === null) return plain;
   return q.common ? Math.min(plain, q.score) : Math.min(QUALIFIER_CAP, Math.max(plain, q.score));
 }
@@ -130,89 +135,106 @@ function plainScore(x, y, weight) {
 export const QUALIFIER_CAP = 0.88;
 /**
  * A core whose words are in no more names than this is never too common to stand for a place (the
- * matcher gives its weight as `weight.rare`): in a small dataset, a qualifier is rare too, and Great,
- * in one name, would outweigh Marlow, in two.
+ * matcher gives its weight as `weight.rare`): in a small dataset, a qualifier is rare too, and Market,
+ * in one name, would outweigh Ongar, in two.
  */
 export const QUALIFIER_RARE = 50;
+
+const compiled = new Map();
 /**
- * The qualifiers, normalised (so King's is "king s"): words in front of a name, words behind it, and
- * the joining words that begin a phrase at its end ("on Thames"). Each counts as the same qualifier
- * as its other spellings (`same`: Kings and King's, St and Saint, upon and on).
+ * The lists of qualifiers of `ids` (qualifiers.js; by default DEFAULT_QUALIFIER_LISTS, the measured
+ * English, Welsh and Latin list), made ready for qualifiers(): { ids, front: [[normalised words], …]
+ * longest first, back: Set, phrases: [RegExp], same, words: Set (every word in front or behind),
+ * label: Map (normalised → as the list writes it), none }. A DataError for an id that is not a list's.
  */
-export const QUALIFIERS = {
-  front: ['great', 'little', 'long', 'old', 'new', 'north', 'south', 'east', 'west', 'upper', 'lower', 'nether', 'over', 'middle', 'mid',
-    'high', 'higher', 'low', 'much', 'market', 'chipping', 'steeple', 'king s', 'kings', 'bishop s', 'bishops', 'abbot s', 'abbots',
-    'monk s', 'monks', 'saint', 'st', 'sainte', 'ste', 'hen'],
-  back: ['magna', 'parva', 'major', 'minor', 'superior', 'inferior', 'regis', 'episcopi', 'fawr', 'mawr', 'fach', 'bach', 'uchaf',
-    'isaf', 'ganol', 'newydd', 'vean', 'veor', 'vear', 'wartha', 'woollas'],
-  joining: ['on', 'upon', 'under', 'next', 'by', 'le', 'en', 'in', 'super', 'juxta'],
-  same: { 'king s': 'kings', 'bishop s': 'bishops', 'abbot s': 'abbots', 'monk s': 'monks', st: 'saint', ste: 'sainte', upon: 'on' },
-};
-const FRONT = QUALIFIERS.front.map((q) => q.split(' ')).sort((a, b) => b.length - a.length);
-const BACK = new Set(QUALIFIERS.back), JOINING = new Set(QUALIFIERS.joining);
-const QUALIFIER_WORDS = new Set([...QUALIFIERS.front.flatMap((q) => q.split(' ')), ...QUALIFIERS.back]);
-/** The most words a joining phrase at the end of a name may have after its joining word ("next the sea"). */
-export const PHRASE_WORDS = 3;
-const canonical = (ws) => { const s = ws.join(' '); return QUALIFIERS.same[s] ?? s; };
+export function compileQualifiers(ids = DEFAULT_QUALIFIER_LISTS) {
+  const key = ids.join(',');
+  let q = compiled.get(key);
+  if (q) return q;
+  const lists = qualifierIds(ids).map((id) => QUALIFIER_LISTS.find((l) => l.id === id));
+  const label = new Map(), front = [], back = new Set(), words = new Set(), phrases = [], same = {};
+  for (const l of lists) {
+    for (const f of l.front) { const n = normalise(f); label.set(n, f); front.push(n.split(' ')); for (const w of n.split(' ')) words.add(w); }
+    for (const b of l.behind) { const n = normalise(b); label.set(n, b); back.add(n); words.add(n); }
+    for (const p of l.phrases) phrases.push(new RegExp(p, 'u'));
+    Object.assign(same, l.same);
+  }
+  front.sort((a, b) => b.length - a.length);
+  q = Object.freeze({ ids: lists.map((l) => l.id), front, back, phrases, same, words, label, none: !front.length && !back.size && !phrases.length });
+  compiled.set(key, q);
+  return q;
+}
 const NONE = Object.freeze({ units: Object.freeze([]) });
 
 /**
- * A normalised name's qualifiers and its core: { core (words), units (each qualifier, as its usual
- * spelling: "kings", "on thames"), words (for each unit, the words that weigh: a joining phrase by
- * its joining word) }, or { units: [] } when it has none. The core keeps at least one word that is
- * not a qualifier, so a name with none ("North", "Over") has no qualifiers.
+ * A normalised name's qualifiers and its core, by the lists `Q` (compileQualifiers()): { core (words),
+ * units (each qualifier, as its usual spelling: "chipping", "on thames"), words (for each unit, the
+ * words that weigh: a phrase by its joining word), labels (each unit as the list writes it, or a
+ * phrase as normalised: "Chipping", "upon avon") }, or { units: [] } when it has none. The core keeps
+ * at least one word that is not a qualifier, so a name with none ("Market") has no qualifiers.
  */
-export function qualifiers(x) {
+export function qualifiers(x, Q = compileQualifiers()) {
+  if (Q.none) return NONE;
   const w = x.split(' ');
   if (w.length < 2) return NONE;
-  const units = [], words = [];
+  const units = [], words = [], labels = [];
   let lo = 0, hi = w.length;
-  const coreLeft = (a, b) => { for (let k = a; k < b; k++) if (!QUALIFIER_WORDS.has(w[k])) return true; return false; };
+  const coreLeft = (a, b) => { for (let k = a; k < b; k++) if (!Q.words.has(w[k])) return true; return false; };
   // In front: the longest qualifier that leaves a core, again and again.
   for (let more = true; more;) {
     more = false;
-    for (const q of FRONT) {
+    for (const q of Q.front) {
       if (lo + q.length < hi && q.every((v, k) => w[lo + k] === v) && coreLeft(lo + q.length, hi)) {
-        units.push(canonical(q)); words.push(q.join(' ')); lo += q.length; more = true; break;
+        const n = q.join(' ');
+        units.push(n); words.push(n); labels.push(Q.label.get(n) ?? n); lo += q.length; more = true; break;
       }
     }
   }
-  // At the end: a joining phrase (its first joining word, with at most PHRASE_WORDS after it), then words behind.
-  for (let k = Math.max(lo + 1, hi - 1 - PHRASE_WORDS); k < hi - 1; k++) {
-    if (JOINING.has(w[k]) && coreLeft(lo, k)) {
-      units.push(canonical([w[k]]) + ' ' + w.slice(k + 1, hi).join(' ')); words.push(w[k]); hi = k; break;
+  // At the end: a phrase (the first of the lists' to match what is left whole and leave a core), then words behind.
+  if (Q.phrases.length && hi - lo > 1) {
+    const rest = w.slice(lo, hi).join(' ');
+    for (const re of Q.phrases) {
+      const g = re.exec(rest)?.groups;
+      if (!g || !g.core || !g.join || !g.tail) continue;
+      const k = lo + g.core.split(' ').length;
+      if (!coreLeft(lo, k)) continue;
+      units.push((Q.same[g.join] ?? g.join) + ' ' + g.tail); words.push(g.join); labels.push(g.join + ' ' + g.tail); hi = k;
+      break;
     }
   }
-  while (hi - lo > 1 && BACK.has(w[hi - 1]) && coreLeft(lo, hi - 1)) { units.push(w[hi - 1]); words.push(w[hi - 1]); hi--; }
-  return units.length ? { core: w.slice(lo, hi).join(' '), units, words } : NONE;
+  while (hi - lo > 1 && Q.back.has(w[hi - 1]) && coreLeft(lo, hi - 1)) { units.push(w[hi - 1]); words.push(w[hi - 1]); labels.push(Q.label.get(w[hi - 1]) ?? w[hi - 1]); hi--; }
+  return units.length ? { core: w.slice(lo, hi).join(' '), units, words, labels } : NONE;
 }
 
 /**
  * How two normalised names that differ by qualifiers score (see the top of this file): { score:
- * QUALIFIER_CAP when their cores are the same, else 0, common: false }, the higher of which and the
- * score without it is kept, at most the cap; or, when a qualifier word added weighs more than the
- * core, { score: the core's share of the weight, common: true }, the lower of which is kept; or null
- * when it does not apply (neither has a qualifier the other has not, or each has one the other has
- * not). `weight` as for similarityNormalised(); `qx`, `qy`, the names' qualifiers(), if known.
+ * QUALIFIER_CAP when their cores are the same, else 0, common: false, added: the labels of the
+ * qualifiers one has and the other has not }, the higher of which and the score without it is kept,
+ * at most the cap; or, when a qualifier word added weighs more than the core, { score: the core's
+ * share of the weight, common: true }, the lower of which is kept; or null when it does not apply
+ * (neither has a qualifier the other has not, or each has one the other has not). `weight` as for
+ * similarityNormalised(); `qx`, `qy`, the names' qualifiers() (by default, by the default lists).
  */
 export function qualifierScore(x, y, weight = () => 1, qx = qualifiers(x), qy = qualifiers(y)) {
   if (!qx.units.length && !qy.units.length) return null;
   const xAdds = qx.units.filter((u) => !qy.units.includes(u)), yAdds = qy.units.filter((u) => !qx.units.includes(u));
-  if (xAdds.length && yAdds.length) return null; // Great and Little: each has its own
+  if (xAdds.length && yAdds.length) return null; // Chipping and Market, Magna and Parva: each has its own
   if (!xAdds.length && !yAdds.length) return null; // the same qualifiers: scored as any other names
   const [more, fewer] = xAdds.length ? [qx, qy] : [qy, qx];
   const fewerCore = fewer.units.length ? fewer.core : (more === qx ? y : x);
   // The core of the name with fewer qualifiers must weigh at least as much as each qualifier word
   // added, unless it is rare in itself (weight.rare: the weight of a word in QUALIFIER_RARE names).
   let coreWeight = 0, addedWeight = 0, common = false;
+  const added = [];
   for (const v of fewerCore.split(' ')) coreWeight += weight(v);
   for (let i = 0; i < more.units.length; i++) {
     if (fewer.units.includes(more.units[i])) continue;
+    added.push(more.labels[i]);
     for (const v of more.words[i].split(' ')) { const wv = weight(v); addedWeight += wv; if (wv > coreWeight) common = true; }
   }
   if (common && coreWeight >= (weight.rare ?? Infinity)) common = false;
   if (common) return { score: coreWeight / (coreWeight + addedWeight), common };
-  return { score: more.core === fewerCore || plainScore(more.core, fewerCore, weight) === 1 ? QUALIFIER_CAP : 0, common };
+  return { score: more.core === fewerCore || plainScore(more.core, fewerCore, weight) === 1 ? QUALIFIER_CAP : 0, common, added };
 }
 
 /**

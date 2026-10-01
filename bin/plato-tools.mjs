@@ -21,6 +21,7 @@ const { match } = await import('../src/engine/krisis/match.js');
 const { apply, OUTPUTS: REVIEW_OUTPUTS } = await import('../src/engine/krisis/apply.js');
 const { checkReviewer, isColumns } = await import('../src/engine/krisis/work.js');
 const { exportCandidates, serialiseCandidateSet } = await import('../src/engine/krisis/candidates.js');
+const { QUALIFIER_LISTS, qualifierIds } = await import('../src/engine/krisis/qualifiers.js');
 const { detect, readable, DataError } = await import('../src/engine/input.js');
 const { nodeResources, gatherInputs, openFiles, isSystemError, NodeHost } = await import('../src/node/host.js');
 const { toolsCommit } = await import('../src/node/build-info.js');
@@ -239,6 +240,9 @@ does not apply to):
   --max-distance KM match: the greatest distance apart, in kilometres, of two places with
                     coordinates that may be suggested (default 50).
   --top K           match: the most suggestions for one place (default 5).
+  --qualifiers IDS  match: the lists of qualifiers to set aside when two names differ only by
+                    them (Chipping Ongar and Ongar), ids separated by commas, or none:
+${QUALIFIER_LISTS.map((l) => `                    ${l.id}: ${l.label}${l.status === 'unmeasured' ? ', unmeasured' : ''}${l.on ? ' (the default)' : ''}`).join('\n')}
   --review FILE     apply: the work file of the review (made by match, and saved by the page).
   --previous-candidates SET
                     candidates: an earlier candidate set, already published; repeatable. A
@@ -397,7 +401,7 @@ async function main(argv) {
         'same-id': { type: 'boolean', default: false }, 'list-places': { type: 'boolean', default: false },
         'header-places': { type: 'boolean', default: false }, 'commentary-places': { type: 'boolean', default: false },
         'key-pattern': { type: 'string', multiple: true, default: [] },
-        with: { type: 'string' }, threshold: { type: 'string' }, 'max-distance': { type: 'string' }, top: { type: 'string' },
+        with: { type: 'string' }, threshold: { type: 'string' }, 'max-distance': { type: 'string' }, top: { type: 'string' }, qualifiers: { type: 'string' },
         review: { type: 'string' }, output: { type: 'string' }, reviewer: { type: 'string' }, orcid: { type: 'string' },
         'others-title': { type: 'string' },
         candidates: { type: 'string', multiple: true }, 'previous-candidates': { type: 'string', multiple: true }, 'set-iri': { type: 'string' },
@@ -457,7 +461,7 @@ async function main(argv) {
   // (--limit, for lookup and preview, is refused above for any other command.)
   if (o.gazetteer || o.places || o['all-names'] || o.variants || o.countries || o.near || o.lang || o.batch || o['dry-run'] || o['token-env'] || o['gazetteer-iri']) return usage('--gazetteer, --token-env, --gazetteer-iri, --places, --all-names, --variants, --countries, --near, --lang, --batch and --dry-run are for lookup.');
   if (o.levels || o.level !== undefined || o.relax !== undefined || o.unconstrained) return usage('--levels, --level, --relax and --unconstrained are for lookup.');
-  if (o.with || o.threshold || o['max-distance'] || o.top || o.review || o.output || o.reviewer || o.orcid || o['others-title'] !== undefined) return usage('--with, --threshold, --max-distance, --top, --review, --output, --reviewer, --orcid and --others-title are for match and apply.');
+  if (o.with || o.threshold || o['max-distance'] || o.top || o.qualifiers !== undefined || o.review || o.output || o.reviewer || o.orcid || o['others-title'] !== undefined) return usage('--with, --threshold, --max-distance, --top, --qualifiers, --review, --output, --reviewer, --orcid and --others-title are for match and apply.');
   if (!reads && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, preview, cluster, compare, publish, match, apply, lookup, candidates and datacube.`);
   // Elenchos: candidate sets checked together, with no other input: the first is checked, with the others
   // (each is first made sure of below, so that a dataset given with --candidates is refused, not checked).
@@ -963,11 +967,13 @@ async function review(action, args, o, resources) {
     if (!o.with) return usage('match needs --with, the other dataset.');
     others = await gatherInputs([o.with]);
     if (others.length !== 1) return usage('--with takes one dataset.');
-    options = { threshold: o.threshold, maxDistanceKm: o['max-distance'], topK: o.top, base: o.base, name: items[0].name, reviewer, othersTitle: o['others-title'], columns };
+    let qualifiers;
+    try { qualifiers = qualifierIds(o.qualifiers); } catch (e) { if (e instanceof DataError) return usage(`--qualifiers ${o.qualifiers}: ${e.message}`); throw e; }
+    options = { threshold: o.threshold, maxDistanceKm: o['max-distance'], topK: o.top, qualifiers, base: o.base, name: items[0].name, reviewer, othersTitle: o['others-title'], columns };
     for (const [flag, v, ok] of [['--threshold', o.threshold, (x) => x > 0 && x <= 1], ['--max-distance', o['max-distance'], (x) => x >= 0], ['--top', o.top, (x) => Number.isInteger(x) && x >= 1]])
       if (v !== undefined && !(/^\s*[\d.]+\s*$/.test(v) && ok(Number(v)))) return usage(`${flag} ${v} is not allowed; see --help.`);
   } else {
-    if (o.with || o.threshold || o['max-distance'] || o.top) return usage('--with, --threshold, --max-distance and --top are for match.');
+    if (o.with || o.threshold || o['max-distance'] || o.top || o.qualifiers !== undefined) return usage('--with, --threshold, --max-distance, --top and --qualifiers are for match.');
     if (!o.review) return usage('apply needs --review, the work file of the review.');
     if (o.output && !REVIEW_OUTPUTS.includes(o.output)) return usage(`"${o.output}" is not an output; the outputs are ${REVIEW_OUTPUTS.join(' and ')}.`);
     try { work = readFileSync(o.review, 'utf8'); }

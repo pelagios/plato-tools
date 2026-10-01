@@ -337,8 +337,9 @@ export const review = {
     ? `${Math.abs(p[1]).toFixed(4)}° ${p[1] < 0 ? 'S' : 'N'}, ${Math.abs(p[0]).toFixed(4)}° ${p[0] < 0 ? 'W' : 'E'}` : 'no coordinates'),
   /** Other names than the label: "Also: Bristow, Brigstowe"; empty when there are none. */
   names: (label, names) => { const other = [...new Set((names || []).filter((n) => n && n !== label))]; return other.length ? `Also: ${other.join(', ')}` : ''; },
-  /** How alike and how far: "names 93% alike, 1.2 km apart". */
+  /** How alike and how far: "names 93% alike, 1.2 km apart"; "names 88% alike, qualifier rule: Chipping, …" when only that rule suggested it. */
   facts: (c) => [`names ${Math.round((c.similarity_score || 0) * 100)}% alike`,
+    ...(c.rule === 'qualifier' ? [`qualifier rule: ${c.qualifier}`] : []),
     Number.isFinite(c.distance_km) ? `${c.distance_km < 10 ? c.distance_km.toFixed(1) : Math.round(c.distance_km).toLocaleString('en-GB')} km apart` : 'distance not known'].join(', '),
   /** A decision taken, in words: "Decided: the same place (exact match)". */
   decision: (d) => !d ? 'Not decided yet'
@@ -364,6 +365,11 @@ export const review = {
   notRecognisedAtFinish: 'The files chosen were not recognised as data these tools read, so the review cannot be finished with them. Save the review, choose the dataset it was made from, and resume the saved review to finish it.',
   /** A dataset given to matching that is not data these tools read ('subjects' or 'others'). */
   notRecognised: (which) => `${which === 'subjects' ? 'Your dataset' : 'The other dataset'} was not recognised as data these tools read, so nothing was matched`,
+  /** The options' lists of qualifiers (src/engine/krisis/qualifiers.js), one checkbox each. */
+  qualifierLegend: 'Matching: names that differ only by a qualifier (Chipping Ongar and Ongar)',
+  qualifierNote: 'A pair of names that differ only by a word or phrase on a list chosen here is suggested at 0.88, and marked "qualifier rule" in the review. Only words that rarely mark a separate place are listed. Lists marked unmeasured have not been tried on real data.',
+  /** One list's checkbox: "French (unmeasured)". */
+  qualifierList: (l) => `${l.label}${l.status === 'unmeasured' ? ' (unmeasured)' : ''}`,
   /** Beside the column choices of a table while a review is open, when they cannot be changed. */
   columnsLocked: 'Locked while a review is open: the review reads the dataset by the matching of columns it was made with.',
 };
@@ -428,6 +434,8 @@ export function hermesTextNote({ model, provider, prompt, date, kindGuess, adjus
 }
 /** What finishing a review with the dataset output says (src/engine/krisis/apply.js), and matching's own warnings. */
 export const KRISIS_TEXT = {
+  /** A list of qualifiers asked for that there is not (src/engine/krisis/qualifiers.js). */
+  noSuchQualifierList: (id, known) => `There is no list of qualifiers "${id}": the lists are ${known.join(', ')}, or none.`,
   /** The other dataset gives no title, so the attestations would cite it by its file's name. */
   othersTitleIsFileName: (name) => `The other dataset does not give its title, so each attestation of this review would cite it as its source by its file's name, ${name}, and a published attestation is never changed. Give the other dataset's title (in the options on the page, or --others-title on the command line) before you finish.`,
   noDataset: 'Choose the dataset this review was made from: the new attestations are added to it. Nothing was written.',

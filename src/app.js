@@ -13,6 +13,7 @@ import { review as W, POOL_BUSY, POOL_STUCK, PREVIEW_WORDS } from './engine/word
 const REVIEW_WORDS = W;   // the review's words, where W names the words for the columns
 import { readable } from './engine/input.js';
 import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions, flag, noteOn, setRowState } from './engine/krisis/work.js';
+import { QUALIFIER_LISTS } from './engine/krisis/qualifiers.js';
 import { exportCandidates, readCandidateSet, serialiseCandidateSet } from './engine/krisis/candidates.js';
 import { datasetAddress, baseDiffers } from './engine/methodos/containment.js';
 import { acceptGuarded, undoBatch, guardOf, guardsFirst, planGuarded } from './engine/krisis/guards.js';
@@ -986,9 +987,16 @@ function reviewerProblem() {
   if (!r) return null;
   try { checkReviewer(r); return null; } catch { return W.badOrcid; }
 }
+// The lists of qualifiers (engine/krisis/qualifiers.js), a checkbox each in the options, with its
+// language, "unmeasured" where it is, and what it holds; those on by default are checked.
+$('qualifier-lists').innerHTML = `<legend>${escapeHtml(W.qualifierLegend)}</legend>`
+  + QUALIFIER_LISTS.map((l) => `<label><input type="checkbox" name="qualifiers" value="${escapeHtml(l.id)}"${l.on ? ' checked' : ''}> ${escapeHtml(W.qualifierList(l))}</label>`
+    + `<small>${escapeHtml(l.description)}</small>`).join('')
+  + `<small>${escapeHtml(W.qualifierNote)}</small>`;
 function matchOptions() {
   const num = (id) => { const v = parseFloat($(id).value); return Number.isFinite(v) ? v : undefined; };
-  return { threshold: num('threshold'), maxDistanceKm: num('max-distance'), othersTitle: $('others-title').value.trim() || undefined };
+  const qualifiers = [...document.querySelectorAll('#qualifier-lists input[name="qualifiers"]:checked')].map((b) => b.value);
+  return { threshold: num('threshold'), maxDistanceKm: num('max-distance'), qualifiers, othersTitle: $('others-title').value.trim() || undefined };
 }
 /** What is wrong with the matching options, in the engine's own words (checkMatchOptions), or null. */
 function matchProblem() { try { checkMatchOptions(matchOptions()); return null; } catch (e) { return e.message; } }

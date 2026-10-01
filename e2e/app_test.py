@@ -605,6 +605,12 @@ def krisis_case(page, tmp):
           s.get('phase') == 'reviewing' and ('bath', 'bathe') in cands and ('bath', 'bath-maine') not in cands, sorted(cands))
     check('match review: the base address in the options is passed to matching and kept in the work file',
           (work.get('match_parameters') or {}).get('base') == 'https://example.org/a/', work.get('match_parameters') or s)
+    # The lists of qualifiers: a checkbox each in the options, the measured one checked, and the work file says which were used.
+    try: boxes = page.evaluate("() => [...document.querySelectorAll('#qualifier-lists input[name=qualifiers]')].map((b) => [b.value, b.checked, b.parentElement.textContent.trim()])")
+    except Exception as e: boxes = [['error', str(e).split('\n')[0][:200], '']]
+    check('match review: the options show a checkbox for each list of qualifiers, "unmeasured" where so; the measured list is used by default and kept in the work file',
+          [b[:2] for b in boxes] == [['en-cy-la', True], ['fr', False], ['de', False]] and boxes[1][2] == 'French (unmeasured)' and boxes[0][2] == 'English, Welsh and Latin'
+          and ((work.get('match_parameters') or {}).get('qualifiers') or {}).get('lists') == ['en-cy-la'], boxes)
     check('match review: the other dataset\'s title in the options replaces the one it gives, is kept in the work file, and is what the suggestions cite',
           (work.get('others') or {}).get('title') == 'Their places, as given' and (work.get('others') or {}).get('titleFrom') == 'given'
           and bool(work.get('candidates')) and all(c['other']['source']['title'] == 'Their places, as given' for c in work['candidates']), work.get('others') or s)
