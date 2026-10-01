@@ -331,7 +331,6 @@ async function main(argv) {
   if (action !== 'convert' && (o.to || o.overwrite)) return usage('--to and --overwrite are for convert.');
   if (o.json && o.brief) return usage('choose --json or --brief, not both.');
   if (o.cube && o.to !== 'ntriples') return usage('--cube is for convert --to ntriples.');
-  if (o.sheet !== undefined && action === 'compare') return usage('--sheet is for check and convert.');
   if (o.columns) {
     try { o.savedColumns = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(o.columns))); }
     catch (e) { return usage(`--columns ${o.columns} cannot be read as JSON: ${e.message}`); }
