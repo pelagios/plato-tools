@@ -58,16 +58,20 @@ async function job(m) {
     trim(new Set(list.map((t) => t.url)));
     return out;
   };
+  let tilesMs = 0;
   try {
+    const t0 = Date.now();
     const got = await getTiles(m.tiles);
+    tilesMs = Date.now() - t0;
     if (!isCurrent()) return;
     const result = m.type === 'trace' ? traceStep({ frame: m.frame, tiles: got, seed: m.seed, mode: m.mode, params: m.params }, cache) : snapStep({ frame: m.frame, tiles: got });
     if (!isCurrent()) return;
+    if (result.timing) result.timing.tilesMs = tilesMs;
     const transfer = m.type === 'snap' ? [result.ridges.buffer, result.edges.buffer] : [];
     postMessage({ type: 'result', channel, gen, result }, transfer);
   } catch (e) {
     if (!isCurrent() && e?.kind === 'cancelled') return;
-    postMessage({ type: 'error', channel, gen, message: e?.message || String(e), kind: e?.kind || 'other', reason: e?.reason || null });
+    postMessage({ type: 'error', channel, gen, message: e?.message || String(e), kind: e?.kind || 'other', reason: e?.reason || null, timing: e?.timing ? { ...e.timing, tilesMs } : null });
   } finally { waiting.delete(`${channel}:${gen}`); }
 }
 

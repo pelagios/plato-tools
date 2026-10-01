@@ -447,3 +447,22 @@ test('10. a level-2 server with no tiles is asked for regions (the parser\'s def
   const level0 = { ...v2, '@id': 'https://iiif.example.org/iiif/z', profile: ['http://iiif.io/api/image/2/level0.json'] };
   assert.throws(() => imageOf(level0), (e) => e.kind === 'image' && /only whole/.test(e.message));
 });
+
+test('10. compose: tiles exactly at their scale give the image\'s own pixels, each in its place (at 1/1, and at 1/2 against the averaged image)', () => {
+  const img = oddImage(), image = Image.parse(ODD);
+  for (const s of [1, 2]) {
+    const frame = frameAround(image, [500, 350], s, 300);
+    const tiles = tilesFor(image, frame).map((t) => serve(img, t));
+    const { rgba } = compose(frame, tiles);
+    let worst = 0, checked = 0;
+    for (let j = 0; j < frame.h; j += 7) for (let i = 0; i < frame.w; i += 5) {
+      const X = frame.x0 + i * s, Y = frame.y0 + j * s;
+      // Only tiles exactly at their scale (at 1/2 the edge tiles, 489 pixels in 245, are read bilinearly).
+      if (X + s > 1001 || Y + s > 701 || (s === 2 && (X + s > 512 || Y + s > 512))) continue;
+      // The image's own pixels under working pixel (i, j), averaged.
+      let r = 0; for (let y = Y; y < Y + s; y++) for (let x = X; x < X + s; x++) r += img.rgba[(y * 1001 + x) * 4];
+      worst = Math.max(worst, Math.abs(rgba[(j * frame.w + i) * 4] - r / (s * s))); checked++;
+    }
+    assert.ok(checked > 500 && worst <= 1, `at 1/${s}: ${checked} pixels, worst ${worst}`);
+  }
+});

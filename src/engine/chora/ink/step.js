@@ -27,8 +27,13 @@ export function createPrepCache(size = 1) {
 export function traceStep({ frame, tiles, seed, mode, params }, cache = createPrepCache()) {
   const colour = mode === 'area' || !!params.colour;
   const key = `${frame.x0},${frame.y0},${frame.s},${frame.w},${frame.h},${colour}`;
-  const prep = cache.get(key, () => prepareTiles(frame, tiles, { colour }));
-  return mode === 'area' ? traceArea(prep, seed, frame, params) : traceLine(prep, seed, frame, params);
+  const t0 = Date.now();
+  let made = false;
+  const prep = cache.get(key, () => { made = true; return prepareTiles(frame, tiles, { colour }); });
+  const t1 = Date.now();
+  // What a proposal or its refusal took: the window made ready (when it was not), and the trace.
+  const timing = (out) => Object.assign(out, { timing: { readyMs: t1 - t0, made, traceMs: Date.now() - t1, px: frame.w * frame.h } });
+  try { return timing(mode === 'area' ? traceArea(prep, seed, frame, params) : traceLine(prep, seed, frame, params)); } catch (e) { throw timing(e); }
 }
 
 /** The ink's sparse pixels for snapping over one window. */

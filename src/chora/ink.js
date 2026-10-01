@@ -32,7 +32,7 @@ const roundCoords = (c) => (typeof c[0] === 'number' ? c.map(round9) : c.map(rou
  */
 export function createInk({ mapApi, guard, state, overlayAt, onAccept, panel }) {
   const map = mapApi.map;
-  const ink = (state.ink = { phase: 'idle', mode: null, proposals: 0, accepted: 0, lastMs: null, lastError: null, snapPoints: 0, snapBuilds: 0, timings: [] });
+  const ink = (state.ink = { phase: 'idle', mode: null, proposals: 0, accepted: 0, lastMs: null, lastError: null, snapPoints: 0, snapBuilds: 0, timings: [], steps: [] });
   const fetcher = createTileFetcher({ guard });
   let worker = null;
   const gens = { trace: 0, snap: 0 };
@@ -56,6 +56,7 @@ export function createInk({ mapApi, guard, state, overlayAt, onAccept, panel }) 
       }
       if (!job) return;
       pending.delete(key);
+      if (m.type === 'result' || m.timing) ink.steps.push({ ...(m.type === 'result' ? m.result.timing : m.timing), kind: m.type === 'result' ? 'ok' : m.kind });
       if (m.type === 'result') job.resolve(m.result); else job.reject(Object.assign(new Error(m.message), { kind: m.kind, reason: m.reason }));
     };
     worker.onerror = (e) => { for (const j of pending.values()) j.reject(new Error(`The tracing stopped (${e.message || 'an error in its worker'}).`)); pending.clear(); };
@@ -129,7 +130,7 @@ export function createInk({ mapApi, guard, state, overlayAt, onAccept, panel }) 
     const p = proposal;
     if (!p) return;
     const t0 = performance.now();
-    ink.phase = 'tracing'; ink.lastError = null; say('Reading the map…');
+    ink.phase = 'tracing'; ink.lastError = null; ink.steps = []; say('Reading the map…');
     try {
       const results = [], gen = newGen('trace'), step = stepper('trace', gen, p.entry);
       for (const [k, s] of p.seeds.entries()) {

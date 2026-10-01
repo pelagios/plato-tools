@@ -100,6 +100,21 @@ export function composeEach(frame, tiles, put) {
     // multiples of s), so only a pixel at the image's own edge, part off the image, is shared by none.
     const i0 = Math.max(0, Math.floor((rx - x0) / s)), i1 = Math.min(w - 1, Math.ceil((rx + rw - x0) / s) - 1);
     const j0 = Math.max(0, Math.floor((ry - y0) / s)), j1 = Math.min(h - 1, Math.ceil((ry + rh - y0) / s) - 1);
+    // A tile that is its region at scale s exactly, on the working grid: its pixels are the window's, as
+    // they are (the bilinear reading below would give the same, at several times the cost).
+    const ox = (x0 - rx) / s, oy = (y0 - ry) / s;
+    if (Math.abs(kx * s - 1) < 1e-12 && Math.abs(ky * s - 1) < 1e-12 && Number.isInteger(ox) && Number.isInteger(oy)) {
+      const D = t.data;
+      for (let j = j0; j <= j1; j++) {
+        const v = Math.min(t.height - 1, Math.max(0, j + oy));
+        for (let i = i0; i <= i1; i++) {
+          const o = (v * t.width + Math.min(t.width - 1, Math.max(0, i + ox))) * 4;
+          put(j * w + i, D[o], D[o + 1], D[o + 2], D[o + 3]);
+        }
+      }
+      covered += (j1 - j0 + 1) * (i1 - i0 + 1);
+      continue;
+    }
     for (let j = j0; j <= j1; j++) {
       const v = Math.min(t.height - 1, Math.max(0, (y0 + (j + 0.5) * s - ry) * ky - 0.5));
       const va = Math.floor(v), vb = Math.min(t.height - 1, va + 1), fy = v - va;

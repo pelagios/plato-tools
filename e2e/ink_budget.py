@@ -8,7 +8,9 @@ What is timed is the page's own account (window.__chora.ink.lastMs: from the cli
 the proposal drawn, the georeference's carrying it into the world included), each the median of --runs:
 
 - an area whose window grows to 1024 x 1024 at full resolution: the first click (its tiles fetched from
-  the fixture server on this machine), the same click again (the tiles kept), and a slider moved;
+  the fixture server on this machine), the same click again (the tiles and the window kept), a slider
+  moved, and the click again once another trace has taken the worker's window (tiles kept, its windows,
+  512 and then 1024, made afresh);
 - a line followed across the map until the window is 2048 wide (the whole map at 1/2), first and again;
 - a snap lookup: Terra Draw's question, asked 20,000 times at random over the map.
 
@@ -127,7 +129,22 @@ def main():
                 page.evaluate('() => window.__chora_ink.discard()')
                 ink = trace('line', BIG_RIVER[300])
                 (line_first if run == 0 else line_again).append(ink['lastMs'])
+                out['line: its steps (' + ('first' if run == 0 else 'again') + ')'] = ink.get('steps')
                 out['line: window'] = ink['last']['frame']; out['line: grown'] = ink['last']['grown']; out['line: vertices'] = ink['last']['vertices']
+            # The middle case: the wash's tiles kept, but its windows made afresh (the line's window has
+            # taken the worker's place for one): read at 512, grown to 1024.
+            page.evaluate('() => window.__chora_ink.discard()')
+            afresh = []
+            for run in range(RUNS):
+                if run:   # the line's window again, to put the wash's out of the worker
+                    page.click('#draw-tools button[data-trace="line"]'); at_ratio(3.0); centre_on(BIG_RIVER[300])
+                    trace('line', BIG_RIVER[300]); page.evaluate('() => window.__chora_ink.discard()')
+                page.click('#draw-tools button[data-trace="area"]'); at_ratio(1.0); centre_on(BIG_WASH_CENTRE)
+                afresh.append(trace('area', BIG_WASH_CENTRE)['lastMs'])
+            out['area: tiles kept, windows made afresh (ms, median)'] = round(statistics.median(afresh))
+            out['area: windows made afresh, its steps (the last run)'] = page.evaluate('() => window.__chora.ink.steps')
+            page.evaluate('() => window.__chora_ink.discard()')
+            page.click('#draw-tools button[data-trace="line"]')
             out['line: first click, tiles fetched (ms)'] = round(line_first[0])
             out['line: click again, tiles kept (ms, median)'] = round(statistics.median(line_again)) if line_again else None
             page.evaluate('() => window.__chora_ink.discard()')
