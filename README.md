@@ -76,12 +76,14 @@ node bin/plato-tools.mjs check my-tables/ places.jsonl.gz export.nt     # or fro
 node bin/plato-tools.mjs convert --to plato-jsonl --out converted/ export.nt.gz
 node bin/plato-tools.mjs check --json data/*.json > report.jsonl        # for scripts
 node bin/plato-tools.mjs compare release-1.jsonl.gz release-2.jsonl.gz  # was anything deleted or changed?
+node bin/plato-tools.mjs preview --limit 5 my-places.csv                 # the first records, before the rest
 ```
 
 | Command | What it does |
 |---|---|
 | `check INPUT…` | Reports on each input in turn, then gives a total |
 | `convert --to TARGET INPUT…` | Also writes each input as `plato-jsonl`, `plato-json`, `ntriples`, `tables`, `lpf-seq` or `lpf`, into `--out` (by default the current directory), named after the input |
+| `preview [--limit N] INPUT` | Shows the first N records (10 unless `--limit` says otherwise) of a table of places, a TEI edition or W3C Web Annotations, as a run reads them, and writes nothing ([below](#previewing-the-first-records)) |
 | `compare EARLIER LATER` | Checks that a published dataset was only added to ([what it reports](https://pelagios.org/place-attestation-ontology/guide/tools.html#comparing-two-versions)) |
 | `publish PART INPUT` | Prepares a dataset for publishing: `report`, `mint`, `site` or `w3id` ([below](#publishing)) |
 | `datacube FILE…` | Checks a Data Cube export against Data Cube's integrity constraints ([Statistical tables](https://pelagios.org/place-attestation-ontology/guide/statistics.html#checking-and-standard-data-cube)) |
@@ -97,8 +99,8 @@ node bin/plato-tools.mjs compare release-1.jsonl.gz release-2.jsonl.gz  # was an
   is, one sheet at a time: the first sheet that is not hidden, unless `--sheet NAME` (or, on the
   page, the sheet chosen above the columns table) names another. The report names the sheets not
   read, any hidden sheet (Excel workbooks only: SheetJS does not read an ODS file's hidden flag), an
-  empty sheet, a formula saved without its value, and a cell holding an error (`#DIV/0!`, `#N/A`, `#REF!`…), which carries nothing. Each cell is read as its value, not as the
-  workbook displays it: a coordinate formatted `0.00` keeps every digit, and a date is an ISO date
+  empty sheet, a formula saved without its value, and a cell holding an error (`#DIV/0!`, `#N/A`,
+  `#REF!`…), which carries nothing. Each cell is read as its value, not as the workbook displays it: a coordinate formatted `0.00` keeps every digit, and a date is an ISO date
   (`1990-05-06`, or `1990-05-06T10:30:00` with a time). A workbook is read whole into memory, and
   one over 50 MB is warned of; a very large sheet is better saved as CSV (UTF-8).
 - **Exit status:** 0 if no input has problems, 1 if any has, 2 if the command is wrong or an input
@@ -117,7 +119,7 @@ node bin/plato-tools.mjs compare release-1.jsonl.gz release-2.jsonl.gz  # was an
   takes the object printed without `--json` instead. For a workbook's sheet, `sheet` names the
   sheet read and `sheets` lists them all. For a TEI edition, `keyPatterns` holds the
   `--key-pattern` patterns. `--brief` prints one line per input.
-- **Reading options** (the table above) are for `check` and `convert`. One that applies to none of
+- **Reading options** (the table above) are for `check`, `convert` and `preview`. One that applies to none of
   the inputs (`--list-places` with no TEI edition among them), or `--same-id` for a table with no
   id column, is a mistake in the command: exit 2, with the reason, and nothing is read.
 - `--base URL` gives the base for the web addresses of spreadsheet identifiers
@@ -135,6 +137,38 @@ node bin/plato-tools.mjs compare release-1.jsonl.gz release-2.jsonl.gz  # was an
   afterwards. It needs room for about one and a half times the uncompressed input (twice the text,
   for spreadsheet tables). If the temporary directory is held in
   memory (a `tmpfs`), point `--work-dir` at a real disk.
+
+### Previewing the first records
+
+`preview` reads the first records of a table of places (a CSV file, plain GeoJSON, or a sheet of a
+workbook), a TEI edition, or W3C Web Annotations (with or without `--georef`: nothing is fetched),
+through the same reader `check` and `convert` use, and stops: it checks nothing as a whole and
+writes nothing. On the page, *Preview the first 10 records* does the same, once the columns are
+read. It takes `--limit N`, `--columns FILE`, `--sheet NAME`, `--base URL` and the reading options.
+Any other format is refused, with exit 2: a shortened file of the spreadsheet tables or of PLATO
+JSON could be taken for the whole.
+
+```bash
+node bin/plato-tools.mjs preview --limit 3 places.csv > first.jsonl    # the records as JSON Lines
+node bin/plato-tools.mjs preview --json edition.xml                   # all of it, as one JSON object
+```
+
+- The records go to stdout, one JSON object a line: a place for a place-centric table, an
+  attestation (saying what it is about) for annotations, TEI and a table of rows about web
+  addresses, as the reader gives them before a run gathers them by place. The line saying what the
+  preview is, why it may be partial, and the **losses so far**, grouped as the report groups them,
+  go to stderr. `--json` prints one object with all of it (`items`, `line`, `complete`, `total`,
+  `read`, `why`, `report`, `exitCode`).
+- The line says `first N of M records; nothing checked or written` only where the whole input was
+  read, so that M is known; otherwise `the first N records read; the rest not read`. A file is never
+  read to its end to count it: reading stops at the first record past the limit.
+- A partial preview says why its records may not be all there are: the rest was not read; a run
+  gathers attestations by place at the end; places made from rows with the same id come at the end;
+  a TEI place name pointing to a `<place>` later in the file (`ref="#…"`) waits for it, and a name
+  in a part that may be the editors' is held until it is known whether the text has an edition div,
+  either of which can need most of the file. The report says so too (`preview-partial`, a warning).
+- Exit status: 0 if the records read have no problems, 1 if they have, 2 if no preview could be
+  made.
 
 ### Publishing
 

@@ -518,10 +518,39 @@ readers link to those headings, so keep them.
   `src/engine/report.js`'s `LOSS_TEXT` under the same `tei-*` and `generic-*` names, with
   `address-pleiades-part` shared by all three readers that take place addresses. The tests
   require a text for every kind.
-- **The pipeline hook** (`pipeline.js`, `runChecked`): `tei` goes to `teiSource`, `csv` and
-  `geojson` to `genericSource`. TEI is attestation-centric, so it goes through the store like
+- **The pipeline hook** (`pipeline.js`, `sourceFor`, which `runChecked` and the preview share):
+  `tei` goes to `teiSource`, `csv` and `geojson` to `genericSource`. TEI is attestation-centric, so it goes through the store like
   annotations; for a table of places `genericProfile` reads the mapping first to decide the profile,
   and so whether the store is needed, and its records are schema-checked like the tables'.
+
+- **The preview** (`src/engine/hermes/preview.js`, `preview({ input, options, limit }, env)`):
+  the first `limit` record and attestation events of a table of places, a TEI edition or W3C
+  annotations (`PREVIEWED`; anything else is a `DataError` in `PREVIEW_WORDS.refused`'s words), read
+  through `sourceFor`, so that they are exactly the first events a run's reader gives (the tests
+  deep-equal them for a CSV, a GeoJSON, a TEI and an annotations fixture). Equality is with the
+  reader's event stream, not with what a run writes: attestation-centric input is regrouped by
+  place through the store at the end of a run, which the preview never reaches. It reads one
+  record past the limit, to know whether there is more, then breaks out of the reader, whose
+  generators close in turn; each lets go of its stream in a `finally` (`textChunks`, `lineChunks`,
+  `jsonDocument`, `annotationItems` and the TEI reader's `chunks` cancel it, `csvRecords` and the
+  TEI head buffer close the chunks they took by hand), which the tests check on a file that counts
+  its streams, for each format made larger than a few 64 KB pieces. Each event is schema-checked as
+  a run checks it; env is given only `resources` and `xlsx`, so it never calls `env.output` or
+  opens a database. It returns `{ header, profile, items, report, complete, read, total, why }`:
+  `report` as it stood at the last record shown (so the record read past the limit, and its losses,
+  are not shown), `read` the reader's counts including that record, `total` only when the whole
+  input was read (the input is never read to its end to count it; `previewLine` words the line
+  "first N of M records" or "the first N records read; the rest not read", with "nothing checked or
+  written"), and `why`, when partial, built from `PREVIEW_WORDS`: stopped, regrouped (attestation-
+  centric), places made at the end (`sameId`), and, from the TEI reader's `watch` hook (the 4th
+  argument of `teiSource`), the names still waiting for a `<place>` (`pending`) or held until the
+  edition div is known (`held`) when reading stopped. The report then carries `preview-partial`, a
+  warning, as the report has no notice severity. The worker's `preview` command (no database, the
+  page's `id` in its reply), the page's button (shown for those formats, enabled once the columns
+  are answered or the TEI keys looked for, cleared when the matching, sheet, reading options or base
+  change; its result in `state.preview`), and `plato-tools preview [--limit N]` (records as JSON
+  Lines to stdout, the rest to stderr, or one object with `--json`; exit 0, 1 with problems in what
+  was read, 2 when none could be made) all call it.
 
 #### Address rules, hermes-addresses 1 (2026-10-01)
 
