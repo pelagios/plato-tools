@@ -351,7 +351,7 @@ export class TeiReader {
   // outside every top-level div and note (the text has no edition div), or the <text> ends; then it
   // is read as before, emitted out of the file's order, as a name waiting for a <place> is. Held
   // names are at most HOLD_CAP: the next is read as if the text had no edition div, the names held
-  // are emitted as ordinary, and that is reported once (tei-editorial-undecided). An edition div that
+  // are emitted as ordinary, and that is reported once for each <text> (tei-editorial-undecided). An edition div that
   // opens after that shows those names, and the ones read after them in the editors' parts, to have
   // been the editors' words converted as the source's: a definite loss (tei-editorial-late-edition,
   // counted in `late`). Everything else is emitted at once.
@@ -490,7 +490,7 @@ export class TeiReader {
     if (local === 'teiHeader') { this.inHeader++; el.header = true; el.hpath = 'teiHeader'; return; }
     if (this.inHeader) { el.hpath = `${parent.hpath}/${local}`; this.headerField(el.hpath, t); }
     if (local === 'text' && !this.inHeader) {
-      if (!this.inText) { this.editionSeen = false; this.editionDecided = false; this.topDiv = null; this.late = null; }
+      if (!this.inText) { this.editionSeen = false; this.editionDecided = false; this.topDiv = null; this.late = null; this.undecidedReported = false; this.textLine = this.parser.line; }
       this.inText++; el.textRoot = true;
     }
 
@@ -893,7 +893,7 @@ export class TeiReader {
     if (d.editorial && !this.editionSeen && !this.editionDecided) {
       if (this.held.length < HOLD_CAP) { this.held.push(d); return; }
       // Too many to hold: read as a text with no edition div, from here on.
-      if (!this.undecidedReported) { this.undecidedReported = true; this.report('tei-editorial-undecided', `${HOLD_CAP.toLocaleString('en')} place names held, the next on line ${m.fileLine}`); }
+      if (!this.undecidedReported) { this.undecidedReported = true; this.report('tei-editorial-undecided', `${HOLD_CAP.toLocaleString('en')} place names held, the next on line ${m.fileLine}, in the <text> beginning on line ${this.textLine}`); }
       this.late = { count: this.held.length, types: new Set(this.held.map((h) => h.editorial)) };
       this.decide(false);
     }

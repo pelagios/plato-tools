@@ -282,7 +282,7 @@ readers link to those headings, so keep them.
   the edition div opens (it is the editors'), a place name is read outside every top-level div and
   note, or the `<text>` ends (no edition div, then: it is the source's words). At most `HOLD_CAP`
   (10,000) names are held: the next decides the `<text>` as having no edition div, the held names
-  are emitted as ordinary, and `tei-editorial-undecided` (a warning) is reported once, so a
+  are emitted as ordinary, and `tei-editorial-undecided` (a warning) is reported once for each `<text>`, so a
   translation-only or commentary-only file holds no more than that; an edition div found after
   that makes only the names after it the editors', and is reported as a definite loss
   (`tei-editorial-late-edition`, its example the edition div's line, the count of names already

@@ -494,7 +494,7 @@ for (const [what, opts, n, total] of [['a top-level div of the text (a letter), 
     assert.ok(got.maxHeld <= HOLD_CAP, `held ${got.maxHeld}`);
     assert.ok(got.maxHeld >= HOLD_CAP / 2, `control: names were held (${got.maxHeld}), so the cap was what stopped it`);
     assert.equal(got.undecided.length, 1);
-    assert.match(got.undecided[0], /^10,000 place names held, the next on line \d+$/);
+    assert.match(got.undecided[0], /^10,000 place names held, the next on line \d+, in the <text> beginning on line 2$/);
     assert.equal(got.editorial, 0, 'none is taken for the editors\'');
     assert.equal(TEI_KINDS['tei-editorial-undecided'], 'warning');
     assert.match(LOSS_TEXT['tei-editorial-undecided'], /^No edition part was found among the first 10,000 place names/);
@@ -525,6 +525,23 @@ test('an edition div after more than 10,000 names in a translation is reported a
   assert.deepEqual(early('tei-editorial-late-edition'), []);
   assert.deepEqual(early('tei-editorial-undecided'), []);
   assert.equal(early('tei-place-editorial').length, 5, 'control: the five held names were taken for the editors\'');
+});
+
+// The cap is reached, and said, for each <text>: a corpus's second text over it is reported too, with its line.
+test('a corpus of two texts, each with more than 10,000 names in a translation, reports the cap for each, naming its text\'s line', () => {
+  const corpus = (n) => {
+    const reported = [];
+    const r = new TeiReader((k, e) => reported.push([k, e]), { fileName: 'corpus.xml' });
+    r.write(`<?xml version="1.0" encoding="UTF-8"?>\n<teiCorpus xmlns="http://www.tei-c.org/ns/1.0">${HEADER}\n`);
+    for (let t = 0; t < 2; t++) r.write(`<TEI>${HEADER}\n<text><body><div type="translation">\n${`<p>${pn(2, 'Place')}</p>\n`.repeat(n[t])}</div></body></text></TEI>\n`);
+    r.write('</teiCorpus>\n'); r.close();
+    return reported.filter(([k]) => k === 'tei-editorial-undecided').map(([, e]) => e);
+  };
+  const both = corpus([10001, 10001]);
+  assert.deepEqual(both, ['10,000 place names held, the next on line 10005, in the <text> beginning on line 4',
+    '10,000 place names held, the next on line 20009, in the <text> beginning on line 10008']);
+  // control: only the second text over the cap: one report, of the second text
+  assert.deepEqual(corpus([5, 10001]), ['10,000 place names held, the next on line 10013, in the <text> beginning on line 12']);
 });
 
 test('listPlaces: a place with several different web addresses is ambiguous, reported, not converted; two forms of one address are one', () => {
