@@ -1468,7 +1468,8 @@ async function* chunks(file) {
       if (r.done) break;
       yield r.value;
     }
-  } finally { reader.releaseLock?.(); }
+    // Closed before the end (a preview that stops early), the stream is cancelled, not left open.
+  } finally { reader.cancel().catch(() => {}); }
 }
 
 /**
@@ -1480,7 +1481,8 @@ async function headed(file) {
   let len = 0, done = false;
   while (len < HEAD) { const r = await it.next(); if (r.done) { done = true; break; } buf.push(r.value); len += r.value.length; }
   const table = mayNameOutsideDtd(buf.join('')) ? await loadIsoEntities() : undefined;
-  return { table, chunks: (async function* () { yield* buf; if (!done) yield* it; })() };
+  // Closed while still giving the head read here, the chunks after it are closed too.
+  return { table, chunks: (async function* () { try { yield* buf; if (!done) yield* it; } finally { if (!done) await it.return(); } })() };
 }
 
 /**
@@ -1488,14 +1490,19 @@ async function headed(file) {
  * attestation-centric attestation about that place. Mirrors annotationSource in
  * src/engine/pipeline.js: yields { type: 'header', value } first, then { type: 'attestation', value, n };
  * every kind the reader reports goes to the report with the severity TEI_KINDS gives it, in the
- * words of LOSS_TEXT. `options` are the run's options, passed to TeiReader.
+ * words of LOSS_TEXT. `options` are the run's options, passed to TeiReader; `watch`, a preview's,
+ * is given a function that says what the reader holds back.
  */
-export async function* teiSource(input, rep, options = {}) {
+export async function* teiSource(input, rep, options = {}, { watch } = {}) {
   const file = input.files[0];
   const { table, chunks: text } = await headed(file);
   // The run's options are the reading options; the file's name, the count and the entity table are the reader's own.
   const reader = new TeiReader((kind, example) => rep.add(TEI_KINDS[kind] || 'loss', kind, LOSS_TEXT[kind] || kind, example),
     { ...options, fileName: file.name, count: () => rep.count('place names'), entities: table });
+  // A preview (preview.js) that stops early asks what the reader has read and not yet given: the
+  // place names waiting for a <place> later in the file, and those held until it is known whether
+  // the text has an edition div.
+  if (watch) watch(() => ({ pending: reader.pending.size, held: reader.held.length }));
   let n = 0;
   const events = function* (evs) { for (const e of evs) yield e.type === 'attestation' ? { ...e, n: ++n } : e; };
   // What a chunk gave before a fault in it is yielded before the fault, so that the part of the file

@@ -214,6 +214,36 @@ export const READING_WORDS = {
   keysUnread: (message) => `The keys could not be read: ${message}`,
 };
 
+// ---- Hermes: the preview of the first records -------------------------------------------------------
+// `plato-tools preview` and the page's "Preview the first 10 records" (src/engine/hermes/preview.js):
+// the first records a run reads, shown as PLATO JSON, with what was lost from them so far. A preview
+// writes nothing and checks nothing as a whole, and says so wherever it is shown.
+const records = (n) => (n === 1 ? 'record' : 'records');
+export const PREVIEW_WORDS = {
+  button: (n) => `Preview the first ${n} records`,
+  tip: 'Reads only the first records, as a conversion reads them, and shows them as PLATO JSON with what was lost from them so far. Nothing is checked as a whole, and nothing is written.',
+  heading: 'Preview',
+  losses: 'Losses so far',
+  noLosses: 'Nothing has been lost from what was read so far.',
+  none: 'No records were read.',
+  /**
+   * The line above a preview: "first N of M records" where the whole input was read (so M is known),
+   * else "the first N records read; the rest not read". The input is never read to the end to count it.
+   */
+  line: ({ count, total }) => `${total === null || total === undefined ? `the first ${count.toLocaleString('en-GB')} ${records(count)} read; the rest not read` : `first ${count.toLocaleString('en-GB')} of ${total.toLocaleString('en-GB')} ${records(total)}`}; nothing checked or written`,
+  /** A format with no preview: said plainly. */
+  refused: (what) => `A preview is made only of a table of places (a CSV file, plain GeoJSON or a sheet of a workbook), a TEI edition, or W3C Web Annotations; this is ${what}, which is not previewed. Check or convert it instead.`,
+  limit: (given) => `The number of records to preview must be a whole number of at least 1; "${given}" is not.`,
+  failed: (message) => `No preview could be made: ${message}`,
+  // Why a preview is partial (complete: false), each said where it applies.
+  stopped: (n) => `Reading stopped after the first ${n.toLocaleString('en-GB')} ${records(n)}: the rest of the file was not read, so nothing after them, and no problem in it, is shown.`,
+  regrouped: "A conversion gathers these attestations by the place each is about once the whole file has been read; here they are shown one by one, as they are read, and a place's other attestations may come later in the file.",
+  sameId: 'Rows with the same id are read as one place, and each such place is made once every row has been read, so none is shown here.',
+  teiPending: (n) => `${n.toLocaleString('en-GB')} place ${n === 1 ? 'name' : 'names'} read so far ${n === 1 ? 'points' : 'point'} to a <place> later in the file (ref="#…"), and ${n === 1 ? 'waits' : 'wait'} for it, so ${n === 1 ? 'is' : 'are'} not shown: a run gives ${n === 1 ? 'it' : 'them'} after that <place>, which can be near the end of the file.`,
+  teiHeld: (n) => `${n.toLocaleString('en-GB')} place ${n === 1 ? 'name' : 'names'} read so far ${n === 1 ? 'is' : 'are'} held until it is known whether the text has an edition div (${n === 1 ? 'it' : 'they'} may be the editors' words), so ${n === 1 ? 'is' : 'are'} not shown.`,
+  unreadable: (message) => `The file could not be read past a problem, so the preview stops there: ${message}`,
+};
+
 // Krisis: review screen
 // What the page says while matches are reviewed one subject place at a time (src/app.js).
 const IDENTITY_WORDS = { exactMatch: 'the same place', closeMatch: 'much the same place', related: 'a related place' };
