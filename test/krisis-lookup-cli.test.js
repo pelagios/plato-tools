@@ -193,3 +193,15 @@ test('--review adds to a work file from match; wrong commands exit 2', { skip: N
   assert.ok(readWork(readFileSync(join(dir, 'a.krisis.json'), 'utf8')).candidates.some((c) => c.candidate_candidate === 'https://gaz.example.org/id/relative-id'));
   assert.equal((await cli(['lookup', join(dir, 'a.json'), '--gazetteer', endpoint, '--gazetteer-iri', 'https://gaz.example.org/id/'])).code, 2, 'a template without {{id}}');
 });
+test('--reviewer is written into the work file a lookup makes; a wrong --orcid is refused', { skip: NO_TLS }, async () => {
+  const dir = fixture();
+  const plain = await cli(['lookup', join(dir, 'a.json'), '--gazetteer', endpoint, '--out', dir]);
+  assert.equal(plain.code, 0, plain.out + plain.err);
+  assert.equal(readWork(readFileSync(join(dir, 'a.krisis.json'), 'utf8')).reviewer, null, 'control: none given, none written');
+  const run = await cli(['lookup', join(dir, 'a.json'), '--gazetteer', endpoint, '--out', dir, '--overwrite', '--reviewer', 'R. Looker', '--orcid', 'https://orcid.org/0000-0002-1825-0097']);
+  assert.equal(run.code, 0, run.out + run.err);
+  assert.deepEqual(readWork(readFileSync(join(dir, 'a.krisis.json'), 'utf8')).reviewer, { name: 'R. Looker', orcid: 'https://orcid.org/0000-0002-1825-0097' });
+  const bad = await cli(['lookup', join(dir, 'a.json'), '--gazetteer', endpoint, '--out', dir, '--overwrite', '--reviewer', 'R. Looker', '--orcid', '0000']);
+  assert.equal(bad.code, 2);
+  assert.match(bad.err + bad.out, /ORCID in full/);
+});

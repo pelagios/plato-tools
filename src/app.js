@@ -16,7 +16,7 @@ import { RELOAD_LOSES } from './lib/permission-words.js';
 import { LOOKUP_WORDS, lookupPage as LW } from './engine/words.js';
 import * as whgToken from './lib/whg-token.js';
 import { createLookup, WHG_ENDPOINT, isWhg } from './engine/gazetteer/index.js';
-import { runLookup, planQueries, selectPlaces, serviceOf, iriFromTemplate, iriVia, manifestSettings, newWork, defaultChoice, licenceOf, PLACE_CHOICES, WHG_REQUESTS_A_DAY } from './engine/krisis/lookup.js';
+import { runLookup, planLookup, serviceOf, iriFromTemplate, iriVia, manifestSettings, newWork, defaultChoice, licenceOf, PLACE_CHOICES, WHG_REQUESTS_A_DAY } from './engine/krisis/lookup.js';
 import { candidateSource } from './engine/krisis/identity.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
@@ -107,7 +107,7 @@ const buttons = (disabled) => { for (const id of ['check', 'convert', 'compare',
 const columnsPending = () => isTable(input) && !columns && !state.columns?.error;
 function gateOnColumns() { if (busy) return; const wait = columnsPending(); $('match').disabled = wait; $('finish').disabled = wait; state.columnsPending = wait; }
 function start(action, earlier) {
-  if (busy || !input?.format || input.reason !== undefined) return;
+  if (busy || looking || !input?.format || input.reason !== undefined) return;   // Krisis: nor while a lookup runs
   busy = true;
   const target = action === 'convert' ? $('target').value : null;
   $('progress').hidden = false; $('result').hidden = true;
@@ -592,16 +592,37 @@ function render(focus) {
   $('finish-cites').textContent = LW.cites(citedSources());   // Krisis: gazetteer lookup, one attestation per source
   if (!order.length) { box.innerHTML = `<p>${escapeHtml(W.none)}</p>`; return; }
   const iri = order[cursor], place = work.places[iri] || {}, cands = candidatesOf(work, iri);
+  const typed = keepTyped(iri);
   box.innerHTML = (allDone ? `<p class="good">${escapeHtml(W.allDone)}</p>` : '')
     + `<div class="subject"><h3 id="review-subject">${escapeHtml(place.label || iri)}</h3>`
     + (W.names(place.label, place.names) ? `<p>${escapeHtml(W.names(place.label, place.names))}</p>` : '')
     + `<p>${escapeHtml(W.point(place.point))}</p><p class="iri">${escapeHtml(iri)}</p>` + lookupPlaceHtml(iri, place) + '</div>'
     + (hasLookups() ? groupedHtml(cands)
       : `<p>${escapeHtml(W.candidates(cands.length))}</p><ol class="candidates">` + cands.map((c, i) => candidateHtml(c, i)).join('') + '</ol>');
-  if (findFor === iri) { $('find-query')?.focus(); return; }
-  if (basisFor) { $('basis-input')?.focus(); return; }
+  restoreTyped(typed);
+  // A form newly opened takes the focus; one redrawn (by a lookup's batch) has it back only if it had it.
+  if (findFor === iri) { if (!typed.find || typed.find.focused) $('find-query')?.focus(); return; }
+  if (basisFor) { if (!typed.basis || typed.basis.focused) $('basis-input')?.focus(); return; }
   if (!$('review-who').hidden) { $('review-name').focus(); return; }   // while the name is asked, it keeps the focus
   if (focus) box.focus({ preventScroll: false });
+}
+/**
+ * What is typed in the find form or the basis field that render() is about to draw again (each batch
+ * of a lookup redraws the place): its text, where the cursor is, and whether it has the focus, kept
+ * only when the same form is drawn again (the same place's find, the same candidate's basis).
+ */
+function keepTyped(iri) {
+  const one = (el, same) => (el && same ? { value: el.value, start: el.selectionStart, end: el.selectionEnd, focused: document.activeElement === el } : null);
+  const f = $('find-query'), b = $('basis-input');
+  return { find: one(f, findFor === iri && f?.form?.dataset.for === iri), basis: one(b, basisFor && b?.form?.dataset.id === basisFor) };
+}
+function restoreTyped(typed) {
+  for (const [id, t] of [['find-query', typed.find], ['basis-input', typed.basis]]) {
+    const el = $(id);
+    if (!el || !t) continue;
+    el.value = t.value;
+    if (t.focused) { el.focus({ preventScroll: true }); try { el.setSelectionRange(t.start, t.end); } catch {} }
+  }
 }
 function candidateHtml(c, i) {
   const o = c.other || (Object.hasOwn(work.places, c.candidate_candidate) ? work.places[c.candidate_candidate] : {}), d = c.decision, id = escapeHtml(c.id);
@@ -693,7 +714,7 @@ async function saveBlob(blob, name) {
     } catch (e) { if (e.name === 'AbortError') return; }
   }
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  a.href = URL.createObjectURL(blob); a.download = name; a.rel = 'noopener'; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 60000);
 }
 // The Permissions panel, from the header's button; and the proof that the page's policy is enforced
@@ -747,7 +768,7 @@ function gatherPlaces() {
 }
 function onPlaces(data) {
   const w = placesWaiting; placesWaiting = null;
-  busy = false; buttons(false);
+  busy = false; buttons(!!looking);   // a lookup running keeps them disabled
   gathered = { files: w.files, base: w.base, subjects: data.subjects || null, places: data.places || null };
   lookupSay('');
   w.resolve(gathered);
@@ -769,12 +790,15 @@ function lookupOptions(extra = {}) {
   return { places: $('lookup-places').value, allNames: $('lookup-all-names').checked, countries: $('lookup-countries').checked,
     nearKm: $('lookup-near').checked && km > 0 ? km : null, maxDistanceKm: matchOptions().maxDistanceKm, ...extra };
 }
-/** The places a lookup would take and what it would send, as runLookup() will plan it. */
+/**
+ * The places a lookup would take and what it would send, planned by runLookup()'s own planLookup, in
+ * requests of the size of the lookup that would send them: WHG's shared one (whose size is the first
+ * caller's, Chora's perhaps), or for another service the module's default, as lookUp() makes it.
+ */
 function planFor(svc, opts, places) {
-  const chosen = selectPlaces({ work: reviewWork(), places, which: opts.places, service: svc.service, only: opts.only });
-  return planQueries(chosen, { ...opts, service: svc.service, batchSize: 25, type: svc.whg ? undefined : manifests.get(svc.service.endpoint)?.type || undefined });
+  return planLookup({ lookup: svc.whg ? whgLookup() : null, work: reviewWork(), places,
+    options: { ...opts, service: svc.service, type: svc.whg ? undefined : manifests.get(svc.service.endpoint)?.type || undefined } });
 }
-const workPlaces = () => Object.entries(reviewWork()?.places || {}).map(([iri, p]) => ({ iri, ...p }));
 
 // The choice of places: after a match, those it found nothing for; once a lookup has run, those not answered.
 function fillChoices() {
@@ -814,15 +838,11 @@ async function lookUp({ only = null, query = null, allNames, which } = {}) {
   if (svc.problem) { $('lookup').open = true; return lookupSay(svc.problem, true); }
   if (svc.whg && !whgToken.get()) { $('lookup').open = true; lookupSay(LW.needToken, true); $('whg-token').focus(); return; }
   const g = await gatherPlaces();
-  let places = g?.places ?? null;
+  const places = g?.places ?? null;
   const existing = reviewWork();
   if (!existing && !g?.subjects) return lookupSay(input?.format ? LW.placesNotRead : LW.noDataset, true);
-  const opts = lookupOptions({ ...(which ? { places: which } : {}), ...(only ? { places: 'all', only } : {}), ...(allNames !== undefined ? { allNames } : {}) });
-  if (only && query) {
-    // The name typed is sent in place of the label; the place's own names are still what its candidates are compared with.
-    places = (places || workPlaces()).filter((p) => only.includes(p.iri)).map((p) => ({ ...p, label: query, names: [...new Set([query, ...(p.names || [])])] }));
-    opts.allNames = false;
-  }
+  // A name typed for one place is sent instead of its label, and what it finds is added beside the place's candidates (runLookup's query).
+  const opts = lookupOptions({ ...(which ? { places: which } : {}), ...(only ? { places: 'all', only } : {}), ...(allNames !== undefined ? { allNames } : {}), ...(only && query ? { query } : {}) });
   let lookup;
   // Another service's candidates' addresses: by the template given, else by its manifest's view.url (read below).
   const template = { template: svc.template ?? null };
@@ -837,6 +857,7 @@ async function lookUp({ only = null, query = null, allNames, which } = {}) {
   looking = new AbortController();
   afterStop = null;
   $('lookup-send').disabled = true; $('lookup-stop').hidden = false; $('lookup-resume').hidden = true;
+  buttons(true);   // as while the worker runs: Match, Check, Resume and the rest would take the review away under the lookup
   lookupSay(LW.sending(service));
   lookupState({ running: true, done: 0, total: null, stopped: null, summary: null, single: !!only });
   const show = () => { if (work !== w || $('review').hidden) beginReview(w, name, { focus: false }); else { order = reviewPlaces(work); render(false); } };
@@ -856,6 +877,7 @@ async function lookUp({ only = null, query = null, allNames, which } = {}) {
   } finally {
     looking = null;
     $('lookup-stop').hidden = true;
+    buttons(busy);
   }
   show();
   const stopped = fault ? { kind: 'fault', message: null } : result.stopped;
@@ -869,7 +891,7 @@ async function lookUp({ only = null, query = null, allNames, which } = {}) {
   fillChoices();
   if (stopped && stopped.kind !== 'fault') offerResume(svc);
   await refreshPreview();
-  if (stopped?.kind === 'auth') $('whg-token').focus();
+  if (stopped?.kind === 'auth') { $('lookup').open = true; $('whg-token').focus(); }   // a field in a closed panel cannot take the focus
   // After one place's lookup, the focus goes to the first new candidate, if any.
   if (only && order[cursor] && only.includes(order[cursor])) {
     const fresh = candidatesOf(work, order[cursor]).findIndex((c) => !before.has(c.id));
@@ -910,7 +932,7 @@ function lookupPlaceHtml(iri, place) {
   }
   out += `<button type="button" data-look="find">${escapeHtml(LW.find(service))}</button>`;
   if (findFor === iri) {
-    out += `<form class="find-form"><label for="find-query">${escapeHtml(LW.findLabel)}</label>`
+    out += `<form class="find-form" data-for="${escapeHtml(iri)}"><label for="find-query">${escapeHtml(LW.findLabel)}</label>`
       + `<input id="find-query" type="text" value="${escapeHtml(place.label || '')}" autocomplete="off" spellcheck="false">`
       + `<button type="submit" class="primary">${escapeHtml(LW.findSend)}</button><button type="button" data-look="cancel">Cancel</button></form>`;
   }

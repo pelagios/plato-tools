@@ -15,10 +15,10 @@ import { readWork, serialiseWork, decide, WORK_VERSION } from '../src/engine/kri
 import { attestationsFrom, gazetteerSource } from '../src/engine/krisis/identity.js';
 import { apply } from '../src/engine/krisis/apply.js';
 import {
-  planQueries, rankGazetteer, runLookup, selectPlaces, mergeAnswers, startLookup, newWork, serviceOf, licenceOf, lookupCandidatesOf,
+  planQueries, planLookup, rankGazetteer, runLookup, selectPlaces, mergeAnswers, startLookup, newWork, serviceOf, licenceOf, lookupCandidatesOf,
   distanceKm, WHG_SERVICE, PREVIEW_QUERIES, LOOKUP_ALGORITHM, authorityIris, typeFromManifest, iriFromTemplate, manifestSettings, iriVia, WHG_PLACE_TYPE,
 } from '../src/engine/krisis/lookup.js';
-import { LOOKUP_WORDS, krisisLookupNote } from '../src/engine/words.js';
+import { LOOKUP_WORDS, krisisLookupNote, lookupPage } from '../src/engine/words.js';
 import { currentIdentities, linkState } from '../src/engine/krisis/identities.js';
 
 const X = 'https://example.org/';
@@ -82,7 +82,7 @@ test('planQueries sends the label only, without filters, unless asked; the previ
   const label = planQueries(g.places);
   assert.deepEqual(label.queries.map((q) => q.query), ['Newcastle', 'York', 'Nowhere']);
   assert.ok(label.queries.every((q) => !q.params), 'no filters by default');
-  assert.deepEqual({ ...label.preview, first: undefined, service: undefined }, { places: 3, queries: 3, requests: 1, allNames: false, limit: 10, filters: [], sendsCoordinates: false, nearKm: null, withoutCountries: 0, withoutPoint: 0, first: undefined, service: undefined });
+  assert.deepEqual({ ...label.preview, first: undefined, service: undefined }, { places: 3, queries: 3, requests: 1, allNames: false, limit: 10, filters: [], sendsCoordinates: false, nearKm: null, withoutCountries: 0, withoutPoint: 0, withoutName: 0, first: undefined, service: undefined });
   // The type in the form the gazetteer module sends WHG (it writes every form of Place as "Place"), so
   // that the preview below is what WHG receives.
   assert.ok(label.queries.every((q) => q.type === 'Place'), 'WHG is always sent its type');
@@ -178,7 +178,7 @@ test('a lookup without a local match makes a version 2 work file, which reads ba
   assert.ok(work.candidates.every((c) => c.decision === null));
   // The attribution as it came, the nulls left null.
   assert.deepEqual(record.attribution, ATTRIBUTION);
-  assert.deepEqual(record.counts, { places: 2, queries: 2, requests: 1, answered: 2, notFound: 1, unanswered: 0, stopped: 0, found: 3, added: 3, far: 2, skipped: { noIri: 0, linked: 0, denied: 0, decided: 0, duplicate: 0 } });
+  assert.deepEqual(record.counts, { places: 2, withoutName: 0, queries: 2, requests: 1, answered: 2, notFound: 1, unanswered: 0, stopped: 0, found: 3, added: 3, far: 2, skipped: { noIri: 0, linked: 0, denied: 0, decided: 0, duplicate: 0 } });
   assert.match(LOOKUP_WORDS.summary(record.counts, 'World Historical Gazetteer').problems, /^3 possible matches to review, 2 of them far away\.$/);
 });
 test('an unanswered query means "try again", never "no match"; a lookup of the pending places asks for it again', async () => {
@@ -406,13 +406,13 @@ test('a query the service refuses inside a good answer is unanswered and marked 
 });
 
 test('a first batch empty for every query is suspect: its places are not answered, and the lookup stops', async () => {
-  const g = await gathered([tyne(), place('york', 'York', [at(-1.08, 53.96)]), place('ely', 'Ely', [at(0.26, 52.4)])]);
-  const r = await runLookup({ lookup: lookupWith(fakeWhg(), { batchSize: 2 }), subjects: g.subjects, places: g.places, now: clock() });
+  const g = await gathered([tyne(), place('york', 'York', [at(-1.08, 53.96)], { ccodes: ['GB'] }), place('ely', 'Ely', [at(0.26, 52.4)], { ccodes: ['GB'] })]);
+  const r = await runLookup({ lookup: lookupWith(fakeWhg(), { batchSize: 2 }), subjects: g.subjects, places: g.places, options: { countries: true }, now: clock() });
   assert.equal(r.stopped.kind, 'suspect');
   assert.deepEqual(Object.values(r.record.queries).map((q) => [q.state, !!q.suspect]), [['unanswered', true], ['unanswered', true], ['stopped', false]]);
   assert.equal(r.record.counts.notFound, 0, 'not counted as found nothing');
   assert.match(LOOKUP_WORDS.stopped(r.stopped), /answered nothing at all/);
-  const ok = await runLookup({ lookup: lookupWith(fakeWhg(byName({ York: NEWCASTLES.slice(0, 1) })), { batchSize: 2 }), subjects: g.subjects, places: g.places, now: clock() });
+  const ok = await runLookup({ lookup: lookupWith(fakeWhg(byName({ York: NEWCASTLES.slice(0, 1) })), { batchSize: 2 }), subjects: g.subjects, places: g.places, options: { countries: true }, now: clock() });
   assert.equal(ok.stopped, null, 'control: one candidate in the batch, and it is trusted');
   assert.equal(ok.record.counts.notFound, 2);
 });
@@ -565,4 +565,116 @@ test('currentIdentities: identities from every attestation and the record, denia
   assert.equal(linkState(m.get(P), { id: 'place:gn:1', iri: W3ID + 'place:gn:1' }), 'linked');
   assert.equal(linkState(m.get(P), { id: 'place:gn:2', iri: W3ID + 'place:gn:2' }), null, 'control');
   assert.equal(linkState({ linked: ['https://sws.geonames.org/2/'], denied: [] }, { id: 'place:gn:2', iri: W3ID + 'place:gn:2' }), 'linked', 'the authority\'s address');
+});
+
+// ---- found by the pre-push review of change 2 ---------------------------------------------------------------
+// 25 obscure places, then one WHG knows, at 26th: the first batch is all empty.
+const obscure = () => {
+  const out = [...Array(25)].map((_, i) => ({ iri: A(`p${i}`), label: `Obscure field ${i}`, names: [`Obscure field ${i}`], point: null, ccodes: ['GB'], identities: { linked: [], denied: [] } }));
+  out.push({ iri: A('known'), label: 'Known', names: ['Known'], point: null, ccodes: ['GB'], identities: { linked: [], denied: [] } });
+  return out;
+};
+const knowsOnlyKnown = () => fakeWhg(byName({ Known: [{ id: 'place:gn:1', name: 'Known', score: 100 }] }));
+test('a suspect first batch is passed by sending it again asked the same way: its empty answers are then accepted', async () => {
+  const fake = knowsOnlyKnown(), lookup = lookupWith(fake), places = obscure();
+  const first = await runLookup({ lookup, subjects: { title: 'T', files: [] }, places, options: { countries: true }, now: clock() });
+  assert.equal(first.stopped?.kind, 'suspect', 'control: with a filter, the first batch is suspect');
+  assert.equal(fake.calls.length, 1);
+  const before = JSON.parse(JSON.stringify(first.work));   // runLookup changes the work file in place
+  const again = await runLookup({ lookup, work: first.work, places, options: { countries: true, places: 'pending' }, now: clock() });
+  assert.equal(again.stopped, null, 'sent again, unchanged: accepted');
+  assert.equal(fake.calls.length, 3, 'the batch once more, and then the 26th place');
+  assert.deepEqual(again.work.candidates.map((c) => c.candidate_candidate), [W3ID + 'place:gn:1'], 'Known is looked up and found');
+  assert.equal(again.record.counts.notFound, 25, 'the 25 are now answered, with nothing found');
+  assert.match(LOOKUP_WORDS.stopped(first.stopped), /send the same places again with the same settings[^.]*: their empty answers are then accepted as genuine/);
+  // Asked another way (another limit), the batch is not the one the reviewer saw: suspect again.
+  const changed = await runLookup({ lookup: lookupWith(knowsOnlyKnown()), work: before, places, options: { countries: true, places: 'pending', limit: 5 }, now: clock() });
+  assert.equal(changed.stopped?.kind, 'suspect');
+});
+test('WHG asked without a filter is never suspect (nothing sent could be wrong); a filter or another service\'s type can be', async () => {
+  const fake = knowsOnlyKnown();
+  const plain = await runLookup({ lookup: lookupWith(fake), subjects: { title: 'T', files: [] }, places: obscure(), now: clock() });
+  assert.equal(plain.stopped, null);
+  assert.equal(plain.work.candidates.length, 1, 'Known found at the first sending');
+  const near = await runLookup({ lookup: lookupWith(knowsOnlyKnown()), subjects: { title: 'T', files: [] }, places: obscure().map((p) => ({ ...p, point: [0, 51] })), options: { nearKm: 10 }, now: clock() });
+  assert.equal(near.stopped?.kind, 'suspect', 'control: a distance filter');
+  const other = createLookup({ endpoint: 'https://gaz.example.org/reconcile', fetch: knowsOnlyKnown().fetch, sleep: () => Promise.resolve(), queryRate: null, iri: (id) => 'https://gaz.example.org/' + id, ...PRIVATE });
+  const typed = await runLookup({ lookup: other, subjects: { title: 'T', files: [] }, places: obscure(), options: { service: serviceOf('https://gaz.example.org/reconcile'), type: 'settlement' }, now: clock() });
+  assert.equal(typed.stopped?.kind, 'suspect', 'control: another service\'s type');
+});
+test('a name typed for one place adds what it finds beside the candidates already there; a re-lookup of the place replaces them', async () => {
+  const g = await gathered([tyne()]);
+  const zennor = { id: 'place:gn:9', name: 'Newcastle upon Tyne', score: 100 };
+  const fake = fakeWhg(byName({ Newcastle: NEWCASTLES, 'Newcastle upon Tyne': [zennor, NEWCASTLES[2]] }));
+  const first = await runLookup({ lookup: lookupWith(fake), subjects: g.subjects, places: g.places, now: clock() });
+  assert.equal(first.work.candidates.length, 3);
+  const typed = await runLookup({ lookup: lookupWith(fake), work: first.work, places: g.places, options: { places: 'all', only: [A('newcastle')], query: 'Newcastle upon Tyne' }, now: clock() });
+  assert.deepEqual(Object.values(fake.calls.at(-1).body.queries).map((q) => q.query), ['Newcastle upon Tyne'], 'only the name typed is sent');
+  assert.deepEqual(typed.work.candidates.map((c) => c.candidate_candidate).sort(), [...NEWCASTLES.map((c) => W3ID + c.id), W3ID + 'place:gn:9'].sort(), 'the three kept, the new one added');
+  assert.equal(typed.record.counts.skipped.duplicate, 1, 'one already a candidate: not added twice');
+  assert.equal(typed.record.parameters.query, 'Newcastle upon Tyne');
+  // Control: looked up again without a name typed, the undecided ones of WHG are replaced by what it answers now.
+  const only = fakeWhg(byName({ Newcastle: [NEWCASTLES[0]] }));
+  const again = await runLookup({ lookup: lookupWith(only), work: typed.work, places: g.places, options: { places: 'all', only: [A('newcastle')] }, now: clock() });
+  assert.deepEqual(again.work.candidates.map((c) => c.candidate_candidate), [W3ID + NEWCASTLES[0].id]);
+  assert.match(lookupPage.findLabel, /added to the candidates already here, which it does not replace/, 'the find form says so');
+  await assert.rejects(runLookup({ lookup: lookupWith(fake), work: typed.work, places: g.places, options: { query: 'Anything' } }), /for one place/);
+});
+test('a place with no name is not looked up, and is counted: its address is never sent as a query', async () => {
+  const g = await gathered([tyne(), { '@id': A('blank'), attestations: [at(0, 51)] }, { '@id': A('toponym'), attestations: [named('Senara')] }]);
+  assert.equal(g.places.find((p) => p.iri === A('blank')).label, A('blank'), 'gather gives a place without a label its address as label');
+  const plan = planQueries(g.places);
+  assert.deepEqual(plan.queries.map((q) => q.query), ['Newcastle', 'Senara'], 'a toponym is a name, and is sent');
+  assert.deepEqual([plan.preview.places, plan.preview.withoutName], [2, 1]);
+  assert.match(LOOKUP_WORDS.preview(plan.preview).join(' '), /1 place has no name \(only a web address\), and is not looked up/);
+  const fake = fakeWhg();
+  const r = await runLookup({ lookup: lookupWith(fake), subjects: g.subjects, places: g.places, options: { places: 'all' }, now: clock() });
+  const sent = fake.calls.flatMap((c) => Object.values(c.body.queries).map((q) => q.query));
+  assert.ok(sent.includes('Newcastle'), 'control: the search finds what was sent');
+  assert.ok(!sent.some((q) => q.includes(A('blank'))), 'the address was not sent');
+  assert.equal(r.record.counts.withoutName, 1);
+  assert.equal(r.record.queries[A('blank')], undefined, 'not among the places looked up');
+  assert.match(LOOKUP_WORDS.summary(r.record.counts, 'WHG').counted, /1 place was not looked up, having no name/);
+});
+test('WHG is one service however its address is written: www and a trailing slash are recorded, compared and read as WHG_ENDPOINT', async () => {
+  const www = 'https://www.whgazetteer.org/reconcile/';
+  assert.equal(serviceOf(www).endpoint, WHG_ENDPOINT);
+  assert.equal(serviceOf('https://gaz.example.org/reconcile/').endpoint, 'https://gaz.example.org/reconcile/', 'control: another service as given');
+  const g = await gathered([tyne(), place('york', 'York', [at(-1.08, 53.96)])]);
+  const fake = fakeWhg((q) => (q.query === 'York' ? { result: [], gateway: { answered: false } } : byName({ Newcastle: NEWCASTLES })(q)));
+  // A caller that gives the service as it was typed.
+  const first = await runLookup({ lookup: lookupWith(fake), subjects: g.subjects, places: g.places, options: { service: { ...WHG_SERVICE, endpoint: www } }, now: clock() });
+  assert.equal(first.record.service.endpoint, WHG_ENDPOINT);
+  assert.deepEqual(selectPlaces({ work: first.work, places: g.places, which: 'pending', service: WHG_SERVICE }).map((p) => p.iri), [A('york')], 'its unanswered place is pending for WHG');
+  // A work file that wrote another of WHG's addresses (an earlier tool) is read with WHG's one.
+  const file = JSON.parse(serialiseWork(first.work));
+  file.lookups[0].service.endpoint = www;
+  for (const c of file.candidates) c.gazetteer.service = www;
+  const read = readWork(JSON.stringify(file));
+  assert.equal(read.lookups[0].service.endpoint, WHG_ENDPOINT);
+  assert.ok(read.candidates.every((c) => c.gazetteer.service === WHG_ENDPOINT));
+  assert.equal(file.lookups[0].service.endpoint, www, 'what was given is not changed in place');
+  // Looked up again by the canonical address, the undecided candidates of the www lookup are replaced, as of the same service.
+  const again = await runLookup({ lookup: lookupWith(fakeWhg(byName({ Newcastle: [NEWCASTLES[0]] }))), work: read, places: g.places, options: { places: 'all', only: [A('newcastle')] }, now: clock() });
+  assert.deepEqual(again.work.candidates.map((c) => c.candidate_candidate), [W3ID + NEWCASTLES[0].id]);
+});
+test('the preview is planned in requests of the lookup\'s own size, as many as are sent', async () => {
+  const places = Array.from({ length: 30 }, (_, i) => ({ iri: A('p' + i), label: 'Place ' + i, names: ['Place ' + i], point: null }));
+  const fake = fakeWhg(byName({ 'Place 0': NEWCASTLES.slice(0, 1) }));
+  const lookup = lookupWith(fake, { batchSize: 10 });
+  const plan = planLookup({ lookup, places, options: { places: 'all' } });
+  assert.equal(plan.preview.requests, 3);
+  await runLookup({ lookup, subjects: { title: 'T', files: [] }, places, options: { places: 'all' }, now: clock() });
+  assert.equal(fake.calls.length, plan.preview.requests, 'as many requests sent as the preview said');
+  assert.equal(planLookup({ lookup: lookupWith(fakeWhg()), places, options: { places: 'all' } }).preview.requests, 2, 'control: the default size, 25');
+});
+test('a work file is read by its own keys only: "constructor" is not a place it lists', async () => {
+  const g = await gathered([tyne()]);
+  const r = await runLookup({ lookup: lookupWith(fakeWhg(byName({ Newcastle: NEWCASTLES }))), subjects: g.subjects, places: g.places, now: clock() });
+  const ok = JSON.parse(serialiseWork(r.work));
+  assert.ok(readWork(JSON.stringify(ok)), 'control: the file as written reads');
+  const tamper = (f) => { const w = JSON.parse(JSON.stringify(ok)); f(w); return JSON.stringify(w); };
+  assert.throws(() => readWork(tamper((w) => { w.candidates[0].candidate_source = 'constructor'; })), /is for a place the file does not list \(constructor\)/);
+  assert.throws(() => readWork(tamper((w) => { w.lookups[0].queries.constructor = { state: 'answered', sent: ['x'] }; })), /looked up a place the file does not list \(constructor\)/);
+  assert.throws(() => readWork(tamper((w) => { delete w.krisis; w.__proto__ = undefined; })), /no "krisis" version/);
 });

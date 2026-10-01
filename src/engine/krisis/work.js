@@ -29,6 +29,13 @@
 // service's, verbatim (a null stays null). readWork reads version 1 and gives it back as version 2.
 import { DataError } from '../input.js';
 import { fileSha256 } from './digest.js';
+import { isWhg, WHG_ENDPOINT } from '../gazetteer/index.js';
+
+/**
+ * A reconciliation service's address as the work file records it: any of WHG's (www, a trailing slash)
+ * as its one, WHG_ENDPOINT, so that two lookups of WHG are of one service; another's as given.
+ */
+export const canonicalEndpoint = (endpoint) => (isWhg(endpoint) ? WHG_ENDPOINT : endpoint);
 
 // The problems of a dataset's own that stop part of it being read (the kinds the version check's
 // NOT_READ in compare.js lists): a matching, or a dataset finished, is then of less than the whole.
@@ -142,7 +149,10 @@ export function readWork(text) {
   if (w.reviewer !== undefined && w.reviewer !== null) { try { checkReviewer(w.reviewer); } catch (e) { bad(e.message[0].toLowerCase() + e.message.slice(1)); } }
   if (w.cursor !== undefined && !(Number.isInteger(w.cursor) && w.cursor >= 0)) bad('its place in the review (cursor) is not a count.');
   checkLookups(w, bad);
-  return { reviewer: null, cursor: 0, ...w, krisis: WORK_VERSION, lookups: w.lookups ?? [] };
+  // WHG by its one address (canonicalEndpoint), however a file wrote it; nothing given is changed in place.
+  const lookups = (w.lookups ?? []).map((l) => (canonicalEndpoint(l.service.endpoint) === l.service.endpoint ? l : { ...l, service: { ...l.service, endpoint: canonicalEndpoint(l.service.endpoint) } }));
+  const candidates = w.candidates.map((c) => (typeof c.gazetteer?.service === 'string' && canonicalEndpoint(c.gazetteer.service) !== c.gazetteer.service ? { ...c, gazetteer: { ...c.gazetteer, service: canonicalEndpoint(c.gazetteer.service) } } : c));
+  return { reviewer: null, cursor: 0, ...w, krisis: WORK_VERSION, candidates, lookups };
 }
 
 // ---- Krisis: gazetteer lookup (work file version 2) --------------------------------------------------

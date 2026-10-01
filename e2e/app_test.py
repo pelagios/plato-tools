@@ -537,12 +537,19 @@ def krisis_lookup_case(page, tmp):
     places += [krisis_place(a + f'filler-{i:02}', f'Filler {i:02}', -3.0 + i / 100, 52.0) for i in range(26)]   # 30 places: two requests of 25
     subjects.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': a, 'title': 'Places to look up'}, 'spatialEntities': places}))
     calls, consoled, quota_on = [], [], {'n': 2}
+    held = {'on': False, 'routes': []}   # while on, requests are held, to be answered by the test (answer_whg)
     cors = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
             'Access-Control-Allow-Headers': 'authorization, content-type, accept, user-agent'}
     def fake_whg(route):
         req = route.request
         if req.method == 'OPTIONS': return route.fulfill(status=204, headers=cors)
         calls.append({'url': req.url, 'headers': req.all_headers(), 'body': req.post_data or ''})
+        if held['on']: held['routes'].append(route); return
+        answer_whg(route)
+    def answer_whg(route, status=200):
+        req = route.request
+        if status != 200:
+            return route.fulfill(status=status, headers={**cors, 'Content-Type': 'application/json'}, body=json.dumps({'detail': 'Invalid token.'}))
         if len(calls) == quota_on['n']:
             return route.fulfill(status=401, headers={**cors, 'Content-Type': 'application/json'}, body=json.dumps({'detail': 'Daily API limit exceeded'}))
         out = {'attribution': LOOKUP_ATTRIBUTION}
@@ -680,6 +687,47 @@ def krisis_lookup_case(page, tmp):
           and not any(has(c['url']) or has(c['body']) for c in calls) and not has(wh.get('plato', LOOKUP_TOKEN)) and not has(wh.get('text', LOOKUP_TOKEN))
           and not has(wh.get('html', LOOKUP_TOKEN)) and not has(wh.get('url', LOOKUP_TOKEN)) and not has(consoled) and not has(f.get('saved', LOOKUP_TOKEN)),
           {'in': [k for k, v in {**wh, 'console': consoled, 'saved': f.get('saved', '')}.items() if has(v)], 'error': wh.get('error')})
+
+    # A lookup running: the actions that would take the review away are disabled; a batch redrawing the
+    # place keeps what is being typed in the find form; a refused token opens the closed panel to focus its
+    # field; and "Save the review" saves through a link with rel="noopener".
+    def held_route(n):
+        for _ in range(100):
+            if len(held['routes']) >= n: return held['routes'][n - 1]
+            page.wait_for_timeout(100)
+        raise TimeoutError(f'request {n} never came')
+    def running():
+        page.click('#lookup > summary') if not page.evaluate("() => document.getElementById('lookup').open") else None
+        page.select_option('#lookup-places', 'all')
+        page.wait_for_function("() => /^Send 30 queries to WHG$/.test(document.getElementById('lookup-send').textContent) && !document.getElementById('lookup-send').disabled", timeout=30_000)
+        held['on'] = True
+        page.click('#lookup-send')
+        first = held_route(1)
+        ids = ['check', 'convert', 'compare', 'match', 'resume', 'finish']
+        during = page.evaluate(f"() => {json.dumps(ids)}.map((id) => document.getElementById(id).disabled)")
+        page.click('#review-place button[data-look="find"]')
+        page.fill('#find-query', ''); page.type('#find-query', 'Half typ')
+        page.click('#lookup > summary')   # the panel closed: a refused token must open it to focus its field
+        page.focus('#find-query')
+        answer_whg(first)
+        wait_state(page, lambda s: lk(s).get('done') == 25, 30, 'first batch')
+        kept = {'value': page.input_value('#find-query'), 'focus': page.evaluate('() => document.activeElement && document.activeElement.id')}
+        answer_whg(held_route(2), status=401)
+        held['on'] = False
+        s = wait_state(page, lambda s: lk(s).get('running') is False, 30, 'auth stop')
+        after = {'open': page.evaluate("() => document.getElementById('lookup').open"), 'focus': page.evaluate('() => document.activeElement && document.activeElement.id'),
+                 'stopped': lk(s).get('stopped'), 'enabled': page.evaluate(f"() => {json.dumps(ids)}.map((id) => !document.getElementById(id).disabled)")}
+        page.evaluate("() => { window.__e2eRel = []; const click = HTMLAnchorElement.prototype.click; HTMLAnchorElement.prototype.click = function () { if (this.download) window.__e2eRel.push(this.rel); return click.call(this); }; }")
+        with page.expect_download(timeout=30_000): page.click('#save-review')
+        return {'during': during, 'kept': kept, **after, 'rel': page.evaluate('() => window.__e2eRel')}
+    rn = step(running, {}) if f.get('saved') else {}
+    check('lookup: while a lookup runs, Check, Convert, Compare, Match, Resume and Finish are disabled, and enabled again after it',
+          rn.get('during') == [True] * 6 and rn.get('enabled') == [True] * 6, rn)
+    check("lookup: a batch redrawing the place keeps what is typed in the find form, and its focus",
+          (rn.get('kept') or {}) == {'value': 'Half typ', 'focus': 'find-query'}, rn)
+    check('lookup: after a refused token, the closed panel is opened and the focus is in the token field',
+          rn.get('stopped') == 'auth' and rn.get('open') is True and rn.get('focus') == 'whg-token', rn)
+    check('lookup: "Save the review" saves through a link with rel="noopener"', rn.get('rel') == ['noopener'], rn)
 
     # Forget: gone from the tab, and nothing is sent without it.
     def forget():

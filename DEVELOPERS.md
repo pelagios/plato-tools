@@ -986,7 +986,12 @@ matching (below). This sends each place's name to the gazetteer, and its coordin
   `scope.applied` is not true is counted and warned of (the filter was not applied). A place's
   queries are never split across batches (`planQueries` chunks), so each place is answered at once. The
   preview gives the places, queries and requests, and the first 20 queries exactly as the service
-  receives them (a test compares them with what the fake service received).
+  receives them (a test compares them with what the fake service received). `planLookup` makes the
+  plan from the lookup itself, in requests of its own `batchSize`, and both `runLookup` and the page's
+  preview use it, so the count of requests shown is the count sent. A place with no name (no label,
+  and no name but its own address, which `gather()` gives a place without a label as its label) is not
+  looked up, and is counted (`withoutName`) in the preview and the summary: its address is never sent as
+  a query.
 - **Ranking, never accepting.** WHG's score is relative to the best in its own answer (the top is about
   100 however bad) and its confidence measures the name only, so neither decides anything. Candidates
   are ranked by distance, then whether the countries agree (yes, unknown, no), then Krisis's own name
@@ -1009,12 +1014,24 @@ matching (below). This sends each place's name to the gazetteer, and its coordin
   `pending` (the default once a lookup has run: those a lookup of this service left unanswered,
   stopped or pending; a place never looked up is not pending) and `unlinked` (not linked to the
   service, legacy WHG addresses included, and with no confirmed candidate of it). Looking a place up
-  again replaces its undecided candidates from that service and keeps the decided ones.
+  again (a batch, "Look it up again", "Try its other names") replaces its undecided candidates from that
+  service and keeps the decided ones. A name typed for one place ("Find this place in WHG…",
+  `options.query` with one place in `only`) adds what it finds beside the place's candidates, replacing
+  none, and an address already among them is not added twice (it is counted as already suggested): a
+  typed name is a further search, not a fresh one. Services are compared by address, and WHG is
+  recorded by one (`canonicalEndpoint`: `www.` and a trailing slash are the same WHG), both when a
+  lookup is made (`serviceOf`) and when a work file is read.
 - **Answers that are not findings.** `.unanswered` (the gateway did not answer, or the query was
   refused) makes the place `unanswered`, to be tried again, never "no match"; a place answered with no
   candidates is labelled with what was sent ("label only"). A first batch of several queries that all
-  come back empty is suspect (a filter or type the service did not take): its places are marked
-  unanswered and the lookup stops (`suspect`). A refused token, a spent allowance, too many queries, no
+  come back empty, while a filter or another service's type (from its manifest) is sent, is suspect (a
+  filter or type the service did not take): its places are marked unanswered and `suspect`, and the
+  lookup stops (`suspect`). WHG without a filter is never suspect: all it is sent is then fixed (the
+  label, the module's own type, which WHG takes, and the limit), so there is nothing the reviewer could
+  check, and a stop would only cost a request. Sending the same places again asked the same way
+  (Resume; the same names, limit, filters and type) is the reviewer's word that the empty answers are
+  genuine: they are accepted, and the lookup goes on. Without that, a suspect batch could never be
+  passed (Resume took the same places in the same order, and stopped again each time). A refused token, a spent allowance, too many queries, no
   answer or a failure stop the lookup, keep what was answered, and mark the rest `stopped`, as does the
   signal (Stop); a fault in the tools does the same and is thrown on. The work file can then be saved
   and the lookup resumed.
@@ -1059,7 +1076,11 @@ matching (below). This sends each place's name to the gazetteer, and its coordin
   shown as fine). Each place has "Find this place in WHG…" (one query, the name editable), "Look it up
   again" when it was not answered, and "Not found? Try its other names" when it was answered with
   nothing under its label; after one place's lookup the focus goes to its first new candidate. The
-  keys do nothing in the panel or the find form. Above Finish, the page says what each attestation
+  keys do nothing in the panel or the find form. While a lookup runs, Check, Convert, Compare, Match,
+  Resume and Finish are disabled, as while the worker runs (each would take the review off the screen
+  under the lookup); the review stays usable, and each batch's redrawing keeps what was being typed in
+  the find form or the basis field, and its focus. After a refused token the panel is opened, and the
+  focus put in the token field. Above Finish, the page says what each attestation
   will cite. The e2e (`krisis_lookup_case`) answers for WHG with `page.route`, never the real service,
   and looks for the token in window.__plato, the page, the console, request addresses and bodies, and
   the saved work file, beside the control that it is in every request's Authorization header.

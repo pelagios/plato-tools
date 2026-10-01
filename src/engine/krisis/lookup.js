@@ -27,13 +27,18 @@
 //   resumed.
 // - A candidate without an address (iri null), or one the dataset already links to the place, or says
 //   is a different place, or that the review has already decided, is not suggested, and is counted.
-//   A place looked up again has its undecided candidates from that service replaced.
+//   A place looked up again has its undecided candidates from that service replaced, except by a
+//   name typed for one place (options.query), whose candidates are added beside them.
+// - A place with no name (no label, and no name but its own address) is not looked up, and is counted:
+//   its address is never sent as a query.
+// - WHG is recorded by one address (WHG_ENDPOINT), however it was given (www, a trailing slash), so that
+//   its lookups are told apart from another service's by comparing addresses.
 // - The service's `attribution` (the licences of the sources searched) is kept as it came, a null
 //   left null, on the lookup record, so the page can show each candidate's licence. No licence is ever
 //   written into an attestation, and none is assumed here.
 import { WHG_ENDPOINT, WHG_PLACE_TYPE, isWhg, normaliseWhgIri, mergeAttribution } from '../gazetteer/index.js';
 import { similarity } from './names.js';
-import { WORK_VERSION } from './work.js';
+import { WORK_VERSION, canonicalEndpoint } from './work.js';
 import { linkState } from './identities.js';
 export { authorityIris, currentIdentities } from './identities.js';
 // The note an attestation on a looked-up candidate carries, here too for the tools that use this file (Chora).
@@ -99,7 +104,8 @@ export function iriFromTemplate(template) {
  * address. `title` and `uri` may be given for another service.
  */
 export function serviceOf(endpoint = WHG_ENDPOINT, { title, uri } = {}) {
-  if (isWhg(endpoint)) return { ...WHG_SERVICE, endpoint };
+  // Any of WHG's addresses is recorded as its one (canonicalEndpoint), so that two lookups of WHG are of one service.
+  if (isWhg(endpoint)) return { ...WHG_SERVICE };
   let u;
   try { u = new URL(endpoint); } catch { throw new TypeError(`Not a web address: ${endpoint}`); }
   return { endpoint, title: title || u.host, uri: uri || `${u.protocol}//${u.host}/` };
@@ -114,12 +120,16 @@ function ofService(iri, service) {
   if (isWhg(service.endpoint)) return s.startsWith('https://w3id.org/whg/') || /^https?:\/\/(www\.)?whgazetteer\.org\//.test(s);
   try { return new URL(s).host === new URL(service.endpoint).host; } catch { return false; }
 }
-/** The latest state of a place in the lookups of this service, or null if never looked up there. */
-function lastState(work, iri, service) {
-  let state = null;
-  for (const l of work?.lookups || []) if (l.service.endpoint === service.endpoint && l.queries[iri]) state = l.queries[iri].state;
-  return state;
+/** Are these the same service (WHG's addresses all one)? */
+const sameEndpoint = (a, b) => canonicalEndpoint(a) === canonicalEndpoint(b);
+/** The latest word on a place in the lookups of this service, { lookup, query }, or null if never looked up there. */
+function lastQuery(work, iri, service) {
+  let found = null;
+  for (const l of work?.lookups || []) if (sameEndpoint(l.service.endpoint, service.endpoint) && Object.hasOwn(l.queries, iri)) found = { lookup: l, query: l.queries[iri] };
+  return found;
 }
+/** The latest state of a place in the lookups of this service, or null if never looked up there. */
+const lastState = (work, iri, service) => lastQuery(work, iri, service)?.query.state ?? null;
 
 /**
  * The places to look up. `places` as gather() gives them (with the links the dataset states), else the
@@ -173,12 +183,17 @@ function filtersOf(place, { countries, nearKm }) {
   }
   return Object.keys(params).length ? params : null;
 }
-/** A place's names to send: its label, then (allNames) each other name once, by how it is compared. */
+/**
+ * A place's names to send: its label, then (allNames) each other name once, by how it is compared.
+ * Its address is not a name (gather() gives a place without a label its address as label): a place
+ * with no other name has none to send, and is not looked up.
+ */
 function namesToSend(place, allNames) {
-  const label = place.label || place.names?.[0] || place.iri;
-  if (!allNames) return [label];
+  const all = [place.label, ...(place.names || [])].filter((n) => typeof n === 'string' && n.trim() && n.trim() !== place.iri);
+  if (!all.length) return [];
+  if (!allNames) return [all[0]];
   const seen = new Set(), out = [];
-  for (const n of [label, ...(place.names || [])]) {
+  for (const n of all) {
     const k = String(n).trim().toLowerCase();
     if (!k || seen.has(k)) continue;
     seen.add(k); out.push(n);
@@ -193,19 +208,23 @@ function namesToSend(place, allNames) {
  * chunks, preview }: `queries` [{ key: [iri, name], query, limit, type?, params? }] in place order;
  * `chunks` the places in groups whose queries fill one batch (a place's queries are never split
  * across groups, so a place is answered all at once); `preview` { places, queries, requests,
- * allNames, filters: ['countries'|'near'], sendsCoordinates, nearKm, withoutCountries, withoutPoint, first:
+ * allNames, filters: ['countries'|'near'], sendsCoordinates, nearKm, withoutCountries, withoutPoint,
+ * withoutName (places with no name to send, which are left out: `places` does not count them), first:
  * [the first PREVIEW_QUERIES queries as they are sent] }.
  */
 export function planQueries(places, options = {}) {
   const o = { ...LOOKUP_DEFAULTS, batchSize: 25, service: WHG_SERVICE, ...defined(options) };
   const type = isWhg(o.service.endpoint) ? WHG_PLACE_TYPE : o.type || undefined;
   const queries = [], chunks = [];
-  let chunk = null, withoutCountries = 0, withoutPoint = 0;
+  let chunk = null, withoutCountries = 0, withoutPoint = 0, withoutName = 0, looked = 0;
   for (const place of places) {
+    const names = namesToSend(place, o.allNames);
+    if (!names.length) { withoutName++; continue; }
+    looked++;
     const params = filtersOf(place, o);
     if (o.countries && !params?.countries) withoutCountries++;
     if (o.nearKm > 0 && params?.radius === undefined) withoutPoint++;
-    const mine = namesToSend(place, o.allNames).map((name) => ({ key: [place.iri, name], query: name, limit: o.limit, ...(type ? { type } : {}), ...(params ? { params } : {}) }));
+    const mine = names.map((name) => ({ key: [place.iri, name], query: name, limit: o.limit, ...(type ? { type } : {}), ...(params ? { params } : {}) }));
     queries.push(...mine);
     if (!chunk || (chunk.queries.length && chunk.queries.length + mine.length > o.batchSize)) chunks.push(chunk = { places: [], queries: [] });
     chunk.places.push(place); chunk.queries.push(...mine);
@@ -213,8 +232,8 @@ export function planQueries(places, options = {}) {
   const requests = chunks.reduce((n, c) => n + Math.ceil(c.queries.length / o.batchSize), 0);
   const filters = [...(o.countries ? ['countries'] : []), ...(o.nearKm > 0 ? ['near'] : [])];
   const preview = {
-    places: places.length, queries: queries.length, requests, allNames: !!o.allNames, limit: o.limit, filters,
-    sendsCoordinates: queries.some((q) => q.params?.radius !== undefined), withoutCountries, withoutPoint, nearKm: o.nearKm > 0 ? Math.min(MAX_RADIUS_KM, o.nearKm) : null,
+    places: looked, queries: queries.length, requests, allNames: !!o.allNames, limit: o.limit, filters,
+    sendsCoordinates: queries.some((q) => q.params?.radius !== undefined), withoutCountries, withoutPoint, withoutName, nearKm: o.nearKm > 0 ? Math.min(MAX_RADIUS_KM, o.nearKm) : null,
     service: o.service, first: queries.slice(0, PREVIEW_QUERIES).map(sent),
   };
   return { queries, chunks, preview };
@@ -267,7 +286,7 @@ export function newWork(subjects, { now = new Date().toISOString(), reviewer = n
 const placeRecord = (p) => ({ label: p.label, names: p.names || [p.label], point: p.point ?? null, ...(p.ccodes ? { ccodes: p.ccodes } : {}), ...(p.types ? { types: p.types } : {}) });
 const SKIPS = ['noIri', 'linked', 'denied', 'decided', 'duplicate'];
 function emptyCounts() {
-  return { places: 0, queries: 0, requests: 0, answered: 0, notFound: 0, unanswered: 0, stopped: 0, found: 0, added: 0, far: 0, skipped: Object.fromEntries(SKIPS.map((k) => [k, 0])) };
+  return { places: 0, withoutName: 0, queries: 0, requests: 0, answered: 0, notFound: 0, unanswered: 0, stopped: 0, found: 0, added: 0, far: 0, skipped: Object.fromEntries(SKIPS.map((k) => [k, 0])) };
 }
 /** A new lookup record, added to the work file, with every place 'pending'. */
 export function startLookup(work, { service, parameters, plan, now = new Date().toISOString() }) {
@@ -279,7 +298,7 @@ export function startLookup(work, { service, parameters, plan, now = new Date().
     queries[p.iri] = { state: 'pending', sent: plan.queries.filter((q) => q.key[0] === p.iri).map((q) => q.query) };
   }
   const record = { id: `l${n}`, service, started_at: now, finished_at: null, algorithm_version: LOOKUP_ALGORITHM, parameters,
-    attribution: null, counts: { ...emptyCounts(), places: plan.preview.places, queries: plan.preview.queries, requests: plan.preview.requests }, stopped: null, queries };
+    attribution: null, counts: { ...emptyCounts(), places: plan.preview.places, withoutName: plan.preview.withoutName || 0, queries: plan.preview.queries, requests: plan.preview.requests }, stopped: null, queries };
   work.lookups.push(record);
   return record;
 }
@@ -289,9 +308,10 @@ export function startLookup(work, { service, parameters, plan, now = new Date().
  * in the order sent (each with `.unanswered`, `.error`); `place` the place, with `identities` (what
  * its dataset currently says, identities.js) if known. The place is 'answered' when every query was, else 'unanswered' (to try again,
  * never "no match"); only an answered place has its earlier undecided candidates from this service
- * replaced. Returns the place's query record.
+ * replaced, unless `adds` (a name typed for one place: what it finds is added beside them, an address
+ * already among them not twice). Returns the place's query record.
  */
-export function mergeAnswers(work, record, place, lists, { now = new Date().toISOString(), maxDistanceKm = record.parameters?.maxDistanceKm ?? LOOKUP_DEFAULTS.maxDistanceKm, scoped = false } = {}) {
+export function mergeAnswers(work, record, place, lists, { now = new Date().toISOString(), maxDistanceKm = record.parameters?.maxDistanceKm ?? LOOKUP_DEFAULTS.maxDistanceKm, scoped = false, adds = false } = {}) {
   const iri = place.iri, c = record.counts, q = record.queries[iri] || (record.queries[iri] = { state: 'pending', sent: lists.map((l) => l.key?.[1]).filter(Boolean) });
   if (!work.places[iri]) work.places[iri] = placeRecord(place);
   const unanswered = lists.filter((l) => l.unanswered);
@@ -316,8 +336,8 @@ export function mergeAnswers(work, record, place, lists, { now = new Date().toIS
   q.found = byIri.size + noIri.size;
   c.found += q.found;
   const service = record.service;
-  const sameService = (x) => !localCandidate(x) && work.lookups.find((l) => l.id === x.lookup)?.service.endpoint === service.endpoint;
-  if (state === 'answered') work.candidates = work.candidates.filter((x) => !(x.candidate_source === iri && !x.decision && x.lookup !== record.id && sameService(x)));
+  const sameService = (x) => !localCandidate(x) && sameEndpoint(work.lookups.find((l) => l.id === x.lookup)?.service.endpoint, service.endpoint);
+  if (state === 'answered' && !adds) work.candidates = work.candidates.filter((x) => !(x.candidate_source === iri && !x.decision && x.lookup !== record.id && sameService(x)));
   let added = 0, n = work.candidates.filter((x) => x.lookup === record.id).length;
   for (const r of rankGazetteer(place, [...byIri.values()], { maxDistanceKm })) {
     const g = r.candidate;
@@ -377,8 +397,40 @@ export function licenceOf(attribution, namespace, dataset) {
 }
 
 // ---- the run ------------------------------------------------------------------------------------------------
-/** A first batch of several queries that all came back empty, none refused: most likely a wrong filter or type, not "nothing". */
-const suspect = (chunk, answers) => chunk.queries.length > 1 && answers.every((l) => !l.unanswered && l.length === 0);
+/**
+ * A first batch of several queries that all came back empty, none refused, while something the
+ * reviewer chose could have narrowed the answers: a filter, or another service's type (from its
+ * manifest). Most likely that filter or type was not taken, not "nothing". WHG without a filter is never
+ * suspect: what is sent it is then fixed (the label, the module's own type, which WHG takes, and the
+ * limit), so there is nothing to check, and a stop would only cost a second request for the same answer.
+ */
+const narrowed = (chunk, service) => chunk.queries.some((q) => q.params || (q.type && !isWhg(service.endpoint)));
+const suspect = (chunk, answers, service) => chunk.queries.length > 1 && narrowed(chunk, service) && answers.every((l) => !l.unanswered && l.length === 0);
+/** What makes a lookup's answers what they are, to tell whether a suspect batch is sent again unchanged. */
+const SAME_ASKING = ['allNames', 'limit', 'countries', 'nearKm', 'type'];
+/**
+ * Was this place in a suspect batch of this service, asked the same way? Sending it again is the
+ * reviewer's word that the empty answers are genuine, and they are then accepted.
+ */
+function wasSuspect(work, iri, service, parameters) {
+  const last = lastQuery(work, iri, service);
+  return !!last?.query.suspect && SAME_ASKING.every((k) => (last.lookup.parameters?.[k] ?? null) === (parameters[k] ?? null));
+}
+
+/**
+ * The places a lookup would take and its queries, planned exactly as runLookup() plans them, in
+ * requests of the lookup's own size (lookup.batchSize): the preview the page and the command line
+ * show is this plan's. `options` as runLookup()'s; `query` (with one place in `only`) is sent instead
+ * of the place's label, and its other names are not sent.
+ */
+export function planLookup({ lookup, work = null, places = null, options = {} }) {
+  const service = options.service || WHG_SERVICE;
+  const typed = typeof options.query === 'string' && options.query.trim() ? options.query.trim() : null;
+  let chosen = selectPlaces({ work, places, which: options.places, service, only: options.only });
+  // The name typed is sent in place of the label; it is compared with the candidates beside the place's own names.
+  if (typed) chosen = chosen.map((p) => ({ ...p, label: typed, names: [...new Set([typed, ...(p.names || [])])] }));
+  return planQueries(chosen, { ...options, ...(typed ? { allNames: false } : {}), service, batchSize: lookup?.batchSize ?? 25 });
+}
 
 /**
  * Look places up and add what is found to the work file.
@@ -388,25 +440,33 @@ const suspect = (chunk, answers) => chunk.queries.length > 1 && answers.every((l
  *   places     gather()'s places, with the links the dataset states; else the work file's (links not known)
  *   options    service (serviceOf(): WHG's by default), places (PLACE_CHOICES; default defaultChoice()),
  *              only (IRIs), allNames, limit, countries, nearKm, maxDistanceKm, type (another service's:
- *              manifestSettings())
+ *              manifestSettings()), query (a name to send for the one place `only` names, instead of
+ *              its label; what it finds is added to the place's candidates, replacing none)
+ *   reviewer   the reviewer ({ name, orcid? }), recorded in the work file when given
  *   signal     stops it: what was answered is kept, the rest marked 'stopped'
  *   onBatch    ({ done, total, record, work }) after each batch of places, to show progress or save
  * Returns { work, record, plan, stopped }: `stopped` null, or { kind, status, message } (kind as
  * GazetteerError's; 'stopped' when signalled; 'suspect' when the first batch of several queries came
- * back empty for every one, whose places are then 'unanswered', not "no match"). Anything else thrown
+ * back empty for every one with a filter or another service's type in play, whose places are then
+ * 'unanswered' and marked `suspect`, not "no match"; the same places asked the same way again are
+ * accepted as genuinely not found). Anything else thrown
  * is a fault, and is thrown on, with the places not answered marked 'stopped' first.
  */
-export async function runLookup({ lookup, work = null, subjects = null, places = null, options = {}, signal, onBatch, now = () => new Date().toISOString() }) {
+export async function runLookup({ lookup, work = null, subjects = null, places = null, options = {}, reviewer = null, signal, onBatch, now = () => new Date().toISOString() }) {
   if (!lookup || typeof lookup.reconcile !== 'function') throw new TypeError('runLookup needs a lookup (createLookup)');
-  const service = options.service || WHG_SERVICE;
+  const given = options.service || WHG_SERVICE;
+  const service = isWhg(given.endpoint) ? { ...given, endpoint: WHG_ENDPOINT } : given;
   const o = { ...LOOKUP_DEFAULTS, ...defined(options) };
+  const typed = typeof o.query === 'string' && o.query.trim() ? o.query.trim() : null;
+  if (typed && !(Array.isArray(o.only) && o.only.length === 1)) throw new TypeError('runLookup: a name typed (query) is for one place (only)');
   if (!work) {
     if (!subjects) throw new TypeError('runLookup needs a work file or the dataset (subjects)');
-    work = newWork(subjects, { now: now() });
-  }
-  const chosen = selectPlaces({ work, places, which: o.places, service, only: o.only });
-  const plan = planQueries(chosen, { ...o, service, batchSize: lookup.batchSize ?? 25 });
-  const parameters = { places: o.places ?? defaultChoice(work), allNames: !!o.allNames, limit: o.limit, countries: !!o.countries, nearKm: o.nearKm ?? null, maxDistanceKm: o.maxDistanceKm, type: plan.queries[0]?.type ?? null, linksKnown: !!places };
+    work = newWork(subjects, { now: now(), reviewer });
+  } else if (reviewer) work.reviewer = reviewer;
+  const plan = planLookup({ lookup, work, places, options: { ...o, service } });
+  const parameters = { places: o.places ?? defaultChoice(work), allNames: typed ? false : !!o.allNames, limit: o.limit, countries: !!o.countries, nearKm: o.nearKm ?? null, maxDistanceKm: o.maxDistanceKm, type: plan.queries[0]?.type ?? null, linksKnown: !!places, ...(typed ? { query: typed } : {}) };
+  // Places of a suspect batch sent again, asked the same way: found before the new record is added.
+  const confirmed = new Set(plan.chunks.flatMap((c) => c.places).filter((p) => wasSuspect(work, p.iri, service, parameters)).map((p) => p.iri));
   const record = startLookup(work, { service, parameters, plan, now: now() });
   const stopRest = (from) => {
     for (const chunk of plan.chunks.slice(from)) for (const p of chunk.places) if (record.queries[p.iri].state === 'pending') { record.queries[p.iri].state = 'stopped'; record.counts.stopped++; }
@@ -427,7 +487,7 @@ export async function runLookup({ lookup, work = null, subjects = null, places =
       return { work, record, plan, stopped: record.stopped };
     }
     record.attribution = mergeAttribution(record.attribution, answers.attribution);
-    if (i === 0 && suspect(chunk, answers)) {
+    if (i === 0 && suspect(chunk, answers, service) && !chunk.places.every((p) => confirmed.has(p.iri))) {
       for (const p of chunk.places) { Object.assign(record.queries[p.iri], { state: 'unanswered', suspect: true }); record.counts.unanswered++; }
       stopRest(1);
       record.stopped = { kind: 'suspect', status: null, message: null };
@@ -438,7 +498,7 @@ export async function runLookup({ lookup, work = null, subjects = null, places =
     try {
       for (const p of chunk.places) {
         const k = record.queries[p.iri].sent.length;
-        mergeAnswers(work, record, p, answers.slice(at, at + k), { now: stamp, maxDistanceKm: o.maxDistanceKm, scoped: o.nearKm > 0 && Array.isArray(p.point) });
+        mergeAnswers(work, record, p, answers.slice(at, at + k), { now: stamp, maxDistanceKm: o.maxDistanceKm, scoped: o.nearKm > 0 && Array.isArray(p.point), adds: !!typed });
         at += k;
       }
     } catch (e) {

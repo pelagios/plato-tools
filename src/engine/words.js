@@ -397,7 +397,7 @@ const STOPPED = {
   network: 'The lookup stopped: the gazetteer could not be reached. Resume it when it can.',
   server: 'The lookup stopped: the gazetteer refused or failed a request. Resume it later.',
   stopped: 'The lookup was stopped. What was answered is kept; resume it to look up the rest.',
-  suspect: 'The lookup stopped: the gazetteer answered nothing at all to any query of the first batch, which is more likely a filter or setting it did not take than places it does not have. Those places are marked not answered, not "no match". Check the filters, and resume the lookup.',
+  suspect: 'The lookup stopped: the gazetteer answered nothing at all to any query of the first batch, which is more likely a filter or setting it did not take than places it does not have. Those places are marked not answered, not "no match". Check the filters and settings. If they are right, send the same places again with the same settings (resume the lookup): their empty answers are then accepted as genuine, and the lookup goes on.',
   fault: 'The lookup stopped because of a fault in the tools (please report it). What was answered before it is kept.',
 };
 export const LOOKUP_WORDS = {
@@ -434,6 +434,7 @@ export const LOOKUP_WORDS = {
     lines.push(p.filters.length ? `Filters: ${p.filters.map((f) => (f === 'countries' ? "the place's own countries" : `within about ${p.nearKm.toLocaleString('en-GB')} km of its point (answered from the gazetteer's upstream sources only)`)).join(' and ')}. A filter leaves out every candidate outside it, the right one too if the data is wrong.` : 'No filters: nothing is left out by country or distance.');
     if (p.sendsCoordinates) lines.push("The places' coordinates are sent.");
     if (p.withoutCountries) lines.push(`${plural(p.withoutCountries, 'place has', 'places have')} no countries, and ${p.withoutCountries === 1 ? 'is' : 'are'} looked up without that filter.`);
+    if (p.withoutName) lines.push(`${plural(p.withoutName, 'place has', 'places have')} no name (only a web address), and ${p.withoutName === 1 ? 'is' : 'are'} not looked up: an address is never sent as a name.`);
     if (p.withoutPoint) lines.push(`${plural(p.withoutPoint, 'place has', 'places have')} no coordinates, and ${p.withoutPoint === 1 ? 'is' : 'are'} looked up without the distance filter.`);
     if (p.first.length) lines.push(`The first ${p.first.length === 1 ? 'query' : `${plural(p.first.length, 'query', 'queries')}`}, as sent:`);
     return lines;
@@ -443,7 +444,8 @@ export const LOOKUP_WORDS = {
     const skipped = [c.skipped.noIri ? `${plural(c.skipped.noIri, 'candidate')} without a web address` : '', c.skipped.linked ? `${plural(c.skipped.linked, 'candidate')} already linked` : '',
       c.skipped.denied ? `${plural(c.skipped.denied, 'candidate')} already said to be a different place` : '', c.skipped.decided ? `${plural(c.skipped.decided, 'candidate')} already decided in this review` : '',
       c.skipped.duplicate ? `${plural(c.skipped.duplicate, 'candidate')} already suggested` : ''].filter(Boolean);
-    const rest = [c.unanswered ? `${plural(c.unanswered, 'place was', 'places were')} not answered, and can be looked up again` : '',
+    const rest = [c.withoutName ? `${plural(c.withoutName, 'place was', 'places were')} not looked up, having no name (only a web address)` : '',
+      c.unanswered ? `${plural(c.unanswered, 'place was', 'places were')} not answered, and can be looked up again` : '',
       c.scopeNotApplied ? `for ${plural(c.scopeNotApplied, 'place')} the gazetteer did not apply the distance filter, so its candidates are not filtered by distance` : '',
       c.stopped ? `${plural(c.stopped, 'place was', 'places were')} not looked up before the lookup stopped` : ''].filter(Boolean);
     return {
@@ -500,7 +502,7 @@ export const lookupPage = {
   licenceWarns: (l) => !l || l.commercial === false || l.redistributable === false,
   /** Single-place lookups on the review screen. */
   find: (service) => `Find this place in ${service}…`,
-  findLabel: 'The name to look for. You may change it; only this name is sent.',
+  findLabel: 'The name to look for. You may change it; only this name is sent. What it finds is added to the candidates already here, which it does not replace.',
   findSend: 'Send 1 query',
   tryNames: (n) => `Not found? Try its other names (${plural(n, 'query', 'queries')})`,
   again: 'Look it up again',

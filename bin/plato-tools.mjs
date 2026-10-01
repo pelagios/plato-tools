@@ -144,9 +144,9 @@ Options:
   --output KIND     apply: what to write: dataset (the default), the dataset as a PLATO JSON
                     document with the new attestations added to its places, checked with the
                     version check; or attestations, a PLATO file of only the new attestations.
-  --reviewer NAME   match, apply: who reviews, recorded as each attestation's contributor
-                    (apply: default, the name in the work file).
-  --orcid URL       match, apply: the reviewer's ORCID, as https://orcid.org/0000-0000-0000-0000.
+  --reviewer NAME   match, apply, lookup: who reviews, recorded as each attestation's contributor
+                    (apply: default, the name in the work file; lookup: written into the work file).
+  --orcid URL       match, apply, lookup: the reviewer's ORCID, as https://orcid.org/0000-0000-0000-0000.
   --others-title TEXT
                     match, apply: the other dataset's title, which each attestation cites as its
                     source (default: the title the other dataset gives; if it gives none, its
@@ -535,17 +535,24 @@ function describeTotal(t) {
 
 process.exitCode = await main(process.argv.slice(2));
 
+/** --reviewer and --orcid as a PLATO contributor ({ reviewer }, null when not given), or the { problem } with them. */
+function reviewerOption(o) {
+  const reviewer = o.reviewer ? { name: o.reviewer, ...(o.orcid ? { orcid: o.orcid } : {}) } : null;
+  if (o.orcid && !o.reviewer) return { problem: '--orcid needs --reviewer, the name it belongs to.' };
+  if (o.orcid && !/^https:\/\/orcid\.org\/\d{4}-\d{4}-\d{4}-\d{3}[0-9X]$/.test(o.orcid)) return { problem: 'give the ORCID in full, as https://orcid.org/0000-0000-0000-0000.' };
+  // The reviewer is checked by the engine's own rule, so that what it would refuse is a mistake in the command, not a fault in the tools.
+  if (reviewer) { try { checkReviewer(reviewer, '--reviewer'); } catch (e) { return { problem: e.message.replace(/^--reviewer must have a name\.$/, '--reviewer must give a name.') }; } }
+  return { reviewer };
+}
+
 // Krisis: matching. `match` suggests places of one dataset that may be the same as places of another,
 // and writes the suggestions to a work file for review (on the page); `apply` makes the decisions of
 // a review into PLATO attestations (src/engine/krisis/).
 async function review(action, args, o, resources) {
   if (o.to) return usage('--to is for convert.');
   if (o.json && o.brief) return usage('choose --json or --brief, not both.');
-  const reviewer = o.reviewer ? { name: o.reviewer, ...(o.orcid ? { orcid: o.orcid } : {}) } : null;
-  if (o.orcid && !o.reviewer) return usage('--orcid needs --reviewer, the name it belongs to.');
-  if (o.orcid && !/^https:\/\/orcid\.org\/\d{4}-\d{4}-\d{4}-\d{3}[0-9X]$/.test(o.orcid)) return usage('give the ORCID in full, as https://orcid.org/0000-0000-0000-0000.');
-  // The reviewer is checked by the engine's own rule, so that what it would refuse is a mistake in the command, not a fault in the tools.
-  if (reviewer) { try { checkReviewer(reviewer, '--reviewer'); } catch (e) { return usage(e.message.replace(/^--reviewer must have a name\.$/, '--reviewer must give a name.')); } }
+  const { reviewer, problem } = reviewerOption(o);
+  if (problem) return usage(problem);
   if (o['others-title'] !== undefined && !o['others-title'].trim()) return usage('--others-title must give a title.');
   // A table of places to match is read by the mapping of its columns given, as check and convert read it; apply, else, by the review's.
   let columns;
@@ -654,8 +661,11 @@ async function lookupCommand(args, o, resources) {
   if (o.to) return usage('--to is for convert.');
   if (o.with || o.threshold || o.top || o.output) return usage('--with, --threshold, --top and --output are not for lookup.');
   if (o.json && o.brief) return usage('choose --json or --brief, not both.');
+  // The reviewer, if given, is written into the work file (the page asks for the name; here it is given).
+  const { reviewer, problem } = reviewerOption(o);
+  if (problem) return usage(problem);
   const { createLookup, WHG_ENDPOINT, isWhg } = await import('../src/engine/gazetteer/index.js');
-  const { runLookup, planQueries, selectPlaces, serviceOf, iriFromTemplate, iriVia, manifestSettings, PLACE_CHOICES, WHG_REQUESTS_A_DAY } = await import('../src/engine/krisis/lookup.js');
+  const { runLookup, planLookup, serviceOf, iriFromTemplate, iriVia, manifestSettings, PLACE_CHOICES, WHG_REQUESTS_A_DAY } = await import('../src/engine/krisis/lookup.js');
   const { gather } = await import('../src/engine/krisis/match.js');
   const { readWork, serialiseWork, filesDiffer } = await import('../src/engine/krisis/work.js');
   const { existsSync } = await import('node:fs');
@@ -725,8 +735,8 @@ async function lookupCommand(args, o, resources) {
   }
   const options = { service, places: o.places, allNames: o['all-names'], countries: o.countries, nearKm: near, limit, maxDistanceKm };
   if (o['dry-run']) {
-    const chosen = selectPlaces({ work, places: gathered.places, which: o.places, service });
-    r.preview = planQueries(chosen, { ...options, batchSize: batch ?? 25 }).preview;
+    // Planned as the lookup would plan it: in requests of --batch, or the gazetteer module's 25.
+    r.preview = planLookup({ lookup: { batchSize: batch ?? 25 }, work, places: gathered.places, options }).preview;
     r.status = 'ok';
     host.cleanup();
     return finishUp();
@@ -744,7 +754,7 @@ async function lookupCommand(args, o, resources) {
   }
   const progress = live ? ({ done, total }) => process.stderr.write(`\r\x1b[K${done.toLocaleString('en-GB')} of ${total.toLocaleString('en-GB')} places looked up`) : undefined;
   let result;
-  try { result = await runLookup({ lookup, work, subjects: gathered.subjects, places: gathered.places, options, signal: controller.signal, onBatch: progress }); }
+  try { result = await runLookup({ lookup, work, subjects: gathered.subjects, places: gathered.places, options, reviewer, signal: controller.signal, onBatch: progress }); }
   catch (e) { host.cleanup(); r.message = toolsFault(e); return finishUp(); }
   finally { if (live) process.stderr.write('\r\x1b[K'); }
   const c = result.record.counts;
