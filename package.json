@@ -26,6 +26,7 @@
     "@sqlite.org/sqlite-wasm": "^3.53.4-build1",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
+    "d3-contour": "4.0.2",
     "fflate": "^0.8.3",
     "maplibre-gl": "^6.11.2",
     "n3": "^2.7.12",
