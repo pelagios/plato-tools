@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { addPlatoFormats, strictFormatLogger } from '../src/lib/formats.js';
-import { teiToDocument, teiSource, TeiReader, TEI_KINDS } from '../src/engine/hermes/tei.js';
+import { teiToDocument, teiSource, TeiReader, TEI_KINDS, loadIsoEntities } from '../src/engine/hermes/tei.js';
 import { detect, DataError } from '../src/engine/input.js';
 import { LOSS_TEXT, Report } from '../src/engine/report.js';
 import { summary, formatName } from '../src/engine/words.js';
@@ -35,14 +35,16 @@ const about = (m) => m.doc.attestations.map((a) => a.about);
 const tei = (body, header = '<teiHeader><fileDesc><titleStmt><title>T</title></titleStmt><publicationStmt><idno type="URI">https://example.org/e</idno></publicationStmt><sourceDesc><p>x</p></sourceDesc></fileDesc></teiHeader>') =>
   `<?xml version="1.0" encoding="UTF-8"?>\n<TEI xmlns="http://www.tei-c.org/ns/1.0">${header}<text><body>${body}</body></text></TEI>\n`;
 
+// The constructed P4 fixture names an outside DTD, and so needs the ISO entity table (test/tei-p4.test.js).
+await loadIsoEntities();
 const ISIC = mapped(text('isicily-ISic000934.xml'), 'isicily-ISic000934.xml');
 const PROSE = mapped(text('prose-constructed.xml'), 'prose-constructed.xml');
 const VERSE = mapped(text('verse-constructed.xml'), 'verse-constructed.xml');
 const PTR = mapped(text('pointers-constructed.xml'), 'pointers-constructed.xml');
 const WHG = mapped(text('whg-constructed.xml'), 'whg-constructed.xml');
 
-test('there are fixtures: a real EpiDoc edition and the five constructed ones', () => {
-  assert.deepEqual(FIXTURES, ['isicily-ISic000934.xml', 'keys-constructed.xml', 'pointers-constructed.xml', 'prose-constructed.xml', 'verse-constructed.xml', 'whg-constructed.xml']);
+test('there are fixtures: a real EpiDoc edition and the six constructed ones (one of them TEI P4)', () => {
+  assert.deepEqual(FIXTURES, ['isicily-ISic000934.xml', 'keys-constructed.xml', 'p4-constructed.xml', 'pointers-constructed.xml', 'prose-constructed.xml', 'verse-constructed.xml', 'whg-constructed.xml']);
 });
 
 for (const f of FIXTURES) {
@@ -50,7 +52,8 @@ for (const f of FIXTURES) {
     const input = await detect([file(f)]);
     assert.equal(input.format, 'tei');
     assert.equal(formatName(input), 'a TEI XML edition');
-    const { doc } = mapped(text(f), f);
+    // The P4 fixture's place names have keys only (Perseus's tgn,…), converted with TGN's pattern.
+    const { doc } = f === 'p4-constructed.xml' ? { doc: teiToDocument(text(f), f, () => {}, { keyPatterns: { tgn: 'http://vocab.getty.edu/tgn/{id}' } }) } : mapped(text(f), f);
     assert.equal(doc.profile, 'attestation-centric');
     assert.ok(doc.attestations.length > 0);
     assert.equal(valid(doc), null);
@@ -466,14 +469,13 @@ test('detected as TEI: a prefixed root, a teiCorpus, a DOCTYPE and comments befo
   };
   for (const [name, s] of Object.entries(cases)) assert.equal((await detect([textFile(s, name)])).format, 'tei', name);
 });
-test('not detected as TEI: other XML, RDF/XML, TEI with no namespace or another one, TEI P4', async () => {
+test('not detected as TEI: other XML, RDF/XML, TEI in another namespace (TEI P4 and TEI with no namespace are: test/tei-p4.test.js)', async () => {
   const cases = {
     'other.xml': '<?xml version="1.0"?>\n<kml xmlns="http://www.opengis.net/kml/2.2"><Document/></kml>',
     'rdf.xml': '<?xml version="1.0"?>\n<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="https://example.org/x"/></rdf:RDF>',
-    'nons.xml': '<?xml version="1.0"?>\n<TEI><teiHeader/></TEI>',
     'otherns.xml': '<TEI xmlns="http://example.org/not-tei"><teiHeader/></TEI>',
     'teins-child.xml': '<root xmlns:t="http://www.tei-c.org/ns/1.0"><t:TEI/></root>',
-    'p4.xml': '<?xml version="1.0"?>\n<TEI.2><teiHeader/></TEI.2>',
+    'p4-in-a-namespace.xml': '<?xml version="1.0"?>\n<TEI.2 xmlns="http://example.org/x"><teiHeader/></TEI.2>',
   };
   for (const [name, s] of Object.entries(cases)) assert.notEqual((await detect([textFile(s, name)])).format, 'tei', name);
   // control: the same test sees TEI when it is there

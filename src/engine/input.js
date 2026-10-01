@@ -467,6 +467,8 @@ export async function detect(files) {
   // TEI P5 (src/engine/hermes/tei.js) is read; any other XML is refused, saying what it is.
   const xml = xmlKind(h);
   if (xml === 'tei') return { format: 'tei', files };
+  // TEI P4 (<TEI.2>, <teiCorpus.2>) and TEI with no namespace are read too, the reader says how (tei.js).
+  if (xml === 'tei-p4' || xml === 'tei-no-namespace') return { format: 'tei', variant: xml === 'tei-p4' ? 'p4' : 'no-namespace', files };
   if (xml) return { format: null, reason: XML_REASONS[xml] };
   if (/^(@prefix|@base|PREFIX|BASE)\b/i.test(h)) return { format: 'turtle', files };
   if (/^(<[^>]+>|_:\S+)\s+<[^>]+>/.test(h)) return { format: 'ntriples', files };
@@ -582,14 +584,14 @@ const zipReason = (inside) => {
   return `This zip holds ${inside.length ? shown.join(', ') + more : 'no files'}, and no PLATO spreadsheet tables (CSV files named after their sheets, such as places.csv), so it cannot be read. Unzip it and choose the file to read.`;
 };
 export const XML_REASONS = {
-  'tei-p4': 'This is a TEI P4 edition (or TEI with no namespace), which PLATO tools cannot read yet; TEI P5 with the TEI namespace can be read.',
   kml: 'This is KML, which PLATO tools cannot read yet. Convert it to GeoJSON (a FeatureCollection), whose properties can be matched to PLATO.',
-  xml: 'This is XML but not TEI, so PLATO tools cannot read it: of XML, only TEI P5 editions (in the TEI namespace) can be read.',
-  unseen: 'This is XML, but its root element is not in the first 64 KB (its prolog or DOCTYPE is longer), so what it is cannot be told. Of XML, only TEI P5 editions can be read.',
+  xml: 'This is XML but not TEI, so PLATO tools cannot read it: of XML, only TEI editions (P5 in the TEI namespace, P4, or TEI with no namespace) can be read.',
+  unseen: 'This is XML, but its root element is not in the first 64 KB (its prolog or DOCTYPE is longer), so what it is cannot be told. Of XML, only TEI editions can be read.',
 };
 /**
- * What XML the head `h` is, or null when it is not XML: 'tei' (TEI P5, read), 'tei-p4' (<TEI.2>, or
- * <TEI>/<teiCorpus> in no namespace), 'kml', 'unseen' (XML whose root is past the head) or 'xml'.
+ * What XML the head `h` is, or null when it is not XML: 'tei' (TEI P5), 'tei-p4' (<TEI.2> or
+ * <teiCorpus.2>, in no namespace), 'tei-no-namespace' (<TEI> or <teiCorpus> in no namespace), 'kml',
+ * 'unseen' (XML whose root is past the head) or 'xml'. A root in a namespace that is not TEI's is 'xml'.
  * XML is an XML declaration, a DOCTYPE or comment first, or an element first.
  */
 function xmlKind(h) {
@@ -599,7 +601,12 @@ function xmlKind(h) {
   const root = XML_START.exec(rest);
   if (!root) return rest.startsWith('<') || !rest ? 'unseen' : 'xml';
   const name = root[0].slice(1).replace(/^[^:]*:/, '');
-  if (name === 'TEI.2' || name === 'TEI' || name === 'teiCorpus') return 'tei-p4';
+  if (['TEI.2', 'teiCorpus.2', 'TEI', 'teiCorpus'].includes(name)) {
+    // In no namespace: no prefix, and no default namespace declared on the root.
+    const tag = rest.slice(0, rest.indexOf('>') + 1 || rest.length);
+    if (root[0].includes(':') || /\sxmlns\s*=\s*["'][^"']/.test(tag)) return 'xml';
+    return name.endsWith('.2') ? 'tei-p4' : 'tei-no-namespace';
+  }
   return name === 'kml' ? 'kml' : 'xml';
 }
 function lpfVersion(obj) {

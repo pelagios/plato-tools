@@ -165,6 +165,11 @@ export const TEI_KINDS = {
   'tei-none-linked': 'warning',
   'tei-editorial-undecided': 'warning',
   'tei-editorial-late-edition': 'loss',
+  'tei-p4': 'warning',
+  'tei-no-namespace': 'warning',
+  'tei-entity-iso': 'warning',
+  'tei-reg': 'loss',
+  'tei-p4-beta-code': 'loss',
 };
 
 // The elements read as place names. <placeName> is TEI's place name; <settlement>, <region>,
@@ -218,11 +223,71 @@ const RECORDS = new Set(['listPerson', 'listOrg', 'listEvent', 'listBibl', 'pers
 // (<g ref="#interpunct">·</g>), a middle dot or a hedera: in a name it is a word divider, so it is
 // read as one space ("colonia·Augusta" is "colonia Augusta"). Any other <g> is read as its text.
 const PUNCTUATION_GLYPH = /punct|middot|hedera|divider|separator/i;
+// The elements that hold a TEI document, each with its header: P5's (and TEI's with no namespace),
+// and P4's.
+const SCOPES = new Set(['TEI', 'teiCorpus', 'TEI.2', 'teiCorpus.2']);
+const XML_NS = 'http://www.w3.org/XML/1998/namespace';
+// A language that is Greek, for Beta Code (below): its tag, or the words of its <language>.
+const GREEK_TAG = /^(grc|el|ell|gre|gr)(-|$)/i;
+const GREEK_WORDS = /^gr(ee)?k$|\bgreek\b/i;
+// Beta Code (Perseus's Greek in Latin letters, *)aqh=nai): text with a letter and nothing but ASCII.
+const BETA_CODE = /^(?=.*[A-Za-z])[\x20-\x7e]+$/;
+
+// ---- TEI P4, and TEI with no namespace ----------------------------------------------------------
+// The root fixes the namespace: an element counts as TEI when its namespace is the root's. <TEI> or
+// <teiCorpus> in TEI's namespace is P5. <TEI.2> or <teiCorpus.2>, in no namespace, is P4 (tei-p4):
+// there, and only there, id and lang are read as xml:id and xml:lang (P4Attributes), lang is an
+// IDREF into the header's <language id> (languageTag), a place name's reg (the editors' regularised
+// form) is reported (tei-reg), and a Greek name in ASCII is Beta Code, reported and never carried
+// (tei-p4-beta-code). P4's divisions are numbered (div1, div2…, read as div is, DIVS), and Perseus's
+// top-level divs are books and chapters, never type="edition", so the edition rule ("Whose words",
+// below) does not fire for such a file: its notes are the source's unless marked as the editors'.
+// <TEI> or <teiCorpus> in no namespace is P5 without its xmlns (tei-no-namespace): xml:id and
+// xml:lang are read as in P5, and id and lang are not.
+//
+// ---- the ISO entity sets ---------------------------------------------------------------------------
+// A file whose DOCTYPE names an outside DTD (an external subset, <!DOCTYPE TEI.2 PUBLIC … "tei2.dtd">,
+// or a parameter entity declared as another file and used in the internal subset, <!ENTITY % ISOgrk1
+// PUBLIC …> %ISOgrk1;) relies on the entities that DTD declares, and no DTD is ever fetched. For such
+// a file, and only such a file, the ISO entity sets (src/vendor/iso-entities.json, built by
+// scripts/make-entities.mjs from the W3C's files) are given to the parser before the file's own
+// declarations, which win. Each name read from them is counted, and each set used is reported once
+// with its names and counts (tei-entity-iso): some ISO names were remapped over the years (ISOgrk3's
+// phiv and epsiv), so what was read is said. A name in neither is an error, as in any file. The
+// table is loaded lazily (loadIsoEntities), only when the head of a file may name an outside DTD.
+let isoTable;
+/** The ISO entity table, loaded once, when a file first needs it. */
+export async function loadIsoEntities() {
+  return (isoTable ||= (await import('../../vendor/iso-entities.json', { with: { type: 'json' } })).default);
+}
+/** Whether a DOCTYPE's text (as saxes gives it, after "<!DOCTYPE") names an outside DTD. */
+export function namesOutsideDtd(text) {
+  const open = text.indexOf('[');
+  if (/^\s*[^\s[]+\s+(SYSTEM|PUBLIC)\b/.test(open < 0 ? text : text.slice(0, open))) return true;
+  if (open < 0) return false;
+  const subset = text.slice(open + 1, text.lastIndexOf(']')).replace(/<!--[\s\S]*?-->/g, '');
+  const external = [...subset.matchAll(/<!ENTITY\s+%\s+([^\s%"'>]+)\s+(?:SYSTEM|PUBLIC)\b/g)].map((m) => m[1]);
+  const outsideDecls = subset.replace(/<!(?:[^>"']|"[^"]*"|'[^']*')*>/g, ' ');
+  return external.some((n) => outsideDecls.includes(`%${n};`));
+}
+// How much of a file is looked at for a DOCTYPE that may name an outside DTD, before reading it.
+const HEAD = 65536;
+const mayNameOutsideDtd = (head) => { const i = head.indexOf('<!DOCTYPE'); return i >= 0 && /\b(SYSTEM|PUBLIC)\b/.test(head.slice(i)); };
 
 const norm = (s) => s.replace(/\s+/g, ' ').trim();
 const isWeb = (s) => typeof s === 'string' && WEB.test(s) && isAbsoluteIri(s);
 const hostOf = (iri) => { try { return new URL(iri).hostname.toLowerCase(); } catch { return undefined; } };
 const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
+
+/** P4's id and lang, read as xml:id and xml:lang (where the element has no xml:id or xml:lang of its own). */
+function P4Attributes(t) {
+  for (const n of ['id', 'lang']) {
+    const a = t.attributes[n];
+    if (!a || a.prefix || t.attributes[`xml:${n}`]) continue;
+    delete t.attributes[n];
+    t.attributes[`xml:${n}`] = { ...a, name: `xml:${n}`, prefix: 'xml', local: n, uri: XML_NS };
+  }
+}
 
 /**
  * The text of one element as it is read: the edited form and the form as printed, with notes left
@@ -270,8 +335,13 @@ class Capture {
  * (none changes what is read yet).
  */
 export class TeiReader {
-  constructor(report, { fileName = 'the TEI file', count = () => {}, onKey, ...reading } = {}) {
+  constructor(report, { fileName = 'the TEI file', count = () => {}, onKey, entities, ...reading } = {}) {
     this.report = report; this.fileName = fileName; this.countOne = count; this.reading = reading;
+    this.entityTable = entities;   // the ISO entity table (loadIsoEntities), for a file naming an outside DTD
+    this.ns = undefined; this.teiVariant = undefined;   // the root's namespace; 'p5', 'p4' or 'no-namespace'
+    this.languages = new Map();    // P4: <language id> -> { ident, text }
+    this.isoNames = null;          // name -> { set, value }, once the ISO table is installed
+    this.isoUsed = new Map();      // set -> Map(name -> count), in the order first used
     this.onKey = onKey;            // onKey(prefix, key, rest): each key of a place name with no ref (teiKeyPrefixes)
     this.keysWithout = new Map();  // prefix -> { count, examples, rests }: keys with no pattern, for tei-key-no-pattern
     const refused = teiReadingRefusal(reading);
@@ -298,9 +368,14 @@ export class TeiReader {
     this.editionSeen = false; this.editionDecided = false; this.topDiv = null;
     this.held = [];              // place names whose words may be the editors', until that is known
     const p = this.parser = new SaxesParser({ xmlns: true, position: true });
+    // Each entity name looked up, so that an undefined one can be named.
+    const E = p.ENTITIES;
+    p.ENTITIES = new Proxy(E, { get: (target, k) => { if (typeof k === 'string') this.lastEntity = k; return target[k]; } });
     p.on('error', (e) => {
       const why = String(e.message).split('\n')[0];
-      if (/undefined entity/.test(why)) throw new DataError(`The XML uses an entity (such as &nbsp;) that the file does not declare, so it cannot be read past that point (${why}). Only entities declared with their text in the file's own DOCTYPE, such as <!ENTITY nbsp "&#160;">, are read; an external DTD is never fetched. Declare the entity, or write the character itself.`);
+      const ent = this.lastEntity ? `&${this.lastEntity};` : 'an entity';
+      if (/undefined entity/.test(why) && this.isoNames) throw new DataError(`The XML uses ${ent}, which neither the file's own DOCTYPE nor the ISO entity sets declare, so it cannot be read past that point (${why}). The file names an outside DTD, which is never fetched; of its entities, only the ISO sets (such as &agr; or &eacute;) are known. Declare the entity in the file, or write the character itself.`);
+      if (/undefined entity/.test(why)) throw new DataError(`The XML uses ${ent}, which the file does not declare, so it cannot be read past that point (${why}). Only entities declared with their text in the file's own DOCTYPE, such as <!ENTITY nbsp "&#160;">, are read (and the ISO sets, such as &agr;, for a file naming an outside DTD); an external DTD is never fetched. Declare the entity, or write the character itself.`);
       throw new DataError(`The XML is not well formed, so the file cannot be read past that point (${why}).`);
     });
     p.on('doctype', (d) => this.doctype(d));
@@ -324,26 +399,51 @@ export class TeiReader {
    * stops the file, saying so; declaring one and not using it is harmless.
    */
   doctype(text) {
+    // Before the early return: a DOCTYPE with no internal subset can name an outside DTD.
+    if (namesOutsideDtd(text)) this.installIso();
     const open = text.indexOf('['), close = text.lastIndexOf(']');
     if (open < 0 || close < open) return;
-    const E = this.parser.ENTITIES;
+    const E = this.parser.ENTITIES, declared = new Set();
     const refuse = (name, why) => Object.defineProperty(E, name, { configurable: true, get: () => { throw new DataError(`The file uses the entity &${name};, ${why}`); } });
     const DECL = /<!ENTITY\s+(%\s+)?([^\s%"'>]+)\s+(?:"([^"]*)"|'([^']*)'|((?:SYSTEM|PUBLIC)\b[^>]*))\s*>/g;
     for (const [, param, name, dq, sq, external] of text.slice(open + 1, close).matchAll(DECL)) {
       // A parameter entity is the DTD's own; the first declaration counts; XML's five are XML's.
-      if (param || Object.hasOwn(E, name) || ['lt', 'gt', 'amp', 'apos', 'quot'].includes(name)) continue;
+      if (param || declared.has(name) || ['lt', 'gt', 'amp', 'apos', 'quot'].includes(name)) continue;
+      declared.add(name);
       if (external !== undefined) { refuse(name, `which the file's DOCTYPE declares as another file (${norm(external)}). An entity from another file is never read, for safety, so the file cannot be read past it: write the entity's text in its place.`); continue; }
       let bad = false;
+      const iso = [];   // the ISO names its text uses, counted each time it is used
       const value = (dq ?? sq).replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[^\s&;]+);/g, (all, ref) => {
         if (ref[0] === '#') { const n = ref[1] === 'x' ? parseInt(ref.slice(2), 16) : parseInt(ref.slice(1), 10); try { return String.fromCodePoint(n); } catch { bad = true; return all; } }
-        const v = Object.getOwnPropertyDescriptor(E, ref)?.value ?? { lt: '<', gt: '>', amp: '&', apos: "'", quot: '"' }[ref];
+        if (!declared.has(ref) && this.isoNames?.has(ref)) { iso.push(ref); return this.isoNames.get(ref).value; }
+        const v = (declared.has(ref) ? Object.getOwnPropertyDescriptor(E, ref)?.value : undefined) ?? { lt: '<', gt: '>', amp: '&', apos: "'", quot: '"' }[ref];
         if (typeof v !== 'string') { bad = true; return all; }
         return v;
       });
       // Markup in an entity's text (<hi>…</hi>), or an entity of an entity not declared, is not supported yet.
       if (bad || /</.test(dq ?? sq)) { refuse(name, 'whose text in the DOCTYPE holds markup or an entity that is not declared, which is not supported yet: write its text in its place.'); continue; }
-      Object.defineProperty(E, name, { value, enumerable: true, configurable: true, writable: true });
+      if (iso.length) Object.defineProperty(E, name, { enumerable: true, configurable: true, get: () => { for (const n of iso) this.useIso(n); return value; } });
+      else Object.defineProperty(E, name, { value, enumerable: true, configurable: true, writable: true });
     }
+  }
+  /** Give the parser the ISO entity sets, each name counted when read; the file's own declarations, made after, replace them. */
+  installIso() {
+    if (this.isoNames) return;
+    const table = this.entityTable || isoTable;
+    if (!table) throw new Error('This file names an outside DTD, and the ISO entity table was not loaded: call loadIsoEntities() first, or pass it as `entities`.');
+    const E = this.parser.ENTITIES;
+    this.isoNames = new Map();
+    for (const [set, names] of Object.entries(table.sets)) for (const [name, value] of Object.entries(names)) {
+      if (this.isoNames.has(name)) continue;
+      this.isoNames.set(name, { set, value });
+      Object.defineProperty(E, name, { enumerable: true, configurable: true, get: () => { this.useIso(name); return value; } });
+    }
+  }
+  useIso(name) {
+    const { set } = this.isoNames.get(name);
+    let used = this.isoUsed.get(set);
+    if (!used) this.isoUsed.set(set, (used = new Map()));
+    used.set(name, (used.get(name) || 0) + 1);
   }
   write(chunk) { this.parser.write(chunk); return this.take(); }
   close() {
@@ -360,6 +460,7 @@ export class TeiReader {
       this.report('tei-key-no-pattern', `${prefix ? `prefix "${prefix}"` : 'no prefix'}: ${plural(k.count, 'key')}, such as ${k.examples.join(', ')}; ${suggested ? 'try' : 'give a pattern, such as'} ${flag}`);
     }
     if (!this.attestations) this.report('tei-none-linked', `${plural(this.mentions, 'place name')} in the text`);
+    for (const [set, used] of this.isoUsed) this.report('tei-entity-iso', `${set}: ${[...used].map(([n, c]) => `${n} (${c})`).join(', ')}`);
     return this.take();
   }
   take() { const o = this.out; this.out = []; return o; }
@@ -482,6 +583,11 @@ export class TeiReader {
     });
     // The datum of the header's coordinates: TEI's default, where geoDecl gives none, is WGS84.
     else if (/encodingDesc\/geoDecl$/.test(path)) h.geoDecls.push(attr('datum') || 'WGS84');
+    // P4's languages, for lang (an IDREF to one): <language id="greek">Greek</language>; an ident, where given, is its tag.
+    else if (/profileDesc\/langUsage\/language$/.test(path) && this.teiVariant === 'p4') {
+      const id = attr('xml:id'), ident = attr('ident');
+      if (id !== undefined) this.capture((c) => { if (!this.languages.has(id)) this.languages.set(id, { ident, text: norm(c.pref) }); });
+    }
     else if (/\/prefixDef$/.test(path)) { h.prefixDefs.push({ ident: attr('ident'), match: attr('matchPattern'), replace: attr('replacementPattern') }); this.prefixCache = null; }
   }
 
@@ -535,13 +641,22 @@ export class TeiReader {
     for (const c of this.captures) if (this.inNote < c.inNoteFrom && this.inAside < c.asideFrom) c.text(t);
   }
   open(t) {
-    const tei = t.uri === TEI_NS, local = t.local;
+    const local = t.local;
     const attr = (n) => t.attributes[n]?.value;
     const parent = this.stack[this.stack.length - 1];
     if (!parent) {
       this.sawRoot = true;
-      if (!tei || (local !== 'TEI' && local !== 'teiCorpus')) throw new DataError(`This XML document is not TEI: its root element is <${t.name}>${t.uri ? ` in the namespace ${t.uri}` : ''}, not <TEI> or <teiCorpus> in the TEI namespace (${TEI_NS}).`);
+      const p5 = t.uri === TEI_NS && (local === 'TEI' || local === 'teiCorpus');
+      const p4 = !t.uri && (local === 'TEI.2' || local === 'teiCorpus.2');
+      const bare = !t.uri && (local === 'TEI' || local === 'teiCorpus');
+      if (!p5 && !p4 && !bare) throw new DataError(`This XML document is not TEI: its root element is <${t.name}>${t.uri ? ` in the namespace ${t.uri}` : ''}, not <TEI> or <teiCorpus> in the TEI namespace (${TEI_NS}), TEI P4's <TEI.2> or <teiCorpus.2>, or <TEI> with no namespace.`);
+      this.ns = t.uri || ''; this.teiVariant = p4 ? 'p4' : bare ? 'no-namespace' : 'p5';
+      if (p4) this.report('tei-p4', `<${local}> in ${this.fileName}`);
+      if (bare) this.report('tei-no-namespace', `<${local}> in ${this.fileName}`);
     }
+    // An element is TEI's when its namespace is the root's.
+    const tei = (t.uri || '') === this.ns;
+    if (tei && this.teiVariant === 'p4') P4Attributes(t);
     const lang = attr('xml:lang') ?? parent?.lang;
     const el = { local, tei, lang, name: t.name };
     if (local === 'provenance') { el.provenance = attr('type') || ''; el.provenanceSubtype = attr('subtype'); }
@@ -576,7 +691,7 @@ export class TeiReader {
       }
     }
 
-    if (local === 'TEI' || local === 'teiCorpus') {
+    if (SCOPES.has(local)) {
       this.scopes.push({ hdr: { titles: [], authors: [], editors: [], idnos: [], licences: [], sourceDescs: [], prefixDefs: [], geoDecls: [], queue: [], authorIds: new Set(), authorNames: [] } });
       this.prefixCache = null;
       this.page = undefined; this.line = undefined; this.divs = []; this.milestones = new Map();
@@ -734,13 +849,14 @@ export class TeiReader {
       // What waited for the whole header (a list of places, the places it describes), now that it is read.
       for (const q of scope.hdr.queue.splice(0)) q();
     }
-    if (el.tei && (el.local === 'TEI' || el.local === 'teiCorpus')) { this.scopes.pop(); this.prefixCache = null; }
+    if (el.tei && SCOPES.has(el.local)) { this.scopes.pop(); this.prefixCache = null; }
     this.stack.pop();
   }
   /** Report each attribute of an element that is not read, once for each attribute and value. */
   attributes(t, read, alsoRead) {
     for (const a of Object.values(t.attributes)) {
       if (read.has(a.name) || a.name === alsoRead || a.name === 'xmlns' || a.prefix === 'xmlns') continue;
+      if (a.name === 'reg' && this.teiVariant === 'p4' && this.isPlace(t)) continue;   // tei-reg, in mention()
       this.once('tei-attribute', `${t.local}@${a.name}="${a.value}"`);
     }
   }
@@ -750,6 +866,26 @@ export class TeiReader {
     if (this.seen.has(k)) return;
     this.seen.add(k);
     this.report(kind, example);
+  }
+  /**
+   * The language tag a name's language gives, or undefined, having reported one that is not a tag.
+   * In P4, lang is an IDREF to the header's <language id>: its ident where that is a tag, else the
+   * id itself where that is one (<language id="la">); else not a tag (<language id="greek">).
+   */
+  languageTag(raw) {
+    if (raw === undefined || raw === '') return undefined;
+    if (this.teiVariant !== 'p4') { if (LANGUAGE_TAG.test(raw)) return raw; this.report('tei-lang-not-tag', raw); return undefined; }
+    const l = this.languages.get(raw);
+    const tag = l?.ident !== undefined && LANGUAGE_TAG.test(l.ident) ? l.ident : LANGUAGE_TAG.test(raw) ? raw : undefined;
+    if (tag === undefined) this.report('tei-lang-not-tag', l ? `${raw} (<language id="${raw}">${l.text}</language>)` : `${raw} (no <language id="${raw}"> in the header)`);
+    return tag;
+  }
+  /** P4: whether a lang names Greek, by the tag it resolves to, or the words of its <language> (or its own). */
+  isGreek(raw) {
+    if (raw === undefined || raw === '') return false;
+    const l = this.languages.get(raw);
+    const tag = l?.ident !== undefined && LANGUAGE_TAG.test(l.ident) ? l.ident : raw;
+    return GREEK_TAG.test(tag) || GREEK_WORDS.test(raw) || (!!l && GREEK_WORDS.test(l.text));
   }
   isPlace(t) {
     if (PLACE_ELEMENTS.has(t.local)) return true;
@@ -820,10 +956,8 @@ export class TeiReader {
     const [head, ...variants] = pl.names;
     if (variants.length) this.report('tei-listplace-variant', `${which}: ${variants.map((n) => n.text).join(', ')}`);
     const name = { toponym: head.text };
-    if (head.lang !== undefined && head.lang !== '') {
-      if (LANGUAGE_TAG.test(head.lang)) name.language = head.lang;
-      else this.report('tei-lang-not-tag', head.lang);
-    }
+    const headLang = this.languageTag(head.lang);
+    if (headLang) name.language = headLang;
     const source = this.source();
     // The coordinates, if any can be carried: parsed, and in a datum PLATO's coordinates can take.
     let points = [];
@@ -903,8 +1037,7 @@ export class TeiReader {
       const toponym = norm(c.pref), printed = norm(c.printed), ref = norm(attr('ref'));
       if (!toponym) { this.report('tei-place-empty', `<${t.name} ref="${ref}"> on line ${fileLine}`); return; }
       const el = this.stack[this.stack.length - 1];
-      let language;
-      if (el.lang !== undefined && el.lang !== '') { if (LANGUAGE_TAG.test(el.lang)) language = el.lang; else this.report('tei-lang-not-tag', el.lang); }
+      const language = this.languageTag(el.lang);
       const m = {
         element: t.name, key: attr('key'), xmlId: attr('xml:id'), toponym, printed: printed !== toponym ? printed : undefined, language, fileLine,
         locator: kind === 'found' ? 'teiHeader, provenance (found)' : kind === 'provenance-other' ? `teiHeader, provenance (found, ${subtype})` : 'teiHeader, origin', pointers: ref.split(' '), subtype,
@@ -955,6 +1088,7 @@ export class TeiReader {
     const ref = attr('ref'), key = attr('key'), xmlId = attr('xml:id');
     const toponym = norm(c.pref), printed = norm(c.printed);
     const el = this.stack[this.stack.length - 1];
+    if (this.teiVariant === 'p4' && attr('reg') !== undefined) this.report('tei-reg', `${toponym || `<${t.name}>`} (reg="${attr('reg')}") on line ${fileLine}`);
     let d, made;
     const hasRef = ref !== undefined && !!norm(ref);
     if (!hasRef) {
@@ -973,17 +1107,14 @@ export class TeiReader {
       const lineWords = el.verse !== undefined || this.verseLine() !== undefined ? `line ${line}`
         : startLine !== undefined && line !== undefined && startLine !== line ? `lines ${startLine} to ${line}` : line !== undefined ? `line ${line}` : undefined;
       const locator = [...where, lineWords, this.inNote ? 'in a note' : undefined, xmlId ? `xml:id ${xmlId}` : undefined].filter(Boolean).join(', ');
-      let language;
-      if (el.lang !== undefined && el.lang !== '') {
-        if (LANGUAGE_TAG.test(el.lang)) language = el.lang;
-        else this.report('tei-lang-not-tag', el.lang);
-      }
+      const language = this.languageTag(el.lang);
       // Only what the attestation needs, and what is shared (the source, the prefixDefs) by
       // reference: a place name may wait until the end of the file for a <place>.
       d = { m: {
         element: t.name, key, xmlId, toponym, printed: printed !== toponym ? printed : undefined, language, locator,
         fileLine, source: this.source(), pointers: hasRef ? norm(ref).split(' ') : [], prefixes: this.prefixes(),
         ...(made ? { keyAddress: made.address, keyNote: made.note } : {}),
+        ...(this.teiVariant === 'p4' && BETA_CODE.test(toponym) && this.isGreek(el.lang) ? { betaCode: true } : {}),
       } };
       d.m.pointerWords = hasRef ? norm(ref) : `key ${norm(key)}`;
     }
@@ -1156,7 +1287,8 @@ export class TeiReader {
     const chosen = preferredAddress(resolved);
     if (chosen.clash) { this.report('tei-ref-ambiguous', `<${m.element}> on line ${m.fileLine}: ${chosen.clash.join(', ')}`); return; }
     if (!this.headed) this.header();
-    const name = m.toponym ? { toponym: m.toponym } : undefined;
+    // A name in Beta Code is not converted (decided 2026-10-01: reported, not converted), so the attestation carries none.
+    const name = m.toponym && !m.betaCode ? { toponym: m.toponym } : undefined;
     if (name && m.language) name.language = m.language;
     if (name && m.printed && m.printed !== m.toponym) name.sourceLabel = m.printed;
     const r = chosen.preferred;
@@ -1168,6 +1300,10 @@ export class TeiReader {
     const notes = [];
     if (m.editorial) notes.push(m.editorialNote || "The editors' words, not the source's.");
     if (m.extraNotes) notes.push(...m.extraNotes);
+    if (m.betaCode) {
+      this.report('tei-p4-beta-code', `${m.toponym} (<${m.element}> on line ${m.fileLine})`);
+      notes.push('The name is written in Beta Code (Greek in Latin letters), which is not converted, so this attestation carries no name.');
+    }
     if (m.keyNote) notes.push(m.keyNote);
     else if (m.key) notes.push(`Key: ${m.key}`);
     notes.push(...several);
@@ -1196,6 +1332,18 @@ async function* chunks(file) {
 }
 
 /**
+ * The text chunks of a file, as chunks() gives them, having first read its head and loaded the ISO
+ * entity table where the head may name an outside DTD: { table, chunks }.
+ */
+async function headed(file) {
+  const it = chunks(file), buf = [];
+  let len = 0, done = false;
+  while (len < HEAD) { const r = await it.next(); if (r.done) { done = true; break; } buf.push(r.value); len += r.value.length; }
+  const table = mayNameOutsideDtd(buf.join('')) ? await loadIsoEntities() : undefined;
+  return { table, chunks: (async function* () { yield* buf; if (!done) yield* it; })() };
+}
+
+/**
  * TEI (Hermes): each place name in the text whose ref points to a place becomes an
  * attestation-centric attestation about that place. Mirrors annotationSource in
  * src/engine/pipeline.js: yields { type: 'header', value } first, then { type: 'attestation', value, n };
@@ -1204,9 +1352,10 @@ async function* chunks(file) {
  */
 export async function* teiSource(input, rep, options = {}) {
   const file = input.files[0];
-  // The run's options are the reading options; the file's name and the count are the reader's own.
+  const { table, chunks: text } = await headed(file);
+  // The run's options are the reading options; the file's name, the count and the entity table are the reader's own.
   const reader = new TeiReader((kind, example) => rep.add(TEI_KINDS[kind] || 'loss', kind, LOSS_TEXT[kind] || kind, example),
-    { ...options, fileName: file.name, count: () => rep.count('place names') });
+    { ...options, fileName: file.name, count: () => rep.count('place names'), entities: table });
   let n = 0;
   const events = function* (evs) { for (const e of evs) yield e.type === 'attestation' ? { ...e, n: ++n } : e; };
   // What a chunk gave before a fault in it is yielded before the fault, so that the part of the file
@@ -1216,7 +1365,7 @@ export async function* teiSource(input, rep, options = {}) {
     try { evs = read(); } catch (e) { yield* events(reader.take()); throw e; }
     yield* events(evs);
   };
-  for await (const chunk of chunks(file)) yield* step(() => reader.write(chunk));
+  for await (const chunk of text) yield* step(() => reader.write(chunk));
   yield* step(() => reader.close());
 }
 
@@ -1236,8 +1385,9 @@ export async function teiKeyPrefixes(input) {
     if (p.rests.length < SAMPLES) p.rests.push(rest);
     by.set(prefix, p);
   };
-  const reader = new TeiReader(() => {}, { fileName: file.name, onKey });
-  for await (const chunk of chunks(file)) reader.write(chunk);
+  const { table, chunks: text } = await headed(file);
+  const reader = new TeiReader(() => {}, { fileName: file.name, onKey, entities: table });
+  for await (const chunk of text) reader.write(chunk);
   reader.close();
   return [...by.values()].map(({ prefix, count, examples, rests }) => ({ prefix, count, examples, suggested: suggestKeyPattern(prefix, rests) }));
 }

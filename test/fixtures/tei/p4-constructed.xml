@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE TEI.2 PUBLIC "-//TEI P4//DTD Main Document Type//EN" "http://www.tei-c.org/Guidelines/DTD/tei2.dtd" [
+<!ENTITY % TEI.XML "INCLUDE">
+<!ENTITY % PersProse PUBLIC "-//Example Digital Library//ELEMENTS TEI P4 Prose//EN" "prose.ent">
+%PersProse;
+<!ENTITY % ISOlat1 PUBLIC "ISO 8879:1986//ENTITIES Added Latin 1//EN//XML" "isolat1.ent">
+%ISOlat1;
+<!ENTITY % ISOgrk1 PUBLIC "ISO 8879:1986//ENTITIES Greek Letters//EN//XML" "isogrk1.ent">
+%ISOgrk1;
+<!ENTITY responsibility "Constructed for the PLATO tools tests">
+]>
+<!-- Constructed for PLATO tools' tests (test/fixtures/tei/README.md): a TEI P4 file in the manner
+     of a digital library's Latin prose text, with invented words. Not copied from any edition. -->
+<TEI.2 id="p4-constructed">
+<teiHeader type="text" status="new">
+<fileDesc>
+<titleStmt>
+<title>De Locis Fictis</title>
+<title type="sub">Machine readable text</title>
+<author>Auctor Fictus</author>
+<editor role="editor">Editor Fictus</editor>
+<sponsor>Example Digital Library</sponsor>
+<principal>A. Principal</principal>
+<respStmt><resp>&responsibility;</resp><name>PLATO tools</name></respStmt>
+<funder n="org:Example">An Example Foundation</funder>
+</titleStmt>
+<extent>About 2Kb</extent>
+<publicationStmt>
+<publisher>Example Digital Library</publisher>
+<pubPlace>Nowhere, NA</pubPlace>
+<authority>Example Digital Library</authority>
+<date>2026</date>
+<idno type="URI">https://example.org/texts/de-locis-fictis</idno>
+<availability status="free"><p>Constructed for tests.</p></availability>
+</publicationStmt>
+<sourceDesc default="NO">
+<biblStruct default="NO">
+<monogr>
+<author>Auctor Fictus</author>
+<title>De Locis Fictis</title>
+<editor role="editor">Editor Fictus</editor>
+<imprint><pubPlace>Lipsiae</pubPlace><publisher>Typis Fictis</publisher><date>1900</date></imprint>
+</monogr>
+</biblStruct>
+</sourceDesc>
+</fileDesc>
+<encodingDesc>
+<refsDecl doctype="TEI.2">
+<state unit="book"/>
+<state unit="chapter"/>
+<state unit="section"/>
+</refsDecl>
+</encodingDesc>
+<profileDesc>
+<langUsage default="NO">
+<language id="en">English</language>
+<language id="la">Latin</language>
+<language id="greek">Greek</language>
+<language id="lat" ident="la">Latin, given by its ident</language>
+<language id="latine">Latin, with no tag</language>
+</langUsage>
+</profileDesc>
+<revisionDesc>
+<change><date>2026-10-01</date><respStmt><name>PLATO tools</name><resp>constructed</resp></respStmt><item>Constructed as a test fixture</item></change>
+</revisionDesc>
+</teiHeader>
+<text lang="la">
+<body>
+<div1 type="book" n="1">
+<head>Liber Primus</head>
+<div2 type="chapter" n="1">
+<milestone unit="section" n="1"/>
+<p>Primum <placeName key="tgn,7000874" reg="Roma">Romae</placeName> fuimus, deinde
+<placeName id="pn-athenae" key="tgn,7001393">Athenas</placeName> navigavimus, ubi Graeci urbem
+<foreign lang="greek"><placeName key="tgn,7001393">*)aqh=nai</placeName></foreign> vocant, alii
+<foreign lang="greek"><placeName key="tgn,7001393">&Agr;&thgr;&eegr;&ngr;&agr;&igr;</placeName></foreign>
+scribunt.</p>
+<milestone unit="section" n="2"/>
+<p>Inde <placeName lang="lat" key="tgn,7002382">Carthaginem</placeName> et
+<placeName lang="latine" key="tgn,7010720">Lacedaemonem</placeName> petivimus, et
+<placeName key="tgn,7003393">Massili&aelig;</placeName> hiemavimus.
+<note anchored="yes" place="foot" resp="ed">Cf. <placeName key="tgn,7000874">Romam</placeName>.</note></p>
+</div2>
+</div1>
+<div1 type="book" n="2">
+<div2 type="chapter" n="1">
+<p>Ad <placeName key="tgn,7012149">Corinthum</placeName> redivimus.</p>
+</div2>
+</div1>
+</body>
+</text>
+</TEI.2>

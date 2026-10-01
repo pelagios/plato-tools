@@ -128,15 +128,14 @@ test('a DOCTYPE whose internal subset has ] or > in a comment or a quoted litera
     assert.equal(await kind(tei(d), 'x.xml'), 'tei', d);
     // Control: the same prolog before a root that is not TEI's, or not in its namespace, is not TEI.
     assert.notEqual(await kind(tei(d, '<html xmlns="http://www.w3.org/1999/xhtml">', '</html>'), 'x.xml'), 'tei', `${d} before <html>`);
-    assert.notEqual(await kind(tei(d, '<TEI>'), 'x.xml'), 'tei', `${d} before a TEI with no namespace`);
+    assert.notEqual(await kind(tei(d, '<TEI xmlns="http://example.org/not-tei">'), 'x.xml'), 'tei', `${d} before a TEI in another namespace`);
   }
 });
 test('XML that is not TEI P5 is refused, saying what it is, and never read as N-Triples', async () => {
   const cases = {
-    'tei-p4': ['<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE TEI.2 PUBLIC "-//TEI P4//DTD Main Document Type//EN" "http://www.tei-c.org/Guidelines/DTD/tei2.dtd" [ <!ENTITY % TEI.XML "INCLUDE"> ]>\n<TEI.2><teiHeader/></TEI.2>\n',
-      '<?xml version="1.0"?>\n<TEI><teiHeader/></TEI>', '<teiCorpus><TEI/></teiCorpus>'],
+    // TEI P4 and TEI with no namespace are read (test/tei-p4.test.js); a TEI root in another namespace is not TEI.
     kml: ['<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark/></Document></kml>'],
-    xml: ['<?xml version="1.0"?>\n<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>', '<root><a/></root>', '<?xml-stylesheet href="x.xsl"?><doc/>', '<!-- a note --><doc/>'],
+    xml: ['<TEI xmlns="http://example.org/not-tei"><teiHeader/></TEI>', '<?xml version="1.0"?>\n<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>', '<root><a/></root>', '<?xml-stylesheet href="x.xsl"?><doc/>', '<!-- a note --><doc/>'],
   };
   for (const [kind, texts] of Object.entries(cases)) for (const t of texts) {
     const d = await detect([textFile(t, 'x.xml')]);
