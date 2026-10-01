@@ -633,6 +633,22 @@ test('upstreamLicence: licenceOf without WHG\'s own licence, for copied data', (
   assert.equal(upstreamLicence(a, 'osm', 42), null, 'a source with no licence, as licenceOf');
   assert.equal(upstreamLicence({ sources: { gn: { redistributable: false } } }, 'gn').redistributable, false, 'not to be passed on is kept');
 });
+test('a WHG-native record whose dataset says not redistributable, with no licence, still warns', () => {
+  const a = { ...ATTRIBUTION, datasets: { 42: { redistributable: false } } };
+  for (const ns of ['whg', null]) for (const [name, f] of [['upstreamLicence', upstreamLicence], ['licenceOf', licenceOf]]) {
+    const l = f(a, ns, 42);
+    assert.notEqual(l, null, `${name} ${ns}: not merely "licence unknown"`);
+    assert.equal(l.redistributable, false, `${name} ${ns}: the dataset's word is kept`);
+    assert.equal(l.spdx, null, `${name} ${ns}: and not WHG's own licence in its place`);
+    assert.equal(lookupPage.licenceWarns(l), true, `${name} ${ns}: warns`);
+  }
+  // Control: a dataset entry that says nothing is still passed over.
+  const quiet = { ...ATTRIBUTION, datasets: { 42: { redistributable: null } } };
+  for (const ns of ['whg', null]) {
+    assert.equal(upstreamLicence(quiet, ns, 42), null, `${ns}: control, nothing said is unknown`);
+    assert.equal(licenceOf(quiet, ns, 42).spdx, 'CC-BY-4.0', `${ns}: control, licenceOf falls back to WHG's`);
+  }
+});
 
 // ---- found by the pre-push review of change 2 ---------------------------------------------------------------
 // 25 obscure places, then one WHG knows, at 26th: the first batch is all empty.

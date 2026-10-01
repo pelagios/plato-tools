@@ -402,13 +402,15 @@ export const lookupCandidatesOf = (work, iri, lookupId) => work.candidates.filte
  * The licence a lookup's attribution gives for a candidate's source, and that source's entry: its
  * namespace's; for WHG's own records (namespace null or whg), its contributed dataset's in
  * attribution.datasets, then, only with `whg`, WHG's own (attribution.whg, attribution.sources.whg).
+ * An entry is taken when it names a licence or says `redistributable: false` (a dataset's as much as
+ * a namespace's), so that "not to be passed on" is never lost, nor replaced by WHG's own licence.
  */
 function licenceEntry(attribution, namespace, dataset, whg) {
   const pick = (x) => (x && (typeof x.license === 'string' || (x.license && typeof x.license === 'object')) ? x.license : null);
   const own = namespace && namespace !== 'whg' ? attribution?.sources?.[namespace] : null;
   if (pick(own) || (namespace && namespace !== 'whg')) return { l: pick(own), entry: own };
   const tries = [dataset != null ? attribution?.datasets?.[dataset] : null, ...(whg ? [attribution?.whg, attribution?.sources?.whg] : [])];
-  for (const e of tries) if (pick(e)) return { l: pick(e), entry: e };
+  for (const e of tries) if (pick(e) || e?.redistributable === false) return { l: pick(e), entry: e };
   return { l: null, entry: null };
 }
 /** The licence object of licenceOf() and upstreamLicence(), from what licenceEntry() found. */

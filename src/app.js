@@ -946,6 +946,7 @@ async function lookUp({ only = null, query = null, allNames, which } = {}) {
  */
 async function offerResume(svc) {
   const g = await gatherPlaces();
+  if (looking) return;   // Send pressed while the places were gathered: Resume stays hidden during the run
   const p = planFor(svc, lookupOptions({ places: 'pending' }), g?.places ?? null).preview;
   const b = $('lookup-resume');
   if (!p.queries) { b.hidden = true; return; }
