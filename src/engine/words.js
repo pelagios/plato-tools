@@ -308,6 +308,37 @@ export const choraTracingNote = ({ zoom } = {}) =>
  */
 export const CHORA_GEOREF_REASON = "This is a IIIF Georeference Annotation (a map's georeference, not a dataset): to show the map, paste it, or its address, under Historical maps, and open a dataset here to draw on.";
 export const choraLoadFailure = (input) => (input?.format === 'georef' ? CHORA_GEOREF_REASON : input?.reason);
+/**
+ * How a drawing traced WITH ASSISTANCE from a historical map was made: a shape proposed from the map's
+ * ink, then accepted or edited by hand. This is the one place its words are made (a citation of the
+ * software may later be added beside it); it follows georefNote's sentences (src/engine/chora/trace.js).
+ * The shape is attested, not computed: a person accepted it. `a` is the draft's trace.assisted: { mode
+ * 'area' | 'line', params (tolerance, colour, bridge), scale (1/s of full resolution: the last part's),
+ * scales (each part's, a line carried on from several clicks), epsilon (image pixels), gaps (a line's,
+ * jumped), holes: { dropped } (an area's holes left out when it was accepted: a drawing is an outline) };
+ * `edits` countEdits' { moved, added, removed, proposed }; `version` the tools'; `uncited`, the title of
+ * the map it was proposed from when it has since been moved off that map (so the map is not cited).
+ */
+export function choraAssistedNote(a, edits, { version, zoom, uncited = null } = {}) {
+  const p = a.params || {};
+  const by = a.mode === 'area' ? 'filling an area' : 'following a line';
+  const tol = a.mode === 'area' || p.colour ? `tolerance ${fmt(p.tolerance)}` : 'by its darkness';
+  const scales = (a.scales?.length ? a.scales : [a.scale]).filter(Number.isFinite);
+  const lo = Math.min(...scales), hi = Math.max(...scales);
+  const at = scales.length && lo !== hi ? `at 1/${lo} to 1/${hi}` : `at 1/${scales.length ? lo : a.scale}`;
+  const eps = a.epsilon > 0 ? `simplified to within ${fmt(a.epsilon)} image pixels` : 'not simplified';
+  const gaps = a.mode === 'area'
+    ? (p.bridge > 0 ? `, gaps of up to ${fmt(p.bridge * a.scale)} image pixels bridged` : '')
+    : `, ${a.gaps || 0} gap${a.gaps === 1 ? '' : 's'} bridged`;
+  const n = a.holes?.dropped || 0;
+  const holes = n > 0 ? `; its ${n} hole${n === 1 ? '' : 's'} left out, as drawings are outlines;` : ',';
+  const done = !edits || (!edits.moved && !edits.added && !edits.removed)
+    ? 'accepted as proposed'
+    : `edited by hand: moved ${edits.moved}, added ${edits.added}, removed ${edits.removed}, of ${edits.proposed} proposed`;
+  const off = uncited !== null ? ` Its citation of the map it was traced from${uncited ? ` (“${uncited}”)` : ''} was dropped: the drawing was moved off that map, or that map could not place it, or the basemap was chosen instead.` : '';
+  return `Traced with assistance in PLATO tools (Chora)${version ? ` ${version}` : ''}${Number.isFinite(zoom) ? ` at zoom ${Math.round(zoom)}` : ''}: proposed from the map's ink by ${by} (${tol}, ${at} of full resolution, ${eps}${gaps})${holes} then ${done}.${off}`;
+}
+const fmt = (x) => (Number.isFinite(x) ? String(Math.round(x * 100) / 100) : '?');
 /** What a Chora save reports of itself (src/engine/chora/save.js), by kind. */
 export const CHORA_TEXT = {
   'chora-addition-invalid': 'A drawing could not be added, because PLATO would not accept it as it is, so nothing was saved',
