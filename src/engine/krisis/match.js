@@ -19,7 +19,7 @@ import { Report } from '../report.js';
 import { collectWithdrawn, resolveWithdrawn } from '../../formats/shared.js';
 import { DISTINCT_GATE } from './names.js';
 import { NameIndex, BLOCKING, BLOCKING_RULE } from './blocking.js';
-import { WORK_VERSION, MATCH_DEFAULTS, fileRecords, serialiseWork, checkReviewer, checkMatchOptions } from './work.js';
+import { WORK_VERSION, MATCH_DEFAULTS, fileRecords, serialiseWork, checkReviewer, checkMatchOptions, NOT_READ_KINDS } from './work.js';
 import { KRISIS_TEXT } from '../words.js';
 
 export const ALGORITHM = 'krisis-names 5';
@@ -45,7 +45,7 @@ export const SCORING = 'Each name of a place (its label and every toponym and ro
   + 'when it has none, by score.';
 
 // A problem of a dataset's own that stops part of it being read: the matching is then of less than the whole.
-const NOT_READ = new Set(['json-syntax', 'rdf-syntax', 'record-failed', 'late-header', 'lpf-v2']);
+const NOT_READ = new Set(NOT_READ_KINDS);
 const TEXT = {
   'no-address': (word) => `A place in the ${word} has no web address (@id), so it cannot be matched: an identity relation needs the addresses of both places. Give it one.`,
   'no-places': (word) => `The ${word} hold no places with web addresses, so nothing was matched.`,

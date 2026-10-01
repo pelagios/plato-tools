@@ -332,6 +332,34 @@ test("a CSV file read by Hermes's reader, its columns guessed, is matched agains
   assert.ok(!r.work.candidates.some((c) => c.candidate_candidate === B('london')));
 });
 
+test('a line of a dataset that is not read is said to be not read, by matching and by finishing: not an object, a record wrapped in a list, not an LPF feature', async () => {
+  const head = { profile: 'place-centric', gazetteer: { '@id': X + 'a', title: 'Dataset A' } };
+  const lines = [JSON.stringify(head), ...subjectsDoc().spatialEntities.slice(0, 3).map((x) => JSON.stringify(x))];
+  const jsonl = (bad) => detect([textFile([...lines, ...bad].join('\n') + '\n', 'a.jsonl')]);
+  const others = async () => (await inputs()).others;
+  // Control: the same lines with nothing added are read whole, and matched.
+  const clean = await match({ subjects: await jsonl([]), others: await others(), options: {} }, env());
+  assert.deepEqual(clean.report.items.map((i) => i.kind), []);
+  assert.ok(clean.work.candidates.length > 0);
+  const feature = (p) => JSON.stringify({ type: 'Feature', '@id': p['@id'], properties: { title: p.label }, geometry: p.attestations.find((a) => a.geometries).geometries[0].geojson });
+  const lpf = (bad) => detect([textFile([...subjectsDoc().spatialEntities.slice(0, 3).map(feature), ...bad].join('\n') + '\n', 'a.geojsonl')]);
+  const lpfClean = await match({ subjects: await lpf([]), others: await others(), options: {} }, env());
+  assert.ok(!lpfClean.report.items.some((i) => i.kind === 'dataset-not-read'), JSON.stringify(lpfClean.report.items));
+  for (const [kind, subjects] of [['jsonl-not-an-object', await jsonl(['42'])], ['not-a-list', await jsonl([`[${lines[1]}]`])],
+    ['lpf-not-a-feature', await lpf([JSON.stringify({ type: 'Point', coordinates: [0, 0] })])]]) {
+    const r = await match({ subjects, others: await others(), options: {} }, env());
+    assert.ok(r.report.items.some((i) => i.kind === 'dataset-not-read'), `match, ${kind}: ${JSON.stringify(r.report.items)}`);
+    assert.ok(!r.report.items.some((i) => i.kind === 'dataset-has-problems'), `match, ${kind}: not one of the dataset's own problems`);
+  }
+  const w = serialiseWork(await reviewed());
+  const done = await apply({ subjects: await jsonl([]), work: w, options: {} }, env());
+  assert.ok(!done.report.items.some((i) => i.kind === 'dataset-not-read'), 'control: ' + JSON.stringify(done.report.items));
+  for (const [kind, bad] of [['jsonl-not-an-object', '42'], ['not-a-list', `[${lines[1]}]`]]) {
+    const r = await apply({ subjects: await jsonl([bad]), work: w, options: {} }, env());
+    assert.ok(r.report.items.some((i) => i.kind === 'dataset-not-read'), `apply, ${kind}: ${JSON.stringify(r.report.items)}`);
+  }
+});
+
 // ---- the work file ---------------------------------------------------------------------------------------
 test('decisions: each sets its status, and a place counts as reviewed once any of its candidates is decided', async () => {
   const { work } = await run();

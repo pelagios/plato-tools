@@ -21,6 +21,9 @@ import { DataError } from '../input.js';
 import { fileSha256 } from './digest.js';
 
 export const WORK_VERSION = 1;
+// The problems of a dataset's own that stop part of it being read (the kinds the version check's
+// NOT_READ in compare.js lists): a matching, or a dataset finished, is then of less than the whole.
+export const NOT_READ_KINDS = ['json-syntax', 'rdf-syntax', 'record-failed', 'late-header', 'not-a-list', 'lpf-v2', 'lpf-not-a-feature', 'jsonl-not-an-object'];
 export const IDENTITY_TYPES = ['exactMatch', 'closeMatch', 'related'];
 export const DECISIONS = ['match', 'not-this', 'distinct'];
 const STATUS_OF = { match: 'confirmed', 'not-this': 'rejected', distinct: 'rejected' };

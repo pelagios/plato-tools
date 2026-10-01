@@ -16,7 +16,7 @@ import { DataError, detect } from '../input.js';
 import { run } from '../pipeline.js';
 import { compare } from '../compare.js';
 import { KRISIS_TEXT } from '../words.js';
-import { readWork, filesDiffer, checkReviewer } from './work.js';
+import { readWork, filesDiffer, checkReviewer, NOT_READ_KINDS } from './work.js';
 import { attestationsFrom, datasetSource } from './identity.js';
 
 export const OUTPUTS = ['attestations', 'dataset'];
@@ -110,7 +110,7 @@ export function attestationsDocument(work, made) {
 const CHANGED = new Set(['attestation-removed', 'attestation-changed', 'attestation-gone', 'facet-changed', 'facet-removed', 'facet-added-to',
   'identity-removed', 'identity-changed', 'identity-gone', 'description-removed', 'description-changed']);
 // What stops part of the dataset being read: the dataset written would then lack what was not.
-const NOT_READ = new Set(['unreadable', 'json-syntax', 'rdf-syntax', 'record-failed', 'late-header', 'lpf-v2']);
+const NOT_READ = new Set(['unreadable', ...NOT_READ_KINDS]);
 
 /**
  * env, with each output also kept as Blob parts, so that the file can be read again for the version
