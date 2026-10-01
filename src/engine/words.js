@@ -451,6 +451,7 @@ export const KRISIS_CANDIDATES = {
   earlierForAnother: (iri, theirs, ours) => `The earlier candidate set ${iri} is for another dataset (${theirs}), not for ${ours}.`,
   noAlgorithm: (id) => `Candidate ${id} does not say which software suggested it (algorithm_version).`,
   noGeneratedAt: (id) => `Candidate ${id} does not say when it was suggested (generated_at).`,
+  sameHash: (h) => `Two suggestions are the same: they have the same place, the same other place, the same software and the same settings, so they are one suggestion, and no candidate set was written. (Both hash to ${h}.)`,
   earlierExportNotGiven: 'This review was exported before, as the candidate set named here, which is not given now as an earlier set. If that set was published, give it as an earlier candidate set and export again: otherwise its candidates are published a second time, under new addresses. If it was not published, this set replaces it.',
   /** The candidate set's title and description. */
   title: (subjects, others, issued) => `Matches suggested for ${subjects} in ${others}, ${issued}`,

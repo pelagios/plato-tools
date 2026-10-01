@@ -22,9 +22,9 @@ import { match } from '../src/engine/krisis/match.js';
 import { readWork, serialiseWork, decide } from '../src/engine/krisis/work.js';
 import { apply, headerWithSets } from '../src/engine/krisis/apply.js';
 import { attestationsFrom } from '../src/engine/krisis/identity.js';
-import { exportCandidates, asCandidate, hashText, candidateHash, jcs, prefixLengths, proposeSetIri, defaultBase, byCodePoint } from '../src/engine/krisis/candidates.js';
+import { exportCandidates, asCandidate, hashText, candidateHash, prefixLengths, proposeSetIri, defaultBase, byCodePoint } from '../src/engine/krisis/candidates.js';
 import { compare } from '../src/engine/compare.js';
-import { Json2Rdf } from '../src/formats/json2rdf.js';
+import { Json2Rdf, jcs } from '../src/formats/json2rdf.js';
 import { tripleNT } from '../src/lib/ntriples.js';
 import { summary, groups, KRISIS_CANDIDATES } from '../src/engine/words.js';
 
@@ -88,6 +88,8 @@ test("the hash is SHA-256 of the JCS array, and gives PLATO's own example ids", 
     assert.equal(candidateHash(text), createHash('sha256').update(text, 'utf8').digest('hex'));
     assert.equal(c['@id'], `${ex.candidateSet['@id']}#c-${candidateHash(text).slice(0, 8)}`);
   }
+  // The example's two ids, by name, so that the loop above cannot pass over an empty list.
+  assert.deepEqual(ex.candidates.map((c) => c['@id'].split('#')[1]).sort(), ['c-1ec753bb', 'c-8ed2901c']);
   // An absent matchParameters is hashed as "": the same as an empty string, never as the word null.
   assert.equal(hashText({ subject: 's', object: 'o', algorithmVersion: 'v' }), '["s","o","v",""]');
   // The array, not the fields joined: a line feed moved from one field to the next is another text.
@@ -110,7 +112,7 @@ test('ids: 8 digits, lengthened in steps of 4 where hashes begin alike, both of 
   // Further: alike to 12 digits takes 16.
   assert.deepEqual(prefixLengths([h('aaaaaaaaaaaa0'), h('aaaaaaaaaaaa1')]), [16, 16]);
   // The same hash twice is one candidate, not two.
-  assert.throws(() => prefixLengths([a, a]), /same hash/);
+  assert.throws(() => prefixLengths([a, a]), (e) => e instanceof DataError && /are the same/.test(e.message));
 });
 
 test("the set's IRI is proposed from the base, the date and the candidates' hash texts in code point order, and the base from the dataset's address", () => {

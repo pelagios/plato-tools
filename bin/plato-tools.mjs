@@ -222,11 +222,21 @@ does not apply to):
                     coordinates that may be suggested (default 50).
   --top K           match: the most suggestions for one place (default 5).
   --review FILE     apply: the work file of the review (made by match, and saved by the page).
-  --candidates SET  apply: a candidate set exported from the review (by candidates, or on the
-                    page), or an earlier set holding a candidate left out of it; repeatable.
-                    Each answer points at its candidate (promotedFrom), and the dataset lists
-                    the sets (candidateSets). An address the work file stores that is under
-                    neither the set last exported from it nor a set given is refused.
+  --candidates SET  check, apply: a candidate set (PLATO JSON or JSON Lines, profile
+                    candidate-set); give it once for each set.
+                    check: check a dataset or candidate set together with these candidate
+                    sets. The sets are taken in the order they were issued: a later set must
+                    leave out a candidate an earlier one published, and its ids must differ
+                    from the earlier sets' (under the same base address). With a dataset, each
+                    identity relation that answers a candidate (promotedFrom) must find it in
+                    the sets, and the sets and the dataset's candidateSets must agree. With no
+                    INPUT, the first set is checked, with the others. Each set is checked
+                    against its profile too. Nothing is fetched.
+                    apply: a candidate set exported from the review (by candidates, or on the
+                    page), or an earlier set holding a candidate left out of it. Each answer
+                    points at its candidate (promotedFrom), and the dataset lists the sets
+                    (candidateSets). An address the work file stores that is under neither the
+                    set last exported from it nor a set given is refused.
   --previous-candidates SET
                     candidates: an earlier candidate set, already published; repeatable. A
                     candidate it holds is left out of the new set, and counted; the others'
@@ -399,8 +409,8 @@ async function main(argv) {
     if (typeof reading === 'string') return usage(reading);
     o.reading = reading;
   }
-  // --candidates is convert's (LPF's region matches) and apply's (what the answers point into).
-  if (o.candidates && action !== 'apply' && (action !== 'convert' || (o.to !== 'lpf' && o.to !== 'lpf-seq'))) return usage('--candidates is for convert --to lpf or lpf-seq, and for apply.');
+  // --candidates is check's (sets checked together), convert's (LPF's region matches) and apply's (what the answers point into).
+  if (o.candidates && action !== 'check' && action !== 'apply' && (action !== 'convert' || (o.to !== 'lpf' && o.to !== 'lpf-seq'))) return usage('--candidates is for check, convert --to lpf or lpf-seq, and apply.');
   if (action === 'cluster') return clusterCommand(args, o);
   if (o.column !== undefined || o.method !== undefined) return usage('--column and --method are for cluster.');
   if (o.clusters !== undefined && !reads) return usage('--clusters is for check, convert and preview.');

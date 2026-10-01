@@ -1216,7 +1216,10 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   file alone, after the review, and reads no dataset; its `--base` is the set's, not the tables'. The
   page has "Export the suggestions as a candidate set" on the review screen (and "Earlier candidate
   sets…" to give those already published); it makes the set in the page, from the work object, which
-  "Save the review" then saves with the addresses.
+  "Save the review" then saves with the addresses. The command line checks the set it writes against
+  the vendored candidate-set schema before writing it; the page does not (the validators are in the
+  worker, and the export is made in the page), so a set saved from the page is checked only when it
+  is given to Finish or to `check`.
 - **promotedFrom and candidateSets.** When finishing, each answered candidate's stored IRI must be
   under the set last exported from the review (`candidate_sets`) or under a candidate set given
   (`--candidates SET…`, or the page's exported and earlier sets); otherwise nothing is written

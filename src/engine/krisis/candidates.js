@@ -24,19 +24,13 @@ import { DataError } from '../input.js';
 import { isIri, CANDIDATE_IRI } from './work.js';
 export { CANDIDATE_IRI };
 import { KRISIS_CANDIDATES } from '../words.js';
+import { jcs } from '../../formats/json2rdf.js';
+export { jcs };
 
 export const CANDIDATE_SET_SCHEMA = 'https://w3id.org/plato/schemas/candidate-set.schema.json';
 const FIRST = 8, MORE = 4, WHOLE = 64;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** JSON in the JSON Canonicalization Scheme (RFC 8785): no spaces, object keys in UTF-16 code unit order. */
-export function jcs(v) {
-  if (v === null || typeof v === 'boolean' || typeof v === 'string') return JSON.stringify(v);
-  if (typeof v === 'number') { if (!Number.isFinite(v)) throw new Error('JCS has no form for a number that is not finite.'); return JSON.stringify(v); }
-  if (Array.isArray(v)) return '[' + v.map((x) => (x === undefined ? 'null' : jcs(x))).join(',') + ']';
-  if (typeof v === 'object') return '{' + Object.keys(v).filter((k) => v[k] !== undefined).sort().map((k) => JSON.stringify(k) + ':' + jcs(v[k])).join(',') + '}';
-  throw new Error(`JCS has no form for ${typeof v}.`);
-}
 /** Strings compared by Unicode code point (JavaScript's sort() compares UTF-16 code units). */
 export function byCodePoint(a, b) {
   const x = [...a], y = [...b];
@@ -49,7 +43,7 @@ export const hashText = ({ subject, object, algorithmVersion, matchParameters })
 /** The full hash of a candidate's text. */
 export const candidateHash = (text) => sha256(text);
 /** The IRI a set's candidates are minted under: the set's own, without any fragment. */
-export const setBase = (setIri) => setIri.split('#')[0];
+export const setIriOf = (setIri) => setIri.split('#')[0];
 
 /**
  * How many hex digits each of `hashes` (the new candidates' full hashes) takes: the shortest prefix,
@@ -61,7 +55,7 @@ export function prefixLengths(hashes, earlier = []) {
   return hashes.map((h, i) => {
     let n = FIRST;
     while (n < WHOLE && all.some((d, j) => j !== i && d.slice(0, n) === h.slice(0, n))) n += MORE;
-    if (all.some((d, j) => j !== i && d === h)) throw new Error(`Two candidates have the same hash ${h}: they are one candidate.`);
+    if (all.some((d, j) => j !== i && d === h)) throw new DataError(KRISIS_CANDIDATES.sameHash(h));
     return n;
   });
 }
@@ -129,7 +123,7 @@ export function exportCandidates(work, options = {}) {
   const previous = (options.previousSets || []).map((s, i) => readCandidateSet(s, K.earlierSetN(i + 1)));
   // The earlier sets an earlier export of this review was made against were published: without them,
   // their candidates would be published again, and a newcomer could fail to lengthen against them.
-  const given = new Set(previous.map((s) => setBase(s.candidateSet['@id'])));
+  const given = new Set(previous.map((s) => setIriOf(s.candidateSet['@id'])));
   const last = (w.candidate_sets || []).at(-1);
   const missing = (last?.previous || []).filter((iri) => !given.has(iri));
   if (missing.length) throw new DataError(K.previousNotGiven(missing));
@@ -154,7 +148,7 @@ export function exportCandidates(work, options = {}) {
 
   let setIri = options.setIri;
   if (setIri !== undefined && !isIri(setIri)) throw new DataError(K.badSetIri(setIri));
-  if (setIri) setIri = setBase(setIri);
+  if (setIri) setIri = setIriOf(setIri);
   const report = { counts: { candidates: fresh.length, leftOut }, errors: 0, items };
   if (!fresh.length) {
     items.push({ severity: 'warning', kind: 'all-left-out', message: K.allLeftOut(leftOut), count: 1, examples: [] });

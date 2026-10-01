@@ -24,7 +24,7 @@ import { run, CANDIDATE_SET_TEXT } from '../pipeline.js';
 import { compare } from '../compare.js';
 import { KRISIS_TEXT } from '../words.js';
 import { readWork, filesDiffer, checkReviewer, NOT_READ_KINDS } from './work.js';
-import { readCandidateSet, setBase } from './candidates.js';
+import { readCandidateSet, setIriOf } from './candidates.js';
 import { KRISIS_CANDIDATES } from '../words.js';
 import { attestationsFrom, datasetSource } from './identity.js';
 
@@ -182,7 +182,7 @@ export function candidateSetsOf(w, given, env, rep) {
     docs.push(d);
   });
   const latest = w.candidate_sets?.at(-1)?.['@id'];
-  const givenIds = new Set(docs.map((d) => setBase(d.candidateSet['@id'])));
+  const givenIds = new Set(docs.map((d) => setIriOf(d.candidateSet['@id'])));
   const held = new Map();
   for (const d of docs) for (const c of d.candidates) held.set(c['@id'], c);
   const sets = [];
@@ -190,7 +190,7 @@ export function candidateSetsOf(w, given, env, rep) {
   for (const c of w.candidates) {
     if (!c.decision || c.decision.kind === 'not-this') continue;
     if (!c.iri) { if (w.candidate_sets?.length) unexported++; continue; }
-    const s = setBase(c.iri);
+    const s = setIriOf(c.iri);
     if (s !== latest && !givenIds.has(s)) { rep.error('candidate-not-under-set', K.notUnderSet, c.iri); continue; }
     if (givenIds.has(s)) {
       const x = held.get(c.iri);
