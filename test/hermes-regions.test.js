@@ -864,3 +864,49 @@ test('the generated export with the Rocque georeference and manifest: 6 placed (
   // Control: the constructed file, which names every image, places 7 (Boston, 9, on the picture's address too).
   assert.equal((await MAIN()).of('annotation-region-shape').length, 7);
 });
+test('a tag whose value is the object {"label": …} (format application/json, Studio\'s region popup) reads as the free tag the string form (its annotation card) gives', async () => {
+  // The two forms appear in real exports: annotations 6 and 16 have the popup's, the rest the card's.
+  assert.deepEqual(gen(6).body[1], { created: gen(6).body[1].created, creator: gen(6).body[1].creator, purpose: 'tagging', value: { label: 'symbol' }, format: 'application/json' });
+  assert.equal(gen(1).body[1].value, 'label');
+  const r = plainRun(GEN);
+  assert.match(r.attestation(6).notes, /^Tag: symbol$/m);
+  assert.match(r.attestation(16).notes, /^Tag: Label$/m);
+  assert.equal(r.attestation(6).types, undefined, 'a label with no concept address is not a type');
+  assert.deepEqual(r.reported.filter(([k, e]) => k === 'annotation-body' || (k === 'annotation-key' && /^body\./.test(e))), [], 'neither the object nor its format is reported as lost');
+  // Placed, each form gives the same role as the other.
+  const asString = (n, text) => ({ ...gen(n), body: [gen(n).body[0], { ...gen(n).body[1], value: text, format: undefined }] });
+  const roleOf = async (a) => (await placed({ georefs: [ROCQUE], manifests: [ROCQUE_M] }, [a])).doc.attestations[0].geometries?.[0]?.role;
+  assert.equal(await roleOf(gen(6)), REPRESENTATIVE);
+  assert.equal(await roleOf(asString(6, 'symbol')), REPRESENTATIVE);
+  assert.equal(await roleOf(gen(16)), LABEL_ANCHOR);
+  assert.equal(await roleOf(asString(16, 'Label')), LABEL_ANCHOR);
+  // Control: an object whose label is empty is no tag (reported), and the region has no role.
+  const empty = { ...gen(16), body: [gen(16).body[0], { ...gen(16).body[1], value: { label: '' } }] };
+  const e = await placed({ georefs: [ROCQUE], manifests: [ROCQUE_M] }, [empty]);
+  assert.deepEqual(e.of('annotation-body'), ['an empty tag']);
+  assert.equal(e.doc.attestations[0].geometries[0].role, undefined);
+  assert.deepEqual(e.of('annotation-region-no-label-evidence'), [id(16)]);
+});
+test('a curved path as Studio\'s path tool writes it (SvgSelector "M … C … Z") is refused as unplaced geometry with the reason, not crashed on; the same outline in straight lines is placed', async () => {
+  assert.match(gen(11).target.selector.value, /^<svg><path d="M [\d ]+ C [\d ]+ C [\d ]+ L [\d ]+ C [\d ]+ Z" \/><\/svg>$/);
+  const r = await placed({ georefs: [ROCQUE], manifests: [ROCQUE_M] }, [gen(11)]);
+  assert.deepEqual(r.of('annotation-region-unplaced'), [`${id(11)}: an SVG shape on ${CANVAS}: The SVG path uses the command "C", which is not read: only straight lines (M, L, H, V and Z) can be transformed, not curves or arcs`]);
+  assert.ok(!r.of('annotation-region-unplaced')[0].includes(UNEXPECTED), 'refused as data, not a fault in the tools');
+  assert.equal(r.doc.attestations.length, 1, 'still converted');
+  assert.equal(r.attestation(11).geometries, undefined);
+  assert.equal(r.attestation(11).citations[0].locator, 'a shape drawn on the image');
+  // Without georeferences it is a shape reported as before.
+  assert.deepEqual(plainRun([gen(11)]).of('annotation-selector'), ['SvgSelector: the shape drawn on the image']);
+  // Controls. Nantucket lies beyond the control points, so the same corners joined by straight
+  // lines are read and refused for that, not for their shape; moved onto Lake Erie (inside them),
+  // the curve is still refused for its "C", and the straight outline is placed.
+  const withPath = (d) => ({ ...gen(11), target: { ...gen(11).target, selector: { type: 'SvgSelector', value: `<svg><path d="${d}" /></svg>` } } });
+  const kinds = async (d) => (await placed({ georefs: [ROCQUE], manifests: [ROCQUE_M] }, [withPath(d)])).reported.filter(([k]) => k.startsWith('annotation-region')).map(([k]) => k);
+  const STRAIGHT = 'M 6550 5640 L 6725 5642 L 6725 5676 L 6550 5676 Z';
+  assert.deepEqual(await kinds(STRAIGHT), ['annotation-region-beyond-control-points']);
+  const curve = /d="([^"]+)"/.exec(gen(11).target.selector.value)[1];
+  const moved = (d) => d.replace(/(\d+) (\d+)/g, (_, x, y) => `${x - 1430} ${y - 40}`);
+  assert.equal(moved(STRAIGHT), 'M 5120 5600 L 5295 5602 L 5295 5636 L 5120 5636 Z');
+  assert.deepEqual(await kinds(moved(curve)), ['annotation-region-unplaced']);
+  assert.deepEqual(await kinds(moved(STRAIGHT)), ['annotation-region-shape']);
+});
