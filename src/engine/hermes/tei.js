@@ -373,7 +373,6 @@ export class TeiReader {
     this.report = report; this.fileName = fileName; this.countOne = count; this.reading = reading;
     this.entityTable = entities;   // the ISO entity table (loadIsoEntities), for a file naming an outside DTD
     this.ns = undefined; this.teiVariant = undefined;   // the root's namespace; 'p5', 'p4' or 'no-namespace'
-    this.languages = new Map();    // P4: <language id> -> { ident, text }
     this.isoNames = null;          // name -> { set, value }, once the ISO table is installed
     this.isoUsed = new Map();      // set -> Map(name -> count), in the order first used
     this.unknownUsed = new Map();  // name -> count: entities in neither the file nor the ISO table, left out (tei-entity-unknown)
@@ -674,7 +673,8 @@ export class TeiReader {
     // P4's languages, for lang (an IDREF to one): <language id="greek">Greek</language>; an ident, where given, is its tag.
     else if (/profileDesc\/langUsage\/language$/.test(path) && this.teiVariant === 'p4') {
       const id = attr('xml:id'), ident = attr('ident');
-      if (id !== undefined) this.capture((c) => { if (!this.languages.has(id)) this.languages.set(id, { ident, text: this.norm(c.pref) }); });
+      // Each TEI.2's own (in a teiCorpus.2, one text's <language id="x"> is not another's), the first of an id in it winning.
+      if (id !== undefined && h) this.capture((c) => { if (!h.languages.has(id)) h.languages.set(id, { ident, text: this.norm(c.pref) }); });
     }
     else if (/\/prefixDef$/.test(path)) { h.prefixDefs.push({ ident: attr('ident'), match: attr('matchPattern'), replace: attr('replacementPattern') }); this.prefixCache = null; }
   }
@@ -785,7 +785,7 @@ export class TeiReader {
     }
 
     if (SCOPES.has(local)) {
-      this.scopes.push({ hdr: { titles: [], authors: [], editors: [], idnos: [], licences: [], sourceDescs: [], prefixDefs: [], geoDecls: [], queue: [], authorIds: new Set(), authorNames: [] } });
+      this.scopes.push({ hdr: { titles: [], authors: [], editors: [], idnos: [], licences: [], sourceDescs: [], prefixDefs: [], geoDecls: [], languages: new Map(), queue: [], authorIds: new Set(), authorNames: [] } });
       this.prefixCache = null;
       this.page = undefined; this.line = undefined; this.divs = []; this.milestones = new Map();
       return;
@@ -975,15 +975,20 @@ export class TeiReader {
   languageTag(raw) {
     if (raw === undefined || raw === '') return undefined;
     if (this.teiVariant !== 'p4') { if (LANGUAGE_TAG.test(raw)) return raw; this.report('tei-lang-not-tag', raw); return undefined; }
-    const l = this.languages.get(raw);
+    const l = this.language(raw);
     const tag = l?.ident !== undefined && LANGUAGE_TAG.test(l.ident) ? l.ident : LANGUAGE_TAG.test(raw) ? raw : undefined;
     if (tag === undefined) this.report('tei-lang-not-tag', l ? `${raw} (<language id="${raw}">${l.text}</language>)` : `${raw} (no <language id="${raw}"> in the header)`);
     return tag;
   }
+  /** P4: the <language> a lang points to, in the innermost TEI.2 or teiCorpus.2 header that has it. */
+  language(raw) {
+    for (let i = this.scopes.length - 1; i >= 0; i--) { const l = this.scopes[i].hdr.languages.get(raw); if (l) return l; }
+    return undefined;
+  }
   /** P4: whether a lang names Greek, by the tag it resolves to, or the words of its <language> (or its own). */
   isGreek(raw) {
     if (raw === undefined || raw === '') return false;
-    const l = this.languages.get(raw);
+    const l = this.language(raw);
     const tag = l?.ident !== undefined && LANGUAGE_TAG.test(l.ident) ? l.ident : raw;
     return GREEK_TAG.test(tag) || GREEK_WORDS.test(raw) || (!!l && GREEK_WORDS.test(l.text));
   }

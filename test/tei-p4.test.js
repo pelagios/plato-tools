@@ -290,3 +290,24 @@ test('a file naming an outside DTD that already holds U+FDD0 or U+FDD1 is refuse
   assert.deepEqual(names(mapped(P5(OUTSIDE, pn('Roma')))), ['Roma']);
   assert.deepEqual(names(mapped(P5('<!DOCTYPE TEI SYSTEM "tei_all.dtd" [<!ENTITY m "m">]>', pn('Ro&m;a')))), ['Roma']);
 });
+
+// ---- a teiCorpus.2's languages: each TEI.2's own -----------------------------------------------------------
+const tei2 = (title, langs, body) => `<TEI.2><teiHeader><fileDesc><titleStmt><title>${title}</title></titleStmt></fileDesc><profileDesc><langUsage>${langs}</langUsage></profileDesc></teiHeader><text><body><p>${body}</p></body></text></TEI.2>`;
+const corpus2 = (langs, ...texts) => `<?xml version="1.0"?>\n<teiCorpus.2><teiHeader><fileDesc><titleStmt><title>C</title></titleStmt></fileDesc>${langs ? `<profileDesc><langUsage>${langs}</langUsage></profileDesc>` : ''}</teiHeader>${texts.join('')}</teiCorpus.2>`;
+test('in a teiCorpus.2, each TEI.2\'s <language id> is its own: the same id resolves to each text\'s language', () => {
+  const m = mapped(corpus2('',
+    tei2('One', '<language id="x" ident="la">Latin</language>', '<placeName lang="x" key="tgn,7000874">Roma</placeName>'),
+    tei2('Two', '<language id="x" ident="grc">Greek</language>', '<placeName lang="x" key="tgn,7001393">Ἀθῆναι</placeName>')), KEYS);
+  assert.deepEqual(m.doc.attestations.map((a) => [a.names[0].toponym, a.names[0].language, a.citations[0].source.title]), [['Roma', 'la', 'One'], ['Ἀθῆναι', 'grc', 'Two']]);
+  // And an id a later text does not declare is not the earlier text's: there it is not resolved.
+  const later = mapped(corpus2('',
+    tei2('One', '<language id="x" ident="la">Latin</language>', '<placeName lang="x" key="tgn,7000874">Roma</placeName>'),
+    tei2('Two', '', '<placeName lang="x" key="tgn,7000874">Roma</placeName>')), KEYS);
+  assert.deepEqual(later.doc.attestations.map((a) => a.names[0].language), ['la', undefined]);
+  assert.deepEqual(examples(later, 'tei-lang-not-tag'), ['x (no <language id="x"> in the header)']);
+  // Control: the corpus's own header's languages hold for every text in it.
+  const shared = mapped(corpus2('<language id="x" ident="la">Latin</language>',
+    tei2('One', '', '<placeName lang="x" key="tgn,7000874">Roma</placeName>'),
+    tei2('Two', '', '<placeName lang="x" key="tgn,7000874">Roma</placeName>')), KEYS);
+  assert.deepEqual(shared.doc.attestations.map((a) => a.names[0].language), ['la', 'la']);
+});
