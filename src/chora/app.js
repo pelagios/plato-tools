@@ -18,6 +18,8 @@ import * as remote from './remote.js';
 import * as georef from '../engine/georef/index.js';
 import * as tracing from '../engine/chora/trace.js';
 import { DataError } from '../engine/input.js';
+// The tools' own version, for the notes of a shape traced with assistance.
+import { version as toolsVersion } from '../../package.json';
 
 const $ = (id) => document.getElementById(id);
 const state = (window.__chora = { phase: 'loading', placeId: null, pendingCount: 0, basemap: null, mapReadyCount: 0, blocked: 0, lastSave: null, overlays: [] });
@@ -199,6 +201,7 @@ function pendingItem(d) {
     ${from}
     <label>What it marks <select data-field="role"><option value="">Not said</option>${opt(roles, d.role, (r) => (r === 'LabelAnchor' ? 'where the map writes its name' : ROLE_WORDS[r] || r))}</select></label>
     <label>How well known <select data-field="precision"><option value="">Not said</option>${opt(PRECISIONS, d.precision, (p) => p.replace('_', ' '))}</select></label>
+    ${d.trace?.assisted ? `<p class="muted" data-assisted>Traced with assistance from: ${esc(d.trace.title || 'a historical map')}</p>` : d.assistedUncited ? `<p class="muted" data-assisted>Proposed from the ink of: ${esc(d.assistedUncited.from || 'a historical map')} (not cited)</p>` : ''}
     ${d.traceNote ? `<p class="note" data-trace-note>${esc(d.traceNote)}</p>` : ''}
     <button type="button" data-remove>Remove</button></li>`;
 }
@@ -283,13 +286,18 @@ function onFinish(id, ctx) {
     if (existing.trace) traceDraft(existing, { only: existing.trace.key, reshaped: true });
     return;
   }
+  const d = newDraft(id, geojson);
+  if (layers?.entries.length) traceDraft(d);
+}
+/** A drawing made now (by hand, or accepted from a trace), for the place chosen: kept, and listed. */
+function newDraft(id, geojson, extra = {}) {
   // The basemap drawn on goes into the published notes: a built-in one by name, a pasted one not (its site may be private).
   const d = { id: String(id), placeId: state.placeId, placeLabel: view?.label || '', geojson, role: '', precision: '',
-    basemap: basemaps.drawnOn(basemaps.byId(state.basemap)), zoom: mapApi.zoom(), drawnAt: new Date().toISOString() };
+    basemap: basemaps.drawnOn(basemaps.byId(state.basemap)), zoom: mapApi.zoom(), drawnAt: new Date().toISOString(), ...extra };
   drafts.push(d);
   keepDrafts();
   renderCard();
-  if (layers?.entries.length) traceDraft(d);
+  return d;
 }
 
 // ---- Tracing from a historical map ---------------------------------------------------------------
@@ -298,8 +306,15 @@ function onFinish(id, ctx) {
 // user choose another map it lies on, or the basemap. Its citations are made when it is saved. A point
 // traced is, until the user says otherwise, a representative point whose position is approximate.
 const traceTickets = new Map();   // draft id -> the latest tracing asked for it (an older answer is let go)
+/** The notes shown on a drawing's card: what accepting it did, then what tracing it says (either may be none). */
+const joinNotes = (d, note) => [d.acceptNote, note].filter(Boolean).join(' ') || null;
 function dropTrace(d, note) {
-  d.trace = null; d.traceNote = note;
+  // A shape proposed from a map's ink is still that, cited from the map or not: what was proposed is kept
+  // (its notes say it, and that the map is not cited), and is cited again if it is traced from the map again.
+  const assisted = d.trace?.assisted || d.assistedPending || d.assistedUncited || null;
+  if (assisted) d.assistedUncited = { ...assisted, from: d.trace?.title ?? assisted.from ?? null };
+  delete d.assistedPending;
+  d.trace = null; d.traceNote = joinNotes(d, note);
   if (d.role === 'LabelAnchor') d.role = '';
   // The defaults were for a point traced from a map: drawn on the basemap, it says nothing of itself.
   if (d.defaulted) { d.role = ''; d.precision = ''; d.defaulted = false; }
@@ -324,7 +339,7 @@ async function traceDraft(d, { only = null, reshaped = false } = {}) {
     if (!only) d.traceOptions = pick.candidates.map((k) => ({ key: k, title: maps.find((m) => m.key === k)?.title || null }));
     const skipped = pick.skipped.map((x) => `${maps.find((m) => m.key === x.key)?.title || 'a map'}: ${x.reason}`).join(' ');
     if (!pick.chosen) {
-      if (was) note = `${reshaped ? 'Moved' : 'It lies'} off “${was.title || 'the map'}”, the map it was traced from, so it no longer cites that map${skipped ? ` (${skipped})` : ''}; it is saved as drawn on the basemap.`;
+      if (was) note = `${reshaped ? 'Moved' : 'It lies'} off “${was.title || 'the map'}”, the map it was traced from, so it no longer cites that map${skipped ? ` (${skipped})` : ''}; ${was.assisted ? 'its notes say it was proposed from that map\'s ink, and that the map is not cited.' : 'it is saved as drawn on the basemap.'}`;
       else if (skipped) note = `Not cited as traced from a historical map: ${skipped}`;
       dropTrace(d, note);
     } else {
@@ -332,8 +347,12 @@ async function traceDraft(d, { only = null, reshaped = false } = {}) {
       try {
         const t = await tracing.traceFor(e.g, d.geojson, { key: e.key, title: e.title, partial: pick.chosen.partial, fetchedAt: e.fetchedAt, licence: e.attribution?.licence || null });
         if (traceTickets.get(d.id) !== ticket || !drafts.includes(d)) return;
-        d.trace = t;
-        d.traceNote = pick.chosen.partial ? `Part of it lies outside “${e.title}”, the map it is cited as traced from.` : null;
+        // A shape traced with assistance keeps what was proposed, traced again or not (its notes count the edits).
+        const back = d.assistedUncited ? (({ from, ...rest }) => rest)(d.assistedUncited) : null;
+        const assisted = was?.assisted || d.assistedPending || back || null;
+        d.trace = assisted ? { ...t, assisted } : t;
+        delete d.assistedPending; delete d.assistedUncited;
+        d.traceNote = joinNotes(d, pick.chosen.partial ? `Part of it lies outside “${e.title}”, the map it is cited as traced from.` : null);
         if (!d.traceOptions?.some((o) => o.key === e.key)) d.traceOptions = [...(d.traceOptions || []), { key: e.key, title: e.title }];
         if (d.geojson.type === 'Point' && !d.role && !d.precision) Object.assign(d, tracing.TRACED_POINT_DEFAULTS, { defaulted: true });
       } catch (err) {
@@ -373,11 +392,69 @@ function keepDrafts() {
   showSaving();
 }
 $('draw-tools').onclick = (e) => {
+  // A Trace button not yet usable says why in its tooltip (aria-disabled, not disabled, so that it can be focused and its tooltip read).
+  const t = e.target.closest('button[data-trace]');
+  if (t) { if (t.getAttribute('aria-disabled') !== 'true') setTraceMode(t.getAttribute('aria-pressed') === 'true' ? null : t.dataset.trace); return; }
   const b = e.target.closest('button[data-mode]');
   if (!b) return;
+  if (inkTools?.mode) setTraceMode(null);
   mapApi.setMode(b.dataset.mode);
   for (const x of $('draw-tools').querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b && b.dataset.mode !== 'static'));
+  // Snapping to the ink is offered while drawing a line or an area by hand over a historical map.
+  $('snap-ink-label').hidden = !['linestring', 'polygon'].includes(b.dataset.mode) || !traceReady();
 };
+
+// ---- Tracing with assistance (src/chora/ink.js, loaded when first wanted) ------------------------------
+// "Trace area" and "Trace line" propose a shape from a historical map's own pixels; they are offered once
+// a map shown has drawn a tile (its image server lets this page read it), and say why not until then.
+let inkTools = null, inkLoading = null;
+function loadInk() {
+  inkLoading ??= import('./ink.js').then((m) => (inkTools = m.createInk({ mapApi, state, overlayAt, onAccept: acceptTraced, panel: $('ink-panel') })))
+    .catch((e) => { inkLoading = null; throw e; });
+  return inkLoading;
+}
+const traceReady = () => state.overlays.some((o) => o.visible && o.firstTile);
+/** The map shown at a place (the topmost whose mask holds it, of those drawn), or null. */
+async function overlayAt(lngLat) {
+  if (!layers) return null;
+  const drawn = layers.ordered().filter((e) => e.visible && state.overlays.find((o) => o.key === e.key)?.firstTile);
+  const pick = await tracing.pickOverlay(drawn.map((e) => ({ key: e.key, g: e.g, visible: true })), { type: 'Point', coordinates: [lngLat.lng, lngLat.lat] });
+  return pick.chosen ? drawn.find((e) => e.key === pick.chosen.key) || null : null;
+}
+function updateTraceButtons() {
+  const ready = traceReady();
+  const failed = state.overlays.find((o) => o.visible && !o.firstTile && o.tileErrors);
+  const why = ready ? null : failed ? `The image of “${failed.title}” could not be read from ${failed.origin}, so it cannot be traced` : 'Show a historical map to trace from it';
+  for (const b of $('draw-tools').querySelectorAll('button[data-trace]')) {
+    b.setAttribute('aria-disabled', String(!ready));
+    b.dataset.tip = why || (b.dataset.trace === 'area' ? 'Click inside an area of the map: its outline is proposed' : 'Click on a line of the map: it is followed both ways and proposed');
+  }
+  state.traceReady = ready; state.traceWhy = why;
+  if (!ready && inkTools?.mode) setTraceMode(null);
+  if (!ready) $('snap-ink-label').hidden = true;
+}
+async function setTraceMode(m) {
+  for (const x of $('draw-tools').querySelectorAll('button')) x.setAttribute('aria-pressed', String(!!m && x.dataset.trace === m));
+  $('snap-ink-label').hidden = true;
+  mapApi.setMode('static');
+  mapApi.setTracing(!!m);
+  if (!m && !inkTools) return;
+  try { (await loadInk()).setMode(m); } catch (e) { drawError = state.drawError = `Tracing could not start (${e.message}).`; if (view) renderCard(); }
+}
+$('snap-ink').onchange = async (e) => { try { (await loadInk()).setSnap(e.target.checked); } catch {} };
+/**
+ * A proposal accepted: an ordinary drawing, cited from the map it was traced from, its round trip checked.
+ * Returns null when it is a drawing now, else why not in words (the proposal is then kept).
+ */
+function acceptTraced({ geometry, key, assisted, note }) {
+  if (!state.placeId) return 'Choose a place first (a drawing is added to the place chosen), then press Enter again: the proposal is kept until then.';
+  const [res] = mapApi.draw.addFeatures([{ type: 'Feature', geometry, properties: { mode: geometry.type === 'Polygon' ? 'polygon' : 'linestring' } }]);
+  if (!res?.valid) { drawError = state.drawError = `The shape could not be made a drawing (${res?.reason || 'refused'}).`; if (view) renderCard(); return drawError; }
+  // What accepting did to it (its holes left out) is kept apart from what tracing says, so neither replaces the other.
+  const d = newDraft(res.id, geometry, { assistedPending: assisted, ...(note ? { acceptNote: note, traceNote: note } : {}) });
+  traceDraft(d, { only: key });
+  return null;
+}
 
 // ---- Saving --------------------------------------------------------------------------------------
 function showSaving() {
@@ -427,7 +504,9 @@ async function saveDataset() {
     // A traced drawing cites the map and its georeference, and says so in its notes (trace.js).
     additions = drafts.map((d) => ({ placeId: d.placeId, attestation: newGeometryAttestation({
       geojson: d.geojson, role: d.role || undefined, precision: d.precision || undefined, contributor, created: d.drawnAt,
-      ...(d.trace ? tracing.tracedParts(d.trace, { zoom: d.zoom, role: d.role }) : { notes: choraDrawingNote({ basemap: d.basemap, zoom: d.zoom }) }) }) }));
+      ...(d.trace ? tracing.tracedParts(d.trace, { zoom: d.zoom, role: d.role, geometry: d.geojson, version: toolsVersion })
+        : d.assistedUncited ? tracing.uncitedParts(d.assistedUncited, { zoom: d.zoom, geometry: d.geojson, version: toolsVersion })
+        : { notes: choraDrawingNote({ basemap: d.basemap, zoom: d.zoom }) }) }) }));
   } catch (e) { $('save-result').innerHTML = `<p class="warn">${esc(e.message)}</p>`; return; }
   const savedIds = new Set(drafts.map((d) => d.id));
   $('save').disabled = true;
@@ -764,10 +843,13 @@ function overlayEvent(type, e) {
   const ids = e?.mapIds || (e?.mapId ? [e.mapId] : []);
   for (const o of state.overlays) {
     if (ids.length && !ids.includes(o.mapId)) continue;
-    if (type === 'maptileloaded') o.tilesLoaded++;
-    else if (type === 'firstmaptileloaded') o.firstTile = true;
+    // A map has drawn once a tile of it has loaded. The renderer's firstmaptileloaded comes only when the
+    // first tile it asked for loads (render 1.0.0-beta.84, TileCache.tileFetched): when that one is refused
+    // and others load, it never comes; so any tile loaded counts.
+    if (type === 'maptileloaded') { o.tilesLoaded++; if (!o.firstTile) { o.firstTile = true; updateTraceButtons(); } }
+    else if (type === 'firstmaptileloaded') { o.firstTile = true; updateTraceButtons(); }
     else if (type === 'allrequestedtilesloaded') o.allLoaded = (o.allLoaded || 0) + 1;
-    else if (type === 'tilefetcherror' || type === 'imageinfofetcherror') { o.tileErrors++; renderMapsSoon(); }
+    else if (type === 'tilefetcherror' || type === 'imageinfofetcherror') { o.tileErrors++; renderMapsSoon(); updateTraceButtons(); }
   }
 }
 // A tile the renderer's worker could not fetch (refused by the page's policy, say, when its server
@@ -782,7 +864,7 @@ function overlayEvent(type, e) {
         const m = a && a.name === 'ResourceFetchError' && /(https?:\/\/\S+)/.exec(String(a.message));
         const tile = m && m[1].replace(/[)(.,]+$/, '');
         const o = tile && state.overlays.find((x) => tile.startsWith(`${x.service}/`));
-        if (o) { o.tileErrors++; renderMapsSoon(); }
+        if (o) { o.tileErrors++; renderMapsSoon(); updateTraceButtons(); }
       }
     } catch {}
     toConsole(...args);
@@ -858,7 +940,7 @@ $('overlay-list').addEventListener('input', (e) => {
 $('overlay-list').addEventListener('change', (e) => {
   const li = e.target.closest('[data-overlay]'); if (!li) return;
   const o = state.overlays.find((x) => x.key === li.dataset.overlay);
-  if (e.target.matches('[data-show]')) { o.visible = e.target.checked; layers.set(o.key, { visible: o.visible }); keepOverlay(o); }
+  if (e.target.matches('[data-show]')) { o.visible = e.target.checked; layers.set(o.key, { visible: o.visible }); keepOverlay(o); updateTraceButtons(); }
 });
 $('overlay-list').addEventListener('click', (e) => {
   const li = e.target.closest('[data-overlay]'); if (!li) return;
@@ -867,7 +949,7 @@ $('overlay-list').addEventListener('click', (e) => {
   if (e.target.matches('[data-fit]')) fitMap(key);
   if (e.target.matches('[data-remove-map]')) {
     layers.remove(key);
-    ov.letGo(key).then(() => { state.overlays = state.overlays.filter((x) => x.key !== key); renderMaps(); });
+    ov.letGo(key).then(() => { state.overlays = state.overlays.filter((x) => x.key !== key); renderMaps(); updateTraceButtons(); });
   }
 });
 async function keepOverlay(o) {
@@ -902,7 +984,7 @@ function permissionsChanged() {
   if (!layers) return;
   const gone = state.overlays.filter((o) => { const [c, sj] = o.permission.split(/:(.*)/s); return !permissions.allowed(c, sj); });
   for (const o of gone) layers.remove(o.key);
-  if (gone.length) { state.overlays = state.overlays.filter((o) => !gone.includes(o)); state.withdrawn = (state.withdrawn || 0) + gone.length; }
+  if (gone.length) { state.overlays = state.overlays.filter((o) => !gone.includes(o)); state.withdrawn = (state.withdrawn || 0) + gone.length; updateTraceButtons(); }
   // Withdrawn, not refused: its line is drawn now, before the panel is (the module tells the page first),
   // so that the permission stays in the panel's list, where it was just changed. The maps kept refine it.
   const undecided = gone.map((o) => o.permission.split(/:(.*)/s).slice(0, 2)).filter(([c, sj]) => permissions.state(c, sj) === 'undecided');
@@ -963,6 +1045,9 @@ mapApi.onDraw({
   },
 });
 initMaps();
+updateTraceButtons();
+// A click on the map while tracing is the trace's (Shift-click carries a line on).
+mapApi.map.on('click', (e) => { if (inkTools?.mode) inkTools.click(e.lngLat, [e.point.x, e.point.y], !!e.originalEvent?.shiftKey); });
 // A permission changed: maps whose permission is withdrawn go at once; maps waiting on one go on.
 permissions.onChange(permissionsChanged);
 // The map and the drawing tool, for automated tests; nothing else reads them.
@@ -994,6 +1079,8 @@ permissions.onBeforeReload(() => {}, { loses: () => {
 } });
 permissions.onBeforeReload(() => {}, { loses: () => ($('paste')?.value.trim() ? RELOAD_LOSES.pasted : null) });
 permissions.onBeforeReload(() => {}, { loses: () => (state.phase === 'saving' ? RELOAD_LOSES.saving : null) });
+// A shape proposed from a map's ink and not yet accepted (RELOAD_LOSES.tracing, R2).
+permissions.onBeforeReload(() => {}, { loses: () => (inkTools?.proposal ? RELOAD_LOSES.tracing : null) });
 // Who was remembered, checked again (contributor.load): what is kept is written back as checked, so that an ORCID
 // that is not one, however it got into this browser's storage, is neither shown, saved nor listed in the panel.
 try { const c = contributors.load(); if (c) contributors.remember(c); else if (localStorage.getItem('chora-contributor') !== null) contributors.forget(); } catch { /* storage refused: nothing kept */ }

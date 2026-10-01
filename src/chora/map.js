@@ -66,6 +66,9 @@ export function createMap(container, { state, onPlaceClick, onStyleError }) {
   // What Chora draws, kept here so that it can be put back when the basemap (the style) changes.
   const data = { overview: EMPTY, place: EMPTY, context: EMPTY };
   let draw = null, drawHandlers = {}, drawnKeep = [];
+  // Snapping a vertex drawn by hand (src/chora/ink.js's "Snap to ink"): Terra Draw asks for it on every move.
+  let snapHook = null, tracing = false;
+  const snapping = { toCustom: (event, context) => (snapHook ? snapHook(event, context) : undefined) };
 
   function addOwnLayers() {
     map.addSource('chora-overview', { type: 'geojson', data: data.overview, cluster: true, clusterRadius: 36, clusterMaxZoom: 11 });
@@ -114,7 +117,7 @@ export function createMap(container, { state, onPlaceClick, onStyleError }) {
   function startDraw() {
     draw = new TerraDraw({
       adapter: new TerraDrawMapLibreGLAdapter({ map }),
-      modes: [new TerraDrawPointMode(), new TerraDrawLineStringMode(), new TerraDrawPolygonMode(),
+      modes: [new TerraDrawPointMode(), new TerraDrawLineStringMode({ snapping }), new TerraDrawPolygonMode({ snapping }),
         new TerraDrawSelectMode({ flags: Object.fromEntries(['point', 'linestring', 'polygon'].map((m) => [m, { feature: { draggable: true, coordinates: m === 'point' ? undefined : { midpoints: true, draggable: true, deletable: true } } }])) })],
     });
     draw.start();
@@ -122,7 +125,8 @@ export function createMap(container, { state, onPlaceClick, onStyleError }) {
     if (drawnKeep.length) draw.addFeatures(drawnKeep);
     drawnKeep = [];
   }
-  const drawing = () => draw && !['static', 'select'].includes(draw.getMode());
+  // Drawing, or tracing (a click on the map is then the trace's, not a place's).
+  const drawing = () => tracing || (draw && !['static', 'select'].includes(draw.getMode()));
 
   let styleVersion = 0;
   const styleHooks = [];
@@ -167,7 +171,16 @@ export function createMap(container, { state, onPlaceClick, onStyleError }) {
     // Drawing, for app.js.
     onDraw(handlers) { drawHandlers = handlers; if (draw) for (const [ev, fn] of Object.entries(handlers)) draw.on(ev, fn); },
     get draw() { return draw; },
-    setMode(mode) { if (draw) draw.setMode(mode); container.classList.toggle('drawing', !['static', 'select'].includes(mode)); },
+    /** The function Terra Draw asks for a snapped position (src/chora/ink.js), or null for none. */
+    setSnap(fn) { snapHook = fn; },
+    /** While tracing, clicks on the map are the trace's: places are not opened, and the cursor is a cross. */
+    setTracing(on) {
+      tracing = !!on;
+      container.classList.toggle('drawing', tracing || (draw && !['static', 'select'].includes(draw.getMode())));
+      // Shift-click carries a traced line on: MapLibre's Shift-drag zoom to a box is off meanwhile.
+      if (tracing) map.boxZoom.disable(); else map.boxZoom.enable();
+    },
+    setMode(mode) { if (draw) draw.setMode(mode); container.classList.toggle('drawing', tracing || !['static', 'select'].includes(mode)); },
     /** Show these drafts (and only these) as editable drawings. */
     showDrafts(drafts) {
       const features = drafts.map((d) => ({ type: 'Feature', id: d.id, geometry: d.geojson, properties: { mode: MODE_OF[d.geojson.type] } }));

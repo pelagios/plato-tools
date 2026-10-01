@@ -98,7 +98,11 @@
       <button type="button" data-mode="polygon" data-tip="Draw an area: click each corner, and click the first one again to finish">Area</button>
       <button type="button" data-mode="select" data-tip="Select a drawing to move or reshape it">Edit</button>
       <button type="button" data-mode="static" data-tip="Stop drawing">Stop</button>
+      <button type="button" data-trace="area" aria-disabled="true" data-tip="Show a historical map to trace from it">Trace area</button>
+      <button type="button" data-trace="line" aria-disabled="true" data-tip="Show a historical map to trace from it">Trace line</button>
+      <label class="snap-ink" id="snap-ink-label" hidden><input type="checkbox" id="snap-ink" data-tip="A vertex placed within 10 screen pixels of the map's ink goes onto it (hold Alt not to)"> Snap to ink</label>
     </div>
+    <div class="ink-panel" id="ink-panel" role="group" aria-label="Tracing from the map's ink" hidden></div>
     <details class="basemaps" id="basemaps">
       <summary>Basemap: <span id="basemap-name">Natural Earth (this site)</span></summary>
       <div id="basemap-options"></div>
