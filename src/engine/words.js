@@ -313,7 +313,7 @@ export const KRISIS_TEXT = {
   /** A mapping of a table's columns given to finish a review is not the one the review was made with. */
   columnsDiffer: 'The columns of your table are read as given now, which is not how they were read when matching: the places may not be the ones the review was made of. Use the same matching of columns as when matching.',
   /** A mapping of a table's columns given to match by is not one a work file can keep. */
-  columnsNotAMapping: 'The matching of columns given is not one: it must be {"column name": "field"}, each column given the name of a field.',
+  columnsNotAMapping: 'The matching of columns given is not one: it must be {"column name": "field"}, each column given the name of a field (or, made into web addresses, {"field": "address", "pattern": "…{id}…"}).',
   /** The version check does not find every new attestation in the dataset written. */
   notAllAdded: (made, added) => `The review made ${plural(made, 'new attestation')}, but the version check finds ${plural(added || 0, 'attestation')} added to the dataset written, which is a fault in the tools (please report it); nothing was written.`,
 };

@@ -133,15 +133,15 @@ function start(action, earlier) {
     (e) => fail(`the list of places to include could not be read (${e.message || e}).`));
   // Match review (Krisis): the files chosen are the subjects, and `earlier` the other dataset; to finish, the review is applied to them.
   // A table of places is matched by the matching of its columns shown, as chosen (Hermes), which the work file keeps for finishing.
-  else if (action === 'match') worker.postMessage({ cmd: 'match', subjects: files, others: earlier, options: { ...matchOptions(), base, ...(isTable(input) && columns ? { columns: { ...columns.mapping } } : {}) } });
+  else if (action === 'match') worker.postMessage({ cmd: 'match', subjects: files, others: earlier, options: { ...matchOptions(), base, ...(isTable(input) && columns ? { columns: columnOptions() } : {}) } });
   // The title in the options is cited only when the review has none but a file's name: one left there from an earlier match must not replace the review's own.
   else if (action === 'apply') worker.postMessage({ cmd: 'apply', subjects: files, work, options: { output: earlier, reviewer: reviewer(), othersTitle: work.others?.titleFrom === 'file-name' ? matchOptions().othersTitle : undefined, base,
     // A table is finished by the review's own matching of its columns, unless another has been loaded since: that is sent, and said to differ.
-    ...(isTable(input) && columns && reviewMapping !== undefined && mappingText(columns.mapping) !== reviewMapping ? { columns: { ...columns.mapping } } : {}) } });
+    ...(isTable(input) && columns && reviewMapping !== undefined && mappingText(columnOptions()) !== reviewMapping ? { columns: columnOptions() } : {}) } });
   else worker.postMessage({ cmd: 'run', files, action, target, options: { base, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked,
     // Hermes: the matching of columns shown, as chosen (the same JSON as the command line's --columns,
     // a pattern column in its object form), and the reading options chosen.
-    ...(isTable(input) && columns ? { columns: mappingToSave(columns.mapping, columns.patterns) } : {}), ...readingOptions() } });
+    ...(isTable(input) && columns ? { columns: columnOptions() } : {}), ...readingOptions() } });
 }
 // Agora's options, from the Options panel: only those given are sent.
 function publishOptions() {
@@ -234,6 +234,8 @@ let columns = null, columnsAsked = 0, columnsFrom, columnsSaved;
 let reviewColumnsAsked = 0, reviewMapping;
 // A matching as text, in the file's order, to compare two by.
 const mappingText = (m) => JSON.stringify(columns.headers.map((h) => [h, m[h]]));
+// The column options a run is given (Hermes's run, Krisis's match and finish): the matching shown, a pattern column in its object form.
+const columnOptions = () => mappingToSave(columns.mapping, columns.patterns);
 const isTable = (inp) => inp?.format === 'csv' || inp?.format === 'geojson';
 function requestColumns(saved, from) {
   const id = ++columnsAsked;
@@ -261,7 +263,7 @@ function onColumns(d) {
   columns.messages = d.saved ? [W.loaded(columnsFrom || ''), ...d.problems.map(columnProblem)] : [];
   renderColumns();
   // Krisis: the matching a resumed review was made with, as read for the file chosen, is the one its Finish compares with.
-  if (d.id === reviewColumnsAsked) { reviewMapping = mappingText(columns.mapping); state.reviewColumns = Object.assign(Object.create(null), columns.mapping); }
+  if (d.id === reviewColumnsAsked) { reviewMapping = mappingText(columnOptions()); state.reviewColumns = Object.assign(Object.create(null), columns.mapping); }
   gateOnColumns();
 }
 function choiceOptions(chosen) {
@@ -682,7 +684,7 @@ function beginReview(w, name, { focus = true } = {}) {
   if (work.reviewer?.name && !reviewer()) { $('reviewer').value = work.reviewer.name; $('orcid').value = work.reviewer.orcid || ''; }
   $('review').hidden = false; showWarning('');
   // The matching of columns a review is finished by is the one shown when it begins: after Match, the one it was matched by.
-  reviewColumnsAsked = 0; reviewMapping = isTable(input) && columns ? mappingText(columns.mapping) : undefined;
+  reviewColumnsAsked = 0; reviewMapping = isTable(input) && columns ? mappingText(columnOptions()) : undefined;
   lockColumns();
   askName(!reviewer() && order.length > 0);
   goTo(cursor, focus);

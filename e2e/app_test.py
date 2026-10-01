@@ -519,6 +519,39 @@ def krisis_case(page, tmp):
 
 GEOREF = ROOT / 'test/fixtures/hermes-detect/loc-chesapeake-annotationpage.json'
 
+def krisis_pattern_match(page, tmp):
+    """Krisis with a Hermes column pattern: a CSV column of Pleiades ids, its suggested pattern ticked,
+    is matched by the same column options a Hermes run is given, so the review's places are the
+    pattern-built Pleiades addresses; unticked (the control), they are not."""
+    table = tmp / 'krisis-pleiades.csv'; others = tmp / 'krisis-pleiades-others.json'
+    table.write_text('id,name,pleiades_id,lat,lon\n1,Athenae,579885,37.97,23.72\n2,Roma,423025,41.89,12.49\n')
+    b = 'https://example.org/b/'
+    others.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': b, 'title': 'Their places'}, 'spatialEntities': [
+        krisis_place(b + 'athens', 'Athenae', 23.72, 37.97), krisis_place(b + 'rome', 'Roma', 12.49, 41.89)]}))
+    def matched(tick):
+        try:
+            page.reload(); r = wait_state(page, lambda s: s.get('phase') == 'ready', 30, 'ready')
+            if r.get('phase') != 'ready': return {'ready': r.get('phase')}
+            page.evaluate("() => { document.getElementById('base').value = 'https://example.org/a/'; }")
+            page.set_input_files('#picker', [str(table)])
+            s = wait_state(page, lambda s: (s.get('columns') or {}).get('mapping'), 60, 'columns')
+            if not (s.get('columns') or {}).get('mapping'): return {'columns': None}
+            if tick: page.locator('#columns input[data-pattern-column]').check()
+            page.wait_for_function("() => !document.getElementById('match').disabled", timeout=30_000)
+            page.set_input_files('#others', [str(others)])
+            s = wait_state(page, lambda s: s.get('phase') in ('reviewing', 'error'), 120, 'matching')
+            w = s.get('work') or {}
+            return {'phase': s.get('phase'), 'sources': sorted(c['candidate_source'] for c in w.get('candidates', [])),
+                    'columns': (w.get('match_parameters') or {}).get('columns')}
+        except Exception as e: return {'error': str(e).split('\n')[0][:200]}
+    on, off = matched(True), matched(False)
+    pattern = 'https://pleiades.stoa.org/places/{id}'
+    check('match review: a CSV column with a confirmed Pleiades pattern is matched by the pattern-built addresses, kept in the work file; unconfirmed, it is not',
+          on.get('phase') == 'reviewing' and on.get('sources') == ['https://pleiades.stoa.org/places/423025', 'https://pleiades.stoa.org/places/579885']
+          and (on.get('columns') or {}).get('pleiades_id') == {'field': 'address', 'pattern': pattern}
+          and off.get('phase') == 'reviewing' and len(off.get('sources') or []) == 2 and not any('pleiades' in x for x in off['sources'])
+          and (off.get('columns') or {}).get('pleiades_id') == 'note', {'on': on, 'off': off})
+
 def krisis_seams(page, tmp, subjects):
     """Where Hermes's readers meet Krisis: a refused file as the other dataset, and a table's columns as chosen."""
     # A IIIF Georeference Annotation as the other dataset is refused with its reason, as a finding,
@@ -1582,6 +1615,7 @@ def main():
                   {'placed': s1.get('phase'), 'shown': said1, 'anchors': len(anchors), 'alone': s2.get('phase'), 'geoms alone': len(geoms2)})
             reading_checks(page, tmp)
             krisis_case(page, tmp)
+            krisis_pattern_match(page, tmp)
 
             # The storage warning (src/app.js, storageCheck): shown when the browser's quota is below
             # what the tables need, and hidden, the control, with the same tables and the real quota.

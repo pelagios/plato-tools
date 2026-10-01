@@ -429,6 +429,46 @@ test('match refuses a mapping of columns that is not one before anything is writ
   assert.deepEqual(readWork(serialiseWork(ok.work)).match_parameters.columns, MAPPING, 'control: a mapping that is one is kept and read back');
 });
 
+// A column of a gazetteer's ids made into web addresses through a pattern confirmed on the page (Hermes's
+// object form, which the page sends to Match and Finish as it does to a Hermes run): the review's places
+// are the pattern-built addresses, the work file keeps the pattern, and apply re-reads the table by it.
+const PLEIADES_CSV = 'id,name,pleiades_id,lat,lon\n1,Athenae,579885,37.97,23.72\n2,Roma,423025,41.89,12.49\n';
+const PLEIADES_PATTERN = 'https://pleiades.stoa.org/places/{id}';
+const PATTERNED = { id: 'id', name: 'name', pleiades_id: { field: 'address', pattern: PLEIADES_PATTERN }, lat: 'latitude', lon: 'longitude' };
+const greekOthers = () => ({ profile: 'place-centric', gazetteer: { '@id': X + 'b', title: 'Dataset B' }, spatialEntities: [
+  place('b', 'athens', 'Athenae', [at(23.72, 37.97)]), place('b', 'rome', 'Roma', [at(12.49, 41.89)])] });
+test('a confirmed gazetteer pattern in the column options makes the review\'s places its web addresses, is kept in the work file, and is what apply reads by', async () => {
+  const subjects = await detect([textFile(PLEIADES_CSV, 'greek.csv')]);
+  const others = await detect([json(greekOthers(), 'b.json')]);
+  const mapped = await match({ subjects, others, options: { base: X + 'a/', columns: PATTERNED } }, env());
+  assert.deepEqual(mapped.work.candidates.map((c) => c.candidate_source).sort(), ['https://pleiades.stoa.org/places/423025', 'https://pleiades.stoa.org/places/579885']);
+  // control: the same mapping without the pattern (the column a note) matches the rows by the base address, as before
+  const plain = await match({ subjects, others, options: { base: X + 'a/', columns: { ...PATTERNED, pleiades_id: 'note' } } }, env());
+  assert.deepEqual(plain.work.candidates.map((c) => c.candidate_source).sort(), [X + 'a/place/1', X + 'a/place/2']);
+  // The work file keeps the pattern and is read back with it; one of plain fields is still read (control).
+  assert.deepEqual(readWork(serialiseWork(mapped.work)).match_parameters.columns, PATTERNED);
+  assert.deepEqual(readWork(serialiseWork(plain.work)).match_parameters.columns, { ...PATTERNED, pleiades_id: 'note' });
+  for (const bad of [{ field: 'address' }, { field: 'address', pattern: 5 }, { field: 'address', pattern: PLEIADES_PATTERN, x: 1 }]) {
+    const w = JSON.parse(serialiseWork(mapped.work)); w.match_parameters.columns = { ...PATTERNED, pleiades_id: bad };
+    assert.throws(() => readWork(w), (e) => e instanceof DataError && /columns/.test(e.message), JSON.stringify(bad));
+  }
+  // Finished by the recorded options, the dataset's places are the pattern-built addresses and the version check sees one change, not false ones.
+  const work = readWork(serialiseWork(mapped.work));
+  decide(work, work.candidates.find((c) => c.candidate_source.endsWith('/579885')).id, 'match', { at: '2026-10-01T09:00:00Z' });
+  work.reviewer = reviewer;
+  const finish = async (options = {}) => { const e = env(); const r = await apply({ subjects, work: JSON.parse(serialiseWork(work)), options: { base: X + 'a/', ...options } }, e); return { r, e }; };
+  const { r, e } = await finish();
+  assert.equal(r.report.errors, 0, JSON.stringify(r.report.items));
+  assert.equal(r.report.counts.versionCheck.added, 1, JSON.stringify(r.report.counts.versionCheck));
+  assert.ok(byId(JSON.parse(outText(e, 'greek.krisis-dataset.json'))).has('https://pleiades.stoa.org/places/579885'));
+  // The same mapping with another pattern differs, and is said to; the identical options given again do not (control).
+  const other = await finish({ columns: { ...PATTERNED, pleiades_id: { field: 'address', pattern: 'https://example.org/p/{id}' } } });
+  assert.ok(other.r.report.items.some((i) => i.kind === 'columns-differ'), 'presence: ' + JSON.stringify(other.r.report.items));
+  const same = await finish({ columns: JSON.parse(JSON.stringify(PATTERNED)) });
+  assert.ok(!same.r.report.items.some((i) => i.kind === 'columns-differ'), 'control: ' + JSON.stringify(same.r.report.items));
+  assert.ok(!r.report.items.some((i) => i.kind === 'columns-differ'), 'the review\'s own options: nothing to say');
+});
+
 // ---- the work file ---------------------------------------------------------------------------------------
 test('decisions: each sets its status, and a place counts as reviewed once any of its candidates is decided', async () => {
   const { work } = await run();

@@ -30,7 +30,9 @@ const TEXT = {
   'not-valid': 'An attestation made from the review does not match the PLATO JSON Schema, which is a fault in the tools; please report it',
 };
 
-const sameMapping = (a, b) => { const ka = Object.keys(a), kb = Object.keys(b); return ka.length === kb.length && ka.every((k) => Object.hasOwn(b, k) && a[k] === b[k]); };
+// Two column options are the same when each column has the same field and, a pattern column, the same pattern.
+const sameColumn = (x, y) => (typeof x === 'string' || typeof y === 'string' ? x === y : x.field === y.field && x.pattern === y.pattern);
+const sameMapping = (a, b) => { const ka = Object.keys(a), kb = Object.keys(b); return ka.length === kb.length && ka.every((k) => Object.hasOwn(b, k) && sameColumn(a[k], b[k])); };
 
 /** The name a review's outputs are made from: the subject dataset's, without its extension. */
 const stemOf = (subjects, work, options) => (options.name || subjects?.files?.[0]?.name || work.subjects.files[0]?.name || 'review').replace(/\.(gz)$/i, '').replace(/\.[^.]+$/, '');
