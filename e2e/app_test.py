@@ -607,6 +607,73 @@ def agora_checks(page, tmp):
         check('choosing a new dataset clears the previous release chosen for the last one', False, str(e).split('\n')[0][:200])
         check('choosing a new dataset clears the list of places to include chosen for the last one', False, str(e).split('\n')[0][:200])
 
+# ---- Tooltips (src/lib/tooltip.js), on both pages ------------------------------------------------
+# Each check waits on the tooltip element itself; each absence (no tooltip after Esc, no title left)
+# is asserted beside a presence in the same check (a tooltip shown first, the tooltips' texts found),
+# so that a page with no tooltips at all fails every one.
+SHOWN = """() => [...document.querySelectorAll('[role=tooltip]')].filter((t) => !t.hidden && t.getBoundingClientRect().width > 0).map((t) => {
+  const r = t.getBoundingClientRect(); return { id: t.id, role: t.getAttribute('role'), text: t.textContent, left: r.left, right: r.right, top: r.top, bottom: r.bottom,
+  vw: document.documentElement.clientWidth, vh: window.innerHeight }; })"""
+NO_TITLES = """() => ({ titled: [...document.querySelectorAll('body [title], svg title')].map((e) => e.outerHTML.slice(0, 120)),
+  tips: [...document.querySelectorAll('[data-tip]')].map((e) => e.dataset.tip),
+  templated: [...document.querySelectorAll('[data-tip-template]')].map((e) => document.getElementById(e.dataset.tipTemplate)?.content.textContent || '') })"""
+
+def shown_tips(page, text, timeout=5):
+    """The tooltips showing once one holding `text` is shown (or [] if none is, in time)."""
+    try: page.wait_for_function('t => [...document.querySelectorAll("[role=tooltip]")].some((x) => !x.hidden && x.textContent.includes(t))', arg=text, timeout=timeout * 1000)
+    except Exception: pass
+    return page.evaluate(SHOWN)
+
+def tab_to(page, selector, limit=200):
+    """Press Tab, as a keyboard user does, until `selector` has focus."""
+    for _ in range(limit):
+        page.keyboard.press('Tab')
+        if page.evaluate('s => document.activeElement?.matches(s)', selector): return True
+    raise RuntimeError(f'Tab never reached {selector}')
+
+def tooltip_checks(page, where, hover, focus, edge):
+    """hover, focus, edge: (selector, text the tooltip holds); edge's element is so near an edge of the
+    window that its tooltip, centred on it, would cross that edge."""
+    page.mouse.move(1, 1)
+    def on_hover():
+        page.hover(hover[0], timeout=10_000); tips = shown_tips(page, hover[1])
+        return len(tips) == 1 and hover[1] in tips[0]['text'] and tips[0]['role'] == 'tooltip', tips
+    attempt(f'{where}: a tooltip appears on hover, the site\'s own (role tooltip), with the text the title had', on_hover)
+    def on_focus():
+        page.mouse.move(1, 1); page.wait_for_timeout(300)
+        tab_to(page, focus[0]); tips = shown_tips(page, focus[1])
+        described = (page.evaluate('() => document.activeElement.getAttribute("aria-describedby")') or '').split()
+        return len(tips) == 1 and focus[1] in tips[0]['text'] and tips[0]['role'] == 'tooltip' and tips[0]['id'] in described, {'tips': tips, 'described by': described}
+    attempt(f'{where}: a tooltip appears on keyboard focus, and the element focused names it in aria-describedby', on_focus)
+    def on_escape():
+        before = shown_tips(page, focus[1], 1)
+        page.keyboard.press('Escape'); page.wait_for_timeout(200)
+        after, still = page.evaluate(SHOWN), page.evaluate('s => document.activeElement?.matches(s)', focus[0])
+        return len(before) == 1 and after == [] and still, {'before': before, 'after': after, 'focus kept': still}
+    attempt(f'{where}: Esc closes the tooltip, and focus stays where it was', on_escape)
+    def at_edge():
+        page.evaluate('() => document.activeElement?.blur()'); page.mouse.move(1, 1); page.wait_for_timeout(300)
+        page.hover(edge[0], timeout=10_000); tips = shown_tips(page, edge[1])
+        box = lambda sel: page.eval_on_selector(sel, 'e => { const r = e.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; }')
+        a = box(edge[0]); t = tips[0] if len(tips) == 1 else {}
+        # It is near the edge: within 60 pixels of it, or so near that its tooltip, centred on it, would cross it.
+        mid, half, vw = (a['left'] + a['right']) / 2, (t.get('right', 0) - t.get('left', 0)) / 2, t.get('vw', 1e9)
+        near = {'left': a['left'] < 60 or mid - half < 8, 'right': a['right'] > vw - 60 or mid + half > vw - 8}[edge[2]]
+        inside = bool(t) and t['left'] >= 0 and t['right'] <= vw and t['top'] >= 0 and t['bottom'] <= t['vh']
+        # And it covers neither its own element nor, if one is named, the control beside it (the next zoom button).
+        overlaps = lambda b: bool(t) and b['left'] < t['right'] and t['left'] < b['right'] and b['top'] < t['bottom'] and t['top'] < b['bottom']
+        covered = [sel for sel in [edge[0]] + list(edge[3:]) if overlaps(box(sel))]
+        return edge[1] in t.get('text', '') and near and inside and not covered, {'tooltip': t, 'element': a, 'near': near, 'covers': covered}
+    attempt(f'{where}: a tooltip by the window\'s {edge[2]} edge stays within the window' + (', and covers no control beside it' if edge[3:] else ''), at_edge)
+    page.mouse.move(1, 1)
+
+def no_titles(page, where, expected):
+    def check_it():
+        r = page.evaluate(NO_TITLES); said = r['tips'] + r['templated']
+        missing = [t for t in expected if not any(t in x for x in said)]
+        return not r['titled'] and not missing, {'title attributes': r['titled'], 'tooltip texts missing': missing}
+    attempt(f'{where}: no element has a title attribute (the browser\'s own tooltip), and the tooltips\' texts are there instead', check_it)
+
 REMOTE = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--url=')), None)
 
 def main():
@@ -638,6 +705,14 @@ def main():
             check('the footer shows the commit served, and says DRAFT exactly when the pin is a draft',
                   ready.get('phase') == 'ready' and ready.get('platoCommit') == served['commit'] and served['commit'][:7] in footer
                   and ('DRAFT' in footer) == bool(served.get('draft')), {'footer': footer, 'served': served})
+            # The tooltips and the "Under development" badge's, at a phone's width, where the badge's
+            # tooltip is wider than the room to the badge's left. (No tooltip on this page is by the
+            # right edge, at any width: Chora's zoom buttons are, below.)
+            page.set_viewport_size({'width': 390, 'height': 844})
+            tooltip_checks(page, 'tooltips', ('#toolbox .tools > li:nth-child(2) .why', 'μετάφρασις'), ('.dev-badge', 'being built in the open'),
+                           ('.dev-badge', 'being built in the open', 'left'))
+            no_titles(page, 'tooltips', ['ἔλεγχος', 'μετάφρασις', 'ἀριθμός', 'μνήμη', 'Ἑρμῆς', 'ἀγορά', 'χώρα', 'κρίσις', 'checked against PLATO at the commit'])
+            page.set_viewport_size({'width': 1280, 'height': 720})
 
             ex = PLATO / 'schemas/tables/examples'
             # Every text the progress line shows, as the page shows it, for the check of the tables below.
@@ -1335,6 +1410,14 @@ def chora_checks(pw, url, tmp):
         # Kingsbury's two markets: one reported, one doubted, each dated; Littleworth's market is denied.
         return kb == ['doubted', 'reported'] and bars == 2 and lw == ['denied'], {'kingsbury': kb, 'bars': bars, 'littleworth': lw}
     attempt('Chora: the place card labels what a source reports, doubts and denies, and dates them on its timeline', statuses)
+    # The tooltips: those the page writes (a status's meaning, on the card), MapLibre's (its zoom
+    # buttons, at the window's right edge, given title attributes by the library), and the badge's.
+    try:
+        chora_boot(page, base, [fixture(judgements, 'judgements-tips.json', tmp)]); chora_pick(page, 'kingsbury')
+    except Exception as e: print('  (Chora tooltips: the page did not open the dataset:', str(e).split('\n')[0][:200], ')')
+    tooltip_checks(page, 'Chora tooltips', ('#card .status-reported', 'as said by others'), ('#card .status-doubted', 'and doubts it'),
+                   ('.maplibregl-ctrl-zoom-in', 'Zoom in', 'right', '.maplibregl-ctrl-zoom-out'))
+    no_titles(page, 'Chora tooltips', ['Draw a point', 'Stop drawing', 'Zoom in', 'Zoom out', 'The source reports this as said by others.', 'market (1673), reported', 'being built in the open'])
     def withdrawn():
         chora_boot(page, base, [fixture(judgements, 'judgements-withdrawn.json', tmp)])
         chora_pick(page, 'littleworth')

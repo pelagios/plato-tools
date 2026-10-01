@@ -16,6 +16,8 @@
     <div>
       <p class="family">Part of <a href="https://pelagios.org/place-attestation-ontology/guide/">PLATO</a>, the Place Attestation Ontology</p>
       <h1><img class="logo" src="./logo/plato-mark.svg" width="27" height="36" alt="">PLATO tools</h1>
+      <a class="dev-badge" href="https://github.com/pelagios/plato-tools/issues" data-tip-template="dev-tip">Under development</a>
+      <template id="dev-tip"><p><strong>PLATO tools is being built in the open.</strong> Its tools, and the formats they write, may still change: check what you make against the PLATO guide and the open issues.</p><p>What you make with it is checked against PLATO at the commit named at the foot of this page.</p><p>Found a problem? Follow this badge to report it on GitHub.</p></template>
     </div>
     <img class="plato-mark" src="./src/plato-thinking.png" width="320" height="217" alt="">
   </div>
@@ -28,40 +30,40 @@
     <h2 id="toolbox-h">The toolbox</h2>
     <ul class="tools">
       <li class="tool">
-        <a class="tool-link" href="#files"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 11 2 2 4-4"/><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><span class="why" title="ἔλεγχος: the Socratic test that exposes a claim's inconsistencies, which is what a check does to your data.">Elenchos</span></h3><p class="label">Check</p></a>
+        <a class="tool-link" href="#files"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 11 2 2 4-4"/><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><span class="why" data-tip="ἔλεγχος: the Socratic test that exposes a claim's inconsistencies, which is what a check does to your data.">Elenchos</span></h3><p class="label">Check</p></a>
         <p>Put your data to the test: every problem found, named and pointed to, before anyone else relies on it.</p>
       </li>
       <li class="tool">
-        <a class="tool-link" href="#files"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/></svg><span class="why" title="μετάφρασις: rendering the same content in another form, as a conversion does.">Metaphrasis</span></h3><p class="label">Convert</p></a>
+        <a class="tool-link" href="#files"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/></svg><span class="why" data-tip="μετάφρασις: rendering the same content in another form, as a conversion does.">Metaphrasis</span></h3><p class="label">Convert</p></a>
         <p>Move your data between PLATO JSON, RDF, the spreadsheet tables and Linked Places Format, and be told exactly what each format cannot carry.</p>
       </li>
       <li class="tool">
-        <a class="tool-link" href="#files"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg><span class="why" title="ἀριθμός: number. For figures from census volumes and statistical tables.">Arithmos</span></h3><p class="label">Statistical figures</p></a>
+        <a class="tool-link" href="#files"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg><span class="why" data-tip="ἀριθμός: number. For figures from census volumes and statistical tables.">Arithmos</span></h3><p class="label">Statistical figures</p></a>
         <p>Figures from census volumes and statistical tables, published as RDF Data Cube and checked against its rules.</p>
         <p class="note">Choose <em>Convert</em> to N-Triples, with the Data Cube option.</p>
       </li>
       <li class="tool">
-        <a class="tool-link" href="#files"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg><span class="why" title="μνήμη: memory. In a published dataset nothing is forgotten or quietly rewritten.">Mneme</span></h3><p class="label">Version check</p></a>
+        <a class="tool-link" href="#files"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg><span class="why" data-tip="μνήμη: memory. In a published dataset nothing is forgotten or quietly rewritten.">Mneme</span></h3><p class="label">Version check</p></a>
         <p>Published is published. Compare two versions of your dataset and show that nothing was quietly changed or lost.</p>
         <p class="note">Choose the new version, then <em>Compare with the earlier version</em>.</p>
       </li>
       <li class="tool">
-        <a class="tool-link" href="#files"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-1"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M2 15h10"/><path d="m9 18 3-3-3-3"/></svg><span class="why" title="Ἑρμῆς: the messenger and interpreter of the Greek gods, who carried meaning from one world to another, as the readers bring other formats into PLATO.">Hermes</span></h3><p class="label">Readers</p></a>
+        <a class="tool-link" href="#files"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-1"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M2 15h10"/><path d="m9 18 3-3-3-3"/></svg><span class="why" data-tip="Ἑρμῆς: the messenger and interpreter of the Greek gods, who carried meaning from one world to another, as the readers bring other formats into PLATO.">Hermes</span></h3><p class="label">Readers</p></a>
         <p>Bring in the places you linked in Recogito, with the regions you marked on georeferenced maps, the places named in a TEI edition, and any spreadsheet (CSV) or GeoJSON you already have.</p>
         <p class="note">For regions on a map, choose the Recogito export together with the map's georeference from Allmaps (and its IIIF manifest, if you have it). A CSV or GeoJSON has its columns matched to PLATO before converting.</p>
       </li>
       <li class="tool">
-        <a class="tool-link" href="#files"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 18v-7"/><path d="M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z"/><path d="M14 18v-7"/><path d="M18 18v-7"/><path d="M3 22h18"/><path d="M6 18v-7"/></svg><span class="why" title="ἀγορά: the public square of a Greek city, where things were made known to all.">Agora</span></h3><p class="label">Publish</p></a>
+        <a class="tool-link" href="#files"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 18v-7"/><path d="M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z"/><path d="M14 18v-7"/><path d="M18 18v-7"/><path d="M3 22h18"/><path d="M6 18v-7"/></svg><span class="why" data-tip="ἀγορά: the public square of a Greek city, where things were made known to all.">Agora</span></h3><p class="label">Publish</p></a>
         <p>From checked to citable: what your dataset still needs to be FAIR, and its deposit files; a permanent address for every attestation; a web page for every place; and the w3id rules that lead to them.</p>
         <p class="note">Choose your dataset, then what to prepare for publishing, and <em>Prepare</em>.</p>
       </li>
       <li class="tool">
-        <a class="tool-link" href="./chora.html"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8c0 3.613-3.869 7.429-5.393 8.795a1 1 0 01-1.214 0C9.87 15.429 6 11.613 6 8a6 6 0 0112 0"/><path d="M4.474 15h-.197a1 1 0 00-.969.753l-1.097 4.35a1.5 1.5 0 001.444 1.898L20.344 22a1.5 1.5 0 001.446-1.897l-1.098-4.35a1 1 0 00-.969-.753h-.197"/><circle cx="12" cy="8" r="2"/></svg><span class="why" title="χώρα: Plato's own word, in the Timaeus, for place, the space in which things come to be.">Chora</span></h3><p class="label">Place on the map</p></a>
+        <a class="tool-link" href="./chora.html"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8c0 3.613-3.869 7.429-5.393 8.795a1 1 0 01-1.214 0C9.87 15.429 6 11.613 6 8a6 6 0 0112 0"/><path d="M4.474 15h-.197a1 1 0 00-.969.753l-1.097 4.35a1.5 1.5 0 001.444 1.898L20.344 22a1.5 1.5 0 001.446-1.897l-1.098-4.35a1 1 0 00-.969-.753h-.197"/><circle cx="12" cy="8" r="2"/></svg><span class="why" data-tip="χώρα: Plato's own word, in the Timaeus, for place, the space in which things come to be.">Chora</span></h3><p class="label">Place on the map</p></a>
         <p>See each place on the map, with everything its attestations say of it over time. Draw a point, a line or an area as a new attestation, and save the whole dataset, checked by Mneme.</p>
         <p class="note"><a href="./chora.html">Open Chora</a>. Next: trace from georeferenced maps.</p>
       </li>
       <li class="tool">
-        <a class="tool-link" href="#files"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18"/><path d="m19 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M3 7h1a17 17 0 0 0 8-2 17 17 0 0 0 8 2h1"/><path d="m5 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M7 21h10"/></svg><span class="why" title="κρίσις: judgement, the act of deciding between alternatives.">Krisis</span></h3><p class="label">Match review</p></a>
+        <a class="tool-link" href="#files"><h3><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18"/><path d="m19 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M3 7h1a17 17 0 0 0 8-2 17 17 0 0 0 8 2h1"/><path d="m5 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M7 21h10"/></svg><span class="why" data-tip="κρίσις: judgement, the act of deciding between alternatives.">Krisis</span></h3><p class="label">Match review</p></a>
         <p>Is this Newton that Newton? Find the same places in another dataset, weigh each suggested match, and keep your judgement, for or against, on the record.</p>
         <p class="note">Choose your dataset, then <em>Match with another dataset</em>. Matching in WHG and other gazetteers is next.</p>
       </li>
@@ -229,6 +231,7 @@
   <p>Checked against PLATO <span id="plato-version">…</span>.</p>
   <p>PLATO: <a href="https://pelagios.org/place-attestation-ontology/guide/">the guide</a> · <a href="https://pelagios.org/place-attestation-ontology/">the ontology reference</a>. PLATO tools: <a href="https://github.com/pelagios/plato-tools">source code</a> (BSD 3-Clause), set in <a href="./fonts/Alegreya-OFL.txt">Alegreya</a> and <a href="./fonts/AlegreyaSans-OFL.txt">Alegreya Sans</a> (SIL Open Font Licence), with icons from <a href="./icons/Lucide-ISC.txt">Lucide</a> (ISC Licence). PLATO is published by the <a href="https://pelagios.org">Pelagios Network</a> Place Working Group. Development has been supported by the <a href="https://www.ishi.pitt.edu/">Institute for Spatial History Innovation (ISHI)</a> at the University of Pittsburgh.</p>
 </footer>
+<script type="module" src="./src/lib/tooltip.js"></script>
 <script type="module" src="./src/app.js"></script>
 </body>
 </html>

@@ -808,6 +808,15 @@ A push to `main` runs the tests, builds the site and publishes it to GitHub Page
 
 - **The toolbox.** The page opens with one panel per tool (`#toolbox` in `index.html`), and the
   README with a table of them. When a tool lands, update its panel and its row in the same change.
+- **Tooltips** are the site's own (`src/lib/tooltip.js`, loaded by each page; its styles are the
+  commented block in `src/styles.css`), never the browser's: give an element `data-tip="…"`, or
+  `data-tip-template="id"` for a `<template>` of rich text (no links or controls: a tooltip cannot
+  be entered), not `title`. A `title` that appears anyway, such as MapLibre's on its buttons, is
+  turned into a tooltip as it appears. Each shows on hover and on keyboard focus, stays while the
+  pointer is on it, closes with Esc, and is named by its element's `aria-describedby`; an element
+  that cannot take focus, and is not inside a link or button that can, is given `tabindex="0"`
+  (except in an SVG drawing). `npm test` and the browser checks fail if a `title` attribute is left
+  on either page. The pages Agora writes carry no script and no tooltips.
 - **Wording** lives in `src/engine/words.js` and `src/engine/report.js`, so that the page and the
   command line say the same thing. British spelling, plain words.
 - **The PLATO guide links to this repository** in two places: the README's

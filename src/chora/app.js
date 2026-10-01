@@ -149,7 +149,7 @@ async function countries(v) {
 }
 
 const STATUS_WORDS = { denied: 'denied', doubted: 'doubted', reported: 'reported', tentative: 'tentative' };
-const badge = (s) => (STATUS_WORDS[s] ? ` <span class="status status-${s}" title="${esc(STATUS_TITLES[s])}">${s}</span>` : '');
+const badge = (s) => (STATUS_WORDS[s] ? ` <span class="status status-${s}" data-tip="${esc(STATUS_TITLES[s])}">${s}</span>` : '');
 const STATUS_TITLES = {
   denied: 'The source says this is NOT so.', doubted: 'The source reports this, and doubts it.',
   reported: 'The source reports this as said by others.', tentative: 'The source gives this tentatively.',
@@ -210,7 +210,8 @@ function timeline(items) {
     const a = t.a ?? t.b, b = t.b ?? t.a, y = i * H;
     const c = STATUS_COLOURS[t.status] || STATUS_COLOURS.asserted;
     const when = a === b ? `${a}` : `${a}–${b}`;
-    return `<g><title>${esc(`${t.text || t.facet} (${t.label || when})${STATUS_WORDS[t.status] ? `, ${t.status}` : ''}`)}</title>
+    // Its whole text, shown on hover by src/lib/tooltip.js (the row's own text may be cut short).
+    return `<g data-tip="${esc(`${t.text || t.facet} (${t.label || when})${STATUS_WORDS[t.status] ? `, ${t.status}` : ''}`)}">
       <text x="${L}" y="${y + 10}" class="tl-text">${esc(trim(`${t.text || t.facet}`, 44))} · ${esc(when)}${STATUS_WORDS[t.status] ? ` · ${t.status}` : ''}</text>
       <rect x="${x(a)}" y="${y + 14}" width="${Math.max(3, x(b) - x(a))}" height="6" rx="2" fill="${c}"${t.status !== 'asserted' ? ` fill-opacity=".45" stroke="${c}" stroke-dasharray="2 1"` : ''}/></g>`;
   }).join('');
