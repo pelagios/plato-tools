@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { keyAction } from '../src/chora/inkkeys.js';
 import { createJobs, WORKER_FAILED } from '../src/chora/inkjobs.js';
-import { inkProposedText } from '../src/engine/words.js';
+import { inkProposedText, lineEnds } from '../src/engine/words.js';
 
 // ---- Keys ----------------------------------------------------------------------------------------
 
@@ -180,4 +180,13 @@ test('ink status: a line stopped at a fork it could not judge says so, and how t
   // An area has no ends; and no ends known (an older worker's result) says nothing of forks.
   assert.equal(inkProposedText({ mode: 'area', scale: 4, holes: 2, ends: ['fork', 'fork'] }), 'An area proposed (dashed orange), read at 1/4 of full resolution, with 2 holes. Enter accepts it, Esc lets it go.');
   assert.doesNotMatch(inkProposedText({ mode: 'line', scale: 1, ends: null }), /fork/);
+  // A line carried on by Shift-click (two results) has every part's ends (lineEnds): a fork the first part stopped at
+  // is still said; three or more forks are counted; no part knowing its ends is null, as one result's unknown ends are.
+  const carried = lineEnds([{ ends: ['fork', 'end'] }, { ends: ['end', 'end'] }]);
+  assert.deepEqual(carried, ['fork', 'end', 'end', 'end']);
+  assert.match(inkProposedText({ mode: 'line', scale: 1, ends: carried }), /stopped short of a fork it could not judge/);
+  assert.match(inkProposedText({ mode: 'line', scale: 1, ends: ['fork', 'fork', 'fork', 'end'] }), /stopped short of three forks/);
+  assert.match(inkProposedText({ mode: 'line', scale: 1, ends: Array(10).fill('fork') }), /stopped short of 10 forks/);
+  assert.deepEqual(lineEnds([{ ends: null }, { ends: ['end', 'end'] }]), ['end', 'end']);
+  assert.equal(lineEnds([{}, { ends: null }]), null);
 });

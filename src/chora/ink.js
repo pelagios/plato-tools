@@ -19,7 +19,7 @@ import { DEFAULTS } from '../engine/chora/ink/params.js';
 import { runTrace, runSnap } from '../engine/chora/ink/job.js';
 import { createJobs } from './inkjobs.js';
 import { keyAction } from './inkkeys.js';
-import { inkProposedText } from '../engine/words.js';
+import { inkProposedText, lineEnds } from '../engine/words.js';
 import * as georef from '../engine/georef/index.js';
 
 const ORANGE = '#e8590c';
@@ -141,13 +141,15 @@ export function createInk({ mapApi, state, overlayAt, onAccept, panel }) {
       }
       if (proposal !== p) return;
       const last = results.at(-1);
-      let geometry, gaps = [];
+      let geometry, gaps = [], ends = null;
       if (p.mode === 'area') geometry = { type: 'Polygon', coordinates: last.rings };
       else {
         let pts = results[0].points;
         for (const r of results.slice(1)) pts = joinLines(pts, r.points, 1.5 * r.width * r.scale);
         geometry = { type: 'LineString', coordinates: pts };
         gaps = results.flatMap((r) => r.gaps);
+        // Every part's ends, not the last click's alone: a fork the first part stopped at is still said after a Shift-click.
+        ends = lineEnds(results);
       }
       p.image = geometry; p.results = results;
       const tw = performance.now();
@@ -156,11 +158,11 @@ export function createInk({ mapApi, state, overlayAt, onAccept, panel }) {
       p.seedsWorld = await Promise.all(p.seeds.map((s) => toWorld(p.entry.g, { type: 'Point', coordinates: s.seedImg })));
       if (proposal !== p) return;
       const ms = performance.now() - t0, worldMs = performance.now() - tw;
-      Object.assign(ink, { phase: 'proposed', proposals: ink.proposals + 1, lastMs: ms, last: { mode: p.mode, scale: last.scale, grown: last.grown, coarser: last.coarser, frame: last.frame, epsilon: last.epsilon, vertices: p.mode === 'area' ? last.rings[0].length - 1 : geometry.coordinates.length, holes: p.mode === 'area' ? last.rings.length - 1 : 0, gaps: gaps.length, ends: last.ends || null, extended: extend, seedsTraced: traced, scales: results.map((r) => r.scale), image: geometry, worldMs } });
+      Object.assign(ink, { phase: 'proposed', proposals: ink.proposals + 1, lastMs: ms, last: { mode: p.mode, scale: last.scale, grown: last.grown, coarser: last.coarser, frame: last.frame, epsilon: last.epsilon, vertices: p.mode === 'area' ? last.rings[0].length - 1 : geometry.coordinates.length, holes: p.mode === 'area' ? last.rings.length - 1 : 0, gaps: gaps.length, ends, extended: extend, seedsTraced: traced, scales: results.map((r) => r.scale), image: geometry, worldMs } });
       ink.timings.push({ ms, mode: p.mode, seeds: p.seeds.length, requests: fetcher.stats.requests, fromCache: fetcher.stats.fromCache });
       draw();
       const holes = p.mode === 'area' ? last.rings.length - 1 : 0;
-      say(inkProposedText({ mode: p.mode, scale: last.scale, gaps: gaps.length, holes, ends: last.ends || null }));
+      say(inkProposedText({ mode: p.mode, scale: last.scale, gaps: gaps.length, holes, ends }));
     } catch (e) {
       if (e.kind === 'cancelled' || proposal !== p) return;
       Object.assign(ink, { phase: 'error', lastError: e.message, lastErrorKind: e.kind || null });

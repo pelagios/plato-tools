@@ -349,8 +349,18 @@ const fmt = (x) => (Number.isFinite(x) ? String(Math.round(x * 100) / 100) : '?'
 export function inkProposedText({ mode, scale, gaps = 0, holes = 0, ends = null }) {
   const forks = mode === 'line' && Array.isArray(ends) ? ends.filter((e) => e === 'fork').length : 0;
   const found = `${gaps ? `, ${gaps} gap${gaps === 1 ? '' : 's'} jumped (dotted)` : ''}${holes ? `, with ${holes} hole${holes === 1 ? '' : 's'}` : ''}`;
-  const fork = forks ? ` It stopped short of ${forks === 1 ? 'a fork' : 'two forks'} it could not judge (two ways on, alike): Shift-click the way the line goes to carry it on.` : '';
+  const some = ['', 'a fork', 'two forks', 'three forks', 'four forks'][forks] ?? `${forks} forks`;
+  const fork = forks ? ` It stopped short of ${some} it could not judge (two ways on, alike): Shift-click the way the line goes to carry it on.` : '';
   return `${mode === 'area' ? 'An area' : 'A line'} proposed (dashed orange), read at 1/${scale} of full resolution${found}.${fork} Enter accepts it, Esc lets it go${mode === 'line' && !forks ? '; Shift-click carries the line on' : ''}.`;
+}
+/**
+ * The ends of a line proposed from one or more clicks (src/chora/ink.js: a Shift-click carries a line on, as another
+ * result): every result's ends in order, so that a fork any one of them stopped at is still said after the line is
+ * carried on past another; null when no result knows its ends (an older worker's).
+ */
+export function lineEnds(results) {
+  const known = results.filter((r) => Array.isArray(r?.ends));
+  return known.length ? known.flatMap((r) => r.ends) : null;
 }
 /** What a Chora save reports of itself (src/engine/chora/save.js), by kind. */
 export const CHORA_TEXT = {

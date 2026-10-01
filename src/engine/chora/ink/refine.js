@@ -131,6 +131,9 @@ export function refinePath(pts, ink, { half, span = 2, limit = 1, skip = () => f
     const a = keep[k - span], b = keep[k + span], tx = b[0] - a[0], ty = b[1] - a[1], L = Math.hypot(tx, ty);
     if (L) dev[k] = ((keep[k][0] - a[0]) * ty - (keep[k][1] - a[1]) * tx) / L;
   }
+  // Within one `span` either way, as meant (e9a495f), not the six of the run medians above: a kink is judged against the
+  // chord offsets of the points beside it, which on a curve are its own curvature's there; over six spans the measure
+  // would be the curve's offset elsewhere, and a tight curve's points would be let go as kinks.
   const devMed = windowMedians(dev, span), out = [];
   for (let k = 0; k < n; k++) {
     if (!Number.isNaN(dev[k]) && !corner(at[k]) && Math.abs(dev[k] - devMed[k]) > wide) continue;
