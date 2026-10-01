@@ -96,6 +96,16 @@ export const REMEMBERED = {
   'chora-basemaps': { label: 'The basemaps you pasted (Chora). Their addresses may hold an API key.' },
 };
 
+/**
+ * What the page says in the console about the canary, once per load: the browser itself reports the
+ * test request it refused ("Connecting to 'data:text/plain,canary' violates … connect-src"), which
+ * looks alarming and which no page can silence.
+ */
+export const CANARY_LOG = {
+  enforced: 'PLATO tools: the blocked request to data:text/plain,canary above is a deliberate test that this page’s protection is switched on. It was blocked, as it should be.',
+  notEnforced: (why) => `PLATO tools: ${PANEL.notProtected}${why ? ` (${why})` : ''}`,
+};
+
 /** What a reload would lose on the main page, said in the panel before it reloads. */
 export const RELOAD_LOSES = {
   files: (names) => `The file${names.length === 1 ? '' : 's'} you chose (${names.join(', ')}): you would choose ${names.length === 1 ? 'it' : 'them'} again.`,

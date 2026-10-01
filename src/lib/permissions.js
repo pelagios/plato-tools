@@ -16,7 +16,7 @@
 // permission allowed now takes effect from the next load; one withdrawn is refused at once, here.
 import * as core from './permissions-core.js';
 import { canary as runCanary, inPolicy } from './csp.js';
-import { nameOf, REFUSED, NEEDS, REMEMBERED } from './permission-words.js';
+import { nameOf, REFUSED, NEEDS, REMEMBERED, CANARY_LOG } from './permission-words.js';
 import { openPanel, refreshPanel } from './permissions-panel.js';
 
 export { CATEGORIES, REGISTRY, STATES, ORIGIN, isOrigin, isInsecure, checkAnswer, originOf, keyOf, parse, originsFor, normalise, check, allowedOrigins, policyFor, migrateBasemapConsent, fromFlags } from './permissions-core.js';
@@ -56,6 +56,7 @@ export function resetForTests() {
   migrated = false;
   Object.assign(cache, { grantsRaw: undefined, grants: {}, tabRaw: undefined, tab: [] });
   canaryResult = null; canaryPromise = null;
+  enforcedFn = null; doFetch = (...a) => globalThis.fetch(...a);
 }
 /** Every permission decided and remembered, cleaned (core.normalise). A copy: the cache is not the caller's. */
 function grants() {
@@ -189,8 +190,17 @@ let enforcedFn = null;
 /** Whether the policy was shown to be enforced (the canary), awaited once. */
 export function enforced() {
   if (enforcedFn) return Promise.resolve(enforcedFn()).then((ok) => { canaryResult = { enforced: !!ok }; return !!ok; });
-  canaryPromise ??= runCanary().then((r) => { canaryResult = r; return r; });
+  canaryPromise ??= runCanary().then((r) => { canaryResult = r; announceCanary(r); return r; });
   return canaryPromise.then((r) => r.enforced);
+}
+/**
+ * Say in the console what the canary found, once per load (enforced() runs it once): after the
+ * browser's own report of the data: request it refused, that this was the test, and that it was
+ * refused as it should be; or, if the page is not protected, that, with the reason the panel gives.
+ * From the page, not the worker, so that it follows the browser's lines.
+ */
+export function announceCanary(r, log = console) {
+  if (r?.enforced) log.info(CANARY_LOG.enforced); else log.warn(CANARY_LOG.notEnforced(r?.why));
 }
 /** The canary's answer so far: null while it runs, else {enforced, why?, directive?}. */
 export const canaryState = () => canaryResult;

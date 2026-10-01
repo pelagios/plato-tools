@@ -848,8 +848,11 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   so) runs the real module in Chromium, Firefox and WebKit under the policy written, none, one that
   lists `data:` and one widened to `*`, with the `<meta>` as served and as written by a script: on 1
   October 2026 (Playwright 1.62: Chromium 151, Firefox 153, WebKit 26.5) each gave the expected answer.
-  Playwright evaluates a bare expression with `eval()`, which the policy forbids: the browser checks
-  give it functions.
+  The browser reports the canary's refused `data:` request in the console ("Connecting to
+  'data:text/plain,canary' violates … connect-src"), which no page can silence, so the page then says,
+  once per load (`announceCanary`), that this was its test and was blocked as it should be, or warns
+  that the page is not protected, with the panel's reason. Playwright evaluates a bare expression with
+  `eval()`, which the policy forbids: the browser checks give it functions.
 - **The shared origin, plainly.** The tools are served on `pelagios.org`, which other Pelagios sites
   share. Everything the tools keep in this browser, permissions, choices, a pasted basemap's address
   and key, the WHG token if remembered, a reviewer's name, the working data (Chora's drafts, its

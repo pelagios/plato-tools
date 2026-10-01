@@ -432,3 +432,25 @@ test('an http site is refused with words, as insecure, and needs() says so rathe
   // Still thrown for what is no site at all.
   assert.throws(() => permissions.needs(fakeEl(), 'iiif', 'not a site'), TypeError);
 });
+
+test('the canary says in the console, once per load, that the blocked data: request is its own test, or that the page is not protected', async () => {
+  const said = [];
+  const log = { info: (m) => said.push(['info', m]), warn: (m) => said.push(['warn', m]) };
+  permissions.announceCanary({ enforced: true }, log);
+  assert.equal(said.length, 1);
+  assert.equal(said[0][0], 'info');
+  assert.ok(said[0][1].includes('data:text/plain,canary') && /deliberate test/.test(said[0][1]) && /blocked, as it should be/.test(said[0][1]), said[0][1]);
+  permissions.announceCanary({ enforced: false, why: 'no policy was written' }, log);
+  assert.equal(said[1][0], 'warn');
+  assert.ok(said[1][1].includes(words.PANEL.notProtected) && said[1][1].includes('no policy was written'), said[1][1]);
+  // From the canary itself, once per load however often it is asked (here, in Node, it finds no policy).
+  const warn = console.warn, info = console.info, seen = [];
+  console.warn = (m) => seen.push(['warn', m]); console.info = (m) => seen.push(['info', m]);
+  try {
+    permissions.resetForTests(); delete globalThis.__platoCsp;
+    assert.equal(await permissions.enforced(), false);
+    assert.equal(await permissions.enforced(), false);
+  } finally { console.warn = warn; console.info = info; }
+  assert.equal(seen.length, 1, JSON.stringify(seen));
+  assert.equal(seen[0][0], 'warn');
+});

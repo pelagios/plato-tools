@@ -1211,6 +1211,27 @@ def main_permissions(ctx, page, url, requests):
         back = wait_state(page, lambda s: s.get('canary') in ('enforced', 'not-enforced'), T(15), 'canary')
         return s.get('canary') == 'not-enforced' and not meta and back.get('canary') == 'enforced', {'without': s.get('canary'), 'why': s.get('canaryWhy'), 'meta': meta, 'with it again': back.get('canary')}
     attempt('main page: served without the script that writes its policy, the canary says it is not enforced (and with it again, enforced)', no_policy)
+    def canary_said():
+        # The browser reports the data: request the canary's worker makes, and no page can silence it:
+        # the page says, once, that it was the test, and that it was blocked as it should be. Without
+        # the policy, the control, it says instead that the page is not protected.
+        def heard(route_head):
+            p = ctx.new_page(); lines = []
+            p.on('console', lambda m: lines.append((m.type, m.text)))
+            if route_head: ctx.route(url, strip_head)
+            try:
+                p.goto(NOTOOLS if PROVE else url)
+                s = wait_state(p, lambda s: s.get('canary') in ('enforced', 'not-enforced'), T(15), 'canary')
+                p.wait_for_timeout(1000)
+                return s.get('canary'), [(t, x) for t, x in lines if x.startswith('PLATO tools:')]
+            finally:
+                if route_head: ctx.unroute(url, strip_head)
+                p.close()
+        on, said_on = heard(False); off, said_off = heard(True)
+        return (on == 'enforced' and len(said_on) == 1 and said_on[0][0] == 'info' and 'data:text/plain,canary' in said_on[0][1] and 'deliberate test' in said_on[0][1]
+                and off == 'not-enforced' and len(said_off) == 1 and said_off[0][0] == 'warning' and 'no policy was written' in said_off[0][1]), {
+            'with the policy': (on, said_on), 'without': (off, said_off)}
+    attempt('main page: once the canary finds the policy enforced, the page says once, in the console, that the blocked data: request was its test; without the policy it warns instead', canary_said)
     # A policy that is written, and enforced, but is not the one the permissions make: the canary's worker
     # finds data: fetched where it lists data:, and its check of the policy finds one widened to every site.
     def altered(variant):
