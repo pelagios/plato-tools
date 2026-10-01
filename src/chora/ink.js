@@ -281,12 +281,15 @@ export function createInk({ mapApi, guard, state, overlayAt, onAccept, panel }) 
   let snapOn = false, snapWorld = null, snapIndex = null, snapEntry = null, snapTimer = null;
   function reproject() {
     if (!snapWorld) { snapIndex = null; return; }
+    const t0 = performance.now();
     const index = (world) => {
       const n = world.length / 2, screen = new Float64Array(world.length);
       for (let k = 0; k < n; k++) { const p = map.project([world[2 * k], world[2 * k + 1]]); screen[2 * k] = p.x; screen[2 * k + 1] = p.y; }
       return binPoints(screen, world);
     };
     snapIndex = { ridges: index(snapWorld.ridges), edges: index(snapWorld.edges) };
+    // The main thread's part of each view's snapping: the points onto the screen and binned (for the budget).
+    ink.snapReprojectMs = performance.now() - t0;
   }
   // Alt held, no snapping: watched here as well as in Terra Draw's own record of the keys held.
   let alt = false;
@@ -311,11 +314,15 @@ export function createInk({ mapApi, guard, state, overlayAt, onAccept, panel }) 
         const coords = []; for (let k = 0; k < pts.length; k += 2) coords.push([pts[k], pts[k + 1]]);
         return Float64Array.from(coords.length ? (await toWorld(entry.g, { type: 'MultiPoint', coordinates: coords })).coordinates.flat() : []);
       };
+      const tw = performance.now();
       const [ridges, edges] = await Promise.all([world(r.ridges), world(r.edges)]);
+      const worldMs = performance.now() - tw;
       snapEntry = entry;
       snapWorld = { ridges, edges };
       ink.snapPoints = (ridges.length + edges.length) / 2; ink.snapRidges = ridges.length / 2; ink.snapBuilds++;
       reproject();
+      // The main thread's work for a build: into the world through the georeference, then onto the screen.
+      ink.snapBuild = { points: ink.snapPoints, worldMs, reprojectMs: ink.snapReprojectMs, mainMs: worldMs + ink.snapReprojectMs, scale: r.frame?.s ?? null, window: r.frame ? [r.frame.w, r.frame.h] : null };
     } catch (e) { if (e.kind !== 'cancelled') { ink.snapError = e.message; } }
   }
   map.on('moveend', () => {

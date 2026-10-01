@@ -2,7 +2,7 @@
 Playwright's bundled headless Chromium, against the fixture server's large map (/iiif/inkbig, 4097 x 3073,
 512-px tiles at 1, 2, 4 and 8: e2e/iiif_fixture_server.py big()).
 
-    E2E_PORT=<free port> python3 e2e/ink_budget.py [--runs=3] [--no-gl-flags]
+    E2E_PORT=<free port> python3 e2e/ink_budget.py [--runs=3] [--no-gl-flags] [--snap-only]
 
 What is timed is the page's own account (window.__chora.ink.lastMs: from the click's trace starting to
 the proposal drawn, the georeference's carrying it into the world included), each the median of --runs:
@@ -12,6 +12,8 @@ the proposal drawn, the georeference's carrying it into the world included), eac
   moved, and the click again once another trace has taken the worker's window (tiles kept, its windows,
   512 and then 1024, made afresh);
 - a line followed across the map until the window is 2048 wide (the whole map at 1/2), first and again;
+- snapping's build with the whole map in view: the main thread's part (the ink's points into the world
+  through the georeference, and onto the screen), and its part again on each moveend (--snap-only: this alone);
 - a snap lookup: Terra Draw's question, asked 20,000 times at random over the map.
 
 The worker's memory is measured in Node instead (e2e/ink_memory.mjs): sampled from outside, a worker
@@ -25,6 +27,7 @@ from playwright.sync_api import sync_playwright
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PORT = int(os.environ.get('E2E_PORT', '4174'))
 RUNS = int(next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--runs=')), '3'))
+SNAP_ONLY = '--snap-only' in sys.argv   # snapping's build at full view alone
 GL = [] if '--no-gl-flags' in sys.argv else ['--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader']
 FIX = ROOT / 'test/fixtures/chora-iiif'
 BIG_RIVER = [(300 + 3.4 * k + 0.5, 1500 + 700 * math.sin(k / 160) + 0.5) for k in range(1001)]
@@ -104,6 +107,40 @@ def main():
                 ink = page.evaluate('() => JSON.parse(JSON.stringify(window.__chora.ink))')
                 if ink['phase'] == 'error' or 'last' not in ink: raise RuntimeError(json.dumps({k: ink.get(k) for k in ('phase', 'lastError', 'proposals', 'mode')}))
                 return ink
+            # ---- Snapping's build at full view (the whole map on the screen): the main thread's part ----
+            # The worker finds the ink's points; the page carries them into the world (toWorld) and onto the
+            # screen (project, binned), the latter again on every moveend. Timed by the page (ink.snapBuild).
+            key = page.evaluate('id => window.__chora.overlays.find((o) => o.annotationId === id).key', ann['id'])
+            page.click(f'#overlay-list li[data-overlay="{key}"] button[data-fit]'); page.evaluate(SETTLE)
+            out['snap build: image px per screen px'] = round(page.evaluate(RATIO, ann['id']), 3)
+            page.click('#draw-tools button[data-mode="linestring"]'); page.check('#snap-ink')
+            until(page, '() => window.__chora.ink && window.__chora.ink.snapBuilds >= 1 && window.__chora.ink.snapBuild', 120)
+            def snap_builds(label):
+                builds, moves = [page.evaluate('() => window.__chora.ink.snapBuild')], []
+                for run in range(RUNS):
+                    n = page.evaluate('() => window.__chora.ink.snapBuilds')
+                    page.evaluate('k => window.__chora_map.panBy([k % 2 ? 3 : -3, 0], { animate: false })', run); page.evaluate(SETTLE)
+                    moves.append(page.evaluate('() => window.__chora.ink.snapReprojectMs'))
+                    until(page, 'n => window.__chora.ink.snapBuilds > n', 120, n)
+                    builds.append(page.evaluate('() => window.__chora.ink.snapBuild'))
+                out[f'snap build {label}: points'] = builds[-1]['points']
+                out[f'snap build {label}: window, scale'] = [builds[-1]['window'], builds[-1]['scale']]
+                out[f'snap build {label}: into the world (ms, median)'] = round(statistics.median(b['worldMs'] for b in builds))
+                out[f'snap build {label}: onto the screen (ms, median)'] = round(statistics.median(b['reprojectMs'] for b in builds))
+                out[f'snap build {label}: main thread in all (ms, median)'] = round(statistics.median(b['mainMs'] for b in builds))
+                out[f'snap {label}, each moveend: onto the screen again (ms, median)'] = round(statistics.median(moves))
+            snap_builds('at full view')
+            # The most points: the largest window read at full resolution (1/1 is read up to 2 image px a
+            # screen pixel: at 1.95 a view about 2700 image px wide, the window capped at 2048), on the map's middle.
+            r = page.evaluate(RATIO, ann['id'])
+            n = page.evaluate('() => window.__chora.ink.snapBuilds')
+            page.evaluate('z => window.__chora_map.jumpTo({ zoom: z })', page.evaluate('() => window.__chora_map.getZoom()') + math.log2(r / 1.95)); page.evaluate(SETTLE)
+            until(page, 'n => window.__chora.ink.snapBuilds > n', 120, n)
+            out['snap build: image px per screen px, at the finest window'] = round(page.evaluate(RATIO, ann['id']), 3)
+            snap_builds('at the largest window at 1/1')
+            page.uncheck('#snap-ink'); page.click('#draw-tools button[data-mode="static"]') if page.query_selector('#draw-tools button[data-mode="static"]') else None
+            if SNAP_ONLY: raise StopIteration
+
             # ---- An area, its window grown to 1024 x 1024 at full resolution ----
             page.click('#draw-tools button[data-trace="area"]')
             out['area: image px per screen px'] = round(at_ratio(1.0), 3)
@@ -160,6 +197,7 @@ def main():
               return { n, meanMs: (performance.now() - t0) / n, worstMs: worst, hits, points: window.__chora.ink.snapPoints }; }''')
             out['snap lookup'] = snap
             ctx.close()
+    except StopIteration: pass
     finally:
         stop(srv); stop(fx); shutil.rmtree(tmp, ignore_errors=True)
     out['load at end'] = load()
