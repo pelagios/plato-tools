@@ -6,11 +6,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { gzipSync } from 'fflate';
+import { readFileSync, readdirSync } from 'node:fs';
 import { env, textFile } from './engine.js';
 import { detect } from '../src/engine/input.js';
 import { save, savedName, refusalOf } from '../src/engine/chora/save.js';
 import { newGeometryAttestation } from '../src/engine/chora/draw.js';
-import { load } from '../src/engine/chora/store.js';
+import { load, keyer } from '../src/engine/chora/store.js';
+import { run } from '../src/engine/pipeline.js';
 import { choraSavedFormat, choraSaveText, choraProblemText, choraSaveProgress, choraStorageWarning, choraPersistNote, CHORA_TEXT } from '../src/engine/words.js';
 import { uncompressedSize, sizeRead, loadNeed, saveNeed, storageShort, shouldPersist, PERSIST_ABOVE } from '../src/engine/chora/storage.js';
 
@@ -30,7 +32,7 @@ async function saved(file, additions, options = {}) {
   const e = env();
   const events = [];
   e.progress = (p) => events.push(p);
-  const input = await detect([file]);
+  const input = await detect([].concat(file));
   const r = await save(input, additions, e, { reopen: (o) => new File(e.outs[o.name], o.name), discard: (o) => { delete e.outs[o.name]; }, ...options });
   const name = r.outputs[0]?.name;
   return { ...r, input, e, events, name, text: name ? e.outs[name].join('') : null };
@@ -188,6 +190,54 @@ test('a dataset with a line that cannot be read is refused before the version ch
   // The control: the same dataset without the broken line is saved, and the version check runs.
   const ok = await saved(jsonl(rows.filter((r) => typeof r !== 'string'), 'mended.jsonl'), additions);
   assert.equal(ok.mneme.passed, true, ok.mneme.reasons.join('; '));
+  assert.equal(mnemeRan(ok.events), true);
+});
+
+// Spreadsheet tables with a sheet that cannot be read (names.csv in Latin-1): the reader stops there,
+// or reads on past it and says the records are short; either way the run is incomplete, and a save
+// of it is refused before the version check, saying why, with nothing kept.
+const TABLES_DIR = 'test/fixtures/tables-routes';
+const tables = (bad) => readdirSync(TABLES_DIR).filter((f) => f.endsWith('.csv')).sort().map((f) => {
+  const text = readFileSync(`${TABLES_DIR}/${f}`, 'utf8');
+  return new File([f === 'names.csv' && bad ? Buffer.from(text.replace('Grantanbrycg', 'Grantanbrycgö'), 'latin1') : Buffer.from(text, 'utf8')], f);
+});
+test('spreadsheet tables with a sheet that cannot be read are refused before the version check, saying why, and nothing is kept or offered', async () => {
+  // A place of the tables, by the key a save finds it by.
+  let first = null;
+  const keyOf = keyer();
+  await run({ input: await detect(tables(false)), action: 'check', options: { sink: { header() {}, event(ev) { if (ev.type === 'record' && first === null) first = keyOf(ev.value); }, async close() {} } } }, env());
+  assert.ok(first, 'the tables have a place');
+  const additions = [{ placeId: first, attestation: drawing(0.1, 52.2) }];
+  // What Chora's store read of the tables, as the page has it when it saves.
+  const e = env();
+  const store = await load(await detect(tables(true)), e, await e.openDb());
+  assert.equal(store.loaded.incomplete, true, 'the reading of the tables is incomplete');
+  for (const [how, options, wrote] of [
+    ['read first', {}, false],
+    ['store, with its reading', { hasPlace: () => true, readReport: store.loaded.report, readIncomplete: store.loaded.incomplete }, false],
+    ['store, without it', { hasPlace: () => true }, null],
+  ]) {
+    const r = await saved(tables(true), additions, { name: 'tables-routes', ...options });
+    const kinds = r.report.items.map((i) => i.kind);
+    const refused = r.report.items.filter((i) => i.kind === 'chora-unreadable' || i.kind === 'chora-not-kept');
+    assert.ok(refused.length >= 1 && refused[0] === r.report.items[0], `${how}: the refusal comes first: ${JSON.stringify(kinds)}`);
+    assert.equal(refused[0].severity, 'error');
+    // Why, in words: the sheet, and that it is not UTF-8, in the refusal or in the problems after it.
+    const words = r.report.items.filter((i) => i.severity === 'error').map(choraProblemText).join(' | ');
+    assert.match(words, /names\.csv.*not encoded as UTF-8/, `${how}: ${words}`);
+    assert.deepEqual(r.outputs, [], `${how}: nothing offered`);
+    assert.deepEqual(Object.keys(r.e.outs), [], `${how}: nothing kept`);
+    assert.equal(r.mneme, null, how);
+    assert.equal(r.incomplete, true, how);
+    assert.equal(choraSaveText(r), 'Nothing was saved.');
+    assert.equal(mnemeRan(r.events), false, `${how}: ${JSON.stringify(r.events.map((p) => [p.save, p.version, p.phase]))}`);
+    // Refused from what was read, nothing is written; found only in the writing, it may have been.
+    if (wrote === false) assert.equal(r.events.some((p) => p.save === 'writing'), false, `${how}: not written`);
+  }
+  store.close();
+  // The control: the same tables in UTF-8 are saved, and the version check runs and passes.
+  const ok = await saved(tables(false), additions, { name: 'tables-routes' });
+  assert.equal(ok.mneme?.passed, true, JSON.stringify(ok.mneme?.reasons || ok.report.items));
   assert.equal(mnemeRan(ok.events), true);
 });
 

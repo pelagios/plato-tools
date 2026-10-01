@@ -366,7 +366,7 @@ async function choraCommand(data) {
         hasPlace: same ? (id) => session.store.has(id) : undefined, record: same ? (id) => session.store.record(id) : undefined,
         // What the opening of this dataset read: one that could not all be read is refused at once, and
         // the writing's progress is shown against the attestations it has.
-        readReport: same ? session.store.loaded.report : undefined, attestations: same ? session.store.loaded.report?.counts?.attestations : undefined,
+        readReport: same ? session.store.loaded.report : undefined, readIncomplete: same ? session.store.loaded.incomplete : undefined, attestations: same ? session.store.loaded.report?.counts?.attestations : undefined,
         reopen: async (o) => (await (await outputsDir(false, CHORA_OUT)).getFileHandle(o.name)).getFile(),
         // A file written and refused is removed at once: DEEP's is 1.14 GB of the browser's storage.
         discard: async (o) => (await outputsDir(false, CHORA_OUT)).removeEntry(o.name),

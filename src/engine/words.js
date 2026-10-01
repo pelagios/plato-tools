@@ -441,7 +441,7 @@ export const CHORA_TEXT = {
   'chora-no-such-place': 'A drawing is for a place this dataset does not have, so nothing was saved. Open the dataset the drawing was made on.',
   'chora-not-placed': 'A drawing did not reach its place in the saved file, so the file must not be used.',
   'chora-attestations-not-a-list': 'A drawing is for a place whose attestations are not a list, as PLATO requires, so the drawing could only replace them, and nothing was saved. Correct that place in the dataset first',
-  'chora-unreadable': 'The dataset could not be read to the end, so it was not saved.',
+  'chora-unreadable': 'The dataset could not be read to the end, so it was not saved',
   'chora-in-another-tab': 'Chora is already open in another tab of this browser. Close it, or use that one.',
   'chora-mneme-failed': 'The version check (Mneme) found that the saved file does not keep every attestation of the dataset exactly as it was, or does not add exactly the drawings. Do not use it.',
   'chora-not-kept': 'The saved file could not hold the dataset exactly as it was read, so it was not checked, kept or offered, and nothing was saved. Why:',

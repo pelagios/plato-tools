@@ -1028,8 +1028,12 @@ publishes its state on `window.__chora` for tests.
   line of a place-centric file, which the PLATO JSON (Lines) writer drops) stops the save before Mneme,
   which is ~90% of a save's time (14 minutes of DEEP's) and could only fail: the file written is
   removed (`discard`), nothing is offered, and the page says why (`chora-not-kept`). A dataset whose
-  opening already reported such a problem is refused before anything is written. Problems of the data
-  itself (a place the schema refuses) do not stop a save.
+  opening already reported such a problem is refused before anything is written, as is one whose
+  opening was incomplete (`readIncomplete`: cut short, or a reader that read on past part of its
+  input it could not read, such as a sheet of the tables), saying why from that reading's errors
+  (`chora-unreadable`). A write that ends incomplete is removed in the same way, and the report
+  begins with `chora-unreadable`, then the run's own problems. Problems of the data itself (a place
+  the schema refuses) do not stop a save.
 - **A write that stops part-way** (a gzip cut short: `run()` catches the `DataError` and returns no
   outputs) leaves the file it was writing, and leaves it open: `run()` does not close its writer then,
   and the browser cannot remove a file whose access handle is open. `save()` gives the run an

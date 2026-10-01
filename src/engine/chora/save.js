@@ -51,7 +51,7 @@ const NOT_WRITTEN = new Set([...NOT_KEPT, 'attestation-centric']);
  */
 export const refusalOf = (report, { written = false } = {}) => (report?.items || []).filter((i) => (written ? NOT_WRITTEN : NOT_KEPT).has(i.kind));
 /** The refusal in the save's report: one problem, with what the run said as its examples. */
-const refuseNotKept = (rep, items) => rep.add('error', 'chora-not-kept', CHORA_TEXT['chora-not-kept'], items.map((i) => `${i.message}${i.count > 1 ? ` (${i.count.toLocaleString('en-GB')} times)` : ''}${i.examples?.[0] ? `: ${i.examples[0]}` : ''}`).join(' | ') || undefined);
+const refuseNotKept = (rep, items, kind = 'chora-not-kept') => rep.add('error', kind, CHORA_TEXT[kind], items.map((i) => `${i.message}${i.count > 1 ? ` (${i.count.toLocaleString('en-GB')} times)` : ''}${i.examples?.[0] ? `: ${i.examples[0]}` : ''}`).join(' | ') || undefined);
 
 /**
  * A record with its additions after its own attestations; the record read is not changed. `key` is
@@ -140,6 +140,8 @@ export async function verify(input, later, added, env) {
  * - discard(output): remove a file written and refused (hosts differ), so that it holds no storage;
  * - readReport: the report of the dataset's reading when the caller has it (Chora's store), so that one
  *   that could not all be read is refused before anything is written;
+ * - readIncomplete: that reading was cut short, or could not read part of its input (Chora's store,
+ *   loaded.incomplete): refused before anything is written, with readReport's errors as why;
  * - attestations: how many the dataset has, when the caller knows, for the progress of the writing.
  * The file is PLATO JSON Lines for a dataset read from them, else PLATO JSON (choraSavedFormat).
  * Progress goes to env.progress, each event saying which step of the save it is (`save`: 'finding',
@@ -180,13 +182,23 @@ export async function save(input, additions, env, options = {}) {
       const k = keyOf(ev.value);
       if (k !== null && byPlace.has(k) && !seen.has(k)) { seen.add(k); if (!listed(ev.value)) unlisted.set(k, ev.value); }
     }, async close() {} } } }, step('finding', options.attestations));
-    if (r.incomplete) { rep.error('chora-unreadable', CHORA_TEXT['chora-unreadable'], r.report.items.find((i) => i.kind === 'unreadable')?.examples[0]); return fail(); }
+    if (r.incomplete) {
+      const cut = r.report.items.find((i) => i.kind === 'unreadable');
+      // A file cut short says where; a reader that read on past part of its input it could not read
+      // (a sheet of the tables) says why in its errors.
+      if (cut) rep.error('chora-unreadable', CHORA_TEXT['chora-unreadable'], cut.examples[0]);
+      else refuseNotKept(rep, r.report.items.filter((i) => i.severity === 'error'), 'chora-unreadable');
+      return fail();
+    }
     missing = [...byPlace.keys()].filter((k) => !seen.has(k));
     options = { ...options, readReport: r.report };
   }
   // A dataset that could not all be read cannot be saved whole: refused before anything is written.
   const unread = refusalOf(options.readReport);
   if (unread.length) { refuseNotKept(rep, unread); return fail(); }
+  // And one whose reading was cut short, or read on past part of its input it could not read (a sheet
+  // of the tables): what was read is not the whole dataset, so a file of it would not be either.
+  if (options.readIncomplete) { refuseNotKept(rep, (options.readReport?.items || []).filter((i) => i.severity === 'error'), 'chora-unreadable'); return fail(); }
   for (const k of missing) rep.error('chora-no-such-place', CHORA_TEXT['chora-no-such-place'], k);
   for (const [k, rec] of unlisted) refuse(rep, k, rec);
   if (missing.length || unlisted.size) return fail();
@@ -210,7 +222,14 @@ export async function save(input, additions, env, options = {}) {
   };
   // Found only in the writing (the caller knew the place, not its record): the file written is not offered.
   if (unlisted.size) { await discard(); for (const [k, rec] of unlisted) refuse(rep, k, rec); return fail(); }
-  if (w.incomplete) { await discard(); return { report, outputs: [], mneme: null, incomplete: true }; }
+  // A write that stopped part-way, or a reader that could not read part of its input (a sheet of the
+  // tables): the file is not offered, and the report says so first, then why.
+  if (w.incomplete) {
+    await discard();
+    rep.error('chora-unreadable', CHORA_TEXT['chora-unreadable']);
+    const r = rep.toJSON();
+    return { report: { ...report, errors: report.errors + r.errors, items: [...r.items, ...report.items] }, outputs: [], mneme: null, incomplete: true };
+  }
   // A file that does not hold what was read: refused now, not after the version check has read it all.
   const notKept = refusalOf(report, { written: true });
   if (notKept.length) {
