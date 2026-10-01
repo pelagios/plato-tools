@@ -480,6 +480,9 @@ export const lookupPage = {
   tokenGiven: 'A token is given',
   tokenNone: 'No token given yet',
   forgotten: 'The token is forgotten. If it may have been seen anywhere else, regenerate it in WHG: that is the only way to revoke it.',
+  /** The one line in place of Send (and of Find on the review screen) while the service's permission is set to Never, and its button, which opens Permissions there. */
+  never: (name) => `Not allowed: ${name} is set to Never in Permissions.`,
+  openPermissions: 'Permissions…',
   badEndpoint: "Give the reconciliation service's address, beginning https://.",
   badTemplate: "Give how to make a candidate's address from its id, with {{id}} in it, such as https://www.wikidata.org/wiki/{{id}}; or leave it empty.",
   /** The share of WHG's daily allowance a lookup would use. */

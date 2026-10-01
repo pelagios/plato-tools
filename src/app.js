@@ -750,8 +750,24 @@ const gazetteerFetch = permittedFetch(permissions.fetch, (e) => looking?.abort(e
 const whgLookup = () => createLookup({ endpoint: WHG_ENDPOINT, fetch: gazetteerFetch });
 /** Whether the permissions module allows a lookup of this service now (allowed, and in this load's policy). */
 const mayLookUp = (svc) => !svc.problem && permissions.allowed('gazetteer', gazetteerPermission(svc.service.endpoint));
-/** The module's one line for this service's permission, in `el` (nothing shown once it is allowed). */
-const needsLine = (el, svc) => { if (svc.problem) permissions.unneed(el); else permissions.needs(el, 'gazetteer', gazetteerPermission(svc.service.endpoint), { name: svc.whg ? undefined : svc.service.title }); };
+/**
+ * The one line for this service's permission, in `el`: the module's ("Needs permission: …", which opens
+ * Permissions; nothing once it is allowed), or, while it is set to Never (where the module says nothing,
+ * and a lookup would otherwise just vanish), "Not allowed: … is set to Never in Permissions." with a
+ * button that opens the panel at that permission. Drawn again on every change of permission.
+ */
+function needsLine(el, svc) {
+  if (svc.problem) return permissions.unneed(el);
+  const subj = gazetteerPermission(svc.service.endpoint), name = svc.whg ? undefined : svc.service.title;
+  // Asked of the module in every state, so that the panel lists this service under its name.
+  if (permissions.needs(el, 'gazetteer', subj, { name }) !== 'never') return;
+  permissions.unneed(el);
+  const key = permissions.keyOf('gazetteer', subj), b = document.createElement('button');
+  b.type = 'button'; b.className = 'link'; b.textContent = LW.openPermissions;
+  b.onclick = () => permissions.open({ focus: key });
+  el.dataset.permission = key; el.classList.add('needs-permission'); el.hidden = false;
+  el.append(LW.never(name || permissions.nameOf('gazetteer', subj)), ' — ', b);
+}
 /** The shared lookup takes the keeper's token, or none: at start (a token kept from before) and on every change. */
 const passToken = () => { const t = token.get(); if (t) whgLookup().setToken(t); else whgLookup().clearToken(); };
 const showTokenState = () => { $('whg-token-state').textContent = token.get() ? LW.tokenGiven : LW.tokenNone; };
@@ -854,7 +870,7 @@ async function lookUp({ only = null, query = null, allNames, which } = {}) {
   if ($('whg-token').value.trim()) commitToken();
   const svc = lookupService();
   if (svc.problem) { $('lookup').open = true; return lookupSay(svc.problem, true); }
-  // Not allowed (or not decided): nothing is sent; the panel shows the one line, whose button opens Permissions.
+  // Not allowed (not decided, or Never): nothing is sent; the panel shows the one line, whose button opens Permissions.
   if (!mayLookUp(svc)) {
     $('lookup').open = true; lookupSay('');
     needsLine($('lookup-permission'), svc);
@@ -923,13 +939,18 @@ async function lookUp({ only = null, query = null, allNames, which } = {}) {
     if (fresh >= 0) { current = fresh; render(false); $('review-place').querySelector(`li.candidate[data-id="${CSS.escape(candidatesOf(work, order[cursor])[fresh].id)}"]`)?.focus(); }
   }
 }
-/** After a stop: Resume takes the places not yet answered, with the same settings. */
+/**
+ * After a stop: Resume takes the places not yet answered, with the same settings. It is shown only while
+ * the permission allows a lookup (after a 'permission' stop, not until it is allowed again: called again
+ * on every change of permission), so that it is never a button that does nothing.
+ */
 async function offerResume(svc) {
   const g = await gatherPlaces();
   const p = planFor(svc, lookupOptions({ places: 'pending' }), g?.places ?? null).preview;
-  if (!p.queries) return;
+  const b = $('lookup-resume');
+  if (!p.queries) { b.hidden = true; return; }
   afterStop = true;
-  const b = $('lookup-resume'); b.textContent = LW.resume(p.queries); b.hidden = false;
+  b.textContent = LW.resume(p.queries); b.hidden = !mayLookUp(svc);
 }
 function commitToken() {
   const f = $('whg-token');
@@ -1038,6 +1059,7 @@ token.onChange(() => { showTokenState(); passToken(); });
 permissions.onChange(() => {
   if (looking) return;
   refreshPreview();
+  if (afterStop) { const svc = lookupService(); if (mayLookUp(svc)) offerResume(svc); else $('lookup-resume').hidden = true; }
   if (work && !$('review').hidden && order.length) render(false);
 });
 showTokenState();

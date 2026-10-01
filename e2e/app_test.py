@@ -590,15 +590,25 @@ def krisis_lookup_case(page, tmp, url):
         page.fill('#whg-token', LOOKUP_TOKEN); page.press('#whg-token', 'Tab')
         page.wait_for_function("() => /Would look up 30 places/.test(document.getElementById('lookup-preview').textContent)", timeout=60_000)
         page.wait_for_function("() => !document.getElementById('lookup-permission').hidden", timeout=10_000)
-        before = len(calls) + len(asked)
+        before, said_before = len(calls) + len(asked), len(consoled)
         page.evaluate("() => document.getElementById('lookup-send').click()")   # hidden: a script's click, which must send nothing either
         page.wait_for_timeout(1500)
+        # A request the policy stopped would not reach page.on('request') either, so "nothing asked" alone cannot
+        # tell the page's own gate from the policy: the policy says "Refused to connect" in the console when it stops one.
+        refused_during = [m for m in consoled[said_before:] if 'Refused to connect' in m]
+        # The control: a request to a site not in the policy (routed, so it could go nowhere even if let through) IS
+        # reported so in the console captured, so the absence above is evidence.
+        page.route('https://refused.example/**', lambda route: route.abort())
+        page.evaluate("() => { fetch('https://refused.example/x').catch(() => {}); }")
+        page.wait_for_timeout(1000)
+        page.unroute('https://refused.example/**')
+        refused_control = [m for m in consoled[said_before:] if 'Refused to connect' in m and 'refused.example' in m]
         out = {'phase': 'shown', 'canary': r.get('canary'), 'policy': page.evaluate('() => (window.__platoCsp || {}).origins || null'),
                'line': page.inner_text(PERM), 'lines': page.eval_on_selector_all('#lookup .needs-permission', 'els => els.filter((e) => !e.hidden).length'),
                'send shown': page.is_visible('#lookup-send'), 'preview': page.inner_text('#lookup-preview'),
                'first': page.eval_on_selector_all('.lookup-queries code', 'els => els.map((e) => e.textContent)'),
                'privacy': page.eval_on_selector_all('#lookup .lookup-privacy', 'els => els.length'), 'panel text': page.inner_text('#lookup'),
-               'sent': len(calls) + len(asked) - before, 'focus after send': page.evaluate('() => document.activeElement && document.activeElement.closest("#lookup-permission") ? "line" : null')}
+               'sent': len(calls) + len(asked) - before, 'refused during': refused_during, 'refused control': len(refused_control), 'focus after send': page.evaluate('() => document.activeElement && document.activeElement.closest("#lookup-permission") ? "line" : null')}
         # The line's button opens the Permissions panel at WHG's entry, where the token's scope is stated.
         page.click(PERM + ' button')
         until(page, '() => document.getElementById("permissions-panel")?.open', 10)
@@ -614,6 +624,8 @@ def krisis_lookup_case(page, tmp, url):
           'Would look up 30 places in World Historical Gazetteer' in na.get('preview', '') and len(nfirst) == 20 and nfirst[0] == {'query': 'Newcastle', 'type': 'Place', 'limit': 10}, na)
     check('lookup, not allowed: Send pressed by script sends nothing (no request to WHG made, routed or not), and the line takes the focus',
           na.get('phase') == 'shown' and na.get('sent') == 0 and not calls and not asked and na.get('focus after send') == 'line', {k: na.get(k) for k in ('phase', 'sent', 'focus after send', 'error')})
+    check('lookup, not allowed: it is the page that sent nothing, not the policy that stopped it: no "Refused to connect" in the console then (the control: a request the policy stops IS reported there)',
+          na.get('phase') == 'shown' and na.get('refused during') == [] and na.get('refused control', 0) >= 1, {k: na.get(k) for k in ('phase', 'refused during', 'refused control', 'error')})
     check("lookup: no privacy paragraph or consent of its own in the lookup panel (the panel's own text is there, the control)",
           na.get('privacy') == 0 and 'Which places' in na.get('panel text', '') and 'Your WHG token' in na.get('panel text', '')
           and 'optional and goes online' not in na.get('panel text', '') and 'this tab' not in na.get('panel text', '') and 'No token is sent' not in na.get('panel text', ''), na.get('panel text', na))
@@ -839,6 +851,66 @@ def krisis_lookup_case(page, tmp, url):
     check('lookup: after a refused token, the closed panel is opened and the focus is in the token field',
           rn.get('stopped') == 'auth' and rn.get('open') is True and rn.get('focus') == 'whg-token', rn)
     check('lookup: "Save the review" saves through a link with rel="noopener"', rn.get('rel') == ['noopener'], rn)
+
+    # Set to Never in the panel (after the refused token, Resume is offered): the lookup panel and the
+    # review screen each show ONE line, "Not allowed: … is set to Never in Permissions.", with a button
+    # to the panel at WHG's entry; nothing is sent, Resume is hidden (and pressed by script, it shows the
+    # line rather than doing nothing). Allowed again, Send and Resume are back, and Resume IS sent.
+    NEVER = 'Not allowed: World Historical Gazetteer is set to Never in Permissions.'
+    def never():
+        before = len(calls) + len(asked)
+        page.click('#lookup > summary') if not page.evaluate("() => document.getElementById('lookup').open") else None
+        resume_before = page.is_visible('#lookup-resume')
+        set_to('never')
+        page.wait_for_function("() => !!document.querySelector('#review-place .find .needs-permission:not([hidden])') && !document.getElementById('lookup-permission').hidden", timeout=10_000)
+        out = {'resume before': resume_before,
+               'review line': page.inner_text('#review-place .find .needs-permission'), 'review buttons': page.eval_on_selector_all('#review-place button[data-look]', 'bs => bs.length'),
+               'review line button': page.eval_on_selector_all('#review-place .find .needs-permission button', 'bs => bs.length'),
+               'line': page.inner_text(PERM), 'lines': page.eval_on_selector_all('#lookup .needs-permission', 'els => els.filter((e) => !e.hidden).length'),
+               'send hidden': page.evaluate("() => document.getElementById('lookup-send').hidden"), 'resume hidden': page.evaluate("() => document.getElementById('lookup-resume').hidden")}
+        page.evaluate("() => document.activeElement && document.activeElement.blur()")
+        page.evaluate("() => document.getElementById('lookup-send').click()")
+        page.wait_for_timeout(1000)
+        out['focus after send'] = page.evaluate("() => { const a = document.activeElement; return a && a.tagName === 'BUTTON' && a.closest('#lookup-permission') ? 'line button' : (a && (a.id || a.tagName)); }")
+        page.evaluate("() => document.activeElement && document.activeElement.blur()")
+        page.evaluate("() => document.getElementById('lookup-resume').click()")
+        page.wait_for_timeout(1000)
+        out['focus after resume'] = page.evaluate("() => { const a = document.activeElement; return a && a.tagName === 'BUTTON' && a.closest('#lookup-permission') ? 'line button' : (a && (a.id || a.tagName)); }")
+        out['line after resume'] = page.inner_text(PERM)
+        out['sent'] = len(calls) + len(asked) - before
+        page.click(PERM + ' button')
+        until(page, '() => document.getElementById("permissions-panel")?.open', 10)
+        out['opened'] = page.evaluate(PANEL_STATE)
+        page.check('#permissions-panel fieldset.perm[data-key="gazetteer:whg"] input[value="allowed"]')
+        page.keyboard.press('Escape')
+        until(page, '() => !document.getElementById("permissions-panel").open', 10)
+        page.wait_for_function("() => !document.getElementById('lookup-send').hidden && !document.getElementById('lookup-resume').hidden", timeout=10_000)
+        out['allowed'] = {'send hidden': page.evaluate("() => document.getElementById('lookup-send').hidden"), 'line hidden': page.evaluate("() => document.getElementById('lookup-permission').hidden"),
+                          'find': page.eval_on_selector_all('#review-place button[data-look="find"]', 'bs => bs.length'), 'resume': page.inner_text('#lookup-resume')}
+        page.fill('#whg-token', LOOKUP_TOKEN); page.press('#whg-token', 'Tab')
+        at = len(calls)
+        page.click('#lookup-resume')
+        s = wait_state(page, lambda s: lk(s).get('running') is False and len(calls) > at, 60, 'resume after Never')
+        out['resumed sent'] = len(calls) - at
+        out['resumed stopped'] = lk(s).get('stopped')
+        return out
+    nv = step(never, {}) if rn.get('rel') else {}
+    check('lookup, Never: the lookup panel and the review screen each show ONE line, "Not allowed: World Historical Gazetteer is set to Never in Permissions.", with a button; Send and Find are gone',
+          nv.get('line', '').startswith(NEVER) and nv.get('lines') == 1 and nv.get('review line', '').startswith(NEVER) and nv.get('review line button') == 1
+          and nv.get('review buttons') == 0 and nv.get('send hidden') is True, nv)
+    check('lookup, Never: Send pressed by script sends nothing and the line\'s button takes the focus; the button opens the Permissions panel at WHG\'s entry',
+          nv.get('sent') == 0 and nv.get('focus after send') == 'line button' and (nv.get('opened') or {}).get('open') is True and (nv.get('opened') or {}).get('focusKey') == 'gazetteer:whg', nv)
+    check('lookup, Never: Resume, offered before, is hidden, and pressed by script it shows the line and focuses its button rather than doing nothing',
+          nv.get('resume before') is True and nv.get('resume hidden') is True and nv.get('focus after resume') == 'line button' and nv.get('line after resume', '').startswith(NEVER), nv)
+    check('lookup, Never then Allow (the positive control): Send, Find and Resume are back without a reload, the line is gone, and Resume IS sent',
+          (nv.get('allowed') or {}).get('send hidden') is False and (nv.get('allowed') or {}).get('line hidden') is True and (nv.get('allowed') or {}).get('find', 0) >= 1
+          and (nv.get('allowed') or {}).get('resume', '').startswith('Resume: send') and nv.get('resumed sent', 0) >= 1, nv)
+
+    # Every lookup of WHG in this page session is given the one fetch (gazetteerFetch): the shared lookup
+    # warns, naming fetch, when a later call gives another. The presence: several lookups were made in it.
+    later = [m for m in consoled if 'createLookup: a later call' in m]
+    check('lookup: the lookups of WHG in one page session (panel, Resume, one place, and again) all gave createLookup the same fetch: no "a later call … gave fetch" warning',
+          len(calls) >= 6 and nv.get('resumed sent', 0) >= 1 and later == [], {'calls': len(calls), 'warnings': later})
 
     # Forget: gone from the tab, and nothing is sent without it.
     def forget():
