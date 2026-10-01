@@ -85,3 +85,86 @@ test('a tool that reads a dataset\'s records refuses a candidate set in words, a
   assert.equal(d.report.errors, 0);
   assert.ok(seen.length > 0);
 });
+
+// ---- the profile, its wording when absent, the reverse link, and what the lossy formats do -------
+import { res } from './engine.js';
+import { droppedText, FORMAT_WORDS } from '../src/engine/report.js';
+import jsonld from 'jsonld';
+import { Json2Rdf } from '../src/formats/json2rdf.js';
+import { tripleNT } from '../src/lib/ntriples.js';
+
+test('the candidate set profile is loaded, as vendored from PLATO at the pin', () => {
+  const vendored = JSON.parse(readFileSync('public/plato/candidate-set.schema.json', 'utf8'));
+  assert.deepEqual(vendored, JSON.parse(readFileSync(`${PLATO_REPO}/schemas/candidate-set.schema.json`, 'utf8')));
+  assert.deepEqual(res.profiles['candidate-set'], vendored);
+  assert.ok(res.profiles['candidate-set'].properties.candidates && res.profiles['candidate-set'].properties.candidateSet);
+  // The control: the dataset profiles are not it.
+  assert.ok(!res.profiles['place-centric'].properties.candidates);
+});
+
+test('a document that is not PLATO is told so in words that name the candidate set, in JSON and in JSON Lines', async () => {
+  const json = await detect([textFile(JSON.stringify({ candidateSet: {}, candidates: [] }), 'x.json')]);
+  const jsonl = await detect([textFile('{"candidateSet":{}}\n{"candidate":1}\n', 'x.jsonl')]);
+  const arr = await detect([textFile('[1]\n2\n', 'x.jsonl')]);
+  for (const d of [json, jsonl]) { assert.equal(d.format, null); assert.match(d.reason, /neither a PLATO (document|header) \(.*a candidate set/, d.reason); }
+  assert.match(arr.reason, /neither a PLATO header \(of a dataset or a candidate set\)/, arr.reason);
+  // The control: with its profile, the same JSON Lines is a candidate set.
+  const ok = await detect([textFile('{"profile":"candidate-set","candidateSet":{}}\n{"candidate":1}\n', 'x.jsonl')]);
+  assert.deepEqual([ok.format, ok.profile], ['plato-jsonl', 'candidate-set']);
+});
+
+const DATASET = `${EX}/attestation-centric-judgements.json`;
+const CF = '<https://w3id.org/plato#candidates_for>';
+function compiledNT(d) {
+  let nt = '';
+  const w = new Json2Rdf(res.context, (s, p, o) => { nt += tripleNT(s, p, o); });
+  const { spatialEntities, newSpatialEntities, attestations, identityRelations, ...head } = d;
+  w.header(head);
+  for (const [k, arr] of Object.entries({ spatialEntities, newSpatialEntities, attestations, identityRelations })) for (const r of arr || []) w.record(k, r);
+  return nt;
+}
+test("a dataset's candidateSets are the reverse of plato:candidates_for, exactly as jsonld.js gives them, and come back from RDF", async () => {
+  const d = JSON.parse(readFileSync(DATASET, 'utf8'));
+  const sets = d.gazetteer.candidateSets;
+  assert.ok(Array.isArray(sets) && sets.length > 0, 'the example carries candidateSets');
+  const want = sets.map((s) => `<${s}> ${CF} <${d.gazetteer['@id']}> .`).sort();
+  const lines = (nt) => nt.split('\n').filter((l) => l.includes(CF)).map((l) => l.trim()).sort();
+  const ref = await jsonld.toRDF({ ...d, '@context': res.context['@context'] }, { format: 'application/n-quads', safe: false });
+  assert.deepEqual(lines(ref), want);
+  assert.deepEqual([...new Set(lines(compiledNT(d)))], want);
+  // The control: without candidateSets, neither writes the link.
+  const { candidateSets, ...gz } = d.gazetteer;
+  assert.deepEqual(lines(compiledNT({ ...d, gazetteer: gz })), []);
+  // And back: JSON -> N-Triples -> JSON gives the same candidateSets.
+  const a = await go([file(DATASET)], 'convert', 'ntriples');
+  const b = await go([textFile(outText(a.e, 'attestation-centric-judgements.nt'), 'j.nt')], 'convert', 'plato-json');
+  assert.deepEqual(JSON.parse(outText(b.e, 'j.json')).gazetteer.candidateSets, sets);
+});
+
+test("a dataset's candidateSets, written as spreadsheet tables or LPF, are left out and reported in words", async () => {
+  const d = JSON.parse(readFileSync(DATASET, 'utf8'));
+  const { candidateSets, ...gz } = d.gazetteer;
+  for (const target of ['tables', 'lpf', 'lpf-seq']) {
+    const r = await go([file(DATASET)], 'convert', target);
+    assert.equal(r.report.errors, 0, target);
+    const it = r.report.items.find((i) => i.kind === 'dropped:gazetteer.candidateSets');
+    assert.ok(it, `${target}: reported`);
+    assert.equal(it.message, droppedText('gazetteer.candidateSets', FORMAT_WORDS[target]));
+    assert.match(it.message, /^The candidate sets that suggest matches for the gazetteer's places \(candidateSets\)/);
+    assert.ok(!(target === 'tables' ? Object.values(r.e.outs).flat().join('') : outText(r.e, r.outputs[0].name)).includes(candidateSets[0]), `${target}: not written`);
+    // The control: without them, nothing of the kind is reported.
+    const c = await go([textFile(JSON.stringify({ ...d, gazetteer: gz }), 'n.json')], 'convert', target);
+    assert.ok(!c.report.items.some((i) => i.kind === 'dropped:gazetteer.candidateSets'), target);
+  }
+});
+
+test('a candidate set written as spreadsheet tables or LPF is refused in plain words', async () => {
+  const words = 'A candidate set cannot be written as spreadsheet tables or Linked Places Format: neither has a place for suggestions made by software, which are claims by no one. Keep it as PLATO JSON or RDF.';
+  for (const target of ['tables', 'lpf', 'lpf-seq']) {
+    const r = await go([file(SET)], 'convert', target);
+    const e = r.report.items.filter((i) => i.severity === 'error');
+    assert.deepEqual(e.map((i) => [i.kind, i.message]), [['candidate-set-target', words]], target);
+  }
+  const ok = await go([file(SET)], 'convert', 'ntriples');
+  assert.ok(!ok.report.items.some((i) => i.message === words));
+});

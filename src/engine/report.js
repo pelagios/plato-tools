@@ -216,6 +216,7 @@ const KEY_WORDS = {
   'gazetteer.uriSpace': "the base of the addresses of the gazetteer's places and sources (uriSpace)",
   'gazetteer.isVersionOf': 'the gazetteer this one is a version of (isVersionOf)',
   'gazetteer.previousVersion': "the gazetteer's previous version (previousVersion)",
+  'gazetteer.candidateSets': 'the candidate sets that suggest matches for the gazetteer\'s places (candidateSets): suggestions made by software, which are claims by no one, published apart from the dataset',
   'source.licence': "a source's licence",
   'spatialEntity.@id': "a place's web address",
   'spatialEntity.entityIdentifier': "a place's own identifier in its project (entityIdentifier)",

@@ -395,7 +395,7 @@ export async function detect(files) {
       if (!ended && stopsShort(line)) return { format: null, reason: `This looks like JSON Lines, but the file ends part-way through its first line (${e.message}): the file may be cut short, so what it is cannot be told from it.` };
       return { format: null, reason: `This looks like JSON Lines, but its first line is not valid JSON (${e.message}), so what the file is cannot be told from it.` };
     }
-    if (!first || typeof first !== 'object' || Array.isArray(first)) return { format: null, reason: 'This looks like JSON Lines, but its first line is not a JSON object, so it is neither a PLATO header, an LPF feature nor a W3C Web Annotation.' };
+    if (!first || typeof first !== 'object' || Array.isArray(first)) return { format: null, reason: 'This looks like JSON Lines, but its first line is not a JSON object, so it is neither a PLATO header (of a dataset or a candidate set), an LPF feature nor a W3C Web Annotation.' };
     if (first.profile) return { format: 'plato-jsonl', profile: first.profile, files };
     if (first.type === 'Feature' || first.type === 'FeatureCollection') {
       // Linked Places Format only by its structure, as for a FeatureCollection below: the collection's
@@ -406,7 +406,7 @@ export async function detect(files) {
       return { format: null, reason: GEOJSON_SEQ_REASON };
     }
     if (isAnnotation(first)) return { format: 'w3c-annotations', shape: 'jsonl', files };
-    return { format: null, reason: 'This is JSON Lines, but its first line is neither a PLATO header, an LPF feature nor a W3C Web Annotation.' };
+    return { format: null, reason: 'This is JSON Lines, but its first line is neither a PLATO header (of a dataset or a candidate set: it has no "profile"), an LPF feature nor a W3C Web Annotation.' };
   }
   if (h.startsWith('{')) {
     // Read as far as the head goes, as structure (null where it is not well formed): a test of the
