@@ -62,15 +62,23 @@ const named = (sites) => (sites.length === 1 ? sites[0] : `${sites.slice(0, -1).
 const END = 'It sees nothing of your data, which stays in this tab.';
 /**
  * The notice shown before a kind of site is first asked for anything: `origins` are the sites not yet
- * agreed to; `name`, what they serve (a basemap's name, a map's title), when known.
+ * agreed to; `name`, what they serve (a basemap's name, a map's title), when known; `fetch`, for
+ * Allmaps, the address of the georeference to be fetched (else Allmaps is to be asked to look for one);
+ * `maps`, for historical maps, how many are asked about together (the maps kept from last time).
  */
-export function notice(kind, { origins: sites = [], name } = {}) {
+export function notice(kind, { origins: sites = [], name, fetch, maps } = {}) {
   const those = sites.length === 1 ? 'that site' : 'those sites';
   if (kind === 'basemap') {
     return `${name || 'This basemap'} is served by ${named(sites)}. Using it, the map asks ${those} for the part of the world you are looking at, so the provider sees where you look (and your address on the internet, as any website does). ${END}`;
   }
+  if (kind === 'iiif' && maps > 1) {
+    return `The ${maps} historical maps you had shown are served by ${named(sites)}. Showing them, the page asks ${those} for the maps' descriptions and for the parts of the images you look at, so the providers see which maps you view, and where (and your address on the internet, as any website does). ${END}`;
+  }
   if (kind === 'iiif') {
     return `${name ? `The historical map “${name}”` : 'This historical map'} is served by ${named(sites)}. Showing it, the page asks ${those} for the map's description and for the parts of the image you look at, so the provider sees which map you view, and where (and your address on the internet, as any website does). ${END}`;
+  }
+  if (kind === 'allmaps' && fetch) {
+    return `Showing this map fetches its georeference from Allmaps (${named(sites)}), at ${fetch}, so Allmaps sees that it was fetched (and your address on the internet, as any website does). ${END}`;
   }
   if (kind === 'allmaps') {
     return `Looking for a georeference sends the address of the map's image to Allmaps (${named(sites)}), which then knows that this map was looked for (and your address on the internet, as any website does). ${END}`;

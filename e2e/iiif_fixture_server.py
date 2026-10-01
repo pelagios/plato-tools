@@ -7,7 +7,9 @@ First written for the Allmaps spike (2026-09-30), whose measurements DEVELOPERS.
 
 Serves test/fixtures/chora-iiif/, rewriting https://iiif.example.org to origin A and
 https://elsewhere.example.org to origin B in the JSON it sends. Every response carries
-Access-Control-Allow-Origin: *.
+Access-Control-Allow-Origin: *. The image information and the manifest name the site they were asked
+for by (the Host header), so http://localhost:PORT_A is a third site, served by A's port: a map there is
+admitted as its own.
 
   /iiif/grid/info.json          info-v2.json (its id on this origin)
   /iiif3/grid/info.json         info-v3.json
@@ -68,19 +70,20 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split('?')[0]
         here = self.server.server_port
+        me = 'http://' + (self.headers.get('Host') or f'127.0.0.1:{here}')   # the site it was asked for by
         if path == '/iiif/grid/info.json':
-            return self.send(200, fixture('info-v2.json').replace(origin(A), origin(here)).encode())
+            return self.send(200, fixture('info-v2.json').replace(origin(A), me).encode())
         if path == '/iiif3/grid/info.json':
-            return self.send(200, fixture('info-v3.json').replace(origin(A), origin(here)).encode())
+            return self.send(200, fixture('info-v3.json').replace(origin(A), me).encode())
         if path == '/iiif/foreign/info.json':
             return self.send(200, fixture('info-foreign-id.json').encode())
         if path == '/iiif/redirect/info.json':
-            body = fixture('info-v2.json').replace('/iiif/grid', '/iiif/redirect').replace(origin(A), origin(here))
+            body = fixture('info-v2.json').replace('/iiif/grid', '/iiif/redirect').replace(origin(A), me)
             return self.send(200, body.encode())
         if path.startswith('/iiif/redirect/'):
             return self.send(302, extra=[('Location', origin(B) + '/iiif/grid/' + self.path[len('/iiif/redirect/'):])])
         if path == '/manifests/grid/manifest':
-            return self.send(200, fixture('manifest-rumsey-shaped.json').replace(origin(A), origin(here)).encode())
+            return self.send(200, fixture('manifest-rumsey-shaped.json').replace(origin(A), me).encode())
         if path.startswith('/iiif') and path.rsplit('/', 1)[-1].startswith('default.'):
             return self.send(200, (ROOT / 'grid.jpg').read_bytes(), 'image/jpeg')
         return self.send(404, b'{"error":"not a fixture"}')

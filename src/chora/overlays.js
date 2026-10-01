@@ -34,12 +34,48 @@ import { originOf } from './consent.js';
 export const ALLMAPS_ANNOTATIONS = 'https://annotations.allmaps.org';
 export const ALLMAPS_EDITOR = 'https://editor.allmaps.org';
 
-/** The sites a step needs agreed to, of one kind, before it can go on. */
+/**
+ * The sites a step needs agreed to, of one kind, before it can go on. `fetch`, when the step is to
+ * fetch a georeference from that address (not to look for one), is the address, for the notice.
+ */
 export class NeedConsent extends Error {
-  constructor(origins, kind, name) {
+  constructor(origins, kind, name, { fetch } = {}) {
     super(`${origins.join(', ')} must be agreed to (${kind}) first.`);
     this.name = 'NeedConsent'; this.origins = origins; this.kind = kind; this.mapName = name;
+    if (fetch) this.fetch = fetch;
   }
+}
+
+/**
+ * A page of several georeferences (Allmaps' /images/<id> often holds several of one image): the user
+ * chooses one. `choices` [{ index, id, label, modified, gcps }], `defaultIndex` the most recently
+ * changed; `annotation`, `fetchedAt` and `url` are what was fetched, so that nothing is fetched again.
+ */
+export class NeedChoice extends Error {
+  constructor(annotation, { fetchedAt = null, url = null, manifest = null } = {}) {
+    const choices = choicesOf(annotation);
+    super(`The georeference holds ${choices.length} georeferences of the map: choose one.`);
+    this.name = 'NeedChoice'; this.annotation = annotation; this.choices = choices; this.defaultIndex = newestChoice(choices);
+    this.fetchedAt = fetchedAt; this.url = url; this.manifest = manifest;
+  }
+}
+const itemsOf = (a) => (typeOf(a) === 'AnnotationPage' ? (Array.isArray(a.items) ? a.items : []) : [a]);
+/** Each georeference of a page, as the choice shows it: { index, id, label, modified, gcps }. */
+export function choicesOf(annotation) {
+  return itemsOf(annotation).map((item, index) => {
+    const source = item?.target?.source || {};
+    const canvas = partOfCanvases(source)[0];
+    const label = labelText(item?.label) || (canvas && labelText(canvas.label)) || null;
+    const when = [item?.modified, item?.created].find((d) => typeof d === 'string' && !Number.isNaN(Date.parse(d))) || null;
+    const gcps = Array.isArray(item?.body?.features) ? item.body.features.length : null;
+    return { index, id: item?.id ?? item?.['@id'] ?? null, label, modified: when, gcps };
+  });
+}
+/** The index of the most recently changed (the first, when none says when; a date beats none). */
+export function newestChoice(choices) {
+  let best = choices[0]?.index ?? 0, at = -Infinity;
+  for (const c of choices) { const t = c.modified ? Date.parse(c.modified) : NaN; if (Number.isFinite(t) && t > at) { at = t; best = c.index; } }
+  return best;
 }
 
 /**
@@ -142,12 +178,23 @@ export async function resolve(parsed, { guard, consented, now = () => new Date()
   }
   if (parsed.kind === 'annotation-url') {
     const kind = annotationKind(parsed.url);
-    need([originOf(parsed.url)], kind);
+    const site = originOf(parsed.url);
+    // Fetching this georeference, not looking for one: the notice says so.
+    if (!consented(site, kind)) throw new NeedConsent([site], kind, undefined, { fetch: parsed.url });
     const annotation = await guard.json(parsed.url, kind);
     if (!isAnnotation(annotation)) throw new DataError(`${parsed.url} is not a georeference (a IIIF Georeference Annotation).`);
     return resolve({ kind: 'annotation', annotation, fetchedAt: now(), url: parsed.url }, { guard, consented, now });
   }
   if (parsed.kind === 'annotation') {
+    // A page of several: one is chosen first (nothing is fetched until then), and that one alone goes on.
+    if (itemsOf(parsed.annotation).length > 1) {
+      if (parsed.index === undefined || parsed.index === null) {
+        throw new NeedChoice(parsed.annotation, { fetchedAt: parsed.fetchedAt || null, url: parsed.url || null, manifest: parsed.manifest || null });
+      }
+      const item = itemsOf(parsed.annotation)[parsed.index];
+      if (!item) throw new DataError(`The georeference has no map ${parsed.index + 1} to choose.`);
+      return resolve({ ...parsed, annotation: item, index: undefined }, { guard, consented, now });
+    }
     const { service, manifest } = namedIn(parsed.annotation);
     if (!service) throw new DataError('The georeference names no image.');
     // The image's site and the manifest's, asked about together.
@@ -206,6 +253,20 @@ function itemOf(annotation, g) {
   return items.find((a) => normaliseId(a?.id ?? a?.['@id']) === normaliseId(g.annotationId)) || items[0];
 }
 
+/**
+ * The georeference as the renderer is to be given it: naming its image by the id the image information
+ * gives, exactly. Admission compares the two normalised (a trailing slash is the same image), but the
+ * renderer looks the information it was given up by the id as written, and fetches it again itself
+ * when the two differ. A copy; what was given is not changed.
+ */
+function withImageId(item, infoId) {
+  const source = item?.target?.source;
+  if (!source || typeof source !== 'object' || typeof infoId !== 'string') return item;
+  const key = 'id' in source || !('@id' in source) ? 'id' : '@id';
+  if (source[key] === infoId) return item;
+  return { ...item, target: { ...item.target, source: { ...source, [key]: infoId } } };
+}
+
 /** The words shown when historical maps cannot be shown safely in this browser. */
 export const REFUSED = 'Historical maps cannot be shown in this browser: the page could not confirm that its protection stops a map\'s image server from sending your requests on to other sites. Nothing was asked of the map\'s server.';
 
@@ -217,6 +278,7 @@ export const REFUSED = 'Historical maps cannot be shown in this browser: the pag
  */
 export async function admit(resolved, { guard, consented, canary }) {
   if (!canary) throw new DataError(REFUSED);
+  if (itemsOf(resolved.annotation).length > 1) throw new NeedChoice(resolved.annotation, { fetchedAt: resolved.fetchedAt || null, manifest: resolved.manifest || null });
   const notes = [...(resolved.notes || [])];
   let g, manifest = resolved.manifest || null;
   try { g = await readGeoreference(resolved.annotation, manifest ? { manifest } : {}); } catch (e) {
@@ -236,7 +298,7 @@ export async function admit(resolved, { guard, consented, canary }) {
     throw new DataError(`The image server says the image is at ${infoId ?? '(no address)'}, not at ${g.imageServiceId}, where the georeference places it. The map was not shown: its image would have been asked for there.`);
   }
   return {
-    g, item: itemOf(resolved.annotation, g), info, manifest, manifestUrl: resolved.manifestUrl || null, fetchedAt: resolved.fetchedAt || null,
+    g, item: withImageId(itemOf(resolved.annotation, g), infoId), info, manifest, manifestUrl: resolved.manifestUrl || null, fetchedAt: resolved.fetchedAt || null,
     title: g.title || labelText(manifest?.label) || 'A map with no title', attribution: attributionOf(manifest, g.imageServiceId), notes,
   };
 }

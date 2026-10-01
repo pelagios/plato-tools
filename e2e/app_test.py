@@ -229,7 +229,7 @@ def report():
 # The map is WebGL: the software-GL switches are kept as insurance (with none, the map still drew on
 # this machine), and --no-gl-flags measures that again. Waits are on the page's own state
 # (window.__chora) and on the map instance, never on a fixed sleep.
-import csv, re, unicodedata
+import csv, hashlib, re, unicodedata
 from urllib.parse import urlparse
 GL = [] if '--no-gl-flags' in sys.argv else ['--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader']
 NOTOOLS = 'data:text/html,<title>no tools here</title><input id=picker type=file multiple>'
@@ -319,7 +319,8 @@ def rendered(page, layers):
 def kept(page, name):
     """The drawings kept on the origin private file system for the file called `name`: what a reload finds."""
     return page.evaluate('''async (name) => { let d; try { d = await (await navigator.storage.getDirectory()).getDirectoryHandle('chora-drafts'); } catch { return []; }
-      for await (const h of d.values()) { const x = JSON.parse(await (await h.getFile()).text()); if (x.fingerprint.split('|')[0] === name) return x.drafts; } return []; }''', name)
+      for await (const h of d.values()) { let x; try { x = JSON.parse(await (await h.getFile()).text()); } catch { continue; }   // a write never finished: nothing kept
+        if (x.fingerprint.split('|')[0] === name) return x.drafts; } return []; }''', name)
 
 def opfs_names(page, directory):
     return page.evaluate('''async (dir) => { try { const d = await (await navigator.storage.getDirectory()).getDirectoryHandle(dir); const n = [];
@@ -385,7 +386,7 @@ def chora_checks(pw, url, tmp):
         chora_boot(page, base)
         until(page, '() => window.__chora.canary !== "pending"', 15)
         c = page.evaluate(CSP_JS); pol = directives(c['policy'])
-        return (c['first'] and pol.get('connect-src') == "'self' data: blob:" and pol.get('worker-src') == "'self' blob:" and pol.get('default-src') == "'self'"
+        return (c['first'] and pol.get('connect-src') == "'self' blob:" and pol.get('worker-src') == "'self' blob:" and pol.get('default-src') == "'self'"
                 and c['published'] and c['published']['origins'] == [] and c['canary'] == 'enforced' and c['directive'] == 'connect-src'), c
     attempt('Chora: first in its <head> is a Content Security Policy that lets it reach this site alone, and the canary finds it enforced in a blob: worker', csp_first)
     def canary_can_fail():
@@ -874,6 +875,27 @@ AGREE_JS = """(pts) => { const o = window.__chora_overlays; return Promise.all(o
   return { annotation: e.g.annotationId, type: wm.transformationType, n: pts.length, worst: d(r, g), lonlat: d(rl, g), order1: d(r1, g), self: d(r, r),
            mapIds: o.layer.getMapIds().includes(e.mapId) }; })); }"""
 
+# Faults the page must survive, installed on the page before its own scripts (Playwright's init scripts
+# are not subject to the page's policy), each active only while its flag is set in sessionStorage, which
+# lasts across the page's own reloads: a consent that the browser will not store, and the browser's file
+# store slow to write (so that a reload can come before a write has finished, as it may for a user).
+STUBS = """(() => {
+  const set = Storage.prototype.setItem;
+  Storage.prototype.setItem = function (k, v) {
+    if (k === 'chora-consent' && this === window.localStorage && window.sessionStorage.getItem('e2e-consent-write-fails')) throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+    return set.call(this, k, v);
+  };
+  const W = window.FileSystemWritableFileStream;
+  if (W) {
+    const write = W.prototype.write;
+    W.prototype.write = async function (...a) {
+      const ms = Number(window.sessionStorage.getItem('e2e-slow-writes') || 0);
+      if (ms) await new Promise((r) => setTimeout(r, ms));
+      return write.apply(this, a);
+    };
+  }
+})()"""
+
 def iiif_checks(pw, url, tmp):
     fx = start_fixtures(tmp); A, B, log = fx['A'], fx['B'], fx['log']
     base = url.rstrip('/') + '/'
@@ -884,6 +906,7 @@ def iiif_checks(pw, url, tmp):
     ctx.on('page', lambda p: p.on('pageerror', lambda e: errors.append(str(e)[:200])))
     page = ctx.pages[0] if ctx.pages else ctx.new_page()
     page.on('pageerror', lambda e: errors.append(str(e)[:200]))
+    page.add_init_script(STUBS)
     def census(since=0):
         return [json.loads(l) for l in log.read_text().splitlines()[since:]]
     def at_origin(rows, o): return [r for r in rows if f"127.0.0.1:{r['port']}" == urlparse(o).netloc]
@@ -930,6 +953,21 @@ def iiif_checks(pw, url, tmp):
             'notice': notice, 'asked before agreeing': early, 'navigations': navs, 'census after': [(r['port'], r['status'], r['path']) for r in rows], 'overlays': s['overlays'], 'canary': s['canary']}
     attempt('Chora maps: nothing is asked of a map\'s server until the user agrees to it by name; then one reload, and its image information and tiles, from it alone', before_consent)
 
+    def sites_listed():
+        # Any page of this site can write what Chora keeps in this browser (the policy guards against map
+        # servers, not against other pages here): the sites agreed to are listed, as stored, so a site
+        # planted there is seen. Planted before the load, as such a page would.
+        page.evaluate("() => { const c = JSON.parse(localStorage.getItem('chora-consent') || '[]'); c.push({ origin: 'https://planted.example.org', kind: 'basemap' }); localStorage.setItem('chora-consent', JSON.stringify(c)); }")
+        page.reload(); until(page, '() => window.__chora && window.__chora.phase === "ready" && window.__chora.canary !== "pending"', 60)
+        listed = soon(page, '() => /planted\\.example\\.org/.test(document.getElementById("agreed-sites")?.textContent || "")', 15)
+        rows = page.eval_on_selector_all('#agreed-sites li', 'ls => ls.map((l) => [l.dataset.site, l.dataset.kind, l.textContent.trim()])')
+        drew = shown(page, grid_id)
+        row = page.inner_text('#overlay-list li') if drew else ''
+        page.evaluate("() => localStorage.setItem('chora-consent', JSON.stringify(JSON.parse(localStorage.getItem('chora-consent')).filter((c) => c.origin !== 'https://planted.example.org')))")
+        return (listed and ['https://planted.example.org', 'basemap'] in [r[:2] for r in rows] and [A, 'iiif'] in [r[:2] for r in rows]
+                and any('a basemap' in r[2] for r in rows if r[0] == 'https://planted.example.org') and drew and f'Image from {A}' in row), {'listed': rows, 'map row': row[:300]}
+    attempt('Chora maps: the sites agreed to in this browser are listed by the "Forget" control, a site planted in storage before the load among them; each map names its image\'s site', sites_listed)
+
     GRID5 = [[64 + 96 * i, 64 + 96 * j] for i in range(5) for j in range(5)]
     def agreement_order1():
         r = page.evaluate(AGREE_JS, GRID5)
@@ -948,6 +986,64 @@ def iiif_checks(pw, url, tmp):
         return (drew and two and two['mapIds'] and two['self'] == 0 and two['type'] == 'polynomial2' and two['worst'] <= 1e-7 and two['lonlat'] <= 1e-7 and two['order1'] > 1
                 and at_origin(census(since), B) == []), {'order 2': two, 'drew': drew}
     attempt('Chora maps: an order-2 map is drawn at order 2 (set from its georeference), agreeing with georef to 1e-7 m; order 1 would be metres off', agreement_order2)
+
+    def several():
+        # Allmaps' /images/<id> often answers with several georeferences of one image: the user chooses.
+        older = annotation(id='https://annotations.allmaps.org/maps/00000000000000a1'); older['modified'] = '2026-09-01T10:00:00.000Z'
+        newer = annotation('annotation-order2.json', id='https://annotations.allmaps.org/maps/00000000000000a2'); newer['modified'] = '2026-09-30T10:00:00.000Z'
+        paste(page, {'id': 'https://annotations.allmaps.org/images/e564650581f5f6bb', 'type': 'AnnotationPage', 'items': [older, newer]})
+        offered = soon(page, '() => document.querySelectorAll("#map-choice input[name=georef-choice]").length === 2', 15)
+        said = page.inner_text('#map-status')
+        checked = page.get_attribute('#map-choice input[name=georef-choice]:checked', 'value') if offered else None
+        if offered: page.click('#map-choose')
+        got = soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id)', 20, newer['id'])
+        return (offered and checked == '1' and '4 control points' in said and '9 control points' in said and '2026-09-30' in said and '2026-09-01' in said
+                and 'index option' not in said and got and not any(o['annotationId'] == older['id'] for o in cstate(page)['overlays'])), {'said': said, 'default': checked, 'shown': got}
+    attempt('Chora maps: a georeference holding several maps offers a choice, each with its date and control points, the newest chosen by default; the one chosen is shown', several)
+
+    def raw_image_id():
+        # The georeference names the image with a trailing slash; its image information without. The same
+        # image to admission; the renderer must still be given the information under the id it looks up,
+        # or it fetches the information again, itself, unguarded (the server's own log counts that).
+        since = len(census()); rid = 'https://annotations.allmaps.org/maps/00000000000000b1'
+        paste(page, annotation(service='/iiif/grid/', id=rid))
+        got = soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.mapId)', 20, rid)
+        page.evaluate(SETTLE); page.wait_for_timeout(1500)
+        infos = [r['path'] for r in census(since) if r['path'].endswith('info.json')]
+        return got and infos == ['/iiif/grid/info.json'], {'admitted': got, 'image information asked for': infos}
+    attempt('Chora maps: a map whose georeference and image information write the image\'s id differently is shown with the information the page fetched; the renderer asks for none of its own', raw_image_id)
+
+    def bad_site():
+        # A site no policy can name (an underscore in its host): said plainly, never an error in the page.
+        before = len(errors)
+        paste(page, 'http://my_host.example.org/maps/grid/manifest')
+        soon(page, '() => !!document.getElementById("map-yes") || /plain web address/.test(document.getElementById("map-status").textContent)', 10)
+        if page.query_selector('#map-yes'): page.click('#map-yes')
+        said = soon(page, '() => /plain web address/.test(document.getElementById("map-status").textContent)', 5)
+        text = page.inner_text('#map-status')
+        return said and 'my_host.example.org' in text and not page.query_selector('#map-yes') and len(errors) == before, {'said': text, 'page errors': errors[before:]}
+    attempt('Chora maps: a map on a site that cannot be put in the page\'s policy is refused in plain words, with no error in the page', bad_site)
+
+    def refusal_in_maps_panel():
+        # The browser will not keep the consent: the page reloads once for it, finds the site still not in
+        # its policy, and on the next agreement says so where the map was asked for, not "Reading…".
+        refused = json.loads(json.dumps(annotation(id='https://annotations.allmaps.org/maps/00000000000000c1')).replace(A, 'https://refused.example.org'))
+        page.evaluate("() => sessionStorage.setItem('e2e-consent-write-fails', '1')")
+        navs = []
+        try:
+            paste(page, refused)
+            asked = soon(page, '() => !!document.getElementById("map-yes")', 10)
+            agree_map(page)
+            again = soon(page, '() => !!document.getElementById("map-yes")', 30)
+            listen = lambda fr: navs.append(fr.url) if fr == page.main_frame else None
+            page.on('framenavigated', listen)
+            if again: page.click('#map-yes')
+            said = soon(page, '() => /could not be given leave/.test(document.getElementById("map-status").textContent)', 10)
+            page.wait_for_timeout(1000)
+            text = page.inner_text('#map-status'); page.remove_listener('framenavigated', listen)
+        finally: page.evaluate("() => sessionStorage.removeItem('e2e-consent-write-fails')")
+        return (asked and again and said and 'refused.example.org' in text and 'Reading' not in text and navs == [] and cstate(page)['phase'] != 'reloading'), {'said': text, 'asked': asked, 'asked again': again, 'navigations': navs}
+    attempt('Chora maps: when the page cannot be given leave to reach a map\'s site, the maps panel says so (not "Reading…"), and it does not reload again', refusal_in_maps_panel)
 
     def foreign_id():
         since = len(census())
@@ -1085,6 +1181,29 @@ def iiif_checks(pw, url, tmp):
             'came back': back, 'notice': notice, 'asked after forgetting': census(since), 'policy': c['published']}
     attempt('Chora maps: a map shown comes back on the next load; after "Forget the sites", it is asked about again, and nothing is asked of its server', come_back_and_forget)
 
+    def kept_asked_together():
+        # Two maps kept from last time, on two sites, neither agreed to (after "Forget"): one notice names
+        # both, and one reload brings both back. The second site is A's port by another name (localhost).
+        A2 = 'http://localhost:' + A.rsplit(':', 1)[1]
+        pid = 'https://annotations.allmaps.org/maps/00000000000000d1'
+        item = json.loads(json.dumps(annotation(id=pid)).replace(A, A2))
+        entry = {'version': 1, 'key': hashlib.sha256(pid.encode()).hexdigest()[:24], 'item': item, 'manifest': None, 'manifestUrl': None, 'fetchedAt': None,
+                 'opacity': 1, 'visible': True, 'added': '2026-10-01T00:00:00.000Z'}
+        page.evaluate("""async (e) => { const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('chora-overlays', { create: true });
+          const w = await (await d.getFileHandle(e.key + '.json', { create: true })).createWritable(); await w.write(JSON.stringify(e)); await w.close(); }""", entry)
+        page.reload(); until(page, '() => window.__chora && window.__chora.phase === "ready" && window.__chora.canary !== "pending"', 60)
+        asked = soon(page, '() => !!document.getElementById("map-yes")', 30)
+        page.wait_for_timeout(1000)                              # every kept map has been read by now
+        notice = page.inner_text('#map-consent-text') if asked else ''
+        navs = []; listen = lambda fr: navs.append(fr.url) if fr == page.main_frame else None
+        page.on('framenavigated', listen)
+        if asked: agree_map(page)
+        both = soon(page, 'ids => ids.every((id) => window.__chora.overlays.some((o) => o.annotationId === id))', 40, [grid_id, pid])
+        page.wait_for_timeout(1000); page.remove_listener('framenavigated', listen)
+        return (asked and A in notice and A2 in notice and both and len(navs) == 1 and not page.query_selector('#map-yes')), {
+            'notice': notice, 'both back': both, 'navigations': navs, 'overlays': [o['annotationId'] for o in cstate(page)['overlays']]}
+    attempt('Chora maps: maps kept from last time on two sites not agreed to are asked about in one notice naming both, and come back after one reload', kept_asked_together)
+
     def no_policy():
         # The same page served without its policy script: maps are refused, in words, and nothing is asked.
         def strip(route):
@@ -1101,6 +1220,25 @@ def iiif_checks(pw, url, tmp):
         finally: page.unroute('**/chora.html', strip)
         return s['canary'] == 'not-enforced' and 'cannot be shown in this browser' in said and rows == [] and s['overlays'] == [], {'canary': s['canary'], 'said': said, 'census': rows}
     attempt('Chora maps: with no policy on the page (the canary finds none), maps are refused in words and their server is asked nothing', no_policy)
+    def draft_survives_reload():
+        # A drawing made, and the page reloaded for a consent at once ("Forget the sites"), while the
+        # browser is still writing the drawing (its writes slowed): the reload waits for the write.
+        f = tmp / 'chora-files' / 'reload-draft.json'; f.parent.mkdir(exist_ok=True)
+        f.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': 'https://example.org/g', 'title': 'Reload'}, 'spatialEntities': [
+            {'@id': 'https://example.org/p/cambridge', 'label': 'Cambridge', 'attestations': [{'names': [{'toponym': 'Cambridge'}], 'sources': [{'title': 's'}]}]}]}))
+        chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
+        page.evaluate("() => sessionStorage.setItem('e2e-slow-writes', '2500')")
+        try:
+            x, y = map_centre(page)
+            draw(page, 'point', [(x - 40, y - 40)])
+            made = cstate(page)['pendingCount']
+            with page.expect_navigation(timeout=T(30) * 1000): page.click('#forget-sites')
+            until(page, '() => window.__chora && window.__chora.resumed && ["loaded", "place"].includes(window.__chora.phase)', 60)
+            after = cstate(page)['pendingCount']
+        finally: page.evaluate("() => sessionStorage.removeItem('e2e-slow-writes')")
+        k = kept(page, 'reload-draft.json')
+        return made == 1 and after == 1 and len(k) == 1, {'drawn before the reload': made, 'after it': after, 'kept': len(k)}
+    attempt('Chora maps: a drawing made just before a reload for a consent is still there after it (the reload waits for the drawing to be kept)', draft_survives_reload)
     attempt('Chora maps: across these checks, origin B was never asked for anything, and no page error', lambda: (len(census()) > 5 and at_origin(census(), B) == [] and not errors, {'census': len(census()), 'B': at_origin(census(), B), 'errors': errors[:5]}))
     ctx.close()
 

@@ -23,6 +23,8 @@ export async function loadDrafts(fp) {
 }
 /** Keep `drafts` for these files; an empty list removes the file. Writes are queued, so the last one wins. */
 let queue = Promise.resolve();
+/** Resolves once every write asked for so far has finished (or failed): a reload waits for it. */
+export const draftsWritten = () => queue;
 export function saveDrafts(fp, drafts) {
   queue = queue.then(async () => {
     const d = await dir(), name = await fileName(fp);

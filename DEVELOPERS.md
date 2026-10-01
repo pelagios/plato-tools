@@ -210,7 +210,8 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
 - **The hard block.** The first script in `chora.html`'s `<head>` (`src/chora/csp-head.js`, put
   there inline by `scripts/vite-chora-csp.mjs`, in the dev server and the build alike) writes a
   Content Security Policy in a `<meta>` tag before the page requests anything: `connect-src` and
-  `img-src` this site and the sites the user has agreed to, `worker-src 'self' blob:`,
+  `img-src` this site and the sites the user has agreed to (`connect-src` with `blob:` but no `data:`:
+nothing on the page fetches one), `worker-src 'self' blob:`,
   `default-src 'self'`, no `unsafe-eval`. CSP Level 3 checks every hop of a redirect, and a worker
   made from a `blob:` takes the page's policy, so it holds for the historical maps' tile workers,
   where no page code can see a request. Only a plain lower-case `http(s)` origin reaches the policy,
@@ -235,7 +236,13 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   three kinds, each with its notice ending "It sees nothing of your data": `basemap`, `iiif` (a
   historical map's image server and its manifest's site) and `allmaps` (`annotations.allmaps.org`).
   The basemap consents kept before there were kinds are carried over once. "Forget the sites I
-  agreed to" empties the record and reloads: each site is asked about again.
+  agreed to" empties the record and reloads: each site is asked about again. The sites agreed to are
+  listed beside it, as stored (`renderSites`), and each map's row names its image's site: the policy
+  guards against map servers, not against other pages of this site, which can write the same storage.
+  A site no policy could name (an underscore in its host, say) is refused in words, never asked about.
+  A reload refused (the sites still not in the policy) is said where it was asked for: the maps panel
+  for a map. A reload waits for the drafts being written (`draftsWritten` in `drafts.js`). The maps
+  kept from last time are asked about together, in one notice, so one reload brings them all back.
 - **Other basemaps** (OpenFreeMap, OpenStreetMap, CARTO, or a pasted style or tile address) are
   used only after a notice naming who will see the requests: the site of the basemap's address
   first, then any other its style names (its sources, TileJSON tiles, glyphs and sprites: the page
@@ -257,11 +264,16 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   asking about every site a step needs at once, before anything is fetched; a manifest is one step
   and its images the next. With no georeference, Allmaps is asked only on "Look for a georeference"
   (`/images/<id of the image service>`, then `?url=`), and otherwise the Allmaps Editor is linked.
+  A georeference of several maps (Allmaps' `/images/<id>` often holds several of one image) is a
+  choice (`NeedChoice`): each with its label, date and number of control points, the most recently
+  `modified` offered first; the one chosen goes on alone.
   Every document is fetched through the guard: only from a site agreed to and in the policy, with
   no credentials. **Admission** (`admit`): the page fetches the image's `info.json` itself, with
   `redirect: 'error'`, and refuses the map unless the id it gives IS the image the georeference
   names (the renderer builds tile addresses from that id); it then gives the renderer the
-  information (`addImageInfos`, so the renderer asks for none) and the annotation, and sets the
+  information (`addImageInfos`, so the renderer asks for none) and the annotation, naming the image by
+  the id the information gives exactly (the renderer looks it up as written, so `…/grid/` against
+  `…/grid` would have it fetch the information again itself), and sets the
   map's transformation from the georeference (`setMapTransformationType`): the renderer takes the
   transformation's type but not a polynomial's order, and would draw an order-2 map at order 1.
   Maps shown are kept in OPFS (`chora-overlays/`) and admitted afresh on the next load; a change of
@@ -285,7 +297,7 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   map shown whose mask holds it whole, else the topmost holding part of it (with a warning); a
   georeference that cannot place it (a fold) passes to the next. It keeps georef's `toPixels`
   record and its box of image pixels (at least 1 px each way; 32 canvas px of context for a point,
-  none for a line or area), and must come back through the georeference to within 0.05 of the map's
+  none for a line or area, put into the region by `withContext` itself, so georef is passed no pad), and must come back through the georeference to within 0.05 of the map's
   pixels there, or it is not kept. Saved, it cites the map (`georefCitation`, the canvas and the box
   as the locator; `cito:citesAsEvidence`) and the georeference (`georefAnnotationCitation`,
   `cito:usesMethodIn`, derived from the map), and its notes are `choraTracingNote` then `georefNote`

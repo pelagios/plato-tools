@@ -347,3 +347,77 @@ test('the layer manager gives the renderer the image information first, then the
   assert.equal(net.calls.length, calls);
   assert.ok(mf.remove('k')); assert.deepEqual(log.at(-1), ['remove', 'map-1']);
 });
+
+// ---- A page of several georeferences, and the image's id as the renderer keys it -----------------
+
+const ORDER2 = json('annotation-order2.json');
+/** Allmaps' /images/<id> often answers with several georeferences of one image: two here, the newer second. */
+const TWO = { id: 'https://annotations.allmaps.org/images/e564650581f5f6bb', type: 'AnnotationPage', items: [
+  { ...ANN, id: 'https://annotations.allmaps.org/maps/00000000000000a1', created: '2026-08-01T00:00:00.000Z', modified: '2026-09-01T10:00:00.000Z' },
+  { ...ORDER2, id: 'https://annotations.allmaps.org/maps/00000000000000a2', created: '2026-08-02T00:00:00.000Z', modified: '2026-09-30T10:00:00.000Z' },
+] };
+
+test('a page of several georeferences is a choice, offered before anything is fetched, the newest by default; never the reader\'s message', async () => {
+  const net = network({ [`${A}/manifests/grid/manifest`]: MANIFEST, [`${A}/iiif/grid/info.json`]: json('info-v2.json') });
+  let asked = null;
+  await assert.rejects(ov.resolve({ kind: 'annotation', annotation: TWO, fetchedAt: NOW() }, { ...net, now: NOW }), (e) => { asked = e; return e instanceof ov.NeedChoice; });
+  assert.deepEqual(net.calls, [], 'nothing fetched before the choice');
+  assert.equal(asked.defaultIndex, 1, 'the most recently changed');
+  assert.deepEqual(asked.choices.map((c) => [c.index, c.id, c.modified, c.gcps]), [
+    [0, TWO.items[0].id, '2026-09-01T10:00:00.000Z', 4], [1, TWO.items[1].id, '2026-09-30T10:00:00.000Z', 9]]);
+  assert.ok(asked.choices.every((c) => c.label === 'A synthetic grid'), JSON.stringify(asked.choices));
+  assert.equal(asked.annotation, TWO); assert.equal(asked.fetchedAt, NOW());
+  assert.doesNotMatch(asked.message, /index option|canvasId/);
+  // Newest by `modified`, wherever it is in the page; one with no date is never preferred to one with a date.
+  assert.equal(ov.newestChoice([{ index: 0, modified: '2026-09-30T00:00:00Z' }, { index: 1, modified: '2026-01-01T00:00:00Z' }, { index: 2 }]), 0);
+  assert.equal(ov.newestChoice([{ index: 0 }, { index: 1 }]), 0);
+  // Chosen: that one alone goes on, with when the page was fetched.
+  const r = await ov.resolve({ kind: 'annotation', annotation: TWO, fetchedAt: NOW(), index: 0 }, { ...net, now: NOW });
+  assert.equal(r.annotation.id, TWO.items[0].id); assert.equal(r.fetchedAt, NOW());
+  const a = await ov.admit(r, { ...net, canary: true });
+  assert.equal(a.g.annotationId, TWO.items[0].id); assert.equal(a.item.id, TWO.items[0].id);
+  // Given the whole page, admission asks for the choice too, rather than failing in the reader's words.
+  await assert.rejects(ov.admit({ annotation: TWO, manifest: null, notes: [] }, { ...net, canary: true }), (e) => e instanceof ov.NeedChoice && e.defaultIndex === 1);
+  // A page fetched from its address: the choice carries what was fetched, so nothing is fetched again.
+  const url = 'https://annotations.allmaps.org/images/e564650581f5f6bb';
+  const net2 = network({ [url]: TWO }, { agreed: [[ov.ALLMAPS_ANNOTATIONS, 'allmaps']] });
+  await assert.rejects(ov.resolve(ov.parseInput(url), { ...net2, now: NOW }), (e) => e instanceof ov.NeedChoice && e.url === url && e.fetchedAt === NOW() && e.annotation.items.length === 2);
+  assert.deepEqual(net2.calls, [url]);
+});
+
+test('admission gives the renderer the georeference with the image\'s id exactly as the image information gives it, which is how the renderer looks it up', async () => {
+  // The annotation names the image with a trailing slash; its information without: the same image to
+  // admission, and two keys to the renderer, which would then fetch the information again itself.
+  const slash = structuredClone(ANN); slash.target.source.id = `${A}/iiif/grid/`;
+  const net = network({ [`${A}/iiif/grid/info.json`]: json('info-v2.json') });
+  const a = await ov.admit({ annotation: slash, manifest: null, notes: [] }, { ...net, canary: true });
+  assert.equal(a.item.target.source.id, `${A}/iiif/grid`);
+  assert.equal(slash.target.source.id, `${A}/iiif/grid/`, 'what was given is not changed');
+  // The other way round, and with the image information of Image API 3 (id, not @id).
+  const v3 = structuredClone(json('info-v3.json')); v3.id = `${A}/iiif3/grid/`;
+  const plain = structuredClone(ANN); plain.target.source.id = `${A}/iiif3/grid`;
+  const net3 = network({ [`${A}/iiif3/grid/info.json`]: v3 });
+  const b = await ov.admit({ annotation: plain, manifest: null, notes: [] }, { ...net3, canary: true });
+  assert.equal(b.item.target.source.id, `${A}/iiif3/grid/`);
+  // The control: ids that agree already are left as they are.
+  const same = await ov.admit({ annotation: ANN, manifest: null, notes: [] }, { ...network({ [`${A}/iiif/grid/info.json`]: json('info-v2.json') }), canary: true });
+  assert.equal(same.item.target.source.id, ANN.target.source.id);
+});
+
+test('a georeference\'s address on Allmaps is asked about as fetching that georeference, not as looking for one', async () => {
+  const url = 'https://annotations.allmaps.org/maps/0000000000000001';
+  const net = network({ [url]: ANN }, { agreed: [] });
+  let e = null;
+  await assert.rejects(ov.resolve(ov.parseInput(url), { ...net, now: NOW }), (x) => { e = x; return x instanceof ov.NeedConsent; });
+  assert.equal(e.kind, 'allmaps'); assert.equal(e.fetch, url);
+  const { notice } = await import('../src/chora/consent.js');
+  const text = notice('allmaps', { origins: e.origins, fetch: e.fetch });
+  assert.match(text, /^Showing this map fetches its georeference from Allmaps \(https:\/\/annotations\.allmaps\.org\)/);
+  assert.ok(text.includes(url), text);
+  assert.doesNotMatch(text, /Looking for|looked for/);
+  assert.match(text, /It sees nothing of your data, which stays in this tab\.$/);
+  // The control: the lookup's notice is still about looking for one.
+  assert.match(notice('allmaps', { origins: e.origins }), /^Looking for a georeference/);
+  // The lookup is asked without `fetch`.
+  await assert.rejects(ov.lookup([`${A}/iiif/grid`], { ...net, now: NOW }), (x) => x instanceof ov.NeedConsent && x.fetch === undefined);
+});

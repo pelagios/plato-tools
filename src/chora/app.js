@@ -8,7 +8,7 @@ import { newGeometryAttestation, checkGeoJSON, wrapLongitudes, DrawError, ROLES,
 import { createMap, placeFeatures, contextFeatures, STATUS_COLOURS } from './map.js';
 import * as basemaps from './basemaps.js';
 import * as contributors from './contributor.js';
-import { fingerprint, loadDrafts, saveDrafts } from './drafts.js';
+import { fingerprint, loadDrafts, saveDrafts, draftsWritten } from './drafts.js';
 import { take as takeHandoff, keepForReload, takeResume } from './handoff.js';
 import { canary, inPolicy } from './csp.js';
 import * as consents from './consent.js';
@@ -502,6 +502,7 @@ $('basemap-options').addEventListener('click', (e) => {
   if (e.target.id === 'consent-yes') {
     const { b, origins } = asking; asking = null;
     for (const o of origins) basemaps.consent(o);
+    renderSites();
     useBasemap(b);
   } else if (e.target.id === 'consent-no') { asking = null; renderBasemaps(); }
   else if (e.target.dataset.unpaste) {
@@ -557,8 +558,15 @@ async function reloadFor(origins, pending = null) {
   let last = null;
   try { last = JSON.parse(sessionStorage.getItem('chora-reloaded-for')); } catch {}
   if (last && last.key === key && Date.now() - last.at < 60000) {
-    basemapError = state.basemapError = `The page could not be given leave to reach ${key}, so it was not used.`;
-    state.reloadRefused = key; renderBasemaps();
+    state.reloadRefused = key;
+    // Said where it was asked for: the maps panel for a historical map, else the basemaps'.
+    if (pending?.overlay) {
+      mapStatus = `warn:The page could not be given leave to reach ${key.split(' ').join(', ')}, so the map was not shown. This browser may not be keeping what you agree to.`;
+      state.mapError = mapStatus.slice(5); renderMaps();
+    } else {
+      basemapError = state.basemapError = `The page could not be given leave to reach ${key}, so it was not used.`;
+      renderBasemaps();
+    }
     return;
   }
   try { sessionStorage.setItem('chora-reloaded-for', JSON.stringify({ key, at: Date.now() })); } catch {}
@@ -566,6 +574,8 @@ async function reloadFor(origins, pending = null) {
 }
 async function reloadNow(pending = null) {
   state.phase = 'reloading';
+  // A drawing just made may still be being written: a reload now would lose it.
+  await draftsWritten();
   const m = mapApi.map;
   await keepForReload({ files, placeId: state.placeId, camera: { center: m.getCenter().toArray(), zoom: m.getZoom(), bearing: m.getBearing(), pitch: m.getPitch() }, pending });
   location.reload();
@@ -580,6 +590,7 @@ const guard = createGuard({ state, consented: (o, k) => consents.consented(o, k)
 const deps = { guard, consented: (o, k) => consents.consented(o, k) && inPolicy(o) };
 let mapAsk = null;     // {origins, kind, name, pending}: sites to agree to before a map can go on
 let mapOffer = null;   // {services, manifestUrl, title, text, notFound}: a map with no georeference given
+let mapChoice = null;  // {choices, chosen, parsed, manifestUrl}: a georeference of several maps, one to choose
 let mapStatus = '';    // what the page says of the last map added, in words (a warn: prefix is a problem)
 let layers = null;     // the maps' layer on the map (overlays.js createLayerManager), once the map exists
 function initMaps() {
@@ -587,19 +598,45 @@ function initMaps() {
   mapApi.onStyleLoad(() => { layers.attach().then(syncOverlays, (e) => console.warn('Historical maps:', e)); });
   // For automated tests; nothing else reads it.
   window.__chora_overlays = { manager: layers, georef, get layer() { return layers.layer; } };
-  renderMaps();
+  renderMaps(); renderSites();
+}
+
+// The sites agreed to, as this browser keeps them. Any page of this site (not Chora alone) can read and
+// change what is kept here, so the list is shown as it is stored, to be checked.
+const KIND_WORDS = { basemap: 'a basemap', iiif: 'historical maps (their images and descriptions)', allmaps: 'Allmaps (georeferences)' };
+function renderSites() {
+  const list = consents.list();
+  $('agreed-sites').innerHTML = list.length
+    ? `<p class="muted">Agreed to in this browser (other pages of ${esc(location.host)} could change this list, so check that it is what you agreed to):</p>
+      <ul class="sites">${list.map((c) => `<li data-site="${esc(c.origin)}" data-kind="${esc(c.kind)}"><code>${esc(c.origin)}</code> <span class="muted">for ${esc(KIND_WORDS[c.kind] || c.kind)}</span></li>`).join('')}</ul>`
+    : '<p class="muted">No other site has been agreed to in this browser.</p>';
 }
 
 /** The needs of a step, where "agreed to" also means in the page's policy (else a reload is due). */
 function needFrom(e, pending) {
+  // A site no policy can name (an underscore in its host, say) cannot be agreed to: said plainly.
+  const bad = e.origins.filter((o) => !consents.isOrigin(o));
+  if (bad.length) return notASite(bad);
   // Agreed to already, but not in this load's policy: the reload is all that is needed.
   if (e.origins.every((o) => consents.consented(o, e.kind))) return reloadFor(e.origins, { overlay: pending });
-  mapAsk = { origins: e.origins, kind: e.kind, name: e.mapName, pending };
+  mapAsk = { origins: e.origins, kind: e.kind, name: e.mapName, fetch: e.fetch, maps: e.maps, pending };
+  mapStatus = '';
   renderMaps();
 }
-/** Add a map from what was pasted (pending: {text, lookup}) or kept (pending: {kept}). */
-async function addMap(pending) {
-  mapAsk = null; mapStatus = 'Reading…'; renderMaps();
+function notASite(bad) {
+  mapAsk = null;
+  mapStatus = `warn:${bad.join(', ')} ${bad.length === 1 ? 'is not a site' : 'are not sites'} this page can be given leave to reach (only a plain web address, such as https://example.org, can be), so the map was not shown.`;
+  state.mapError = mapStatus.slice(5);
+  renderMaps();
+}
+/**
+ * Add a map from what was pasted (pending: {text, lookup}), kept (pending: {kept}), or chosen from a
+ * georeference of several (pending: {parsed, manifestUrl}); pending {readmit} is the maps kept, all.
+ * With `collect`, a site to agree to is returned (NeedConsent) rather than asked about.
+ */
+async function addMap(pending, { collect = false } = {}) {
+  if (pending.readmit) { mapStatus = ''; return readmitKept(); }
+  mapAsk = null; mapChoice = null; mapStatus = 'Reading…'; renderMaps();
   await canaryDone;
   if (state.canary !== 'enforced') { mapStatus = `warn:${ov.REFUSED}`; state.mapError = ov.REFUSED; renderMaps(); return; }
   try {
@@ -609,6 +646,9 @@ async function addMap(pending) {
       if (!keptEntry) { mapStatus = ''; renderMaps(); return; }
       r = await ov.resolve({ kind: 'annotation', annotation: keptEntry.item, manifest: keptEntry.manifest, fetchedAt: keptEntry.fetchedAt }, deps);
       r.manifestUrl = keptEntry.manifestUrl || r.manifestUrl;
+    } else if (pending.parsed) {
+      r = await ov.resolve(pending.parsed, deps);
+      r.manifestUrl ||= pending.manifestUrl || null;
     } else {
       r = await ov.resolve(ov.parseInput(pending.text), deps);
       if (r.services) {
@@ -623,7 +663,18 @@ async function addMap(pending) {
     const a = await ov.admit(r, { ...deps, canary: true });
     await showMap(a, keptEntry);
   } catch (e) {
+    if (collect && (e instanceof ov.NeedConsent || (e instanceof GuardError && e.kind === 'reload'))) {
+      mapStatus = ''; renderMaps();
+      return e instanceof ov.NeedConsent ? e : new ov.NeedConsent([e.origin], 'iiif');
+    }
     if (e instanceof ov.NeedConsent) return needFrom(e, pending);
+    if (e instanceof ov.NeedChoice) {
+      // Several georeferences of the map: the user chooses, the most recently changed offered first.
+      mapChoice = { choices: e.choices, chosen: e.defaultIndex, manifestUrl: mapOffer?.manifestUrl || null,
+        parsed: { kind: 'annotation', annotation: e.annotation, fetchedAt: e.fetchedAt, url: e.url, manifest: e.manifest } };
+      mapOffer = null; mapStatus = ''; renderMaps();
+      return;
+    }
     if (e instanceof GuardError && e.kind === 'reload') return reloadFor([e.origin], { overlay: pending });
     mapStatus = `warn:${e.message}`; state.mapError = e.message;
     renderMaps();
@@ -687,9 +738,16 @@ function renderMaps() {
   const shown = new Map(layers.entries.map((e) => [e.key, e]));
   let html = '';
   if (mapAsk) {
-    html += `<div class="consent" role="alertdialog" aria-labelledby="map-consent-text"><p id="map-consent-text">${esc(consents.notice(mapAsk.kind, { origins: mapAsk.origins, name: mapAsk.name }))}</p>
+    const yes = mapAsk.kind === 'allmaps' ? (mapAsk.fetch ? 'Fetch it from Allmaps' : 'Ask Allmaps') : mapAsk.maps > 1 ? 'Show the maps' : 'Show the map';
+    html += `<div class="consent" role="alertdialog" aria-labelledby="map-consent-text"><p id="map-consent-text">${esc(consents.notice(mapAsk.kind, { origins: mapAsk.origins, name: mapAsk.name, fetch: mapAsk.fetch, maps: mapAsk.maps }))}</p>
       ${mapAsk.origins.some((o) => !inPolicy(o)) ? '<p class="muted">The page will reload once to let it reach them; your drawings and the dataset open are kept.</p>' : ''}
-      <p><button type="button" class="primary" id="map-yes">${mapAsk.kind === 'allmaps' ? 'Ask Allmaps' : 'Show the map'}</button> <button type="button" id="map-no">Not now</button></p></div>`;
+      <p><button type="button" class="primary" id="map-yes">${yes}</button> <button type="button" id="map-no">Not now</button></p></div>`;
+  }
+  if (mapChoice) {
+    const one = (c) => `Georeference ${c.index + 1}${c.label ? `: ${esc(c.label)}` : ''} <span class="muted">(${c.modified ? `changed ${esc(c.modified.slice(0, 10))}` : 'no date given'}, ${c.gcps === null ? 'control points not given' : `${c.gcps} control point${c.gcps === 1 ? '' : 's'}`}${c.id ? `; ${esc(c.id)}` : ''})</span>`;
+    html += `<div class="choice" id="map-choice" role="group" aria-labelledby="map-choice-text"><p id="map-choice-text">This holds ${mapChoice.choices.length} georeferences of the map, made separately. Choose the one to show (the most recently changed is chosen):</p>
+      <ul class="choices">${mapChoice.choices.map((c) => `<li><label><input type="radio" name="georef-choice" value="${c.index}"${c.index === mapChoice.chosen ? ' checked' : ''}> ${one(c)}</label></li>`).join('')}</ul>
+      <p><button type="button" class="primary" id="map-choose">Show this one</button> <button type="button" id="map-choose-no">Not now</button></p></div>`;
   }
   if (mapOffer) {
     const name = mapOffer.title ? `“${esc(mapOffer.title)}”` : 'This map';
@@ -703,6 +761,7 @@ function renderMaps() {
     const a = e.attribution || {};
     const licence = a.licence ? `<a href="${esc(a.licence)}" target="_blank" rel="noopener noreferrer">${esc(a.licenceLabel || a.licence)}</a>` : '';
     return `<li data-overlay="${esc(o.key)}"><p class="overlay-title">${esc(o.title)}</p>
+      <p class="muted">Image from <code>${esc(o.origin)}</code></p>
       ${a.credit ? `<p class="muted">${esc(a.credit)}</p>` : ''}
       ${licence ? `<p class="muted">Licence: ${licence}</p>` : ''}
       ${a.nonCommercial ? `<p class="note">${esc(ov.nonCommercialLine(a))} ${licence}</p>` : ''}
@@ -714,13 +773,19 @@ function renderMaps() {
       <p><a href="${esc(ov.editorUrl(e.manifestUrl, e.g.imageServiceId))}" target="_blank" rel="noopener noreferrer">Open in the Allmaps Editor</a> <small class="muted">(sends the map's address to Allmaps)</small></p></li>`;
   }).join('');
 }
-$('map-form').onsubmit = (e) => { e.preventDefault(); mapOffer = null; addMap({ text: $('map-input').value }); };
+$('map-form').onsubmit = (e) => { e.preventDefault(); mapOffer = null; mapChoice = null; addMap({ text: $('map-input').value }); };
 $('map-status').addEventListener('click', (e) => {
   if (e.target.id === 'map-yes' && mapAsk) {
     const { origins, kind, pending } = mapAsk; mapAsk = null;
-    consents.grant(origins, kind);
+    try { consents.grant(origins, kind); } catch { return notASite(origins.filter((o) => !consents.isOrigin(o))); }
+    renderSites();
     if (origins.some((o) => !inPolicy(o))) reloadFor(origins, { overlay: pending }); else addMap(pending);
   } else if (e.target.id === 'map-no') { mapAsk = null; mapStatus = ''; renderMaps(); }
+  else if (e.target.id === 'map-choose' && mapChoice) {
+    const picked = $('map-status').querySelector('input[name="georef-choice"]:checked');
+    const { parsed, manifestUrl, chosen } = mapChoice; mapChoice = null;
+    addMap({ parsed: { ...parsed, index: picked ? Number(picked.value) : chosen }, manifestUrl });
+  } else if (e.target.id === 'map-choose-no') { mapChoice = null; mapStatus = ''; renderMaps(); }
   else if (e.target.id === 'map-lookup' && mapOffer) addMap({ text: mapOffer.text, lookup: true });
 });
 $('overlay-list').addEventListener('input', (e) => {
@@ -752,9 +817,17 @@ $('forget-sites').onclick = async () => {
   basemaps.choose(basemaps.byId('natural-earth'));
   await reloadNow();
 };
-/** The maps kept from last time, admitted afresh (a site forgotten is asked about again). */
+/**
+ * The maps kept from last time, admitted afresh (a site forgotten is asked about again): every site
+ * they need is asked about in one notice, so that one reload brings them all back.
+ */
 async function readmitKept() {
-  for (const k of await ov.kept()) await addMap({ kept: k.key });
+  const needs = [];
+  for (const k of await ov.kept()) { const need = await addMap({ kept: k.key }, { collect: true }); if (need) needs.push(need); }
+  if (!needs.length) return;
+  // Kept maps need only their own sites (iiif); were another kind needed too, it is asked after the reload.
+  const these = needs.filter((x) => x.kind === needs[0].kind);
+  needFrom({ origins: [...new Set(these.flatMap((x) => x.origins))], kind: these[0].kind, mapName: these.length === 1 ? these[0].mapName : undefined, maps: these.length }, { readmit: true });
 }
 
 // ---- The rest ------------------------------------------------------------------------------------
@@ -829,7 +902,8 @@ startWorker().then(async () => {
     if (resumed.camera) mapApi.map.jumpTo(resumed.camera);
     state.resumed = { files: (resumed.files || []).map((f) => f.name), placeId: resumed.placeId || null, pending: resumed.pending || null };
     await readmitKept();
-    if (resumed.pending?.overlay) await addMap(resumed.pending.overlay);
+    // The maps kept were the pending action: just readmitted.
+    if (resumed.pending?.overlay && !resumed.pending.overlay.readmit) await addMap(resumed.pending.overlay);
     return;
   }
   await readmitKept();

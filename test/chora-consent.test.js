@@ -70,6 +70,10 @@ test('each kind has its notice, naming the sites, and each ends by saying the si
     assert.match(text, /It sees nothing of your data, which stays in this tab\.$/);
   }
   assert.match(consent.notice('allmaps', { origins: ['https://annotations.allmaps.org'] }), /Allmaps/);
+  // Several maps kept from last time, asked about at once: every site named, in one notice.
+  const kept = consent.notice('iiif', { origins: ['https://a.example.org', 'https://b.example.org'], maps: 2 });
+  assert.match(kept, /^The 2 historical maps you had shown are served by https:\/\/a\.example\.org and https:\/\/b\.example\.org\./);
+  assert.match(kept, /It sees nothing of your data, which stays in this tab\.$/);
   assert.throws(() => consent.notice('nothing', { origins: [] }));
 });
 
