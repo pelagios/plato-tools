@@ -297,3 +297,10 @@ test('the attestation each name came from is not kept once the withdrawn names a
   assert.equal(s.search('nova roma').total, 0);
   assert.deepEqual(hits(s.search('lygos')), ['Byzantium — Lygos']);
 });
+
+test('a lone surrogate in a name (possible in JSON) is folded to U+FFFD, as SQLite reads it, so the index and the scan agree', () => {
+  assert.equal(fold('ab\uD800cd'), 'ab�cd');
+  assert.equal(fold('ab\uDC00'), 'ab�');
+  // The control: a well-formed pair is kept as it is.
+  assert.equal(fold('a😀b'), 'a😀b');
+});
