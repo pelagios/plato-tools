@@ -1,28 +1,30 @@
 // The page's side of the hard block (the policy itself is written by the first script in the <head>
 // of index.html and chora.html, src/lib/csp-head.js, and published on window.__platoCsp).
 //
-// - canary(): proof, at startup, that the policy is enforced where it matters: a worker made from a
-//   blob: (as MapLibre's is) asks for https://canary.invalid/, and the policy must stop it, raising a
-//   securitypolicyviolation in that worker. Anything else (no policy written, no violation, a worker
-//   that cannot start, no answer in time) counts as NOT enforced, and src/lib/permissions.js then
-//   asks no other site at all (it fails closed). Measured 2026-10-01 on Chora's branch: Chromium 147
-//   and Firefox (Playwright's build 1538) raise it in the worker; WebKit (Playwright's build 2336)
-//   enforces the policy but raises no event, so there no other site is asked.
+// - canary(): proof, at startup, that the policy is enforced where it matters, in a worker made from a
+//   blob: (as MapLibre's is). The worker fetches a data: address, which nothing but a policy can refuse
+//   (connect-src does not list data:), and, as the control, a blob: address of its own, which the
+//   policy allows: enforced means the first refused and the second fetched. No network is involved.
+//   Anything else (no policy written, the data: fetched, the control refused, a worker that cannot
+//   start, no answer in time) counts as NOT enforced, and src/lib/permissions.js then asks no other site
+//   at all (it fails closed). This replaced waiting for a securitypolicyviolation event, which WebKit
+//   never raises. Measured 2026-10-01 (Playwright 1.62: Chromium 151, Firefox 153, WebKit 26.5): with
+//   the policy, all three refuse the data: fetch in the worker and fetch the blob:; without it (the
+//   spike page), all three fetch both.
 // - blobWorkerUrl(url): a blob: address for a module worker that imports `url`. A worker made from
 //   a same-origin address takes its policy from its own response, not from the page's <meta>; one made
 //   from a blob: takes the page's. MapLibre's worker is made this way, so its requests are under the
 //   policy too.
 // - inPolicy(origin): whether the policy in force lets the page reach that site. A permission allowed
 //   since the page loaded is not in it until the next load.
-const CANARY = 'https://canary.invalid/';
 
 /** The policy written at load ({policy, origins}), or null when there is none (the block is missing). */
 export const policy = () => (typeof window !== 'undefined' && window.__platoCsp) || globalThis.__platoCsp || null;
 /** Whether the policy in force lets the page connect to `origin`. */
 export const inPolicy = (origin) => !!policy()?.origins?.includes(origin);
 
-/** Resolves {enforced: true, directive} or {enforced: false, why}. Never rejects. */
-export function canary({ timeout = 5000, settle = 1000 } = {}) {
+/** Resolves {enforced: true} or {enforced: false, why}. Never rejects. */
+export function canary({ timeout = 5000 } = {}) {
   return new Promise((resolve) => {
     if (!policy()) { resolve({ enforced: false, why: 'no policy was written' }); return; }
     if (typeof Worker === 'undefined' || typeof Blob === 'undefined') { resolve({ enforced: false, why: 'there are no workers here' }); return; }
@@ -35,20 +37,21 @@ export function canary({ timeout = 5000, settle = 1000 } = {}) {
       resolve(r);
     };
     timer = setTimeout(() => finish({ enforced: false, why: 'no answer from the test worker' }), timeout);
-    // Nothing on the page but the test worker ever asks canary.invalid (a name that cannot exist); a
-    // browser may report only the site of what it blocked, so the site is what is matched.
-    const ours = (u) => String(u || '').startsWith(CANARY.slice(0, -1));
-    const code = `self.addEventListener('securitypolicyviolation', (e) => postMessage({ violated: String(e.blockedURI || ''), directive: e.effectiveDirective }));
-fetch(${JSON.stringify(CANARY)}).then(() => postMessage({ fetched: true }), () => postMessage({ failed: true }));`;
+    const code = `const t = (p) => p.then(() => true, () => false);
+(async () => {
+  const data = await t(fetch('data:text/plain,canary'));
+  const own = URL.createObjectURL(new Blob(['control']));
+  const blob = await t(fetch(own));
+  postMessage({ data, blob });
+})();`;
     try {
       url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
       worker = new Worker(url);
     } catch (e) { finish({ enforced: false, why: `the test worker could not start (${e?.message || e})` }); return; }
     worker.onmessage = ({ data }) => {
-      if (ours(data?.violated)) finish({ enforced: true, directive: data.directive });
-      else if (data?.fetched) finish({ enforced: false, why: 'the test request was not stopped' });
-      // The violation may be reported just after the request fails: it is waited for, a little.
-      else if (data?.failed) setTimeout(() => finish({ enforced: false, why: 'the test request failed, but not because the policy stopped it' }), settle);
+      if (data?.data === false && data?.blob === true) finish({ enforced: true });
+      else if (data?.data) finish({ enforced: false, why: 'the test request was not stopped' });
+      else finish({ enforced: false, why: 'the test worker could fetch nothing, so the test proves nothing' });
     };
     worker.onerror = () => finish({ enforced: false, why: 'the test worker could not run' });
   });

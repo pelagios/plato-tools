@@ -753,7 +753,9 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   `PermissionError` whose `kind` is `address`, `undecided`, `never`, `reload`, `unprotected`, `moved`
   or `network`, and whose message names the site, never the address (a key may be in it);
   `transformRequest(() => [[cat, subj], …], { onBlocked })` for MapLibre; `needs(el, cat, subj)` for
-  the one line; `open({ focus: 'cat:subj' })`; `onBeforeReload(fn)` and `reload()`; `mount({ state })`
+  the one line; `open({ focus: 'cat:subj' })`; `onBeforeReload(fn, { loses })`, `reloadLosses()` and `reload({ confirmed })` (a part of the page that
+  cannot keep something across the reload says so in `loses()`, and the panel then asks first, with
+  Cancel: the main page names the files chosen, a run in progress and a review open); `mount({ state })`
   for the header button and the canary; `keepWorkingData()`; and `token`, the World Historical
   Gazetteer token's keeper (`get`, `set`, `forget`, `onChange`, as `src/lib/whg-token.js` had them,
   and `remember(on)`, `remembered()`: kept for the tab unless the user chooses to remember it).
@@ -772,12 +774,21 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   `transformRequest`. No `'wasm-unsafe-eval'` is needed: SQLite's WebAssembly runs in the engine's
   worker, which is made from this site's address and so takes no policy from the page (it fetches
   only this site's files; any request to another site belongs on the page, through the module).
-  MapLibre's worker is made from a `blob:`, and is under the policy.
-- **The canary** (`src/lib/csp.js`): at start, a worker made from a `blob:` asks
-  `https://canary.invalid/`, and the policy must stop it. Unless it does, the module asks no other
-  site at all (`unprotected`), whatever is allowed, and Chora stays on Natural Earth and says why.
-  WebKit enforces the policy but raises no event, so there nothing is asked. Playwright evaluates a
-  bare expression with `eval()`, which the policy forbids: the browser checks give it functions.
+  MapLibre's worker is made from a `blob:`, and is under the policy. The engine's worker cannot be
+  put under it as things stand: ajv compiles PLATO's JSON Schemas with `new Function`, which a
+  policy without `'unsafe-eval'` refuses (measured: the page stops with "Error compiling schema"; with
+  `'unsafe-eval'` added, checks and Chora run). The ways out are ajv's standalone code, compiled at
+  build time from the vendored schemas, or `'unsafe-eval'` in the policy; neither is done yet.
+- **The canary** (`src/lib/csp.js`): at start, a worker made from a `blob:` fetches a `data:`
+  address, which only the policy can refuse (`connect-src` does not list `data:`), and, as the
+  control, a `blob:` address of its own, which the policy allows. Enforced means the first refused
+  and the second fetched; no network is involved. Unless it is enforced, the module asks no other
+  site at all (`unprotected`), whatever is allowed, the panel says so in a plain line, and Chora stays
+  on Natural Earth and says why. It used to wait for a `securitypolicyviolation` event, which WebKit
+  never raises, so Safari had no other site at all; measured on 1 October 2026 (Playwright 1.62:
+  Chromium 151, Firefox 153, WebKit 26.5), all three refuse the `data:` fetch under the policy and
+  make it without one. Playwright evaluates a bare expression with `eval()`, which the policy
+  forbids: the browser checks give it functions.
 - **The shared origin, plainly.** The tools are served on `pelagios.org`, which other Pelagios sites
   share. Everything the tools keep in this browser, permissions, choices, a pasted basemap's address
   and key, the WHG token if remembered, a reviewer's name, the working data (Chora's drafts, its
