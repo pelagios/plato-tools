@@ -37,7 +37,7 @@
 // georeferences were supplied, so a run without them never loads it.
 import { DataError, textStream } from '../engine/input.js';
 import {
-  readGeoreference, toWorld, matchTarget, containsRegion, georefNote, georefCitation, georefAnnotationCitation, LABEL_ANCHOR,
+  readGeoreference, toWorld, matchTarget, containsRegion, georefNote, georefCitation, georefAnnotationCitation, LABEL_ANCHOR, partOfCanvases,
 } from '../engine/georef/index.js';
 import { normaliseId, manifestId, manifestCanvases } from '../engine/georef/iiif.js';
 import { parseXywh, xywhPolygon, parseSvg, vertices, openRing, signedArea2 } from '../engine/georef/shapes.js';
@@ -123,7 +123,8 @@ export async function readGeoreferences(georefFiles, manifestFiles, report) {
       report('annotation-georef-unreadable', `${f.name}: ${message(e)}`);
       continue;
     }
-    const count = json && typeof json === 'object' && (json.type ?? json['@type']) === 'AnnotationPage' && Array.isArray(json.items) ? json.items.length : 1;
+    const page = Boolean(json && typeof json === 'object' && (json.type ?? json['@type']) === 'AnnotationPage' && Array.isArray(json.items));
+    const count = page ? json.items.length : 1;
     for (let index = 0; index < Math.max(count, 1); index++) {
       const where = `${f.name}${count > 1 ? ` (map ${index + 1} of ${count})` : ''}`;
       let g;
@@ -154,9 +155,13 @@ export async function readGeoreferences(georefFiles, manifestFiles, report) {
       }
       // The map's manifest: the one given whose id is the manifest the annotation names, if it
       // shows the map's image; else one given that shows it (an id written another way, http for
-      // https, say), with a warning.
+      // https, say), with a warning. A canvas shows it by its image service, or by being the
+      // canvas, or any of the canvases, the annotation says its image is part of (as
+      // readGeoreference's onCanvas decides).
+      const item = page ? json.items[index] : json;
+      const partOf = new Set(partOfCanvases(item && item.target && typeof item.target === 'object' ? item.target.source : undefined).map((p) => normaliseId(p.id)).filter(Boolean));
       const image = normaliseId(g.imageServiceId), canvas = normaliseId(g.canvasId);
-      const shows = (x) => manifestCanvases(x.json).some((c) => c.services.includes(image) || (canvas && normaliseId(c.id) === canvas));
+      const shows = (x) => manifestCanvases(x.json).some((c) => c.services.includes(image) || (canvas && normaliseId(c.id) === canvas) || partOf.has(normaliseId(c.id)));
       let m = g.manifestId ? manifests.find((x) => x.id === normaliseId(g.manifestId)) : undefined;
       if (m && !shows(m)) {
         report('annotation-manifest-mismatch', `${m.name}, with ${where}: the manifest given does not show this map's image (${g.imageServiceId})`);

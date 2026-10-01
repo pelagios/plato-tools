@@ -705,6 +705,30 @@ test('annotation-manifest-mismatch: a manifest with the id named but not showing
   // Control: the right manifest is not reported.
   assert.deepEqual((await MAIN()).of('annotation-manifest-mismatch'), []);
 });
+test('a manifest shows the map when it has any canvas the annotation names in partOf, as readGeoreference decides: the second of two is matched; an unrelated manifest is not', async () => {
+  // The annotation names two canvases: one of another manifest, then the Rocque canvas.
+  const annotation = json(ROCQUE);
+  const rocqueCanvas = annotation.target.source.partOf[0];
+  annotation.target.source.partOf = [{ id: 'https://example.org/constructed/canvas/1', type: 'Canvas', partOf: [{ id: 'https://example.org/constructed/manifest', type: 'Manifest' }] }, rocqueCanvas];
+  const two = () => textFile(JSON.stringify(annotation), 'rocque-two-canvases.json');
+  // The Rocque manifest, its image service written so that only the canvas says it is the map.
+  const manifest = json(ROCQUE_M);
+  manifest.sequences[0].canvases[0].images[0].resource.service['@id'] = 'https://example.org/constructed/the-image-written-another-way';
+  const second = textFile(JSON.stringify(manifest), 'rocque-second.json');
+  const r = await placed({ georefs: [two()], manifests: [second] }, [item(1)]);
+  assert.deepEqual(r.of('annotation-manifest-mismatch'), []);
+  assert.deepEqual(r.of('annotation-manifest-unused'), []);
+  assert.deepEqual(r.of('annotation-georef-unreadable'), []);
+  assert.equal(r.of('annotation-manifest-matched-by-image').length, 1);
+  assert.ok(r.attestation(1).geometries, 'placed on the canvas the manifest gives');
+  // readGeoreference, given the same manifest, agrees that it shows the map.
+  assert.equal((await readGeoreference(annotation, { manifest })).canvasId, CANVAS);
+  // Control: an unrelated manifest is not matched; it is unused, and the region is not placed.
+  const u = await placed({ georefs: [two()], manifests: [G + 'lynn-atlas-manifest.json'] }, [item(1)]);
+  assert.deepEqual(u.of('annotation-manifest-matched-by-image'), []);
+  assert.deepEqual(u.of('annotation-manifest-unused'), ['lynn-atlas-manifest.json']);
+  assert.equal(u.attestation(1).geometries, undefined);
+});
 test('with georeferences, an SVG shape is reported by its region kind, never also as annotation-selector, and never dropped', async () => {
   const { of, reported } = await MAIN();
   assert.deepEqual(of('annotation-selector'), []);
