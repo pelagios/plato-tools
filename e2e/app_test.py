@@ -678,6 +678,60 @@ def tooltip_checks(page, where, hover, focus, edge):
     attempt(f'{where}: a tooltip by the window\'s {edge[2]} edge stays within the window' + (', and covers no control beside it' if edge[3:] else ''), at_edge)
     page.mouse.move(1, 1)
 
+def tooltip_upkeep(page, where, tools='#toolbox .tools > li'):
+    """What the tooltips do as the page changes around them, on the main page's toolbox: a focused
+    container, a hover over a focused element's tooltip, a data-tip removed, and one changed."""
+    why = lambda n: f'{tools}:nth-child({n}) .why'
+    def reset():
+        page.evaluate('() => document.activeElement?.blur()'); page.mouse.move(1, 1); page.wait_for_timeout(300)
+    def container():
+        # A focused section opens no tooltip of the links inside it; the presence: Tab to its first
+        # link, and that link's own tooltip shows.
+        reset(); page.keyboard.press('Shift')        # keyboard last, so the focus that follows is visible focus
+        page.evaluate('() => { const s = document.getElementById("toolbox"); s.tabIndex = -1; s.focus(); }')
+        page.wait_for_timeout(300)
+        on_section = page.evaluate(SHOWN) if page.evaluate('() => document.activeElement?.id') == 'toolbox' else None
+        page.keyboard.press('Tab'); link = shown_tips(page, 'ἔλεγχος')
+        page.evaluate('() => document.getElementById("toolbox").removeAttribute("tabindex")')
+        return on_section == [] and len(link) == 1 and 'ἔλεγχος' in link[0]['text'], {'focused section shows': on_section, 'its first link shows': link}
+    attempt(f'{where}: a focused container opens none of the tooltips inside it, and its first link, focused, opens its own', container)
+    def restored():
+        # The link focused shows its tooltip; one shown by hovering another name replaces it; when
+        # the pointer leaves, the focused link's is back.
+        reset(); tab_to(page, f'{tools}:nth-child(1) .tool-link'); focused = shown_tips(page, 'ἔλεγχος')
+        page.hover(why(2), timeout=10_000); hovered = shown_tips(page, 'μετάφρασις')
+        page.mouse.move(1, 1); back = shown_tips(page, 'ἔλεγχος')
+        texts = lambda ts: [t['text'][:10] for t in ts]
+        return (len(focused) == 1 and 'ἔλεγχος' in focused[0]['text'] and len(hovered) == 1 and 'μετάφρασις' in hovered[0]['text']
+                and len(back) == 1 and 'ἔλεγχος' in back[0]['text']), {'focused': texts(focused), 'hovered': texts(hovered), 'after the pointer left': texts(back)}
+    attempt(f'{where}: a focused link\'s tooltip, replaced by one shown on hover, comes back when the pointer leaves', restored)
+    def dropped():
+        # A name's data-tip removed: its tooltip element goes, and its link's aria-describedby no longer
+        # names it. The presence: both were there before, and every other tooltip is still there.
+        reset(); page.hover(why(3), timeout=10_000); before = shown_tips(page, 'ἀριθμός')
+        q = f'(() => {{ const w = document.querySelector("{why(3)}"), a = w?.closest("a"); return {{ tip: w?.dataset.tip, described: a?.getAttribute("aria-describedby"), nodes: document.querySelectorAll("[role=tooltip]").length }}; }})()'
+        was = page.evaluate(q); tid = before[0]['id'] if before else None
+        page.evaluate(f'() => document.querySelector("{why(3)}").removeAttribute("data-tip")'); page.wait_for_timeout(200)
+        now = page.evaluate(q); gone = page.evaluate('id => !!id && !document.getElementById(id)', tid); shown = page.evaluate(SHOWN)
+        page.evaluate(f't => document.querySelector("{why(3)}").setAttribute("data-tip", t)', was.get('tip') or '')   # put back, for the checks after
+        return (bool(tid) and tid in (was['described'] or '').split() and gone and not (now['described'] or '').split().count(tid)
+                and now['nodes'] == was['nodes'] - 1 and shown == []), {'tooltip': tid, 'before': was, 'after': now, 'its element gone': gone, 'shown after': shown}
+    attempt(f'{where}: a data-tip removed takes its tooltip element and its aria-describedby id with it, and leaves the others', dropped)
+    def refilled():
+        # A tooltip's text changed while it shows: placed again, centred on its element, within the window.
+        reset(); page.hover(why(4), timeout=10_000); before = shown_tips(page, 'μνήμη')
+        old = page.evaluate(f'() => document.querySelector("{why(4)}").dataset.tip')
+        page.evaluate(f'() => {{ document.querySelector("{why(4)}").dataset.tip = "Short"; }}'); page.wait_for_timeout(200)
+        after = page.evaluate(SHOWN)
+        a = page.eval_on_selector(why(4), 'e => { const r = e.getBoundingClientRect(); return (r.left + r.right) / 2; }')
+        page.evaluate(f't => {{ document.querySelector("{why(4)}").dataset.tip = t; }}', old)
+        t = after[0] if len(after) == 1 else {}
+        centred = bool(t) and abs((t['left'] + t['right']) / 2 - a) <= 1.5 and t['left'] >= 0 and t['right'] <= t['vw']
+        return len(before) == 1 and t.get('text') == 'Short' and (t['right'] - t['left']) < (before[0]['right'] - before[0]['left']) and centred, {
+            'before': before, 'after': after, 'element centre': a}
+    attempt(f'{where}: a tooltip whose text changes while it shows is placed again, centred on its element', refilled)
+    reset()
+
 def no_titles(page, where, expected):
     def check_it():
         r = page.evaluate(NO_TITLES); said = r['tips'] + r['templated']
@@ -723,6 +777,7 @@ def main():
             tooltip_checks(page, 'tooltips', ('#toolbox .tools > li:nth-child(2) .why', 'μετάφρασις'), ('.dev-badge', 'being built in the open'),
                            ('.dev-badge', 'being built in the open', 'left'))
             no_titles(page, 'tooltips', ['ἔλεγχος', 'μετάφρασις', 'ἀριθμός', 'μνήμη', 'Ἑρμῆς', 'ἀγορά', 'χώρα', 'κρίσις', 'checked against PLATO at the commit'])
+            tooltip_upkeep(page, 'tooltips')
             page.set_viewport_size({'width': 1280, 'height': 720})
 
             ex = PLATO / 'schemas/tables/examples'
