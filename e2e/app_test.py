@@ -1466,13 +1466,34 @@ def front_page_checks(browser, url):
                    lede: vis(i?.querySelector('.lede')), drawing: vis(i?.querySelector('.plato-mark')), title: vis(document.querySelector('h1')),
                    stored: (() => { try { return localStorage.getItem('plato-tools.intro'); } catch { return 'refused'; } })() }; }''')
 
+    def settled(page):
+        # The introduction folds away and opens with a short animation: wait for it to end (a function,
+        # not a string, since the page's policy refuses eval) before reading where it stands.
+        page.wait_for_function('() => !(document.getElementById("intro")?.getAnimations?.() || []).length', timeout=T(5))
+        return intro_state(page)
+
+    def animates():
+        ctx, page = fresh()
+        try:
+            page.click('#intro-toggle')
+            mid = page.evaluate('() => ({ running: (document.getElementById("intro").getAnimations() || []).length, expanded: document.getElementById("intro-toggle").getAttribute("aria-expanded") })')
+            end = settled(page)
+            page.emulate_media(reduced_motion='reduce')
+            page.click('#intro-toggle')
+            still = page.evaluate('() => (document.getElementById("intro").getAnimations() || []).length')
+            shown = intro_state(page)
+            return (mid['running'] >= 1 and mid['expanded'] == 'false' and not end['lede'] and still == 0 and shown['lede']), \
+                   {'just after the click': mid, 'when it ends': end, 'running with reduced motion': still, 'shown at once': shown}
+        finally: ctx.close()
+    attempt('front page: hiding the introduction folds it away over a moment (the button says so at once), and with reduced motion asked for it changes at once', animates)
+
     def toggle_persists():
         ctx, page = fresh()
         try:
             first = intro_state(page)
-            page.focus('#intro-toggle'); page.keyboard.press('Enter'); hidden = intro_state(page)
+            page.focus('#intro-toggle'); page.keyboard.press('Enter'); hidden = settled(page)
             page.reload(); wait_state(page, lambda s: s.get('phase') == 'ready', T(30)); after = intro_state(page)
-            page.click('#intro-toggle'); shown = intro_state(page)
+            page.click('#intro-toggle'); shown = settled(page)
             ok = (first['button'] == 'Hide introduction' and first['expanded'] == 'true' and first['controls'] == 'intro' and first['lede'] and first['drawing']
                   and hidden['button'] == 'Show introduction' and hidden['expanded'] == 'false' and not hidden['lede'] and not hidden['drawing'] and hidden['title'] and hidden['stored'] == 'hidden'
                   and after['button'] == 'Show introduction' and after['expanded'] == 'false' and not after['lede'] and after['title']
@@ -1504,7 +1525,7 @@ def front_page_checks(browser, url):
         ctx, page = fresh(init=[REFUSE_STORAGE])
         try:
             errors = []; page.on('pageerror', lambda e: errors.append(str(e)))
-            first = intro_state(page); page.click('#intro-toggle'); hidden = intro_state(page)
+            first = intro_state(page); page.click('#intro-toggle'); hidden = settled(page)
             page.reload(); wait_state(page, lambda s: s.get('phase') == 'ready', T(30)); after = intro_state(page)
             return (first['stored'] == 'refused' and first['lede'] and hidden['button'] == 'Show introduction' and not hidden['lede'] and hidden['expanded'] == 'false'
                     and after['lede'] and after['button'] == 'Hide introduction' and not errors), {'first': first, 'hidden': hidden, 'after reload': after, 'errors': errors}
