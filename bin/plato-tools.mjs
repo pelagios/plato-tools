@@ -88,6 +88,8 @@ Options:
   --columns FILE    a table of places (CSV or GeoJSON): which column holds what, as a JSON
                     object {"column name": "field"}, instead of the guess. The guess is
                     printed with each such input, as JSON to save, edit and give back here.
+                    match: for the dataset matched (not --with's), kept in the work file;
+                    apply: in place of the work file's, which is used when none is given.
                     The fields: ${Object.keys(FIELDS).slice(0, 6).join(', ')},
                     ${Object.keys(FIELDS).slice(6).join(', ')};
                     or "note" (kept in the notes as "column: value") or "skip" (not carried
@@ -507,6 +509,13 @@ async function review(action, args, o, resources) {
   // The reviewer is checked by the engine's own rule, so that what it would refuse is a mistake in the command, not a fault in the tools.
   if (reviewer) { try { checkReviewer(reviewer, '--reviewer'); } catch (e) { return usage(e.message.replace(/^--reviewer must have a name\.$/, '--reviewer must give a name.')); } }
   if (o['others-title'] !== undefined && !o['others-title'].trim()) return usage('--others-title must give a title.');
+  // A table of places to match is read by the mapping of its columns given, as check and convert read it; apply, else, by the review's.
+  let columns;
+  if (o.columns) {
+    try { columns = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(o.columns))); }
+    catch (e) { return usage(`--columns ${o.columns} cannot be read as JSON: ${e.message}`); }
+    if (!columns || typeof columns !== 'object' || Array.isArray(columns)) return usage(`--columns ${o.columns} must hold one JSON object, {"column name": "field"}.`);
+  }
   const items = await gatherInputs(args);
   if (items.length !== 1) return usage(`${action} takes one dataset of places to match; ${items.length} ${items.length === 1 ? 'was' : 'were'} given.`);
   let others = null, work = null, options;
@@ -515,7 +524,7 @@ async function review(action, args, o, resources) {
     if (!o.with) return usage('match needs --with, the other dataset.');
     others = await gatherInputs([o.with]);
     if (others.length !== 1) return usage('--with takes one dataset.');
-    options = { threshold: o.threshold, maxDistanceKm: o['max-distance'], topK: o.top, base: o.base, name: items[0].name, reviewer, othersTitle: o['others-title'] };
+    options = { threshold: o.threshold, maxDistanceKm: o['max-distance'], topK: o.top, base: o.base, name: items[0].name, reviewer, othersTitle: o['others-title'], columns };
     for (const [flag, v, ok] of [['--threshold', o.threshold, (x) => x > 0 && x <= 1], ['--max-distance', o['max-distance'], (x) => x >= 0], ['--top', o.top, (x) => Number.isInteger(x) && x >= 1]])
       if (v !== undefined && !(/^\s*[\d.]+\s*$/.test(v) && ok(Number(v)))) return usage(`${flag} ${v} is not allowed; see --help.`);
   } else {
@@ -524,7 +533,7 @@ async function review(action, args, o, resources) {
     if (o.output && !REVIEW_OUTPUTS.includes(o.output)) return usage(`"${o.output}" is not an output; the outputs are ${REVIEW_OUTPUTS.join(' and ')}.`);
     try { work = readFileSync(o.review, 'utf8'); }
     catch (e) { return usage(`the work file ${o.review} cannot be read: ${e.code === 'ENOENT' ? 'there is no such file.' : e.message}`); }
-    options = { output: o.output || 'dataset', reviewer: reviewer || undefined, name: items[0].name, base: o.base, othersTitle: o['others-title'] };
+    options = { output: o.output || 'dataset', reviewer: reviewer || undefined, name: items[0].name, base: o.base, othersTitle: o['others-title'], columns };
   }
   const host = new NodeHost({ workDir: o['work-dir'], outDir: o.out, overwrite: o.overwrite });
   process.once('SIGINT', () => { host.abandon(); process.exit(130); });

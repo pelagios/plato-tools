@@ -169,3 +169,42 @@ test('--others-title: the other dataset\'s title, when it gives none, is kept in
   assert.equal(cli('match', join(dir, 'a.json'), '--with', join(dir, 'b.json'), '--out', scratch(), '--others-title', ' ').code, 2, 'an empty title is a mistake in the command');
   assert.equal(cli('check', join(dir, 'a.json'), '--others-title', 'X').code, 2, '--others-title is for match and apply');
 });
+test('--columns: a table of places is matched by the mapping given, which the work file keeps for apply; a file that is not a mapping exits 2', () => {
+  const dir = scratch();
+  writeFileSync(join(dir, 'roman.csv'), 'id,label,town,lat,lon\nbath,Spa Site,Aquae Sulis,51.3811,-2.3590\n');
+  writeFileSync(join(dir, 'b.json'), JSON.stringify(doc('b', [['bath', 'Aquae Sulis', [-2.36, 51.38]]])));
+  const mapping = { id: 'id', label: 'note', town: 'name', lat: 'latitude', lon: 'longitude' };
+  writeFileSync(join(dir, 'columns.json'), JSON.stringify(mapping));
+  const guessed = cli('match', join(dir, 'roman.csv'), '--with', join(dir, 'b.json'), '--out', scratch(), '--base', `${X}a/`, '--json');
+  assert.equal(guessed.code, 0, guessed.out + guessed.err);
+  assert.equal(JSON.parse(guessed.out).counts.candidates, 0, 'absence: by the guess, "Spa Site" is the name');
+  const mapped = cli('match', join(dir, 'roman.csv'), '--with', join(dir, 'b.json'), '--out', dir, '--base', `${X}a/`, '--columns', join(dir, 'columns.json'), '--json');
+  assert.equal(mapped.code, 0, mapped.out + mapped.err);
+  assert.equal(JSON.parse(mapped.out).counts.candidates, 1, 'presence: by the mapping, "Aquae Sulis" is');
+  const w = readWork(readFileSync(join(dir, 'roman.krisis.json'), 'utf8'));
+  assert.deepEqual(w.match_parameters.columns, mapping);
+  decide(w, w.candidates[0].id, 'match');
+  writeFileSync(join(dir, 'review.json'), serialiseWork(w));
+  const out = scratch();
+  const applied = cli('apply', join(dir, 'roman.csv'), '--review', join(dir, 'review.json'), '--out', out, '--reviewer', 'R', '--base', `${X}a/`, '--json');
+  assert.equal(applied.code, 0, applied.out + applied.err);
+  assert.equal(JSON.parse(applied.out).errors, 0, applied.out);
+  const written = JSON.parse(readFileSync(join(out, 'roman.krisis-dataset.json'), 'utf8'));
+  assert.deepEqual(written.spatialEntities[0].attestations.flatMap((a) => (a.names || []).map((n) => n.toponym)), ['Aquae Sulis'], 'apply read the table by the review\'s mapping');
+  writeFileSync(join(dir, 'not-columns.json'), '["town"]');
+  for (const action of [['match', '--with', join(dir, 'b.json')], ['apply', '--review', join(dir, 'review.json')]]) {
+    const r = cli(action[0], join(dir, 'roman.csv'), ...action.slice(1), '--out', scratch(), '--columns', join(dir, 'not-columns.json'));
+    assert.equal(r.code, 2, r.out + r.err);
+    assert.match(r.err, /--columns .* must hold one JSON object/);
+  }
+});
+test('match: a IIIF Georeference Annotation as the other dataset is refused with its reason, not as a fault in the tools', () => {
+  const dir = fixtures();
+  const georef = fileURLToPath(new URL('./fixtures/hermes-detect/loc-chesapeake-annotationpage.json', import.meta.url));
+  const r = cli('match', join(dir, 'a.json'), '--with', georef, '--out', scratch(), '--json');
+  assert.equal(r.code, 2, r.out + r.err);
+  const j = JSON.parse(r.out);
+  assert.match(j.message, /IIIF Georeference Annotation/);
+  assert.doesNotMatch(r.out + r.err, /fault in the tools/);
+  assert.equal(cli('match', join(dir, 'a.json'), '--with', join(dir, 'b.json'), '--out', scratch()).code, 0, 'control: the PLATO JSON beside it is matched');
+});

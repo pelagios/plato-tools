@@ -328,6 +328,59 @@ def krisis_case(page, tmp):
         except Exception as e: unrec = 'harness-error: ' + str(e).split('\n')[0][:200]
     check('match review: a review resumed with files chosen that are not recognised says so, not that none is chosen',
           'not recognised' in unrec and 'No dataset is chosen' not in unrec, unrec)
+    # The same with a IIIF Georeference Annotation chosen, which is recognised and refused with its
+    # reason (input.js, readable()): it says that, where it went on to compare the files.
+    geounrec = ''
+    if 'not recognised' in unrec:
+        try:
+            page.set_input_files('#picker', [str(GEOREF)])
+            wait_state(page, lambda s: s.get('phase') in ('unrecognised', 'detected'), 30, 'detection')
+            page.set_input_files('#workfile', [str(tmp / 'saved.krisis.json')])
+            page.wait_for_selector('#review-warning:not([hidden])', timeout=20_000); geounrec = page.inner_text('#review-warning')
+        except Exception as e: geounrec = 'harness-error: ' + str(e).split('\n')[0][:200]
+    check('match review: a review resumed with a IIIF Georeference Annotation chosen says it is not recognised, not that the files differ',
+          'not recognised' in geounrec and 'other files than' not in geounrec, geounrec)
+    krisis_seams(page, tmp, subjects)
+
+GEOREF = ROOT / 'test/fixtures/hermes-detect/loc-chesapeake-annotationpage.json'
+
+def krisis_seams(page, tmp, subjects):
+    """Where Hermes's readers meet Krisis: a refused file as the other dataset, and a table's columns as chosen."""
+    # A IIIF Georeference Annotation as the other dataset is refused with its reason, as a finding,
+    # not as a fault in the tools; the match of two PLATO files (krisis_case) is the control.
+    geo = {}
+    try:
+        page.reload(); wait_state(page, lambda s: s.get('phase') == 'ready', 30, 'ready')
+        s = match_case(page, subjects, GEOREF)
+        said = [i for i in (s.get('report') or {}).get('items', []) if i.get('kind') == 'not-recognised']
+        geo = {'phase': s.get('phase'), 'action': s.get('action'), 'shown': page.inner_text('#result'), 'reason': (said[0].get('examples') or [''])[0] if said else ''}
+    except Exception as e: geo = {'error': str(e).split('\n')[0][:200]}
+    shown = geo.get('shown', '')
+    check('match review: a IIIF Georeference Annotation as the other dataset is refused with its reason, not as something gone wrong',
+          geo.get('action') == 'match' and geo.get('phase') == 'done' and 'The other dataset was not recognised' in shown
+          and 'IIIF Georeference Annotation' in geo.get('reason', '') and 'Something went wrong' not in shown, geo)
+    # A table of places is matched by its columns as chosen on the page: the guess takes "label" for
+    # the name, and only with "town" chosen as the name are the places matched.
+    table = tmp / 'krisis-roman.csv'
+    table.write_text('id,label,town,lat,lon\nbristol,Port,Bristoll,51.4500,-2.5900\nbath,Spa Site,Bathe,51.3800,-2.3600\n')
+    def table_match(choices):
+        try:
+            page.reload(); wait_state(page, lambda s: s.get('phase') == 'ready', 30, 'ready')
+            page.evaluate("() => { document.getElementById('base').value = 'https://example.org/t/'; }")
+            s = table_case(page, table, choices)
+            if not (s.get('columns') or {}).get('mapping'): return s
+            page.set_input_files('#others', [str(subjects)])
+            return wait_state(page, lambda s: s.get('phase') in ('reviewing', 'error') or (s.get('action') == 'match' and s.get('phase') == 'done'), 120, 'matching')
+        except Exception as e: return {'phase': 'harness-error', 'error': str(e).split('\n')[0][:200]}
+    guessed = table_match(None)
+    chosen = table_match({'town': 'name', 'label': 'note'})
+    pairs = lambda s: sorted((c['candidate_source'].rsplit('/', 1)[-1], c['candidate_candidate'].rsplit('/', 1)[-1]) for c in (s.get('work') or {}).get('candidates', []))
+    params = (chosen.get('work') or {}).get('match_parameters') or {}
+    check('match review: a table of places is matched by its columns as chosen on the page, not as guessed, and the work file keeps the matching',
+          guessed.get('phase') == 'reviewing' and 'candidates' in (guessed.get('work') or {}) and pairs(guessed) == []
+          and chosen.get('phase') == 'reviewing' and pairs(chosen) == [('bath', 'bath'), ('bristol', 'bristol')]
+          and (params.get('columns') or {}).get('town') == 'name' and (params.get('columns') or {}).get('label') == 'note',
+          {'guessed': pairs(guessed), 'chosen': pairs(chosen), 'columns': params.get('columns'), 'state': chosen if not pairs(chosen) else ''})
 
 def download(page, name, dest):
     with page.expect_download(timeout=600_000) as d:

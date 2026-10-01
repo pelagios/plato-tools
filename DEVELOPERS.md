@@ -504,7 +504,11 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   objects are looked in with `Object.hasOwn`). The page checks the reviewer's ORCID by the same rule (`checkReviewer`) before
   it saves or finishes, so it never writes one a resumed review would refuse. The base address given
   for spreadsheet tables is kept in `match_parameters.base`; finishing tables with another warns
-  (`base-differs`), as their places' addresses are made from it.
+  (`base-differs`), as their places' addresses are made from it. A table of places (CSV, plain
+  GeoJSON) to match is read by the matching of its columns chosen on the page, or given with
+  `--columns` (Hermes), which is kept in `match_parameters.columns`; finishing reads the table by it
+  again, unless another is given, which warns (`columns-differ`). The other dataset's columns are
+  guessed.
 - **Decisions.** "Same place" confirms a candidate; "Not this one" rejects it and writes nothing;
   "Different places" rejects it and writes a negated attestation bundling exactly one exactMatch,
   with the reviewer's basis. The matches accepted for one place are ONE attestation bundling a

@@ -153,7 +153,8 @@ self.onmessage = async ({ data }) => {
       // Match review (Krisis, src/engine/krisis/): 'match' finds candidates for the subjects' places in
       // the others, and returns the work file; 'apply' turns the decisions in it into attestations.
       const subjects = await detect(data.subjects), others = data.cmd === 'match' ? await detect(data.others) : null;
-      const unknown = [['subjects', subjects], ['others', others]].find(([, input]) => input && !input.format);
+      // Not recognised, or recognised and refused with its reason (a IIIF Georeference Annotation): readable(), as for every other command.
+      const unknown = [['subjects', subjects], ['others', others]].find(([, input]) => input && !readable(input));
       if (unknown) {
         postMessage({ type: 'done', incomplete: true, outputs: [], report: { counts: {}, errors: 1, items: [{ severity: 'error', kind: 'not-recognised', count: 1,
           message: review.notRecognised(unknown[0]), examples: [unknown[1].reason] }] } });

@@ -30,6 +30,8 @@ const TEXT = {
   'not-valid': 'An attestation made from the review does not match the PLATO JSON Schema, which is a fault in the tools; please report it',
 };
 
+const sameMapping = (a, b) => { const ka = Object.keys(a), kb = Object.keys(b); return ka.length === kb.length && ka.every((k) => Object.hasOwn(b, k) && a[k] === b[k]); };
+
 /** The name a review's outputs are made from: the subject dataset's, without its extension. */
 const stemOf = (subjects, work, options) => (options.name || subjects?.files?.[0]?.name || work.subjects.files[0]?.name || 'review').replace(/\.(gz)$/i, '').replace(/\.[^.]+$/, '');
 
@@ -39,7 +41,8 @@ const stemOf = (subjects, work, options) => (options.name || subjects?.files?.[0
  * 'dataset' output), `work` a work file's object or text. options: output ('dataset', the default,
  * or 'attestations'), reviewer ({ name, orcid? }, else the work file's), date (to stamp every
  * attestation with, else each is dated by its decisions), name (the stem of the output's name),
- * base (spreadsheet tables: the base address of their places, as given to match()), othersTitle
+ * base (spreadsheet tables: the base address of their places, as given to match()), columns (a table
+ * of places: the mapping of its columns, else the one in the work file), othersTitle
  * (the other dataset's title, for the source the attestations cite, in place of the work file's).
  * Returns { report, outputs, attestations }, with `incomplete` when nothing could be written.
  */
@@ -59,6 +62,11 @@ export async function apply({ subjects, work, options = {} }, env) {
   // Spreadsheet tables' places take their addresses from the base address: another than the review's gives other places.
   const reviewedBase = w.match_parameters.base || undefined, base = options.base || undefined;
   if (subjects?.format === 'tables' && reviewedBase !== base) rep.warning('base-differs', KRISIS_TEXT.baseDiffers(reviewedBase, base));
+  // A table of places is read by the mapping of its columns the review was made with, unless another is given (and said to differ).
+  const reviewedColumns = w.match_parameters.columns, columns = options.columns || reviewedColumns;
+  if (options.columns && reviewedColumns && !sameMapping(options.columns, reviewedColumns) && (subjects?.format === 'csv' || subjects?.format === 'geojson'))
+    rep.warning('columns-differ', KRISIS_TEXT.columnsDiffer);
+  options = { ...options, columns };
   if (subjects?.files) {
     const differ = await filesDiffer(w.subjects, subjects.files);
     if (differ.length) rep.add('warning', 'subjects-differ', TEXT['subjects-differ'], differ.join(', '), differ.length);
@@ -145,7 +153,7 @@ async function writeDataset({ subjects, made, work, options }, env, rep, fail) {
   };
   const name = stemOf(subjects, work, options) + '.krisis-dataset.json';
   const kept = new Map();
-  const r = await run({ input: subjects, action: 'convert', target: 'plato-json', options: { name, base: options.base, augment } }, teeing(env, kept));
+  const r = await run({ input: subjects, action: 'convert', target: 'plato-json', options: { name, base: options.base, columns: options.columns, augment } }, teeing(env, kept));
   // What the conversion says of the dataset. Its own problems are its own, not the review's: they
   // are counted, and the dataset is best checked by itself. What stopped it being read is not.
   let own = 0;
@@ -177,7 +185,7 @@ async function writeDataset({ subjects, made, work, options }, env, rep, fail) {
  */
 export async function checkAppendOnly({ earlier, later, added, options = {} }, env, rep) {
   const K = KRISIS_TEXT;
-  const c = await compare({ earlier, later: await detect([later]), options: { base: options.base } }, env);
+  const c = await compare({ earlier, later: await detect([later]), options: { base: options.base, columns: options.columns } }, env);
   for (const i of c.report.items) {
     if (CHANGED.has(i.kind)) {
       rep.add('error', 'not-append-only', `${K.notAppendOnly} ${i.message}`, i.examples[0], i.count);

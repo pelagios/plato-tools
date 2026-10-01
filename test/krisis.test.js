@@ -360,6 +360,53 @@ test('a line of a dataset that is not read is said to be not read, by matching a
   }
 });
 
+// Hermes's matching of a table's columns, chosen on the page or given with --columns, is the one the
+// review reads the dataset with: here the guess takes "label" for the name and "town" for a note,
+// and the mapping says the opposite. Only with the mapping are the places' names the ones to match.
+const MISGUESSED_CSV = 'id,label,town,lat,lon\nbath,Spa Site,Aquae Sulis,51.3811,-2.3590\nyork,Fortress,Eboracum,53.9590,-1.0815\n';
+const MAPPING = { id: 'id', label: 'note', town: 'name', lat: 'latitude', lon: 'longitude' };
+const romanOthers = () => ({ profile: 'place-centric', gazetteer: { '@id': X + 'b', title: 'Dataset B' }, spatialEntities: [
+  place('b', 'bath', 'Aquae Sulis', [at(-2.36, 51.38)]), place('b', 'york', 'Eburacum', [at(-1.08, 53.96)])] });
+test("a table's columns as mapped, not as guessed, are what it is matched by, and the mapping is kept in the work file", async () => {
+  const subjects = await detect([textFile(MISGUESSED_CSV, 'roman.csv')]);
+  const others = await detect([json(romanOthers(), 'b.json')]);
+  const guessed = await match({ subjects, others, options: { base: X + 'a/' } }, env());
+  const mapped = await match({ subjects, others, options: { base: X + 'a/', columns: MAPPING } }, env());
+  // Both read the two rows; only the mapped one has the names to match.
+  assert.equal(guessed.report.counts.subjects, 2);
+  assert.equal(mapped.report.counts.subjects, 2);
+  assert.deepEqual(guessed.work.candidates, [], 'absence: by the guess, "Spa Site" and "Fortress" are the names');
+  assert.deepEqual(mapped.work.candidates.map((c) => [c.candidate_source, c.candidate_candidate]), [[X + 'a/place/bath', B('bath')], [X + 'a/place/york', B('york')]]);
+  assert.deepEqual(mapped.work.match_parameters.columns, MAPPING);
+  assert.ok(!('columns' in guessed.work.match_parameters), 'no mapping given, none recorded');
+  // The work file with its mapping is read back as it was written; a mapping that is not one is refused.
+  assert.deepEqual(readWork(serialiseWork(mapped.work)).match_parameters.columns, MAPPING);
+  const bad = JSON.parse(serialiseWork(mapped.work)); bad.match_parameters.columns = ['town'];
+  assert.throws(() => readWork(bad), (e) => e instanceof DataError && /columns/.test(e.message));
+});
+test("apply reads a table by the mapping the review was made with, so its dataset and version check agree", async () => {
+  const subjects = await detect([textFile(MISGUESSED_CSV, 'roman.csv')]);
+  const { work } = await match({ subjects, others: await detect([json(romanOthers(), 'b.json')]), options: { base: X + 'a/', columns: MAPPING } }, env());
+  decide(work, work.candidates[0].id, 'match', { at: '2026-09-30T13:00:00Z' });
+  work.reviewer = reviewer;
+  const finish = async (w, options = {}) => { const e = env(); const r = await apply({ subjects, work: w, options: { base: X + 'a/', ...options } }, e); return { r, e }; };
+  const { r, e } = await finish(work);
+  assert.equal(r.report.errors, 0, JSON.stringify(r.report.items));
+  assert.equal(r.report.counts.versionCheck.added, 1);
+  const toponyms = (p) => p.attestations.flatMap((a) => (a.names || []).map((n) => n.toponym));
+  const bath = byId(JSON.parse(outText(e, 'roman.krisis-dataset.json'))).get(X + 'a/place/bath');
+  assert.deepEqual(toponyms(bath), ['Aquae Sulis'], 'the place is named as mapped, and the column mapped as a note is not a name');
+  // The same review with its mapping taken out reads the table by the guess: the place is named otherwise.
+  const unmapped = JSON.parse(serialiseWork(work)); delete unmapped.match_parameters.columns;
+  const g = await finish(unmapped);
+  const named = byId(JSON.parse(outText(g.e, 'roman.krisis-dataset.json'))).get(X + 'a/place/bath');
+  assert.deepEqual(toponyms(named), ['Spa Site']);
+  // A mapping given to apply is used in place of the review's, and said to differ.
+  const other = await finish(work, { columns: { ...MAPPING, label: 'name', town: 'note' } });
+  assert.ok(other.r.report.items.some((i) => i.kind === 'columns-differ'), JSON.stringify(other.r.report.items));
+  assert.ok(!r.report.items.some((i) => i.kind === 'columns-differ'), 'the review\'s own mapping: nothing to say');
+});
+
 // ---- the work file ---------------------------------------------------------------------------------------
 test('decisions: each sets its status, and a place counts as reviewed once any of its candidates is decided', async () => {
   const { work } = await run();

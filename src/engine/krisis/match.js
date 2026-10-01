@@ -171,7 +171,10 @@ function standInTitles(input) {
 
 async function readSide(input, word, options, env, rep, progress) {
   const side = { title: input.files[0]?.name || 'Untitled dataset', titleFrom: 'file-name', uri: undefined, places: new Map(), links: [], withdrawals: new Map(), unaddressed: 0 };
-  const r = await run({ input, action: 'check', options: { base: options.base, sink: reader(side, rep, word, standInTitles(input)) } },
+  // A table of places (CSV, plain GeoJSON) is read by the mapping of its columns chosen for it (Hermes),
+  // given for the subjects, the dataset chosen first; the other dataset's columns are guessed.
+  const columns = word === 'subjects' ? options.columns : undefined;
+  const r = await run({ input, action: 'check', options: { base: options.base, columns, sink: reader(side, rep, word, standInTitles(input)) } },
     { ...env, progress: (p) => progress({ ...p, dataset: word, phase: p.phase === 'done' ? 'read' : p.phase }) });
   if (r.incomplete) return { side, failed: r.report.items.find((i) => i.kind === 'unreadable')?.examples[0] };
   let others = 0;
@@ -218,7 +221,8 @@ const sideRecord = (s) => ({ title: s.title, titleFrom: s.titleFrom, ...(s.uri ?
 
 /**
  * Match two datasets. `subjects` and `others` are inputs as detect() describes them; options:
- * threshold (0.85), maxDistanceKm (50), topK (5), base (for spreadsheet tables), name (the stem of
+ * threshold (0.85), maxDistanceKm (50), topK (5), base (for spreadsheet tables), columns (the subjects'
+ * mapping of columns, for a table of places: kept in the work file, for apply()), name (the stem of
  * the work file's name), othersTitle (the other dataset's title, which the attestations cite, when
  * its file gives none or another is wanted), now (the time to stamp, for tests). Returns { report, outputs, work }, the
  * report in the shape run() gives, with `incomplete` set when a dataset could not be read to the end.
@@ -303,7 +307,7 @@ export async function match({ subjects, others, options = {} }, env) {
 
   const work = {
     krisis: WORK_VERSION, generated_at, algorithm_version: ALGORITHM,
-    match_parameters: { ...params, ...(options.base ? { base: options.base } : {}), blocking: { ...BLOCKING, rule: BLOCKING_RULE }, scoring: SCORING },
+    match_parameters: { ...params, ...(options.base ? { base: options.base } : {}), ...(options.columns ? { columns: { ...options.columns } } : {}), blocking: { ...BLOCKING, rule: BLOCKING_RULE }, scoring: SCORING },
     subjects: sideRecord(S), others: sideRecord(O),
     places, candidates, reviewer: options.reviewer || null, cursor: 0,
   };

@@ -6,7 +6,7 @@
 // Kept light (no pipeline, no schema library) so that the page can read and write it directly.
 //
 // The shape, version 1 (test/krisis.test.js holds an example of each part):
-//   { krisis: 1, generated_at, algorithm_version, match_parameters: { threshold, maxDistanceKm, topK, base?, blocking, scoring },
+//   { krisis: 1, generated_at, algorithm_version, match_parameters: { threshold, maxDistanceKm, topK, base?, columns?, blocking, scoring },
 //     subjects: { title, uri?, titleFrom?, files: [{ name, size, sha256 }] }, others: { title, uri?, titleFrom?, files },
 //     (titleFrom: 'gazetteer', 'given' by the person matching, or 'file-name' when neither gave one)
 //     places: { <subject place IRI>: { label, names, point: [lon, lat] | null, ccodes?, types? } },
@@ -86,6 +86,8 @@ export function readWork(text) {
   const bad = (m) => { throw new DataError(`This work file cannot be used: ${m}`); };
   if (typeof w.generated_at !== 'string' || typeof w.algorithm_version !== 'string') bad('it does not say when and how its suggestions were made (generated_at, algorithm_version).');
   if (!isObject(w.match_parameters)) bad('it does not give the parameters its suggestions were made with (match_parameters).');
+  const cols = w.match_parameters.columns;
+  if (cols !== undefined && !(isObject(cols) && Object.values(cols).every((f) => typeof f === 'string'))) bad('the mapping of its dataset\'s columns (match_parameters.columns) is not one: it must be {"column name": "field"}.');
   try { checkSide(w.subjects, 'subjects'); checkSide(w.others, 'others'); } catch (e) { bad(e.message[0].toLowerCase() + e.message.slice(1)); }
   if (!isObject(w.places)) bad('it lists no places (places).');
   for (const [iri, p] of Object.entries(w.places)) {

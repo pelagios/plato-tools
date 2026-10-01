@@ -5,6 +5,7 @@
 import { fmtBytes, formatName, progressText, summary, groups, draftNote, explainedLines } from './engine/words.js';
 import { COLUMN_CHOICES, COLUMN_WORDS, columnWarnings, columnProblem } from './engine/words.js';
 import { review as W } from './engine/words.js';
+import { readable } from './engine/input.js';
 import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions } from './engine/krisis/work.js';
 import { stash as stashForChora } from './chora/handoff.js';
 const $ = (id) => document.getElementById(id);
@@ -101,7 +102,8 @@ function start(action, earlier) {
     (only) => worker.postMessage({ cmd: 'publish', part: $('part').value, files, previous: [...$('previous').files], options: { base, ...publishOptions(), only } }),
     (e) => fail(`the list of places to include could not be read (${e.message || e}).`));
   // Match review (Krisis): the files chosen are the subjects, and `earlier` the other dataset; to finish, the review is applied to them.
-  else if (action === 'match') worker.postMessage({ cmd: 'match', subjects: files, others: earlier, options: { ...matchOptions(), base } });
+  // A table of places is matched by the matching of its columns shown, as chosen (Hermes), which the work file keeps for finishing.
+  else if (action === 'match') worker.postMessage({ cmd: 'match', subjects: files, others: earlier, options: { ...matchOptions(), base, ...(isTable(input) && columns ? { columns: { ...columns.mapping } } : {}) } });
   // The title in the options is cited only when the review has none but a file's name: one left there from an earlier match must not replace the review's own.
   else if (action === 'apply') worker.postMessage({ cmd: 'apply', subjects: files, work, options: { output: earlier, reviewer: reviewer(), othersTitle: work.others?.titleFrom === 'file-name' ? matchOptions().othersTitle : undefined, base } });
   else worker.postMessage({ cmd: 'run', files, action, target, options: { base, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked,
@@ -365,7 +367,7 @@ async function resume(file) {
   beginReview(w, file.name);
   // A review made from other files than those chosen now is still opened, with a warning; with none chosen, it says so.
   if (!files.length) { showWarning(W.noDatasetYet); return; }
-  if (!input?.format) { showWarning(W.notRecognisedYet); return; }
+  if (!readable(input)) { showWarning(W.notRecognisedYet); return; }
   try { const differ = await filesDiffer(w.subjects, files); showWarning(differ.length ? W.differs(differ) : ''); } catch { showWarning(''); }
 }
 function beginReview(w, name) {
@@ -500,7 +502,7 @@ $('save-review').onclick = () => {
 };
 $('finish').onclick = () => {
   if (!work) return;
-  if (!input?.format) return showWarning(W.noDataset);
+  if (!readable(input)) return showWarning(files.length ? W.notRecognisedYet : W.noDataset);
   if (!reviewer()) return askName(true, W.nameNeeded);
   const problem = reviewerProblem(); if (problem) return showWarning(problem);
   work.cursor = cursor; work.reviewer = reviewer();
