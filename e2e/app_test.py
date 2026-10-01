@@ -1495,6 +1495,41 @@ def chora_checks(pw, url, tmp):
     attempt('Chora in a second tab lets go of files handed over from the main page, which it cannot open',
             lambda: (bool(tabs) and tabs['second'] == 'in-another-tab' and (tabs['handed over'] or {}).get('names') == ['fresh.json'] and tabs['hand-off left'] is None, tabs))
 
+    # The main page's pool is let go when a run ends, so that the browser stops counting the room its
+    # removed databases took (src/engine/worker.js, runEnv). Chora's is not: holding it is what keeps a
+    # second Chora tab out, and Chora opens its session database from it outside any run. A run of
+    # Chora's that ends with no database open (a save with no dataset opened, sent to the page's own
+    # engine) must leave the pool held: a second tab is still kept out, and the first still opens a file.
+    # The page's engine is the worker built from src/engine/worker.js (the map has workers of its own).
+    WORKERS = '''(() => { const W = window.Worker; window.__workers = [];
+      window.Worker = class extends W { constructor(...a) { super(...a); if (/\\/assets\\/worker-|\\/engine\\/worker\\.js/.test(String(a[0]))) window.__workers.push(this); } }; })()'''
+    RUN_EMPTY = '''async (text) => { const w = window.__workers[0]; if (!w) return 'no engine';
+      return await Promise.race([new Promise((r) => setTimeout(() => r('no reply'), 60000)), new Promise((r) => {
+        const on = ({ data }) => { if (data.type === 'done' || data.type === 'error') { w.removeEventListener('message', on); r(data.type); } };
+        w.addEventListener('message', on);
+        w.postMessage({ cmd: 'chora-save', files: [new File([text], 'held.json', { type: 'application/json', lastModified: 1 })], additions: [] }); })]); }'''
+    def pool_held():
+        page.goto('about:blank')                                # no Chora tab but these two
+        one, two = ctx.new_page(), ctx.new_page()
+        try:
+            one.add_init_script(WORKERS); chora_boot(one, base)
+            ran = one.evaluate(RUN_EMPTY, ant.read_text())
+            two.bring_to_front(); two.goto(NOTOOLS if PROVE else base + 'chora.html')
+            until(two, '() => window.__chora && ["in-another-tab", "error", "ready"].includes(window.__chora.phase)', 60)
+            s2 = cstate(two); two.close()
+            one.bring_to_front(); one.set_input_files('#picker', [str(fixture(judgements, 'judgements-held.json', tmp))])
+            until(one, '["loaded", "error", "unrecognised"].includes(window.__chora.phase)'); s1 = cstate(one)
+            return {'run': ran, 'second': s2.get('phase'), 'first': s1.get('phase'), 'error': s1.get('error') or s2.get('error')}
+        finally:
+            for p in (one, two):
+                if not p.is_closed(): p.close()
+    held = {}
+    def pool_held_run():
+        held.update(pool_held()); r = held
+        return r['run'] == 'done' and r['second'] == 'in-another-tab', r
+    attempt('Chora keeps its pool when a run ends with no database open: a second Chora tab is still kept out', pool_held_run)
+    attempt('Chora keeps its pool when a run ends with no database open: it still opens a file', lambda: (bool(held) and held['first'] == 'loaded', held))
+
     def narrow():
         page.goto('about:blank')
         n = ctx.new_page(); n.set_viewport_size({'width': 390, 'height': 844}); n.bring_to_front()

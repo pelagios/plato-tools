@@ -19,7 +19,15 @@ import { save as choraSave } from './chora/save.js';
 
 let resources = null, pool = null, runs = 0, poolName = null;
 async function sqlitePool() {
-  if (pool) return pool;
+  if (pool) {
+    // The main page's pool is let go between runs (tidy, in runEnv), and taken up again here. Another
+    // tab of the main page may have taken it meanwhile and be running: that is said as for a pool in
+    // use at install, and nothing is changed, so the next run may try again.
+    if (pool.vfs.isPaused()) {
+      try { await pool.vfs.unpauseVfs(); } catch (e) { throw poolBusy(e) ? Object.assign(new Error(e.message), { kind: 'pool-busy' }) : e; }
+    }
+    return pool;
+  }
   const sqlite3 = await sqlite3InitModule();
   // A pool is one tab's alone: it holds every file in its directory open, so a second tab using the
   // same one cannot start. A page that may be open beside the main page (Chora's) asks for a pool of
@@ -60,7 +68,6 @@ async function output(dir, name) {
 async function runEnv({ clearOutputs = true, outputs = 'outputs' } = {}) {
   const dir = await outputsDir(clearOutputs, outputs);
   const { vfs } = await sqlitePool();
-  if (vfs.isPaused()) await vfs.unpauseVfs();
   const opened = [];
   const unlinkClosed = () => { for (const d of opened) if (!d.gone && !d.db.isOpen()) { try { vfs.unlink(d.name); } catch {} d.gone = true; } };
   const env = {
@@ -83,10 +90,14 @@ async function runEnv({ clearOutputs = true, outputs = 'outputs' } = {}) {
   // and the conversion that followed peaked at 675 MB; let go, usage fell to 0 after the check and
   // the conversion peaked at 401 MB (1 October 2026). At a million places the check's 0.8 GB was
   // still counted when the conversion ended, at 3.6 GB.
+  // Only the main page's pool is let go. A pool of its own (Chora's) is held for the page's life: its
+  // holding is what tells a second Chora tab that it cannot start, and Chora's session database is
+  // opened from it outside any run. pauseVfs throws, changing nothing, while any database in the pool
+  // is open, so a database still open is never cut off; the pool is let go at a later run's end.
   const tidy = () => {
     for (const d of opened) if (!d.gone) { try { d.db.close(); } catch {} }
     unlinkClosed();
-    try { vfs.pauseVfs(); } catch { /* a database still open: let go at the next run's end */ }
+    if (!poolName) { try { vfs.pauseVfs(); } catch { /* a database still open */ } }
   };
   return { env, tidy };
 }
