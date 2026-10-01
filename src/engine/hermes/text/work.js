@@ -35,7 +35,12 @@ import { CHUNKING, cpLength, sliceCodePoints, dedupeMentions } from './chunk.js'
 
 export const WORK_VERSION = 1;
 export const STATUSES = ['confirmed', 'rejected'];
-export const MAX_TYPE = 100;
+/**
+ * The types a reviewer may confirm: the engine's fixed kinds, chosen from a list and never typed, and
+ * written as a label with no vocabulary term for now (the maintainer's decision, 2026-10-01). Not
+ * "other", which says no more than leaving the type out.
+ */
+export const TYPE_KINDS = Object.freeze(KINDS.filter((k) => k !== 'other'));
 
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isCount = (n) => Number.isInteger(n) && n >= 0;
@@ -136,8 +141,8 @@ export function decide(work, text, id, d, { at = new Date().toISOString() } = {}
       if (`${d.start}-${d.end}` !== id) { out.start = d.start; out.end = d.end; }
     }
     if (d.type !== undefined && d.type !== null) {
-      if (typeof d.type !== 'string' || !d.type.trim() || d.type.trim().length > MAX_TYPE) throw new DataError(`A type of place is a word or a few (at most ${MAX_TYPE} characters).`);
-      out.type = d.type.trim();
+      if (!TYPE_KINDS.includes(d.type)) throw new DataError(`The type of place is chosen from ${TYPE_KINDS.join(', ')}; "${String(d.type).slice(0, 40)}" is not one of them. To record no type, leave it out.`);
+      out.type = d.type;
     }
     if (d.place !== undefined && d.place !== null) {
       const a = placeAddress(d.place);
@@ -202,7 +207,7 @@ export function readWork(input) {
     if (!isObject(d) || !STATUSES.includes(d.status) || typeof d.decided_at !== 'string' || !DATE_TIME.test(d.decided_at)) bad(`the decision on ${id} is not a confirmation or rejection with its date.`);
     if (d.place !== undefined && (d.status !== 'confirmed' || !isIri(d.place) || !/^https?:\/\//i.test(d.place))) bad(`the decision on ${id} links a place that is not an IRI, or links a rejected suggestion.`);
     if ((d.start !== undefined || d.end !== undefined) && !(isCount(d.start) && Number.isInteger(d.end) && d.end > d.start && d.end <= w.text.characters)) bad(`the decision on ${id} adjusts the span to something that is not one.`);
-    if (d.type !== undefined && (typeof d.type !== 'string' || !d.type.trim())) bad(`the decision on ${id} has a type that is not a word.`);
+    if (d.type !== undefined && !TYPE_KINDS.includes(d.type)) bad(`the decision on ${id} has a type that is not one of ${TYPE_KINDS.join(', ')}.`);
   }
   return w;
 }

@@ -81,7 +81,8 @@ test('Anthropic: the key in x-api-key and nowhere else, the browser header, the 
   assert.ok(!url.includes(KEY) && !init.body.includes(KEY), 'absence: not in the address or the body');
   assert.ok(!Object.entries(init.headers).some(([k, v]) => k !== 'x-api-key' && String(v).includes(KEY)), 'nor in any other header');
   for (const k of ['temperature', 'top_p', 'top_k']) assert.ok(!(k in body), `no ${k}`);
-  assert.deepEqual(body.output_config, { format: { type: 'json_schema', schema: T.OUTPUT_SCHEMA } });
+  assert.deepEqual(body.output_config, { format: { type: 'json_schema', schema: T.OUTPUT_SCHEMA }, effort: 'low' }, 'low effort by default, beside the schema');
+  assert.equal(body.thinking, undefined, 'thinking left to the model unless asked');
   assert.equal(body.output_format, undefined, 'not the deprecated field');
   assert.equal(body.system, T.systemPrompt({ language: 'la' }));
   assert.deepEqual(body.messages, [{ role: 'user', content: CHUNK.text }]);
@@ -91,6 +92,28 @@ test('Anthropic: the key in x-api-key and nowhere else, the browser header, the 
   assert.deepEqual(r.usage, { input: 812, output: 64 });
   assert.equal(r.truncated, false);
   assert.equal(r.settings.sampling, 'provider defaults (none sent)');
+  assert.equal(r.settings.effort, 'low', 'the effort sent is recorded');
+});
+
+test('Anthropic: effort is a run option (low by default; null sends none), up-front thinking can be turned off on request, and the estimate follows the effort', async () => {
+  const f = fakeFetch(() => anthropicReply());
+  await T.anthropic({ key: KEY, fetch: f, effort: null }).extract(CHUNK, { model: 'claude-haiku-4-5' });
+  assert.ok(!('effort' in f.calls[0].body.output_config), 'null: the model\'s own default, nothing sent');
+  assert.deepEqual(f.calls[0].body.output_config.format.type, 'json_schema');
+  await T.anthropic({ key: KEY, fetch: f, effort: 'high' }).extract(CHUNK, { model: 'm' });
+  assert.equal(f.calls[1].body.output_config.effort, 'high');
+  const r = await T.anthropic({ key: KEY, fetch: f, thinking: 'between_tools' }).extract(CHUNK, { model: 'claude-sonnet-5-5' });
+  assert.deepEqual(f.calls[2].body.thinking, { type: 'between_tools' });
+  assert.equal(f.calls[2].body.output_config.effort, 'low');
+  assert.deepEqual([r.settings.effort, r.settings.thinking], ['low', 'between_tools']);
+  assert.throws(() => T.anthropic({ key: KEY, fetch: f, effort: 'minimal' }), /effort is one of/);
+  assert.throws(() => T.anthropic({ key: KEY, fetch: f, effort: 'xhigh', thinking: 'between_tools' }), /only at low, medium or high/);
+  assert.throws(() => T.anthropic({ key: KEY, fetch: f, thinking: 'disabled' }), /between_tools/);
+  assert.equal(T.DEFAULT_EFFORT, 'low');
+  const big = { text: 'x'.repeat(8000) };
+  const low = T.anthropic({ key: KEY, fetch: f }).estimate(big), def = T.anthropic({ key: KEY, fetch: f, effort: null }).estimate(big);
+  assert.equal(low.input, def.input);
+  assert.ok(low.output.high < def.output.high, 'low effort, less thinking allowed for');
 });
 
 test('Anthropic: a reply cut off at max_tokens is marked so; a refusal is an error of its own', async () => {

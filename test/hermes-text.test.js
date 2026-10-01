@@ -267,6 +267,17 @@ test('the estimate: tokens always; money only for a priced model, as "about", an
   const day89 = new Date(Date.parse(T.PRICES.checkedOn) + 89 * 86_400_000);
   assert.equal(T.costOf(e, 'anthropic', 'claude-sonnet-5-5', { now: day91 }).why, 'stale');
   assert.ok(T.costOf(e, 'anthropic', 'claude-sonnet-5-5', { now: day89 }).usd, 'control: within 90 days it is shown');
+  // The words always name the date of the prices, whether money is shown or not.
+  assert.equal(T.PRICES.verified, true);
+  assert.equal(T.PRICES.source, 'https://platform.claude.com/docs/en/about-claude/pricing');
+  assert.match(T.estimateWords(e, c), new RegExp(`: about \\$[0-9.]+ to \\$[0-9.]+, at prices as of ${T.PRICES.checkedOn}\\.$`));
+  assert.match(T.estimateWords(e, T.costOf(e, 'anthropic', 'claude-sonnet-5-5', { now: day91 })), new RegExp(`No cost is shown: the prices as of ${T.PRICES.checkedOn} are more than 90 days old\\.$`));
+  assert.match(T.estimateWords(e, T.costOf(e, 'anthropic', 'some-new-model', { now: fresh })), new RegExp(`no price recorded for this model \\(prices as of ${T.PRICES.checkedOn}\\)`));
+  assert.match(T.estimateWords(e, c), /^About [\d,]+ tokens in and [\d,]+ to [\d,]+ out/);
+  // The effort asked for changes the top of the range, not the input.
+  const low = T.estimateRun(chunks, { effort: 'low' });
+  assert.equal(low.input, e.input);
+  assert.ok(low.output.high < e.output.high);
   assert.equal(T.needsSecondConfirmation({ ...e, chunks: 201 }, null), true);
   assert.equal(T.needsSecondConfirmation(e, { usd: { low: 1, high: 6 } }), true);
   assert.equal(T.needsSecondConfirmation(e, { usd: { low: 0.01, high: 0.02 } }), false);
@@ -388,6 +399,7 @@ test('readWork refuses a file no run or review could have written', async () => 
   assert.throws(tamper((w) => { w.results[0].mentions[0].end += 1; }), /not as long as its name/);
   assert.throws(tamper((w) => { w.results[0].mentions[0].kind = 'city'; }), /a span, a name and a kind/);
   assert.throws(tamper((w) => { delete w.source.title; }), /title/);
+  assert.throws(tamper((w) => { w.review.decisions[id].type = 'a walled town'; }), /type that is not one of/);
 });
 
 // ---- review and attestations ---------------------------------------------------------------------
@@ -465,6 +477,10 @@ test('decisions are checked: a span not in the text, a staging WHG address, a re
   assert.throws(() => T.decide(work, text, id, { status: 'confirmed', place: 'https://dev.whgazetteer.org/places/1' }), /staging/);
   assert.throws(() => T.decide(work, text, id, { status: 'confirmed', place: 'Capua' }), /web address/);
   assert.throws(() => T.decide(work, text, '0-1', { status: 'confirmed' }), /no suggestion/);
+  // The type is chosen from the fixed kinds: no free text, and not "other".
+  for (const bad of ['city', 'Settlement', 'a walled town', 'other', 7]) assert.throws(() => T.decide(work, text, id, { status: 'confirmed', type: bad }), /chosen from settlement, region/, String(bad));
+  assert.deepEqual(T.TYPE_KINDS, T.KINDS.filter((k) => k !== 'other'));
+  assert.equal(T.decide(work, text, id, { status: 'confirmed', type: 'water' }).type, 'water', 'control: one of the kinds is taken');
   assert.throws(() => T.setReviewer(work, { name: '' }), /name/);
   assert.ok(T.decide(work, text, id, { status: 'confirmed', place: 'https://pleiades.stoa.org/places/432754' }), 'control: a good decision is taken');
   assert.equal(T.decide(work, text, id, null), null);

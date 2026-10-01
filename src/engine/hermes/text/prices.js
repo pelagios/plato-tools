@@ -17,13 +17,15 @@ export const CONFIRM_CHUNKS = 200;
 export const CONFIRM_USD = 5;
 
 /**
- * US dollars per million tokens, input and output, by provider and model, as recorded on `checkedOn`
- * from `source`. A model the provider names with a date after it (claude-haiku-4-5-20251001) is
- * priced as the model without it.
+ * US dollars per million tokens, input and output, by provider and model, as read on `checkedOn` from
+ * `source` (the provider's own pricing page; base rates, no batch, cache or regional pricing). A model
+ * the provider names with a date after it (claude-haiku-4-5-20251001) is priced as the model without
+ * it. `verified` is false for a table not read from the live page.
  */
 export const PRICES = Object.freeze({
-  checkedOn: '2026-09-25',
-  source: "Anthropic's table of current models and prices (platform.claude.com, as cached by Claude Code's API reference on 2026-09-25); to be checked against https://platform.claude.com/docs/en/about-claude/pricing",
+  checkedOn: '2026-10-01',
+  verified: true,
+  source: 'https://platform.claude.com/docs/en/about-claude/pricing',
   usdPerMillion: {
     anthropic: {
       'claude-fable-5-1': { input: 10, output: 50 },
@@ -31,32 +33,45 @@ export const PRICES = Object.freeze({
       'claude-opus-5-5': { input: 4, output: 20 },
       'claude-opus-5': { input: 5, output: 25 },
       'claude-opus-4-8': { input: 5, output: 25 },
+      'claude-opus-4-7': { input: 5, output: 25 },
+      'claude-opus-4-6': { input: 5, output: 25 },
+      'claude-opus-4-5': { input: 5, output: 25 },
       'claude-sonnet-5-5': { input: 2, output: 10 },
       'claude-sonnet-5': { input: 2, output: 10 },
       'claude-sonnet-4-6': { input: 3, output: 15 },
+      'claude-sonnet-4-5': { input: 3, output: 15 },
       'claude-haiku-4-5': { input: 1, output: 5 },
     },
   },
 });
+
+/**
+ * How much a model's thinking may add to its output, as a share of the chunk's own tokens, by the
+ * effort asked for (null: the model's own default, taken as high). A guess, for the top of the range:
+ * thinking is billed as output, and lower effort means less of it.
+ */
+export const THINKING_ALLOWANCE = Object.freeze({ low: 0.25, medium: 0.6, high: 1.0, xhigh: 2.0, max: 3.0, default: 1.0 });
 
 // What is sent with every chunk besides its text: the prompt and the schema.
 const OVERHEAD_CHARS = PROMPT.length + JSON.stringify(OUTPUT_SCHEMA).length + 60;
 
 /**
  * One chunk's tokens, estimated: { input, output: { low, high } }. Output is a range: a text dense with
- * names gives a long list, and a model that thinks before answering spends tokens doing so.
+ * names gives a long list, and a model that thinks before answering spends tokens doing so, more at
+ * higher `effort` (THINKING_ALLOWANCE).
  */
-export function estimateChunk(chunk) {
+export function estimateChunk(chunk, { effort = null } = {}) {
   const chars = typeof chunk === 'string' ? chunk.length : chunk.text.length;
   const text = Math.ceil(chars / CHARS_PER_TOKEN);
-  return { input: Math.ceil((chars + OVERHEAD_CHARS) / CHARS_PER_TOKEN), output: { low: 20 + Math.ceil(text * 0.05), high: 200 + text } };
+  const thinking = THINKING_ALLOWANCE[effort ?? 'default'] ?? THINKING_ALLOWANCE.default;
+  return { input: Math.ceil((chars + OVERHEAD_CHARS) / CHARS_PER_TOKEN), output: { low: 20 + Math.ceil(text * 0.05), high: 200 + Math.ceil(text * (0.6 + thinking)) } };
 }
 
-/** A whole run's estimate: { characters, chunks, input, output: { low, high } }. */
-export function estimateRun(chunks) {
-  const out = { characters: 0, chunks: chunks.length, input: 0, output: { low: 0, high: 0 } };
+/** A whole run's estimate: { characters, chunks, input, output: { low, high }, effort }. */
+export function estimateRun(chunks, { effort = null } = {}) {
+  const out = { characters: 0, chunks: chunks.length, input: 0, output: { low: 0, high: 0 }, effort };
   for (const c of chunks) {
-    const e = estimateChunk(c);
+    const e = estimateChunk(c, { effort });
     out.characters += c.text.length; out.input += e.input; out.output.low += e.output.low; out.output.high += e.output.high;
   }
   return out;
@@ -84,4 +99,18 @@ export function costOf(estimate, provider, model, { now = new Date(), table = PR
 }
 
 /** Whether a run is large enough that the user must confirm it a second time. */
+const usd = (n) => (n < 0.01 ? 'under $0.01' : '$' + (n < 10 ? n.toFixed(2) : Math.round(n).toLocaleString('en-GB')));
+const tokens = (n) => n.toLocaleString('en-GB');
+/**
+ * The estimate in words, as the page and the command line show it. It always names the date of the
+ * prices, whether or not money is shown.
+ */
+export function estimateWords(estimate, cost) {
+  const t = `About ${tokens(estimate.input)} tokens in and ${tokens(estimate.output.low)} to ${tokens(estimate.output.high)} out, for ${tokens(estimate.chunks)} ${estimate.chunks === 1 ? 'part' : 'parts'} of the text`;
+  const asOf = `prices as of ${cost.pricesOf}${PRICES.verified ? '' : ', not checked against the provider\'s page'}`;
+  if (cost.usd) return `${t}: about ${usd(cost.usd.low)} to ${usd(cost.usd.high)}, at ${asOf}.`;
+  if (cost.why === 'stale') return `${t}. No cost is shown: the ${asOf} are more than ${PRICE_STALE_DAYS} days old.`;
+  return `${t}. No cost is shown: there is no price recorded for this model (${asOf}).`;
+}
+
 export const needsSecondConfirmation = (estimate, cost) => estimate.chunks > CONFIRM_CHUNKS || (cost?.usd ? cost.usd.high > CONFIRM_USD : false);
