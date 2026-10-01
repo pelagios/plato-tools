@@ -32,7 +32,7 @@
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self' data:",
     "img-src 'self' data: blob:" + sites,
-    "connect-src 'self' data: blob:" + sites,
+    "connect-src 'self' blob:" + sites,
     "worker-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'self'",

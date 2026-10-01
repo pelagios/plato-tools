@@ -36,7 +36,7 @@ test('with nothing agreed to, the policy lets the page reach this site alone, an
   assert.equal(meta['http-equiv'], 'Content-Security-Policy');
   const p = parse(meta.content);
   assert.deepEqual(p['default-src'], ["'self'"]);
-  assert.deepEqual(p['connect-src'], ["'self'", 'data:', 'blob:']);
+  assert.deepEqual(p['connect-src'], ["'self'", 'blob:'], 'no data: (nothing on the page fetches one)');
   assert.deepEqual(p['img-src'], ["'self'", 'data:', 'blob:']);
   assert.deepEqual(p['worker-src'], ["'self'", 'blob:']);
   assert.deepEqual(p['object-src'], ["'none'"]);
@@ -75,7 +75,7 @@ test('anything that is not a plain origin is left out of the policy, so a stored
 test('storage that cannot be read gives the policy of nothing agreed to, not no policy (it fails closed)', () => {
   const { meta, published } = runHead({}, { throwing: true });
   assert.ok(meta, 'a policy is still written');
-  assert.deepEqual(parse(meta.content)['connect-src'], ["'self'", 'data:', 'blob:']);
+  assert.deepEqual(parse(meta.content)['connect-src'], ["'self'", 'blob:']);
   assert.deepEqual(published.origins, []);
   // Garbage in storage, the same.
   const g = runHead({ 'chora-consent': '{not json', 'chora-basemap-consent': '"a string"' });
