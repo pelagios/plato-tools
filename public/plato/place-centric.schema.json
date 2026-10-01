@@ -1,18 +1,26 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://w3id.org/plato/schemas/place-centric.schema.json",
-  "title": "PLATO Place-Centric Submission Profile",
-  "description": "Submit one or more SpatialEntities with their attestations nested under them. This is the successor to LPF for dataset ingestion and legacy gazetteer contributions. Each SpatialEntity carries its own attestations, which do not need to specify an 'about' field (it is implicit from the nesting).",
+  "title": "PLATO Place-Centric Profile",
+  "description": "A document of one or more SpatialEntities, each with its attestations nested under it: the shape for a dataset of its own places, such as a gazetteer or a converted Linked Places Format file (LPF is PLATO's single-object-attestation profile, and remains valid as it is). Each SpatialEntity carries its own attestations, which do not give an 'about' field: it is implicit from the nesting.",
   "type": "object",
   "properties": {
     "$schema": {
       "type": "string",
       "const": "https://w3id.org/plato/schemas/place-centric.schema.json"
     },
+    "@context": {
+      "description": "The JSON-LD context, so that a JSON-LD processor reads the document as RDF in the PLATO ontology: https://w3id.org/plato/schemas/plato.context.jsonld, or a list or object that includes it. A relative address is allowed, as in JSON-LD; null, which would clear the context, is not. Optional: a tool that knows PLATO applies the context whether or not the document names it.",
+      "anyOf": [
+        { "type": "string", "format": "iri-reference" },
+        { "type": "object" },
+        { "type": "array", "items": { "anyOf": [{ "type": "string", "format": "iri-reference" }, { "type": "object" }] } }
+      ]
+    },
     "profile": {
       "type": "string",
       "const": "place-centric",
-      "description": "Identifies this as a place-centric submission."
+      "description": "Identifies this as a place-centric document."
     },
     "gazetteer": {
       "type": "object",
@@ -125,6 +133,14 @@
           "type": "string",
           "format": "uri",
           "description": "The base from which the dataset's places, sources and other entities have their web addresses (void:uriSpace), e.g. https://w3id.org/whg-epns/. Choose one you control and will keep."
+        },
+        "candidateSets": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "plato.schema.json#/$defs/uri"
+          },
+          "description": "The candidate sets made for this dataset (the reverse of plato:candidates_for): the IRIs of the sets whose candidates its identity relations answer through promotedFrom. Each set's own candidatesFor must be this gazetteer's @id, which is therefore required with this key. Optional: a validator given the sets checks that both ends agree."
         }
       },
       "required": [
@@ -149,7 +165,12 @@
             ]
           }
         }
-      ]
+      ],
+      "dependentRequired": {
+        "candidateSets": [
+          "@id"
+        ]
+      }
     },
     "dataSets": {
       "type": "array",
@@ -167,7 +188,7 @@
     },
     "spatialEntities": {
       "type": "array",
-      "description": "The SpatialEntities being submitted, each with its attestations nested. A SpatialEntity may have no attestations: it is then only a referent, such as the target of a relation, and its label is not evidence.",
+      "description": "The document's SpatialEntities, each with its attestations nested. A SpatialEntity may have no attestations: it is then only a referent, such as the target of a relation, and its label is not evidence.",
       "items": {
         "allOf": [
           {
@@ -210,7 +231,7 @@
     },
     "identityRelations": {
       "type": "array",
-      "description": "Identity assertions between SpatialEntities in this submission or between submitted SpatialEntities and existing ones.",
+      "description": "Identity assertions between SpatialEntities in this document, or between them and SpatialEntities elsewhere.",
       "items": {
         "allOf": [
           {

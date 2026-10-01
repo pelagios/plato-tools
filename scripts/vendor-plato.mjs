@@ -11,7 +11,8 @@ import { mkdir, writeFile, readFile } from 'node:fs/promises';
 
 const REPO = 'pelagios/place-attestation-ontology';
 const FILES = ['ontology.ttl', 'schemas/plato.schema.json', 'schemas/place-centric.schema.json',
-  'schemas/attestation-centric.schema.json', 'schemas/plato.context.jsonld', 'schemas/tables/csv-metadata.json'];
+  'schemas/attestation-centric.schema.json', 'schemas/candidate-set.schema.json', 'schemas/plato.context.jsonld',
+  'schemas/tables/csv-metadata.json'];
 const pkg = JSON.parse(await readFile('package.json', 'utf8'));
 const argv = process.argv.slice(2);
 const refAt = argv.indexOf('--ref');
