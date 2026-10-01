@@ -290,7 +290,7 @@ readers link to those headings, so keep them.
   Everything else is emitted at once, so a held name comes out after the names read after it. The reading
   options that convert the editors' words (`commentaryPlaces`, `headerPlaces`) are refused while
   `EDITORIAL_IRI` is null (`teiReadingRefusal`); tests set it with `setEditorialIriForTests`. With `listPlaces`, a `<place>` gives a Headword
-  attestation (`listPlace()`); one in the teiHeader goes on the header's `queue`, run at
+  attestation (`listPlace()`), from its own names (a name that is the `<place>`'s child) and its own `<location>`s (not one whose type says it is another place's, `OTHER_PLACE_LOCATION`, such as Schnitzler's `located_in_place`: `tei-listplace-geo-other-place`), its `<geo>` read by `parseGeo`; one in the teiHeader goes on the header's `queue`, run at
   `</teiHeader>` after `header()`, so that the source, the own host and the `geoDecl` are read from
   the whole header. With `headerPlaces` (held), a findspot or place of origin in the header
   goes on the same queue (`headerMention`, `headerPlace`), so its prefixes are those in force at

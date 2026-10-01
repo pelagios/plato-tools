@@ -1,0 +1,55 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader>
+    <fileDesc>
+      <titleStmt>
+        <title level="s">Arthur Schnitzler: Briefwechsel mit Autorinnen und Autoren</title>
+        <title level="a">Verzeichnis der vorkommenden Orte</title>
+        <respStmt>
+          <resp>providing the content</resp>
+          <name>Martin Anton Müller</name>
+          <name>Gerd-Hermann Susen</name>
+          <name>Laura Untner</name>
+          <name>Selma Jahnke</name>
+          <name>PMB (Personen der Moderne Basis)</name>
+        </respStmt>
+        <respStmt>
+          <resp>converted to XML encoding</resp>
+          <name>Martin Anton Müller</name>
+        </respStmt>
+      </titleStmt>
+      <publicationStmt>
+        <publisher>Austrian Centre for Digital Humanities and Cultural Heritage (ACDH-CH)</publisher>
+        <pubPlace>Vienna, Austria</pubPlace>
+        <date>2025</date>
+        <idno type="URI">https://id.acdh.oeaw.ac.at/arthur-schnitzler-briefe/v1/indices/listPlace</idno>
+        <idno type="handle">https://hdl.handle.net/21.11115/0000-000E-753E-A</idno>
+      </publicationStmt>
+      <sourceDesc>
+        <p>Entitäten für die Edition der Korrespondenz Schnitzlers mit Autorinnen und Autoren, https://schnitzler-briefe.acdh.oeaw.ac.at/</p>
+      </sourceDesc>
+    </fileDesc>
+  </teiHeader>
+  <text>
+    <body><listPlace><place xml:id="pmb365563">
+  <placeName>Meidlinger Hauptstraße 56</placeName>
+  <desc type="entity_type">Wohngebäude (K.WHS)</desc>
+  <desc type="entity_type_id">36</desc>
+<location type="coords">
+  <geo>48,177598 16,329723</geo>
+</location>
+<location type="located_in_place">
+  <placeName key="pmb62">XII., Meidling</placeName>
+  <geo>48,17192 16,32586</geo>
+</location>
+<location type="located_in_place">
+  <placeName key="pmb1239">Meidlinger Hauptstraße</placeName>
+  <geo>48,178825 16,329918</geo>
+</location>
+  <idno type="URL" subtype="pmb">https://pmb.acdh.oeaw.ac.at/entity/365563/</idno>
+<listBibl>
+    <bibl type="collections" n="24">manually created entity</bibl>
+</listBibl>
+</place></listPlace></body>
+  </text>
+</TEI>

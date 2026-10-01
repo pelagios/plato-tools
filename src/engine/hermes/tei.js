@@ -30,7 +30,6 @@ const FINDSPOT_OF = PLATO + 'FindspotOf';
 // Coordinates in a <geo>: a latitude and a longitude in degrees, between them a comma, spaces, or both
 // (TEI's default "37.97 23.72"; I.Sicily writes "37.08415, 15.27628").
 const GEO = /^([-+]?\d+(?:\.\d+)?)\s*(?:,\s*|\s+)([-+]?\d+(?:\.\d+)?)$/;
-
 // Or each with a comma for its decimal point, and only whitespace between them (Schnitzler's
 // "48,177598 16,329723"): two numbers, each with exactly one comma, which nothing else can mean.
 // Anything else with commas ("48,1,16,3", "48,1 16") is ambiguous, and stays invalid.
@@ -140,6 +139,7 @@ export const TEI_KINDS = {
   'tei-listplace-geo-gazetteer': 'loss',
   'tei-listplace-geo-datum': 'loss',
   'tei-listplace-geo-invalid': 'loss',
+  'tei-listplace-geo-other-place': 'loss',
   'tei-lang-not-tag': 'loss',
   'tei-licence-not-address': 'loss',
   'tei-sourcedesc-several': 'loss',
@@ -199,6 +199,8 @@ const READ_ATTRIBUTES = new Set(['ref', 'key', 'xml:id', 'xml:lang', 'xml:space'
 // The children of a <place> in a list of places that are read (idno) or reported by a kind of their
 // own (its names, its location); a nested <place> is read as a place. Any other child is reported.
 const PLACE_CHILDREN = new Set(['idno', 'location', 'place', ...PLACE_ELEMENTS]);
+// A <location> type that says the location is another place's (the place this one is in), not this place's own.
+const OTHER_PLACE_LOCATION = /located[_ -]?in|parent|part[_ -]?of|within|in[_ -]?place|broader/i;
 // A description of a person, an organisation, an event or a book (in <back>, say), whose place names
 // (a birthplace in a <listPerson>) describe it, not a passage of the text that names the place.
 const RECORDS = new Set(['listPerson', 'listOrg', 'listEvent', 'listBibl', 'person', 'personGrp', 'org', 'event', 'bibl', 'biblStruct']);
@@ -538,6 +540,7 @@ export class TeiReader {
     }
     const pl = this.placeStack[this.placeStack.length - 1];
     if (pl && local === 'geo' && parent?.location === pl) { this.capture((c) => pl.geos.push(norm(c.pref))); return; }
+    if (pl && local === 'geo' && parent?.otherLocation) { this.capture((c) => parent.otherLocation.geos.push(norm(c.pref))); return; }
     if (pl && parent?.place === pl) {
       if (local === 'idno') {
         this.capture((c) => {
@@ -550,7 +553,21 @@ export class TeiReader {
         });
         return;
       }
-      if (local === 'location') { el.location = pl; this.capture((c) => { pl.geo.push(norm(c.pref) || 'a location'); }); return; }
+      if (local === 'location') {
+        // Only the place's own location: one whose type says it is another place's (Schnitzler's
+        // type="located_in_place", the district or street the place is in) is that place's, and is
+        // reported, not read as this place's coordinates or names.
+        const type = attr('type');
+        if (type !== undefined && OTHER_PLACE_LOCATION.test(type)) {
+          const other = el.otherLocation = { names: [], geos: [] };
+          this.capture((c) => {
+            const words = [other.names.join(', '), other.geos.length ? `(${other.geos.join('; ')})` : ''].filter(Boolean).join(' ') || norm(c.pref) || 'empty';
+            this.report('tei-listplace-geo-other-place', `${pl.id !== undefined ? `#${pl.id}` : 'a place with no xml:id'}: ${type}: ${words}`);
+          });
+          return;
+        }
+        el.location = pl; this.capture((c) => { pl.geo.push(norm(c.pref) || 'a location'); }); return;
+      }
       if (!PLACE_CHILDREN.has(local)) this.once('tei-place-content', `${pl.id !== undefined ? `#${pl.id}` : 'a place with no xml:id'}: <${local}>`);
     }
 
@@ -572,7 +589,10 @@ export class TeiReader {
       return;
     }
     // A place name in a list of places describes the place listed, not a passage that names it.
-    if (pl) { this.capture((c) => { const s = norm(c.pref); if (s) pl.names.push({ text: s, lang: this.stack[this.stack.length - 1].lang }); }); return; }
+    // Only a name that is the place's own child is its name: one in a <location> is part of that
+    // location (its own, read as words, or another place's, reported above), not a name of this place.
+    if (pl && parent?.otherLocation) { const o = parent.otherLocation; this.capture((c) => { const s = norm(c.pref); if (s) o.names.push(s); }); return; }
+    if (pl) { if (parent?.place === pl) this.capture((c) => { const s = norm(c.pref); if (s) pl.names.push({ text: s, lang: this.stack[this.stack.length - 1].lang }); }); return; }
     // A place name outside the text (in the teiHeader, where EpiDoc says where an inscription was
     // found; in a <standOff>, a <facsimile>) is the edition's description of the document, not a
     // name the text attests. It is reported where it points to a place; without a ref (a
