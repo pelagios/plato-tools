@@ -93,7 +93,12 @@ test('Linked Places Format is still read as LPF; plain GeoJSON is read as a tabl
 });
 
 // ---- the fixtures read -------------------------------------------------------------------------------
-for (const f of readdirSync(DIR).filter((f) => /\.(csv|geojson)$/.test(f) && f !== 'duplicate-ids.csv')) {
+const FIXTURES = readdirSync(DIR).filter((f) => /\.(csv|geojson)$/.test(f) && f !== 'duplicate-ids.csv');
+test('the fixtures read are there to read', () => {
+  for (const f of ['with-ids.csv', 'no-ids.csv', 'odd-headers.csv', 'pleiades-places-subset.csv', 'feature-ids.geojson', 'plain.geojson'])
+    assert.ok(FIXTURES.includes(f), `${f} is not among ${FIXTURES.join(', ')}`);
+});
+for (const f of FIXTURES) {
   test(`${f}: read into valid PLATO JSON`, async () => {
     const { doc } = await readAll(fx(f));
     const n = (doc.spatialEntities || doc.attestations).length;
@@ -477,10 +482,8 @@ test('a CSV file with no header, and GeoJSON in another reference system, are re
   await assert.doesNotReject(readAll(textFile(JSON.stringify(crs), 'x.geojson')), 'control: WGS 84 named is read');
 });
 
-// ---- through the engine (once src/engine/pipeline.js dispatches to the reader) ---------------------
-const wired = /genericSource/.test(readFileSync('src/engine/pipeline.js', 'utf8'));
-const skip = wired ? false : 'src/engine/pipeline.js does not yet dispatch csv and geojson to src/engine/hermes/generic.js';
-test('through the engine: converted to PLATO JSON and N-Triples with no errors, place-centric and attestation-centric', { skip }, async () => {
+// ---- through the engine ---------------------------------------------------------------------------------
+test('through the engine: converted to PLATO JSON and N-Triples with no errors, place-centric and attestation-centric', async () => {
   for (const [f, stem] of [['with-ids.csv', 'with-ids'], ['odd-headers.csv', 'odd-headers'], ['feature-ids.geojson', 'feature-ids']]) {
     const j = await go([fx(f)], 'convert', 'plato-json');
     assert.equal(j.report.errors, 0, `${f}: ${JSON.stringify(j.report.items.filter((i) => i.severity === 'error'))}`);
@@ -492,7 +495,7 @@ test('through the engine: converted to PLATO JSON and N-Triples with no errors, 
     assert.match(outText(n.e, `${stem}.nt`), /<https:\/\/w3id\.org\/plato#attests_about>|contains_entity/);
   }
 });
-test('through the engine: a duplicate id stops the run with no output', { skip }, async () => {
+test('through the engine: a duplicate id stops the run with no output', async () => {
   const r = await go([fx('duplicate-ids.csv')], 'convert', 'plato-json');
   assert.ok(r.incomplete);
   assert.deepEqual(r.outputs, []);
@@ -534,7 +537,7 @@ test('command line: columns whose headings are numbers are printed, and given in
     assert.deepEqual(Object.keys({ parish: 1, 1801: 1, 1811: 1, name: 1 }), ['1801', '1811', 'parish', 'name']);
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
-test('command line: the columns as read are printed with the report, as JSON to save and give back', { skip }, () => {
+test('command line: the columns as read are printed with the report, as JSON to save and give back', () => {
   const r = cli('check', DIR + 'odd-headers.csv');
   assert.equal(r.code, 0, r.out + r.err);
   assert.match(r.out, /Columns read as/);
