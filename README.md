@@ -50,7 +50,8 @@ and the issue for each where it has one:
 
 They read and write PLATO's spreadsheet tables, PLATO JSON and JSON Lines, RDF (N-Triples, N-Quads
 and Turtle, written as N-Triples) and Linked Places Format v1, and read the W3C Web Annotations that
-Recogito exports, TEI editions, and any other CSV or GeoJSON of places: [the formats in full](https://pelagios.org/place-attestation-ontology/guide/tools.html#what-it-reads-and-writes).
+Recogito exports, TEI editions (P5; P4, such as Perseus's, its Beta Code Greek reported and not
+converted; and TEI with no namespace), and any other CSV or GeoJSON of places: [the formats in full](https://pelagios.org/place-attestation-ontology/guide/tools.html#what-it-reads-and-writes).
 
 A TEI edition and a table of places have **reading options**, each off until chosen: on the page in
 *Reading options*, below the column table, and on the command line as flags (below).

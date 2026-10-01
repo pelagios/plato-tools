@@ -317,8 +317,52 @@ readers link to those headings, so keep them.
   no DOM (a Web Worker has none); the only thing held to the end is a place name waiting for a
   `<place>` later in the file, indexed by the id it waits for. The edition, from its `teiHeader`, is the source; a place name's
   `xml:id` is never the attestation's `@id`. A file that declares an encoding other than UTF-8 is
-  refused. Any other XML (TEI P4, TEI in no namespace, KML, anything else) is refused by
+  refused. Any other XML (KML, TEI in a namespace not TEI's, anything else) is refused by
   `detect()` with a reason (`XML_REASONS`), never sniffed as N-Triples.
+- **TEI P4, and TEI with no namespace** (`tei.js`, "TEI P4, and TEI with no namespace"). `detect()`
+  gives `{format: 'tei', variant: 'p4'}` for `<TEI.2>` or `<teiCorpus.2>` in no namespace, and
+  `variant: 'no-namespace'` for `<TEI>` or `<teiCorpus>` in none (a TEI root in another namespace is
+  refused as XML). The reader decides for itself, from the root: the root fixes the namespace
+  (`this.ns`), and an element is TEI's when its namespace is the root's. P4 semantics apply only to
+  P4 (`teiVariant === 'p4'`, `tei-p4`, a warning): `P4Attributes` renames `id` and `lang` to
+  `xml:id` and `xml:lang` before anything reads them; `lang` is an IDREF into the header's
+  `<language id>`, resolved by `languageTag` to the `<language>`'s `ident` where that is a tag,
+  else to the id where that is one (`<language id="la">`), else `tei-lang-not-tag` naming the
+  `<language>`; a place name's `@reg` (the editors' regularised form) is `tei-reg`, a loss, and the
+  name is the text's; a name whose language is Greek (`isGreek`: its tag `grc`/`el`, or its
+  `<language>`'s words or id naming Greek) and whose text is ASCII with a letter is Beta Code:
+  `tei-p4-beta-code`, a loss naming the string, and the attestation carries no `names` (and so no
+  `formStatus`), with a note (decided 2026-10-01: reported, not converted; a later opt-in only with
+  exact round trips). P4's numbered divs (`div1`…`div7`) are read as `div` is (`DIVS`); Perseus's
+  top-level divs are books and chapters, never `type="edition"`, so the edition rule does not fire
+  for such a file and its notes are the source's unless marked as the editors' (`noteMark`, as
+  `resp="ed"`). Keys (`key="tgn,7011179"`) take the key path, with TGN's pattern suggested. A
+  namespace-less TEI is P5 without its xmlns (`tei-no-namespace`, a warning): `xml:id` and
+  `xml:lang` are read, `id` and `lang` are not (reported as attributes).
+- **The ISO entity sets.** A DOCTYPE naming an outside DTD (`namesOutsideDtd`: an external subset,
+  `SYSTEM` or `PUBLIC` after the root's name, or a parameter entity declared `SYSTEM`/`PUBLIC` and
+  used, `%ISOgrk1;`, in the internal subset) means the file relies on that DTD's entities, which are
+  never fetched. For such a file only (decided 2026-10-01), `installIso()` gives saxes' `ENTITIES`
+  each name of `src/vendor/iso-entities.json` as a getter that counts its use (`useIso`), in
+  `doctype()` before its early return for a DOCTYPE with no internal subset; the file's own
+  declarations are made after it and replace it (`declared`, not `Object.hasOwn`, decides which
+  declaration is first), and an in-file entity whose text uses a table name counts it each time it
+  is used. At `close()`, each set used is reported once (`tei-entity-iso`, a warning: "isogrk1: agr
+  (3), bgr (1)"), since some names were remapped over the years (the 2007 sets have `phiv` U+03D5,
+  `epsiv` U+03F5 and no `phis`). A name in neither the file nor the table is an error, named (a
+  `Proxy` on `ENTITIES` remembers the last name looked up). `teiSource` and `teiKeyPrefixes` read
+  the file's first 64 KB (`headed`) and load the table (`loadIsoEntities`, a dynamic JSON import,
+  cached) only when a DOCTYPE there has `SYSTEM` or `PUBLIC`; `teiToDocument` takes it as the option
+  `entities`, or uses the cached one. The table is built by `node scripts/make-entities.mjs`
+  (`--from DIR` for local copies) from the W3C's *XML Entity Definitions for Characters*
+  (https://www.w3.org/2003/entities/2007/, the 22 `iso*.ent` files: not the WHATWG's entities.json,
+  which lacks ISOgrk1's transliterations, and not ISO 8879's own files, licensed only for SGML
+  systems); it writes `src/vendor/iso-entities.NOTICE`, with the W3C Software Notice and License and
+  the ISO 1986 and 1991 notices verbatim, and puts the same text in the JSON's `licence`, so the
+  notice travels into the built site. Real Perseus P4 files also use their own DTD's entities in the
+  header (`&responsibility;`, `&fund.NEH;`, `&Perseus.publish;`), which are not ISO's: such a file
+  stops there, with the entity named. `scripts/check-perseus-p4.mjs` checks the reading against a
+  local Perseus file (opt-in, `PERSEUS_P4_FILE`; Perseus's texts are CC BY-SA and none is committed).
 - **Tables of places** (`columns.js`, `generic.js`). `input.js`'s `detect()` sends a lone CSV (or
   `.tsv`/`.tab`) that is not one of the tables' sheets, and a FeatureCollection or Feature whose
   structure is not LPF's (`isLpf`, on the head read as structure by `jsonHead`), here. A GeoJSON
@@ -1512,6 +1556,7 @@ node e2e/ink_memory.mjs                   # the tracing worker's memory, for its
 node scripts/install-test.mjs             # install the packed tools as npx does, and run the command
 node e2e/compare_scale.mjs deep-plato.jsonl.gz --work-dir DIR   # the version check at full scale
 python3 e2e/scale_test.py --input deep-plato.nt.gz --target plato-jsonl --out out.jsonl
+PERSEUS_P4_FILE=/path/to/text.xml node scripts/check-perseus-p4.mjs   # TEI P4 against a real Perseus file (opt-in)
 ```
 
 `npm test` reads PLATO's examples from a checkout of PLATO beside this one, or wherever
