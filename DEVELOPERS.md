@@ -142,6 +142,21 @@ are held to.
   a whole number below 10²¹ is an `xsd:integer` and any other number an `xsd:double`, so `1e-7` is
   `"1.0E-7"^^xsd:double` and comes back exactly. The tests of equivalence with `jsonld.js` check
   that their data holds no such number, and `test/json2rdf.test.js` shows the difference.
+- **A workbook's cells** (.xlsx and .ods, both read by SheetJS) are read as stored, not as their
+  number formats show them (`workbookSheetCsv` in `pipeline.js`), and each sheet is then read as
+  CSV text, as a CSV file is. A number is written in JavaScript's shortest round-trip form
+  (`String(n)`), never as an exponent, which a CSVW decimal does not allow (`1e-7` is `0.0000001`):
+  a coordinate formatted `0.00` keeps all its digits, a General number all 15 or more (SheetJS's
+  formatted text has 11), a whole number formatted `0.00` is `42`, and a percentage or an amount of
+  money is the number (`0.95`, not `95%`). A date is ISO 8601: `YYYY-MM-DD` at midnight, the form
+  `from` and `to` take; otherwise `YYYY-MM-DDThh:mm:ss`, with no zone, as the workbook gives none
+  (it does not validate in `from` or `to`, which take no time, and is reported there); a cell whose
+  format shows no day nor year is a time, `hh:mm:ss`. The workbook is read with `UTC: true`, so a
+  Date's UTC fields are the date as stored: SheetJS 0.20.3 gives UTC Dates from `read` whatever
+  the option, but its `sheet_to_json` turns them to local time, and `toISOString` on a local
+  midnight in London in summer is the day before. A text cell is its text, so `007` stays `007`.
+  `test/workbook-values.test.js` builds an .xlsx and an .ods with each of these and runs in London's
+  time zone.
 - **A structured value** (a property value whose `value` is a JSON object) goes to RDF as
   `plato:value_json`, in canonical form (RFC 8785), and comes back as the object. This departs from
   `jsonld.js`, which would make the object a node and drop its keys.

@@ -257,6 +257,50 @@ const WORKBOOK_WHOLE = 50 * 2 ** 20;
 // Where in a record a source is cited: an attestation's sources, an identity relation's source.
 const SOURCE_AT = /\/(sources\/\d+|source)(\/|$)/;
 
+/**
+ * A number as the shortest text that reads back as the same number (JavaScript's String(n)), but
+ * never in exponent form, which a CSVW decimal does not allow: 1e-7 is 0.0000001.
+ */
+export function numberText(n) {
+  const s = String(n);
+  const m = /^(-?)(\d)(?:\.(\d+))?e([+-]\d+)$/.exec(s);
+  if (!m) return s;
+  const digits = m[2] + (m[3] || ''), exp = Number(m[4]);
+  return m[1] + (exp < 0 ? `0.${'0'.repeat(-exp - 1)}${digits}` : digits + '0'.repeat(exp - digits.length + 1));
+}
+
+/**
+ * A date cell's value as ISO 8601. The workbook is read with UTC: true, so the Date's UTC fields are
+ * the date and time as stored, whatever the time zone of the machine. Midnight is a date
+ * (YYYY-MM-DD, the form the tables' from and to take); any other time is a date and time with no
+ * zone (YYYY-MM-DDThh:mm:ss, with the seconds' fraction only if there is one), as the workbook gives
+ * none. A cell whose number format shows no day nor year is a time of day (hh:mm:ss).
+ */
+export function dateText(d, format) {
+  const iso = d.toISOString(), t = iso.indexOf('T');
+  const time = iso.slice(t + 1, -1).replace(/\.000$/, '');
+  if (format && !/[dy]/i.test(format.replace(/"[^"]*"|\[[^\]]*\]|\\./g, ''))) return time;
+  return time === '00:00:00' ? iso.slice(0, t) : `${iso.slice(0, t)}T${time}`;
+}
+
+/**
+ * One sheet of a workbook (.xlsx or .ods, both read by SheetJS) as CSV text, each cell's value as
+ * stored, not as its number format shows it: a coordinate formatted 0.00 keeps all its digits, a
+ * percentage or an amount of money is the number itself (0.256, not 25.60%), and a date is ISO 8601,
+ * not the m/d/yy of a format. A text cell is its text as typed, so 007 stays 007.
+ */
+export function workbookSheetCsv(XLSX, data, name) {
+  const wb = XLSX.read(data, { type: 'array', dense: true, cellDates: true, cellNF: true, UTC: true, sheets: name });
+  const ws = wb.Sheets[name];
+  for (const row of ws['!data'] || []) for (const cell of row || []) {
+    if (!cell) continue;
+    if (cell.t === 'n' && typeof cell.v === 'number') cell.w = numberText(cell.v);
+    else if (cell.t === 'd' && cell.v instanceof Date && !isNaN(cell.v)) cell.w = dateText(cell.v, cell.z);
+  }
+  // Each number and date is written as the text set above (sheet_to_csv writes a cell's w).
+  return XLSX.utils.sheet_to_csv(ws, { blankrows: false, rawNumbers: false }).replace(/^﻿/, '');
+}
+
 /** The sheets of the input, each { label, chunks() }: the last of several files for one sheet wins. */
 async function tableSheetsOf(input, env, rep) {
   const sheets = new Map();
@@ -288,10 +332,10 @@ async function tableSheetsOf(input, env, rep) {
     for (const name of names) {
       if (!TABLE_SHEETS.includes(name.toLowerCase())) continue;
       sheets.set(sheetOf(name), { label: `${name} in ${file.name}`, chunks: async function* () {
-        let wb;
-        try { wb = XLSX.read(data, { type: 'array', raw: false, dense: true, sheets: name }); }
+        let csv;
+        try { csv = workbookSheetCsv(XLSX, data, name); }
         catch (e) { throw damaged(e); }
-        yield XLSX.utils.sheet_to_csv(wb.Sheets[name], { blankrows: false, rawNumbers: false }).replace(/^﻿/, '');
+        yield csv;
       } });
     }
   }
