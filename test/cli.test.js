@@ -94,6 +94,14 @@ test('usage problems exit 2, with a message on stderr and nothing on stdout', ()
   for (const t of ['plato-jsonl', 'plato-json', 'ntriples', 'tables', 'lpf-seq', 'lpf']) assert.match(h.out, new RegExp(`\\n  ${t} +\\S`), t);
   // The working database's room: the input, and with --previous the previous release too (minting holds both).
   assert.match(h.out.replace(/\s+/g, ' '), /room for about 1\.2 to 1\.5 times the uncompressed size of the input and, with --previous, of the previous release as well/);
+  // Which formats are read only says so by name (three formats came before "these two"), and --json's
+  // columns (a list) is told apart from the object --columns takes; the README says the same.
+  const flat = h.out.replace(/\s+/g, ' ');
+  assert.match(flat, /or a TEI XML edition \(annotations and TEI are read, not written\)/);
+  assert.doesNotMatch(flat, /these two/);
+  assert.match(flat, /--json print one JSON object per input.*?Its "columns", for a table of places, is a list of \{column, field, reason\} to read; --columns takes the object printed without --json instead\./);
+  const readme = readFileSync('README.md', 'utf8').replace(/\s+/g, ' ');
+  assert.match(readme, /its `columns` is a list of `\{column, field, reason\}`, to read; `--columns` takes the object printed without `--json` instead/);
 });
 
 // ---- --json -------------------------------------------------------------------------------------

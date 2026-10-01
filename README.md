@@ -77,7 +77,9 @@ node bin/plato-tools.mjs compare release-1.jsonl.gz release-2.jsonl.gz  # was an
 - **Outputs are never replaced** unless `--overwrite` is given, and an output left incomplete by a
   file that could not be read to the end is removed.
 - `--json` prints one JSON object per input, one per line, then one for the total: the page's
-  report, with the input's format, counts, outputs and status. `--brief` prints one line per input.
+  report, with the input's format, counts, outputs and status. For a table of places its `columns`
+  is a list of `{column, field, reason}`, to read; `--columns` takes the object printed without
+  `--json` instead. `--brief` prints one line per input.
 - `--base URL` gives the base for the web addresses of spreadsheet identifiers
   ([web addresses for your identifiers](https://pelagios.org/place-attestation-ontology/guide/tools.html#converting)). `--no-typing` leaves out the
   node types and typed dates that N-Triples output otherwise has. `--cube` adds what Data Cube

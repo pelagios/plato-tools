@@ -58,7 +58,8 @@ longitude, id, the place's web address…) is guessed from the column names, and
 --columns.
 Everything else is read as the format it turns out to be: PLATO JSON or JSON Lines, RDF
 (N-Triples, N-Quads, Turtle), Linked Places Format v1, W3C Web Annotations as Recogito exports
-them, or a TEI XML edition (these two read only). Gzipped files are read directly.
+them, or a TEI XML edition (annotations and TEI are read, not written). Gzipped files are read
+directly.
 
 Targets for --to:
 ${Object.entries(TARGETS).map(([k, v]) => `  ${k.padEnd(12)} ${v.label}`).join('\n')}
@@ -110,6 +111,8 @@ Options:
                     room for about 1.2 to 1.5 times the uncompressed size of the input and, with
                     --previous, of the previous release as well; it is removed afterwards.
   --json            print one JSON object per input, one per line, then one for the total.
+                    Its "columns", for a table of places, is a list of {column, field, reason}
+                    to read; --columns takes the object printed without --json instead.
   --brief           print one line per input and the total, without the details.
   -h, --help        show this help.
   -V, --version     show the version, and the PLATO commit the checks follow.
