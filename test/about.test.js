@@ -70,6 +70,20 @@ test('about: the creator cell pairs a name and its address, and takes either alo
   assert.deepEqual(warnings(r), []);
   assert.deepEqual(records(r)[0].gazetteer.creator, [{ '@id': 'https://orcid.org/0000-0002-1825-0097', name: 'Josiah  Carberry' }, { '@id': 'https://ror.org/052gg0110' }, { name: 'Anne Annotator' }]);
 });
+test('about: an item with a colon is an address only with a scheme an author\'s address has; otherwise it is a name', async () => {
+  const row = { ...FULL, creator: 'Re:Place;urn:isni:0000000121032683;https://orcid.org/0000-0002-1825-0097;Dr. Who: a life;Re:Place <https://ror.org/052gg0110>' };
+  const r = await go(customsWith(Papa.unparse({ fields: HEADER.split(','), data: [HEADER.split(',').map((h) => row[h])] }, { newline: '\n' }).split('\n')[1]), 'convert', 'plato-json');
+  assert.deepEqual(errors(r), []);
+  assert.deepEqual(JSON.parse(outText(r.e, Object.keys(r.e.outs)[0])).gazetteer.creator, [{ name: 'Re:Place' }, { '@id': 'urn:isni:0000000121032683' },
+    { '@id': 'https://orcid.org/0000-0002-1825-0097' }, { name: 'Dr. Who: a life' }, { '@id': 'https://ror.org/052gg0110', name: 'Re:Place' }]);
+  // Written back, an address that would be read as a name cannot go alone: it is reported, not changed into a name.
+  const doc = { profile: 'place-centric', gazetteer: { title: 't', creator: [{ '@id': 'tag:example.org,2026:me' }, { '@id': 'x:y' }] },
+    spatialEntities: [{ '@id': 'https://example.org/my-dataset/place/p', label: 'P', attestations: [{ names: [{ toponym: 'P' }], sources: ['https://example.org/my-dataset/source/s'] }] }] };
+  const w = await go([textFile(JSON.stringify(doc), 'a.json')], 'convert', 'tables');
+  const [about] = Papa.parse(strFromU8(unzipSync(w.e.outs['a-tables.zip'][0])['about.csv']), { header: true, delimiter: ',' }).data;
+  assert.equal(about.creator, 'tag:example.org,2026:me');
+  assert.deepEqual(items(w, 'loss').find((i) => i.kind === 'about-value')?.examples, ['creator: {"@id":"x:y"}']);
+});
 test('about: creator_name is still read, after creator, and is warned of as deprecated, not an error', async () => {
   const row = { ...FULL, creator: 'Stephen Gadd <https://orcid.org/0000-0003-3060-0181>', creator_name: 'Anne Annotator;Bea Builder' };
   const r = await go(customsWith(Papa.unparse({ fields: HEADER.split(','), data: [HEADER.split(',').map((h) => row[h])] }, { newline: '\n' }).split('\n')[1]), 'convert', 'plato-jsonl');
@@ -88,11 +102,13 @@ test('about: creator_name is still read, after creator, and is warned of as depr
 });
 test('about: an author with both an address and a name is written as Name <address>; a name the cell cannot hold is reported', async () => {
   const doc = { profile: 'place-centric', gazetteer: { title: 't', creator: [{ '@id': 'https://orcid.org/0000-0003-3060-0181', name: 'Stephen Gadd' }, { name: 'Anne Annotator' },
-    { '@id': 'https://ror.org/052gg0110', name: 'An <odd> institute' }, { name: 'x;y' }] },
+    { '@id': 'https://ror.org/052gg0110', name: 'An <odd> institute' }, { name: 'x;y' }, { '@id': 'https://ror.org/02mhbdp94', name: '' }] },
     spatialEntities: [{ '@id': 'https://example.org/my-dataset/place/p', label: 'P', attestations: [{ names: [{ toponym: 'P' }], sources: ['https://example.org/my-dataset/source/s'] }] }] };
   const r = await go([textFile(JSON.stringify(doc), 'a.json')], 'convert', 'tables');
-  const [row] = Papa.parse(strFromU8(unzipSync(r.e.outs['a-tables.zip'][0])['about.csv']), { header: true }).data;
-  assert.deepEqual([row.creator, row.creator_name], ['Stephen Gadd <https://orcid.org/0000-0003-3060-0181>;Anne Annotator;https://ror.org/052gg0110', '']);
+  // The delimiter is given: with this many ';' in the one row, Papa would guess ';'.
+  const [row] = Papa.parse(strFromU8(unzipSync(r.e.outs['a-tables.zip'][0])['about.csv']), { header: true, delimiter: ',' }).data;
+  assert.deepEqual([row.creator, row.creator_name], ['Stephen Gadd <https://orcid.org/0000-0003-3060-0181>;Anne Annotator;https://ror.org/052gg0110;https://ror.org/02mhbdp94', '']);
+  // An empty name is no name: nothing is lost with it, so nothing is reported.
   assert.deepEqual(items(r, 'loss').find((i) => i.kind === 'creator-name')?.examples, ['https://ror.org/052gg0110: An <odd> institute']);
   assert.deepEqual(items(r, 'loss').find((i) => i.kind === 'about-value')?.examples, ['creator: {"name":"x;y"}']);
   // A value its column cannot hold is left out and reported, never written into the wrong column.

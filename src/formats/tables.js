@@ -199,13 +199,17 @@ export { encodeId };
 
 // One author in the about sheet's creator cell, as PLATO's csv-metadata.json defines it: a name and its
 // address in angle brackets ('Josiah Carberry <https://orcid.org/0000-0002-1825-0097>'), an address
-// alone, or a name alone. An address is what the anyURI check takes: a scheme, ':' and no space.
-const IRI_SHAPE = /^[A-Za-z][A-Za-z0-9+.-]*:[^<>\s]+$/;
+// alone, or a name alone. In brackets, an address is what the column's pattern takes: a scheme, ':'
+// and no space. Alone, that pattern would make a name with a colon ('Re:Place') an address, which
+// PLATO's IRI format also accepts; so an item alone is an address only when it is unmistakably one:
+// a scheme followed by '//' (https://orcid.org/…), or one of the schemes an author's identifier has
+// without it (urn:, tag:, mailto:, doi:, info:). Anything else alone is a name.
+const ADDRESS_ALONE = /^(?:[A-Za-z][A-Za-z0-9+.-]*:\/\/|(?:urn|tag|mailto|doi|info):)[^<>\s]+$/i;
 const PAIRED = /^([^<>;]*[^<>;\s])\s+<([A-Za-z][A-Za-z0-9+.-]*:[^<>\s]+)>$/;
 export function creatorOf(item) {
   const m = item.match(PAIRED);
   if (m) return { '@id': m[2], name: m[1].trim() };
-  return IRI_SHAPE.test(item) ? { '@id': item } : { name: item };
+  return ADDRESS_ALONE.test(item) ? { '@id': item } : { name: item };
 }
 /**
  * A creator object as one item of the creator cell (creatorOf's inverse), or null if the cell cannot
@@ -220,7 +224,8 @@ function creatorItem(c, accepts) {
   const back = (v, want) => !v.includes(';') && !v.includes('\n') && accepts('about', 'creator', v)
     && JSON.stringify(creatorOf(v)) === JSON.stringify(want);
   if (id !== undefined && name !== undefined && back(`${name} <${id}>`, { '@id': id, name })) return { item: `${name} <${id}>` };
-  if (id !== undefined && back(id, { '@id': id })) return { item: id, nameLost: given(c.name) };
+  // An empty name (or one of spaces only) is no name: nothing is lost with it.
+  if (id !== undefined && back(id, { '@id': id })) return { item: id, nameLost: given(c.name) && !(typeof c.name === 'string' && c.name.trim() === '') };
   if (id === undefined && name !== undefined && back(name, { name })) return { item: name };
   return null;
 }
