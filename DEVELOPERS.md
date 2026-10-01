@@ -64,10 +64,18 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   place described a little more is still one the candidates name) is written as the candidate set; a graph with both is written as the dataset, and the candidate set is
   reported as not written (`candidate-set-not-written`), to RDF as well as to JSON. Krisis's apply
   refuses a candidate set given as its dataset. A dataset's `gazetteer.candidateSets` is the
-  reverse of `plato:candidates_for`, written and read back as such. Not done yet (the candidate set
-  specification's section 13): the checks no schema can make (ids under their set, the mint rule,
-  duplicates, across sets, `promotedFrom` against a set given beside a dataset), the version check of a
-  candidate set, and Krisis's export of one.
+  reverse of `plato:candidates_for`, written and read back as such (`test/candidates.test.js` checks
+  the triples against jsonld.js's); the tables and LPF leave it out and report it
+  (`dropped:gazetteer.candidateSets`). Where the tools stand: a candidate set is read, checked against
+  its profile and converted. Krisis's export of one and its `promotedFrom` come later, as do the checks
+  no schema can make (ids under their set, the mint rule, duplicates, across sets, `promotedFrom`
+  against a set given beside a dataset) and the version check of a candidate set (the candidate set
+  specification's section 13). An edge case to keep: a candidate's score records what the software
+  said when it first suggested the pair. A candidate is frozen once its set is published, and a later
+  set leaves out any pair already published, so if the places' names change and the same algorithm
+  with the same settings would now score the pair differently, the first score stands. To record a new
+  score, publish it under a new `algorithmVersion` or new `matchParameters`, which gives the candidate
+  a new address.
 - **The about sheet's authors.** Each item of `creator` is `Name <address>`, an address alone, or a
   name alone (PLATO 8385472; `creatorOf` in `tables.js`). An item alone is an address only with a
   scheme and `//`, or a `urn:`, `tag:`, `mailto:`, `doi:` or `info:` scheme, so that `Re:Place` is a
