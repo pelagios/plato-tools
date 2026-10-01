@@ -1,0 +1,890 @@
+[
+  {
+    "id": "3b7e2f10-6c4d-4e5a-9f8b-000000000001",
+    "target": {
+      "source": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/8623qf00m",
+      "type": "SpecificResource",
+      "selector": {
+        "type": "FragmentSelector",
+        "conformsTo": "http://www.w3.org/TR/media-frags/",
+        "value": "xywh=pixel:5120,5600,230,72"
+      }
+    },
+    "motivation": "commenting",
+    "@context": "http://www.w3.org/ns/anno.jsonld",
+    "type": "Annotation",
+    "created": "2026-09-30T09:00:00.000Z",
+    "creator": {
+      "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+      "name": "Ayşe Yılmaz",
+      "avatar": null
+    },
+    "modified": "2026-09-30T09:00:00.000Z",
+    "body": [
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "geotagging",
+        "value": {
+          "id": "http://www.wikidata.org/entity/Q5492",
+          "properties": {
+            "title": "Lake Erie",
+            "description": "one of the Great Lakes in North America"
+          },
+          "geometry": {
+            "type": "Point",
+            "coordinates": [
+              -81.2,
+              42.2
+            ]
+          }
+        },
+        "format": "application/json"
+      },
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "tagging",
+        "value": "label"
+      }
+    ]
+  },
+  {
+    "id": "3b7e2f10-6c4d-4e5a-9f8b-000000000002",
+    "target": {
+      "source": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/8623qf00m",
+      "type": "SpecificResource",
+      "selector": {
+        "type": "SvgSelector",
+        "value": "<svg><polygon points=\"5524,5352 5906,5350 5908,5410 5522,5414\" /></svg>"
+      }
+    },
+    "motivation": "commenting",
+    "@context": "http://www.w3.org/ns/anno.jsonld",
+    "type": "Annotation",
+    "created": "2026-09-30T09:00:00.000Z",
+    "creator": {
+      "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+      "name": "Ayşe Yılmaz",
+      "avatar": null
+    },
+    "modified": "2026-09-30T09:00:00.000Z",
+    "body": [
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "geotagging",
+        "value": {
+          "id": "http://www.wikidata.org/entity/Q1062",
+          "properties": {
+            "title": "Lake Ontario",
+            "description": "one of the Great Lakes in North America"
+          },
+          "geometry": {
+            "type": "Point",
+            "coordinates": [
+              -77.9,
+              43.7
+            ]
+          }
+        },
+        "format": "application/json"
+      },
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "tagging",
+        "value": "label"
+      }
+    ]
+  },
+  {
+    "id": "3b7e2f10-6c4d-4e5a-9f8b-000000000003",
+    "target": {
+      "source": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/8623qf00m",
+      "type": "SpecificResource",
+      "selector": {
+        "type": "SvgSelector",
+        "value": "<svg><rect x=\"6932\" y=\"5370\" width=\"280\" height=\"40\" transform=\"rotate(-11.459155902616464 7072 5390)\" /></svg>"
+      }
+    },
+    "motivation": "commenting",
+    "@context": "http://www.w3.org/ns/anno.jsonld",
+    "type": "Annotation",
+    "created": "2026-09-30T09:00:00.000Z",
+    "creator": {
+      "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+      "name": "Ayşe Yılmaz",
+      "avatar": null
+    },
+    "modified": "2026-09-30T09:00:00.000Z",
+    "body": [
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "geotagging",
+        "value": {
+          "id": "http://www.wikidata.org/entity/Q5546752",
+          "properties": {
+            "title": "Georges Bank",
+            "description": "oceanic bank in the North Atlantic"
+          },
+          "geometry": {
+            "type": "Point",
+            "coordinates": [
+              -67.7,
+              41.4
+            ]
+          }
+        },
+        "format": "application/json"
+      },
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "tagging",
+        "value": "label"
+      }
+    ]
+  },
+  {
+    "id": "3b7e2f10-6c4d-4e5a-9f8b-000000000004",
+    "target": {
+      "source": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/8623qf00m",
+      "type": "SpecificResource",
+      "selector": {
+        "type": "SvgSelector",
+        "value": "<svg><ellipse cx=\"5040\" cy=\"5170\" rx=\"190\" ry=\"32\" /></svg>"
+      }
+    },
+    "motivation": "commenting",
+    "@context": "http://www.w3.org/ns/anno.jsonld",
+    "type": "Annotation",
+    "created": "2026-09-30T09:00:00.000Z",
+    "creator": {
+      "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+      "name": "Ayşe Yılmaz",
+      "avatar": null
+    },
+    "modified": "2026-09-30T09:00:00.000Z",
+    "body": [
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "geotagging",
+        "value": {
+          "id": "http://www.wikidata.org/entity/Q1383",
+          "properties": {
+            "title": "Lake Huron",
+            "description": "one of the Great Lakes of North America"
+          },
+          "geometry": {
+            "type": "Point",
+            "coordinates": [
+              -82.4,
+              44.8
+            ]
+          }
+        },
+        "format": "application/json"
+      },
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "tagging",
+        "value": "label"
+      }
+    ]
+  },
+  {
+    "id": "3b7e2f10-6c4d-4e5a-9f8b-000000000005",
+    "target": {
+      "source": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/8623qf00m",
+      "type": "SpecificResource",
+      "selector": {
+        "type": "FragmentSelector",
+        "conformsTo": "http://www.w3.org/TR/media-frags/",
+        "value": "xywh=pixel:6140,5074,140,32"
+      }
+    },
+    "motivation": "commenting",
+    "@context": "http://www.w3.org/ns/anno.jsonld",
+    "type": "Annotation",
+    "created": "2026-09-30T09:00:00.000Z",
+    "creator": {
+      "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+      "name": "Ayşe Yılmaz",
+      "avatar": null
+    },
+    "modified": "2026-09-30T09:00:00.000Z",
+    "body": [
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "geotagging",
+        "value": {
+          "id": "http://www.wikidata.org/entity/Q340",
+          "properties": {
+            "title": "Montreal",
+            "description": "largest city in Quebec, Canada"
+          },
+          "geometry": {
+            "type": "Point",
+            "coordinates": [
+              -73.56,
+              45.5
+            ]
+          }
+        },
+        "format": "application/json"
+      },
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "commenting",
+        "value": "<p>Town on the St Lawrence.</p>",
+        "type": "TextualBody",
+        "format": "text/html"
+      }
+    ]
+  },
+  {
+    "id": "3b7e2f10-6c4d-4e5a-9f8b-000000000006",
+    "target": {
+      "source": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/8623qf00m",
+      "type": "SpecificResource",
+      "selector": {
+        "type": "FragmentSelector",
+        "conformsTo": "http://www.w3.org/TR/media-frags/",
+        "value": "xywh=pixel:6358,5510,15,15"
+      }
+    },
+    "motivation": "commenting",
+    "@context": "http://www.w3.org/ns/anno.jsonld",
+    "type": "Annotation",
+    "created": "2026-09-30T09:00:00.000Z",
+    "creator": {
+      "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+      "name": "Ayşe Yılmaz",
+      "avatar": null
+    },
+    "modified": "2026-09-30T09:00:00.000Z",
+    "body": [
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "geotagging",
+        "value": {
+          "id": "http://www.wikidata.org/entity/Q49179",
+          "properties": {
+            "title": "Worcester",
+            "description": "county seat city in Worcester County, Massachusetts, United States"
+          },
+          "geometry": {
+            "type": "Point",
+            "coordinates": [
+              -71.8,
+              42.27
+            ]
+          }
+        },
+        "format": "application/json"
+      },
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "tagging",
+        "value": {
+          "label": "symbol"
+        },
+        "format": "application/json"
+      }
+    ]
+  },
+  {
+    "id": "3b7e2f10-6c4d-4e5a-9f8b-000000000007",
+    "target": {
+      "source": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/8623qf00m",
+      "type": "SpecificResource",
+      "selector": {
+        "type": "FragmentSelector",
+        "conformsTo": "http://www.w3.org/TR/media-frags/",
+        "value": "xywh=pixel:3718,892,84,36"
+      }
+    },
+    "motivation": "commenting",
+    "@context": "http://www.w3.org/ns/anno.jsonld",
+    "type": "Annotation",
+    "created": "2026-09-30T09:00:00.000Z",
+    "creator": {
+      "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+      "name": "Ayşe Yılmaz",
+      "avatar": null
+    },
+    "modified": "2026-09-30T09:00:00.000Z",
+    "body": [
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "geotagging",
+        "value": {
+          "id": "http://www.wikidata.org/entity/Q2696926",
+          "properties": {
+            "title": "120th meridian west",
+            "description": "Earth meridian"
+          },
+          "geometry": {
+            "type": "Point",
+            "coordinates": [
+              -120,
+              45
+            ]
+          }
+        },
+        "format": "application/json"
+      },
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "tagging",
+        "value": "label"
+      }
+    ]
+  },
+  {
+    "id": "3b7e2f10-6c4d-4e5a-9f8b-000000000008",
+    "target": {
+      "source": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/8623qf00m",
+      "type": "SpecificResource",
+      "selector": {
+        "type": "FragmentSelector",
+        "conformsTo": "http://www.w3.org/TR/media-frags/",
+        "value": "xywh=pixel:188,2190,192,60"
+      }
+    },
+    "motivation": "commenting",
+    "@context": "http://www.w3.org/ns/anno.jsonld",
+    "type": "Annotation",
+    "created": "2026-09-30T09:00:00.000Z",
+    "creator": {
+      "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+      "name": "Ayşe Yılmaz",
+      "avatar": null
+    },
+    "modified": "2026-09-30T09:00:00.000Z",
+    "body": [
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "geotagging",
+        "value": {
+          "id": "http://www.wikidata.org/entity/Q1256191",
+          "properties": {
+            "title": "45th parallel north",
+            "description": "circle of latitude often called the halfway point between the equator and the North Pole"
+          },
+          "geometry": {
+            "type": "Point",
+            "coordinates": [
+              -90,
+              45
+            ]
+          }
+        },
+        "format": "application/json"
+      },
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "tagging",
+        "value": "label"
+      }
+    ]
+  },
+  {
+    "id": "3b7e2f10-6c4d-4e5a-9f8b-000000000009",
+    "target": {
+      "type": "SpecificResource",
+      "selector": {
+        "type": "FragmentSelector",
+        "conformsTo": "http://www.w3.org/TR/media-frags/",
+        "value": "xywh=pixel:6278,5480,120,30"
+      }
+    },
+    "motivation": "commenting",
+    "@context": "http://www.w3.org/ns/anno.jsonld",
+    "type": "Annotation",
+    "created": "2026-09-30T09:00:00.000Z",
+    "creator": {
+      "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+      "name": "Ayşe Yılmaz",
+      "avatar": null
+    },
+    "modified": "2026-09-30T09:00:00.000Z",
+    "body": [
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "geotagging",
+        "value": {
+          "id": "http://www.wikidata.org/entity/Q100",
+          "properties": {
+            "title": "Boston",
+            "description": "capital city of the U.S. state of Massachusetts and seat of Suffolk County"
+          },
+          "geometry": {
+            "type": "Point",
+            "coordinates": [
+              -71.06,
+              42.36
+            ]
+          }
+        },
+        "format": "application/json"
+      },
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "tagging",
+        "value": "label"
+      }
+    ]
+  },
+  {
+    "id": "3b7e2f10-6c4d-4e5a-9f8b-000000000010",
+    "target": {
+      "type": "SpecificResource",
+      "selector": {
+        "type": "FragmentSelector",
+        "conformsTo": "http://www.w3.org/TR/media-frags/",
+        "value": "xywh=pixel:290,150,260,40"
+      }
+    },
+    "motivation": "commenting",
+    "@context": "http://www.w3.org/ns/anno.jsonld",
+    "type": "Annotation",
+    "created": "2026-09-30T09:00:00.000Z",
+    "creator": {
+      "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+      "name": "Ayşe Yılmaz",
+      "avatar": null
+    },
+    "modified": "2026-09-30T09:00:00.000Z",
+    "body": [
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "geotagging",
+        "value": {
+          "id": "http://www.wikidata.org/entity/Q100",
+          "properties": {
+            "title": "Boston",
+            "description": "capital city of the U.S. state of Massachusetts and seat of Suffolk County"
+          },
+          "geometry": {
+            "type": "Point",
+            "coordinates": [
+              -71.06,
+              42.36
+            ]
+          }
+        },
+        "format": "application/json"
+      },
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "tagging",
+        "value": "label"
+      }
+    ]
+  },
+  {
+    "id": "3b7e2f10-6c4d-4e5a-9f8b-000000000011",
+    "target": {
+      "source": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/8623qf00m",
+      "type": "SpecificResource",
+      "selector": {
+        "type": "SvgSelector",
+        "value": "<svg><path d=\"M 6550 5640 C 6600 5630 6680 5630 6725 5642 C 6725 5642 6725 5676 6725 5676 L 6550 5676 C 6550 5676 6550 5640 6550 5640 Z\" /></svg>"
+      }
+    },
+    "motivation": "commenting",
+    "@context": "http://www.w3.org/ns/anno.jsonld",
+    "type": "Annotation",
+    "created": "2026-09-30T09:00:00.000Z",
+    "creator": {
+      "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+      "name": "Ayşe Yılmaz",
+      "avatar": null
+    },
+    "modified": "2026-09-30T09:00:00.000Z",
+    "body": [
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "geotagging",
+        "value": {
+          "id": "http://www.wikidata.org/entity/Q49149",
+          "properties": {
+            "title": "Nantucket",
+            "description": "island of Massachusetts, United States"
+          },
+          "geometry": {
+            "type": "Point",
+            "coordinates": [
+              -70.1,
+              41.28
+            ]
+          }
+        },
+        "format": "application/json"
+      },
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "tagging",
+        "value": "label"
+      }
+    ]
+  },
+  {
+    "id": "3b7e2f10-6c4d-4e5a-9f8b-000000000012",
+    "target": {
+      "source": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/qr46xn78z",
+      "type": "SpecificResource",
+      "selector": {
+        "type": "FragmentSelector",
+        "conformsTo": "http://www.w3.org/TR/media-frags/",
+        "value": "xywh=pixel:3850,2200,1250,750"
+      }
+    },
+    "motivation": "commenting",
+    "@context": "http://www.w3.org/ns/anno.jsonld",
+    "type": "Annotation",
+    "created": "2026-09-30T09:00:00.000Z",
+    "creator": {
+      "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+      "name": "Ayşe Yılmaz",
+      "avatar": null
+    },
+    "modified": "2026-09-30T09:00:00.000Z",
+    "body": [
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "geotagging",
+        "value": {
+          "id": "http://www.wikidata.org/entity/Q12630",
+          "properties": {
+            "title": "Gulf of Mexico",
+            "description": "marginal sea of the Atlantic Ocean"
+          },
+          "geometry": {
+            "type": "Point",
+            "coordinates": [
+              -90,
+              25
+            ]
+          }
+        },
+        "format": "application/json"
+      },
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "tagging",
+        "value": "label"
+      }
+    ]
+  },
+  {
+    "id": "3b7e2f10-6c4d-4e5a-9f8b-000000000013",
+    "target": {
+      "type": "SpecificResource",
+      "selector": {
+        "type": "FragmentSelector",
+        "conformsTo": "http://www.w3.org/TR/media-frags/",
+        "value": "xywh=pixel:1200,800,300,60"
+      }
+    },
+    "motivation": "commenting",
+    "@context": "http://www.w3.org/ns/anno.jsonld",
+    "type": "Annotation",
+    "created": "2026-09-30T09:00:00.000Z",
+    "creator": {
+      "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+      "name": "Ayşe Yılmaz",
+      "avatar": null
+    },
+    "modified": "2026-09-30T09:00:00.000Z",
+    "body": [
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "geotagging",
+        "value": {
+          "id": "http://www.wikidata.org/entity/Q5492",
+          "properties": {
+            "title": "Lake Erie",
+            "description": "one of the Great Lakes in North America"
+          },
+          "geometry": {
+            "type": "Point",
+            "coordinates": [
+              -81.2,
+              42.2
+            ]
+          }
+        },
+        "format": "application/json"
+      },
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "tagging",
+        "value": "label"
+      }
+    ]
+  },
+  {
+    "id": "3b7e2f10-6c4d-4e5a-9f8b-000000000014",
+    "target": {
+      "source": "https://tile.loc.gov/image-services/iiif/service:gmd:gmd384:g3842:g3842c:ct008615",
+      "type": "SpecificResource",
+      "selector": {
+        "type": "FragmentSelector",
+        "conformsTo": "http://www.w3.org/TR/media-frags/",
+        "value": "xywh=pixel:2750,5000,100,40"
+      }
+    },
+    "motivation": "commenting",
+    "@context": "http://www.w3.org/ns/anno.jsonld",
+    "type": "Annotation",
+    "created": "2026-09-30T09:00:00.000Z",
+    "creator": {
+      "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+      "name": "Ayşe Yılmaz",
+      "avatar": null
+    },
+    "modified": "2026-09-30T09:00:00.000Z",
+    "body": [
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "geotagging",
+        "value": {
+          "id": "http://www.wikidata.org/entity/Q1070564",
+          "properties": {
+            "title": "Chesapeake and Ohio Canal",
+            "description": "canal in Washington, D.C. and Maryland, United States"
+          },
+          "geometry": {
+            "type": "Point",
+            "coordinates": [
+              -77.5,
+              39.3
+            ]
+          }
+        },
+        "format": "application/json"
+      }
+    ]
+  },
+  {
+    "id": "3b7e2f10-6c4d-4e5a-9f8b-000000000015",
+    "target": {
+      "source": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/8623qf00m",
+      "type": "SpecificResource",
+      "selector": {
+        "type": "FragmentSelector",
+        "conformsTo": "http://www.w3.org/TR/media-frags/",
+        "value": "xywh=pixel:3718,892,84,80"
+      }
+    },
+    "motivation": "commenting",
+    "@context": "http://www.w3.org/ns/anno.jsonld",
+    "type": "Annotation",
+    "created": "2026-09-30T09:00:00.000Z",
+    "creator": {
+      "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+      "name": "Ayşe Yılmaz",
+      "avatar": null
+    },
+    "modified": "2026-09-30T09:00:00.000Z",
+    "body": [
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "geotagging",
+        "value": {
+          "id": "http://www.wikidata.org/entity/Q2696926",
+          "properties": {
+            "title": "120th meridian west",
+            "description": "Earth meridian"
+          },
+          "geometry": {
+            "type": "Point",
+            "coordinates": [
+              -120,
+              45
+            ]
+          }
+        },
+        "format": "application/json"
+      },
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "tagging",
+        "value": "label"
+      }
+    ]
+  },
+  {
+    "id": "3b7e2f10-6c4d-4e5a-9f8b-000000000016",
+    "target": {
+      "source": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/8623qf00m",
+      "type": "SpecificResource",
+      "selector": {
+        "type": "FragmentSelector",
+        "conformsTo": "http://www.w3.org/TR/media-frags/",
+        "value": "xywh=pixel:6096,5482,110,28"
+      }
+    },
+    "motivation": "commenting",
+    "@context": "http://www.w3.org/ns/anno.jsonld",
+    "type": "Annotation",
+    "created": "2026-09-30T09:00:00.000Z",
+    "creator": {
+      "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+      "name": "Ayşe Yılmaz",
+      "avatar": null
+    },
+    "modified": "2026-09-30T09:00:00.000Z",
+    "body": [
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "geotagging",
+        "value": {
+          "id": "http://www.wikidata.org/entity/Q24861",
+          "properties": {
+            "title": "Albany",
+            "description": "capital city of the U.S. state of New York and seat of Albany County"
+          },
+          "geometry": {
+            "type": "Point",
+            "coordinates": [
+              -73.76,
+              42.65
+            ]
+          }
+        },
+        "format": "application/json"
+      },
+      {
+        "created": "2026-09-30T09:00:00.000Z",
+        "creator": {
+          "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+          "name": "Ayşe Yılmaz"
+        },
+        "purpose": "tagging",
+        "value": {
+          "label": "Label"
+        },
+        "format": "application/json"
+      }
+    ]
+  }
+]

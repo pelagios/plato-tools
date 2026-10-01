@@ -171,7 +171,8 @@ async function digests(f) {
   return out;
 }
 test('without georeferences, the existing Recogito fixtures convert and report byte for byte as before', async () => {
-  const existing = readdirSync(A).filter((f) => /\.json(ld)?$/.test(f) && f !== 'recogito-studio-regions-constructed.json').sort();
+  // The two regions fixtures came with or after georeferenced regions, so have no digest from before.
+  const existing = readdirSync(A).filter((f) => /\.json(ld)?$/.test(f) && !['recogito-studio-regions-constructed.json', 'recogito-studio-regions-generated.json'].includes(f)).sort();
   assert.deepEqual(existing, Object.keys(BEFORE).sort(), 'every existing fixture is covered');
   for (const [f, want] of Object.entries(BEFORE)) assert.deepEqual(await digests(f), want, f);
   // Control: the comparison can fail (one fixture's digests are not another's).
