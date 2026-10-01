@@ -211,3 +211,89 @@ test('names reach the search from every route: JSON Lines and N-Triples', async 
     assert.equal(s.search('constantinople').total, 1, target);
   }
 });
+
+// FTS5's trigram tokenizer folds case by its own table, which is not JavaScript's: it takes ς to σ,
+// ſ to s, µ to μ and the Greek symbol letters (ϐ ϑ ϰ ϖ ϱ ϕ ϵ) to their letters. Were fold() to leave
+// any of these as it is, a query of three letters or more (the index) and one of fewer (the scan of
+// sf), or the index and the name shown as matched (sx), would disagree. fold() is to be a fixed
+// point of FTS5's fold: what it gives, FTS5 keeps as it is. Trying every code point once (recorded
+// in the commit that made this so) found these ten, and U+FFFE and U+FFFF, and no other.
+const FTS5_FOLDS = { 'ς': 'σ', 'ſ': 's', 'µ': 'μ', 'ϐ': 'β', 'ϑ': 'θ', 'ϰ': 'κ', 'ϖ': 'π', 'ϱ': 'ρ', 'ϕ': 'φ', 'ϵ': 'ε' };
+/** The text FTS5's trigram tokenizer keeps of `t`: its trigrams joined again, in order. */
+async function asFts5Keeps(texts) {
+  const e = env(), db = await e.openDb();
+  db.exec('CREATE TABLE d(n INTEGER PRIMARY KEY, f TEXT NOT NULL)');
+  db.exec("CREATE VIRTUAL TABLE dt USING fts5(f, content='d', content_rowid='n', tokenize='trigram')");
+  db.exec("CREATE VIRTUAL TABLE dv USING fts5vocab(dt, 'instance')");
+  const ins = db.prepare('INSERT INTO d(n, f) VALUES (?, ?)');
+  texts.forEach((t, i) => ins.bind([i + 1, t]).stepReset());
+  ins.finalize();
+  db.exec("INSERT INTO dt(dt) VALUES ('rebuild')");
+  const kept = texts.map(() => '');
+  const q = db.prepare('SELECT doc, term FROM dv ORDER BY doc, offset');
+  while (q.step()) { const i = q.get(0) - 1, t = q.get(1); kept[i] = kept[i] ? kept[i] + [...t].at(-1) : t; }
+  q.finalize(); db.close();
+  return kept;
+}
+
+test("fold() gives what FTS5's trigram index keeps as it is, for the letters it folds otherwise than JavaScript", async () => {
+  const chars = Object.keys(FTS5_FOLDS);
+  // Positive control: FTS5 does fold each of them, unfolded, so the check below can fail.
+  const raw = await asFts5Keeps(chars.map((c) => `a${c}b`));
+  assert.deepEqual(raw, chars.map((c) => `a${FTS5_FOLDS[c]}b`), 'FTS5 folds these, as the probe found');
+  for (const c of chars) assert.equal(fold(c), FTS5_FOLDS[c], `fold(${c})`);
+  const folded = chars.map((c) => `a${fold(c)}b`);
+  assert.deepEqual(await asFts5Keeps(folded), folded);
+  // Compatibility forms are spelt out too: a ligature fi is f and i.
+  assert.equal(fold('ﬁnis'), 'finis');
+  // And SQLite reads the non-characters U+FFFE and U+FFFF as U+FFFD, in the index and in LIKE alike.
+  assert.deepEqual(await asFts5Keeps(['a\uFFFEb', 'a\uFFFFb']), ['a\uFFFDb', 'a\uFFFDb'], 'the control');
+  assert.equal(fold('a\uFFFEb\uFFFF'), 'a\uFFFDb\uFFFD');
+});
+
+test('a final sigma, a long s and the rest are found alike by the index, the scan and the name shown', async () => {
+  const ds = dataset();
+  ds.spatialEntities.push({ '@id': id('wight'), label: 'Wight', attestations: [named('w1', { toponym: 'Iſle of Wight' })] });
+  const s = await open(ds);
+  assert.deepEqual(hits(s.search('ΚΩΝΣ')), ['Byzantium — Κωνσταντινούπολις'], 'Σ at the end of the query is a final sigma to JavaScript');
+  assert.deepEqual(hits(s.search('ΝΣ')), ['Byzantium — Κωνσταντινούπολις'], 'and the scan agrees');
+  assert.deepEqual(hits(s.search('isle')), ['Wight — Iſle of Wight']);
+  assert.deepEqual(hits(s.search('iſl')), ['Wight — Iſle of Wight']);
+  assert.deepEqual(hits(s.search('ſl')), ['Wight — Iſle of Wight'], 'and the scan agrees');
+  // Every query, by either path, finds what its folded text holds, and shows the first name that holds it.
+  const places = ds.spatialEntities.map((p, i) => ({
+    id: p['@id'] || `#${i + 1}`, label: p.label,
+    names: p.attestations.filter((a) => a.names && !a.negated && !['b3', 'b4'].map(att).includes(a['@id']))
+      .flatMap((a) => a.names.flatMap((n) => [n.toponym, n.romanized])).filter(Boolean),
+  }));
+  for (const q of ['ς', 'σ', 'ΝΣ', 'νς', 'ΩΝΣ', 'κωνς', 'is', 'ſ', 'isl', 'iſle', 'ISLE OF']) {
+    const f = fold(q);
+    const want = places.filter((p) => [p.label, ...p.names].some((t) => fold(t).includes(f)))
+      .map((p) => (fold(p.label).includes(f) ? p.label : `${p.label} — ${p.names.find((t) => fold(t).includes(f))}`));
+    assert.deepEqual(hits(s.search(q, { limit: 100 })), want, JSON.stringify(q));
+    assert.equal(s.search(q).total, want.length, JSON.stringify(q));
+  }
+});
+
+test('U+0000 in a name is dropped by fold(), so the scan finds it as the index does', async () => {
+  assert.equal(fold('abc\u0000def'), 'abcdef');
+  const ds = dataset();
+  ds.spatialEntities.push({ '@id': id('nul'), label: 'Nul', attestations: [named('z1', { toponym: 'abc\u0000defgh' })] });
+  const s = await open(ds);
+  assert.deepEqual(hits(s.search('defg')), ['Nul — abc\u0000defgh']);
+  assert.deepEqual(hits(s.search('cd')), ['Nul — abc\u0000defgh'], 'the scan, across where the U+0000 was');
+  assert.deepEqual(hits(s.search('fg')), ['Nul — abc\u0000defgh'], 'the scan, after it');
+});
+
+test('the attestation each name came from is not kept once the withdrawn names are out: sx holds no attestation ids', async () => {
+  const s = await open();
+  const cols = []; for (const r of s.rows("SELECT name FROM pragma_table_info('sx')")) cols.push(r.get(0));
+  assert.ok(cols.includes('fold') && cols.includes('name'), `sx is read by its columns: ${cols}`);
+  assert.ok(!cols.includes('att'), `sx keeps no attestation: ${cols}`);
+  const tables = []; for (const r of s.rows("SELECT name FROM sqlite_schema WHERE type = 'table'")) tables.push(r.get(0));
+  assert.ok(tables.includes('sx') && tables.includes('wd'), `the tables are read: ${tables}`);
+  assert.deepEqual(tables.filter((t) => !['p', 'sx', 'sf', 'g', 'wd'].includes(t) && !t.startsWith('sft')), [], 'no table of attestation ids is left');
+  // And the withdrawals were still settled by it: Nova Roma, retracted under Rome, is not found.
+  assert.equal(s.search('nova roma').total, 0);
+  assert.deepEqual(hits(s.search('lygos')), ['Byzantium — Lygos']);
+});

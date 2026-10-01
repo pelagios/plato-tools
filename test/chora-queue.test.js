@@ -51,3 +51,43 @@ test('a command that fails does not stop the queue', async () => {
   await assert.rejects(request({ cmd: 'x' }), /no/);
   assert.deepEqual(await request({ cmd: 'y' }), { cmd: 'y' });
 });
+
+// Next and Previous: which page to ask for depends on the page shown, and the page shown on the reply
+// to the command before. A command given as a function is made when it is sent, not when it is asked
+// for, so it sees what the reply before it did. Here as the page does it: an async function that
+// awaits the reply and then records where the list is.
+function pager(w, { latestOf } = {}) {
+  const request = serialQueue(w.send);
+  const at = { after: 0, next: 0, shown: [] };
+  async function next() {
+    const r = await request(() => ({ cmd: 'chora-search', q: 'x', after: at.next }), { latestOf });
+    if (!r) return;
+    at.after = r.reply.after; at.next = r.reply.after + 50; at.shown.push(r.reply.after);
+  }
+  return { at, next };
+}
+
+test('a command given as a function is made when it is sent: Next twice goes on two pages, not one twice', async () => {
+  const w = worker(), p = pager(w);
+  const one = p.next(), two = p.next();    // two clicks before the first is answered
+  await w.answer(); await w.answer(); await one; await two;
+  assert.deepEqual(w.sent.map((m) => m.after), [0, 50], 'the second is asked for from where the first left the list');
+  assert.deepEqual(p.at.shown, [0, 50]);
+  // The control: the same two clicks with the page worked out when asked, as before, ask for one page twice.
+  const v = worker(), request = serialQueue(v.send), at = { next: 0 };
+  const asked = [0, 1].map(() => request({ cmd: 'chora-search', after: at.next }).then((r) => { at.next = r.reply.after + 50; }));
+  await v.answer(); await v.answer(); await Promise.all(asked);
+  assert.deepEqual(v.sent.map((m) => m.after), [0, 0]);
+});
+
+test('a command given as a function and passed over by a later one is never made', async () => {
+  const w = worker(), request = serialQueue(w.send), made = [];
+  const busy = request({ cmd: 'chora-load' });
+  const a = request(() => { made.push('a'); return { cmd: 'chora-search', q: 'a' }; }, { latestOf: 'search' });
+  const b = request(() => { made.push('b'); return { cmd: 'chora-search', q: 'b' }; }, { latestOf: 'search' });
+  await w.answer(); await w.answer();
+  assert.deepEqual(made, ['b']);
+  assert.equal(await a, null);
+  assert.deepEqual(await b, { reply: { cmd: 'chora-search', q: 'b' } });
+  await busy;
+});

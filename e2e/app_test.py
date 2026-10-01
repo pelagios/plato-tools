@@ -684,11 +684,11 @@ GL = [] if '--no-gl-flags' in sys.argv else ['--enable-unsafe-swiftshader', '--u
 NOTOOLS = 'data:text/html,<title>no tools here</title><input id=picker type=file multiple>'
 EX = PLATO / 'schemas/examples'
 T = (lambda s: min(s, 6)) if PROVE else (lambda s: s)   # against the page with no tools every wait fails: sooner
-SPELT = {'œ': 'oe', 'æ': 'ae', 'þ': 'th', 'ð': 'th', 'ß': 'ss'}
+SPELT = {'œ': 'oe', 'æ': 'ae', 'þ': 'th', 'ð': 'th', 'ß': 'ss', 'ς': 'σ', '\ufffe': '\ufffd', '\uffff': '\ufffd'}
 def chora_fold(t):
-    """A label or name as Chora's search compares it (fold in store.js): NFD, marks dropped, lower case,
-    œ æ þ ð ß spelt out."""
-    t = ''.join(c for c in unicodedata.normalize('NFD', t) if not unicodedata.combining(c) and c != '\x01').lower()
+    """A label or name as Chora's search compares it (fold in src/engine/chora/fold.js): NFKD, marks (every category M)
+    and U+0000 and U+0001 dropped, lower case, œ æ þ ð ß ς spelt out."""
+    t = ''.join(c for c in unicodedata.normalize('NFKD', t) if not unicodedata.category(c).startswith('M') and c not in '\x00\x01').lower()
     return ''.join(SPELT.get(c, c) for c in t)
 
 def attempt(name, fn):
@@ -891,7 +891,7 @@ def chora_checks(pw, url, tmp):
     def search():
         chora_boot(page, base, [fixture(ant, 'antonine-search.json', tmp)])
         labels = lambda: sorted(page.eval_on_selector_all('#list button[data-id]', 'bs => bs.map((b) => b.firstChild.textContent.trim())'))
-        # What should be found, worked out from the file, folded as the page says it folds (NFD, marks dropped, lower case).
+        # What should be found, worked out from the file, folded as the page says it folds (chora_fold).
         fold = chora_fold
         want = sorted(p['label'] for p in antj['spatialEntities'] if 'road' in fold(p['label']))
         want_dover = sorted(p['label'] for p in antj['spatialEntities'] if 'dover' in fold(p['label']))
@@ -916,24 +916,52 @@ def chora_checks(pw, url, tmp):
     attempt('Chora: search finds a place by a name that is not its label, and shows the name it matched', search_names)
     def paging():
         # 120 places, so the list has three pages: 1-50, 51-100, 101-120. Next and Previous go on
-        # from the place before the page, and the count stays that of the whole query.
+        # from the place before the page (the request carries it as `after`), and the count stays that
+        # of the whole query. The labels are not in the order of the file, so a list sorted by label,
+        # or paged by anything but the order of the file, shows other places.
         f = tmp / 'chora-files' / 'paging.json'; f.parent.mkdir(exist_ok=True)
+        order = [f'https://example.org/p/{i}' for i in range(1, 121)]
+        label = {u: f'Stead {(i * 37) % 120 + 1:03d}' for i, u in enumerate(order, 1)}
         f.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': 'https://example.org/g', 'title': 'Paging', 'status': 'draft', 'version': '1'},
-            'spatialEntities': [{'@id': f'https://example.org/p/{i}', 'label': f'Stead {i:03d}', 'attestations': []} for i in range(1, 121)]}))
+            'spatialEntities': [{'@id': u, 'label': label[u], 'attestations': []} for u in order]}))
         chora_boot(page, base, [f])
-        first = lambda: page.eval_on_selector_all('#list button[data-id]', 'bs => [bs.length, bs[0]?.firstChild.textContent.trim(), bs.at(-1)?.firstChild.textContent.trim()]')
-        seen = []
+        shown = lambda: page.eval_on_selector_all('#list button[data-id]', 'bs => bs.map((b) => [b.dataset.id, b.firstChild.textContent.trim()])')
+        last = lambda: cstate(page).get('lastSearch') or {}
+        seen, sent, prev = [], [], None
         for step in ['start', 'next', 'next', 'prev']:
             was = page.inner_text('#found')
             if step != 'start':
                 page.click(f'#{step}'); until(page, 'w => document.getElementById("found").textContent !== w', 20, was)
-            seen.append([page.inner_text('#found'), *first(), page.is_disabled('#prev'), page.is_disabled('#next')])
-        want = [['120 places, showing 1–50.', 50, 'Stead 001', 'Stead 050', True, False],
-                ['120 places, showing 51–100.', 50, 'Stead 051', 'Stead 100', False, False],
-                ['120 places, showing 101–120.', 20, 'Stead 101', 'Stead 120', False, True],
-                ['120 places, showing 51–100.', 50, 'Stead 051', 'Stead 100', False, False]]
-        return seen == want, {'seen': seen, 'wanted': want}
+            ls, items = last(), shown()
+            seen.append([page.inner_text('#found'), [i for i, _ in items], [l for _, l in items], page.is_disabled('#prev'), page.is_disabled('#next')])
+            # What each request asked for: after which place, and what the reply before it said came next.
+            sent.append([step, ls.get('after'), (prev or {}).get('next'), ls.get('shown') == [i for i, _ in items]])
+            prev = ls
+        page_of = lambda a, b: [order[a:b], [label[u] for u in order[a:b]]]
+        want = [['120 places, showing 1–50.', *page_of(0, 50), True, False],
+                ['120 places, showing 51–100.', *page_of(50, 100), False, False],
+                ['120 places, showing 101–120.', *page_of(100, 120), False, True],
+                ['120 places, showing 51–100.', *page_of(50, 100), False, False]]
+        # Next goes on from the place the reply before gave as next (not 0, not an offset), and the
+        # first place of the page after is the place after the last of the page before, in the file.
+        nexts_ok = all(a == n and isinstance(a, int) and a > 0 and same for step, a, n, same in sent if step == 'next')
+        follows = all(order.index(seen[k + 1][1][0]) == order.index(seen[k][1][-1]) + 1 for k in (0, 1))
+        return seen == want and nexts_ok and follows and sent[0][1] == 0, {'seen': [x[0] for x in seen], 'sent': sent, 'follows': follows,
+                                                                            'first of each': [x[2][:1] for x in seen], 'wanted': [x[2][:1] for x in want]}
     attempt('Chora: the place list pages forwards and back, each page going on from the one before', paging)
+    def paging_twice():
+        # Next clicked twice before the first is answered goes on two pages: the second click asks for
+        # the page after the one the first showed, not the same page again.
+        f = tmp / 'chora-files' / 'paging-twice.json'; f.parent.mkdir(exist_ok=True)
+        f.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': 'https://example.org/g2', 'title': 'Paging twice', 'status': 'draft', 'version': '1'},
+            'spatialEntities': [{'@id': f'https://example.org/q/{i}', 'label': f'Holm {i:03d}', 'attestations': []} for i in range(1, 121)]}))
+        chora_boot(page, base, [f])
+        before = page.inner_text('#found')
+        page.evaluate('() => { const b = document.getElementById("next"); b.click(); b.click(); }')
+        got = soon(page, '() => /101–120/.test(document.getElementById("found").textContent)', 20)
+        after = page.inner_text('#found'); first = page.eval_on_selector_all('#list button[data-id]', 'bs => bs[0]?.firstChild.textContent.trim()')
+        return before == '120 places, showing 1–50.' and got and first == 'Holm 101', {'before': before, 'after': after, 'first': first}
+    attempt('Chora: Next clicked twice goes on two pages', paging_twice)
 
     def statuses():
         chora_boot(page, base, [fixture(judgements, 'judgements-card.json', tmp)])
