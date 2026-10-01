@@ -372,6 +372,17 @@ test('a key pattern whose key stands in the address\'s host is refused, so a key
   assert.deepEqual(odd.doc.attestations.map((a) => a.about), ['https://example.org/entity/ab'], 'control: a plain id is taken');
 });
 
+test('a key whose prefix is the name of a member every object has ("constructor") has no pattern, unless one is given for it', () => {
+  const s = tei('<p><placeName key="constructor:1">C</placeName><placeName key="toString:2">T</placeName><placeName key="pleiades:3">P</placeName></p>');
+  const m = mapped(s, { keyPatterns: { pleiades: PLEIADES } });
+  assert.deepEqual(m.doc.attestations.map((a) => a.about), ['https://pleiades.stoa.org/places/3'], 'control: a prefix with a pattern is used');
+  assert.deepEqual(examples(m, 'tei-key-shape'), []);
+  assert.deepEqual(examples(m, 'tei-key-no-pattern').map((e) => e.split(':')[0]), ['prefix "constructor"', 'prefix "toString"']);
+  // given a pattern of its own, such a prefix is used like any other
+  const own = mapped(s, { keyPatterns: { constructor: 'https://example.org/c/{id}' } });
+  assert.ok(own.doc.attestations.some((a) => a.about === 'https://example.org/c/1'));
+});
+
 test('with no pattern, keys are reported by prefix with a count, examples and a suggested pattern; a key beside a ref is not counted', () => {
   const m = keyed({});
   assert.deepEqual(names(m), ['Argos'], 'control: the place name with a ref is converted');

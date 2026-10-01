@@ -821,7 +821,9 @@ export class TeiReader {
   fromKey(key) {
     const k = norm(key), { prefix, rest } = splitKey(k);
     this.onKey?.(prefix, k, rest);
-    const pattern = this.reading.keyPatterns?.[prefix];
+    // Only a pattern given for the prefix: never a member every object has ("constructor", "toString").
+    const kp = this.reading.keyPatterns;
+    const pattern = kp && Object.hasOwn(kp, prefix) ? kp[prefix] : undefined;
     if (pattern === undefined) {
       const w = this.keysWithout.get(prefix) || { count: 0, examples: [], rests: [] };
       w.count++;
