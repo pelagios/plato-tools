@@ -1024,22 +1024,31 @@ publishes its state on `window.__chora` for tests.
   passes, as it compares attestations and nothing else.
 - **Refused before the version check.** A run whose report says the file cannot hold what was read
   (`refusalOf` in `save.js`: the kinds Mneme calls not read, a line that could not be read, and, in the
-  report of the writing only, the writer's `order` and `attestation-centric`, an attestation-shaped
-  line of a place-centric file, which the PLATO JSON (Lines) writer drops) stops the save before Mneme,
+  report of the writing only, what the writer itself left out: `attestation-centric`, an
+  attestation-shaped line of a place-centric file, which the PLATO JSON (Lines) writer drops, and
+  `identity-relations-lost`, held back by the PLATO JSON writer where its working database could not
+  be had) stops the save before Mneme,
   which is ~90% of a save's time (14 minutes of DEEP's) and could only fail: the file written is
   removed (`discard`), nothing is offered, and the page says why (`chora-not-kept`). A dataset whose
-  opening already reported such a problem is refused before anything is written, as is one whose
   opening was incomplete (`readIncomplete`: cut short, or a reader that read on past part of its
-  input it could not read, such as a sheet of the tables), saying why from that reading's errors
-  (`chora-unreadable`). A write that ends incomplete is removed in the same way, and the report
-  begins with `chora-unreadable`, then the run's own problems. Problems of the data itself (a place
+  input it could not read, such as a sheet of the tables) is refused before anything is written, as
+  not read to the end (`chora-unreadable`), with that reading's errors as why; this is tested before
+  the opening's report, which then also holds `unreadable`. One whose opening read to the end and
+  reported such a problem is refused before anything is written as `chora-not-kept`. A write that
+  ends incomplete is removed in the same way, and the report begins with the refusal, then the run's
+  own problems: `chora-not-kept` when the dataset was read to the end and the writer left its file
+  short (`identity-relations-lost`), else `chora-unreadable`. Problems of the data itself (a place
   the schema refuses) do not stop a save.
-- **A write that stops part-way** (a gzip cut short: `run()` catches the `DataError` and returns no
-  outputs) leaves the file it was writing, and leaves it open: `run()` does not close its writer then,
-  and the browser cannot remove a file whose access handle is open. `save()` gives the run an
-  `env.output` that keeps each file it opens, closes any the run left open, and removes the file by
-  the name it was opened under (and the name expected) when there are no outputs to go by. Only
-  `save()`'s own outputs (`chora-outputs/`) are handled so; the main page's runs are as they were.
+- **A write that stops part-way** (a gzip cut short: `run()` catches the `DataError`) or ends knowingly
+  short returns no outputs, and leaves the file it was writing. `run()` closes every output it opened
+  and did not close (the browser cannot remove a file whose access handle is open); removing the file
+  is `save()`'s job. It gives the run an `env.output` that keeps the name of each file opened, and,
+  with no outputs to go by, removes the file by those names and the name expected (`discard`).
+- **Known: a save cut off with its page** (the tab closed or crashed mid-save) leaves its partial
+  file in `chora-outputs/` until the next save, which clears that folder first. Opening a dataset
+  leaves the folder as it is (the last saved file is kept there, and its download cannot be seen to
+  finish), and a partial file cannot be told there from a completed save without a record of which
+  saves completed.
 - **Progress** of a save is shown under its button, step by step: each event from `save()` says
   which (`save`: `finding`, `writing`, `checking`) and, where known, how many attestations that step
   reads (`total`), in words by `choraSaveProgress`.
@@ -1048,8 +1057,11 @@ publishes its state on `window.__chora` for tests.
   about 2 times for RDF, which needs a triple store beside Chora's database; to save, the file and
   Mneme's ledger, about 2.3 times the records, and a triple store again for RDF), and warns plainly
   when `navigator.storage.estimate()` says too little is left. A triple store is counted wherever the
-  pipeline uses one (its `needsStore`: RDF, attestation-centric PLATO, W3C annotations), from the
-  format detected, not the name. A file is gzipped when its first two bytes say so, whatever its name.
+  pipeline uses one (its `needsStore`: RDF, attestation-centric PLATO, W3C annotations, TEI, and a
+  CSV or plain GeoJSON whose column matching finds the places' web addresses), from the format
+  detected, not the name. A CSV or GeoJSON is counted as read by address before it is opened (its
+  columns are not matched then, so the estimate errs toward a warning), and as the opened dataset was
+  read when it is saved (`loaded.input.profile`, from `genericProfile`). A file is gzipped when its first two bytes say so, whatever its name.
   A gzip of one member is read at the size its trailer gives (ISIZE, the size modulo 4 GB), unless
   that is less than 4 times the compressed size, when the larger of it and 20 times (DEEP's ratio) is
   taken; a gzip of several members (bgzip, known by its first header, or any whose last 64 KiB holds

@@ -82,10 +82,8 @@ test('the saved name and format follow the dataset: JSON Lines as JSON Lines, an
 // ---- 2. A write that cannot hold what was read is refused before Mneme --------------------------
 test('refusalOf: a write report saying the output does not hold the input is a refusal; problems of the data itself are not', () => {
   const item = (severity, kind, message = kind) => ({ severity, kind, message, count: 1, examples: [] });
-  // The scale run's report: the writer moved 538,369 places among the identity relations.
-  const order = refusalOf({ errors: 0, counts: {}, items: [item('warning', 'order', 'A place came after the identity relations; it is written with them')] });
-  assert.equal(order.length, 1);
-  assert.equal(order[0].kind, 'order');
+  // The writer's own: identity relations it held back and could not write (the run is incomplete).
+  assert.deepEqual(refusalOf({ items: [item('error', 'identity-relations-lost')] }, { written: true }).map((i) => i.kind), ['identity-relations-lost']);
   for (const kind of ['record-failed', 'json-syntax', 'rdf-syntax', 'not-a-list', 'late-header', 'unreadable', 'lpf-v2']) {
     assert.deepEqual(refusalOf({ items: [item('error', kind)] }).map((i) => i.kind), [kind], kind);
   }
@@ -124,37 +122,89 @@ test('a place-centric JSON Lines file with an attestation-shaped line (which the
   assert.equal(mnemeRan(ok.events), true);
 });
 
-test('a write that stops part-way (a gzip cut short) leaves no file behind: the file it opened is closed and removed', async () => {
+// run() closes the outputs of a run stopped part-way (src/engine/pipeline.js), and returns none: the
+// file it was writing is still there, and removing it is save()'s job, which this tests.
+test('a write that stops part-way (a gzip cut short) leaves no file behind: save() removes the file the run opened', async () => {
   const rows = [HEADER, ...Array.from({ length: 300 }, (_, i) => place('p' + i, 'Place ' + i, 3))];
   const gz = gzipSync(new TextEncoder().encode(rows.map((r) => JSON.stringify(r)).join('\n') + '\n'));
   const cut = () => new File([gz.slice(0, Math.floor(gz.length * 0.6))], 'cut.jsonl.gz');
   const additions = [{ placeId: X + 'p/p1', attestation: drawing(1, 1) }];
   // A host that makes the file when it is opened, as the browser's (createSyncAccessHandle) and the
-  // command line's do, and says which it opened and closed.
-  const host = (e) => {
-    const opened = [], closed = [], output = e.output;
-    e.output = async (name) => { opened.push(name); e.outs[name] = []; const o = await output(name); return { ...o, close: async () => { closed.push(name); return o.close(); } }; };
-    return { opened, closed };
-  };
+  // command line's do, and says which it opened.
   const once = async (discard) => {
-    const e = env(); const seen = host(e);
-    const r = await save(await detect([cut()]), additions, e, { hasPlace: () => true, reopen: (o) => new File(e.outs[o.name], o.name), discard: discard(e) });
-    return { r, e, ...seen };
+    const e = env(), opened = [], removed = [], output = e.output;
+    e.output = async (name) => { opened.push(name); e.outs[name] = []; return output(name); };
+    const r = await save(await detect([cut()]), additions, e, { hasPlace: () => true, reopen: (o) => new File(e.outs[o.name], o.name), discard: discard && ((o) => { if (!(o.name in e.outs)) throw new Error('no such file'); removed.push(o.name); delete e.outs[o.name]; }) });
+    return { r, e, opened, removed };
   };
-  // The control: with a discard that removes nothing, the file opened for the write is still there.
-  const kept = await once(() => () => {});
+  // The control: given no discard, the file opened for the write is still there when the save ends.
+  const kept = await once(false);
   assert.equal(kept.r.incomplete, true);
-  assert.deepEqual(kept.r.outputs, []);
+  assert.deepEqual(kept.r.outputs, [], 'the run stopped part-way returns no outputs to go by');
   assert.deepEqual(kept.opened, ['cut.chora.jsonl'], 'the write opened its file');
   assert.deepEqual(Object.keys(kept.e.outs), ['cut.chora.jsonl'], 'without a discard, the file is left');
-  // The subject: the file is closed (the browser cannot remove a file whose handle is open) and removed.
-  const gone = await once((e) => (o) => { if (!(o.name in e.outs)) throw new Error('no such file'); delete e.outs[o.name]; });
+  // The subject: save() removes it, by the name it was opened under, though the run returned none.
+  const gone = await once(true);
   assert.equal(gone.r.incomplete, true);
   assert.ok(gone.r.report.items.some((i) => i.kind === 'unreadable'), JSON.stringify(gone.r.report.items.map((i) => i.kind)));
+  assert.equal(gone.r.report.items[0].kind, 'chora-unreadable', 'refused as a dataset not read to the end');
   assert.deepEqual(gone.opened, ['cut.chora.jsonl']);
-  assert.deepEqual(gone.closed, ['cut.chora.jsonl'], 'the file opened is closed before it is removed');
+  assert.deepEqual(gone.removed, ['cut.chora.jsonl'], 'the file opened is removed');
   assert.deepEqual(Object.keys(gone.e.outs), [], 'nothing kept');
   assert.deepEqual(gone.r.outputs, []);
+});
+
+test('a dataset whose opening was cut short is refused as not read to the end, not as a file that could not hold it', async () => {
+  const rows = [HEADER, ...Array.from({ length: 300 }, (_, i) => place('p' + i, 'Place ' + i, 3))];
+  const gz = gzipSync(new TextEncoder().encode(rows.map((r) => JSON.stringify(r)).join('\n') + '\n'));
+  const cut = () => new File([gz.slice(0, Math.floor(gz.length * 0.6))], 'cut.jsonl.gz');
+  const additions = [{ placeId: X + 'p/p1', attestation: drawing(1, 1) }];
+  const e = env();
+  const store = await load(await detect([cut()]), e, await e.openDb());
+  assert.equal(store.loaded.incomplete, true, 'the opening was cut short');
+  assert.ok(store.loaded.report.items.some((i) => i.kind === 'unreadable'), 'and its report says so');
+  for (const [how, options] of [
+    ['read first', {}],
+    ['from the store', { hasPlace: () => true, readReport: store.loaded.report, readIncomplete: store.loaded.incomplete }],
+  ]) {
+    const r = await saved(cut(), additions, options);
+    const kinds = r.report.items.map((i) => i.kind);
+    assert.equal(kinds[0], 'chora-unreadable', `${how}: ${JSON.stringify(kinds)}`);
+    assert.equal(r.report.items[0].message, CHORA_TEXT['chora-unreadable']);
+    assert.ok(!kinds.includes('chora-not-kept'), `${how}: ${JSON.stringify(kinds)}`);
+    assert.deepEqual(r.outputs, [], how);
+    assert.deepEqual(Object.keys(r.e.outs), [], `${how}: nothing kept`);
+    assert.equal(r.events.some((p) => p.save === 'writing'), false, `${how}: not written`);
+  }
+  store.close();
+});
+
+// The PLATO JSON writer holds identity relations back, past 10,000 in a working database; one that
+// cannot be had loses them, and the run is incomplete. The dataset was read whole: the FILE could not
+// hold it, and the refusal says so, not that the dataset could not be read.
+test('a write the writer left short (identity relations lost) is refused as a file that could not hold the dataset, and removed', async () => {
+  const doc = JSON.stringify({ ...HEADER, spatialEntities: [place('a', 'Alpha'), place('b', 'Beta')], identityRelations: Array.from({ length: 10001 }, (_, i) => idr(i % 2 ? 'a' : 'b', `https://sws.geonames.org/${i}/`)) });
+  const additions = [{ placeId: X + 'p/b', attestation: drawing(1, 1) }];
+  const once = async (broken) => {
+    const e = env();
+    if (broken) e.openDb = async () => { throw new Error('no room'); };
+    const r = await save(await detect([textFile(doc, 'many.json')]), additions, e, { hasPlace: () => true, reopen: (o) => new File(e.outs[o.name], o.name), discard: (o) => { delete e.outs[o.name]; } });
+    return { r, e };
+  };
+  const { r, e } = await once(true);
+  const kinds = r.report.items.map((i) => i.kind);
+  assert.ok(kinds.includes('identity-relations-lost'), JSON.stringify(kinds));
+  assert.equal(kinds[0], 'chora-not-kept', JSON.stringify(kinds));
+  assert.equal(r.report.items[0].message, CHORA_TEXT['chora-not-kept']);
+  assert.match(r.report.items[0].examples.join(), /identity relations are not in the output/);
+  assert.ok(!kinds.includes('chora-unreadable'), JSON.stringify(kinds));
+  assert.equal(r.incomplete, true);
+  assert.deepEqual(r.outputs, []);
+  assert.deepEqual(Object.keys(e.outs), [], 'nothing kept');
+  assert.equal(r.mneme, null);
+  // The control: with a working database the same save is written, checked, and passes.
+  const ok = await once(false);
+  assert.equal(ok.r.mneme?.passed, true, JSON.stringify(ok.r.mneme?.reasons || ok.r.report.items));
 });
 
 test('a dataset with a line that cannot be read is refused before the version check runs, saying why, and nothing is kept or offered', async () => {
@@ -336,8 +386,34 @@ test('the storage a load needs covers what the full DEEP load used, JSON Lines a
     assert.ok(saveNeed({ name: 'x.json', bytes: 1e6, input }) >= saveNeed({ name: 'x.json', bytes: 1e6 }) + 1.25 * 2.3 * 1e6, JSON.stringify(input));
   }
   assert.equal(plain, loadNeed({ name: 'x.json', bytes: 1e6 }), 'the control: place-centric JSON has none');
+  // TEI, and a CSV or GeoJSON whose column matching finds the places' web addresses, are read by
+  // address through the store too; a CSV or GeoJSON not yet matched is taken as one that may be.
+  for (const input of [{ format: 'tei' }, { format: 'csv' }, { format: 'geojson' }, { format: 'csv', profile: 'attestation-centric' }]) {
+    assert.ok(loadNeed({ name: 'x', bytes: 1e6, input }) >= (1.2 + 1.25 * 2.3) * 1e6, JSON.stringify(input));
+    assert.ok(saveNeed({ name: 'x', bytes: 1e6, input }) >= saveNeed({ name: 'x.json', bytes: 1e6 }) + 1.25 * 2.3 * 1e6, JSON.stringify(input));
+  }
+  // The control: one matched as place-centric has no store.
+  for (const format of ['csv', 'geojson']) assert.equal(loadNeed({ name: 'x', bytes: 1e6, input: { format, profile: 'place-centric' } }), plain, format);
   // RDF known by its format, whatever its name.
   assert.equal(loadNeed({ name: 'export.txt', bytes: 1e6, input: { format: 'ntriples' } }), loadNeed({ name: 'x.nt', bytes: 1e6 }));
+});
+
+test('the dataset opened says how a CSV was read (by address or not), so that a save counts a store only where there is one', async () => {
+  const csv = (text, name) => textFile(text, name);
+  const cases = [
+    ['by address', csv('place_uri,name,latitude,longitude\nhttps://example.org/p/a,Alpha,51.38,-2.36\nhttps://example.org/p/b,Beta,53.96,-1.08\n', 'by-address.csv'), 'attestation-centric'],
+    ['places', textFile(readFileSync('test/fixtures/generic/with-ids.csv', 'utf8'), 'with-ids.csv'), 'place-centric'],
+  ];
+  const needs = [];
+  for (const [how, file, profile] of cases) {
+    const e = env();
+    const store = await load(await detect([file]), e, await e.openDb());
+    assert.ok(store.loaded.places > 0, `${how}: opened`);
+    assert.equal(store.loaded.input.profile, profile, how);
+    needs.push(saveNeed({ name: file.name, bytes: 1e6, input: store.loaded.input }));
+    store.close();
+  }
+  assert.ok(needs[0] >= needs[1] + 1.25 * 2.3 * 1e6, `${needs}`);
 });
 
 test('the storage a save needs covers what the full DEEP save used: the file, Mneme\'s ledger, and for RDF a triple store', () => {

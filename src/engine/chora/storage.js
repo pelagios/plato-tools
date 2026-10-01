@@ -14,16 +14,23 @@
 /** Names read as RDF (N-Triples, N-Quads, Turtle), which go through a triple store on disk. */
 const RDF = /\.(nt|nq|ttl|n3|rdf)(\.gz)?$/i;
 const RDF_FORMATS = new Set(['ntriples', 'nquads', 'turtle']);
+// Read by the places' web addresses, so gathered in a triple store first whatever their profile.
+const BY_ADDRESS = new Set(['w3c-annotations', 'tei']);
+// A CSV or plain GeoJSON is read by address when its column matching finds a column of the places' web
+// addresses (genericProfile in src/engine/hermes/generic.js); until that is known, it is taken as one.
+const GENERIC = new Set(['csv', 'geojson']);
 /**
  * How a dataset is read, which decides the storage it needs: 'rdf' (a triple store of its text beside
- * Chora's database), 'store' (JSON gathered in a triple store first: attestation-centric PLATO and W3C
- * annotations, the pipeline's needsStore in src/engine/pipeline.js), or 'json'. From `input` (detect()'s
- * { format, profile }) when it is known, else from the name.
+ * Chora's database), 'store' (gathered in a triple store first: attestation-centric PLATO, W3C
+ * annotations, TEI, and a CSV or GeoJSON read by address; the pipeline's needsStore in
+ * src/engine/pipeline.js), or 'json'. From `input` (detect()'s { format, profile }, or the opened
+ * dataset's, whose profile says how a CSV or GeoJSON was read) when it is known, else from the name.
  */
 function readAs(name, input) {
   if (input && input.format) {
     if (RDF_FORMATS.has(input.format)) return 'rdf';
-    return input.profile === 'attestation-centric' || input.format === 'w3c-annotations' ? 'store' : 'json';
+    if (BY_ADDRESS.has(input.format) || input.profile === 'attestation-centric') return 'store';
+    return GENERIC.has(input.format) && input.profile !== 'place-centric' ? 'store' : 'json';
   }
   return RDF.test(String(name || '')) ? 'rdf' : 'json';
 }
@@ -97,7 +104,7 @@ export async function sizeRead(file) {
  * as `input` says (detect()'s { format, profile }, when known): Chora's database, about 1.2 times what
  * is read (1.40 GB for DEEP's 1.185 GB of JSON Lines), and from RDF, whose records are much smaller
  * than its text (DEEP's N-Triples are 2.3 times its JSON Lines), a triple store of 1.25 times the text
- * besides. JSON gathered in a triple store (attestation-centric, annotations) has a store of its
+ * besides. JSON gathered in a triple store (attestation-centric, annotations, TEI, a CSV by address) has a store of its
  * triples, 2.3 times its text taken at 1.25: not measured, but from the same run's factors.
  */
 export function loadNeed({ name, bytes, input }) {

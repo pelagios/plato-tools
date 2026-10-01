@@ -9,6 +9,7 @@
 // under another place, so what is withdrawn is known only when the whole dataset has been read; the
 // boxes and points are worked out then, and the withdrawn names taken out.
 import { run } from '../pipeline.js';
+import { genericProfile } from '../hermes/generic.js';
 import { collectWithdrawn, resolveWithdrawn, isDenial } from '../../formats/shared.js';
 import { viewPlace, currentGeometries } from './view.js';
 import { unionBbox } from './geo.js';
@@ -289,7 +290,9 @@ export async function load(input, env, db, { name } = {}) {
     bbox = unionBbox((function* () { for (const q of store.rows('SELECT w, s, e, nn FROM p WHERE w IS NOT NULL ORDER BY n')) yield [q.get(0), q.get(1), q.get(2), q.get(3)]; })());
   }
   store.loaded = {
-    input: { format: input.format, profile: input.profile || null, name: name || input.name || input.files?.[0]?.name || null },
+    // A CSV or plain GeoJSON has no profile of its own: the one its column matching gave the run, so
+    // that the storage a save needs counts a triple store only where it was read through one.
+    input: { format: input.format, profile: input.profile || (input.format === 'csv' || input.format === 'geojson' ? await genericProfile(input) : null), name: name || input.name || input.files?.[0]?.name || null },
     header, places, bbox, withGeometry, withdrawn: store.one('SELECT COUNT(*) FROM wd'), report: r.report, incomplete: !!r.incomplete,
   };
   return store;

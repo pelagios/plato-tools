@@ -8,8 +8,8 @@
 //
 // Additions are checked against the pinned JSON Schema here, before anything is read: the pipeline
 // checks what it reads, not what options.augment adds to it. And a file that cannot hold what was read
-// (a line that could not be read, a record that could not be written, a place moved among the identity
-// relations) is refused as soon as that is known, before the version check, which is ~90% of a save's
+// (a line that could not be read, a record that could not be written, identity relations the writer
+// could not hold) is refused as soon as that is known, before the version check, which is ~90% of a save's
 // time (14 minutes for DEEP) and could only fail.
 import { run, explainSchema } from '../pipeline.js';
 import { compare, NOT_READ } from '../compare.js';
@@ -39,12 +39,16 @@ export function checkAddition(attestation, validators) {
 export const savedName = (name, target = 'plato-json') => String(name).replace(/\.gz$/i, '').replace(/\.[^./]+$/, '') + (target === 'plato-jsonl' ? '.chora.jsonl' : '.chora.json');
 
 // What a run reports when the file it wrote cannot hold what was read: part of the input not read
-// (the kinds the version check calls not read, and a file that stops part-way), or, from the writer,
-// a place moved among the identity relations. Mneme would fail each; the save need not wait for it.
-const NOT_KEPT = new Set([...NOT_READ, 'unreadable', 'order']);
-// And, in the report of the writing only: the PLATO JSON (Lines) writer drops an attestation-shaped
-// line of a place-centric file ('attestation-centric'), so the file written has not got it.
-const NOT_WRITTEN = new Set([...NOT_KEPT, 'attestation-centric']);
+// (the kinds the version check calls not read, and a file that stops part-way). Mneme would fail each;
+// the save need not wait for it.
+const NOT_KEPT = new Set([...NOT_READ, 'unreadable']);
+// What the writer itself left out, in the report of the writing only: the PLATO JSON (Lines) writer
+// drops an attestation-shaped line of a place-centric file ('attestation-centric'), and the PLATO JSON
+// writer loses the identity relations it held back where its working database cannot be had
+// ('identity-relations-lost', which makes the run incomplete). The dataset was read; the file written
+// has not got it.
+const BY_WRITER = new Set(['attestation-centric', 'identity-relations-lost']);
+const NOT_WRITTEN = new Set([...NOT_KEPT, ...BY_WRITER]);
 /**
  * The items of a run's report that mean its output does not hold its input: none, for a save to go on.
  * `written`: the report is of the writing of the file, not of a reading.
@@ -85,16 +89,12 @@ function writeWithAdditions(input, byPlace, placed, unlisted, env, name, target)
   return run({ input, action: 'convert', target, options: { name, augment: (rec) => appendTo(rec, keyOf(rec), byPlace, placed, unlisted) } }, env);
 }
 /**
- * env, with each output it opens kept in `opened` ({ name, out, closed }), so that one a run leaves
- * open can be closed: a run stopped part-way (a DataError) returns no outputs and does not close its
- * writer, and the browser cannot remove a file whose access handle is still open.
+ * env, with the name of each output the run opens kept in `opened`. A run stopped part-way (a
+ * DataError) closes what it opened (run() in pipeline.js) and returns no outputs, so the names it was
+ * opened under are what save() removes it by.
  */
-function tracking(env, opened) {
-  return { ...env, output: async (name) => {
-    const out = await env.output(name), o = { name, out, closed: false };
-    opened.push(o);
-    return { ...out, close: async () => { o.closed = true; return out.close(); } };
-  } };
+function naming(env, opened) {
+  return { ...env, output: async (name, ...a) => { opened.push(name); return env.output(name, ...a); } };
 }
 
 // What the version check must find for the save to stand: nothing of the earlier version lost or
@@ -193,12 +193,14 @@ export async function save(input, additions, env, options = {}) {
     missing = [...byPlace.keys()].filter((k) => !seen.has(k));
     options = { ...options, readReport: r.report };
   }
-  // A dataset that could not all be read cannot be saved whole: refused before anything is written.
+  // A dataset whose reading was cut short, or read on past part of its input it could not read (a
+  // sheet of the tables): what was read is not the whole dataset, so a file of it would not be either.
+  // Said first, as the dataset not read to the end, with that reading's errors as why.
+  if (options.readIncomplete) { refuseNotKept(rep, (options.readReport?.items || []).filter((i) => i.severity === 'error'), 'chora-unreadable'); return fail(); }
+  // And one read to the end that could not all be read (a line that is not JSON): refused before
+  // anything is written, as a file that could not hold it.
   const unread = refusalOf(options.readReport);
   if (unread.length) { refuseNotKept(rep, unread); return fail(); }
-  // And one whose reading was cut short, or read on past part of its input it could not read (a sheet
-  // of the tables): what was read is not the whole dataset, so a file of it would not be either.
-  if (options.readIncomplete) { refuseNotKept(rep, (options.readReport?.items || []).filter((i) => i.severity === 'error'), 'chora-unreadable'); return fail(); }
   for (const k of missing) rep.error('chora-no-such-place', CHORA_TEXT['chora-no-such-place'], k);
   for (const [k, rec] of unlisted) refuse(rep, k, rec);
   if (missing.length || unlisted.size) return fail();
@@ -208,25 +210,28 @@ export async function save(input, additions, env, options = {}) {
   const placed = new Set();
   progress({ save: 'writing', attestations: 0, ...(options.attestations ? { total: options.attestations } : {}), elapsedMs: Date.now() - t0 });
   const opened = [];
-  const w = await writeWithAdditions(input, byPlace, placed, unlisted, tracking(step('writing', options.attestations), opened), name, target);
+  const w = await writeWithAdditions(input, byPlace, placed, unlisted, naming(step('writing', options.attestations), opened), name, target);
   const report = w.report;
   const added = [...byPlace.values()].reduce((s, l) => s + l.length, 0);
-  // The files written, or, from a write that stopped part-way (no outputs), the file it was writing:
-  // by the name it was opened under, and the name expected, closed first if the run left it open.
+  // The files written, or, from a run that ended with no outputs (stopped part-way, or knowingly
+  // short), the file it was writing: run() has closed it, and it is removed here, by the name it was
+  // opened under and the name expected.
   const discard = async () => {
-    for (const o of opened) if (!o.closed) { try { o.closed = true; await o.out.close(); } catch { /* closed already */ } }
     if (!options.discard) return;
     const names = new Set((w.outputs || []).map((o) => o.name));
-    if (!names.size) { for (const o of opened) names.add(o.name); names.add(name); }
+    if (!names.size) { for (const n of opened) names.add(n); names.add(name); }
     for (const n of names) { try { await options.discard({ name: n }); } catch { /* gone already, or never made */ } }
   };
   // Found only in the writing (the caller knew the place, not its record): the file written is not offered.
   if (unlisted.size) { await discard(); for (const [k, rec] of unlisted) refuse(rep, k, rec); return fail(); }
-  // A write that stopped part-way, or a reader that could not read part of its input (a sheet of the
-  // tables): the file is not offered, and the report says so first, then why.
+  // A write that stopped part-way, a reader that could not read part of its input (a sheet of the
+  // tables), or a writer that left its file knowingly short: the file is not offered, and the report
+  // says so first, then why. The dataset not read to the end, unless it was and the writer is why.
   if (w.incomplete) {
     await discard();
-    rep.error('chora-unreadable', CHORA_TEXT['chora-unreadable']);
+    const byWriter = report.items.some((i) => i.kind === 'unreadable') ? [] : report.items.filter((i) => i.kind === 'identity-relations-lost');
+    if (byWriter.length) refuseNotKept(rep, byWriter);
+    else rep.error('chora-unreadable', CHORA_TEXT['chora-unreadable']);
     const r = rep.toJSON();
     return { report: { ...report, errors: report.errors + r.errors, items: [...r.items, ...report.items] }, outputs: [], mneme: null, incomplete: true };
   }
