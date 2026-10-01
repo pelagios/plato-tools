@@ -155,6 +155,14 @@ npm run dev                               # a local server
 [DEVELOPERS.md](DEVELOPERS.md) has the rest: how the tools are built, how they are pinned to PLATO,
 every test and what it proves, and the conventions to keep.
 
+## Acknowledgements
+
+The development of PLATO tools has been supported by the
+[Institute for Spatial History Innovation (ISHI)](https://www.ishi.pitt.edu/) at the University of
+Pittsburgh, through Stephen Gadd's work as a contractor for the
+[World Historical Gazetteer](https://whgazetteer.org), and through ISHI's collaboration with the
+[Pelagios Network](https://pelagios.org).
+
 ## Licence
 
 BSD 3-Clause. PLATO itself is CC BY 4.0.
