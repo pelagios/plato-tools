@@ -42,13 +42,19 @@ export const REGISTRY = {
 
 export const STATES = ['allowed', 'never'];
 
-// A plain http(s) origin, in lower case, with nothing after it: no path, no space, no quote, no
-// semicolon, no wildcard. Only such a string ever reaches the policy, so nothing kept in storage can
-// add a directive or widen one.
-export const ORIGIN = /^https?:\/\/[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[0-9]{1,5})?$/;
+// A plain origin, in lower case, with nothing after it: no path, no space, no quote, no semicolon, no
+// wildcard; https, or http only for this computer (localhost, 127.0.0.1); a port, if any, of at most
+// 65535 and without a leading zero. Only such a string ever reaches the policy, so nothing kept in
+// storage can add a directive or widen one.
+export const ORIGIN = /^https?:\/\/[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[1-9][0-9]{0,4})?$/;
 const ID = /^[a-z][a-z0-9-]{0,40}$/;
 
-export function isOrigin(o) { return typeof o === 'string' && ORIGIN.test(o); }
+export function isOrigin(o) {
+  if (typeof o !== 'string' || !ORIGIN.test(o)) return false;
+  const m = /^(https?):\/\/([^:]+)(?::([0-9]+))?$/.exec(o);
+  if (m[3] && Number(m[3]) > 65535) return false;
+  return m[1] === 'https' || m[2] === 'localhost' || m[2] === '127.0.0.1';
+}
 
 /** The site (origin) of an http(s) address, or null. */
 export function originOf(url) {

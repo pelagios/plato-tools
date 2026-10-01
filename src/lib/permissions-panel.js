@@ -10,26 +10,27 @@ const date = (at) => { try { const d = new Date(at); return Number.isNaN(d.getTi
 
 let dialog = null, opener = null;
 
-/** What a remembered value is, briefly: a person's name (and ORCID), or the sites of pasted basemaps. Never a key. */
-function summary(key, v) {
-  if (key === 'chora-basemaps' && Array.isArray(v)) {
-    const hosts = [...new Set(v.map((b) => { try { return new URL(String(b?.url || b?.tiles || '').replace(/[{}]/g, '_')).host; } catch { return null; } }).filter(Boolean))];
-    return `${v.length} basemap${v.length === 1 ? '' : 's'}${hosts.length ? `, from ${hosts.join(', ')}` : ''}`;
+/** What a remembered value is, briefly: a person's name (and ORCID), or the hosts of pasted basemaps. Never an address or a key. */
+function summary(v) {
+  if (Array.isArray(v?.basemaps)) {
+    return `${v.basemaps.length} basemap${v.basemaps.length === 1 ? '' : 's'}: ${v.basemaps.map((b) => `${b.host || '?'}${b.key ? ` (${PANEL.keyHeld})` : ''}`).join(', ')}`;
   }
-  if (v && typeof v === 'object' && typeof v.name === 'string') return `${v.name}${v.orcid ? ` (${String(v.orcid).replace('https://orcid.org/', 'ORCID ')})` : ''}`;
+  if (v && typeof v.name === 'string') return `${v.name}${v.orcid ? ` (${String(v.orcid).replace('https://orcid.org/', 'ORCID ')})` : ''}`;
   return '';
 }
 
 function entry(x) {
   const id = `perm-${x.key.replace(/[^a-z0-9]+/gi, '-')}`;
   const radio = (value, label) => `<label><input type="radio" name="${esc(`perm:${x.key}`)}" value="${value}"${x.state === value ? ' checked' : ''}> ${esc(label)}</label>`;
-  const notes = [PANEL.sitesOf(x.origins)];
+  const many = x.origins.length > 2;
+  const notes = [many ? PANEL.sitesShort(x.key, x.origins) : PANEL.sitesOf(x.origins)];
   if (x.added) notes.push(PANEL.added(date(x.at)));
   if (x.scope === 'tab') notes.push(PANEL.forTab);
   if (x.reload) notes.push(PANEL.reloadNote);
   return `<fieldset class="perm" data-key="${esc(x.key)}" aria-describedby="${id}-d">
     <legend>${esc(x.name)}</legend>
     <p class="muted" id="${id}-d">${esc(notes.join(' '))}</p>
+    ${many ? `<details class="perm-sites"><summary>${esc(PANEL.allSites(x.origins.length))}</summary><ul>${x.origins.map((o) => `<li>${esc(o)}</li>`).join('')}</ul></details>` : ''}
     <div class="perm-choices">${radio('allowed', PANEL.allowed)} ${radio('undecided', PANEL.undecided)} ${radio('never', PANEL.never)}
     ${x.state === 'undecided' ? `<button type="button" data-tab="${esc(x.key)}">${esc(PANEL.allowTab)}</button>` : ''}</div>
   </fieldset>`;
@@ -61,7 +62,7 @@ function render(api) {
     </section>
     <section aria-labelledby="perm-remembered-h">
       <h3 id="perm-remembered-h">${esc(PANEL.rememberedHeading)}</h3>
-      ${remembered.length ? `<ul class="perm-remembered">${remembered.map((r) => `<li>${esc(r.label)}${summary(r.key, r.value) ? `: <span class="muted">${esc(summary(r.key, r.value))}</span>` : ''} <button type="button" data-forget="${esc(r.key)}">${esc(PANEL.forget)}</button></li>`).join('')}</ul>` : `<p class="muted">${esc(PANEL.rememberedNone)}</p>`}
+      ${remembered.length ? `<ul class="perm-remembered">${remembered.map((r) => `<li>${esc(r.label)}${summary(r.value) ? `: <span class="muted">${esc(summary(r.value))}</span>` : ''} <button type="button" data-forget="${esc(r.key)}">${esc(PANEL.forget)}</button></li>`).join('')}</ul>` : `<p class="muted">${esc(PANEL.rememberedNone)}</p>`}
     </section>
     <section aria-labelledby="perm-work-h">
       <h3 id="perm-work-h">${esc(PANEL.workHeading)}</h3>

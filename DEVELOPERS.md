@@ -736,15 +736,20 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   recorded, the default). Not decided, a feature shows one line, "Needs permission: <name> —
   Permissions…", which opens the panel at that entry, where it can also be allowed for this tab only;
   Never, the feature does without, and says nothing. Never beats allowing for the tab. Everything
-  decided is remembered (`localStorage` `plato-tools.permissions`), a site the user typed marked as
-  added, with the date; Forget all forgets them. Tabs keep in step through the storage event.
+  decided is remembered (`localStorage` `plato-tools.permissions`); a site, rather than a known
+  service, is listed as "Added on <date>", in words that do not claim the user added it (a sibling
+  site may have, or the carrying over of an old consent); Forget all forgets them. The module reads
+  storage again only when its text has changed (MapLibre asks at every tile), and carries old consents
+  over once per load, never on the way to a request. `remembered()` gives the panel a person's name,
+  or a pasted basemap's host and whether its address may hold a key, never the address. Tabs keep in step through the storage event.
 - **The API.** The pure core, `src/lib/permissions-core.js`, re-exported by the module: `CATEGORIES`,
   `REGISTRY`, `parse`, `originsFor`, `check(grants, cat, subj, tab)`, `allowedOrigins`, `policyFor`,
   `fromFlags`. The page's side: `state(cat, subj)` (`'allowed' | 'never' | 'undecided'`),
   `allowed(cat, subj)` (allowed and in this load's policy: may be asked now), `waitsForReload`,
   `set(cat, subj, state)`, `allowOnce`, `forget`, `forgetAll`, `list()` (never the token),
   `onChange(fn)`; `fetch(url, { cat, subj, …init })`, which asks only that permission's sites, never
-  with credentials, refuses an answer that a redirect brought from another site, and throws a
+  with credentials, never follows a redirect (`redirect: 'manual'`: an answer that is a redirect, to
+  any site, is refused as `moved`, since the page cannot see where it points), and throws a
   `PermissionError` whose `kind` is `address`, `undecided`, `never`, `reload`, `unprotected`, `moved`
   or `network`, and whose message names the site, never the address (a key may be in it);
   `transformRequest(() => [[cat, subj], …], { onBlocked })` for MapLibre; `needs(el, cat, subj)` for
@@ -759,7 +764,8 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: <sites>; connect-src 'self'
   blob: <sites>; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'`,
   where `<sites>` are the sites of the permissions allowed, each checked against a strict origin rule
-  twice, so nothing kept in storage can add a directive. Storage that cannot be read gives the policy
+  twice (https, or http only for localhost and 127.0.0.1; a port no higher than 65535), so nothing
+  kept in storage can add a directive. Storage that cannot be read gives the policy
   of nothing allowed. With nothing allowed it is the same on both pages. The policy cannot be widened
   while the page runs: a permission allowed takes effect from the next load (the panel offers the
   reload, and Chora keeps what is open); one withdrawn is refused at once by `fetch` and

@@ -34,22 +34,42 @@ function put(store, key, value) { try { store?.setItem(key, value); return true;
 function drop(store, key) { try { store?.removeItem(key); } catch { /* nothing kept there */ } }
 
 // ---- What is decided -----------------------------------------------------------------------------
-/** Every permission decided and remembered, cleaned (core.normalise); Chora's old consents carried over once. */
-function grants() {
+// What is kept is read again only when its text has changed: transformRequest asks at every tile.
+const cache = { grantsRaw: undefined, grants: {}, tabRaw: undefined, tab: [] };
+const rawOf = (store, key) => { try { return store?.getItem(key) ?? null; } catch { return null; } };
+let migrated = false;
+/**
+ * Carry Chora's old basemap consents over ('chora-basemap-consent', a list of sites), and let the old
+ * key go. Done once per load (the head script has done it already, before the page asked anything),
+ * never on the way to a request; exported for tests.
+ */
+export function migrate() {
+  migrated = true;
   const st = local();
-  let g = core.normalise(readJson(st, KEY)?.grants);
-  let legacy = null;
-  try { legacy = st?.getItem(LEGACY) ?? null; } catch { legacy = null; }
-  if (legacy !== null) {
-    g = core.normalise(core.migrateBasemapConsent(g, readJson(st, LEGACY)));
-    if (put(st, KEY, JSON.stringify({ version: 1, grants: g }))) drop(st, LEGACY);
+  if (rawOf(st, LEGACY) === null) return;
+  const g = core.normalise(core.migrateBasemapConsent(core.normalise(readJson(st, KEY)?.grants), readJson(st, LEGACY)));
+  if (put(st, KEY, JSON.stringify({ version: 1, grants: g }))) drop(st, LEGACY);
+}
+/** Every permission decided and remembered, cleaned (core.normalise). A copy: the cache is not the caller's. */
+function grants() {
+  if (!migrated) migrate();
+  const raw = rawOf(local(), KEY);
+  if (raw !== cache.grantsRaw) {
+    let parsed = null;
+    try { parsed = JSON.parse(raw ?? 'null'); } catch { parsed = null; }
+    cache.grants = core.normalise(parsed?.grants); cache.grantsRaw = raw;
   }
-  return g;
+  return { ...cache.grants };
 }
 const writeGrants = (g) => put(local(), KEY, JSON.stringify({ version: 1, grants: g }));
 function tab() {
-  const t = readJson(session(), TAB);
-  return Array.isArray(t) ? t.filter((k) => typeof k === 'string' && core.parse(k)) : [];
+  const raw = rawOf(session(), TAB);
+  if (raw !== cache.tabRaw) {
+    let t = null;
+    try { t = JSON.parse(raw ?? 'null'); } catch { t = null; }
+    cache.tab = Array.isArray(t) ? t.filter((k) => typeof k === 'string' && core.parse(k)) : []; cache.tabRaw = raw;
+  }
+  return [...cache.tab];
 }
 const writeTab = (t) => put(session(), TAB, JSON.stringify([...new Set(t)]));
 
@@ -173,8 +193,10 @@ export function configure({ fetch: f, enforced: e } = {}) {
 /**
  * fetch(), for a request to another site under the permission (cat, subj): only to that permission's
  * sites, only once it is allowed and in this load's policy, only where the policy was shown to be
- * enforced, never with credentials (cookies), and an answer from another site, after a redirect, is
- * refused. Throws PermissionError, whose message names the site and never the address.
+ * enforced, never with credentials (cookies), and never following a redirect: a server that answers
+ * with one is refused ('moved'), whichever site it points to, since the page cannot see where to.
+ * Throws PermissionError, whose message names the site and never the address. (Tiles are fetched by
+ * MapLibre, through transformRequest, and the policy checks each hop of their redirects.)
  */
 export async function fetch(url, { cat, subj, ...init } = {}) {
   const p = core.parse(cat, subj), origin = core.originOf(url);
@@ -187,9 +209,10 @@ export async function fetch(url, { cat, subj, ...init } = {}) {
   if (!inPolicy(origin)) throw new PermissionError('reload', REFUSED.reload(name), { cat, subj, origin });
   if (!(await enforced())) throw new PermissionError('unprotected', REFUSED.unprotected(), { cat, subj, origin });
   let r;
-  try { r = await doFetch(url, { ...init, credentials: 'omit', redirect: 'follow' }); } catch {
+  try { r = await doFetch(url, { ...init, credentials: 'omit', redirect: 'manual' }); } catch {
     throw new PermissionError('network', REFUSED.network(origin), { cat, subj, origin });
   }
+  if (r?.type === 'opaqueredirect' || (r?.status >= 300 && r?.status < 400)) throw new PermissionError('moved', REFUSED.redirect(origin), { cat, subj, origin });
   const landed = core.originOf(r?.url || url);
   if (landed && !sites.includes(landed)) throw new PermissionError('moved', REFUSED.moved(origin, landed), { cat, subj, origin, landed });
   return r;
@@ -296,12 +319,24 @@ export const keepWorkingData = () => { try { return local()?.getItem(KEEP) !== '
 export function setKeepWorkingData(on) { if (on) drop(local(), KEEP); else put(local(), KEEP, 'no'); notify(); }
 
 // ---- Remembered in this browser ------------------------------------------------------------------
-/** What else is remembered here (REMEMBERED's keys that hold something): [{key, label, value}]. */
+/**
+ * What else is remembered here (REMEMBERED's keys that hold something): [{key, label, value}], where
+ * value is only what the panel shows: a person's {name, orcid}, or for pasted basemaps
+ * {basemaps: [{host, key}]}, `key` saying that the address carries something that may be a key (a
+ * query, or a user name). Never an address itself.
+ */
 export function remembered() {
   const out = [];
   for (const key of Object.keys(REMEMBERED)) {
     const v = readJson(local(), key);
-    if (v !== null && v !== undefined && !(Array.isArray(v) && !v.length)) out.push({ key, label: REMEMBERED[key].label, value: v });
+    if (v === null || v === undefined || (Array.isArray(v) && !v.length)) continue;
+    let value = null;
+    if (key === 'chora-basemaps' && Array.isArray(v)) {
+      value = { basemaps: v.map((b) => {
+        try { const u = new URL(String(b?.url || b?.tiles || '').replace(/[{}]/g, '_')); return { host: u.host, key: !!(u.search || u.username || u.password) }; } catch { return { host: '', key: false }; }
+      }) };
+    } else if (v && typeof v === 'object' && typeof v.name === 'string') value = { name: v.name, ...(typeof v.orcid === 'string' ? { orcid: v.orcid } : {}) };
+    out.push({ key, label: REMEMBERED[key].label, value });
   }
   return out;
 }

@@ -101,6 +101,10 @@ test('a forged grant is listed as kept; unknown ids, malformed and injected site
 test('Chora\'s old basemap consents are carried over once: a whole provider by its id, the rest as pasted sites, the old key removed', () => {
   const carto = core.REGISTRY.basemap.carto.origins;
   localStorage.setItem('chora-basemap-consent', JSON.stringify(['https://tiles.openfreemap.org', carto[0], 'https://my-tiles.example.org', 'not a site']));
+  // Carried over at load, never on the way to a request (transformRequest asks at every tile).
+  permissions.list();
+  assert.notEqual(localStorage.getItem('chora-basemap-consent'), null, 'not carried over by a later read');
+  permissions.migrate();
   const l = permissions.list();
   const st = (k) => l.find((x) => x.key === k)?.state;
   assert.equal(st('basemap:openfreemap'), 'allowed');
@@ -115,19 +119,45 @@ test('Chora\'s old basemap consents are carried over once: a whole provider by i
   // A grant already made is not changed by a later carrying over.
   permissions.set('basemap', 'osm', 'never');
   localStorage.setItem('chora-basemap-consent', JSON.stringify([OSM]));
+  permissions.migrate();
   assert.equal(permissions.state('basemap', 'osm'), 'never');
   // The whole of CARTO's list makes the provider's permission.
   assert.equal(core.check(core.migrateBasemapConsent({}, carto), 'basemap', 'carto'), 'allowed');
 });
 
-test('an answer from another site, after a redirect, is refused; one from the same site, or another of the provider\'s sites, is used', async () => {
+test('a redirect is never followed: an answer that is one is refused, wherever it points; a plain answer is used', async () => {
   inPolicy(...core.REGISTRY.basemap.carto.origins);
   permissions.set('basemap', 'carto', 'allowed');
-  permissions.configure({ fetch: stub(() => ({ ok: true, url: 'https://elsewhere.example.org/style.json' })) });
-  await assert.rejects(permissions.fetch('https://basemaps.cartocdn.com/style.json', { cat: 'basemap', subj: 'carto' }), (e) => e.kind === 'moved' && e.landed === 'https://elsewhere.example.org');
-  permissions.configure({ fetch: stub(() => ({ ok: true, url: 'https://tiles-a.basemaps.cartocdn.com/style.json' })) });
-  assert.equal((await permissions.fetch('https://basemaps.cartocdn.com/style.json', { cat: 'basemap', subj: 'carto' })).ok, true);
-  assert.equal(calls[0].init.redirect, 'follow');
+  const style = 'https://basemaps.cartocdn.com/style.json';
+  // What fetch gives with redirect: 'manual' for a redirect: an opaque answer, status 0, no address.
+  permissions.configure({ fetch: stub(() => ({ ok: false, type: 'opaqueredirect', status: 0, url: '' })) });
+  await assert.rejects(permissions.fetch(style, { cat: 'basemap', subj: 'carto' }), (e) => e.kind === 'moved' && !e.message.includes('style.json'));
+  assert.equal(calls[0].init.redirect, 'manual');
+  // A fetch that shows the redirect itself (Node's, say) is refused the same.
+  permissions.configure({ fetch: stub(() => ({ ok: false, status: 302, url: style })) });
+  await assert.rejects(permissions.fetch(style, { cat: 'basemap', subj: 'carto' }), { kind: 'moved' });
+  // And an answer that says it came from elsewhere.
+  permissions.configure({ fetch: stub(() => ({ ok: true, status: 200, url: 'https://elsewhere.example.org/style.json' })) });
+  await assert.rejects(permissions.fetch(style, { cat: 'basemap', subj: 'carto' }), (e) => e.kind === 'moved' && e.landed === 'https://elsewhere.example.org');
+  // The control: a plain answer is used.
+  permissions.configure({ fetch: stub(() => ({ ok: true, status: 200, type: 'cors', url: style })) });
+  assert.equal((await permissions.fetch(style, { cat: 'basemap', subj: 'carto' })).ok, true);
+});
+
+test('only https sites, or http on this computer, with a port no higher than 65535, can be permissions', () => {
+  for (const o of ['https://a.example.org', 'http://localhost:5173', 'http://127.0.0.1', 'https://a.example.org:65535']) assert.ok(core.isOrigin(o), o);
+  for (const o of ['http://a.example.org', 'https://a.example.org:65536', 'https://a.example.org:99999', 'https://a.example.org:0443', 'http://10.0.0.1', 'HTTPS://A.org']) assert.ok(!core.isOrigin(o), o);
+  assert.equal(core.parse('iiif', 'http://maps.example.org'), null);
+  assert.ok(!core.policyFor(['http://maps.example.org', 'https://x.example.org:70000']).includes('example'));
+});
+
+test('what is remembered is shown by host and name only: a pasted basemap\'s address and key are not given out', () => {
+  localStorage.setItem('chora-basemaps', JSON.stringify([{ id: 'pasted-1', url: 'https://tiles.example.org/style.json?api_key=SECRETKEY' }, { id: 'pasted-2', tiles: 'https://plain.example.org/{z}/{x}/{y}.png' }]));
+  localStorage.setItem('plato-tools.reviewer', JSON.stringify({ name: 'Ada', orcid: 'https://orcid.org/0000-0002-1825-0097' }));
+  const r = permissions.remembered(), text = JSON.stringify(r);
+  assert.deepEqual(r.find((x) => x.key === 'chora-basemaps').value, { basemaps: [{ host: 'tiles.example.org', key: true }, { host: 'plain.example.org', key: false }] });
+  assert.ok(!text.includes('SECRETKEY') && !text.includes('style.json'), text);
+  assert.equal(r.find((x) => x.key === 'plato-tools.reviewer').value.name, 'Ada');
 });
 
 test('the token is never in list(), in the panel\'s data or in an error; it is kept for the tab unless remembered', async () => {

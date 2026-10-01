@@ -22,6 +22,11 @@ export const SERVICE_NAMES = {
   'gazetteer:whg': 'the World Historical Gazetteer',
 };
 
+/** How a service on more than two sites is named in short. */
+export const SITES_IN_SHORT = {
+  'basemap:carto': 'CARTO’s map servers (basemaps.cartocdn.com and its tile servers)',
+};
+
 /** A permission's name for people: a known service's, else its site's host. */
 export function nameOf(cat, subj) {
   const k = `${cat}:${subj}`;
@@ -41,8 +46,12 @@ export const PANEL = {
   never: 'Never',
   allowTab: 'Allow for this tab',
   forTab: 'Allowed for this tab only.',
-  added: (date) => `You added this${date ? ` on ${date}` : ''}.`,
+  added: (date) => (date ? `Added on ${date}.` : 'Added in this browser.'),
   sitesOf: (origins) => `Asks ${listOf(origins.map((o) => o.replace(/^https:\/\//, '')))}.`,
+  // A service on many sites is named in short, with the whole list on request.
+  sitesShort: (key, origins) => `Asks ${SITES_IN_SHORT[key] || `${origins[0].replace(/^https:\/\//, '')} and ${origins.length - 1} more of its servers`}.`,
+  allSites: (n) => `All ${n} sites`,
+  keyHeld: 'its address may hold a key',
   reloadNote: 'Allowed: it can be used once the page is reloaded.',
   reload: 'Reload the page now',
   reloadKept: 'What you have open is kept.',
@@ -87,6 +96,7 @@ export const REFUSED = {
   never: (name) => `${name} is set to Never in Permissions.`,
   reload: (name) => `${name} was allowed after this page loaded: it can be reached once the page is reloaded.`,
   unprotected: () => 'This browser did not show that it enforces the page’s protection, so no other site is asked from this page.',
+  redirect: (site) => `${site} answered by sending the request elsewhere, which is not followed, so its answer was not used.`,
   moved: (site, landed) => `${site} sent the request on to ${landed}, another site, so its answer was not used.`,
   network: (site) => `${site} could not be reached; it may not allow other sites to read it.`,
 };

@@ -9,7 +9,7 @@
 @import '@fontsource/alegreya-sans/400.css';
 @import '@fontsource/alegreya-sans/700.css';
 :root { --fg: #1d2330; --muted: #5a6475; --bg: #fbfbf8; --card: #ffffff; --line: #d9dde3; --accent: #2757dd; --accent-fg: #ffffff; --warn: #8a5a00; --err: #a1261b; --ok: #256b2f; }
-@media (prefers-color-scheme: dark) { :root { --fg: #e8eaee; --muted: #a5adba; --bg: #16191f; --card: #1e2229; --line: #353b45; --accent: #5ca5ff; --accent-fg: #0d1117; --warn: #e2b04a; --err: #f08074; --ok: #7ccf88; } }
+@media (prefers-color-scheme: dark) { :root { color-scheme: dark; --fg: #e8eaee; --muted: #a5adba; --bg: #16191f; --card: #1e2229; --line: #353b45; --accent: #5ca5ff; --accent-fg: #0d1117; --warn: #e2b04a; --err: #f08074; --ok: #7ccf88; } }
 * { box-sizing: border-box; }
 :root { --font-text: "Alegreya Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --font-headings: Alegreya, Georgia, "Times New Roman", serif;
@@ -40,6 +40,10 @@ h1 .logo { height: .9em; width: auto; margin-right: .3em; vertical-align: -.08em
 .permissions-panel fieldset.perm legend { font-weight: 700; padding: 0 .3rem; }
 .permissions-panel .perm-choices label { margin-right: .8rem; white-space: nowrap; }
 .permissions-panel .muted { color: var(--muted); margin: .1rem 0 .3rem; }
+.permissions-panel .perm-sites { font-size: .9rem; margin: 0 0 .3rem; }
+.permissions-panel .perm-sites ul { margin: .2rem 0; padding-left: 1.2rem; font: .8rem/1.5 var(--font-mono); }
+/* Radios, checkboxes in the page's own accent, so that they are not the browser's white in dark mode. */
+input[type=radio], input[type=checkbox] { accent-color: var(--accent); }
 .needs-permission { margin: .4rem 0; }
 .family { margin: 0; font-size: 1.1rem; color: var(--muted); }
 .plato-mark { width: 150px; height: auto; flex: none; margin-bottom: .35rem; }
