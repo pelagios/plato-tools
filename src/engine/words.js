@@ -364,6 +364,42 @@ export const KRISIS_TEXT = {
 export const PASTED_BASEMAP = 'a basemap pasted by the contributor';
 export const choraDrawingNote = ({ basemap = 'Natural Earth', zoom } = {}) =>
   `Drawn by hand on ${basemap === PASTED_BASEMAP ? basemap : `the ${basemap} basemap`}${Number.isFinite(zoom) ? ` at zoom ${Math.round(zoom)}` : ''} in PLATO tools (Chora)`;
+
+// Adopting a location from a gazetteer match (src/engine/chora/adopt.js). Both notes give the record's
+// address verbatim, so that the two attestations of one adoption can be paired by their text.
+/** A record as the notes name it: its address, then its name, upstream source and id there. */
+const recordWords = ({ record, name, sourceName, namespace, localId }, more = []) =>
+  `${record} (${[name ? `"${name}"` : null, namespace ? `upstream source: ${sourceName ? `${sourceName} (${namespace})` : namespace}` : "the gazetteer's own record", localId ? `id ${localId}` : null, ...more].filter(Boolean).join('; ')})`;
+/** The identity's notes. */
+export const choraAdoptIdentityNote = (r) =>
+  `Accepted in PLATO tools (Chora) when adopting the location of World Historical Gazetteer record ${recordWords(r)}. The location copied from the record is a separate attestation.`;
+/**
+ * The copied geometry's notes. `licence` and `whgLicence` are SPDX ids or null; `fallback` says the
+ * record could not be fetched and WHG's representative point was taken instead; `linked` that the
+ * identity was already in the dataset, so none was recorded with this.
+ */
+export const choraAdoptGeometryNote = ({ licence, whgLicence, fetched, fallback = false, linked = false, ...r }) => {
+  const record = recordWords(r, [`licence ${licence || 'not stated'}`, `World Historical Gazetteer's own licence: ${whgLicence || 'not stated'}`]);
+  return `${fallback ? `World Historical Gazetteer's representative point for record ${record}, copied` : `Copied from World Historical Gazetteer record ${record}`}, fetched ${String(fetched).slice(0, 10)};`
+  + `${fallback ? " the record itself could not be fetched, so this is only WHG's representative point, not the record's geometry;" : ''}`
+  + ' coordinates rounded to 7 decimal places; in PLATO tools (Chora). '
+  + (linked ? 'The identity with this record was already recorded in the dataset.' : 'The identity with this record is a separate attestation.');
+};
+/** What an adoption tells the person adopting, beside the attestations (adopt.js, notes), by kind. */
+export const CHORA_ADOPT_TEXT = {
+  'already-linked': 'This place is already recorded as the same as this record, so only its location is added.',
+  'loosely-linked': 'This place is already linked to this record, but not as the same place: adopting records that it is.',
+  'licence-restricted': (spdx) => `The record's source is licensed ${spdx}; this may bear on how the copied location can be reused.`,
+  'licence-unknown': "The gazetteer does not say under what licence the record's source may be reused.",
+  'unstable-id': "This is one of the gazetteer's own records, whose id may change if its dataset is uploaded again: its name and dataset are kept in the notes.",
+  'representative-point-only': "The record could not be fetched, so only the gazetteer's representative point is offered, not the record's own geometry.",
+  // Refusals: nothing is recorded. ('geometry' and 'when' give their own reasons.)
+  'no-address': 'This place has no address (@id) in the dataset, so nothing can be recorded about it here. Give it one first.',
+  denied: 'The dataset already says this place and this record are different places. To change that, use Krisis.',
+  unavailable: "The record's source does not allow the gazetteer to pass it on, so nothing is copied: the record was consulted, not copied. You can draw the location yourself, citing the record as evidence.",
+  'no-geometry': "There is no geometry to adopt: choose one of the record's geometries.",
+  'no-record': 'This candidate has no address in the gazetteer, so it cannot be adopted.',
+};
 /**
  * A run refused because another tab of the main page holds the working files: the browser lets one
  * tab at a time hold them (src/engine/worker.js, sqlitePool), and its own words for that are not ours.

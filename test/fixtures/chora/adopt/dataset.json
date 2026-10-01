@@ -1,0 +1,36 @@
+{
+  "$schema": "https://w3id.org/plato/schemas/place-centric.schema.json",
+  "profile": "place-centric",
+  "gazetteer": {
+    "@id": "https://example.org/gazetteer/tyneside",
+    "title": "Tyneside places to locate (illustrative)",
+    "creator": [{ "name": "Ada Surveyor" }],
+    "version": "2026-10",
+    "status": "draft",
+    "licence": "https://creativecommons.org/licenses/by/4.0/"
+  },
+  "spatialEntities": [
+    {
+      "@id": "https://example.org/place/newcastle",
+      "label": "Newcastle upon Tyne",
+      "attestations": [
+        { "@id": "https://example.org/place/newcastle#a-names", "names": [{ "toponym": "Newcastle upon Tyne", "language": "en" }], "contributor": { "name": "Ada Surveyor" }, "created": "2026-09-01T09:00:00Z" }
+      ]
+    },
+    {
+      "@id": "https://example.org/place/novocastria",
+      "label": "Novocastria",
+      "attestations": [
+        { "@id": "https://example.org/place/novocastria#a-link", "identities": [{ "subject": "https://example.org/place/novocastria", "object": "https://whgazetteer.org/entity/place:gn:2641673/api", "identityType": "exactMatch" }], "contributor": { "name": "Ada Surveyor" }, "created": "2026-09-01T09:05:00Z" }
+      ]
+    },
+    {
+      "@id": "https://example.org/place/newcastle-nsw",
+      "label": "Newcastle",
+      "attestations": [
+        { "@id": "https://example.org/place/newcastle-nsw#a-not", "negated": true, "identities": [{ "subject": "https://example.org/place/newcastle-nsw", "object": "https://w3id.org/whg/id/place:gn:2155472", "identityType": "exactMatch" }], "contributor": { "name": "Ada Surveyor" }, "created": "2026-09-01T09:10:00Z" }
+      ]
+    },
+    { "label": "Newcastle (which?)" }
+  ]
+}

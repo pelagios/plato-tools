@@ -1,0 +1,11 @@
+{
+  "@id": "https://whgazetteer.org/entity/place:gn:2641673/api",
+  "type": "Feature",
+  "properties": { "title": "Newcastle upon Tyne", "ccodes": ["GB"] },
+  "geometry": {
+    "type": "Point",
+    "coordinates": [-1.613960123456, 54.97328],
+    "when": { "timespans": [{ "start": { "in": "1080" }, "end": { "latest": "2026" } }], "label": "from the castle onwards" }
+  },
+  "names": [{ "toponym": "Newcastle upon Tyne", "lang": "en" }]
+}
