@@ -1,0 +1,126 @@
+src/vendor/iso-entities.json: ISO entity sets, from the W3C
+
+src/vendor/iso-entities.json is derived from the W3C's "XML Entity Definitions for Characters", the files isolat1.ent, isolat2.ent, isogrk1.ent, isogrk2.ent, isogrk3.ent, isogrk4.ent, isocyr1.ent, isocyr2.ent, isodia.ent, isonum.ent, isopub.ent, isobox.ent, isotech.ent, isoamsa.ent, isoamsb.ent, isoamsc.ent, isoamsn.ent, isoamso.ent, isoamsr.ent, isomfrk.ent, isomopf.ent, isomscr.ent at https://www.w3.org/2003/entities/2007/. It was made by scripts/make-entities.mjs, which keeps each entity's name and the characters it stands for, and nothing else: the files' comments and parameter entities are left out, the character references are written as the characters themselves, and XML's own five entities (amp, lt, gt, apos, quot) are left out. The table was generated on 2026-10-01, and is generated again only by that script.
+
+Use and distribution of these files are permitted under the terms of either of two licences, the W3C Software Notice and License or the licence used for the WHATWG HTML specification; PLATO tools uses them under the first. The notices the files carry, verbatim:
+
+---- the notice in isolat1.ent, isolat2.ent, isogrk1.ent, isogrk2.ent, isocyr1.ent, isocyr2.ent, isodia.ent, isonum.ent, isopub.ent, isobox.ent ----
+
+     Copyright 1998 - 2011 W3C.
+
+     Use and distribution of this code are permitted under the terms of
+     either of the following two licences:
+
+     1) W3C Software Notice and License.
+        http://www.w3.org/Consortium/Legal/2002/copyright-software-20021231.html
+
+
+     2) The license used for the WHATWG HTML specification,
+        which states, in full:
+            You are granted a license to use, reproduce and create derivative
+            works of this document.
+
+ 
+     Please report any errors to David Carlisle
+     via the public W3C list www-math@w3.org.
+
+     The numeric character values assigned to each entity
+     (should) match the Unicode assignments in Unicode 5.x.
+
+     Entity names in this file are derived from files carrying the
+     following notice:
+
+     (C) International Organization for Standardization 1986
+     Permission to copy in any form is granted for use with
+     conforming SGML systems and applications as defined in
+     ISO 8879, provided this notice is included in all copies.
+
+---- the notice in isogrk3.ent, isogrk4.ent, isotech.ent, isoamsa.ent, isoamsc.ent, isoamso.ent, isomfrk.ent, isomopf.ent, isomscr.ent ----
+
+     Copyright 1998 - 2011 W3C.
+
+     Use and distribution of this code are permitted under the terms of
+     either of the following two licences:
+
+     1) W3C Software Notice and License.
+        http://www.w3.org/Consortium/Legal/2002/copyright-software-20021231.html
+
+
+     2) The license used for the WHATWG HTML specification,
+        which states, in full:
+            You are granted a license to use, reproduce and create derivative
+            works of this document.
+
+ 
+     Please report any errors to David Carlisle
+     via the public W3C list www-math@w3.org.
+
+     The numeric character values assigned to each entity
+     (should) match the Unicode assignments in Unicode 5.x.
+
+     Entity names in this file are derived from files carrying the
+     following notice:
+
+     (C) International Organization for Standardization 1991
+     Permission to copy in any form is granted for use with
+     conforming SGML systems and applications as defined in
+     ISO 8879, provided this notice is included in all copies.
+
+---- the notice in isoamsb.ent, isoamsn.ent, isoamsr.ent ----
+
+     Copyright 1998 - 2011 W3C.
+
+     Use and distribution of this code are permitted under the terms of
+     either of the following two licences:
+
+     1) W3C Software Notice and License.
+        http://www.w3.org/Consortium/Legal/2002/copyright-software-20021231.html
+
+
+     2) The license used for the WHATWG HTML specification,
+        which states, in full:
+            You are granted a license to use, reproduce and create derivative
+            works of this document.
+
+ 
+     Please report any errors to David Carlisle
+     via the public W3C list www-math@w3.org.
+
+     The numeric character values assigned to each entity
+     (should) match the Unicode assignments in Unicode 5.x.
+
+     References to the VARIANT SELECTOR 1 character (&#x0FE00;)
+     should match the uses listed in Unicode Technical Report 25.
+
+     Entity names in this file are derived from files carrying the
+     following notice:
+
+     (C) International Organization for Standardization 1991
+     Permission to copy in any form is granted for use with
+     conforming SGML systems and applications as defined in
+     ISO 8879, provided this notice is included in all copies.
+
+---- the licence those notices name (1) ----
+
+W3C Software Notice and License (2002 version)
+https://www.w3.org/copyright/software-license-2002/
+
+This work (and included software, documentation such as READMEs, or other related items) is being provided by the copyright holders under the following license.
+
+License
+
+By obtaining, using and/or copying this work, you (the licensee) agree that you have read, understood, and will comply with the following terms and conditions.
+
+Permission to copy, modify, and distribute this software and its documentation, with or without modification, for any purpose and without fee or royalty is hereby granted, provided that you include the following on ALL copies of the software and documentation or portions thereof, including modifications:
+
+- The full text of this NOTICE in a location viewable to users of the redistributed or derivative work.
+- Any pre-existing intellectual property disclaimers, notices, or terms and conditions. If none exist, the W3C Software Short Notice should be included (hypertext is preferred, text is permitted) within the body of any redistributed or derivative code.
+- Notice of any changes or modifications to the files, including the date changes were made. (We recommend you provide URIs to the location from which the code is derived.)
+
+Disclaimers
+
+THIS SOFTWARE AND DOCUMENTATION IS PROVIDED "AS IS," AND COPYRIGHT HOLDERS MAKE NO REPRESENTATIONS OR WARRANTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO, WARRANTIES OF MERCHANTABILITY OR FITNESS FOR ANY PARTICULAR PURPOSE OR THAT THE USE OF THE SOFTWARE OR DOCUMENTATION WILL NOT INFRINGE ANY THIRD PARTY PATENTS, COPYRIGHTS, TRADEMARKS OR OTHER RIGHTS.
+
+COPYRIGHT HOLDERS WILL NOT BE LIABLE FOR ANY DIRECT, INDIRECT, SPECIAL OR CONSEQUENTIAL DAMAGES ARISING OUT OF ANY USE OF THE SOFTWARE OR DOCUMENTATION.
+
+The name and trademarks of copyright holders may NOT be used in advertising or publicity pertaining to the software without specific, written prior permission. Title to copyright in this software and any associated documentation will at all times remain with copyright holders.
