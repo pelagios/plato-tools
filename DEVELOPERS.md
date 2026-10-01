@@ -1172,8 +1172,14 @@ publishes its state on `window.__chora` for tests.
   lookup per endpoint in a page or worker (`whgazetteer.org` with or without `www.`), and the first
   call's options stand: a later call's differing options are ignored with one `console.warn` each,
   but a later token replaces the token and `token: null` clears it (also `lookup.setToken(t)`,
-  `lookup.clearToken()`). A tool reads the token from its one keeper (`token` in `src/lib/permissions.js`)
-  and passes it, rather than keeping a copy of its own. What is held when: within a page or
+  `lookup.clearToken()`). A tool reads the token from its one keeper (`permissions.token` in
+  `src/lib/permissions.js`) and passes it, rather than keeping a copy of its own. On a page the
+  lookup's `fetch` is `permissions.fetch` (cat `gazetteer`): a `PermissionError` it throws (told by
+  `name === 'PermissionError'`, or by `retry === false` on any error a wrapper throws) is never
+  tried again. The job ends at once as a `GazetteerError` of kind `refused` whose `refusal` is the
+  PermissionError's `kind` (`never`, `undecided`, `reload`, …) and whose message is its words, token
+  cleaned; the lock and the queue are let go and the jobs behind it run. Its kind `network` (fetch
+  failing beneath the module) is no answer and keeps the retries, unless it says `retry: false`. What is held when: within a page or
   worker, the shared lookup's queue runs one request at a time, and a request's retries and the
   pauses between them finish before the next request in that page starts. Across tabs and workers,
   each TRY of a request is made holding the Web Lock `plato-tools:gazetteer:<site>`, which covers
@@ -1638,10 +1644,10 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   Cancel: the main page names the files chosen, a run in progress and the review decisions not yet
   saved; Chora a line or area still being drawn, an address typed in the paste box and a save running); `mount({ state })`
   for the header button and the canary; `keepWorkingData()`; `persistChoice()` and `choosePersist(on)`; and
-  `token`, the World Historical Gazetteer token's keeper (`get`, `set`, `forget`, `onChange`, the API
-  Krisis's own keeper had before it moved here, and `remember(on)`, `remembered()`: kept for the tab
-  unless the user chooses to remember it; the panel says which, and that only regenerating the token
-  in WHG revokes it).
+  `token`, the World Historical Gazetteer token's one keeper (`permissions.token`: `get`, `set`, `forget`,
+  `onChange`, the API Krisis's own keeper had before it moved here, and `remember(on)`, `remembered()`:
+  kept for the tab unless the user chooses to remember it; the panel says which, and that only
+  regenerating the token in WHG revokes it); there is no other.
 - **The Content Security Policy.** The first script in each page's `<head>` is the pure core, its
   `export`s removed, and `src/lib/csp-head.js`, put there inline by `scripts/vite-csp.mjs` at the
   page's `<!-- plato:csp -->` (a page without the mark fails the build). It writes, from the grants,

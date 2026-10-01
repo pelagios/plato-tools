@@ -47,6 +47,13 @@
 //   else a growing one; the lock is let go for the pause. 401, 403 and 451 are final at once: a
 //   token refused, a day's allowance spent or a source's terms will not change by asking again, and
 //   WHG blocks clients that keep asking.
+// - A request the page's permissions would not let go (the injected fetch threw a PermissionError,
+//   src/lib/permissions.js) is final at once too, and is not counted as no answer: the job ends with
+//   kind 'refused', the lock and the queue are let go, and the jobs behind it run as usual (each is
+//   refused in its turn while the permission stays as it is). Told by the error's `name ===
+//   'PermissionError'`, or by `retry === false` on any error a fetch wrapper throws; a PermissionError
+//   of kind 'network' (fetch failing beneath the module: the service was not reached) is no answer,
+//   and tried again, unless it says `retry: false`.
 // - An AbortSignal stops a lookup: its request in flight, its pause between tries or for the pacer,
 //   its wait for the lock, and its requests still waiting their turn.
 import {
@@ -76,17 +83,28 @@ const LOCK_PREFIX = 'plato-tools:gazetteer:';
  * - 'rate': still too many queries after waiting (429);
  * - 'unavailable': the source does not allow the record to be passed on (451; A10);
  * - 'network': no answer, or none within the timeout;
+ * - 'refused': not asked, for the page's permissions would not let the request go (a PermissionError
+ *   from fetch, or an error with `retry: false`); `refusal` is that error's `kind` ('never',
+ *   'undecided', 'reload', 'unprotected', 'address', 'moved', …), or null;
  * - 'server': any other refusal or failure, and an answer that could not be read.
  * `status` is the HTTP status, or null. It carries nothing else: no request, no headers, no cause.
  */
 export class GazetteerError extends Error {
-  constructor(message, { status = null, kind }) {
+  constructor(message, { status = null, kind, refusal }) {
     super(message);
     this.name = 'GazetteerError';
     this.status = status;
     this.kind = kind;
+    if (kind === 'refused') this.refusal = refusal ?? null;
   }
 }
+
+/**
+ * Is what fetch threw a refusal, never to be asked again (rather than no answer)? A PermissionError
+ * (src/lib/permissions.js; told by its name, so that this engine imports nothing of the page) other
+ * than its 'network', or any error that says `retry === false`.
+ */
+const isRefusal = (e) => e != null && (e.retry === false || (e.name === 'PermissionError' && e.kind !== 'network'));
 
 /**
  * A candidate for a query. NEVER accept one on `match` or `score` alone: `score` is relative within
@@ -243,8 +261,9 @@ const NOT_CONFIG = new Set(['endpoint', 'token', 'shared']);
  * - A later call with a token changes the token of the shared lookup, for every caller; `token: null`
  *   (or '') clears it, and requests go without Authorization from then on; an absent or undefined
  *   token leaves it. `lookup.setToken(t)` and `lookup.clearToken()` do the same. A tool should read
- *   the token from the one shared store (src/lib/whg-token.js) and pass it on each call, or on a
- *   change, rather than keep a copy of its own: two copies would take turns being sent.
+ *   the token from its one keeper (`permissions.token` in src/lib/permissions.js: token.get(), and
+ *   token.onChange for a change) and pass it on each call, or on a change, rather than keep a copy
+ *   of its own: two copies would take turns being sent.
  * - Every other option is the first call's: a later call's differing values (fetch, batchSize, rates,
  *   …) are ignored, as a second queue is what is to be avoided, and console.warn names each such
  *   option once per endpoint. A later call is still refused a blocked User-Agent, a missing endpoint,
@@ -253,7 +272,8 @@ const NOT_CONFIG = new Set(['endpoint', 'token', 'shared']);
  * @param {object} o
  * @param {string} o.endpoint  the service's address, e.g. WHG_ENDPOINT
  * @param {string|null} [o.token]  sent as `Authorization: Bearer`, and only so; null clears it
- * @param {typeof fetch} [o.fetch]
+ * @param {typeof fetch} [o.fetch]  on a page, permissions.fetch with cat 'gazetteer'; a PermissionError
+ *   it throws ends the request at once as kind 'refused' (above)
  * @param {number} [o.batchSize]  queries per request, 1 to 50 (default 25)
  * @param {boolean} [o.shared]  true (the default): the one lookup for this endpoint
  * @param {{request: Function}|null} [o.locks]  a Web Locks LockManager (default
@@ -459,6 +479,10 @@ function makeLookup({
     for (let tries = 0; ; tries++) {
       const { res, text, failed, timedOut } = await attempt(request, tok, signal);
       if (failed !== undefined) {
+        if (isRefusal(failed)) {
+          const said = clip(scrub(String(failed.message ?? '').replace(/\s+/g, ' ').trim(), tok));
+          throw new GazetteerError(`The gazetteer was not asked${said ? ': ' + said : '.'}`, { kind: 'refused', refusal: typeof failed.kind === 'string' ? failed.kind : null });
+        }
         if (tries < maxRetries) { await sleep(backoff(tries, 1000), signal); continue; }
         const why = timedOut ? ` within ${perTry / 1000} seconds` : failed?.message ? ` (${scrub(failed.message, tok)})` : '';
         throw new GazetteerError(`The gazetteer could not be reached${why}.`, { kind: 'network' });

@@ -1263,3 +1263,150 @@ test('the lock is held for each try, not across the pause between tries: another
   assert.equal(heldInFetch, 3, 'every request, the retry too, was made holding the lock');
   assert.equal(locks.heldNow, 0);
 });
+
+// ---- A request the permissions module would not make ----
+//
+// The page gives the lookup permissions.fetch (or a wrapper of it) as its `fetch`. A PermissionError
+// from it is a refusal, not a failure to reach the service: asking again cannot change it. Each check
+// below is beside its control: an ordinary network failure, through the same lookup, is still retried.
+
+/** An error shaped as src/lib/permissions.js throws it, without importing the module. */
+const refusal = (kind, message = `Not allowed (${kind}).`) => Object.assign(new Error(message), { name: 'PermissionError', kind });
+
+test('a PermissionError from fetch is not retried: the job ends at once as kind refused, keeping its kind, token cleaned', async () => {
+  let slept = 0;
+  const sleep = () => { slept++; return Promise.resolve(); };
+  const s = service({ answer: () => { throw refusal('never', `World Historical Gazetteer is set to Never (${TOKEN}).`); } });
+  const look = lookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: s.fetch, maxRetries: 5, sleep });
+  const err = await look.reconcile([{ query: 'a' }]).catch((e) => e);
+  assert.ok(err instanceof GazetteerError, String(err));
+  assert.equal(err.kind, 'refused');
+  assert.equal(err.refusal, 'never', "the PermissionError's kind is kept");
+  assert.equal(err.status, null);
+  assert.equal(s.calls.length, 1, 'asked once, never again');
+  assert.equal(slept, 0, 'no pause for a retry');
+  assert.equal(s.calls[0].headers.Authorization, `Bearer ${TOKEN}`, 'the token was there to be leaked');
+  assert.match(err.message, /set to Never \(\[token\]\)/);
+  assert.ok(!err.message.includes(TOKEN), err.message);
+  assert.ok(!('cause' in err), 'nothing of the PermissionError is carried but its kind and words');
+
+  // Control: an ordinary network failure through the same kind of lookup is still tried again.
+  const down = service({ answer: () => { throw new TypeError('fetch failed'); } });
+  slept = 0;
+  const e2 = await lookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: down.fetch, maxRetries: 5, sleep }).reconcile([{ query: 'a' }]).catch((e) => e);
+  assert.equal(e2.kind, 'network');
+  assert.equal(down.calls.length, 6);
+  assert.equal(slept, 5);
+});
+
+test("err.retry === false is a refusal too, whatever its name; a PermissionError of kind 'network' is retried as no answer", async () => {
+  const noRetry = service({ answer: () => { throw Object.assign(new Error('Blocked here.'), { retry: false, kind: 'blocked' }); } });
+  const e1 = await lookup({ endpoint: WHG_ENDPOINT, fetch: noRetry.fetch, maxRetries: 3, sleep: noSleep }).reconcile([{ query: 'a' }]).catch((e) => e);
+  assert.equal(e1.kind, 'refused');
+  assert.equal(e1.refusal, 'blocked');
+  assert.equal(noRetry.calls.length, 1);
+  // The module's 'network' is fetch failing beneath it: the service was not reached, which may change.
+  const unreached = service({ answer: () => { throw refusal('network', 'whgazetteer.org could not be reached.'); } });
+  const e2 = await lookup({ endpoint: WHG_ENDPOINT, fetch: unreached.fetch, maxRetries: 3, sleep: noSleep }).reconcile([{ query: 'a' }]).catch((e) => e);
+  assert.equal(e2.kind, 'network');
+  assert.equal(unreached.calls.length, 4);
+  // ...unless it says itself that it is not to be retried.
+  const final = service({ answer: () => { throw Object.assign(refusal('network'), { retry: false }); } });
+  const e3 = await lookup({ endpoint: WHG_ENDPOINT, fetch: final.fetch, maxRetries: 3, sleep: noSleep }).reconcile([{ query: 'a' }]).catch((e) => e);
+  assert.equal(e3.kind, 'refused');
+  assert.equal(final.calls.length, 1);
+});
+
+test('reconcile, extend, entity and manifest: each ends at once on a refusal, and the job queued behind it runs', async () => {
+  const paths = {
+    reconcile: (l) => l.reconcile([{ query: 'a' }]),
+    extend: (l) => l.extend(['place:gn:1'], ['whg:countries_codes']),
+    entity: (l) => l.entity('place:whg:1'),
+    manifest: (l) => l.manifest(),
+  };
+  for (const [name, call] of Object.entries(paths)) {
+    let n = 0;
+    // The first request is refused; every later one is answered.
+    const s = service({ answer: (sent, c) => {
+      if (++n === 1) throw refusal('undecided');
+      return c.init.method === 'GET' && c.url === WHG_ENDPOINT ? reply(200, { name: 'WHG' }) : echo(sent, c);
+    } });
+    const look = lookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: s.fetch, maxRetries: 5, sleep: noSleep });
+    // Queued together: the second waits its turn behind the first.
+    const [first, second] = await Promise.allSettled([call(look), look.reconcile([{ query: 'next' }])]);
+    assert.equal(first.status, 'rejected', name);
+    assert.equal(first.reason.kind, 'refused', `${name}: ${first.reason}`);
+    assert.equal(first.reason.refusal, 'undecided', name);
+    assert.equal(second.status, 'fulfilled', `${name}: the queued job ran (${second.reason})`);
+    assert.equal(second.value[0][0].name, 'next', name);
+    assert.equal(s.calls.length, 2, `${name}: one refused request, one answered`);
+  }
+});
+
+test('a refusal lets the lock go (fake LockManager): the next lookup on the site runs; control: retries hold it per try', { timeout: 5000 }, async () => {
+  const locks = fakeLocks();
+  const s = service({ answer: () => { throw refusal('reload'); } });
+  const err = await lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch, locks, sleep: noSleep }).reconcile(names(1)).catch((e) => e);
+  assert.equal(err.kind, 'refused');
+  assert.equal(err.refusal, 'reload');
+  assert.equal(locks.requests.length, 1, 'one try, under the lock');
+  assert.equal(locks.heldNow, 0, 'let go');
+  assert.equal(locks.waiting, 0);
+  const good = service();
+  const r = await Promise.race([lookup({ endpoint: WHG_ENDPOINT, fetch: good.fetch, locks }).reconcile(names(1)), wait(1000).then(() => 'HUNG')]);
+  assert.notEqual(r, 'HUNG');
+  assert.equal(good.calls.length, 1);
+  // Control: a network failure takes the lock once for each try.
+  const before = locks.requests.length;
+  const down = service({ answer: () => { throw new TypeError('fetch failed'); } });
+  await lookup({ endpoint: WHG_ENDPOINT, fetch: down.fetch, locks, sleep: noSleep, maxRetries: 2 }).reconcile(names(1)).catch(() => {});
+  assert.equal(locks.requests.length - before, 3);
+  assert.equal(locks.heldNow, 0);
+});
+
+test('a refusal lets the real navigator.locks go, and a following job on the site runs', { timeout: 5000 }, async (t) => {
+  if (!globalThis.navigator?.locks) return t.skip('no navigator.locks here');
+  const endpoint = 'https://refused-lock.example/reconcile', NAME = 'plato-tools:gazetteer:refused-lock.example';
+  let heldInFetch = null;
+  const s = service({ answer: async () => { heldInFetch = (await navigator.locks.query()).held.some((l) => l.name === NAME); throw refusal('unprotected'); } });
+  const look = createLookup({ endpoint, fetch: s.fetch, shared: false, maxRetries: 5 }); // real sleep: a retry would take seconds
+  const started = Date.now();
+  const err = await look.reconcile(names(1)).catch((e) => e);
+  assert.equal(err.kind, 'refused');
+  assert.equal(err.refusal, 'unprotected');
+  assert.ok(Date.now() - started < 500, 'no pause before giving up');
+  assert.equal(heldInFetch, true, 'held while asked');
+  const { held, pending } = await navigator.locks.query();
+  assert.ok(!held.some((l) => l.name === NAME) && !pending.some((l) => l.name === NAME), 'not held, not waited for');
+  const good = service();
+  const r = await Promise.race([createLookup({ endpoint, fetch: good.fetch, shared: false }).reconcile(names(1)).then(() => 'ran'), wait(1000).then(() => 'HUNG')]);
+  assert.equal(r, 'ran');
+});
+
+test("the real permissions.fetch, undecided, as the lookup's fetch: refused once, kind kept, nothing sent", async () => {
+  const permissions = await import('../src/lib/permissions.js');
+  const sent = [];
+  permissions.configure({ fetch: async (u) => { sent.push(u); return new Response('{}'); }, enforced: async () => true });
+  const fetch = (url, init) => permissions.fetch(url, { cat: 'gazetteer', subj: 'whg', ...init });
+  let tried = 0;
+  const counted = (u, i) => { tried++; return fetch(u, i); };
+  const err = await lookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: counted, sleep: noSleep }).reconcile([{ query: 'a' }]).catch((e) => e);
+  assert.equal(permissions.state('gazetteer', 'whg'), 'undecided', 'the module saw no grant');
+  assert.equal(err.kind, 'refused', String(err));
+  assert.equal(err.refusal, 'undecided');
+  assert.equal(tried, 1);
+  assert.equal(sent.length, 0, 'nothing reached the network');
+});
+
+test('the WHG token is kept by permissions.token: no file names src/lib/whg-token.js, which does not exist', async () => {
+  const { readFileSync, readdirSync, existsSync } = await import('node:fs');
+  const root = new URL('../', import.meta.url);
+  assert.ok(!existsSync(new URL('src/lib/whg-token.js', root)));
+  const files = ['DEVELOPERS.md', 'README.md', ...readdirSync(new URL('src/', root), { recursive: true }).filter((f) => /\.(js|mjs|html)$/.test(f)).map((f) => 'src/' + f)];
+  const texts = files.map((f) => [f, readFileSync(new URL(f, root), 'utf8')]);
+  // Control: the search sees the files, and the storage key, which keeps its name, is found.
+  assert.ok(texts.some(([f, t]) => f === 'src/lib/permissions.js' && t.includes("'plato-tools.whg-token'")));
+  assert.deepEqual(texts.filter(([, t]) => t.includes('whg-token.js')).map(([f]) => f), []);
+  const index = texts.find(([f]) => f === 'src/engine/gazetteer/index.js')[1];
+  assert.match(index, /permissions\.token|`token` in src\/lib\/permissions\.js/);
+});
