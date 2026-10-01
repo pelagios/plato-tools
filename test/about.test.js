@@ -3,8 +3,8 @@ import { PLATO_REPO } from './paths.js';
 // temporal, landingPage and uriSpace, and the tables' about sheet, one row that becomes the header.
 // The about sheet's base_uri is the base the places' and sources' addresses are made from, unless a
 // base is given for the conversion. rdf-tabular (strict, serialize --validate) rejected a missing
-// title, status 'Published', a creator written as a name and a three-digit temporal_from on
-// 2026-09-30 (test/tables.test.js holds those), and accepted zero rows, two rows and a published row
+// title, status 'Published' and a three-digit temporal_from on 2026-09-30, and three broken creator
+// cells for PLATO 8385472 (test/tables.test.js holds those), and accepted zero rows, two rows and a published row
 // without a licence, which CSVW cannot state: PLATO tools checks those (checkAboutRules).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -26,7 +26,7 @@ const customsWith = (rows) => readdirSync(CUSTOMS).filter((f) => f !== 'about.cs
 // ---- a full about row -> the header, and back ----------------------------------------------------
 const FULL = {
   title: 'Customs, described in full', description: 'Every column of the about sheet, filled in.',
-  creator: 'https://orcid.org/0000-0003-3060-0181;https://ror.org/052gg0110', creator_name: 'Anne Annotator;Bea Builder',
+  creator: 'Stephen Gadd <https://orcid.org/0000-0003-3060-0181>;https://ror.org/052gg0110;Anne Annotator;Bea Builder', creator_name: '',
   contributor: 'https://orcid.org/0000-0002-1825-0097', licence: 'https://creativecommons.org/licenses/by/4.0/', version: '1.2',
   status: 'published', keywords: 'customs accounts;ports', spatial: 'http://www.wikidata.org/entity/Q21;http://www.wikidata.org/entity/Q145',
   temporal_from: '1480', temporal_to: '1485-09-29', landing_page: 'https://example.org/customs/about',
@@ -34,7 +34,7 @@ const FULL = {
 };
 const FULL_GAZETTEER = {
   '@id': 'https://example.org/customs/dataset', title: FULL.title, description: FULL.description, contributor: FULL.contributor,
-  creator: [{ '@id': 'https://orcid.org/0000-0003-3060-0181' }, { '@id': 'https://ror.org/052gg0110' }, { name: 'Anne Annotator' }, { name: 'Bea Builder' }],
+  creator: [{ '@id': 'https://orcid.org/0000-0003-3060-0181', name: 'Stephen Gadd' }, { '@id': 'https://ror.org/052gg0110' }, { name: 'Anne Annotator' }, { name: 'Bea Builder' }],
   licence: FULL.licence, version: '1.2', status: 'published', keywords: ['customs accounts', 'ports'],
   spatial: ['http://www.wikidata.org/entity/Q21', 'http://www.wikidata.org/entity/Q145'],
   temporal: { startDate: '1480', endDate: '1485-09-29' }, landingPage: FULL.landing_page, uriSpace: 'https://example.org/customs/',
@@ -60,14 +60,41 @@ test('about: tables -> JSON -> tables gives back the same about row, and reports
   // The places were made under base_uri, and are written back under it: no address is lost.
   assert.ok(!items(b, 'loss').some((i) => i.kind === 'place-address' || i.kind === 'source-address'), JSON.stringify(items(b, 'loss')));
 });
-test('about: an author with both an address and a name keeps the address, and the name is reported', async () => {
-  const doc = { profile: 'place-centric', gazetteer: { title: 't', creator: [{ '@id': 'https://orcid.org/0000-0003-3060-0181', name: 'Stephen Gadd' }, { name: 'Anne Annotator' }] },
+// The creator cell (PLATO 8385472): 'Name <address>', an address alone or a name alone, ';'-separated;
+// creator_name, for names alone, is deprecated but still read, and warned of.
+test('about: the creator cell pairs a name and its address, and takes either alone; items are trimmed', async () => {
+  const row = { ...FULL, creator: ' Josiah  Carberry <https://orcid.org/0000-0002-1825-0097>; https://ror.org/052gg0110;Anne Annotator ' };
+  // A space after the closing bracket is outside the column's pattern (rdf-tabular does not trim), so is not tried.
+  const r = await go(customsWith(Papa.unparse({ fields: HEADER.split(','), data: [HEADER.split(',').map((h) => row[h])] }, { newline: '\n' }).split('\n')[1]), 'convert', 'plato-jsonl');
+  assert.deepEqual(errors(r), []);
+  assert.deepEqual(warnings(r), []);
+  assert.deepEqual(records(r)[0].gazetteer.creator, [{ '@id': 'https://orcid.org/0000-0002-1825-0097', name: 'Josiah  Carberry' }, { '@id': 'https://ror.org/052gg0110' }, { name: 'Anne Annotator' }]);
+});
+test('about: creator_name is still read, after creator, and is warned of as deprecated, not an error', async () => {
+  const row = { ...FULL, creator: 'Stephen Gadd <https://orcid.org/0000-0003-3060-0181>', creator_name: 'Anne Annotator;Bea Builder' };
+  const r = await go(customsWith(Papa.unparse({ fields: HEADER.split(','), data: [HEADER.split(',').map((h) => row[h])] }, { newline: '\n' }).split('\n')[1]), 'convert', 'plato-jsonl');
+  assert.deepEqual(errors(r), []);
+  assert.deepEqual(records(r)[0].gazetteer.creator, [{ '@id': 'https://orcid.org/0000-0003-3060-0181', name: 'Stephen Gadd' }, { name: 'Anne Annotator' }, { name: 'Bea Builder' }]);
+  assert.deepEqual(tableItems(r, 'warning'), ["about.csv, column creator_name: is deprecated, and is to be withdrawn in a later release of PLATO: write these names in creator instead, which takes a name alone, or a name with its web address as 'Name <address>'"]);
+  assert.deepEqual(warnings(r)[0].examples, ['about.csv row 2 creator_name: gives Anne Annotator;Bea Builder: write these names in creator instead']);
+  // Written back, every author goes in creator, and creator_name is left empty.
+  const a = await go(customsWith(Papa.unparse({ fields: HEADER.split(','), data: [HEADER.split(',').map((h) => row[h])] }, { newline: '\n' }).split('\n')[1]), 'convert', 'plato-json');
+  const b = await go([textFile(outText(a.e, Object.keys(a.e.outs)[0]), 'c.json')], 'convert', 'tables');
+  const [back] = Papa.parse(strFromU8(unzipSync(b.e.outs['c-tables.zip'][0])['about.csv']), { header: true, skipEmptyLines: true }).data;
+  assert.deepEqual([back.creator, back.creator_name], ['Stephen Gadd <https://orcid.org/0000-0003-3060-0181>;Anne Annotator;Bea Builder', '']);
+  // The control: the same row with its names in creator warns of nothing.
+  const now = await go(customsWith(Papa.unparse({ fields: HEADER.split(','), data: [HEADER.split(',').map((h) => ({ ...row, creator: back.creator, creator_name: '' })[h])] }, { newline: '\n' }).split('\n')[1]), 'check');
+  assert.deepEqual([errors(now), warnings(now)], [[], []]);
+});
+test('about: an author with both an address and a name is written as Name <address>; a name the cell cannot hold is reported', async () => {
+  const doc = { profile: 'place-centric', gazetteer: { title: 't', creator: [{ '@id': 'https://orcid.org/0000-0003-3060-0181', name: 'Stephen Gadd' }, { name: 'Anne Annotator' },
+    { '@id': 'https://ror.org/052gg0110', name: 'An <odd> institute' }, { name: 'x;y' }] },
     spatialEntities: [{ '@id': 'https://example.org/my-dataset/place/p', label: 'P', attestations: [{ names: [{ toponym: 'P' }], sources: ['https://example.org/my-dataset/source/s'] }] }] };
   const r = await go([textFile(JSON.stringify(doc), 'a.json')], 'convert', 'tables');
   const [row] = Papa.parse(strFromU8(unzipSync(r.e.outs['a-tables.zip'][0])['about.csv']), { header: true }).data;
-  assert.deepEqual([row.creator, row.creator_name], ['https://orcid.org/0000-0003-3060-0181', 'Anne Annotator']);
-  const l = items(r, 'loss').find((i) => i.kind === 'creator-name');
-  assert.deepEqual(l?.examples, ['https://orcid.org/0000-0003-3060-0181: Stephen Gadd']);
+  assert.deepEqual([row.creator, row.creator_name], ['Stephen Gadd <https://orcid.org/0000-0003-3060-0181>;Anne Annotator;https://ror.org/052gg0110', '']);
+  assert.deepEqual(items(r, 'loss').find((i) => i.kind === 'creator-name')?.examples, ['https://ror.org/052gg0110: An <odd> institute']);
+  assert.deepEqual(items(r, 'loss').find((i) => i.kind === 'about-value')?.examples, ['creator: {"name":"x;y"}']);
   // A value its column cannot hold is left out and reported, never written into the wrong column.
   const odd = { ...doc, gazetteer: { title: 't', contributor: 'Anne Annotator', keywords: ['ports', 'a;b'] } };
   const o = await go([textFile(JSON.stringify(odd), 'o.json')], 'convert', 'tables');

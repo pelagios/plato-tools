@@ -197,16 +197,45 @@ const withSlash = (b) => (b.endsWith('/') || b.endsWith('#') ? b : b + '/');
 // it is exported from here too, for the modules that have always imported it from the tables.
 export { encodeId };
 
+// One author in the about sheet's creator cell, as PLATO's csv-metadata.json defines it: a name and its
+// address in angle brackets ('Josiah Carberry <https://orcid.org/0000-0002-1825-0097>'), an address
+// alone, or a name alone. An address is what the anyURI check takes: a scheme, ':' and no space.
+const IRI_SHAPE = /^[A-Za-z][A-Za-z0-9+.-]*:[^<>\s]+$/;
+const PAIRED = /^([^<>;]*[^<>;\s])\s+<([A-Za-z][A-Za-z0-9+.-]*:[^<>\s]+)>$/;
+export function creatorOf(item) {
+  const m = item.match(PAIRED);
+  if (m) return { '@id': m[2], name: m[1].trim() };
+  return IRI_SHAPE.test(item) ? { '@id': item } : { name: item };
+}
+/**
+ * A creator object as one item of the creator cell (creatorOf's inverse), or null if the cell cannot
+ * hold it. An item is written only if the column takes it and it reads back as the same author; an
+ * author whose name cannot be written (with '<', '>' or ';' in it) keeps the address (nameLost).
+ */
+function creatorItem(c, accepts) {
+  const given = (v) => v !== undefined && v !== null;
+  if (given(c['@id']) && typeof c['@id'] !== 'string') return null;
+  const id = given(c['@id']) ? c['@id'] : undefined;
+  const name = typeof c.name === 'string' && c.name.trim() !== '' && c.name === c.name.trim() ? c.name : undefined;
+  const back = (v, want) => !v.includes(';') && !v.includes('\n') && accepts('about', 'creator', v)
+    && JSON.stringify(creatorOf(v)) === JSON.stringify(want);
+  if (id !== undefined && name !== undefined && back(`${name} <${id}>`, { '@id': id, name })) return { item: `${name} <${id}>` };
+  if (id !== undefined && back(id, { '@id': id })) return { item: id, nameLost: given(c.name) };
+  if (id === undefined && name !== undefined && back(name, { name })) return { item: name };
+  return null;
+}
+
 /**
  * The about row -> the document's gazetteer. `base` is the address the places and sources are made
  * under; it is the gazetteer's own address when the row gives no dataset_uri, as before the sheet.
- * Addresses in creator become {"@id"} and names in creator_name {"name"}: the tables hold each author
- * as one or the other, since a cell cannot pair them.
+ * Each author in creator becomes a creator object (creatorOf): 'Name <address>' both, an address alone
+ * {"@id"}, a name alone {"name"}. Names in creator_name (deprecated since PLATO 8385472, and warned of by
+ * checkAboutRules) are still read, as {"name"}, after creator's.
  */
 export function aboutToGazetteer(row, base, fallbackTitle) {
   return clean({
     '@id': row.dataset_uri || withSlash(base), title: row.title || fallbackTitle, description: row.description, contributor: row.contributor,
-    creator: [...parts(row.creator).map((id) => ({ '@id': id })), ...parts(row.creator_name).map((name) => ({ name }))],
+    creator: [...parts(row.creator).map(creatorOf), ...parts(row.creator_name).map((name) => ({ name }))],
     licence: row.licence, version: row.version, status: row.status,
     keywords: parts(row.keywords), spatial: parts(row.spatial),
     temporal: row.temporal_from || row.temporal_to ? clean({ startDate: row.temporal_from, endDate: row.temporal_to }) : undefined,
@@ -227,6 +256,8 @@ export function checkAboutRules(rows, { issue, warn }, { base } = {}) {
   const r = rows[0];
   if (!r.licence && r.status === 'published') issue({ table: 'about.csv', row: 1, column: 'licence', message: "is empty, but status is 'published': a published dataset must state its licence" });
   else if (!r.licence) warn({ table: 'about.csv', row: 1, column: 'licence', message: "is empty: say under what licence others may reuse the dataset (it is required once status is 'published')" });
+  if (r.creator_name) warn({ table: 'about.csv', row: 1, column: 'creator_name', message: "is deprecated, and is to be withdrawn in a later release of PLATO: write these names in creator instead, which takes a name alone, or a name with its web address as 'Name <address>'",
+    detail: `gives ${r.creator_name}: write ${parts(r.creator_name).length === 1 ? 'this name' : 'these names'} in creator instead` });
   if (!r.base_uri) warn({ table: 'about.csv', row: 1, column: 'base_uri', message: base
     ? 'is empty, so the addresses of places and sources are made from the base given for this conversion, which the tables do not record: they will not be permanent unless the same base is given every time; give it as base_uri'
     : 'is empty, so the addresses of places and sources are made from a stand-in base and will not be permanent: give a base address you control' });
@@ -237,8 +268,9 @@ export function checkAboutRules(rows, { issue, warn }, { base } = {}) {
 /**
  * The document's gazetteer -> the about row (aboutToGazetteer's inverse). A value its column cannot
  * hold (a contributor named in words, a list item containing ';') is left out and reported, and so
- * is every key the sheet has no column for (dropKeys). An author with both an address and a name
- * keeps the address, as the creator column holds one or the other.
+ * is every key the sheet has no column for (dropKeys). Every author goes in creator, as 'Name <address>',
+ * an address or a name (creatorItem); creator_name, deprecated, is left empty. An author whose name the
+ * cell cannot hold (it has '<', '>' or ';') keeps the address, and the name is reported (creator-name).
  */
 export function gazetteerToAbout(g, loss = () => {}, accepts = () => true) {
   g = g && typeof g === 'object' && !Array.isArray(g) ? g : {};
@@ -251,20 +283,19 @@ export function gazetteerToAbout(g, loss = () => {}, accepts = () => true) {
   };
   const column = (key, col, vs) => (Array.isArray(vs) ? vs : vs === undefined || vs === null ? [] : [vs])
     .filter((v) => { const ok = typeof v === 'string' && v.trim() !== '' && !v.includes(';') && v === v.trim() && accepts('about', col, v); if (!ok && v !== null && v !== undefined) bad(key, v); return ok; }).join(';');
-  const addresses = [], names = [];
+  const authors = [];
   for (const c of Array.isArray(g.creator) ? g.creator : g.creator === undefined || g.creator === null ? [] : [g.creator]) {
-    if (c && typeof c === 'object' && typeof c['@id'] === 'string') {
-      addresses.push(c['@id']);
-      if (c.name !== undefined && c.name !== null) loss({ kind: 'creator-name', value: `${c['@id']}: ${c.name}` });
-    } else if (c && typeof c === 'object' && typeof c.name === 'string') names.push(c.name);
-    else bad('creator', c);
+    const w = c && typeof c === 'object' && !Array.isArray(c) ? creatorItem(c, accepts) : null;
+    if (!w) { bad('creator', c); continue; }
+    authors.push(w.item);
+    if (w.nameLost) loss({ kind: 'creator-name', value: `${c['@id']}: ${typeof c.name === 'string' ? c.name : JSON.stringify(c.name)}` });
   }
   const t = g.temporal && typeof g.temporal === 'object' ? g.temporal : {};
   if (g.temporal !== undefined && g.temporal !== null && typeof g.temporal !== 'object') bad('temporal', g.temporal);
   dropKeys(t, 'temporal', new Set(['startDate', 'endDate']), loss);
   return {
     title: cell('title', 'title', g.title), description: cell('description', 'description', g.description),
-    creator: column('creator', 'creator', addresses), creator_name: column('creator', 'creator_name', names),
+    creator: authors.join(';'), creator_name: '',
     contributor: cell('contributor', 'contributor', g.contributor), licence: cell('licence', 'licence', g.licence),
     version: cell('version', 'version', g.version), status: cell('status', 'status', g.status),
     keywords: column('keywords', 'keywords', g.keywords), spatial: column('spatial', 'spatial', g.spatial),

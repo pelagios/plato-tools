@@ -71,11 +71,22 @@ Object.assign(controls, {
 // The about sheet (PLATO's FAIR metadata). rdf-tabular (strict, serialize --validate) rejected each of
 // these on 2026-09-30, and accepted zero rows, two rows and a published row without a licence, which
 // CSVW cannot state and PLATO tools checks beside it (checkAboutRules, test/about.test.js).
+// Since PLATO 8385472 a creator may be a name alone, so 'Stephen Gadd' is no longer a broken cell; the
+// creator cell's own broken forms are the three rdf-tabular rejected for that commit: a name with
+// something not an address in brackets, an address in brackets with no name, and an unclosed bracket.
 Object.assign(controls, {
   'about without a title': () => mutate(survey(), 'about', (r) => { r[0].title = ''; }),
   'about status Published': () => mutate(survey(), 'about', (r) => { r[0].status = 'Published'; }),
-  'about creator written as a name': () => mutate(survey(), 'about', (r) => { r[0].creator = 'Stephen Gadd'; }),
+  'about creator with a name and something not an address in brackets': () => mutate(survey(), 'about', (r) => { r[0].creator = 'Stephen Gadd <not an address>'; }),
+  'about creator with an address in brackets and no name': () => mutate(survey(), 'about', (r) => { r[0].creator = '<https://orcid.org/0000-0003-3060-0181>'; }),
+  'about creator with an unclosed bracket': () => mutate(survey(), 'about', (r) => { r[0].creator = 'Stephen Gadd <https://orcid.org/0000-0003-3060-0181'; }),
   'about temporal_from of three digits': () => mutate(survey(), 'about', (r) => { r[0].temporal_from = '921'; }),
+});
+test('the about sheet\'s creator takes a name with its address, an address alone and a name alone, several at once', async () => {
+  for (const creator of ['Stephen Gadd', 'https://orcid.org/0000-0003-3060-0181', 'Stephen Gadd <https://orcid.org/0000-0003-3060-0181>',
+    'Stephen Gadd <https://orcid.org/0000-0003-3060-0181>;Anne Annotator; https://ror.org/052gg0110']) {
+    assert.deepEqual(await validate(mutate(survey(), 'about', (r) => { r[0].creator = creator; })), [], creator);
+  }
 });
 test('the about rules CSVW cannot state are not CSVW errors: zero rows, two rows, published without a licence', async () => {
   const t = survey();

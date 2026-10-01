@@ -41,7 +41,7 @@ export const LOSS_TEXT = {
   retracted: 'An attestation that has been withdrawn (plato:Retracts) is left out: this file shows only the current state, and written here the withdrawn claim would read as current.',
   superseded: 'An attestation that has been replaced by a later one (plato:Supersedes) is left out: this file shows only the current state, of which the replaced claim is no longer part.',
   'about-value': "A value of the gazetteer is not in the form its column in the about sheet takes (a web address, 'draft' or 'published', a date of at least four digits, or a list item without ';'), so it is left out; the example names the key and the value.",
-  'creator-name': "An author given with both a web address and a name keeps only the address: the about sheet's creator column holds addresses, and creator_name the names of authors who have none.",
+  'creator-name': "An author's name that the about sheet's creator column cannot hold (it contains '<', '>' or ';', or is not text) is left out, and the author's web address is kept.",
   'gazetteer-version': "The gazetteer's version and status (version, status, isVersionOf, previousVersion) have no place here and are dropped, so this file does not say which state of the gazetteer it holds.",
   'figure-literal': 'A coordinate or attribute of a statistical figure whose datatype PLATO JSON cannot carry (a year typed xsd:gYear, a language tag) keeps its text; the datatype is dropped.',
   'figure-blank-value': 'A coordinate or attribute of a statistical figure that is a node with no web address cannot be written in PLATO JSON, which needs a code or a literal, and is dropped.',
