@@ -21,6 +21,22 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   is a file opened with Node's built-in SQLite (`src/node/sqlite.js`, which gives it the few calls
   the store makes of SQLite in the browser). [spike/](spike/README.md) records how the any-size
   claim was established, on DEEP's 24.8 million triples.
+- **The spreadsheet tables stream** (`tablesSource` in `pipeline.js`). Each sheet is read a row at a
+  time (`csvRecords` in `src/formats/csv.js`, shared with Hermes) into a working database
+  (`TableStore` in `src/lib/store.js`): one row of cells to a row, with the key it is looked up by.
+  The validator (`validateTables`, unchanged) scans it, and keeps the keys it has seen in it
+  (`INSERT OR IGNORE … RETURNING 1`); then each place is read back with its attestations and
+  identities in one join, in the places sheet's order, which SQLite gives without sorting. A zip is
+  read from its central directory, entry by entry (`zipEntries`, `zipEntryText` in `input.js`),
+  never by scanning for where an entry ends. Each row is still the object `Papa.parse(text,
+  { header: true })` made of it when the sheets were read whole (`papaRow`, `papaFirstRow`: a
+  repeated heading renamed `b_1`, a cell past the header under `__parsed_extra`), so streaming
+  changed nothing a conversion writes. A sheet whose text stops it (not UTF-8, a quotation mark out
+  of place, a damaged entry) is an error naming that sheet and the line of the file it stopped at;
+  the other sheets are still checked, and the run is incomplete. A table issue's "row N" is a row of
+  the sheet, the header being row 1 and blank rows not counted; a "line N" is a line of the file.
+  The working database is about 1.1 times the size of the tables' text, and its join needs no
+  temporary space (1 million places, 6 million rows: a database of 1.3 GB).
 - **The other formats** are in `src/formats/`: `tables.js`, `lpf.js`, `annotations.js`, `cube.js`,
   and `shared.js` for the rules the lossy writers share (denials, the current state, computed
   values, figures, bundled identities).
@@ -28,8 +44,8 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   `src/engine/input.js`; `run()` turns it into a problem in the report, marked incomplete. A new
   reader must throw `DataError` for bad input, or a fault in the data will look like a fault in
   the tools, which is the only thing shown as one.
-- **Text is UTF-8, strictly.** Every text input is decoded by `textStream` (or `decodeUtf8`, for the
-  tables' sheets) with a fatal decoder: a byte that is not UTF-8 is a `DataError` naming the file,
+- **Text is UTF-8, strictly.** Every text input is decoded by `textStream` (or, for a sheet in a
+  zip, `zipEntryText`) with a fatal decoder: a byte that is not UTF-8 is a `DataError` naming the file,
   the line and the byte, and saying how to save it as UTF-8, never a replacement character. A
   byte-order mark is dropped. Detection alone (`head`) decodes leniently, so that such a file is
   still recognised and its reader can say what is wrong.
@@ -702,8 +718,9 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
 
 - **Private windows** keep the browser's file storage in memory and allow it very little, so large
   files fail there. The page warns when the storage allowance looks too small.
-- **Spreadsheet tables** are read into memory, which suits them: a spreadsheet holds at most about a
-  million rows per sheet. The JSON, JSON Lines, LPF and RDF routes stream at any size.
+- **A workbook** (.xlsx, .ods) is read whole, one sheet at a time, since SheetJS cannot stream one; a
+  workbook over 50 MB is warned of. CSV files, and a zip of them, stream at any size, as the JSON,
+  JSON Lines, LPF and RDF routes do.
 - **A document's header comes first.** `dataSets` or `relationTypes` written after the records are
   reported, not read.
 - **Web annotations** give attestations about places the file does not describe, so each place is

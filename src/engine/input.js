@@ -463,31 +463,73 @@ function isTei(h) {
   return new RegExp(`\\sxmlns${m[1] ? ':' + m[1] : ''}\\s*=\\s*["']http://www\\.tei-c\\.org/ns/1\\.0["']`).test(m[3]);
 }
 /**
- * The names of the files in a zip, from its central directory at the end of the file (so only the
- * end is read, however large the zip), or null when they cannot be listed (not a zip, or a Zip64
- * archive): the tables reader then says what is wrong.
+ * The entries of a zip, from its central directory at the end of the file (so only the end is
+ * read, however large the zip): { name, method, flags, csize, usize, offset } each, in the order
+ * the directory lists them. The directory's sizes and offsets are authoritative: a stream of an
+ * entry never has to find where it ends, as one written with a data descriptor would otherwise
+ * make it. A file that is not a zip, or a Zip64 archive, is a DataError.
+ */
+export async function zipEntries(file) {
+  const damaged = (why) => new DataError(`The zip is damaged or incomplete, so its tables cannot be read (${why}).`);
+  const tail = new Uint8Array(await file.slice(Math.max(0, file.size - 65557)).arrayBuffer());
+  const dv = new DataView(tail.buffer, tail.byteOffset, tail.byteLength);
+  let e = -1;
+  for (let i = tail.length - 22; i >= 0; i--) if (dv.getUint32(i, true) === 0x06054b50) { e = i; break; }
+  if (e < 0) throw damaged('no central directory at its end');
+  const count = dv.getUint16(e + 10, true), size = dv.getUint32(e + 12, true), offset = dv.getUint32(e + 16, true);
+  if (count === 0xffff || size === 0xffffffff || offset === 0xffffffff) throw new DataError('The zip is a Zip64 archive (over 4 GB, or over 65,535 files), which these tools cannot read. Zip the tables without Zip64, or choose the CSV files themselves.');
+  if (offset + size > file.size) throw damaged('its central directory lies past its end');
+  const cd = new Uint8Array(await file.slice(offset, offset + size).arrayBuffer());
+  const c = new DataView(cd.buffer, cd.byteOffset, cd.byteLength);
+  const entries = [];
+  for (let i = 0; entries.length < count; ) {
+    if (i + 46 > cd.length || c.getUint32(i, true) !== 0x02014b50) throw damaged('its central directory is cut short');
+    const flags = c.getUint16(i + 8, true), len = c.getUint16(i + 28, true), extra = c.getUint16(i + 30, true), note = c.getUint16(i + 32, true);
+    const raw = cd.subarray(i + 46, i + 46 + len);
+    entries.push({ name: flags & 0x800 ? new TextDecoder().decode(raw) : String.fromCharCode(...raw), flags, method: c.getUint16(i + 10, true),
+      csize: c.getUint32(i + 20, true), usize: c.getUint32(i + 24, true), offset: c.getUint32(i + 42, true) });
+    i += 46 + len + extra + note;
+  }
+  return entries;
+}
+/**
+ * The names of the files in a zip (zipEntries), or null when they cannot be listed (not a zip, or a
+ * Zip64 archive): the tables reader then says what is wrong.
  */
 export async function zipNames(file) {
-  try {
-    const tail = new Uint8Array(await file.slice(Math.max(0, file.size - 65557)).arrayBuffer());
-    const dv = new DataView(tail.buffer, tail.byteOffset, tail.byteLength);
-    let e = -1;
-    for (let i = tail.length - 22; i >= 0; i--) if (dv.getUint32(i, true) === 0x06054b50) { e = i; break; }
-    if (e < 0) return null;
-    const count = dv.getUint16(e + 10, true), size = dv.getUint32(e + 12, true), offset = dv.getUint32(e + 16, true);
-    if (count === 0xffff || size === 0xffffffff || offset === 0xffffffff) return null;
-    const cd = new Uint8Array(await file.slice(offset, offset + size).arrayBuffer());
-    const c = new DataView(cd.buffer, cd.byteOffset, cd.byteLength);
-    const names = [];
-    for (let i = 0; names.length < count; ) {
-      if (i + 46 > cd.length || c.getUint32(i, true) !== 0x02014b50) return null;
-      const utf8 = c.getUint16(i + 8, true) & 0x800, len = c.getUint16(i + 28, true), extra = c.getUint16(i + 30, true), note = c.getUint16(i + 32, true);
-      const raw = cd.subarray(i + 46, i + 46 + len);
-      names.push(utf8 ? new TextDecoder().decode(raw) : String.fromCharCode(...raw));
-      i += 46 + len + extra + note;
-    }
-    return names.filter((x) => !x.endsWith('/'));
-  } catch { return null; }
+  try { return (await zipEntries(file)).map((x) => x.name).filter((x) => !x.endsWith('/')); }
+  catch { return null; }
+}
+/**
+ * One entry of a zip (from zipEntries) as a stream of text, decompressed as it is read and decoded
+ * as UTF-8 strictly (notUtf8 names it `label`). Only the entry's own bytes are read, by the sizes
+ * the central directory gives; text that does not come to the size it gives is damaged.
+ */
+export async function zipEntryText(file, entry, label) {
+  const damaged = (why) => new DataError(`${label} is damaged, so it cannot be read (${why}).`);
+  if (entry.flags & 1) throw new DataError(`${label} is encrypted, so it cannot be read. Zip the tables without a password.`);
+  if (entry.method !== 0 && entry.method !== 8) throw new DataError(`${label} is compressed in a way these tools cannot read (method ${entry.method}). Zip the tables with ordinary compression (deflate), or none.`);
+  const head = new Uint8Array(await file.slice(entry.offset, entry.offset + 30).arrayBuffer());
+  const h = new DataView(head.buffer, head.byteOffset, head.byteLength);
+  if (head.length < 30 || h.getUint32(0, true) !== 0x04034b50) throw damaged('its local header is missing');
+  const start = entry.offset + 30 + h.getUint16(26, true) + h.getUint16(28, true);
+  if (start + entry.csize > file.size) throw damaged('it runs past the end of the zip');
+  let bytes = file.slice(start, start + entry.csize).stream();
+  if (entry.method === 8) {
+    const { Inflate } = await import('fflate');
+    let inflate;
+    bytes = bytes.pipeThrough(new TransformStream({
+      start(ctl) { inflate = new Inflate((chunk) => { if (chunk.length) ctl.enqueue(chunk); }); },
+      transform(chunk) { try { inflate.push(chunk, false); } catch (e) { throw damaged(String(e && e.message || e)); } },
+      flush() { try { inflate.push(new Uint8Array(0), true); } catch (e) { throw damaged(String(e && e.message || e)); } },
+    }));
+  }
+  let got = 0;
+  bytes = bytes.pipeThrough(new TransformStream({
+    transform(chunk, ctl) { got += chunk.length; ctl.enqueue(chunk); },
+    flush() { if (got !== entry.usize) throw damaged(`it holds ${got.toLocaleString('en-GB')} bytes where the zip says ${entry.usize.toLocaleString('en-GB')}`); },
+  }));
+  return bytes.pipeThrough(strictUtf8(label));
 }
 const zipReason = (inside) => {
   const shown = inside.slice(0, 5).map((x) => x.split('/').pop());

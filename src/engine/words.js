@@ -32,6 +32,7 @@ export const draftNote = (v) => (v?.draft ? `DRAFT: PLATO's ${v.ref} branch, not
 export function progressText(p) {
   const bits = [];
   if (p.triples) bits.push(count(p.triples, 'triples'));
+  if (p.rows) bits.push(count(p.rows, 'rows'));
   if (p.places) bits.push(count(p.places, 'places'));
   if (p.attestations) bits.push(count(p.attestations, 'attestations'));
   const phase = { reading: 'Reading', loading: 'Loading into the working database', indexing: 'Indexing', writing: 'Writing', done: 'Finishing', read: 'Read', comparing: 'Comparing the two versions' }[p.phase] || KRISIS_PHASES[p.phase] || p.phase;

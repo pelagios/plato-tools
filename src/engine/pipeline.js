@@ -5,13 +5,12 @@
 // go through the on-disk triple store; everything else streams straight through.
 import { Parser } from 'n3';
 import Papa from 'papaparse';
-import { unzipSync } from 'fflate';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { addPlatoFormats, strictFormatLogger } from '../lib/formats.js';
 import { Json2Rdf } from '../formats/json2rdf.js';
 import { Rdf2Json } from '../formats/rdf2json.js';
 import { tripleNT } from '../lib/ntriples.js';
-import { TripleStore } from '../lib/store.js';
+import { TripleStore, TableStore } from '../lib/store.js';
 import { PLATO, RDF } from '../lib/context.js';
 import { featureToRecord, recordToFeature, collectionHead, collectionToGazetteer } from '../formats/lpf.js';
 import { list, collectWithdrawn, resolveWithdrawn, addWithdrawal, versionLosses, tableLosses, relationTypeLosses, collectMembership, membershipCycles } from '../formats/shared.js';
@@ -20,7 +19,8 @@ import { validateTables, checkTableRules, checkAboutRules, aboutToGazetteer, gaz
 import { AnnotationReader, ANNOTATION_KINDS } from '../formats/annotations.js';
 import { teiSource } from './hermes/tei.js';
 import { genericSource, genericProfile } from './hermes/generic.js';
-import { lineChunks, lines, jsonDocument, annotationItems, TABLE_SHEETS, DataError, decodeUtf8, sheetOf, textStream } from './input.js';
+import { lineChunks, lines, jsonDocument, annotationItems, TABLE_SHEETS, DataError, sheetOf, zipEntries, zipEntryText } from './input.js';
+import { csvRecords, textChunks, papaRecords, papaRow } from '../formats/csv.js';
 import { Report, LOSS_TEXT, droppedText, FORMAT_WORDS } from './report.js';
 
 export const TARGETS = {
@@ -231,76 +231,175 @@ async function* rdfSource(file, format, rep) {
 }
 
 // ---- tables: sheets from CSV files, a zip or a workbook -----------------------------------------
-/** A whole file's text, decompressed and decoded as UTF-8 strictly (input.js, textStream). */
-async function readText(f) {
-  try { let t = ''; for await (const chunk of await textStream(f)) t += chunk; return t; }
-  catch (e) { throw e instanceof DataError ? e : new DataError(`${f.name} stops, or is damaged, part-way through, so it cannot be read to the end (${String(e && (e.message || e.name) || e).split('\n')[0]}).`); }
-}
-async function readSheets(input, env) {
-  const sheets = {};
-  const put = (name, text) => { const b = sheetOf(name); if (b) sheets[b] = Papa.parse(text.replace(/^﻿/, ''), { header: true, skipEmptyLines: 'greedy' }); };
-  // A sheet's text is UTF-8, strictly (input.js, textStream and decodeUtf8), as every other input's
-  // is; a sheet compressed with gzip (places.csv.gz) is decompressed first, as every other input is.
-  if (input.container === 'csv') { for (const f of input.files) if (sheetOf(f.name)) put(f.name, await readText(f)); }
-  else if (input.container === 'zip') {
-    let z;
-    try { z = unzipSync(new Uint8Array(await input.files[0].arrayBuffer())); }
-    catch (e) { throw new DataError(`The zip is damaged or incomplete, so its tables cannot be read (${String(e && e.message || e)}).`); }
-    for (const [name, data] of Object.entries(z)) if (name.toLowerCase().endsWith('.csv') && sheetOf(name)) put(name, decodeUtf8(data, `${name} in ${input.files[0].name}`));
+// The sheets stream into a working database (TableStore), one row at a time, so that a set of tables
+// of any size is checked and converted in bounded memory: validated by scans of it, and read back
+// one place at a time, with its attestations, in one streaming join. Each row is the object
+// Papa.parse(text, { header: true }) made of it when the sheets were read whole (src/formats/csv.js),
+// so streaming changes nothing a conversion writes or a check reports.
+const SHEET_NO = Object.fromEntries(TABLE_SHEETS.map((s, i) => [s, i]));
+// The attestation sheets, then identities, are numbered in the order a place's record lists them.
+const FIRST_JOINED = SHEET_NO[ATTESTATION_SHEETS[0]];
+if (ATTESTATION_SHEETS.some((s, i) => SHEET_NO[s] !== FIRST_JOINED + i) || SHEET_NO.identities !== FIRST_JOINED + ATTESTATION_SHEETS.length) throw new Error('the sheets are not numbered in the order a record lists them');
+// What a row is looked up by: a source by its source_id, as given (a source with none is found by
+// none); a row of any other sheet by its place_id, when it has one.
+const rowKey = (sheet, row) => (sheet === 'sources' ? row.source_id : sheet === 'about' || !row.place_id ? undefined : row.place_id);
+const WORKBOOK_WHOLE = 50 * 2 ** 20;
+
+/** The sheets of the input, each { label, chunks() }: the last of several files for one sheet wins. */
+async function tableSheetsOf(input, env, rep) {
+  const sheets = new Map();
+  if (input.container === 'csv') {
+    // A sheet's text is UTF-8, strictly (input.js, textStream), as every other input's is; a sheet
+    // compressed with gzip (places.csv.gz) is decompressed first, as every other input is.
+    for (const f of input.files) { const b = sheetOf(f.name); if (b) sheets.set(b, { label: f.name, chunks: () => textChunks(f) }); }
+  } else if (input.container === 'zip') {
+    // The zip is read from its central directory, entry by entry, as each sheet is loaded. Where two
+    // entries have one name, the later is read, in the place of the first, as unzipping them did.
+    const file = input.files[0];
+    const named = new Map();
+    for (const e of await zipEntries(file)) if (e.name.toLowerCase().endsWith('.csv') && sheetOf(e.name)) named.set(e.name, e);
+    for (const [name, e] of named) {
+      const label = `${name} in ${file.name}`;
+      sheets.set(sheetOf(name), { label, chunks: async function* () { yield* textChunks(await zipEntryText(file, e, label)); } });
+    }
   } else {
+    // A workbook can only be read whole (SheetJS), so it is read once for its sheets' names, then once
+    // for each sheet, which is made into CSV text and read as a CSV file is.
     const XLSX = env.xlsx;
-    let wb;
-    try { wb = XLSX.read(new Uint8Array(await input.files[0].arrayBuffer()), { type: 'array', raw: false }); }
-    catch (e) { throw new DataError(`The workbook is damaged or incomplete, so its sheets cannot be read (${String(e && e.message || e)}).`); }
-    for (const name of wb.SheetNames) if (TABLE_SHEETS.includes(name.toLowerCase())) put(name, XLSX.utils.sheet_to_csv(wb.Sheets[name], { blankrows: false, rawNumbers: false }));
+    const file = input.files[0];
+    if (file.size > WORKBOOK_WHOLE) rep.warning('workbook-whole', 'A workbook is read whole into memory, one sheet at a time, so a very large one may not fit: save each sheet as CSV (UTF-8) and choose the CSV files, or a zip of them, which are read a row at a time', `${file.name}: ${(file.size / 2 ** 20).toFixed(0)} MB`);
+    const data = new Uint8Array(await file.arrayBuffer());
+    const damaged = (e) => new DataError(`The workbook is damaged or incomplete, so its sheets cannot be read (${String(e && e.message || e)}).`);
+    let names;
+    try { names = XLSX.read(data, { type: 'array', bookSheets: true }).SheetNames; }
+    catch (e) { throw damaged(e); }
+    for (const name of names) {
+      if (!TABLE_SHEETS.includes(name.toLowerCase())) continue;
+      sheets.set(sheetOf(name), { label: `${name} in ${file.name}`, chunks: async function* () {
+        let wb;
+        try { wb = XLSX.read(data, { type: 'array', raw: false, dense: true, sheets: name }); }
+        catch (e) { throw damaged(e); }
+        yield XLSX.utils.sheet_to_csv(wb.Sheets[name], { blankrows: false, rawNumbers: false }).replace(/^﻿/, '');
+      } });
+    }
   }
   return sheets;
 }
-async function* tablesSource(input, env, rep, options) {
-  const sheets = await readSheets(input, env);
-  const sets = new Map();
-  await validateTables(env.csvMeta, {
-    header: async (n) => (sheets[n] ? sheets[n].meta.fields : null),
-    rows: async function* (n) { yield* sheets[n].data; },
-    keys: { add: async (t, k) => { const s = sets.get(t) || sets.set(t, new Set()).get(t); if (s.has(k)) return false; s.add(k); return true; }, has: async (t, k) => !!sets.get(t)?.has(k) },
-    issue: (i) => rep.error('table', `${i.table}${i.column ? `, column ${i.column}` : ''}: ${i.message.replace(/'[^']*'/, "'…'")}`, `${i.table}${i.row ? ` row ${i.row + 1}` : ''}${i.column ? ` ${i.column}` : ''}: ${i.message}`),
-  });
-  // PLATO's own rules for the tables, beyond what CSVW can state (and rdf-tabular checks).
-  const where = (i) => `${i.table}${i.row ? ` row ${i.row + 1}` : ''}${i.column ? ` ${i.column}` : ''}: ${i.detail || i.message}`;
-  const said = (i) => `${i.table}${i.column ? `, column ${i.column}` : ''}: ${i.message}`;
-  const rules = { issue: (i) => rep.error('table', said(i), where(i)), warn: (i) => rep.warning('table', said(i), where(i)) };
-  checkTableRules((n) => (sheets[n] ? sheets[n].data : []), rules);
-  // The about sheet: one row describing the dataset, which becomes the document's gazetteer. The base
-  // for the places' and sources' addresses is the one given for this conversion, else its base_uri.
-  const aboutRows = sheets.about ? sheets.about.data : null;
-  checkAboutRules(aboutRows, rules, { base: options.base });
-  const about = (aboutRows && aboutRows[0]) || {};
-  const base = options.base || about.base_uri || DEFAULT_TABLE_BASE;
-  yield { type: 'header', value: { profile: 'place-centric', gazetteer: aboutToGazetteer(about, base, options.title || 'Converted from PLATO spreadsheet tables') } };
-  const rows = (n) => (sheets[n] ? sheets[n].data : []);
-  const sources = new Map(rows('sources').map((r) => [r.source_id, r]));
-  const ids = tableIds(base, (id) => sources.get(id));
-  const byPlace = new Map();
-  for (const sheet of ATTESTATION_SHEETS) for (const row of rows(sheet)) {
-    if (!row.place_id) continue;
-    (byPlace.get(row.place_id) || byPlace.set(row.place_id, []).get(row.place_id)).push(rowToAttestation(sheet, row, ids));
+
+/**
+ * Load each sheet into the store: { fields, first, last, count } by sheet, or { unreadable } for a
+ * sheet whose text stops it (not UTF-8, a quotation mark out of place, a damaged entry in the zip),
+ * which is reported, and taken out, and the other sheets read.
+ */
+async function loadSheets(sheets, store, rep, progress) {
+  const loaded = new Map();
+  let rows = 0;
+  for (const [sheet, { label, chunks }] of sheets) {
+    const before = store.mark(), no = SHEET_NO[sheet];
+    let fields = null, n = 0;
+    try {
+      for await (const cells of papaRecords(csvRecords(chunks(), { keepBlank: true }), (f) => { fields = f; })) {
+        store.add(no, ++n, rowKey(sheet, papaRow(fields, cells)), cells);
+        if (++rows % 50000 === 0) progress({ phase: 'loading', rows });
+      }
+      loaded.set(sheet, { fields, first: before + 1, last: store.mark(), count: n });
+    } catch (e) {
+      if (!(e instanceof DataError)) throw e;
+      store.drop(before);
+      loaded.set(sheet, { unreadable: true });
+      // Where it stopped is a line of the file (the validator's rows are rows of the sheet, its
+      // header row 1, and blank rows not counted).
+      rep.error('table', `${sheet}.csv cannot be read, so it is not checked, and nothing is converted; the other sheets are checked`, e.message.startsWith(label) ? e.message : `${label}: ${e.message}`);
+    }
   }
-  const idrs = new Map();
-  for (const r of rows('identities')) if (r.place_id) (idrs.get(r.place_id) || idrs.set(r.place_id, []).get(r.place_id)).push(r);
-  let n = 0;
-  for (const p of rows('places')) {
-    n++;
+  return loaded;
+}
+
+/** The table definitions without the sheets that could not be read, nor the references to them. */
+function readableMeta(meta, loaded) {
+  const out = (url) => loaded.get(url.replace(/\.csv$/, ''))?.unreadable;
+  if (!meta.tables.some((t) => out(t.url))) return meta;
+  return { ...meta, tables: meta.tables.filter((t) => !out(t.url)).map((t) => ({ ...t, tableSchema: { ...t.tableSchema,
+    ...(t.tableSchema.foreignKeys ? { foreignKeys: t.tableSchema.foreignKeys.filter((f) => !out(f.reference.resource)) } : {}) } })) };
+}
+
+async function* tablesSource(input, env, rep, options) {
+  const t0 = Date.now();
+  const progress = (p) => env.progress?.({ ...p, elapsedMs: Date.now() - t0 });
+  const sheets = await tableSheetsOf(input, env, rep);
+  const store = new TableStore(await env.openDb({ store: true }));
+  try {
+    const loaded = await loadSheets(sheets, store, rep, progress);
+    const known = (n) => !!loaded.get(n) && !loaded.get(n).unreadable;
+    const rows = (n) => { if (!known(n)) return []; const m = loaded.get(n); return (function* () { for (const cells of store.rows(m.first, m.last)) yield papaRow(m.fields, cells); })(); };
+    await validateTables(readableMeta(env.csvMeta, loaded), {
+      header: async (n) => (known(n) ? loaded.get(n).fields : null),
+      rows,
+      keys: { add: async (t, k) => store.keyAdd(t, k), has: async (t, k) => store.keyHas(t, k) },
+      issue: (i) => rep.error('table', `${i.table}${i.column ? `, column ${i.column}` : ''}: ${i.message.replace(/'[^']*'/, "'…'")}`, `${i.table}${i.row ? ` row ${i.row + 1}` : ''}${i.column ? ` ${i.column}` : ''}: ${i.message}`),
+    });
+    // PLATO's own rules for the tables, beyond what CSVW can state (and rdf-tabular checks).
+    const where = (i) => `${i.table}${i.row ? ` row ${i.row + 1}` : ''}${i.column ? ` ${i.column}` : ''}: ${i.detail || i.message}`;
+    const said = (i) => `${i.table}${i.column ? `, column ${i.column}` : ''}: ${i.message}`;
+    const rules = { issue: (i) => rep.error('table', said(i), where(i)), warn: (i) => rep.warning('table', said(i), where(i)) };
+    checkTableRules(rows, rules);
+    // The about sheet: one row describing the dataset, which becomes the document's gazetteer. The base
+    // for the places' and sources' addresses is the one given for this conversion, else its base_uri.
+    // Only its first row is read, and how many there are.
+    let aboutRows = null;
+    if (known('about')) { const it = rows('about'), first = it.next().value; it.return(); aboutRows = new Array(loaded.get('about').count); if (first) aboutRows[0] = first; }
+    checkAboutRules(aboutRows, rules, { base: options.base });
+    const about = (aboutRows && aboutRows[0]) || {};
+    const base = options.base || about.base_uri || DEFAULT_TABLE_BASE;
+    yield { type: 'header', value: { profile: 'place-centric', gazetteer: aboutToGazetteer(about, base, options.title || 'Converted from PLATO spreadsheet tables') } };
+
+    progress({ phase: 'indexing' });
+    store.index();
+    // A source by its source_id, the last row that has it (as a Map of the sheet kept it), with the
+    // rows looked up lately kept: the built source is made afresh each time, as it always was.
+    const cache = new Map();
+    const sourceRow = (id) => {
+      if (cache.has(id)) { const r = cache.get(id); cache.delete(id); cache.set(id, r); return r; }
+      const cells = known('sources') ? store.lookup(SHEET_NO.sources, id) : null;
+      const r = cells ? papaRow(loaded.get('sources').fields, cells) : undefined;
+      cache.set(id, r);
+      if (cache.size > 4096) cache.delete(cache.keys().next().value);
+      return r;
+    };
+    const ids = tableIds(base, sourceRow);
+    let n = 0;
     // place_id reaches the data as the record's own identifier (plato:entity_identifier), as the
     // table definitions write it, not only as the tail of the minted address.
-    const rec = { '@id': ids.place(p.place_id), label: p.label, entityIdentifier: p.place_id, attestations: byPlace.get(p.place_id) || [] };
-    if (p.country_codes) rec.ccodes = p.country_codes.split(';');
-    for (const r of idrs.get(p.place_id) || []) {
-      (rec.identityRelations ||= []).push(Object.fromEntries(Object.entries({
-        subject: rec['@id'], object: r.same_as, identityType: r.match_type || undefined, certainty: r.certainty !== '' ? Number(r.certainty) : undefined,
-        basis: r.basis || undefined, source: r.source_id ? ids.source(r.source_id) : undefined }).filter(([, v]) => v !== undefined)));
+    const record = (p, atts, idrs) => {
+      const rec = { '@id': ids.place(p.place_id), label: p.label, entityIdentifier: p.place_id, attestations: atts };
+      if (p.country_codes) rec.ccodes = p.country_codes.split(';');
+      for (const r of idrs) {
+        (rec.identityRelations ||= []).push(Object.fromEntries(Object.entries({
+          subject: rec['@id'], object: r.same_as, identityType: r.match_type || undefined, certainty: r.certainty !== '' ? Number(r.certainty) : undefined,
+          basis: r.basis || undefined, source: r.source_id ? ids.source(r.source_id) : undefined }).filter(([, v]) => v !== undefined)));
+      }
+      return { type: 'record', value: rec, n: ++n };
+    };
+    // Each place, in the order of the places sheet, with the rows of the attestation sheets (in
+    // ATTESTATION_SHEETS order, each in its own order) and of identities that give its place_id. A
+    // place_id given to two places gives both of them all of its rows.
+    if (known('places')) {
+      const P = loaded.get('places');
+      let cur = null;
+      for (const [rowid, pcells, sheet, cells] of store.joined(P.first, P.last, FIRST_JOINED)) {
+        if (!cur || cur.rowid !== rowid) {
+          if (cur) yield record(cur.p, cur.atts, cur.idrs);
+          cur = { rowid, p: papaRow(P.fields, pcells), atts: [], idrs: [] };
+        }
+        if (sheet === null) continue;
+        const name = TABLE_SHEETS[sheet], row = papaRow(loaded.get(name).fields, cells);
+        if (name === 'identities') cur.idrs.push(row); else cur.atts.push(rowToAttestation(name, row, ids));
+      }
+      if (cur) yield record(cur.p, cur.atts, cur.idrs);
     }
-    yield { type: 'record', value: rec, n };
-  }
+    // Without a sheet, the records are knowingly short: the run is incomplete, and writes nothing.
+    if ([...loaded.values()].some((m) => m.unreadable)) yield { type: 'short' };
+  } finally { store.close(); }
 }
 
 // ---- sinks -------------------------------------------------------------------------------------
@@ -432,11 +531,14 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   const notAList = (ev) => rep.error('not-a-list', notAListText(ev.key, ev.shape), ev.key);
   const lateHeader = (ev) => rep.error('late-header', `The document's ${ev.key} come after its records. These tools read a document's header before its records, so ${ev.key} must come before spatialEntities or attestations; as the file is, they are not read at all.`, ev.key);
 
+  // A reader that read on past part of its input it could not read (a sheet of the tables) says so.
+  let short = false;
   if (!needsStore) {
     let header = null;
     for await (const ev of source) {
       if (ev.type === 'late-header') { lateHeader(ev); continue; }
       if (ev.type === 'not-a-list') { notAList(ev); continue; }
+      if (ev.type === 'short') { short = true; continue; }
       if (ev.type === 'header') {
         header = ev.value;
         if (input.format.startsWith('plato') && !V.header(header)) rep.error('schema', `The document header does not match the PLATO JSON Schema: ${ajvMessage(V.header.errors)}`);
@@ -525,9 +627,10 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   for (const c of membershipCycles(membership)) rep.error('membership-cycle', 'A route, itinerary or network is, through its members, a member of itself (MemberOf, followed round, comes back to where it started)', c);
   if (writer) await writer.close();
   progress({ phase: 'done', ...rep.counts, elapsedMs: Date.now() - t0 });
-  // A writer whose output is knowingly short (identity relations it held back and lost) ends the run
-  // incomplete, as a file cut short does: no outputs, and a host removes what was written.
-  if (writer?.incomplete) return { report: rep.toJSON(), outputs: [], incomplete: true };
+  // A writer whose output is knowingly short (identity relations it held back and lost), or a reader
+  // that could not read part of its input (a sheet of the tables), ends the run incomplete, as a file
+  // cut short does: no outputs, and a host removes what was written.
+  if (writer?.incomplete || short) return { report: rep.toJSON(), outputs: [], incomplete: true };
   return { report: rep.toJSON(), outputs };
 }
 /** Resolve a document's withdrawals, reporting any loop of them as an error in the data. */

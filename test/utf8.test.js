@@ -76,7 +76,10 @@ test('firstNonUtf8 finds the first byte that is not UTF-8, and passes valid sequ
   assert.equal(decodeUtf8(Buffer.from('﻿Köln', 'utf8'), 'x.csv'), 'Köln', 'control: a byte-order mark is dropped');
 });
 
-// ---- the spreadsheet tables (src/engine/pipeline.js, readSheets) ------------------------------------
+// ---- the spreadsheet tables (src/engine/pipeline.js, loadSheets) ------------------------------------
+// A sheet that is not UTF-8 is unreadable on its own: the error names it, the other sheets are still
+// checked, and the run is incomplete (nothing is written without it).
+const sheetUnreadable = (r) => r.report.items.filter((i) => i.kind === 'table' && / cannot be read, so it is not checked/.test(i.message));
 const CUSTOMS = `${PLATO_REPO}/schemas/tables/examples/customs`;
 /** The customs tables, with places.csv's Bristol renamed Bristöl and written in `encoding`. */
 function customs(encoding) {
@@ -85,14 +88,21 @@ function customs(encoding) {
     return [f, f === 'places.csv' ? Buffer.from(text.replace('bristol,Bristol,', 'bristol,Bristöl,'), encoding) : Buffer.from(text, 'utf8')];
   }));
 }
-test('a sheet of the tables that is not UTF-8 is unreadable, as CSV files and in a zip; the same in UTF-8 reads', async () => {
+test('a sheet of the tables that is not UTF-8 is unreadable, as CSV files and in a zip, and the rest is still checked; the same in UTF-8 reads', async () => {
   for (const encoding of ['latin1', 'utf8']) {
     const sheets = customs(encoding);
     const csvs = await go(Object.entries(sheets).map(([f, b]) => new File([b], f)), 'check');
     const zip = await go([new File([zipSync(Object.fromEntries(Object.entries(sheets).map(([f, b]) => [f, new Uint8Array(b)])))], 'customs.zip')], 'check');
     for (const [r, name] of [[csvs, /^places\.csv is not encoded as UTF-8: the first byte that is not is on line 2 /], [zip, /^places\.csv in customs\.zip is not encoded as UTF-8/]]) {
-      if (encoding === 'latin1') { assert.equal(unreadable(r).length, 1, JSON.stringify(r.report.items)); assert.match(unreadable(r)[0].examples[0], name); }
-      else { assert.deepEqual(unreadable(r), [], 'control: in UTF-8'); assert.equal(r.report.errors, 0, JSON.stringify(r.report.items)); }
+      if (encoding === 'latin1') {
+        assert.equal(sheetUnreadable(r).length, 1, JSON.stringify(r.report.items));
+        assert.match(sheetUnreadable(r)[0].message, /^places\.csv cannot be read/);
+        assert.match(sheetUnreadable(r)[0].examples[0], name);
+        assert.equal(r.incomplete, true);
+        assert.deepEqual(unreadable(r), [], 'one sheet, not the whole input');
+        // Nothing else is wrong (test/tables-stream.test.js shows the other sheets still checked).
+        assert.equal(r.report.errors, 1, JSON.stringify(r.report.items));
+      } else { assert.deepEqual(sheetUnreadable(r), [], 'control: in UTF-8'); assert.equal(r.report.errors, 0, JSON.stringify(r.report.items)); assert.ok(!r.incomplete); }
     }
   }
 });
@@ -127,8 +137,9 @@ test('the sheets of the tables compressed with gzip read as the same sheets unco
   // Latin-1, compressed: refused as not UTF-8, saying so of its decompressed text; uncompressed, the same (the control).
   for (const [files, at] of [[gz(customs('latin1')), /^places\.csv\.gz is not encoded as UTF-8: the first byte of its decompressed text that is not is on line 2 /], [plain(customs('latin1')), /^places\.csv is not encoded as UTF-8: the first byte that is not is on line 2 /]]) {
     const r = await go(files, 'check');
-    assert.equal(unreadable(r).length, 1, JSON.stringify(r.report.items));
-    assert.match(unreadable(r)[0].examples[0], at);
+    assert.equal(sheetUnreadable(r).length, 1, JSON.stringify(r.report.items));
+    assert.match(sheetUnreadable(r)[0].examples[0], at);
+    assert.equal(r.incomplete, true);
   }
 });
 test('a character begun at the very end of one chunk and broken in the next is placed at its first byte, however the file is cut', async () => {
