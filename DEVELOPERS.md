@@ -553,20 +553,38 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   searched by, settled at the end of the file, where what is retracted or superseded is known. One
   dataset at a time.
 - **The search box** finds a place by its label or any current name (toponym or romanized; not
-  denied, retracted or superseded), by part of it, case and accents aside, and œ, æ, þ, ð and ß as
-  oe, ae, th, th and ss (`fold` in `store.js`), in dataset order, each place once. A place found by a
-  name and not its label comes with `matched`, the first such name, which the list shows ("Byzantium
-  — also Konstantinoupolis"). The names go to SQLite as they are read (`sx`, a row per name) and,
-  once withdrawals are known, one row per place holds its folded label and names joined (`sf`),
-  apart from the records. A query of three letters or more is looked up in an FTS5 trigram index of
-  `sf` (`sft`, which does not copy its text), as one phrase; a shorter one scans `sf` with `LIKE`.
-  A page goes on from the last place of the one before (`after`, and the reply's `next`), not past
-  an offset, and the count is made once per query. The page's queue to the worker (`queue.js`) sends
-  only the latest of the searches waiting, so a place chosen is not kept behind searches nobody will
-  see. On 540,000 synthetic places of about 1.9 KB each, three names each, in a 1.6 GB database on
-  disk (Node's SQLite): a search of three letters or more 0.2 to 15 ms, of one or two letters
-  about 60 to 100 ms, a later page about 1 ms. Labels alone were 450 to 1,000 ms, and a deep offset
-  up to 900 ms. The index adds about 80 MB and 4 s to loading.
+  denied, retracted or superseded), by part of it, in dataset order, each place once. A name's
+  `sourceLabel` (the name as the source prints it) is not searched. Both sides are folded
+  (`fold` in `src/engine/chora/fold.js`): NFKD, marks dropped, lower case, so case, accents and
+  compatibility forms aside (ﬁ fi, ſ s, µ μ); œ, æ, þ, ð and ß as oe, ae, th, th and ss; ς as σ;
+  U+0000 and U+0001 dropped. What it gives is a fixed point of FTS5's trigram case fold, which is
+  not JavaScript's (it takes ς to σ, ſ to s, µ to μ and the Greek symbol letters ϐ ϑ ϰ ϖ ϱ ϕ ϵ to
+  their letters, and SQLite reads U+FFFE and U+FFFF as U+FFFD): tried over every code point, fold
+  leaves none that FTS5 would fold further, so the index, the scan and the name shown agree. A place
+  found by a name and not its label comes with `matched`, the first such name, which the list shows
+  ("Byzantium — also Konstantinoupolis"). The names go to SQLite as they are read (`sx`, a row per
+  name, and `sxa`, the attestation each came from, kept only until the withdrawn names are taken out
+  and then dropped, its pages used again by what is made after it); then one row per place holds its
+  folded label and names joined (`sf`), apart from the records. A query of three letters or more is
+  looked up in an FTS5 trigram index of `sf` (`sft`, which does not copy its text), as one phrase; a
+  shorter one scans `sf` with `LIKE`. A page goes on from the last place of the one before (`after`,
+  and the reply's `next`), not past an offset. The count is made once per query (folded) and kept;
+  it costs what the hits cost, so the first page of a query that matches many places is the slow
+  one. The page's queue to the worker (`queue.js`) sends only the latest of the new queries waiting,
+  so a place chosen is not kept behind searches nobody will see; Next and Previous are each sent, the
+  page they ask for worked out when they are sent (so Next clicked twice goes on two pages), and a
+  reply for a query no longer in the box is not shown. The list's state is `window.__chora.lastSearch`.
+  - *Measured*, on synthetic places made by a script (three attestations each, two names and a
+    romanized form in each, one attestation in fifty retracted), read into an in-memory database by
+    sqlite-wasm under Node: at 50,000 places, dropping the attestation ids from `sx` took it from
+    30.6 to 13.5 MB and the whole database from 91.1 to 73.9 MB. At 540,000 places (a database of
+    800 MB: records 443 MB, `sx` 148, `sft` 126, `sf` 54): the first page of a query of three
+    letters or more, count included, 14 to 31 ms for 5,600 to 89,000 hits; of one or two letters
+    matching nearly every place, 96 to 147 ms; any later page about 2 ms. An independent review
+    measured about 200 ms for the count of a common trigram at DEEP's scale, once per query.
+    Earlier, on 540,000 synthetic places of about 1.9 KB each in a 1.6 GB database on disk (Node's
+    SQLite, with the attestation ids still in `sx`): labels alone took 450 to 1,000 ms a search and a
+    deep offset up to 900 ms; the trigram index added about 80 MB and 4 s to loading.
 - **The overview** reads a covering index of the places with a point (`pov`), not the records.
 - **A pool and an outputs folder of its own.** A SQLite SAHPool holds every file in its folder open,
   so a second tab on the same pool cannot start. Chora's page asks the worker for its own

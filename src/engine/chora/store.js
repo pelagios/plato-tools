@@ -12,6 +12,7 @@ import { run } from '../pipeline.js';
 import { collectWithdrawn, resolveWithdrawn, isDenial } from '../../formats/shared.js';
 import { viewPlace, currentGeometries } from './view.js';
 import { unionBbox } from './geo.js';
+import { fold } from './fold.js';
 
 /** The key a place goes by in Chora: its @id, or its position in the dataset when it has none. */
 export const placeKey = (rec, n) => (rec && typeof rec['@id'] === 'string' ? rec['@id'] : `#${n}`);
@@ -23,14 +24,7 @@ export function keyer() {
   let n = 0;
   return (rec) => { n++; return rec && typeof rec === 'object' && !Array.isArray(rec) ? placeKey(rec, n) : null; };
 }
-/**
- * A label or name as the search box compares it: lower case, without accents (Ἑρμῆς finds ερμης,
- * İstanbul finds istanbul), letters that are no accented letter spelt out as they are written in
- * their place (œ oe, æ ae, þ and ð th, ß ss: Brabœuf finds braboeuf, Þanet thanet), and without
- * U+0001, which joins a place's names in the search table.
- */
-const SPELT = { 'œ': 'oe', 'æ': 'ae', 'þ': 'th', 'ð': 'th', 'ß': 'ss' };
-export const fold = (s) => String(s ?? '').normalize('NFD').replace(/[\p{M}\u0001]/gu, '').toLowerCase().replace(/[œæþðß]/g, (c) => SPELT[c]);
+export { fold } from './fold.js';
 /** How many places the overview map is given at most. */
 export const OVERVIEW_CAP = 50000;
 const BATCH = 5000;
@@ -42,14 +36,17 @@ export class ChoraStore {
     // dataset is read (denied ones never go in; withdrawn ones are taken out at the end). sx: each
     // place's label, folded (k = 0, name null), and then its names, toponym and romanized, in
     // attestation order (k = 1, 2, ...; denied ones never go in, withdrawn ones are taken out at the
-    // end). sf: what the search box looks in, made from sx at the end: one row per place, its folded
+    // end). sxa: the attestation each name of sx came from, when it has an @id, only until the
+    // withdrawn names are taken out: a third of what sx would be, and dropped then, its pages used
+    // again by what is made after it. sf: what the search box looks in, made from sx at the end: one row per place, its folded
     // label and names joined by U+0001 (which no folded text holds, so a match never spans two), kept
     // apart from the records so that a search reads little; sft, a trigram index of it (FTS5, its text
     // not copied), for queries of three letters or more; shorter ones scan sf. wd: what the whole
     // dataset withdraws.
     db.exec(`CREATE TABLE p(n INTEGER PRIMARY KEY, id TEXT NOT NULL, label TEXT, ccodes TEXT, rel TEXT, rec TEXT NOT NULL,
       w REAL, s REAL, e REAL, nn REAL, rx REAL, ry REAL)`);
-    db.exec('CREATE TABLE sx(n INTEGER NOT NULL, k INTEGER NOT NULL, att TEXT, fold TEXT NOT NULL, name TEXT, PRIMARY KEY(n, k)) WITHOUT ROWID');
+    db.exec('CREATE TABLE sx(n INTEGER NOT NULL, k INTEGER NOT NULL, fold TEXT NOT NULL, name TEXT, PRIMARY KEY(n, k)) WITHOUT ROWID');
+    db.exec('CREATE TABLE sxa(att TEXT NOT NULL, n INTEGER NOT NULL, k INTEGER NOT NULL)');
     db.exec('CREATE TABLE sf(n INTEGER PRIMARY KEY, f TEXT NOT NULL)');
     db.exec("CREATE VIRTUAL TABLE sft USING fts5(f, content='sf', content_rowid='n', tokenize='trigram')");
     db.exec('CREATE TABLE g(n INTEGER NOT NULL, att TEXT, w REAL, s REAL, e REAL, nn REAL, rx REAL, ry REAL)');
@@ -61,7 +58,8 @@ export class ChoraStore {
   sink() {
     const db = this.db;
     const insP = db.prepare('INSERT INTO p(n,id,label,ccodes,rel,rec) VALUES (?,?,?,?,?,?)');
-    const insS = db.prepare('INSERT INTO sx(n,k,att,fold,name) VALUES (?,?,?,?,?)');
+    const insS = db.prepare('INSERT INTO sx(n,k,fold,name) VALUES (?,?,?,?)');
+    const insA = db.prepare('INSERT INTO sxa(att,n,k) VALUES (?,?,?)');
     const insG = db.prepare('INSERT INTO g(n,att,w,s,e,nn,rx,ry) VALUES (?,?,?,?,?,?,?,?)');
     const edges = new Map(), keyOf = keyer();
     let n = 0, open = false, closed = false;
@@ -82,7 +80,7 @@ export class ChoraStore {
         const label = typeof rec.label === 'string' ? rec.label : key;
         insP.bind([n, key, label, JSON.stringify(Array.isArray(rec.ccodes) ? rec.ccodes : []), JSON.stringify(related), JSON.stringify(rec)]).stepReset();
         const folded = fold(label);
-        insS.bind([n, 0, null, folded, null]).stepReset();
+        insS.bind([n, 0, folded, null]).stepReset();
         // Its names. One the label already holds adds nothing; a name repeated within an attestation
         // is one. The same name from another attestation is kept: that one may be withdrawn, this not.
         let k = 0;
@@ -96,7 +94,8 @@ export class ChoraStore {
               const f = fold(t);
               if (seen.has(f)) continue;
               seen.add(f);
-              insS.bind([n, ++k, aid, f, t]).stepReset();
+              insS.bind([n, ++k, f, t]).stepReset();
+              if (aid !== null) insA.bind([aid, n, k]).stepReset();
             }
           }
         }
@@ -113,7 +112,7 @@ export class ChoraStore {
         if (closed) return;
         closed = true;
         if (open) db.exec('COMMIT');
-        insP.finalize(); insG.finalize(); insS.finalize();
+        insP.finalize(); insG.finalize(); insS.finalize(); insA.finalize();
         self.edges = edges;
       },
     };
@@ -128,11 +127,13 @@ export class ChoraStore {
     const ins = db.prepare('INSERT OR REPLACE INTO wd(id,kind) VALUES (?,?)');
     for (const [id, kind] of status) ins.bind([id, kind]).stepReset();
     ins.finalize();
-    db.exec('CREATE INDEX pid ON p(id)');
-    db.exec('CREATE INDEX gn ON g(n)');
     this.counts = new Map();
     db.exec('DELETE FROM g WHERE att IN (SELECT id FROM wd)');
-    db.exec('DELETE FROM sx WHERE att IN (SELECT id FROM wd)');
+    db.exec('DELETE FROM sx WHERE (n, k) IN (SELECT n, k FROM sxa WHERE att IN (SELECT id FROM wd))');
+    // Made after sxa is dropped, so that they go in the pages it held.
+    db.exec('DROP TABLE sxa');
+    db.exec('CREATE INDEX pid ON p(id)');
+    db.exec('CREATE INDEX gn ON g(n)');
     db.exec("INSERT INTO sf(n, f) SELECT n, group_concat(fold, char(1)) FROM sx GROUP BY n ORDER BY n");
     db.exec("INSERT INTO sft(sft) VALUES ('rebuild')");
     const first = (col) => `(SELECT ${col} FROM g WHERE g.n=p.n AND g.rx IS NOT NULL ORDER BY g.rowid LIMIT 1)`;

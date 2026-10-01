@@ -11,6 +11,7 @@ import * as contributors from './contributor.js';
 import { fingerprint, loadDrafts, saveDrafts } from './drafts.js';
 import { take as takeHandoff, clear as clearHandoff } from './handoff.js';
 import { serialQueue } from './queue.js';
+import { fold } from '../engine/chora/fold.js';
 
 const $ = (id) => document.getElementById(id);
 const state = (window.__chora = { phase: 'loading', placeId: null, pendingCount: 0, basemap: null, mapReadyCount: 0, blocked: 0, lastSave: null });
@@ -32,7 +33,8 @@ const enqueue = serialQueue(({ msg, replyType }) => new Promise((resolve, reject
   };
   worker.postMessage(msg);
 }));
-const request = (msg, replyType, opts) => enqueue({ msg, replyType }, opts);
+// `msg` may be a function that makes the command when it is sent (queue.js).
+const request = (msg, replyType, opts) => enqueue(() => ({ msg: typeof msg === 'function' ? msg() : msg, replyType }), opts);
 function startWorker() {
   worker = new Worker(new URL('../engine/worker.js', import.meta.url), { type: 'module' });
   worker.onerror = (e) => fail(`The engine stopped: ${e.message || 'unknown error'}`);
@@ -81,12 +83,21 @@ async function open(list) {
 
 // ---- The place list ------------------------------------------------------------------------------
 // A page goes on from the place before it (keyset paging): `starts` holds where each page so far
-// began, so Previous goes back one, and a new query starts again.
+// began, so Previous goes back one, and a new query starts again. Which page to ask for is worked out
+// when the request is sent, from the page the reply before it showed, so that Next clicked twice
+// goes on two pages. A new query is sent only if no later one was typed before it could be; Next and
+// Previous are each sent. A reply for a query that is no longer the one in the box (folded, as the
+// search compares) is not shown.
 async function search(to = 'first') {
-  const pages = to === 'first' ? [0] : to === 'next' ? [...starts, nextAfter] : to === 'prev' ? starts.slice(0, -1) : starts;
-  const r = await request({ cmd: 'chora-search', q: query, after: pages[pages.length - 1], limit: PAGE }, 'chora-results', { latestOf: 'search' });
+  let pages;
+  const r = await request(() => {
+    pages = to === 'first' ? [0] : to === 'next' ? (nextAfter === null ? starts : [...starts, nextAfter]) : to === 'prev' ? (starts.length > 1 ? starts.slice(0, -1) : starts) : starts;
+    return { cmd: 'chora-search', q: query, after: pages[pages.length - 1], limit: PAGE };
+  }, 'chora-results', to === 'first' ? { latestOf: 'search' } : undefined);
   if (!r) return;   // a later search was asked for before this one was sent
+  if (fold(r.q) !== fold($('q').value.trim())) return;   // the box holds another query now
   starts = pages; nextAfter = r.next; total = r.total;
+  state.lastSearch = { q: r.q, after: pages[pages.length - 1], next: r.next, total: r.total, shown: r.items.map((p) => p.id) };
   const at = (pages.length - 1) * PAGE;
   $('found').textContent = total ? `${query ? `${n(total)} found` : `${n(total)} places`}${total > PAGE ? `, showing ${n(at + 1)}–${n(at + r.items.length)}` : ''}.` : 'No place has that in its name.';
   const pending = new Set(drafts.map((d) => d.placeId));
