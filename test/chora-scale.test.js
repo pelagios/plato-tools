@@ -262,6 +262,10 @@ test('a save reports its steps: writing, then the version check reading each ver
   assert.equal(choraSaveProgress({ save: 'checking', phase: 'comparing', elapsedMs: 2000 }), 'Saving, step 2 of 2, the version check (Mneme), comparing the two (2 s)');
   assert.equal(choraSaveProgress({ save: 'writing', phase: 'loading', triples: 50000, elapsedMs: 0 }), 'Saving, step 1 of 2, writing the file: loading 50,000 triples (0 s)');
   assert.equal(choraSaveProgress({ save: 'writing', attestations: 3, elapsedMs: 0 }), 'Saving, step 1 of 2, writing the file: 3 attestations (0 s)');
+  // Spreadsheet tables are loaded into a working database, then checked, row by row, before a place is written.
+  assert.equal(choraSaveProgress({ save: 'writing', phase: 'loading', rows: 50000, elapsedMs: 0 }), 'Saving, step 1 of 2, writing the file: loading the tables: 50,000 rows (0 s)');
+  assert.equal(choraSaveProgress({ save: 'writing', phase: 'checking', rows: 100000, elapsedMs: 0 }), 'Saving, step 1 of 2, writing the file: checking the tables: 100,000 rows (0 s)');
+  assert.equal(choraSaveProgress({ save: 'writing', phase: 'checking', elapsedMs: 0 }), 'Saving, step 1 of 2, writing the file: checking the tables (0 s)');
 });
 
 // ---- 3. The storage a load and a save need ------------------------------------------------------

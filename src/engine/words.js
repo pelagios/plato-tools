@@ -486,6 +486,8 @@ export function choraSaveProgress(p) {
   const n = (x) => x.toLocaleString('en-GB');
   const what = p.attestations !== undefined ? `${n(p.attestations)}${p.total ? ` of ${n(p.total)}` : ''} attestation${p.attestations === 1 && !p.total ? '' : 's'}`
     : p.triples ? `${p.phase === 'indexing' ? 'indexing' : 'loading'} ${count(p.triples, 'triples')}`
+    : p.rows ? `${p.phase === 'checking' ? 'checking the tables' : 'loading the tables'}: ${count(p.rows, 'rows')}`
+    : p.phase === 'checking' ? 'checking the tables'
     : p.places ? count(p.places, 'places') : '';
   const time = ` (${fmtTime(p.elapsedMs || 0)})`;
   if (p.save === 'finding') return `Saving: first reading the dataset, to find the places drawn on${what ? `: ${what}` : ''}${time}`;
