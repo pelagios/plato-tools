@@ -27,7 +27,8 @@ Status: IMPLEMENTED; engine and CLI tests pass (test/krisis.test.js, test/krisis
     `candidate_status` ('confirmed' | 'rejected' | 'suggested') to agree. 'distinct' requires a
     non-empty basis (throws otherwise).
   - `reviewPlaces(work) -> [iri…]` subject places in review order (= `Object.keys(work.places)`).
-  - `candidatesOf(work, iri) -> [candidate…]` in score order.
+  - `candidatesOf(work, iri) -> [candidate…]`: the other dataset's candidates in score order (then
+    nearest), then each lookup's in the order the lookup ranked them (`rankGazetteer`: distance first).
   - `isReviewed(work, iri) -> boolean` — at least one of its candidates has a decision.
   - `reviewProgress(work) -> { reviewed, total }`.
   - `filesDiffer(side, files) -> Promise<string[]>` — `side` is `work.subjects` or `work.others`;
@@ -43,7 +44,8 @@ Status: IMPLEMENTED; engine and CLI tests pass (test/krisis.test.js, test/krisis
     given, its file's name stands in (`titleFrom: 'file-name'`) and the report has a warning
     `others-title-is-file-name`. Bad options throw `DataError`. Writes output
     `<subjects stem>.krisis.json`. `match_parameters` also holds `blocking` (`BLOCKING` with its
-    `rule` in words) and `scoring` (in words); `algorithm_version` is `krisis-names 3`.
+    `rule` in words) and `scoring` (in words); `algorithm_version` is `krisis-names 5` (`ALGORITHM`). A candidate from a
+    lookup carries its own, `krisis-lookup 1` (`LOOKUP_ALGORITHM`), which overrides the file's.
 - `src/engine/krisis/apply.js`:
   - `apply({ subjects, work, options: { output = 'dataset', reviewer, date, base, othersTitle } }, env) -> { report, outputs, incomplete? }`
     `work` is a work object or its text. `reviewer` ({ name, orcid? }) overrides `work.reviewer`;
@@ -80,11 +82,14 @@ Status: IMPLEMENTED; engine and CLI tests pass (test/krisis.test.js, test/krisis
   `BLOCKING` `{ share: 0.4, commonShare: 0.01, commonFloor: 50, keys: 4, spread: 4 }`, `BLOCKING_RULE`,
   `canReach(lengthA, lengthB, threshold)`.
 
-## Work file (version 1)
+## Work file (version 2)
 
-See the comment at the top of `work.js`. Candidate `other: { label, names, point, source: { title, uri? }, ccodes?, types? }`;
+See the comment at the top of `work.js`. `readWork` reads version 1 and gives it back as version 2;
+every file written is version 2. Version 2 adds `lookups: [...]` (empty after `match`), lets `others`
+be `null` (a review of lookups alone; then every candidate is a lookup's, and finishing cites the
+gazetteer for each), and lets `places` hold places looked up without a candidate found. Candidate `other: { label, names, point, source: { title, uri? }, ccodes?, types? }`;
 `decision: null | { kind, identityType (not for 'not-this'), basis?, decided_at }`. Each side
-(`subjects`, `others`) has `titleFrom`: `'gazetteer'`, `'given'` (by `othersTitle`) or `'file-name'`. `places` holds only
+(`subjects`, `others`) has `titleFrom`: `'gazetteer'`, `'given'` (by `othersTitle`) or `'file-name'`. After `match`, `places` holds only
 subject places with at least one candidate, in review order. `reviewer: null | { name, orcid? }`
 (`match` puts `options.reviewer` there if given). `cursor`: index into `reviewPlaces(work)`.
 

@@ -74,10 +74,12 @@ export async function apply({ subjects, work, options = {} }, env) {
   }
   progress({ phase: 'applying', elapsedMs: Date.now() - t0 });
   // The source the attestations cite: the other dataset, by the title given now, else the work file's.
+  // It is the source of the other dataset's candidates only: one looked up in a gazetteer cites the
+  // gazetteer (attestationsFrom). A review of lookups alone has no other dataset (others: null).
   const given = typeof options.othersTitle === 'string' ? options.othersTitle.trim() : '';
-  const others = given ? { ...w.others, title: given, titleFrom: 'given' } : w.others;
-  if (others.titleFrom === 'file-name') rep.warning('others-title-is-file-name', KRISIS_TEXT.othersTitleIsFileName(others.title));
-  const made = attestationsFrom(w, { reviewer, date: options.date, source: datasetSource(others) });
+  const others = w.others && (given ? { ...w.others, title: given, titleFrom: 'given' } : w.others);
+  if (others?.titleFrom === 'file-name') rep.warning('others-title-is-file-name', KRISIS_TEXT.othersTitleIsFileName(others.title));
+  const made = attestationsFrom(w, { reviewer, date: options.date, source: others ? datasetSource(others) : undefined });
   rep.counts = {
     attestations: made.length,
     matchAttestations: made.filter((m) => !m.attestation.negated).length,

@@ -329,7 +329,7 @@ def krisis_case(page, tmp):
           'threshold must be above 0 and at most 1' in bad.get('summary', '') and 'Something went wrong' not in bad.get('summary', '') and bad.get('action') == 'check', bad)
     # Resuming with no dataset chosen says so, not that every file differs; with one chosen, the files are compared (above).
     nodata = ''
-    if saved.get('krisis') == 1 and 'other files than the ones chosen' in w:
+    if saved.get('krisis') == 2 and 'other files than the ones chosen' in w:
         try:
             page.reload()
             wait_state(page, lambda s: s.get('phase') == 'ready', 30, 'ready')

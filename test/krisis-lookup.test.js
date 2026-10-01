@@ -678,3 +678,117 @@ test('a work file is read by its own keys only: "constructor" is not a place it 
   assert.throws(() => readWork(tamper((w) => { w.lookups[0].queries.constructor = { state: 'answered', sent: ['x'] }; })), /looked up a place the file does not list \(constructor\)/);
   assert.throws(() => readWork(tamper((w) => { delete w.krisis; w.__proto__ = undefined; })), /no "krisis" version/);
 });
+
+// ---- change 2 on change 1: where the two meet ----------------------------------------------------------
+// Each of these failed, or would fail, on a rebase that kept one side only: change 1 finishing a review
+// that has no other dataset, change 1's stand-in titles and change 2's tap in one reading, change 1's
+// ranking of local candidates and change 2's order for a lookup's.
+const { candidatesOf } = await import('../src/engine/krisis/work.js');
+const { ALGORITHM } = await import('../src/engine/krisis/match.js');
+const { krisisNote, KRISIS_TEXT } = await import('../src/engine/words.js');
+const WHG_CITED = [{ source: gazetteerSource(WHG_SERVICE) }];
+
+test('a review of lookups alone (no other dataset) finishes with either output, the title options ignored, every attestation citing WHG', async () => {
+  const g = await gathered([tyne()]);
+  const r = await runLookup({ lookup: lookupWith(fakeWhg(byName({ Newcastle: NEWCASTLES }))), subjects: g.subjects, places: g.places, now: clock() });
+  assert.equal(r.work.others, null, 'control: the review has no other dataset');
+  decide(r.work, r.work.candidates.find((c) => c.gazetteer.id === 'place:gn:2641673').id, 'match', { at: NOW });
+  decide(r.work, r.work.candidates.find((c) => c.gazetteer.id === 'place:gn:2155472').id, 'distinct', { at: NOW, basis: 'Another continent' });
+  const subjects = await detect([textFile(JSON.stringify(doc([tyne()])), 'a.json')]);
+  for (const output of ['attestations', 'dataset']) {
+    for (const othersTitle of [undefined, 'A title for no dataset']) {
+      const done = await apply({ subjects, work: serialiseWork(r.work), options: { output, reviewer: REVIEWER, othersTitle } }, env());
+      const what = `${output}, othersTitle ${othersTitle}`;
+      assert.equal(done.report.errors, 0, `${what}: ${JSON.stringify(done.report.items)}`);
+      assert.equal(done.attestations.length, 2, what);
+      for (const { attestation } of done.attestations) assert.deepEqual(attestation.citations, WHG_CITED, what);
+      assert.ok(!done.report.items.some((i) => i.kind === 'others-title-is-file-name'), `${what}: no other dataset, so no warning of its title`);
+      assert.equal(done.outputs.length, 1, what);
+    }
+  }
+});
+
+test('finishing a review with local and WHG matches: the other dataset\'s title, given or warned of, is cited for its own candidates only', async () => {
+  const subjects = await detect([textFile(JSON.stringify(doc([tyne()])), 'a.json')]);
+  // The other dataset gives no title: its file's name stands in, and finishing warns of it.
+  const others = await detect([textFile(JSON.stringify({ profile: 'place-centric', spatialEntities: [{ '@id': X + 'b/newcastle', label: 'Newcastle', attestations: [at(-1.6, 54.97)] }] }), 'b.json')]);
+  const m = await match({ subjects, others, options: { now: NOW } }, env());
+  assert.equal(m.work.others.titleFrom, 'file-name', 'control: the other dataset gives no title');
+  const g = await gather({ subjects, options: {} }, env());
+  const r = await runLookup({ lookup: lookupWith(fakeWhg(byName({ Newcastle: NEWCASTLES }))), work: m.work, places: g.places, options: { places: 'all' }, now: clock() });
+  decide(r.work, r.work.candidates.find((c) => !c.lookup).id, 'match', { at: NOW });
+  decide(r.work, r.work.candidates.find((c) => c.gazetteer?.id === 'place:gn:2641673').id, 'match', { at: NOW });
+  const finish = (othersTitle) => apply({ subjects, work: serialiseWork(r.work), options: { output: 'attestations', reviewer: REVIEWER, othersTitle } }, env());
+  const given = await finish('Dataset B');
+  assert.equal(given.report.errors, 0, JSON.stringify(given.report.items));
+  const cites = (done) => done.attestations.map((a) => a.attestation.citations[0].source.title);
+  assert.deepEqual(cites(given), ['Dataset B', 'World Historical Gazetteer']);
+  assert.ok(!given.report.items.some((i) => i.kind === 'others-title-is-file-name'), 'a title given: no warning');
+  const untitled = await finish(undefined);
+  assert.deepEqual(cites(untitled), ['b.json', 'World Historical Gazetteer'], 'control: the file\'s name, for the local candidate only');
+  assert.ok(untitled.report.items.some((i) => i.kind === 'others-title-is-file-name' && i.message === KRISIS_TEXT.othersTitleIsFileName('b.json')), 'control: warned of');
+});
+
+test('gather reads a dataset as match does: its own title or its file\'s name as a stand-in, and the links it states', async () => {
+  const linked = place('newcastle', 'Newcastle', [at(-1.61, 54.97), { identities: [{ subject: A('newcastle'), object: X + 'b/newcastle', identityType: 'exactMatch' }], sources: [src] }]);
+  const titled = await gathered([linked]);
+  assert.deepEqual([titled.subjects.title, titled.subjects.titleFrom], ['Dataset A', 'gazetteer']);
+  assert.deepEqual(titled.places[0].identities.linked, [X + 'b/newcastle'], 'the tap saw the identity relation');
+  // LPF with no title: its reader gives the dataset its file's name, which is a stand-in, not a title.
+  const { go, outText } = await import('./engine.js');
+  const c = await go([textFile(JSON.stringify({ profile: 'place-centric', gazetteer: { '@id': X + 'a' }, spatialEntities: [linked] }), 'a.json')], 'convert', 'lpf');
+  const text = outText(c.e, 'a.geojson');
+  assert.equal(JSON.parse(text).title, undefined, 'control: the LPF file gives no title of its own');
+  const untitled = await gather({ subjects: await detect([textFile(text, 'untitled.geojson')]), options: {} }, env());
+  assert.deepEqual([untitled.subjects.title, untitled.subjects.titleFrom], ['untitled.geojson', 'file-name'], 'the reader\'s stand-in is not taken for a title');
+  assert.equal(untitled.places.length, 1, 'control: the place was read');
+});
+
+test('the other dataset\'s candidates are listed by change 1\'s ranking, a lookup\'s after them in the order the lookup ranked them', async () => {
+  const subjects = await detect([textFile(JSON.stringify(doc([place('newcastle', 'Newcastle', [at(-1.61, 54.97)])])), 'a.json')]);
+  // b/1 is the nearer and the less alike by name: change 1 lists by score first, b/2 before it.
+  const others = await detect([textFile(JSON.stringify({ profile: 'place-centric', gazetteer: { title: 'Dataset B' }, spatialEntities: [
+    { '@id': X + 'b/1', label: 'Newcastel', attestations: [at(-1.6, 54.97)] },
+    { '@id': X + 'b/2', label: 'Newcastle', attestations: [at(-1.62, 54.96)] },
+  ] }), 'b.json')]);
+  const m = await match({ subjects, others, options: { now: NOW } }, env());
+  assert.equal(m.work.candidates.length, 2);
+  const local = (id) => m.work.candidates.find((c) => c.candidate_candidate === X + id);
+  assert.ok(local('b/1').similarity_score < local('b/2').similarity_score && local('b/1').distance_km < local('b/2').distance_km, 'control: score and distance disagree');
+  m.work.candidates.sort((a, b) => a.similarity_score - b.similarity_score);   // worst first in the file
+  const g = await gather({ subjects, options: {} }, env());
+  const tyneOnly = { ...NEWCASTLES[2], alt_names: [] };
+  const r = await runLookup({ lookup: lookupWith(fakeWhg(byName({ Newcastle: [NEWCASTLES[1], NEWCASTLES[0], tyneOnly] }))), work: m.work, places: g.places, options: { places: 'all' }, now: clock() });
+  const listed = candidatesOf(r.work, A('newcastle'));
+  assert.deepEqual(listed.map((c) => c.candidate_candidate).slice(0, 2), [X + 'b/2', X + 'b/1'], 'local: best score first');
+  const looked = listed.slice(2);
+  assert.deepEqual(looked.map((c) => c.other.ccodes[0]), ['GB', 'NA', 'AU'], 'lookup: nearest first');
+  assert.ok(looked[0].similarity_score < looked[1].similarity_score, 'control: by score alone the nearest would not be first');
+});
+
+test('a lookup\'s candidates are not cut to the best few, nor do located and unlocated take turns: all are kept, the located first', async () => {
+  const g = await gathered([place('newcastle', 'Newcastle', [at(-1.61, 54.97)])]);
+  const located = [1, 2, 3, 4].map((i) => ({ id: `place:gn:${i}`, name: `Newcastle ${'x'.repeat(i)}`, score: 100, repr_point: [-1.61 + i / 10, 54.97], ccodes: ['GB'] }));
+  const unlocated = [5, 6, 7].map((i) => ({ id: `place:gn:${i}`, name: 'Newcastle', score: 100, ccodes: ['GB'] }));
+  const r = await runLookup({ lookup: lookupWith(fakeWhg(byName({ Newcastle: [...unlocated, ...located] }))), subjects: g.subjects, places: g.places, now: clock() });
+  const listed = candidatesOf(r.work, A('newcastle'));
+  assert.equal(listed.length, 7, 'more than topK (5)');
+  assert.deepEqual(listed.map((c) => c.distance_km !== null), [true, true, true, true, false, false, false], 'located first, no turns');
+  assert.ok(listed[4].similarity_score > listed[0].similarity_score, 'control: the unlocated are the more alike by name, so turns would put one second');
+});
+
+test('local candidates keep change 1\'s algorithm (krisis-names 5), a lookup\'s its own, in the work file and in each attestation\'s note', async () => {
+  const subjects = await detect([textFile(JSON.stringify(doc([tyne()])), 'a.json')]);
+  const others = await detect([textFile(JSON.stringify({ profile: 'place-centric', gazetteer: { title: 'Dataset B' }, spatialEntities: [{ '@id': X + 'b/newcastle', label: 'Newcastle', attestations: [at(-1.6, 54.97)] }] }), 'b.json')]);
+  const m = await match({ subjects, others, options: { now: NOW } }, env());
+  const g = await gather({ subjects, options: {} }, env());
+  const r = await runLookup({ lookup: lookupWith(fakeWhg(byName({ Newcastle: NEWCASTLES }))), work: m.work, places: g.places, options: { places: 'all' }, now: clock() });
+  const w = readWork(serialiseWork(r.work));
+  assert.equal(ALGORITHM, 'krisis-names 5');
+  assert.equal(w.algorithm_version, ALGORITHM, 'the file\'s, for its local candidates');
+  assert.ok(w.candidates.filter((c) => c.lookup).every((c) => c.algorithm_version === LOOKUP_ALGORITHM));
+  decide(w, w.candidates.find((c) => !c.lookup).id, 'match', { at: NOW });
+  decide(w, w.candidates.find((c) => c.gazetteer?.id === 'place:gn:2641673').id, 'match', { at: NOW });
+  const notes = attestationsFrom(w, { reviewer: REVIEWER }).map((x) => x.attestation.notes);
+  assert.deepEqual(notes, [krisisNote('match', 'krisis-names 5'), krisisLookupNote('match', 'World Historical Gazetteer', LOOKUP_ALGORITHM)]);
+});
