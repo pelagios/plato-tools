@@ -13,7 +13,7 @@
 //   copied, so the file cannot contradict the dataset it adds to.
 import { Report } from '../report.js';
 import { DataError, detect } from '../input.js';
-import { run } from '../pipeline.js';
+import { run, CANDIDATE_SET_TEXT } from '../pipeline.js';
 import { compare } from '../compare.js';
 import { KRISIS_TEXT } from '../words.js';
 import { readWork, filesDiffer, checkReviewer, NOT_READ_KINDS } from './work.js';
@@ -140,6 +140,9 @@ function teeing(env, kept) {
 async function writeDataset({ subjects, made, work, options }, env, rep, fail) {
   const K = KRISIS_TEXT;
   if (!subjects?.format) { rep.error('no-dataset', K.noDataset); return fail(); }
+  // A candidate set (PLATO 53c5a40) holds no places to add attestations to: refused, as the other tools
+  // that read a dataset's records refuse it, before anything is written.
+  if (subjects.profile === 'candidate-set') { rep.error('candidate-set-not-a-dataset', CANDIDATE_SET_TEXT['candidate-set-not-a-dataset']); return fail(); }
   const progress = env.progress || (() => {});
   const t0 = Date.now();
   // Each place's new attestations, appended when the pipeline hands the place over: once, should

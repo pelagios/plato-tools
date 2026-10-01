@@ -59,16 +59,19 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   profile and writes it as PLATO JSON, JSON Lines (the header, then a candidate a line) or N-Triples;
   the tables and Linked Places Format refuse it in words (`candidate-set-target`), as do the tools that
   read a dataset's records through `options.sink` (`candidate-set-not-a-dataset`). From RDF, a graph
-  with a candidate set and no dataset (no gazetteer, place, attestation or identity relation with
-  anything said of it beyond its type, since typed N-Triples type a candidate's places and dataset) is
-  written as the candidate set; a graph with both is written as the dataset, and the candidate set is
-  reported as not written (`candidate-set-not-written`). A dataset's `gazetteer.candidateSets` is the
+  with a candidate set and no dataset (no gazetteer with anything said of it beyond its type, no
+  attestation and no identity relation: typed N-Triples type a candidate's dataset and places, and a
+  place described a little more is still one the candidates name) is written as the candidate set; a graph with both is written as the dataset, and the candidate set is
+  reported as not written (`candidate-set-not-written`), to RDF as well as to JSON. Krisis's apply
+  refuses a candidate set given as its dataset. A dataset's `gazetteer.candidateSets` is the
   reverse of `plato:candidates_for`, written and read back as such. Not done yet (the candidate set
   specification's section 13): the checks no schema can make (ids under their set, the mint rule,
   duplicates, across sets, `promotedFrom` against a set given beside a dataset), the version check of a
   candidate set, and Krisis's export of one.
 - **The about sheet's authors.** Each item of `creator` is `Name <address>`, an address alone, or a
-  name alone (PLATO 8385472; `creatorOf` in `tables.js`); `creator_name`, deprecated, is still read
+  name alone (PLATO 8385472; `creatorOf` in `tables.js`). An item alone is an address only with a
+  scheme and `//`, or a `urn:`, `tag:`, `mailto:`, `doi:` or `info:` scheme, so that `Re:Place` is a
+  name (PLATO's own pattern would take it as an address); `creator_name`, deprecated, is still read
   and warned of. The writer puts every author in `creator` and leaves `creator_name` empty.
 - **The other formats** are in `src/formats/`: `tables.js`, `lpf.js`, `annotations.js`, `cube.js`,
   and `shared.js` for the rules the lossy writers share (denials, the current state, computed

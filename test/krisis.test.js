@@ -571,6 +571,15 @@ test('apply warns when the dataset is not the one reviewed, and says nothing whe
   assert.deepEqual(r.report.items.map((i) => i.kind), ['subjects-differ']);
   assert.equal(r.outputs.length, 1, 'a warning, not a refusal');
 });
+test('apply refuses a candidate set given as the dataset, in words, and writes nothing', async () => {
+  const w = await reviewed();
+  const set = readFileSync(`${PLATO_REPO}/schemas/examples/candidate-set-judgements.json`, 'utf8');
+  const e = env();
+  const r = await apply({ subjects: await detect([textFile(set, 'a.json')]), work: w, options: {} }, e);
+  assert.ok(r.incomplete);
+  assert.deepEqual(r.report.items.filter((i) => i.severity === 'error').map((i) => i.kind), ['candidate-set-not-a-dataset']);
+  assert.deepEqual([r.outputs, Object.keys(e.outs)], [[], []]);
+});
 test('apply refuses a tampered work file, and a review with no reviewer', async () => {
   const w = await reviewed();
   const tampered = JSON.parse(serialiseWork(w)); tampered.candidates[0].candidate_status = 'rejected';

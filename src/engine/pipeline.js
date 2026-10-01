@@ -634,12 +634,15 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     // candidate set; otherwise the dataset is written, and the candidates are reported as not written,
     // never merged into it.
     const sets = [...new Set([...store.subjects(TYPE, PLATO + 'CandidateSet'), ...distinctSubjectsWith(store, PLATO + 'contains_candidate')])];
-    // A gazetteer or a place counts only if something is said of it beyond its type: typed N-Triples
-    // type the dataset a candidate set is for as plato:Gazetteer (the range of candidates_for), and a
-    // candidate's two places as plato:SpatialEntity (the range of candidate_source and candidate_candidate).
+    // What makes a dataset is a gazetteer with something said of it beyond its type, an attestation or an
+    // identity relation. Typed N-Triples type the dataset a candidate set is for as plato:Gazetteer (the
+    // range of candidates_for), and a candidate's two places as plato:SpatialEntity (the range of
+    // candidate_source and candidate_candidate); a place described a little more (a label added to a
+    // candidate set's graph) is still a place the candidates name, not a dataset of empty places.
     const described = (id) => store.out(id).some((t) => t.p !== TYPE);
     const isDataset = !!(docs.some(described) || firstSubjectWith(store, PLATO + 'contains_entity') || firstSubjectWith(store, PLATO + 'contains_attestation')
-      || firstSubjectWith(store, PLATO + 'attests_about') || describedEntity(store) || store.subjects(TYPE, PLATO + 'IdentityRelation').next().value || firstSubjectWith(store, PLATO + 'identity_subject'));
+      || firstSubjectWith(store, PLATO + 'attests_about') || store.subjects(TYPE, PLATO + 'Attestation').next().value
+      || store.subjects(TYPE, PLATO + 'IdentityRelation').next().value || firstSubjectWith(store, PLATO + 'identity_subject'));
     const looseCandidates = (keep) => [...new Set([...store.subjects(TYPE, PLATO + 'Candidate'), ...distinctSubjectsWith(store, PLATO + 'candidate_source')])].filter((c) => !keep.has(c));
     const notWritten = (v) => rep.loss('candidate-set-not-written', LOSS_TEXT['candidate-set-not-written'], v);
     if (!isDataset && (sets.length || looseCandidates(new Set()).length)) {
@@ -719,12 +722,6 @@ const ISSUE_TEXT = {
   'structure-without-address': "A table's structure has no web address; PLATO JSON requires one for a structure whose components are listed.",
   'component-several': "A component of a table's structure names more than one dimension, measure or attribute; PLATO JSON gives each its own component.",
 };
-/** A place (typed plato:SpatialEntity) with a statement other than its type, or null. */
-function describedEntity(store) {
-  const tp = store.pid.get(TYPE); if (tp === undefined) return null;
-  const q = store.db.prepare('SELECT s FROM t WHERE p<>? AND s IN (SELECT s FROM t WHERE p=? AND o=?) LIMIT 1');
-  try { q.bind([tp, tp, PLATO + 'SpatialEntity']); return q.step() ? q.get(0) : null; } finally { q.finalize(); }
-}
 function* distinctSubjectsWith(store, p) {
   const i = store.pid.get(p); if (i === undefined) return;
   const q = store.db.prepare('SELECT DISTINCT s FROM t WHERE p=?');

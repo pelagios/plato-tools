@@ -46,6 +46,17 @@ test('JSON -> N-Triples -> PLATO JSON gives the candidate set back, typed or not
   }
 });
 
+test('a typed candidate set with something more said of a place it matches is still a candidate set, not a dataset of empty places', async () => {
+  const a = await go([file(SET)], 'convert', 'ntriples', { typing: true });
+  const nt = outText(a.e, 'candidate-set-judgements.nt')
+    + '<https://whgazetteer.org/example/entity/newton-by-the-river> <http://www.w3.org/2000/01/rdf-schema#label> "Newton (by the river)" .\n';
+  const b = await go([textFile(nt, 's.nt')], 'convert', 'plato-json');
+  const out = JSON.parse(outText(b.e, 's.json'));
+  assert.equal(out.profile, 'candidate-set', JSON.stringify(out).slice(0, 200));
+  assert.equal(out.candidates.length, 2);
+  assert.ok(!b.report.items.some((i) => i.kind === 'candidate-set-not-written'));
+});
+
 test('a graph holding a dataset and its candidate set is written as the dataset, and the candidate set is reported, not merged', async () => {
   const r = await go([file(`${PLATO_REPO}/examples/identity-judgements.ttl`)], 'convert', 'plato-json');
   const out = JSON.parse(outText(r.e, 'identity-judgements.json'));
@@ -54,6 +65,10 @@ test('a graph holding a dataset and its candidate set is written as the dataset,
   assert.ok(!JSON.stringify(out).includes('"similarityScore"'), 'no candidate is written into the dataset');
   const lost = r.report.items.find((i) => i.kind === 'candidate-set-not-written');
   assert.deepEqual(lost?.examples, ['https://whgazetteer.org/example/candidates/county-survey-2026-09-09']);
+  // RDF to RDF too: the dataset is written, and the candidate set's triples are reported as left out.
+  const nt = await go([file(`${PLATO_REPO}/examples/identity-judgements.ttl`)], 'convert', 'ntriples');
+  assert.ok(!outText(nt.e, 'identity-judgements.nt').includes('similarity_score'), 'no candidate is written');
+  assert.deepEqual(nt.report.items.find((i) => i.kind === 'candidate-set-not-written')?.examples, ['https://whgazetteer.org/example/candidates/county-survey-2026-09-09']);
   // The control: the dataset's own JSON, with no candidate set in it, reports none.
   const plain = await go([file(`${EX}/attestation-centric-judgements.json`)], 'convert', 'plato-json');
   assert.deepEqual(kinds(plain, 'loss'), []);
