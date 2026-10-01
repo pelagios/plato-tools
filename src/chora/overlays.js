@@ -249,6 +249,11 @@ export async function lookup(services, { fetchJson, allowed, now = () => new Dat
 }
 
 /** Allmaps' Editor for a map: the address given to it is sent to Allmaps when the link is followed. */
+// The Allmaps Editor link (Stephen, 2026-10-01): always offered, unless Allmaps is set to Never, and
+// its words say what following it sends. Following it is the user's own act, not a request of the
+// page's, so it needs no permission; Never is taken as "nothing of mine to Allmaps", and hides it.
+export const editorLinkShown = (state) => state !== 'never';
+export const EDITOR_LINK_TEXT = "Open in the Allmaps Editor ↗ (sends this map's address)";
 export const editorUrl = (manifestUrl, serviceId) => `${ALLMAPS_EDITOR}/images?url=${encodeURIComponent(manifestUrl ? upgrade(manifestUrl) : infoUrl(serviceId))}`;
 
 // ---- 3. Admission --------------------------------------------------------------------------------

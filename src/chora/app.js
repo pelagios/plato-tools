@@ -646,7 +646,7 @@ function initMaps() {
   window.__chora_overlays = { manager: layers, georef, get layer() { return layers.layer; } };
   renderMaps();
 }
-const allmapsAllowed = () => permissions.state('allmaps', 'allmaps') === 'allowed';
+const editorShown = () => ov.editorLinkShown(permissions.state('allmaps', 'allmaps'));
 const setStatus = (text, link = null) => { mapStatus = text; mapLink = link; state.mapError = text.startsWith('warn:') ? text.slice(5) : null; };
 
 /** A step needs permissions: a line for each not yet allowed, or, if one is set to Never, why the map is not shown. */
@@ -792,12 +792,11 @@ function renderMaps() {
   }
   if (mapOffer) {
     const name = mapOffer.title ? `“${esc(mapOffer.title)}”` : 'This map';
-    // The Editor is linked only once Allmaps is allowed: following the link sends it the map's address
-    // (provisional, until Stephen's ruling, R4).
-    const editor = allmapsAllowed() ? `<a href="${esc(ov.editorUrl(mapOffer.manifestUrl, mapOffer.services[0]))}" target="_blank" rel="noopener noreferrer" id="map-editor">Allmaps Editor</a>` : '';
+    // The Editor is linked unless Allmaps is set to Never, saying what following it sends (overlays.js).
+    const editor = editorShown() ? `<a href="${esc(ov.editorUrl(mapOffer.manifestUrl, mapOffer.services[0]))}" target="_blank" rel="noopener noreferrer" id="map-editor">${esc(ov.EDITOR_LINK_TEXT)}</a>` : '';
     html += `<div class="offer"><p>${name} came with no georeference${mapOffer.notFound ? ', and Allmaps has none for it' : ''}.</p>
       ${mapOffer.notFound ? '' : '<p><button type="button" class="primary" id="map-lookup">Look for a georeference</button></p>'}
-      ${editor ? `<p>${mapOffer.notFound ? 'You can' : 'Or'} georeference it in the ${editor}, and paste here the georeference it makes.</p>` : `<p>${mapOffer.notFound ? 'You can georeference it elsewhere, and' : 'Or'} paste a georeference of it here.</p>`}</div>`;
+      ${editor ? `<p>${mapOffer.notFound ? 'You can' : 'Or'} georeference it in the Allmaps Editor, and paste here the georeference it makes: ${editor}</p>` : `<p>${mapOffer.notFound ? 'You can georeference it elsewhere, and' : 'Or'} paste a georeference of it here.</p>`}</div>`;
   }
   if (mapStatus) {
     const warn = mapStatus.startsWith('warn:');
@@ -818,7 +817,7 @@ function renderMaps() {
       <p class="overlay-controls"><label>Opacity <input type="range" min="0" max="100" step="5" value="${Math.round(o.opacity * 100)}" data-opacity></label>
       <label><input type="checkbox" data-show${o.visible ? ' checked' : ''}> Show</label>
       <button type="button" data-fit>Fit</button> <button type="button" data-remove-map>Remove</button></p>
-      ${allmapsAllowed() ? `<p><a href="${esc(ov.editorUrl(e.manifestUrl, e.g.imageServiceId))}" target="_blank" rel="noopener noreferrer" data-editor>Open in the Allmaps Editor</a></p>` : ''}</li>`;
+      ${editorShown() ? `<p><a href="${esc(ov.editorUrl(e.manifestUrl, e.g.imageServiceId))}" target="_blank" rel="noopener noreferrer" data-editor>${esc(ov.EDITOR_LINK_TEXT)}</a></p>` : ''}</li>`;
   }).join('');
 }
 $('map-form').onsubmit = (e) => { e.preventDefault(); mapOffer = null; mapChoice = null; addMap({ text: $('map-input').value }); };

@@ -546,3 +546,12 @@ test('a pasted map waiting on a permission set to Never since is said to be refu
   assert.equal(ov.waitRefused({ ...pasted, pending: { kept: 'k' } }, st([`iiif:${A}`])), false);
   assert.equal(ov.waitRefused(null, st([`iiif:${A}`])), false);
 });
+
+test('the Allmaps Editor link is offered unless Allmaps is set to Never, and says what following it sends (Stephen, R4)', () => {
+  // Following the link is the user's own act, so it needs no permission; Never hides it.
+  assert.equal(ov.editorLinkShown('undecided'), true);
+  assert.equal(ov.editorLinkShown('allowed'), true);
+  assert.equal(ov.editorLinkShown('never'), false);
+  assert.match(ov.EDITOR_LINK_TEXT, /Allmaps Editor/);
+  assert.match(ov.EDITOR_LINK_TEXT, /sends this map's address/);
+});

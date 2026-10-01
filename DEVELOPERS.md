@@ -773,8 +773,9 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   is done without: the maps that need it are not shown, and nothing is said of them, but a map just
   pasted says it is set to Never. With no georeference, Allmaps is asked only from "Look for a
   georeference", which shows no notice: it needs `allmaps:allmaps`, and its line, like any other.
-  The Allmaps Editor is linked only once `allmaps:allmaps` is allowed, since following the link sends
-  Allmaps the map's address (provisional, pending Stephen's ruling). A georeference of several maps
+  The Allmaps Editor is always linked unless `allmaps:allmaps` is set to Never (Stephen, 2026-10-01):
+  following the link is the user's own act, so it needs no permission, and its words say it sends
+  the map's address ("Open in the Allmaps Editor ↗ (sends this map's address)"). A georeference of several maps
   (Allmaps' `/images/<id>` often holds several of one image) is a choice (`NeedChoice`): each with its
   label, date and number of control points, the most recently `modified` offered first.
   **Fetching** (`remote.js`): every document through `permissions.fetch`, which follows no redirect;

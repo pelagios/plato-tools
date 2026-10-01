@@ -2910,11 +2910,26 @@ def iiif_checks(pw, url, tmp):
         got = soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id)', 30, 'https://annotations.allmaps.org/maps/0000000000000003')
         asked = allmaps_hits[hits:]
         editor = page.get_attribute('#overlay-list a[data-editor]', 'href') if page.query_selector('#overlay-list a[data-editor]') else ''
-        return (offered and not editor_before and 'Allmaps learns' not in offer and 'asks Allmaps' not in offer and before == 0 and 'Needs permission: Allmaps' in said
+        return (offered and editor_before and 'sends this map' in offer and 'Allmaps learns' not in offer and 'asks Allmaps' not in offer and before == 0 and 'Needs permission: Allmaps' in said
                 and got and asked and all(urlparse(u).path.startswith('/images/') and '?url=' not in u for u in asked)
                 and editor.startswith('https://editor.allmaps.org/images?url=')), {
             'offered': offered, 'offer': offer[:200], 'editor before': editor_before, 'line': said, 'asked before allowing': before, 'asked': asked, 'got': got, 'editor': editor}
-    attempt('Chora maps: a manifest with no georeference offers "Look for a georeference", with no notice and no Editor link; Allmaps is asked nothing until allowed, then at /images/<id> only; the Editor link shows once it is allowed', lookup)
+    attempt('Chora maps: a manifest with no georeference offers "Look for a georeference" and, while Allmaps is not decided, the Editor link saying what it sends; Allmaps is asked nothing until allowed, then at /images/<id> only; the Editor link is still there once it is allowed', lookup)
+
+    def editor_never():
+        # Allmaps set to Never: the Editor link is absent from the offer and from every map's row, while the
+        # offer itself is still made (the control), and Allmaps is asked nothing.
+        hits = len(allmaps_hits)
+        panel_set([ALLMAPS_KEY], to='never', reload=True)
+        paste(A + '/manifests/grid/manifest')
+        offered = soon(page, '() => /no georeference/.test(document.getElementById("map-status")?.innerText || "")', 20)
+        editor = page.query_selector('#map-editor, #overlay-list a[data-editor]') is not None
+        listed = page.evaluate('() => window.__chora.overlays.length')
+        asked = len(allmaps_hits) - hits
+        panel_set([ALLMAPS_KEY], to='allowed', reload=True)      # put back for the checks after this one
+        back = soon(page, '() => !!document.querySelector("#overlay-list a[data-editor]")', 20) if listed else True
+        return offered and not editor and asked == 0 and back, {'offered': offered, 'editor shown under Never': editor, 'Allmaps asked': asked, 'back once allowed': back}
+    attempt('Chora maps: with Allmaps set to Never the Editor link is absent (the offer is still made, and Allmaps is asked nothing); allowed again, it is back', editor_never)
 
     def controls():
         s = cstate(page); keys = [o['key'] for o in s['overlays']]
