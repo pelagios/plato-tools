@@ -974,6 +974,15 @@ A push to `main` runs the tests, builds the site and publishes it to GitHub Page
   `plato-tools.intro`). `public/intro.js`, a classic script in `<head>`, sets `html.intro-hidden`
   before the first paint; it is a file, not an inline script, so that a policy of
   `script-src 'self'` allows it.
+- **The colour theme** is Auto (the device's setting), Light or Dark, chosen in the header of both
+  pages (`#theme-switch`, three radio buttons) and remembered per browser (localStorage
+  `plato-tools.theme`; nothing for Auto). `public/theme.js`, a classic script in `<head>` before the
+  stylesheet, sets `html[data-theme="light|dark"]` before the first paint, and takes up a choice
+  made in another tab. In `src/styles.css` every dark rule is written twice, under
+  `@media (prefers-color-scheme: dark)` for `:root:not([data-theme="light"])` and again for
+  `:root[data-theme="dark"]`, word for word; `test/theme.test.js` fails if a twin is missing or
+  differs, so add a colour to both. Chora's map (its basemaps and drawn layers) does not change
+  with the theme.
 - **Tooltips** are the site's own (`src/lib/tooltip.js`, loaded by each page; its styles are the
   commented block in `src/styles.css`), never the browser's: give an element `data-tip="…"`, or
   `data-tip-template="id"` for a `<template>` of rich text (no links or controls: a tooltip cannot

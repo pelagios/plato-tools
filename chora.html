@@ -9,6 +9,9 @@
   <link rel="icon" href="./logo/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="./logo/plato-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="./logo/plato-180.png">
+  <!-- Sets the colour theme chosen in this browser (Auto, Light or Dark) before the page is painted:
+       a classic script from this site, not an inline one, so that a policy of script-src 'self' allows it. -->
+  <script src="./theme.js"></script>
   <link rel="stylesheet" href="./src/styles.css">
 </head>
 <body class="chora">
@@ -20,7 +23,14 @@
       <a class="dev-badge" href="https://github.com/pelagios/plato-tools/issues" data-tip-template="dev-tip">Under development</a>
       <template id="dev-tip"><p><strong>PLATO tools is being built in the open.</strong> Its tools, and the formats they write, may still change: check what you make against the PLATO guide and the open issues.</p><p>What you make with it is checked against PLATO at the commit named at the foot of this page.</p><p>Found a problem? Follow this badge to report it on GitHub.</p></template>
     </div>
-    <button type="button" id="permissions-button" class="permissions-button" aria-haspopup="dialog">Permissions <span class="count"></span></button>
+    <div class="masthead-side">
+      <div id="theme-switch" class="theme-switch" role="radiogroup" aria-label="Colour theme">
+        <label><input type="radio" name="plato-theme" value="auto" autocomplete="off" checked><span>Auto</span></label>
+        <label><input type="radio" name="plato-theme" value="light" autocomplete="off"><span>Light</span></label>
+        <label><input type="radio" name="plato-theme" value="dark" autocomplete="off"><span>Dark</span></label>
+      </div>
+      <button type="button" id="permissions-button" class="permissions-button" aria-haspopup="dialog">Permissions <span class="count"></span></button>
+    </div>
   </div>
 </header>
 <main class="chora-main">

@@ -8,8 +8,13 @@
 @import '@fontsource/alegreya/500.css';
 @import '@fontsource/alegreya-sans/400.css';
 @import '@fontsource/alegreya-sans/700.css';
-:root { --fg: #1d2330; --muted: #5a6475; --bg: #fbfbf8; --card: #ffffff; --line: #d9dde3; --accent: #2757dd; --accent-fg: #ffffff; --warn: #8a5a00; --err: #a1261b; --ok: #256b2f; }
-@media (prefers-color-scheme: dark) { :root { color-scheme: dark; --fg: #e8eaee; --muted: #a5adba; --bg: #16191f; --card: #1e2229; --line: #353b45; --accent: #5ca5ff; --accent-fg: #0d1117; --warn: #e2b04a; --err: #f08074; --ok: #7ccf88; } }
+:root { color-scheme: light; --fg: #1d2330; --muted: #5a6475; --bg: #fbfbf8; --card: #ffffff; --line: #d9dde3; --accent: #2757dd; --accent-fg: #ffffff; --warn: #8a5a00; --err: #a1261b; --ok: #256b2f; }
+/* The dark scheme: on a device set to dark, unless Light is chosen in the header (public/theme.js sets
+   html[data-theme]), and wherever Dark is chosen. Each dark rule in this file is written twice, once
+   for each case, word for word (test/theme.test.js holds them to that); the page-wide ones carry the
+   root's condition in :where(), so that each keeps the specificity of the rule it overrides. */
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { color-scheme: dark; --fg: #e8eaee; --muted: #a5adba; --bg: #16191f; --card: #1e2229; --line: #353b45; --accent: #5ca5ff; --accent-fg: #0d1117; --warn: #e2b04a; --err: #f08074; --ok: #7ccf88; } }
+:root[data-theme="dark"] { color-scheme: dark; --fg: #e8eaee; --muted: #a5adba; --bg: #16191f; --card: #1e2229; --line: #353b45; --accent: #5ca5ff; --accent-fg: #0d1117; --warn: #e2b04a; --err: #f08074; --ok: #7ccf88; }
 * { box-sizing: border-box; }
 :root { --font-text: "Alegreya Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --font-headings: Alegreya, Georgia, "Times New Roman", serif;
@@ -47,6 +52,16 @@ input[type=radio], input[type=checkbox] { accent-color: var(--accent); }
 .masthead-side { display: flex; flex: none; flex-wrap: nowrap; justify-content: flex-end; align-items: center; gap: .5rem; }
 /* Permissions and "Hide introduction", side by side, the same size. */
 .intro-toggle, .permissions-button { white-space: nowrap; font-size: .95rem; padding: .35rem .8rem; }
+/* The colour theme (public/theme.js): Auto, Light or Dark, three radio buttons drawn as one segmented
+   control the height of the buttons beside it. The radios themselves are hidden but focusable; the
+   label of the one chosen takes the accent, and the focus ring is drawn on the label. */
+.theme-switch { display: inline-flex; flex: none; border: 1px solid var(--line); border-radius: 6px; background: var(--card); font-size: .95rem; line-height: 1.5; }
+.theme-switch label { position: relative; display: block; padding: .35rem .65rem; cursor: pointer; color: var(--fg); white-space: nowrap; }
+.theme-switch label + label { border-left: 1px solid var(--line); }
+.theme-switch label:first-child { border-radius: 5px 0 0 5px; } .theme-switch label:last-child { border-radius: 0 5px 5px 0; }
+.theme-switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.theme-switch label:has(input:checked) { background: var(--accent); color: var(--accent-fg); }
+.theme-switch label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; z-index: 1; }
 /* The introduction: the opening paragraph, with the guide's drawing of Plato floated beside it. The
    drawing is line art on a transparent ground; in the dark scheme its ink is inverted, as in the guide.
    The paragraph carries the promise, which keeps its weight as a phrase rather than a boxed panel.
@@ -60,7 +75,8 @@ html.intro-hidden .intro-toggle .if-hidden { display: inline; }
 .plato-mark { height: auto; }
 /* Wide enough for the words in Plato's thought bubble to be read (250px on a desktop screen). */
 .intro .plato-mark { float: right; width: 250px; margin: 0 0 .25rem 1rem; }
-@media (prefers-color-scheme: dark) { .plato-mark { filter: invert(1); } }
+@media (prefers-color-scheme: dark) { :where(:root:not([data-theme="light"])) .plato-mark { filter: invert(1); } }
+:where(:root[data-theme="dark"]) .plato-mark { filter: invert(1); }
 .lede { margin: 0; color: var(--fg); }
 .lede .promise { font-weight: 700; }
 section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.25rem; margin: 1.25rem 0; }
@@ -139,7 +155,8 @@ a:visited { color: var(--accent); }
 .tip strong { font-weight: 700; color: var(--gold); }
 @keyframes tip-in { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .tip { animation: none; } }
-@media (prefers-color-scheme: dark) { .tip { border-color: var(--iris); border-top-color: var(--gold); } .tip[data-side="above"], .tip[data-side="left"], .tip[data-side="right"] { border-top-color: var(--iris); } }
+@media (prefers-color-scheme: dark) { :where(:root:not([data-theme="light"])) .tip { border-color: var(--iris); border-top-color: var(--gold); } :where(:root:not([data-theme="light"])) .tip[data-side="above"], :where(:root:not([data-theme="light"])) .tip[data-side="left"], :where(:root:not([data-theme="light"])) .tip[data-side="right"] { border-top-color: var(--iris); } }
+:where(:root[data-theme="dark"]) .tip { border-color: var(--iris); border-top-color: var(--gold); } :where(:root[data-theme="dark"]) .tip[data-side="above"], :where(:root[data-theme="dark"]) .tip[data-side="left"], :where(:root[data-theme="dark"]) .tip[data-side="right"] { border-top-color: var(--iris); }
 .masthead > div:has(> .dev-badge) { display: flex; flex-wrap: wrap; align-items: center; column-gap: .75rem; }
 .masthead > div:has(> .dev-badge) > .family { flex-basis: 100%; }
 .dev-badge, .dev-badge:visited { display: inline-block; font: 700 .72rem/1.5 var(--font-text); letter-spacing: .06em; text-transform: uppercase; text-decoration: none; white-space: nowrap;
@@ -152,7 +169,8 @@ a:visited { color: var(--accent); }
    is coming and link to the issue where it is being planned. In the dark scheme the light blue
    takes cobalt's place, which would not show on a dark ground. */
 :root { --pin: #1f45b8; --gold: #f3c969; --gold-edge: #8a6d1f; --iris: #7cc4f2; --pupil: #101a3a; --tool-band: var(--pin); --soon: #4f8fc4; }
-@media (prefers-color-scheme: dark) { :root { --tool-band: var(--iris); --soon: var(--iris); } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --tool-band: var(--iris); --soon: var(--iris); } }
+:root[data-theme="dark"] { --tool-band: var(--iris); --soon: var(--iris); }
 /* The tools sit in the main column, with no panel and no heading shown (a visually hidden h2 keeps
    the order h1 > h2 > h3). The whole card is the link; Chora's, to a page of its own, has a double band. */
 .tools-bare { margin: 1.5rem 0 1.25rem; }
@@ -321,7 +339,8 @@ body.chora .note { color: var(--muted); font-size: .92rem; }
 .place-id { font: .78rem/1.4 var(--font-mono); overflow-wrap: anywhere; margin: 0; }
 .status { font-size: .72rem; letter-spacing: .04em; text-transform: uppercase; border-radius: 999px; padding: 0 .4rem; border: 1px solid currentColor; cursor: help; }
 .status-denied { color: #c0392b; } .status-doubted { color: #6b7280; } .status-reported { color: #7a4fc9; } .status-tentative { color: #b7791f; }
-@media (prefers-color-scheme: dark) { .status-denied { color: #f08074; } .status-doubted { color: #a5adba; } .status-reported { color: #b79cf0; } .status-tentative { color: #e2b04a; } }
+@media (prefers-color-scheme: dark) { :where(:root:not([data-theme="light"])) .status-denied { color: #f08074; } :where(:root:not([data-theme="light"])) .status-doubted { color: #a5adba; } :where(:root:not([data-theme="light"])) .status-reported { color: #b79cf0; } :where(:root:not([data-theme="light"])) .status-tentative { color: #e2b04a; } }
+:where(:root[data-theme="dark"]) .status-denied { color: #f08074; } :where(:root[data-theme="dark"]) .status-doubted { color: #a5adba; } :where(:root[data-theme="dark"]) .status-reported { color: #b79cf0; } :where(:root[data-theme="dark"]) .status-tentative { color: #e2b04a; }
 svg.timeline { width: 100%; height: auto; display: block; }
 svg.timeline .tl-text { font: 10px var(--font-text); fill: var(--fg); }
 svg.timeline .tl-axis { font: 9px var(--font-text); fill: var(--muted); }
@@ -357,7 +376,10 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; tex
   header.top { padding-top: 1.25rem; }
   h1 { font-size: 2rem; }
   .masthead { flex-wrap: wrap; align-items: flex-end; }
-  .masthead-side { flex-wrap: wrap; gap: .4rem; }
+  .masthead-side { flex: 1 1 100%; flex-wrap: wrap; justify-content: flex-start; gap: .4rem; }
+  .intro-toggle, .permissions-button, .theme-switch { font-size: .9rem; }
+  .intro-toggle, .permissions-button { padding: .3rem .6rem; }
+  .theme-switch label { padding: .3rem .5rem; }
   .intro .plato-mark { float: none; display: block; width: min(250px, 75%); margin: 0 auto .6rem; }
   .tools { grid-template-columns: 1fr; }
   section { padding: .9rem 1rem; }

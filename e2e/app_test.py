@@ -1139,7 +1139,7 @@ def main():
             main_permissions(ctx, page, url, main_requests)
             ctx.close()
             front = pw.chromium.launch(headless=True)
-            try: front_page_checks(front, url)
+            try: front_page_checks(front, url); theme_checks(front, url)
             finally: front.close()
             chora_checks(pw, url, tmp)
     finally:
@@ -1439,12 +1439,12 @@ def front_page_checks(browser, url):
               return { classic: [...document.head.querySelectorAll('script[src]')].filter((s) => !s.type || s.type === 'text/javascript').map((s) => new URL(s.src).pathname),
                 inline: inline.length, inlineIsPolicyWriter: inline.length === 1 && inline[0] === document.head.querySelector('script'),
                 scriptSrc: (meta.match(/script-src[^;]*/) || [''])[0], violations: window.__cspViolations || null }; }''')
-            same_origin = all(p.endswith('/intro.js') for p in heads['classic']) and len(heads['classic']) == 1
+            same_origin = [p.rsplit('/', 1)[-1] for p in heads['classic']] == ['theme.js', 'intro.js']
             policy_ok = "'self'" in heads['scriptSrc'] and 'unsafe-inline' not in heads['scriptSrc'] and 'unsafe-eval' not in heads['scriptSrc']
             return (bool(at) and at['htmlHidden'] is True and at['modulesRun'] is False and same_origin and heads['inlineIsPolicyWriter']
                     and policy_ok and heads['violations'] == []), {'when #intro was parsed': at, 'scripts': heads}
         finally: ctx.close()
-    attempt('front page: a hidden introduction is hidden as the page is parsed, before its modules run, by a script file of its own that the page\'s policy allows (no violation)', before_paint)
+    attempt('front page: a hidden introduction is hidden as the page is parsed, before its modules run, by a script file of its own (beside the theme\'s) that the page\'s policy allows (no violation)', before_paint)
 
     def refused():
         ctx, page = fresh(init=[REFUSE_STORAGE])
@@ -1670,6 +1670,110 @@ def front_page_checks(browser, url):
             finally: ctx.close()
         return (len(found) == 2 and all(ISHI in v['text'] and v['link'] == 'Institute for Spatial History Innovation (ISHI)' for v in found.values())), found
     attempt('both pages: the footer acknowledges ISHI, with its link', acknowledged)
+
+# ---- The colour theme (public/theme.js): Auto, Light or Dark, on both pages ----------------------------
+# The browser is told which scheme the device prefers (color_scheme), and the page's colours are
+# measured, not only its attributes read: the page's background, a panel's, and on the main page the
+# band of a tool's card (cobalt in light, light blue in dark) and the drawing's inversion. Each check
+# sees both schemes, so a page that never changes cannot pass one, and the switch must be there to be used.
+THEME_STATE = """() => { const lum = (c) => { const m = c && c.match(/[\\d.]+/g); if (!m) return null; const [r, g, b] = m.map(Number); return (0.299 * r + 0.587 * g + 0.114 * b) > 128 ? 'light' : 'dark'; };
+  const css = (e, p) => e ? getComputedStyle(e)[p] : null, root = document.documentElement, group = document.getElementById('theme-switch');
+  const checked = group ? [...group.querySelectorAll('input[name="plato-theme"]')].filter((i) => i.checked).map((i) => i.value) : null;
+  return { page: lum(css(document.body, 'backgroundColor')), body: css(document.body, 'backgroundColor'), panel: lum(css(document.getElementById('files'), 'backgroundColor')),
+    band: css(document.querySelector('#toolbox .tool:not(.coming)'), 'borderTopColor'), mark: css(document.querySelector('#intro .plato-mark'), 'filter'),
+    colorScheme: css(root, 'colorScheme'), attr: root.getAttribute('data-theme'), checked, group: !!group && !!group.offsetWidth,
+    stored: (() => { try { return localStorage.getItem('plato-tools.theme'); } catch { return 'refused'; } })(),
+    violations: window.__cspViolations || null, atParse: window.__themeAtParse }; }"""
+# The theme on <html> at the moment <body> is parsed, before any paint and before the page's modules run.
+THEME_AT_PARSE = """window.__themeAtParse = null;
+new MutationObserver((ms, o) => { if (!document.body) return; window.__themeAtParse = { attr: document.documentElement.getAttribute('data-theme'), modulesRun: !!(window.__plato || window.__chora) }; o.disconnect(); })
+  .observe(document, { childList: true, subtree: true });"""
+THEME_PAGES = (('index', ''), ('chora', 'chora.html'))
+COBALT, IRIS = 'rgb(31, 69, 184)', 'rgb(124, 196, 242)'
+
+def theme_checks(browser, url):
+    def opened(scheme, name, init=(), ctx=None):
+        ctx = ctx or browser.new_context(viewport={'width': 1280, 'height': 900}, color_scheme=scheme)
+        for s in (CSP_WATCH, THEME_AT_PARSE, *init): ctx.add_init_script(s)
+        page = ctx.new_page(); page.set_default_timeout(T(8) * 1000)
+        errors = []; page.on('pageerror', lambda e: errors.append(str(e)[:160]))
+        page.goto(NOTOOLS if PROVE else url + name)
+        return ctx, page, errors
+    def state(page): return page.evaluate(THEME_STATE)
+    def choose(page, theme): page.click(f'#theme-switch label:has(input[value="{theme}"])')
+    def clean(*ss): return all(s['violations'] == [] for s in ss)
+    def each_page(fn):
+        out = {}
+        for key, name in THEME_PAGES:
+            ok, detail = fn(key, name); out[key] = detail
+            if not ok: return False, out
+        return True, out
+
+    def light_under_dark(key, name):
+        ctx, page, errors = opened('dark', name)
+        try:
+            a = state(page); choose(page, 'light'); b = state(page)
+            page.reload(); c = state(page)
+            choose(page, 'auto'); d = state(page)
+            main = key != 'index' or (a['band'] == IRIS and a['mark'] == 'invert(1)' and b['band'] == COBALT and b['mark'] == 'none' and c['band'] == COBALT)
+            return (a['group'] and a['checked'] == ['auto'] and a['page'] == 'dark' and a['panel'] == 'dark' and a['attr'] is None and a['colorScheme'] == 'dark'
+                    and b['checked'] == ['light'] and b['page'] == 'light' and b['panel'] == 'light' and b['attr'] == 'light' and b['colorScheme'] == 'light' and b['stored'] == 'light'
+                    and c['checked'] == ['light'] and c['page'] == 'light' and c['atParse'] == {'attr': 'light', 'modulesRun': False}
+                    and d['checked'] == ['auto'] and d['page'] == 'dark' and d['attr'] is None and d['stored'] is None
+                    and main and clean(a, b, c, d) and not errors), {'auto': a, 'light': b, 'after reload': c, 'auto again': d, 'errors': errors}
+        finally: ctx.close()
+    attempt('theme, both pages: under a device set to dark, Light chosen gives light colours (page, panels, tool bands, drawing, native controls), set before the page is painted after a reload, and Auto gives dark again', lambda: each_page(light_under_dark))
+
+    def auto_follows(key, name):
+        ctx, page, errors = opened('light', name)
+        try:
+            a = state(page); page.emulate_media(color_scheme='dark'); b = state(page); page.emulate_media(color_scheme='light'); c = state(page)
+            return (a['group'] and a['checked'] == ['auto'] and a['page'] == 'light' and a['colorScheme'] == 'light' and b['page'] == 'dark' and b['panel'] == 'dark' and b['colorScheme'] == 'dark'
+                    and c['page'] == 'light' and a['attr'] is None and b['attr'] is None and clean(a, b, c) and not errors), {'light': a, 'dark': b, 'light again': c, 'errors': errors}
+        finally: ctx.close()
+    attempt('theme, both pages: Auto follows the device\'s setting both ways, light to dark and back, with no reload', lambda: each_page(auto_follows))
+
+    def dark_under_light(key, name):
+        ctx, page, errors = opened('light', name)
+        try:
+            a = state(page); choose(page, 'dark'); b = state(page); page.reload(); c = state(page)
+            return (a['group'] and a['page'] == 'light' and b['checked'] == ['dark'] and b['page'] == 'dark' and b['panel'] == 'dark' and b['colorScheme'] == 'dark' and b['attr'] == 'dark'
+                    and b['stored'] == 'dark' and c['page'] == 'dark' and c['checked'] == ['dark'] and c['atParse'] == {'attr': 'dark', 'modulesRun': False}
+                    and (key != 'index' or (a['band'] == COBALT and b['band'] == IRIS)) and clean(a, b, c) and not errors), {'light': a, 'dark': b, 'after reload': c, 'errors': errors}
+        finally: ctx.close()
+    attempt('theme, both pages: under a device set to light, Dark chosen gives dark colours, and is kept after a reload', lambda: each_page(dark_under_light))
+
+    def refused(key, name):
+        ctx, page, errors = opened('dark', name, init=[REFUSE_STORAGE])
+        try:
+            a = state(page); choose(page, 'light'); b = state(page); page.reload(); c = state(page)
+            return (a['stored'] == 'refused' and a['group'] and a['page'] == 'dark' and b['page'] == 'light' and b['checked'] == ['light']
+                    and c['page'] == 'dark' and c['checked'] == ['auto'] and clean(a, b, c) and not errors), {'first': a, 'light': b, 'after reload': c, 'errors': errors}
+        finally: ctx.close()
+    attempt('theme, both pages: with storage refused, Light chosen still applies to the page, nothing fails, and a reload is back to Auto', lambda: each_page(refused))
+
+    def accessible(key, name):
+        ctx, page, errors = opened('dark', name)
+        try:
+            group = page.get_by_role('radiogroup', name='Colour theme')
+            radios = [(r.get_attribute('value'), r.is_checked()) for r in group.get_by_role('radio').all()] if group.count() == 1 else []
+            group.get_by_role('radio', name='Auto').focus(); page.keyboard.press('ArrowRight'); after = state(page)
+            ring = page.evaluate("() => { const l = document.querySelector('#theme-switch label:has(input:focus-visible)'); return l ? getComputedStyle(l).outlineStyle : null; }")
+            return (radios == [('auto', True), ('light', False), ('dark', False)] and after['checked'] == ['light'] and after['page'] == 'light' and ring == 'solid'
+                    and not errors), {'radios': radios, 'after the arrow key': after, 'focus ring': ring}
+        finally: ctx.close()
+    attempt('theme, both pages: the switch is a radio group named "Colour theme" (Auto, Light, Dark; Auto chosen), worked by the arrow keys, with a focus ring', lambda: each_page(accessible))
+
+    def other_tabs():
+        ctx = browser.new_context(viewport={'width': 1280, 'height': 900}, color_scheme='dark')
+        try:
+            _, one, _ = opened('dark', '', ctx=ctx); _, two, _ = opened('dark', 'chora.html', ctx=ctx)
+            a = state(two); choose(one, 'light')
+            moved = soon(two, "() => document.documentElement.getAttribute('data-theme') === 'light'", 5); b = state(two)
+            choose(one, 'auto'); back = soon(two, "() => !document.documentElement.hasAttribute('data-theme')", 5); c = state(two)
+            return (a['page'] == 'dark' and moved and b['page'] == 'light' and b['checked'] == ['light'] and back and c['page'] == 'dark' and c['checked'] == ['auto']), {'before': a, 'after Light in the other tab': b, 'after Auto': c}
+        finally: ctx.close()
+    attempt('theme: a theme chosen on the main page is taken up at once by Chora open in another tab, and Auto too', other_tabs)
 
 def chora_checks(pw, url, tmp):
     base = url.rstrip('/') + '/'; here = urlparse(base).netloc
@@ -2505,4 +2609,4 @@ def chora_checks(pw, url, tmp):
     attempt('Chora: a pasted style on two sites needs each allowed before either is asked for tiles; once both are, both are used, and a third site is still refused', multi_origin)
     ctx.close()
 
-main()
+if __name__ == '__main__': main()
