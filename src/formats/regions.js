@@ -214,6 +214,12 @@ function bboxOf(geom) {
   const x = Math.min(...xs), y = Math.min(...ys);
   return [x, y, Math.max(...xs) - x, Math.max(...ys) - y];
 }
+/** [x, y, w, h] with w and h each at least 1, grown about the box's middle. */
+function atLeastOnePixel([x, y, w, h]) {
+  const grow = (start, size) => (size >= 1 ? [start, size] : [start - (1 - size) / 2, 1]);
+  const [x1, w1] = grow(x, w), [y1, h1] = grow(y, h);
+  return [x1, y1, w1, h1];
+}
 /** Great-circle distance in km between two [lon, lat] positions (haversine, mean radius). */
 export function haversineKm([lon1, lat1], [lon2, lat2]) {
   const r = Math.PI / 180;
@@ -233,6 +239,11 @@ function radiusKm(point, outline, record) {
   const outlineKm = Math.max(0, ...vertices(outline).map((v) => haversineKm(point.coordinates, v)));
   return upToHundredths(outlineKm + (record.controlPointMisfitKm ?? 0));
 }
+
+/** The words for a region given up on through an error that is a fault in these tools. */
+export const UNEXPECTED = 'an unexpected error, which is a fault in these tools';
+/** Every such error, in this process (see placeRegions): for the tests, which assert it empty. */
+export const unexpectedRegionErrors = [];
 
 /**
  * Place the regions of one annotation, adding to each of its attestations the point, the citations
@@ -287,8 +298,14 @@ export async function placeRegions(a, attestations, ctx, report) {
         if (!containsRegion(m.g, geom, { space: 'image' })) report('annotation-region-crosses-map-edge', `${where}: ${shape} on ${source} reaches beyond ${maps(inside)}`);
         await place(m, geom, centres.get(m), attestations, { ...ctx, index, replaced }, report, shape);
       } catch (e) {
-        if (!(e instanceof DataError)) throw e;
-        report('annotation-region-unplaced', `${where}: ${shape} on ${source}: ${message(e)}`);
+        if (e instanceof DataError) report('annotation-region-unplaced', `${where}: ${shape} on ${source}: ${message(e)}`);
+        else {
+          // Anything else is a fault in these tools, not in the data: it costs this region its
+          // point, never the run. It is recorded (unexpectedRegionErrors) so that the tests, which
+          // assert that list empty, still see such a fault.
+          unexpectedRegionErrors.push(e);
+          report('annotation-region-unplaced', `${where}: ${shape} on ${source}: ${UNEXPECTED} (${e && e.name || 'Error'}: ${message(e)})`);
+        }
       }
     }
   }
@@ -349,8 +366,10 @@ async function place(m, geom, centre, attestations, ctx, report, shape) {
   const { geojson: point, record } = await toWorld(m.g, { type: 'Point', coordinates: centre }, { space: 'image', role });
   const { geojson: outline } = await toWorld(m.g, geom, { space: 'image' });
   const geometry = { geojson: point, ...(role ? { role } : {}), precisionKm: [radiusKm(point, outline, record)] };
-  // The region's exact pixel box (georefCitation pads nothing unless asked).
-  const box = bboxOf(geom);
+  // The region's exact pixel box (georefCitation pads nothing unless asked), at least 1 pixel
+  // each way: a straight horizontal or vertical line (Recogito Studio's path tool draws them) has
+  // no height or no width, and a box of none is no box. It grows about its middle.
+  const box = atLeastOnePixel(bboxOf(geom));
   const map = georefCitation(record, { region: box });
   // The pixel region in words adds something only where the map's locator does not give the same
   // box (a canvas of another size than the image, say).

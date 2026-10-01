@@ -4,7 +4,7 @@
 // test/fixtures/annotations/README.md and test/fixtures/georef/README.md. Every kind is shown
 // reported where it applies AND not reported where it does not (the control), and every placed
 // point is compared with what src/engine/georef/ gives for the same pixels, not with numbers alone.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, rmSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { addPlatoFormats, strictFormatLogger } from '../src/lib/formats.js';
 import { annotationsToDocument, annotationsToDocumentPlaced, ANNOTATION_KINDS } from '../src/formats/annotations.js';
-import { NO_ROLE_NOTE, SYMBOL_NOTE } from '../src/formats/regions.js';
+import { NO_ROLE_NOTE, SYMBOL_NOTE, UNEXPECTED, unexpectedRegionErrors, placeRegions } from '../src/formats/regions.js';
 import { readGeoreference, toWorld, georefNote, georefCitation, georefAnnotationCitation, LABEL_ANCHOR } from '../src/engine/georef/index.js';
 import { detect, readable, GEOREF_REASON, MANIFEST_REASON } from '../src/engine/input.js';
 import { LOSS_TEXT } from '../src/engine/report.js';
@@ -57,6 +57,10 @@ const unplaced = () => {
   return { doc, reported, of: (kind) => reported.filter(([k]) => k === kind).map(([, e]) => e), attestation: (n) => doc.attestations.find((a) => a.notes?.includes(`urn:uuid:${id(n)}`)) };
 };
 const rocque = () => readGeoreference(json(ROCQUE), { manifest: json(ROCQUE_M) });
+// A fault in the tools costs a region its point, not the run (annotation-region-unplaced, "an
+// unexpected error"), so that a run never ends on one; but no test here may meet one unless it
+// means to, and the one that does takes its error back off the list.
+after(() => assert.deepEqual(unexpectedRegionErrors.map((e) => String(e && e.stack || e)), [], 'no test met a fault in the tools by accident'));
 const exampleFor = (examples, n) => examples.filter((e) => e.startsWith(id(n)));
 
 // ---- independent arithmetic -------------------------------------------------------------------------
@@ -77,7 +81,7 @@ function fanCentroid(points) {
   }
   return [x / area, y / area];
 }
-const outlineVertices = (g) => (g.type === 'Polygon' ? g.coordinates.flat(1) : g.coordinates.flat(2));
+const outlineVertices = (g) => (g.type === 'LineString' ? g.coordinates : g.type === 'Polygon' ? g.coordinates.flat(1) : g.coordinates.flat(2));
 /**
  * What the reader must have written for a region with this centre, outline and role: the point is
  * toWorld of the centre; the radius the farthest outline vertex plus the control-point misfit (none
@@ -473,6 +477,49 @@ test('annotation-region-unplaced: a curved outline, with the reason; the run goe
   assert.match(u[0], new RegExp(`^${id(11)}: an SVG shape on .*: The SVG path uses the command "C"`));
   assert.equal(attestation(11).geometries, undefined);
   assert.ok(attestation(12), 'annotations after it were read');
+});
+test('a straight horizontal or vertical line (Studio\'s path tool, or <line>) is placed, cited by a box 1 pixel across; a diagonal line, the control, by its own box', async () => {
+  const line = (svg) => ({ ...item(4), target: { ...item(4).target, selector: { ...item(4).target.selector, value: svg } } });
+  const lineGeom = (a, b) => ({ type: 'LineString', coordinates: [a, b] });
+  const cases = [
+    ['horizontal path', '<svg><path d="M 6000,5000 L 6200,5000"/></svg>', [6000, 5000], [6200, 5000], [6000, 4999.5, 200, 1], `${CANVAS}#xywh=6000,4999,200,2`],
+    ['vertical line', '<svg><line x1="6100" y1="4950" x2="6100" y2="5050"/></svg>', [6100, 4950], [6100, 5050], [6099.5, 4950, 1, 100], `${CANVAS}#xywh=6099,4950,2,100`],
+    ['diagonal path (control)', '<svg><path d="M 6000,4950 L 6200,5050"/></svg>', [6000, 4950], [6200, 5050], [6000, 4950, 200, 100], `${CANVAS}#xywh=6000,4950,200,100`],
+  ];
+  const g = await rocque();
+  for (const [what, svg, a, b, bbox, locator] of cases) {
+    const r = await placed({ georefs: [ROCQUE], manifests: [ROCQUE_M] }, [line(svg)]);
+    assert.deepEqual(r.of('annotation-region-unplaced'), [], what);
+    assert.equal(r.of('annotation-region-shape').length, 1, what);
+    const att = r.attestation(4);
+    const want = await expected(g, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], lineGeom(a, b), LABEL_ANCHOR, bbox);
+    assert.deepEqual(att.geometries, [want.geometry], what);
+    assert.deepEqual(att.citations, want.citations, what);
+    assert.equal(att.citations[0].locator, locator, what);
+  }
+});
+test('a fault in the tools while placing a region costs that region its point, reported with the error, never the run', async () => {
+  const g = await rocque();
+  // A georeference naming no transformation the tools know cannot come from readGeoreference; here
+  // it stands for any fault in them, met while placing.
+  const broken = { ...g, transformation: 'no-such-transformation' };
+  const reported = [];
+  const att = { citations: [{ source: { '@id': CANVAS, title: 't', authorityType: 'source' } }] };
+  const before = unexpectedRegionErrors.length;
+  await placeRegions(item(1), [att], { maps: [{ g: broken, file: 'broken.json', used: 0 }], where: id(1), label: true }, (k, e) => reported.push([k, e]));
+  const caught = unexpectedRegionErrors.splice(before);
+  assert.equal(caught.length, 1, 'recorded for the tests to see');
+  assert.ok(!(caught[0] instanceof Error && caught[0].constructor.name === 'DataError'));
+  const u = reported.filter(([k]) => k === 'annotation-region-unplaced').map(([, e]) => e);
+  assert.equal(u.length, 1);
+  assert.ok(u[0].startsWith(`${id(1)}: the rectangle xywh=pixel:5120,5600,230,72 on `) && u[0].includes(`: ${UNEXPECTED} (`), u[0]);
+  assert.equal(att.geometries, undefined);
+  assert.equal(reported.filter(([k]) => k === 'annotation-region-shape').length, 0);
+  // Control: the same region through the real georeference is placed, and records nothing.
+  const ok = { citations: [...att.citations] };
+  await placeRegions(item(1), [ok], { maps: [{ g, file: 'rocque.json', used: 0 }], where: id(1), label: true }, () => {});
+  assert.equal(ok.geometries.length, 1);
+  assert.equal(unexpectedRegionErrors.length, before);
 });
 test('annotation-region-ambiguous: inside both masks of the constructed page, naming both; inside one of the real page, placed', async () => {
   const both = await placed({ georefs: [LOC_OVERLAP] });
