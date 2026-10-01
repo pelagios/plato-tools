@@ -184,16 +184,17 @@ test('part of a Pleiades place\'s record is carried as given, not rewritten, and
   assert.match(LOSS_TEXT['address-pleiades-part'], /a location, a name, or a format such as \/json/);
 });
 
-test('a TEI ref giving one Pleiades place as http and as https gives one attestation, and no tei-ref-several', () => {
+test('a TEI ref giving one Pleiades place as http and as https gives one attestation, and is not ambiguous', () => {
   for (const ref of ['http://pleiades.stoa.org/places/579885 https://pleiades.stoa.org/places/579885', 'https://pleiades.stoa.org/places/579885 http://pleiades.stoa.org/places/579885/']) {
     const m = mappedTei(`<p><placeName ref="${ref}">Athenae</placeName></p>`);
     assert.deepEqual(m.doc.attestations.map((a) => a.about), ['https://pleiades.stoa.org/places/579885'], ref);
-    assert.ok(!m.kinds.has('tei-ref-several'), ref);
+    assert.ok(!m.kinds.has('tei-ref-ambiguous') && !m.kinds.has('tei-several-ids'), ref);
+    assert.equal(m.doc.attestations[0].identities, undefined, ref);
   }
-  // control: two places in one ref are two attestations, and reported
+  // control: two Pleiades places in one ref are ambiguous (one gazetteer), and nothing is converted
   const two = mappedTei('<p><placeName ref="http://pleiades.stoa.org/places/579885 https://pleiades.stoa.org/places/541138">Athenae</placeName></p>');
-  assert.deepEqual(two.doc.attestations.map((a) => a.about), ['https://pleiades.stoa.org/places/579885', 'https://pleiades.stoa.org/places/541138']);
-  assert.ok(two.kinds.has('tei-ref-several'));
+  assert.deepEqual(two.doc.attestations, []);
+  assert.ok(two.kinds.has('tei-ref-ambiguous'));
 });
 
 test('I.Sicily\'s GeoNames address, http://sws.geonames.org/2523083, is carried as https://sws.geonames.org/2523083/', () => {

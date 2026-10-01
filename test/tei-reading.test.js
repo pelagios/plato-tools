@@ -544,12 +544,14 @@ test('a corpus of two texts, each with more than 10,000 names in a translation, 
   assert.deepEqual(corpus([5, 10001]), ['10,000 place names held, the next on line 10013, in the <text> beginning on line 12']);
 });
 
-test('listPlaces: a place with several different web addresses is ambiguous, reported, not converted; two forms of one address are one', () => {
-  const s = LIST(`<place xml:id="two"><placeName>Two</placeName><idno type="URI">https://pleiades.stoa.org/places/579885</idno><idno type="URI">https://sws.geonames.org/264371/</idno></place>`
+test('listPlaces: two web addresses from one gazetteer are ambiguous, reported, not converted; two forms of one address are one', () => {
+  const s = LIST(`<place xml:id="two"><placeName>Two</placeName><idno type="URI">https://sws.geonames.org/264371/</idno><idno type="URI">https://www.geonames.org/264372/athens.html</idno><idno type="URI">https://pleiades.stoa.org/places/579885</idno></place>`
     + `<place xml:id="one"><placeName>One</placeName><idno type="URI">http://pleiades.stoa.org/places/579885</idno><idno type="URI">https://pleiades.stoa.org/places/579885</idno></place>`);
   const m = mapped(s, { listPlaces: true });
-  assert.deepEqual(examples(m, 'tei-listplace-ambiguous'), ['#two: https://pleiades.stoa.org/places/579885, https://sws.geonames.org/264371/']);
+  // Only the two GeoNames addresses are listed: they are what makes it ambiguous.
+  assert.deepEqual(examples(m, 'tei-listplace-ambiguous'), ['#two: https://sws.geonames.org/264371/, https://sws.geonames.org/264372/']);
   assert.ok(!names(m).includes('Two'));
+  assert.ok(!m.kinds.has('tei-several-ids'));
   // control: the http and https forms of one Pleiades address are one address, converted once
   const one = m.doc.attestations.filter((a) => a.names[0].toponym === 'One');
   assert.deepEqual(one.map((a) => a.about), ['https://pleiades.stoa.org/places/579885']);

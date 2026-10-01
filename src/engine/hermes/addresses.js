@@ -249,3 +249,66 @@ export function addressFromPattern(value, pattern, { shape } = {}) {
   // The scheme is compared in any case (HTTPS:// is https://), and written in lower case.
   return placeAddress(lowerScheme(pattern.trim()).replace(PLACEHOLDER, v));
 }
+
+// ---- several addresses for one place: the preferred one ---------------------------------------------
+// A source may give one place several addresses (a <place> in a TEI list of places with an idno for
+// each gazetteer, a ref with two addresses). After the canonical rules, the addresses are grouped by
+// the authority each is from (one authority per gazetteer, AUTHORITIES; any other address by its host,
+// without a leading "www."). Two different addresses from the same authority name two records of one
+// gazetteer, and which place is meant cannot be told: the place stays ambiguous. Otherwise one address
+// is preferred, by the fixed order below (gazetteers of places, then authority files, then a project's
+// own, then any other host in alphabetical order), and the others are the preferred one's identity
+// relations. The order is versioned with PREFERRED_RULES (DEVELOPERS.md, "Preferred authorities"):
+// changing it changes which address earlier conversions are about.
+
+/** The version of the order below, named in every note that says which address was preferred. */
+export const PREFERRED_RULES = 'hermes-preferred 1';
+const lowHost = (url) => url.hostname.toLowerCase().replace(/\.$/, '');
+/** The authorities, in the order an address is preferred by: each with the test of a URL that is its. */
+export const AUTHORITIES = [
+  { key: 'pleiades', name: 'Pleiades', test: (u) => lowHost(u) === 'pleiades.stoa.org' },
+  { key: 'whg', name: 'World Historical Gazetteer', test: (u) => (lowHost(u) === 'w3id.org' && /^\/whg(\/|$)/i.test(u.pathname)) || /(^|\.)whgazetteer\.org$/.test(lowHost(u)) },
+  { key: 'geonames', name: 'GeoNames', test: (u) => /^(?:www\.|sws\.)?geonames\.org$/.test(lowHost(u)) },
+  { key: 'tgn', name: 'Getty Thesaurus of Geographic Names', test: (u) => lowHost(u) === 'vocab.getty.edu' && /^\/tgn(\/|$)/i.test(u.pathname) },
+  { key: 'wikidata', name: 'Wikidata', test: (u) => /^(?:www\.)?wikidata\.org$/.test(lowHost(u)) },
+  { key: 'gnd', name: 'GND', test: (u) => lowHost(u) === 'd-nb.info' && /^\/gnd(\/|$)/i.test(u.pathname) },
+  { key: 'viaf', name: 'VIAF', test: (u) => /^(?:www\.)?viaf\.org$/.test(lowHost(u)) },
+  { key: 'pmb', name: 'PMB (Personen der Moderne Basis)', test: (u) => lowHost(u) === 'pmb.acdh.oeaw.ac.at' },
+];
+
+/** The authority an address is from: { key, rank } (rank its place in AUTHORITIES; any other host after them all, keyed by its host without "www."). */
+export function authorityOf(iri) {
+  let url;
+  try { url = new URL(iri); } catch { return { key: String(iri), rank: AUTHORITIES.length }; }
+  const i = AUTHORITIES.findIndex((a) => a.test(url));
+  return i >= 0 ? { key: AUTHORITIES[i].key, rank: i } : { key: lowHost(url).replace(/^www\./, ''), rank: AUTHORITIES.length };
+}
+
+/**
+ * One place's addresses (objects with an `iri`, already canonical and each given once): { preferred,
+ * others } by the order of AUTHORITIES (other hosts after them, alphabetically by host), or
+ * { clash: [iri, iri, …] } when two of them are from the same authority (the first such authority's,
+ * in the order given). One address is { preferred, others: [] }.
+ */
+export function preferredAddress(addresses) {
+  const by = new Map();
+  for (const a of addresses) {
+    const au = authorityOf(a.iri);
+    const g = by.get(au.key);
+    if (g) g.list.push(a); else by.set(au.key, { ...au, list: [a] });
+  }
+  const clash = [...by.values()].find((g) => g.list.length > 1);
+  if (clash) return { clash: clash.list.map((a) => a.iri) };
+  const order = [...by.values()].sort((x, y) => x.rank - y.rank || (x.key < y.key ? -1 : x.key > y.key ? 1 : 0));
+  return { preferred: order[0].list[0], others: order.slice(1).map((g) => g.list[0]) };
+}
+
+/** The identity relations an attestation about `preferred` carries to each of `others`: the source links them, without saying how strongly. */
+export function identityRelations(preferred, others) {
+  return others.map((o) => ({ subject: preferred, object: o, identityType: 'unspecified' }));
+}
+
+/** The note on a record whose place had several addresses: which one it is about, and by which order. */
+export function preferredNote(preferred, others) {
+  return `The place has ${others.length + 1} addresses: this attestation is about ${preferred} (${PREFERRED_RULES}), with an identity relation to ${others.length > 1 ? 'each of the others' : 'the other'}: ${others.join(', ')}`;
+}

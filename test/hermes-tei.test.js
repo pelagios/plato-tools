@@ -90,7 +90,6 @@ test('a prose edition: book, chapter, milestone and page in the locator; the sou
   assert.deepEqual(a.map((x) => [x.names[0].toponym, x.citations[0].locator]), [
     ['Corinth', 'book 2, chapter 1, section 1, page 12'],
     ['Kenchreai', 'book 2, chapter 1, section 2, page 12'],
-    ['Kenchreai', 'book 2, chapter 1, section 2, page 12'],
     ['Sikyon', 'book 2, chapter 2, page 13'],
     ['Phlious', 'book 2, chapter 2, page 13, in a note'],
     ['Argos', 'book 2, chapter 2, page 13, xml:id arg'],
@@ -244,12 +243,20 @@ test('a local ref to a place with no web address is reported; one with a web add
   assert.ok(!names(PTR).includes('Νεφελοκοκκυγία'));
   assert.ok(names(PTR).includes('Ἀθηνῶν'), 'control');
 });
-test('a local ref to a place with several web addresses carries nothing over, and lists them', () => {
-  // The idno writes https://www.wikidata.org/entity/Q192393, listed in its canonical form (rule wikidata-https).
-  assert.deepEqual(examples(PTR, 'tei-ref-ambiguous'), ['#thebes: https://pleiades.stoa.org/places/541138, http://www.wikidata.org/entity/Q192393']);
-  assert.ok(!names(PTR).includes('Θῆβαι'));
-  assert.ok(!about(PTR).includes('https://pleiades.stoa.org/places/541138') && !about(PTR).includes('http://www.wikidata.org/entity/Q192393'));
-  assert.ok(about(PTR).includes('https://pleiades.stoa.org/places/579885'), 'control: #athens, with one address, is resolved');
+test('a local ref to a place with addresses from two gazetteers: one attestation about the preferred one, with an identity relation', () => {
+  // #thebes gives Pleiades and Wikidata (the idno writes https://www.wikidata.org/entity/Q192393: rule wikidata-https).
+  assert.deepEqual(examples(PTR, 'tei-ref-ambiguous'), []);
+  const t = PTR.doc.attestations.filter((a) => a.names[0].toponym === 'Θῆβαι');
+  assert.deepEqual(t.map((a) => a.about), ['https://pleiades.stoa.org/places/541138']);
+  assert.deepEqual(t[0].identities, [{ subject: 'https://pleiades.stoa.org/places/541138', object: 'http://www.wikidata.org/entity/Q192393', identityType: 'unspecified' }]);
+  assert.ok(t[0].notes.split('\n').includes('The place has 2 addresses: this attestation is about https://pleiades.stoa.org/places/541138 (hermes-preferred 1), with an identity relation to the other: http://www.wikidata.org/entity/Q192393'), t[0].notes);
+  assert.ok(t[0].notes.split('\n').includes('Place address given as https://www.wikidata.org/entity/Q192393 (rule wikidata-https, hermes-addresses 1)'), t[0].notes);
+  assert.match(t[0].notes, /ref="#thebes"/);
+  assert.ok(!about(PTR).includes('http://www.wikidata.org/entity/Q192393'), 'no attestation about the other address');
+  assert.ok(examples(PTR, 'tei-several-ids').includes('https://pleiades.stoa.org/places/541138, with http://www.wikidata.org/entity/Q192393'));
+  assert.equal(valid(PTR.doc), null);
+  const athens = PTR.doc.attestations.find((a) => a.about === 'https://pleiades.stoa.org/places/579885');
+  assert.equal(athens.identities, undefined, 'control: #athens, with one address, has no identity relations');
 });
 test('a ref into another file is reported', () => {
   assert.deepEqual(examples(PTR, 'tei-ref-relative'), ['places.xml#delphi (Δελφοί)']);
@@ -281,12 +288,27 @@ test('several originals in the sourceDesc: the first is derivedFrom, the others 
   assert.deepEqual(examples(PTR, 'tei-sourcedesc-several'), ['Second witness']);
   assert.deepEqual(PTR.doc.attestations[0].citations[0].source.derivedFrom, { title: 'First witness', authorityType: 'source' });
 });
-test('a ref with several web addresses gives one attestation each, a note naming them, and a warning', () => {
-  assert.deepEqual(examples(PROSE, 'tei-ref-several'), ['<placeName> on line 35: https://pleiades.stoa.org/places/570536, https://sws.geonames.org/257880/']);
+test('a ref with addresses from two gazetteers gives one attestation, about the preferred one, with an identity relation and a warning', () => {
+  assert.deepEqual(examples(PROSE, 'tei-several-ids'), ['https://pleiades.stoa.org/places/570536, with https://sws.geonames.org/257880/']);
   const k = PROSE.doc.attestations.filter((a) => a.names[0].toponym === 'Kenchreai');
-  assert.deepEqual(k.map((a) => a.about), ['https://pleiades.stoa.org/places/570536', 'https://sws.geonames.org/257880/']);
-  assert.ok(k.every((a) => a.notes.startsWith('The ref of this place name gives 2 addresses, each an attestation of its own: ')));
-  assert.equal(examples(PROSE, 'tei-ref-several').length, 1, 'control: the single-address names in the same file raise no warning');
+  assert.deepEqual(k.map((a) => a.about), ['https://pleiades.stoa.org/places/570536']);
+  assert.deepEqual(k[0].identities, [{ subject: 'https://pleiades.stoa.org/places/570536', object: 'https://sws.geonames.org/257880/', identityType: 'unspecified' }]);
+  assert.ok(k[0].notes.startsWith('The place has 2 addresses: this attestation is about https://pleiades.stoa.org/places/570536 (hermes-preferred 1)'), k[0].notes);
+  assert.equal(PROSE.doc.attestations.filter((a) => a.identities).length, 1, 'control: the single-address names in the same file have none');
+  assert.equal(TEI_KINDS['tei-several-ids'], 'warning');
+  assert.equal(TEI_KINDS['tei-ref-several'], undefined, 'the old one-attestation-each kind is gone');
+});
+test('an inline ref with Pleiades and Wikidata: one attestation about Pleiades, whichever comes first; two of one gazetteer: refused', () => {
+  for (const ref of ['https://www.wikidata.org/wiki/Q1524 https://pleiades.stoa.org/places/579885', 'https://pleiades.stoa.org/places/579885 http://www.wikidata.org/entity/Q1524']) {
+    const m = mapped(tei(`<p><placeName ref="${ref}">Athenae</placeName> <placeName ref="${ref}">Athenis</placeName></p>`));
+    assert.deepEqual(about(m), ['https://pleiades.stoa.org/places/579885', 'https://pleiades.stoa.org/places/579885'], ref);
+    assert.deepEqual(m.doc.attestations[0].identities, [{ subject: 'https://pleiades.stoa.org/places/579885', object: 'http://www.wikidata.org/entity/Q1524', identityType: 'unspecified' }], ref);
+    assert.equal(examples(m, 'tei-several-ids').length, 1, `reported once for the place: ${ref}`);
+    assert.ok(!m.kinds.has('tei-ref-several') && !m.kinds.has('tei-ref-ambiguous'), ref);
+    assert.equal(valid(m.doc), null, ref);
+  }
+  const two = mapped(tei('<p><placeName ref="https://www.wikidata.org/wiki/Q1524 http://www.wikidata.org/entity/Q1525">Athenae</placeName></p>'));
+  assert.deepEqual([about(two), examples(two, 'tei-ref-ambiguous')], [[], ['<placeName> on line 2: http://www.wikidata.org/entity/Q1524, http://www.wikidata.org/entity/Q1525']]);
 });
 test('a file with no place name that points to a place says so; one with such names does not', () => {
   const m = mapped(tei('<p><placeName>Athenae</placeName></p>'));
@@ -300,9 +322,11 @@ test('a place waited for by several place names resolves them all; one waiting f
   const m = mapped(s);
   const got = m.doc.attestations.map((a) => [a.names[0].toponym, a.about.split('/').pop()]);
   assert.deepEqual(got.filter(([w]) => w.startsWith('A') && w !== 'AB'), [['A1', '1'], ['A2', '1'], ['A3', '1'], ['A4', '1']], 'every place name waiting for #a, once each');
-  assert.deepEqual(got.filter(([w]) => w === 'AB').map(([, n]) => n), ['1', '2'], 'resolved once #b is read too');
+  // #a and #b are two Pleiades places: resolved once #b is read too, and then ambiguous (one gazetteer)
+  assert.deepEqual(got.filter(([w]) => w === 'AB'), []);
+  assert.deepEqual(examples(m, 'tei-ref-ambiguous'), ['<placeName> on line 2: https://pleiades.stoa.org/places/1, https://pleiades.stoa.org/places/2']);
   assert.deepEqual(got.filter(([w]) => w === 'B1'), [['B1', '2']]);
-  assert.equal(got.length, 7);
+  assert.equal(got.length, 5);
   assert.deepEqual(examples(m, 'tei-ref-local'), ['#z (no place with this id in the file)'], 'the one that never comes is reported at the end');
 });
 // ---- variant readings: place names inside <app> and <choice> ---------------------------------------
@@ -477,7 +501,7 @@ test('XML cut short, or not well formed, is a DataError; the whole file reads', 
   assert.ok(teiToDocument(s).attestations.length > 0);
   let n = 0;
   for await (const ev of teiSource({ files: [textFile(s, 'whole.xml')] }, new Report())) if (ev.type === 'attestation') n++;
-  assert.equal(n, 6);
+  assert.equal(n, 5);
 });
 test('XML that is not TEI, or says it is not UTF-8, is a DataError in the reader', () => {
   assert.throws(() => teiToDocument('<root><placeName ref="https://example.org/p">X</placeName></root>'), (e) => e instanceof DataError && /not TEI/.test(e.message));

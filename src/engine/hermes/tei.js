@@ -4,10 +4,11 @@
 // ref="https://pleiades.stoa.org/places/579885">Athenae</placeName>) says that the edition, at that
 // point, names that place: the place's address is what the attestation is about, the words marked
 // are the name as written, and the edition, with where in it the words stand, is the citation. One
-// attestation is made for each pair of a place name and a place address it points to, as the
-// Recogito reader (src/formats/annotations.js) makes one for each link from a passage to a place.
-// Everything else is either carried (a key, several addresses, where the words came from, in the
-// notes) or reported by kind. Nothing is dropped silently, except the parts of the teiHeader that
+// attestation is made for each place name and the place it points to (about the preferred one of
+// the place's addresses where it has several), as the Recogito reader (src/formats/annotations.js)
+// makes one for each link from a passage to a place.
+// Everything else is either carried (a key, where the words came from, in the notes; a place's other
+// addresses, as identity relations) or reported by kind. Nothing is dropped silently, except the parts of the teiHeader that
 // describe the file rather than cite it (who encoded it, its revision history, its taxonomies).
 //
 // The file is parsed as a stream with saxes (no DOM: a Web Worker has no DOMParser, and an edition
@@ -21,7 +22,7 @@ import { SaxesParser } from 'saxes';
 import { PLATO, isAbsoluteIri } from '../../lib/context.js';
 import { DataError, textStream } from '../input.js';
 import { LOSS_TEXT } from '../report.js';
-import { placeAddress, addressNote, addressFromPattern, patternFault, GAZETTEER_PATTERNS } from './addresses.js';
+import { placeAddress, addressNote, addressFromPattern, patternFault, GAZETTEER_PATTERNS, preferredAddress, identityRelations, preferredNote } from './addresses.js';
 
 export const TEI_NS = 'http://www.tei-c.org/ns/1.0';
 const ATTESTED = PLATO + 'Attested';
@@ -157,7 +158,7 @@ export const TEI_KINDS = {
   'tei-key-shape': 'loss',
   'tei-findspot-no-object': 'loss',
   'address-not-a-place': 'loss',
-  'tei-ref-several': 'warning',
+  'tei-several-ids': 'warning',
   'address-pleiades-part': 'warning',
   'address-web-page': 'warning',
   'tei-source-no-address': 'warning',
@@ -795,7 +796,8 @@ export class TeiReader {
 
   /**
    * A place in a list of places, read with the reading option listPlaces: one attestation for the
-   * one web address its idnos give (several: ambiguous, reported, nothing converted), its first name the headword (formStatus Headword: the form the edition
+   * web address its idnos give (several: the preferred one, with identity relations to the others,
+   * severalIds; two from one gazetteer: ambiguous, reported, nothing converted), its first name the headword (formStatus Headword: the form the edition
    * files the place under), its other names reported. Its coordinates are carried only where they can
    * be the editors' own: the place's address is on the edition's own site (the host of the
    * publicationStmt's idno of type URI, never a DOI), and the header declares no datum but WGS84.
@@ -804,9 +806,12 @@ export class TeiReader {
     const which = pl.id !== undefined ? `#${pl.id}` : 'a place with no xml:id';
     const words = pl.names.map((n) => n.text).join(', ') || 'no name';
     if (!pl.uris.length) { this.report('tei-listplace-no-address', `${which}: ${words}`); return; }
-    // Several different addresses: which place is meant cannot be told, as for a ref to it (tei-ref-ambiguous).
-    // Two forms of one address (http and https) were made one as the idnos were read.
-    if (pl.uris.length > 1) { this.report('tei-listplace-ambiguous', `${which}: ${pl.uris.map((u) => u.iri).join(', ')}`); return; }
+    // Several different addresses: one is preferred (severalIds), unless two are from one gazetteer,
+    // when which place is meant cannot be told, as for a ref to it (tei-ref-ambiguous). Two forms of
+    // one address (http and https) were made one as the idnos were read.
+    const chosen = preferredAddress(pl.uris);
+    if (chosen.clash) { this.report('tei-listplace-ambiguous', `${which}: ${chosen.clash.join(', ')}`); return; }
+    const u = chosen.preferred, others = chosen.others;
     if (!pl.names.length) { if (pl.geo.length) this.report('tei-listplace-geo', `${which}: ${pl.geo.join('; ')}`); return; }
     const [head, ...variants] = pl.names;
     if (variants.length) this.report('tei-listplace-variant', `${which}: ${variants.map((n) => n.text).join(', ')}`);
@@ -831,20 +836,34 @@ export class TeiReader {
     const own = this.ownHost();
     const locator = `list of places${pl.id !== undefined ? `, place ${pl.id}` : ''}`;
     if (!this.headed) this.header();
-    for (const u of pl.uris) {
-      const att = { about: u.iri, names: [{ ...name }], formStatus: HEADWORD };
-      if (points.length) {
-        if (own && hostOf(u.iri) === own) att.geometries = points.map((p) => ({ reprPoint: [p.lon, p.lat], geojson: { type: 'Point', coordinates: [p.lon, p.lat] }, sourceLabel: p.label }));
-        else this.report('tei-listplace-geo-gazetteer', `${which}: ${points.map((p) => p.label).join('; ')} (${u.iri})`);
-      }
-      att.citations = [{ source, locator }];
-      const notes = [];
-      if (u.from) notes.push(addressNote(u));
-      notes.push(`From TEI element <place${pl.id !== undefined ? ` xml:id="${pl.id}"` : ''}> on line ${pl.fileLine} of ${this.fileName}`);
-      att.notes = notes.join('\n');
-      this.attestations++;
-      this.out.push({ type: 'attestation', value: att });
+    const att = { about: u.iri, names: [{ ...name }], formStatus: HEADWORD };
+    if (points.length) {
+      if (own && hostOf(u.iri) === own) att.geometries = points.map((p) => ({ reprPoint: [p.lon, p.lat], geojson: { type: 'Point', coordinates: [p.lon, p.lat] }, sourceLabel: p.label }));
+      else this.report('tei-listplace-geo-gazetteer', `${which}: ${points.map((p) => p.label).join('; ')} (${u.iri})`);
     }
+    att.citations = [{ source, locator }];
+    const notes = this.severalIds(att, u, others);
+    notes.push(`From TEI element <place${pl.id !== undefined ? ` xml:id="${pl.id}"` : ''}> on line ${pl.fileLine} of ${this.fileName}`);
+    att.notes = notes.join('\n');
+    this.attestations++;
+    this.out.push({ type: 'attestation', value: att });
+  }
+  /**
+   * An attestation about the preferred one of a place's addresses (preferredAddress): its identity
+   * relations to the others (identityType unspecified: the edition links them without saying how
+   * strongly; the attestation's citation of the edition is their provenance), reported once for each
+   * place (tei-several-ids). Returns the notes so far: which address was preferred, and the original
+   * of each address rewritten.
+   */
+  severalIds(att, preferred, others) {
+    const notes = [];
+    if (others.length) {
+      att.identities = identityRelations(preferred.iri, others.map((o) => o.iri));
+      notes.push(preferredNote(preferred.iri, others.map((o) => o.iri)));
+      this.once('tei-several-ids', `${preferred.iri}, with ${others.map((o) => o.iri).join(', ')}`);
+    }
+    for (const a of [preferred, ...others]) if (a.from) notes.push(addressNote(a));
+    return notes;
   }
   // ---- places in the teiHeader (headerPlaces) -----------------------------------------------------
   // EpiDoc's header says where the object was found (<provenance type="found">) and where it was made
@@ -1088,7 +1107,12 @@ export class TeiReader {
       const id = p.slice(1), pl = this.places.get(id);
       if (!pl) { if (final) this.report('tei-ref-local', `${p} (no place with this id in the file)`); return null; }
       if (pl.uris.length === 1) return { ...pl.uris[0], via: p };
-      if (pl.uris.length > 1) { this.report('tei-ref-ambiguous', `${p}: ${pl.uris.map((u) => u.iri).join(', ')}`); return null; }
+      if (pl.uris.length > 1) {
+        // The place's preferred address, with the others (severalIds); two from one gazetteer: ambiguous.
+        const c = preferredAddress(pl.uris);
+        if (c.clash) { this.report('tei-ref-ambiguous', `${p}: ${c.clash.join(', ')}`); return null; }
+        return { ...c.preferred, via: p, others: c.others.map((o) => ({ ...o, via: p })) };
+      }
       this.report('tei-ref-local', p);
       return null;
     }
@@ -1117,36 +1141,38 @@ export class TeiReader {
     return null;
   }
   emit(m, final) {
+    // Every address the ref gives (a #x its place's, all of them), each once: one place, about the
+    // preferred one, with identity relations to the others (severalIds); two from one gazetteer: ambiguous.
     const resolved = [];
-    for (const p of m.pointers) { const r = this.resolve(p, m, final); if (r && !resolved.some((x) => x.iri === r.iri)) resolved.push(r); }
-    if (m.keyAddress) resolved.push(m.keyAddress);
+    const add = (r) => { if (!resolved.some((x) => x.iri === r.iri)) resolved.push(r); };
+    for (const p of m.pointers) { const r = this.resolve(p, m, final); if (r) { const { others = [], ...one } = r; add(one); others.forEach(add); } }
+    if (m.keyAddress) add(m.keyAddress);
     if (!resolved.length) return;
+    const chosen = preferredAddress(resolved);
+    if (chosen.clash) { this.report('tei-ref-ambiguous', `<${m.element}> on line ${m.fileLine}: ${chosen.clash.join(', ')}`); return; }
     if (!this.headed) this.header();
-    const where = `<${m.element}> on line ${m.fileLine}`;
-    if (resolved.length > 1) this.report('tei-ref-several', `${where}: ${resolved.map((r) => r.iri).join(', ')}`);
     const name = m.toponym ? { toponym: m.toponym } : undefined;
     if (name && m.language) name.language = m.language;
     if (name && m.printed && m.printed !== m.toponym) name.sourceLabel = m.printed;
-    for (const r of resolved) {
-      const att = { about: r.iri };
-      if (name) { att.names = [{ ...name }]; att.formStatus = m.editorial ? this.editorialIri : ATTESTED; }
-      att.citations = [{ source: m.source, ...(m.locator ? { locator: m.locator } : {}) }];
-      if (m.relation) att.relations = [{ ...m.relation }];
-      const notes = [];
-      if (m.editorial) notes.push(m.editorialNote || "The editors' words, not the source's.");
-      if (m.extraNotes) notes.push(...m.extraNotes);
-      if (m.keyNote) notes.push(m.keyNote);
-      else if (m.key) notes.push(`Key: ${m.key}`);
-      if (resolved.length > 1) notes.push(`The ref of this place name gives ${resolved.length} addresses, each an attestation of its own: ${resolved.map((x) => x.iri).join(', ')}.`);
-      // Where the attestation came from, as the Recogito reader says "From annotation …". The
-      // element's xml:id is not taken for the attestation's @id: the edition can be revised under
-      // the same ids, and a published attestation must never change.
-      if (r.from) notes.push(addressNote(r));
-      notes.push(`From TEI element <${m.element}${m.xmlId ? ` xml:id="${m.xmlId}"` : ''}${r.via ? ` ref="${r.via}"` : ''}> on line ${m.fileLine} of ${this.fileName}`);
-      att.notes = notes.join('\n');
-      this.attestations++;
-      this.out.push({ type: 'attestation', value: att });
-    }
+    const r = chosen.preferred;
+    const att = { about: r.iri };
+    if (name) { att.names = [{ ...name }]; att.formStatus = m.editorial ? this.editorialIri : ATTESTED; }
+    att.citations = [{ source: m.source, ...(m.locator ? { locator: m.locator } : {}) }];
+    if (m.relation) att.relations = [{ ...m.relation }];
+    const several = this.severalIds(att, r, chosen.others);
+    const notes = [];
+    if (m.editorial) notes.push(m.editorialNote || "The editors' words, not the source's.");
+    if (m.extraNotes) notes.push(...m.extraNotes);
+    if (m.keyNote) notes.push(m.keyNote);
+    else if (m.key) notes.push(`Key: ${m.key}`);
+    notes.push(...several);
+    // Where the attestation came from, as the Recogito reader says "From annotation …". The
+    // element's xml:id is not taken for the attestation's @id: the edition can be revised under
+    // the same ids, and a published attestation must never change.
+    notes.push(`From TEI element <${m.element}${m.xmlId ? ` xml:id="${m.xmlId}"` : ''}${r.via ? ` ref="${r.via}"` : ''}> on line ${m.fileLine} of ${this.fileName}`);
+    att.notes = notes.join('\n');
+    this.attestations++;
+    this.out.push({ type: 'attestation', value: att });
   }
 }
 

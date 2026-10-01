@@ -270,11 +270,13 @@ readers link to those headings, so keep them.
 
 - **TEI** (`tei.js`). Each place name in `<text>` (`placeName`, `settlement`, `region`, `country`,
   `bloc`, `district`, `geogName`, and `rs` or `name` with `type="place"`) becomes one
-  attestation-centric attestation for each address its `@ref` resolves to (its words leave out a
+  attestation-centric attestation about the place its `@ref` resolves to (its words leave out a
   `<geo>`, `<location>`, `<idno>` or `<note>` inside it, `ASIDE`; a `<geo>` there is `tei-place-geo`): a web address as it is,
   a prefixed pointer through the header's `<prefixDef>` (the pattern anchored to the whole of what
-  follows the prefix), and `#x` through the one web-address `<idno>` (or `<linkGrp>/<link type="normal">` target, as
-  EHRI writes them: `placeUri`) of `<place xml:id="x">` in the same file (several: ambiguous, nothing converted). A place name in an `<rdg>`, or in the part of a
+  follows the prefix), and `#x` through the web-address `<idno>`s (or `<linkGrp>/<link type="normal">` targets, as
+  EHRI writes them: `placeUri`) of `<place xml:id="x">` in the same file. Several addresses, from a ref, a `#x` or a listed place,
+  are one place, about the preferred one with identity relations to the others, unless two are from one gazetteer
+  ("Preferred authorities", below). A place name in an `<rdg>`, or in the part of a
   `<choice>` not taken, is a variant (`tei-variant`): one in a part of a `<choice>` waits until the
   `<choice>` closes. In a `<text>` with a top-level `div type="edition"`, every other top-level div,
   of whatever type (an introduction as much as a commentary), before the edition div as after it,
@@ -443,6 +445,40 @@ earlier version converted, and this one rewrites, as changed (their `about` and 
 and the version in the notes says why. Agora mints addresses only for attestations about places under the
 dataset's own base address (an attestation about a Pleiades, GeoNames or Wikidata place is left
 without one, `place-outside-base`), so releases already published are mostly untouched.
+
+#### Preferred authorities, hermes-preferred 1 (2026-10-01)
+
+A place given several addresses (a TEI `<place>`'s idnos or links, a ref's addresses, or a `#x`
+ref's place's) is one place. After the address rules above, `preferredAddress` (`addresses.js`)
+groups the addresses by authority (`authorityOf`: the rows below; any other address by its host,
+without a leading `www.`). Two different addresses from one authority name two records of one
+gazetteer: the place is ambiguous, refused and reported (`tei-listplace-ambiguous` for a listed
+place, `tei-ref-ambiguous` for a ref, each listing the two). Otherwise the attestation is about the
+address of the first authority in this order, and carries `identities`, one for each other address
+(in the same order): `{ subject: <preferred>, object: <other>, identityType: "unspecified" }` (the
+edition links them without saying how strongly; the relations bundled by an attestation share its
+provenance, so the attestation's citation of the edition is theirs, and they carry no `source` of
+their own). Its note names the addresses and this version, and each place is reported once
+(`tei-several-ids`, a warning: carried, worth a look). A listed place's coordinates are compared
+with the preferred address's host only.
+
+| Order | Authority | Addresses |
+| --- | --- | --- |
+| 1 | `pleiades` | Pleiades: `pleiades.stoa.org` |
+| 2 | `whg` | World Historical Gazetteer: `w3id.org/whg/…`, `whgazetteer.org` |
+| 3 | `geonames` | GeoNames: `sws.geonames.org`, `(www.)geonames.org` |
+| 4 | `tgn` | Getty TGN: `vocab.getty.edu/tgn/…` |
+| 5 | `wikidata` | Wikidata: `(www.)wikidata.org` |
+| 6 | `gnd` | GND: `d-nb.info/gnd/…` |
+| 7 | `viaf` | VIAF: `(www.)viaf.org` |
+| 8 | `pmb` | PMB (a project's own): `pmb.acdh.oeaw.ac.at` |
+
+Gazetteers of places come first, then authority files, then a project's own; any other host comes
+after them all, in alphabetical order of its host (a Wikipedia page, carried and reported as
+`address-web-page`, is such a host). A change to the order, or a new authority, is a new version:
+change `PREFERRED_RULES` and this heading together (`test/tei-ids-and-notes.test.js` fails when the
+heading, the rows and `AUTHORITIES` differ), since every such note names the version and an earlier
+conversion's attestation may be about a different address.
 
 **Georeferencing** (`src/engine/georef/`, on branch `hermes-georef`, shared with Chora). Positions
 on a map image to positions in the world and back, through a IIIF Georeference Annotation as

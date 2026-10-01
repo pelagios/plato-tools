@@ -160,8 +160,14 @@ test('EHRI-like: a <place>\'s <linkGrp><link type="normal"> web targets are read
   assert.deepEqual(c.doc.attestations.map((a) => a.about), m.doc.attestations.map((a) => a.about));
 });
 
-test('EHRI-like: two different gazetteer links in one linkGrp make the place ambiguous, as two idnos do', () => {
+test('EHRI-like: links to two gazetteers in one linkGrp are one place, about the preferred one, as two idnos are', () => {
   const m = mapped(EHRI_LIKE('<linkGrp><link type="normal" target="https://www.geonames.org/294801/haifa.html https://www.wikidata.org/wiki/Q41621"/></linkGrp>'));
-  assert.deepEqual(examples(m, 'tei-ref-ambiguous'), ['#ehri_haifa: https://sws.geonames.org/294801/, http://www.wikidata.org/entity/Q41621']);
-  assert.deepEqual(m.doc.attestations.map((a) => a.about), ['https://portal.ehri-project.eu/keywords/ehri_camps-1']);
+  assert.deepEqual(examples(m, 'tei-ref-ambiguous'), []);
+  const haifa = m.doc.attestations.find((a) => a.about === 'https://sws.geonames.org/294801/');
+  assert.deepEqual(haifa.identities, [{ subject: 'https://sws.geonames.org/294801/', object: 'http://www.wikidata.org/entity/Q41621', identityType: 'unspecified' }]);
+  assert.deepEqual(examples(m, 'tei-several-ids'), ['https://sws.geonames.org/294801/, with http://www.wikidata.org/entity/Q41621']);
+  // control: two links to one gazetteer are still ambiguous
+  const two = mapped(EHRI_LIKE('<linkGrp><link type="normal" target="https://www.geonames.org/294801/haifa.html https://sws.geonames.org/294802/"/></linkGrp>'));
+  assert.deepEqual(examples(two, 'tei-ref-ambiguous'), ['#ehri_haifa: https://sws.geonames.org/294801/, https://sws.geonames.org/294802/']);
+  assert.deepEqual(two.doc.attestations.map((a) => a.about), ['https://portal.ehri-project.eu/keywords/ehri_camps-1']);
 });
