@@ -92,6 +92,7 @@ import { droppedText, FORMAT_WORDS } from '../src/engine/report.js';
 import jsonld from 'jsonld';
 import { Json2Rdf } from '../src/formats/json2rdf.js';
 import { tripleNT } from '../src/lib/ntriples.js';
+import { unzipSync, strFromU8 } from 'fflate';
 
 test('the candidate set profile is loaded, as vendored from PLATO at the pin', () => {
   const vendored = JSON.parse(readFileSync('public/plato/candidate-set.schema.json', 'utf8'));
@@ -131,7 +132,7 @@ test("a dataset's candidateSets are the reverse of plato:candidates_for, exactly
   const lines = (nt) => nt.split('\n').filter((l) => l.includes(CF)).map((l) => l.trim()).sort();
   const ref = await jsonld.toRDF({ ...d, '@context': res.context['@context'] }, { format: 'application/n-quads', safe: false });
   assert.deepEqual(lines(ref), want);
-  assert.deepEqual([...new Set(lines(compiledNT(d)))], want);
+  assert.deepEqual(lines(compiledNT(d)), want);
   // The control: without candidateSets, neither writes the link.
   const { candidateSets, ...gz } = d.gazetteer;
   assert.deepEqual(lines(compiledNT({ ...d, gazetteer: gz })), []);
@@ -151,7 +152,12 @@ test("a dataset's candidateSets, written as spreadsheet tables or LPF, are left 
     assert.ok(it, `${target}: reported`);
     assert.equal(it.message, droppedText('gazetteer.candidateSets', FORMAT_WORDS[target]));
     assert.match(it.message, /^The candidate sets that suggest matches for the gazetteer's places \(candidateSets\)/);
-    assert.ok(!(target === 'tables' ? Object.values(r.e.outs).flat().join('') : outText(r.e, r.outputs[0].name)).includes(candidateSets[0]), `${target}: not written`);
+    // What was written, as text: the tables are a zip, so it is unzipped and its CSVs read.
+    const text = target === 'tables'
+      ? Object.values(unzipSync(new Uint8Array(await new Blob(r.e.outs[r.outputs[0].name]).arrayBuffer()))).map(strFromU8).join('\n')
+      : outText(r.e, r.outputs[0].name);
+    // The gazetteer's title is there (so the search can find what was written), and its candidate set is not.
+    assert.deepEqual([text.includes(d.gazetteer.title), text.includes(candidateSets[0])], [true, false], `${target}: title written, candidate set not`);
     // The control: without them, nothing of the kind is reported.
     const c = await go([textFile(JSON.stringify({ ...d, gazetteer: gz }), 'n.json')], 'convert', target);
     assert.ok(!c.report.items.some((i) => i.kind === 'dropped:gazetteer.candidateSets'), target);

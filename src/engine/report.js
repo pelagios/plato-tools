@@ -68,7 +68,7 @@ export const LOSS_TEXT = {
   'certainty-level': 'A certainty level that cannot be expressed here (not one of Certain, LessCertain, Uncertain, or on a kind of fact that has no certainty) is dropped.',
   'identity-bundle': "Identity matches that an attestation makes together (its identities, such as the matches made in accepting a cluster) cannot go here: written as separate matches they would lose the source, date and certainty they share, and could no longer be withdrawn together. They are left out; the example names the attestation.",
   'identity-denied': 'A statement that places are NOT the same (an attestation that denies the identity matches it bundles) cannot be expressed here, so it is left out: written as a match, it would say the opposite. The example names the attestation.',
-  'identity-provenance': 'Who made an identity match, and the candidate it came from, have no place here and are dropped.',
+  'identity-provenance': 'Who made an identity match, and the candidate it answers, have no place here and are dropped.',
   'place-without-address': 'A place has no web address (@id), so it is written as a place of its own, with a place_id of its own (place, place-2 and so on), and reading the tables back gives it an address under the base address it did not have.',
   'place-address': "A place's web address is not kept: its place_id is only the last part of it, and reading the tables back makes a new address from the base address you choose.",
   'source-address': "A source's web address is not kept: its source_id is only the last part of it, and reading the tables back makes a new address from the base address you choose.",
@@ -283,7 +283,7 @@ const KEY_WORDS = {
   'identityRelation.assertedBy': 'who made an identity match (assertedBy)',
   'identityRelation.assertedAt': 'when an identity match was made (assertedAt)',
   'identityRelation.source': 'the source of an identity match',
-  'identityRelation.promotedFrom': 'the candidate an identity match was promoted from (promotedFrom)',
+  'identityRelation.promotedFrom': 'the candidate an identity match or a denial answers (promotedFrom)',
 };
 const OBJECT_WORDS = { gazetteer: 'the gazetteer', spatialEntity: 'a place', attestation: 'an attestation', name: 'a name', geometry: 'a location', timespan: 'a date', type: 'a type', propertyValue: 'a property value', source: 'a source', citation: 'a citation', identityRelation: 'an identity match', relation: 'a relation' };
 /** Words for a dropped key: "The notes on an attestation: Linked Places Format has no place for this, so it is left out." */

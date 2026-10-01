@@ -71,11 +71,10 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   no schema can make (ids under their set, the mint rule, duplicates, across sets, `promotedFrom`
   against a set given beside a dataset) and the version check of a candidate set (the candidate set
   specification's section 13). An edge case to keep: a candidate's score records what the software
-  said when it first suggested the pair. A candidate is frozen once its set is published, and a later
-  set leaves out any pair already published, so if the places' names change and the same algorithm
-  with the same settings would now score the pair differently, the first score stands. To record a new
-  score, publish it under a new `algorithmVersion` or new `matchParameters`, which gives the candidate
-  a new address.
+  said when it first suggested the pair. A candidate is frozen once issued, and a later set leaves out
+  any pair already published, so if the places' names change and the same algorithm with the same
+  settings would now score the pair differently, the first score stands. A different
+  `algorithmVersion` or different `matchParameters` make a different candidate, with its own address.
 - **The about sheet's authors.** Each item of `creator` is `Name <address>`, an address alone, or a
   name alone (PLATO 8385472; `creatorOf` in `tables.js`). An item alone is an address only with a
   scheme and `//`, or a `urn:`, `tag:`, `mailto:`, `doi:` or `info:` scheme, so that `Re:Place` is a
