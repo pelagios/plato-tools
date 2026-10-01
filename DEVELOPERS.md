@@ -563,8 +563,9 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   leaves none that FTS5 would fold further, so the index, the scan and the name shown agree. A place
   found by a name and not its label comes with `matched`, the first such name, which the list shows
   ("Byzantium — also Konstantinoupolis"). The names go to SQLite as they are read (`sx`, a row per
-  name, and `sxa`, the attestation each came from, kept only until the withdrawn names are taken out
-  and then dropped, its pages used again by what is made after it); then one row per place holds its
+  name, written 64 rows to a statement; and `sxa`, a row per attestation with an `@id` giving the
+  range of `sx` numbers its names took, kept only until the withdrawn names are taken out and then
+  dropped, its pages used again by what is made after it); then one row per place holds its
   folded label and names joined (`sf`), apart from the records. A query of three letters or more is
   looked up in an FTS5 trigram index of `sf` (`sft`, which does not copy its text), as one phrase; a
   shorter one scans `sf` with `LIKE`. A page goes on from the last place of the one before (`after`,
@@ -584,7 +585,17 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
     measured about 200 ms for the count of a common trigram at DEEP's scale, once per query.
     Earlier, on 540,000 synthetic places of about 1.9 KB each in a 1.6 GB database on disk (Node's
     SQLite, with the attestation ids still in `sx`): labels alone took 450 to 1,000 ms a search and a
-    deep offset up to 900 ms; the trigram index added about 80 MB and 4 s to loading.
+    deep offset up to 900 ms.
+  - *What names cost to load*, measured by timing `load()` over the same kind of synthetic file
+    (20,000 places, 146,800 current names after the label and repeats within an attestation are
+    left out; in-memory sqlite-wasm under Node, database size as `page_count` × `page_size`, the
+    branch and `main` run alternately, two loads a run, on a shared machine): `main`, which
+    searches labels only and has no `sf` or `sft`, loads it in 3.5 to 4.4 s to an 18.4 MB
+    database; with the names and their trigram index, 5.6 to 6.3 s and 34.9 MB. So names cost
+    about 2 s and 16.5 MB per 20,000 places here: about 100 µs and 0.8 KB a place, or 14 µs and
+    110 bytes a name, of which `sx` is 6.4 MB, `sft` 5.9 MB and `sf` 2.4 MB. Writing `sxa` a row
+    per attestation and not a row per name took the load from 6.4 to 6.7 s to 6.1 to 6.4 s, and
+    writing `sx` 64 rows to a statement to 5.8 to 6.0 s; the database is the same size.
 - **The overview** reads a covering index of the places with a point (`pov`), not the records.
 - **A pool and an outputs folder of its own.** A SQLite SAHPool holds every file in its folder open,
   so a second tab on the same pool cannot start. Chora's page asks the worker for its own

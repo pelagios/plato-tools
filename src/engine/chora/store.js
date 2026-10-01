@@ -27,7 +27,7 @@ export function keyer() {
 export { fold } from './fold.js';
 /** How many places the overview map is given at most. */
 export const OVERVIEW_CAP = 50000;
-const BATCH = 5000;
+const BATCH = 5000, ROWS = 64;
 
 export class ChoraStore {
   constructor(db) {
@@ -36,9 +36,11 @@ export class ChoraStore {
     // dataset is read (denied ones never go in; withdrawn ones are taken out at the end). sx: each
     // place's label, folded (k = 0, name null), and then its names, toponym and romanized, in
     // attestation order (k = 1, 2, ...; denied ones never go in, withdrawn ones are taken out at the
-    // end). sxa: the attestation each name of sx came from, when it has an @id, only until the
-    // withdrawn names are taken out: a third of what sx would be, and dropped then, its pages used
-    // again by what is made after it. sf: what the search box looks in, made from sx at the end: one row per place, its folded
+    // end). sxa: the names of sx each attestation with an @id gave, as one row per attestation (its
+    // names are numbered one after another, so they are the range kLo..kHi of its place), kept only
+    // until the withdrawn names are taken out, and dropped then, its pages used again by what is made
+    // after it. Keyed by (n, kLo), the order it is written in, so the taking out finds a name's
+    // attestation by the place and k it has. sf: what the search box looks in, made from sx at the end: one row per place, its folded
     // label and names joined by U+0001 (which no folded text holds, so a match never spans two), kept
     // apart from the records so that a search reads little; sft, a trigram index of it (FTS5, its text
     // not copied), for queries of three letters or more; shorter ones scan sf. wd: what the whole
@@ -46,7 +48,7 @@ export class ChoraStore {
     db.exec(`CREATE TABLE p(n INTEGER PRIMARY KEY, id TEXT NOT NULL, label TEXT, ccodes TEXT, rel TEXT, rec TEXT NOT NULL,
       w REAL, s REAL, e REAL, nn REAL, rx REAL, ry REAL)`);
     db.exec('CREATE TABLE sx(n INTEGER NOT NULL, k INTEGER NOT NULL, fold TEXT NOT NULL, name TEXT, PRIMARY KEY(n, k)) WITHOUT ROWID');
-    db.exec('CREATE TABLE sxa(att TEXT NOT NULL, n INTEGER NOT NULL, k INTEGER NOT NULL)');
+    db.exec('CREATE TABLE sxa(n INTEGER NOT NULL, kLo INTEGER NOT NULL, kHi INTEGER NOT NULL, att TEXT NOT NULL, PRIMARY KEY(n, kLo)) WITHOUT ROWID');
     db.exec('CREATE TABLE sf(n INTEGER PRIMARY KEY, f TEXT NOT NULL)');
     db.exec("CREATE VIRTUAL TABLE sft USING fts5(f, content='sf', content_rowid='n', tokenize='trigram')");
     db.exec('CREATE TABLE g(n INTEGER NOT NULL, att TEXT, w REAL, s REAL, e REAL, nn REAL, rx REAL, ry REAL)');
@@ -58,8 +60,13 @@ export class ChoraStore {
   sink() {
     const db = this.db;
     const insP = db.prepare('INSERT INTO p(n,id,label,ccodes,rel,rec) VALUES (?,?,?,?,?,?)');
+    // The names go in ROWS at a time, by one statement of that many rows: far fewer calls into SQLite.
     const insS = db.prepare('INSERT INTO sx(n,k,fold,name) VALUES (?,?,?,?)');
-    const insA = db.prepare('INSERT INTO sxa(att,n,k) VALUES (?,?,?)');
+    const insSn = db.prepare('INSERT INTO sx(n,k,fold,name) VALUES ' + Array(ROWS).fill('(?,?,?,?)').join(','));
+    let buf = [];
+    const name = (...row) => { buf.push(...row); if (buf.length === ROWS * 4) { insSn.bind(buf).stepReset(); buf = []; } };
+    const flush = () => { for (let i = 0; i < buf.length; i += 4) insS.bind(buf.slice(i, i + 4)).stepReset(); buf = []; };
+    const insA = db.prepare('INSERT INTO sxa(n,kLo,kHi,att) VALUES (?,?,?,?)');
     const insG = db.prepare('INSERT INTO g(n,att,w,s,e,nn,rx,ry) VALUES (?,?,?,?,?,?,?,?)');
     const edges = new Map(), keyOf = keyer();
     let n = 0, open = false, closed = false;
@@ -80,13 +87,13 @@ export class ChoraStore {
         const label = typeof rec.label === 'string' ? rec.label : key;
         insP.bind([n, key, label, JSON.stringify(Array.isArray(rec.ccodes) ? rec.ccodes : []), JSON.stringify(related), JSON.stringify(rec)]).stepReset();
         const folded = fold(label);
-        insS.bind([n, 0, folded, null]).stepReset();
+        name(n, 0, folded, null);
         // Its names. One the label already holds adds nothing; a name repeated within an attestation
         // is one. The same name from another attestation is kept: that one may be withdrawn, this not.
         let k = 0;
         for (const a of atts) {
           if (!a || typeof a !== 'object' || !Array.isArray(a.names) || isDenial(a)) continue;
-          const aid = typeof a['@id'] === 'string' ? a['@id'] : null, seen = new Set([folded]);
+          const aid = typeof a['@id'] === 'string' ? a['@id'] : null, seen = new Set([folded]), kLo = k + 1;
           for (const nm of a.names) {
             if (!nm || typeof nm !== 'object') continue;
             for (const t of [nm.toponym, nm.romanized]) {
@@ -94,25 +101,25 @@ export class ChoraStore {
               const f = fold(t);
               if (seen.has(f)) continue;
               seen.add(f);
-              insS.bind([n, ++k, f, t]).stepReset();
-              if (aid !== null) insA.bind([aid, n, k]).stepReset();
+              name(n, ++k, f, t);
             }
           }
+          if (aid !== null && k >= kLo) insA.bind([n, kLo, k, aid]).stepReset();
         }
         // Withdrawn geometries are removed once the whole dataset is known; denied ones never enter.
         for (const g of currentGeometries(rec, null)) {
           if (!g.bbox) continue;
           insG.bind([n, g.attestationId, ...g.bbox, g.reprPoint ? g.reprPoint[0] : null, g.reprPoint ? g.reprPoint[1] : null]).stepReset();
         }
-        if (n % BATCH === 0) { db.exec('COMMIT'); open = false; }
+        if (n % BATCH === 0) { flush(); db.exec('COMMIT'); open = false; }
       },
       // Called by run() at the end, and again by load(), since a file that stops part-way ends the
       // run without it: what was read before the problem is still shown.
       async close() {
         if (closed) return;
         closed = true;
-        if (open) db.exec('COMMIT');
-        insP.finalize(); insG.finalize(); insS.finalize(); insA.finalize();
+        if (open) { flush(); db.exec('COMMIT'); }
+        insP.finalize(); insG.finalize(); insS.finalize(); insSn.finalize(); insA.finalize();
         self.edges = edges;
       },
     };
@@ -129,7 +136,9 @@ export class ChoraStore {
     ins.finalize();
     this.counts = new Map();
     db.exec('DELETE FROM g WHERE att IN (SELECT id FROM wd)');
-    db.exec('DELETE FROM sx WHERE (n, k) IN (SELECT n, k FROM sxa WHERE att IN (SELECT id FROM wd))');
+    // A name is withdrawn when the attestation whose range holds it is: found by sxa's key (n, kLo).
+    db.exec(`DELETE FROM sx WHERE EXISTS (SELECT 1 FROM sxa WHERE sxa.n = sx.n AND sx.k BETWEEN sxa.kLo AND sxa.kHi
+      AND sxa.att IN (SELECT id FROM wd))`);
     // Made after sxa is dropped, so that they go in the pages it held.
     db.exec('DROP TABLE sxa');
     db.exec('CREATE INDEX pid ON p(id)');

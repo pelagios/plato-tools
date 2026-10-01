@@ -85,6 +85,30 @@ test('a withdrawn name is not found, even when retracted under another place; no
   assert.deepEqual(hits(control.search('nova roma')), ['Byzantium — Nova Roma']);
 });
 
+test("one attestation's names withdrawn take none of the names of the attestations either side of it", async () => {
+  // Each attestation's names are a range of k; the withdrawn one's range lies between two kept ones.
+  const ds = (retracted) => ({
+    profile: 'place-centric',
+    gazetteer: { '@id': X + 'g', title: 'Chora adjacent ranges', status: 'published', version: '1' },
+    spatialEntities: [
+      { '@id': id('eboracum'), label: 'York', attestations: [
+        named('e1', { toponym: 'Eboracum', romanized: 'Eburacum' }, { toponym: 'Ebrauc' }),
+        named('e2', { toponym: 'Eoforwic', romanized: 'Euerwic' }, { toponym: 'Eferwic' }),
+        named('e3', { toponym: 'Jorvik', romanized: 'Iorvik' }, { toponym: 'Yerk' }),
+      ] },
+      { '@id': id('other'), label: 'Other', attestations: retracted ? [retract('o1', 'e2')] : [] },
+    ],
+  });
+  const s = await open(ds(true));
+  for (const gone of ['eoforwic', 'euerwic', 'eferwic']) assert.equal(s.search(gone).total, 0, gone);
+  for (const [q, name] of [['eboracum', 'Eboracum'], ['eburacum', 'Eburacum'], ['ebrauc', 'Ebrauc'],
+    ['jorvik', 'Jorvik'], ['iorvik', 'Iorvik'], ['yerk', 'Yerk']]) assert.deepEqual(hits(s.search(q)), [`York — ${name}`], q);
+  const control = await open(ds(false));
+  for (const [q, name] of [['eoforwic', 'Eoforwic'], ['euerwic', 'Euerwic'], ['eferwic', 'Eferwic']]) {
+    assert.deepEqual(hits(control.search(q)), [`York — ${name}`], q);
+  }
+});
+
 test('a denied name is not found; the same name not denied is', async () => {
   const s = await open();
   assert.equal(s.search('troia').total, 0);
