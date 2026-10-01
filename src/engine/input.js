@@ -345,6 +345,12 @@ const XML_ROOT = /^<(?:([A-Za-z_][\w.-]*):)?([A-Za-z_][\w.-]*)((?:\s+[^\s=/>]+\s
 // The start of an element (a name, with or without a prefix), as far as the head goes; an IRI in
 // angle brackets, as N-Triples and Turtle begin, is not one (<https://… has // after its "prefix").
 const XML_START = /^<(?:[A-Za-z_][\w.-]*:)?[A-Za-z_][\w.-]*(?=[\s/>]|$)/;
+// A first line that is a triple (or a quad), as N-Triples and N-Quads begin: <urn:a> looks like an
+// element with a prefix, but <urn:a> <https://…> <urn:b> . is a triple, not XML. Its subject and
+// predicate are absolute IRIs (with a colon), and it ends with a full stop, on the one line, so that
+// elements on lines of their own (<a:b>, then <c:d>…) are still XML.
+const IRI = '<[^>\\s]*:[^>\\s]*>';
+const TRIPLE_START = new RegExp(`^[ \\t]*${IRI}[ \\t]+${IRI}[ \\t]+(?:<[^>\\s]*>|_:\\S+|")[^\\n]*\\.[ \\t]*(?:#[^\\n]*)?(?:\\r?\\n|$)`);
 function isTei(h) {
   const m = XML_ROOT.exec(h.slice(XML_PROLOG.exec(h)[0].length));
   if (!m || (m[2] !== 'TEI' && m[2] !== 'teiCorpus')) return false;
@@ -394,7 +400,7 @@ export const XML_REASONS = {
  * XML is an XML declaration, a DOCTYPE or comment first, or an element first.
  */
 function xmlKind(h) {
-  if (!/^<\?[A-Za-z]/.test(h) && !/^<!(?:DOCTYPE\s|--)/.test(h) && !XML_START.test(h)) return null;
+  if (!/^<\?[A-Za-z]/.test(h) && !/^<!(?:DOCTYPE\s|--)/.test(h) && (!XML_START.test(h) || TRIPLE_START.test(h))) return null;
   if (isTei(h)) return 'tei';
   const rest = h.slice(XML_PROLOG.exec(h)[0].length);
   const root = XML_START.exec(rest);

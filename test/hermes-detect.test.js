@@ -154,6 +154,15 @@ test('XML that is not TEI P5 is refused, saying what it is, and never read as N-
   assert.equal(await kind('<https://example.org/a> <https://example.org/p> <https://example.org/b> <https://example.org/g> .\n', 'x.nq'), 'nquads');
   assert.equal(await kind(nt, 'x.nt'), 'ntriples');
 });
+test('N-Triples whose subject is <urn:a> (shaped like an element with a prefix) is N-Triples, not XML; XML whose root is <urn:a> is still XML', async () => {
+  assert.equal(await kind('<urn:a> <https://example.org/p> <urn:b> .\n', 'x.txt'), 'ntriples');
+  assert.equal(await kind('<urn:a> <https://example.org/p> "Köln"@de .\n<urn:a> <https://example.org/q> _:b0 .\n', 'x.txt'), 'ntriples');
+  // Controls: XML is still refused as XML, an element named with a prefix, and elements each on a line of their own.
+  for (const t of ['<urn:a xmlns:urn="urn:example:">text</urn:a>\n', '<urn:a>text</urn:a>\n', '<a:b>\n  <c:d>\n    <e:f>x</e:f>\n  </c:d>\n</a:b>\n', '<root>\n <a>\n  <b/>\n </a>\n</root>\n']) {
+    const d = await detect([textFile(t, 'x.txt')]);
+    assert.deepEqual([d.format, d.reason], [null, XML_REASONS.xml], t);
+  }
+});
 test('a head that ends part-way (a first record past 64 KB, a gzip cut mid-record, a DOCTYPE past 64 KB) never makes detection throw', async () => {
   // A File made of 16 KB parts streams them one by one, as a file on disk streams in chunks, so the
   // head (64 KB) ends part-way through the record.
