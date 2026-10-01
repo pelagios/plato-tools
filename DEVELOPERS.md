@@ -922,8 +922,17 @@ npx vite build   # the same, with the PLATO files already in public/plato/
 A push to `main` runs the tests, builds the site and publishes it to GitHub Pages
 (`.github/workflows/pages.yml`).
 
-- **The toolbox.** The page opens with one panel per tool (`#toolbox` in `index.html`), and the
-  README with a table of them. When a tool lands, update its panel and its row in the same change.
+- **The toolbox.** The page opens with the introduction, step 1's drop zone, and one card per tool
+  (`nav#toolbox` in `index.html`), and the README with a table of them. When a tool lands, update
+  its card and its row in the same change. A card is a link to `#tool=<key>` (never a button's id),
+  which narrows step 2 to that tool: each part of step 2 names in `data-tools` the tools it is for,
+  and `src/app.js` (`TOOLS`, `chooseTool`) does the rest. With no tool chosen, step 2 offers every
+  action, Chora's map included. Hermes's card goes to the drop zone; Chora's opens `chora.html`,
+  with the chosen file (`src/chora/handoff.js`).
+- **The introduction** (`#intro`) can be hidden, and stays hidden (localStorage
+  `plato-tools.intro`). `public/intro.js`, a classic script in `<head>`, sets `html.intro-hidden`
+  before the first paint; it is a file, not an inline script, so that a policy of
+  `script-src 'self'` allows it.
 - **Tooltips** are the site's own (`src/lib/tooltip.js`, loaded by each page; its styles are the
   commented block in `src/styles.css`), never the browser's: give an element `data-tip="…"`, or
   `data-tip-template="id"` for a `<template>` of rich text (no links or controls: a tooltip cannot

@@ -7,10 +7,14 @@ convert it, compare two versions of it, publish it. They run in your browser at
 **https://pelagios.org/plato-tools/**, and [from the command line](#from-the-command-line) for many
 files at a time.
 
-Your files are never uploaded. Everything happens in the browser tab, at any size your disk can
-hold: memory stays roughly constant while the working data lives on disk, in the browser's private
-file storage.
-Nothing is sent to any other site unless you allow it, in the **Permissions** panel at the top of each page, which also shows what this browser remembers for the tools and lets you forget it.
+Your files stay on your computer, and nothing is sent to any other site unless you allow it, in the
+**Permissions** panel at the top of each page, which also shows what this browser remembers for the
+tools and lets you forget it.
+Everything happens in the browser tab, with the working data on disk, in the browser's private file
+storage. A dataset of a million places has been checked and converted in the page;
+[how large a dataset your browser can take](https://pelagios.org/place-attestation-ontology/guide/tools.html#large-datasets),
+and what changes [on the command line](#from-the-command-line), which also takes many files at once,
+is in the guide.
 
 **How to use them is in the PLATO guide**:
 [Checking, converting and comparing](https://pelagios.org/place-attestation-ontology/guide/tools.html) says what each check looks at, what each format keeps

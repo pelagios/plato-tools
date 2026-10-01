@@ -22,11 +22,9 @@ h1, h2, h3, .family { font-family: var(--font-headings); font-weight: 500; }
 h1 { margin: 0 0 .25rem; font-size: 2.4rem; line-height: 1.15; }
 /* PLATO's logo, the pin, set before the name at about cap height. */
 h1 .logo { height: .9em; width: auto; margin-right: .3em; vertical-align: -.08em; }
-/* The name, with the line that says whose it is, and the guide's drawing of Plato small beside it.
-   The drawing is line art on a transparent ground; in the dark scheme its ink is inverted, as in the guide. */
-.masthead { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; }
-.masthead-side { display: flex; flex-direction: column; align-items: flex-end; gap: .4rem; }
-.permissions-button { white-space: nowrap; }
+/* The title row: the name, with the line that says whose it is, and the button that hides or shows
+   the introduction. */
+.masthead { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .permissions-button .count:not(:empty) { display: inline-grid; place-items: center; min-width: 1.3rem; margin-left: .25rem; padding: 0 .3rem; border-radius: 999px; background: var(--accent); color: var(--accent-fg); font-size: .8rem; }
 /* The Permissions panel (src/lib/permissions-panel.js): a modal dialogue over either page. */
 .permissions-panel { max-width: min(44rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--fg); padding: 1rem 1.25rem; font-size: 1rem; }
@@ -46,19 +44,39 @@ h1 .logo { height: .9em; width: auto; margin-right: .3em; vertical-align: -.08em
 input[type=radio], input[type=checkbox] { accent-color: var(--accent); }
 .needs-permission { margin: .4rem 0; }
 .family { margin: 0; font-size: 1.1rem; color: var(--muted); }
-.plato-mark { width: 150px; height: auto; flex: none; margin-bottom: .35rem; }
+.masthead-side { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: .5rem; }
+/* Permissions and "Hide introduction", side by side, the same size. */
+.intro-toggle, .permissions-button { white-space: nowrap; font-size: .95rem; padding: .35rem .8rem; }
+/* The introduction: the opening paragraph, with the guide's drawing of Plato floated beside it. The
+   drawing is line art on a transparent ground; in the dark scheme its ink is inverted, as in the guide.
+   The paragraph carries the promise, which keeps its weight as a phrase rather than a boxed panel.
+   Hidden, it leaves only the title row. public/intro.js sets html.intro-hidden before the page is
+   painted, if this browser last left it hidden; the class, not only #intro's hidden attribute, hides
+   it, and chooses the button's word, so that nothing flashes before the page's scripts run. */
+.intro { display: flow-root; margin-top: .5rem; }
+.intro[hidden], html.intro-hidden .intro { display: none; }
+.intro-toggle .if-hidden, html.intro-hidden .intro-toggle .if-shown { display: none; }
+html.intro-hidden .intro-toggle .if-hidden { display: inline; }
+.plato-mark { height: auto; }
+.intro .plato-mark { float: right; width: 150px; margin: 0 0 .25rem 1rem; }
 @media (prefers-color-scheme: dark) { .plato-mark { filter: invert(1); } }
-@media (max-width: 34rem) { .plato-mark { width: 96px; } }
-.lede { margin: .5rem 0 .75rem; color: var(--muted); }
-.privacy { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: .75rem 1rem; }
-.cli { margin: .6rem 0 0; color: var(--muted); font-size: .95rem; }
+.lede { margin: 0; color: var(--fg); }
+.lede .promise { font-weight: 700; }
 section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.25rem; margin: 1.25rem 0; }
 h2 { font-size: 1.2rem; margin: 0 0 .75rem; display: flex; align-items: center; gap: .5rem; }
 .step { font-family: var(--font-text); font-weight: 400; font-variant-numeric: lining-nums; display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--accent); color: var(--accent-fg); font-size: .95rem; }
 .drop { display: block; border: 2px dashed var(--line); border-radius: 10px; padding: 1.5rem; text-align: center; cursor: pointer; }
+.compact-drop { padding: .9rem 1rem; }
 .drop.over { border-color: var(--accent); }
 .drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .drop small { display: block; color: var(--muted); margin-top: .5rem; }
+.compact-drop small { margin-top: .25rem; }
+#files-h:focus { outline: none; }
+#files-h:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* A tool chosen: what step 2 is narrowed to, and the way back to every action. */
+.for-tool { margin: -.35rem 0 .75rem; color: var(--muted); font-size: .95rem; }
+.for-tool strong { color: var(--fg); }
+.for-tool button.link { font-size: inherit; }
 #chosen { margin-top: .75rem; }
 #chosen ul { margin: .25rem 0; padding-left: 1.25rem; }
 .detected { font-weight: 700; }
@@ -69,8 +87,13 @@ button.primary { background: var(--accent); color: var(--accent-fg); border-colo
 button:disabled { opacity: .5; cursor: default; }
 select { padding: .4rem; border-radius: 6px; max-width: min(100%, 30rem); }
 .or { color: var(--muted); }
-.versions, .publishing { margin-top: .75rem; }
-.versions small, .publishing small { flex-basis: 100%; color: var(--muted); }
+.versions, .publishing, .mapping { margin-top: .75rem; }
+.versions small, .publishing small, .mapping small { flex-basis: 100%; color: var(--muted); }
+/* A part of step 2 hidden when a tool is chosen that it is not for (src/app.js, data-tools). */
+#action [data-tools][hidden] { display: none; }
+#action.narrowed .actions { margin-top: 0; }
+a.button, a.button:visited { display: inline-block; padding: .45rem 1rem; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--fg); text-decoration: none; }
+a.button:hover { border-color: var(--accent); }
 details#options { margin-top: .75rem; }
 .opt { margin: .6rem 0; }
 .opt small { display: block; color: var(--muted); }
@@ -128,7 +151,20 @@ a:visited { color: var(--accent); }
    takes cobalt's place, which would not show on a dark ground. */
 :root { --pin: #1f45b8; --gold: #f3c969; --gold-edge: #8a6d1f; --iris: #7cc4f2; --pupil: #101a3a; --tool-band: var(--pin); --soon: #4f8fc4; }
 @media (prefers-color-scheme: dark) { :root { --tool-band: var(--iris); --soon: var(--iris); } }
-#toolbox h2 { margin-bottom: .6rem; }
+/* The tools sit in the main column, with no panel and no heading shown (a visually hidden h2 keeps
+   the order h1 > h2 > h3). The whole card is the link; Chora's, to a page of its own, has a double band. */
+.tools-bare { margin: 1.5rem 0 1.25rem; }
+.tools.choose .tool { padding: 0; }
+.tools.choose .tool-link { height: 100%; padding: .65rem .85rem .75rem; }
+.tools.choose .tool-link .label { margin: 0 0 .35rem; }
+.tool .go { display: block; margin-top: .45rem; font-size: .88rem; color: var(--accent); }
+.tool .go .arrow { display: inline-block; transition: transform .12s; }
+.tool:has(.tool-link:hover) .go .arrow { transform: translateX(3px); }
+@media (prefers-reduced-motion: reduce) { .tool .go .arrow { transition: none; } }
+.tool.elsewhere { border-top-style: double; border-top-width: 5px; }
+/* The tool chosen, which step 2 is narrowed to. */
+.tool:has(.tool-link[aria-current]) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.tool-link[aria-current] .go { font-weight: 700; }
 .tools { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; grid-template-columns: repeat(auto-fill, minmax(14.5rem, 1fr)); }
 .tool { position: relative; border: 1px solid var(--line); border-top: 4px solid var(--tool-band); border-radius: 8px; padding: .65rem .85rem .75rem; background: var(--bg); }
 .tool h3 { font-family: var(--font-headings); font-weight: 500; font-size: 1.2rem; margin: 0; }
@@ -277,4 +313,16 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; tex
   body.chora main.chora-main { display: flex; flex-direction: column-reverse; }
   .chora-mapwrap { height: 55vh; }
   .chora-panel { overflow: visible; padding: 0 1rem; }
+}
+
+/* The main page at a phone's width: a narrower gutter, one column of tools, a smaller drawing. */
+@media (max-width: 34rem) {
+  header.top, main, footer { padding: 0 1rem; }
+  header.top { padding-top: 1.25rem; }
+  h1 { font-size: 2rem; }
+  .masthead { flex-wrap: wrap; align-items: flex-end; }
+  .masthead-side { gap: .4rem; }
+  .intro .plato-mark { width: 92px; margin-left: .6rem; }
+  .tools { grid-template-columns: 1fr; }
+  section { padding: .9rem 1rem; }
 }

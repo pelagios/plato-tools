@@ -69,6 +69,7 @@ function onDetected({ input: inp, targets: t }) {
     if (k === INPUT_TO_TARGET[inp.format]) continue;
     const o = document.createElement('option'); o.value = k; o.textContent = v.label; sel.appendChild(o);
   }
+  if (tool === 'figures') presetFigures();   // Arithmos chosen first: N-Triples, now that it is offered
   document.querySelector('[data-for="tables-input"]').hidden = inp.format !== 'tables';
   // Hermes: a table of places shows which column holds what before it is run, and the web address
   // its place ids are made under.
@@ -356,6 +357,81 @@ $('others').onchange = (e) => { const others = [...e.target.files]; e.target.val
 $('resume').onclick = () => $('workfile').click();
 $('workfile').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) resume(f); };
 $('target').onchange = () => { document.querySelector('[data-for="ntriples-output"]').hidden = $('target').value !== 'ntriples'; };
+
+// ---- The tools, chosen first or not at all -------------------------------------------------------
+// The data can be chosen first, and step 2 then offers everything that can be done with it, Chora's
+// map included; or a tool's card can be chosen, before the data or after, and step 2 is narrowed to
+// what that tool does (each part of step 2 names, in data-tools, the tools it is for). The choice is
+// kept in the address as #tool=<key>, replaced rather than added to the history, so that a reload or
+// a link keeps it. The keys are not the ids of step 2's buttons (#check would scroll to the button,
+// not choose the tool). Hermes, the readers, narrows nothing: its card goes to the drop zone. Chora's
+// card is a link to its own page, which takes the chosen file with it (the click handler above).
+const GUIDE = 'https://pelagios.org/place-attestation-ontology/guide/tools.html';
+const TOOLS = {
+  check: { name: 'Elenchos', what: 'the check', heading: 'Check it', guide: ['checking', 'What it checks'] },
+  convert: { name: 'Metaphrasis', what: 'conversion', heading: 'Convert it', guide: ['converting', 'What each format keeps'] },
+  figures: { name: 'Arithmos', what: 'statistical figures, converted to N-Triples with the RDF Data Cube option (ticked, under Options)', heading: 'Convert its figures to RDF Data Cube', guide: ['converting', 'Converting, in the guide'] },
+  versions: { name: 'Mneme', what: 'the version check: choose the new version here, and you will be asked for the earlier one', heading: 'Compare it with the earlier version', guide: ['comparing-two-versions', 'What it reports'] },
+  publish: { name: 'Agora', what: 'publishing', heading: 'Prepare it for publishing', guide: ['publishing-your-dataset', 'What publishing takes'] },
+  match: { name: 'Krisis', what: 'match review', heading: 'Match it with another dataset', guide: ['match-review', 'How to review matches'] },
+};
+const EVERY_ACTION = $('action-what').textContent;
+let tool = null;
+const toolFromHash = () => { const m = /^#tool=([a-z]+)$/.exec(location.hash); return m && TOOLS[m[1]] ? m[1] : null; };
+const reduceMotion = () => !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+function chooseTool(key) {
+  tool = TOOLS[key] ? key : null;
+  for (const el of document.querySelectorAll('#action [data-tools]')) el.hidden = !!tool && !el.dataset.tools.split(' ').includes(tool);
+  // Convert stands alone when Check is not shown, and is then the step's main button.
+  $('convert').classList.toggle('primary', tool === 'convert' || tool === 'figures');
+  $('action-what').textContent = tool ? TOOLS[tool].heading : EVERY_ACTION;
+  $('action').classList.toggle('narrowed', !!tool);
+  for (const a of document.querySelectorAll('#toolbox .tool-link[data-tool]')) {
+    if (a.dataset.tool === tool) a.setAttribute('aria-current', 'true'); else a.removeAttribute('aria-current');
+  }
+  const note = $('for-tool');
+  note.hidden = !tool;
+  note.textContent = '';
+  if (tool) {
+    const [anchor, words] = TOOLS[tool].guide;
+    note.innerHTML = `For <strong>${TOOLS[tool].name}</strong>, ${escapeHtml(TOOLS[tool].what)}. <a href="${GUIDE}#${anchor}">${words}</a>. `;
+    const all = document.createElement('button');
+    all.type = 'button'; all.className = 'link'; all.id = 'every-action'; all.textContent = 'Show every action';
+    all.onclick = () => { chooseTool(null); setHash(null); focusStep1(); };
+    note.appendChild(all);
+    if (tool === 'figures') presetFigures();
+  }
+  Object.assign(state, { tool });
+}
+// Arithmos: Convert to N-Triples, with the Data Cube option (in Options) ticked. Applied again when a
+// file is detected, since the list of formats to convert to is made then.
+function presetFigures() {
+  const sel = $('target');
+  if ([...sel.options].some((o) => o.value === 'ntriples')) { sel.value = 'ntriples'; sel.onchange(); }
+  $('cube').checked = true;
+}
+function setHash(key) {
+  try { history.replaceState(history.state, '', location.pathname + location.search + (key ? `#tool=${key}` : '')); } catch {}
+}
+function focusStep1() {
+  const h = $('files-h');
+  h.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' });
+  h.focus({ preventScroll: true });
+}
+$('toolbox').addEventListener('click', (e) => {
+  const a = e.target.closest('.tool-link[data-tool]');
+  if (!a || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;
+  e.preventDefault();
+  if (a.dataset.tool === 'read') {          // Hermes: to the drop zone, with every action still offered
+    chooseTool(null); setHash(null);
+    $('drop').scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'center' });
+    $('picker').focus({ preventScroll: true });
+    return;
+  }
+  chooseTool(a.dataset.tool); setHash(a.dataset.tool); focusStep1();
+});
+window.addEventListener('hashchange', () => chooseTool(toolFromHash()));
+chooseTool(toolFromHash());
 
 // Krisis: match review. One subject place at a time, with its candidates; each decision is written
 // into the work object at once (decide() in engine/krisis/work.js), which "Save the review" saves
