@@ -79,8 +79,19 @@ export function tilesFor(image, frame) {
  * are left transparent (alpha 0). Returns { rgba, covered } (covered: the share of pixels set).
  */
 export function compose(frame, tiles) {
+  const rgba = new Uint8ClampedArray(frame.w * frame.h * 4);
+  const covered = composeEach(frame, tiles, (i, r, g, b, a) => { const o = i * 4; rgba[o] = r; rgba[o + 1] = g; rgba[o + 2] = b; rgba[o + 3] = a || 255; });
+  return { rgba, covered };
+}
+
+/**
+ * As compose, but each working pixel's colour given to `put(i, r, g, b, a)` (i its index in the window)
+ * rather than kept: so that the window can be made into L* or CIELAB with no RGBA of its own (at 2048²,
+ * 16 MB not needed). Returns the share of pixels some tile covers.
+ */
+export function composeEach(frame, tiles, put) {
   const { x0, y0, s, w, h } = frame;
-  const rgba = new Uint8ClampedArray(w * h * 4);
+  // Tiles meet on the working grid, so no pixel is given twice: the pixels given are the pixels covered.
   let covered = 0;
   for (const t of tiles) {
     const { x: rx, y: ry, width: rw, height: rh } = t.region;
@@ -95,15 +106,15 @@ export function compose(frame, tiles) {
       for (let i = i0; i <= i1; i++) {
         const u = Math.min(t.width - 1, Math.max(0, (x0 + (i + 0.5) * s - rx) * kx - 0.5));
         const ua = Math.floor(u), ub = Math.min(t.width - 1, ua + 1), fx = u - ua;
-        const o = (j * w + i) * 4;
-        if (!rgba[o + 3]) covered++;
+        const q = j * w + i;
+        covered++;
         const a = (va * t.width + ua) * 4, b = (va * t.width + ub) * 4, c = (vb * t.width + ua) * 4, d = (vb * t.width + ub) * 4;
-        for (let k = 0; k < 4; k++) {
-          rgba[o + k] = (t.data[a + k] * (1 - fx) + t.data[b + k] * fx) * (1 - fy) + (t.data[c + k] * (1 - fx) + t.data[d + k] * fx) * fy;
-        }
-        if (!rgba[o + 3]) rgba[o + 3] = 255;
+        const D = t.data, w00 = (1 - fx) * (1 - fy), w01 = fx * (1 - fy), w10 = (1 - fx) * fy, w11 = fx * fy;
+        // Rounded as a canvas would store them (the RGBA path's Uint8ClampedArray rounds the same way).
+        const px = (k) => Math.min(255, Math.max(0, Math.round(D[a + k] * w00 + D[b + k] * w01 + D[c + k] * w10 + D[d + k] * w11)));
+        put(q, px(0), px(1), px(2), px(3));
       }
     }
   }
-  return { rgba, covered: covered / (w * h) };
+  return Math.min(1, covered / (w * h));
 }

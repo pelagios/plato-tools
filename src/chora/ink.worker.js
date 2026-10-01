@@ -13,7 +13,8 @@
 // 'error', channel, gen, message, kind }. Each channel ('trace', 'snap') runs its latest job alone.
 import { traceStep, snapStep, createPrepCache } from '../engine/chora/ink/step.js';
 
-const TILE_BYTES = 24 * 1024 * 1024;
+// Tiles kept beyond those a window needs now (at 2048², 16 MB, kept whatever this says).
+const TILE_BYTES = 16 * 1024 * 1024;
 const tiles = new Map();          // url -> { width, height, data } (RGBA), the most recently used last
 let tileBytes = 0;
 const latest = { trace: 0, snap: 0 };

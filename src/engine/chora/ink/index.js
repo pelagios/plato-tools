@@ -19,7 +19,8 @@
 // - contour.js: the outline (d3-contour) and its holes; edt.js: the exact distance transform;
 // - thin.js: Zhang–Suen; graph.js: the skeleton as nodes and chains, spurs pruned; follow.js: the line
 //   followed from the click; simplify.js: Douglas–Peucker in IMAGE pixels, halved while it crosses itself.
-import { lab, lightness } from './colour.js';
+import { lab, lightness, lightnessWriter, labWriter } from './colour.js';
+import { composeEach } from './window.js';
 import { median3 } from './median.js';
 import { seedColour, deltaEMask, sauvolaMask, darkest } from './mask.js';
 import { floodFill, fillInto, bridgedFill, leak } from './fill.js';
@@ -55,6 +56,24 @@ export function prepare(win, { colour = true } = {}) {
     return { w, h, L, a, b: median3(c.b, w, h) };
   }
   const L0 = lightness(rgba, w, h); rgba = null;
+  return { w, h, L: median3(L0, w, h) };
+}
+
+/**
+ * The same as prepare, made straight from the tiles (window.js's composeEach): no RGBA of the window is
+ * ever made. What the worker does.
+ */
+export function prepareTiles(frame, tiles, { colour = true } = {}) {
+  const { w, h } = frame, n = w * h;
+  if (colour) {
+    const c = { L: new Float32Array(n), a: new Int8Array(n), b: new Int8Array(n) };
+    composeEach(frame, tiles, labWriter(c.L, c.a, c.b));
+    const L = median3(c.L, w, h); c.L = null;
+    const a = median3(c.a, w, h); c.a = null;
+    return { w, h, L, a, b: median3(c.b, w, h) };
+  }
+  const L0 = new Float32Array(n);
+  composeEach(frame, tiles, lightnessWriter(L0));
   return { w, h, L: median3(L0, w, h) };
 }
 
@@ -245,10 +264,13 @@ export function traceLine(prep, seed, frame, params = {}) {
       }
     }
   }
-  // The thickness band, with a pixel's slack either way for the coarseness of a pixel's width.
-  const band = new Uint8Array(w * h);
-  for (const [i, wd] of widths) band[i] = wd >= p.band[0] * width - 1 && wd <= p.band[1] * width + 1 ? 1 : 0;
-  band[s0] = 1;
+  // The mask is not needed again (a colour's centre is found from the labels): let go.
+  if (!p.colour) ink = null;
+  // The thickness band, with a pixel's slack either way for the coarseness of a pixel's width: the
+  // skeleton's pixels outside it are taken out of it, in place.
+  for (const [i, wd] of widths) if (!(wd >= p.band[0] * width - 1 && wd <= p.band[1] * width + 1)) skel[i] = 0;
+  skel[s0] = 1;
+  const band = skel;
   const g = skeletonGraph(band, w, h);
   pruneSpurs(g, 2 * width, s0);
   const isEdge = (i) => { const [x, y] = xy(i); return x === 0 || y === 0 || x === w - 1 || y === h - 1; };
@@ -259,7 +281,7 @@ export function traceLine(prep, seed, frame, params = {}) {
   // where the ink of the other line would draw it aside.
   const junctions = g.nodes.filter((n) => live(g, n.id).length >= 3).map((n) => [n.x + 0.5, n.y + 0.5]);
   const nearJunction = (q) => junctions.some(([x, y]) => (q[0] - x) ** 2 + (q[1] - y) ** 2 <= (2 * width + 1) ** 2);
-  const inkOf = p.colour ? maskInk(Float32Array.from(ink), w, h) : darkness(prep.L, w, h);
+  const inkOf = p.colour ? maskInk(ink, w, h) : darkness(prep.L, w, h);
   const work = refinePath(f.px.map(centre), inkOf, { half: width / 2 + 2, span: Math.max(2, Math.round(width)), limit: 1, skip: nearJunction });
   // Thinning wears a line's ends away by about half its width: an end that is the ink's end is carried on,
   // the way the line runs, to half a width short of where the ink stops.

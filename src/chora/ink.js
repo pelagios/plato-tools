@@ -124,15 +124,17 @@ export function createInk({ mapApi, guard, state, overlayAt, onAccept, panel }) 
     return options[0][1]();
   }
 
-  async function propose({ extend = false } = {}) {
+  async function propose({ extend = false, again = false } = {}) {
     const p = proposal;
     if (!p) return;
     const t0 = performance.now();
     ink.phase = 'tracing'; ink.lastError = null; say('Reading the map…');
     try {
       const results = [], gen = newGen('trace'), step = stepper('trace', gen, p.entry);
-      for (const s of p.seeds) {
-        results.push(await runTrace({ info: p.entry.info, seedImg: s.seedImg, pxPerScreen: s.pxPerScreen, mode: p.mode, params: { ...params[p.mode] }, step, isCurrent: () => gens.trace === gen }));
+      for (const [k, s] of p.seeds.entries()) {
+        // Again from the same clicks (a slider moved): each from the window its last proposal ended in.
+        const start = again ? p.results?.[k]?.frame || null : null;
+        results.push(await runTrace({ info: p.entry.info, seedImg: s.seedImg, pxPerScreen: s.pxPerScreen, mode: p.mode, params: { ...params[p.mode] }, step, isCurrent: () => gens.trace === gen, start }));
       }
       if (proposal !== p) return;
       const last = results.at(-1);
@@ -244,7 +246,7 @@ export function createInk({ mapApi, guard, state, overlayAt, onAccept, panel }) 
     else q[k] = v;
     // A slider re-proposes from the window already read (the worker keeps it), once the hand stops.
     clearTimeout(rerun);
-    if (proposal) rerun = setTimeout(() => propose(), 120);
+    if (proposal) rerun = setTimeout(() => propose({ again: true }), 120);
   });
   panel.addEventListener('click', (e) => {
     if (e.target.dataset.ink === 'accept') accept();
@@ -306,13 +308,14 @@ export function createInk({ mapApi, guard, state, overlayAt, onAccept, panel }) 
     reproject();
     clearTimeout(snapTimer); snapTimer = setTimeout(buildSnap, 250);
   });
-  mapApi.setSnap((event) => {
+  const snapHook = (event) => {
     if (!snapOn || !snapIndex || alt || event.heldKeys?.includes('Alt')) return undefined;
     const hit = nearest(snapIndex.ridges, event.containerX, event.containerY, SNAP_RADIUS) || nearest(snapIndex.edges, event.containerX, event.containerY, SNAP_RADIUS);
     return hit ? [round9(hit.lngLat[0]), round9(hit.lngLat[1])] : undefined;
-  });
+  };
+  mapApi.setSnap(snapHook);
 
-  return {
+  const api = {
     get mode() { return mode; },
     setMode(m) {
       if (m !== mode) discard();
@@ -327,5 +330,10 @@ export function createInk({ mapApi, guard, state, overlayAt, onAccept, panel }) 
     },
     get snapEntry() { return snapEntry; },
     snapNow: buildSnap,
+    /** Where a vertex at these container pixels would snap (for tests and the budget's timing). */
+    snapAt: (x, y) => snapHook({ containerX: x, containerY: y, heldKeys: [] }),
   };
+  // For automated tests; nothing else reads it.
+  window.__chora_ink = api;
+  return api;
 }

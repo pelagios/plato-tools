@@ -394,6 +394,14 @@ test('the job: a trace let go asks for no more tiles; a second trace of the same
   await runTrace({ info: ODD, seedImg: [574, 520], mode: 'area', step: localSteps(servedBy(img, []), counting).trace, pxPerScreen: 2 });
   await runTrace({ info: ODD, seedImg: [574, 520], mode: 'area', params: { tolerance: 20 }, step: localSteps(servedBy(img, []), counting).trace, pxPerScreen: 2 });
   assert.equal(made, 1);
+  // Begun again from the window the last proposal ended in (a slider moved), nothing is made ready again
+  // even when that window had grown; begun afresh, the first window is made again.
+  made = 0;
+  const grownCache = createPrepCache(), c2 = { get: (k, mk) => grownCache.get(k, () => { made++; return mk(); }) };
+  const first = await runTrace({ info: ODD, seedImg: [805, 420], mode: 'line', step: localSteps(servedBy(img, []), c2).trace, size: 128, max: 512 });
+  const madeFirst = made;
+  await runTrace({ info: ODD, seedImg: [805, 420], mode: 'line', params: { jumps: false }, step: localSteps(servedBy(img, []), c2).trace, size: 128, max: 512, start: first.frame });
+  assert.ok(madeFirst >= 3 && made === madeFirst, `made ${madeFirst}, then ${made - madeFirst} more`);
 });
 
 test('the job: snapping\'s ridge pixels over the view, in image pixels, on the line', async () => {
@@ -404,4 +412,17 @@ test('the job: snapping\'s ridge pixels over the view, in image pixels, on the l
   assert.ok(near.length > 300, `${near.length} ridge points`);
   near.sort((a, b) => a - b);
   assert.ok(near[near.length >> 1] <= 0.5, `median ${near[near.length >> 1]}`);
+});
+
+test('a window made ready straight from its tiles is the window composed and then made ready (no RGBA between)', async () => {
+  const { prepareTiles } = await import('../src/engine/chora/ink/index.js');
+  const img = oddImage(), image = Image.parse(ODD), frame = frameAround(image, [700, 500], 2);
+  const tiles = tilesFor(image, frame).map((t) => serve(img, t));
+  for (const colour of [false, true]) {
+    const a = prepare({ w: frame.w, h: frame.h, rgba: compose(frame, tiles).rgba }, { colour }), b = prepareTiles(frame, tiles, { colour });
+    for (const k of colour ? ['L', 'a', 'b'] : ['L']) {
+      let worst = 0; for (let i = 0; i < a[k].length; i++) worst = Math.max(worst, Math.abs(a[k][i] - b[k][i]));
+      assert.ok(worst < 1e-4, `${k}: ${worst}`);
+    }
+  }
 });

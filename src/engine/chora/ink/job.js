@@ -24,13 +24,17 @@ const cancelled = () => new InkError('Cancelled.', 'cancelled');
  * the engine's, `pxPerScreen` image pixels per screen pixel at the view (for the scale and the seed's
  * reach). `step({ frame, tiles, seed, mode, params })` -> the proposal for one window (tiles as tilesFor
  * gives them), or throws (a fill's leak to the window's edge: kind 'leak', reason 'edge'); `isCurrent()`
- * false once the trace is let go. Returns the proposal with { frame, scale, grown, coarser, params }.
+ * false once the trace is let go; `start`, a window to begin from (the last proposal's, for a slider moved).
+ * Returns the proposal with { frame, scale, grown, coarser, params }.
  */
-export async function runTrace({ info, seedImg, mode, params = {}, pxPerScreen = 1, step, isCurrent = () => true, size = WINDOW, max = MAX_WINDOW }) {
+export async function runTrace({ info, seedImg, mode, params = {}, pxPerScreen = 1, step, isCurrent = () => true, size = WINDOW, max = MAX_WINDOW, start = null }) {
   const image = imageOf(info);
   const sfs = scaleFactors(image);
   let s = chooseScale(image, pxPerScreen), coarser = false, grown = 0;
   let frame = frameAround(image, seedImg, s, size);
+  // Proposed again from the same click (a slider moved): from the window the last proposal ended in, which
+  // the worker has made ready already, rather than growing to it again.
+  if (start) { frame = start; coarser = start.s !== s; s = start.s; }
   const p = { ...(mode === 'area' ? DEFAULTS.area : DEFAULTS.line), ...params };
   // The seed's reach (a line): six screen pixels, in working pixels.
   const reach = () => { if (mode === 'line') p.seedRadius = Math.max(1, (6 * pxPerScreen) / s); };

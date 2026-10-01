@@ -46,3 +46,22 @@ export function labOf([r, g, b]) {
   const fz = f((0.0193339 * x + 0.119192 * y + 0.9503041 * z) / ZN);
   return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
 }
+
+/**
+ * Writers for window.js's composeEach: each pixel's colour written as L* (into `L`), or as CIELAB (into
+ * `L`, `a`, `b`), with no RGBA kept between.
+ */
+export function lightnessWriter(L) {
+  return (i, r, g, b) => { L[i] = 116 * f(0.2126729 * LINEAR[r] + 0.7151522 * LINEAR[g] + 0.072175 * LINEAR[b]) - 16; };
+}
+export function labWriter(L, A, B) {
+  return (i, r0, g0, b0) => {
+    const r = LINEAR[r0], g = LINEAR[g0], bl = LINEAR[b0];
+    const fx = f((0.4124564 * r + 0.3575761 * g + 0.1804375 * bl) / XN);
+    const fy = f(0.2126729 * r + 0.7151522 * g + 0.072175 * bl);
+    const fz = f((0.0193339 * r + 0.119192 * g + 0.9503041 * bl) / ZN);
+    L[i] = 116 * fy - 16;
+    A[i] = Math.max(-128, Math.min(127, Math.round(500 * (fx - fy))));
+    B[i] = Math.max(-128, Math.min(127, Math.round(200 * (fy - fz))));
+  };
+}
