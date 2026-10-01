@@ -291,8 +291,11 @@ readers link to those headings, so keep them.
   (`tei-editorial-late-edition`, its example the edition div's line, the count of names already
   converted as the source's words in the editors' parts, and those parts' div types, counted in `late`).
   Everything else is emitted at once, so a held name comes out after the names read after it. The reading
-  options that convert the editors' words (`commentaryPlaces`, `headerPlaces`) are refused while
-  `EDITORIAL_IRI` is null (`teiReadingRefusal`); tests set it with `setEditorialIriForTests`. In any
+  options that convert the editors' words (`commentaryPlaces`, `headerPlaces`) give each place name
+  they convert the form status `EDITORIAL_IRI`, `plato:Editorial`'s full IRI exactly as the vendored
+  `public/plato/ontology.ttl` writes it (`test/tei-editorial-iri.test.js` reads it from there and
+  compares). They are refused should it ever be unset (`teiReadingRefusal`), since a record with no
+  `formStatus` would be read as Attested; tests unset it with `setEditorialIriForTests(null)`. In any
   file, edition div or not, a `<note>` marked as the editors' (`noteMark`: `@type` editorial,
   commentary or translator, or a `@resp` that is not the work's author's) is the editors' at once,
   never held, its example naming the mark (`note (resp="editor")`). A `@resp` is the author's when
@@ -303,7 +306,7 @@ readers link to those headings, so keep them.
   Unmarked notes in a file with no edition div stay the source's. With `listPlaces`, a `<place>` gives a Headword
   attestation (`listPlace()`), from its own names (a name that is the `<place>`'s child) and its own `<location>`s (not one whose type says it is another place's, `OTHER_PLACE_LOCATION`, such as Schnitzler's `located_in_place`: `tei-listplace-geo-other-place`), its `<geo>` read by `parseGeo`; one in the teiHeader goes on the header's `queue`, run at
   `</teiHeader>` after `header()`, so that the source, the own host and the `geoDecl` are read from
-  the whole header. With `headerPlaces` (held), a findspot (a `provenance type="found"` with no subtype, or one meaning found, `FOUND_SUBTYPE`; another subtype, such as I.Sicily's `first-seen`, is a plain attestation with a note, `tei-provenance-other`) or place of origin in the header (a `<geo>` there is reported, `tei-header-geo`, with the option or without)
+  the whole header. With `headerPlaces`, a findspot (a `provenance type="found"` with no subtype, or one meaning found, `FOUND_SUBTYPE`; another subtype, such as I.Sicily's `first-seen`, is a plain attestation with a note, `tei-provenance-other`) or place of origin in the header (a `<geo>` there is reported, `tei-header-geo`, with the option or without)
   goes on the same queue (`headerMention`, `headerPlace`), so its prefixes are those in force at
   `</teiHeader>`; it is then placed as a name in the text is (`place()`), so one whose ref points to
   a `<place>` not yet read (in `<back>`) waits in `pending`. A place name with no ref and a `@key` is converted with `keyPatterns`
@@ -377,14 +380,13 @@ readers link to those headings, so keep them.
   prefixes from the worker's `tei-keys` command (`teiKeyPrefixes`; its reply carries the page's
   `columnsAsked` id, as `columns` does, and a stale one is dropped), each with its suggested pattern
   filled in and unticked; a table's `sameId`. The worker's `ready` says whether the options for the
-  editors' words may be shown (`reading.editorial`, `EDITORIAL_IRI !== null`); while it is null,
-  `headerPlaces` and `commentaryPlaces` are not shown. `readingOptions()` adds only the options that
+  editors' words may be shown (`reading.editorial`, `EDITORIAL_IRI !== null`, as it is); were it null,
+  `headerPlaces` and `commentaryPlaces` would not be shown. `readingOptions()` adds only the options that
   are on to the run's `options` (`keyPatterns` as `{ prefix: pattern }`, `''` for keys with no
   prefix). No `title` attributes and no explanatory prose: hints await the shared tooltip module (a
   TODO in `app.js`), and the report says what each option does. The command line's `--list-places`,
   `--key-pattern [PREFIX=]PATTERN` (repeatable; a prefix has no `:`, `,` or `/`, so a pattern with an
-  `=` of its own is read whole), `--header-places`, `--commentary-places` (refused with
-  `teiReadingRefusal`'s words while held) and `--same-id` are for `check` and `convert`. Each input is
+  `=` of its own is read whole), `--header-places`, `--commentary-places` (both giving `plato:Editorial`) and `--same-id` are for `check` and `convert`. Each input is
   detected first when one is given, and a flag that applies to none of them, or `--same-id` for a
   table with no id column, is a usage error (exit 2). TEI options go only to TEI inputs and `sameId`
   only to tables; `--json` gives a TEI input's `keyPatterns`. `test/cli-reading.test.js` and the

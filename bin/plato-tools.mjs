@@ -130,7 +130,7 @@ does not apply to):
   --commentary-places
                     TEI: convert place names in an edition's commentary, translation and notes,
                     marked as the editors' words.
-                    These two are refused until PLATO pins its Editorial form status.
+                    These two give the place names they convert the form status plato:Editorial.
   --no-typing       N-Triples output: leave out the node types and typed dates that the DEEP RDF
                     export adds (they are added by default, as in the browser).
   --cube            N-Triples output: also write what the RDF Data Cube vocabulary expects of

@@ -9,6 +9,7 @@ import { readFileSync, writeFileSync, mkdtempSync, rmSync, readdirSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { EDITORIAL_IRI } from '../src/engine/hermes/tei.js';
 
 const CLI = fileURLToPath(new URL('../bin/plato-tools.mjs', import.meta.url));
 const FX = fileURLToPath(new URL('./fixtures/', import.meta.url));
@@ -54,13 +55,27 @@ test('--list-places: a listed place becomes a Headword attestation; without it, 
     [['https://pleiades.stoa.org/places/570685', 'Lacedaemon', 'list of places, place sparta'], ['https://pleiades.stoa.org/places/579885', 'Athenae', 'list of places, place athens']]);
 });
 
-// ---- --header-places and --commentary-places, held -------------------------------------------------
-test('--header-places and --commentary-places are refused, in tei.js\'s words, until PLATO pins Editorial; the file alone is read', () => {
-  refused(cli('check', '--header-places', ISICILY), /^plato-tools: Converting header places, marked as the editors' words, is available once PLATO's Editorial form status is pinned\.\n/);
-  refused(cli('check', '--commentary-places', ISICILY), /^plato-tools: Converting commentary places, marked as the editors' words, is available once PLATO's Editorial form status is pinned\.\n/);
-  const r = cli('check', ISICILY);
-  assert.equal(r.code, 0, 'control: the same file without the flags is checked');
-  assert.match(r.out, /a TEI XML edition/);
+// ---- --header-places and --commentary-places ------------------------------------------------------
+const EDITORIAL = EDITORIAL_IRI;   // tei.js's; test/tei-editorial-iri.test.js checks it against the vendored ontology
+test('--commentary-places: the commentary\'s place name becomes an attestation with formStatus plato:Editorial; without it, it is reported, not converted', () => {
+  const off = convert(ISICILY), on = convert('--commentary-places', ISICILY);
+  assert.equal(off.code, 0, off.err); assert.equal(on.code, 0, on.err);
+  assert.deepEqual(atts(off.doc).map((a) => [a.names[0].toponym, a.formStatus]), [['Μάκρης κώμης', 'https://w3id.org/plato#Attested']], 'control: the inscription\'s name alone, Attested');
+  assert.ok(off.result.items.some((i) => i.kind === 'tei-place-editorial'), 'control: without the flag, the commentary\'s name is reported');
+  assert.deepEqual(atts(on.doc).map((a) => [a.names[0].toponym, a.formStatus, a.citations[0].locator]), [
+    ['Μάκρης κώμης', 'https://w3id.org/plato#Attested', 'edition, lines 2 to 4'],
+    ['Sarepta', EDITORIAL, 'commentary'],
+  ]);
+  assert.ok(!on.result.items.some((i) => i.kind === 'tei-place-editorial'));
+});
+test('--header-places: the findspot and places of origin in the header become attestations with formStatus plato:Editorial; without it, they are reported', () => {
+  const off = convert(ISICILY), on = convert('--header-places', ISICILY);
+  assert.equal(on.code, 0, on.err);
+  assert.ok(off.result.items.some((i) => i.kind === 'tei-place-outside-text'), 'control: without the flag, the header\'s names are reported');
+  const header = atts(on.doc).filter((a) => a.citations[0].locator.startsWith('teiHeader'));
+  assert.deepEqual(header.map((a) => [a.names[0].toponym, a.formStatus]).sort(), [['Siracusa', EDITORIAL], ['Syracusae', EDITORIAL], ['catacomb of S. Giovanni', EDITORIAL]]);
+  assert.deepEqual(header.find((a) => a.names[0].toponym === 'catacomb of S. Giovanni').relations.map((r) => r.relationType), ['https://w3id.org/plato#FindspotOf']);
+  assert.ok(atts(on.doc).some((a) => a.names[0].toponym === 'Μάκρης κώμης' && a.formStatus === 'https://w3id.org/plato#Attested'), 'control: the inscription\'s name, Attested');
 });
 
 // ---- --key-pattern ---------------------------------------------------------------------------------
@@ -113,7 +128,8 @@ test('--same-id with no id column, or with no table of places, is refused before
 
 // ---- a flag for none of the inputs, and for other commands ------------------------------------------
 test('a TEI flag with no TEI input is refused with a usage message; given beside a TEI input, it is taken', () => {
-  // (--header-places and --commentary-places are refused whatever the input, while held.)
+  refused(cli('check', '--commentary-places', DUPLICATES), /^plato-tools: --commentary-places is for TEI, and no input is a TEI edition\.\n/);
+  refused(cli('check', '--header-places', DUPLICATES), /^plato-tools: --header-places is for TEI, and no input is a TEI edition\.\n/);
   refused(cli('check', '--list-places', DUPLICATES), /^plato-tools: --list-places is for TEI, and no input is a TEI edition\.\n/);
   refused(cli('check', '--key-pattern', `tgn=${TGN}`, DUPLICATES), /^plato-tools: --key-pattern is for TEI/);
   const both = cli('check', '--json', '--list-places', DUPLICATES, TEI_LIST);
@@ -147,6 +163,7 @@ test('a column of gazetteer ids: suggested, not used, until given in --columns i
 test('--help documents every reading option', () => {
   const r = cli('--help');
   for (const flag of ['--same-id', '--list-places', '--key-pattern [PREFIX=]PATTERN', '--header-places', '--commentary-places']) assert.ok(r.out.includes(flag), flag);
-  assert.match(r.out, /refused until PLATO pins its Editorial form status/);
+  assert.match(r.out, /These two give the place names they convert the form status plato:Editorial\./);
+  assert.doesNotMatch(r.out, /refused until PLATO pins/);
   assert.match(r.out, /"keyPatterns"/);
 });

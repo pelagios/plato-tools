@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { teiToDocument, TEI_KINDS, parseGeo, setEditorialIriForTests } from '../src/engine/hermes/tei.js';
+import { teiToDocument, TEI_KINDS, parseGeo, EDITORIAL_IRI } from '../src/engine/hermes/tei.js';
 import { LOSS_TEXT } from '../src/engine/report.js';
 
 const DIR = 'test/fixtures/tei/excerpts/';
@@ -86,13 +86,12 @@ test('a listed place\'s <location> words still hold its <geo> (the place name ru
 });
 
 // ---- places in the header: findspot only for a provenance that says found (I.Sicily) --------------------
-const EDITORIAL = 'https://w3id.org/plato#Editorial';
-function withEditorial(fn) { const was = setEditorialIriForTests(EDITORIAL); try { return fn(); } finally { setEditorialIriForTests(was); } }
+const EDITORIAL = EDITORIAL_IRI;   // tei.js's; test/tei-editorial-iri.test.js checks it against the vendored ontology
 const FINDSPOT_OF = 'https://w3id.org/plato#FindspotOf';
 const ISIC_FIRST_SEEN = 'isicily-ISic030001-header.xml';
 const ISIC_FOUND = readFileSync('test/fixtures/tei/isicily-ISic000934.xml', 'utf8');
 
-test('I.Sicily ISic030001: a provenance type="found" subtype="first-seen" (the Ragusa museum) is a plain attestation with a note, not a findspot; reported', () => withEditorial(() => {
+test('I.Sicily ISic030001: a provenance type="found" subtype="first-seen" (the Ragusa museum) is a plain attestation with a note, not a findspot; reported', () => {
   const m = mapped(text(ISIC_FIRST_SEEN), { headerPlaces: true }, ISIC_FIRST_SEEN);
   const ragusa = m.doc.attestations.find((a) => a.names[0].toponym === 'Ragusa');
   assert.ok(ragusa, JSON.stringify(m.doc.attestations.map((a) => a.names[0].toponym)));
@@ -107,27 +106,27 @@ test('I.Sicily ISic030001: a provenance type="found" subtype="first-seen" (the R
   assert.deepEqual(examples(m, 'tei-header-geo'), ['origin: 37.43067, 14.47945 on line 41']);
   assert.equal(TEI_KINDS['tei-provenance-other'], 'loss');
   assert.equal(TEI_KINDS['tei-header-geo'], 'loss');
-}));
+});
 
-test('I.Sicily ISic000934 (control): a provenance type="found" subtype="discovered" is the findspot, with FindspotOf; its <geo> is reported', () => withEditorial(() => {
+test('I.Sicily ISic000934 (control): a provenance type="found" subtype="discovered" is the findspot, with FindspotOf; its <geo> is reported', () => {
   const m = mapped(ISIC_FOUND, { headerPlaces: true });
   const found = m.doc.attestations.filter((a) => a.citations[0].locator === 'teiHeader, provenance (found)');
-  assert.deepEqual(found.map((a) => [a.about, a.relations?.[0]?.relationType]), [['https://pleiades.stoa.org/places/560149180', FINDSPOT_OF]]);
+  assert.deepEqual(found.map((a) => [a.about, a.relations?.[0]?.relationType, a.formStatus]), [['https://pleiades.stoa.org/places/560149180', FINDSPOT_OF, EDITORIAL]]);
   assert.ok(!m.kinds.has('tei-provenance-other'));
   assert.deepEqual(examples(m, 'tei-header-geo'), ['origin: 37.08415, 15.27628 on line 102', 'provenance (found, discovered): 37.0767995, 15.2848558 on line 106']);
-}));
+});
 
-test('a provenance type="found" with no subtype is the findspot; with subtype "first-recorded" or "transferred" it is not', () => withEditorial(() => {
+test('a provenance type="found" with no subtype is the findspot; with subtype "first-recorded" or "transferred" it is not', () => {
   const header = (prov) => `<teiHeader><fileDesc><titleStmt><title>Stone</title></titleStmt><publicationStmt><idno type="URI">https://example.org/stone</idno></publicationStmt><sourceDesc><msDesc><msIdentifier><idno>1</idno></msIdentifier><history>${prov}</history></msDesc></sourceDesc></fileDesc></teiHeader>`;
   const at = (prov) => mapped(tei('<div type="edition"><p>x</p></div>', header(prov)), { headerPlaces: true });
   const plain = at('<provenance type="found">At <placeName ref="https://pleiades.stoa.org/places/462503">Syracusae</placeName></provenance>');
-  assert.deepEqual(plain.doc.attestations.map((a) => a.relations?.[0]?.relationType), [FINDSPOT_OF]);
+  assert.deepEqual(plain.doc.attestations.map((a) => [a.relations?.[0]?.relationType, a.formStatus]), [[FINDSPOT_OF, EDITORIAL]]);
   for (const sub of ['first-recorded', 'transferred']) {
     const other = at(`<provenance type="found" subtype="${sub}">At <placeName ref="https://pleiades.stoa.org/places/462503">Syracusae</placeName></provenance>`);
-    assert.deepEqual(other.doc.attestations.map((a) => a.relations), [undefined], sub);
+    assert.deepEqual(other.doc.attestations.map((a) => [a.relations, a.formStatus]), [[undefined, EDITORIAL]], sub);
     assert.deepEqual(examples(other, 'tei-provenance-other'), [`Syracusae (https://pleiades.stoa.org/places/462503): subtype "${sub}"`]);
   }
-}));
+});
 
 test('without header places, the header\'s findspot and origin <geo> are still reported, beside its place names', () => {
   const m = mapped(text(ISIC_FIRST_SEEN), {}, ISIC_FIRST_SEEN);

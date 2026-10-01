@@ -386,9 +386,9 @@ $('columns').addEventListener('change', (e) => {
 // ---- Hermes: Reading options --------------------------------------------------------------------
 // One fieldset, shown only for a format that has reading options: a TEI edition (its list of places,
 // and a pattern for each prefix of its keys) or a table of places (rows with the same id as one
-// place). Every control is off until chosen. The options held until PLATO pins its Editorial form
-// status (TEI header places and commentary places, tei.js EDITORIAL_IRI) are not shown until then:
-// the worker says which, when it is ready.
+// place). Every control is off until chosen. The options that convert the editors' words (TEI header
+// places and commentary places, marked plato:Editorial) are shown only while tei.js's EDITORIAL_IRI
+// is set, as it is: the worker says so, when it is ready.
 // A hint for an option, if one is ever added, is a data-tip (src/lib/tooltip.js), never a title
 // attribute; for now the report says what each does.
 let readingCaps = { editorial: false }, teiKeys = null;

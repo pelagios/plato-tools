@@ -47,15 +47,15 @@ export function parseGeo(text) {
 
 /**
  * The form status of words that are the editors' own, not the source's: a place name in an
- * edition's commentary, translation, apparatus or a note, or in its teiHeader. PLATO has no such
- * status pinned yet, so it is null, and the reading options that would convert the editors' words
- * (commentaryPlaces, headerPlaces) are refused until it is set: such a record must never go out
- * with no formStatus, which PLATO would read as Attested. Enabling them is this one constant
- * (https://w3id.org/plato#Editorial, once PLATO pins it).
+ * edition's commentary, translation, apparatus or a note, or in its teiHeader. It is plato:Editorial,
+ * written exactly as in the vendored public/plato/ontology.ttl (test/tei-editorial-iri.test.js reads
+ * it from there). The reading options that convert the editors' words (commentaryPlaces,
+ * headerPlaces) are still refused whenever it is unset: such a record must never go out with no
+ * formStatus, which PLATO would read as Attested.
  */
-export const EDITORIAL_IRI = null;
+export const EDITORIAL_IRI = 'https://w3id.org/plato#Editorial';
 let editorialIri = EDITORIAL_IRI;
-/** For tests only: the form status the editors' words are given, as if EDITORIAL_IRI were set; returns the one it replaces. */
+/** For tests only: the form status the editors' words are given, in place of EDITORIAL_IRI (null to unset it); returns the one it replaces. */
 export function setEditorialIriForTests(iri) { const was = editorialIri; editorialIri = iri; return was; }
 export const EDITORIAL_HELD = "available once PLATO's Editorial form status is pinned";
 const HELD_OPTIONS = { commentaryPlaces: 'commentary places', headerPlaces: 'header places' };
@@ -370,7 +370,7 @@ export class TeiReader {
   // bibliography) and every <note>, wherever it is, is the editors'. A place name there is the
   // editors' words, not the source's: it is reported (tei-place-editorial, with the part), and is
   // converted only with the reading option commentaryPlaces, marked with the editors' form status
-  // (EDITORIAL_IRI, which holds that option back until PLATO pins it). The divisions inside the
+  // (EDITORIAL_IRI, plato:Editorial). The divisions inside the
   // edition (textparts) are the edition. A file with no edition div is read as it always was:
   // its notes, commentary and translations are the edition's text, except a note marked as the
   // editors' (by @resp or @type: "notes in the editors' words", below), which is theirs in any file.
@@ -870,7 +870,7 @@ export class TeiReader {
   // ---- places in the teiHeader (headerPlaces) -----------------------------------------------------
   // EpiDoc's header says where the object was found (<provenance type="found">) and where it was made
   // (<origin>/<origPlace>), naming the places in the editors' words. With the reading option
-  // headerPlaces (held, like commentaryPlaces, until PLATO pins its Editorial form status), such a
+  // headerPlaces (like commentaryPlaces, marked with plato:Editorial, EDITORIAL_IRI), such a
   // place name with a ref is converted, marked as the editors' form: a findspot with the relation
   // FindspotOf to the object, a place of origin as a plain attestation with a note, PLATO having no
   // relation for it. Each waits for the end of the header, and its ref is resolved then, with the

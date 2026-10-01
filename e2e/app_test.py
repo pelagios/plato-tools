@@ -192,16 +192,17 @@ def reading_checks(page, tmp):
     """Hermes: the Reading options area, for TEI and for a table of places. Every check pairs an absence
     with a presence found in the same call, and a converted result with a run without the option."""
     fx = ROOT / 'test/fixtures'
-    # A format with no reading options shows none; TEI shows the one that is not held, off, after the
-    # column table, and not the two held until PLATO pins its Editorial form status.
+    # A format with no reading options shows none; TEI shows its three, all off, after the column table:
+    # the list of places, and the two that convert the editors' words (marked plato:Editorial).
     s1 = reading_case(page, fx / 'lpf-readme-example.json')
     d1 = page.evaluate(READING_DOM) if s1.get('format') else None
     s2 = reading_case(page, fx / 'tei/isicily-ISic000934.xml', keys=True)
     d2 = page.evaluate(READING_DOM) if s2.get('format') else None
-    check('Reading options: none for LPF; for a TEI edition one box, the list of places, off, after the column table; the held two absent; no key table for a file with no keys; no title attributes',
+    check('Reading options: none for LPF; for a TEI edition three boxes, the list of places, header places and commentary places, all off, after the column table; no key table for a file with no keys; no title attributes',
           s1.get('format') == 'lpf' and d1 and d1['hidden'] and not d1['shown']
           and s2.get('format') == 'tei' and d2 and d2['shown'] and d2['legend'] == 'Reading options' and d2['after'] == 'columns'
-          and [b['id'] for b in d2['boxes']] == ['reading-listPlaces'] and not d2['boxes'][0]['checked'] and 'list of places' in d2['boxes'][0]['label']
+          and [b['id'] for b in d2['boxes']] == ['reading-listPlaces', 'reading-headerPlaces', 'reading-commentaryPlaces'] and not any(b['checked'] for b in d2['boxes'])
+          and 'list of places' in d2['boxes'][0]['label'] and "editors' words" in d2['boxes'][1]['label'] and "editors' words" in d2['boxes'][2]['label']
           and (s2.get('reading') or {}).get('keys') == [] and d2['keyRows'] == [] and d2['keysMessage'] == '' and d2['titles'] == 0, {'lpf': d1, 'tei': d2, 'state': s2.get('reading')})
 
     # A TEI file whose keys cannot be read (an entity it does not declare, past its head): the Reading
@@ -212,8 +213,8 @@ def reading_checks(page, tmp):
                       '<text><body><p><placeName key="tgn,1">A</placeName>&nbsp;</p></body></text></TEI>\n', encoding='utf-8')
     s3 = reading_case(page, broken, keys=True)
     d3 = page.evaluate(READING_DOM) if s3.get('format') else None
-    check('Reading options: a TEI file whose keys cannot be read says so in the Reading options, with the box still shown; no key table, no title attributes',
-          s3.get('format') == 'tei' and d3 and d3['shown'] and [b['id'] for b in d3['boxes']] == ['reading-listPlaces']
+    check('Reading options: a TEI file whose keys cannot be read says so in the Reading options, with the three boxes still shown; no key table, no title attributes',
+          s3.get('format') == 'tei' and d3 and d3['shown'] and [b['id'] for b in d3['boxes']] == ['reading-listPlaces', 'reading-headerPlaces', 'reading-commentaryPlaces']
           and d3['keysMessage'].startswith('The keys could not be read: ') and 'entity' in d3['keysMessage'] and (s3.get('reading') or {}).get('keysMessage') == d3['keysMessage']
           and d3['keyRows'] == [] and d3['titles'] == 0, {'dom': d3, 'state': s3.get('reading') or s3})
 
@@ -1503,7 +1504,7 @@ def main():
             doc = json.loads(download(page, s['outputs'][0]['name'], tmp / 'isicily.json').read_text()) if ok else {}
             atts = [a for p in doc.get('spatialEntities', []) for a in p.get('attestations', [])]
             # The name in the English commentary is the editors' words (the file has a div type="edition"),
-            # reported and not converted until PLATO pins its Editorial form status; the inscription's is converted.
+            # reported and not converted unless the commentary-places option is chosen; the inscription's is converted.
             editorial = next((i for i in (s.get('report') or {}).get('items', []) if i['kind'] == 'tei-place-editorial'), None)
             check('TEI edition -> PLATO JSON: the page says it is TEI; the place name in the inscription becomes an attestation about Pleiades 678374, the one in the commentary is reported as the editors\' words',
                   ok and s.get('format') == 'tei' and 'a TEI XML edition' in said and len(atts) == 1

@@ -181,7 +181,7 @@ self.onmessage = async ({ data }) => {
       // A page with a pool of its own (Chora's) takes it now, so that a second tab of that page is
       // told at once that it cannot start, not when a file is first opened.
       if (poolName) await sqlitePool();
-      // Whether the TEI reading options for the editors' words may be offered (held until PLATO pins Editorial).
+      // Whether the TEI reading options for the editors' words may be offered (while EDITORIAL_IRI is set, as it is).
       postMessage({ type: 'ready', version: resources.version, reading: { editorial: EDITORIAL_IRI !== null } });
     } else if (data.cmd === 'detect') {
       const input = await detect(data.files);

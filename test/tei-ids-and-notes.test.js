@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { addPlatoFormats, strictFormatLogger } from '../src/lib/formats.js';
-import { teiToDocument, TEI_KINDS, setEditorialIriForTests } from '../src/engine/hermes/tei.js';
+import { teiToDocument, TEI_KINDS, EDITORIAL_IRI, setEditorialIriForTests } from '../src/engine/hermes/tei.js';
 import { AUTHORITIES, PREFERRED_RULES, authorityOf, preferredAddress } from '../src/engine/hermes/addresses.js';
 import { LOSS_TEXT } from '../src/engine/report.js';
 
@@ -28,7 +28,8 @@ const examples = (m, kind) => m.reported.filter(([k]) => k === kind).map(([, e])
 const names = (m) => m.doc.attestations.flatMap((a) => (a.names || []).map((n) => n.toponym));
 const HEADER = (extra = '') => `<teiHeader><fileDesc><titleStmt><title>T</title>${extra}</titleStmt><publicationStmt><idno type="URI">https://example.org/e</idno></publicationStmt><sourceDesc><p>x</p></sourceDesc></fileDesc></teiHeader>`;
 const tei = (body, header = HEADER()) => `<?xml version="1.0" encoding="UTF-8"?>\n<TEI xmlns="http://www.tei-c.org/ns/1.0">${header}<text><body>${body}</body></text></TEI>\n`;
-const withEditorial = (fn) => { const was = setEditorialIriForTests('https://w3id.org/plato#Editorial'); try { return fn(); } finally { setEditorialIriForTests(was); } };
+/** Run fn with the editors' form status unset (as if EDITORIAL_IRI were null), and put it back. */
+const withoutEditorial = (fn) => { const was = setEditorialIriForTests(null); try { return fn(); } finally { setEditorialIriForTests(was); } };
 const unspecified = (subject, object) => ({ subject, object, identityType: 'unspecified' });
 
 // ---- the order -----------------------------------------------------------------------------------
@@ -216,18 +217,17 @@ test('a note whose resp points to the work\'s own author is the source\'s: by th
 });
 
 test('a marked note goes the editorial path: converted only with commentaryPlaces, with the editors\' form status', () => {
-  withEditorial(() => {
-    const m = mapped(PERSEUS_LIKE(' resp="editor"'), { commentaryPlaces: true });
-    const argos = m.doc.attestations.find((a) => a.names[0].toponym === 'Argos');
-    assert.equal(argos.formStatus, 'https://w3id.org/plato#Editorial');
-    assert.equal(argos.citations[0].locator, 'translation 1, in a note');
-    assert.match(argos.notes, /^The editors' words, not the source's\./);
-    // control: the unmarked note's name stays the source's
-    assert.equal(m.doc.attestations.find((a) => a.names[0].toponym === 'Sikyon').formStatus, 'https://w3id.org/plato#Attested');
-    assert.equal(valid(m.doc), null);
-  });
-  // held while EDITORIAL_IRI is null: the option is refused
-  assert.throws(() => mapped(PERSEUS_LIKE(' resp="editor"'), { commentaryPlaces: true }), /Editorial form status/);
+  const m = mapped(PERSEUS_LIKE(' resp="editor"'), { commentaryPlaces: true });
+  const argos = m.doc.attestations.find((a) => a.names[0].toponym === 'Argos');
+  assert.equal(argos.formStatus, EDITORIAL_IRI);
+  assert.equal(argos.formStatus, 'https://w3id.org/plato#Editorial');
+  assert.equal(argos.citations[0].locator, 'translation 1, in a note');
+  assert.match(argos.notes, /^The editors' words, not the source's\./);
+  // control: the unmarked note's name stays the source's
+  assert.equal(m.doc.attestations.find((a) => a.names[0].toponym === 'Sikyon').formStatus, 'https://w3id.org/plato#Attested');
+  assert.equal(valid(m.doc), null);
+  // the guard: were EDITORIAL_IRI unset, the option would be refused, never converted with no formStatus
+  withoutEditorial(() => assert.throws(() => mapped(PERSEUS_LIKE(' resp="editor"'), { commentaryPlaces: true }), /Editorial form status/));
 });
 
 test('with an edition div, notes are the editors\' as before, marked or not; a marked one is named by its resp', () => {
