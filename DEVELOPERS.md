@@ -35,8 +35,10 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   of place, a damaged entry) is an error naming that sheet and the line of the file it stopped at;
   the other sheets are still checked, and the run is incomplete. A table issue's "row N" is a row of
   the sheet, the header being row 1 and blank rows not counted; a "line N" is a line of the file.
-  The working database is about 1.1 times the size of the tables' text, and its join needs no
-  temporary space (1 million places, 6 million rows: a database of 1.3 GB).
+  The working database is about twice the size of the tables' text, and its join needs no
+  temporary space. At scale (`SCALE=1 node --test test/tables-stream.test.js`, 512 MB of heap):
+  1 million places, 6 million rows, 296 MB of CSV became 2.0 GB of PLATO JSON Lines in 6 min 38 s
+  on the command line, with a peak RSS of 367 MB and a working database of 589 MB.
 - **The other formats** are in `src/formats/`: `tables.js`, `lpf.js`, `annotations.js`, `cube.js`,
   and `shared.js` for the rules the lossy writers share (denials, the current state, computed
   values, figures, bundled identities).

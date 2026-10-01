@@ -125,10 +125,11 @@ Options:
   --site-dir NAME   publish site: the name of the site's folder under --out (default: the
                     dataset's name, then -site). The workflow gives one, so that it knows
                     which folder to publish.
-  --work-dir DIR    where the working database for RDF and attestation-centric input is kept
-                    while it is in use (default: the system's temporary directory). It needs
-                    room for about 1.2 to 1.5 times the uncompressed size of the input and, with
-                    --previous, of the previous release as well; it is removed afterwards.
+  --work-dir DIR    where the working database for RDF, attestation-centric input and
+                    spreadsheet tables is kept while it is in use (default: the system's
+                    temporary directory). It needs room for about 1.2 to 1.5 times the
+                    uncompressed size of the input and, with --previous, of the previous release
+                    as well (twice the text, for spreadsheet tables); it is removed afterwards.
   --with INPUT      match: the other dataset, whose places are suggested.
   --threshold N     match: the lowest name score suggested, above 0 and at most 1 (default 0.85).
   --max-distance KM match: the greatest distance apart, in kilometres, of two places with

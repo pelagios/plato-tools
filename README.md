@@ -79,8 +79,8 @@ node bin/plato-tools.mjs compare release-1.jsonl.gz release-2.jsonl.gz  # was an
   PLATO JSON document, is removed.
 - `--json` prints one JSON object per input, one per line, then one for the total: the page's
   report, with the input's format, counts, outputs and status. Its `storeBytes` is the size of the
-  working database (the triple store) for RDF or attestation-centric input, or null when the input
-  streamed straight through. For a table of places its `columns` is a list of
+  working database (the triple store) for RDF or attestation-centric input, or the tables' for
+  spreadsheet tables, or null when the input streamed straight through. For a table of places its `columns` is a list of
   `{column, field, reason}`, to read; `--columns` takes the object printed without `--json` instead.
   `--brief` prints one line per input.
 - `--base URL` gives the base for the web addresses of spreadsheet identifiers
@@ -92,10 +92,11 @@ node bin/plato-tools.mjs compare release-1.jsonl.gz release-2.jsonl.gz  # was an
   manifest if you have it. Each region inside the map becomes a point, citing the map and the
   georeference ([the mapping](test/fixtures/annotations/README.md#the-mapping)). On the page, choose
   the files together. Nothing is fetched.
-- **`--work-dir DIR`.** RDF, attestation-centric JSON and comparisons go through a working database
-  on disk, as in the browser, so memory stays roughly constant at any size. It is kept in the
-  system's temporary directory unless `--work-dir` says otherwise, and removed afterwards. It needs
-  room for about one and a half times the uncompressed input. If the temporary directory is held in
+- **`--work-dir DIR`.** RDF, attestation-centric JSON, spreadsheet tables and comparisons go through
+  a working database on disk, as in the browser, so memory stays roughly constant at any size. It is
+  kept in the system's temporary directory unless `--work-dir` says otherwise, and removed
+  afterwards. It needs room for about one and a half times the uncompressed input (twice the text,
+  for spreadsheet tables). If the temporary directory is held in
   memory (a `tmpfs`), point `--work-dir` at a real disk.
 
 ### Publishing
