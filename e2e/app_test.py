@@ -617,8 +617,14 @@ def main():
                   and ('DRAFT' in footer) == bool(served.get('draft')), {'footer': footer, 'served': served})
 
             ex = PLATO / 'schemas/tables/examples'
+            # Every text the progress line shows, as the page shows it, for the check of the tables below.
+            page.evaluate('''() => { window.__phases = []; const el = document.getElementById('phase');
+              if (el) new MutationObserver(() => window.__phases.push(el.textContent)).observe(el, { childList: true, characterData: true, subtree: true }); }''')
             s = run_case(page, sorted((ex / 'customs').glob('*.csv')), 'check')
             check('customs tables: detected as tables and checked with no problems', s.get('format') == 'tables' and s.get('phase') == 'done' and s['report']['errors'] == 0, s.get('report') or s)
+            shown = page.evaluate('() => window.__phases || []')
+            check('the page says when the tables are being checked, between their loading and indexing',
+                  any(t.startswith('Checking the tables') for t in shown) and any(t.startswith('Indexing') for t in shown), shown)
             s = run_case(page, sorted((ex / 'survey').glob('*.csv')), 'check')
             errs = [i for i in (s.get('report') or {}).get('items', []) if i['severity'] == 'error']
             check('survey tables: checked with no problems (a label-only type and an evidence-less place are valid PLATO)', s.get('phase') == 'done' and not errs and (s.get('report') or {}).get('counts', {}).get('places') == 3, errs or s)

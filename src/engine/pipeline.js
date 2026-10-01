@@ -237,13 +237,16 @@ async function* rdfSource(file, format, rep) {
 // Papa.parse(text, { header: true }) made of it when the sheets were read whole (src/formats/csv.js),
 // so streaming changes nothing a conversion writes or a check reports.
 const SHEET_NO = Object.fromEntries(TABLE_SHEETS.map((s, i) => [s, i]));
-// The attestation sheets, then identities, are numbered in the order a place's record lists them.
+// The attestation sheets, then identities, are numbered in the order a place's record lists them,
+// identities last: the streaming join reads the sheets from FIRST_JOINED to the end.
 const FIRST_JOINED = SHEET_NO[ATTESTATION_SHEETS[0]];
-if (ATTESTATION_SHEETS.some((s, i) => SHEET_NO[s] !== FIRST_JOINED + i) || SHEET_NO.identities !== FIRST_JOINED + ATTESTATION_SHEETS.length) throw new Error('the sheets are not numbered in the order a record lists them');
+if (ATTESTATION_SHEETS.some((s, i) => SHEET_NO[s] !== FIRST_JOINED + i) || SHEET_NO.identities !== FIRST_JOINED + ATTESTATION_SHEETS.length || SHEET_NO.identities !== TABLE_SHEETS.length - 1) throw new Error('the sheets are not numbered in the order a record lists them');
 // What a row is looked up by: a source by its source_id, as given (a source with none is found by
 // none); a row of any other sheet by its place_id, when it has one.
 const rowKey = (sheet, row) => (sheet === 'sources' ? row.source_id : sheet === 'about' || !row.place_id ? undefined : row.place_id);
 const WORKBOOK_WHOLE = 50 * 2 ** 20;
+// Where in a record a source is cited: an attestation's sources, an identity relation's source.
+const SOURCE_AT = /\/(sources\/\d+|source)(\/|$)/;
 
 /** The sheets of the input, each { label, chunks() }: the last of several files for one sheet wins. */
 async function tableSheetsOf(input, env, rep) {
@@ -291,7 +294,7 @@ async function tableSheetsOf(input, env, rep) {
  * sheet whose text stops it (not UTF-8, a quotation mark out of place, a damaged entry in the zip),
  * which is reported, and taken out, and the other sheets read.
  */
-async function loadSheets(sheets, store, rep, progress) {
+async function loadSheets(sheets, store, rep, progress, action) {
   const loaded = new Map();
   let rows = 0;
   for (const [sheet, { label, chunks }] of sheets) {
@@ -309,7 +312,7 @@ async function loadSheets(sheets, store, rep, progress) {
       loaded.set(sheet, { unreadable: true });
       // Where it stopped is a line of the file (the validator's rows are rows of the sheet, its
       // header row 1, and blank rows not counted).
-      rep.error('table', `${sheet}.csv cannot be read, so it is not checked, and nothing is converted; the other sheets are checked`, e.message.startsWith(label) ? e.message : `${label}: ${e.message}`);
+      rep.error('table', `${sheet}.csv cannot be read, so it is not checked${action === 'convert' ? ', and nothing is converted' : ''}; the other sheets are checked`, e.message.startsWith(label) ? e.message : `${label}: ${e.message}`);
     }
   }
   return loaded;
@@ -323,15 +326,21 @@ function readableMeta(meta, loaded) {
     ...(t.tableSchema.foreignKeys ? { foreignKeys: t.tableSchema.foreignKeys.filter((f) => !out(f.reference.resource)) } : {}) } })) };
 }
 
-async function* tablesSource(input, env, rep, options) {
+async function* tablesSource(input, env, rep, options, action) {
   const t0 = Date.now();
   const progress = (p) => env.progress?.({ ...p, elapsedMs: Date.now() - t0 });
   const sheets = await tableSheetsOf(input, env, rep);
   const store = new TableStore(await env.openDb({ store: true }));
   try {
-    const loaded = await loadSheets(sheets, store, rep, progress);
+    const loaded = await loadSheets(sheets, store, rep, progress, action);
     const known = (n) => !!loaded.get(n) && !loaded.get(n).unreadable;
-    const rows = (n) => { if (!known(n)) return []; const m = loaded.get(n); return (function* () { for (const cells of store.rows(m.first, m.last)) yield papaRow(m.fields, cells); })(); };
+    // The checks are scans of the sheets, which at a million places take minutes: each 50,000 rows
+    // scanned, of any sheet, is reported, so that the page does not sit on the last of the loading.
+    let scanned = 0;
+    const rows = (n) => { if (!known(n)) return []; const m = loaded.get(n); return (function* () {
+      for (const cells of store.rows(m.first, m.last)) { if (++scanned % 50000 === 0) progress({ phase: 'checking', rows: scanned }); yield papaRow(m.fields, cells); }
+    })(); };
+    progress({ phase: 'checking' });
     await validateTables(readableMeta(env.csvMeta, loaded), {
       header: async (n) => (known(n) ? loaded.get(n).fields : null),
       rows,
@@ -367,6 +376,9 @@ async function* tablesSource(input, env, rep, options) {
       return r;
     };
     const ids = tableIds(base, sourceRow);
+    // Without sources.csv, each source is cited by its address alone, which the schema rejects in a
+    // record: that follows from the sheet, which is reported, and not from the record.
+    const sourcesUnread = !!loaded.get('sources')?.unreadable;
     let n = 0;
     // place_id reaches the data as the record's own identifier (plato:entity_identifier), as the
     // table definitions write it, not only as the tail of the minted address.
@@ -378,7 +390,7 @@ async function* tablesSource(input, env, rep, options) {
           subject: rec['@id'], object: r.same_as, identityType: r.match_type || undefined, certainty: r.certainty !== '' ? Number(r.certainty) : undefined,
           basis: r.basis || undefined, source: r.source_id ? ids.source(r.source_id) : undefined }).filter(([, v]) => v !== undefined)));
       }
-      return { type: 'record', value: rec, n: ++n };
+      return { type: 'record', value: rec, n: ++n, ...(sourcesUnread ? { sourcesUnread } : {}) };
     };
     // Each place, in the order of the places sheet, with the rows of the attestation sheets (in
     // ATTESTATION_SHEETS order, each in its own order) and of identities that give its place_id. A
@@ -451,7 +463,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   const source = input.format === 'plato-jsonl' ? platoJsonl(input.files[0], rep)
     : input.format === 'plato-json' ? platoJson(input.files[0])
     : input.format === 'lpf' || input.format === 'lpf-seq' ? lpfSource(input.files[0], input.format === 'lpf-seq', rep)
-    : input.format === 'tables' ? tablesSource(input, env, rep, options)
+    : input.format === 'tables' ? tablesSource(input, env, rep, options, action)
     : input.format === 'w3c-annotations' ? annotationSource(input, rep)
     : input.format === 'tei' ? teiSource(input, rep)
     : input.format === 'csv' || input.format === 'geojson' ? genericSource(input, rep, options, DEFAULT_TABLE_BASE)
@@ -505,7 +517,12 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     if (ev.type === 'record' && ev.value) collectMembership(ev.value.attestations, ev.value['@id'], membership);
     else if (ev.type === 'attestation' && ev.value) collectMembership([ev.value], null, membership);
     const f = ev.newEntity ? V.newEntity : ev.type === 'record' ? V.entity : ev.type === 'attestation' ? V.attestation : V.identity;
-    if (f && !f(ev.value)) rep.error('schema', explainSchema(f.errors, input.format === 'tables'), `${ev.value?.['@id'] || ev.value?.subject || `item ${ev.n}`}: ${ajvMessage(f.errors)}`);
+    if (f && !f(ev.value)) {
+      // A source cited by its address alone because sources.csv could not be read (tablesSource) is
+      // not the record's fault: the errors at its sources are left out, and the record's own reported.
+      const errs = ev.sourcesUnread ? f.errors.filter((e) => !SOURCE_AT.test(e.instancePath || '')) : f.errors;
+      if (errs.length) rep.error('schema', explainSchema(errs, input.format === 'tables'), `${ev.value?.['@id'] || ev.value?.subject || `item ${ev.n}`}: ${ajvMessage(errs)}`);
+    }
     // A nested identity relation may leave out its subject, which is then its place; if it gives
     // one, it must be that place, or in RDF it has two subjects. A schema cannot say this.
     if (ev.type === 'record' && ev.value && Array.isArray(ev.value.identityRelations)) {

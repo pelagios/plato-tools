@@ -12,7 +12,8 @@ import { spawnSync } from 'node:child_process';
 import Papa from 'papaparse';
 import { zipSync, strToU8 } from 'fflate';
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
-import { go, outText } from './engine.js';
+import { go, outText, env } from './engine.js';
+import { run } from '../src/engine/pipeline.js';
 import { csvRecords, papaRecords, papaRow } from '../src/formats/csv.js';
 import { TableStore, openSqlite } from '../src/lib/store.js';
 import { storageNeed } from '../src/engine/storage.js';
@@ -208,6 +209,62 @@ test('a sheet that cannot be read is an error of its own, the other sheets are s
   const ok = await go(filesOf({ ...broken, 'names.csv': s['names.csv'] }), 'convert', 'plato-jsonl');
   assert.ok(!ok.incomplete);
   assert.equal(ok.outputs.length, 1);
+});
+test('a sheet that cannot be read is worded by what was asked: a check converts nothing anyway', async () => {
+  const s = sheetsOf(`${EX}/survey`);
+  const broken = filesOf({ ...s, 'names.csv': s['names.csv'].replace('\ncambridge,Grantanbrycg,', '\ncambridge,"Grant"anbrycg,') });
+  const msgs = (r) => r.report.items.filter((i) => /^names\.csv cannot be read/.test(i.message)).map((i) => i.message);
+  assert.deepEqual(msgs(await go(broken, 'check')), ['names.csv cannot be read, so it is not checked; the other sheets are checked']);
+  assert.deepEqual(msgs(await go(broken, 'convert', 'plato-jsonl')), ['names.csv cannot be read, so it is not checked, and nothing is converted; the other sheets are checked']);
+});
+test('sources.csv that cannot be read is one error: the records citing its sources are not also wrong for it', async () => {
+  const s = sheetsOf(`${EX}/survey`);
+  // An unclosed quotation mark in sources.csv, and a type with no label (a schema error of the record's own).
+  const sheets = { ...s, 'sources.csv': s['sources.csv'].replace('asc-annal-921,"Anglo', 'asc-annal-921,"Anglo"x'), 'types.csv': s['types.csv'].replace('bunsty,hundred,', 'bunsty,,') };
+  for (const action of ['check', 'convert']) {
+    const r = await go(filesOf(sheets), action, 'plato-jsonl');
+    const schema = r.report.items.filter((i) => i.kind === 'schema').flatMap((i) => i.examples);
+    assert.ok(r.report.items.some((i) => /^sources\.csv cannot be read, so it is not checked/.test(i.message)), action);
+    assert.ok(!schema.some((e) => /sources\/\d+ must be object/.test(e)), `${action}: ${schema.join('\n')}`);
+    // Presence: the record's own schema error is still reported, with the sources unread.
+    assert.ok(schema.some((e) => /bunsty: .*types\/0 must have required property 'label'/.test(e)), `${action}: ${schema.join('\n')}`);
+    assert.equal(r.incomplete, true);
+  }
+  // The control: sources.csv read, the type's is the only schema error.
+  const cut = await go(filesOf({ ...sheets, 'sources.csv': s['sources.csv'] }), 'check');
+  assert.equal(cut.report.items.filter((i) => i.kind === 'schema').length, 1, JSON.stringify(cut.report.items));
+});
+test('a heading named __parsed_extra holds its cells in an array, with any cells beyond the header, as Papa does', async () => {
+  const rowsOf = async (text) => {
+    let fields = null; const rows = [];
+    for await (const cells of papaRecords(csvRecords(inChunks(text, 3), { keepBlank: true }), (f) => { fields = f; })) rows.push(papaRow(fields, cells));
+    return rows;
+  };
+  for (const text of ['a,__parsed_extra\n1,\n', 'a,__parsed_extra\n1,x\n', 'a,__parsed_extra\n1,x,y,z\n', '__parsed_extra,a\n,1\n', 'a,__parsed_extra\n1\n']) {
+    assert.deepEqual(await rowsOf(text), Papa.parse(text, { header: true, skipEmptyLines: 'greedy' }).data, text);
+  }
+  assert.deepEqual(await rowsOf('a,__parsed_extra\n1,x,y,z\n'), [{ a: '1', __parsed_extra: ['x', 'y', 'z'] }]);
+  assert.deepEqual(await rowsOf('a,__parsed_extra\n1,x\n'), [{ a: '1', __parsed_extra: ['x'] }]);
+});
+test('the tables report progress while they are checked, not only while they are loaded, in words the page shows', async () => {
+  const { progressText } = await import('../src/engine/words.js');
+  const s = sheetsOf(`${EX}/survey`);
+  const N = 60000;
+  const places = s['places.csv'] + Array.from({ length: N }, (_, i) => `x${i},Place ${i},GB\n`).join('');
+  const e = env(), seen = [];
+  e.progress = (p) => seen.push(p);
+  const input = await detect(filesOf({ ...s, 'places.csv': places }));
+  await run({ input, action: 'check' }, e);
+  const phases = new Set(seen.map((p) => p.phase));
+  assert.ok(phases.has('loading'), `presence: progress is heard (${[...phases]})`);
+  const checking = seen.filter((p) => p.phase === 'checking');
+  assert.ok(checking.length >= 2, `a beat as checking begins, and every 50,000 rows: ${JSON.stringify(checking)}`);
+  assert.ok(checking.some((p) => p.rows >= 50000), JSON.stringify(checking));
+  // Checking comes after loading and before indexing.
+  const order = seen.map((p) => p.phase).filter((p, i, a) => p !== a[i - 1]);
+  assert.ok(order.indexOf('loading') < order.indexOf('checking') && order.indexOf('checking') < order.indexOf('indexing'), order.join(' '));
+  assert.match(progressText(checking.find((p) => p.rows)), /^Checking the tables: [\d,]+ rows \(/);
+  assert.match(progressText({ phase: 'checking' }), /^Checking the tables \(/);
 });
 test('a sheet in a zip that is damaged is unreadable on its own; a zip with no central directory is refused whole', async () => {
   const s = sheetsOf(`${EX}/survey`);

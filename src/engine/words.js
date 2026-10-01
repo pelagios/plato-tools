@@ -35,7 +35,7 @@ export function progressText(p) {
   if (p.rows) bits.push(count(p.rows, 'rows'));
   if (p.places) bits.push(count(p.places, 'places'));
   if (p.attestations) bits.push(count(p.attestations, 'attestations'));
-  const phase = { reading: 'Reading', loading: 'Loading into the working database', indexing: 'Indexing', writing: 'Writing', done: 'Finishing', read: 'Read', comparing: 'Comparing the two versions' }[p.phase] || KRISIS_PHASES[p.phase] || p.phase;
+  const phase = { reading: 'Reading', loading: 'Loading into the working database', checking: 'Checking the tables', indexing: 'Indexing', writing: 'Writing', done: 'Finishing', read: 'Read', comparing: 'Comparing the two versions' }[p.phase] || KRISIS_PHASES[p.phase] || p.phase;
   // The version check reads two inputs, one after the other, and says which it is on.
   const which = p.version ? `${p.version === 'earlier' ? 'Earlier' : 'Later'} version${p.again ? ', again, to see what changed' : ''}: ` : p.dataset ? `${KRISIS_DATASETS[p.dataset]}: ` : '';
   return `${which}${phase}${bits.length ? ': ' + bits.join(', ') : ''} (${fmtTime(p.elapsedMs || 0)})`;

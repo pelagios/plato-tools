@@ -113,13 +113,15 @@ export function papaFirstRow(cells) {
 export function papaRow(fields, cells) {
   const row = {};
   for (let j = 0; j < cells.length; j++) {
-    if (j >= fields.length) {
-      // Papa would fail on a heading "__parsed_extra" with a cell in it and a row longer than its
-      // header; here the extra cells replace it.
+    const field = j >= fields.length ? '__parsed_extra' : fields[j];
+    // Papa puts the cells beyond the header into an array, __parsed_extra, and the cell under a
+    // heading of that name too (its field is that name, so row[field] || [], then push): the
+    // heading's cell is the array's first, and the cells beyond the header follow it.
+    if (field === '__parsed_extra') {
       if (!Array.isArray(row.__parsed_extra)) row.__parsed_extra = [];
       row.__parsed_extra.push(cells[j]);
     }
-    else row[fields[j]] = cells[j];
+    else row[field] = cells[j];
   }
   return row;
 }
