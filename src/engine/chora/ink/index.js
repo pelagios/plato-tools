@@ -62,11 +62,11 @@ export const HOOK_OFF = 0.25;
  * and either the points bend within the stretch fitted (endLine's `bent`) or the chord's cap costs less than
  * END_CHORD_GAIN of the fit's. To the points alone, a bend near the end and a hook into a blob or a burr beside it look
  * the same, and a blob's or a burr's ink beside the end makes either cap cost more; measured on bends of 20° and 45°
- * 1.5 to 5 widths from the end and blobs beside it, at widths 3 and 6 (the chord is 10° to 31° off the fit at a bend,
- * 20° to 61° at a blob; its cost a third of the fit's or more at a blob). The limit this leaves: a 45° bend 1.5 widths
- * from the end of a line 3 px wide (a stub of 4.5 px, of which thinning leaves a pixel or two) is placed 3.6 px off.
+ * 1.5 to 5 widths from the end and blobs beside it, at widths 3 and 6 (the chord is 8° to 32° off the fit at a bend,
+ * 19° to 62° at a blob). Where the bend is too near the end for the points to show it (a 45° stub 1.5 widths long, 3 px
+ * wide), the chord's cost is 0.35 to 0.6 of the fit's; at a blob, within END_CHORD_TURN, 0.95 or more.
  */
-export const END_CHORD_TURN = 35, END_CHORD_GAIN = 0.3;
+export const END_CHORD_TURN = 35, END_CHORD_GAIN = 0.75;
 /**
  * A point of a line whose cross-section of ink is wider than the line's about it by more than this (pixels) is
  * let go (refine.js): a burr, a blot or a branch's joined ink on one side would draw it aside.

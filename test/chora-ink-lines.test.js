@@ -136,14 +136,13 @@ test('a corner mid-line (90°, 60° and 30° turns, widths 3, 6 and 10) is not c
   assert.ok(cases >= 20, `${cases} corners drawn`);
 });
 
-test('a line that bends (20° or 45°) 1.5 to 5 widths from its end: the end placed to 2.5 px (a 45° stub of 1.5 widths 3 px wide, to 4: END_CHORD\'s limit), and no point of the trace beyond it', () => {
+test('a line that bends (20° or 45°) 1.5 to 5 widths from its end: the end placed to 2.5 px (as at 104a9f9, whose worst is 2.3), and no point of the trace beyond it', () => {
   for (const deg of [20, 45]) for (const k of [1.5, 3, 5]) for (const width of [3, 6]) for (const [[a, b], seed] of SLANTS.slice(0, 4)) {
     const u = unit(a, b), c = [b[0] - u[0] * k * width, b[1] - u[1] * k * width], v = rot(u, deg), e = [c[0] + v[0] * k * width, c[1] + v[1] * k * width];
     const res = trace(new Raster(W, H).stroke([a, c, e], width, INK), seed, { detail: 0.1 });
     const E = endAt(res, e), where = `${deg}° at ${k} widths from the end, width ${width}, line from (${a.map((v) => v.toFixed(1))})`;
-    const limit = deg === 45 && k === 1.5 && width === 3;
-    assert.ok(d(E, e) <= (limit ? 4 : 2.5), `${where}: the end ${d(E, e).toFixed(2)} px from where it is`);
-    assert.ok(beyondEnd(res.points, E, v) <= (limit ? 0.5 : 0.01), `${where}: a point ${beyondEnd(res.points, E, v).toFixed(2)} px beyond the end`);
+    assert.ok(d(E, e) <= 2.5, `${where}: the end ${d(E, e).toFixed(2)} px from where it is`);
+    assert.ok(beyondEnd(res.points, E, v) <= 0.01, `${where}: a point ${beyondEnd(res.points, E, v).toFixed(2)} px beyond the end`);
   }
 });
 
