@@ -821,3 +821,36 @@ test('annotation-region-no-georef "the image is not named": with georeferences, 
   const run = await go([file(GENERATED), file(ROCQUE), file(ROCQUE_M)], 'check');
   assert.equal(run.report.errors, 0, JSON.stringify(run.report.items.filter((i) => i.severity === 'error')));
 });
+test('the generated export with the Rocque georeference and manifest: 6 placed (label tags LabelAnchor, the popup tags {label} read), each region reported once, no errors', async () => {
+  const r = await placed({ georefs: [ROCQUE], manifests: [ROCQUE_M] }, GEN);
+  const roles = Object.fromEntries(r.doc.attestations.filter((a) => a.geometries).map((a) => {
+    const n = Number(/urn:uuid:3b7e2f10-6c4d-4e5a-9f8b-(\d{12})/.exec(a.notes)[1]);
+    return [n, a.geometries.map((g) => [g.role ?? null, g.spatialPrecision ?? null])];
+  }));
+  assert.deepEqual(roles, {
+    1: [[LABEL_ANCHOR, null]], 2: [[LABEL_ANCHOR, null]], 4: [[LABEL_ANCHOR, null]],
+    5: [[null, null]],                                  // a comment only: no evidence of a label
+    6: [[REPRESENTATIVE, ['approximate']]],             // the popup tag {"label": "symbol"}
+    16: [[LABEL_ANCHOR, null]],                         // the popup tag {"label": "Label"}
+  });
+  // Every region reported by exactly one region kind; the counts pinned.
+  const counts = Object.fromEntries(['annotation-region-shape', 'annotation-region-no-georef', 'annotation-region-beyond-control-points', 'annotation-region-outside-map', 'annotation-region-unplaced', 'annotation-region-not-iiif', 'annotation-region-ambiguous', 'annotation-region-no-label-evidence', 'annotation-region-image-url'].map((k) => [k, r.of(k).length]));
+  assert.deepEqual(counts, {
+    'annotation-region-shape': 6, 'annotation-region-no-georef': 5, 'annotation-region-beyond-control-points': 2, 'annotation-region-outside-map': 2,
+    'annotation-region-unplaced': 1, 'annotation-region-not-iiif': 0, 'annotation-region-ambiguous': 0, 'annotation-region-no-label-evidence': 1, 'annotation-region-image-url': 0,
+  });
+  const byRegion = (k) => r.of(k).map((e) => Number(e.slice(24, 36))).sort((x, y) => x - y);
+  assert.deepEqual(byRegion('annotation-region-no-georef'), [9, 10, 12, 13, 14]);
+  assert.deepEqual(byRegion('annotation-region-beyond-control-points'), [3, 8]);
+  assert.deepEqual(byRegion('annotation-region-outside-map'), [7, 15]);
+  assert.deepEqual(byRegion('annotation-region-unplaced'), [11]);
+  assert.deepEqual(byRegion('annotation-region-no-label-evidence'), [5]);
+  // A region on a Recogito v1 part with no source (13) is not named, so not known to be Recogito v1's.
+  assert.deepEqual(r.of('annotation-georef-unused'), []);
+  for (const [, att] of Object.entries(r.doc.attestations)) assert.equal(valid(AC, { profile: 'attestation-centric', gazetteer: { title: 't' }, attestations: [att] }), null, att.notes);
+  const run = await go([file(GENERATED), file(ROCQUE), file(ROCQUE_M)], 'convert', 'plato-json');
+  assert.equal(run.report.errors, 0, JSON.stringify(run.report.items.filter((i) => i.severity === 'error')));
+  assert.equal(run.report.items.find((i) => i.kind === 'annotation-region-shape')?.count, 6);
+  // Control: the constructed file, which names every image, places 7 (Boston, 9, on the picture's address too).
+  assert.equal((await MAIN()).of('annotation-region-shape').length, 7);
+});
