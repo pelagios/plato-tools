@@ -13,12 +13,12 @@ import mapWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { TerraDraw, TerraDrawPointMode, TerraDrawLineStringMode, TerraDrawPolygonMode, TerraDrawSelectMode } from 'terra-draw';
 import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter';
 import { transformRequest, blobWorkerUrl } from '../lib/permissions.js';
+import { STATUS_COLOURS } from './card.js';
 
 // A worker made from a blob: takes the page's policy; one made from this site's address would not.
 maplibregl.setWorkerUrl(blobWorkerUrl(mapWorkerUrl));
 
-// Colours of the statuses, the same in the card (styles.css) and on the map.
-export const STATUS_COLOURS = { asserted: '#2757dd', reported: '#7a4fc9', tentative: '#b7791f', doubted: '#6b7280', denied: '#c0392b' };
+// Colours of the statuses: the card's (card.js), so the same in the card and on the map.
 const status = (fallback) => ['match', ['get', 'status'], ...Object.entries(STATUS_COLOURS).flat(), fallback];
 const EMPTY = { type: 'FeatureCollection', features: [] };
 // On a narrow screen the attribution, written out, runs over the scale bar: there it is MapLibre's

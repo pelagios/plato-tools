@@ -216,3 +216,55 @@ test("a location's precision and role are kept only as text: anything else, whic
   assert.equal(g({ spatialPrecision: ['historical_approximate'] }).precision, 'historical_approximate');
   assert.equal(g({ role: P + 'Extent' }).role, P + 'Extent');
 });
+
+// ---- PLATO's rulings of 1 October 2026 on testing against Trismegistos (#18, #20). Each test below
+// failed before Chora followed them. ---------------------------------------------------------------
+test('#18: a relation naming its target only (relatedLabel, no relatesTo) is shown by name, linked to nothing, and places nothing', async () => {
+  const delta = { relationType: P + 'ContainedIn', relatedLabel: 'the Delta', relationLabel: 'in the Delta' };
+  const v = viewPlace({ '@id': id('agathos'), label: 'Agathos Daimon', ccodes: ['EG'], attestations: [
+    { relations: [delta], sources: [src] },
+    { relations: [{ relationType: P + 'ContainedIn', relatesTo: id('bexley') }], sources: [src] },
+  ] }, { lookup: (x) => (x === id('bexley') ? { id: x, label: 'Bexley', reprPoint: [5, 50], bbox: [5, 50, 5, 50] } : null), ccodeBbox: () => GB });
+  assert.deepEqual(v.relations.map((r) => [r.typeLabel, r.label, r.relatesTo, r.related && r.related.id, r.status]),
+    [['ContainedIn', 'the Delta', null, null, 'asserted'], ['ContainedIn', 'Bexley', id('bexley'), id('bexley'), 'asserted']]);
+  // The control beside it is what places it: the related place's point, not the name.
+  assert.deepEqual(v.fallback, { kind: 'related', bbox: [5, 50, 5, 50] });
+  // Alone, the name places nothing: the map goes on to the country.
+  const alone = viewPlace({ label: 'Agathos Daimon', ccodes: ['EG'], attestations: [{ relations: [delta], sources: [src] }] }, { lookup: () => { throw new Error('a name alone is never looked up'); }, ccodeBbox: () => GB });
+  assert.deepEqual(alone.relations.map((r) => [r.label, r.related]), [['the Delta', null]]);
+  assert.deepEqual(alone.fallback, { kind: 'ccodes', bbox: GB });
+  // A relation with neither a target nor a name is still left out, and its denial is still a denial.
+  const odd = viewPlace({ label: 'x', attestations: [{ relations: [{ relationType: P + 'ContainedIn' }, { relationType: P + 'ContainedIn', relatedLabel: '' }] }, { negated: true, relations: [delta] }] });
+  assert.deepEqual(odd.relations.map((r) => [r.label, r.status]), [['the Delta', 'denied']]);
+});
+
+test('#18: the store indexes only addresses as related places, and opens a place whose relation is a name alone', async () => {
+  const s = await open(textFile(JSON.stringify({ ...dataset(), spatialEntities: [...dataset().spatialEntities,
+    { '@id': id('agathos'), label: 'Agathos Daimon', attestations: [{ relations: [{ relationType: P + 'ContainedIn', relatedLabel: 'the Delta' }, { relationType: P + 'ContainedIn', relatesTo: id('bexley'), relatedLabel: 'Bexley' }], sources: [src] }] }] }), 'delta.json'));
+  assert.equal(s.db.selectValue('SELECT rel FROM p WHERE id = ?', [id('agathos')]), JSON.stringify([id('bexley')]));
+  assert.deepEqual(s.getPlace(id('agathos')).relations.map((r) => [r.label, r.related && r.related.id]), [['the Delta', null], ['Bexley', id('bexley')]]);
+});
+
+test('#20: a timespan an attestation gives as EvidenceSpan is the span of the texts, marked evidence, never a claim\'s date', () => {
+  const EV = P + 'EvidenceSpan';
+  const v = viewPlace({ label: 'Agathos Daimon', attestations: [
+    { '@id': att('window'), timespans: [{ startEarliest: '0015', endLatest: '0540', sourceLabel: 'AD 15 - AD 540' }], timespanRole: EV, sources: [src], notes: 'The span of the texts.' },
+    { names: [{ toponym: 'Agathos Daimon' }], timespans: [{ startEarliest: '0100', endLatest: '0200' }], sources: [src] },
+    { names: [{ toponym: 'Agathou Daimonos' }], timespans: [{ startEarliest: '0050' }], timespanRole: P + 'WhenTrue', sources: [src] },
+    // Against PLATO's advice (the window is an attestation of its own), a location with an evidence span:
+    { geometries: [pt(30, 30)], timespans: [{ startEarliest: '0015', endLatest: '0540' }], timespanRole: 'plato:EvidenceSpan', sources: [src] },
+    { geometries: [pt(31, 31)], timespans: [{ startEarliest: '0300', endLatest: '0400' }], sources: [src] },
+  ] });
+  assert.deepEqual(v.timeline.map((t) => [t.facet, t.text, t.start, t.end, t.label, t.evidence]), [
+    ['evidence', '', '0015', '0540', 'AD 15 - AD 540', true],
+    ['name', 'Agathos Daimon', '0100', '0200', null, false],
+    ['name', 'Agathou Daimonos', '0050', null, null, false],
+    ['geometry', 'Point', '0015', '0540', null, true],
+    ['geometry', 'Point', '0300', '0400', null, false],
+  ]);
+  // A location's own date is its claim's: not the span of the texts. The control beside it keeps its own.
+  assert.deepEqual(v.geometries.map((g) => g.timespan), [null, { start: '0300', end: '0400', label: null }]);
+  // A role PLATO does not define is shown as the ordinary date of the claim.
+  const u = viewPlace({ label: 'x', attestations: [{ timespans: [{ startEarliest: '1000' }], timespanRole: 'https://example.org/role/Other' }] });
+  assert.deepEqual(u.timeline.map((t) => t.evidence), [false]);
+});

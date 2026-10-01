@@ -972,7 +972,8 @@ What it does is in the guide:
 [Placing on the map](https://pelagios.org/place-attestation-ontology/guide/tools.html#chora).
 It is a page of its own, `chora.html`, a second entry in `vite.config.js`, so that MapLibre GL JS,
 Terra Draw and Allmaps load only there. The page is `src/chora/` (`app.js`; `map.js`, the map, the
-guard and drawing; `basemaps.js`; `overlays.js` and `remote.js`, the historical maps; `ink.js`,
+guard and drawing; `card.js`, what the place card writes, pure so that it is tested without a page;
+`basemaps.js`; `overlays.js` and `remote.js`, the historical maps; `ink.js`,
 `ink.worker.js` and `inkfetch.js`, tracing with assistance; `contributor.js`; `drafts.js`; `handoff.js`,
 which passes files chosen on the main page through IndexedDB, taken out of it as soon as Chora's page
 starts, not offered if older than two minutes, and let go by the main page too, when it starts, is shown
@@ -1079,6 +1080,16 @@ and reaches nothing.
     110 bytes a name, of which `sx` is 6.4 MB, `sft` 5.9 MB and `sf` 2.4 MB. Writing `sxa` a row
     per attestation and not a row per name took the load from 6.4 to 6.7 s to 6.1 to 6.4 s, and
     writing `sx` 64 rows to a statement to 5.8 to 6.0 s; the database is the same size.
+- **The place card** shows each attestation with its status (`view.js`). A relation that names its
+  target only (`relatedLabel` with no `relatesTo`, PLATO #18: "in the Delta") is shown by its name,
+  as text: it is looked up nowhere, links nowhere, and never places the place on the map; the
+  store's list of related places (`p.rel`) holds addresses only. An attestation whose
+  `timespanRole` is `EvidenceSpan` (PLATO #20) dates the texts that mention the place: its timeline
+  entries are `evidence: true`, written "mentioned in texts dated …" and drawn hatched, with a
+  legend only when there is one, and it is never a location's own date. `WhenTrue`, the default,
+  and any role PLATO does not define are shown as the date of the claim. Qualifications
+  (`relativeTo`, #19) are not shown: a location given only relative to other places has nothing
+  to draw, and is not on the card.
 - **The overview** reads a covering index of the places with a point (`pov`), not the records.
 - **A pool and an outputs folder of its own.** A SQLite SAHPool holds every file in its folder open,
   so a second tab on the same pool cannot start. Chora's page asks the worker for its own

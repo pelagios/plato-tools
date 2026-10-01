@@ -11,6 +11,12 @@ import { isDenial, collectWithdrawn, resolveWithdrawn } from '../../formats/shar
 import { bboxOf, unionBbox, reprPointOf, drawable } from './geo.js';
 
 const full = (iri) => (typeof iri === 'string' && iri.startsWith('plato:') ? PLATO + iri.slice(6) : iri);
+// What an attestation's timespans date (plato:timespan_role, PLATO #20). EvidenceSpan: the span of the
+// texts that mention the place, not when anything held, so a timeline entry says so (`evidence`) and
+// it is never a location's own date. WhenTrue is the default. A role PLATO does not define is shown as
+// WhenTrue is, the ordinary date of the claim: that is how a consumer that does not know the term
+// would read it, and it is the only reading Chora could give it.
+const isEvidence = (a) => full(a.timespanRole) === PLATO + 'EvidenceSpan';
 const STANCES = { [PLATO + 'StanceReported']: 'reported', [PLATO + 'StanceTentative']: 'tentative', [PLATO + 'StanceDoubted']: 'doubted' };
 /** 'denied' | 'doubted' | 'reported' | 'tentative' | 'asserted'. A denial outranks any stance. */
 export function statusOf(a) {
@@ -87,7 +93,8 @@ export function viewPlace(record, ctx = {}) {
     if (!a || typeof a !== 'object') continue;
     if (typeof a['@id'] === 'string' && withdrawn.get(a['@id'])) { view.withdrawn++; continue; }
     const status = statusOf(a), srcs = sourcesOf(a), attestationId = a['@id'] ?? null, created = a.created ?? null;
-    const timespan = span((a.timespans || [])[0]);
+    const evidence = isEvidence(a);
+    const timespan = evidence ? null : span((a.timespans || [])[0]);
     for (const s of srcs) { const k = s.id || s.title; if (!seenSources.has(k)) { seenSources.add(k); view.sources.push({ id: s.id, title: s.title }); } }
     for (const n of a.names || []) if (n && n.toponym) view.names.push({ toponym: n.toponym, language: n.language ?? null, romanized: n.romanized ?? null, status, attestationIndex: i });
     for (const g of a.geometries || []) {
@@ -100,7 +107,15 @@ export function viewPlace(record, ctx = {}) {
     }
     for (const t of a.types || []) if (t) view.types.push({ label: t.label ?? tail(t.identifier), identifier: t.identifier ?? null, status, attestationIndex: i });
     for (const r of a.relations || []) {
-      if (!r || typeof r.relatesTo !== 'string') continue;
+      if (!r) continue;
+      // A target named only (relatedLabel, no relatesTo; PLATO #18: "in the Delta"): shown by its name,
+      // looked up nowhere, related to no place, so it neither links nor places anything on the map.
+      if (typeof r.relatesTo !== 'string') {
+        if (typeof r.relatedLabel === 'string' && r.relatedLabel) {
+          view.relations.push({ type: r.relationType ?? null, typeLabel: tail(r.relationType), relatesTo: null, label: r.relatedLabel, related: null, status, attestationIndex: i });
+        }
+        continue;
+      }
       if (!related.has(r.relatesTo)) related.set(r.relatesTo, lookup(r.relatesTo) || null);
       const other = related.get(r.relatesTo);
       view.relations.push({
@@ -113,8 +128,10 @@ export function viewPlace(record, ctx = {}) {
     for (const t of a.timespans || []) {
       const s = span(t);
       if (s.start === null && s.end === null && s.label === null) continue;
-      const [facet, text] = facetOf(a);
-      view.timeline.push({ facet, text, start: s.start, end: s.end, label: s.label, status, attestationIndex: i });
+      // An attestation window (PLATO #20) is an attestation with only its timespan: about the evidence.
+      let [facet, text] = facetOf(a);
+      if (evidence && facet === 'other') [facet, text] = ['evidence', ''];
+      view.timeline.push({ facet, text, start: s.start, end: s.end, label: s.label, status, evidence, attestationIndex: i });
     }
   }
   // Where to look. A denied location is where the place is NOT, so it never places it.

@@ -67,7 +67,8 @@ test('the page scripts write no title attribute or SVG title, and say their tool
   const files = [new URL('../src/app.js', import.meta.url), ...readdirSync(dir).filter((f) => f.endsWith('.js')).map((f) => new URL(f, dir))];
   const all = files.map((f) => readFileSync(f, 'utf8'));
   for (const [i, s] of all.entries()) assert.deepEqual(titles(s).map((m) => m[0]), [], files[i].pathname);
-  const chora = all[files.findIndex((f) => f.pathname.endsWith('/chora/app.js'))];
+  // The card's badges and timeline rows are written by card.js (renderCard in app.js puts them together).
+  const chora = all[files.findIndex((f) => f.pathname.endsWith('/chora/card.js'))];
   assert.match(chora, /class="status status-\$\{s\}" data-tip="\$\{esc\(STATUS_TITLES\[s\]\)\}"/);
   assert.match(chora, /<g data-tip="/);
 });

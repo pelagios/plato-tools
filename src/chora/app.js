@@ -7,7 +7,8 @@ import { fmtBytes, formatName, progressText, summary, draftNote, choraDrawingNot
 import { sizeRead, loadNeed, saveNeed, storageShort } from '../engine/chora/storage.js';
 import { detect } from '../engine/input.js';
 import { newGeometryAttestation, checkGeoJSON, wrapLongitudes, DrawError, ROLES, PRECISIONS } from '../engine/chora/draw.js';
-import { createMap, placeFeatures, contextFeatures, STATUS_COLOURS } from './map.js';
+import { createMap, placeFeatures, contextFeatures } from './map.js';
+import { esc, badge, tailOf, relationItem, timeline } from './card.js';
 import * as basemaps from './basemaps.js';
 import * as contributors from './contributor.js';
 import { fingerprint, loadDrafts, saveDrafts, draftsWritten, forgetAllDrafts } from './drafts.js';
@@ -170,14 +171,7 @@ async function countries(v) {
   return countriesFc.features.filter((f) => v.ccodes.includes(f.properties?.iso));
 }
 
-const STATUS_WORDS = { denied: 'denied', doubted: 'doubted', reported: 'reported', tentative: 'tentative' };
-const badge = (s) => (STATUS_WORDS[s] ? ` <span class="status status-${s}" data-tip="${esc(STATUS_TITLES[s])}">${s}</span>` : '');
-const STATUS_TITLES = {
-  denied: 'The source says this is NOT so.', doubted: 'The source reports this, and doubts it.',
-  reported: 'The source reports this as said by others.', tentative: 'The source gives this tentatively.',
-};
 const ROLE_WORDS = { Extent: 'the whole place', FeaturePoint: 'a feature of it', RepresentativePoint: 'a point standing for it', LabelAnchor: 'where its label goes', Itinerary: 'a route' };
-const tailOf = (iri) => (iri ? String(iri).split(/[#/]/).pop() : '');
 
 function renderCard() {
   const v = view, card = $('card');
@@ -194,7 +188,7 @@ function renderCard() {
     <h3>Names</h3>${list(v.names, (x) => `${esc(x.toponym)}${x.language ? ` <span class="muted">(${esc(x.language)})</span>` : ''}${x.romanized ? ` <span class="muted">${esc(x.romanized)}</span>` : ''}${badge(x.status)}`)}
     <h3>Types</h3>${list(v.types, (x) => `${esc(x.label || '')}${badge(x.status)}`)}
     <h3>Locations</h3>${list(v.geometries, (g) => `${esc(g.geojson.type)}${g.role ? `, ${esc(ROLE_WORDS[tailOf(g.role)] || tailOf(g.role))}` : ''}${g.precision ? `, ${esc(g.precision.replace('_', ' '))}` : ''}${g.precisionKm != null ? ` (±${esc(g.precisionKm)} km)` : ''}${g.timespan?.label || g.timespan?.start ? ` <span class="muted">${esc(g.timespan.label || `${g.timespan.start ?? ''}–${g.timespan.end ?? ''}`)}</span>` : ''}${badge(g.status)}`)}
-    <h3>Related places</h3>${list(v.relations, (r) => `${esc(r.typeLabel || tailOf(r.type))}: ${r.related ? `<a href="#" data-place="${esc(r.related.id)}">${esc(r.label)}</a>` : esc(r.label)}${badge(r.status)}`)}
+    <h3>Related places</h3>${list(v.relations, relationItem)}
     <h3>Over time</h3>${timeline(v.timeline)}
     <h3>Sources</h3>${list(v.sources, (s) => (s.id && /^https?:/.test(s.id) ? `<a href="${esc(s.id)}" rel="noopener noreferrer">${esc(s.title || s.id)}</a>` : esc(s.title || s.id)))}
     ${v.withdrawn ? `<p class="muted">${n(v.withdrawn)} withdrawn attestation${v.withdrawn === 1 ? '' : 's'} not shown.</p>` : ''}
@@ -229,38 +223,6 @@ function pendingItem(d) {
 }
 const KIND = { Point: 'A point', LineString: 'A line', Polygon: 'An area' };
 
-// The timeline: one row per dated attestation, a bar from its start to its end, in its status's
-// colour. Years only; a date that is not a year is read for its year.
-function timeline(items) {
-  const year = (x) => { const m = x == null ? null : String(x).match(/^(-?\d{1,6})/); return m ? Number(m[1]) : null; };
-  const rows = items.map((t) => ({ ...t, a: year(t.start), b: year(t.end) })).filter((t) => t.a !== null || t.b !== null);
-  const undated = items.length - rows.length;
-  // Dates given only in words ("undated", "in the reign of Henry II"), each once, with how many.
-  const words = () => {
-    const c = new Map();
-    for (const t of items) if ((year(t.start) ?? year(t.end)) === null && t.label) c.set(t.label, (c.get(t.label) || 0) + 1);
-    return [...c].map(([w, k]) => `“${esc(w)}”${k > 1 ? ` (${k})` : ''}`).join(', ');
-  };
-  if (!rows.length) return `<p class="muted">${items.length ? `Dated only in words: ${words()}.` : 'No dates recorded.'}</p>`;
-  let lo = Math.min(...rows.map((t) => t.a ?? t.b)), hi = Math.max(...rows.map((t) => t.b ?? t.a));
-  if (hi === lo) { lo -= 10; hi += 10; }
-  const W = 320, L = 4, R = 4, H = 26, x = (y) => L + ((y - lo) / (hi - lo)) * (W - L - R);
-  const bars = rows.map((t, i) => {
-    const a = t.a ?? t.b, b = t.b ?? t.a, y = i * H;
-    // In its status's colour, from the stylesheet (svg.timeline .tl-…), so that it follows the colour theme.
-    const s = STATUS_COLOURS[t.status] ? t.status : 'asserted';
-    const when = a === b ? `${a}` : `${a}–${b}`;
-    // Its whole text, shown on hover by src/lib/tooltip.js (the row's own text may be cut short).
-    return `<g data-tip="${esc(`${t.text || t.facet} (${t.label || when})${STATUS_WORDS[t.status] ? `, ${t.status}` : ''}`)}">
-      <text x="${L}" y="${y + 10}" class="tl-text">${esc(trim(`${t.text || t.facet}`, 44))} · ${esc(when)}${STATUS_WORDS[t.status] ? ` · ${t.status}` : ''}</text>
-      <rect x="${x(a)}" y="${y + 14}" width="${Math.max(3, x(b) - x(a))}" height="6" rx="2" class="tl-bar tl-${s}"${s !== 'asserted' ? ' fill-opacity=".45" stroke-dasharray="2 1"' : ''}/></g>`;
-  }).join('');
-  const h = rows.length * H + 16;
-  return `<svg class="timeline" viewBox="0 0 ${W} ${h}" role="img" aria-label="When each attestation applies, from ${lo} to ${hi}">${bars}
-    <text x="${L}" y="${h - 2}" class="tl-axis">${lo}</text><text x="${W - R}" y="${h - 2}" class="tl-axis" text-anchor="end">${hi}</text></svg>`
-    + (undated ? `<p class="muted">Also dated only in words: ${words()}.</p>` : '');
-}
-const trim = (s, k) => (s.length > k ? s.slice(0, k - 1) + '…' : s);
 
 $('card').addEventListener('click', (e) => {
   if (e.target.closest('#adopt-find')) { if (view) adopt.openFor(view); return; }
@@ -1160,7 +1122,6 @@ function fail(message) {
   Object.assign(state, { phase: 'error', error: message });
 }
 const n = (x) => (x || 0).toLocaleString('en-GB');
-function esc(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
 function boxOf(geoms) {
   let w = Infinity, s = Infinity, e = -Infinity, nn = -Infinity;
   const walk = (c) => { if (typeof c[0] === 'number') { w = Math.min(w, c[0]); e = Math.max(e, c[0]); s = Math.min(s, c[1]); nn = Math.max(nn, c[1]); } else c.forEach(walk); };
