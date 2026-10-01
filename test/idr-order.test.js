@@ -3,7 +3,9 @@
 // place after the first identity relation was written inside identityRelations, with a warning.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { textFile, go, outText } from './engine.js';
+import { textFile, go, outText, env as testEnv } from './engine.js';
+import { run } from '../src/engine/pipeline.js';
+import { detect } from '../src/engine/input.js';
 
 const X = 'https://example.org/';
 const place = (id) => ({ '@id': `${X}place/${id}`, label: id, attestations: [{ sources: [{ '@id': X + 'source/s', title: 'S' }], names: [{ toponym: id }] }] });
@@ -14,10 +16,22 @@ const lines = (n) => {
   return out.map((o) => JSON.stringify(o)).join('\n') + '\n';
 };
 
-for (const [what, options] of [['held in memory', {}], ['held in the working database', { heldIdentities: 2 }]]) {
+// The ten lines converted with env.openDb wrapped by openDb(base, ...args), base being the test's own.
+async function goWith(openDb, options) {
+  const e = testEnv();
+  const base = e.openDb;
+  e.openDb = (...a) => openDb(base, ...a);
+  const r = await run({ input: await detect([textFile(lines(10), 'mixed.jsonl')]), action: 'convert', target: 'plato-json', options }, e);
+  return { r, doc: JSON.parse(outText(e, Object.keys(e.outs)[0])) };
+}
+
+// Each case proves which way it went: the database case opened one (else it tests memory twice), and
+// the memory case, its control, did not.
+for (const [what, options, opened] of [['held in memory', {}, 0], ['held in the working database', { heldIdentities: 2 }, 1]]) {
   test(`mixed places and identity relations: every place stays a place (${what})`, async () => {
-    const r = await go([textFile(lines(10), 'mixed.jsonl')], 'convert', 'plato-json', options);
-    const doc = JSON.parse(outText(r.e, Object.keys(r.e.outs)[0]));
+    let calls = 0;
+    const { r, doc } = await goWith((base, ...a) => { calls++; return base(...a); }, options);
+    assert.equal(calls, opened, `env.openDb was called ${calls} times`);
     assert.equal(doc.spatialEntities.length, 10);
     assert.equal(doc.identityRelations.length, 5);
     assert.ok(doc.identityRelations.every((x) => x.subject && !x.attestations));   // no place among them
@@ -43,16 +57,6 @@ test('with no identity relations the document has no identityRelations key', asy
 // Held in memory up to options.heldIdentities, then in a database from env.openDb(). Where that fails
 // (it cannot be opened, given its table, or written to), the run is not broken by a TypeError at
 // close(), and every identity relation not in the output is reported, by count.
-import { env as testEnv } from './engine.js';
-import { run } from '../src/engine/pipeline.js';
-import { detect } from '../src/engine/input.js';
-async function goWith(openDb, options) {
-  const e = testEnv();
-  const base = e.openDb;
-  e.openDb = (...a) => openDb(base, ...a);
-  const r = await run({ input: await detect([textFile(lines(10), 'mixed.jsonl')]), action: 'convert', target: 'plato-json', options }, e);
-  return { r, doc: JSON.parse(outText(e, Object.keys(e.outs)[0])) };
-}
 const lostItem = (r) => r.report.items.find((i) => i.kind === 'identity-relations-lost');
 const failing = {
   'it cannot be opened': async () => { throw new Error('no room'); },
