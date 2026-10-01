@@ -48,6 +48,12 @@ export const MAX_COMPONENTS = 2000;
  * and any other is placed as a round one, as it always was.
  */
 export const FLAT_END = 0.84, FLAT_END_NARROW = 0.97, NARROW_END = 5;
+// The limit this leaves (measured on 30 seeded slants a width, both ends, pixels painted by their centres): flat
+// ends 3 to 5 px wide on a slant are placed as round ones, half a width and more short of where the ink stops
+// (median 1.3 px at 3, 1.7 at 4, 2.2 at 5; at 6, one in seven). The pixels do not tell the two apart there: the cap
+// fits below (fitCap) score a flat end's pixels as well by a round cap as by a flat one (the difference's median
+// 0.0 at 3 px), and at 4 and 5 px a margin that finds a quarter to a half of the flat ends also takes round ones
+// for flat. Round ends are placed to 0.5 px at every width; a flat end is not, below six pixels on a slant.
 /** A point at a line's end off the line fitted behind it by more than this share of the width (and a pixel) is a hook into a burr. */
 export const HOOK_OFF = 0.25;
 /**
@@ -394,14 +400,6 @@ export function traceLine(prep, seed, frame, params = {}) {
   const nearJunction = (q) => junctions.some(([x, y]) => (q[0] - x) ** 2 + (q[1] - y) ** 2 <= (2 * width + 1) ** 2);
   const inkOf = p.colour ? maskInk(ink, w, h) : darkness(prep.L, w, h);
   const work = refinePath(f.px.map(centre), inkOf, { half: width / 2 + 2, span: Math.max(2, Math.round(width)), limit: 1, skip: nearJunction, wide: WIDE_RUN });
-  // Where a burr was pruned off the line, thinning bent the line towards it, and the burr's ink draws the points
-  // there aside: those within a width and a pixel of where it left are let go, and the line runs straight between
-  // the points either side (their own cross-sections clear of the burr). Not a path's first or last point.
-  const burrs = (g.pruned || []).filter((id) => live(g, id).length === 2).map((id) => [g.nodes[id].x + 0.5, g.nodes[id].y + 0.5]);
-  if (burrs.length) {
-    const R2 = (width + 1) ** 2;
-    for (let k = work.length - 2; k >= 1; k--) if (burrs.some(([x, y]) => (work[k][0] - x) ** 2 + (work[k][1] - y) ** 2 <= R2)) work.splice(k, 1);
-  }
   // Thinning wears a line's ends away by about half its width: an end that is the ink's end is carried on,
   // the way the line runs, to half a width short of where the ink stops.
   if (!f.closed && work.length > 1) {
@@ -465,35 +463,21 @@ export function traceLine(prep, seed, frame, params = {}) {
       }
       const tWide = Number.isFinite(wide[0]) && Number.isFinite(wide[1]) ? Math.max(wide[0], wide[1]) : Infinity;
       const aRef = t - (1.5 * width + 1), Lr = Math.max(4, 2 * width);
-      // A burr (or a branch) off one side of the line near its end adds ink beyond the line's edge on that side: the
-      // end is then measured from the other side alone (the line is symmetric about its centreline), each pixel
-      // weighed by its share on that side, twice. Only when the two sides are alike within the line's edge over the
-      // stretch behind the end (a curving line's ink leaves one side of a straight band, and is no burr).
-      const edge = width / 2 + 1, excess = [0, 0], within = [0, 0];
-      for (let k = 0; k < inks.length; k += 2) {
-        if (inks[k] <= aRef - Lr) continue;
-        const sd = inks[k + 1] > 0 ? 0 : 1;
-        if (Math.abs(inks[k + 1]) > edge) excess[sd]++; else if (inks[k] <= aRef) within[sd]++;
-      }
-      const alike = Math.abs(within[0] - within[1]) <= 0.15 * Math.max(within[0], within[1]);
-      const clean = !alike ? 0 : excess[0] > excess[1] + 1 ? -1 : excess[1] > excess[0] + 1 ? 1 : 0;
-      const weight = (sd) => (clean ? 2 * Math.max(0, Math.min(1, 0.5 + clean * sd)) : 1);
-      const share = (a, b) => { let n = 0; for (let k = 0; k < inks.length; k += 2) { const v = inks[k]; n += weight(inks[k + 1]) * Math.max(0, Math.min(b, v + 0.5) - Math.max(a, v - 0.5)); } return n; };
+      const share = (a, b) => { let n = 0; for (let k = 0; k < inks.length; k += 2) { const v = inks[k]; n += Math.max(0, Math.min(b, v + 0.5) - Math.max(a, v - 0.5)); } return n; };
       const wRef = share(aRef - Lr, aRef) / Lr, T = aRef + share(aRef, Infinity) / wRef, r = wRef / 2;
       // The end's shape: a flat (butt) end is at its full width over the last half width; a round one tapers
       // there (to π/4 of the full width, ideally). Flat, the line runs to where the ink stops; round, to the
       // centre of its cap, half a width short of it.
       const square = wRef > 0 && share(t - r, t) / (r * wRef) >= (width < NARROW_END ? FLAT_END_NARROW : FLAT_END);
       // Where the end is, to a fraction of a pixel: the cap (flat, or a half disc) placed along the line where it
-      // best matches the ink's pixels (on the clean side alone, when there is one), near where its area puts it.
+      // best matches the ink's pixels, near where its area puts it.
       const capCells = [];
-      for (let k = 0; k < cells.length; k += 3) if (!clean || clean * cells[k + 1] >= -0.5) capCells.push(cells[k], Math.abs(cells[k + 1]), cells[k + 2]);
+      for (let k = 0; k < cells.length; k += 3) capCells.push(cells[k], Math.abs(cells[k + 1]), cells[k + 2]);
       const asFlat = wRef > 0 ? fitCap(capCells, T, r, width, false) : [T, Infinity];
       const asRound = wRef > 0 ? fitCap(capCells, T - (Math.PI * wRef) / 8, r, width, true) : [T, Infinity];
       // Flat only when the ink fills the end's full width (above) and a flat cap fits its pixels as well as a round
-      // one: a round cap drawn square to the pixels (a line on a pixel's edge) fills it too. With a burr at the end,
-      // whose ink fills a corner, and half the cap to fit, only when a flat cap fits clearly better (by half a pixel).
-      const flat = square && asFlat[1] <= asRound[1] + 1e-6 - (clean ? 0.5 : 0);
+      // one: a round cap drawn square to the pixels (a line on a pixel's edge) fills it too.
+      const flat = square && asFlat[1] <= asRound[1] + 1e-6;
       const go = Number.isFinite(tWide) ? tWide : flat ? asFlat[0] : wRef > 0 ? asRound[0] : tMed - width / 2;
       // Drawn back too (to a width at most) when the end placed is short of the last point: thinning can run on into a burr.
       if (!(go > -width || Number.isFinite(tWide))) return;

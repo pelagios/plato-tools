@@ -22,12 +22,18 @@ const burr = (r, p, u, side, width, len) => {
   return r.stroke([p, [p[0] + n[0] * width * len + u[0] * 1.3, p[1] + n[1] * width * len + u[1] * 1.3]], Math.max(2, 0.6 * width), INK);
 };
 
-test('a line\'s ends on a slant: round ends at widths 3 to 14 to 0.5 px, flat ends at widths 8 to 14 to 0.5 px (six seeded slants)', () => {
+test('a line\'s ends on a slant: round ends at widths 3 to 14 to 0.5 px, flat ends at widths 8 to 14 to 0.5 px (six seeded slants); a round end along pixels\' edges is not taken for flat', () => {
   for (const [cap, widths] of [['round', [3, 4, 5, 6, 8, 10, 14]], ['flat', [8, 10, 14]]]) for (const width of widths) {
     for (const [line, seed] of SLANTS) {
       const e = Math.max(...endErrors(trace(new Raster(W, H).stroke(line, width, INK, { cap }), seed), line));
       assert.ok(e <= 0.5, `${cap}, width ${width}, from (${line[0].map((v) => v.toFixed(1))}): an end off by ${e.toFixed(2)} px`);
     }
+  }
+  // A round end on a line along pixels' edges (its cap drawn square to the pixels, filling the end's full width
+  // as a flat end does) is still placed as round: the flat cap fits its pixels worse.
+  for (const width of [6, 10]) for (const line of [[[110, 200], [530.3, 200]], [[250, 40.2], [250, 401]]]) {
+    const e = Math.max(...endErrors(trace(new Raster(W, H).stroke(line, width, INK), lerp(line[0], line[1], 0.45)), line));
+    assert.ok(e <= 0.5, `round, width ${width}, along pixels' edges from (${line[0]}): an end off by ${e.toFixed(2)} px`);
   }
 });
 
