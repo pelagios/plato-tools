@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { keyAction } from '../src/chora/inkkeys.js';
 import { createJobs, WORKER_FAILED } from '../src/chora/inkjobs.js';
+import { inkProposedText } from '../src/engine/words.js';
 
 // ---- Keys ----------------------------------------------------------------------------------------
 
@@ -166,4 +167,17 @@ test('ink jobs: forget is passed to the worker, and the worker is asked how many
   assert.equal(await c, 7);
   jobs.forget('https://a.example');
   assert.deepEqual(made[0].sent.at(-1).m, { type: 'forget', origin: 'https://a.example' });
+});
+
+// ---- What a proposal is said to be --------------------------------------------------------------
+
+test('ink status: a line stopped at a fork it could not judge says so, and how to carry it on; one that ran to its ends does not', () => {
+  const plain = inkProposedText({ mode: 'line', scale: 2, gaps: 1, ends: ['end', 'turn'] });
+  assert.equal(plain, 'A line proposed (dashed orange), read at 1/2 of full resolution, 1 gap jumped (dotted). Enter accepts it, Esc lets it go; Shift-click carries the line on.');
+  const one = inkProposedText({ mode: 'line', scale: 1, ends: ['end', 'fork'] });
+  assert.equal(one, 'A line proposed (dashed orange), read at 1/1 of full resolution. It stopped short of a fork it could not judge (two ways on, alike): Shift-click the way the line goes to carry it on. Enter accepts it, Esc lets it go.');
+  assert.match(inkProposedText({ mode: 'line', scale: 1, ends: ['fork', 'fork'] }), /stopped short of two forks it could not judge/);
+  // An area has no ends; and no ends known (an older worker's result) says nothing of forks.
+  assert.equal(inkProposedText({ mode: 'area', scale: 4, holes: 2, ends: ['fork', 'fork'] }), 'An area proposed (dashed orange), read at 1/4 of full resolution, with 2 holes. Enter accepts it, Esc lets it go.');
+  assert.doesNotMatch(inkProposedText({ mode: 'line', scale: 1, ends: null }), /fork/);
 });

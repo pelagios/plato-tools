@@ -341,6 +341,17 @@ export function choraAssistedNote(a, edits, { version, zoom, uncited = null, pro
   return `Traced with assistance in PLATO tools (Chora)${version ? ` ${version}` : ''}${Number.isFinite(zoom) ? ` at zoom ${Math.round(zoom)}` : ''}: proposed from ${proposedFrom === null ? 'the map\'s ink' : proposedFrom ? `the ink of “${proposedFrom}”` : 'the ink of another map'} by ${by} (${tol}, ${at} of full resolution, ${eps}${gaps})${holes} then ${done}.${off}`;
 }
 const fmt = (x) => (Number.isFinite(x) ? String(Math.round(x * 100) / 100) : '?');
+/**
+ * What the ink panel says of a shape proposed (src/chora/ink.js): `mode` 'area' | 'line', `scale` (read at 1/scale of
+ * full resolution), `gaps` jumped, `holes` (an area's), `ends` (a line's last part: why each end stopped, as the engine's
+ * follow gives it; 'fork' where it stopped at a fork it could not judge, its end drawn back to where the two ways part).
+ */
+export function inkProposedText({ mode, scale, gaps = 0, holes = 0, ends = null }) {
+  const forks = mode === 'line' && Array.isArray(ends) ? ends.filter((e) => e === 'fork').length : 0;
+  const found = `${gaps ? `, ${gaps} gap${gaps === 1 ? '' : 's'} jumped (dotted)` : ''}${holes ? `, with ${holes} hole${holes === 1 ? '' : 's'}` : ''}`;
+  const fork = forks ? ` It stopped short of ${forks === 1 ? 'a fork' : 'two forks'} it could not judge (two ways on, alike): Shift-click the way the line goes to carry it on.` : '';
+  return `${mode === 'area' ? 'An area' : 'A line'} proposed (dashed orange), read at 1/${scale} of full resolution${found}.${fork} Enter accepts it, Esc lets it go${mode === 'line' && !forks ? '; Shift-click carries the line on' : ''}.`;
+}
 /** What a Chora save reports of itself (src/engine/chora/save.js), by kind. */
 export const CHORA_TEXT = {
   'chora-addition-invalid': 'A drawing could not be added, because PLATO would not accept it as it is, so nothing was saved',

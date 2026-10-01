@@ -19,6 +19,7 @@ import { DEFAULTS } from '../engine/chora/ink/params.js';
 import { runTrace, runSnap } from '../engine/chora/ink/job.js';
 import { createJobs } from './inkjobs.js';
 import { keyAction } from './inkkeys.js';
+import { inkProposedText } from '../engine/words.js';
 import * as georef from '../engine/georef/index.js';
 
 const ORANGE = '#e8590c';
@@ -159,7 +160,7 @@ export function createInk({ mapApi, state, overlayAt, onAccept, panel }) {
       ink.timings.push({ ms, mode: p.mode, seeds: p.seeds.length, requests: fetcher.stats.requests, fromCache: fetcher.stats.fromCache });
       draw();
       const holes = p.mode === 'area' ? last.rings.length - 1 : 0;
-      say(`${p.mode === 'area' ? 'An area' : 'A line'} proposed (dashed orange), read at 1/${last.scale} of full resolution${gaps.length ? `, ${gaps.length} gap${gaps.length === 1 ? '' : 's'} jumped (dotted)` : ''}${holes ? `, with ${holes} hole${holes === 1 ? '' : 's'}` : ''}. Enter accepts it, Esc lets it go${p.mode === 'line' ? '; Shift-click carries the line on' : ''}.`);
+      say(inkProposedText({ mode: p.mode, scale: last.scale, gaps: gaps.length, holes, ends: last.ends || null }));
     } catch (e) {
       if (e.kind === 'cancelled' || proposal !== p) return;
       Object.assign(ink, { phase: 'error', lastError: e.message, lastErrorKind: e.kind || null });
