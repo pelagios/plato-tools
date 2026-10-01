@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import * as core from '../src/lib/permissions-core.js';
 import * as permissions from '../src/lib/permissions.js';
+import { readFileSync } from 'node:fs';
 import { headScript, HEAD_MARK, cspPlugin } from '../scripts/vite-csp.mjs';
 import { checkPolicy } from '../src/lib/csp.js';
 
@@ -275,7 +276,16 @@ test('the build puts the head script where each page marks it, and refuses a pag
   const out = plugin.transformIndexHtml.handler(`<head><meta charset="utf-8">${HEAD_MARK}</head>`, { filename: `${root}chora.html` });
   assert.ok(out.includes('<script>') && out.includes('Content-Security-Policy') && !/^\s*export\b/m.test(out));
   assert.throws(() => plugin.transformIndexHtml.handler('<head></head>', { filename: `${root}index.html` }), /plato:csp/);
-  assert.equal(plugin.transformIndexHtml.handler('<head></head>', { filename: `${root}spike/index.html` }), '<head></head>');
+  assert.throws(() => plugin.transformIndexHtml.handler('<head></head>', { filename: `${root}spike/index.html` }), /plato:csp/);
+});
+
+test('every page the site builds carries the mark, the spike page included: none is served outside the policy', async () => {
+  const root = new URL('../', import.meta.url).pathname;
+  const { default: config } = await import('../vite.config.js');
+  const cfg = typeof config === 'function' ? config({ command: 'build', mode: 'production' }) : config;
+  const pages = Object.values(cfg.build.rollupOptions.input).map((p) => String(p).replace(/\\/g, '/'));
+  assert.ok(pages.some((p) => p.endsWith('/index.html')) && pages.some((p) => p.endsWith('/spike/index.html')), pages.join(', '));
+  for (const p of pages) assert.ok(readFileSync(p, 'utf8').includes(HEAD_MARK), `${p.replace(root, '')} has no ${HEAD_MARK}`);
 });
 
 test('the canary\'s second half: the policy in force must be exactly the one written from the permissions', () => {
