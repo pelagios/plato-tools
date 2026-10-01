@@ -9,6 +9,12 @@ export const MAX_TURN = 60;      // degrees
 export const JUMP_CONE = 20;     // degrees either side of the way ahead
 export const JUMP_REACH = 3;     // times the width at the click
 export const DIRECTION_SPAN = 2; // the way ahead is estimated over this many widths of the path
+// A narrow fork (two ways on within FORK_SPLIT degrees of each other): thinning joins the two lines' ink for
+// several widths before the junction and bends the skeleton between them, so each way is judged over a longer
+// baseline, FORK_SPAN widths back along the line and twice that on along each way; and when the two turn alike
+// (by less than FORK_AMBIGUOUS of the angle between them) and are alike in width, the line stops at the fork
+// ('fork') rather than guess.
+export const FORK_SPLIT = 30, FORK_SPAN = 8, FORK_AMBIGUOUS = 0.3;
 
 const angle = (u, v) => {
   const n = Math.hypot(u[0], u[1]) * Math.hypot(v[0], v[1]);
@@ -20,9 +26,9 @@ const angle = (u, v) => {
  * the click (pixels), `widthAt(i)` a pixel's width; `jumps` whether gaps may be jumped; `isEdge(i)`
  * whether a pixel is on the edge of the window. Returns { px: [pixel index] in order along the line,
  * gaps: [[from, to]] (pixel indices), closed, ends: [first, last] (why each end stopped: 'end' | 'turn'
- * | 'used' | 'edge') }.
+ * | 'used' | 'edge' | 'fork') }.
  */
-export function follow(g, start, { width, widthAt = () => width, jumps = true, maxTurn = MAX_TURN, cone = JUMP_CONE, reach = JUMP_REACH, span = DIRECTION_SPAN, isEdge = () => false } = {}) {
+export function follow(g, start, { width, widthAt = () => width, jumps = true, maxTurn = MAX_TURN, cone = JUMP_CONE, reach = JUMP_REACH, span = DIRECTION_SPAN, isEdge = () => false, forkSpan = FORK_SPAN } = {}) {
   const { w } = g;
   const xy = (i) => [i % w, (i / w) | 0];
   let c0 = null, k0 = -1;
@@ -32,6 +38,26 @@ export function follow(g, start, { width, widthAt = () => width, jumps = true, m
   const K = Math.max(3, Math.round(span * width));
   const gaps = [];
   const dirOf = (px) => { const a = xy(px[0]), b = xy(px[Math.min(px.length - 1, K)]); return [b[0] - a[0], b[1] - a[1]]; };
+
+  // A way on from a node, `need` pixels long if it can be: the chain, and on from its far end along the chain
+  // that turns least (thinning can leave a fork as two junctions a few pixels apart).
+  function onward(o, need) {
+    const run = [...o.px], seen = new Set([o.c.id]);
+    while (run.length <= need) {
+      const end = g.nodeOf.get(run.at(-1));
+      if (end === undefined) break;
+      const a = xy(run[Math.max(0, run.length - 1 - K)]), b = xy(run.at(-1)), d = [b[0] - a[0], b[1] - a[1]];
+      let best = null, bt = Infinity;
+      for (const id of live(g, end)) {
+        if (seen.has(id)) continue;
+        const c = g.chains[id], px = g.nodeOf.get(c.px[0]) === end ? c.px : [...c.px].reverse(), t = angle(d, dirOf(px));
+        if (t < bt) { bt = t; best = { id, px }; }
+      }
+      if (!best) break;
+      seen.add(best.id); run.push(...best.px.slice(1));
+    }
+    return run;
+  }
 
   // path: the pixels from the click to the end, in order; behind: those before the click, in the same
   // order (for the way ahead while the path is still short).
@@ -57,9 +83,37 @@ export function follow(g, start, { width, widthAt = () => width, jumps = true, m
           const wm = ws.length ? ws[ws.length >> 1] : width;
           return { c, px, turn: angle(d, dirOf(px)), dw: Math.abs(Math.log(Math.max(wm, 0.5) / Math.max(width, 0.5))) };
         }).sort((p, q) => (Math.abs(p.turn - q.turn) < 5 ? p.dw - q.dw : p.turn - q.turn));
+        // A narrow fork: the ways on judged again over the longer baseline (from a point FORK_SPAN widths back,
+        // the way the line ran there, to a point twice that far on along each way).
+        let narrow = null;
+        if (options.length >= 2) {
+          const Lb = Math.max(4, Math.round(forkSpan * width)), n = path.length;
+          const back = (k) => (n - 1 - k >= 0 ? path[n - 1 - k] : behind[behind.length + (n - 1 - k)] ?? behind[0] ?? path[0]);
+          const P = xy(back(Lb)), P2 = xy(back(2 * Lb)), din = [P[0] - P2[0], P[1] - P2[1]];
+          const nd = g.nodes[node];
+          if (din[0] || din[1]) {
+            for (const o of options) {
+              const run = onward(o, 2 * Lb), Q = xy(run[Math.min(run.length - 1, 2 * Lb)]);
+              o.long = angle(din, [Q[0] - P[0], Q[1] - P[1]]); o.dir = [Q[0] - nd.x, Q[1] - nd.y];
+            }
+            const byLong = [...options].sort((p, q) => p.long - q.long), [o1, o2] = byLong;
+            const split = angle(o1.dir, o2.dir);
+            if (split < FORK_SPLIT) {
+              narrow = { split };
+              if (Math.abs(o1.long - o2.long) < FORK_AMBIGUOUS * split && Math.abs(o1.dw - o2.dw) < 0.5) {
+                // Stopped where the two lines part: the pixels of their joined ink (see below) let go.
+                const rb2 = (width / Math.sin((Math.max(5, split) * Math.PI) / 180) + width) ** 2;
+                while (path.length > behindLen + 1 && (xy(path.at(-1))[0] - nd.x) ** 2 + (xy(path.at(-1))[1] - nd.y) ** 2 <= rb2) path.pop();
+                return 'fork';
+              }
+              options = byLong;
+            }
+          }
+        }
         // A node with one way on and one way in (a spur pruned, a ring's own node) is passed, whatever its turn.
         const through = live(g, node).length === 2 && options.length === 1;
-        if (options.length && (through || options[0].turn <= maxTurn)) next = options[0];
+        if (options.length && (through || options[0].turn <= maxTurn || narrow)) next = options[0];
+        if (next && narrow) next.narrow = narrow;
       }
       if (next) {
         used.add(next.c.id);
@@ -68,9 +122,14 @@ export function follow(g, start, { width, widthAt = () => width, jumps = true, m
         let head = 1;
         if (live(g, node).length >= 3) {
           const n = g.nodes[node], r2 = (Math.max(1.5, width)) ** 2;
-          const near = (i) => { const [x, y] = xy(i); return (x - n.x) ** 2 + (y - n.y) ** 2 <= r2; };
-          while (path.length > 2 && near(path.at(-1)) && path.length > behindLen + 1) path.pop();
-          while (head < next.px.length - 1 && near(next.px[head])) head++;
+          // At a narrow fork the lines' ink is joined (and the skeleton bent) from where they part, a width over the
+          // sine of the angle between them back from the junction: the pixels within that (and a width) are let go
+          // behind, and within two widths on.
+          const rb2 = next.narrow ? (width / Math.sin((Math.max(5, next.narrow.split) * Math.PI) / 180) + width) ** 2 : r2;
+          const ra2 = next.narrow ? (2 * width) ** 2 : r2;
+          const near = (i, rr) => { const [x, y] = xy(i); return (x - n.x) ** 2 + (y - n.y) ** 2 <= rr; };
+          while (path.length > 2 && near(path.at(-1), rb2) && path.length > behindLen + 1) path.pop();
+          while (head < next.px.length - 1 && near(next.px[head], ra2)) head++;
         }
         if (take(next.px.slice(head))) return 'edge';
         continue;
