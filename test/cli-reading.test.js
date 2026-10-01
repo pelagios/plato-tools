@@ -136,10 +136,10 @@ test('a TEI flag with no TEI input is refused with a usage message; given beside
   assert.equal(both.code, 1, 'control: with a TEI input as well, both are read (the CSV has its repeated id)');
   assert.deepEqual(jsonLines(both.out).slice(0, 2).map((r) => r.format), ['csv', 'tei']);
 });
-test('the reading flags are for check and convert only', () => {
-  refused(cli('compare', '--list-places', TEI_LIST, TEI_LIST), /^plato-tools: --list-places is for check and convert\.\n/);
-  refused(cli('publish', 'report', '--same-id', DUPLICATES), /^plato-tools: --same-id is for check and convert\.\n/);
-  refused(cli('match', '--key-pattern', `tgn=${TGN}`, TEI_KEYS, '--with', TEI_KEYS), /^plato-tools: --key-pattern is for check and convert\.\n/);
+test('the reading flags are for check, convert and preview only', () => {
+  refused(cli('compare', '--list-places', TEI_LIST, TEI_LIST), /^plato-tools: --list-places is for check, convert and preview\.\n/);
+  refused(cli('publish', 'report', '--same-id', DUPLICATES), /^plato-tools: --same-id is for check, convert and preview\.\n/);
+  refused(cli('match', '--key-pattern', `tgn=${TGN}`, TEI_KEYS, '--with', TEI_KEYS), /^plato-tools: --key-pattern is for check, convert and preview\.\n/);
 });
 
 // ---- confirmed patterns for a column of ids ----------------------------------------------------------
