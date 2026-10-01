@@ -198,3 +198,21 @@ test('a column of ids with a pattern, a row with no name and no usable id: repor
   assert.ok(!r.kinds.has('generic-address-not-web'), 'not reported twice');
   assert.equal(r.records.length, 0);
 });
+
+// ---- the warning that points at a suggested pattern (words.js, columnWarnings: the page and the command line) ----
+test('columnWarnings points at a suggested pattern until it is confirmed, in place of "named for a gazetteer"', async () => {
+  const { columnWarnings, gazetteerWarnings } = await import('../src/engine/words.js');
+  const m = await mappingOf(await detect([fx('gazetteer-ids.csv')]));
+  assert.ok(m.suggested.pleiades_id, 'the fixture has its suggestion');
+  const page = columnWarnings(m.mapping, m.gazetteer, m.suggested, m.patterns);
+  assert.ok(page.some((w) => w.includes('“pleiades_id” seems to hold a gazetteer\'s ids') && w.includes(PLEIADES) && w.includes('tick “Make web addresses” in its row')), page);
+  assert.ok(!page.some((w) => w.includes('is named for a gazetteer')), 'one warning for the column, not two');
+  // Control: without the suggestion (the two-argument form, as before), the old warning is given.
+  assert.ok(columnWarnings(m.mapping, m.gazetteer).some((w) => w.includes('“pleiades_id” is named for a gazetteer')));
+  const cli = gazetteerWarnings(m.mapping, m.gazetteer, { cli: true, suggested: m.suggested, patterns: m.patterns });
+  assert.ok(cli.some((w) => w.includes(`{"field": "address", "pattern": "${PLEIADES}"} in the mapping given with --columns`)), cli);
+  // Confirmed: no warning about the column at all.
+  const confirmed = resolveColumns(['id', 'name', 'pleiades_id'], [], CONFIRMED, {}, {});
+  assert.equal(confirmed.mapping.pleiades_id, 'address');
+  assert.deepEqual(columnWarnings(confirmed.mapping, m.gazetteer, m.suggested, confirmed.patterns).filter((w) => w.includes('pleiades_id')), []);
+});

@@ -146,6 +146,11 @@ export const COLUMN_WORDS = {
   noIds: 'These places will have no web addresses: they can be checked and converted, but not published or linked until they have ids. Choose a column as the place id, or add one.',
   latOnly: 'A column is read as latitude but none as longitude, so no place will have a location from them. Choose the longitude column too, or keep the latitude as a note.',
   lonOnly: 'A column is read as longitude but none as latitude, so no place will have a location from them. Choose the latitude column too, or keep the longitude as a note.',
+  /** A column of a gazetteer's ids for which a pattern is suggested (columns.js, guessColumns `suggested`), until it is confirmed. */
+  patternSuggested: (col, pattern, cli) => `The column “${col}” seems to hold a gazetteer's ids, but they are not read as web addresses until you confirm the pattern that makes them, ${pattern}: ${cli ? `give it as {"field": "address", "pattern": "${pattern}"} in the mapping given with --columns` : 'tick “Make web addresses” in its row'}.`,
+  /** The row control that confirms a suggested pattern. */
+  usePattern: 'Make web addresses',
+  usePatternLabel: (col, pattern) => `Make the web addresses of the column “${col}” with ${pattern}`,
   gazetteerNotAddress: (col, cli) => `The column “${col}” is named for a gazetteer or a web address, but no column is read as the place's web address, so no row will be linked to a gazetteer's place: each is read as a new place. If “${col}” holds the places' addresses, ${cli ? 'map it to "address" in the mapping given with --columns' : 'choose “Place\'s web address” for it'}.`,
 };
 /**
@@ -153,18 +158,26 @@ export const COLUMN_WORDS = {
  * (`gazetteer`, columns.js's gazetteerColumns) when no column is the address, no ids or addresses,
  * half a coordinate pair.
  */
-export function columnWarnings(mapping, gazetteer = []) {
+export function columnWarnings(mapping, gazetteer = [], suggested = {}, patterns = {}) {
   const fields = new Set(Object.values(mapping || {}));
-  const out = gazetteerWarnings(mapping, gazetteer);
+  const out = gazetteerWarnings(mapping, gazetteer, { suggested, patterns });
   if (!fields.has('address') && !fields.has('id')) out.push(COLUMN_WORDS.noIds);
   if (fields.has('latitude') && !fields.has('longitude')) out.push(COLUMN_WORDS.latOnly);
   if (fields.has('longitude') && !fields.has('latitude')) out.push(COLUMN_WORDS.lonOnly);
   return out;
 }
-/** A warning for each column named for a gazetteer or a web address when no column is read as the address; `cli` words it for the command line. */
-export function gazetteerWarnings(mapping, gazetteer = [], { cli = false } = {}) {
-  if (Object.values(mapping || {}).includes('address')) return [];
-  return gazetteer.filter((h) => Object.hasOwn(mapping || {}, h)).map((h) => COLUMN_WORDS.gazetteerNotAddress(h, cli));
+/**
+ * A warning for each column named for a gazetteer or a web address when no column is read as the
+ * address; `cli` words it for the command line. A column with a pattern suggested for its ids
+ * (`suggested`, columns.js) and not yet confirmed (`patterns`) is pointed at that pattern instead.
+ */
+export function gazetteerWarnings(mapping, gazetteer = [], { cli = false, suggested = {}, patterns = {} } = {}) {
+  const m = mapping || {}, s = suggested || {}, p = patterns || {};
+  const pending = Object.keys(s).filter((h) => Object.hasOwn(m, h) && !Object.hasOwn(p, h));
+  // With a column read as the address, only that column's own ids, if it has a pattern still to confirm.
+  if (Object.values(m).includes('address')) return pending.filter((h) => m[h] === 'address').map((h) => COLUMN_WORDS.patternSuggested(h, s[h].pattern, cli));
+  return [...pending.map((h) => COLUMN_WORDS.patternSuggested(h, s[h].pattern, cli)),
+    ...gazetteer.filter((h) => Object.hasOwn(m, h) && !pending.includes(h)).map((h) => COLUMN_WORDS.gazetteerNotAddress(h, cli))];
 }
 /** A problem with a saved matching (columns.js, resolveColumns: { kind, example }) in words. */
 export function columnProblem(p) {
@@ -172,6 +185,28 @@ export function columnProblem(p) {
   if (p.kind === 'generic-mapping-unknown-column') return COLUMN_WORDS.unknown(p.example);
   return COLUMN_WORDS.unusable(p.example);
 }
+
+// ---- Hermes: Reading options --------------------------------------------------------------------
+// The page's one fieldset of reading options (src/app.js), shown only for a format that has some:
+// a TEI edition, or a table of places (CSV or plain GeoJSON). Every control is off until chosen; what
+// each one does is said in the report (LOSS_TEXT), not here.
+export const READING_WORDS = {
+  legend: 'Reading options',
+  listPlaces: "Read the list of places, each place's first name as its headword",
+  headerPlaces: "Read the places in the header (found at, made at), as the editors' words",
+  commentaryPlaces: "Read place names in the commentary and notes, as the editors' words",
+  sameId: 'Rows with the same id are one place',
+  /** Refused: the checkbox ticked with no column read as the place id. */
+  sameIdNoId: 'Rows can be one place only when a column is read as the place id. Choose one in the table above first.',
+  keysCaption: 'Keys with no web address: make one from each key with a pattern',
+  keyPrefix: 'Prefix', keyCount: 'Place names', keyExamples: 'Examples', keyPattern: 'Pattern', keyUse: 'Use',
+  noPrefix: '(none)',
+  keyPatternLabel: (prefix) => `The pattern for keys ${prefix ? `with the prefix “${prefix}”` : 'with no prefix'}`,
+  keyUseLabel: (prefix) => `Use the pattern for keys ${prefix ? `with the prefix “${prefix}”` : 'with no prefix'}`,
+  /** A pattern ticked with nothing in it. */
+  keyEmpty: (prefix) => `Give a pattern for keys ${prefix ? `with the prefix “${prefix}”` : 'with no prefix'}, or untick it.`,
+  keysUnread: (message) => `The keys could not be read: ${message}`,
+};
 
 // Krisis: review screen
 // What the page says while matches are reviewed one subject place at a time (src/app.js).

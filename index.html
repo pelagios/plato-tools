@@ -58,6 +58,8 @@
     <h2 id="action-h"><span class="step">2</span> <span id="action-what">Check it, convert it, compare it, publish it, match it, or see it on the map</span></h2>
     <!-- Hermes: for a table of places (CSV, or plain GeoJSON), which column holds what, as guessed; filled by src/app.js. -->
     <div id="columns" class="columns" data-for="generic-input" role="group" aria-labelledby="columns-h" hidden></div>
+    <!-- Hermes: the reading options of a TEI edition or a table of places, every one off until chosen; filled by src/app.js, worded in src/engine/words.js (READING_WORDS). -->
+    <fieldset id="reading" class="reading" data-for="hermes-reading" hidden></fieldset>
     <!-- data-tools: the tools (#tool=…) each part is shown for, once one is chosen; with none chosen, every part is shown. -->
     <div class="actions" data-tools="check convert figures">
       <button id="check" class="primary" data-tools="check">Check</button>

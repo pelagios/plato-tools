@@ -3,7 +3,8 @@
 // The work happens in a worker (src/engine/worker.js). The page publishes its own state on
 // window.__plato for automated tests; nothing else reads it.
 import { fmtBytes, formatName, progressText, summary, groups, draftNote, explainedLines } from './engine/words.js';
-import { COLUMN_CHOICES, COLUMN_WORDS, columnWarnings, columnProblem } from './engine/words.js';
+import { COLUMN_CHOICES, COLUMN_WORDS, columnWarnings, columnProblem, READING_WORDS } from './engine/words.js';
+import { mappingToSave } from './engine/hermes/columns.js';
 import { review as W, POOL_BUSY, POOL_STUCK } from './engine/words.js';
 const REVIEW_WORDS = W;   // the review's words, where W names the words for the columns
 import { readable } from './engine/input.js';
@@ -39,11 +40,13 @@ function onMessage({ data }) {
     $('plato-version').innerHTML = `${v.versionInfo} at <a href="${v.repository}/tree/${v.commit}">${v.commit.slice(0, 7)}</a>`
       // A pin to a branch other than main is a draft of PLATO, and says so wherever the pin is shown.
       + (v.draft ? ` <strong class="draft">${draftNote(v)}</strong>` : '');
+    readingCaps = { editorial: !!data.reading?.editorial };
     Object.assign(state, { phase: 'ready', platoCommit: v.commit, platoDraft: v.draft ? v.ref : null });
   } else if (data.type === 'detected') onDetected(data);
   else if (data.type === 'progress') onProgress(data);
   else if (data.type === 'done') onDone(data);
   else if (data.type === 'columns') onColumns(data);
+  else if (data.type === 'tei-keys') onTeiKeys(data);
   else if (data.type === 'places') onPlaces(data);   // Krisis: gazetteer lookup
   else if (data.type === 'error' && placesWaiting) onPlaces({ subjects: null, places: null, reason: data.message });
   // Another tab of the main page is running: said in words, and the run may be tried again.
@@ -85,6 +88,9 @@ function onDetected({ input: inp, targets: t }) {
   // Every detection makes any answer about the columns of an earlier file stale, a table or not.
   columns = null; state.columns = null; columnsAsked++;
   if (isTable(inp)) { document.querySelector('[data-for="tables-input"]').hidden = false; requestColumns(); }
+  // The reading options this format has, if any, all off; a TEI file's keys are looked for.
+  renderReading();
+  if (inp.format === 'tei') requestTeiKeys();
   gateOnColumns();
   $('action').hidden = false;
   Object.assign(state, { phase: 'detected', format: inp.format, profile: inp.profile || null });
@@ -108,6 +114,9 @@ const columnsPending = () => isTable(input) && !columns && !state.columns?.error
 function gateOnColumns() { if (busy) return; const wait = columnsPending(); $('match').disabled = wait; $('finish').disabled = wait; state.columnsPending = wait; }
 function start(action, earlier) {
   if (busy || looking || !input?.format || input.reason !== undefined) return;   // Krisis: nor while a lookup runs
+  // A reading option that cannot be used is said plainly, and nothing is run.
+  const readingRefused = action === 'check' || action === 'convert' ? readingProblem() : null;
+  if (readingRefused) { readingMessage(readingRefused); return refuse(readingRefused); }
   busy = true;
   const target = action === 'convert' ? $('target').value : null;
   $('progress').hidden = false; $('result').hidden = true;
@@ -130,8 +139,9 @@ function start(action, earlier) {
     // A table is finished by the review's own matching of its columns, unless another has been loaded since: that is sent, and said to differ.
     ...(isTable(input) && columns && reviewMapping !== undefined && mappingText(columns.mapping) !== reviewMapping ? { columns: { ...columns.mapping } } : {}) } });
   else worker.postMessage({ cmd: 'run', files, action, target, options: { base, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked,
-    // Hermes: the matching of columns shown, as chosen (the same JSON as the command line's --columns).
-    ...(isTable(input) && columns ? { columns: { ...columns.mapping } } : {}) } });
+    // Hermes: the matching of columns shown, as chosen (the same JSON as the command line's --columns,
+    // a pattern column in its object form), and the reading options chosen.
+    ...(isTable(input) && columns ? { columns: mappingToSave(columns.mapping, columns.patterns) } : {}), ...readingOptions() } });
 }
 // Agora's options, from the Options panel: only those given are sent.
 function publishOptions() {
@@ -242,7 +252,9 @@ function onColumns(d) {
   }
   // With no prototype, so that a column called "__proto__" is a column like any other (columns.js).
   const own = (o) => Object.assign(Object.create(null), o);
-  columns = { headers: d.headers, examples: own(d.examples), fields: d.fields, mapping: own(d.mapping), reasons: own(d.reasons), gazetteer: d.gazetteer || [] };
+  columns = { headers: d.headers, examples: own(d.examples), fields: d.fields, mapping: own(d.mapping), reasons: own(d.reasons), gazetteer: d.gazetteer || [],
+    // A column of a gazetteer's ids: the pattern suggested for it, and the patterns confirmed (or saved).
+    patterns: own(d.patterns || {}), suggested: own(d.suggested || {}), first: own(d.mapping) };
   // A column the saved matching gives, and the engine took as given, says so in the page's words;
   // one it could not take keeps the engine's reason.
   if (d.saved) for (const h of d.headers) if (d.reasons[h] && d.problems.every((p) => p.example !== h && !String(p.example).startsWith(`${h}: `))) columns.reasons[h] = W.saved;
@@ -263,7 +275,7 @@ function renderColumns() {
     const ex = c.examples[h] || [];
     return `<tr><th scope="row"><code>${escapeHtml(h)}</code></th>`
       + `<td>${ex.length ? `<ul class="examples">${ex.map((v) => `<li>${escapeHtml(v.length > 60 ? v.slice(0, 59) + '…' : v)}</li>`).join('')}</ul>` : `<em>${W.noExamples}</em>`}</td>`
-      + `<td><label for="column-${i}" class="visually-hidden">${escapeHtml(W.selectLabel(h))}</label><select id="column-${i}" data-column="${i}" aria-describedby="column-why-${i}">${choiceOptions(c.mapping[h])}</select></td>`
+      + `<td><label for="column-${i}" class="visually-hidden">${escapeHtml(W.selectLabel(h))}</label><select id="column-${i}" data-column="${i}" aria-describedby="column-why-${i}">${choiceOptions(c.mapping[h])}</select>${patternControl(h, i)}</td>`
       + `<td id="column-why-${i}" class="why-guess">${escapeHtml(c.reasons[h] || '')}</td></tr>`;
   }).join('');
   $('columns').innerHTML = `<h3 id="columns-h">${W.heading}</h3><p>${escapeHtml(W.intro(geojson))} ${escapeHtml(W.base)}</p>`
@@ -290,10 +302,18 @@ function lockColumns() {
   const note = $('columns-locked'); if (note) note.hidden = !(reviewing && selects.length);
   state.columnsLocked = reviewing;
 }
+// A column of a gazetteer's ids, with a pattern suggested (or confirmed): a box to tick to make its
+// web addresses with the pattern, unticked until the user confirms it.
+function patternControl(h, i) {
+  const c = columns, pattern = Object.hasOwn(c.patterns, h) ? c.patterns[h] : c.suggested[h]?.pattern;
+  if (!pattern) return '';
+  return `<label class="use-pattern"><input type="checkbox" id="column-pattern-${i}" data-pattern-column="${i}"${Object.hasOwn(c.patterns, h) ? ' checked' : ''}> ${escapeHtml(COLUMN_WORDS.usePattern)} <code>${escapeHtml(pattern)}</code></label>`;
+}
 function renderColumnWarnings() {
-  const warnings = columnWarnings(columns.mapping, columns.gazetteer);
+  const warnings = columnWarnings(columns.mapping, columns.gazetteer, columns.suggested, columns.patterns);
   $('columns-warnings').innerHTML = warnings.map((w) => `<p class="warn">${escapeHtml(w)}</p>`).join('');
-  state.columns = { headers: [...columns.headers], mapping: Object.assign(Object.create(null), columns.mapping), reasons: Object.assign(Object.create(null), columns.reasons), examples: columns.examples, warnings, messages: [...columns.messages] };
+  state.columns = { headers: [...columns.headers], mapping: Object.assign(Object.create(null), columns.mapping), reasons: Object.assign(Object.create(null), columns.reasons), examples: columns.examples, warnings, messages: [...columns.messages],
+    patterns: Object.assign(Object.create(null), columns.patterns), suggested: Object.assign(Object.create(null), columns.suggested) };
 }
 // A choice for one column. A field one column only can be (the name, the id…) is taken from the
 // column that had it, which is then kept as a note, and says why.
@@ -304,16 +324,43 @@ function chooseColumn(i, field) {
       if (j === i || columns.mapping[other] !== field) return;
       columns.mapping[other] = 'note'; columns.reasons[other] = W.movedTo(COLUMN_CHOICES[field] || field, h);
       $(`column-${j}`).value = 'note'; $(`column-why-${j}`).textContent = columns.reasons[other];
+      dropPattern(other, j);
     });
   }
   columns.mapping[h] = field; columns.reasons[h] = W.youChose;
   $(`column-why-${i}`).textContent = W.youChose;
+  // A pattern makes web addresses: it goes with the address, and with nothing else.
+  if (field !== 'address') dropPattern(h, i);
+  // Rows with the same id are one place only while a column is the id.
+  if ($('reading-sameId')?.checked && !hasIdColumn()) { $('reading-sameId').checked = false; readingMessage(READING_WORDS.sameIdNoId); }
+  renderColumnWarnings();
+}
+function dropPattern(h, i) {
+  delete columns.patterns[h];
+  const box = $(`column-pattern-${i}`); if (box) box.checked = false;
+}
+// The box beside a suggested pattern: ticked, the column is the place's web address, made with it;
+// unticked, the column goes back to what it was first read as (an address column without the pattern).
+function choosePattern(i, on) {
+  const h = columns.headers[i], pattern = Object.hasOwn(columns.patterns, h) ? columns.patterns[h] : columns.suggested[h]?.pattern;
+  if (on && pattern) {
+    $(`column-${i}`).value = 'address';
+    chooseColumn(i, 'address');
+    columns.patterns[h] = pattern;
+  } else {
+    const back = columns.first[h] === 'address' ? 'address' : 'note';
+    $(`column-${i}`).value = back;
+    chooseColumn(i, back);
+    dropPattern(h, i);
+  }
   renderColumnWarnings();
 }
 function saveMatching() {
   const a = document.createElement('a');
   // In the file's order, which an object would not keep for a column whose heading is a number.
-  const text = `{\n${columns.headers.map((h) => `  ${JSON.stringify(h)}: ${JSON.stringify(columns.mapping[h])}`).join(',\n')}\n}\n`;
+  // A column made into web addresses through a pattern is saved in its object form (mappingToSave).
+  const saved = mappingToSave(columns.mapping, columns.patterns);
+  const text = `{\n${columns.headers.map((h) => `  ${JSON.stringify(h)}: ${JSON.stringify(saved[h])}`).join(',\n')}\n}\n`;
   a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
   a.download = (files[0]?.name || 'table').replace(/\.gz$/i, '').replace(/\.[^.]+$/, '') + '-columns.json';
   a.click();
@@ -329,7 +376,95 @@ async function loadMatching(file) {
   }
   requestColumns(saved, file.name);
 }
-$('columns').addEventListener('change', (e) => { if (e.target.matches('select[data-column]')) chooseColumn(Number(e.target.dataset.column), e.target.value); });
+$('columns').addEventListener('change', (e) => {
+  if (e.target.matches('select[data-column]')) chooseColumn(Number(e.target.dataset.column), e.target.value);
+  else if (e.target.matches('input[data-pattern-column]')) choosePattern(Number(e.target.dataset.patternColumn), e.target.checked);
+});
+
+// ---- Hermes: Reading options --------------------------------------------------------------------
+// One fieldset, shown only for a format that has reading options: a TEI edition (its list of places,
+// and a pattern for each prefix of its keys) or a table of places (rows with the same id as one
+// place). Every control is off until chosen. The options held until PLATO pins its Editorial form
+// status (TEI header places and commentary places, tei.js EDITORIAL_IRI) are not shown until then:
+// the worker says which, when it is ready.
+// TODO(tooltips): a hint for each option belongs in the shared tooltip module being built on another
+// branch, never a title attribute; until then the report says what each does.
+let readingCaps = { editorial: false }, teiKeys = null;
+const hasIdColumn = () => !!columns && Object.values(columns.mapping).includes('id');
+function renderReading() {
+  const R = READING_WORDS, box = $('reading'), tei = input?.format === 'tei';
+  teiKeys = null;
+  box.hidden = !(tei || isTable(input));
+  if (box.hidden) { box.innerHTML = ''; readingState(); return; }
+  const controls = tei ? ['listPlaces', ...(readingCaps.editorial ? ['headerPlaces', 'commentaryPlaces'] : [])] : ['sameId'];
+  box.innerHTML = `<legend>${escapeHtml(R.legend)}</legend>`
+    + controls.map((c) => `<label><input type="checkbox" id="reading-${c}" data-reading="${c}"> ${escapeHtml(R[c])}</label>`).join('')
+    + '<div id="reading-keys"></div><div id="reading-message" aria-live="polite"></div>';
+  readingState();
+}
+function requestTeiKeys() {
+  const id = ++columnsAsked;             // the same count as the columns': a later choice makes it stale
+  worker.postMessage({ cmd: 'tei-keys', id, files });
+}
+function onTeiKeys(d) {
+  if (d.id !== columnsAsked || input?.format !== 'tei') return;   // an answer about a file no longer chosen
+  const R = READING_WORDS;
+  // A file whose keys cannot be read: the run reports what stops it, in full.
+  teiKeys = d.error ? [] : d.prefixes;
+  if (teiKeys.length) {
+    const rows = teiKeys.map((k, i) => `<tr><th scope="row">${k.prefix ? `<code>${escapeHtml(k.prefix)}</code>` : `<em>${escapeHtml(R.noPrefix)}</em>`}</th>`
+      + `<td>${k.count.toLocaleString('en-GB')}</td>`
+      + `<td><ul class="examples">${k.examples.map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul></td>`
+      + `<td><label for="key-pattern-${i}" class="visually-hidden">${escapeHtml(R.keyPatternLabel(k.prefix))}</label><input type="text" id="key-pattern-${i}" data-key="${i}" value="${escapeHtml(k.suggested || '')}" size="34" spellcheck="false" autocomplete="off"></td>`
+      + `<td><label for="key-use-${i}" class="visually-hidden">${escapeHtml(R.keyUseLabel(k.prefix))}</label><input type="checkbox" id="key-use-${i}" data-key-use="${i}"></td></tr>`).join('');
+    $('reading-keys').innerHTML = `<div class="columns-scroll"><table class="columns-table reading-keys"><caption>${escapeHtml(R.keysCaption)}</caption>`
+      + `<thead><tr><th scope="col">${R.keyPrefix}</th><th scope="col">${R.keyCount}</th><th scope="col">${R.keyExamples}</th><th scope="col">${R.keyPattern}</th><th scope="col">${R.keyUse}</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+  readingState();
+}
+/** The patterns ticked for the keys' prefixes, as { prefix: pattern }. */
+function keyPatterns() {
+  const out = Object.create(null);
+  (teiKeys || []).forEach((k, i) => { if ($(`key-use-${i}`)?.checked) out[k.prefix] = $(`key-pattern-${i}`).value.trim(); });
+  return out;
+}
+/** The reading options chosen, for the run's options: only those that are on. */
+function readingOptions() {
+  const on = (id) => !!$(`reading-${id}`)?.checked, o = {};
+  if (input?.format === 'tei') {
+    if (on('listPlaces')) o.listPlaces = true;
+    if (readingCaps.editorial && on('headerPlaces')) o.headerPlaces = true;
+    if (readingCaps.editorial && on('commentaryPlaces')) o.commentaryPlaces = true;
+    const kp = keyPatterns();
+    if (Object.keys(kp).length) o.keyPatterns = { ...kp };
+  } else if (isTable(input) && on('sameId')) o.sameId = true;
+  return o;
+}
+/** Why the reading options chosen cannot be used, in words, or null. A pattern itself the engine checks, and refuses in the report. */
+function readingProblem() {
+  if (isTable(input) && $('reading-sameId')?.checked && !hasIdColumn()) return READING_WORDS.sameIdNoId;
+  if (input?.format === 'tei') for (const [prefix, pattern] of Object.entries(keyPatterns())) if (!pattern) return READING_WORDS.keyEmpty(prefix);
+  return null;
+}
+function readingMessage(text) {
+  const m = $('reading-message');
+  if (m) m.innerHTML = text ? `<p class="warn">${escapeHtml(text)}</p>` : '';
+  readingState();
+}
+function readingState() {
+  const box = $('reading');
+  state.reading = {
+    shown: !box.hidden,
+    controls: [...box.querySelectorAll('input[data-reading]')].map((x) => ({ id: x.dataset.reading, checked: x.checked })),
+    keys: teiKeys && teiKeys.map((k, i) => ({ prefix: k.prefix, count: k.count, suggested: k.suggested || null, pattern: $(`key-pattern-${i}`)?.value ?? null, use: !!$(`key-use-${i}`)?.checked })),
+    message: $('reading-message')?.textContent || '',
+  };
+}
+$('reading').addEventListener('change', (e) => {
+  if (e.target.id === 'reading-sameId' && e.target.checked && !hasIdColumn()) { e.target.checked = false; readingMessage(READING_WORDS.sameIdNoId); return; }
+  readingMessage('');
+});
+$('reading').addEventListener('input', () => readingState());
 
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
 

@@ -264,6 +264,16 @@ a:visited { color: var(--accent); }
 #columns-messages p, #columns-warnings p { margin: .5rem 0 0; }
 .columns-files { margin-top: .6rem; }
 .columns-files small { flex-basis: 100%; color: var(--muted); }
+/* A suggested pattern for a column of a gazetteer's ids: a box to tick under the column's choice. */
+.columns-table .use-pattern { display: block; margin-top: .3rem; font-size: .85rem; }
+.columns-table .use-pattern code { font: .8rem/1.45 var(--font-mono); overflow-wrap: anywhere; }
+
+/* Hermes: Reading options. One compact group: a line for each checkbox, then the keys' patterns. */
+.reading { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 1rem; padding: .3rem .8rem .6rem; }
+.reading legend { font-weight: 700; padding: 0 .3rem; }
+.reading > label { display: block; margin: .25rem 0; }
+.reading-keys input[type=text] { font: .85rem/1.4 var(--font-mono); padding: .2rem .3rem; border: 1px solid var(--line); border-radius: 4px; background: var(--card); color: var(--fg); max-width: 100%; }
+#reading-message p { margin: .4rem 0 0; }
 
 /* Krisis: match review. One subject place at a time, its candidates below it; the highlighted
    candidate (the one the keys act on) carries the gold of PLATO's logo at its edge, a decided one

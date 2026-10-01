@@ -14,6 +14,7 @@ import { pragmas } from '../lib/store.js';
 import { detect, readable } from './input.js';
 import { columnsOf, mappingOf } from './hermes/generic.js';
 import { FIELDS, cellText } from './hermes/columns.js';
+import { teiKeyPrefixes, EDITORIAL_IRI } from './hermes/tei.js';
 import { load as choraLoad } from './chora/store.js';
 import { save as choraSave } from './chora/save.js';
 
@@ -180,7 +181,8 @@ self.onmessage = async ({ data }) => {
       // A page with a pool of its own (Chora's) takes it now, so that a second tab of that page is
       // told at once that it cannot start, not when a file is first opened.
       if (poolName) await sqlitePool();
-      postMessage({ type: 'ready', version: resources.version });
+      // Whether the TEI reading options for the editors' words may be offered (held until PLATO pins Editorial).
+      postMessage({ type: 'ready', version: resources.version, reading: { editorial: EDITORIAL_IRI !== null } });
     } else if (data.cmd === 'detect') {
       const input = await detect(data.files);
       // File objects stay here; the page is told what was found, and the run detects the files again.
@@ -197,11 +199,21 @@ self.onmessage = async ({ data }) => {
         const input = await detect(data.files);
         const { headers, sample } = await columnsOf(input);
         const examples = Object.fromEntries(headers.map((h) => [h, sample.map((r) => cellText(r?.[h])).filter(Boolean).slice(0, 3)]));
-        const { mapping, reasons, problems, gazetteer } = await mappingOf(input, data.saved);
+        const { mapping, patterns, suggested, reasons, problems, gazetteer } = await mappingOf(input, data.saved);
         const fields = Object.fromEntries(Object.entries(FIELDS).map(([k, f]) => [k, { single: f.single }]));
-        postMessage({ type: 'columns', id: data.id, headers, examples, mapping, reasons, problems, gazetteer, fields, saved: data.saved !== undefined });
+        postMessage({ type: 'columns', id: data.id, headers, examples, mapping, patterns, suggested, reasons, problems, gazetteer, fields, saved: data.saved !== undefined });
       } catch (e) {
         postMessage({ type: 'columns', id: data.id, error: String(e && e.message || e) });
+      }
+    } else if (data.cmd === 'tei-keys') {
+      // Hermes: the prefixes of a TEI file's keys on place names with no ref, each with a pattern to
+      // suggest (tei.js, teiKeyPrefixes), for the page to offer before the run. `id` is the page's,
+      // shared with 'columns', so that an answer about a file no longer chosen is set aside.
+      try {
+        const input = await detect(data.files);
+        postMessage({ type: 'tei-keys', id: data.id, prefixes: await teiKeyPrefixes(input) });
+      } catch (e) {
+        postMessage({ type: 'tei-keys', id: data.id, error: String(e && e.message || e) });
       }
     } else if (data.cmd === 'run') {
       const input = await detect(data.files);
