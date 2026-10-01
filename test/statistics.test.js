@@ -334,16 +334,28 @@ test('Data Cube: a constraint over nothing is reported as not tested, never as p
   const s = status(integrity(await cubeOf(bare)));
   assert.deepEqual(s, { 'IC-1': 'pass', 'IC-2': 'pass', 'IC-11': 'pass', 'IC-12': 'pass', 'IC-14': 'not-tested' });
 });
-test('Data Cube: IC-12 groups rather than pairs, so 100,000 observations take moments', async () => {
-  const obs = [];
-  for (let i = 0; i < 100000; i++) obs.push(`<https://example.org/o/${i}> <${QB}dataSet> <https://example.org/t> .\n<https://example.org/o/${i}> <https://example.org/dim/a> "${i % 1000}" .\n<https://example.org/o/${i}> <https://example.org/dim/b> "${Math.floor(i / 1000)}" .\n`);
+// What this guards is the algorithm, not the machine: IC-12 groups observations by their dimension
+// values, so ten times the observations take about ten times as long; comparing every pair would take
+// a hundred times as long. The ratio of two runs in the same process holds on a loaded machine, where
+// a fixed limit in seconds did not (31–81 s at load 100+, against 14–25 s alone). A generous ceiling
+// still catches a collapse that hits both sizes alike.
+test('Data Cube: IC-12 groups rather than pairs, so ten times the observations take about ten times as long', async () => {
   const head = `<https://example.org/t> <${QB}structure> <https://example.org/s> .\n<https://example.org/s> <${QB}component> _:a .\n_:a <${QB}dimension> <https://example.org/dim/a> .\n<https://example.org/s> <${QB}component> _:b .\n_:b <${QB}dimension> <https://example.org/dim/b> .\n`;
-  const t0 = Date.now();
-  const clean12 = integrity(head + obs.join(''))[3];
+  const cube = (n) => {
+    const obs = [];
+    for (let i = 0; i < n; i++) obs.push(`<https://example.org/o/${i}> <${QB}dataSet> <https://example.org/t> .\n<https://example.org/o/${i}> <https://example.org/dim/a> "${i % 1000}" .\n<https://example.org/o/${i}> <https://example.org/dim/b> "${Math.floor(i / 1000)}" .\n`);
+    return head + obs.join('');
+  };
+  const timed = (text) => { const t0 = performance.now(); const r = integrity(text)[3]; return [r, performance.now() - t0]; };
+  timed(cube(1000));                                   // warm the code paths, so the first size is not paying for them
+  const [small, tSmall] = timed(cube(10000));
+  const [clean12, tLarge] = timed(cube(100000));
+  assert.deepEqual([small.status, small.evaluated], ['pass', 10000]);
   assert.deepEqual([clean12.status, clean12.evaluated], ['pass', 100000]);
-  const dup = integrity(head + obs.join('') + `<https://example.org/o/dup> <${QB}dataSet> <https://example.org/t> .\n<https://example.org/o/dup> <https://example.org/dim/a> "7" .\n<https://example.org/o/dup> <https://example.org/dim/b> "3" .\n`)[3];
+  const dup = integrity(cube(100000) + `<https://example.org/o/dup> <${QB}dataSet> <https://example.org/t> .\n<https://example.org/o/dup> <https://example.org/dim/a> "7" .\n<https://example.org/o/dup> <https://example.org/dim/b> "3" .\n`)[3];
   assert.deepEqual(dup.violations, ['https://example.org/t: https://example.org/o/3007 and https://example.org/o/dup have the same dimension values']);
-  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+  assert.ok(tLarge / tSmall < 30, `ten times the observations took ${(tLarge / tSmall).toFixed(1)} times as long (${tSmall.toFixed(0)} ms, ${tLarge.toFixed(0)} ms): pairwise is about 100`);
+  assert.ok(tLarge < 180000, `${tLarge.toFixed(0)} ms for 100,000 observations`);
 });
 test('--cube: a figure with neither a value nor an obsStatus gets no measure, and is reported', async () => {
   const d = doc(); const f = figures(d)[4]; delete f.attributes;
