@@ -1680,7 +1680,7 @@ THEME_STATE = """() => { const lum = (c) => { const m = c && c.match(/[\\d.]+/g)
   const css = (e, p) => e ? getComputedStyle(e)[p] : null, root = document.documentElement, group = document.getElementById('theme-switch');
   const checked = group ? [...group.querySelectorAll('input[name="plato-theme"]')].filter((i) => i.checked).map((i) => i.value) : null;
   return { page: lum(css(document.body, 'backgroundColor')), body: css(document.body, 'backgroundColor'), panel: lum(css(document.getElementById('files'), 'backgroundColor')),
-    band: css(document.querySelector('#toolbox .tool:not(.coming)'), 'borderTopColor'), mark: css(document.querySelector('#intro .plato-mark'), 'filter'),
+    band: css(document.querySelector('#toolbox .tool:not(.coming) .icon'), 'stroke'), mark: css(document.querySelector('#intro .plato-mark'), 'filter'),
     colorScheme: css(root, 'colorScheme'), attr: root.getAttribute('data-theme'), checked, group: !!group && !!group.offsetWidth,
     stored: (() => { try { return localStorage.getItem('plato-tools.theme'); } catch { return 'refused'; } })(),
     violations: window.__cspViolations || null, atParse: window.__themeAtParse }; }"""
