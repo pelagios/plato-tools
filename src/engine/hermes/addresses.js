@@ -64,6 +64,34 @@ export function canonicalAddress(value) {
   return { iri: value };
 }
 
+// ---- addresses that are not a place's --------------------------------------------------------------
+// Checked after the canonical rules, so that every form those rules take is a place's already. On a
+// gazetteer's own host, anything that is still not one of its record addresses names a list, a search
+// or a map page, or is garbled (Pleiades' /places/ alone; /places/http://pleiades.stoa.org/places/1/,
+// an address pasted after its own prefix; GeoNames' /maps/…, /search…, /advanced-search…): it is
+// refused. A Pleiades address is a place's only as /places/<digits> (or part of one, above); a GeoNames
+// address only with a numeric id as its path's first step (sws.geonames.org/<n>/about.rdf is carried
+// as it is, as before). Pages of sites that are not gazetteers (Wikipedia, Google Maps and its short
+// links) are carried as given, and reported: they may name the place, but no record of it.
+const PLEIADES_HOST = /^pleiades\.stoa\.org$/;
+const GEONAMES_HOST = /^(?:www\.|sws\.)?geonames\.org$/;
+const PAGE_HOSTS = [
+  (h) => h === 'wikipedia.org' || h.endsWith('.wikipedia.org'),
+  (h) => h === 'goo.gl' || h === 'maps.app.goo.gl',
+  (h, path) => /^(?:www\.|maps\.)?google\.com$/.test(h) && (h.startsWith('maps.') || /^\/maps(?:[/?#]|$)/.test(path)),
+];
+/** 'not-a-place' for an address on a gazetteer's host that names no place's record, 'web-page' for a page of a site that is not a gazetteer, else undefined. `value` has been through the canonical rules. */
+function notAPlace(value) {
+  if (!/^https?:\/\//i.test(value)) return undefined;
+  let url;
+  try { url = new URL(value); } catch { return undefined; }
+  const host = url.hostname.toLowerCase().replace(/\.$/, '');
+  if (PLEIADES_HOST.test(host)) return PLEIADES.test(value) || PLEIADES_PART.test(value) ? undefined : 'not-a-place';
+  if (GEONAMES_HOST.test(host)) return /^\/\d+(?:\/|$)/.test(url.pathname) ? undefined : 'not-a-place';
+  if (PAGE_HOSTS.some((f) => f(host, url.pathname))) return 'web-page';
+  return undefined;
+}
+
 /** The note on a record whose address was rewritten: what the source wrote, and by which rules. */
 export function addressNote({ from, rules = [] }) {
   return `Place address given as ${from} (${rules.length > 1 ? 'rules' : 'rule'} ${rules.join(' and ')}, ${ADDRESS_RULES})`;
@@ -81,10 +109,12 @@ const STAGING = /^https?:\/\/dev\.whgazetteer\.org\//i;
  * The address to carry for a place identifier, as { iri } when it is usable as it stands, { iri,
  * from, rules } when it was rewritten (`from` is what the source wrote, `rules` the rules applied:
  * addressNote words them), { iri, part } for part of a Pleiades place's record, carried as given and
- * to be reported (address-pleiades-part), or { lost, value } when it must not be carried over, `lost`
- * naming why ('whg-portal-record' | 'whg-staging'). Anything else passes through unchanged as
- * { iri: value }, for the caller's own checks. The canonical rules come first, then WHG's; no
- * address matches both.
+ * to be reported (address-pleiades-part), { iri, page: true } for a web page that is not a gazetteer's
+ * record (Wikipedia, Google Maps), carried as given and to be reported (address-web-page), or
+ * { lost, value } when it must not be carried over, `lost` naming why ('address-not-a-place' |
+ * 'whg-portal-record' | 'whg-staging'). Anything else passes through unchanged as { iri: value },
+ * for the caller's own checks. The canonical rules come first, then the check that an address on a
+ * gazetteer's host is a place's (notAPlace), then WHG's; no address matches two of them.
  */
 export function placeAddress(value) {
   if (typeof value !== 'string') return { iri: value };
@@ -92,6 +122,9 @@ export function placeAddress(value) {
   const c = canonicalAddress(v);
   if (c.part) return { iri: v, part: c.part };
   if (c.rules) return { iri: c.iri, from: v, rules: c.rules };
+  const not = notAPlace(v);
+  if (not === 'not-a-place') return { lost: 'address-not-a-place', value: v };
+  if (not === 'web-page') return { iri: v, page: true };
   if (CURIE.test(v)) return { iri: W3ID + v, from: v, rules: ['whg-record-id'] };
   const e = ENTITY.exec(v);
   if (e) return { iri: W3ID + e[1], from: v, rules: ['whg-entity-page'] };

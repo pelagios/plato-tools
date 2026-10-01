@@ -60,6 +60,7 @@ export const GENERIC_KINDS = {
   'generic-address-not-web': 'loss',
   'generic-whg-record': 'loss',
   'generic-whg-staging': 'loss',
+  'address-not-a-place': 'loss',
   'generic-id-shape': 'loss',
   'generic-same-id-empty': 'loss',
   'generic-feature-key': 'loss',
@@ -67,6 +68,7 @@ export const GENERIC_KINDS = {
   'generic-csv-extra-cells': 'loss',
   'generic-csv-row': 'warning',
   'address-pleiades-part': 'warning',
+  'address-web-page': 'warning',
   'generic-csv-duplicate-header': 'warning',
   'generic-no-ids': 'warning',
   'generic-id-empty': 'warning',
@@ -118,6 +120,8 @@ export const isWebAddress = (s) => typeof s === 'string' && /^https?:\/\/\S+$/i.
 // A value that names a place's address: a web address, or a form addresses.js rewrites into one
 // (WHG's place:<ns>:<id>). A bare number, or whg:<n>, is neither, and is never expanded.
 const namesAddress = (s) => { const p = placeAddress(s); return isWebAddress(p.lost ? p.value : p.iri); };
+// What placeAddress (addresses.js) says of an address that must not be carried, as a kind here.
+const lostKind = (lost) => (lost === 'address-not-a-place' ? lost : lost === 'whg-staging' ? 'generic-whg-staging' : 'generic-whg-record');
 const NUMBER = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
 const isNumber = (s) => NUMBER.test(s);
 const FIELD_WORDS = {
@@ -456,17 +460,18 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
           // shape (whg:<n> always) makes none, and is kept in the notes should the row become a place of its own.
           const p = addressFromPattern(v, pattern);
           if (p.lost === 'shape') { addressLost = true; report('generic-id-shape', `${where}, ${col}: ${v} (the pattern ${pattern})`); note(col, v); }
-          else if (p.lost) { addressLost = true; report(p.lost === 'whg-staging' ? 'generic-whg-staging' : 'generic-whg-record', `${where}: ${p.value}`); }
+          else if (p.lost) { addressLost = true; report(lostKind(p.lost), `${where}: ${p.value}`); }
           else if (isWebAddress(p.iri)) {
             address = p.iri.trim(); addressFrom = p.from ? p : undefined;
             notes.push(`Place address made from the value ${v} in the column "${col}" with the pattern ${pattern}`);
             if (p.part) report('address-pleiades-part', `${where}: ${p.iri}`);
+            if (p.page) report('address-web-page', `${where}: ${p.iri}`);
           } else { addressText = v; note(col, v); }
           break;
         }
         const p = placeAddress(v);
-        if (p.lost) { addressLost = true; report(p.lost === 'whg-staging' ? 'generic-whg-staging' : 'generic-whg-record', `${where}: ${p.value}`); }
-        else if (isWebAddress(p.iri)) { address = p.iri.trim(); addressFrom = p.from ? p : undefined; if (p.part) report('address-pleiades-part', `${where}: ${p.iri}`); }
+        if (p.lost) { addressLost = true; report(lostKind(p.lost), `${where}: ${p.value}`); }
+        else if (isWebAddress(p.iri)) { address = p.iri.trim(); addressFrom = p.from ? p : undefined; if (p.part) report('address-pleiades-part', `${where}: ${p.iri}`); if (p.page) report('address-web-page', `${where}: ${p.iri}`); }
         else { addressText = v; note(col, v); }   // kept, should the row become a place of its own
         break;
       }

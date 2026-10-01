@@ -248,3 +248,75 @@ test('DEVELOPERS.md names the rules version the code has, with a row for every r
   const named = [...section.matchAll(/^\| `([a-z-]+)` \|/gm)].map((x) => x[1]);
   assert.deepEqual(named.sort(), RULES.map(([r]) => r).sort());
 });
+
+// Addresses that are not a place's record (real-data findings, 2026-10-01): on a gazetteer's own host,
+// a list, search or map page, or a garbled address, is refused; a page of a site that is not a
+// gazetteer is carried and reported. Each reader is given one address, beside a place's own as the control.
+const allThree = async (v) => {
+  const out = [];
+  const tei = mappedTei(`<p><placeName ref="${v.replace(/&/g, '&amp;')}">X</placeName></p>`);
+  out.push(['TEI', tei.doc.attestations.map((a) => a.about), tei.reported]);
+  const rep = new Report(), evs = [];
+  for await (const ev of genericSource(await detect([new File([`name,address\nX,${v}\n`], 'x.csv')]), rep, { columns: { name: 'name', address: 'address' } })) evs.push(ev);
+  out.push(['CSV', evs.filter((e) => e.type === 'attestation').map((e) => e.value.about), rep.toJSON().items.flatMap((i) => i.examples.map((e) => [i.kind, e]))]);
+  const rec = mapped([studio(v)]);
+  out.push(['Recogito', rec.doc.attestations.map((a) => a.about), rec.reported]);
+  return out;
+};
+const NOT_PLACES = [
+  'http://pleiades.stoa.org/places/',      // IIP's header writes this when no place is known (an equivalent, not copied: IIP is CC BY-NC)
+  'https://pleiades.stoa.org/places/',
+  'https://pleiades.stoa.org/places/http://pleiades.stoa.org/places/687966/',
+  'https://pleiades.stoa.org/',
+  'https://www.geonames.org/maps/google_31.563_34.928.html',
+  'https://www.geonames.org/search.html?q=haifa',
+  'https://www.geonames.org/advanced-search.html?q=lviv&country=UA',
+  'http://geonames.org/',
+];
+test('an address on a gazetteer\'s host that names no place\'s record is refused by every reader, as address-not-a-place', async () => {
+  for (const v of NOT_PLACES) {
+    assert.deepEqual(placeAddress(v), { lost: 'address-not-a-place', value: v }, v);
+    for (const [name, abouts, reported] of await allThree(v)) {
+      assert.deepEqual(abouts, [], `${name}: ${v}`);
+      assert.ok(reported.some(([k, e]) => k === 'address-not-a-place' && e.includes(v)), `${name}: ${JSON.stringify(reported)}`);
+    }
+  }
+  // controls: real record addresses, in every form the canonical rules take, are carried, and not reported
+  for (const [v, carried] of [['https://pleiades.stoa.org/places/687966', 'https://pleiades.stoa.org/places/687966'], ['http://pleiades.stoa.org/places/677994', 'https://pleiades.stoa.org/places/677994'],
+    ['https://pleiades.stoa.org/places/687966/', 'https://pleiades.stoa.org/places/687966'], ['https://www.geonames.org/294801/haifa.html', 'https://sws.geonames.org/294801/'],
+    ['http://sws.geonames.org/2525448', 'https://sws.geonames.org/2525448/'], ['https://sws.geonames.org/2523083/about.rdf', 'https://sws.geonames.org/2523083/about.rdf']]) {
+    assert.equal(placeAddress(v).lost, undefined, v);
+    for (const [name, abouts, reported] of await allThree(v)) {
+      assert.deepEqual(abouts, [carried], `${name}, control: ${v}`);
+      assert.ok(!reported.some(([k]) => k === 'address-not-a-place'), `${name}, control: ${v}`);
+    }
+  }
+  // Pleiades' parts keep their own treatment
+  assert.deepEqual(placeAddress('https://pleiades.stoa.org/places/687966/json'), { iri: 'https://pleiades.stoa.org/places/687966/json', part: 'part' });
+  for (const kinds of [TEI_KINDS, GENERIC_KINDS, ANNOTATION_KINDS]) { assert.equal(kinds['address-not-a-place'], 'loss'); assert.equal(kinds['address-web-page'], 'warning'); }
+  assert.match(LOSS_TEXT['address-not-a-place'], /names a gazetteer's list, search or map page, or is garbled, not a place's record/);
+});
+
+test('an address of a TEI list of places\' idno that names no place is refused too, and the place name pointing to it gives nothing', () => {
+  const m = mappedTei('<p><placeName ref="#p">X</placeName></p><listPlace><place xml:id="p"><idno type="URI">https://pleiades.stoa.org/places/</idno></place></listPlace>');
+  assert.deepEqual(m.doc.attestations, []);
+  assert.ok(m.reported.some(([k, e]) => k === 'address-not-a-place' && e === '#p: https://pleiades.stoa.org/places/'), JSON.stringify(m.reported));
+  const c = mappedTei('<p><placeName ref="#p">X</placeName></p><listPlace><place xml:id="p"><idno type="URI">https://pleiades.stoa.org/places/687966</idno></place></listPlace>');
+  assert.deepEqual(c.doc.attestations.map((a) => a.about), ['https://pleiades.stoa.org/places/687966'], 'control');
+});
+
+test('a web page that is not a gazetteer record is carried as given, and reported as address-web-page by every reader', async () => {
+  for (const v of ['https://en.wikipedia.org/wiki/Haifa', 'https://de.wikipedia.org/wiki/Palazzo_Orsini_di_Gravina', 'https://goo.gl/maps/AbCdEf123', 'https://maps.app.goo.gl/AbCdEf123', 'https://www.google.com/maps/place/Haifa/']) {
+    assert.deepEqual(placeAddress(v), { iri: v, page: true }, v);
+    for (const [name, abouts, reported] of await allThree(v)) {
+      assert.deepEqual(abouts, [v], `${name}: ${v}`);
+      assert.ok(reported.some(([k, e]) => k === 'address-web-page' && e.includes(v)), `${name}: ${JSON.stringify(reported)}`);
+    }
+  }
+  // control: an address of another site is carried with no such warning
+  for (const [name, abouts, reported] of await allThree('https://www.google.com/search?q=haifa')) {
+    assert.deepEqual(abouts, ['https://www.google.com/search?q=haifa'], name);
+    assert.ok(!reported.some(([k]) => k === 'address-web-page'), `${name}, control`);
+  }
+  assert.match(LOSS_TEXT['address-web-page'], /a web page, not a gazetteer record/);
+});

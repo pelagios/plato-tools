@@ -375,10 +375,18 @@ readers link to those headings, so keep them.
 - **Addresses** (`addresses.js`). `placeAddress(value)` returns `{ iri }`; `{ iri, from, rules }`
   when it rewrote the address by the rules below (`from` is what the source wrote); `{ iri, part }`
   for part of a Pleiades place's record, carried as given and reported (`address-pleiades-part`, a
-  warning in all three readers); or `{ lost, value }` for a WHG portal address below whg_id
-  12,345,678 (`whg-portal-record`) or one on dev.whgazetteer.org (`whg-staging`). It applies the
-  canonical rules (`canonicalAddress`) first, then WHG's; no address matches both, so the order
-  cannot change a result. The Recogito, TEI and CSV/GeoJSON readers all pass every place address
+  warning in all three readers); `{ iri, page: true }` for a page of a site that is not a gazetteer
+  (Wikipedia, `goo.gl` and `maps.app.goo.gl` short links, Google Maps), carried as given and reported
+  (`address-web-page`, a warning); or `{ lost, value }` for an address on Pleiades' or GeoNames' host
+  that is not a place's record once the canonical rules have run (Pleiades: anything but
+  `/places/<digits>` and its parts, such as `/places/` alone or a doubled
+  `/places/http://pleiades.stoa.org/places/687966/`; GeoNames: no numeric id as the path's first
+  step, such as `/maps/…`, `/search…`, `/advanced-search…`), refused in every reader as
+  `address-not-a-place` (a loss), a WHG portal address below whg_id 12,345,678
+  (`whg-portal-record`) or one on dev.whgazetteer.org (`whg-staging`). It applies the canonical rules
+  (`canonicalAddress`) first, then that check (`notAPlace`), then WHG's; no address matches two, so
+  the order cannot change a result. The check rewrites nothing, so it is not a rule of the table
+  below and does not change its version. The Recogito, TEI and CSV/GeoJSON readers all pass every place address
   through it, and a rewritten address gets the note `addressNote` words: "Place address given as X
   (rule <name>, hermes-addresses 1)".
 - **Loss kinds.** Each reader lists its kinds with their severity (`TEI_KINDS` in `tei.js`,

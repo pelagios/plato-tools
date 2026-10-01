@@ -65,8 +65,10 @@ export const ANNOTATION_KINDS = {
   'annotation-date': 'loss',
   'annotation-whg-record': 'loss',
   'annotation-whg-staging': 'loss',
+  'address-not-a-place': 'loss',
   'annotation-source-not-address': 'warning',
   'address-pleiades-part': 'warning',
+  'address-web-page': 'warning',
   'annotation-target-no-source': 'warning',
   'annotation-several-places': 'warning',
   'annotation-verification-unknown': 'warning',
@@ -351,8 +353,9 @@ export class AnnotationReader {
     const links = [];
     for (const c of read.filter((c) => c.kind === 'link')) {
       const addr = placeAddress(c.iri);
-      if (addr.lost) { report(addr.lost === 'whg-staging' ? 'annotation-whg-staging' : 'annotation-whg-record', `${where}: ${addr.value}`); continue; }
+      if (addr.lost) { report(addr.lost === 'address-not-a-place' ? addr.lost : addr.lost === 'whg-staging' ? 'annotation-whg-staging' : 'annotation-whg-record', `${where}: ${addr.value}`); continue; }
       if (addr.part) report('address-pleiades-part', `${where}: ${addr.iri}`);
+      if (addr.page) report('address-web-page', `${where}: ${addr.iri}`);
       links.push(addr.from ? { ...c, iri: addr.iri, from: addr.from, rules: addr.rules } : c);
     }
     // Recogito v1 does not write whether a link was confirmed. A link with no creator was made by

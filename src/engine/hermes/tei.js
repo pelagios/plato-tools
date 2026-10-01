@@ -139,8 +139,10 @@ export const TEI_KINDS = {
   'tei-key-no-pattern': 'loss',
   'tei-key-shape': 'loss',
   'tei-findspot-no-object': 'loss',
+  'address-not-a-place': 'loss',
   'tei-ref-several': 'warning',
   'address-pleiades-part': 'warning',
+  'address-web-page': 'warning',
   'tei-source-no-address': 'warning',
   'tei-none-linked': 'warning',
   'tei-editorial-undecided': 'warning',
@@ -172,7 +174,7 @@ const BREAKS = new Set(['lb', 'pb', 'cb']);
 // "Whose words"): past it, the text is read as having none, and that is reported.
 export const HOLD_CAP = 10000;
 // What placeAddress (./addresses.js) says of an address that must not be carried, as a kind here.
-const WHG_LOST = { 'whg-portal-record': 'tei-whg-record', 'whg-staging': 'tei-whg-staging' };
+const WHG_LOST = { 'whg-portal-record': 'tei-whg-record', 'whg-staging': 'tei-whg-staging', 'address-not-a-place': 'address-not-a-place' };
 // The attributes of a place name that are read (xml:lang for the name's language; type only where it
 // makes <rs> or <name> a place). Every other attribute is reported, once for each attribute and
 // value. @cert is among them: TEI's high, medium and low do not say what they are certain of (the
@@ -528,6 +530,7 @@ export class TeiReader {
           const s = norm(c.pref), r = placeAddress(s);
           if (r.lost) { this.report(WHG_LOST[r.lost], `#${pl.id ?? ''}: ${r.value}`); return; }
           if (r.part) this.report('address-pleiades-part', `#${pl.id ?? ''}: ${r.iri}`);
+          if (r.page) this.report('address-web-page', `#${pl.id ?? ''}: ${r.iri}`);
           if (isWeb(r.iri)) { if (!pl.uris.some((u) => u.iri === r.iri)) pl.uris.push(r.from ? { iri: r.iri, from: r.from, rules: r.rules } : { iri: r.iri }); }
           else this.report('tei-place-content', `${pl.id !== undefined ? `#${pl.id}` : 'a place with no xml:id'}: <idno${t.attributes.type ? ` type="${t.attributes.type.value}"` : ''}> ${s}`);
         });
@@ -843,6 +846,7 @@ export class TeiReader {
     if (r.error || r.lost === 'shape' || (!r.lost && !isWeb(r.iri))) { this.report('tei-key-shape', `${k} (pattern ${pattern})`); return { lost: true }; }
     if (r.lost) { this.report(WHG_LOST[r.lost], `${r.value} (key ${k})`); return { lost: true }; }
     if (r.part) this.report('address-pleiades-part', `${r.iri} (key ${k})`);
+    if (r.page) this.report('address-web-page', `${r.iri} (key ${k})`);
     return { address: { iri: r.iri, ...(r.from ? { from: r.from, rules: r.rules } : {}) }, note: `Place address made from the key ${k} with the pattern ${pattern}` };
   }
   /** The prefixDefs in force, innermost first: one array, made again only when a prefixDef or a TEI element comes or goes. */
@@ -932,6 +936,7 @@ export class TeiReader {
       const r = placeAddress(v);
       if (r.lost) { this.report(WHG_LOST[r.lost], `${r.value}${words}`); return null; }
       if (r.part) this.report('address-pleiades-part', `${r.iri}${words}`);
+      if (r.page) this.report('address-web-page', `${r.iri}${words}`);
       return { iri: r.iri, ...(r.from ? { from: r.from, rules: r.rules } : {}), ...(via ? { via } : {}) };
     };
     if (isWeb(p)) return address(p);
