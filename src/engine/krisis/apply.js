@@ -64,7 +64,8 @@ export async function apply({ subjects, work, options = {} }, env) {
   if (subjects?.format === 'tables' && reviewedBase !== base) rep.warning('base-differs', KRISIS_TEXT.baseDiffers(reviewedBase, base));
   // A table of places is read by the mapping of its columns the review was made with, unless another is given (and said to differ).
   const reviewedColumns = w.match_parameters.columns, columns = options.columns || reviewedColumns;
-  if (options.columns && reviewedColumns && !sameMapping(options.columns, reviewedColumns) && (subjects?.format === 'csv' || subjects?.format === 'geojson'))
+  // Said both ways, as the base address is: a mapping given now to a review made by the guess differs as much as one made by another mapping.
+  if (options.columns && (subjects?.format === 'csv' || subjects?.format === 'geojson') && (!reviewedColumns || !sameMapping(options.columns, reviewedColumns)))
     rep.warning('columns-differ', KRISIS_TEXT.columnsDiffer);
   options = { ...options, columns };
   if (subjects?.files) {

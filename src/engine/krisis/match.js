@@ -19,8 +19,9 @@ import { Report } from '../report.js';
 import { collectWithdrawn, resolveWithdrawn } from '../../formats/shared.js';
 import { DISTINCT_GATE } from './names.js';
 import { NameIndex, BLOCKING, BLOCKING_RULE } from './blocking.js';
-import { WORK_VERSION, MATCH_DEFAULTS, fileRecords, serialiseWork, checkReviewer, checkMatchOptions, NOT_READ_KINDS } from './work.js';
+import { WORK_VERSION, MATCH_DEFAULTS, fileRecords, serialiseWork, checkReviewer, checkMatchOptions, NOT_READ_KINDS, isColumns } from './work.js';
 import { KRISIS_TEXT } from '../words.js';
+import { DataError } from '../input.js';
 
 export const ALGORITHM = 'krisis-names 5';
 export const DEFAULTS = MATCH_DEFAULTS;
@@ -233,6 +234,7 @@ export async function match({ subjects, others, options = {} }, env) {
   const progress = env.progress || (() => {});
   const params = checkMatchOptions(options);
   if (options.reviewer) checkReviewer(options.reviewer);
+  if (options.columns !== undefined && options.columns !== null && !isColumns(options.columns)) throw new DataError(KRISIS_TEXT.columnsNotAMapping);
   const sides = {};
   for (const [word, input] of [['subjects', subjects], ['others', others]]) {
     const { side, failed } = await readSide(input, word, options, env, rep, progress);

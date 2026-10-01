@@ -206,6 +206,8 @@ export const review = {
   noDatasetYet: 'No dataset is chosen yet. You can look through the review, but to finish it, choose the dataset it was made from, then resume the review again.',
   /** A review resumed with files chosen that are not data these tools read. */
   notRecognisedYet: 'The files chosen were not recognised as data these tools read. You can look through the review, but to finish it, choose the dataset it was made from, then resume the review again.',
+  /** Finish pressed with files chosen that are not data these tools read: the reviewer is still in the review. */
+  notRecognisedAtFinish: 'The files chosen were not recognised as data these tools read, so the review cannot be finished with them. Save the review, choose the dataset it was made from, and resume the saved review to finish it.',
   /** A dataset given to matching that is not data these tools read ('subjects' or 'others'). */
   notRecognised: (which) => `${which === 'subjects' ? 'Your dataset' : 'The other dataset'} was not recognised as data these tools read, so nothing was matched`,
 };
@@ -272,6 +274,8 @@ export const KRISIS_TEXT = {
   baseDiffers: (reviewed, given) => `The review was made with ${reviewed ? `the base address ${reviewed}` : 'no base address'} for the places of your spreadsheet tables, and ${given ? `${given} is given now` : 'none is given now'}, so the places may not have the addresses the review gives them. Give the same base address as when matching.`,
   /** A mapping of a table's columns given to finish a review is not the one the review was made with. */
   columnsDiffer: 'The columns of your table are read as given now, which is not how they were read when matching: the places may not be the ones the review was made of. Use the same matching of columns as when matching.',
+  /** A mapping of a table's columns given to match by is not one a work file can keep. */
+  columnsNotAMapping: 'The matching of columns given is not one: it must be {"column name": "field"}, each column given the name of a field.',
   /** The version check does not find every new attestation in the dataset written. */
   notAllAdded: (made, added) => `The review made ${plural(made, 'new attestation')}, but the version check finds ${plural(added || 0, 'attestation')} added to the dataset written, which is a fault in the tools (please report it); nothing was written.`,
 };

@@ -68,6 +68,7 @@ function onDetected({ input: inp, targets: t }) {
   // Every detection makes any answer about the columns of an earlier file stale, a table or not.
   columns = null; state.columns = null; columnsAsked++;
   if (isTable(inp)) { document.querySelector('[data-for="tables-input"]').hidden = false; requestColumns(); }
+  gateOnColumns();
   $('action').hidden = false;
   Object.assign(state, { phase: 'detected', format: inp.format, profile: inp.profile || null });
   storageCheck();
@@ -84,7 +85,11 @@ async function storageCheck() {
   } catch { w.hidden = true; }
 }
 
-const buttons = (disabled) => { for (const id of ['check', 'convert', 'compare', 'publish', 'match', 'resume', 'finish']) $(id).disabled = disabled; };
+const buttons = (disabled) => { for (const id of ['check', 'convert', 'compare', 'publish', 'match', 'resume', 'finish']) $(id).disabled = disabled; if (!disabled) gateOnColumns(); };
+// Krisis: a table of places is matched, and its review finished, by the matching of its columns: until
+// the worker's answer about them arrives, Match and Finish wait, or the table would be read by the guess.
+const columnsPending = () => isTable(input) && !columns && !state.columns?.error;
+function gateOnColumns() { if (busy) return; const wait = columnsPending(); $('match').disabled = wait; $('finish').disabled = wait; state.columnsPending = wait; }
 function start(action, earlier) {
   if (busy || !input?.format || input.reason !== undefined) return;
   busy = true;
@@ -95,7 +100,7 @@ function start(action, earlier) {
   Object.assign(state, { phase: 'running', action, target, report: null, outputs: null, error: null });
   const base = $('base').value.trim() || undefined;
   // Krisis: a review on the page is put away (and its keys with it) while anything but its own finishing runs.
-  if (action !== 'apply') $('review').hidden = true;
+  if (action !== 'apply') { $('review').hidden = true; lockColumns(); }
   // The version check: the files chosen are the later version, and `earlier` the one it is compared with.
   if (action === 'compare') worker.postMessage({ cmd: 'compare', earlier, later: files, options: { base } });
   else if (action === 'publish') onlyKeys().then(
@@ -105,7 +110,9 @@ function start(action, earlier) {
   // A table of places is matched by the matching of its columns shown, as chosen (Hermes), which the work file keeps for finishing.
   else if (action === 'match') worker.postMessage({ cmd: 'match', subjects: files, others: earlier, options: { ...matchOptions(), base, ...(isTable(input) && columns ? { columns: { ...columns.mapping } } : {}) } });
   // The title in the options is cited only when the review has none but a file's name: one left there from an earlier match must not replace the review's own.
-  else if (action === 'apply') worker.postMessage({ cmd: 'apply', subjects: files, work, options: { output: earlier, reviewer: reviewer(), othersTitle: work.others?.titleFrom === 'file-name' ? matchOptions().othersTitle : undefined, base } });
+  else if (action === 'apply') worker.postMessage({ cmd: 'apply', subjects: files, work, options: { output: earlier, reviewer: reviewer(), othersTitle: work.others?.titleFrom === 'file-name' ? matchOptions().othersTitle : undefined, base,
+    // A table is finished by the review's own matching of its columns, unless another has been loaded since: that is sent, and said to differ.
+    ...(isTable(input) && columns && reviewMapping !== undefined && mappingText(columns.mapping) !== reviewMapping ? { columns: { ...columns.mapping } } : {}) } });
   else worker.postMessage({ cmd: 'run', files, action, target, options: { base, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked,
     // Hermes: the matching of columns shown, as chosen (the same JSON as the command line's --columns).
     ...(isTable(input) && columns ? { columns: { ...columns.mapping } } : {}) } });
@@ -197,6 +204,10 @@ function fail(message) {
 // one choice for each column, with three examples and the reason for the guess, and the run is given
 // the matching as it stands. The matching can be saved as JSON and loaded again.
 let columns = null, columnsAsked = 0, columnsFrom;
+// Krisis: the request for the columns of a resumed review, and the matching the review was made with, as text (undefined: not known yet).
+let reviewColumnsAsked = 0, reviewMapping;
+// A matching as text, in the file's order, to compare two by.
+const mappingText = (m) => JSON.stringify(columns.headers.map((h) => [h, m[h]]));
 const isTable = (inp) => inp?.format === 'csv' || inp?.format === 'geojson';
 function requestColumns(saved, from) {
   const id = ++columnsAsked;
@@ -210,6 +221,7 @@ function onColumns(d) {
   if (d.error) {
     $('columns').innerHTML = `<h3 id="columns-h">${W.heading}</h3><p class="warn">${escapeHtml(W.cannotRead(d.error))}</p>`;
     state.columns = { error: d.error };
+    gateOnColumns();
     return;
   }
   // With no prototype, so that a column called "__proto__" is a column like any other (columns.js).
@@ -220,6 +232,9 @@ function onColumns(d) {
   if (d.saved) for (const h of d.headers) if (d.reasons[h] && d.problems.every((p) => p.example !== h && !String(p.example).startsWith(`${h}: `))) columns.reasons[h] = W.saved;
   columns.messages = d.saved ? [W.loaded(columnsFrom || ''), ...d.problems.map(columnProblem)] : [];
   renderColumns();
+  // Krisis: the matching a resumed review was made with, as read for the file chosen, is the one its Finish compares with.
+  if (d.id === reviewColumnsAsked) { reviewMapping = mappingText(columns.mapping); state.reviewColumns = Object.assign(Object.create(null), columns.mapping); }
+  gateOnColumns();
 }
 function choiceOptions(chosen) {
   const keys = [...Object.keys(COLUMN_CHOICES).filter((k) => columns.fields[k] || k === 'note' || k === 'skip'),
@@ -246,6 +261,14 @@ function renderColumns() {
   $('columns-load').onclick = () => $('columns-file').click();
   $('columns-file').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) loadMatching(f); };
   renderColumnWarnings();
+  lockColumns();
+}
+// Krisis: while a review is shown, the columns are read as the review was made, and cannot be chosen
+// one by one; a saved matching can still be loaded, and Finish then sends it, and says it differs.
+function lockColumns() {
+  const reviewing = !!work && !$('review').hidden;
+  for (const sel of document.querySelectorAll('#columns select[data-column]')) sel.disabled = reviewing;
+  state.columnsLocked = reviewing;
 }
 function renderColumnWarnings() {
   const warnings = columnWarnings(columns.mapping, columns.gazetteer);
@@ -368,6 +391,8 @@ async function resume(file) {
   // A review made from other files than those chosen now is still opened, with a warning; with none chosen, it says so.
   if (!files.length) { showWarning(W.noDatasetYet); return; }
   if (!readable(input)) { showWarning(W.notRecognisedYet); return; }
+  // A table of places is shown as the review read it, by the matching kept in the work file (or by the guess, if it keeps none).
+  if (isTable(input)) { columns = null; state.columns = null; gateOnColumns(); requestColumns(w.match_parameters.columns, workName); reviewColumnsAsked = columnsAsked; }
   try { const differ = await filesDiffer(w.subjects, files); showWarning(differ.length ? W.differs(differ) : ''); } catch { showWarning(''); }
 }
 function beginReview(w, name) {
@@ -379,6 +404,9 @@ function beginReview(w, name) {
   if (!work.reviewer?.name && !reviewer()) { const r = remembered(); $('reviewer').value = r.name || ''; $('orcid').value = r.orcid || ''; }
   if (work.reviewer?.name && !reviewer()) { $('reviewer').value = work.reviewer.name; $('orcid').value = work.reviewer.orcid || ''; }
   $('review').hidden = false; showWarning('');
+  // The matching of columns a review is finished by is the one shown when it begins: after Match, the one it was matched by.
+  reviewColumnsAsked = 0; reviewMapping = isTable(input) && columns ? mappingText(columns.mapping) : undefined;
+  lockColumns();
   askName(!reviewer() && order.length > 0);
   goTo(cursor);
 }
@@ -502,7 +530,7 @@ $('save-review').onclick = () => {
 };
 $('finish').onclick = () => {
   if (!work) return;
-  if (!readable(input)) return showWarning(files.length ? W.notRecognisedYet : W.noDataset);
+  if (!readable(input)) return showWarning(files.length ? W.notRecognisedAtFinish : W.noDataset);
   if (!reviewer()) return askName(true, W.nameNeeded);
   const problem = reviewerProblem(); if (problem) return showWarning(problem);
   work.cursor = cursor; work.reviewer = reviewer();

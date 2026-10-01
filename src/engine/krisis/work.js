@@ -61,6 +61,13 @@ export function checkMatchOptions(o = {}) {
   return t;
 }
 
+/**
+ * A mapping of a table's columns, as a work file keeps it (match_parameters.columns): one object, not a
+ * list, each column given the name of a field. True if it is one. The command line and match() check
+ * a mapping by this rule before anything is written, so that no work file holds one readWork refuses.
+ */
+export const isColumns = (c) => isObject(c) && Object.values(c).every((f) => typeof f === 'string');
+
 /** Where a dataset's title in a work file came from: its gazetteer, the person matching, or (neither given) its file's name. */
 export const TITLE_FROM = ['gazetteer', 'given', 'file-name'];
 
@@ -87,7 +94,7 @@ export function readWork(text) {
   if (typeof w.generated_at !== 'string' || typeof w.algorithm_version !== 'string') bad('it does not say when and how its suggestions were made (generated_at, algorithm_version).');
   if (!isObject(w.match_parameters)) bad('it does not give the parameters its suggestions were made with (match_parameters).');
   const cols = w.match_parameters.columns;
-  if (cols !== undefined && !(isObject(cols) && Object.values(cols).every((f) => typeof f === 'string'))) bad('the mapping of its dataset\'s columns (match_parameters.columns) is not one: it must be {"column name": "field"}.');
+  if (cols !== undefined && !isColumns(cols)) bad('the mapping of its dataset\'s columns (match_parameters.columns) is not one: it must be {"column name": "field"}.');
   try { checkSide(w.subjects, 'subjects'); checkSide(w.others, 'others'); } catch (e) { bad(e.message[0].toLowerCase() + e.message.slice(1)); }
   if (!isObject(w.places)) bad('it lists no places (places).');
   for (const [iri, p] of Object.entries(w.places)) {

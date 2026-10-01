@@ -19,7 +19,7 @@ const { compare } = await import('../src/engine/compare.js');
 const { publish, PUBLISH_PARTS } = await import('../src/engine/agora/index.js');
 const { match } = await import('../src/engine/krisis/match.js');
 const { apply, OUTPUTS: REVIEW_OUTPUTS } = await import('../src/engine/krisis/apply.js');
-const { checkReviewer } = await import('../src/engine/krisis/work.js');
+const { checkReviewer, isColumns } = await import('../src/engine/krisis/work.js');
 const { detect, readable, DataError } = await import('../src/engine/input.js');
 const { nodeResources, gatherInputs, openFiles, isSystemError, NodeHost } = await import('../src/node/host.js');
 const { toolsCommit } = await import('../src/node/build-info.js');
@@ -514,7 +514,7 @@ async function review(action, args, o, resources) {
   if (o.columns) {
     try { columns = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(o.columns))); }
     catch (e) { return usage(`--columns ${o.columns} cannot be read as JSON: ${e.message}`); }
-    if (!columns || typeof columns !== 'object' || Array.isArray(columns)) return usage(`--columns ${o.columns} must hold one JSON object, {"column name": "field"}.`);
+    if (!isColumns(columns)) return usage(`--columns ${o.columns} must hold one JSON object, {"column name": "field"}, each column given the name of a field.`);
   }
   const items = await gatherInputs(args);
   if (items.length !== 1) return usage(`${action} takes one dataset of places to match; ${items.length} ${items.length === 1 ? 'was' : 'were'} given.`);

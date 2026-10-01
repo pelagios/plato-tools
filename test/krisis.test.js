@@ -406,6 +406,26 @@ test("apply reads a table by the mapping the review was made with, so its datase
   assert.ok(other.r.report.items.some((i) => i.kind === 'columns-differ'), JSON.stringify(other.r.report.items));
   assert.ok(!r.report.items.some((i) => i.kind === 'columns-differ'), 'the review\'s own mapping: nothing to say');
 });
+test('a mapping given to finish a review made by the guess is said to differ, as one given to a review made by another is', async () => {
+  const subjects = await detect([textFile(MISGUESSED_CSV, 'roman.csv')]);
+  const others = await detect([json(romanOthers(), 'b.json')]);
+  const { work } = await match({ subjects, others, options: { base: X + 'a/' } }, env());
+  assert.ok(!('columns' in work.match_parameters), 'the review was made by the guess');
+  work.reviewer = reviewer;
+  const finish = async (options) => (await apply({ subjects, work: JSON.parse(serialiseWork(work)), options: { base: X + 'a/', output: 'attestations', ...options } }, env())).report.items;
+  assert.ok((await finish({ columns: MAPPING })).some((i) => i.kind === 'columns-differ'), 'presence: a mapping given now, none then');
+  assert.ok(!(await finish({})).some((i) => i.kind === 'columns-differ'), 'control: no mapping given now, none then');
+});
+test('match refuses a mapping of columns that is not one before anything is written, as readWork would refuse it in the work file', async () => {
+  const subjects = await detect([textFile(MISGUESSED_CSV, 'roman.csv')]);
+  const others = await detect([json(romanOthers(), 'b.json')]);
+  for (const columns of [{ town: 5 }, { ...MAPPING, label: { x: 1 } }, ['town']]) {
+    const e = env();
+    await assert.rejects(match({ subjects, others, options: { base: X + 'a/', columns } }, e), (err) => err instanceof DataError && /matching of columns/.test(err.message), JSON.stringify(columns));
+  }
+  const ok = await match({ subjects, others, options: { base: X + 'a/', columns: MAPPING } }, env());
+  assert.deepEqual(readWork(serialiseWork(ok.work)).match_parameters.columns, MAPPING, 'control: a mapping that is one is kept and read back');
+});
 
 // ---- the work file ---------------------------------------------------------------------------------------
 test('decisions: each sets its status, and a place counts as reviewed once any of its candidates is decided', async () => {

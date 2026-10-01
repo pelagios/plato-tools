@@ -328,6 +328,16 @@ def krisis_case(page, tmp):
         except Exception as e: unrec = 'harness-error: ' + str(e).split('\n')[0][:200]
     check('match review: a review resumed with files chosen that are not recognised says so, not that none is chosen',
           'not recognised' in unrec and 'No dataset is chosen' not in unrec, unrec)
+    # Finish pressed then says so in words that fit Finish: the reviewer is in the review, not about to resume it.
+    atfinish = ''
+    if 'not recognised' in unrec:
+        try:
+            page.evaluate("() => { document.getElementById('review-warning').textContent = ''; }")
+            page.click('#finish')
+            page.wait_for_function("() => document.getElementById('review-warning').textContent.length > 0", timeout=10_000); atfinish = page.inner_text('#review-warning')
+        except Exception as e: atfinish = 'harness-error: ' + str(e).split('\n')[0][:200]
+    check('match review: Finish with files chosen that are not recognised says so in words for Finish, not "resume the review again"',
+          'not recognised' in atfinish and 'cannot be finished with them' in atfinish and 'resume the review again' not in atfinish, atfinish)
     # The same with a IIIF Georeference Annotation chosen, which is recognised and refused with its
     # reason (input.js, readable()): it says that, where it went on to compare the files.
     geounrec = ''
@@ -381,6 +391,59 @@ def krisis_seams(page, tmp, subjects):
           and chosen.get('phase') == 'reviewing' and pairs(chosen) == [('bath', 'bath'), ('bristol', 'bristol')]
           and (params.get('columns') or {}).get('town') == 'name' and (params.get('columns') or {}).get('label') == 'note',
           {'guessed': pairs(guessed), 'chosen': pairs(chosen), 'columns': params.get('columns'), 'state': chosen if not pairs(chosen) else ''})
+    krisis_table_review(page, tmp, table, subjects, chosen)
+
+def krisis_table_review(page, tmp, table, subjects, chosen):
+    """A table of places in a review: Match waits for the matching of its columns, and a resumed review
+    shows, locks and finishes by the matching it was made with."""
+    # Match waits for the worker's answer about the columns: at the moment the table is seen, Match is
+    # not to be pressed (it would read the table by the guess), and once the answer is in, it may be.
+    gate = {}
+    try:
+        page.reload(); wait_state(page, lambda s: s.get('phase') == 'ready', 30, 'ready')
+        page.evaluate("""() => { const st = window.__plato; let ph = st.phase; window.__matchAtDetected = [];
+            Object.defineProperty(st, 'phase', { configurable: true, enumerable: true, get() { return ph; },
+              set(v) { ph = v; if (v === 'detected') window.__matchAtDetected.push(document.getElementById('match').disabled); } }); }""")
+        page.set_input_files('#picker', [str(table)])
+        s = wait_state(page, lambda s: (s.get('columns') or {}).get('mapping'), 60, 'columns')
+        gate = {'at detected': page.evaluate('() => window.__matchAtDetected'), 'after columns': page.evaluate("() => document.getElementById('match').disabled"), 'columns': bool((s.get('columns') or {}).get('mapping'))}
+    except Exception as e: gate = {'error': str(e).split('\n')[0][:200]}
+    check('match review: Match waits for the matching of a table\'s columns, and may be pressed once it is shown',
+          gate.get('at detected') == [True] and gate.get('after columns') is False and gate.get('columns'), gate)
+    # A review of the table matched by the columns as chosen ("town" the name), resumed with the table
+    # chosen again (whose guess is "label" the name): the page shows the review's matching, locked.
+    work = chosen.get('work') or {}
+    res = {}
+    if work.get('candidates'):
+        try:
+            c = work['candidates'][0]
+            c.update({'candidate_status': 'confirmed', 'decision': {'kind': 'match', 'identityType': 'exactMatch', 'decided_at': '2026-10-01T09:00:00Z'}})
+            work['reviewer'] = {'name': 'Ada Reviewer'}
+            (tmp / 'table.krisis.json').write_text(json.dumps(work))
+            (tmp / 'other-columns.json').write_text(json.dumps({'id': 'id', 'label': 'name', 'town': 'note', 'lat': 'latitude', 'lon': 'longitude'}))
+            page.reload(); wait_state(page, lambda s: s.get('phase') == 'ready', 30, 'ready')
+            page.evaluate("() => { document.getElementById('base').value = 'https://example.org/t/'; }")
+            page.set_input_files('#picker', [str(table)])
+            wait_state(page, lambda s: (s.get('columns') or {}).get('mapping'), 60, 'columns')
+            guess = page.evaluate("() => ({ ...window.__plato.columns.mapping })")
+            page.set_input_files('#workfile', [str(tmp / 'table.krisis.json')])
+            s = wait_state(page, lambda s: s.get('phase') == 'reviewing' and s.get('reviewColumns') and not s.get('columnsPending'), 60, 'resume')
+            shown = page.evaluate("() => Object.fromEntries([...document.querySelectorAll('#columns select[data-column]')].map((x) => [x.closest('tr').querySelector('code').textContent, [x.value, x.disabled]]))")
+            page.click('#finish')
+            f = wait_state(page, lambda s: s.get('action') == 'apply' and s.get('phase') in ('done', 'error'), 120, 'finish')
+            same = [i.get('kind') for i in (f.get('report') or {}).get('items', [])]
+            # The control: another matching loaded after all is sent with Finish, and said to differ.
+            page.set_input_files('#columns-file', [str(tmp / 'other-columns.json')])
+            wait_state(page, lambda s: any('other-columns.json' in m for m in (s.get('columns') or {}).get('messages', [])), 30, 'load')
+            page.click('#finish')
+            g = wait_state(page, lambda s: s.get('action') == 'apply' and s.get('phase') in ('done', 'error') and s.get('report') is not None, 120, 'finish again')
+            res = {'guess': guess, 'shown': shown, 'phase': f.get('phase'), 'same': same, 'other phase': g.get('phase'), 'other': [i.get('kind') for i in (g.get('report') or {}).get('items', [])]}
+        except Exception as e: res = {'error': str(e).split('\n')[0][:200]}
+    shown = res.get('shown') or {}
+    check('match review: a resumed review of a table shows the matching of columns it was made with, not the guess, and the choices are locked',
+          (res.get('guess') or {}).get('label') == 'name' and shown.get('town') == ['name', True] and shown.get('label') == ['note', True], res)
+    check('match review: Finish reads the table as the review did, and says nothing of the columns; another matching loaded is said to differ',
+          res.get('phase') == 'done' and 'columns-differ' not in res.get('same', ['x']) and res.get('other phase') == 'done' and 'columns-differ' in res.get('other', []), res)
 
 def download(page, name, dest):
     with page.expect_download(timeout=600_000) as d:

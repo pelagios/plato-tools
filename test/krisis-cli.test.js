@@ -4,7 +4,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -191,11 +191,16 @@ test('--columns: a table of places is matched by the mapping given, which the wo
   assert.equal(JSON.parse(applied.out).errors, 0, applied.out);
   const written = JSON.parse(readFileSync(join(out, 'roman.krisis-dataset.json'), 'utf8'));
   assert.deepEqual(written.spatialEntities[0].attestations.flatMap((a) => (a.names || []).map((n) => n.toponym)), ['Aquae Sulis'], 'apply read the table by the review\'s mapping');
-  writeFileSync(join(dir, 'not-columns.json'), '["town"]');
-  for (const action of [['match', '--with', join(dir, 'b.json')], ['apply', '--review', join(dir, 'review.json')]]) {
-    const r = cli(action[0], join(dir, 'roman.csv'), ...action.slice(1), '--out', scratch(), '--columns', join(dir, 'not-columns.json'));
-    assert.equal(r.code, 2, r.out + r.err);
-    assert.match(r.err, /--columns .* must hold one JSON object/);
+  // Not a mapping: a list, or an object whose columns are not each given a field's name (readWork would refuse the work file).
+  for (const [file, text] of [['not-columns.json', '["town"]'], ['not-fields.json', '{"town":5,"label":{"x":1}}']]) {
+    writeFileSync(join(dir, file), text);
+    for (const action of [['match', '--with', join(dir, 'b.json')], ['apply', '--review', join(dir, 'review.json')]]) {
+      const out = scratch();
+      const r = cli(action[0], join(dir, 'roman.csv'), ...action.slice(1), '--out', out, '--base', `${X}a/`, '--reviewer', 'R', '--columns', join(dir, file));
+      assert.equal(r.code, 2, `${file} ${action[0]}: ${r.out}${r.err}`);
+      assert.match(r.err, /--columns .* must hold one JSON object/);
+      assert.deepEqual(readdirSync(out), [], 'nothing written');
+    }
   }
 });
 test('match: a IIIF Georeference Annotation as the other dataset is refused with its reason, not as a fault in the tools', () => {
