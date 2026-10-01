@@ -311,3 +311,32 @@ test('in a teiCorpus.2, each TEI.2\'s <language id> is its own: the same id reso
     tei2('Two', '', '<placeName lang="x" key="tgn,7000874">Roma</placeName>')), KEYS);
   assert.deepEqual(shared.doc.attestations.map((a) => a.names[0].language), ['la', 'la']);
 });
+
+// ---- an unknown entity in a locator's n --------------------------------------------------------------------
+test('an unknown entity in a div, milestone, pb or lb n is reported by element and line, and that number left out of the locator', () => {
+  const loc = (m) => m.doc.attestations.map((a) => a.citations[0].locator);
+  const cases = {
+    milestone: ['<milestone unit="section" n="1"/>', '<milestone unit="section" n="&sec.no;"/>', ['book 1', 'book 1'], /^&sec\.no; in the n of <milestone unit="section"> on line \d+: its number is left out of the locator$/],
+    div: ['<div1 type="book" n="1">', '<div1 type="book" n="1&book.suffix;">', ['book, section 1', 'book, section 1'], /^&book\.suffix; in the n of <div1 type="book"> on line \d+: its number is left out/],
+    pb: ['<p><milestone', '<p><pb n="&pg;"/><milestone', ['book 1, section 1', 'book 1, section 1'], /^&pg; in the n of <pb> on line \d+/],
+    lb: ['venimus,', 'venimus, <lb n="&ln;"/>', ['book 1, section 1', 'book 1, section 1'], /^&ln; in the n of <lb> on line \d+/],
+  };
+  for (const [what, [from, to, want, said]] of Object.entries(cases)) {
+    const m = mapped(boiler().replace(from, to), KEYS);
+    assert.deepEqual(names(m), ['Romam', 'Athenas'], what);
+    assert.deepEqual(loc(m), want, what);
+    assert.ok(!loc(m).some((l) => /\s,|\s$/.test(l)), what);
+    const r = examples(m, 'tei-locator-entity-unknown');
+    assert.equal(r.length, 1, what);
+    assert.match(r[0], said, what);
+  }
+  // A line or a section number lost replaces the one before: it no longer holds.
+  const after = mapped(boiler().replace('venimus,', '<milestone unit="section" n="&sec.no;"/>venimus,'), KEYS);
+  assert.deepEqual(loc(after), ['book 1, section 1', 'book 1']);
+  assert.equal(TEI_KINDS['tei-locator-entity-unknown'], 'loss');
+  assert.ok(LOSS_TEXT['tei-locator-entity-unknown']);
+  // Control: with the numbers written, the locator is whole and nothing is reported.
+  const ok = mapped(boiler().replace('venimus,', '<milestone unit="section" n="2"/>venimus,'), KEYS);
+  assert.deepEqual(loc(ok), ['book 1, section 1', 'book 1, section 2']);
+  assert.ok(!ok.kinds.has('tei-locator-entity-unknown'));
+});

@@ -170,6 +170,7 @@ export const TEI_KINDS = {
   'tei-entity-iso': 'warning',
   'tei-entity-unknown': 'warning',
   'tei-place-entity-unknown': 'loss',
+  'tei-locator-entity-unknown': 'loss',
   'tei-reg': 'loss',
   'tei-p4-beta-code': 'loss',
 };
@@ -799,8 +800,13 @@ export class TeiReader {
 
     // Where in the text: divisions, pages, lines, milestones.
     if (this.inText) {
+      // An n holding an unknown entity (an outside-DTD file only) would give an incomplete locator
+      // ("book 1, section "): it is left out of the locator, and reported by element and line.
+      const nLost = (DIVS.test(local) || ['pb', 'lb', 'l', 'milestone'].includes(local)) && t.unknownAttrs?.has('n');
+      if (nLost) this.report('tei-locator-entity-unknown', `${entities(t.unknownAttrs.get('n'))} in the n of <${t.name}${attr('unit') !== undefined ? ` unit="${attr('unit')}"` : ''}${attr('type') !== undefined ? ` type="${attr('type')}"` : ''}> on line ${this.parser.line}: its number is left out of the locator`);
+      const n = nLost ? undefined : attr('n');
       if (DIVS.test(local)) {
-        const type = attr('type'), label = [type === 'textpart' ? attr('subtype') || type : type, attr('n')].filter(Boolean).join(' ');
+        const type = attr('type'), label = [type === 'textpart' ? attr('subtype') || type : type, n].filter(Boolean).join(' ');
         if (!this.divs.length) {
           el.topDiv = true; this.topDiv = { type };
           // Any other top-level div, of whatever type, may come before an edition div: its place
@@ -811,10 +817,11 @@ export class TeiReader {
           }
         }
         this.divs.push(label); el.div = true; this.line = undefined; this.milestones = new Map();
-      } else if (local === 'pb') { this.page = attr('n'); this.line = undefined; }
-      else if (local === 'lb') { if (attr('n') !== undefined) this.line = attr('n'); }
-      else if (local === 'l') el.verse = attr('n');
-      else if (local === 'milestone' && attr('unit') && attr('n') !== undefined) this.milestones.set(attr('unit'), attr('n'));
+      } else if (local === 'pb') { this.page = n; this.line = undefined; }
+      // A line whose number is lost: the line before's number no longer holds.
+      else if (local === 'lb') { if (n !== undefined) this.line = n; else if (nLost) this.line = undefined; }
+      else if (local === 'l') el.verse = n;
+      else if (local === 'milestone' && attr('unit')) { if (n !== undefined) this.milestones.set(attr('unit'), n); else if (nLost) this.milestones.delete(attr('unit')); }
     }
 
     // A list of places: a <place>, its id, its web address, and what is not read from it.

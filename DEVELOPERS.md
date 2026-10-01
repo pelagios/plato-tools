@@ -365,7 +365,10 @@ readers link to those headings, so keep them.
   `ref` or `key` held one is not converted (`tei-place-entity-unknown`, a loss, with the entity and
   the words as read without it); so is a listed `<place>` whose `idno` or link target held one (and
   every name pointing to it), or whose headword did, with `listPlaces`; and a header place name with
-  `headerPlaces`. The source's title (`mainTitle`'s) or the edition's address (the `idno` `source()`
+  `headerPlaces`. An `n` holding one on a `div`/`div1`…, `milestone`, `pb`, `lb` or `l` is left out
+  of the locator, rather than giving an incomplete one ("book 1, section "), and reported by element
+  and line (`tei-locator-entity-unknown`, a loss); a lost `lb` or milestone number also ends the one
+  before it. The source's title (`mainTitle`'s) or the edition's address (the `idno` `source()`
   uses: type URI or URL, else a DOI) holding one stops the file (`checkSourceEntities`, at the end of
   each `teiHeader`), naming it, since every citation would be incomplete. A file naming no outside
   DTD refuses any undeclared entity, as before. Markers are looked for and stripped only where the
