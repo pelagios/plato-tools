@@ -816,6 +816,23 @@ test('the generated export: Studio writes no target source for a picture or a Re
   for (const n of UNNAMED) assert.deepEqual(Object.keys(gen(n).target), ['type', 'selector'], n);
   for (const a of GEN.filter((x) => !UNNAMED.some((n) => x.id === id(n)))) assert.deepEqual(Object.keys(a.target), ['source', 'type', 'selector'], a.id);
 });
+test('DEVELOPERS.md names the generated export as the authority, and links to a heading the fixtures README has', () => {
+  const dev = readFileSync('DEVELOPERS.md', 'utf8');
+  const readme = readFileSync(A + 'README.md', 'utf8');
+  const slug = (h) => h.trim().toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
+  const headings = [...readme.matchAll(/^#+ (.*)$/gm)].map((m) => slug(m[1]));
+  const at = dev.indexOf('recogito-studio-regions-generated.json');
+  assert.ok(at > 0, 'the generated file is named');
+  assert.match(dev, /the generated file is right/);
+  const links = [...dev.matchAll(/\(test\/fixtures\/annotations\/README\.md#([\w-]+)\)/g)].map((m) => m[1]);
+  assert.ok(links.includes('generated-by-recogito-studios-own-exporter'), JSON.stringify(links));
+  for (const l of links) assert.ok(headings.includes(l), `${l} is a heading of the README`);
+  // The stale sentence is gone (and the pattern does match the sentence as it was).
+  assert.doesNotMatch(dev, /constructed until a real Recogito Studio export/);
+  assert.match('The fixture is constructed until a real Recogito Studio export of regions', /constructed until a real Recogito Studio export/);
+  // Control: a heading the README does not have is not found.
+  assert.ok(!headings.includes('no-such-heading') && headings.includes('the-mapping'));
+});
 test('annotation-target-no-source: a target with a selector and no source is converted, cited by a source with a title and no address, with a warning; one with neither stays malformed', async () => {
   const r = plainRun(GEN);
   assert.deepEqual(r.of('annotation-malformed'), []);

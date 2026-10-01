@@ -176,9 +176,13 @@ output is byte for byte what it was (the test holds the digests).
   map uses, is a warning. Any error other than a `DataError` while placing a region is a fault in
   the tools: it costs that region its point (`annotation-region-unplaced`, "an unexpected error"),
   never the run, and is recorded in `unexpectedRegionErrors`, which the tests assert empty.
-- **The fixture** is constructed until a real Recogito Studio export of regions on the Rocque/Dury
-  map replaces it: `test/fixtures/annotations/make-recogito-studio-regions.mjs` writes it, following
-  Recogito Studio's exporter and Annotorious's serialiser step by step.
+- **The fixtures.** `test/fixtures/annotations/recogito-studio-regions-generated.json` was written
+  by Recogito Studio's own exporter code (run with its database client stubbed, not exported from a
+  running instance), and is the authority on what Studio writes: where it and the constructed
+  `recogito-studio-regions-constructed.json` differ, the generated file is right. The constructed
+  one (written by `make-recogito-studio-regions.mjs`) is kept for the paths Studio's editor cannot
+  reach. How each was made, and what each shows:
+  [test/fixtures/annotations/README.md](test/fixtures/annotations/README.md#generated-by-recogito-studios-own-exporter).
 
 ### Hermes: TEI, and tables of places (CSV and GeoJSON)
 
