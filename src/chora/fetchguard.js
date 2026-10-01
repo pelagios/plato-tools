@@ -37,7 +37,9 @@ export function createGuard({ state, consented, inPolicy, fetch = globalThis.fet
     state.iiifRequests++;
     let r;
     try { r = await fetch(url, { redirect, credentials: 'omit', mode: 'cors' }); } catch (e) {
-      if (redirect === 'error') throw new GuardError('redirect', `${url} did not answer, or answered by sending the request elsewhere, which is not accepted for this.`, { origin });
+      // The browser says no more than that the fetch failed: a redirect refused, no answer, or an answer
+      // the server does not let other sites read (no CORS header). All three are named.
+      if (redirect === 'error') throw new GuardError('redirect', `${url} did not answer, answered by sending the request elsewhere (which is not accepted for this), or does not let other sites read its answer (CORS).`, { origin });
       throw new GuardError('network', `${url} could not be reached (${e?.message || e}); the server may not allow other sites to read it (CORS).`, { origin });
     }
     const landed = originOf(r.url || url);

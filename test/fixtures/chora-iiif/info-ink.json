@@ -1,0 +1,11 @@
+{
+  "@context": "http://iiif.io/api/image/3/context.json",
+  "id": "https://iiif.example.org/iiif/ink",
+  "type": "ImageService3",
+  "protocol": "http://iiif.io/api/image",
+  "profile": "level0",
+  "width": 1001,
+  "height": 701,
+  "sizes": [{ "width": 251, "height": 176 }, { "width": 501, "height": 351 }, { "width": 1001, "height": 701 }],
+  "tiles": [{ "width": 256, "height": 256, "scaleFactors": [1, 2, 4] }]
+}

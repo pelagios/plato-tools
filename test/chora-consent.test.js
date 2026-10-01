@@ -74,6 +74,9 @@ test('each kind has its notice, naming the sites, and each ends by saying the si
   const kept = consent.notice('iiif', { origins: ['https://a.example.org', 'https://b.example.org'], maps: 2 });
   assert.match(kept, /^The 2 historical maps you had shown are served by https:\/\/a\.example\.org and https:\/\/b\.example\.org\./);
   assert.match(kept, /It sees nothing of your data, which stays in this tab\.$/);
+  // Tracing from a map asks its server for more of the same: the notice says so, before it is agreed to.
+  for (const t of [kept, consent.notice('iiif', { origins: ['https://iiif.example.org'], name: 'A map' })]) assert.match(t, /Tracing from (it|them) asks the same servers? for the part of the map you click, in more detail\./);
+  assert.doesNotMatch(consent.notice('basemap', { origins: ['https://tiles.openfreemap.org'] }), /Tracing/);
   assert.throws(() => consent.notice('nothing', { origins: [] }));
 });
 

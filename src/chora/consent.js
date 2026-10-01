@@ -60,6 +60,8 @@ export function forget(st) {
 
 const named = (sites) => (sites.length === 1 ? sites[0] : `${sites.slice(0, -1).join(', ')} and ${sites[sites.length - 1]}`);
 const END = 'It sees nothing of your data, which stays in this tab.';
+// Tracing with assistance (src/chora/ink.js) reads the map's pixels from the same server, closer up.
+const TRACING = 'Tracing from it asks the same server for the part of the map you click, in more detail.';
 /**
  * The notice shown before a kind of site is first asked for anything: `origins` are the sites not yet
  * agreed to; `name`, what they serve (a basemap's name, a map's title), when known; `fetch`, for
@@ -72,10 +74,10 @@ export function notice(kind, { origins: sites = [], name, fetch, maps } = {}) {
     return `${name || 'This basemap'} is served by ${named(sites)}. Using it, the map asks ${those} for the part of the world you are looking at, so the provider sees where you look (and your address on the internet, as any website does). ${END}`;
   }
   if (kind === 'iiif' && maps > 1) {
-    return `The ${maps} historical maps you had shown are served by ${named(sites)}. Showing them, the page asks ${those} for the maps' descriptions and for the parts of the images you look at, so the providers see which maps you view, and where (and your address on the internet, as any website does). ${END}`;
+    return `The ${maps} historical maps you had shown are served by ${named(sites)}. Showing them, the page asks ${those} for the maps' descriptions and for the parts of the images you look at, so the providers see which maps you view, and where (and your address on the internet, as any website does). ${TRACING.replace('from it', 'from them').replace('same server', 'same servers')} ${END}`;
   }
   if (kind === 'iiif') {
-    return `${name ? `The historical map “${name}”` : 'This historical map'} is served by ${named(sites)}. Showing it, the page asks ${those} for the map's description and for the parts of the image you look at, so the provider sees which map you view, and where (and your address on the internet, as any website does). ${END}`;
+    return `${name ? `The historical map “${name}”` : 'This historical map'} is served by ${named(sites)}. Showing it, the page asks ${those} for the map's description and for the parts of the image you look at, so the provider sees which map you view, and where (and your address on the internet, as any website does). ${TRACING} ${END}`;
   }
   if (kind === 'allmaps' && fetch) {
     return `Showing this map fetches its georeference from Allmaps (${named(sites)}), at ${fetch}, so Allmaps sees that it was fetched (and your address on the internet, as any website does). ${END}`;
