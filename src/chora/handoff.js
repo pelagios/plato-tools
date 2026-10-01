@@ -38,3 +38,19 @@ export async function take() {
   await clear();
   return v?.files?.length && Date.now() - (v.at || 0) < FRESH ? v.files : null;
 }
+
+// The same store carries Chora's page across its own reload, when the user allows a site (the
+// Content Security Policy is written at load, so a site allowed is reachable only from the next one):
+// the files open, the place chosen and where the map was. Kept under its own key, 'chora-resume',
+// taken once, and not used if older than a few minutes.
+const RESUME = 'chora-resume';
+/** Keep `value` ({files, placeId, camera, …}) for the page after the reload. */
+export async function keepForReload(value) {
+  try { await tx('readwrite', (s) => s.put({ ...value, files: [...(value.files || [])], at: Date.now() }, RESUME)); return true; } catch { return false; }
+}
+/** What was kept for this load, or null: taken, so that it is used once. */
+export async function takeResume() {
+  let v;
+  try { v = await tx('readonly', (s) => s.get(RESUME)); await tx('readwrite', (s) => s.delete(RESUME)); } catch { return null; }
+  return v && Date.now() - (v.at || 0) < FRESH ? v : null;
+}

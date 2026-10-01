@@ -75,7 +75,7 @@ export function set(cat, subj, to, { added } = {}) {
   if (![...core.STATES, 'undecided'].includes(to)) throw new TypeError(`${to} is not a state (allowed, never or undecided)`);
   const g = grants(), before = g[k];
   if (to === 'undecided') delete g[k];
-  else g[k] = { state: to, at: new Date().toISOString(), ...((added || before?.added) ? { added: true } : {}) };
+  else g[k] = { state: to, at: new Date().toISOString(), ...((added || before?.added || needed.get(k)?.added) ? { added: true } : {}) };
   writeGrants(g);
   if (to !== 'allowed') writeTab(tab().filter((x) => x !== k));
   notify();
@@ -220,11 +220,12 @@ const lines = new Map();   // element -> {cat, subj, name}
  * The one line a feature shows while it waits for a permission, in `el`: "Needs permission: <name>"
  * and a button that opens the panel at that permission; allowed since the page loaded, a line that
  * offers the reload; allowed (or Never: the feature does without, and says nothing), nothing. Kept up
- * to date. Returns the state.
+ * to date. `added`: the user typed this site (a pasted basemap's), so that once decided the panel says
+ * so, with the date. Returns the state.
  */
-export function needs(el, cat, subj, { name } = {}) {
+export function needs(el, cat, subj, { name, added } = {}) {
   const p = need(cat, subj), k = core.keyOf(p.cat, p.subj), nm = name || nameOf(p.cat, p.subj);
-  needed.set(k, { name: nm });
+  needed.set(k, { name: nm, added: !!added });
   lines.set(el, { cat: p.cat, subj: p.subj, name: nm });
   renderLine(el);
   listen();

@@ -760,6 +760,8 @@ def main():
         with sync_playwright() as pw:
             ctx = pw.chromium.launch_persistent_context(str(tmp / 'profile'), headless=True, accept_downloads=True)
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            main_requests = []
+            ctx.on('request', lambda r: main_requests.append(r.url))
             page.add_init_script('window.__plato_forceDownload = true;')
             page.goto('data:text/html,<title>no tools here</title><input id=picker type=file multiple>' if PROVE else url)
             ready = wait_state(page, lambda s: s.get('phase') == 'ready', 30, 'ready')
@@ -1001,7 +1003,7 @@ def main():
                     if wait_state(p, lambda s: s.get('phase') == 'ready', 30, 'ready').get('phase') != 'ready': return None
                     p.set_input_files('#picker', [str(f) for f in sorted((ex / 'customs').glob('*.csv'))])
                     if wait_state(p, lambda s: s.get('phase') == 'detected', 60, 'detection').get('phase') != 'detected': return None
-                    p.wait_for_function('window.__estimates > 0', timeout=10_000); p.wait_for_timeout(300)
+                    p.wait_for_function('() => window.__estimates > 0', timeout=10_000)   # a function: the page's policy refuses eval; p.wait_for_timeout(300)
                     return {'visible': p.is_visible('#storage-warning'), 'text': p.inner_text('#storage-warning')}
                 except Exception as e:
                     return {'error': str(e).split('\n')[0][:200]}
@@ -1130,6 +1132,7 @@ def main():
             check('a tab refused part of the working files holds none of them while it waits: another tab runs meanwhile, and then it runs',
                   half.get('held again') == 2 and refused(half.get('refused again'))
                   and done(half.get('second meanwhile')) and done(half.get('first after')), half)
+            main_permissions(ctx, page, url, main_requests)
             ctx.close()
             chora_checks(pw, url, tmp)
     finally:
@@ -1142,6 +1145,65 @@ def main():
         print('PROVE-IT-FAILS:', 'every check failed, as it must' if len(failed) == len(results) else f'{len(results) - len(failed)} check(s) passed against a page with no tools: they cannot fail')
         sys.exit(0 if len(failed) == len(results) else 1)
     print('RESULT:', 'ALL PASS' if not failed else f'{len(failed)} FAILED'); sys.exit(1 if failed else 0)
+
+# ---- Permissions (src/lib/permissions.js) on the main page ------------------------------------------
+# The page runs under the Content Security Policy written from the permissions allowed (none, here),
+# and every check above ran under it. The panel is the same on both pages; Chora's checks below allow,
+# reload, withdraw and forge permissions.
+PANEL_STATE = '''() => { const d = document.getElementById('permissions-panel'), a = document.activeElement;
+  return { open: !!d && d.open, focus: a ? (a.id || a.name || a.tagName) : null, focusValue: a && a.value || null,
+           focusKey: a && a.closest && a.closest('fieldset.perm') ? a.closest('fieldset.perm').dataset.key : null }; }'''
+
+def panel_cycle(page):
+    """Open the panel from the header's button, then close it with Esc: where the focus was at each step."""
+    page.focus('#permissions-button'); page.keyboard.press('Enter')
+    until(page, '() => { const d = document.getElementById("permissions-panel"); return !!d && d.open; }', 10)
+    opened = page.evaluate(PANEL_STATE)
+    text = page.inner_text('#permissions-panel')
+    page.keyboard.press('Escape')
+    until(page, '() => !document.getElementById("permissions-panel").open', 10)
+    return opened, page.evaluate(PANEL_STATE), text
+
+def strip_head(route):
+    """The page as served, without the first script of its <head>: the one that writes its policy."""
+    r = route.fetch(); body = r.text()
+    a = body.find('<script>\n(function () {'); b = body.find('</script>', a)
+    route.fulfill(response=r, body=body[:a] + body[b + len('</script>'):] if a >= 0 and b > a else body)
+
+def main_permissions(ctx, page, url, requests):
+    here = urlparse(url).netloc
+    def nothing_else():
+        foreign = sorted({urlparse(u).netloc for u in requests if urlparse(u).scheme in ('http', 'https') and urlparse(u).netloc != here})
+        mine = [u for u in requests if urlparse(u).netloc == here]
+        return not foreign and any('/plato/' in u for u in mine), {'foreign': foreign, 'requests here': len(mine)}
+    attempt('main page: with nothing allowed, across every check above no request went to any other site (and PLATO\'s files were fetched from this one)', nothing_else)
+    def enforced():
+        s = wait_state(page, lambda s: s.get('canary') in ('enforced', 'not-enforced'), T(15), 'canary')
+        csp = page.evaluate('() => window.__platoCsp || null')
+        meta = page.evaluate('() => document.querySelector(\'meta[http-equiv="Content-Security-Policy"]\')?.content || null')
+        return (s.get('canary') == 'enforced' and csp and csp['origins'] == [] and meta == csp['policy'] and "connect-src 'self' blob:;" in meta), {'canary': s.get('canary'), 'why': s.get('canaryWhy'), 'csp': csp, 'meta': meta}
+    attempt('main page: its policy, written first in its <head>, allows no other site, and the canary shows it enforced', enforced)
+    def panel():
+        opened, closed, text = panel_cycle(page)
+        promise = 'Your files stay on your computer, and nothing is sent to any other site unless you allow it.'
+        top = page.inner_text('header.top')
+        return (opened['open'] and opened['focus'] == 'permissions-h' and not closed['open'] and closed['focus'] == 'permissions-button'
+                and promise in text and 'any Pelagios site' in text and top.count(promise) == 1
+                and 'sends nothing anywhere' not in page.inner_text('#action')), {'opened': opened, 'closed': closed, 'header': top[:300]}
+    attempt('main page: the Permissions panel opens from the header with the focus on its heading, Esc closes it and the focus returns; the promise is said once at the top', panel)
+    def no_policy():
+        target = NOTOOLS if PROVE else url
+        ctx.route(url, strip_head)
+        try:
+            page.goto(target)
+            s = wait_state(page, lambda s: s.get('canary') in ('enforced', 'not-enforced'), T(15), 'canary')
+            meta = page.evaluate('() => !!document.querySelector(\'meta[http-equiv="Content-Security-Policy"]\')')
+        finally:
+            ctx.unroute(url, strip_head)
+        page.goto(target)
+        back = wait_state(page, lambda s: s.get('canary') in ('enforced', 'not-enforced'), T(15), 'canary')
+        return s.get('canary') == 'not-enforced' and not meta and back.get('canary') == 'enforced', {'without': s.get('canary'), 'why': s.get('canaryWhy'), 'meta': meta, 'with it again': back.get('canary')}
+    attempt('main page: served without the script that writes its policy, the canary says it is not enforced (and with it again, enforced)', no_policy)
 
 # ---- Chora (chora.html): the map page ------------------------------------------------------------
 # Chora has a browser profile of its own, so that its storage (the drawings kept, the contributor
@@ -1175,6 +1237,9 @@ def until(page, js, timeout=60, arg=None):
     """Wait for `js` to hold; a timeout says what the page was doing (a hidden tab never draws a map, and
     looks exactly like a map that cannot), in the words the page itself shows."""
     t0 = time.time()
+    # The pages run under a Content Security Policy without 'unsafe-eval', and Playwright evaluates a
+    # bare expression with eval(): an expression is given as a function, which it calls instead.
+    if not re.match(r'\s*(async\s+)?(\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>', js): js = f'() => ({js})'
     try: page.wait_for_function(js, arg=arg, timeout=T(timeout) * 1000)
     except Exception as e:
         try: d = page.evaluate(DIAG)
@@ -1884,20 +1949,140 @@ def chora_checks(pw, url, tmp):
     attempt('Chora: across all these checks, no request went to any other site, and no page error', lambda: (
         len(web()) > 50 and 'loaded' in loads and not foreign() and not errors, {'requests': len(web()), 'foreign': foreign(), 'errors': errors[:5]}))
 
-    # After that check, since it asks another site (stopped here, by the route) for a style.
+    # ---- Permissions. After that check, since these ask other sites (each answered here, by a route).
+    # Each check sets the permissions it needs in this profile's storage, and reloads, as a user would.
+    PNG = __import__('base64').b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==')
+    OSM = 'https://tile.openstreetmap.org'
+    hits = {'osm': 0, 'second': 0}
+    def osm(route): hits['osm'] += 1; route.fulfill(status=200, content_type='image/png', body=PNG, headers={'Access-Control-Allow-Origin': '*'})
+    ctx.route(OSM + '/**', osm)
+    RESET = '''([g, b]) => { localStorage.removeItem('plato-tools.permissions'); sessionStorage.removeItem('plato-tools.permissions.tab');
+      localStorage.removeItem('chora-basemaps'); localStorage.removeItem('plato-tools.keep-working-data');
+      if (g) localStorage.setItem('plato-tools.permissions', JSON.stringify({ version: 1, grants: g }));
+      if (b) localStorage.setItem('chora-basemap', JSON.stringify(b)); else localStorage.removeItem('chora-basemap'); }'''
+    def fresh(grants=None, basemap=None, files=None):
+        """Chora with these permissions remembered (and nothing else decided), this basemap chosen, these files open."""
+        chora_boot(page, base)
+        page.evaluate(RESET, [grants, basemap])
+        return chora_boot(page, base, files)
+    def allow_in_panel(key):
+        """From a "Needs permission" line: open the panel at it, allow it, and reload as the panel offers. Where the focus went."""
+        page.click(f'[data-permission="{key}"] button')
+        until(page, '() => document.getElementById("permissions-panel")?.open', 10)
+        at = page.evaluate(PANEL_STATE)
+        page.check(f'#permissions-panel fieldset.perm[data-key="{key}"] input[value="allowed"]')
+        with page.expect_navigation(timeout=60_000): page.click('#permissions-panel [data-reload]')
+        until(page, '() => window.__chora && window.__chora.phase !== "reloading" && window.__chora.mapReadyCount >= 1 && window.__chora.canary !== "pending"', 60)
+        return at
+    def choose(bid):
+        page.evaluate("() => { document.getElementById('basemaps').open = true; }")
+        page.check(f'input[name="basemap"][value="{bid}"]')
+    META = '''() => document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.content || null'''
+
+    def allow_reload():
+        fresh(files=[fixture(ant, 'antonine-allow.json', tmp)]); since = len(requests); h0 = hits['osm']
+        choose('osm')
+        line = page.inner_text('[data-permission="basemap:osm"]') if page.is_visible('[data-permission="basemap:osm"]') else ''
+        before = {'osm asked': hits['osm'] - h0 + len([u for u in requests[since:] if u.startswith(OSM)]), 'basemap': cstate(page)['basemap']}
+        at = allow_in_panel('basemap:osm')
+        used = soon(page, '() => window.__chora.basemap === "osm" && window.__chora_map.isStyleLoaded()', 30)
+        got = soon(page, '() => window.__chora_map.isSourceLoaded("basemap")', 30) and hits['osm'] > h0
+        until(page, '() => ["loaded", "place"].includes(window.__chora.phase)', 60)
+        after = cstate(page); csp = page.evaluate('() => window.__platoCsp')
+        return ('Needs permission: OpenStreetMap' in line and before['osm asked'] == 0 and before['basemap'] == 'natural-earth'
+                and at['open'] and at['focusKey'] == 'basemap:osm' and at['focusValue'] == 'undecided'
+                and used and got and OSM in csp['origins'] and (after.get('resumed') or {}).get('files') == ['antonine-allow.json'] and after.get('places') == ant_places), {
+            'line': line, 'before': before, 'panel focus': at, 'used': used, 'tiles': hits['osm'] - h0, 'policy': csp['origins'], 'resumed': after.get('resumed')}
+    attempt('Chora: OpenStreetMap chosen asks nothing and says "Needs permission"; its button opens the panel at that permission; allowed and reloaded, its tiles are fetched, with the dataset still open', allow_reload)
+    PROBE = 'u => { const m = window.__chora_map; const id = "probe-" + Math.random().toString(36).slice(2); m.addSource(id, { type: "raster", tiles: [u + "/{z}/{x}/{y}.png?" + id], tileSize: 256 }); m.addLayer({ id, type: "raster", source: id }); }'
+    def revoke():
+        fresh({'basemap:osm': {'state': 'allowed'}}, 'osm')
+        on = soon(page, '() => window.__chora.basemap === "osm" && window.__chora_map.isStyleLoaded()', 20)
+        h0 = hits['osm']
+        page.evaluate(PROBE, OSM)
+        page.wait_for_timeout(1500); control = hits['osm'] - h0
+        page.click('#permissions-button')
+        until(page, '() => document.getElementById("permissions-panel")?.open', 10)
+        page.check('#permissions-panel fieldset.perm[data-key="basemap:osm"] input[value="never"]')
+        page.keyboard.press('Escape')
+        back = soon(page, '() => window.__chora.basemap === "natural-earth" && window.__chora_map.isStyleLoaded()', 20)
+        b0 = cstate(page)['blocked']; h1 = hits['osm']; since = len(requests)
+        page.evaluate(PROBE, OSM)
+        blocked = soon(page, 'b => window.__chora.blocked > b', 20, b0)
+        page.wait_for_timeout(1000)
+        offered = page.is_visible('input[name="basemap"][value="osm"]')
+        return (on and control > 0 and back and blocked and hits['osm'] == h1 and not [u for u in requests[since:] if u.startswith(OSM)]
+                and OSM in cstate(page)['blockedOrigins'] and not offered and not page.is_visible('[data-permission="basemap:osm"]')), {
+            'used': on, 'tiles before': control, 'back on Natural Earth': back, 'refused': blocked, 'asked after': hits['osm'] - h1, 'still offered': offered}
+    attempt('Chora: OpenStreetMap allowed is used; set to Never in the panel, the map goes back to Natural Earth at once, its tiles are refused and not asked, and it is no longer offered (silently)', revoke)
+    def panel_chora():
+        fresh(); opened, closed, text = panel_cycle(page)
+        return (opened['open'] and opened['focus'] == 'permissions-h' and not closed['open'] and closed['focus'] == 'permissions-button'
+                and 'OpenStreetMap' in text and 'Keep my working data between visits' in text and 'Remember my token in this browser' in text
+                and page.query_selector('header .privacy') is None), {'opened': opened, 'closed': closed}
+    attempt('Chora: the Permissions panel opens from the header with the focus on its heading, Esc closes it and the focus returns; no privacy banner', panel_chora)
+    def forged():
+        INJECT = 'https://evil.example.org; script-src *'
+        fresh({'basemap:https://forged.example.org': {'state': 'allowed', 'at': '2026-09-01T10:00:00Z', 'added': True}, f'basemap:{INJECT}': {'state': 'allowed'}, 'basemap:nosuch': {'state': 'allowed'}})
+        csp = page.evaluate('() => window.__platoCsp'); meta = page.evaluate(META) or ''
+        page.click('#permissions-button')
+        until(page, '() => document.getElementById("permissions-panel")?.open', 10)
+        keys = page.eval_on_selector_all('#permissions-panel fieldset.perm', 'fs => fs.map((f) => f.dataset.key)')
+        sel = '#permissions-panel fieldset.perm[data-key="basemap:https://forged.example.org"]'
+        entry = page.inner_text(sel) if 'basemap:https://forged.example.org' in keys else ''
+        checked = page.evaluate('s => document.querySelector(s + " input:checked")?.value || null', sel)
+        page.keyboard.press('Escape')
+        return (csp['origins'] == ['https://forged.example.org'] and 'https://forged.example.org' in meta and 'evil' not in meta and 'evil' not in ' '.join(keys)
+                and 'basemap:nosuch' not in keys and checked == 'allowed' and 'You added this on 1 September 2026' in entry), {'policy': csp['origins'], 'keys': keys, 'entry': entry, 'checked': checked}
+    attempt('Chora: a grant forged in storage is in the policy and listed in the panel, as kept; an injected site and an unknown provider are in neither', forged)
+    def no_policy():
+        page_url = base + 'chora.html'
+        fresh({'basemap:osm': {'state': 'allowed'}}, 'osm'); h0 = hits['osm']
+        ctx.route(page_url, strip_head)
+        try:
+            page.goto(NOTOOLS if PROVE else page_url)
+            until(page, '() => window.__chora && window.__chora.canary && window.__chora.canary !== "pending" && window.__chora.mapReadyCount >= 1', 30)
+            soon(page, '() => !!window.__chora.basemapError', 10)
+            page.wait_for_timeout(1000)
+            s = cstate(page); meta = page.evaluate(META)
+        finally:
+            ctx.unroute(page_url, strip_head)
+        return (s['canary'] == 'not-enforced' and not meta and s['basemap'] == 'natural-earth' and 'protection' in (s.get('basemapError') or '') and hits['osm'] == h0), {
+            'canary': s.get('canary'), 'why': s.get('canaryWhy'), 'meta': meta, 'basemap': s.get('basemap'), 'error': s.get('basemapError'), 'osm asked': hits['osm'] - h0}
+    attempt('Chora: served without the script that writes its policy, the canary says it is not enforced, and an allowed basemap is not used (no other site asked)', no_policy)
+    def keep_off():
+        name = 'antonine-keepoff.json'; f = fixture(ant, name, tmp)
+        fresh(files=[f]); chora_pick(page, 'londinium')
+        x, y = map_centre(page); draw(page, 'point', [(x + 150, y + 60)]); page.click('#draw-tools button[data-mode="static"]')
+        until(page, '() => window.__chora.pendingCount === 1', 10)
+        page.wait_for_timeout(500); held = len(kept(page, name))
+        page.click('#permissions-button')
+        until(page, '() => document.getElementById("permissions-panel")?.open', 10)
+        page.uncheck('#perm-keep-work'); page.keyboard.press('Escape')
+        off = page.evaluate("() => localStorage.getItem('plato-tools.keep-working-data')")
+        s = chora_boot(page, base)
+        until(page, '() => window.__chora.workingCleared === true', 10)
+        left = opfs_names(page, 'chora-drafts')
+        s2 = chora_boot(page, base, [f])
+        page.evaluate("() => localStorage.removeItem('plato-tools.keep-working-data')")
+        return held == 1 and off == 'no' and left == [] and s2.get('pendingCount') == 0, {
+            'kept before': held, 'setting': off, 'drafts left': left, 'pending after': s2.get('pendingCount')}
+    attempt('Chora: with "Keep my working data between visits" turned off in the panel, the drawings kept are cleared at the next load (one was kept before)', keep_off)
+
     STYLES = 'https://styles.example.org'
     GOOD = json.dumps({'version': 8, 'name': 'Probe style', 'sources': {}, 'layers': [{'id': 'probe-bg', 'type': 'background', 'paint': {'background-color': '#f4efe4'}}]})
-    ctx.route(STYLES + '/**', lambda route: route.fulfill(status=200, content_type='application/json', body=GOOD) if route.request.url.endswith('/good.json') else route.fulfill(status=404, body='not here'))
-    def use_pasted(address):
+    CORS = {'Access-Control-Allow-Origin': '*'}
+    ctx.route(STYLES + '/**', lambda route: route.fulfill(status=200, content_type='application/json', body=GOOD, headers=CORS) if route.request.url.endswith('/good.json') else route.fulfill(status=404, body='not here', headers=CORS))
+    def paste(address):
         page.evaluate("() => { document.getElementById('basemaps').open = true; }")
         page.fill('#paste', address); page.click('#paste-form button[type=submit]')
-        if page.is_visible('#consent-yes'): page.click('#consent-yes')
     def bad_style():
-        chora_boot(page, base); since = len(requests)
-        # The control: a style that loads is kept.
-        use_pasted(STYLES + '/good.json')
+        fresh(); since = len(requests)
+        # The control: a style that loads is kept, once its site is allowed (and the page reloaded).
+        paste(STYLES + '/good.json')
+        allow_in_panel('basemap:' + STYLES)
         kept_good = soon(page, '() => window.__chora_map.getStyle()?.name === "Probe style"', 20) and cstate(page)['basemap'].startswith('pasted-')
-        use_pasted(STYLES + '/missing.json')
+        paste(STYLES + '/missing.json')
         back = soon(page, '() => window.__chora.basemap === "natural-earth" && !!window.__chora.basemapError', 20)
         asked = any(u.endswith('/missing.json') for u in requests[since:])   # it failed for being missing, not for never being asked
         drew = soon(page, '() => window.__chora_map.getStyle()?.name?.includes("Natural Earth") && window.__chora_map.queryRenderedFeatures({ layers: ["land"] }).length > 0', 30)
@@ -1905,43 +2090,41 @@ def chora_checks(pw, url, tmp):
         return (kept_good and asked and back and drew and 'Natural Earth' in text and 'could not be loaded' in text and s['basemapError'] in text), {
             'the good style kept': kept_good, 'asked for the missing one': asked, 'state': {k: s.get(k) for k in ('basemap', 'basemapError')}, 'said': text[:300]}
     attempt('Chora: a basemap whose style cannot be loaded gives way to Natural Earth, and the page says why (a style that loads is kept)', bad_style)
-    # A pasted style whose sources are on a second site: that site is named in a notice once the style
-    # is read, and asked nothing until the user agrees; then both are allowed, and a third still refused.
+    # A pasted style whose sources are on a second site: that site needs its own permission once the
+    # style is read, and is asked nothing until it is allowed; then both are used, and a third still refused.
     MULTI, SECOND, THIRD = 'https://multi.example.org', 'https://second.example.net', 'https://third.example.com'
     MULTI_STYLE = json.dumps({'version': 8, 'name': 'Multi probe', 'sources': {'second': {'type': 'raster', 'tiles': [SECOND + '/{z}/{x}/{y}.png'], 'tileSize': 256}},
                               'layers': [{'id': 'multi-bg', 'type': 'background', 'paint': {'background-color': '#eee'}}, {'id': 'second', 'type': 'raster', 'source': 'second'}]})
-    PNG = __import__('base64').b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==')
-    hits = {'second': 0}
-    def second(route): hits['second'] += 1; route.fulfill(status=200, content_type='image/png', body=PNG, headers={'Access-Control-Allow-Origin': '*'})
-    ctx.route(MULTI + '/**', lambda route: route.fulfill(status=200, content_type='application/json', body=MULTI_STYLE, headers={'Access-Control-Allow-Origin': '*'}))
+    def second(route): hits['second'] += 1; route.fulfill(status=200, content_type='image/png', body=PNG, headers=CORS)
+    ctx.route(MULTI + '/**', lambda route: route.fulfill(status=200, content_type='application/json', body=MULTI_STYLE, headers=CORS))
     ctx.route(SECOND + '/**', second)
     ctx.route(THIRD + '/**', lambda route: route.abort())
     def multi_origin():
-        chora_boot(page, base); since = len(requests)
-        page.evaluate("() => { document.getElementById('basemaps').open = true; }")
-        page.fill('#paste', MULTI + '/style.json'); page.click('#paste-form button[type=submit]')
-        first = page.inner_text('#consent-text') if page.is_visible('#consent-text') else ''
-        if page.is_visible('#consent-yes'): page.click('#consent-yes')
-        # Once the style is read, a notice naming both sites, and nothing yet asked of the second.
-        asked_both = soon(page, 's => { const t = document.getElementById("consent-text"); return !!t && t.textContent.includes(s); }', 20, SECOND)
-        notice = page.inner_text('#consent-text') if page.is_visible('#consent-text') else ''
+        fresh(); since = len(requests)
+        paste(MULTI + '/style.json')
+        sel = f'[data-permission="basemap:{MULTI}"]'
+        first = page.inner_text(sel) if page.is_visible(sel) else ''
+        unread = not any(u.startswith(MULTI) for u in requests[since:])
+        allow_in_panel('basemap:' + MULTI)
+        # Once the style is read, a line for the second site, and nothing yet asked of it.
+        asked_second = soon(page, 's => !!document.querySelector(`[data-permission="basemap:${s}"]`)', 20, SECOND)
         page.wait_for_timeout(500)
         read = any(u.startswith(MULTI) for u in requests[since:])
-        before = {'second asked': hits['second'] + len([u for u in requests[since:] if u.startswith(SECOND)]), 'basemap': cstate(page)['basemap'], 'blocked': cstate(page)['blockedOrigins']}
-        if page.is_visible('#consent-yes'): page.click('#consent-yes')
+        before = {'second asked': hits['second'] + len([u for u in requests[since:] if u.startswith(SECOND)]), 'basemap': cstate(page)['basemap']}
+        if asked_second: allow_in_panel('basemap:' + SECOND)
         used = soon(page, '() => window.__chora_map.getStyle()?.name === "Multi probe"', 20)
         got = soon(page, '() => window.__chora_map.isSourceLoaded("second")', 20) and hits['second'] > 0
-        # The control: a third site, named by nothing the user agreed to, is still refused.
+        # The control: a third site, allowed by nothing, is still refused.
         b0 = cstate(page)['blocked']
         page.evaluate('t => { const m = window.__chora_map; m.addSource("probe-third", { type: "raster", tiles: [t + "/{z}/{x}/{y}.png"], tileSize: 256 }); m.addLayer({ id: "probe-third", type: "raster", source: "probe-third" }); }', THIRD)
         third = soon(page, 'b => window.__chora.blocked > b', 20, b0)
         after = cstate(page)
-        return (MULTI in first and asked_both and MULTI in notice and SECOND in notice and read and before['second asked'] == 0 and not before['basemap'].startswith('pasted-')
-                and SECOND not in before['blocked'] and used and got and third and THIRD in after['blockedOrigins'] and SECOND not in after['blockedOrigins']
+        return ('Needs permission: multi.example.org' in first and unread and asked_second and read and before['second asked'] == 0 and not before['basemap'].startswith('pasted-')
+                and used and got and third and THIRD in after['blockedOrigins'] and SECOND not in after['blockedOrigins']
                 and not any(u.startswith(THIRD) for u in requests[since:])), {
-            'first notice': first, 'second notice': notice, 'style read': read, 'before agreeing': before, 'used': used, 'second fetched': got, 'hits': hits,
-            'third refused': third, 'blocked': after['blockedOrigins']}
-    attempt('Chora: a pasted style on two sites names both before either is asked for tiles; once agreed, both are used, and a third site is still refused', multi_origin)
+            'first line': first, 'style unread before': unread, 'second site asked about': asked_second, 'style read': read, 'before allowing': before, 'used': used,
+            'second fetched': got, 'hits': hits, 'third refused': third, 'blocked': after['blockedOrigins']}
+    attempt('Chora: a pasted style on two sites needs each allowed before either is asked for tiles; once both are, both are used, and a third site is still refused', multi_origin)
     ctx.close()
 
 main()

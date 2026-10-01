@@ -33,3 +33,10 @@ export function saveDrafts(fp, drafts) {
   }).catch((e) => console.warn('Chora: the drawings could not be kept', e));
   return queue;
 }
+/** Resolves once every write queued so far is done (before the page reloads, say). */
+export const draftsWritten = () => queue;
+/** Remove every dataset's drawings kept here (the user keeps no working data between visits). */
+export async function forgetAllDrafts() {
+  await queue;
+  try { await (await navigator.storage.getDirectory()).removeEntry(DIR, { recursive: true }); } catch { /* none kept */ }
+}

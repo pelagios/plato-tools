@@ -1,19 +1,21 @@
 // Chora's map: MapLibre GL JS, with the dataset's places over a basemap, the chosen place drawn by
 // the status of each attestation, and Terra Draw for drawing new ones.
 //
-// The guard. Every request MapLibre makes goes through transformRequest, which refuses any address
-// not on this site or on the site of the basemap the user has agreed to. A Content Security Policy
-// would do this better, but a policy in a <meta> tag cannot be widened once the page is running, and
-// a pasted basemap may be on any site; so it is done here, and each refusal is counted
-// (window.__chora.blocked) and named (blockedOrigins), for the page and its tests.
+// The guard. Every request MapLibre makes goes through transformRequest (the permissions module's),
+// which refuses any address not on this site or on a site of the basemap shown whose permission is
+// allowed; each refusal is counted (window.__chora.blocked) and named (blockedOrigins), for the page
+// and its tests. Beneath it, the page's Content Security Policy (src/lib/csp-head.js) lets nothing
+// reach a site not allowed when the page loaded, and MapLibre's worker, made from a blob:, is under it.
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 // MapLibre's own worker, bundled by Vite with what it imports, and served from this site.
 import mapWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { TerraDraw, TerraDrawPointMode, TerraDrawLineStringMode, TerraDrawPolygonMode, TerraDrawSelectMode } from 'terra-draw';
 import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter';
+import { transformRequest, blobWorkerUrl } from '../lib/permissions.js';
 
-maplibregl.setWorkerUrl(mapWorkerUrl);
+// A worker made from a blob: takes the page's policy; one made from this site's address would not.
+maplibregl.setWorkerUrl(blobWorkerUrl(mapWorkerUrl));
 
 // Colours of the statuses, the same in the card (styles.css) and on the map.
 export const STATUS_COLOURS = { asserted: '#2757dd', reported: '#7a4fc9', tentative: '#b7791f', doubted: '#6b7280', denied: '#c0392b' };
@@ -32,21 +34,16 @@ const kindOf = (e) => (e?.tile ? 'a tile' : e?.sourceId ? 'a source' : 'the styl
  * `onStyleError(why)` when a basemap's style (not a tile of it) cannot be loaded.
  */
 export function createMap(container, { state, onPlaceClick, onStyleError }) {
-  const allowed = new Set([location.origin]);
+  let subjects = [];   // the permissions of the basemap shown, [category, subject] pairs
   state.blocked = 0; state.blockedOrigins = [];
-  // The guard: MapLibre's requests, and the page's own fetch of a pasted style, pass through it.
-  function guard(url) {
-    let origin;
-    try { origin = new URL(url, location.href).origin; } catch { origin = 'null'; }
-    if (/^(data|blob):/.test(url) || allowed.has(origin)) return url;
+  const guard = transformRequest(() => subjects, { onBlocked: (origin) => {
     state.blocked++;
     if (!state.blockedOrigins.includes(origin)) state.blockedOrigins.push(origin);
-    throw new Error(`Chora refused a request to ${origin}: it is not this site, nor the basemap's.`);
-  }
+  } });
   const map = new maplibregl.Map({
     container, style: { version: 8, sources: {}, layers: [{ id: 'blank', type: 'background', paint: { 'background-color': '#dde3ea' } }] },
     center: [10, 30], zoom: 1.2, attributionControl: { compact: false }, maplibreLogo: false,
-    transformRequest: (url) => ({ url: guard(url) }),
+    transformRequest: guard,
   });
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
   map.addControl(new maplibregl.ScaleControl(), 'bottom-left');
@@ -58,7 +55,7 @@ export function createMap(container, { state, onPlaceClick, onStyleError }) {
     const why = redact(e?.error?.message || e?.error || 'unknown error');
     if (styleLoading && !e?.sourceId && !e?.tile) { styleLoading = false; onStyleError?.(why); }
     // A refused request surfaces as an error event; it has been counted, and is not a fault.
-    if (!/Chora refused/.test(why)) console.warn(`Map, ${kindOf(e)}:`, why);
+    if (!/Refused a request to /.test(why)) console.warn(`Map, ${kindOf(e)}:`, why);
   });
 
   // What Chora draws, kept here so that it can be put back when the basemap (the style) changes.
@@ -132,10 +129,8 @@ export function createMap(container, { state, onPlaceClick, onStyleError }) {
 
   return {
     map,
-    /** Allow requests to these origins (besides this site's), and no others. */
-    allow(origins) { allowed.clear(); allowed.add(location.origin); for (const o of origins) if (o) allowed.add(o); },
-    /** The address, if the guard lets it through; else the refusal is counted, and thrown. */
-    guard,
+    /** The permissions the basemap shown needs ([category, subject] pairs): their sites, once allowed, and this site's, are let through. */
+    use(list) { subjects = [...list]; },
     /** Change the basemap: `style` is a style object or address. What Chora draws is kept. */
     setStyle(style) {
       if (draw) {

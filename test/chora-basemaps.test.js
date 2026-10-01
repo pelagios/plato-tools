@@ -1,9 +1,11 @@
-// Chora's basemaps (src/chora/basemaps.js): which sites each asks, so that the guard in map.js allows
-// those and no others, and the notice names every one; and what a drawing's note says of the basemap
+// Chora's basemaps (src/chora/basemaps.js): which sites each asks, so that the map's transformRequest
+// allows those and no others, and the permission each needs (src/lib/permissions.js) covers every one;
+// and what a drawing's note says of the basemap
 // it was drawn on. Written for the pre-push review of 30 September 2026: each test failed before its fix.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { builtIn, fromPaste, notice, originsOf, styleOrigins, drawnOn } from '../src/chora/basemaps.js';
+import { builtIn, fromPaste, subjectsOf, originsOf, styleOrigins, drawnOn } from '../src/chora/basemaps.js';
+import { originsFor } from '../src/lib/permissions-core.js';
 import { choraDrawingNote } from '../src/engine/words.js';
 
 // CARTO's styles (fetched without a key, 30 September 2026) name their sources, glyphs and sprites on
@@ -17,7 +19,7 @@ const cartoLike = {
   layers: [],
 };
 
-test('each built-in basemap names every site it asks, and its notice names them all', () => {
+test('each built-in basemap names every site it asks, and the one permission it needs covers them all', () => {
   const by = Object.fromEntries(builtIn().map((b) => [b.id, b]));
   for (const id of ['carto-positron', 'carto-voyager', 'carto-dark-matter']) {
     assert.deepEqual(originsOf(by[id]), ['https://basemaps.cartocdn.com', 'https://tiles.basemaps.cartocdn.com',
@@ -25,7 +27,12 @@ test('each built-in basemap names every site it asks, and its notice names them 
   }
   for (const id of ['ofm-liberty', 'ofm-bright', 'ofm-positron']) assert.deepEqual(originsOf(by[id]), ['https://tiles.openfreemap.org'], id);
   assert.deepEqual(originsOf(by.osm), ['https://tile.openstreetmap.org']);
-  for (const b of builtIn().filter((x) => !x.local)) for (const o of originsOf(b)) assert.ok(notice(b).includes(o), `${b.id}'s notice names ${o}`);
+  for (const b of builtIn().filter((x) => !x.local)) {
+    const subjects = subjectsOf(b);
+    assert.equal(subjects.length, 1, b.id);
+    assert.deepEqual(originsFor(...subjects[0]), originsOf(b), `${b.id}'s permission covers every site it asks`);
+  }
+  assert.deepEqual(subjectsOf(by['natural-earth']), [], 'Natural Earth, from this site, needs none');
   // What CARTO's style names is within what CARTO's entry allows: the style's own host alone would not do.
   const named = styleOrigins(cartoLike, CARTO_STYLE);
   assert.deepEqual(named, ['https://tiles.basemaps.cartocdn.com']);
@@ -57,8 +64,8 @@ test('a pasted basemap asks its own site until its style is read; then every sit
   assert.deepEqual(originsOf(b), ['https://first.example.org']);
   const read = { ...b, origins: ['https://first.example.org', 'https://second.example.com'] };
   assert.deepEqual(originsOf(read), ['https://first.example.org', 'https://second.example.com']);
-  assert.ok(notice(read).includes('https://second.example.com') && notice(read).includes('https://first.example.org'));
-  assert.ok(!notice(read).includes('key=K'), 'the notice names sites, not the address and its key');
+  assert.deepEqual(subjectsOf(read), [['basemap', 'https://first.example.org'], ['basemap', 'https://second.example.com']], 'one permission for each site');
+  assert.ok(!JSON.stringify(subjectsOf(read)).includes('key=K'), 'permissions name sites, not the address and its key');
 });
 
 test("a drawing's note names a built-in basemap, never a pasted one's site", () => {

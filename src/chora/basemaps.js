@@ -1,13 +1,14 @@
 // The basemaps Chora offers (decision D1). The default is Natural Earth, served from this site, so
 // that by default nothing leaves the browser. Every other basemap is fetched from its provider, who
 // then sees which part of the world is being looked at (never the files: those stay in the tab). So
-// each is used only after a notice naming the provider's address, and map.js refuses any request to
-// another site unless the basemap chosen is served from it.
+// each is used only once its provider is allowed in Permissions (src/lib/permissions.js): a built-in
+// one's as basemap:<provider> (openfreemap, osm, carto, each with every site it asks, in the
+// permissions' REGISTRY), a pasted one's as basemap:<site> for each site it asks.
 //
-// Choices are remembered in this browser only: which basemap (localStorage 'chora-basemap'), which
-// providers were agreed to ('chora-basemap-consent'), and any pasted basemap ('chora-basemaps'),
-// keys and all. A pasted address is sent to nowhere but its own provider.
+// Kept in this browser: which basemap was chosen last (localStorage 'chora-basemap'), and any pasted
+// basemap ('chora-basemaps'), keys and all. A pasted address is sent to nowhere but its own provider.
 import { PASTED_BASEMAP } from '../engine/words.js';
+import * as permissions from '../lib/permissions.js';
 
 // CARTO's vector basemaps need an API key, scoped by referrer to the published site (so it never
 // works from localhost). It is given at build time as VITE_CARTO_API_KEY, never written in a file
@@ -20,23 +21,23 @@ const OSM_ATTRIBUTION = '© <a href="https://www.openstreetmap.org/copyright">Op
 
 /**
  * Each basemap: {id, name, group, kind: 'style' | 'raster', url (a style address) or tiles (a tile
- * template), origins (every site it asks), attribution?, disabled?: reason}. `local` marks the one
- * served from this site. A style's sources, glyphs and sprites may be on sites other than the
- * style's own, and a TileJSON's tiles on others again, so each built-in basemap lists them all, as
- * found in its styles and TileJSON (fetched, without a key, on 30 September 2026).
+ * template), provider (its permission's id) or origins (a pasted one's sites), attribution?,
+ * disabled?: reason}. `local` marks the one served from this site. A style's sources, glyphs and
+ * sprites may be on sites other than the style's own, and a TileJSON's tiles on others again, so each
+ * provider in the permissions' REGISTRY lists them all, as found in its styles and TileJSON (fetched,
+ * without a key, on 30 September 2026).
  */
 export function builtIn() {
   const carto = (name, label) => ({
-    id: `carto-${name}`, name: `CARTO ${label}`, group: 'CARTO', kind: 'style',
+    id: `carto-${name}`, name: `CARTO ${label}`, group: 'CARTO', kind: 'style', provider: 'carto',
     url: `https://basemaps.cartocdn.com/gl/${name}-gl-style/style.json${CARTO_KEY ? `?api_key=${encodeURIComponent(CARTO_KEY)}` : ''}`,
-    origins: ['https://basemaps.cartocdn.com', 'https://tiles.basemaps.cartocdn.com', ...'abcd'.split('').map((x) => `https://tiles-${x}.basemaps.cartocdn.com`)],
     disabled: CARTO_KEY ? null : 'needs an API key: not yet configured',
   });
-  const ofm = (name, label) => ({ id: `ofm-${name}`, name: `OpenFreeMap ${label}`, group: 'OpenFreeMap', kind: 'style', url: `https://tiles.openfreemap.org/styles/${name}`, origins: ['https://tiles.openfreemap.org'] });
+  const ofm = (name, label) => ({ id: `ofm-${name}`, name: `OpenFreeMap ${label}`, group: 'OpenFreeMap', kind: 'style', provider: 'openfreemap', url: `https://tiles.openfreemap.org/styles/${name}` });
   return [
     { id: 'natural-earth', name: 'Natural Earth (this site)', group: 'This site', kind: 'style', url: NE_STYLE, local: true },
     ofm('liberty', 'Liberty'), ofm('bright', 'Bright'), ofm('positron', 'Positron'),
-    { id: 'osm', name: 'OpenStreetMap standard', group: 'OpenStreetMap', kind: 'raster', tiles: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', origins: ['https://tile.openstreetmap.org'], attribution: OSM_ATTRIBUTION, maxzoom: 19 },
+    { id: 'osm', name: 'OpenStreetMap standard', group: 'OpenStreetMap', kind: 'raster', provider: 'osm', tiles: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: OSM_ATTRIBUTION, maxzoom: 19 },
     carto('positron', 'Positron'), carto('voyager', 'Voyager'), carto('dark-matter', 'Dark Matter'),
   ];
 }
@@ -74,13 +75,25 @@ export function originOf(b) {
 }
 
 /**
- * Every site a basemap asks: a built-in one's list; a pasted one's own site, and, once its style has
- * been read, every site the style names (styleOrigins, kept on it as `origins`); this site for Natural Earth.
+ * Every site a basemap asks: a built-in one's provider's (the permissions' REGISTRY); a pasted one's own
+ * site, and, once its style has been read, every site the style names (styleOrigins, kept on it as
+ * `origins`); this site for Natural Earth.
  */
 export function originsOf(b) {
   if (!b || b.local) return [location.origin];
+  if (b.provider) return permissions.originsFor('basemap', b.provider);
   return Array.isArray(b.origins) && b.origins.length ? b.origins : [originOf(b)].filter(Boolean);
 }
+/** The permissions a basemap needs, as [category, subject] pairs: none for Natural Earth. */
+export function subjectsOf(b) {
+  if (!b || b.local) return [];
+  if (b.provider) return [['basemap', b.provider]];
+  return originsOf(b).filter(permissions.isOrigin).map((o) => ['basemap', o]);
+}
+/** Whether a basemap may be used now: every permission it needs allowed, and in this load's policy. */
+export const permitted = (b) => !!b && (b.local || (subjectsOf(b).length > 0 && subjectsOf(b).every(([c, s]) => permissions.allowed(c, s))));
+/** Whether any permission it needs is set to Never: then it is not offered. */
+export const refused = (b) => subjectsOf(b).some(([c, s]) => permissions.state(c, s) === 'never');
 
 /**
  * The sites a style names (its sources' TileJSON, tiles and data, its glyphs and sprites), each once,
@@ -102,23 +115,14 @@ export function styleOrigins(style, base) {
   return [...out].filter((o) => o !== 'null').sort();
 }
 
-/** The basemap chosen last in this browser, if it is still on offer (and consented to), else Natural Earth. */
+/** The basemap chosen last in this browser, whether or not it may be used yet. */
+export const wanted = () => byId(get('chora-basemap', 'natural-earth'));
+/** The basemap to show: the one chosen last, if it is on offer and permitted, else Natural Earth. */
 export function current() {
-  const b = byId(get('chora-basemap', 'natural-earth'));
-  return b && !b.disabled && (b.local || agreed(b)) ? b : byId('natural-earth');
+  const b = wanted();
+  return b && !b.disabled && permitted(b) ? b : byId('natural-earth');
 }
 export const choose = (b) => put('chora-basemap', b.id);
-export const consented = (origin) => get('chora-basemap-consent', []).includes(origin);
-/** Whether the user has agreed to every site a basemap asks. */
-export const agreed = (b) => originsOf(b).every(consented);
-export const consent = (origins) => put('chora-basemap-consent', [...new Set([...get('chora-basemap-consent', []), ...[].concat(origins)])]);
-
-const listOf = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
-/** The notice shown before a basemap from another site is first used, naming every site it asks. */
-export function notice(b) {
-  const os = originsOf(b), one = os.length === 1;
-  return `${b.name} is served by ${listOf(os)}. Using it, the map asks ${one ? 'that site' : 'those sites'} for the part of the world you are looking at, so ${one ? 'the provider sees' : 'each sees'} where you look (and your address on the internet, as any website does). ${one ? 'It sees' : 'None sees'} nothing of your data, which stays in this tab.`;
-}
 
 /** What a drawing's note says it was drawn on: a built-in basemap's name; never a pasted one's site. */
 export const drawnOn = (b) => (!b || b.local ? 'Natural Earth' : b.group === 'Pasted' ? PASTED_BASEMAP : b.name);
@@ -150,11 +154,11 @@ export function resolveStyle(style, base) {
 /**
  * The style to give MapLibre for a basemap. Natural Earth's is fetched here, from this site, and its
  * addresses made absolute; a raster basemap is wrapped in a style of one layer, so that nothing but
- * its tiles is asked of the provider; a pasted style is fetched here too, through `guard` (map.js's),
- * so that the sites it names can be found (styleOrigins) before MapLibre asks any of them; a built-in
- * one is given by its address, for MapLibre to fetch (through the guard).
+ * its tiles is asked of the provider; a pasted style is fetched here too, through the permissions'
+ * fetch, so that the sites it names can be found (styleOrigins) before MapLibre asks any of them; a
+ * built-in one is given by its address, for MapLibre to fetch (through the map's transformRequest).
  */
-export async function styleFor(b, guard = (u) => u) {
+export async function styleFor(b) {
   if (b.local) {
     const url = new URL(b.url, location.href).href;
     const r = await fetch(url);
@@ -169,7 +173,7 @@ export async function styleFor(b, guard = (u) => u) {
     };
   }
   if (b.group === 'Pasted') {
-    const r = await fetch(guard(b.url));
+    const r = await permissions.fetch(b.url, { cat: 'basemap', subj: originOf(b) });
     if (!r.ok) throw new Error(`its style could not be read (${r.status})`);
     let style;
     try { style = await r.json(); } catch { throw new Error('its address is not that of a style'); }

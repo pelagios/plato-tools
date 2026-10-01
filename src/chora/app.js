@@ -8,9 +8,10 @@ import { newGeometryAttestation, checkGeoJSON, wrapLongitudes, DrawError, ROLES,
 import { createMap, placeFeatures, contextFeatures, STATUS_COLOURS } from './map.js';
 import * as basemaps from './basemaps.js';
 import * as contributors from './contributor.js';
-import { fingerprint, loadDrafts, saveDrafts } from './drafts.js';
-import { take as takeHandoff, clear as clearHandoff } from './handoff.js';
+import { fingerprint, loadDrafts, saveDrafts, draftsWritten, forgetAllDrafts } from './drafts.js';
+import { take as takeHandoff, clear as clearHandoff, keepForReload, takeResume } from './handoff.js';
 import { serialQueue, pageRequest, answers } from './queue.js';
+import * as permissions from '../lib/permissions.js';
 
 const $ = (id) => document.getElementById(id);
 const state = (window.__chora = { phase: 'loading', placeId: null, pendingCount: 0, basemap: null, mapReadyCount: 0, blocked: 0, lastSave: null });
@@ -370,6 +371,8 @@ async function saveDataset() {
     // The drawings in that file need not be kept here once it is on the user's disk; any others still are.
     const letGo = (said) => {
       offered = null; box.remove();
+      // The file is on the user's disk: one who keeps no working data has no copy of it left here.
+      if (!permissions.keepWorkingData()) navigator.storage.getDirectory().then((r) => r.getDirectoryHandle('chora-outputs')).then((d) => d.removeEntry(out.name)).catch(() => {});
       drafts = drafts.filter((d) => !savedIds.has(d.id)); keepDrafts(); showDrafts(drafts.filter((d) => d.placeId === state.placeId)); if (view) renderCard();
       $('save-result').insertAdjacentHTML('beforeend', `<p>${said} To add more, open ${esc(out.name)}.</p>`);
     };
@@ -421,38 +424,56 @@ async function save(name) {
 window.__chora_save = save;
 
 // ---- Basemaps ------------------------------------------------------------------------------------
-let asking = null;   // a basemap waiting for the user to agree to its provider
+// A basemap from another site is used only once its permission is allowed (src/lib/permissions.js).
+// Chosen before then, it is remembered as the one wanted, the map stays as it is, and one line says
+// "Needs permission", opening the Permissions panel at it. Allowed, it can be used from the next load
+// (the page's policy is written at load): the panel offers the reload, and what is open is kept.
 let basemapError = null;   // why the basemap chosen could not be used
+function unprotected(b) {
+  basemapError = state.basemapError = `${b.name} cannot be used here: this browser did not show that it enforces the page’s protection, so the map stays on Natural Earth, from this site.`;
+}
 function renderBasemaps() {
-  const cur = basemaps.current();
+  const cur = basemaps.current(), want = basemaps.wanted();
+  const waiting = want && !want.disabled && !want.local && !basemaps.permitted(want) && !basemaps.refused(want) && state.canary !== 'not-enforced' ? want : null;
   $('basemap-name').textContent = cur.name;
   const groups = new Map();
-  for (const b of basemaps.all()) { if (!groups.has(b.group)) groups.set(b.group, []); groups.get(b.group).push(b); }
+  // A basemap set to Never in Permissions is not offered (and nothing says why: that is Never).
+  for (const b of basemaps.all()) { if (basemaps.refused(b)) continue; if (!groups.has(b.group)) groups.set(b.group, []); groups.get(b.group).push(b); }
   $('basemap-options').innerHTML = (basemapError ? `<p class="warn" role="status">${esc(basemapError)}</p>` : '') + [...groups].map(([g, bs]) => `<fieldset><legend>${esc(g)}</legend>${bs.map((b) => `<label class="${b.disabled ? 'disabled' : ''}">
-      <input type="radio" name="basemap" value="${esc(b.id)}"${b.id === (asking || cur).id ? ' checked' : ''}${b.disabled ? ' disabled' : ''}> ${esc(b.name)}${b.disabled ? ` <small>(${esc(b.disabled)})</small>` : ''}
+      <input type="radio" name="basemap" value="${esc(b.id)}"${b.id === (waiting || cur).id ? ' checked' : ''}${b.disabled ? ' disabled' : ''}> ${esc(b.name)}${b.disabled ? ` <small>(${esc(b.disabled)})</small>` : ''}
       ${b.group === 'Pasted' ? ` <button type="button" class="link" data-unpaste="${esc(b.id)}">remove</button>` : ''}</label>`).join('')}</fieldset>`).join('')
-    + (asking ? `<div class="consent" role="alertdialog" aria-labelledby="consent-text"><p id="consent-text">${esc(basemaps.notice(asking))}</p>
-      <p><button type="button" class="primary" id="consent-yes">Use ${esc(asking.name)}</button> <button type="button" id="consent-no">Keep the current map</button></p></div>` : '')
+    + '<div id="basemap-needs"></div>'
     + `<form id="paste-form"><label for="paste">Paste a style address or a tile template</label>
       <input id="paste" type="url" placeholder="https://…/style.json or https://…/{z}/{x}/{y}.png" autocomplete="off">
-      <small>Kept in this browser only, key and all, and sent to nowhere but that provider.</small>
+      <small>Kept in this browser, key and all, and sent to nowhere but that provider.</small>
       <button type="submit">Add</button> <span id="paste-error" class="warn"></span></form>`
     + (state.blocked ? `<p class="muted">Refused ${n(state.blocked)} request${state.blocked === 1 ? '' : 's'} to ${esc(state.blockedOrigins.join(', '))}, not the basemap's site.</p>` : '');
+  // One line for each permission the basemap wanted still needs (a pasted style may name several sites).
+  state.basemapWaiting = waiting?.id || null;
+  if (waiting) {
+    for (const [c, subj] of basemaps.subjectsOf(waiting)) {
+      if (permissions.allowed(c, subj)) continue;
+      const p = document.createElement('p');
+      $('basemap-needs').appendChild(p);
+      permissions.needs(p, c, subj, { added: waiting.group === 'Pasted' });
+    }
+  }
+}
+function want(b) {
+  basemaps.choose(b);
+  if (basemaps.permitted(b)) useBasemap(b);
+  else { $('basemaps').open = true; renderBasemaps(); }
 }
 $('basemap-options').addEventListener('change', (e) => {
   if (e.target.name !== 'basemap') return;
   const b = basemaps.byId(e.target.value);
-  if (!b || b.disabled) return;
-  if (!b.local && !basemaps.agreed(b)) { asking = b; renderBasemaps(); return; }
-  useBasemap(b);
+  if (b && !b.disabled) want(b);
 });
 $('basemap-options').addEventListener('click', (e) => {
-  if (e.target.id === 'consent-yes') { basemaps.consent(basemaps.originsOf(asking)); const b = asking; asking = null; useBasemap(b); }
-  else if (e.target.id === 'consent-no') { asking = null; renderBasemaps(); }
-  else if (e.target.dataset.unpaste) {
+  if (e.target.dataset.unpaste) {
     const id = e.target.dataset.unpaste;
     basemaps.removePasted(id);
-    if (basemaps.current().id === id || state.basemap === id) useBasemap(basemaps.byId('natural-earth')); else renderBasemaps();
+    if (basemaps.current().id === id || state.basemap === id || basemaps.wanted() === null) want(basemaps.byId('natural-earth')); else renderBasemaps();
   }
 });
 $('basemap-options').addEventListener('submit', (e) => {
@@ -460,35 +481,47 @@ $('basemap-options').addEventListener('submit', (e) => {
   const b = basemaps.fromPaste($('paste').value);
   if (!b) { $('paste-error').textContent = 'That is not an https address.'; return; }
   basemaps.addPasted(b);
-  asking = basemaps.agreed(b) ? null : b;
-  if (asking) renderBasemaps(); else useBasemap(b);
+  want(b);
 });
 async function useBasemap(b) {
-  if (!b.local) basemapError = state.basemapError = null;
-  mapApi.allow(basemaps.originsOf(b));
+  if (!b.local) {
+    basemapError = state.basemapError = null;
+    // Where the page's policy was not shown to be enforced, no other site is asked (src/lib/csp.js).
+    if (!(await permissions.enforced())) { unprotected(b); b = basemaps.byId('natural-earth'); }
+  }
+  mapApi.use(basemaps.subjectsOf(b));
   let style;
-  try { style = await basemaps.styleFor(b, mapApi.guard); } catch (e) {
+  try { style = await basemaps.styleFor(b); } catch (e) {
     if (b.local) { console.warn(e); return; }
     return styleFailed(e.message, b);
   }
-  // A pasted style says which sites it asks only once it has been read: any the user has not agreed
-  // to are named in the notice, and the map stays as it is (its own sites allowed again) until they agree.
+  // A pasted style says which sites it asks only once it has been read: those not yet allowed are
+  // each given a "Needs permission" line, and the map stays as it is until they are.
   if (b.group === 'Pasted' && b.kind === 'style') {
     const origins = [...new Set([basemaps.originOf(b), ...basemaps.styleOrigins(style, b.url)])];
     if (origins.join() !== basemaps.originsOf(b).join()) { b = { ...b, origins }; basemaps.addPasted(b); }
-    if (!basemaps.agreed(b)) {
+    if (!basemaps.permitted(b)) {
       const shown = basemaps.byId(state.basemap);
-      asking = b; $('basemaps').open = true;
-      if (shown) { mapApi.allow(basemaps.originsOf(shown)); renderBasemaps(); } else useBasemap(basemaps.byId('natural-earth'));
+      $('basemaps').open = true;
+      if (shown) { mapApi.use(basemaps.subjectsOf(shown)); renderBasemaps(); } else useBasemap(basemaps.byId('natural-earth'));
       return;
     }
-    mapApi.allow(origins);
+    mapApi.use(basemaps.subjectsOf(b));
   }
-  basemaps.choose(b);
+  if (!b.local || basemaps.wanted()?.local) basemaps.choose(b);
   state.basemap = b.id;
   mapApi.setStyle(style);
   renderBasemaps();
 }
+// A permission changed, here or in another tab: a basemap shown that is no longer allowed gives way to
+// Natural Earth at once; one wanted that now may be used (allowed again within this load's policy) is used.
+permissions.onChange(() => {
+  const shown = basemaps.byId(state.basemap);
+  if (shown && !shown.local && !basemaps.permitted(shown)) { useBasemap(basemaps.byId('natural-earth')); return; }
+  const w = basemaps.wanted();
+  if (w && !w.disabled && w.id !== state.basemap && basemaps.permitted(w)) { useBasemap(w); return; }
+  renderBasemaps();
+});
 
 // ---- The rest ------------------------------------------------------------------------------------
 // Chora's working database is in a pool that one tab alone can hold (src/engine/worker.js), so a
@@ -522,6 +555,7 @@ function styleFailed(why, b = basemaps.byId(state.basemap)) {
   if (!b || b.local) return;
   basemapError = state.basemapError = `${b.name} could not be loaded from ${basemaps.originOf(b)} (${why}), so the map is back on Natural Earth, from this site.`;
   $('basemaps').open = true;
+  basemaps.choose(basemaps.byId('natural-earth'));
   useBasemap(basemaps.byId('natural-earth'));
 }
 const mapApi = createMap($('map'), { state, onPlaceClick: (id) => selectPlace(id), onStyleError: styleFailed });
@@ -538,8 +572,42 @@ mapApi.onDraw({
 // The map and the drawing tool, for automated tests; nothing else reads them.
 window.__chora_map = mapApi.map;
 Object.defineProperty(window, '__chora_draw', { get: () => mapApi.draw });
+// The Permissions panel, from the header's button, and the proof that the page's policy is enforced
+// (state.canary): until it has come, no other site is asked; unless it holds, none ever is.
+permissions.mount({ state }).then((r) => {
+  // Not enforced: a basemap chosen from another site is not used (current() never offers it, as it is
+  // in no policy), and the page says why rather than offering a reload that would change nothing.
+  const w = basemaps.wanted();
+  if (!r?.enforced && w && !w.local) { unprotected(w); $('basemaps').open = true; renderBasemaps(); }
+});
+// The page's policy is written at load, so a permission allowed is in it from the next one: before
+// the page reloads for it, what is open is kept (the files, the place, the view), and taken back after.
+permissions.onBeforeReload(async () => {
+  state.phase = 'reloading';
+  await draftsWritten();
+  const m = mapApi.map;
+  await keepForReload({ files, placeId: state.placeId, camera: { center: m.getCenter().toArray(), zoom: m.getZoom(), bearing: m.getBearing(), pitch: m.getPitch() } });
+});
 useBasemap(basemaps.current());
 startWorker().then(async () => {
+  // Back from a reload for a permission: the dataset, the place and the view as they were.
+  const resumed = await takeResume();
+  if (resumed) {
+    if (resumed.files?.length) {
+      await open(resumed.files);
+      if (resumed.placeId && dataset) await selectPlace(resumed.placeId);
+    }
+    if (resumed.camera) mapApi.map.jumpTo(resumed.camera);
+    state.resumed = { files: (resumed.files || []).map((f) => f.name), placeId: resumed.placeId || null };
+    return;
+  }
+  // The user keeps no working data between visits: the drawings not saved and the file last written
+  // go now. (The dataset's working copy, in Chora's SQLite pool, is cleared at every start anyway.)
+  if (!permissions.keepWorkingData()) {
+    await forgetAllDrafts();
+    try { await (await navigator.storage.getDirectory()).removeEntry('chora-outputs', { recursive: true }); } catch { /* none kept */ }
+    state.workingCleared = true;
+  }
   // Files chosen on the main page, offered here.
   const handed = await takeHandoff();
   if (handed && !files.length) {
