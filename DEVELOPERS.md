@@ -333,10 +333,15 @@ readers link to those headings, so keep them.
   each `<TEI.2>` has its own, and the corpus header's hold for every text in it; a place name's `@reg` (the editors' regularised form) is `tei-reg`, a loss, and the
   name is the text's (in P5 it is an attribute not read, `tei-attribute`, beside a ref or, on a name
   with a key and no ref, alone); a name whose language is Greek (`isGreek`: its tag `grc`/`el`, or its
-  `<language>`'s words or id naming Greek) and whose text is ASCII with a letter is Beta Code:
-  `tei-p4-beta-code`, a loss naming the string, and the attestation carries no `names` (and so no
-  `formStatus`), with a note (decided 2026-10-01: reported, not converted; a later opt-in only with
-  exact round trips). P4's numbered divs (`div1`…`div7`) are read as `div` is (`DIVS`); Perseus's
+  `<language>`'s words or id naming Greek; its language is its own `lang`, else the nearest
+  enclosing one, so a note's own `lang` overrides its div's) and whose text is ASCII with a letter
+  and one of Beta Code's signs (`BETA_SIGNATURE`: `*`, `(`, `)`, `/`, `\`, `=`, `|`, `+` or a digit) is
+  Beta Code: `tei-p4-beta-code`, a loss naming the string, and the attestation carries no `names`
+  (and so no `formStatus`), with a note (decided 2026-10-01: reported, not converted; a later opt-in
+  only with exact round trips). ASCII with a letter and none of the signs ("Rwmh", or an English
+  "Athens" in a note with no `lang` of its own, in a Greek div) cannot be told from Latin letters:
+  the conservative reading (decided 2026-10-01, in the review fixes) carries it as written, not
+  converted, with no `language`, and a note, and reports it as `tei-p4-maybe-beta-code`, a warning. P4's numbered divs (`div1`…`div7`) are read as `div` is (`DIVS`); Perseus's
   top-level divs are books and chapters, never `type="edition"`, so the edition rule does not fire
   for such a file and its notes are the source's unless marked as the editors' (`noteMark`, as
   `resp="ed"`). Keys (`key="tgn,7011179"`) take the key path, with TGN's pattern suggested. A

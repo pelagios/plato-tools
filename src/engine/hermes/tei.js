@@ -173,6 +173,7 @@ export const TEI_KINDS = {
   'tei-locator-entity-unknown': 'loss',
   'tei-reg': 'loss',
   'tei-p4-beta-code': 'loss',
+  'tei-p4-maybe-beta-code': 'warning',
 };
 
 // The elements read as place names. <placeName> is TEI's place name; <settlement>, <region>,
@@ -233,8 +234,14 @@ const XML_NS = 'http://www.w3.org/XML/1998/namespace';
 // A language that is Greek, for Beta Code (below): its tag, or the words of its <language>.
 const GREEK_TAG = /^(grc|el|ell|gre|gr)(-|$)/i;
 const GREEK_WORDS = /^gr(ee)?k$|\bgreek\b/i;
-// Beta Code (Perseus's Greek in Latin letters, *)aqh=nai): text with a letter and nothing but ASCII.
+// Beta Code (Perseus's Greek in Latin letters, *)aqh=nai): text with a letter and nothing but ASCII
+// (so no Greek letter and no diacritic), and with one of Beta Code's signs: * for a capital, ( ) for
+// breathings, / \ = for accents, | for iota subscript, + for diaeresis, or a digit (a sigma's form,
+// s1-s3, or a mark). ASCII with a letter and none of them ("Rwmh", or an English "Athens" in a note
+// with no lang of its own, in a Greek div) may be Beta Code or may be Latin letters: it is carried as
+// written, without its (Greek) language, and reported as possible Beta Code (tei-p4-maybe-beta-code).
 const BETA_CODE = /^(?=.*[A-Za-z])[\x20-\x7e]+$/;
+const BETA_SIGNATURE = /[*()/\\=|+0-9]/;
 
 // ---- TEI P4, and TEI with no namespace ----------------------------------------------------------
 // The root fixes the namespace: an element counts as TEI when its namespace is the root's. <TEI> or
@@ -1237,7 +1244,7 @@ export class TeiReader {
         element: t.name, key, xmlId, toponym, printed: printed !== toponym ? printed : undefined, language, locator,
         fileLine, source: this.source(), pointers: hasRef ? this.norm(ref).split(' ') : [], prefixes: this.prefixes(),
         ...(made ? { keyAddress: made.address, keyNote: made.note } : {}),
-        ...(this.teiVariant === 'p4' && BETA_CODE.test(toponym) && this.isGreek(el.lang) ? { betaCode: true } : {}),
+        ...(this.teiVariant === 'p4' && BETA_CODE.test(toponym) && this.isGreek(el.lang) ? (BETA_SIGNATURE.test(toponym) ? { betaCode: true } : { maybeBetaCode: true, language: undefined }) : {}),
       } };
       d.m.pointerWords = hasRef ? this.norm(ref) : `key ${this.norm(key)}`;
     }
@@ -1430,6 +1437,10 @@ export class TeiReader {
     if (m.betaCode) {
       this.report('tei-p4-beta-code', `${m.toponym} (<${m.element}> on line ${m.fileLine})`);
       notes.push('The name is written in Beta Code (Greek in Latin letters), which is not converted, so this attestation carries no name.');
+    }
+    if (m.maybeBetaCode) {
+      this.report('tei-p4-maybe-beta-code', `${m.toponym} (<${m.element}> on line ${m.fileLine}): carried as written, with no language`);
+      notes.push('The name is in Latin letters where its language is Greek: it may be Beta Code (Greek in Latin letters), or a name in another language. It is carried as written, not converted, and with no language.');
     }
     if (m.keyNote) notes.push(m.keyNote);
     else if (m.key) notes.push(`Key: ${m.key}`);

@@ -340,3 +340,40 @@ test('an unknown entity in a div, milestone, pb or lb n is reported by element a
   assert.deepEqual(loc(ok), ['book 1, section 1', 'book 1, section 2']);
   assert.ok(!ok.kinds.has('tei-locator-entity-unknown'));
 });
+
+// ---- Beta Code, and what only might be ---------------------------------------------------------------------
+// ASCII in a Greek context is Beta Code only with one of its signs (* ( ) / \ = | + or a digit). With
+// none ("Rwmh", or an English "Athens" in a note with no lang of its own), it is carried as written,
+// with no language, and reported as possible Beta Code (decided here: the conservative reading).
+const p4doc = (body) => `<?xml version="1.0"?>\n<TEI.2><teiHeader><fileDesc><titleStmt><title>T</title></titleStmt></fileDesc><profileDesc><langUsage><language id="greek">Greek</language><language id="en">English</language></langUsage></profileDesc></teiHeader><text><body><div1 type="book" n="1" lang="greek"><p>${body}</p></div1></body></text></TEI.2>`;
+test('Beta Code needs one of its signs: an English "Athens" in a note in a Greek div is a name, "*)aqh=nai" is Beta Code, a bare "Rwmh" is possible Beta Code', () => {
+  const pl = (w, id = 7001393) => `<placeName key="tgn,${id}">${w}</placeName>`;
+  // A note with no lang of its own, in a Greek div: carried, with no language, and flagged softly.
+  const note = mapped(p4doc(`text <note>Compare ${pl('Athens')}.</note>`), KEYS);
+  assert.deepEqual(names(note), ['Athens']);
+  assert.equal(note.doc.attestations[0].names[0].language, undefined);
+  assert.ok(!note.kinds.has('tei-p4-beta-code'));
+  assert.match(examples(note, 'tei-p4-maybe-beta-code')[0], /^Athens \(<placeName> on line \d+\): carried as written/);
+  // The note's own lang overrides the div's: English, with nothing reported.
+  const en = mapped(p4doc(`text <note lang="en">Compare ${pl('Athens')}.</note>`), KEYS);
+  assert.deepEqual(en.doc.attestations[0].names[0], { toponym: 'Athens', language: 'en' });
+  assert.ok(!en.kinds.has('tei-p4-beta-code') && !en.kinds.has('tei-p4-maybe-beta-code'));
+  // With a sign, Beta Code: reported as a loss, and no name carried.
+  const beta = mapped(p4doc(pl('*)aqh=nai')), KEYS);
+  assert.deepEqual(names(beta), []);
+  assert.deepEqual(examples(beta, 'tei-p4-beta-code').map((e) => e.replace(/ on line \d+/, '')), ['*)aqh=nai (<placeName>)']);
+  assert.ok(!beta.kinds.has('tei-p4-maybe-beta-code'));
+  for (const w of ['qh/bai', 'a)/rgos', 'Rw/mh', 'Kori/nqos', 'tro/s1', 'w|']) assert.deepEqual(names(mapped(p4doc(pl(w)), KEYS)), [], w);
+  // No sign: possible Beta Code, carried as written, with no language, and a note saying so.
+  const rwmh = mapped(p4doc(pl('Rwmh', 7000874)), KEYS);
+  assert.deepEqual(rwmh.doc.attestations[0].names, [{ toponym: 'Rwmh' }]);
+  assert.match(rwmh.doc.attestations[0].notes, /may be Beta Code/);
+  assert.equal(examples(rwmh, 'tei-p4-maybe-beta-code').length, 1);
+  assert.equal(TEI_KINDS['tei-p4-maybe-beta-code'], 'warning');
+  assert.ok(LOSS_TEXT['tei-p4-maybe-beta-code']);
+  assert.equal(valid(rwmh.doc), null);
+  // Control: Greek letters in the Greek div are a Greek name, with nothing reported.
+  const greek = mapped(p4doc(pl('Ἀθῆναι')), KEYS);
+  assert.deepEqual(names(greek), ['Ἀθῆναι']);
+  assert.ok(!greek.kinds.has('tei-p4-beta-code') && !greek.kinds.has('tei-p4-maybe-beta-code'));
+});
