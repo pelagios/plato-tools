@@ -69,8 +69,12 @@ illustrative, and the identifiers are made up.
   flagged as having no match (no value); a rich-text comment as HTML; a tag from a vocabulary as
   `{ label, id }`; a PDF target with a `page=` fragment; an image target with a media-fragment
   region; and an annotation with only a tag.
-- `recogito-studio-regions-constructed.json`: **Constructed**, to stand in for a real Recogito
-  Studio export of regions on the Rocque/Dury map until the maintainer makes one. Written by
+- `recogito-studio-regions-constructed.json`: **Constructed**. It stood in for a Studio export of
+  regions on the Rocque/Dury map until `recogito-studio-regions-generated.json` (above) was made
+  from the same regions by Studio's own exporter; it is kept for the paths Studio's editor cannot
+  reach: a transcription, a quote, and a picture's address (or a Recogito v1 part) as the target's
+  source. Where the two differ in anything else, the generated file is what Studio writes, and this
+  one was corrected to match it (the `modified` key, the geotags' shape). Written by
   `make-recogito-studio-regions.mjs` (run it to make the file again), which follows, step by step,
   how Recogito Studio exports an image annotation: `getAnnotations` in
   `src/backend/helpers/annotationHelpers.ts` and `src/util/export/w3c/w3cExporter.ts` in
@@ -79,10 +83,15 @@ illustrative, and the identifiers are made up.
   `serializeFragmentSelector` and `serializeSVGSelector` in
   [@annotorious/annotorious](https://github.com/annotorious/annotorious) 3.8.10 (the npm package),
   with `serializeW3CBodies` from @annotorious/core as bundled there. So: the keys in the order those
-  spreads give (`id`, `target`, `motivation`, `@context`, `type`, `created`, `creator`, `body`); no
-  `visibility` for a public annotation (the export reads it as undefined, not false); the target
-  `{ source, type: "SpecificResource", selector }`, its `source` the canvas or picture the region
-  was drawn on; an unrotated rectangle as a `FragmentSelector` `xywh=pixel:…`, and every other
+  spreads give (`id`, `target`, `motivation`, `@context`, `type`, `created`, `creator`, `modified`,
+  `body`), `modified` the target's `updated_at`, which Studio sets to `created_at` when a region is
+  drawn, so the same as `created`; no `visibility` for a public annotation (the export reads it as
+  undefined, not false); the target `{ source, type: "SpecificResource", selector }`, its `source`
+  the canvas the region was drawn on (but see the departures below: Studio writes a `source` only
+  for a canvas of a IIIF manifest, and for any other image **no source at all**, as the generated
+  file's annotations 9, 10 and 13 show); a geotag's `value` the Feature as the geotagging plugin's
+  Wikidata connector builds it, `{ id, properties: { title, description }, geometry }`, with no
+  `type: "Feature"` (descriptions from Wikidata's `wbgetentities`, 2026-10-01); an unrotated rectangle as a `FragmentSelector` `xywh=pixel:…`, and every other
   shape as an `SvgSelector` in Annotorious's markup (a rotated rectangle with
   `transform="rotate(…)"`, its angle as JavaScript prints it). The regions are drawn round real
   printed labels, read off the image (Digital Commonwealth's IIIF image service,
@@ -101,12 +110,21 @@ illustrative, and the identifiers are made up.
   the ambiguous case, with `../georef/loc-chesapeake-overlapping-constructed.json`; on the real
   page it is beyond the second map's control points); 15 the `120` again, boxed loosely down into
   the map (its centre still off it); 16 Albany, tagged `Label`.
-  **Two departures from what Studio writes**, both to test a path Studio cannot reach: Recogito
+  **Three departures from what Studio writes**, each to test a path Studio cannot reach: Recogito
   Studio's own editor writes no transcription (its bodies are commenting, replying, tagging and
   the geotagging plugin's), so the `transcribing` bodies are shaped as its crosswalk would write
-  one; and Annotorious writes one selector, never a `TextQuoteSelector`, for an image, so
-  annotation 2's quote beside its polygon is not Studio's shape. In a real Studio export the only
-  evidence of a label is the tag `label` (below).
+  one; Annotorious writes one selector, never a `TextQuoteSelector`, for an image, so
+  annotation 2's quote beside its polygon is not Studio's shape; and Studio writes no `source` for
+  an image that is not part of a IIIF manifest (`AnnotatedImage.tsx` gives one only for a
+  manifest's canvas), so the picture addresses of 9 and 10 and the Recogito v1 part of 13 are
+  not what Studio writes: they test matching a picture to a georeference and refusing a Recogito v1
+  document. (An earlier version of this README gave every Studio target a source, the canvas or
+  picture the region was drawn on; a target with no source does occur, and the reader converts one,
+  with the warning `annotation-target-no-source`.) Besides these, the curve of 11 is written by hand with one `C`
+  command, not as Studio's path tool writes it (the generated file has that), and the tags of 6 and
+  16 are strings, as Studio's annotation card stores a tag (the generated file has the region
+  popup's `{ "label": … }` form). In a real Studio export the only evidence of a label is the tag
+  `label` (below).
 
 ## The mapping
 

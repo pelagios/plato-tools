@@ -105,10 +105,20 @@ async function expected(g, centre, outline, role, bbox, transformation, precisio
 test('the constructed export is in the shape Recogito Studio writes image annotations (key order, target, bodies)', () => {
   assert.equal(ITEMS.length, 16);
   for (const a of ITEMS) {
-    assert.deepEqual(Object.keys(a), ['id', 'target', 'motivation', '@context', 'type', 'created', 'creator', 'body'], a.id);
+    assert.deepEqual(Object.keys(a), ['id', 'target', 'motivation', '@context', 'type', 'created', 'creator', 'modified', 'body'], a.id);
+    assert.equal(a.modified, a.created, 'a target never edited: updated_at is created_at');
     assert.deepEqual(Object.keys(a.target), ['source', 'type', 'selector'], a.id);
     assert.deepEqual(Object.keys(a.creator), ['id', 'name', 'avatar']);
     for (const b of a.body) assert.deepEqual(Object.keys(b).slice(0, 3), ['created', 'creator', 'purpose']);
+  }
+  // Checked against what Studio's own exporter wrote for the same regions (the generated fixture,
+  // read below): the same annotation keys and the same geotags ({ id, properties: { title,
+  // description }, geometry }, no type "Feature"), annotation by annotation.
+  const generated = json(A + 'recogito-studio-regions-generated.json');
+  for (const [i, a] of ITEMS.entries()) {
+    const g = generated[i];
+    assert.deepEqual([a.id, Object.keys(a), a.modified], [g.id, Object.keys(g), g.modified], a.id);
+    assert.deepEqual(a.body.find((b) => b.purpose === 'geotagging'), g.body.find((b) => b.purpose === 'geotagging'), a.id);
   }
   // Annotorious writes an unrotated rectangle as a media fragment and a rotated one as SVG.
   assert.equal(item(1).target.selector.value, 'xywh=pixel:5120,5600,230,72');

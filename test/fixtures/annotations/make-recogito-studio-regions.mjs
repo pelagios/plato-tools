@@ -15,7 +15,20 @@
 //     written as JavaScript writes them), serializeSVGSelector, and @annotorious/core's
 //     serializeW3CBodies.
 // Key order is the order those spreads give: id, target, motivation, @context, type, created,
-// creator, body. `modified` is left out, as it is when a target was never updated.
+// creator, modified, body. `modified` is the target's updated_at, which SupabasePlugin.createTarget
+// sets to created_at, so for a region never edited it is the same as `created`.
+// A geotag's value is the Feature as plugin-geotagging's WikidataConnector builds it, and
+// EditorExtension.saveGeoTag stores it: { id, properties: { title, description }, geometry }, with
+// no type "Feature"; the descriptions are Wikidata's (wbgetentities, 2026-10-01).
+//
+// Checked against test/fixtures/annotations/recogito-studio-regions-generated.json, written by
+// Studio's own exporter from the same regions (see README.md). This file differs from it, on
+// purpose, only where it tests a path Studio's editor cannot reach: the transcriptions (1, 3, 4,
+// 7-13, 15; Studio's file tags these regions "label" instead), annotation 2's TextQuoteSelector,
+// the picture addresses as the source of 9 and 10 and the Recogito v1 part as that of 13 (Studio
+// writes no source for an image that is not part of a IIIF manifest), the free tag "symbol" of 6
+// and "Label" of 16 as strings (Studio's region popup writes { label } objects, which the generated
+// file has), and the curve of 11, written with one C command.
 import { writeFileSync } from 'node:fs';
 
 const CANVAS = 'https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/8623qf00m';
@@ -39,7 +52,7 @@ const path = (d) => ({ type: 'SvgSelector', value: `<svg><path d="${d}" /></svg>
 
 // Bodies as crosswalkAnnotationBodies writes them.
 const who = { id: user.id, name: user.name };
-const geotag = (id, title, coordinates) => ({ created, creator: who, purpose: 'geotagging', value: { id, type: 'Feature', properties: { title }, geometry: { type: 'Point', coordinates } }, format: 'application/json' });
+const geotag = (id, title, description, coordinates) => ({ created, creator: who, purpose: 'geotagging', value: { id, properties: { title, description }, geometry: { type: 'Point', coordinates } }, format: 'application/json' });
 const tag = (value) => ({ created, creator: who, purpose: 'tagging', value });
 const comment = (value) => ({ created, creator: who, purpose: 'commenting', value, type: 'TextualBody', format: 'text/html' });
 // NOT written by Recogito Studio's own editor, which has no transcription (its bodies are
@@ -56,6 +69,7 @@ const annotation = (source, selector, body) => ({
   type: 'Annotation',
   created,
   creator: user,
+  modified: created,
   body,
 });
 
@@ -63,41 +77,41 @@ const annotation = (source, selector, body) => ({
 // the image around each printed label. The Allmaps mask is 284,942 226,6060 10776,6112 10752,976.
 const out = [
   // 1. A rectangle round "LAKE ERIE", with a transcription: a label.
-  annotation(CANVAS, rectangle({ x: 5120, y: 5600, w: 230, h: 72 }), [geotag('http://www.wikidata.org/entity/Q5492', 'Lake Erie', [-81.2, 42.2]), transcription('LAKE ERIE')]),
+  annotation(CANVAS, rectangle({ x: 5120, y: 5600, w: 230, h: 72 }), [geotag('http://www.wikidata.org/entity/Q5492', 'Lake Erie', 'one of the Great Lakes in North America', [-81.2, 42.2]), transcription('LAKE ERIE')]),
   // 2. A polygon round "LAKE ONTARIO", with the name as a quote. NOT Studio's shape: Annotorious
   //    writes one selector, and no TextQuoteSelector, for an image. Here to test a quote as evidence.
-  annotation(CANVAS, [polygon([[5524, 5352], [5906, 5350], [5908, 5410], [5522, 5414]]), { type: 'TextQuoteSelector', exact: 'LAKE ONTARIO' }], [geotag('http://www.wikidata.org/entity/Q1062', 'Lake Ontario', [-77.9, 43.7])]),
+  annotation(CANVAS, [polygon([[5524, 5352], [5906, 5350], [5908, 5410], [5522, 5414]]), { type: 'TextQuoteSelector', exact: 'LAKE ONTARIO' }], [geotag('http://www.wikidata.org/entity/Q1062', 'Lake Ontario', 'one of the Great Lakes in North America', [-77.9, 43.7])]),
   // 3. A rotated rectangle along "St Georges Bank", written at a slant.
-  annotation(CANVAS, rectangle({ x: 6932, y: 5370, w: 280, h: 40, rot: -0.2 }), [geotag('http://www.wikidata.org/entity/Q5546752', 'Georges Bank', [-67.7, 41.4]), transcription('St Georges Bank')]),
+  annotation(CANVAS, rectangle({ x: 6932, y: 5370, w: 280, h: 40, rot: -0.2 }), [geotag('http://www.wikidata.org/entity/Q5546752', 'Georges Bank', 'oceanic bank in the North Atlantic', [-67.7, 41.4]), transcription('St Georges Bank')]),
   // 4. An ellipse round "LAKE HURON".
-  annotation(CANVAS, ellipse({ cx: 5040, cy: 5170, rx: 190, ry: 32 }), [geotag('http://www.wikidata.org/entity/Q1383', 'Lake Huron', [-82.4, 44.8]), transcription('LAKE HURON')]),
+  annotation(CANVAS, ellipse({ cx: 5040, cy: 5170, rx: 190, ry: 32 }), [geotag('http://www.wikidata.org/entity/Q1383', 'Lake Huron', 'one of the Great Lakes of North America', [-82.4, 44.8]), transcription('LAKE HURON')]),
   // 5. "Montreal", with a comment but no transcription: nothing says it is a label.
-  annotation(CANVAS, rectangle({ x: 6140, y: 5074, w: 140, h: 32 }), [geotag('http://www.wikidata.org/entity/Q340', 'Montreal', [-73.56, 45.5]), comment('<p>Town on the St Lawrence.</p>')]),
+  annotation(CANVAS, rectangle({ x: 6140, y: 5074, w: 140, h: 32 }), [geotag('http://www.wikidata.org/entity/Q340', 'Montreal', 'largest city in Quebec, Canada', [-73.56, 45.5]), comment('<p>Town on the St Lawrence.</p>')]),
   // 6. The town symbol (a small circle) of Worcester, tagged "symbol".
-  annotation(CANVAS, rectangle({ x: 6358, y: 5510, w: 15, h: 15 }), [geotag('http://www.wikidata.org/entity/Q49179', 'Worcester', [-71.8, 42.27]), tag('symbol')]),
+  annotation(CANVAS, rectangle({ x: 6358, y: 5510, w: 15, h: 15 }), [geotag('http://www.wikidata.org/entity/Q49179', 'Worcester', 'county seat city in Worcester County, Massachusetts, United States', [-71.8, 42.27]), tag('symbol')]),
   // 7. The meridian label "120" in the top margin, above the neatline: outside the mask.
-  annotation(CANVAS, rectangle({ x: 3718, y: 892, w: 84, h: 36 }), [geotag('http://www.wikidata.org/entity/Q2696926', '120th meridian west', [-120, 45]), transcription('120')]),
+  annotation(CANVAS, rectangle({ x: 3718, y: 892, w: 84, h: 36 }), [geotag('http://www.wikidata.org/entity/Q2696926', '120th meridian west', 'Earth meridian', [-120, 45]), transcription('120')]),
   // 8. The parallel label "45" in the left border, drawn round loosely, well into the map: its centre
   //    is inside the mask, and it reaches beyond it; but its centre is beyond the control points.
-  annotation(CANVAS, rectangle({ x: 188, y: 2190, w: 192, h: 60 }), [geotag('http://www.wikidata.org/entity/Q1256191', '45th parallel north', [-90, 45]), transcription('45')]),
+  annotation(CANVAS, rectangle({ x: 188, y: 2190, w: 192, h: 60 }), [geotag('http://www.wikidata.org/entity/Q1256191', '45th parallel north', 'circle of latitude often called the halfway point between the equator and the North Pole', [-90, 45]), transcription('45')]),
   // 9. "Boston", on the image service's full-size picture rather than the canvas.
-  annotation(`${SERVICE}/full/max/0/default.jpg`, rectangle({ x: 6278, y: 5480, w: 120, h: 30 }), [geotag('http://www.wikidata.org/entity/Q100', 'Boston', [-71.06, 42.36]), transcription('Boston')]),
+  annotation(`${SERVICE}/full/max/0/default.jpg`, rectangle({ x: 6278, y: 5480, w: 120, h: 30 }), [geotag('http://www.wikidata.org/entity/Q100', 'Boston', 'capital city of the U.S. state of Massachusetts and seat of Suffolk County', [-71.06, 42.36]), transcription('Boston')]),
   // 10. "Boston Harbour", on a cropped picture of the image: its pixels are not the image's.
-  annotation(`${SERVICE}/6200,5300,1000,500/full/0/default.jpg`, rectangle({ x: 290, y: 150, w: 260, h: 40 }), [geotag('http://www.wikidata.org/entity/Q100', 'Boston', [-71.06, 42.36]), transcription('Boston Harbour')]),
+  annotation(`${SERVICE}/6200,5300,1000,500/full/0/default.jpg`, rectangle({ x: 290, y: 150, w: 260, h: 40 }), [geotag('http://www.wikidata.org/entity/Q100', 'Boston', 'capital city of the U.S. state of Massachusetts and seat of Suffolk County', [-71.06, 42.36]), transcription('Boston Harbour')]),
   // 11. "Nantucket I.", drawn with a curved outline (a cubic Bezier), which cannot be transformed.
-  annotation(CANVAS, path('M 6550 5640 C 6600 5630 6680 5630 6725 5642 L 6725 5676 L 6550 5676 Z'), [geotag('http://www.wikidata.org/entity/Q49149', 'Nantucket', [-70.1, 41.28]), transcription('Nantucket I.')]),
+  annotation(CANVAS, path('M 6550 5640 C 6600 5630 6680 5630 6725 5642 L 6725 5676 L 6550 5676 Z'), [geotag('http://www.wikidata.org/entity/Q49149', 'Nantucket', 'island of Massachusetts, United States', [-70.1, 41.28]), transcription('Nantucket I.')]),
   // 12. "GULF OF MEXICO" on the map's second sheet, which has no georeference.
-  annotation(SECOND_CANVAS, rectangle({ x: 3850, y: 2200, w: 1250, h: 750 }), [geotag('http://www.wikidata.org/entity/Q12630', 'Gulf of Mexico', [-90, 25]), transcription('GULF OF MEXICO')]),
+  annotation(SECOND_CANVAS, rectangle({ x: 3850, y: 2200, w: 1250, h: 750 }), [geotag('http://www.wikidata.org/entity/Q12630', 'Gulf of Mexico', 'marginal sea of the Atlantic Ocean', [-90, 25]), transcription('GULF OF MEXICO')]),
   // 13. A region on a Recogito v1 document part, which is not a IIIF image.
-  annotation(V1_PART, rectangle({ x: 1200, y: 800, w: 300, h: 60 }), [geotag('http://www.wikidata.org/entity/Q5492', 'Lake Erie', [-81.2, 42.2]), transcription('Lake Erie')]),
+  annotation(V1_PART, rectangle({ x: 1200, y: 800, w: 300, h: 60 }), [geotag('http://www.wikidata.org/entity/Q5492', 'Lake Erie', 'one of the Great Lakes in North America', [-81.2, 42.2]), transcription('Lake Erie')]),
   // 14. A region on the Library of Congress's Chesapeake and Ohio Canal map, where its two
   //     georeferenced maps meet (inside the second only; inside both on the constructed page).
-  annotation(CHESAPEAKE, rectangle({ x: 2750, y: 5000, w: 100, h: 40 }), [geotag('http://www.wikidata.org/entity/Q1070564', 'Chesapeake and Ohio Canal', [-77.5, 39.3])]),
+  annotation(CHESAPEAKE, rectangle({ x: 2750, y: 5000, w: 100, h: 40 }), [geotag('http://www.wikidata.org/entity/Q1070564', 'Chesapeake and Ohio Canal', 'canal in Washington, D.C. and Maryland, United States', [-77.5, 39.3])]),
   // 15. The meridian label "120" again, drawn round loosely, down into the map: part of it is inside
   //     the mask, but not its centre.
-  annotation(CANVAS, rectangle({ x: 3718, y: 892, w: 84, h: 80 }), [geotag('http://www.wikidata.org/entity/Q2696926', '120th meridian west', [-120, 45]), transcription('120')]),
+  annotation(CANVAS, rectangle({ x: 3718, y: 892, w: 84, h: 80 }), [geotag('http://www.wikidata.org/entity/Q2696926', '120th meridian west', 'Earth meridian', [-120, 45]), transcription('120')]),
   // 16. "Albany", tagged "Label" (the tag convention, which Studio's editor can write).
-  annotation(CANVAS, rectangle({ x: 6096, y: 5482, w: 110, h: 28 }), [geotag('http://www.wikidata.org/entity/Q24861', 'Albany', [-73.76, 42.65]), tag('Label')]),
+  annotation(CANVAS, rectangle({ x: 6096, y: 5482, w: 110, h: 28 }), [geotag('http://www.wikidata.org/entity/Q24861', 'Albany', 'capital city of the U.S. state of New York and seat of Albany County', [-73.76, 42.65]), tag('Label')]),
 ];
 
 writeFileSync(new URL('./recogito-studio-regions-constructed.json', import.meta.url), JSON.stringify(out, null, 2));
