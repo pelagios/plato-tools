@@ -146,6 +146,20 @@ test('a line that bends (20° or 45°) 1.5 to 5 widths from its end: the end pla
   }
 });
 
+test('a blob touching a line\'s end on one side (a letter\'s body; at the end, or 0.7 widths past it): the end is not drawn into it, to 2.5 px (the chord at a bend, END_CHORD, is not taken there)', () => {
+  let cases = 0;
+  for (const width of [3, 6]) for (const at of [0, 0.7]) for (const [[a, b], seed] of SLANTS.slice(0, 4)) for (const side of [1, -1]) {
+    const u = unit(a, b), n = [-u[1] * side, u[0] * side], R = 1.3 * width;
+    const c = [b[0] + u[0] * at * width + n[0] * (R + 0.4 * width), b[1] + u[1] * at * width + n[1] * (R + 0.4 * width)];
+    const res = trace(new Raster(W, H).stroke([a, b], width, INK).disc(c[0], c[1], R, INK), seed);
+    const E = endAt(res, b), where = `width ${width}, blob ${at} widths on, side ${side}, line from (${a.map((v) => v.toFixed(1))})`;
+    assert.ok(d(E, a) > 100 && res.ends.includes('end'), `${where}: traced to the blob's end (ends ${res.ends})`);
+    assert.ok(d(E, b) <= 2.5, `${where}: the end ${d(E, b).toFixed(2)} px from the line's`);
+    cases++;
+  }
+  assert.equal(cases, 32);
+});
+
 // A bar twice as wide is not tested here: the thickness band cuts the T's widest pixels out of the skeleton, and the
 // stem's chain can run on round into one half of the bar with no junction to stop at (a limit, as at 104a9f9).
 test('a line ending on a bar across it as wide (a T): the line stops at the bar, not carried along it by a jump (a jump is for a break in the ink)', () => {
