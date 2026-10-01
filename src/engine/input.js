@@ -142,15 +142,18 @@ export async function textStream(file, { lenient = false } = {}) {
 export async function* lineChunks(file) {
   const reader = (await textStream(file)).getReader();
   let buf = '';
-  for (;;) {
-    const { value, done } = await readChunk(reader);
-    if (done) break;
-    // Only the new text is searched: a long line, searched whole at every chunk, took quadratic time.
-    const i = value.lastIndexOf('\n');
-    if (i < 0) { buf += value; continue; }
-    yield buf + value.slice(0, i + 1);
-    buf = value.slice(i + 1);
-  }
+  // Closed before the end (a reader that stops early), the stream is cancelled, not left open.
+  try {
+    for (;;) {
+      const { value, done } = await readChunk(reader);
+      if (done) break;
+      // Only the new text is searched: a long line, searched whole at every chunk, took quadratic time.
+      const i = value.lastIndexOf('\n');
+      if (i < 0) { buf += value; continue; }
+      yield buf + value.slice(0, i + 1);
+      buf = value.slice(i + 1);
+    }
+  } finally { reader.cancel().catch(() => {}); }
   if (buf) yield buf.endsWith('\n') ? buf : buf + '\n';
 }
 export async function* lines(file) {
@@ -303,7 +306,9 @@ export async function* jsonDocument(file, { arrays = [], keys = [], onlyKeys = f
       try { parser.end(); } catch (e) { throw new DataError(`The JSON document stops before it is complete, so the file may have been cut short (${String(e.message).split('.')[0]}).`); }
     }
     while (queue.length) yield queue.shift();
-  } finally { reader.releaseLock?.(); }
+    // Closed before the end (a reader that stops early), the stream is cancelled: let go of, the lock
+    // alone released would leave it open. Cancelling one read to its end changes nothing.
+  } finally { reader.cancel().catch(() => {}); }
 }
 
 /**
@@ -339,7 +344,7 @@ export async function* annotationItems(file, shape) {
       try { parser.end(); } catch (e) { throw new DataError(`The JSON document stops before it is complete, so the file may have been cut short (${String(e.message).split('.')[0]}).`); }
     }
     while (queue.length) yield queue.shift();
-  } finally { reader.releaseLock?.(); }
+  } finally { reader.cancel().catch(() => {}); }   // as jsonDocument's
 }
 
 // ---- detection ----------------------------------------------------------------------------------

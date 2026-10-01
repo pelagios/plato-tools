@@ -44,6 +44,10 @@ export const isBlank = (cells) => cells.every((c) => c.trim() === '');
 export async function* csvRecords(chunks, { delimiter, keepBlank = false } = {}) {
   const it = chunks[Symbol.asyncIterator]();
   let buf = '', done = false;
+  // Closed before the end (a reader that stops early: the first rows for the columns, a preview),
+  // the chunks are closed too, so that their stream is let go, not left open.
+  try { yield* records(); } finally { if (!done) await it.return?.(); }
+  async function* records() {
   // Enough of the start to guess the delimiter and the line break from, as Papa guesses them from its
   // first rows: ten lines, or 64 KB, or the whole file.
   const lineCount = (t) => { let k = 0, i = -1; while ((i = t.indexOf('\n', i + 1)) !== -1 && k < 11) k++; return k; };
@@ -73,6 +77,7 @@ export async function* csvRecords(chunks, { delimiter, keepBlank = false } = {})
     buf = buf.slice(cursor);
     const r = await it.next();
     if (r.done) done = true; else buf += r.value;
+  }
   }
 }
 
