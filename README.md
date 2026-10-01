@@ -21,6 +21,10 @@ is in the guide.
 when converting, and what the version check reports. The rest of the [guide](https://pelagios.org/place-attestation-ontology/guide/) explains PLATO
 itself. How the tools work, and how they are tested, is in [DEVELOPERS.md](DEVELOPERS.md).
 
+No data to hand? [Download example files](https://pelagios.org/plato-tools/try/plato-tools-try-files.zip)
+(zip, 344 KB) to try each tool with, and a README in it saying what each should show. The zip is
+also in this repository, in [`public/try/`](public/try/).
+
 ## The toolbox
 
 <table>

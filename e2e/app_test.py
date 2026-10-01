@@ -1540,6 +1540,17 @@ def front_page_checks(browser, url):
         finally: ctx.close()
     attempt('front page: Peripleo\'s card says it is planned, is not a link and offers no Choose, and choosing it leaves step 2 as it was', planned)
 
+    def example_files():
+        # Step 1 offers example files to try, and the zip is served from the site.
+        ctx, page = fresh()
+        try:
+            href = page.evaluate("() => { const a = document.querySelector('#drop a#try-files'); return a && a.offsetWidth ? a.getAttribute('href') : null; }")
+            got = page.evaluate("""async (h) => { const r = await fetch(h); const b = new Uint8Array(await r.arrayBuffer());
+              return { status: r.status, magic: String.fromCharCode(b[0], b[1]), size: b.length }; }""", href) if href else None
+            return (href == './try/plato-tools-try-files.zip' and got and got['status'] == 200 and got['magic'] == 'PK' and got['size'] > 100_000), {'link': href, 'served': got}
+        finally: ctx.close()
+    attempt('front page: step 1 links to the example files, and the zip is served (200, a zip)', example_files)
+
     # The acknowledgement of ISHI ends the footer of both pages: a rebase once dropped it unseen.
     ISHI = 'Development has been supported by the Institute for Spatial History Innovation (ISHI) at the University of Pittsburgh.'
     def acknowledged():
