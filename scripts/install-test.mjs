@@ -50,7 +50,17 @@ try {
   // the tools, else a PLATO clone beside this one. Not found is a failure, not a skip.
   const plato = [process.env.PLATO_REPO, join(root, 'plato-repo'), join(root, '..', 'place-attestation-ontology')]
     .filter(Boolean).map((d) => resolve(root, d, 'schemas/tables/examples/customs')).find((d) => existsSync(d));
-  step("PLATO's customs tables, to publish", () => { if (!plato) throw new Error('no PLATO checkout: set PLATO_REPO'); cpSync(plato, join(app, 'customs'), { recursive: true }); return plato; });
+  // A PLATO checkout ahead of or behind the pin fails this for reasons that are not the tools' (as
+  // test/paths.js and e2e/app_test.py also refuse); PLATO_REPO_ANY=1 runs anyway.
+  step("PLATO's customs tables, at the pinned PLATO", () => {
+    if (!plato) throw new Error('no PLATO checkout: set PLATO_REPO');
+    const repo = resolve(plato, '../../../..'), pin = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).plato.commit;
+    if (!process.env.PLATO_REPO_ANY && existsSync(join(repo, '.git'))) {
+      try { execFileSync('git', ['-C', repo, 'diff', '--quiet', pin, '--', 'schemas'], { stdio: 'ignore' }); }
+      catch { throw new Error(`${repo} is not at the pinned PLATO ${pin.slice(0, 7)} (or lacks it): set PLATO_REPO to a checkout of it, or PLATO_REPO_ANY=1`); }
+    }
+    cpSync(plato, join(app, 'customs'), { recursive: true }); return plato;
+  });
   step('plato-tools publish report writes the deposit files', () => {
     const r = JSON.parse(sh(bin, ['publish', 'report', '--json', '--out', 'out', 'customs'], app));
     const deposit = join(app, 'out', 'customs-deposit');
