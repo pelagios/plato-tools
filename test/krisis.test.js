@@ -12,7 +12,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { env, res, file, textFile, go, outText } from './engine.js';
 import { detect } from '../src/engine/input.js';
-import { normalise, similarity, similarityNormalised, nameScore, distinctive, expandedScore, oneEdit, jaroWinkler, trigrams } from '../src/engine/krisis/names.js';
+import { normalise, similarity, similarityNormalised, nameScore, distinctive, expandedScore, oneEdit, jaroWinkler, trigrams, qualifiers, qualifierScore, QUALIFIER_CAP } from '../src/engine/krisis/names.js';
 import { NameIndex, BLOCKING } from '../src/engine/krisis/blocking.js';
 import { syntheticNames, random } from './krisis-synthetic.js';
 import { DataError } from '../src/engine/input.js';
@@ -193,7 +193,7 @@ test('matching suggests the near namesakes, the accented and the misspelt, and n
   assert.equal(work.subjects.title, 'Dataset A');
   assert.equal(work.subjects.uri, X + 'a');
   assert.match(work.subjects.files[0].sha256, /^[0-9a-f]{64}$/);
-  assert.deepEqual({ ...work.match_parameters, scoring: undefined, blocking: undefined }, { ...DEFAULTS, scoring: undefined, blocking: undefined });
+  assert.deepEqual({ ...work.match_parameters, scoring: undefined, blocking: undefined, qualifiers: undefined }, { ...DEFAULTS, scoring: undefined, blocking: undefined, qualifiers: undefined });
   assert.match(work.match_parameters.scoring, /Jaro-Winkler/);
   // In words.
   const s = summary(report, 'match');
@@ -799,8 +799,8 @@ test('matching: Saint Maurice is not suggested for Saint Martin, St Martin is; t
     place('b', 'maurice', 'Saint Maurice', [at(2.01, 48.01)]), place('b', 'st-martin', 'St Martin', [at(2.02, 48.02)])] };
   const { work, report } = await run({}, s, o);
   assert.deepEqual(pairs(work), [`${A('martin')} ${B('st-martin')}`]);
-  assert.equal(work.algorithm_version, 'krisis-names 5');
-  assert.equal(ALGORITHM, 'krisis-names 5');
+  assert.equal(work.algorithm_version, 'krisis-names 6');
+  assert.equal(ALGORITHM, 'krisis-names 6');
   assert.match(work.match_parameters.scoring, /do not share/);
   assert.deepEqual({ ...work.match_parameters.blocking, rule: undefined }, { ...BLOCKING, rule: undefined });
   assert.match(work.match_parameters.blocking.rule, /common when more than 1%/);
@@ -847,6 +847,122 @@ test('three-letter words: one letter is the limit, and a common shared word take
   assert.ok(similarity('Kafr Saba', 'Kafr Sabe', idx.weight) >= 0.85, 'control: a word of four letters with one changed still is');
   assert.ok(!idx.best(['Kafr Cal'], 0.85).has(200) && idx.best(['Kafr Saba'], 0.85).has(201), 'and so in matching');
   assert.match(SCORING, /for words of three letters one letter is already the limit/);
+});
+
+// ---- scoring: names that differ by a qualifier (krisis-names 6) -------------------------------------------------
+/** Weights as a large gazetteer gives them: the qualifiers, and Farm, in many names; the cores in a few. */
+const gazetteerIndex = () => {
+  const r = random(5), filler = [];
+  const syl = () => ['b', 'd', 'g', 'k', 'l', 'm', 'n', 'p', 'r', 't', 'v', 'z'][Math.floor(r() * 12)] + ['a', 'e', 'i', 'o', 'u'][Math.floor(r() * 5)];
+  for (let i = 0; i < 3000; i++) {
+    const w = syl() + syl() + syl() + 'q';
+    filler.push([['Great', 'Little', 'East', 'West', 'Upper', 'Lower', 'Chipping', 'Market'][i % 8] + ' ' + w], [w + ' Farm'], [w + ' Farm House']);
+  }
+  return new NameIndex([...filler, ['Great Marlow'], ['Little Marlow'], ['Ongar'], ['Harborough'], ['West Ham'], ['Lower Slaughter'], ['Farm'],
+    ['Abingdon-on-Thames'], ['Marlow Bottom'], ['Danebury Hill'], ['Bristoll'], ['Saint Martin'], ['Kafr Cel']],
+  [['Marlow'], ['Chipping Ongar'], ['Market Harborough'], ['East Ham'], ['Upper Slaughter'], ['Little Farm'], ['Abingdon']]);
+};
+/** The number in gazetteerIndex() of the k-th named place, after the filler. */
+const nth = (k) => 9000 + k;
+
+test('qualifiers: Great Marlow and Marlow, Chipping Ongar and Ongar, Market Harborough and Harborough are suggested, at most at the cap', () => {
+  const idx = gazetteerIndex();
+  assert.ok(idx.weight('great') < idx.weight('marlow') / 2 && idx.weight('chipping') < idx.weight('ongar') / 2, 'control: the qualifiers are common, the cores rare');
+  const low = [['Great Marlow', 'Marlow'], ['Chipping Ongar', 'Ongar'], ['Marlow', 'Great Marlow'], ["King's Lynn", 'Lynn']];
+  for (const [a, b] of low) assert.ok(nameScore(normalise(a), normalise(b)) < 0.85, `control: ${a} and ${b} are under the threshold on their letters (${nameScore(normalise(a), normalise(b))})`);
+  for (const [a, b] of [...low, ['Hen Domen', 'Domen'], ['Aston', 'Aston Magna'], ['Llanfair Isaf', 'Llanfair'], ['Trewint Vean', 'Trewint'], ['Market Harborough', 'Harborough'], ['Wells-next-the-Sea', 'Wells'], ['Chapel-en-le-Frith', 'Chapel'], ['Stratford', 'Stratford upon Avon'], ['Great Marlow', 'Great Marlow on Thames']]) {
+    for (const weight of [undefined, idx.weight]) {
+      const s = similarity(a, b, weight);
+      assert.ok(s >= 0.85 && s <= QUALIFIER_CAP, `${a} and ${b}: ${s}`);
+    }
+  }
+  // The cap: a qualifier is a real difference, so such a pair never scores as a respelling does,
+  // even where its letters alone scored more (Abingdon-on-Thames 0.889, Market Harborough 0.918 with its words sorted).
+  for (const [a, b] of [['Abingdon', 'Abingdon-on-Thames'], ['Market Harborough', 'Harborough']]) {
+    assert.ok(nameScore(normalise(a), normalise(b)) > QUALIFIER_CAP, `control: ${a} and ${b} score over the cap on their letters`);
+    assert.equal(similarity(a, b), QUALIFIER_CAP);
+  }
+  assert.equal(QUALIFIER_CAP, 0.88);
+  // The cores must be the same, but for the order of their words or a short form: a core respelt is not raised (found
+  // in a trial on real data: Burnley and Burley in Wharfedale, Bradfield and Great Bardfield, at 0.88 times 0.966).
+  for (const [a, b] of [['Great Marlowe', 'Marlow'], ['Burnley', 'Burley in Wharfedale'], ['Bradfield', 'Great Bardfield']]) {
+    assert.ok(similarity(a, b) < 0.85, `${a} and ${b}: ${similarity(a, b)}`);
+    assert.ok(similarity(a.replace('Great ', ''), b.replace(' in Wharfedale', '').replace('Great ', '')) > 0.95, `control: ${a} and ${b}: the cores alike`);
+  }
+  assert.equal(similarity('Great Mt Pleasant', 'Mount Pleasant'), QUALIFIER_CAP, 'a core the same but for a short form');
+  assert.ok(similarity('Great Marlow', 'Marlow Bottom') < 0.85, `Great Marlow and Marlow Bottom: ${similarity('Great Marlow', 'Marlow Bottom')}`);
+  // And in matching, through blocking: each finds the other, whichever is the subject.
+  assert.ok(idx.best(['Marlow'], 0.85).has(nth(0)), 'Marlow finds Great Marlow');
+  assert.ok(idx.best(['Chipping Ongar'], 0.85).has(nth(2)), 'Chipping Ongar finds Ongar');
+  assert.ok(idx.best(['Market Harborough'], 0.85).has(nth(3)), 'Market Harborough finds Harborough');
+  assert.ok(idx.best(['Abingdon'], 0.85).has(nth(7)), 'Abingdon finds Abingdon-on-Thames');
+  assert.equal(idx.best(['Marlow'], 0.85).get(nth(0)), similarity('Marlow', 'Great Marlow', idx.weight), 'blocking scores as names.js does');
+  assert.deepEqual(qualifiers(normalise("King's Lynn")), { core: 'lynn', units: ['kings'], words: ['king s'] });
+  assert.deepEqual(qualifiers(normalise('Stratford-upon-Avon')), { core: 'stratford', units: ['on avon'], words: ['upon'] });
+  assert.deepEqual(qualifiers('over').units, [], 'a name that is only a qualifier has none');
+});
+test('qualifiers: Great Marlow and Little Marlow, East Ham and West Ham, Upper and Lower Slaughter are not suggested, though each is for its core', () => {
+  const idx = gazetteerIndex();
+  for (const [a, b, core] of [['Great Marlow', 'Little Marlow', 'Marlow'], ['East Ham', 'West Ham', 'Ham'], ['Upper Slaughter', 'Lower Slaughter', 'Slaughter'],
+    ['Great Marlow on Thames', 'Little Marlow', 'Marlow'], ['Newton on the Hill', 'Newton by the River', 'Newton']]) {
+    for (const weight of [undefined, idx.weight]) {
+      // The presence beside each absence: each name is suggested for its core.
+      assert.ok(similarity(a, core, weight) >= 0.85 && similarity(b, core, weight) >= 0.85, `control: ${a} and ${b} are each suggested for ${core}`);
+      assert.ok(similarity(a, b, weight) < 0.85, `${a} and ${b}: ${similarity(a, b, weight)}`);
+    }
+    assert.equal(qualifierScore(normalise(a), normalise(b)), null, `${a} and ${b}: each has a qualifier the other has not`);
+    assert.equal(qualifierScore(normalise(a), normalise(core)).score, QUALIFIER_CAP, `control: ${a} and ${core} differ by qualifiers`);
+  }
+  assert.ok(nameScore('east ham', 'west ham') >= 0.85, 'control: East Ham and West Ham score over the threshold on their letters alone');
+  // In matching: Marlow finds both, Great Marlow not Little Marlow; East Ham not West Ham.
+  const marlow = idx.best(['Marlow'], 0.85);
+  assert.ok(marlow.has(nth(0)) && marlow.has(nth(1)), 'control: Marlow finds Great and Little Marlow');
+  assert.ok(!idx.best(['Great Marlow'], 0.85).has(nth(1)), 'Great Marlow does not find Little Marlow');
+  assert.ok(!idx.best(['East Ham'], 0.85).has(nth(4)) && !idx.best(['Upper Slaughter'], 0.85).has(nth(5)));
+  // A common core is not a place: where Farm is in more names than Little, Little Farm is not Farm.
+  assert.ok(idx.weight('farm') < idx.weight('little'), 'control: Farm is commoner than Little');
+  assert.ok(similarity('Little Farm', 'Farm') >= 0.85, 'control: with every word weighed alike, Little Farm and Farm are suggested');
+  assert.ok(similarity('Little Farm', 'Farm', idx.weight) < 0.5, `with Farm common, they are not: ${similarity('Little Farm', 'Farm', idx.weight)}`);
+  assert.ok(nameScore('little farm', 'farm') >= 0.85, 'control: on their letters alone (their words sorted), they were');
+  assert.ok(!idx.best(['Little Farm'], 0.85).has(nth(6)) && idx.best(['Marlow'], 0.85).has(nth(0)), 'and so in matching');
+});
+test('qualifiers in blocking: a name with qualifiers is looked up by its core too, where its own keys all fall in the qualifier', () => {
+  // The trigrams of "ongar" in many names (common), those of "chipping" in a few (rare): Chipping
+  // Ongar's keys are all in "chipping", and Ongar has none of them.
+  const L = 'bdfhjklmnrstvwz', others = [];
+  for (let i = 0; i < 120; i++) others.push([`${L[i % 15]}${L[(i * 7) % 15]}${L[(i * 4) % 15]} Ongar`]);
+  for (let i = 0; i < 10; i++) others.push([`Chipping ${L[i]}e${L[(i * 7) % 15]}o`]);
+  for (let i = 0; i < 4000; i++) others.push([`${L[i % 15]}a${L[(i * 5) % 15]}e${L[(i * 11) % 15]}u${L[(i * 13) % 15]}`]);
+  const idx = new NameIndex([...others, ['Ongar']]), ongar = others.length;
+  assert.ok(!idx.candidates('chipping ongar', 0.85).has(ongar), 'control: by its own keys, Chipping Ongar is not compared with Ongar');
+  assert.ok(idx.best(['Chipping Ongar'], 0.85).has(ongar), 'by its core, it is');
+  assert.ok(idx.candidates('ongar', 0.85).size > 100, 'control: Ongar, the other way round, is compared with the names with it in, by its own keys');
+});
+test('qualifiers leave the rest as it was: St and Saint, Dry Hill and Danebury Hill, Kafr Cal and Kafr Cel, Bristol and Bristoll', () => {
+  const idx = gazetteerIndex();
+  // The scores of krisis-names 5, to the last digit.
+  assert.equal(similarity('St Martin', 'Saint Martin'), 1);
+  assert.equal(similarity('St Zan', 'Saint Zan'), 1);
+  assert.equal(similarity('Stratford upon Avon', 'Stratford-on-Avon'), 1);
+  assert.equal(similarity('Upper Newton', 'Newton Upper'), 1);
+  assert.equal(similarity('Dry Hill', 'Danebury Hill').toFixed(3), '0.333');
+  assert.equal(similarity('Kafr Cal', 'Kafr Cel').toFixed(3), '0.867', 'with every word weighed alike, as Match review says');
+  assert.equal(similarity('Bristol', 'Bristoll').toFixed(3), '0.975');
+  assert.ok(idx.best(['St Martin'], 0.85).has(nth(11)) && idx.best(['Bristol'], 0.85).has(nth(10)), 'St Martin and Bristol find theirs');
+  assert.ok(!idx.best(['Dry Hill'], 0.85).has(nth(9)), 'Dry Hill does not find Danebury Hill');
+  assert.match(SCORING, /never more than 0\.88/);
+});
+test('matching: Great Marlow is suggested for Marlow, and Little Marlow is not for Great Marlow; the work file records the qualifiers', async () => {
+  const s = { profile: 'place-centric', gazetteer: { '@id': X + 'a', title: 'A' }, spatialEntities: [
+    place('a', 'marlow', 'Marlow', [at(-0.77, 51.57)]), place('a', 'great-marlow', 'Great Marlow', [at(-0.775, 51.575)])] };
+  const o = { profile: 'place-centric', gazetteer: { '@id': X + 'b', title: 'B' }, spatialEntities: [
+    place('b', 'great-marlow', 'Great Marlow', [at(-0.771, 51.571)]), place('b', 'little-marlow', 'Little Marlow', [at(-0.73, 51.58)])] };
+  const { work } = await run({}, s, o);
+  assert.deepEqual(pairs(work), [`${A('great-marlow')} ${B('great-marlow')}`, `${A('marlow')} ${B('great-marlow')}`, `${A('marlow')} ${B('little-marlow')}`]);
+  assert.equal(work.candidates.find((c) => c.candidate_source === A('marlow') && c.candidate_candidate === B('great-marlow')).similarity_score, QUALIFIER_CAP);
+  assert.equal(work.match_parameters.qualifiers.cap, QUALIFIER_CAP);
+  assert.ok(work.match_parameters.qualifiers.front.includes('chipping') && work.match_parameters.qualifiers.joining.includes('next'));
+  assert.match(work.match_parameters.scoring, /qualifier/);
 });
 
 // ---- blocking --------------------------------------------------------------------------------------------------

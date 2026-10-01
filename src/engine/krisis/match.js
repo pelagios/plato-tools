@@ -17,7 +17,7 @@
 import { run } from '../pipeline.js';
 import { Report } from '../report.js';
 import { collectWithdrawn, resolveWithdrawn } from '../../formats/shared.js';
-import { DISTINCT_GATE } from './names.js';
+import { DISTINCT_GATE, QUALIFIER_CAP, QUALIFIER_RARE, QUALIFIERS, PHRASE_WORDS } from './names.js';
 import { NameIndex, BLOCKING, BLOCKING_RULE } from './blocking.js';
 import { WORK_VERSION, MATCH_DEFAULTS, fileRecords, serialiseWork, checkReviewer, checkMatchOptions, NOT_READ_KINDS, isColumns } from './work.js';
 import { KRISIS_TEXT } from '../words.js';
@@ -25,7 +25,7 @@ import { DataError } from '../input.js';
 import { createIdentityCollector } from './identities.js';
 import { CONTAINED_IN, containerKey, withinOf, withinLevels } from '../hermes/within.js';
 
-export const ALGORITHM = 'krisis-names 5';
+export const ALGORITHM = 'krisis-names 6';
 export const DEFAULTS = MATCH_DEFAULTS;
 export { BLOCKING };
 export const SCORING = 'Each name of a place (its label and every toponym and romanised form) is normalised: '
@@ -39,6 +39,11 @@ export const SCORING = 'Each name of a place (its label and every toponym and ro
   + 'for words of three letters one letter is already the limit, and a common shared word takes the pair under it (Kafr Cal and Kafr Cel score 0.87 with every word weighed alike, and under 0.85 where Kafr is common). '
   + 'The one exception that raises a score: two names whose words are all shared, some only as a known short form (as above: St and Saint, Mt and Mount), '
   + 'are scored again with each short form written out in full, and the higher score is kept. '
+  + 'Names that differ only by qualifiers (Great Marlow and Marlow, Chipping Ongar and Ongar, Abingdon and Abingdon-on-Thames): a qualifier is a word on a list in front of a name (Great, Little, North, Upper, Market, Chipping, King\'s, St and the like) or behind it (Welsh, Cornish and Latin: Fawr, Isaf, Vean, Magna and the like), '
+  + `or a phrase at its end beginning with a joining word (on, upon, under, next, by, le, en, in, super, juxta, and at most ${PHRASE_WORDS} words after it); the rest is the name's core, which keeps at least one word not on the list. `
+  + `When one name has every qualifier the other has and more, and their cores are the same (scoring 1 as above: the same words, but for their order or a short form), the pair scores ${QUALIFIER_CAP}; if the cores differ, the score as above; and never more than ${QUALIFIER_CAP}: a qualifier is a real difference. `
+  + 'When each has a qualifier the other has not (Great Marlow and Little Marlow, East Ham and West Ham), this does not apply. Nor does it when the core is common: its words must weigh at least as much as each qualifier word added (a joining phrase by its joining word), '
+  + `unless they are in no more than ${QUALIFIER_RARE} names. `
   + 'Two places score the best of any pair of their names, over the pairs blocking allows (see blocking). '
   + "A place's point is the first Point geometry of its attestations, else the centre of the first bounding box, else none, passing over attestations that are negated or withdrawn (retracted or superseded); "
   + 'a pair whose points are further apart than maxDistanceKm (great-circle distance) is dropped, and a pair without two points is kept, with no distance. '
@@ -46,6 +51,8 @@ export const SCORING = 'Each name of a place (its label and every toponym and ro
   + 'Each subject place keeps its topK best. When it has a point, the places within maxDistanceKm of it (by score, then distance) and those with no point (by score) are chosen taking turns, '
   + 'starting with the group whose best scores higher (the places with a point on a tie), and when one group runs out the other fills the rest; '
   + 'when it has none, by score.';
+/** The qualifiers and their bounds, as the work file records them. */
+export const QUALIFIER_PARAMETERS = { cap: QUALIFIER_CAP, rare: QUALIFIER_RARE, front: QUALIFIERS.front, back: QUALIFIERS.back, joining: QUALIFIERS.joining, phraseWords: PHRASE_WORDS, same: QUALIFIERS.same };
 
 // A problem of a dataset's own that stops part of it being read: the matching is then of less than the whole.
 const NOT_READ = new Set(NOT_READ_KINDS);
@@ -409,7 +416,7 @@ export async function match({ subjects, others, options = {} }, env) {
 
   const work = {
     krisis: WORK_VERSION, generated_at, algorithm_version: ALGORITHM,
-    match_parameters: { ...params, ...(options.base ? { base: options.base } : {}), ...(options.columns ? { columns: { ...options.columns } } : {}), blocking: { ...BLOCKING, rule: BLOCKING_RULE }, scoring: SCORING },
+    match_parameters: { ...params, ...(options.base ? { base: options.base } : {}), ...(options.columns ? { columns: { ...options.columns } } : {}), blocking: { ...BLOCKING, rule: BLOCKING_RULE }, qualifiers: QUALIFIER_PARAMETERS, scoring: SCORING },
     subjects: sideRecord(S), others: sideRecord(O),
     places, regions: {}, candidates, reviewer: options.reviewer || null, cursor: 0, lookups: [],
   };

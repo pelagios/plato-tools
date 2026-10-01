@@ -24,6 +24,27 @@
 // Mount Pleasant, St Zan and Saint Zan): the letters of St and Saint differ and would count against a pair
 // that differs in nothing else, so such names are scored again with each short form written out in
 // full, and the higher score is kept (expandedScore()).
+//
+// A name may differ from another only by QUALIFIERS (qualifierScore(), new in krisis-names 6): Great
+// Marlow and Marlow, Chipping Ongar and Ongar, Abingdon and Abingdon-on-Thames. Letters score these
+// low when the qualifier is in front (0.333 and 0.514), and the distinctive words cannot help, as
+// all the words of one are shared. A qualifier is a word on a fixed list (QUALIFIERS: Great, Little,
+// North, Upper, Nether, Market, Chipping, King's and the like in front; Welsh, Cornish and Latin ones
+// such as Fawr, Isaf, Vean and Magna behind; St and Saint), or a phrase at the end beginning with a
+// joining word (on, upon, under, next, by, le, en, in, super, juxta: "on Thames", "next the Sea",
+// "le Street"). When one name is the other's core with qualifiers added, and the other's qualifiers
+// are all among them (Marlow, or Great Marlow against Great Marlow on Thames), the pair scores
+// QUALIFIER_CAP (0.88), and never more: a qualifier is a real difference (Great Marlow and Little
+// Marlow are two places), so such a pair is suggested, but below a pair the same but for its
+// spelling. The cores must be the same (score 1: the same words, but for their order or a short
+// form): in a trial on real data, a core respelt raised only wrong pairs (Burnley and Burley in
+// Wharfedale, Bradfield and Great Bardfield, near 0.85 as 0.88 times their cores' 0.966). A pair whose cores differ keeps the score as above, at most the cap. When each name has a qualifier the other has not (Great and Little Marlow, East
+// and West Ham), this does not apply, and they score as above, low. And a common core is not
+// evidence of a place: when a qualifier word added (a joining phrase counted by its joining word)
+// weighs more than the core's words, the pair scores the core's share of the weight of the two,
+// as distinctive() scores the words shared, if that is lower: in a gazetteer where Farm is in more
+// names than Little, Little Farm is not Farm (0.873 on letters, under a half so). A core whose words
+// are in no more than QUALIFIER_RARE (50) names is never common: in a small dataset Great is rare too.
 // Trigrams of the normalised name are what matching blocks on (blocking.js).
 
 const SPELT = { ß: 'ss', æ: 'ae', œ: 'oe', ø: 'o', ł: 'l', đ: 'd', ð: 'd', þ: 'th', ı: 'i', ŋ: 'ng', ħ: 'h' };
@@ -89,12 +110,109 @@ export function nameScore(x, y, xs = sortWords(x), ys = sortWords(y)) {
  * frequency in the two datasets); by default every word counts alike.
  */
 export function similarityNormalised(x, y, weight) {
+  const plain = plainScore(x, y, weight);
+  if (plain === 1) return plain;
+  const q = qualifierScore(x, y, weight);
+  if (q === null) return plain;
+  return q.common ? Math.min(plain, q.score) : Math.min(QUALIFIER_CAP, Math.max(plain, q.score));
+}
+/** similarityNormalised() but for qualifiers: the name score, raised by short forms or lowered by the distinctive words. */
+function plainScore(x, y, weight) {
   const base = nameScore(x, y);
   if (base === 0 || base === 1) return base;
   const e = expandedScore(x, y);
   if (e !== null) return Math.max(base, e);
   const d = distinctive(x, y, weight);
   return d === null ? base : Math.min(base, d);
+}
+
+/** What a pair of names that differ only by a qualifier scores, and the most a pair that differs by one can. */
+export const QUALIFIER_CAP = 0.88;
+/**
+ * A core whose words are in no more names than this is never too common to stand for a place (the
+ * matcher gives its weight as `weight.rare`): in a small dataset, a qualifier is rare too, and Great,
+ * in one name, would outweigh Marlow, in two.
+ */
+export const QUALIFIER_RARE = 50;
+/**
+ * The qualifiers, normalised (so King's is "king s"): words in front of a name, words behind it, and
+ * the joining words that begin a phrase at its end ("on Thames"). Each counts as the same qualifier
+ * as its other spellings (`same`: Kings and King's, St and Saint, upon and on).
+ */
+export const QUALIFIERS = {
+  front: ['great', 'little', 'long', 'old', 'new', 'north', 'south', 'east', 'west', 'upper', 'lower', 'nether', 'over', 'middle', 'mid',
+    'high', 'higher', 'low', 'much', 'market', 'chipping', 'steeple', 'king s', 'kings', 'bishop s', 'bishops', 'abbot s', 'abbots',
+    'monk s', 'monks', 'saint', 'st', 'sainte', 'ste', 'hen'],
+  back: ['magna', 'parva', 'major', 'minor', 'superior', 'inferior', 'regis', 'episcopi', 'fawr', 'mawr', 'fach', 'bach', 'uchaf',
+    'isaf', 'ganol', 'newydd', 'vean', 'veor', 'vear', 'wartha', 'woollas'],
+  joining: ['on', 'upon', 'under', 'next', 'by', 'le', 'en', 'in', 'super', 'juxta'],
+  same: { 'king s': 'kings', 'bishop s': 'bishops', 'abbot s': 'abbots', 'monk s': 'monks', st: 'saint', ste: 'sainte', upon: 'on' },
+};
+const FRONT = QUALIFIERS.front.map((q) => q.split(' ')).sort((a, b) => b.length - a.length);
+const BACK = new Set(QUALIFIERS.back), JOINING = new Set(QUALIFIERS.joining);
+const QUALIFIER_WORDS = new Set([...QUALIFIERS.front.flatMap((q) => q.split(' ')), ...QUALIFIERS.back]);
+/** The most words a joining phrase at the end of a name may have after its joining word ("next the sea"). */
+export const PHRASE_WORDS = 3;
+const canonical = (ws) => { const s = ws.join(' '); return QUALIFIERS.same[s] ?? s; };
+const NONE = Object.freeze({ units: Object.freeze([]) });
+
+/**
+ * A normalised name's qualifiers and its core: { core (words), units (each qualifier, as its usual
+ * spelling: "kings", "on thames"), words (for each unit, the words that weigh: a joining phrase by
+ * its joining word) }, or { units: [] } when it has none. The core keeps at least one word that is
+ * not a qualifier, so a name with none ("North", "Over") has no qualifiers.
+ */
+export function qualifiers(x) {
+  const w = x.split(' ');
+  if (w.length < 2) return NONE;
+  const units = [], words = [];
+  let lo = 0, hi = w.length;
+  const coreLeft = (a, b) => { for (let k = a; k < b; k++) if (!QUALIFIER_WORDS.has(w[k])) return true; return false; };
+  // In front: the longest qualifier that leaves a core, again and again.
+  for (let more = true; more;) {
+    more = false;
+    for (const q of FRONT) {
+      if (lo + q.length < hi && q.every((v, k) => w[lo + k] === v) && coreLeft(lo + q.length, hi)) {
+        units.push(canonical(q)); words.push(q.join(' ')); lo += q.length; more = true; break;
+      }
+    }
+  }
+  // At the end: a joining phrase (its first joining word, with at most PHRASE_WORDS after it), then words behind.
+  for (let k = Math.max(lo + 1, hi - 1 - PHRASE_WORDS); k < hi - 1; k++) {
+    if (JOINING.has(w[k]) && coreLeft(lo, k)) {
+      units.push(canonical([w[k]]) + ' ' + w.slice(k + 1, hi).join(' ')); words.push(w[k]); hi = k; break;
+    }
+  }
+  while (hi - lo > 1 && BACK.has(w[hi - 1]) && coreLeft(lo, hi - 1)) { units.push(w[hi - 1]); words.push(w[hi - 1]); hi--; }
+  return units.length ? { core: w.slice(lo, hi).join(' '), units, words } : NONE;
+}
+
+/**
+ * How two normalised names that differ by qualifiers score (see the top of this file): { score:
+ * QUALIFIER_CAP when their cores are the same, else 0, common: false }, the higher of which and the
+ * score without it is kept, at most the cap; or, when a qualifier word added weighs more than the
+ * core, { score: the core's share of the weight, common: true }, the lower of which is kept; or null
+ * when it does not apply (neither has a qualifier the other has not, or each has one the other has
+ * not). `weight` as for similarityNormalised(); `qx`, `qy`, the names' qualifiers(), if known.
+ */
+export function qualifierScore(x, y, weight = () => 1, qx = qualifiers(x), qy = qualifiers(y)) {
+  if (!qx.units.length && !qy.units.length) return null;
+  const xAdds = qx.units.filter((u) => !qy.units.includes(u)), yAdds = qy.units.filter((u) => !qx.units.includes(u));
+  if (xAdds.length && yAdds.length) return null; // Great and Little: each has its own
+  if (!xAdds.length && !yAdds.length) return null; // the same qualifiers: scored as any other names
+  const [more, fewer] = xAdds.length ? [qx, qy] : [qy, qx];
+  const fewerCore = fewer.units.length ? fewer.core : (more === qx ? y : x);
+  // The core of the name with fewer qualifiers must weigh at least as much as each qualifier word
+  // added, unless it is rare in itself (weight.rare: the weight of a word in QUALIFIER_RARE names).
+  let coreWeight = 0, addedWeight = 0, common = false;
+  for (const v of fewerCore.split(' ')) coreWeight += weight(v);
+  for (let i = 0; i < more.units.length; i++) {
+    if (fewer.units.includes(more.units[i])) continue;
+    for (const v of more.words[i].split(' ')) { const wv = weight(v); addedWeight += wv; if (wv > coreWeight) common = true; }
+  }
+  if (common && coreWeight >= (weight.rare ?? Infinity)) common = false;
+  if (common) return { score: coreWeight / (coreWeight + addedWeight), common };
+  return { score: more.core === fewerCore || plainScore(more.core, fewerCore, weight) === 1 ? QUALIFIER_CAP : 0, common };
 }
 
 /**

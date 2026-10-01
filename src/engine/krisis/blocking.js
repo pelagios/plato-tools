@@ -30,9 +30,20 @@
 // name made only of common trigrams reads its four rarest lists, and one more when they fall
 // together), where before, every name that shared a first letter or a common word was read.
 //
+// Names that may differ only by qualifiers (names.js, qualifierScore(): Marlow and Great Marlow).
+// A subject name finds an other name that is it with qualifiers added through its keys as they are:
+// Great Marlow has every trigram of "marlow" but its first, padded one ("  m", common in any large
+// dataset, so a key only when the name has no more than four trigrams, and then one of four). The
+// other way round it may not: Chipping Ongar may be looked up only by trigrams of "chipping" and
+// "g o", when those of "ongar" are common, and miss Ongar. So a subject name with qualifiers is
+// looked up by its core too, which finds a name the same as the core (always compared) and those
+// alike to it. canReach() bounds the name score, not the score of the cores, so names of which either
+// has qualifiers are compared when their cores' lengths can reach the threshold over QUALIFIER_CAP
+// (the cores must score that much), if the threshold is at most QUALIFIER_CAP.
+//
 // Scoring is names.js's, and each word is weighted by its inverse document frequency in the names of
 // both datasets, ln(1 + N / df), so that a common word counts for little.
-import { normalise, nameScore, distinctive, expandedScore, sortWords, trigrams } from './names.js';
+import { normalise, nameScore, distinctive, expandedScore, sortWords, trigrams, qualifiers, qualifierScore, QUALIFIER_CAP, QUALIFIER_RARE } from './names.js';
 
 export const BLOCKING = { share: 0.4, commonShare: 0.01, commonFloor: 50, keys: 4, spread: 4, far: 10 };
 export const BLOCKING_RULE = 'The names of the other dataset are indexed by their trigrams (normalised, padded with two spaces before and one after). '
@@ -40,7 +51,8 @@ export const BLOCKING_RULE = 'The names of the other dataset are indexed by thei
   + `A name is looked up by its trigrams that are not common (or, with fewer than ${BLOCKING.keys} of those, by its ${BLOCKING.keys} rarest), `
   + `and, when those keys all begin within ${BLOCKING.spread} places of each other, by the rarest trigram beginning further off too, unless more than ${BLOCKING.far} times as many names as make a trigram common have it; `
   + `each name found is compared if it shares at least ${BLOCKING.share * 100}% of the trigrams of the one with fewer (and at least one), or begins with the same three letters; `
-  + 'a name that is exactly the same is always compared.';
+  + 'a name that is exactly the same is always compared; '
+  + 'a name with qualifiers is looked up by its core (the name without them) as well as by itself, and names of which either has qualifiers are let through by their cores\' lengths as well as their own.';
 
 /** The index of the other dataset's names; `best(names)` scores a subject place against it. */
 export class NameIndex {
@@ -64,7 +76,8 @@ export class NameIndex {
           this.postings[id].push(ni);
           t.push(id);
         }
-        this.names.push({ pi, n, t: Int32Array.from(t), sorted: sortWords(n), words: n.split(' ').length });
+        const q = qualifiers(n);
+        this.names.push({ pi, n, t: Int32Array.from(t), sorted: sortWords(n), words: n.split(' ').length, q });
         (this.exact.get(n) || this.exact.set(n, []).get(n)).push(ni);
       }
     });
@@ -80,10 +93,15 @@ export class NameIndex {
     const N = seen.size;
     const idf = new Map();
     this.weight = (w) => { let v = idf.get(w); if (v === undefined) { v = Math.log(1 + N / (df.get(w) || 1)); idf.set(w, v); } return v; };
+    // What a word in QUALIFIER_RARE names weighs: a core weighing this much is never too common (names.js).
+    this.weight.rare = Math.log(1 + N / QUALIFIER_RARE);
   }
 
-  /** The numbers of the other names to compare with the normalised name `s`, for scores that must reach `threshold`. */
-  candidates(s, threshold = 0) {
+  /**
+   * The numbers of the other names to compare with the normalised name `s`, for scores that must
+   * reach `threshold`. `core`: the core of the subject name, when it has qualifiers.
+   */
+  candidates(s, threshold = 0, core = null) {
     const all = trigrams(s), known = [], start = new Map();
     // Each known trigram, with where it first begins in the padded name.
     const pad = '  ' + s + ' ';
@@ -112,6 +130,7 @@ export class NameIndex {
     const seen = this.seen ||= new Uint8Array(this.names.length), found = [];
     for (const id of keys) { const p = this.postings[id]; for (let i = 0; i < p.length; i++) if (!seen[p[i]]) { seen[p[i]] = 1; found.push(p[i]); } }
     const out = new Set(this.exact.get(s) || []);
+    const byQualifier = threshold <= QUALIFIER_CAP;
     // The trigrams of the name's first three letters ("  b", " br", "bru"), when it has three.
     const words = s.split(' ').length, head = s.length >= 3 && !s.slice(0, 3).includes(' ') ? [0, 1, 2].map((i) => this.ids.get(pad.slice(i, i + 3))) : null;
     for (let j = 0; j < found.length; j++) {
@@ -120,7 +139,9 @@ export class NameIndex {
       const o = this.names[ni];
       // Names of the same number of words may differ only in short forms (expandedScore()), which
       // letters and lengths cannot bound.
-      if (!canReach(s.length, o.n.length, threshold) && !(words > 1 && o.words === words)) continue;
+      // Nor can they bound names that may differ only by qualifiers: their cores must reach threshold / QUALIFIER_CAP.
+      if (!canReach(s.length, o.n.length, threshold) && !(words > 1 && o.words === words)
+        && !(byQualifier && (core || o.q.units.length) && canReach((core ?? s).length, (o.q.core ?? o.n).length, threshold / QUALIFIER_CAP))) continue;
       const need = Math.max(1, Math.ceil(BLOCKING.share * Math.min(all.size, o.t.length)));
       let n = 0;
       for (let i = 0, t = o.t; i < t.length; i++) if (mark[t[i]] === stamp) n++;
@@ -137,18 +158,38 @@ export class NameIndex {
    */
   best(names, threshold = 0) {
     const best = new Map();
+    const byQualifier = threshold <= QUALIFIER_CAP;
     for (const s of new Set(names.map(normalise))) {
       if (!s) continue;
-      const ss = sortWords(s), sw = s.split(' ').length;
-      for (const ni of this.candidates(s, threshold)) {
+      const ss = sortWords(s), sw = s.split(' ').length, sq = qualifiers(s);
+      // A name with qualifiers is looked up by its core too (Great Marlow by "marlow"), each other name once.
+      let found = this.candidates(s, threshold, sq.core);
+      if (byQualifier && sq.units.length) {
+        found = new Set(found);
+        for (const ni of this.candidates(sq.core, threshold, sq.core)) found.add(ni);
+      }
+      for (const ni of found) {
         const o = this.names[ni];
         this.comparisons++;
         let score = nameScore(s, o.n, ss, o.sorted);
         // Names of the same words but for short forms are scored with them written out (names.js);
-        // otherwise a score under the threshold is let go, as lowering by the distinctive words cannot raise it.
+        // otherwise a score under the threshold is let go, as lowering by the distinctive words cannot
+        // raise it, unless the names may differ only by qualifiers, which can (qualifierScore()).
         const e = score < 1 && sw > 1 && o.words === sw && Math.abs(s.length - o.n.length) >= 2 ? expandedScore(s, o.n) : null;
         if (e !== null) { if (e > score) score = e; }
-        else if (score < threshold) continue;
+        if (score < 1 && (sq.units.length || o.q.units.length)) {
+          const q = qualifierScore(s, o.n, this.weight, sq, o.q);
+          if (q !== null) {
+            // The higher of the score as below and the cores', at most the cap; or, for a common
+            // core, the lower of the score as below and its share. Under the threshold the score as
+            // below cannot matter: the cores' then decides whether the pair is kept.
+            if (score >= threshold && e === null) { const d = distinctive(s, o.n, this.weight); if (d !== null && d < score) score = d; }
+            score = q.common ? Math.min(score, q.score) : Math.min(QUALIFIER_CAP, Math.max(score, q.score));
+            if (score >= threshold && score > (best.get(o.pi) ?? -1)) best.set(o.pi, score);
+            continue;
+          }
+        }
+        if (e !== null) { /* raised above, and not lowered */ } else if (score < threshold) continue;
         else if (score < 1) { const d = distinctive(s, o.n, this.weight); if (d !== null && d < score) score = d; }
         if (score >= threshold && score > (best.get(o.pi) ?? -1)) best.set(o.pi, score);
       }

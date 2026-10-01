@@ -1064,7 +1064,7 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   dataset, so a retraction that is itself retracted elsewhere restores the point), country codes and types, and
   the identity relations either dataset states are kept, in memory. A place without an `@id` cannot
   be matched, and is reported as a problem.
-- **Scoring** (`names.js`, algorithm `krisis-names 5`). Names are normalised: NFKD, combining marks
+- **Scoring** (`names.js`, algorithm `krisis-names 6`). Names are normalised: NFKD, combining marks
   removed, ß æ œ ø ł đ ð þ ı spelt out, lower-cased, everything but letters and digits a space. Two
   names score their Jaro-Winkler similarity (prefix scale 0.1, up to four letters) or, if higher, that
   of their words sorted, so that "Upper Newton" and "Newton Upper" agree. Two places score the best
@@ -1106,6 +1106,45 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   name. Salt Ives and St Ives, Foot Lee and Ft Lee, Lake Mans and Le Mans were 1 too. Rd for Road is no
   longer written out, and on the scale test three planted pairs a doubled letter apart after a common
   word (Ain Bo and Ain BBo, 0.710) are no longer suggested: only the contraction rule found them.
+- **Names that differ by a qualifier** (`qualifierScore()`, new in `krisis-names 6`,
+  `match_parameters.qualifiers`). Great Marlow and Marlow scored 0.333 and Chipping Ongar and Ongar
+  0.514, so neither was ever suggested, while Abingdon and Abingdon-on-Thames (0.889) were, only because
+  the qualifier trails. A qualifier is a word on a fixed list (`QUALIFIERS`): in front, Great, Little,
+  Long, Old, New, North, South, East, West, Upper, Lower, Nether, Over, Middle, Mid, High, Higher, Low,
+  Much, Market, Chipping, Steeple, King's, Bishop's, Abbot's, Monk's (with or without the apostrophe),
+  St, Saint, Ste, Sainte and Welsh Hen; behind, Latin Magna, Parva, Major, Minor, Superior, Inferior,
+  Regis, Episcopi, Welsh Fawr, Mawr, Fach, Bach, Uchaf, Isaf, Ganol, Newydd and Cornish Vean, Veor,
+  Vear, Wartha, Woollas; or a phrase at the end beginning with a joining word (on, upon, under, next,
+  by, le, en, in, super, juxta) and at most three words after it ("on Thames", "next the Sea", "en le
+  Frith"). The rest is the name's core, which keeps a word not on the list. When one name has every
+  qualifier the other has and more, and their cores are the same (scoring 1: the same words, but for
+  their order or a short form), the pair scores **0.88** (`QUALIFIER_CAP`): over the threshold, so it
+  is suggested, but under any respelling, because a qualifier is a real difference. The cap holds for
+  every such pair, so pairs letters already found drop to 0.88 (Abingdon-on-Thames 0.889, Market
+  Harborough 0.918 with its words sorted, High Barnet 0.909). **When each name has a qualifier the
+  other has not** (Great and Little Marlow, East and West Ham, Upper and Lower Slaughter, Newton on the
+  Hill and Newton by the River) the rule does not apply, and they score as before, 0.333: this is the
+  guard against the obvious false positive. **A core respelt is not raised**: the first version scored
+  0.88 times the cores' score, and in the trial below every pair it added that way was wrong (Burnley
+  and Burley in Wharfedale, Bradfield and Great Bardfield, 0.851). **A common core is not a place**:
+  when a qualifier word added (a joining phrase counted by its joining word) weighs more by inverse
+  document frequency than the core, the pair scores the core's share of the weight, if lower (in DEEP,
+  Farm is in 13,872 names and Little in 6,124, so Little Farm and Farm, 0.873 on letters with their
+  words sorted, now score under a half); a core in no more than 50 names (`QUALIFIER_RARE`) is never
+  common, as in a small dataset the qualifiers are rare too. The list was preferred to qualifiers
+  found by frequency alone: the commonest words of DEEP are Farm, Hill, Field, Lane and Wood, which
+  are not qualifiers (Marlow Bottom is not Marlow). **Measured** (1 October 2026) on market
+  towns matched with CAMPOP's places: of the 1,048 market places with a CAMPOP place within 1.5 km,
+  956 had it suggested before and 961 now (Great Marlow, Chipping Ongar, Market Warsop, Weldon and
+  Great Weldon; High Ongar and Ongar, 1.45 km, which are two places); 10 suggestions added, none lost,
+  of the 10 five the same place and five not (Old Windsor and Windsor, Sutton and Long Sutton 44 km
+  apart; West Horsley and Hornsey, 0.850 on letters as before, reached now by the core's lookup). On
+  1,728 copies of DEEP's located places whose names begin with a qualifier on the list, the qualifier
+  dropped, 59.3% had their original suggested before (only by the letters of the words sorted). On
+  the scale test (5,000 with 5,000, the synthetic names half beginning with a common word, Great,
+  Upper and East among them) the comparisons rise from 137,742 to 168,440, the planted pairs found are
+  the same, and the time is the same within the noise of a busy machine (9.8 and 10.2 s). The DEEP
+  perturbed sets with the fix, and the qualifier copies with it, are still to be measured.
 - **Blocking** (`blocking.js`, `match_parameters.blocking`). The rule until September 2026 (compare
   names sharing 30% of their padded trigrams) let every "Saint …", "San …", "Kafr …" or "Tell …" pass
   against each other, and a short name against every name with its first letter: a review measured
@@ -1133,7 +1172,14 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   with it), and when their lengths let them reach the threshold at all
   (`canReach()`: a name of two letters cannot reach 0.85 with one of more than four; names of the same
   number of words are let through, as abbreviations can raise them past what letters and lengths
-  bound); a name exactly the same is always compared. So a name is compared with at most 1% of the
+  bound); a name exactly the same is always compared. **Qualifiers** (new in `krisis-names 6`): a
+  subject Marlow finds Great Marlow through its keys as they are, since Great Marlow has every trigram
+  of "marlow" but the padded first one ("  m", common, and a key only of a name of four trigrams, then
+  one of four). The other way round it may not: Chipping Ongar's keys can all fall in "chipping" and
+  "g o" when the trigrams of "ongar" are common (the suite builds that case), so a subject name with
+  qualifiers is looked up by its core too; and names of which either has qualifiers are let through
+  `canReach()` when their cores' lengths can reach the threshold over 0.88 (Bow and Great Bow, which
+  letters bound at 0.844). So a name is compared with at most 1% of the
   other dataset for each trigram it is looked up by. `e2e/match_scale.mjs [N]` matches two synthetic
   datasets of N places (half the names beginning with a common word, one in ten of the others a planted
   variant) with `plato-tools match` and requires it to finish in time and suggest 97% of the planted
@@ -2346,8 +2392,10 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   Cologne, or Wum and Wem, are not suggested (see Match review for the limits of three-letter words).
   A pair that shares little but its first three letters (Bruxelles and Brussels) is compared only
   when blocking finds it at all, through a trigram that is not common in the other dataset; in a large
-  gazetteer, where "bru" is common, it may not be. **A qualifier word in front is never found**: Great
-  Marlow and Marlow score 0.333, Chipping Ongar and Ongar 0.514, as the qualifier is a word not shared.
+  gazetteer, where "bru" is common, it may not be. **Qualifiers are a fixed list** (see Match review):
+  a pair that differs by a word not on it (a manorial name, Wootton Bassett and Wootton) is not found,
+  nor one whose cores are spelt differently (Great Marlowe and Marlow), and a qualifier pair is
+  suggested at 0.88 whether or not it is the same place (Old Windsor and Windsor are two).
   The default threshold stays 0.85: in the DEEP trial 0.80 added noise and found nothing more, and 0.90
   lost real pairs that differ in a suffix or are in two languages.
 - **RDF output is N-Triples only**, and Linked Places Format v2 is refused until it is specified.
