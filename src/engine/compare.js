@@ -18,6 +18,11 @@
 // When something has changed, both versions are read once more, for the few examples the report
 // shows, to say WHAT changed: the statements found in one version only.
 //
+// A candidate set (PLATO 05cf78a) is compared the same way, candidate by candidate: a published
+// candidate is frozen, never changed or deleted, whatever became of it (what became of it is read
+// from the attestations that answer it, never from its status). A later set is a new set, not a
+// version, so two sets under different addresses are not compared, nor a set with a dataset.
+//
 // Nothing is held in memory but the record in hand: a digest of each attestation goes into a working
 // database, where the two versions are compared, so the check runs at any size, like the rest.
 import { run } from './pipeline.js';
@@ -29,11 +34,13 @@ import { collectWithdrawn, resolveWithdrawn } from '../formats/shared.js';
 import { sha256 } from '../lib/sha256.js';
 
 const ABOUT = PLATO + 'attests_about', META_ABOUT = PLATO + 'meta_attestation_about', CREATED = PLATO + 'created';
+const CANDIDATE_SOURCE = PLATO + 'candidate_source', CANDIDATES_FOR = PLATO + 'candidates_for';
 const IDENTITY_SUBJECT = PLATO + 'identity_subject', ATTESTS_IDENTITY = PLATO + 'attests_identity', HAS_CITATION = PLATO + 'has_citation';
 // What an attestation bundles: its facets (plato:attests_name, attests_geometry, …) and its citations.
 const isFacetLink = (p) => p === HAS_CITATION || (p.startsWith(PLATO + 'attests_') && p !== ABOUT);
 const RDFS_LABEL = 'http://www.w3.org/2000/01/rdf-schema#label';
-const EARLIER = 0, LATER = 1, ATTESTATION = 0, IDENTITY = 1;
+const EARLIER = 0, LATER = 1, ATTESTATION = 0, IDENTITY = 1, CANDIDATE = 2;
+const KIND_NAMES = ['attestation', 'identity', 'candidate'];
 const nodeKey = (t) => (t.termType === 'BlankNode' ? '_:' + t.value : t.value);
 const isBlank = (key) => key.startsWith('_:');
 // 128 bits of SHA-256: the digests guard against accident, not attack, and half the length halves
@@ -54,6 +61,16 @@ const TEXT = {
   'attestation-changed': 'An attestation of the earlier version says something different in the later one. A published attestation is never changed: put it back as it was, and record the correction as a new attestation that replaces it (plato:Supersedes).',
   'attestation-readdressed': 'An attestation of the earlier version is in the later one, saying the same, but without its web address (@id), or under another. Its address is how later attestations point to it, to replace or withdraw it: give it back its address.',
   'attestation-gone': 'An attestation of the earlier version that has no web address of its own (@id) is not in the later one as it was: it was deleted, or changed. Put it back as it was. Without an address the two cannot be told apart, and nothing can retract or replace it; the example names the place it is about.',
+  'candidate-removed': 'A candidate of the earlier version of this candidate set is not in the later one. A published candidate is never deleted: identity relations answer it by its address (promotedFrom), and must keep their meaning. Put it back as it was; a new run of the software is a new candidate set.',
+  'candidate-changed': 'A candidate of the earlier version of this candidate set says something different in the later one: its places, score, software, settings, time or status. A published candidate is never changed, whatever became of it: that is read from the attestations that answer it, not from the candidate. Put it back as it was; a new run of the software is a new candidate set.',
+  'candidate-readdressed': 'A candidate of the earlier version of this candidate set is in the later one, saying the same, but without its web address (@id), or under another. Identity relations answer a candidate by its address (promotedFrom): give it back its address.',
+  'candidate-gone': 'A candidate of the earlier version of this candidate set that has no web address of its own (@id) is not in the later one as it was: it was deleted, or changed. Put it back as it was.',
+  'different-kinds': 'One file is a dataset and the other a candidate set, so they are not two versions of one thing and were not compared. Give two versions of one dataset, or two copies of one candidate set.',
+  'different-candidate-set': 'The two files are different candidate sets (their addresses, @id, differ), not two versions of one, so they were not compared. A candidate set is never revised: a later run of the software is a new set, under a new address, which leaves out every candidate an earlier set published.',
+  'candidate-set-issued-changed': 'The two copies of this candidate set give different dates of issue (issued). A candidate set is frozen from the date it was issued, so the date should not change.',
+  'candidate-set-for-changed': 'The two copies of this candidate set say they were made for different datasets (candidatesFor).',
+  'candidate-set-unlisted': "A candidate set the earlier version lists (candidateSets) is not listed in the later one. The list is the dataset's description of itself, not an attestation, so this does not break the rule; but the dataset's identity relations may still answer candidates in that set (promotedFrom), and a reader can no longer find it from here.",
+  'nothing-to-compare-candidates': 'The earlier version holds no candidates, so there was nothing for the later one to have kept, and nothing was tested.',
   'identity-removed': 'An identity match of the earlier version is not in the later one. The append-only rule is about attestations, so this does not break it, but the match has gone with no record of why.',
   'identity-changed': 'An identity match of the earlier version says something different in the later one. The append-only rule is about attestations, so this does not break it, but nothing records the change.',
   'identity-gone': 'An identity match of the earlier version that has no web address of its own (@id) is not in the later one as it was: it was removed, or changed. The append-only rule is about attestations, so this does not break it; the example names the place it is about.',
@@ -178,12 +195,16 @@ function reader(context, out, side = { withdrawals: new Map() }) {
   const take = () => {
     // This record's statements, and only these: whatever happens below, none is left for the next.
     const batch = triples; triples = [];
-    const by = new Map(), bundled = new Set();
+    const by = new Map(), bundled = new Set(), docKey = doc && nodeKey(doc);
     for (let i = 0; i < batch.length; i += 3) {
       const k = nodeKey(batch[i]), p = batch[i + 1].value, o = batch[i + 2];
       // A place read with no label is given its address as a stand-in (pipeline.js), which is not a
       // statement of the data's, so it is not compared.
       if (p === RDFS_LABEL && o.termType === 'Literal' && o.value === batch[i].value) continue;
+      // A dataset lists its candidate sets (gazetteer.candidateSets) by the reverse of
+      // plato:candidates_for, so the statement is the set's, naming this version's own address: it
+      // changes from version to version by design, like the rest of the dataset's description.
+      if (p === CANDIDATES_FOR && docKey !== null && nodeKey(o) === docKey) continue;
       (by.get(k) || by.set(k, []).get(k)).push([p, o]);
       // An identity match an attestation bundles is part of what that attestation says.
       if (p === ATTESTS_IDENTITY && o.termType !== 'Literal') bundled.add(nodeKey(o));
@@ -202,19 +223,18 @@ function reader(context, out, side = { withdrawals: new Map() }) {
       return text;
     };
     const said = (k) => (by.get(k) || []).map(([p, o]) => p + ' ' + term(o)).sort();
-    const docKey = doc && nodeKey(doc);
     for (const [k, list] of by) {
       // The gazetteer's own description (its title, version, what it contains) changes from version
       // to version by design.
       if (k === docKey) continue;
       const about = list.find(([p]) => p === ABOUT), meta = list.find(([p]) => p === META_ABOUT);
-      const subject = list.find(([p]) => p === IDENTITY_SUBJECT);
-      const kind = about || meta ? ATTESTATION : subject && !bundled.has(k) ? IDENTITY : null;
+      const subject = list.find(([p]) => p === IDENTITY_SUBJECT), source = list.find(([p]) => p === CANDIDATE_SOURCE);
+      const kind = about || meta ? ATTESTATION : source ? CANDIDATE : subject && !bundled.has(k) ? IDENTITY : null;
       if (kind === null) {
         if (!isBlank(k)) for (const [p, o] of list) out.statement(k, p + ' ' + term(o));
         continue;
       }
-      const of = nodeKey((about || meta || subject)[1]);
+      const of = nodeKey((about || meta || source || subject)[1]);
       open.push(k);
       out.item(kind, isBlank(k) ? null : k, isBlank(of) ? null : of, said(k), list.some(([p]) => p === CREATED));
       open.pop();
@@ -223,7 +243,10 @@ function reader(context, out, side = { withdrawals: new Map() }) {
   };
   return {
     header(head) {
-      side.gazetteer = (head && typeof head.gazetteer === 'object' && head.gazetteer) || {};
+      // A dataset is described by its gazetteer, a candidate set by its candidateSet.
+      side.kind = head && head.profile === 'candidate-set' ? 'candidate-set' : 'dataset';
+      const own = head && (side.kind === 'candidate-set' ? head.candidateSet : head.gazetteer);
+      side.gazetteer = (own && typeof own === 'object' && !Array.isArray(own) && own) || {};
       doc = j2r.header(head);
       take();
     },
@@ -231,6 +254,11 @@ function reader(context, out, side = { withdrawals: new Map() }) {
       const atts = ev.type === 'attestation' ? [ev.value] : ev.type === 'record' && ev.value && Array.isArray(ev.value.attestations) ? ev.value.attestations : [];
       collectWithdrawn(atts, side.withdrawals);
       j2r.record(ev.type === 'idr' ? 'identityRelations' : ev.type === 'attestation' ? 'attestations' : ev.newEntity ? 'newSpatialEntities' : 'spatialEntities', ev.value);
+      take();
+    },
+    // One candidate of a candidate set (the pipeline gives a sink with this method a candidate set).
+    candidate(c) {
+      j2r.record('candidates', c);
       take();
     },
     async close() {},
@@ -261,7 +289,7 @@ export async function compare({ earlier, later, options = {} }, env) {
     const ledger = new Ledger(db);
     const sides = [];
     for (const [v, input, word] of [[EARLIER, earlier, 'earlier'], [LATER, later, 'later']]) {
-      const side = { gazetteer: {}, withdrawals: new Map() };
+      const side = { kind: null, gazetteer: {}, withdrawals: new Map() };
       db.exec('BEGIN');
       const r = await run({ input, action: 'check', options: { ...options, sink: reader(env.resources.context, ledger.sink(v), side) } },
         { ...env, progress: (p) => progress({ ...p, version: word, phase: p.phase === 'done' ? 'read' : p.phase }) });
@@ -281,31 +309,50 @@ export async function compare({ earlier, later, options = {} }, env) {
       if (others) rep.add('warning', 'version-has-problems', `The ${word} version has problems of its own, which a comparison does not list. Check it by itself to see them.`, undefined, others);
       sides.push(side);
     }
+    const [old, neu] = sides.map((s) => s.gazetteer);
+    // Two versions of one thing: a dataset and a candidate set are not, nor two candidate sets.
+    const refuse = (kind, example) => { rep.error(kind, TEXT[kind], example); return { report: rep.toJSON(), outputs: [], incomplete: true }; };
+    if (sides[EARLIER].kind !== sides[LATER].kind) return refuse('different-kinds', `the earlier version is a ${sides[EARLIER].kind === 'candidate-set' ? 'candidate set' : 'dataset'}, the later a ${sides[LATER].kind === 'candidate-set' ? 'candidate set' : 'dataset'}`);
+    const isSet = sides[EARLIER].kind === 'candidate-set';
+    if (isSet && old['@id'] !== neu['@id']) return refuse('different-candidate-set', `${old['@id'] ?? 'no @id'} and ${neu['@id'] ?? 'no @id'}`);
     progress({ phase: 'comparing', elapsedMs: Date.now() - t0 });
     ledger.index();
     db.exec('BEGIN');
-    const [old, neu] = sides.map((s) => s.gazetteer);
+    // What the comparison is of: a dataset's attestations, or a candidate set's candidates.
+    const OF = isSet ? CANDIDATE : ATTESTATION;
 
     // The rule binds from publication. Before it, what would break it is worth knowing, not wrong.
-    const published = old.status === 'published';
+    // A candidate set has no status: it is published when it is issued, and frozen from then on.
+    const published = isSet || old.status === 'published';
     const breach = published ? 'error' : 'warning';
-    if (!published) rep.warning('earlier-not-published', TEXT['earlier-not-published'], old.status === undefined ? undefined : String(old.status));
+    if (isSet) {
+      // Its description (title, description, creator, licence) may be corrected, as a dataset's may.
+      if (old.issued !== neu.issued) rep.warning('candidate-set-issued-changed', TEXT['candidate-set-issued-changed'], `${old.issued ?? 'none'}, then ${neu.issued ?? 'none'}`);
+      if (old.candidatesFor !== neu.candidatesFor) rep.warning('candidate-set-for-changed', TEXT['candidate-set-for-changed'], `${old.candidatesFor ?? 'none'}, then ${neu.candidatesFor ?? 'none'}`);
+    } else if (!published) rep.warning('earlier-not-published', TEXT['earlier-not-published'], old.status === undefined ? undefined : String(old.status));
     else if (neu.status !== 'published') rep.warning('later-not-published', TEXT['later-not-published'], neu.status === undefined ? undefined : String(neu.status));
+    // A dataset's list of its candidate sets is its description of itself: a set added to it is
+    // news, not a breach; one gone from it is reported, as a place no longer described is.
+    if (!isSet) {
+      const listed = (g) => (Array.isArray(g.candidateSets) ? g.candidateSets : []).filter((x) => typeof x === 'string');
+      const now = new Set(listed(neu));
+      for (const set of listed(old)) if (!now.has(set)) rep.warning('candidate-set-unlisted', TEXT['candidate-set-unlisted'], set);
+    }
     if (typeof neu.previousVersion === 'string' && typeof old['@id'] === 'string' && neu.previousVersion !== old['@id']) rep.warning('previous-version-differs', TEXT['previous-version-differs'], `${neu.previousVersion}, not ${old['@id']}`);
     if (typeof old.isVersionOf === 'string' && typeof neu.isVersionOf === 'string' && old.isVersionOf !== neu.isVersionOf) rep.warning('different-gazetteer', TEXT['different-gazetteer'], `${old.isVersionOf} and ${neu.isVersionOf}`);
     if (old.version !== undefined && old.version !== null && old.version === neu.version) rep.warning('same-version', TEXT['same-version'], String(old.version));
 
-    const count = (v, k = ATTESTATION) => ledger.one('SELECT COUNT(*) FROM a WHERE v=? AND k=?', [v, k]);
+    const count = (v, k = OF) => ledger.one('SELECT COUNT(*) FROM a WHERE v=? AND k=?', [v, k]);
     const had = count(EARLIER), has = count(LATER);
-    if (!had) rep.error('nothing-to-compare', TEXT['nothing-to-compare']);
+    if (!had) rep.error(isSet ? 'nothing-to-compare-candidates' : 'nothing-to-compare', TEXT[isSet ? 'nothing-to-compare-candidates' : 'nothing-to-compare']);
     let lost = 0, changed = 0;
     // The first few changed things of each kind, to be looked at again for what changed in them.
     const toExplain = new Map();
     const explainLater = (name, address) => { const l = toExplain.get(name) || toExplain.set(name, []).get(name); if (l.length < EXPLAINED) l.push(address); };
     const found = (kind, what, example, n = 1) => {
-      const name = `${kind === ATTESTATION ? 'attestation' : 'identity'}-${what}`;
-      rep.add(kind === ATTESTATION ? breach : 'warning', name, TEXT[name], example, n);
-      if (kind === ATTESTATION) { if (what === 'changed') changed += n; else lost += n; }
+      const name = `${KIND_NAMES[kind]}-${what}`;
+      rep.add(kind === IDENTITY ? 'warning' : breach, name, TEXT[name], example, n);
+      if (kind === OF) { if (what === 'changed') changed += n; else lost += n; }
       if (what === 'changed') explainLater(name, example);
     };
     // Those with an address: each must be in the later version under it, saying what it said and
@@ -313,7 +360,7 @@ export async function compare({ earlier, later, options = {} }, env) {
     let last = null;
     for (const q of ledger.rows(QUERIES.addressed)) {
       if (q.get(1) === last) continue;
-      if (!q.get(2) && q.get(5) && q.get(0) === ATTESTATION) { rep.add(breach, 'attestation-readdressed', TEXT['attestation-readdressed'], (last = q.get(1))); changed++; }
+      if (!q.get(2) && q.get(5) && q.get(0) !== IDENTITY) { const name = `${KIND_NAMES[q.get(0)]}-readdressed`; rep.add(breach, name, TEXT[name], (last = q.get(1))); if (q.get(0) === OF) changed++; }
       else if (!q.get(2)) found(q.get(0), 'removed', (last = q.get(1)));
       else if (!q.get(3) || q.get(4)) found(q.get(0), 'changed', (last = q.get(1)));
     }
@@ -368,7 +415,7 @@ export async function compare({ earlier, later, options = {} }, env) {
       }
     }
 
-    rep.counts = { earlier: had, later: has, unchanged: Math.max(0, had - lost - changed), changed, lost, added: Math.max(0, has - (had - lost)), retracted, superseded };
+    rep.counts = { ...(isSet ? { of: 'candidates' } : {}), earlier: had, later: has, unchanged: Math.max(0, had - lost - changed), changed, lost, added: Math.max(0, has - (had - lost)), retracted, superseded };
     progress({ phase: 'done', elapsedMs: Date.now() - t0 });
     return { report: rep.toJSON(), outputs: [], versions: { earlier: old, later: neu } };
   } finally {

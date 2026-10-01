@@ -58,7 +58,8 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   places, published apart from the dataset. `runCandidateSet` in `pipeline.js` checks one against its
   profile and writes it as PLATO JSON, JSON Lines (the header, then a candidate a line) or N-Triples;
   the tables and Linked Places Format refuse it in words (`candidate-set-target`), as do the tools that
-  read a dataset's records through `options.sink` (`candidate-set-not-a-dataset`). From RDF, a graph
+  read a dataset's records through `options.sink` (`candidate-set-not-a-dataset`), unless the sink
+  has a `candidate` method (the version check's), which is given the set's header and candidates. From RDF, a graph
   with a candidate set and no dataset (no gazetteer with anything said of it beyond its type, no
   attestation and no identity relation: typed N-Triples type a candidate's dataset and places, and a
   place described a little more is still one the candidates name) is written as the candidate set; a graph with both is written as the dataset, and the candidate set is
@@ -69,8 +70,8 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   (`dropped:gazetteer.candidateSets`). Where the tools stand: a candidate set is read, checked against
   its profile and converted. Krisis's export of one and its `promotedFrom` come later, as do the checks
   no schema can make (ids under their set, the mint rule, duplicates, across sets, `promotedFrom`
-  against a set given beside a dataset) and the version check of a candidate set (the candidate set
-  specification's section 13). An edge case to keep: a candidate's score records what the software
+  against a set given beside a dataset), which the candidate set specification's section 13 lists.
+  The version check of a candidate set is done (see the version check, below). An edge case to keep: a candidate's score records what the software
   said when it first suggested the pair. A candidate is frozen once issued, and a later set leaves out
   any pair already published, so if the places' names change and the same algorithm with the same
   settings would now score the pair differently, the first score stands. A different
@@ -932,6 +933,26 @@ What it reports, and why, is in the guide:
   other, so every inner lookup must go by an index on more than the version. SQLite once chose the
   wrong index and the comparison became quadratic; the queries now say `INDEXED BY`, and a test
   reads SQLite's plan for each.
+- **Candidate sets** (PLATO 05cf78a). Two copies of one candidate set (the same `@id`) are compared
+  candidate by candidate, as attestations are: a candidate is a node with `plato:candidate_source`,
+  kind 2 in the ledger. A published candidate is frozen, so a candidate removed or changed in any field
+  (its places, score, software, settings, time or status) is an error, named by its address with what
+  changed (`candidate-removed`, `candidate-changed`, `candidate-readdressed`), whatever became of it:
+  that is read from the attestations that answer it, never from its status. A set has no `status`; it
+  binds from issue. A candidate added is counted (`counts.of` is `'candidates'`) and is not reported.
+  The set's own description is left out, as a dataset's is, so a corrected title, description,
+  creator or licence is nothing; a changed `issued` or `candidatesFor` is a warning, as a dataset's
+  `isVersionOf` is. A dataset against a candidate set (`different-kinds`), and two sets under
+  different addresses (`different-candidate-set`: a later run is a new set, not a version), are
+  refused in words and marked incomplete. On the dataset side, `promotedFrom` is part of what an
+  attestation says (its identity relation is written out in it, or, with an address, is a facet of
+  it), so changing, adding or removing one is a breach already. A dataset's `candidateSets` is the
+  reverse of `plato:candidates_for`, a statement of the set's naming the version's own address, so it
+  is left out of the comparison of named things (it would change with every version), and the two
+  headers' lists are compared instead: a set gone from the list is a warning
+  (`candidate-set-unlisted`), as a place no longer described is, since the list is the dataset's
+  description of itself, not an attestation; a set added is nothing. `test/compare-candidates.test.js`
+  has a failing case and a control for each.
 - **At scale**: DEEP's export against itself, 1.4 million attestations a side, took under six
   minutes on the command line, 520 MB of memory and a working database of 860 MB.
   `e2e/compare_scale.mjs` deletes, changes and adds one attestation in a hundred of a published

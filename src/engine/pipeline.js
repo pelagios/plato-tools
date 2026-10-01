@@ -666,7 +666,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   if (candidateSet) {
     const refused = refuseCandidateSet({ action, target, options }, rep);
     if (refused) return refused;
-    const w = action === 'convert' ? await candidateSetWriter(target, env, rep, typing, outputs, input, options) : null;
+    const w = action === 'convert' ? await candidateSetWriter(target, env, rep, typing, outputs, input, options) : readsCandidates(options);
     await runCandidateSet(candidateSetSource(input, rep), { V, rep, writer: w, dry, notAList });
     return { report: rep.toJSON(), outputs };
   }
@@ -780,7 +780,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       const ids = setId ? [...objectsOf(store, setId, PLATO + 'contains_candidate')] : looseCandidates(new Set());
       for (const other of sets.slice(1)) notWritten(other);
       if (setId) for (const c of looseCandidates(new Set(ids))) notWritten(c);
-      const w = action === 'convert' ? await candidateSetWriter(target, env, rep, typing, outputs, input, options) : null;
+      const w = action === 'convert' ? await candidateSetWriter(target, env, rep, typing, outputs, input, options) : readsCandidates(options);
       const events = (function* () {
         yield { type: 'header', value: setId ? { $schema: CANDIDATE_SET_SCHEMA, ...r2j.candidateSetHeader(setId) } : { $schema: CANDIDATE_SET_SCHEMA, profile: 'candidate-set', candidateSet: {} } };
         let n = 0;
@@ -963,14 +963,17 @@ export const CANDIDATE_SET_TEXT = {
 };
 /**
  * A run on a candidate set that cannot go ahead, else null: a target that cannot hold one, or a tool
- * that reads a dataset's records through options.sink (the version check, match review, Chora).
+ * that reads a dataset's records through options.sink (match review, Chora). A sink that reads
+ * candidates too (it has a candidate method: the version check's) is given the set's header and
+ * candidates, as a writer is.
  */
 function refuseCandidateSet({ action, target, options }, rep) {
-  const kind = options.sink ? 'candidate-set-not-a-dataset' : action === 'convert' && (target === 'tables' || target === 'lpf' || target === 'lpf-seq') ? 'candidate-set-target' : null;
+  const kind = options.sink && !readsCandidates(options) ? 'candidate-set-not-a-dataset' : action === 'convert' && (target === 'tables' || target === 'lpf' || target === 'lpf-seq') ? 'candidate-set-target' : null;
   if (!kind) return null;
   rep.error(kind, CANDIDATE_SET_TEXT[kind]);
   return { report: rep.toJSON(), outputs: [], incomplete: true };
 }
+const readsCandidates = (options) => (options.sink && typeof options.sink.candidate === 'function' ? options.sink : null);
 async function* candidateSetSource(input, rep) {
   const file = input.files[0];
   if (input.format === 'plato-jsonl') {

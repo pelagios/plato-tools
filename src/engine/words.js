@@ -18,7 +18,7 @@ function withGeorefs({ georefs, manifests }) {
 }
 
 // A count in words, singular for one: "1 place", "2 places", "1 identity relation".
-const ONE = { 'earlier attestations': 'earlier attestation', annotations: 'annotation', places: 'place', attestations: 'attestation', 'identity relations': 'identity relation', candidates: 'candidate', triples: 'triple', 'triples written': 'triple written', 'table rows': 'table row', observations: 'Data Cube observation' };
+const ONE = { 'earlier attestations': 'earlier attestation', 'earlier candidates': 'earlier candidate', annotations: 'annotation', places: 'place', attestations: 'attestation', 'identity relations': 'identity relation', candidates: 'candidate', triples: 'triple', 'triples written': 'triple written', 'table rows': 'table row', observations: 'Data Cube observation' };
 const MANY = { observations: 'Data Cube observations' };
 ONE['place names'] = 'place name';
 ONE.rows = 'row'; ONE.features = 'feature';
@@ -68,9 +68,12 @@ export function explainedLines(x) {
   return [...x.earlier.map((t) => `Only in the earlier version: ${t}`), ...x.later.map((t) => `Only in the later version: ${t}`)];
 }
 
-/** The summary of a version check: whether the append-only rule holds, and what became of the earlier attestations. */
+/**
+ * The summary of a version check: whether the append-only rule holds, and what became of the earlier
+ * attestations, or, for two copies of a candidate set (counts.of 'candidates'), of its candidates.
+ */
 function compareSummary(report) {
-  const c = report.counts, n = (x) => (x || 0).toLocaleString('en-GB');
+  const c = report.counts, n = (x) => (x || 0).toLocaleString('en-GB'), what = c.of === 'candidates' ? 'candidates' : 'attestations';
   if (c.earlier === undefined) return { problems: 'The two versions could not be compared.', counted: '' };
   const parts = [`${n(c.unchanged)} unchanged`];
   if (c.changed) parts.push(`${n(c.changed)} changed`);
@@ -80,7 +83,7 @@ function compareSummary(report) {
   return {
     problems: nErr ? `${n(nErr)} problem${nErr === 1 ? '' : 's'} found.`
       : c.unchanged === c.earlier ? 'Nothing was deleted or changed.' : 'The append-only rule is not broken, but see the warnings.',
-    counted: `Of ${count(c.earlier, 'earlier attestations')}, ${parts.join(', ')}. The later version has ${count(c.later, 'attestations')}, ${n(c.added)} of them new${withdrawn ? `; it ${withdrawn} of the earlier ones` : ''}.`,
+    counted: `Of ${count(c.earlier, `earlier ${what}`)}, ${parts.join(', ')}. The later version has ${count(c.later, what)}, ${n(c.added)} of them new${withdrawn ? `; it ${withdrawn} of the earlier ones` : ''}.`,
   };
 }
 
@@ -105,7 +108,7 @@ export function groups(action) {
   ];
   if (action === 'match' || action === 'apply') return krisisGroups(action);
   if (action === 'compare') return [
-    { severity: 'error', title: 'Problems', intro: 'These break the append-only rule: once a dataset is published, its attestations are added to, never deleted or changed.' },
+    { severity: 'error', title: 'Problems', intro: 'These break the append-only rule: once a dataset is published, its attestations are added to, never deleted or changed; once a candidate set is issued, its candidates are never deleted or changed.' },
     { severity: 'warning', title: 'Warnings', intro: 'Worth a look; none of these breaks the rule.' },
   ];
   return [
