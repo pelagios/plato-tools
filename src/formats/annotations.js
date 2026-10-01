@@ -29,7 +29,11 @@
 //     gazetteer (Wikidata, WHG, a GeoJSON file, Core Data), its `id` the place's identifier; a
 //     geotag with no value is a mention flagged as having no match.
 //   - a tag from a vocabulary is a `value` object { label, id }; a free tag a string.
-//   - the target's `source` is the Studio project's id, not the document's address.
+//   - the target's `source` is the Studio project's id, not the document's address; or, for an
+//     image, the IIIF canvas the region was drawn on. For an image that is not part of a IIIF
+//     manifest Studio writes no `source` at all (AnnotatedImage.tsx gives the annotator its
+//     source only for a manifest's canvas): a target with a selector and no source is a position
+//     in a document the export does not name, converted with a warning.
 import { PLATO, isAbsoluteIri } from '../lib/context.js';
 import { placeAddress } from '../engine/hermes/addresses.js';
 
@@ -62,6 +66,7 @@ export const ANNOTATION_KINDS = {
   'annotation-whg-record': 'loss',
   'annotation-whg-staging': 'loss',
   'annotation-source-not-address': 'warning',
+  'annotation-target-no-source': 'warning',
   'annotation-several-places': 'warning',
   'annotation-verification-unknown': 'warning',
   'annotation-none-linked': 'warning',
@@ -258,11 +263,15 @@ function selectorWords(s, lost, placing) {
 }
 
 const SVG_SHAPE = 'SvgSelector: the shape drawn on the image';
-/** One target as { source, label, quotes, locator }. */
+/**
+ * One target as { source, label, quotes, locator, unnamed }. `unnamed` is a target with a selector
+ * and no source: a position in a document the export does not name (Recogito Studio writes no
+ * source for an image that is not part of a IIIF manifest). A target with neither says nothing.
+ */
 function readTarget(t, report, keyLoss, placing) {
   if (typeof t === 'string') return { source: t, quotes: [] };
   if (!t || typeof t !== 'object') return null;
-  for (const k of Object.keys(t)) if (!TARGET_KEYS.has(k) && !(k === 'id' && t.source === undefined) && t[k] !== undefined && t[k] !== null) keyLoss(`target.${k}`);
+  for (const k of Object.keys(t)) if (!TARGET_KEYS.has(k) && !(k === 'id' && t.source === undefined && t.selector === undefined) && t[k] !== undefined && t[k] !== null) keyLoss(`target.${k}`);
   const src = t.source && typeof t.source === 'object' ? (t.source.id ?? t.source['@id']) : t.source ?? (t.selector === undefined ? t.id ?? t['@id'] : undefined);
   const quotes = [], words = [];
   for (const s of list(t.selector)) {
@@ -273,7 +282,9 @@ function readTarget(t, report, keyLoss, placing) {
     const w = selectorWords(s, report, placing);
     if (w) words.push(w);
   }
-  return { source: typeof src === 'string' ? src : undefined, label: labelText(t.label ?? t.source?.label), quotes, locator: words.join('; ') || undefined };
+  const source = typeof src === 'string' ? src : undefined;
+  const unnamed = source === undefined && (t.source === undefined || t.source === null) && t.selector !== undefined && t.selector !== null;
+  return { source, label: labelText(t.label ?? t.source?.label), quotes, locator: words.join('; ') || undefined, unnamed };
 }
 
 /**
@@ -360,7 +371,7 @@ export class AnnotationReader {
     }
     const placing = this.maps !== null;
     const targets = list(a.target).map((t) => readTarget(t, report, keyLoss, placing)).filter(Boolean);
-    if (!targets.length || targets.some((t) => t.source === undefined)) {
+    if (!targets.length || targets.some((t) => t.source === undefined && !t.unnamed)) {
       report('annotation-malformed', `${where}: no target, or a target that does not say what document it is in`);
       // Not placed, so its SVG shapes are reported as they are without georeferences.
       if (placing) for (let i = this.regions.svgRegionCount(a); i > 0; i--) report('annotation-selector', SVG_SHAPE);
@@ -385,7 +396,13 @@ export class AnnotationReader {
     const types = read.filter((c) => c.kind === 'type').map((c) => ({ identifier: c.identifier, label: c.label }));
     const citations = targets.map((t) => {
       let source;
-      if (isIri(t.source)) source = { '@id': t.source, title: t.label || t.source, authorityType: 'source' };
+      if (t.unnamed) {
+        // No source, but a position in it: Recogito Studio writes no address for an image that is
+        // not part of a IIIF manifest, so the document is named only by the export itself. Kept as a
+        // source with a title and no address, as for a source that is not an address (below).
+        report('annotation-target-no-source', where);
+        source = { title: t.label || 'The annotated document (the export does not name it)', authorityType: 'source' };
+      } else if (isIri(t.source)) source = { '@id': t.source, title: t.label || t.source, authorityType: 'source' };
       else {
         // Recogito Studio writes its project's id here, which is not the document's address: the
         // source keeps it as its title, and the warning says that documents cannot be told apart.

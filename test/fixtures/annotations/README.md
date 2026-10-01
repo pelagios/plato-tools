@@ -119,7 +119,7 @@ Each link from a passage to a place becomes one attestation-centric attestation 
 |---|---|---|
 | The place link: Recogito's `identifying` body (the address in its `value`), Studio's `geotagging` body (the `id` of its GeoJSON Feature), or a W3C `identifying` or `linking` body's `source` | `about` | Only a web address; a gazetteer's own id is reported. One passage linked to several places gives one attestation each |
 | The words marked (`TextQuoteSelector` `exact`); for an image, a `transcribing` body | `names[].toponym`, with `formStatus` `plato:Attested` | A transcription beside a quote is a note |
-| The annotated document (the target's `source`, and its `label` as the title) | `citations[].source` | Recogito Studio writes its project's id here: kept as the title, with a warning |
+| The annotated document (the target's `source`, and its `label` as the title) | `citations[].source` | Recogito Studio writes its project's id here: kept as the title, with a warning. For an image that is not part of a IIIF manifest it writes no `source` at all: a target with a selector and no source is converted, its source a title with no address, with a warning (`annotation-target-no-source`); a target with neither is malformed |
 | The selectors | `citations[].locator`, in words | "characters 1083 to 1092", "region at x 2948, y 4087, 197 by 173 pixels", "row 2" |
 | The link body's `creator` (else the annotation's) | `contributor` | A web address, or a name; an internal user id is reported |
 | `created`, `modified` (of the link body, else the annotation) | `created`, `modified` | Recogito v1 writes only `modified` |

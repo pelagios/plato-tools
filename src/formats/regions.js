@@ -306,6 +306,9 @@ export async function placeRegions(a, attestations, ctx, report) {
     for (const region of regionsOf(t)) {
       const shape = region.kind === 'svg' ? 'an SVG shape' : `the rectangle ${region.value}`;
       if (ctx.v1 || (source && RECOGITO_V1.test(source))) { report('annotation-region-not-iiif', `${where}: ${shape} on ${source}`); continue; }
+      // No source (Recogito Studio writes none for an image that is not part of a IIIF manifest):
+      // nothing says which image the region is on, so no georeference can be matched to it.
+      if (source === undefined) { report('annotation-region-no-georef', `${where}: ${shape}: the image is not named`); continue; }
       const tried = maps.map((m) => ({ m, match: matchTarget(m.g, source) }));
       const candidates = tried.filter((x) => x.match.match);
       if (!candidates.length) {
