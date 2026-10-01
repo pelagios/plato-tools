@@ -154,8 +154,8 @@ a:visited { color: var(--accent); }
 /* The tools sit in the main column, with no panel and no heading shown (a visually hidden h2 keeps
    the order h1 > h2 > h3). The whole card is the link; Chora's, to a page of its own, has a double band. */
 .tools-bare { margin: 1.5rem 0 1.25rem; }
-.tools.choose .tool { padding: 0; }
-.tools.choose .tool-link { height: 100%; padding: .65rem .85rem .75rem; }
+.tools.choose .tool { padding: 0; display: flex; flex-direction: column; }
+.tools.choose .tool-link { flex: 1 0 auto; padding: .65rem .85rem .75rem; }
 .tools.choose .tool-link .label { margin: 0 0 .35rem; }
 .tool .go { display: block; margin-top: .45rem; font-size: .88rem; color: var(--accent); }
 .tool .go .arrow { display: inline-block; transition: transform .12s; }
@@ -190,6 +190,30 @@ a:visited { color: var(--accent); }
 .tools.choose .tool.coming { padding: .65rem .85rem .75rem; }
 /* Its badge's words in the muted text colour, which is legible at that size (the light blue alone is not, at 3.3:1). */
 .tool.coming .badge { color: var(--muted); }
+
+/* Each card's "More": a native disclosure after the card's link (not inside it, where a click would
+   choose the tool), closed at first. Its summary reads "More" or "Less", swapped by [open], with the
+   tool's name after it for a screen reader. A sentence about what is still to come is .coming-next,
+   to be put in the present tense when it is done. */
+.tool .more { padding: 0 .85rem .6rem; font-size: .92rem; }
+.tools.choose .tool.coming .more { padding: .45rem 0 0; margin-top: auto; }
+.tool .more summary { display: inline-block; cursor: pointer; padding: .15rem 0; font-size: .88rem; color: var(--accent); }
+.tool .more summary::-webkit-details-marker { display: none; }
+.tool .more summary::before { content: "+"; content: "+" / ""; display: inline-block; width: .9em; font-weight: 700; }
+.tool .more[open] summary::before { content: "\2212"; content: "\2212" / ""; }
+.tool .more summary:hover { text-decoration: underline; }
+.tool .more summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.tool .more .when-open, .tool .more[open] .when-closed { display: none; }
+.tool .more[open] .when-open { display: inline; }
+.tool.coming .more summary { color: var(--muted); }
+.tool .more-body { border-top: 1px solid var(--line); padding-top: .45rem; margin-top: .15rem; color: var(--fg); }
+.tool .more-body p, .tool .more-body ul, .tool .more-body ol { margin: 0 0 .45rem; font-size: .92rem; }
+.tool .more-body ul, .tool .more-body ol { padding-left: 1.15rem; }
+.tool .more-body li + li { margin-top: .2rem; }
+.tool .more-body .coming-next { color: var(--muted); font-style: italic; }
+.tool .more-body .in-guide { margin-bottom: 0; }
+.tool .more-body code { font-size: .85em; overflow-wrap: anywhere; }
+.tool.coming .more-body { color: var(--muted); }
 
 /* Hermes: the matching of a table's columns (a CSV file, or plain GeoJSON) to PLATO, shown before it
    is checked or converted. A real table, scrolling sideways on its own on a narrow screen rather

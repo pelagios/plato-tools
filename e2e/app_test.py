@@ -1603,8 +1603,62 @@ def front_page_checks(browser, url):
         finally: ctx.close()
     attempt('front page: step 1 links to the example files, and the zip is served (200, a zip)', example_files)
 
+    def card_details():
+        # Each card has a "More" section, closed: opened, it shows its text and reads "Less", and leaves
+        # the tool chosen (#tool=check here) and step 2 as they were. Chora's speaks of tracing, and
+        # Krisis's of the World Historical Gazetteer, only in the sentence marked as coming next.
+        ctx, page = fresh(hash='#tool=check')
+        try:
+            page.set_input_files('#picker', str(FRONT_FILE))
+            wait_state(page, lambda s: s.get('phase') == 'detected', T(60), 'detection')
+            before = {'shown': page.evaluate(VISIBLE, ACTIONS), 'hash': page.evaluate('() => location.hash'), 'url': page.url}
+            STATE = """() => [...document.querySelectorAll('#toolbox .tools > li')].map((li) => {
+              const d = li.querySelector(':scope > details.more'), s = d?.querySelector('summary'), body = d?.querySelector('.more-body');
+              const coming = [...(body?.querySelectorAll('.coming-next') || [])].map((e) => e.textContent.replace(/\\s+/g, ' ').trim());
+              const rest = body ? (() => { const c = body.cloneNode(true); c.querySelectorAll('.coming-next').forEach((e) => e.remove()); return c.textContent; })() : '';
+              const links = [...(body?.querySelectorAll('a[href]') || [])].map((a) => a.href);
+              return { name: li.querySelector('h3')?.textContent.trim(), has: !!d, open: !!d?.open, said: s ? [...s.querySelectorAll('span:not(.visually-hidden)')].filter((e) => e.getClientRects().length).map((e) => e.textContent).join('').trim() : null,
+                       named: !!s && s.textContent.includes(li.querySelector('h3')?.textContent.trim() || '?'),
+                       body: body && body.offsetHeight > 0 ? body.innerText.trim().length : 0, coming, rest: rest.replace(/\\s+/g, ' '), links,
+                       insideLink: !!d?.closest('a') }; })"""
+            closed = page.evaluate(STATE)
+            opened, kept = [], True
+            for n in range(1, len(closed) + 1):
+                page.click(f'#toolbox .tools > li:nth-child({n}) > details.more > summary')
+                page.wait_for_timeout(100)
+                now = {'shown': page.evaluate(VISIBLE, ACTIONS), 'hash': page.evaluate('() => location.hash'), 'url': page.url}
+                kept = kept and now == before and page.evaluate('() => window.__plato.tool ?? null') == 'check'
+                opened.append(page.evaluate(STATE)[n - 1])
+            # By keyboard: Enter on a focused summary closes it again, and it reads "More".
+            page.focus('#toolbox .tools > li:nth-child(1) > details.more > summary'); page.keyboard.press('Enter'); page.wait_for_timeout(100)
+            again = page.evaluate(STATE)[0]
+            guide = 'https://pelagios.org/place-attestation-ontology/guide/'
+            by = {c['name']: c for c in opened}
+            chora, krisis, peripleo = by.get('Chora', {}), by.get('Krisis', {}), by.get('Peripleo', {})
+            ok = (len(closed) == 9 and all(c['has'] and not c['open'] and c['said'] == 'More' and c['body'] == 0 and c['named'] and not c['insideLink'] for c in closed)
+                  and all(c['open'] and c['said'] == 'Less' and c['body'] > 60 for c in opened) and kept
+                  and all(c['links'] and c['links'][-1].startswith(guide) for c in opened if c['name'] != 'Peripleo') and peripleo.get('links') == []
+                  and len(chora.get('coming', [])) == 1 and chora['coming'][0].startswith('Coming next:') and 'trace' in chora['coming'][0]
+                  and 'trac' not in chora.get('rest', 'trac').lower()
+                  and len(krisis.get('coming', [])) == 1 and 'World Historical Gazetteer' in krisis['coming'][0] and 'World Historical' not in krisis.get('rest', 'World Historical')
+                  and not again['open'] and again['said'] == 'More')
+            return ok, {'closed': closed, 'opened': opened, 'step 2 and #tool kept': kept, 'before': before, 'first, closed by Enter': again}
+        finally: ctx.close()
+    attempt('front page: each of the nine cards has a closed "More"; opened, it shows its text and reads "Less", and leaves #tool= and step 2 as they were; Chora\'s tracing and Krisis\'s WHG are only "coming next"', card_details)
+
+    def card_details_phone():
+        # At a phone's width, with every card's More open, the cards stay one column, with no sideways scroll.
+        ctx, page = fresh(390)
+        try:
+            page.evaluate("() => document.querySelectorAll('#toolbox details.more').forEach((d) => { d.open = true; })")
+            r = page.evaluate('''() => ({ scroll: document.documentElement.scrollWidth, open: document.querySelectorAll('#toolbox details.more[open]').length,
+              cards: [...document.querySelectorAll('#toolbox .tool')].map((t) => [Math.round(t.getBoundingClientRect().left), Math.round(t.getBoundingClientRect().right)]) })''')
+            return r['open'] == 9 and r['scroll'] <= 390 and len(r['cards']) == 9 and len(set(map(tuple, r['cards']))) == 1 and r['cards'][0][1] <= 390, r
+        finally: ctx.close()
+    attempt('front page at 390 px: with every card\'s More open, one column of nine cards and no sideways scroll', card_details_phone)
+
     # The acknowledgement of ISHI ends the footer of both pages: a rebase once dropped it unseen.
-    ISHI = 'Development has been supported by the Institute for Spatial History Innovation (ISHI) at the University of Pittsburgh.'
+    ISHI ='Development has been supported by the Institute for Spatial History Innovation (ISHI) at the University of Pittsburgh.'
     def acknowledged():
         found = {}
         for name in ('', 'chora.html'):
