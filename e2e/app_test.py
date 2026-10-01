@@ -1394,6 +1394,9 @@ new MutationObserver((ms, o) => { const i = document.getElementById('intro'); if
   window.__introAtParse = { htmlHidden: document.documentElement.classList.contains('intro-hidden'), modulesRun: !!window.__plato }; o.disconnect(); })
   .observe(document, { childList: true, subtree: true });'''
 
+# Every report of a violation of the page's Content Security Policy, from before its first script.
+CSP_WATCH = "window.__cspViolations = []; document.addEventListener('securitypolicyviolation', (e) => window.__cspViolations.push(e.violatedDirective + ' ' + (e.blockedURI || 'inline')));"
+
 def front_page_checks(browser, url):
     def fresh(width=1280, init=(), hash=''):
         ctx = browser.new_context(viewport={'width': width, 'height': 900})
@@ -1425,15 +1428,23 @@ def front_page_checks(browser, url):
     attempt('front page: "Hide introduction" hides the paragraph and the drawing, not the title, and they stay hidden after a reload until shown again', toggle_persists)
 
     def before_paint():
-        ctx, page = fresh(init=[AT_PARSE, "try { localStorage.setItem('plato-tools.intro', 'hidden'); } catch {}"])
+        # Under the page's Content Security Policy (script-src 'self', written by the one inline script,
+        # the first in <head>): the introduction's own script is a file from the site, and the browser
+        # reports no violation of the policy.
+        ctx, page = fresh(init=[AT_PARSE, CSP_WATCH, "try { localStorage.setItem('plato-tools.intro', 'hidden'); } catch {}"])
         try:
             at = page.evaluate('() => window.__introAtParse')
-            heads = page.evaluate('''() => ({ classic: [...document.head.querySelectorAll('script[src]')].filter((s) => !s.type || s.type === 'text/javascript').map((s) => new URL(s.src).pathname),
-              inline: [...document.querySelectorAll('script:not([src])')].filter((s) => s.textContent.trim()).length })''')
+            heads = page.evaluate('''() => { const inline = [...document.querySelectorAll('script:not([src])')].filter((s) => s.textContent.trim());
+              const meta = document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.content || '';
+              return { classic: [...document.head.querySelectorAll('script[src]')].filter((s) => !s.type || s.type === 'text/javascript').map((s) => new URL(s.src).pathname),
+                inline: inline.length, inlineIsPolicyWriter: inline.length === 1 && inline[0] === document.head.querySelector('script'),
+                scriptSrc: (meta.match(/script-src[^;]*/) || [''])[0], violations: window.__cspViolations || null }; }''')
             same_origin = all(p.endswith('/intro.js') for p in heads['classic']) and len(heads['classic']) == 1
-            return (bool(at) and at['htmlHidden'] is True and at['modulesRun'] is False and same_origin and heads['inline'] == 0), {'when #intro was parsed': at, 'scripts': heads}
+            policy_ok = "'self'" in heads['scriptSrc'] and 'unsafe-inline' not in heads['scriptSrc'] and 'unsafe-eval' not in heads['scriptSrc']
+            return (bool(at) and at['htmlHidden'] is True and at['modulesRun'] is False and same_origin and heads['inlineIsPolicyWriter']
+                    and policy_ok and heads['violations'] == []), {'when #intro was parsed': at, 'scripts': heads}
         finally: ctx.close()
-    attempt('front page: a hidden introduction is hidden as the page is parsed, before its modules run, by a script of its own (none inline)', before_paint)
+    attempt('front page: a hidden introduction is hidden as the page is parsed, before its modules run, by a script file of its own that the page\'s policy allows (no violation)', before_paint)
 
     def refused():
         ctx, page = fresh(init=[REFUSE_STORAGE])
@@ -1466,17 +1477,17 @@ def front_page_checks(browser, url):
         try:
             page.set_input_files('#picker', str(FRONT_FILE))
             wait_state(page, lambda s: s.get('phase') == 'detected', T(60), 'detection')
-            seen, n0 = {}, page.evaluate('history.length')
+            seen, n0 = {}, page.evaluate('() => history.length')
             for key, shown in (('check', ['check']), ('convert', ['convert']), ('figures', ['convert']), ('versions', ['compare']), ('publish', ['publish']), ('match', ['match'])):
                 page.click(f'#toolbox .tool-link[href="#tool={key}"]')
                 vis = page.evaluate(VISIBLE, ACTIONS)
-                seen[key] = {'shown': [a for a in ACTIONS if vis[a]], 'hash': page.evaluate('location.hash'), 'focus': page.evaluate('document.activeElement?.id'),
+                seen[key] = {'shown': [a for a in ACTIONS if vis[a]], 'hash': page.evaluate('() => location.hash'), 'focus': page.evaluate('() => document.activeElement?.id'),
                              'current': page.eval_on_selector_all('#toolbox [aria-current]', 'es => es.map((e) => e.getAttribute("href"))'),
                              'note': page.inner_text('#for-tool'), 'target': page.input_value('#target'), 'cube': page.is_checked('#cube')}
                 seen[key]['ok'] = seen[key]['shown'] == shown and seen[key]['hash'] == f'#tool={key}' and seen[key]['current'] == [f'#tool={key}']
             fig = seen['figures']; fig['ok'] = fig['ok'] and fig['target'] == 'ntriples' and fig['cube'] and 'Arithmos' in fig['note']
-            page.click('#every-action'); back = page.evaluate(VISIBLE, ACTIONS); hash_after = page.evaluate('location.hash')
-            return (all(v['ok'] for v in seen.values()) and all(back.values()) and hash_after == '' and page.evaluate('history.length') == n0), {'per tool': seen, 'every action again': back, 'hash': hash_after}
+            page.click('#every-action'); back = page.evaluate(VISIBLE, ACTIONS); hash_after = page.evaluate('() => location.hash')
+            return (all(v['ok'] for v in seen.values()) and all(back.values()) and hash_after == '' and page.evaluate('() => history.length') == n0), {'per tool': seen, 'every action again': back, 'hash': hash_after}
         finally: ctx.close()
     attempt('front page: choosing a tool\'s card narrows step 2 to that tool (Arithmos: N-Triples with the Data Cube option), and "Show every action" undoes it', narrowed)
 
@@ -1488,7 +1499,7 @@ def front_page_checks(browser, url):
               top: Math.round(a?.getBoundingClientRect().top ?? -1) }; }''')
             hermes = None
             page.click('#toolbox .tool-link[data-tool="read"]')
-            hermes = {'focus': page.evaluate('document.activeElement?.id'), 'hash': page.evaluate('location.hash'), 'current': page.eval_on_selector_all('#toolbox [aria-current]', 'es => es.length')}
+            hermes = {'focus': page.evaluate('() => document.activeElement?.id'), 'hash': page.evaluate('() => location.hash'), 'current': page.eval_on_selector_all('#toolbox [aria-current]', 'es => es.length')}
             return (el['id'] == 'files-h' and el['tabindex'] == '-1' and 'Choose your data' in el['text'] and 0 <= el['top'] < 900
                     and hermes['focus'] == 'picker' and hermes['hash'] == '' and hermes['current'] == 0), {'after a card': el, 'after Hermes': hermes}
         finally: ctx.close()
@@ -1501,7 +1512,7 @@ def front_page_checks(browser, url):
             wait_state(page, lambda s: s.get('phase') == 'detected', T(60), 'detection')
             vis = page.evaluate(VISIBLE, ACTIONS)
             heading = page.inner_text('#action-h')
-            page.evaluate("location.hash = '#tool=nonsense'"); page.wait_for_timeout(200)
+            page.evaluate("() => { location.hash = '#tool=nonsense'; }"); page.wait_for_timeout(200)
             unknown = page.evaluate(VISIBLE, ACTIONS)
             return (vis['publish'] and not any(vis[a] for a in ACTIONS if a != 'publish') and 'publishing' in heading and all(unknown.values())), {'#tool=publish': vis, 'heading': heading, '#tool=nonsense': unknown}
         finally: ctx.close()
@@ -1534,7 +1545,7 @@ def front_page_checks(browser, url):
                 links: c.querySelectorAll('a, button').length, choose: /Choose/.test(c.textContent), visible: !!c.offsetWidth }; }""")
             page.click('#toolbox .tool.coming h3')
             after = page.evaluate(VISIBLE, ACTIONS)
-            hash, tool, current = page.evaluate('location.hash'), page.evaluate('window.__plato.tool ?? null'), page.eval_on_selector_all('#toolbox [aria-current]', 'es => es.length')
+            hash, tool, current = page.evaluate('() => location.hash'), page.evaluate('() => window.__plato.tool ?? null'), page.eval_on_selector_all('#toolbox [aria-current]', 'es => es.length')
             return (bool(card) and card['visible'] and card['coming'] and card['badge'] == 'Planned' and card['label'] == 'Visualisation' and card['links'] == 0 and not card['choose']
                     and all(before.values()) and after == before and hash == '' and tool is None and current == 0), {'card': card, 'before': before, 'after': after, 'hash': hash, 'tool': tool}
         finally: ctx.close()

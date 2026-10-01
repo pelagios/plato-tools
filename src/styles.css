@@ -44,7 +44,7 @@ h1 .logo { height: .9em; width: auto; margin-right: .3em; vertical-align: -.08em
 input[type=radio], input[type=checkbox] { accent-color: var(--accent); }
 .needs-permission { margin: .4rem 0; }
 .family { margin: 0; font-size: 1.1rem; color: var(--muted); }
-.masthead-side { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: .5rem; }
+.masthead-side { display: flex; flex: none; flex-wrap: nowrap; justify-content: flex-end; align-items: center; gap: .5rem; }
 /* Permissions and "Hide introduction", side by side, the same size. */
 .intro-toggle, .permissions-button { white-space: nowrap; font-size: .95rem; padding: .35rem .8rem; }
 /* The introduction: the opening paragraph, with the guide's drawing of Plato floated beside it. The
@@ -325,7 +325,7 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; tex
   header.top { padding-top: 1.25rem; }
   h1 { font-size: 2rem; }
   .masthead { flex-wrap: wrap; align-items: flex-end; }
-  .masthead-side { gap: .4rem; }
+  .masthead-side { flex-wrap: wrap; gap: .4rem; }
   .intro .plato-mark { width: 92px; margin-left: .6rem; }
   .tools { grid-template-columns: 1fr; }
   section { padding: .9rem 1rem; }
