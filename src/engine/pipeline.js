@@ -551,7 +551,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     : input.format === 'lpf' || input.format === 'lpf-seq' ? lpfSource(input.files[0], input.format === 'lpf-seq', rep)
     : input.format === 'tables' ? tablesSource(input, env, rep, options, action)
     : input.format === 'w3c-annotations' ? annotationSource(input, rep)
-    : input.format === 'tei' ? teiSource(input, rep)
+    : input.format === 'tei' ? teiSource(input, rep, options)
     : input.format === 'csv' || input.format === 'geojson' ? genericSource(input, rep, options, DEFAULT_TABLE_BASE)
     : ['ntriples', 'nquads', 'turtle'].includes(input.format) ? rdfSource(input.files[0], input.format, rep) : null;
   if (!source) throw new Error(`Unsupported input: ${input.format}`);
@@ -562,7 +562,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   const isRdf = ['ntriples', 'nquads', 'turtle'].includes(input.format);
   // Annotations and TEI become attestation-centric attestations, which are gathered by place like
   // any others. A CSV or GeoJSON is either, by its column matching: the file is read (and kept) first.
-  const generic = input.format === 'csv' || input.format === 'geojson' ? await genericProfile(input, options.columns) : null;
+  const generic = input.format === 'csv' || input.format === 'geojson' ? await genericProfile(input, options) : null;
   const needsStore = isRdf || input.profile === 'attestation-centric' || input.format === 'w3c-annotations' || input.format === 'tei' || generic === 'attestation-centric';
   const typing = options.typing ? { types: res.types, typedBounds: true, wktPoints: true } : {};
   const profileName = input.profile || generic || (input.format === 'w3c-annotations' || input.format === 'tei' ? 'attestation-centric' : 'place-centric');
