@@ -58,13 +58,14 @@ export const FLAT_END = 0.84, FLAT_END_NARROW = 0.97, NARROW_END = 5;
 export const HOOK_OFF = 0.25;
 /**
  * A line's end is placed along the chord (from its last point to the point two widths back) rather than along the line
- * fitted to its last three widths when the chord's cap fits the ink better and the two are within END_CHORD_TURN degrees,
- * and either the points bend within the stretch fitted (endLine's `bent`) or the chord's cap costs less than
+ * fitted to its last three widths when the two are within END_CHORD_TURN degrees and the chord's cap costs less than
  * END_CHORD_GAIN of the fit's. To the points alone, a bend near the end and a hook into a blob or a burr beside it look
  * the same, and a blob's or a burr's ink beside the end makes either cap cost more; measured on bends of 20° and 45°
  * 1.5 to 5 widths from the end and blobs beside it, at widths 3 and 6 (the chord is 8° to 32° off the fit at a bend,
  * 19° to 62° at a blob). Where the bend is too near the end for the points to show it (a 45° stub 1.5 widths long, 3 px
- * wide), the chord's cost is 0.35 to 0.6 of the fit's; at a blob, within END_CHORD_TURN, 0.95 or more.
+ * wide), the chord's cost is 0.35 to 0.6 of the fit's; at a blob, within END_CHORD_TURN, 0.95 or more. (A second way in,
+ * whether the points bent within the stretch fitted, was measured and dropped: it changed no drawn bend or blob, and of
+ * the probes it moved three ends, two better by 0.6 and 0.1 px, one worse by 0.9.)
  */
 export const END_CHORD_TURN = 35, END_CHORD_GAIN = 0.75;
 /**
@@ -124,15 +125,14 @@ export function prepareTiles(frame, tiles, { colour = true } = {}) {
  * three widths back (at least 10 points); while the nearest of those is off the fit by more than HOOK_OFF (a
  * quarter width, and a pixel at least), the end runs off into a burr (a stub thinning took the line's end into,
  * or a serif): it is left out and the line fitted again (`hook` true), to two widths back at most. `chord`
- * itself, and the end as it is, when there are too few points to fit. `bent`: the points bend within the stretch
- * (the line fitted to either half of it off the other half by more than the tolerance).
+ * itself, and the end as it is, when there are too few points to fit.
  */
 export function endLine(pts, end, width, chord) {
   const step = end === 0 ? 1 : -1, n = pts.length, tol = Math.max(1, HOOK_OFF * width);
   let k0 = Math.ceil(width / 2) + 1;
   const k1 = Math.min(n - 1, Math.max(k0 + 5, 10, Math.round(3 * width)));
   const p = pts[end];
-  if (k1 - k0 < 3) return { u: chord, at: p, hook: false, bent: false };
+  if (k1 - k0 < 3) return { u: chord, at: p, hook: false };
   const fit = (from, to) => {
     let mx = 0, my = 0, m = 0;
     for (let k = from; k <= to; k++) { const q = pts[end + step * k]; mx += q[0]; my += q[1]; m++; }
@@ -148,12 +148,9 @@ export function endLine(pts, end, width, chord) {
   };
   const off = (f, q) => Math.abs((q[0] - f.mx) * f.uy - (q[1] - f.my) * f.ux);
   let f = fit(k0, k1), hook = false;
-  // A bend near the end, or a hook into a burr longer than a point or two: the caller weighs the chord too.
-  const mid = Math.ceil((k0 + k1) / 2), worst = (g, from, to) => { let m = 0; for (let k = from; k <= to; k++) m = Math.max(m, off(g, pts[end + step * k])); return m; };
-  const bent = mid - k0 >= 3 && k1 - mid >= 3 && (worst(fit(k0, mid), mid, k1) > tol || worst(fit(mid, k1), k0, mid) > tol);
   while (k1 - k0 > 5 && k0 < 2 * width + 1 && off(f, pts[end + step * k0]) > tol) { k0++; f = fit(k0, k1); hook = true; }
   const along = (p[0] - f.mx) * f.ux + (p[1] - f.my) * f.uy;
-  return { u: [f.ux, f.uy], at: [f.mx + along * f.ux, f.my + along * f.uy], hook, bent };
+  return { u: [f.ux, f.uy], at: [f.mx + along * f.ux, f.my + along * f.uy], hook };
 }
 
 /**
@@ -499,25 +496,21 @@ export function traceLine(prep, seed, frame, params = {}) {
       let best = { ...fitted, ...place(fitted.u, fitted.at) };
       const byChord = { u: chord, at: work[at], chord: true, ...place(chord, work[at]) };
       const turned = (Math.acos(Math.min(1, Math.abs(fitted.u[0] * chord[0] + fitted.u[1] * chord[1]))) * 180) / Math.PI;
-      if (byChord.cost < best.cost && turned < END_CHORD_TURN && (fitted.bent || byChord.cost < END_CHORD_GAIN * best.cost)) best = byChord;
+      if (turned < END_CHORD_TURN && byChord.cost < END_CHORD_GAIN * best.cost) best = byChord;
       const { u: [ux, uy], at: [bx, by], go, tWide } = best;
-      // Points off the fitted line by more than a quarter width (and a pixel) at the end are a hook into a burr: let go
-      // (not along the chord: those are the bend's).
+      // Points off the line taken by more than a quarter width (and a pixel), from the end's neighbour inwards, are a hook
+      // into a burr: let go. (Along the chord too: the end's neighbour is on the chord, so a bend's points are never taken.)
       const off = (q) => Math.abs((q[0] - bx) * uy - (q[1] - by) * ux) > Math.max(1, HOOK_OFF * width);
-      for (let k = 0; !best.chord && k < 2 * width + 2 && work.length > 2; k++) {
+      for (let k = 0; k < 2 * width + 2 && work.length > 2; k++) {
         const j = at > 0 ? work.length - 2 : 1;
         if (!off(work[j])) break;
         work.splice(j, 1);
       }
       if (at > 0) at = work.length - 1;
       // Drawn back too (to a width at most) when the end placed is short of the last point: thinning can run on into a burr.
+      // (A pass letting go of points beyond a drawn-back end was measured inert on every test and probe, and dropped.)
       if (!(go > -width || Number.isFinite(tWide))) return;
-      const e = [bx + go * ux, by + go * uy];
-      work[at] = e;
-      // Drawn back, the points beyond the new end are let go (the line does not fold back on itself).
-      const beyond = (q) => (q[0] - e[0]) * ux + (q[1] - e[1]) * uy > 0;
-      if (at > 0) while (work.length > 2 && beyond(work[work.length - 2])) work.splice(work.length - 2, 1);
-      else while (work.length > 2 && beyond(work[1])) work.splice(1, 1);
+      work[at] = [bx + go * ux, by + go * uy];
     };
     // The chord's far point: K points back along the path, or the first point as far as K pixels back (refinement
     // lets points go: K points back can be past a bend).
