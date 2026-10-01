@@ -286,13 +286,21 @@ export function authorityOf(iri) {
 
 /**
  * One place's addresses (objects with an `iri`, already canonical and each given once): { preferred,
- * others } by the order of AUTHORITIES (other hosts after them, alphabetically by host), or
+ * others, pages } by the order of AUTHORITIES (other hosts after them, alphabetically by host), or
  * { clash: [iri, iri, …] } when two of them are from the same authority (the first such authority's,
- * in the order given). One address is { preferred, others: [] }.
+ * in the order given). One address is { preferred, others: [], pages: [] }.
+ * A web page that is not a gazetteer's record (`page: true`, placeAddress: Wikipedia, Google Maps and
+ * its short links) is never preferred, nor the object of an identity relation: it is left out of the
+ * grouping and returned in `pages`, given but not used as an identifier. Only where every address is
+ * a web page: one is preferred as it is (carried as given, as a lone address always was), and several
+ * are a clash (which page names the place cannot be told).
  */
 export function preferredAddress(addresses) {
+  const pages = addresses.filter((a) => a.page);
+  const ids = addresses.filter((a) => !a.page);
+  if (!ids.length) return pages.length > 1 ? { clash: pages.map((a) => a.iri) } : { preferred: pages[0], others: [], pages: [] };
   const by = new Map();
-  for (const a of addresses) {
+  for (const a of ids) {
     const au = authorityOf(a.iri);
     const g = by.get(au.key);
     if (g) g.list.push(a); else by.set(au.key, { ...au, list: [a] });
@@ -300,7 +308,7 @@ export function preferredAddress(addresses) {
   const clash = [...by.values()].find((g) => g.list.length > 1);
   if (clash) return { clash: clash.list.map((a) => a.iri) };
   const order = [...by.values()].sort((x, y) => x.rank - y.rank || (x.key < y.key ? -1 : x.key > y.key ? 1 : 0));
-  return { preferred: order[0].list[0], others: order.slice(1).map((g) => g.list[0]) };
+  return { preferred: order[0].list[0], others: order.slice(1).map((g) => g.list[0]), pages };
 }
 
 /** The identity relations an attestation about `preferred` carries to each of `others`: the source links them, without saying how strongly. */
@@ -311,4 +319,9 @@ export function identityRelations(preferred, others) {
 /** The note on a record whose place had several addresses: which one it is about, and by which order. */
 export function preferredNote(preferred, others) {
   return `The place has ${others.length + 1} addresses: this attestation is about ${preferred} (${PREFERRED_RULES}), with an identity relation to ${others.length > 1 ? 'each of the others' : 'the other'}: ${others.join(', ')}`;
+}
+
+/** The note on a record whose place was also given web pages that are not gazetteer records (preferredAddress's `pages`): given, not used as identifiers. */
+export function pagesNote(pages) {
+  return `Also given ${pages.length > 1 ? 'web pages' : 'a web page'}, not a gazetteer record and not used as an identifier (${PREFERRED_RULES}): ${pages.join(', ')}`;
 }

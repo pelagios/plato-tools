@@ -474,8 +474,15 @@ with the preferred address's host only.
 | 8 | `pmb` | PMB (a project's own): `pmb.acdh.oeaw.ac.at` |
 
 Gazetteers of places come first, then authority files, then a project's own; any other host comes
-after them all, in alphabetical order of its host (a Wikipedia page, carried and reported as
-`address-web-page`, is such a host). A change to the order, or a new authority, is a new version:
+after them all, in alphabetical order of its host.
+
+An address that is a web page rather than a gazetteer record (the ones `placeAddress` marks `page`
+and the readers report as `address-web-page`: Wikipedia pages, `goo.gl` and `maps.app.goo.gl` short
+links, `google.com/maps`) is never the preferred address nor the object of an identity relation. It
+is left out of the grouping, still reported as `address-web-page`, and the attestation's note names
+it as given but not used as an identifier (`pagesNote`). Only where a place's addresses are all web
+pages does one count: a lone web page is carried as given, with its warning, as before; several are
+ambiguous, refused and reported (`tei-listplace-ambiguous`, `tei-ref-ambiguous`, listing them). A change to the order, or a new authority, is a new version:
 change `PREFERRED_RULES` and this heading together (`test/tei-ids-and-notes.test.js` fails when the
 heading, the rows and `AUTHORITIES` differ), since every such note names the version and an earlier
 conversion's attestation may be about a different address.

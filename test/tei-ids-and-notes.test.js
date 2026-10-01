@@ -121,6 +121,57 @@ test('a ref with a web address and a #x: all their addresses together are one pl
   assert.deepEqual([clash.doc.attestations, examples(clash, 'tei-ref-ambiguous')], [[], ['<placeName> on line 2: https://sws.geonames.org/1/, https://sws.geonames.org/264371/']]);
 });
 
+// ---- web pages beside gazetteer ids ------------------------------------------------------------------
+const GNW = 'https://sws.geonames.org/3164048/', WDW = 'http://www.wikidata.org/entity/Q1248', WP = 'https://en.wikipedia.org/wiki/Monte_Viso';
+test('a listed place with GeoNames, Wikidata and a Wikipedia idno: identity relations only to Wikidata, the Wikipedia page reported and noted', () => {
+  const place = (extra) => tei(`<listPlace><place xml:id="v"><placeName>Monte Viso</placeName><idno type="URL">${GNW}</idno>${extra}<idno type="URL">${WDW}</idno></place></listPlace>`);
+  const m = mapped(place(`<idno type="URL">${WP}</idno>`), { listPlaces: true });
+  const c = mapped(place(''), { listPlaces: true });
+  assert.equal(m.doc.attestations.length, 1);
+  const [a] = m.doc.attestations;
+  assert.equal(a.about, GNW);
+  assert.deepEqual(a.identities, [unspecified(GNW, WDW)]);
+  assert.deepEqual(examples(m, 'address-web-page'), [`#v: ${WP}`]);
+  assert.deepEqual(examples(m, 'tei-several-ids'), [`${GNW}, with ${WDW}`]);
+  assert.match(a.notes, new RegExp(`Also given a web page, not a gazetteer record and not used as an identifier \\(hermes-preferred 1\\): ${WP.replace(/[.]/g, '\\.')}`));
+  assert.ok(!m.kinds.has('tei-listplace-ambiguous'));
+  assert.equal(valid(m.doc), null);
+  // control: without the Wikipedia idno, the same output, minus the report and the note
+  assert.deepEqual(examples(c, 'address-web-page'), []);
+  assert.doesNotMatch(c.doc.attestations[0].notes, /Also given/);
+  const strip = (doc) => JSON.parse(JSON.stringify(doc.attestations).replace(/\\nAlso given[^\\]*/g, '').replace(/line \d+/g, 'line N'));
+  assert.deepEqual(strip(m.doc), strip(c.doc));
+  assert.deepEqual(m.reported.filter(([k]) => k !== 'address-web-page'), c.reported);
+});
+
+test('an inline ref with a Pleiades address and a Wikipedia page: about Pleiades, no identity relation, the warning given', () => {
+  const PL = 'https://pleiades.stoa.org/places/579885', W = 'https://en.wikipedia.org/wiki/Athens';
+  const m = mapped(tei(`<p><placeName ref="${W} ${PL}">Athenae</placeName></p>`));
+  assert.deepEqual(m.doc.attestations.map((a) => a.about), [PL]);
+  assert.equal(m.doc.attestations[0].identities, undefined);
+  assert.deepEqual(examples(m, 'address-web-page'), [`${W} (Athenae)`]);
+  assert.ok(!m.kinds.has('tei-several-ids') && !m.kinds.has('tei-ref-ambiguous'));
+  assert.match(m.doc.attestations[0].notes, /not used as an identifier/);
+  assert.equal(valid(m.doc), null);
+  // control: a lone web page is carried as given, with its warning; two web pages and nothing else are ambiguous
+  const one = mapped(tei(`<p><placeName ref="${W}">Athenae</placeName></p>`));
+  assert.deepEqual([one.doc.attestations.map((a) => a.about), examples(one, 'address-web-page')], [[W], [`${W} (Athenae)`]]);
+  assert.doesNotMatch(one.doc.attestations[0].notes, /not used as an identifier/);
+  const two = mapped(tei(`<p><placeName ref="${W} https://maps.app.goo.gl/abc">Athenae</placeName></p>`));
+  assert.deepEqual([two.doc.attestations, examples(two, 'tei-ref-ambiguous')], [[], [`<placeName> on line 2: ${W}, https://maps.app.goo.gl/abc`]]);
+  // and a #x to a listed place whose only addresses are two web pages
+  const list = mapped(tei(`<p><placeName ref="#a">Athenae</placeName></p><listPlace><place xml:id="a"><idno>${W}</idno><idno>https://www.google.com/maps/place/Athens</idno></place></listPlace>`));
+  assert.deepEqual([list.doc.attestations, examples(list, 'tei-ref-ambiguous')], [[], [`#a: ${W}, https://www.google.com/maps/place/Athens`]]);
+});
+
+test('preferredAddress never prefers a web page, nor relates one, unless every address is one', () => {
+  const W = { iri: 'https://en.wikipedia.org/wiki/X', page: true };
+  const c = preferredAddress([W, { iri: 'https://zz.example.org/p/1' }]);
+  assert.deepEqual([c.preferred.iri, c.others, c.pages], ['https://zz.example.org/p/1', [], [W]]);
+  assert.deepEqual(preferredAddress([W]), { preferred: W, others: [], pages: [] });
+  assert.deepEqual(preferredAddress([W, { iri: 'https://de.wikipedia.org/wiki/X', page: true }]).clash, [W.iri, 'https://de.wikipedia.org/wiki/X']);
+});
+
 // ---- notes in the editors' words ------------------------------------------------------------------------
 // A Perseus-like file, constructed (no Perseus text is committed): no edition div, the text in a
 // div type="translation", a note by the editor and an unmarked note.

@@ -22,7 +22,7 @@ import { SaxesParser } from 'saxes';
 import { PLATO, isAbsoluteIri } from '../../lib/context.js';
 import { DataError, textStream } from '../input.js';
 import { LOSS_TEXT } from '../report.js';
-import { placeAddress, addressNote, addressFromPattern, patternFault, GAZETTEER_PATTERNS, preferredAddress, identityRelations, preferredNote } from './addresses.js';
+import { placeAddress, addressNote, addressFromPattern, patternFault, GAZETTEER_PATTERNS, preferredAddress, identityRelations, preferredNote, pagesNote } from './addresses.js';
 
 export const TEI_NS = 'http://www.tei-c.org/ns/1.0';
 const ATTESTED = PLATO + 'Attested';
@@ -770,7 +770,7 @@ export class TeiReader {
     if (r.part) this.report('address-pleiades-part', `${which}: ${r.iri}`);
     if (r.page) this.report('address-web-page', `${which}: ${r.iri}`);
     if (!isWeb(r.iri)) return false;
-    if (!pl.uris.some((u) => u.iri === r.iri)) pl.uris.push(r.from ? { iri: r.iri, from: r.from, rules: r.rules } : { iri: r.iri });
+    if (!pl.uris.some((u) => u.iri === r.iri)) pl.uris.push(r.from ? { iri: r.iri, from: r.from, rules: r.rules } : r.page ? { iri: r.iri, page: true } : { iri: r.iri });
     return true;
   }
   placeDone(pl) {
@@ -811,7 +811,7 @@ export class TeiReader {
     // one address (http and https) were made one as the idnos were read.
     const chosen = preferredAddress(pl.uris);
     if (chosen.clash) { this.report('tei-listplace-ambiguous', `${which}: ${chosen.clash.join(', ')}`); return; }
-    const u = chosen.preferred, others = chosen.others;
+    const u = chosen.preferred, others = chosen.others, pages = chosen.pages;
     if (!pl.names.length) { if (pl.geo.length) this.report('tei-listplace-geo', `${which}: ${pl.geo.join('; ')}`); return; }
     const [head, ...variants] = pl.names;
     if (variants.length) this.report('tei-listplace-variant', `${which}: ${variants.map((n) => n.text).join(', ')}`);
@@ -842,7 +842,7 @@ export class TeiReader {
       else this.report('tei-listplace-geo-gazetteer', `${which}: ${points.map((p) => p.label).join('; ')} (${u.iri})`);
     }
     att.citations = [{ source, locator }];
-    const notes = this.severalIds(att, u, others);
+    const notes = this.severalIds(att, u, others, pages);
     notes.push(`From TEI element <place${pl.id !== undefined ? ` xml:id="${pl.id}"` : ''}> on line ${pl.fileLine} of ${this.fileName}`);
     att.notes = notes.join('\n');
     this.attestations++;
@@ -852,16 +852,18 @@ export class TeiReader {
    * An attestation about the preferred one of a place's addresses (preferredAddress): its identity
    * relations to the others (identityType unspecified: the edition links them without saying how
    * strongly; the attestation's citation of the edition is their provenance), reported once for each
-   * place (tei-several-ids). Returns the notes so far: which address was preferred, and the original
-   * of each address rewritten.
+   * place (tei-several-ids). Web pages given beside them (`pages`, already reported as
+   * address-web-page) are named in a note, as given but not used as identifiers. Returns the notes so
+   * far: which address was preferred, the pages left out, and the original of each address rewritten.
    */
-  severalIds(att, preferred, others) {
+  severalIds(att, preferred, others, pages = []) {
     const notes = [];
     if (others.length) {
       att.identities = identityRelations(preferred.iri, others.map((o) => o.iri));
       notes.push(preferredNote(preferred.iri, others.map((o) => o.iri)));
       this.once('tei-several-ids', `${preferred.iri}, with ${others.map((o) => o.iri).join(', ')}`);
     }
+    if (pages.length) notes.push(pagesNote(pages.map((p) => p.iri)));
     for (const a of [preferred, ...others]) if (a.from) notes.push(addressNote(a));
     return notes;
   }
@@ -1008,7 +1010,7 @@ export class TeiReader {
     if (r.lost) { this.report(WHG_LOST[r.lost], `${r.value} (key ${k})`); return { lost: true }; }
     if (r.part) this.report('address-pleiades-part', `${r.iri} (key ${k})`);
     if (r.page) this.report('address-web-page', `${r.iri} (key ${k})`);
-    return { address: { iri: r.iri, ...(r.from ? { from: r.from, rules: r.rules } : {}) }, note: `Place address made from the key ${k} with the pattern ${pattern}` };
+    return { address: { iri: r.iri, ...(r.from ? { from: r.from, rules: r.rules } : {}), ...(r.page ? { page: true } : {}) }, note: `Place address made from the key ${k} with the pattern ${pattern}` };
   }
   /** The prefixDefs in force, innermost first: one array, made again only when a prefixDef or a TEI element comes or goes. */
   prefixes() {
@@ -1100,7 +1102,7 @@ export class TeiReader {
       if (r.lost) { this.report(WHG_LOST[r.lost], `${r.value}${words}`); return null; }
       if (r.part) this.report('address-pleiades-part', `${r.iri}${words}`);
       if (r.page) this.report('address-web-page', `${r.iri}${words}`);
-      return { iri: r.iri, ...(r.from ? { from: r.from, rules: r.rules } : {}), ...(via ? { via } : {}) };
+      return { iri: r.iri, ...(r.from ? { from: r.from, rules: r.rules } : {}), ...(r.page ? { page: true } : {}), ...(via ? { via } : {}) };
     };
     if (isWeb(p)) return address(p);
     if (p.startsWith('#')) {
@@ -1111,7 +1113,7 @@ export class TeiReader {
         // The place's preferred address, with the others (severalIds); two from one gazetteer: ambiguous.
         const c = preferredAddress(pl.uris);
         if (c.clash) { this.report('tei-ref-ambiguous', `${p}: ${c.clash.join(', ')}`); return null; }
-        return { ...c.preferred, via: p, others: c.others.map((o) => ({ ...o, via: p })) };
+        return { ...c.preferred, via: p, others: [...c.others, ...c.pages].map((o) => ({ ...o, via: p })) };
       }
       this.report('tei-ref-local', p);
       return null;
@@ -1159,7 +1161,7 @@ export class TeiReader {
     if (name) { att.names = [{ ...name }]; att.formStatus = m.editorial ? this.editorialIri : ATTESTED; }
     att.citations = [{ source: m.source, ...(m.locator ? { locator: m.locator } : {}) }];
     if (m.relation) att.relations = [{ ...m.relation }];
-    const several = this.severalIds(att, r, chosen.others);
+    const several = this.severalIds(att, r, chosen.others, chosen.pages);
     const notes = [];
     if (m.editorial) notes.push(m.editorialNote || "The editors' words, not the source's.");
     if (m.extraNotes) notes.push(...m.extraNotes);
