@@ -25,8 +25,10 @@
 //   - plato:LabelAnchor when the annotation gives the label's words or says it is a label: a
 //     transcription, a quote (what src/formats/annotations.js takes as the attested name), or a tag
 //     "label" (see isLabelTag), the one of these Recogito Studio's own editor can write;
-//   - else no role, with a note saying why, and a warning. A region tagged "symbol" (isSymbolTag)
-//     is given no role too, for now (see the TODO at roleOf).
+//   - plato:RepresentativePoint, with spatialPrecision ["approximate"] and a note, when the region
+//     is tagged "symbol" (isSymbolTag): the region is drawn round the map's symbol for the place,
+//     and its centre stands in for the place. A symbol tag wins over label evidence (see roleOf);
+//   - else no role, with a note saying why, and a warning.
 // Everything else (no georeference for the image, a centre outside the map, in two maps or beyond
 // its control points, a Recogito v1 document, a georeference that cannot place it) is reported by
 // kind, and the region stays what it was before: a locator in words, in the citation of the image.
@@ -42,8 +44,10 @@ import { parseXywh, xywhPolygon, parseSvg, vertices, openRing, signedArea2 } fro
 
 /** The note on a placed region that nothing marks as a label. */
 export const NO_ROLE_NOTE = 'The position is the centre of a region drawn on the map. Nothing in the annotation says that the region marks a label, so the position is given no role.';
-/** The note on a placed region tagged as a symbol, which is given no role for now (see roleOf). */
-export const SYMBOL_NOTE = 'The position is the centre of a region drawn on the map and tagged as a symbol; it is given no role.';
+/** The note on a placed region tagged as a symbol, a representative point (see roleOf). */
+export const SYMBOL_NOTE = "The position is the centre of the region drawn round the map's symbol, not the symbol itself.";
+/** The role of a placed region tagged as a symbol. */
+export const REPRESENTATIVE_POINT = 'https://w3id.org/plato#RepresentativePoint';
 const MEDIA_FRAGS = /^https?:\/\/www\.w3\.org\/TR\/media-frags\/?$/;
 const RECOGITO_V1 = /^https?:\/\/recogito\.pelagios\.org\//i;
 const EARTH_KM = 6371.0088; // the mean radius (IUGG), for the haversine distance
@@ -59,14 +63,16 @@ const EARTH_KM = 6371.0088; // the mean radius (IUGG), for the haversine distanc
 export const isLabelTag = (text) => typeof text === 'string' && /^(map\s+)?labels?$/i.test(text.trim());
 export const isSymbolTag = (text) => typeof text === 'string' && /^(map\s+)?symbols?$/i.test(text.trim());
 /**
- * The role of a placed region's point, and the note for one with none.
- * TODO(maintainer): a region tagged "symbol" was to be plato:RepresentativePoint; an independent
- * review argued that a map's town symbol depicts a feature (plato:FeaturePoint, as PLATO's example
- * has it) rather than standing in for the place ("need not depict any feature"). Until the
- * maintainer chooses, a symbol is given no role, with its own note and the no-label warning.
+ * The role of a placed region's point, its spatialPrecision, and its note.
+ * A region tagged "symbol" is plato:RepresentativePoint, spatialPrecision ["approximate"] (the
+ * maintainer's decision, 2026-10-01): the centre of a region drawn round a symbol is near the
+ * symbol, not on it. Precedence: a symbol tag wins over label evidence (a transcription, a quote, a
+ * tag "label"), the rule this function already had when a symbol was given no role; the annotator
+ * who tags a region "symbol" has said what it is drawn round, where a transcription may only give
+ * the name written beside it.
  */
 function roleOf(ctx) {
-  if (ctx.symbol) return { role: undefined, note: SYMBOL_NOTE };
+  if (ctx.symbol) return { role: REPRESENTATIVE_POINT, precision: ['approximate'], note: SYMBOL_NOTE };
   if (ctx.label) return { role: LABEL_ANCHOR };
   return { role: undefined, note: NO_ROLE_NOTE };
 }
@@ -407,11 +413,11 @@ export function withinControlPoints(g, point) {
 const SHAPE_WORDS = 'a shape drawn on the image';
 
 async function place(m, geom, centre, attestations, ctx, report, shape) {
-  const { role, note } = roleOf(ctx);
+  const { role, precision, note } = roleOf(ctx);
   // The centre was worked out in pixels, and is placed as a point of its own.
   const { geojson: point, record } = await toWorld(m.g, { type: 'Point', coordinates: centre }, { space: 'image', role });
   const { geojson: outline } = await toWorld(m.g, geom, { space: 'image' });
-  const geometry = { geojson: point, ...(role ? { role } : {}), precisionKm: [radiusKm(point, outline, record)] };
+  const geometry = { geojson: point, ...(role ? { role } : {}), ...(precision ? { spatialPrecision: precision } : {}), precisionKm: [radiusKm(point, outline, record)] };
   // The region's exact pixel box (georefCitation pads nothing unless asked), at least 1 pixel
   // each way: a straight horizontal or vertical line (Recogito Studio's path tool draws them) has
   // no height or no width, and a box of none is no box. It grows about its middle.

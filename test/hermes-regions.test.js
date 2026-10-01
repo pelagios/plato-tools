@@ -36,6 +36,7 @@ const ajv = addPlatoFormats(new Ajv2020({ strict: false, allErrors: true, logger
 ajv.addSchema(load('plato.schema.json'), 'https://w3id.org/plato/schemas/plato.schema.json');
 ajv.addSchema(load('attestation-centric.schema.json'));
 ajv.addSchema(load('place-centric.schema.json'));
+const REPRESENTATIVE = 'https://w3id.org/plato#RepresentativePoint';
 const AC = 'https://w3id.org/plato/schemas/attestation-centric.schema.json', PC = 'https://w3id.org/plato/schemas/place-centric.schema.json';
 const valid = (schema, doc) => { const v = ajv.getSchema(schema); return v(doc) ? null : v.errors.slice(0, 3); };
 
@@ -87,12 +88,12 @@ const outlineVertices = (g) => (g.type === 'LineString' ? g.coordinates : g.type
  * toWorld of the centre; the radius the farthest outline vertex plus the control-point misfit (none
  * for a thin plate spline), rounded up to 0.01 km; the note and citations georef's own.
  */
-async function expected(g, centre, outline, role, bbox, transformation) {
+async function expected(g, centre, outline, role, bbox, transformation, precision) {
   const { geojson: point, record } = await toWorld(g, { type: 'Point', coordinates: centre }, { space: 'image', role, transformation });
   const { geojson: shape } = await toWorld(g, outline, { space: 'image', transformation });
   const far = Math.max(...outlineVertices(shape).map((v) => km(point.coordinates, v))) + (record.controlPointMisfitKm ?? 0);
   return {
-    geometry: { geojson: point, ...(role ? { role } : {}), precisionKm: [Math.ceil(far * 100 - 1e-9) / 100] },
+    geometry: { geojson: point, ...(role ? { role } : {}), ...(precision ? { spatialPrecision: precision } : {}), precisionKm: [Math.ceil(far * 100 - 1e-9) / 100] },
     far,
     record,
     note: georefNote(record, { misfit: true }),
@@ -226,16 +227,16 @@ const CASES = {
   2: { what: 'the polygon round LAKE ONTARIO, with a quote', centre: fanCentroid(ONTARIO), outline: ring(ONTARIO), role: LABEL_ANCHOR, bbox: bboxOf(ONTARIO) },
   4: { what: 'the ellipse round LAKE HURON', centre: [5040, 5170], outline: { svg: item(4).target.selector.value }, role: LABEL_ANCHOR, bbox: [4850, 5138, 380, 64] },
   5: { what: 'Montreal, with no transcription', centre: [6140 + 70, 5074 + 16], outline: { xywh: '6140,5074,140,32' }, role: undefined, bbox: [6140, 5074, 140, 32] },
-  6: { what: 'the Worcester symbol, tagged "symbol" (no role for now)', centre: [6358 + 7.5, 5510 + 7.5], outline: { xywh: '6358,5510,15,15' }, role: undefined, note: SYMBOL_NOTE, bbox: [6358, 5510, 15, 15] },
+  6: { what: 'the Worcester symbol, tagged "symbol" (a representative point, approximate)', centre: [6358 + 7.5, 5510 + 7.5], outline: { xywh: '6358,5510,15,15' }, role: REPRESENTATIVE, precision: ['approximate'], note: SYMBOL_NOTE, bbox: [6358, 5510, 15, 15] },
   9: { what: 'Boston, on the full-size picture', centre: [6278 + 60, 5480 + 15], outline: { xywh: '6278,5480,120,30' }, role: LABEL_ANCHOR, bbox: [6278, 5480, 120, 30] },
   16: { what: 'Albany, tagged "Label"', centre: [6096 + 55, 5482 + 14], outline: { xywh: '6096,5482,110,28' }, role: LABEL_ANCHOR, bbox: [6096, 5482, 110, 28] },
 };
-const NOTE = (c) => (c.role ? undefined : c.note ?? NO_ROLE_NOTE);
+const NOTE = (c) => c.note ?? (c.role ? undefined : NO_ROLE_NOTE);
 for (const [n, c] of Object.entries(CASES)) {
   test(`placed: ${c.what}: the point is toWorld of its centre, the radius holds its outline, the citations and note are georef's own`, async () => {
     const { attestation } = await MAIN();
     const g = await rocque();
-    const want = await expected(g, c.centre, c.outline, c.role, c.bbox);
+    const want = await expected(g, c.centre, c.outline, c.role, c.bbox, undefined, c.precision);
     const att = attestation(Number(n));
     assert.deepEqual(att.geometries, [want.geometry]);
     // The radius holds the whole outline, and is no more than 0.01 km beyond it.
@@ -319,7 +320,11 @@ test('placed: the whole document, and the PLATO JSON converted from it, are vali
   const geoms = pc.spatialEntities.flatMap((p) => p.attestations.flatMap((a) => a.geometries || []));
   assert.equal(geoms.length, Object.keys(CASES).length);
   assert.equal(geoms.filter((x) => x.role === LABEL_ANCHOR).length, 5);
-  assert.equal(geoms.filter((x) => x.role !== undefined && x.role !== LABEL_ANCHOR).length, 0);
+  assert.equal(geoms.filter((x) => x.role !== undefined && x.role !== LABEL_ANCHOR).length, 1);
+  const symbol = pc.spatialEntities.find((p) => p['@id'] === 'http://www.wikidata.org/entity/Q49179').attestations.find((a) => a.geometries);
+  assert.deepEqual(symbol.geometries, (await MAIN()).attestation(6).geometries, 'the symbol, with its role and spatialPrecision, survives the conversion');
+  assert.equal(symbol.geometries[0].role, REPRESENTATIVE);
+  assert.deepEqual(symbol.geometries[0].spatialPrecision, ['approximate']);
   const erie = pc.spatialEntities.find((p) => p['@id'] === 'http://www.wikidata.org/entity/Q5492').attestations.find((a) => a.geometries);
   assert.deepEqual(erie.geometries, (await MAIN()).attestation(1).geometries);
   // Control: the same export alone gives no geometry at all.
@@ -341,20 +346,28 @@ test('annotation-region-shape: once for each placed region, and for nothing else
   assert.deepEqual(shapes.map((e) => e.slice(0, 36)).sort(), Object.keys(CASES).map((n) => id(n)).sort());
   assert.equal(ANNOTATION_KINDS['annotation-region-shape'], 'loss');
 });
-test('annotation-region-no-label-evidence: the region with no transcription, quote or "label" tag, and the symbol; not the others', async () => {
+test('annotation-region-no-label-evidence: the region with no transcription, quote or "label" tag; not the symbol, nor the others', async () => {
   const { of, attestation } = await MAIN();
-  assert.deepEqual(of('annotation-region-no-label-evidence'), [id(5), id(6)]);
+  assert.deepEqual(of('annotation-region-no-label-evidence'), [id(5)]);
   assert.equal('role' in attestation(5).geometries[0], false);
+  assert.equal('spatialPrecision' in attestation(5).geometries[0], false, 'control: an untagged region with no evidence has no precision qualifier either');
+  assert.equal(attestation(6).geometries[0].role, REPRESENTATIVE, 'the symbol is a representative point');
   assert.equal(attestation(1).geometries[0].role, LABEL_ANCHOR, 'control: a transcription makes a label');
   assert.equal(attestation(2).geometries[0].role, LABEL_ANCHOR, 'control: a quote makes a label');
   assert.equal(attestation(16).geometries[0].role, LABEL_ANCHOR, 'control: a tag "Label" makes a label');
 });
-test('the tag conventions: "label" (any case, free or from a vocabulary) makes a label; "symbol" gives no role even beside a transcription', async () => {
+test('the symbol note, pinned', () => {
+  assert.equal(SYMBOL_NOTE, "The position is the centre of the region drawn round the map's symbol, not the symbol itself.");
+});
+test('the tag conventions: "label" (any case, free or from a vocabulary) makes a label; "symbol" makes a representative point, approximate, even beside a transcription', async () => {
   const six = item(6), five = item(5);
   const words = { created: six.created, creator: six.body[0].creator, purpose: 'transcribing', value: 'Worcester' };
   const vocabTag = (label) => ({ ...six.body[1], value: { label, id: `http://example.org/vocab/${label.replace(/ /g, '-')}` }, format: 'application/json' });
   const cases = [
-    [{ ...six, body: [six.body[0], vocabTag('Map symbols'), words] }, null, SYMBOL_NOTE],
+    // Label evidence and a tag "symbol" together: the symbol wins (the precedence in roleOf).
+    [{ ...six, body: [six.body[0], vocabTag('Map symbols'), words] }, REPRESENTATIVE, SYMBOL_NOTE],
+    [{ ...six, body: [six.body[0], { ...six.body[1], value: ' SYMBOL ' }] }, REPRESENTATIVE, SYMBOL_NOTE],
+    [{ ...five, body: [five.body[0], { ...six.body[1], value: 'symbol' }, { ...six.body[1], value: 'label' }] }, REPRESENTATIVE, SYMBOL_NOTE],
     [{ ...six, body: [six.body[0], words] }, LABEL_ANCHOR, null],
     [{ ...six, body: [six.body[0], { ...six.body[1], value: 'Symbolic' }] }, null, NO_ROLE_NOTE],
     [{ ...five, body: [five.body[0], { ...six.body[1], value: ' LABEL ' }] }, LABEL_ANCHOR, null],
@@ -365,6 +378,9 @@ test('the tag conventions: "label" (any case, free or from a vocabulary) makes a
     const r = await placed({ georefs: [ROCQUE], manifests: [ROCQUE_M] }, [a]);
     const [att] = r.doc.attestations;
     assert.equal(att.geometries?.[0].role ?? null, role, `case ${i}`);
+    assert.deepEqual(att.geometries?.[0].spatialPrecision ?? null, role === REPRESENTATIVE ? ['approximate'] : null, `case ${i}: spatialPrecision`);
+    assert.equal(r.of('annotation-region-no-label-evidence').length > 0, role === null, `case ${i}: the no-label warning`);
+    assert.equal(valid(AC, { profile: 'attestation-centric', gazetteer: { title: 't' }, attestations: [att] }), null, `case ${i}: schema`);
     for (const x of [NO_ROLE_NOTE, SYMBOL_NOTE]) assert.equal(att.notes.split('\n').includes(x), note === x, `case ${i}: ${x}`);
   }
 });

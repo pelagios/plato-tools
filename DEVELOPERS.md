@@ -163,9 +163,11 @@ output is byte for byte what it was (the test holds the digests).
   otherwise no role, a note and a warning. The tag conventions (`label`, `symbol`, or `map label`,
   `map symbol`, singular or plural, any case, free or from a vocabulary) are the only evidence
   Recogito Studio's own editor can write for an image: it has no transcription, and Annotorious
-  writes no quote for an image. A region tagged `symbol` has no role for now: whether a map's
-  symbol is `plato:RepresentativePoint` or `plato:FeaturePoint` is the maintainer's decision (the
-  TODO at `roleOf`).
+  writes no quote for an image. A region tagged `symbol` is `plato:RepresentativePoint` with
+  `spatialPrecision: ["approximate"]` and the note "The position is the centre of the region drawn
+  round the map's symbol, not the symbol itself." (the maintainer's decision, 2026-10-01), and is
+  not given the `annotation-region-no-label-evidence` warning. A region with both label evidence and
+  a tag `symbol` is a symbol: the tag wins (`roleOf`).
 - **Reporting.** Every region is reported by exactly one of the `annotation-region-*` kinds, and a
   placed one also by `annotation-region-shape`; with georeferences an SVG shape is not also
   reported as `annotation-selector` (it still is when its annotation is not converted at all, and
