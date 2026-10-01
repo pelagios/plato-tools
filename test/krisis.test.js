@@ -292,6 +292,8 @@ test("PLATO's judgements example matched with itself: the Newtons it says are di
 });
 test('every input format is matched alike: the other dataset as Linked Places Format, the subjects as spreadsheet tables', async () => {
   const plain = await run();
+  // Two empty lists are equal: the comparisons below mean something only if there is a suggestion.
+  assert.ok(pairs(plain.work).length > 0, 'the plain run suggests something');
   // The other dataset converted to LPF: the same suggestions.
   const lpf = await go([json(othersDoc(), 'b.json')], 'convert', 'lpf');
   const lpfText = outText(lpf.e, 'b.geojson');

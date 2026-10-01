@@ -29,6 +29,11 @@ test('the streamed checks give the same results as the in-memory ones, across ma
   for (const dup of [false, true]) {
     const text = cube(100000, dup);
     const want = summary(integrity(text));
+    // Two empty lists are equal too, so what both must give is named: every check, each with
+    // something to evaluate (IC-14 has no measure here), and the duplicate found.
+    assert.deepEqual(want, dup
+      ? [['IC-1', 'pass', 100001, 0], ['IC-2', 'pass', 1, 0], ['IC-11', 'pass', 200002, 0], ['IC-12', 'fail', 100001, 1], ['IC-14', 'not-tested', 0, 0]]
+      : [['IC-1', 'pass', 100000, 0], ['IC-2', 'pass', 1, 0], ['IC-11', 'pass', 200000, 0], ['IC-12', 'pass', 100000, 0], ['IC-14', 'not-tested', 0, 0]], `in memory, dup ${dup}`);
     assert.deepEqual(summary(await integrityOfFile(new File([text], 'c.nt'))), want, `dup ${dup}`);
     assert.deepEqual(summary(await integrityOfFile(new File([gzipSync(text)], 'c.nt.gz'))), want, `gzipped, dup ${dup}`);
   }
