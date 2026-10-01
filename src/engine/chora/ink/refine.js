@@ -20,7 +20,7 @@ function at(V, w, h, x, y) {
  * cross-section to measure: `ink(x, y)` the inkiness there (0 none, larger more), sampled every `step`
  * out to `half` either way; the run of ink that holds the point (or the nearest sample) alone is weighed.
  */
-export function crossCentre(ink, x, y, nx, ny, half, step = 0.25) {
+export function crossCentre(ink, x, y, nx, ny, half, step = 0.25, out = null) {
   const n = Math.ceil(half / step), vals = [];
   for (let k = -n; k <= n; k++) vals.push(ink(x + k * step * nx, y + k * step * ny));
   if (vals.some((v) => v === null)) return null;
@@ -40,6 +40,7 @@ export function crossCentre(ink, x, y, nx, ny, half, step = 0.25) {
   if (a === 0 || b === vals.length - 1) return null;
   let sw = 0, s = 0;
   for (let k = a - 1; k <= b + 1; k++) { sw += vals[k]; s += vals[k] * (k - n) * step; }
+  if (out) out.run = (b - a + 1) * step;
   return sw ? s / sw : null;
 }
 
@@ -51,16 +52,53 @@ export const maskInk = (M, w, h) => (x, y) => at(M, w, h, x, y);
 /**
  * Points [[x, y]] of a path (centre convention), each moved across the path to the ink's centre, except
  * those `skip(p)` says to leave (near a junction). The normal is the path's own, over `span` points
- * either way. Moves of more than `limit` are not made.
+ * either way. Moves of more than `limit` are not made. With `wide`, a point whose cross-section of ink is
+ * wider than the line about it (the median over `span` × 6 points either way) by more than `wide` pixels, or
+ * with none to measure, is let go: a burr or a blot on one side, which would draw it aside. Not the path's first or last point.
  */
-export function refinePath(pts, ink, { half, span = 2, limit = 1, skip = () => false } = {}) {
-  return pts.map((p, k) => {
+export function refinePath(pts, ink, { half, span = 2, limit = 1, skip = () => false, wide = Infinity } = {}) {
+  const runs = new Float64Array(pts.length).fill(NaN);
+  const moved = pts.map((p, k) => {
     if (skip(p)) return p;
     const a = pts[Math.max(0, k - span)], b = pts[Math.min(pts.length - 1, k + span)];
     const tx = b[0] - a[0], ty = b[1] - a[1], L = Math.hypot(tx, ty);
     if (!L) return p;
-    const nx = -ty / L, ny = tx / L;
-    const d = crossCentre(ink, p[0], p[1], nx, ny, half);
+    const nx = -ty / L, ny = tx / L, out = {};
+    const d = crossCentre(ink, p[0], p[1], nx, ny, half, 0.25, out);
+    // No cross-section to measure, or one too far off, counts as too wide.
+    runs[k] = d === null || Math.abs(d) > limit ? Infinity : out.run;
     return d === null || Math.abs(d) > limit ? p : [p[0] + d * nx, p[1] + d * ny];
   });
+  if (!Number.isFinite(wide)) return moved;
+  const M = 6 * span, keep = [];
+  for (let k = 0; k < moved.length; k++) {
+    // Only where most of the points about it were measured (their median a width): a line whose cross-sections
+    // are mostly not measured keeps its points.
+    if (k > 0 && k < moved.length - 1 && !Number.isNaN(runs[k])) {
+      const near = [];
+      for (let j = Math.max(0, k - M); j <= Math.min(moved.length - 1, k + M); j++) if (!Number.isNaN(runs[j])) near.push(runs[j]);
+      near.sort((p, q) => p - q);
+      if (runs[k] > near[near.length >> 1] + wide) continue;
+    }
+    keep.push(moved[k]);
+  }
+  // And a point off the chord of the points `span` either side of it by more than `wide` more than the points
+  // about it are (a kink where a burr too short to branch bent the line, and its ink is not wide enough to tell):
+  // let go. A curve's points are all off their chords alike, and kept.
+  const n = keep.length, dev = new Float64Array(n).fill(NaN);
+  for (let k = span; k < n - span; k++) {
+    const a = keep[k - span], b = keep[k + span], tx = b[0] - a[0], ty = b[1] - a[1], L = Math.hypot(tx, ty);
+    if (L) dev[k] = ((keep[k][0] - a[0]) * ty - (keep[k][1] - a[1]) * tx) / L;
+  }
+  const out = [];
+  for (let k = 0; k < n; k++) {
+    if (!Number.isNaN(dev[k])) {
+      const near = [];
+      for (let j = Math.max(0, k - M); j <= Math.min(n - 1, k + M); j++) if (!Number.isNaN(dev[j])) near.push(dev[j]);
+      near.sort((p, q) => p - q);
+      if (Math.abs(dev[k] - near[near.length >> 1]) > wide) continue;
+    }
+    out.push(keep[k]);
+  }
+  return out;
 }
