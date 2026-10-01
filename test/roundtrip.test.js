@@ -64,6 +64,26 @@ for (const f of readdirSync(EXAMPLES).filter((f) => f.endsWith('.json'))) {
     assert.equal(lean(toRdf(back).nt), lean(first.nt));
   });
 }
+// PLATO 7720890 (#19): relativeTo is one anchor or a list; BetweenXAndY takes exactly two.
+const placeWith = (qualification) => ({
+  profile: 'place-centric', title: 't', '@id': 'https://example.org/d',
+  spatialEntities: [{ '@id': 'https://example.org/p', attestations: [{ '@id': 'https://example.org/p#a', geometries: [{ sourceLabel: 's', qualification }] }] }],
+});
+const qualificationBack = (doc) => {
+  const first = toRdf(doc);
+  return toJson(first.g, first.docNode, 'place-centric').doc.spatialEntities[0].attestations[0].geometries[0].qualification;
+};
+test('relativeTo: two anchors come back as a list of both, and one anchor as a string', () => {
+  const two = ['https://example.org/x', 'https://example.org/y'];
+  const back = qualificationBack(placeWith({ relativeQualifier: 'https://w3id.org/plato#BetweenXAndY', relativeTo: two }));
+  assert.ok(Array.isArray(back.relativeTo), `relativeTo came back as ${JSON.stringify(back.relativeTo)}`);
+  assert.deepEqual([...back.relativeTo].sort(), two);
+  const one = qualificationBack(placeWith({ relativeQualifier: 'https://w3id.org/plato#Near', relativeTo: 'https://example.org/x' }));
+  assert.equal(one.relativeTo, 'https://example.org/x');
+  // A list of one is the same graph as the string, and reads back as the string.
+  const listOfOne = qualificationBack(placeWith({ relativeQualifier: 'https://w3id.org/plato#Near', relativeTo: ['https://example.org/x'] }));
+  assert.equal(listOfOne.relativeTo, 'https://example.org/x');
+});
 test('control: the comparison notices a dropped attestation', async () => {
   const doc = JSON.parse(readFileSync(`${EXAMPLES}/place-centric-constantinople.json`, 'utf8'));
   const first = toRdf(doc);

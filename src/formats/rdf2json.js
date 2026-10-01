@@ -40,7 +40,10 @@ function shape(schema, core, profile) {
   if (s && !s.$ref && Array.isArray(s.allOf)) s = s.allOf.find((x) => x && x.$ref) || s;
   if (s && s.oneOf) {
     const obj = s.oneOf.find((x) => defName(x) && defName(x) !== 'uri');
-    return { kind: obj ? 'either' : 'uri', def: obj ? defName(obj) : null, array };
+    // One value or a list of them (relativeTo, PLATO 7720890): one value is read as itself, and a
+    // second turns it into a list, rather than being reported as a value too many.
+    const many = !array && s.oneOf.some((x) => x && x.type === 'array');
+    return { kind: obj ? 'either' : 'uri', def: obj ? defName(obj) : null, array, ...(many ? { many } : {}) };
   }
   const name = defName(s);
   if (name === 'uri') return { kind: 'uri', array };
@@ -294,6 +297,10 @@ export class Rdf2Json {
       const k = entry.path ? entry.path.key : entry.key;
       if (entry.shape.array) (tgt[k] ||= []).push(value);
       else if (tgt[k] === undefined) tgt[k] = value;
+      else if (entry.shape.many) {
+        const list = Array.isArray(tgt[k]) ? tgt[k] : (tgt[k] = [tgt[k]]);
+        if (!list.some((x) => JSON.stringify(x) === JSON.stringify(value))) list.push(value);
+      }
       // Identical repeats are copies of one value (DEEP writes a source's date out once per record
       // that cites it, so the source gathers many identical date nodes); only differences matter.
       else if (JSON.stringify(tgt[k]) !== JSON.stringify(value)) this.issue({ kind: 'multiple-values', key: k, node: id, value: JSON.stringify(value) });
