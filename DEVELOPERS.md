@@ -153,11 +153,13 @@ What it does is in the guide:
 It is a page of its own, `chora.html`, a second entry in `vite.config.js`, so that MapLibre GL JS,
 Terra Draw and Allmaps load only there. The page is `src/chora/` (`app.js`; `map.js`, the map, the
 guard and drawing; `basemaps.js`; `consent.js`; `csp-head.js` and `csp.js`, the hard block;
-`fetchguard.js` and `overlays.js`, the historical maps; `contributor.js`; `drafts.js`; `handoff.js`,
+`fetchguard.js` and `overlays.js`, the historical maps; `ink.js`, `ink.worker.js` and `inkfetch.js`, tracing
+with assistance; `contributor.js`; `drafts.js`; `handoff.js`,
 which passes files chosen
 on the main page through IndexedDB, taken out of it as soon as Chora's page starts, and not offered
 if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `view.js`,
-`draw.js`, `save.js`, `geo.js`, `trace.js`). It publishes its state on `window.__chora` for tests.
+`draw.js`, `save.js`, `geo.js`, `trace.js`, and `ink/`, the pixel work of tracing with assistance). It
+publishes its state on `window.__chora` for tests.
 
 - **The worker** is the main page's, with commands of its own, sent one at a time: `chora-load`,
   `chora-search`, `chora-overview` (every place's point, at most 50,000), `chora-place` (one
@@ -303,6 +305,55 @@ nothing on the page fetches one), `worker-src 'self' blob:`,
   `cito:usesMethodIn`, derived from the map), and its notes are `choraTracingNote` then `georefNote`
   with the date the georeference was fetched (PLATO 3acab8e's pattern). Moved or reshaped, it is
   traced again, or no longer cites the map and says so. The geometry saved is the one drawn.
+- **Tracing with assistance** ("Trace area", "Trace line", "Snap to ink"; `src/chora/ink.js`, loaded only
+  when first wanted): a shape proposed from a historical map's own pixels, which the user accepts (Enter),
+  edits like any drawing, or lets go (Esc). The design is `ink-tracing-design.md` with its amendments.
+  - **Where the pixels come from.** The IIIF tiles of the map's image, asked for exactly as the renderer
+    asks (`@allmaps/iiif-parser`'s `getTileImageRequest` and `getImageUrl`, so the browser's cache serves
+    both), fetched by the page through the guard (`inkfetch.js`: kind `iiif`, from the map's own image
+    server only, two at a time, a 429 waited out as Retry-After says, a refusal said in words), and
+    decoded with `createImageBitmap` (no colour-space conversion, no premultiplied alpha). A level-0
+    server gives its `tiles`; a level-1 or 2 server without them gives the parser's default regions. The
+    window is 512 working pixels each way at the scale factor read (the smallest offered at least half
+    the image pixels per screen pixel), grown when a line followed or a fill reaches its edge, to 2048,
+    then once at one scale coarser, then "too large" in words. An edge tile is not at its scale factor:
+    each tile is placed by its region and scaled by its region over its bitmap's size (`compose`).
+  - **Who does what.** The page plans (`ink/job.js`: the scale, the window, its tiles, its growth: it
+    needs the image parser, which the renderer has loaded already) and carries the proposal into the
+    world through the map's georeference (`toWorld`, no densifying); the worker (`ink.worker.js`, from a
+    `blob:` that imports it, so under the page's policy, and fetching nothing) does one window's pixel
+    work (`ink/step.js`), and keeps the window made ready so that a slider re-proposes without reading it
+    again. Jobs carry a generation id: a new click or Esc lets the older go.
+  - **The engine** (`src/engine/chora/ink/`, pure, tested in Node on synthetic maps): the 3×3 median of
+    CIELAB (an area) or of L* alone (a line), L* as Float32 and a*, b* as Int8, the RGBA let go once
+    converted. An area: ΔE76 from the clicked colour, a scanline fill (gaps bridged by growing the
+    boundary, filling, and growing the fill back), refused when it reaches the window's edge or covers
+    more than 60% of it; outlined by d3-contour (ISC), each edge pixel placed within the pixels by its
+    cover (1 − ΔE over the local contrast), holes smaller than (4 × the map's pen stroke)² left out. A
+    line: Sauvola's adaptive threshold on L* (or ΔE, "match the colour"), the seed on the darkest pixel
+    within 6 screen pixels, the component under it and those across gaps ahead taken in, each thinned in
+    its own box (exact distance transform, Felzenszwalb–Huttenlocher; Zhang–Suen), the skeleton kept
+    within a thickness band, read as a graph (junction pixels within 2 px one node, spurs pruned),
+    followed both ways by the least turn (direction over 2 widths, stopping past 60°), gaps jumped up to
+    3 widths ahead in a ±20° cone, never into a chain used; each point moved across the line to the
+    ink's centre, the ends carried to where the ink stops. Douglas–Peucker in image pixels, corners kept,
+    ε halved while the result crosses itself, down to 0.1. **Half pixels**: a contour's coordinates are
+    pixel corners (IIIF's convention; no half pixel added); a skeleton's are pixel centres (+0.5).
+  - **Accepted**, a proposal is an ordinary Terra Draw drawing (an area as its outline: Terra Draw takes
+    no holes, and the page says they were left out), cited from the map it was traced from as one drawn
+    by hand is, its round trip checked. The draft keeps what was proposed and how (`trace.assisted`);
+    its notes are `choraAssistedNote` (`words.js`, the one place they are made) and then georefNote's:
+    how it was proposed (ε in image pixels, the gaps bridged) and "accepted as proposed" or "edited by
+    hand: moved k, added a, removed d, of n proposed", counted against the proposal (`ink/edits.js`).
+    Attested, not computed: a person accepted it.
+  - **Offered** once a map shown has drawn a tile (`maptileloaded`: the renderer's `firstmaptileloaded`
+    comes only when the first tile it asked for loads, and never when that one is refused); until then
+    the buttons say why not. A server that lets no other site read it is refused at admission (the
+    image information), and one that refuses the pixels (401, 403) is said so: IIIF Auth is unsupported.
+  - **Snap to ink**: Terra Draw asks for a snapped position on every move, synchronously, so on each
+    `moveend` the worker finds the ink's ridges (a line's centre) and edges over the view, the page
+    carries them into the world through the georeference as one MultiPoint, and bins them by screen
+    pixel; a vertex within 10 screen pixels goes to the nearest ridge, else edge. Alt held: no snapping.
 - **Georeferencing** comes from `src/engine/georef/`, which belongs to Hermes; Chora keeps none of
   its own, except `allmapsTransformationName` in `overlays.js`, a marked stand-in until georef's
   export of that name is merged here.
@@ -347,11 +398,17 @@ python3 e2e/scale_test.py --input deep-plato.nt.gz --target plato-jsonl --out ou
 - Recogito's exports become the attestations designed for them;
 - the version check finds each kind of deletion and change, each made by one edit to a version
   that passes;
-- the command line gives what the engine gives, with the right exit status.
+- the command line gives what the engine gives, with the right exit status;
+- tracing with assistance proposes known shapes from synthetic maps drawn in code (`test/ink-synth.js`,
+  seeded; non-square windows, off-centre asymmetric shapes, a 1001 × 701 image tiled at an odd size):
+  outlines and centrelines within a pixel, the half-pixel conventions, faint ink on a vignette (where one
+  threshold fails), specks and JPEG blocks, gaps, colours, the seam between tiles.
 
 Chora's historical maps are checked against a real second origin: `e2e/iiif_fixture_server.py`
-serves `test/fixtures/chora-iiif/` on two free ports, A (the image server agreed to) and B (never to
-be asked), and logs every request it receives. That log is the census: Playwright's request events
+serves `test/fixtures/chora-iiif/` on three free ports, A (the image server agreed to), B (never to
+be asked) and C (which sends no CORS header), and logs every request it receives. It serves `ink.png`,
+a synthetic map for tracing with assistance, as IIIF tiles cut and scaled with Pillow (JPEG, PNG, and
+with its full-resolution tiles refused, 403). That log is the census: Playwright's request events
 also list requests the browser stopped. Allmaps' annotation server is answered by `page.route`.
 The checks include a tile answered with a redirect to B (B must get nothing in the whole run while
 the honest map on A draws), an `info.json` naming B, and the renderer's own transformation of 25

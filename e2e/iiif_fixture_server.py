@@ -18,11 +18,12 @@ admitted as its own.
   /iiif/redirect/<rest>         302 to origin B /iiif/grid/<rest>
   /iiif*/<name>/<...>/default.* grid.jpg
   /manifests/grid/manifest      manifest-rumsey-shaped.json
-  /iiif/ink/info.json           info-ink.json (and /iiif/inkpng, /iiif/ink403), its id on the site asked
+  /iiif/ink/info.json           info-ink.json (and /iiif/inkpng, /iiif/ink403, /iiif/inkbig), its id on the site asked
   /iiif/ink/<region>/<size>/<rotation>/<quality>.<format>
                                 ink.png cut and scaled as IIIF says (Pillow, averaging): JPEG at /iiif/ink,
                                 PNG at /iiif/inkpng (whatever the format asked); at /iiif/ink403 a tile at
-                                full resolution is refused, 403, and any other given
+                                full resolution is refused, 403, and any other given; /iiif/inkbig is
+                                a 4097 x 3073 map drawn here (big()), 512-px tiles at 1, 2, 4 and 8
 
 PORT_C, when given, is a third site that serves the same, but with no Access-Control-Allow-Origin: a
 server that does not let other sites read what it sends (CORS).
@@ -46,10 +47,39 @@ def ink():
     return INK
 
 
-def iiif_image(region, size):
+BIG = None
+BIG_SIZE = (4097, 3073)
+def big():
+    """A large map for the tracing's budget (e2e/ink_budget.py), drawn here, the same each time: a river
+    winding across it, 5 px wide (BIG_RIVER), a wash 900 px across (BIG_WASH), and linework, lettering and
+    specks about them."""
+    global BIG
+    if BIG is None:
+        import math, random
+        from PIL import Image, ImageDraw
+        r = random.Random(7)
+        img = Image.new('RGB', BIG_SIZE, (238, 230, 210)); d = ImageDraw.Draw(img)
+        d.polygon(BIG_WASH, fill=(176, 198, 150))
+        for _ in range(140):
+            x, y = r.uniform(0, BIG_SIZE[0]), r.uniform(0, BIG_SIZE[1])
+            d.line([(x, y), (x + r.uniform(-400, 400), y + r.uniform(-400, 400))], fill=(60, 52, 46), width=r.choice([2, 3]))
+        for _ in range(400):
+            x, y = r.uniform(0, BIG_SIZE[0]), r.uniform(0, BIG_SIZE[1])
+            d.text((x, y), r.choice(['Mill', 'Ford', 'Wood', 'Ch.', 'Farm']), fill=(40, 34, 30))
+        d.line(BIG_RIVER, fill=(30, 26, 24), width=5, joint='curve')
+        for _ in range(20000):
+            x, y = r.randrange(BIG_SIZE[0]), r.randrange(BIG_SIZE[1]); img.putpixel((x, y), (120, 110, 100))
+        BIG = img
+    return BIG
+import math as _m
+BIG_RIVER = [(300 + 3.4 * k, 1500 + 700 * _m.sin(k / 160)) for k in range(1001)]
+BIG_WASH = [(2500, 300), (3350, 420), (3420, 1100), (3000, 1250), (2550, 1000)]
+
+
+def iiif_image(region, size, img=None):
     """The image request's pixels, as IIIF says: region 'full' or x,y,w,h; size max, w,h, w, ,h or !w,h."""
     from PIL import Image
-    img = ink()
+    img = img or ink()
     W, H = img.size
     if region in ('full', 'max'):
         x, y, w, h = 0, 0, W, H
@@ -125,15 +155,18 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(302, extra=[('Location', origin(B) + '/iiif/grid/' + self.path[len('/iiif/redirect/'):])])
         if path == '/manifests/grid/manifest':
             return self.send(200, fixture('manifest-rumsey-shaped.json').replace(origin(A), me).encode())
-        m = re.match(r'^/iiif/(ink|inkpng|ink403)/(.+)$', path)
+        m = re.match(r'^/iiif/(ink|inkpng|ink403|inkbig)/(.+)$', path)
         if m:
             name, rest = m.groups()
             if rest == 'info.json':
-                return self.send(200, fixture('info-ink.json').replace(origin(A) + '/iiif/ink', me + '/iiif/' + name).encode())
+                info = fixture('info-ink.json').replace(origin(A) + '/iiif/ink', me + '/iiif/' + name)
+                if name == 'inkbig':
+                    j = json.loads(info); j.update(width=BIG_SIZE[0], height=BIG_SIZE[1], sizes=[], tiles=[{'width': 512, 'height': 512, 'scaleFactors': [1, 2, 4, 8]}]); info = json.dumps(j)
+                return self.send(200, info.encode())
             parts = rest.split('/')
             if len(parts) != 4:
                 return self.send(404, b'{"error":"not an image request"}')
-            out, (w, h, sw, sh) = iiif_image(parts[0], parts[1])
+            out, (w, h, sw, sh) = iiif_image(parts[0], parts[1], big() if name == 'inkbig' else None)
             if name == 'ink403' and (sw, sh) == (w, h):
                 return self.send(403, b'{"error":"forbidden"}')
             buf = io.BytesIO()
