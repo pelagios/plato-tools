@@ -408,6 +408,20 @@ function representativePoint(g) {
 }
 
 /**
+ * Once every record has been read: each relations row whose labelled target (`relatesToPlace`) turned
+ * out to be a place of the dataset points at it by its place_id, keeping the label beside it.
+ * `placeIdOf(iri)` gives the place_id of a place of the dataset, or nothing.
+ */
+export function settleRelatedPlaces(relations, placeIdOf) {
+  for (const row of relations) {
+    if (row.relatesToPlace === undefined) continue;
+    const id = placeIdOf(row.relatesToPlace);
+    if (id) { row.related_place_id = id; row.related_uri = ''; }
+    delete row.relatesToPlace;
+  }
+}
+
+/**
  * One PLATO record -> rows for each sheet. `ids.place(iri, label)` and `ids.source(obj)` return
  * short table ids (registering rows for places and sources as needed); `loss(l)` receives what
  * the tables cannot hold. The tables cannot express meta-attestations, so they show the current
@@ -536,11 +550,18 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
           property_uri: pv.property, property_label: pv.label || '', value: typeof pv.value === 'object' ? JSON.stringify(pv.value) : pv.value, unit_uri: pv.unit || '', ...common });
         continue;
       }
-      // A target named by related_label, or related by a relation to people, objects or events, is
-      // not a place in the places sheet: it goes to related_uri, and gets no row of its own.
-      const external = !!r.relatedLabel || EXTERNAL.has(rt);
-      rows.relations.push({ place_id: pid, relation_type: rt, related_place_id: external ? '' : ids.place(r.relatesTo, null, false),
-        related_uri: external ? r.relatesTo : '', related_label: external ? r.relatedLabel || '' : '', sequence: a.sequence ?? '', duration: t.duration || '', ...common });
+      // A target related by a relation to people, objects or events, or named by related_label, is
+      // not a place of its own in the places sheet: it goes to related_uri, and gets no row of its
+      // own. A labelled target that is a place of the dataset (a province minted as a place, as
+      // PLATO 7720890 #18 advises) goes to related_place_id, with its label beside it, so that the
+      // tables join; whether it is one is known only when every record has been read, so the row
+      // carries its address in `relatesToPlace`, which the writer settles at the end
+      // (settleRelatedPlaces). Not a column: it is never written.
+      const external = !!r.relatedLabel || EXTERNAL.has(rt) || !r.relatesTo;
+      const row = { place_id: pid, relation_type: rt, related_place_id: external ? '' : ids.place(r.relatesTo, null, false),
+        related_uri: external ? r.relatesTo || '' : '', related_label: external ? r.relatedLabel || '' : '', sequence: a.sequence ?? '', duration: t.duration || '', ...common };
+      if (external && r.relatesTo && !EXTERNAL.has(rt)) row.relatesToPlace = r.relatesTo;
+      rows.relations.push(row);
     }
     // A statistical figure keeps its own CSVW description (PLATO issue #14, decision 4): the
     // properties sheet has no columns for its table or coordinates, and without them it says something false.

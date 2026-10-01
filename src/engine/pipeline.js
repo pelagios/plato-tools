@@ -15,7 +15,7 @@ import { PLATO, RDF } from '../lib/context.js';
 import { featureToRecord, recordToFeature, collectionHead, collectionToGazetteer } from '../formats/lpf.js';
 import { list, collectWithdrawn, resolveWithdrawn, addWithdrawal, versionLosses, tableLosses, relationTypeLosses, collectMembership, membershipCycles } from '../formats/shared.js';
 import { CubeExport, CUBE_TEXT } from '../formats/cube.js';
-import { validateTables, checkTableRules, checkAboutRules, aboutToGazetteer, gazetteerToAbout, rowToAttestation, tableIds, recordToRows, identityRow, ATTESTATION_SHEETS, tableSchemas, cellChecker, sourceLosses } from '../formats/tables.js';
+import { validateTables, checkTableRules, checkAboutRules, aboutToGazetteer, gazetteerToAbout, rowToAttestation, tableIds, recordToRows, settleRelatedPlaces, identityRow, ATTESTATION_SHEETS, tableSchemas, cellChecker, sourceLosses } from '../formats/tables.js';
 import { AnnotationReader, ANNOTATION_KINDS } from '../formats/annotations.js';
 import { teiSource } from './hermes/tei.js';
 import { genericSource, genericProfile } from './hermes/generic.js';
@@ -73,6 +73,12 @@ export function explainSchema(errs, fromTables) {
   if (!e) return 'does not match the PLATO JSON Schema';
   const at = e.instancePath || '';
   const col = (c) => (fromTables ? ` In the spreadsheets, fill in ${c}.` : '');
+  // How many anchors relativeTo has (PLATO 7720890, #19): a qualification's conditional rules, whose
+  // raw words ("relativeTo must NOT be valid") say nothing. A bearing or distance is ruled out with
+  // `not`; Between X and Y's two anchors by type, minItems, maxItems or required.
+  const anchors = (errs || []).find((x) => /\/then\/(properties\/relativeTo|required)/.test(x.schemaPath || '')
+    && (/qualification\/relativeTo$/.test(x.instancePath || '') || (x.keyword === 'required' && x.params?.missingProperty === 'relativeTo' && /qualification$/.test(x.instancePath || ''))));
+  if (anchors) return anchors.keyword === 'not' ? 'A bearing or distance needs a single anchor: relativeTo gives one place, not a list.' : 'Between X and Y needs exactly two anchors: relativeTo gives a list of the two places, in either order.';
   if (e.keyword === 'required') {
     const p = e.params.missingProperty;
     if (p === 'identifier' && /types\/\d+$/.test(at)) return 'A type has no identifier: PLATO JSON requires the web address of the concept in a published vocabulary.' + col('type_uri');
@@ -80,6 +86,8 @@ export function explainSchema(errs, fromTables) {
     if (p === 'toponym') return 'A name has no spelling (toponym).' + col('name');
     if (p === 'identityType') return 'An identity match does not say what kind of match it is (exactMatch, closeMatch, related, or unspecified if the source does not say): PLATO JSON requires it.' + col('match_type');
     if (p === 'title') return 'A source has no title.' + col('title');
+    // A relation gives relatesTo, or relatedLabel alone (PLATO 7720890, #18): with neither, each is reported missing.
+    if ((p === 'relatesTo' || p === 'relatedLabel') && /relations\/\d+$/.test(at)) return 'A relation names no target: give relatesTo, or relatedLabel alone where there is no address.' + col('related_place_id or related_uri, or related_label alone');
     // PLATO issue #14: a value is required unless the figure's attributes give obsStatus.
     if (p === 'value' && /properties\/\d+$/.test(at)) return 'A property value has no value. Give it, or, for a figure that has none (a printed dash), say why with sdmx-attribute:obsStatus in its attributes; a dash is never written as 0.';
     return `Something required is missing: ${p}.`;
@@ -1045,6 +1053,7 @@ function tablesWriter(env, rep, options, outputs, stem, loss) {
       else if (ev.type === 'attestation') loss({ kind: 'attestation-centric', value: ev.value?.['@id'] || `item ${ev.n}` });
     },
     async close() {
+      settleRelatedPlaces(buffers.relations, (iri) => { const p = places.get(iri); return p && p.own ? p.place_id : null; });
       buffers.places = [...places.values()].map(({ own, ...r }) => r);
       buffers.sources = [...sources.values()];
       buffers.about = [about || gazetteerToAbout({}, loss, accepts)];

@@ -328,8 +328,15 @@ export function recordToFeature(rec, idrs = [], loss = () => {}, withdrawn = nul
       const c = certaintyWord(gl || a.certaintyLevel, a.certaintyNote); if (c) lg.certainty = c;
       geoms.push(lg);
     }
-    for (const r of list(a.relations)) dropKeys(r, 'relation', KEEPS.relation, loss);
-    for (const r of list(a.relations)) f.relations.push(clean({ relationType: r.relationType, relationTo: r.relatesTo, label: r.relationLabel, when, citations: cits.length ? cits : undefined, certainty: certaintyWord(a.certaintyLevel, a.certaintyNote) }));
+    // LPF's relationTo is required: a relation named only by its label (PLATO 7720890, #18: "in the
+    // Delta") has no target address, so it is left out whole, and reported once.
+    const targeted = [];
+    for (const r of list(a.relations)) {
+      if (!r || typeof r.relatesTo !== 'string' || !r.relatesTo) { loss({ kind: 'relation-without-target', value: r?.relatedLabel || rec['@id'] }); continue; }
+      dropKeys(r, 'relation', KEEPS.relation, loss);
+      targeted.push(r);
+    }
+    for (const r of targeted) f.relations.push(clean({ relationType: r.relationType, relationTo: r.relatesTo, label: r.relationLabel, when, citations: cits.length ? cits : undefined, certainty: certaintyWord(a.certaintyLevel, a.certaintyNote) }));
     for (const p of list(a.properties)) {
       if (isFigure(p)) { loss({ kind: 'statistical-figure', value: p['@id'] || p.label || p.property }); continue; }
       qualificationLosses(p.qualification, [], loss);
