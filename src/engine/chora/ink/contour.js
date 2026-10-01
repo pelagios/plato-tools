@@ -51,7 +51,9 @@ function grow(m, w, h, r) {
 export function outline(region, w, bbox, at, cover = null) {
   const [x0, y0, x1, y1] = bbox;
   // One empty pixel all round, so that a region touching the box is closed.
-  const cw = x1 - x0 + 3, ch = y1 - y0 + 3, grid = new Float64Array(cw * ch);
+  // Float32 (d3-contour reads any array of numbers): half the bytes (a fill the size of a 2048² window,
+  // 16 MB rather than 32; ink_memory.mjs's area, its box about 600², 1.8 MB less at the peak).
+  const cw = x1 - x0 + 3, ch = y1 - y0 + 3, grid = new Float32Array(cw * ch);
   for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) grid[(y - y0 + 1) * cw + (x - x0 + 1)] = region[y * w + x];
   // With `cover(x, y)` (each pixel's share covered by the region's colour, 0..1), the outline is put where
   // the cover crosses one half, between the pixels on either side of it, so that it moves smoothly as the
