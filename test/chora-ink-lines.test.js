@@ -136,7 +136,8 @@ test('a corner mid-line (90°, 60° and 30° turns, widths 3, 6 and 10) is not c
   assert.ok(cases >= 20, `${cases} corners drawn`);
 });
 
-test('a line that bends (20° or 45°) 1.5 to 5 widths from its end: the end placed to 2.5 px (as at 104a9f9, whose worst is 2.3), and no point of the trace beyond it', () => {
+// Drawn bends: a straight leg turning by 20° or 45°. A plain curve's end at 3 px is not held to this (the arc test below).
+test('a line with a drawn bend (20° or 45°) 1.5 to 5 widths from its end: the end placed to 2.5 px (as at 104a9f9, whose worst is 2.3), and no point of the trace beyond it', () => {
   for (const deg of [20, 45]) for (const k of [1.5, 3, 5]) for (const width of [3, 6]) for (const [[a, b], seed] of SLANTS.slice(0, 4)) {
     const u = unit(a, b), c = [b[0] - u[0] * k * width, b[1] - u[1] * k * width], v = rot(u, deg), e = [c[0] + v[0] * k * width, c[1] + v[1] * k * width];
     const res = trace(new Raster(W, H).stroke([a, c, e], width, INK), seed, { detail: 0.1 });
@@ -173,7 +174,7 @@ test('a line ending on a bar across it as wide (a T): the line stops at the bar,
   }
 });
 
-test('a dashed line (dashes six widths, gaps one and a half) whose last dash is short: the far end is not carried past that dash\'s ink', () => {
+test('a dashed line (dashes six widths, gaps one and a half) whose last dash is short: every dash that can be reached is jumped to, and the far end is at the last of them, not carried past its ink', () => {
   let short = 0;
   for (const width of [3, 5]) for (const [[a, b], seed] of SLANTS.slice(0, 4)) {
     const u = unit(a, b), L = d(a, b), r = new Raster(W, H), segs = [];
@@ -185,8 +186,61 @@ test('a dashed line (dashes six widths, gaps one and a half) whose last dash is 
     const aside = Math.max(...densify(res.points).map((q) => Math.abs((q[0] - a[0]) * u[1] - (q[1] - a[1]) * u[0])));
     assert.ok(aside <= 1, `${where}: the trace ${aside.toFixed(2)} px aside of the line`);
     assert.ok(beyondEnd([E], b, u) <= width / 2 + 0.5, `${where}: the end ${beyondEnd([E], b, u).toFixed(2)} px beyond where the ink ends`);
+    // The dashes a jump can reach: a dash thins to a skeleton about as long as the dash itself, and one of 3 px or fewer is
+    // a single node with no chain (graph.js, MERGE_PX), which a jump cannot land on. (Its ink survives the median and
+    // Sauvola's threshold: the 1.9 px dash here keeps 13 pixels.) Here a 1.9 px dash is lost; 5 px and more are reached.
+    // Without jumps at all (follow.js), no gap is jumped and the end is on the first dash: this is what fails then.
+    const reached = segs.filter(([p, q]) => d(p, q) > 3);
+    assert.equal(res.gaps.length, reached.length - 1, `${where}: ${res.gaps.length} gaps jumped, ${reached.length} dashes to reach (ends ${res.ends})`);
+    const lastReached = reached.at(-1)[1];
+    assert.ok(d(E, lastReached) <= width / 2 + 1, `${where}: the end ${d(E, lastReached).toFixed(2)} px from the end of the last dash reached`);
   }
   assert.ok(short >= 2, `${short} lines whose last dash is short`);
+});
+
+// A plain curve's end at 3 px: a documented limit, not a target. Where the arc runs near 45° at its end, the skeleton stops
+// short of the ink before any band or pruning (Zhang–Suen erases a diagonal two pixels wide, which is what the 3×3 median
+// leaves of a 3-px line there): measured, the skeleton's last pixel is 7.0 px short of the ink's end at R30 and 13.5 at R90
+// (the arc from 4.0 rad, direction −1, the end at arc[0]). The end is then carried on straight from there while the arc
+// curves away: 4.8 px short at R30, 3.9 at R90 (2.2 and 2.3 at 104a9f9, whose end placement reached farther along the ink).
+// Weighting the end's fit towards its last points cannot mend this: the points are missing, not misfitted. At 6 px the
+// skeleton reaches the end and the ends are within 2.2 px, which the test holds to 2.5.
+test('an arc that simply ends (R30 and R90, widths 3 and 6, 16 ends each): the end within 5 px, a limit at width 3 where the arc runs near 45° (see the comment), within 2.5 px at width 6, and no point beyond it', () => {
+  const arcPts = (cx, cy, R, a0, a1, n = 200) => Array.from({ length: n + 1 }, (_, k) => { const t = a0 + ((a1 - a0) * k) / n; return [cx + R * Math.cos(t), cy + R * Math.sin(t)]; });
+  for (const R of [30, 90]) for (const width of [3, 6]) {
+    let ends = 0, worst = 0;
+    for (const [a0, span] of [[0.2, 1.1], [1.3, 1.0], [2.6, 0.9], [4.0, 1.2]]) for (const dirn of [1, -1]) {
+      const cx = 350 + 60 * Math.cos(a0 * 2), cy = 230 + 40 * Math.sin(a0 * 3);
+      const arc = arcPts(cx, cy, R, a0, a0 + dirn * Math.min(span, 180 / R));
+      assert.ok(arc.every((p) => p[0] >= 20 && p[1] >= 20 && p[0] <= W - 20 && p[1] <= H - 20), `R${R}, from ${a0} rad: the arc is within the window`);
+      const res = trace(new Raster(W, H).stroke(arc, width, INK), arc[100], { detail: 0.1 });
+      for (const [e, prev] of [[arc.at(-1), arc.at(-2)], [arc[0], arc[1]]]) {
+        const E = endAt(res, e), u = unit(prev, e), where = `R${R}, width ${width}, from ${a0} rad, direction ${dirn}, the end at (${e.map((v) => v.toFixed(1))})`;
+        assert.ok(d(E, e) <= 5, `${where}: the end ${d(E, e).toFixed(2)} px from where it is`);
+        assert.ok(beyondEnd(res.points, E, u) <= 0.01, `${where}: a point ${beyondEnd(res.points, E, u).toFixed(2)} px beyond the end`);
+        worst = Math.max(worst, d(E, e)); ends++;
+      }
+    }
+    assert.equal(ends, 16, `R${R}, width ${width}: ${ends} ends measured`);
+    if (width === 6) assert.ok(worst <= 2.5, `R${R}, width 6: the worst end ${worst.toFixed(2)} px off (the limit is at width 3)`);
+  }
+});
+
+// A short stroke 3 px wide on a slant near 45°: the same thinning. A 15-px stroke at 50° thins to a skeleton of 4 px where
+// the other slants give 12 to 14, so the width at the click (the ink's area over the skeleton's length within 8 px) is read
+// as 13.18, the thickness band [0.5w − 1, 2w + 1] then takes every skeleton pixel but the seed's, and the trace is one point
+// (round 4's dbg-short: "short 5w w3 … width 13.18 pts 1"; the same line 2 and 3 widths long reads 6.74 and 9.08). A guard
+// on the band (never taking the seed's own chain when the skeleton under the click is shorter than two widths) would leave
+// a four-pixel path whose ends are placed with the same wrong width: not taken. Run, and reported as to do while it fails.
+test.todo('a short stroke (2 to 5 widths) 3 px wide at about 50°: its width at the click is over-read (13.18 for 3) and it is traced as one point', () => {
+  const [[a, b]] = SLANTS[2], u = unit(a, b), m = lerp(a, b, 0.5);
+  const slant = (Math.atan2(u[1], u[0]) * 180) / Math.PI;
+  assert.ok(Math.abs(slant - 50) < 2, `the third seeded slant is ${slant.toFixed(0)}°`);
+  for (const lenW of [2, 3, 5]) {
+    const p = [m[0] - (u[0] * lenW * 3) / 2, m[1] - (u[1] * lenW * 3) / 2], q = [m[0] + (u[0] * lenW * 3) / 2, m[1] + (u[1] * lenW * 3) / 2];
+    const res = trace(new Raster(W, H).stroke([p, q], 3, INK), [m[0] + 0.3, m[1] - 0.2]);
+    assert.ok(res.width <= 4.5 && res.points.length >= 2, `${lenW} widths long: width ${res.width.toFixed(2)}, ${res.points.length} points`);
+  }
 });
 
 test('forks at the boundary of narrow (FORK_SPLIT 30°): a branch 26° or 28° off is judged as a narrow fork, and the line followed on, to 1 px; at 32° the ways are judged at the junction, as before (either line, to 2 px, not stopped)', () => {

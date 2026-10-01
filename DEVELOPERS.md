@@ -1092,6 +1092,22 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
 
 - **Private windows** keep the browser's file storage in memory and allow it very little, so large
   files fail there. The page warns when the storage allowance looks too small.
+- **Tracing with assistance** (`src/engine/chora/ink/`; measured on the synthetic maps of
+  `test/chora-ink-lines.test.js`, 2026-10-01, in working pixels):
+  - **A line 3 px wide running near 45° thins short**: the 3×3 median leaves it two pixels wide on the
+    diagonal, which Zhang–Suen erases. So a plain curve's end there is carried on straight from where
+    the skeleton stops (7 px short of the ink at radius 30, 13.5 at radius 90) while the arc curves
+    away: up to 4.8 px short at radius 30 and 3.9 at radius 90 (2.2 and 2.3 at 104a9f9); within 2.2 px
+    at 6 px wide. The arc test holds the ends to 5 px, a limit, not a target. Drawn bends (a straight
+    leg turning by 20° or 45°, 1.5 to 5 widths from the end) are placed to 2.5 px. And a short stroke
+    (2 to 5 widths long) 3 px wide at about 50° thins to four pixels, so its width at the click is
+    over-read (13.18 for 3), the thickness band takes every skeleton pixel but the seed's, and it is
+    traced as one point (a `test.todo` there, run and reported as to do while it fails).
+  - **A flat end narrower than 6 px on a slant** is placed as a round one, half a width short of where
+    the ink stops: the pixels do not tell the two apart there (`FLAT_END` in `ink/index.js`).
+  - **A line ending on a bar twice as wide** can run on along it: the thickness band cuts the bar's
+    widest pixels out of the skeleton, and the stem's chain runs round into one half of the bar with
+    no junction to stop at. On a bar as wide, the line stops at it, within 1.3 px of its near edge.
 - **A workbook** (.xlsx, .ods) is read whole, one sheet at a time, since SheetJS cannot stream one; a
   workbook over 50 MB is warned of. CSV files, and a zip of them, stream at any size, as the JSON,
   JSON Lines, LPF and RDF routes do.
