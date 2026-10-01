@@ -124,10 +124,15 @@ const WHG_HOST = /^https?:\/\/(?:[^/?#@]*\.)?whgazetteer\.org(?:[/:?#]|$)|^https
 
 /** The shape a pattern's ids must have: the gazetteer's, for one of GAZETTEER_PATTERNS ({id} or {key}), else PATTERN_SHAPE. */
 export function patternShape(pattern) {
-  const p = typeof pattern === 'string' ? pattern.trim().replace(PLACEHOLDER, '{id}') : pattern;
+  const p = typeof pattern === 'string' ? lowerScheme(pattern.trim().replace(PLACEHOLDER, '{id}')) : pattern;
   for (const g of Object.values(GAZETTEER_PATTERNS)) if (g.pattern === p) return g.shape;
   return PATTERN_SHAPE;
 }
+
+/** An address or pattern with its scheme in lower case (HTTPS://… is written https://…). */
+const lowerScheme = (s) => s.replace(/^https?:/i, (m) => m.toLowerCase());
+// A control character (U+0000 to U+001F, U+007F) has no place in a web address, and a URL parser drops some unseen.
+const CONTROL = /[\u0000-\u001f\u007f]/;
 
 /** Whether a pattern's placeholder stands before the end of its address's host (in the scheme, or in the host itself). */
 function idBeforeHost(p) {
@@ -137,7 +142,7 @@ function idBeforeHost(p) {
 
 /**
  * What is wrong with a pattern, as a code, or null: 'placeholder' (not text, or not exactly one {id}
- * or {key}), 'not-web' (it does not make a web address, or has a space, or its placeholder is not
+ * or {key}), 'not-web' (it does not make a web address, or has a space or a control character, or its placeholder is not
  * after the whole of the address's scheme and host), 'whg' (it makes a World
  * Historical Gazetteer address, which is never made from an id: WHG's codes are not its records'
  * addresses). patternProblem gives the same in words.
@@ -145,6 +150,7 @@ function idBeforeHost(p) {
 export function patternFault(pattern) {
   if (typeof pattern !== 'string' || !pattern.trim() || (pattern.match(PLACEHOLDER) || []).length !== 1) return 'placeholder';
   const p = pattern.trim();
+  if (CONTROL.test(p)) return 'not-web';
   // Everything before the placeholder must be a whole scheme and host, so that no id can change the
   // host (https://{id}/… with the id whgazetteer.org would make a WHG address).
   if (idBeforeHost(p)) return 'not-web';
@@ -174,6 +180,7 @@ export function patternProblem(pattern) {
     const n = (pattern.match(PLACEHOLDER) || []).length;
     return `the pattern ${pattern} has ${n ? 'more than one' : 'no'} {id} in it, where it needs one, which the id replaces`;
   }
+  if (fault === 'not-web' && CONTROL.test(pattern.trim())) return `the pattern ${JSON.stringify(pattern)} has a control character in it, which no web address has`;
   if (fault === 'not-web') return idBeforeHost(pattern.trim()) && /^https?:\/\//i.test(pattern.trim())
     ? `the pattern ${pattern} puts the id in the address's host: the id must come after the address's host`
     : `the pattern ${pattern} does not make a web address (http or https)`;
@@ -193,5 +200,6 @@ export function addressFromPattern(value, pattern, { shape } = {}) {
   const v = typeof value === 'string' ? value.trim() : String(value ?? '');
   const s = shape || patternShape(pattern);
   if (/^whg:/i.test(v) || !s.test(v)) return { lost: 'shape', value: v };
-  return placeAddress(pattern.trim().replace(PLACEHOLDER, v));
+  // The scheme is compared in any case (HTTPS:// is https://), and written in lower case.
+  return placeAddress(lowerScheme(pattern.trim()).replace(PLACEHOLDER, v));
 }

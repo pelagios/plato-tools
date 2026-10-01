@@ -71,6 +71,19 @@ test('a WHG pattern is refused however its address is written: a trailing-dot ho
     assert.equal(patternProblem(p), null, p);
 });
 
+test('a pattern with a control character is refused; a scheme in upper case is taken, and the address written with it in lower case', () => {
+  for (const p of ['https://ex.org/p\u0000/{id}', 'https://ex.org/p/\u0001{id}', 'https://w3id.org/w\u0000hg/{id}', 'https://ex.org/p\u001f/{id}', 'https://ex.org/p\u007f/{id}', 'https://ex.org/p\n/{id}']) {
+    assert.match(patternProblem(p), /control character/, JSON.stringify(p));
+    assert.deepEqual(addressFromPattern('12', p), { error: 'not-web' }, JSON.stringify(p));
+  }
+  assert.equal(patternProblem('https://ex.org/p/{id}'), null, 'control: the same pattern without one is used');
+  // The scheme in any case: refused as WHG's however it is written, and an address otherwise made with https in lower case.
+  assert.match(patternProblem('HTTPS://W3ID.ORG/whg/id/place:gn:{id}'), /World Historical Gazetteer/);
+  assert.deepEqual(addressFromPattern('12', 'HTTPS://ex.org/p/{id}'), { iri: 'https://ex.org/p/12' });
+  assert.deepEqual(addressFromPattern('579885', 'Https://pleiades.stoa.org/places/{id}'), { iri: 'https://pleiades.stoa.org/places/579885' });
+  assert.deepEqual(addressFromPattern('12', 'https://ex.org/p/{id}'), { iri: 'https://ex.org/p/12' }, 'control: a lower-case scheme, unchanged');
+});
+
 test('a pattern whose id stands in the address\'s host is refused in a mapping, so an id cannot choose the host; one with the id after the host is used', async () => {
   const BAD = ['https://{id}/entity/place:gn:1', 'https://{id}.example.org/p', 'https://ex.org{id}/p'];
   for (const p of BAD) assert.match(patternProblem(p), /the id must come after the address's host/, p);
