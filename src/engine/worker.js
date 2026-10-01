@@ -20,7 +20,9 @@ import { save as choraSave } from './chora/save.js';
 let resources = null, pool = null, runs = 0, poolName = null;
 // A take-up of the main page's pool is under way (unpauseVfs): it is not to be let go meanwhile.
 let takingUp = false;
-const busyError = (message) => Object.assign(new Error(message), { kind: 'pool-busy' });
+// When this tab's take-up was last refused (letGoNowAndLater), for the wait before trying again.
+let refusedAt = -Infinity;
+const busyError = (message, kind = 'pool-busy') => Object.assign(new Error(message), { kind });
 /**
  * Let go of the main page's pool if it is left half-taken; true if it holds nothing, or is whole.
  *
@@ -59,6 +61,7 @@ function letGo() {
  * cut off.
  */
 function letGoNowAndLater() {
+  refusedAt = Date.now();
   letGo();
   for (const ms of [100, 1000, 5000]) setTimeout(() => { if (!takingUp) letGo(); }, ms);
 }
@@ -69,7 +72,18 @@ async function sqlitePool() {
     // use at install, the pool is let go of whatever it was granted, and the next run may try again.
     // No second command reaches the pool while this one awaits: the page sends none while it is busy
     // (src/app.js, start). Chora's pool is never let go (runEnv), so never half taken.
-    if (!poolName && !letGo()) throw busyError('The working files are half taken up and could not be let go.');
+    //
+    // A try again soon after a refusal (within the 200 ms its grants take) would ask for files whose
+    // old grants are still to come: one could refuse the new request for its own file (a refusal of
+    // this tab's own making, gone at the next try), and a grant arriving out of order could be taken
+    // for the new take-up's and let go by a mend under it. So a try again waits until 1.2 s after the
+    // refusal, past the mends at 0.1 and 1 s; a grant later than that is not ruled out, but was not seen.
+    if (!poolName) {
+      const wait = refusedAt + 1200 - Date.now();
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      // This tab's own mend failed: no other tab is to blame, and only a reload frees the files.
+      if (!letGo()) throw busyError('The working files are half taken up and could not be let go.', 'pool-stuck');
+    }
     if (pool.vfs.isPaused()) {
       takingUp = true;
       try { await pool.vfs.unpauseVfs(); }

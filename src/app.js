@@ -4,7 +4,7 @@
 // window.__plato for automated tests; nothing else reads it.
 import { fmtBytes, formatName, progressText, summary, groups, draftNote, explainedLines } from './engine/words.js';
 import { COLUMN_CHOICES, COLUMN_WORDS, columnWarnings, columnProblem } from './engine/words.js';
-import { review as W, POOL_BUSY } from './engine/words.js';
+import { review as W, POOL_BUSY, POOL_STUCK } from './engine/words.js';
 const REVIEW_WORDS = W;   // the review's words, where W names the words for the columns
 import { readable } from './engine/input.js';
 import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions } from './engine/krisis/work.js';
@@ -38,6 +38,8 @@ function onMessage({ data }) {
   else if (data.type === 'columns') onColumns(data);
   // Another tab of the main page is running: said in words, and the run may be tried again.
   else if (data.type === 'error' && data.kind === 'pool-busy') fail(data.message, POOL_BUSY);
+  // This tab could not let go of the working files: no other tab is to blame, and a reload frees them.
+  else if (data.type === 'error' && data.kind === 'pool-stuck') fail(data.message, POOL_STUCK);
   else if (data.type === 'error') fail(data.message);
 }
 

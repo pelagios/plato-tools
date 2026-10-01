@@ -945,6 +945,9 @@ def main():
                     if not choose(page): return {**r, 'first': 'not detected'}
                     page.click('#check'); r['refused again'] = ran(page)
                     r['released again'] = holder.evaluate(HOLDER, 'release')
+                    # Past the refused tab's mends at 0.1 and 1 s, so that a grant still in flight at the
+                    # refusal has been let go: the second tab's run then tests the mend, not the timing.
+                    two.wait_for_timeout(1200)
                     for k, p in (('second meanwhile', two), ('first after', page)):
                         if not choose(p): return {**r, k: 'not detected'}
                         p.click('#check'); r[k] = ran(p)
