@@ -354,3 +354,53 @@ test('the stroke width of the dark ink is measured (the hole threshold\'s scale)
   const sw = strokeWidth(prepare(win(r)));
   assert.ok(sw >= 2.6 && sw <= 3.4, `stroke ${sw}`);
 });
+
+// ---- The job: scale, window, growth -----------------------------------------------------------
+
+import { runTrace, runSnap, TOO_LARGE, createPrepCache } from '../src/engine/chora/ink/job.js';
+const servedBy = (img, asked) => async (tiles) => { asked.push(tiles.map((t) => t.url)); return tiles.map((t) => serve(img, t)); };
+
+test('the job: a line run to the window\'s edge grows the window, then reads one scale coarser, and is followed to its ends', async () => {
+  const img = oddImage(), asked = [];
+  const res = await runTrace({ info: ODD, seedImg: [805, 420], mode: 'line', pxPerScreen: 1, getTiles: servedBy(img, asked), size: 128, max: 512 });
+  assert.ok(res.grown === 2 && res.coarser && res.scale === 2, `grown ${res.grown}, coarser ${res.coarser}, scale ${res.scale}`);
+  assert.ok(asked.length >= 3, `tiles asked ${asked.length} times`);
+  assert.ok(hausdorff(res.points, ODD_LINE) <= 3, `line against the truth: ${hausdorff(res.points, ODD_LINE)}`);
+  // The control: read whole at the start (a window larger than the image), nothing grows.
+  const whole = await runTrace({ info: ODD, seedImg: [805, 420], mode: 'line', pxPerScreen: 1, getTiles: servedBy(img, []), size: 1024, max: 1024 });
+  assert.equal(whole.grown, 0); assert.equal(whole.coarser, false);
+});
+
+test('the job: too large when even one scale coarser does not hold it; a fill leaking at the image\'s own edge is a leak', async () => {
+  const one = { ...ODD, tiles: [{ width: 256, scaleFactors: [1] }] };
+  await assert.rejects(runTrace({ info: one, seedImg: [805, 420], mode: 'line', getTiles: servedBy(oddImage(), []), size: 64, max: 128 }), (e) => e.message === TOO_LARGE);
+  const blank = new Raster(1001, 701);
+  await assert.rejects(runTrace({ info: ODD, seedImg: [500, 300], mode: 'area', pxPerScreen: 4, getTiles: servedBy(blank, []), size: 512, max: 512 }), (e) => e.kind === 'leak');
+});
+
+test('the job: a trace let go asks for no more tiles; a second trace of the same window reuses its pixels', async () => {
+  const asked = [];
+  let current = true;
+  const get = async (tiles) => { asked.push(tiles.length); current = false; return tiles.map((t) => serve(oddImage(), t)); };
+  await assert.rejects(runTrace({ info: ODD, seedImg: [805, 420], mode: 'line', getTiles: get, isCurrent: () => current, size: 128, max: 256 }), (e) => e.kind === 'cancelled');
+  assert.equal(asked.length, 1);
+  // Let go while its tiles were coming, a trace that needs no more proposes nothing either.
+  current = true;
+  await assert.rejects(runTrace({ info: ODD, seedImg: [574, 520], mode: 'area', getTiles: get, isCurrent: () => current, pxPerScreen: 2 }), (e) => e.kind === 'cancelled');
+  const cache = createPrepCache(), img = oddImage();
+  let made = 0;
+  const counting = { get: (k, make) => cache.get(k, () => { made++; return make(); }) };
+  await runTrace({ info: ODD, seedImg: [574, 520], mode: 'area', getTiles: servedBy(img, []), cache: counting, pxPerScreen: 2 });
+  await runTrace({ info: ODD, seedImg: [574, 520], mode: 'area', params: { tolerance: 20 }, getTiles: servedBy(img, []), cache: counting, pxPerScreen: 2 });
+  assert.equal(made, 1);
+});
+
+test('the job: snapping\'s ridge pixels over the view, in image pixels, on the line', async () => {
+  const res = await runSnap({ info: ODD, box: [600, 140, 1001, 701], pxPerScreen: 2, getTiles: servedBy(oddImage(), []) });
+  assert.equal(res.frame.s, 1);
+  const r = res.ridges, near = [];
+  for (let k = 0; k < r.length; k += 2) near.push(distToPolyline([r[k], r[k + 1]], ODD_LINE));
+  assert.ok(near.length > 300, `${near.length} ridge points`);
+  near.sort((a, b) => a - b);
+  assert.ok(near[near.length >> 1] <= 0.5, `median ${near[near.length >> 1]}`);
+});

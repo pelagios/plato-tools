@@ -42,7 +42,8 @@ export function createGuard({ state, consented, inPolicy, fetch = globalThis.fet
     }
     const landed = originOf(r.url || url);
     if (landed && landed !== origin) throw new GuardError('moved', `${url} sent the request on to ${landed}, another site, so its answer was not used.`, { origin, landed });
-    if (!r.ok) throw new GuardError('status', `${url} answered ${r.status}.`, { origin, status: r.status });
+    // Retry-After, when the server lets the page read it (a 429's wait, for the tracing's tiles).
+    if (!r.ok) throw new GuardError('status', `${url} answered ${r.status}.`, { origin, status: r.status, retryAfter: r.headers?.get?.('Retry-After') ?? null });
     return r;
   }
   return {
