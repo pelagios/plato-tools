@@ -90,7 +90,17 @@ node bin/plato-tools.mjs compare release-1.jsonl.gz release-2.jsonl.gz  # was an
   spreadsheet tables (`places.csv`, `names.csv`…) are one input per directory, whether the directory
   is given or its CSV files are named one by one, so `a/*.csv b/*.csv` is two sets. Any other CSV
   file in the directory, or named, is an input of its own, and so is a lone sheet whose header does
-  not begin as that sheet's does (a `places.csv` of one's own). A zip of the CSV files, or a workbook, is one set.
+  not begin as that sheet's does (a `places.csv` of one's own). A zip of the CSV files is one set, and so
+  is a workbook (`.xlsx`, `.ods`) whose sheets are named after the tables' (two or more, or one that
+  begins as that sheet does).
+- **A workbook of your own** (any other `.xlsx` or `.ods`) is a table of places, read as a CSV file
+  is, one sheet at a time: the first sheet that is not hidden, unless `--sheet NAME` (or, on the
+  page, the sheet chosen above the columns table) names another. The report names the sheets not
+  read, any hidden sheet (Excel workbooks only: SheetJS does not read an ODS file's hidden flag), an
+  empty sheet, and a formula saved without its value. Each cell is read as its value, not as the
+  workbook displays it: a coordinate formatted `0.00` keeps every digit, and a date is an ISO date
+  (`1990-05-06`, or `1990-05-06T10:30:00` with a time). A workbook is read whole into memory, and
+  one over 50 MB is warned of; a very large sheet is better saved as CSV (UTF-8).
 - **Exit status:** 0 if no input has problems, 1 if any has, 2 if the command is wrong or an input
   cannot be read or written (a missing file, an unrecognised format, an output that already
   exists). Warnings, and what a conversion cannot carry over, do not count as problems. For
@@ -104,7 +114,8 @@ node bin/plato-tools.mjs compare release-1.jsonl.gz release-2.jsonl.gz  # was an
   working database (the triple store) for RDF or attestation-centric input, or the tables' for
   spreadsheet tables, or null when the input streamed straight through. For a table of places its `columns` is a list of
   `{column, field, pattern, reason}` (`pattern` only for a column given one), to read; `--columns`
-  takes the object printed without `--json` instead. For a TEI edition, `keyPatterns` holds the
+  takes the object printed without `--json` instead. For a workbook's sheet, `sheet` names the
+  sheet read and `sheets` lists them all. For a TEI edition, `keyPatterns` holds the
   `--key-pattern` patterns. `--brief` prints one line per input.
 - **Reading options** (the table above) are for `check` and `convert`. One that applies to none of
   the inputs (`--list-places` with no TEI edition among them), or `--same-id` for a table with no

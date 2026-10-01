@@ -400,7 +400,31 @@ readers link to those headings, so keep them.
   `.tsv`/`.tab`) that is not one of the tables' sheets, and a FeatureCollection or Feature whose
   structure is not LPF's (`isLpf`, on the head read as structure by `jsonHead`), here. A GeoJSON
   sequence is LPF only by the same test, of its collection line or its first feature; a sequence of
-  plain features is refused (`GEOJSON_SEQ_REASON`), asking for one FeatureCollection. A IIIF
+  plain features is refused (`GEOJSON_SEQ_REASON`), asking for one FeatureCollection. A workbook
+  (`.xlsx`, `.ods`) comes here too unless it is the tables: `workbookSheets(file)` reads its list of
+  sheets (`XLSX.read(data, { sheets: [] })` for xlsx, which gives `Workbook.Sheets[i].Hidden` without
+  parsing a sheet; `bookSheets: true` for ODS, whose hidden flag SheetJS 0.20.3 does not read, so
+  `generic-sheet-hidden` is xlsx-only), and `workbookKind` applies `tableSheets`' rule with the one
+  header test they share (`isSheetHeader`): two or more sheets named after PLATO's (any case, as the
+  tables reader takes them), or exactly one whose first cell (`sheetRows: 1`) is that sheet's first
+  column. Otherwise it is `{ format: 'csv', container: 'workbook', sheets: [{ name, hidden }], sheet }`,
+  `sheet` the first not hidden, so `isTable`, `genericProfile`, Krisis and the page treat it as a CSV
+  file. SheetJS is imported lazily (`useXlsx(lib)` injects one). `generic.js`'s `openSheet` reads the
+  sheet with `XLSX.read(data, { cellDates: true, UTC: true, sheets: [name], dense: true })` and
+  `sheet_to_json(ws, { header: 1, raw: true, UTC: true, defval: '', blankrows: true })`, each cell made
+  text by `sheetCellText` (a number by `String`, so full precision, never the displayed `0.00`; a
+  date `YYYY-MM-DD` at midnight, else `YYYY-MM-DDTHH:MM:SS`; it is `sheet_to_json`'s `UTC` that keeps
+  a date from shifting by the local time zone, which the TZ test catches), the header the first row
+  that is not blank, rows numbered as the workbook numbers them. A formula saved with no cached value
+  is a cell `{ t: 'e', f }` with no `v`, found on the dense cells and reported
+  (`generic-sheet-formula-no-value`). The sheet is `options.sheet` (a run's options, `sheetIn`), else
+  `input.sheet`; `withSheet(input, name)` sets it, refusing a name the workbook lacks with a
+  DataError listing its sheets (the worker's `columns`, `match` and `apply` commands, and the command
+  line's `--sheet`, a usage error there). The other sheets (`generic-sheets-not-read`), hidden ones,
+  an empty sheet (`generic-sheet-empty`, an error) and a workbook over 50 MB (`workbook-whole`, as the
+  tables reader warns) are reported from the sheet's `headProblems`. SheetJS holds the whole
+  workbook, so the sheet is read once for its columns and once more for its rows, and nothing
+  between. The tables reader's own workbook path (`pipeline.js`, `tableSheetsOf`) is unchanged. A IIIF
   Georeference Annotation (Allmaps) is detected first, as `georef` with a `reason`, and refused
   like an unrecognised file (`readable()`); opened on Chora as a dataset, it is refused with Chora's
   own advice instead, to paste it under Historical maps (`words.js` `choraLoadFailure`). `guessColumns` maps each column to one `FIELDS` key, `note` or `skip`
@@ -1542,7 +1566,8 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
     widest pixels out of the skeleton, and the stem's chain runs round into one half of the bar with
     no junction to stop at. On a bar as wide, the line stops at it, within 1.3 px of its near edge.
 - **A workbook** (.xlsx, .ods) is read whole, one sheet at a time, since SheetJS cannot stream one; a
-  workbook over 50 MB is warned of. CSV files, and a zip of them, stream at any size, as the JSON,
+  workbook over 50 MB is warned of, as tables or as a table of places. Only one sheet of a workbook
+  of one's own is read per run; a hidden sheet of an ODS workbook is not known as hidden. CSV files, and a zip of them, stream at any size, as the JSON,
   JSON Lines, LPF and RDF routes do.
 - **A document's header comes first.** `dataSets` or `relationTypes` written after the records are
   reported, not read.

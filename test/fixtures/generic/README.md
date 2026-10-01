@@ -21,6 +21,16 @@ Tests also build small inputs of their own in the test file: WHG addresses (reco
 entity pages, record and staging addresses), a TSV file, rows with too many or too few cells, and
 GeoJSON that names a coordinate reference system other than WGS 84.
 
+Workbooks (`.xlsx`, `.ods`) are not kept here: `test/hermes-workbook.test.js` makes each one in
+memory with SheetJS (`test/workbooks.js`), constructed, as the repository (BSD-3-Clause). Dates are
+written as the serial numbers a spreadsheet keeps, with a date format, so that nothing in them
+depends on the time zone they are made in. They exercise: the first sheet read and the others
+reported; another chosen (`sheet`, `--sheet`), and one the workbook lacks refused; a coordinate
+formatted `0.00` read in full; date cells as ISO dates, read in three time zones; a hidden sheet
+(xlsx only); a formula saved with no value, and one with its value; an empty sheet; a PLATO tables
+workbook, and a lone `places` sheet beginning `place_id`, still read as the tables, and one
+beginning `name` read as a table of places.
+
 ## The mapping
 
 Which column holds what is guessed from its heading (case, spaces and punctuation do not count)
