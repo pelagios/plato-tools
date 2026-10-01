@@ -161,12 +161,17 @@ a:visited { color: var(--accent); }
 .tool .go .arrow { display: inline-block; transition: transform .12s; }
 .tool:has(.tool-link:hover) .go .arrow { transform: translateX(3px); }
 @media (prefers-reduced-motion: reduce) { .tool .go .arrow { transition: none; } }
-.tool.elsewhere { border-top-style: double; border-top-width: 5px; }
+
 /* The tool chosen, which step 2 is narrowed to. */
 .tool:has(.tool-link[aria-current]) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .tool-link[aria-current] .go { font-weight: 700; }
 .tools { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; grid-template-columns: repeat(auto-fill, minmax(14.5rem, 1fr)); }
-.tool { position: relative; border: 1px solid var(--line); border-top: 4px solid var(--tool-band); border-radius: 8px; padding: .65rem .85rem .75rem; background: var(--bg); }
+.tool { position: relative; border: 1px solid var(--line); border-radius: 8px; padding: calc(.65rem + 10px) .85rem .75rem; background: var(--bg); overflow: hidden; }
+/* The logo's rings, outermost first, as bands across the top of each card: the pin's blue, white,
+   gold, the light blue of the iris and the dark of the pupil. A card that is only planned has none. */
+.tool::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 11px;
+  background: linear-gradient(to bottom, var(--pin) 0 3px, #ffffff 3px 4px, var(--gold) 4px 7px, var(--iris) 7px 10px, var(--pupil) 10px 11px); }
+.tool.coming::before { content: none; }
 .tool h3 { font-family: var(--font-headings); font-weight: 500; font-size: 1.2rem; margin: 0; }
 .tool .label { margin: 0 0 .35rem; font-size: .85rem; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
 .tool p { margin: 0; font-size: .95rem; }
