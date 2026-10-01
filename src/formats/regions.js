@@ -303,9 +303,11 @@ export async function placeRegions(a, attestations, ctx, report) {
   const replaced = new Set();
   for (const [index, t] of readTargets(a).entries()) {
     const source = sourceOf(t);
+    // For the report: a missing or empty source is not written as "undefined", or as nothing.
+    const named = source || 'an unnamed image';
     for (const region of regionsOf(t)) {
       const shape = region.kind === 'svg' ? 'an SVG shape' : `the rectangle ${region.value}`;
-      if (ctx.v1 || (source && RECOGITO_V1.test(source))) { report('annotation-region-not-iiif', `${where}: ${shape} on ${source}`); continue; }
+      if (ctx.v1 || (source && RECOGITO_V1.test(source))) { report('annotation-region-not-iiif', `${where}: ${shape} on ${named}`); continue; }
       // No source (Recogito Studio writes none for an image that is not part of a IIIF manifest):
       // nothing says which image the region is on, so no georeference can be matched to it.
       if (source === undefined) { report('annotation-region-no-georef', `${where}: ${shape}: the image is not named`); continue; }
@@ -315,7 +317,7 @@ export async function placeRegions(a, attestations, ctx, report) {
         const why = tried.find((x) => x.match.reason);
         report('annotation-region-no-georef', why
           ? `${where}: ${source} is a ${why.match.reason} picture of the image ${why.m.g.imageServiceId}, whose pixels are not the image's`
-          : `${where}: ${shape} on ${source}, which no georeference given is for`);
+          : `${where}: ${shape} on ${named}, which no georeference given is for`);
         continue;
       }
       for (const { match } of candidates) {
@@ -329,11 +331,11 @@ export async function placeRegions(a, attestations, ctx, report) {
         const maps = (list) => (list.length === 1 ? `the map ${mapName(list[0].m.g)}` : `each of the maps ${list.map(({ m }) => mapName(m.g)).join('; ')}`);
         if (!inside.length) {
           const partly = candidates.some(({ m }) => vertices(geoms.get(m)).some((p) => containsRegion(m.g, { type: 'Point', coordinates: p }, { space: 'image' })));
-          report('annotation-region-outside-map', `${where}: ${shape} on ${source} has its centre outside ${maps(candidates)}${partly ? ', though part of it is inside' : ', and lies wholly outside'}`);
+          report('annotation-region-outside-map', `${where}: ${shape} on ${named} has its centre outside ${maps(candidates)}${partly ? ', though part of it is inside' : ', and lies wholly outside'}`);
           continue;
         }
         if (inside.length > 1) {
-          report('annotation-region-ambiguous', `${where}: ${shape} on ${source} is inside ${inside.length} maps: ${inside.map(({ m }) => mapName(m.g)).join('; ')}`);
+          report('annotation-region-ambiguous', `${where}: ${shape} on ${named} is inside ${inside.length} maps: ${inside.map(({ m }) => mapName(m.g)).join('; ')}`);
           continue;
         }
         const { m } = inside[0];
@@ -345,19 +347,19 @@ export async function placeRegions(a, attestations, ctx, report) {
         // extrapolates safely, where the hull of its two points would be a segment and place
         // nothing. The mask still applies.
         if (!SIMILARITY.has(m.g.transformation) && !withinControlPoints(m.g, centres.get(m))) {
-          report('annotation-region-beyond-control-points', `${where}: ${shape} on ${source} has its centre beyond the control points of ${maps(inside)}`);
+          report('annotation-region-beyond-control-points', `${where}: ${shape} on ${named} has its centre beyond the control points of ${maps(inside)}`);
           continue;
         }
-        if (!containsRegion(m.g, geom, { space: 'image' })) report('annotation-region-crosses-map-edge', `${where}: ${shape} on ${source} reaches beyond ${maps(inside)}`);
+        if (!containsRegion(m.g, geom, { space: 'image' })) report('annotation-region-crosses-map-edge', `${where}: ${shape} on ${named} reaches beyond ${maps(inside)}`);
         await place(m, geom, centres.get(m), attestations, { ...ctx, index, replaced }, report, shape);
       } catch (e) {
-        if (e instanceof DataError) report('annotation-region-unplaced', `${where}: ${shape} on ${source}: ${message(e)}`);
+        if (e instanceof DataError) report('annotation-region-unplaced', `${where}: ${shape} on ${named}: ${message(e)}`);
         else {
           // Anything else is a fault in these tools, not in the data: it costs this region its
           // point, never the run. It is recorded (unexpectedRegionErrors) so that the tests, which
           // assert that list empty, still see such a fault.
           unexpectedRegionErrors.push(e);
-          report('annotation-region-unplaced', `${where}: ${shape} on ${source}: ${UNEXPECTED} (${e && e.name || 'Error'}: ${message(e)})`);
+          report('annotation-region-unplaced', `${where}: ${shape} on ${named}: ${UNEXPECTED} (${e && e.name || 'Error'}: ${message(e)})`);
         }
       }
     }

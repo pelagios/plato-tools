@@ -523,6 +523,26 @@ test('annotation-region-not-iiif: a region on a Recogito v1 document; not one on
   const { of } = await MAIN();
   assert.deepEqual(of('annotation-region-not-iiif'), [`${id(13)}: the rectangle xywh=pixel:1200,800,300,60 on https://recogito.pelagios.org/part/7d2c4e1a-0b3f-4a5e-9c8d-1e2f3a4b5c6d`]);
 });
+test('the report names a missing or empty source "an unnamed image", never "undefined" or nothing', async () => {
+  const g = await rocque();
+  const att = () => ({ citations: [{ source: { title: 't', authorityType: 'source' } }] });
+  const run = async (target, ctx = {}) => {
+    const reported = [];
+    await placeRegions({ ...item(1), target }, [att()], { maps: [{ g, file: 'rocque.json', used: 0 }], where: id(1), label: true, ...ctx }, (k, e) => reported.push([k, e]));
+    return reported;
+  };
+  const sel = item(1).target.selector;
+  // An empty source: no georeference is for it.
+  const empty = await run({ ...item(1).target, source: '' });
+  assert.deepEqual(empty.filter(([k]) => k === 'annotation-region-no-georef').map(([, e]) => e), [`${id(1)}: the rectangle xywh=pixel:5120,5600,230,72 on an unnamed image, which no georeference given is for`]);
+  // A Recogito v1 export, with no source.
+  const v1 = await run({ type: 'SpecificResource', selector: sel }, { v1: true });
+  assert.deepEqual(v1.filter(([k]) => k === 'annotation-region-not-iiif').map(([, e]) => e), [`${id(1)}: the rectangle xywh=pixel:5120,5600,230,72 on an unnamed image`]);
+  for (const [, e] of [...empty, ...v1]) assert.ok(!/on (undefined|,)/.test(String(e)), e);
+  // Control: a source that is named is written as itself.
+  const other = await run({ ...item(1).target, source: 'https://example.org/canvas/x' });
+  assert.deepEqual(other.filter(([k]) => k === 'annotation-region-no-georef').map(([, e]) => e), [`${id(1)}: the rectangle xywh=pixel:5120,5600,230,72 on https://example.org/canvas/x, which no georeference given is for`]);
+});
 test('annotation-region-unplaced: a curved outline, with the reason; the run goes on', async () => {
   const { of, attestation } = await MAIN();
   const u = of('annotation-region-unplaced');
