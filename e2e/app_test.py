@@ -2057,7 +2057,7 @@ def chora_checks(pw, url, tmp):
         checked = page.evaluate('s => document.querySelector(s + " input:checked")?.value || null', sel)
         page.keyboard.press('Escape')
         return (csp['origins'] == ['https://forged.example.org'] and 'https://forged.example.org' in meta and 'evil' not in meta and 'evil' not in ' '.join(keys)
-                and 'basemap:nosuch' not in keys and checked == 'allowed' and 'You added this on 1 September 2026' in entry), {'policy': csp['origins'], 'keys': keys, 'entry': entry, 'checked': checked}
+                and 'basemap:nosuch' not in keys and checked == 'allowed' and 'Added on 1 September 2026' in entry and 'You added' not in entry), {'policy': csp['origins'], 'keys': keys, 'entry': entry, 'checked': checked}
     attempt('Chora: a grant forged in storage is in the policy and listed in the panel, as kept; an injected site and an unknown provider are in neither', forged)
     def no_policy():
         page_url = base + 'chora.html'
