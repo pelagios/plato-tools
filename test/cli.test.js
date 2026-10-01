@@ -145,17 +145,17 @@ test('a workbook, and the zip the command line writes, are each one set of table
 const bytesOf = (parts) => Buffer.concat(parts.map((p) => (typeof p === 'string' ? Buffer.from(p, 'utf8') : Buffer.from(p))));
 const zipContents = (buf) => Object.fromEntries(Object.entries(unzipSync(new Uint8Array(buf))).map(([k, v]) => [k, strFromU8(v)]));
 const CASES = [
-  // [what, CLI arguments, the files the engine is given, engine options, target]
-  ['tables -> JSON Lines, with --base', [`${TABLES}/customs`, '--base', 'https://example.org/customs/'], () => readdirSync(`${TABLES}/customs`).map((f) => file(`${TABLES}/customs/${f}`)), { base: 'https://example.org/customs/', name: 'customs' }, 'plato-jsonl'],
-  ['tables -> tables (a zip)', [`${TABLES}/survey`], () => readdirSync(`${TABLES}/survey`).map((f) => file(`${TABLES}/survey/${f}`)), { name: 'survey' }, 'tables'],
-  ['place-centric JSON -> N-Triples, typed by default', [`${EX}/place-centric-constantinople.json`], () => [file(`${EX}/place-centric-constantinople.json`)], { typing: true }, 'ntriples'],
-  ['place-centric JSON -> N-Triples, --no-typing', [`${EX}/place-centric-constantinople.json`, '--no-typing'], () => [file(`${EX}/place-centric-constantinople.json`)], { typing: false }, 'ntriples'],
-  ['place-centric JSON -> LPF', [`${EX}/place-centric-constantinople.json`], () => [file(`${EX}/place-centric-constantinople.json`)], {}, 'lpf'],
-  ['attestation-centric JSON -> JSON document (through the store)', [`${EX}/attestation-centric-customs.json`], () => [file(`${EX}/attestation-centric-customs.json`)], {}, 'plato-json'],
-  ['Turtle -> JSON Lines (through the store)', [`${PLATO_REPO}/examples/survey-attestations.ttl`], () => [file(`${PLATO_REPO}/examples/survey-attestations.ttl`)], {}, 'plato-jsonl'],
-  ['LPF -> LPF sequence', ['test/fixtures/lpf-sample-v1.2.2.geojson'], () => [file('test/fixtures/lpf-sample-v1.2.2.geojson')], {}, 'lpf-seq'],
+  // [what, CLI arguments, the files the engine is given, engine options, target, a record the output must hold]
+  ['tables -> JSON Lines, with --base', [`${TABLES}/customs`, '--base', 'https://example.org/customs/'], () => readdirSync(`${TABLES}/customs`).map((f) => file(`${TABLES}/customs/${f}`)), { base: 'https://example.org/customs/', name: 'customs' }, 'plato-jsonl', '"@id":"https://example.org/customs/place/bristol"'],
+  ['tables -> tables (a zip)', [`${TABLES}/survey`], () => readdirSync(`${TABLES}/survey`).map((f) => file(`${TABLES}/survey/${f}`)), { name: 'survey' }, 'tables', '\ncambridge,Grantanbrycg,'],
+  ['place-centric JSON -> N-Triples, typed by default', [`${EX}/place-centric-constantinople.json`], () => [file(`${EX}/place-centric-constantinople.json`)], { typing: true }, 'ntriples', '\n<https://whgazetteer.org/place/12345> '],
+  ['place-centric JSON -> N-Triples, --no-typing', [`${EX}/place-centric-constantinople.json`, '--no-typing'], () => [file(`${EX}/place-centric-constantinople.json`)], { typing: false }, 'ntriples', '\n<https://whgazetteer.org/place/12345> '],
+  ['place-centric JSON -> LPF', [`${EX}/place-centric-constantinople.json`], () => [file(`${EX}/place-centric-constantinople.json`)], {}, 'lpf', '"features":[{"@id":"https://whgazetteer.org/place/12345"'],
+  ['attestation-centric JSON -> JSON document (through the store)', [`${EX}/attestation-centric-customs.json`], () => [file(`${EX}/attestation-centric-customs.json`)], {}, 'plato-json', '"spatialEntities":[{"@id":"https://whgazetteer.org/place/99001"'],
+  ['Turtle -> JSON Lines (through the store)', [`${PLATO_REPO}/examples/survey-attestations.ttl`], () => [file(`${PLATO_REPO}/examples/survey-attestations.ttl`)], {}, 'plato-jsonl', '\n{"@id":"https://whgazetteer.org/example/entity/cambridge"'],
+  ['LPF -> LPF sequence', ['test/fixtures/lpf-sample-v1.2.2.geojson'], () => [file('test/fixtures/lpf-sample-v1.2.2.geojson')], {}, 'lpf-seq', '\n{"@id":"http://mygaz.org/places/p_12345"'],
 ];
-for (const [what, args, files, options, target] of CASES) {
+for (const [what, args, files, options, target, present] of CASES) {
   test(`convert writes to disk exactly what the engine produces: ${what}`, async () => {
     const out = scratch();
     const r = cli('convert', '--to', target, '--out', out, '--json', ...args);
@@ -168,7 +168,9 @@ for (const [what, args, files, options, target] of CASES) {
     assert.deepEqual(readdirSync(out), names, 'the same output, under the same name');
     assert.deepEqual(line.outputs, [{ path: join(out, names[0]), size: readFileSync(join(out, names[0])).length }]);
     const disk = readFileSync(join(out, names[0])), mem = bytesOf(engine.e.outs[names[0]]);
-    assert.ok(mem.length > 100, `the engine wrote ${mem.length} bytes`);
+    // A header alone is more than 100 bytes, so the output is asked for a record it must hold.
+    const held = target === 'tables' ? zipContents(mem)['names.csv'] : mem.toString('utf8');
+    assert.ok(held.includes(present), `${names[0]} does not hold ${present.trim()}: ${held.slice(0, 300)}`);
     // A zip records when it was made, so zips are compared by what they hold.
     if (target === 'tables') assert.deepEqual(zipContents(disk), zipContents(mem));
     else assert.ok(disk.equals(mem), `${names[0]}: ${disk.length} bytes on disk, ${mem.length} from the engine`);
@@ -310,10 +312,21 @@ test('counts of one are singular in the summary: "1 place", "1 identity relation
 // This path (N-Triples in, PLATO JSON out) crashed on PLATO's statistics example while every
 // in-memory test passed, so each example is taken through it as a user would: to N-Triples, then to
 // a PLATO JSON document and to JSON Lines, each written, valid, and with every place.
-for (const f of readdirSync(EX).filter((x) => x.endsWith('.json'))) {
+const EXAMPLES = readdirSync(EX).filter((x) => x.endsWith('.json'));
+test('the examples taken through RDF and back are there to take', () => {
+  for (const f of ['attestation-centric-customs.json', 'candidate-set-judgements.json', 'place-centric-constantinople.json', 'place-centric-river-idle.json'])
+    assert.ok(EXAMPLES.includes(f), `${f} is not among ${EXAMPLES.join(', ')}`);
+});
+for (const f of EXAMPLES) {
   test(`command line: ${f} -> N-Triples -> PLATO JSON and JSON Lines, each written and valid`, () => {
     const dir = scratch();
-    const places = (JSON.parse(readFileSync(`${EX}/${f}`, 'utf8')).spatialEntities || []).length;
+    // What the example holds, as the check counts it (places, attestations, identity relations or
+    // candidates): the same must come back, whatever the profile, and something must.
+    const counted = (out) => { const { triples, ...rest } = jsonLines(out)[0].counts; return rest; };
+    const before = cli('check', '--json', `${EX}/${f}`);
+    assert.equal(before.code, 0, before.out + before.err);
+    const want = counted(before.out);
+    assert.ok(Object.values(want).some((n) => n > 0), `${f}: nothing counted ${JSON.stringify(want)}`);
     const toNt = cli('convert', '--to', 'ntriples', '--out', dir, '--json', `${EX}/${f}`);
     assert.equal(toNt.code, 0, toNt.out + toNt.err);
     const ntFile = join(dir, f.replace(/\.json$/, '.nt'));
@@ -326,7 +339,7 @@ for (const f of readdirSync(EX).filter((x) => x.endsWith('.json'))) {
       const written = join(out, f.replace(/\.json$/, ext));
       const again = cli('check', '--json', written);
       assert.equal(again.code, 0, `${target} output does not check clean: ${again.out}`);
-      if (places) assert.equal(jsonLines(again.out)[0].counts.places, places, `${target}: every place is there`);
+      assert.deepEqual(counted(again.out), want, `${target}: everything is there`);
     }
   });
 }
