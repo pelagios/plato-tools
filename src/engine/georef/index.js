@@ -842,11 +842,12 @@ const ISO_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[
  * record.role is LABEL_ANCHOR, "The position is where the map writes the name, not necessarily
  * where the place is."
  *
- * Sentences added later, each fixed too, the earlier ones unchanged: after the place sentence and
- * before the label-anchor one, the annotation's version when it is known ("Annotation version <v>,
- * modified <d>." | "Annotation version <v>." | "Annotation modified <d>."); and last, only when
- * asked for with `misfit: true`, how far the georeference misses its own control points (see
- * MISFIT_NOTE), which says of itself that it is not the accuracy of the position.
+ * Sentences added later, each fixed too, only ever APPEND after those (the template, the place
+ * sentence and the label-anchor one), which keep their wording and order: first the annotation's
+ * version when it is known ("Annotation version <v>, modified <d>." | "Annotation version <v>." |
+ * "Annotation modified <d>."); and last, only when asked for with `misfit: true`, how far the
+ * georeference misses its own control points (see MISFIT_NOTE), which says of itself that it is
+ * not the accuracy of the position.
  *
  * @param options.fetched When the annotation was retrieved: an ISO 8601 date-time with an offset
  *   or Z (e.g. 2026-09-30T14:05:00Z). A TypeError otherwise.
@@ -868,12 +869,13 @@ export function georefNote(record, { fetched, misfit = false } = {}) {
   else if (record.canvasId) sentences.push(`On canvas ${record.canvasId}.`);
   else if (record.manifestId) sentences.push(`In manifest ${record.manifestId}.`);
   else if (record.imageServiceId) sentences.push(`On image ${record.imageServiceId}.`);
+  if (record.role === LABEL_ANCHOR) sentences.push(LABEL_ANCHOR_NOTE);
+  // Sentences added later only follow the original ones (template, place, label anchor).
   const version = typeof record.annotationVersion === 'string' && record.annotationVersion ? record.annotationVersion : null;
   const modified = typeof record.annotationModified === 'string' && record.annotationModified ? record.annotationModified : null;
   if (version && modified) sentences.push(`Annotation version ${version}, modified ${modified}.`);
   else if (version) sentences.push(`Annotation version ${version}.`);
   else if (modified) sentences.push(`Annotation modified ${modified}.`);
-  if (record.role === LABEL_ANCHOR) sentences.push(LABEL_ANCHOR_NOTE);
   if (misfit) sentences.push(misfitSentence(record));
   return sentences.join(' ');
 }

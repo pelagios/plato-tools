@@ -1092,7 +1092,7 @@ test('readGeoreference carries the annotation version and date into g and the re
   await assert.rejects(readGeoreference(late), isDataError);
 });
 
-test('georefNote: the version sentence, pinned exactly, after the place and before the label anchor; none without a version', async () => {
+test('georefNote: the version sentence, pinned exactly, after the place and after the label anchor (new sentences only append); none without a version', async () => {
   const g = await rocque();
   const record = (await toWorld(g, pt([5000, 4000]), { space: 'image' })).record;
   const base = `Georeferenced through ${ROCQUE_ID} (thin plate spline, 22 control points), retrieved 2026-09-30T14:05:00Z. On canvas ${ROCQUE_CANVAS} of manifest ${ROCQUE_MANIFEST}.`;
@@ -1105,9 +1105,10 @@ test('georefNote: the version sentence, pinned exactly, after the place and befo
   assert.equal(georefNote(unversioned(record), opts), base);
   const noKeys = { ...record }; delete noKeys.annotationVersion; delete noKeys.annotationModified;
   assert.equal(georefNote(noKeys, opts), base);
-  // Before the label-anchor sentence.
+  // After the label-anchor sentence: the original sentences come first, in their order.
   const anchored = { ...record, role: LABEL_ANCHOR };
-  assert.equal(georefNote(anchored, opts), `${base} Annotation version ${ROCQUE_VERSION}, modified ${ROCQUE_MODIFIED}. The position is where the map writes the name, not necessarily where the place is.`);
+  assert.equal(georefNote(anchored, opts), `${base} The position is where the map writes the name, not necessarily where the place is. Annotation version ${ROCQUE_VERSION}, modified ${ROCQUE_MODIFIED}.`);
+  assert.ok(georefNote(anchored, opts).startsWith(georefNote(unversioned(anchored), opts) + ' '), 'the unversioned note is a prefix of the versioned one');
   // With no canvas or manifest, after the image sentence.
   assert.equal(georefNote({ ...record, canvasId: null, manifestId: null }), `Georeferenced through ${ROCQUE_ID} (thin plate spline, 22 control points), retrieval date not recorded. On image ${ROCQUE_IMAGE}. Annotation version ${ROCQUE_VERSION}, modified ${ROCQUE_MODIFIED}.`);
 });
@@ -1180,7 +1181,7 @@ test('georefNote misfit: only when asked; the two sentences pinned exactly', asy
   assert.equal(georefNote(tps), base('thin plate spline'));
   // Two decimals always (Lynn: a few metres), and last, after the version and label-anchor sentences.
   const lynn = (await toWorld(await readGeoreference(LYNN, { index: 7 }), pt([2000, 1000]), { space: 'image', role: LABEL_ANCHOR })).record;
-  assert.equal(georefNote(lynn, { misfit: true }), `Georeferenced through https://annotations.allmaps.org/maps/051d059e8d1111fd (polynomial order 1, 23 control points), retrieval date not recorded. On canvas ${LYNN_CANVAS('jd475s53d')} of manifest ${LYNN_MANIFEST}. Annotation version https://annotations.allmaps.org/maps/051d059e8d1111fd@e8405163b4a995bf, modified 2023-06-22T19:44:41.434Z. The position is where the map writes the name, not necessarily where the place is. The georeference misses its own control points by ${lynn.controlPointMisfitKm.toFixed(2)} km on average (root mean square; at most ${lynn.controlPointMisfitMaxKm.toFixed(2)} km); this is a measure of the georeference, not of this position's accuracy.`);
+  assert.equal(georefNote(lynn, { misfit: true }), `Georeferenced through https://annotations.allmaps.org/maps/051d059e8d1111fd (polynomial order 1, 23 control points), retrieval date not recorded. On canvas ${LYNN_CANVAS('jd475s53d')} of manifest ${LYNN_MANIFEST}. The position is where the map writes the name, not necessarily where the place is. Annotation version https://annotations.allmaps.org/maps/051d059e8d1111fd@e8405163b4a995bf, modified 2023-06-22T19:44:41.434Z. The georeference misses its own control points by ${lynn.controlPointMisfitKm.toFixed(2)} km on average (root mean square; at most ${lynn.controlPointMisfitMaxKm.toFixed(2)} km); this is a measure of the georeference, not of this position's accuracy.`);
   assert.equal(lynn.controlPointMisfitKm.toFixed(2), '0.00');
   assert.equal(lynn.controlPointMisfitMaxKm.toFixed(2), '0.01');
   // A misfit option that is not a boolean, or a least-squares record with no misfit, is a TypeError;
