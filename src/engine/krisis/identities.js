@@ -9,6 +9,8 @@
 //   formats/shared.js): a relation whose attestation is withdrawn in the current state no longer holds.
 // - Addresses are kept in WHG's persistent form (normaliseWhgIri); a legacy WHG cluster address
 //   (/places/<n>/portal/) is kept as found. Relations are symmetric: each place of a pair gets the other.
+// - `exact` holds the linked addresses whose relation's identityType is exactMatch (a missing type is
+//   not exact); `linked` holds every type.
 // - Comparing with a WHG candidate (linkState) also counts the authority's own address of the record
 //   (authorityIris: GeoNames, Getty TGN, Wikidata, OpenStreetMap) as the candidate's.
 import { collectWithdrawn, resolveWithdrawn } from '../../formats/shared.js';
@@ -40,12 +42,12 @@ export function authorityIris(id) {
 /**
  * Collects identity relations record by record (for a sink that sees each record once), and gives the
  * current state when all are in. `add(record)` a place-centric record; `addRelation(subject, object,
- * negated?, attestationId?)` a relation met elsewhere (a top-level one); `result()` the Map below.
+ * negated?, attestationId?, identityType?)` a relation met elsewhere (a top-level one); `result()` the Map below.
  */
 export function createIdentityCollector() {
   const links = [], withdrawals = new Map();
-  const addRelation = (a, b, negated = false, att = null) => {
-    if (typeof a === 'string' && typeof b === 'string' && a && b && a !== b) links.push({ a, b, negated: !!negated, att: typeof att === 'string' ? att : null });
+  const addRelation = (a, b, negated = false, att = null, identityType = null) => {
+    if (typeof a === 'string' && typeof b === 'string' && a && b && a !== b) links.push({ a, b, negated: !!negated, att: typeof att === 'string' ? att : null, exact: identityType === 'exactMatch' });
   };
   return {
     addRelation,
@@ -54,29 +56,34 @@ export function createIdentityCollector() {
       if (!rec || typeof rec !== 'object') return;
       for (const a of rec.attestations || []) {
         if (!a || typeof a !== 'object') continue;
-        for (const r of [].concat(a.identities || [])) addRelation(r?.subject ?? iri, r?.object, !!a.negated, a['@id']);
+        for (const r of [].concat(a.identities || [])) addRelation(r?.subject ?? iri, r?.object, !!a.negated, a['@id'], r?.identityType);
       }
       collectWithdrawn(rec.attestations, withdrawals);
-      for (const r of rec.identityRelations || []) addRelation(r?.subject ?? iri, r?.object, false, null);
+      for (const r of rec.identityRelations || []) addRelation(r?.subject ?? iri, r?.object, false, null, r?.identityType);
     },
-    /** Map<place IRI, { linked: Set<IRI>, denied: Set<IRI> }>, without what has been withdrawn. */
+    /**
+     * Map<place IRI, { linked: Set<IRI>, exact: Set<IRI>, denied: Set<IRI> }>, without what has been
+     * withdrawn: `exact` is the part of `linked` said by an exactMatch.
+     */
     result() {
       const withdrawn = resolveWithdrawn(withdrawals).status;
       const out = new Map();
-      const put = (from, to, negated) => {
-        const e = out.get(from) || out.set(from, { linked: new Set(), denied: new Set() }).get(from);
-        (negated ? e.denied : e.linked).add(normaliseWhgIri(to));
+      const put = (from, to, negated, exact) => {
+        const e = out.get(from) || out.set(from, { linked: new Set(), exact: new Set(), denied: new Set() }).get(from);
+        const iri = normaliseWhgIri(to);
+        (negated ? e.denied : e.linked).add(iri);
+        if (exact && !negated) e.exact.add(iri);
       };
       for (const l of links) {
         if (l.att && withdrawn.has(l.att)) continue;
-        put(l.a, l.b, l.negated); put(l.b, l.a, l.negated);
+        put(l.a, l.b, l.negated, l.exact); put(l.b, l.a, l.negated, l.exact);
       }
       return out;
     },
   };
 }
 
-/** The current identity decisions of places: currentIdentities(records) → Map<place IRI, { linked, denied }>. */
+/** The current identity decisions of places: currentIdentities(records) → Map<place IRI, { linked, exact, denied }>. */
 export function currentIdentities(records) {
   const c = createIdentityCollector();
   for (const r of records || []) c.add(r);
@@ -89,11 +96,12 @@ const has = (list, iri) => (list instanceof Set ? list.has(iri) : Array.isArray(
 
 /**
  * Whether a place's identities (one entry of the Map, or the same with arrays) already link it to a
- * candidate ({ id, iri }), or deny it: 'linked', 'denied', or null. A link wins over a denial.
+ * candidate ({ id, iri }), or deny it: 'linked', 'denied', or null. A link wins over a denial. With
+ * `{ exact: true }`, only an exactMatch links (entry.exact, not entry.linked).
  */
-export function linkState(entry, candidate) {
+export function linkState(entry, candidate, { exact = false } = {}) {
   if (!entry) return null;
   const known = [...addressesOf(candidate)];
   const hit = (list) => known.some((iri) => has(list, iri) || has(list, normaliseWhgIri(iri)));
-  return hit(entry.linked) ? 'linked' : hit(entry.denied) ? 'denied' : null;
+  return hit(exact ? entry.exact : entry.linked) ? 'linked' : hit(entry.denied) ? 'denied' : null;
 }

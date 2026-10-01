@@ -341,7 +341,7 @@ export async function gather({ subjects, options = {} }, env) {
   const progress = env.progress || (() => {});
   if (options.columns !== undefined && options.columns !== null && !isColumns(options.columns)) throw new DataError(KRISIS_TEXT.columnsNotAMapping);
   const ids = createIdentityCollector();
-  const tap = (ev) => { if (ev.type === 'record' && ev.value) ids.add(ev.value); else if (ev.type === 'idr' && ev.value) ids.addRelation(ev.value.subject, ev.value.object); };
+  const tap = (ev) => { if (ev.type === 'record' && ev.value) ids.add(ev.value); else if (ev.type === 'idr' && ev.value) ids.addRelation(ev.value.subject, ev.value.object, false, null, ev.value.identityType); };
   const { side, failed } = await readSide(subjects, 'subjects', options, env, rep, progress, tap);
   if (failed !== undefined || !side.files) {
     rep.error('unreadable', TEXT.unreadable(words('subjects')), failed);

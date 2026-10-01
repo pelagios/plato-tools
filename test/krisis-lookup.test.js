@@ -15,11 +15,11 @@ import { readWork, serialiseWork, decide, WORK_VERSION } from '../src/engine/kri
 import { attestationsFrom, gazetteerSource } from '../src/engine/krisis/identity.js';
 import { apply } from '../src/engine/krisis/apply.js';
 import {
-  planQueries, planLookup, rankGazetteer, runLookup, selectPlaces, mergeAnswers, startLookup, newWork, serviceOf, licenceOf, lookupCandidatesOf,
+  planQueries, planLookup, rankGazetteer, runLookup, selectPlaces, mergeAnswers, startLookup, newWork, serviceOf, licenceOf, upstreamLicence, lookupCandidatesOf,
   distanceKm, WHG_SERVICE, PREVIEW_QUERIES, LOOKUP_ALGORITHM, authorityIris, typeFromManifest, iriFromTemplate, manifestSettings, iriVia, WHG_PLACE_TYPE,
 } from '../src/engine/krisis/lookup.js';
 import { LOOKUP_WORDS, krisisLookupNote, lookupPage } from '../src/engine/words.js';
-import { currentIdentities, linkState } from '../src/engine/krisis/identities.js';
+import { currentIdentities, createIdentityCollector, linkState } from '../src/engine/krisis/identities.js';
 
 const X = 'https://example.org/';
 const W3ID = 'https://w3id.org/whg/id/';
@@ -565,6 +565,73 @@ test('currentIdentities: identities from every attestation and the record, denia
   assert.equal(linkState(m.get(P), { id: 'place:gn:1', iri: W3ID + 'place:gn:1' }), 'linked');
   assert.equal(linkState(m.get(P), { id: 'place:gn:2', iri: W3ID + 'place:gn:2' }), null, 'control');
   assert.equal(linkState({ linked: ['https://sws.geonames.org/2/'], denied: [] }, { id: 'place:gn:2', iri: W3ID + 'place:gn:2' }), 'linked', 'the authority\'s address');
+});
+
+test('currentIdentities: exactMatch links kept apart in exact; linked keeps every type; linkState { exact } reads exact', () => {
+  const P = A('p');
+  const records = [{ '@id': P, label: 'P',
+    identityRelations: [{ object: X + 'nested-exact', identityType: 'exactMatch' }, { object: X + 'nested-close', identityType: 'closeMatch' }, { object: X + 'nested-untyped' }],
+    attestations: [
+      { '@id': P + '#a1', identities: [{ subject: P, object: X + 'close', identityType: 'closeMatch' }, { subject: P, object: X + 'exact', identityType: 'exactMatch' }, { subject: P, object: 'https://sws.geonames.org/2641673/', identityType: 'exactMatch' }], sources: [src] },
+      { '@id': P + '#a2', negated: true, identities: [{ subject: P, object: X + 'denied', identityType: 'exactMatch' }], sources: [src] },
+      { '@id': P + '#a3', identities: { subject: P, object: X + 'withdrawn', identityType: 'exactMatch' }, sources: [src] },
+      { '@id': P + '#a4', meta: [{ metaType: 'plato:Retracts', targetAttestation: P + '#a3' }], sources: [src] },
+    ] }];
+  const e = currentIdentities(records).get(P);
+  assert.ok(e.linked.has(X + 'close') && !e.exact.has(X + 'close'), 'closeMatch: linked, not exact');
+  assert.ok(e.linked.has(X + 'exact') && e.exact.has(X + 'exact'), 'exactMatch: both');
+  assert.ok(e.denied.has(X + 'denied') && !e.linked.has(X + 'denied') && !e.exact.has(X + 'denied'), 'a negated exactMatch: denied only');
+  assert.ok(!e.linked.has(X + 'withdrawn') && !e.exact.has(X + 'withdrawn') && !e.denied.has(X + 'withdrawn'), 'a withdrawn exactMatch: neither');
+  const kept = currentIdentities([{ ...records[0], attestations: records[0].attestations.filter((a) => a['@id'] !== P + '#a4') }]).get(P);
+  assert.ok(kept.exact.has(X + 'withdrawn'), 'control: without the retraction, it is exact');
+  assert.ok(e.exact.has(X + 'nested-exact') && e.linked.has(X + 'nested-close') && !e.exact.has(X + 'nested-close'), 'nested identityRelations carry their type');
+  assert.ok(e.linked.has(X + 'nested-untyped') && !e.exact.has(X + 'nested-untyped'), 'a missing type is not exact');
+  assert.deepEqual([...e.exact].sort(), [X + 'exact', 'https://sws.geonames.org/2641673/', X + 'nested-exact'].sort());
+  // Symmetric, and normalised as linked is.
+  const q = currentIdentities([{ '@id': P, attestations: [{ identities: [{ subject: P, object: 'https://whgazetteer.org/entity/place:gn:1/api', identityType: 'exactMatch' }] }] }]);
+  assert.ok(q.get(P).exact.has(W3ID + 'place:gn:1') && q.get('https://whgazetteer.org/entity/place:gn:1/api').exact.has(P));
+  // Top-level relations, through the collector.
+  const c = createIdentityCollector();
+  c.addRelation(P, X + 'top-exact', false, null, 'exactMatch');
+  c.addRelation(P, X + 'top-close', false, null, 'closeMatch');
+  c.addRelation(P, X + 'top-untyped');
+  const t = c.result().get(P);
+  assert.deepEqual([[...t.linked].length, [...t.exact]], [3, [X + 'top-exact']]);
+  // linkState: the default reads linked, { exact: true } reads exact, and authority addresses count.
+  const gn = { id: 'place:gn:2641673', iri: W3ID + 'place:gn:2641673' };
+  assert.equal(linkState(e, gn, { exact: true }), 'linked', 'the authority\'s address, found among the exact');
+  assert.equal(linkState(e, { id: 'place:gn:9', iri: W3ID + 'place:gn:9' }, { exact: true }), null, 'control: another authority record');
+  const close = { id: 'x', iri: X + 'close' };
+  assert.equal(linkState(e, close), 'linked', 'default: any type links');
+  assert.equal(linkState(e, close, { exact: true }), null, 'exact: a closeMatch does not');
+  assert.equal(linkState(e, { id: 'x', iri: X + 'denied' }, { exact: true }), 'denied');
+  // Array entries are still accepted.
+  const arr = { linked: [X + 'close', 'https://sws.geonames.org/2641673/'], exact: ['https://sws.geonames.org/2641673/'], denied: [] };
+  assert.equal(linkState(arr, gn, { exact: true }), 'linked');
+  assert.equal(linkState(arr, close, { exact: true }), null);
+  assert.equal(linkState(arr, close), 'linked', 'control: the same array entry, by default');
+});
+test('upstreamLicence: licenceOf without WHG\'s own licence, for copied data', () => {
+  const d = { license: { spdx_id: 'CC-BY-NC-4.0', permits_commercial: false, no_derivatives: false } };
+  const a = { ...ATTRIBUTION, datasets: { 42: d } };
+  // A WHG-native record (place:whg:42:…, or no namespace) whose dataset gives a licence: that licence.
+  for (const ns of ['whg', null]) {
+    assert.equal(upstreamLicence(a, ns, 42).spdx, 'CC-BY-NC-4.0', `${ns}: the contributed dataset's`);
+    assert.deepEqual(upstreamLicence(a, ns, 42), licenceOf(a, ns, 42), `${ns}: as licenceOf`);
+    // Without a dataset licence: null; licenceOf gives WHG's own.
+    assert.equal(upstreamLicence(a, ns, 7), null, `${ns}: no dataset licence, unknown`);
+    assert.equal(upstreamLicence(ATTRIBUTION, ns, 42), null, `${ns}: no datasets at all, unknown`);
+    assert.equal(licenceOf(a, ns, 7).spdx, 'CC-BY-4.0', `${ns}: control, licenceOf takes WHG's`);
+    assert.equal(licenceOf(ATTRIBUTION, ns, 42).spdx, 'CC-BY-4.0');
+  }
+  assert.equal(upstreamLicence({ sources: { whg: { license: 'CC-BY-4.0' } } }, 'whg'), null, 'nor WHG\'s entry among the sources');
+  assert.equal(licenceOf({ sources: { whg: { license: 'CC-BY-4.0' } } }, 'whg').spdx, 'CC-BY-4.0', 'control');
+  // A GeoNames record: both give its source's.
+  assert.equal(upstreamLicence(a, 'gn', 42).spdx, 'CC-BY-4.0');
+  assert.equal(licenceOf(a, 'gn', 42).spdx, 'CC-BY-4.0');
+  assert.deepEqual(upstreamLicence(a, 'gn'), licenceOf(a, 'gn'));
+  assert.equal(upstreamLicence(a, 'osm', 42), null, 'a source with no licence, as licenceOf');
+  assert.equal(upstreamLicence({ sources: { gn: { redistributable: false } } }, 'gn').redistributable, false, 'not to be passed on is kept');
 });
 
 // ---- found by the pre-push review of change 2 ---------------------------------------------------------------

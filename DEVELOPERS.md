@@ -1046,6 +1046,7 @@ matching (below). This sends each place's name to the gazetteer, and its coordin
   unknown". It gives `redistributable` as well: false only when the entry says `redistributable: false`
   ("not to be passed on"), and missing or null is not known, never true, like `permits_commercial` and
   `no_derivatives` ("terms partly unknown"). No licence value is written in the code.
+  `upstreamLicence` is the same without WHG's own licence (its source's, or its contributed dataset's, else null), for data copied from a candidate, such as its geometry; `identities.js` keeps exactMatch links apart (`exact`), and `linkState(…, { exact: true })` counts only those.
 - **The work file, version 2** (`work.js`): `others` may be null; `places` may hold places without
   candidates; `lookups: [{ id, service, started_at, finished_at, algorithm_version, parameters,
   attribution, counts, stopped, queries: { <place>: { state, sent, found, added, refused?, error?,

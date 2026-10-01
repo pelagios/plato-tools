@@ -399,6 +399,27 @@ export function mergeAnswers(work, record, place, lists, { now = new Date().toIS
 export const lookupCandidatesOf = (work, iri, lookupId) => work.candidates.filter((c) => c.candidate_source === iri && !localCandidate(c) && (!lookupId || c.lookup === lookupId));
 
 /**
+ * The licence a lookup's attribution gives for a candidate's source, and that source's entry: its
+ * namespace's; for WHG's own records (namespace null or whg), its contributed dataset's in
+ * attribution.datasets, then, only with `whg`, WHG's own (attribution.whg, attribution.sources.whg).
+ */
+function licenceEntry(attribution, namespace, dataset, whg) {
+  const pick = (x) => (x && (typeof x.license === 'string' || (x.license && typeof x.license === 'object')) ? x.license : null);
+  const own = namespace && namespace !== 'whg' ? attribution?.sources?.[namespace] : null;
+  if (pick(own) || (namespace && namespace !== 'whg')) return { l: pick(own), entry: own };
+  const tries = [dataset != null ? attribution?.datasets?.[dataset] : null, ...(whg ? [attribution?.whg, attribution?.sources?.whg] : [])];
+  for (const e of tries) if (pick(e)) return { l: pick(e), entry: e };
+  return { l: null, entry: null };
+}
+/** The licence object of licenceOf() and upstreamLicence(), from what licenceEntry() found. */
+function licenceFrom({ l, entry }) {
+  const yes = (v) => (v === true || v === false ? v : null);
+  const redistributable = yes(entry?.redistributable);
+  if (!l) return redistributable === false ? { spdx: null, commercial: null, derivatives: null, redistributable } : null;
+  if (typeof l === 'string') return { spdx: l, commercial: null, derivatives: null, redistributable };
+  return { spdx: typeof l.spdx_id === 'string' ? l.spdx_id : null, commercial: yes(l.permits_commercial), derivatives: l.no_derivatives === true ? false : l.no_derivatives === false ? true : null, redistributable };
+}
+/**
  * The licence a lookup's attribution gives for a candidate's source (its namespace; for WHG's own
  * records, whose namespace is null or whg, its dataset's in attribution.datasets, else WHG's own), as
  * the service wrote it, or null when it gives none ("licence unknown"): { spdx, commercial, derivatives }, where
@@ -408,20 +429,13 @@ export const lookupCandidatesOf = (work, iri, lookupId) => work.candidates.filte
  * service left null stays null. A source that says it is not redistributable, with no licence, still
  * gives an object, so that it is not read as merely "licence unknown".
  */
-export function licenceOf(attribution, namespace, dataset) {
-  const pick = (x) => (x && (typeof x.license === 'string' || (x.license && typeof x.license === 'object')) ? x.license : null);
-  // A source's own; else, for WHG's own records (no namespace, or whg), its dataset's, then WHG's.
-  const own = namespace && namespace !== 'whg' ? attribution?.sources?.[namespace] : null;
-  let l = pick(own), entry = own;
-  if (!l && (!namespace || namespace === 'whg')) {
-    for (const e of [dataset != null ? attribution?.datasets?.[dataset] : null, attribution?.whg, attribution?.sources?.whg]) if (pick(e)) { l = pick(e); entry = e; break; }
-  }
-  const yes = (v) => (v === true || v === false ? v : null);
-  const redistributable = yes(entry?.redistributable);
-  if (!l) return redistributable === false ? { spdx: null, commercial: null, derivatives: null, redistributable } : null;
-  if (typeof l === 'string') return { spdx: l, commercial: null, derivatives: null, redistributable };
-  return { spdx: typeof l.spdx_id === 'string' ? l.spdx_id : null, commercial: yes(l.permits_commercial), derivatives: l.no_derivatives === true ? false : l.no_derivatives === false ? true : null, redistributable };
-}
+export const licenceOf = (attribution, namespace, dataset) => licenceFrom(licenceEntry(attribution, namespace, dataset, true));
+/**
+ * The licence of data COPIED from a candidate (its geometry, say): licenceOf() without the fall back to
+ * WHG's own licence. The source namespace's, or for WHG's own records the contributed dataset's, else
+ * null (unknown): WHG's licence covers WHG's records, not what its contributors licensed.
+ */
+export const upstreamLicence = (attribution, namespace, dataset) => licenceFrom(licenceEntry(attribution, namespace, dataset, false));
 
 // ---- the run ------------------------------------------------------------------------------------------------
 /**

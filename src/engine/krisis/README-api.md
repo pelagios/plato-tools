@@ -139,8 +139,9 @@ words them all.
   `manifestSettings(lookup, { signal }) -> { read, type, template }`, `iriVia(holder)`,
   `iriFromTemplate`, `WHG_SERVICE`, `WHG_PLACE_TYPE` (the gazetteer module's), `PLACE_CHOICES`; re-exports `krisisLookupNote`,
   `authorityIris`, `currentIdentities`.
-- `src/engine/krisis/identities.js`: `currentIdentities(records) -> Map<place IRI, { linked, denied }>`,
-  `createIdentityCollector()`, `linkState(entry, { id, iri })`, `authorityIris(id)`.
+- `src/engine/krisis/identities.js`: `currentIdentities(records) -> Map<place IRI, { linked, exact, denied }>`,
+  `createIdentityCollector()`, `linkState(entry, { id, iri }, { exact })`, `authorityIris(id)`.
+  `upstreamLicence(attribution, namespace, dataset)` (lookup.js): licenceOf without WHG's own licence, for copied data.
 - `src/engine/krisis/identity.js`: `gazetteerSource(service)`, `candidateSource(work, candidate)`.
 - `src/engine/krisis/match.js`: `gather({ subjects, options }, env) -> { report, subjects, places }`.
 - Words: `LOOKUP_WORDS`, `krisisLookupNote` in words.js. DEVELOPERS.md, "Gazetteer lookup".
