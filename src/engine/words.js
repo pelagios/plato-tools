@@ -210,6 +210,8 @@ export const review = {
   notRecognisedAtFinish: 'The files chosen were not recognised as data these tools read, so the review cannot be finished with them. Save the review, choose the dataset it was made from, and resume the saved review to finish it.',
   /** A dataset given to matching that is not data these tools read ('subjects' or 'others'). */
   notRecognised: (which) => `${which === 'subjects' ? 'Your dataset' : 'The other dataset'} was not recognised as data these tools read, so nothing was matched`,
+  /** Beside the column choices of a table while a review is open, when they cannot be changed. */
+  columnsLocked: 'Locked while a review is open: the review reads the dataset by the matching of columns it was made with.',
 };
 
 // Krisis: matching. What the match review (src/engine/krisis/) says, on the page and the command line.

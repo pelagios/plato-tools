@@ -426,24 +426,66 @@ def krisis_table_review(page, tmp, table, subjects, chosen):
             page.set_input_files('#picker', [str(table)])
             wait_state(page, lambda s: (s.get('columns') or {}).get('mapping'), 60, 'columns')
             guess = page.evaluate("() => ({ ...window.__plato.columns.mapping })")
+            locks = {'before': page.evaluate(LOCK_NOTE)}
             page.set_input_files('#workfile', [str(tmp / 'table.krisis.json')])
             s = wait_state(page, lambda s: s.get('phase') == 'reviewing' and s.get('reviewColumns') and not s.get('columnsPending'), 60, 'resume')
             shown = page.evaluate("() => Object.fromEntries([...document.querySelectorAll('#columns select[data-column]')].map((x) => [x.closest('tr').querySelector('code').textContent, [x.value, x.disabled]]))")
+            locks['review'] = page.evaluate(LOCK_NOTE)
             page.click('#finish')
             f = wait_state(page, lambda s: s.get('action') == 'apply' and s.get('phase') in ('done', 'error'), 120, 'finish')
+            locks['finished'] = page.evaluate(LOCK_NOTE)
             same = [i.get('kind') for i in (f.get('report') or {}).get('items', [])]
             # The control: another matching loaded after all is sent with Finish, and said to differ.
             page.set_input_files('#columns-file', [str(tmp / 'other-columns.json')])
             wait_state(page, lambda s: any('other-columns.json' in m for m in (s.get('columns') or {}).get('messages', [])), 30, 'load')
             page.click('#finish')
             g = wait_state(page, lambda s: s.get('action') == 'apply' and s.get('phase') in ('done', 'error') and s.get('report') is not None, 120, 'finish again')
-            res = {'guess': guess, 'shown': shown, 'phase': f.get('phase'), 'same': same, 'other phase': g.get('phase'), 'other': [i.get('kind') for i in (g.get('report') or {}).get('items', [])]}
+            res = {'guess': guess, 'shown': shown, 'locks': locks, 'phase': f.get('phase'), 'same': same, 'other phase': g.get('phase'), 'other': [i.get('kind') for i in (g.get('report') or {}).get('items', [])]}
         except Exception as e: res = {'error': str(e).split('\n')[0][:200]}
     shown = res.get('shown') or {}
     check('match review: a resumed review of a table shows the matching of columns it was made with, not the guess, and the choices are locked',
           (res.get('guess') or {}).get('label') == 'name' and shown.get('town') == ['name', True] and shown.get('label') == ['note', True], res)
     check('match review: Finish reads the table as the review did, and says nothing of the columns; another matching loaded is said to differ',
           res.get('phase') == 'done' and 'columns-differ' not in res.get('same', ['x']) and res.get('other phase') == 'done' and 'columns-differ' in res.get('other', []), res)
+    # The locked choices say why, beside them, while the review is open and after Finish; before the
+    # review, with the choices open, the note is not shown (the control).
+    locks = res.get('locks') or {}
+    said = lambda k: (locks.get(k) or {}).get('note') or ''
+    check('match review: the column choices say why they are locked exactly while a review is open, after Finish too',
+          (locks.get('before') or {}).get('open') is True and (locks.get('before') or {}).get('note') is None
+          and all((locks.get(k) or {}).get('locked') is True and said(k).startswith('Locked while a review is open') for k in ('review', 'finished')), locks)
+    # Cancel while the matching of a resumed review's columns is still being worked out: the worker is
+    # held at that request and at Check's run (as a large table would hold it), then Cancel ends it (and the
+    # new worker's 'ready' follows 'cancelled').
+    # The answer is asked for again, by the review's matching, so Match and Finish do not wait for ever.
+    cancel = {}
+    if work.get('candidates'):
+        try:
+            page.reload(); wait_state(page, lambda s: s.get('phase') == 'ready', 30, 'ready')
+            page.evaluate("() => { document.getElementById('base').value = 'https://example.org/t/'; }")
+            page.set_input_files('#picker', [str(table)])
+            wait_state(page, lambda s: (s.get('columns') or {}).get('mapping'), 60, 'columns')
+            page.evaluate("""() => { const send = Worker.prototype.postMessage, hold = new Set(['columns', 'run']); window.__held = [];
+                Worker.prototype.postMessage = function (m, ...rest) { if (m && hold.has(m.cmd)) { hold.delete(m.cmd); window.__held.push(m.cmd); return; } return send.call(this, m, ...rest); }; }""")
+            page.set_input_files('#workfile', [str(tmp / 'table.krisis.json')])
+            p = wait_state(page, lambda s: s.get('phase') == 'reviewing' and s.get('columnsPending'), 30, 'resume')
+            page.click('#check')
+            r = wait_state(page, lambda s: s.get('phase') == 'running', 30, 'check')
+            page.click('#cancel')
+            s = wait_state(page, lambda s: s.get('phase') in ('cancelled', 'ready') and s.get('reviewColumns') and not s.get('columnsPending'), 30, 'columns after cancel')
+            cancel = {'pending at resume': p.get('columnsPending'), 'running': r.get('phase'), 'held': page.evaluate('() => window.__held'),
+                      'phase': s.get('phase'), 'pending': s.get('columnsPending'), 'review columns': s.get('reviewColumns'),
+                      'buttons': page.evaluate("() => ['match', 'finish'].map((id) => document.getElementById(id).disabled)"),
+                      'looking': 'Reading the columns' in page.inner_text('#columns')}
+        except Exception as e: cancel = {'error': str(e).split('\n')[0][:200]}
+    check('match review: Cancel while a resumed review\'s columns are still being read asks for them again, by the review\'s matching, and Match and Finish are free',
+          cancel.get('pending at resume') is True and cancel.get('running') == 'running' and cancel.get('held') == ['columns', 'run']
+          and cancel.get('phase') in ('cancelled', 'ready') and cancel.get('pending') is False and (cancel.get('review columns') or {}).get('town') == 'name'
+          and cancel.get('buttons') == [False, False] and cancel.get('looking') is False, cancel)
+
+# Krisis: the note beside a table's column choices, as shown (None when hidden), and whether every choice is locked, or every one open.
+LOCK_NOTE = """() => { const n = document.getElementById('columns-locked'), sels = [...document.querySelectorAll('#columns select[data-column]')];
+    return { note: n && !n.hidden && n.offsetParent !== null ? n.textContent : null, locked: sels.length > 0 && sels.every((x) => x.disabled), open: sels.length > 0 && sels.every((x) => !x.disabled) }; }"""
 
 def download(page, name, dest):
     with page.expect_download(timeout=600_000) as d:

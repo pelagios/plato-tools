@@ -5,6 +5,7 @@
 import { fmtBytes, formatName, progressText, summary, groups, draftNote, explainedLines } from './engine/words.js';
 import { COLUMN_CHOICES, COLUMN_WORDS, columnWarnings, columnProblem } from './engine/words.js';
 import { review as W } from './engine/words.js';
+const REVIEW_WORDS = W;   // the review's words, where W names the words for the columns
 import { readable } from './engine/input.js';
 import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions } from './engine/krisis/work.js';
 import { stash as stashForChora } from './chora/handoff.js';
@@ -203,7 +204,7 @@ function fail(message) {
 // The worker reads the columns and guesses (src/engine/hermes/columns.js); the page shows the guess,
 // one choice for each column, with three examples and the reason for the guess, and the run is given
 // the matching as it stands. The matching can be saved as JSON and loaded again.
-let columns = null, columnsAsked = 0, columnsFrom;
+let columns = null, columnsAsked = 0, columnsFrom, columnsSaved;
 // Krisis: the request for the columns of a resumed review, and the matching the review was made with, as text (undefined: not known yet).
 let reviewColumnsAsked = 0, reviewMapping;
 // A matching as text, in the file's order, to compare two by.
@@ -212,7 +213,7 @@ const isTable = (inp) => inp?.format === 'csv' || inp?.format === 'geojson';
 function requestColumns(saved, from) {
   const id = ++columnsAsked;
   if (saved === undefined) $('columns').innerHTML = `<h3 id="columns-h">${COLUMN_WORDS.heading}</h3><p>${COLUMN_WORDS.looking}</p>`;
-  columnsFrom = from;
+  columnsFrom = from; columnsSaved = saved;
   worker.postMessage({ cmd: 'columns', id, files, saved });
 }
 function onColumns(d) {
@@ -251,6 +252,7 @@ function renderColumns() {
       + `<td id="column-why-${i}" class="why-guess">${escapeHtml(c.reasons[h] || '')}</td></tr>`;
   }).join('');
   $('columns').innerHTML = `<h3 id="columns-h">${W.heading}</h3><p>${escapeHtml(W.intro(geojson))} ${escapeHtml(W.base)}</p>`
+    + `<p id="columns-locked" class="columns-locked" hidden>${escapeHtml(REVIEW_WORDS.columnsLocked)}</p>`
     + `<div class="columns-scroll"><table class="columns-table"><caption>${escapeHtml(W.caption(files[0]?.name || '', geojson))}</caption>`
     + `<thead><tr><th scope="col">${W.column}</th><th scope="col">${W.examples}</th><th scope="col">${W.readAs}</th><th scope="col">${W.why}</th></tr></thead><tbody>${rows}</tbody></table></div>`
     + `<div id="columns-messages" aria-live="polite">${c.messages.map((m) => `<p>${escapeHtml(m)}</p>`).join('')}</div>`
@@ -267,7 +269,10 @@ function renderColumns() {
 // one by one; a saved matching can still be loaded, and Finish then sends it, and says it differs.
 function lockColumns() {
   const reviewing = !!work && !$('review').hidden;
-  for (const sel of document.querySelectorAll('#columns select[data-column]')) sel.disabled = reviewing;
+  const selects = document.querySelectorAll('#columns select[data-column]');
+  for (const sel of selects) sel.disabled = reviewing;
+  // and says why, exactly when they are locked.
+  const note = $('columns-locked'); if (note) note.hidden = !(reviewing && selects.length);
   state.columnsLocked = reviewing;
 }
 function renderColumnWarnings() {
@@ -335,7 +340,10 @@ $('convert').onclick = () => start('convert');
 $('compare').onclick = () => $('earlier').click();
 $('earlier').onchange = (e) => { const earlier = [...e.target.files]; e.target.value = ''; if (earlier.length) start('compare', earlier); };
 $('publish').onclick = () => start('publish');
-$('cancel').onclick = () => { worker.terminate(); busy = false; $('progress').hidden = true; buttons(false); Object.assign(state, { phase: 'cancelled' }); startWorker(); };
+$('cancel').onclick = () => { worker.terminate(); busy = false; $('progress').hidden = true; buttons(false); Object.assign(state, { phase: 'cancelled' }); startWorker();
+  // Krisis: an answer about the columns still being worked out went with the worker: it is asked for again, as it was
+  // (for a resumed review, by the matching the review was made with), or Match and Finish would wait for it for ever.
+  if (columnsPending()) { const forReview = reviewColumnsAsked === columnsAsked; requestColumns(columnsSaved, columnsFrom); if (forReview) reviewColumnsAsked = columnsAsked; } };
 // Matching asks for the other dataset, and starts once it is chosen; resuming asks for a saved review.
 // Options that matching would refuse are said plainly first, before the other dataset is asked for.
 $('match').onclick = () => { const problem = matchProblem(); if (problem) return refuse(problem); $('others').click(); };
