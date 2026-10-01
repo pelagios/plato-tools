@@ -466,3 +466,24 @@ test('10. compose: tiles exactly at their scale give the image\'s own pixels, ea
     assert.ok(checked > 500 && worst <= 1, `at 1/${s}: ${checked} pixels, worst ${worst}`);
   }
 });
+
+test('the worker\'s cache of windows made ready: two maps of the same size, the same window, each traced from its own pixels (the control: one map twice reuses them)', async () => {
+  // One cache, as the worker has it (src/chora/ink.worker.js): map A a square wash, map B a disc elsewhere
+  // in its colour, the same size and served alike, so that the window about the same click is the same frame.
+  const OTHER = { ...ODD, id: 'https://iiif.example.org/iiif/other' };
+  const mapA = new Raster(1001, 701).polygon([[300, 200], [500, 200], [500, 400], [300, 400]], [182, 72, 48]);
+  const mapB = new Raster(1001, 701).disc(400, 300, 60, [60, 120, 200]);
+  const cache = createPrepCache();
+  let made = 0;
+  const counting = { get: (k, mk) => cache.get(k, () => { made++; return mk(); }) };
+  const a = await runTrace({ info: ODD, seedImg: [400, 300], mode: 'area', step: localSteps(servedBy(mapA, []), counting).trace });
+  const b = await runTrace({ info: OTHER, seedImg: [400, 300], mode: 'area', step: localSteps(servedBy(mapB, []), counting).trace });
+  assert.deepEqual(a.frame, b.frame, 'the two windows are the same frame (else the case is not tested)');
+  assert.ok(Math.abs(a.areaPx - 200 * 200) / (200 * 200) <= 0.01, `map A: ${a.areaPx}`);
+  assert.ok(Math.abs(b.areaPx - Math.PI * 60 * 60) / (Math.PI * 60 * 60) <= 0.02, `map B traced from map A's pixels: ${b.areaPx}`);
+  assert.equal(made, 2, 'each map made ready once');
+  // The control: map B again (the window kept), the same window, is not made again.
+  const b2 = await runTrace({ info: OTHER, seedImg: [400, 300], mode: 'area', params: { tolerance: 14 }, step: localSteps(servedBy(mapB, []), counting).trace });
+  assert.equal(made, 2, 'map B traced again was made ready again');
+  assert.ok(Math.abs(b2.areaPx - b.areaPx) < 1);
+});

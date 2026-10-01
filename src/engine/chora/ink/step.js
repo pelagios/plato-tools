@@ -23,13 +23,24 @@ export function createPrepCache(size = 1) {
   };
 }
 
-/** One trace in one window: `tiles` decoded ([{ region, width, height, data }]). The engine's proposal. */
+/**
+ * The key a window made ready is kept by: the tiles' addresses (which name the image, its service's id, and
+ * the regions read) with the frame and the kind. Two maps of the same size share every frame, so the frame
+ * alone would serve one map's pixels for the other's. Null (nothing kept) when a tile has no address.
+ */
+export function prepKey(frame, tiles, colour) {
+  if (!tiles.length || tiles.some((t) => typeof t.url !== 'string' || !t.url)) return null;
+  return `${frame.x0},${frame.y0},${frame.s},${frame.w},${frame.h},${colour} ${tiles.map((t) => t.url).join(' ')}`;
+}
+
+/** One trace in one window: `tiles` decoded ([{ url, region, width, height, data }]). The engine's proposal. */
 export function traceStep({ frame, tiles, seed, mode, params }, cache = createPrepCache()) {
   const colour = mode === 'area' || !!params.colour;
-  const key = `${frame.x0},${frame.y0},${frame.s},${frame.w},${frame.h},${colour}`;
+  const key = prepKey(frame, tiles, colour);
   const t0 = Date.now();
   let made = false;
-  const prep = cache.get(key, () => { made = true; return prepareTiles(frame, tiles, { colour }); });
+  const make = () => { made = true; return prepareTiles(frame, tiles, { colour }); };
+  const prep = key === null ? make() : cache.get(key, make);
   const t1 = Date.now();
   // What a proposal or its refusal took: the window made ready (when it was not), and the trace.
   const timing = (out) => Object.assign(out, { timing: { readyMs: t1 - t0, made, traceMs: Date.now() - t1, px: frame.w * frame.h } });
@@ -43,6 +54,6 @@ export function snapStep({ frame, tiles }) {
 
 /** A step done here, its tiles from getTiles(list) -> decoded tiles: as job.js wants it (tests; Node). */
 export const localSteps = (getTiles, cache = createPrepCache()) => ({
-  trace: async ({ tiles, ...rest }) => traceStep({ ...rest, tiles: await getTiles(tiles) }, cache),
+  trace: async ({ tiles, ...rest }) => traceStep({ ...rest, tiles: (await getTiles(tiles)).map((d, k) => ({ ...d, url: tiles[k].url })) }, cache),
   snap: async ({ tiles, ...rest }) => snapStep({ ...rest, tiles: await getTiles(tiles) }),
 });

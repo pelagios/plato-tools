@@ -54,7 +54,7 @@ async function job(m) {
       postMessage({ type: 'need', channel, gen, urls: missing });
       await got;
     }
-    const out = list.map((t) => { const d = tiles.get(t.url); if (!d) throw Object.assign(new Error('A tile went missing.'), { kind: 'other' }); return { region: t.region, ...d }; });
+    const out = list.map((t) => { const d = tiles.get(t.url); if (!d) throw Object.assign(new Error('A tile went missing.'), { kind: 'other' }); return { url: t.url, region: t.region, ...d }; });
     trim(new Set(list.map((t) => t.url)));
     return out;
   };
