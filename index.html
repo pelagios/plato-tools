@@ -2,6 +2,7 @@
 <html lang="en-GB">
 <head>
   <meta charset="utf-8">
+  <!-- plato:csp -->
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PLATO tools: check and convert data about places</title>
   <meta name="description" content="Check and convert data about places between PLATO spreadsheet tables, PLATO JSON, RDF and Linked Places Format, read Recogito's web annotations, compare versions of a published dataset, and prepare it for publishing, in your browser. Your files never leave your computer.">
@@ -19,10 +20,13 @@
       <a class="dev-badge" href="https://github.com/pelagios/plato-tools/issues" data-tip-template="dev-tip">Under development</a>
       <template id="dev-tip"><p><strong>PLATO tools is being built in the open.</strong> Its tools, and the formats they write, may still change: check what you make against the PLATO guide and the open issues.</p><p>What you make with it is checked against PLATO at the commit named at the foot of this page.</p><p>Found a problem? Follow this badge to report it on GitHub.</p></template>
     </div>
-    <img class="plato-mark" src="./src/plato-thinking.png" width="320" height="217" alt="">
+    <div class="masthead-side">
+      <img class="plato-mark" src="./src/plato-thinking.png" width="320" height="217" alt="">
+      <button type="button" id="permissions-button" class="permissions-button" aria-haspopup="dialog">Permissions <span class="count"></span></button>
+    </div>
   </div>
   <p class="lede">Check and convert data about places, in the formats of PLATO. What the formats are, and how to organise your data in them, is explained in the <a href="https://pelagios.org/place-attestation-ontology/guide/">PLATO guide</a>.</p>
-  <p class="privacy"><strong>Your files stay on your computer.</strong> Nothing is uploaded: everything happens in this browser tab, and it works for datasets of any size your disk can hold.</p>
+  <p class="privacy"><strong>Your files stay on your computer, and nothing is sent to any other site unless you allow it.</strong></p>
   <p class="cli">Checking many files at once? PLATO tools also runs <a href="https://github.com/pelagios/plato-tools#from-the-command-line">from the command line</a>, with the same checks and the same reports.</p>
 </header>
 <main>
@@ -115,7 +119,7 @@
       <input type="file" id="others" multiple hidden aria-label="The other dataset">
       <button id="resume">Resume a review…</button>
       <input type="file" id="workfile" hidden accept=".json,application/json" aria-label="A saved review">
-      <small>You will be asked for the other dataset's file. Places whose names are alike, and that are near each other, are suggested as matches, for you to accept or reject one by one; your decisions become attestations of identity. Matching two files on your computer sends nothing anywhere. To carry on with a review you saved, choose the same dataset, then <em>Resume a review</em>.</small>
+      <small>You will be asked for the other dataset's file. Places whose names are alike, and that are near each other, are suggested as matches, for you to accept or reject one by one; your decisions become attestations of identity. To carry on with a review you saved, choose the same dataset, then <em>Resume a review</em>.</small>
     </div>
     <details id="options">
       <summary>Options</summary>

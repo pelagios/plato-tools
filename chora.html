@@ -2,6 +2,7 @@
 <html lang="en-GB">
 <head>
   <meta charset="utf-8">
+  <!-- plato:csp -->
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Chora: places on the map, in PLATO tools</title>
   <meta name="description" content="See the places in a PLATO dataset on a map, with everything their attestations say over time, and draw a point, line or area as a new attestation, in your browser. Your files never leave your computer.">
@@ -19,8 +20,8 @@
       <a class="dev-badge" href="https://github.com/pelagios/plato-tools/issues" data-tip-template="dev-tip">Under development</a>
       <template id="dev-tip"><p><strong>PLATO tools is being built in the open.</strong> Its tools, and the formats they write, may still change: check what you make against the PLATO guide and the open issues.</p><p>What you make with it is checked against PLATO at the commit named at the foot of this page.</p><p>Found a problem? Follow this badge to report it on GitHub.</p></template>
     </div>
+    <button type="button" id="permissions-button" class="permissions-button" aria-haspopup="dialog">Permissions <span class="count"></span></button>
   </div>
-  <p class="privacy"><strong>Your files stay on your computer.</strong> Nothing is uploaded: everything happens in this browser tab. The map is served from this site; if you choose another basemap, its provider sees which part of the world you view, and nothing of your data.</p>
 </header>
 <main class="chora-main">
   <div class="chora-panel" id="panel">

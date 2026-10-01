@@ -10,6 +10,7 @@ import { readable } from './engine/input.js';
 import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions } from './engine/krisis/work.js';
 import { stash as stashForChora } from './chora/handoff.js';
 import { storageNeed } from './engine/storage.js';
+import * as permissions from './lib/permissions.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
 let worker, files = [], input = null, targets = {}, busy = false;
@@ -560,4 +561,7 @@ async function saveBlob(blob, name) {
   a.href = URL.createObjectURL(blob); a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 60000);
 }
+// The Permissions panel, from the header's button; and the proof that the page's policy is enforced
+// (state.canary), without which no other site is asked from this page.
+permissions.mount({ state });
 startWorker();

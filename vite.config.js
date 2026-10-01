@@ -1,10 +1,14 @@
 import { defineConfig } from 'vite';
 import { fileURLToPath } from 'node:url';
+import { cspPlugin } from './scripts/vite-csp.mjs';
 
 // The OPFS "SAHPool" storage mode of SQLite needs no cross-origin isolation headers,
 // which GitHub Pages cannot send, so no server headers are configured here.
 export default defineConfig({
   base: './',
+  // The hard block: each page's Content Security Policy, written from the permissions allowed by the
+  // first script in its <head> (scripts/vite-csp.mjs).
+  plugins: [cspPlugin()],
   optimizeDeps: { exclude: ['@sqlite.org/sqlite-wasm'] },
   worker: { format: 'es' },
   build: {
