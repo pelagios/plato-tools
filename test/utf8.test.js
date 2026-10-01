@@ -114,3 +114,20 @@ test('the line and byte of the first byte that is not UTF-8 are right however th
     assert.equal(ok.report.counts.rows, 3000);
   }
 });
+test('the sheets of the tables compressed with gzip read as the same sheets uncompressed do; a Latin-1 sheet compressed is still not UTF-8', async () => {
+  const gz = (sheets) => Object.entries(sheets).map(([f, b]) => new File([gzipSync(b)], f + '.gz'));
+  const plain = (sheets) => Object.entries(sheets).map(([f, b]) => new File([b], f));
+  const shape = (r) => ({ errors: r.report.errors, counts: r.report.counts, items: r.report.items.map((i) => [i.kind, i.message]), out: outText(r.e, Object.keys(r.e.outs)[0]) });
+  const want = await go(plain(customs('utf8')), 'convert', 'plato-json');
+  assert.equal(want.report.errors, 0, JSON.stringify(want.report.items));
+  assert.match(want.e.outs[Object.keys(want.e.outs)[0]].join(''), /Bristöl/);
+  const got = await go(gz(customs('utf8')), 'convert', 'plato-json');
+  assert.equal(got.input.format, 'tables');
+  assert.deepEqual(shape(got), shape(want));
+  // Latin-1, compressed: refused as not UTF-8, saying so of its decompressed text; uncompressed, the same (the control).
+  for (const [files, at] of [[gz(customs('latin1')), /^places\.csv\.gz is not encoded as UTF-8: the first byte of its decompressed text that is not is on line 2 /], [plain(customs('latin1')), /^places\.csv is not encoded as UTF-8: the first byte that is not is on line 2 /]]) {
+    const r = await go(files, 'check');
+    assert.equal(unreadable(r).length, 1, JSON.stringify(r.report.items));
+    assert.match(unreadable(r)[0].examples[0], at);
+  }
+});
