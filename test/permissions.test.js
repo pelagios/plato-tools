@@ -344,11 +344,13 @@ test('"Keep large datasets\' working files": persist() is asked only on the choi
   }
 });
 
-test('what the historical maps learn, the trace a reload would lose, and the maps the working data keeps, in words (e2 R1-R3)', () => {
+test('what the historical maps and Allmaps learn, and the maps the working data keeps, in words; no word for a trace, which a reload does not lose (e2 R1, R3, R4)', () => {
   const iiif = words.CATEGORY_WORDS.iiif.learns;
   assert.ok(/manifest/.test(iiif) && /georeference/.test(iiif), iiif);
   assert.ok(iiif.includes('Tracing from a map asks its server for the part you click, in more detail.'), iiif);
-  assert.equal(words.RELOAD_LOSES.tracing, 'The trace being proposed now.');
+  assert.equal(words.RELOAD_LOSES.tracing, undefined, 'nothing in a trace is lost on reload: no words for it');
+  const allmaps = words.CATEGORY_WORDS.allmaps.learns;
+  assert.ok(/Allmaps Editor/.test(allmaps) && /address/.test(allmaps), allmaps);
   assert.ok(words.PANEL.keepWorkNote.includes('the historical maps you showed'), words.PANEL.keepWorkNote);
 });
 

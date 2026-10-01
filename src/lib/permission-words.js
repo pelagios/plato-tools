@@ -8,7 +8,7 @@ export const PROMISE = 'Your files stay on your computer, and nothing is sent to
 export const CATEGORY_WORDS = {
   basemap: { heading: 'Basemaps', learns: 'A basemap’s provider sees which part of the world you look at, and your address on the internet, as any website does.' },
   iiif: { heading: 'Historical maps', learns: 'A historical map’s server sees which map you view, and which parts of it; so does the site its description (its manifest) or its georeference is on. Tracing from a map asks its server for the part you click, in more detail.' },
-  allmaps: { heading: 'Georeferences', learns: 'Allmaps learns which map a georeference was looked for.' },
+  allmaps: { heading: 'Georeferences', learns: 'Allmaps learns which map a georeference was looked for. Opening a map in the Allmaps Editor sends Allmaps the map’s address.' },
   gazetteer: { heading: 'Gazetteers', learns: 'A gazetteer sees the names you look up in it.' },
   linked: { heading: 'Linked sites', learns: 'A site your data links to sees which of its pages you open.' },
 };
@@ -104,7 +104,6 @@ export const RELOAD_LOSES = {
   drawing: 'The line or area you are drawing, not yet finished.',
   pasted: 'The address in the box for pasting a basemap, not yet added.',
   saving: 'The save running now.',
-  tracing: 'The trace being proposed now.',
 };
 
 /** The one line a feature shows while it waits for a permission. */
