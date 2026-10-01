@@ -328,7 +328,7 @@ readers link to those headings, so keep them.
   `xml:id` and `xml:lang` before anything reads them; `lang` is an IDREF into the header's
   `<language id>`, resolved by `languageTag` to the `<language>`'s `ident` where that is a tag,
   else to the id where that is one (`<language id="la">`), else `tei-lang-not-tag` naming the
-  `<language>`; the `<language>`s are kept on each scope's header (`hdr.languages`, pushed and
+  `<language>` (once for each value, `langNotTag`, in P4 and P5 alike); the `<language>`s are kept on each scope's header (`hdr.languages`, pushed and
   popped with `this.scopes`) and looked up innermost first (`language()`), so in a `teiCorpus.2`
   each `<TEI.2>` has its own, and the corpus header's hold for every text in it; a place name's `@reg` (the editors' regularised form) is `tei-reg`, a loss, and the
   name is the text's (in P5 it is an attribute not read, `tei-attribute`, beside a ref or, on a name

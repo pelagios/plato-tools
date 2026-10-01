@@ -988,10 +988,12 @@ export class TeiReader {
    */
   languageTag(raw) {
     if (raw === undefined || raw === '') return undefined;
-    if (this.teiVariant !== 'p4') { if (LANGUAGE_TAG.test(raw)) return raw; this.report('tei-lang-not-tag', raw); return undefined; }
+    // Each value not a tag is reported once, however many names it is on.
+    const notTag = (example) => { if (!(this.langNotTag ||= new Set()).has(raw)) { this.langNotTag.add(raw); this.report('tei-lang-not-tag', example); } };
+    if (this.teiVariant !== 'p4') { if (LANGUAGE_TAG.test(raw)) return raw; notTag(raw); return undefined; }
     const l = this.language(raw);
     const tag = l?.ident !== undefined && LANGUAGE_TAG.test(l.ident) ? l.ident : LANGUAGE_TAG.test(raw) ? raw : undefined;
-    if (tag === undefined) this.report('tei-lang-not-tag', l ? `${raw} (<language id="${raw}">${l.text}</language>)` : `${raw} (no <language id="${raw}"> in the header)`);
+    if (tag === undefined) notTag(l ? `${raw} (<language id="${raw}">${l.text}</language>)` : `${raw} (no <language id="${raw}"> in the header)`);
     return tag;
   }
   /** P4: the <language> a lang points to, in the innermost TEI.2 or teiCorpus.2 header that has it. */

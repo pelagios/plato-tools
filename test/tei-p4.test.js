@@ -377,3 +377,17 @@ test('Beta Code needs one of its signs: an English "Athens" in a note in a Greek
   assert.deepEqual(names(greek), ['Ἀθῆναι']);
   assert.ok(!greek.kinds.has('tei-p4-beta-code') && !greek.kinds.has('tei-p4-maybe-beta-code'));
 });
+
+// ---- tei-lang-not-tag, once for each value ----------------------------------------------------------------
+test('tei-lang-not-tag is reported once for each distinct value, however many names carry it', () => {
+  const pl = (w, lang) => `<placeName lang="${lang}" key="tgn,7000874">${w}</placeName>`;
+  const m = mapped(p4doc(`${pl('Ἀθῆναι', 'greek')} ${pl('Ῥώμη', 'greek')} ${pl('Ῥώμη', 'greek')} ${pl('Roma', 'latine')}`), KEYS);
+  assert.equal(names(m).length, 4);
+  assert.deepEqual(examples(m, 'tei-lang-not-tag'), ['greek (<language id="greek">Greek</language>)', 'latine (no <language id="latine"> in the header)']);
+  // P5: the same.
+  const p5 = mapped(P5('', ['Roma', 'Roma', 'Athenae'].map((w) => `<placeName xml:lang="Latin" ref="https://pleiades.stoa.org/places/579885">${w}</placeName>`).join(' ')));
+  assert.equal(names(p5).length, 3);
+  assert.deepEqual(examples(p5, 'tei-lang-not-tag'), ['Latin']);
+  // Control: the fixture's two values, each once, with no deduplication by the test.
+  assert.deepEqual(examples(p4(), 'tei-lang-not-tag').sort(), ['greek (<language id="greek">Greek</language>)', 'latine (<language id="latine">Latin, with no tag</language>)']);
+});
