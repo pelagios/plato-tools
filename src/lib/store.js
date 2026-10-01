@@ -97,7 +97,7 @@ export class TripleStore {
 
 /**
  * The spreadsheet tables in a working database, so that a set of tables of any size is checked and
- * converted without being held in memory: each sheet's rows, one row of cells (as JSON) to a row
+ * converted without being held in memory: each sheet's rows, one row of cells (packCells) to a row
  * of `r`, in the order they were read; the keys the validator has seen, in `keys`. Each row carries
  * `k`, the key it is looked up by (its place_id; a source's source_id), or null. A sheet's rows are
  * loaded together, so they are one run of rowids, which a scan of the sheet reads in order.
@@ -106,6 +106,13 @@ export class TripleStore {
  * cells, which the caller makes into objects. Synchronous, over the SQLite calls the triple store
  * uses, in the browser (oo1) and in Node (src/node/sqlite.js).
  */
+// A row of cells is kept as its cells joined by U+001F (the unit separator) behind one, which is
+// about the size of its CSV; a row with that character in a cell is kept as JSON instead (which
+// begins with '['). JSON for every row made the database 2.6 times the size of the tables' text.
+const US = '\u001f';
+const packCells = (cells) => (cells.some((c) => c.includes(US)) ? JSON.stringify(cells) : US + cells.join(US));
+const unpackCells = (s) => (s[0] === US ? s.slice(1).split(US) : JSON.parse(s));
+
 export class TableStore {
   constructor(db) {
     this.db = db;
@@ -119,7 +126,7 @@ export class TableStore {
   }
   /** Add one row of a sheet. Committed in batches. */
   add(sheet, n, k, cells) {
-    this.ins.bind([sheet, n, k === undefined ? null : k, JSON.stringify(cells)]).stepReset();
+    this.ins.bind([sheet, n, k === undefined ? null : k, packCells(cells)]).stepReset();
     if (++this.pending >= 50000) { this.db.exec('COMMIT'); this.db.exec('BEGIN'); this.pending = 0; }
   }
   /** The last rowid given (0 for none): a sheet's rows are the rowids after the mark before it, to the mark after. */
@@ -130,7 +137,7 @@ export class TableStore {
   *rows(first, last) {
     if (first > last) return;
     const q = this.db.prepare('SELECT cells FROM r WHERE rowid BETWEEN ? AND ? ORDER BY rowid');
-    try { q.bind([first, last]); while (q.step()) yield JSON.parse(q.get(0)); } finally { q.finalize(); }
+    try { q.bind([first, last]); while (q.step()) yield unpackCells(q.get(0)); } finally { q.finalize(); }
   }
   /** Add a key to table t's set: false if it was there already. Bound as strings, so that '1' and '01' stay two keys. */
   keyAdd(t, key) {
@@ -160,7 +167,7 @@ export class TableStore {
   /** The cells of the last row of `sheet` whose key is `k` (undefined: the rows with none), or null. */
   lookup(sheet, k) {
     const q = k === undefined ? this.qLastNull.bind([sheet]) : this.qLast.bind([String(k), sheet]);
-    const cells = q.step() ? JSON.parse(q.get(0)) : null;
+    const cells = q.step() ? unpackCells(q.get(0)) : null;
     q.reset();
     return cells;
   }
@@ -176,7 +183,7 @@ export class TableStore {
     const q = this.db.prepare(TableStore.JOIN);
     try {
       q.bind([from, first, last]);
-      while (q.step()) yield [q.get(0), JSON.parse(q.get(1)), q.get(2), q.get(3) === null ? null : JSON.parse(q.get(3))];
+      while (q.step()) yield [q.get(0), unpackCells(q.get(1)), q.get(2), q.get(3) === null ? null : unpackCells(q.get(3))];
     } finally { q.finalize(); }
   }
   close() {
