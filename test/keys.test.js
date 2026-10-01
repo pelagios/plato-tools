@@ -159,6 +159,9 @@ export const WRITERS = ['lpf', 'lpf-seq', 'tables', 'ntriples', 'rdf-json'];
 
 // Keys that say what format a document is in, not what it holds: each output declares its own.
 export const NOT_DATA = new Set(['$schema', 'profile']);
+// And the one that says how to read it: the JSON-LD context (PLATO's, which the tools apply whether
+// the document names it or not). It is not a constant, so it is checked apart from NOT_DATA.
+export const READ_AS = new Set(['@context']);
 
 /**
  * Where a writer leaves out a whole object, and the loss it reports for it: the object's keys are
@@ -209,7 +212,7 @@ export function cases() {
   const out = [];
   let n = 0;
   for (const e of keyPaths('place-centric')) {
-    if (NOT_DATA.has(e.key) && e.path.length === 1) continue;
+    if ((NOT_DATA.has(e.key) || READ_AS.has(e.key)) && e.path.length === 1) continue;
     n++;
     out.push({ e, n, variant: null });
     if (e.path.join('.').startsWith('spatialEntities.0.attestations.0.timespans.0.')) out.push({ e, n: n + 500, variant: 'undated' });
@@ -276,6 +279,7 @@ test('only the keys that name a document\'s format are left out of the audit, an
     const top = Object.keys(p.properties);
     for (const k of NOT_DATA) assert.ok(p.properties[k].const !== undefined, `${name}.${k}`);
     assert.deepEqual(top.filter((k) => p.properties[k].const !== undefined).sort(), [...NOT_DATA].sort(), name);
+    for (const k of READ_AS) assert.ok(p.properties[k], `${name}.${k} is no longer in the profile`);
   }
 });
 for (const writer of WRITERS) {
