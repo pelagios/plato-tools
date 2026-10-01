@@ -231,7 +231,8 @@ self.onmessage = async ({ data }) => {
       // release when one is given.
       const input = await detect(data.files);
       const previous = data.previous?.length ? await detect(data.previous) : undefined;
-      const unknown = [['dataset', input], ['previous release', previous]].find(([, i]) => i && !i.format);
+      // Not recognised, or recognised and refused with its reason (a IIIF Georeference Annotation): readable(), as for every other command.
+      const unknown = [['dataset', input], ['previous release', previous]].find(([, i]) => i && !readable(i));
       if (unknown) {
         postMessage({ type: 'done', incomplete: true, outputs: [], report: { counts: {}, errors: 1, items: [{ severity: 'error', kind: 'not-recognised', count: 1,
           message: `The ${unknown[0]} was not recognised as data these tools read, so nothing was done`, examples: [unknown[1].reason] }] } });
