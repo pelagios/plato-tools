@@ -989,10 +989,11 @@ def iiif_checks(pw, url, tmp):
         page.click('#map-lookup')
         notice = page.inner_text('#map-consent-text') if soon(page, '() => !!document.getElementById("map-yes")', 10) else ''
         agree_map(page)
-        got = shown(page, 'https://annotations.allmaps.org/maps/0000000000000003')
+        # Admitted (its image is the grid's, whose tiles the renderer may hold already, so no new tile is due).
+        got = soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id)', 30, 'https://annotations.allmaps.org/maps/0000000000000003')
         asked = allmaps_hits[hits:]
         return (offered and before == 0 and 'Allmaps' in notice and got and asked and all('/images/' in u for u in asked)
-                and editor.startswith('https://editor.allmaps.org/images?url=')), {'offered': offered, 'asked before the button': before, 'notice': notice, 'asked': asked, 'editor': editor}
+                and editor.startswith('https://editor.allmaps.org/images?url=')), {'got': got, 'asked': asked, 'offered': offered, 'asked before the button': before, 'editor': editor, 'notice': notice[:60]}
     attempt('Chora maps: a manifest with no georeference asks nothing of Allmaps until "Look for a georeference" is pressed and Allmaps agreed to; then it finds one by the image', lookup)
 
     def controls():
@@ -1045,6 +1046,30 @@ def iiif_checks(pw, url, tmp):
                 and notes.startswith('Traced by hand from a georeferenced historical map') and f'Georeferenced through {grid_id} (polynomial order 1, 4 control points)' in notes
                 and 'retrieval date not recorded' in notes and '@id' not in new), {'citations': cits, 'notes': notes, 'save': {k: ls.get(k) for k in ('passed', 'added')}}
     attempt('Chora maps: a point traced from the map is saved citing the map (on its canvas) and the georeference, with the fixed notes, and Mneme passes', trace_save)
+
+    def moved_off():
+        # A traced point moved off the map with the Edit tool no longer cites the map, and says so; the
+        # control is the same point traced first (the check before left the page on the map, fitted).
+        PX = """async (px) => { const e = window.__chora_overlays.manager.entries[0];
+          const w = (await window.__chora_overlays.georef.toWorld(e.g, { type: 'Point', coordinates: px }, { space: 'image' })).geojson.coordinates;
+          const p = window.__chora_map.project(w), r = window.__chora_map.getCanvas().getBoundingClientRect(); return [r.left + p.x, r.top + p.y]; }"""
+        KEPT = """async () => { const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('chora-drafts');
+          for await (const h of d.values()) { const x = JSON.parse(await (await h.getFile()).text()); if (x.fingerprint.startsWith('cambridge.json')) return x.drafts.map((k) => !!k.trace); } return null; }"""
+        page.evaluate(SETTLE)
+        x, y = page.evaluate(PX, [200, 200])
+        draw(page, 'point', [(x, y)]); page.click('#draw-tools button[data-mode="static"]')
+        traced = soon(page, '() => window.__chora.lastTrace && window.__chora.lastTrace.key && window.__chora.pendingCount === 1', 15)
+        first = cstate(page).get('lastTrace')
+        tx, ty = page.evaluate(PX, [504, 256])                  # on the image, outside the mask (16 to 496)
+        page.click('#draw-tools button[data-mode="select"]')
+        tap(page, x, y)
+        page.mouse.move(x, y); page.mouse.down(); page.mouse.move((x + tx) / 2, (y + ty) / 2, steps=6); page.mouse.move(tx, ty, steps=6); page.mouse.up()
+        page.click('#draw-tools button[data-mode="static"]')
+        dropped = soon(page, '() => window.__chora.lastTrace && !window.__chora.lastTrace.key', 15)
+        note = page.inner_text('#card [data-trace-note]') if page.query_selector('#card [data-trace-note]') else ''
+        kept = page.evaluate(KEPT)
+        return (traced and first and first.get('key') and dropped and 'no longer cites that map' in note and kept == [False]), {'first': first, 'after': cstate(page).get('lastTrace'), 'note': note, 'kept traced': kept}
+    attempt('Chora maps: a traced point moved off its map with the Edit tool no longer cites the map, and the card says so', moved_off)
 
     def come_back_and_forget():
         page.reload(); until(page, '() => window.__chora && window.__chora.phase === "ready" && window.__chora.canary !== "pending"', 60)

@@ -5,7 +5,10 @@
 //   blob: (as the historical maps' tile workers are) asks for https://canary.invalid/, and the policy
 //   must stop it, raising a securitypolicyviolation in that worker. Anything else (no violation, a
 //   worker that cannot start, no answer in time) counts as NOT enforced, and historical maps are
-//   then refused (fail closed): their workers' requests are guarded by nothing else.
+//   then refused (fail closed): their workers' requests are guarded by nothing else. Measured
+//   2026-10-01: Chromium 147 and Firefox (Playwright's build 1538) raise it in the worker; WebKit
+//   (Playwright's build 2336) enforces the policy but raises no event, in the worker or the page, so
+//   maps are refused there (Chora's page does not start in that build anyway: no OPFS for SQLite).
 // - blobWorkerUrl(url): a blob: address for a module worker that imports `url`. A worker made from
 //   a same-origin address takes its policy from its own response, not from the page's <meta>; one made
 //   from a blob: takes the page's. MapLibre's worker is made this way, so its requests are under the
@@ -32,14 +35,17 @@ export function canary({ timeout = 5000, settle = 1000 } = {}) {
       resolve(r);
     };
     timer = setTimeout(() => finish({ enforced: false, why: 'no answer from the test worker' }), timeout);
-    const code = `self.addEventListener('securitypolicyviolation', (e) => postMessage({ violated: String(e.blockedURI || 'yes'), directive: e.effectiveDirective }));
+    // Nothing on the page but the test worker ever asks canary.invalid (a name that cannot exist); a
+    // browser may report only the site of what it blocked, so the site is what is matched.
+    const ours = (u) => String(u || '').startsWith(CANARY.slice(0, -1));
+    const code = `self.addEventListener('securitypolicyviolation', (e) => postMessage({ violated: String(e.blockedURI || ''), directive: e.effectiveDirective }));
 fetch(${JSON.stringify(CANARY)}).then(() => postMessage({ fetched: true }), () => postMessage({ failed: true }));`;
     try {
       url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
       worker = new Worker(url);
     } catch (e) { finish({ enforced: false, why: `the test worker could not start (${e?.message || e})` }); return; }
     worker.onmessage = ({ data }) => {
-      if (data?.violated) finish({ enforced: true, directive: data.directive });
+      if (ours(data?.violated)) finish({ enforced: true, directive: data.directive });
       else if (data?.fetched) finish({ enforced: false, why: 'the test request was not stopped' });
       // The violation may be reported just after the request fails: it is waited for, a little.
       else if (data?.failed) setTimeout(() => finish({ enforced: false, why: 'the test request failed, but not because the policy stopped it' }), settle);

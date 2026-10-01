@@ -150,12 +150,14 @@ What it reports, and why, is in the guide:
 
 What it does is in the guide:
 [Placing on the map](https://pelagios.org/place-attestation-ontology/guide/tools.html#chora).
-It is a page of its own, `chora.html`, a second entry in `vite.config.js`, so that MapLibre GL JS
-and Terra Draw load only there. The page is `src/chora/` (`app.js`; `map.js`, the map, the guard
-and drawing; `basemaps.js`; `contributor.js`; `drafts.js`; `handoff.js`, which passes files chosen
+It is a page of its own, `chora.html`, a second entry in `vite.config.js`, so that MapLibre GL JS,
+Terra Draw and Allmaps load only there. The page is `src/chora/` (`app.js`; `map.js`, the map, the
+guard and drawing; `basemaps.js`; `consent.js`; `csp-head.js` and `csp.js`, the hard block;
+`fetchguard.js` and `overlays.js`, the historical maps; `contributor.js`; `drafts.js`; `handoff.js`,
+which passes files chosen
 on the main page through IndexedDB, taken out of it as soon as Chora's page starts, and not offered
 if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `view.js`,
-`draw.js`, `save.js`, `geo.js`). It publishes its state on `window.__chora` for tests.
+`draw.js`, `save.js`, `geo.js`, `trace.js`). It publishes its state on `window.__chora` for tests.
 
 - **The worker** is the main page's, with commands of its own, sent one at a time: `chora-load`,
   `chora-search`, `chora-overview` (every place's point, at most 50,000), `chora-place` (one
@@ -205,12 +207,39 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   rebuilds it from pinned commits, refusing any download whose sha256 differs, and records inputs
   and outputs in `sources.json`; on the same pins it reproduces the committed files byte for byte.
   [public/basemap/README.md](public/basemap/README.md) has the rest.
-- **The privacy guard.** MapLibre's `transformRequest` (`map.js`) refuses any site but this one and
-  that of a basemap the user has agreed to, and counts each refusal (`window.__chora.blocked`). A
-  Content Security Policy in a `<meta>` tag cannot be widened once the page is running, and a pasted
-  basemap may be on any site, so the guard is in code.
+- **The hard block.** The first script in `chora.html`'s `<head>` (`src/chora/csp-head.js`, put
+  there inline by `scripts/vite-chora-csp.mjs`, in the dev server and the build alike) writes a
+  Content Security Policy in a `<meta>` tag before the page requests anything: `connect-src` and
+  `img-src` this site and the sites the user has agreed to, `worker-src 'self' blob:`,
+  `default-src 'self'`, no `unsafe-eval`. CSP Level 3 checks every hop of a redirect, and a worker
+  made from a `blob:` takes the page's policy, so it holds for the historical maps' tile workers,
+  where no page code can see a request. Only a plain lower-case `http(s)` origin reaches the policy,
+  and storage that cannot be read gives the policy of nothing agreed to. MapLibre's own worker is
+  started from a `blob:` that imports it (`blobWorkerUrl` in `csp.js`): one started from its own
+  address would take its response's policy, which has none. At startup a canary (`canary()` in
+  `src/chora/csp.js`) has a `blob:` worker ask for `https://canary.invalid/`; unless the policy
+  raises a `securitypolicyviolation` in that worker, historical maps are refused, in words. Measured
+  2026-10-01: Chromium 147 and Playwright's Firefox (build 1538) raise it; Playwright's WebKit
+  (build 2336) enforces the policy but raises no event anywhere, so maps are refused there (and
+  Chora's page does not start in that build: it has no OPFS for SQLite).
+- **The policy is written at load.** A policy in a `<meta>` tag cannot be widened while the page
+  runs, so a site agreed to is reachable from the next load: Chora reloads once for each set of
+  sites agreed to, keeping the files open, the place, the view and what was being added
+  (`keepForReload` in `handoff.js`; drafts are on OPFS already). A reload that did not put its sites
+  in the policy is not repeated. Playwright's `wait_for_function` must be given a function, not an
+  expression: the policy forbids evaluating a string (`as_function` in `e2e/app_test.py`).
+- **The privacy guard in code.** MapLibre's `transformRequest` (`map.js`) still refuses any site but
+  this one and those of the basemap agreed to, and counts each refusal (`window.__chora.blocked`)
+  and names it (`blockedOrigins`): it is what counts, names and explains; the policy is what holds.
+- **Consent** (`src/chora/consent.js`): `{origin, kind}` in `localStorage` (`chora-consent`), of
+  three kinds, each with its notice ending "It sees nothing of your data": `basemap`, `iiif` (a
+  historical map's image server and its manifest's site) and `allmaps` (`annotations.allmaps.org`).
+  The basemap consents kept before there were kinds are carried over once. "Forget the sites I
+  agreed to" empties the record and reloads: each site is asked about again.
 - **Other basemaps** (OpenFreeMap, OpenStreetMap, CARTO, or a pasted style or tile address) are
-  used only after a notice naming who will see the requests. Choices and consents stay in
+  used only after a notice naming who will see the requests: the site of the basemap's address
+  first, then any other its style names (its sources, TileJSON tiles, glyphs and sprites: the page
+  fetches the style itself, so these are known before MapLibre asks any of them). Choices and consents stay in
   `localStorage`. A basemap whose style cannot be loaded gives way to Natural Earth, and the page
   says why. A map error goes to the console without the query strings of its addresses, where a key
   may be. CARTO's key is given at build time as `VITE_CARTO_API_KEY`, and without it CARTO
@@ -222,8 +251,49 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   reconciliation protocol, one request at a time per lookup, with the token in the `Authorization`
   header only. Every assumption about the World Historical Gazetteer, and whether it is verified,
   is in `whg.js`, so that a correction is made in one place.
-- **Georeferencing**, for tracing from a georeferenced map, will come from `src/engine/georef/`,
-  which belongs to Hermes. Chora uses it and keeps none of its own.
+- **Historical maps** (`src/chora/overlays.js`, `fetchguard.js`): a IIIF image placed by a IIIF
+  Georeference Annotation, drawn by `@allmaps/maplibre` (pinned; loaded only when a map is shown, in
+  a chunk of its own). What is pasted (`parseInput`) is followed to a georeference (`resolve`),
+  asking about every site a step needs at once, before anything is fetched; a manifest is one step
+  and its images the next. With no georeference, Allmaps is asked only on "Look for a georeference"
+  (`/images/<id of the image service>`, then `?url=`), and otherwise the Allmaps Editor is linked.
+  Every document is fetched through the guard: only from a site agreed to and in the policy, with
+  no credentials. **Admission** (`admit`): the page fetches the image's `info.json` itself, with
+  `redirect: 'error'`, and refuses the map unless the id it gives IS the image the georeference
+  names (the renderer builds tile addresses from that id); it then gives the renderer the
+  information (`addImageInfos`, so the renderer asks for none) and the annotation, and sets the
+  map's transformation from the georeference (`setMapTransformationType`): the renderer takes the
+  transformation's type but not a polynomial's order, and would draw an order-2 map at order 1.
+  Maps shown are kept in OPFS (`chora-overlays/`) and admitted afresh on the next load; a change of
+  basemap puts them back in a new layer without fetching anything.
+- **Why tiles cannot be guarded request by request** (the spike of 2026-09-30, @allmaps/maplibre
+  1.0.0-beta.44, render beta.84): tiles are fetched in a pool of five `blob:` workers. A `fetchFn`
+  cannot be passed to them (a function cannot be cloned: `DataCloneError`, logged only, and no tile
+  loads), so the page sees no tile request. A map admitted for site A reached site B two ways: an
+  `info.json` whose id is on B (the tiles are built from it: refused at admission), and a tile
+  answered with a redirect to B, which the worker follows after admission. Only the policy stops the
+  second; a Service Worker also did, but fails open on Shift+Reload, before it is installed and in
+  private windows. The renderer reports a tile its worker could not fetch only to the console (a
+  `ResourceFetchError` naming the tile; no event), so the page listens there, for its own maps'
+  tiles, and says in plain words that part of the map could not be loaded.
+- **Attribution**: the manifest's credit and licence (Presentation 3 `requiredStatement` and
+  `rights`, 2 `attribution` and `license`), as text only; the manifest's logo, thumbnail,
+  rendering, homepage and seeAlso are never used. David Rumsey's manifests carry no licence, so it
+  comes from a table by site (`HOSTS`). A non-commercial licence gets one neutral line, and the
+  licence is linked in the traced attestation's citation of the map (`source.licence`).
+- **Tracing** (`src/engine/chora/trace.js`): a drawing made over a map is traced from the topmost
+  map shown whose mask holds it whole, else the topmost holding part of it (with a warning); a
+  georeference that cannot place it (a fold) passes to the next. It keeps georef's `toPixels`
+  record and its box of image pixels (at least 1 px each way; 32 canvas px of context for a point,
+  none for a line or area), and must come back through the georeference to within 0.05 of the map's
+  pixels there, or it is not kept. Saved, it cites the map (`georefCitation`, the canvas and the box
+  as the locator; `cito:citesAsEvidence`) and the georeference (`georefAnnotationCitation`,
+  `cito:usesMethodIn`, derived from the map), and its notes are `choraTracingNote` then `georefNote`
+  with the date the georeference was fetched (PLATO 3acab8e's pattern). Moved or reshaped, it is
+  traced again, or no longer cites the map and says so. The geometry saved is the one drawn.
+- **Georeferencing** comes from `src/engine/georef/`, which belongs to Hermes; Chora keeps none of
+  its own, except `allmapsTransformationName` in `overlays.js`, a marked stand-in until georef's
+  export of that name is merged here.
 
 ## Limits
 
@@ -246,6 +316,7 @@ npm test                                  # the engine and the command line, in 
 python3 e2e/app_test.py                   # the page itself, in Playwright's bundled Chromium
 python3 e2e/app_test.py --url=https://pelagios.org/plato-tools/   # the deployed page
 python3 e2e/app_test.py --prove-it-fails  # every check pointed at a page with no tools: all must fail
+python3 e2e/app_test.py --chora-only      # Chora's checks alone (--maps-only: its historical maps)
 node scripts/install-test.mjs             # install the packed tools as npx does, and run the command
 node e2e/compare_scale.mjs deep-plato.jsonl.gz --work-dir DIR   # the version check at full scale
 python3 e2e/scale_test.py --input deep-plato.nt.gz --target plato-jsonl --out out.jsonl
@@ -265,6 +336,15 @@ python3 e2e/scale_test.py --input deep-plato.nt.gz --target plato-jsonl --out ou
 - the version check finds each kind of deletion and change, each made by one edit to a version
   that passes;
 - the command line gives what the engine gives, with the right exit status.
+
+Chora's historical maps are checked against a real second origin: `e2e/iiif_fixture_server.py`
+serves `test/fixtures/chora-iiif/` on two free ports, A (the image server agreed to) and B (never to
+be asked), and logs every request it receives. That log is the census: Playwright's request events
+also list requests the browser stopped. Allmaps' annotation server is answered by `page.route`.
+The checks include a tile answered with a redirect to B (B must get nothing in the whole run while
+the honest map on A draws), an `info.json` naming B, and the renderer's own transformation of 25
+pixels against `src/engine/georef/`'s, to 1e-7 m, at order 1 and 2, with the renderer's order-1
+transformation of the order-2 map as the control.
 
 A check that finds nothing is worth something only if it could have found something: each test of
 an absence has a presence beside it, or a control that finds the same thing when it is there.
