@@ -273,8 +273,8 @@ readers link to those headings, so keep them.
   attestation-centric attestation for each address its `@ref` resolves to (its words leave out a
   `<geo>`, `<location>`, `<idno>` or `<note>` inside it, `ASIDE`; a `<geo>` there is `tei-place-geo`): a web address as it is,
   a prefixed pointer through the header's `<prefixDef>` (the pattern anchored to the whole of what
-  follows the prefix), and `#x` through the one web-address `<idno>` of `<place xml:id="x">` in the
-  same file (several: ambiguous, nothing converted). A place name in an `<rdg>`, or in the part of a
+  follows the prefix), and `#x` through the one web-address `<idno>` (or `<linkGrp>/<link type="normal">` target, as
+  EHRI writes them: `placeUri`) of `<place xml:id="x">` in the same file (several: ambiguous, nothing converted). A place name in an `<rdg>`, or in the part of a
   `<choice>` not taken, is a variant (`tei-variant`): one in a part of a `<choice>` waits until the
   `<choice>` closes. In a `<text>` with a top-level `div type="edition"`, every other top-level div,
   of whatever type (an introduction as much as a commentary), before the edition div as after it,

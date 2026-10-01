@@ -205,7 +205,7 @@ const READ_ATTRIBUTES = new Set(['ref', 'key', 'xml:id', 'xml:lang', 'xml:space'
 // A provenance subtype that means the object was found there.
 const FOUND_SUBTYPE = /^(found|discovered|excavated|excavation|discovery|findspot)$/i;
 const ASIDE = new Set(['geo', 'location', 'idno', 'note']);
-const PLACE_CHILDREN = new Set(['idno', 'location', 'place', ...PLACE_ELEMENTS]);
+const PLACE_CHILDREN = new Set(['idno', 'location', 'linkGrp', 'place', ...PLACE_ELEMENTS]);
 // A <location> type that says the location is another place's (the place this one is in), not this place's own.
 const OTHER_PLACE_LOCATION = /located[_ -]?in|parent|part[_ -]?of|within|in[_ -]?place|broader/i;
 // A description of a person, an organisation, an event or a book (in <back>, say), whose place names
@@ -565,20 +565,30 @@ export class TeiReader {
       return;
     }
     const pl = this.placeStack[this.placeStack.length - 1];
+    if (pl && parent?.linkGrp === pl) {
+      const which = pl.id !== undefined ? `#${pl.id}` : 'a place with no xml:id';
+      const type = attr('type');
+      if (local !== 'link') this.once('tei-place-content', `${which}: <linkGrp>/<${local}>`);
+      else if (type !== undefined && type !== 'normal') this.once('tei-place-content', `${which}: <link type="${type}"> ${norm(attr('target') || '')}`);
+      else for (const target of norm(attr('target') || '').split(' ').filter(Boolean)) {
+        if (!/^https?:\/\//i.test(target) || !this.placeUri(pl, target)) this.once('tei-place-content', `${which}: <link target="${target}">`);
+      }
+      return;
+    }
     if (pl && local === 'geo' && parent?.location === pl) { this.capture((c) => pl.geos.push(norm(c.pref))); return; }
     if (pl && local === 'geo' && parent?.otherLocation) { this.capture((c) => parent.otherLocation.geos.push(norm(c.pref))); return; }
     if (pl && parent?.place === pl) {
       if (local === 'idno') {
         this.capture((c) => {
-          const s = norm(c.pref), r = placeAddress(s);
-          if (r.lost) { this.report(WHG_LOST[r.lost], `#${pl.id ?? ''}: ${r.value}`); return; }
-          if (r.part) this.report('address-pleiades-part', `#${pl.id ?? ''}: ${r.iri}`);
-          if (r.page) this.report('address-web-page', `#${pl.id ?? ''}: ${r.iri}`);
-          if (isWeb(r.iri)) { if (!pl.uris.some((u) => u.iri === r.iri)) pl.uris.push(r.from ? { iri: r.iri, from: r.from, rules: r.rules } : { iri: r.iri }); }
-          else this.report('tei-place-content', `${pl.id !== undefined ? `#${pl.id}` : 'a place with no xml:id'}: <idno${t.attributes.type ? ` type="${t.attributes.type.value}"` : ''}> ${s}`);
+          const s = norm(c.pref);
+          if (!this.placeUri(pl, s)) this.report('tei-place-content', `${pl.id !== undefined ? `#${pl.id}` : 'a place with no xml:id'}: <idno${t.attributes.type ? ` type="${t.attributes.type.value}"` : ''}> ${s}`);
         });
         return;
       }
+      // EHRI gives a place's gazetteer links as <linkGrp><link type="normal" target="…">: each target
+      // that is a web address is read as an idno is. A link of another type (EHRI's type="desc", a
+      // Wikipedia article describing the place) or to a target that is not a web address is reported.
+      if (local === 'linkGrp') { el.linkGrp = pl; this.attributes(t, new Set(['xml:id', 'xml:lang', 'xml:space'])); return; }
       if (local === 'location') {
         // Only the place's own location: one whose type says it is another place's (Schnitzler's
         // type="located_in_place", the district or street the place is in) is that place's, and is
@@ -699,6 +709,19 @@ export class TeiReader {
     for (const [unit, n] of this.milestones) bits.push(`${unit} ${n}`);
     if (this.page !== undefined) bits.push(`page ${this.page}`);
     return bits;
+  }
+  /**
+   * A listed place's web address, from an idno or a link: through placeAddress, then kept once (two
+   * forms of one address are one). True when it was a web address (kept, or refused and reported).
+   */
+  placeUri(pl, s) {
+    const r = placeAddress(s), which = `#${pl.id ?? ''}`;
+    if (r.lost) { this.report(WHG_LOST[r.lost], `${which}: ${r.value}`); return true; }
+    if (r.part) this.report('address-pleiades-part', `${which}: ${r.iri}`);
+    if (r.page) this.report('address-web-page', `${which}: ${r.iri}`);
+    if (!isWeb(r.iri)) return false;
+    if (!pl.uris.some((u) => u.iri === r.iri)) pl.uris.push(r.from ? { iri: r.iri, from: r.from, rules: r.rules } : { iri: r.iri });
+    return true;
   }
   placeDone(pl) {
     this.placeStack.pop();

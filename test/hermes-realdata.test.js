@@ -134,3 +134,34 @@ test('without header places, the header\'s findspot and origin <geo> are still r
   assert.deepEqual(examples(m, 'tei-header-geo'), ['origin: 37.43067, 14.47945 on line 41']);
   assert.ok(m.kinds.has('tei-place-outside-text'));
 });
+
+// ---- EHRI: a place's gazetteer links in <linkGrp><link> ------------------------------------------------
+// EHRI's only files with these (The Sunflower) are CC BY-NC-SA 4.0, so this is a constructed equivalent
+// of their listPlace in the teiHeader's sourceDesc (EHRI-TS-19580908-A_EN.xml has the same shape).
+const EHRI_LIKE = (placeBody) => `<?xml version="1.0" encoding="UTF-8"?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0"><teiHeader><fileDesc><titleStmt><title>A letter</title></titleStmt><publicationStmt><idno type="URI">https://example.org/letter</idno></publicationStmt><sourceDesc><listPlace>
+<place xml:id="ehri_haifa"><placeName>Haifa</placeName><location><geo>32.81841 34.9885</geo></location>${placeBody}</place>
+<place xml:id="ehri_camp"><placeName>A camp</placeName><linkGrp><link type="normal" target="https://portal.ehri-project.eu/keywords/ehri_camps-1"/></linkGrp></place>
+<place xml:id="self"><placeName>no place</placeName><linkGrp><link type="normal" target="#self"/></linkGrp></place>
+</listPlace></sourceDesc></fileDesc></teiHeader><text><body><p>To <placeName ref="#ehri_haifa">Haifa</placeName> and <placeName ref="#ehri_camp">the camp</placeName>.</p></body></text></TEI>
+`;
+test('EHRI-like: a <place>\'s <linkGrp><link type="normal"> web targets are read as its idnos, and the linkGrp is no longer reported as unknown', () => {
+  const m = mapped(EHRI_LIKE('<linkGrp><link type="normal" target="https://www.geonames.org/294801/haifa.html"/><link type="desc" target="https://en.wikipedia.org/wiki/Haifa"/></linkGrp>'), { listPlaces: true });
+  const text = m.doc.attestations.filter((a) => a.formStatus === 'https://w3id.org/plato#Attested');
+  assert.deepEqual(text.map((a) => a.about), ['https://sws.geonames.org/294801/', 'https://portal.ehri-project.eu/keywords/ehri_camps-1']);
+  assert.match(text[0].notes, /Place address given as https:\/\/www\.geonames\.org\/294801\/haifa\.html \(rule geonames-page/);
+  const listed = m.doc.attestations.filter((a) => a.formStatus === 'https://w3id.org/plato#Headword');
+  assert.deepEqual(listed.map((a) => a.about), ['https://sws.geonames.org/294801/', 'https://portal.ehri-project.eu/keywords/ehri_camps-1']);
+  const content = examples(m, 'tei-place-content');
+  assert.ok(!content.some((e) => /<linkGrp>$/.test(e)), JSON.stringify(content));
+  assert.deepEqual(content, ['#ehri_haifa: <link type="desc"> https://en.wikipedia.org/wiki/Haifa', '#self: <link target="#self">']);
+  // control: the same place with its address in an <idno> gives the same attestations
+  const c = mapped(EHRI_LIKE('<idno type="URI">https://www.geonames.org/294801/haifa.html</idno>'), { listPlaces: true });
+  assert.deepEqual(c.doc.attestations.map((a) => a.about), m.doc.attestations.map((a) => a.about));
+});
+
+test('EHRI-like: two different gazetteer links in one linkGrp make the place ambiguous, as two idnos do', () => {
+  const m = mapped(EHRI_LIKE('<linkGrp><link type="normal" target="https://www.geonames.org/294801/haifa.html https://www.wikidata.org/wiki/Q41621"/></linkGrp>'));
+  assert.deepEqual(examples(m, 'tei-ref-ambiguous'), ['#ehri_haifa: https://sws.geonames.org/294801/, http://www.wikidata.org/entity/Q41621']);
+  assert.deepEqual(m.doc.attestations.map((a) => a.about), ['https://portal.ehri-project.eu/keywords/ehri_camps-1']);
+});
