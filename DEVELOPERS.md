@@ -327,7 +327,16 @@ readers link to those headings, so keep them.
   An address column makes the rows attestation-centric; otherwise each row is a
   place whose `@id` is minted by `tableIds` from its id under the base address, with the id kept as
   `entityIdentifier`. No id column means no addresses and one `generic-no-ids` warning; a repeated
-  id is a `DataError`. An unrecognised column goes to `notes`, never `properties`. The mapping, reasons
+  id is a `DataError`, whose message names `--same-id`. With `options.sameId` (and an id column)
+  `genericProfile` and `genericSource` are attestation-centric: each row is an attestation about
+  the place minted from its id, and after the last row each id is one
+  `{ type: 'record', newEntity: true, value: { '@id', label, entityIdentifier, attestations: [] } }`,
+  which the store path (`needsStore`, then `listedThenOthers`/`r2j.entity`) regroups with its
+  attestations. The reader holds only `Map(id → { names: Set })` (about 300 bytes an id, measured
+  in `test/hermes-generic-same-id-large.test.js`), never a row. Names that agree are the label;
+  names that differ make the id the label (`generic-same-id-label`); a row with no id is a loss
+  (`generic-same-id-empty`). The page's Reading options and the command line's `--same-id` (step D)
+  set `options.sameId: true`. An unrecognised column goes to `notes`, never `properties`. The mapping, reasons
   and rows have no prototype, so a column called `__proto__` is kept. A CSV streams through Papa's
   chunk parser (`csvRecords`): the columns and guess read its header and first 50 rows, and the rows
   are read again, never kept. A FeatureCollection streams too, read twice (columns, then rows).

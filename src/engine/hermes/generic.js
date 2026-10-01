@@ -11,7 +11,12 @@
 //     the spreadsheet tables make one from place_id (tableIds), with the id kept as the place's own
 //     identifier (entityIdentifier). Two rows with one id are refused. With no id, a place has no
 //     address at all, and the report says once how to give it one: no address is ever made from a
-//     row's number or its name, since such an address would change whenever the file did.
+//     row's number or its name, since such an address would change whenever the file did;
+//   - with options.sameId (rows with the same id are evidence about one place), each row is an
+//     attestation about the address made from its id (attestation-centric), and at the end each id
+//     is one new place, with its label and entityIdentifier and no attestations of its own: the
+//     store regroups the rows under it. Only each id and the names its rows give are held, never a
+//     row. Names that agree are the label; names that differ make the id the label, and are reported.
 // A GeoJSON feature's own id counts as a column (FEATURE_ID), and its geometry is always carried.
 import { jsonDocument, DataError } from '../input.js';
 import { csvRecords, textChunks } from '../../formats/csv.js';
@@ -181,20 +186,26 @@ export function savedColumns(given) {
   return values.length && values.every(entry) && values.some(named) ? given : c;
 }
 /**
- * 'attestation-centric' when a column holds the places' web addresses, else 'place-centric'.
- * `options` are the run's options (`options.columns` a saved mapping, else the guess is used); a
- * saved mapping alone is still accepted (savedColumns).
+ * 'attestation-centric' when a column holds the places' web addresses, or when rows with the same
+ * id are one place (options.sameId, with an id column), else 'place-centric'. `options` are the
+ * run's options (`options.columns` a saved mapping, else the guess is used); a saved mapping alone is
+ * still accepted (savedColumns).
  */
 export async function genericProfile(input, options) {
-  const { mapping } = await mappingOf(input, savedColumns(options));
-  return Object.values(mapping).includes('address') ? 'attestation-centric' : 'place-centric';
+  const saved = savedColumns(options);
+  const { mapping } = await mappingOf(input, saved);
+  const fields = Object.values(mapping);
+  const sameId = saved !== options && options?.sameId === true && fields.includes('id');
+  return fields.includes('address') || sameId ? 'attestation-centric' : 'place-centric';
 }
 
 /**
  * The records of a CSV or plain GeoJSON input: a header, then a 'record' for each place
  * (place-centric), or an 'attestation' for each row about a web address (attestation-centric).
  * `options.columns` is a saved mapping (else the guess is used); `options.base` the base address
- * places' addresses are made under, `defaultBase` the stand-in used without one.
+ * places' addresses are made under, `defaultBase` the stand-in used without one; `options.sameId`
+ * reads rows with the same id as evidence about one place (an attestation each, and one new place
+ * for each id at the end).
  */
 export async function* genericSource(input, rep, options = {}, defaultBase = 'https://example.org/my-dataset/') {
   const file = input.files[0];
@@ -204,11 +215,14 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
   for (const p of [...(t.headProblems || []), ...problems]) report(p.kind, p.example);
   const fields = Object.values(mapping);
   const byAddress = fields.includes('address'), hasId = fields.includes('id');
+  // Rows with the same id as one place: each id, and the names its rows give (no row is kept).
+  const sameId = options.sameId === true && hasId;
+  const places = sameId ? new Map() : null;
   const what = input.format === 'csv' ? 'a table of places (CSV)' : 'plain GeoJSON';
   const title = options.title || (typeof t.head.title === 'string' && t.head.title) || (typeof t.head.name === 'string' && t.head.name) || `Places in ${file.name}`;
   yield { type: 'header', value: {
-    profile: byAddress ? 'attestation-centric' : 'place-centric',
-    gazetteer: { title, description: `Converted by PLATO tools from ${what}, ${file.name}: one attestation for each ${input.format === 'csv' ? 'row' : 'feature'}${byAddress ? ', about the place whose web address it gives' : ''}.` },
+    profile: byAddress || sameId ? 'attestation-centric' : 'place-centric',
+    gazetteer: { title, description: `Converted by PLATO tools from ${what}, ${file.name}: one attestation for each ${input.format === 'csv' ? 'row' : 'feature'}${byAddress ? ', about the place whose web address it gives' : ''}${sameId ? `${byAddress ? ', or else ' : ', '}about the place its id names, ${input.format === 'csv' ? 'rows' : 'features'} with the same id being one place` : ''}.` },
   } };
   const base = options.base || defaultBase;
   if (!byAddress && !hasId) report('generic-no-ids', file.name);
@@ -241,9 +255,19 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
       continue;
     }
     if (!a.label) { report('generic-row-no-name', r.where); continue; }
+    if (sameId) {
+      // Evidence about the place its id names: an attestation needs that address, so a row with no id is lost.
+      if (a.id === undefined) { report('generic-same-id-empty', r.where); continue; }
+      let p = places.get(a.id);
+      if (!p) places.set(a.id, (p = { names: new Set() }));
+      p.names.add(a.label);
+      out++;
+      yield { type: 'attestation', value: { about: mint(a.id), ...a.attestation }, n };
+      continue;
+    }
     const rec = {};
     if (a.id !== undefined) {
-      if (seen.has(a.id)) throw new DataError(`The id "${a.id}" is used by more than one ${input.format === 'csv' ? 'row' : 'feature'} (${whereOf(seen.get(a.id))} and ${r.where}). Each id becomes the web address of a place, so ids must be unique: correct the duplicate, or map another column as the id.`);
+      if (seen.has(a.id)) throw new DataError(`The id "${a.id}" is used by more than one ${input.format === 'csv' ? 'row' : 'feature'} (${whereOf(seen.get(a.id))} and ${r.where}). Each id becomes the web address of a place, so ids must be unique: correct the duplicate, or map another column as the id, or, if every ${input.format === 'csv' ? 'row' : 'feature'} is evidence about the same place, read ${input.format === 'csv' ? 'rows' : 'features'} with the same id as one place (Reading options, or --same-id).`);
       seen.set(a.id, n);
       rec['@id'] = mint(a.id);
     } else if (hasId) report('generic-id-empty', r.where);
@@ -252,6 +276,16 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
     rec.attestations = [a.attestation];
     out++;
     yield byAddress ? { type: 'record', value: rec, n, newEntity: true } : { type: 'record', value: rec, n };
+  }
+  // Each id read with options.sameId is one new place, its attestations the rows above. Its label is
+  // the name its rows agree on; where they differ, none is picked: the label is the id, and the names
+  // are reported (every one is still its own row's attestation's).
+  if (sameId) {
+    for (const [id, p] of places) {
+      const names = [...p.names];
+      if (names.length > 1) report('generic-same-id-label', `"${id}": ${names.slice(0, 5).join(' / ')}${names.length > 5 ? ` and ${names.length - 5} more` : ''}`);
+      yield { type: 'record', newEntity: true, value: { '@id': mint(id), label: names.length > 1 ? id : names[0], entityIdentifier: id, attestations: [] } };
+    }
   }
   // A skipped column is reported once, by name, if it had a value to lose.
   for (const c of skipped) report('generic-column-skipped', c);
