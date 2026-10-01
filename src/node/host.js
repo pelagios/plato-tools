@@ -110,14 +110,19 @@ export class NodeHost {
     const host = this;
     // What this run made, so that a run that fails can take it all back: its files, the folders
     // made to hold them, and the roots of the trees it began (env.folder) where there was none.
-    const run = { db: null, created: [], dirs: new Set(), roots: [] };
+    // Every database it opened (the triple store, and any other: identity relations held back for a
+    // PLATO JSON document, the version check's ledger), each closed and deleted by finish().
+    const run = { dbs: [], store: null, created: [], dirs: new Set(), roots: [] };
     this.running = run;
     const env = {
       resources, csvMeta: resources.csvMeta, xlsx, progress,
-      openDb: async () => {
-        run.db = openNodeSqlite(join(host._work(), `run-${++host.runs}.sqlite3`));
-        host.open.add(run.db);
-        return run.db;
+      // { store: true } marks the triple store, whose size --json reports as storeBytes.
+      openDb: async ({ store = false } = {}) => {
+        const db = openNodeSqlite(join(host._work(), `run-${++host.runs}.sqlite3`));
+        host.open.add(db);
+        run.dbs.push(db);
+        if (store && !run.store) run.store = db;
+        return db;
       },
       output: async (name) => create(join(host.outDir, name), name),
       // A folder of files with paths of their own (Agora's site and w3id folder); in the browser the
@@ -159,10 +164,12 @@ export class NodeHost {
     }
     return {
       env,
-      /** After the run: close and delete its database; on failure, delete its partial outputs. */
+      /** After the run: close and delete its databases; on failure, delete its partial outputs. */
       finish(failed) {
         host.running = null;
-        const storeBytes = run.db ? (run.db.close(), host.open.delete(run.db), run.db.bytes) : null;
+        for (const db of run.dbs) { try { db.close(); } catch { /* closed already */ } host.open.delete(db); }
+        // The triple store's size; null where the input streamed straight through, with no store.
+        const storeBytes = run.store ? run.store.bytes : null;
         if (failed) undo(run);
         return { storeBytes, removed: failed ? run.created : [] };
       },

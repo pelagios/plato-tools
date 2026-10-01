@@ -439,7 +439,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     }
   } else {
     // Gather everything in the on-disk store first, then read it back one place at a time.
-    const store = new TripleStore(await env.openDb());
+    const store = new TripleStore(await env.openDb({ store: true }));
     // Here the store's converter is the only one that sees the records, so it reports.
     const w = new Json2Rdf(res.context, (s, p, o) => store.add(s, p, o), { onIssue: jsonIssue });
     let header = null, batch = 0;

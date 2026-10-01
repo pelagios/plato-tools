@@ -221,6 +221,45 @@ test('RDF goes through a database file on disk in --work-dir, which is removed a
   assert.deepEqual(jsonLines(b.out).map((l) => l.status), ['failed', 'ok', undefined]);
 });
 
+test('JSON Lines to PLATO JSON with identity relations spilled to a database: no store, nothing left', () => {
+  // Over 10,000 identity relations are held in a working database, not in memory (pipeline.js). That
+  // database is not the triple store: the input still streams straight through, so storeBytes is null,
+  // as for the same input with a few. It used to be the held database's size.
+  const X = 'https://example.org/', dir = scratch(), out = scratch(), work = scratch();
+  const rows = [{ profile: 'place-centric', gazetteer: { title: 't' } }];
+  const place = (i) => ({ '@id': `${X}place/p${i}`, label: 'p' + i, attestations: [{ sources: [{ '@id': X + 'source/s', title: 'S' }], names: [{ toponym: 'p' + i }] }] });
+  for (let i = 0; i < 10010; i++) { rows.push(place(i)); rows.push({ subject: `${X}place/p${i}`, object: `${X}place/p${i + 1}`, identityType: 'closeMatch' }); }
+  const p = join(dir, 'many.jsonl');
+  writeFileSync(p, rows.map((o) => JSON.stringify(o)).join('\n') + '\n');
+  const r = cli('convert', '--to', 'plato-json', '--json', '--work-dir', work, '--out', out, p);
+  assert.equal(r.code, 0, r.out + r.err);
+  const [line] = jsonLines(r.out);
+  assert.equal(line.status, 'ok', JSON.stringify(line.items));
+  assert.equal(line.counts['identity relations'], 10010);
+  // Presence: every identity relation came back out (by way of the database: there are over 10,000).
+  assert.equal(JSON.parse(readFileSync(join(out, 'many.json'), 'utf8')).identityRelations.length, 10010);
+  assert.equal(line.storeBytes, null, 'the held identity relations are not the triple store');
+  assert.deepEqual(readdirSync(work), [], 'nothing is left in the work directory');
+});
+test('a run that opens several databases closes and deletes every one, and storeBytes is the store\'s', async () => {
+  const { NodeHost } = await import('../src/node/host.js');
+  const { existsSync } = await import('node:fs');
+  const host = new NodeHost({ workDir: scratch(), outDir: scratch() });
+  try {
+    const { env, finish } = host.env({});
+    const store = await env.openDb({ store: true }), other = await env.openDb();
+    store.exec('CREATE TABLE t(x)'); store.exec("INSERT INTO t VALUES (randomblob(20000))");
+    other.exec('CREATE TABLE u(x)');
+    // Presence: both are files on disk until the run is finished.
+    assert.ok(existsSync(store.path) && existsSync(other.path));
+    const done = finish(false);
+    assert.ok(!existsSync(store.path), 'the store is deleted');
+    assert.ok(!existsSync(other.path), 'the other database is deleted too');
+    assert.ok(done.storeBytes > 20000, `storeBytes ${done.storeBytes} is the store's`);
+    assert.equal(host.open.size, 0);
+  } finally { host.cleanup(); }
+});
+
 test('counts of one are singular in the summary: "1 place", "1 identity relation"', async () => {
   const { summary } = await import('../src/engine/words.js');
   assert.equal(summary({ errors: 0, counts: { places: 1, attestations: 3, 'identity relations': 1 } }).counted, 'Read 1 place, 3 attestations, 1 identity relation.');
