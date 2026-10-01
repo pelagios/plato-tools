@@ -169,6 +169,33 @@ test('a formula saved without its value is reported as a loss; one with its valu
   assert.equal(r.records[1].attestations[0].notes, 'note: 102.76');
   assert.equal(r.records[0].attestations[0].notes, undefined);
 });
+test('a cell holding an error (#DIV/0!, #N/A) is reported as a loss and carries nothing; the cells beside it are read', async () => {
+  const err = (v, w, f) => ({ t: 'e', v, w, ...(f ? { f } : {}) });
+  const f = workbookFile([['Places', [['name', 'latitude', 'longitude', 'note'], ['Oxford', 51.75, -1.25, err(0x07, '#DIV/0!', 'B2/0')], ['Bath', 51.38, err(0x2A, '#N/A'), 'spa']]]]);
+  const r = await readAll(f);
+  assert.equal(GENERIC_KINDS['generic-sheet-error-cell'], 'loss');
+  assert.equal(r.of('generic-sheet-error-cell').severity, 'loss');
+  assert.deepEqual(r.of('generic-sheet-error-cell').examples, ['row 2, column "note", cell D2: #DIV/0!', 'row 3, column "longitude", cell C3: #N/A']);
+  assert.equal(r.of('generic-sheet-error-cell').count, 2);
+  // Nothing is carried for the error cells: no note on Oxford, no longitude (so no point) on Bath.
+  assert.equal(r.records[0].attestations[0].notes, undefined);
+  assert.ok(!JSON.stringify(r.records).includes('DIV'));
+  // The control: the normal cells in the same rows are read.
+  assert.deepEqual(labels(r), ['Oxford', 'Bath']);
+  assert.match(JSON.stringify(r.records[0]), /51\.75/);
+  assert.equal(r.records[1].attestations[0].notes, 'note: spa');
+  // And a sheet with no error cell reports none.
+  const plain = await readAll(workbookFile([['Places', PLACES]]));
+  assert.deepEqual(labels(plain), ['Oxford', 'Bath']);
+  assert.equal(plain.of('generic-sheet-error-cell'), undefined);
+});
+test('a row whose only value is an error is still reported, and an error in the heading row too', async () => {
+  const err = (v, w) => ({ t: 'e', v, w });
+  const r = await readAll(workbookFile([['Places', [['name', err(0x17, '#REF!')], ['Oxford', 'x'], ['', err(0x07, '#DIV/0!')]]]]));
+  assert.deepEqual(r.of('generic-sheet-error-cell').examples, ['cell B1 of "Places", in the heading row: #REF!', 'row 3, column B (no heading), cell B3: #DIV/0!']);
+  assert.ok(r.kinds.has('generic-row-empty') || r.kinds.has('generic-row-no-name'));
+  assert.deepEqual(labels(r), ['Oxford']);
+});
 test('an empty sheet is an error, and its columns cannot be read', async () => {
   const f = workbookFile([['Places', PLACES], ['Empty', []]]);
   const r = await readAll(f, { sheet: 'Empty' });

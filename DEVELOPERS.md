@@ -417,7 +417,11 @@ readers link to those headings, so keep them.
   a date from shifting by the local time zone, which the TZ test catches), the header the first row
   that is not blank, rows numbered as the workbook numbers them. A formula saved with no cached value
   is a cell `{ t: 'e', f }` with no `v`, found on the dense cells and reported
-  (`generic-sheet-formula-no-value`). The sheet is `options.sheet` (a run's options, `sheetIn`), else
+  (`generic-sheet-formula-no-value`). A cell holding an error (`{ t: 'e', v: <code>, w: '#DIV/0!' }`),
+  which `sheet_to_json` gives as empty, is found on the same dense cells and reported as a loss
+  (`generic-sheet-error-cell`) naming its row, column, cell and error text, and carries nothing; a
+  row whose only value is an error is still yielded (so its loss is reported), and an error in the
+  heading row or past the last column is reported from `headProblems`. The sheet is `options.sheet` (a run's options, `sheetIn`), else
   `input.sheet`; `withSheet(input, name)` sets it, refusing a name the workbook lacks with a
   DataError listing its sheets (the worker's `columns`, `match` and `apply` commands, and the command
   line's `--sheet`, a usage error there). The other sheets (`generic-sheets-not-read`), hidden ones,

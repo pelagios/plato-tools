@@ -85,6 +85,7 @@ export const GENERIC_KINDS = {
   'generic-sheet-hidden': 'warning',
   'generic-sheet-empty': 'error',
   'generic-sheet-formula-no-value': 'loss',
+  'generic-sheet-error-cell': 'loss',
   'workbook-whole': 'warning',
 };
 

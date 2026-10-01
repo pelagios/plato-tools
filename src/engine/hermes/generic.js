@@ -81,8 +81,12 @@ const sheetMissing = (name, sheets) => `The workbook has no sheet "${name}"; its
 // A workbook can only be read whole (SheetJS): read once for the columns and first rows, then once
 // more for the rows. Each cell is read as its value, not as the workbook shows it: a coordinate
 // formatted "0.00" keeps every digit it has (String of the number), a date is an ISO date, and a
-// formula is its last calculated value (one saved with none is reported, and read as empty).
+// formula is its last calculated value (one saved with none is reported, and read as empty). A cell
+// holding an error (#DIV/0!, #N/A, #REF!…) is reported as a loss, naming its row, column and error,
+// and carries nothing.
 const WORKBOOK_WHOLE = 50 * 2 ** 20;   // as the tables reader warns (pipeline.js)
+// The text of a spreadsheet's error codes, for a cell that keeps the code and not its text.
+const ERROR_TEXT = { 0x00: '#NULL!', 0x07: '#DIV/0!', 0x0F: '#VALUE!', 0x17: '#REF!', 0x1D: '#NAME?', 0x24: '#NUM!', 0x2A: '#N/A', 0x2B: '#GETTING_DATA' };
 /** A cell's value as text: a date YYYY-MM-DD at midnight, else YYYY-MM-DDTHH:MM:SS (the time as the workbook gives it, in no time zone); TRUE or FALSE; a number in full. */
 export function sheetCellText(v) {
   if (v === undefined || v === null) return '';
@@ -107,16 +111,22 @@ async function openSheet(file, name) {
     let ws;
     try { ws = XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: 'array', cellDates: true, UTC: true, sheets: [name], dense: true }).Sheets[name]; }
     catch (e) { throw damaged(e); }
-    if (!ws || !ws['!ref']) return { rows: [], top: 0, left: 0, formulas: [] };
+    if (!ws || !ws['!ref']) return { rows: [], top: 0, left: 0, formulas: [], errors: new Map() };
     const { s } = XLSX.utils.decode_range(ws['!ref']);
-    const formulas = [];
+    // Formulas with no value, and cells holding an error (which SheetJS gives as empty), by the index
+    // of their row among the rows read: { j (the column among those read), ref, text }.
+    const formulas = [], errors = new Map();
     (ws['!data'] || []).forEach((cells, r) => (cells || []).forEach((cell, c) => {
-      if (cell && cell.t === 'e' && cell.v === undefined && cell.f) formulas.push({ r, c, f: cell.f });
+      if (!cell || cell.t !== 'e') return;
+      if (cell.v === undefined) { if (cell.f) formulas.push({ r, c, f: cell.f }); return; }
+      const i = r - s.r;
+      if (!errors.has(i)) errors.set(i, []);
+      errors.get(i).push({ j: c - s.c, ref: XLSX.utils.encode_cell({ r, c }), text: typeof cell.w === 'string' && cell.w ? cell.w : ERROR_TEXT[cell.v] || `error ${cell.v}` });
     }));
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, UTC: true, defval: '', blankrows: true }).map((cells) => cells.map(sheetCellText));
-    return { rows, top: s.r, left: s.c, formulas };
+    return { rows, top: s.r, left: s.c, formulas, errors };
   };
-  const { rows, top, left, formulas } = await read();
+  const { rows, top, left, formulas, errors } = await read();
   const blank = (cells) => cells.every((c) => c.trim() === '');
   const h = rows.findIndex((cells) => !blank(cells));
   const headProblems = [];
@@ -124,6 +134,10 @@ async function openSheet(file, name) {
   if (others.length) headProblems.push({ kind: 'generic-sheets-not-read', example: `${file.name}: read "${name}"; not read ${quoted(others.map((x) => x.name))}` });
   for (const x of sheets) if (x.hidden) headProblems.push({ kind: 'generic-sheet-hidden', example: `"${x.name}" in ${file.name}${x.name === name ? ', the sheet read' : ', not read'}` });
   if (file.size > WORKBOOK_WHOLE) headProblems.push({ kind: 'workbook-whole', example: `${file.name}: ${(file.size / 2 ** 20).toFixed(0)} MB` });
+  // An error in no row or column that is read (above or in the heading row, or past the last
+  // column): reported here, by its cell, never passed over.
+  const stray = (i, e) => headProblems.push({ kind: 'generic-sheet-error-cell', example: `cell ${e.ref} of "${name}"${i === h ? ', in the heading row' : ''}: ${e.text}` });
+  if (h < 0) { for (const [i, es] of errors) for (const e of es) stray(i, e); }
   if (h < 0) return { empty: true, sheet: name, headers: [], headerText: Object.create(null), headProblems, sample: [], head: {}, async *rows() {} };
   // The columns are as wide as any heading or value goes: a column formatted and never filled is not one.
   let width = 0;
@@ -136,23 +150,27 @@ async function openSheet(file, name) {
   const headerText = Object.create(null);
   headers.forEach((k, j) => { headerText[k] = rawHeaders[j]; });
   for (const [x, cols] of uses) if (cols.length > 1) headProblems.push({ kind: 'generic-csv-duplicate-header', example: `"${x}": ${cols.length} columns (${cols.join(', ')}), read as ${cols.map((c) => `"${x} (column ${c})"`).join(', ')}` });
+  for (const [i, es] of errors) for (const e of es) if (i <= h || e.j >= width) stray(i, e);
   for (const { r, c, f } of formulas) {
     // The dense sheet's rows and columns are counted from A1; the rows read, from where the sheet's range begins.
     const column = c - left < width && r - top > h ? `, column "${headers[c - left]}"` : '';
     headProblems.push({ kind: 'generic-sheet-formula-no-value', example: `cell ${XLSX.utils.encode_cell({ r, c })} of "${name}"${column}: =${f}` });
   }
-  const body = function* (all) {
+  // Each row, with the error cells in it (a row whose only value is an error is still a row: never
+  // passed over as blank, so that its loss is reported).
+  const body = function* (all, errs) {
     for (let i = h + 1; i < all.length; i++) {
-      if (blank(all[i])) continue;
-      yield { row: rowOfCells(headers, all[i].slice(0, width)), where: `row ${top + i + 1}` };
+      const cellErrors = (errs.get(i) || []).filter((e) => e.j < width).map((e) => ({ column: headers[e.j], ref: e.ref, text: e.text }));
+      if (blank(all[i]) && !cellErrors.length) continue;
+      yield { row: rowOfCells(headers, all[i].slice(0, width)), where: `row ${top + i + 1}`, ...(cellErrors.length ? { cellErrors } : {}) };
     }
   };
   const sample = [];
-  for (const { row } of body(rows)) { sample.push(row); if (sample.length >= SAMPLE) break; }
+  for (const { row } of body(rows, errors)) { sample.push(row); if (sample.length >= SAMPLE) break; }
   return {
     sheet: name, headers, headerText, headProblems, sample, head: {},
     // The rows are read again, the workbook being read whole, rather than kept between readings.
-    async *rows() { yield* body((await read()).rows); },
+    async *rows() { const again = await read(); yield* body(again.rows, again.errors); },
   };
 }
 
@@ -345,6 +363,8 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
     if (r.problem) report('generic-csv-row', `${r.where}: ${r.problem}`);
     if (r.extra?.length) report('generic-csv-extra-cells', `${r.where}: ${r.extra.join(', ')}`);
     for (const k of r.keys || []) report('generic-feature-key', k);
+    // A cell holding an error carries nothing (it is read as empty), and is lost aloud.
+    for (const e of r.cellErrors || []) report('generic-sheet-error-cell', `${r.where}, ${e.column.trim() ? `column "${e.column}"` : `column ${e.ref.replace(/\d+$/, '')} (no heading)`}, cell ${e.ref}: ${e.text}`);
     const a = applyColumns(r.row, mapping, { where: r.where, report, fileName: file.name, geometry: r.geometry, idAsNote: byAddress, patterns });
     for (const c of a.skipped) skipped.add(c);
     if (byAddress && a.address) { out++; yield { type: 'attestation', value: { about: a.address, ...a.attestation }, n }; continue; }

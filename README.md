@@ -97,7 +97,7 @@ node bin/plato-tools.mjs compare release-1.jsonl.gz release-2.jsonl.gz  # was an
   is, one sheet at a time: the first sheet that is not hidden, unless `--sheet NAME` (or, on the
   page, the sheet chosen above the columns table) names another. The report names the sheets not
   read, any hidden sheet (Excel workbooks only: SheetJS does not read an ODS file's hidden flag), an
-  empty sheet, and a formula saved without its value. Each cell is read as its value, not as the
+  empty sheet, a formula saved without its value, and a cell holding an error (`#DIV/0!`, `#N/A`, `#REF!`…), which carries nothing. Each cell is read as its value, not as the
   workbook displays it: a coordinate formatted `0.00` keeps every digit, and a date is an ISO date
   (`1990-05-06`, or `1990-05-06T10:30:00` with a time). A workbook is read whole into memory, and
   one over 50 MB is warned of; a very large sheet is better saved as CSV (UTF-8).
