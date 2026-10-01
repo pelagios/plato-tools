@@ -502,6 +502,31 @@ for (const [what, opts, n, total] of [['a top-level div of the text (a letter), 
   });
 }
 
+// An edition div that opens only after the cap was reached shows that the names already converted as the
+// source's words, in the parts before it, were the editors': a definite loss, with the line, count and parts.
+/** Read a <text> of `before` translation names (each on its own line), then an edition div with one name; the reports, by kind. */
+function lateEdition(before) {
+  const reported = [];
+  const r = new TeiReader((k, e) => reported.push([k, e]), { fileName: 'late.xml' });
+  r.write(`<?xml version="1.0" encoding="UTF-8"?>\n<TEI xmlns="http://www.tei-c.org/ns/1.0">${HEADER}<text><body><div type="translation">\n`);
+  r.write(`<p>${pn(2, 'Place')}</p>\n`.repeat(before));
+  r.write(`</div>\n<div type="edition"><p>${pn(3, 'Edited')}</p></div></body></text></TEI>\n`);
+  r.close();
+  return (k) => reported.filter(([kind]) => kind === k).map(([, e]) => e);
+}
+test('an edition div after more than 10,000 names in a translation is reported as a definite loss, with its line, the count and the part; one before the cap is not', () => {
+  const late = lateEdition(10005);
+  assert.equal(late('tei-editorial-undecided').length, 1, 'the cap was reached');
+  assert.deepEqual(late('tei-editorial-late-edition'), ["an edition part began on line 10009, after 10,005 place names in other parts (translation) had been converted as the source's words"]);
+  assert.equal(TEI_KINDS['tei-editorial-late-edition'], 'loss');
+  assert.match(LOSS_TEXT['tei-editorial-late-edition'], /^An edition part began after more than 10,000 place names .* Those names were the editors', not the source's/);
+  // control: an edition div before the cap: the names held are the editors', and nothing is said of a late edition part
+  const early = lateEdition(5);
+  assert.deepEqual(early('tei-editorial-late-edition'), []);
+  assert.deepEqual(early('tei-editorial-undecided'), []);
+  assert.equal(early('tei-place-editorial').length, 5, 'control: the five held names were taken for the editors\'');
+});
+
 test('listPlaces: a place with several different web addresses is ambiguous, reported, not converted; two forms of one address are one', () => {
   const s = LIST(`<place xml:id="two"><placeName>Two</placeName><idno type="URI">https://pleiades.stoa.org/places/579885</idno><idno type="URI">https://sws.geonames.org/264371/</idno></place>`
     + `<place xml:id="one"><placeName>One</placeName><idno type="URI">http://pleiades.stoa.org/places/579885</idno><idno type="URI">https://pleiades.stoa.org/places/579885</idno></place>`);

@@ -284,7 +284,9 @@ readers link to those headings, so keep them.
   (10,000) names are held: the next decides the `<text>` as having no edition div, the held names
   are emitted as ordinary, and `tei-editorial-undecided` (a warning) is reported once, so a
   translation-only or commentary-only file holds no more than that; an edition div found after
-  that makes only the names after it the editors'.
+  that makes only the names after it the editors', and is reported as a definite loss
+  (`tei-editorial-late-edition`, its example the edition div's line, the count of names already
+  converted as the source's words in the editors' parts, and those parts' div types, counted in `late`).
   Everything else is emitted at once, so a held name comes out after the names read after it. The reading
   options that convert the editors' words (`commentaryPlaces`, `headerPlaces`) are refused while
   `EDITORIAL_IRI` is null (`teiReadingRefusal`); tests set it with `setEditorialIriForTests`. With `listPlaces`, a `<place>` gives a Headword

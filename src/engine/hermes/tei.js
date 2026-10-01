@@ -144,6 +144,7 @@ export const TEI_KINDS = {
   'tei-source-no-address': 'warning',
   'tei-none-linked': 'warning',
   'tei-editorial-undecided': 'warning',
+  'tei-editorial-late-edition': 'loss',
 };
 
 // The elements read as place names. <placeName> is TEI's place name; <settlement>, <region>,
@@ -350,8 +351,10 @@ export class TeiReader {
   // outside every top-level div and note (the text has no edition div), or the <text> ends; then it
   // is read as before, emitted out of the file's order, as a name waiting for a <place> is. Held
   // names are at most HOLD_CAP: the next is read as if the text had no edition div, the names held
-  // are emitted as ordinary, and that is reported once (tei-editorial-undecided). Everything else is
-  // emitted at once.
+  // are emitted as ordinary, and that is reported once (tei-editorial-undecided). An edition div that
+  // opens after that shows those names, and the ones read after them in the editors' parts, to have
+  // been the editors' words converted as the source's: a definite loss (tei-editorial-late-edition,
+  // counted in `late`). Everything else is emitted at once.
   /** The editors' part a place name opened now would be in, if the file has an edition div: the top-level div's type, else 'note'. */
   editorialPart() {
     if (this.topDiv && this.topDiv.type !== 'edition') return this.topDiv.type || 'div';
@@ -487,7 +490,7 @@ export class TeiReader {
     if (local === 'teiHeader') { this.inHeader++; el.header = true; el.hpath = 'teiHeader'; return; }
     if (this.inHeader) { el.hpath = `${parent.hpath}/${local}`; this.headerField(el.hpath, t); }
     if (local === 'text' && !this.inHeader) {
-      if (!this.inText) { this.editionSeen = false; this.editionDecided = false; this.topDiv = null; }
+      if (!this.inText) { this.editionSeen = false; this.editionDecided = false; this.topDiv = null; this.late = null; }
       this.inText++; el.textRoot = true;
     }
 
@@ -499,7 +502,10 @@ export class TeiReader {
           el.topDiv = true; this.topDiv = { type };
           // Any other top-level div, of whatever type, may come before an edition div: its place
           // names wait for it (deliver).
-          if (type === 'edition') { this.editionSeen = true; this.decide(true); }
+          if (type === 'edition') {
+            if (this.late && !this.editionSeen) this.report('tei-editorial-late-edition', `an edition part began on line ${this.parser.line}, after ${this.late.count.toLocaleString('en')} place names in other parts (${[...this.late.types].join(', ')}) had been converted as the source's words`);
+            this.editionSeen = true; this.decide(true);
+          }
         }
         this.divs.push(label); el.div = true; this.line = undefined; this.milestones = new Map();
       } else if (local === 'pb') { this.page = attr('n'); this.line = undefined; }
@@ -888,8 +894,11 @@ export class TeiReader {
       if (this.held.length < HOLD_CAP) { this.held.push(d); return; }
       // Too many to hold: read as a text with no edition div, from here on.
       if (!this.undecidedReported) { this.undecidedReported = true; this.report('tei-editorial-undecided', `${HOLD_CAP.toLocaleString('en')} place names held, the next on line ${m.fileLine}`); }
+      this.late = { count: this.held.length, types: new Set(this.held.map((h) => h.editorial)) };
       this.decide(false);
     }
+    // A name in a part that would be the editors' if an edition div came, read as the source's words since the cap.
+    if (d.editorial && this.late && !this.editionSeen) { this.late.count++; this.late.types.add(d.editorial); }
     this.place(d, this.editionSeen ? d.editorial : undefined);
   }
   /** A place name with words and a ref, whose words are known to be the source's (editorial undefined) or the editors' (the part they are in). */
