@@ -948,7 +948,8 @@ What it reports, and why, is in the guide:
   `candidate-set-for-changed`). A corrected title, description, creator or licence is reported and
   allowed, as 13.4 says (`candidate-set-described-changed`, a warning naming the fields), since a
   description may be corrected as an Authority's may. A dataset against a candidate set (`different-kinds`), and two sets under
-  different addresses (`different-candidate-set`: a later run is a new set, not a version), are
+  different addresses (`different-candidate-set`: a later run is a new set, not a version, and the refusal points to
+  `plato-tools check --candidates <earlier> <later>` for Elenchos's `already-published`), are
   refused in words and marked incomplete. On the dataset side, `promotedFrom` is part of what an
   attestation says (its identity relation is written out in it, or, with an address, is a facet of
   it), so changing, adding or removing one is a breach already. A dataset's `candidateSets` is the
@@ -956,7 +957,8 @@ What it reports, and why, is in the guide:
   is left out of the comparison of named things (it would change with every version), and the two
   headers' lists are compared instead: a set gone from the list is a warning
   (`candidate-set-unlisted`), as a place no longer described is, since the list is the dataset's
-  description of itself, not an attestation; a set added is nothing. `test/compare-candidates.test.js`
+  description of itself, not an attestation; a set added is reported and allowed, as 13.4 says
+  (`candidate-set-listed`, a warning, as a corrected description is). `test/compare-candidates.test.js`
   has a failing case and a control for each.
 - **At scale**: DEEP's export against itself, 1.4 million attestations a side, took under six
   minutes on the command line, 520 MB of memory and a working database of 860 MB.

@@ -8,7 +8,8 @@ import { PLATO_REPO } from './paths.js';
 // and allowed (the candidate set specification, 13.4). A dataset and a candidate
 // set, or two different candidate sets, are not two versions of one thing, and are refused in words.
 // On the dataset side, promotedFrom is part of what an attestation says, and a dataset's list of its
-// candidate sets (gazetteer.candidateSets) is its description of itself: one gone is a warning.
+// candidate sets (gazetteer.candidateSets) is its description of itself: one gone is a warning, and one added is
+// reported and allowed (13.4), as a warning.
 //
 // Each rule has a failing case and a control in the same test, built on PLATO's own examples: a
 // comparison that finds nothing is worth something only if the same comparison could find something.
@@ -187,6 +188,8 @@ test('two different candidate sets are not two versions of one, and are refused 
   const r = await cmp(json(SET(), 'a.json'), json(other, 'b.json'));
   assert.deepEqual([r.incomplete, kinds(r, 'error'), r.items.length], [true, ['different-candidate-set'], 1]);
   assert.match(item(r, 'different-candidate-set').message, /a later run of the software is a new set/);
+  // and says how to check the cross-set rule instead (Elenchos's already-published).
+  assert.match(item(r, 'different-candidate-set').message, /plato-tools check --candidates <earlier> <later>/);
 });
 
 // ---- the dataset side ------------------------------------------------------------------------------------
@@ -214,11 +217,12 @@ test('promotedFrom is part of what an attestation says: changed, added or taken 
   for (const d of [published(), bare()]) assert.deepEqual((await cmp(json(d, 'a.json'), json(d, 'b.json'))).items, []);
 });
 
-test('a candidate set gone from a dataset\'s list is a warning, one added to it nothing', async () => {
+test('a candidate set gone from a dataset\'s list is a warning, and one added to it is reported and allowed', async () => {
   const S1 = 'https://whgazetteer.org/example/candidates/county-survey-2026-09-09', S2 = 'https://whgazetteer.org/example/candidates/county-survey-2026-10-01';
   const unlisted = published((d) => { d.gazetteer.candidateSets = [S2]; });
   const r = await cmp(json(published(), 'a.json'), json(unlisted, 'b.json'));
-  assert.deepEqual([kinds(r, 'error'), kinds(r, 'warning'), item(r, 'candidate-set-unlisted').examples], [[], ['candidate-set-unlisted'], [S1]]);
+  // S1 replaced by S2: S1 gone, and S2 added.
+  assert.deepEqual([kinds(r, 'error'), kinds(r, 'warning'), item(r, 'candidate-set-unlisted').examples, item(r, 'candidate-set-listed').examples], [[], ['candidate-set-listed', 'candidate-set-unlisted'], [S1], [S2]]);
   // Read through RDF too: the list comes back as the reverse of plato:candidates_for.
   const nt = await go([json(unlisted, 'b.json')], 'convert', 'ntriples');
   const viaRdf = await cmp(json(published(), 'a.json'), textFile(outText(nt.e, 'b.nt'), 'b.nt'));
@@ -226,8 +230,11 @@ test('a candidate set gone from a dataset\'s list is a warning, one added to it 
   // The key taken away altogether is the same loss.
   const none = await cmp(json(published(), 'a.json'), json(published((d) => { delete d.gazetteer.candidateSets; }), 'b.json'));
   assert.deepEqual(kinds(none, 'warning'), ['candidate-set-unlisted']);
-  // The controls: a set added, and the dataset under a new address of its own (a new version is),
-  // with its list as it was. Neither is reported.
+  // A set added is reported and allowed (section 13.4): a warning naming it, and no error.
   const more = await cmp(json(published(), 'a.json'), json(published((d) => { d.gazetteer.candidateSets.push(S2); d.gazetteer['@id'] += '/2'; }), 'b.json'));
-  assert.deepEqual([more.items, more.counts.unchanged], [[], 2]);
+  assert.deepEqual([kinds(more, 'error'), kinds(more, 'warning'), item(more, 'candidate-set-listed').examples, more.counts.unchanged], [[], ['candidate-set-listed'], [S2], 2]);
+  assert.match(item(more, 'candidate-set-listed').message, /This is allowed/);
+  // The control: the dataset under a new address of its own (a new version is), with its list as it was. Nothing is reported.
+  const same = await cmp(json(published(), 'a.json'), json(published((d) => { d.gazetteer['@id'] += '/2'; }), 'b.json'));
+  assert.deepEqual([same.items, same.counts.unchanged], [[], 2]);
 });

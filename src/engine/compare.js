@@ -69,10 +69,11 @@ const TEXT = {
   'candidate-gone': 'A candidate of the earlier version of this candidate set that has no web address of its own (@id) is not in the later one as it was: it was deleted, or changed. Put it back as it was.',
   'candidate-added': 'The later copy of this candidate set has a candidate the earlier one does not. A candidate set is frozen as a whole once issued (its address is made from its candidates), so nothing is added to it: new suggestions belong in a new candidate set, under a new address, which leaves out the candidates already published.',
   'different-kinds': 'One file is a dataset and the other a candidate set, so they are not two versions of one thing and were not compared. Give two versions of one dataset, or two copies of one candidate set.',
-  'different-candidate-set': 'The two files are different candidate sets (their addresses, @id, differ), not two versions of one, so they were not compared. A candidate set is never revised: a later run of the software is a new set, under a new address, which leaves out every candidate an earlier set published.',
+  'different-candidate-set': 'The two files are different candidate sets (their addresses, @id, differ), not two versions of one, so they were not compared. A candidate set is never revised: a later run of the software is a new set, under a new address, which leaves out every candidate an earlier set published. To check that a later set does leave them out, check the two together: plato-tools check --candidates <earlier> <later>.',
   'candidate-set-issued-changed': 'The two copies of this candidate set give different dates of issue (issued). A candidate set is frozen as a whole once issued, its date of issue with it: put the date back as it was.',
   'candidate-set-for-changed': 'The two copies of this candidate set say they were made for different datasets (candidatesFor). A candidate set is frozen as a whole once issued, the dataset it was made for with it: put it back as it was. Suggestions for another dataset belong in a new candidate set.',
   'candidate-set-described-changed': 'The two copies of this candidate set describe it differently (its title, description, creator or licence). This is allowed: a description may be corrected, as an Authority\'s may, and the candidates are what is frozen.',
+  'candidate-set-listed': "A candidate set the earlier version does not list (candidateSets) is listed in the later one. This is allowed: the list is the dataset's description of itself, not an attestation, and a set is listed when attestations come to answer its candidates (promotedFrom).",
   'candidate-set-unlisted': "A candidate set the earlier version lists (candidateSets) is not listed in the later one. The list is the dataset's description of itself, not an attestation, so this does not break the rule; but the dataset's identity relations may still answer candidates in that set (promotedFrom), and a reader can no longer find it from here.",
   'nothing-to-compare-candidates': 'The earlier version holds no candidates, so there was nothing for the later one to have kept, and nothing was tested.',
   'identity-removed': 'An identity match of the earlier version is not in the later one. The append-only rule is about attestations, so this does not break it, but the match has gone with no record of why.',
@@ -345,11 +346,13 @@ export async function compare({ earlier, later, options = {} }, env) {
     } else if (!published) rep.warning('earlier-not-published', TEXT['earlier-not-published'], old.status === undefined ? undefined : String(old.status));
     else if (neu.status !== 'published') rep.warning('later-not-published', TEXT['later-not-published'], neu.status === undefined ? undefined : String(neu.status));
     // A dataset's list of its candidate sets is its description of itself: a set added to it is
-    // news, not a breach; one gone from it is reported, as a place no longer described is.
+    // reported and allowed (the specification's section 13.4), as a corrected description of a
+    // candidate set is; one gone from it is reported, as a place no longer described is.
     if (!isSet) {
       const listed = (g) => (Array.isArray(g.candidateSets) ? g.candidateSets : []).filter((x) => typeof x === 'string');
-      const now = new Set(listed(neu));
-      for (const set of listed(old)) if (!now.has(set)) rep.warning('candidate-set-unlisted', TEXT['candidate-set-unlisted'], set);
+      const was = new Set(listed(old)), now = new Set(listed(neu));
+      for (const set of was) if (!now.has(set)) rep.warning('candidate-set-unlisted', TEXT['candidate-set-unlisted'], set);
+      for (const set of now) if (!was.has(set)) rep.warning('candidate-set-listed', TEXT['candidate-set-listed'], set);
     }
     if (typeof neu.previousVersion === 'string' && typeof old['@id'] === 'string' && neu.previousVersion !== old['@id']) rep.warning('previous-version-differs', TEXT['previous-version-differs'], `${neu.previousVersion}, not ${old['@id']}`);
     if (typeof old.isVersionOf === 'string' && typeof neu.isVersionOf === 'string' && old.isVersionOf !== neu.isVersionOf) rep.warning('different-gazetteer', TEXT['different-gazetteer'], `${old.isVersionOf} and ${neu.isVersionOf}`);
