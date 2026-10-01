@@ -152,8 +152,12 @@ export function patternFault(pattern) {
   let url;
   try { url = new URL(sample); } catch { return 'not-web'; }
   if (!/^https?:$/.test(url.protocol) || /\s/.test(sample) || !/^https?:\/\/[^\s/?#]+\S*$/i.test(sample)) return 'not-web';
-  const host = url.hostname.toLowerCase();
-  if (WHG_HOST.test(sample) || host === 'whgazetteer.org' || host.endsWith('.whgazetteer.org') || (host === 'w3id.org' && /^\/whg(\/|$)/i.test(url.pathname))) return 'whg';
+  // WHG's host however written: a trailing dot (whgazetteer.org.) is the same host, and w3id.org's
+  // path is compared decoded (%77hg is whg) with its slashes collapsed (//whg is /whg).
+  const host = url.hostname.toLowerCase().replace(/\.$/, '');
+  let path; try { path = decodeURIComponent(url.pathname); } catch { path = url.pathname; }
+  path = path.replace(/\/+/g, '/');
+  if (WHG_HOST.test(sample) || host === 'whgazetteer.org' || host.endsWith('.whgazetteer.org') || (host === 'w3id.org' && /^\/whg(\/|$)/i.test(path))) return 'whg';
   return null;
 }
 

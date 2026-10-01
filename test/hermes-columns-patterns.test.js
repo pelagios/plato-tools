@@ -60,6 +60,17 @@ test('patternProblem: a pattern needs {id} once, must make a web address, and is
     assert.match(patternProblem(p), /World Historical Gazetteer/, p);
 });
 
+test('a WHG pattern is refused however its address is written: a trailing-dot host, a doubled slash, a percent-encoded path', () => {
+  for (const p of ['https://whgazetteer.org./places/{id}/portal', 'https://www.whgazetteer.org./entity/place:gn:{id}', 'https://w3id.org./whg/id/place:gn:{id}',
+    'https://w3id.org//whg/id/place:gn:{id}', 'https://w3id.org///whg/{id}', 'https://w3id.org/%77hg/id/place:gn:{id}', 'https://w3id.org/%2Fwhg/id/{id}', 'https://w3id.org/W%48G/{id}']) {
+    assert.match(patternProblem(p), /World Historical Gazetteer/, p);
+    assert.deepEqual(addressFromPattern('12', p), { error: 'whg' }, p);
+  }
+  // controls: the same shapes, not WHG's, are used
+  for (const p of ['https://ex.org./p/{id}', 'https://ex.org//p/{id}', 'https://ex.org/%77hg/{id}', 'https://w3id.org//whgx/{id}', 'https://w3id.org/%77hgx/{id}', 'https://w3id.org/other/whg/{id}'])
+    assert.equal(patternProblem(p), null, p);
+});
+
 test('a pattern whose id stands in the address\'s host is refused in a mapping, so an id cannot choose the host; one with the id after the host is used', async () => {
   const BAD = ['https://{id}/entity/place:gn:1', 'https://{id}.example.org/p', 'https://ex.org{id}/p'];
   for (const p of BAD) assert.match(patternProblem(p), /the id must come after the address's host/, p);
