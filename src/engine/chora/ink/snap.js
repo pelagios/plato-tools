@@ -11,6 +11,12 @@ import { crossCentre, darkness } from './refine.js';
 
 export const SNAP_RADIUS = 10;      // screen pixels
 export const MAX_SNAP_POINTS = 200000;
+/**
+ * A ridge is a line's when both its sides are lighter than it by LINE_CONTRAST units of L* at least, and the
+ * darker side by at least LINE_SIDES of the lighter's difference (a road along a wash: the wash is lighter
+ * than the road by most of what the paper is).
+ */
+export const LINE_CONTRAST = 3, LINE_SIDES = 0.35;
 // A screen pixel's cell: rows of SPAN, offset so that a point a little off the map's container has one too.
 const SPAN = 1 << 20, OFF = 1 << 19;
 const cell = (x, y) => (Math.floor(x) + OFF) * SPAN + Math.floor(y) + OFF;
@@ -35,6 +41,13 @@ export function snapPixels(prep, frame, { max = MAX_SNAP_POINTS, edgeStep = 8 } 
     if (n >= 3) {
       mx /= n; my /= n; sxx = sxx / n - mx * mx; syy = syy / n - my * my; sxy = sxy / n - mx * my;
       const th = 0.5 * Math.atan2(2 * sxy, sxx - syy), nx = -Math.sin(th), ny = Math.cos(th);
+      // A line is lighter on both sides of it. A dark wash is darker than the paper about it, so Sauvola's
+      // threshold marks a band of it along its edge as ink, whose skeleton is no line: on its inner side the
+      // wash is as dark as it is. Such a ridge would win over the wash's edge (nearestInk), so it is not kept.
+      const r = Math.sqrt(dt[y * w + x]) + 1.5, c = L[y * w + x];
+      const side = (k) => { const sx = Math.floor(px + k * r * nx), sy = Math.floor(py + k * r * ny); return sx >= 0 && sy >= 0 && sx < w && sy < h ? L[sy * w + sx] : c; };
+      const a = side(1), b = side(-1);
+      if (Math.min(a, b) - c < Math.max(LINE_CONTRAST, LINE_SIDES * (Math.max(a, b) - c))) continue;
       const d = crossCentre(ink, px, py, nx, ny, Math.sqrt(dt[y * w + x]) + 2);
       if (d !== null && Math.abs(d) <= 1) { px += d * nx; py += d * ny; }
     }
@@ -88,3 +101,10 @@ export function nearest(index, x, y, radius = SNAP_RADIUS) {
   }
   return best === null ? null : { k: best, d: Math.sqrt(bd), lngLat: [index.world[2 * best], index.world[2 * best + 1]], screen: [index.screen[2 * best], index.screen[2 * best + 1]] };
 }
+
+/**
+ * Where a vertex at (x, y) snaps among the ink's two sets ({ ridges, edges }, each binPoints'): a ridge (a
+ * line's centre) within the radius wins over an edge (an area's edge), however much nearer the edge is, so
+ * that a vertex drawn near a line goes onto its middle, not onto its side. As nearest, or null.
+ */
+export const nearestInk = (index, x, y, radius = SNAP_RADIUS) => (index ? nearest(index.ridges, x, y, radius) || nearest(index.edges, x, y, radius) : null);

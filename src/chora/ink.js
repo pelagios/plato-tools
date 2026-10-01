@@ -12,7 +12,7 @@
 import inkWorkerUrl from './ink.worker.js?worker&url';
 import { blobWorkerUrl } from './csp.js';
 import { createTileFetcher, TileError } from './inkfetch.js';
-import { binPoints, nearest, SNAP_RADIUS } from '../engine/chora/ink/snap.js';
+import { binPoints, nearestInk, SNAP_RADIUS } from '../engine/chora/ink/snap.js';
 import { DEFAULTS } from '../engine/chora/ink/params.js';
 import { runTrace, runSnap } from '../engine/chora/ink/job.js';
 import * as georef from '../engine/georef/index.js';
@@ -277,7 +277,7 @@ export function createInk({ mapApi, guard, state, overlayAt, onAccept, panel }) 
 
   // ---- Snapping to the ink, for drawing by hand --------------------------------------------------
   // Two sets of points: the ridges (a line's centre) and the edges (an area's edge). A ridge within reach
-  // wins over a nearer edge: a vertex drawn near a line goes onto its middle, not onto its side.
+  // wins over a nearer edge (snap.js nearestInk): a vertex drawn near a line goes onto its middle, not onto its side.
   let snapOn = false, snapWorld = null, snapIndex = null, snapEntry = null, snapTimer = null;
   function reproject() {
     if (!snapWorld) { snapIndex = null; return; }
@@ -332,7 +332,7 @@ export function createInk({ mapApi, guard, state, overlayAt, onAccept, panel }) 
   });
   const snapHook = (event) => {
     if (!snapOn || !snapIndex || alt || event.heldKeys?.includes('Alt')) return undefined;
-    const hit = nearest(snapIndex.ridges, event.containerX, event.containerY, SNAP_RADIUS) || nearest(snapIndex.edges, event.containerX, event.containerY, SNAP_RADIUS);
+    const hit = nearestInk(snapIndex, event.containerX, event.containerY, SNAP_RADIUS);
     return hit ? [round9(hit.lngLat[0]), round9(hit.lngLat[1])] : undefined;
   };
   mapApi.setSnap(snapHook);

@@ -336,12 +336,16 @@ export function traceLine(prep, seed, frame, params = {}) {
       // Each ink pixel within half a width (and a pixel) of the line carried on: how far along, and across.
       // t, the farthest ink ahead; tMed, the same in the component (after the median: where a round end has
       // always been placed from, its tip pixel worn away).
-      let t = 0, tMed = 0;
+      // tWide: where ink wider than the line begins about the end (a thicker road across it, which the thickness
+      // band cut the line at): the line ends at that ink's edge, not carried into it (and drawn back to it when
+      // the skeleton ran a little way in).
+      let t = 0, tMed = 0, tWide = Infinity;
       const along_ = [];
       for (let y = Y0; y <= Y1; y++) for (let x = X0; x <= X1; x++) {
         const i = y * w + x, mine = labels[i] === id, ink = isInk(i);
         if (!mine && !ink) continue;
         const dx = x + 0.5 - bx, dy = y + 0.5 - by, along = dx * ux + dy * uy, across = Math.abs(dx * uy - dy * ux);
+        if (mine && along > -2 * width && along <= 2 * width + 1 && across > width + 1) tWide = Math.min(tWide, along - 0.5);
         if (across > width / 2 + 1) continue;
         if (mine && along > 0) tMed = Math.max(tMed, along + 0.5);
         if (!ink) continue;
@@ -355,8 +359,14 @@ export function traceLine(prep, seed, frame, params = {}) {
       // there (to π/4 of the full width, ideally). Flat, the line runs to where the ink stops; round, to the
       // centre of its cap, half a width short of it.
       const flat = wRef > 0 && share(t - r, t) / (r * wRef) >= (width < NARROW_END ? FLAT_END_NARROW : FLAT_END);
-      const go = flat ? T : tMed - width / 2;
-      if (go > 0) work[at] = [bx + go * ux, by + go * uy];
+      const go = Number.isFinite(tWide) ? tWide : flat ? T : tMed - width / 2;
+      if (!(go > 0 || Number.isFinite(tWide))) return;
+      const e = [bx + go * ux, by + go * uy];
+      work[at] = e;
+      // Drawn back, the points beyond the new end are let go (the line does not fold back on itself).
+      const beyond = (q) => (q[0] - e[0]) * ux + (q[1] - e[1]) * uy > 0;
+      if (at > 0) while (work.length > 2 && beyond(work[work.length - 2])) work.splice(work.length - 2, 1);
+      else while (work.length > 2 && beyond(work[1])) work.splice(1, 1);
     };
     if (f.ends[1] === 'end') extendEnd(work.length - 1, Math.max(0, work.length - 1 - K), f.px.at(-1));
     if (f.ends[0] === 'end') extendEnd(0, Math.min(work.length - 1, K), f.px[0]);
