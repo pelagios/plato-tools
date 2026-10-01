@@ -264,7 +264,9 @@ function itemOf(annotation, g) {
  * The georeference as the renderer is to be given it: naming its image by the id the image information
  * is given under, exactly. Admission compares the two normalised (a trailing slash is the same image),
  * but the renderer looks the information it was given up by the id as written, and fetches it again
- * itself when the two differ. A copy; what was given is not changed.
+ * itself when the two differ. A copy; what was given is not changed. Only the renderer is given this
+ * copy (createLayerManager's show()): what is kept, and so read again on the next load, cited and keyed,
+ * is the georeference as written.
  */
 function withImageId(item, infoId) {
   const source = item?.target?.source;
@@ -312,7 +314,8 @@ export async function admit(resolved, { fetchJson, allowed, enforced }) {
   }
   const id = upgrade(infoId);
   return {
-    g, item: withImageId(itemOf(resolved.annotation, g), id), info: infoUnder(info, id), manifest, manifestUrl: resolved.manifestUrl || null, fetchedAt: resolved.fetchedAt || null,
+    // The georeference as written: the renderer is given it under the image's id (show(), withImageId).
+    g, item: itemOf(resolved.annotation, g), info: infoUnder(info, id), manifest, manifestUrl: resolved.manifestUrl || null, fetchedAt: resolved.fetchedAt || null,
     title: g.title || labelText(manifest?.label) || 'A map with no title', attribution: attributionOf(manifest, g.imageServiceId), notes, subject,
   };
 }
@@ -370,6 +373,15 @@ export function attributionOf(manifest, serviceId) {
 /** The one neutral line shown for a non-commercial licence (the licence itself is linked where it is shown). */
 export const nonCommercialLine = (a) => `The map image is licensed ${a.licenceLabel || 'for non-commercial use'}; this may bear on how what you trace from it can be reused.`;
 
+/**
+ * Whether a map pasted (not one kept) that waits on permissions (app.js's mapNeed: { subjects, pending })
+ * now waits on one set to Never (`state(category, subject)`), so that the page says why it is not shown.
+ */
+export function waitRefused(need, state) {
+  if (!need || need.pending?.readmit || need.pending?.kept) return false;
+  return need.subjects.some(([c, s]) => state(c, s) === 'never');
+}
+
 // ---- Keeping the maps shown --------------------------------------------------------------------
 
 const DIR = 'chora-overlays';
@@ -419,8 +431,10 @@ export function createLayerManager(map, { beforeId = 'chora-overview-clusters', 
   for (const t of EVENTS) map.on(t, (e) => onEvent?.(t, e));
   function show(e) {
     layer.addImageInfos([e.info]);
+    // Naming the image by the id its information was just given under (admit()'s, exactly).
+    const named = withImageId(e.item, e.info.id ?? e.info['@id']);
     // The renderer's parser takes the motivation only as the string (as georef's reader notes).
-    const item = typeof e.item.motivation === 'string' ? e.item : { ...e.item, motivation: 'georeferencing' };
+    const item = typeof named.motivation === 'string' ? named : { ...named, motivation: 'georeferencing' };
     // One result per map of the annotation: { ok, mapId } or { ok: false, error } (render 1.0.0-beta.84).
     const [r] = layer.addGeoreferenceAnnotation(item);
     if (!r?.ok || typeof r.mapId !== 'string') throw new Error(`The renderer could not show the map (${r?.error?.message || 'no map in the georeference'}).`);
@@ -436,6 +450,8 @@ export function createLayerManager(map, { beforeId = 'chora-overview-clusters', 
     // Chora's own layers are there once a style has loaded (map.isStyleLoaded() is false while any
     // source is still loading, which is not what matters here).
     if (layer || !map.getLayer(beforeId)) return;
+    // Put there already in this style (by add(), before the style's own attach): replaced, not added twice.
+    if (map.getLayer(layerId)) map.removeLayer(layerId);
     layer = new Layer({ layerId });
     map.addLayer(layer, map.getLayer(beforeId) ? beforeId : undefined);
     for (const e of entries) { try { show(e); } catch (err) { e.error = err.message; } }
@@ -447,8 +463,11 @@ export function createLayerManager(map, { beforeId = 'chora-overview-clusters', 
     attach() { attaching = attach(); return attaching; },
     /** Show an admitted map (admit()'s result with key, opacity, visible). */
     async add(e) {
+      // A new style (a new basemap) takes the layer away before its style.load attaches a new one: the
+      // layer is then put back, with this map in it, rather than the map given to the layer taken away.
+      if (!layer || !map.getLayer(layerId)) { entries.push(e); await attach(); return e; }
+      show(e);   // a map the renderer refuses throws, and is not among those shown
       entries.push(e);
-      if (!layer) await attach(); else show(e);
       return e;
     },
     remove(key) {

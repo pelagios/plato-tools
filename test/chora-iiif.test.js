@@ -175,6 +175,25 @@ function network(routes, { allowed = [['iiif', A]], never = [] } = {}) {
 }
 const NOW = () => '2026-09-30T12:00:00.000Z';
 const needs = (...subjects) => (e) => e instanceof ov.NeedPermission && JSON.stringify(e.subjects) === JSON.stringify(subjects);
+/** A MapLibre map as the layer manager uses it: its style holds Chora's layers and those added to it. */
+function fakeMap() {
+  const ids = new Set(['chora-overview-clusters']);
+  return { on() {}, getLayer: (id) => (ids.has(id) ? { id } : undefined), addLayer: () => ids.add('chora-historical-maps'), removeLayer: (id) => ids.delete(id) };
+}
+/** What the layer manager gives the renderer for an admitted map: { info, item }. */
+async function rendered(a) {
+  const got = {};
+  class FakeLayer {
+    addImageInfos(i) { got.info = i[0]; }
+    addGeoreferenceAnnotation(item) { got.item = item; return [{ ok: true, mapId: 'm', index: 0 }]; }
+    setMapTransformationType() {}
+    setMapOptions() {}
+  }
+  const map = fakeMap();
+  await ov.createLayerManager(map, { Layer: FakeLayer }).add({ ...a, key: 'k', opacity: 1, visible: true });
+  assert.ok(got.item && got.info, 'the renderer was given the map');
+  return got;
+}
 
 test('parseInput tells a georeference, an Allmaps address, a manifest and an image apart, asks over https, and says what it cannot read', () => {
   assert.equal(ov.parseInput(JSON.stringify(ANN)).kind, 'annotation');
@@ -315,9 +334,32 @@ test('admission of an image named over http asks over https, and gives the rende
   const a = await ov.admit({ annotation: ann, manifest: null, notes: [] }, { ...net, enforced: true });
   assert.deepEqual(net.calls, ['https://www.example.org/iiif/grid/info.json']);
   assert.equal(a.info['@id'], 'https://www.example.org/iiif/grid');
-  assert.equal(a.item.target.source.id, 'https://www.example.org/iiif/grid');
+  // Kept as written (it is what is kept, and read again on the next load); the renderer is given it under the https id.
+  assert.equal(a.item.target.source.id, `${H}/iiif/grid`, 'the georeference is kept as written');
+  const r = await rendered(a);
+  assert.equal(r.info['@id'], 'https://www.example.org/iiif/grid');
+  assert.equal(r.item.target.source.id, 'https://www.example.org/iiif/grid', 'the renderer is given the image under its https id');
   assert.equal(a.g.imageServiceId, `${H}/iiif/grid`, 'the georeference is cited as written');
   assert.equal(info['@id'], `${H}/iiif/grid`, 'what was fetched is not changed');
+});
+
+test('a map named over http, with no georeference id, kept and admitted again on the next load, is the same map: cited over http, under the same key', async () => {
+  const H = 'http://www.example.org';
+  const ann = JSON.parse(JSON.stringify(ANN).replaceAll(A, H)); delete ann.id;
+  const info = JSON.parse(JSON.stringify(json('info-v2.json')).replaceAll(A, H));
+  const net = network({ ['https://www.example.org/iiif/grid/info.json']: info }, { allowed: [['iiif', 'https://www.example.org']] });
+  const deps = { ...net, now: NOW };
+  const first = await ov.admit(await ov.resolve({ kind: 'annotation', annotation: ann }, deps), { ...net, enforced: true });
+  assert.equal(first.g.annotationId ?? null, null, 'the control: no georeference id, so the key is the image\'s');
+  // What app.js keeps (ov.keep's item), as the file holds it, and admitted again from it, as on the next load.
+  const kept = JSON.parse(JSON.stringify({ item: first.item }));
+  const again = await ov.admit(await ov.resolve({ kind: 'annotation', annotation: kept.item }, deps), { ...net, enforced: true });
+  assert.equal(first.g.imageServiceId, `${H}/iiif/grid`);
+  assert.equal(again.g.imageServiceId, `${H}/iiif/grid`, 'still cited over http');
+  assert.equal(await ov.keyOf(again.g), await ov.keyOf(first.g), 'the same key, so the same file');
+  assert.deepEqual(again.item, first.item);
+  // Both are shown from the image's https id.
+  assert.equal((await rendered(again)).item.target.source.id, 'https://www.example.org/iiif/grid');
 });
 
 test('admission of a page of georeferences gives the renderer the one read, and a manifest that does not belong is set aside, with a note', async () => {
@@ -430,13 +472,77 @@ test('admission gives the renderer the georeference with the image\'s id exactly
   const slash = structuredClone(ANN); slash.target.source.id = `${A}/iiif/grid/`;
   const net = network({ [`${A}/iiif/grid/info.json`]: json('info-v2.json') });
   const a = await ov.admit({ annotation: slash, manifest: null, notes: [] }, { ...net, enforced: true });
-  assert.equal(a.item.target.source.id, `${A}/iiif/grid`);
+  assert.equal((await rendered(a)).item.target.source.id, `${A}/iiif/grid`);
+  assert.equal(a.item.target.source.id, `${A}/iiif/grid/`, 'kept as written');
   assert.deepEqual(net.calls, [`${A}/iiif/grid/info.json`], 'asked with no trailing slash');
   assert.equal(slash.target.source.id, `${A}/iiif/grid/`, 'what was given is not changed');
   const v3 = structuredClone(json('info-v3.json')); v3.id = `${A}/iiif3/grid/`;
   const plain = structuredClone(ANN); plain.target.source.id = `${A}/iiif3/grid`;
   const b = await ov.admit({ annotation: plain, manifest: null, notes: [] }, { ...network({ [`${A}/iiif3/grid/info.json`]: v3 }), enforced: true });
-  assert.equal(b.item.target.source.id, `${A}/iiif3/grid/`);
+  assert.equal((await rendered(b)).item.target.source.id, `${A}/iiif3/grid/`);
+  assert.equal(b.item.target.source.id, `${A}/iiif3/grid`, 'kept as written');
   const same = await ov.admit({ annotation: ANN, manifest: null, notes: [] }, { ...network({ [`${A}/iiif/grid/info.json`]: json('info-v2.json') }), enforced: true });
-  assert.equal(same.item.target.source.id, ANN.target.source.id);
+  assert.equal((await rendered(same)).item.target.source.id, ANN.target.source.id);
+  assert.equal(same.item, ANN);
+});
+
+test('a map added while a new basemap has taken the layer away is shown in a new layer, not the one taken away', async () => {
+  const a = await ov.admit({ annotation: ANN, manifest: null, notes: [] }, { ...network({ [`${A}/iiif/grid/info.json`]: json('info-v2.json') }), enforced: true });
+  const log = []; let n = 0;
+  class FakeLayer {
+    constructor() { this.n = ++n; log.push(['new', this.n]); }
+    addImageInfos() { log.push(['addImageInfos', this.n]); }
+    addGeoreferenceAnnotation() { log.push(['addGeoreferenceAnnotation', this.n]); return [{ ok: true, mapId: `map-${this.n}`, index: 0 }]; }
+    setMapTransformationType() {}
+    setMapOptions() {}
+  }
+  // A fake map whose style holds the layers added to it; setStyle takes them all away, as MapLibre's does.
+  const layers = new Set(['chora-overview-clusters']);
+  const map = { on() {}, getLayer: (id) => (layers.has(id) ? { id } : undefined), addLayer: (l) => layers.add(l.layerId ?? 'chora-historical-maps'), removeLayer: (id) => layers.delete(id),
+    setStyle() { layers.clear(); layers.add('chora-overview-clusters'); } };
+  const mf = ov.createLayerManager(map, { Layer: FakeLayer });
+  await mf.add({ ...a, key: 'one', opacity: 1, visible: true });
+  assert.deepEqual(log, [['new', 1], ['addImageInfos', 1], ['addGeoreferenceAnnotation', 1]], 'the control: shown in the first layer');
+  map.setStyle();   // a new basemap, its style.load (and attach()) not yet come
+  log.length = 0;
+  const two = await mf.add({ ...a, key: 'two', opacity: 1, visible: true });
+  assert.ok(log.length > 0, 'something was given to a renderer');
+  assert.ok(log.every(([, i]) => i !== 1), `nothing given to the layer taken away: ${JSON.stringify(log)}`);
+  assert.equal(two.mapId, 'map-2');
+  assert.deepEqual(mf.entries.map((e) => e.key), ['one', 'two']);
+  // Then the style's own attach: one layer, not two of the same id.
+  log.length = 0;
+  await mf.attach();
+  assert.equal(log.filter(([t]) => t === 'new').length, 1);
+  assert.ok(map.getLayer('chora-historical-maps'));
+});
+
+test('a map the renderer refuses is not left among the maps shown', async () => {
+  const a = await ov.admit({ annotation: ANN, manifest: null, notes: [] }, { ...network({ [`${A}/iiif/grid/info.json`]: json('info-v2.json') }), enforced: true });
+  let refuse = false;
+  class FakeLayer {
+    addImageInfos() {}
+    addGeoreferenceAnnotation() { return [refuse ? { ok: false, error: new Error('no') } : { ok: true, mapId: 'm', index: 0 }]; }
+    setMapTransformationType() {}
+    setMapOptions() {}
+  }
+  const map = fakeMap();
+  const mf = ov.createLayerManager(map, { Layer: FakeLayer });
+  await mf.add({ ...a, key: 'one', opacity: 1, visible: true });
+  assert.deepEqual(mf.entries.map((e) => e.key), ['one'], 'the control: one accepted is there');
+  refuse = true;
+  await assert.rejects(mf.add({ ...a, key: 'two', opacity: 1, visible: true }), /could not show the map/);
+  assert.deepEqual(mf.entries.map((e) => e.key), ['one']);
+});
+
+test('a pasted map waiting on a permission set to Never since is said to be refused; maps kept, or one allowed, are not', () => {
+  const st = (never) => (c, s) => (never.includes(`${c}:${s}`) ? 'never' : 'undecided');
+  const pasted = { subjects: [['iiif', A]], pending: { text: '{}' } };
+  assert.equal(ov.waitRefused(pasted, st([`iiif:${A}`])), true);
+  assert.equal(ov.waitRefused({ ...pasted, pending: { parsed: {} } }, st([`iiif:${A}`])), true, 'one chosen from several is pasted too');
+  assert.equal(ov.waitRefused(pasted, st([])), false, 'not Never');
+  assert.equal(ov.waitRefused(pasted, st([`iiif:${B}`])), false, 'another site\'s Never');
+  assert.equal(ov.waitRefused({ ...pasted, pending: { readmit: true } }, st([`iiif:${A}`])), false, 'maps kept say nothing');
+  assert.equal(ov.waitRefused({ ...pasted, pending: { kept: 'k' } }, st([`iiif:${A}`])), false);
+  assert.equal(ov.waitRefused(null, st([`iiif:${A}`])), false);
 });

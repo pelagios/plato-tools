@@ -75,6 +75,16 @@ export async function pickOverlay(maps, geojson, { toPixels = georef.toPixels } 
   return out;
 }
 
+/**
+ * Which map a traced drawing that was moved or reshaped is traced from now, given pickOverlay's result
+ * over every map shown (`pick`) and the key of the map it was traced from (`wasKey`): that map, while it
+ * holds any of the drawing (the user's choice, or the one made before, stands); else the one pickOverlay
+ * chooses; else null, when it lies on none.
+ */
+export function afterReshape(pick, wasKey) {
+  return pick.candidates.includes(wasKey) ? wasKey : pick.chosen?.key ?? null;
+}
+
 const R = 6371008.8, RAD = Math.PI / 180;
 /** Metres between two nearby positions (degrees), on a sphere of the IUGG mean radius, as georef's metresPerPixel measures. */
 function metres([lon1, lat1], [lon2, lat2]) {

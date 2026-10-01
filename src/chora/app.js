@@ -311,6 +311,14 @@ async function traceDraft(d, { only = null, reshaped = false } = {}) {
   const was = d.trace;
   let note = null;
   try {
+    if (reshaped && was) {
+      // Moved or reshaped: the maps it lies on now are offered, and it stays with its map while that map
+      // holds any of it; moved off that map onto another, it is traced from the other (trace.js afterReshape).
+      const all = await tracing.pickOverlay(maps, d.geojson);
+      if (traceTickets.get(d.id) !== ticket || !drafts.includes(d)) return;
+      d.traceOptions = all.candidates.map((k) => ({ key: k, title: maps.find((m) => m.key === k)?.title || null }));
+      only = tracing.afterReshape(all, was.key) || was.key;   // on none: asked of its own map, which says it moved off
+    }
     const pick = await tracing.pickOverlay(only ? maps.filter((m) => m.key === only) : maps, d.geojson);
     if (traceTickets.get(d.id) !== ticket || !drafts.includes(d)) return;
     if (!only) d.traceOptions = pick.candidates.map((k) => ({ key: k, title: maps.find((m) => m.key === k)?.title || null }));
@@ -650,7 +658,8 @@ function needFor(e, pending, { quiet = false } = {}) {
     setStatus(quiet ? '' : `warn:${never.map(([c, s]) => PERMISSION_REFUSED.never(permissions.nameOf(c, s))).join(' ')}`);
   } else {
     mapNeed = { subjects: e.subjects, pending, maps: e.maps || 1 };
-    setStatus('');
+    // The maps kept (quiet) leave what is said of the last map pasted as it is.
+    if (!quiet) setStatus('');
   }
   renderMaps();
 }
@@ -691,6 +700,9 @@ async function addMapNow(pending, { collect = false } = {}) {
     await showMap(a, keptEntry);
   } catch (e) {
     if (e instanceof ov.NeedPermission) { if (collect) return e; needFor(e, pending); return null; }
+    // A map kept that cannot be shown now (its server down, say) is left for the next load; what is said
+    // of the map last pasted stays (this runs on every change of permission).
+    if (collect) { console.warn('Chora: a map kept could not be shown', e); state.keptError = e.message; return null; }
     if (e instanceof ov.NeedChoice) {
       // Several georeferences of the map: the user chooses, the most recently changed offered first.
       mapChoice = { choices: e.choices, chosen: e.defaultIndex, manifestUrl: mapOffer?.manifestUrl || null,
@@ -876,7 +888,9 @@ function permissionsChanged() {
   const undecided = gone.map((o) => o.permission.split(/:(.*)/s).slice(0, 2)).filter(([c, sj]) => permissions.state(c, sj) === 'undecided');
   if (undecided.length && !mapNeed) mapNeed = { subjects: undecided.filter((x, i) => undecided.findIndex((y) => y[1] === x[1]) === i), pending: { readmit: true } };
   const waiting = mapNeed;
-  if (waiting && !waiting.pending.readmit && waiting.subjects.every(([c, s]) => permissions.allowed(c, s))) { mapNeed = null; addMap(waiting.pending); }
+  // A map pasted, waiting on a permission now set to Never: its line goes, and the status says why.
+  if (ov.waitRefused(waiting, (c, s) => permissions.state(c, s))) { needFor(waiting, waiting.pending); inTurn(() => readmitKept()); }
+  else if (waiting && !waiting.pending.readmit && waiting.subjects.every(([c, s]) => permissions.allowed(c, s))) { mapNeed = null; addMap(waiting.pending); }
   else inTurn(() => readmitKept());
   renderMaps();
 }

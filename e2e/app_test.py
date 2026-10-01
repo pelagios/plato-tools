@@ -2995,6 +2995,41 @@ def iiif_checks(pw, url, tmp):
         return (traced and first and first.get('key') and dropped and 'no longer cites that map' in note and k and k[-1] == [False, '', '']), {'first': first, 'after': cstate(page).get('lastTrace'), 'note': note, 'kept': k}
     attempt('Chora maps: a traced point moved off its map with the Edit tool no longer cites the map, the card says so, and its traced-point defaults go', moved_off)
 
+    def reshaped_onto_another():
+        # Two maps of the same image, each holding one corner (X the top left, Y the bottom right), the
+        # whole grid hidden: a point traced from X and moved onto Y is traced from Y, and Y alone is offered.
+        def corner(mid, pts):
+            a = annotation(id=mid); a['target']['selector'] = {'type': 'SvgSelector', 'value': f'<svg width="512" height="512"><polygon points="{pts}" /></svg>'}; return a
+        xid, yid = 'https://annotations.allmaps.org/maps/00000000000000f1', 'https://annotations.allmaps.org/maps/00000000000000f2'
+        grid_key = next(o['key'] for o in cstate(page)['overlays'] if o['annotationId'] == grid_id)
+        page.uncheck(f'#overlay-list li[data-overlay="{grid_key}"] input[data-show]')
+        for mid, pts in ((xid, '16,16 250,16 250,250 16,250 16,16'), (yid, '260,260 496,260 496,496 260,496 260,260')):
+            paste(corner(mid, pts))
+            if not soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.mapId)', 20, mid): return False, {'not shown': mid}
+        keys = {o['annotationId']: o['key'] for o in cstate(page)['overlays']}
+        page.click(f'#overlay-list li[data-overlay="{grid_key}"] button[data-fit]'); page.evaluate(SETTLE)
+        PX = """async (px) => { const e = window.__chora_overlays.manager.entries[0];
+          const w = (await window.__chora_overlays.georef.toWorld(e.g, { type: 'Point', coordinates: px }, { space: 'image' })).geojson.coordinates;
+          const p = window.__chora_map.project(w), r = window.__chora_map.getCanvas().getBoundingClientRect(); return [r.left + p.x, r.top + p.y]; }"""
+        x, y = page.evaluate(PX, [100, 100]); n0 = cstate(page)['pendingCount']
+        draw(page, 'point', [(x, y)]); page.click('#draw-tools button[data-mode="static"]')
+        first = soon(page, '([k, n]) => window.__chora.lastTrace && window.__chora.lastTrace.key === k && window.__chora.pendingCount === n + 1', 15, [keys[xid], n0])
+        tx, ty = page.evaluate(PX, [400, 400])
+        page.click('#draw-tools button[data-mode="select"]')
+        tap(page, x, y)
+        page.mouse.move(x, y); page.mouse.down(); page.mouse.move((x + tx) / 2, (y + ty) / 2, steps=6); page.mouse.move(tx, ty, steps=6); page.mouse.up()
+        page.click('#draw-tools button[data-mode="static"]')
+        moved = soon(page, 'k => window.__chora.lastTrace && window.__chora.lastTrace.key === k', 15, keys[yid])
+        lt = cstate(page).get('lastTrace') or {}
+        offered = page.evaluate('() => [...document.querySelectorAll(\'#card li[data-draft]:last-child select[data-field="tracedFrom"] option\')].map((o) => o.value)')
+        # Back as the checks after this one expect: the corners gone, the grid shown.
+        for mid in (xid, yid):
+            page.click(f'#overlay-list li[data-overlay="{keys[mid]}"] button[data-remove-map]')
+            until(page, 'k => !window.__chora.overlays.some((o) => o.key === k)', 10, keys[mid])
+        page.check(f'#overlay-list li[data-overlay="{grid_key}"] input[data-show]')
+        return (first and moved and lt.get('options') == [keys[yid]] and keys[xid] not in offered and keys[yid] in offered), {'first': first, 'moved': moved, 'trace': lt, 'offered': offered}
+    attempt('Chora maps: a point traced from one map and moved onto another it alone lies on is traced from that one, which alone is offered', reshaped_onto_another)
+
     def come_back():
         page.reload(); ready()
         back = shown(grid_id)
@@ -3061,6 +3096,67 @@ def iiif_checks(pw, url, tmp):
         return (both_lines and both and len(navs) == 1 and not page.query_selector('#map-needs [data-permission]:not([hidden])')), {
             'both lines': both_lines, 'both back': both, 'navigations': navs, 'overlays': [o['annotationId'] for o in cstate(page)['overlays']]}
     attempt('Chora maps: maps kept on two sites not allowed say "Needs permission" for both at once, and come back after one reload', kept_together)
+
+    KEPT_ITEMS = """async () => { const out = {}; try { const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('chora-overlays');
+      for await (const h of d.values()) out[h.name] = JSON.parse(await (await h.getFile()).text()).item; } catch {} return out; }"""
+    def kept_as_written():
+        # A map with no georeference id, its image written with a trailing slash (which the image information
+        # does not have): kept as written, so that the next load reads, cites and keys the same map, in one file.
+        # (The http-to-https difference the unit test checks cannot be made here: this computer's sites stay http.)
+        a = annotation(service='/iiif/grid/'); a.pop('id', None)
+        before = set(page.evaluate(KEPT_ITEMS))
+        paste(a)
+        got = soon(page, '() => window.__chora.overlays.some((o) => !o.annotationId && o.mapId)', 20)
+        first = {}
+        for _ in range(20):                                       # the keeping is not awaited by the page: asked until written
+            first = {k: v for k, v in page.evaluate(KEPT_ITEMS).items() if k not in before}
+            if first: break
+            page.wait_for_timeout(500)
+        written = bool(first)
+        page.reload(); ready()
+        back = soon(page, '() => window.__chora.overlays.some((o) => !o.annotationId && o.mapId)', 30)
+        page.wait_for_timeout(1000)
+        second = {k: v for k, v in page.evaluate(KEPT_ITEMS).items() if k not in before}
+        ids = [v['target']['source']['id'] for v in first.values()]
+        key = next(iter(first), '').removesuffix('.json')
+        if key: page.click(f'#overlay-list li[data-overlay="{key}"] button[data-remove-map]')
+        return (got and written and len(first) == 1 and ids == [A + '/iiif/grid/'] and back and second == first), {'shown': got, 'kept': ids, 'files before reload': list(first), 'files after': list(second), 'came back': back}
+    attempt('Chora maps: a map is kept with its georeference as written (its image\'s id not rewritten), and comes back from the same one file', kept_as_written)
+
+    def kept_server_down():
+        # A map kept whose image information cannot be had (the server answers 404): left for the next load,
+        # and what is said of the map last pasted stays, at the load and on a change of permission.
+        mid = 'https://annotations.allmaps.org/maps/00000000000000g1'
+        entry = {'version': 1, 'key': hashlib.sha256(mid.encode()).hexdigest()[:24], 'item': annotation(service='/iiif/missing', id=mid), 'manifest': None, 'manifestUrl': None,
+                 'fetchedAt': None, 'opacity': 1, 'visible': True, 'added': '2026-10-01T00:00:01.000Z'}
+        page.evaluate("""async (e) => { const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('chora-overlays', { create: true });
+          const w = await (await d.getFileHandle(e.key + '.json', { create: true })).createWritable(); await w.write(JSON.stringify(e)); await w.close(); }""", entry)
+        page.reload(); ready()
+        tried = soon(page, '() => !!window.__chora.keptError', 30)
+        at_load = page.inner_text('#map-status').strip()
+        paste(annotation())                                       # shown already: its status line
+        said = soon(page, '() => /is shown already/.test(document.getElementById("map-status").textContent)', 15)
+        panel_set([ALLMAPS_KEY], 'allowed'); page.wait_for_timeout(1500)
+        after = page.inner_text('#map-status')
+        panel_set([ALLMAPS_KEY], 'undecided')
+        page.evaluate("k => navigator.storage.getDirectory().then((r) => r.getDirectoryHandle('chora-overlays')).then((d) => d.removeEntry(k + '.json'))", entry['key'])
+        return (tried and 'missing' not in at_load and said and 'is shown already' in after), {'kept error': cstate(page).get('keptError'), 'status at load': at_load, 'status after a permission changed': after}
+    attempt('Chora maps: a map kept whose server cannot give its image is left quietly: the status of the map last pasted stays, at the load and when a permission changes', kept_server_down)
+
+    def never_after_line():
+        # A map pasted says "Needs permission"; set to Never from that line's panel, it says the site is set to Never.
+        panel_set([IA], 'undecided')
+        since = len(census())
+        paste(annotation(id='https://annotations.allmaps.org/maps/00000000000000e1'))
+        said = line(IA)
+        if said: panel_set([IA], 'never', via=IA)
+        told = soon(page, '() => /set to Never in Permissions/.test(document.getElementById("map-status").textContent)', 10)
+        lines = page.evaluate('() => [...document.querySelectorAll("#map-needs [data-permission]")].filter((e) => !e.hidden).length')
+        rows = at_origin(census(since), A)
+        text = page.inner_text('#map-status')
+        panel_set([IA], 'allowed')                               # for the checks after this one
+        return (f'Needs permission: {urlparse(A).netloc}' in said and told and lines == 0 and rows == []), {'line': said, 'status': text, 'lines left': lines, 'asked of A': rows}
+    attempt('Chora maps: a map pasted, waiting on "Needs permission", set to Never in the panel says its site is set to Never, and its line goes', never_after_line)
 
     def no_policy():
         page_url = base + 'chora.html'

@@ -55,6 +55,31 @@ test('pickOverlay: the map the drawing lies on; none when it lies on none; the t
   assert.equal((await trace.pickOverlay([{ key: 'top', g: order2, visible: true, opacity: 0 }, { key: 'under', g: grid }], inside)).chosen.key, 'top');
 });
 
+test('afterReshape: a traced drawing moved stays with its map while that map holds any of it; moved off onto another, it is traced from that one; onto none, from none', async () => {
+  const part = (id, pts) => ({ ...GRID, id: `https://annotations.allmaps.org/maps/${id}`, target: { ...GRID.target, selector: { type: 'SvgSelector', value: `<svg width="512" height="512"><polygon points="${pts}" /></svg>` } } });
+  const X = await georef.readGeoreference(part('x', '16,16 250,16 250,250 16,250 16,16'));
+  const Y = await georef.readGeoreference(part('y', '260,260 496,260 496,496 260,496 260,260'));
+  const maps = [{ key: 'X', g: X }, { key: 'Y', g: Y }];
+  const pt = async (x, y) => ({ type: 'Point', coordinates: await at(grid, x, y) });
+  // Still on X: X, though Y is above it in another case.
+  const onX = await trace.pickOverlay(maps, await pt(100, 100));
+  assert.deepEqual(onX.candidates, ['X']);
+  assert.equal(trace.afterReshape(onX, 'X'), 'X');
+  // Moved from X onto Y: Y is offered, and chosen.
+  const onY = await trace.pickOverlay(maps, await pt(400, 400));
+  assert.deepEqual(onY.candidates, ['Y'], 'the options offered are those it lies on now');
+  assert.equal(trace.afterReshape(onY, 'X'), 'Y');
+  // Moved onto neither: none (the drawing no longer cites X).
+  const onNone = await trace.pickOverlay(maps, await pt(255, 100));
+  assert.deepEqual(onNone.candidates, []);
+  assert.equal(trace.afterReshape(onNone, 'X'), null);
+  // Reshaped across both, X still holding part: it stays with X, though Y holds as much.
+  const across = await trace.pickOverlay([{ key: 'Y', g: Y }, { key: 'X', g: X }], { type: 'LineString', coordinates: [(await pt(100, 100)).coordinates, (await pt(400, 400)).coordinates] });
+  assert.deepEqual(across.candidates, ['Y', 'X']);
+  assert.equal(across.chosen.key, 'Y', 'the control: left to pickOverlay, Y would be chosen');
+  assert.equal(trace.afterReshape(across, 'X'), 'X');
+});
+
 test('pickOverlay: a map whose georeference cannot place the drawing (a fold) is passed over, and why is kept', async () => {
   const inside = { type: 'Point', coordinates: await at(grid, 200, 200) };
   const folding = async (g, gj, o) => { if (g === order2) throw new DataError('The position has more than one position on the map, because the transformation folds the map over there.'); return georef.toPixels(g, gj, o); };
