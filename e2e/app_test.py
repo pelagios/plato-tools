@@ -8,6 +8,8 @@
                     still draws without them (it did on this machine, Chromium 147, September 2026)
     --chora-only    Chora's checks alone, for work on Chora (a full run is what counts)
     --maps-only     Chora's historical-map checks alone
+    --only=TEXT     only the checks whose names contain TEXT (with --chora-only or --maps-only), to work on
+                    one; a check that needs what an earlier one left may then fail: a full run is what counts
 """
 import json, os, pathlib, shutil, signal, socket, subprocess, sys, tempfile, time, urllib.request
 from playwright.sync_api import sync_playwright
@@ -17,6 +19,7 @@ PLATO = pathlib.Path(os.environ.get('PLATO_REPO', ROOT.parent / 'place-attestati
 PROVE = '--prove-it-fails' in sys.argv
 CHORA_ONLY = '--chora-only' in sys.argv or '--maps-only' in sys.argv
 MAPS_ONLY = '--maps-only' in sys.argv
+ONLY = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--only=')), None)
 # The preview server runs under npx, whose child (node vite preview) outlived a plain kill() and
 # held the port for the next run: it gets a session of its own, and the whole group is stopped.
 def stop(srv):
@@ -218,6 +221,7 @@ def stop_fixtures():
 
 def report():
     failed = [r for r in results if not r[1]]
+    if not results: print('RESULT: NO CHECK RAN'); sys.exit(1)
     if PROVE:
         print('PROVE-IT-FAILS:', 'every check failed, as it must' if len(failed) == len(results) else f'{len(results) - len(failed)} check(s) passed against a page with no tools: they cannot fail')
         sys.exit(0 if len(failed) == len(results) else 1)
@@ -244,6 +248,7 @@ T = (lambda s: min(s, 6)) if PROVE else (lambda s: s)   # against the page with 
 
 def attempt(name, fn):
     """A check made of steps, any of which may raise: a harness error is a failed check, never a crash."""
+    if ONLY and ONLY not in name: return
     try: ok, detail = fn()
     except Exception as e: ok, detail = False, 'harness error: ' + str(e).split('\n')[0][:240]
     check(name, ok, detail)
@@ -814,6 +819,19 @@ def chora_checks(pw, url, tmp):
         return (kept_good and asked and back and drew and 'Natural Earth' in text and 'could not be loaded' in text and s['basemapError'] in text), {
             'the good style kept': kept_good, 'asked for the missing one': asked, 'state': {k: s.get(k) for k in ('basemap', 'basemapError')}, 'said': text[:300]}
     attempt('Chora: a basemap whose style cannot be loaded gives way to Natural Earth, and the page says why (a style that loads is kept)', bad_style)
+    def bad_basemap_site():
+        # A pasted basemap on a site no policy can name (an underscore in its host): said plainly, never
+        # asked about, never an error in the page. Were a notice shown, it is agreed to, as a user would.
+        chora_boot(page, base); before = len(errors); since = len(requests)
+        page.evaluate("() => { document.getElementById('basemaps').open = true; }")
+        page.fill('#paste', 'https://tiles_x.example.org/{z}/{x}/{y}.png'); page.click('#paste-form button[type=submit]')
+        asked = soon(page, '() => !!document.getElementById("consent-yes")', 3)
+        if asked: page.click('#consent-yes'); page.wait_for_timeout(500)
+        said = soon(page, '() => /plain web address/.test(document.getElementById("basemap-options").textContent)', 5)
+        text = page.inner_text('#basemap-options'); s = cstate(page)
+        return (said and not asked and 'tiles_x.example.org' in text and 'not used' in text and len(errors) == before and s['basemap'] == 'natural-earth'
+                and not [u for u in web(since) if 'tiles_x' in u]), {'asked': asked, 'said': text[:300], 'page errors': errors[before:], 'basemap': s['basemap']}
+    attempt('Chora: a pasted basemap on a site the page\'s policy cannot name is refused in plain words, never asked about, with no error in the page', bad_basemap_site)
 
     OFM = 'https://tiles.openfreemap.org'; ofm_asked = []
     OFM_STYLE = json.dumps({'version': 8, 'name': 'Probe OFM', 'sources': {}, 'layers': [{'id': 'probe-bg', 'type': 'background', 'paint': {'background-color': '#e4efe4'}}]})

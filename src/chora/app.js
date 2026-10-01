@@ -486,10 +486,24 @@ function renderBasemaps() {
       <button type="submit">Add</button> <span id="paste-error" class="warn"></span></form>`
     + (state.blocked ? `<p class="muted">Refused ${n(state.blocked)} request${state.blocked === 1 ? '' : 's'} to ${esc(state.blockedOrigins.join(', '))}, not the basemap's site.</p>` : '');
 }
+/**
+ * A basemap needing a site no policy can name (an underscore in its host, say) is refused in words,
+ * never asked about: as a historical map's is (notASite). True when refused.
+ */
+function basemapNotASite(b, origins) {
+  const bad = origins.filter((o) => !consents.isOrigin(o));
+  if (!bad.length) return false;
+  asking = null;
+  basemapError = state.basemapError = `${bad.map((o) => o || b.url || b.tiles).join(', ')} ${bad.length === 1 ? 'is not a site' : 'are not sites'} this page can be given leave to reach (only a plain web address, such as https://example.org, can be), so ${b.name} was not used.`;
+  $('basemaps').open = true;
+  renderBasemaps();
+  return true;
+}
 /** Use `b` if every site it needs has been agreed to; else ask, naming the sites not yet agreed to. */
 function chooseBasemap(b) {
   if (b.local) return useBasemap(b);
   const primary = basemaps.originOf(b);
+  if (basemapNotASite(b, [primary])) return;
   if (!basemaps.consented(primary)) { asking = { b, origins: [primary] }; renderBasemaps(); return; }
   useBasemap(b);
 }
@@ -501,7 +515,7 @@ $('basemap-options').addEventListener('change', (e) => {
 $('basemap-options').addEventListener('click', (e) => {
   if (e.target.id === 'consent-yes') {
     const { b, origins } = asking; asking = null;
-    for (const o of origins) basemaps.consent(o);
+    try { for (const o of origins) basemaps.consent(o); } catch { basemapNotASite(b, origins); return; }
     renderSites();
     useBasemap(b);
   } else if (e.target.id === 'consent-no') { asking = null; renderBasemaps(); }
@@ -531,6 +545,7 @@ async function useBasemap(b) {
     return styleFailed(e.message, b);
   }
   const origins = b.local ? [] : [...new Set([primary, ...await basemaps.styleOrigins(style, { tileJson })])];
+  if (basemapNotASite(b, origins)) { if (!state.basemap) await useBasemap(basemaps.byId('natural-earth')); return; }
   const missing = origins.filter((o) => !basemaps.consented(o));
   if (missing.length) {
     // The style names sites not yet agreed to: asked about, with Natural Earth shown meanwhile.
