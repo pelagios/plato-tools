@@ -794,13 +794,16 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   `PermissionError` whose `kind` is `address`, `undecided`, `never`, `reload`, `unprotected`, `moved`
   or `network`, and whose message names the site, never the address (a key may be in it);
   `transformRequest(() => [[cat, subj], …], { onBlocked })` for MapLibre; `needs(el, cat, subj)` for
-  the one line; `open({ focus: 'cat:subj' })`; `onBeforeReload(fn, { loses })`, `reloadLosses()` and `reload({ confirmed })` (a part of the page that
+  the one line, or `needs(el, [[cat, subj], …])` for a feature that needs several sites at once (one
+  line naming those still to allow; the panel opens at the first); `open({ focus: 'cat:subj' })`; `onBeforeReload(fn, { loses })`, `reloadLosses()` and `reload({ confirmed })` (a part of the page that
   cannot keep something across the reload says so in `loses()`, and the panel then asks first, with
   Cancel: the main page names the files chosen, a run in progress and the review decisions not yet
   saved; Chora a line or area still being drawn, an address typed in the paste box and a save running); `mount({ state })`
-  for the header button and the canary; `keepWorkingData()`; and `token`, the World Historical
-  Gazetteer token's keeper (`get`, `set`, `forget`, `onChange`, as `src/lib/whg-token.js` had them,
-  and `remember(on)`, `remembered()`: kept for the tab unless the user chooses to remember it).
+  for the header button and the canary; `keepWorkingData()`; `persistChoice()` and `choosePersist(on)`; and
+  `token`, the World Historical Gazetteer token's keeper (`get`, `set`, `forget`, `onChange`, the API
+  Krisis's own keeper had before it moved here, and `remember(on)`, `remembered()`: kept for the tab
+  unless the user chooses to remember it; the panel says which, and that only regenerating the token
+  in WHG revokes it).
 - **The Content Security Policy.** The first script in each page's `<head>` is the pure core, its
   `export`s removed, and `src/lib/csp-head.js`, put there inline by `scripts/vite-csp.mjs` at the
   page's `<!-- plato:csp -->` (a page without the mark fails the build). It writes, from the grants,
@@ -853,6 +856,20 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   `plato-tools.keep-working-data` is `no` when off): off, Chora clears its drawings not saved and its
   last output at the next load (not at a reload for a permission), and the output once saved to disk.
   The dataset's working copy, in Chora's SQLite pool, is cleared at every start anyway (`clearOnInit`).
+  The historical maps shown (`chora-overlays/`) are cleared with the drawings, once Chora keeps them.
+- **Persistent storage.** "Keep large datasets' working files (ask the browser for persistent
+  storage)" calls `navigator.storage.persist()` once, when the user ticks it, never on load (Firefox
+  asks the user, which is why Chora no longer calls it itself), and remembers the browser's answer
+  (`plato-tools.persist`: `{granted, at}`), which the panel shows. Unticking forgets the choice; the
+  browser's answer can be undone only by clearing the site's data in the browser, which the panel says.
+- **Redirects.** `permissions.fetch` never follows one (`redirect: 'manual'`), and a browser cannot
+  read a redirect's `Location` (the answer is opaque), so it cannot tell where it pointed. Every
+  redirect is refused, as `moved`, in words naming the site. What e2 found in real IIIF and Allmaps
+  data is that the redirects that matter are mended by the caller before asking: an `http:` address
+  asked as `https:`, an image service's `{id}` given its `/info.json`, and Allmaps' annotation found by
+  the hash of the image's address rather than through its redirect. A redirect to another host (an
+  ARK resolver, say) is refused with words, never followed: allowing the resolver's site would not
+  say where it sends the user next.
 - **Chora's old consents** (`chora-basemap-consent`, a list of sites) are carried over by the head
   script at load, by the module at its first read, and by the module again when another tab writes
   the old key (the storage event): a provider all of whose sites are listed becomes
