@@ -30,18 +30,19 @@
 // Abingdon and Abingdon-on-Thames. Letters score these low when the qualifier is in front (Chipping
 // Ongar and Ongar 0.514), and the distinctive words cannot help, as all the words of one are shared.
 // A qualifier is a word or phrase on one of the lists chosen (qualifiers.js; by default the measured
-// English, Welsh and Latin list: Chipping and Market in front, Magna, Parva, Regis, Fawr and Bach
+// English, Welsh and Latin list: Chipping and Market in front, Regis
 // behind, and "on", "upon", "under", "next", "juxta" or "super" and a river or short phrase at the
 // end): only words that RARELY mark a separate place, so not Old (Old Windsor is not Windsor), Long,
 // High, Great or Little (Great and Little Marlow are two places). When one name is the other's core
 // with qualifiers added, and the other's qualifiers are all among them (Ongar, or Chipping Ongar
-// against Chipping Ongar on Roding), the pair scores QUALIFIER_CAP (0.88), and never more: a
-// qualifier is still a difference, so such a pair is suggested, but below a pair the same but for its
-// spelling. The cores must be the same (score 1: the same words, but for their order or a short
+// against Chipping Ongar on Roding), the pair scores QUALIFIER_CAP (0.88), unless letters alone
+// score it higher: the rule only ever raises a score, never lowers one (Abingdon and
+// Abingdon-on-Thames keep their 0.889), so a pair letters would find is found with qualifiers on too.
+// The rule itself raises no further than the cap: a qualifier is still a difference. The cores must be the same (score 1: the same words, but for their order or a short
 // form): in a trial on real data, a core respelt raised only wrong pairs (Bradfield and Great
 // Bardfield, near 0.85 as 0.88 times their cores' 0.966). A pair whose cores differ keeps the score
-// as above, at most the cap. When each name has a qualifier the other has not (Aston Magna and Aston
-// Parva, Chipping Ongar and Market Ongar), this does not apply, and they score as above, low. And a
+// as above. When each name has a qualifier the other has not (Chipping Ongar
+// and Market Ongar), this does not apply, and they score as above, low. And a
 // common core is not evidence of a place: when a qualifier word added (a phrase counted by its
 // joining word) weighs more than the core's words, the pair scores the core's share of the weight of
 // the two, as distinctive() scores the words shared, if that is lower: in a gazetteer where Farm is
@@ -119,7 +120,8 @@ export function similarityNormalised(x, y, weight, Q = compileQualifiers()) {
   if (plain === 1) return plain;
   const q = qualifierScore(x, y, weight, qualifiers(x, Q), qualifiers(y, Q));
   if (q === null) return plain;
-  return q.common ? Math.min(plain, q.score) : Math.min(QUALIFIER_CAP, Math.max(plain, q.score));
+  // The rule only ever raises a score (to the cap): a pair letters alone score higher keeps that score.
+  return q.common ? Math.min(plain, q.score) : Math.max(plain, Math.min(QUALIFIER_CAP, q.score));
 }
 /** similarityNormalised() but for qualifiers: the name score, raised by short forms or lowered by the distinctive words. */
 function plainScore(x, y, weight) {
@@ -209,8 +211,8 @@ export function qualifiers(x, Q = compileQualifiers()) {
 /**
  * How two normalised names that differ by qualifiers score (see the top of this file): { score:
  * QUALIFIER_CAP when their cores are the same, else 0, common: false, added: the labels of the
- * qualifiers one has and the other has not }, the higher of which and the score without it is kept,
- * at most the cap; or, when a qualifier word added weighs more than the core, { score: the core's
+ * qualifiers one has and the other has not }, the higher of which and the score without it is kept
+ * (the rule only raises); or, when a qualifier word added weighs more than the core, { score: the core's
  * share of the weight, common: true }, the lower of which is kept; or null when it does not apply
  * (neither has a qualifier the other has not, or each has one the other has not). `weight` as for
  * similarityNormalised(); `qx`, `qy`, the names' qualifiers() (by default, by the default lists).
@@ -218,7 +220,7 @@ export function qualifiers(x, Q = compileQualifiers()) {
 export function qualifierScore(x, y, weight = () => 1, qx = qualifiers(x), qy = qualifiers(y)) {
   if (!qx.units.length && !qy.units.length) return null;
   const xAdds = qx.units.filter((u) => !qy.units.includes(u)), yAdds = qy.units.filter((u) => !qx.units.includes(u));
-  if (xAdds.length && yAdds.length) return null; // Chipping and Market, Magna and Parva: each has its own
+  if (xAdds.length && yAdds.length) return null; // Chipping and Market: each has its own
   if (!xAdds.length && !yAdds.length) return null; // the same qualifiers: scored as any other names
   const [more, fewer] = xAdds.length ? [qx, qy] : [qy, qx];
   const fewerCore = fewer.units.length ? fewer.core : (more === qx ? y : x);

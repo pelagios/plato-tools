@@ -193,13 +193,14 @@ export class NameIndex {
         if (score < 1 && (sq.units.length || o.q.units.length)) {
           const q = qualifierScore(s, o.n, this.weight, sq, o.q);
           if (q !== null) {
-            // The higher of the score as below and the cores', at most the cap; or, for a common
+            // The higher of the score as below and the cores' (at most the cap: the rule only raises,
+            // so a pair letters score over the cap keeps that score); or, for a common
             // core, the lower of the score as below and its share. Under the threshold the score as
             // below cannot matter: the cores' then decides whether the pair is kept.
             if (score >= threshold && e === null) { const d = distinctive(s, o.n, this.weight); if (d !== null && d < score) score = d; }
             // Only the rule reached the threshold (the review says so, and names the qualifiers).
             const by = !q.common && score < threshold && q.score >= threshold ? { added: q.added, names: [s, o.n] } : null;
-            score = q.common ? Math.min(score, q.score) : Math.min(QUALIFIER_CAP, Math.max(score, q.score));
+            score = q.common ? Math.min(score, q.score) : Math.max(score, Math.min(QUALIFIER_CAP, q.score));
             keep(o.pi, score, by);
             continue;
           }

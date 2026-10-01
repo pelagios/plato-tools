@@ -859,14 +859,14 @@ const gazetteerIndex = (Q) => {
     const w = syl() + syl() + syl() + 'q';
     filler.push([['Great', 'Little', 'East', 'West', 'Upper', 'Lower', 'Chipping', 'Market'][i % 8] + ' ' + w], [w + ' Farm'], [w + ' Farm House']);
   }
-  return new NameIndex([...filler, ['Ongar'], ['Warsop'], ['Windsor'], ['Sutton'], ['Marlow'], ['Aston Parva'], ['Farm'],
+  return new NameIndex([...filler, ['Ongar'], ['Warsop'], ['Windsor'], ['Sutton'], ['Marlow'], ['Bere on Stour'], ['Farm'],
     ['Abingdon-on-Thames'], ['Market Ongar'], ['Danebury Hill'], ['Bristoll'], ['Saint Martin'], ['Kafr Cel'], ['Harborough'], ['Bar'], ['Ems']],
-  [['Chipping Ongar'], ['Market Warsop'], ['Old Windsor'], ['Long Sutton'], ['High Ongar'], ['Great Marlow'], ['Little Marlow'], ['Aston Magna'],
+  [['Chipping Ongar'], ['Market Warsop'], ['Old Windsor'], ['Long Sutton'], ['High Ongar'], ['Great Marlow'], ['Little Marlow'], ['Bere Regis'],
     ['Market Farm'], ['Abingdon'], ['Market Harborough'], ['Bar-sur-Aube'], ['Bad Ems']], Q);
 };
 /** The number in gazetteerIndex() of the k-th named place, after the filler. */
 const nth = (k) => 9000 + k;
-const ONGAR = nth(0), WARSOP = nth(1), WINDSOR = nth(2), SUTTON = nth(3), MARLOW = nth(4), ASTON_PARVA = nth(5), FARM = nth(6), ABINGDON = nth(7), MARKET_ONGAR = nth(8), HARBOROUGH = nth(13), BAR = nth(14), EMS = nth(15);
+const ONGAR = nth(0), WARSOP = nth(1), WINDSOR = nth(2), SUTTON = nth(3), MARLOW = nth(4), BERE_ON_STOUR = nth(5), FARM = nth(6), ABINGDON = nth(7), MARKET_ONGAR = nth(8), HARBOROUGH = nth(13), BAR = nth(14), EMS = nth(15);
 
 test('qualifiers: only those that rarely mark a separate place: Chipping Ongar and Market Warsop are found, Old Windsor, Long Sutton, High Ongar, Great and Little Marlow are not', () => {
   const idx = gazetteerIndex();
@@ -880,26 +880,51 @@ test('qualifiers: only those that rarely mark a separate place: Chipping Ongar a
   }
   // Not suggested by the rule: Old, Long, High, Great and Little are not qualifiers (Old Windsor and
   // Windsor are two places, Long Sutton and Sutton 44 km apart, High Ongar and Ongar two parishes).
-  for (const [a, b, k] of [['Old Windsor', 'Windsor', WINDSOR], ['Long Sutton', 'Sutton', SUTTON], ['High Ongar', 'Ongar', ONGAR], ['Great Marlow', 'Marlow', MARLOW], ['Little Marlow', 'Marlow', MARLOW]]) {
+  // Not raised by the rule: each scores as with no lists at all (Aston Magna and Aston 0.891 on its letters alone).
+  for (const [a, b] of [['High Ongar', 'Ongar'], ['Aston Magna', 'Aston'], ['Mitton Parva', 'Mitton'], ['Llanfair Fawr', 'Llanfair'], ['Llanfair Bach', 'Llanfair']]) {
+    assert.equal(qualifierScore(normalise(a), normalise(b)), null, `${a} and ${b}: no qualifier on the list`);
+    assert.deepEqual(qualifiers(normalise(a)).units, [], `${a} has no qualifier`);
+    assert.equal(similarity(a, b), similarity(a, b, undefined, compileQualifiers([])), `${a} and ${b}: as with no lists`);
+    assert.notEqual(similarity(a, b), QUALIFIER_CAP, `${a} and ${b}: not at the cap`);
+  }
+  // High Ongar finds the very place Chipping Ongar finds, so it is tested by itself, beside its control.
+  for (const [a, b, k] of [['Old Windsor', 'Windsor', WINDSOR], ['Long Sutton', 'Sutton', SUTTON], ['Great Marlow', 'Marlow', MARLOW], ['Little Marlow', 'Marlow', MARLOW]]) {
     assert.equal(qualifierScore(normalise(a), normalise(b)), null, `${a} and ${b}: no qualifier on the list`);
     assert.deepEqual(qualifiers(normalise(a)).units, [], `${a} has no qualifier`);
     for (const weight of [undefined, idx.weight]) assert.ok(similarity(a, b, weight) < 0.85, `${a} and ${b}: ${similarity(a, b, weight)}`);
     // The presence beside the absence: the same call finds Chipping Ongar's Ongar.
     const found = idx.best([a, 'Chipping Ongar'], 0.85);
-    assert.ok(!found.has(k) || k === ONGAR, `${a} does not find ${b}`);
+    assert.ok(!found.has(k), `${a} does not find ${b}`);
     assert.ok(found.has(ONGAR), 'control: in the same call, Chipping Ongar finds Ongar');
   }
   assert.ok(!idx.best(['High Ongar'], 0.85).has(ONGAR) && idx.best(['Chipping Ongar'], 0.85).has(ONGAR), 'High Ongar does not find Ongar; Chipping Ongar does');
   // The other words on the list, and the phrases at the end.
-  for (const [a, b] of [['Aston Magna', 'Aston'], ['Mitton Parva', 'Mitton'], ['Bere Regis', 'Bere'], ['Llanfair Fawr', 'Llanfair'], ['Ash next Ridley', 'Ash'], ['Wells-next-the-Sea', 'Wells'],
+  for (const [a, b] of [['Bere Regis', 'Bere'], ['Ash next Ridley', 'Ash'], ['Wells-next-the-Sea', 'Wells'],
     ['Bampton', 'Bampton under Wychwood'], ['Newcastle-under-Lyme', 'Newcastle'], ['Great Marlow on Thames', 'Great Marlow'], ['Stratford', 'Stratford upon Avon']])
-    assert.equal(similarity(a, b), QUALIFIER_CAP, `${a} and ${b}`);
+  {
+    // The rule applies (Regis, a trailing word, already scores the cap or more on its letters alone), and raises to the cap, never lowers.
+    assert.equal(qualifierScore(normalise(a), normalise(b)).score, QUALIFIER_CAP, `${a} and ${b}: the rule applies`);
+    assert.equal(similarity(a, b), Math.max(QUALIFIER_CAP, similarity(a, b, undefined, compileQualifiers([]))), `${a} and ${b}`);
+  }
   assert.ok(nameScore('ash next ridley', 'ash') < 0.85, 'control: Ash next Ridley and Ash are under the threshold on their letters');
-  // The cap: even where letters alone scored more (Abingdon-on-Thames 0.889, Market Harborough 0.918 with its words sorted).
+  // The rule only raises: where letters alone score more (Abingdon-on-Thames 0.889, Market Harborough
+  // 0.918 with its words sorted), the pair keeps that score, as with no lists at all.
+  const none = compileQualifiers([]);
   for (const [a, b] of [['Abingdon', 'Abingdon-on-Thames'], ['Market Harborough', 'Harborough']]) {
     assert.ok(nameScore(normalise(a), normalise(b)) > QUALIFIER_CAP, `control: ${a} and ${b} score over the cap on their letters`);
-    assert.equal(similarity(a, b), QUALIFIER_CAP);
+    assert.ok(qualifierScore(normalise(a), normalise(b)).score === QUALIFIER_CAP, `control: ${a} and ${b} differ by a qualifier`);
+    assert.ok(similarity(a, b) > QUALIFIER_CAP, `${a} and ${b}: ${similarity(a, b)}`);
+    assert.equal(similarity(a, b), similarity(a, b, undefined, none), `${a} and ${b}: as with no lists`);
   }
+  // And so in matching, at a threshold over the cap: a pair letters find is found with the lists on as off.
+  for (const Q of [undefined, none]) {
+    const g = gazetteerIndex(Q), at885 = g.best(['Abingdon'], 0.885);
+    assert.ok(at885.has(ABINGDON) && !at885.rule.has(ABINGDON), `${Q ? 'no lists' : 'the default list'}: Abingdon finds Abingdon-on-Thames at 0.885, by its letters`);
+    assert.ok(at885.get(ABINGDON) > QUALIFIER_CAP);
+  }
+  // A pair only the rule finds is found up to the cap, and not over it.
+  assert.ok(idx.best(['Chipping Ongar'], 0.85).has(ONGAR) && idx.best(['Chipping Ongar'], 0.88).has(ONGAR), 'Chipping Ongar finds Ongar at 0.85 and at the cap');
+  assert.ok(!idx.best(['Chipping Ongar'], 0.89).has(ONGAR), 'but not at 0.89');
   assert.ok(idx.best(['Abingdon'], 0.85).has(ABINGDON) && !idx.best(['Abingdon'], 0.85).rule.has(ABINGDON), 'Abingdon finds Abingdon-on-Thames by its letters, not only by the rule');
   assert.ok(idx.best(['Market Harborough'], 0.85).has(HARBOROUGH));
   // Dropped from the list: by, in, le and en (Burley in Wharfedale is not raised), St, Old, Hen and the rest.
@@ -908,11 +933,16 @@ test('qualifiers: only those that rarely mark a separate place: Chipping Ongar a
   assert.deepEqual(qualifiers(normalise('Chipping Ongar')), { core: 'ongar', units: ['chipping'], words: ['chipping'], labels: ['Chipping'] });
   assert.deepEqual(qualifiers(normalise('Stratford-upon-Avon')), { core: 'stratford', units: ['on avon'], words: ['upon'], labels: ['upon avon'] });
   assert.deepEqual(qualifiers('market').units, [], 'a name that is only a qualifier has none');
+  // Magna, Parva, Fawr and Bach are not on the list (the maintainer's ruling of 1 October 2026), Chipping, Market and Regis are.
+  assert.deepEqual(QUALIFIER_LISTS[0].front, ['Chipping', 'Market']);
+  assert.deepEqual(QUALIFIER_LISTS[0].behind, ['Regis']);
+  assert.match(QUALIFIER_LISTS[0].evidence, /Magna, Parva, Fawr and Bach were dropped.*held-out Index Villaris check.*Mawr and Fach/);
+  assert.equal(QUALIFIER_TABLE_VERSION, 'krisis-qualifiers 2');
   assert.equal(QUALIFIER_CAP, 0.88);
 });
-test('qualifiers: the guards stay: each has its own (Aston Magna and Aston Parva), a core respelt, and a common core (Market Farm and Farm)', () => {
+test('qualifiers: the guards stay: each has its own (Bere Regis and Bere on Stour), a core respelt, and a common core (Market Farm and Farm)', () => {
   const idx = gazetteerIndex();
-  for (const [a, b, core] of [['Aston Magna', 'Aston Parva', 'Aston'], ['Chipping Ongar', 'Market Ongar', 'Ongar'], ['Newton on the Hill', 'Newton under the Hill', 'Newton']]) {
+  for (const [a, b, core] of [['Bere Regis', 'Bere on Stour', 'Bere'], ['Chipping Ongar', 'Market Ongar', 'Ongar'], ['Newton on the Hill', 'Newton under the Hill', 'Newton']]) {
     for (const weight of [undefined, idx.weight]) {
       // The presence beside each absence: each name is suggested for its core.
       assert.ok(similarity(a, core, weight) >= 0.85 && similarity(b, core, weight) >= 0.85, `control: ${a} and ${b} are each suggested for ${core}`);
@@ -921,7 +951,7 @@ test('qualifiers: the guards stay: each has its own (Aston Magna and Aston Parva
     assert.equal(qualifierScore(normalise(a), normalise(b)), null, `${a} and ${b}: each has a qualifier the other has not`);
     assert.equal(qualifierScore(normalise(a), normalise(core)).score, QUALIFIER_CAP, `control: ${a} and ${core} differ by qualifiers`);
   }
-  assert.ok(!idx.best(['Aston Magna'], 0.85).has(ASTON_PARVA) && !idx.best(['Chipping Ongar'], 0.85).has(MARKET_ONGAR), 'not in matching either');
+  assert.ok(!idx.best(['Bere Regis'], 0.85).has(BERE_ON_STOUR) && !idx.best(['Chipping Ongar'], 0.85).has(MARKET_ONGAR), 'not in matching either');
   assert.ok(idx.best(['Chipping Ongar'], 0.85).has(ONGAR), 'control: Chipping Ongar finds Ongar');
   // A core respelt is not raised (Bradfield and Great Bardfield, in a trial on real data, at 0.88 times 0.966).
   for (const [a, b] of [['Chipping Ongaar', 'Ongar'], ['Bradfield', 'Market Bardfield']]) {
@@ -942,18 +972,31 @@ test('qualifiers per language: a French list switched on finds Bar-sur-Aube for 
     assert.ok(similarity(a, b) < 0.85, 'off by default');
   }
   // Châtillon-sur-Seine and Châtillon: letters alone already suggest them (0.895, a shared beginning
-  // counts for much), so the list does not decide whether they are suggested; it reads the phrase, and caps them.
+  // counts for much), so the list does not decide whether they are suggested; it reads the phrase, and leaves their score.
   assert.deepEqual(qualifiers(normalise('Châtillon-sur-Seine'), on), { core: 'chatillon', units: ['sur seine'], words: ['sur'], labels: ['sur seine'] });
   assert.deepEqual(qualifiers(normalise('Châtillon-sur-Seine'), off).units, [], 'French off: no qualifier');
-  assert.equal(similarity('Châtillon-sur-Seine', 'Châtillon', undefined, on), QUALIFIER_CAP);
   assert.ok(similarity('Châtillon-sur-Seine', 'Châtillon', undefined, off) > QUALIFIER_CAP, 'control: off, its letters score it');
+  assert.equal(similarity('Châtillon-sur-Seine', 'Châtillon', undefined, on), similarity('Châtillon-sur-Seine', 'Châtillon', undefined, off), 'on, the same: the rule never lowers');
   assert.equal(similarity('Châlons-en-Champagne', 'Châlons', undefined, on), QUALIFIER_CAP);
+  // Unmeasured, and so off by default: "en" is read only before one word that is not an article,
+  // so Chapel-en-le-Frith has no qualifier (its core would be "chapel"), but Saint-Germain-en-Laye does.
+  assert.deepEqual(qualifiers(normalise('Chapel en le Frith'), on).units, [], 'Chapel en le Frith: no qualifier');
+  assert.deepEqual(qualifiers(normalise('Chapel-en-le-Frith'), on).units, []);
+  assert.equal(similarity('Chapel en le Frith', 'Chapel', undefined, on), similarity('Chapel en le Frith', 'Chapel', undefined, off), 'Chapel en le Frith and Chapel: scored on their letters, French on as off');
+  assert.notEqual(similarity('Chapel en le Frith', 'Chapel', undefined, on), QUALIFIER_CAP);
+  assert.deepEqual(qualifiers(normalise('Saint-Germain-en-Laye'), on), { core: 'saint germain', units: ['en laye'], words: ['en'], labels: ['en laye'] }, 'control: one word after en is read');
+  assert.match(QUALIFIER_LISTS.find((l) => l.id === 'fr').evidence, /Not measured: off by default\..*Chapel-en-le-Frith/);
   // German: Bad in front, am and an der at the end; the guard holds across them.
   const de = compileQualifiers(['de']);
   assert.equal(similarity('Bad Ems', 'Ems', undefined, de), QUALIFIER_CAP);
   assert.ok(similarity('Bad Ems', 'Ems', undefined, off) < 0.85, 'German off');
   assert.deepEqual(qualifiers('frankfurt an der oder', de), { core: 'frankfurt', units: ['an der oder'], words: ['an der'], labels: ['an der oder'] });
-  assert.ok(similarity('Frankfurt am Main', 'Frankfurt an der Oder', undefined, de) < 0.85 && similarity('Frankfurt am Main', 'Frankfurt', undefined, de) === QUALIFIER_CAP, 'each has its own; control: each is its core');
+  // Kept as it is, and said in the list's evidence: an ordinary phrase is read as a qualifier too
+  // (lowercased, a lake cannot be told from a word), so Haus am See and Haus score the cap with German on.
+  assert.equal(similarity('Haus am See', 'Haus', undefined, de), QUALIFIER_CAP);
+  assert.ok(similarity('Haus am See', 'Haus') < QUALIFIER_CAP, `control: off by default, on their letters only: ${similarity('Haus am See', 'Haus')}`);
+  assert.match(QUALIFIER_LISTS.find((l) => l.id === 'de').evidence, /Not measured: off by default\..*"Haus am See" and "Haus" score 0\.88/);
+  assert.ok(similarity('Frankfurt am Main', 'Frankfurt an der Oder', undefined, de) < 0.85 && similarity('Frankfurt am Main', 'Frankfurt', undefined, de) >= QUALIFIER_CAP, 'each has its own; control: each is its core (its letters score it over the cap)');
   // In matching, with the lists chosen; and lists together.
   assert.ok(gazetteerIndex(on).best(['Bar-sur-Aube'], 0.85).has(BAR), 'French on: Bar-sur-Aube finds Bar');
   assert.ok(!gazetteerIndex(off).best(['Bar-sur-Aube'], 0.85).has(BAR), 'French off: it does not');
@@ -966,7 +1009,7 @@ test('qualifiers per language: a French list switched on finds Bar-sur-Aube for 
   assert.deepEqual(DEFAULT_QUALIFIER_LISTS, ['en-cy-la']);
   for (const l of QUALIFIER_LISTS) {
     assert.ok(l.label && l.description && l.evidence && Array.isArray(l.language) && l.language.length, `${l.id} says what it is and why`);
-    for (const p of l.phrases) assert.deepEqual(Object.keys(new RegExp(p, 'u').exec('a ' + (l.id === 'de' ? 'am' : l.id === 'fr' ? 'sur' : 'on') + ' b').groups).sort(), ['core', 'join', 'tail'], `${l.id}: each phrase names core, join and tail`);
+    for (const p of l.phrases) assert.deepEqual(Object.keys(['on', 'sur', 'en', 'am'].map((j) => new RegExp(p, 'u').exec(`a ${j} b`)).find(Boolean).groups).sort(), ['core', 'join', 'tail'], `${l.id}: each phrase names core, join and tail`);
   }
   assert.ok(!QUALIFIER_LISTS.some((l) => l.language.includes('nl')), 'no Dutch list (Nieuw- often marks a separate place)');
 });
@@ -1013,6 +1056,13 @@ test('matching: Chipping Ongar is suggested for Ongar and marked "qualifier rule
   const { work: off } = await run({ qualifiers: 'none' }, s, o);
   assert.deepEqual(pairs(off), [`${A('abingdon')} ${B('abingdon-on-thames')}`]);
   assert.deepEqual(off.match_parameters.qualifiers.lists, []);
+  // A qualifier with an accent is named as the name writes it ("sur Cère"), not as normalised ("sur cere").
+  const fs = { profile: 'place-centric', gazetteer: { '@id': X + 'a', title: 'A' }, spatialEntities: [place('a', 'vic', 'Vic', [at(2.62, 44.98)])] };
+  const fo = { profile: 'place-centric', gazetteer: { '@id': X + 'b', title: 'B' }, spatialEntities: [place('b', 'vic-sur-cere', 'Vic-sur-Cère', [at(2.625, 44.981)])] };
+  const { work: fr } = await run({ qualifiers: ['fr'] }, fs, fo);
+  assert.deepEqual(pairs(fr), [`${A('vic')} ${B('vic-sur-cere')}`], 'control: French on, Vic-sur-Cère is suggested for Vic');
+  assert.equal(fr.candidates[0].rule, 'qualifier');
+  assert.equal(fr.candidates[0].qualifier, 'sur Cère');
   // A bad id is refused before anything is read.
   await assert.rejects(run({ qualifiers: ['xx'] }, s, o), (e) => e instanceof DataError && /no list of qualifiers "xx"/.test(e.message));
 });
@@ -1051,7 +1101,7 @@ test('qualifiers leave the rest as it was: St and Saint, Dry Hill and Danebury H
   assert.equal(similarity('Bristol', 'Bristoll').toFixed(3), '0.975');
   assert.ok(idx.best(['St Martin'], 0.85).has(nth(11)) && idx.best(['Bristol'], 0.85).has(nth(10)), 'St Martin and Bristol find theirs');
   assert.ok(!idx.best(['Dry Hill'], 0.85).has(nth(9)), 'Dry Hill does not find Danebury Hill');
-  assert.match(SCORING, /never more than 0\.88/);
+  assert.match(SCORING, /the rule only raises a score: it never raises one past 0\.88, a qualifier being still a difference, nor lowers one/);
 });
 
 // ---- blocking --------------------------------------------------------------------------------------------------

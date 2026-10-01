@@ -17,7 +17,7 @@
 import { run } from '../pipeline.js';
 import { Report } from '../report.js';
 import { collectWithdrawn, resolveWithdrawn } from '../../formats/shared.js';
-import { DISTINCT_GATE, QUALIFIER_CAP, QUALIFIER_RARE, compileQualifiers } from './names.js';
+import { DISTINCT_GATE, QUALIFIER_CAP, QUALIFIER_RARE, compileQualifiers, normalise } from './names.js';
 import { qualifierRecord } from './qualifiers.js';
 import { NameIndex, BLOCKING, BLOCKING_RULE } from './blocking.js';
 import { WORK_VERSION, MATCH_DEFAULTS, fileRecords, serialiseWork, checkReviewer, checkMatchOptions, NOT_READ_KINDS, isColumns } from './work.js';
@@ -41,9 +41,9 @@ export const SCORING = 'Each name of a place (its label and every toponym and ro
   + 'The one exception that raises a score: two names whose words are all shared, some only as a known short form (as above: St and Saint, Mt and Mount), '
   + 'are scored again with each short form written out in full, and the higher score is kept. '
   + 'Names that differ only by qualifiers (Chipping Ongar and Ongar, Abingdon and Abingdon-on-Thames): a qualifier is a word or phrase that rarely marks a separate place, on one of the lists chosen (qualifiers.lists; by default the measured English, Welsh and Latin list: '
-  + 'Chipping and Market in front of a name; Magna, Parva, Regis, Fawr and Bach behind it; or at its end a phrase of on, upon, under, next, juxta or super and at most three words after it); the rest is the name\'s core, which keeps at least one word not on the lists. '
-  + `When one name has every qualifier the other has and more, and their cores are the same (scoring 1 as above: the same words, but for their order or a short form), the pair scores ${QUALIFIER_CAP}; if the cores differ, the score as above; and never more than ${QUALIFIER_CAP}: a qualifier is still a difference. `
-  + 'When each has a qualifier the other has not (Aston Magna and Aston Parva), this does not apply. Nor does it when the core is common: its words must weigh at least as much as each qualifier word added (a phrase by its joining word), '
+  + 'Chipping and Market in front of a name; Regis behind it; or at its end a phrase of on, upon, under, next, juxta or super and at most three words after it); the rest is the name\'s core, which keeps at least one word not on the lists. '
+  + `When one name has every qualifier the other has and more, and their cores are the same (scoring 1 as above: the same words, but for their order or a short form), the pair scores ${QUALIFIER_CAP}, or the score as above if that is higher (the rule only raises a score: it never raises one past ${QUALIFIER_CAP}, a qualifier being still a difference, nor lowers one); if the cores differ, the score as above. `
+  + 'When each has a qualifier the other has not (Chipping Ongar and Market Ongar), this does not apply. Nor does it when the core is common: its words must weigh at least as much as each qualifier word added (a phrase by its joining word), '
   + `unless they are in no more than ${QUALIFIER_RARE} names. A suggestion that only this rule took over the threshold says so (rule: qualifier, and the qualifier). `
   + 'Two places score the best of any pair of their names, over the pairs blocking allows (see blocking). '
   + "A place's point is the first Point geometry of its attestations, else the centre of the first bounding box, else none, passing over attestations that are negated or withdrawn (retracted or superseded); "
@@ -57,13 +57,19 @@ export const qualifierParameters = (ids) => ({ ...qualifierRecord(ids), cap: QUA
 
 /**
  * The qualifiers the rule set aside, as the names write them where that can be found ("on Thames"
- * in Abingdon-on-Thames), else as the list writes them ("Chipping"), joined: "Chipping", "Magna, on Avon".
+ * in Abingdon-on-Thames), else as the list writes them ("Chipping"), joined: "Chipping", "Regis, on Avon".
  */
 function qualifierWords(added, names) {
   return added.map((label) => {
     if (label !== label.toLowerCase()) return label;
-    const re = new RegExp('(?<![\\p{L}\\p{N}])' + label.split(' ').map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[^\\p{L}\\p{N}]+') + '(?![\\p{L}\\p{N}])', 'iu');
-    for (const n of names) { const m = re.exec(n); if (m) return m[0].replace(/[^\p{L}\p{N}]+/gu, ' '); }
+    // The label is normalised ("sur cere"), so each name is compared word by word, normalised,
+    // and the words are given as the name writes them ("sur Cère" in Vic-sur-Cère).
+    const want = label.split(' ');
+    for (const n of names) {
+      const words = [...String(n ?? '').matchAll(/[\p{L}\p{N}\p{M}]+/gu)].map((m) => m[0]), norm = words.map(normalise);
+      for (let i = 0; i + want.length <= words.length; i++)
+        if (want.every((w, k) => norm[i + k] === w)) return words.slice(i, i + want.length).join(' ');
+    }
     return label;
   }).join(', ');
 }

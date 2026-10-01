@@ -1111,15 +1111,17 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   and Ongar scored 0.514, so they were never suggested, while Abingdon and Abingdon-on-Thames (0.889)
   were, only because the qualifier trails. A qualifier is a word or phrase on one of the **lists
   chosen** (see the table below; by default only the measured English, Welsh and Latin list):
-  Chipping and Market in front; Magna, Parva, Regis, Fawr and Bach behind; or at the end a phrase of
+  Chipping and Market in front; Regis behind; or at the end a phrase of
   on, upon, under, next, juxta or super and at most three words after it ("on Thames", "next the
   Sea", "under Wychwood"). The rest is the name's core, which keeps a word not on the lists. When one
   name has every qualifier the other has and more, and their cores are the same (scoring 1: the same
   words, but for their order or a short form), the pair scores **0.88** (`QUALIFIER_CAP`): over the
   threshold, so it is suggested, but under any respelling, because a qualifier is still a
-  difference. The cap holds for every such pair, so pairs letters already found drop to 0.88
-  (Abingdon-on-Thames 0.889, Market Harborough 0.918 with its words sorted). **When each name has a
-  qualifier the other has not** (Aston Magna and Aston Parva, Chipping Ongar and Market Ongar) the
+  difference. **The rule only ever raises a score**: a pair letters already score over 0.88 keeps
+  that score (Abingdon-on-Thames 0.889, Market Harborough 0.918 with its words sorted), so a pair
+  letters would find at a threshold over 0.88 is still found with qualifiers on (until the Fable
+  review of 1 October 2026 the cap lowered them to 0.88). **When each name has a
+  qualifier the other has not** (Chipping Ongar and Market Ongar) the
   rule does not apply, and they score as before, low. **A core respelt is not raised**: the first
   version scored 0.88 times the cores' score, and in the trial below every pair it added that way was
   wrong (Bradfield and Great Bardfield, 0.851). **A common core is not a place**: when a qualifier
@@ -1146,6 +1148,11 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   sixty, and the planted pairs found the same (497 of 500). On the held-out pair at small size (the 92
   market places within the bounds of DEEP's Gloucestershire volumes, 25,404 places, at 293 MB) the
   rule added nothing: both name their towns in full (Chipping Campden, Chipping Sodbury, Upton on Severn).
+  **Magna, Parva, Fawr and Bach were dropped** too (the maintainer's ruling of 1 October 2026,
+  `krisis-qualifiers 2`): they mean or work like Great and Little, and often mark separate places
+  (Aston Magna and Aston, Llanfair Fawr and Llanfair are no longer raised). Any of them may be
+  re-admitted only if the held-out Index Villaris check measures it separately and it does well;
+  Mawr and Fach would go back with Fawr and Bach.
   **Still to be measured**: the precision of the restricted list on a pair of gazetteers
   not used to choose it (`e2e/qualifier_precision.mjs`, below), and recall on the DEEP perturbed sets.
 - **The lists of qualifiers** (`src/engine/krisis/qualifiers.js`, `QUALIFIER_LISTS`, version
@@ -1157,13 +1164,17 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   en-cy-la,fr` on the command line (`--qualifiers none` for none; an id that is not a list's is
   refused, by `qualifierIds()`, the rule both use). Seeded: `en-cy-la` (English, Welsh and Latin,
   **measured**, on by default); `fr` (French: "sur" and a river, "en" and a district at the end:
-  Châtillon-sur-Seine, Châlons-en-Champagne) and `de` (German: "Bad" in front, "am" or "an der" and
-  a river at the end: Bad Ems, Frankfurt am Main), each **unmeasured** and off unless chosen. A list
+  Châtillon-sur-Seine, Châlons-en-Champagne; "en" only before one word that is not an article, so
+  not Chapel-en-le-Frith) and `de` (German: "Bad" in front, "am" or "an der" and
+  a river at the end: Bad Ems, Frankfurt am Main), each **unmeasured** and off unless chosen. Names
+  are compared lowercased, so neither can tell a river from an ordinary word, and both read some
+  ordinary phrases as qualifiers ("Haus am See" and "Haus" score 0.88 with `de` on); their
+  `evidence` says so. A list
   is seeded only where the usage is well established and the risk low: Dutch "Nieuw-" (Nieuw-Vennep
   is not Vennep) and the like are left out, and other languages are left to contributors. Note that
   a trailing phrase often scores over the threshold on its letters alone (Châtillon-sur-Seine and
-  Châtillon 0.895: Jaro-Winkler rewards the shared beginning), so for such names a list caps the
-  score at 0.88 rather than deciding the suggestion; it decides it for short cores (Bar-sur-Aube and
+  Châtillon 0.895: Jaro-Winkler rewards the shared beginning), so for such names a list does not
+  decide the suggestion (and never lowers the score); it decides it for short cores (Bar-sur-Aube and
   Bar 0.825 without it) and for words in front (Bad Ems and Ems 0).
 
   **To add a language's list**, add an entry to `QUALIFIER_LISTS`:
