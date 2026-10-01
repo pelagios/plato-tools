@@ -32,7 +32,7 @@ const GOOD = Object.freeze({
 });
 const place = (base, id, srcBase = base) => ({
   '@id': `${base}place/${id}`, label: id,
-  attestations: [{ names: [{ toponym: id }], sources: [{ '@id': `${srcBase}source/s-${id}`, title: 'Charter' }], citations: [{ source: `${srcBase}source/cited-only` }] }],
+  attestations: [{ '@id': `${base}place/${id}#a-1`, names: [{ toponym: id }], sources: [{ '@id': `${srcBase}source/s-${id}`, title: 'Charter' }], citations: [{ source: `${srcBase}source/cited-only` }] }],
 });
 const doc = (gazetteer, places = [place(BASE, 'a'), place(BASE, 'b')]) => ({ profile: 'place-centric', gazetteer, spatialEntities: places });
 const edit = (change) => { const g = structuredClone(GOOD); change(g); return g; };
@@ -110,6 +110,28 @@ for (const [what, change, kind, severity] of FIRES) {
     assert.equal(bad.counts.fair.of, good.counts.fair.of, 'the same checks are made');
   });
 }
+
+test('attestations without addresses: a warning in a draft and a problem once published, as the site has them, and none once minted', async () => {
+  const unminted = (status) => {
+    const d = doc(edit((g) => { g.status = status; }));
+    for (const p of d.spatialEntities) for (const a of p.attestations) delete a['@id'];
+    return d;
+  };
+  const minted = await report(doc(GOOD)), draft = await report(unminted('draft')), published = await report(unminted('published'));
+  assert.equal(minted.counts.places, 2, 'the records were read');
+  assert.equal(item(minted, 'attestations-without-ids'), undefined, 'attestations with addresses raise nothing');
+  const d = item(draft, 'attestations-without-ids');
+  assert.equal(d?.severity, 'warning', kinds(draft));
+  assert.equal(d.count, 2);
+  assert.equal(d.message, TEXT['attestations-without-ids-draft']);
+  assert.match(d.message, /plato-tools publish mint/);
+  assert.equal(draft.outputs.length, 1, 'a draft still gets its deposit files');
+  const p = item(published, 'attestations-without-ids');
+  assert.equal(p?.severity, 'error', kinds(published));
+  assert.equal(p.count, 2);
+  assert.equal(p.message, TEXT['attestations-without-ids']);
+  assert.equal(published.outputs.length, 0, 'a published dataset without them gets no deposit files');
+});
 
 test('ORCIDs: the form and the ISO 7064 11,2 check digit', () => {
   assert.equal(orcidProblem('https://orcid.org/0000-0002-1825-0097'), null);

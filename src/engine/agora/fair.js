@@ -60,6 +60,9 @@ export const TEXT = {
   'keys-not-servable': "Places or sources have addresses a static site cannot serve: what follows <base>place/ or <base>source/ has more than one part, has characters other than letters, digits and . _ ~ -, starts with '.', ends in .jsonld, .ttl or .html (which the w3id rules read as a format), or differs from another's only in capital letters (one file on macOS and Windows). The site has no page for them and the w3id rules do not reach them. While the dataset is a draft, give them identifiers of one part, of those characters, that differ in more than case (in the spreadsheets, place_id or source_id); once it is published its addresses are frozen, and the site lists them as held only in the downloads. The example names each and says what is wrong.",
   'sources-outside-base': "Sources described in full have addresses not under the dataset's base address, so the site made from it will not serve them: if they are the dataset's own, give them addresses of the form <base>source/<id>; if another dataset's, cite them by address alone.",
   'sources-not-served': "Sources have addresses under the dataset's base address but not of the form <base>source/<id> (the example names them), so the site has no page for them and the w3id rules do not reach them: their addresses will not lead anywhere. If they are the dataset's sources, give them addresses of that form before the dataset is published; the downloads hold what the dataset says of them.",
+  // As the site has them (site.js): mint first, since the site never mints (D4).
+  'attestations-without-ids': "Attestations have no address of their own (@id), so nothing can link to them, retract them or replace them, and the dataset is published, so the deposit files are not written. Mint first: plato-tools publish mint writes a copy of the dataset in which every attestation has an address; commit that copy and deposit it.",
+  'attestations-without-ids-draft': 'Attestations have no address of their own (@id). That will do for a draft, but mint first, before publishing (plato-tools publish mint), so that each can be linked to, retracted or replaced; the site is not made for a published dataset without them.',
   'no-publisher': "Nothing says who publishes the dataset, which DataCite requires: give a contributor by name, or an author's name, or fill in the publisher in datacite.json.",
 };
 
@@ -246,11 +249,16 @@ export function create(ctx) {
     else if (r.problem) note('keys', unservableExample(iri, r));
   };
   const attestation = (a) => { for (const s of sourcesOf(a)) source(s); };
+  // A place's attestations without an address of their own, counted as the site counts them.
+  let unidentified = 0;
   return {
     header() { if (ctx.scheme) found = servability(ctx.scheme); },
     event(ev) {
       // Counted whatever else: what the report was given to read, which a test can hold it to.
       if (ev.type === 'record') rep.count('places');
+      if (ev.type === 'record' && ev.value && typeof ev.value === 'object') {
+        for (const a of list(ev.value.attestations)) if (a && typeof a === 'object' && typeof a['@id'] !== 'string') unidentified++;
+      }
       if (!ctx.scheme) return;
       if (ev.type === 'record' && ev.value) {
         const id = ev.value['@id'];
@@ -263,6 +271,13 @@ export function create(ctx) {
     async finish() {
       const g = ctx.gazetteer || {};
       const checks = assess(ctx, g, outside);
+      // The site refuses a published dataset whose attestations have no addresses, and warns of a
+      // draft's (site.js); the report says so first, with the same severity.
+      if (unidentified) {
+        const published = g.status === 'published';
+        const kind = 'attestations-without-ids';
+        rep.add(published ? 'error' : 'warning', kind, TEXT[published ? kind : kind + '-draft'], undefined, unidentified);
+      }
       const passed = checks.filter((c) => c.passed).length;
       rep.counts.fair = { passed, of: checks.length };
       rep.counts.fairChecks = checks;
