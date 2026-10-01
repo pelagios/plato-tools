@@ -807,6 +807,9 @@ export class TeiReader {
     // A place name in the text, notes and commentary included: the source is the edition, and the
     // locator says where in it the words stand.
     if (ref !== undefined) this.attributes(t, READ_ATTRIBUTES, GENERAL_NAMES.has(local) ? 'type' : undefined);
+    // A name with a key and no ref takes the key path: its reg (the editors' regularised form) is not
+    // used there either, and is reported as it is beside a ref (in P4 as tei-reg, in mention()).
+    else if (attr('key') !== undefined && attr('reg') !== undefined && this.teiVariant !== 'p4') this.once('tei-attribute', `${local}@reg="${attr('reg')}"`);
     const nested = this.inPlaceMention > 0;
     this.inPlaceMention++; el.mention = true;
     const where = this.where();

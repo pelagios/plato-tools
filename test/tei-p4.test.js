@@ -87,6 +87,16 @@ test('reg, the editors\' regularised form, is reported and not carried', () => {
   assert.ok(!JSON.stringify(p4().doc).includes('"Roma"'));
   assert.ok(!examples(p4(), 'tei-attribute').some((e) => /@(reg|id|lang)=/.test(e)), examples(p4(), 'tei-attribute').join('; '));
 });
+test('in P5, a reg on a place name with a key and no ref is reported, as one beside a ref is', () => {
+  const doc = (pn) => `<TEI xmlns="http://www.tei-c.org/ns/1.0"><teiHeader><fileDesc><titleStmt><title>T</title></titleStmt></fileDesc></teiHeader><text><body><p>${pn}</p></body></text></TEI>`;
+  const keyed = mapped(doc('<placeName key="tgn,7000874" reg="Roma">Romae</placeName>'), { keyPatterns: { tgn: TGN } });
+  assert.deepEqual(names(keyed), ['Romae']);
+  assert.deepEqual(examples(keyed, 'tei-attribute'), ['placeName@reg="Roma"']);
+  assert.ok(!keyed.kinds.has('tei-reg'));
+  // Control: beside a ref it was already reported so; with no reg, nothing is.
+  assert.deepEqual(examples(mapped(doc('<placeName ref="http://vocab.getty.edu/tgn/7000874" reg="Roma">Romae</placeName>')), 'tei-attribute'), ['placeName@reg="Roma"']);
+  assert.deepEqual(examples(mapped(doc('<placeName key="tgn,7000874">Romae</placeName>'), { keyPatterns: { tgn: TGN } }), 'tei-attribute'), []);
+});
 test('Beta Code: a Greek name in ASCII is reported, naming the string, and its attestation carries no toponym', () => {
   assert.deepEqual(examples(p4(), 'tei-p4-beta-code'), ['*)aqh=nai (<placeName> on line 75)']);
   assert.ok(!JSON.stringify(p4().doc).includes('aqh=nai'));
