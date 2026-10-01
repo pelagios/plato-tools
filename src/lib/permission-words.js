@@ -19,7 +19,7 @@ export const SERVICE_NAMES = {
   'basemap:osm': 'OpenStreetMap',
   'basemap:carto': 'CARTO',
   'allmaps:allmaps': 'Allmaps',
-  'gazetteer:whg': 'the World Historical Gazetteer',
+  'gazetteer:whg': 'World Historical Gazetteer',
 };
 
 /** How a service on more than two sites is named in short. */

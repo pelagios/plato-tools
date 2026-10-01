@@ -223,7 +223,7 @@ kbd { font: .8em var(--font-mono); border: 1px solid var(--line); border-bottom-
    place's card beside a map of full height. On a narrow screen the two stack, the map first at half
    the window's height. The statuses have the same colours here as on the map (src/chora/map.js). */
 body.chora { display: flex; flex-direction: column; height: 100vh; }
-body.chora header.top { max-width: none; padding: .6rem 1.25rem .4rem; }
+body.chora header.top { max-width: none; margin: 0; align-self: stretch; padding: .6rem 1.25rem .4rem; }
 body.chora h1 { font-size: 1.6rem; }
 body.chora h1 .label { font-family: var(--font-text); font-size: .8rem; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-left: .5rem; }
 body.chora main.chora-main { max-width: none; width: 100%; margin: 0; padding: 0; flex: 1; display: grid; grid-template-columns: minmax(20rem, 28rem) 1fr; min-height: 0; }
