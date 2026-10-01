@@ -130,6 +130,7 @@ export function parseInput(text) {
   if (u.origin === ALLMAPS_ANNOTATIONS) {
     // ?url= of an image forwards to /images/<id>, computed here; of anything else, it is fetched as it is (and refused as forwarding).
     const inner = u.pathname === '/' && u.searchParams.get('url') ? parseInput(u.searchParams.get('url')) : null;
+    if (inner?.kind === 'allmaps-image') return inner;
     if (inner?.kind === 'service') return { kind: 'allmaps-image', serviceId: inner.serviceId };
     if (inner?.kind === 'url') return { kind: 'allmaps-image', serviceId: normaliseId(inner.url) };
     return { kind: 'annotation-url', url: u.href };

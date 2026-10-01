@@ -3130,6 +3130,8 @@ def iiif_checks(pw, url, tmp):
         waiting = soon(page, 'k => window.__chora.mapNeeds?.includes(k)', 30, IA) and not any(o['annotationId'] == kid for o in cstate(page)['overlays'])
         text = json.dumps(annotation(id=pid))
         paste(text)
+        # The map pasted is waiting too, before the reload is asked for (the line for A was there already, the map kept's).
+        pasted_waits = soon(page, '() => window.__chora.mapPasted === true', 20)
         said = line(IA)
         before = [o['annotationId'] for o in cstate(page)['overlays']]
         if said: panel_set([IA], reload=True, via=IA)
@@ -3137,9 +3139,9 @@ def iiif_checks(pw, url, tmp):
         s = cstate(page); handed = (s.get('resumed') or {}).get('maps') or {}
         for i in (kid, pid):
             page.evaluate("k => navigator.storage.getDirectory().then((r) => r.getDirectoryHandle('chora-overlays')).then((d) => d.removeEntry(k + '.json')).catch(() => {})", key(i))
-        return (waiting and f'Needs permission: {urlparse(A).netloc}' in said and kid not in before and pid not in before and both
+        return (waiting and pasted_waits and f'Needs permission: {urlparse(A).netloc}' in said and kid not in before and pid not in before and both
                 and (handed.get('pending') or {}).get('text') == text and handed.get('readmit') is True), {
-            'kept map waiting': waiting, 'line': said, 'shown before': before, 'both shown': both, 'handed over': {k: v for k, v in handed.items() if k != 'typed'},
+            'kept map waiting': waiting, 'pasted map waiting': pasted_waits, 'line': said, 'shown before': before, 'both shown': both, 'handed over': {k: v for k, v in handed.items() if k != 'typed'},
             'overlays': [o['annotationId'] for o in s['overlays']]}
     attempt('Chora maps: a map kept waiting on a withdrawn site and a map pasted on it: allowed from the line, one reload brings back both (the maps kept never take the place of the map pasted)', kept_and_pasted)
 

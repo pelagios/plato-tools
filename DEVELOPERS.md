@@ -774,7 +774,8 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   (from the last visit, or withdrawn) can wait at once: what they wait on (`mapNeed`) is built by
   `withNeed` from the two parts, each replaced only by its own, so the maps kept, looked at again on
   every change of permission, never take the place of the map pasted; the reload hands over both
-  (`reloadHandOver`: the map pasted, and whether maps kept wait), and after it the maps kept are
+  (`reloadHandOver`: the map pasted, and, for the record only, whether maps kept waited: they are
+  looked at again after every load whatever it says), and after it the maps kept are
   admitted again and then the map pasted is added. A permission set to Never
   is done without: the maps that need it are not shown, and nothing is said of them, but a map just
   pasted says it is set to Never. With no georeference, Allmaps is asked only from "Look for a

@@ -779,6 +779,7 @@ function renderMaps() {
   const needBox = $('map-needs');
   needBox.replaceChildren();
   state.mapNeeds = mapNeed ? mapNeed.subjects.map(([c, s]) => `${c}:${s}`) : [];
+  state.mapPasted = !!mapNeed?.pasted;
   for (const [c, s] of mapNeed?.subjects || []) {
     if (permissions.allowed(c, s)) continue;
     const p = document.createElement('p');
@@ -990,7 +991,7 @@ startWorker().then(async () => {
     await inTurn(() => readmitKept());
     // The map pasted that was waiting on the permissions just allowed (the maps kept are back already).
     const pending = resumed.maps?.pending;
-    if (pending && !pending.readmit) await addMap(pending);
+    if (pending) await addMap(pending);
     return;
   }
   // The user keeps no working data between visits: the drawings not saved and the file last written

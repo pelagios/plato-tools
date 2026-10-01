@@ -290,6 +290,8 @@ test('Allmaps\' ?url= address for an image is asked at /images/<id>, under Allma
   const viaInfo = `https://annotations.allmaps.org/?url=${encodeURIComponent(`${id}/info.json`)}`;
   assert.deepEqual(ov.parseInput(viaInfo), { kind: 'allmaps-image', serviceId: id });
   assert.deepEqual(ov.parseInput(`https://annotations.allmaps.org/?url=${encodeURIComponent(id)}`), { kind: 'allmaps-image', serviceId: id });
+  // Wrapped twice, it is unwrapped to the same lookup.
+  assert.deepEqual(ov.parseInput(`https://annotations.allmaps.org/?url=${encodeURIComponent(viaInfo)}`), { kind: 'allmaps-image', serviceId: id });
   // Not yet allowed: Allmaps' permission is needed, and nothing is asked.
   const net = network({ [byId]: json('allmaps-images-e564650581f5f6bb.json') });
   await assert.rejects(ov.resolve(ov.parseInput(viaInfo), { ...net, now: NOW }), needs(ALLMAPS));
