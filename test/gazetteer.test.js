@@ -609,7 +609,6 @@ test('the answers keep the root attribution, merged across batches, with null le
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 /** Given to a later call on a shared lookup: never used there, and never reaches the network. */
-const unusedFetch = async () => { throw new TypeError('the later fetch was used'); };
 
 /**
  * A stand-in for the Web Locks API's LockManager (exclusive mode only), which records who holds a
@@ -648,8 +647,9 @@ test('createLookup gives one shared lookup per endpoint: one request in flight a
   const OTHER = 'tok-other-1a2b3c';
   const s = service({ delay: 5 });
   const a = createLookup({ endpoint: 'https://shared-one.example/reconcile', token: TOKEN, fetch: s.fetch, batchSize: 10, locks: null });
-  // The same service written differently, a later token, and a batch size that differs: still the same lookup.
-  const b = createLookup({ endpoint: 'HTTPS://Shared-One.example/reconcile/', token: OTHER, fetch: unusedFetch, batchSize: 3, locks: null });
+  // The same service written differently, a later token, and a batch size that differs: still the same
+  // lookup. (A different fetch is refused: see 'a later createLookup … with another fetch throws'.)
+  const b = createLookup({ endpoint: 'HTTPS://Shared-One.example/reconcile/', token: OTHER, fetch: s.fetch, batchSize: 3, locks: null });
   assert.equal(a, b, 'one lookup for one endpoint');
   assert.equal(b.batchSize, 10, 'the first batch size stands');
   await Promise.all([a.reconcile(names(30, 'x')), b.reconcile(names(20, 'y')), a.extend(['i'], ['p'])]);
@@ -657,7 +657,7 @@ test('createLookup gives one shared lookup per endpoint: one request in flight a
   assert.equal(s.maxInFlight, 1);
   assert.ok(s.calls.every((c) => c.headers.Authorization === `Bearer ${OTHER}`), 'the later token is the one sent');
   // A call with no token leaves the token as it is; the earlier token is still cleaned from messages.
-  const c = createLookup({ endpoint: 'https://shared-one.example/reconcile', fetch: unusedFetch, locks: null });
+  const c = createLookup({ endpoint: 'https://shared-one.example/reconcile', locks: null });
   assert.equal(c, a);
   await c.reconcile([{ query: 'z' }]);
   assert.equal(s.calls.at(-1).headers.Authorization, `Bearer ${OTHER}`);
@@ -1409,4 +1409,86 @@ test('the WHG token is kept by permissions.token: no file names src/lib/whg-toke
   assert.deepEqual(texts.filter(([, t]) => t.includes('whg-token.js')).map(([f]) => f), []);
   const index = texts.find(([f]) => f === 'src/engine/gazetteer/index.js')[1];
   assert.match(index, /permissions\.token|`token` in src\/lib\/permissions\.js/);
+});
+
+test("a refusal of kind 'moved' says the answer was not used (the request was sent); every other refusal, that the gazetteer was not asked", async () => {
+  const moved = service({ answer: () => { throw refusal('moved', 'whgazetteer.org answered with a redirect.'); } });
+  const e1 = await lookup({ endpoint: WHG_ENDPOINT, fetch: moved.fetch, sleep: noSleep }).reconcile(names(1)).catch((e) => e);
+  assert.equal(e1.kind, 'refused');
+  assert.equal(e1.refusal, 'moved');
+  assert.equal(moved.calls.length, 1, 'asked once');
+  assert.equal(e1.message, "The gazetteer's answer was not used: whgazetteer.org answered with a redirect.");
+  // Control: each kind of refusal before sending keeps the words for a request never made.
+  for (const kind of ['never', 'undecided', 'reload', 'unprotected', 'address']) {
+    const s = service({ answer: () => { throw refusal(kind, `Refused as ${kind}.`); } });
+    const e = await lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch, sleep: noSleep }).reconcile(names(1)).catch((x) => x);
+    assert.equal(e.refusal, kind);
+    assert.equal(e.message, `The gazetteer was not asked: Refused as ${kind}.`, kind);
+  }
+});
+
+test("a refused request is not charged to the pacer's ledger, under the lock; a sent one, and a 'moved' one (sent, its answer not used), are", async () => {
+  const NOW = 1_000_000, KEY = 'whgazetteer.org:queries', BEFORE = [{ t: NOW - 1000, n: 7 }];
+  const run = async (answer) => {
+    const locks = fakeLocks();
+    const ledger = sharedLedger(locks);
+    ledger.map.set(KEY, structuredClone(BEFORE));
+    let charged = null;
+    const s = service({ delay: 0, answer: async (sent, call) => {
+      // What the ledger held while fetch was asked: the pacer had charged the batch by then.
+      charged = structuredClone(ledger.map.get(KEY));
+      return (answer ?? echo)(sent, call);
+    } });
+    const result = await lookup({ endpoint: WHG_ENDPOINT, fetch: s.fetch, batchSize: 50, locks, ledger, now: () => NOW, sleep: noSleep })
+      .reconcile(names(50)).catch((e) => e);
+    return { result, charged, after: ledger.map.get(KEY), unlocked: ledger.unlocked, calls: s.calls.length };
+  };
+  const refused = await run(() => { throw refusal('undecided'); });
+  assert.equal(refused.result.kind, 'refused', String(refused.result));
+  assert.equal(refused.calls, 1);
+  assert.deepEqual(refused.charged, [...BEFORE, { t: NOW, n: 50 }], 'charged before fetch was asked');
+  assert.deepEqual(refused.after, BEFORE, 'and refunded: the ledger is as it was');
+  assert.equal(refused.unlocked, 0, 'the refund was made holding the lock');
+  // A wrapper's retry: false is a refusal too, and refunded.
+  const final = await run(() => { throw Object.assign(new Error('Blocked here.'), { retry: false }); });
+  assert.equal(final.result.kind, 'refused');
+  assert.deepEqual(final.after, BEFORE);
+  // Control: a request sent and answered is charged its 50 queries.
+  const sent = await run();
+  assert.equal(sent.result[49][0].name, 'n49');
+  assert.deepEqual(sent.after, [...BEFORE, { t: NOW, n: 50 }]);
+  // 'moved': the request was sent, so it stays charged.
+  const moved = await run(() => { throw refusal('moved'); });
+  assert.equal(moved.result.refusal, 'moved');
+  assert.deepEqual(moved.after, [...BEFORE, { t: NOW, n: 50 }]);
+});
+
+test('a later createLookup for a shared endpoint with another fetch throws, naming the problem; the same fetch, or shared:false, is fine', async (t) => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  const EP = 'https://later-fetch.example/reconcile';
+  const s = service(), other = service();
+  const first = createLookup({ endpoint: EP, token: TOKEN, fetch: s.fetch, locks: null });
+  assert.equal(createLookup({ endpoint: EP, fetch: s.fetch, locks: null }), first, 'the same fetch: the same lookup');
+  assert.equal(createLookup({ endpoint: 'https://LATER-FETCH.example/reconcile/', locks: null }), first, 'no fetch: the same lookup');
+  assert.throws(() => createLookup({ endpoint: 'https://www.later-fetch.example/reconcile', token: 'tok-new-7777', fetch: other.fetch, locks: null }),
+    (e) => e instanceof TypeError && /already uses another fetch; pass permissions\.fetch/.test(e.message));
+  // The refused call changed nothing: its token was not taken, and the first fetch is still used.
+  await first.reconcile(names(1));
+  assert.equal(s.calls.length, 1);
+  assert.equal(other.calls.length, 0);
+  assert.equal(s.calls[0].headers.Authorization, `Bearer ${TOKEN}`);
+  // A lookup of its own may have any fetch.
+  const own = createLookup({ endpoint: EP, fetch: other.fetch, shared: false, locks: null });
+  assert.notEqual(own, first);
+  await own.reconcile(names(1));
+  assert.equal(other.calls.length, 1);
+  // A first call that gave no fetch uses the platform's: a later page caller's permissions.fetch differs.
+  const EP2 = 'https://later-fetch-two.example/reconcile';
+  createLookup({ endpoint: EP2, locks: null });
+  assert.throws(() => createLookup({ endpoint: EP2, fetch: s.fetch, locks: null }), /already uses another fetch/);
+  // Softer options still only warn.
+  assert.equal(warn.mock.callCount(), 0);
+  assert.equal(createLookup({ endpoint: EP, fetch: s.fetch, batchSize: 3, locks: null }), first);
+  assert.equal(warn.mock.callCount(), 1);
+  assert.match(String(warn.mock.calls[0].arguments[0]), /batchSize/);
 });
