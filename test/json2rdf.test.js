@@ -130,3 +130,15 @@ test('a number below 1e-6 is a double, not the integer 0 jsonld.js makes of it, 
   const values = outText(back.e, 'tiny.jsonl').trim().split('\n').slice(1).map((l) => JSON.parse(l).attestations[0].properties[0].value);
   assert.deepEqual(values.sort(), [...tiny].sort());
 });
+
+test('a source cited by every record is described once, and its timespan, a blank node, does not grow the set that remembers it', () => {
+  const lines = [];
+  const w = new Json2Rdf(CTX, (s, p, o) => lines.push(tripleNT(s, p, o)));
+  w.header({ profile: 'place-centric', gazetteer: { '@id': 'https://example.org/g', title: 'g' } });
+  const source = { '@id': 'https://example.org/source/s', title: 'S', timespan: { sourceLabel: '1086', startEarliest: '1086' } };
+  for (let i = 0; i < 2000; i++) w.record('spatialEntities', { '@id': `https://example.org/place/p${i}`, label: `p${i}`, attestations: [{ sources: [source], names: [{ toponym: `p${i}` }] }] });
+  // The source's own statements are kept, and written once (the presence); the statements linking it
+  // to each record's fresh timespan are not kept, since none can come again.
+  assert.equal(lines.filter((l) => l.includes('<https://example.org/source/s> <https://w3id.org/plato#authority_title>')).length, 1);
+  assert.ok(w.shared.size > 0 && w.shared.size < 10, `the set holds ${w.shared.size} entries`);
+});

@@ -69,8 +69,11 @@ export class Json2Rdf {
     this.seen.add(k);
     // A source with its own IRI is described again in every record that cites it. Across records
     // its triples are emitted once: the set grows with the number of distinct sources, not with the
-    // data, and is capped, past which repeats are simply written again (still the same graph).
-    if (this.inShared && s.termType === 'NamedNode') {
+    // data, and is capped, past which repeats are simply written again (still the same graph). A
+    // triple whose object is a blank node is never kept: blank nodes are labelled afresh in each
+    // record (_blank), so it cannot come again, and kept, a source's timespan filled the set with
+    // one entry for every record citing it (2 million entries, some 400 MB, at 200,000 places).
+    if (this.inShared && s.termType === 'NamedNode' && o.termType !== 'BlankNode') {
       if (this.shared.has(k)) return;
       if (this.shared.size < SHARED_CAP) this.shared.add(k);
     }
