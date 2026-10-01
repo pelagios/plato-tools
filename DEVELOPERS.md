@@ -128,8 +128,11 @@ with IIIF Georeference Annotations, and optionally the maps' IIIF manifests, is 
 (`detectGroup` in `input.js`; any other mix of several files is refused with a reason). On the command
 line they are `--georef FILE` and `--manifest FILE`, both repeatable, for a Recogito export only.
 Nothing is fetched. `annotationSource` (`pipeline.js`) then calls `AnnotationReader.useGeoreferences`,
-which reads each georeference file once (every map of an AnnotationPage), pairing each map with the
-manifest whose id is the one its annotation names, and `place(annotation, attestations)` after each
+which reads each georeference file once (every map of an AnnotationPage; a map given twice, by its
+annotation's id, is used once, the later modified of two versions), pairing each map with the
+manifest whose id is the one its annotation names if it shows the map's image (else a warning, and
+the map is used without it), failing that with a manifest given that shows the image (a warning
+naming both ids), and `place(annotation, attestations)` after each
 `annotation()`, which stays synchronous. Without georeferences neither is called, nothing of
 `src/engine/georef/` is loaded (the test counts Allmaps imports in a process of its own), and the
 output is byte for byte what it was (the test holds the digests).
@@ -151,7 +154,8 @@ output is byte for byte what it was (the test holds the digests).
   record's `controlPointMisfitKm` for a transformation fitted by least squares (null, so nothing,
   for a thin plate spline), rounded up to 0.01 km (`radiusKm`). The outline is reported, not
   carried. The image's citation is replaced by `georefCitation(record, { region })` (the exact
-  pixel box, unpadded) and followed by `georefAnnotationCitation(record)`; the notes get
+  pixel box, unpadded, but at least 1 pixel each way, so that a straight horizontal or vertical
+  line has a box) and followed by `georefAnnotationCitation(record)`; the notes get
   `georefNote(record, { misfit: true })` (no `fetched`: "retrieval date not recorded"; the misfit
   sentence says what the georeference's error is, or that a spline's is not estimated), and a
   rectangle's pixels in words where the map's locator does not give the same box.
@@ -164,9 +168,12 @@ output is byte for byte what it was (the test holds the digests).
   TODO at `roleOf`).
 - **Reporting.** Every region is reported by exactly one of the `annotation-region-*` kinds, and a
   placed one also by `annotation-region-shape`; with georeferences an SVG shape is not also
-  reported as `annotation-selector` (it still is when its annotation is not converted at all). A
-  georeference or manifest that cannot be read is an error, and the run goes on without it; one
-  that placed nothing, or a manifest no map uses, is a warning.
+  reported as `annotation-selector` (it still is when its annotation is not converted at all, and
+  when it is nested in `refinedBy`, which is never placed). A georeference or manifest that cannot
+  be read is an error, and the run goes on without it; one that placed nothing, or a manifest no
+  map uses, is a warning. Any error other than a `DataError` while placing a region is a fault in
+  the tools: it costs that region its point (`annotation-region-unplaced`, "an unexpected error"),
+  never the run, and is recorded in `unexpectedRegionErrors`, which the tests assert empty.
 - **The fixture** is constructed until a real Recogito Studio export of regions on the Rocque/Dury
   map replaces it: `test/fixtures/annotations/make-recogito-studio-regions.mjs` writes it, following
   Recogito Studio's exporter and Annotorious's serialiser step by step.
