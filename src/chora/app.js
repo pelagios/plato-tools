@@ -12,7 +12,7 @@ import { fingerprint, loadDrafts, saveDrafts, draftsWritten, forgetAllDrafts } f
 import { take as takeHandoff, clear as clearHandoff, keepForReload, takeResume } from './handoff.js';
 import { serialQueue, pageRequest, answers } from './queue.js';
 import * as permissions from '../lib/permissions.js';
-import { RELOAD_LOSES, REFUSED as PERMISSION_REFUSED } from '../lib/permission-words.js';
+import { RELOAD_LOSES, REFUSED as PERMISSION_REFUSED, NEEDS } from '../lib/permission-words.js';
 import * as ov from './overlays.js';
 import * as remote from './remote.js';
 import * as georef from '../engine/georef/index.js';
@@ -797,7 +797,7 @@ function renderMaps() {
     const a = e.attribution || {};
     const licence = a.licence ? `<a href="${esc(a.licence)}" target="_blank" rel="noopener noreferrer">${esc(a.licenceLabel || a.licence)}</a>` : '';
     return `<li data-overlay="${esc(o.key)}"><p class="overlay-title">${esc(o.title)}</p>
-      <p class="muted">Image from <code>${esc(o.origin)}</code> <button type="button" class="link" data-permissions="${esc(o.permission)}">${esc('Permissions…')}</button></p>
+      <p class="muted">Image from <code>${esc(o.origin)}</code> <button type="button" class="link" data-permissions="${esc(o.permission)}">${esc(NEEDS.open)}</button></p>
       ${a.credit ? `<p class="muted">${esc(a.credit)}</p>` : ''}
       ${licence ? `<p class="muted">Licence: ${licence}</p>` : ''}
       ${a.nonCommercial ? `<p class="note">${esc(ov.nonCommercialLine(a))} ${licence}</p>` : ''}
