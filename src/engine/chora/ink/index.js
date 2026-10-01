@@ -21,7 +21,7 @@
 //   followed from the click; simplify.js: Douglas–Peucker in IMAGE pixels, halved while it crosses itself.
 import { lab, lightness, lightnessWriter, labWriter } from './colour.js';
 import { composeEach } from './window.js';
-import { median3, unquantise } from './median.js';
+import { median3, unquantise, SCALE as RAW_SCALE } from './median.js';
 import { seedColour, deltaEMask, sauvolaMask, darkest } from './mask.js';
 import { floodFill, fillInto, bridgedFill, leak } from './fill.js';
 import { outline, keepHoles, ringArea } from './contour.js';
@@ -40,6 +40,14 @@ export { DEFAULTS, InkError } from './params.js';
 export const STROKE_MARGIN = 128;
 /** The most components of ink a line is followed through (each a gap jumped, at most). */
 export const MAX_COMPONENTS = 2000;
+/**
+ * A line's end is taken as flat when its ink fills at least this share of its full width over its last
+ * half width (a round cap fills π/4 ≈ 0.79 of it). Measured on drawn ends, from six pixels wide (5.5 as the width is measured, on a slant) flat ones
+ * fill 0.86 or more and round ones 0.80 or less; narrower (below 5 measured), on a slant, the two overlap (0.59 to 0.92 each),
+ * so there only an end at its full width to its last pixel (an end square to the pixels) is taken as flat,
+ * and any other is placed as a round one, as it always was.
+ */
+export const FLAT_END = 0.84, FLAT_END_NARROW = 0.97, NARROW_END = 5;
 
 /**
  * The window's pixels made ready for one kind of tracing, cached by the caller while the window stands
@@ -58,7 +66,9 @@ export function prepare(win, { colour = true } = {}) {
     return { w, h, L, a, b: median3(c.b, w, h) };
   }
   const L0 = lightness(rgba, w, h); rgba = null;
-  return { w, h, L: median3(L0, w, h) };
+  const raw = new Int16Array(w * h);
+  for (let i = 0; i < raw.length; i++) raw[i] = Math.round(L0[i] * RAW_SCALE);
+  return { w, h, L: median3(L0, w, h), raw };
 }
 
 /**
@@ -80,7 +90,8 @@ export function prepareTiles(frame, tiles, { colour = true } = {}) {
   }
   const q = new Int16Array(n);
   composeEach(frame, tiles, lightnessWriter(q));
-  return { w, h, L: L16(q) };
+  // The unfiltered L* is kept (at 1/64, 2 bytes a pixel) for where a line's ink ends (traceLine).
+  return { w, h, L: L16(q), raw: q };
 }
 
 const toImage = (frame) => ([x, y]) => [frame.x0 + x * frame.s, frame.y0 + y * frame.s];
@@ -302,16 +313,46 @@ export function traceLine(prep, seed, frame, params = {}) {
       const [ax, ay] = work[from], [bx, by] = work[at], L = Math.hypot(bx - ax, by - ay);
       if (!L) return;
       const ux = (bx - ax) / L, uy = (by - ay) / L, id = labels[px];
-      // Where the ink stops the way the line runs: the farthest of its pixels ahead, within half a width
-      // (and a pixel) of the line carried on.
-      let t = 0;
-      const R = Math.ceil(2 * width + 2), x0 = Math.floor(bx), y0 = Math.floor(by);
-      for (let y = Math.max(0, y0 - R); y <= Math.min(h - 1, y0 + R); y++) for (let x = Math.max(0, x0 - R); x <= Math.min(w - 1, x0 + R); x++) {
-        if (labels[y * w + x] !== id) continue;
-        const dx = x + 0.5 - bx, dy = y + 0.5 - by, along = dx * ux + dy * uy, across = Math.abs(dx * uy - dy * ux);
-        if (along > 0 && across <= width / 2 + 1) t = Math.max(t, along + 0.5);
+      // The ink about the end, as it was before the 3×3 median (which wears a flat end's corners away and
+      // takes a round end's tip off, so that, a few pixels wide, the two look alike): the pixels darker than
+      // halfway from the line's lightness to the paper's, in the component or touching it. Without the
+      // unfiltered lightness (a colour), the component's own pixels.
+      const R = Math.ceil(4 * width + 6), x0 = Math.floor(bx), y0 = Math.floor(by);
+      const X0 = Math.max(0, x0 - R), X1 = Math.min(w - 1, x0 + R), Y0 = Math.max(0, y0 - R), Y1 = Math.min(h - 1, y0 + R);
+      let isInk = (i) => labels[i] === id;
+      if (prep.raw) {
+        const inkL = [], paperL = [];
+        for (let y = Y0; y <= Y1; y++) for (let x = X0; x <= X1; x++) { const i = y * w + x; (labels[i] === id ? inkL : labels[i] ? null : paperL)?.push(prep.L[i]); }
+        const mid = (v) => v.sort((a, b) => a - b)[v.length >> 1];
+        if (inkL.length && paperL.length) {
+          const thr = ((mid(inkL) + mid(paperL)) / 2) * RAW_SCALE, raw = prep.raw;
+          const touches = (x, y) => { for (let j = Math.max(0, y - 1); j <= Math.min(h - 1, y + 1); j++) for (let k = Math.max(0, x - 1); k <= Math.min(w - 1, x + 1); k++) if (labels[j * w + k] === id) return true; return false; };
+          isInk = (i) => raw[i] <= thr && touches(i % w, (i / w) | 0);
+        }
       }
-      const go = t - width / 2;
+      // Each ink pixel within half a width (and a pixel) of the line carried on: how far along, and across.
+      // t, the farthest ink ahead; tMed, the same in the component (after the median: where a round end has
+      // always been placed from, its tip pixel worn away).
+      let t = 0, tMed = 0;
+      const along_ = [];
+      for (let y = Y0; y <= Y1; y++) for (let x = X0; x <= X1; x++) {
+        const i = y * w + x, mine = labels[i] === id, ink = isInk(i);
+        if (!mine && !ink) continue;
+        const dx = x + 0.5 - bx, dy = y + 0.5 - by, along = dx * ux + dy * uy, across = Math.abs(dx * uy - dy * ux);
+        if (across > width / 2 + 1) continue;
+        if (mine && along > 0) tMed = Math.max(tMed, along + 0.5);
+        if (!ink) continue;
+        along_.push(along);
+        if (along > 0) t = Math.max(t, along + 0.5);
+      }
+      const share = (a, b) => { let n = 0; for (const v of along_) n += Math.max(0, Math.min(b, v + 0.5) - Math.max(a, v - 0.5)); return n; };
+      const aRef = t - (1.5 * width + 1), Lr = Math.max(4, 2 * width);
+      const wRef = share(aRef - Lr, aRef) / Lr, T = aRef + share(aRef, Infinity) / wRef, r = wRef / 2;
+      // The end's shape: a flat (butt) end is at its full width over the last half width; a round one tapers
+      // there (to π/4 of the full width, ideally). Flat, the line runs to where the ink stops; round, to the
+      // centre of its cap, half a width short of it.
+      const flat = wRef > 0 && share(t - r, t) / (r * wRef) >= (width < NARROW_END ? FLAT_END_NARROW : FLAT_END);
+      const go = flat ? T : tMed - width / 2;
       if (go > 0) work[at] = [bx + go * ux, by + go * uy];
     };
     if (f.ends[1] === 'end') extendEnd(work.length - 1, Math.max(0, work.length - 1 - K), f.px.at(-1));

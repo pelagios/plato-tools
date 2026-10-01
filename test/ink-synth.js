@@ -33,10 +33,17 @@ export class Raster {
     return this.paint((x, y) => inPolygon([x, y], pts), c, [Math.min(...xs) - 1, Math.min(...ys) - 1, Math.max(...xs) + 1, Math.max(...ys) + 1]);
   }
   disc(cx, cy, r, c) { return this.paint((x, y) => (x - cx) ** 2 + (y - cy) ** 2 <= r * r, c, [cx - r - 1, cy - r - 1, cx + r + 1, cy + r + 1]); }
-  /** A line of width `width` along the polyline (round ends). */
-  stroke(pts, width, c) {
+  /**
+   * A line of width `width` along the polyline: round ends, or with { cap: 'flat' } flat (butt) ends, cut
+   * square across the line at its first and last points (a pen stroke, or a road ending at a border).
+   */
+  stroke(pts, width, c, { cap = 'round' } = {}) {
     const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]), r = width / 2;
-    return this.paint((x, y) => distToPolyline([x, y], pts) <= r, c, [Math.min(...xs) - r - 1, Math.min(...ys) - r - 1, Math.max(...xs) + r + 1, Math.max(...ys) + r + 1]);
+    // Beyond an end: ahead of the end point, the way the end segment runs.
+    const beyond = ([x, y], [ax, ay], [bx, by]) => (x - bx) * (bx - ax) + (y - by) * (by - ay) > 0;
+    const flat = cap === 'flat' && pts.length > 1;
+    return this.paint((x, y) => distToPolyline([x, y], pts) <= r && !(flat && (beyond([x, y], pts[1], pts[0]) || beyond([x, y], pts.at(-2), pts.at(-1)))), c,
+      [Math.min(...xs) - r - 1, Math.min(...ys) - r - 1, Math.max(...xs) + r + 1, Math.max(...ys) + r + 1]);
   }
   ring(cx, cy, r, width, c, gap = null) {
     return this.paint((x, y) => {

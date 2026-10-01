@@ -487,3 +487,23 @@ test('the worker\'s cache of windows made ready: two maps of the same size, the 
   assert.equal(made, 2, 'map B traced again was made ready again');
   assert.ok(Math.abs(b2.areaPx - b.areaPx) < 1);
 });
+
+test('a line\'s ends: flat (butt) ends traced to where the ink stops, to 0.5 px, at widths 3, 6 and 10 (and on a slant at 6 and 10); round ends to the stroke\'s end points, to 0.4 px, as before', () => {
+  // The ends of the trace matched to the stroke's two end points (either way round): the worse of the two.
+  const worst = (res, want) => {
+    const got = [res.points[0], res.points.at(-1)], d = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]);
+    const [a, b] = d(got[0], want[0]) <= d(got[0], want[1]) ? got : [got[1], got[0]];
+    return Math.max(d(a, want[0]), d(b, want[1]));
+  };
+  const trace = (line, width, cap, seed) => traceLine(prepare(win(new Raster(W, H).stroke(line, width, INK, { cap })), { colour: false }), seed, ONE);
+  const across = [[[100, 240.5], [500, 240.5]], [300, 240]], down = [[[320.5, 50], [320.5, 430]], [320, 240]], slant = [[[90.3, 80.6], [540.2, 390.1]], [315, 235]];
+  for (const [line, seed] of [across, down]) for (const width of [3, 6, 10]) {
+    const f = worst(trace(line, width, 'flat', seed), line), r = worst(trace(line, width, 'round', seed), line);
+    assert.ok(f <= 0.5, `flat, width ${width}, from ${line[0]}: an end off by ${f.toFixed(2)} px`);
+    assert.ok(r <= 0.4, `round, width ${width}, from ${line[0]}: an end off by ${r.toFixed(2)} px`);
+  }
+  for (const width of [6, 10]) {
+    const f = worst(trace(slant[0], width, 'flat', slant[1]), slant[0]);
+    assert.ok(f <= 0.5, `flat on a slant, width ${width}: an end off by ${f.toFixed(2)} px`);
+  }
+});
