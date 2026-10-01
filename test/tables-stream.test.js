@@ -57,6 +57,35 @@ test('a sheet streamed in chunks of any size gives exactly the header and rows P
   assert.deepEqual(Papa.parse(texts['repeated headings'], { header: true }).meta.fields, ['a', 'b', 'b_2', 'b_1', 'b_3']);
 });
 
+test('a CRLF line break split between two chunks, its CR ending one and its LF beginning the next, ends its row as an unbroken one does', async () => {
+  // Thirty rows, so that the line break is guessed from the first ten and the rest are streamed; one
+  // cell holds a quoted CRLF, which is a line break inside the cell, not the end of its row.
+  const rows = Array.from({ length: 30 }, (_, i) => (i === 17 ? `${i},"Roma\r\nnova"` : `${i},Place ${i}`));
+  const text = ['id,name', ...rows].join('\r\n') + '\r\n';
+  const whole = Papa.parse(text, { header: true, skipEmptyLines: 'greedy' });
+  assert.equal(whole.data.length, 30);
+  assert.equal(whole.data[17].name, 'Roma\r\nnova');
+  const cutAfter = (ch) => { const out = []; let at = 0; for (let i = 0; i < text.length; i++) if (text[i] === ch) { out.push(text.slice(at, i + 1)); at = i + 1; } if (at < text.length) out.push(text.slice(at)); return out; };
+  const read = async (chunks) => {
+    let fields = null; const got = [];
+    async function* given() { yield* chunks; }
+    for await (const cells of papaRecords(csvRecords(given(), { keepBlank: true }), (f) => { fields = f; })) got.push(papaRow(fields, cells));
+    return { fields, got };
+  };
+  // Every chunk but the last (the file's final \n) ends in the \r of a CRLF, and the next begins with its \n.
+  const split = cutAfter('\r');
+  assert.equal(split.length, 33);
+  assert.equal(split.at(-1), '\n');
+  assert.ok(split.slice(0, -1).every((c) => c.endsWith('\r')) && split.slice(1).every((c) => c.startsWith('\n')));
+  const s = await read(split);
+  assert.deepEqual(s.fields, whole.meta.fields);
+  assert.deepEqual(s.got, whole.data);
+  // The control: cut after the \n, each CRLF whole in its chunk, it reads the same.
+  const unbroken = cutAfter('\n');
+  assert.ok(unbroken.every((c) => c.endsWith('\r\n')));
+  assert.deepEqual((await read(unbroken)).got, whole.data);
+});
+
 // ---- in chunks of 1 KB -----------------------------------------------------------------------------
 /** A file whose stream gives `size` bytes at a time, counting what it gave. */
 class Chunked extends File {
@@ -319,9 +348,9 @@ test('the storage the page asks for allows for the tables\' working database and
   const z = await detect([zip]);
   assert.equal(z.textBytes, text, 'the sheets\' size, from the central directory');
   assert.notEqual(zip.size, text, 'the zip is not the size of its text');
-  assert.equal(storageNeed(z, [zip]), text * (3 + 8));
+  assert.equal(storageNeed(z, [zip]), text * (4 + 8));
   const csvs = filesOf(s);
-  assert.equal(storageNeed(await detect(csvs), csvs), text * (3 + 8));
+  assert.equal(storageNeed(await detect(csvs), csvs), text * (4 + 8));
   // The control: any other input, as before, four times its size (forty, gzipped).
   const jsonl = [new File(['{"profile":"place-centric"}\n'], 'x.jsonl')];
   assert.equal(storageNeed(await detect(jsonl), jsonl), jsonl[0].size * 4);

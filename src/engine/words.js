@@ -291,6 +291,11 @@ export const KRISIS_TEXT = {
 export const PASTED_BASEMAP = 'a basemap pasted by the contributor';
 export const choraDrawingNote = ({ basemap = 'Natural Earth', zoom } = {}) =>
   `Drawn by hand on ${basemap === PASTED_BASEMAP ? basemap : `the ${basemap} basemap`}${Number.isFinite(zoom) ? ` at zoom ${Math.round(zoom)}` : ''} in PLATO tools (Chora)`;
+/**
+ * A run refused because another tab of the main page holds the working files: the browser lets one
+ * tab at a time hold them (src/engine/worker.js, sqlitePool), and its own words for that are not ours.
+ */
+export const POOL_BUSY = 'Another tab of PLATO tools in this browser is working on a file. Wait for it to finish, or close it, then try again.';
 /** What a Chora save reports of itself (src/engine/chora/save.js), by kind. */
 export const CHORA_TEXT = {
   'chora-addition-invalid': 'A drawing could not be added, because PLATO would not accept it as it is, so nothing was saved',

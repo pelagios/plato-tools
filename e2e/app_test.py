@@ -847,6 +847,55 @@ def main():
             check('the storage warning shows when the quota is below what the tables need, naming the quota, and not with the real quota',
                   (low or {}).get('visible') is True and 'allows the page only 1000 bytes of storage' in low.get('text', '')
                   and (normal or {}).get('visible') is False, {'low': low, 'normal': normal})
+
+            # Two tabs of the main page: the working files are one tab's at a time while it runs. A run
+            # in a second tab while the first runs is told so in words, not in the browser's own
+            # (createSyncAccessHandle); the control, the same run alone, before and after, says nothing of it.
+            POOL_BUSY = 'Another tab of PLATO tools in this browser is working on a file. Wait for it to finish, or close it, then try again.'
+            def two_mains():
+                big = tables_copy(tmp / 'busy-tables')
+                with open(tmp / 'busy-tables' / 'places.csv', 'a', encoding='utf-8') as fh:
+                    fh.writelines(f'busy-{i},Busy place {i},GB\n' for i in range(200_000))
+                small = sorted((ex / 'customs').glob('*.csv'))
+                two = ctx.new_page()
+                try:
+                    two.goto('data:text/html,<title>no tools here</title><input id=picker type=file multiple>' if PROVE else url)
+                    if wait_state(two, lambda s: s.get('phase') == 'ready', 30, 'ready').get('phase') != 'ready': return None
+                    said = lambda p: p.evaluate("() => document.getElementById('summary')?.textContent || ''")
+                    alone = run_case(two, small, 'check')
+                    r = {'alone': alone.get('phase'), 'alone said': said(two)}
+                    page.set_input_files('#picker', [str(f) for f in big])
+                    if wait_state(page, lambda s: s.get('phase') == 'detected', 60, 'detection').get('phase') != 'detected': return {**r, 'first': 'not detected'}
+                    two.set_input_files('#picker', [])
+                    two.set_input_files('#picker', [str(f) for f in small])
+                    if wait_state(two, lambda s: s.get('phase') == 'detected', 60, 'detection').get('phase') != 'detected': return {**r, 'second': 'not detected'}
+                    # The first holds the working files once its run reports progress (which comes from the run, after
+                    # they are taken up), not when the page says it is running: its worker may not have begun.
+                    page.evaluate('() => { window.__plato.progress = null; }')
+                    page.click('#check')
+                    r['first running'] = wait_state(page, lambda s: s.get('phase') == 'running' and s.get('progress'), 60, 'running').get('phase')
+                    two.click('#check')
+                    during = wait_state(two, lambda s: s.get('phase') in ('done', 'error'), 60, 'run')
+                    r.update({'during': during.get('phase'), 'during said': said(two), 'during state': during.get('said'),
+                              'first still running': page.evaluate('() => window.__plato.phase')})
+                    first = wait_state(page, lambda s: s.get('phase') in ('done', 'error'), 300, 'run')
+                    r['first'] = first.get('phase'); r['first error'] = first.get('error')
+                    two.set_input_files('#picker', [])   # the same files again: emptied first, or the page would not look at them
+                    after = run_case(two, small, 'check')
+                    r.update({'after': after.get('phase'), 'after said': said(two)})
+                    return r
+                except Exception as e:
+                    return {'error': str(e).split('\n')[0][:200]}
+                finally:
+                    two.close()
+            busy = two_mains() or {}
+            check('a run in a second tab of the main page while the first runs says another tab is working, in words',
+                  busy.get('first running') == 'running' and busy.get('first still running') == 'running'
+                  and busy.get('during') == 'error' and busy.get('during state') == POOL_BUSY and busy.get('during said') == POOL_BUSY
+                  and 'Something went wrong' not in busy.get('during said', '') and busy.get('first') == 'done', busy)
+            check('the same run in the second tab alone, before and after, says nothing of another tab',
+                  busy.get('alone') == 'done' and busy.get('after') == 'done'
+                  and busy.get('alone said', '') and POOL_BUSY not in busy.get('alone said', '') + busy.get('after said', 'x'), busy)
             ctx.close()
             chora_checks(pw, url, tmp)
     finally:

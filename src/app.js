@@ -4,7 +4,7 @@
 // window.__plato for automated tests; nothing else reads it.
 import { fmtBytes, formatName, progressText, summary, groups, draftNote, explainedLines } from './engine/words.js';
 import { COLUMN_CHOICES, COLUMN_WORDS, columnWarnings, columnProblem } from './engine/words.js';
-import { review as W } from './engine/words.js';
+import { review as W, POOL_BUSY } from './engine/words.js';
 const REVIEW_WORDS = W;   // the review's words, where W names the words for the columns
 import { readable } from './engine/input.js';
 import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions } from './engine/krisis/work.js';
@@ -36,6 +36,8 @@ function onMessage({ data }) {
   else if (data.type === 'progress') onProgress(data);
   else if (data.type === 'done') onDone(data);
   else if (data.type === 'columns') onColumns(data);
+  // Another tab of the main page is running: said in words, and the run may be tried again.
+  else if (data.type === 'error' && data.kind === 'pool-busy') fail(data.message, POOL_BUSY);
   else if (data.type === 'error') fail(data.message);
 }
 
@@ -191,13 +193,13 @@ async function save(name) {
   setTimeout(() => URL.revokeObjectURL(a.href), 60000);
 }
 window.__plato_save = save;
-function fail(message) {
+function fail(message, words) {
   busy = false;
   buttons(false);
   $('progress').hidden = true; $('result').hidden = false;
-  $('summary').innerHTML = `<span class="warn">Something went wrong: ${escapeHtml(message)}</span>`;
+  $('summary').innerHTML = `<span class="warn">${escapeHtml(words || `Something went wrong: ${message}`)}</span>`;
   $('saves').innerHTML = ''; $('report').innerHTML = '';
-  Object.assign(state, { phase: 'error', error: message });
+  Object.assign(state, { phase: 'error', error: message, said: words || null });
 }
 // ---- Hermes: which column of a table of places holds what -------------------------------------------
 // The worker reads the columns and guesses (src/engine/hermes/columns.js); the page shows the guess,

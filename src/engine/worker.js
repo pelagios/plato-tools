@@ -23,6 +23,18 @@ async function sqlitePool() {
     // The main page's pool is let go between runs (tidy, in runEnv), and taken up again here. Another
     // tab of the main page may have taken it meanwhile and be running: that is said as for a pool in
     // use at install, and nothing is changed, so the next run may try again.
+    // A take-up refused part-way leaves the pool neither paused nor usable: sqlite-wasm asks for every
+    // file's access handle at once, gives up at the first refused, and keeps those granted after that,
+    // so the pool holds some files (keeping other tabs out) with its VFS unregistered, and does not
+    // try again (it is not paused), so that every database opened after says "no such vfs" for the
+    // page's life. pauseVfs alone cannot mend that: it unregisters the VFS first, which throws, and
+    // lets nothing go. So the VFS is registered again, from where it was installed, and paused, which
+    // lets the stray handles go, and the take-up is tried again in full (probed with two tabs of
+    // headless Chromium, another holding two of the pool's four files, 1 October 2026).
+    const { capi } = pool.sqlite3;
+    if (!poolName && !pool.vfs.isPaused() && !capi.sqlite3_vfs_find(pool.vfs.vfsName)) {
+      try { capi.sqlite3_vfs_register(pool.cVfs, 0); pool.vfs.pauseVfs(); } catch { /* tried again at the next run */ }
+    }
     if (pool.vfs.isPaused()) {
       try { await pool.vfs.unpauseVfs(); } catch (e) { throw poolBusy(e) ? Object.assign(new Error(e.message), { kind: 'pool-busy' }) : e; }
     }
@@ -36,7 +48,8 @@ async function sqlitePool() {
   let vfs;
   try { vfs = await sqlite3.installOpfsSAHPoolVfs({ clearOnInit: true, initialCapacity: 8, forceReinitIfPreviouslyFailed: true, ...own }); }
   catch (e) { throw poolBusy(e) ? Object.assign(new Error(e.message), { kind: 'pool-busy' }) : e; }
-  pool = { sqlite3, vfs };
+  // Where the VFS lives, kept for registering it again (above): sqlite-wasm keeps its own to itself.
+  pool = { sqlite3, vfs, cVfs: sqlite3.capi.sqlite3_vfs_find(vfs.vfsName) };
   return pool;
 }
 // The browser's refusal of a file another tab holds open (createSyncAccessHandle, when an access
@@ -232,7 +245,11 @@ async function choraCommand(data) {
     const db = new vfs.OpfsSAHPoolDb(CHORA_DB);
     db.exec(pragmas());
     // Opening a dataset leaves the last saved file where it is.
-    const { env, tidy } = await runEnv({ clearOutputs: false, outputs: CHORA_OUT });
+    // The session database is open from here: if the run cannot begin (its outputs folder refused),
+    // it is closed, not left holding its file until the page is reloaded.
+    let env, tidy;
+    try { ({ env, tidy } = await runEnv({ clearOutputs: false, outputs: CHORA_OUT })); }
+    catch (e) { try { db.close(); } catch {} throw e; }
     let store;
     try { store = await choraLoad(input, env, db, { name: inputName(input, data.name) }); }
     catch (e) { try { db.close(); } catch {} throw e; }
