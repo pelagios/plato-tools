@@ -108,11 +108,29 @@ function boxOf(pixels) {
   return [x0, y0, w, h];
 }
 
+const sized = (d) => d && Number.isFinite(d.width) && Number.isFinite(d.height) && d.width > 0 && d.height > 0;
+/**
+ * The region [x, y, w, h] of image pixels widened by `pad` CANVAS pixels each way ([x−p, y−p, w+2p,
+ * h+2p], p the pad scaled from canvas to image pixels; the pad as image pixels when either size is
+ * unknown), and kept within the image when its size is known. A pad of 0 leaves the region as it is.
+ */
+export function withContext(region, pad, record = {}) {
+  if (!pad) return region;
+  const c = record.canvasSize, i = record.imageSize, both = sized(c) && sized(i);
+  const px = both ? pad * (i.width / c.width) : pad, py = both ? pad * (i.height / c.height) : pad;
+  const [x, y, w, h] = region;
+  let x0 = x - px, y0 = y - py, x1 = x + w + px, y1 = y + h + py;
+  if (sized(i)) { x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(i.width, x1); y1 = Math.min(i.height, y1); }
+  // Off the image altogether (not so for a point on the map's mask): left for georef to refuse, in words.
+  return x1 > x0 && y1 > y0 ? [x0, y0, x1 - x0, y1 - y0] : region;
+}
+
 /**
  * What a drawing traced from the map of `g` carries until it is saved: { key, title, record, region,
  * pad, partial, fetchedAt, licence }. record is georef's (toPixels, image pixels); region the box of
  * image pixels it covers (lines and areas followed along their curve on the map, to a pixel); pad the
- * context given around it in the citation (POINT_CONTEXT_PX for a point, none for a line or area).
+ * context, in canvas pixels, put around it in the citation (POINT_CONTEXT_PX for a point, none for a
+ * line or area; withContext, when it is saved: so a draft kept before it is cited the same way).
  * `meta` gives key, title, partial, fetchedAt (when the georeference was fetched; null if pasted) and
  * licence (the map's, to link in the citation). Throws TraceError when the round trip fails, and
  * DataError when the georeference cannot place the drawing.
@@ -141,7 +159,9 @@ export async function traceFor(g, drawn, meta = {}) {
 export function tracedParts(trace, { zoom, role } = {}) {
   const anchor = role === 'LabelAnchor' || role === georef.LABEL_ANCHOR;
   const record = anchor ? { ...trace.record, role: georef.LABEL_ANCHOR } : trace.record;
-  const map = georef.georefCitation(record, { region: trace.region, pad: trace.pad });
+  // The context is put into the region here, and no pad is passed: georefCitation's own padding (2% of
+  // the box now; none by default once georef takes a pad option) then adds nothing a point depends on.
+  const map = georef.georefCitation(record, { region: withContext(trace.region, trace.pad, record) });
   if (trace.licence) map.source = { ...map.source, licence: trace.licence };
   const citations = [map, ...(record.annotationId ? [georef.georefAnnotationCitation(record)] : [])];
   const notes = `${choraTracingNote({ zoom })} ${georef.georefNote(record, trace.fetchedAt ? { fetched: trace.fetchedAt } : {})}`;

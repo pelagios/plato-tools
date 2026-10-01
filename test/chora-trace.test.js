@@ -79,6 +79,32 @@ test('the region traced is its box of image pixels, at least 1 pixel each way; a
   assert.equal(flat.pad, 0);
 });
 
+test('a traced point is cited with its context: a box at least twice POINT_CONTEXT_PX of the canvas each way, in canvas units however the canvas is scaled, and kept on the canvas; a line or area gets none', async () => {
+  const C = trace.POINT_CONTEXT_PX;
+  const box = (locator) => { const m = /#xywh=(\d+),(\d+),(\d+),(\d+)$/.exec(locator); assert.ok(m, locator); return m.slice(1).map(Number); };
+  // A canvas half the image's size, and one twice it: the context is in CANVAS pixels either way.
+  const scaled = (k) => { const m = structuredClone(MANIFEST); const c = m.sequences[0].canvases[0]; c.width = 512 * k; c.height = 512 * k; return m; };
+  for (const [name, g, k] of [['canvas = image', grid, 1], ['canvas half the image', await georef.readGeoreference(GRID, { manifest: scaled(0.5) }), 0.5], ['canvas twice the image', await georef.readGeoreference(GRID, { manifest: scaled(2) }), 2]]) {
+    const t = await trace.traceFor(g, { type: 'Point', coordinates: await at(g, 256, 256) }, { key: 'grid' });
+    const [x, y, w, h] = box(trace.tracedParts(t, { zoom: 12 }).citations[0].locator);
+    assert.ok(w >= 2 * C && h >= 2 * C, `${name}: ${[x, y, w, h]} is not ${2 * C} canvas px each way`);
+    // ...and not much more: the point, its context, and georef's rounding (and its 2% of the box, while it pads).
+    assert.ok(w <= 2 * C + 8 && h <= 2 * C + 8, `${name}: ${[x, y, w, h]}`);
+    const mid = 256 * k;
+    assert.ok(x <= mid - C && x + w >= mid + C && y <= mid - C && y + h >= mid + C, `${name}: ${[x, y, w, h]} is not centred on ${mid}`);
+  }
+  // Near the corner of the image: the context is kept on the canvas, not cut off the citation.
+  const corner = await trace.traceFor(grid, { type: 'Point', coordinates: await at(grid, 20, 20) }, { key: 'grid' });
+  const [cx, cy, cw, ch] = box(trace.tracedParts(corner, { zoom: 12 }).citations[0].locator);
+  assert.ok(cx === 0 && cy === 0 && cw >= 20 + C && ch >= 20 + C && cw < 2 * C + 20, String([cx, cy, cw, ch]));
+  // A line or area: its own box, not the point's context (georef's current 2% of the larger side is
+  // allowed, knowingly: src/engine/georef/ pads every region so, until its pad option defaults to 0).
+  const flat = await trace.traceFor(grid, { type: 'LineString', coordinates: [await at(grid, 100, 250), await at(grid, 300, 250)] }, { key: 'grid' });
+  const [, , lw, lh] = box(trace.tracedParts(flat, { zoom: 12 }).citations[0].locator);
+  assert.ok(lw >= 200 && lw <= Math.ceil(200 * 1.04) + 2, `line width ${lw}`);
+  assert.ok(lh < 2 * C, `line height ${lh}: given a point's context`);
+});
+
 test('the round-trip guard: a drawing comes back through the georeference to where it was drawn, to a small share of a pixel, on a thin plate spline, polynomials of order 1 and 2', async () => {
   for (const [name, g, pts] of [['rocque (thin plate spline)', rocque, [[3000, 2000], [8000, 3000], [5000, 5000]]], ['british dominions (polynomial)', dominions, [[2000, 2000], [5000, 2500], [3500, 4500]]], ['order 2', order2, [[100, 100], [400, 150], [250, 420]]]]) {
     const ring = [];
