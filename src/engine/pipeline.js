@@ -21,7 +21,7 @@ import { teiSource } from './hermes/tei.js';
 import { genericSource, genericProfile } from './hermes/generic.js';
 import { lineChunks, lines, jsonDocument, annotationItems, TABLE_SHEETS, DataError, sheetOf, zipEntries, zipEntryText } from './input.js';
 import { csvRecords, textChunks, papaRecords, papaRow } from '../formats/csv.js';
-import { Report, LOSS_TEXT, droppedText, FORMAT_WORDS } from './report.js';
+import { Report, LOSS_TEXT, droppedText, FORMAT_WORDS, WORKBOOK_TEXT, dateTimeWords } from './report.js';
 
 export const TARGETS = {
   'plato-jsonl': { label: 'PLATO JSON Lines (.jsonl): one place per line', ext: '.jsonl' },
@@ -284,19 +284,50 @@ export function dateText(d, format) {
 }
 
 /**
+ * The columns of each sheet that take a date alone (YYYY-MM-DD, or a year), by sheet name: those
+ * whose format in the table definitions accepts a date and refuses a date with a time of day.
+ */
+export function dateOnlyColumns(csvMeta) {
+  const out = new Map();
+  for (const t of csvMeta.tables) {
+    const cols = t.tableSchema.columns.filter((c) => {
+      const f = c.datatype?.format;
+      if (typeof f !== 'string') return false;
+      try { const re = new RegExp(f); return re.test('2020-07-01') && !re.test('2020-07-01T09:30:00'); } catch { return false; }
+    }).map((c) => c.name);
+    if (cols.length) out.set(t.url.replace(/\.csv$/, ''), new Set(cols));
+  }
+  return out;
+}
+
+/**
  * One sheet of a workbook (.xlsx or .ods, both read by SheetJS) as CSV text, each cell's value as
  * stored, not as its number format shows it: a coordinate formatted 0.00 keeps all its digits, a
  * percentage or an amount of money is the number itself (0.256, not 25.60%), and a date is ISO 8601,
- * not the m/d/yy of a format. A text cell is its text as typed, so 007 stays 007.
+ * not the m/d/yy of a format. A text cell is its text as typed, so 007 stays 007. In a column of
+ * dateOnly (names from the header row, as a CSV file's are matched), a date with a time of day is
+ * written as the date alone, and timeDropped(row, column, given, date) is told of it, row being the
+ * row of the sheet (the header is row 1).
  */
-export function workbookSheetCsv(XLSX, data, name) {
+export function workbookSheetCsv(XLSX, data, name, { dateOnly, timeDropped } = {}) {
   const wb = XLSX.read(data, { type: 'array', dense: true, cellDates: true, cellNF: true, UTC: true, sheets: name });
   const ws = wb.Sheets[name];
-  for (const row of ws['!data'] || []) for (const cell of row || []) {
-    if (!cell) continue;
+  const rows = ws['!data'] || [];
+  // The header is the first row with anything in it, as sheet_to_csv leaves out blank rows.
+  const header = rows.find((r) => r && r.some((c) => c && c.v !== undefined && c.v !== ''));
+  const dateCol = (header || []).map((c) => !!(dateOnly && c && dateOnly.has(String(c.v).trim().toLowerCase())));
+  rows.forEach((row, r) => (row || []).forEach((cell, c) => {
+    if (!cell) return;
     if (cell.t === 'n' && typeof cell.v === 'number') cell.w = numberText(cell.v);
-    else if (cell.t === 'd' && cell.v instanceof Date && !isNaN(cell.v)) cell.w = dateText(cell.v, cell.z);
-  }
+    else if (cell.t === 'd' && cell.v instanceof Date && !isNaN(cell.v)) {
+      cell.w = dateText(cell.v, cell.z);
+      if (row !== header && dateCol[c] && cell.w.includes('T')) {
+        const date = cell.w.slice(0, cell.w.indexOf('T'));
+        timeDropped?.(r + 1, String(header[c].v).trim(), cell.w.replace('T', ' ').replace(/:00$/, ''), date);
+        cell.w = date;
+      }
+    }
+  }));
   // Each number and date is written as the text set above (sheet_to_csv writes a cell's w).
   return XLSX.utils.sheet_to_csv(ws, { blankrows: false, rawNumbers: false }).replace(/^﻿/, '');
 }
@@ -331,9 +362,11 @@ async function tableSheetsOf(input, env, rep) {
     catch (e) { throw damaged(e); }
     for (const name of names) {
       if (!TABLE_SHEETS.includes(name.toLowerCase())) continue;
+      const dateOnly = dateOnlyColumns(env.csvMeta).get(sheetOf(name));
+      const timeDropped = (row, column, given, date) => rep.warning('workbook-date-time', WORKBOOK_TEXT['workbook-date-time'], dateTimeWords(name, row, column, given, date));
       sheets.set(sheetOf(name), { label: `${name} in ${file.name}`, chunks: async function* () {
         let csv;
-        try { csv = workbookSheetCsv(XLSX, data, name); }
+        try { csv = workbookSheetCsv(XLSX, data, name, { dateOnly, timeDropped }); }
         catch (e) { throw damaged(e); }
         yield csv;
       } });

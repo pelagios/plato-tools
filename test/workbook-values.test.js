@@ -69,11 +69,46 @@ for (const bookType of ['xlsx', 'ods']) {
   });
 }
 
-test('control: a date and time in from, which takes no time, is reported, not cut to the date', async () => {
-  const bytes = workbook('xlsx', { t: 'd', v: utc(2020, 6, 1, 9, 30) });
-  assert.match(workbookSheetCsv(XLSX, bytes, 'names').split('\n')[1], /,2020-07-01T09:30:00,2020-07-02,/);
-  const r = await go([new File([bytes], 'customs.xlsx')], 'check');
-  assert.ok(errors(r).some((e) => e.kind === 'table' && /\bfrom\b/.test(JSON.stringify(e)) && /2020-07-01T09:30:00/.test(JSON.stringify(e))), JSON.stringify(errors(r)));
+// A date with a time of day in a column that takes a date alone (from, to): the date is kept, the
+// time dropped, and a warning names the cell, so that the user checks the date (a time zone can
+// have moved it a day). Here from has a time of day, to is at midnight, and date (free text) has a
+// time of day it keeps.
+const timed = workbook('xlsx', { t: 'd', v: utc(2020, 6, 1, 9, 30) });
+const dateTimes = (r) => r.report.items.filter((i) => i.kind === 'workbook-date-time');
+
+for (const bookType of ['xlsx', 'ods']) {
+  const bytes = workbook(bookType, { t: 'd', v: utc(2020, 6, 1, 9, 30) });
+  test(`${bookType}: a time of day in from gives the date, and a warning naming the cell`, async () => {
+    const r = await go([new File([bytes], `customs.${bookType}`)], 'convert', 'plato-jsonl', { base: 'https://example.org/customs/' });
+    assert.deepEqual(errors(r), []);
+    const w = dateTimes(r);
+    assert.equal(w.length, 1, JSON.stringify(r.report.items));
+    assert.equal(w[0].severity, 'warning');
+    assert.equal(w[0].count, 1);
+    assert.deepEqual(w[0].examples, ['names row 2, from: 2020-07-01 09:30 was read as the date 2020-07-01; check the date.']);
+    assert.match(w[0].message, /check each date/);
+    const atts = outText(r.e, Object.keys(r.e.outs)[0]).trim().split('\n').slice(1).flatMap((l) => JSON.parse(l).attestations || []);
+    const named = atts.find((a) => a.names?.[0]?.toponym === '007');
+    assert.deepEqual(named.timespans, [{ sourceLabel: '2021-05-04T13:45:30', startEarliest: '2020-07-01', endLatest: '2020-07-02' }]);
+  });
+}
+
+test('a date at midnight in to gives the date and no warning; nor does a time of day in date, which takes any text', async () => {
+  const r = await go([new File([timed], 'customs.xlsx')], 'check');
+  const w = dateTimes(r);
+  // The warning is there (for from), so that its naming no other cell says something.
+  assert.equal(w.length, 1, JSON.stringify(r.report.items));
+  assert.equal(w[0].count, 1);
+  assert.ok(w[0].examples.every((e) => /^names row 2, from: /.test(e)), JSON.stringify(w[0].examples));
+  assert.ok(!w[0].examples.some((e) => /, (to|date): /.test(e)));
+});
+
+test('workbookSheetCsv drops the time only in the columns it is given, and says where', () => {
+  const told = [];
+  const csv = workbookSheetCsv(XLSX, timed, 'names', { dateOnly: new Set(['from', 'to']), timeDropped: (...a) => told.push(a) });
+  assert.match(csv.split('\n')[1], /,2021-05-04T13:45:30,2020-07-01,2020-07-02,/);
+  assert.deepEqual(told, [[2, 'from', '2020-07-01 09:30', '2020-07-01']]);
+  assert.match(workbookSheetCsv(XLSX, timed, 'names').split('\n')[1], /,2021-05-04T13:45:30,2020-07-01T09:30:00,2020-07-02,/);
 });
 
 test('numberText is the shortest round-trip form, never an exponent', () => {

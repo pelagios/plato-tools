@@ -149,9 +149,12 @@ are held to.
   a coordinate formatted `0.00` keeps all its digits, a General number all 15 or more (SheetJS's
   formatted text has 11), a whole number formatted `0.00` is `42`, and a percentage or an amount of
   money is the number (`0.95`, not `95%`). A date is ISO 8601: `YYYY-MM-DD` at midnight, the form
-  `from` and `to` take; otherwise `YYYY-MM-DDThh:mm:ss`, with no zone, as the workbook gives none
-  (it does not validate in `from` or `to`, which take no time, and is reported there); a cell whose
-  format shows no day nor year is a time, `hh:mm:ss`. The workbook is read with `UTC: true`, so a
+  `from` and `to` take; otherwise `YYYY-MM-DDThh:mm:ss`, with no zone, as the workbook gives none;
+  a cell whose format shows no day nor year is a time, `hh:mm:ss`. In a column that takes a date
+  alone (`from`, `to`, `temporal_from`, `temporal_to`: any whose format in the table definitions
+  takes a date and refuses a time, `dateOnlyColumns`), a date with a time of day keeps the date,
+  drops the time, and is warned of by sheet, row and column (`workbook-date-time`, words in
+  `report.js`), so that the user checks it: a time of day can mean that a time zone moved the date. The workbook is read with `UTC: true`, so a
   Date's UTC fields are the date as stored: SheetJS 0.20.3 gives UTC Dates from `read` whatever
   the option, but its `sheet_to_json` turns them to local time, and `toISOString` on a local
   midnight in London in summer is the day before. A text cell is its text, so `007` stays `007`.

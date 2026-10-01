@@ -297,3 +297,10 @@ export function droppedText(key, format) {
 }
 // Each format with its verb, so that "the spreadsheet tables have" agrees.
 export const FORMAT_WORDS = { lpf: 'Linked Places Format has', 'lpf-seq': 'Linked Places Format has', tables: 'the spreadsheet tables have', ntriples: 'RDF has', 'plato-json': 'PLATO JSON has', 'plato-jsonl': 'PLATO JSON has' };
+
+// What reading a workbook reports (pipeline.js, workbookSheetCsv).
+export const WORKBOOK_TEXT = {
+  'workbook-date-time': "A date in a column that takes a date alone (such as from and to) has a time of day in the workbook: the date is kept and the time dropped. A time of day can mean that a time zone moved the date to the day before or after, so check each date named.",
+};
+/** One date of 'workbook-date-time': where it is, what the workbook holds, and what it was read as. */
+export const dateTimeWords = (sheet, row, column, given, date) => `${sheet} row ${row}, ${column}: ${given} was read as the date ${date}; check the date.`;
