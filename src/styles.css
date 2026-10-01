@@ -157,7 +157,8 @@ a:visited { color: var(--accent); }
    the order h1 > h2 > h3). The whole card is the link; Chora's, to a page of its own, has a double band. */
 .tools-bare { margin: 1.5rem 0 1.25rem; }
 .tools.choose .tool { padding: 0; display: flex; flex-direction: column; }
-.tools.choose .tool-link { flex: 1 0 auto; padding: .65rem .85rem .75rem; }
+.tools.choose .tool-link { flex: 1 0 auto; padding: calc(.85rem + 11px) .85rem .75rem; }
+.tools.choose .tool.coming .tool-link { padding-top: .65rem; }
 .tools.choose .tool-link .label { margin: 0 0 .35rem; }
 .tool .go { display: block; margin-top: .45rem; font-size: .88rem; color: var(--accent); }
 .tool .go .arrow { display: inline-block; transition: transform .12s; }
@@ -168,7 +169,7 @@ a:visited { color: var(--accent); }
 .tool:has(.tool-link[aria-current]) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .tool-link[aria-current] .go { font-weight: 700; }
 .tools { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; grid-template-columns: repeat(auto-fill, minmax(14.5rem, 1fr)); }
-.tool { position: relative; border: 1px solid var(--line); border-radius: 8px; padding: calc(.65rem + 10px) .85rem .75rem; background: var(--bg); overflow: hidden; }
+.tool { position: relative; border: 1px solid var(--line); border-radius: 8px; padding: calc(.85rem + 11px) .85rem .75rem; background: var(--bg); overflow: hidden; }
 /* The logo's rings, outermost first, as bands across the top of each card: the pin's blue, white,
    gold, the light blue of the iris and the dark of the pupil. A card that is only planned has none. */
 .tool::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 11px;
