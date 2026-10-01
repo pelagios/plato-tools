@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Constructed for the tests of TEI keys (test/tei-reading.test.js); not from any edition. The keys
+     are written as Perseus writes them (key="tgn,7011179": Getty TGN, the prefix before a comma) and
+     as EpiDoc projects do (key="pleiades:579885"), with one of no prefix and one of a prefix no
+     gazetteer is known by. -->
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader>
+    <fileDesc>
+      <titleStmt><title>Keys in the Perseus manner (constructed)</title></titleStmt>
+      <publicationStmt><idno type="URI">https://example.org/keys</idno></publicationStmt>
+      <sourceDesc><p>Constructed; no original.</p></sourceDesc>
+    </fileDesc>
+  </teiHeader>
+  <text xml:lang="en">
+    <body>
+      <div type="edition">
+        <div type="textpart" subtype="book" n="1">
+          <p>From <placeName key="tgn,7011179">Athens</placeName> to <placeName key="tgn,7010720">Sparta</placeName>,
+            and back by <placeName key="tgn,7001393">Corinth</placeName>.</p>
+          <p>The Latin <placeName key="pleiades:579885">Athenae</placeName>; a key out of shape,
+            <placeName key="pleiades:athens">Athenai</placeName>.</p>
+          <p>A key with no prefix: <placeName key="Q1524">Athína</placeName>. A prefix no gazetteer is known
+            by: <placeName key="perseus,Argos">Argos</placeName>.</p>
+          <p>A ref and a key: <placeName ref="https://pleiades.stoa.org/places/570106" key="tgn,7010832">Argos</placeName>.</p>
+        </div>
+      </div>
+    </body>
+  </text>
+</TEI>

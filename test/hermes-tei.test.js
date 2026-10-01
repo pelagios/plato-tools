@@ -41,8 +41,8 @@ const VERSE = mapped(text('verse-constructed.xml'), 'verse-constructed.xml');
 const PTR = mapped(text('pointers-constructed.xml'), 'pointers-constructed.xml');
 const WHG = mapped(text('whg-constructed.xml'), 'whg-constructed.xml');
 
-test('there are fixtures: a real EpiDoc edition and the four constructed ones', () => {
-  assert.deepEqual(FIXTURES, ['isicily-ISic000934.xml', 'pointers-constructed.xml', 'prose-constructed.xml', 'verse-constructed.xml', 'whg-constructed.xml']);
+test('there are fixtures: a real EpiDoc edition and the five constructed ones', () => {
+  assert.deepEqual(FIXTURES, ['isicily-ISic000934.xml', 'keys-constructed.xml', 'pointers-constructed.xml', 'prose-constructed.xml', 'verse-constructed.xml', 'whg-constructed.xml']);
 });
 
 for (const f of FIXTURES) {

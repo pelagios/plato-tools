@@ -285,7 +285,10 @@ readers link to those headings, so keep them.
   `</teiHeader>` after `header()`, so that the source, the own host and the `geoDecl` are read from
   the whole header. With `headerPlaces` (held), a findspot or place of origin in the header
   goes on the same queue (`headerMention`, `headerPlace`), so its prefixes are those in force at
-  `</teiHeader>`. Entities declared with their text in the file's own DOCTYPE are given to
+  `</teiHeader>`. A place name with no ref and a `@key` is converted with `keyPatterns`
+  (`fromKey`, through `addressFromPattern` in `addresses.js`); keys with no pattern are counted by
+  prefix and reported at `close()`. `teiKeyPrefixes(input)` streams the file through a `TeiReader`
+  with an `onKey` hook, for the page's prefill. Entities declared with their text in the file's own DOCTYPE are given to
   saxes' `ENTITIES`; an external entity is never read. The file is parsed as a stream with saxes, with
   no DOM (a Web Worker has none); the only thing held to the end is a place name waiting for a
   `<place>` later in the file, indexed by the id it waits for. The edition, from its `teiHeader`, is the source; a place name's

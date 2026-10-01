@@ -21,7 +21,7 @@ import { SaxesParser } from 'saxes';
 import { PLATO, isAbsoluteIri } from '../../lib/context.js';
 import { DataError, textStream } from '../input.js';
 import { LOSS_TEXT } from '../report.js';
-import { placeAddress, addressNote } from './addresses.js';
+import { placeAddress, addressNote, addressFromPattern, patternProblem, GAZETTEER_PATTERNS } from './addresses.js';
 
 export const TEI_NS = 'http://www.tei-c.org/ns/1.0';
 const ATTESTED = PLATO + 'Attested';
@@ -52,8 +52,47 @@ const HELD_OPTIONS = { commentaryPlaces: 'commentary places', headerPlaces: 'hea
  */
 export function teiReadingRefusal(reading = {}) {
   for (const [k, words] of Object.entries(HELD_OPTIONS)) if (reading[k] && !editorialIri) return `Converting ${words}, marked as the editors' words, is ${EDITORIAL_HELD}.`;
+  const kp = reading.keyPatterns;
+  if (kp !== undefined && (typeof kp !== 'object' || kp === null || Array.isArray(kp))) return 'Key patterns are given as a prefix and a pattern for each.';
+  for (const [prefix, pattern] of Object.entries(kp || {})) {
+    // "whg:<n>" is WHG's ambiguous code (a cluster to Recogito, a database key to reconciliation), never an id to make an address from.
+    const why = prefix.toLowerCase() === 'whg' ? 'whg' : patternProblem(pattern);
+    if (why) return `The key pattern ${prefix ? `for the prefix "${prefix}"` : 'for keys with no prefix'} (${pattern}) ${PATTERN_WHY[why]}`;
+  }
   return null;
 }
+const PATTERN_WHY = {
+  placeholder: 'must hold the place of the key, {id}, exactly once, such as https://pleiades.stoa.org/places/{id}.',
+  'not-web': 'must make a web address (http:// or https://), with no spaces.',
+  whg: "makes a World Historical Gazetteer address, which is never made from a key: WHG's codes are not its records' addresses. Give each place's https://w3id.org/whg/id/place:… address in its ref instead.",
+};
+
+// ---- keys --------------------------------------------------------------------------------------
+// A place name with no ref may give a key (key="pleiades:579885", Perseus's key="tgn,7011179"). A key
+// is not an address, so it is converted only with a pattern the user confirms for its prefix (the
+// reading option keyPatterns, {prefix: pattern}): the prefix is what comes before the key's first ':'
+// or ','; a key with neither has the prefix "". The rest of the key is made into an address by
+// addressFromPattern (./addresses.js). A key beside a ref is never used: the ref says which place.
+/** A key's prefix and the rest. */
+export function splitKey(key) {
+  const k = norm(key), i = k.search(/[:,]/);
+  return i < 0 ? { prefix: '', rest: k } : { prefix: k.slice(0, i), rest: k.slice(i + 1) };
+}
+// The patterns suggested for a prefix, by the gazetteer it names, where most of its keys fit (the
+// user still confirms each). Getty's TGN is Perseus's; its ids are digits.
+const KEY_GAZETTEERS = [
+  { prefixes: ['pleiades', 'pl', 'pleiad'], ...GAZETTEER_PATTERNS.pleiades },
+  { prefixes: ['geonames', 'gn'], ...GAZETTEER_PATTERNS.geonames },
+  { prefixes: ['wikidata', 'wd', ''], ...GAZETTEER_PATTERNS.wikidata },
+  { prefixes: ['tgn', 'getty'], pattern: 'http://vocab.getty.edu/tgn/{id}', shape: /^\d+$/ },
+];
+/** The pattern to suggest for a prefix, given some of its keys' rests, or undefined. */
+export function suggestKeyPattern(prefix, rests) {
+  const g = KEY_GAZETTEERS.find((x) => x.prefixes.includes(prefix.toLowerCase()));
+  if (!g || !rests.length) return undefined;
+  return rests.filter((r) => g.shape.test(r)).length * 2 >= rests.length ? g.pattern : undefined;
+}
+const SAMPLES = 50;
 // A language tag: stricter than plato.schema.json's languageTag, which would take xml:lang="Latin"
 // (five letters): a primary language subtag in use has two or three letters (BCP 47).
 const LANGUAGE_TAG = /^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{1,8})*$/;
@@ -95,6 +134,8 @@ export const TEI_KINDS = {
   'tei-variant': 'loss',
   'tei-place-editorial': 'loss',
   'tei-header-origin': 'loss',
+  'tei-key-no-pattern': 'loss',
+  'tei-key-shape': 'loss',
   'tei-findspot-no-object': 'loss',
   'tei-ref-several': 'warning',
   'address-pleiades-part': 'warning',
@@ -194,8 +235,10 @@ class Capture {
  * (none changes what is read yet).
  */
 export class TeiReader {
-  constructor(report, { fileName = 'the TEI file', count = () => {}, ...reading } = {}) {
+  constructor(report, { fileName = 'the TEI file', count = () => {}, onKey, ...reading } = {}) {
     this.report = report; this.fileName = fileName; this.countOne = count; this.reading = reading;
+    this.onKey = onKey;            // onKey(prefix, key, rest): each key of a place name with no ref (teiKeyPrefixes)
+    this.keysWithout = new Map();  // prefix -> { count, examples, rests }: keys with no pattern, for tei-key-no-pattern
     const refused = teiReadingRefusal(reading);
     if (refused) throw new DataError(refused);
     this.editorialIri = editorialIri;
@@ -274,6 +317,11 @@ export class TeiReader {
     for (const m of this.pending) this.emit(m, true);
     this.pending.clear(); this.waitingFor.clear();
     this.header();
+    for (const [prefix, k] of this.keysWithout) {
+      const suggested = suggestKeyPattern(prefix, k.rests);
+      const flag = `--key-pattern ${prefix ? `${prefix}=` : ''}${suggested || 'https://…/{id}'}`;
+      this.report('tei-key-no-pattern', `${prefix ? `prefix "${prefix}"` : 'no prefix'}: ${plural(k.count, 'key')}, such as ${k.examples.join(', ')}; ${suggested ? 'try' : 'give a pattern, such as'} ${flag}`);
+    }
     if (!this.attestations) this.report('tei-none-linked', `${plural(this.mentions, 'place name')} in the text`);
     return this.take();
   }
@@ -719,14 +767,19 @@ export class TeiReader {
     const ref = attr('ref'), key = attr('key'), xmlId = attr('xml:id');
     const toponym = norm(c.pref), printed = norm(c.printed);
     const el = this.stack[this.stack.length - 1];
-    let d;
-    if (ref === undefined || !norm(ref)) {
+    let d, made;
+    const hasRef = ref !== undefined && !!norm(ref);
+    if (!hasRef) {
       // A place name with no ref points to no place. One inside another place name is part of that
       // name ("<placeName><settlement>Roma</settlement></placeName>"), and one around a place name
-      // that has a ref is only its wrapping: neither is reported.
+      // that has a ref is only its wrapping: neither is reported. Its key, with a pattern for the
+      // key's prefix, can make its address.
       if (nested || c.hasRef) return;
-      d = { noRef: true, words: `${toponym || `<${t.name}>`}${key ? ` (key ${key})` : ''}` };
-    } else {
+      made = key !== undefined && norm(key) ? this.fromKey(key) : undefined;
+      if (!made) d = { noRef: true, words: `${toponym || `<${t.name}>`}${key ? ` (key ${key})` : ''}` };
+      else if (made.lost) d = { lost: true };
+    }
+    if (!d) {
       for (const o of this.captures) if (o.hasRef !== undefined) o.hasRef = true;
       const line = el.verse ?? this.verseLine() ?? this.line;
       const lineWords = el.verse !== undefined || this.verseLine() !== undefined ? `line ${line}`
@@ -741,11 +794,36 @@ export class TeiReader {
       // reference: a place name may wait until the end of the file for a <place>.
       d = { m: {
         element: t.name, key, xmlId, toponym, printed: printed !== toponym ? printed : undefined, language, locator,
-        fileLine, source: this.source(), pointers: norm(ref).split(' '), prefixes: this.prefixes(),
+        fileLine, source: this.source(), pointers: hasRef ? norm(ref).split(' ') : [], prefixes: this.prefixes(),
+        ...(made ? { keyAddress: made.address, keyNote: made.note } : {}),
       } };
+      d.m.pointerWords = hasRef ? norm(ref) : `key ${norm(key)}`;
     }
     d.element = t.name; d.fileLine = fileLine; d.toponym = toponym; d.editorial = editorial;
     this.route(d, this.stack.length - 1);
+  }
+  /**
+   * The address a key makes, with the pattern given for its prefix: { address, note }, or { lost }
+   * having reported why not, or undefined where no pattern is given for its prefix (counted, for
+   * tei-key-no-pattern).
+   */
+  fromKey(key) {
+    const k = norm(key), { prefix, rest } = splitKey(k);
+    this.onKey?.(prefix, k, rest);
+    const pattern = this.reading.keyPatterns?.[prefix];
+    if (pattern === undefined) {
+      const w = this.keysWithout.get(prefix) || { count: 0, examples: [], rests: [] };
+      w.count++;
+      if (w.examples.length < 3 && !w.examples.includes(k)) w.examples.push(k);
+      if (w.rests.length < SAMPLES) w.rests.push(rest);
+      this.keysWithout.set(prefix, w);
+      return undefined;
+    }
+    const r = addressFromPattern(rest, pattern);
+    if (r.error || (!r.lost && !isWeb(r.iri))) { this.report('tei-key-shape', `${k} (pattern ${pattern})`); return { lost: true }; }
+    if (r.lost) { this.report(WHG_LOST[r.lost], `${r.value} (key ${k})`); return { lost: true }; }
+    if (r.part) this.report('address-pleiades-part', `${r.iri} (key ${k})`);
+    return { address: { iri: r.iri, ...(r.from ? { from: r.from, rules: r.rules } : {}) }, note: `Place address made from the key ${k} with the pattern ${pattern}` };
   }
   /** The prefixDefs in force, innermost first: one array, made again only when a prefixDef or a TEI element comes or goes. */
   prefixes() {
@@ -770,11 +848,11 @@ export class TeiReader {
     const pick = (order) => order.find((n) => el.parts.includes(n));
     const taken = pick(PREFERRED) || el.parts[0];
     const printed = pick(PRINTED.filter((n) => n !== 'lem'));
-    const kept = el.deferred.filter((x) => x.part === taken && !x.d.noRef);
+    const kept = el.deferred.filter((x) => x.part === taken && x.d.m);
     for (const x of el.deferred) {
       if (x.part === taken) continue;
       // The form as printed of a place name the part taken also names, with the same ref.
-      const same = x.part === printed && !x.d.noRef && kept.find((k) => !k.labelled && k.d.m.pointers.join(' ') === x.d.m.pointers.join(' '));
+      const same = x.part === printed && x.d.m && kept.find((k) => !k.labelled && k.d.m.pointerWords === x.d.m.pointerWords);
       if (same) { same.labelled = true; if (x.d.toponym && x.d.toponym !== same.d.m.toponym) same.d.m.printed = x.d.toponym; continue; }
       this.variant(x.d, x.part);
     }
@@ -783,14 +861,15 @@ export class TeiReader {
   }
   variant(d, part) {
     this.mentions++; this.countOne();
-    this.once('tei-variant', `${part}: ${d.toponym || `<${d.element}>`} (<${d.element}>${d.m ? ` ref="${d.m.pointers.join(' ')}"` : ''} on line ${d.fileLine})`);
+    this.once('tei-variant', `${part}: ${d.toponym || `<${d.element}>`} (<${d.element}>${d.m ? (d.m.pointers.length ? ` ref="${d.m.pointers.join(' ')}"` : ` ${d.m.pointerWords}`) : ''} on line ${d.fileLine})`);
   }
   deliver(d) {
     this.mentions++; this.countOne();
     if (d.noRef) { this.report('tei-place-no-ref', d.words); return; }
+    if (d.lost) return;
     const m = d.m;
     // A place name with no words (<placeName ref="…"/>) gives no name to attest.
-    if (!m.toponym) { this.report('tei-place-empty', `<${m.element} ref="${m.pointers.join(' ')}"> on line ${m.fileLine}`); return; }
+    if (!m.toponym) { this.report('tei-place-empty', `<${m.element}${m.pointers.length ? ` ref="${m.pointers.join(' ')}"` : ` ${m.pointerWords}`}> on line ${m.fileLine}`); return; }
     if (d.editorial && !this.editionSeen && !this.editionDecided) { this.out.push({ type: 'held', d }); return; }
     this.place(d, this.editionSeen ? d.editorial : undefined);
   }
@@ -798,7 +877,7 @@ export class TeiReader {
   place(d, editorial) {
     const m = d.m;
     if (editorial) {
-      if (!this.reading.commentaryPlaces) { this.report('tei-place-editorial', `${editorial}: ${m.toponym} (${m.pointers.join(' ')}) on line ${m.fileLine}`); return; }
+      if (!this.reading.commentaryPlaces) { this.report('tei-place-editorial', `${editorial}: ${m.toponym} (${m.pointerWords}) on line ${m.fileLine}`); return; }
       m.editorial = editorial;
       // The locator names the part, where it does not already ("commentary", "edition, line 3, in a note").
       const named = editorial === 'note' ? /\bin a note\b/.test(m.locator) : m.locator === editorial || m.locator.startsWith(`${editorial} `) || m.locator.startsWith(`${editorial},`);
@@ -863,6 +942,7 @@ export class TeiReader {
   emit(m, final) {
     const resolved = [];
     for (const p of m.pointers) { const r = this.resolve(p, m, final); if (r && !resolved.some((x) => x.iri === r.iri)) resolved.push(r); }
+    if (m.keyAddress) resolved.push(m.keyAddress);
     if (!resolved.length) return;
     if (!this.headed) this.header();
     const where = `<${m.element}> on line ${m.fileLine}`;
@@ -878,7 +958,8 @@ export class TeiReader {
       const notes = [];
       if (m.editorial) notes.push(m.editorialNote || "The editors' words, not the source's.");
       if (m.extraNotes) notes.push(...m.extraNotes);
-      if (m.key) notes.push(`Key: ${m.key}`);
+      if (m.keyNote) notes.push(m.keyNote);
+      else if (m.key) notes.push(`Key: ${m.key}`);
       if (resolved.length > 1) notes.push(`The ref of this place name gives ${resolved.length} addresses, each an attestation of its own: ${resolved.map((x) => x.iri).join(', ')}.`);
       // Where the attestation came from, as the Recogito reader says "From annotation …". The
       // element's xml:id is not taken for the attestation's @id: the edition can be revised under
@@ -929,6 +1010,28 @@ export async function* teiSource(input, rep, options = {}) {
   };
   for await (const chunk of chunks(file)) yield* step(() => reader.write(chunk));
   yield* step(() => reader.close());
+}
+
+/**
+ * The prefixes of the keys of a TEI file's place names that have no ref, for a page to offer a
+ * pattern for each before the run: [{ prefix, count, examples, suggested }], in the order first
+ * met; `suggested` is a pattern where the prefix names a gazetteer most of whose keys fit, else
+ * undefined. The file is read as a stream, as teiSource reads it; nothing is converted.
+ */
+export async function teiKeyPrefixes(input) {
+  const file = input.files[0];
+  const by = new Map();
+  const onKey = (prefix, key, rest) => {
+    const p = by.get(prefix) || { prefix, count: 0, examples: [], rests: [] };
+    p.count++;
+    if (p.examples.length < 3 && !p.examples.includes(key)) p.examples.push(key);
+    if (p.rests.length < SAMPLES) p.rests.push(rest);
+    by.set(prefix, p);
+  };
+  const reader = new TeiReader(() => {}, { fileName: file.name, onKey });
+  for await (const chunk of chunks(file)) reader.write(chunk);
+  reader.close();
+  return [...by.values()].map(({ prefix, count, examples, rests }) => ({ prefix, count, examples, suggested: suggestKeyPattern(prefix, rests) }));
 }
 
 /** Every attestation of a TEI document given as text, and the document: for tests and small inputs. `options` are reading options. */

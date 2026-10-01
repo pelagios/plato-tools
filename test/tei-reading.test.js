@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { addPlatoFormats, strictFormatLogger } from '../src/lib/formats.js';
-import { teiToDocument, TeiReader, TEI_KINDS, EDITORIAL_IRI, setEditorialIriForTests, teiReadingRefusal } from '../src/engine/hermes/tei.js';
+import { teiToDocument, TeiReader, TEI_KINDS, EDITORIAL_IRI, setEditorialIriForTests, teiReadingRefusal, teiKeyPrefixes, splitKey } from '../src/engine/hermes/tei.js';
+import { addressFromPattern, patternProblem } from '../src/engine/hermes/addresses.js';
 import { DataError } from '../src/engine/input.js';
 import { LOSS_TEXT } from '../src/engine/report.js';
 
@@ -278,4 +279,100 @@ test('headerPlaces: a prefixDef declared after the msDesc still resolves a finds
     assert.ok(!m.kinds.has('tei-ref-prefix'));
     assert.deepEqual(examples(m, 'tei-place-outside-text'), ['teiHeader: Town (https://pleiades.stoa.org/places/2)']);
   });
+});
+
+// ---- Q3: keys ------------------------------------------------------------------------------------
+const KEYS = 'keys-constructed.xml';
+const TGN = 'http://vocab.getty.edu/tgn/{id}';
+const PLEIADES = 'https://pleiades.stoa.org/places/{id}';
+const keyed = (options) => mapped(text(KEYS), options, KEYS);
+
+test('a key is split at its first ":" or ","; a key with neither has the prefix ""', () => {
+  assert.deepEqual(splitKey('tgn,7011179'), { prefix: 'tgn', rest: '7011179' });
+  assert.deepEqual(splitKey('pleiades:579885'), { prefix: 'pleiades', rest: '579885' });
+  assert.deepEqual(splitKey('a:b,c'), { prefix: 'a', rest: 'b,c' });
+  assert.deepEqual(splitKey('Q1524'), { prefix: '', rest: 'Q1524' });
+});
+
+test('addressFromPattern: the shape is checked, the id put in, and the address made goes through placeAddress', () => {
+  assert.deepEqual(addressFromPattern('579885', PLEIADES), { iri: 'https://pleiades.stoa.org/places/579885' });
+  assert.deepEqual(addressFromPattern('579885', 'http://pleiades.stoa.org/places/{key}'), { iri: 'https://pleiades.stoa.org/places/579885', from: 'http://pleiades.stoa.org/places/579885', rules: ['pleiades-https'] });
+  assert.deepEqual(addressFromPattern('athens', PLEIADES), { error: 'shape' });
+  assert.deepEqual(addressFromPattern('1524', 'http://www.wikidata.org/entity/{id}'), { error: 'shape' });
+  assert.deepEqual(addressFromPattern('Q1524', 'http://www.wikidata.org/entity/{id}'), { iri: 'http://www.wikidata.org/entity/Q1524' });
+  // a pattern of the user's own takes only the characters an address takes unescaped
+  assert.deepEqual(addressFromPattern('Argos', 'https://example.org/p/{id}'), { iri: 'https://example.org/p/Argos' });
+  assert.deepEqual(addressFromPattern('Ar gos', 'https://example.org/p/{id}'), { error: 'shape' });
+  assert.deepEqual(addressFromPattern('whg:123', 'https://example.org/p/{id}'), { error: 'whg' });
+  assert.equal(patternProblem('https://example.org/{id}/{id}'), 'placeholder');
+  assert.equal(patternProblem('https://example.org/'), 'placeholder');
+  assert.equal(patternProblem('urn:x:{id}'), 'not-web');
+  assert.equal(patternProblem('https://whgazetteer.org/places/{id}/portal/'), 'whg');
+  assert.equal(patternProblem('https://w3id.org/whg/id/place:gn:{id}'), 'whg');
+  assert.equal(patternProblem('https://w3id.org/other/{id}'), null);
+});
+
+test('a WHG pattern, a pattern for the prefix "whg", and a pattern with no placeholder are refused; a good one is taken', () => {
+  for (const kp of [{ w: 'https://whgazetteer.org/places/{id}/portal/' }, { whg: 'https://example.org/{id}' }, { tgn: 'http://vocab.getty.edu/tgn/' }]) {
+    assert.ok(teiReadingRefusal({ keyPatterns: kp }), JSON.stringify(kp));
+    assert.throws(() => new TeiReader(() => {}, { keyPatterns: kp }), DataError);
+  }
+  assert.match(teiReadingRefusal({ keyPatterns: { w: 'https://w3id.org/whg/id/{id}' } }), /World Historical Gazetteer/);
+  assert.equal(teiReadingRefusal({ keyPatterns: { tgn: TGN, '': PLEIADES } }), null);
+});
+
+test('with no pattern, keys are reported by prefix with a count, examples and a suggested pattern; a key beside a ref is not counted', () => {
+  const m = keyed({});
+  assert.deepEqual(names(m), ['Argos'], 'control: the place name with a ref is converted');
+  assert.deepEqual(examples(m, 'tei-key-no-pattern'), [
+    'prefix "tgn": 3 keys, such as tgn,7011179, tgn,7010720, tgn,7001393; try --key-pattern tgn=http://vocab.getty.edu/tgn/{id}',
+    'prefix "pleiades": 2 keys, such as pleiades:579885, pleiades:athens; try --key-pattern pleiades=https://pleiades.stoa.org/places/{id}',
+    'no prefix: 1 key, such as Q1524; try --key-pattern http://www.wikidata.org/entity/{id}',
+    'prefix "perseus": 1 key, such as perseus,Argos; give a pattern, such as --key-pattern perseus=https://…/{id}',
+  ]);
+  assert.equal(examples(m, 'tei-place-no-ref').length, 7);
+});
+
+test('with a pattern for a prefix, its keys make attestations, with a note of the key and the pattern; other prefixes are still reported', () => {
+  const m = keyed({ keyPatterns: { tgn: TGN } });
+  const tgn = m.doc.attestations.filter((a) => a.about.startsWith('http://vocab.getty.edu/tgn/'));
+  assert.deepEqual(tgn.map((a) => [a.about, a.names[0].toponym, a.citations[0].locator]), [
+    ['http://vocab.getty.edu/tgn/7011179', 'Athens', 'edition, book 1'],
+    ['http://vocab.getty.edu/tgn/7010720', 'Sparta', 'edition, book 1'],
+    ['http://vocab.getty.edu/tgn/7001393', 'Corinth', 'edition, book 1'],
+  ]);
+  assert.equal(tgn[0].notes, `Place address made from the key tgn,7011179 with the pattern ${TGN}\nFrom TEI element <placeName> on line 18 of ${KEYS}`);
+  assert.equal(tgn[0].formStatus, PLATO + 'Attested');
+  assert.ok(!examples(m, 'tei-key-no-pattern').some((e) => e.startsWith('prefix "tgn"')));
+  assert.ok(examples(m, 'tei-key-no-pattern').some((e) => e.startsWith('prefix "pleiades"')), 'control: a prefix with no pattern is still reported');
+  assert.equal(valid(m.doc), null);
+});
+
+test('a key out of the pattern\'s shape is reported and not converted; one in shape beside it is', () => {
+  const m = keyed({ keyPatterns: { pleiades: PLEIADES } });
+  assert.deepEqual(m.doc.attestations.filter((a) => a.notes.includes('made from the key')).map((a) => [a.about, a.names[0].toponym]), [['https://pleiades.stoa.org/places/579885', 'Athenae']]);
+  assert.deepEqual(examples(m, 'tei-key-shape'), [`pleiades:athens (pattern ${PLEIADES})`]);
+  assert.ok(!names(m).includes('Athenai'));
+});
+
+test('the empty prefix takes a pattern too; a ref with a key beside it gives no attestation from the key', () => {
+  const m = keyed({ keyPatterns: { '': 'http://www.wikidata.org/entity/{id}', tgn: TGN } });
+  assert.ok(m.doc.attestations.some((a) => a.about === 'http://www.wikidata.org/entity/Q1524' && a.names[0].toponym === 'Athína'));
+  const argos = m.doc.attestations.filter((a) => a.names[0].toponym === 'Argos');
+  assert.deepEqual(argos.map((a) => a.about), ['https://pleiades.stoa.org/places/570106'], 'the ref, not tgn 7010832');
+  assert.match(argos[0].notes, /^Key: tgn,7010832\n/);
+  assert.ok(!m.doc.attestations.some((a) => a.about === 'http://vocab.getty.edu/tgn/7010832'));
+  assert.ok(m.doc.attestations.some((a) => a.about === 'http://vocab.getty.edu/tgn/7011179'), 'control: the tgn pattern is in use');
+});
+
+test('teiKeyPrefixes reads the file as a stream and gives each prefix with its count, examples and suggested pattern', async () => {
+  const got = await teiKeyPrefixes({ format: 'tei', files: [new File([readFileSync(DIR + KEYS)], KEYS)] });
+  assert.deepEqual(got, [
+    { prefix: 'tgn', count: 3, examples: ['tgn,7011179', 'tgn,7010720', 'tgn,7001393'], suggested: TGN },
+    { prefix: 'pleiades', count: 2, examples: ['pleiades:579885', 'pleiades:athens'], suggested: PLEIADES },
+    { prefix: '', count: 1, examples: ['Q1524'], suggested: 'http://www.wikidata.org/entity/{id}' },
+    { prefix: 'perseus', count: 1, examples: ['perseus,Argos'], suggested: undefined },
+  ]);
+  // a file with no keys gives none (control above: the same call on a file with keys gives four)
+  assert.deepEqual(await teiKeyPrefixes({ format: 'tei', files: [new File([readFileSync(DIR + ISIC)], ISIC)] }), []);
 });
