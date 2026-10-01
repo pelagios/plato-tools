@@ -1174,12 +1174,22 @@ publishes its state on `window.__chora` for tests.
   but a later token replaces the token and `token: null` clears it (also `lookup.setToken(t)`,
   `lookup.clearToken()`). A tool reads the token from its one keeper (`permissions.token` in
   `src/lib/permissions.js`) and passes it, rather than keeping a copy of its own. On a page the
-  lookup's `fetch` is `permissions.fetch` (cat `gazetteer`): a `PermissionError` it throws (told by
-  `name === 'PermissionError'`, or by `retry === false` on any error a wrapper throws) is never
-  tried again. The job ends at once as a `GazetteerError` of kind `refused` whose `refusal` is the
-  PermissionError's `kind` (`never`, `undecided`, `reload`, …) and whose message is its words, token
-  cleaned; the lock and the queue are let go and the jobs behind it run. Its kind `network` (fetch
-  failing beneath the module) is no answer and keeps the retries, unless it says `retry: false`. What is held when: within a page or
+  lookup's `fetch` is `permissions.fetch` (cat `gazetteer`), and **every page caller of
+  `createLookup` must pass it**: a later call whose `fetch` is another function than the shared
+  lookup's (by identity; the platform's `fetch` if the first call gave none) throws a `TypeError`
+  ("the WHG lookup on this page already uses another fetch; pass permissions.fetch") and changes
+  nothing, rather than be given a lookup that sends past its permissions; a later call with no
+  `fetch` uses the lookup's, and `shared: false` may have any. A `PermissionError` that fetch throws
+  (told by `name === 'PermissionError'`, or by `retry === false` on any error a wrapper throws) is
+  never tried again, except its kind `network` (fetch failing beneath the module: the service was
+  not reached), which is no answer and keeps the retries unless it says `retry: false`. The job ends
+  at once as a `GazetteerError` of kind `refused` whose `refusal` is the PermissionError's `kind`
+  (`never`, `undecided`, `reload`, …) and whose message is its words, token cleaned: "The gazetteer
+  was not asked: …", or for `moved` (the request WAS sent, and its answer, a redirect, not used)
+  "The gazetteer's answer was not used: …". The lock and the queue are let go and the jobs behind it
+  run. A request refused before it was sent is not counted against WHG's allowance: the pacer's
+  charge for it is taken back from the ledger before the lock is let go; a `moved` one, which was
+  sent, stays counted. What is held when: within a page or
   worker, the shared lookup's queue runs one request at a time, and a request's retries and the
   pauses between them finish before the next request in that page starts. Across tabs and workers,
   each TRY of a request is made holding the Web Lock `plato-tools:gazetteer:<site>`, which covers
@@ -1633,9 +1643,12 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   `PermissionError` whose `kind` is `address`, `insecure` (a plain http site, other than localhost and
   127.0.0.1: IIIF addresses often are, and none can be allowed), `undecided`, `never`, `reload`,
   `unprotected`, `moved` or `network`, and whose message names the site, never the address (a key may
-  be in it). What it does with an answer is the core's `checkAnswer(r, url, sites)`, so that a fetch
-  in Node (Hermes's, for `--fetch-georef`) refuses exactly what the page does: a redirect, a browser's
-  opaque one or Node's 3xx, and an answer from another site;
+  be in it); every kind but `moved` (sent, and answered with a redirect or from another site) and
+  `network` (sent, or tried, and failed beneath the module) means nothing was sent. What it does with
+  an answer is the core's `checkAnswer(r, url, sites)`, so that a fetch in Node (Hermes's, for
+  `--fetch-georef`) refuses exactly what the page does: a redirect, a browser's opaque one or Node's
+  3xx, and an answer from another site. The gazetteer lookup must be given it as its `fetch` by every
+  page caller (`createLookup` refuses a later caller with another);
   `transformRequest(() => [[cat, subj], …], { onBlocked })` for MapLibre; `needs(el, cat, subj)` for
   the one line (for an http site it says why, in words, offers nothing to allow, and returns
   `'insecure'`; it throws only for what is no site at all), or `needs(el, [[cat, subj], …])` for a feature that needs several sites at once (one

@@ -53,7 +53,9 @@
 //   refused in its turn while the permission stays as it is). Told by the error's `name ===
 //   'PermissionError'`, or by `retry === false` on any error a fetch wrapper throws; a PermissionError
 //   of kind 'network' (fetch failing beneath the module: the service was not reached) is no answer,
-//   and tried again, unless it says `retry: false`.
+//   and tried again, unless it says `retry: false`. A refused request was not sent, so the pacer's
+//   charge for it is taken back from the ledger before the lock is let go; except kind 'moved' (the
+//   request WAS sent and answered with a redirect, whose answer was not used), which stays counted.
 // - An AbortSignal stops a lookup: its request in flight, its pause between tries or for the pacer,
 //   its wait for the lock, and its requests still waiting their turn.
 import {
@@ -83,9 +85,12 @@ const LOCK_PREFIX = 'plato-tools:gazetteer:';
  * - 'rate': still too many queries after waiting (429);
  * - 'unavailable': the source does not allow the record to be passed on (451; A10);
  * - 'network': no answer, or none within the timeout;
- * - 'refused': not asked, for the page's permissions would not let the request go (a PermissionError
- *   from fetch, or an error with `retry: false`); `refusal` is that error's `kind` ('never',
- *   'undecided', 'reload', 'unprotected', 'address', 'moved', …), or null;
+ * - 'refused': the page's permissions would not let the request go, or would not let its answer be
+ *   used (a PermissionError from fetch, or an error with `retry: false`); `refusal` is that error's
+ *   `kind` ('never', 'undecided', 'reload', 'unprotected', 'address', 'moved', …), or null. For every
+ *   kind but 'moved' the gazetteer was not asked ("The gazetteer was not asked: …"); 'moved' means
+ *   the request WAS sent and its answer, a redirect, was not used ("The gazetteer's answer was not
+ *   used: …");
  * - 'server': any other refusal or failure, and an answer that could not be read.
  * `status` is the HTTP status, or null. It carries nothing else: no request, no headers, no cause.
  */
@@ -216,7 +221,8 @@ function defaultLedger(timeoutMs) {
 }
 
 /**
- * At most `limit` units (queries, requests) in any `windowMs`. `take(n)` waits until n more fit.
+ * At most `limit` units (queries, requests) in any `windowMs`. `take(n)` waits until n more fit, and
+ * gives the entry it wrote ({t, n}); `refund(entry)` removes that entry again (a request not sent).
  * What has been sent is read from and written to `ledger` under `key`, each time: a caller who
  * shares the ledger with other contexts must call take() holding a lock they share too.
  * @param {{limit: number, windowMs: number, now?: () => number, sleep?: (ms: number, signal?: AbortSignal) => Promise<void>,
@@ -235,7 +241,7 @@ export function createPacer({ limit, windowMs, now = Date.now, sleep = abortable
         const sent = read.map((e) => (e.t > t ? { t, n: e.n } : e))
           .filter((e) => e.t > t - windowMs).sort((a, b) => a.t - b.t);
         const used = sent.reduce((a, e) => a + e.n, 0);
-        if (used + n <= limit) { sent.push({ t, n }); await ledger.write(key, sent); return; }
+        if (used + n <= limit) { const entry = { t, n }; sent.push(entry); await ledger.write(key, sent); return { ...entry }; }
         if (ahead) await ledger.write(key, sent);
         // Wait until enough of the oldest have left the window.
         let freed = 0, until = t;
@@ -246,13 +252,23 @@ export function createPacer({ limit, windowMs, now = Date.now, sleep = abortable
         await sleep(Math.max(1, until - t), signal);
       }
     },
+    // Takes back what take() charged (the entry it returned), for a request that was never sent.
+    async refund(entry) {
+      if (!entry) return;
+      const read = await ledger.read(key);
+      const i = read.findIndex((e) => e.t === entry.t && e.n === entry.n);
+      if (i < 0) return;
+      read.splice(i, 1);
+      await ledger.write(key, read);
+    },
   };
 }
 
-// The lookups of this page or worker, one per endpoint: {lookup, options (the first call's), warned}.
+// The lookups of this page or worker, one per endpoint: {lookup, options (the first call's), fetch
+// (the one it uses), warned}.
 const shared = new Map();
-// Options that are not the lookup's configuration, so never a cause to warn.
-const NOT_CONFIG = new Set(['endpoint', 'token', 'shared']);
+// Options that are not the lookup's configuration, so never a cause to warn (fetch: a cause to throw).
+const NOT_CONFIG = new Set(['endpoint', 'token', 'shared', 'fetch']);
 
 /**
  * The lookup against one reconciliation service: the SAME one for every call with the same endpoint
@@ -264,10 +280,14 @@ const NOT_CONFIG = new Set(['endpoint', 'token', 'shared']);
  *   the token from its one keeper (`permissions.token` in src/lib/permissions.js: token.get(), and
  *   token.onChange for a change) and pass it on each call, or on a change, rather than keep a copy
  *   of its own: two copies would take turns being sent.
- * - Every other option is the first call's: a later call's differing values (fetch, batchSize, rates,
- *   …) are ignored, as a second queue is what is to be avoided, and console.warn names each such
- *   option once per endpoint. A later call is still refused a blocked User-Agent, a missing endpoint,
- *   and a fetch, locks or ledger of the wrong kind.
+ * - A later call whose `fetch` is not the one the lookup uses (by identity; the platform's fetch if
+ *   the first call gave none) is refused with a TypeError, and changes nothing: on a page that fetch
+ *   is permissions.fetch, and a caller that passed another would believe its requests went through
+ *   it. Every page caller passes permissions.fetch; a later call that gives no fetch uses the lookup's.
+ * - Every other option is the first call's: a later call's differing values (batchSize, rates, …)
+ *   are ignored, as a second queue is what is to be avoided, and console.warn names each such option
+ *   once per endpoint. A later call is still refused a blocked User-Agent, a missing endpoint, and a
+ *   fetch, locks or ledger of the wrong kind.
  * - `shared: false` makes a lookup of its own, apart from the shared one (for tests).
  * @param {object} o
  * @param {string} o.endpoint  the service's address, e.g. WHG_ENDPOINT
@@ -303,6 +323,10 @@ export function createLookup(options = {}) {
   const key = sameAddress(endpoint);
   const found = shared.get(key);
   if (found) {
+    // Fail closed: a caller is never given a lookup that sends through a fetch other than its own.
+    if (o.fetch !== undefined && o.fetch !== found.fetch) {
+      throw new TypeError(`createLookup: the ${isWhg(endpoint) ? 'WHG' : siteOf(endpoint)} lookup on this page already uses another fetch; pass permissions.fetch`);
+    }
     if (o.token !== undefined) found.lookup.setToken(o.token);
     const differ = Object.keys(o).filter((k) => !NOT_CONFIG.has(k) && o[k] !== undefined && !found.warned.has(k) && !sameOption(k, found.options[k], o[k]));
     if (differ.length) {
@@ -313,7 +337,7 @@ export function createLookup(options = {}) {
   }
   const lookup = makeLookup(o);
   const { token: _secret, ...kept } = o;
-  shared.set(key, { lookup, options: kept, warned: new Set() });
+  shared.set(key, { lookup, options: kept, fetch: o.fetch ?? globalThis.fetch, warned: new Set() });
   return lookup;
 }
 
@@ -459,7 +483,7 @@ function makeLookup({
   // request, and reading its body. The lock is let go before any pause between tries.
   function attempt({ method, url, payload, pacer, cost }, tok, signal) {
     return exclusive(async () => {
-      await pacer?.take(cost, signal);
+      const charged = await pacer?.take(cost, signal);
       const one = trySignal(signal, perTry);
       try {
         const res = await settleOrAbort(fetchFn(url, { method, headers: headers(method === 'POST', tok), body: payload, signal: one.signal, credentials: 'omit' }), one.signal);
@@ -468,6 +492,9 @@ function makeLookup({
         return { res, text };
       } catch (e) {
         if (signal?.aborted) throw signal.reason;
+        // Refused before it was sent: not counted against the allowance. Taken back still holding the
+        // lock; if the ledger fails, the charge stays, which errs towards asking less.
+        if (charged && isRefusal(e) && e.kind !== 'moved') await pacer.refund(charged).catch(() => {});
         return { failed: e, timedOut: one.timedOut() };
       } finally { one.done(); }
     }, signal);
@@ -481,7 +508,9 @@ function makeLookup({
       if (failed !== undefined) {
         if (isRefusal(failed)) {
           const said = clip(scrub(String(failed.message ?? '').replace(/\s+/g, ' ').trim(), tok));
-          throw new GazetteerError(`The gazetteer was not asked${said ? ': ' + said : '.'}`, { kind: 'refused', refusal: typeof failed.kind === 'string' ? failed.kind : null });
+          // 'moved': sent, and answered with a redirect that was not followed.
+          const lead = failed.kind === 'moved' ? "The gazetteer's answer was not used" : 'The gazetteer was not asked';
+          throw new GazetteerError(`${lead}${said ? ': ' + said : '.'}`, { kind: 'refused', refusal: typeof failed.kind === 'string' ? failed.kind : null });
         }
         if (tries < maxRetries) { await sleep(backoff(tries, 1000), signal); continue; }
         const why = timedOut ? ` within ${perTry / 1000} seconds` : failed?.message ? ` (${scrub(failed.message, tok)})` : '';
