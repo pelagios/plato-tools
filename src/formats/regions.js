@@ -12,7 +12,8 @@
 // how far the georeference misses its own control points (the root mean square, in the record). The outline itself is not carried, and is reported. A
 // region whose centre is inside the mask but beyond the convex hull of the georeference's control
 // points (in image pixels, with a tolerance of 1% of the hull's diagonal) is not placed, since
-// there the transformation only extrapolates. A region whose centre is inside both, but which
+// there the transformation only extrapolates (except through a Helmert or straight transformation,
+// a similarity, which extrapolates safely). A region whose centre is inside both, but which
 // reaches beyond the mask, is still placed, with a warning.
 //
 // The citation of the annotated image is REPLACED, for a placed region, by the citation of the map
@@ -330,7 +331,11 @@ export async function placeRegions(a, attestations, ctx, report) {
         const geom = geoms.get(m);
         // Beyond the control points a georeference extrapolates (a thin plate spline wildly: the
         // "45" in the Rocque map's border went to about -127.8, 57.4), so such a centre is not placed.
-        if (!withinControlPoints(m.g, centres.get(m))) {
+        // Except through a Helmert or straight transformation: a similarity (a shift, a turn and
+        // one scale, or a shift and a scale), fixed by any two points, which keeps shapes and so
+        // extrapolates safely, where the hull of its two points would be a segment and place
+        // nothing. The mask still applies.
+        if (!SIMILARITY.has(m.g.transformation) && !withinControlPoints(m.g, centres.get(m))) {
           report('annotation-region-beyond-control-points', `${where}: ${shape} on ${source} has its centre beyond the control points of ${maps(inside)}`);
           continue;
         }
@@ -375,6 +380,8 @@ function segmentDistance([x, y], [ax, ay], [bx, by]) {
   const t = l2 ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2)) : 0;
   return Math.hypot(x - (ax + t * dx), y - (ay + t * dy));
 }
+/** The transformations to which the control-point hull does not apply (see placeRegions). */
+const SIMILARITY = new Set(['helmert', 'straight']);
 /** Share of the hull's diagonal (its bounding box's) by which a centre may lie outside it. */
 export const HULL_TOLERANCE = 0.01;
 /**

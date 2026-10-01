@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { addPlatoFormats, strictFormatLogger } from '../src/lib/formats.js';
 import { annotationsToDocument, annotationsToDocumentPlaced, ANNOTATION_KINDS } from '../src/formats/annotations.js';
-import { NO_ROLE_NOTE, SYMBOL_NOTE, UNEXPECTED, unexpectedRegionErrors, placeRegions } from '../src/formats/regions.js';
+import { NO_ROLE_NOTE, SYMBOL_NOTE, UNEXPECTED, unexpectedRegionErrors, placeRegions, withinControlPoints } from '../src/formats/regions.js';
 import { readGeoreference, toWorld, georefNote, georefCitation, georefAnnotationCitation, LABEL_ANCHOR } from '../src/engine/georef/index.js';
 import { detect, readable, GEOREF_REASON, MANIFEST_REASON } from '../src/engine/input.js';
 import { LOSS_TEXT } from '../src/engine/report.js';
@@ -446,6 +446,32 @@ test('annotation-region-beyond-control-points: near the hull\'s edge, inside or 
   const f = await placed({ georefs: [ROCQUE], manifests: [ROCQUE_M] }, [box(far)]);
   assert.equal(f.of('annotation-region-beyond-control-points').length, 1);
   assert.equal(f.attestation(1).geometries, undefined);
+});
+test('a two-point Helmert (or straight) georeference, a similarity, places a region inside its mask though off the segment its points span; a two-point polynomial is refused when read', async () => {
+  // The Rocque annotation cut to two control points, (4658, 4466) and (6153, 5811).
+  const two = (type) => {
+    const annotation = json(ROCQUE);
+    annotation.body.features = [annotation.body.features[0], annotation.body.features[12]];
+    annotation.body.transformation = { type };
+    return annotation;
+  };
+  for (const type of ['helmert', 'straight']) {
+    const annotation = two(type);
+    const g = await readGeoreference(annotation, { manifest: json(ROCQUE_M) });
+    assert.equal(withinControlPoints(g, CASES[1].centre), false, 'Lake Erie is off the segment the two points span: the hull rule would refuse it');
+    const r = await placed({ georefs: [textFile(JSON.stringify(annotation), `rocque-${type}.json`)], manifests: [ROCQUE_M] }, [item(1), item(7)]);
+    assert.deepEqual(r.of('annotation-region-beyond-control-points'), [], type);
+    const want = await expected(g, CASES[1].centre, CASES[1].outline, LABEL_ANCHOR, CASES[1].bbox);
+    assert.deepEqual(r.attestation(1).geometries, [want.geometry], type);
+    assert.match(r.attestation(1).notes, new RegExp(`\\(${type === 'helmert' ? 'Helmert' : 'straight'}, 2 control points\\)`));
+    // The mask still applies: the region outside it is not placed.
+    assert.equal(r.of('annotation-region-outside-map').length, 1, type);
+    assert.equal(r.attestation(7).geometries, undefined);
+  }
+  // Control: a polynomial through the same two points is refused when read, so places nothing.
+  const poly = await placed({ georefs: [textFile(JSON.stringify(two('polynomial')), 'rocque-poly2.json')], manifests: [ROCQUE_M] }, [item(1)]);
+  assert.match(poly.of('annotation-georef-unreadable')[0], /^rocque-poly2\.json: .*2 control points, too few for a polynomial order 1 transformation, which needs at least 3/);
+  assert.equal(poly.attestation(1).geometries, undefined);
 });
 test('annotation-region-image-url: the picture address, with full size assumed for "max"; not for the canvas', async () => {
   const { of, attestation } = await MAIN();

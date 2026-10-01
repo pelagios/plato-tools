@@ -141,8 +141,10 @@ output is byte for byte what it was (the test holds the digests).
   convex hull of that map's control points in image pixels (`withinControlPoints`, with a tolerance
   of `HULL_TOLERANCE`, 1% of the hull's bounding-box diagonal), or it is not placed
   (`annotation-region-beyond-control-points`): beyond them a thin plate spline extrapolates wildly
-  (the fixture's "45" in the border would go to about -127.8, 57.4). A region whose centre is inside
-  both but which reaches beyond the mask is placed, with a warning.
+  (the fixture's "45" in the border would go to about -127.8, 57.4). Not through a Helmert or
+  straight transformation, though: a similarity, fixed by any two points, extrapolates safely, and
+  the hull of two points is a segment that would place nothing; the mask still applies. A region
+  whose centre is inside both but which reaches beyond the mask is placed, with a warning.
 - **What is written.** One `Point`: the centre, worked out in pixels (the area centroid; the
   midpoint by length of a line) and then transformed; `precisionKm` (an array, as the schema has
   it) the greatest haversine distance from it to the transformed outline's vertices, plus the
