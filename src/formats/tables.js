@@ -373,9 +373,10 @@ export function sourceLosses(s, loss) {
   }
 }
 const GVP_BROADER_PARTITIVE = 'http://vocab.getty.edu/ontology#broaderPartitive';
-// PLATO's relations to people, objects and events, and to images and records about a place (DepictedIn,
-// SubjectOf): their target is described elsewhere, not a place, so it goes to related_uri.
-const EXTERNAL = new Set(['BirthplaceOf', 'DeathplaceOf', 'ResidenceOf', 'FindspotOf', 'SettingOf', 'WorkplaceOf', 'DepictedIn', 'SubjectOf']);
+// PLATO's relations to people, objects and events, to images and records about a place (DepictedIn,
+// SubjectOf), and to a people whose land the place is (HomelandOf, PLATO 7720890): their target is
+// described elsewhere, not a place, so it goes to related_uri.
+const EXTERNAL = new Set(['BirthplaceOf', 'DeathplaceOf', 'ResidenceOf', 'FindspotOf', 'SettingOf', 'WorkplaceOf', 'DepictedIn', 'SubjectOf', 'HomelandOf']);
 const LEVELS = new Set(['Certain', 'LessCertain', 'Uncertain']);   // the tables' certainty_level values
 const ACCURACY = new Set(['Accurate', 'Inaccurate', 'False']), COMPLETENESS = new Set(['Complete', 'Reconstructable', 'NonReconstructable']);
 // A position's first two coordinates, or nothing when the coordinates are not a list.

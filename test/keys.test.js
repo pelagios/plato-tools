@@ -66,6 +66,8 @@ const BY_KEY = {
   created: (n) => `2025-01-01T${String(Math.floor(n / 60) % 24).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}:00Z`,
   modified: (n) => `2025-06-01T${String(Math.floor(n / 60) % 24).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}:00Z`,
   negated: () => true,
+  // PLATO 7720890 (#20): the role a writer cannot carry as dates (EvidenceSpan), not the default.
+  timespanRole: () => P + 'EvidenceSpan',
 };
 // A nested identity relation's subject, if given, must be its place (PLATO eb8065a).
 const SAME_AS_NESTING = new Set(['spatialEntities.0.identityRelations.0.subject']);
@@ -110,6 +112,7 @@ export function build(entry, value, variant) {
     // A property LPF has a place for: a description, rather than a property it leaves out whole.
     if (variant === 'description' && childHost === 'propertyValue') Object.assign(cur, { property: 'http://purl.org/dc/terms/description', value: 'Base description' });
   }
+  if (variant === 'dated') cur.timespans = [{ startEarliest: '1250', endLatest: '1350' }];
   const leaf = String(segs[segs.length - 1]).replace('{}', '');
   // A citation that describes its source in full is the attestation's source: the base one goes.
   if (segs[2] === 'attestations' && segs[4] === 'citations' && segs[6] === 'source{}') delete doc.spatialEntities[0].attestations[0].sources;
@@ -217,6 +220,8 @@ export function cases() {
     out.push({ e, n, variant: null });
     if (e.path.join('.').startsWith('spatialEntities.0.attestations.0.timespans.0.')) out.push({ e, n: n + 500, variant: 'undated' });
     if (e.path.join('.').startsWith('spatialEntities.0.attestations.0.properties.0.')) out.push({ e, n: n + 1000, variant: 'description' });
+    // A timespan role on an attestation that has dates, as well as on the base one that has none.
+    if (e.path.join('.') === 'spatialEntities.0.attestations.0.timespanRole') out.push({ e, n: n + 1500, variant: 'dated' });
   }
   return out;
 }
@@ -320,6 +325,16 @@ test('the enumeration reaches every object PLATO defines, and every key of each'
   // `about` is forbidden on a nested attestation, and is the attestation-centric profile's own.
   assert.ok(acCases().some(({ e }) => e.path.join('.') === 'attestations.0.about'));
   assert.ok(paths.length > 400, `${paths.length} paths`);
+});
+test('PLATO 7720890\'s timespanRole is audited with and without dates, and has words of its own when dropped', async () => {
+  const dated = cases().filter(({ e }) => e.path.join('.') === 'spatialEntities.0.attestations.0.timespanRole').map((c) => c.variant);
+  assert.deepEqual(dated, [null, 'dated']);
+  const { droppedText, FORMAT_WORDS, LOSS_TEXT } = await import('../src/engine/report.js');
+  assert.doesNotMatch(droppedText('attestation.timespanRole', FORMAT_WORDS.lpf), /the key "/i);
+  assert.match(droppedText('attestation.timespanRole', FORMAT_WORDS.lpf), /timespanRole/);
+  assert.match(droppedText('attestation.notes', FORMAT_WORDS.lpf), /^The notes on an attestation/, 'a control: a key with words');
+  assert.match(droppedText('attestation.nonesuch', FORMAT_WORDS.lpf), /the key "nonesuch"/i, 'a control: a key without words');
+  assert.ok(LOSS_TEXT['evidence-span']);
 });
 test('only the keys that name a document\'s format are left out of the audit, and they are constants', () => {
   for (const [name, p] of Object.entries(PROFILES)) {

@@ -227,6 +227,7 @@ const KEY_WORDS = {
   'attestation.sequence': "an attestation's place in a sequence, such as a stop on a route (sequence)",
   'relation.relatedLabel': 'the name of something a place is related to that is not itself a place, such as a person (relatedLabel)',
   'attestation.notes': 'the notes on an attestation',
+  'attestation.timespanRole': 'what an attestation\'s dates are dates of (timespanRole: the span of the evidence that mentions the place, rather than when what it records held)',
   'attestation.sourceStance': 'how firmly the source itself says it (its stance: reported, tentative or doubted), so the claim reads as if the source simply asserted it',
   'attestation.contributor': 'who made an attestation (its contributor)',
   'attestation.created': 'when an attestation was made (created)',

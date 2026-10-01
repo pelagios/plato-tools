@@ -212,6 +212,21 @@ test('an evidence span is not written as the place\'s dates in LPF or the tables
   assert.deepEqual(cnames.map((r) => [r.from, r.to]), [['-0200', '0100']], 'a control: without the role the name is dated');
 });
 
+// PLATO 7720890 (#22): HomelandOf relates land to the people who lived in or held it. A people is not
+// a place: its address goes to related_uri, and it gets no place row, with or without a name.
+test('a HomelandOf relation goes to related_uri, never to a place row of its own', async () => {
+  const people = 'http://www.wikidata.org/entity/Q193592';
+  const doc = { profile: 'place-centric', gazetteer: { '@id': 'https://example.org/my-dataset/', title: 't' }, spatialEntities: [{ '@id': 'https://example.org/my-dataset/place/land', label: 'Land', entityIdentifier: 'land', attestations: [
+    { relations: [{ relatesTo: people, relationType: P + 'HomelandOf' }], citations: [{ source: 'https://example.org/my-dataset/source/tm' }] },
+  ] }] };
+  const t = await go([textFile(JSON.stringify(doc), 'h.json')], 'convert', 'tables');
+  assert.deepEqual(items(t, 'error'), []);
+  assert.ok(!kinds(t, 'loss').includes('relation-type-not-in-plato'), kinds(t, 'loss').join(', '));
+  const z = unzipSync(t.e.outs['h-tables.zip'][0]);
+  assert.deepEqual(rowsOf(strFromU8(z['relations.csv'])).map((r) => [r.relation_type, r.related_place_id, r.related_uri]), [['HomelandOf', '', people]]);
+  assert.deepEqual(rowsOf(strFromU8(z['places.csv'])).map((r) => r.place_id), ['land'], 'the people gets no place row');
+});
+
 test('a route that is, through its members, a member of itself is an error; a chain is not', async () => {
   const att = (about, whole) => ({ about, relations: [{ relatesTo: whole, relationType: P + 'MemberOf' }], citations: [{ source: 'https://example.org/s' }] });
   const doc = (atts) => JSON.stringify({ profile: 'attestation-centric', gazetteer: { '@id': 'https://example.org/g', title: 't' }, attestations: atts });
