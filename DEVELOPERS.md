@@ -192,7 +192,11 @@ draw an order-2 or order-3 map at order 1, so Chora passes `allmapsTransformatio
 `georefNote` states in a sentence of its own) and, for least-squares transformations, how far the
 fit misses its own control points (`controlPointMisfitKm`, `controlPointMisfitMaxKm`; null for a
 thin plate spline), stated in the note only with `{ misfit: true }`. `georefCitation(record, {
-region, pad })` pads a region by `pad` canvas pixels, none by default. The fixtures, real Allmaps annotations
+region, pad })` pads a region by `pad` canvas pixels, none by default. `metresPerPixel(g, px, { space, transformation })` (async) gives the ground scale at
+a pixel as `{ x, y, mean }` metres per pixel of `space`, by a ±0.5 px symmetric difference through
+the same transformation and canvas scaling as `toWorld`, and refuses as it does. The IIIF helpers
+`normaliseId`, `manifestCanvases`, `partOfCanvases`, `labelText` and `parseImageRequest` are public,
+re-exported from `iiif.js` by `index.js` (`test/georef-exports.test.js`). The fixtures, real Allmaps annotations
 and IIIF manifests with reference values from Allmaps' own code, are described in
 `test/fixtures/georef/README.md`.
 

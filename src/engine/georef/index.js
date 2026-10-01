@@ -1,17 +1,36 @@
 // Georeferencing: positions on a map image to positions in the world and back, through a IIIF
 // Georeference Annotation (as Allmaps makes them), for every PLATO tool that needs it.
 //
-//   import { readGeoreference, toWorld, toPixels, georefNote, georefCitation, georefAnnotationCitation,
-//            matchesTarget, matchTarget, containsRegion, allmapsLookupUrl,
-//            allmapsTransformationName } from './engine/georef/index.js'
+//   import { readGeoreference, toWorld, toPixels, metresPerPixel, georefNote, georefCitation,
+//            georefAnnotationCitation, matchesTarget, matchTarget, containsRegion, allmapsLookupUrl,
+//            allmapsTransformationName, normaliseId, manifestCanvases, partOfCanvases, labelText,
+//            parseImageRequest } from './engine/georef/index.js'
 //
-// ASYNC: readGeoreference, toWorld and toPixels return Promises. The Allmaps libraries they use
+// ASYNC: readGeoreference, toWorld, toPixels and metresPerPixel return Promises. The Allmaps libraries they use
 // are loaded by dynamic import() the first time one of them is called, so that a page which never
 // meets a georeference never downloads them. georefNote, georefCitation, georefAnnotationCitation,
 // matchesTarget, matchTarget, containsRegion and allmapsTransformationName are synchronous and
 // never load Allmaps.
 // allmapsLookupUrl is async only because it hashes with Web Crypto; it builds a URL and fetches
 // nothing.
+//
+// metresPerPixel(g, px, { space, transformation }) -> Promise of { x, y, mean }: the ground scale
+// at pixel px of `space`, in metres per pixel along x, along y, and their geometric mean, by the
+// transformation and canvas scaling toWorld uses; refused as toWorld refuses (see its comment).
+//
+// IIIF helpers, synchronous, never loading Allmaps (they live in iiif.js; these are public):
+//   normaliseId(id) -> string | undefined: a trimmed id without a trailing "/info.json" or
+//     trailing slashes, for comparing ids; undefined for anything not a string.
+//   manifestCanvases(manifest) -> [{ id, width, height, label, services }]: the canvases of a IIIF
+//     Presentation 2 or 3 manifest, in order, with the normalised image service ids painted on
+//     each (a Choice's too) and the label as labelText gives it.
+//   partOfCanvases(resource) -> [{ id, label, manifestId, manifestLabel }]: the canvases (and their
+//     manifests) that an Allmaps annotation's target source says it is part of (partOf).
+//   labelText(label) -> string | undefined: the text of a IIIF label (a v2 string, array or
+//     { "@value" }, or a v3 language map, preferring en, en-GB, en-US, none); undefined if empty.
+//   parseImageRequest(id) -> { service, region, size, rotation, quality, format } | undefined: a
+//     IIIF Image API 2/3 image request URL taken apart, service normalised; undefined when the id
+//     is not Image API grammar. Its service may be compared with image service ids only.
 //
 // Nothing here fetches anything: the caller fetches the annotation and the manifest.
 // Pure ESM, no DOM: runs in Node and in a Web Worker.
@@ -36,11 +55,12 @@ import {
   segmentsCross, vertices, edges,
 } from './shapes.js';
 
+// Public helpers for reading IIIF, kept in iiif.js (see the list of exports above).
+export { allmapsLookupUrl, parseImageRequest, normaliseId, manifestCanvases, partOfCanvases, labelText } from './iiif.js';
 /**
  * The transformation library, as the record names it. A test checks this against
  * node_modules/@allmaps/transform/package.json, so it cannot drift from package.json's pin.
  */
-export { allmapsLookupUrl, parseImageRequest } from './iiif.js';
 export const SOFTWARE = '@allmaps/transform@1.0.0-beta.53';
 
 // ---- Loading Allmaps, lazily ------------------------------------------------------------------
@@ -706,6 +726,43 @@ export async function toPixels(g, geojson, { space, transformation, densify, pre
     polygon: (rings) => rings.map((r) => inverseLine(entry, r, true, tol).map(out)),
   });
   return { geometry: pixels, record: makeRecord(g, 'toPixels', name, space, undefined, undefined, undefined, entry.misfit) };
+}
+
+/**
+ * The scale of the map on the ground at one pixel, in metres per pixel of `space`.
+ *
+ * Measured with the transformation toWorld uses (the same choice and the same canvas-to-image
+ * scaling): the positions half a pixel either side of px along x, and along y, are placed in the
+ * world and the great-circle distance between each pair is taken (on a sphere of the IUGG mean
+ * radius). A symmetric difference, so a straight-line scale is exact and a curved one is right to
+ * the second order.
+ *
+ * @param px [x, y] in pixels of `space`.
+ * @param options.space 'canvas' or 'image': REQUIRED; a TypeError if missing or anything else.
+ * @param options.transformation As for toWorld (default: the annotation's own).
+ * @returns Promise of { x, y, mean }: metres per pixel along x, along y, and their geometric mean.
+ *   Refused as toWorld refuses: a DataError where toWorld gives one (too few control points, an
+ *   unknown image or canvas size, a position that is not a pair of numbers, or one with no place
+ *   in the world).
+ */
+export async function metresPerPixel(g, px, { space, transformation } = {}) {
+  spaceOf(space);
+  const name = transformation === undefined ? g.transformation : transformationName(transformation, 'The option');
+  enoughPoints(g, name);
+  const [x, y] = readGeojson({ type: 'Point', coordinates: px }, 'The pixel position').coordinates;
+  const [sx, sy] = scaleToImage(g, space);
+  const { t } = await transformerFor(g, name);
+  const at = ([u, v]) => {
+    const [lon, lat] = fromMercator(t.transformToGeo([u * sx, v * sy]));
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+      throw new DataError(`The georeference${g.annotationId ? ` ${g.annotationId}` : ''} gives no position in the world near [${x}, ${y}] through a ${TRANSFORMATIONS[name].words} transformation, so its scale there cannot be measured. Nothing was changed.`);
+    }
+    return [lon, lat];
+  };
+  const h = 0.5;
+  const along = (a, b) => (haversineKm(at(a), at(b)) * 1000) / (2 * h);
+  const mx = along([x - h, y], [x + h, y]), my = along([x, y - h], [x, y + h]);
+  return { x: mx, y: my, mean: Math.sqrt(mx * my) };
 }
 
 // ---- Choosing among georeferences --------------------------------------------------------------
