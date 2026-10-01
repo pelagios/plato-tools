@@ -225,6 +225,14 @@ test('a HomelandOf relation goes to related_uri, never to a place row of its own
   const z = unzipSync(t.e.outs['h-tables.zip'][0]);
   assert.deepEqual(rowsOf(strFromU8(z['relations.csv'])).map((r) => [r.relation_type, r.related_place_id, r.related_uri]), [['HomelandOf', '', people]]);
   assert.deepEqual(rowsOf(strFromU8(z['places.csv'])).map((r) => r.place_id), ['land'], 'the people gets no place row');
+  // A presence control: the same target related as a place (ContainedIn, no label) is a place row,
+  // in related_place_id, so the absences above are the relation type's doing.
+  const asPlace = JSON.parse(JSON.stringify(doc));
+  asPlace.spatialEntities[0].attestations[0].relations[0].relationType = P + 'ContainedIn';
+  const c = await go([textFile(JSON.stringify(asPlace), 'h.json')], 'convert', 'tables');
+  const cz = unzipSync(c.e.outs['h-tables.zip'][0]);
+  assert.deepEqual(rowsOf(strFromU8(cz['relations.csv'])).map((r) => [r.relation_type, r.related_place_id, r.related_uri]), [['ContainedIn', 'Q193592', '']]);
+  assert.deepEqual(rowsOf(strFromU8(cz['places.csv'])).map((r) => r.place_id).sort(), ['Q193592', 'land']);
 });
 
 test('a route that is, through its members, a member of itself is an error; a chain is not', async () => {
