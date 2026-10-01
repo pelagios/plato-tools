@@ -200,6 +200,10 @@ a:visited { color: var(--accent); }
 .tool-link { color: inherit; text-decoration: none; display: block; }
 .tool-link:hover h3, .tool-link:focus-visible h3 { color: var(--tool-band); text-decoration: underline; }
 .tool:has(.tool-link:hover) { border-color: var(--tool-band); }
+/* Hover and choice tint the card with the logo's gold, mixed into the page's own background, so the
+   same rule gives a pale gold on light and a warm, dim gold on dark, with no theme rule of its own. */
+.tools.choose .tool:not(.coming):has(.tool-link:hover), .tools.choose .tool:not(.coming):has(.tool-link:focus-visible) { background: color-mix(in srgb, var(--gold) 16%, var(--bg)); }
+.tools.choose .tool:has(.tool-link[aria-current]) { background: color-mix(in srgb, var(--gold) 26%, var(--bg)); }
 .tool.coming { color: var(--muted); border: 1px dashed var(--soon); background: transparent; }
 .tool.coming h3 { color: var(--muted); }
 .badge { position: absolute; top: .55rem; right: .6rem; font-size: .72rem; letter-spacing: .05em; text-transform: uppercase; border: 1px solid var(--soon); border-radius: 999px; padding: .05rem .5rem; color: var(--soon); }
