@@ -2881,6 +2881,35 @@ def chora_checks(pw, url, tmp):
                 and ctl['chora-context-area'] == 0 and ctl['chora-place-points'] > 0), {'note': note, 'centre': c, 'GR': [w, s, e, n], 'Athens': ctl}
     attempt('Chora: a place with no location of its own is shown by its country, outlined, and the map goes there', fallback)
 
+    # PLATO #18 and #20, in the shape Trismegistos gives them: a containment known only by name ("in
+    # the Delta"), and an attestation window (the span of the texts that mention the place).
+    def name_only_and_evidence():
+        f = tmp / 'chora-files' / 'trismegistos-shape.json'; f.parent.mkdir(exist_ok=True)
+        P = 'https://w3id.org/plato#'; s = [{'title': 'Trismegistos Places'}]
+        f.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': 'https://example.org/g', 'title': 'Windows'}, 'spatialEntities': [
+            {'@id': 'https://example.org/p/agathos', 'label': 'Agathos Daimon', 'ccodes': ['EG'], 'attestations': [
+                {'names': [{'toponym': 'Agathos Daimon'}], 'sources': s},
+                {'relations': [{'relationType': P + 'ContainedIn', 'relatedLabel': 'the Delta', 'relationLabel': 'in the Delta'}], 'sources': s},
+                {'timespans': [{'startEarliest': '0015', 'endLatest': '0540', 'sourceLabel': 'AD 15 - AD 540'}], 'timespanRole': P + 'EvidenceSpan', 'sources': s}]},
+            {'@id': 'https://example.org/p/kom', 'label': 'Kom Control', 'ccodes': ['EG'], 'attestations': [
+                {'names': [{'toponym': 'Kom Control'}], 'timespans': [{'startEarliest': '0100', 'endLatest': '0200'}], 'sources': s},
+                {'relations': [{'relationType': P + 'ContainedIn', 'relatesTo': 'https://example.org/p/agathos'}], 'sources': s}]}]}))
+        chora_boot(page, base, [f])
+        chora_pick(page, 'agathos')
+        rel = page.evaluate('() => { const ul = [...document.querySelectorAll("#card h3")].find((h) => h.textContent === "Related places")?.nextElementSibling; return ul ? { text: ul.textContent, links: ul.querySelectorAll("a").length } : null; }')
+        tl = page.evaluate('() => { const s = document.querySelector("#card svg.timeline"); return s ? { text: s.textContent, evidence: s.querySelectorAll("rect.tl-evidence").length, legend: s.querySelectorAll(".tl-legend").length } : null; }')
+        note = page.inner_text('#card .note')
+        # The control: a dated claim is a solid bar with no legend, and a relation to a place of the dataset is a link.
+        chora_pick(page, 'kom control')
+        ctl_rel = page.evaluate('() => [...document.querySelectorAll("#card h3")].find((h) => h.textContent === "Related places")?.nextElementSibling?.querySelectorAll("a[data-place]").length')
+        ctl = page.evaluate('() => { const s = document.querySelector("#card svg.timeline"); return s ? { text: s.textContent, bars: s.querySelectorAll("rect").length, evidence: s.querySelectorAll("rect.tl-evidence").length, legend: s.querySelectorAll(".tl-legend").length } : null; }')
+        return (rel and 'ContainedIn: the Delta' in rel['text'] and rel['links'] == 0
+                and 'showing its country (EG)' in note
+                and tl and 'mentioned in texts dated 15–540' in tl['text'] and tl['evidence'] == 1 and tl['legend'] == 1
+                and ctl_rel == 1 and ctl and 'Kom Control · 100–200' in ctl['text'] and 'mentioned' not in ctl['text']
+                and ctl['bars'] == 1 and ctl['evidence'] == 0 and ctl['legend'] == 0), {'related': rel, 'timeline': tl, 'note': note, 'control links': ctl_rel, 'control timeline': ctl}
+    attempt('Chora: a relation named only is plain text that places nothing, and the span of the texts is drawn hatched as a mention (a dated claim is not)', name_only_and_evidence)
+
     # Drawing, in one file: each check below opens it afresh and finds what the one before left.
     draws = {'file': fixture(ant, 'antonine-draw.json', tmp)}
     def draw_three():
