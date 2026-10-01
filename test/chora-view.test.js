@@ -3,8 +3,10 @@
 // with no geometry of its own. Each absence asserted here has its presence beside it: a withdrawn
 // geometry is shown when the retraction is not seen, a fallback is taken only when the one before
 // it is missing, so that none of these checks could pass by showing nothing.
+import { PLATO_REPO } from './paths.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { env, file, textFile, go, outText } from './engine.js';
 import { detect } from '../src/engine/input.js';
 import { load, fold } from '../src/engine/chora/store.js';
@@ -298,4 +300,119 @@ test('#19: a location given only relative to other places is kept, in words, wit
   assert.deepEqual([bad.anchors.map((a) => a.label), bad.distance, bad.bearing], [['a', '<b>'], null, null]);
   // A location that is neither drawable nor relative is still not shown.
   assert.deepEqual(viewPlace({ label: 'x', attestations: [{ geometries: [{ sourceLabel: '??', qualification: { certainty: 0.5 } }] }] }).relative, []);
+});
+
+// ---- PLATO's own example of #18 to #22, schemas/examples/place-centric-trismegistos.json at the pinned
+// commit, through the store as Chora opens it. What each test expects is read from the example (and
+// named here, so that a changed example fails the test rather than moving its target). ---------------
+const TM = `${PLATO_REPO}/schemas/examples/place-centric-trismegistos.json`;
+const example = () => JSON.parse(readFileSync(TM, 'utf8'));
+const entity = (ex, label) => { const e = ex.spatialEntities.find((x) => x.label === label); assert.ok(e, `${label} is in the example`); return e; };
+// The attestation of an entity whose @id ends "#frag": the example names each facet so.
+const facet = (e, frag) => { const a = e.attestations.find((x) => x['@id'] === `${e['@id']}#${frag}`); assert.ok(a, `${e.label}#${frag} is in the example`); return a; };
+const EG = [24.7, 22, 36.9, 31.7], BG = [22.4, 41.2, 28.6, 44.2];
+const tmBoxes = (c) => ({ EG, BG })[c] || null;
+const TRISMEGISTOS = 'https://www.trismegistos.org/place/';
+
+test('Trismegistos #18: "the Delta" is a relation by name alone and places nothing; a province minted as a place of the dataset is a related place', async () => {
+  const ex = example();
+  const s = await open(file(TM, 'trismegistos.json'));
+  assert.equal(s.loaded.places, ex.spatialEntities.length);
+  assert.equal(s.loaded.places, 5, 'three Trismegistos places and two minted provinces');
+  const agathos = entity(ex, 'Agathos Daimon');
+  const delta = facet(agathos, 'delta').relations[0];
+  assert.deepEqual([delta.relatedLabel, delta.relatesTo], ['the Delta', undefined], 'the example names the Delta with no address');
+  const v = s.getPlace(agathos['@id'], { ccodeBbox: tmBoxes });
+  assert.deepEqual(v.relations.map((r) => [r.typeLabel, r.label, r.relatesTo, r.related, r.status]), [['ContainedIn', 'the Delta', null, null, 'asserted']]);
+  assert.deepEqual(v.fallback, { kind: 'ccodes', bbox: EG }, 'the Delta places nothing: the map goes on to Egypt');
+  assert.deepEqual(v.types.map((t) => t.label), ['river']);
+  // Beside it: Setis is in Aegyptus, a place of the dataset, so the relation is to that place.
+  const setis = entity(ex, 'Setis'), aegyptus = entity(ex, 'Aegyptus');
+  assert.equal(facet(setis, 'province').relations[0].relatesTo, aegyptus['@id'], 'the example points Setis at Aegyptus');
+  const sv = s.getPlace(setis['@id'], { ccodeBbox: tmBoxes });
+  assert.deepEqual(sv.relations.map((r) => [r.typeLabel, r.label, r.relatesTo, r.related && r.related.id]), [['ContainedIn', 'Aegyptus', aegyptus['@id'], aegyptus['@id']]]);
+  assert.deepEqual(s.getPlace(aegyptus['@id']).names.map((n) => n.toponym), ['Aegyptus'], 'and Aegyptus opens as a place');
+  // The store keeps the address as a related place, and not the name.
+  assert.equal(s.db.selectValue('SELECT rel FROM p WHERE id = ?', [setis['@id']]), JSON.stringify([aegyptus['@id']]));
+  assert.equal(s.db.selectValue('SELECT rel FROM p WHERE id = ?', [agathos['@id']]), JSON.stringify([]));
+});
+
+test('Trismegistos #19: Setis between two places and Agrianes near one, both outside the dataset: lines in words, never drawn; Setis\'s point is drawn beside them', async () => {
+  const ex = example();
+  const s = await open(file(TM, 'trismegistos.json'));
+  const setis = entity(ex, 'Setis');
+  const between = facet(setis, 'between').geometries[0], point = facet(setis, 'point').geometries[0];
+  assert.deepEqual(between.qualification.relativeTo, [TRISMEGISTOS + '2207', TRISMEGISTOS + '1767'], 'the example gives two anchors as a list');
+  assert.equal(between.geojson, undefined, 'and no coordinates with them');
+  const sv = s.getPlace(setis['@id'], { ccodeBbox: tmBoxes });
+  assert.deepEqual(sv.relative.map((r) => [r.qualifierLabel, r.anchors, r.distance, r.bearing, r.sourceLabel, r.status, r.timespan]), [
+    ['between', [{ id: TRISMEGISTOS + '2207', label: '2207', place: false }, { id: TRISMEGISTOS + '1767', label: '1767', place: false }], null, null, between.sourceLabel, 'asserted', null],
+  ]);
+  assert.equal(between.sourceLabel, 'between U01 Assuan (2207) and U01 Philai (1767)');
+  // The point of the same place is drawn, and is what places it: the anchors are not.
+  assert.deepEqual(sv.geometries.map((g) => g.geojson), [point.geojson]);
+  assert.deepEqual(point.geojson.coordinates, [32.88393, 24.098744]);
+  assert.deepEqual(sv.fallback, { kind: 'geometry', bbox: [32.88393, 24.098744, 32.88393, 24.098744] });
+  // Agrianes: one anchor, given as a string, and nothing drawn, so the map goes on to Bulgaria.
+  const agrianes = entity(ex, 'Agrianes');
+  const valley = facet(agrianes, 'valley').geometries[0];
+  assert.equal(valley.qualification.relativeTo, TRISMEGISTOS + '11828', 'the example gives one anchor as a string');
+  const av = s.getPlace(agrianes['@id'], { ccodeBbox: tmBoxes });
+  assert.deepEqual(av.relative.map((r) => [r.qualifierLabel, r.anchors, r.sourceLabel]), [['near', [{ id: TRISMEGISTOS + '11828', label: '11828', place: false }], valley.sourceLabel]]);
+  assert.deepEqual(av.geometries, []);
+  assert.deepEqual(av.fallback, { kind: 'ccodes', bbox: BG });
+  assert.equal(s.loaded.withGeometry, 1, 'of the five places, only Setis is on the map');
+});
+
+test('Trismegistos #20: each place\'s window is the span of the texts, an evidence entry on the timeline and never a location\'s date', async () => {
+  const ex = example();
+  const s = await open(file(TM, 'trismegistos.json'));
+  const expected = { Setis: ['-0144', '0099', 'BC 144 - AD 99'], 'Agathos Daimon': ['0015', '0540', 'AD 15 - AD 540'], Agrianes: ['-0236', '0075', 'BC 236 - AD 75'] };
+  for (const [label, [start, end, words]] of Object.entries(expected)) {
+    const e = entity(ex, label), w = facet(e, 'window');
+    assert.equal(w.timespanRole, P + 'EvidenceSpan', `${label}'s window is an evidence span in the example`);
+    assert.deepEqual([w.timespans[0].startEarliest, w.timespans[0].endLatest, w.timespans[0].sourceLabel], [start, end, words], `${label}'s dates in the example`);
+    const v = s.getPlace(e['@id']);
+    assert.deepEqual(v.timeline.map((t) => [t.facet, t.text, t.start, t.end, t.label, t.evidence, t.status]), [['evidence', '', start, end, words, true, 'asserted']], label);
+    assert.ok(v.geometries.every((g) => g.timespan === null), `${label}: no location carries the window's dates`);
+  }
+  assert.deepEqual(s.getPlace(entity(ex, 'Aegyptus')['@id']).timeline, [], 'a minted province has no window');
+  // The control: the same dates given to Setis's point as its own, with no role, date the point and are no mention.
+  const doctored = structuredClone(ex), setis = entity(doctored, 'Setis');
+  facet(setis, 'point').timespans = facet(setis, 'window').timespans;
+  const d = await open(textFile(JSON.stringify(doctored), 'doctored.json'));
+  const dv = d.getPlace(setis['@id']);
+  assert.deepEqual(dv.geometries.map((g) => g.timespan), [{ start: '-0144', end: '0099', label: 'BC 144 - AD 99' }]);
+  assert.deepEqual(dv.timeline.map((t) => [t.facet, t.evidence]), [['evidence', true], ['geometry', false]]);
+});
+
+test('Trismegistos #21, #22: a name known only in transliteration says so, with its system; the names of a people\'s land carry what they denote', async () => {
+  const ex = example();
+  const s = await open(file(TM, 'trismegistos.json'));
+  const setis = entity(ex, 'Setis');
+  const stt = facet(setis, 'names').names.find((n) => n.transliterationSystem);
+  assert.deepEqual(stt, { toponym: 'Sṯt', language: 'egy-Latn-t-egy-egyd', script: 'Latn', transliterationSystem: 'Egyptological transliteration' }, 'the Demotic name in the example');
+  const sv = s.getPlace(setis['@id']);
+  assert.deepEqual(sv.names.map((n) => [n.toponym, n.language, n.script, n.transliterationSystem, n.nameType]), [
+    ['Setis', null, null, null, null],
+    ['Σητις', 'grc', 'Grek', null, null],
+    ['Διονύσου Νῆσος', 'grc', 'Grek', null, null],
+    ['Κρόνου Ἐμπόριον', 'grc', 'Grek', null, null],
+    ['Sṯt', 'egy-Latn-t-egy-egyd', 'Latn', 'Egyptological transliteration', null],
+  ]);
+  // Agrianes, the land of a people (#22): its names are toponym and ethnonym, its inhabitants' a demonym.
+  const agrianes = entity(ex, 'Agrianes');
+  assert.deepEqual(facet(agrianes, 'headword').names[0].nameType, ['toponym', 'ethnonym'], 'the example types the headword both ways');
+  const av = s.getPlace(agrianes['@id']);
+  assert.deepEqual(av.names.map((n) => [n.toponym, n.language, n.nameType]), [
+    ['Agrianes', null, ['toponym', 'ethnonym']], ['Agriani', 'la', ['toponym', 'ethnonym']], ['Ἀγρίανες', 'grc', ['toponym', 'ethnonym']],
+    ['Agrian', null, ['demonym']], ['Agrianus', null, ['demonym']],
+  ]);
+  assert.deepEqual(av.types.map((t) => t.label), ['land of a people']);
+  // What the schema refuses is dropped, not shown: a type that is not a list of text, a system that is not text.
+  const bad = viewPlace({ label: 'x', attestations: [{ names: [{ toponym: 'x', nameType: 'toponym', transliterationSystem: ['Pinyin'], script: 5 }, { toponym: 'y', nameType: ['toponym', 5, '<b>'] }] }] });
+  assert.deepEqual(bad.names.map((n) => [n.nameType, n.transliterationSystem, n.script]), [[null, null, null], [['toponym', '<b>'], null, null]]);
+  // A HomelandOf relation (#22) is shown as any relation type is, by its name, to the record it points at.
+  const home = viewPlace({ label: 'x', attestations: [{ relations: [{ relationType: P + 'HomelandOf', relatesTo: 'https://example.org/people/agrianes', relatedLabel: 'the Agrianes' }] }] });
+  assert.deepEqual(home.relations.map((r) => [r.typeLabel, r.label, r.related]), [['HomelandOf', 'the Agrianes', null]]);
 });

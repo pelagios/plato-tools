@@ -14,6 +14,20 @@ export const badge = (s) => (STATUS_WORDS[s] ? ` <span class="status status-${s}
 export const tailOf = (iri) => (iri ? String(iri).split(/[#/]/).pop() : '');
 const trim = (s, k) => (s.length > k ? s.slice(0, k - 1) + '…' : s);
 
+/**
+ * One name: the source's form, its language (else its script), its romanised form, and the system
+ * of transliteration where one is named (PLATO #21: "Sṯt (egy-Latn-t-egy-egyd) in Egyptological
+ * transliteration" is a Demotic name known only so; with a romanised form the system is that form's).
+ * What the name denotes follows where the record says and it is not a toponym alone (#22: "Agrianes
+ * toponym, ethnonym" names the land of a people, "Agrian demonym" its inhabitants).
+ */
+export function nameItem(n) {
+  const tag = n.language || n.script;
+  const system = n.transliterationSystem ? (n.romanized ? ` (${esc(n.transliterationSystem)})` : ` <span class="muted">in ${esc(n.transliterationSystem)}</span>`) : '';
+  const kinds = n.nameType && !(n.nameType.length === 1 && n.nameType[0] === 'toponym') ? ` <span class="muted">${esc(n.nameType.join(', '))}</span>` : '';
+  return `${esc(n.toponym)}${tag ? ` <span class="muted">(${esc(tag)})</span>` : ''}${n.romanized ? ` <span class="muted">${esc(n.romanized)}${system}</span>` : system}${kinds}${badge(n.status)}`;
+}
+
 export const ROLE_WORDS = { Extent: 'the whole place', FeaturePoint: 'a feature of it', RepresentativePoint: 'a point standing for it', LabelAnchor: 'where its label goes', Itinerary: 'a route' };
 const dated = (t) => (t?.label || t?.start ? ` <span class="muted">${esc(t.label || `${t.start ?? ''}–${t.end ?? ''}`)}</span>` : '');
 /** One location drawn on the map: its kind, what it marks, how well it is known, and its date. */

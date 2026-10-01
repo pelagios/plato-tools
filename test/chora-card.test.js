@@ -1,9 +1,11 @@
 // Chora's place card as text (src/chora/card.js): what the card writes for a relation and for the
 // timeline, from the view (src/engine/chora/view.js). Pure: no page, no map. Each absence asserted
 // here has its presence beside it, so that none of these checks could pass by writing nothing.
+import { PLATO_REPO } from './paths.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { relationItem, timeline, esc, relativeItem, locations } from '../src/chora/card.js';
+import { readFileSync } from 'node:fs';
+import { relationItem, timeline, esc, relativeItem, locations, nameItem } from '../src/chora/card.js';
 import { viewPlace } from '../src/engine/chora/view.js';
 
 const P = 'https://w3id.org/plato#';
@@ -71,4 +73,97 @@ test('#19: a location relative to other places is a line under Locations, its an
   assert.match(html, /^<ul><li>Point<\/li><li>between <a /);
   assert.equal(locations({ geometries: [], relative: [] }), '<p class="muted">None recorded.</p>');
   assert.equal(locations({ geometries: v.geometries, relative: [] }), '<ul><li>Point</li></ul>', 'the control: no relative line where there is none');
+});
+
+test('#21, #22: a name is written with its language, its romanised form and system, and what it denotes where that is not a toponym alone', () => {
+  const name = (o) => nameItem({ toponym: 'x', language: null, script: null, romanized: null, transliterationSystem: null, nameType: null, status: 'asserted', ...o });
+  assert.equal(name({}), 'x', 'the control: nothing is added where nothing is given');
+  assert.equal(name({ language: 'grc', script: 'Grek' }), 'x <span class="muted">(grc)</span>', 'the language tag, which already says the script');
+  assert.equal(name({ script: 'Grek' }), 'x <span class="muted">(Grek)</span>', 'the script where there is no language');
+  assert.equal(name({ language: 'egy-Latn-t-egy-egyd', transliterationSystem: 'Egyptological transliteration' }), 'x <span class="muted">(egy-Latn-t-egy-egyd)</span> <span class="muted">in Egyptological transliteration</span>');
+  assert.equal(name({ romanized: 'Athenai', transliterationSystem: 'ISO 843' }), 'x <span class="muted">Athenai (ISO 843)</span>', 'with a romanised form, the system is that form\'s');
+  assert.equal(name({ romanized: 'Athenai' }), 'x <span class="muted">Athenai</span>');
+  assert.equal(name({ nameType: ['toponym'] }), 'x', 'a toponym alone is what a name is taken to be');
+  assert.equal(name({ nameType: ['toponym', 'ethnonym'] }), 'x <span class="muted">toponym, ethnonym</span>');
+  assert.equal(name({ nameType: ['demonym'], status: 'doubted' }), 'x <span class="muted">demonym</span> <span class="status status-doubted" data-tip="The source reports this, and doubts it.">doubted</span>');
+  // Each is the dataset's text, never markup.
+  assert.equal(name({ toponym: '<b>', language: '<i>', romanized: '<u>', transliterationSystem: '<s>', nameType: ['<em>'] }), '&lt;b&gt; <span class="muted">(&lt;i&gt;)</span> <span class="muted">&lt;u&gt; (&lt;s&gt;)</span> <span class="muted">&lt;em&gt;</span>');
+});
+
+// ---- PLATO's own example of #18 to #22, schemas/examples/place-centric-trismegistos.json at the pinned
+// commit, through the view and then each card function, with the expected words taken from the example
+// and named here. The lookup knows the example's own places, as the store's does. ------------------
+const TM = `${PLATO_REPO}/schemas/examples/place-centric-trismegistos.json`;
+const example = () => JSON.parse(readFileSync(TM, 'utf8'));
+const lookupOf = (ex) => (x) => { const e = ex.spatialEntities.find((p) => p['@id'] === x); return e ? { id: e['@id'], label: e.label, reprPoint: null, bbox: null } : null; };
+const place = (ex, label) => { const e = ex.spatialEntities.find((x) => x.label === label); assert.ok(e, `${label} is in the example`); return viewPlace(e, { lookup: lookupOf(ex) }); };
+const facet = (ex, label, frag) => { const e = ex.spatialEntities.find((x) => x.label === label); const a = e.attestations.find((x) => x['@id'] === `${e['@id']}#${frag}`); assert.ok(a, `${label}#${frag} is in the example`); return a; };
+
+test('Trismegistos #18: the card writes "the Delta" as text, and Aegyptus, a place of the dataset, as a link to it', () => {
+  const ex = example();
+  assert.equal(facet(ex, 'Agathos Daimon', 'delta').relations[0].relatedLabel, 'the Delta');
+  assert.deepEqual(place(ex, 'Agathos Daimon').relations.map(relationItem), ['ContainedIn: the Delta']);
+  const aegyptus = facet(ex, 'Setis', 'province').relations[0].relatesTo;
+  assert.equal(aegyptus, 'https://example.org/plato-examples/trismegistos/province/Aegyptus');
+  assert.deepEqual(place(ex, 'Setis').relations.map(relationItem), [`ContainedIn: <a href="#" data-place="${aegyptus}">Aegyptus</a>`]);
+  assert.deepEqual(place(ex, 'Agrianes').relations.map(relationItem), ['ContainedIn: <a href="#" data-place="https://example.org/plato-examples/trismegistos/province/Thracia">Thracia</a>']);
+});
+
+test('Trismegistos #19: under Locations, Setis has its point and a line "between 2207 and 1767", Agrianes "near 11828", the anchors as text since they are not places of the dataset', () => {
+  const ex = example();
+  const between = facet(ex, 'Setis', 'between').geometries[0].qualification;
+  assert.deepEqual(between.relativeTo.map((x) => x.split('/').pop()), ['2207', '1767'], 'the anchors in the example');
+  assert.equal(locations(place(ex, 'Setis')), '<ul><li>Point</li><li>between 2207 and 1767 <span class="muted">(relative; not drawn)</span></li></ul>');
+  assert.equal(facet(ex, 'Agrianes', 'valley').geometries[0].qualification.relativeTo.split('/').pop(), '11828');
+  assert.equal(locations(place(ex, 'Agrianes')), '<ul><li>near 11828 <span class="muted">(relative; not drawn)</span></li></ul>');
+  // The control, with the same lookup: an anchor that IS a place of the dataset is a link, as Aegyptus is under Related places.
+  const doctored = structuredClone(ex);
+  facet(doctored, 'Agrianes', 'valley').geometries[0].qualification.relativeTo = 'https://example.org/plato-examples/trismegistos/province/Thracia';
+  assert.equal(locations(place(doctored, 'Agrianes')), '<ul><li>near <a href="#" data-place="https://example.org/plato-examples/trismegistos/province/Thracia">Thracia</a> <span class="muted">(relative; not drawn)</span></li></ul>');
+  assert.equal(locations(place(ex, 'Aegyptus')), '<p class="muted">None recorded.</p>');
+});
+
+test('Trismegistos #20: each window is a hatched mention on the timeline, "BC 144 - AD 99" in the tip, with the legend; a province has no dates', () => {
+  const ex = example();
+  const expected = { Setis: ['BC 144 - AD 99', '-144–99'], 'Agathos Daimon': ['AD 15 - AD 540', '15–540'], Agrianes: ['BC 236 - AD 75', '-236–75'] };
+  for (const [label, [words, years]] of Object.entries(expected)) {
+    assert.equal(facet(ex, label, 'window').timespans[0].sourceLabel, words, `${label}'s window in the example`);
+    const tl = timeline(place(ex, label).timeline);
+    assert.match(tl, new RegExp(`class="tl-text">mentioned in texts dated ${years}</text>`), label);
+    assert.match(tl, new RegExp(`data-tip="Mentioned in texts dated ${esc(words)}"`), label);
+    assert.equal((tl.match(/class="tl-evidence"/g) || []).length, 1, label);
+    assert.equal((tl.match(/<rect /g) || []).length, 2, `${label}: the one bar and the legend's swatch`);
+    assert.match(tl, /class="tl-legend"/, label);
+  }
+  assert.equal(timeline(place(ex, 'Thracia').timeline), '<p class="muted">No dates recorded.</p>');
+  // The control: the same window with no role is a claim's bar, solid, not a mention.
+  const doctored = structuredClone(ex);
+  delete facet(doctored, 'Setis', 'window').timespanRole;
+  const tl = timeline(place(doctored, 'Setis').timeline);
+  assert.match(tl, /-144–99/);
+  assert.doesNotMatch(tl, /mentioned|tl-evidence|tl-legend/);
+  assert.equal((tl.match(/<rect /g) || []).length, 1);
+});
+
+test('Trismegistos #21, #22: the Demotic name is written as in Egyptological transliteration, and the names of the Agrianes with what they denote', () => {
+  const ex = example();
+  const stt = facet(ex, 'Setis', 'names').names.find((n) => n.transliterationSystem);
+  assert.deepEqual([stt.toponym, stt.language, stt.transliterationSystem], ['Sṯt', 'egy-Latn-t-egy-egyd', 'Egyptological transliteration'], 'the Demotic name in the example');
+  assert.deepEqual(place(ex, 'Setis').names.map(nameItem), [
+    'Setis',
+    'Σητις <span class="muted">(grc)</span>',
+    'Διονύσου Νῆσος <span class="muted">(grc)</span>',
+    'Κρόνου Ἐμπόριον <span class="muted">(grc)</span>',
+    'Sṯt <span class="muted">(egy-Latn-t-egy-egyd)</span> <span class="muted">in Egyptological transliteration</span>',
+  ]);
+  assert.deepEqual(facet(ex, 'Agrianes', 'names').names.map((n) => n.nameType), [['toponym', 'ethnonym'], ['toponym', 'ethnonym'], ['demonym'], ['demonym']], 'what each name denotes, in the example');
+  assert.deepEqual(place(ex, 'Agrianes').names.map(nameItem), [
+    'Agrianes <span class="muted">toponym, ethnonym</span>',
+    'Agriani <span class="muted">(la)</span> <span class="muted">toponym, ethnonym</span>',
+    'Ἀγρίανες <span class="muted">(grc)</span> <span class="muted">toponym, ethnonym</span>',
+    'Agrian <span class="muted">demonym</span>',
+    'Agrianus <span class="muted">demonym</span>',
+  ]);
+  // A HomelandOf relation (#22) is written as any relation is, by its type's name.
+  assert.equal(relationItem({ typeLabel: 'HomelandOf', type: P + 'HomelandOf', label: 'the Agrianes', relatesTo: 'https://example.org/people/agrianes', related: null, status: 'asserted' }), 'HomelandOf: the Agrianes');
 });

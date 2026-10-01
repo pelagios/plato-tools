@@ -1092,7 +1092,18 @@ and reaches nothing.
   or a list, #19, and no coordinates) is a line under Locations in words: "between Assuan and 1767
   (relative; not drawn)", with its distance and bearing when given. An anchor that is a place of the
   dataset is a link to it, any other its address's last segment. It is never drawn and never places
-  the place on the map. A location with coordinates and a qualification is drawn, as before.
+  the place on the map. A location with coordinates and a qualification is drawn, as before. A name
+  is written with its language tag (else its script), its romanised form, and the system of
+  transliteration where one is named (#21: "Sṯt (egy-Latn-t-egy-egyd) in Egyptological
+  transliteration" for a Demotic name known only so; with a romanised form the system is that
+  form's), and with what it denotes where that is not a toponym alone (#22: "Agrianes toponym,
+  ethnonym" for the land of a people, "Agrian demonym" for its inhabitants). A `HomelandOf`
+  relation (#22) is written as any relation is, by its type's name. The card's words are pure
+  functions in `src/chora/card.js` (`nameItem`, `relationItem`, `locations`, `timeline`), tested
+  without a page; `test/chora-view.test.js` and `test/chora-card.test.js` also run PLATO's own
+  Trismegistos example (`schemas/examples/place-centric-trismegistos.json`, read from
+  `PLATO_REPO`, so a missing checkout fails them) through the view and the card, with the expected
+  words taken from the example.
 - **The overview** reads a covering index of the places with a point (`pov`), not the records.
 - **A pool and an outputs folder of its own.** A SQLite SAHPool holds every file in its folder open,
   so a second tab on the same pool cannot start. Chora's page asks the worker for its own

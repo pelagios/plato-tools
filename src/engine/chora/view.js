@@ -78,6 +78,8 @@ const km = (v) => { const x = Array.isArray(v) ? v[0] : undefined; return typeof
 // A location's precision (the first of its list) and role: text, or nothing, for the same reason.
 const word = (v) => { const x = Array.isArray(v) ? v[0] : undefined; return typeof x === 'string' ? x : null; };
 const text = (v) => (typeof v === 'string' ? v : null);
+// A list of words (a name's nameType): its strings, or nothing where it is not a list or is empty.
+const wordList = (v) => { const xs = Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x) : []; return xs.length ? xs : null; };
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 // The relative qualifiers PLATO defines (plato:RelativeQualifierScheme), in words. DuringReignOf and
 // VariantOf qualify a timespan and a name, not a location, and are worded only in case one is used.
@@ -106,7 +108,14 @@ export function viewPlace(record, ctx = {}) {
     const evidence = isEvidence(a);
     const timespan = evidence ? null : span((a.timespans || [])[0]);
     for (const s of srcs) { const k = s.id || s.title; if (!seenSources.has(k)) { seenSources.add(k); view.sources.push({ id: s.id, title: s.title }); } }
-    for (const n of a.names || []) if (n && n.toponym) view.names.push({ toponym: n.toponym, language: n.language ?? null, romanized: n.romanized ?? null, status, attestationIndex: i });
+    // A name is the source's own form (PLATO #21): in its script where that can be written, else in a
+    // transliteration, `script` and `transliterationSystem` saying which. `nameType` says what it
+    // denotes (#22: the land of a people is named by a toponym that is an ethnonym too, and its
+    // inhabitants by a demonym). Each is kept only in the shape the schema allows: text, or a list of it.
+    for (const n of a.names || []) if (n && n.toponym) view.names.push({
+      toponym: n.toponym, language: text(n.language), script: text(n.script), romanized: text(n.romanized),
+      transliterationSystem: text(n.transliterationSystem), nameType: wordList(n.nameType), status, attestationIndex: i,
+    });
     for (const g of a.geometries || []) {
       const geojson = drawable(g);
       // A location given only relative to other places (PLATO #19: "between Assuan and Philai"): kept in

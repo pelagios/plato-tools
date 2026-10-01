@@ -2889,7 +2889,7 @@ def chora_checks(pw, url, tmp):
         P = 'https://w3id.org/plato#'; s = [{'title': 'Trismegistos Places'}]
         f.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': 'https://example.org/g', 'title': 'Windows'}, 'spatialEntities': [
             {'@id': 'https://example.org/p/agathos', 'label': 'Agathos Daimon', 'ccodes': ['EG'], 'attestations': [
-                {'names': [{'toponym': 'Agathos Daimon'}], 'sources': s},
+                {'names': [{'toponym': 'Agathos Daimon'}, {'toponym': 'Sṯt', 'language': 'egy-Latn-t-egy-egyd', 'script': 'Latn', 'transliterationSystem': 'Egyptological transliteration'}], 'sources': s},
                 {'relations': [{'relationType': P + 'ContainedIn', 'relatedLabel': 'the Delta', 'relationLabel': 'in the Delta'}], 'sources': s},
                 {'geometries': [{'sourceLabel': 'between Kom and Philai', 'qualification': {'relativeQualifier': P + 'BetweenXAndY', 'relativeTo': ['https://example.org/p/kom', 'https://www.trismegistos.org/place/1767']}}], 'sources': s},
                 {'timespans': [{'startEarliest': '0015', 'endLatest': '0540', 'sourceLabel': 'AD 15 - AD 540'}], 'timespanRole': P + 'EvidenceSpan', 'sources': s}]},
@@ -2904,6 +2904,7 @@ def chora_checks(pw, url, tmp):
         note = page.inner_text('#card .note')
         locs = page.evaluate('() => { const ul = [...document.querySelectorAll("#card h3")].find((h) => h.textContent === "Locations")?.nextElementSibling; return ul ? { text: ul.textContent, links: [...ul.querySelectorAll("a[data-place]")].map((a) => a.dataset.place) } : null; }')
         drawn = rendered(page, ['chora-place-points'])['chora-place-points']
+        names = page.evaluate('() => { const ul = [...document.querySelectorAll("#card h3")].find((h) => h.textContent === "Names")?.nextElementSibling; return ul ? [...ul.querySelectorAll("li")].map((li) => li.textContent) : null; }')
         # The control: a location with coordinates is drawn and not written as relative; a dated claim is a solid bar with no legend, and a relation to a place of the dataset is a link.
         chora_pick(page, 'kom control')
         ctl_locs = page.evaluate('() => [...document.querySelectorAll("#card h3")].find((h) => h.textContent === "Locations")?.nextElementSibling?.textContent')
@@ -2916,8 +2917,9 @@ def chora_checks(pw, url, tmp):
                 and ctl_locs == 'Point' and ctl_drawn > 0
                 and tl and 'mentioned in texts dated 15–540' in tl['text'] and tl['evidence'] == 1 and tl['legend'] == 1
                 and ctl_rel == 1 and ctl and 'Kom Control · 100–200' in ctl['text'] and 'mentioned' not in ctl['text']
-                and ctl['bars'] == 1 and ctl['evidence'] == 0 and ctl['legend'] == 0), {'related': rel, 'locations': locs, 'drawn': drawn, 'control locations': ctl_locs, 'control drawn': ctl_drawn, 'timeline': tl, 'note': note, 'control links': ctl_rel, 'control timeline': ctl}
-    attempt('Chora: a relation named only is plain text that places nothing, a location between two places is a line in words that is not drawn, and the span of the texts is drawn hatched as a mention (a drawn location and a dated claim are not)', name_only_and_evidence)
+                and ctl['bars'] == 1 and ctl['evidence'] == 0 and ctl['legend'] == 0
+                and names == ['Agathos Daimon', 'Sṯt (egy-Latn-t-egy-egyd) in Egyptological transliteration']), {'related': rel, 'locations': locs, 'drawn': drawn, 'control locations': ctl_locs, 'control drawn': ctl_drawn, 'timeline': tl, 'note': note, 'control links': ctl_rel, 'control timeline': ctl, 'names': names}
+    attempt('Chora: a relation named only is plain text that places nothing, a location between two places is a line in words that is not drawn, the span of the texts is drawn hatched as a mention (a drawn location and a dated claim are not), and a name known only in transliteration says so', name_only_and_evidence)
 
     # Drawing, in one file: each check below opens it afresh and finds what the one before left.
     draws = {'file': fixture(ant, 'antonine-draw.json', tmp)}

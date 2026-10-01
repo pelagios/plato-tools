@@ -8,7 +8,7 @@ import { sizeRead, loadNeed, saveNeed, storageShort } from '../engine/chora/stor
 import { detect } from '../engine/input.js';
 import { newGeometryAttestation, checkGeoJSON, wrapLongitudes, DrawError, ROLES, PRECISIONS } from '../engine/chora/draw.js';
 import { createMap, placeFeatures, contextFeatures } from './map.js';
-import { esc, badge, relationItem, timeline, locations, ROLE_WORDS } from './card.js';
+import { esc, badge, nameItem, relationItem, timeline, locations, ROLE_WORDS } from './card.js';
 import * as basemaps from './basemaps.js';
 import * as contributors from './contributor.js';
 import { fingerprint, loadDrafts, saveDrafts, draftsWritten, forgetAllDrafts } from './drafts.js';
@@ -185,7 +185,7 @@ function renderCard() {
   const mine = drafts.filter((d) => d.placeId === v.id);
   card.innerHTML = `<h2 id="card-h">${esc(v.label)}</h2>
     <p class="muted place-id">${esc(v.id)}${v.ccodes.length ? ` · ${esc(v.ccodes.join(', '))}` : ''}</p>${where}
-    <h3>Names</h3>${list(v.names, (x) => `${esc(x.toponym)}${x.language ? ` <span class="muted">(${esc(x.language)})</span>` : ''}${x.romanized ? ` <span class="muted">${esc(x.romanized)}</span>` : ''}${badge(x.status)}`)}
+    <h3>Names</h3>${list(v.names, nameItem)}
     <h3>Types</h3>${list(v.types, (x) => `${esc(x.label || '')}${badge(x.status)}`)}
     <h3>Locations</h3>${locations(v)}
     <h3>Related places</h3>${list(v.relations, relationItem)}
