@@ -332,7 +332,7 @@ test('placed: the whole document, and the PLATO JSON converted from it, are vali
 // ---- each kind, with its control -----------------------------------------------------------------------
 test('every region kind has words, and a severity the report knows', () => {
   const kinds = Object.keys(ANNOTATION_KINDS).filter((k) => /^annotation-(region|georef|manifest)-/.test(k));
-  assert.equal(kinds.length, 13);
+  assert.equal(kinds.length, 14);
   for (const k of kinds) { assert.ok(LOSS_TEXT[k], k); assert.ok(['loss', 'warning', 'error'].includes(ANNOTATION_KINDS[k]), k); }
 });
 test('annotation-region-shape: once for each placed region, and for nothing else', async () => {
@@ -555,6 +555,28 @@ test('annotation-georef-unused: a map that placed nothing is named; the maps tha
   assert.ok(r.attestation(14).geometries, 'the other map on the page placed the Chesapeake region');
   assert.ok(r.attestation(1).geometries, 'and the Rocque map its regions');
 });
+test('annotation-georef-duplicate: one map given twice (alone and in a page holding it) places as with one, naming both files; one map alone reports nothing', async () => {
+  const page = textFile(JSON.stringify({ type: 'AnnotationPage', '@context': 'http://www.w3.org/ns/anno.jsonld', items: [json(ROCQUE)] }), 'rocque-page.json');
+  const twice = await placed({ georefs: [ROCQUE, page], manifests: [ROCQUE_M] });
+  const once = await MAIN();
+  assert.deepEqual(twice.of('annotation-georef-duplicate'), ['https://annotations.allmaps.org/maps/56425c69f9cd4f1b is given in bpl-rocque-annotation.json and again in rocque-page.json; the first is used']);
+  assert.equal(ANNOTATION_KINDS['annotation-georef-duplicate'], 'warning');
+  assert.deepEqual(twice.of('annotation-region-ambiguous'), [], 'no region is ambiguous between the map and itself');
+  assert.deepEqual(twice.doc.attestations, once.doc.attestations, 'placed exactly as with the map given once');
+  assert.deepEqual(twice.of('annotation-georef-unused'), [], 'the copy left out is not reported as unused');
+  assert.deepEqual(once.of('annotation-georef-duplicate'), [], 'control: once, no duplicate');
+  // Two versions of the map: the later modified is used, whichever is given first.
+  const v2 = json(ROCQUE);
+  v2.body._allmaps.version = 'https://annotations.allmaps.org/maps/56425c69f9cd4f1b@ffff';
+  v2.modified = '2026-01-01T00:00:00.000Z';
+  for (const order of [[ROCQUE, 'v2'], ['v2', ROCQUE]]) {
+    const r = await placed({ georefs: order.map((x) => (x === 'v2' ? textFile(JSON.stringify(v2), 'rocque-v2.json') : x)), manifests: [ROCQUE_M] }, [item(1)]);
+    const [d] = r.of('annotation-georef-duplicate');
+    assert.match(d, /is given in two versions, .*; the later modified, in rocque-v2\.json, is used$/, d);
+    assert.ok(r.attestation(1).notes.includes('Annotation version https://annotations.allmaps.org/maps/56425c69f9cd4f1b@ffff, modified 2026-01-01T00:00:00.000Z.'), r.attestation(1).notes);
+    assert.deepEqual(r.of('annotation-region-ambiguous'), []);
+  }
+});
 test('annotation-georef-unreadable: a broken georeference or manifest is an error, and the run goes on with the rest', async () => {
   const r = await placed({ georefs: [textFile('{"type": "Annotation", ', 'broken.json'), textFile(JSON.stringify({ type: 'Annotation', motivation: 'painting' }), 'painting.json'), ROCQUE], manifests: [textFile('[1, 2', 'broken-manifest.json')] });
   const bad = r.of('annotation-georef-unreadable');
@@ -638,6 +660,19 @@ test('--georef and --manifest: the command line writes what the engine gives for
     assert.ok(line.items.some((i) => i.kind === 'annotation-georef-unused'), 'the Chesapeake page\'s first map placed nothing');
     assert.ok(!line.items.some((i) => i.kind === 'annotation-region-no-georef' && i.examples.some((e) => e.startsWith(id(14)))), 'its second placed region 14');
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+test('--georef given twice with the same file: the map is used once, the regions placed as with one', async () => {
+  const twice = cli('check', '--json', '--georef', ROCQUE, '--georef', ROCQUE, REGIONS);
+  const once = cli('check', '--json', '--georef', ROCQUE, REGIONS);
+  assert.equal(twice.code, 0, twice.out + twice.err);
+  const items = (r) => JSON.parse(r.out.split('\n')[0]).items;
+  const dup = items(twice).find((i) => i.kind === 'annotation-georef-duplicate');
+  assert.deepEqual(dup?.examples, ['https://annotations.allmaps.org/maps/56425c69f9cd4f1b is given twice, in bpl-rocque-annotation.json both times; it is used once']);
+  assert.ok(!items(twice).some((i) => i.kind === 'annotation-region-ambiguous'));
+  const shapes = (r) => items(r).find((i) => i.kind === 'annotation-region-shape')?.count;
+  assert.equal(shapes(twice), 7);
+  assert.equal(shapes(twice), shapes(once), 'as many placed as with the file given once');
+  assert.ok(!items(once).some((i) => i.kind === 'annotation-georef-duplicate'), 'control: once, no duplicate');
 });
 test('--georef and --manifest: a usage error (exit 2) with anything but a Recogito export, with compare, for a missing file, or a manifest alone', () => {
   const lpf = cli('check', '--georef', ROCQUE, 'test/fixtures/lpf-readme-example.json');

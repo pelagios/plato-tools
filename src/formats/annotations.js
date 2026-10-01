@@ -79,6 +79,7 @@ export const ANNOTATION_KINDS = {
   'annotation-region-crosses-map-edge': 'warning',
   'annotation-region-no-label-evidence': 'warning',
   'annotation-georef-unused': 'warning',
+  'annotation-georef-duplicate': 'warning',
   'annotation-manifest-unused': 'warning',
   'annotation-georef-unreadable': 'error',
 };

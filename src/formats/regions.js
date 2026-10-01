@@ -87,7 +87,9 @@ const message = (e) => String(e && e.message || e).replace(/\.$/, '');
  * Read the georeference files once each, and the manifests, pairing each map with the manifest
  * whose id is the manifest its annotation says it is part of. An AnnotationPage gives one map for
  * each of its annotations. A file that cannot be read, or a map in it that cannot, is reported
- * ('annotation-georef-unreadable', an error) and left out; the rest are used. A manifest that
+ * ('annotation-georef-unreadable', an error) and left out; the rest are used. A map given twice
+ * (by its annotation's id) is used once ('annotation-georef-duplicate'): of the same version, or
+ * where either says none, the first given; of two versions, the later modified. A manifest that
  * belongs to no map is reported ('annotation-manifest-unused').
  * @returns Promise of [{ g, file, used }]
  */
@@ -121,6 +123,26 @@ export async function readGeoreferences(georefFiles, manifestFiles, report) {
         report('annotation-georef-unreadable', `${where}: ${message(e)}`);
         continue;
       }
+      // The same map given twice (a single annotation and a page holding it, or one file given
+      // twice) would make every region on it ambiguous between it and itself: it is used once.
+      const held = g.annotationId ? maps.findIndex((x) => x.g.annotationId === g.annotationId) : -1;
+      if (held >= 0) {
+        const h = maps[held];
+        const [v1, v2] = [h.g.annotationVersion, g.annotationVersion];
+        if (!v1 || !v2 || v1 === v2) {
+          report('annotation-georef-duplicate', h.where === where
+            ? `${g.annotationId} is given twice, in ${where} both times; it is used once`
+            : `${g.annotationId} is given in ${h.where} and again in ${where}; the first is used`);
+          continue;
+        }
+        // Two versions of one map: the later modified is used (the one held, when that cannot be told).
+        const hm = Date.parse(h.g.annotationModified), gm = Date.parse(g.annotationModified);
+        const later = gm > hm;
+        const which = later ? `the later modified, in ${where}` : hm > gm ? `the later modified, in ${h.where}` : `the one in ${h.where} (which is later cannot be told)`;
+        report('annotation-georef-duplicate', `${g.annotationId} is given in two versions, ${v1} in ${h.where} and ${v2} in ${where}; ${which}, is used`);
+        if (!later) continue;
+        maps.splice(held, 1);
+      }
       const m = g.manifestId ? manifests.find((x) => x.id === normaliseId(g.manifestId)) : undefined;
       if (m) {
         // The manifest gives the canvas's size; one that does not fit the map is reported, and the
@@ -130,7 +152,7 @@ export async function readGeoreferences(georefFiles, manifestFiles, report) {
           report('annotation-georef-unreadable', `${m.name}, with ${where}: ${message(e)}`);
         }
       }
-      maps.push({ g, file: f.name, used: 0 });
+      maps.push({ g, file: f.name, where, used: 0 });
     }
   }
   for (const m of manifests) if (!m.used) report('annotation-manifest-unused', m.name);
