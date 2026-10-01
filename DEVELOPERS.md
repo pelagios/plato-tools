@@ -275,7 +275,12 @@ readers link to those headings, so keep them.
   follows the prefix), and `#x` through the one web-address `<idno>` of `<place xml:id="x">` in the
   same file (several: ambiguous, nothing converted). A place name in an `<rdg>`, or in the part of a
   `<choice>` not taken, is a variant (`tei-variant`): one in a part of a `<choice>` waits until the
-  `<choice>` closes. Entities declared with their text in the file's own DOCTYPE are given to
+  `<choice>` closes. In a `<text>` with a top-level `div type="edition"`, every other top-level div
+  and every `<note>` is the editors' (`tei-place-editorial`); a place name there that comes before
+  the edition div is held, as a `held` event in its place in `out`, until the edition div opens or
+  the `<text>` ends, and `take()` stops at it, so the output keeps the file's order. The reading
+  options that convert the editors' words (`commentaryPlaces`, `headerPlaces`) are refused while
+  `EDITORIAL_IRI` is null (`teiReadingRefusal`); tests set it with `setEditorialIriForTests`. Entities declared with their text in the file's own DOCTYPE are given to
   saxes' `ENTITIES`; an external entity is never read. The file is parsed as a stream with saxes, with
   no DOM (a Web Worker has none); the only thing held to the end is a place name waiting for a
   `<place>` later in the file, indexed by the id it waits for. The edition, from its `teiHeader`, is the source; a place name's

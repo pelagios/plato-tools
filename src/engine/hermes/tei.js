@@ -25,6 +25,30 @@ import { placeAddress, addressNote } from './addresses.js';
 
 export const TEI_NS = 'http://www.tei-c.org/ns/1.0';
 const ATTESTED = PLATO + 'Attested';
+
+/**
+ * The form status of words that are the editors' own, not the source's: a place name in an
+ * edition's commentary, translation, apparatus or a note, or in its teiHeader. PLATO has no such
+ * status pinned yet, so it is null, and the reading options that would convert the editors' words
+ * (commentaryPlaces, headerPlaces) are refused until it is set: such a record must never go out
+ * with no formStatus, which PLATO would read as Attested. Enabling them is this one constant
+ * (https://w3id.org/plato#Editorial, once PLATO pins it).
+ */
+export const EDITORIAL_IRI = null;
+let editorialIri = EDITORIAL_IRI;
+/** For tests only: the form status the editors' words are given, as if EDITORIAL_IRI were set; returns the one it replaces. */
+export function setEditorialIriForTests(iri) { const was = editorialIri; editorialIri = iri; return was; }
+export const EDITORIAL_HELD = "available once PLATO's Editorial form status is pinned";
+const HELD_OPTIONS = { commentaryPlaces: 'commentary places', headerPlaces: 'header places' };
+
+/**
+ * Why a run's reading options cannot be used, in words a page or the command line can show, or
+ * null. Checked again by TeiReader, which refuses them with a DataError.
+ */
+export function teiReadingRefusal(reading = {}) {
+  for (const [k, words] of Object.entries(HELD_OPTIONS)) if (reading[k] && !editorialIri) return `Converting ${words}, marked as the editors' words, is ${EDITORIAL_HELD}.`;
+  return null;
+}
 // A language tag: stricter than plato.schema.json's languageTag, which would take xml:lang="Latin"
 // (five letters): a primary language subtag in use has two or three letters (BCP 47).
 const LANGUAGE_TAG = /^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{1,8})*$/;
@@ -59,6 +83,7 @@ export const TEI_KINDS = {
   'tei-attribute': 'loss',
   'tei-place-content': 'loss',
   'tei-variant': 'loss',
+  'tei-place-editorial': 'loss',
   'tei-ref-several': 'warning',
   'address-pleiades-part': 'warning',
   'tei-source-no-address': 'warning',
@@ -158,6 +183,9 @@ class Capture {
 export class TeiReader {
   constructor(report, { fileName = 'the TEI file', count = () => {}, ...reading } = {}) {
     this.report = report; this.fileName = fileName; this.countOne = count; this.reading = reading;
+    const refused = teiReadingRefusal(reading);
+    if (refused) throw new DataError(refused);
+    this.editorialIri = editorialIri;
     this.out = [];
     this.stack = [];            // open elements: { local, tei, lang, ... }
     this.captures = [];         // open captures, each with the callback that reads it
@@ -173,6 +201,9 @@ export class TeiReader {
     this.headed = false; this.mentions = 0; this.attestations = 0;
     this.inHeader = 0; this.inText = 0; this.inNote = 0; this.inPlaceMention = 0;
     this.seen = new Set();       // (kind, example) pairs reported with once()
+    // The editors' parts of an edition (below, "Whose words"): whether the <text> being read has a
+    // top-level div type="edition", and whether that is known yet; the top-level div open now.
+    this.editionSeen = false; this.editionDecided = false; this.topDiv = null;
     const p = this.parser = new SaxesParser({ xmlns: true, position: true });
     p.on('error', (e) => {
       const why = String(e.message).split('\n')[0];
@@ -225,6 +256,7 @@ export class TeiReader {
   close() {
     this.parser.close();
     if (!this.stack.length && !this.scopes.length && !this.sawRoot) throw new DataError('The file holds no XML element, so there is nothing to read.');
+    if (!this.editionDecided) this.decide(false);
     // What is still waiting was pointing at a <place> that never came.
     for (const m of this.pending) this.emit(m, true);
     this.pending.clear(); this.waitingFor.clear();
@@ -232,7 +264,39 @@ export class TeiReader {
     if (!this.attestations) this.report('tei-none-linked', `${plural(this.mentions, 'place name')} in the text`);
     return this.take();
   }
-  take() { const o = this.out; this.out = []; return o; }
+  /** The events read so far, up to the first place name held until it is known whose words it is (below). */
+  take() {
+    const i = this.out.findIndex((e) => e.type === 'held');
+    if (i < 0) { const o = this.out; this.out = []; return o; }
+    const o = this.out.slice(0, i); this.out = this.out.slice(i); return o;
+  }
+
+  // ---- whose words ---------------------------------------------------------------------------------
+  // An edition that has a top-level div type="edition" (EpiDoc's, Perseus's) says that the source's
+  // text is there, and that every other top-level div (a translation, a commentary, an apparatus, a
+  // bibliography) and every <note>, wherever it is, is the editors'. A place name there is the
+  // editors' words, not the source's: it is reported (tei-place-editorial, with the part), and is
+  // converted only with the reading option commentaryPlaces, marked with the editors' form status
+  // (EDITORIAL_IRI, which holds that option back until PLATO pins it). The divisions inside the
+  // edition (textparts) are the edition. A file with no edition div is read as it always was:
+  // its notes, commentary and translations are the edition's text.
+  //
+  // Where such a place name comes before any edition div has been seen, whether the file has one is
+  // not known yet. It is held, in its place among the events, until an edition div opens (it is the
+  // editors') or the <text> ends without one (it is read as before); the events after it wait with
+  // it, so the order of the output is the order of the file either way.
+  /** The editors' part a place name opened now would be in, if the file has an edition div: the top-level div's type, else 'note'. */
+  editorialPart() {
+    if (this.topDiv && this.topDiv.type !== 'edition') return this.topDiv.type || 'div';
+    return this.inNote ? 'note' : undefined;
+  }
+  /** Whether the <text> has an edition div is now known: the place names held are placed, in order. */
+  decide(hasEdition) {
+    this.editionDecided = true;
+    if (!this.out.some((e) => e.type === 'held')) return;
+    const evs = this.out; this.out = [];
+    for (const e of evs) if (e.type === 'held') this.place(e.d, hasEdition ? e.d.editorial : undefined); else this.out.push(e);
+  }
 
   // ---- the header ------------------------------------------------------------------------------
   /** The document header for the attestations: the gazetteer, described from the first teiHeader. */
@@ -348,12 +412,19 @@ export class TeiReader {
     }
     if (local === 'teiHeader') { this.inHeader++; el.header = true; el.hpath = 'teiHeader'; return; }
     if (this.inHeader) { el.hpath = `${parent.hpath}/${local}`; this.headerField(el.hpath, t); }
-    if (local === 'text' && !this.inHeader) { this.inText++; el.textRoot = true; }
+    if (local === 'text' && !this.inHeader) {
+      if (!this.inText) { this.editionSeen = false; this.editionDecided = false; this.topDiv = null; }
+      this.inText++; el.textRoot = true;
+    }
 
     // Where in the text: divisions, pages, lines, milestones.
     if (this.inText) {
       if (DIVS.test(local)) {
         const type = attr('type'), label = [type === 'textpart' ? attr('subtype') || type : type, attr('n')].filter(Boolean).join(' ');
+        if (!this.divs.length) {
+          el.topDiv = true; this.topDiv = { type };
+          if (type === 'edition') { this.editionSeen = true; this.decide(true); }
+        }
         this.divs.push(label); el.div = true; this.line = undefined; this.milestones = new Map();
       } else if (local === 'pb') { this.page = attr('n'); this.line = undefined; }
       else if (local === 'lb') { if (attr('n') !== undefined) this.line = attr('n'); }
@@ -417,7 +488,8 @@ export class TeiReader {
     const where = this.where();
     const startLine = el.verse ?? this.verseLine() ?? this.line;
     const fileLine = this.parser.line;
-    this.capture((c) => this.mention(t, c, { where, startLine, nested, fileLine }), { hasRef: false });
+    const editorial = this.editorialPart();
+    this.capture((c) => this.mention(t, c, { where, startLine, nested, fileLine, editorial }), { hasRef: false });
   }
   close_(t) {
     const el = this.stack[this.stack.length - 1];
@@ -434,7 +506,8 @@ export class TeiReader {
     if (el.punctuation) this.inPunctuation--;
     if (el.mention) this.inPlaceMention--;
     if (el.div) { this.divs.pop(); this.line = undefined; this.milestones = new Map(); }
-    if (el.textRoot) this.inText--;
+    if (el.topDiv) this.topDiv = null;
+    if (el.textRoot && --this.inText === 0 && !this.editionDecided) this.decide(false);
     if (el.msIdentifier) { const h = this.scopes[this.scopes.length - 1].hdr; if (h.msParts.length) h.sourceDescs.push(h.msParts.join(', ')); h.msParts = undefined; }
     if (el.place) this.placeDone(el.place);
     if (el.header) {
@@ -489,7 +562,7 @@ export class TeiReader {
   }
 
   // ---- one place name ------------------------------------------------------------------------------
-  mention(t, c, { where, startLine, nested, fileLine }) {
+  mention(t, c, { where, startLine, nested, fileLine, editorial }) {
     const attr = (n) => t.attributes[n]?.value;
     const ref = attr('ref'), key = attr('key'), xmlId = attr('xml:id');
     const toponym = norm(c.pref), printed = norm(c.printed);
@@ -519,7 +592,7 @@ export class TeiReader {
         fileLine, source: this.source(), pointers: norm(ref).split(' '), prefixes: this.prefixes(),
       } };
     }
-    d.element = t.name; d.fileLine = fileLine; d.toponym = toponym;
+    d.element = t.name; d.fileLine = fileLine; d.toponym = toponym; d.editorial = editorial;
     this.route(d, this.stack.length - 1);
   }
   /** The prefixDefs in force, innermost first: one array, made again only when a prefixDef or a TEI element comes or goes. */
@@ -566,6 +639,19 @@ export class TeiReader {
     const m = d.m;
     // A place name with no words (<placeName ref="…"/>) gives no name to attest.
     if (!m.toponym) { this.report('tei-place-empty', `<${m.element} ref="${m.pointers.join(' ')}"> on line ${m.fileLine}`); return; }
+    if (d.editorial && !this.editionSeen && !this.editionDecided) { this.out.push({ type: 'held', d }); return; }
+    this.place(d, this.editionSeen ? d.editorial : undefined);
+  }
+  /** A place name with words and a ref, whose words are known to be the source's (editorial undefined) or the editors' (the part they are in). */
+  place(d, editorial) {
+    const m = d.m;
+    if (editorial) {
+      if (!this.reading.commentaryPlaces) { this.report('tei-place-editorial', `${editorial}: ${m.toponym} (${m.pointers.join(' ')}) on line ${m.fileLine}`); return; }
+      m.editorial = editorial;
+      // The locator names the part, where it does not already ("commentary", "edition, line 3, in a note").
+      const named = editorial === 'note' ? /\bin a note\b/.test(m.locator) : m.locator === editorial || m.locator.startsWith(`${editorial} `) || m.locator.startsWith(`${editorial},`);
+      if (!named) m.locator = [editorial, m.locator].filter(Boolean).join(', ');
+    }
     // How many <place>s, not yet read, the place name waits for (each id once, however often it is given).
     const ids = new Set(m.pointers.filter((p) => p.startsWith('#') && !this.places.has(p.slice(1))).map((p) => p.slice(1)));
     if (!ids.size) { this.emit(m, false); return; }
@@ -634,9 +720,10 @@ export class TeiReader {
     if (name && m.printed && m.printed !== m.toponym) name.sourceLabel = m.printed;
     for (const r of resolved) {
       const att = { about: r.iri };
-      if (name) { att.names = [{ ...name }]; att.formStatus = ATTESTED; }
+      if (name) { att.names = [{ ...name }]; att.formStatus = m.editorial ? this.editorialIri : ATTESTED; }
       att.citations = [{ source: m.source, ...(m.locator ? { locator: m.locator } : {}) }];
       const notes = [];
+      if (m.editorial) notes.push("The editors' words, not the source's.");
       if (m.key) notes.push(`Key: ${m.key}`);
       if (resolved.length > 1) notes.push(`The ref of this place name gives ${resolved.length} addresses, each an attestation of its own: ${resolved.map((x) => x.iri).join(', ')}.`);
       // Where the attestation came from, as the Recogito reader says "From annotation …". The
@@ -690,9 +777,9 @@ export async function* teiSource(input, rep, options = {}) {
   yield* step(() => reader.close());
 }
 
-/** Every attestation of a TEI document given as text, and the document: for tests and small inputs. */
-export function teiToDocument(text, fileName = 'test.xml', report = () => {}) {
-  const r = new TeiReader(report, { fileName });
+/** Every attestation of a TEI document given as text, and the document: for tests and small inputs. `options` are reading options. */
+export function teiToDocument(text, fileName = 'test.xml', report = () => {}, options = {}) {
+  const r = new TeiReader(report, { ...options, fileName });
   const evs = [...r.write(text), ...r.close()];
   return { ...evs.find((e) => e.type === 'header').value, attestations: evs.filter((e) => e.type === 'attestation').map((e) => e.value) };
 }

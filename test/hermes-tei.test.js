@@ -80,14 +80,10 @@ test('a real EpiDoc inscription (I.Sicily ISic000934) becomes exactly these atte
       formStatus: PLATO + 'Attested',
       citations: [{ source: ISIC_SOURCE, locator: 'edition, lines 2 to 4' }],
       notes: 'From TEI element <placeName> on line 180 of isicily-ISic000934.xml',
-    }, {
-      about: 'https://pleiades.stoa.org/places/678374',
-      names: [{ toponym: 'Sarepta', language: 'en' }],
-      formStatus: PLATO + 'Attested',
-      citations: [{ source: ISIC_SOURCE, locator: 'commentary' }],
-      notes: 'From TEI element <placeName> on line 205 of isicily-ISic000934.xml',
     }],
   });
+  // The commentary's Sarepta is the editors' words: the file has a div type="edition" (test/tei-reading.test.js).
+  assert.deepEqual(examples(ISIC, 'tei-place-editorial'), ['commentary: Sarepta (https://pleiades.stoa.org/places/678374) on line 205']);
 });
 test('a prose edition: book, chapter, milestone and page in the locator; the source from the header, its DOI as its address', () => {
   const a = PROSE.doc.attestations;
