@@ -507,3 +507,20 @@ test('a line\'s ends: flat (butt) ends traced to where the ink stops, to 0.5 px,
     assert.ok(f <= 0.5, `flat on a slant, width ${width}: an end off by ${f.toFixed(2)} px`);
   }
 });
+
+test('the hole threshold\'s stroke is the map\'s linework, not the area\'s own rim: a wash with a large hole keeps it (stroke about 3), a word in it is still dropped', () => {
+  // A wash with a square hole of paper 50 px across (a field left white), a word (two rings of ink) in the
+  // wash, and the map's linework, 3 px, about it. Sauvola's threshold marks a band of the wash round the
+  // hole as darker than its surroundings: taken for a line, its width is the stroke, and the hole is dropped.
+  // A dark wash (brick, L* about 50: the Chora fixture's), where the band is marked; a light one is not.
+  const r = new Raster(W, H).disc(300.5, 240.5, 150, [190, 86, 64]);
+  r.paint((x, y) => x >= 300 && x < 350 && y >= 160 && y < 200, PAPER);
+  r.ring(244, 300, 3, 3, INK); r.ring(250.5, 300, 3, 3, INK);
+  r.stroke([[20, 20], [620, 40]], 3, INK); r.stroke([[30, 460], [610, 440]], 3, INK); r.stroke([[600, 60], [620, 420]], 3, INK);
+  const res = traceArea(prepare(win(r)), [260, 260], ONE);
+  assert.ok(res.stroke >= 2.5 && res.stroke <= 3.5, `stroke ${res.stroke}`);
+  assert.equal(res.holes.kept, 1, `holes ${JSON.stringify(res.holes)}`);
+  assert.equal(res.holes.dropped, 1, 'the word');
+  const hole = res.rings[1], want = 50 * 40;
+  assert.ok(Math.abs(Math.abs(area(hole)) - want) / want <= 0.03, `hole area ${area(hole)}`);
+});

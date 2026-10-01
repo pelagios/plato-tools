@@ -100,14 +100,17 @@ const toImage = (frame) => ([x, y]) => [frame.x0 + x * frame.s, frame.y0 + y * f
  * The usual width of the window's dark ink (its pen stroke), in working pixels: for each piece of ink
  * (Sauvola's mask, within `bbox` when given) that is a line (four times as long as it is wide, so not a
  * blot or a letter), its area over the length of its centreline; the median of those, weighted by
- * length. 2 when there is none to measure.
+ * length. 2 when there is none to measure. `area`, a w × h mask of an area's pixels, is left out.
  */
-export function strokeWidth(prep, bbox = null) {
+export function strokeWidth(prep, bbox = null, area = null) {
   const { w, L } = prep;
   const [x0, y0, x1, y1] = bbox || [0, 0, prep.w - 1, prep.h - 1];
   const cw = x1 - x0 + 1, ch = y1 - y0 + 1, sub = new Float32Array(cw * ch);
   for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) sub[y * cw + x] = L[(y + y0) * w + x + x0];
   const ink = sauvolaMask(sub, cw, ch);
+  // Not the area itself: a dark wash is darker than the paper about it, so Sauvola's threshold marks a band
+  // of it along its edges (round a hole, too) as ink, which would be measured as a line many pixels wide.
+  if (area) for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) if (area[(y + y0) * w + x + x0]) ink[y * cw + x] = 0;
   const sk = zhangSuen(ink, cw, ch);
   const labels = new Uint16Array(cw * ch);
   const pieces = [];
@@ -166,12 +169,12 @@ export function traceArea(prep, seed, frame, params = {}) {
   if (!o) throw new InkError('The fill has no outline.', 'empty');
   let holes = o.holes, stroke = null;
   if (p.dropSmallHoles && holes.length) {
-    // The map's linework about the area (its box, and STROKE_MARGIN working pixels round it), kept with the
-    // window for that box: a slider moved does not measure it again.
+    // The map's linework about the area (its box, and STROKE_MARGIN working pixels round it, the area itself
+    // left out), kept with the window for that fill: a slider that does not change the fill does not measure it again.
     const [bx0, by0, bx1, by1] = fill.bbox, m = STROKE_MARGIN;
     const box = [Math.max(0, bx0 - m), Math.max(0, by0 - m), Math.min(w - 1, bx1 + m), Math.min(h - 1, by1 + m)];
-    const key = box.join(',');
-    if (prep.strokeKey !== key) { prep.stroke = strokeWidth(prep, box); prep.strokeKey = key; }
+    const key = `${box.join(',')} ${fill.count} ${fill.seed ?? [sx, sy]}`;
+    if (prep.strokeKey !== key) { prep.stroke = strokeWidth(prep, box, fill.region); prep.strokeKey = key; }
     stroke = prep.stroke;
     holes = keepHoles(holes, (4 * stroke) ** 2);
   }
