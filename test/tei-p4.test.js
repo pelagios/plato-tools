@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { addPlatoFormats, strictFormatLogger } from '../src/lib/formats.js';
-import { teiToDocument, teiSource, teiKeyPrefixes, TEI_KINDS } from '../src/engine/hermes/tei.js';
+import { teiToDocument, teiSource, teiKeyPrefixes, TEI_KINDS, TeiReader } from '../src/engine/hermes/tei.js';
 import { detect, DataError } from '../src/engine/input.js';
 import { LOSS_TEXT, Report } from '../src/engine/report.js';
 
@@ -254,4 +254,39 @@ test('a file naming no outside DTD still refuses an undeclared entity, in the he
   assert.throws(() => mapped(noDtd.replace(/&[\w.]+;/g, '').replace('Romam', 'Ro&lacuna;mam'), KEYS), (e) => e instanceof DataError && /&lacuna;/.test(e.message));
   // Control: without the entities, it converts.
   assert.deepEqual(names(mapped(noDtd.replace(/&[\w.]+;/g, ''), KEYS)), ['Romam', 'Athenas']);
+});
+
+// ---- U+FDD0 and U+FDD1, the markers of unknown entities, outside an outside-DTD file -------------------------
+// The markers are looked for and stripped only where the ISO table is installed; elsewhere they are
+// characters of the text, read as written. An outside-DTD file that already holds one is refused.
+const OUTSIDE = '<!DOCTYPE TEI SYSTEM "tei_all.dtd">';
+test('in a file naming no outside DTD, U+FDD0 and U+FDD1 are read as written, never as an unknown entity', () => {
+  for (const w of ['Ro&#xFDD0;zz&#xFDD1;ma', 'Ro﷐zz﷑ma', 'Ro&#64976;ma']) {
+    const m = mapped(P5('', pn(w)));
+    const want = w.replace('&#xFDD0;', '﷐').replace('&#xFDD1;', '﷑').replace('&#64976;', '﷐');
+    assert.deepEqual(names(m), [want], w);
+    assert.ok(!m.kinds.has('tei-place-entity-unknown') && !m.kinds.has('tei-entity-unknown'), w);
+  }
+  // In an attribute too: the ref is read whole, and is not a web address with a hole in it.
+  const a = mapped(P5('', '<placeName ref="https://pleiades.stoa.org/places/57&#xFDD0;x&#xFDD1;9885">Roma</placeName>'));
+  assert.ok(!a.kinds.has('tei-place-entity-unknown'));
+  // Control: an unknown entity in an outside-DTD file is still found, left out and reported.
+  const c = mapped(P5(OUTSIDE, pn('Ro&zz;ma')));
+  assert.deepEqual(names(c), []);
+  assert.match(examples(c, 'tei-place-entity-unknown')[0], /^&zz; in "Roma"/);
+});
+test('a file naming an outside DTD that already holds U+FDD0 or U+FDD1 is refused, as the character or a reference to it', async () => {
+  const refused = (e) => e instanceof DataError && /U\+FDD0 or U\+FDD1/.test(e.message) && /outside DTD/.test(e.message);
+  for (const w of ['Ro﷐ma', 'Ro﷑ma', 'Ro﷐zz﷑ma', 'Ro&#xFDD0;ma', 'Ro&#xfdd1;ma', 'Ro&#64976;ma']) assert.throws(() => mapped(P5(OUTSIDE, pn(w))), refused, w);
+  // In an entity the file declares; and before the DOCTYPE, in a chunk of its own.
+  assert.throws(() => mapped(P5('<!DOCTYPE TEI SYSTEM "tei_all.dtd" [<!ENTITY m "&#xFDD0;">]>', pn('Ro&m;ma'))), refused);
+  const r = new TeiReader(() => {}, { entities: ISO });
+  r.write('<?xml version="1.0"?>\n<!-- ﷐ -->\n');
+  assert.throws(() => r.write(P5(OUTSIDE, pn('Roma')).replace('<?xml version="1.0"?>\n', '')), refused);
+  // And through teiSource, read in chunks.
+  const input = { format: 'tei', files: [textFile(P5(OUTSIDE, pn('Ro﷐ma')))] };
+  await assert.rejects(async () => { for await (const ev of teiSource(input, new Report())) void ev; }, refused);
+  // Control: the same files with no marker convert.
+  assert.deepEqual(names(mapped(P5(OUTSIDE, pn('Roma')))), ['Roma']);
+  assert.deepEqual(names(mapped(P5('<!DOCTYPE TEI SYSTEM "tei_all.dtd" [<!ENTITY m "m">]>', pn('Ro&m;a')))), ['Roma']);
 });

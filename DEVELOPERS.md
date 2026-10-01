@@ -366,8 +366,14 @@ readers link to those headings, so keep them.
   `headerPlaces`. The source's title (`mainTitle`'s) or the edition's address (the `idno` `source()`
   uses: type URI or URL, else a DOI) holding one stops the file (`checkSourceEntities`, at the end of
   each `teiHeader`), naming it, since every citation would be incomplete. A file naming no outside
-  DTD refuses any undeclared entity, as before. A literal U+FDD0…U+FDD1 pair in a file would be read
-  as a marker; noncharacters have no place in a TEI text. `teiSource` and `teiKeyPrefixes` read
+  DTD refuses any undeclared entity, as before. Markers are looked for and stripped only where the
+  table is installed (the reader's `norm`, `unknownIn` and `stripUnknown` methods; the module-level
+  `norm` only collapses whitespace): in any other file U+FDD0 and U+FDD1 are characters of the text,
+  read as written. So that a marker cannot collide with real text, an outside-DTD file whose input
+  already holds either is refused with a `DataError` (`markerRefusal`): a raw chunk holding one, in
+  `write()` before the parser sees it (a chunk read before the DOCTYPE is remembered, `markerSeen`,
+  and refused when `installIso()` runs), a character reference to one (`&#xFDD0;`, by wrapping
+  saxes' `parseEntity`), or an entity the file declares with one in its text. `teiSource` and `teiKeyPrefixes` read
   the file's first 64 KB (`headed`) and load the table (`loadIsoEntities`, a dynamic JSON import,
   cached) only when a DOCTYPE there has `SYSTEM` or `PUBLIC`; `teiToDocument` takes it as the option
   `entities`, or uses the cached one. The table is built by `node scripts/make-entities.mjs`
