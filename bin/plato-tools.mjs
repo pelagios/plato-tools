@@ -192,11 +192,25 @@ does not apply to):
                     each figure from a statistical table: its qb:Observation type,
                     the measure as a direct statement, sdmx-dimension:refArea and refPeriod,
                     and the types of its table and structure. Without it, the plain PLATO graph.
-  --candidates SET  convert --to lpf or lpf-seq: a candidate set (PLATO JSON or JSON Lines, profile
-                    candidate-set) whose suggestions the dataset's region matches answer
-                    (promotedFrom); repeatable. Each gvp:broaderPartitive then carries the
-                    suggestion's score as whg_match_score. Without it, no score is written,
-                    and each missing one is reported.
+  --candidates SET  check, convert --to lpf or lpf-seq, apply: a candidate set (PLATO JSON or
+                    JSON Lines, profile candidate-set); give it once for each set.
+                    check: check a dataset or candidate set together with these candidate
+                    sets. The sets are taken in the order they were issued: a later set must
+                    leave out a candidate an earlier one published, and its ids must differ
+                    from the earlier sets' (under the same base address). With a dataset, each
+                    identity relation that answers a candidate (promotedFrom) must find it in
+                    the sets, and the sets and the dataset's candidateSets must agree. With no
+                    INPUT, the first set is checked, with the others. Each set is checked
+                    against its profile too. Nothing is fetched.
+                    convert: the sets whose suggestions the dataset's region matches answer
+                    (promotedFrom). Each gvp:broaderPartitive then carries the suggestion's
+                    score as whg_match_score. Without them, no score is written, and each
+                    missing one is reported.
+                    apply: a candidate set exported from the review (by candidates, or on the
+                    page), or an earlier set holding a candidate left out of it. Each answer
+                    points at its candidate (promotedFrom), and the dataset lists the sets
+                    (candidateSets). An address the work file stores that is under neither the
+                    set last exported from it nor a set given is refused.
   --release NAME    publish: the name of the release being made (its address is
                     <base>release/NAME).
   --previous FILE   publish: the previous release: minting keeps its attestations' addresses,
@@ -226,21 +240,6 @@ does not apply to):
                     coordinates that may be suggested (default 50).
   --top K           match: the most suggestions for one place (default 5).
   --review FILE     apply: the work file of the review (made by match, and saved by the page).
-  --candidates SET  check, apply: a candidate set (PLATO JSON or JSON Lines, profile
-                    candidate-set); give it once for each set.
-                    check: check a dataset or candidate set together with these candidate
-                    sets. The sets are taken in the order they were issued: a later set must
-                    leave out a candidate an earlier one published, and its ids must differ
-                    from the earlier sets' (under the same base address). With a dataset, each
-                    identity relation that answers a candidate (promotedFrom) must find it in
-                    the sets, and the sets and the dataset's candidateSets must agree. With no
-                    INPUT, the first set is checked, with the others. Each set is checked
-                    against its profile too. Nothing is fetched.
-                    apply: a candidate set exported from the review (by candidates, or on the
-                    page), or an earlier set holding a candidate left out of it. Each answer
-                    points at its candidate (promotedFrom), and the dataset lists the sets
-                    (candidateSets). An address the work file stores that is under neither the
-                    set last exported from it nor a set given is refused.
   --previous-candidates SET
                     candidates: an earlier candidate set, already published; repeatable. A
                     candidate it holds is left out of the new set, and counted; the others'

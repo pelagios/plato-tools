@@ -151,6 +151,18 @@ test('described-differently: two copies of one set that disagree are an error, n
 // Two real candidates whose SHA-256 share their first 8 hex digits (3f04af4c), found by the prototype's search.
 const REAL = { subject: 'https://whgazetteer.org/example/entity/newton-by-the-river', algorithmVersion: 'matcher 2.1', matchParameters: '{"threshold":0.8}' };
 const [REAL_A, REAL_B] = [20128, 138143].map((n) => ({ ...REAL, object: `https://whgazetteer.org/example/county-survey/r${n}` }));
+test("the hash text is json2rdf's JCS, and the hashes are those JSON.stringify gave: PLATO's example ids, and the colliding pair", () => {
+  // PLATO's two example ids, by name, so that the comparison below cannot pass over an empty list.
+  assert.deepEqual(CS.candidates.map((c) => c['@id'].split('#c-')[1]).sort(), ['1ec753bb', '8ed2901c']);
+  for (const c of [...CS.candidates, REAL_A, REAL_B]) {
+    assert.equal(candidateText(c), JSON.stringify([c.subject, c.object, c.algorithmVersion, c.matchParameters ?? '']));
+  }
+  for (const c of CS.candidates) assert.equal(c['@id'], `${SET.split('#')[0]}#c-${sha256(candidateText(c)).slice(0, 8)}`);
+  assert.equal(sha256(candidateText(REAL_A)).slice(0, 8), '3f04af4c');
+  // An absent matchParameters is hashed as "", not as null.
+  assert.equal(candidateText({ subject: 's', object: 'o', algorithmVersion: 'v' }), '["s","o","v",""]');
+});
+
 function collidingSets({ lengthen, laterIri = LATER }) {
   const s1 = copy(CS), a = { ...CS.candidates[0], ...REAL_A }; a['@id'] = mint(a, SET); s1.candidates = [a];
   const s2 = copy(CS); s2.candidateSet['@id'] = laterIri; s2.candidateSet.issued = '2026-10-01';
@@ -277,6 +289,15 @@ test('check --candidates: with a dataset, alone, and refused where it is not a c
     assert.match(notSet.err, /given with --candidates, is a PLATO JSON document \(attestation-centric\), not a candidate set/);
     const convert = cli('convert', '--to', 'ntriples', '--out', dir, `${EX}/candidate-set-judgements.json`, '--candidates', `${EX}/candidate-set-judgements.json`);
     assert.equal(convert.code, 2);
-    assert.match(convert.err, /--candidates is for check\./);
+    assert.match(convert.err, /--candidates is for check and apply\./);
+    // The guard comes before match and apply are dispatched: match is refused by it, and apply passes
+    // it, to be refused by apply itself for what it lacks (the guard's words absent, apply's present).
+    const match = cli('match', `${EX}/attestation-centric-judgements.json`, '--candidates', `${EX}/candidate-set-judgements.json`);
+    assert.equal(match.code, 2);
+    assert.match(match.err, /--candidates is for check and apply\./);
+    const apply = cli('apply', '--candidates', `${EX}/candidate-set-judgements.json`);
+    assert.equal(apply.code, 2);
+    assert.match(apply.err, /apply takes one dataset of places to match; 0 were given/);
+    assert.doesNotMatch(apply.err, /--candidates is for/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

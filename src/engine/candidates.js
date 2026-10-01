@@ -7,18 +7,20 @@
 //
 // A candidate's @id (section 5): its candidate set's IRI without any fragment, "#c-", and the first 8
 // hex digits (or 12, 16 … where 8 would begin like another candidate's hash) of the SHA-256 of
-//   JSON.stringify([subject, object, algorithmVersion, matchParameters ?? ''])
-// which is that array in the JSON Canonicalization Scheme (RFC 8785), hashed as UTF-8 with no
+//   JCS([subject, object, algorithmVersion, matchParameters ?? ''])
+// that array in the JSON Canonicalization Scheme (RFC 8785; json2rdf's jcs, the tools' one
+// canonicaliser), hashed as UTF-8 with no
 // Unicode normalisation. generatedAt, similarityScore and status are not hashed: the four inputs are
 // what make one candidate the same as another.
 import { sha256 } from '../lib/sha256.js';
+import { jcs } from '../formats/json2rdf.js';
 
 const FIRST = 8, MORE = 4;
 const isObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 /** The four inputs that make a candidate what it is. */
 export const candidateInputs = (c) => [c.subject, c.object, c.algorithmVersion, c.matchParameters ?? ''];
 /** The text a candidate's @id is the hash of. */
-export const candidateText = (c) => JSON.stringify(candidateInputs(c));
+export const candidateText = (c) => jcs(candidateInputs(c));
 const sameKey = (c) => candidateText(c);
 /** An IRI without its fragment. */
 const noFragment = (iri) => String(iri).split('#')[0];

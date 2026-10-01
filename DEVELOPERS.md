@@ -123,7 +123,7 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   checked with the others; on the page, *Check with candidate sets…* asks for the files. The sets
   given are read before the input and checked against their profile, each problem said to be in that
   set; only their candidates are held. A candidate's `@id` is `<set IRI>#c-` and a prefix of the
-  SHA-256 of `JSON.stringify([subject, object, algorithmVersion, matchParameters ?? ''])`.
+  SHA-256 of the JCS text (json2rdf's `jcs`) of `[subject, object, algorithmVersion, matchParameters ?? '']`.
   Within a set: `duplicate-id` and `same-candidate-twice` (the same four inputs under two ids) are
   errors, as is `id-not-under-set` (which refuses the withdrawn `<subject IRI>#c-` form); an id whose
   hex is not its hash's beginning is `id-not-minted` and a place matched with itself
@@ -134,7 +134,9 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   `described-differently` (two copies of one set disagree; identical copies are not reported) are
   errors; `not-distinct` (an id not lengthened past another hash in its set or an earlier set) is a
   warning, and compares only sets under the same base (the set IRI up to its last `/`), since only
-  the minter knew what it was given. With a dataset, each answer (`promotedFrom`, wherever it is, with
+  the minter knew what it was given. So not-distinct compares only sets whose IRIs share a folder,
+  while Krisis, minting, lengthens against every set it is given; the rule is advisory (a warning),
+  and a set it flags is not wrong. With a dataset, each answer (`promotedFrom`, wherever it is, with
   the subject its relation, attestation or place gives) is checked as it streams past:
   `promoted-from-unresolved` and `promoted-from-other-pair` are warnings; `ends-disagree` (a listed set
   made for another dataset) is an error and `set-not-listed` a warning. From RDF, the same is read from
