@@ -12,6 +12,28 @@ from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PLATO = pathlib.Path(os.environ.get('PLATO_REPO', ROOT.parent / 'place-attestation-ontology'))
+# The checks read PLATO's examples from PLATO_REPO. A checkout ahead of (or behind) the pin fails
+# checks for reasons that have nothing to do with the tools, or passes them for the wrong ones, so the
+# run stops unless PLATO_REPO holds the pinned commit's files (see test/paths.js, which does the same).
+def plato_at_pin():
+    pin = json.loads((ROOT / 'package.json').read_text())['plato']['commit']
+    if os.environ.get('PLATO_REPO_ANY'): return
+    if (PLATO / '.git').exists():
+        git = lambda *a: subprocess.run(['git', '-C', str(PLATO), *a], capture_output=True, text=True)
+        if git('cat-file', '-e', pin + '^{commit}').returncode:
+            sys.exit(f'PLATO_REPO ({PLATO}) does not have the pinned commit {pin[:7]}: fetch it, or set PLATO_REPO to a checkout of it')
+        if git('diff', '--quiet', pin, '--', 'ontology.ttl', 'schemas', 'examples').returncode:
+            head = git('rev-parse', '--short', 'HEAD').stdout.strip()
+            sys.exit(f'PLATO_REPO ({PLATO}) is at {head}, whose schemas or examples differ from the pinned {pin[:7]}: '
+                     f'set PLATO_REPO to a checkout of {pin[:7]} (or PLATO_REPO_ANY=1 to run anyway)')
+        return
+    vend = ROOT / 'public' / 'plato'
+    for f in ('ontology.ttl', 'schemas/plato.schema.json', 'schemas/place-centric.schema.json',
+              'schemas/attestation-centric.schema.json', 'schemas/plato.context.jsonld', 'schemas/tables/csv-metadata.json'):
+        mine = vend / pathlib.Path(f).name
+        if mine.exists() and (PLATO / f).read_bytes() != mine.read_bytes():
+            sys.exit(f'PLATO_REPO ({PLATO}) has a {f} that differs from the vendored pinned copy {pin[:7]}: '
+                     f'set PLATO_REPO to a checkout of {pin[:7]} (or PLATO_REPO_ANY=1 to run anyway)')
 PROVE = '--prove-it-fails' in sys.argv
 # The preview server runs under npx, whose child (node vite preview) outlived a plain kill() and
 # held the port for the next run: it gets a session of its own, and the whole group is stopped.
@@ -588,6 +610,7 @@ def agora_checks(page, tmp):
 REMOTE = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--url=')), None)
 
 def main():
+    plato_at_pin()
     if REMOTE:                                    # the deployed site: a green local run is not a green deploy
         srv = subprocess.Popen(['true']); url = REMOTE
     else:
