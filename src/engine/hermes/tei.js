@@ -151,6 +151,8 @@ export const TEI_KINDS = {
   'tei-variant': 'loss',
   'tei-place-editorial': 'loss',
   'tei-header-origin': 'loss',
+  'tei-provenance-other': 'loss',
+  'tei-header-geo': 'loss',
   'tei-key-no-pattern': 'loss',
   'tei-key-shape': 'loss',
   'tei-findspot-no-object': 'loss',
@@ -200,6 +202,8 @@ const READ_ATTRIBUTES = new Set(['ref', 'key', 'xml:id', 'xml:lang', 'xml:space'
 // The children of a <place> in a list of places that are read (idno) or reported by a kind of their
 // own (its names, its location); a nested <place> is read as a place. Any other child is reported.
 // Elements inside a place name whose words are not part of the name.
+// A provenance subtype that means the object was found there.
+const FOUND_SUBTYPE = /^(found|discovered|excavated|excavation|discovery|findspot)$/i;
 const ASIDE = new Set(['geo', 'location', 'idno', 'note']);
 const PLACE_CHILDREN = new Set(['idno', 'location', 'place', ...PLACE_ELEMENTS]);
 // A <location> type that says the location is another place's (the place this one is in), not this place's own.
@@ -489,7 +493,7 @@ export class TeiReader {
     }
     const lang = attr('xml:lang') ?? parent?.lang;
     const el = { local, tei, lang, name: t.name };
-    if (local === 'provenance') el.provenance = attr('type') || '';
+    if (local === 'provenance') { el.provenance = attr('type') || ''; el.provenanceSubtype = attr('subtype'); }
     this.stack.push(el);
     const depth = this.stack.length;
     // A <choice> or <app>, and its parts, for every capture open around it.
@@ -509,6 +513,16 @@ export class TeiReader {
     if (ASIDE.has(local) && this.stack.slice(0, -1).some((e) => e.placeName)) {
       el.aside = true; this.inAside++;
       if (local === 'geo' && this.inText && !this.inHeader) { const line = this.parser.line; this.capture((c) => this.report('tei-place-geo', `${norm(c.pref) || 'an empty geo'} on line ${line}`)); }
+    }
+    // Coordinates for the findspot or the place of origin, in the header: not carried (PLATO takes a
+    // place's coordinates from its own record), and reported, never dropped unsaid.
+    if (local === 'geo' && this.inHeader) {
+      const prov = this.stack.findLast((e) => e.provenance !== undefined);
+      const kind = this.headerPlaceKind() || (prov ? 'provenance' : undefined);
+      if (kind) {
+        const where = kind === 'origin' ? 'origin' : `provenance (${[prov.provenance, prov.provenanceSubtype].filter(Boolean).join(', ')})`, line = this.parser.line;
+        this.capture((c) => this.report('tei-header-geo', `${where}: ${norm(c.pref) || 'an empty geo'} on line ${line}`));
+      }
     }
 
     if (local === 'TEI' || local === 'teiCorpus') {
@@ -768,19 +782,24 @@ export class TeiReader {
   // FindspotOf to the object, a place of origin as a plain attestation with a note, PLATO having no
   // relation for it. Each waits for the end of the header, and its ref is resolved then, with the
   // prefixDefs in force then (they are in the encodingDesc, after the sourceDesc).
-  /** 'found' for a place name in a provenance of type found, 'origin' for one in an origin, else undefined. */
+  /** The provenance's subtype, for a place name in a provenance of type found whose subtype does not mean found ('provenance-other'). */
+  provenanceSubtype() { for (let i = this.stack.length - 1; i >= 0; i--) if (this.stack[i].provenance !== undefined) return this.stack[i].provenanceSubtype; return undefined; }
+  /** 'found' for a place name in a provenance of type found (with no subtype, or one meaning found), 'provenance-other' for one with another subtype, 'origin' for one in an origin, else undefined. */
   headerPlaceKind() {
     for (let i = this.stack.length - 1; i >= 0; i--) {
       const e = this.stack[i];
       if (!e.tei) continue;
-      if (e.provenance !== undefined) return e.provenance === 'found' ? 'found' : undefined;
+      // A provenance of type found is the findspot only with no subtype, or one meaning found
+      // (discovered, excavated); first-seen, first-recorded, observed or transferred say where the
+      // object was seen or kept, not where it was found.
+      if (e.provenance !== undefined) return e.provenance !== 'found' ? undefined : (e.provenanceSubtype === undefined || FOUND_SUBTYPE.test(e.provenanceSubtype) ? 'found' : 'provenance-other');
       if (e.local === 'origin') return 'origin';
     }
     return undefined;
   }
   headerMention(t) {
     const attr = (n) => t.attributes[n]?.value;
-    const kind = this.headerPlaceKind(), fileLine = this.parser.line;
+    const kind = this.headerPlaceKind(), fileLine = this.parser.line, subtype = kind === 'provenance-other' ? this.provenanceSubtype() : undefined;
     const hdr = this.scopes[this.scopes.length - 1].hdr;
     this.attributes(t, READ_ATTRIBUTES, GENERAL_NAMES.has(t.local) ? 'type' : undefined);
     this.capture((c) => {
@@ -791,7 +810,7 @@ export class TeiReader {
       if (el.lang !== undefined && el.lang !== '') { if (LANGUAGE_TAG.test(el.lang)) language = el.lang; else this.report('tei-lang-not-tag', el.lang); }
       const m = {
         element: t.name, key: attr('key'), xmlId: attr('xml:id'), toponym, printed: printed !== toponym ? printed : undefined, language, fileLine,
-        locator: kind === 'found' ? 'teiHeader, provenance (found)' : 'teiHeader, origin', pointers: ref.split(' '),
+        locator: kind === 'found' ? 'teiHeader, provenance (found)' : kind === 'provenance-other' ? `teiHeader, provenance (found, ${subtype})` : 'teiHeader, origin', pointers: ref.split(' '), subtype,
         editorial: 'teiHeader', editorialNote: "The name is the editors' form, in the edition's header, not words of the source.",
       };
       hdr.queue.push(() => this.headerPlace(m, kind));
@@ -815,6 +834,9 @@ export class TeiReader {
         const title = this.mainTitle(h);
         if (title) m.relation.relatedLabel = title;
       } else this.report('tei-findspot-no-object', words);
+    } else if (kind === 'provenance-other') {
+      m.extraNotes = [`The edition's header gives this place in a provenance of type found with the subtype "${m.subtype}", which says where the object was seen or kept, not where it was found, so it is not given as the findspot.`];
+      this.report('tei-provenance-other', `${words}: subtype "${m.subtype}"`);
     } else {
       m.extraNotes = ["The edition's header gives this as the place of origin (where the object was made, or the text composed or inscribed); PLATO has no relation for a place of origin."];
       this.report('tei-header-origin', words);

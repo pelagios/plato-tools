@@ -293,7 +293,7 @@ readers link to those headings, so keep them.
   `EDITORIAL_IRI` is null (`teiReadingRefusal`); tests set it with `setEditorialIriForTests`. With `listPlaces`, a `<place>` gives a Headword
   attestation (`listPlace()`), from its own names (a name that is the `<place>`'s child) and its own `<location>`s (not one whose type says it is another place's, `OTHER_PLACE_LOCATION`, such as Schnitzler's `located_in_place`: `tei-listplace-geo-other-place`), its `<geo>` read by `parseGeo`; one in the teiHeader goes on the header's `queue`, run at
   `</teiHeader>` after `header()`, so that the source, the own host and the `geoDecl` are read from
-  the whole header. With `headerPlaces` (held), a findspot or place of origin in the header
+  the whole header. With `headerPlaces` (held), a findspot (a `provenance type="found"` with no subtype, or one meaning found, `FOUND_SUBTYPE`; another subtype, such as I.Sicily's `first-seen`, is a plain attestation with a note, `tei-provenance-other`) or place of origin in the header (a `<geo>` there is reported, `tei-header-geo`, with the option or without)
   goes on the same queue (`headerMention`, `headerPlace`), so its prefixes are those in force at
   `</teiHeader>`; it is then placed as a name in the text is (`place()`), so one whose ref points to
   a `<place>` not yet read (in `<back>`) waits in `pending`. A place name with no ref and a `@key` is converted with `keyPatterns`

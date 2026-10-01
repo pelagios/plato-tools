@@ -1,0 +1,70 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0" xmlns:xi="http://www.w3.org/2001/XInclude" xml:lang="en">
+   <teiHeader>
+      <fileDesc>
+         <titleStmt>
+            <title>Contract for the sale of a house</title>
+            <editor ref="#JP">Jonathan Prag</editor>
+           </titleStmt>
+         <publicationStmt>
+            <authority>I.Sicily</authority>
+            <idno type="filename">ISic030001</idno>
+            <idno type="TM">698782</idno>
+            <idno type="EDR">153170</idno>
+            <idno type="EDH"/>
+            <idno type="EDCS">71000290</idno>
+            <idno type="PHI">331952</idno>
+            <idno type="URI">http://sicily.classics.ox.ac.uk/inscription/ISic030001</idno>
+            <availability>
+               <licence target="http://creativecommons.org/licenses/by/4.0/">Licensed under a Creative Commons-Attribution 4.0 licence</licence>
+            </availability>
+         </publicationStmt>
+         <sourceDesc>
+            <msDesc>
+               <msIdentifier>
+                  <country>Italy</country>
+                  <region>Sicily</region>
+                  <settlement>Ragusa</settlement>
+                  <repository role="museum" ref="http://sicily.classics.ox.ac.uk/museum/091">Museo Archeologico Ibleo</repository><!-- aka Museo Regionale Interdisciplinare di Ragusa -->
+                  <idno type="inventory"/><!--check inventory no.-->
+                  <altIdentifier>
+                     <settlement/>
+                     <repository/>
+                     <idno/>
+                  </altIdentifier>
+                </msIdentifier>
+               <history>
+                  <origin>
+                     <origPlace><region>Sicilia</region>
+                        <placeName type="ancient" ref="http://pleiades.stoa.org/places/462372">Morgantina</placeName>
+                        <placeName type="modern" ref="http://www.geonames.org/6537793/aidone.html">Aidone</placeName>
+                        <geo>37.43067, 14.47945</geo>
+                     </origPlace>
+                     <origDate notBefore-custom="-0200" notAfter-custom="-0101" evidence="lettering">2nd century BCE</origDate>
+                  </origin>
+                  <provenance type="found" subtype="first-seen" when="1983">Given by Ricotti Prina in 1983 to the Museo Interdisciplinare Regionale di Ragusa in <placeName type="modern" ref="http://www.geonames.org/2523650/ragusa.html">Ragusa</placeName></provenance>
+                  <provenance type="observed" subtype="autopsied" resp="#RDS" when="2014-03-24">Souza, 2014.03.24 (not on display)</provenance>
+                  <acquisition>Ragusa, Museo Regionale Interdisciplinare di Ragusa</acquisition>
+               </history>
+               </msDesc>
+         </sourceDesc>
+      </fileDesc>
+   </teiHeader>
+   <text>
+      <body>
+         <div type="edition" subtype="primary" xml:space="preserve" xml:lang="grc" resp="#RDS">
+            <ab>
+               <lb n="1"/><handShift new="#m1"/><unclear>ἐ</unclear>π<unclear>ὶ</unclear> ἱαραπ<supplied reason="lost">όλ</supplied>ο<supplied reason="lost">υ</supplied> <gap reason="lost" extent="7" unit="character" precision="medium"/> <supplied reason="lost">τ</supplied>οῦ Διογένεο<hi rend="stacked">ς</hi>
+               <lb n="2"/>μη<subst><del rend="corrected">ο</del><add place="overstrike">ν</add></subst>ὸς Ἀπελλαίου <num value="11">ἑνδ<supplied reason="lost">εκ</supplied>άτ<unclear>αι</unclear></num> ἱσταμένου
+               <lb n="3"/>Κληναγόρα Ἀρίστωνο<supplied reason="lost">ς</supplied> <supplied reason="lost">ο</supplied>ἰκήαν πρίατο πὰρ Ἀγα<surplus>σ</surplus>
+	       <lb n="4" break="no"/>τετόρων ταλάντων <space extent="unknown" unit="character"/>
+	       <lb n="5"/>θοκλέος <g type="interpunct">·</g> <unclear>Ἄ</unclear><supplied reason="lost">μπο</supplied>χοι <g type="interpunct">·</g> <handShift new="#m2"/>Λίσσος Θαρσύνοντος
+	       <lb n="6"/><handShift new="#m3"/>Ἱάρων Ἀγα<unclear>θά</unclear>ρχο<subst><del rend="corrected">ι</del><add place="overstrike">υ</add></subst> <handShift new="#m4"/>Τίμων Ξένωνος <space unit="character" quantity="3"/>
+	       <lb n="7"/><handShift new="#m5"/>Διονύσιος Φιλίνου <space unit="character" extent="unknown"/>
+	       <lb n="8"/><handShift new="#m6"/>Ἱπποσ<supplied reason="omitted">θ</supplied>ένης Πράτωνος <space unit="character" extent="unknown"/>
+	       <lb n="9"/><space unit="line" extent="unknown"/>    
+            </ab>
+         </div>
+      </body>
+   </text>
+</TEI>
