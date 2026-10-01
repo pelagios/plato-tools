@@ -88,3 +88,26 @@ export async function fetchJson(url, { fetch = permissions.fetch } = {}) {
   if (!r.ok) throw new RemoteError('status', `${site} answered ${r.status}${r.status === 404 ? ' (not found)' : ''}.`, { url: asked, origin: site, status: r.status, subject: s });
   try { return await r.json(); } catch { throw new RemoteError('not-json', `${site} did not answer with JSON.`, { url: asked, origin: site, subject: s }); }
 }
+
+/**
+ * Fetch an image under its site's `iiif` permission, as bytes: the tiles a trace with assistance reads
+ * (src/chora/inkfetch.js), from the map's own image server. Asked as written (over https, unless on this
+ * computer), so that the address is the one the renderer asks for. Throws RemoteError 'address' (not a
+ * site that can be a `iiif` permission) or 'status' (with `status`, and `retryAfter`, Retry-After when
+ * the server lets the page read it: a 429's wait); or the module's PermissionError as it is (undecided,
+ * never, reload, unprotected, moved, network): a tile that forwards is not an address to paste, so
+ * FORWARDS is not said of it.
+ */
+export async function fetchImage(url, { fetch = permissions.fetch } = {}) {
+  const asked = upgrade(url);
+  const s = subjectOf(asked);
+  if (!s || s[0] !== 'iiif') throw new RemoteError('address', `${String(url)} is not on a site a historical map's permission can cover.`, { url: asked });
+  let r;
+  try { r = await fetch(asked, { cat: s[0], subj: s[1], mode: 'cors' }); } catch (e) {
+    if (e?.name === 'PermissionError') { e.url = asked; e.subject = s; }
+    throw e;
+  }
+  const site = permissions.originOf(asked);
+  if (!r.ok) throw new RemoteError('status', `${site} answered ${r.status}.`, { url: asked, origin: site, status: r.status, subject: s, retryAfter: r.headers?.get?.('Retry-After') ?? null });
+  return r.blob();
+}
