@@ -36,6 +36,8 @@ import { DEFAULTS, InkError } from './params.js';
 
 export { EPSILON } from './simplify.js';
 export { DEFAULTS, InkError } from './params.js';
+/** How far round an area its map's pen stroke is measured, in working pixels. */
+export const STROKE_MARGIN = 128;
 /** The most components of ink a line is followed through (each a gap jumped, at most). */
 export const MAX_COMPONENTS = 2000;
 
@@ -149,8 +151,13 @@ export function traceArea(prep, seed, frame, params = {}) {
   if (!o) throw new InkError('The fill has no outline.', 'empty');
   let holes = o.holes, stroke = null;
   if (p.dropSmallHoles && holes.length) {
-    // The map's linework, over the whole window (kept with it: a slider does not measure it again).
-    stroke = prep.stroke ??= strokeWidth(prep);
+    // The map's linework about the area (its box, and STROKE_MARGIN working pixels round it), kept with the
+    // window for that box: a slider moved does not measure it again.
+    const [bx0, by0, bx1, by1] = fill.bbox, m = STROKE_MARGIN;
+    const box = [Math.max(0, bx0 - m), Math.max(0, by0 - m), Math.min(w - 1, bx1 + m), Math.min(h - 1, by1 + m)];
+    const key = box.join(',');
+    if (prep.strokeKey !== key) { prep.stroke = strokeWidth(prep, box); prep.strokeKey = key; }
+    stroke = prep.stroke;
     holes = keepHoles(holes, (4 * stroke) ** 2);
   }
   const img = toImage(frame);
