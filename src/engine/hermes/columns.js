@@ -80,6 +80,12 @@ export const GENERIC_KINDS = {
   'generic-nothing-converted': 'error',
   'generic-features-not-list': 'error',
   'generic-empty': 'warning',
+  // A sheet of a workbook read as a table of places (generic.js, openSheet).
+  'generic-sheets-not-read': 'warning',
+  'generic-sheet-hidden': 'warning',
+  'generic-sheet-empty': 'error',
+  'generic-sheet-formula-no-value': 'loss',
+  'workbook-whole': 'warning',
 };
 
 /** The name of the column that stands for a GeoJSON feature's own id (its `id` member, not a property). */

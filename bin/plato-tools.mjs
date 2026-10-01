@@ -24,7 +24,7 @@ const { detect, readable, DataError } = await import('../src/engine/input.js');
 const { nodeResources, gatherInputs, openFiles, isSystemError, NodeHost } = await import('../src/node/host.js');
 const { toolsCommit } = await import('../src/node/build-info.js');
 const { fmtBytes, fmtTime, formatName, progressText, summary, groups, draftNote, explainedLines, gazetteerWarnings, LOOKUP_WORDS } = await import('../src/engine/words.js');
-const { mappingOf } = await import('../src/engine/hermes/generic.js');
+const { mappingOf, withSheet } = await import('../src/engine/hermes/generic.js');
 const { FIELDS } = await import('../src/engine/hermes/columns.js');
 const { teiReadingRefusal } = await import('../src/engine/hermes/tei.js');
 
@@ -67,11 +67,13 @@ Each INPUT is one file, or one set of spreadsheet tables:
     whether the directory is given or its CSV files are named one by one;
   - every other CSV file, in a directory given or named, is an input of its own, and so is a
     lone sheet whose header does not begin as that sheet's does (a places.csv of one's own);
-  - a zip of the CSV files, or a workbook (.xlsx), is one set of tables.
-A CSV (or TSV) file that is not one of the tables' sheets, and plain GeoJSON that is not Linked
-Places Format, are read as a table of places: which column holds what (name, latitude,
-longitude, id, the place's web address…) is guessed from the column names, and printed; see
---columns.
+  - a zip of the CSV files, or a workbook (.xlsx, .ods) whose sheets are named after the
+    tables' (two or more, or one that begins as that sheet does), is one set of tables.
+A CSV (or TSV) file that is not one of the tables' sheets, a sheet of any other workbook, and
+plain GeoJSON that is not Linked Places Format, are read as a table of places: which column
+holds what (name, latitude, longitude, id, the place's web address…) is guessed from the
+column names, and printed; see --columns. Of a workbook, the first sheet that is not hidden is
+read, and the others are named in the report; see --sheet.
 Everything else is read as the format it turns out to be: PLATO JSON or JSON Lines, RDF
 (N-Triples, N-Quads, Turtle), Linked Places Format v1, W3C Web Annotations as Recogito exports
 them, or a TEI XML edition (annotations and TEI are read, not written). Gzipped files are read
@@ -103,6 +105,9 @@ Options:
                     addresses with {"field": "address", "pattern": "https://pleiades.stoa.org/places/{id}"},
                     the id replacing {id}; a pattern is suggested for such a column, never
                     used until it is given here.
+  --sheet NAME      check, convert: the sheet of a workbook to read as a table of places,
+                    instead of its first sheet that is not hidden. A name the workbook does
+                    not have is refused, naming the sheets it has.
   --georef FILE     a Recogito export (W3C Web Annotations): the IIIF Georeference Annotation
                     (from Allmaps) of a map its regions are drawn on. Each region on that map,
                     inside the georeferenced part, becomes a point, with a radius that holds the
@@ -256,7 +261,7 @@ async function main(argv) {
       options: {
         to: { type: 'string' }, out: { type: 'string', default: '.' }, overwrite: { type: 'boolean', default: false },
         base: { type: 'string' }, typing: { type: 'boolean', default: true }, cube: { type: 'boolean', default: false },
-        columns: { type: 'string' },
+        columns: { type: 'string' }, sheet: { type: 'string' },
         'same-id': { type: 'boolean', default: false }, 'list-places': { type: 'boolean', default: false },
         'header-places': { type: 'boolean', default: false }, 'commentary-places': { type: 'boolean', default: false },
         'key-pattern': { type: 'string', multiple: true, default: [] },
@@ -296,6 +301,7 @@ async function main(argv) {
   }
   if (action === 'datacube') return datacube(args, o);
   if (action === 'publish') return publishCommand(args, o, resources);
+  if (o.sheet !== undefined && action !== 'check' && action !== 'convert') return usage('--sheet is for check and convert.');
   if (action === 'match' || action === 'apply') return review(action, args, o, resources);
   if (action === 'lookup') return lookupCommand(args, o, resources);
   if (o.gazetteer || o.places || o['all-names'] || o.countries || o.near || o.limit || o.batch || o['dry-run'] || o['token-env'] || o['gazetteer-iri']) return usage('--gazetteer, --token-env, --gazetteer-iri, --places, --all-names, --countries, --near, --limit, --batch and --dry-run are for lookup.');
@@ -307,6 +313,7 @@ async function main(argv) {
   if (action !== 'convert' && (o.to || o.overwrite)) return usage('--to and --overwrite are for convert.');
   if (o.json && o.brief) return usage('choose --json or --brief, not both.');
   if (o.cube && o.to !== 'ntriples') return usage('--cube is for convert --to ntriples.');
+  if (o.sheet !== undefined && action === 'compare') return usage('--sheet is for check and convert.');
   if (o.columns) {
     try { o.savedColumns = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(o.columns))); }
     catch (e) { return usage(`--columns ${o.columns} cannot be read as JSON: ${e.message}`); }
@@ -353,8 +360,17 @@ async function main(argv) {
   // A reading option that applies to none of the inputs, or that one cannot take, is a mistake in
   // the command: each input is looked at first (and not again).
   const seen = new Map();
+  // --sheet: for a workbook read as a table of places, and a sheet it has; anything else is a mistake in the command.
+  if (o.sheet !== undefined) {
+    for (const item of items) if (!seen.has(item)) seen.set(item, await readInput(item));
+    const books = [...seen].filter(([, x]) => x.input?.format === 'csv' && x.input.container === 'workbook');
+    if (!books.length) return usage('--sheet is for a workbook (.xlsx or .ods) read as a table of places, and no input is one.');
+    for (const [item, { input }] of books) {
+      try { withSheet(input, o.sheet); } catch (e) { if (e?.name !== 'DataError') throw e; return usage(`${item.label}: ${e.message}`); }
+    }
+  }
   if (readingFlags.length) {
-    for (const item of items) seen.set(item, await readInput(item));
+    for (const item of items) if (!seen.has(item)) seen.set(item, await readInput(item));
     const formats = new Set([...seen.values()].map((x) => x.input?.format).filter(Boolean));
     const tables = formats.has('csv') || formats.has('geojson');
     for (const f of readingFlags) {
@@ -365,7 +381,7 @@ async function main(argv) {
       for (const [item, { input }] of seen) {
         if (input?.format !== 'csv' && input?.format !== 'geojson') continue;
         let m;
-        try { m = await mappingOf(input, o.savedColumns); } catch (e) { if (e?.name !== 'DataError') throw e; continue; /* the run reports what stops the reader */ }
+        try { m = await mappingOf(input, o.savedColumns, input.container === 'workbook' ? o.sheet : undefined); } catch (e) { if (e?.name !== 'DataError') throw e; continue; /* the run reports what stops the reader */ }
         if (!Object.values(m.mapping).includes('id')) return usage(`--same-id reads rows with the same id as one place, but no column of ${item.label} is read as the place id; map one to "id" with --columns.`);
       }
     }
@@ -550,6 +566,11 @@ async function runOne(item, action, o, resources, host, live, seen) {
   const table = input.format === 'csv' || input.format === 'geojson';
   const reading = input.format === 'tei' ? { ...o.reading?.tei } : table && o.reading?.sameId ? { sameId: true } : {};
   if (input.format === 'tei' && reading.keyPatterns) r.keyPatterns = { ...reading.keyPatterns };
+  // A workbook read as a table of places: the sheet given, else the one detection chose, named with the columns.
+  if (input.container === 'workbook' && input.format === 'csv') {
+    if (o.sheet !== undefined) input.sheet = o.sheet;
+    r.container = 'workbook'; r.sheet = input.sheet ?? null; r.sheets = input.sheets.map((s) => s.name);
+  }
   if (o.georefFiles) { input.georefs = o.georefFiles; input.manifests = o.manifestFiles; r.georefs = o.georef; r.manifests = o.manifest || []; }
   // A table of places: the columns as they are read (the mapping given with --columns, else the
   // guess), printed with the report so that it can be saved, edited and given back.
@@ -609,7 +630,7 @@ function describe(r, action, brief) {
 function columnLines(r) {
   const w = Math.min(24, Math.max(...r.columns.map((c) => c.column.length)));
   return [
-    '  Columns read as (to change this, save the JSON below to a file, edit it, and give it with --columns FILE):',
+    `  Columns${r.sheet ? ` of the sheet ${JSON.stringify(r.sheet)}` : ''} read as (to change this, save the JSON below to a file, edit it, and give it with --columns FILE${r.sheets?.length > 1 ? '; another sheet with --sheet NAME' : ''}):`,
     ...r.columns.map((c) => `    ${c.column.padEnd(w)}  ${c.field.padEnd(16)}  ${c.reason || ''}`),
     // The mapping as --columns takes it, written in the file's order, a pattern column in its object form.
     `    {${r.columns.map((c) => `${JSON.stringify(c.column)}:${JSON.stringify(c.pattern === undefined ? c.field : { field: c.field, pattern: c.pattern })}`).join(',')}}`,

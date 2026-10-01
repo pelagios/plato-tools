@@ -363,13 +363,77 @@ export async function tableSheets(files) {
   // reader, which says so; any other error is a fault in the tools, and is not hidden.
   try { first = String(Papa.parse((await head(named[0], 4096)).replace(/^\uFEFF/, ''), { preview: 1, skipEmptyLines: 'greedy' }).data[0]?.[0] ?? '').trim(); }
   catch (e) { if (e instanceof DataError) return named; throw e; }
-  const sheet = sheetOf(named[0].name);
-  return first === (SHEET_FIRST_COLUMN[sheet] || 'place_id') ? named : [];
+  return isSheetHeader(sheetOf(named[0].name), first) ? named : [];
+}
+/**
+ * Whether a sheet's first cell (the first heading of its first row, trimmed) is the first column of
+ * the PLATO sheet it is named after: the one test that tells a lone places.csv, or a workbook's lone
+ * "places" sheet, of the tables from a table of one's own (tableSheets, workbookKind).
+ */
+const isSheetHeader = (sheet, first) => first === (SHEET_FIRST_COLUMN[sheet] || 'place_id');
+
+// ---- a workbook (.xlsx, .ods): PLATO's tables, or a table of one's own (Hermes) ----------------------
+// SheetJS is loaded only when a workbook is chosen; a host or a test may give its own (useXlsx).
+let loadXlsx = () => import('xlsx');
+/** Use this SheetJS (the module's exports) for workbooks, or, given nothing, import it when needed. */
+export function useXlsx(lib) { loadXlsx = lib ? async () => lib : () => import('xlsx'); }
+export const xlsxLib = () => loadXlsx();
+// What detection found of each workbook: it is detected again for every command, and read whole.
+const workbooks = new WeakMap();
+/**
+ * The sheets of a workbook: { sheets: [{ name, hidden }], tables }, where `tables` says it is PLATO's
+ * spreadsheet tables by tableSheets' rule: two or more sheets named after PLATO's sheets (as the
+ * tables reader names them, whatever their case), or exactly one whose first cell is that sheet's
+ * first column. Only the workbook's own list of sheets is read (and that one sheet's first row), not
+ * the sheets. `hidden` is the workbook's flag (a sheet hidden, or "very hidden", in Excel); SheetJS
+ * 0.20.3 does not read an ODS file's, so a hidden sheet of an ODS workbook is not known as hidden.
+ * A workbook SheetJS cannot open is a DataError.
+ */
+export async function workbookSheets(file) {
+  if (workbooks.has(file)) return workbooks.get(file);
+  const XLSX = await loadXlsx();
+  const data = new Uint8Array(await file.arrayBuffer());
+  const damaged = (e) => new DataError(`The workbook is damaged or incomplete, so its sheets cannot be read (${String(e && e.message || e)}).`);
+  let wb;
+  // An xlsx file's own list of sheets, with their hidden flags, and no sheet parsed (sheets: []);
+  // an ODS file has no flags to give, and its names come without parsing it (bookSheets).
+  try { wb = XLSX.read(data, base(file.name).endsWith('.ods') ? { type: 'array', bookSheets: true } : { type: 'array', sheets: [] }); }
+  catch (e) { throw damaged(e); }
+  const flags = wb.Workbook?.Sheets || [];
+  const sheets = wb.SheetNames.map((name, i) => ({ name, hidden: !!flags[i]?.Hidden }));
+  const named = sheets.filter((s) => TABLE_SHEETS.includes(s.name.toLowerCase()));
+  let tables = named.length > 1;
+  if (named.length === 1) {
+    let first;
+    try {
+      const ws = XLSX.read(data, { type: 'array', sheets: [named[0].name], sheetRows: 1 }).Sheets[named[0].name];
+      first = String(ws ? XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })[0]?.[0] ?? '' : '').trim();
+    } catch (e) { throw damaged(e); }
+    tables = isSheetHeader(named[0].name.toLowerCase(), first);
+  }
+  const found = { sheets, tables };
+  workbooks.set(file, found);
+  return found;
+}
+/**
+ * A workbook as an input: PLATO's spreadsheet tables, as before, or (Hermes) a table of places on
+ * one of its sheets, read through a mapping of its columns as a CSV file is: format 'csv', container
+ * 'workbook', its sheets, and the sheet read unless another is chosen (the first that is not hidden).
+ * A workbook that cannot be opened is left to the tables reader, which says it is damaged, as before.
+ */
+async function workbookKind(files) {
+  let found;
+  try { found = await workbookSheets(files[0]); }
+  catch (e) { if (e instanceof DataError) return { format: 'tables', container: 'workbook', files }; throw e; }
+  if (found.tables) return { format: 'tables', container: 'workbook', files };
+  const { sheets } = found;
+  return { format: 'csv', container: 'workbook', sheets, sheet: (sheets.find((s) => !s.hidden) || sheets[0])?.name, files };
 }
 
 /**
  * Group the chosen files into one input and say what it is:
- *   tables (10 CSVs, a zip or a workbook), plato-json, plato-jsonl, lpf, lpf-seq, ntriples, nquads, turtle,
+ *   tables (10 CSVs, a zip or a workbook), csv (a table of places: a CSV file, or a sheet of a
+ *   workbook that is not the tables), plato-json, plato-jsonl, lpf, lpf-seq, ntriples, nquads, turtle,
  *   w3c-annotations (W3C Web Annotations, as Recogito exports them; `shape` says how they are held).
  */
 export async function detect(files) {
@@ -389,7 +453,7 @@ export async function detect(files) {
     const textBytes = entries ? entries.filter((x) => x.name.toLowerCase().endsWith('.csv') && sheetOf(x.name)).reduce((n, x) => n + x.usize, 0) : undefined;
     return { format: 'tables', container: 'zip', files, ...(textBytes !== undefined ? { textBytes } : {}) };
   }
-  if (n.endsWith('.xlsx') || n.endsWith('.ods')) return { format: 'tables', container: 'workbook', files };
+  if (n.endsWith('.xlsx') || n.endsWith('.ods')) return workbookKind(files);
   if (n.endsWith('.tsv') || n.endsWith('.tab')) return (await headerless(f, '\t')) ? { format: null, reason: HEADERLESS_REASON } : { format: 'csv', delimiter: '\t', files };
   if (n.endsWith('.nt')) return { format: 'ntriples', files };
   if (n.endsWith('.nq')) return { format: 'nquads', files };

@@ -18,7 +18,8 @@
 //     store regroups the rows under it. Only each id and the names its rows give are held, never a
 //     row. Names that agree are the label; names that differ make the id the label, and are reported.
 // A GeoJSON feature's own id counts as a column (FEATURE_ID), and its geometry is always carried.
-import { jsonDocument, DataError, jsonFaultWords } from '../input.js';
+// A sheet of a workbook (.xlsx, .ods) that is not PLATO's tables is read as a CSV file is (openSheet).
+import { jsonDocument, DataError, jsonFaultWords, workbookSheets, xlsxLib } from '../input.js';
 import { csvRecords, textChunks } from '../../formats/csv.js';
 import { LOSS_TEXT } from '../report.js';
 import { tableIds } from '../../formats/tables.js';
@@ -43,19 +44,116 @@ async function wholeText(file) {
 
 // What has been read of each input's start (its columns and first rows), so that finding the
 // profile, the columns and the mapping reads the start once. The rows are never kept: each reading
-// of them streams the file again.
+// of them streams the file again. A workbook's are kept by sheet.
 const opened = new WeakMap();
 
 /**
- * Open a CSV/TSV or plain GeoJSON input: { headers, sample, rows(), head }, where rows() yields
- * { row, where, geometry?, extra? } for each row or feature. Bad input throws DataError.
+ * Open a CSV/TSV or plain GeoJSON input, or a sheet of a workbook: { headers, sample, rows(), head },
+ * where rows() yields { row, where, geometry?, extra? } for each row or feature. Bad input throws
+ * DataError. `sheet` is the workbook's sheet to read (else the one detection chose).
  */
-async function open(input) {
+async function open(input, sheet = input.sheet) {
   const file = input.files[0];
-  if (opened.has(file)) return opened.get(file);
-  const t = input.format === 'csv' ? await openCsv(file, input) : await openGeojson(file, input);
-  opened.set(file, t);
+  const key = input.container === 'workbook' ? `sheet:${sheet}` : 'file';
+  if (!opened.has(file)) opened.set(file, new Map());
+  const done = opened.get(file);
+  if (done.has(key)) return done.get(key);
+  const t = input.container === 'workbook' ? await openSheet(file, sheet) : input.format === 'csv' ? await openCsv(file, input) : await openGeojson(file, input);
+  done.set(key, t);
   return t;
+}
+/** The workbook's sheet a run reads: options.sheet when the options are a run's (not a mapping alone), else the input's. */
+const sheetIn = (input, options) => (input.container === 'workbook' && options && savedColumns(options) !== options && typeof options.sheet === 'string' ? options.sheet : input.sheet);
+/**
+ * The input with `name` as the workbook's sheet to read, or the input as it is when no name is
+ * given; a name the workbook does not have is a DataError naming the sheets it has.
+ */
+export function withSheet(input, name) {
+  if (name === undefined || name === null || name === '') return input;
+  if (input.container !== 'workbook' || input.format !== 'csv') throw new DataError(`A sheet ("${name}") can be chosen only for a workbook (.xlsx or .ods) read as a table of places.`);
+  if (!input.sheets.some((s) => s.name === name)) throw new DataError(sheetMissing(name, input.sheets));
+  return { ...input, sheet: name };
+}
+const quoted = (names) => names.map((n) => `"${n}"`).join(', ');
+const sheetMissing = (name, sheets) => `The workbook has no sheet "${name}"; its sheets are ${quoted(sheets.map((s) => s.name))}.`;
+
+// ---- a sheet of a workbook ------------------------------------------------------------------------
+// A workbook can only be read whole (SheetJS): read once for the columns and first rows, then once
+// more for the rows. Each cell is read as its value, not as the workbook shows it: a coordinate
+// formatted "0.00" keeps every digit it has (String of the number), a date is an ISO date, and a
+// formula is its last calculated value (one saved with none is reported, and read as empty).
+const WORKBOOK_WHOLE = 50 * 2 ** 20;   // as the tables reader warns (pipeline.js)
+/** A cell's value as text: a date YYYY-MM-DD at midnight, else YYYY-MM-DDTHH:MM:SS (the time as the workbook gives it, in no time zone); TRUE or FALSE; a number in full. */
+export function sheetCellText(v) {
+  if (v === undefined || v === null) return '';
+  if (v instanceof Date) {
+    if (Number.isNaN(v.getTime())) return '';
+    // Read with UTC: true, the date's UTC fields are the workbook's own: toISOString, never the local time.
+    const iso = v.toISOString();
+    return iso.endsWith('T00:00:00.000Z') ? iso.slice(0, 10) : iso.replace(/\.000Z$|Z$/, '');
+  }
+  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
+  return String(v);
+}
+async function openSheet(file, name) {
+  const XLSX = await xlsxLib();
+  const { sheets } = await workbookSheets(file);
+  if (!sheets.length) throw new DataError(`The workbook ${file.name} has no sheets, so there is nothing in it to read.`);
+  if (!sheets.some((s) => s.name === name)) throw new DataError(sheetMissing(name, sheets));
+  const damaged = (e) => new DataError(`The workbook is damaged or incomplete, so its sheet "${name}" cannot be read (${String(e && e.message || e)}).`);
+  // The sheet's rows as text (blank rows kept, so that each has its number), where its rows begin,
+  // and its formulas saved with no value.
+  const read = async () => {
+    let ws;
+    try { ws = XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: 'array', cellDates: true, UTC: true, sheets: [name], dense: true }).Sheets[name]; }
+    catch (e) { throw damaged(e); }
+    if (!ws || !ws['!ref']) return { rows: [], top: 0, left: 0, formulas: [] };
+    const { s } = XLSX.utils.decode_range(ws['!ref']);
+    const formulas = [];
+    (ws['!data'] || []).forEach((cells, r) => (cells || []).forEach((cell, c) => {
+      if (cell && cell.t === 'e' && cell.v === undefined && cell.f) formulas.push({ r, c, f: cell.f });
+    }));
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, UTC: true, defval: '', blankrows: true }).map((cells) => cells.map(sheetCellText));
+    return { rows, top: s.r, left: s.c, formulas };
+  };
+  const { rows, top, left, formulas } = await read();
+  const blank = (cells) => cells.every((c) => c.trim() === '');
+  const h = rows.findIndex((cells) => !blank(cells));
+  const headProblems = [];
+  const others = sheets.filter((x) => x.name !== name);
+  if (others.length) headProblems.push({ kind: 'generic-sheets-not-read', example: `${file.name}: read "${name}"; not read ${quoted(others.map((x) => x.name))}` });
+  for (const x of sheets) if (x.hidden) headProblems.push({ kind: 'generic-sheet-hidden', example: `"${x.name}" in ${file.name}${x.name === name ? ', the sheet read' : ', not read'}` });
+  if (file.size > WORKBOOK_WHOLE) headProblems.push({ kind: 'workbook-whole', example: `${file.name}: ${(file.size / 2 ** 20).toFixed(0)} MB` });
+  if (h < 0) return { empty: true, sheet: name, headers: [], headerText: Object.create(null), headProblems, sample: [], head: {}, async *rows() {} };
+  // The columns are as wide as any heading or value goes: a column formatted and never filled is not one.
+  let width = 0;
+  for (const cells of rows) for (let j = cells.length - 1; j >= width; j--) if (cells[j].trim() !== '') { width = j + 1; break; }
+  const rawHeaders = rows[h].slice(0, width);
+  while (rawHeaders.length < width) rawHeaders.push('');
+  const uses = new Map();
+  rawHeaders.forEach((x, j) => uses.set(x, [...(uses.get(x) || []), j + 1]));
+  const headers = rawHeaders.map((x, j) => (uses.get(x).length > 1 ? `${x} (column ${j + 1})` : x));
+  const headerText = Object.create(null);
+  headers.forEach((k, j) => { headerText[k] = rawHeaders[j]; });
+  for (const [x, cols] of uses) if (cols.length > 1) headProblems.push({ kind: 'generic-csv-duplicate-header', example: `"${x}": ${cols.length} columns (${cols.join(', ')}), read as ${cols.map((c) => `"${x} (column ${c})"`).join(', ')}` });
+  for (const { r, c, f } of formulas) {
+    // The dense sheet's rows and columns are counted from A1; the rows read, from where the sheet's range begins.
+    const column = c - left < width && r - top > h ? `, column "${headers[c - left]}"` : '';
+    headProblems.push({ kind: 'generic-sheet-formula-no-value', example: `cell ${XLSX.utils.encode_cell({ r, c })} of "${name}"${column}: =${f}` });
+  }
+  const body = function* (all) {
+    for (let i = h + 1; i < all.length; i++) {
+      if (blank(all[i])) continue;
+      yield { row: rowOfCells(headers, all[i].slice(0, width)), where: `row ${top + i + 1}` };
+    }
+  };
+  const sample = [];
+  for (const { row } of body(rows)) { sample.push(row); if (sample.length >= SAMPLE) break; }
+  return {
+    sheet: name, headers, headerText, headProblems, sample, head: {},
+    // The rows are read again, the workbook being read whole, rather than kept between readings.
+    async *rows() { yield* body((await read()).rows); },
+  };
 }
 
 /** A row of cells as an object keyed by column, with no prototype (so that a column called "__proto__" is kept). */
@@ -158,16 +256,17 @@ async function openGeojson(file, input) {
 
 /** The columns of a CSV or plain GeoJSON input, and its first rows: { headers, sample }, for the page's table of columns. */
 export async function columnsOf(input) {
-  const { headers, sample } = await open(input);
-  return { headers, sample };
+  const t = await open(input);
+  if (t.empty) throw new DataError(`${LOSS_TEXT['generic-sheet-empty']} (the sheet "${t.sheet}")`);
+  return { headers: t.headers, sample: t.sample };
 }
 /**
  * The mapping a run of this input uses: { mapping, reasons, problems, gazetteer } (columns.js,
  * resolveColumns), and `headers`, the columns in the file's order (which the mapping, an object,
  * does not keep for a column whose heading is a number).
  */
-export async function mappingOf(input, saved) {
-  const { headers, sample, headerText, ownGeometry } = await open(input);
+export async function mappingOf(input, saved, sheet) {
+  const { headers, sample, headerText, ownGeometry } = await open(input, sheet ?? input.sheet);
   return { ...resolveColumns(headers, sample, saved, headerText, { ownGeometry }), headers };
 }
 /**
@@ -193,7 +292,7 @@ export function savedColumns(given) {
  */
 export async function genericProfile(input, options) {
   const saved = savedColumns(options);
-  const { mapping } = await mappingOf(input, saved);
+  const { mapping } = await mappingOf(input, saved, sheetIn(input, options));
   const fields = Object.values(mapping);
   const sameId = saved !== options && options?.sameId === true && fields.includes('id');
   return fields.includes('address') || sameId ? 'attestation-centric' : 'place-centric';
@@ -210,7 +309,8 @@ export async function genericProfile(input, options) {
 export async function* genericSource(input, rep, options = {}, defaultBase = 'https://example.org/my-dataset/') {
   const file = input.files[0];
   const report = (kind, example) => rep.add(GENERIC_KINDS[kind] || 'loss', kind, LOSS_TEXT[kind] || kind, example);
-  const t = await open(input);
+  const sheet = sheetIn(input, options);
+  const t = await open(input, sheet);
   const { mapping, patterns, problems } = resolveColumns(t.headers, t.sample, options.columns, t.headerText, { ownGeometry: t.ownGeometry });
   for (const p of [...(t.headProblems || []), ...problems]) report(p.kind, p.example);
   const fields = Object.values(mapping);
@@ -218,12 +318,14 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
   // Rows with the same id as one place: each id, and the names its rows give (no row is kept).
   const sameId = options.sameId === true && hasId;
   const places = sameId ? new Map() : null;
-  const what = input.format === 'csv' ? 'a table of places (CSV)' : 'plain GeoJSON';
+  const what = input.container === 'workbook' ? `a table of places, the sheet "${sheet}" of a workbook` : input.format === 'csv' ? 'a table of places (CSV)' : 'plain GeoJSON';
   const title = options.title || (typeof t.head.title === 'string' && t.head.title) || (typeof t.head.name === 'string' && t.head.name) || `Places in ${file.name}`;
   yield { type: 'header', value: {
     profile: byAddress || sameId ? 'attestation-centric' : 'place-centric',
     gazetteer: { title, description: `Converted by PLATO tools from ${what}, ${file.name}: one attestation for each ${input.format === 'csv' ? 'row' : 'feature'}${byAddress ? ', about the place whose web address it gives' : ''}${sameId ? `${byAddress ? ', or else ' : ', '}about the place its id names, ${input.format === 'csv' ? 'rows' : 'features'} with the same id being one place` : ''}.` },
   } };
+  // A sheet with nothing on it: said once, as an error, and nothing more is read.
+  if (t.empty) { report('generic-sheet-empty', `"${sheet}" in ${file.name}`); return; }
   const base = options.base || defaultBase;
   if (!byAddress && !hasId) report('generic-no-ids', file.name);
   const minted = tableIds(base, () => null);

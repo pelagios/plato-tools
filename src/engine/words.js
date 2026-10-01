@@ -7,7 +7,9 @@ FORMAT_NAMES.tei = 'a TEI XML edition';
 FORMAT_NAMES.csv = 'a table of places (CSV), its columns matched to PLATO';
 FORMAT_NAMES.geojson = 'plain GeoJSON (not Linked Places Format), its properties matched to PLATO';
 /** What a detected input is, in words: "PLATO JSON Lines (place-centric)". */
-export const formatName = (input) => FORMAT_NAMES[input.format] + (input.profile ? ` (${input.profile})` : '') + (input.lpfVersion === 2 ? ', version 2' : '') + withGeorefs(input);
+export const formatName = (input) => (input.format === 'csv' && input.container === 'workbook' ? sheetName(input) : FORMAT_NAMES[input.format]) + (input.profile ? ` (${input.profile})` : '') + (input.lpfVersion === 2 ? ', version 2' : '') + withGeorefs(input);
+// Hermes: a sheet of a workbook that is not PLATO's tables, read as a table of places.
+const sheetName = ({ sheet }) => `a table of places${sheet !== undefined ? ` (the sheet “${sheet}” of a workbook)` : ' (a workbook)'}, its columns matched to PLATO`;
 // Hermes: a Recogito export chosen with the georeferences of its maps, and their manifests (plural is below).
 function withGeorefs({ georefs, manifests }) {
   if (!georefs?.length && !manifests?.length) return '';
@@ -134,6 +136,10 @@ export const COLUMN_WORDS = {
   saved: 'as the saved matching says',
   movedTo: (field, col) => `kept as a note, as ${field} is now the column “${col}”, and only one column can be`,
   looking: 'Reading the columns…',
+  /** A workbook read as a table of places: which of its sheets is read. */
+  sheetLabel: 'Sheet to read',
+  sheetTip: 'Only one sheet of a workbook is read. Choosing another reads its columns again; the report names the sheets not read.',
+  sheetHidden: (name) => `${name} (hidden)`,
   save: 'Save this matching', load: 'Use a saved matching…', loadLabel: 'A saved matching',
   saveNote: 'Saved as JSON, the file can be used again here, or given to the command line with --columns.',
   base: 'Each place id becomes a web address under the web address given in Options.',
