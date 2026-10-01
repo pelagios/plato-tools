@@ -125,9 +125,12 @@ export function createMap(container, { state, onPlaceClick, onStyleError }) {
   const drawing = () => draw && !['static', 'select'].includes(draw.getMode());
 
   let styleVersion = 0;
+  const styleHooks = [];
   map.on('style.load', () => {
     styleLoading = false;
     addOwnLayers();
+    // The historical maps' layer goes in here, below Chora's own layers and above the basemap.
+    for (const fn of styleHooks) { try { fn(map); } catch (e) { console.warn('Map:', e); } }
     startDraw();
     styleVersion++;
   });
@@ -149,6 +152,8 @@ export function createMap(container, { state, onPlaceClick, onStyleError }) {
       map.setStyle(style, { diff: false });
     },
     get styleVersion() { return styleVersion; },
+    /** Call fn(map) whenever a style has loaded, after Chora's own layers are added (and now, if one has). */
+    onStyleLoad(fn) { styleHooks.push(fn); if (map.isStyleLoaded() && map.getLayer('chora-overview-clusters')) fn(map); },
     setOverview(fc) { data.overview = fc || EMPTY; map.getSource('chora-overview')?.setData(data.overview); },
     setPlace(fc) { data.place = fc || EMPTY; map.getSource('chora-place')?.setData(data.place); },
     setContext(fc) { data.context = fc || EMPTY; map.getSource('chora-context')?.setData(data.context); },

@@ -47,6 +47,19 @@
       <div id="dataset" hidden></div>
     </section>
 
+    <section id="maps" aria-labelledby="maps-h">
+      <h2 id="maps-h">Historical maps</h2>
+      <p class="muted">Lay a georeferenced historical map over the basemap, and trace places from it: what you trace cites the map, and the georeference that places it.</p>
+      <form id="map-form">
+        <label for="map-input">A georeference (a IIIF Georeference Annotation), or the address of one (Allmaps), of a IIIF manifest, or of a IIIF image</label>
+        <textarea id="map-input" rows="2" autocomplete="off" spellcheck="false" placeholder="https://annotations.allmaps.org/maps/…"></textarea>
+        <p><button type="submit">Add the map</button></p>
+      </form>
+      <div id="map-needs"></div>
+      <div id="map-status" role="status" aria-live="polite"></div>
+      <ul id="overlay-list" class="overlays"></ul>
+    </section>
+
     <section id="places" aria-labelledby="places-h" hidden>
       <h2 id="places-h"><span class="step">2</span> Places</h2>
       <label for="q" class="visually-hidden">Find a place by name</label>
@@ -93,7 +106,7 @@
 </main>
 <footer>
   <p>Checked against PLATO <span id="plato-version">…</span>.</p>
-  <p>PLATO: <a href="https://pelagios.org/place-attestation-ontology/guide/">the guide</a> · <a href="https://pelagios.org/place-attestation-ontology/">the ontology reference</a>. PLATO tools: <a href="https://github.com/pelagios/plato-tools">source code</a> (BSD 3-Clause), set in <a href="./fonts/Alegreya-OFL.txt">Alegreya</a> and <a href="./fonts/AlegreyaSans-OFL.txt">Alegreya Sans</a> (SIL Open Font Licence), with icons from <a href="./icons/Lucide-ISC.txt">Lucide</a> (ISC Licence). The map: <a href="https://www.naturalearthdata.com/">Natural Earth</a> (public domain), drawn with <a href="https://maplibre.org/">MapLibre GL JS</a> (BSD 3-Clause), and drawing with <a href="https://terradraw.io/">Terra Draw</a> (MIT). PLATO is published by the <a href="https://pelagios.org">Pelagios Network</a> Place Working Group. Development has been supported by the <a href="https://www.ishi.pitt.edu/">Institute for Spatial History Innovation (ISHI)</a> at the University of Pittsburgh.</p>
+  <p>PLATO: <a href="https://pelagios.org/place-attestation-ontology/guide/">the guide</a> · <a href="https://pelagios.org/place-attestation-ontology/">the ontology reference</a>. PLATO tools: <a href="https://github.com/pelagios/plato-tools">source code</a> (BSD 3-Clause), set in <a href="./fonts/Alegreya-OFL.txt">Alegreya</a> and <a href="./fonts/AlegreyaSans-OFL.txt">Alegreya Sans</a> (SIL Open Font Licence), with icons from <a href="./icons/Lucide-ISC.txt">Lucide</a> (ISC Licence). The map: <a href="https://www.naturalearthdata.com/">Natural Earth</a> (public domain), drawn with <a href="https://maplibre.org/">MapLibre GL JS</a> (BSD 3-Clause), historical maps with <a href="https://allmaps.org/">Allmaps</a> (MIT), and drawing with <a href="https://terradraw.io/">Terra Draw</a> (MIT). PLATO is published by the <a href="https://pelagios.org">Pelagios Network</a> Place Working Group. Development has been supported by the <a href="https://www.ishi.pitt.edu/">Institute for Spatial History Innovation (ISHI)</a> at the University of Pittsburgh.</p>
 </footer>
 <script type="module" src="./src/lib/tooltip.js"></script>
 <script type="module" src="./src/chora/app.js"></script>

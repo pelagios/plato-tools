@@ -12,10 +12,15 @@ import { fingerprint, loadDrafts, saveDrafts, draftsWritten, forgetAllDrafts } f
 import { take as takeHandoff, clear as clearHandoff, keepForReload, takeResume } from './handoff.js';
 import { serialQueue, pageRequest, answers } from './queue.js';
 import * as permissions from '../lib/permissions.js';
-import { RELOAD_LOSES } from '../lib/permission-words.js';
+import { RELOAD_LOSES, REFUSED as PERMISSION_REFUSED } from '../lib/permission-words.js';
+import * as ov from './overlays.js';
+import * as remote from './remote.js';
+import * as georef from '../engine/georef/index.js';
+import * as tracing from '../engine/chora/trace.js';
+import { DataError } from '../engine/input.js';
 
 const $ = (id) => document.getElementById(id);
-const state = (window.__chora = { phase: 'loading', placeId: null, pendingCount: 0, basemap: null, mapReadyCount: 0, blocked: 0, lastSave: null });
+const state = (window.__chora = { phase: 'loading', placeId: null, pendingCount: 0, basemap: null, mapReadyCount: 0, blocked: 0, lastSave: null, overlays: [] });
 const PAGE = 50;
 let showing = false;   // true while the drawings shown are being replaced
 let worker, files = [], fp = null, dataset = null, drafts = [], view = null, total = 0, query = '';
@@ -185,9 +190,16 @@ function renderCard() {
 }
 function pendingItem(d) {
   const opt = (vals, cur, words) => vals.map((x) => `<option value="${x}"${x === cur ? ' selected' : ''}>${esc(words(x))}</option>`).join('');
+  // A drawing traced from a historical map may mark where the map writes the name (a label anchor).
+  const roles = ['Extent', 'FeaturePoint', 'RepresentativePoint', ...(d.trace ? ['LabelAnchor'] : [])].filter((r) => ROLES.includes(r));
+  const from = d.traceOptions?.length || d.trace
+    ? `<label>Traced from <select data-field="tracedFrom">${[...(d.traceOptions || []).filter((o) => o.key !== d.trace?.key), ...(d.trace ? [{ key: d.trace.key, title: d.trace.title }] : [])]
+      .map((o) => `<option value="${esc(o.key)}"${o.key === d.trace?.key ? ' selected' : ''}>${esc(o.title || 'a historical map')}</option>`).join('')}<option value=""${d.trace ? '' : ' selected'}>the basemap</option></select></label>` : '';
   return `<li data-draft="${esc(d.id)}"><span class="kind">${esc(KIND[d.geojson.type] || d.geojson.type)}</span>
-    <label>What it marks <select data-field="role"><option value="">Not said</option>${opt(['Extent', 'FeaturePoint', 'RepresentativePoint'].filter((r) => ROLES.includes(r)), d.role, (r) => ROLE_WORDS[r] || r)}</select></label>
+    ${from}
+    <label>What it marks <select data-field="role"><option value="">Not said</option>${opt(roles, d.role, (r) => (r === 'LabelAnchor' ? 'where the map writes its name' : ROLE_WORDS[r] || r))}</select></label>
     <label>How well known <select data-field="precision"><option value="">Not said</option>${opt(PRECISIONS, d.precision, (p) => p.replace('_', ' '))}</select></label>
+    ${d.traceNote ? `<p class="note" data-trace-note>${esc(d.traceNote)}</p>` : ''}
     <button type="button" data-remove>Remove</button></li>`;
 }
 const KIND = { Point: 'A point', LineString: 'A line', Polygon: 'An area' };
@@ -235,7 +247,15 @@ $('card').addEventListener('change', (e) => {
   const sel = e.target.closest('select[data-field]');
   if (!sel) return;
   const d = drafts.find((x) => x.id === sel.closest('[data-draft]').dataset.draft);
-  if (d) { d[sel.dataset.field] = sel.value; keepDrafts(); }
+  if (!d) return;
+  if (sel.dataset.field === 'tracedFrom') {
+    // Chosen by the user: another map it lies on, or the basemap (no citation of any map).
+    if (sel.value) traceDraft(d, { only: sel.value });
+    else { dropTrace(d, null); keepDrafts(); renderCard(); }
+    return;
+  }
+  // Chosen by the user: no longer the default a traced point was given.
+  d[sel.dataset.field] = sel.value; d.defaulted = false; keepDrafts();
 });
 
 // ---- Drawing -------------------------------------------------------------------------------------
@@ -258,12 +278,74 @@ function onFinish(id, ctx) {
   }
   if (geojson !== f.geometry) setTimeout(() => { try { mapApi.draw?.updateFeatureGeometry(id, geojson); } catch {} });
   drawError = state.drawError = null;
-  if (existing) { existing.geojson = geojson; keepDrafts(); return; }   // moved or reshaped
+  if (existing) {   // moved or reshaped: a traced drawing is traced again from its map, or no longer cites it
+    existing.geojson = geojson; keepDrafts();
+    if (existing.trace) traceDraft(existing, { only: existing.trace.key, reshaped: true });
+    return;
+  }
   // The basemap drawn on goes into the published notes: a built-in one by name, a pasted one not (its site may be private).
-  drafts.push({ id: String(id), placeId: state.placeId, placeLabel: view?.label || '', geojson, role: '', precision: '',
-    basemap: basemaps.drawnOn(basemaps.current()), zoom: mapApi.zoom(), drawnAt: new Date().toISOString() });
+  const d = { id: String(id), placeId: state.placeId, placeLabel: view?.label || '', geojson, role: '', precision: '',
+    basemap: basemaps.drawnOn(basemaps.current()), zoom: mapApi.zoom(), drawnAt: new Date().toISOString() };
+  drafts.push(d);
   keepDrafts();
   renderCard();
+  if (layers?.entries.length) traceDraft(d);
+}
+
+// ---- Tracing from a historical map ---------------------------------------------------------------
+// A drawing made over a historical map is traced from it (src/engine/chora/trace.js): the topmost map
+// shown that holds it whole, else the topmost holding part of it (with a warning); the card lets the
+// user choose another map it lies on, or the basemap. Its citations are made when it is saved. A point
+// traced is, until the user says otherwise, a representative point whose position is approximate.
+const traceTickets = new Map();   // draft id -> the latest tracing asked for it (an older answer is let go)
+function dropTrace(d, note) {
+  d.trace = null; d.traceNote = note;
+  if (d.role === 'LabelAnchor') d.role = '';
+  // The defaults were for a point traced from a map: drawn on the basemap, it says nothing of itself.
+  if (d.defaulted) { d.role = ''; d.precision = ''; d.defaulted = false; }
+}
+async function traceDraft(d, { only = null, reshaped = false } = {}) {
+  const ticket = {}; traceTickets.set(d.id, ticket);
+  const shown = layers ? layers.ordered() : [];
+  const maps = shown.map((e) => ({ key: e.key, g: e.g, visible: e.visible, title: e.title }));
+  const was = d.trace;
+  let note = null;
+  try {
+    const pick = await tracing.pickOverlay(only ? maps.filter((m) => m.key === only) : maps, d.geojson);
+    if (traceTickets.get(d.id) !== ticket || !drafts.includes(d)) return;
+    if (!only) d.traceOptions = pick.candidates.map((k) => ({ key: k, title: maps.find((m) => m.key === k)?.title || null }));
+    const skipped = pick.skipped.map((x) => `${maps.find((m) => m.key === x.key)?.title || 'a map'}: ${x.reason}`).join(' ');
+    if (!pick.chosen) {
+      if (was) note = `${reshaped ? 'Moved' : 'It lies'} off “${was.title || 'the map'}”, the map it was traced from, so it no longer cites that map${skipped ? ` (${skipped})` : ''}; it is saved as drawn on the basemap.`;
+      else if (skipped) note = `Not cited as traced from a historical map: ${skipped}`;
+      dropTrace(d, note);
+    } else {
+      const e = shown.find((x) => x.key === pick.chosen.key);
+      try {
+        const t = await tracing.traceFor(e.g, d.geojson, { key: e.key, title: e.title, partial: pick.chosen.partial, fetchedAt: e.fetchedAt, licence: e.attribution?.licence || null });
+        if (traceTickets.get(d.id) !== ticket || !drafts.includes(d)) return;
+        d.trace = t;
+        d.traceNote = pick.chosen.partial ? `Part of it lies outside “${e.title}”, the map it is cited as traced from.` : null;
+        if (!d.traceOptions?.some((o) => o.key === e.key)) d.traceOptions = [...(d.traceOptions || []), { key: e.key, title: e.title }];
+        if (d.geojson.type === 'Point' && !d.role && !d.precision) Object.assign(d, tracing.TRACED_POINT_DEFAULTS, { defaulted: true });
+      } catch (err) {
+        if (err instanceof tracing.TraceError && !reshaped && !was) {
+          // A drawing that cannot be placed back where it was drawn through the map is not kept.
+          drawError = state.drawError = err.message;
+          removeDraft(d.id);
+          return;
+        }
+        if (!(err instanceof tracing.TraceError || err instanceof DataError)) throw err;
+        dropTrace(d, `Not cited as traced from “${e.title}”: ${err.message}`);
+      }
+    }
+  } catch (err) {
+    if (!(err instanceof DataError)) { console.warn('Chora: tracing', err); return; }
+    dropTrace(d, `Not cited as traced from a historical map: ${err.message}`);
+  }
+  state.lastTrace = { draftId: d.id, key: d.trace?.key || null, partial: !!d.trace?.partial, note: d.traceNote || null, options: (d.traceOptions || []).map((o) => o.key), role: d.role || null, precision: d.precision || null };
+  keepDrafts();
+  if (view) renderCard();
 }
 function showDrafts(list) { showing = true; try { mapApi.showDrafts(list); } finally { showing = false; } }
 function removeDraft(id) {
@@ -334,9 +416,10 @@ async function saveDataset() {
   const contributor = contributors.load();
   let additions;
   try {
+    // A traced drawing cites the map and its georeference, and says so in its notes (trace.js).
     additions = drafts.map((d) => ({ placeId: d.placeId, attestation: newGeometryAttestation({
-      geojson: d.geojson, role: d.role || undefined, precision: d.precision || undefined, contributor,
-      created: d.drawnAt, notes: choraDrawingNote({ basemap: d.basemap, zoom: d.zoom }) }) }));
+      geojson: d.geojson, role: d.role || undefined, precision: d.precision || undefined, contributor, created: d.drawnAt,
+      ...(d.trace ? tracing.tracedParts(d.trace, { zoom: d.zoom, role: d.role }) : { notes: choraDrawingNote({ basemap: d.basemap, zoom: d.zoom }) }) }) }));
   } catch (e) { $('save-result').innerHTML = `<p class="warn">${esc(e.message)}</p>`; return; }
   const savedIds = new Set(drafts.map((d) => d.id));
   $('save').disabled = true;
@@ -528,6 +611,276 @@ permissions.onChange(() => {
   renderBasemaps();
 });
 
+// ---- Historical maps -----------------------------------------------------------------------------
+// A georeferenced map over the basemap (src/chora/overlays.js has how it gets there; src/chora/
+// remote.js how each document is fetched). Each permission a map needs (iiif:<site> for its servers,
+// allmaps:allmaps for Allmaps) is named in one "Needs permission" line each, all at once, before
+// anything is asked; allowed in the panel, they are in the page's policy from the next load, and the
+// map waiting is added after the reload (what was pasted is kept for it). Allmaps is asked only from
+// the "Look for a georeference" button. A permission withdrawn takes its maps off the map at once
+// (they stay kept, and come back once it is allowed again); one set to Never is done without, and
+// nothing is said of it, but for a map just pasted, where the status line says why it is not shown.
+const deps = { fetchJson: (u) => remote.fetchJson(u), allowed: (c, s) => permissions.allowed(c, s), state: (c, s) => permissions.state(c, s) };
+let mapNeed = null;    // {subjects, pending, maps?}: the permissions a map waits on, and what to do once they are allowed
+let mapOffer = null;   // {services, manifestUrl, title, text, notFound}: a map with no georeference given
+let mapChoice = null;  // {choices, chosen, parsed, manifestUrl}: a georeference of several maps, one to choose
+let mapStatus = '';    // what the page says of the last map added, in words (a warn: prefix is a problem)
+let mapLink = null;    // an address the user may open in a new tab (one that forwards elsewhere)
+let layers = null;     // the maps' layer on the map (overlays.js createLayerManager), once the map exists
+// One map at a time: what is pasted, the maps kept, and a change of permission are each done in turn.
+let mapsChain = Promise.resolve();
+const inTurn = (fn) => (mapsChain = mapsChain.then(fn, fn).catch((e) => console.warn('Historical maps:', e)));
+const addMap = (pending) => inTurn(() => addMapNow(pending));
+function initMaps() {
+  layers = ov.createLayerManager(mapApi.map, { onEvent: overlayEvent });
+  mapApi.onStyleLoad(() => { layers.attach().then(syncOverlays, (e) => console.warn('Historical maps:', e)); });
+  // For automated tests; nothing else reads it.
+  window.__chora_overlays = { manager: layers, georef, get layer() { return layers.layer; } };
+  renderMaps();
+}
+const allmapsAllowed = () => permissions.state('allmaps', 'allmaps') === 'allowed';
+const setStatus = (text, link = null) => { mapStatus = text; mapLink = link; state.mapError = text.startsWith('warn:') ? text.slice(5) : null; };
+
+/** A step needs permissions: a line for each not yet allowed, or, if one is set to Never, why the map is not shown. */
+function needFor(e, pending, { quiet = false } = {}) {
+  const never = e.subjects.filter(([c, s]) => permissions.state(c, s) === 'never');
+  if (never.length) {
+    mapNeed = null;
+    // Never: the feature does without. Only a map just asked for is told why (a map kept says nothing).
+    setStatus(quiet ? '' : `warn:${never.map(([c, s]) => PERMISSION_REFUSED.never(permissions.nameOf(c, s))).join(' ')}`);
+  } else {
+    mapNeed = { subjects: e.subjects, pending, maps: e.maps || 1 };
+    setStatus('');
+  }
+  renderMaps();
+}
+/**
+ * Add a map from what was pasted (pending: {text, lookup}), kept (pending: {kept}), or chosen from a
+ * georeference of several (pending: {parsed, manifestUrl}); pending {readmit} is the maps kept, all.
+ * With `collect`, the permissions a kept map needs are returned (NeedPermission), not shown.
+ */
+async function addMapNow(pending, { collect = false } = {}) {
+  if (pending.readmit) return readmitKept();
+  if (!collect) { mapNeed = null; mapChoice = null; setStatus('Reading…'); renderMaps(); }
+  // Where the page's policy was not shown to be enforced, no map is shown: its tiles could go anywhere.
+  if (!(await permissions.enforced())) { setStatus(`warn:${ov.REFUSED}`); renderMaps(); return null; }
+  try {
+    let r, keptEntry = null;
+    if (pending.kept) {
+      keptEntry = (await ov.kept()).find((k) => k.key === pending.kept);
+      if (!keptEntry) return null;
+      r = await ov.resolve({ kind: 'annotation', annotation: keptEntry.item, manifest: keptEntry.manifest, fetchedAt: keptEntry.fetchedAt }, deps);
+      r.manifestUrl = keptEntry.manifestUrl || r.manifestUrl;
+    } else if (pending.parsed) {
+      r = await ov.resolve(pending.parsed, deps);
+      r.manifestUrl ||= pending.manifestUrl || null;
+    } else {
+      r = await ov.resolve(ov.parseInput(pending.text), deps);
+      if (r.services) {
+        mapOffer = { ...r, text: pending.text, notFound: false };
+        if (!pending.lookup) { setStatus(''); renderMaps(); return null; }
+        const found = await ov.lookup(r.services, deps);
+        if (!found) { mapOffer.notFound = true; setStatus(''); renderMaps(); return null; }
+        const manifestUrl = mapOffer.manifestUrl;
+        r = await ov.resolve({ kind: 'annotation', annotation: found.annotation, fetchedAt: found.fetchedAt, manifest: r.manifest, url: found.url }, deps);
+        r.manifestUrl ||= manifestUrl || null;
+      }
+    }
+    mapOffer = null;
+    const a = await ov.admit(r, { ...deps, enforced: true });
+    await showMap(a, keptEntry);
+  } catch (e) {
+    if (e instanceof ov.NeedPermission) { if (collect) return e; needFor(e, pending); return null; }
+    if (e instanceof ov.NeedChoice) {
+      // Several georeferences of the map: the user chooses, the most recently changed offered first.
+      mapChoice = { choices: e.choices, chosen: e.defaultIndex, manifestUrl: mapOffer?.manifestUrl || null,
+        parsed: { kind: 'annotation', annotation: e.annotation, fetchedAt: e.fetchedAt, url: e.url, manifest: e.manifest } };
+      mapOffer = null; setStatus(''); renderMaps();
+      return null;
+    }
+    // An address that forwards elsewhere: c2's words, and the address to open in a new tab.
+    if (e instanceof remote.RemoteError && e.kind === 'moved') setStatus(`warn:${e.message}`, e.url);
+    else setStatus(`warn:${e.message}`);
+    renderMaps();
+  }
+  return null;
+}
+async function showMap(a, keptEntry = null) {
+  const key = await ov.keyOf(a.g);
+  if (layers.entries.some((e) => e.key === key)) { if (!keptEntry) { setStatus(`${a.title} is shown already.`); renderMaps(); } return; }
+  const e = { ...a, key, opacity: keptEntry?.opacity ?? 1, visible: keptEntry?.visible ?? true, added: keptEntry?.added || new Date().toISOString() };
+  await layers.add(e);
+  if (e.error) { layers.remove(key); throw new Error(e.error); }
+  // service: the image as its tiles are asked for (over https, no trailing slash), to know its tiles' errors by.
+  state.overlays.push({ key, mapId: e.mapId, origin: a.subject[1], permission: `${a.subject[0]}:${a.subject[1]}`, service: remote.infoUrl(a.g.imageServiceId).replace(/\/info\.json$/, ''),
+    annotationId: a.g.annotationId, title: a.title, transformation: ov.allmapsTransformationName(a.g), opacity: e.opacity, visible: e.visible, tilesLoaded: 0, tileErrors: 0, firstTile: false });
+  ov.keep({ key, item: a.item, manifest: a.manifest, manifestUrl: a.manifestUrl, fetchedAt: a.fetchedAt, opacity: e.opacity, visible: e.visible, added: e.added }).catch((err) => console.warn('Chora: the map could not be kept', err));
+  setStatus(keptEntry ? '' : `${a.title} is on the map.`);
+  if (!keptEntry) fitMap(key);
+  renderMaps();
+}
+/** The renderer's ids change when the maps are put into a new layer (a new basemap): kept up to date. */
+function syncOverlays() {
+  for (const o of state.overlays) { const e = layers.entries.find((x) => x.key === o.key); if (e) o.mapId = e.mapId; }
+}
+function fitMap(key) {
+  const b = layers.bounds(key);
+  if (b) mapApi.map.fitBounds(b, { padding: 32, duration: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 700 });
+}
+function overlayEvent(type, e) {
+  (state.overlayEvents ||= {})[type] = (state.overlayEvents[type] || 0) + 1;
+  const ids = e?.mapIds || (e?.mapId ? [e.mapId] : []);
+  for (const o of state.overlays) {
+    if (ids.length && !ids.includes(o.mapId)) continue;
+    if (type === 'maptileloaded') o.tilesLoaded++;
+    else if (type === 'firstmaptileloaded') o.firstTile = true;
+    else if (type === 'allrequestedtilesloaded') o.allLoaded = (o.allLoaded || 0) + 1;
+    else if (type === 'tilefetcherror' || type === 'imageinfofetcherror') { o.tileErrors++; renderMapsSoon(); }
+  }
+}
+// A tile the renderer's worker could not fetch (refused by the page's policy, say, when its server
+// sent the request elsewhere) is reported by the renderer only to the console, as a ResourceFetchError
+// naming the tile's address (@allmaps/render 1.0.0-beta.84, CacheableWorkerImageDataTile: no event is
+// dispatched). So the page listens there, for the tiles of its own maps only, and says so in plain words.
+{
+  const toConsole = console.error.bind(console);
+  console.error = (...args) => {
+    try {
+      for (const a of args) {
+        const m = a && a.name === 'ResourceFetchError' && /(https?:\/\/\S+)/.exec(String(a.message));
+        const tile = m && m[1].replace(/[)(.,]+$/, '');
+        const o = tile && state.overlays.find((x) => tile.startsWith(`${x.service}/`));
+        if (o) { o.tileErrors++; renderMapsSoon(); }
+      }
+    } catch {}
+    toConsole(...args);
+  };
+}
+let rendering = null;
+const renderMapsSoon = () => { rendering ??= setTimeout(() => { rendering = null; renderMaps(); }, 250); };
+
+function renderMaps() {
+  const shown = new Map(layers.entries.map((e) => [e.key, e]));
+  // The lines asking for permission, one for each not yet allowed (or allowed since the page loaded).
+  const needBox = $('map-needs');
+  needBox.replaceChildren();
+  state.mapNeeds = mapNeed ? mapNeed.subjects.map(([c, s]) => `${c}:${s}`) : [];
+  for (const [c, s] of mapNeed?.subjects || []) {
+    if (permissions.allowed(c, s)) continue;
+    const p = document.createElement('p');
+    needBox.appendChild(p);
+    permissions.needs(p, c, s);
+  }
+  let html = '';
+  if (mapChoice) {
+    const one = (c) => `Georeference ${c.index + 1}${c.label ? `: ${esc(c.label)}` : ''} <span class="muted">(${c.modified ? `changed ${esc(c.modified.slice(0, 10))}` : 'no date given'}, ${c.gcps === null ? 'control points not given' : `${c.gcps} control point${c.gcps === 1 ? '' : 's'}`}${c.id ? `; ${esc(c.id)}` : ''})</span>`;
+    html += `<div class="choice" id="map-choice" role="group" aria-labelledby="map-choice-text"><p id="map-choice-text">This holds ${mapChoice.choices.length} georeferences of the map, made separately. Choose the one to show (the most recently changed is chosen):</p>
+      <ul class="choices">${mapChoice.choices.map((c) => `<li><label><input type="radio" name="georef-choice" value="${c.index}"${c.index === mapChoice.chosen ? ' checked' : ''}> ${one(c)}</label></li>`).join('')}</ul>
+      <p><button type="button" class="primary" id="map-choose">Show this one</button> <button type="button" id="map-choose-no">Not now</button></p></div>`;
+  }
+  if (mapOffer) {
+    const name = mapOffer.title ? `“${esc(mapOffer.title)}”` : 'This map';
+    // The Editor is linked only once Allmaps is allowed: following the link sends it the map's address
+    // (provisional, until Stephen's ruling, R4).
+    const editor = allmapsAllowed() ? `<a href="${esc(ov.editorUrl(mapOffer.manifestUrl, mapOffer.services[0]))}" target="_blank" rel="noopener noreferrer" id="map-editor">Allmaps Editor</a>` : '';
+    html += `<div class="offer"><p>${name} came with no georeference${mapOffer.notFound ? ', and Allmaps has none for it' : ''}.</p>
+      ${mapOffer.notFound ? '' : '<p><button type="button" class="primary" id="map-lookup">Look for a georeference</button></p>'}
+      ${editor ? `<p>${mapOffer.notFound ? 'You can' : 'Or'} georeference it in the ${editor}, and paste here the georeference it makes.</p>` : `<p>${mapOffer.notFound ? 'You can georeference it elsewhere, and' : 'Or'} paste a georeference of it here.</p>`}</div>`;
+  }
+  if (mapStatus) {
+    const warn = mapStatus.startsWith('warn:');
+    html += `<p class="${warn ? 'warn' : 'muted'}">${esc(mapStatus.replace(/^warn:/, ''))}${mapLink ? ` <a href="${esc(mapLink)}" target="_blank" rel="noopener noreferrer" id="map-forwards">${esc(mapLink)}</a>` : ''}</p>`;
+  }
+  $('map-status').innerHTML = html;
+  $('overlay-list').innerHTML = state.overlays.map((o) => {
+    const e = shown.get(o.key); if (!e) return '';
+    const a = e.attribution || {};
+    const licence = a.licence ? `<a href="${esc(a.licence)}" target="_blank" rel="noopener noreferrer">${esc(a.licenceLabel || a.licence)}</a>` : '';
+    return `<li data-overlay="${esc(o.key)}"><p class="overlay-title">${esc(o.title)}</p>
+      <p class="muted">Image from <code>${esc(o.origin)}</code> <button type="button" class="link" data-permissions="${esc(o.permission)}">${esc('Permissions…')}</button></p>
+      ${a.credit ? `<p class="muted">${esc(a.credit)}</p>` : ''}
+      ${licence ? `<p class="muted">Licence: ${licence}</p>` : ''}
+      ${a.nonCommercial ? `<p class="note">${esc(ov.nonCommercialLine(a))} ${licence}</p>` : ''}
+      ${(e.notes || []).map((x) => `<p class="muted">${esc(x)}</p>`).join('')}
+      ${o.tileErrors ? `<p class="warn">Some parts of the map's image could not be loaded from ${esc(o.origin)}.</p>` : ''}
+      <p class="overlay-controls"><label>Opacity <input type="range" min="0" max="100" step="5" value="${Math.round(o.opacity * 100)}" data-opacity></label>
+      <label><input type="checkbox" data-show${o.visible ? ' checked' : ''}> Show</label>
+      <button type="button" data-fit>Fit</button> <button type="button" data-remove-map>Remove</button></p>
+      ${allmapsAllowed() ? `<p><a href="${esc(ov.editorUrl(e.manifestUrl, e.g.imageServiceId))}" target="_blank" rel="noopener noreferrer" data-editor>Open in the Allmaps Editor</a></p>` : ''}</li>`;
+  }).join('');
+}
+$('map-form').onsubmit = (e) => { e.preventDefault(); mapOffer = null; mapChoice = null; addMap({ text: $('map-input').value }); };
+$('map-status').addEventListener('click', (e) => {
+  if (e.target.id === 'map-choose' && mapChoice) {
+    const picked = $('map-status').querySelector('input[name="georef-choice"]:checked');
+    const { parsed, manifestUrl, chosen } = mapChoice; mapChoice = null;
+    addMap({ parsed: { ...parsed, index: picked ? Number(picked.value) : chosen }, manifestUrl });
+  } else if (e.target.id === 'map-choose-no') { mapChoice = null; setStatus(''); renderMaps(); }
+  else if (e.target.id === 'map-lookup' && mapOffer) addMap({ text: mapOffer.text, lookup: true });
+});
+$('overlay-list').addEventListener('input', (e) => {
+  const li = e.target.closest('[data-overlay]'); if (!li) return;
+  const o = state.overlays.find((x) => x.key === li.dataset.overlay);
+  if (e.target.matches('[data-opacity]')) { o.opacity = Number(e.target.value) / 100; layers.set(o.key, { opacity: o.opacity }); keepOverlay(o); }
+});
+$('overlay-list').addEventListener('change', (e) => {
+  const li = e.target.closest('[data-overlay]'); if (!li) return;
+  const o = state.overlays.find((x) => x.key === li.dataset.overlay);
+  if (e.target.matches('[data-show]')) { o.visible = e.target.checked; layers.set(o.key, { visible: o.visible }); keepOverlay(o); }
+});
+$('overlay-list').addEventListener('click', (e) => {
+  const li = e.target.closest('[data-overlay]'); if (!li) return;
+  const key = li.dataset.overlay;
+  if (e.target.matches('[data-permissions]')) permissions.open({ focus: e.target.dataset.permissions });
+  if (e.target.matches('[data-fit]')) fitMap(key);
+  if (e.target.matches('[data-remove-map]')) {
+    layers.remove(key);
+    ov.letGo(key).then(() => { state.overlays = state.overlays.filter((x) => x.key !== key); renderMaps(); });
+  }
+});
+async function keepOverlay(o) {
+  const k = (await ov.kept()).find((x) => x.key === o.key);
+  if (k) ov.keep({ ...k, opacity: o.opacity, visible: o.visible }).catch(() => {});
+}
+/**
+ * The maps kept from last time (and any withdrawn and allowed again), admitted afresh: those whose
+ * permissions may be asked now are shown; the permissions the others need are asked for together, so
+ * one reload brings them all back. A map that needs a permission set to Never is done without, silently.
+ */
+async function readmitKept() {
+  const shownKeys = new Set(layers.entries.map((e) => e.key));
+  const subjects = []; let maps = 0;
+  for (const k of await ov.kept()) {
+    if (shownKeys.has(k.key)) continue;
+    const need = await addMapNow({ kept: k.key }, { collect: true });
+    if (!need) continue;
+    if (need.subjects.some(([c, s]) => permissions.state(c, s) === 'never')) continue;
+    maps++;
+    for (const sj of need.subjects) if (!subjects.some((x) => x[0] === sj[0] && x[1] === sj[1])) subjects.push(sj);
+  }
+  if (subjects.length) needFor({ subjects, maps }, { readmit: true }, { quiet: true });
+  else if (mapNeed?.pending?.readmit) { mapNeed = null; renderMaps(); }
+}
+/**
+ * A permission changed, here or in another tab: a map whose permission is no longer allowed is taken
+ * off the map at once (it stays kept, to come back once allowed again); a map waiting on permissions
+ * that may all be asked now is added; and the maps kept are looked at again.
+ */
+function permissionsChanged() {
+  if (!layers) return;
+  const gone = state.overlays.filter((o) => { const [c, sj] = o.permission.split(/:(.*)/s); return !permissions.allowed(c, sj); });
+  for (const o of gone) layers.remove(o.key);
+  if (gone.length) { state.overlays = state.overlays.filter((o) => !gone.includes(o)); state.withdrawn = (state.withdrawn || 0) + gone.length; }
+  // Withdrawn, not refused: its line is drawn now, before the panel is (the module tells the page first),
+  // so that the permission stays in the panel's list, where it was just changed. The maps kept refine it.
+  const undecided = gone.map((o) => o.permission.split(/:(.*)/s).slice(0, 2)).filter(([c, sj]) => permissions.state(c, sj) === 'undecided');
+  if (undecided.length && !mapNeed) mapNeed = { subjects: undecided.filter((x, i) => undecided.findIndex((y) => y[1] === x[1]) === i), pending: { readmit: true } };
+  const waiting = mapNeed;
+  if (waiting && !waiting.pending.readmit && waiting.subjects.every(([c, s]) => permissions.allowed(c, s))) { mapNeed = null; addMap(waiting.pending); }
+  else inTurn(() => readmitKept());
+  renderMaps();
+}
+
 // ---- The rest ------------------------------------------------------------------------------------
 // Chora's working database is in a pool that one tab alone can hold (src/engine/worker.js), so a
 // second Chora tab cannot start: it says so, and offers nothing to open.
@@ -574,6 +927,9 @@ mapApi.onDraw({
     if (drafts.some((d) => gone.has(d.id))) { drafts = drafts.filter((d) => !gone.has(d.id)); keepDrafts(); if (view) renderCard(); }
   },
 });
+initMaps();
+// A permission changed: maps whose permission is withdrawn go at once; maps waiting on one go on.
+permissions.onChange(permissionsChanged);
 // The map and the drawing tool, for automated tests; nothing else reads them.
 window.__chora_map = mapApi.map;
 Object.defineProperty(window, '__chora_draw', { get: () => mapApi.draw });
@@ -591,7 +947,9 @@ permissions.onBeforeReload(async () => {
   state.phase = 'reloading';
   await draftsWritten();
   const m = mapApi.map;
-  await keepForReload({ files, placeId: state.placeId, camera: { center: m.getCenter().toArray(), zoom: m.getZoom(), bearing: m.getBearing(), pitch: m.getPitch() } });
+  // And the historical map waiting on the permissions (it is added after the reload), and what is typed in its box.
+  await keepForReload({ files, placeId: state.placeId, camera: { center: m.getCenter().toArray(), zoom: m.getZoom(), bearing: m.getBearing(), pitch: m.getPitch() },
+    maps: { pending: mapNeed?.pending || null, typed: $('map-input').value || '' } });
 });
 // What the reload keeps not: a line or area still being drawn (finished drawings are kept), an
 // address in the paste box not yet added, a save running. Each is said in the panel first, with Cancel.
@@ -610,17 +968,23 @@ startWorker().then(async () => {
       if (resumed.placeId && dataset) await selectPlace(resumed.placeId);
     }
     if (resumed.camera) mapApi.map.jumpTo(resumed.camera);
-    state.resumed = { files: (resumed.files || []).map((f) => f.name), placeId: resumed.placeId || null };
+    state.resumed = { files: (resumed.files || []).map((f) => f.name), placeId: resumed.placeId || null, maps: resumed.maps || null };
+    if (resumed.maps?.typed) $('map-input').value = resumed.maps.typed;
+    await inTurn(() => readmitKept());
+    // The map that was waiting on the permissions just allowed (the maps kept are back already).
+    const pending = resumed.maps?.pending;
+    if (pending && !pending.readmit) await addMap(pending);
     return;
   }
   // The user keeps no working data between visits: the drawings not saved and the file last written
   // go now. (The dataset's working copy, in Chora's SQLite pool, is cleared at every start anyway.)
   if (!permissions.keepWorkingData()) {
     await forgetAllDrafts();
-    // The historical maps shown (chora-overlays/, once Chora shows them) go too, as the panel says.
+    // The historical maps shown last time (chora-overlays/) are working data too, as the panel says.
     for (const dir of ['chora-outputs', 'chora-overlays']) { try { await (await navigator.storage.getDirectory()).removeEntry(dir, { recursive: true }); } catch { /* none kept */ } }
     state.workingCleared = true;
   }
+  inTurn(() => readmitKept());
   // Files chosen on the main page, offered here.
   const handed = await takeHandoff();
   if (handed && !files.length) {
