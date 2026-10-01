@@ -5,7 +5,7 @@
 // own, with GitHub answered by a stand-in so that the test needs no network.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -67,5 +67,17 @@ test('a draft pin (--ref) is marked as a draft everywhere the pin is shown, and 
     assert.deepEqual(Object.keys(v).sort(), ['commit', 'repository', 'versionInfo']);
     assert.deepEqual([v.commit, pkg.plato.draft, pkg.plato.ref], ['b'.repeat(40), undefined, undefined]);
     assert.equal(draftNote(v), '');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+test('vendoring copies the candidate set profile beside the dataset profiles', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'plato-pin-'));
+  try {
+    writeFileSync(join(dir, 'stub.mjs'), STUB);
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x', plato: { repository: 'r', commit: 'c'.repeat(40) } }));
+    vendor(dir);
+    const written = readdirSync(join(dir, 'public/plato'));
+    assert.ok(written.includes('candidate-set.schema.json'), written.join(', '));
+    // The control: the listing is of what vendoring wrote, the dataset profiles among it.
+    assert.ok(written.includes('place-centric.schema.json') && written.includes('attestation-centric.schema.json'), written.join(', '));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
