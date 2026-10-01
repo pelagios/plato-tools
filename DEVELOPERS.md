@@ -328,7 +328,11 @@ readers link to those headings, so keep them.
   itself) and `patternProblem(pattern)` the same verdict in words, refusing a pattern without `{id}`
   (or `{key}`) once, one that makes no web address, and any World Historical Gazetteer one;
   `GAZETTEER_PATTERNS` has Pleiades', GeoNames' and Wikidata's patterns and id shapes, and
-  `patternShape` the shape a pattern takes). `guessColumns`/`resolveColumns` return `{ mapping, patterns,
+  `patternShape` the shape a pattern takes; Pleiades' has `idPrefix`, so that its pattern takes
+  `/places/579885`, as Pleiades' own `pid` columns write an id, as `579885`: `patternId`). GeoNames'
+  own heading `geonameid` names GeoNames, and `pid` of such paths is suggested Pleiades' pattern. A
+  GeoJSON file (any JSON document) that is not well formed is refused with where and why in plain
+  words (`jsonFaultWords` in `input.js`: a NaN or Infinity, a single quote), not the parser's message. `guessColumns`/`resolveColumns` return `{ mapping, patterns,
   suggested, reasons, problems, gazetteer }`: `mapping` is fields as strings, `patterns` is
   `{ column: pattern }` (only from a saved mapping; the guess never makes one), and
   `suggested[column]` is `{ field: 'address', pattern, gazetteer, fit, sampled }` for a column named

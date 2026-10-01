@@ -6,6 +6,25 @@ import { JSONParser, Tokenizer, TokenizerError, TokenType } from '../vendor/stre
 import Papa from 'papaparse';
 
 /**
+ * Where and why a JSON parser stopped, in plain words, from its error: "at character 220: NaN, which
+ * JSON does not allow as a number; write null, or leave the value out". The streaming parser
+ * says `Unexpected "N" at chunk position "219" (absolute position "219")`; JSON.parse says
+ * `Unexpected token 'N', …` (with "at position n" in some versions). Either is put in words, not
+ * shown as it stands; an error of another shape gives its first line.
+ */
+export function jsonFaultWords(e) {
+  const m = String(e && e.message || e).split('\n')[0];
+  const stream = /Unexpected "([^"]*)" at chunk position "\d+" \(absolute position "(\d+)"\)/.exec(m);
+  const parsed = /Unexpected token '?(.)'?(?:,| in JSON at position (\d+))/.exec(m);
+  const [ch, pos] = stream ? [stream[1], Number(stream[2])] : parsed ? [parsed[1], parsed[2] !== undefined ? Number(parsed[2]) : undefined] : [];
+  if (ch === undefined) return m;
+  const why = ch === 'N' ? 'NaN, which JSON does not allow as a number; write null, or leave the value out'
+    : ch === 'I' ? 'Infinity, which JSON does not allow as a number; write null, or leave the value out'
+      : ch === "'" ? 'a single quote, where JSON needs a double quote'
+        : `an unexpected ${/^\s$/.test(ch) ? 'space' : JSON.stringify(ch)}`;
+  return `${pos !== undefined ? `at character ${(pos + 1).toLocaleString('en')}: ` : ''}${why}`;
+}
+/**
  * The file's content stopped the reader: JSON that is not well formed or stops early, or
  * compressed data that is damaged or cut short. It is a problem in the data, for the report, not
  * a failure of the tools; run() turns it into an error in the report.
@@ -274,7 +293,7 @@ export async function* jsonDocument(file, { arrays = [], keys = [], onlyKeys = f
       if (done) break;
       try { parser.write(value); } catch (e) {
         if (e === STOP) { reader.cancel().catch(() => {}); stopped = true; break; }
-        throw new DataError(`The JSON is not well formed, so the file cannot be read past that point (${String(e && e.message || e).split('\n')[0]}).`);
+        throw new DataError(`The JSON is not well formed, so the file cannot be read past that point (${jsonFaultWords(e)}).`);
       }
       while (queue.length) yield queue.shift();
     }
@@ -312,7 +331,7 @@ export async function* annotationItems(file, shape) {
       const { value, done } = await readChunk(reader);
       if (done) break;
       try { parser.write(value); } catch (e) {
-        throw new DataError(`The JSON is not well formed, so the file cannot be read past that point (${String(e && e.message || e).split('\n')[0]}).`);
+        throw new DataError(`The JSON is not well formed, so the file cannot be read past that point (${jsonFaultWords(e)}).`);
       }
       while (queue.length) yield queue.shift();
     }

@@ -258,3 +258,45 @@ test('columnWarnings points at a suggested pattern until it is confirmed, in pla
   assert.equal(confirmed.mapping.pleiades_id, 'address');
   assert.deepEqual(columnWarnings(confirmed.mapping, m.gazetteer, m.suggested, confirmed.patterns).filter((w) => w.includes('pleiades_id')), []);
 });
+
+// ---- real headings (2026-10-01): GeoNames' geonameid, Pleiades' pid -----------------------------------
+test('GeoNames\' own heading geonameid (and geoname_id) is read as a column of GeoNames ids, with GeoNames\' pattern suggested', () => {
+  // GeoNames' allCountries.txt headings (its readme), with digits as its rows give them.
+  const rows = [{ geonameid: '2523083', name: 'Siracusa' }, { geonameid: '2525068', name: 'Catania' }];
+  for (const h of ['geonameid', 'geoname_id']) {
+    const g = guessColumns([h, 'name'], rows.map((r) => ({ [h]: r.geonameid, name: r.name })));
+    assert.equal(g.mapping[h], 'note', h);
+    assert.deepEqual(g.suggested[h], { field: 'address', pattern: GAZETTEER_PATTERNS.geonames.pattern, gazetteer: 'geonames', fit: 2, sampled: 2 }, h);
+  }
+  // control: a heading that names no gazetteer, with the same values, gets no suggestion
+  assert.deepEqual(Object.keys(guessColumns(['number', 'name'], rows.map((r) => ({ number: r.geonameid, name: r.name }))).suggested), []);
+});
+
+test('Pleiades\' pid ("/places/579885") is suggested Pleiades\' pattern, and a confirmed pattern takes the /places/ off the id', async () => {
+  const rows = [{ pid: '/places/579885', title: 'Athenae' }, { pid: '/places/423025', title: 'Roma' }];
+  const g = guessColumns(['pid', 'title'], rows);
+  assert.equal(g.mapping.pid, 'note');
+  assert.deepEqual(g.suggested.pid, { field: 'address', pattern: PLEIADES, gazetteer: 'pleiades', fit: 2, sampled: 2 });
+  assert.deepEqual(addressFromPattern('/places/579885', PLEIADES), { iri: 'https://pleiades.stoa.org/places/579885' });
+  assert.deepEqual(addressFromPattern('/places/abc', PLEIADES), { lost: 'shape', value: 'abc' }, 'the rest must still be digits');
+  assert.deepEqual(addressFromPattern('/places/579885', 'https://example.org/{id}'), { lost: 'shape', value: '/places/579885' }, 'only Pleiades\' own pattern takes the path off');
+  // The pattern that would take the path whole cannot be written safely, and is refused.
+  assert.match(patternProblem('https://pleiades.stoa.org{id}'), /puts the id in the address's host/);
+  const r = await readAll(textFile('pid,title\n/places/579885,Athenae\n/places/423025,Roma\n', 'names.csv'), { columns: { pid: { field: 'address', pattern: PLEIADES }, title: 'name' } });
+  assert.deepEqual(r.attestations.map((a) => a.about), ['https://pleiades.stoa.org/places/579885', 'https://pleiades.stoa.org/places/423025']);
+  // control: a pid column that is not Pleiades' paths gets no suggestion
+  assert.deepEqual(Object.keys(guessColumns(['pid', 'title'], [{ pid: '17', title: 'x' }, { pid: 'a', title: 'y' }]).suggested), []);
+});
+
+test('a GeoJSON file that is not well formed (a NaN in its coordinates) is refused with a plain reason, not the parser\'s words', async () => {
+  const bad = '{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"name":"A"},"geometry":{"type":"Point","coordinates":[1,2]}},{"type":"Feature","properties":{"name":"B"},"geometry":{"type":"Point","coordinates":[NaN,NaN]}}]}';
+  for (const [text, name, where] of [[bad, 'x.geojson', 'at character 220: '], [JSON.stringify({ type: 'Feature', properties: { name: 'B' }, geometry: { type: 'Point', coordinates: [1, 2] } }).replace('[1,2]', '[NaN,2]'), 'y.geojson', '']]) {
+    const r = await go([textFile(text, name)], 'check');
+    const msg = r.report.items.flatMap((i) => i.examples).join(' ');
+    assert.ok(msg.includes(`(${where}NaN, which JSON does not allow as a number; write null, or leave the value out)`), msg);
+    assert.doesNotMatch(msg, /chunk position|Unexpected token|is not valid JSON/);
+  }
+  // control: the same file with numbers where the NaNs were is read
+  const ok = await go([textFile(bad.replace('[NaN,NaN]', '[3,4]'), 'x.geojson')], 'check');
+  assert.equal(ok.report.counts.features, 2);
+});

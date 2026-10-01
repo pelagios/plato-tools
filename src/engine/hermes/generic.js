@@ -18,7 +18,7 @@
 //     store regroups the rows under it. Only each id and the names its rows give are held, never a
 //     row. Names that agree are the label; names that differ make the id the label, and are reported.
 // A GeoJSON feature's own id counts as a column (FEATURE_ID), and its geometry is always carried.
-import { jsonDocument, DataError } from '../input.js';
+import { jsonDocument, DataError, jsonFaultWords } from '../input.js';
 import { csvRecords, textChunks } from '../../formats/csv.js';
 import { LOSS_TEXT } from '../report.js';
 import { tableIds } from '../../formats/tables.js';
@@ -114,7 +114,7 @@ async function openGeojson(file, input) {
   let features, all;
   if (input.shape === 'feature') {
     let f;
-    try { f = JSON.parse(await wholeText(file)); } catch (e) { throw new DataError(`The JSON is not well formed, so the file cannot be read (${String(e.message).split('\n')[0]}).`); }
+    try { f = JSON.parse(await wholeText(file)); } catch (e) { throw new DataError(`The JSON is not well formed, so the file cannot be read (${jsonFaultWords(e)}).`); }
     features = all = async function* () { yield f; };
   } else {
     // `features` given as something else than a list is no features: null says so; anything else

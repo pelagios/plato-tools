@@ -19,7 +19,7 @@
 // do, a date column is the date as the source writes it, a start and end the earliest start and
 // latest end, a type column a type's label (and its identifier, when it is a web address).
 import { isAbsoluteIri } from '../../lib/context.js';
-import { placeAddress, addressNote, addressFromPattern, patternProblem, GAZETTEER_PATTERNS } from './addresses.js';
+import { placeAddress, addressNote, addressFromPattern, patternProblem, patternId, GAZETTEER_PATTERNS } from './addresses.js';
 
 /** What each field of the mapping means, and whether one column only may be mapped to it. */
 export const FIELDS = {
@@ -109,7 +109,8 @@ const HEADINGS = {
 };
 const BY_HEADING = new Map(Object.entries(HEADINGS).flatMap(([f, hs]) => hs.map((h) => [h, f])));
 // A gazetteer's name at the start of a heading (wikidata_uri, pleiades_url, geonames_id) reads as an address column.
-const GAZETTEER_PREFIX = /^(wikidata|pleiades|geonames|whg|tgn|gazetteer)/;
+// GeoNames' own heading for its id is geonameid (geoname_id), without the s.
+const GAZETTEER_PREFIX = /^(wikidata|pleiades|geonames?|whg|tgn|gazetteer)/;
 const ADDRESS_SUFFIX = /(uri|url|iri)$/;
 // A heading, normalised, that names a gazetteer or a web address: every address heading but "link".
 const namesGazetteer = (n) => GAZETTEER_PREFIX.test(n) || ADDRESS_SUFFIX.test(n);
@@ -149,7 +150,10 @@ const isField = (f) => typeof f === 'string' && (Object.hasOwn(FIELDS, f) || Obj
 const single = (f) => Object.hasOwn(FIELDS, f) && FIELDS[f].single;
 
 // A heading, normalised, that names one of the gazetteers whose addresses are made from ids.
-const PATTERN_GAZETTEER = /^(pleiades|geonames|wikidata)/;
+const PATTERN_GAZETTEER = /^(pleiades|geonames?|wikidata)/;
+const gazetteerNamed = (n) => { const g = PATTERN_GAZETTEER.exec(n)?.[1]; return g === 'geoname' ? 'geonames' : g; };
+// An id of a gazetteer in a value: its ids' shape, or (Pleiades) its path, /places/<n> (patternId).
+const fitsGazetteer = (g, v) => GAZETTEER_PATTERNS[g].shape.test(patternId(v, GAZETTEER_PATTERNS[g].pattern));
 const GAZETTEER_WORDS = { pleiades: 'Pleiades', geonames: 'GeoNames', wikidata: 'Wikidata' };
 
 /**
@@ -188,9 +192,14 @@ export function guessColumns(headers, sampleRows = [], headerText = {}, { ownGeo
       // A gazetteer's ids (pleiades_id: 579885): the address can be made from each, once the user
       // confirms the pattern; a bare number is never taken for an address unasked. Web addresses in
       // the column count with the ids, as they are read as addresses, not through the pattern.
-      const g = PATTERN_GAZETTEER.exec(n)?.[1];
-      const fit = g && (field === 'note' || field === 'address') ? vs.filter((v) => GAZETTEER_PATTERNS[g].shape.test(v)).length : 0;
+      const g = gazetteerNamed(n);
+      const fit = g && (field === 'note' || field === 'address') ? vs.filter((v) => fitsGazetteer(g, v)).length : 0;
       if (fit && 2 * (fit + k) >= vs.length) suggested[h] = { field: 'address', pattern: GAZETTEER_PATTERNS[g].pattern, gazetteer: g, fit, sampled: vs.length };
+    } else if (!field && n === 'pid') {
+      // Pleiades' names.csv and locations.csv give the place each row is about as "pid", its path
+      // (/places/579885): at least half of the sampled values must be one for the pattern to be suggested.
+      const fit = vs.filter((v) => /^\/places\/\d+$/.test(v)).length;
+      if (fit && 2 * fit >= vs.length) { field = 'note'; reason = `the heading "${h}" is Pleiades' for the place a row is about`; suggested[h] = { field: 'address', pattern: GAZETTEER_PATTERNS.pleiades.pattern, gazetteer: 'pleiades', fit, sampled: vs.length }; }
     } else if ((field === 'latitude' || field === 'longitude') && ownGeometry) {
       // GeoJSON features with a geometry of their own: that is the place's location, and a latitude
       // and longitude beside it would give each place a second one.

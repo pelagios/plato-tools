@@ -144,7 +144,11 @@ export function placeAddress(value) {
 
 /** The three gazetteers whose addresses are made from their ids: each pattern, and the shape its ids have. */
 export const GAZETTEER_PATTERNS = {
-  pleiades: { pattern: 'https://pleiades.stoa.org/places/{id}', shape: /^\d+$/ },
+  // Pleiades' own tables write a place's id as its path, "/places/579885" (names.csv's and
+  // locations.csv's pid): with Pleiades' pattern, a leading "/places/" is taken off the id first
+  // (idPrefix). The pattern grammar cannot say https://pleiades.stoa.org{id} safely: an id straight
+  // after the host could change the host, so such a pattern is refused (patternFault, 'not-web').
+  pleiades: { pattern: 'https://pleiades.stoa.org/places/{id}', shape: /^\d+$/, idPrefix: '/places/' },
   geonames: { pattern: 'https://sws.geonames.org/{id}/', shape: /^\d+$/ },
   wikidata: { pattern: 'http://www.wikidata.org/entity/{id}', shape: /^Q\d+$/ },
 };
@@ -155,11 +159,19 @@ const PLACEHOLDER = /\{(?:id|key)\}/g;
 // ambiguous: see the top of this file).
 const WHG_HOST = /^https?:\/\/(?:[^/?#@]*\.)?whgazetteer\.org(?:[/:?#]|$)|^https?:\/\/w3id\.org\/whg(?:[/?#]|$)/i;
 
+/** The entry of GAZETTEER_PATTERNS a pattern is ({id} or {key}, its scheme in any case), or undefined. */
+function gazetteerOf(pattern) {
+  const p = typeof pattern === 'string' ? lowerScheme(pattern.trim().replace(PLACEHOLDER, '{id}')) : pattern;
+  return Object.values(GAZETTEER_PATTERNS).find((g) => g.pattern === p);
+}
 /** The shape a pattern's ids must have: the gazetteer's, for one of GAZETTEER_PATTERNS ({id} or {key}), else PATTERN_SHAPE. */
 export function patternShape(pattern) {
-  const p = typeof pattern === 'string' ? lowerScheme(pattern.trim().replace(PLACEHOLDER, '{id}')) : pattern;
-  for (const g of Object.values(GAZETTEER_PATTERNS)) if (g.pattern === p) return g.shape;
-  return PATTERN_SHAPE;
+  return gazetteerOf(pattern)?.shape || PATTERN_SHAPE;
+}
+/** An id as a gazetteer's pattern takes it: Pleiades' "/places/579885" is "579885" (idPrefix); any other id as it is. */
+export function patternId(value, pattern) {
+  const g = gazetteerOf(pattern);
+  return g?.idPrefix && value.startsWith(g.idPrefix) ? value.slice(g.idPrefix.length) : value;
 }
 
 /** An address or pattern with its scheme in lower case (HTTPS://… is written https://…). */
@@ -221,7 +233,8 @@ export function patternProblem(pattern) {
 }
 
 /**
- * The address made from an id through a pattern: placeAddress's result for the address made (so
+ * The address made from an id through a pattern (Pleiades' "/places/<n>" taken as <n>: patternId):
+ * placeAddress's result for the address made (so
  * { iri }, { iri, from, rules }, { iri, part } or { lost, value }: a gazetteer's other forms become
  * its one form), or { lost: 'shape', value } when the id does not have `shape` (patternShape(pattern)
  * when none is given). whg:<n> never has a shape. A pattern that cannot be used gives
@@ -230,7 +243,7 @@ export function patternProblem(pattern) {
 export function addressFromPattern(value, pattern, { shape } = {}) {
   const fault = patternFault(pattern);
   if (fault) return { error: fault };
-  const v = typeof value === 'string' ? value.trim() : String(value ?? '');
+  const v = patternId(typeof value === 'string' ? value.trim() : String(value ?? ''), pattern);
   const s = shape || patternShape(pattern);
   if (/^whg:/i.test(v) || !s.test(v)) return { lost: 'shape', value: v };
   // The scheme is compared in any case (HTTPS:// is https://), and written in lower case.
