@@ -164,6 +164,9 @@ test('what else is not carried is reported by kind: gazetteer copies, drawn shap
   assert.ok(!s.reported.some(([k, e]) => k === 'annotation-key' && /visibility/.test(e)), 'a public annotation says nothing to lose');
 });
 test('every kind the reader reports has words, and a severity the report knows', () => {
+  // The loop proves nothing of an empty list: kinds the other tests here meet must be in it.
+  for (const k of ['annotation-no-place', 'annotation-gazetteer-copy', 'annotation-selector', 'annotation-key', 'annotation-place-not-address', 'annotation-malformed'])
+    assert.ok(k in ANNOTATION_KINDS, `${k} is not among ${Object.keys(ANNOTATION_KINDS).join(', ')}`);
   for (const [k, sev] of Object.entries(ANNOTATION_KINDS)) {
     assert.ok(LOSS_TEXT[k], k);
     assert.ok(['loss', 'warning', 'error'].includes(sev), k);

@@ -280,6 +280,9 @@ test('a saved matching that names constructor, toString or __proto__ as a field 
   }
 });
 test('every kind the reader reports has words, and a severity the report knows', () => {
+  // The loop proves nothing of an empty list: kinds the other tests here meet must be in it.
+  for (const k of ['generic-mapping', 'generic-column-skipped', 'generic-coordinate-range', 'generic-wkt-invalid', 'generic-no-ids', 'generic-empty'])
+    assert.ok(k in GENERIC_KINDS, `${k} is not among ${Object.keys(GENERIC_KINDS).join(', ')}`);
   for (const [k, sev] of Object.entries(GENERIC_KINDS)) {
     assert.ok(LOSS_TEXT[k], k);
     assert.ok(['loss', 'warning', 'error'].includes(sev), k);
