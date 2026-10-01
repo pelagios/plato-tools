@@ -64,7 +64,8 @@ html.intro-hidden .intro-toggle .if-hidden { display: inline; }
 .lede .promise { font-weight: 700; }
 section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.25rem; margin: 1.25rem 0; }
 h2 { font-size: 1.2rem; margin: 0 0 .75rem; display: flex; align-items: center; gap: .5rem; }
-.step { font-family: var(--font-text); font-weight: 400; font-variant-numeric: lining-nums; display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--accent); color: var(--accent-fg); font-size: .95rem; }
+.step { font-family: var(--font-text); font-weight: 400; font-variant-numeric: lining-nums; display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--pin); color: #ffffff; box-shadow: 0 0 0 1.5px #ffffff, 0 0 0 3.5px var(--gold), 0 0 0 4.5px var(--pupil); margin: 0 .45rem 0 .3rem; font-size: .95rem; }
+/* The step's disc borrows the logo: the pin's blue, ringed in white, gold and the pupil's dark. */
 .drop { display: block; border: 2px dashed var(--line); border-radius: 10px; padding: 1.5rem; text-align: center; cursor: pointer; }
 .compact-drop { padding: .9rem 1rem; }
 .drop.over { border-color: var(--accent); }
