@@ -339,7 +339,9 @@ readers link to those headings, so keep them.
   `patterns` and `suggested` through; the page shows a *Make web addresses* box in a suggested
   column's row (`patternControl`), and sends, and saves, `mappingToSave(mapping, patterns)`; the
   command line prints the object form, and `--json` gives `pattern` beside `field`.
-  An address column makes the rows attestation-centric; otherwise each row is a
+  An address column makes the rows attestation-centric (converted to place-centric output, each
+  place is labelled by the name its rows agree on, in `pipeline.js`, as a place-centric row is by its
+  name; rows that disagree leave the address as the label, with `no-label`); otherwise each row is a
   place whose `@id` is minted by `tableIds` from its id under the base address, with the id kept as
   `entityIdentifier`. No id column means no addresses and one `generic-no-ids` warning; a repeated
   id is a `DataError`, whose message names `--same-id`. With `options.sameId` (and an id column)
@@ -481,7 +483,8 @@ What it reports, and why, is in the guide:
   since its remedy is the address, not the content.
 - **A stand-in label is not compared.** Reading RDF or attestation-centric JSON, the pipeline gives
   a place with no label its address as a label; that statement is not the data's, so the check
-  leaves it out, or every such place would read as relabelled.
+  leaves it out, or every such place would read as relabelled. (A table of places' rows about an
+  address label their place by the name they agree on, which is the data's, and is compared.)
 - **What changed.** When anything changed, both versions are read a second time, keeping the
   statements of the first five changed things of each kind only (as many as the report shows), and
   each example is given the statements one version makes and the other does not.

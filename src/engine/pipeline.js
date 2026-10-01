@@ -765,6 +765,10 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     let n = 0;
     for (const e of entities) {
       const rec = r2j.entity(e);
+      // A table of places whose rows are about gazetteer addresses gives no place a label (the
+      // attestation-centric profile has none), but its name column names each place, as a row's name
+      // is a place-centric row's label: where its rows agree on the name, that is the label.
+      if (!rec.label && generic) { const names = new Set(list(rec.attestations).map((a) => a?.names?.[0]?.toponym).filter(Boolean)); if (names.size === 1) rec.label = [...names][0]; }
       if (!rec.label) { rec.label = e; rep.warning('no-label', 'A place has no label; its identifier is used as its label', e); }
       n++; rep.count('places'); rep.count('attestations', rec.attestations?.length || 0);
       if (isRdf && !V.entity(rec)) rep.error('schema', explainSchema(V.entity.errors, false), `${e}: ${ajvMessage(V.entity.errors)}`);

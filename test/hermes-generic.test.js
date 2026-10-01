@@ -571,3 +571,29 @@ test('command line: the columns as read are printed with the report, as JSON to 
   assert.deepEqual(j.columns.find((c) => c.column === 'wikidata'), { column: 'wikidata', field: 'address', reason: 'the heading "wikidata" reads as the place\'s web address, and all 7 of its sampled values are web addresses' });
   assert.equal(j.profile, 'attestation-centric');
 });
+
+// Rows about gazetteer addresses (an address column, or an id column with a pattern): each place
+// is labelled by the name its rows agree on, as a place-centric row is, not by its address with a
+// no-label warning for every place (42,479 of them, converting Pleiades' places.csv).
+test('rows about an address: the place is labelled by the name its rows agree on, with no no-label warning; names that differ keep the stand-in and the warning', async () => {
+  const csv = 'name,uri\nRoma,https://pleiades.stoa.org/places/423025\nAthenae,https://pleiades.stoa.org/places/579885\nAthenai,https://pleiades.stoa.org/places/579885\nRoma,https://pleiades.stoa.org/places/423025\n';
+  const r = await go([textFile(csv, 'rows.csv')], 'convert', 'plato-json');
+  const places = JSON.parse(outText(r.e, Object.keys(r.e.outs)[0])).spatialEntities;
+  const label = (iri) => places.find((p) => p['@id'] === iri).label;
+  assert.equal(label('https://pleiades.stoa.org/places/423025'), 'Roma');
+  const noLabel = r.report.items.filter((i) => i.kind === 'no-label').flatMap((i) => i.examples);
+  assert.deepEqual(noLabel, ['https://pleiades.stoa.org/places/579885'], 'control: the place whose rows disagree is still reported');
+  assert.equal(label('https://pleiades.stoa.org/places/579885'), 'https://pleiades.stoa.org/places/579885');
+});
+
+test('Pleiades\' places.csv (the subset), its id column made into addresses: every place is labelled by its title, and none is reported as having no label', async () => {
+  const f = fx('pleiades-places-subset.csv');
+  const head = readFileSync(`${DIR}pleiades-places-subset.csv`, 'utf8').split('\n')[0].split(',');
+  const columns = Object.fromEntries(head.map((h) => [h, 'note']));
+  columns.id = { field: 'address', pattern: 'https://pleiades.stoa.org/places/{id}' }; columns.title = 'name';
+  const r = await go([f], 'convert', 'plato-json', { columns });
+  const places = JSON.parse(outText(r.e, Object.keys(r.e.outs)[0])).spatialEntities;
+  assert.ok(places.length > 1);
+  for (const p of places) assert.ok(p.label && !p.label.startsWith('https://'), JSON.stringify(p.label));
+  assert.ok(!r.report.items.some((i) => i.kind === 'no-label'));
+});
