@@ -91,6 +91,22 @@ test('an LPF FeatureCollection whose type comes after a long member is detected'
   assert.equal(d.format, 'lpf', d.reason);
   assert.equal(d.lpfVersion, 1);
 });
+test('a FeatureCollection past the head is LPF by an @context the scan finds, and plain GeoJSON without one, reading only to its features', async () => {
+  const lpf = 'https://raw.githubusercontent.com/LinkedPasts/linked-places-format/main/linkedplaces-context-v1.1.jsonld';
+  const point = { type: 'Feature', geometry: { type: 'Point', coordinates: [1, 2] }, properties: { name: 'A' } };
+  const fc = (extra) => JSON.stringify({ title: 't'.repeat(200_000), type: 'FeatureCollection', ...extra });
+  // The @context before the type, past the head, counts as one after it does.
+  const before = JSON.stringify({ title: 't'.repeat(200_000), '@context': lpf, type: 'FeatureCollection', features: [] });
+  assert.equal((await detect([chunked(before, 'before.geojson')])).format, 'lpf');
+  // Control: the same collection with no @context is plain GeoJSON, read as a table of its features.
+  assert.deepEqual(await detect([chunked(fc({ features: [point] }), 'plain.geojson')]).then((d) => [d.format, d.shape]), ['geojson', 'collection']);
+  // The scan stops at the features: a large plain collection is not read to the cap for an @context.
+  const many = Array.from({ length: 30_000 }, () => point);
+  const big = counted(fc({ features: many }), 'big.geojson');
+  assert.ok(big.size > 2 ** 21, 'the collection is megabytes long');
+  assert.equal((await detect([big])).format, 'geojson');
+  assert.ok(big.read < 200_000 + 2 ** 18, `read ${big.read}`);
+});
 /** A File-like like chunked(), whose stream is pulled chunk by chunk and counts the bytes it hands over. */
 function counted(bytes, name, size = 16384) {
   if (typeof bytes === 'string') bytes = strToU8(bytes);

@@ -186,9 +186,9 @@ export async function firstLine(file, cap = DETECT_CAP) {
  * The string values of the given top-level keys of a JSON document, read token by token (nothing
  * of the values is held), until all are found, its `profile` or `type` is met (a PLATO document has
  * a profile and no type, so the others matter only without one: reading on for them read a large
- * PLATO document to the cap; a FeatureCollection's type is read on from for its @context, which
- * says whether it is LPF, up to its features), the document closes or breaks, or `cap` characters
- * have been read. Decoded leniently, as head() is: a byte that is not UTF-8 is left to the reader,
+ * PLATO document to the cap; after a type of FeatureCollection it reads on for the @context, which
+ * says whether it is LPF, as far as the features), the document closes or breaks, or `cap`
+ * characters have been read. Decoded leniently, as head() is: a byte that is not UTF-8 is left to the reader,
  * which reports it.
  */
 async function topLevelStrings(file, wanted, cap = DETECT_CAP) {
