@@ -426,3 +426,18 @@ test('a window made ready straight from its tiles is the window composed and the
     }
   }
 });
+
+test('10. a level-2 server with no tiles is asked for regions (the parser\'s default tiling, as the renderer asks); level 0 with no tiles is refused in words', async () => {
+  const { imageOf } = await import('../src/engine/chora/ink/job.js');
+  const v2 = { '@context': 'http://iiif.io/api/image/2/context.json', '@id': 'https://iiif.example.org/iiif/r', protocol: 'http://iiif.io/api/image', width: 3001, height: 2001, profile: ['http://iiif.io/api/image/2/level2.json'] };
+  const image = imageOf(v2);
+  const frame = frameAround(image, [2900, 1950], 1);
+  const tiles = tilesFor(image, frame);
+  assert.ok(tiles.length >= 1);
+  // Regions cut by the image's edge, each with its size: the last column and row are short.
+  const last = tiles.find((t) => t.region.x + t.region.width === 3001 && t.region.y + t.region.height === 2001);
+  assert.ok(last && last.size.width === last.region.width && last.size.height === last.region.height, JSON.stringify(last));
+  assert.match(last.url, /^https:\/\/iiif\.example\.org\/iiif\/r\/\d+,\d+,\d+,\d+\/\d+,\/0\/default\.jpg$/, 'the renderer\'s own form of the address (Image API 2: w,)');
+  const level0 = { ...v2, '@id': 'https://iiif.example.org/iiif/z', profile: ['http://iiif.io/api/image/2/level0.json'] };
+  assert.throws(() => imageOf(level0), (e) => e.kind === 'image' && /only whole/.test(e.message));
+});

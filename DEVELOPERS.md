@@ -379,7 +379,9 @@ npm test                                  # the engine and the command line, in 
 python3 e2e/app_test.py                   # the page itself, in Playwright's bundled Chromium
 python3 e2e/app_test.py --url=https://pelagios.org/plato-tools/   # the deployed page
 python3 e2e/app_test.py --prove-it-fails  # every check pointed at a page with no tools: all must fail
-python3 e2e/app_test.py --chora-only      # Chora's checks alone (--maps-only: its historical maps)
+python3 e2e/app_test.py --chora-only      # Chora's checks alone (--maps-only: its historical maps; --only=TEXT: those named so)
+python3 e2e/ink_budget.py                 # the budget of tracing with assistance, timed in the page
+node e2e/ink_memory.mjs                   # the tracing worker's memory, for its budget
 node scripts/install-test.mjs             # install the packed tools as npx does, and run the command
 node e2e/compare_scale.mjs deep-plato.jsonl.gz --work-dir DIR   # the version check at full scale
 python3 e2e/scale_test.py --input deep-plato.nt.gz --target plato-jsonl --out out.jsonl

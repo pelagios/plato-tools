@@ -10,9 +10,10 @@ the proposal drawn, the georeference's carrying it into the world included), eac
 - an area whose window grows to 1024 x 1024 at full resolution: the first click (its tiles fetched from
   the fixture server on this machine), the same click again (the tiles kept), and a slider moved;
 - a line followed across the map until the window is 2048 wide (the whole map at 1/2), first and again;
-- a snap lookup: Terra Draw's question, asked 20,000 times at random over the map;
-- the worker's memory during the line's trace: its V8 heap and the array buffers it holds, sampled every
-  few milliseconds through the DevTools protocol (Runtime.getHeapUsage on the worker's own target).
+- a snap lookup: Terra Draw's question, asked 20,000 times at random over the map.
+
+The worker's memory is measured in Node instead (e2e/ink_memory.mjs): sampled from outside, a worker
+busy with a trace answers no question until it is done, so its peak cannot be seen from the page.
 
 The machine's load is printed beside the numbers: they are of this machine, then.
 """
@@ -101,26 +102,6 @@ def main():
                 ink = page.evaluate('() => JSON.parse(JSON.stringify(window.__chora.ink))')
                 if ink['phase'] == 'error' or 'last' not in ink: raise RuntimeError(json.dumps({k: ink.get(k) for k in ('phase', 'lastError', 'proposals', 'mode')}))
                 return ink
-            # The worker's memory, sampled through the DevTools protocol on the worker's own target.
-            cdp = ctx.new_cdp_session(page)
-            samples, sampling = [], {'on': False, 'sid': None}
-            replies = {}
-            def on_msg(e):
-                m = json.loads(e['message'])
-                if 'id' in m: replies[m['id']] = m.get('result')
-            cdp.on('Target.receivedMessageFromTarget', on_msg)
-            def worker_session():
-                ts = cdp.send('Target.getTargets')['targetInfos']
-                w = [t for t in ts if t['type'] == 'worker' and 'ink' in (t.get('url') or '') or (t['type'] == 'worker' and t.get('url', '').startswith('blob:'))]
-                return w
-            mid = [0]
-            def heap(sid):
-                mid[0] += 1; k = mid[0]
-                cdp.send('Target.sendMessageToTarget', {'sessionId': sid, 'message': json.dumps({'id': k, 'method': 'Runtime.getHeapUsage'})})
-                t0 = time.time()
-                while k not in replies and time.time() - t0 < 2: page.wait_for_timeout(5)
-                return replies.get(k)
-
             # ---- An area, its window grown to 1024 x 1024 at full resolution ----
             page.click('#draw-tools button[data-trace="area"]')
             out['area: image px per screen px'] = round(at_ratio(1.0), 3)
@@ -141,35 +122,14 @@ def main():
             page.click('#draw-tools button[data-trace="line"]')
             out['line: image px per screen px'] = round(at_ratio(3.0), 3)
             centre_on(BIG_RIVER[300])
-            ws = worker_session()
-            sid = cdp.send('Target.attachToTarget', {'targetId': ws[0]['targetId'], 'flatten': False})['sessionId'] if ws else None
-            peak = {'used': 0, 'buffers': 0}
-            stop_flag = {'stop': False}
             line_first, line_again = [], []
             for run in range(RUNS):
                 page.evaluate('() => window.__chora_ink.discard()')
-                if run == 0: mem_before = heap(sid) if sid else None
-                n = page.evaluate('() => window.__chora.ink.proposals')
-                [[x, y]] = page.evaluate(TO_SCREEN, [ann['id'], [list(BIG_RIVER[300])]])
-                page.mouse.move(x - 2, y - 2); page.mouse.move(x, y); page.mouse.down(); page.mouse.up()
-                t0 = time.time()
-                while time.time() - t0 < 120:
-                    if sid:
-                        h = heap(sid)
-                        if h: peak['used'] = max(peak['used'], h.get('usedSize', 0)); peak['buffers'] = max(peak['buffers'], h.get('backingStorageSize', 0) or 0); peak['total'] = max(peak.get('total', 0), (h.get('usedSize', 0) + (h.get('backingStorageSize', 0) or 0)))
-                    done = page.evaluate('n => window.__chora.ink.proposals > n || window.__chora.ink.phase === "error"', n)
-                    if done: break
-                    page.wait_for_timeout(5)
-                ink = page.evaluate('() => JSON.parse(JSON.stringify(window.__chora.ink))')
-                if ink['phase'] == 'error': raise RuntimeError(ink['lastError'])
+                ink = trace('line', BIG_RIVER[300])
                 (line_first if run == 0 else line_again).append(ink['lastMs'])
                 out['line: window'] = ink['last']['frame']; out['line: grown'] = ink['last']['grown']; out['line: vertices'] = ink['last']['vertices']
             out['line: first click, tiles fetched (ms)'] = round(line_first[0])
             out['line: click again, tiles kept (ms, median)'] = round(statistics.median(line_again)) if line_again else None
-            out['worker heap used, peak (MB)'] = round(peak['used'] / 2**20, 1)
-            out['worker array buffers, peak (MB)'] = round(peak['buffers'] / 2**20, 1) if peak['buffers'] else 'not reported'
-            out['worker, both, peak (MB)'] = round(peak.get('total', 0) / 2**20, 1)
-            out['worker heap keys'] = sorted((mem_before or {}).keys())
             page.evaluate('() => window.__chora_ink.discard()')
 
             # ---- A snap lookup ----
