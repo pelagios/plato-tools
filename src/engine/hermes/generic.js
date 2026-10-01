@@ -108,8 +108,13 @@ async function openSheet(file, name) {
   // The sheet's rows as text (blank rows kept, so that each has its number), where its rows begin,
   // and its formulas saved with no value.
   const read = async () => {
+    // sheetStubs (xlsx only): a formula saved with no value, as Excel, openpyxl and pandas write it
+    // (`<f>B2*2</f>` alone, or with an empty `<v></v>`), is then a cell { t: 'z', f } and not dropped
+    // unseen; sheet_to_json gives a stub as empty, so the rows are as without it. Not for ODS, where
+    // SheetJS would make a stub of every repeated empty cell (a styled row repeated to the sheet's end).
+    const stubs = !file.name.toLowerCase().endsWith('.ods');
     let ws;
-    try { ws = XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: 'array', cellDates: true, UTC: true, sheets: [name], dense: true }).Sheets[name]; }
+    try { ws = XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: 'array', cellDates: true, UTC: true, sheets: [name], dense: true, sheetStubs: stubs }).Sheets[name]; }
     catch (e) { throw damaged(e); }
     if (!ws || !ws['!ref']) return { rows: [], top: 0, left: 0, formulas: [], errors: new Map() };
     const { s } = XLSX.utils.decode_range(ws['!ref']);
@@ -117,6 +122,8 @@ async function openSheet(file, name) {
     // of their row among the rows read: { j (the column among those read), ref, text }.
     const formulas = [], errors = new Map();
     (ws['!data'] || []).forEach((cells, r) => (cells || []).forEach((cell, c) => {
+      // A formula with no value: { t: 'z', f } from Excel, openpyxl, pandas; { t: 'e', f } with no v from SheetJS's own writer.
+      if (cell && cell.t === 'z' && cell.f) { formulas.push({ r, c, f: cell.f }); return; }
       if (!cell || cell.t !== 'e') return;
       if (cell.v === undefined) { if (cell.f) formulas.push({ r, c, f: cell.f }); return; }
       const i = r - s.r;

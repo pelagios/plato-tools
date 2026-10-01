@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as XLSX from 'xlsx';
+import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 import { detect, DataError } from '../src/engine/input.js';
 import { Report, LOSS_TEXT } from '../src/engine/report.js';
 import { genericSource, columnsOf, withSheet, sheetCellText } from '../src/engine/hermes/generic.js';
@@ -168,6 +169,21 @@ test('a formula saved without its value is reported as a loss; one with its valu
   // The control: the formula with its value is carried, as the value.
   assert.equal(r.records[1].attestations[0].notes, 'note: 102.76');
   assert.equal(r.records[0].attestations[0].notes, undefined);
+});
+test('a formula saved without its value as Excel, openpyxl and pandas write it (<f> alone, or with <v></v>) is reported; one with its value is read', async () => {
+  // Not written by SheetJS: its sheet XML is edited, so that the cells are as other programs save them.
+  const zip = unzipSync(workbookBytes([['Places', [['name', 'latitude', 'longitude', 'note'], ['Oxford', 51.75, -1.25, 'x'], ['Bath', 51.38, -2.36, 'x'], ['Ely', 52.4, 0.26, 'x']]]]));
+  const cell = (ref, xml) => (s) => { const out = s.replace(new RegExp(`<c r="${ref}"[^>]*>.*?</c>`), xml); assert.notEqual(out, s, `cell ${ref} is in the sheet XML`); return out; };
+  const edits = [cell('D2', '<c r="D2"><f>B2*2</f></c>'), cell('D3', '<c r="D3"><f>B3*2</f><v></v></c>'), cell('D4', '<c r="D4"><f>B4*2</f><v>104.8</v></c>')];
+  zip['xl/worksheets/sheet1.xml'] = strToU8(edits.reduce((s, e) => e(s), strFromU8(zip['xl/worksheets/sheet1.xml'])));
+  const r = await readAll(new File([zipSync(zip)], 'excel.xlsx'));
+  assert.deepEqual(r.of('generic-sheet-formula-no-value').examples, ['cell D2 of "Places", column "note": =B2*2', 'cell D3 of "Places", column "note": =B3*2']);
+  assert.equal(r.of('generic-sheet-formula-no-value').count, 2);
+  assert.equal(r.records[0].attestations[0].notes, undefined);
+  assert.equal(r.records[1].attestations[0].notes, undefined);
+  // The control: the formula with its cached value is read as that value, and the rows are all read.
+  assert.deepEqual(labels(r), ['Oxford', 'Bath', 'Ely']);
+  assert.equal(r.records[2].attestations[0].notes, 'note: 104.8');
 });
 test('a cell holding an error (#DIV/0!, #N/A) is reported as a loss and carries nothing; the cells beside it are read', async () => {
   const err = (v, w, f) => ({ t: 'e', v, w, ...(f ? { f } : {}) });

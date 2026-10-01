@@ -416,8 +416,16 @@ readers link to those headings, so keep them.
   date `YYYY-MM-DD` at midnight, else `YYYY-MM-DDTHH:MM:SS`; it is `sheet_to_json`'s `UTC` that keeps
   a date from shifting by the local time zone, which the TZ test catches), the header the first row
   that is not blank, rows numbered as the workbook numbers them. A formula saved with no cached value
-  is a cell `{ t: 'e', f }` with no `v`, found on the dense cells and reported
-  (`generic-sheet-formula-no-value`). A cell holding an error (`{ t: 'e', v: <code>, w: '#DIV/0!' }`),
+  is found on the dense cells and reported (`generic-sheet-formula-no-value`) in either of the two
+  forms SheetJS 0.20.3 reads it as: `{ t: 'e', f }` with no `v`, as SheetJS's own writer saves it
+  (`test/workbooks.js` `formulaCell`), and `{ t: 'z', f, v: 0 }`, as Excel, openpyxl and pandas save
+  it (`<f>B2*2</f>` alone, or with an empty `<v></v>`), which is seen only because an xlsx sheet is
+  read with `sheetStubs: true`; without it SheetJS drops such a cell as empty, with nothing to report.
+  A stub is empty to `sheet_to_json`, so the rows are unchanged. The test of the second form edits
+  an xlsx file's sheet XML (fflate), not a workbook SheetJS writes. An ODS sheet is read without
+  `sheetStubs` (SheetJS would make a stub of every repeated empty cell, as in a styled row repeated
+  to the end of the sheet), so an ODS formula saved with no value is untested and may be read as
+  empty unreported: LibreOffice always saves a formula's value. A cell holding an error (`{ t: 'e', v: <code>, w: '#DIV/0!' }`),
   which `sheet_to_json` gives as empty, is found on the same dense cells and reported as a loss
   (`generic-sheet-error-cell`) naming its row, column, cell and error text, and carries nothing; a
   row whose only value is an error is still yielded (so its loss is reported), and an error in the
