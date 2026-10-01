@@ -935,14 +935,19 @@ What it reports, and why, is in the guide:
   reads SQLite's plan for each.
 - **Candidate sets** (PLATO 05cf78a). Two copies of one candidate set (the same `@id`) are compared
   candidate by candidate, as attestations are: a candidate is a node with `plato:candidate_source`,
-  kind 2 in the ledger. A published candidate is frozen, so a candidate removed or changed in any field
-  (its places, score, software, settings, time or status) is an error, named by its address with what
-  changed (`candidate-removed`, `candidate-changed`, `candidate-readdressed`), whatever became of it:
-  that is read from the attestations that answer it, never from its status. A set has no `status`; it
-  binds from issue. A candidate added is counted (`counts.of` is `'candidates'`) and is not reported.
-  The set's own description is left out, as a dataset's is, so a corrected title, description,
-  creator or licence is nothing; a changed `issued` or `candidatesFor` is a warning, as a dataset's
-  `isVersionOf` is. A dataset against a candidate set (`different-kinds`), and two sets under
+  kind 2 in the ledger. A published candidate set is frozen as a whole (the candidate set
+  specification, 13.4): its address is minted from a hash of its candidates' texts (13.5), and new
+  suggestions go in a new set, which leaves out those already published. So a candidate removed or
+  changed in any field (its places, score, software, settings, time or status) is an error, named by
+  its address with what changed (`candidate-removed`, `candidate-changed`, `candidate-readdressed`),
+  whatever became of it: that is read from the attestations that answer it, never from its status. A
+  candidate added is an error too (`candidate-added`, named by its address, saying that new
+  suggestions belong in a new candidate set); one given a new address is readdressed, not added as
+  well. The counts say `counts.of` is `'candidates'`. A set has no `status`; it binds from issue. A
+  changed `issued` or `candidatesFor` is an error (`candidate-set-issued-changed`,
+  `candidate-set-for-changed`). A corrected title, description, creator or licence is reported and
+  allowed, as 13.4 says (`candidate-set-described-changed`, a warning naming the fields), since a
+  description may be corrected as an Authority's may. A dataset against a candidate set (`different-kinds`), and two sets under
   different addresses (`different-candidate-set`: a later run is a new set, not a version), are
   refused in words and marked incomplete. On the dataset side, `promotedFrom` is part of what an
   attestation says (its identity relation is written out in it, or, with an address, is a facet of

@@ -1,9 +1,11 @@
 import { PLATO_REPO } from './paths.js';
 // The version check (src/engine/compare.js) and candidate sets (PLATO 05cf78a). A published candidate
-// is frozen: never deleted, never changed in any field, its status the one it was issued with, since
-// what became of it is read from the attestations that answer it. So between two copies of one
-// candidate set, a candidate removed or changed breaks the rule, and is reported by its address with
-// what changed in it, as an attestation is; a candidate added is counted. A dataset and a candidate
+// set is frozen as a whole (its address is minted from its candidates' texts): no candidate is
+// deleted, changed in any field or added, its status stays the one it was issued with, since what
+// became of it is read from the attestations that answer it, and its date of issue and its dataset do
+// not change. So between two copies of one candidate set, a candidate removed, changed or added breaks
+// the rule, and is reported by its address, as an attestation is; a corrected description is reported
+// and allowed (the candidate set specification, 13.4). A dataset and a candidate
 // set, or two different candidate sets, are not two versions of one thing, and are refused in words.
 // On the dataset side, promotedFrom is part of what an attestation says, and a dataset's list of its
 // candidate sets (gazetteer.candidateSets) is its description of itself: one gone is a warning.
@@ -111,25 +113,60 @@ test('a candidate given another address, or none, breaks the rule as a readdress
   assert.deepEqual((await cmp(json(SET(), 'a.json'), json(SET(), 'b.json'))).items, []);
 });
 
-test('a candidate added to a candidate set is counted, and breaks nothing', async () => {
-  const added = set((d) => d.candidates.push({ ...d.candidates[1], '@id': C2.replace('1ec753bb', '5a5a5a5a'), object: 'https://whgazetteer.org/example/county-survey/newton-fen' }));
-  const r = await cmp(json(SET(), 'a.json'), json(added, 'b.json'));
-  assert.deepEqual([r.incomplete, r.items, r.counts], [false, [], { ...SAME, later: 3, added: 1 }]);
+test('a candidate added to a candidate set breaks the rule, named by its address: new suggestions go in a new set', async () => {
+  const C3 = C2.replace('1ec753bb', '5a5a5a5a');
+  const extra = (d) => d.candidates.push({ ...d.candidates[1], '@id': C3, object: 'https://whgazetteer.org/example/county-survey/newton-fen' });
+  const r = await cmp(json(SET(), 'a.json'), json(set(extra), 'b.json'));
+  assert.deepEqual([r.incomplete, kinds(r, 'error'), kinds(r, 'warning'), item(r, 'candidate-added').examples], [false, ['candidate-added'], [], [C3]]);
+  assert.match(item(r, 'candidate-added').message, /new suggestions belong in a new candidate set/);
+  assert.deepEqual(r.counts, { ...SAME, later: 3, added: 1 });
+  assert.equal(summary(r, 'compare').problems, '1 problem found.');
   assert.match(summary(r, 'compare').counted, /The later version has 3 candidates, 1 of them new\.$/);
-  // The control: the same addition with an earlier candidate dropped is found.
-  const swapped = set((d) => { d.candidates.push({ ...d.candidates[1], '@id': C2.replace('1ec753bb', '5a5a5a5a'), object: 'https://whgazetteer.org/example/county-survey/newton-fen' }); d.candidates.splice(0, 1); });
-  const s = await cmp(json(SET(), 'a.json'), json(swapped, 'b.json'));
-  assert.deepEqual([kinds(s, 'error'), s.counts.added, s.counts.lost], [['candidate-removed'], 1, 1]);
+  // Read as JSON Lines, the same.
+  const l = await cmp(jsonl(SET(), 'candidates', 'a.jsonl'), jsonl(set(extra), 'candidates', 'b.jsonl'));
+  assert.deepEqual(item(l, 'candidate-added')?.examples, [C3]);
+  // Added with an earlier candidate dropped: both are found.
+  const s = await cmp(json(SET(), 'a.json'), json(set((d) => { extra(d); d.candidates.splice(0, 1); }), 'b.json'));
+  assert.deepEqual([kinds(s, 'error'), item(s, 'candidate-added').examples, s.counts.added, s.counts.lost], [['candidate-added', 'candidate-removed'], [C3], 1, 1]);
+  // A candidate given a new address is readdressed, not added as well.
+  const moved = await cmp(json(SET(), 'a.json'), json(set((d) => { d.candidates[0]['@id'] = C1.replace('8ed2901c', '8ed2901c0000'); }), 'b.json'));
+  assert.deepEqual(kinds(moved, 'error'), ['candidate-readdressed']);
+  // The controls: identical sets, and the same addition made to both, give nothing.
+  for (const d of [SET(), set(extra)]) {
+    const same = await cmp(json(d, 'a.json'), json(d, 'b.json'));
+    assert.deepEqual([same.items, same.counts.added], [[], 0]);
+  }
 });
 
-test('a candidate set\'s description may be corrected as a dataset\'s may; its date of issue and its dataset are warned of', async () => {
-  const described = set((d) => { d.candidateSet.title = 'Another title'; d.candidateSet.description = 'Corrected.'; d.candidateSet.creator = [{ name: 'Someone else' }]; d.candidateSet.licence = 'https://creativecommons.org/publicdomain/zero/1.0/'; });
-  const r = await cmp(json(SET(), 'a.json'), json(described, 'b.json'));
-  assert.deepEqual([r.items, r.counts], [[], SAME]);
-  const moved = set((d) => { d.candidateSet.issued = '2026-09-10'; d.candidateSet.candidatesFor = 'https://whgazetteer.org/example/gazetteer/other'; });
-  const m = await cmp(json(SET(), 'a.json'), json(moved, 'b.json'));
-  assert.deepEqual([kinds(m, 'error'), kinds(m, 'warning'), m.counts], [[], ['candidate-set-for-changed', 'candidate-set-issued-changed'], SAME]);
-  assert.deepEqual(item(m, 'candidate-set-issued-changed').examples, ['2026-09-09, then 2026-09-10']);
+test('a candidate set\'s date of issue and its dataset are frozen with it: a change to either breaks the rule', async () => {
+  const edits = {
+    'candidate-set-issued-changed': [(d) => { d.candidateSet.issued = '2026-09-10'; }, '2026-09-09, then 2026-09-10'],
+    'candidate-set-for-changed': [(d) => { d.candidateSet.candidatesFor = 'https://whgazetteer.org/example/gazetteer/other'; }, 'https://whgazetteer.org/example/gazetteer/fen-parishes, then https://whgazetteer.org/example/gazetteer/other'],
+  };
+  for (const [kind, [edit, example]] of Object.entries(edits)) {
+    const r = await cmp(json(SET(), 'a.json'), json(set(edit), 'b.json'));
+    assert.deepEqual([kinds(r, 'error'), kinds(r, 'warning'), item(r, kind).examples, r.counts], [[kind], [], [example], SAME], kind);
+    // The control: identical sets, and the same edit made to both, give nothing.
+    for (const d of [SET(), set(edit)]) assert.deepEqual((await cmp(json(d, 'a.json'), json(d, 'b.json'))).items, [], kind);
+  }
+});
+
+test('a candidate set\'s description may be corrected: reported, and allowed', async () => {
+  const fields = {
+    title: (d) => { d.candidateSet.title = 'Another title'; },
+    description: (d) => { d.candidateSet.description = 'Corrected.'; },
+    creator: (d) => { d.candidateSet.creator = [{ name: 'Someone else' }]; },
+    licence: (d) => { d.candidateSet.licence = 'https://creativecommons.org/publicdomain/zero/1.0/'; },
+  };
+  for (const [field, edit] of Object.entries(fields)) {
+    const r = await cmp(json(SET(), 'a.json'), json(set(edit), 'b.json'));
+    assert.deepEqual([kinds(r, 'error'), kinds(r, 'warning'), item(r, 'candidate-set-described-changed').examples, r.counts], [[], ['candidate-set-described-changed'], [field], SAME], field);
+  }
+  const all = await cmp(json(SET(), 'a.json'), json(set((d) => { for (const edit of Object.values(fields)) edit(d); }), 'b.json'));
+  assert.deepEqual(item(all, 'candidate-set-described-changed').examples, ['title, description, creator, licence']);
+  assert.equal(summary(all, 'compare').problems, 'Nothing was deleted or changed.');
+  // The control: identical sets give nothing.
+  assert.deepEqual((await cmp(json(SET(), 'a.json'), json(SET(), 'b.json'))).items, []);
 });
 
 // ---- what is not two versions of one thing ---------------------------------------------------------------

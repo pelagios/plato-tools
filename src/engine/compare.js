@@ -18,16 +18,18 @@
 // When something has changed, both versions are read once more, for the few examples the report
 // shows, to say WHAT changed: the statements found in one version only.
 //
-// A candidate set (PLATO 05cf78a) is compared the same way, candidate by candidate: a published
-// candidate is frozen, never changed or deleted, whatever became of it (what became of it is read
-// from the attestations that answer it, never from its status). A later set is a new set, not a
-// version, so two sets under different addresses are not compared, nor a set with a dataset.
+// A candidate set (PLATO 05cf78a) is compared the same way, candidate by candidate, but it is frozen
+// as a whole once issued: its address is minted from its candidates' texts, so no candidate is
+// changed, deleted or added, whatever became of it (what became of it is read from the attestations
+// that answer it, never from its status), and its date of issue and its dataset do not change. New
+// suggestions go in a new set, under a new address, so two sets under different addresses are not
+// compared, nor a set with a dataset.
 //
 // Nothing is held in memory but the record in hand: a digest of each attestation goes into a working
 // database, where the two versions are compared, so the check runs at any size, like the rest.
 import { run } from './pipeline.js';
 import { Report } from './report.js';
-import { Json2Rdf } from '../formats/json2rdf.js';
+import { Json2Rdf, jcs } from '../formats/json2rdf.js';
 import { termNT } from '../lib/ntriples.js';
 import { PLATO } from '../lib/context.js';
 import { collectWithdrawn, resolveWithdrawn } from '../formats/shared.js';
@@ -65,10 +67,12 @@ const TEXT = {
   'candidate-changed': 'A candidate of the earlier version of this candidate set says something different in the later one: its places, score, software, settings, time or status. A published candidate is never changed, whatever became of it: that is read from the attestations that answer it, not from the candidate. Put it back as it was; a new run of the software is a new candidate set.',
   'candidate-readdressed': 'A candidate of the earlier version of this candidate set is in the later one, saying the same, but without its web address (@id), or under another. Identity relations answer a candidate by its address (promotedFrom): give it back its address.',
   'candidate-gone': 'A candidate of the earlier version of this candidate set that has no web address of its own (@id) is not in the later one as it was: it was deleted, or changed. Put it back as it was.',
+  'candidate-added': 'The later copy of this candidate set has a candidate the earlier one does not. A candidate set is frozen as a whole once issued (its address is made from its candidates), so nothing is added to it: new suggestions belong in a new candidate set, under a new address, which leaves out the candidates already published.',
   'different-kinds': 'One file is a dataset and the other a candidate set, so they are not two versions of one thing and were not compared. Give two versions of one dataset, or two copies of one candidate set.',
   'different-candidate-set': 'The two files are different candidate sets (their addresses, @id, differ), not two versions of one, so they were not compared. A candidate set is never revised: a later run of the software is a new set, under a new address, which leaves out every candidate an earlier set published.',
-  'candidate-set-issued-changed': 'The two copies of this candidate set give different dates of issue (issued). A candidate set is frozen from the date it was issued, so the date should not change.',
-  'candidate-set-for-changed': 'The two copies of this candidate set say they were made for different datasets (candidatesFor).',
+  'candidate-set-issued-changed': 'The two copies of this candidate set give different dates of issue (issued). A candidate set is frozen as a whole once issued, its date of issue with it: put the date back as it was.',
+  'candidate-set-for-changed': 'The two copies of this candidate set say they were made for different datasets (candidatesFor). A candidate set is frozen as a whole once issued, the dataset it was made for with it: put it back as it was. Suggestions for another dataset belong in a new candidate set.',
+  'candidate-set-described-changed': 'The two copies of this candidate set describe it differently (its title, description, creator or licence). This is allowed: a description may be corrected, as an Authority\'s may, and the candidates are what is frozen.',
   'candidate-set-unlisted': "A candidate set the earlier version lists (candidateSets) is not listed in the later one. The list is the dataset's description of itself, not an attestation, so this does not break the rule; but the dataset's identity relations may still answer candidates in that set (promotedFrom), and a reader can no longer find it from here.",
   'nothing-to-compare-candidates': 'The earlier version holds no candidates, so there was nothing for the later one to have kept, and nothing was tested.',
   'identity-removed': 'An identity match of the earlier version is not in the later one. The append-only rule is about attestations, so this does not break it, but the match has gone with no record of why.',
@@ -128,6 +132,12 @@ export const QUERIES = {
       AND EXISTS(SELECT 1 FROM n x WHERE x.v=1 AND x.s=f.s AND NOT EXISTS(SELECT 1 FROM n o WHERE o.v=0 AND o.s=x.s AND o.h=x.h))
       AND NOT EXISTS(SELECT 1 FROM n o WHERE o.v=0 AND o.s=f.s AND NOT EXISTS(SELECT 1 FROM n x WHERE x.v=1 AND x.s=o.s AND x.h=o.h))`,
   withAddress: 'SELECT 1 FROM a INDEXED BY ai WHERE v=0 AND id=? LIMIT 1',
+  // Candidates the later copy of a candidate set has and the earlier does not: neither under its
+  // address nor saying the same (one saying the same under another address is readdressed, which is
+  // reported as such).
+  addedCandidates: `SELECT n.id, n.about FROM a n WHERE n.v=1 AND n.k=2 AND
+      NOT EXISTS(SELECT 1 FROM a o INDEXED BY ah WHERE o.v=0 AND o.h=n.h) AND
+      (n.id IS NULL OR NOT EXISTS(SELECT 1 FROM a o INDEXED BY ai WHERE o.v=0 AND o.id=n.id))`,
 };
 
 // A statement as the report shows it: the well-known namespaces by their prefixes, and not so long
@@ -326,9 +336,12 @@ export async function compare({ earlier, later, options = {} }, env) {
     const published = isSet || old.status === 'published';
     const breach = published ? 'error' : 'warning';
     if (isSet) {
-      // Its description (title, description, creator, licence) may be corrected, as a dataset's may.
-      if (old.issued !== neu.issued) rep.warning('candidate-set-issued-changed', TEXT['candidate-set-issued-changed'], `${old.issued ?? 'none'}, then ${neu.issued ?? 'none'}`);
-      if (old.candidatesFor !== neu.candidatesFor) rep.warning('candidate-set-for-changed', TEXT['candidate-set-for-changed'], `${old.candidatesFor ?? 'none'}, then ${neu.candidatesFor ?? 'none'}`);
+      // Frozen as a whole: its date of issue and its dataset with its candidates. Its description
+      // (title, description, creator, licence) may be corrected, and a correction is reported.
+      if (old.issued !== neu.issued) rep.error('candidate-set-issued-changed', TEXT['candidate-set-issued-changed'], `${old.issued ?? 'none'}, then ${neu.issued ?? 'none'}`);
+      if (old.candidatesFor !== neu.candidatesFor) rep.error('candidate-set-for-changed', TEXT['candidate-set-for-changed'], `${old.candidatesFor ?? 'none'}, then ${neu.candidatesFor ?? 'none'}`);
+      const described = ['title', 'description', 'creator', 'licence'].filter((k) => jcs(old[k] ?? null) !== jcs(neu[k] ?? null));
+      if (described.length) rep.warning('candidate-set-described-changed', TEXT['candidate-set-described-changed'], described.join(', '));
     } else if (!published) rep.warning('earlier-not-published', TEXT['earlier-not-published'], old.status === undefined ? undefined : String(old.status));
     else if (neu.status !== 'published') rep.warning('later-not-published', TEXT['later-not-published'], neu.status === undefined ? undefined : String(neu.status));
     // A dataset's list of its candidate sets is its description of itself: a set added to it is
@@ -369,6 +382,10 @@ export async function compare({ earlier, later, options = {} }, env) {
     for (const q of ledger.rows(QUERIES.unaddressed)) {
       const missing = q.get(1) - q.get(3);
       if (missing > 0) found(q.get(0), 'gone', q.get(2) ?? undefined, missing);
+    }
+    // A candidate set is frozen as a whole: a candidate added is a breach, named by its address.
+    if (isSet) for (const q of ledger.rows(QUERIES.addedCandidates)) {
+      rep.error('candidate-added', TEXT['candidate-added'], q.get(0) ?? (q.get(1) ? `a candidate for ${q.get(1)}` : undefined));
     }
     const unidentified = ledger.one('SELECT COUNT(*) FROM a WHERE v=0 AND k=0 AND id IS NULL');
     if (unidentified) rep.add('warning', 'earlier-unidentified', TEXT['earlier-unidentified'], undefined, unidentified);
