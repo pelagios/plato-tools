@@ -40,8 +40,9 @@ const rawOf = (store, key) => { try { return store?.getItem(key) ?? null; } catc
 let migrated = false;
 /**
  * Carry Chora's old basemap consents over ('chora-basemap-consent', a list of sites), and let the old
- * key go. Done once per load (the head script has done it already, before the page asked anything),
- * never on the way to a request; exported for tests.
+ * key go. Done at the first read after the page loads (the head script has done it already, before the
+ * page asked anything), and when another tab writes the old key (an older copy of Chora still open);
+ * never on the way to a request. Exported for tests.
  */
 export function migrate() {
   migrated = true;
@@ -49,6 +50,12 @@ export function migrate() {
   if (rawOf(st, LEGACY) === null) return;
   const g = core.normalise(core.migrateBasemapConsent(core.normalise(readJson(st, KEY)?.grants), readJson(st, LEGACY)));
   if (put(st, KEY, JSON.stringify({ version: 1, grants: g }))) drop(st, LEGACY);
+}
+/** For tests: forget what this module holds between calls (the cache, and that it has carried old consents over). */
+export function resetForTests() {
+  migrated = false;
+  Object.assign(cache, { grantsRaw: undefined, grants: {}, tabRaw: undefined, tab: [] });
+  canaryResult = null; canaryPromise = null;
 }
 /** Every permission decided and remembered, cleaned (core.normalise). A copy: the cache is not the caller's. */
 function grants() {
@@ -156,6 +163,9 @@ function listen() {
   window.addEventListener('storage', (e) => {
     if (e.key !== null && ![KEY, LEGACY, KEEP, TOKEN, TOKEN_REMEMBER, ...Object.keys(REMEMBERED)].includes(e.key)) return;
     if (e.key === TOKEN || e.key === TOKEN_REMEMBER || e.key === null) tokenNotify();
+    // An older copy of Chora, open in another tab, may still write its old consents: carried over now.
+    // (They reach the page's policy, as any permission does, from its next load.)
+    if (e.key === LEGACY && e.newValue !== null) migrate();
     notify();
   });
 }

@@ -1204,6 +1204,31 @@ def main_permissions(ctx, page, url, requests):
         back = wait_state(page, lambda s: s.get('canary') in ('enforced', 'not-enforced'), T(15), 'canary')
         return s.get('canary') == 'not-enforced' and not meta and back.get('canary') == 'enforced', {'without': s.get('canary'), 'why': s.get('canaryWhy'), 'meta': meta, 'with it again': back.get('canary')}
     attempt('main page: served without the script that writes its policy, the canary says it is not enforced (and with it again, enforced)', no_policy)
+    # A policy that is written, and enforced, but is not the one the permissions make: the canary's worker
+    # finds data: fetched where it lists data:, and its check of the policy finds one widened to every site.
+    def altered(variant):
+        def handler(route):
+            r = route.fetch(); body = r.text()
+            route.fulfill(response=r, body=body.replace('"connect-src \'self\' blob:" + sites', '"connect-src \'self\' blob: ' + variant + '" + sites'))
+        return handler
+    def wrong_policy():
+        target = NOTOOLS if PROVE else url; seen = {}
+        for name, variant in (('data', 'data:'), ('wildcard', '*')):
+            h = altered(variant); ctx.route(url, h)
+            try:
+                page.goto(target)
+                s = wait_state(page, lambda s: s.get('canary') in ('enforced', 'not-enforced'), T(15), 'canary')
+                meta = page.evaluate('() => document.querySelector(\'meta[http-equiv="Content-Security-Policy"]\')?.content || ""')
+                seen[name] = {'canary': s.get('canary'), 'why': s.get('canaryWhy'), 'altered': ('blob: ' + variant) in meta}
+            finally:
+                ctx.unroute(url, h)
+        page.goto(target)
+        back = wait_state(page, lambda s: s.get('canary') in ('enforced', 'not-enforced'), T(15), 'canary')
+        d, w = seen.get('data', {}), seen.get('wildcard', {})
+        return (d.get('altered') and d.get('canary') == 'not-enforced' and d.get('why') == 'the test request was not stopped'
+                and w.get('altered') and w.get('canary') == 'not-enforced' and 'not the one written' in (w.get('why') or '')
+                and back.get('canary') == 'enforced'), {**seen, 'as served': back.get('canary')}
+    attempt('main page: a policy that lists data:, or one widened to every site, is found not enforced by the canary (its worker, then its check of the policy); as served, enforced', wrong_policy)
     def reload_asks():
         page.goto(NOTOOLS if PROVE else url)
         wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready')

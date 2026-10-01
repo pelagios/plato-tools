@@ -7,6 +7,7 @@ import vm from 'node:vm';
 import * as core from '../src/lib/permissions-core.js';
 import * as permissions from '../src/lib/permissions.js';
 import { headScript, HEAD_MARK, cspPlugin } from '../scripts/vite-csp.mjs';
+import { checkPolicy } from '../src/lib/csp.js';
 
 class Store {
   constructor() { this.m = new Map(); }
@@ -24,6 +25,7 @@ beforeEach(() => {
   globalThis.sessionStorage = new Store();
   globalThis.__platoCsp = { policy: '', origins: [] };
   calls = [];
+  permissions.resetForTests();
   permissions.configure({ fetch: stub(), enforced: async () => true });
 });
 const inPolicy = (...origins) => { globalThis.__platoCsp = { policy: core.policyFor(origins), origins }; };
@@ -101,10 +103,7 @@ test('a forged grant is listed as kept; unknown ids, malformed and injected site
 test('Chora\'s old basemap consents are carried over once: a whole provider by its id, the rest as pasted sites, the old key removed', () => {
   const carto = core.REGISTRY.basemap.carto.origins;
   localStorage.setItem('chora-basemap-consent', JSON.stringify(['https://tiles.openfreemap.org', carto[0], 'https://my-tiles.example.org', 'not a site']));
-  // Carried over at load, never on the way to a request (transformRequest asks at every tile).
-  permissions.list();
-  assert.notEqual(localStorage.getItem('chora-basemap-consent'), null, 'not carried over by a later read');
-  permissions.migrate();
+  // The first read after load carries them over, with no call to migrate().
   const l = permissions.list();
   const st = (k) => l.find((x) => x.key === k)?.state;
   assert.equal(st('basemap:openfreemap'), 'allowed');
@@ -116,6 +115,13 @@ test('Chora\'s old basemap consents are carried over once: a whole provider by i
   const once = localStorage.getItem('plato-tools.permissions');
   permissions.list();
   assert.equal(localStorage.getItem('plato-tools.permissions'), once, 'idempotent');
+  // Written after that first read (by an older Chora in another tab): not carried over on the way to a
+  // request, which transformRequest makes at every tile; carried over by migrate() (the storage event's).
+  localStorage.setItem('chora-basemap-consent', JSON.stringify(['https://late.example.org']));
+  assert.equal(permissions.state('basemap', 'https://late.example.org'), 'undecided');
+  assert.notEqual(localStorage.getItem('chora-basemap-consent'), null);
+  permissions.migrate();
+  assert.equal(permissions.state('basemap', 'https://late.example.org'), 'allowed');
   // A grant already made is not changed by a later carrying over.
   permissions.set('basemap', 'osm', 'never');
   localStorage.setItem('chora-basemap-consent', JSON.stringify([OSM]));
@@ -270,4 +276,21 @@ test('the build puts the head script where each page marks it, and refuses a pag
   assert.ok(out.includes('<script>') && out.includes('Content-Security-Policy') && !/^\s*export\b/m.test(out));
   assert.throws(() => plugin.transformIndexHtml.handler('<head></head>', { filename: `${root}index.html` }), /plato:csp/);
   assert.equal(plugin.transformIndexHtml.handler('<head></head>', { filename: `${root}spike/index.html` }), '<head></head>');
+});
+
+test('the canary\'s second half: the policy in force must be exactly the one written from the permissions', () => {
+  const origins = ['https://maps.example.org'];
+  const written = { policy: core.policyFor(origins), origins };
+  const doc = (...contents) => ({ querySelectorAll: () => contents.map((c) => ({ getAttribute: (k) => (k === 'http-equiv' ? 'Content-Security-Policy' : c) })) });
+  assert.deepEqual(checkPolicy(doc(written.policy), written), { ok: true });
+  const widened = written.policy.replace("connect-src 'self' blob:", "connect-src 'self' blob: *");
+  assert.equal(checkPolicy(doc(widened), written).ok, false, 'a policy widened to every site');
+  assert.equal(checkPolicy(doc(widened), { policy: widened, origins }).ok, false, 'even when published as written');
+  const dataAllowed = written.policy.replace("connect-src 'self' blob:", "connect-src 'self' blob: data:");
+  assert.equal(checkPolicy(doc(dataAllowed), { policy: dataAllowed, origins }).ok, false);
+  assert.equal(checkPolicy(doc(written.policy, written.policy), written).ok, false, 'two policies');
+  assert.equal(checkPolicy(doc(), written).ok, false, 'none in force');
+  assert.equal(checkPolicy(doc(written.policy), null).ok, false, 'none written');
+  const forged = { policy: core.policyFor(['https://maps.example.org', '*']), origins: ['https://maps.example.org', '*'] };
+  assert.equal(checkPolicy(doc(forged.policy), forged).ok, false, 'a site that is not one');
 });

@@ -777,18 +777,29 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   MapLibre's worker is made from a `blob:`, and is under the policy. The engine's worker cannot be
   put under it as things stand: ajv compiles PLATO's JSON Schemas with `new Function`, which a
   policy without `'unsafe-eval'` refuses (measured: the page stops with "Error compiling schema"; with
-  `'unsafe-eval'` added, checks and Chora run). The ways out are ajv's standalone code, compiled at
-  build time from the vendored schemas, or `'unsafe-eval'` in the policy; neither is done yet.
-- **The canary** (`src/lib/csp.js`): at start, a worker made from a `blob:` fetches a `data:`
-  address, which only the policy can refuse (`connect-src` does not list `data:`), and, as the
-  control, a `blob:` address of its own, which the policy allows. Enforced means the first refused
-  and the second fetched; no network is involved. Unless it is enforced, the module asks no other
-  site at all (`unprotected`), whatever is allowed, the panel says so in a plain line, and Chora stays
-  on Natural Earth and says why. It used to wait for a `securitypolicyviolation` event, which WebKit
-  never raises, so Safari had no other site at all; measured on 1 October 2026 (Playwright 1.62:
-  Chromium 151, Firefox 153, WebKit 26.5), all three refuse the `data:` fetch under the policy and
-  make it without one. Playwright evaluates a bare expression with `eval()`, which the policy
-  forbids: the browser checks give it functions.
+  `'unsafe-eval'` added, checks and Chora run). `'unsafe-eval'` was considered and refused (1 October
+  2026). The plan, as a follow-up: compile the validators at build time with ajv's standalone code,
+  from the vendored schemas, and then start the worker from a `blob:` (with `'wasm-unsafe-eval'` for
+  SQLite). Until then, every request to another site is made on the page's own thread, through the
+  module, never in the engine's worker.
+- **The canary** (`src/lib/csp.js`) proves two things at start, and only both count. First, that a
+  policy is enforced at all in a worker made from a `blob:`: the worker fetches a `data:` address,
+  which only a policy can refuse (`connect-src` does not list `data:`), and, as the control, a
+  `blob:` of its own, which the policy allows. That proves enforcement, not what the policy allows:
+  a policy widened to every site refuses `data:` too. So, second, `checkPolicy` reads the page's one
+  Content Security Policy `<meta>` and requires its text to be exactly `policyFor()` of the sites
+  published with it, each a plain site, with `connect-src` and `img-src` naming nothing else but
+  `'self'`, `blob:` and (images only) `data:`. Unless both hold, the module asks no other site at all
+  (`unprotected`), whatever is allowed, the panel says so in a plain line, and Chora stays on Natural
+  Earth and says why. What it cannot see: a policy sent by a server header (GitHub Pages sends none).
+  The canary used to wait for a `securitypolicyviolation` event, which WebKit never raises, so Safari
+  had no other site at all. `node scripts/canary-engines.mjs` (opt-in: set `PLAYWRIGHT_MODULE` to an
+  install of Playwright, which is not a dependency; an engine without its browser is skipped, said
+  so) runs the real module in Chromium, Firefox and WebKit under the policy written, none, one that
+  lists `data:` and one widened to `*`, with the `<meta>` as served and as written by a script: on 1
+  October 2026 (Playwright 1.62: Chromium 151, Firefox 153, WebKit 26.5) each gave the expected answer.
+  Playwright evaluates a bare expression with `eval()`, which the policy forbids: the browser checks
+  give it functions.
 - **The shared origin, plainly.** The tools are served on `pelagios.org`, which other Pelagios sites
   share. Everything the tools keep in this browser, permissions, choices, a pasted basemap's address
   and key, the WHG token if remembered, a reviewer's name, the working data (Chora's drafts, its
@@ -800,8 +811,9 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   `plato-tools.keep-working-data` is `no` when off): off, Chora clears its drawings not saved and its
   last output at the next load (not at a reload for a permission), and the output once saved to disk.
   The dataset's working copy, in Chora's SQLite pool, is cleared at every start anyway (`clearOnInit`).
-- **Chora's old consents** (`chora-basemap-consent`, a list of sites) are carried over once, by the
-  head script and the module alike: a provider all of whose sites are listed becomes
+- **Chora's old consents** (`chora-basemap-consent`, a list of sites) are carried over by the head
+  script at load, by the module at its first read, and by the module again when another tab writes
+  the old key (the storage event): a provider all of whose sites are listed becomes
   `basemap:<provider>`, every other site `basemap:<site>`, and the old key goes.
 - **The command line has no settings: the flag is the consent.** A command that asks another site
   takes `--gazetteer` (`whg` or a service's address) and repeatable `--allow-host`, makes grants for
