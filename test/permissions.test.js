@@ -304,3 +304,91 @@ test('the canary\'s second half: the policy in force must be exactly the one wri
   const forged = { policy: core.policyFor(['https://maps.example.org', '*']), origins: ['https://maps.example.org', '*'] };
   assert.equal(checkPolicy(doc(forged.policy), forged).ok, false, 'a site that is not one');
 });
+
+// ---- The follow-up of 1 October 2026 (permissions-next) -------------------------------------------
+import { readFileSync } from 'node:fs';
+import * as words from '../src/lib/permission-words.js';
+
+test('"Keep large datasets\' working files": persist() is asked only on the choice, once, and its answer remembered', async () => {
+  let asked = 0, answer = true;
+  const nav = { storage: { persist: async () => { asked++; return answer; } } };
+  const before = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'navigator', { value: nav, configurable: true, writable: true });
+  try {
+    assert.equal(permissions.persistChoice(), null, 'nothing chosen yet');
+    assert.equal(asked, 0, 'never asked on the way in');
+    let r = await permissions.choosePersist(true);
+    assert.equal(r.granted, true); assert.equal(asked, 1);
+    r = await permissions.choosePersist(true);   // chosen already: the browser is not asked again
+    assert.equal(asked, 1); assert.equal(r.granted, true);
+    permissions.resetForTests();                 // the next visit: remembered, not asked
+    assert.equal(permissions.persistChoice().granted, true); assert.equal(asked, 1);
+    await permissions.choosePersist(false);
+    assert.equal(permissions.persistChoice(), null, 'unchosen, forgotten');
+    answer = false;
+    r = await permissions.choosePersist(true);
+    assert.equal(r.granted, false); assert.equal(asked, 2);
+    assert.equal(permissions.persistChoice().granted, false, 'a refusal is remembered too');
+    await permissions.choosePersist(false);
+    nav.storage = {};                            // a browser without it
+    r = await permissions.choosePersist(true);
+    assert.deepEqual([r.granted, r.unsupported], [false, true]);
+    for (const k of ['granted', 'refused', 'unsupported']) assert.equal(typeof words.PANEL.persistResult[k], 'string', k);
+  } finally {
+    if (before) Object.defineProperty(globalThis, 'navigator', before); else delete globalThis.navigator;
+  }
+});
+
+test('what the historical maps learn, the trace a reload would lose, and the maps the working data keeps, in words (e2 R1-R3)', () => {
+  const iiif = words.CATEGORY_WORDS.iiif.learns;
+  assert.ok(/manifest/.test(iiif) && /georeference/.test(iiif), iiif);
+  assert.ok(iiif.includes('Tracing from a map asks its server for the part you click, in more detail.'), iiif);
+  assert.equal(words.RELOAD_LOSES.tracing, 'The trace being proposed now.');
+  assert.ok(words.PANEL.keepWorkNote.includes('the historical maps you showed'), words.PANEL.keepWorkNote);
+});
+
+test('the token is said to be held for the tab or remembered, as it is, and only WHG can revoke it (fc)', () => {
+  assert.equal(typeof words.PANEL.tokenHeld, 'function');
+  const tab = words.PANEL.tokenHeld(false), kept = words.PANEL.tokenHeld(true);
+  assert.ok(/this tab/.test(tab) && !/remembered/.test(tab), tab);
+  assert.ok(/remembered in this browser/.test(kept) && !/this tab/.test(kept), kept);
+  assert.ok(/regenerat/.test(words.PANEL.tokenRevoke) && /World Historical Gazetteer/.test(words.PANEL.tokenRevoke), words.PANEL.tokenRevoke);
+});
+
+// A page element, as much of one as needs() uses.
+function fakeEl() {
+  const el = { children: [], hidden: false, dataset: {}, isConnected: true, classList: { add() {} },
+    ownerDocument: { createElement: () => ({ type: '', textContent: '', className: '' }) },
+    replaceChildren(...c) { this.children = [...c]; }, append(...c) { this.children.push(...c); },
+    get text() { return this.children.map((c) => (typeof c === 'string' ? c : c.textContent)).join(''); } };
+  return el;
+}
+
+test('needs() for several sites at once: one line naming those still to allow, gone once all are, silent if one is Never (e2 R5)', () => {
+  const pairs = [['iiif', 'https://maps.example.org'], ['iiif', 'https://images.example.org']];
+  const el = fakeEl();
+  permissions.needs(el, pairs);
+  assert.equal(el.hidden, false);
+  assert.ok(el.text.startsWith('Needs permission: maps.example.org and images.example.org'), el.text);
+  assert.equal(el.dataset.permission, 'iiif:https://maps.example.org');
+  inPolicy('https://maps.example.org');
+  permissions.set('iiif', 'https://maps.example.org', 'allowed');
+  assert.ok(el.text.startsWith('Needs permission: images.example.org'), el.text);
+  assert.equal(el.dataset.permission, 'iiif:https://images.example.org', 'the panel opens at the one still to decide');
+  inPolicy('https://maps.example.org', 'https://images.example.org');
+  permissions.set('iiif', 'https://images.example.org', 'allowed');
+  assert.equal(el.hidden, true, 'all allowed: no line');
+  permissions.set('iiif', 'https://images.example.org', 'never');
+  assert.equal(el.hidden, true, 'one Never: the feature does without, and says nothing');
+  // The one-site form is as it was.
+  const one = fakeEl();
+  permissions.needs(one, 'basemap', 'osm');
+  assert.ok(one.text.startsWith('Needs permission: OpenStreetMap'), one.text);
+  assert.throws(() => permissions.needs(fakeEl(), [['basemap', 'https://evil.example.org; script-src *']]), TypeError);
+});
+
+test('DEVELOPERS.md names no module that is gone, and says what happens to a redirect', () => {
+  const dev = readFileSync(new URL('../DEVELOPERS.md', import.meta.url), 'utf8');
+  assert.ok(!dev.includes('src/lib/whg-token.js'), 'src/lib/whg-token.js is not in the tools');
+  assert.ok(dev.includes('**Redirects.**'), 'a Redirects note');
+});

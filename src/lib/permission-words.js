@@ -7,7 +7,7 @@ export const PROMISE = 'Your files stay on your computer, and nothing is sent to
 /** Each category: its heading, and what a site of that kind learns. */
 export const CATEGORY_WORDS = {
   basemap: { heading: 'Basemaps', learns: 'A basemap’s provider sees which part of the world you look at, and your address on the internet, as any website does.' },
-  iiif: { heading: 'Historical maps', learns: 'A historical map’s server sees which map you view, and which parts of it.' },
+  iiif: { heading: 'Historical maps', learns: 'A historical map’s server sees which map you view, and which parts of it; so does the site its description (its manifest) or its georeference is on. Tracing from a map asks its server for the part you click, in more detail.' },
   allmaps: { heading: 'Georeferences', learns: 'Allmaps learns which map a georeference was looked for.' },
   gazetteer: { heading: 'Gazetteers', learns: 'A gazetteer sees the names you look up in it.' },
   linked: { heading: 'Linked sites', learns: 'A site your data links to sees which of its pages you open.' },
@@ -64,7 +64,10 @@ export const PANEL = {
   none: 'No other site has been allowed.',
   close: 'Close',
   tokenHeading: 'World Historical Gazetteer token',
-  tokenHeld: 'A token is held for this tab. It is never shown, and is sent only to the World Historical Gazetteer.',
+  tokenHeld: (remembered) => (remembered
+    ? 'A token is remembered in this browser, and stays after the tab is closed. It is never shown, and is sent only to the World Historical Gazetteer.'
+    : 'A token is held for this tab, and is forgotten when the tab is closed. It is never shown, and is sent only to the World Historical Gazetteer.'),
+  tokenRevoke: 'Forgetting it here does not revoke it: only regenerating it in the World Historical Gazetteer does, and then every copy of the old one stops working.',
   tokenNone: 'No token is held.',
   tokenRemember: 'Remember my token in this browser',
   tokenRememberNote: 'Remembered, it stays after the tab is closed, and any Pelagios site open on this computer could read it. Not remembered, it is forgotten when the tab is closed.',
@@ -74,7 +77,14 @@ export const PANEL = {
   forget: 'Forget',
   workHeading: 'Your working data',
   keepWork: 'Keep my working data between visits',
-  keepWorkNote: 'Chora keeps the dataset you opened, your drawings not yet saved, and the file it last wrote, in this browser, so that you can carry on next time. Turned off, they are cleared when you next open Chora, and the file it wrote is cleared once you have saved it: save your drawings before you leave.',
+  keepWorkNote: 'Chora keeps the dataset you opened, your drawings not yet saved, the historical maps you showed, and the file it last wrote, in this browser, so that you can carry on next time. Turned off, they are cleared when you next open Chora, and the file it wrote is cleared once you have saved it: save your drawings before you leave.',
+  persist: 'Keep large datasets’ working files (ask the browser for persistent storage)',
+  persistNote: 'A browser short of space may clear a site’s files, the working copy of a large dataset among them. Ticked, the browser is asked once to keep them; some browsers ask you, some decide for themselves. The answer cannot be undone from here: clearing this site’s data in the browser does that.',
+  persistResult: {
+    granted: 'The browser agreed: it will not clear these files to make room.',
+    refused: 'The browser did not agree: it may still clear these files when it runs short of space.',
+    unsupported: 'This browser cannot be asked to keep them.',
+  },
   count: (n) => (n ? `${n} allowed` : 'none allowed'),
   notProtected: 'This browser did not show that it enforces the page’s protection, so no other site is asked from this page, whatever is allowed.',
 };
@@ -94,11 +104,13 @@ export const RELOAD_LOSES = {
   drawing: 'The line or area you are drawing, not yet finished.',
   pasted: 'The address in the box for pasting a basemap, not yet added.',
   saving: 'The save running now.',
+  tracing: 'The trace being proposed now.',
 };
 
 /** The one line a feature shows while it waits for a permission. */
 export const NEEDS = {
   line: (name) => `Needs permission: ${name}`,
+  names: (names) => listOf(names),
   open: 'Permissions…',
   reload: (name) => `${name} is allowed, and can be used once the page is reloaded.`,
 };

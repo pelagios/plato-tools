@@ -52,7 +52,7 @@ function render(api) {
   const all = api.list(), cats = [...new Set(all.map((x) => x.cat))];
   const canary = api.canaryState();
   const reload = all.some((x) => x.reload);
-  const t = api.token.get() !== null, remembered = api.remembered();
+  const t = api.token.get() !== null, remembered = api.remembered(), persist = api.persistChoice();
   return `<form method="dialog" class="panel-close"><button type="submit">${esc(PANEL.close)}</button></form>
     <h2 id="permissions-h" tabindex="-1">${esc(PANEL.title)}</h2>
     <p class="promise">${esc(PROMISE)}</p>
@@ -67,10 +67,11 @@ function render(api) {
     </section>
     <section aria-labelledby="perm-token-h">
       <h3 id="perm-token-h">${esc(PANEL.tokenHeading)}</h3>
-      <p>${esc(t ? PANEL.tokenHeld : PANEL.tokenNone)}</p>
+      <p>${esc(t ? PANEL.tokenHeld(api.token.remembered()) : PANEL.tokenNone)}</p>
       <label><input type="checkbox" id="perm-token-remember"${api.token.remembered() ? ' checked' : ''} aria-describedby="perm-token-note"> ${esc(PANEL.tokenRemember)}</label>
       <p class="muted" id="perm-token-note">${esc(PANEL.tokenRememberNote)}</p>
       <p><button type="button" data-token-forget${t ? '' : ' disabled'}>${esc(PANEL.tokenForget)}</button></p>
+      <p class="muted">${esc(PANEL.tokenRevoke)}</p>
     </section>
     <section aria-labelledby="perm-remembered-h">
       <h3 id="perm-remembered-h">${esc(PANEL.rememberedHeading)}</h3>
@@ -80,6 +81,9 @@ function render(api) {
       <h3 id="perm-work-h">${esc(PANEL.workHeading)}</h3>
       <label><input type="checkbox" id="perm-keep-work"${api.keepWorkingData() ? ' checked' : ''} aria-describedby="perm-keep-note"> ${esc(PANEL.keepWork)}</label>
       <p class="muted" id="perm-keep-note">${esc(PANEL.keepWorkNote)}</p>
+      <label><input type="checkbox" id="perm-persist"${persist ? ' checked' : ''} aria-describedby="perm-persist-note"> ${esc(PANEL.persist)}</label>
+      <p class="muted" id="perm-persist-note">${esc(PANEL.persistNote)}</p>
+      <p role="status" id="perm-persist-result">${persist ? esc(persist.unsupported ? PANEL.persistResult.unsupported : persist.granted ? PANEL.persistResult.granted : PANEL.persistResult.refused) : ''}</p>
     </section>`;
 }
 
@@ -97,6 +101,8 @@ function create(api) {
     }
     if (e.target.id === 'perm-token-remember') api.token.remember(e.target.checked);
     if (e.target.id === 'perm-keep-work') api.setKeepWorkingData(e.target.checked);
+    // Asked once, on this choice only; the answer shows when it comes (the panel is drawn again).
+    if (e.target.id === 'perm-persist') api.choosePersist(e.target.checked);
   });
   dialog.addEventListener('click', (e) => {
     const b = e.target.closest('button');

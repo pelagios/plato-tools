@@ -1260,6 +1260,34 @@ def main_permissions(ctx, page, url, requests):
         return ('place-centric-judgements.json' in asked and focus and kept and reloaded and 'https://whgazetteer.org' in csp['origins']), {
             'asked': asked, 'cancel focused': focus, 'kept after cancel': kept, 'reloaded': reloaded, 'policy': csp['origins']}
     attempt('main page: a reload for a permission that would lose the files chosen says so in the panel first; Cancel keeps the page, Reload anyway reloads it with the site in its policy', reload_asks)
+    def persist():
+        # navigator.storage.persist is counted, and answers no, so that the answer shown is the one given.
+        counter = "(() => { window.__persists = 0; if (navigator.storage) navigator.storage.persist = async () => { window.__persists++; return false; }; })()"
+        p = ctx.new_page()
+        try:
+            p.add_init_script(counter)
+            p.goto(NOTOOLS if PROVE else url)
+            wait_state(p, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+            p.evaluate("() => localStorage.removeItem('plato-tools.persist')")
+            asked_on_load = p.evaluate('() => window.__persists')
+            p.click('#permissions-button')
+            until(p, '() => document.getElementById("permissions-panel")?.open', 10)
+            p.check('#perm-persist')
+            until(p, '() => (document.getElementById("perm-persist-result")?.textContent || "").length > 0', 10)
+            said = p.inner_text('#perm-persist-result'); kept = p.evaluate("() => JSON.parse(localStorage.getItem('plato-tools.persist'))")
+            p.keyboard.press('Escape'); p.reload()
+            wait_state(p, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+            p.click('#permissions-button')
+            until(p, '() => document.getElementById("permissions-panel")?.open', 10)
+            again = {'asked': p.evaluate('() => window.__persists'), 'ticked': p.is_checked('#perm-persist'), 'said': p.inner_text('#perm-persist-result')}
+            p.uncheck('#perm-persist'); p.keyboard.press('Escape')
+            gone = p.evaluate("() => localStorage.getItem('plato-tools.persist')")
+            return (asked_on_load == 0 and 'did not agree' in said and kept and kept.get('granted') is False
+                    and again['asked'] == 0 and again['ticked'] and 'did not agree' in again['said'] and gone is None), {
+                'asked on load': asked_on_load, 'said': said, 'kept': kept, 'next visit': again, 'after unticking': gone}
+        finally:
+            p.close()
+    attempt('main page: "Keep large datasets\' working files" asks the browser only when ticked, shows and remembers its answer, and is not asked again on the next visit', persist)
 
 # ---- Chora (chora.html): the map page ------------------------------------------------------------
 # Chora has a browser profile of its own, so that its storage (the drawings kept, the contributor
@@ -2554,18 +2582,22 @@ def chora_checks(pw, url, tmp):
         x, y = map_centre(page); draw(page, 'point', [(x + 150, y + 60)]); page.click('#draw-tools button[data-mode="static"]')
         until(page, '() => window.__chora.pendingCount === 1', 10)
         page.wait_for_timeout(500); held = len(kept(page, name))
+        # A historical map shown, as Chora keeps one (chora-overlays/): a file put there stands for it.
+        page.evaluate('''async () => { const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('chora-overlays', { create: true });
+          const w = await (await d.getFileHandle('map.json', { create: true })).createWritable(); await w.write('{}'); await w.close(); }''')
+        maps = opfs_names(page, 'chora-overlays')
         page.click('#permissions-button')
         until(page, '() => document.getElementById("permissions-panel")?.open', 10)
         page.uncheck('#perm-keep-work'); page.keyboard.press('Escape')
         off = page.evaluate("() => localStorage.getItem('plato-tools.keep-working-data')")
         s = chora_boot(page, base)
         until(page, '() => window.__chora.workingCleared === true', 10)
-        left = opfs_names(page, 'chora-drafts')
+        left = opfs_names(page, 'chora-drafts'); maps_left = opfs_names(page, 'chora-overlays')
         s2 = chora_boot(page, base, [f])
         page.evaluate("() => localStorage.removeItem('plato-tools.keep-working-data')")
-        return held == 1 and off == 'no' and left == [] and s2.get('pendingCount') == 0, {
-            'kept before': held, 'setting': off, 'drafts left': left, 'pending after': s2.get('pendingCount')}
-    attempt('Chora: with "Keep my working data between visits" turned off in the panel, the drawings kept are cleared at the next load (one was kept before)', keep_off)
+        return held == 1 and maps == ['map.json'] and off == 'no' and left == [] and maps_left == [] and s2.get('pendingCount') == 0, {
+            'kept before': held, 'maps before': maps, 'setting': off, 'drafts left': left, 'maps left': maps_left, 'pending after': s2.get('pendingCount')}
+    attempt('Chora: with "Keep my working data between visits" turned off in the panel, the drawings and historical maps kept are cleared at the next load (both were kept before)', keep_off)
 
     STYLES = 'https://styles.example.org'
     GOOD = json.dumps({'version': 8, 'name': 'Probe style', 'sources': {}, 'layers': [{'id': 'probe-bg', 'type': 'background', 'paint': {'background-color': '#f4efe4'}}]})

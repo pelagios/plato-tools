@@ -161,7 +161,7 @@ function listen() {
   if (listening || typeof window === 'undefined') return;
   listening = true;
   window.addEventListener('storage', (e) => {
-    if (e.key !== null && ![KEY, LEGACY, KEEP, TOKEN, TOKEN_REMEMBER, ...Object.keys(REMEMBERED)].includes(e.key)) return;
+    if (e.key !== null && ![KEY, LEGACY, KEEP, TOKEN, TOKEN_REMEMBER, PERSIST, ...Object.keys(REMEMBERED)].includes(e.key)) return;
     if (e.key === TOKEN || e.key === TOKEN_REMEMBER || e.key === null) tokenNotify();
     // An older copy of Chora, open in another tab, may still write its old consents: carried over now.
     // (They reach the page's policy, as any permission does, from its next load.)
@@ -248,42 +248,56 @@ export function transformRequest(subjects, { onBlocked } = {}) {
 }
 
 // ---- The page ------------------------------------------------------------------------------------
-const lines = new Map();   // element -> {cat, subj, name}
+const lines = new Map();   // element -> {pairs: [{cat, subj, key, name}]}
 /**
- * The one line a feature shows while it waits for a permission, in `el`: "Needs permission: <name>"
- * and a button that opens the panel at that permission; allowed since the page loaded, a line that
- * offers the reload; allowed (or Never: the feature does without, and says nothing), nothing. Kept up
- * to date. `added`: the user typed this site (a pasted basemap's), so that once decided the panel says
- * so, with the date. Returns the state.
+ * The one line a feature shows while it waits for permissions, in `el`: "Needs permission: <names>"
+ * and a button that opens the panel at the first still to decide; all allowed since the page loaded, a
+ * line that offers the reload; all allowed (or any Never: the feature does without, and says nothing),
+ * nothing. Kept up to date. needs(el, cat, subj, {name, added}) for one site, or
+ * needs(el, [[cat, subj], …], {added}) for a feature that needs several at once (a historical map's
+ * manifest and image servers): one line, naming those still to allow. `added`: the user typed this
+ * site (a pasted basemap's), so that once decided the panel says so, with the date. Returns the state
+ * of them all: 'never' if any is, 'allowed' if all are, else 'undecided'.
  */
 export function needs(el, cat, subj, { name, added } = {}) {
-  const p = need(cat, subj), k = core.keyOf(p.cat, p.subj), nm = name || nameOf(p.cat, p.subj);
-  needed.set(k, { name: nm, added: !!added });
-  lines.set(el, { cat: p.cat, subj: p.subj, name: nm });
+  let list, opts;
+  if (Array.isArray(cat)) { list = cat; opts = subj || {}; } else { list = [[cat, subj]]; opts = { name, added }; }
+  if (!list.length) throw new TypeError('needs() was given no permission');
+  const pairs = list.map(([c, s]) => {
+    const p = need(c, s), k = core.keyOf(p.cat, p.subj), nm = (list.length === 1 && opts.name) || nameOf(p.cat, p.subj);
+    needed.set(k, { name: nm, added: !!opts.added });
+    return { cat: p.cat, subj: p.subj, key: k, name: nm };
+  });
+  lines.set(el, { pairs });
   renderLine(el);
   listen();
-  return state(p.cat, p.subj);
+  return overall(pairs);
+}
+function overall(pairs) {
+  const sts = pairs.map((x) => state(x.cat, x.subj));
+  return sts.includes('never') ? 'never' : sts.every((x) => x === 'allowed') ? 'allowed' : 'undecided';
 }
 /** Stop showing a line in `el` (and empty it). */
 export function unneed(el) { lines.delete(el); if (el) el.replaceChildren(); }
 function renderLine(el) {
   const l = lines.get(el);
   if (!l) return;
-  const st = state(l.cat, l.subj), k = core.keyOf(l.cat, l.subj);
+  const st = overall(l.pairs);
+  const todo = l.pairs.filter((x) => state(x.cat, x.subj) !== 'allowed');
+  const waiting = l.pairs.filter((x) => waitsForReload(x.cat, x.subj));
   el.replaceChildren();
-  el.dataset.permission = k;
-  if (st === 'allowed' && !waitsForReload(l.cat, l.subj)) { el.hidden = true; return; }
-  if (st === 'never') { el.hidden = true; return; }
+  el.dataset.permission = (todo[0] || waiting[0] || l.pairs[0]).key;
+  if (st === 'never' || (st === 'allowed' && !waiting.length)) { el.hidden = true; return; }
   el.hidden = false;
   el.classList.add('needs-permission');
   const doc = el.ownerDocument, b = doc.createElement('button');
   b.type = 'button';
   if (st === 'allowed') {
-    el.append(NEEDS.reload(l.name), ' ');
+    el.append(NEEDS.reload(NEEDS.names(waiting.map((x) => x.name))), ' ');
     b.textContent = 'Reload the page'; b.onclick = () => reload();
   } else {
-    el.append(NEEDS.line(l.name), ' — ');
-    b.textContent = NEEDS.open; b.className = 'link'; b.onclick = () => open({ focus: k });
+    el.append(NEEDS.line(NEEDS.names(todo.map((x) => x.name))), ' — ');
+    b.textContent = NEEDS.open; b.className = 'link'; b.onclick = () => open({ focus: todo[0].key });
   }
   el.append(b);
 }
@@ -344,6 +358,32 @@ export function mount({ state: pageState } = {}) {
 /** Whether the user wants working data kept between visits (the default). */
 export const keepWorkingData = () => { try { return local()?.getItem(KEEP) !== 'no'; } catch { return true; } };
 export function setKeepWorkingData(on) { if (on) drop(local(), KEEP); else put(local(), KEEP, 'no'); notify(); }
+
+// ---- Persistent storage -------------------------------------------------------------------------
+// "Keep large datasets' working files": on the user's choice, and only then, the browser is asked once
+// (navigator.storage.persist(); Firefox asks the user, others decide), and its answer is remembered
+// ('plato-tools.persist': {granted, at}), so that it is shown and never asked again. Unticking forgets
+// the choice; the browser's answer stays until the site's data is cleared, which the panel says.
+const PERSIST = 'plato-tools.persist';
+/** The choice made, with the browser's answer ({granted, unsupported?, at}), or null when none. */
+export function persistChoice() {
+  const v = readJson(local(), PERSIST);
+  return v && typeof v === 'object' && typeof v.granted === 'boolean' ? v : null;
+}
+/** Make the choice: on, the browser is asked (once: not again while the choice stands); off, it is forgotten. */
+export async function choosePersist(on) {
+  if (!on) { drop(local(), PERSIST); notify(); return null; }
+  const had = persistChoice();
+  if (had) return had;
+  let granted = false, unsupported = false;
+  const ask = globalThis.navigator?.storage?.persist;
+  if (typeof ask !== 'function') unsupported = true;
+  else { try { granted = !!(await globalThis.navigator.storage.persist()); } catch { granted = false; } }
+  const v = { granted, ...(unsupported ? { unsupported } : {}), at: new Date().toISOString() };
+  put(local(), PERSIST, JSON.stringify(v));
+  notify();
+  return v;
+}
 
 // ---- Remembered in this browser ------------------------------------------------------------------
 /**
@@ -414,5 +454,5 @@ export const token = {
 };
 
 // What the panel is given: the module's own functions, so that it has no import of its own here.
-const api = { list, state, set, allowOnce, forget, forgetAll, token, keepWorkingData, setKeepWorkingData, remembered, forgetRemembered,
+const api = { list, state, set, allowOnce, forget, forgetAll, token, keepWorkingData, setKeepWorkingData, remembered, forgetRemembered, persistChoice, choosePersist,
   reload, reloadLosses, canaryState: () => canaryResult, waitsForReload };

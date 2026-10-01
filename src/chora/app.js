@@ -617,7 +617,8 @@ startWorker().then(async () => {
   // go now. (The dataset's working copy, in Chora's SQLite pool, is cleared at every start anyway.)
   if (!permissions.keepWorkingData()) {
     await forgetAllDrafts();
-    try { await (await navigator.storage.getDirectory()).removeEntry('chora-outputs', { recursive: true }); } catch { /* none kept */ }
+    // The historical maps shown (chora-overlays/, once Chora shows them) go too, as the panel says.
+    for (const dir of ['chora-outputs', 'chora-overlays']) { try { await (await navigator.storage.getDirectory()).removeEntry(dir, { recursive: true }); } catch { /* none kept */ } }
     state.workingCleared = true;
   }
   // Files chosen on the main page, offered here.
