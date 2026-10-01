@@ -164,6 +164,8 @@ export function tracedParts(trace, { zoom, role } = {}) {
   const map = georef.georefCitation(record, { region: trace.region, ...(trace.pad ? { pad: trace.pad } : {}) });
   if (trace.licence) map.source = { ...map.source, licence: trace.licence };
   const citations = [map, ...(record.annotationId ? [georef.georefAnnotationCitation(record)] : [])];
-  const notes = `${choraTracingNote({ zoom })} ${georef.georefNote(record, trace.fetchedAt ? { fetched: trace.fetchedAt } : {})}`;
+  // georefNote's fixed template comes first, as Hermes writes it and PLATO's example has it; Chora's
+  // own sentence is appended after, as the template's contract requires.
+  const notes = `${georef.georefNote(record, trace.fetchedAt ? { fetched: trace.fetchedAt } : {})} ${choraTracingNote({ zoom })}`;
   return { citations, notes };
 }

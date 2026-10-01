@@ -2982,7 +2982,7 @@ def iiif_checks(pw, url, tmp):
                 and fns == ['http://purl.org/spar/cito/citesAsEvidence', 'http://purl.org/spar/cito/usesMethodIn']
                 and cits[0]['source'].get('@id') == A + '/manifests/grid/manifest' and m and int(m[3]) >= 64 and int(m[4]) >= 64
                 and cits[1]['source'].get('@id') == grid_id and cits[1]['source'].get('derivedFrom') == A + '/manifests/grid/manifest'
-                and notes.startswith('Traced by hand from a georeferenced historical map') and f'Georeferenced through {grid_id} (polynomial order 1, 4 control points)' in notes
+                and notes.startswith(f'Georeferenced through {grid_id} (polynomial order 1, 4 control points)') and 'Traced by hand from a georeferenced historical map' in notes
                 and 'retrieval date not recorded' in notes and '@id' not in new), {'citations': cits, 'notes': notes, 'geometry': geo, 'trace': lt, 'save': {k: ls.get(k) for k in ('passed', 'added')}}
     attempt('Chora maps: a point traced from the map is, by default, a representative point, approximate, and is saved citing the map (its canvas, 32 px of context each side) and the georeference, with the fixed notes; Mneme passes', trace_save)
 

@@ -179,8 +179,9 @@ test('a traced drawing becomes an attestation citing the map as evidence, on the
   const [x, y, w, h] = m.slice(2).map(Number);
   assert.ok(x <= 255.5 && y <= 255.5 && x + w >= 256.5 && y + h >= 256.5, map.locator);
   assert.ok(x + w <= 512 && y + h <= 512 && x >= 0 && y >= 0, 'within the canvas');
-  // The notes: how it was drawn, then the georeference's fixed sentences, with when it was fetched.
-  assert.ok(a.notes.startsWith(choraTracingNote({ zoom: 14.2 })), a.notes);
+  // The notes: the georeference's fixed sentences first, with when it was fetched, then how it was drawn.
+  assert.ok(a.notes.startsWith(`Georeferenced through ${GRID.id} `), a.notes);
+  assert.ok(a.notes.endsWith(choraTracingNote({ zoom: 14.2 })), a.notes);
   assert.ok(a.notes.includes(`Georeferenced through ${GRID.id} (polynomial order 1, 4 control points), retrieved 2026-09-30T13:55:00.000Z.`), a.notes);
   assert.ok(a.notes.includes('On canvas https://iiif.example.org/manifests/grid/canvas/c1 of manifest https://iiif.example.org/manifests/grid/manifest.'), a.notes);
   assert.ok(!a.notes.includes('where the map writes the name'));
