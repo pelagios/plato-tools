@@ -321,7 +321,12 @@ test('a column named for a gazetteer that is not the address is warned of, on th
   try {
     writeFileSync(join(d, 'g.csv'), text);
     writeFileSync(join(d, 'u.csv'), 'name,uri\nRoma,https://www.geonames.org/3169070\n');
-    assert.match(cli('check', join(d, 'g.csv')).out, /Note: The column “geonames_id” is named for a gazetteer or a web address, but no column is read as the place's web address.*map it to "address" in the mapping given with --columns/);
+    // Its values are GeoNames ids, so the note points at the pattern that makes them addresses
+    // (words.js, patternSuggested); a column of the same name whose values are not ids keeps the
+    // warning that it is named for a gazetteer.
+    assert.match(cli('check', join(d, 'g.csv')).out, /Note: The column “geonames_id” seems to hold a gazetteer's ids, .*give it as \{"field": "address", "pattern": "https:\/\/sws\.geonames\.org\/\{id\}\/"\} in the mapping given with --columns/);
+    writeFileSync(join(d, 'h.csv'), 'name,geonames_id\nRoma,see the notes\n');
+    assert.match(cli('check', join(d, 'h.csv')).out, /Note: The column “geonames_id” is named for a gazetteer or a web address, but no column is read as the place's web address.*map it to "address" in the mapping given with --columns/);
     const u = cli('check', join(d, 'u.csv')).out;
     assert.match(u, /uri +address/, 'control: an address column is read');
     assert.doesNotMatch(u, /is named for a gazetteer/);

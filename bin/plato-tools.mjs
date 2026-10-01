@@ -26,6 +26,7 @@ const { toolsCommit } = await import('../src/node/build-info.js');
 const { fmtBytes, fmtTime, formatName, progressText, summary, groups, draftNote, explainedLines, gazetteerWarnings, LOOKUP_WORDS } = await import('../src/engine/words.js');
 const { mappingOf } = await import('../src/engine/hermes/generic.js');
 const { FIELDS } = await import('../src/engine/hermes/columns.js');
+const { teiReadingRefusal } = await import('../src/engine/hermes/tei.js');
 
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -98,7 +99,10 @@ Options:
                     The fields: ${Object.keys(FIELDS).slice(0, 6).join(', ')},
                     ${Object.keys(FIELDS).slice(6).join(', ')};
                     or "note" (kept in the notes as "column: value") or "skip" (not carried
-                    over, and reported).
+                    over, and reported). A column of a gazetteer's ids is made into web
+                    addresses with {"field": "address", "pattern": "https://pleiades.stoa.org/places/{id}"},
+                    the id replacing {id}; a pattern is suggested for such a column, never
+                    used until it is given here.
   --georef FILE     a Recogito export (W3C Web Annotations): the IIIF Georeference Annotation
                     (from Allmaps) of a map its regions are drawn on. Each region on that map,
                     inside the georeferenced part, becomes a point, with a radius that holds the
@@ -106,6 +110,27 @@ Options:
                     georeference file. Nothing is fetched.
   --manifest FILE   with --georef: the IIIF manifest of a georeferenced map, which gives the
                     size of its canvas. Give it once for each manifest file.
+
+Reading options (check and convert; each is off unless given, and is refused for an input it
+does not apply to):
+  --same-id         a table of places: rows with the same id are evidence about one place, each
+                    row an attestation about it, rather than a repeated id being a problem.
+                    Needs a column read as the place id.
+  --list-places     TEI: also read each <place> of a <listPlace> that has a web address, as an
+                    attestation with its first name as the edition's headword, and its
+                    coordinates where the address is on the edition's own site.
+  --key-pattern [PREFIX=]PATTERN
+                    TEI: make the web address of a place name that has a key and no ref from
+                    the key, for keys with PREFIX (what comes before the key's first ":" or ","),
+                    the rest of the key replacing {id}: --key-pattern tgn=http://vocab.getty.edu/tgn/{id}.
+                    With no PREFIX=, for keys with no prefix. Repeatable. The report suggests a
+                    pattern for each prefix that has none.
+  --header-places   TEI: convert place names in the header (where the object was found or made),
+                    marked as the editors' words.
+  --commentary-places
+                    TEI: convert place names in an edition's commentary, translation and notes,
+                    marked as the editors' words.
+                    These two are refused until PLATO pins its Editorial form status.
   --no-typing       N-Triples output: leave out the node types and typed dates that the DEEP RDF
                     export adds (they are added by default, as in the browser).
   --cube            N-Triples output: also write what the RDF Data Cube vocabulary expects of
@@ -176,8 +201,10 @@ Options:
   --batch N         lookup: queries in one request, 1 to 50 (default 25).
   --dry-run         lookup: say what would be sent, and the first queries exactly; send nothing.
   --json            print one JSON object per input, one per line, then one for the total.
-                    Its "columns", for a table of places, is a list of {column, field, reason}
-                    to read; --columns takes the object printed without --json instead.
+                    Its "columns", for a table of places, is a list of {column, field, pattern,
+                    reason} to read (pattern only where one is given); --columns takes the
+                    object printed without --json instead. For a TEI edition, "keyPatterns"
+                    holds the --key-pattern patterns, {prefix: pattern}.
   --brief           print one line per input and the total, without the details.
   -h, --help        show this help.
   -V, --version     show the version, and the PLATO commit the checks follow.
@@ -190,6 +217,31 @@ did (a place without an address), 2 if it could not be done. For lookup: 0 if ev
 was answered, 1 if some were not or the lookup stopped (the work file still holds what was
 found, to resume from), 2 if it could not be done.
 `;
+
+const READING_FLAGS = ['same-id', 'list-places', 'key-pattern', 'header-places', 'commentary-places'];
+/**
+ * The TEI reading options the flags give ({ listPlaces, headerPlaces, commentaryPlaces, keyPatterns },
+ * only those given), or why they cannot be used, in words. --key-pattern is [PREFIX=]PATTERN: a
+ * prefix has no ":", "," or "/" (a pattern's "https:" has), so a pattern with an "=" of its own is
+ * still read whole; with no prefix, the keys with none.
+ */
+function readingOf(o) {
+  const t = {};
+  if (o['list-places']) t.listPlaces = true;
+  if (o['header-places']) t.headerPlaces = true;
+  if (o['commentary-places']) t.commentaryPlaces = true;
+  if (o['key-pattern'].length) {
+    t.keyPatterns = Object.create(null);
+    for (const given of o['key-pattern']) {
+      const m = /^([^=:,/]*)=(.*)$/s.exec(given);
+      const [prefix, pattern] = m ? [m[1].trim(), m[2].trim()] : ['', given.trim()];
+      if (Object.hasOwn(t.keyPatterns, prefix)) return `--key-pattern is given twice for ${prefix ? `the prefix "${prefix}"` : 'keys with no prefix'}; give one pattern for each.`;
+      t.keyPatterns[prefix] = pattern;
+    }
+  }
+  const refusal = teiReadingRefusal(t);
+  return refusal || { tei: t, sameId: o['same-id'] };
+}
 
 function usage(message) {
   process.stderr.write(`plato-tools: ${message}\nRun "plato-tools --help" for how to use it.\n`);
@@ -205,6 +257,9 @@ async function main(argv) {
         to: { type: 'string' }, out: { type: 'string', default: '.' }, overwrite: { type: 'boolean', default: false },
         base: { type: 'string' }, typing: { type: 'boolean', default: true }, cube: { type: 'boolean', default: false },
         columns: { type: 'string' },
+        'same-id': { type: 'boolean', default: false }, 'list-places': { type: 'boolean', default: false },
+        'header-places': { type: 'boolean', default: false }, 'commentary-places': { type: 'boolean', default: false },
+        'key-pattern': { type: 'string', multiple: true, default: [] },
         with: { type: 'string' }, threshold: { type: 'string' }, 'max-distance': { type: 'string' }, top: { type: 'string' },
         review: { type: 'string' }, output: { type: 'string' }, reviewer: { type: 'string' }, orcid: { type: 'string' },
         'others-title': { type: 'string' },
@@ -231,6 +286,14 @@ async function main(argv) {
   }
   const [action, ...args] = positionals;
   if (!action) return usage('say what to do: check, convert, compare, publish, match or apply.');
+  // The reading options are the readers' (TEI, a table of places), for check and convert only.
+  const readingFlags = READING_FLAGS.filter((f) => f === 'key-pattern' ? o[f].length : o[f]);
+  if (readingFlags.length && action !== 'check' && action !== 'convert') return usage(`${readingFlags.map((f) => `--${f}`).join(', ')} ${readingFlags.length === 1 ? 'is' : 'are'} for check and convert.`);
+  if (readingFlags.length) {
+    const reading = readingOf(o);
+    if (typeof reading === 'string') return usage(reading);
+    o.reading = reading;
+  }
   if (action === 'datacube') return datacube(args, o);
   if (action === 'publish') return publishCommand(args, o, resources);
   if (action === 'match' || action === 'apply') return review(action, args, o, resources);
@@ -286,9 +349,30 @@ async function main(argv) {
     out(o.json ? JSON.stringify(r) + '\n' : describeComparison(r, o.brief));
     return r.exitCode;
   }
+  const items = await gatherInputs(args);
+  // A reading option that applies to none of the inputs, or that one cannot take, is a mistake in
+  // the command: each input is looked at first (and not again).
+  const seen = new Map();
+  if (readingFlags.length) {
+    for (const item of items) seen.set(item, await readInput(item));
+    const formats = new Set([...seen.values()].map((x) => x.input?.format).filter(Boolean));
+    const tables = formats.has('csv') || formats.has('geojson');
+    for (const f of readingFlags) {
+      if (f === 'same-id' && !tables) return usage('--same-id is for a table of places (CSV or GeoJSON), and no input is one.');
+      if (f !== 'same-id' && !formats.has('tei')) return usage(`--${f} is for TEI, and no input is a TEI edition.`);
+    }
+    if (o['same-id']) {
+      for (const [item, { input }] of seen) {
+        if (input?.format !== 'csv' && input?.format !== 'geojson') continue;
+        let m;
+        try { m = await mappingOf(input, o.savedColumns); } catch (e) { if (e?.name !== 'DataError') throw e; continue; /* the run reports what stops the reader */ }
+        if (!Object.values(m.mapping).includes('id')) return usage(`--same-id reads rows with the same id as one place, but no column of ${item.label} is read as the place id; map one to "id" with --columns.`);
+      }
+    }
+  }
   try {
-    for (const item of await gatherInputs(args)) {
-      const r = await runOne(item, action, o, resources, host, live);
+    for (const item of items) {
+      const r = await runOne(item, action, o, resources, host, live, seen.get(item));
       results.push(r);
       out(o.json ? JSON.stringify(r) + '\n' : describe(r, action, o.brief));
     }
@@ -454,31 +538,37 @@ function itemLines(all, action) {
 }
 
 /** Check or convert one input, and say how it went, as an object that --json prints as it is. */
-async function runOne(item, action, o, resources, host, live) {
+async function runOne(item, action, o, resources, host, live, seen) {
   const t0 = Date.now();
   const r = { type: 'input', input: item.label, files: item.paths, format: null, profile: null, action, target: action === 'convert' ? o.to : null,
     status: 'failed', errors: 0, counts: {}, items: [], outputs: [], storeBytes: null, elapsedMs: 0 };
-  const { input, message } = await readInput(item);
+  const { input, message } = seen || await readInput(item);
   if (!input) { r.message = message; r.elapsedMs = Date.now() - t0; return r; }
   r.format = input.format; r.profile = input.profile || null;
   if (input.lpfVersion) r.lpfVersion = input.lpfVersion;
+  // The reading options that apply to this input: a TEI edition's, or a table of places'.
+  const table = input.format === 'csv' || input.format === 'geojson';
+  const reading = input.format === 'tei' ? { ...o.reading?.tei } : table && o.reading?.sameId ? { sameId: true } : {};
+  if (input.format === 'tei' && reading.keyPatterns) r.keyPatterns = { ...reading.keyPatterns };
   if (o.georefFiles) { input.georefs = o.georefFiles; input.manifests = o.manifestFiles; r.georefs = o.georef; r.manifests = o.manifest || []; }
   // A table of places: the columns as they are read (the mapping given with --columns, else the
   // guess), printed with the report so that it can be saved, edited and given back.
   if (input.format === 'csv' || input.format === 'geojson') {
     try {
       const m = await mappingOf(input, o.savedColumns);
-      // In the file's order: an object would put a column whose heading is a number first.
-      r.columns = m.headers.map((column) => ({ column, field: m.mapping[column], reason: m.reasons[column] }));
-      r.columnWarnings = gazetteerWarnings(m.mapping, m.gazetteer, { cli: true });
-      r.profile = Object.values(m.mapping).includes('address') ? 'attestation-centric' : 'place-centric';
+      // In the file's order: an object would put a column whose heading is a number first. A column
+      // made into web addresses through a pattern has it beside its field.
+      r.columns = m.headers.map((column) => ({ column, field: m.mapping[column], ...(Object.hasOwn(m.patterns, column) ? { pattern: m.patterns[column] } : {}), reason: m.reasons[column] }));
+      r.columnWarnings = gazetteerWarnings(m.mapping, m.gazetteer, { cli: true, suggested: m.suggested, patterns: m.patterns });
+      const fields = Object.values(m.mapping);
+      r.profile = fields.includes('address') || (reading.sameId && fields.includes('id')) ? 'attestation-centric' : 'place-centric';
     } catch (e) { if (e?.name !== 'DataError') throw e; /* the run reports what stops the reader */ }
   }
   const progress = live ? (p) => process.stderr.write(`\r\x1b[K${item.label}: ${progressText(p)}`) : undefined;
   const xlsx = input.container === 'workbook' ? await import('xlsx') : undefined;
   const { env, finish } = host.env(resources, { progress, xlsx });
   let result = null, failure = null;
-  try { result = await run({ input, action, target: r.target, options: { base: o.base, typing: o.typing, cube: o.cube, name: input.format === 'csv' ? undefined : item.name, columns: o.savedColumns } }, env); }
+  try { result = await run({ input, action, target: r.target, options: { base: o.base, typing: o.typing, cube: o.cube, name: input.format === 'csv' ? undefined : item.name, columns: o.savedColumns, ...reading } }, env); }
   catch (e) { failure = e; }
   if (live) process.stderr.write('\r\x1b[K');
   // A file the engine could not read to the end comes back as a report marked incomplete; any
@@ -509,6 +599,7 @@ function describe(r, action, brief) {
   const { problems, counted } = summary({ errors: r.errors, counts: r.counts });
   const lines = [head + `  ${problems}${counted ? ' ' + counted : ''}`];
   if (!brief && r.columns) lines.push(...columnLines(r));
+  if (!brief && r.keyPatterns) lines.push('  Keys made into web addresses with the patterns given:', ...Object.entries(r.keyPatterns).map(([prefix, pattern]) => `    ${prefix ? `"${prefix}"` : '(no prefix)'}  ${pattern}`));
   if (!brief) lines.push(...itemLines(r.items, action));
   if (r.message) lines.push(`  ${r.message}`);
   for (const x of r.outputs) lines.push(`  Wrote ${x.path} (${fmtBytes(x.size)})`);
@@ -520,8 +611,8 @@ function columnLines(r) {
   return [
     '  Columns read as (to change this, save the JSON below to a file, edit it, and give it with --columns FILE):',
     ...r.columns.map((c) => `    ${c.column.padEnd(w)}  ${c.field.padEnd(16)}  ${c.reason || ''}`),
-    // The mapping as --columns takes it, written in the file's order.
-    `    {${r.columns.map((c) => `${JSON.stringify(c.column)}:${JSON.stringify(c.field)}`).join(',')}}`,
+    // The mapping as --columns takes it, written in the file's order, a pattern column in its object form.
+    `    {${r.columns.map((c) => `${JSON.stringify(c.column)}:${JSON.stringify(c.pattern === undefined ? c.field : { field: c.field, pattern: c.pattern })}`).join(',')}}`,
     ...(r.columnWarnings || []).map((w) => `  Note: ${w}`),
   ];
 }

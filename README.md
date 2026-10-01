@@ -90,8 +90,9 @@ node bin/plato-tools.mjs compare release-1.jsonl.gz release-2.jsonl.gz  # was an
   report, with the input's format, counts, outputs and status. Its `storeBytes` is the size of the
   working database (the triple store) for RDF or attestation-centric input, or the tables' for
   spreadsheet tables, or null when the input streamed straight through. For a table of places its `columns` is a list of
-  `{column, field, reason}`, to read; `--columns` takes the object printed without `--json` instead.
-  `--brief` prints one line per input.
+  `{column, field, pattern, reason}` (`pattern` only for a column given one), to read; `--columns`
+  takes the object printed without `--json` instead. For a TEI edition, `keyPatterns` holds the
+  `--key-pattern` patterns. `--brief` prints one line per input.
 - `--base URL` gives the base for the web addresses of spreadsheet identifiers
   ([web addresses for your identifiers](https://pelagios.org/place-attestation-ontology/guide/tools.html#converting)). `--no-typing` leaves out the
   node types and typed dates that N-Triples output otherwise has. `--cube` adds what Data Cube
