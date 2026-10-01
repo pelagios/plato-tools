@@ -1366,8 +1366,8 @@ def main():
                 return next(({**a, 'place': p.get('@id')} for p in doc.get('spatialEntities', []) for a in p.get('attestations', []) if any(n.get('toponym') == 'Roma' for n in a.get('names', []))), None)
             s = table_case(page, odd, {}, 'convert', 'plato-json')
             r1 = roma(s, 'odd-guess.json')
-            check('odd-headed CSV -> PLATO JSON with the guess: Roma is about Wikidata Q220, typed "city", with the remark in its notes, and no column reported as not carried',
-                  r1 is not None and r1['place'] == 'https://www.wikidata.org/wiki/Q220' and [t.get('label') for t in r1.get('types', [])] == ['city']
+            check('odd-headed CSV -> PLATO JSON with the guess: Roma is about Wikidata Q220 (its entity address, rule wikidata-page), typed "city", with the remark in its notes, and no column reported as not carried',
+                  r1 is not None and r1['place'] == 'http://www.wikidata.org/entity/Q220' and [t.get('label') for t in r1.get('types', [])] == ['city']
                   and 'Remarks: the capital' in r1.get('notes', '') and not any(i['kind'] == 'generic-column-skipped' for i in s['report']['items']), (s.get('report') or s) if r1 is None else r1)
             s = table_case(page, odd, {'Feature Type': 'note', 'Remarks': 'skip'}, 'convert', 'plato-json')
             r2 = roma(s, 'odd-chosen.json')

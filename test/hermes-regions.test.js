@@ -160,14 +160,16 @@ test('detect(): two exports, a georeference or manifest alone, and an export wit
 // Digests of what the Recogito fixtures converted to, and what they reported, computed by digests()
 // below on hermes-landing 5adecc1, before georeferenced regions existed (the same run twice gave the
 // same digests). Only a change meant to alter how the Recogito reader reads these fixtures may
-// change them.
+// change them. The five Recogito v1 fixtures' were recomputed on merging georeferenced regions into
+// hermes-next, whose canonical addresses (hermes-addresses 1) rewrite their http Pleiades and
+// GeoNames addresses, with a note: their output then was byte for byte hermes-next 774ef7c's.
 const BEFORE = {
   'recogito-studio-constructed.json': ['e3d9a40ad81071be149abb6b17d5ef1f90b9ed38cdbcb9251da9f59f05b69c99', '0280424f635de0d76c00623313d72801b1585f943b465c80f835540dcfeb33de', '2a8275d88d0a87ff44b8d107d456edfe34feaddc017e89bc6d925fc04e995499', '2f9bedcfc081528db67baf8aa4fb3f3f4e3f6109466252806efd3bb9dc47102d'],
-  'recogito-v1-constructed.jsonld': ['91016b7eb07c841d0d74d349a5249241e5f127d25a4c16581cf246d5c78ac604', 'ca3a4f96705f858a25f2ddaf350b4f63d6c39365ea3a7adfbbe4dcfe01e2194f', '3af4b1dcfba3de8e9b1d0c70f56115be28d2fde38b0aeec0e809a14437b34ce1', 'd06f2a8d646bd77be03ce2ef0e2423a8e158ff49bb1cd10a6fae5cd39d5f9bff'],
-  'recogito-v1-islandia-map.jsonld': ['10cff5296782c5e53d19921fb8ec093bb08c40ca7d711b9ac2cf71bdc32e88dc', '1f1656a5bffd2497aedfbf349de12aeeb9703b6e60bcd8ed26ffd75c68da9d20', '562da1d629381f86b4371731ca14836cb60a61b1e9bc8c1284b3ad8b933725e5', '22973deb745e508a135798062d7cb890094d9737d4eb0178ea0d34ae9c78bb9d'],
-  'recogito-v1-linked-traces-readme.json': ['0e304faa898f9ce4e60465be72e3ef2482544f82eb36f4ae2e32e3d303555ccc', '65070340e7495123455bef7001a6a92d664a321a28909cbc31b0ffa7a4da6677', 'ef1d9a69bbbc5bf7caabd36f9a8227af4128ce1b30a25bab1c7d20b76eb5ea2e', 'b2cb7d4098557ceb2f6190382f6493380be0aaccf76aa8383f77c186aaf7a2cc'],
-  'recogito-v1-paulinus-csv.jsonld': ['bed4462f8cfa0d2689f35bf167f5d3b04c1d0dfdfa0c5a1fe6f56d75badb2286', '8077bbc89ea4c4a97e1e112c7d467ed97d4cd67a41498d8daf9e5d26332d39da', '7c5e53d3c2e397db1230db6b0db87eea4aa9daa9fdad0749308c803d19f81a86', '6895955ab58f1580d9958f74a11cb2bf618ae7afb2551394e8a7f3fe3917e793'],
-  'recogito-v1-pliny-text.jsonld': ['fac33d058c83d724f3deb38da7678113e1602ef9457fc98a2096ec72954315ee', '4876189b9aac50da7df998eab982fb521de7a34f47cc1017fd5d6b8c3f8c2c97', '8705e3a107d1d2917aecfce2a098f4a99a6b9262bd1447291fc5e18e18fa3fcc', 'e232cb2dda2e8c90921cf407a95dc68a933899ca7ce2d87c461e737416283b9d'],
+  'recogito-v1-constructed.jsonld': ['4a065503df771827a58ed8727d544ed7b629471039b9a4aa6d79176b60edbc63', 'a6b2a9e3c7d6b7a4badfb429206687bbacadcdd4691f8fe99fd238e9d5d285dc', '86a4081614f49664cf6b657ede4eb18b74a96d60553294bbf09e05658c6d7b26', 'ff4111509227dd0d28b3913fd4762a01ac0c4d2c718b7acae17e23f3eb3435ad'],
+  'recogito-v1-islandia-map.jsonld': ['37776d5d7838d564a632ae93d4dbc12349a523098b28fdaf11f60dda05ae0cc6', '7a1c3f2b4a8721e28dd238712621f3ed1b7832a7ec290612eae0efe109d63112', '1a26ec14b31f7ec59b616026799f7507cdcab916f2a529897a656447a57f94f3', 'a133cc36441ba8cf1d8bb0a3308d84eb0e8de81de3c740b6165534de84946108'],
+  'recogito-v1-linked-traces-readme.json': ['ddd46e2d56025127646ff3047d1d5dd19d984c22567f41d10ffd6169759942b0', 'e355e2bbcae0c5a5edb791691a52c63b1b84543c8988d032ddb71c36186ae8a3', 'd6490bc9f902ad4334d7adee6c14acead472f3c4233891e7d71b62bf3deb3434', '20f74f30ac6e1f88afe6187cd3aee26e610bff84405e1dd009ae31c7e69ba56d'],
+  'recogito-v1-paulinus-csv.jsonld': ['c0fd9d3f88964288b76483b833663eeb9fc2a0602149e257e32486068acfdd42', 'deb0d0567fde6f684154b34dcae7139d9d755c17c57f51d8d54a6edd1c1c95e5', '3a41495e123fbe440aade9488c85ad868d32b18aeed2b217cec6d310f9c18b06', 'eb53dd76513b2ccea4ba441ccb9f6ba8285d5eec1cf0c007ded0d9cc2e62d7f9'],
+  'recogito-v1-pliny-text.jsonld': ['a4977e0358225a482f9353c6d372552914d0c1ace1f322de9b667aafd1984526', '9fadcdf8b20e8083885ae48b9e963a6ef47cdefa707221c33abe7b9502b8a952', 'a03412da8ce74787beae891bbe0c7c7b29d546ffa0583652eeade186f0f444de', 'df3e69992d5b1dde0e38143b09ef079bb155e8d750b077fc4e855de97677b67e'],
 };
 const sha = (s) => createHash('sha256').update(s).digest('hex');
 async function digests(f) {
@@ -275,6 +277,26 @@ for (const [n, c] of Object.entries(CASES)) {
     assert.equal(valid(AC, { profile: 'attestation-centric', gazetteer: { title: 't' }, attestations: [att] }), null);
   });
 }
+test('placed: a region whose place is given by an address the rules rewrite is about the canonical address, with both the address note and the georeference\'s', async () => {
+  // Item 1 (LAKE ERIE) with its geotag's address in a form hermes-addresses rewrites.
+  const items = structuredClone(ITEMS);
+  const one = items.find((a) => a.id === id(1));
+  one.body[0].value.id = 'http://pleiades.stoa.org/places/423025';
+  const { attestation, of } = await placed({ georefs: [ROCQUE], manifests: [ROCQUE_M] }, items);
+  const att = attestation(1);
+  assert.equal(att.about, 'https://pleiades.stoa.org/places/423025');
+  const notes = att.notes.split('\n');
+  assert.ok(notes.includes('Place address given as http://pleiades.stoa.org/places/423025 (rule pleiades-https, hermes-addresses 1)'), att.notes);
+  // Placed as before: the point, the map and the georeference cited, and the georeference's note.
+  const { attestation: as } = await MAIN();
+  assert.deepEqual(att.geometries, as(1).geometries);
+  assert.deepEqual(att.citations, as(1).citations);
+  for (const l of as(1).notes.split('\n')) assert.ok(notes.includes(l), l);
+  assert.ok(of('annotation-region-shape').some((e) => e.startsWith(id(1))));
+  // Control: the unmodified export is about Wikidata, with no address note.
+  assert.equal(as(1).about, 'http://www.wikidata.org/entity/Q5492');
+  assert.ok(!as(1).notes.includes('Place address given as'));
+});
 test('placed through a polynomial georeference: the radius adds its control-point misfit (136.80 km on the Rocque map), and the note says so', async () => {
   // The Rocque annotation, declaring a first-order polynomial instead of its thin plate spline.
   const annotation = json(ROCQUE);

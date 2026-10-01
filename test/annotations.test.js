@@ -79,7 +79,7 @@ const fromAnno = (id) => (x) => x['@id'] === undefined && (x.notes || '').split(
 test('a place link on a TEI text (Linked Traces README, example 1) becomes exactly this attestation', () => {
   const { doc } = mapped([RT[0]]);
   assert.deepEqual(doc.attestations, [{
-    about: 'http://pleiades.stoa.org/places/530906',
+    about: 'https://pleiades.stoa.org/places/530906',
     names: [{ toponym: 'Ithaca' }],
     formStatus: PLATO + 'Attested',
     citations: [{
@@ -88,27 +88,27 @@ test('a place link on a TEI text (Linked Traces README, example 1) becomes exact
     }],
     contributor: 'https://recogito.pelagios.org/rainer',
     modified: '2019-10-21T10:47:52+00:00',
-    notes: 'From annotation https://recogito.pelagios.org/annotation/533fb599-9e02-4fe2-ae98-6857b6055c22',
+    notes: 'Place address given as http://pleiades.stoa.org/places/530906 (rule pleiades-https, hermes-addresses 1)\nFrom annotation https://recogito.pelagios.org/annotation/533fb599-9e02-4fe2-ae98-6857b6055c22',
   }]);
 });
 test('a place link on a map image: the transcription is the name, the region the locator', () => {
   const { doc } = mapped(fixture('recogito-v1-islandia-map.jsonld'));
-  const a = doc.attestations.find((x) => x.about === 'http://sws.geonames.org/3415496');
+  const a = doc.attestations.find((x) => x.about === 'https://sws.geonames.org/3415496/');
   assert.deepEqual(a.names, [{ toponym: 'Keflavig' }]);
   assert.deepEqual(a.citations, [{ source: { '@id': 'https://recogito.pelagios.org/part/46c9126b-6904-4229-bfc3-06b40d1834f1', title: 'Islandia', authorityType: 'source' }, locator: 'region at x 2948, y 4087, 197 by 173 pixels' }]);
   assert.equal(a.geometries, undefined, "the gazetteer's coordinates are not the document's evidence");
 });
 test('a plain text: character positions; a CSV: the row; a tag that is only a word goes to the notes', () => {
   const p = mapped(fixture('recogito-v1-pliny-text.jsonld')).doc.attestations.find(fromAnno('https://recogito.pelagios.org/annotation/db7cebda-cb21-4942-8080-24074e78189e'));
-  assert.deepEqual([p.about, p.names, p.citations[0].locator, p.citations[0].source.title], ['http://pleiades.stoa.org/places/570718', [{ toponym: 'Theganusa' }], 'characters 1083 to 1092', 'PlinyCapeMalea.txt']);
+  assert.deepEqual([p.about, p.names, p.citations[0].locator, p.citations[0].source.title], ['https://pleiades.stoa.org/places/570718', [{ toponym: 'Theganusa' }], 'characters 1083 to 1092', 'PlinyCapeMalea.txt']);
   const c = mapped(fixture('recogito-v1-paulinus-csv.jsonld')).doc.attestations.find(fromAnno('https://recogito.pelagios.org/annotation/dff95cf2-02a0-4ab7-9777-15efb4ce891d'));
-  assert.deepEqual([c.about, c.names, c.citations[0].locator, c.notes, c.types], ['http://pleiades.stoa.org/places/442518', undefined, 'row 2', 'Tag: Paulinus of Nola\nFrom annotation https://recogito.pelagios.org/annotation/dff95cf2-02a0-4ab7-9777-15efb4ce891d', undefined]);
+  assert.deepEqual([c.about, c.names, c.citations[0].locator, c.notes, c.types], ['https://pleiades.stoa.org/places/442518', undefined, 'row 2', 'Tag: Paulinus of Nola\nPlace address given as http://pleiades.stoa.org/places/442518 (rule pleiades-https, hermes-addresses 1)\nFrom annotation https://recogito.pelagios.org/annotation/dff95cf2-02a0-4ab7-9777-15efb4ce891d', undefined]);
 });
 test('comments, notes and tags: a tag from a vocabulary is a type, a free tag and a comment are notes', () => {
   const { doc } = mapped(fixture('recogito-v1-constructed.jsonld'));
-  const a = doc.attestations.find((x) => x.about === 'http://pleiades.stoa.org/places/570536');
+  const a = doc.attestations.find((x) => x.about === 'https://pleiades.stoa.org/places/570536');
   assert.deepEqual(a.types, [{ identifier: 'http://vocab.getty.edu/aat/300008347', label: 'inhabited places' }]);
-  assert.equal(a.notes, 'Note: Corinth, not Kenchreai\nComment: The harbour town is meant here.\nTag: to check\nFrom annotation https://recogito.pelagios.org/annotation/7d0e2c10-0001-4000-8000-000000000001');
+  assert.equal(a.notes, 'Note: Corinth, not Kenchreai\nComment: The harbour town is meant here.\nTag: to check\nPlace address given as http://pleiades.stoa.org/places/570536 (rule pleiades-https, hermes-addresses 1)\nFrom annotation https://recogito.pelagios.org/annotation/7d0e2c10-0001-4000-8000-000000000001');
   const s = mapped(fixture('recogito-studio-constructed.json')).doc.attestations.find((x) => x.about === 'http://www.wikidata.org/entity/Q14989');
   assert.deepEqual([s['@id'], s.names, s.types, s.notes, s.contributor, s.created], [undefined, [{ toponym: 'Ancyra' }],
     [{ identifier: 'http://vocab.getty.edu/aat/300008347', label: 'settlement' }], 'Comment: Ancyra in the Itinerarium.\nFrom annotation urn:uuid:0c1d2e3f-4a5b-4c6d-8e7f-8091a2b3c4d1', { name: 'Ayşe Yılmaz' }, '2026-09-29T10:16:00.000Z']);
@@ -116,7 +116,7 @@ test('comments, notes and tags: a tag from a vocabulary is a type, a free tag an
 test('the mapping survives the conversion: the attestation read back from PLATO JSON has the same about, name and locator', async () => {
   const r = await go([file(DIR + 'recogito-v1-linked-traces-readme.json')], 'convert', 'plato-json');
   const a = allAttestations(JSON.parse(outText(r.e, 'recogito-v1-linked-traces-readme.json'))).find(fromAnno(RT[0].id));
-  assert.deepEqual([a.about, a.names, a.formStatus, a.citations[0].locator, a.contributor], ['http://pleiades.stoa.org/places/530906', [{ toponym: 'Ithaca' }], PLATO + 'Attested', 'XPath /TEI[1]/text[1]/body[1]/div[1]/p[2]', 'https://recogito.pelagios.org/rainer']);
+  assert.deepEqual([a.about, a.names, a.formStatus, a.citations[0].locator, a.contributor], ['https://pleiades.stoa.org/places/530906', [{ toponym: 'Ithaca' }], PLATO + 'Attested', 'XPath /TEI[1]/text[1]/body[1]/div[1]/p[2]', 'https://recogito.pelagios.org/rainer']);
 });
 
 // ---- what is not converted, and is reported -------------------------------------------------------
@@ -124,10 +124,10 @@ const V1 = mapped(fixture('recogito-v1-constructed.jsonld'));
 const about = (m) => m.doc.attestations.map((a) => a.about);
 const names = (m) => m.doc.attestations.flatMap((a) => (a.names || []).map((n) => n.toponym));
 test('an unverified link (made by software, no creator) is left out and reported; a confirmed one beside it is kept', () => {
-  assert.ok(!about(V1).includes('http://pleiades.stoa.org/places/570728'));
+  assert.ok(!about(V1).includes('https://pleiades.stoa.org/places/570728'));
   assert.ok(!names(V1).includes('Lechaeum'));
-  assert.deepEqual(V1.reported.filter(([k]) => k === 'annotation-unverified'), [['annotation-unverified', 'https://recogito.pelagios.org/annotation/7d0e2c10-0001-4000-8000-000000000002: http://pleiades.stoa.org/places/570728']]);
-  assert.ok(about(V1).includes('http://pleiades.stoa.org/places/570536'), 'control: the confirmed link is converted');
+  assert.deepEqual(V1.reported.filter(([k]) => k === 'annotation-unverified'), [['annotation-unverified', 'https://recogito.pelagios.org/annotation/7d0e2c10-0001-4000-8000-000000000002: https://pleiades.stoa.org/places/570728']]);
+  assert.ok(about(V1).includes('https://pleiades.stoa.org/places/570536'), 'control: the confirmed link is converted');
   // The links that remain cannot be known to be confirmed, and the file says so once.
   assert.deepEqual(V1.reported.filter(([k]) => k === 'annotation-verification-unknown'), [['annotation-verification-unknown', '3 links']]);
 });

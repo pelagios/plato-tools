@@ -35,7 +35,7 @@
 //     source only for a manifest's canvas): a target with a selector and no source is a position
 //     in a document the export does not name, converted with a warning.
 import { PLATO, isAbsoluteIri } from '../lib/context.js';
-import { placeAddress } from '../engine/hermes/addresses.js';
+import { placeAddress, addressNote } from '../engine/hermes/addresses.js';
 
 export const ANNO_CONTEXT = /^https?:\/\/www\.w3\.org\/ns\/anno\.jsonld$/;
 const ATTESTED = PLATO + 'Attested';
@@ -66,6 +66,7 @@ export const ANNOTATION_KINDS = {
   'annotation-whg-record': 'loss',
   'annotation-whg-staging': 'loss',
   'annotation-source-not-address': 'warning',
+  'address-pleiades-part': 'warning',
   'annotation-target-no-source': 'warning',
   'annotation-several-places': 'warning',
   'annotation-verification-unknown': 'warning',
@@ -344,14 +345,15 @@ export class AnnotationReader {
       if (b && typeof b === 'object') for (const k of Object.keys(b)) if (!BODY_KEYS.has(k) && b[k] !== undefined && b[k] !== null) keyLoss(`body.${k}`);
       return c;
     });
-    // A place's address in the form PLATO should carry (src/engine/hermes/addresses.js): WHG's
-    // record addresses are rewritten to their persistent form, and an address WHG would answer
-    // with the wrong place is not carried over.
+    // A place's address in the form PLATO should carry (src/engine/hermes/addresses.js): a
+    // gazetteer's forms of an address become its one form, WHG's record addresses are rewritten to
+    // their persistent form, and an address WHG would answer with the wrong place is not carried over.
     const links = [];
     for (const c of read.filter((c) => c.kind === 'link')) {
       const addr = placeAddress(c.iri);
       if (addr.lost) { report(addr.lost === 'whg-staging' ? 'annotation-whg-staging' : 'annotation-whg-record', `${where}: ${addr.value}`); continue; }
-      links.push(addr.from ? { ...c, iri: addr.iri, from: addr.from } : c);
+      if (addr.part) report('address-pleiades-part', `${where}: ${addr.iri}`);
+      links.push(addr.from ? { ...c, iri: addr.iri, from: addr.from, rules: addr.rules } : c);
     }
     // Recogito v1 does not write whether a link was confirmed. A link with no creator was made by
     // software (named-entity recognition and gazetteer matching) and never saved by a person:
@@ -431,7 +433,7 @@ export class AnnotationReader {
       if (created) att.created = created;
       if (modified) att.modified = modified;
       const own = [...notes];
-      if (l.from) own.push(`Place address given as ${l.from}`);
+      if (l.from) own.push(addressNote(l));
       if (typeof b.note === 'string' && b.note.trim()) own.unshift(`Note: ${b.note}`);
       if (kept.length > 1) own.push(`Annotation ${id || where} links this passage to ${kept.length} places: ${kept.map((k) => k.iri).join(', ')}.`);
       // The annotation's address is not the attestation's @id: an annotation can be edited and

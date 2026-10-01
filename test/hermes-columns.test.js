@@ -212,10 +212,11 @@ test('with no name, the label is the first other name; with neither there is no 
 });
 test('the address column gives the address only when it is a web address', () => {
   const m = { n: 'name', w: 'address', i: 'id' };
-  assert.deepEqual([read({ w: 'https://www.wikidata.org/wiki/Q220' }, m).a.address, read({ w: 'Q220' }, m).a.address, read({ w: 'Q220' }, m).a.addressText],
-    ['https://www.wikidata.org/wiki/Q220', undefined, 'Q220']);
+  // Wikidata's entity address, already in the form addresses.js gives, so that nothing is rewritten here.
+  assert.deepEqual([read({ w: 'http://www.wikidata.org/entity/Q220' }, m).a.address, read({ w: 'Q220' }, m).a.address, read({ w: 'Q220' }, m).a.addressText],
+    ['http://www.wikidata.org/entity/Q220', undefined, 'Q220']);
   // Rows about an address keep their id in the notes, since the place is not theirs to name.
-  const { a } = read({ n: 'R', w: 'https://www.wikidata.org/wiki/Q220', i: 'r1' }, m, { idAsNote: true });
+  const { a } = read({ n: 'R', w: 'http://www.wikidata.org/entity/Q220', i: 'r1' }, m, { idAsNote: true });
   assert.equal(a.attestation.notes, 'i: r1');
   assert.equal(read({ n: 'R', i: 'r1' }, m).a.attestation.notes, undefined, 'control: a place-centric row does not');
 });

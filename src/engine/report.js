@@ -167,6 +167,11 @@ export const LOSS_TEXT = {
   'unmapped-predicate': 'A predicate that has no place in PLATO JSON is dropped.',
   'unmapped-type': 'A class that has no place in PLATO JSON is dropped.',
 };
+// A place's address, in any reader that passes it through src/engine/hermes/addresses.js (Recogito's
+// annotations, TEI, and tables of places). The severity is each reader's kinds map's.
+Object.assign(LOSS_TEXT, {
+  'address-pleiades-part': "A Pleiades address that names part of a place's record (a location, a name, or a format such as /json), not the place itself, is carried as it is, not changed to the place's address. Check that it is the place you mean. An address ending #this is not a part: it is the place in Pleiades' own data, written differently from its plain address, and it too is carried as it is.",
+});
 // A table of places, CSV or plain GeoJSON (src/engine/hermes/columns.js, generic.js): what a row holds
 // that is not carried, and what is carried but worth a look. The severity of each is GENERIC_KINDS's.
 Object.assign(LOSS_TEXT, {

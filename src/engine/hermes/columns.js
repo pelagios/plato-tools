@@ -15,7 +15,7 @@
 // do, a date column is the date as the source writes it, a start and end the earliest start and
 // latest end, a type column a type's label (and its identifier, when it is a web address).
 import { isAbsoluteIri } from '../../lib/context.js';
-import { placeAddress } from './addresses.js';
+import { placeAddress, addressNote } from './addresses.js';
 
 /** What each field of the mapping means, and whether one column only may be mapped to it. */
 export const FIELDS = {
@@ -60,6 +60,7 @@ export const GENERIC_KINDS = {
   'generic-not-feature': 'loss',
   'generic-csv-extra-cells': 'loss',
   'generic-csv-row': 'warning',
+  'address-pleiades-part': 'warning',
   'generic-csv-duplicate-header': 'warning',
   'generic-no-ids': 'warning',
   'generic-id-empty': 'warning',
@@ -380,11 +381,12 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
       case 'geometry': geomCell = { col, v }; break;
       case 'id': id = v; idCol = col; break;
       case 'address': {
-        // Put into the form `about` should carry (addresses.js): WHG's reconciliation ids and entity
-        // pages become its persistent addresses; one that must not be carried is reported.
+        // Put into the form `about` should carry (addresses.js): a gazetteer's forms of an address
+        // become its one form, WHG's reconciliation ids and entity pages its persistent addresses;
+        // one that must not be carried is reported.
         const p = placeAddress(v);
         if (p.lost) { addressLost = true; report(p.lost === 'whg-staging' ? 'generic-whg-staging' : 'generic-whg-record', `${where}: ${p.value}`); }
-        else if (isWebAddress(p.iri)) { address = p.iri.trim(); addressFrom = p.from; }
+        else if (isWebAddress(p.iri)) { address = p.iri.trim(); addressFrom = p.from ? p : undefined; if (p.part) report('address-pleiades-part', `${where}: ${p.iri}`); }
         else { addressText = v; note(col, v); }   // kept, should the row become a place of its own
         break;
       }
@@ -410,7 +412,7 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
   for (const a of alternatives) if (a !== name) names.push({ toponym: a });
   // A row about an address keeps its id in the notes, since the place is not the file's to name.
   if (idAsNote && address && id !== undefined) note(idCol, id);
-  if (address && addressFrom) notes.push(`Place address given as ${addressFrom}`);
+  if (address && addressFrom) notes.push(addressNote(addressFrom));
 
   const geometries = [];
   // A latitude and longitude: a location exactly as the locations sheet makes one, with the WKT beside it.

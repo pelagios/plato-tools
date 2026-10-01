@@ -233,7 +233,7 @@ test('a place name in the teiHeader (where the inscription was found) is reporte
     'teiHeader: Siracusa (http://sws.geonames.org/2523083)',
     'teiHeader: catacomb of S. Giovanni (https://pleiades.stoa.org/places/560149180)',
   ]);
-  assert.ok(!about(ISIC).includes('http://pleiades.stoa.org/places/462503') && !names(ISIC).includes('Syracusae'));
+  assert.ok(!about(ISIC).some((a) => a.includes('pleiades.stoa.org/places/462503')) && !names(ISIC).includes('Syracusae'));
   assert.ok(names(ISIC).includes('Μάκρης κώμης'), 'control');
 });
 test('a prefix with no prefixDef, and a prefix that expands to something not a web address, are reported', () => {
@@ -249,9 +249,10 @@ test('a local ref to a place with no web address is reported; one with a web add
   assert.ok(names(PTR).includes('Ἀθηνῶν'), 'control');
 });
 test('a local ref to a place with several web addresses carries nothing over, and lists them', () => {
-  assert.deepEqual(examples(PTR, 'tei-ref-ambiguous'), ['#thebes: https://pleiades.stoa.org/places/541138, https://www.wikidata.org/entity/Q192393']);
+  // The idno writes https://www.wikidata.org/entity/Q192393, listed in its canonical form (rule wikidata-https).
+  assert.deepEqual(examples(PTR, 'tei-ref-ambiguous'), ['#thebes: https://pleiades.stoa.org/places/541138, http://www.wikidata.org/entity/Q192393']);
   assert.ok(!names(PTR).includes('Θῆβαι'));
-  assert.ok(!about(PTR).includes('https://pleiades.stoa.org/places/541138') && !about(PTR).includes('https://www.wikidata.org/entity/Q192393'));
+  assert.ok(!about(PTR).includes('https://pleiades.stoa.org/places/541138') && !about(PTR).includes('http://www.wikidata.org/entity/Q192393'));
   assert.ok(about(PTR).includes('https://pleiades.stoa.org/places/579885'), 'control: #athens, with one address, is resolved');
 });
 test('a ref into another file is reported', () => {
@@ -491,8 +492,8 @@ test('XML that is not TEI, or says it is not UTF-8, is a DataError in the reader
 // ---- World Historical Gazetteer addresses (src/engine/hermes/addresses.js) ------------------------
 const whgAbout = (toponym) => WHG.doc.attestations.filter((a) => a.names[0].toponym === toponym).map((a) => [a.about, a.notes.split('\n')[0]]);
 test('a WHG reconciliation id (place:gn:…) and a WHG entity page are carried as the w3id address, with a note of what was written', () => {
-  assert.deepEqual(whgAbout('Paris'), [['https://w3id.org/whg/id/place:gn:2988507', 'Place address given as place:gn:2988507']]);
-  assert.deepEqual(whgAbout('Marseille'), [['https://w3id.org/whg/id/place:gn:2995469', 'Place address given as https://whgazetteer.org/entity/place:gn:2995469/api']]);
+  assert.deepEqual(whgAbout('Paris'), [['https://w3id.org/whg/id/place:gn:2988507', 'Place address given as place:gn:2988507 (rule whg-record-id, hermes-addresses 1)']]);
+  assert.deepEqual(whgAbout('Marseille'), [['https://w3id.org/whg/id/place:gn:2995469', 'Place address given as https://whgazetteer.org/entity/place:gn:2995469/api (rule whg-entity-page, hermes-addresses 1)']]);
   assert.ok(!examples(WHG, 'tei-ref-prefix').some((e) => e.startsWith('place:')), 'place:gn:… is no longer an unexpanded prefix');
   // control: an address WHG does not rewrite is carried as written, with no such note
   assert.deepEqual(whgAbout('Lyon'), [['https://whgazetteer.org/places/12345999/portal/', 'From TEI element <placeName> on line 16 of whg-constructed.xml']]);
@@ -512,7 +513,7 @@ test('a WHG database-record address and a staging address are reported, not carr
   assert.ok(names(WHG).includes('Lyon'), 'control: a WHG cluster address in the range of whg_ids is carried');
 });
 test('an idno in a list of places passes through the same rewriting: place:gn:… becomes the w3id address', () => {
-  assert.deepEqual(whgAbout('Bordeaux'), [['https://w3id.org/whg/id/place:gn:3031582', 'Place address given as place:gn:3031582']]);
+  assert.deepEqual(whgAbout('Bordeaux'), [['https://w3id.org/whg/id/place:gn:3031582', 'Place address given as place:gn:3031582 (rule whg-record-id, hermes-addresses 1)']]);
   // control: a place whose only idno is refused has no address, and says so
   assert.deepEqual(examples(WHG, 'tei-ref-local'), ['#nantes']);
 });

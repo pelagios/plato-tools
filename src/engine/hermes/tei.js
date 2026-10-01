@@ -21,7 +21,7 @@ import { SaxesParser } from 'saxes';
 import { PLATO, isAbsoluteIri } from '../../lib/context.js';
 import { DataError, textStream } from '../input.js';
 import { LOSS_TEXT } from '../report.js';
-import { placeAddress } from './addresses.js';
+import { placeAddress, addressNote } from './addresses.js';
 
 export const TEI_NS = 'http://www.tei-c.org/ns/1.0';
 const ATTESTED = PLATO + 'Attested';
@@ -60,6 +60,7 @@ export const TEI_KINDS = {
   'tei-place-content': 'loss',
   'tei-variant': 'loss',
   'tei-ref-several': 'warning',
+  'address-pleiades-part': 'warning',
   'tei-source-no-address': 'warning',
   'tei-none-linked': 'warning',
 };
@@ -372,7 +373,8 @@ export class TeiReader {
         this.capture((c) => {
           const s = norm(c.pref), r = placeAddress(s);
           if (r.lost) { this.report(WHG_LOST[r.lost], `#${pl.id ?? ''}: ${r.value}`); return; }
-          if (isWeb(r.iri)) { if (!pl.uris.some((u) => u.iri === r.iri)) pl.uris.push(r.from ? { iri: r.iri, from: r.from } : { iri: r.iri }); }
+          if (r.part) this.report('address-pleiades-part', `#${pl.id ?? ''}: ${r.iri}`);
+          if (isWeb(r.iri)) { if (!pl.uris.some((u) => u.iri === r.iri)) pl.uris.push(r.from ? { iri: r.iri, from: r.from, rules: r.rules } : { iri: r.iri }); }
           else this.report('tei-place-content', `${pl.id !== undefined ? `#${pl.id}` : 'a place with no xml:id'}: <idno${t.attributes.type ? ` type="${t.attributes.type.value}"` : ''}> ${s}`);
         });
         return;
@@ -578,12 +580,14 @@ export class TeiReader {
    */
   resolve(p, m, final) {
     const words = m.toponym ? ` (${m.toponym})` : '';
-    // Every address about to be carried passes through placeAddress, which rewrites WHG's forms to
-    // their persistent address and refuses the ones that name the wrong thing.
+    // Every address about to be carried passes through placeAddress, which puts a gazetteer's forms
+    // of an address into its one form, rewrites WHG's forms to their persistent address, and refuses
+    // the ones that name the wrong thing.
     const address = (v, via) => {
       const r = placeAddress(v);
       if (r.lost) { this.report(WHG_LOST[r.lost], `${r.value}${words}`); return null; }
-      return { iri: r.iri, ...(r.from ? { from: r.from } : {}), ...(via ? { via } : {}) };
+      if (r.part) this.report('address-pleiades-part', `${r.iri}${words}`);
+      return { iri: r.iri, ...(r.from ? { from: r.from, rules: r.rules } : {}), ...(via ? { via } : {}) };
     };
     if (isWeb(p)) return address(p);
     if (p.startsWith('#')) {
@@ -638,7 +642,7 @@ export class TeiReader {
       // Where the attestation came from, as the Recogito reader says "From annotation …". The
       // element's xml:id is not taken for the attestation's @id: the edition can be revised under
       // the same ids, and a published attestation must never change.
-      if (r.from) notes.push(`Place address given as ${r.from}`);
+      if (r.from) notes.push(addressNote(r));
       notes.push(`From TEI element <${m.element}${m.xmlId ? ` xml:id="${m.xmlId}"` : ''}${r.via ? ` ref="${r.via}"` : ''}> on line ${m.fileLine} of ${this.fileName}`);
       att.notes = notes.join('\n');
       this.attestations++;

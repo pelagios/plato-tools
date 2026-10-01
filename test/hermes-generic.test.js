@@ -112,12 +112,13 @@ test('odd-headers.csv: rows with a web address become attestations about it, sev
   assert.equal(r.doc.profile, 'attestation-centric');
   assert.equal(await genericProfile(r.input), 'attestation-centric');
   const about = r.doc.attestations.map((a) => a.about);
-  assert.deepEqual(about.filter((a) => a === 'https://www.wikidata.org/wiki/Q90').length, 2);
+  // Written as Wikidata's page, each is carried as its entity address (rule wikidata-page).
+  assert.deepEqual(about.filter((a) => a === 'http://www.wikidata.org/entity/Q90').length, 2);
   assert.equal(about.length, 7);
   const roma = r.doc.attestations[0];
   assert.deepEqual(roma.names, [{ toponym: 'Roma' }, { toponym: 'Rome' }, { toponym: 'Urbs' }]);
   assert.deepEqual(roma.citations, [{ source: { title: 'Itinerarium Antonini', authorityType: 'source' } }]);
-  assert.equal(roma.notes, 'Remarks: the capital');
+  assert.equal(roma.notes, 'Remarks: the capital\nPlace address given as https://www.wikidata.org/wiki/Q220 (rule wikidata-page, hermes-addresses 1)');
   for (const [k, ex] of [['generic-coordinate-missing', 'row 6'], ['generic-coordinate-not-number', 'row 7'], ['generic-coordinate-range', 'row 8'], ['generic-no-address', 'row 9'], ['generic-row-empty', 'row 10']]) {
     assert.ok(r.of(k)?.examples.some((e) => e.startsWith(ex)), `${k} at ${ex}`);
   }
@@ -241,7 +242,7 @@ test('genericProfile takes the run\'s options whole, and still a saved mapping a
 });
 test('an address column whose value is not a web address loses the row, and says so', async () => {
   const r = await readAll(textFile('name,wikidata\nRoma,https://www.wikidata.org/wiki/Q220\nAthenae,Q1524\n', 'x.csv'), { columns: { name: 'name', wikidata: 'address' } });
-  assert.deepEqual(r.doc.attestations.map((a) => a.about), ['https://www.wikidata.org/wiki/Q220']);
+  assert.deepEqual(r.doc.attestations.map((a) => a.about), ['http://www.wikidata.org/entity/Q220']);
   assert.deepEqual(r.of('generic-address-not-web').examples, ['row 3: Q1524']);
 });
 
@@ -261,9 +262,9 @@ test("WHG's reconciliation ids and entity pages become its persistent addresses,
   assert.equal(valid(r.doc), null);
   const [roma, lutetia, cluster] = r.doc.attestations;
   assert.equal(roma.about, `${W3ID}place:gn:3169070`);
-  assert.equal(roma.notes, 'id: r1\nPlace address given as place:gn:3169070');
+  assert.equal(roma.notes, 'id: r1\nPlace address given as place:gn:3169070 (rule whg-record-id, hermes-addresses 1)');
   assert.equal(lutetia.about, `${W3ID}place:wd:Q90`);
-  assert.match(lutetia.notes, /Place address given as https:\/\/whgazetteer\.org\/entity\/place:wd:Q90\/api$/);
+  assert.match(lutetia.notes, /Place address given as https:\/\/whgazetteer\.org\/entity\/place:wd:Q90\/api \(rule whg-entity-page, hermes-addresses 1\)$/);
   // A cluster's own address (a whg_id) has no other form, and is kept as it is, with no note.
   assert.equal(cluster.about, 'https://whgazetteer.org/places/12345999/portal/');
   assert.doesNotMatch(cluster.notes, /Place address given as/);
@@ -399,7 +400,7 @@ test('a feature that is null, a number, a string or a list, or has properties or
 });
 test('a row whose address is not one, but which has an id, becomes a place of its own, keeping what the address column said', async () => {
   const r = await readAll(textFile('id,name,wikidata\nr1,Roma,https://www.wikidata.org/wiki/Q220\nr2,Athenae,Q1524\n', 'x.csv'), { columns: { id: 'id', name: 'name', wikidata: 'address' } });
-  assert.deepEqual(r.doc.attestations.map((a) => a.about), ['https://www.wikidata.org/wiki/Q220']);
+  assert.deepEqual(r.doc.attestations.map((a) => a.about), ['http://www.wikidata.org/entity/Q220']);
   assert.deepEqual(r.doc.newSpatialEntities.map((p) => [p.entityIdentifier, p.attestations[0].notes]), [['r2', 'wikidata: Q1524']]);
   assert.ok(!r.kinds.has('generic-address-not-web'), 'nothing is lost, so nothing is reported');
   assert.equal(valid(r.doc), null);
