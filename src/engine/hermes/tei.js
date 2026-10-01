@@ -121,6 +121,7 @@ export const TEI_KINDS = {
   'tei-listplace-geo': 'loss',
   'tei-listplace-variant': 'loss',
   'tei-listplace-no-address': 'loss',
+  'tei-listplace-ambiguous': 'loss',
   'tei-listplace-geo-gazetteer': 'loss',
   'tei-listplace-geo-datum': 'loss',
   'tei-listplace-geo-invalid': 'loss',
@@ -650,8 +651,8 @@ export class TeiReader {
   }
 
   /**
-   * A place in a list of places, read with the reading option listPlaces: one attestation for each
-   * web address its idnos give, its first name the headword (formStatus Headword: the form the edition
+   * A place in a list of places, read with the reading option listPlaces: one attestation for the
+   * one web address its idnos give (several: ambiguous, reported, nothing converted), its first name the headword (formStatus Headword: the form the edition
    * files the place under), its other names reported. Its coordinates are carried only where they can
    * be the editors' own: the place's address is on the edition's own site (the host of the
    * publicationStmt's idno of type URI, never a DOI), and the header declares no datum but WGS84.
@@ -660,6 +661,9 @@ export class TeiReader {
     const which = pl.id !== undefined ? `#${pl.id}` : 'a place with no xml:id';
     const words = pl.names.map((n) => n.text).join(', ') || 'no name';
     if (!pl.uris.length) { this.report('tei-listplace-no-address', `${which}: ${words}`); return; }
+    // Several different addresses: which place is meant cannot be told, as for a ref to it (tei-ref-ambiguous).
+    // Two forms of one address (http and https) were made one as the idnos were read.
+    if (pl.uris.length > 1) { this.report('tei-listplace-ambiguous', `${which}: ${pl.uris.map((u) => u.iri).join(', ')}`); return; }
     if (!pl.names.length) { if (pl.geo.length) this.report('tei-listplace-geo', `${which}: ${pl.geo.join('; ')}`); return; }
     const [head, ...variants] = pl.names;
     if (variants.length) this.report('tei-listplace-variant', `${which}: ${variants.map((n) => n.text).join(', ')}`);
@@ -691,7 +695,6 @@ export class TeiReader {
       }
       att.citations = [{ source, locator }];
       const notes = [];
-      if (pl.uris.length > 1) notes.push(`The list of places gives ${pl.uris.length} addresses for this place, each an attestation of its own: ${pl.uris.map((x) => x.iri).join(', ')}.`);
       if (u.from) notes.push(addressNote(u));
       notes.push(`From TEI element <place${pl.id !== undefined ? ` xml:id="${pl.id}"` : ''}> on line ${pl.fileLine} of ${this.fileName}`);
       att.notes = notes.join('\n');
