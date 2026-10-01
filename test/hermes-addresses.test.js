@@ -127,6 +127,20 @@ for (const [rule, given, carried] of RULES) {
   });
 }
 
+test('rule wikidata-https also takes the entity address without www., by http or https; the canonical address is left as it is', async () => {
+  const CANON = 'http://www.wikidata.org/entity/Q42';
+  for (const given of ['https://wikidata.org/entity/Q42', 'http://wikidata.org/entity/Q42', 'https://www.wikidata.org/entity/Q42']) {
+    assert.deepEqual(placeAddress(given), { iri: CANON, from: given, rules: ['wikidata-https'] }, given);
+    for (const [name, via] of [['TEI', viaTei], ['CSV', viaCsv], ['Recogito', viaRecogito]]) {
+      const r = await via(given);
+      assert.equal(r.about, CANON, `${name}: ${given}`);
+      assert.ok(r.notes.split('\n').includes(`Place address given as ${given} (rule wikidata-https, hermes-addresses 1)`), `${name}: ${r.notes}`);
+    }
+  }
+  assert.deepEqual(placeAddress(CANON), { iri: CANON }, 'control: the canonical address, with no note');
+  assert.deepEqual(placeAddress('https://wikidata.org/entity/P31'), { iri: 'https://wikidata.org/entity/P31' }, 'not a place: left as written');
+});
+
 test('an address two rules apply to names both in its note', () => {
   const r = placeAddress('http://pleiades.stoa.org/places/579885/');
   assert.deepEqual(r, { iri: 'https://pleiades.stoa.org/places/579885', from: 'http://pleiades.stoa.org/places/579885/', rules: ['pleiades-https', 'pleiades-slash'] });

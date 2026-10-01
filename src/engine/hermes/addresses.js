@@ -31,7 +31,9 @@ const PLEIADES_PART = /^https?:\/\/pleiades\.stoa\.org\/places\/\d+(?:\/?#this|\
 const GEONAMES_PAGE = /^https?:\/\/(?:www\.)?geonames\.org\/(\d+)(?:\/[^?#\s]*)?$/i;
 const GEONAMES_SWS = /^(https?):\/\/sws\.geonames\.org\/(\d+)(\/?)$/i;
 const WIKIDATA_PAGE = /^https?:\/\/(?:www\.)?wikidata\.org\/wiki\/(Q\d+)$/;
-const WIKIDATA_HTTPS = /^https:\/\/www\.wikidata\.org\/entity\/(Q\d+)$/;
+// Any other form of the entity address: https, or without www (http or https). The canonical
+// http://www.wikidata.org/entity/Q<n> matches too, and is left as it is.
+const WIKIDATA_ENTITY = /^https?:\/\/(?:www\.)?wikidata\.org\/entity\/(Q\d+)$/;
 
 /**
  * A gazetteer's address in the one form that gazetteer gives it: { iri, rules } when rewritten
@@ -55,7 +57,10 @@ export function canonicalAddress(value) {
     return m[3] ? { iri: value } : { iri: `https://sws.geonames.org/${m[2]}/`, rules: ['geonames-https'] };
   }
   if ((m = WIKIDATA_PAGE.exec(value))) return { iri: `http://www.wikidata.org/entity/${m[1]}`, rules: ['wikidata-page'] };
-  if ((m = WIKIDATA_HTTPS.exec(value))) return { iri: `http://www.wikidata.org/entity/${m[1]}`, rules: ['wikidata-https'] };
+  if ((m = WIKIDATA_ENTITY.exec(value))) {
+    const iri = `http://www.wikidata.org/entity/${m[1]}`;
+    return value === iri ? { iri: value } : { iri, rules: ['wikidata-https'] };
+  }
   return { iri: value };
 }
 

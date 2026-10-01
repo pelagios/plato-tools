@@ -399,7 +399,7 @@ readers link to those headings, so keep them.
 | `geonames-https` | `https://sws.geonames.org/<n>`, without its closing slash | `https://sws.geonames.org/<n>/` |
 | `geonames-sws-https` | `http://sws.geonames.org/<n>`, with or without its closing slash | `https://sws.geonames.org/<n>/` |
 | `wikidata-page` | `http(s)://(www.)wikidata.org/wiki/Q<n>` | `http://www.wikidata.org/entity/Q<n>` |
-| `wikidata-https` | `https://www.wikidata.org/entity/Q<n>` | `http://www.wikidata.org/entity/Q<n>` |
+| `wikidata-https` | `https://www.wikidata.org/entity/Q<n>`, or `http(s)://wikidata.org/entity/Q<n>` (without `www.`) | `http://www.wikidata.org/entity/Q<n>` |
 | `whg-record-id` | `place:<ns>:<id>` (with no `prefixDef` for `place`, in TEI) | `https://w3id.org/whg/id/place:<ns>:<id>` |
 | `whg-entity-page` | `http(s)://(www.)whgazetteer.org/entity/place:<ns>:<id>[/api][/]` | `https://w3id.org/whg/id/place:<ns>:<id>` |
 
