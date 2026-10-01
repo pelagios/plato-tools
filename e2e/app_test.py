@@ -611,6 +611,29 @@ def krisis_case(page, tmp):
     page.evaluate("() => { const t = document.getElementById('others-title'); if (t) t.value = 'A title for another review'; }")
     check('match review: the file made is the new attestations only, in PLATO JSON, with no @id minted', bool(atts) and out.get('profile') == 'attestation-centric'
           and not any('@id' in a for a in atts), {k: v for k, v in out.items() if k != 'attestations'} if isinstance(out, dict) else out)
+    # Krisis: the suggestions exported as a candidate set on the review screen, and Finish then pointing at it.
+    cset, out2, status = {}, {}, ''
+    if s.get('phase') == 'done' and page.is_visible('#export-candidates'):
+        try:
+            with page.expect_download(timeout=30_000) as d: page.click('#export-candidates')
+            d.value.save_as(tmp / 'krisis.candidates.json'); cset = json.loads((tmp / 'krisis.candidates.json').read_text())
+            status = page.inner_text('#candidates-status')
+            page.check('input[name="review-output"][value="attestations"]')
+            page.click('#finish')
+            s = wait_state(page, lambda s: s.get('action') == 'apply' and s.get('phase') in ('done', 'error'), 120, 'finish after the export')
+            if s.get('phase') == 'done' and s.get('outputs'):
+                out2 = json.loads(download(page, s['outputs'][0]['name'], tmp / 'krisis-attestations-2.json').read_text())
+        except Exception as e: s = {'phase': 'harness-error', 'error': str(e).split('\n')[0][:200]}
+    set_id = (cset.get('candidateSet') or {}).get('@id', '') if isinstance(cset, dict) else ''
+    ids = {c.get('@id') for c in cset.get('candidates', [])} if isinstance(cset, dict) else set()
+    check('match review: Export the suggestions writes a candidate set of every suggestion, each under the set\'s address and suggested, and says to save the review',
+          cset.get('profile') == 'candidate-set' and set_id.startswith(a + 'candidates/') and len(ids) == len(work.get('candidates', [])) > 0
+          and all(i.startswith(set_id + '#c-') for i in ids) and all(c.get('status') == 'suggested' for c in cset.get('candidates', []))
+          and cset['candidateSet'].get('candidatesFor') == a and 'Save the review as well' in status, {'status': status, 'set': cset} if cset else s)
+    pf = {rel(x)[0]: [i.get('promotedFrom') for i in x.get('identities', [])] for x in (out2.get('attestations', []) if isinstance(out2, dict) else []) if rel(x)}
+    check('match review: Finish after the export points each answer at its candidate (promotedFrom), the denial too, and lists the candidate set',
+          s.get('phase') == 'done' and sorted(pf) == [('bath', 'bathe'), ('bristol', 'bristoll')] and all(len(v) == 1 and v[0] in ids for v in pf.values())
+          and (out2.get('gazetteer') or {}).get('candidateSets') == [set_id], {'promotedFrom': pf, 'gazetteer': out2.get('gazetteer') if isinstance(out2, dict) else None} if out2 else (s.get('report') or s))
     # Resuming: the saved review, opened again, is back where it was, decisions and all.
     r = {}
     if saved.get('krisis') == 2:

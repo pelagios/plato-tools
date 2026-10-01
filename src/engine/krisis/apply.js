@@ -11,12 +11,21 @@
 //   that already exist without redefining them: each attestation names its place in `about`, and
 //   the document's gazetteer names the dataset the places belong to. Nothing of the places is
 //   copied, so the file cannot contradict the dataset it adds to.
+//
+// Once the review's suggestions have been exported as a candidate set (candidates.js), each answer
+// points at the candidate it answers (promotedFrom, written by identity.js), and both outputs list,
+// in their gazetteer's candidateSets, every candidate set a written answer points into. A candidate's
+// address must be under the set last exported from the review, or under an earlier set given
+// (options.candidates): anything else is refused, since an answer must never point at a set that
+// does not hold its candidate.
 import { Report } from '../report.js';
 import { DataError, detect } from '../input.js';
 import { run, CANDIDATE_SET_TEXT } from '../pipeline.js';
 import { compare } from '../compare.js';
 import { KRISIS_TEXT } from '../words.js';
 import { readWork, filesDiffer, checkReviewer, NOT_READ_KINDS } from './work.js';
+import { readCandidateSet, setBase } from './candidates.js';
+import { KRISIS_CANDIDATES } from '../words.js';
 import { attestationsFrom, datasetSource } from './identity.js';
 
 export const OUTPUTS = ['attestations', 'dataset'];
@@ -45,7 +54,9 @@ const stemOf = (subjects, work, options) => (options.name || subjects?.files?.[0
  * attestation with, else each is dated by its decisions), name (the stem of the output's name),
  * base (spreadsheet tables: the base address of their places, as given to match()), columns (a table
  * of places: the mapping of its columns, else the one in the work file), othersTitle
- * (the other dataset's title, for the source the attestations cite, in place of the work file's).
+ * (the other dataset's title, for the source the attestations cite, in place of the work file's),
+ * candidates (candidate sets, objects or text: the one exported from the review, and any earlier set
+ * holding a candidate left out of it; see candidateSetsOf).
  * Returns { report, outputs, attestations }, with `incomplete` when nothing could be written.
  */
 export async function apply({ subjects, work, options = {} }, env) {
@@ -81,6 +92,9 @@ export async function apply({ subjects, work, options = {} }, env) {
   const given = typeof options.othersTitle === 'string' ? options.othersTitle.trim() : '';
   const others = w.others && (given ? { ...w.others, title: given, titleFrom: 'given' } : w.others);
   if (others?.titleFrom === 'file-name') rep.warning('others-title-is-file-name', KRISIS_TEXT.othersTitleIsFileName(others.title));
+  // The candidate sets the answers point into: checked before anything is made.
+  const sets = candidateSetsOf(w, options.candidates || [], env, rep);
+  if (rep.toJSON().errors) return fail();
   const made = attestationsFrom(w, { reviewer, date: options.date, source: others ? datasetSource(others) : undefined });
   rep.counts = {
     attestations: made.length,
@@ -89,6 +103,7 @@ export async function apply({ subjects, work, options = {} }, env) {
     relations: made.reduce((n, m) => n + m.attestation.identities.length, 0),
   };
   if (!made.length) { rep.warning('nothing-decided', TEXT['nothing-decided']); return { report: rep.toJSON(), outputs: [], attestations: [] }; }
+  if (sets.length) { rep.counts.candidateSets = sets.length; for (const iri of sets) rep.warning('publish-candidate-sets', KRISIS_CANDIDATES.publishSets, iri); }
   if (output === 'dataset') {
     // Each attestation is checked as the checker would check it in a place-centric dataset, before anything is
     // converted: the profile has no schema for an attestation alone, so it is checked under a place of its own.
@@ -97,10 +112,11 @@ export async function apply({ subjects, work, options = {} }, env) {
       if (!V({ '@id': subject, label: subject, attestations: [attestation] })) rep.error('not-valid', TEXT['not-valid'], `${subject}: ${V.errors.map((e) => `${e.instancePath} ${e.message}`).join('; ')}`);
     }
     if (rep.toJSON().errors) return fail();
-    return writeDataset({ subjects, made, work: w, options }, env, rep, fail);
+    return writeDataset({ subjects, made, work: w, options, sets }, env, rep, fail);
   }
 
-  const doc = attestationsDocument(w, made);
+  if (sets.length && !w.subjects.uri) { rep.error('no-gazetteer-id', KRISIS_CANDIDATES.noGazetteerId); return fail(); }
+  const doc = attestationsDocument(w, made, sets);
   // Each attestation is checked as the checker would check it: what is written must be valid PLATO.
   const V = env.resources.validators['attestation-centric'];
   for (const a of doc.attestations) if (!V.attestation(a)) rep.error('not-valid', TEXT['not-valid'], `${a.about}: ${V.attestation.errors.map((e) => `${e.instancePath} ${e.message}`).join('; ')}`);
@@ -112,9 +128,9 @@ export async function apply({ subjects, work, options = {} }, env) {
   return { report: rep.toJSON(), outputs, attestations: made };
 }
 
-/** The new attestations as an attestation-centric PLATO document, about the subject dataset's places. */
-export function attestationsDocument(work, made) {
-  const gazetteer = { ...(work.subjects.uri ? { '@id': work.subjects.uri } : {}), title: work.subjects.title };
+/** The new attestations as an attestation-centric PLATO document, about the subject dataset's places, listing the candidate sets they answer. */
+export function attestationsDocument(work, made, sets = []) {
+  const gazetteer = { ...(work.subjects.uri ? { '@id': work.subjects.uri } : {}), title: work.subjects.title, ...(sets.length ? { candidateSets: sets } : {}) };
   return { $schema: AC, profile: 'attestation-centric', gazetteer, attestations: made.map(({ subject, attestation }) => ({ about: subject, ...attestation })) };
 }
 
@@ -141,7 +157,96 @@ function teeing(env, kept) {
   } };
 }
 
-async function writeDataset({ subjects, made, work, options }, env, rep, fail) {
+/**
+ * The candidate sets a review's answers point into, as IRIs, in the order first pointed at: each
+ * answered candidate's stored `iri` must be under the set last exported from the review
+ * (work.candidate_sets) or under a set given in `given`, and, under a set given, be one of its
+ * candidates, for the same places. A set given must be a valid candidate set for the dataset
+ * reviewed. Errors go into `rep`; an answer to a candidate never exported is warned of.
+ */
+export function candidateSetsOf(w, given, env, rep) {
+  const K = KRISIS_CANDIDATES;
+  const V = env.resources?.validators?.['candidate-set'];
+  const docs = [];
+  given.forEach((g, i) => {
+    let d;
+    try { d = readCandidateSet(g, K.earlierSetN(i + 1)); }
+    catch (e) { if (!(e instanceof DataError)) throw e; rep.error('candidate-set-unreadable', K.givenNotASet, e.message); return; }
+    const id = d.candidateSet['@id'];
+    if (V) {
+      const { candidates, ...head } = d;
+      if (!V.header(head)) rep.error('candidate-set-not-valid', K.givenNotValid, `${id}: ${V.header.errors.map((x) => `${x.instancePath} ${x.message}`).join('; ')}`);
+      for (const c of candidates) if (!V.candidate(c)) rep.error('candidate-set-not-valid', K.givenNotValid, `${c['@id']}: ${V.candidate.errors.map((x) => `${x.instancePath} ${x.message}`).join('; ')}`);
+    }
+    if (d.candidateSet.candidatesFor !== w.subjects.uri) rep.error('candidate-set-for-another', K.givenForAnother, `${id}: ${d.candidateSet.candidatesFor}`);
+    docs.push(d);
+  });
+  const latest = w.candidate_sets?.at(-1)?.['@id'];
+  const givenIds = new Set(docs.map((d) => setBase(d.candidateSet['@id'])));
+  const held = new Map();
+  for (const d of docs) for (const c of d.candidates) held.set(c['@id'], c);
+  const sets = [];
+  let unexported = 0;
+  for (const c of w.candidates) {
+    if (!c.decision || c.decision.kind === 'not-this') continue;
+    if (!c.iri) { if (w.candidate_sets?.length) unexported++; continue; }
+    const s = setBase(c.iri);
+    if (s !== latest && !givenIds.has(s)) { rep.error('candidate-not-under-set', K.notUnderSet, c.iri); continue; }
+    if (givenIds.has(s)) {
+      const x = held.get(c.iri);
+      if (!x || x.subject !== c.candidate_source || x.object !== c.candidate_candidate) { rep.error('candidate-not-in-set', K.notInSet, c.iri); continue; }
+    }
+    if (!sets.includes(s)) sets.push(s);
+  }
+  if (unexported) rep.add('warning', 'answers-not-exported', K.notExported, undefined, unexported);
+  return sets;
+}
+
+/**
+ * env, with `sets` added to the gazetteer's candidateSets in the header of the output `name` (the
+ * place-centric PLATO JSON the pipeline writes: the header, then "spatialEntities":[, in its first
+ * writes). The text is held until the header is complete, then written with the sets in it. `seen`
+ * is told whether the header was found (found) and had an @id (id).
+ */
+function withCandidateSets(env, name, sets, seen) {
+  if (!sets.length) return env;
+  return { ...env, output: async (n, binary) => {
+    const o = await env.output(n, binary);
+    if (n !== name) return o;
+    let held = '', done = false;
+    return {
+      write: (s) => {
+        if (done) return o.write(s);
+        held += s;
+        const head = headerWithSets(held, sets);
+        if (!head) return;
+        done = true; seen.found = true; seen.id = head.id;
+        o.write(head.text);
+      },
+      writeBytes: (b) => o.writeBytes(b),
+      close: async () => { if (!done && held) o.write(held); return o.close(); },
+    };
+  } };
+}
+/** The text with `sets` added to its header's gazetteer, once the header is all there; else null. */
+export function headerWithSets(text, sets) {
+  const KEY = '"spatialEntities":[';
+  for (let at = text.indexOf(KEY); at > 0; at = text.indexOf(KEY, at + 1)) {
+    if (text[at - 1] !== ',') continue;
+    let head;
+    // The first place where what comes before closes as one object is the header's end: the key met
+    // inside a header value would leave it open.
+    try { head = JSON.parse(text.slice(0, at - 1) + '}'); } catch { continue; }
+    const g = head.gazetteer;
+    if (!g || typeof g !== 'object' || typeof g['@id'] !== 'string') return { text, id: false };
+    g.candidateSets = [...new Set([...(Array.isArray(g.candidateSets) ? g.candidateSets : []), ...sets])];
+    const s = JSON.stringify(head);
+    return { text: s.slice(0, -1) + ',' + text.slice(at), id: true };
+  }
+  return null;
+}
+
+async function writeDataset({ subjects, made, work, options, sets = [] }, env, rep, fail) {
   const K = KRISIS_TEXT;
   if (!subjects?.format) { rep.error('no-dataset', K.noDataset); return fail(); }
   // A candidate set (PLATO 53c5a40) holds no places to add attestations to: refused, as the other tools
@@ -161,7 +266,12 @@ async function writeDataset({ subjects, made, work, options }, env, rep, fail) {
   };
   const name = stemOf(subjects, work, options) + '.krisis-dataset.json';
   const kept = new Map();
-  const r = await run({ input: subjects, action: 'convert', target: 'plato-json', options: { name, base: options.base, columns: options.columns, augment } }, teeing(env, kept));
+  // The candidate sets the answers point into go into the header as it is written (the pipeline hands
+  // a caller each record, not the header): withCandidateSets says what it found there.
+  const header = { found: !sets.length, id: true };
+  const r = await run({ input: subjects, action: 'convert', target: 'plato-json', options: { name, base: options.base, columns: options.columns, augment } }, withCandidateSets(teeing(env, kept), name, sets, header));
+  if (!header.found) rep.error('candidate-sets-not-written', KRISIS_CANDIDATES.setsNotWritten);
+  else if (!header.id) rep.error('no-gazetteer-id', KRISIS_CANDIDATES.noGazetteerId);
   // What the conversion says of the dataset. Its own problems are its own, not the review's: they
   // are counted, and the dataset is best checked by itself. What stopped it being read is not.
   let own = 0;

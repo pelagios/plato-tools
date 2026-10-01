@@ -53,6 +53,7 @@ export function summary(report, action) {
   if (action === 'publish') return publishSummary(report);
   if (action === 'match') return matchSummary(report);
   if (action === 'apply') return applySummary(report);
+  if (action === 'candidates') return candidatesSummary(report);
   // The regions a table's places lie in, minted as places (Hermes, generic.js), are among the places, and said apart.
   const regions = (k) => (k === 'places' && c.regions ? ` (${c.regions.toLocaleString('en-GB')} of them ${c.regions === 1 ? 'a region' : 'regions'})` : '');
   const counted = ['annotations', 'place names', 'rows', 'features', 'places', 'attestations', 'identity relations', 'candidates', 'triples', 'triples written', 'table rows', 'observations'].filter((k) => c[k]).map((k) => count(c[k], k) + regions(k)).join(', ');
@@ -107,6 +108,7 @@ export function groups(action) {
     { severity: 'warning', title: 'Warnings', intro: 'Worth fixing: the dataset can be published, but is harder to find, cite or reuse.' },
   ];
   if (action === 'match' || action === 'apply') return krisisGroups(action);
+  if (action === 'candidates') return candidatesGroups();
   if (action === 'compare') return [
     { severity: 'error', title: 'Problems', intro: 'These break the append-only rule: once a dataset is published, its attestations are added to, never deleted or changed; once a candidate set is issued, its candidates are never deleted or changed.' },
     { severity: 'warning', title: 'Warnings', intro: 'Worth a look; none of these breaks the rule.' },
@@ -430,6 +432,58 @@ export const KRISIS_TEXT = {
   /** The version check does not find every new attestation in the dataset written. */
   notAllAdded: (made, added) => `The review made ${plural(made, 'new attestation')}, but the version check finds ${plural(added || 0, 'attestation')} added to the dataset written, which is a fault in the tools (please report it); nothing was written.`,
 };
+// Krisis: the suggestions exported as a candidate set (src/engine/krisis/candidates.js), and the
+// answers that point back at them (promotedFrom), on the page and the command line.
+/** "3 candidates were already published …": the count of candidates an export left out. */
+const leftOutText = (n) => `${plural(n, 'candidate was', 'candidates were')} already published in an earlier candidate set and ${n === 1 ? 'is' : 'are'} left out of this one; answers to ${n === 1 ? 'it point at its earlier IRI' : 'them point at their earlier IRIs'}.`;
+export const KRISIS_CANDIDATES = {
+  leftOut: leftOutText,
+  allLeftOut: (n) => `Every candidate of this review was already published in an earlier candidate set, so there is nothing new to publish and no candidate set was written. ${leftOutText(n)}`,
+  workFileOnly: 'What the work file keeps for the review (each suggestion\'s distance and description of the other place, the decisions, the reviewer\'s place in the review) is not part of a candidate set and is not exported: a candidate records only what the software suggested. The decisions become attestations when the review is finished.',
+  noDatasetIri: 'The dataset of the places matched has no address of its own (its gazetteer has no @id), and a candidate set must say which dataset its suggestions are for. Give the dataset an @id in its gazetteer header, match again, and export then.',
+  noCandidates: 'This review has no suggestions, so there is no candidate set to export.',
+  badIssued: (d) => `The date of issue must be written as YYYY-MM-DD, not ${d}.`,
+  badSetIri: (iri) => `The candidate set's address must be a web address (an IRI), not ${iri}.`,
+  setIriTaken: (iri) => `The address ${iri} is an earlier candidate set's, given as such; a new set needs an address of its own.`,
+  notASet: (where) => `${where} is not a PLATO candidate set: it must have the profile candidate-set, a candidateSet with an @id, and candidates each with an @id, subject, object and algorithmVersion.`,
+  earlierSetN: (n) => `Earlier candidate set ${n}`,
+  previousNotGiven: (iris) => `This review was last exported against ${iris.length === 1 ? 'an earlier candidate set' : 'earlier candidate sets'}, ${iris.join(', ')}, which ${iris.length === 1 ? 'is' : 'are'} not given now. Give ${iris.length === 1 ? 'it' : 'them'} again: without ${iris.length === 1 ? 'it' : 'them'}, candidates already published would be published again.`,
+  earlierForAnother: (iri, theirs, ours) => `The earlier candidate set ${iri} is for another dataset (${theirs}), not for ${ours}.`,
+  noAlgorithm: (id) => `Candidate ${id} does not say which software suggested it (algorithm_version).`,
+  noGeneratedAt: (id) => `Candidate ${id} does not say when it was suggested (generated_at).`,
+  earlierExportNotGiven: 'This review was exported before, as the candidate set named here, which is not given now as an earlier set. If that set was published, give it as an earlier candidate set and export again: otherwise its candidates are published a second time, under new addresses. If it was not published, this set replaces it.',
+  /** The candidate set's title and description. */
+  title: (subjects, others, issued) => `Matches suggested for ${subjects} in ${others}, ${issued}`,
+  description: (subjects, others, algorithm) => `What PLATO tools (Krisis) suggested by comparing names (${algorithm}), as it suggested it, for the places of ${subjects} in ${others}. What the reviewer made of each suggestion is in the dataset, in the attestations whose identity relations point here through promotedFrom.`,
+  // Finishing a review that was exported (apply.js).
+  notUnderSet: 'A suggestion the review answers has an address that is not under the candidate set last exported from this review, nor under an earlier candidate set given, so nothing was written. Export the suggestions again, or give the candidate set the address belongs to.',
+  notInSet: 'A suggestion the review answers is not in the candidate set given that its address belongs to, or is there for other places, so nothing was written. Is this the candidate set exported from this review?',
+  givenNotASet: 'A candidate set given is not one these tools can point into, so nothing was written',
+  givenForAnother: 'A candidate set given is for another dataset than the one reviewed, so nothing was written',
+  givenNotValid: 'A candidate set given does not match the PLATO JSON Schema for candidate sets, so nothing was written',
+  noGazetteerId: 'The dataset written has no address of its own (its gazetteer has no @id), so it cannot list the candidate sets its new attestations answer (candidateSets), and nothing was written. Give the dataset an @id in its gazetteer header.',
+  setsNotWritten: 'The candidate sets the new attestations answer could not be added to the dataset\'s header, which is a fault in the tools (please report it); nothing was written.',
+  notExported: 'Some of the suggestions the review answers are in no candidate set exported from it, so their answers do not say which suggestion they answer (promotedFrom). Export the suggestions again before finishing to include them.',
+  publishSets: 'The new attestations answer suggestions in these candidate sets, and point at them (promotedFrom). Publish each candidate set wherever the dataset is published, so that the answers can be followed to what they answer.',
+  // The page (src/app.js, the review screen).
+  earlierGiven: (n) => `${plural(n, 'earlier candidate set')} given: ${n === 1 ? 'its' : 'their'} candidates will be left out of the set exported.`,
+  saveReviewToo: 'Save the review as well: it now records each candidate\'s address, which finishing points at.',
+};
+/** The summary of exporting a candidate set: how many candidates it holds, and how many were left out. */
+function candidatesSummary(report) {
+  const c = report.counts, nErr = report.errors;
+  if (c.candidates === undefined) return { problems: nErr ? `${plural(nErr, 'problem')} found.` : 'The candidate set could not be made.', counted: '' };
+  if (!c.candidates) return { problems: 'No candidate set was written: every candidate was published already.', counted: leftOutText(c.leftOut) };
+  return {
+    problems: nErr ? `${plural(nErr, 'problem')} found.` : 'The suggestions were exported as a candidate set.',
+    counted: `It holds ${plural(c.candidates, 'candidate')}${c.lengthened ? `, ${plural(c.lengthened, 'of which has', 'of which have')} a longer address to tell it from another` : ''}.${c.leftOut ? ' ' + leftOutText(c.leftOut) : ''}`,
+  };
+}
+const candidatesGroups = () => [
+  { severity: 'error', title: 'Problems', intro: 'No candidate set was written because of these.' },
+  { severity: 'warning', title: 'Warnings', intro: 'Worth a look before the candidate set is published.' },
+  { severity: 'loss', title: 'Not exported', intro: 'A candidate set has no place for these.' },
+];
 // ---- Chora (the map viewer and editor) -----------------------------------------------------------
 /**
  * What a drawing's notes say of how it was made, since PLATO has no term for it: "Drawn by hand on

@@ -9,8 +9,14 @@
 // exactMatch. No identity is canonical and nothing is merged.
 //
 // The attestation is given no @id: whatever saves it mints one (<place IRI>#a-<8 hex>), and these
-// tools never mint one in that form. It is given no promotedFrom either: the suggestion it came
-// from lives only in the work file, which is not published.
+// tools never mint one in that form.
+//
+// WITHDRAWN (PLATO 05cf78a, the candidate set): "It is given no promotedFrom either: the suggestion
+// it came from lives only in the work file, which is not published." A review's suggestions can now
+// be published as a candidate set (candidates.js), so each identity relation of an answer points at
+// the candidate it answers, through promotedFrom: every relation of an accepting attestation, and
+// the one exactMatch of a negated ("different places") attestation. A suggestion never exported has
+// no address to point at, and its answer still has no promotedFrom.
 //
 // recordIdentity is shared with the Chora session (gazetteer reconciliation); its signature is agreed.
 import { checkReviewer, DATE_TIME, isIri } from './work.js';
@@ -21,8 +27,10 @@ const TYPES = new Set(['exactMatch', 'closeMatch', 'related', 'unspecified']);
 /**
  * One attestation recording identity relations from `subject` to each of `targets`.
  *   subject   the IRI of the place the attestation is about
- *   targets   [{ iri, label?, identityType = 'exactMatch', certainty?, basis? }] (label is for the
- *             caller's display only: an identity relation has no place for it)
+ *   targets   [{ iri, label?, identityType = 'exactMatch', certainty?, basis?, promotedFrom? }] (label
+ *             is for the caller's display only: an identity relation has no place for it;
+ *             promotedFrom, optional and added after the signature was agreed with Chora, is the IRI
+ *             of the candidate the relation answers, in a published candidate set)
  *   source    what the judgement rests on: a PLATO source object ({ title, '@id'?, uri?, authorityType? })
  *             or a source's IRI; cited as the attestation's citation. Optional.
  *   reviewer  { name, orcid? }, PLATO's contributorObject
@@ -50,6 +58,10 @@ export function recordIdentity({ subject, targets, source, reviewer, date, negat
       r.certainty = t.certainty;
     }
     if (typeof t.basis === 'string' && t.basis.trim()) r.basis = t.basis.trim();
+    if (t.promotedFrom !== undefined && t.promotedFrom !== null) {
+      if (!isIri(t.promotedFrom)) throw new Error('recordIdentity: promotedFrom must be the IRI of a candidate.');
+      r.promotedFrom = t.promotedFrom;
+    }
     return r;
   });
   if (negated && (identities.length !== 1 || identities[0].identityType !== 'exactMatch'))
@@ -78,7 +90,8 @@ const latest = (dates) => dates.filter(Boolean).sort().at(-1);
 /**
  * The attestations a review's decisions make: one for each subject place with any 'match' decision,
  * bundling a relation to each place accepted, and one for each 'distinct' decision, negated. A
- * 'not-this' decision makes nothing. Each is dated when its last decision was made, unless `date`
+ * 'not-this' decision makes nothing. Each relation points at the candidate it answers (promotedFrom)
+ * when the candidate has an address in a candidate set (its `iri`, stored by the export). Each is dated when its last decision was made, unless `date`
  * is given. `reviewer` defaults to the work file's, `source` to the dataset of the other places.
  * `source` is what the judgements on the other dataset's candidates cite; one on a candidate looked
  * up in a gazetteer cites the gazetteer whatever `source` says (one attestation per source).
@@ -96,14 +109,14 @@ export function attestationsFrom(work, { reviewer = work.reviewer, source, date 
     for (const { src, of: matches } of bySource(decided.filter((c) => c.decision.kind === 'match'), sourceOf)) {
       out.push({ subject, attestation: recordIdentity({
         subject, reviewer, source: src, date: date || latest(matches.map((c) => c.decision.decided_at)),
-        targets: matches.map((c) => ({ iri: c.candidate_candidate, label: c.other.label, identityType: c.decision.identityType, basis: c.decision.basis })),
+        targets: matches.map((c) => ({ iri: c.candidate_candidate, label: c.other.label, identityType: c.decision.identityType, basis: c.decision.basis, promotedFrom: c.iri })),
         notes: noteOf(work, 'match', matches[0], [...new Set(matches.map(algorithm))].join(', ')),
       }) });
     }
     for (const c of decided.filter((x) => x.decision.kind === 'distinct')) {
       out.push({ subject, attestation: recordIdentity({
         subject, reviewer, source: sourceOf(c), date: date || c.decision.decided_at, negated: true,
-        targets: [{ iri: c.candidate_candidate, label: c.other.label, identityType: 'exactMatch', basis: c.decision.basis }],
+        targets: [{ iri: c.candidate_candidate, label: c.other.label, identityType: 'exactMatch', basis: c.decision.basis, promotedFrom: c.iri }],
         notes: noteOf(work, 'distinct', c, algorithm(c)),
       }) });
     }

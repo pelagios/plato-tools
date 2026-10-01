@@ -63,10 +63,29 @@ Status: IMPLEMENTED; engine and CLI tests pass (test/krisis.test.js, test/krisis
     failure is `not-valid`, nothing converted. It then runs `checkAppendOnly()`. Any error
     (below) → `incomplete: true`, no outputs.
     'attestations' writes `<subjects stem>.krisis-attestations.json` (attestation-centric PLATO).
+    `options.candidates`: candidate sets (objects or text) the answers point into, beside the one last
+    exported (recorded in the work file). Each relation of an answer carries `promotedFrom` (the
+    candidate's stored `iri`), and both outputs' gazetteer `candidateSets` lists the sets pointed
+    into. Errors: `candidate-not-under-set`, `candidate-not-in-set`, `candidate-set-unreadable`,
+    `candidate-set-not-valid`, `candidate-set-for-another`, `no-gazetteer-id`,
+    `candidate-sets-not-written`; warnings `publish-candidate-sets` (one example per set),
+    `answers-not-exported`.
   - `checkAppendOnly({ earlier, later, added, options: { base } }, env, rep)` — the version check
     (`compare()`) of the dataset written (`later`, a File) against the subject dataset; adds its
     findings to the Report `rep` and returns compare's result.
-- `src/engine/krisis/identity.js`: `recordIdentity({ subject, targets, source, reviewer, date, negated, notes })`,
+- `src/engine/krisis/candidates.js` — light (no pipeline import; app.js imports it):
+  - `exportCandidates(work, { setIri | base, issued, previousSets, title, description, licence, creator }) -> { set, work, report, setIri, leftOut }`
+    The review's suggestions as a PLATO candidate set (`set`, or null when every candidate was left
+    out), and a copy of the work file with each candidate's IRI in `iri` and the set recorded in
+    `candidate_sets`. `report.counts`: candidates, leftOut, lengthened; items `work-file-only` (loss),
+    `all-left-out`, `earlier-export-not-given` (warnings). Throws `DataError` in words: no gazetteer
+    `@id` for the subjects, a bad date, an earlier set the last export was made against not given, an
+    earlier set for another dataset.
+  - `hashText(candidate)`, `candidateHash(text)`, `jcs(value)`, `prefixLengths(hashes, earlier)`,
+    `proposeSetIri(base, issued, texts)`, `defaultBase(candidatesFor)`, `asCandidate(work, c)`,
+    `readCandidateSet(objectOrText, where)`, `serialiseCandidateSet(set)`, `CANDIDATE_IRI`.
+- `src/engine/krisis/identity.js`: `recordIdentity({ subject, targets, source, reviewer, date, negated, notes })`
+  (a target may carry `promotedFrom`, the IRI of the candidate it answers),
   `attestationsFrom(work, { reviewer, source, date }) -> [{ subject, attestation }]` (each attestation
   dated by its latest decision's `decided_at` unless `date` is given).
 - `src/engine/krisis/names.js`: `normalise(s)`, `similarity(a, b, weight?)`,

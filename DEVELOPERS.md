@@ -68,7 +68,7 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   reverse of `plato:candidates_for`, written and read back as such (`test/candidates.test.js` checks
   the triples against jsonld.js's); the tables and LPF leave it out and report it
   (`dropped:gazetteer.candidateSets`). Where the tools stand: a candidate set is read, checked against
-  its profile and converted. Krisis's export of one and its `promotedFrom` come later, as do the checks
+  its profile and converted. Krisis exports one and writes `promotedFrom` (see Match review). Later: the checks
   no schema can make (ids under their set, the mint rule, duplicates, across sets, `promotedFrom`
   against a set given beside a dataset), which the candidate set specification's section 13 lists.
   The version check of a candidate set is done (see the version check, below). An edge case to keep: a candidate's score records what the software
@@ -1180,7 +1180,58 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   share provenance and are withdrawn together; a consumer chains exactMatch only within one
   attestation. Each is dated by its last decision, cites the other dataset as its source
   (`authorityType: dataset`), names the reviewer as its contributor, and has no `@id` (the saver
-  mints one) and no `promotedFrom` (the candidate is not published).
+  mints one). **Withdrawn:** the earlier statement here that an attestation has "no `promotedFrom`
+  (the candidate is not published)", and Krisis's first decision that its output carries none, no
+  longer hold since PLATO 05cf78a gave candidates a published form (the candidate set): once the
+  suggestions are exported as one (below), each answer points at the candidate it answers. A review
+  never exported still writes no `promotedFrom`, since there is nothing published to point at.
+- **The candidate set** (`candidates.js`, `exportCandidates`; the candidate set specification,
+  sections 5 and 13.5). The suggestions of a work file, published as a PLATO candidate set
+  (`<subjects>.candidates.json`): `candidate_source`, `candidate_candidate`, `similarity_score` become
+  `subject`, `object`, `similarityScore`; `algorithm_version`, `match_parameters` (as JCS text) and
+  `generated_at` the candidate's own, else the work file's; `status` is always `suggested`, whatever
+  was decided (the decisions become attestations). The distance, the other place's description, the
+  decisions and the cursor stay in the work file, which the report says once. The header's
+  `candidatesFor` is the subjects' gazetteer `@id` (refused in words when there is none), `issued` the
+  day of export, and the title and description name the two datasets. The set's IRI comes first,
+  since every candidate's is minted under it: `<base>candidates/<issued>-<first 8 hex of the SHA-256
+  of the JCS array of the candidates' hash texts, sorted by code point>`, where the base defaults to
+  the folder of the subjects' dataset address, and the whole IRI can be given instead. Each
+  candidate's IRI is `<set IRI>#c-<hash>`, the hash SHA-256 of the JCS text of `[subject, object,
+  algorithmVersion, matchParameters or ""]` (it gives PLATO's example ids, which the tests check),
+  8 hex digits, lengthened by 4 until it differs from the hash of every other candidate in the set and
+  in the earlier sets given (both of a colliding pair lengthen; against an earlier set, only the
+  newcomer). A candidate whose four inputs are those of one an earlier set published is left out and
+  counted ("N candidates were already published in an earlier candidate set and are left out of this
+  one; answers to them point at their earlier IRIs"); when every candidate is, no set is written and
+  the report says so. The score and the time are not hashed, so a rerun that scores an old pair again
+  leaves it out all the same: the first score stands. Each export stores every candidate's IRI in the
+  work file (`iri`: the new set's, or the earlier set's for one left out), overwriting what an earlier
+  export stored, and records the set in `candidate_sets` (`{ @id, issued, previous }`, the latest
+  last). A later export refuses, in words, when the earlier sets the latest export was made against
+  are not given again (as Agora refuses without its previous release), and warns when the latest
+  exported set itself is not given: if it was published, its candidates would be published twice.
+  The command line has `plato-tools candidates WORKFILE [--base] [--set-iri] [--previous-candidates
+  SET…] [--out]`, a command of its own rather than an option of `match`, because it runs on a work
+  file alone, after the review, and reads no dataset; its `--base` is the set's, not the tables'. The
+  page has "Export the suggestions as a candidate set" on the review screen (and "Earlier candidate
+  sets…" to give those already published); it makes the set in the page, from the work object, which
+  "Save the review" then saves with the addresses.
+- **promotedFrom and candidateSets.** When finishing, each answered candidate's stored IRI must be
+  under the set last exported from the review (`candidate_sets`) or under a candidate set given
+  (`--candidates SET…`, or the page's exported and earlier sets); otherwise nothing is written
+  (`candidate-not-under-set`), and so when a given set does not hold the candidate for the same
+  places (`candidate-not-in-set`), is not a valid candidate set, or is for another dataset. Then
+  `promotedFrom` is written on every identity relation of an accepting attestation and on the one
+  exactMatch of a negated ("different places") attestation; "not this one" still writes nothing.
+  Both outputs list in their gazetteer's `candidateSets` every set a written answer points into
+  (merged with those the dataset lists already): the pipeline hands a caller each record, not the
+  header, so `apply.js` adds them to the header text as it is written (`headerWithSets`), and the
+  version check, reading the original as the earlier version, still finds only the new attestations
+  added. The report says to publish each of those sets wherever the dataset is published
+  (`publish-candidate-sets`). Not done yet: a decision changed after its answer was published should
+  retract or supersede the earlier answer in the same run (the specification's section 13.5); apply
+  does not yet read the dataset's earlier answers to do so.
 - **The output**, by default, is the subject dataset with the new attestations appended to their
   places (`apply.js`, `writeDataset`). The dataset is converted to a PLATO JSON document by `run()`
   with `options.augment`, whatever format it came in (tables, LPF, RDF: the report says the output is

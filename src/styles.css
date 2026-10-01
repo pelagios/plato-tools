@@ -365,6 +365,10 @@ kbd { font: .8em var(--font-mono); border: 1px solid var(--line); border-bottom-
 .review-end > small { color: var(--muted); flex: 1 1 14rem; }
 .finish { flex-basis: 100%; border: 1px solid var(--line); border-radius: 8px; margin: .25rem 0 0; padding: .5rem .8rem .75rem; display: flex; flex-direction: column; align-items: flex-start; gap: .3rem; }
 .finish legend { font-family: var(--font-headings); padding: 0 .3rem; }
+.candidate-export { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; }
+.candidate-export small { flex-basis: 100%; color: var(--muted); }
+#candidates-status { flex-basis: 100%; margin: 0; }
+#candidates-status[hidden] { display: none; }
 @media (max-width: 34rem) { #review { padding: .85rem .8rem; } .candidate .acts button { flex: 1 1 auto; } }
 /* ---- Chora (chora.html): the map page ---------------------------------------------------------
    The page fills the window: a short header, then a panel of the dataset, its places and the chosen

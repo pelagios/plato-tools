@@ -14,7 +14,9 @@
 //       candidate_status: 'suggested' | 'confirmed' | 'rejected', generated_at?, algorithm_version?, match_parameters?,
 //       other: { label, names, point, source: { title, uri? }, ccodes?, types? },
 //       decision: null | { kind: 'match' | 'not-this' | 'distinct', identityType, basis?, decided_at } }],
-//     reviewer: null | { name, orcid? }, cursor }
+//     reviewer: null | { name, orcid? }, cursor,
+//     candidate_sets?: [{ '@id', issued, previous: [earlier set IRIs] }] }   (each export, the latest last; candidates.js)
+//   and, once exported, each candidate's iri: its address in the latest set, or in the earlier set that published it.
 // A candidate's own generated_at, algorithm_version and match_parameters, where given, override the
 // file's: a later source of suggestions (a gazetteer's reconciliation service) fits the same record.
 //
@@ -41,6 +43,8 @@ export const canonicalEndpoint = (endpoint) => (isWhg(endpoint) ? WHG_ENDPOINT :
 // NOT_READ in compare.js lists): a matching, or a dataset finished, is then of less than the whole.
 export const NOT_READ_KINDS = ['json-syntax', 'rdf-syntax', 'record-failed', 'late-header', 'not-a-list', 'lpf-v2', 'lpf-not-a-feature', 'jsonl-not-an-object'];
 export const WORK_VERSION = 2;
+/** A candidate's IRI as the candidate set profile's pattern has it (candidates.js mints them). */
+export const CANDIDATE_IRI = /#c-(?:[0-9a-f]{4}){2,}$/;
 export const IDENTITY_TYPES = ['exactMatch', 'closeMatch', 'related'];
 export const DECISIONS = ['match', 'not-this', 'distinct'];
 const STATUS_OF = { match: 'confirmed', 'not-this': 'rejected', distinct: 'rejected' };
@@ -145,6 +149,8 @@ export function readWork(text) {
     if (c.distance_km !== undefined && c.distance_km !== null && !(typeof c.distance_km === 'number' && c.distance_km >= 0)) bad(`${where} has a distance that is not a number of kilometres.`);
     if (!isObject(c.other) || typeof c.other.label !== 'string' || !isNames(c.other.names) || !isPoint(c.other.point ?? null)) bad(`${where} does not describe the place it suggests (other).`);
     if (!['suggested', 'confirmed', 'rejected'].includes(c.candidate_status)) bad(`${where} has a status that is not suggested, confirmed or rejected.`);
+    // Its address in the candidate set last exported (candidates.js), or in an earlier set that published it.
+    if (c.iri !== undefined && !(isIri(c.iri) && CANDIDATE_IRI.test(c.iri))) bad(`${where} has an address in a candidate set (iri) that is not one: a web address ending in #c- and 8, 12, 16 … lower-case hex digits.`);
     const d = c.decision ?? null;
     if (d === null) { if (c.candidate_status !== 'suggested') bad(`${where} is ${c.candidate_status}, but no decision is recorded.`); continue; }
     if (!isObject(d) || !DECISIONS.includes(d.kind)) bad(`${where} has a decision that is not match, not-this or distinct.`);
@@ -155,6 +161,9 @@ export function readWork(text) {
     if (d.kind === 'distinct' && d.identityType !== 'exactMatch') bad(`${where} says two places are different, which PLATO records only of an exact match.`);
     if (d.kind === 'distinct' && !(typeof d.basis === 'string' && d.basis.trim())) bad(`${where} says two places are different without saying why (basis).`);
   }
+  // The candidate sets exported from this review, last the latest: each with the earlier sets it was exported against.
+  if (w.candidate_sets !== undefined && !(Array.isArray(w.candidate_sets) && w.candidate_sets.every((x) => isObject(x) && isIri(x['@id']) && !x['@id'].includes('#')
+    && typeof x.issued === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x.issued) && Array.isArray(x.previous) && x.previous.every(isIri)))) bad('the candidate sets exported from it (candidate_sets) are not listed as an address, a date of issue and the earlier sets each.');
   if (w.reviewer !== undefined && w.reviewer !== null) { try { checkReviewer(w.reviewer); } catch (e) { bad(e.message[0].toLowerCase() + e.message.slice(1)); } }
   if (w.cursor !== undefined && !(Number.isInteger(w.cursor) && w.cursor >= 0)) bad('its place in the review (cursor) is not a count.');
   checkLookups(w, bad);

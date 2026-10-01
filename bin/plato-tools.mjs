@@ -20,6 +20,7 @@ const { publish, PUBLISH_PARTS } = await import('../src/engine/agora/index.js');
 const { match } = await import('../src/engine/krisis/match.js');
 const { apply, OUTPUTS: REVIEW_OUTPUTS } = await import('../src/engine/krisis/apply.js');
 const { checkReviewer, isColumns } = await import('../src/engine/krisis/work.js');
+const { exportCandidates, serialiseCandidateSet } = await import('../src/engine/krisis/candidates.js');
 const { detect, readable, DataError } = await import('../src/engine/input.js');
 const { nodeResources, gatherInputs, openFiles, isSystemError, NodeHost } = await import('../src/node/host.js');
 const { toolsCommit } = await import('../src/node/build-info.js');
@@ -74,6 +75,10 @@ Usage:
                                             World Historical Gazetteer by default), and add what
                                             it finds to a work file for review (this sends each
                                             place's name to the gazetteer; nothing else unless asked)
+  plato-tools candidates [options] WORKFILE
+                                            publish a review's suggestions as a PLATO candidate
+                                            set, for its attestations to point at (promotedFrom);
+                                            each candidate's address is stored in WORKFILE
   plato-tools datacube [--json] FILE...     check a cube export (convert --to ntriples --cube)
                                             against the RDF Data Cube integrity constraints IC-1,
                                             IC-2, IC-11, IC-12 and IC-14
@@ -217,6 +222,20 @@ does not apply to):
                     coordinates that may be suggested (default 50).
   --top K           match: the most suggestions for one place (default 5).
   --review FILE     apply: the work file of the review (made by match, and saved by the page).
+  --candidates SET  apply: a candidate set exported from the review (by candidates, or on the
+                    page), or an earlier set holding a candidate left out of it; repeatable.
+                    Each answer points at its candidate (promotedFrom), and the dataset lists
+                    the sets (candidateSets). An address the work file stores that is under
+                    neither the set last exported from it nor a set given is refused.
+  --previous-candidates SET
+                    candidates: an earlier candidate set, already published; repeatable. A
+                    candidate it holds is left out of the new set, and counted; the others'
+                    addresses are made to differ from its. Give every earlier set the review
+                    was last exported against.
+  --set-iri IRI     candidates: the candidate set's address, instead of the one proposed,
+                    <base>candidates/<date>-<8 hex digits of what it holds>.
+                    For candidates, --base is that base (default: the folder of the address of
+                    the dataset matched), and --out where the set is written.
   --output KIND     apply: what to write: dataset (the default), the dataset as a PLATO JSON
                     document with the new attestations added to its places, checked with the
                     version check; or attestations, a PLATO file of only the new attestations.
@@ -269,7 +288,8 @@ one a preview is made of). For compare: 0 if nothing was deleted or changed, 1 i
 versions could not be compared. For match and apply: 0 if nothing stopped it, 1 if something
 did (a place without an address), 2 if it could not be done. For lookup: 0 if every place
 was answered, 1 if some were not or the lookup stopped (the work file still holds what was
-found, to resume from), 2 if it could not be done.
+found, to resume from), 2 if it could not be done. For candidates: 0 if the set was
+written, or nothing was new to write; 2 if it could not be made.
 `;
 
 const READING_FLAGS = ['same-id', 'list-places', 'key-pattern', 'header-places', 'commentary-places'];
@@ -340,10 +360,10 @@ async function main(argv) {
         'same-id': { type: 'boolean', default: false }, 'list-places': { type: 'boolean', default: false },
         'header-places': { type: 'boolean', default: false }, 'commentary-places': { type: 'boolean', default: false },
         'key-pattern': { type: 'string', multiple: true, default: [] },
-        candidates: { type: 'string', multiple: true },
         with: { type: 'string' }, threshold: { type: 'string' }, 'max-distance': { type: 'string' }, top: { type: 'string' },
         review: { type: 'string' }, output: { type: 'string' }, reviewer: { type: 'string' }, orcid: { type: 'string' },
         'others-title': { type: 'string' },
+        candidates: { type: 'string', multiple: true }, 'previous-candidates': { type: 'string', multiple: true }, 'set-iri': { type: 'string' },
         georef: { type: 'string', multiple: true }, manifest: { type: 'string', multiple: true },
         gazetteer: { type: 'string' }, places: { type: 'string' }, 'all-names': { type: 'boolean', default: false }, countries: { type: 'boolean', default: false },
         near: { type: 'string' }, limit: { type: 'string' }, batch: { type: 'string' }, 'dry-run': { type: 'boolean', default: false }, token: { type: 'string' },
@@ -379,7 +399,8 @@ async function main(argv) {
     if (typeof reading === 'string') return usage(reading);
     o.reading = reading;
   }
-  if (o.candidates && (action !== 'convert' || (o.to !== 'lpf' && o.to !== 'lpf-seq'))) return usage('--candidates is for convert --to lpf or lpf-seq.');
+  // --candidates is convert's (LPF's region matches) and apply's (what the answers point into).
+  if (o.candidates && action !== 'apply' && (action !== 'convert' || (o.to !== 'lpf' && o.to !== 'lpf-seq'))) return usage('--candidates is for convert --to lpf or lpf-seq, and for apply.');
   if (action === 'cluster') return clusterCommand(args, o);
   if (o.column !== undefined || o.method !== undefined) return usage('--column and --method are for cluster.');
   if (o.clusters !== undefined && !reads) return usage('--clusters is for check, convert and preview.');
@@ -391,12 +412,14 @@ async function main(argv) {
     o.splits = [];
     for (const given of o.split) { const sp = splitOf(given); if (typeof sp === 'string') return usage(sp); o.splits.push(sp); }
   }
+  if (action === 'candidates') return candidatesCommand(args, o, resources);
+  if (o['previous-candidates'] || o['set-iri']) return usage('--previous-candidates and --set-iri are for candidates.');
   if (action === 'match' || action === 'apply') return review(action, args, o, resources);
   if (action === 'lookup') return lookupCommand(args, o, resources);
   // (--limit, for lookup and preview, is refused above for any other command.)
   if (o.gazetteer || o.places || o['all-names'] || o.countries || o.near || o.batch || o['dry-run'] || o['token-env'] || o['gazetteer-iri']) return usage('--gazetteer, --token-env, --gazetteer-iri, --places, --all-names, --countries, --near, --batch and --dry-run are for lookup.');
   if (o.with || o.threshold || o['max-distance'] || o.top || o.review || o.output || o.reviewer || o.orcid || o['others-title'] !== undefined) return usage('--with, --threshold, --max-distance, --top, --review, --output, --reviewer, --orcid and --others-title are for match and apply.');
-  if (!reads && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, preview, cluster, compare, publish, match, apply and datacube.`);
+  if (!reads && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, preview, cluster, compare, publish, match, apply, lookup, candidates and datacube.`);
   if (!args.length) return usage(`name ${action === 'preview' ? 'the input' : 'at least one input'} to ${action}.`);
   if (action === 'preview' && o.brief) return usage('--brief is for check and convert; a preview prints its records, and --json prints them with the rest.');
   if (action === 'convert' && !o.to) return usage(`convert needs --to, one of: ${Object.keys(TARGETS).join(', ')}.`);
@@ -905,6 +928,14 @@ async function review(action, args, o, resources) {
     try { work = readFileSync(o.review, 'utf8'); }
     catch (e) { return usage(`the work file ${o.review} cannot be read: ${e.code === 'ENOENT' ? 'there is no such file.' : e.message}`); }
     options = { output: o.output || 'dataset', reviewer: reviewer || undefined, name: items[0].name, base: o.base, othersTitle: o['others-title'], columns };
+    // Krisis: the candidate sets the answers point into (promotedFrom), read as text; apply checks them.
+    if (o.candidates) {
+      options.candidates = [];
+      for (const f of o.candidates) {
+        try { options.candidates.push(readFileSync(f, 'utf8')); }
+        catch (e) { return usage(`the candidate set ${f} cannot be read: ${e.code === 'ENOENT' ? 'there is no such file.' : e.message}`); }
+      }
+    }
   }
   const host = new NodeHost({ workDir: o['work-dir'], outDir: o.out, overwrite: o.overwrite });
   process.once('SIGINT', () => { host.abandon(); process.exit(130); });
@@ -1099,4 +1130,67 @@ async function lookupCommand(args, o, resources) {
   host.cleanup();
   r.status = result.stopped || c.unanswered || gathered.report.errors ? 'problems' : 'ok';
   return finishUp();
+}
+
+// Krisis: a review's suggestions published as a PLATO candidate set (src/engine/krisis/candidates.js).
+// A command of its own, not an option of match: it is run on a work file alone, after the review (whose
+// decisions the page saves in it), reads no dataset, and its --base is the candidate set's, where
+// match's and apply's is the base of spreadsheet tables' places. It writes <subjects>.candidates.json
+// to --out, and stores each candidate's address back in the work file, so that apply points at them.
+async function candidatesCommand(args, o, resources) {
+  if (o.json && o.brief) return usage('choose --json or --brief, not both.');
+  if (o.to || o.with || o.review || o.output || o.candidates || o.threshold || o['max-distance'] || o.top || o.reviewer || o.orcid || o.columns)
+    return usage('candidates takes a work file, and --base, --set-iri, --previous-candidates, --out, --overwrite, --json or --brief.');
+  if (args.length !== 1) return usage(`candidates takes one work file (made by match, and saved by the page); ${args.length} ${args.length === 1 ? 'was' : 'were'} given.`);
+  const { writeFileSync, renameSync, mkdirSync } = await import('node:fs');
+  const { join, basename } = await import('node:path');
+  const { readWork, serialiseWork } = await import('../src/engine/krisis/work.js');
+  const t0 = Date.now();
+  const path = args[0];
+  const r = { type: 'candidates', work: path, status: 'failed', errors: 0, counts: {}, items: [], outputs: [], setIri: null, elapsedMs: 0 };
+  const done = () => {
+    r.elapsedMs = Date.now() - t0;
+    r.exitCode = r.status === 'failed' ? 2 : 0;
+    if (o.json) { process.stdout.write(JSON.stringify(r) + '\n'); return r.exitCode; }
+    const lines = [`Work file: ${path}`];
+    if (r.status === 'failed') lines.push(`  Could not be done: ${r.message}`);
+    else {
+      const { problems, counted } = summary({ errors: r.errors, counts: r.counts }, 'candidates');
+      lines.push(`  ${problems}${counted ? ' ' + counted : ''}`);
+      if (!o.brief) lines.push(...itemLines(r.items, 'candidates'));
+      for (const x of r.outputs) lines.push(`  Wrote ${x.path} (${fmtBytes(x.size)})`);
+      if (r.stored) lines.push(`  Stored each candidate's address in ${path}.`);
+    }
+    process.stdout.write(lines.join('\n') + '\n');
+    return r.exitCode;
+  };
+  let work;
+  try { work = readWork(readFileSync(path, 'utf8')); }
+  catch (e) { r.message = e.code === 'ENOENT' ? `there is no such file as ${path}.` : e.message; return done(); }
+  const previousSets = [];
+  for (const f of o['previous-candidates'] || []) {
+    try { previousSets.push(readFileSync(f, 'utf8')); }
+    catch (e) { return usage(`the earlier candidate set ${f} cannot be read: ${e.code === 'ENOENT' ? 'there is no such file.' : e.message}`); }
+  }
+  let x;
+  try { x = exportCandidates(work, { base: o.base, setIri: o['set-iri'], previousSets }); }
+  catch (e) { if (!(e instanceof DataError)) { r.message = toolsFault(e); return done(); } r.message = e.message; return done(); }
+  // What is written is checked against the vendored candidate set profile first: anything it refuses is the tools' fault.
+  if (x.set) {
+    const V = resources.validators['candidate-set'];
+    const { candidates, ...head } = x.set;
+    const bad = !V.header(head) ? V.header.errors : candidates.map((c) => (V.candidate(c) ? null : V.candidate.errors)).find(Boolean);
+    if (bad) { r.message = toolsFault(new Error(`the candidate set made does not match its schema: ${JSON.stringify(bad)}`)); return done(); }
+    const stem = (work.subjects.files[0]?.name || basename(path).replace(/\.krisis\.json$/i, '')).replace(/\.(gz)$/i, '').replace(/\.[^.]+$/, '');
+    const out = join(o.out, stem + '.candidates.json');
+    const text = serialiseCandidateSet(x.set);
+    try { mkdirSync(o.out, { recursive: true }); writeFileSync(out, text, { flag: o.overwrite ? 'w' : 'wx' }); }
+    catch (e) { r.message = e.code === 'EEXIST' ? `${out} already exists; give --overwrite to replace it, or --out for somewhere else.` : e.message; return done(); }
+    r.outputs.push({ path: out, size: Buffer.byteLength(text) });
+  }
+  // The addresses go back into the work file, replacing it whole (written beside it, then moved).
+  try { writeFileSync(path + '.tmp', serialiseWork(x.work)); renameSync(path + '.tmp', path); r.stored = true; }
+  catch (e) { r.message = `the work file ${path} could not be updated with the candidates' addresses: ${e.message}`; return done(); }
+  Object.assign(r, { status: 'ok', errors: x.report.errors, counts: x.report.counts, items: x.report.items, setIri: x.setIri });
+  return done();
 }

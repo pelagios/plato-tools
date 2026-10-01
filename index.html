@@ -271,6 +271,13 @@
     <div class="review-end">
       <button id="save-review" type="button">Save the review</button>
       <small>Saves your decisions so far, to carry on later with <em>Resume a review</em>.</small>
+      <div class="candidate-export">
+        <button id="export-candidates" type="button">Export the suggestions as a candidate set</button>
+        <button id="earlier-candidates" type="button">Earlier candidate sets…</button>
+        <input type="file" id="earlier-candidates-file" accept=".json,application/json" multiple hidden>
+        <small>A candidate set publishes what the software suggested, so that each attestation can point at the suggestion it answers. If earlier sets were published, give them first: their candidates are left out.</small>
+        <p id="candidates-status" aria-live="polite" hidden></p>
+      </div>
       <fieldset class="finish">
         <legend>Finish: what to make of your decisions</legend>
         <label><input type="radio" name="review-output" value="dataset" checked> Your dataset with the new attestations added, as a PLATO JSON document, checked with the version check</label>

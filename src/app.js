@@ -13,6 +13,8 @@ import { review as W, POOL_BUSY, POOL_STUCK, PREVIEW_WORDS } from './engine/word
 const REVIEW_WORDS = W;   // the review's words, where W names the words for the columns
 import { readable } from './engine/input.js';
 import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions } from './engine/krisis/work.js';
+import { exportCandidates, readCandidateSet, serialiseCandidateSet } from './engine/krisis/candidates.js';
+import { KRISIS_CANDIDATES } from './engine/words.js';
 import { stash as stashForChora, dropStale as dropStaleHandoff } from './chora/handoff.js';
 import { dropStale as dropStaleHandback, workflowOf } from './chora/handback.js';
 import { storageNeed } from './engine/storage.js';
@@ -158,7 +160,9 @@ function start(action, earlier) {
   // A table of places is matched by the matching of its columns shown, as chosen (Hermes), which the work file keeps for finishing.
   else if (action === 'match') worker.postMessage({ cmd: 'match', subjects: files, others: earlier, options: { ...matchOptions(), base, ...sheetOption(), ...(isTable(input) && columns ? { columns: columnOptions() } : {}) } });
   // The title in the options is cited only when the review has none but a file's name: one left there from an earlier match must not replace the review's own.
+  // The candidate set exported on the page, and the earlier sets given, are what the answers point into (promotedFrom).
   else if (action === 'apply') worker.postMessage({ cmd: 'apply', subjects: files, work, options: { output: earlier, reviewer: reviewer(), othersTitle: work.others?.titleFrom === 'file-name' ? matchOptions().othersTitle : undefined, base, ...sheetOption(),
+    candidates: [exportedSet, ...earlierSets].filter(Boolean),
     // A table is finished by the review's own matching of its columns, unless another has been loaded since: that is sent, and said to differ.
     ...(isTable(input) && columns && reviewMapping !== undefined && mappingText(columnOptions()) !== reviewMapping ? { columns: columnOptions() } : {}) } });
   else worker.postMessage({ cmd: 'run', files, action, target, options: { base, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked,
@@ -983,6 +987,7 @@ async function resume(file) {
 }
 function beginReview(w, name, { focus = true } = {}) {
   work = w; workName = name || workName; basisFor = null; findFor = null; allDone = false; unsaved = 0;
+  exportedSet = null; earlierSets = []; candidatesStatus('');
   order = reviewPlaces(work);
   cursor = Math.min(Math.max(0, work.cursor || 0), Math.max(0, order.length - 1));
   // A place with no candidates has nothing to review: start at the first that has some.
@@ -1152,6 +1157,32 @@ $('finish').onclick = () => {
   const problem = reviewerProblem(); if (problem) return showWarning(problem);
   work.cursor = cursor; work.reviewer = reviewer();
   start('apply', document.querySelector('input[name="review-output"]:checked').value);
+};
+// Krisis: the suggestions exported as a candidate set (engine/krisis/candidates.js), made here on the
+// page from the work object, which then stores each candidate's address (saved with the review). The
+// earlier sets given are left out of it, and Finish passes both to apply.
+let exportedSet = null, earlierSets = [];
+function candidatesStatus(text, warn = false) { const p = $('candidates-status'); p.textContent = text; p.hidden = !text; p.classList.toggle('warn', warn); }
+$('earlier-candidates').onclick = () => $('earlier-candidates-file').click();
+$('earlier-candidates-file').onchange = async (e) => {
+  const chosen = [...e.target.files]; e.target.value = '';
+  if (!chosen.length) return;
+  try { earlierSets = await Promise.all(chosen.map(async (f) => readCandidateSet(await f.text(), f.name))); candidatesStatus(KRISIS_CANDIDATES.earlierGiven(earlierSets.length)); }
+  catch (err) { earlierSets = []; candidatesStatus(err.message, true); }
+  state.earlierCandidateSets = earlierSets.map((s) => s.candidateSet['@id']);
+};
+$('export-candidates').onclick = () => {
+  if (!work || busy) return;
+  let x;
+  try { x = exportCandidates(work, { previousSets: earlierSets }); }
+  catch (err) { if (err?.name !== 'DataError') throw err; candidatesStatus(err.message, true); return; }
+  work = x.work; exportedSet = x.set;
+  const { problems, counted } = summary(x.report, 'candidates');
+  candidatesStatus(`${problems} ${counted} ${KRISIS_CANDIDATES.saveReviewToo}`);
+  const name = workName.replace(/\.krisis\.json$/i, '').replace(/\.json$/i, '') + '.candidates.json';
+  if (x.set) saveBlob(new Blob([serialiseCandidateSet(x.set)], { type: 'application/json' }), name);
+  Object.assign(state, { candidates: { setIri: x.setIri, leftOut: x.leftOut, set: x.set, name: x.set ? name : null } });
+  render();
 };
 /** Save something made in the page, not by the engine: as save() does, to disk or as a download. */
 async function saveBlob(blob, name) {
