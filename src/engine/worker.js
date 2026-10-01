@@ -196,7 +196,7 @@ async function choraCommand(data) {
   if (data.cmd === 'chora-load') {
     session.base = data.base || session.base;
     const input = await detect(data.files);
-    if (!input.format) { postMessage({ type: 'chora-loaded', failure: input.reason }); return; }
+    if (!readable(input)) { postMessage({ type: 'chora-loaded', failure: input.reason }); return; }
     const { vfs } = await sqlitePool();
     if (session.store) { session.store.close(); session.store = null; session.fingerprint = null; }
     try { vfs.unlink(CHORA_DB); } catch { /* none yet */ }
@@ -214,7 +214,7 @@ async function choraCommand(data) {
   }
   if (data.cmd === 'chora-save') {
     const input = await detect(data.files);
-    if (!input.format) throw new Error(input.reason);
+    if (!readable(input)) throw new Error(input.reason);
     const same = session.store && session.fingerprint === fingerprint(data.files);
     const { env, tidy } = await runEnv({ outputs: CHORA_OUT });
     let result;

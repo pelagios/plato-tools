@@ -851,6 +851,16 @@ def chora_checks(pw, url, tmp):
         return s['phase'] == 'loaded' and s['places'] == len(rows) and sorted(labels) == sorted(r['label'] for r in rows), {'state': s, 'listed': labels}
     attempt('Chora: the PLATO spreadsheet tables open, each place in places.csv listed', load_tables)
 
+    def georef_said():
+        # A IIIF Georeference Annotation is not a dataset: Chora says why, in the readers' own words.
+        # The control: the same page then opens a dataset.
+        s = chora_boot(page, base, [ROOT / 'test/fixtures/hermes-detect/bpl-rocque-annotation.json'])
+        said = page.inner_text('#phase')
+        ok = s['phase'] == 'unrecognised' and 'IIIF Georeference Annotation' in said and 'Unsupported input' not in said
+        s2 = chora_boot(page, base, [ant])
+        return ok and s2['phase'] == 'loaded', {'state': s, 'said': said[:300], 'then': s2.get('phase')}
+    attempt('Chora: a IIIF Georeference Annotation is refused as a dataset with the reason the readers give', georef_said)
+
     def search():
         chora_boot(page, base, [fixture(ant, 'antonine-search.json', tmp)])
         labels = lambda: sorted(page.eval_on_selector_all('#list button[data-id]', 'bs => bs.map((b) => b.firstChild.textContent.trim())'))
