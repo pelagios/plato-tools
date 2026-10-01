@@ -310,6 +310,28 @@ test('every input format is matched alike: the other dataset as Linked Places Fo
   assert.deepEqual(viaTables.work.candidates.map((c) => c.candidate_candidate).sort(), plain.work.candidates.map((c) => c.candidate_candidate).sort());
 });
 
+test("a CSV file read by Hermes's reader, its columns guessed, is matched against a PLATO JSON file", async () => {
+  const subjects = await detect([file('test/fixtures/generic/with-ids.csv')]);
+  assert.equal(subjects.format, 'csv');
+  const others = { profile: 'place-centric', gazetteer: { '@id': X + 'b', title: 'Dataset B' }, spatialEntities: [
+    place('b', 'bath', 'Aquae Sulis', [at(-2.36, 51.38)]),
+    place('b', 'york', 'Eburacum', [at(-1.08, 53.96)]),
+    place('b', 'london', 'Londinium', [at(-0.09, 51.51)]),
+  ] };
+  const r = await match({ subjects, others: await detect([json(others, 'b.json')]), options: { base: X + 'a/' } }, env());
+  // Four rows have ids and are matched; the fifth, Isca, has none, and is the one problem, named.
+  assert.equal(r.report.counts.subjects, 4);
+  assert.equal(r.report.counts.unaddressed, 1);
+  assert.deepEqual(r.report.items.map((i) => i.kind), ['no-address']);
+  // Aquae Sulis exactly, Eboracum and Eburacum by a letter; Londinium, like no row, is not suggested.
+  assert.deepEqual(r.work.candidates.map((c) => [c.candidate_source.split('/').pop(), c.candidate_candidate]),
+    [['bath', B('bath')], ['york', B('york')]]);
+  assert.equal(r.work.candidates[0].similarity_score, 1);
+  assert.ok(r.work.candidates[1].similarity_score >= DEFAULTS.threshold && r.work.candidates[1].similarity_score < 1);
+  assert.ok(r.work.candidates.every((c) => c.distance_km < 1), 'the rows\' coordinates were read');
+  assert.ok(!r.work.candidates.some((c) => c.candidate_candidate === B('london')));
+});
+
 // ---- the work file ---------------------------------------------------------------------------------------
 test('decisions: each sets its status, and a place counts as reviewed once any of its candidates is decided', async () => {
   const { work } = await run();
