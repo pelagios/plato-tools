@@ -12,7 +12,7 @@ import { review, choraLoadFailure } from './words.js';
 import { DataError } from './input.js';
 import { pragmas } from '../lib/store.js';
 import { detect, readable } from './input.js';
-import { columnsOf, mappingOf } from './hermes/generic.js';
+import { columnsOf, mappingOf, withSheet } from './hermes/generic.js';
 import { FIELDS, cellText } from './hermes/columns.js';
 import { teiKeyPrefixes, EDITORIAL_IRI } from './hermes/tei.js';
 import { load as choraLoad } from './chora/store.js';
@@ -196,7 +196,8 @@ self.onmessage = async ({ data }) => {
       // What stops the file being read is said here, for the page to show beside the table; the run
       // reports it again, in full.
       try {
-        const input = await detect(data.files);
+        // A workbook's sheet chosen on the page (else the one detection chose); one it does not have is said.
+        const input = withSheet(await detect(data.files), data.sheet);
         const { headers, sample } = await columnsOf(input);
         const examples = Object.fromEntries(headers.map((h) => [h, sample.map((r) => cellText(r?.[h])).filter(Boolean).slice(0, 3)]));
         const { mapping, patterns, suggested, reasons, problems, gazetteer } = await mappingOf(input, data.saved);
@@ -268,9 +269,11 @@ self.onmessage = async ({ data }) => {
       const { env, tidy } = await runEnv();
       let result;
       try {
+        // A workbook's sheet chosen on the page is the one matched, and finished.
+        const chosen = withSheet(subjects, data.options?.sheet);
         result = data.cmd === 'match'
-          ? await match({ subjects, others, options: data.options || {} }, env)
-          : await apply({ subjects, work: data.work, options: data.options || {} }, env);
+          ? await match({ subjects: chosen, others, options: data.options || {} }, env)
+          : await apply({ subjects: chosen, work: data.work, options: data.options || {} }, env);
       } catch (e) {
         // A mistake in what was asked (an option out of range) is said plainly, as a finding, not as a fault in the tools.
         if (!(e instanceof DataError)) throw e;

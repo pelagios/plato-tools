@@ -74,7 +74,8 @@ function onDetected({ input: inp, targets: t }) {
   // Not recognised, or recognised and refused with a reason (a IIIF Georeference Annotation): input.js, readable().
   if (!inp.format || inp.reason !== undefined) { p.innerHTML = `<span class="warn">${escapeHtml(inp.reason)}</span>`; Object.assign(state, { phase: 'unrecognised', reason: inp.reason }); return; }
   const what = formatName(inp);
-  p.innerHTML = `This looks like <span class="detected">${what}</span>.`;
+  // Escaped: a workbook's sheet, named in it, is the file's own text.
+  p.innerHTML = `This looks like <span class="detected">${escapeHtml(what)}</span>.`;
   const sel = $('target'); sel.innerHTML = '';
   for (const [k, v] of Object.entries(t)) {
     if (k === INPUT_TO_TARGET[inp.format]) continue;
@@ -133,15 +134,15 @@ function start(action, earlier) {
     (e) => fail(`the list of places to include could not be read (${e.message || e}).`));
   // Match review (Krisis): the files chosen are the subjects, and `earlier` the other dataset; to finish, the review is applied to them.
   // A table of places is matched by the matching of its columns shown, as chosen (Hermes), which the work file keeps for finishing.
-  else if (action === 'match') worker.postMessage({ cmd: 'match', subjects: files, others: earlier, options: { ...matchOptions(), base, ...(isTable(input) && columns ? { columns: columnOptions() } : {}) } });
+  else if (action === 'match') worker.postMessage({ cmd: 'match', subjects: files, others: earlier, options: { ...matchOptions(), base, ...sheetOption(), ...(isTable(input) && columns ? { columns: columnOptions() } : {}) } });
   // The title in the options is cited only when the review has none but a file's name: one left there from an earlier match must not replace the review's own.
-  else if (action === 'apply') worker.postMessage({ cmd: 'apply', subjects: files, work, options: { output: earlier, reviewer: reviewer(), othersTitle: work.others?.titleFrom === 'file-name' ? matchOptions().othersTitle : undefined, base,
+  else if (action === 'apply') worker.postMessage({ cmd: 'apply', subjects: files, work, options: { output: earlier, reviewer: reviewer(), othersTitle: work.others?.titleFrom === 'file-name' ? matchOptions().othersTitle : undefined, base, ...sheetOption(),
     // A table is finished by the review's own matching of its columns, unless another has been loaded since: that is sent, and said to differ.
     ...(isTable(input) && columns && reviewMapping !== undefined && mappingText(columnOptions()) !== reviewMapping ? { columns: columnOptions() } : {}) } });
   else worker.postMessage({ cmd: 'run', files, action, target, options: { base, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked,
     // Hermes: the matching of columns shown, as chosen (the same JSON as the command line's --columns,
     // a pattern column in its object form), and the reading options chosen.
-    ...(isTable(input) && columns ? { columns: columnOptions() } : {}), ...readingOptions() } });
+    ...(isTable(input) && columns ? { columns: columnOptions() } : {}), ...sheetOption(), ...readingOptions() } });
 }
 // Agora's options, from the Options panel: only those given are sent.
 function publishOptions() {
@@ -237,17 +238,29 @@ const mappingText = (m) => JSON.stringify(columns.headers.map((h) => [h, m[h]]))
 // The column options a run is given (Hermes's run, Krisis's match and finish): the matching shown, a pattern column in its object form.
 const columnOptions = () => mappingToSave(columns.mapping, columns.patterns);
 const isTable = (inp) => inp?.format === 'csv' || inp?.format === 'geojson';
+// A workbook read as a table of places: the sheet read (the first not hidden, until another is
+// chosen), sent with every command that reads the table.
+const isSheet = (inp) => inp?.format === 'csv' && inp.container === 'workbook';
+const sheetOption = () => (isSheet(input) && input.sheet !== undefined ? { sheet: input.sheet } : {});
+// The choice of sheet, above the columns table, when the workbook has more than one.
+function sheetControl() {
+  if (!isSheet(input) || !(input.sheets?.length > 1)) return '';
+  const W = COLUMN_WORDS;
+  const options = input.sheets.map((s) => `<option value="${escapeHtml(s.name)}"${s.name === input.sheet ? ' selected' : ''}>${escapeHtml(s.hidden ? W.sheetHidden(s.name) : s.name)}</option>`).join('');
+  return `<p class="sheet-choice"><label for="columns-sheet">${escapeHtml(W.sheetLabel)}</label> <select id="columns-sheet" data-tip="${escapeHtml(W.sheetTip)}">${options}</select></p>`;
+}
 function requestColumns(saved, from) {
   const id = ++columnsAsked;
-  if (saved === undefined) $('columns').innerHTML = `<h3 id="columns-h">${COLUMN_WORDS.heading}</h3><p>${COLUMN_WORDS.looking}</p>`;
+  if (saved === undefined) $('columns').innerHTML = `<h3 id="columns-h">${COLUMN_WORDS.heading}</h3>${sheetControl()}<p>${COLUMN_WORDS.looking}</p>`;
   columnsFrom = from; columnsSaved = saved;
-  worker.postMessage({ cmd: 'columns', id, files, saved });
+  state.sheet = sheetOption().sheet ?? null;
+  worker.postMessage({ cmd: 'columns', id, files, saved, ...sheetOption() });
 }
 function onColumns(d) {
   if (d.id !== columnsAsked) return;                    // an answer about a file no longer chosen
   const W = COLUMN_WORDS;
   if (d.error) {
-    $('columns').innerHTML = `<h3 id="columns-h">${W.heading}</h3><p class="warn">${escapeHtml(W.cannotRead(d.error))}</p>`;
+    $('columns').innerHTML = `<h3 id="columns-h">${W.heading}</h3>${sheetControl()}<p class="warn">${escapeHtml(W.cannotRead(d.error))}</p>`;
     state.columns = { error: d.error };
     gateOnColumns();
     return;
@@ -266,6 +279,15 @@ function onColumns(d) {
   if (d.id === reviewColumnsAsked) { reviewMapping = mappingText(columnOptions()); state.reviewColumns = Object.assign(Object.create(null), columns.mapping); }
   gateOnColumns();
 }
+// Another sheet of the workbook: its columns are asked for again, and guessed afresh.
+function chooseSheet(name) {
+  if (!isSheet(input) || !input.sheets.some((s) => s.name === name)) return;
+  input.sheet = name;
+  $('chosen').querySelector('p').innerHTML = `This looks like <span class="detected">${escapeHtml(formatName(input))}</span>.`;
+  columns = null; state.columns = null;
+  requestColumns();
+  gateOnColumns();
+}
 function choiceOptions(chosen) {
   const keys = [...Object.keys(COLUMN_CHOICES).filter((k) => columns.fields[k] || k === 'note' || k === 'skip'),
     ...Object.keys(columns.fields).filter((k) => !COLUMN_CHOICES[k])];     // a field these words do not yet name
@@ -280,7 +302,7 @@ function renderColumns() {
       + `<td><label for="column-${i}" class="visually-hidden">${escapeHtml(W.selectLabel(h))}</label><select id="column-${i}" data-column="${i}" aria-describedby="column-why-${i}">${choiceOptions(c.mapping[h])}</select>${patternControl(h, i)}</td>`
       + `<td id="column-why-${i}" class="why-guess">${escapeHtml(c.reasons[h] || '')}</td></tr>`;
   }).join('');
-  $('columns').innerHTML = `<h3 id="columns-h">${W.heading}</h3><p>${escapeHtml(W.intro(geojson))} ${escapeHtml(W.base)}</p>`
+  $('columns').innerHTML = `<h3 id="columns-h">${W.heading}</h3>${sheetControl()}<p>${escapeHtml(W.intro(geojson))} ${escapeHtml(W.base)}</p>`
     + `<p id="columns-locked" class="columns-locked" hidden>${escapeHtml(REVIEW_WORDS.columnsLocked)}</p>`
     + `<div class="columns-scroll"><table class="columns-table"><caption>${escapeHtml(W.caption(files[0]?.name || '', geojson))}</caption>`
     + `<thead><tr><th scope="col">${W.column}</th><th scope="col">${W.examples}</th><th scope="col">${W.readAs}</th><th scope="col">${W.why}</th></tr></thead><tbody>${rows}</tbody></table></div>`
@@ -300,6 +322,8 @@ function lockColumns() {
   const reviewing = !!work && !$('review').hidden;
   const selects = document.querySelectorAll('#columns select[data-column]');
   for (const sel of selects) sel.disabled = reviewing;
+  // The sheet too: a review was made of one sheet.
+  if ($('columns-sheet')) $('columns-sheet').disabled = reviewing;
   // and says why, exactly when they are locked.
   const note = $('columns-locked'); if (note) note.hidden = !(reviewing && selects.length);
   state.columnsLocked = reviewing;
@@ -379,7 +403,8 @@ async function loadMatching(file) {
   requestColumns(saved, file.name);
 }
 $('columns').addEventListener('change', (e) => {
-  if (e.target.matches('select[data-column]')) chooseColumn(Number(e.target.dataset.column), e.target.value);
+  if (e.target.id === 'columns-sheet') chooseSheet(e.target.value);
+  else if (e.target.matches('select[data-column]')) chooseColumn(Number(e.target.dataset.column), e.target.value);
   else if (e.target.matches('input[data-pattern-column]')) choosePattern(Number(e.target.dataset.patternColumn), e.target.checked);
 });
 
