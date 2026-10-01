@@ -74,12 +74,15 @@ node bin/plato-tools.mjs compare release-1.jsonl.gz release-2.jsonl.gz  # was an
   exists). Warnings, and what a conversion cannot carry over, do not count as problems. For
   `compare`: 0 if nothing was deleted or changed, 1 if something was, 2 if the two versions could
   not be compared, including when either cannot be read to the end.
-- **Outputs are never replaced** unless `--overwrite` is given, and an output left incomplete by a
-  file that could not be read to the end is removed.
+- **Outputs are never replaced** unless `--overwrite` is given, and an output left incomplete, by a
+  file that could not be read to the end or by identity relations that could not be held back for a
+  PLATO JSON document, is removed.
 - `--json` prints one JSON object per input, one per line, then one for the total: the page's
-  report, with the input's format, counts, outputs and status. For a table of places its `columns`
-  is a list of `{column, field, reason}`, to read; `--columns` takes the object printed without
-  `--json` instead. `--brief` prints one line per input.
+  report, with the input's format, counts, outputs and status. Its `storeBytes` is the size of the
+  working database (the triple store) for RDF or attestation-centric input, or null when the input
+  streamed straight through. For a table of places its `columns` is a list of
+  `{column, field, reason}`, to read; `--columns` takes the object printed without `--json` instead.
+  `--brief` prints one line per input.
 - `--base URL` gives the base for the web addresses of spreadsheet identifiers
   ([web addresses for your identifiers](https://pelagios.org/place-attestation-ontology/guide/tools.html#converting)). `--no-typing` leaves out the
   node types and typed dates that N-Triples output otherwise has. `--cube` adds what Data Cube

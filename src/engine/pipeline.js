@@ -506,6 +506,9 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   for (const c of membershipCycles(membership)) rep.error('membership-cycle', 'A route, itinerary or network is, through its members, a member of itself (MemberOf, followed round, comes back to where it started)', c);
   if (writer) await writer.close();
   progress({ phase: 'done', ...rep.counts, elapsedMs: Date.now() - t0 });
+  // A writer whose output is knowingly short (identity relations it held back and lost) ends the run
+  // incomplete, as a file cut short does: no outputs, and a host removes what was written.
+  if (writer?.incomplete) return { report: rep.toJSON(), outputs: [], incomplete: true };
   return { report: rep.toJSON(), outputs };
 }
 /** Resolve a document's withdrawals, reporting any loop of them as an error in the data. */
@@ -579,10 +582,11 @@ async function makeWriter(target, env, rep, options, typing, outputs, input) {
     // does). Identity relations are held back and written after the last place, never with places
     // inside them: in memory up to a limit, then in a working database, so that any number can wait.
     const HELD = options.heldIdentities || 10000;   // the tests set it low, to reach the database
-    let held = [], heldDb = null, heldIns = null, heldCount = 0, heldFailed = null;
-    // Where the working database cannot be had (opened, given its table, or written to), those already
-    // held in memory are kept and written, and every one after is lost: reported once, with a count at
-    // close(), never a TypeError and never silently.
+    let held = [], heldDb = null, heldIns = null, heldCount = 0, heldFailed = null, incomplete = false;
+    // Where the working database cannot be had (opened, given its table, or written to), those still
+    // held in memory are written and every other is lost, including any already moved into the database
+    // before a write to it failed: reported once, with a count at close(), never a TypeError and never
+    // silently. The output is then knowingly short, so the run is incomplete and a host removes it.
     const holdingFailed = (e) => {
       heldFailed = e && e.message || String(e);
       if (heldDb) { try { heldDb.close(); } catch { /* closed already */ } }
@@ -605,6 +609,7 @@ async function makeWriter(target, env, rep, options, typing, outputs, input) {
       } catch (e) { holdingFailed(e); }
     };
     return {
+      get incomplete() { return incomplete; },
       header(h) {
         const head = { $schema: 'https://w3id.org/plato/schemas/place-centric.schema.json', ...h, profile: 'place-centric' };
         if (target === 'plato-jsonl') sink.write(JSON.stringify(head) + '\n');
@@ -634,13 +639,10 @@ async function makeWriter(target, env, rep, options, typing, outputs, input) {
                 try { while (q.step()) { put(q.get(0)); written++; } } finally { q.finalize(); }
               } catch (e) { heldFailed = heldFailed || (e && e.message || String(e)); }
               try { heldDb.close(); } catch { /* closed already */ }
-            } else {
-              if (heldDb) { heldFailed = heldFailed || 'the working database was opened but could not be written to'; try { heldDb.close(); } catch { /* closed already */ } }
-              for (const l of held) { put(l); written++; }
-            }
+            } else for (const l of held) { put(l); written++; }
             sink.write(']');
             const lost = heldCount - written;
-            if (lost) rep.error('identity-relations-lost', `Identity relations are held back to be written after the last place, in a working database once there are many; it could not be used, so ${lost} of the ${heldCount} identity relations are not in the output`, heldFailed);
+            if (lost) { incomplete = true; rep.error('identity-relations-lost', `Identity relations are held back to be written after the last place, in a working database once there are many; it could not be used, so ${lost} of the ${heldCount} identity relations are not in the output`, heldFailed); }
           }
           sink.write('}');
         }

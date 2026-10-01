@@ -56,7 +56,8 @@ test('with no identity relations the document has no identityRelations key', asy
 // ---- when the working database cannot be had --------------------------------------------------------
 // Held in memory up to options.heldIdentities, then in a database from env.openDb(). Where that fails
 // (it cannot be opened, given its table, or written to), the run is not broken by a TypeError at
-// close(), and every identity relation not in the output is reported, by count.
+// close(), and every identity relation not in the output is reported, by count. The output is then
+// knowingly short, so the run is incomplete: a host removes it, as after a file cut short.
 const lostItem = (r) => r.report.items.find((i) => i.kind === 'identity-relations-lost');
 const failing = {
   'it cannot be opened': async () => { throw new Error('no room'); },
@@ -72,6 +73,7 @@ for (const [what, openDb] of Object.entries(failing)) {
     assert.equal(item.severity, 'error');
     assert.match(item.message, /3 of the 5 identity relations are not in the output/);
     assert.ok(!r.report.items.some((i) => /TypeError|Cannot read/.test(JSON.stringify(i))), JSON.stringify(r.report.items));
+    assert.equal(r.incomplete, true, 'an output short of identity relations is incomplete');
   });
 }
 test('identity relations written to the database and then lost there are all counted', async () => {
@@ -86,10 +88,12 @@ test('identity relations written to the database and then lost there are all cou
   assert.equal(doc.identityRelations.length, 0);
   assert.match(lostItem(r).message, /5 of the 5 /);
   assert.deepEqual(lostItem(r).examples, ['disk full']);
+  assert.equal(r.incomplete, true);
 });
 test('control: with a working database nothing is reported lost', async () => {
   const { r, doc } = await goWith((base) => base(), { heldIdentities: 2 });
   assert.equal(doc.identityRelations.length, 5);
   assert.equal(lostItem(r), undefined);
   assert.equal(r.report.errors, 0);
+  assert.ok(!r.incomplete, 'a complete output is not marked incomplete');
 });

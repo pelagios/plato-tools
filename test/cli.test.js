@@ -239,7 +239,30 @@ test('JSON Lines to PLATO JSON with identity relations spilled to a database: no
   // Presence: every identity relation came back out (by way of the database: there are over 10,000).
   assert.equal(JSON.parse(readFileSync(join(out, 'many.json'), 'utf8')).identityRelations.length, 10010);
   assert.equal(line.storeBytes, null, 'the held identity relations are not the triple store');
+  // cleanup() removes the run's whole working folder, so this shows only that nothing is left behind
+  // at exit; that finish() closed and deleted each database is the NodeHost test's, below.
   assert.deepEqual(readdirSync(work), [], 'nothing is left in the work directory');
+});
+test('a PLATO JSON document that loses identity relations it held back is removed, being incomplete', () => {
+  // The same input as above, but --work-dir is a file, so the working database cannot be made and
+  // the 10 identity relations beyond the 10,000 held in memory cannot be held: the output would be
+  // knowingly short. (The test above, with a working directory, is its control.)
+  const X = 'https://example.org/', dir = scratch(), out = scratch(), work = join(scratch(), 'not-a-dir');
+  writeFileSync(work, '');
+  const rows = [{ profile: 'place-centric', gazetteer: { title: 't' } }];
+  const place = (i) => ({ '@id': `${X}place/p${i}`, label: 'p' + i, attestations: [{ sources: [{ '@id': X + 'source/s', title: 'S' }], names: [{ toponym: 'p' + i }] }] });
+  for (let i = 0; i < 10010; i++) { rows.push(place(i)); rows.push({ subject: `${X}place/p${i}`, object: `${X}place/p${i + 1}`, identityType: 'closeMatch' }); }
+  const p = join(dir, 'many.jsonl');
+  writeFileSync(p, rows.map((o) => JSON.stringify(o)).join('\n') + '\n');
+  const r = cli('convert', '--to', 'plato-json', '--json', '--work-dir', work, '--out', out, p);
+  assert.equal(r.code, 1, r.out + r.err);
+  const [line] = jsonLines(r.out);
+  const lost = line.items.find((i) => i.kind === 'identity-relations-lost');
+  assert.ok(lost, JSON.stringify(line.items));
+  assert.match(lost.message, /10 of the 10010 identity relations are not in the output/);
+  assert.match(line.message, /Nothing was written: .*many\.json was removed, being incomplete\./);
+  assert.deepEqual(line.outputs, []);
+  assert.deepEqual(readdirSync(out), [], 'the short output is not kept');
 });
 test('a run that opens several databases closes and deletes every one, and storeBytes is the store\'s', async () => {
   const { NodeHost } = await import('../src/node/host.js');
@@ -258,6 +281,23 @@ test('a run that opens several databases closes and deletes every one, and store
     assert.ok(done.storeBytes > 20000, `storeBytes ${done.storeBytes} is the store's`);
     assert.equal(host.open.size, 0);
   } finally { host.cleanup(); }
+});
+
+test('a working database whose close() throws is still deleted, and a second close() finishes it', async () => {
+  const { openNodeSqlite } = await import('../src/node/sqlite.js');
+  const { DatabaseSync } = await import('node:sqlite');
+  const { existsSync } = await import('node:fs');
+  const db = openNodeSqlite(join(scratch(), 'x.sqlite3'));
+  db.exec('CREATE TABLE t(x)');
+  // Presence: the file is there before close().
+  assert.ok(existsSync(db.path));
+  const real = DatabaseSync.prototype.close;
+  DatabaseSync.prototype.close = function () { throw new Error('cannot close'); };
+  try { assert.throws(() => db.close(), /cannot close/); } finally { DatabaseSync.prototype.close = real; }
+  assert.ok(!existsSync(db.path), 'the file is removed although close() threw');
+  assert.equal(db.closed, false, 'it is not marked closed, so close() can be tried again');
+  db.close();
+  assert.equal(db.closed, true);
 });
 
 test('counts of one are singular in the summary: "1 place", "1 identity relation"', async () => {

@@ -37,10 +37,9 @@ export function openNodeSqlite(path, { cacheMB = 64 } = {}) {
     prepare(sql) { return new Statement(db.prepare(sql)); },
     close() {
       if (handle.closed) return;
-      handle.closed = true;
       try { handle.bytes = statSync(path).size; } catch {}
-      db.close();
-      rmSync(path, { force: true });
+      // Marked closed only once it is: a close() that throws still removes the file, and may be tried again.
+      try { db.close(); handle.closed = true; } finally { rmSync(path, { force: true }); }
     },
   };
   return handle;
