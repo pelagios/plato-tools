@@ -21,7 +21,7 @@ import { SaxesParser } from 'saxes';
 import { PLATO, isAbsoluteIri } from '../../lib/context.js';
 import { DataError, textStream } from '../input.js';
 import { LOSS_TEXT } from '../report.js';
-import { placeAddress, addressNote, addressFromPattern, patternProblem, GAZETTEER_PATTERNS } from './addresses.js';
+import { placeAddress, addressNote, addressFromPattern, patternFault, GAZETTEER_PATTERNS } from './addresses.js';
 
 export const TEI_NS = 'http://www.tei-c.org/ns/1.0';
 const ATTESTED = PLATO + 'Attested';
@@ -56,7 +56,7 @@ export function teiReadingRefusal(reading = {}) {
   if (kp !== undefined && (typeof kp !== 'object' || kp === null || Array.isArray(kp))) return 'Key patterns are given as a prefix and a pattern for each.';
   for (const [prefix, pattern] of Object.entries(kp || {})) {
     // "whg:<n>" is WHG's ambiguous code (a cluster to Recogito, a database key to reconciliation), never an id to make an address from.
-    const why = prefix.toLowerCase() === 'whg' ? 'whg' : patternProblem(pattern);
+    const why = prefix.toLowerCase() === 'whg' ? 'whg' : patternFault(pattern);
     if (why) return `The key pattern ${prefix ? `for the prefix "${prefix}"` : 'for keys with no prefix'} (${pattern}) ${PATTERN_WHY[why]}`;
   }
   return null;
@@ -830,7 +830,7 @@ export class TeiReader {
       return undefined;
     }
     const r = addressFromPattern(rest, pattern);
-    if (r.error || (!r.lost && !isWeb(r.iri))) { this.report('tei-key-shape', `${k} (pattern ${pattern})`); return { lost: true }; }
+    if (r.error || r.lost === 'shape' || (!r.lost && !isWeb(r.iri))) { this.report('tei-key-shape', `${k} (pattern ${pattern})`); return { lost: true }; }
     if (r.lost) { this.report(WHG_LOST[r.lost], `${r.value} (key ${k})`); return { lost: true }; }
     if (r.part) this.report('address-pleiades-part', `${r.iri} (key ${k})`);
     return { address: { iri: r.iri, ...(r.from ? { from: r.from, rules: r.rules } : {}) }, note: `Place address made from the key ${k} with the pattern ${pattern}` };

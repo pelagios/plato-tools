@@ -4,7 +4,11 @@
 //
 // The mapping is a JSON object, { "column name": field }, where field is one of FIELDS' keys,
 // "note" (kept in the attestation's notes as "column: value") or "skip" (not carried over, and
-// reported by name). Every column goes to exactly one of these. A column that is not recognised is
+// reported by name). Every column goes to exactly one of these. A field may also be given as an
+// object, { "field": "address", "pattern": "https://pleiades.stoa.org/places/{id}" }: a column of a
+// gazetteer's ids, from which each place's address is made through the pattern (addresses.js,
+// addressFromPattern). resolveColumns gives the fields as strings (`mapping`) and the patterns beside
+// them (`patterns`); mappingToSave puts the two back into the one JSON object. A column that is not recognised is
 // kept in the notes, never put in `properties`: a property would claim the source said something
 // PLATO defines, when all that is known is that a column had that heading. The mapping and the
 // reasons are made with no prototype (Object.create(null)), so that a column called "__proto__" or
@@ -15,7 +19,7 @@
 // do, a date column is the date as the source writes it, a start and end the earliest start and
 // latest end, a type column a type's label (and its identifier, when it is a web address).
 import { isAbsoluteIri } from '../../lib/context.js';
-import { placeAddress, addressNote } from './addresses.js';
+import { placeAddress, addressNote, addressFromPattern, patternProblem, GAZETTEER_PATTERNS } from './addresses.js';
 
 /** What each field of the mapping means, and whether one column only may be mapped to it. */
 export const FIELDS = {
@@ -56,6 +60,7 @@ export const GENERIC_KINDS = {
   'generic-address-not-web': 'loss',
   'generic-whg-record': 'loss',
   'generic-whg-staging': 'loss',
+  'generic-id-shape': 'loss',
   'generic-feature-key': 'loss',
   'generic-not-feature': 'loss',
   'generic-csv-extra-cells': 'loss',
@@ -137,15 +142,25 @@ function geometryLike(s) {
 const isField = (f) => typeof f === 'string' && (Object.hasOwn(FIELDS, f) || Object.hasOwn(OTHER, f));
 const single = (f) => Object.hasOwn(FIELDS, f) && FIELDS[f].single;
 
+// A heading, normalised, that names one of the gazetteers whose addresses are made from ids.
+const PATTERN_GAZETTEER = /^(pleiades|geonames|wikidata)/;
+const GAZETTEER_WORDS = { pleiades: 'Pleiades', geonames: 'GeoNames', wikidata: 'Wikidata' };
+
 /**
- * Guess which column holds what, from the headings and a few rows. Returns { mapping, reasons, gazetteer }:
- * the mapping as described at the top of this file, and for each column a reason in words, which
- * the page shows beside its guess and the command line prints, and the columns whose headings name
- * a gazetteer (gazetteerColumns). `headerText` gives, for a column known
+ * Guess which column holds what, from the headings and a few rows. Returns { mapping, patterns,
+ * suggested, reasons, gazetteer }: the mapping as described at the top of this file (fields as
+ * strings), `patterns` (none: a guess never makes an address from an id), and for each column a
+ * reason in words, which the page shows beside its guess and the command line prints, and the
+ * columns whose headings name a gazetteer (gazetteerColumns). `suggested[column]` is
+ * { field: 'address', pattern, gazetteer, fit, sampled } for a column whose heading names Pleiades,
+ * GeoNames or Wikidata and at least half of whose sampled values (`fit` of `sampled`) have the shape
+ * of that gazetteer's ids, when no column is the address: the column stays a note until the user
+ * confirms the pattern, and its reason says so. `headerText` gives, for a column known
  * by its heading and place ("name (column 3)", where two columns share a heading), the heading itself.
  */
 export function guessColumns(headers, sampleRows = [], headerText = {}, { ownGeometry = false } = {}) {
   const mapping = Object.create(null), reasons = Object.create(null), taken = new Map();
+  const suggested = Object.create(null);
   const values = (h) => sampleRows.map((r) => cellText(r?.[h])).filter(Boolean);
   for (const h of headers) {
     const n = normaliseHeader(Object.hasOwn(headerText, h) ? headerText[h] : h);
@@ -161,7 +176,15 @@ export function guessColumns(headers, sampleRows = [], headerText = {}, { ownGeo
       // make every row one. A column named for an address that holds none is only a note.
       const k = vs.filter(namesAddress).length;
       if (k && (2 * k >= vs.length || (field === 'address' && namesGazetteer(n)))) { field = 'address'; reason = `${reason}, and ${webAddresses(k, vs.length)}`; }
-      else if (field === 'address') { field = 'note'; reason = vs.length ? `the heading "${h}" reads as a web address, but ${k ? `only ${webAddresses(k, vs.length)}` : `${vs.length === 1 ? 'its one sampled value is not a web address' : `none of its ${vs.length} sampled values is a web address`}`} (http or https), so it is kept in the notes` : `the heading "${h}" reads as a web address, but it is empty in the rows looked at, so it is kept in the notes`; }
+      else if (field === 'address') {
+        field = 'note'; reason = vs.length ? `the heading "${h}" reads as a web address, but ${k ? `only ${webAddresses(k, vs.length)}` : `${vs.length === 1 ? 'its one sampled value is not a web address' : `none of its ${vs.length} sampled values is a web address`}`} (http or https), so it is kept in the notes` : `the heading "${h}" reads as a web address, but it is empty in the rows looked at, so it is kept in the notes`;
+      }
+      // A gazetteer's ids (pleiades_id: 579885): the address can be made from each, once the user
+      // confirms the pattern; a bare number is never taken for an address unasked. Web addresses in
+      // the column count with the ids, as they are read as addresses, not through the pattern.
+      const g = PATTERN_GAZETTEER.exec(n)?.[1];
+      const fit = g && (field === 'note' || field === 'address') ? vs.filter((v) => GAZETTEER_PATTERNS[g].shape.test(v)).length : 0;
+      if (fit && 2 * (fit + k) >= vs.length) suggested[h] = { field: 'address', pattern: GAZETTEER_PATTERNS[g].pattern, gazetteer: g, fit, sampled: vs.length };
     } else if ((field === 'latitude' || field === 'longitude') && ownGeometry) {
       // GeoJSON features with a geometry of their own: that is the place's location, and a latitude
       // and longitude beside it would give each place a second one.
@@ -183,16 +206,27 @@ export function guessColumns(headers, sampleRows = [], headerText = {}, { ownGeo
     if (single(field)) taken.set(field, h);
     mapping[h] = field; reasons[h] = reason;
   }
-  return { mapping, reasons, gazetteer: gazetteerColumns(headers, headerText) };
+  // A suggestion only when no other column is the address already: one column only can be.
+  for (const h of Object.keys(suggested)) if (Object.keys(mapping).some((c) => c !== h && mapping[c] === 'address')) delete suggested[h];
+  for (const [h, s] of Object.entries(suggested)) {
+    const have = s.fit === s.sampled ? (s.sampled === 1 ? 'its one sampled value has' : `all ${s.sampled} of its sampled values have`) : `${s.fit} of its ${s.sampled} sampled values have`;
+    reasons[h] += mapping[h] === 'address'
+      ? `; ${have} the form of ${GAZETTEER_WORDS[s.gazetteer]} ids, which are made into web addresses with the pattern ${s.pattern} once you confirm that pattern, and are kept in the notes until then`
+      : `; but ${have} the form of ${GAZETTEER_WORDS[s.gazetteer]} ids, so it can be read as the place's web address, made with the pattern ${s.pattern}, once you confirm that pattern`;
+  }
+  return { mapping, patterns: Object.create(null), suggested, reasons, gazetteer: gazetteerColumns(headers, headerText) };
 }
 // How many of a column's sampled values are web addresses: "49 of its 50 sampled values are web addresses".
 const webAddresses = (k, n) => (n === 1 ? 'its one sampled value is a web address' : k === n ? `all ${n} of its sampled values are web addresses` : `${k} of its ${n} sampled values ${k === 1 ? 'is a web address' : 'are web addresses'}`);
 
 /**
  * The mapping to use: `saved` (a mapping given, from --columns or the page), checked against the
- * columns there are, else the guess. Returns { mapping, reasons, problems, gazetteer }, each problem
- * { kind, example } of a kind in GENERIC_KINDS. A column the saved mapping leaves out, or maps to
- * something that is not a field, is kept in the notes, so that nothing is lost or claimed.
+ * columns there are, else the guess. Returns { mapping, patterns, suggested, reasons, problems,
+ * gazetteer } (guessColumns), each problem { kind, example } of a kind in GENERIC_KINDS. A column
+ * the saved mapping leaves out, or maps to something that is not a field, or to a pattern that
+ * cannot be used (addresses.js, patternProblem: a World Historical Gazetteer pattern among them), is
+ * kept in the notes, so that nothing is lost or claimed. With a saved mapping, `suggested` holds the
+ * guess's suggestions for the columns it keeps as notes, when it has no address column.
  */
 export function resolveColumns(headers, sampleRows, saved, headerText, options) {
   if (saved === undefined || saved === null) return { ...guessColumns(headers, sampleRows, headerText, options), problems: [] };
@@ -201,18 +235,29 @@ export function resolveColumns(headers, sampleRows, saved, headerText, options) 
     problems.push({ kind: 'generic-mapping', example: 'the mapping given is not a JSON object of column names and fields; the guess is used instead' });
     return { ...guessColumns(headers, sampleRows, headerText, options), problems };
   }
-  const mapping = Object.create(null), reasons = Object.create(null), taken = new Map();
+  const mapping = Object.create(null), patterns = Object.create(null), reasons = Object.create(null), taken = new Map();
   for (const h of headers) {
     if (!Object.hasOwn(saved, h)) {
       mapping[h] = 'note'; reasons[h] = 'the mapping given does not name this column, so it is kept in the notes';
       problems.push({ kind: 'generic-mapping-missing-column', example: h });
       continue;
     }
-    const f = saved[h];
+    // A field, or { field, pattern }: the pattern only for the address.
+    const given = saved[h];
+    const entry = given !== null && typeof given === 'object' && !Array.isArray(given);
+    const f = entry ? given.field : given, pattern = entry && Object.hasOwn(given, 'pattern') ? given.pattern : undefined;
     if (!isField(f)) {
       mapping[h] = 'note'; reasons[h] = `the mapping given says ${JSON.stringify(f)}, which is not a field, so it is kept in the notes`;
       problems.push({ kind: 'generic-mapping', example: `${h}: ${JSON.stringify(f)} is not one of ${[...Object.keys(FIELDS), ...Object.keys(OTHER)].join(', ')}` });
       continue;
+    }
+    if (pattern !== undefined) {
+      const why = f !== 'address' ? `a pattern makes the place's web address, so it goes with "address", not "${f}"` : patternProblem(pattern);
+      if (why) {
+        mapping[h] = 'note'; reasons[h] = `the mapping given has a pattern for it that cannot be used (${why}), so it is kept in the notes`;
+        problems.push({ kind: 'generic-mapping', example: `${h}: ${why}` });
+        continue;
+      }
     }
     if (single(f) && taken.has(f)) {
       mapping[h] = 'note'; reasons[h] = `the mapping given also maps column "${taken.get(f)}" to ${f}, which one column only can be, so this one is kept in the notes`;
@@ -220,10 +265,27 @@ export function resolveColumns(headers, sampleRows, saved, headerText, options) 
       continue;
     }
     if (single(f)) taken.set(f, h);
-    mapping[h] = f; reasons[h] = 'as the mapping given says';
+    mapping[h] = f; reasons[h] = pattern === undefined ? 'as the mapping given says' : `as the mapping given says, with each address made from the column's value through the pattern ${pattern}`;
+    if (pattern !== undefined) patterns[h] = pattern;
   }
   for (const k of Object.keys(saved)) if (!headers.includes(k)) problems.push({ kind: 'generic-mapping-unknown-column', example: k });
-  return { mapping, reasons, problems, gazetteer: gazetteerColumns(headers, headerText) };
+  const suggested = Object.create(null);
+  if (!Object.values(mapping).includes('address')) {
+    const guess = guessColumns(headers, sampleRows, headerText, options);
+    for (const [h, s] of Object.entries(guess.suggested)) if (mapping[h] === 'note') suggested[h] = s;
+  }
+  return { mapping, patterns, suggested, reasons, problems, gazetteer: gazetteerColumns(headers, headerText) };
+}
+
+/**
+ * A mapping and its patterns (resolveColumns) as the one JSON object to save and give back (with
+ * --columns, or on the page): each column's field, or { field: 'address', pattern } for a column
+ * whose addresses are made through a pattern.
+ */
+export function mappingToSave(mapping, patterns = {}) {
+  const out = Object.create(null);
+  for (const [h, f] of Object.entries(mapping)) out[h] = Object.hasOwn(patterns, h) ? { field: f, pattern: patterns[h] } : f;
+  return out;
 }
 
 // ---- one row through the mapping ------------------------------------------------------------------
@@ -357,8 +419,10 @@ export function geometryToPlato(g, report = () => {}, where = '') {
  * that had a value. `where` says which row, for the report; `fileName` is the file, cited as the
  * source when no source column gives one; `geometry` is a GeoJSON feature's own geometry.
  * `idAsNote` keeps the id in the notes, for rows that are attestations about an address.
+ * `patterns` (resolveColumns) gives the pattern an address column's ids are made into addresses by;
+ * a value that is already a web address is read as one, not through the pattern.
  */
-export function applyColumns(row, mapping, { where = '', report = () => {}, fileName = 'the file', geometry, idAsNote = false } = {}) {
+export function applyColumns(row, mapping, { where = '', report = () => {}, fileName = 'the file', geometry, idAsNote = false, patterns = {} } = {}) {
   let name, id, idCol, address, addressFrom, addressText, addressLost = false, language, languageCol, date, start, end, wkt, lat = '', lon = '', geomCell;
   const alternatives = [], types = [], sources = [], notes = [], skipped = [];
   const note = (col, v) => notes.push(`${col}: ${v}`);
@@ -384,6 +448,20 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
         // Put into the form `about` should carry (addresses.js): a gazetteer's forms of an address
         // become its one form, WHG's reconciliation ids and entity pages its persistent addresses;
         // one that must not be carried is reported.
+        const pattern = Object.hasOwn(patterns, col) ? patterns[col] : undefined;
+        if (pattern !== undefined && !/^https?:\/\//i.test(v)) {
+          // An id, made into the address through the pattern the user confirmed; one of the wrong
+          // shape (whg:<n> always) makes none, and is kept in the notes should the row become a place of its own.
+          const p = addressFromPattern(v, pattern);
+          if (p.lost === 'shape') { addressLost = true; report('generic-id-shape', `${where}, ${col}: ${v} (the pattern ${pattern})`); note(col, v); }
+          else if (p.lost) { addressLost = true; report(p.lost === 'whg-staging' ? 'generic-whg-staging' : 'generic-whg-record', `${where}: ${p.value}`); }
+          else if (isWebAddress(p.iri)) {
+            address = p.iri.trim(); addressFrom = p.from ? p : undefined;
+            notes.push(`Place address made from the value ${v} in the column "${col}" with the pattern ${pattern}`);
+            if (p.part) report('address-pleiades-part', `${where}: ${p.iri}`);
+          } else { addressText = v; note(col, v); }
+          break;
+        }
         const p = placeAddress(v);
         if (p.lost) { addressLost = true; report(p.lost === 'whg-staging' ? 'generic-whg-staging' : 'generic-whg-record', `${where}: ${p.value}`); }
         else if (isWebAddress(p.iri)) { address = p.iri.trim(); addressFrom = p.from ? p : undefined; if (p.part) report('address-pleiades-part', `${where}: ${p.iri}`); }

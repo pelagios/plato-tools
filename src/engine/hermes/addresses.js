@@ -96,49 +96,80 @@ export function placeAddress(value) {
   return { iri: v };
 }
 
-// ---- an address made from an id and a pattern ----------------------------------------------------
+// ---- addresses made from ids, through a pattern -------------------------------------------------
 // A source that gives a place's id rather than its address (a TEI @key such as "pleiades:579885", a
-// table's id column) is converted only with a pattern the user confirms, with its placeholder ({id},
-// or {key}) exactly once. The id must have the shape the gazetteer's ids have (a pattern of
-// GAZETTEER_PATTERNS) or, for a pattern of the user's own, only the characters an address takes
-// unescaped; the address made then passes through placeAddress, as any other address does.
+// table's id column) is converted only through a pattern the user confirms, "…{id}…" ("{key}" in
+// TEI's words), whose placeholder appears exactly once and is replaced by the id. The id must have
+// the shape the gazetteer's ids have (a pattern of GAZETTEER_PATTERNS: a Pleiades id is digits) or,
+// for a pattern of the user's own, only the characters an address takes unescaped (PATTERN_SHAPE);
+// the address made then passes through placeAddress, as any other address does.
 
-/** The gazetteers whose addresses can be made from an id, each with its pattern and the shape of its ids. */
+/** The three gazetteers whose addresses are made from their ids: each pattern, and the shape its ids have. */
 export const GAZETTEER_PATTERNS = {
   pleiades: { pattern: 'https://pleiades.stoa.org/places/{id}', shape: /^\d+$/ },
   geonames: { pattern: 'https://sws.geonames.org/{id}/', shape: /^\d+$/ },
   wikidata: { pattern: 'http://www.wikidata.org/entity/{id}', shape: /^Q\d+$/ },
 };
-const OWN_ID = /^[A-Za-z0-9._~-]+$/;
+/** The ids a pattern of the user's own takes. */
+export const PATTERN_SHAPE = /^[A-Za-z0-9._~-]+$/;
 const PLACEHOLDER = /\{(?:id|key)\}/g;
+// The World Historical Gazetteer's addresses are never made from an id (a whg:<n> or a number is
+// ambiguous: see the top of this file).
+const WHG_HOST = /^https?:\/\/(?:[^/?#@]*\.)?whgazetteer\.org(?:[/:?#]|$)|^https?:\/\/w3id\.org\/whg(?:[/?#]|$)/i;
+
+/** The shape a pattern's ids must have: the gazetteer's, for one of GAZETTEER_PATTERNS ({id} or {key}), else PATTERN_SHAPE. */
+export function patternShape(pattern) {
+  const p = typeof pattern === 'string' ? pattern.trim().replace(PLACEHOLDER, '{id}') : pattern;
+  for (const g of Object.values(GAZETTEER_PATTERNS)) if (g.pattern === p) return g.shape;
+  return PATTERN_SHAPE;
+}
 
 /**
- * What is wrong with a pattern, or null: 'placeholder' (not exactly one {id} or {key}), 'not-web'
- * (it does not make a web address), 'whg' (it makes a World Historical Gazetteer address, which is
- * never made from an id: WHG's codes are not its records' addresses).
+ * What is wrong with a pattern, as a code, or null: 'placeholder' (not text, or not exactly one {id}
+ * or {key}), 'not-web' (it does not make a web address, or has a space), 'whg' (it makes a World
+ * Historical Gazetteer address, which is never made from an id: WHG's codes are not its records'
+ * addresses). patternProblem gives the same in words.
  */
-export function patternProblem(pattern) {
-  if (typeof pattern !== 'string' || (pattern.match(PLACEHOLDER) || []).length !== 1) return 'placeholder';
+export function patternFault(pattern) {
+  if (typeof pattern !== 'string' || !pattern.trim() || (pattern.match(PLACEHOLDER) || []).length !== 1) return 'placeholder';
+  const sample = pattern.trim().replace(PLACEHOLDER, '1');
   let url;
-  try { url = new URL(pattern.replace(PLACEHOLDER, '0')); } catch { return 'not-web'; }
-  if (!/^https?:$/.test(url.protocol) || /\s/.test(pattern)) return 'not-web';
+  try { url = new URL(sample); } catch { return 'not-web'; }
+  if (!/^https?:$/.test(url.protocol) || /\s/.test(sample) || !/^https?:\/\/[^\s/?#]+\S*$/i.test(sample)) return 'not-web';
   const host = url.hostname.toLowerCase();
-  if (host === 'whgazetteer.org' || host.endsWith('.whgazetteer.org') || (host === 'w3id.org' && /^\/whg(\/|$)/i.test(url.pathname))) return 'whg';
+  if (WHG_HOST.test(sample) || host === 'whgazetteer.org' || host.endsWith('.whgazetteer.org') || (host === 'w3id.org' && /^\/whg(\/|$)/i.test(url.pathname))) return 'whg';
   return null;
 }
 
 /**
- * The address a pattern makes from an id: placeAddress's result for it (so { iri }, { iri, from,
- * rules }, { iri, part } or { lost, value }), or { error } where it makes none: the pattern's own
- * problem (patternProblem), 'whg' for an id that is a WHG code ("whg:123"), 'shape' for an id that
- * does not have the shape the pattern takes.
+ * What is wrong with a pattern, in words, or null when nothing is: it must be text with its
+ * placeholder ({id}, or {key}) exactly once, make a web address, and not be one of the World
+ * Historical Gazetteer's. The same verdicts as patternFault.
  */
-export function addressFromPattern(value, pattern) {
-  const problem = patternProblem(pattern);
-  if (problem) return { error: problem };
-  const id = typeof value === 'string' ? value.trim() : '';
-  if (/^whg:/i.test(id)) return { error: 'whg' };
-  const known = Object.values(GAZETTEER_PATTERNS).find((g) => g.pattern === pattern.replace(PLACEHOLDER, '{id}'));
-  if (!(known ? known.shape : OWN_ID).test(id)) return { error: 'shape' };
-  return placeAddress(pattern.replace(PLACEHOLDER, id));
+export function patternProblem(pattern) {
+  const fault = patternFault(pattern);
+  if (!fault) return null;
+  if (typeof pattern !== 'string' || !pattern.trim()) return 'the pattern is not text';
+  if (fault === 'placeholder') {
+    const n = (pattern.match(PLACEHOLDER) || []).length;
+    return `the pattern ${pattern} has ${n ? 'more than one' : 'no'} {id} in it, where it needs one, which the id replaces`;
+  }
+  if (fault === 'not-web') return `the pattern ${pattern} does not make a web address (http or https)`;
+  return `the pattern ${pattern} is the World Historical Gazetteer's, whose addresses are never made from an id (a number, or whg: and a number, names no one record)`;
+}
+
+/**
+ * The address made from an id through a pattern: placeAddress's result for the address made (so
+ * { iri }, { iri, from, rules }, { iri, part } or { lost, value }: a gazetteer's other forms become
+ * its one form), or { lost: 'shape', value } when the id does not have `shape` (patternShape(pattern)
+ * when none is given). whg:<n> never has a shape. A pattern that cannot be used gives
+ * { error: patternFault(pattern) }; callers are expected to have refused it already.
+ */
+export function addressFromPattern(value, pattern, { shape } = {}) {
+  const fault = patternFault(pattern);
+  if (fault) return { error: fault };
+  const v = typeof value === 'string' ? value.trim() : String(value ?? '');
+  const s = shape || patternShape(pattern);
+  if (/^whg:/i.test(v) || !s.test(v)) return { lost: 'shape', value: v };
+  return placeAddress(pattern.trim().replace(PLACEHOLDER, v));
 }

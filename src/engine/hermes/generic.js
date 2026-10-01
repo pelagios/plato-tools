@@ -200,7 +200,7 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
   const file = input.files[0];
   const report = (kind, example) => rep.add(GENERIC_KINDS[kind] || 'loss', kind, LOSS_TEXT[kind] || kind, example);
   const t = await open(input);
-  const { mapping, problems } = resolveColumns(t.headers, t.sample, options.columns, t.headerText, { ownGeometry: t.ownGeometry });
+  const { mapping, patterns, problems } = resolveColumns(t.headers, t.sample, options.columns, t.headerText, { ownGeometry: t.ownGeometry });
   for (const p of [...(t.headProblems || []), ...problems]) report(p.kind, p.example);
   const fields = Object.values(mapping);
   const byAddress = fields.includes('address'), hasId = fields.includes('id');
@@ -229,7 +229,7 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
     if (r.problem) report('generic-csv-row', `${r.where}: ${r.problem}`);
     if (r.extra?.length) report('generic-csv-extra-cells', `${r.where}: ${r.extra.join(', ')}`);
     for (const k of r.keys || []) report('generic-feature-key', k);
-    const a = applyColumns(r.row, mapping, { where: r.where, report, fileName: file.name, geometry: r.geometry, idAsNote: byAddress });
+    const a = applyColumns(r.row, mapping, { where: r.where, report, fileName: file.name, geometry: r.geometry, idAsNote: byAddress, patterns });
     for (const c of a.skipped) skipped.add(c);
     if (byAddress && a.address) { out++; yield { type: 'attestation', value: { about: a.address, ...a.attestation }, n }; continue; }
     // A row about an address that gives none it can use is still read: with an id, it is a place of

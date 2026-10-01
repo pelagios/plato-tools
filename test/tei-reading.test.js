@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { addPlatoFormats, strictFormatLogger } from '../src/lib/formats.js';
 import { teiToDocument, TeiReader, TEI_KINDS, EDITORIAL_IRI, setEditorialIriForTests, teiReadingRefusal, teiKeyPrefixes, splitKey } from '../src/engine/hermes/tei.js';
-import { addressFromPattern, patternProblem } from '../src/engine/hermes/addresses.js';
+import { addressFromPattern, patternFault } from '../src/engine/hermes/addresses.js';
 import { DataError } from '../src/engine/input.js';
 import { LOSS_TEXT } from '../src/engine/report.js';
 
@@ -297,19 +297,20 @@ test('a key is split at its first ":" or ","; a key with neither has the prefix 
 test('addressFromPattern: the shape is checked, the id put in, and the address made goes through placeAddress', () => {
   assert.deepEqual(addressFromPattern('579885', PLEIADES), { iri: 'https://pleiades.stoa.org/places/579885' });
   assert.deepEqual(addressFromPattern('579885', 'http://pleiades.stoa.org/places/{key}'), { iri: 'https://pleiades.stoa.org/places/579885', from: 'http://pleiades.stoa.org/places/579885', rules: ['pleiades-https'] });
-  assert.deepEqual(addressFromPattern('athens', PLEIADES), { error: 'shape' });
-  assert.deepEqual(addressFromPattern('1524', 'http://www.wikidata.org/entity/{id}'), { error: 'shape' });
+  assert.deepEqual(addressFromPattern('athens', PLEIADES), { lost: 'shape', value: 'athens' });
+  assert.deepEqual(addressFromPattern('1524', 'http://www.wikidata.org/entity/{id}'), { lost: 'shape', value: '1524' });
   assert.deepEqual(addressFromPattern('Q1524', 'http://www.wikidata.org/entity/{id}'), { iri: 'http://www.wikidata.org/entity/Q1524' });
   // a pattern of the user's own takes only the characters an address takes unescaped
   assert.deepEqual(addressFromPattern('Argos', 'https://example.org/p/{id}'), { iri: 'https://example.org/p/Argos' });
-  assert.deepEqual(addressFromPattern('Ar gos', 'https://example.org/p/{id}'), { error: 'shape' });
-  assert.deepEqual(addressFromPattern('whg:123', 'https://example.org/p/{id}'), { error: 'whg' });
-  assert.equal(patternProblem('https://example.org/{id}/{id}'), 'placeholder');
-  assert.equal(patternProblem('https://example.org/'), 'placeholder');
-  assert.equal(patternProblem('urn:x:{id}'), 'not-web');
-  assert.equal(patternProblem('https://whgazetteer.org/places/{id}/portal/'), 'whg');
-  assert.equal(patternProblem('https://w3id.org/whg/id/place:gn:{id}'), 'whg');
-  assert.equal(patternProblem('https://w3id.org/other/{id}'), null);
+  assert.deepEqual(addressFromPattern('Ar gos', 'https://example.org/p/{id}'), { lost: 'shape', value: 'Ar gos' });
+  assert.deepEqual(addressFromPattern('whg:123', 'https://example.org/p/{id}'), { lost: 'shape', value: 'whg:123' });
+  assert.deepEqual(addressFromPattern('123', 'https://whgazetteer.org/places/{id}/portal/'), { error: 'whg' });
+  assert.equal(patternFault('https://example.org/{id}/{id}'), 'placeholder');
+  assert.equal(patternFault('https://example.org/'), 'placeholder');
+  assert.equal(patternFault('urn:x:{id}'), 'not-web');
+  assert.equal(patternFault('https://whgazetteer.org/places/{id}/portal/'), 'whg');
+  assert.equal(patternFault('https://w3id.org/whg/id/place:gn:{id}'), 'whg');
+  assert.equal(patternFault('https://w3id.org/other/{id}'), null);
 });
 
 test('a WHG pattern, a pattern for the prefix "whg", and a pattern with no placeholder are refused; a good one is taken', () => {

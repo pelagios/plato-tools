@@ -214,7 +214,8 @@ Object.assign(LOSS_TEXT, {
   'generic-stand-in-base': 'The web addresses of the places are made from their ids under a stand-in base address, and so are not permanent: give a base address you control (--base, or the field on the page).',
   'generic-mapping-missing-column': 'The matching of columns given does not name this column, so it is kept in the notes. The example names the column.',
   'generic-mapping-unknown-column': 'The matching of columns given names a column this file does not have, so that part of it is not used. The example names the column.',
-  'generic-mapping': 'Part of the matching of columns given cannot be used (a field that does not exist, or a second column for a field that takes one), so that column is kept in the notes.',
+  'generic-mapping': 'Part of the matching of columns given cannot be used (a field that does not exist, a second column for a field that takes one, or a pattern that cannot be used: one without {id} exactly once, one that does not make a web address, one given for a field other than the address, or one for the World Historical Gazetteer, whose addresses are never made from an id), so that column is kept in the notes. The example says which, and why.',
+  'generic-id-shape': "A value in the column whose ids are made into the place's web address through a pattern does not have the form that pattern takes (digits for Pleiades and GeoNames, Q and digits for Wikidata, and for a pattern of your own only letters, digits and . _ ~ -), so no address is made from it. The row is read without it: with an id it becomes a place of its own, keeping the value in its notes, and otherwise it is not carried. whg: followed by a number is never made into an address. The example gives the row, the value and the pattern.",
 });
 
 // ---- a key a format has no place for, in words ------------------------------------------------------

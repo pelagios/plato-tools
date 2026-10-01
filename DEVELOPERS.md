@@ -309,7 +309,22 @@ readers link to those headings, so keep them.
   instead. The mapping is the same JSON on the page (the column-matching step in `src/app.js`, via
   `columnsOf`/`mappingOf` in `worker.js`, worded in `words.js`: `COLUMN_CHOICES`, `COLUMN_WORDS`,
   `columnWarnings`, which warns of a column named for a gazetteer when no column is the address) and on the command line (printed with each input, taken back with
-  `--columns FILE`). An address column makes the rows attestation-centric; otherwise each row is a
+  `--columns FILE`). A mapping value may also be `{"field": "address", "pattern": "…{id}…"}`, a
+  column of a gazetteer's ids made into addresses (`addresses.js`: `addressFromPattern(value,
+  pattern, { shape })` returns `placeAddress`'s result or `{ lost: 'shape', value }`;
+  `patternProblem(pattern)` refuses a pattern without `{id}` once, one that makes no web address,
+  and any World Historical Gazetteer one; `GAZETTEER_PATTERNS` has Pleiades', GeoNames' and
+  Wikidata's patterns and id shapes). `guessColumns`/`resolveColumns` return `{ mapping, patterns,
+  suggested, reasons, problems, gazetteer }`: `mapping` is fields as strings, `patterns` is
+  `{ column: pattern }` (only from a saved mapping; the guess never makes one), and
+  `suggested[column]` is `{ field: 'address', pattern, gazetteer, fit, sampled }` for a column named
+  for Pleiades, GeoNames or Wikidata of which at least half the sampled values have that gazetteer's
+  shape, when no other column is the address; the column stays `note`, and its reason names the
+  pattern, until the user confirms it. `mappingToSave(mapping, patterns)` gives the one JSON object
+  to save (the object form for a pattern column). `mappingOf` (the worker's `columns` reply) passes
+  `patterns` and `suggested` through; the page and the command line are to send the object form
+  back as `options.columns`, and `words.js`'s `columnWarnings` is to point at a suggested pattern.
+  An address column makes the rows attestation-centric; otherwise each row is a
   place whose `@id` is minted by `tableIds` from its id under the base address, with the id kept as
   `entityIdentifier`. No id column means no addresses and one `generic-no-ids` warning; a repeated
   id is a `DataError`. An unrecognised column goes to `notes`, never `properties`. The mapping, reasons
