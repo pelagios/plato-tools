@@ -104,6 +104,7 @@ export const RELOAD_LOSES = {
   drawing: 'The line or area you are drawing, not yet finished.',
   pasted: 'The address in the box for pasting a basemap, not yet added.',
   saving: 'The save running now.',
+  tracing: 'The trace being proposed now, not yet accepted.',
 };
 
 /** The one line a feature shows while it waits for a permission. */
