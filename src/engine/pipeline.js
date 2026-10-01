@@ -535,6 +535,22 @@ export async function run(job, env) {
     return { report: rep.toJSON(), outputs: [], incomplete: true };
   }
 }
+/**
+ * The stream of events (see "sources", above) an input is read as, or null for a format no reader
+ * reads: the reader runChecked uses, shared with the preview (src/engine/hermes/preview.js), so
+ * that a preview's records are the first a run reads. `hooks` are a caller's own, passed to the
+ * reader that takes them (the TEI reader's `watch`).
+ */
+export function sourceFor(input, env, rep, options = {}, action = 'check', hooks = {}) {
+  return input.format === 'plato-jsonl' ? platoJsonl(input.files[0], rep)
+    : input.format === 'plato-json' ? platoJson(input.files[0])
+    : input.format === 'lpf' || input.format === 'lpf-seq' ? lpfSource(input.files[0], input.format === 'lpf-seq', rep)
+    : input.format === 'tables' ? tablesSource(input, env, rep, options, action)
+    : input.format === 'w3c-annotations' ? annotationSource(input, rep)
+    : input.format === 'tei' ? teiSource(input, rep, options, hooks)
+    : input.format === 'csv' || input.format === 'geojson' ? genericSource(input, rep, options, DEFAULT_TABLE_BASE)
+    : ['ntriples', 'nquads', 'turtle'].includes(input.format) ? rdfSource(input.files[0], input.format, rep) : null;
+}
 async function runChecked({ input, action, target, options = {} }, env, rep) {
   // options.augment(record) -> record: a caller's change to each place-centric record on its way to
   // the writer or sink (another tool appending its attestations to the places they are about), after
@@ -546,14 +562,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   let lastBeat = 0;
   const beat = (phase, extra = {}) => { const now = Date.now(); if (now - lastBeat > 250 || extra.force) { lastBeat = now; progress({ phase, ...rep.counts, elapsedMs: now - t0, ...extra }); } };
 
-  const source = input.format === 'plato-jsonl' ? platoJsonl(input.files[0], rep)
-    : input.format === 'plato-json' ? platoJson(input.files[0])
-    : input.format === 'lpf' || input.format === 'lpf-seq' ? lpfSource(input.files[0], input.format === 'lpf-seq', rep)
-    : input.format === 'tables' ? tablesSource(input, env, rep, options, action)
-    : input.format === 'w3c-annotations' ? annotationSource(input, rep)
-    : input.format === 'tei' ? teiSource(input, rep, options)
-    : input.format === 'csv' || input.format === 'geojson' ? genericSource(input, rep, options, DEFAULT_TABLE_BASE)
-    : ['ntriples', 'nquads', 'turtle'].includes(input.format) ? rdfSource(input.files[0], input.format, rep) : null;
+  const source = sourceFor(input, env, rep, options, action);
   if (!source) throw new Error(`Unsupported input: ${input.format}`);
   if ((input.format === 'lpf' || input.format === 'lpf-seq') && input.lpfVersion === 2) {
     rep.error('lpf-v2', 'Linked Places Format v2 is not yet specified, so it cannot be read. It will be supported once the specification is published.');
