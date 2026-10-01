@@ -5,13 +5,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Image } from '@allmaps/iiif-parser';
-import { Raster, PAPER, INK, distToPolyline, area, closedRing } from './ink-synth.js';
+import { Raster, PAPER, INK, distToPolyline, area, densify } from './ink-synth.js';
 import { prepare, traceArea, traceLine, InkError } from '../src/engine/chora/ink/index.js';
 import { outline } from '../src/engine/chora/ink/contour.js';
 import { frameAround, grow } from '../src/engine/chora/ink/window.js';
 import { snapPixels, binPoints, nearestInk } from '../src/engine/chora/ink/snap.js';
 import { runTrace } from '../src/engine/chora/ink/job.js';
-import { localSteps } from '../src/engine/chora/ink/step.js';
+import { localSteps, traceStep, createPrepCache } from '../src/engine/chora/ink/step.js';
 
 const W = 640, H = 480, ONE = { x0: 0, y0: 0, s: 1 };
 const win = (r) => ({ w: r.w, h: r.h, rgba: r.rgba });
@@ -79,12 +79,49 @@ test('the thickness band: a road four times as thick across the line is not foll
   const stem = [[60, 240.5], [580, 240.5]];
   const thick = new Raster(W, H).stroke(stem, 3, INK).stroke([[320.5, 40], [320.5, 440]], 12, INK);
   const rt = traceLine(prepare(win(thick), { colour: false }), [150, 240], ONE);
-  assert.ok(Math.max(...xs(rt)) < 316, `ran to x ${Math.max(...xs(rt))} (the road's edge is at 314.5)`);
+  // The road (12 px wide about x 320.5) begins at x 314: the line ends there, and no point of it lies beyond its end.
+  const last = rt.points.reduce((a, p) => (p[0] > a[0] ? p : a));
+  const end = [rt.points[0], rt.points.at(-1)].reduce((a, p) => (p[0] > a[0] ? p : a));
+  assert.ok(Math.abs(end[0] - 314) <= 0.5 && last === end, `ends at x ${end[0]}, its farthest point at x ${last[0]} (the road's edge is at 314)`);
   assert.ok(rt.points.every((p) => Math.abs(p[1] - 240.5) <= 2), 'went into the road');
   // The control: a crossing line as thick as it is crossed, straight on.
   const thin = new Raster(W, H).stroke(stem, 3, INK).stroke([[320.5, 40], [320.5, 440]], 3, INK);
   const rn = traceLine(prepare(win(thin), { colour: false }), [150, 240], ONE);
   assert.ok(Math.max(...xs(rn)) > 570, `the thin crossing: ran to x ${Math.max(...xs(rn))}`);
+});
+
+test('spurs: a line bending 50° where a burr a width or so long carries straight on is followed round the bend (the burr pruned), not into the burr', () => {
+  const a = (50 * Math.PI) / 180, bend = [320, 240.5], end = [320 + 220 * Math.cos(a), 240.5 + 220 * Math.sin(a)];
+  for (const stub of [1, 1.5]) {
+    const w = 6, r = new Raster(W, H).stroke([[60, 240.5], bend, end], w, INK).stroke([bend, [320 + stub * w + w / 2, 240.5]], w, INK);
+    const res = traceLine(prepare(win(r), { colour: false }), [150, 240], ONE);
+    assert.ok(Math.max(...xs(res)) > 455 && res.points.every((p) => distToPolyline(p, [[60, 240.5], bend, end]) <= 2.5), `burr ${stub} widths: ran to x ${Math.max(...xs(res))}`);
+  }
+});
+
+test('junctions: where a branch leaves the line at 25° to 35°, the line is not drawn aside towards the branch\'s ink (no refinement near a junction), to 0.25 px', () => {
+  // Simplified within 0.1 px, so that a point drawn aside is kept; the traced line densified, so that a
+  // stretch with no vertex in it is measured too.
+  for (const [deg, w] of [[25, 4], [30, 3], [30, 4], [35, 3]]) {
+    const a = (deg * Math.PI) / 180, c = [320, 240.5], line = [[60, 240.5], [580, 240.5]];
+    const r = new Raster(W, H).stroke(line, w, INK).stroke([c, [c[0] + 260 * Math.cos(a), c[1] - 260 * Math.sin(a)]], w, INK);
+    const res = traceLine(prepare(win(r), { colour: false }), [130, 240], ONE, { detail: 0.1 });
+    const near = densify(res.points).filter((p) => p[0] >= 300 && p[0] <= 360);
+    assert.ok(near.length > 50, `the fork's stretch measured: ${near.length} points`);
+    const worst = Math.max(...near.map((p) => distToPolyline(p, line)));
+    assert.ok(worst <= 0.25 && Math.max(...xs(res)) > 575, `${deg}°, width ${w}: ${worst.toFixed(2)} px aside at the fork, to x ${Math.max(...xs(res))}`);
+  }
+});
+
+test('the cache of windows made ready keeps none whose tiles have no address (it could not tell one map\'s from another\'s)', () => {
+  const frame = { x0: 0, y0: 0, s: 1, w: 64, h: 48 }, data = new Uint8ClampedArray(64 * 48 * 4).fill(230);
+  for (let i = 3; i < data.length; i += 4) data[i] = 255;
+  const tile = { region: { x: 0, y: 0, width: 64, height: 48 }, width: 64, height: 48, data };
+  const cache = createPrepCache(), made = (tiles) => { try { return traceStep({ frame, tiles, seed: [30, 20], mode: 'area', params: {} }, cache).timing.made; } catch (e) { return e.timing.made; } };
+  assert.equal(made([tile]), true); assert.equal(made([tile]), true, 'kept with no address');
+  // The control: with an address, the second is not made again.
+  const addressed = { ...tile, url: 'https://iiif.example.org/iiif/a/0,0,64,48/64,/0/default.jpg' };
+  assert.equal(made([addressed]), true); assert.equal(made([addressed]), false);
 });
 
 // ---- Outlines --------------------------------------------------------------------------------------
@@ -138,7 +175,7 @@ test('the window grows about its centre (the click), not its corner', () => {
   assert.ok(Math.hypot(a[0] - b[0], a[1] - b[1]) <= f.s, `centre moved from ${a} to ${b}`);
 });
 
-test('a line\'s click reaches the ink within six screen pixels, however many image pixels those are: 16 image px off at 4 per screen pixel finds the line, 30 does not', async () => {
+test('a line\'s click reaches the ink within six screen pixels, however many image pixels those are: 20 image px off at 4 per screen pixel finds the line, 34 does not', async () => {
   const info = { '@context': 'http://iiif.io/api/image/3/context.json', id: 'https://iiif.example.org/iiif/reach', type: 'ImageService3', protocol: 'http://iiif.io/api/image', profile: 'level1', width: 1001, height: 701, tiles: [{ width: 256, scaleFactors: [1, 2, 4] }] };
   const img = new Raster(1001, 701).stroke([[100, 350.5], [900, 350.5]], 6, INK);
   const serve = ({ region, size }) => {
@@ -148,10 +185,12 @@ test('a line\'s click reaches the ink within six screen pixels, however many ima
   };
   const step = localSteps(async (ts) => ts.map(serve)).trace;
   // Four image pixels to a screen pixel: read at 1/2, so six screen pixels are 24 image pixels, 12 working.
-  const res = await runTrace({ info, seedImg: [500, 350.5 - 16], mode: 'line', pxPerScreen: 4, step });
+  // The line's ink, read at 1/2, is working rows 173 to 176; 20 image px above its centre is row 165 (8 rows
+  // from the ink: within 12, not within 6), and 34 is row 158 (15 rows: beyond 12).
+  const res = await runTrace({ info, seedImg: [500, 350.5 - 20], mode: 'line', pxPerScreen: 4, step });
   assert.equal(res.scale, 2);
   assert.ok(Math.max(...res.points.map((p) => distToPolyline(p, [[100, 350.5], [900, 350.5]]))) <= 2 && Math.max(...xs(res)) > 850);
-  await assert.rejects(runTrace({ info, seedImg: [500, 350.5 - 30], mode: 'line', pxPerScreen: 4, step }), (e) => e instanceof InkError && e.kind === 'empty');
+  await assert.rejects(runTrace({ info, seedImg: [500, 350.5 - 34], mode: 'line', pxPerScreen: 4, step }), (e) => e instanceof InkError && e.kind === 'empty');
 });
 
 // ---- Snapping: edges, and a ridge before an edge ---------------------------------------------------
