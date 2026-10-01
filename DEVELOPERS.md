@@ -889,7 +889,9 @@ publishes its state on `window.__chora` for tests.
     line: Sauvola's adaptive threshold on L* (or ΔE, "match the colour"), the seed on the darkest pixel
     within 6 screen pixels, the component under it and those across gaps ahead taken in, each thinned in
     its own box (exact distance transform, Felzenszwalb–Huttenlocher; Zhang–Suen), the skeleton kept
-    within a thickness band, read as a graph (junction pixels within 2 px one node, spurs pruned),
+    within a thickness band (0.5 to 2 widths; measured 2026-10-01 without it: no faster, a road four
+    times as thick no longer cuts the line, though a line ending on a bar twice as wide then stops at it
+    rather than running on along it, a limit left), read as a graph (junction pixels within 2 px one node, spurs pruned),
     followed both ways by the least turn (direction over 2 widths, stopping past 60°), gaps jumped up to
     3 widths ahead in a ±20° cone, never into a chain used; each point moved across the line to the
     ink's centre, the ends carried to where the ink stops. Douglas–Peucker in image pixels, corners kept,
