@@ -19,7 +19,7 @@ import { canary as runCanary, inPolicy } from './csp.js';
 import { nameOf, REFUSED, NEEDS, REMEMBERED } from './permission-words.js';
 import { openPanel, refreshPanel } from './permissions-panel.js';
 
-export { CATEGORIES, REGISTRY, STATES, ORIGIN, isOrigin, originOf, keyOf, parse, originsFor, normalise, check, allowedOrigins, policyFor, migrateBasemapConsent, fromFlags } from './permissions-core.js';
+export { CATEGORIES, REGISTRY, STATES, ORIGIN, isOrigin, isInsecure, checkAnswer, originOf, keyOf, parse, originsFor, normalise, check, allowedOrigins, policyFor, migrateBasemapConsent, fromFlags } from './permissions-core.js';
 export { inPolicy, policy, blobWorkerUrl } from './csp.js';
 export { nameOf };
 
@@ -177,7 +177,7 @@ export function onChange(fn) {
 }
 
 // ---- Asking another site -------------------------------------------------------------------------
-/** Why a request was not made. kind: address | undecided | never | reload | unprotected | moved | network. */
+/** Why a request was not made. kind: address | insecure | undecided | never | reload | unprotected | moved | network. */
 export class PermissionError extends Error {
   constructor(kind, message, extra = {}) { super(message); this.name = 'PermissionError'; this.kind = kind; Object.assign(this, extra); }
 }
@@ -212,6 +212,8 @@ export async function fetch(url, { cat, subj, ...init } = {}) {
   const p = core.parse(cat, subj), origin = core.originOf(url);
   const sites = p ? core.originsFor(p.cat, p.subj) : [];
   const name = p ? nameOf(p.cat, p.subj) : String(subj);
+  // A plain http address, or permission, is refused for what it is, not as an address unknown.
+  if (core.isInsecure(origin) || core.isInsecure(subj)) throw new PermissionError('insecure', REFUSED.insecure(origin || subj), { cat, subj, origin });
   if (!origin || !sites.includes(origin)) throw new PermissionError('address', REFUSED.address(origin), { cat, subj, origin });
   const st = state(p.cat, p.subj);
   if (st === 'never') throw new PermissionError('never', REFUSED.never(name), { cat, subj, origin });
@@ -222,9 +224,10 @@ export async function fetch(url, { cat, subj, ...init } = {}) {
   try { r = await doFetch(url, { ...init, credentials: 'omit', redirect: 'manual' }); } catch {
     throw new PermissionError('network', REFUSED.network(origin), { cat, subj, origin });
   }
-  if (r?.type === 'opaqueredirect' || (r?.status >= 300 && r?.status < 400)) throw new PermissionError('moved', REFUSED.redirect(origin), { cat, subj, origin });
-  const landed = core.originOf(r?.url || url);
-  if (landed && !sites.includes(landed)) throw new PermissionError('moved', REFUSED.moved(origin, landed), { cat, subj, origin, landed });
+  const bad = core.checkAnswer(r, url, sites);
+  if (bad?.landed) throw new PermissionError('moved', REFUSED.moved(origin, bad.landed), { cat, subj, origin, landed: bad.landed });
+  if (bad?.kind === 'moved') throw new PermissionError('moved', REFUSED.redirect(origin), { cat, subj, origin });
+  if (bad) throw new PermissionError('network', REFUSED.network(origin), { cat, subj, origin });
   return r;
 }
 
@@ -264,6 +267,7 @@ export function needs(el, cat, subj, { name, added } = {}) {
   if (Array.isArray(cat)) { list = cat; opts = subj || {}; } else { list = [[cat, subj]]; opts = { name, added }; }
   if (!list.length) throw new TypeError('needs() was given no permission');
   const pairs = list.map(([c, s]) => {
+    if (core.isInsecure(s) && Object.hasOwn(core.CATEGORIES, c)) return { cat: c, subj: s, key: core.keyOf(c, s), name: nameOf(c, s), insecure: true };
     const p = need(c, s), k = core.keyOf(p.cat, p.subj), nm = (list.length === 1 && opts.name) || nameOf(p.cat, p.subj);
     needed.set(k, { name: nm, added: !!opts.added });
     return { cat: p.cat, subj: p.subj, key: k, name: nm };
@@ -274,6 +278,7 @@ export function needs(el, cat, subj, { name, added } = {}) {
   return overall(pairs);
 }
 function overall(pairs) {
+  if (pairs.some((x) => x.insecure)) return 'insecure';
   const sts = pairs.map((x) => state(x.cat, x.subj));
   return sts.includes('never') ? 'never' : sts.every((x) => x === 'allowed') ? 'allowed' : 'undecided';
 }
@@ -286,6 +291,13 @@ function renderLine(el) {
   const todo = l.pairs.filter((x) => state(x.cat, x.subj) !== 'allowed');
   const waiting = l.pairs.filter((x) => waitsForReload(x.cat, x.subj));
   el.replaceChildren();
+  // An http site cannot be allowed at all: the line says so, and offers nothing.
+  const insecure = l.pairs.filter((x) => x.insecure);
+  if (insecure.length) {
+    el.dataset.permission = insecure[0].key; el.hidden = false; el.classList.add('needs-permission');
+    el.append(REFUSED.insecure(NEEDS.names(insecure.map((x) => x.name))));
+    return;
+  }
   el.dataset.permission = (todo[0] || waiting[0] || l.pairs[0]).key;
   if (st === 'never' || (st === 'allowed' && !waiting.length)) { el.hidden = true; return; }
   el.hidden = false;

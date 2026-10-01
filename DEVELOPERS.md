@@ -791,10 +791,15 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   `onChange(fn)`; `fetch(url, { cat, subj, …init })`, which asks only that permission's sites, never
   with credentials, never follows a redirect (`redirect: 'manual'`: an answer that is a redirect, to
   any site, is refused as `moved`, since the page cannot see where it points), and throws a
-  `PermissionError` whose `kind` is `address`, `undecided`, `never`, `reload`, `unprotected`, `moved`
-  or `network`, and whose message names the site, never the address (a key may be in it);
+  `PermissionError` whose `kind` is `address`, `insecure` (a plain http site, other than localhost and
+  127.0.0.1: IIIF addresses often are, and none can be allowed), `undecided`, `never`, `reload`,
+  `unprotected`, `moved` or `network`, and whose message names the site, never the address (a key may
+  be in it). What it does with an answer is the core's `checkAnswer(r, url, sites)`, so that a fetch
+  in Node (Hermes's, for `--fetch-georef`) refuses exactly what the page does: a redirect, a browser's
+  opaque one or Node's 3xx, and an answer from another site;
   `transformRequest(() => [[cat, subj], …], { onBlocked })` for MapLibre; `needs(el, cat, subj)` for
-  the one line, or `needs(el, [[cat, subj], …])` for a feature that needs several sites at once (one
+  the one line (for an http site it says why, in words, offers nothing to allow, and returns
+  `'insecure'`; it throws only for what is no site at all), or `needs(el, [[cat, subj], …])` for a feature that needs several sites at once (one
   line naming those still to allow; the panel opens at the first); `open({ focus: 'cat:subj' })`; `onBeforeReload(fn, { loses })`, `reloadLosses()` and `reload({ confirmed })` (a part of the page that
   cannot keep something across the reload says so in `loses()`, and the panel then asks first, with
   Cancel: the main page names the files chosen, a run in progress and the review decisions not yet
@@ -876,8 +881,13 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   `basemap:<provider>`, every other site `basemap:<site>`, and the old key goes.
 - **The command line has no settings: the flag is the consent.** A command that asks another site
   takes `--gazetteer` (`whg` or a service's address) and repeatable `--allow-host`, makes grants for
-  that run with `fromFlags`, and asks `check()` before each request; tokens come from the
-  environment, never from a file the tools write. No command asks another site yet.
+  that run with `fromFlags({ gazetteer, allowHost, hostCategory })`, and asks `check()` before each
+  request; tokens come from the environment, never from a file the tools write. A value of
+  `--allow-host` that names a known service (`allmaps`) grants that service; a site grants it only for
+  the category of what the command fetches (`hostCategory`, `iiif` for a georeference's maps), and is
+  refused when the command gives none. **Changed on 1 October 2026:** a site given to `--allow-host`
+  used to be granted for `iiif` and `linked` both. No command asks another site yet, so nothing that
+  runs today changes; a command written against the old rule must now say its `hostCategory`.
 - **Adopting it.** Chora's basemaps use it now. Chora's historical maps (`iiif`, `allmaps`) and
   Krisis's gazetteer lookup (`allowed('gazetteer', 'whg')` before sending; `token` for the token) move
   onto it in their own branches, and Hermes's linked sites (`linked`, per host) when it fetches.

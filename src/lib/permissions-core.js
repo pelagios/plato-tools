@@ -176,10 +176,39 @@ export function migrateBasemapConsent(grants, legacy, now) {
 }
 
 /**
+ * Whether a site is one the tools refuse for being plain http (not https), a site elsewhere than this
+ * computer: IIIF addresses often are. Such a site is never a permission (isOrigin); asking for one is
+ * refused as 'insecure', with words, not thrown.
+ */
+export function isInsecure(o) {
+  if (typeof o !== 'string') return false;
+  const m = /^http:\/\/([a-z0-9.-]+)(:[0-9]+)?$/.exec(o);
+  return !!m && m[1] !== 'localhost' && m[1] !== '127.0.0.1';
+}
+
+/**
+ * The one rule for an answer to a request made under a permission, for the page's fetch and for a
+ * Node one alike: null when it may be used; {kind: 'moved'} when it is a redirect (a browser's opaque
+ * one, with redirect: 'manual', or Node's 3xx, whose Location is not followed either), or
+ * {kind: 'moved', landed} when it came from a site that is not one of `sites`; {kind: 'network'} when
+ * there is no answer. A status that is not a redirect (404, say) is the caller's to read.
+ */
+export function checkAnswer(r, url, sites) {
+  if (!r) return { kind: 'network' };
+  if (r.type === 'opaqueredirect' || (r.status >= 300 && r.status < 400)) return { kind: 'moved' };
+  const landed = originOf(r.url || url);
+  if (landed && (sites || []).indexOf(landed) < 0) return { kind: 'moved', landed: landed };
+  return null;
+}
+
+/**
  * The command line has no settings: the flag is the consent. `gazetteer` (from --gazetteer, a REGISTRY
- * id or a service's address) and `allowHost` (from each --allow-host, a site) become grants for that
- * run alone, to be read with check(). A value that is not a site or a known service is returned in
- * `refused`, for the command to report.
+ * id or a service's address) and `allowHost` (from each --allow-host) become grants for that run
+ * alone, to be read with check(). A value of --allow-host that names a service of the REGISTRY (allmaps,
+ * say) grants that service; a site grants it for `hostCategory` only, the category of what the command
+ * fetches (iiif for georeferences' maps), and with no hostCategory it is refused, not granted for every
+ * category. A value that is not a site or a known service, or an http site, is returned in `refused`,
+ * for the command to report.
  */
 export function fromFlags(flags) {
   const grants = {}, refused = [];
@@ -190,9 +219,12 @@ export function fromFlags(flags) {
     if (p) grants[keyOf(p.cat, p.subj)] = { state: 'allowed' }; else refused.push(s);
   }
   for (const h of [].concat(f.allowHost || [])) {
-    const s = String(h), o = isOrigin(s) ? s : originOf(s);
-    if (!o) { refused.push(s); continue; }
-    for (const cat of ['iiif', 'linked']) grants[keyOf(cat, o)] = { state: 'allowed' };
+    const s = String(h);
+    const service = Object.keys(REGISTRY).filter((c) => Object.prototype.hasOwnProperty.call(REGISTRY[c], s));
+    if (ID.test(s) && service.length === 1) { grants[keyOf(service[0], s)] = { state: 'allowed' }; continue; }
+    const o = isOrigin(s) ? s : originOf(s);
+    const p = f.hostCategory && o ? parse(f.hostCategory, o) : null;
+    if (p) grants[keyOf(p.cat, p.subj)] = { state: 'allowed' }; else refused.push(s);
   }
   return { grants: grants, refused: refused };
 }

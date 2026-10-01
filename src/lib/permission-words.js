@@ -122,6 +122,7 @@ export const REFUSED = {
   never: (name) => `${name} is set to Never in Permissions.`,
   reload: (name) => `${name} was allowed after this page loaded: it can be reached once the page is reloaded.`,
   unprotected: () => 'This browser did not show that it enforces the page’s protection, so no other site is asked from this page.',
+  insecure: (site) => `${String(site).replace(/^http:\/\//, '')} is reached only over plain http, which these tools do not use: ask for its https address, or its holder for one.`,
   redirect: (site) => `${site} answered by sending the request elsewhere, which is not followed, so its answer was not used.`,
   moved: (site, landed) => `${site} sent the request on to ${landed}, another site, so its answer was not used.`,
   network: (site) => `${site} could not be reached; it may not allow other sites to read it.`,

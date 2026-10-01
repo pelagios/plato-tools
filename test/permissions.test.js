@@ -220,13 +220,18 @@ test('MapLibre\'s transformRequest: this site goes, an allowed provider goes, an
   } finally { delete globalThis.location; }
 });
 
-test('the command line: the flag is the consent, and anything that is not a site or a known service is refused', () => {
-  const { grants, refused } = core.fromFlags({ gazetteer: ['whg', 'https://gaz.example.org/reconcile'], allowHost: ['https://maps.example.org', 'not a host'] });
+test('the command line: the flag is the consent; --allow-host grants only the category the command asks, or the service it names', () => {
+  const { grants, refused } = core.fromFlags({ gazetteer: ['whg', 'https://gaz.example.org/reconcile'], allowHost: ['https://maps.example.org', 'allmaps', 'not a host'], hostCategory: 'iiif' });
   assert.equal(core.check(grants, 'gazetteer', 'whg'), 'allowed');
   assert.equal(core.check(grants, 'gazetteer', 'https://gaz.example.org'), 'allowed');
   assert.equal(core.check(grants, 'iiif', 'https://maps.example.org'), 'allowed');
+  assert.equal(core.check(grants, 'linked', 'https://maps.example.org'), 'undecided', 'a host for historical maps is not a linked site too');
+  assert.equal(core.check(grants, 'allmaps', 'allmaps'), 'allowed', 'a value naming a known service grants that service');
   assert.equal(core.check(grants, 'basemap', 'osm'), 'undecided');
   assert.deepEqual(refused, ['not a host']);
+  // A host with no category to grant it for is refused, not granted for every one.
+  assert.deepEqual(core.fromFlags({ allowHost: ['https://maps.example.org'] }).refused, ['https://maps.example.org']);
+  assert.deepEqual(core.fromFlags({ allowHost: ['http://maps.example.org'], hostCategory: 'iiif' }).refused, ['http://maps.example.org']);
   assert.equal(core.check(core.fromFlags({}).grants, 'gazetteer', 'whg'), 'undecided');
 });
 
@@ -391,4 +396,37 @@ test('DEVELOPERS.md names no module that is gone, and says what happens to a red
   const dev = readFileSync(new URL('../DEVELOPERS.md', import.meta.url), 'utf8');
   assert.ok(!dev.includes('src/lib/whg-token.js'), 'src/lib/whg-token.js is not in the tools');
   assert.ok(dev.includes('**Redirects.**'), 'a Redirects note');
+});
+
+test('an answer is checked by one pure rule, for the page and for Node alike: a redirect, or an answer from elsewhere, is refused (b7)', () => {
+  const sites = ['https://maps.example.org'];
+  const url = 'https://maps.example.org/a/info.json';
+  assert.equal(core.checkAnswer({ status: 200, type: 'cors', url }, url, sites), null);
+  assert.equal(core.checkAnswer({ status: 0, type: 'opaqueredirect', url: '' }, url, sites).kind, 'moved', 'a browser\'s redirect');
+  for (const status of [301, 302, 303, 307, 308]) assert.equal(core.checkAnswer({ status, url }, url, sites).kind, 'moved', `Node's ${status}`);
+  const away = core.checkAnswer({ status: 200, url: 'https://elsewhere.example.org/x' }, url, sites);
+  assert.deepEqual([away.kind, away.landed], ['moved', 'https://elsewhere.example.org']);
+  assert.equal(core.checkAnswer({ status: 404, url }, url, sites), null, 'a status that is not a redirect is the caller\'s to read');
+  assert.equal(core.checkAnswer(null, url, sites).kind, 'network');
+});
+
+test('an http site is refused with words, as insecure, and needs() says so rather than throwing (b7)', async () => {
+  assert.equal(core.isInsecure('http://maps.example.org'), true);
+  assert.equal(core.isInsecure('http://localhost:5173'), false);
+  assert.equal(core.isInsecure('https://maps.example.org'), false);
+  const el = fakeEl();
+  assert.equal(permissions.needs(el, 'iiif', 'http://maps.example.org'), 'insecure');
+  assert.equal(el.hidden, false);
+  assert.ok(/maps\.example\.org/.test(el.text) && /https/.test(el.text), el.text);
+  assert.equal(el.children.some((c) => typeof c !== 'string'), false, 'no Permissions button: allowing could not help');
+  inPolicy('https://maps.example.org'); permissions.set('iiif', 'https://maps.example.org', 'allowed');
+  await assert.rejects(permissions.fetch('http://maps.example.org/a/info.json', { cat: 'iiif', subj: 'http://maps.example.org' }), (e) => e.kind === 'insecure' && /https/.test(e.message));
+  await assert.rejects(permissions.fetch('http://maps.example.org/a/info.json', { cat: 'iiif', subj: 'https://maps.example.org' }), { kind: 'insecure' });
+  assert.equal(calls.length, 0);
+  // Several sites, one of them http: the line says so, and offers nothing to allow.
+  const two = fakeEl();
+  assert.equal(permissions.needs(two, [['iiif', 'https://images.example.org'], ['iiif', 'http://maps.example.org']]), 'insecure');
+  assert.ok(/maps\.example\.org/.test(two.text), two.text);
+  // Still thrown for what is no site at all.
+  assert.throws(() => permissions.needs(fakeEl(), 'iiif', 'not a site'), TypeError);
 });
