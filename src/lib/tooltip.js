@@ -56,6 +56,7 @@ const sideOf = (el) => el.getAttribute('data-tip-side') || SIDES.find(([sel]) =>
 
 let installed = false, serial = 0;
 const tips = new Map();   // element with data-tip → its tooltip element
+const owners = new Map(); // element with data-tip → the element whose aria-describedby names its tooltip
 let open = null;          // { el, node, via: 'hover' | 'focus' | 'tap' }
 let hideTimer = 0, lastTouch = 0, dismissed = null;
 
@@ -67,7 +68,7 @@ function ownerOf(el) {
 }
 
 function adopt(el) {
-  if (el.hasAttribute('title') && !['LINK', 'STYLE', 'META', 'HTML'].includes(el.tagName)) {
+  if (el.hasAttribute('title')) {
     const t = el.getAttribute('title').trim();
     el.removeAttribute('title');
     if (t && !el.hasAttribute('data-tip-template')) {
@@ -76,7 +77,7 @@ function adopt(el) {
       if (!el.hasAttribute('aria-label') && !el.hasAttribute('aria-labelledby') && !el.textContent.trim()) el.setAttribute('aria-label', t);
     }
   }
-  if (!el.matches(TIP)) return;
+  if (!el.matches(TIP)) { if (tips.has(el)) drop(el); return; }
   let node = tips.get(el);
   if (!node) {
     node = document.createElement('div');
@@ -88,9 +89,23 @@ function adopt(el) {
       if (owner === el && !el.matches(FOCUSABLE)) el.tabIndex = 0;
       const ids = (owner.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean);
       if (!ids.includes(node.id)) owner.setAttribute('aria-describedby', [...ids, node.id].join(' '));
+      owners.set(el, owner);
     }
   }
   fill(el, node);
+  if (open?.el === el) position();   // its text changed while showing: it may now be another size
+}
+
+// An element that no longer says anything (its data-tip removed), or has left the page: its tooltip
+// goes, and its owner's aria-describedby no longer names it.
+function drop(el) {
+  const node = tips.get(el), owner = owners.get(el);
+  if (open?.el === el) hide();
+  if (owner && node) {
+    const ids = (owner.getAttribute('aria-describedby') || '').split(/\s+/).filter((x) => x && x !== node.id);
+    if (ids.length) owner.setAttribute('aria-describedby', ids.join(' ')); else owner.removeAttribute('aria-describedby');
+  }
+  node?.remove(); tips.delete(el); owners.delete(el);
 }
 
 function fill(el, node) {
@@ -108,11 +123,7 @@ function scan(root) {
 
 // Tooltips whose element has left the page go with it (Chora redraws its card on every change).
 function sweep() {
-  for (const [el, node] of tips) {
-    if (el.isConnected) continue;
-    node.remove(); tips.delete(el);
-    if (open?.el === el) open = null;
-  }
+  for (const el of [...tips.keys()]) if (!el.isConnected) drop(el);
 }
 
 function position() {
@@ -141,10 +152,21 @@ function hide() {
   open.node.hidden = true;
   open = null;
 }
-const hideSoon = () => { clearTimeout(hideTimer); hideTimer = setTimeout(hide, HIDE_AFTER); };
+// A tooltip shown by hover in place of the one the focused element shows comes back when the
+// pointer leaves (unless Esc dismissed it).
+function restoreFocused() {
+  const f = document.activeElement, el = f && tipFor(f);
+  if (el && f.matches(':focus-visible')) show(el, 'focus');
+}
+const hideSoon = () => { clearTimeout(hideTimer); hideTimer = setTimeout(() => { hide(); restoreFocused(); }, HIDE_AFTER); };
 
-// The tooltip's element for an element focused: its own, or the first inside the link or button.
-const tipFor = (target) => (target.matches?.(TIP) ? target : target.querySelector?.(TIP));
+// The tooltip's element for an element focused: its own, or the first inside it that it is the
+// owner of (a link's name). A focused container (a section, a list) opens no descendant's tooltip.
+function tipFor(target) {
+  if (!target?.matches) return null;
+  if (target.matches(TIP) && tips.has(target) && owners.get(target) === target) return target;
+  return [...target.querySelectorAll(TIP)].find((x) => tips.has(x) && owners.get(x) === target) || null;
+}
 
 export function install(doc = document) {
   if (installed || !doc?.body) return;
@@ -178,18 +200,18 @@ export function install(doc = document) {
   doc.addEventListener('focusin', (e) => {
     dismissed = null;
     const el = tipFor(e.target);
-    if (el && tips.has(el) && e.target.matches(':focus-visible')) show(el, 'focus');
+    if (el && e.target.matches(':focus-visible')) show(el, 'focus');
     else if (open && open.via === 'focus') hide();
   });
   doc.addEventListener('focusout', (e) => {
     if (dismissed && (e.target === dismissed || e.target.contains(dismissed))) dismissed = null;
     if (open && open.via === 'focus' && (e.target === open.el || e.target.contains(open.el))) hide();
   });
-  // Esc closes the tooltip and nothing else: the key goes no further while one is open.
+  // Esc closes the tooltip, and goes on to whatever else the page does with Esc: Terra Draw cancels
+  // a drawing with it, and the match review closes its form, whether or not a tooltip is open.
   doc.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape' || !open) return;
     dismissed = open.el; hide();
-    e.preventDefault(); e.stopPropagation();
   }, true);
   // Touch: tap to show, tap again to hide; a tap anywhere else, the tooltip included, hides it.
   doc.addEventListener('pointerdown', (e) => {

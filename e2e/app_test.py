@@ -651,6 +651,17 @@ def tooltip_checks(page, where, hover, focus, edge):
         after, still = page.evaluate(SHOWN), page.evaluate('s => document.activeElement?.matches(s)', focus[0])
         return len(before) == 1 and after == [] and still, {'before': before, 'after': after, 'focus kept': still}
     attempt(f'{where}: Esc closes the tooltip, and focus stays where it was', on_escape)
+    def esc_passes():
+        # The page's own Esc (Terra Draw cancels a drawing with it; the match review closes its form)
+        # must still be heard while a tooltip shown by hover is open: Esc closes the tooltip and goes on.
+        page.evaluate('() => document.activeElement?.blur()'); page.mouse.move(1, 1); page.wait_for_timeout(300)
+        page.evaluate('''() => { window.__escHeard = []; document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') window.__escHeard.push({ prevented: e.defaultPrevented }); }, { once: true }); }''')
+        page.hover(hover[0], timeout=10_000); before = shown_tips(page, hover[1])
+        page.keyboard.press('Escape'); page.wait_for_timeout(200)
+        after, heard = page.evaluate(SHOWN), page.evaluate('() => window.__escHeard')
+        return len(before) == 1 and after == [] and heard == [{'prevented': False}], {'before': before, 'after': after, 'page heard Esc': heard}
+    attempt(f'{where}: Esc closes a tooltip shown by hover, and the page\'s own Esc handler still hears it', esc_passes)
     def at_edge():
         page.evaluate('() => document.activeElement?.blur()'); page.mouse.move(1, 1); page.wait_for_timeout(300)
         page.hover(edge[0], timeout=10_000); tips = shown_tips(page, edge[1])

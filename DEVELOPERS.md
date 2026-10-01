@@ -813,7 +813,7 @@ A push to `main` runs the tests, builds the site and publishes it to GitHub Page
   `data-tip-template="id"` for a `<template>` of rich text (no links or controls: a tooltip cannot
   be entered), not `title`. A `title` that appears anyway, such as MapLibre's on its buttons, is
   turned into a tooltip as it appears. Each shows on hover and on keyboard focus, stays while the
-  pointer is on it, closes with Esc, and is named by its element's `aria-describedby`; an element
+  pointer is on it, closes with Esc (which still reaches the page: Terra Draw and the match review use it), and is named by its element's `aria-describedby`; an element
   that cannot take focus, and is not inside a link or button that can, is given `tabindex="0"`
   (except in an SVG drawing). `npm test` and the browser checks fail if a `title` attribute is left
   on either page. The pages Agora writes carry no script and no tooltips.
