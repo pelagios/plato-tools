@@ -215,3 +215,67 @@ test('the pointers fixture with listPlaces: its listed places with one or more w
   assert.deepEqual(on.doc.attestations.filter((a) => a.formStatus !== PLATO + 'Headword'), off.doc.attestations, 'the text\'s attestations are as before');
   assert.equal(valid(on.doc), null);
 });
+
+// ---- Q6: places in the teiHeader ---------------------------------------------------------------
+const msHeader = ({ msIdno = '', pubIdno = '<idno type="URI">https://example.org/e</idno>', provenance, origin = '', after = '' }) =>
+  `<teiHeader><fileDesc><titleStmt><title>A stone</title></titleStmt><publicationStmt>${pubIdno}</publicationStmt><sourceDesc><msDesc>`
+  + `<msIdentifier><repository>Museum</repository><idno type="inventory">7</idno>${msIdno}</msIdentifier>`
+  + `<history><origin>${origin}</origin><provenance type="found">${provenance}</provenance></history></msDesc></sourceDesc></fileDesc>${after}</teiHeader>`;
+
+test('I.Sicily with headerPlaces (the form status set): the findspot has FindspotOf to the object; the origin a note and no relation', () => {
+  withEditorial(() => {
+    const m = mapped(text(ISIC), { headerPlaces: true }, ISIC);
+    assert.deepEqual(m.doc.attestations.map((a) => [a.about, a.names[0].toponym, a.citations[0].locator, a.formStatus.replace(PLATO, '')]), [
+      ['https://pleiades.stoa.org/places/462503', 'Syracusae', 'teiHeader, origin', 'Editorial'],
+      ['https://sws.geonames.org/2523083/', 'Siracusa', 'teiHeader, origin', 'Editorial'],
+      ['https://pleiades.stoa.org/places/560149180', 'catacomb of S. Giovanni', 'teiHeader, provenance (found)', 'Editorial'],
+      ['https://pleiades.stoa.org/places/678374', 'Μάκρης κώμης', 'edition, lines 2 to 4', 'Attested'],
+    ]);
+    const [syr, , cat] = m.doc.attestations;
+    // the object is the edition's URI (the msIdentifier gives only an inventory number); no relationLabel ("found" is a code, not words)
+    assert.deepEqual(cat.relations, [{ relatesTo: 'http://sicily.classics.ox.ac.uk/inscription/ISic000934', relationType: PLATO + 'FindspotOf', relatedLabel: 'Epitaph of Zodoros' }]);
+    assert.match(cat.notes, /^The name is the editors' form, in the edition's header, not words of the source\.\n/);
+    // origin: no relation (absence), a note saying it is the place of origin (presence), and the loss
+    assert.equal(syr.relations, undefined);
+    assert.match(syr.notes, /place of origin/);
+    assert.deepEqual(examples(m, 'tei-header-origin'), ['Syracusae (http://pleiades.stoa.org/places/462503)', 'Siracusa (http://sws.geonames.org/2523083)']);
+    assert.ok(!m.kinds.has('tei-place-outside-text'));
+    assert.equal(valid(m.doc), null);
+  });
+  // and without the option, as before
+  const off = mapped(text(ISIC), {}, ISIC);
+  assert.equal(examples(off, 'tei-place-outside-text').length, 3);
+  assert.deepEqual(names(off), ['Μάκρης κώμης']);
+});
+
+test('headerPlaces: the object is the msIdentifier\'s URI, else the edition\'s URI; a DOI-only edition gives no relatesTo', () => {
+  withEditorial(() => {
+    const found = pn(5, 'Findspot');
+    const rel = (h) => mapped(tei(`<p>${pn(9, 'Text')}</p>`, h), { headerPlaces: true });
+    const byMs = rel(msHeader({ msIdno: '<idno type="URI">https://museum.example/obj/7</idno>', provenance: found }));
+    assert.equal(byMs.doc.attestations[0].relations[0].relatesTo, 'https://museum.example/obj/7');
+    const byEdition = rel(msHeader({ provenance: found }));
+    assert.equal(byEdition.doc.attestations[0].relations[0].relatesTo, 'https://example.org/e');
+    const doiOnly = rel(msHeader({ pubIdno: '<idno type="DOI">10.5281/zenodo.1</idno>', provenance: found }));
+    assert.deepEqual(names(doiOnly), ['Findspot', 'Text'], 'control: the findspot is converted');
+    assert.equal(doiOnly.doc.attestations[0].relations, undefined);
+    assert.deepEqual(examples(doiOnly, 'tei-findspot-no-object'), ['Findspot (https://pleiades.stoa.org/places/5)']);
+  });
+});
+
+test('headerPlaces: a prefixDef declared after the msDesc still resolves a findspot\'s ref; other header place names are still reported', () => {
+  withEditorial(() => {
+    const h = msHeader({
+      provenance: '<placeName ref="pl:579885">Athens</placeName>', origin: '<origPlace ref="https://pleiades.stoa.org/places/1">Somewhere</origPlace>',
+      after: '<encodingDesc><listPrefixDef><prefixDef ident="pl" matchPattern="(\\d+)" replacementPattern="https://pleiades.stoa.org/places/$1"/></listPrefixDef></encodingDesc>',
+    }).replace('<repository>Museum</repository>', '<repository>Museum</repository><settlement ref="https://pleiades.stoa.org/places/2">Town</settlement>');
+    const m = mapped(tei(`<p>${pn(9, 'Text')}</p>`, h), { headerPlaces: true });
+    assert.deepEqual(m.doc.attestations.map((a) => [a.about, a.names[0].toponym]), [
+      ['https://pleiades.stoa.org/places/1', 'Somewhere'],
+      ['https://pleiades.stoa.org/places/579885', 'Athens'],
+      ['https://pleiades.stoa.org/places/9', 'Text'],
+    ]);
+    assert.ok(!m.kinds.has('tei-ref-prefix'));
+    assert.deepEqual(examples(m, 'tei-place-outside-text'), ['teiHeader: Town (https://pleiades.stoa.org/places/2)']);
+  });
+});

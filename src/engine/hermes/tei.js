@@ -26,6 +26,7 @@ import { placeAddress, addressNote } from './addresses.js';
 export const TEI_NS = 'http://www.tei-c.org/ns/1.0';
 const ATTESTED = PLATO + 'Attested';
 const HEADWORD = PLATO + 'Headword';
+const FINDSPOT_OF = PLATO + 'FindspotOf';
 // Coordinates in a <geo>: a latitude and a longitude in degrees, between them a comma, spaces, or both
 // (TEI's default "37.97 23.72"; I.Sicily writes "37.08415, 15.27628").
 const GEO = /^([-+]?\d+(?:\.\d+)?)\s*(?:,\s*|\s+)([-+]?\d+(?:\.\d+)?)$/;
@@ -93,6 +94,8 @@ export const TEI_KINDS = {
   'tei-place-content': 'loss',
   'tei-variant': 'loss',
   'tei-place-editorial': 'loss',
+  'tei-header-origin': 'loss',
+  'tei-findspot-no-object': 'loss',
   'tei-ref-several': 'warning',
   'address-pleiades-part': 'warning',
   'tei-source-no-address': 'warning',
@@ -381,7 +384,12 @@ export class TeiReader {
     // a source, and is not read.
     else if (/fileDesc\/sourceDesc\/(listBibl\/)?(bibl|biblStruct|biblFull)$/.test(path)) cap((c) => { const s = norm(c.pref); if (s) h.sourceDescs.push(s); });
     else if (/fileDesc\/sourceDesc\/msDesc\/msIdentifier$/.test(path)) { h.msParts = []; this.stack[this.stack.length - 1].msIdentifier = true; }
-    else if (/fileDesc\/sourceDesc\/msDesc\/msIdentifier\/[^/]+$/.test(path) && h.msParts && t.local !== 'altIdentifier') cap((c) => { const s = norm(c.pref); if (s) h.msParts.push(s); });
+    else if (/fileDesc\/sourceDesc\/msDesc\/msIdentifier\/[^/]+$/.test(path) && h.msParts && t.local !== 'altIdentifier') cap((c) => {
+      const s = norm(c.pref);
+      if (s) h.msParts.push(s);
+      // The object's own address (an idno of type URI), for a findspot's relation (headerPlace).
+      if (t.local === 'idno' && ['uri', 'url'].includes((attr('type') || '').toLowerCase()) && isWeb(s)) h.msUri ||= s;
+    });
     // The datum of the header's coordinates: TEI's default, where geoDecl gives none, is WGS84.
     else if (/encodingDesc\/geoDecl$/.test(path)) h.geoDecls.push(attr('datum') || 'WGS84');
     else if (/\/prefixDef$/.test(path)) { h.prefixDefs.push({ ident: attr('ident'), match: attr('matchPattern'), replace: attr('replacementPattern') }); this.prefixCache = null; }
@@ -403,6 +411,7 @@ export class TeiReader {
     }
     const lang = attr('xml:lang') ?? parent?.lang;
     const el = { local, tei, lang, name: t.name };
+    if (local === 'provenance') el.provenance = attr('type') || '';
     this.stack.push(el);
     const depth = this.stack.length;
     // A <choice> or <app>, and its parts, for every capture open around it.
@@ -467,7 +476,8 @@ export class TeiReader {
       if (!PLACE_CHILDREN.has(local)) this.once('tei-place-content', `${pl.id !== undefined ? `#${pl.id}` : 'a place with no xml:id'}: <${local}>`);
     }
 
-    if (!this.isPlace(t)) return;
+    // With headerPlaces, an <origPlace> with a ref is a place name of the place of origin.
+    if (!this.isPlace(t) && !(local === 'origPlace' && this.inHeader && this.reading.headerPlaces && attr('ref') !== undefined)) return;
     const ref = attr('ref');
     // An ethnic (<placeName type="ethnic">Σελινόντιοι</placeName>) names the people of a place, not
     // the place: it is not a toponym, and is not converted.
@@ -490,6 +500,7 @@ export class TeiReader {
     // name the text attests. It is reported where it points to a place; without a ref (a
     // <settlement> in a manuscript's identifier, where it is kept) it is only part of the header.
     if (!this.inText) {
+      if (this.inHeader && ref !== undefined && norm(ref) && this.reading.headerPlaces && this.headerPlaceKind()) { this.headerMention(t); return; }
       if (ref !== undefined) this.capture((c) => this.report('tei-place-outside-text', `${this.inHeader ? 'teiHeader' : `<${this.outsideWhere()}>`}: ${norm(c.pref) || `<${t.name}>`} (${norm(ref)})`));
       return;
     }
@@ -633,6 +644,68 @@ export class TeiReader {
       this.out.push({ type: 'attestation', value: att });
     }
   }
+  // ---- places in the teiHeader (headerPlaces) -----------------------------------------------------
+  // EpiDoc's header says where the object was found (<provenance type="found">) and where it was made
+  // (<origin>/<origPlace>), naming the places in the editors' words. With the reading option
+  // headerPlaces (held, like commentaryPlaces, until PLATO pins its Editorial form status), such a
+  // place name with a ref is converted, marked as the editors' form: a findspot with the relation
+  // FindspotOf to the object, a place of origin as a plain attestation with a note, PLATO having no
+  // relation for it. Each waits for the end of the header, and its ref is resolved then, with the
+  // prefixDefs in force then (they are in the encodingDesc, after the sourceDesc).
+  /** 'found' for a place name in a provenance of type found, 'origin' for one in an origin, else undefined. */
+  headerPlaceKind() {
+    for (let i = this.stack.length - 1; i >= 0; i--) {
+      const e = this.stack[i];
+      if (!e.tei) continue;
+      if (e.provenance !== undefined) return e.provenance === 'found' ? 'found' : undefined;
+      if (e.local === 'origin') return 'origin';
+    }
+    return undefined;
+  }
+  headerMention(t) {
+    const attr = (n) => t.attributes[n]?.value;
+    const kind = this.headerPlaceKind(), fileLine = this.parser.line;
+    const hdr = this.scopes[this.scopes.length - 1].hdr;
+    this.attributes(t, READ_ATTRIBUTES, GENERAL_NAMES.has(t.local) ? 'type' : undefined);
+    this.capture((c) => {
+      const toponym = norm(c.pref), printed = norm(c.printed), ref = norm(attr('ref'));
+      if (!toponym) { this.report('tei-place-empty', `<${t.name} ref="${ref}"> on line ${fileLine}`); return; }
+      const el = this.stack[this.stack.length - 1];
+      let language;
+      if (el.lang !== undefined && el.lang !== '') { if (LANGUAGE_TAG.test(el.lang)) language = el.lang; else this.report('tei-lang-not-tag', el.lang); }
+      const m = {
+        element: t.name, key: attr('key'), xmlId: attr('xml:id'), toponym, printed: printed !== toponym ? printed : undefined, language, fileLine,
+        locator: kind === 'found' ? 'teiHeader, provenance (found)' : 'teiHeader, origin', pointers: ref.split(' '),
+        editorial: 'teiHeader', editorialNote: "The name is the editors' form, in the edition's header, not words of the source.",
+      };
+      hdr.queue.push(() => this.headerPlace(m, kind));
+    });
+  }
+  /** A header place name, at the end of the header: its source, prefixes and relation are those of the whole header. */
+  headerPlace(m, kind) {
+    m.source = this.source(); m.prefixes = this.prefixes();
+    const words = `${m.toponym} (${m.pointers.join(' ')})`;
+    if (kind === 'found') {
+      const scope = [...this.scopes].reverse().find((s) => s.hdr.read);
+      const h = scope.hdr;
+      // The object: its own address in the msIdentifier, else the edition's address; never a DOI,
+      // which is a deposit of the edition, not the object.
+      const own = h.idnos.find((i) => ['uri', 'url'].includes((i.type || '').toLowerCase()) && isWeb(i.text));
+      const object = h.msUri || own?.text;
+      if (object) {
+        // relationLabel would be the source's own words for the relation; the header's coded "found"
+        // is not words, so it is left out.
+        m.relation = { relatesTo: object, relationType: FINDSPOT_OF };
+        const title = this.mainTitle(h);
+        if (title) m.relation.relatedLabel = title;
+      } else this.report('tei-findspot-no-object', words);
+    } else {
+      m.extraNotes = ["The edition's header gives this as the place of origin (where the object was made, or the text composed or inscribed); PLATO has no relation for a place of origin."];
+      this.report('tei-header-origin', words);
+    }
+    this.emit(m, true);
+  }
+
   /** The host of the edition's own address (its publicationStmt idno of type URI or URL), or undefined: a DOI is a deposit, not the edition's site. */
   ownHost() {
     const scope = [...this.scopes].reverse().find((s) => s.hdr.read) || this.scopes[this.scopes.length - 1];
@@ -801,8 +874,10 @@ export class TeiReader {
       const att = { about: r.iri };
       if (name) { att.names = [{ ...name }]; att.formStatus = m.editorial ? this.editorialIri : ATTESTED; }
       att.citations = [{ source: m.source, ...(m.locator ? { locator: m.locator } : {}) }];
+      if (m.relation) att.relations = [{ ...m.relation }];
       const notes = [];
-      if (m.editorial) notes.push("The editors' words, not the source's.");
+      if (m.editorial) notes.push(m.editorialNote || "The editors' words, not the source's.");
+      if (m.extraNotes) notes.push(...m.extraNotes);
       if (m.key) notes.push(`Key: ${m.key}`);
       if (resolved.length > 1) notes.push(`The ref of this place name gives ${resolved.length} addresses, each an attestation of its own: ${resolved.map((x) => x.iri).join(', ')}.`);
       // Where the attestation came from, as the Recogito reader says "From annotation …". The
