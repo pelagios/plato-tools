@@ -151,11 +151,12 @@ class Capture {
  * first, then { type: 'attestation', value } for each attestation.
  *
  * Options: fileName, for the header and the notes; count(), called once for each place name read in
- * the text (the report's count).
+ * the text (the report's count). Any other option is a reading option, kept in `this.reading`
+ * (none changes what is read yet).
  */
 export class TeiReader {
-  constructor(report, { fileName = 'the TEI file', count = () => {} } = {}) {
-    this.report = report; this.fileName = fileName; this.countOne = count;
+  constructor(report, { fileName = 'the TEI file', count = () => {}, ...reading } = {}) {
+    this.report = report; this.fileName = fileName; this.countOne = count; this.reading = reading;
     this.out = [];
     this.stack = [];            // open elements: { local, tei, lang, ... }
     this.captures = [];         // open captures, each with the callback that reads it
@@ -665,12 +666,13 @@ async function* chunks(file) {
  * attestation-centric attestation about that place. Mirrors annotationSource in
  * src/engine/pipeline.js: yields { type: 'header', value } first, then { type: 'attestation', value, n };
  * every kind the reader reports goes to the report with the severity TEI_KINDS gives it, in the
- * words of LOSS_TEXT.
+ * words of LOSS_TEXT. `options` are the run's options, passed to TeiReader.
  */
-export async function* teiSource(input, rep) {
+export async function* teiSource(input, rep, options = {}) {
   const file = input.files[0];
+  // The run's options are the reading options; the file's name and the count are the reader's own.
   const reader = new TeiReader((kind, example) => rep.add(TEI_KINDS[kind] || 'loss', kind, LOSS_TEXT[kind] || kind, example),
-    { fileName: file.name, count: () => rep.count('place names') });
+    { ...options, fileName: file.name, count: () => rep.count('place names') });
   let n = 0;
   const events = function* (evs) { for (const e of evs) yield e.type === 'attestation' ? { ...e, n: ++n } : e; };
   // What a chunk gave before a fault in it is yielded before the fault, so that the part of the file

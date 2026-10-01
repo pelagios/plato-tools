@@ -383,6 +383,18 @@ test('every kind the reader reports has words, and a severity the report knows',
 });
 
 // ---- the source generator, as the pipeline will call it ------------------------------------------
+test('teiSource passes the run\'s options to the reader, which keeps them and reads exactly as before', async () => {
+  const read = async (options) => { const evs = []; for await (const ev of teiSource({ format: 'tei', files: [file('pointers-constructed.xml')] }, new Report(), options)) evs.push(ev); return evs; };
+  const plain = await read(), given = await read({ listPlaces: true, fileName: 'not-the-file.xml', title: 'T' });
+  assert.ok(plain.filter((e) => e.type === 'attestation').length > 0, 'control: there are attestations to compare');
+  assert.deepEqual(given, plain, 'no reading option changes what is read yet');
+  assert.match(JSON.stringify(plain), /pointers-constructed\.xml/, 'control: the file\'s name is in the output');
+  assert.doesNotMatch(JSON.stringify(given), /not-the-file/, 'an option cannot replace the file\'s name');
+  const r = new TeiReader(() => {}, { fileName: 'f.xml', listPlaces: true, keyPatterns: { pleiades: 'https://pleiades.stoa.org/places/{key}' } });
+  assert.deepEqual(r.reading, { listPlaces: true, keyPatterns: { pleiades: 'https://pleiades.stoa.org/places/{key}' } });
+  assert.equal(r.fileName, 'f.xml');
+  assert.deepEqual(new TeiReader(() => {}).reading, {});
+});
 test('teiSource yields the header first, then numbered attestations, and reports with the kinds\' severities and words', async () => {
   const rep = new Report();
   const evs = [];

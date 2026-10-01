@@ -17,7 +17,7 @@ import { jsonDocument, DataError } from '../input.js';
 import { csvRecords, textChunks } from '../../formats/csv.js';
 import { LOSS_TEXT } from '../report.js';
 import { tableIds } from '../../formats/tables.js';
-import { resolveColumns, applyColumns, GENERIC_KINDS, FEATURE_ID } from './columns.js';
+import { resolveColumns, applyColumns, GENERIC_KINDS, FEATURE_ID, FIELDS, OTHER } from './columns.js';
 
 // The CSV reader is shared with the spreadsheet tables (src/formats/csv.js); exported here as before.
 export { csvRecords };
@@ -165,9 +165,28 @@ export async function mappingOf(input, saved) {
   const { headers, sample, headerText, ownGeometry } = await open(input);
   return { ...resolveColumns(headers, sample, saved, headerText, { ownGeometry }), headers };
 }
-/** 'attestation-centric' when a column holds the places' web addresses, else 'place-centric'. */
-export async function genericProfile(input, saved) {
-  const { mapping } = await mappingOf(input, saved);
+/**
+ * The saved mapping in what genericProfile was given: the run's options (their `columns`), or, as
+ * before the options were passed whole, a mapping alone. A mapping alone is told by its values:
+ * each a string or a { field } object, and at least one a field's name. Options hold something
+ * else (an address, a title, a function), or a `columns` key.
+ */
+export function savedColumns(given) {
+  if (given === undefined || given === null || typeof given !== 'object' || Array.isArray(given)) return given;
+  const c = Object.hasOwn(given, 'columns') ? given.columns : undefined;
+  if (c !== undefined && typeof c !== 'string' && !(c && typeof c === 'object' && typeof c.field === 'string')) return c;
+  const values = Object.values(given);
+  const entry = (v) => typeof v === 'string' || (v !== null && typeof v === 'object' && typeof v.field === 'string');
+  const named = (v) => { const f = typeof v === 'string' ? v : v.field; return Object.hasOwn(FIELDS, f) || Object.hasOwn(OTHER, f); };
+  return values.length && values.every(entry) && values.some(named) ? given : c;
+}
+/**
+ * 'attestation-centric' when a column holds the places' web addresses, else 'place-centric'.
+ * `options` are the run's options (`options.columns` a saved mapping, else the guess is used); a
+ * saved mapping alone is still accepted (savedColumns).
+ */
+export async function genericProfile(input, options) {
+  const { mapping } = await mappingOf(input, savedColumns(options));
   return Object.values(mapping).includes('address') ? 'attestation-centric' : 'place-centric';
 }
 

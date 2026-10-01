@@ -15,7 +15,7 @@ import { addPlatoFormats, strictFormatLogger } from '../src/lib/formats.js';
 import { detect, DataError } from '../src/engine/input.js';
 import { Report } from '../src/engine/report.js';
 import { tableIds } from '../src/formats/tables.js';
-import { genericSource, genericProfile, columnsOf, mappingOf, csvRecords } from '../src/engine/hermes/generic.js';
+import { genericSource, genericProfile, savedColumns, columnsOf, mappingOf, csvRecords } from '../src/engine/hermes/generic.js';
 import Papa from 'papaparse';
 import { FEATURE_ID, GENERIC_KINDS } from '../src/engine/hermes/columns.js';
 import { columnWarnings, COLUMN_WORDS } from '../src/engine/words.js';
@@ -219,6 +219,25 @@ test('a saved mapping is used instead of the guess, and a skipped column is repo
   assert.match(r.doc.spatialEntities[0].attestations[0].notes, /wikidata: https:\/\/www\.wikidata\.org\/wiki\/Q220/);
   const { mapping } = await mappingOf(r.input, columns);
   assert.deepEqual({ ...mapping }, columns);
+});
+test('genericProfile takes the run\'s options whole, and still a saved mapping alone', async () => {
+  // odd-headers.csv is attestation-centric by the guess (it has an address column) and place-centric
+  // by this mapping, so each form below can only give its answer by reading what it was given.
+  const columns = { 'Place Name': 'name', LAT: 'latitude', Long: 'longitude', wikidata: 'note', 'Feature Type': 'skip', 'Alt. names': 'alternativeNames', Source: 'source', Remarks: 'note' };
+  const { input } = await readAll(fx('odd-headers.csv'));
+  assert.equal(await genericProfile(input), 'attestation-centric', 'control: the guess');
+  assert.equal(await genericProfile(input, columns), 'place-centric', 'a mapping alone, as before');
+  assert.equal(await genericProfile(input, { columns }), 'place-centric', 'the options, with the mapping');
+  assert.equal(await genericProfile(input, { columns, base: 'https://example.org/x/', title: 'T', typing: true }), 'place-centric');
+  assert.equal(await genericProfile(input, { base: 'https://example.org/x/', title: 'T' }), 'attestation-centric', 'options without a mapping: the guess');
+  assert.equal(await genericProfile(input, {}), 'attestation-centric');
+  assert.equal(await genericProfile(input, { columns: undefined, sink: () => {} }), 'attestation-centric');
+  // A mapping alone with one field it does not know is still a mapping (that column goes to the notes).
+  assert.equal(await genericProfile(input, { ...columns, Remarks: 'remark' }), 'place-centric');
+  assert.equal(savedColumns(columns), columns);
+  assert.equal(savedColumns({ columns }), columns);
+  assert.equal(savedColumns({ title: 'T' }), undefined);
+  assert.equal(savedColumns(undefined), undefined);
 });
 test('an address column whose value is not a web address loses the row, and says so', async () => {
   const r = await readAll(textFile('name,wikidata\nRoma,https://www.wikidata.org/wiki/Q220\nAthenae,Q1524\n', 'x.csv'), { columns: { name: 'name', wikidata: 'address' } });
