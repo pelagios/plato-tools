@@ -31,6 +31,20 @@ const FINDSPOT_OF = PLATO + 'FindspotOf';
 // (TEI's default "37.97 23.72"; I.Sicily writes "37.08415, 15.27628").
 const GEO = /^([-+]?\d+(?:\.\d+)?)\s*(?:,\s*|\s+)([-+]?\d+(?:\.\d+)?)$/;
 
+// Or each with a comma for its decimal point, and only whitespace between them (Schnitzler's
+// "48,177598 16,329723"): two numbers, each with exactly one comma, which nothing else can mean.
+// Anything else with commas ("48,1,16,3", "48,1 16") is ambiguous, and stays invalid.
+const GEO_COMMA_DECIMALS = /^([-+]?\d+),(\d+)\s+([-+]?\d+),(\d+)$/;
+/** A <geo>'s "lat long" as { lat, lon } in degrees, or null when it cannot be read as one, or is off the earth. */
+export function parseGeo(text) {
+  const s = norm(text || '');
+  let m = GEO.exec(s), lat, lon;
+  if (m) { lat = Number(m[1]); lon = Number(m[2]); }
+  else if ((m = GEO_COMMA_DECIMALS.exec(s))) { lat = Number(`${m[1]}.${m[2]}`); lon = Number(`${m[3]}.${m[4]}`); }
+  else return null;
+  return Math.abs(lat) > 90 || Math.abs(lon) > 180 ? null : { lat, lon };
+}
+
 /**
  * The form status of words that are the editors' own, not the source's: a place name in an
  * edition's commentary, translation, apparatus or a note, or in its teiHeader. PLATO has no such
@@ -688,8 +702,9 @@ export class TeiReader {
     if (pl.geos.length) {
       const datum = this.scopes.flatMap((s) => s.hdr.geoDecls).find((d) => d.toUpperCase() !== 'WGS84');
       for (const g of pl.geos) {
-        const m = GEO.exec(g), lat = m && Number(m[1]), lon = m && Number(m[2]);
-        if (!m || Math.abs(lat) > 90 || Math.abs(lon) > 180) { this.report('tei-listplace-geo-invalid', `${which}: ${g || 'an empty geo'}`); continue; }
+        const p = parseGeo(g);
+        if (!p) { this.report('tei-listplace-geo-invalid', `${which}: ${g || 'an empty geo'}`); continue; }
+        const { lat, lon } = p;
         if (datum) { this.report('tei-listplace-geo-datum', `${which}: ${g} (datum ${datum})`); continue; }
         points.push({ lat, lon, label: g });
       }
