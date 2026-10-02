@@ -2236,6 +2236,10 @@ def front_page_checks(browser, url):
         ctx, page = fresh()
         try:
             page.focus('#toolbox .tool-link[href="#tool=check"]'); page.keyboard.press('Enter')
+            # The scroll to step 1 is smooth, and Elenchos is now a group further down than it was, so
+            # the heading is measured once the scroll has settled (or after 3 s, as it then is).
+            try: page.wait_for_function('() => { const t = document.activeElement?.getBoundingClientRect().top; return t >= 0 && t < 900; }', timeout=3000)
+            except Exception: pass
             el = page.evaluate('''() => { const a = document.activeElement; return { id: a?.id, tabindex: a?.getAttribute('tabindex'), text: a?.textContent.trim(),
               top: Math.round(a?.getBoundingClientRect().top ?? -1) }; }''')
             hermes = None
