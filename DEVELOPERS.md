@@ -947,7 +947,6 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   `plato-tools.keep-working-data` is `no` when off): off, Chora clears its drawings not saved, its
   last output and the historical maps it keeps (`chora-overlays/`) at the next load (not at a reload for a permission), and the output once saved to disk.
   The dataset's working copy, in Chora's SQLite pool, is cleared at every start anyway (`clearOnInit`).
-  The historical maps shown (`chora-overlays/`) are cleared with the drawings.
 - **Persistent storage.** "Keep large datasets' working files (ask the browser for persistent
   storage)" calls `navigator.storage.persist()` once, when the user ticks it, never on load (Firefox
   asks the user, which is why Chora no longer calls it itself), and remembers the browser's answer

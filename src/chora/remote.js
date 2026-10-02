@@ -70,8 +70,9 @@ export async function allmapsImageUrls(serviceId) {
  * Fetch JSON from `url` under its permission. Throws RemoteError: 'address' (not a site that can be
  * a permission), 'moved' (it answered with a redirect: FORWARDS, with `url`, the address to open),
  * 'status' (it answered, but not with a document: `status`), 'not-json'; or the PermissionError of
- * the module (undecided, never, reload, unprotected, network), which names the site only. A 404 is
- * 'status' with status 404, which a caller may take as "none there".
+ * the module (undecided, never, reload, unprotected, network), which names the site only. Never the
+ * module's 'insecure' or 'address': an http address is asked over https (upgrade), and under its own
+ * site. A 404 is 'status' with status 404, which a caller may take as "none there".
  */
 export async function fetchJson(url, { fetch = permissions.fetch } = {}) {
   const asked = upgrade(url);
