@@ -874,7 +874,11 @@ publishes its state on `window.__chora` for tests.
 - **Tracing with assistance** ("Trace area", "Trace line", "Snap to ink"; `src/chora/ink.js`, loaded only
   when first wanted, in a chunk of its own): a shape proposed from a historical map's own pixels, which the
   user accepts (Enter), edits like any drawing, or lets go (Esc). The design is `ink-tracing-design.md` with
-  its amendments.
+  its amendments. The chunk is loaded by the first press of a trace tool, and a click on the map made before
+  it has arrived waits for it (`app.js`, `traceWanted`): the first click of a user who presses "Trace line"
+  and clicks the river at once is not lost on a slow connection (a browser check holds the chunk until the
+  click has landed). The tool set once it has arrived is the one wanted then, so a tool pressed again, or a
+  drawing tool chosen, before then leaves tracing off.
   - **Where the pixels come from.** The IIIF tiles of the map's image, asked for exactly as the renderer
     asks (`@allmaps/iiif-parser`'s `getTileImageRequest` and `getImageUrl`), fetched by the page through
     `inkfetch.js` and `remote.js`'s `fetchImage`, that is through `permissions.fetch` under the map's

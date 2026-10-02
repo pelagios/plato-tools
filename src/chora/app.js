@@ -398,7 +398,7 @@ $('draw-tools').onclick = (e) => {
   if (t) { if (t.getAttribute('aria-disabled') !== 'true') setTraceMode(t.getAttribute('aria-pressed') === 'true' ? null : t.dataset.trace); return; }
   const b = e.target.closest('button[data-mode]');
   if (!b) return;
-  if (inkTools?.mode) setTraceMode(null);
+  if (traceWanted) setTraceMode(null);
   mapApi.setMode(b.dataset.mode);
   for (const x of $('draw-tools').querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b && b.dataset.mode !== 'static'));
   // Snapping to the ink is offered while drawing a line or an area by hand over a historical map.
@@ -433,16 +433,22 @@ function updateTraceButtons() {
     b.dataset.tip = why || (b.dataset.trace === 'area' ? 'Click inside an area of the map: its outline is proposed' : 'Click on a line of the map: it is followed both ways and proposed');
   }
   state.traceReady = ready; state.traceWhy = why;
-  if (!ready && inkTools?.mode) setTraceMode(null);
+  if (!ready && traceWanted) setTraceMode(null);
   if (!ready) $('snap-ink-label').hidden = true;
 }
+// The trace tool pressed ('area' | 'line' | null), from the press itself. ink.js, which does the tracing, is
+// loaded by the first press, and until it has arrived (a fetch: tens of milliseconds, or more on a slow
+// connection) the tool is wanted but not yet able: a click on the map meanwhile waits for it (below) rather
+// than being lost, and the tool set once it has arrived is the one wanted then, not the one pressed first.
+let traceWanted = null;
 async function setTraceMode(m) {
+  traceWanted = m;
   for (const x of $('draw-tools').querySelectorAll('button')) x.setAttribute('aria-pressed', String(!!m && x.dataset.trace === m));
   $('snap-ink-label').hidden = true;
   mapApi.setMode('static');
   mapApi.setTracing(!!m);
   if (!m && !inkTools) return;
-  try { (await loadInk()).setMode(m); } catch (e) { drawError = state.drawError = `Tracing could not start (${e.message}).`; if (view) renderCard(); }
+  try { const tools = await loadInk(); tools.setMode(traceWanted); } catch (e) { drawError = state.drawError = `Tracing could not start (${e.message}).`; if (view) renderCard(); }
 }
 $('snap-ink').onchange = async (e) => { try { (await loadInk()).setSnap(e.target.checked); } catch {} };
 /**
@@ -1049,8 +1055,16 @@ mapApi.onDraw({
 });
 initMaps();
 updateTraceButtons();
-// A click on the map while tracing is the trace's (Shift-click carries a line on).
-mapApi.map.on('click', (e) => { if (inkTools?.mode) inkTools.click(e.lngLat, [e.point.x, e.point.y], !!e.originalEvent?.shiftKey); });
+// A click on the map while tracing is the trace's (Shift-click carries a line on). Made in the moment after
+// the first press of a trace tool, before ink.js has arrived, it waits for it: the first click of a user
+// who presses "Trace line" and clicks the river is not lost on a slow connection.
+mapApi.map.on('click', async (e) => {
+  if (!traceWanted) return;
+  const lngLat = e.lngLat, point = [e.point.x, e.point.y], shift = !!e.originalEvent?.shiftKey;
+  let tools = inkTools;
+  if (!tools) try { tools = await loadInk(); } catch { return; }   // said by setTraceMode, which failed the same way
+  if (traceWanted && tools.mode) tools.click(lngLat, point, shift);
+});
 // A permission changed: maps whose permission is withdrawn go at once; maps waiting on one go on.
 permissions.onChange(permissionsChanged);
 // The map and the drawing tool, for automated tests; nothing else reads them.

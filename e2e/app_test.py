@@ -3647,6 +3647,36 @@ def ink_checks(page, base, tmp, h):
             'tiles kept before': cached, 'after': after, 'worker tiles before': in_worker, 'worker tiles after': in_worker_after, 'let go': s['ink'].get('letGo'), 'ink': s['ink'].get('phase'), 'proposal gone': gone, 'buttons': buttons}
     attempt('Chora ink: a map\'s server withdrawn in the panel lets go at once of every tile read from it for tracing (there were some, on the page and in the worker), here and in the worker, and of the proposal made from them; the trace tools are no longer offered', withdrawn_lets_go)
 
+    def click_before_ink_arrives():
+        # ink.js is loaded by the first press of a trace tool. On a slow connection a user who presses "Trace
+        # area" and clicks the map at once clicks before it has arrived: the click waits for it, and is not lost.
+        # Here the chunk is held by a route until the click has landed, then let through. (After the withdrawn
+        # check, which allows the map's server again as it ends; the check after this one opens the page afresh.)
+        f = place_file('ink-held.json'); chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
+        a = ink_annotation('/iiif/ink', 'e3')
+        if not show(a): raise RuntimeError('the JPEG map did not draw')
+        only_map(a['id'])
+        held = []
+        ink_chunk = re.compile(r'/assets/ink-[^/?]*\.js')
+        page.route(ink_chunk, lambda r: held.append(r))
+        try:
+            page.click('#draw-tools button[data-trace="area"]')
+            soon(page, '() => document.querySelector(\'#draw-tools button[data-trace="area"]\').getAttribute("aria-pressed") === "true"', 5)
+            click_image(a['id'], (520, 210))
+            page.wait_for_timeout(500)
+            before = cstate(page)
+            # The presence: the chunk was asked for and is held, and so nothing has been proposed yet.
+            not_yet = len(held) == 1 and before.get('ink') is None and not page.evaluate('() => !!window.__chora_ink')
+        finally:
+            for r in held: r.continue_()
+            page.unroute(ink_chunk)
+        proposed = soon(page, '() => window.__chora.ink?.phase === "proposed" && window.__chora.ink.proposals === 1', 60)
+        ink = (cstate(page).get('ink') or {})
+        drawn = proposed and soon(page, PROPOSAL_DRAWN, 10)
+        page.keyboard.press('Escape')
+        return (not_yet and proposed and drawn and ink.get('mode') == 'area'), {'held': len(held), 'before the chunk': {'ink': before.get('ink'), 'pressed': page.get_attribute('#draw-tools button[data-trace="area"]', 'aria-pressed')}, 'proposed': proposed, 'drawn': drawn, 'ink': {k: ink.get(k) for k in ('phase', 'mode', 'proposals', 'lastError')}}
+    attempt('Chora ink: a click on the map made while ink.js is still arriving, after the first press of "Trace area", is not lost: once it has arrived, the proposal is made from that click', click_before_ink_arrives)
+
     def keys_are_the_controls():
         # With a proposal live, Enter on a focused control is the control's (Save saves; nothing accepted), and
         # Esc in the permissions dialog closes the dialog (the proposal kept). The controls: Enter with nothing
