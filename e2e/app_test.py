@@ -1297,7 +1297,7 @@ def tooltip_upkeep(page, where):
     """What the tooltips do as the page changes around them, on the main page's toolbox: a focused
     container, a hover over a focused element's tooltip, a data-tip removed, and one changed. The
     cards are in groups (one list each), so a card is found by its tool, not by its place in a list."""
-    why = lambda n: f'#toolbox .tool-link[data-tool="{("check", "convert", "figures", "versions")[n - 1]}"] .why'
+    why = lambda n: f"#toolbox .tool-link[data-tool='{('check', 'convert', 'figures', 'versions')[n - 1]}'] .why"
     def reset():
         page.evaluate('() => document.activeElement?.blur()'); page.mouse.move(1, 1); page.wait_for_timeout(300)
     def container():

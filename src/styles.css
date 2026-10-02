@@ -176,7 +176,7 @@ a:visited { color: var(--accent); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --tool-band: var(--iris); --soon: var(--iris); } }
 :root[data-theme="dark"] { --tool-band: var(--iris); --soon: var(--iris); }
 /* The tools sit in the main column, with no panel and no heading shown (a visually hidden h2 keeps
-   the order h1 > h2 > h3). The whole card is the link; Chora's, to a page of its own, has a double band. */
+   the order h1 > h2 > h3 > h4: the groups' headings, then the tools' names). The whole card is the link; Chora's, to a page of its own, has a double band. */
 .tools-bare { margin: 1.5rem 0 1.25rem; }
 /* The tools in groups, each under a short plain heading that asks what a visitor wants to do
    (docs/plans/methodos.md, 11.2): one grid per group, so that a group starts its own row. */
