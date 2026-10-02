@@ -1469,7 +1469,7 @@ def front_page_checks(browser, url):
     def settled(page):
         # The introduction folds away and opens with a short animation: wait for it to end (a function,
         # not a string, since the page's policy refuses eval) before reading where it stands.
-        page.wait_for_function('() => !(document.getElementById("intro")?.getAnimations?.() || []).length', timeout=T(5))
+        page.wait_for_function('() => !(document.getElementById("intro")?.getAnimations?.() || []).length', timeout=T(5) * 1000)
         return intro_state(page)
 
     def animates():
