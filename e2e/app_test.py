@@ -3629,10 +3629,11 @@ def ink_checks(page, base, tmp, h):
         only_map(a['id'])
         blur = '() => document.activeElement && document.activeElement.blur()'
         def propose():
-            n = cstate(page)['ink']['proposals']
+            # The page was opened afresh: ink.js, and the ink state with it, is loaded by the first Trace click.
+            n = (cstate(page).get('ink') or {}).get('proposals', 0)
             if page.get_attribute('#draw-tools button[data-trace="area"]', 'aria-pressed') != 'true': page.click('#draw-tools button[data-trace="area"]')
             click_image(a['id'], (520, 210))
-            until(page, 'n => window.__chora.ink.proposals > n && window.__chora.ink.phase === "proposed"', 60, n)
+            until(page, 'n => !!window.__chora.ink && window.__chora.ink.proposals > n && window.__chora.ink.phase === "proposed"', 60, n)
         # Enter with nothing focused accepts (the positive control; it also makes a drawing, so Save can be used).
         propose()
         acc0 = cstate(page)['ink']['accepted']; page.evaluate(blur); page.keyboard.press('Enter')
