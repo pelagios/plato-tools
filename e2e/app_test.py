@@ -3505,8 +3505,9 @@ def ink_checks(page, base, tmp, h):
         page.mouse.move(1, 1); page.hover('#draw-tools button[data-trace="line"]')
         tip_before = [t['text'] for t in shown_tips(page, 'Show a historical map to trace from it')]
         waiting = (cstate(page).get('traceReady') is False and all(b[0] == 'true' and b[1] is False and not b[3] for b in buttons) and tip_before == ['Show a historical map to trace from it'])
-        # Clicked while not offered, it does nothing.
-        page.click('#draw-tools button[data-trace="line"]'); page.wait_for_timeout(300)
+        # Clicked while not offered, it does nothing. A plain page.click would wait for ever: Playwright (1.59)
+        # counts a button with aria-disabled="true" as disabled, so force=True clicks it where it is, as a user does.
+        page.click('#draw-tools button[data-trace="line"]', force=True); page.wait_for_timeout(300)
         inert = page.get_attribute('#draw-tools button[data-trace="line"]', 'aria-pressed') != 'true' and not page.evaluate('() => !!window.__chora_ink?.mode')
         since = len(census())
         a = ink_annotation('/iiif/inkpng', 'e1'); paste(a)
