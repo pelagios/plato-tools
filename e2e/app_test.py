@@ -933,6 +933,18 @@ def krisis_lookup_case(page, tmp, url):
         return wide
     ph = step(phone, {})
     check('lookup: at 375 px wide, the panel and the review fit without scrolling sideways', ph.get('panel') and ph.get('review') and ph.get('page', 999) <= 375, ph)
+
+    # Step 2 narrowed to one tool (#tool=…): the lookup panel is Krisis's, so it goes with Match and is
+    # hidden for the other tools, as Match itself is. The control: it is back for Match and for "Show every action".
+    def follows_tool():
+        vis = lambda: page.evaluate("() => ['lookup', 'match', 'check'].map((id) => { const e = document.getElementById(id); return !!e && !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length); })")
+        page.click('#toolbox .tool-link[href="#tool=check"]'); for_check = vis()
+        page.click('#toolbox .tool-link[href="#tool=match"]'); for_match = vis()
+        page.click('#every-action'); every = vis()
+        return {'for check (lookup, match, check)': for_check, 'for match': for_match, 'every action': every}
+    ft = step(follows_tool, {})
+    check('lookup: the panel goes with Match when step 2 is narrowed to one tool: hidden for Check (as Match is), shown for Match and for "Show every action"',
+          ft.get('for check (lookup, match, check)') == [False, False, True] and ft.get('for match') == [True, True, False] and ft.get('every action') == [True, True, True], ft)
     page.unroute(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'))
 
 def download(page, name, dest):
