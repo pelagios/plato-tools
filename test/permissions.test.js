@@ -311,7 +311,6 @@ test('the canary\'s second half: the policy in force must be exactly the one wri
 });
 
 // ---- The follow-up of 1 October 2026 (permissions-next) -------------------------------------------
-import { readFileSync } from 'node:fs';
 import * as words from '../src/lib/permission-words.js';
 
 test('"Keep large datasets\' working files": persist() is asked only on the choice, once, and its answer remembered', async () => {
