@@ -11,6 +11,8 @@
 // Everything that comes from the data is escaped. A link is made only of an http(s) address:
 // anything else (javascript:, data:) is shown as text.
 import { doiOf } from '../address.js';
+import { datesTheEvidence } from '../../../formats/shared.js';
+import { PLATO } from '../../../lib/context.js';
 
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const isWeb = (s) => typeof s === 'string' && /^https?:\/\/[^\s]+$/i.test(s);
@@ -125,7 +127,16 @@ export function attestation(att, ctx) {
   row('Relation', list(att.relations).map((r) => r && join([term(r.relationType) || esc(r.relationLabel), r.relatesTo ? link(r.relatesTo, r.relatedLabel || r.relatesTo) : esc(r.relatedLabel), r.sequence !== undefined ? `(stop ${esc(r.sequence)})` : ''], ' ')));
   row('Identity', list(att.identities).map((i) => i && join([esc(localName(i.identityType) || 'match'), link(i.object)], ' ')));
   row('Comments on', list(att.meta).map((m) => m && join([term(m.metaType), link(m.targetAttestation)], ' ')));
-  row('When', list(att.timespans).map(timespan));
+  // An evidence span (timespanRole EvidenceSpan) dates the texts that mention the place, not what
+  // they say of it (PLATO 7720890, #20): under "When" it would read as the place's dates, which is
+  // why the LPF writer and the tables leave it out. A page has words to say what it is, so it is
+  // written as Chora's card writes it, as a mention; any other role is named, since only WhenTrue,
+  // the default, is the place's dates. The role may be written with the plato: prefix (the context
+  // makes it an address), so the prefix is read as the address; a role that is not an address at all
+  // is named for what it is written as.
+  const role = typeof att.timespanRole === 'string' ? att.timespanRole.replace(/^plato:/, PLATO) : att.timespanRole;
+  const whenLabel = !datesTheEvidence(att) ? 'When' : role === PLATO + 'EvidenceSpan' ? 'Mentioned in texts dated' : `Dated as ${term(role) || esc(String(role ?? ''))}`;
+  row(whenLabel, list(att.timespans).map(timespan));
   const src = (s) => (typeof s === 'string' ? link(s) : s && typeof s === 'object' ? (s['@id'] ? link(s['@id'], s.title || s['@id']) : esc(s.title || s.citation || 'a source')) : '');
   row('Source', [...list(att.sources).map(src), ...list(att.citations).map((c) => c && join([src(c.source), c.locator ? esc(c.locator) : '', c.citationFunction ? `<span class="muted">${esc(words(localName(c.citationFunction)))}</span>` : ''], ', '))]);
   row('Certainty', [join([att.certainty !== undefined ? esc(att.certainty) : '', att.certaintyLevel ? term(att.certaintyLevel) : '', att.certaintyNote ? esc(att.certaintyNote) : ''], '; ')]);

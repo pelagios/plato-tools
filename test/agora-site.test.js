@@ -564,6 +564,35 @@ test('a PeriodO link on a page is a link, not its markup shown as text', async (
   assert.doesNotMatch(page, /&lt;a href/);
 });
 
+// PLATO 7720890 (#20): timespanRole EvidenceSpan dates the texts that mention the place, not the
+// place. The LPF writer and the tables leave such a span out (they have no way to say what it is);
+// Chora's card writes it as a mention. The page does as Chora does, and never files it under When.
+test('an evidence span is shown as the dates of the texts that mention the place, never under When', async () => {
+  const doc = kingJohn({ retract: false });
+  const windsor = doc.spatialEntities.find((p) => p['@id'].endsWith('/windsor'));
+  // An attestation window, as PLATO advises: one attestation of the place with only a timespan and the role.
+  windsor.attestations.push({ '@id': windsor['@id'] + '#a-0000ee01', timespanRole: PLATO + 'EvidenceSpan', timespans: [{ startEarliest: '-0250', endLatest: '0150' }], citations: [{ source: 'https://example.org/s/tm' }] });
+  // Against PLATO's advice, a role that is not the place's dates and not EvidenceSpan either: named, not When.
+  windsor.attestations.push({ '@id': windsor['@id'] + '#a-0000ee02', timespanRole: PLATO + 'SomeOtherRole', timespans: [{ startEarliest: '1300', endLatest: '1310' }], citations: [{ source: 'https://example.org/s/tm' }] });
+  // The role written with the context's prefix, which the context makes the same address.
+  windsor.attestations.push({ '@id': windsor['@id'] + '#a-0000ee03', timespanRole: 'plato:EvidenceSpan', timespans: [{ startEarliest: '0015', endLatest: '0540' }], citations: [{ source: 'https://example.org/s/tm' }] });
+  const page = (await site([jsonFile(doc)])).read('place/windsor/index.html');
+  const article = (anchor) => { const m = page.match(new RegExp(`<article class="att" id="${anchor}">[\\s\\S]*?</article>`)); assert.ok(m, anchor); return m[0]; };
+  const window = article('a-0000ee01');
+  assert.match(window, /<dt>Mentioned in texts dated<\/dt><dd>-0250 to 0150<\/dd>/);
+  assert.doesNotMatch(window, /<dt>When<\/dt>/);
+  const prefixed = article('a-0000ee03');
+  assert.match(prefixed, /<dt>Mentioned in texts dated<\/dt><dd>0015 to 0540<\/dd>/);
+  assert.doesNotMatch(prefixed, /<dt>When<\/dt>|Dated as/);
+  const other = article('a-0000ee02');
+  assert.match(other, /<dt>Dated as <a href="https:\/\/w3id\.org\/plato#SomeOtherRole">Some Other Role<\/a><\/dt><dd>1300 to 1310<\/dd>/);
+  assert.doesNotMatch(other, /<dt>When<\/dt>/);
+  // The absences are paired with a presence: an ordinary attestation's dates are still under When.
+  const ordinary = article(windsor.attestations[1]['@id'].split('#')[1]);
+  assert.match(ordinary, /<dt>When<\/dt><dd>1215-06-01 to 1215-06-03, “from the 1st to the 3d of June 1215”<\/dd>/);
+  assert.doesNotMatch(ordinary, /Mentioned in texts|Dated as/);
+});
+
 test('a site address that is not an http(s) address is refused, as the w3id rules refuse it', async () => {
   for (const bad of ['javascript:alert(1)//', 'ftp://example.org/', 'https://example.org/"><script>']) {
     const s = await siteInBrowser([jsonFile(kingJohn())], { siteUrl: bad });
