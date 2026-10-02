@@ -2122,8 +2122,11 @@ def front_page_checks(browser, url):
     def card_details():
         # Each card has a "More" section, closed: opened, it shows its text and reads "Less", and leaves
         # the tool chosen (#tool=check here) and step 2 as they were. Chora's speaks of tracing from a
-        # historical map as something it does now, with nothing coming next; Krisis's speaks of the World
-        # Historical Gazetteer only in the sentence marked as coming next.
+        # historical map, and Krisis's of looking places up in the World Historical Gazetteer, as things
+        # they do now, with nothing coming next.
+        # Krisis's WHG sentence (the lookup landed with Krisis change 2): the control for "nothing coming next"
+        # is that the sentence IS there, in the body, and names what is sent nowhere but where allowed.
+        KRISIS_NOW = 'look your places up in the World Historical Gazetteer, or another reconciliation service, online and only if you allow it'
         ctx, page = fresh(hash='#tool=check')
         try:
             page.set_input_files('#picker', str(FRONT_FILE))
@@ -2156,11 +2159,11 @@ def front_page_checks(browser, url):
                   and all(c['open'] and c['said'] == 'Less' and c['body'] > 60 for c in opened) and kept
                   and all(c['links'] and c['links'][-1].startswith(guide) for c in opened if c['name'] != 'Peripleo') and peripleo.get('links') == []
                   and chora.get('coming') == [] and 'and trace places from it by hand or with assistance from its ink: what you trace cites the map' in chora.get('rest', '')
-                  and len(krisis.get('coming', [])) == 1 and 'World Historical Gazetteer' in krisis['coming'][0] and 'World Historical' not in krisis.get('rest', 'World Historical')
+                  and krisis.get('coming') == [] and KRISIS_NOW in krisis.get('rest', '')
                   and not again['open'] and again['said'] == 'More')
             return ok, {'closed': closed, 'opened': opened, 'step 2 and #tool kept': kept, 'before': before, 'first, closed by Enter': again}
         finally: ctx.close()
-    attempt('front page: each of the nine cards has a closed "More"; opened, it shows its text and reads "Less", and leaves #tool= and step 2 as they were; Chora\'s tracing is in the present tense and Krisis\'s WHG only "coming next"', card_details)
+    attempt('front page: each of the nine cards has a closed "More"; opened, it shows its text and reads "Less", and leaves #tool= and step 2 as they were; Chora\'s tracing and Krisis\'s WHG lookup are in the present tense, with nothing "coming next"', card_details)
 
     def card_details_phone():
         # At a phone's width, with every card's More open, the cards stay one column, with no sideways scroll.
