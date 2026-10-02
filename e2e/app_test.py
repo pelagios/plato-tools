@@ -1293,27 +1293,28 @@ def tooltip_checks(page, where, hover, focus, edge):
     attempt(f'{where}: a tooltip by the window\'s {edge[2]} edge stays within the window' + (', and covers no control beside it' if edge[3:] else ''), at_edge)
     page.mouse.move(1, 1)
 
-def tooltip_upkeep(page, where, tools='#toolbox .tools > li'):
+def tooltip_upkeep(page, where):
     """What the tooltips do as the page changes around them, on the main page's toolbox: a focused
-    container, a hover over a focused element's tooltip, a data-tip removed, and one changed."""
-    why = lambda n: f'{tools}:nth-child({n}) .why'
+    container, a hover over a focused element's tooltip, a data-tip removed, and one changed. The
+    cards are in groups (one list each), so a card is found by its tool, not by its place in a list."""
+    why = lambda n: f'#toolbox .tool-link[data-tool="{("check", "convert", "figures", "versions")[n - 1]}"] .why'
     def reset():
         page.evaluate('() => document.activeElement?.blur()'); page.mouse.move(1, 1); page.wait_for_timeout(300)
     def container():
-        # A focused section opens no tooltip of the links inside it; the presence: Tab to its first
-        # link, and that link's own tooltip shows.
+        # A focused section opens no tooltip of the names inside it; the presence: Tab to its first
+        # name (Methodos's, planned, so a name made focusable rather than a link), and its own tooltip shows.
         reset(); page.keyboard.press('Shift')        # keyboard last, so the focus that follows is visible focus
         page.evaluate('() => { const s = document.getElementById("toolbox"); s.tabIndex = -1; s.focus(); }')
         page.wait_for_timeout(300)
         on_section = page.evaluate(SHOWN) if page.evaluate('() => document.activeElement?.id') == 'toolbox' else None
-        page.keyboard.press('Tab'); link = shown_tips(page, 'ἔλεγχος')
+        page.keyboard.press('Tab'); link = shown_tips(page, 'μέθοδος')
         page.evaluate('() => document.getElementById("toolbox").removeAttribute("tabindex")')
-        return on_section == [] and len(link) == 1 and 'ἔλεγχος' in link[0]['text'], {'focused section shows': on_section, 'its first link shows': link}
-    attempt(f'{where}: a focused container opens none of the tooltips inside it, and its first link, focused, opens its own', container)
+        return on_section == [] and len(link) == 1 and 'μέθοδος' in link[0]['text'], {'focused section shows': on_section, 'its first name shows': link}
+    attempt(f'{where}: a focused container opens none of the tooltips inside it, and its first name, focused, opens its own', container)
     def restored():
         # The link focused shows its tooltip; one shown by hovering another name replaces it; when
         # the pointer leaves, the focused link's is back.
-        reset(); tab_to(page, f'{tools}:nth-child(1) .tool-link'); focused = shown_tips(page, 'ἔλεγχος')
+        reset(); tab_to(page, '#toolbox .tool-link[data-tool="check"]'); focused = shown_tips(page, 'ἔλεγχος')
         page.hover(why(2), timeout=10_000); hovered = shown_tips(page, 'μετάφρασις')
         page.mouse.move(1, 1); back = shown_tips(page, 'ἔλεγχος')
         texts = lambda ts: [t['text'][:10] for t in ts]
@@ -1398,9 +1399,9 @@ def main():
             side = 'left'
             try: side = 'right' if page.eval_on_selector('.dev-badge', 'e => e.getBoundingClientRect().right > innerWidth - 60') else 'left'
             except Exception: pass
-            tooltip_checks(page, 'tooltips', ('#toolbox .tools > li:nth-child(2) .why', 'μετάφρασις'), ('.dev-badge', 'being built in the open'),
+            tooltip_checks(page, 'tooltips', ('#toolbox .tool-link[data-tool="convert"] .why', 'μετάφρασις'), ('.dev-badge', 'being built in the open'),
                            ('.dev-badge', 'being built in the open', side))
-            no_titles(page, 'tooltips', ['ἔλεγχος', 'μετάφρασις', 'ἀριθμός', 'μνήμη', 'Ἑρμῆς', 'ἀγορά', 'χώρα', 'κρίσις', 'περιπλέω', 'checked against PLATO at the commit'])
+            no_titles(page, 'tooltips', ['μέθοδος', 'ἔλεγχος', 'μετάφρασις', 'ἀριθμός', 'μνήμη', 'Ἑρμῆς', 'ἀγορά', 'χώρα', 'κρίσις', 'περιπλέω', 'checked against PLATO at the commit'])
             tooltip_upkeep(page, 'tooltips')
             page.set_viewport_size({'width': 1280, 'height': 720})
 
@@ -2269,27 +2270,70 @@ def front_page_checks(browser, url):
                   drawing: !!document.querySelector('#intro .plato-mark')?.offsetWidth, chora: !!document.getElementById('to-chora')?.offsetWidth })''')
             finally: ctx.close()
         s, h = out.get('shown', {}), out.get('hidden', {})
-        return (s and h and s['scroll'] <= 390 and h['scroll'] <= 390 and len(s['cards']) == 9 and len(set(s['cards'])) == 1
+        return (s and h and s['scroll'] <= 390 and h['scroll'] <= 390 and len(s['cards']) == 10 and len(set(s['cards'])) == 1
                 and s['drawing'] and not h['drawing'] and s['chora']), out
-    attempt('front page at 390 px: one column of the nine cards, step 2 with Chora\'s row, and no sideways scroll, with the introduction shown or hidden', phone)
+    attempt('front page at 390 px: one column of the ten cards, step 2 with Chora\'s row, and no sideways scroll, with the introduction shown or hidden', phone)
 
     def planned():
-        # Peripleo is planned, not here: its card says so, links nowhere, and choosing it changes nothing.
+        # Methodos and Peripleo are planned, not here: each card says so, links nowhere (bar the issues in
+        # its More), and choosing it changes nothing.
+        out = {}
+        for name, label in (('Methodos', 'Workflows'), ('Peripleo', 'Visualisation')):
+            ctx, page = fresh()
+            try:
+                page.set_input_files('#picker', str(FRONT_FILE))
+                wait_state(page, lambda s: s.get('phase') == 'detected', T(60), 'detection')
+                before = page.evaluate(VISIBLE, ACTIONS)
+                card = page.evaluate("""(name) => { const c = [...document.querySelectorAll('#toolbox .tool')].find((t) => t.querySelector('h4')?.textContent.trim() === name);
+                  return c && { badge: c.querySelector('.badge')?.textContent.trim(), label: c.querySelector('.label')?.textContent.trim(), coming: c.classList.contains('coming'),
+                    links: [...c.querySelectorAll('a, button')].filter((e) => !e.closest('details')).length, choose: /Choose/.test(c.textContent), visible: !!c.offsetWidth }; }""", name)
+                page.click(f'#toolbox .tool.coming h4:has-text("{name}")')
+                after = page.evaluate(VISIBLE, ACTIONS)
+                hash, tool, current = page.evaluate('() => location.hash'), page.evaluate('() => window.__plato.tool ?? null'), page.eval_on_selector_all('#toolbox [aria-current]', 'es => es.length')
+                out[name] = (bool(card) and card['visible'] and card['coming'] and card['badge'] == 'Planned' and card['label'] == label and card['links'] == 0 and not card['choose']
+                             and all(before.values()) and after == before and hash == '' and tool is None and current == 0), {'card': card, 'before': before, 'after': after, 'hash': hash, 'tool': tool}
+            finally: ctx.close()
+        return len(out) == 2 and all(v[0] for v in out.values()), {k: v[1] for k, v in out.items()}
+    attempt('front page: Methodos\'s and Peripleo\'s cards say they are planned, are not links and offer no Choose, and choosing either leaves step 2 as it was', planned)
+
+    def grouped():
+        # The cards are grouped under plain headings, in the order decided (docs/plans/methodos.md, 11.2):
+        # each group a list labelled by the heading just before it, Methodos first of all the cards and
+        # Peripleo last. The control that can fail: the names are compared in full and in order, and a
+        # real card (Elenchos) chosen from its group still sets #tool=check and aria-current.
         ctx, page = fresh()
         try:
-            page.set_input_files('#picker', str(FRONT_FILE))
-            wait_state(page, lambda s: s.get('phase') == 'detected', T(60), 'detection')
-            before = page.evaluate(VISIBLE, ACTIONS)
-            card = page.evaluate("""() => { const c = [...document.querySelectorAll('#toolbox .tool')].find((t) => t.querySelector('h3')?.textContent.trim() === 'Peripleo');
-              return c && { badge: c.querySelector('.badge')?.textContent.trim(), label: c.querySelector('.label')?.textContent.trim(), coming: c.classList.contains('coming'),
-                links: c.querySelectorAll('a, button').length, choose: /Choose/.test(c.textContent), visible: !!c.offsetWidth }; }""")
-            page.click('#toolbox .tool.coming h3')
-            after = page.evaluate(VISIBLE, ACTIONS)
-            hash, tool, current = page.evaluate('() => location.hash'), page.evaluate('() => window.__plato.tool ?? null'), page.eval_on_selector_all('#toolbox [aria-current]', 'es => es.length')
-            return (bool(card) and card['visible'] and card['coming'] and card['badge'] == 'Planned' and card['label'] == 'Visualisation' and card['links'] == 0 and not card['choose']
-                    and all(before.values()) and after == before and hash == '' and tool is None and current == 0), {'card': card, 'before': before, 'after': after, 'hash': hash, 'tool': tool}
+            got = page.evaluate("""() => [...document.querySelectorAll('#toolbox h3.tool-group')].map((h) => { const ul = h.nextElementSibling;
+              return { heading: h.textContent.trim(), visible: !!h.offsetWidth, list: ul?.matches('ul.tools.choose') && ul.getAttribute('aria-labelledby') === h.id,
+                       cards: ul ? [...ul.children].map((li) => li.tagName === 'LI' ? li.querySelector('h4')?.textContent.trim() : '!' + li.tagName) : [] }; })""")
+            first = page.evaluate("() => { const c = document.querySelector('#toolbox .tool'); return c && { name: c.querySelector('h4')?.textContent.trim(), coming: c.classList.contains('coming'), link: !!c.querySelector('.tool-link') }; }")
+            every = page.eval_on_selector_all('#toolbox .tool', 'es => es.length')
+            page.click('#toolbox ul[aria-labelledby="tg-check"] .tool-link[data-tool="check"]')
+            chose = {'hash': page.evaluate('() => location.hash'), 'tool': page.evaluate('() => window.__plato.tool ?? null'),
+                     'current': page.eval_on_selector_all('#toolbox [aria-current]', 'es => es.map((e) => e.dataset.tool)')}
+            want = [('Start here', ['Methodos']), ('Bring your data in', ['Hermes']), ('Check and convert', ['Elenchos', 'Metaphrasis', 'Arithmos']),
+                    ('Identify and locate', ['Krisis', 'Chora']), ('Publish and keep', ['Agora', 'Mneme']), ('Explore', ['Peripleo'])]
+            return ([(g['heading'], g['cards']) for g in got] == want and all(g['visible'] and g['list'] for g in got) and every == 10
+                    and first == {'name': 'Methodos', 'coming': True, 'link': False}
+                    and chose == {'hash': '#tool=check', 'tool': 'check', 'current': ['check']}), {'groups': got, 'first card': first, 'cards': every, 'Elenchos chosen': chose}
         finally: ctx.close()
-    attempt('front page: Peripleo\'s card says it is planned, is not a link and offers no Choose, and choosing it leaves step 2 as it was', planned)
+    attempt('front page: the ten cards are in six groups under plain headings, in the order decided, Methodos (planned, not a link) first, and a card in a group is still chosen', grouped)
+
+    def guide_links():
+        # The masthead's Guide and step 1's temPlato link go where the guide has them: the presence is
+        # each visible with its exact address, and the control that can fail is the pinned PLATO's own
+        # docs, which must hold the guide's tools page and the "Get temPlato" heading the anchor names.
+        ctx, page = fresh()
+        try:
+            got = page.evaluate("""() => Object.fromEntries([['guide', '.masthead-side a#guide-link'], ['templato', '#drop a#get-templato']].map(([k, q]) => {
+              const a = document.querySelector(q); return [k, a && { href: a.getAttribute('href'), text: a.textContent.trim(), visible: !!a.offsetWidth }]; }))""")
+        finally: ctx.close()
+        g = 'https://pelagios.org/place-attestation-ontology/guide/'
+        docs = {'tools.md': (PLATO / 'docs/tools.md').is_file(),
+                'Get temPlato': any(l.strip() == '## Get temPlato' for l in (PLATO / 'docs/spreadsheets/index.md').read_text().splitlines()) if (PLATO / 'docs/spreadsheets/index.md').is_file() else False}
+        return (got.get('guide') == {'href': g + 'tools.html', 'text': 'Guide', 'visible': True}
+                and got.get('templato') == {'href': g + 'spreadsheets/index.html#get-templato', 'text': 'temPlato', 'visible': True} and all(docs.values())), {'links': got, 'in the pinned guide': docs}
+    attempt('front page: the masthead links to the guide, and step 1 to the guide\'s "Get temPlato", both found in the pinned PLATO docs', guide_links)
 
     def example_files():
         # Step 1 offers example files to try, and the zip is served from the site.
@@ -2320,33 +2364,34 @@ def front_page_checks(browser, url):
               const coming = [...(body?.querySelectorAll('.coming-next') || [])].map((e) => e.textContent.replace(/\\s+/g, ' ').trim());
               const rest = body ? (() => { const c = body.cloneNode(true); c.querySelectorAll('.coming-next').forEach((e) => e.remove()); return c.textContent; })() : '';
               const links = [...(body?.querySelectorAll('a[href]') || [])].map((a) => a.href);
-              return { name: li.querySelector('h3')?.textContent.trim(), has: !!d, open: !!d?.open, said: s ? [...s.querySelectorAll('span:not(.visually-hidden)')].filter((e) => e.getClientRects().length).map((e) => e.textContent).join('').trim() : null,
-                       named: !!s && s.textContent.includes(li.querySelector('h3')?.textContent.trim() || '?'),
+              return { name: li.querySelector('h4')?.textContent.trim(), has: !!d, open: !!d?.open, said: s ? [...s.querySelectorAll('span:not(.visually-hidden)')].filter((e) => e.getClientRects().length).map((e) => e.textContent).join('').trim() : null,
+                       named: !!s && s.textContent.includes(li.querySelector('h4')?.textContent.trim() || '?'),
                        body: body && body.offsetHeight > 0 ? body.innerText.trim().length : 0, coming, rest: rest.replace(/\\s+/g, ' '), links,
                        insideLink: !!d?.closest('a') }; })"""
             closed = page.evaluate(STATE)
             opened, kept = [], True
             for n in range(1, len(closed) + 1):
-                page.click(f'#toolbox .tools > li:nth-child({n}) > details.more > summary')
+                page.locator('#toolbox .tools > li').nth(n - 1).locator(':scope > details.more > summary').click()
                 page.wait_for_timeout(100)
                 now = {'shown': page.evaluate(VISIBLE, ACTIONS), 'hash': page.evaluate('() => location.hash'), 'url': page.url}
                 kept = kept and now == before and page.evaluate('() => window.__plato.tool ?? null') == 'check'
                 opened.append(page.evaluate(STATE)[n - 1])
             # By keyboard: Enter on a focused summary closes it again, and it reads "More".
-            page.focus('#toolbox .tools > li:nth-child(1) > details.more > summary'); page.keyboard.press('Enter'); page.wait_for_timeout(100)
+            page.locator('#toolbox .tools > li').nth(0).locator(':scope > details.more > summary').focus(); page.keyboard.press('Enter'); page.wait_for_timeout(100)
             again = page.evaluate(STATE)[0]
             guide = 'https://pelagios.org/place-attestation-ontology/guide/'
             by = {c['name']: c for c in opened}
-            chora, krisis, peripleo = by.get('Chora', {}), by.get('Krisis', {}), by.get('Peripleo', {})
-            ok = (len(closed) == 9 and all(c['has'] and not c['open'] and c['said'] == 'More' and c['body'] == 0 and c['named'] and not c['insideLink'] for c in closed)
+            chora, krisis, peripleo, methodos = by.get('Chora', {}), by.get('Krisis', {}), by.get('Peripleo', {}), by.get('Methodos', {})
+            ok = (len(closed) == 10 and all(c['has'] and not c['open'] and c['said'] == 'More' and c['body'] == 0 and c['named'] and not c['insideLink'] for c in closed)
                   and all(c['open'] and c['said'] == 'Less' and c['body'] > 60 for c in opened) and kept
-                  and all(c['links'] and c['links'][-1].startswith(guide) for c in opened if c['name'] != 'Peripleo') and peripleo.get('links') == []
+                  and all(c['links'] and c['links'][-1].startswith(guide) for c in opened if c['name'] not in ('Peripleo', 'Methodos')) and peripleo.get('links') == []
+                  and methodos.get('links') == ['https://github.com/pelagios/plato-tools/issues']
                   and chora.get('coming') == [] and 'and trace places from it by hand or with assistance from its ink: what you trace cites the map' in chora.get('rest', '')
                   and krisis.get('coming') == [] and KRISIS_NOW in krisis.get('rest', '')
                   and not again['open'] and again['said'] == 'More')
             return ok, {'closed': closed, 'opened': opened, 'step 2 and #tool kept': kept, 'before': before, 'first, closed by Enter': again}
         finally: ctx.close()
-    attempt('front page: each of the nine cards has a closed "More"; opened, it shows its text and reads "Less", and leaves #tool= and step 2 as they were; Chora\'s tracing and Krisis\'s WHG lookup are in the present tense, with nothing "coming next"', card_details)
+    attempt('front page: each of the ten cards has a closed "More"; opened, it shows its text and reads "Less", and leaves #tool= and step 2 as they were; Chora\'s tracing and Krisis\'s WHG lookup are in the present tense, with nothing "coming next"', card_details)
 
     def card_details_phone():
         # At a phone's width, with every card's More open, the cards stay one column, with no sideways scroll.
@@ -2355,9 +2400,9 @@ def front_page_checks(browser, url):
             page.evaluate("() => document.querySelectorAll('#toolbox details.more').forEach((d) => { d.open = true; })")
             r = page.evaluate('''() => ({ scroll: document.documentElement.scrollWidth, open: document.querySelectorAll('#toolbox details.more[open]').length,
               cards: [...document.querySelectorAll('#toolbox .tool')].map((t) => [Math.round(t.getBoundingClientRect().left), Math.round(t.getBoundingClientRect().right)]) })''')
-            return r['open'] == 9 and r['scroll'] <= 390 and len(r['cards']) == 9 and len(set(map(tuple, r['cards']))) == 1 and r['cards'][0][1] <= 390, r
+            return r['open'] == 10 and r['scroll'] <= 390 and len(r['cards']) == 10 and len(set(map(tuple, r['cards']))) == 1 and r['cards'][0][1] <= 390, r
         finally: ctx.close()
-    attempt('front page at 390 px: with every card\'s More open, one column of nine cards and no sideways scroll', card_details_phone)
+    attempt('front page at 390 px: with every card\'s More open, one column of ten cards and no sideways scroll', card_details_phone)
 
     # The acknowledgement of ISHI ends the footer of both pages: a rebase once dropped it unseen.
     ISHI ='Development has been supported by the Institute for Spatial History Innovation (ISHI) at the University of Pittsburgh.'

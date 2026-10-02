@@ -44,6 +44,7 @@ and the issue for each where it has one:
 
 <table>
 <tr><th width="290">Tool</th><th>What it will do</th><th>Issue</th></tr>
+<tr><td nowrap><img src="public/icons/route.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Methodos</b>: workflows</td><td>Helps you choose a workflow, such as Map your data, and follow it through the tools step by step, with your place kept: planned, and first on the page, under "Start here"</td><td><a href="docs/plans/methodos.md">the plan</a></td></tr>
 <tr><td nowrap><img src="public/icons/telescope.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Peripleo</b>: visualisation</td><td>Peripleo, the Pelagios map viewer, for visualisation: planned</td><td></td></tr>
 </table>
 

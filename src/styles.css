@@ -111,6 +111,10 @@ select { padding: .4rem; border-radius: 6px; max-width: min(100%, 30rem); }
 #action [data-tools][hidden] { display: none; }
 #action.narrowed .actions { margin-top: 0; }
 a.button, a.button:visited { display: inline-block; padding: .45rem 1rem; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--fg); text-decoration: none; }
+/* The guide, in the masthead beside Permissions: the one link among those buttons, the same size, and in
+   the accent so that it is found (the accent and its foreground have their dark values already). */
+a.button.guide-link, a.button.guide-link:visited { white-space: nowrap; font-size: .95rem; padding: .35rem .8rem; background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 700; }
+a.button.guide-link:hover { text-decoration: underline; }
 a.button:hover { border-color: var(--accent); }
 details#options { margin-top: .75rem; }
 .opt { margin: .6rem 0; }
@@ -174,6 +178,10 @@ a:visited { color: var(--accent); }
 /* The tools sit in the main column, with no panel and no heading shown (a visually hidden h2 keeps
    the order h1 > h2 > h3). The whole card is the link; Chora's, to a page of its own, has a double band. */
 .tools-bare { margin: 1.5rem 0 1.25rem; }
+/* The tools in groups, each under a short plain heading that asks what a visitor wants to do
+   (docs/plans/methodos.md, 11.2): one grid per group, so that a group starts its own row. */
+.tool-group { font-size: 1.05rem; margin: 1.1rem 0 .45rem; color: var(--muted); }
+.tools-bare > .tool-group:first-of-type { margin-top: 0; }
 .tools.choose .tool { padding: 0; display: flex; flex-direction: column; }
 .tools.choose .tool-link { flex: 1 0 auto; padding: calc(.85rem + 11px) .85rem .75rem; }
 .tools.choose .tool.coming .tool-link { padding-top: .65rem; }
@@ -193,19 +201,19 @@ a:visited { color: var(--accent); }
 .tool::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 11px;
   background: linear-gradient(to bottom, var(--pin) 0 3px, #ffffff 3px 4px, var(--gold) 4px 7px, var(--iris) 7px 10px, var(--pupil) 10px 11px); }
 .tool.coming::before { content: none; }
-.tool h3 { font-family: var(--font-headings); font-weight: 500; font-size: 1.2rem; margin: 0; }
+.tool h4 { font-family: var(--font-headings); font-weight: 500; font-size: 1.2rem; margin: 0; }
 .tool .label { margin: 0 0 .35rem; font-size: .85rem; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
 .tool p { margin: 0; font-size: .95rem; }
 .tool .note { margin-top: .35rem; color: var(--muted); font-size: .88rem; }
 .tool-link { color: inherit; text-decoration: none; display: block; }
-.tool-link:hover h3, .tool-link:focus-visible h3 { color: var(--tool-band); text-decoration: underline; }
+.tool-link:hover h4, .tool-link:focus-visible h4 { color: var(--tool-band); text-decoration: underline; }
 .tool:has(.tool-link:hover) { border-color: var(--tool-band); }
 /* Hover and choice tint the card with the logo's gold, mixed into the page's own background, so the
    same rule gives a pale gold on light and a warm, dim gold on dark, with no theme rule of its own. */
 .tools.choose .tool:not(.coming):has(.tool-link:hover), .tools.choose .tool:not(.coming):has(.tool-link:focus-visible) { background: color-mix(in srgb, var(--gold) 16%, var(--bg)); }
 .tools.choose .tool:has(.tool-link[aria-current]) { background: color-mix(in srgb, var(--gold) 26%, var(--bg)); }
 .tool.coming { color: var(--muted); border: 1px dashed var(--soon); background: transparent; }
-.tool.coming h3 { color: var(--muted); }
+.tool.coming h4 { color: var(--muted); }
 .badge { position: absolute; top: .55rem; right: .6rem; font-size: .72rem; letter-spacing: .05em; text-transform: uppercase; border: 1px solid var(--soon); border-radius: 999px; padding: .05rem .5rem; color: var(--soon); }
 .badge.partly { background: var(--gold); border-color: var(--gold-edge); color: var(--pupil); }
 .follow { display: inline-block; margin-top: .45rem; font-size: .88rem; color: var(--soon); }
@@ -408,8 +416,8 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; tex
   h1 { font-size: 2rem; }
   .masthead { flex-wrap: wrap; align-items: flex-end; }
   .masthead-side { flex: 1 1 100%; flex-wrap: wrap; justify-content: flex-start; gap: .4rem; }
-  .intro-toggle, .permissions-button, .theme-switch { font-size: .9rem; }
-  .intro-toggle, .permissions-button { padding: .3rem .6rem; }
+  .intro-toggle, .permissions-button, a.button.guide-link, .theme-switch { font-size: .9rem; }
+  .intro-toggle, .permissions-button, a.button.guide-link { padding: .3rem .6rem; }
   .theme-switch label { padding: .3rem .5rem; }
   .intro .plato-mark { float: none; display: block; width: min(250px, 75%); margin: 0 auto .6rem; }
   .tools { grid-template-columns: 1fr; }

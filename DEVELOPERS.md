@@ -1594,6 +1594,11 @@ A push to `main` runs the tests, builds the site and publishes it to GitHub Page
   and `src/app.js` (`TOOLS`, `chooseTool`) does the rest. With no tool chosen, step 2 offers every
   action, Chora's map included. Hermes's card goes to the drop zone; Chora's opens `chora.html`,
   with the chosen file (`src/chora/handoff.js`).
+  The cards are grouped, one `ul.tools.choose` under each plain `h3.tool-group` heading (Start here,
+  Bring your data in, Check and convert, Identify and locate, Publish and keep, Explore), with each
+  card's name an `h4`; the order is decided in `docs/plans/methodos.md` (11.2). A planned card
+  (`li.tool.coming`: Methodos first, Peripleo last) has a badge and no link, and is never chosen. A
+  check that wants the n-th card counts across the groups, not `:nth-child` within one.
 - **The introduction** (`#intro`) can be hidden, and stays hidden (localStorage
   `plato-tools.intro`). `public/intro.js`, a classic script in `<head>`, sets `html.intro-hidden`
   before the first paint; it is a file, not an inline script, so that a policy of
