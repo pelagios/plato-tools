@@ -542,6 +542,26 @@ test('an edition div after more than 10,000 names in a translation is reported a
   assert.equal(early('tei-place-editorial').length, 5, 'control: the five held names were taken for the editors\'');
 });
 
+// A place name outside any top-level div (in a <head> before the divs) decides the <text> as having no
+// edition div: names in a translation after it go out as the source's words. An edition div that then
+// opens must say so, as it does after the cap: the loss is the same.
+test('a name in a <head> before the divs, then a translation, then an edition div: the translation\'s names went out as the source\'s, and the edition div reports it', () => {
+  const body = (head, translation) => `${head}<div type="translation"><p>${translation}</p></div>\n<div type="edition"><p>${pn(3, 'Edited')}</p></div>`;
+  const m = mapped(tei(body(`<head>Of ${pn(1, 'Head')}</head>`, `${pn(2, 'Trans')} and ${pn(4, 'Other')}`)));
+  assert.deepEqual(examples(m, 'tei-editorial-late-edition'), ["an edition part began on line 3, after 2 place names in other parts (translation) had been converted as the source's words"]);
+  assert.deepEqual(m.doc.attestations.map((a) => [a.names[0].toponym, a.formStatus.endsWith('Attested')]), [['Head', true], ['Trans', true], ['Other', true], ['Edited', true]]);
+  assert.deepEqual(examples(m, 'tei-place-editorial'), []);
+  // control: no name before the divs: the translation's names are held, taken for the editors', and nothing is said of a late edition part
+  const c = mapped(tei(body('<head>Of nowhere</head>', `${pn(2, 'Trans')} and ${pn(4, 'Other')}`)));
+  assert.deepEqual(examples(c, 'tei-editorial-late-edition'), []);
+  assert.equal(examples(c, 'tei-place-editorial').length, 2);
+  assert.deepEqual(c.doc.attestations.map((a) => a.names[0].toponym), ['Edited']);
+  // control: a name before the divs, and no name in a part before the edition div: nothing was lost, so nothing is said
+  const none = mapped(tei(body(`<head>Of ${pn(1, 'Head')}</head>`, 'no name')));
+  assert.deepEqual(examples(none, 'tei-editorial-late-edition'), []);
+  assert.deepEqual(none.doc.attestations.map((a) => a.names[0].toponym), ['Head', 'Edited']);
+});
+
 // The cap is reached, and said, for each <text>: a corpus's second text over it is reported too, with its line.
 test('a corpus of two texts, each with more than 10,000 names in a translation, reports the cap for each, naming its text\'s line', () => {
   const corpus = (n) => {

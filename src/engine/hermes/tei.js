@@ -394,6 +394,10 @@ export class TeiReader {
   decide(hasEdition) {
     this.editionDecided = true;
     const held = this.held; this.held = [];
+    // Decided as having no edition div (a name outside any top-level div, the cap, the end of the
+    // text): the names held go out as the source's words, and are counted, with every one read so
+    // after them, for an edition div that opens late after all (tei-editorial-late-edition).
+    if (!hasEdition) this.late = { count: held.length, types: new Set(held.map((h) => h.editorial)) };
     for (const d of held) this.place(d, hasEdition ? d.editorial : undefined);
   }
 
@@ -594,7 +598,7 @@ export class TeiReader {
           // Any other top-level div, of whatever type, may come before an edition div: its place
           // names wait for it (deliver).
           if (type === 'edition') {
-            if (this.late && !this.editionSeen) this.report('tei-editorial-late-edition', `an edition part began on line ${this.parser.line}, after ${this.late.count.toLocaleString('en')} place names in other parts (${[...this.late.types].join(', ')}) had been converted as the source's words`);
+            if (this.late?.count && !this.editionSeen) this.report('tei-editorial-late-edition', `an edition part began on line ${this.parser.line}, after ${this.late.count.toLocaleString('en')} place names in other parts (${[...this.late.types].join(', ')}) had been converted as the source's words`);
             this.editionSeen = true; this.decide(true);
           }
         }
@@ -1063,7 +1067,6 @@ export class TeiReader {
       if (this.held.length < HOLD_CAP) { this.held.push(d); return; }
       // Too many to hold: read as a text with no edition div, from here on.
       if (!this.undecidedReported) { this.undecidedReported = true; this.report('tei-editorial-undecided', `${HOLD_CAP.toLocaleString('en')} place names held, the next on line ${m.fileLine}, in the <text> beginning on line ${this.textLine}`); }
-      this.late = { count: this.held.length, types: new Set(this.held.map((h) => h.editorial)) };
       this.decide(false);
     }
     // A name in a part that would be the editors' if an edition div came, read as the source's words since the cap.
