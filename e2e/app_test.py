@@ -740,6 +740,9 @@ def no_titles(page, where, expected):
     attempt(f'{where}: no element has a title attribute (the browser\'s own tooltip), and the tooltips\' texts are there instead', check_it)
 
 REMOTE = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--url=')), None)
+# "--url <address>", with a space, was once read as no --url at all, and a run that tested this
+# build was taken for a check of the deployed site. Refuse it rather than guess.
+if '--url' in sys.argv: sys.exit('Give the deployed site as --url=<address>, with an equals sign.')
 
 def main():
     plato_at_pin()
@@ -2919,6 +2922,11 @@ def iiif_checks(pw, url, tmp):
     ctx = pw.chromium.launch_persistent_context(str(tmp / 'iiif-profile'), headless=True, accept_downloads=True, args=GL,
                                                 viewport={'width': 1400, 'height': 900}, reduced_motion='reduce')
     ctx.add_init_script('window.__plato_forceDownload = true;')
+    # The fixtures' sites are on this computer (127.0.0.1). Chromium lets a public site's page reach
+    # them only with the local-network-access permission, which a real map server never needs: grant
+    # it to the deployed site, so that a live run checks the page rather than this computer's network.
+    if urlparse(base).hostname not in ('127.0.0.1', 'localhost'):
+        ctx.grant_permissions(['local-network-access'], origin=f'{urlparse(base).scheme}://{urlparse(base).netloc}')
     errors = []
     ctx.on('page', lambda p: p.on('pageerror', lambda e: errors.append(str(e)[:200])))
     page = ctx.pages[0] if ctx.pages else ctx.new_page()
