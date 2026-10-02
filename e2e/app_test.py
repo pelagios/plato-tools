@@ -2921,14 +2921,16 @@ def iiif_checks(pw, url, tmp):
     def editor_never():
         # Allmaps set to Never: the Editor link is absent from the offer and from every map's row, while the
         # offer itself is still made (the control), and Allmaps is asked nothing.
+        # Neither change asks for a reload: Never is refused at once, and allowing again widens nothing, since
+        # Allmaps was allowed when this page loaded and so is in its policy (the panel offers a reload only then).
         hits = len(allmaps_hits)
-        panel_set([ALLMAPS_KEY], to='never', reload=True)
+        panel_set([ALLMAPS_KEY], to='never')
         paste(A + '/manifests/grid/manifest')
         offered = soon(page, '() => /no georeference/.test(document.getElementById("map-status")?.innerText || "")', 20)
         editor = page.query_selector('#map-editor, #overlay-list a[data-editor]') is not None
         listed = page.evaluate('() => window.__chora.overlays.length')
         asked = len(allmaps_hits) - hits
-        panel_set([ALLMAPS_KEY], to='allowed', reload=True)      # put back for the checks after this one
+        panel_set([ALLMAPS_KEY], to='allowed')                   # put back for the checks after this one
         back = soon(page, '() => !!document.querySelector("#overlay-list a[data-editor]")', 20) if listed else True
         return offered and not editor and asked == 0 and back, {'offered': offered, 'editor shown under Never': editor, 'Allmaps asked': asked, 'back once allowed': back}
     attempt('Chora maps: with Allmaps set to Never the Editor link is absent (the offer is still made, and Allmaps is asked nothing); allowed again, it is back', editor_never)
@@ -3048,9 +3050,18 @@ def iiif_checks(pw, url, tmp):
     attempt('Chora maps: a point traced from one map and moved onto another it alone lies on is traced from that one, which alone is offered', reshaped_onto_another)
 
     def come_back():
+        KEPT_MAPS = '''async () => { const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('chora-overlays'); const out = [];
+          for await (const h of d.values()) { const x = JSON.parse(await (await h.getFile()).text()); out.push({ key: x.key, visible: x.visible, opacity: x.opacity }); } return out; }'''
+        # The map is shown, and kept as shown, before the reload: the check before this one ticked "Show" last,
+        # and the record is written after the tick, not with it (a reload at once would find it kept hidden).
+        grid_key = next(o['key'] for o in cstate(page)['overlays'] if o['annotationId'] == grid_id)
+        kept_shown = soon(page, 'k => window.__chora.overlays.some((o) => o.key === k && o.visible)', 10, grid_key) and soon(page, f'async (k) => ({KEPT_MAPS})().then((m) => m.some((x) => x.key === k && x.visible === true))', 10, grid_key)
         page.reload(); ready()
         back = shown(grid_id)
-        return back and at_origin(census(), B) == [], {'came back': back}
+        # Said on failure: what is kept of each map (shown or hidden), what the page shows, and where the map is.
+        kept_maps = page.evaluate(KEPT_MAPS)
+        view = page.evaluate('() => { const m = window.__chora_map; return { zoom: m.getZoom(), center: m.getCenter().toArray() }; }')
+        return kept_shown and back and at_origin(census(), B) == [], {'kept as shown before': kept_shown, 'came back': back, 'kept': kept_maps, 'overlays': cstate(page)['overlays'], 'view': view}
     attempt('Chora maps: a map shown comes back on the next load', come_back)
 
     def withdraw():
