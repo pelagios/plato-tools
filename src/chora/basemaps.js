@@ -6,7 +6,9 @@
 // permissions' REGISTRY), a pasted one's as basemap:<site> for each site it asks.
 //
 // Kept in this browser: which basemap was chosen last (localStorage 'chora-basemap'), and any pasted
-// basemap ('chora-basemaps'), keys and all. A pasted address is sent to nowhere but its own provider.
+// basemap ('chora-basemaps'), keys and all. A pasted address is sent to nowhere but its own provider,
+// and never at load: a pasted basemap is used only once the user has chosen it in this load (`automatic`,
+// `current`), since what is kept here could have been written by another page of the site's origin.
 import { PASTED_BASEMAP } from '../engine/words.js';
 import * as permissions from '../lib/permissions.js';
 
@@ -45,8 +47,24 @@ export function builtIn() {
 const get = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch { return d; } };
 const put = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
-/** The basemaps pasted in this browser. */
-export const pasted = () => get('chora-basemaps', []).filter((b) => b && b.id && (b.url || b.tiles));
+/**
+ * The basemaps pasted in this browser, each rebuilt from its address alone, as fromPaste makes one: its
+ * id, its kind by whether it is a tile template, its name from its host, and the sites its style was
+ * found to name (origins, each a plain site). Nothing else kept is read: what is kept here can be
+ * written by any page of the site's origin, and a field such as `local`, `provider`, `group` or a name
+ * taken from storage could pass a pasted basemap off as this site's or a provider's.
+ */
+export const pasted = () => get('chora-basemaps', []).map(cleanPasted).filter(Boolean);
+function cleanPasted(b) {
+  if (!b || typeof b !== 'object' || typeof b.id !== 'string' || !/^pasted-[a-z0-9]{1,16}$/.test(b.id)) return null;
+  const made = fromPaste(typeof b.tiles === 'string' ? b.tiles : typeof b.url === 'string' ? b.url : '');
+  // The id is the address's own (fromPaste, the same since the first version): an entry re-pointed at another address is not the one chosen.
+  if (!made || made.id !== b.id) return null;
+  if (made.kind === 'style' && Array.isArray(b.origins)) { const os = b.origins.filter((o) => permissions.isOrigin(o)); if (os.length) made.origins = os; }
+  return made;
+}
+/** Whether two basemaps are the same one: the same id at the same address (an id alone could be re-pointed in storage). */
+export const sameBasemap = (a, b) => !!a && !!b && a.id === b.id && (a.url || a.tiles) === (b.url || b.tiles);
 /** Every basemap on offer: the built-in ones, then those pasted here. */
 export const all = () => [...builtIn(), ...pasted()];
 export const byId = (id) => all().find((b) => b.id === id) || null;
@@ -117,10 +135,22 @@ export function styleOrigins(style, base) {
 
 /** The basemap chosen last in this browser, whether or not it may be used yet. */
 export const wanted = () => byId(get('chora-basemap', 'natural-earth'));
-/** The basemap to show: the one chosen last, if it is on offer and permitted, else Natural Earth. */
-export function current() {
+/**
+ * Whether a basemap may be used with no click in this load: this site's, or a provider of the
+ * permissions' REGISTRY, whose sites are fixed in the code. A pasted one never is: its address, its
+ * permission and its being the one chosen are all in this browser's storage, which any page of this
+ * site's origin can write (DEVELOPERS.md, "The shared origin"), so it is used only once the user has
+ * chosen it in this load, by a click on the page.
+ */
+export const automatic = (b) => !!b && (b.local || !!b.provider);
+/**
+ * The basemap to show: the one chosen last, if it is on offer, permitted, and either automatic or the
+ * one the user chose in this load (`chosen`, the basemap as it was when chosen: the same id at the same
+ * address, sameBasemap); else Natural Earth.
+ */
+export function current({ chosen } = {}) {
   const b = wanted();
-  return b && !b.disabled && permitted(b) ? b : byId('natural-earth');
+  return b && !b.disabled && permitted(b) && (automatic(b) || sameBasemap(b, chosen)) ? b : byId('natural-earth');
 }
 export const choose = (b) => put('chora-basemap', b.id);
 

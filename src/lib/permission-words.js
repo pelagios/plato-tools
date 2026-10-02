@@ -41,6 +41,7 @@ export const PANEL = {
   shared: 'These tools are on pelagios.org, which other Pelagios sites share. So what this browser keeps for them (your permissions, your choices, keys such as a pasted basemap’s or the World Historical Gazetteer token if you remember it, and your working data) can be read, on this computer only, by any Pelagios site.',
   sitesHeading: 'Sites these tools may ask',
   sitesIntro: 'Each is asked only once you allow it. “Not decided” means a tool will ask you first; “Never” means the tool does without it, and does not ask again.',
+  links: 'A link in your data (to a source, say, or to an ORCID) is followed only when you click it: that is a visit you make yourself, outside these permissions, and the site visited is told nothing of this page.',
   allowed: 'Allowed',
   undecided: 'Not decided',
   never: 'Never',
@@ -87,6 +88,12 @@ export const PANEL = {
   },
   count: (n) => (n ? `${n} allowed` : 'none allowed'),
   notProtected: 'This browser did not show that it enforces the page’s protection, so no other site is asked from this page, whatever is allowed.',
+};
+
+/** The line Chora shows for a pasted basemap remembered as the choice, which is never used until asked for in this load. */
+export const REMEMBERED_BASEMAP = {
+  line: (name) => `${name} is remembered as your choice. A pasted basemap is not loaded until you ask, each time this page opens.`,
+  use: 'Use it now',
 };
 
 /** What is remembered in this browser, besides permissions: each key's description. */

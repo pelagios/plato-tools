@@ -8,7 +8,7 @@ import { review as W, POOL_BUSY, POOL_STUCK } from './engine/words.js';
 const REVIEW_WORDS = W;   // the review's words, where W names the words for the columns
 import { readable } from './engine/input.js';
 import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions } from './engine/krisis/work.js';
-import { stash as stashForChora } from './chora/handoff.js';
+import { stash as stashForChora, dropStale as dropStaleHandoff } from './chora/handoff.js';
 import { storageNeed } from './engine/storage.js';
 import * as permissions from './lib/permissions.js';
 import { RELOAD_LOSES } from './lib/permission-words.js';
@@ -337,6 +337,11 @@ document.addEventListener('click', async (e) => {
   await stashForChora(files);
   location.href = a.href;
 });
+// Files handed over that Chora's page never took (the way taken, its page not started) are not left
+// in the browser: let go here when this page starts, is shown again (back from Chora) or is left,
+// once they are older than the hand-over allows. A fresh hand-over, on the way to Chora now, is kept.
+dropStaleHandoff();
+for (const ev of ['pageshow', 'pagehide']) window.addEventListener(ev, () => dropStaleHandoff());
 const drop = $('drop');
 drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
 drop.ondragleave = () => drop.classList.remove('over');
@@ -461,7 +466,19 @@ chooseTool(toolFromHash());
 let work = null, workName = 'review.krisis.json', order = [], cursor = 0, current = 0, basisFor = null, allDone = false;
 let unsaved = 0;   // decisions made since the review began or was last saved (a reload would lose them)
 const REVIEWER_KEY = 'plato-tools.reviewer';
-function remembered() { try { return JSON.parse(localStorage.getItem(REVIEWER_KEY)) || {}; } catch { return {}; } }
+/**
+ * The reviewer remembered, checked again on load by the engine's own rule (checkReviewer), as before a
+ * save: a name, and an ORCID only if it is one. What is kept here can be written by any page of the
+ * site's origin (DEVELOPERS.md, "The shared origin"), so an ORCID that is not one is dropped, not shown.
+ */
+function remembered() {
+  let r;
+  try { r = JSON.parse(localStorage.getItem(REVIEWER_KEY)); } catch { return {}; }
+  if (!r || typeof r !== 'object' || typeof r.name !== 'string') return {};
+  const out = { name: r.name };
+  if (typeof r.orcid === 'string') { try { checkReviewer({ name: r.name, orcid: r.orcid }); out.orcid = r.orcid; } catch { /* not an ORCID: dropped */ } }
+  return out;
+}
 function remember() {
   const r = reviewer() || {};
   if (r.orcid && reviewerProblem()) delete r.orcid;   // an ORCID that is not one is not remembered
@@ -632,7 +649,9 @@ $('review-who').onsubmit = (e) => {
   $('reviewer').value = name; remember(); askName(false); showWarning(''); render(true);
 };
 for (const id of ['reviewer', 'orcid']) $(id).addEventListener('change', remember);
-{ const r = remembered(); $('reviewer').value = r.name || ''; $('orcid').value = r.orcid || ''; }
+{ const r = remembered(); $('reviewer').value = r.name || ''; $('orcid').value = r.orcid || '';
+  // Written back as checked (remembered), so that an ORCID that is not one is not kept, nor listed in the panel; nothing usable, nothing kept.
+  try { if (localStorage.getItem(REVIEWER_KEY) !== null) { if (r.name) localStorage.setItem(REVIEWER_KEY, JSON.stringify(r)); else localStorage.removeItem(REVIEWER_KEY); } } catch {} }
 $('save-review').onclick = () => {
   if (!work) return;
   const problem = reviewerProblem(); if (problem) return showWarning(problem);

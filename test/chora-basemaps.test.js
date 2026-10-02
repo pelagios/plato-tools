@@ -4,8 +4,9 @@
 // it was drawn on. Written for the pre-push review of 30 September 2026: each test failed before its fix.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { builtIn, fromPaste, subjectsOf, originsOf, styleOrigins, drawnOn } from '../src/chora/basemaps.js';
-import { originsFor } from '../src/lib/permissions-core.js';
+import { builtIn, fromPaste, subjectsOf, originsOf, styleOrigins, drawnOn, current, automatic, permitted, pasted, sameBasemap } from '../src/chora/basemaps.js';
+import { originsFor, policyFor } from '../src/lib/permissions-core.js';
+import * as permissions from '../src/lib/permissions.js';
 import { choraDrawingNote } from '../src/engine/words.js';
 
 // CARTO's styles (fetched without a key, 30 September 2026) name their sources, glyphs and sprites on
@@ -79,4 +80,78 @@ test("a drawing's note names a built-in basemap, never a pasted one's site", () 
   const by = Object.fromEntries(builtIn().map((b) => [b.id, b]));
   assert.equal(choraDrawingNote({ basemap: drawnOn(by['ofm-liberty']), zoom: 5 }), 'Drawn by hand on the OpenFreeMap Liberty basemap at zoom 5 in PLATO tools (Chora)');
   assert.equal(choraDrawingNote({ basemap: drawnOn(by['natural-earth']) }), 'Drawn by hand on the Natural Earth basemap in PLATO tools (Chora)');
+});
+
+// What any page of the site's origin can write into this browser: a grant marked as added by the user, a
+// pasted basemap and the choice of it (the security audit of 1 October 2026, H2). None of it may put the
+// basemap on the map at load: only a click in this load does; a provider of the REGISTRY loads as before.
+test('a pasted basemap remembered as the choice, allowed and in the policy, is not current at load, only once chosen in this load; a registry provider is', () => {
+  class Store { constructor() { this.m = new Map(); } getItem(k) { return this.m.has(k) ? this.m.get(k) : null; } setItem(k, v) { this.m.set(k, String(v)); } removeItem(k) { this.m.delete(k); } }
+  const INJECTED = 'https://injected.example.org', OSM = 'https://tile.openstreetmap.org';
+  const pasted = fromPaste(`${INJECTED}/{z}/{x}/{y}.png`);   // as a sibling would have to write it: the id is the address's own
+  globalThis.localStorage = new Store(); globalThis.sessionStorage = new Store();
+  globalThis.__platoCsp = { policy: policyFor([INJECTED, OSM]), origins: [INJECTED, OSM] };
+  permissions.resetForTests();
+  localStorage.setItem('plato-tools.permissions', JSON.stringify({ version: 1, grants: {
+    [`basemap:${INJECTED}`]: { state: 'allowed', at: '2026-10-01T09:00:00Z', added: true }, 'basemap:osm': { state: 'allowed' } } }));
+  localStorage.setItem('chora-basemaps', JSON.stringify([pasted]));
+  localStorage.setItem('chora-basemap', JSON.stringify(pasted.id));
+  assert.equal(permitted(pasted), true, 'the grant is in force: nothing but the rule below keeps it off the map');
+  assert.equal(automatic(pasted), false);
+  assert.equal(current().id, 'natural-earth', 'not at load');
+  assert.equal(current({ chosen: { ...pasted, id: 'pasted-other' } }).id, 'natural-earth', 'not for another basemap chosen');
+  assert.equal(current({ chosen: pasted }).id, pasted.id, 'once chosen in this load');
+  // The id alone is not enough: the same id re-pointed at another address in storage is not the one chosen (Fable, 2 October 2026).
+  localStorage.setItem('chora-basemaps', JSON.stringify([{ ...pasted, tiles: 'https://attacker.example.net/{z}/{x}/{y}.png' }]));
+  localStorage.setItem('plato-tools.permissions', JSON.stringify({ version: 1, grants: {
+    [`basemap:${INJECTED}`]: { state: 'allowed', added: true }, 'basemap:https://attacker.example.net': { state: 'allowed', added: true }, 'basemap:osm': { state: 'allowed' } } }));
+  globalThis.__platoCsp = { policy: policyFor([INJECTED, OSM, 'https://attacker.example.net']), origins: [INJECTED, OSM, 'https://attacker.example.net'] };
+  assert.equal(sameBasemap(pasted, { ...pasted, tiles: 'https://attacker.example.net/{z}/{x}/{y}.png' }), false);
+  assert.equal(current({ chosen: pasted }).id, 'natural-earth', 're-pointed: not used (the entry is not even read: its id is another address\'s)');
+  localStorage.setItem('chora-basemaps', JSON.stringify([pasted]));
+  assert.equal(current({ chosen: pasted }).id, pasted.id, 'the control: as chosen, used');
+  // The controls: a provider of the REGISTRY is automatic and current at load, as is Natural Earth.
+  localStorage.setItem('chora-basemap', JSON.stringify('osm'));
+  assert.equal(automatic(builtIn().find((b) => b.id === 'osm')), true);
+  assert.equal(current().id, 'osm');
+  localStorage.setItem('chora-basemap', JSON.stringify('natural-earth'));
+  assert.equal(current().id, 'natural-earth');
+  delete globalThis.localStorage; delete globalThis.sessionStorage; delete globalThis.__platoCsp;
+});
+
+// A pasted basemap is rebuilt from its address alone when read: fields a sibling page could write
+// into storage to pass it off as this site's or a provider's (automatic at load) are not read.
+test('a stored pasted basemap is read from its address alone: local, provider, group and name from storage count for nothing', () => {
+  class Store { constructor() { this.m = new Map(); } getItem(k) { return this.m.has(k) ? this.m.get(k) : null; } setItem(k, v) { this.m.set(k, String(v)); } removeItem(k) { this.m.delete(k); } }
+  globalThis.localStorage = new Store(); globalThis.sessionStorage = new Store();
+  globalThis.__platoCsp = { policy: policyFor([]), origins: [] };
+  permissions.resetForTests();
+  const a = fromPaste('https://attacker.example.net/style.json'), b = fromPaste('https://attacker.example.net/{z}/{x}/{y}.png');
+  localStorage.setItem('chora-basemaps', JSON.stringify([
+    { id: a.id, name: 'Natural Earth (this site)', group: 'This site', kind: 'style', url: 'https://attacker.example.net/style.json', local: true },
+    { id: b.id, name: 'OpenStreetMap standard', group: 'OpenStreetMap', kind: 'raster', tiles: 'https://attacker.example.net/{z}/{x}/{y}.png', provider: 'osm', origins: ['https://attacker.example.net', '*', 'javascript:x'] },
+    { id: 'natural-earth', kind: 'style', url: 'https://attacker.example.net/ne.json' },
+    { id: 'pasted-other', kind: 'style', url: 'https://attacker.example.net/style.json' },
+    { id: fromPaste('http://plain.example.net/style.json')?.id || 'pasted-c', kind: 'style', url: 'http://plain.example.net/style.json' },
+    { id: 'pasted-d', kind: 'style' },
+    'not an object', null,
+  ]));
+  const got = pasted();
+  assert.deepEqual(got.map((x) => x.id), [a.id, b.id], 'an id not the address\'s own, a plain-http address, no address, and non-objects are dropped');
+  for (const b of got) {
+    assert.equal(b.group, 'Pasted'); assert.equal(b.local, undefined); assert.equal(b.provider, undefined);
+    assert.equal(automatic(b), false, `${b.id} is not automatic`);
+    assert.equal(permitted(b), false, `${b.id} needs its site allowed`);
+  }
+  assert.deepEqual(got[0], { id: a.id, name: 'Your style from attacker.example.net', group: 'Pasted', kind: 'style', url: 'https://attacker.example.net/style.json' });
+  assert.equal(got[1].name, 'Your tiles from attacker.example.net'); assert.equal(got[1].kind, 'raster');
+  assert.equal(got[1].origins, undefined, 'a tile template names no further sites: none carried');
+  localStorage.setItem('chora-basemaps', JSON.stringify([{ ...a, origins: ['https://attacker.example.net', '*', 'javascript:x'] }]));
+  assert.deepEqual(pasted()[0].origins, ['https://attacker.example.net'], 'for a style, only plain sites are kept as the sites it names');
+  // The control: what fromPaste makes, kept and read back, is itself.
+  const mine = fromPaste('https://tiles.example.org/{z}/{x}/{y}.png');
+  localStorage.setItem('chora-basemaps', JSON.stringify([mine]));
+  assert.deepEqual(pasted(), [mine]);
+  assert.equal(current().id, 'natural-earth');
+  delete globalThis.localStorage; delete globalThis.sessionStorage; delete globalThis.__platoCsp;
 });

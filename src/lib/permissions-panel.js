@@ -61,6 +61,7 @@ function render(api) {
     <section aria-labelledby="perm-sites-h">
       <h3 id="perm-sites-h">${esc(PANEL.sitesHeading)}</h3>
       <p class="muted">${esc(PANEL.sitesIntro)}</p>
+      <p class="muted">${esc(PANEL.links)}</p>
       ${cats.map((c) => `<h4>${esc(CATEGORY_WORDS[c].heading)}</h4><p class="muted">${esc(CATEGORY_WORDS[c].learns)}</p>${all.filter((x) => x.cat === c).map(entry).join('')}`).join('')}
       ${reload || confirming ? reloadPart(api) : ''}
       <p><button type="button" data-forget-all>${esc(PANEL.forgetAll)}</button> <span class="muted" role="status" id="perm-forgot"></span></p>

@@ -605,8 +605,9 @@ It is a page of its own, `chora.html`, a second entry in `vite.config.js`, so th
 Terra Draw and Allmaps load only there. The page is `src/chora/` (`app.js`; `map.js`, the map, the
 guard and drawing; `basemaps.js`; `overlays.js` and `remote.js`, the historical maps;
 `contributor.js`; `drafts.js`; `handoff.js`, which passes files chosen
-on the main page through IndexedDB, taken out of it as soon as Chora's page starts, and not offered
-if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `view.js`,
+on the main page through IndexedDB, taken out of it as soon as Chora's page starts, not offered if
+older than two minutes, and let go by the main page too, when it starts, is shown again or is left,
+once it is that old), and its engine `src/engine/chora/` (`store.js`, `view.js`,
 `draw.js`, `save.js`, `geo.js`, `trace.js`). It publishes its state on `window.__chora` for tests.
 
 - **The worker** is the main page's, with commands of its own, sent one at a time: `chora-load`,
@@ -727,7 +728,15 @@ if older than five minutes), and its engine `src/engine/chora/` (`store.js`, `vi
   not offered. A pasted style is read by the page, through the module's `fetch`, once its own site
   is allowed; any further sites it names (`styleOrigins`) each get a line, and the map does not use
   it until they are allowed too. Sites named only by a TileJSON are not found this way, and are
-  refused. The chosen basemap and pasted ones stay in `localStorage`. A basemap whose style cannot be loaded
+  refused. The chosen basemap and pasted ones stay in `localStorage`. **A pasted basemap is never used
+  without a click in this load** (`basemaps.automatic`, `current({ chosen })`, 1 October 2026): its
+  address, its permission (`added`) and its being the one chosen are all in storage that any page of
+  the site's origin can write, so at load, and when a permission changes (which may be another tab's
+  doing), the map stays on Natural Earth, the site is asked nothing, and one line names it as the
+  remembered choice with "Use it now"; the user's click (that button, its radio, or pasting) uses it,
+  for this load. A provider of the `REGISTRY` (OpenFreeMap, OpenStreetMap, CARTO), whose sites are
+  fixed in the code, loads as before. After the reload for a pasted site's permission the click is
+  needed again, which is the cost of the rule. A basemap whose style cannot be loaded
   gives way to Natural Earth, and the page says why. A map error goes to the console with only the
   site of its addresses, since a key may be in the query or the path. A drawing's note names the
   basemap it was drawn on if it is a built-in one, and a pasted one only as such. CARTO's key is given at build time as `VITE_CARTO_API_KEY`, and without it CARTO
@@ -942,7 +951,27 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   last output), can be read and changed by any page of `pelagios.org`, on that computer only. A
   page there could forge a grant; the panel lists whatever is kept, so a forged grant is seen and can
   be withdrawn, and the policy admits only plain sites. The panel says this in words. Moving the
-  tools to an origin of their own was considered and not done (2026-10-01).
+  tools to an origin of their own was considered and not done (2026-10-01); the audit of that day
+  proposes it again. Until then, **nothing read from storage is trusted to act on its own**: a pasted
+  basemap is used only after a click in this load (above, Chora), and is rebuilt from its address alone
+  when read (`pasted()`: its kind, its name and its group come from the address, never from fields a
+  sibling could write, such as `local` or `provider`; a click chooses the basemap as it was listed, at
+  that address, not whatever storage holds by then, `sameBasemap`); a remembered
+  contributor's or reviewer's ORCID is checked again on load (`orcidUri`, `checkReviewer`) and dropped,
+  and the cleaned value written back, if it is not one; files handed to Chora are usable for two
+  minutes and let go by either page after that.
+- **The frame and the referrer.** The head script also guards against framing: framed by another
+  origin (the top window's address cannot be read), the page hides everything it has behind one line,
+  "PLATO tools cannot be used inside another site's page", and publishes `__platoCsp.framed`. Framed
+  by this site's own origin, any page of `pelagios.org`, it cannot tell, and does not try: script
+  cannot stop same-origin framing, and only a `frame-ancestors` header or an origin of the tools' own
+  could. Each page's `<meta name="referrer">` is `strict-origin-when-cross-origin`: another site, on a
+  link followed or a tile asked, is sent this site's origin at most, never the page's address. Not
+  `no-referrer`: OpenStreetMap's tile usage policy requires a Referer on requests to
+  `tile.openstreetmap.org` ("Do not set a restrictive Referrer-Policy that prevents the Referer header
+  being sent", read 1 October 2026), and CARTO's key is scoped by it. Links written from the data (a
+  source's address, an ORCID) carry `rel="noopener noreferrer"`, so they send nothing, and the panel
+  says that following one is a visit the user makes, outside the permissions.
 - **Working data.** "Keep my working data between visits" (on by default,
   `plato-tools.keep-working-data` is `no` when off): off, Chora clears its drawings not saved, its
   last output and the historical maps it keeps (`chora-overlays/`) at the next load (not at a reload for a permission), and the output once saved to disk.
@@ -1072,7 +1101,11 @@ The browser checks run every page under its Content Security Policy, and check t
 allowed neither page asks another site; that a permission allowed in the panel, from its "Needs
 permission" line, is used after the reload and refused at once when withdrawn; that a page served
 without its policy is found unprotected by the canary and asks nothing; and that turning off "Keep
-my working data" clears Chora's drawings, and the historical maps it keeps, at the next load.
+my working data" clears Chora's drawings, and the historical maps it keeps, at the next load; that a
+pasted basemap written into storage as allowed and chosen is not used, and its site asked nothing,
+until a click; that a page framed by another origin hides itself; that a link carries the origin at
+most, and a data link nothing; that a planted ORCID is dropped on load; and that a stale hand-off is
+let go by the main page.
 
 Chora's historical maps are checked against a real second origin: `e2e/iiif_fixture_server.py`
 serves `test/fixtures/chora-iiif/` on two free ports, A (the image server allowed) and B (never to

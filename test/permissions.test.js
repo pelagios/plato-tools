@@ -293,6 +293,62 @@ test('every page the site builds carries the mark, the spike page included: none
   for (const p of pages) assert.ok(readFileSync(p, 'utf8').includes(HEAD_MARK), `${p.replace(root, '')} has no ${HEAD_MARK}`);
 });
 
+// The frame guard (the security audit of 1 October 2026, M1): framed by another origin, the top window's
+// address cannot be read, and the page hides what it has behind one line. The same page not framed, or
+// framed by its own origin, which it cannot tell from not being framed, is left as it is.
+function runHeadIn(window) {
+  const head = { prepended: [], prepend(m) { this.prepended.push(m); } }, listeners = {}, body = { children: [], appendChild(c) { this.children.push(c); } };
+  const html = { attrs: {}, setAttribute(k, v) { this.attrs[k] = v; } };
+  const document = { head, documentElement: html, body: null, createElement: (tag) => ({ tag, attrs: {}, setAttribute(k, v) { this.attrs[k] = v; } }),
+    addEventListener(ev, fn) { listeners[ev] = fn; } };
+  vm.runInNewContext(headScript(), { document, window, localStorage: new Store(), sessionStorage: new Store(), URL });
+  document.body = body;
+  if (listeners.DOMContentLoaded) listeners.DOMContentLoaded();
+  return { head, html, body, csp: JSON.parse(JSON.stringify(window.__platoCsp)) };
+}
+test('the head script hides the page behind one line when it is framed by another origin, and leaves it alone on its own or framed by its own origin', () => {
+  const foreign = {}; foreign.self = foreign;
+  const top = {}; Object.defineProperty(top, 'location', { get() { throw new Error('SecurityError: cross-origin'); } });
+  foreign.top = top;
+  const r = runHeadIn(foreign);
+  assert.equal(r.csp.framed, true);
+  assert.equal(r.html.attrs['data-framed'], '');
+  assert.ok(r.head.prepended.some((e) => e.tag === 'style' && /body > \* \{ display: none !important/.test(e.textContent)), 'everything hidden, by a style in force before the body is parsed');
+  assert.equal(r.body.children.length, 1);
+  assert.equal(r.body.children[0].className, 'framed-notice');
+  assert.match(r.body.children[0].textContent, /cannot be used inside another site/);
+  assert.ok(r.head.prepended.some((e) => e.attrs['http-equiv'] === 'Content-Security-Policy'), 'the policy is still written');
+  // The controls: on its own, and framed by the same origin (the top window's address can be read).
+  const own = {}; own.self = own; own.top = own;
+  const a = runHeadIn(own);
+  assert.equal(a.csp.framed, false); assert.equal(a.html.attrs['data-framed'], undefined); assert.equal(a.body.children.length, 0);
+  const same = {}; same.self = same; same.top = { location: { href: 'https://pelagios.org/other/' } };
+  const b = runHeadIn(same);
+  assert.equal(b.csp.framed, false); assert.equal(b.html.attrs['data-framed'], undefined); assert.equal(b.body.children.length, 0);
+  // A top window that cannot even be looked at is taken as another origin's: the guard fails closed.
+  const odd = {}; odd.self = odd; Object.defineProperty(odd, 'top', { get() { throw new Error('SecurityError'); } });
+  assert.equal(runHeadIn(odd).csp.framed, true);
+});
+
+test('each page sends another site its origin at most, never its address (the referrer policy), and the panel says a link followed is a visit of the user\'s own', () => {
+  const root = new URL('../', import.meta.url);
+  for (const f of ['index.html', 'chora.html', 'spike/index.html']) {
+    const html = readFileSync(new URL(f, root), 'utf8');
+    const metas = html.match(/<meta name="referrer"[^>]*>/g) || [];
+    assert.equal(metas.length, 1, `${f} has one referrer policy`);
+    assert.ok(metas[0].includes('content="strict-origin-when-cross-origin"'), `${f}: ${metas[0]}`);
+    assert.ok(html.indexOf(metas[0]) < Math.min(...['<link', '<script'].map((t) => html.indexOf(t)).filter((i) => i >= 0)), `${f}: before any link or script`);
+  }
+  // Not no-referrer: OpenStreetMap's tile usage policy requires a Referer on requests to tile.openstreetmap.org, and CARTO's key is scoped by it.
+  assert.ok(!readFileSync(new URL('chora.html', root), 'utf8').includes('no-referrer'));
+  assert.match(words.PANEL.links, /a visit you make yourself/);
+  assert.match(words.PANEL.links, /told nothing of this page/);
+  // The data-derived links Chora writes carry neither the page nor a window handle to the site visited.
+  const chora = readFileSync(new URL('src/chora/app.js', root), 'utf8');
+  assert.match(chora, /<a href="\$\{esc\(s\.id\)\}" rel="noopener noreferrer">/);
+  assert.match(chora, /<a href="\$\{esc\(c\.orcid\)\}" rel="noopener noreferrer">/);
+});
+
 test('the canary\'s second half: the policy in force must be exactly the one written from the permissions', () => {
   const origins = ['https://maps.example.org'];
   const written = { policy: core.policyFor(origins), origins };

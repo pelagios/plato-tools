@@ -2631,11 +2631,16 @@ def chora_checks(pw, url, tmp):
     def paste(address):
         page.evaluate("() => { document.getElementById('basemaps').open = true; }")
         page.fill('#paste', address); page.click('#paste-form button[type=submit]')
+    def use_remembered():
+        """After a reload, a pasted basemap is only remembered, never used until asked for in this load: ask (H2)."""
+        page.evaluate("() => { document.getElementById('basemaps').open = true; }")
+        until(page, '() => !!document.getElementById("use-remembered")', 10)
+        page.click('#use-remembered')
     def bad_style():
         fresh(); since = len(requests)
         # The control: a style that loads is kept, once its site is allowed (and the page reloaded).
         paste(STYLES + '/good.json')
-        allow_in_panel('basemap:' + STYLES)
+        allow_in_panel('basemap:' + STYLES); use_remembered()
         kept_good = soon(page, '() => window.__chora_map.getStyle()?.name === "Probe style"', 20) and cstate(page)['basemap'].startswith('pasted-')
         paste(STYLES + '/missing.json')
         back = soon(page, '() => window.__chora.basemap === "natural-earth" && !!window.__chora.basemapError', 20)
@@ -2660,13 +2665,13 @@ def chora_checks(pw, url, tmp):
         sel = f'[data-permission="basemap:{MULTI}"]'
         first = page.inner_text(sel) if page.is_visible(sel) else ''
         unread = not any(u.startswith(MULTI) for u in requests[since:])
-        allow_in_panel('basemap:' + MULTI)
+        allow_in_panel('basemap:' + MULTI); use_remembered()
         # Once the style is read, a line for the second site, and nothing yet asked of it.
         asked_second = soon(page, 's => !!document.querySelector(`[data-permission="basemap:${s}"]`)', 20, SECOND)
         page.wait_for_timeout(500)
         read = any(u.startswith(MULTI) for u in requests[since:])
         before = {'second asked': hits['second'] + len([u for u in requests[since:] if u.startswith(SECOND)]), 'basemap': cstate(page)['basemap']}
-        if asked_second: allow_in_panel('basemap:' + SECOND)
+        if asked_second: allow_in_panel('basemap:' + SECOND); use_remembered()
         used = soon(page, '() => window.__chora_map.getStyle()?.name === "Multi probe"', 20)
         got = soon(page, '() => window.__chora_map.isSourceLoaded("second")', 20) and hits['second'] > 0
         # The control: a third site, allowed by nothing, is still refused.
@@ -2680,6 +2685,186 @@ def chora_checks(pw, url, tmp):
             'first line': first, 'style unread before': unread, 'second site asked about': asked_second, 'style read': read, 'before allowing': before, 'used': used,
             'second fetched': got, 'hits': hits, 'third refused': third, 'blocked': after['blockedOrigins']}
     attempt('Chora: a pasted style on two sites needs each allowed before either is asked for tiles; once both are, both are used, and a third site is still refused', multi_origin)
+    # ---- The shared origin, the frame and the referrer: the security audit of 1 October 2026.
+    # Every page of pelagios.org can write this browser's storage for the tools. What one could write:
+    # a grant for a site, marked as if the user had added it, a pasted basemap on that site and the
+    # choice of it. None of it may put the basemap on the map at load: the map stays on Natural Earth,
+    # the site is asked nothing, the page names the remembered choice, and a click uses it (the control).
+    INJECTED = 'https://injected.example.org'
+    hits['injected'] = 0
+    def injected(route): hits['injected'] += 1; route.fulfill(status=200, content_type='image/png', body=PNG, headers=CORS)
+    ctx.route(INJECTED + '/**', injected)
+    TILES = INJECTED + '/{z}/{x}/{y}.png'
+    # The id a pasted basemap has is its address's own (fromPaste): an entry under any other id is not read.
+    def pasted_id(s):
+        h = 7
+        for c in s: h = (h * 31 + ord(c)) & 0xFFFFFFFF
+        digits = '0123456789abcdefghijklmnopqrstuvwxyz'; out = ''
+        while h: out = digits[h % 36] + out; h //= 36
+        return 'pasted-' + (out or '0')
+    PID = pasted_id(TILES)
+    PASTED = {'id': PID, 'name': 'Your tiles from injected.example.org', 'group': 'Pasted', 'kind': 'raster', 'tiles': TILES, 'attribution': 'Tiles from injected.example.org'}
+    def injected_basemap():
+        chora_boot(page, base)
+        page.evaluate(RESET, [{f'basemap:{INJECTED}': {'state': 'allowed', 'at': '2026-10-01T09:00:00Z', 'added': True}}, PID])
+        page.evaluate('b => localStorage.setItem("chora-basemaps", JSON.stringify([b]))', PASTED)
+        since = len(requests); h0 = hits['injected']
+        s = chora_boot(page, base)
+        until(page, '() => window.__chora.canary && window.__chora.canary !== "pending"', 30)
+        page.wait_for_timeout(1500)
+        csp = page.evaluate('() => window.__platoCsp')
+        before = {'basemap': cstate(page)['basemap'], 'asked': hits['injected'] - h0 + len([u for u in requests[since:] if u.startswith(INJECTED)]),
+                  'remembered': cstate(page).get('basemapRemembered'), 'in policy': INJECTED in csp['origins'], 'canary': s.get('canary')}
+        page.evaluate("() => { document.getElementById('basemaps').open = true; }")
+        line = page.inner_text('#basemap-remembered') if page.is_visible('#basemap-remembered') else ''
+        checked = page.evaluate('() => document.querySelector("input[name=basemap]:checked")?.value || null')
+        # The control: asked for by a click in this load, it is used and its tiles fetched.
+        page.click('#use-remembered')
+        used = soon(page, 'id => window.__chora.basemap === id && window.__chora_map.isStyleLoaded()', 20, PID)
+        got = soon(page, '() => window.__chora_map.isSourceLoaded("basemap")', 20) and hits['injected'] > h0
+        page.evaluate(RESET, [None, None])
+        return (before['basemap'] == 'natural-earth' and before['asked'] == 0 and before['remembered'] == PID and before['in policy']
+                and 'remembered as your choice' in line and 'injected.example.org' in line and checked == 'natural-earth' and used and got), {
+            'before the click': before, 'line': line, 'checked': checked, 'used after the click': used, 'tiles after': hits['injected'] - h0}
+    attempt('Chora: a pasted basemap written into storage as allowed and chosen (as a sibling page could) is in the policy but not used at load, and its site asked nothing, until a click; then it is used', injected_basemap)
+
+    # Framed by another origin, each page hides itself behind one line; framed by this site's own
+    # origin, which script cannot tell from not being framed, it runs as it does on its own (the
+    # control). The framer is a page the server really serves at another origin: a file written into
+    # dist/ for this run, read on 127.0.0.1 (which is not localhost), with the frames added by script.
+    # Nothing else does: a frame to localhost from a data: page, or from a page the harness fulfilled
+    # itself (fabricated, or fetched and given back without its policy), comes up as chrome-error://,
+    # and a page of the site is under the policy, whose default-src 'self' refuses a cross-origin frame
+    # (measured, 2 October 2026). For the deployed site, which is public and has no dist/ here, a page
+    # routed on framer.example.org is used, untested against that site.
+    FRAME_STATE = '''() => ({ framed: document.documentElement.hasAttribute('data-framed'), flag: window.__platoCsp ? window.__platoCsp.framed : null,
+      notice: document.querySelector('.framed-notice')?.textContent || '', buttonShown: !!document.getElementById('permissions-button')?.offsetParent,
+      title: document.title })'''
+    def frame_states(page, wait):
+        out = {}
+        for f in page.frames:
+            if f == page.main_frame: continue
+            try:
+                f.wait_for_function(wait, timeout=T(30) * 1000)
+                out[f.name] = f.evaluate(FRAME_STATE)
+            except Exception as e: out[f.name or f.url] = {'error': str(e).split('\n')[0][:120]}
+        return out
+    def framed():
+        chora_url = NOTOOLS if PROVE else base + 'chora.html'; main_url = NOTOOLS if PROVE else base
+        local = 'localhost' in base
+        framer = base.replace('localhost', '127.0.0.1') + 'framed-probe.html' if local else 'https://framer.example.org/framed-probe.html'
+        other = lambda route: route.fulfill(status=200, content_type='text/html', body='<title>framer</title>')
+        served = ROOT / 'dist' / 'framed-probe.html'
+        if local: served.write_text('<!doctype html><title>framer</title>')
+        else: ctx.route(framer, other)
+        try:
+            page.goto(framer)
+            page.evaluate('''([c, m]) => { for (const [name, src] of [['c', c], ['m', m]]) { const f = document.createElement('iframe'); f.name = name; f.src = src; f.width = 900; f.height = 600; document.body.appendChild(f); } }''', [chora_url, main_url])
+            # The head script says at once whether the page is framed; the notice comes once the body is there.
+            blanked = frame_states(page, '() => !!window.__platoCsp && (!window.__platoCsp.framed || !!document.querySelector(".framed-notice"))')
+        finally:
+            if local: served.unlink(missing_ok=True)
+            else: ctx.unroute(framer, other)
+        probe = base + 'framed-probe.html'
+        same = lambda route: route.fulfill(status=200, content_type='text/html', body=f'<title>same origin</title><iframe name="c" src="{chora_url}" width="900" height="600"></iframe>')
+        ctx.route(probe, same)
+        try:
+            page.goto(NOTOOLS if PROVE else probe)
+            as_own = frame_states(page, '() => window.__chora && window.__chora.phase === "ready"').get('c')
+        finally:
+            ctx.unroute(probe, same)
+        both = (sorted(blanked) == ['c', 'm'] and all(v.get('framed') and v.get('flag') is True and 'cannot be used inside another site' in v.get('notice', '') and not v.get('buttonShown') for v in blanked.values()))
+        return (both and as_own is not None and not as_own.get('framed') and as_own.get('flag') is False and as_own.get('notice') == '' and as_own.get('buttonShown')), {'framed by another origin': blanked, 'framed by this one': as_own}
+    attempt('both pages: framed by another origin, each hides itself behind one line (and the policy is still written); framed by this site\'s own origin, Chora runs as on its own', framed)
+
+    # What another site is told when the user follows a link there: this site's origin at most (the
+    # page's referrer policy), never the page's address; from a link in the data, nothing at all.
+    PROBE_SITE = 'https://referrer-probe.example.org'
+    referers = {}
+    def probe_route(route):
+        referers[route.request.url.rsplit('/', 1)[-1]] = route.request.headers.get('referer')
+        route.fulfill(status=200, content_type='text/html', body='<title>probe</title>probe')
+    ctx.route(PROBE_SITE + '/**', probe_route)
+    def referrer():
+        chora_boot(page, base)
+        meta = page.evaluate('() => document.querySelector("meta[name=referrer]")?.content || null')
+        origin = page.evaluate('() => location.origin')
+        for name, rel in (('plain', ''), ('noreferrer', 'noopener noreferrer')):
+            chora_boot(page, base)
+            with page.expect_navigation(timeout=30_000):
+                page.evaluate('([u, rel]) => { const a = document.createElement("a"); a.href = u; if (rel) a.rel = rel; a.textContent = "probe"; document.body.appendChild(a); a.click(); }', [PROBE_SITE + '/' + name, rel])
+        return (meta == 'strict-origin-when-cross-origin' and referers.get('plain') == origin + '/' and 'chora.html' not in (referers.get('plain') or '')
+                and 'noreferrer' in referers and referers['noreferrer'] is None), {'meta': meta, 'origin': origin, 'referer sent': referers}
+    attempt('Chora: a link to another site carries this site\'s origin at most, never the page\'s address, and one with rel="noreferrer" carries nothing (both requests seen)', referrer)
+
+    # Links written from the data (a source's address, the contributor's ORCID) open with neither a
+    # referrer nor a window handle, and the panel says that following one is a visit of the user's own.
+    def links_rel():
+        d = json.loads(ant.read_text())
+        p0 = next(p for p in d['spatialEntities'] if 'londinium' in json.dumps(p).lower())
+        p0['attestations'][0]['sources'] = [{'@id': 'https://source.example.org/itinerary', 'title': 'Probe source'}]
+        f = tmp / 'chora-files' / 'antonine-links.json'; f.parent.mkdir(exist_ok=True); f.write_text(json.dumps(d))
+        chora_boot(page, base)
+        page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test', orcid: 'https://orcid.org/0000-0002-1825-0097' }))")
+        chora_boot(page, base, [f]); chora_pick(page, 'londinium')
+        links = page.eval_on_selector_all('#card a[href^="http"], #contributor-line a[href^="http"]', 'as => as.map((a) => ({ href: a.getAttribute("href"), rel: a.rel }))')
+        page.click('#permissions-button'); until(page, '() => document.getElementById("permissions-panel")?.open', 10)
+        text = page.inner_text('#permissions-panel'); page.keyboard.press('Escape')
+        hrefs = ' '.join(l['href'] for l in links)
+        return (len(links) >= 2 and 'source.example.org/itinerary' in hrefs and 'orcid.org/0000-0002-1825-0097' in hrefs
+                and all('noopener' in l['rel'] and 'noreferrer' in l['rel'] for l in links) and 'a visit you make yourself' in text), {'links': links, 'panel says': 'a visit you make yourself' in text}
+    attempt('Chora: a source\'s link and the contributor\'s ORCID link carry rel="noopener noreferrer", and the panel says following a link is a visit the user makes', links_rel)
+
+    # An identity planted in storage with an ORCID that is not one: dropped on load, on each page, and
+    # the cleaned value written back; a right one is kept and shown (the control).
+    def planted_contributor():
+        f = fixture(ant, 'antonine-identity.json', tmp)
+        chora_boot(page, base)
+        page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test', orcid: 'javascript:alert(1)' }))")
+        chora_boot(page, base, [f])
+        bad = {'line': page.inner_text('#contributor-line'), 'links': page.eval_on_selector_all('#contributor-line a[href]', 'as => as.map((a) => a.getAttribute("href"))'),
+               'stored': json.loads(page.evaluate("() => localStorage.getItem('chora-contributor')") or 'null')}
+        page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test', orcid: '0000-0002-1825-0097' }))")
+        chora_boot(page, base, [f])
+        good = {'links': page.eval_on_selector_all('#contributor-line a[href]', 'as => as.map((a) => a.getAttribute("href"))'), 'stored': json.loads(page.evaluate("() => localStorage.getItem('chora-contributor')") or 'null')}
+        page.evaluate("() => localStorage.removeItem('chora-contributor')")
+        return ('Saving as Ada Test' in bad['line'] and 'javascript' not in bad['line'] and bad['links'] == ['#', '#'] and bad['stored'] == {'name': 'Ada Test'}
+                and good['links'] == ['https://orcid.org/0000-0002-1825-0097', '#', '#'] and good['stored'] == {'name': 'Ada Test', 'orcid': 'https://orcid.org/0000-0002-1825-0097'}), {'planted': bad, 'right': good}
+    attempt('Chora: a remembered ORCID that is not one is dropped on load and not written back; a right one is kept, as the address, and linked', planted_contributor)
+    def planted_reviewer():
+        page.bring_to_front(); page.goto(NOTOOLS if PROVE else base)
+        if wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready').get('phase') != 'ready': raise RuntimeError('the main page did not start')
+        page.evaluate("() => localStorage.setItem('plato-tools.reviewer', JSON.stringify({ name: 'Rev Test', orcid: 'javascript:alert(1)' }))")
+        page.reload(); wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+        bad = {'name': page.input_value('#reviewer'), 'orcid': page.input_value('#orcid'), 'stored': json.loads(page.evaluate("() => localStorage.getItem('plato-tools.reviewer')") or 'null')}
+        page.evaluate("() => localStorage.setItem('plato-tools.reviewer', JSON.stringify({ name: 'Rev Test', orcid: 'https://orcid.org/0000-0002-1825-0097' }))")
+        page.reload(); wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+        good = {'name': page.input_value('#reviewer'), 'orcid': page.input_value('#orcid'), 'stored': json.loads(page.evaluate("() => localStorage.getItem('plato-tools.reviewer')") or 'null')}
+        # Nothing usable (no name): nothing kept, so the panel lists no empty identity.
+        page.evaluate("() => localStorage.setItem('plato-tools.reviewer', JSON.stringify({ orcid: 'https://orcid.org/0000-0002-1825-0097' }))")
+        page.reload(); wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+        nameless = page.evaluate("() => localStorage.getItem('plato-tools.reviewer')")
+        page.evaluate("() => localStorage.removeItem('plato-tools.reviewer')")
+        return (bad == {'name': 'Rev Test', 'orcid': '', 'stored': {'name': 'Rev Test'}}
+                and good == {'name': 'Rev Test', 'orcid': 'https://orcid.org/0000-0002-1825-0097', 'stored': {'name': 'Rev Test', 'orcid': 'https://orcid.org/0000-0002-1825-0097'}}
+                and nameless is None), {'planted': bad, 'right': good, 'nameless left': nameless}
+    attempt('main page: a remembered reviewer\'s ORCID that is not one is dropped on load and not written back; a right one is kept and shown', planted_reviewer)
+
+    # A hand-off Chora's page never took is let go by the main page when it starts, once it is no longer
+    # fresh; a fresh one, on its way to Chora, is kept (the control).
+    def handoff_stale_main():
+        page.bring_to_front(); page.goto(NOTOOLS if PROVE else base)
+        if wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready').get('phase') != 'ready': raise RuntimeError('the main page did not start')
+        page.evaluate(IDB, True); page.reload()
+        wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready'); page.wait_for_timeout(500)
+        stale = page.evaluate(IDB, False)
+        page.evaluate(IDB_FRESH); page.reload()
+        wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready'); page.wait_for_timeout(500)
+        fresh_kept = page.evaluate(IDB, False)
+        page.evaluate('''() => new Promise((resolve) => { const q = indexedDB.open('plato-tools-chora', 1);
+          q.onsuccess = () => { const db = q.result, t = db.transaction('kv', 'readwrite'); t.objectStore('kv').delete('chora-handoff'); t.oncomplete = () => { db.close(); resolve(true); }; }; })''')
+        return stale is None and fresh_kept is not None and fresh_kept['names'] == ['fresh.json'], {'stale left': stale, 'fresh kept': fresh_kept}
+    attempt('main page: a hand-off to Chora older than two minutes is let go when the main page starts; a fresh one is kept for Chora', handoff_stale_main)
     ctx.close()
 
 # ---- Chora's historical maps (IIIF), against a real second origin ---------------------------------

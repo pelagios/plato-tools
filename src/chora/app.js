@@ -12,7 +12,7 @@ import { fingerprint, loadDrafts, saveDrafts, draftsWritten, forgetAllDrafts } f
 import { take as takeHandoff, clear as clearHandoff, keepForReload, takeResume } from './handoff.js';
 import { serialQueue, pageRequest, answers } from './queue.js';
 import * as permissions from '../lib/permissions.js';
-import { RELOAD_LOSES, REFUSED as PERMISSION_REFUSED, NEEDS } from '../lib/permission-words.js';
+import { RELOAD_LOSES, REFUSED as PERMISSION_REFUSED, NEEDS, REMEMBERED_BASEMAP } from '../lib/permission-words.js';
 import * as ov from './overlays.js';
 import * as remote from './remote.js';
 import * as georef from '../engine/georef/index.js';
@@ -181,7 +181,7 @@ function renderCard() {
     <h3>Locations</h3>${list(v.geometries, (g) => `${esc(g.geojson.type)}${g.role ? `, ${esc(ROLE_WORDS[tailOf(g.role)] || tailOf(g.role))}` : ''}${g.precision ? `, ${esc(g.precision.replace('_', ' '))}` : ''}${g.precisionKm != null ? ` (±${esc(g.precisionKm)} km)` : ''}${g.timespan?.label || g.timespan?.start ? ` <span class="muted">${esc(g.timespan.label || `${g.timespan.start ?? ''}–${g.timespan.end ?? ''}`)}</span>` : ''}${badge(g.status)}`)}
     <h3>Related places</h3>${list(v.relations, (r) => `${esc(r.typeLabel || tailOf(r.type))}: ${r.related ? `<a href="#" data-place="${esc(r.related.id)}">${esc(r.label)}</a>` : esc(r.label)}${badge(r.status)}`)}
     <h3>Over time</h3>${timeline(v.timeline)}
-    <h3>Sources</h3>${list(v.sources, (s) => (s.id && /^https?:/.test(s.id) ? `<a href="${esc(s.id)}" rel="noopener">${esc(s.title || s.id)}</a>` : esc(s.title || s.id)))}
+    <h3>Sources</h3>${list(v.sources, (s) => (s.id && /^https?:/.test(s.id) ? `<a href="${esc(s.id)}" rel="noopener noreferrer">${esc(s.title || s.id)}</a>` : esc(s.title || s.id)))}
     ${v.withdrawn ? `<p class="muted">${n(v.withdrawn)} withdrawn attestation${v.withdrawn === 1 ? '' : 's'} not shown.</p>` : ''}
     <h3>Your drawings</h3>
     <p class="muted">Draw with the tools on the map. Each drawing is added as a new attestation of this place; nothing already there is changed.</p>
@@ -285,7 +285,7 @@ function onFinish(id, ctx) {
   }
   // The basemap drawn on goes into the published notes: a built-in one by name, a pasted one not (its site may be private).
   const d = { id: String(id), placeId: state.placeId, placeLabel: view?.label || '', geojson, role: '', precision: '',
-    basemap: basemaps.drawnOn(basemaps.current()), zoom: mapApi.zoom(), drawnAt: new Date().toISOString() };
+    basemap: basemaps.drawnOn(basemaps.byId(state.basemap)), zoom: mapApi.zoom(), drawnAt: new Date().toISOString() };
   drafts.push(d);
   keepDrafts();
   renderCard();
@@ -391,7 +391,7 @@ function showSaving() {
   const c = contributors.load();
   const line = $('contributor-line');
   line.hidden = !c;
-  if (c) line.innerHTML = `Saving as <strong>${esc(c.name)}</strong>${c.orcid ? ` (<a href="${esc(c.orcid)}">${esc(c.orcid.replace('https://orcid.org/', ''))}</a>)` : ''} — <a href="#" id="c-change">change</a> / <a href="#" id="c-forget">forget me</a>`;
+  if (c) line.innerHTML = `Saving as <strong>${esc(c.name)}</strong>${c.orcid ? ` (<a href="${esc(c.orcid)}" rel="noopener noreferrer">${esc(c.orcid.replace('https://orcid.org/', ''))}</a>)` : ''} — <a href="#" id="c-change">change</a> / <a href="#" id="c-forget">forget me</a>`;
 }
 $('saving').addEventListener('click', (e) => {
   if (e.target.id === 'c-change') { e.preventDefault(); askContributor(); }
@@ -521,13 +521,23 @@ window.__chora_save = save;
 // Chosen before then, it is remembered as the one wanted, the map stays as it is, and one line says
 // "Needs permission", opening the Permissions panel at it. Allowed, it can be used from the next load
 // (the page's policy is written at load): the panel offers the reload, and what is open is kept.
+// A pasted basemap is never used at load, nor when a permission changes, however it is remembered: only
+// once the user has chosen it in this load, by a click (basemaps.automatic). Until then the map is on
+// Natural Earth, and one line names it as the remembered choice, with a button to use it.
 let basemapError = null;   // why the basemap chosen could not be used
+let chosenHere = null;     // the pasted basemap the user chose in this load, as it was then: the only one that may be used
+let listed = new Map();    // the basemaps as listed, by id: a click chooses what was shown, not what storage holds by then
+const currentNow = () => basemaps.current({ chosen: chosenHere });
 function unprotected(b) {
   basemapError = state.basemapError = `${b.name} cannot be used here: this browser did not show that it enforces the page’s protection, so the map stays on Natural Earth, from this site.`;
 }
 function renderBasemaps() {
-  const cur = basemaps.current(), want = basemaps.wanted();
+  const cur = currentNow(), want = basemaps.wanted();
   const waiting = want && !want.disabled && !want.local && !basemaps.permitted(want) && !basemaps.refused(want) && state.canary !== 'not-enforced' ? want : null;
+  // A pasted basemap remembered as the choice, permitted, but not yet chosen in this load: named, with the button.
+  const remembered = want && !waiting && !basemaps.automatic(want) && !want.disabled && basemaps.permitted(want) && want.id !== cur.id ? want : null;
+  state.basemapRemembered = remembered?.id || null;
+  listed = new Map([...basemaps.all(), ...(remembered ? [remembered] : [])].map((b) => [b.id, b]));
   $('basemap-name').textContent = cur.name;
   const groups = new Map();
   // A basemap set to Never in Permissions is not offered (and nothing says why: that is Never).
@@ -535,7 +545,9 @@ function renderBasemaps() {
   // What is typed in the paste box survives the list being drawn again (a permission changed, say).
   const typed = $('paste')?.value || '';
   // The line asking for permission goes first, where it is seen without scrolling the list.
-  $('basemap-options').innerHTML = (basemapError ? `<p class="warn" role="status">${esc(basemapError)}</p>` : '') + '<div id="basemap-needs"></div>' + [...groups].map(([g, bs]) => `<fieldset><legend>${esc(g)}</legend>${bs.map((b) => `<label class="${b.disabled ? 'disabled' : ''}">
+  $('basemap-options').innerHTML = (basemapError ? `<p class="warn" role="status">${esc(basemapError)}</p>` : '')
+    + (remembered ? `<p class="needs-permission" id="basemap-remembered">${esc(REMEMBERED_BASEMAP.line(remembered.name))} <button type="button" class="link" id="use-remembered">${esc(REMEMBERED_BASEMAP.use)}</button></p>` : '')
+    + '<div id="basemap-needs"></div>' + [...groups].map(([g, bs]) => `<fieldset><legend>${esc(g)}</legend>${bs.map((b) => `<label class="${b.disabled ? 'disabled' : ''}">
       <input type="radio" name="basemap" value="${esc(b.id)}"${b.id === (waiting || cur).id ? ' checked' : ''}${b.disabled ? ' disabled' : ''}> ${esc(b.name)}${b.disabled ? ` <small>(${esc(b.disabled)})</small>` : ''}
       ${b.group === 'Pasted' ? ` <button type="button" class="link" data-unpaste="${esc(b.id)}">remove</button>` : ''}</label>`).join('')}</fieldset>`).join('')
     + `<form id="paste-form"><label for="paste">Paste a style address or a tile template</label>
@@ -556,19 +568,23 @@ function renderBasemaps() {
 }
 function want(b) {
   basemaps.choose(b);
+  // Chosen by a click in this load: this pasted basemap, at this address, may now be used; a built-in one chosen ends that.
+  chosenHere = basemaps.automatic(b) ? null : b;
   if (basemaps.permitted(b)) useBasemap(b);
   else { $('basemaps').open = true; renderBasemaps(); }
 }
 $('basemap-options').addEventListener('change', (e) => {
   if (e.target.name !== 'basemap') return;
-  const b = basemaps.byId(e.target.value);
+  const b = listed.get(e.target.value);
   if (b && !b.disabled) want(b);
 });
 $('basemap-options').addEventListener('click', (e) => {
+  if (e.target.id === 'use-remembered') { const w = listed.get(state.basemapRemembered); if (w) want(w); return; }
   if (e.target.dataset.unpaste) {
     const id = e.target.dataset.unpaste;
     basemaps.removePasted(id);
-    if (basemaps.current().id === id || state.basemap === id || basemaps.wanted() === null) want(basemaps.byId('natural-earth')); else renderBasemaps();
+    if (chosenHere?.id === id) chosenHere = null;
+    if (currentNow().id === id || state.basemap === id || basemaps.wanted() === null) want(basemaps.byId('natural-earth')); else renderBasemaps();
   }
 });
 $('basemap-options').addEventListener('submit', (e) => {
@@ -595,7 +611,7 @@ async function useBasemap(b) {
   // each given a "Needs permission" line, and the map stays as it is until they are.
   if (b.group === 'Pasted' && b.kind === 'style') {
     const origins = [...new Set([basemaps.originOf(b), ...basemaps.styleOrigins(style, b.url)])];
-    if (origins.join() !== basemaps.originsOf(b).join()) { b = { ...b, origins }; basemaps.addPasted(b); }
+    if (origins.join() !== basemaps.originsOf(b).join()) { b = { ...b, origins }; basemaps.addPasted(b); if (basemaps.sameBasemap(b, chosenHere)) chosenHere = b; }
     if (!basemaps.permitted(b)) {
       const shown = basemaps.byId(state.basemap);
       $('basemaps').open = true;
@@ -610,12 +626,14 @@ async function useBasemap(b) {
   renderBasemaps();
 }
 // A permission changed, here or in another tab: a basemap shown that is no longer allowed gives way to
-// Natural Earth at once; one wanted that now may be used (allowed again within this load's policy) is used.
+// Natural Earth at once; one wanted that now may be used (allowed again within this load's policy) is
+// used, if it is automatic or was chosen here (a change may come from another tab, or another page of
+// the origin, which must not put a pasted basemap on the map).
 permissions.onChange(() => {
   const shown = basemaps.byId(state.basemap);
   if (shown && !shown.local && !basemaps.permitted(shown)) { useBasemap(basemaps.byId('natural-earth')); return; }
   const w = basemaps.wanted();
-  if (w && !w.disabled && w.id !== state.basemap && basemaps.permitted(w)) { useBasemap(w); return; }
+  if (w && !w.disabled && w.id !== state.basemap && basemaps.permitted(w) && (basemaps.automatic(w) || basemaps.sameBasemap(w, chosenHere))) { useBasemap(basemaps.automatic(w) ? w : chosenHere); return; }
   renderBasemaps();
 });
 
@@ -976,7 +994,10 @@ permissions.onBeforeReload(() => {}, { loses: () => {
 } });
 permissions.onBeforeReload(() => {}, { loses: () => ($('paste')?.value.trim() ? RELOAD_LOSES.pasted : null) });
 permissions.onBeforeReload(() => {}, { loses: () => (state.phase === 'saving' ? RELOAD_LOSES.saving : null) });
-useBasemap(basemaps.current());
+// Who was remembered, checked again (contributor.load): what is kept is written back as checked, so that an ORCID
+// that is not one, however it got into this browser's storage, is neither shown, saved nor listed in the panel.
+try { const c = contributors.load(); if (c) contributors.remember(c); else if (localStorage.getItem('chora-contributor') !== null) contributors.forget(); } catch { /* storage refused: nothing kept */ }
+useBasemap(currentNow());
 startWorker().then(async () => {
   // Back from a reload for a permission: the dataset, the place and the view as they were.
   const resumed = await takeResume();

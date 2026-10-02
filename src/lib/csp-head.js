@@ -38,4 +38,26 @@ var meta = document.createElement('meta');
 meta.setAttribute('http-equiv', 'Content-Security-Policy');
 meta.setAttribute('content', policy);
 document.head.prepend(meta);
-window.__platoCsp = { policy: policy, origins: origins.filter(isOrigin) };
+// The frame guard. A page of another site that frames this one could lay its own content over it and
+// have the user click here unknowingly (clickjacking): framed by another origin (the top window's
+// address cannot be read), the page hides everything it has and shows one line instead. Framing by
+// this site's own origin (any page of pelagios.org) can read the top window, and cannot be told from
+// the page being on its own: script cannot stop it, and this does not try (DEVELOPERS.md).
+var framed = false;
+try {
+  if (window.top !== window.self) { try { void window.top.location.href; } catch (e) { framed = true; } }
+} catch (e) { framed = true; }   // a top window that cannot even be looked at: taken as another origin's
+if (framed) {
+  var style = document.createElement('style');
+  style.textContent = 'body > * { display: none !important; } body > .framed-notice { display: block !important; margin: 1rem; font: 1rem system-ui, sans-serif; }';
+  document.head.prepend(style);
+  document.documentElement.setAttribute('data-framed', '');
+  var notice = function () {
+    var p = document.createElement('p');
+    p.className = 'framed-notice';
+    p.textContent = 'PLATO tools cannot be used inside another site’s page. Open it in a tab of its own.';
+    document.body.appendChild(p);
+  };
+  if (document.body) notice(); else document.addEventListener('DOMContentLoaded', notice);
+}
+window.__platoCsp = { policy: policy, origins: origins.filter(isOrigin), framed: framed };

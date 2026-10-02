@@ -3,8 +3,18 @@
 // the person drawing is not necessarily the person who made the gazetteer.
 const KEY = 'chora-contributor';
 
+/**
+ * Who was remembered, checked again as the form checks it: a name, and an ORCID only if it is one
+ * (orcidUri, check digit and all). What is kept here can be written by any page of the site's origin
+ * (DEVELOPERS.md, "The shared origin"), so an ORCID that is not one is dropped, not shown or saved.
+ */
 export function load() {
-  try { const c = JSON.parse(localStorage.getItem(KEY)); return c && typeof c.name === 'string' && c.name.trim() ? c : null; } catch { return null; }
+  let c;
+  try { c = JSON.parse(localStorage.getItem(KEY)); } catch { return null; }
+  if (!c || typeof c !== 'object' || typeof c.name !== 'string' || !c.name.trim()) return null;
+  const out = { name: c.name };
+  if (c.orcid !== undefined && c.orcid !== null) { const uri = orcidUri(c.orcid); if (uri) out.orcid = uri; }
+  return out;
 }
 export function remember(c) { try { localStorage.setItem(KEY, JSON.stringify(c)); } catch {} }
 export function forget() { try { localStorage.removeItem(KEY); } catch {} }
