@@ -65,6 +65,17 @@ test('a listed place with a variant name as its own child still reports it; a lo
   assert.deepEqual(examples(m, 'tei-listplace-geo-other-place'), ['#a: located_in_place: Parent (5 6)']);
 });
 
+test('a location whose type merely contains "parent" or "in_place" (apparent, main_place, domain_place) is the place\'s own; one that is another place\'s (located_in_place, parent, in place) is skipped', () => {
+  const place = (types) => tei('<p>x</p>').replace('</body>', `</body><back><listPlace><place xml:id="a"><placeName>Main</placeName><idno type="URI">https://example.org/places/a</idno>${types.map((t, i) => `<location type="${t}"><geo>${i + 1} ${i + 1}</geo></location>`).join('')}</place></listPlace></back>`);
+  const own = mapped(place(['apparent', 'main_place', 'domain_place', 'coords']), { listPlaces: true });
+  assert.deepEqual(own.doc.attestations[0].geometries.map((g) => g.reprPoint), [[1, 1], [2, 2], [3, 3], [4, 4]]);
+  assert.ok(!own.kinds.has('tei-listplace-geo-other-place'), JSON.stringify(own.reported));
+  // control: the types that name another place's location are skipped and reported, whatever their case
+  const other = mapped(place(['located_in_place', 'parent', 'in place', 'Located-In', 'part_of', 'within', 'broader']), { listPlaces: true });
+  assert.equal(other.doc.attestations[0].geometries, undefined);
+  assert.equal(examples(other, 'tei-listplace-geo-other-place').length, 7, JSON.stringify(other.reported));
+});
+
 // ---- words inside a place name that are not the name (IIP-like; IIP is CC BY-NC, so constructed) ------
 test('a <geo>, <location>, <idno> or <note> inside a place name is left out of the name; a <geo> in the text is reported once as tei-place-geo', () => {
   // An equivalent of what IIP writes (a <geo> inside the place name), constructed, not copied.

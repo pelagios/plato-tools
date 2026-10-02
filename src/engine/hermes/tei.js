@@ -210,7 +210,7 @@ const ASIDE = new Set(['geo', 'location', 'idno', 'note']);
 const EDITOR_NOTE_TYPES = /^(editorial|commentary|translator)$/i;
 const PLACE_CHILDREN = new Set(['idno', 'location', 'linkGrp', 'place', ...PLACE_ELEMENTS]);
 // A <location> type that says the location is another place's (the place this one is in), not this place's own.
-const OTHER_PLACE_LOCATION = /located[_ -]?in|parent|part[_ -]?of|within|in[_ -]?place|broader/i;
+const OTHER_PLACE_LOCATION = /^\s*(located[_ -]?in(?:[_ -]?place)?|parent|part[_ -]?of|within|in[_ -]?place|broader)\s*$/i;
 // A description of a person, an organisation, an event or a book (in <back>, say), whose place names
 // (a birthplace in a <listPerson>) describe it, not a passage of the text that names the place.
 const RECORDS = new Set(['listPerson', 'listOrg', 'listEvent', 'listBibl', 'person', 'personGrp', 'org', 'event', 'bibl', 'biblStruct']);
