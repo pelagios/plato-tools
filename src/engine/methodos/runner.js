@@ -12,7 +12,7 @@
 //   completed  every step is done or skipped.
 // The three ways of stopping (waiting, stopped, failed) are kept apart, in the status and in the step.
 import { OPERATIONS } from './operations.js';
-import { TYPES, checkHandoff, isRef } from './handoffs.js';
+import { checkHandoff, isRef } from './handoffs.js';
 import { alternatives, applies, check, digest } from './recipe.js';
 
 export const FORMAT = 1;
@@ -125,6 +125,7 @@ function checkOutputs(s, outputs) {
 export function complete(state, stepId, outputs) {
   const out = clone(state);
   const s = current(out, stepId, ['running', 'waiting'], 'done');
+  if (s.state === 'waiting' && OPERATIONS[s.op].kind !== 'interactive') no(`The step ${titleOf(s)} is waiting to run, not done: it is resumed, and it is done when it has run.`);
   s.outputs = checkOutputs(s, outputs);
   clean(s);
   s.state = 'done';
@@ -162,7 +163,7 @@ export function stop(state, stepId, problem) {
   if (!problem || typeof problem.words !== 'string' || !problem.words.trim()) no(`The step ${titleOf(s)} cannot stop without saying what to put right.`);
   s.state = 'stopped';
   s.problem = { words: problem.words, ...(Number.isSafeInteger(problem.errors) ? { errors: problem.errors } : {}), rerun: s.id };
-  out.status = 'stopped';
+  out.current = null; out.status = 'stopped';
   return out;
 }
 
@@ -173,7 +174,7 @@ export function fail(state, stepId, error) {
   s.state = 'failed';
   s.error = String(error && (error.message || error) || 'The step failed.').split('\n')[0];
   delete s.why;
-  out.status = 'failed';
+  out.current = null; out.status = 'failed';
   return out;
 }
 
@@ -192,7 +193,7 @@ export function cancel(state, stepId, partial) {
     if (op.cancel === 'keeps-partial') s.partial = checkOutputs(s, partial);
     else s.discarded = Object.values(partial).flat().filter(isRef).map((r) => r.name);
   }
-  out.status = 'cancelled';
+  out.current = null; out.status = 'cancelled';
   return out;
 }
 
@@ -207,21 +208,25 @@ export function progress(state, stepId, counts) {
 
 /**
  * Do a step again: it, and every step that took its outputs (and so on, down), go back to pending,
- * as WHG resets the levels below a changed parent. A cancelled step keeps what it kept, for the page
- * to begin from. Not while another step is running or waiting.
+ * as WHG resets the levels below a changed parent; so does a step that stopped, failed or was
+ * cancelled, which has to be done again in any case. What a cancelled step kept is kept for the page
+ * to begin from only when that step is the one done again: below it, it was made from what is now
+ * reset. Not while a step is running, nor while another is waiting.
  */
 export function invalidate(state, stepId) {
   const out = clone(state);
   const s = stepOf(out, stepId);
   if (s.state === 'pending' || s.state === 'skipped') no(`The step ${titleOf(s)} is ${s.state}: there is nothing to do again.`);
-  if (out.current && out.current !== stepId) no(`The step ${titleOf(s)} cannot be done again while ${titleOf(stepOf(out, out.current))} is ${stepOf(out, out.current).state}.`);
+  const cur = out.current ? stepOf(out, out.current) : null;
+  if (cur && (cur.state === 'running' || cur.id !== stepId)) no(`The step ${titleOf(s)} cannot be done again while ${titleOf(cur)} is ${cur.state}.`);
   const reset = new Set([stepId]);
   for (const x of out.steps) {
+    if (['stopped', 'failed', 'cancelled'].includes(x.state)) reset.add(x.id);
     if (Object.values(x.from).some((ref) => alternatives(ref).some((a) => reset.has(a.split('.')[0])))) reset.add(x.id);
   }
   for (const x of out.steps) {
     if (!reset.has(x.id) || x.state === 'skipped') continue;
-    const partial = x.state === 'cancelled' ? x.partial : undefined;
+    const partial = x.id === stepId && x.state === 'cancelled' ? x.partial : undefined;
     clean(x); delete x.outputs;
     if (partial) x.partial = partial;
     x.state = 'pending';
@@ -239,10 +244,13 @@ export function deserialise(text) {
   try { s = JSON.parse(text); } catch { no('This is not a workflow record: it is not JSON.'); }
   if (!s || s.methodos !== FORMAT) no(`This is not a workflow record of a version these tools read (${FORMAT}).`);
   if (!STATUSES.includes(s.status) || !Array.isArray(s.steps) || !s.recipe || typeof s.recipe.digest !== 'string') no('This workflow record is damaged: it has no status, steps or recipe.');
+  const refsOk = (refs) => Array.isArray(refs) && refs.every(isRef);
   for (const x of s.steps) {
-    if (!STEP_STATES.includes(x.state) || !OPERATIONS[x.op]) no(`This workflow record is damaged: the step "${x.id}" is not one the tools know.`);
-    for (const refs of Object.values({ ...x.outputs, ...x.partial })) if (!refs.every(isRef)) no(`This workflow record is damaged: an output of the step "${x.id}" is not a reference to a file.`);
+    if (!x || !STEP_STATES.includes(x.state) || !OPERATIONS[x.op] || !x.from || typeof x.from !== 'object') no(`This workflow record is damaged: the step "${x?.id}" is not one the tools know.`);
+    for (const refs of Object.values({ ...x.outputs, ...x.partial })) if (!refsOk(refs)) no(`This workflow record is damaged: an output of the step "${x.id}" is not a reference to a file.`);
   }
-  for (const refs of Object.values(s.files || {})) if (!refs.every((r) => isRef(r) && Object.hasOwn(TYPES, r.type))) no('This workflow record is damaged: a file chosen is not a reference to a file.');
+  for (const refs of Object.values(s.files || {})) if (!refsOk(refs)) no('This workflow record is damaged: a file chosen is not a reference to a file.');
+  const cur = s.current === null ? null : s.steps.find((x) => x.id === s.current);
+  if (s.current !== null && !(cur && ['running', 'waiting'].includes(cur.state))) no('This workflow record is damaged: the step it is at is not running or waiting.');
   return s;
 }
