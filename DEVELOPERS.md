@@ -1478,7 +1478,9 @@ workflow is not yet kept anywhere (both are later phases).
 - **Operations** (`operations.js`) describe the calls the tools already make: each says whether it is
   automatic or interactive (done by the user, so the step waits), what types it takes and gives,
   which permissions it needs, and whether a cancelled run keeps what it had done (a review and a
-  lookup do; a conversion or a part of publishing is all or nothing). An operation that does not
+  lookup do; a conversion or a part of publishing is all or nothing, and the runner names what such
+  a step had written for the host to remove: stopping the engine's call and removing its files are
+  the host's, as the page does now). An operation that does not
   exist yet (regions level by level, the containment relation, adopting a match's geometry, Chora's
   hand-back, finding places in a text) is declared with the reason it is not available, and a
   workflow whose answers would reach it is refused at the start, in those words.
@@ -1504,7 +1506,9 @@ workflow is not yet kept anywhere (both are later phases).
   does. The front end gives a host: `open(ref)` for the file a reference names, `env()` for one run's
   environment, `file(output)` for what the run wrote, and, for the lookup, a lookup made on the page
   thread through the permissions module. `drive()` runs the automatic steps until the workflow waits,
-  stops, fails or completes.
+  stops, fails or completes. A run whose report counts errors stops the workflow but keeps what it
+  wrote, as the page and the command line do; one that did not finish leaves nothing. A permission
+  still to decide, set to Never, or needing a reload is waiting; any other refusal is a failure.
 
 `test/methodos.test.js` drives "Publish a dataset" through the real engine on PLATO's Antonine example
 and checks that every output the record names is the file the engine wrote, by size and SHA-256.

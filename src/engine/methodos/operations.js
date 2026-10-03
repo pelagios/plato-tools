@@ -7,7 +7,11 @@
 //               it may be left out;
 //   gives       its outputs, each of one type;
 //   permissions the (category, subject) pairs of src/lib/permissions.js it needs, if any;
-//   cancel      'keeps-partial' when what it had done when cancelled is kept, else 'all-or-nothing';
+//   cancel      'keeps-partial' when what it had done when cancelled is kept, else 'all-or-nothing':
+//               the runner then names what it had written (`discarded`), and removing it is the
+//               host's (the page's, as it removes a stopped conversion's file now); stopping the
+//               engine's call is the host's too (the worker's run cancellation), as only the lookup
+//               takes a signal;
 //   available   true, or the reason it is not available yet: a step naming an operation that is
 //               not available is refused when the workflow starts, never run as something else.
 const ANY = ['files', 'dataset'];
@@ -46,7 +50,7 @@ export const OPERATIONS = Object.fromEntries([
     available: 'Regions cannot be identified yet: Hermes has no column role for a containing region, and Krisis has no level-by-level lookup in which a region constrains the one below it.' }),
   op({ key: 'relate.containment', title: 'Record which region each place is in', tool: 'Krisis',
     takes: { subjects: { types: ANY }, work: { types: ['work.krisis'] } }, gives: { dataset: 'dataset' },
-    available: 'PLATO has no relation type for containment yet; it has been raised with PLATO.' }),
+    available: "PLATO has decided how containment is recorded (PLATO #23, option B: the source's ContainedIn points to a region minted under the full chain, and a reviewer's IdentityRelation links that region to the authority's), but the tools do not write it yet." }),
   op({ key: 'adopt', title: "Take each identified place's location from its match", tool: 'Chora',
     takes: { dataset: { types: ANY } }, gives: { dataset: 'dataset' },
     available: "Adopting a match's geometry is on a branch of Chora (chora-adopt) that has not been merged." }),
