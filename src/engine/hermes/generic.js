@@ -372,19 +372,22 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
   const base = options.base || defaultBase;
   if (!byAddress && !hasId) report('generic-no-ids', file.name);
   const minted = tableIds(base, () => null);
-  // The regions the rows' places lie in (within.js): with a base address of the user's own, each
-  // distinct container (the same value under the same parents, containerKey) is minted once as a
-  // place of its own, <base>place/region-<hex>, contained in its parent region, and each row's place
-  // gets one plato:ContainedIn attestation for each level of its chain. Without one, the chain is
-  // kept in the notes (columns.js, applyColumns), and that is said once. Only the keys of the regions
-  // made are held, never a row.
+  // The regions the rows' places lie in (within.js), as PLATO's worked example has them
+  // (schemas/examples/place-centric-regions.json, PLATO 1d2cf6e): with a base address of the user's
+  // own, each distinct container (the same value under the same parents, containerKey) is minted once
+  // as a place of its own, <base>place/region-<hex>, labelled with its name and, after it, its parents
+  // narrowest first ("Surrey (England)"), with a name attestation and a plato:ContainedIn attestation
+  // to its parent region; each row's place is ContainedIn its narrowest region, and the chain above
+  // it follows from the regions. Without a base address, the chain is kept in the notes (columns.js,
+  // applyColumns), and that is said once. Only the keys of the regions made are held, never a row.
   const containment = !!options.base;
   const regionsMade = new Set();
   let withinNoted = false;
   const regionIri = (key) => minted.place(regionId(key));
-  // A ContainedIn attestation, citing what the row's attestation cites.
-  const containedIn = (c, iri, att) => ({ relations: [{ relationType: CONTAINED_IN, relatesTo: iri, relatedLabel: c.value }], sequence: c.level, sources: att.sources, citations: att.citations });
-  // For a row read as `a`: the events of the regions not yet made, and the place's ContainedIn attestations.
+  // What a region's and a place's attestations cite: what the row's attestation cites.
+  const cites = (att) => ({ sources: att.sources, citations: att.citations });
+  const containedIn = (value, iri, att) => ({ relations: [{ relationType: CONTAINED_IN, relatesTo: iri, relatedLabel: value }], ...cites(att) });
+  // For a row read as `a`: the events of the regions not yet made, and the place's ContainedIn attestation.
   const regionsOf = (a) => {
     const events = [], contained = [];
     if (!a.within) return { events, contained };
@@ -393,22 +396,25 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
       return { events, contained };
     }
     const parents = [];
-    let parentIri, parentLevel;
+    let parentIri, iri;
     a.within.forEach((c, i) => {
-      const key = containerKey(c.level, c.value, parents), iri = regionIri(key);
-      contained.push(containedIn(c, iri, a.attestation));
+      const key = containerKey(c.level, c.value, parents);
+      iri = regionIri(key);
       if (!regionsMade.has(key)) {
         regionsMade.add(key);
-        const up = parentIri ? containedIn({ level: parentLevel, value: parents[parents.length - 1] }, parentIri, a.attestation) : null;
+        const own = [{ names: [{ toponym: c.value }], ...cites(a.attestation) }];
+        if (parentIri) own.push(containedIn(parents[parents.length - 1], parentIri, a.attestation));
         const chain = a.within.slice(0, i);
         const tags = { region: { level: c.level, key }, ...(chain.length ? { within: chain } : {}) };
-        const value = { '@id': iri, label: c.value, entityIdentifier: key, attestations: [] };
-        // Attestation-centric: a new place, its attestation given on its own, about it.
-        if (attestationCentric) { events.push({ type: 'record', newEntity: true, value, ...tags }); if (up) events.push({ type: 'attestation', value: { about: iri, ...up }, ...tags }); }
-        else { if (up) value.attestations.push(up); events.push({ type: 'record', value, ...tags }); }
+        const label = parents.length ? `${c.value} (${[...parents].reverse().join(', ')})` : c.value;
+        const value = { '@id': iri, label, entityIdentifier: key, attestations: [] };
+        // Attestation-centric: a new place, its attestations given on their own, about it.
+        if (attestationCentric) { events.push({ type: 'record', newEntity: true, value, ...tags }); for (const x of own) events.push({ type: 'attestation', value: { about: iri, ...x }, ...tags }); }
+        else { value.attestations.push(...own); events.push({ type: 'record', value, ...tags }); }
       }
-      parents.push(c.value); parentIri = iri; parentLevel = c.level;
+      parents.push(c.value); parentIri = iri;
     });
+    contained.push(containedIn(a.within[a.within.length - 1].value, iri, a.attestation));
     return { events, contained };
   };
   let standIn = false;

@@ -6,7 +6,7 @@
 // presence beside it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,7 +17,8 @@ import { detect } from '../src/engine/input.js';
 import { Report, LOSS_TEXT } from '../src/engine/report.js';
 import { genericSource, mappingOf, regionId, columnsOf } from '../src/engine/hermes/generic.js';
 import { guessColumns, resolveColumns, mappingToSave, splitCell, expandSplits, splitRow, applyColumns, GENERIC_KINDS } from '../src/engine/hermes/columns.js';
-import { withinOf, withinChains, withinLevels, containerKey, withinNote, CONTAINED_IN } from '../src/engine/hermes/within.js';
+import { withinOf, withinChains, withinLevels, containerKey, withinNote, regionIndex, CONTAINED_IN } from '../src/engine/hermes/within.js';
+import { PLATO_REPO } from './paths.js';
 import { pastedListCsv, pastedListFile, PASTED_FILE_NAME } from '../src/engine/hermes/pasted.js';
 import { isColumns } from '../src/engine/krisis/work.js';
 import { gather } from '../src/engine/krisis/match.js';
@@ -156,60 +157,72 @@ test('the note is the chain, widest first, then the place\'s own name', () => {
 
 // ---- ContainedIn and minted regions, under a base address -----------------------------------------
 const NEWTONS = 'id,Name,Parish,County,Country\n1,Mill,Newton,Lancashire,England\n2,Farm,Newton,Cheshire,England\n3,Barn,Newton,Cheshire,England\n';
-test('with a base address, each row\'s place gets one ContainedIn attestation for each level, with its level as sequence; schema-valid', async () => {
+test('with a base address, each row\'s place is ContainedIn its narrowest region, citing what its row cites; schema-valid', async () => {
   const { e, report } = await go([textFile(NEWTONS, 'places.csv')], 'convert', 'plato-json', { base: BASE });
   const doc = JSON.parse(outText(e, 'places.json'));
   assert.equal(validPlaceCentric(doc), null);
   assert.equal(report.errors, 0);
   assert.ok(!JSON.stringify(doc).includes('"within"'));
   assert.ok(!JSON.stringify(doc).includes('Within (as the source gives it)'));   // written as relations, not the note
+  assert.ok(!JSON.stringify(doc).includes('"sequence"'));   // a sequence orders a route's members, not regions
   const mill = doc.spatialEntities.find((p) => p['@id'] === `${BASE}place/1`);
   const contained = mill.attestations.filter((a) => a.relations);
-  assert.deepEqual(contained.map((a) => [a.sequence, a.relations[0].relationType, a.relations[0].relatedLabel]), [[1, CONTAINED_IN, 'England'], [2, CONTAINED_IN, 'Lancashire'], [3, CONTAINED_IN, 'Newton']]);
   const key = containerKey(3, 'Newton', ['England', 'Lancashire']);
-  assert.equal(contained[2].relations[0].relatesTo, `${BASE}place/region-${sha256(key).slice(0, 16)}`);
+  assert.deepEqual(contained.map((a) => a.relations), [[{ relationType: CONTAINED_IN, relatesTo: `${BASE}place/region-${sha256(key).slice(0, 16)}`, relatedLabel: 'Newton' }]]);
   assert.equal(regionId(key), `region-${sha256(key).slice(0, 16)}`);
-  assert.deepEqual(contained[0].citations, mill.attestations[0].citations);   // cites the file and row, as the row's attestation does
+  assert.deepEqual(contained[0].citations, mill.attestations[0].citations);   // the file and the row, as the row's attestation
+  assert.equal(contained[0].citations[0].locator, 'row 2');
 });
-test('each region is minted once, contained in its parent; two Newtons under different chains are two, identical chains one', async () => {
+test('each region is minted once, named, labelled with its parents, contained in its parent; two Newtons under different chains are two, identical chains one', async () => {
   const { e } = await go([textFile(NEWTONS, 'places.csv')], 'convert', 'plato-json', { base: BASE });
   const doc = JSON.parse(outText(e, 'places.json'));
   const regions = doc.spatialEntities.filter((p) => p['@id'].includes('/place/region-'));
   // England; Lancashire, Cheshire; Newton (Lancashire), Newton (Cheshire): the third row adds none.
-  assert.deepEqual(regions.map((r) => r.label).sort(), ['Cheshire', 'England', 'Lancashire', 'Newton', 'Newton']);
+  assert.deepEqual(regions.map((r) => r.label).sort(), ['Cheshire (England)', 'England', 'Lancashire (England)', 'Newton (Cheshire, England)', 'Newton (Lancashire, England)']);
   assert.equal(new Set(regions.map((r) => r['@id'])).size, 5);
-  const newtons = regions.filter((r) => r.label === 'Newton');
-  assert.deepEqual(newtons.map((r) => r.entityIdentifier).sort(), [JSON.stringify([3, 'England', 'Cheshire', 'Newton']), JSON.stringify([3, 'England', 'Lancashire', 'Newton'])]);
   const byLabel = (l) => regions.find((r) => r.label === l);
+  const newtonC = byLabel('Newton (Cheshire, England)');
+  assert.equal(newtonC.entityIdentifier, JSON.stringify([3, 'England', 'Cheshire', 'Newton']));
   const england = byLabel('England');
-  assert.deepEqual(england.attestations, []);   // the widest has no parent
-  const lancs = byLabel('Lancashire');
-  assert.deepEqual(lancs.attestations.map((a) => [a.sequence, a.relations[0].relatesTo, a.relations[0].relatedLabel]), [[1, england['@id'], 'England']]);
-  const newtonC = newtons.find((r) => r.entityIdentifier.includes('Cheshire'));
-  assert.equal(newtonC.attestations[0].relations[0].relatesTo, byLabel('Cheshire')['@id']);
-  // Farm and Barn are in the same Newton.
-  const farm = doc.spatialEntities.find((p) => p['@id'] === `${BASE}place/2`), barn = doc.spatialEntities.find((p) => p['@id'] === `${BASE}place/3`);
-  const narrowest = (p) => p.attestations.find((a) => a.sequence === 3).relations[0].relatesTo;
-  assert.equal(narrowest(farm), narrowest(barn));
-  assert.equal(narrowest(farm), newtonC['@id']);
-  assert.notEqual(narrowest(doc.spatialEntities.find((p) => p['@id'] === `${BASE}place/1`)), newtonC['@id']);   // control
+  // Each region a name attestation, as its source writes it, citing the row it was first met in; the widest no parent.
+  assert.deepEqual(england.attestations.map((a) => [a.names?.[0]?.toponym, a.relations, a.citations[0].locator]), [['England', undefined, 'row 2']]);
+  const lancs = byLabel('Lancashire (England)');
+  assert.deepEqual(lancs.attestations.map((a) => a.names?.[0]?.toponym ?? a.relations[0]), ['Lancashire', { relationType: CONTAINED_IN, relatesTo: england['@id'], relatedLabel: 'England' }]);
+  assert.equal(newtonC.attestations[1].relations[0].relatesTo, byLabel('Cheshire (England)')['@id']);
+  // Farm and Barn are in the same Newton; Mill in the other.
+  const narrowest = (id) => doc.spatialEntities.find((p) => p['@id'] === `${BASE}place/${id}`).attestations.find((a) => a.relations).relations[0].relatesTo;
+  assert.equal(narrowest(2), newtonC['@id']);
+  assert.equal(narrowest(3), newtonC['@id']);
+  assert.equal(narrowest(1), byLabel('Newton (Lancashire, England)')['@id']);   // control
+});
+test('converted regions have the shape of PLATO\'s worked example (place-centric-regions.json)', async (t) => {
+  const path = `${PLATO_REPO}/schemas/examples/place-centric-regions.json`;
+  if (!existsSync(path)) { t.skip(`PLATO at ${PLATO_REPO} has no schemas/examples/place-centric-regions.json (from 1d2cf6e): repin to compare`); return; }
+  const example = JSON.parse(readFileSync(path, 'utf8'));
+  const { e } = await go([textFile('id,Name,County,Country\nr,Rotherhithe,Surrey,England\n', 'places.csv')], 'convert', 'plato-json', { base: BASE });
+  const doc = JSON.parse(outText(e, 'places.json'));
+  // The shape: for each place, its name attestation, and one ContainedIn to the nearest container; a region labelled "Surrey (England)".
+  const shape = (d) => d.spatialEntities.map((p) => ({ label: p.label, atts: p.attestations.filter((a) => !a.identities).map((a) => (a.names ? ['name', a.names[0].toponym] : ['in', a.relations[0].relationType, d.spatialEntities.find((q) => q['@id'] === a.relations[0].relatesTo)?.label])) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  assert.deepEqual(shape(doc), shape(example));
 });
 test('region events are tagged, carry their parents as their chain, and are left out of the rows\' chains and levels', async () => {
   const { events } = await eventsOf(NEWTONS, { base: BASE });
   const regionEvents = events.filter((e) => e.region);
   assert.equal(regionEvents.length, 5);
-  const newton = regionEvents.find((e) => e.value.label === 'Newton');
+  const newton = regionEvents.find((e) => e.value.label === 'Newton (Lancashire, England)');
   assert.deepEqual(newton.within.map((c) => c.value), ['England', 'Lancashire']);
   assert.deepEqual(newton.region, { level: 3, key: containerKey(3, 'Newton', ['England', 'Lancashire']) });
   assert.equal(withinChains(events).length, 3);
   assert.equal(withinLevels(events).get(1).size, 1);
 });
-test('attestation-centric rows with a base: regions are new places, their ContainedIn given about them, and records read back carry within', async () => {
+test('attestation-centric rows with a base: regions are new places, their attestations given about them, and records read back carry within', async () => {
   const csv = 'uri,Name,County,Country\nhttps://www.wikidata.org/entity/Q1,Mill,Surrey,England\n';
   const { events } = await eventsOf(csv, { base: BASE });
-  const surrey = events.find((e) => e.region && e.type === 'record' && e.value.label === 'Surrey');
+  const surrey = events.find((e) => e.region && e.type === 'record' && e.value.label === 'Surrey (England)');
   assert.equal(surrey.newEntity, true);
-  assert.ok(events.some((e) => e.type === 'attestation' && e.region && e.value.about === surrey.value['@id'] && e.value.relations[0].relatedLabel === 'England'));
+  assert.ok(events.some((e) => e.type === 'attestation' && e.region && e.value.about === surrey.value['@id'] && e.value.relations?.[0].relatedLabel === 'England'));
+  assert.ok(events.some((e) => e.type === 'attestation' && e.region && e.value.about === surrey.value['@id'] && e.value.names?.[0].toponym === 'Surrey'));
   // Through run(): regrouped by place in the store, each record's event given back its chain.
   const seen = [];
   const sink = { header() {}, event(ev) { seen.push(ev); }, async close() {} };
@@ -220,18 +233,26 @@ test('attestation-centric rows with a base: regions are new places, their Contai
   assert.ok(!Object.hasOwn(mill.value, 'within'));
   const back = seen.find((ev) => ev.value?.['@id'] === surrey.value['@id']);
   assert.deepEqual(back.region, surrey.region);
-  assert.deepEqual(withinOf({ type: 'record', value: mill.value }).map((c) => [c.level, c.value]), [[1, 'England'], [2, 'Surrey']]);
+  // And read back from PLATO alone, through the regions as the sink received them.
+  assert.deepEqual(withinOf({ type: 'record', value: mill.value }, regionIndex(seen)).map((c) => [c.level, c.value]), [[1, 'England'], [2, 'Surrey']]);
 });
-test('withinOf reads the chain back from a record\'s ContainedIn attestations, agreeing with the event\'s own', async () => {
-  const { events } = await eventsOf(NEWTONS, { base: BASE });
-  for (const ev of rows(events)) {
-    const fromPlato = withinOf({ type: ev.type, value: ev.value });
-    assert.deepEqual(fromPlato.map((c) => [c.level, c.value]), ev.within.map((c) => [c.level, c.value]));
-    assert.ok(fromPlato.every((c) => c.iri.startsWith(`${BASE}place/region-`)));
+test('withinOf reads the chain back from PLATO, following ContainedIn up through the regions, agreeing with the event\'s own', async () => {
+  const sparse = 'id,Name,Parish,County,Country\n1,Mill,Rotherhithe,,England\n';   // a gap: no county
+  for (const csv of [NEWTONS, sparse]) {
+    const { events } = await eventsOf(csv, { base: BASE });
+    const regions = regionIndex(events);
+    assert.ok(regions.size >= 2);
+    for (const ev of rows(events)) {
+      const fromPlato = withinOf({ type: ev.type, value: ev.value }, regions);
+      assert.deepEqual(fromPlato.map((c) => [c.level, c.value]), ev.within.map((c) => [c.level, c.value]));
+      assert.ok(fromPlato.every((c) => c.iri.startsWith(`${BASE}place/region-`)));
+    }
   }
-  // Control: without the ContainedIn attestations (no base), nothing to read back.
+  // Controls: without the regions, or without the ContainedIn attestations (no base), nothing to read back.
+  const { events } = await eventsOf(NEWTONS, { base: BASE });
+  assert.deepEqual(withinOf({ type: 'record', value: rows(events)[0].value }), []);
   const plain = await eventsOf(NEWTONS);
-  assert.deepEqual(withinOf({ type: 'record', value: rows(plain.events)[0].value }), []);
+  assert.deepEqual(withinOf({ type: 'record', value: rows(plain.events)[0].value }, regionIndex(events)), []);
 });
 test('plato:ContainedIn is a RelationType of the vendored ontology, at the IRI the reader writes', (t) => {
   const ttl = readFileSync('public/plato/ontology.ttl', 'utf8');
@@ -356,7 +377,7 @@ test('Krisis gathers the places of a table with regions, read by a mapping with 
   assert.deepEqual(g.places.map((p) => p.label), ['Mill', 'Farm', 'Barn']);
   // With a base, the regions are places of their own too, which Krisis can look up.
   const withBase = await gather({ subjects: input, options: { columns, base: BASE } }, env());
-  assert.ok(withBase.places.some((p) => p.label === 'Surrey' && p.iri.includes('/place/region-')));
+  assert.ok(withBase.places.some((p) => p.label === 'Surrey (England)' && p.iri.includes('/place/region-')));
 });
 
 // ---- the command line ------------------------------------------------------------------------------
