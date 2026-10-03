@@ -29,6 +29,8 @@ const { FIELDS, mappingToSave } = await import('../src/engine/hermes/columns.js'
 const { teiReadingRefusal } = await import('../src/engine/hermes/tei.js');
 const { preview, previewRefusal, previewLine, PREVIEW_LIMIT } = await import('../src/engine/hermes/preview.js');
 const { PREVIEW_WORDS } = await import('../src/engine/words.js');
+const { clusterCounter, clustersInFile, checkClusters, splitMatching, CLUSTER_METHODS, DEFAULT_METHOD } = await import('../src/engine/hermes/cluster.js');
+const { columnValues } = await import('../src/engine/hermes/generic.js');
 
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -45,6 +47,10 @@ Usage:
                                             lost from them so far to stderr (both, as one JSON
                                             object, with --json). Nothing is checked as a whole,
                                             and nothing is written.
+  plato-tools cluster --column NAME [--method M] [--sheet NAME] INPUT
+                                            propose groups of similar spellings in one column of
+                                            a table of places, as JSON, for review: nothing is
+                                            applied (give the groups you keep with --clusters)
   plato-tools compare [options] EARLIER LATER
                                             check that a published dataset was only added to:
                                             every attestation of the EARLIER version must be in
@@ -127,6 +133,16 @@ Options:
                     column only, and is printed in the mapping as {"field": "split", …}.
                     Parts beyond the levels given are named in the report. (A pasted list of
                     names is the page's; here, save the list as a CSV file headed "name".)
+  --clusters FILE   a table of places (check, convert, preview): groups of similar spellings
+                    to look places up by, as saved on the page (a matching saved with groups
+                    ticked), or as {"<column>": {"method": "fingerprint", "groups":
+                    [{"chosen": "Rotherhithe", "members": ["Rotherhith", "ROTHERHITHE"]}]}}.
+                    Each row whose value is a member keeps the source's spelling in PLATO; its
+                    attestation gets a note naming the group and the spelling chosen, which
+                    the lookup can use. Groups are never applied without this option.
+  --column NAME     cluster: the column whose spellings to group.
+  --method M        cluster: how values are grouped: ${CLUSTER_METHODS.join(', ')}
+                    (default ${DEFAULT_METHOD}).
   --limit N         preview: how many records to show (default ${PREVIEW_LIMIT}). Reading stops at the
                     first record past them; a file is never read to its end to count it.
   --sheet NAME      check, convert, preview: the sheet of a workbook to read as a table of places,
@@ -319,6 +335,7 @@ async function main(argv) {
         to: { type: 'string' }, out: { type: 'string', default: '.' }, overwrite: { type: 'boolean', default: false },
         base: { type: 'string' }, typing: { type: 'boolean', default: true }, cube: { type: 'boolean', default: false },
         columns: { type: 'string' }, sheet: { type: 'string' }, limit: { type: 'string' }, split: { type: 'string', multiple: true, default: [] },
+        clusters: { type: 'string' }, column: { type: 'string' }, method: { type: 'string' },
         'same-id': { type: 'boolean', default: false }, 'list-places': { type: 'boolean', default: false },
         'header-places': { type: 'boolean', default: false }, 'commentary-places': { type: 'boolean', default: false },
         'key-pattern': { type: 'string', multiple: true, default: [] },
@@ -362,6 +379,9 @@ async function main(argv) {
     o.reading = reading;
   }
   if (o.candidates && (action !== 'convert' || (o.to !== 'lpf' && o.to !== 'lpf-seq'))) return usage('--candidates is for convert --to lpf or lpf-seq.');
+  if (action === 'cluster') return clusterCommand(args, o);
+  if (o.column !== undefined || o.method !== undefined) return usage('--column and --method are for cluster.');
+  if (o.clusters !== undefined && !reads) return usage('--clusters is for check, convert and preview.');
   if (action === 'datacube') return datacube(args, o);
   if (action === 'publish') return publishCommand(args, o, resources);
   if (o.sheet !== undefined && !reads) return usage('--sheet is for check, convert and preview.');
@@ -375,7 +395,7 @@ async function main(argv) {
   // (--limit, for lookup and preview, is refused above for any other command.)
   if (o.gazetteer || o.places || o['all-names'] || o.countries || o.near || o.batch || o['dry-run'] || o['token-env'] || o['gazetteer-iri']) return usage('--gazetteer, --token-env, --gazetteer-iri, --places, --all-names, --countries, --near, --batch and --dry-run are for lookup.');
   if (o.with || o.threshold || o['max-distance'] || o.top || o.review || o.output || o.reviewer || o.orcid || o['others-title'] !== undefined) return usage('--with, --threshold, --max-distance, --top, --review, --output, --reviewer, --orcid and --others-title are for match and apply.');
-  if (!reads && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, preview, compare, publish, match, apply and datacube.`);
+  if (!reads && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, preview, cluster, compare, publish, match, apply and datacube.`);
   if (!args.length) return usage(`name ${action === 'preview' ? 'the input' : 'at least one input'} to ${action}.`);
   if (action === 'preview' && o.brief) return usage('--brief is for check and convert; a preview prints its records, and --json prints them with the rest.');
   if (action === 'convert' && !o.to) return usage(`convert needs --to, one of: ${Object.keys(TARGETS).join(', ')}.`);
@@ -399,6 +419,17 @@ async function main(argv) {
     try { o.savedColumns = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(o.columns))); }
     catch (e) { return usage(`--columns ${o.columns} cannot be read as JSON: ${e.message}`); }
     if (!o.savedColumns || typeof o.savedColumns !== 'object' || Array.isArray(o.savedColumns)) return usage(`--columns ${o.columns} must hold one JSON object, {"column name": "field"}.`);
+    // A matching saved with groups of spellings ({ columns, clusters }): the mapping is its columns;
+    // the groups are used only when given with --clusters, never because they are in the file.
+    const { columns, clusters } = splitMatching(o.savedColumns);
+    o.savedColumns = columns;
+    if (clusters && o.clusters === undefined) process.stderr.write(`plato-tools: ${o.columns} also holds groups of spellings; they are used only when the file is given with --clusters too.\n`);
+  }
+  if (o.clusters !== undefined) {
+    let json;
+    try { json = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(o.clusters))); }
+    catch (e) { return usage(`--clusters ${o.clusters} cannot be read as JSON: ${e.message}`); }
+    try { o.savedClusters = checkClusters(clustersInFile(json)); } catch (e) { if (e?.name !== 'DataError') throw e; return usage(`--clusters ${o.clusters}: ${e.message}`); }
   }
   // Georeferenced regions: the files are opened once and given to each input, which must be a
   // Recogito export; anything else is a mistake in the command, not in the data.
@@ -681,7 +712,7 @@ async function previewCommand(items, o, resources, seen) {
   if (o.georefFiles) { input.georefs = o.georefFiles; input.manifests = o.manifestFiles; }
   const xlsx = input.container === 'workbook' ? await import('xlsx') : undefined;
   let result;
-  try { result = await preview({ input, options: { base: o.base, columns: columnsFor(item, o), ...(o.sheet !== undefined ? { sheet: o.sheet } : {}), ...reading }, limit }, { resources, xlsx }); }
+  try { result = await preview({ input, options: { base: o.base, columns: columnsFor(item, o), ...(table && o.savedClusters ? { clusters: o.savedClusters } : {}), ...(o.sheet !== undefined ? { sheet: o.sheet } : {}), ...reading }, limit }, { resources, xlsx }); }
   catch (e) {
     if (e?.name === 'DataError' || isSystemError(e)) return failed(e.message);
     return failed(toolsFault(e));
@@ -699,6 +730,32 @@ async function previewCommand(items, o, resources, seen) {
   lines.push(...(found.length ? found : [`    ${PREVIEW_WORDS.noLosses}`]));
   process.stderr.write(lines.join('\n') + '\n');
   return r.exitCode;
+}
+
+/**
+ * plato-tools cluster: the groups of similar spellings in one column of one table of places, as one
+ * JSON object on stdout ({ input, column, method, values, distinct, clusters }), for review. Nothing
+ * is applied, and nothing is written.
+ */
+async function clusterCommand(args, o) {
+  if (!o.column) return usage('cluster needs --column, the column whose spellings to group.');
+  const method = o.method ?? DEFAULT_METHOD;
+  if (!CLUSTER_METHODS.includes(method)) return usage(`--method ${method}: the ways of grouping are ${CLUSTER_METHODS.join(', ')}.`);
+  if (o.clusters !== undefined || o.to || o.columns) return usage('cluster takes --column, --method and --sheet only; it applies nothing.');
+  const items = await gatherInputs(args);
+  if (items.length !== 1) return usage(`cluster takes one table of places; ${items.length} ${items.length === 1 ? 'was' : 'were'} given.`);
+  const { input, message } = await readInput(items[0]);
+  if (!input) return usage(`${items[0].label}: ${message}`);
+  if (input.format !== 'csv' && input.format !== 'geojson') return usage(`cluster is for a table of places (CSV, plain GeoJSON, a sheet of a workbook), and ${items[0].label} is ${formatName(input)}.`);
+  let sheetInput = input;
+  try { sheetInput = withSheet(input, o.sheet); } catch (e) { if (e?.name !== 'DataError') throw e; return usage(`${items[0].label}: ${e.message}`); }
+  const counter = clusterCounter({ method });
+  let values = 0;
+  try { for await (const v of columnValues(sheetInput, o.column)) { values++; counter.add(v); } }
+  catch (e) { if (e?.name !== 'DataError') throw e; return usage(`${items[0].label}: ${e.message}`); }
+  const clusters = counter.clusters();
+  process.stdout.write(JSON.stringify({ input: items[0].label, column: o.column, method, values, distinct: counter.distinct, clusters }, null, 2) + '\n');
+  return 0;
 }
 
 /** Check or convert one input, and say how it went, as an object that --json prints as it is. */
@@ -739,7 +796,7 @@ async function runOne(item, action, o, resources, host, live, seen) {
   const xlsx = input.container === 'workbook' ? await import('xlsx') : undefined;
   const { env, finish } = host.env(resources, { progress, xlsx });
   let result = null, failure = null;
-  try { result = await run({ input, action, target: r.target, options: { base: o.base, typing: o.typing, cube: o.cube, name: input.format === 'csv' ? undefined : item.name, columns: columnsFor(item, o), candidates: o.candidateInputs, ...reading } }, env); }
+  try { result = await run({ input, action, target: r.target, options: { base: o.base, typing: o.typing, cube: o.cube, name: input.format === 'csv' ? undefined : item.name, columns: columnsFor(item, o), ...(table && o.savedClusters ? { clusters: o.savedClusters } : {}), candidates: o.candidateInputs, ...reading } }, env); }
   catch (e) { failure = e; }
   if (live) process.stderr.write('\r\x1b[K');
   // A file the engine could not read to the end comes back as a report marked incomplete; any
@@ -821,6 +878,7 @@ async function review(action, args, o, resources) {
   if (o.columns) {
     try { columns = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(o.columns))); }
     catch (e) { return usage(`--columns ${o.columns} cannot be read as JSON: ${e.message}`); }
+    columns = splitMatching(columns).columns;   // a matching saved with groups of spellings: its mapping
     if (!isColumns(columns)) return usage(`--columns ${o.columns} must hold one JSON object, {"column name": "field"}, each column given the name of a field.`);
   }
   const items = await gatherInputs(args);
