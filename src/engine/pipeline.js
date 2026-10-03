@@ -1171,9 +1171,12 @@ function tablesWriter(env, rep, options, outputs, stem, loss) {
       // none: each gets its own row and place_id, and reading back gives it an address it did not have.
       if (!iri) { loss({ kind: 'place-without-address', value: label || entityIdentifier || '(no label)' }); iri = {}; }
       let p = places.get(iri);
-      // A record's own identifier (from a place_id, say) is its place_id again, so tables round-trip.
+      // A record's own identifier (from a place_id, say) is its place_id again, so tables round-trip,
+      // but only where reading back mints the same address from it: a minted region's identifier is its
+      // containerKey (JSON), and its place_id is then the address's last part (region-<hex>).
       if (!p) {
-        p = { place_id: entityIdentifier && !usedIds.has(entityIdentifier) ? (usedIds.add(entityIdentifier), entityIdentifier) : shortId(typeof iri === 'string' ? iri : undefined, 'place'), label: label || (typeof iri === 'string' ? iri : 'place'), country_codes: '', own };
+        const reuse = entityIdentifier && !usedIds.has(entityIdentifier) && (typeof iri !== 'string' || minted.place(entityIdentifier) === iri);
+        p = { place_id: reuse ? (usedIds.add(entityIdentifier), entityIdentifier) : shortId(typeof iri === 'string' ? iri : undefined, 'place'), label: label || (typeof iri === 'string' ? iri : 'place'), country_codes: '', own };
         places.set(iri, p);
         if (typeof iri === 'string' && iri !== minted.place(p.place_id)) loss({ kind: 'place-address', value: iri });
       }
