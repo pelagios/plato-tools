@@ -14,8 +14,12 @@ import { readFileSync } from 'node:fs';
 import { env, file, res } from './engine.js';
 import { detect } from '../src/engine/input.js';
 import { save, checkAddition } from '../src/engine/chora/save.js';
+import { newGeometryAttestation } from '../src/engine/chora/draw.js';
 import { createLookup, GazetteerError, WHG_ENDPOINT, normaliseWhgIri } from '../src/engine/gazetteer/index.js';
 import * as adopt from '../src/engine/chora/adopt.js';
+import { currentIdentities } from '../src/engine/krisis/lookup.js';
+import { gazetteerSource } from '../src/engine/krisis/identity.js';
+import { WHG_SERVICE, upstreamLicence } from '../src/engine/krisis/lookup.js';
 
 const F = 'test/fixtures/chora/adopt/';
 const json = (name) => JSON.parse(readFileSync(F + name, 'utf8'));
@@ -24,25 +28,28 @@ const P = 'https://example.org/place/';
 const W3ID = 'https://w3id.org/whg/id/';
 const EVIDENCE = 'http://purl.org/spar/cito/citesAsEvidence';
 const PLATO = 'https://w3id.org/plato#';
-// What Krisis's gazetteerSource(WHG_SERVICE) gives (branch krisis-lookup, not yet on main): WHG as a
-// dataset, cited by its site. The page passes Krisis's own; the test pins the shape it must have.
+// What Krisis's gazetteerSource(WHG_SERVICE) gives: WHG as a dataset, cited by its site. Pinned here as a
+// literal, so that a change on Krisis's side shows as a failure here rather than passing through.
 const WHG = { title: 'World Historical Gazetteer', authorityType: 'dataset', '@id': 'https://whgazetteer.org/' };
 const who = { name: 'Ada Surveyor', orcid: '0000-0002-1825-0097' };
 const CREATED = '2026-10-01T10:00:00Z';
 const FETCHED = '2026-10-01T09:58:00Z';
 
-/** A stand-in for WHG: the reconcile fixture for a POST, an entity fixture (or a 451) for a GET. */
-function whg(entities) {
+/**
+ * A stand-in for WHG: for a POST, `post` (a fixture's name, answered 200, or { status, body }); for a GET,
+ * an entity fixture (or a 451). Records each request's address and headers.
+ */
+function whg(entities, { post = 'whg-newcastle-reconcile.json', token = 'tok-fixture' } = {}) {
   const calls = [];
   const fetch = async (url, init = {}) => {
-    calls.push(String(url));
+    calls.push({ url: String(url), headers: { ...(init.headers || {}) }, body: init.body ?? null });
     const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
-    if ((init.method || 'GET') === 'POST') return reply(200, json('whg-newcastle-reconcile.json'));
+    if ((init.method || 'GET') === 'POST') return typeof post === 'string' ? reply(200, json(post)) : reply(post.status, typeof post.body === 'function' ? post.body(init) : post.body);
     const id = decodeURIComponent(/\/entity\/([^/]+)\/api/.exec(String(url))[1]);
     const e = entities[id];
     return e === 451 ? reply(451, json('whg-451.json')) : e ? reply(200, json(e)) : reply(404, { detail: 'Not found' });
   };
-  return { calls, look: createLookup({ endpoint: WHG_ENDPOINT, token: 'tok-fixture', fetch, shared: false, locks: null, queryRate: null, entityRate: null }) };
+  return { calls, look: createLookup({ endpoint: WHG_ENDPOINT, token, fetch, shared: false, locks: null, queryRate: null, entityRate: null, maxRetries: 0, sleep: async () => {} }) };
 }
 /** The four Newcastles, as createLookup gives them, by id, and the root attribution. */
 async function setup() {
@@ -51,8 +58,9 @@ async function setup() {
   return { byId: Object.fromEntries(lists[0].map((c) => [c.id, c])), attribution: lists.attribution };
 }
 const place = (slug, label = slug) => ({ '@id': P + slug, label });
-const none = { linked: new Set(), denied: new Set(), exact: new Set() };
-const args = (o) => ({ contributor: who, created: CREATED, fetched: FETCHED, source: WHG, existing: none, ...o });
+// The dataset's identities as Krisis reads them, over the whole fixture dataset (records as JSON).
+const IDS = currentIdentities(json('dataset.json').spatialEntities);
+const args = (o) => ({ contributor: who, created: CREATED, fetched: FETCHED, identities: IDS.get(o.place?.['@id']) ?? null, ...o });
 const valid = (a) => checkAddition(a, res.validators);
 
 test('adopting a point: an identity with the record and a geometry copied from it, both accepted by PLATO', async () => {
@@ -143,30 +151,40 @@ test("a geometry whose when PLATO cannot hold is refused with the reason; one it
 
 test('a place already linked to the record by an exactMatch gets the geometry only; linked more loosely, or not at all, both', async () => {
   const { byId, attribution } = await setup();
-  const base = args({ place: place('novocastria'), candidate: byId['place:gn:2641673'], feature: json('lpf-point.json'), geometryIndex: 0, attribution });
-  // As currentIdentities gives it, with the address in the form the dataset wrote it (legacy entity URL).
-  const legacy = 'https://whgazetteer.org/entity/place:gn:2641673/api';
-  const linked = adopt.adoptionAttestations({ ...base, existing: { linked: new Set([legacy]), denied: new Set(), exact: new Set([legacy]) } });
+  const cand = byId['place:gn:2641673'];
+  // Novocastria: the dataset links it to the record by an exactMatch, written as a legacy entity URL (Krisis's currentIdentities normalises it).
+  const base = args({ place: place('novocastria'), candidate: cand, feature: json('lpf-point.json'), geometryIndex: 0, attribution });
+  assert.ok(base.identities, 'the fixture dataset gives Novocastria identities');
+  assert.equal(adopt.candidateStatus(cand, { identities: base.identities, attribution }).linked, 'exact');
+  const linked = adopt.adoptionAttestations(base);
   assert.equal(linked.attestations.length, 1);
   assert.ok(linked.attestations[0].geometries);
   assert.ok(linked.notes.some((n) => n.kind === 'already-linked'));
   assert.match(linked.attestations[0].notes, /already/);
-  // Controls: linked only by a closeMatch, and not linked.
-  const loose = adopt.adoptionAttestations({ ...base, existing: { linked: new Set([normaliseWhgIri(legacy)]), denied: new Set(), exact: new Set() } });
+  // Controls: linked only by a closeMatch, and not linked at all (Newcastle, which has no identities).
+  const close = currentIdentities([{ '@id': P + 'novocastria', label: 'Novocastria', attestations: [{ identities: [{ subject: P + 'novocastria', object: cand.iri, identityType: 'closeMatch' }] }] }]).get(P + 'novocastria');
+  const loose = adopt.adoptionAttestations({ ...base, identities: close });
   assert.equal(loose.attestations.length, 2);
   assert.ok(loose.notes.some((n) => n.kind === 'loosely-linked'));
-  assert.equal(adopt.adoptionAttestations(base).attestations.length, 2);
+  assert.equal(adopt.adoptionAttestations({ ...base, place: place('newcastle'), identities: IDS.get(P + 'newcastle') ?? null }).attestations.length, 2);
 });
 
-test('a candidate the dataset says is a different place is refused, and nothing is recorded', async () => {
+test('a candidate the dataset says is a different place is refused, and nothing is recorded; a link wins over a denial', async () => {
   const { byId, attribution } = await setup();
-  const base = args({ place: place('newcastle-nsw'), candidate: byId['place:gn:2155472'], feature: { type: 'Feature', geometry: { type: 'Point', coordinates: [151.77647, -32.92953] } }, geometryIndex: 0, attribution });
-  const r = adopt.adoptionAttestations({ ...base, existing: { linked: new Set(), denied: new Set([W3ID + 'place:gn:2155472']), exact: new Set() } });
+  const feature = { type: 'Feature', geometry: { type: 'Point', coordinates: [151.77647, -32.92953] } };
+  const base = args({ place: place('newcastle-nsw'), candidate: byId['place:gn:2155472'], feature, geometryIndex: 0, attribution });
+  assert.equal(adopt.candidateStatus(byId['place:gn:2155472'], { identities: base.identities }).denied, true);
+  const r = adopt.adoptionAttestations(base);
   assert.equal(r.refused.kind, 'denied');
   assert.match(r.refused.reason, /Krisis/);
   assert.deepEqual(r.attestations, []);
-  // Control: a denial of another record.
-  assert.equal(adopt.adoptionAttestations({ ...base, existing: { linked: new Set(), denied: new Set([W3ID + 'place:gn:2641673']), exact: new Set() } }).attestations.length, 2);
+  // Control: the same place and another record, which it does not deny.
+  assert.equal(adopt.adoptionAttestations({ ...base, candidate: byId['place:gn:2641673'] }).attestations.length, 2);
+  // A denial withdrawn by a later link (both in the dataset): the link wins, as Krisis's linkState says.
+  const both = currentIdentities([...json('dataset.json').spatialEntities, { '@id': P + 'other', label: 'x', attestations: [{ identities: [{ subject: P + 'newcastle-nsw', object: W3ID + 'place:gn:2155472', identityType: 'exactMatch' }] }] }]).get(P + 'newcastle-nsw');
+  const won = adopt.adoptionAttestations({ ...base, identities: both });
+  assert.equal(won.refused, undefined);
+  assert.equal(won.attestations.length, 1, 'linked by an exactMatch: the geometry only');
 });
 
 test('a place without an @id cannot be adopted for; one with an @id can', async () => {
@@ -227,8 +245,8 @@ test("the licence on the copied geometry is the upstream source's, as an SPDX UR
   assert.equal(Object.hasOwn(g.citations[0].source, 'licence'), false);
   assert.ok(unknown.notes.some((n) => n.kind === 'licence-unknown'));
   assert.match(g.notes, /licence not stated/);
-  assert.equal(adopt.upstreamLicence(attribution, 'gn').spdx, 'CC-BY-4.0');
-  assert.equal(adopt.upstreamLicence(noSource, 'tgn'), null);
+  assert.equal(upstreamLicence(attribution, 'gn').spdx, 'CC-BY-4.0');
+  assert.equal(upstreamLicence(noSource, 'tgn'), null);
 });
 
 test("WHG's own records are adopted with a warning that their ids can change, and their dataset's licence", () => {
@@ -260,9 +278,8 @@ test('saving one adoption: Mneme passes with exactly 2 added, or 1 for a place a
   const { byId, attribution } = await setup();
   const cand = byId['place:gn:2641673'];
   const feature = json('lpf-point.json');
-  const linkedAs = 'https://whgazetteer.org/entity/place:gn:2641673/api';
-  for (const [slug, existing, n] of [['newcastle', none, 2], ['novocastria', { linked: new Set([linkedAs]), denied: new Set(), exact: new Set([linkedAs]) }, 1]]) {
-    const r = adopt.adoptionAttestations(args({ place: place(slug), candidate: cand, feature, geometryIndex: 0, attribution, existing }));
+  for (const [slug, n] of [['newcastle', 2], ['novocastria', 1]]) {
+    const r = adopt.adoptionAttestations(args({ place: place(slug), candidate: cand, feature, geometryIndex: 0, attribution }));
     assert.equal(r.attestations.length, n);
     const e = env();
     const input = await detect([file(DATASET)]);
@@ -274,4 +291,150 @@ test('saving one adoption: Mneme passes with exactly 2 added, or 1 for a place a
     const doc = JSON.parse(e.outs[saved.outputs[0].name].join(''));
     assert.deepEqual(doc.spatialEntities.find((s) => s['@id'] === P + slug).attestations.slice(1), r.attestations);
   }
+});
+
+test("WHG as cited is Krisis's gazetteerSource(WHG_SERVICE), the same as a Krisis identity's", () => {
+  assert.deepEqual(gazetteerSource(WHG_SERVICE), WHG);
+  assert.deepEqual(adopt.whgSource(), WHG);
+});
+
+test('a dataset that may not be redistributed copies nothing; a redistributable one beside it does (redistributable tested directly, not through licenceWarns)', async () => {
+  const { look } = whg({}, { post: 'whg-datasets-reconcile.json' });
+  const lists = await look.reconcile([{ query: 'Newcastle' }]);
+  const [closed, open] = lists[0];
+  const attribution = lists.attribution;
+  const feature = { type: 'Feature', geometry: { type: 'Point', coordinates: [-1.61, 54.97] } };
+  const base = args({ place: place('newcastle'), feature, geometryIndex: 0, attribution });
+  const sc = adopt.candidateStatus(closed, { attribution }), so = adopt.candidateStatus(open, { attribution });
+  assert.equal(sc.licence?.redistributable, false, "Krisis's upstreamLicence gives an object for a dataset not redistributable, even with no licence");
+  assert.equal(sc.mayCopy, false);
+  assert.equal(so.mayCopy, true);
+  const r = adopt.adoptionAttestations({ ...base, candidate: closed });
+  assert.equal(r.refused?.kind, 'unavailable');
+  assert.deepEqual(r.attestations, []);
+  const ok = adopt.adoptionAttestations({ ...base, candidate: open });
+  assert.equal(ok.attestations.length, 2);
+  assert.equal(ok.attestations[1].citations[0].source.licence, 'https://spdx.org/licenses/CC0-1.0');
+  // A non-commercial licence warns (licenceWarns) and still may be copied, with the neutral line: warning is not refusing.
+  const { byId, attribution: nca } = await setup();
+  const tgn = adopt.candidateStatus(byId['place:tgn:7011781'], { attribution: nca });
+  assert.equal(tgn.licenceWarns, true);
+  assert.equal(tgn.mayCopy, true);
+  assert.ok(adopt.licenceNotes(tgn.licence).some((n) => n.kind === 'licence-restricted'));
+  assert.deepEqual(adopt.licenceNotes(adopt.candidateStatus(byId['place:gn:2641673'], { attribution: nca }).licence), [], 'control: CC-BY-4.0 gets no line');
+});
+
+test('ranking: geography puts the GB Newcastles first (WHG gave Tyne last); with no reference, the gazetteer order stands', async () => {
+  const { byId } = await setup();
+  const order = ['place:tgn:7011781', 'place:gn:2641591', 'place:gn:2155472', 'place:gn:2641673'];
+  const cands = order.map((id) => byId[id]);
+  assert.equal(cands.at(-1).id, 'place:gn:2641673', "control: Tyne is last in WHG's own order");
+  // A place known only by its country (view.js fallback 'ccodes'): GB's box.
+  const gbBox = [-8.65, 49.86, 1.77, 60.86];
+  const box = adopt.referenceOf({ geometries: [], fallback: { kind: 'ccodes', bbox: gbBox } });
+  assert.deepEqual(box, { kind: 'box', bbox: gbBox, from: 'ccodes' });
+  const byBox = adopt.rankCandidates(box, cands);
+  assert.deepEqual(byBox.map((r) => r.candidate.id), ['place:gn:2641591', 'place:gn:2641673', 'place:tgn:7011781', 'place:gn:2155472'], 'inside first, each group in WHG order');
+  assert.deepEqual(byBox.map((r) => r.inArea), [true, true, false, false]);
+  assert.ok(byBox.every((r) => r.distanceKm === null), 'no distance with only a box');
+  assert.deepEqual(byBox.map((r) => r.n), [1, 2, 3, 4]);
+  // Its own point: by distance, Tyne first, a few hundred metres off ([lng, lat] not swapped: swapped, it would be thousands of km).
+  const pt = adopt.referenceOf({ geometries: [{ geojson: { type: 'Point', coordinates: [-1.6178, 54.9783] }, status: 'asserted' }], fallback: { kind: 'geometry' } });
+  const byPoint = adopt.rankCandidates(pt, cands);
+  assert.equal(byPoint[0].candidate.id, 'place:gn:2641673');
+  assert.ok(byPoint[0].distanceKm < 1, String(byPoint[0].distanceKm));
+  assert.ok(byPoint.every((r) => r.inArea === null));
+  // A denied location is no reference; nor is the dataset's box: the gazetteer's order, unchanged.
+  const none = adopt.referenceOf({ geometries: [{ geojson: { type: 'Point', coordinates: [-1.6, 55] }, status: 'denied' }], fallback: { kind: 'none', bbox: null } });
+  assert.deepEqual(none, { kind: 'none' });
+  assert.deepEqual(adopt.rankCandidates(none, cands).map((r) => r.candidate.id), order);
+  assert.deepEqual(adopt.rankCandidates(none, cands).map((r) => r.sameSpelling), [true, true, true, false], "WHG's match: same spelling");
+});
+
+test('a candidate without coordinates comes last and says so; a repr_point with a latitude beyond 90 is no coordinate (a swapped pair is caught)', async () => {
+  const swapped = { q0: { result: [
+    { id: 'place:gn:1', name: 'A', score: 100, match: true, repr_point: [-32.92953, 151.77647], namespace: 'gn' },
+    { id: 'place:gn:2', name: 'B', score: 90, match: true, repr_point: [151.77647, -32.92953], namespace: 'gn' }] } };
+  const { look } = whg({}, { post: { status: 200, body: swapped } });
+  const [list] = await look.reconcile([{ query: 'x' }]);
+  assert.equal(list[0].coords, null, '|lat| > 90: refused as a coordinate');
+  assert.deepEqual(list[1].coords, [151.77647, -32.92953], 'control: the same pair the right way round is kept');
+  const ranked = adopt.rankCandidates({ kind: 'point', points: [[151.7, -32.9]] }, list);
+  assert.deepEqual(ranked.map((r) => [r.candidate.id, r.noCoords]), [['place:gn:2', false], ['place:gn:1', true]]);
+});
+
+test('what went wrong: a quota 401 keeps the token and says tomorrow; a refused token offers it again; a per-query error or gateway.answered:false is "try again", never "nothing found"', async () => {
+  const fail = async (post) => { const { look } = whg({}, { post }); try { await look.reconcile([{ query: 'Newcastle' }]); return null; } catch (e) { return e; } };
+  const quota = await fail({ status: 401, body: json('whg-quota-401.json') });
+  assert.equal(quota.kind, 'quota');
+  assert.deepEqual(adopt.lookupProblem(quota), { kind: 'quota', text: quota && adopt.lookupProblem(quota).text, offer: 'tomorrow' });
+  assert.match(adopt.lookupProblem(quota).text, /token is kept: try again tomorrow/);
+  const auth = await fail({ status: 401, body: json('whg-auth-401.json') });
+  assert.equal(auth.kind, 'auth');
+  assert.equal(adopt.lookupProblem(auth).offer, 'token');
+  for (const f of ['whg-per-query-error.json', 'whg-gateway-unanswered.json']) {
+    const { look } = whg({}, { post: f });
+    const lists = await look.reconcile([{ query: 'Newcastle' }]);
+    assert.deepEqual([...lists[0]], [], f);
+    assert.equal(adopt.lookupProblem(null, lists[0])?.kind, 'unanswered', f);
+    assert.equal(adopt.lookupProblem(null, lists[0]).offer, 'retry');
+  }
+  // Control: an answered query with candidates is no problem.
+  const { look } = whg({});
+  assert.equal(adopt.lookupProblem(null, (await look.reconcile([{ query: 'Newcastle' }]))[0]), null);
+  assert.equal(adopt.lookupProblem({ name: 'PermissionError', kind: 'undecided' }).offer, 'permissions');
+});
+
+test('the token is never in a draft, a note or an error, even when the service echoes it back (a planted token is found by the same search)', async () => {
+  const TOKEN = 'tok-SECRET-4f2a9c';
+  const found = (x) => JSON.stringify(x ?? null).includes(TOKEN) || String(x?.message ?? '').includes(TOKEN);
+  assert.equal(found({ planted: `Bearer ${TOKEN}` }), true, 'control: the search finds a token where one is');
+  const { look, calls } = whg({}, { token: TOKEN, post: { status: 401, body: (init) => ({ detail: `Invalid token ${String(init.headers?.Authorization || init.headers?.authorization || '').replace('Bearer ', '')}` }) } });
+  let err;
+  await look.reconcile([{ query: 'Newcastle' }]).catch((e) => { err = e; });
+  assert.ok(calls.length >= 1);
+  assert.ok(JSON.stringify(calls[0].headers).includes(TOKEN), 'control: the token WAS sent, in the Authorization header');
+  assert.ok(!calls[0].url.includes(TOKEN), 'and not in the address');
+  assert.equal(err?.kind, 'auth');
+  assert.equal(found(err), false, 'the error does not repeat it');
+  assert.equal(found(adopt.lookupProblem(err)), false);
+  // A draft and its attestations, from an answer fetched with the token.
+  const ok = whg({ 'place:gn:2641673': 'lpf-point.json' }, { token: TOKEN });
+  const lists = await ok.look.reconcile([{ query: 'Newcastle' }]);
+  const cand = lists[0].find((c) => c.id === 'place:gn:2641673');
+  const feature = await ok.look.entity(cand.id);
+  const d = adopt.adoptionDraft({ id: 'a1', place: place('newcastle'), candidate: cand, feature, geometryIndex: 0, attribution: lists.attribution, identities: null, created: CREATED, fetched: FETCHED });
+  const atts = adopt.draftAttestations(d, who);
+  assert.equal(atts.attestations.length, 2, 'control: the draft makes its two attestations');
+  assert.equal(found(d), false);
+  assert.equal(found(atts), false);
+});
+
+test('a kept adoption makes, at saving, the same attestations as adopting at once; it holds only the geometry chosen, and survives a JSON round trip', async () => {
+  const { byId, attribution } = await setup();
+  const cand = byId['place:gn:2641673'];
+  const feature = json('lpf-polygon.json');
+  const direct = adopt.adoptionAttestations(args({ place: place('newcastle'), candidate: cand, feature, geometryIndex: 0, attribution, basis: 'Same city', role: 'FeaturePoint' }));
+  const d = JSON.parse(JSON.stringify(adopt.adoptionDraft({ id: 'a1', place: place('newcastle'), candidate: cand, feature, geometryIndex: 0, attribution, identities: IDS.get(P + 'newcastle') ?? null, basis: 'Same city', role: 'FeaturePoint', created: CREATED, fetched: FETCHED })));
+  assert.equal(d.kind, 'adoption');
+  assert.equal(d.feature.geometry.type, 'Polygon', 'the one geometry chosen, not the collection');
+  assert.ok(d.feature.geometry.when, 'with its when');
+  assert.equal(d.candidate.raw, undefined, "WHG's raw answer is not kept");
+  assert.deepEqual(adopt.draftAttestations(d, who), direct);
+  // An already-linked place's draft keeps its identities, and makes the geometry only.
+  const dl = JSON.parse(JSON.stringify(adopt.adoptionDraft({ id: 'a2', place: place('novocastria'), candidate: cand, feature, geometryIndex: 1, attribution, identities: IDS.get(P + 'novocastria'), created: CREATED })));
+  assert.equal(adopt.draftAttestations(dl, who).attestations.length, 1);
+});
+
+test('a hand-drawing for a record consulted, not copied, cites WHG with the record as locator, no licence, and says nothing was copied', async () => {
+  const { byId, attribution } = await setup();
+  const c = adopt.consultation(byId['place:tgn:7011781'], attribution);
+  const parts = adopt.consultedParts(c, 'Drawn by hand on the Natural Earth basemap at zoom 9 in PLATO tools (Chora)');
+  const a = newGeometryAttestation({ geojson: { type: 'Point', coordinates: [17.08, -22.57] }, contributor: who, created: CREATED, ...parts });
+  assert.equal(valid(a), null);
+  assert.deepEqual(a.citations, [{ source: WHG, locator: W3ID + 'place:tgn:7011781', citationFunction: EVIDENCE }]);
+  assert.equal(Object.hasOwn(a.citations[0].source, 'licence'), false);
+  assert.match(a.notes, /^Drawn by hand/);
+  assert.ok(a.notes.includes(W3ID + 'place:tgn:7011781'));
+  assert.match(a.notes, /nothing was copied/);
 });

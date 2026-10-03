@@ -399,7 +399,68 @@ export const CHORA_ADOPT_TEXT = {
   unavailable: "The record's source does not allow the gazetteer to pass it on, so nothing is copied: the record was consulted, not copied. You can draw the location yourself, citing the record as evidence.",
   'no-geometry': "There is no geometry to adopt: choose one of the record's geometries.",
   'no-record': 'This candidate has no address in the gazetteer, so it cannot be adopted.',
+  /** A lookup or a record fetch that gave no answer (adopt.js lookupProblem). */
+  problem: {
+    quota: "The World Historical Gazetteer's allowance of requests for today is spent. Your token is kept: try again tomorrow.",
+    auth: 'The World Historical Gazetteer refused the token. Give it again (from your WHG profile), or forget it.',
+    permission: 'The World Historical Gazetteer is not allowed in Permissions now, so nothing was sent.',
+    rate: 'The World Historical Gazetteer still refused the query as one too many after waiting. Try again in a minute.',
+    network: 'The World Historical Gazetteer could not be reached. Try again when it can.',
+    server: 'The World Historical Gazetteer refused or failed the request. Try again later.',
+    unanswered: 'The World Historical Gazetteer did not answer this query; this is not a finding that it has no such place. Try again.',
+  },
 };
+/** Chora's page for adopting a location (src/chora/adopt-ui.js), in words. */
+export const CHORA_ADOPT_PAGE = {
+  find: 'Find in a gazetteer…',
+  /** Why the button is disabled, shown beside it. */
+  noAddress: 'This place has no address (@id) in the dataset, so a gazetteer record cannot be adopted for it: give it one first.',
+  heading: 'Find in the World Historical Gazetteer',
+  queryLabel: 'The name to look for (only this is sent, with the type Place)',
+  tokenLabel: 'Your WHG token',
+  tokenUse: 'Use this token',
+  tokenNeeded: 'Give your WHG token first: WHG answers only queries that carry one. It is kept as Permissions says.',
+  tokenGiven: 'A token is given.',
+  forget: 'Forget the token',
+  send: 'Look up',
+  sending: 'Asking the World Historical Gazetteer…',
+  close: 'Close',
+  /** How the candidates are ordered (adopt.js rankCandidates), said once above them. */
+  order: { point: "In order of distance from this place's own location.", box: (from) => `Those inside the area of ${from === 'related' ? 'the places it is related to' : 'its countries'} first, each group in the gazetteer's order.`, none: "No geographic reference: the gazetteer's order." },
+  none: 'The gazetteer found no candidates for that name.',
+  caveat: "Nothing is chosen for you: the gazetteer's score is relative to its best answer, and its confidence measures the name only.",
+  distance: (km) => `${km.toLocaleString('en-GB')} km away`,
+  inside: 'inside the area', outside: 'outside the area',
+  noCoords: 'no coordinates given, so not on the map',
+  sameSpelling: 'same spelling',
+  linked: 'Already recorded in your dataset as the same place as this record.',
+  loose: 'Already linked to this record in your dataset, but not as the same place.',
+  denied: 'Your dataset says this is a different place (change that in Krisis).',
+  krisisUnsaved: 'Decisions made in Krisis and not yet saved into the dataset open here are not seen.',
+  preview: 'Show the record',
+  useLocation: 'Use its location',
+  notThis: 'Not this one',
+  different: 'Different places? Record it in Krisis ↗',
+  dismissed: (n) => `${n === 1 ? 'One candidate' : `${n} candidates`} set aside as not this one, for this visit only.`,
+  fetching: 'Fetching the record…',
+  geometries: "The record's locations: choose one",
+  role: 'What it marks',
+  basis: 'Why they are the same place (optional, kept with the identity)',
+  adopt: 'Adopt: this place is that record, located there',
+  adoptLinked: "Adopt the record's location",
+  consulted: 'This record was consulted, not copied: its source does not allow it to be passed on.',
+  drawInstead: 'Draw it yourself, citing the record as consulted',
+  drawArmed: (name) => `Draw on the map: the next drawing for this place cites ${name} as consulted.`,
+  adopted: (n) => `Adopted: ${n === 2 ? 'two attestations (the identity and the location) are' : 'one attestation (the location) is'} waiting to be saved.`,
+  pendingItem: (name) => `Adopted from ${name}`,
+  consultedItem: (name) => `Cites ${name} as consulted (nothing copied from it)`,
+  when: (t) => `dated ${t}`,
+  noRecordGeometry: 'The record gives no location.',
+  repOnly: "WHG's representative point only",
+};
+/** A hand-drawing's notes, after how it was drawn, for a record consulted and not copied (adopt.js consultedParts). */
+export const choraConsultedNote = (r) =>
+  `Drawn consulting World Historical Gazetteer record ${recordWords(r)}, whose source does not allow it to be passed on: nothing was copied from it.`;
 /**
  * A run refused because another tab of the main page holds the working files: the browser lets one
  * tab at a time hold them (src/engine/worker.js, sqlitePool), and its own words for that are not ours.
