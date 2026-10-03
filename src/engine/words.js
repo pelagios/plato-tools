@@ -312,6 +312,10 @@ export const CLUSTER_WORDS = {
   ticked: (n) => (n ? `${n} ${n === 1 ? 'group' : 'groups'} ticked: ${n === 1 ? 'its' : 'their'} rows are looked up by the spelling chosen.` : 'No group is ticked, so no spelling is grouped.'),
   loaded: (n, columns) => `${n} ${n === 1 ? 'group' : 'groups'} of spellings loaded with the matching, for ${columns.map((c) => `"${c}"`).join(', ')}.`,
   cannotRead: (message) => `The column could not be read: ${message}`,
+  // A ticked group that "Find groups" did not find again: kept, still ticked, after the groups found.
+  savedNotFound: 'From the saved matching, not found this way.',
+  tickedNotFound: 'Ticked before, not found this way.',
+  carried: (n) => `${n.toLocaleString('en-GB')} ticked ${n === 1 ? 'group' : 'groups'} not found this way ${n === 1 ? 'is' : 'are'} kept at the end of the list, still ticked.`,
 };
 
 // Krisis: review screen

@@ -20,7 +20,9 @@ const sameSet = (a, b) => a.length === b.length && a.every((x) => b.includes(x))
  */
 export function spellingsPanel({ box, ask, changed = () => {}, publish = () => {} }) {
   let headers = [], nameColumn, on = false, open = false, asked = 0, waiting = false, message = '', loadedNote = '';
-  // What is shown for each column: { method, rows: [{ members: [{ value, count }], chosen, ticked }] }.
+  // What is shown for each column: { method, rows: [{ members: [{ value, count }], chosen, ticked,
+  // saved?, notFound? }] }: saved for a group loaded with a matching, notFound for a ticked group kept
+  // although the last "Find groups" did not find it.
   let shown = Object.create(null);
   let column, method = DEFAULT_METHOD;
 
@@ -36,7 +38,7 @@ export function spellingsPanel({ box, ask, changed = () => {}, publish = () => {
     const s = shown[column];
     publish({
       shown: on, open, column: column ?? null, method, waiting, message: box.querySelector('#spellings-message')?.textContent || '',
-      rows: s ? s.rows.map((r) => ({ members: r.members.map((m) => ({ ...m })), chosen: r.chosen, ticked: r.ticked })) : [],
+      rows: s ? s.rows.map((r) => ({ members: r.members.map((m) => ({ ...m })), chosen: r.chosen, ticked: r.ticked, ...(r.notFound ? { notFound: true, saved: !!r.saved } : {}) })) : [],
       confirmed: JSON.parse(JSON.stringify(confirmed())), ticked: tickedCount(),
     });
   }
@@ -55,7 +57,8 @@ export function spellingsPanel({ box, ask, changed = () => {}, publish = () => {
     const columnOptions = headers.map((h) => `<option value="${esc(h)}"${h === column ? ' selected' : ''}>${esc(h)}</option>`).join('');
     const methodOptions = CLUSTER_METHODS.map((m) => `<option value="${m}"${m === method ? ' selected' : ''}>${esc(W.methods[m])}</option>`).join('');
     const rows = s ? s.rows.map((r, i) => `<tr><td><input type="checkbox" id="spellings-use-${i}" data-spellings-use="${i}"${r.ticked ? ' checked' : ''} aria-label="${esc(W.useLabel(r.chosen))}"></td>`
-      + `<td><ul class="examples">${r.members.map((m) => `<li><code>${esc(m.value)}</code>${m.count === null || m.count === undefined ? '' : ` (${m.count.toLocaleString('en-GB')})`}</li>`).join('')}</ul></td>`
+      + `<td><ul class="examples">${r.members.map((m) => `<li><code>${esc(m.value)}</code>${m.count === null || m.count === undefined ? '' : ` (${m.count.toLocaleString('en-GB')})`}</li>`).join('')}</ul>`
+      + `${r.notFound ? `<p class="spellings-not-found">${esc(r.saved ? W.savedNotFound : W.tickedNotFound)}</p>` : ''}</td>`
       + `<td><input type="text" id="spellings-chosen-${i}" data-spellings-chosen="${i}" value="${esc(r.chosen)}" size="24" spellcheck="false" autocomplete="off" aria-label="${esc(W.chosenLabel(r.members[0]?.value ?? ''))}"></td></tr>`).join('') : '';
     box.innerHTML = `<fieldset class="reading spellings-box"><legend>${esc(W.legend)}</legend><p>${esc(W.intro)}</p>`
       + `<p class="spellings-choice"><label for="spellings-column">${esc(W.columnLabel)}</label> <select id="spellings-column">${columnOptions}</select> `
@@ -81,8 +84,9 @@ export function spellingsPanel({ box, ask, changed = () => {}, publish = () => {
     else if (e.target.id === 'spellings-find') find();
   });
   box.addEventListener('change', (e) => {
-    if (e.target.id === 'spellings-column') { column = e.target.value; method = shown[column]?.method || method; message = ''; render(); }
-    else if (e.target.id === 'spellings-method') { method = e.target.value; message = ''; render(); }
+    // A new column or way of grouping: an answer still to come for the old one is set aside (asked).
+    if (e.target.id === 'spellings-column') { column = e.target.value; method = shown[column]?.method || method; asked++; waiting = false; message = ''; render(); }
+    else if (e.target.id === 'spellings-method') { method = e.target.value; asked++; waiting = false; message = ''; render(); }
     else if (e.target.matches('input[data-spellings-use]')) {
       const r = shown[column]?.rows[Number(e.target.dataset.spellingsUse)];
       if (r) { r.ticked = e.target.checked; changed(); }
@@ -113,20 +117,27 @@ export function spellingsPanel({ box, ask, changed = () => {}, publish = () => {
       if (!column || !headers.includes(column)) column = nameColumn && headers.includes(nameColumn) ? nameColumn : headers[0];
       render();
     },
-    /** The worker's answer: the groups proposed, each unticked, unless the same group was already ticked (or loaded). */
+    /**
+     * The worker's answer: the groups proposed, each unticked, unless the same group was already
+     * ticked (or loaded). A ticked group not found again this way is kept, still ticked, after them,
+     * marked as not found, and the message says how many: a "Find groups" never drops a tick.
+     */
     answer(d) {
       if (d.id !== asked) return;
       waiting = false;
       if (d.error) { message = W.cannotRead(d.error); render(); return; }
       const before = shown[d.column]?.rows || [];
+      const refound = new Set();
       const rows = d.clusters.map((c) => {
         const values = c.members.map((m) => m.value);
-        const kept = before.find((r) => r.ticked && sameSet(r.members.map((m) => m.value), values));
+        const kept = before.find((r) => r.ticked && !refound.has(r) && sameSet(r.members.map((m) => m.value), values));
+        if (kept) refound.add(kept);
         return { members: c.members.map((m) => ({ value: m.value, count: m.count })), chosen: kept ? kept.chosen : c.suggested, ticked: !!kept };
       });
+      const carried = before.filter((r) => r.ticked && !refound.has(r)).map((r) => ({ ...r, members: r.members.map((m) => ({ ...m })), notFound: true }));
       const wasTicked = before.some((r) => r.ticked);
-      shown[d.column] = { method: d.method, rows };
-      message = rows.length ? W.found(rows.length, d.column, d.distinct) : W.none(d.column, d.distinct);
+      shown[d.column] = { method: d.method, rows: [...rows, ...carried] };
+      message = (rows.length ? W.found(rows.length, d.column, d.distinct) : W.none(d.column, d.distinct)) + (carried.length ? ` ${W.carried(carried.length)}` : '');
       if (wasTicked) changed();
       render();
     },
@@ -136,7 +147,7 @@ export function spellingsPanel({ box, ask, changed = () => {}, publish = () => {
       shown = Object.create(null);
       let n = 0;
       for (const [c, { method: m, groups }] of Object.entries(checked)) {
-        shown[c] = { method: m, rows: groups.map((g) => ({ members: g.members.map((value) => ({ value, count: null })), chosen: g.chosen, ticked: true })) };
+        shown[c] = { method: m, rows: groups.map((g) => ({ members: g.members.map((value) => ({ value, count: null })), chosen: g.chosen, ticked: true, saved: true })) };
         n += groups.length;
       }
       loadedNote = n ? W.loaded(n, Object.keys(checked)) : '';
