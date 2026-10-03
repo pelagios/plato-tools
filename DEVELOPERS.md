@@ -559,15 +559,19 @@ readers link to those headings, so keep them.
   rows), the store path keeps by place the first `within` (and `region`, below) each place's events
   give and puts them back on its record's event (`withinByPlace`, `pipeline.js`), so Krisis's
   `readSide`/`gather` and `match`, and the version check, see `within` on every **record** event.
-  **What PLATO is told**: with a base address of the user's own (`options.base`: the page's Options,
-  `--base`), each distinct container, the same value under the same parents, is minted once as a
-  place-centric record (a `newEntity` record, its ContainedIn given as an attestation about it, when
-  the rows are attestation-centric) `{ '@id': <base>place/region-<the first 16 hex of the SHA-256 of
-  its containerKey> (regionId, src/lib/sha256.js), label: value, entityIdentifier: containerKey,
-  attestations }`, its one attestation `plato:ContainedIn` its parent region (`sequence` the parent's
-  level; the widest has none), and each row's place gets one attestation per level, `{ relations:
-  [{ relationType: 'https://w3id.org/plato#ContainedIn', relatesTo: <the region>, relatedLabel:
-  <its value> }], sequence: <the level> }`, citing what the row's attestation cites. Two "Newton"
+  **What PLATO is told**, as PLATO's worked example has it (`schemas/examples/place-centric-regions.json`
+  and the guide's "Regions matched to a gazetteer", PLATO 1d2cf6e): with a base address of the user's
+  own (`options.base`: the page's Options, `--base`), each distinct container, the same value under
+  the same parents, is minted once as a place-centric record (a `newEntity` record, its attestations
+  given on their own about it, when the rows are attestation-centric) `{ '@id': <base>place/region-<the
+  first 16 hex of the SHA-256 of its containerKey> (regionId, src/lib/sha256.js), label: "Surrey
+  (England)" (its value, then its parents narrowest first), entityIdentifier: containerKey,
+  attestations }`, with a name attestation (`toponym` the value) and, but for the widest, one
+  `plato:ContainedIn` its parent region; each row's place gets one attestation `{ relations: [{
+  relationType: 'https://w3id.org/plato#ContainedIn', relatesTo: <its narrowest region>,
+  relatedLabel: <its value> }] }`, the chain above following from the regions. Every one cites what
+  the row's attestation cites (the file and the row where the region was first met). No `sequence`
+  (it orders a route's members). Two "Newton"
   parishes under different chains are two regions, never merged; only the keys of the regions made
   are held (`regionsMade`), bounded by the distinct containers. A region's events are tagged
   `event.region = { level, key }` and carry their parents as `within`. Linking a region to WHG is
@@ -577,10 +581,12 @@ readers link to those headings, so keep them.
   place's name; `withinNote`), and `generic-within-no-base` (a warning) says so once.
   `test/hermes-within.test.js` reads `plato:ContainedIn` from the vendored ontology, skipping visibly
   should a pin lack it. Krisis's work file takes both object forms (`isColumns` in `krisis/work.js`).
-  **`src/engine/hermes/within.js`, for Krisis and Methodos**: `withinOf(event)` is the event's chain,
-  or, with no `within` on it, the chain its PLATO gives, read back from a record's (or an attestation's
-  own) ContainedIn attestations ordered by `sequence`, `{ level, value, iri }` (so the two agree on
-  levels and values; only the event knows the column); `[]` for none. `containerKey(level, value,
+  **`src/engine/hermes/within.js`, for Krisis and Methodos**: `withinOf(event, regions?)` is the
+  event's chain, or, with no `within` on it and `regions` given (`regionIndex(events)`: Map(address ->
+  a region's record), from the events or a sink's), the chain its PLATO gives, read back by following
+  its ContainedIn up through the regions, each region's level and value its entityIdentifier's,
+  `{ level, value, iri }` (so the two agree on levels and values; only the event knows the column);
+  `[]` for none. `containerKey(level, value,
   parentValues)` is `JSON.stringify([level, ...parentValues, value])`, parents widest first (labels
   may hold "/" or ","), the one definition every grouping and the minting use. `withinChains(events)`
   is `[{ name, chain, n, iri? }]`, one for each row's record or attestation event (not a region's

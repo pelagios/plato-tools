@@ -6,9 +6,9 @@
 // guess orders them by the kind of region their headings name; the page and the saved mapping can
 // reorder them). The chain rides on the reader's event objects (`event.within`, beside
 // `event.value`), never as a key of PLATO JSON. What PLATO says of it is written by generic.js: with
-// a base address of the user's own, each distinct container is minted as a place of its own, and
-// each row's place gets one plato:ContainedIn attestation for each level, with `sequence` the
-// level; without one, a written attestation carries the chain only as a note (withinNote).
+// a base address of the user's own, each distinct container is minted as a place of its own,
+// ContainedIn its parent, and each row's place is plato:ContainedIn its narrowest region; without
+// one, a written attestation carries the chain only as a note (withinNote).
 //
 //   event.within = [{ level, value, column }, …]   widest first (ascending level); empty cells
 //                                                   skipped; values trimmed; no key when empty.
@@ -18,26 +18,48 @@ export const CONTAINED_IN = 'https://w3id.org/plato#ContainedIn';
 
 /**
  * A row's chain of containing regions, widest first, or [] when it has none: the event's own
- * `within`, else what its PLATO says, read back from its plato:ContainedIn attestations (a record's,
- * or an attestation's own) ordered by `sequence`, each { level: sequence, value: relatedLabel, iri:
- * relatesTo }, so that the two agree on the levels and values (only the event knows the column). A
- * region's own record (generic.js) has one such attestation, to its parent; its event's `within` is
- * its whole chain of parents.
+ * `within`, else what its PLATO says, read back by following its plato:ContainedIn attestation (a
+ * record's, or an attestation's own) up through the regions generic.js mints, given as `regions`
+ * (regionIndex(events), or any Map of a region's address to its record): each region's level and value
+ * are its entityIdentifier's (containerKey), so that the two agree on levels and values (only the
+ * event knows the column), each { level, value, iri }. With no `regions`, or a container not in them,
+ * nothing is read back for it. A region's own record reads back its parents.
  */
-export function withinOf(event) {
+export function withinOf(event, regions) {
   if (!event) return [];
   if (Array.isArray(event.within)) return event.within;
   const v = event.value;
-  if (!v || typeof v !== 'object') return [];
-  const atts = event.type === 'record' ? (Array.isArray(v.attestations) ? v.attestations : []) : event.type === 'attestation' ? [v] : [];
-  const out = [];
-  for (const a of atts) {
-    if (!a || a.negated || !Number.isInteger(a.sequence)) continue;
-    for (const r of Array.isArray(a.relations) ? a.relations : []) {
-      if (r && r.relationType === CONTAINED_IN && typeof r.relatedLabel === 'string') out.push({ level: a.sequence, value: r.relatedLabel, ...(typeof r.relatesTo === 'string' ? { iri: r.relatesTo } : {}) });
+  if (!v || typeof v !== 'object' || !regions) return [];
+  const up = (atts) => {
+    for (const a of Array.isArray(atts) ? atts : []) {
+      if (!a || a.negated) continue;
+      for (const r of Array.isArray(a.relations) ? a.relations : []) if (r && r.relationType === CONTAINED_IN && typeof r.relatesTo === 'string') return r.relatesTo;
     }
+    return undefined;
+  };
+  const out = [], seen = new Set();
+  let iri = up(event.type === 'record' ? v.attestations : event.type === 'attestation' ? [v] : []);
+  while (iri !== undefined && !seen.has(iri) && regions.has(iri)) {
+    seen.add(iri);
+    const region = regions.get(iri);
+    let key;
+    try { key = JSON.parse(region.entityIdentifier); } catch { break; }
+    if (!Array.isArray(key) || key.length < 2) break;
+    out.unshift({ level: key[0], value: key[key.length - 1], iri });
+    iri = up(region.attestations);
   }
-  return out.sort((a, b) => a.level - b.level);
+  return out;
+}
+
+/**
+ * The regions generic.js minted, from a run's events: Map(address -> the region's record value),
+ * for withinOf to read a chain back from PLATO. A region read back from the store (an attestation-
+ * centric run) has its attestations regrouped under it, as a sink receives it.
+ */
+export function regionIndex(events) {
+  const out = new Map();
+  for (const ev of events) if (ev && ev.region && ev.type === 'record' && ev.value && typeof ev.value['@id'] === 'string') out.set(ev.value['@id'], ev.value);
+  return out;
 }
 
 /**

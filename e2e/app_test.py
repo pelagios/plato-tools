@@ -335,10 +335,10 @@ def within_checks(page, tmp):
     doc = reading_doc(page, r, tmp, 'within.json')
     text = json.dumps(doc)
     mill = next((p for p in doc.get('spatialEntities', []) if p['@id'] == base + 'place/1'), {})
-    contained = sorted((a['sequence'], a['relations'][0]['relatedLabel']) for a in mill.get('attestations', []) if a.get('relations'))
+    contained = [a['relations'][0]['relatedLabel'] for a in mill.get('attestations', []) if a.get('relations')]
     region_labels = sorted(p['label'] for p in doc.get('spatialEntities', []) if '/place/region-' in p['@id'])
-    check('column table: converted under a base address, the place is ContainedIn each region at its level, each region minted once; no "within" key is written',
-          r.get('phase') == 'done' and contained == [(1, 'Rotherhithe'), (2, 'Surrey'), (3, 'England')] and region_labels == ['England', 'Rotherhithe', 'Surrey']
+    check('column table: converted under a base address, the place is ContainedIn its narrowest region (the parish, now level 3: England), each region minted once; no "within" key is written',
+          r.get('phase') == 'done' and contained == ['England'] and region_labels == ['England (Surrey, Rotherhithe)', 'Rotherhithe', 'Surrey (Rotherhithe)']
           and '"within"' not in text and 'https://w3id.org/plato#ContainedIn' in text, {'phase': r.get('phase'), 'contained': contained, 'regions': region_labels})
 
     # A column of several regions in one cell: no split controls until it is chosen; then a separator,
