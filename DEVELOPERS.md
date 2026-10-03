@@ -560,7 +560,7 @@ readers link to those headings, so keep them.
   give and puts them back on its record's event (`withinByPlace`, `pipeline.js`), so Krisis's
   `readSide`/`gather` and `match`, and the version check, see `within` on every **record** event.
   **What PLATO is told**, as PLATO's worked example has it (`schemas/examples/place-centric-regions.json`
-  and the guide's "Regions matched to a gazetteer", PLATO 1d2cf6e): with a base address of the user's
+  and the guide's "Regions matched to a gazetteer", PLATO 1d2cf6e, a6bc022): with a base address of the user's
   own (`options.base`: the page's Options, `--base`), each distinct container, the same value under
   the same parents, is minted once as a place-centric record (a `newEntity` record, its attestations
   given on their own about it, when the rows are attestation-centric) `{ '@id': <base>place/region-<the
@@ -568,8 +568,10 @@ readers link to those headings, so keep them.
   (England)" (its value, then its parents narrowest first), entityIdentifier: containerKey,
   attestations }`, with a name attestation (`toponym` the value) and, but for the widest, one
   `plato:ContainedIn` its parent region; each row's place gets one attestation `{ relations: [{
-  relationType: 'https://w3id.org/plato#ContainedIn', relatesTo: <its narrowest region>,
-  relatedLabel: <its value> }] }`, the chain above following from the regions. Every one cites what
+  relationType: 'https://w3id.org/plato#ContainedIn', relatesTo: <its narrowest region> }] }`
+  and nothing more (PLATO a6bc022: no `relatedLabel`, which is for a target outside the dataset or
+  standing alone, and no `relationLabel`, which is a source's own wording; a region's name is only in
+  its own name attestation), the chain above following from the regions. Every one cites what
   the row's attestation cites (the file and the row where the region was first met). No `sequence`
   (it orders a route's members). Two "Newton"
   parishes under different chains are two regions, never merged; only the keys of the regions made

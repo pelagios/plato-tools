@@ -373,7 +373,7 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
   if (!byAddress && !hasId) report('generic-no-ids', file.name);
   const minted = tableIds(base, () => null);
   // The regions the rows' places lie in (within.js), as PLATO's worked example has them
-  // (schemas/examples/place-centric-regions.json, PLATO 1d2cf6e): with a base address of the user's
+  // (schemas/examples/place-centric-regions.json, PLATO 1d2cf6e, a6bc022): with a base address of the user's
   // own, each distinct container (the same value under the same parents, containerKey) is minted once
   // as a place of its own, <base>place/region-<hex>, labelled with its name and, after it, its parents
   // narrowest first ("Surrey (England)"), with a name attestation and a plato:ContainedIn attestation
@@ -386,7 +386,9 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
   const regionIri = (key) => minted.place(regionId(key));
   // What a region's and a place's attestations cite: what the row's attestation cites.
   const cites = (att) => ({ sources: att.sources, citations: att.citations });
-  const containedIn = (value, iri, att) => ({ relations: [{ relationType: CONTAINED_IN, relatesTo: iri, relatedLabel: value }], ...cites(att) });
+  // {relationType, relatesTo} only (PLATO a6bc022): the region's name is in its own name attestation;
+  // relatedLabel is for a target outside the dataset, relationLabel for a source's own wording.
+  const containedIn = (iri, att) => ({ relations: [{ relationType: CONTAINED_IN, relatesTo: iri }], ...cites(att) });
   // For a row read as `a`: the events of the regions not yet made, and the place's ContainedIn attestation.
   const regionsOf = (a) => {
     const events = [], contained = [];
@@ -403,7 +405,7 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
       if (!regionsMade.has(key)) {
         regionsMade.add(key);
         const own = [{ names: [{ toponym: c.value }], ...cites(a.attestation) }];
-        if (parentIri) own.push(containedIn(parents[parents.length - 1], parentIri, a.attestation));
+        if (parentIri) own.push(containedIn(parentIri, a.attestation));
         const chain = a.within.slice(0, i);
         const tags = { region: { level: c.level, key }, ...(chain.length ? { within: chain } : {}) };
         const label = parents.length ? `${c.value} (${[...parents].reverse().join(', ')})` : c.value;
@@ -414,7 +416,7 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
       }
       parents.push(c.value); parentIri = iri;
     });
-    contained.push(containedIn(a.within[a.within.length - 1].value, iri, a.attestation));
+    contained.push(containedIn(iri, a.attestation));
     return { events, contained };
   };
   let standIn = false;
