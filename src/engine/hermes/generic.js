@@ -31,7 +31,7 @@ import { sha256 } from '../../lib/sha256.js';
 /** The id a region is minted with, under the base address: "region-" and 16 hex digits of the SHA-256 of its containerKey. */
 export const regionId = (key) => `region-${sha256(key).slice(0, 16)}`;
 // Spellings grouped for lookup (cluster.js): carried beside each record, never in place of its name.
-import { lookupSpellings } from './cluster.js';
+import { lookupSpellings, isMappingEntry } from './cluster.js';
 import { cellText } from './columns.js';
 import { CLUSTER_WORDS } from '../words.js';
 
@@ -333,7 +333,10 @@ export async function mappingOf(input, saved, sheet) {
 export function savedColumns(given) {
   if (given === undefined || given === null || typeof given !== 'object' || Array.isArray(given)) return given;
   const c = Object.hasOwn(given, 'columns') ? given.columns : undefined;
-  if (c !== undefined && typeof c !== 'string' && !(c && typeof c === 'object' && typeof c.field === 'string')) return c;
+  // `columns` is the options' mapping, unless it is one column's entry (a mapping alone, with a column
+  // headed "columns"), told by its exact shape (cluster.js, isMappingEntry): a mapping with a column
+  // headed "field" is still a mapping.
+  if (c !== undefined && !isMappingEntry(c)) return c;
   const values = Object.values(given);
   const entry = (v) => typeof v === 'string' || (v !== null && typeof v === 'object' && typeof v.field === 'string');
   const named = (v) => { const f = typeof v === 'string' ? v : v.field; return Object.hasOwn(FIELDS, f) || Object.hasOwn(OTHER, f); };

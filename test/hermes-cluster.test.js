@@ -15,7 +15,7 @@ import { genericSource, savedColumns, columnValues } from '../src/engine/hermes/
 import { resolveColumns } from '../src/engine/hermes/columns.js';
 import {
   fingerprint, ngramFingerprint, cologne, phoneticKey, clusterKey, clusterValues, clusterCounter,
-  checkClusters, lookupSpellings, confirmedGroups, matchingToSave, splitMatching, clustersInFile, isMatchingEnvelope,
+  checkClusters, lookupSpellings, confirmedGroups, matchingToSave, splitMatching, clustersInFile, isMatchingEnvelope, isMappingEntry,
 } from '../src/engine/hermes/cluster.js';
 import { textFile } from './engine.js';
 
@@ -239,6 +239,62 @@ test('saved and loaded: the groups ride beside the mapping in { columns, cluster
   assert.deepEqual(clustersInFile(GROUPS), GROUPS);
   const col = { clusters: { groups: [{ chosen: 'A', members: ['a'] }] } };
   assert.deepEqual(clustersInFile(col), col);
+});
+
+// Columns headed "field", "columns" and "clusters": the envelope is still told from a mapping.
+const ODD_CSV = 'id,field,columns,clusters,name,lat,lon\n1,a,b,c,Rotherhithe,51.5,-0.05\n2,a,b,c,Rotherhith,51.5,-0.05\n3,a,b,c,Bermondsey,51.49,-0.07\n';
+const ODD_MAPPING = { id: 'id', field: 'note', columns: 'note', clusters: 'note', name: 'name', lat: 'latitude', lon: 'longitude' };
+const ODD_GROUPS = { name: { method: 'fingerprint', groups: [{ chosen: 'Rotherhithe', members: ['Rotherhithe', 'Rotherhith'] }] } };
+
+test('a saved matching for a table with columns headed "field", "columns" and "clusters" is still read as { columns, clusters }', async () => {
+  // The control: an ordinary heading in place of each.
+  for (const [heading, why] of [['field', 'a column headed "field"'], ['columns', 'a column headed "columns"'], ['clusters', 'a column headed "clusters"'], ['parish', 'the control: an ordinary heading']]) {
+    const mapping = { id: 'id', [heading]: 'note', name: 'name' };
+    const saved = JSON.parse(JSON.stringify(matchingToSave(mapping, ODD_GROUPS)));
+    assert.ok(isMatchingEnvelope(saved), why);
+    assert.deepEqual(splitMatching(saved).columns, mapping, why);
+    assert.deepEqual(clustersInFile(saved), ODD_GROUPS, why);
+    assert.deepEqual(savedColumns({ columns: mapping, clusters: ODD_GROUPS }), mapping, why);
+    assert.deepEqual(savedColumns({ columns: mapping, base: undefined }), mapping, why);
+    assert.deepEqual(savedColumns({ columns: mapping }), mapping, why);   // options holding the mapping alone
+  }
+  // All three at once, through the reader: the groups applied, the mapping's columns kept as notes.
+  const saved = JSON.parse(JSON.stringify(matchingToSave(ODD_MAPPING, ODD_GROUPS)));
+  const { columns, clusters } = splitMatching(saved);
+  assert.deepEqual(columns, ODD_MAPPING);
+  const { events } = await read(ODD_CSV, { columns, clusters: clustersInFile(saved) });
+  assert.equal(events.filter((e) => e.lookupName === 'Rotherhithe').length, 2);
+  assert.match(events[0].value.attestations[0].notes, /^field: a\ncolumns: b\nclusters: c\nGrouped for lookup/);
+  assert.ok(!('lookupName' in events[2]));
+  // A mapping alone stays a mapping, whatever its columns are called, a pattern's entry included.
+  const alone = [
+    { columns: 'name', clusters: 'note' },
+    { columns: { field: 'address', pattern: 'https://pleiades.stoa.org/places/{id}' }, clusters: 'note', name: 'name' },
+    { columns: { field: 'address', pattern: 'https://pleiades.stoa.org/places/{id}' }, clusters: { field: 'note' } },
+    { field: 'note', columns: { field: 'name' }, name: 'name' },
+  ];
+  for (const m of alone) {
+    assert.ok(!isMatchingEnvelope(m), JSON.stringify(m));
+    assert.deepEqual(splitMatching(m).columns, m);
+    assert.equal(savedColumns(m), m, JSON.stringify(m));
+  }
+  // An entry is told exactly: { field, pattern } only, of strings.
+  assert.ok(isMappingEntry('name') && isMappingEntry({ field: 'name' }) && isMappingEntry({ field: 'address', pattern: 'x{id}' }));
+  for (const v of [{ field: 'note', name: 'name' }, { field: 'address', pattern: 3 }, { field: 1 }, [], null, { name: { groups: [] } }]) assert.ok(!isMappingEntry(v), JSON.stringify(v));
+});
+
+test('convert --columns F --clusters F with F saved for a table with a column headed "field": the mapping and the groups both used', () => {
+  const d = scratch(), f = join(d, 'odd.csv'), g = join(d, 'odd.json');
+  writeFileSync(f, ODD_CSV);
+  writeFileSync(g, JSON.stringify(matchingToSave(ODD_MAPPING, ODD_GROUPS)));
+  const out = scratch();
+  const r = cli('convert', '--to', 'plato-json', '--out', out, '--json', '--columns', g, '--clusters', g, f);
+  assert.equal(r.code, 0, r.err + r.out);
+  const doc = JSON.parse(readFileSync(join(out, readdirSync(out)[0]), 'utf8'));
+  const notes = doc.spatialEntities.map((p) => p.attestations[0].notes || '');
+  assert.equal(notes.filter((n) => n.includes('(spelling chosen: Rotherhithe)')).length, 2);
+  assert.ok(notes.every((n) => n.startsWith('field: a\ncolumns: b\nclusters: c')));
+  assert.equal(JSON.parse(r.out.trim().split('\n')[0]).items.filter((i) => /mapping/.test(i.kind)).length, 0);
 });
 
 test('columnValues streams one column as the reader reads it, and names the columns for one it lacks', async () => {

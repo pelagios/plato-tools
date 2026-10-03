@@ -191,9 +191,24 @@ export function clusterValues(values, { method = DEFAULT_METHOD } = {}) {
 
 // ---- confirmed groups: saving, loading, applying ----------------------------------------------------
 const isObject = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
-/** A saved matching that holds more than the mapping: { columns: {mapping}, clusters? }, never a mapping alone. */
+/**
+ * One column's entry in a saved mapping, told exactly by its shape: a field's name, or { field } or
+ * { field, pattern } with strings and no other key (columns.js, mappingToSave). Any other object is
+ * not an entry: a mapping ({ "field": "note", … }, for a table with a column headed "field"), the
+ * groups of spellings, or a run's options.
+ */
+export function isMappingEntry(v) {
+  if (typeof v === 'string') return true;
+  if (!isObject(v) || typeof v.field !== 'string') return false;
+  return Object.keys(v).every((k) => k === 'field' || (k === 'pattern' && typeof v.pattern === 'string'));
+}
+/**
+ * A saved matching that holds more than the mapping: { columns: {mapping}, clusters: {groups} }, as
+ * matchingToSave writes it (only ever with groups), never a mapping alone. A mapping with columns
+ * headed "columns" and "clusters" has an entry for each (isMappingEntry), never two objects that are not.
+ */
 export function isMatchingEnvelope(x) {
-  return isObject(x) && Object.hasOwn(x, 'columns') && isObject(x.columns) && typeof x.columns.field !== 'string';
+  return isObject(x) && isObject(x.columns) && isObject(x.clusters) && !(isMappingEntry(x.columns) && isMappingEntry(x.clusters));
 }
 /** A saved matching as the mapping and the confirmed groups it holds: { columns, clusters } (clusters undefined when none). */
 export function splitMatching(saved) {
