@@ -25,7 +25,7 @@ const { nodeResources, gatherInputs, openFiles, isSystemError, NodeHost } = awai
 const { toolsCommit } = await import('../src/node/build-info.js');
 const { fmtBytes, fmtTime, formatName, progressText, summary, groups, draftNote, explainedLines, gazetteerWarnings, LOOKUP_WORDS } = await import('../src/engine/words.js');
 const { mappingOf, withSheet } = await import('../src/engine/hermes/generic.js');
-const { FIELDS } = await import('../src/engine/hermes/columns.js');
+const { FIELDS, mappingToSave } = await import('../src/engine/hermes/columns.js');
 const { teiReadingRefusal } = await import('../src/engine/hermes/tei.js');
 const { preview, previewRefusal, previewLine, PREVIEW_LIMIT } = await import('../src/engine/hermes/preview.js');
 const { PREVIEW_WORDS } = await import('../src/engine/words.js');
@@ -37,7 +37,7 @@ const HELP = `plato-tools: check and convert PLATO data, and compare versions of
 Usage:
   plato-tools check [options] INPUT...
   plato-tools convert --to TARGET [--out DIR] [options] INPUT...
-  plato-tools preview [--limit N] [--columns FILE] [--sheet NAME] [reading options] INPUT
+  plato-tools preview [--limit N] [--columns FILE] [--split …] [--sheet NAME] [reading options] INPUT
                                             show the first N records (default ${PREVIEW_LIMIT}) of a table of
                                             places (CSV, plain GeoJSON, a sheet of a workbook), a
                                             TEI edition or W3C Web Annotations, as they would be
@@ -114,7 +114,19 @@ Options:
                     over, and reported). A column of a gazetteer's ids is made into web
                     addresses with {"field": "address", "pattern": "https://pleiades.stoa.org/places/{id}"},
                     the id replacing {id}; a pattern is suggested for such a column, never
-                    used until it is given here.
+                    used until it is given here. A region the place lies in (a parish, a
+                    county, a country…) is {"field": "within", "level": N}, 1 the widest:
+                    such columns are guessed from their headings, widest first.
+  --split COLUMN=SEP[:LEVELS]
+                    check, convert, preview: a table of places' column of several regions in
+                    one cell, narrowest first ("Rotherhithe, Surrey, England"), split on SEP
+                    into levels: LEVELS are the levels its parts go to, narrowest first (1 is
+                    the widest), and "name" first if the first part is the place's own name:
+                    --split 'Place=, :name,3,2,1'. Without LEVELS, as many as the most parts
+                    in the first rows. Repeatable; it changes the guess, or --columns, for that
+                    column only, and is printed in the mapping as {"field": "split", …}.
+                    Parts beyond the levels given are named in the report. (A pasted list of
+                    names is the page's; here, save the list as a CSV file headed "name".)
   --limit N         preview: how many records to show (default ${PREVIEW_LIMIT}). Reading stops at the
                     first record past them; a file is never read to its end to count it.
   --sheet NAME      check, convert, preview: the sheet of a workbook to read as a table of places,
@@ -223,8 +235,9 @@ does not apply to):
   --batch N         lookup: queries in one request, 1 to 50 (default 25).
   --dry-run         lookup: say what would be sent, and the first queries exactly; send nothing.
   --json            print one JSON object per input, one per line, then one for the total.
-                    Its "columns", for a table of places, is a list of {column, field, pattern,
-                    reason} to read (pattern only where one is given); --columns takes the
+                    Its "columns", for a table of places, is a list of {column, field, reason},
+                    with pattern, level, or separator, levels and firstIsName where the field
+                    has them; --columns takes the
                     object printed without --json instead. For a TEI edition, "keyPatterns"
                     holds the --key-pattern patterns, {prefix: pattern}.
   --brief           print one line per input and the total, without the details.
@@ -267,6 +280,31 @@ function readingOf(o) {
   return refusal || { tei: t, sameId: o['same-id'] };
 }
 
+/**
+ * One --split, COLUMN=SEP[:LEVELS], as { column, separator, levels?, firstIsName }, or why it cannot
+ * be used, in words. The column is what comes before the first "="; LEVELS, after the last ":",
+ * are whole numbers separated by commas, narrowest first, with "name" first if the first part is
+ * the place's own name; a SEP with a ":" of its own is read whole when what follows is not levels.
+ */
+function splitOf(given) {
+  const m = /^([^=]+)=(.*)$/s.exec(given);
+  if (!m) return `--split ${given}: give the column, an "=", and what separates its parts, such as --split 'Place=, :3,2,1'.`;
+  const column = m[1];
+  let separator = m[2], items;
+  const at = separator.lastIndexOf(':');
+  if (at >= 0 && /^\s*(name|\d+)(\s*,\s*(name|\d+))*\s*$/.test(separator.slice(at + 1))) { items = separator.slice(at + 1).split(',').map((x) => x.trim()); separator = separator.slice(0, at); }
+  if (separator === '') return `--split ${given}: give what separates the parts of "${column}", such as a comma: --split '${column}=, :3,2,1'.`;
+  const firstIsName = items?.[0] === 'name';
+  const nums = (items || []).slice(firstIsName ? 1 : 0);
+  if (nums.includes('name')) return `--split ${given}: "name" can only come first, for a first part that is the place's own name.`;
+  const levels = nums.map(Number);
+  if (!levels.every((l) => Number.isInteger(l) && l >= 1)) return `--split ${given}: the levels are whole numbers of 1 or more (1 is the widest).`;
+  if (new Set(levels).size !== levels.length) return `--split ${given}: a level is given twice; each part goes to a level of its own.`;
+  return { column, separator, ...(levels.length ? { levels } : {}), firstIsName };
+}
+/** The mapping a table of places is read by: --columns, with --split's columns put in (o.columnsByItem). */
+const columnsFor = (item, o) => (o.columnsByItem?.has(item) ? o.columnsByItem.get(item) : o.savedColumns);
+
 function usage(message) {
   process.stderr.write(`plato-tools: ${message}\nRun "plato-tools --help" for how to use it.\n`);
   return 2;
@@ -280,7 +318,7 @@ async function main(argv) {
       options: {
         to: { type: 'string' }, out: { type: 'string', default: '.' }, overwrite: { type: 'boolean', default: false },
         base: { type: 'string' }, typing: { type: 'boolean', default: true }, cube: { type: 'boolean', default: false },
-        columns: { type: 'string' }, sheet: { type: 'string' }, limit: { type: 'string' },
+        columns: { type: 'string' }, sheet: { type: 'string' }, limit: { type: 'string' }, split: { type: 'string', multiple: true, default: [] },
         'same-id': { type: 'boolean', default: false }, 'list-places': { type: 'boolean', default: false },
         'header-places': { type: 'boolean', default: false }, 'commentary-places': { type: 'boolean', default: false },
         'key-pattern': { type: 'string', multiple: true, default: [] },
@@ -327,6 +365,11 @@ async function main(argv) {
   if (action === 'datacube') return datacube(args, o);
   if (action === 'publish') return publishCommand(args, o, resources);
   if (o.sheet !== undefined && !reads) return usage('--sheet is for check, convert and preview.');
+  if (o.split.length && !reads) return usage('--split is for check, convert and preview.');
+  if (o.split.length) {
+    o.splits = [];
+    for (const given of o.split) { const sp = splitOf(given); if (typeof sp === 'string') return usage(sp); o.splits.push(sp); }
+  }
   if (action === 'match' || action === 'apply') return review(action, args, o, resources);
   if (action === 'lookup') return lookupCommand(args, o, resources);
   // (--limit, for lookup and preview, is refused above for any other command.)
@@ -407,6 +450,23 @@ async function main(argv) {
       try { withSheet(input, o.sheet); } catch (e) { if (e?.name !== 'DataError') throw e; return usage(`${item.label}: ${e.message}`); }
     }
   }
+  // --split: for a table of places with that column; the mapping each such input is then read by.
+  if (o.splits) {
+    for (const item of items) if (!seen.has(item)) seen.set(item, await readInput(item));
+    o.columnsByItem = new Map();
+    for (const [item, { input }] of seen) {
+      if (input?.format !== 'csv' && input?.format !== 'geojson') continue;
+      let m;
+      try { m = await mappingOf(input, o.savedColumns, input.container === 'workbook' ? o.sheet : undefined); } catch (e) { if (e?.name !== 'DataError') throw e; continue; /* the run reports what stops the reader */ }
+      const given = o.savedColumns ? { ...o.savedColumns } : mappingToSave(m.mapping, m.patterns, m.levels, m.splits);
+      for (const sp of o.splits) {
+        if (!m.headers.includes(sp.column)) return usage(`--split names the column "${sp.column}", which ${item.label} does not have; its columns are ${m.headers.map((h) => `"${h}"`).join(', ')}.`);
+        given[sp.column] = { field: 'split', separator: sp.separator, ...(sp.levels ? { levels: sp.levels } : {}), firstIsName: sp.firstIsName };
+      }
+      o.columnsByItem.set(item, given);
+    }
+    if (!o.columnsByItem.size) return usage('--split is for a table of places (CSV, GeoJSON or a sheet of a workbook), and no input is one.');
+  }
   if (readingFlags.length) {
     for (const item of items) if (!seen.has(item)) seen.set(item, await readInput(item));
     const formats = new Set([...seen.values()].map((x) => x.input?.format).filter(Boolean));
@@ -419,7 +479,7 @@ async function main(argv) {
       for (const [item, { input }] of seen) {
         if (input?.format !== 'csv' && input?.format !== 'geojson') continue;
         let m;
-        try { m = await mappingOf(input, o.savedColumns, input.container === 'workbook' ? o.sheet : undefined); } catch (e) { if (e?.name !== 'DataError') throw e; continue; /* the run reports what stops the reader */ }
+        try { m = await mappingOf(input, columnsFor(item, o), input.container === 'workbook' ? o.sheet : undefined); } catch (e) { if (e?.name !== 'DataError') throw e; continue; /* the run reports what stops the reader */ }
         if (!Object.values(m.mapping).includes('id')) return usage(`--same-id reads rows with the same id as one place, but no column of ${item.label} is read as the place id; map one to "id" with --columns.`);
       }
     }
@@ -621,7 +681,7 @@ async function previewCommand(items, o, resources, seen) {
   if (o.georefFiles) { input.georefs = o.georefFiles; input.manifests = o.manifestFiles; }
   const xlsx = input.container === 'workbook' ? await import('xlsx') : undefined;
   let result;
-  try { result = await preview({ input, options: { base: o.base, columns: o.savedColumns, ...(o.sheet !== undefined ? { sheet: o.sheet } : {}), ...reading }, limit }, { resources, xlsx }); }
+  try { result = await preview({ input, options: { base: o.base, columns: columnsFor(item, o), ...(o.sheet !== undefined ? { sheet: o.sheet } : {}), ...reading }, limit }, { resources, xlsx }); }
   catch (e) {
     if (e?.name === 'DataError' || isSystemError(e)) return failed(e.message);
     return failed(toolsFault(e));
@@ -664,10 +724,12 @@ async function runOne(item, action, o, resources, host, live, seen) {
   // guess), printed with the report so that it can be saved, edited and given back.
   if (input.format === 'csv' || input.format === 'geojson') {
     try {
-      const m = await mappingOf(input, o.savedColumns);
+      const m = await mappingOf(input, columnsFor(item, o));
       // In the file's order: an object would put a column whose heading is a number first. A column
-      // made into web addresses through a pattern has it beside its field.
-      r.columns = m.headers.map((column) => ({ column, field: m.mapping[column], ...(Object.hasOwn(m.patterns, column) ? { pattern: m.patterns[column] } : {}), reason: m.reasons[column] }));
+      // made into web addresses through a pattern has it beside its field; a region its level; a
+      // split its separator, levels and firstIsName.
+      const saved = mappingToSave(m.mapping, m.patterns, m.levels, m.splits);
+      r.columns = m.headers.map((column) => ({ column, field: m.mapping[column], ...(typeof saved[column] === 'object' ? (({ field, ...rest }) => rest)(saved[column]) : {}), reason: m.reasons[column] }));
       r.columnWarnings = gazetteerWarnings(m.mapping, m.gazetteer, { cli: true, suggested: m.suggested, patterns: m.patterns });
       const fields = Object.values(m.mapping);
       r.profile = fields.includes('address') || (reading.sameId && fields.includes('id')) ? 'attestation-centric' : 'place-centric';
@@ -677,7 +739,7 @@ async function runOne(item, action, o, resources, host, live, seen) {
   const xlsx = input.container === 'workbook' ? await import('xlsx') : undefined;
   const { env, finish } = host.env(resources, { progress, xlsx });
   let result = null, failure = null;
-  try { result = await run({ input, action, target: r.target, options: { base: o.base, typing: o.typing, cube: o.cube, name: input.format === 'csv' ? undefined : item.name, columns: o.savedColumns, candidates: o.candidateInputs, ...reading } }, env); }
+  try { result = await run({ input, action, target: r.target, options: { base: o.base, typing: o.typing, cube: o.cube, name: input.format === 'csv' ? undefined : item.name, columns: columnsFor(item, o), candidates: o.candidateInputs, ...reading } }, env); }
   catch (e) { failure = e; }
   if (live) process.stderr.write('\r\x1b[K');
   // A file the engine could not read to the end comes back as a report marked incomplete; any
@@ -721,7 +783,7 @@ function columnLines(r) {
     `  Columns${r.sheet ? ` of the sheet ${JSON.stringify(r.sheet)}` : ''} read as (to change this, save the JSON below to a file, edit it, and give it with --columns FILE${r.sheets?.length > 1 ? '; another sheet with --sheet NAME' : ''}):`,
     ...r.columns.map((c) => `    ${c.column.padEnd(w)}  ${c.field.padEnd(16)}  ${c.reason || ''}`),
     // The mapping as --columns takes it, written in the file's order, a pattern column in its object form.
-    `    {${r.columns.map((c) => `${JSON.stringify(c.column)}:${JSON.stringify(c.pattern === undefined ? c.field : { field: c.field, pattern: c.pattern })}`).join(',')}}`,
+    `    {${r.columns.map((c) => { const { column, field, reason, ...rest } = c; return `${JSON.stringify(column)}:${JSON.stringify(Object.keys(rest).length ? { field, ...rest } : field)}`; }).join(',')}}`,
     ...(r.columnWarnings || []).map((w) => `  Note: ${w}`),
   ];
 }
