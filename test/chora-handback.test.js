@@ -90,9 +90,17 @@ test('a hand-back read is used only if it is for this workflow, of this format, 
     'an upper-case hash': f([{ ...REF, sha256: REF.sha256.toUpperCase() }]), 'a short hash': f([{ ...REF, sha256: REF.sha256.slice(1) }]),
     'a size below zero': f([{ ...REF, size: -1 }]), 'a fractional size': f([{ ...REF, size: 1.5 }]), 'a size as text': f([{ ...REF, size: '12' }]),
     'no name': f([{ ...REF, name: '' }]), 'a path': f([{ ...REF, name: '../../etc/passwd' }]), 'a name with a line break': f([{ ...REF, name: 'a\n<script>' }]),
-    'a name too long': f([{ ...REF, name: 'a'.repeat(256) }]), 'a reference with a key more': f([{ ...REF, bytes: 'eA==' }]),
+    'a name too long': f([{ ...REF, name: 'a'.repeat(256) }]),
+    'the name "."': f([{ ...REF, name: '.' }]), 'the name ".."': f([{ ...REF, name: '..' }]), 'a name of a space': f([{ ...REF, name: ' ' }]),
+    'a name of spaces and a tab-like space': f([{ ...REF, name: ' \u00a0 ' }]),
+    'a right-to-left override (txt.exe shown as exe.txt)': f([{ ...REF, name: 'places\u202Enosj.exe' }]),
+    'a zero-width space': f([{ ...REF, name: 'places\u200B.json' }]), 'a left-to-right mark': f([{ ...REF, name: 'places\u200E.json' }]),
+    'an embedding': f([{ ...REF, name: '\u202Aplaces.json' }]), 'an isolate': f([{ ...REF, name: 'places\u2066.json\u2069' }]),
+    'a byte-order mark': f([{ ...REF, name: '\uFEFFplaces.json' }]), 'a reference with a key more': f([{ ...REF, bytes: 'eA==' }]),
   };
   for (const [why, v] of Object.entries(refused)) assert.equal(check(v, 'wf-1', NOW), null, why);
+  // The controls: ordinary names, one with a space and an accent, and one of dots with a letter, are kept.
+  for (const name of ['antonine draw.chora.json', 'Λονδίνιον.json', '..a', 'a.']) assert.ok(check(f([{ ...REF, name }]), 'wf-1', NOW), name);
   // Asked for a workflow that is not an id, nothing is used, however good the record.
   for (const bad of [undefined, '', '<x>', 'wf 1']) assert.equal(check({ ...good, workflow: bad }, bad, NOW), null, String(bad));
 });
