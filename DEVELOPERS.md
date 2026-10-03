@@ -621,7 +621,40 @@ readers link to those headings, so keep them.
   COLUMN=SEP[:LEVELS]` (repeatable; LEVELS after the last `:`, narrowest first, `name` first for
   `firstIsName`) puts a split into `--columns`, or into the guess saved as a mapping, for that column
   only; the printed mapping and `--json`'s `columns` give `level`, or `separator`, `levels` and
-  `firstIsName`. Out of scope: OSGB and other grid coordinates, spelling clustering.
+  `firstIsName`. Out of scope: spelling clustering (grid references are read: below).
+- **Grid references** (`gridref.js`, the column field `gridref`). `parseGridRef(text)` reads two
+  letters (Ordnance Survey National Grid) or one (Irish Grid) and an even number of digits, with or
+  without spaces (two groups must be of one length), as `{ grid, letters, digits, sizeM, easting,
+  northing }` (the square's south-west corner) or `{ error }` in words: no letter I, letters naming a
+  100 km square of the National Grid (eastings below 700 km, northings below 1300 km from the false
+  origin's square S; any of the Irish Grid's 25), at most ten digits. n digits per axis are a square of
+  10^(5-n) m: letters alone 100 km, two figures 10 km, four 1 km, up to ten, 1 m. `gridRefToWgs84`
+  takes the square's **centre**, converts it with `gridToLatLon` (the inverse Transverse Mercator of
+  the OS's *A Guide to Coordinate Systems in Great Britain*, v3.6, annex C, on Airy 1830 or Airy
+  modified, with its table A.2's projections) and `datumToWgs84` (Cartesian, a 7-parameter Helmert in
+  the position vector convention, back to GRS80): for OSGB36 the guide's table 4 with every sign
+  changed (its section 6.2), whose error the guide gives as up to 3.5 m (95%); for TM65, EPSG 1641
+  (Ordnance Survey Ireland's parameters), 1 m. `precisionKm` is the larger of the square's half
+  diagonal (the farthest a point of the square is from its centre) and that accuracy, so 70.71 km for
+  letters alone, 0.7071 km for four figures, 3.5 m (OSGB) or 1 m (Irish) for ten; `spatialPrecision`
+  is `approximate` for a square of 1 km or more, and absent below. The geometry keeps the reference as
+  written in `sourceLabel`, and the attestation's notes say which transformation was used and its
+  accuracy. OSTN15, the OS's definitive transformation (about 0.1 m, Open Government Licence), is
+  not used: its grid is about 15 MB. A column is guessed `gridref` from its heading (`grid ref`,
+  `NGR`, `OSGB`, `OS grid`, `irish grid`… in `HEADINGS`) when at least half its sampled values are
+  references, and from its values alone, when its heading says nothing, if at least half are
+  references with digits (`looksLikeGridRef`: letters alone, such as a state code, are not enough).
+  Irish Transverse Mercator (ITM) coordinates, which are numbers with no letters, are not read. An
+  invalid reference is `generic-gridref-invalid` (a loss, with the value). A row with a latitude and
+  longitude too takes its location from those; the reference is kept in the notes, and
+  `generic-gridref-disagrees` (a warning) is given when the two are farther apart than the
+  reference's `precisionKm` plus half the last decimal place of the latitude and longitude. The tests
+  (`test/hermes-gridref.test.js`) check the guide's worked examples (annex C to 0.0001", annex D's
+  Helmert) and the OS's OSTN15 test points (`OSTN15-OSGM15-DevelopersPack.zip`) and its Northern
+  Ireland Irish Grid ones, which come from OSTN15 and OSNI's transformation, not this Helmert: six
+  GB points within 3.5 m, and TP31 (North Uist), 4.9 m, out of it, as the guide's 95% allows at the
+  grid's edges (4 of its 40 points, at Scilly and the Western Isles, are 4.1 to 4.9 m out); the
+  Northern Ireland points are within 0.44 m.
 - **Reading options** (the page and the command line). The page has one `<fieldset id="reading">`
   after `#columns`, filled by `src/app.js` (`renderReading`) in `words.js`'s `READING_WORDS`, shown
   only for TEI or a table of places, every control off: TEI's `listPlaces`, and a table of the keys'

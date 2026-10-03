@@ -62,6 +62,12 @@ and Turtle, written as N-Triples) and Linked Places Format v1, and read the W3C 
 Recogito exports, TEI editions (P5; P4, such as Perseus's, its Beta Code Greek reported and not
 converted; and TEI with no namespace), and any other CSV or GeoJSON of places: [the formats in full](https://pelagios.org/place-attestation-ontology/guide/tools.html#what-it-reads-and-writes).
 
+A CSV, workbook or GeoJSON of places may give its locations as **grid references** of the Ordnance
+Survey National Grid (`TQ 33760 80560`, `SU1234`) or the Irish Grid (`O 15 34`): each becomes the
+centre of its square in WGS 84, with a precision from the number of digits (a four-figure reference
+is a 1 km square), converted by the Ordnance Survey's Helmert transformation (good to about 3.5 m)
+or, for the Irish Grid, EPSG 1641's (about 1 m). Irish Transverse Mercator coordinates are not read.
+
 A TEI edition and a table of places have **reading options**, each off until chosen: on the page in
 *Reading options*, below the column table, and on the command line as flags (below).
 
