@@ -201,9 +201,10 @@ self.onmessage = async ({ data }) => {
         const input = withSheet(await detect(data.files), data.sheet);
         const { headers, sample } = await columnsOf(input);
         const examples = Object.fromEntries(headers.map((h) => [h, sample.map((r) => cellText(r?.[h])).filter(Boolean).slice(0, 3)]));
-        const { mapping, patterns, suggested, reasons, problems, gazetteer } = await mappingOf(input, data.saved);
+        const { mapping, patterns, levels, splits, suggested, reasons, problems, gazetteer } = await mappingOf(input, data.saved);
         const fields = Object.fromEntries(Object.entries(FIELDS).map(([k, f]) => [k, { single: f.single }]));
-        postMessage({ type: 'columns', id: data.id, headers, examples, mapping, patterns, suggested, reasons, problems, gazetteer, fields, saved: data.saved !== undefined });
+        // `levels` (a "within" column's level) and `splits` (a column split into levels) beside the mapping, as `patterns` are.
+        postMessage({ type: 'columns', id: data.id, headers, examples, mapping, patterns, levels, splits, suggested, reasons, problems, gazetteer, fields, saved: data.saved !== undefined });
       } catch (e) {
         postMessage({ type: 'columns', id: data.id, error: String(e && e.message || e) });
       }
