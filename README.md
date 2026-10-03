@@ -136,6 +136,11 @@ node bin/plato-tools.mjs preview --limit 5 my-places.csv                 # the f
   manifest if you have it. Each region inside the map becomes a point, citing the map and the
   georeference ([the mapping](test/fixtures/annotations/README.md#the-mapping)). On the page, choose
   the files together. Nothing is fetched.
+- **`--candidates SET`** (repeatable), for `convert --to lpf` or `lpf-seq`: a candidate set (PLATO
+  JSON or JSON Lines) whose suggestions the dataset's region matches answer. Each region a place is
+  contained in is written as one `gvp:broaderPartitive`, pointing at the gazetteer's region, and with
+  this the suggestion's score goes in its `whg_match_score`. Without it, no score is written, and
+  each one missing is reported. A file that is not a candidate set is a mistake in the command (exit 2).
 - **`--work-dir DIR`.** RDF, attestation-centric JSON, spreadsheet tables and comparisons go through
   a working database on disk, as in the browser, so memory stays roughly constant as the input grows. It is
   kept in the system's temporary directory unless `--work-dir` says otherwise, and removed
