@@ -1,6 +1,6 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="public/logo/plato-tools-logo-dark.svg">
-  <img src="public/logo/plato-tools-logo.svg" alt="PLATO tools" width="320">
+  <img src="public/logo/plato-tools-logo.svg" alt="PLATO tools" width="480">
 </picture>
 
 # PLATO tools
