@@ -449,7 +449,7 @@ test('the storage warnings say what is needed, what is left, and what to do', ()
 // permission of their own (persistent storage is to be offered in the toolbox's Permissions window):
 // nothing the page runs calls it, or persisted(). The control: the same scan of the same files finds
 // the storage estimate Chora does ask for, and the pattern finds a call written as it was.
-test('no page asks the browser to keep its storage (persist() is never called); the estimate still is', () => {
+test('no page asks the browser to keep its storage on its own: only the Permissions window\'s choice calls persist(); the estimate still is', () => {
   const files = [];
   const walk = (dir) => { for (const e of readdirSync(dir, { withFileTypes: true })) { const p = `${dir}/${e.name}`; if (e.isDirectory()) walk(p); else if (p.endsWith('.js')) files.push(p); } };
   walk(new URL('../src', import.meta.url).pathname);
@@ -459,5 +459,6 @@ test('no page asks the browser to keep its storage (persist() is never called); 
   assert.ok(chora && files.length > 50, `${files.length} files, Chora's page among them`);
   assert.match(readFileSync(chora, 'utf8'), /navigator\.storage\.estimate\(\)/, 'the same scan sees the estimate');
   const calls = files.filter((f) => CALL.test(readFileSync(f, 'utf8')));
-  assert.deepEqual(calls, []);
+  // The one caller is the Permissions window's "keep working data" choice, asked when the user ticks it.
+  assert.deepEqual(calls.map((f) => f.replace(/^.*\/src\//, 'src/')), ['src/lib/permissions.js']);
 });
