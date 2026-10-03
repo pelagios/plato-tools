@@ -20,7 +20,7 @@ import { publish } from '../agora/index.js';
 import { match, gather } from '../krisis/match.js';
 import { apply } from '../krisis/apply.js';
 import { runLookup } from '../krisis/lookup.js';
-import { serialiseWork } from '../krisis/work.js';
+import { readWork, serialiseWork } from '../krisis/work.js';
 import { OPERATIONS } from './operations.js';
 import { HandoffError, refsOf, refsDiffer } from './handoffs.js';
 import * as runner from './runner.js';
@@ -53,7 +53,9 @@ async function engine(host, type, call) {
   let r;
   try { r = await call(env); } catch (e) { finish(true); throw e; }
   const problem = problemOf(r);
-  finish(!!problem);
+  // As the page and the command line do: a run that did not finish leaves nothing; one that finished
+  // with errors in its report keeps what it wrote, but the step stops, and its outputs are not handed on.
+  finish(!!r?.incomplete);
   if (problem) return { report: r.report, problem };
   const outputs = type ? await refsOf(await Promise.all(r.outputs.map((o) => host.file(o))), type) : [];
   return { report: r.report, outputs, result: r };
@@ -122,10 +124,15 @@ export const ADAPTERS = {
   async lookup({ inputs, options, host, signal }) {
     if (!host.lookup) throw new Error('No gazetteer lookup was given: the lookup is made on the page thread, through the permissions module.');
     const subjects = await inputOf(inputs.subjects, host, 'dataset');
-    const work = inputs.work ? JSON.parse(await (await filesFor(inputs.work, host))[0].text()) : null;
+    const work = inputs.work ? readWork(await (await filesFor(inputs.work, host))[0].text()) : null;
     const g = await engine(host, null, (env) => gather({ subjects, options: {} }, env));
     if (g.problem) return g;
     const r = await runLookup({ lookup: host.lookup, work, subjects: g.result.subjects, places: g.result.places, options, signal });
+    // Stopped short of the end other than by the user: a permission to decide is waiting for the
+    // user; anything else (the service refusing, failing, or answering what cannot be right) is a fault.
+    const st = r.stopped;
+    if (st && st.kind === 'permission') throw Object.assign(new Error(`The gazetteer was not asked: ${st.refused === 'never' ? 'it is set to Never' : 'it is not allowed yet'} in the Permissions panel.`), { name: 'PermissionError', kind: st.refused });
+    if (st && st.kind !== 'stopped') throw new Error(`The lookup stopped part-way: ${st.message || `the gazetteer's answers could not be used (${st.kind})`}.`);
     const w = await engine(host, 'work.krisis', async (env) => {
       const o = await env.output(subjects.files[0].name.replace(/\.[^.]+$/, '') + '.krisis.json');
       o.write(serialiseWork(r.work));
@@ -136,8 +143,12 @@ export const ADAPTERS = {
 };
 
 /** Which of the three ways of stopping an error is: waiting for the user, a data problem, or an execution failure. */
+// A permission the user has still to decide, has set to Never (the step may be done without), or has
+// allowed in a way that needs the page reloaded, waits for the user; any other refusal (an insecure or
+// unknown address, a network failure, a redirect) is a fault.
+export const WAITING_PERMISSIONS = ['undecided', 'never', 'reload'];
 export function stoppingKind(e) {
-  if (e?.name === 'PermissionError') return 'waiting';
+  if (e?.name === 'PermissionError') return WAITING_PERMISSIONS.includes(e.kind) ? 'waiting' : 'failed';
   if (e instanceof DataError || e instanceof HandoffError) return 'stopped';
   return 'failed';
 }
