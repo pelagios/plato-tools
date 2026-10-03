@@ -541,9 +541,12 @@ readers link to those headings, so keep them.
   `mappingToSave(mapping, patterns, levels, splits)` writes it back); a level that is not a whole
   number of 1 or more is `generic-mapping`, a second column at one level is
   `generic-within-same-level` (a warning, the column kept as a note), and a `within` column given no
-  level takes the next free one. **Split into levels**: `{"Place": {"field": "split", "separator":
+  level takes the next free one. On the page, a level's selector offers 1 to the highest level in
+  use or one for each, whichever is more (`levelChoices(level, used)`), so a loaded mapping with gaps
+  ({1, 3, 6}) reaches 6 from any column. **Split into levels**: `{"Place": {"field": "split", "separator":
   ", ", "levels": [3, 2, 1], "firstIsName": true}}` (`splits`, `{ column: { separator, levels,
-  firstIsName } }`; levels guessed from the sampled values' most parts when not given), a transform
+  firstIsName } }`; levels guessed from the sampled values' most parts when not given, and left out of
+  the saved form when no sampled value has a part, since `--columns` refuses `"levels": []`), a transform
   made before `applyColumns`: `expandSplits(mapping, levels, splits)` once gives a mapping in which
   each part is a column of its own (`<column>\u0000<level>`, a `within` at its level, and
   `<column>\u0000name` the name, or an other name when a column is already the name), and
