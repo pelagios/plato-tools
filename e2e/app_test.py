@@ -1771,6 +1771,7 @@ def main():
             front = pw.chromium.launch(headless=True)
             try: front_page_checks(front, url); theme_checks(front, url)
             finally: front.close()
+            methodos_checks(pw, url, tmp)
             chora_checks(pw, url, tmp)
             iiif_checks(pw, url, tmp)
     finally:
@@ -1784,6 +1785,68 @@ def main():
         print('PROVE-IT-FAILS:', 'every check failed, as it must' if len(failed) == len(results) else f'{len(results) - len(failed)} check(s) passed against a page with no tools: they cannot fail')
         sys.exit(0 if len(failed) == len(results) else 1)
     print('RESULT:', 'ALL PASS' if not failed else f'{len(failed)} FAILED'); sys.exit(1 if failed else 0)
+
+# ---- Methodos: saving and resuming (phase 2) ----------------------------------------------------------
+# The page has no Methodos panel yet (phase 3), so these drive the record and its store through a test
+# hook (e2e/methodos-hook.js), bundled from src/ here and served through Playwright's routing alone: it
+# is not in the build, and no visitor can load it. It runs in the page's origin, with the page's own
+# IndexedDB, sessionStorage and "keep working data" choice, and does nothing on a page with no tools.
+HOOK_PATH = '__e2e/methodos-hook.js'
+def methodos_checks(pw, url, tmp):
+    hook = tmp / 'methodos-hook.js'
+    built = subprocess.run(['node', str(ROOT / 'e2e/methodos-hook.mjs'), str(hook)], cwd=ROOT, capture_output=True, text=True)
+    base = url.rstrip('/') + '/'
+    browser = pw.chromium.launch(headless=True)
+    try:
+        ctx = browser.new_context()
+        if built.returncode == 0:
+            ctx.route(base + HOOK_PATH, lambda r: r.fulfill(path=str(hook), content_type='text/javascript'))
+        def tab(p=None):
+            p = p or ctx.new_page()
+            if p.url in ('', 'about:blank'): p.goto(NOTOOLS if PROVE else base)
+            wait_state(p, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+            if built.returncode != 0: raise RuntimeError('the hook did not bundle: ' + built.stderr[-240:])
+            p.add_script_tag(url=base + HOOK_PATH)
+            p.wait_for_function('() => !!window.__methodos_e2e', timeout=T(10) * 1000)
+            return p
+        call = lambda p, js, *a: p.evaluate(f'(a) => window.__methodos_e2e.{js}(...a)', list(a))
+        DATA, OTHER = '{"places": ["Abingdon"]}', '{"places": ["Abingdon", "Oxford"]}'
+        r = {}
+        def saved_and_reloaded():
+            a = tab(); r['a'] = a
+            r['begun'] = call(a, 'begin', DATA, 'Abingdon')
+            a.reload(); tab(a)
+            r['resumed'] = call(a, 'resume', r['begun']['id'])
+            b, e = r['begun'], r['resumed']
+            return (b['kept'] == 'browser' and b['at'] == 'report' and b['status'] == 'stopped' and e['action'] == 'continue'
+                    and e['at'] == b['at'] and e['status'] == b['status'] and e['states'] == b['states']), r
+        attempt('Methodos: a workflow saved mid-way is found at the same step after a reload', saved_and_reloaded)
+        def files_checked():
+            a, id_ = r['a'], r['begun']['id']
+            got = {'same': call(a, 'chosen', id_, DATA), 'other': call(a, 'chosen', id_, OTHER)}
+            return got['same'] == 'ok' and 'not the files this workflow was begun with' in got['other'] and 'p.json' in got['other'], got
+        attempt('Methodos: a record naming a different file is refused (filesDiffer); the same file is accepted', files_checked)
+        def nothing_left():
+            a, id_ = r['a'], r['begun']['id']
+            # Kept: the record outlives its tab (the presence beside the absence below).
+            c = tab(); got = {'kept, a new tab': call(c, 'list'), 'kept, in IndexedDB': call(c, 'keys')}; c.close()
+            a.evaluate("() => localStorage.setItem('plato-tools.keep-working-data', 'no')")
+            try:
+                gone = call(a, 'begin', DATA, 'Not kept')
+                # Read before anything else uses the store, which, with working data not kept, clears it.
+                got['not kept, in IndexedDB at once'] = call(a, 'keys')
+                a.reload(); tab(a)
+                got.update({'not kept, saved': gone['kept'], 'not kept, same tab': call(a, 'resume', gone['id']).get('at')})
+                a.close()
+                d = tab(); got.update({'not kept, a new tab': call(d, 'list'), 'not kept, in IndexedDB': call(d, 'keys')})
+                d.evaluate("() => localStorage.removeItem('plato-tools.keep-working-data')"); d.close()
+            finally:
+                if not a.is_closed(): a.evaluate("() => localStorage.removeItem('plato-tools.keep-working-data')")
+            return (got['kept, a new tab'] == [id_] and got['kept, in IndexedDB'] == [id_] and got['not kept, saved'] == 'tab'
+                    and got['not kept, in IndexedDB at once'] == [] and got['not kept, same tab'] == 'report' and got['not kept, a new tab'] == [] and got['not kept, in IndexedDB'] == []), got
+        attempt('Methodos: with "keep working data" off nothing is left after the tab closes (with it on, the record outlives the tab)', nothing_left)
+    finally:
+        browser.close()
 
 # ---- Permissions (src/lib/permissions.js) on the main page ------------------------------------------
 # The page runs under the Content Security Policy written from the permissions allowed (none, here),
