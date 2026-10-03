@@ -12,9 +12,15 @@ import { openSqlite } from '../src/lib/store.js';
 import { res } from './engine.js';
 import { PLATO_REPO } from './paths.js';
 import { DataError } from '../src/engine/input.js';
-import { OPERATIONS, RECIPES, TYPES, HandoffError, RecipeError, checkRecipe, digest, refsOf, runner, drive, ADAPTERS } from '../src/engine/methodos/index.js';
+import { OPERATIONS, RECIPES, TYPES, HandoffError, RecipeError, checkRecipe, digest, refsOf, runner, drive, ADAPTERS, stoppingKind } from '../src/engine/methodos/index.js';
 
-const { start, next, complete, waiting, resume, stop, fail, cancel, invalidate, serialise, deserialise, TransitionError } = runner;
+const { start, serialise, deserialise, TransitionError } = runner;
+// Every transition the tests call is called through this, which asserts that it left the state it was given unchanged.
+const unchanged = (name) => (state, ...a) => {
+  const before = JSON.stringify(state);
+  try { return runner[name](state, ...a); } finally { assert.equal(JSON.stringify(state), before, `${name}() changed the state it was given`); }
+};
+const [next, complete, waiting, resume, stop, fail, cancel, invalidate, progress] = ['next', 'complete', 'waiting', 'resume', 'stop', 'fail', 'cancel', 'invalidate', 'progress'].map(unchanged);
 const hex = (c) => c.repeat(64);
 const ref = (type, name, c = 'a') => ({ type, name, size: 10, sha256: hex(c) });
 const PUBLISH = RECIPES['publish-a-dataset'], MAP = RECIPES['map-your-data'];
@@ -79,7 +85,7 @@ test('every transition that does not apply throws, and a transition never change
   const frozen = serialise(s0);
   assert.equal(s0.status, 'idle');
   for (const t of [() => complete(s0, 'check', {}), () => waiting(s0, 'check', 'x'), () => resume(s0, 'check'), () => stop(s0, 'check', { words: 'x' }),
-    () => fail(s0, 'check', 'x'), () => cancel(s0, 'check'), () => invalidate(s0, 'check'), () => runner.progress(s0, 'check', { n: 1 })])
+    () => fail(s0, 'check', 'x'), () => cancel(s0, 'check'), () => invalidate(s0, 'check'), () => progress(s0, 'check', { n: 1 })])
     assert.throws(t, TransitionError);
   const s1 = next(s0);
   assert.equal(serialise(s0), frozen, 'next() changed the state it was given');
@@ -92,6 +98,8 @@ test('every transition that does not apply throws, and a transition never change
   const w = waiting(s1, 'check', 'Waiting for permission');
   assert.throws(() => stop(w, 'check', { words: 'x' }), TransitionError);       // a data problem is found running, not waiting
   assert.equal(resume(w, 'check').status, 'running');
+  assert.throws(() => complete(w, 'check', {}), /waiting to run, not done: it is resumed/);   // an automatic step is never done without running
+  assert.throws(() => invalidate(s1, 'check'), /cannot be done again while "Check the dataset" is running/);
   const st = stop(s1, 'check', { words: 'Fix it.' });
   for (const t of [() => next(st), () => complete(st, 'check', {}), () => fail(st, 'check', 'x'), () => cancel(st, 'check')]) assert.throws(t, TransitionError);
   const f = fail(s1, 'check', new Error('boom'));
@@ -124,13 +132,19 @@ test('invalidate resets the step and every step that took its outputs, and no ot
   assert.deepEqual(again.steps.map((x) => [x.id, x.state]), [['check', 'done'], ['mint', 'pending'], ['report', 'pending'], ['site', 'pending'], ['w3id', 'pending']]);
   assert.equal(again.steps.find((x) => x.id === 'site').outputs, undefined);
   assert.equal(next(again).current, 'mint');
+  // A step that failed is done again with whatever is done again before it.
+  let f = start(PUBLISH, {}, { files: [ref('files', 'places.json')] });
+  f = complete(next(f), 'check', {}); f = complete(next(f), 'mint', { dataset: [ref('dataset', 'm.json')] });
+  f = fail(next(f), 'report', new Error('boom'));
+  assert.deepEqual(invalidate(f, 'check').steps.map((x) => x.state), ['pending', 'done', 'pending', 'pending', 'pending']);
+  assert.deepEqual(invalidate(f, 'mint').steps.map((x) => x.state), ['done', 'pending', 'pending', 'pending', 'pending']);
 });
 
 test('a serialised state round-trips, and a damaged one is refused in words', () => {
   let s = start(MAP, { ...MAP_ANSWERS, release: 'v1' }, { files: [ref('files', 'places.csv')] });
   s = complete(next(s), 'columns', { mapping: [ref('mapping', 'columns.json')] });
   s = waiting(next(s), 'check', 'Waiting for you to allow the World Historical Gazetteer.');
-  s = runner.progress(s, 'check', { reviewed: 124, total: 310 });
+  s = progress(s, 'check', { reviewed: 124, total: 310 });
   const text = serialise(s);
   assert.deepEqual(deserialise(text), s);
   assert.equal(serialise(deserialise(text)), text);
@@ -190,6 +204,9 @@ test('the three ways of stopping are kept apart: waiting for the user, a data pr
   // The presence beside those absences: a check that passes goes on, to the next step.
   assert.equal(step(runs.done).state, 'done');
   assert.equal(step(runs.done, 'mint').state, 'waiting');
+  // Only a permission the user can decide waits; a refusal for any other reason is a fault.
+  assert.deepEqual(['undecided', 'never', 'reload', 'network', 'insecure', 'moved'].map((kind) => stoppingKind(Object.assign(new Error('x'), { name: 'PermissionError', kind }))),
+    ['waiting', 'waiting', 'waiting', 'failed', 'failed', 'failed']);
   // A data problem is put right by doing its step again; a failure is tried again the same way.
   assert.equal(next(invalidate(runs.stopped.state, 'check')).current, 'check');
   assert.equal(next(invalidate(runs.failed.state, 'check')).current, 'check');
@@ -210,8 +227,9 @@ test('cancel keeps partial results only where the operation declares it keeps th
   const rv = r.steps.find((x) => x.id === 'review');
   assert.equal(r.status, 'cancelled');
   assert.deepEqual([rv.state, rv.partial.work[0].name, rv.discarded], ['cancelled', 'part.krisis.json', undefined]);
-  // Done again, it begins from what it kept.
+  // Done again, it begins from what it kept; but reset because the step before it is done again, it does not.
   assert.equal(invalidate(r, 'review').steps.find((x) => x.id === 'review').partial.work[0].name, 'part.krisis.json');
+  assert.equal(invalidate(r, 'match').steps.find((x) => x.id === 'review').partial, undefined);
   // Minting cancelled part-way keeps nothing: its half-written file is named for removal.
   let p = start(PUBLISH, {}, { files });
   p = complete(next(p), 'check', {});
@@ -280,6 +298,24 @@ test('driven through "Publish a dataset" with the real engine, the outputs are t
   assert.deepEqual(runner.inputsOf(state, 'site').dataset, minted);
   // The record round-trips with them.
   assert.deepEqual(deserialise(serialise(state)), state);
+});
+
+test('a check that finds errors in the data stops the workflow with its words, through the real engine', async () => {
+  const d = JSON.parse(await antonine().text());
+  d.spatialEntities[0].attestations[0].timespans = 'never';
+  const bad = new File([JSON.stringify(d)], 'bad.json');
+  const host = memoryHost([bad, antonine()]);
+  const one = recipe([{ id: 'check', op: 'check', from: { files: '$files' } }, { id: 'out', op: 'convert', from: { files: '$files' }, options: { target: 'plato-json' } }]);
+  const { state, reports } = await drive(start(one, {}, { files: await refsOf([bad], 'files') }), host);
+  assert.equal(state.status, 'stopped');
+  assert.deepEqual(state.steps.map((x) => x.state), ['stopped', 'pending']);
+  assert.equal(state.steps[0].problem.errors, 1);
+  assert.match(state.steps[0].problem.words, /timespans must be array/);
+  assert.equal(reports.check.errors, 1);
+  // The presence: the same recipe on the clean file goes on to the conversion, whose output is recorded.
+  const clean = await drive(start(one, {}, { files: await refsOf([antonine()], 'files') }), host);
+  assert.equal(clean.state.status, 'completed');
+  assert.equal(clean.state.steps[1].outputs.dataset.length, 1);
 });
 
 test('a file that is not the one the record names is refused before the engine runs, as a data problem', async () => {
