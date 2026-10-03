@@ -116,7 +116,11 @@ export function featureToRecord(f, loss = () => {}) {
     A.push(attestation({ geometries: [geom] }, g.when, g.citations, loss, { certaintyNote: gc.certaintyNote }));
   }
   for (const r of many(f.relations, 'relations', loss)) {
-    A.push(attestation({ relations: [clean({ relatesTo: expandLpf(r.relationTo), relationType: expandLpf(r.relationType), relationLabel: r.label })] }, r.when, r.citations, loss,
+    // gvp:broaderPartitive is the authority plato:ContainedIn declares, and what the writer makes of it
+    // (PLATO 1d2cf6e, #23); a gazetteer match's score has no place on a relation, and is reported.
+    const type = expandLpf(r.relationType) === GVP_BROADER_PARTITIVE ? PLATO + 'ContainedIn' : expandLpf(r.relationType);
+    if (r.whg_match_score !== undefined && r.whg_match_score !== null) loss({ kind: 'lpf-match-score', value: expandLpf(r.relationTo) });
+    A.push(attestation({ relations: [clean({ relatesTo: expandLpf(r.relationTo), relationType: type, relationLabel: r.label })] }, r.when, r.citations, loss,
       level(r.certainty)));
   }
   for (const l of many(f.links, 'links', loss)) {
@@ -262,7 +266,7 @@ export function collectionToGazetteer(fc, fallbackTitle, loss = () => {}) {
 // the region's name. A region assigned by hand (ContainedIn straight at the gazetteer, or at a region
 // with no current match) is written as it stands. Where the writer cannot tell (several current
 // matches, a score it was not given), it writes no guess and reports it.
-const BROADER_PARTITIVE = 'gvp:broaderPartitive';
+const BROADER_PARTITIVE = 'gvp:broaderPartitive', GVP_BROADER_PARTITIVE = LPF_PREFIXES.gvp + 'broaderPartitive';
 const SAME_PLACE = new Set(['exactMatch', 'closeMatch']);
 /** A region's name where a record gives no relationLabel: its label, else its first toponym. */
 export const regionLabel = (rec) => (typeof rec?.label === 'string' && rec.label) || list(rec?.attestations).flatMap((a) => list(a?.names)).find((n) => typeof n?.toponym === 'string')?.toponym;
@@ -302,6 +306,15 @@ export class RegionIndex {
     for (const stubs of this.matches.values()) for (const s of stubs) for (const ir of s.identities) if (typeof ir.promotedFrom === 'string') wanted.add(ir.promotedFrom);
     return wanted;
   }
+  /**
+   * True when attestation `a` of record `id` is a current match whose certainty level the region's
+   * gvp:broaderPartitive carries, so that the level is written, not dropped.
+   */
+  carries(id, a, withdrawn) {
+    if (!this.targets.has(id) || typeof a?.['@id'] !== 'string' || !a.certaintyLevel) return false;
+    const m = this.resolve(id, withdrawn);
+    return !!(m.relationTo && m.from?.has(a['@id']) && m.certaintyLevel === a.certaintyLevel && WORD[a.certaintyLevel]);
+  }
   /** The Candidates found in the sets given: @id -> { subject, object, score }; null when none were given. */
   setCandidates(found) { this.candidates = found; this.cache.clear(); }
   /**
@@ -318,6 +331,7 @@ export class RegionIndex {
     if (objects.length > 1) out.several = objects;
     else if (objects.length === 1) {
       out.relationTo = objects[0];
+      out.from = new Set(same.map((x) => x.a['@id']).filter((id) => typeof id === 'string'));
       const levels = [...new Set(same.map((x) => x.a.certaintyLevel ?? null))];
       if (levels.length === 1) out.certaintyLevel = levels[0] ?? undefined; else out.certaintyDiffers = true;
       // A score only from a Candidate for this pair (either way round, as promotedFrom allows), and only
@@ -327,7 +341,9 @@ export class RegionIndex {
       for (const p of promoted) {
         const c = this.candidates?.get(p);
         const pair = c && ((c.subject === region && c.object === out.relationTo) || (c.subject === out.relationTo && c.object === region));
-        if (pair && typeof c.score === 'number') scores.add(c.score); else { out.noScore = p; break; }
+        if (pair && c.conflict) { out.noScore = p; out.noScoreKind = 'region-match-score-conflict'; break; }
+        if (pair && typeof c.score !== 'number') { out.noScore = p; out.noScoreKind = 'region-match-unscored'; break; }
+        if (pair) scores.add(c.score); else { out.noScore = p; break; }
       }
       if (!out.noScore && scores.size === 1) out.score = [...scores][0];
       else if (!out.noScore && scores.size > 1) out.noScore = promoted[0];
@@ -351,7 +367,7 @@ function containment(r, a, when, cits, regions, withdrawn, loss) {
     // The containment's own certainty has no place beside the reviewer's.
     if (own && own !== rel.certainty) loss({ kind: 'region-containment-certainty', value: a['@id'] || r.relatesTo });
     if (m.score !== undefined) rel.whg_match_score = m.score;
-    else if (m.noScore) loss({ kind: 'region-match-no-score', value: m.noScore });
+    else if (m.noScore) loss({ kind: m.noScoreKind || 'region-match-no-score', value: m.noScore });
   }
   return clean(rel);
 }
@@ -398,7 +414,7 @@ export function recordToFeature(rec, idrs = [], loss = () => {}, withdrawn = nul
     if (a.occurrenceCount !== undefined) loss({ kind: 'occurrence-count' });
     if (a.certainty !== undefined) loss({ kind: 'numeric-certainty' });
     // LPF has certainty on a when, a geometry and a relation only.
-    if (a.certaintyLevel && !a.geometries?.length && !a.relations?.length) loss({ kind: 'certainty-level', value: a.certaintyLevel.replace(PLATO, '') });
+    if (a.certaintyLevel && !a.geometries?.length && !a.relations?.length && !regions?.carries(rec['@id'], a, withdrawn)) loss({ kind: 'certainty-level', value: a.certaintyLevel.replace(PLATO, '') });
     else if (a.certaintyLevel && !WORD[a.certaintyLevel]) loss({ kind: 'certainty-level', value: a.certaintyLevel });
     // Alternative readings are written, each as its own claim: that at most one is right is lost,
     // and said so in its own words, since it changes what the output claims.

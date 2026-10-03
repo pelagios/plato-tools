@@ -93,7 +93,13 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   score (a region assigned by hand). Several current matches to different places: no guess, the
   region's own address, reported (`region-match-several`). A score is written only from a Candidate
   found in the sets given whose pair is the identity's (either way round); otherwise none, reported
-  with the suggestion's address (`region-match-no-score`). The candidate sets come as
+  with the suggestion's address (`region-match-no-score`; `region-match-unscored` for a Candidate found
+  with no score, `region-match-score-conflict` for one in two sets with different scores). A set whose
+  `candidatesFor` names another dataset is warned of (`candidates-other-dataset`), the pair check
+  still deciding. The reviewer's certainty level, written in the relation, is not reported as dropped
+  from the reviewer's attestation (`RegionIndex.carries`). Reading LPF back, `gvp:broaderPartitive`
+  (prefixed or in full) becomes `plato:ContainedIn`, and a `whg_match_score` is reported as lost
+  (`lpf-match-score`). The candidate sets come as
   `options.candidates` (inputs detected as a candidate set; `--candidates SET` on the command line,
   repeatable, for `convert --to lpf` or `lpf-seq` only); a set is read for its scores alone, its own
   faults left to checking it on its own. The page gives none yet, so its LPF has no scores, each

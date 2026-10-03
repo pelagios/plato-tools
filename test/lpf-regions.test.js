@@ -64,9 +64,12 @@ test('the example with its candidate set: each ContainedIn is one gvp:broaderPar
   assert.equal(rel.citations?.length, 1, 'the containment keeps its citation');
   const [up] = containedIn(byId, SURREY);
   assert.deepEqual([up.relationTo, up.label, up.certainty, up.whg_match_score], [WHG_ENGLAND, 'England', 'certain', 98]);
-  // A presence control for the absence below: the run reports losses, just none of these.
-  assert.ok(losses(r).length, 'the run reports losses');
+  // A presence control for the absences below: the reviewers' identities are still reported as not
+  // written as links (identity-bundle), and the run's losses are read.
+  assert.equal(loss(r, 'identity-bundle')?.count, 2, JSON.stringify(losses(r).map((i) => i.kind)));
   assert.equal(loss(r, 'region-match-no-score'), undefined, JSON.stringify(losses(r).map((i) => i.kind)));
+  // The reviewers' certainty is written, in the broaderPartitive, so it is not reported as dropped.
+  assert.equal(loss(r, 'certainty-level'), undefined, JSON.stringify(losses(r).map((i) => i.kind)));
   assert.equal(containedIn(byId, ROTHERHITHE).length, 1);
 });
 
@@ -148,6 +151,8 @@ test('two live matches to different places: no guess, the region\'s own address,
   const [rel] = containedIn(byId, ROTHERHITHE);
   assert.deepEqual([rel.relationTo, 'whg_match_score' in rel], [SURREY, false]);
   assert.equal(loss(r, 'region-match-several')?.count, 1);
+  // Here no reviewer's certainty is written, so each is reported as dropped (a control for the first test).
+  assert.equal(loss(r, 'certainty-level')?.count, 2, JSON.stringify(losses(r).map((i) => i.kind)));
   // A control: two live matches to the same place are one match.
   const same = await lpf(withSurreyMatches([review('m1', WHG_SURREY, { promotedFrom: SURREY_CANDIDATE }), review('m2', WHG_SURREY)]), await sets(candidateSet()));
   assert.equal(containedIn(same.byId, ROTHERHITHE)[0].relationTo, WHG_SURREY);
@@ -187,6 +192,59 @@ test('a file given as a candidate set that is not one is warned of, and gives no
   assert.equal(r.report.items.find((i) => i.kind === 'candidates-not-a-set')?.severity, 'warning');
   assert.equal(containedIn(byId, ROTHERHITHE)[0].relationTo, WHG_SURREY);
   assert.equal(loss(r, 'region-match-no-score')?.count, 2);
+});
+
+test('LPF -> PLATO reads gvp:broaderPartitive back as ContainedIn, prefixed or in full, and reports whg_match_score as lost', async () => {
+  const { r } = await lpf(dataset(), await sets(candidateSet()));
+  const fc = JSON.parse(outText(r.e, 'd.geojson'));
+  const surreyRel = fc.features.find((f) => f['@id'] === SURREY).relations[0];
+  surreyRel.relationType = 'http://vocab.getty.edu/ontology#broaderPartitive';   // the full form
+  const back = await go([textFile(JSON.stringify(fc), 'd.geojson')], 'convert', 'plato-json');
+  const doc = JSON.parse(outText(back.e, 'd.json'));
+  const rels = (id) => doc.spatialEntities.find((e) => e['@id'] === id).attestations.flatMap((a) => a.relations || []);
+  assert.deepEqual(rels(ROTHERHITHE).map((x) => [x.relationType, x.relatesTo, x.relationLabel]), [[P + 'ContainedIn', WHG_SURREY, 'Surrey']]);
+  assert.deepEqual(rels(SURREY).map((x) => [x.relationType, x.relatesTo]), [[P + 'ContainedIn', WHG_ENGLAND]]);
+  assert.equal(loss(back, 'lpf-match-score')?.count, 2, JSON.stringify(losses(back).map((i) => i.kind)));
+  // A control: an LPF relation with no score reports none.
+  for (const f of fc.features) for (const x of f.relations || []) delete x.whg_match_score;
+  const plain = await go([textFile(JSON.stringify(fc), 'd.geojson')], 'convert', 'plato-json');
+  assert.equal(loss(plain, 'lpf-match-score'), undefined);
+  const plainDoc = JSON.parse(outText(plain.e, 'd.json'));
+  assert.equal(plainDoc.spatialEntities.flatMap((e) => e.attestations.flatMap((a) => a.relations || [])).length, 2, 'the relations were read');
+});
+
+test('one candidate in two sets with different scores: no score, and the conflict is reported', async () => {
+  const other = candidateSet();
+  other.candidates.find((c) => c['@id'] === SURREY_CANDIDATE).similarityScore = 50;
+  const { r, byId } = await lpf(dataset(), await sets(candidateSet(), other));
+  assert.equal('whg_match_score' in containedIn(byId, ROTHERHITHE)[0], false);
+  assert.equal(loss(r, 'region-match-score-conflict')?.count, 1, JSON.stringify(losses(r).map((i) => i.kind)));
+  assert.equal(containedIn(byId, SURREY)[0].whg_match_score, 98, 'the candidate both agree on keeps its score');
+  // A control: the same candidate with the same score in both sets is no conflict.
+  const same = await lpf(dataset(), await sets(candidateSet(), candidateSet()));
+  assert.equal(containedIn(same.byId, ROTHERHITHE)[0].whg_match_score, 93);
+  assert.equal(loss(same.r, 'region-match-score-conflict'), undefined);
+});
+
+test("a candidate set for another dataset is warned of; the pair check still decides the score", async () => {
+  const other = candidateSet();
+  other.candidateSet.candidatesFor = `${W}gazetteer/someone-else`;
+  const { r, byId } = await lpf(dataset(), await sets(other));
+  assert.equal(r.report.items.find((i) => i.kind === 'candidates-other-dataset')?.severity, 'warning');
+  assert.equal(containedIn(byId, ROTHERHITHE)[0].whg_match_score, 93);
+  const own = await lpf(dataset(), await sets(candidateSet()));
+  assert.equal(own.r.report.items.find((i) => i.kind === 'candidates-other-dataset'), undefined, 'a control: its own set is not');
+  assert.ok(own.r.report.items.length, 'the report is read');
+});
+
+test('a candidate found with no score is reported in its own words, not as missing', async () => {
+  const s = candidateSet();
+  delete s.candidates.find((c) => c['@id'] === SURREY_CANDIDATE).similarityScore;
+  const { r, byId } = await lpf(dataset(), await sets(s));
+  assert.equal('whg_match_score' in containedIn(byId, ROTHERHITHE)[0], false);
+  assert.equal(loss(r, 'region-match-unscored')?.count, 1, JSON.stringify(losses(r).map((i) => i.kind)));
+  assert.equal(loss(r, 'region-match-no-score'), undefined);
+  assert.equal(containedIn(byId, SURREY)[0].whg_match_score, 98, 'a control: the scored candidate is used');
 });
 
 test('the command line: --candidates SET with convert --to lpf; refused for anything else', () => {

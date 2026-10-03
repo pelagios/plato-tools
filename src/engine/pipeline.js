@@ -597,13 +597,15 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     // every place, and LPF needs them on the feature.
     withdrawn = new Map();
     const again = input.format === 'plato-jsonl' ? platoJsonl(input.files[0], new Report()) : platoJson(input.files[0]);
+    let gazetteerId;
     for await (const ev of again) {
+      if (ev.type === 'header') gazetteerId = ev.value?.gazetteer?.['@id'];
       if (ev.type === 'idr') { if (lpfTarget) (idrsBySubject.get(ev.value.subject) || idrsBySubject.set(ev.value.subject, []).get(ev.value.subject)).push(ev.value); }
       else if (ev.type === 'record') { collectWithdrawn(ev.value?.attestations, withdrawn); regions?.add(ev.value?.attestations, ev.value?.['@id'], regionLabel(ev.value)); }
       else if (ev.type === 'attestation') collectWithdrawn([ev.value], withdrawn);
     }
     withdrawn = resolved(withdrawn, rep);
-    if (regions) await regionCandidates(regions, options.candidates, rep);
+    if (regions) await regionCandidates(regions, options.candidates, rep, gazetteerId);
   }
   if (action === 'convert' && options.cube && target !== 'ntriples') rep.warning('cube-not-ntriples', 'The Data Cube export applies to N-Triples output only, so it is not made here.');
   // RDF may hold a dataset or a candidate set, which are written by different writers: its writer is
@@ -773,7 +775,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       for (const a of distinctSubjectsWith(store, PLATO + 'attests_identity')) for (const e of objectsOf(store, a, PLATO + 'attests_about')) if (regions.targets.has(e)) matched.add(e);
       const quiet = new Rdf2Json(r2jSchemas, store, { withdrawn: storeWithdrawn });
       for (const e of matched) { const rec = quiet.entity(e); regions.add(rec.attestations, e, regionLabel(rec)); }
-      await regionCandidates(regions, options.candidates, rep);
+      await regionCandidates(regions, options.candidates, rep, docId && !String(docId).startsWith('_:') ? docId : undefined);
     }
     const head = docId ? { $schema: 'https://w3id.org/plato/schemas/place-centric.schema.json', ...r2j.header(docId) } : { profile: 'place-centric', gazetteer: { title: input.files[0].name } };
     head.profile = 'place-centric';
@@ -818,7 +820,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
  * sets given with the dataset (options.candidates: inputs detected as PLATO JSON or JSON Lines with the
  * profile candidate-set). With none given, every score wanted is reported missing as it is met.
  */
-async function regionCandidates(regions, sets, rep) {
+async function regionCandidates(regions, sets, rep, gazetteerId) {
   const wanted = regions.prune();
   if (!Array.isArray(sets) || !sets.length) return;
   const found = new Map();
@@ -827,8 +829,15 @@ async function regionCandidates(regions, sets, rep) {
     if (!wanted.size) continue;
     // The set's own faults are its own: it is read for its scores only, and checked on its own.
     for await (const ev of candidateSetSource(set, new Report())) {
+      // A set made for another dataset may still hold a pair of this one's: warned of, and each pair checked.
+      const forId = ev.type === 'header' ? ev.value?.candidateSet?.candidatesFor : undefined;
+      if (typeof forId === 'string' && typeof gazetteerId === 'string' && forId !== gazetteerId) rep.warning('candidates-other-dataset', CANDIDATE_SET_TEXT['candidates-other-dataset'], `${set.files?.[0]?.name}: ${forId}`);
       const c = ev.type === 'candidate' ? ev.value : null;
-      if (c && typeof c === 'object' && wanted.has(c['@id'])) found.set(c['@id'], { subject: c.subject, object: c.object, score: c.similarityScore });
+      if (!c || typeof c !== 'object' || !wanted.has(c['@id'])) continue;
+      const seen = found.get(c['@id']);
+      // One candidate in two sets with different scores: neither is written (a candidate is frozen once issued).
+      if (seen && seen.score !== c.similarityScore) seen.conflict = true;
+      else if (!seen) found.set(c['@id'], { subject: c.subject, object: c.object, score: c.similarityScore });
     }
   }
   regions.setCandidates(found);
@@ -904,6 +913,7 @@ function checkGraph(store, res, rep) {
 const CANDIDATE_SET_SCHEMA = 'https://w3id.org/plato/schemas/candidate-set.schema.json';
 export const CANDIDATE_SET_TEXT = {
   'candidate-set-target': 'A candidate set cannot be written as spreadsheet tables or Linked Places Format: neither has a place for suggestions made by software, which are claims by no one. Keep it as PLATO JSON or RDF.',
+  'candidates-other-dataset': "A candidate set given is for another dataset (its candidatesFor is not this dataset's address); a score is still taken from it only for a suggestion of the same two places as a match.",
   'candidates-not-a-set': 'A file given as a candidate set is not one (PLATO JSON or JSON Lines with the profile candidate-set), so no score is read from it.',
   'candidate-set-not-a-dataset': 'This is a candidate set, not a dataset: it holds matches suggested by software, and no places, attestations or identity relations, which are what this tool reads. A candidate set can be checked, and converted to PLATO JSON or RDF, on its own.',
 };
