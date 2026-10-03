@@ -60,6 +60,7 @@ const shape = (s) => canonical({ id: s.id, op: s.op, from: s.from, options: s.op
 /** A record found mid-step (the page closed while a step ran) is at a failed step, to run again. */
 function settle(state) {
   if (state.status !== 'running') return state;
+  if (!state.current) throw new RecordError('This workflow record is damaged: it says a step is running, but not which.');
   return fail(state, state.current, 'The page was closed while this step was running, so it did not finish: run it again.');
 }
 

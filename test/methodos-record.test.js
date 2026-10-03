@@ -124,6 +124,8 @@ test('a record saved while a step ran resumes at that step, failed, to run again
   assert.equal(r.state.status, 'failed');
   assert.equal(r.state.steps[2].state, 'failed');
   assert.match(r.state.steps[2].error, /page was closed while this step was running/);
+  // One that says a step is running and not which is refused in words.
+  assert.throws(() => reconcile({ ...s, current: null }, PUBLISH), (e) => e instanceof RecordError && /says a step is running, but not which/.test(e.message));
 });
 
 test('.workflow.json: a record round-trips, and what is not one is refused', () => {
@@ -208,6 +210,7 @@ test('with "keep working data" off, a record is kept for the tab only, and none 
   const before = await workflowStore({ indexedDB: idb, session: new Storage(), keep: () => true }).save(midway());
   assert.deepEqual(await idbKeys(idb), [before.record.id]);
   assert.deepEqual(await newTab.list(), []);
+  assert.deepEqual((await idb.databases()).map((d) => d.name), [], 'not even the database is left');
   assert.deepEqual(await idbKeys(idb), []);
 });
 

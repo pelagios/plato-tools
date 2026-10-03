@@ -54,8 +54,14 @@ export function workflowStore({ indexedDB, session, keep = keepWorkingData } = {
     } finally { db.close(); }
   };
   const keeping = () => { try { return keep() !== false; } catch { return true; } };
-  // With working data not kept, nothing stays in IndexedDB.
-  const forgetKept = async () => { try { await tx('readwrite', (s) => s.clear()); } catch { /* none kept */ } };
+  // With working data not kept, nothing stays in IndexedDB: not a record, nor the database. (Its
+  // connections are each closed when their transaction ends, so the deletion is not held up by them.)
+  const forgetKept = () => new Promise((resolve) => {
+    try {
+      const req = idb.deleteDatabase(DB);
+      req.onsuccess = req.onerror = req.onblocked = () => resolve();
+    } catch { resolve(); }
+  });
   const read = (text) => { try { return text ? deserialise(text) : null; } catch { return null; } };
 
   return {
@@ -90,9 +96,10 @@ export function workflowStore({ indexedDB, session, keep = keepWorkingData } = {
     /** Let the record go, wherever it was kept. */
     async remove(id) {
       tab.drop(id);
+      if (!keeping()) { await forgetKept(); return; }
       try { await tx('readwrite', (s) => s.delete(id)); } catch { /* none kept */ }
     },
-    /** Let every record kept in IndexedDB go (when "keep working data" is turned off). */
+    /** Let everything kept in IndexedDB go, the database too (when "keep working data" is turned off). */
     forgetKept,
   };
 }
