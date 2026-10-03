@@ -1506,8 +1506,8 @@ matching (below). This sends each place's name to the gazetteer, and its coordin
 Methodos runs a workflow, a named sequence of the tools' own operations, from a recipe
 (`docs/plans/methodos.md`). It is a coordinator over the engine, not a second engine: plain ES modules
 in `src/engine/methodos/`, with no page, no storage and no framework, so that the same code runs in
-Node (the tests) and in the worker. Phases 0 and 1 are built; nothing on the page uses it yet, and a
-workflow is not yet kept anywhere (both are later phases).
+Node (the tests) and in the worker. Phases 0, 1 and 3 are built: the engine, its adapters, and the
+page's interview and tracker (below); keeping a workflow beyond the tab is phase 2.
 
 - **Operations** (`operations.js`) describe the calls the tools already make: each says whether it is
   automatic or interactive (done by the user, so the step waits), what types it takes and gives,
@@ -1562,6 +1562,39 @@ file; done again, it begins from that file and asks only for the places not yet 
 downloadable `.workflow.json`. Tested in `test/methodos-record.test.js`, and in the browser by
 `e2e/app_test.py` through a test hook (`e2e/methodos-hook.js`) the harness bundles and serves itself,
 until the page has a Methodos panel (phase 3).
+
+**On the page** (phase 3): two self-contained components, mounted by `mountMethodos()` in
+`src/methodos/page.js` on elements the host gives it, so that where they sit can change without
+changing them.
+
+- **The interview** (`section#methodos`, opened by the one-line banner above step 1, the Methodos
+  card, or an address ending `#methodos`) asks three questions as radio groups, each a `fieldset`
+  with its question as `legend`. The words and the routing are engine code,
+  `src/engine/methodos/interview.js`: `choose(have, want)` gives a recipe and the yes-or-no questions
+  still to ask, `{ kind: 'grid' }` for "not sure" (a button to the plain grid of cards), or
+  `{ kind: 'none', why, tools }` (no composition: it says which tools do the work meanwhile);
+  `plan(key, answers)` gives the steps the tracker shows, each with its tool, its act, and, where its
+  operation is declared unavailable, the reason. Such a step does not stop the workflow: it is shown
+  greyed as "Not yet available", with the reason, is not counted and is skipped (`unavailable`), and
+  the last step says what was not done for it (`notes`: "The regions were not identified…"). Answers
+  that lead to no workflow also offer "Tell us what you wanted to do": a new GitHub issue, in a new
+  tab, titled with the two answers and labelled Methodos (`feedbackUrl()`).
+- **The tracker** (`section#methodos-tracker`, above step 1) lists the steps, each with its state in
+  words (Done, Now, To come, Not yet available), the current one `aria-current="step"`, and "Step 3
+  of 10" in a polite live region; no percentage, no time. The host's `onStep({ tool, text, link })`
+  (`src/app.js`) chooses the step's tool as its card would (`#tool=`, step 2 narrowed) and says the
+  step first in `#for-tool`; `onStep(null)` when the workflow is left. Methodos does not yet see what
+  the tools did: the user says when a step is done (This step is done, Back a step).
+- **Save and resume** go through one interface, `pageStore()` in `src/methodos/page-store.js`:
+  `list()`, `save(record)`, `remove(id)`, each a promise, named as phase 2's `workflowStore()` names
+  them, and the record `{ id, methodos: 1, recipe: { key, version, digest }, answers, at, done }`. It is
+  a stub kept in memory for the tab; joining it to phase 2 means keeping the runner's state, once the
+  page starts the runner when step 1's file is chosen. A record is resumed only if its recipe's digest is
+  the one shipped.
+
+`test/methodos-interview.test.js` holds the interview to `test/methodos-predicted.json`, which the
+browser checks (`methodos_page_checks` in `e2e/app_test.py`) answer through the page and compare with what
+it shows.
 
 ## Permissions
 
@@ -1910,13 +1943,14 @@ A push to `main` runs the tests, builds the site and publishes it to GitHub Page
   and `src/app.js` (`TOOLS`, `chooseTool`) does the rest. With no tool chosen, step 2 offers every
   action, Chora's map included. Hermes's card goes to the drop zone; Chora's opens `chora.html`,
   with the chosen file (`src/chora/handoff.js`).
-  The cards are grouped, one `ul.tools.choose` under each plain `h3.tool-group` heading (Start here,
+  The cards are grouped, one `ul.tools.choose` under each plain `h3.tool-group` heading (Guided workflows,
   Bring your data in, Check and convert, Identify and locate, Publish and keep, Explore), with each
   card's name an `h4`; the order is decided in `docs/plans/methodos.md` (11.2). Each group is a
   `div.tool-set` with `data-cards` (its number of cards), and the groups flow in one grid of card-wide
   columns (3, 2 or 1, by container query), each spanning as many columns as it has cards, so that a
   group of one shares a row; its list is on those columns by `subgrid`. A planned card
-  (`li.tool.coming`: Methodos first, Peripleo last) has a badge and no link, and is never chosen. A
+  (`li.tool.coming`: Peripleo, last) has a badge and no link, and is never chosen. Methodos's card,
+  first, is a link (`#methodos-card`, no `data-tool`) that opens the interview. A
   check that wants the n-th card counts across the groups, not `:nth-child` within one.
 - **The introduction** (`#intro`) can be hidden, and stays hidden (localStorage
   `plato-tools.intro`). `public/intro.js`, a classic script in `<head>`, sets `html.intro-hidden`

@@ -1302,7 +1302,7 @@ def tooltip_upkeep(page, where):
         page.evaluate('() => document.activeElement?.blur()'); page.mouse.move(1, 1); page.wait_for_timeout(300)
     def container():
         # A focused section opens no tooltip of the names inside it; the presence: Tab to its first
-        # name (Methodos's, planned, so a name made focusable rather than a link), and its own tooltip shows.
+        # name (Methodos's, in its card's link), and its own tooltip shows.
         reset(); page.keyboard.press('Shift')        # keyboard last, so the focus that follows is visible focus
         page.evaluate('() => { const s = document.getElementById("toolbox"); s.tabIndex = -1; s.focus(); }')
         page.wait_for_timeout(300)
@@ -1769,7 +1769,7 @@ def main():
             krisis_lookup_case(page, tmp, url)
             ctx.close()
             front = pw.chromium.launch(headless=True)
-            try: front_page_checks(front, url); theme_checks(front, url)
+            try: front_page_checks(front, url); theme_checks(front, url); methodos_page_checks(front, url)
             finally: front.close()
             methodos_checks(pw, url, tmp)
             chora_checks(pw, url, tmp)
@@ -2347,10 +2347,10 @@ def front_page_checks(browser, url):
     attempt('front page at 390 px: one column of the ten cards, step 2 with Chora\'s row, and no sideways scroll, with the introduction shown or hidden', phone)
 
     def planned():
-        # Methodos and Peripleo are planned, not here: each card says so, links nowhere (bar the issues in
-        # its More), and choosing it changes nothing.
+        # Peripleo is planned, not here: its card says so, links nowhere (bar its More), and choosing it
+        # changes nothing. Methodos's card, once planned too, is a link now (methodos_checks).
         out = {}
-        for name, label in (('Methodos', 'Workflows'), ('Peripleo', 'Visualisation')):
+        for name, label in (('Peripleo', 'Visualisation'),):
             ctx, page = fresh()
             try:
                 page.set_input_files('#picker', str(FRONT_FILE))
@@ -2365,8 +2365,8 @@ def front_page_checks(browser, url):
                 out[name] = (bool(card) and card['visible'] and card['coming'] and card['badge'] == 'Planned' and card['label'] == label and card['links'] == 0 and not card['choose']
                              and all(before.values()) and after == before and hash == '' and tool is None and current == 0), {'card': card, 'before': before, 'after': after, 'hash': hash, 'tool': tool}
             finally: ctx.close()
-        return len(out) == 2 and all(v[0] for v in out.values()), {k: v[1] for k, v in out.items()}
-    attempt('front page: Methodos\'s and Peripleo\'s cards say they are planned, are not links and offer no Choose, and choosing either leaves step 2 as it was', planned)
+        return len(out) == 1 and all(v[0] for v in out.values()), {k: v[1] for k, v in out.items()}
+    attempt('front page: Peripleo\'s card says it is planned, is not a link and offers no Choose, and choosing it leaves step 2 as it was', planned)
 
     def grouped():
         # The cards are grouped under plain headings, in the order decided (docs/plans/methodos.md, 11.2):
@@ -2388,15 +2388,15 @@ def front_page_checks(browser, url):
             page.click('#toolbox ul[aria-labelledby="tg-check"] .tool-link[data-tool="check"]')
             chose = {'hash': page.evaluate('() => location.hash'), 'tool': page.evaluate('() => window.__plato.tool ?? null'),
                      'current': page.eval_on_selector_all('#toolbox [aria-current]', 'es => es.map((e) => e.dataset.tool)')}
-            want = [('Start here', ['Methodos']), ('Bring your data in', ['Hermes']), ('Check and convert', ['Elenchos', 'Metaphrasis', 'Arithmos']),
+            want = [('Guided workflows', ['Methodos']), ('Bring your data in', ['Hermes']), ('Check and convert', ['Elenchos', 'Metaphrasis', 'Arithmos']),
                     ('Identify and locate', ['Krisis', 'Chora']), ('Publish and keep', ['Agora', 'Mneme']), ('Explore', ['Peripleo'])]
             return ([(g['heading'], g['cards']) for g in got] == want and all(g['visible'] and g['list'] for g in got) and every == 10
-                    and first == {'name': 'Methodos', 'coming': True, 'link': False}
+                    and first == {'name': 'Methodos', 'coming': False, 'link': True}
                     and chose == {'hash': '#tool=check', 'tool': 'check', 'current': ['check']}
                     and vw >= 1000 and rows.get('start') == rows.get('in') and rows.get('publish') == rows.get('explore')
                     and rows['in'] < rows['check'] < rows['locate'] < rows['publish']), {'groups': got, 'first card': first, 'cards': every, 'Elenchos chosen': chose, 'heading tops': rows, 'width': vw}
         finally: ctx.close()
-    attempt('front page: the ten cards are in six groups under plain headings, in the order decided, Methodos (planned, not a link) first, the groups of one sharing a row, and a card in a group is still chosen', grouped)
+    attempt('front page: the ten cards are in six groups under plain headings, in the order decided, Methodos (a link to its interview) first, the groups of one sharing a row, and a card in a group is still chosen', grouped)
 
     def guide_links():
         # The masthead's Guide and step 1's temPlato link go where the guide has them: the presence is
@@ -3776,6 +3776,196 @@ def start_fixtures(tmp):
 def stop_fixtures():
     p = FIXTURES.pop('proc', None)
     if p: stop(p)
+
+# ---- Methodos: the interview and the tracker (src/methodos/page.js) ----------------------------------
+# The interview's answers are given as a visitor gives them (clicks, and the keyboard), and the recipe
+# and steps the page shows are compared with test/methodos-predicted.json, the table the unit test
+# (test/methodos-interview.test.js) holds the engine to. Every absence is asserted beside a presence.
+METHODOS_PREDICTED = json.loads((ROOT / 'test/methodos-predicted.json').read_text())
+METHODOS_PAGE_STATE = '''() => { const v = (e) => !!e && !e.closest('[hidden]') && !!(e.offsetWidth || e.offsetHeight);
+  const steps = (sel) => [...document.querySelectorAll(sel + ' li.track-step')].map((li) => ({ id: li.dataset.step, state: li.dataset.state, current: li.getAttribute('aria-current'),
+    words: li.querySelector('.track-state')?.textContent, why: li.querySelector('.track-why')?.textContent || null }));
+  const m = document.getElementById('methodos'), t = document.getElementById('methodos-tracker'), n = document.getElementById('for-tool');
+  return { banner: v(document.getElementById('methodos-ask')), interview: v(m), recipe: m?.dataset.recipe || null, verdict: document.getElementById('methodos-verdict')?.textContent || '',
+    plan: steps('#methodos-plan'), follow: v(document.getElementById('methodos-start')), followText: document.getElementById('methodos-start')?.textContent || '',
+    blocked: document.querySelector('#methodos-plan .track-blocked')?.textContent || null, grid: v(document.getElementById('methodos-grid')),
+    tracker: v(t), trackerRecipe: t?.dataset.recipe || null, track: steps('#methodos-track'), where: document.getElementById('methodos-tracker-where')?.textContent || '',
+    hash: location.hash, tool: window.__plato?.tool ?? null, note: v(n) ? n.textContent : null, files: v(document.getElementById('files')),
+    focus: document.activeElement ? (document.activeElement.id || document.activeElement.name || document.activeElement.tagName) : null }; }'''
+
+def methodos_page_checks(browser, url):
+    def fresh(width=1280, scheme='light'):
+        ctx = browser.new_context(viewport={'width': width, 'height': 900}, color_scheme=scheme)
+        page = ctx.new_page(); page.set_default_timeout(T(8) * 1000)
+        page.goto(NOTOOLS if PROVE else url)
+        if wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready').get('phase') != 'ready': raise RuntimeError('the main page did not start')
+        return ctx, page
+    st = lambda page: page.evaluate(METHODOS_PAGE_STATE)
+    def answer(page, have, want, yes):
+        page.click('#methodos-ask'); until(page, "!document.getElementById('methodos').hidden", 5)
+        page.check(f'input[name="methodos-have"][value="{have}"]'); page.check(f'input[name="methodos-want"][value="{want}"]')
+        for k, v in yes.items(): page.check(f'input[name="methodos-ask-{k}"][value="{"yes" if v else "no"}"]')
+
+    def untouched():
+        # A visitor who does not use Methodos: the interview and the tracker are not shown, #for-tool is
+        # not either, and nothing is chosen (absences); the banner and step 1 are shown (presences).
+        ctx, page = fresh()
+        try:
+            s = st(page)
+            return (s['banner'] and s['files'] and not s['interview'] and not s['tracker'] and s['note'] is None and s['hash'] == '' and s['tool'] is None), s
+        finally: ctx.close()
+    attempt('Methodos: a visitor who does not open it sees step 1 and the one-line banner, and no interview, tracker or chosen step', untouched)
+
+    def predicted():
+        out = {}
+        for p in METHODOS_PREDICTED:
+            ctx, page = fresh()
+            try:
+                answer(page, p['have'], p['want'], p['yes'])
+                s = st(page)
+                plan = [x['id'] for x in s['plan']]
+                ok = (s['recipe'] == p['recipe'] and plan == p['steps'] and all(x['state'] == 'todo' and x['words'] == 'To come' for x in s['plan'])
+                      and s['follow'] and s['blocked'] is None and str(len(p['steps'])) in s['verdict'])
+                out[f"{p['have']}+{p['want']}"] = (ok, {'recipe': s['recipe'], 'plan': plan, 'verdict': s['verdict'], 'follow': s['follow']})
+            finally: ctx.close()
+        return len(out) == len(METHODOS_PREDICTED) and all(v[0] for v in out.values()), {k: v[1] for k, v in out.items()}
+    attempt("Methodos: the interview's answers give the recipe and the steps test/methodos-predicted.json predicts, for each of its rows", predicted)
+
+    def tracker():
+        # Follow the first prediction (Map your data): the tracker above step 1 shows every step, the first
+        # now and the rest to come; the first is Hermes's columns (no #tool=, said in #for-tool); a step
+        # done moves to Elenchos's check, which chooses #tool=check; back a step returns; leaving clears all.
+        p = METHODOS_PREDICTED[0]
+        ctx, page = fresh()
+        try:
+            answer(page, p['have'], p['want'], p['yes'])
+            page.click('#methodos-start'); until(page, "!document.getElementById('methodos-tracker').hidden", 5)
+            a = st(page)
+            order = page.evaluate("() => { const t = document.getElementById('methodos-tracker'), f = document.getElementById('files'); return !!(t.compareDocumentPosition(f) & Node.DOCUMENT_POSITION_FOLLOWING); }")
+            page.click('#methodos-done'); b = st(page)
+            page.click('#methodos-back'); c = st(page)
+            page.click('#methodos-done'); page.click('#methodos-leave'); d = st(page)
+            ids = [x['id'] for x in a['track']]
+            first_ok = (a['tracker'] and not a['interview'] and not a['banner'] and order and a['trackerRecipe'] == p['recipe'] and ids == p['steps']
+                        and a['track'][0]['state'] == 'current' and a['track'][0]['current'] == 'step' and a['track'][0]['words'] == 'Now'
+                        and all(x['state'] == 'todo' and x['current'] is None for x in a['track'][1:])
+                        and a['hash'] == '' and a['tool'] is None and a['note'] and f"step 1 of {len(ids)}" in a['note'] and 'Hermes' in a['note']
+                        and a['where'].startswith(f"Step 1 of {len(ids)}") and '%' not in a['where'] + a['note'] and a['focus'] == 'methodos-tracker-h')
+            second_ok = (b['track'][0]['state'] == 'done' and b['track'][0]['words'] == 'Done' and b['track'][1]['state'] == 'current'
+                         and b['hash'] == '#tool=check' and b['tool'] == 'check' and 'Elenchos' in (b['note'] or '') and f"step 2 of {len(ids)}" in (b['note'] or ''))
+            back_ok = c['track'][0]['state'] == 'current' and c['hash'] == '' and c['tool'] is None
+            left_ok = not d['tracker'] and d['banner'] and d['hash'] == '' and d['tool'] is None and d['note'] is None and d['files']
+            return first_ok and second_ok and back_ok and left_ok, {'started': a, 'above step 1': order, 'one done': b, 'back': c, 'left': d}
+        finally: ctx.close()
+    attempt('Methodos: the tracker above step 1 shows the workflow\'s steps as now and to come, and each step chooses its tool (#tool=) and says itself in #for-tool; back and leave undo it', tracker)
+
+    def unavailable():
+        # Has regions, answered Yes: the workflow is not refused. The regions step is in the plan and the
+        # tracker, "Not yet available" with the engine's reason, and is skipped: the first step is now, the
+        # count leaves it out, Done never stops on it, and the last step notes that the regions were not
+        # identified. No "Answer No" (an absence, beside the Follow button and the reason, presences).
+        ctx, page = fresh()
+        try:
+            answer(page, 'table', 'map', {'has-regions': True, 'will-draw': False, 'will-publish': False})
+            a = st(page)
+            page.click('#methodos-start'); until(page, "!document.getElementById('methodos-tracker').hidden", 5)
+            b = st(page)
+            seen = []
+            for _ in range(12):
+                cur = next((x['id'] for x in st(page)['track'] if x['state'] == 'current'), None)
+                if cur is None: break
+                seen.append(cur); page.click('#methodos-done')
+            last = page.evaluate("() => document.querySelector('#methodos-track li.track-step:last-child .track-end')?.textContent || null")
+            c = st(page)
+            r = next((x for x in a['plan'] if x['id'] == 'regions'), None)
+            t = next((x for x in b['track'] if x['id'] == 'regions'), None)
+            avail = [x['id'] for x in a['plan'] if x['id'] != 'regions']
+            ok = (r is not None and r['state'] == 'unavailable' and r['words'] == 'Not yet available' and 'Regions cannot be identified yet' in (r['why'] or '')
+                  and a['follow'] and a['blocked'] is None and 'Answer No' not in page.evaluate("() => document.getElementById('methodos').textContent")
+                  and f"in {len(avail)} steps" in a['verdict']
+                  and b['tracker'] and t is not None and t['state'] == 'unavailable' and 'Regions cannot be identified yet' in (t['why'] or '')
+                  and b['track'][0]['state'] == 'current' and b['where'].startswith(f"Step 1 of {len(avail)}")
+                  and seen == avail and 'regions were not identified' in (last or '') and c['where'].startswith('Every one'))
+            return ok, {'plan': a, 'started': b, 'steps taken': seen, 'last step notes': last, 'at the end': c['where']}
+        finally: ctx.close()
+    attempt('Methodos: with regions answered Yes the workflow is followed, its regions step shown as "Not yet available" with its reason and skipped, and the last step notes the regions were not identified', unavailable)
+
+    def unsure_and_none():
+        # "Not sure" leads to the plain grid of cards; answers with no recipe say so and name the tools.
+        ctx, page = fresh()
+        try:
+            answer(page, 'table', 'unsure', {})
+            a = st(page)
+            page.click('#methodos-grid'); b = st(page)
+            in_tools = page.evaluate("() => !!document.activeElement?.closest('#toolbox')")
+            answer(page, 'plato', 'convert', {}); c = st(page)
+            links = page.eval_on_selector_all('#methodos-plan a[data-methodos-tool]', 'es => es.map((e) => [e.textContent, e.getAttribute("href")])')
+            fb = page.evaluate("""() => { const a = document.querySelector('#methodos-plan a.feedback'); if (!a) return null;
+              const u = new URL(a.href); return { text: a.firstChild?.textContent, hint: a.querySelector('.visually-hidden')?.textContent, base: u.origin + u.pathname, title: u.searchParams.get('title'), labels: u.searchParams.get('labels'),
+                target: a.target, rel: a.rel, visible: !!a.offsetWidth }; }""")
+            page.click('#methodos-plan a[data-methodos-tool="convert"]'); page.wait_for_timeout(300)
+            chosen = st(page); chosen['focus'] = page.evaluate('() => document.activeElement?.id')
+            ok = (a['grid'] and not a['follow'] and a['recipe'] is None and not b['interview'] and in_tools and b['banner']
+                  and c['recipe'] is None and not c['follow'] and 'no workflow for this yet' in c['verdict'] and ['Metaphrasis', '#tool=convert'] in links
+                  and fb == {'text': 'Tell us what you wanted to do', 'hint': ' (opens in a new tab)', 'base': 'https://github.com/pelagios/plato-tools/issues/new', 'labels': 'Methodos',
+                             'title': 'Methodos: a workflow for “A dataset already in a PLATO format” to “A file in another format”', 'target': '_blank', 'rel': 'noopener noreferrer', 'visible': True}
+                  and not chosen['interview'] and chosen['hash'] == '#tool=convert' and chosen['tool'] == 'convert' and chosen['focus'] == 'files-h')
+            return ok, {'unsure': a, 'grid': b, 'focus in the cards': in_tools, 'none': c, 'links': links, 'feedback': fb, 'Metaphrasis chosen': chosen}
+        finally: ctx.close()
+    attempt('Methodos: "not sure" leads to the plain grid of cards, and answers that name no workflow say so, link the tools that do the work (each chosen as its card chooses it), and invite feedback in a new issue', unsure_and_none)
+
+    def keyboard():
+        # By keyboard alone: Tab to the banner, Enter opens the interview with focus on its heading;
+        # Tab and Space answer the first two; the questions are fieldsets with legends, every radio has a
+        # name; the verdict is a live region. The card opens it too.
+        ctx, page = fresh()
+        try:
+            tab_to(page, '#methodos-ask'); page.keyboard.press('Enter')
+            until(page, "!document.getElementById('methodos').hidden", 5)
+            opened = page.evaluate('() => document.activeElement?.id')
+            page.keyboard.press('Tab'); page.keyboard.press('Space'); page.keyboard.press('Tab'); page.keyboard.press('Space')
+            s = st(page)
+            a11y = page.evaluate("""() => ({ legends: [...document.querySelectorAll('#methodos fieldset')].filter((f) => !f.hidden).map((f) => f.querySelector(':scope > legend')?.textContent.trim()),
+              unlabelled: [...document.querySelectorAll('#methodos input')].filter((i) => !i.closest('label')).length, live: document.getElementById('methodos-verdict').getAttribute('aria-live'),
+              said: document.getElementById('methodos-said').getAttribute('aria-live') })""")
+            page.keyboard.press('Escape')
+            page.click('#methodos-close'); closed = st(page)
+            tab_to(page, '#methodos-card'); page.keyboard.press('Enter')
+            again = page.evaluate("() => !document.getElementById('methodos').hidden && document.activeElement?.id")
+            page.click('#methodos-close'); back_to_card = page.evaluate('() => document.activeElement?.id')
+            ok = (opened == 'methodos-h' and s['recipe'] == 'map-your-data' and a11y['legends'][:3] == ['1. What do you have?', '2. What do you want at the end?', '3. Anything of these?']
+                  and a11y['unlabelled'] == 0 and a11y['live'] == 'polite' and a11y['said'] == 'polite' and not closed['interview'] and closed['focus'] == 'methodos-ask'
+                  and again == 'methodos-h' and back_to_card == 'methodos-card')
+            return ok, {'focus on opening': opened, 'state': s, 'a11y': a11y, 'closed': closed, 'from the card': again, 'closed from the card': back_to_card}
+        finally: ctx.close()
+    attempt('Methodos: the interview opens from the banner and the card by keyboard, with focus on its heading, is answered with Tab and Space, its questions are labelled fieldsets, and Close returns focus to whichever opened it', keyboard)
+
+    def clean_and_narrow():
+        # No inline script, no inline handler and no title attribute, with the interview and tracker open
+        # (presence: the page's own scripts by src, and the data-tip on Methodos's name); and at 390 px
+        # in dark, no sideways scroll, in the dark colours (the tracker's card is the dark --card).
+        ctx, page = fresh(390, 'dark')
+        try:
+            p = METHODOS_PREDICTED[0]
+            answer(page, p['have'], p['want'], p['yes'])
+            wide1 = page.evaluate('() => document.documentElement.scrollWidth - document.documentElement.clientWidth')
+            page.click('#methodos-start'); until(page, "!document.getElementById('methodos-tracker').hidden", 5)
+            wide2 = page.evaluate('() => document.documentElement.scrollWidth - document.documentElement.clientWidth')
+            # The one inline script is the head's policy writer (front_page_checks); none other.
+            r = page.evaluate("""() => ({ inline: [...document.scripts].filter((s) => !s.src && s !== document.head.querySelector('script')).length,
+              writer: !!document.head.querySelector('script:not([src])'), bySrc: [...document.scripts].filter((s) => s.src).length,
+              handlers: (() => { const probe = document.createElement('i'); probe.setAttribute('onclick', 'void 0'); probe.hidden = true; document.body.append(probe);
+                const n = [...document.querySelectorAll('*')].filter((e) => [...e.attributes].some((a) => /^on/i.test(a.name))).length; probe.remove(); return n - 1; })(),
+              titled: document.querySelectorAll('body [title]').length, tip: !!document.querySelector('#methodos-card .why[data-tip]'),
+              bg: getComputedStyle(document.getElementById('methodos-tracker')).backgroundColor, body: getComputedStyle(document.body).backgroundColor })""")
+            # The tooltips turn any title attribute into data-tip as the page loads (src/lib/tooltip.js), so
+            # titles are looked for in the served file, beside the data-tip that the same search finds.
+            served = urllib.request.urlopen(url, timeout=10).read().decode('utf-8') if not PROVE else ''
+            r['titles served'] = len(re.findall(r'<[^>]*\stitle=', served)); r['data-tip served'] = len(re.findall(r'\sdata-tip=', served))
+            ok = r['titles served'] == 0 and r['data-tip served'] > 0 and wide1 <= 0 and wide2 <= 0 and r['inline'] == 0 and r['writer'] and r['bySrc'] > 0 and r['handlers'] == 0 and r['titled'] == 0 and r['tip'] and r['bg'] == 'rgb(30, 34, 41)' and r['body'] == 'rgb(22, 25, 31)'
+            return ok, {'overflow (interview, tracker)': (wide1, wide2), **r}
+        finally: ctx.close()
+    attempt('Methodos at 390 px in dark: no sideways scroll, dark colours, and no inline script, inline handler or title attribute with the interview and tracker open', clean_and_narrow)
 
 def iiif_checks(pw, url, tmp):
     fx = start_fixtures(tmp); A, B, log = fx['A'], fx['B'], fx['log']

@@ -478,3 +478,46 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; tex
 .candidate .licence.warn { color: var(--warn); }
 .candidate:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (max-width: 34rem) { .lookup { padding: .5rem .6rem; } .lookup-queries { padding-left: 1.4rem; } }
+/* Methodos (src/methodos/page.js): the interview, and the tracker above step 1. Colours are the
+   page's tokens only, so the dark scheme needs no rule of its own here. */
+#methodos-h:focus, #methodos-tracker-h:focus { outline: none; }
+#methodos-h:focus-visible, #methodos-tracker-h:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.methodos-lede { margin: 0 0 .75rem; color: var(--muted); }
+.interview fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 .75rem; padding: .4rem .85rem .6rem; min-width: 0; }
+.interview legend { font-weight: 700; padding: 0 .3rem; }
+.interview fieldset.yes-no { border: 0; padding: .25rem 0 0; margin: 0 0 .35rem; }
+.interview fieldset.yes-no legend { font-weight: 400; padding: 0; }
+.interview .choices { display: flex; flex-wrap: wrap; gap: .2rem 1.25rem; }
+.interview .choices label { display: flex; align-items: baseline; gap: .35rem; padding: .15rem 0; cursor: pointer; }
+.interview #mq-have .choices, .interview #mq-want .choices { flex-direction: column; }
+.methodos-verdict { margin: .5rem 0; font-weight: 700; }
+.methodos-plan .meanwhile { margin: .25rem 0; padding-left: 1.25rem; }
+.methodos-buttons { display: flex; flex-wrap: wrap; gap: .5rem; margin: .75rem 0 0; }
+.methodos-tracker { border-color: var(--accent); }
+.track-where { margin: 0 0 .5rem; font-weight: 700; }
+.track { list-style: none; margin: 0; padding: 0; counter-reset: track; }
+.track-step { counter-increment: track; display: flex; gap: .55rem; align-items: baseline; padding: .3rem .5rem; border-radius: 6px; }
+.track-step::before { content: counter(track) "."; min-width: 1.6rem; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.track-mark { width: 1rem; text-align: center; color: var(--muted); }
+.track-body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.track-state { display: inline-block; min-width: 4.5rem; font-size: .85rem; font-weight: 700; color: var(--muted); }
+.track-tool { font-family: var(--font-headings); }
+.track-why { display: block; color: var(--warn); font-size: .95rem; }
+.track-step.is-done .track-mark, .track-step.is-done .track-state { color: var(--ok); }
+.track-step.is-current { background: color-mix(in srgb, var(--accent) 12%, var(--card)); box-shadow: inset 3px 0 0 var(--accent); }
+.track-step.is-current .track-mark, .track-step.is-current .track-state { color: var(--accent); }
+.track-step.is-todo .track-act, .track-step.is-todo .track-tool { color: var(--muted); }
+.track-left, .track-note { color: var(--muted); font-size: .95rem; margin: .5rem 0 0; }
+.workflow-step { color: var(--fg); }
+@media (max-width: 34rem) { .methodos, .methodos-tracker { padding: .85rem .8rem; } .track-state { min-width: 0; display: block; } .methodos-buttons button { flex: 1 1 auto; } }
+/* The one line above step 1 that opens the interview: quiet, and secondary to step 1's drop zone. */
+.methodos-banner { margin: 1.25rem 0 -.5rem; font-size: .95rem; color: var(--muted); }
+.methodos-banner a { color: var(--accent); }
+#methodos-tracker-h { display: block; }
+/* A step not yet available is greyed, not numbered and skipped; the reason stays readable. */
+.track-step.is-unavailable { counter-increment: none; border: 1px dashed var(--line); }
+.track-step.is-unavailable::before { content: ""; }
+.track-step.is-unavailable .track-tool, .track-step.is-unavailable .track-act, .track-step.is-unavailable .track-state, .track-step.is-unavailable .track-mark { color: var(--muted); }
+.track-why { color: var(--muted); }
+.track-end { display: block; margin-top: .2rem; color: var(--warn); font-size: .95rem; }
+.feedback-line { margin: .5rem 0 0; }
