@@ -701,6 +701,17 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     // Here the store's converter is the only one that sees the records, so it reports.
     const w = new Json2Rdf(res.context, (s, p, o) => store.add(s, p, o), { onIssue: jsonIssue });
     let header = null, batch = 0;
+    // The regions a place lies in (a table of places' `within`, and `region` on a region's own events:
+    // src/engine/hermes/within.js and generic.js) ride on the reader's events, never in PLATO: kept here
+    // by place, the first each place's events give, and put back on its record's event when the place
+    // is read back, for a sink that reads them.
+    const withinByPlace = new Map();
+    const keepWithin = (ev) => {
+      const iri = ev.type === 'attestation' ? ev.value?.about : ev.type === 'record' ? ev.value?.['@id'] : undefined;
+      if (typeof iri !== 'string' || withinByPlace.has(iri)) return;
+      const within = Array.isArray(ev.within) && ev.within.length ? { within: ev.within } : {};
+      if (within.within || ev.region) withinByPlace.set(iri, { ...within, ...(ev.region ? { region: ev.region } : {}) });
+    };
     store.beginBatch();
     for await (const ev of source) {
       if (ev.type === 'triple') { store.add(ev.s, ev.p, ev.o); if (++batch % 50000 === 0) { store.endBatch(); store.beginBatch(); beat('loading', { triples: store.count }); } continue; }
@@ -708,6 +719,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       if (ev.type === 'not-a-list') { notAList(ev); continue; }
       if (ev.type === 'header') { header = ev.value; w.header(header); dry.header(header); if (!V.header(header)) rep.error('schema', `The document header does not match the PLATO JSON Schema: ${ajvMessage(V.header.errors)}`); continue; }
       checkRecord(ev);
+      keepWithin(ev);
       w.record(ev.type === 'idr' ? 'identityRelations' : ev.type === 'attestation' ? 'attestations' : ev.newEntity ? 'newSpatialEntities' : 'spatialEntities', ev.value);
       if (++batch % 5000 === 0) { store.endBatch(); store.beginBatch(); beat('loading', { triples: store.count }); }
     }
@@ -808,7 +820,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       n++; rep.count('places'); rep.count('attestations', rec.attestations?.length || 0);
       if (isRdf && !V.entity(rec)) rep.error('schema', explainSchema(V.entity.errors, false), `${e}: ${ajvMessage(V.entity.errors)}`);
       collectMembership(rec.attestations, rec['@id'], membership);
-      if (writer) await writer.event(augmented({ type: 'record', value: rec, n }));
+      if (writer) await writer.event(augmented({ type: 'record', value: rec, n, ...withinByPlace.get(e) }));
       beat('writing', { places: n });
     }
     for (const i of idrIds) { rep.count('identity relations'); if (writer) await writer.event({ type: 'idr', value: r2j.identityRelation(i) }); }
