@@ -93,8 +93,9 @@ for (const f of examples) {
     const doc = JSON.parse(text);
     await control(text, f, true);
     const arrays = firstArrays(doc);
-    // A candidate set has two lists only, its candidates and its authors: both must be found.
-    if (doc.profile === 'candidate-set') assert.deepEqual([...arrays.keys()].sort(), ['candidates', 'creator']);
+    // A candidate set has two lists only, its candidates and its authors (creator, which a set may leave
+    // out, as PLATO 1d2cf6e's candidate-set-regions.json does): each given must be found.
+    if (doc.profile === 'candidate-set') assert.deepEqual([...arrays.keys()].sort(), ['candidates', ...(Array.isArray(doc.candidateSet?.creator) ? ['creator'] : [])]);
     else assert.ok(arrays.size >= 3, `only ${arrays.size} arrays found`);
     const reported = (report, key) => report.errors > 0 || report.items.some((i) => JSON.stringify(i).includes(key));
     const { threw, silent } = await sweep(doc, f, arrays, f, reported);
