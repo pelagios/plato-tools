@@ -265,6 +265,25 @@ test('converted regions have the shape of PLATO\'s worked example file (place-ce
   const { e } = await go([textFile(ROTHERHITHE, 'places.csv')], 'convert', 'plato-json', { base: BASE });
   assert.deepEqual(regionShape(JSON.parse(outText(e, 'places.json'))), regionShape(example));
 });
+test('a table converted straight to LPF writes each ContainedIn as broaderPartitive to the region\'s address, labelled with its toponym', async () => {
+  const relations = async (csv) => {
+    const { e } = await go([textFile(csv, 'places.csv')], 'convert', 'lpf', { base: BASE });
+    const doc = JSON.parse(outText(e, 'places.geojson'));
+    const byId = new Map(doc.features.map((f) => [f['@id'], f]));
+    return doc.features.flatMap((f) => (f.relations || []).map((r) => ({ from: f.properties.title, type: r.relationType, to: byId.get(r.relationTo)?.properties.title, label: r.label })));
+  };
+  // place-centric rows (streamed) and attestation-centric rows (read through the store) alike
+  for (const csv of [NEWTONS, 'uri,Name,County,Country\nhttps://www.wikidata.org/entity/Q1,Mill,Surrey,England\n']) {
+    const rels = await relations(csv);
+    assert.ok(rels.length > 0);
+    for (const r of rels) {
+      assert.equal(r.type, 'gvp:broaderPartitive');
+      assert.ok(r.to, `${r.from}: relationTo is a region of the file`);
+      assert.equal(r.label, r.to.replace(/ \(.*\)$/, ''), `${r.from}: labelled with the region's toponym, not its display label`);
+    }
+  }
+  assert.ok((await relations(NEWTONS)).some((r) => r.from === 'Mill' && r.to === 'Newton (Lancashire, England)' && r.label === 'Newton'));
+});
 test('region events are tagged, carry their parents as their chain, and are left out of the rows\' chains and levels', async () => {
   const { events } = await eventsOf(NEWTONS, { base: BASE });
   const regionEvents = events.filter((e) => e.region);
