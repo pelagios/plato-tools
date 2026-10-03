@@ -99,9 +99,9 @@ test('usage problems exit 2, with a message on stderr and nothing on stdout', ()
   const flat = h.out.replace(/\s+/g, ' ');
   assert.match(flat, /or a TEI XML edition \(annotations and TEI are read, not written\)/);
   assert.doesNotMatch(flat, /these two/);
-  assert.match(flat, /--json print one JSON object per input.*?Its "columns", for a table of places, is a list of \{column, field, pattern, reason\} to read \(pattern only where one is given\); --columns takes the object printed without --json instead\./);
+  assert.match(flat, /--json print one JSON object per input.*?Its "columns", for a table of places, is a list of \{column, field, reason\}, with pattern, level, or separator, levels and firstIsName where the field has them; --columns takes the object printed without --json instead\./);
   const readme = readFileSync('README.md', 'utf8').replace(/\s+/g, ' ');
-  assert.match(readme, /its `columns` is a list of `\{column, field, pattern, reason\}` \(`pattern` only for a column given one\), to read; `--columns` takes the object printed without `--json` instead/);
+  assert.match(readme, /its `columns` is a list of `\{column, field, reason\}`, with `pattern`, `level`, or `separator`, `levels` and `firstIsName` where the field has them, to read; `--columns` takes the object printed without `--json` instead/);
 });
 
 // ---- --json -------------------------------------------------------------------------------------
