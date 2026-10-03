@@ -68,6 +68,9 @@ A TEI edition and a table of places have **reading options**, each off until cho
 | TEI | Places in the header (where the object was found or made), and place names in an edition's commentary, translation and notes, as the editors' words, each with the form status `plato:Editorial` | Read the places in the header (found at, made at), as the editors' words; Read place names in the commentary and notes, as the editors' words | `--header-places`, `--commentary-places` |
 | CSV, GeoJSON | Rows with the same id are evidence about one place, an attestation each, where a repeated id is otherwise a problem; needs a column read as the place id | Rows with the same id are one place | `--same-id` |
 | CSV, GeoJSON | A column of a gazetteer's ids (`pleiades_id: 579885`) made into web addresses with a pattern, suggested for Pleiades, GeoNames and Wikidata, never used until confirmed | In the column table, *Make web addresses* in the column's row | `--columns` with `{"field": "address", "pattern": "https://pleiades.stoa.org/places/{id}"}` for the column |
+| CSV, GeoJSON | The regions a place lies in (a parish, a county, a country…), guessed from the headings and numbered widest first (1 the widest). Under a base address of your own each region becomes a place, each contained in the next, and each place is `plato:ContainedIn` each of its regions; without one they are kept in the notes | *Region it lies in*, with its *Level* beside it | `--columns` with `{"field": "within", "level": 2}` for the column |
+| CSV, GeoJSON | A column of several regions in one cell, narrowest first ("Rotherhithe, Surrey, England"), split into levels, its first part the place's name if you say so | *Regions, to split into levels*, with what separates the parts, the levels and *The first part is the place's name* | `--split 'Place=, :name,3,2,1'`, or `--columns` with `{"field": "split", "separator": ", ", "levels": [3, 2, 1], "firstIsName": true}` |
+| A list of names | Pasted, one name a line, it is read as a table of places of one column, "name" | *Or paste a list of names*, under the drop zone | (none: save the list as a CSV file headed `name`) |
 
 ## From the command line
 
@@ -120,7 +123,7 @@ node bin/plato-tools.mjs preview --limit 5 my-places.csv                 # the f
   report, with the input's format, counts, outputs and status. Its `storeBytes` is the size of the
   working database (the triple store) for RDF or attestation-centric input, or the tables' for
   spreadsheet tables, or null when the input streamed straight through. For a table of places its `columns` is a list of
-  `{column, field, pattern, reason}` (`pattern` only for a column given one), to read; `--columns`
+  `{column, field, reason}`, with `pattern`, `level`, or `separator`, `levels` and `firstIsName` where the field has them, to read; `--columns`
   takes the object printed without `--json` instead. For a workbook's sheet, `sheet` names the
   sheet read and `sheets` lists them all. For a TEI edition, `keyPatterns` holds the
   `--key-pattern` patterns. `--brief` prints one line per input.
