@@ -12,6 +12,7 @@ import * as basemaps from './basemaps.js';
 import * as contributors from './contributor.js';
 import { fingerprint, loadDrafts, saveDrafts, draftsWritten, forgetAllDrafts } from './drafts.js';
 import { take as takeHandoff, clear as clearHandoff, keepForReload, takeResume } from './handoff.js';
+import * as handback from './handback.js';
 import { serialQueue, pageRequest, answers } from './queue.js';
 import * as permissions from '../lib/permissions.js';
 import { RELOAD_LOSES, REFUSED as PERMISSION_REFUSED, NEEDS, REMEMBERED_BASEMAP } from '../lib/permission-words.js';
@@ -604,12 +605,15 @@ async function saveDataset() {
       $('save-result').insertAdjacentHTML('beforeend', `<p>${said} To add more, open ${esc(out.name)}.</p>`);
     };
     b.onclick = async () => {
-      let done;
-      try { done = await save(out.name); } catch (e) {
+      let done, file;
+      try { file = await outputFile(out.name); done = await saveFile(file, out.name); } catch (e) {
         offered = null; box.remove();
         $('save-result').insertAdjacentHTML('beforeend', `<p class="warn">${esc(out.name)} is no longer there to save (${esc(e.message)}): save again.</p>`);
         return;
       }
+      // Opened for a workflow: the file saved is handed back to it, by reference (handback.js), before
+      // a copy kept here is let go, and from the very bytes that went to the user's disk.
+      if (done && workflow) await handBack(file, out.name);
       if (done === true) letGo('Saved.');
       else if (done === 'download' && !box.querySelector('[data-clear]')) {
         // A download cannot be seen to finish: the drawings are kept, and the file still offered,
@@ -669,9 +673,13 @@ async function storageCheck(when, el) {
 // through the save dialogue where there is one, else as a download. True once saved through the
 // dialogue, which returns when the file is written; 'download' for a download, which cannot be seen
 // to finish; false if the user cancelled.
-async function save(name) {
+async function save(name) { return saveFile(await outputFile(name), name); }
+/** The file the worker wrote for Chora, on the origin private file system: the bytes saved, and handed back (handback.js). */
+async function outputFile(name) {
   const root = await navigator.storage.getDirectory();
-  const file = await (await (await root.getDirectoryHandle('chora-outputs')).getFileHandle(name)).getFile();
+  return (await (await root.getDirectoryHandle('chora-outputs')).getFileHandle(name)).getFile();
+}
+async function saveFile(file, name) {
   if (window.showSaveFilePicker && !window.__plato_forceDownload) {
     try {
       const h = await window.showSaveFilePicker({ suggestedName: name });
@@ -685,6 +693,47 @@ async function save(name) {
   return 'download';
 }
 window.__chora_save = save;
+
+// ---- The way back into a workflow (handback.js) --------------------------------------------------
+// Opened from a Methodos workflow (chora.html#workflow=<id>), a file saved is handed back to it: a
+// record in this browser naming the file by name, size and SHA-256, never the file, and a link to the
+// main page at the workflow. The id is read once, from the address, and used only if it is one; it
+// reaches the page and the link as text and as a checked address, never as markup.
+const wf = handback.workflowOf(location.hash);
+const workflow = wf?.id || null;
+state.workflow = workflow; state.workflowRefused = !!wf?.refused; state.handback = null;
+if (wf) {
+  const p = $('workflow');
+  p.className = workflow ? 'note' : 'warn';
+  p.textContent = workflow ? 'Opened for a workflow on the main page: once you have saved the dataset, you are offered the way back to it.'
+    : 'This address names a workflow, but not in a form these tools use, so nothing saved here is handed back to it.';
+  p.hidden = false;
+}
+async function handBack(file, name) {
+  let ref;
+  try { ref = await handback.refOf(file, name); } catch (e) {
+    $('save-result').insertAdjacentHTML('beforeend', `<p class="warn">${esc(name)} could not be handed back to the workflow (${esc(e.message)}): choose it on the main page.</p>`);
+    return;
+  }
+  const kept = await handback.give(workflow, ref);
+  state.handback = kept ? { ...kept, files: kept.files.map((r) => ({ ...r })) } : null;
+  $('back-to-workflow')?.closest('p')?.remove();
+  const p = document.createElement('p'), a = document.createElement('a');
+  a.id = 'back-to-workflow'; a.className = 'button'; a.textContent = 'Back to the workflow';
+  a.href = handback.backTo(workflow, location.href);
+  // Taken by a click, the record is written again first, so that the main page finds it fresh (two
+  // minutes, as the hand-off: handoff.js); a link opened in another tab finds the one written at the save.
+  a.addEventListener('click', async (e) => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    await handback.give(workflow, ref);
+    location.assign(a.href);
+  });
+  p.append(a, Object.assign(document.createElement('span'), { className: 'muted',
+    textContent: kept ? ` The main page takes the workflow up again after this step, and asks you there for ${ref.name} (${fmtBytes(ref.size)}), the file just saved.`
+      : ` This browser would not keep the hand-back, so choose ${ref.name} on the main page when it asks.` }));
+  $('save-result').appendChild(p);
+}
 
 // ---- Basemaps ------------------------------------------------------------------------------------
 // A basemap from another site is used only once its permission is allowed (src/lib/permissions.js).
@@ -1214,6 +1263,7 @@ startWorker().then(async () => {
     state.workingCleared = true;
   }
   inTurn(() => readmitKept());
+  handback.dropStale();
   // Files chosen on the main page, offered here.
   const handed = await takeHandoff();
   if (handed && !files.length) {

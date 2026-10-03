@@ -20,7 +20,8 @@ function open() {
     req.onerror = () => reject(req.error);
   });
 }
-async function tx(mode, fn) {
+/** One transaction on the store, its request's result; shared with the hand-back (handback.js), which is kept in the same store. */
+export async function tx(mode, fn) {
   const db = await open();
   try {
     return await new Promise((resolve, reject) => {
