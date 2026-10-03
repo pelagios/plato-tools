@@ -219,16 +219,35 @@ test('tables with a base: a region\'s place_id is region-<hex>, never its contai
   const mill = doc.spatialEntities.find((p) => p['@id'] === `${BASE}place/1`);
   assert.ok(regionIris.includes(mill.attestations.find((a) => a.relations)?.relations[0].relatesTo), 'the place is still ContainedIn a region read back');
 });
-test('converted regions have the shape of PLATO\'s worked example (place-centric-regions.json)', async (t) => {
-  const path = `${PLATO_REPO}/schemas/examples/place-centric-regions.json`;
-  if (!existsSync(path)) { t.skip(`PLATO at ${PLATO_REPO} has no schemas/examples/place-centric-regions.json (from 1d2cf6e): repin to compare`); return; }
-  const example = JSON.parse(readFileSync(path, 'utf8'));
-  const { e } = await go([textFile('id,Name,County,Country\nr,Rotherhithe,Surrey,England\n', 'places.csv')], 'convert', 'plato-json', { base: BASE });
+// The shape of a document's places: for each, its label and its attestations (identities aside, which
+// are Krisis's), a name as ['name', toponym], a relation as ['in', type, the target's label, its keys].
+const regionShape = (d) => d.spatialEntities.map((p) => ({ label: p.label, atts: p.attestations.filter((a) => !a.identities).map((a) => (a.names ? ['name', a.names[0].toponym]
+  : ['in', a.relations[0].relationType, d.spatialEntities.find((q) => q['@id'] === a.relations[0].relatesTo)?.label, Object.keys(a.relations[0]).sort().join(',')])) }))
+  .sort((a, b) => a.label.localeCompare(b.label));
+// PLATO's worked example, schemas/examples/place-centric-regions.json (PLATO a6bc022), as that shape,
+// inlined so the comparison runs at any pin: each region a name attestation, the place ContainedIn its
+// narrowest region, each region ContainedIn its parent, the relation {relationType, relatesTo} alone.
+const EXAMPLE_REGION_SHAPE = [
+  { label: 'England', atts: [['name', 'England']] },
+  { label: 'Rotherhithe', atts: [['name', 'Rotherhithe'], ['in', CONTAINED_IN, 'Surrey (England)', 'relatesTo,relationType']] },
+  { label: 'Surrey (England)', atts: [['name', 'Surrey'], ['in', CONTAINED_IN, 'England', 'relatesTo,relationType']] },
+];
+const ROTHERHITHE = 'id,Name,County,Country\nr,Rotherhithe,Surrey,England\n';
+test('converted regions have the shape of PLATO\'s worked example, inlined (labels, a name per region, place -> narrowest region -> parent, no relatedLabel or relationLabel)', async () => {
+  const { e } = await go([textFile(ROTHERHITHE, 'places.csv')], 'convert', 'plato-json', { base: BASE });
   const doc = JSON.parse(outText(e, 'places.json'));
-  // The shape: for each place, its name attestation, and one ContainedIn to the nearest container; a region labelled "Surrey (England)".
-  const shape = (d) => d.spatialEntities.map((p) => ({ label: p.label, atts: p.attestations.filter((a) => !a.identities).map((a) => (a.names ? ['name', a.names[0].toponym] : ['in', a.relations[0].relationType, d.spatialEntities.find((q) => q['@id'] === a.relations[0].relatesTo)?.label])) }))
-    .sort((a, b) => a.label.localeCompare(b.label));
-  assert.deepEqual(shape(doc), shape(example));
+  assert.deepEqual(regionShape(doc), EXAMPLE_REGION_SHAPE);
+  // control: a relation that also carried relatedLabel (as before PLATO a6bc022) would not have the shape
+  const labelled = structuredClone(doc);
+  for (const p of labelled.spatialEntities) for (const a of p.attestations) for (const r of a.relations || []) r.relatedLabel = 'x';
+  assert.notDeepEqual(regionShape(labelled), EXAMPLE_REGION_SHAPE);
+});
+test('converted regions have the shape of PLATO\'s worked example file (place-centric-regions.json), where the pin has it', async (t) => {
+  const path = `${PLATO_REPO}/schemas/examples/place-centric-regions.json`;
+  if (!existsSync(path)) { t.skip(`PLATO at ${PLATO_REPO} has no schemas/examples/place-centric-regions.json (from 1d2cf6e): repin to compare with the file (the inlined shape is checked above)`); return; }
+  const example = JSON.parse(readFileSync(path, 'utf8'));
+  const { e } = await go([textFile(ROTHERHITHE, 'places.csv')], 'convert', 'plato-json', { base: BASE });
+  assert.deepEqual(regionShape(JSON.parse(outText(e, 'places.json'))), regionShape(example));
 });
 test('region events are tagged, carry their parents as their chain, and are left out of the rows\' chains and levels', async () => {
   const { events } = await eventsOf(NEWTONS, { base: BASE });
