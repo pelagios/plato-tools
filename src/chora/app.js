@@ -614,7 +614,14 @@ async function saveDataset() {
       }
       // Opened for a workflow: the file saved is handed back to it, by reference (handback.js), before
       // a copy kept here is let go, and from the very file that went to the user's disk, read as a stream.
-      if (done && workflow) await handBack(file);
+      if (done && workflow) {
+        // Hashing a large file takes a while: the button waits, and the page says why (state.handingBack, for tests).
+        b.disabled = true;
+        const busy = Object.assign(document.createElement('span'), { className: 'muted', textContent: ' Handing the file back to the workflow…' });
+        busy.setAttribute('role', 'status'); box.append(busy);
+        state.handingBack = { disabled: b.disabled, said: busy.textContent.trim() };
+        try { await handBack(file); } finally { busy.remove(); b.disabled = false; }
+      }
       if (done === true) letGo('Saved.');
       else if (done === 'download' && !box.querySelector('[data-clear]')) {
         // A download cannot be seen to finish: the drawings are kept, and the file still offered,
