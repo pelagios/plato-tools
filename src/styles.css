@@ -312,6 +312,9 @@ a:visited { color: var(--accent); }
 .reading { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 1rem; padding: .3rem .8rem .6rem; }
 .reading legend { font-weight: 700; padding: 0 .3rem; }
 .reading > label { display: block; margin: .25rem 0; }
+.spellings { margin: 0 0 1rem; }
+.spellings-ticked { color: var(--muted, inherit); }
+.spellings-table input[type=text] { font: .85rem/1.4 var(--font-mono); padding: .2rem .3rem; border: 1px solid var(--line); border-radius: 4px; background: var(--card); color: var(--fg); max-width: 100%; }
 .reading-keys input[type=text] { font: .85rem/1.4 var(--font-mono); padding: .2rem .3rem; border: 1px solid var(--line); border-radius: 4px; background: var(--card); color: var(--fg); max-width: 100%; }
 #reading-message p { margin: .4rem 0 0; }
 

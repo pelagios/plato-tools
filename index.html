@@ -86,6 +86,8 @@
     <div id="columns" class="columns" data-for="generic-input" role="group" aria-labelledby="columns-h" hidden></div>
     <!-- Hermes: the reading options of a TEI edition or a table of places, every one off until chosen; filled by src/app.js, worded in src/engine/words.js (READING_WORDS). -->
     <fieldset id="reading" class="reading" data-for="hermes-reading" hidden></fieldset>
+    <!-- Hermes: "Group similar spellings…" for a table of places, nothing grouped until a group is ticked; filled by src/hermes-spellings.js, worded in src/engine/words.js (CLUSTER_WORDS). -->
+    <div id="spellings" class="spellings" data-for="hermes-spellings" hidden></div>
     <!-- data-tools: the tools (#tool=…) each part is shown for, once one is chosen; with none chosen, every part is shown. -->
     <div class="actions" data-tools="check convert figures">
       <button id="check" class="primary" data-tools="check">Check</button>

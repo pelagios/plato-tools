@@ -408,6 +408,79 @@ def within_checks(page, tmp):
           and st.get('format') == 'csv' and (st.get('columns') or {}).get('mapping') == {'name': 'name'} and ex == ['Rotherhithe', 'Newport, Isle of Wight']
           and 'pasted-list.csv' in chosen and message == '', {'ok': ok, 'empty': empty, 'phase': phase_empty, 'state': st.get('columns'), 'chosen': chosen[:200]})
 
+
+SPELLINGS_CSV = 'id,name,lat,lon\n1,Rotherhithe,51.5,-0.05\n2,ROTHERHITHE.,51.5,-0.05\n3,Rotherhithe,51.5,-0.05\n4,Bermondsey,51.49,-0.07\n5,Deptford,51.48,-0.03\n'
+SPELLINGS_DOM = """() => { const b = document.getElementById('spellings'); if (!b) return null;
+    return { hidden: b.hidden, open: !!document.getElementById('spellings-open'), tip: document.getElementById('spellings-open')?.dataset.tip || '',
+      after: b.previousElementSibling?.id || '', boxes: [...b.querySelectorAll('input[data-spellings-use]')].map((x) => x.checked),
+      chosen: [...b.querySelectorAll('input[data-spellings-chosen]')].map((x) => x.value), rows: [...b.querySelectorAll('tbody tr')].map((r) => r.querySelector('ul').textContent),
+      titles: document.querySelectorAll('#action [title]').length }; }"""
+
+def spellings_find(page, file, column='name'):
+    """Choose a table, open "Group similar spellings…", and find the groups in a column: the page's state once they are shown."""
+    s = reading_case(page, file, columns=True)
+    if not s.get('columns'): return s
+    try:
+        page.click('#spellings-open')
+        page.select_option('#spellings-column', column)
+        page.click('#spellings-find')
+    except Exception as e:
+        return {'phase': 'harness-error', 'error': str(e).split('\n')[0][:200]}
+    return wait_state(page, lambda x: (x.get('spellings') or {}).get('rows') and not x['spellings'].get('waiting'), 60, 'spelling groups')
+
+def grouped_notes(doc):
+    return [a.get('notes', '') for p in doc.get('spatialEntities', []) for a in p.get('attestations', []) if 'Grouped for lookup' in a.get('notes', '')]
+
+def spellings_checks(page, tmp):
+    """Hermes: "Group similar spellings…" for a table of places (Methodos #28). Groups are proposed
+    unticked; converted unticked, no row is grouped (with the five rows read as the presence); ticked,
+    the grouped rows carry the note and keep the source's names; the matching saved holds the groups
+    beside the mapping, and loaded again they apply as before."""
+    f = tmp / 'spellings.csv'
+    f.write_text(SPELLINGS_CSV, encoding='utf-8')
+    before = reading_case(page, f, columns=True)
+    d0 = page.evaluate(SPELLINGS_DOM) if before.get('columns') else None
+    s = spellings_find(page, f)
+    d = page.evaluate(SPELLINGS_DOM) if (s.get('spellings') or {}).get('rows') else None
+    sp = s.get('spellings') or {}
+    check('spellings: a table of places offers "Group similar spellings…" (a data-tip, no title), after the Reading options; found, the group is shown unticked with its counts and the most frequent spelling to look up by',
+          d0 and not d0['hidden'] and d0['open'] and 'tick' in d0['tip'] and 'source' in d0['tip'] and d0['after'] == 'reading' and d0['titles'] == 0
+          and d and d['boxes'] == [False] and d['chosen'] == ['Rotherhithe'] and 'Rotherhithe (2)' in d['rows'][0] and 'ROTHERHITHE. (1)' in d['rows'][0]
+          and sp.get('ticked') == 0 and sp.get('confirmed') == {} and d['titles'] == 0, {'before': d0, 'after': d, 'state': sp})
+    r0 = reading_run(page)
+    doc0 = reading_doc(page, r0, tmp, 'spellings-off.json')
+    s = spellings_find(page, f)
+    try: page.get_by_label('Use the group looked up as “Rotherhithe”', exact=True).check(); ticked = True
+    except Exception as e: ticked = str(e).split('\n')[0][:200]
+    st = wait_state(page, lambda x: (x.get('spellings') or {}).get('ticked') == 1, 10, 'ticked')
+    try:
+        with page.expect_download(timeout=30_000) as dl: page.click('#columns-save')
+        dl.value.save_as(tmp / 'spellings-matching.json'); saved = json.loads((tmp / 'spellings-matching.json').read_text())
+    except Exception as e: saved = {'error': str(e)[:200]}
+    r1 = reading_run(page)
+    doc1 = reading_doc(page, r1, tmp, 'spellings-on.json')
+    labels = lambda doc: [p.get('label') for p in doc.get('spatialEntities', [])]
+    check('spellings: unticked, no row is grouped; ticked, the three rows of the group carry "Grouped for lookup with" and keep the source\'s names',
+          len(doc0.get('spatialEntities', [])) == 5 and grouped_notes(doc0) == []
+          and ticked is True and len(grouped_notes(doc1)) == 3 and all('(spelling chosen: Rotherhithe)' in n for n in grouped_notes(doc1))
+          and labels(doc1) == ['Rotherhithe', 'ROTHERHITHE.', 'Rotherhithe', 'Bermondsey', 'Deptford'],
+          {'off': grouped_notes(doc0), 'on': grouped_notes(doc1), 'labels': labels(doc1), 'ticked': ticked, 'state': st.get('spellings')})
+    # Saved: the mapping under "columns", the ticked group under "clusters". Loaded with the file chosen
+    # afresh (nothing ticked), the group is ticked again, and the run groups the same three rows.
+    s = reading_case(page, f, columns=True)
+    fresh = (s.get('spellings') or {}).get('ticked')
+    try:
+        page.set_input_files('#columns-file', str(tmp / 'spellings-matching.json')); loaded = True
+    except Exception as e: loaded = str(e).split('\n')[0][:200]
+    st2 = wait_state(page, lambda x: (x.get('spellings') or {}).get('ticked') == 1 and x.get('columns') and 'using the matching' in ' '.join((x.get('columns') or {}).get('messages', [])).lower(), 30, 'loaded')
+    r2 = reading_run(page)
+    doc2 = reading_doc(page, r2, tmp, 'spellings-loaded.json')
+    check('spellings: the matching saved holds the groups beside the mapping ({columns, clusters}); loaded again, the group is ticked and applies as before',
+          saved.get('columns', {}).get('name') == 'name' and saved.get('clusters', {}).get('name', {}).get('groups') == [{'chosen': 'Rotherhithe', 'members': ['Rotherhithe', 'ROTHERHITHE.']}]
+          and fresh == 0 and loaded is True and (st2.get('spellings') or {}).get('ticked') == 1 and grouped_notes(doc2) == grouped_notes(doc1) and len(grouped_notes(doc2)) == 3,
+          {'saved': saved, 'fresh': fresh, 'loaded': loaded, 'state': st2.get('spellings'), 'notes': grouped_notes(doc2)})
+
+
 def krisis_place(iri, label, lon, lat, *also):
     return {'@id': iri, 'label': label, 'attestations': [{'names': [{'toponym': n} for n in (label, *also)],
             'geometries': [{'geojson': {'type': 'Point', 'coordinates': [lon, lat]}}], 'sources': [{'title': 'A survey'}]}]}
@@ -1732,6 +1805,7 @@ def main():
                   {'placed': s1.get('phase'), 'shown': said1, 'anchors': len(anchors), 'alone': s2.get('phase'), 'geoms alone': len(geoms2)})
             reading_checks(page, tmp)
             within_checks(page, tmp)
+            spellings_checks(page, tmp)
             krisis_case(page, tmp)
             krisis_pattern_match(page, tmp)
 

@@ -6,6 +6,9 @@ import { fmtBytes, formatName, progressText, summary, groups, draftNote, explain
 import { COLUMN_CHOICES, COLUMN_WORDS, columnWarnings, columnProblem, READING_WORDS, PASTE_WORDS } from './engine/words.js';
 import { mappingToSave, levelChoices } from './engine/hermes/columns.js';
 import { pastedListFile } from './engine/hermes/pasted.js';
+// Hermes: grouping similar spellings for lookup, a panel of its own (src/hermes-spellings.js).
+import { spellingsPanel } from './hermes-spellings.js';
+import { splitMatching } from './engine/hermes/cluster.js';
 import { review as W, POOL_BUSY, POOL_STUCK, PREVIEW_WORDS } from './engine/words.js';
 const REVIEW_WORDS = W;   // the review's words, where W names the words for the columns
 import { readable } from './engine/input.js';
@@ -60,6 +63,7 @@ function onMessage({ data }) {
   else if (data.type === 'places') onPlaces(data);   // Krisis: gazetteer lookup
   else if (data.type === 'error' && placesWaiting) onPlaces({ subjects: null, places: null, reason: data.message });
   else if (data.type === 'preview') onPreview(data);
+  else if (data.type === 'cluster') spellings.answer(data);   // Hermes: groups of similar spellings
   // Another tab of the main page is running: said in words, and the run may be tried again.
   else if (data.type === 'error' && data.kind === 'pool-busy') fail(data.message, POOL_BUSY);
   // This tab could not let go of the working files: no other tab is to blame, and a reload frees them.
@@ -104,6 +108,7 @@ function onDetected({ input: inp, targets: t }) {
   if (isTable(inp)) { document.querySelector('[data-for="tables-input"]').hidden = false; requestColumns(); }
   // The reading options this format has, if any, all off; a TEI file's keys are looked for.
   renderReading();
+  spellings.reset(isTable(inp));   // and nothing grouped
   if (inp.format === 'tei') requestTeiKeys();
   clearPreview();
   gateOnColumns();
@@ -159,7 +164,7 @@ function start(action, earlier) {
   else worker.postMessage({ cmd: 'run', files, action, target, options: { base, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked,
     // Hermes: the matching of columns shown, as chosen (the same JSON as the command line's --columns,
     // a pattern column in its object form), and the reading options chosen.
-    ...(isTable(input) && columns ? { columns: columnOptions() } : {}), ...sheetOption(), ...readingOptions() } });
+    ...(isTable(input) && columns ? { columns: columnOptions() } : {}), ...sheetOption(), ...readingOptions(), ...(isTable(input) ? spellings.options() : {}) } });
 }
 // Agora's options, from the Options panel: only those given are sent.
 function publishOptions() {
@@ -300,6 +305,7 @@ function onColumns(d) {
   if (d.saved) for (const h of d.headers) if (d.reasons[h] && d.problems.every((p) => p.example !== h && !String(p.example).startsWith(`${h}: `))) columns.reasons[h] = W.saved;
   columns.messages = d.saved ? [W.loaded(columnsFrom || ''), ...d.problems.map(columnProblem)] : [];
   renderColumns();
+  spellings.columns(columns.headers, columns.headers.find((h) => columns.mapping[h] === 'name'));
   // Krisis: the matching a resumed review was made with, as read for the file chosen, is the one its Finish compares with.
   if (d.id === reviewColumnsAsked) { reviewMapping = mappingText(columnOptions()); state.reviewColumns = Object.assign(Object.create(null), columns.mapping); }
   gateOnColumns();
@@ -310,6 +316,7 @@ function chooseSheet(name) {
   input.sheet = name;
   $('chosen').querySelector('p').innerHTML = `This looks like <span class="detected">${escapeHtml(formatName(input))}</span>.`;
   columns = null; state.columns = null;
+  spellings.reset(true);   // groups found in another sheet are not this one's
   requestColumns();
   gateOnColumns();
 }
@@ -497,7 +504,13 @@ function saveMatching() {
   // In the file's order, which an object would not keep for a column whose heading is a number.
   // A column made into web addresses through a pattern is saved in its object form (mappingToSave).
   const saved = mappingToSave(columns.mapping, columns.patterns, columns.levels, columns.splits);
-  const text = `{\n${columns.headers.map((h) => `  ${JSON.stringify(h)}: ${JSON.stringify(saved[h])}`).join(',\n')}\n}\n`;
+  const mapped = columns.headers.map((h) => `${JSON.stringify(h)}: ${JSON.stringify(saved[h])}`);
+  // With groups of spellings ticked, the mapping and the groups side by side ({ columns, clusters },
+  // src/engine/hermes/cluster.js): never inside the mapping, where any key could be a column's heading.
+  const groups = spellings.confirmed();
+  const text = Object.keys(groups).length
+    ? `{\n  "columns": {\n${mapped.map((l) => `    ${l}`).join(',\n')}\n  },\n  "clusters": ${JSON.stringify(groups, null, 2).replace(/\n/g, '\n  ')}\n}\n`
+    : `{\n${mapped.map((l) => `  ${l}`).join(',\n')}\n}\n`;
   a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
   a.download = (files[0]?.name || 'table').replace(/\.gz$/i, '').replace(/\.[^.]+$/, '') + '-columns.json';
   a.click();
@@ -511,7 +524,13 @@ async function loadMatching(file) {
     state.columns = { ...state.columns, messages: [COLUMN_WORDS.notJson(file.name)] };
     return;
   }
-  requestColumns(saved, file.name);
+  // A matching saved with groups of spellings: the mapping is read as before, and the groups shown, ticked as saved.
+  const { columns: mapping, clusters } = splitMatching(saved);
+  if (clusters !== undefined) {
+    try { spellings.load(clusters); }
+    catch (e) { $('columns-messages').innerHTML = `<p class="warn">${escapeHtml(e.message)}</p>`; return; }
+  }
+  requestColumns(mapping, file.name);
 }
 $('columns').addEventListener('change', (e) => {
   if (e.target.id === 'columns-sheet') chooseSheet(e.target.value);
@@ -531,6 +550,9 @@ $('columns').addEventListener('change', (e) => {
 // attribute; for now the report says what each does.
 let readingCaps = { editorial: false }, teiKeys = null;
 const hasIdColumn = () => !!columns && Object.values(columns.mapping).includes('id');
+// Hermes: "Group similar spellings…", below the Reading options for a table of places. Only the
+// groups ticked are sent with a run or a preview; any change to them clears the preview.
+const spellings = spellingsPanel({ box: $('spellings'), ask: (m) => worker.postMessage({ ...m, files, ...sheetOption() }), changed: () => clearPreview(), publish: (s) => { state.spellings = s; } });
 function renderReading() {
   const R = READING_WORDS, box = $('reading'), tei = input?.format === 'tei';
   teiKeys = null;
@@ -587,6 +609,7 @@ function readingOptions() {
 /** Why the reading options chosen cannot be used, in words, or null. A pattern itself the engine checks, and refuses in the report. */
 function readingProblem() {
   if (isTable(input) && $('reading-sameId')?.checked && !hasIdColumn()) return READING_WORDS.sameIdNoId;
+  if (isTable(input) && spellings.problem()) return spellings.problem();
   if (input?.format === 'tei') for (const [prefix, pattern] of Object.entries(keyPatterns())) if (!pattern) return READING_WORDS.keyEmpty(prefix);
   return null;
 }
@@ -654,7 +677,7 @@ function startPreview() {
   gatePreview();
   const base = $('base').value.trim() || undefined;
   worker.postMessage({ cmd: 'preview', id, files, limit: PREVIEW_N,
-    options: { base, ...(isTable(input) && columns ? { columns: columnOptions() } : {}), ...sheetOption(), ...readingOptions() } });
+    options: { base, ...(isTable(input) && columns ? { columns: columnOptions() } : {}), ...sheetOption(), ...readingOptions(), ...(isTable(input) ? spellings.options() : {}) } });
 }
 function onPreview(d) {
   if (d.id !== previewAsked) return;              // an answer about a reading changed since
