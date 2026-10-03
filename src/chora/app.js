@@ -613,7 +613,7 @@ async function saveDataset() {
       }
       // Opened for a workflow: the file saved is handed back to it, by reference (handback.js), before
       // a copy kept here is let go, and from the very file that went to the user's disk, read as a stream.
-      if (done && workflow) await handBack(file, out.name);
+      if (done && workflow) await handBack(file);
       if (done === true) letGo('Saved.');
       else if (done === 'download' && !box.querySelector('[data-clear]')) {
         // A download cannot be seen to finish: the drawings are kept, and the file still offered,
@@ -709,9 +709,10 @@ if (wf) {
     : 'This address names a workflow, but not in a form these tools use, so nothing saved here is handed back to it.';
   p.hidden = false;
 }
-async function handBack(file, name) {
+async function handBack(file) {
+  const name = file.name;
   let ref;
-  try { ref = await handback.refOf(file, name); } catch (e) {
+  try { ref = await handback.refOf(file); } catch (e) {
     $('save-result').insertAdjacentHTML('beforeend', `<p class="warn">${esc(name)} could not be handed back to the workflow (${esc(e.message)}): choose it on the main page.</p>`);
     return;
   }

@@ -6,14 +6,12 @@
 //
 // The record is the hand-off's shape, `{ files, at }`, with the workflow's id and a format number:
 //   { handback: 1, workflow: '<id>', files: [{ type: 'dataset', name, size, sha256 }], at }
-// and `files` holds REFERENCES, never the bytes: a Methodos hand-off is a list of references to files
-// (src/engine/methodos/handoffs.js, isRef and checkHandoff, on the branch methodos-engine), each
-// { type, name, size, sha256 } with sha256 64 lower-case hexadecimal digits over the file's bytes, hashed
-// as a stream by the same code, as Krisis's work file records its inputs (fileRecords in src/engine/krisis/work.js). The reference
-// here MUST stay that shape: test/chora-handback.test.js pins it, and checks it against the Methodos
-// module itself where that module is present. The main page completes the step with
-// runner.complete(state, stepId, { dataset: record.files }) once the user has chosen the saved file
-// again and refsDiffer(record.files, [file]) is empty (DEVELOPERS.md, "Chora's way back").
+// and `files` holds REFERENCES, never the bytes: a Methodos hand-off, made and checked by Methodos
+// itself (refsOf, isRef and checkHandoff in src/engine/methodos/handoffs.js). refsOf hashes the file
+// as a stream (Krisis's fileRecords), so a saved dataset of any size is never in memory whole. The
+// main page completes the step "place" with runner.complete(state, stepId, { dataset: record.files })
+// once the user has chosen the saved file again and refsDiffer(record.files, [file]) is empty
+// (DEVELOPERS.md, "Chora's way back").
 //
 // Any page of the site's origin can write this store (DEVELOPERS.md, "The shared origin"), so what is
 // read is checked again (check(): the format, the workflow it is for, the reference's shape, the age),
@@ -21,9 +19,7 @@
 // as long as the hand-off is (FRESH, two minutes): it is written when the file is saved and written
 // again when the way back is taken, so the two minutes are the navigation's, as the hand-off's are.
 import { tx, isFresh } from './handoff.js';
-// The streaming SHA-256 Krisis's fileRecords uses (src/engine/krisis/work.js), so that a reference made
-// here is the one Methodos's refsOf makes, and a saved dataset of any size is never in memory whole.
-import { fileSha256 } from '../engine/krisis/digest.js';
+import { isRef, refsOf, checkHandoff } from '../engine/methodos/handoffs.js';
 
 export const KEY = 'chora-handback';
 export const FORMAT = 1;
@@ -31,8 +27,7 @@ export const FORMAT = 1;
 export const TYPE = 'dataset';
 /** A workflow's id as an address may carry it: letters, digits, '-' and '_', at most 64, so that it is safe in an address and in the page. */
 const WORKFLOW_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
-const HEX64 = /^[0-9a-f]{64}$/;
-// A file's name as the page will show it: no path, no control characters, not empty, not absurdly long.
+// Beyond Methodos's own check, a name the main page can show: no path, no control characters, not absurdly long.
 const NAME = /^[^/\\\u0000-\u001f\u007f]{1,255}$/;
 
 export const isWorkflowId = (id) => typeof id === 'string' && WORKFLOW_ID.test(id);
@@ -57,18 +52,13 @@ export function backTo(id, here) {
   return u.href;
 }
 
-/** Whether `r` is one reference to a dataset as Methodos's isRef takes it, its name one the page can show. */
-export const isDatasetRef = (r) => !!r && typeof r === 'object' && !Array.isArray(r) && Object.keys(r).length === 4
-  && r.type === TYPE && typeof r.name === 'string' && NAME.test(r.name)
-  && Number.isSafeInteger(r.size) && r.size >= 0 && typeof r.sha256 === 'string' && HEX64.test(r.sha256);
+/** Whether `r` is one reference to a dataset, as Methodos's isRef takes it and with no other key, its name one the page can show. */
+export const isDatasetRef = (r) => isRef(r) && r.type === TYPE && Object.keys(r).length === 4 && NAME.test(r.name);
 
-/**
- * The reference to `file` (a File, or a Blob with a name), as Krisis's fileRecords makes one: its size,
- * and the SHA-256 of its bytes read once as a stream, a chunk at a time, never the whole file at once.
- */
-export async function refOf(file, name = file.name) {
-  const ref = { type: TYPE, name, size: file.size, sha256: await fileSha256(file) };
-  if (!isDatasetRef(ref)) throw new Error(`${name} cannot be handed back: its name is not one the main page can show.`);
+/** The reference to `file` (a File, or a Blob with a name), made by Methodos's refsOf: its size, and the SHA-256 of its bytes read as a stream. */
+export async function refOf(file) {
+  const [ref] = await refsOf([file], TYPE);
+  if (!isDatasetRef(ref)) throw new Error(`${file.name} cannot be handed back: its name is not one the main page can show.`);
   return ref;
 }
 
@@ -91,6 +81,7 @@ export function check(v, workflow, now = Date.now()) {
   if (Object.keys(v).sort().join() !== 'at,files,handback,workflow') return null;
   if (v.handback !== FORMAT || v.workflow !== workflow || !isFresh(v, now)) return null;
   if (!Array.isArray(v.files) || v.files.length !== 1 || !isDatasetRef(v.files[0])) return null;
+  try { checkHandoff(v.files, [TYPE], 'the step "place"'); } catch { return null; }
   return record(workflow, v.files[0], v.at);
 }
 

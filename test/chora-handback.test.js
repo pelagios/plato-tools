@@ -1,15 +1,13 @@
 // Chora's hand-back to a Methodos workflow (src/chora/handback.js): the record's shape, its check on
 // read (bad, old and foreign records refused), the workflow id taken from the address, and the SHA-256
-// over known bytes. The reference must be the shape of a Methodos hand-off, { type, name, size, sha256 }
-// (src/engine/methodos/handoffs.js, on the branch methodos-engine): pinned here, and checked against
-// that module itself where it is present (in this tree once merged, or at METHODOS_HANDOFFS).
+// over known bytes, read as a stream. The reference is a Methodos hand-off, made by Methodos's refsOf
+// (src/engine/methodos/handoffs.js), and the step "place" of a workflow is completed with it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 import { IDBFactory } from 'fake-indexeddb';
 import { FRESH, stash, take as takeHandoff } from '../src/chora/handoff.js';
+import { isRef, checkHandoff, refsOf, refsDiffer, TYPES, OPERATIONS, RECIPES, runner } from '../src/engine/methodos/index.js';
 import { KEY, FORMAT, TYPE, workflowOf, isWorkflowId, backTo, refOf, isDatasetRef, record, check, give, take, dropStale } from '../src/chora/handback.js';
 
 const hex = (b) => createHash('sha256').update(b).digest('hex');
@@ -143,22 +141,35 @@ test('kept in the hand-off\'s store under a key of its own: given, taken once, a
   delete globalThis.indexedDB;
 });
 
-// The Methodos module, where it can be reached: in this tree once methodos-engine is merged, else at
-// METHODOS_HANDOFFS (a path to src/engine/methodos/handoffs.js in a checkout of that branch).
-const here = fileURLToPath(new URL('../src/engine/methodos/handoffs.js', import.meta.url));
-const methodosAt = existsSync(here) ? here : process.env.METHODOS_HANDOFFS || null;
-test('the reference is one Methodos accepts as a hand-off of a dataset, made as Methodos makes one, and nothing Methodos refuses is used here',
-  { skip: methodosAt ? false : 'src/engine/methodos/handoffs.js is not on this branch and METHODOS_HANDOFFS is not set: the shape is pinned by the tests above' }, async () => {
-    const m = await import(pathToFileURL(methodosAt).href);
-    const text = '{"spatialEntities":[]}\n'; const file = new File([text], 'antonine.chora.json');
-    const ref = await refOf(file);
-    assert.ok(m.isRef(ref));
-    assert.deepEqual(m.checkHandoff(record('wf-1', ref).files, ['dataset'], 'the step "place"'), [ref]);
-    // Made by Methodos from the same file (Krisis's streaming hash): the same reference, key for key.
-    assert.deepEqual(await m.refsOf([file], 'dataset'), [ref]);
-    assert.deepEqual(await m.refsDiffer([ref], [file]), []);
-    assert.ok(Object.hasOwn(m.TYPES, TYPE));
-    // At least as strict: every reference Methodos refuses is refused here too.
-    for (const bad of [{ ...ref, sha256: ref.sha256.toUpperCase() }, { ...ref, size: -1 }, { ...ref, name: '' }, { ...ref, type: 'nonsense' }, { name: 'a', size: 1 }, null])
-      if (!m.isRef(bad)) assert.equal(isDatasetRef(bad), false, JSON.stringify(bad));
-  });
+test('the reference is one Methodos accepts as a hand-off of a dataset, made as Methodos makes one, and nothing Methodos refuses is used here', async () => {
+  const text = '{"spatialEntities":[]}\n'; const file = new File([text], 'antonine.chora.json');
+  const ref = await refOf(file);
+  assert.ok(isRef(ref));
+  assert.deepEqual(checkHandoff(record('wf-1', ref).files, ['dataset'], 'the step "place"'), [ref]);
+  assert.deepEqual(await refsOf([file], 'dataset'), [ref]);
+  assert.deepEqual(await refsDiffer([ref], [file]), []);
+  // The control: another file is told apart by refsDiffer.
+  assert.deepEqual(await refsDiffer([ref], [new File([text + ' '], 'antonine.chora.json')]), ['antonine.chora.json', 'antonine.chora.json']);
+  assert.ok(Object.hasOwn(TYPES, TYPE));
+  // At least as strict: every reference Methodos refuses is refused here too.
+  for (const bad of [{ ...ref, sha256: ref.sha256.toUpperCase() }, { ...ref, size: -1 }, { ...ref, name: '' }, { ...ref, type: 'nonsense' }, { name: 'a', size: 1 }, null])
+    assert.equal(isRef(bad) || isDatasetRef(bad), false, JSON.stringify(bad));
+});
+
+test('the hand-back completes the workflow\'s step "place", which is where Chora\'s way back belongs (no operation of its own)', async () => {
+  assert.equal(OPERATIONS['place.handback'], undefined);
+  assert.equal(OPERATIONS.place.kind, 'interactive'); assert.equal(OPERATIONS.place.available, true);
+  assert.match(OPERATIONS.place.waitsFor, /handed back/);
+  const fake = (type, name) => [{ type, name, size: 1, sha256: hex(name) }];
+  let s = runner.start(RECIPES['map-your-data'], { 'has-regions': false, 'will-draw': true, 'will-publish': false, target: 'plato-json' }, { files: fake('files', 'places.csv') });
+  // Every step before "place" done with outputs of the types it gives, as the page and the adapters would.
+  for (s = runner.next(s); s.current !== 'place'; s = runner.next(s)) {
+    const st = s.steps.find((x) => x.id === s.current);
+    s = runner.complete(s, st.id, Object.fromEntries(Object.entries(OPERATIONS[st.op].gives).map(([k, t]) => [k, fake(t, `${st.id}.${k}`)])));
+  }
+  assert.equal(s.status, 'waiting');
+  const r = check(record('wf-1', await refOf(new File(['{}'], 'places.chora.json'))), 'wf-1');
+  const done = runner.complete(s, 'place', { dataset: r.files });
+  assert.deepEqual(done.steps.find((x) => x.id === 'place').outputs, { dataset: r.files });
+  assert.deepEqual(runner.inputsOf(runner.next(done), 'again').files, r.files, 'the next step takes the dataset Chora saved');
+});
