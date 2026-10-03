@@ -3800,6 +3800,9 @@ def chora_adopt_checks(pw, url, tmp):
     W3 = 'https://w3id.org/whg/id/'
     # The unit tests' dataset, with Newcastle given its country (GB), so that the candidates are ranked by it.
     doc = fx('dataset.json'); doc['spatialEntities'][0]['ccodes'] = ['GB']
+    # A place linked only to a legacy WHG cluster page, and one whose @id IS a record's w3id.
+    doc['spatialEntities'].append({'@id': P + 'portal-place', 'label': 'Portal place', 'attestations': [{'identities': [{'subject': P + 'portal-place', 'object': 'https://whgazetteer.org/places/123456/portal/', 'identityType': 'exactMatch'}], 'contributor': {'name': 'Ada'}, 'created': '2026-09-01T09:00:00Z'}]})
+    doc['spatialEntities'].append({'@id': W3 + 'place:gn:2641673', 'label': 'Tyne record'})
     RESET = """([g]) => { localStorage.removeItem('plato-tools.permissions'); sessionStorage.clear(); localStorage.removeItem('plato-tools.whg-token');
       localStorage.removeItem('plato-tools.whg-token.remember');
       if (g) localStorage.setItem('plato-tools.permissions', JSON.stringify({ version: 1, grants: g })); }"""
@@ -3900,6 +3903,22 @@ def chora_adopt_checks(pw, url, tmp):
             'preview': a.get('preview'), 'markers': a.get('markers'), 'gets': [(g['url'], 'authorization' in g['headers']) for g in gets], 'text': text[:300]}
     attempt("Chora adopt: a 451 copies nothing: its marker is hidden (another's stays), the record is said to be consulted, not copied, a hand-drawing is offered, and no Adopt", unavailable)
 
+    # "Draw it yourself" arms the next drawing; Cancel, closing the panel, or another place disarms it.
+    def disarm():
+        armed = lambda: cstate(page).get('consultArmed')
+        rec = W3 + 'place:tgn:7011781'
+        page.click('#adopt-draw'); a1 = armed(); shown = page.is_visible('#adopt-armed')
+        page.click('#adopt-unarm'); a2 = armed(); gone = not page.is_visible('#adopt-armed')
+        page.click('#adopt-draw'); a3 = armed()
+        page.click('#adopt-close'); a4 = armed()
+        page.click('#adopt-find'); until(page, '() => window.__chora.adopt && window.__chora.adopt.open', 10); look_up('Newcastle')
+        page.click('#adopt-candidates li[data-cand="place:tgn:7011781"] button[data-preview]'); until(page, '() => window.__chora.adopt.phase === "preview"', 30)
+        page.click('#adopt-draw'); a5 = armed()
+        chora_pick(page, 'novocastria'); a6 = armed()
+        chora_pick(page, 'newcastle upon'); page.click('#adopt-find'); until(page, '() => window.__chora.adopt && window.__chora.adopt.open', 10); look_up('Newcastle')
+        return (a1 == rec and shown and a2 is None and gone and a3 == rec and a4 is None and a5 == rec and a6 is None), {'armed': [a1, a2, a3, a4, a5, a6], 'shown': shown, 'gone': gone}
+    attempt('Chora adopt: "Draw it yourself" arms the next drawing to cite the record (the control); Cancel, closing the panel, and choosing another place each disarm it', disarm)
+
     # Adopting Tyne: the record fetched without the token (an authority's), its point offered, Adopt keeps one adoption draft.
     def adopt_one():
         since = len(calls)
@@ -3909,14 +3928,18 @@ def chora_adopt_checks(pw, url, tmp):
         drawn = soon(page, '() => window.__chora_map.getSource("chora-preview") && window.__chora_map.querySourceFeatures("chora-preview").length > 0', 10)
         before = cstate(page)['pendingCount']
         page.fill('#adopt-basis', 'Same city: the castle and the bridge')
+        # A change of permission draws the panel again: what was typed in the basis is kept.
+        page.click('#permissions-button'); until(page, '() => document.getElementById("permissions-panel")?.open', 10)
+        page.click('#perm-keep-work'); page.click('#perm-keep-work'); page.keyboard.press('Escape')
+        st['basis kept'] = page.input_value('#adopt-basis')
         page.click('#adopt-go')
         until(page, '() => window.__chora.adopt.phase === "adopted"', 10)
         k = kept(page, st['file'].name)
         return (len(gets) == 1 and gets[0]['url'].endswith('/entity/place:gn:2641673/api') and 'authorization' not in gets[0]['headers']
                 and drawn and before == 0 and cstate(page)['pendingCount'] == 1 and ad()['done']['count'] == 2
-                and len(k) == 1 and k[0].get('kind') == 'adoption' and k[0]['basis'] == 'Same city: the castle and the bridge'), {
+                and len(k) == 1 and k[0].get('kind') == 'adoption' and k[0]['basis'] == 'Same city: the castle and the bridge' and st['basis kept'] == 'Same city: the castle and the bridge'), {'basis kept': st.get('basis kept'), 
             'gets': [(g['url'], 'authorization' in g['headers']) for g in gets], 'drawn': drawn, 'pending': [before, cstate(page)['pendingCount']], 'kept': k}
-    attempt('Chora adopt: Show the record fetches it without the token (an authority\'s record), draws it, and Adopt keeps ONE adoption draft (two attestations), only on the button', adopt_one)
+    attempt('Chora adopt: Show the record fetches it without the token (an authority\'s record), draws it, the basis typed survives the panel being drawn again, and Adopt keeps ONE adoption draft (two attestations), only on the button', adopt_one)
     def no_token_kept():
         k = kept(page, st['file'].name)
         session = page.evaluate("() => sessionStorage.getItem('plato-tools.whg-token')")
@@ -3944,6 +3967,7 @@ def chora_adopt_checks(pw, url, tmp):
         page.click('#adopt-close')
         open_for('novocastria'); a = look_up('Newcastle')
         tyne = next((c for c in a.get('candidates', []) if c['id'] == 'place:gn:2641673'), {})
+        st['cluster on novocastria'] = page.is_visible('#adopt-cluster')
         label = page.inner_text('#adopt-candidates li[data-cand="place:gn:2641673"] button[data-preview]')
         page.click('#adopt-candidates li[data-cand="place:gn:2641673"] button[data-preview]')
         until(page, '() => window.__chora.adopt.phase === "preview"', 30)
@@ -4007,8 +4031,28 @@ def chora_adopt_checks(pw, url, tmp):
         before = len(calls) + len(asked)
         page.evaluate("() => document.getElementById('adopt-form').requestSubmit()"); page.wait_for_timeout(1000)
         line = page.inner_text('#adopt-permission') if page.is_visible('#adopt-permission') else ''
-        return 'set to Never in Permissions' in line and not page.is_visible('#adopt-send') and len(calls) + len(asked) == before, {'line': line}
-    attempt('Chora adopt, Never: the line says it is set to Never, with a button to the panel, and nothing is sent', never)
+        # A token half typed survives the panel being drawn again on a change of permission.
+        page.fill('#adopt-token', 'half-typed')
+        page.click('#permissions-button'); until(page, '() => document.getElementById("permissions-panel")?.open', 10)
+        page.click('#perm-keep-work'); page.click('#perm-keep-work'); page.keyboard.press('Escape')
+        typed = page.input_value('#adopt-token')
+        return 'set to Never in Permissions' in line and not page.is_visible('#adopt-send') and len(calls) + len(asked) == before and typed == 'half-typed', {'line': line, 'token field': typed}
+    attempt('Chora adopt, Never: the line says it is set to Never, with a button to the panel, and nothing is sent; a token half typed survives the panel being drawn again', never)
+
+    # A legacy cluster link is named (Novocastria, with a record link, has no such line: the control); a place whose @id is the record's adopts the location only.
+    def cluster_and_same():
+        fresh(ALLOW); open_for('portal'); give_token(); look_up('Newcastle')
+        cluster = page.inner_text('#adopt-cluster') if page.is_visible('#adopt-cluster') else ''
+        page.click('#adopt-close')
+        open_for('tyne record'); look_up('Newcastle')
+        page.click('#adopt-candidates li[data-cand="place:gn:2641673"] button[data-preview]')
+        until(page, '() => window.__chora.adopt.phase === "preview"', 30)
+        page.click('#adopt-go'); until(page, '() => ["adopted"].includes(window.__chora.adopt.phase) || !!document.getElementById("adopt-refused")', 10)
+        done = ad().get('done') or {}
+        notes = page.inner_text('#adopt') 
+        return ('whether it holds this record is not known' in cluster and st.get('cluster on novocastria') is False
+                and done.get('count') == 1 and not page.is_visible('#adopt-refused') and not errors), {'cluster': cluster, 'novocastria': st.get('cluster on novocastria'), 'done': done, 'errors': errors[:3]}
+    attempt("Chora adopt: a place linked only to a WHG cluster page says so (one linked to a record does not); a place whose @id is the record's w3id adopts the location only, with no error", cluster_and_same)
     attempt('Chora adopt: no page error across these checks (and the checks ran: a request reached the fake WHG)', lambda: (not errors and len(calls) > 3, {'errors': errors[:5], 'calls': len(calls)}))
     ctx.close()
 
