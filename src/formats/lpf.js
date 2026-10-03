@@ -268,8 +268,8 @@ export function collectionToGazetteer(fc, fallbackTitle, loss = () => {}) {
 // matches, a score it was not given), it writes no guess and reports it.
 const BROADER_PARTITIVE = 'gvp:broaderPartitive', GVP_BROADER_PARTITIVE = LPF_PREFIXES.gvp + 'broaderPartitive';
 const SAME_PLACE = new Set(['exactMatch', 'closeMatch']);
-/** A region's name where a record gives no relationLabel: its label, else its first toponym. */
-export const regionLabel = (rec) => (typeof rec?.label === 'string' && rec.label) || list(rec?.attestations).flatMap((a) => list(a?.names)).find((n) => typeof n?.toponym === 'string')?.toponym;
+/** A record's label, which names a region only where it has no current name attestation (RegionIndex). */
+export const regionLabel = (rec) => (typeof rec?.label === 'string' && rec.label) || undefined;
 
 /**
  * What the whole document says of the regions its places are ContainedIn, gathered before any feature
@@ -278,7 +278,7 @@ export const regionLabel = (rec) => (typeof rec?.label === 'string' && rec.label
  * Candidates they were promoted from, from the candidate sets given (setCandidates).
  */
 export class RegionIndex {
-  constructor() { this.matches = new Map(); this.labels = new Map(); this.targets = new Set(); this.candidates = null; this.cache = new Map(); }
+  constructor() { this.matches = new Map(); this.names = new Map(); this.labels = new Map(); this.targets = new Set(); this.candidates = null; this.cache = new Map(); }
   /** Gather from the attestations of the record `subject`, whose name (regionLabel) is `label`. */
   add(attestations, subject, label) {
     for (const a of list(attestations)) {
@@ -297,11 +297,18 @@ export class RegionIndex {
     }
     // A name is kept only for a region with a match, so that the index stays small on a large file: one
     // with none is written under its own address, where an LPF reader finds the region's feature.
-    if (typeof subject === 'string' && label && this.matches.has(subject)) this.labels.set(subject, label);
+    if (typeof subject !== 'string' || !this.matches.has(subject)) return;
+    if (label) this.labels.set(subject, label);
+    // Its name attestations, reduced to what says whether each is current, and the first toponym.
+    for (const a of list(attestations)) {
+      if (!a || typeof a !== 'object' || (typeof a.about === 'string' && a.about !== subject)) continue;
+      const toponym = list(a.names).find((n) => typeof n?.toponym === 'string' && n.toponym)?.toponym;
+      if (toponym) (this.names.get(subject) || this.names.set(subject, []).get(subject)).push({ '@id': a['@id'], negated: a.negated, toponym });
+    }
   }
   /** Keep only what concerns the regions some place is ContainedIn; returns the Candidates wanted. */
   prune() {
-    for (const m of [this.matches, this.labels]) for (const k of [...m.keys()]) if (!this.targets.has(k)) m.delete(k);
+    for (const m of [this.matches, this.names, this.labels]) for (const k of [...m.keys()]) if (!this.targets.has(k)) m.delete(k);
     const wanted = new Set();
     for (const stubs of this.matches.values()) for (const s of stubs) for (const ir of s.identities) if (typeof ir.promotedFrom === 'string') wanted.add(ir.promotedFrom);
     return wanted;
@@ -324,7 +331,10 @@ export class RegionIndex {
    */
   resolve(region, withdrawn) {
     if (this.cache.has(region)) return this.cache.get(region);
-    const out = { label: this.labels.get(region) };
+    // WHG's label is the region's name (Surrey), not its display label (Surrey (England)): the toponym of a
+    // current name attestation, not denied, first; the record's label only where there is none.
+    const named = currentAttestations({ attestations: this.names.get(region) || [] }, withdrawn, () => {}).find((a) => !isDenial(a));
+    const out = { label: named?.toponym || this.labels.get(region) };
     const live = currentAttestations({ attestations: this.matches.get(region) || [] }, withdrawn, () => {}).filter((a) => !isDenial(a));
     const same = live.flatMap((a) => a.identities.filter((ir) => SAME_PLACE.has(ir.identityType)).map((ir) => ({ a, ir })));
     const objects = [...new Set(same.map((x) => x.ir.object))];

@@ -82,7 +82,9 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   the score. The LPF writer writes each `ContainedIn` as one relation of type `gvp:broaderPartitive`,
   as WHG does: `relationTo` is the identity's object, `certainty` the reviewer's level in LPF's words
   (`certain`, `less-certain`, `uncertain`), `whg_match_score` the Candidate's `similarityScore`, and
-  `label` the relation's `relationLabel`, else the region's label, else its first toponym. Its `when`
+  `label` the relation's `relationLabel`, else the toponym of the region's current name attestation
+  (not denied, retracted or superseded), else the region's `label`, which is a display form (*Surrey
+  (England)*) where WHG wants the name (*Surrey*). Its `when`
   and citations are the containment attestation's, as for any relation. `RegionIndex` in `lpf.js`
   gathers what the document says of the regions before any feature is written: in the JSON pre-pass
   that already finds withdrawals, or, for RDF and attestation-centric input, from the store (the

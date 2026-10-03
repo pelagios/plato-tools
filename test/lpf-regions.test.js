@@ -110,6 +110,7 @@ test('a region assigned by hand: ContainedIn straight at the gazetteer, with its
   const d = dataset();
   const att = d.spatialEntities[0].attestations.find((a) => a.relations);
   att.relations[0].relatesTo = WHG_SURREY;
+  att.relations[0].relationLabel = 'Surrey';   // a region outside the dataset has no name of its own here
   att.certaintyLevel = P + 'LessCertain';
   att.timespans = [{ startEarliest: '1801', endLatest: '1900' }];
   const { r, byId } = await lpf(d, await sets(candidateSet()));
@@ -159,14 +160,24 @@ test('two live matches to different places: no guess, the region\'s own address,
   assert.equal(loss(same.r, 'region-match-several'), undefined);
 });
 
-test("with no relationLabel, the label is the region's label, else its toponym", async () => {
-  const d = dataset();
-  delete d.spatialEntities[0].attestations.find((a) => a.relations).relations[0].relationLabel;
-  const { byId } = await lpf(d, await sets(candidateSet()));
-  assert.equal(containedIn(byId, ROTHERHITHE)[0].label, 'Surrey (England)');
-  delete d.spatialEntities.find((e) => e['@id'] === SURREY).label;
-  const { byId: b2 } = await lpf(d, await sets(candidateSet()));
-  assert.equal(containedIn(b2, ROTHERHITHE)[0].label, 'Surrey');
+test("the label is the relationLabel, else the region's toponym from a live name attestation, else its label", async () => {
+  // PLATO a6bc022's example gives no relationLabel: the region's name is in its name attestation.
+  assert.equal(dataset().spatialEntities[0].attestations.find((a) => a.relations).relations[0].relationLabel, undefined, 'the example has no relationLabel');
+  const { byId } = await lpf(dataset(), await sets(candidateSet()));
+  assert.equal(containedIn(byId, ROTHERHITHE)[0].label, 'Surrey', "the toponym, not the region's display label");
+  assert.equal(containedIn(byId, SURREY)[0].label, 'England');
+  // The relation's own wording comes first.
+  const worded = dataset();
+  worded.spatialEntities[0].attestations.find((a) => a.relations).relations[0].relationLabel = 'the county of Surrey';
+  assert.equal(containedIn((await lpf(worded, await sets(candidateSet()))).byId, ROTHERHITHE)[0].label, 'the county of Surrey');
+  // A name attestation that is denied or retracted is not the region's name: then its label.
+  const surreyOf = (d) => d.spatialEntities.find((e) => e['@id'] === SURREY);
+  const denied = dataset();
+  surreyOf(denied).attestations.find((a) => a.names).negated = true;
+  assert.equal(containedIn((await lpf(denied, await sets(candidateSet()))).byId, ROTHERHITHE)[0].label, 'Surrey (England)');
+  const retracted = dataset();
+  surreyOf(retracted).attestations.push({ '@id': `${W}attestation/r-name`, meta: [{ metaType: P + 'Retracts', targetAttestation: `${W}attestation/surrey-name` }], sources: [{ '@id': `${W}source/region-review`, title: 'Review' }] });
+  assert.equal(containedIn((await lpf(retracted, await sets(candidateSet()))).byId, ROTHERHITHE)[0].label, 'Surrey (England)');
 });
 
 test('the containment attestation keeps everything else: its citations, and a meta-attestation is still reported', async () => {
