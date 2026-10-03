@@ -1176,6 +1176,8 @@ function tablesWriter(env, rep, options, outputs, stem, loss) {
       // containerKey (JSON), and its place_id is then the address's last part (region-<hex>).
       if (!p) {
         const reuse = entityIdentifier && !usedIds.has(entityIdentifier) && (typeof iri !== 'string' || minted.place(entityIdentifier) === iri);
+        // Not reused, the identifier is not kept (reading back gives the place_id as entityIdentifier): said.
+        if (entityIdentifier && !reuse) loss({ kind: 'dropped', key: 'spatialEntity.entityIdentifier', value: entityIdentifier });
         p = { place_id: reuse ? (usedIds.add(entityIdentifier), entityIdentifier) : shortId(typeof iri === 'string' ? iri : undefined, 'place'), label: label || (typeof iri === 'string' ? iri : 'place'), country_codes: '', own };
         places.set(iri, p);
         if (typeof iri === 'string' && iri !== minted.place(p.place_id)) loss({ kind: 'place-address', value: iri });
