@@ -982,7 +982,7 @@ publishes its state on `window.__chora` for tests.
 
 - **The worker** is the main page's, with commands of its own, sent one at a time: `chora-load`,
   `chora-search`, `chora-overview` (every place's point, at most 50,000), `chora-place` (one
-  place's view) and `chora-save`.
+  place's view, with its identities as Krisis reads the whole dataset) and `chora-save`.
 - **The session database.** `chora-load` reads the dataset with `run()` and `options.sink`, so every
   format arrives as place-centric records, and writes each to `/chora.sqlite3` on the origin
   private file system, with the boxes and points of its current geometries and the names it is
@@ -1357,6 +1357,52 @@ publishes its state on `window.__chora` for tests.
     pixel; a vertex within 10 screen pixels goes to the nearest ridge, else edge. Alt held: no snapping.
 - **Georeferencing** comes from `src/engine/georef/`, which belongs to Hermes; Chora keeps none of
   its own.
+
+### Adopting a gazetteer location
+
+"Find in a gazetteer…" on the place card (`src/chora/adopt-ui.js`; the engine, pure, is
+`src/engine/chora/adopt.js`) looks the place up in the World Historical Gazetteer and adopts a record's
+location as one act that records two claims: an identity (this place IS the record) and a geometry
+(it is located where the record says).
+
+- **Only places with an `@id`.** An identity needs the place's address, so the button is disabled, with
+  the reason beside it, for a place Chora keys as `#<n>`.
+- **Asking WHG** goes through the shared lookup (`createLookup`, one queue per page) with Krisis's
+  `permittedFetch`, under the same permission (`gazetteer:whg`) and the same token keeper
+  (`permissions.token`) as Krisis on the main page. Until it is allowed, the module's one "Needs
+  permission" line stands in for Look up; there is no notice or consent of Chora's own. One query, the
+  name typed, always with `type: 'Place'` and `limit: 10`; no filters (WHG's filters remove candidates, never rank them).
+- **Ranking, honestly** (`referenceOf`, `rankCandidates`): by distance only when the place has its own
+  current geometry; inside or outside the box of its related places or countries otherwise; with neither,
+  the gazetteer's order, said as such. Candidates without coordinates come last and say so. WHG's score is
+  relative and its confidence the name's, so nothing is preselected. The numbers in the list are the
+  numbers of the markers (HTML markers, which need no glyphs from the basemap's style).
+- **What the dataset already says** comes from Krisis's `createIdentityCollector`, run over the whole
+  dataset as Chora's store reads it (`identitiesOf`, given with each place's view): `linkState(entry,
+  candidate, { exact: true }) === 'linked'` is "already linked" (the geometry only is recorded), and
+  `linkState(entry, candidate) === 'denied'` is "ruled out" (struck through, nothing to adopt; "Different
+  places?" links to Krisis). A link wins over a denial. Decisions in Krisis not yet saved are not seen.
+- **The record** is fetched with `entity()` (LPF; the token only for WHG's own records). A
+  GeometryCollection's members are offered one by one; a geometry's `when` is carried into the
+  attestation's timespans, or the geometry is refused with the reason. If the record cannot be fetched
+  (not a 451), WHG's representative point is offered, labelled as only that.
+- **Never copied:** a 451, or a source whose `redistributable` is `false` (Krisis's `upstreamLicence`,
+  tested directly, not through `licenceWarns`). Its marker is hidden, the record is said to be consulted,
+  not copied, and "Draw it yourself" makes the next drawing of the place cite it (`consultedParts`:
+  `citesAsEvidence`, the record as locator, no licence).
+- **The attestations** (`adoptionAttestations`) share `created` and the contributor and have no `@id`.
+  Both cite `gazetteerSource(WHG_SERVICE)`; the geometry with `cito:citesAsEvidence`, the record's w3id as
+  the locator, and the upstream source's licence as `https://spdx.org/licenses/<id>` (never WHG's own,
+  which the notes give beside it). The record's address is in both notes, verbatim, to pair them. A
+  licence that warns gets one neutral line, never a block.
+- **The draft** is one draft kind in `chora-drafts/` (`kind: 'adoption'`, `adoptionDraft`): the one
+  geometry chosen, the candidate's address, name and point, the attribution entry used, the place's
+  identities, the time of adopting; no lookup and no token. Removing it removes both claims. Saving makes
+  the attestations then (`draftAttestations`, with the contributor asked for as for drawings), so Mneme
+  counts 2 added for an adoption, 1 for a place already linked.
+- **Errors** (`lookupProblem`): a quota 401 keeps the token and says try tomorrow; a refused token offers to
+  give it again or forget it; a per-query error or `gateway.answered: false` is "try again", never "nothing
+  found".
 
 ## Gazetteer lookup
 

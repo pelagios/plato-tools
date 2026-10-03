@@ -457,6 +457,7 @@ export const CHORA_ADOPT_PAGE = {
   when: (t) => `dated ${t}`,
   noRecordGeometry: 'The record gives no location.',
   repOnly: "WHG's representative point only",
+  reloadLoses: 'The gazetteer lookup on screen, and its answers (anything adopted is kept).',
 };
 /** A hand-drawing's notes, after how it was drawn, for a record consulted and not copied (adopt.js consultedParts). */
 export const choraConsultedNote = (r) =>

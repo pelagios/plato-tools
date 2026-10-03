@@ -14,6 +14,7 @@ import { collectWithdrawn, resolveWithdrawn, isDenial } from '../../formats/shar
 import { viewPlace, currentGeometries } from './view.js';
 import { unionBbox } from './geo.js';
 import { fold } from './fold.js';
+import { createIdentityCollector } from '../krisis/identities.js';
 
 /** The key a place goes by in Chora: its @id, or its position in the dataset when it has none. */
 export const placeKey = (rec, n) => (rec && typeof rec['@id'] === 'string' ? rec['@id'] : `#${n}`);
@@ -70,12 +71,16 @@ export class ChoraStore {
     const insA = db.prepare('INSERT INTO sxa(n,kLo,kHi,att) VALUES (?,?,?,?)');
     const insG = db.prepare('INSERT INTO g(n,att,w,s,e,nn,rx,ry) VALUES (?,?,?,?,?,?,?,?)');
     const edges = new Map(), keyOf = keyer();
+    // Which places the dataset says are, and are not, the same, as Krisis reads it (identities.js): for
+    // adopting a gazetteer record (adopt.js). Only the relations are kept, not the records.
+    const ids = createIdentityCollector();
     let n = 0, open = false, closed = false;
     const self = this;
     return {
       header(h) { self.header = h || {}; },
       event(ev) {
-        // Identity matches are not shown on the map; everything reaches here as place-centric records.
+        // Identity matches are not shown on the map, and are kept for adopting; everything else reaches here as place-centric records.
+        if (ev.type === 'idr' && ev.value) { ids.addRelation(ev.value.subject, ev.value.object, false, null, ev.value.identityType); return; }
         if (ev.type !== 'record') return;
         const rec = ev.value, key = keyOf(rec);
         if (key === null) return;
@@ -84,6 +89,7 @@ export class ChoraStore {
         // Attestations that are not a list (the schema refuses them, and the place is still shown) are none.
         const atts = Array.isArray(rec.attestations) ? rec.attestations : [];
         collectWithdrawn(atts, edges);
+        ids.add(rec);
         const related = [...new Set(atts.flatMap((a) => (a && Array.isArray(a.relations) ? a.relations : [])).map((r) => r && r.relatesTo).filter((x) => typeof x === 'string'))];
         const label = typeof rec.label === 'string' ? rec.label : key;
         insP.bind([n, key, label, JSON.stringify(Array.isArray(rec.ccodes) ? rec.ccodes : []), JSON.stringify(related), JSON.stringify(rec)]).stepReset();
@@ -122,6 +128,7 @@ export class ChoraStore {
         if (open) { flush(); db.exec('COMMIT'); }
         insP.finalize(); insG.finalize(); insS.finalize(); insSn.finalize(); insA.finalize();
         self.edges = edges;
+        self.identities = ids.result();
       },
     };
   }
@@ -262,7 +269,15 @@ export class ChoraStore {
       if (kind) withdrawn.set(a['@id'], kind);
     }
     // Under the key it goes by here (placeKey), so that a place without an @id finds its drawings.
-    return { ...viewPlace(rec, { withdrawn, lookup: (other) => this.brief(other), ccodeBbox }), id };
+    return { ...viewPlace(rec, { withdrawn, lookup: (other) => this.brief(other), ccodeBbox }), id, identities: this.identitiesOf(id) };
+  }
+  /**
+   * What the dataset currently says of a place's identities (Krisis's currentIdentities, read over the
+   * whole dataset, withdrawals honoured): { linked, exact, denied } as lists of addresses, or null.
+   */
+  identitiesOf(id) {
+    const e = this.identities?.get(id);
+    return e ? { linked: [...e.linked], exact: [...e.exact], denied: [...e.denied] } : null;
   }
 
   close() { try { this.db.close(); } catch { /* closed already */ } }

@@ -31,6 +31,8 @@ import { choraAdoptIdentityNote, choraAdoptGeometryNote, choraConsultedNote, CHO
 export const CITES_AS_EVIDENCE = 'http://purl.org/spar/cito/citesAsEvidence';
 const SPDX = 'https://spdx.org/licenses/';
 const isIri = (s) => typeof s === 'string' && /^[A-Za-z][A-Za-z0-9+.-]*:\S+$/.test(s);
+/** Whether a place's key is an address (its @id), as adopting needs; Chora keys a place without one as #<n>. */
+export const isPlaceIri = isIri;
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 /** Dates of a record's that PLATO cannot hold as they are; the message says why, in words. */
