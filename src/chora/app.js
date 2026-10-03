@@ -317,7 +317,7 @@ function newDraft(id, geojson, extra = {}) {
   const d = { id: String(id), placeId: state.placeId, placeLabel: view?.label || '', geojson, role: '', precision: '',
     basemap: basemaps.drawnOn(basemaps.byId(state.basemap)), zoom: mapApi.zoom(), drawnAt: new Date().toISOString(), ...extra };
   // A record consulted and not copied (adopt-ui.js "Draw it yourself"): the next drawing of its place cites it.
-  if (consultArmed && consultArmed.placeId === d.placeId) { const { placeId, ...c } = consultArmed; d.consulted = c; consultArmed = null; }
+  if (consultArmed && consultArmed.placeId === d.placeId) { const { placeId, ...c } = consultArmed; d.consulted = c; consultArmed = null; state.consultArmed = null; }
   drafts.push(d);
   keepDrafts();
   renderCard();
@@ -1137,7 +1137,7 @@ mapApi.onDraw({
 });
 initMaps();
 updateTraceButtons();
-const adopt = createAdopt({ root: $('adopt'), mapApi, state, addAdoption, armConsult: (c) => { consultArmed = c; },
+const adopt = createAdopt({ root: $('adopt'), mapApi, state, addAdoption, armConsult: (c) => { consultArmed = c; state.consultArmed = c ? c.record : null; },
   adopted: (placeId) => drafts.filter((d) => d.kind === 'adoption' && d.placeId === placeId) });
 // A click on the map while tracing is the trace's (Shift-click carries a line on). Made in the moment after
 // the first press of a trace tool, before ink.js has arrived, it waits for it: the first click of a user

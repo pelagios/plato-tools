@@ -60,6 +60,7 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
 
   function close() {
     inFlight?.abort(); inFlight = null;
+    armConsult(null);   // "Draw it yourself" is for this panel's record: closed, the next drawing cites nothing
     s = null; root.hidden = true; root.innerHTML = '';
     mapApi.setCandidates([]); showAdopted();
     publish();
@@ -67,6 +68,7 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
   /** The place shown changed: the panel is for one place, and goes; that place's adoptions are drawn. */
   function placeShown(view) {
     if (s && s.view.id !== view?.id) close();
+    else if (!s) armConsult(null);
     showAdopted(view?.id);
   }
   /** The adopted locations of the place shown, in the preview style (they are not the place's until saved). */
@@ -102,6 +104,10 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
   function render() {
     if (!s) return;
     const typed = root.querySelector('#adopt-q')?.value;
+    // What is half typed survives the panel being drawn again (a change of permission or token): the basis, and a token not yet given.
+    const basisTyped = root.querySelector('#adopt-basis')?.value;
+    if (basisTyped !== undefined && s.preview) s.preview.basis = basisTyped;
+    const tokenTyped = root.querySelector('#adopt-token')?.value ?? '';
     const was = root.querySelector('#adopt-permission');
     if (was) permissions.unneed(was);   // the line is drawn afresh below; the module keeps no element gone from the page
     if (typed !== undefined) s.query = typed;
@@ -122,6 +128,8 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
       <p><button type="button" id="adopt-close">${esc(W.close)}</button></p>`;
     const line = root.querySelector('#adopt-permission');
     if (ok) { permissions.unneed(line); line.hidden = true; } else permissionLine(line);
+    const tf = root.querySelector('#adopt-token');
+    if (tf && tokenTyped) tf.value = tokenTyped;
     publish();
   }
 
@@ -132,6 +140,7 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
     if (!s.ranked.length) return `<p id="adopt-none">${esc(W.none)}</p>`;
     return `<p class="muted" id="adopt-order">${esc(order)} ${esc(W.caveat)}</p>
       <p class="muted">${esc(W.krisisUnsaved)}</p>
+      ${A.clusterLinks(s.view.identities).length ? `<p class="note" id="adopt-cluster">${esc(W.cluster)}</p>` : ''}
       <ol class="adopt-candidates" id="adopt-candidates">${shown.map(candidateHtml).join('')}</ol>
       ${s.dismissed.size ? `<p class="muted">${esc(W.dismissed(s.dismissed.size))}</p>` : ''}`;
   }
@@ -160,17 +169,17 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
     const c = p.candidate, st = s.statuses.get(c.id);
     if (!st.mayCopy || s.unavailable.has(c.id)) {
       return `<div class="adopt-preview" id="adopt-preview"><h3>${esc(c.name)}</h3><p class="warn">${esc(CHORA_ADOPT_TEXT.unavailable)}</p>
-        <p><button type="button" id="adopt-draw">${esc(W.drawInstead)}</button></p>${p.armed ? `<p class="note" id="adopt-armed">${esc(W.drawArmed(c.name))}</p>` : ''}</div>`;
+        <p><button type="button" id="adopt-draw">${esc(W.drawInstead)}</button></p>${p.armed ? `<p class="note" id="adopt-armed">${esc(W.drawArmed(c.name))} <button type="button" class="link" id="adopt-unarm">${esc(W.cancelDraw)}</button></p>` : ''}</div>`;
     }
     const opts = p.offered.length ? p.offered.map((o) => `<li><label${o.refused ? ' class="disabled"' : ''}><input type="radio" name="adopt-geom" value="${o.index}"${o.refused ? ' disabled' : ''}${p.chosen === o.index ? ' checked' : ''}>
         ${esc(o.geojson.type)}${p.feature ? '' : ` (${esc(W.repOnly)})`}${o.when ? ` <span class="muted">${esc(W.when(whenText(o.when)))}</span>` : ''}</label>${o.refused ? ` <span class="warn">${esc(o.refused.reason)}</span>` : ''}</li>`).join('')
       : `<li class="muted">${esc(W.noRecordGeometry)}</li>`;
     const chosen = p.offered.find((o) => o.index === p.chosen);
     const role = p.role || chosen?.role || '';
-    const roles = ['RepresentativePoint', 'Extent', 'FeaturePoint'].filter((r) => ROLES.includes(r));
+    const roles = A.rolesFor(chosen?.geojson.type).filter((r) => ROLES.includes(r));
     const notes = (p.notes || []).map((n) => `<li>${esc(n.text)}${n.uri ? ` <a href="${esc(n.uri)}" rel="noopener noreferrer">${esc(n.uri.replace('https://spdx.org/licenses/', ''))}</a>` : ''}</li>`).join('');
     return `<div class="adopt-preview" id="adopt-preview"><h3>${esc(c.name)} <span class="muted">${esc(st.record)}</span></h3>
-      ${p.fetchProblem ? `<p class="warn">${esc(p.fetchProblem)} ${esc(CHORA_ADOPT_TEXT['representative-point-only'])}</p>` : ''}
+      ${p.fetchProblem ? `<p class="warn">${esc(p.fetchProblem)}${p.offered.length ? ` ${esc(CHORA_ADOPT_TEXT['representative-point-only'])}` : ''}</p>` : ''}
       <fieldset><legend>${esc(W.geometries)}</legend><ul class="adopt-geoms">${opts}</ul></fieldset>
       <label for="adopt-role">${esc(W.role)}</label> <select id="adopt-role">${roles.map((r) => `<option value="${r}"${r === role ? ' selected' : ''}>${esc(ROLE_WORDS[r])}</option>`).join('')}</select>
       ${st.linked === 'exact' ? '' : `<label for="adopt-basis">${esc(W.basis)}</label> <input id="adopt-basis" type="text" autocomplete="off" value="${esc(p.basis || '')}">`}
@@ -243,8 +252,10 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
     } else if (err?.name === 'PermissionError' || err?.kind === 'auth' || err?.kind === 'quota') {
       s.problem = A.lookupProblem(err); s.phase = 'problem'; render(); return;
     } else {
+      // WHG's representative point stands in only after a passing failure, and never for a WHG record whose licence is unknown (adopt.js).
+      const fallback = !feature && Array.isArray(c.coords) && A.fallbackAllowed(err) && !(st.whgNative && st.licence === null);
       const offered = feature ? A.featureGeometries(feature)
-        : Array.isArray(c.coords) ? [{ index: 0, geojson: { type: 'Point', coordinates: c.coords }, role: 'RepresentativePoint' }] : [];
+        : fallback ? [{ index: 0, geojson: { type: 'Point', coordinates: c.coords }, role: 'RepresentativePoint' }] : [];
       const usable = offered.filter((o) => !o.refused);
       s.preview = { id, candidate: c, feature, fetchError: err ? { kind: err.kind ?? null, status: err.status ?? null } : null, fetchProblem: err ? (A.lookupProblem(err)?.text || '') : null,
         offered, chosen: usable.length === 1 ? usable[0].index : null, fetched, basis: '' };
@@ -268,10 +279,12 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
     const place = { '@id': s.view.id, label: s.view.label };
     const args = { place, candidate: p.candidate, feature: p.feature, fetchError: p.fetchError, geometryIndex: p.chosen, role: p.role, basis: p.basis, attribution: s.answer.attribution, identities: s.view.identities, created: now, fetched: p.fetched };
     // Checked now, with a stand-in contributor (who saves is asked when saving, as for drawings).
-    const check = A.adoptionAttestations({ ...args, contributor: { name: 'check' } });
+    const check = A.safeAdoption({ ...args, contributor: { name: 'check' } });
     p.notes = check.notes;
     if (check.refused) { p.refused = check.refused.reason; render(); return; }
-    const d = A.adoptionDraft({ id: `adopt-${now}-${Math.random().toString(16).slice(2, 8)}`, ...args });
+    let d;
+    try { d = A.adoptionDraft({ id: `adopt-${now}-${Math.random().toString(16).slice(2, 8)}`, ...args }); }
+    catch (e) { p.refused = CHORA_ADOPT_TEXT.error(e?.message || String(e)); render(); return; }
     d.count = check.attestations.length;
     addAdoption(d);
     s.done = { count: d.count, id: d.id, candidate: p.candidate.id };
@@ -300,6 +313,7 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
     else if (b.dataset.preview) preview(b.dataset.preview);
     else if (b.dataset.dismiss) { s.dismissed.add(b.dataset.dismiss); if (s.preview?.id === b.dataset.dismiss) s.preview = null; render(); drawMarkers(); }
     else if (b.id === 'adopt-go') adopt();
+    else if (b.id === 'adopt-unarm') { s.preview.armed = false; armConsult(null); render(); }
     else if (b.id === 'adopt-draw') { s.preview.armed = true; armConsult({ placeId: s.view.id, ...A.consultation(s.preview.candidate, s.answer.attribution) }); render(); }
   });
   root.addEventListener('change', (e) => {

@@ -1382,19 +1382,31 @@ location as one act that records two claims: an identity (this place IS the reco
   candidate, { exact: true }) === 'linked'` is "already linked" (the geometry only is recorded), and
   `linkState(entry, candidate) === 'denied'` is "ruled out" (struck through, nothing to adopt; "Different
   places?" links to Krisis). A link wins over a denial. Decisions in Krisis not yet saved are not seen.
+  Amendment 6 is met only in part: a link to a legacy WHG cluster page (`whgazetteer.org/places/<n>/portal/`)
+  is NOT counted as a link to any record, since a cluster cannot be told apart into records; the panel
+  says "This place is linked to a WHG cluster page; whether it holds this record is not known"
+  (`clusterLinks`). A place whose `@id` is the record's own w3id is that record already: the location
+  only is recorded, with a note saying so (an identity with itself is no claim).
 - **The record** is fetched with `entity()` (LPF; the token only for WHG's own records). A
   GeometryCollection's members are offered one by one; a geometry's `when` is carried into the
-  attestation's timespans, or the geometry is refused with the reason. If the record cannot be fetched
-  (not a 451), WHG's representative point is offered, labelled as only that.
+  attestation's timespans, or the geometry is refused with the reason. A line's role is Itinerary by
+  default, or Extent (`rolesFor`). If the record cannot be fetched for a passing reason only (no answer,
+  too many requests, or a 5xx: `fallbackAllowed`), WHG's representative point is offered, labelled as only
+  that; never after a 403 or 404, and never for a WHG record whose licence cannot be known (an id with no
+  dataset).
 - **Never copied:** a 451, or a source whose `redistributable` is `false` (Krisis's `upstreamLicence`,
   tested directly, not through `licenceWarns`). Its marker is hidden, the record is said to be consulted,
   not copied, and "Draw it yourself" makes the next drawing of the place cite it (`consultedParts`:
-  `citesAsEvidence`, the record as locator, no licence).
+  `citesAsEvidence`, the record as locator, no licence). Cancel beside it, closing the panel, or choosing
+  another place disarms it.
 - **The attestations** (`adoptionAttestations`) share `created` and the contributor and have no `@id`.
   Both cite `gazetteerSource(WHG_SERVICE)`; the geometry with `cito:citesAsEvidence`, the record's w3id as
   the locator, and the upstream source's licence as `https://spdx.org/licenses/<id>` (never WHG's own,
-  which the notes give beside it). The record's address is in both notes, verbatim, to pair them. A
-  licence that warns gets one neutral line, never a block.
+  which the notes give beside it). So the same source `@id` (`https://whgazetteer.org/`) carries different
+  `licence` values across a dataset, one per upstream source copied from, and the notes give both the
+  upstream licence and WHG's own. The record's address is in both notes, verbatim, to pair them; a WHG
+  record of its own is named with its dataset's name and id too. A licence that warns gets one neutral
+  line, never a block.
 - **The draft** is one draft kind in `chora-drafts/` (`kind: 'adoption'`, `adoptionDraft`): the one
   geometry chosen, the candidate's address, name and point, the attribution entry used, the place's
   identities, the time of adopting; no lookup and no token. Removing it removes both claims. Saving makes
