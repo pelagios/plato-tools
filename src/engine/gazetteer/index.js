@@ -491,10 +491,12 @@ function makeLookup({
         const text = await settleOrAbort(res.text(), one.signal);
         return { res, text };
       } catch (e) {
-        if (signal?.aborted) throw signal.reason;
         // Refused before it was sent: not counted against the allowance. Taken back still holding the
-        // lock; if the ledger fails, the charge stays, which errs towards asking less.
+        // lock; if the ledger fails, the charge stays, which errs towards asking less. Before the check
+        // for a stop: a page's wrapper (Krisis's permittedFetch) aborts the lookup with the refusal
+        // before it rethrows it, so what is caught is then the signal's reason, and still a refusal.
         if (charged && isRefusal(e) && e.kind !== 'moved') await pacer.refund(charged).catch(() => {});
+        if (signal?.aborted) throw signal.reason;
         return { failed: e, timedOut: one.timedOut() };
       } finally { one.done(); }
     }, signal);

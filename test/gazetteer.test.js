@@ -1463,6 +1463,33 @@ test("a refused request is not charged to the pacer's ledger, under the lock; a 
   assert.deepEqual(moved.after, [...BEFORE, { t: NOW, n: 50 }]);
 });
 
+test("through the page's own wrapper (Krisis's permittedFetch, which aborts the lookup on a refusal before rethrowing it), a refusal is still refunded and not retried", async () => {
+  const { permittedFetch } = await import('../src/engine/krisis/lookup.js');
+  const NOW = 1_000_000, KEY = 'whgazetteer.org:queries', BEFORE = [{ t: NOW - 1000, n: 7 }];
+  const run = async (kind) => {
+    const locks = fakeLocks();
+    const ledger = sharedLedger(locks);
+    ledger.map.set(KEY, structuredClone(BEFORE));
+    const looking = new AbortController();
+    let asked = 0, aborted = null;
+    const ask = async () => { asked++; throw refusal(kind); };
+    const fetch = permittedFetch(ask, (e) => { aborted = e; looking.abort(e); });
+    const result = await lookup({ endpoint: WHG_ENDPOINT, fetch, batchSize: 50, locks, ledger, now: () => NOW, sleep: noSleep, maxRetries: 5 })
+      .reconcile(names(50), { signal: looking.signal }).catch((e) => e);
+    return { result, aborted, asked, after: ledger.map.get(KEY), unlocked: ledger.unlocked };
+  };
+  const r = await run('undecided');
+  assert.equal(r.aborted?.kind, 'undecided', 'the wrapper stopped the lookup, as the page does');
+  assert.equal(r.result, r.aborted, 'the lookup ends with the refusal the page aborted with (runLookup words it)');
+  assert.equal(r.asked, 1, 'never asked again');
+  assert.deepEqual(r.after, BEFORE, 'refunded: the request was never sent');
+  assert.equal(r.unlocked, 0, 'the refund was made holding the lock');
+  // Control: 'moved' (sent, its answer not used) through the same wrapper stays charged.
+  const m = await run('moved');
+  assert.equal(m.asked, 1);
+  assert.deepEqual(m.after, [...BEFORE, { t: NOW, n: 50 }]);
+});
+
 test('a later createLookup for a shared endpoint with another fetch throws, naming the problem; the same fetch, or shared:false, is fine', async (t) => {
   const warn = t.mock.method(console, 'warn', () => {});
   const EP = 'https://later-fetch.example/reconcile';
