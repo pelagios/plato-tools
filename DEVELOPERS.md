@@ -75,6 +75,31 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   any pair already published, so if the places' names change and the same algorithm with the same
   settings would now score the pair differently, the first score stands. A different
   `algorithmVersion` or different `matchParameters` make a different candidate, with its own address.
+- **Regions matched to a gazetteer, in LPF** (PLATO 1d2cf6e, #23). A dataset says a place is
+  `ContainedIn` a region minted from its own data; a reviewer's attestation about that region bundles
+  an identity (closeMatch or exactMatch) to the gazetteer's region, with `certaintyLevel` on the
+  attestation and `promotedFrom` naming the Candidate, in a candidate set published apart, that holds
+  the score. The LPF writer writes each `ContainedIn` as one relation of type `gvp:broaderPartitive`,
+  as WHG does: `relationTo` is the identity's object, `certainty` the reviewer's level in LPF's words
+  (`certain`, `less-certain`, `uncertain`), `whg_match_score` the Candidate's `similarityScore`, and
+  `label` the relation's `relationLabel`, else the region's label, else its first toponym. Its `when`
+  and citations are the containment attestation's, as for any relation. `RegionIndex` in `lpf.js`
+  gathers what the document says of the regions before any feature is written: in the JSON pre-pass
+  that already finds withdrawals, or, for RDF and attestation-centric input, from the store (the
+  regions some place is `ContainedIn` that have an attestation bundling identities, read once more
+  through a quiet `Rdf2Json`). Only current matches count, by the same `currentAttestations` every
+  writer uses, with denials left out. The cases: a `ContainedIn` straight at the gazetteer, or at a
+  region with no current match, is written as it stands, with the containment's own certainty and no
+  score (a region assigned by hand). Several current matches to different places: no guess, the
+  region's own address, reported (`region-match-several`). A score is written only from a Candidate
+  found in the sets given whose pair is the identity's (either way round); otherwise none, reported
+  with the suggestion's address (`region-match-no-score`). The candidate sets come as
+  `options.candidates` (inputs detected as a candidate set; `--candidates SET` on the command line,
+  repeatable, for `convert --to lpf` or `lpf-seq` only); a set is read for its scores alone, its own
+  faults left to checking it on its own. The page gives none yet, so its LPF has no scores, each
+  reported. A region's name is kept only for a region with a match, so that the index stays small;
+  an unmatched region's `ContainedIn` keeps only its `relationLabel`. `test/lpf-regions.test.js` has
+  each case on PLATO's `place-centric-regions.json` and `candidate-set-regions.json`.
 - **The about sheet's authors.** Each item of `creator` is `Name <address>`, an address alone, or a
   name alone (PLATO 8385472; `creatorOf` in `tables.js`). An item alone is an address only with a
   scheme and `//`, or a `urn:`, `tag:`, `mailto:`, `doi:` or `info:` scheme, so that `Re:Place` is a
