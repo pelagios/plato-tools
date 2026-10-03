@@ -21,7 +21,7 @@
 import { isAbsoluteIri } from '../../lib/context.js';
 import { placeAddress, addressNote, addressFromPattern, patternProblem, patternId, GAZETTEER_PATTERNS } from './addresses.js';
 import { withinNote } from './within.js';
-import { parseGridRef, gridRefToWgs84, looksLikeGridRef } from './gridref.js';
+import { parseGridRef, gridRefToWgs84, looksLikeGridRef, isMissingMarker } from './gridref.js';
 
 /** What each field of the mapping means, and whether one column only may be mapped to it. */
 export const FIELDS = {
@@ -273,9 +273,10 @@ export function guessColumns(headers, sampleRows = [], headerText = {}, { ownGeo
     } else if (field === 'geometry') {
       if (!vs.length || !vs.every(geometryLike)) { reason = `the heading "${h}" reads as a geometry, but its values are not GeoJSON geometries, so it is kept in the notes`; field = 'note'; }
     } else if (field === 'gridref') {
-      // At least half of its values must be grid references (gridref.js); letters alone count here.
-      const k = vs.filter((v) => !parseGridRef(v).error).length;
-      if (vs.length && 2 * k < vs.length) { reason = `the heading "${h}" reads as ${FIELD_WORDS.gridref}, but ${k ? `only ${k}` : 'none'} of its ${vs.length} sampled values ${k === 1 ? 'is' : 'are'} a grid reference (such as TQ 33760 80560, or O 15 34), so it is kept in the notes`; field = 'note'; }
+      // At least half of its values must be grid references (gridref.js); letters alone count here,
+      // and a missing value's marker (NA, N/A, NULL) is not a value.
+      const gv = vs.filter((v) => !isMissingMarker(v)), k = gv.filter((v) => !parseGridRef(v).error).length;
+      if (gv.length && 2 * k < gv.length) { reason = `the heading "${h}" reads as ${FIELD_WORDS.gridref}, but ${k ? `only ${k}` : 'none'} of its ${gv.length} sampled values ${k === 1 ? 'is' : 'are'} a grid reference (such as TQ 33760 80560, or O 15 34), so it is kept in the notes`; field = 'note'; }
     }
     // A column whose heading says nothing, at least half of whose values are grid references with digits.
     if (!field && vs.length && 2 * vs.filter(looksLikeGridRef).length >= vs.length) {
@@ -655,7 +656,7 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
         break;
       }
       case 'geometry': geomCell = { col, v }; break;
-      case 'gridref': gridCell = { col, v }; break;
+      case 'gridref': if (!isMissingMarker(v)) gridCell = { col, v }; break;   // NA, N/A, NULL, - are empty cells
       case 'id': id = v; idCol = col; break;
       case 'address': {
         // Put into the form `about` should carry (addresses.js): a gazetteer's forms of an address

@@ -183,3 +183,10 @@ export function gridRefToWgs84(text) {
 
 /** Whether a value has the shape of a grid reference with digits (for guessing a column from its values). */
 export const looksLikeGridRef = (v) => /\d/.test(String(v)) && !parseGridRef(v).error;
+
+/**
+ * Whether a cell holds a marker of a missing value rather than a value: R's NA, N/A, NULL, a dash and
+ * the like. "NA" is otherwise a 100 km square of the National Grid, in the Atlantic, so a grid
+ * reference column reads each of these as an empty cell.
+ */
+export const isMissingMarker = (v) => /^(?:#?N\/?A|N\.A\.?|NULL|NIL|NONE|NAN|MISSING|UNKNOWN|-+|\u2013|\u2014|\?+|\.)$/i.test(String(v ?? '').trim());

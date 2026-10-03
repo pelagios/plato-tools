@@ -252,3 +252,31 @@ test('through the engine: a CSV of grid references, guessed, converted to PLATO 
   const bad = r.report.items.find((i) => i.kind === 'generic-gridref-invalid');
   assert.ok(bad && bad.examples.some((e) => e.includes('(TQ123)')), JSON.stringify(bad));
 });
+
+// ---- review findings (#28) ---------------------------------------------------------------------------
+test("a missing value's marker (R's NA, N/A, NULL, a dash) in a grid reference column is an empty cell: no location, nothing reported", async () => {
+  // "NA" alone is otherwise the National Grid's 100 km square NA, in the Atlantic west of the Hebrides.
+  assert.equal(parseGridRef('NA').error, undefined);
+  for (const v of ['NA', 'na', 'N/A', 'n/a', 'NULL', '-']) {
+    const { a, reported } = read({ n: 'x', g: v }, { n: 'name', g: 'gridref' });
+    assert.deepEqual(reported, [], v);
+    assert.equal(a.attestation.geometries, undefined, v);
+    assert.equal(a.label, 'x', v);
+  }
+  // Control: a reference in the same column is converted.
+  assert.equal(read({ n: 'x', g: 'TQ3380' }, { n: 'name', g: 'gridref' }).a.attestation.geometries.length, 1);
+  // Through the engine, the column guessed from its heading.
+  const csv = 'id,name,grid ref\na,Alpha,NA\nb,Beta,TQ3380\nc,Gamma,N/A\nd,Delta,SU1234\ne,Eps,NULL\nf,Zeta,TQ1751\ng,Eta,na\nh,Theta,NY2000\ni,Iota,-\n';
+  const r = await go([textFile(csv, 'na.csv')], 'convert', 'plato-json');
+  const doc = JSON.parse(outText(r.e, Object.keys(r.e.outs)[0]));
+  const place = (label) => doc.spatialEntities.find((p) => p.label === label);
+  for (const label of ['Alpha', 'Gamma', 'Eps', 'Eta', 'Iota']) {
+    assert.ok(place(label), label);   // the row is carried...
+    assert.equal(place(label).attestations?.[0]?.geometries, undefined, label);   // ...with no location
+  }
+  assert.deepEqual(r.report.items.filter((i) => i.kind.startsWith('generic-gridref')).map((i) => i.examples), []);
+  // Control: the reference beside them is converted, to the square's centre in London.
+  const beta = place('Beta').attestations[0].geometries[0];
+  assert.equal(beta.sourceLabel, 'TQ3380');
+  assert.ok(Math.abs(beta.reprPoint[1] - 51.508) < 0.01 && Math.abs(beta.reprPoint[0] + 0.078) < 0.01, JSON.stringify(beta));
+});

@@ -644,7 +644,10 @@ readers link to those headings, so keep them.
   `NGR`, `OSGB`, `OS grid`, `irish grid`… in `HEADINGS`) when at least half its sampled values are
   references, and from its values alone, when its heading says nothing, if at least half are
   references with digits (`looksLikeGridRef`: letters alone, such as a state code, are not enough).
-  Irish Transverse Mercator (ITM) coordinates, which are numbers with no letters, are not read. An
+  Irish Transverse Mercator (ITM) coordinates, which are numbers with no letters, are not read. A
+  missing value's marker in the column (R's `NA`, `N/A`, `NULL`, `NIL`, `NONE`, `NaN`, a dash, `?`:
+  `isMissingMarker`) is an empty cell, with no location and nothing reported, since `NA` is otherwise
+  the National Grid's 100 km square NA, in the Atlantic; other fields are unaffected. An
   invalid reference is `generic-gridref-invalid` (a loss, with the value). A row with a latitude and
   longitude too takes its location from those; the reference is kept in the notes, and
   `generic-gridref-disagrees` (a warning) is given when the two are farther apart than the
