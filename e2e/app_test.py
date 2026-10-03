@@ -4242,16 +4242,25 @@ def ink_checks(page, base, tmp, h):
         if modifiers: page.keyboard.up(modifiers)
         return x, y
     def no_maps_kept():
-        page.evaluate("() => navigator.storage.getDirectory().then((r) => r.removeEntry('chora-overlays', { recursive: true })).catch(() => {})")
+        """The maps kept let go, from a page of the same site that is not Chora's: a Chora page brings its maps kept
+        back as it starts, and keeps one again once shown, so while it runs it can write what is removed here
+        (on the deployed site the map kept_together kept, on localhost, came back that way). Then it is read
+        that none is kept."""
+        page.goto(base)
+        left = page.evaluate("""() => navigator.storage.getDirectory().then(async (r) => { await r.removeEntry('chora-overlays', { recursive: true }).catch(() => {});
+          return r.getDirectoryHandle('chora-overlays').then(() => true, () => false); })""")
+        if left: raise RuntimeError('set-up: the maps kept could not be let go')
 
     def trace_line_save():
         # No map kept, and the map's server not allowed: the tools are there, not offered, and say why in a tooltip.
         chora_boot(page, base)
-        no_maps_kept()
         if page.evaluate(GRANT, IA) != 'undecided': panel_set([IA], 'undecided')     # allowed by the maps' checks (or Never, left by one that failed)
+        no_maps_kept()
         f = place_file('ink-line.json'); chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
         page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
         buttons = page.evaluate(TRACE_TIP)
+        # What the page started with, said first if the check fails: the maps shown and the server's permission.
+        start = {'grant': page.evaluate(GRANT, IA), 'shown': [(o['annotationId'][-4:], o['permission'].replace(A, 'A'), o['firstTile']) for o in cstate(page)['overlays']]}
         page.mouse.move(1, 1); page.hover('#draw-tools button[data-trace="line"]')
         tip_before = [t['text'] for t in shown_tips(page, 'Show a historical map to trace from it')]
         waiting = (cstate(page).get('traceReady') is False and all(b[0] == 'true' and b[1] is False and not b[3] for b in buttons) and tip_before == ['Show a historical map to trace from it'])
@@ -4274,7 +4283,7 @@ def ink_checks(page, base, tmp, h):
         click_image(a['id'], INK_RIVER[50])
         until(page, '() => ["proposed", "error"].includes(window.__chora.ink?.phase)', 60)
         ink = cstate(page)['ink']
-        if ink['phase'] != 'proposed': return False, {'ink': ink}
+        if ink['phase'] != 'proposed': return False, {'start': start, 'ink': ink}
         drawn = soon(page, PROPOSAL_DRAWN, 10)
         proposed = [tuple(p) for p in ink['last']['image']['coordinates']]
         hd = hausdorff(proposed, INK_RIVER)
@@ -4293,7 +4302,7 @@ def ink_checks(page, base, tmp, h):
         card = page.inner_text('#card')
         page.click('#save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
         ls = cstate(page)['lastSave'] or {}
-        if not ls.get('passed'): return False, {'save': ls, 'card': card[-300:]}
+        if not ls.get('passed'): return False, {'start': start, 'save': ls, 'card': card[-300:]}
         with page.expect_download(timeout=T(60) * 1000) as d: page.click('#save-result button.primary')
         out = tmp / 'ink-line-saved.json'; d.value.save_as(out)
         new = json.loads(out.read_text())['spatialEntities'][0]['attestations'][-1]
@@ -4308,7 +4317,7 @@ def ink_checks(page, base, tmp, h):
                 and notes.endswith('then accepted as proposed.') and new['geometries'][0]['geojson']['type'] == 'LineString'
                 and any(p.startswith('/iiif/inkpng/') and p.endswith('default.jpg') for p in paths) and at_origin(rows, B) == [] and at_origin(rows, C) == []
                 and len(rows) == len(at_origin(rows, A))), {
-            'buttons before a map': buttons, 'tooltip before': tip_before, 'inert': inert, 'line': said, 'asked before allowing': early, 'buttons after': buttons_after,
+            'start': start, 'buttons before a map': buttons, 'tooltip before': tip_before, 'inert': inert, 'line': said, 'asked before allowing': early, 'buttons after': buttons_after,
             'hausdorff px': round(hd, 2), 'ends': ends, 'notes': notes[:220], 'citations': [c.get('citationFunction') for c in cits],
             'carried on': carried, 'clicks traced when carried on': traced_again, 'census': sorted({(r['port'], r['path'].split('/')[2] if r['path'].count('/') > 2 else r['path']) for r in rows}), 'ink': {k: ink['last'].get(k) for k in ('scale', 'grown', 'vertices', 'gaps')}}
     attempt('Chora ink: "Trace line" is not offered before a map is drawn, and says why in its tooltip (aria-disabled, no title); the map\'s server asked nothing until allowed in the panel; a click proposes the river (within 2 px, end to end) from that server\'s tiles alone; Shift-click carries it on (tracing the new click alone); Enter makes it a drawing; saved, it cites the map and the georeference, says it was traced with assistance and accepted as proposed, and Mneme passes', trace_line_save)
