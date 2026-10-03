@@ -1,6 +1,11 @@
-<img src="public/logo/plato-mark.svg" alt="" width="40" align="left">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="public/logo/plato-tools-logo-dark.svg">
+  <img src="public/logo/plato-tools-logo.svg" alt="PLATO tools" width="320">
+</picture>
 
 # PLATO tools
+
+**Status: alpha — under development; not yet in beta testing.**
 
 Tools for data about places in the formats of PLATO, the Place Attestation Ontology: check it,
 convert it, compare two versions of it, publish it. They run in your browser at
@@ -230,6 +235,12 @@ npm run dev                               # a local server
 
 [DEVELOPERS.md](DEVELOPERS.md) has the rest: how the tools are built, how they are pinned to PLATO,
 every test and what it proves, and the conventions to keep.
+
+## Citing
+
+If you use the tools in your work, please cite them: [CITATION.cff](CITATION.cff) gives the
+citation (GitHub shows it as "Cite this repository"), and [.zenodo.json](.zenodo.json) the record
+each release is archived under. PLATO itself is cited separately, as its own repository says.
 
 ## Acknowledgements
 

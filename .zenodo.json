@@ -1,0 +1,38 @@
+{
+  "title": "PLATO tools",
+  "description": "<p>Tools for data about places in the formats of PLATO, the Place Attestation Ontology: check it, convert it, compare two versions of it, publish it. They run in the browser, with the files kept on the user's own computer and nothing sent to any other site unless the user allows it, and from the command line for many files at a time.</p><p>Development has been supported by the Institute for Spatial History Innovation (ISHI) at the University of Pittsburgh.</p><p><strong>Status: alpha — under development; not yet in beta testing.</strong></p>",
+  "upload_type": "software",
+  "version": "0.9.0-alpha.1",
+  "license": "bsd-3-clause",
+  "access_right": "open",
+  "creators": [
+    {
+      "name": "Gadd, Stephen",
+      "affiliation": "Institute for Spatial History Innovation (ISHI), University of Pittsburgh",
+      "orcid": "0000-0003-3060-0181"
+    }
+  ],
+  "keywords": [
+    "PLATO",
+    "historical gazetteer",
+    "place",
+    "attestation",
+    "linked open data",
+    "Linked Places Format",
+    "data validation",
+    "format conversion",
+    "digital humanities"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "10.5281/zenodo.21688313",
+      "relation": "isSupplementTo",
+      "scheme": "doi"
+    },
+    {
+      "identifier": "https://pelagios.org/place-attestation-ontology/guide/tools.html",
+      "relation": "isDocumentedBy",
+      "scheme": "url"
+    }
+  ]
+}

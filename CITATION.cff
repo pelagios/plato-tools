@@ -1,0 +1,37 @@
+cff-version: 1.2.0
+message: "If you use PLATO tools, please cite them as below."
+title: "PLATO tools"
+abstract: >-
+  Tools for data about places in the formats of PLATO, the Place Attestation
+  Ontology: check it, convert it, compare two versions of it, publish it. They
+  run in the browser, with the files kept on the user's own computer, and from
+  the command line for many files at a time.
+type: software
+authors:
+  - family-names: Gadd
+    given-names: Stephen
+    orcid: "https://orcid.org/0000-0003-3060-0181"
+    email: stephen.gadd@pitt.edu
+    affiliation: "Institute for Spatial History Innovation (ISHI), University of Pittsburgh"
+version: 0.9.0-alpha.1
+license: BSD-3-Clause
+repository-code: "https://github.com/pelagios/plato-tools"
+url: "https://pelagios.org/plato-tools/"
+references:
+  - type: software
+    title: "PLATO — Place Attestation Ontology"
+    authors:
+      - family-names: Gadd
+        given-names: Stephen
+    doi: 10.5281/zenodo.21688313
+    url: "https://pelagios.org/place-attestation-ontology/"
+keywords:
+  - PLATO
+  - historical gazetteer
+  - place
+  - attestation
+  - linked open data
+  - Linked Places Format
+  - data validation
+  - format conversion
+  - digital humanities
