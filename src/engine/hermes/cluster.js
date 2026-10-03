@@ -32,8 +32,11 @@
 //       other languages written in the Latin alphabet passably, being coarse (every vowel after the
 //       first letter counts for nothing; d and t, f, v and w, g, k and q are each one sound), so it
 //       is for names that sound alike and are spelt differently, and it groups the most, wrongly
-//       too ("Rotherhithe" and "Redruth" are both 7272). A digit is kept as itself (so "Newton 2" and "Newton 3" stay apart), and a word with no
-//       Latin letter at all (Greek, Arabic, Chinese…) is kept as it is, never coded to nothing.
+//       too ("Rotherhithe" and "Redruth" are both 7272). A digit is kept as itself (so "Newton 2" and
+//       "Newton 3" stay apart), and a word with no Latin letter at all (Greek, Arabic, Chinese…) is
+//       kept as it is, never coded to nothing. A digit inside a word with a Latin letter is coded as
+//       the letters are, so a digit repeated there is one, as any run of one code is ("A22" and "A2"
+//       share a code); a word of digits alone is kept whole ("22" and "2" do not).
 // - suggested is the most frequent member (a tie: the one met first), for the spelling to look up
 //   with; the page lets the user type another. Members are listed most frequent first (a tie: in the
 //   order met), and clusters by how many values they hold (then by key), so the output is the same
@@ -70,7 +73,7 @@ export function fingerprint(value) {
   return [...new Set(words)].sort().join(' ');
 }
 
-/** OpenRefine's n-gram fingerprint of a value (n = 2): "Paris" is "arispa"; a value shorter than n is itself. */
+/** OpenRefine's n-gram fingerprint of a value (n = 2): "Paris" is "arispari"; a value shorter than n is itself. */
 export function ngramFingerprint(value, n = 2) {
   const s = fold(String(value ?? '').toLowerCase()).replace(PUNCT, '').replace(/\s+/g, '');
   if (s.length < n) return s;

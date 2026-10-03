@@ -85,6 +85,10 @@ test('phonetic: Cologne phonetics, by its published examples, word by word, neve
   assert.equal(cologne('Müller-Lüdenscheidt'), '65752682');
   assert.equal(cologne('Wikipedia'), '3412');
   assert.equal(cologne('Breschnew'), '17863');
+  // A digit inside a word with a Latin letter is coded as the letters are: repeated, it is one.
+  assert.equal(cologne('a22'), cologne('a2'));
+  assert.notEqual(cologne('a23'), cologne('a2'));   // the control: another digit is not
+  assert.notEqual(phoneticKey('22'), phoneticKey('2'));   // a word of digits alone is kept whole
   // Sounds alike, spelt differently.
   assert.equal(phoneticKey('Meyer'), phoneticKey('Maier'));
   assert.equal(phoneticKey('Rotherhithe'), phoneticKey('Rotherhith'));
