@@ -2312,6 +2312,11 @@ def front_page_checks(browser, url):
                        cards: ul ? [...ul.children].map((li) => li.tagName === 'LI' ? li.querySelector('h4')?.textContent.trim() : '!' + li.tagName) : [] }; })""")
             first = page.evaluate("() => { const c = document.querySelector('#toolbox .tool'); return c && { name: c.querySelector('h4')?.textContent.trim(), coming: c.classList.contains('coming'), link: !!c.querySelector('.tool-link') }; }")
             every = page.eval_on_selector_all('#toolbox .tool', 'es => es.length')
+            # The groups flow (Stephen, 2 October): a group of one shares a row with the next, so Start
+            # here sits beside Bring your data in, and Publish and keep beside Explore; the groups of
+            # three and two that follow each other start rows of their own. Tops of the headings, by group.
+            rows = page.evaluate("""() => Object.fromEntries([...document.querySelectorAll('#toolbox h3.tool-group')].map((h) => [h.id.slice(3), Math.round(h.getBoundingClientRect().top)]))""")
+            vw = page.evaluate('() => innerWidth')
             page.click('#toolbox ul[aria-labelledby="tg-check"] .tool-link[data-tool="check"]')
             chose = {'hash': page.evaluate('() => location.hash'), 'tool': page.evaluate('() => window.__plato.tool ?? null'),
                      'current': page.eval_on_selector_all('#toolbox [aria-current]', 'es => es.map((e) => e.dataset.tool)')}
@@ -2319,9 +2324,11 @@ def front_page_checks(browser, url):
                     ('Identify and locate', ['Krisis', 'Chora']), ('Publish and keep', ['Agora', 'Mneme']), ('Explore', ['Peripleo'])]
             return ([(g['heading'], g['cards']) for g in got] == want and all(g['visible'] and g['list'] for g in got) and every == 10
                     and first == {'name': 'Methodos', 'coming': True, 'link': False}
-                    and chose == {'hash': '#tool=check', 'tool': 'check', 'current': ['check']}), {'groups': got, 'first card': first, 'cards': every, 'Elenchos chosen': chose}
+                    and chose == {'hash': '#tool=check', 'tool': 'check', 'current': ['check']}
+                    and vw >= 1000 and rows.get('start') == rows.get('in') and rows.get('publish') == rows.get('explore')
+                    and rows['in'] < rows['check'] < rows['locate'] < rows['publish']), {'groups': got, 'first card': first, 'cards': every, 'Elenchos chosen': chose, 'heading tops': rows, 'width': vw}
         finally: ctx.close()
-    attempt('front page: the ten cards are in six groups under plain headings, in the order decided, Methodos (planned, not a link) first, and a card in a group is still chosen', grouped)
+    attempt('front page: the ten cards are in six groups under plain headings, in the order decided, Methodos (planned, not a link) first, the groups of one sharing a row, and a card in a group is still chosen', grouped)
 
     def guide_links():
         # The masthead's Guide and step 1's temPlato link go where the guide has them: the presence is

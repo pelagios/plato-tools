@@ -1596,7 +1596,10 @@ A push to `main` runs the tests, builds the site and publishes it to GitHub Page
   with the chosen file (`src/chora/handoff.js`).
   The cards are grouped, one `ul.tools.choose` under each plain `h3.tool-group` heading (Start here,
   Bring your data in, Check and convert, Identify and locate, Publish and keep, Explore), with each
-  card's name an `h4`; the order is decided in `docs/plans/methodos.md` (11.2). A planned card
+  card's name an `h4`; the order is decided in `docs/plans/methodos.md` (11.2). Each group is a
+  `div.tool-set` with `data-cards` (its number of cards), and the groups flow in one grid of card-wide
+  columns (3, 2 or 1, by container query), each spanning as many columns as it has cards, so that a
+  group of one shares a row; its list is on those columns by `subgrid`. A planned card
   (`li.tool.coming`: Methodos first, Peripleo last) has a badge and no link, and is never chosen. A
   check that wants the n-th card counts across the groups, not `:nth-child` within one.
 - **The introduction** (`#intro`) can be hidden, and stays hidden (localStorage
