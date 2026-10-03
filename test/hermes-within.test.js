@@ -26,6 +26,8 @@ import { columnWarnings } from '../src/engine/words.js';
 import { run } from '../src/engine/pipeline.js';
 import { sha256 } from '../src/lib/sha256.js';
 import { textFile, go, outText, env } from './engine.js';
+import { unzipSync, strFromU8 } from 'fflate';
+import Papa from 'papaparse';
 
 const CLI = fileURLToPath(new URL('../bin/plato-tools.mjs', import.meta.url));
 const cli = (...args) => { const r = spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8' }); return { code: r.status, out: r.stdout, err: r.stderr }; };
@@ -197,6 +199,25 @@ test('each region is minted once, named, labelled with its parents, contained in
   assert.equal(narrowest(2), newtonC['@id']);
   assert.equal(narrowest(3), newtonC['@id']);
   assert.equal(narrowest(1), byLabel('Newton (Lancashire, England)')['@id']);   // control
+});
+test('tables with a base: a region\'s place_id is region-<hex>, never its containerKey, and reading back gives the same region addresses with no address losses', async () => {
+  const json = await go([textFile(NEWTONS, 'places.csv')], 'convert', 'plato-json', { base: BASE });
+  const regionIris = JSON.parse(outText(json.e, 'places.json')).spatialEntities.map((p) => p['@id']).filter((i) => i.includes('/place/region-')).sort();
+  assert.equal(regionIris.length, 5);
+  const t = await go([textFile(NEWTONS, 'places.csv')], 'convert', 'tables', { base: BASE });
+  const lost = t.report.items.filter((i) => i.kind === 'place-address');
+  assert.deepEqual(lost, [], 'no place-address losses');
+  const z = unzipSync(t.e.outs['places-tables.zip'][0]);
+  const ids = Papa.parse(strFromU8(z['places.csv']), { header: true, skipEmptyLines: true }).data.map((r) => r.place_id);
+  assert.ok(ids.includes('1') && ids.includes('2') && ids.includes('3'), `an ordinary place keeps its own id (control): ${ids}`);
+  assert.deepEqual(ids.filter((i) => i.startsWith('region-')).sort(), regionIris.map((i) => i.split('/').pop()));
+  assert.ok(!ids.some((i) => i.startsWith('[')), `no containerKey as a place_id: ${ids}`);
+  const back = await go([new File([t.e.outs['places-tables.zip'][0]], 'places.zip')], 'convert', 'plato-json', { base: BASE });
+  const doc = JSON.parse(outText(back.e, 'places.json'));
+  assert.deepEqual(doc.spatialEntities.map((p) => p['@id']).filter((i) => i.includes('/place/region-')).sort(), regionIris);
+  assert.ok(doc.spatialEntities.some((p) => p['@id'] === `${BASE}place/1`), 'control: the ordinary place\'s address is minted from its own id');
+  const mill = doc.spatialEntities.find((p) => p['@id'] === `${BASE}place/1`);
+  assert.ok(regionIris.includes(mill.attestations.find((a) => a.relations)?.relations[0].relatesTo), 'the place is still ContainedIn a region read back');
 });
 test('converted regions have the shape of PLATO\'s worked example (place-centric-regions.json)', async (t) => {
   const path = `${PLATO_REPO}/schemas/examples/place-centric-regions.json`;
