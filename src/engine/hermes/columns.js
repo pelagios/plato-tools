@@ -732,12 +732,16 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
     const g = gridRefToWgs84(gridCell.v);
     const shown = gridCell.v.length > 60 ? gridCell.v.slice(0, 59) + '…' : gridCell.v;
     if (g.error) report('generic-gridref-invalid', `${where}, ${gridCell.col}: ${g.error} (${shown})`);
-    if (geometries.length) {
+    // A POINT in the WKT or GeoJSON geometry column wins as a latitude and longitude do (cellPoint);
+    // a shape that is not a point (a polygon) is kept beside the reference's point.
+    const own = geometries.length ? undefined : cellPoint(wkt, geomCell);
+    if (geometries.length || own) {
       note(gridCell.col, gridCell.v);
-      const [x, y] = geometries[0].reprPoint;
-      const allowed = g.error ? 0 : g.precisionKm + decimalsKm(lat, lon);
+      const [x, y] = own ? own.at : geometries[0].reprPoint;
+      const allowed = g.error ? 0 : g.precisionKm + (own ? own.km : decimalsKm(lat, lon));
       const km = g.error ? 0 : groundKm([x, y], [g.lon, g.lat]);
-      if (km > allowed) report('generic-gridref-disagrees', `${where}: the grid reference ${shown} (column "${gridCell.col}") is ${round3(km)} km from latitude ${lat}, longitude ${lon}, more than the ${round3(allowed)} km the two allow together; the latitude and longitude are used`);
+      const from = own ? own.words : `latitude ${lat}, longitude ${lon}`, used = own ? `${own.what} is used` : 'the latitude and longitude are used';
+      if (km > allowed) report('generic-gridref-disagrees', `${where}: the grid reference ${shown} (column "${gridCell.col}") is ${round3(km)} km from ${from}, more than the ${round3(allowed)} km the two allow together; ${used}`);
     } else if (!g.error) {
       geometries.push(clean({ reprPoint: [g.lon, g.lat], geojson: { type: 'Point', coordinates: [g.lon, g.lat] }, spatialPrecision: g.approximate ? ['approximate'] : undefined, precisionKm: [g.precisionKm], sourceLabel: gridCell.v }));
       notes.push(g.note);
@@ -774,4 +778,22 @@ function groundKm([x1, y1], [x2, y2]) {
 function decimalsKm(lat, lon) {
   const half = (s) => 0.5 * 10 ** -((/\.(\d+)/.exec(s) || ['', ''])[1].length);
   return Math.hypot(half(lat) * 111.32, half(lon) * 111.32 * Math.cos(Number(lat) * Math.PI / 180));
+}
+
+const GRIDREF_NUM = '([+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?)';
+const GRIDREF_WKT_POINT = new RegExp(`^(?:SRID=4326;)?\\s*POINT\\s*(?:ZM|Z|M)?\\s*\\(\\s*${GRIDREF_NUM}\\s+${GRIDREF_NUM}`, 'i');
+/**
+ * The point a row's Well-Known Text (already found good by wktFault) or GeoJSON geometry cell gives,
+ * when it is a POINT: { at: [lon, lat], km (half the last decimal place of each), words, what }; else
+ * undefined, as for a polygon or a line.
+ */
+function cellPoint(wkt, geomCell) {
+  const m = wkt && GRIDREF_WKT_POINT.exec(wkt.trim());
+  if (m) return { at: [Number(m[1]), Number(m[2])], km: decimalsKm(m[2], m[1]), words: `the Well-Known Text ${wkt.length > 60 ? wkt.slice(0, 59) + '…' : wkt}`, what: 'the Well-Known Text' };
+  if (!geomCell) return undefined;
+  let g;
+  try { g = JSON.parse(geomCell.v); } catch { return undefined; }
+  if (!g || g.type !== 'Point' || geometryFault('Point', g.coordinates)) return undefined;
+  const [x, y] = g.coordinates;
+  return { at: [x, y], km: decimalsKm(String(y), String(x)), words: `the GeoJSON point ${x} ${y} (column "${geomCell.col}")`, what: 'the GeoJSON point' };
 }

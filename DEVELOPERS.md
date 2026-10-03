@@ -653,7 +653,11 @@ readers link to those headings, so keep them.
   invalid reference is `generic-gridref-invalid` (a loss, with the value). A row with a latitude and
   longitude too takes its location from those; the reference is kept in the notes, and
   `generic-gridref-disagrees` (a warning) is given when the two are farther apart than the
-  reference's `precisionKm` plus half the last decimal place of the latitude and longitude. The tests
+  reference's `precisionKm` plus half the last decimal place of the latitude and longitude. A POINT in
+  the row's `wkt` or `geometry` column, when there is no latitude and longitude, is treated the same
+  way (`cellPoint`): it is the location, the reference goes to the notes, and the same warning is
+  given, with the point's own decimals. A `wkt` or `geometry` that is not a point (a polygon, a line)
+  is kept beside the reference's point, so that row has two geometries and nothing is compared. The tests
   (`test/hermes-gridref.test.js`) check the guide's worked examples (annex C to 0.0001", annex D's
   Helmert) and the OS's OSTN15 test points (`OSTN15-OSGM15-DevelopersPack.zip`) and its Northern
   Ireland Irish Grid ones, which come from OSTN15 and OSNI's transformation, not this Helmert: six

@@ -294,3 +294,30 @@ test('from its values alone, a column is guessed as grid references only at 1 km
   assert.equal(guessColumns(['where'], [{ where: 'SU1234' }]).mapping.where, 'gridref');
   assert.equal(guessColumns(['ngr'], [{ ngr: 'SU13' }, { ngr: 'TQ' }]).mapping.ngr, 'gridref');
 });
+test('with a WKT or GeoJSON point too, the point wins as a latitude and longitude do; with a polygon, both are kept', () => {
+  const g = gridRefToWgs84('TQ 30624 78388');
+  for (const [m, at, far, what] of [
+    [{ n: 'name', w: 'wkt', g: 'gridref' }, (x, y) => `POINT(${x} ${y})`, 'POINT(-0.1199 51.4983)', /from the Well-Known Text POINT\(-0\.1199 51\.4983\).*the Well-Known Text is used$/],
+    [{ n: 'name', w: 'geometry', g: 'gridref' }, (x, y) => JSON.stringify({ type: 'Point', coordinates: [x, y] }), '{"type":"Point","coordinates":[-0.1199,51.4983]}', /from the GeoJSON point -0\.1199 51\.4983 \(column "w"\).*the GeoJSON point is used$/],
+  ]) {
+    // Agreeing: one geometry, the point's, the reference in the notes, nothing reported.
+    const ok = read({ n: 'P', w: at(g.lon, g.lat), g: 'TQ 30624 78388' }, m);
+    assert.deepEqual(ok.reported, [], m.w);
+    assert.equal(ok.a.attestation.geometries.length, 1, m.w);
+    assert.equal(ok.a.attestation.geometries[0].sourceLabel, undefined, m.w);
+    assert.match(ok.a.attestation.notes, /^g: TQ 30624 78388$/m);
+    // Disagreeing by about 1 km: warned, the point still the one geometry.
+    const off = read({ n: 'P', w: far, g: 'TQ 30624 78388' }, m);
+    assert.deepEqual(off.kinds, ['generic-gridref-disagrees'], m.w);
+    assert.match(off.reported[0][1], what);
+    assert.equal(off.a.attestation.geometries.length, 1, m.w);
+  }
+  // A polygon is not a point: both kept, the reference's point first, nothing reported.
+  const poly = read({ n: 'P', w: 'POLYGON((-0.2 51.4, 0 51.4, 0 51.6, -0.2 51.6, -0.2 51.4))', g: 'TQ 30624 78388' }, { n: 'name', w: 'wkt', g: 'gridref' });
+  assert.deepEqual(poly.reported, []);
+  assert.equal(poly.a.attestation.geometries.length, 2);
+  assert.equal(poly.a.attestation.geometries[0].sourceLabel, 'TQ 30624 78388');
+  assert.match(poly.a.attestation.geometries[1].wkt, /^POLYGON/);
+  const gpoly = read({ n: 'P', w: JSON.stringify({ type: 'Polygon', coordinates: [[[-0.2, 51.4], [0, 51.4], [0, 51.6], [-0.2, 51.4]]] }), g: 'TQ 30624 78388' }, { n: 'name', w: 'geometry', g: 'gridref' });
+  assert.deepEqual(gpoly.a.attestation.geometries.map((x) => x.geojson.type), ['Point', 'Polygon']);
+});
