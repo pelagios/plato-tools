@@ -10,20 +10,43 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { IDBFactory } from 'fake-indexeddb';
 import { FRESH, stash, take as takeHandoff } from '../src/chora/handoff.js';
-import { KEY, FORMAT, TYPE, workflowOf, isWorkflowId, backTo, sha256Hex, refOf, isDatasetRef, record, check, give, take, dropStale } from '../src/chora/handback.js';
+import { KEY, FORMAT, TYPE, workflowOf, isWorkflowId, backTo, refOf, isDatasetRef, record, check, give, take, dropStale } from '../src/chora/handback.js';
 
 const hex = (b) => createHash('sha256').update(b).digest('hex');
 const NOW = 1_800_000_000_000;
 const REF = { type: 'dataset', name: 'antonine.chora.json', size: 12, sha256: hex('hello, world') };
 
-test('the SHA-256 is SubtleCrypto\'s over the exact bytes: the standard\'s vectors, and Node\'s own over random bytes', async () => {
-  assert.equal(await sha256Hex(new Uint8Array(0)), 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
-  assert.equal(await sha256Hex(new TextEncoder().encode('abc')), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+const shaOf = async (bytes) => (await refOf(new File([bytes], 'x.json'))).sha256;
+test('the SHA-256 is over the exact bytes: the standard\'s vectors, and Node\'s own over random bytes of several chunks', async () => {
+  assert.equal(await shaOf(new Uint8Array(0)), 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+  assert.equal(await shaOf(new TextEncoder().encode('abc')), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
   const bytes = randomBytes(300_001);
-  assert.equal(await sha256Hex(bytes), hex(bytes));
+  assert.equal(await shaOf(bytes), hex(bytes));
   // The control: one byte changed changes the digest (the comparison can see a difference).
   const other = Buffer.from(bytes); other[150_000] ^= 1;
-  assert.notEqual(await sha256Hex(other), hex(bytes));
+  assert.notEqual(await shaOf(other), hex(bytes));
+});
+
+test('the file is hashed as a stream, a chunk at a time, never read whole', async () => {
+  const bytes = randomBytes(1_000_003);
+  // A File-like whose whole-file reads throw: only its stream can be read, and it gives 64 KiB at a
+  // time, as a file on disk does (Node's in-memory File gives itself in one chunk).
+  const streamOnly = (f) => {
+    let chunks = 0;
+    const g = { name: f.name, size: f.size, type: f.type, get chunks() { return chunks; },
+      stream: () => { let at = 0; return new ReadableStream({ async pull(ctl) {
+        if (at >= f.size) { ctl.close(); return; }
+        ctl.enqueue(new Uint8Array(await f.slice(at, at + 65536).arrayBuffer())); at += 65536; chunks++;
+      } }); } };
+    for (const k of ['arrayBuffer', 'text', 'bytes']) g[k] = () => { throw new Error(`${k}() read the whole file`); };
+    return g;
+  };
+  const s = streamOnly(new File([bytes], 'big.chora.json'));
+  assert.deepEqual(await refOf(s), { type: 'dataset', name: 'big.chora.json', size: bytes.length, sha256: hex(bytes) });
+  assert.ok(s.chunks > 1, `read in ${s.chunks} chunks`);
+  // The control: the same File-like with its stream refused too cannot be hashed, so the hash above came from the stream.
+  const none = { ...streamOnly(new File([bytes], 'big.chora.json')), stream: () => { throw new Error('no stream'); } };
+  await assert.rejects(refOf(none), /no stream/);
 });
 
 test('a saved file\'s reference is exactly { type: "dataset", name, size, sha256 } of its bytes', async () => {
