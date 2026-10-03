@@ -980,6 +980,30 @@ again or is left, once it is that old), and its engine `src/engine/chora/` (`sto
 `draw.js`, `save.js`, `geo.js`, `trace.js`, and `ink/`, the pixel work of tracing with assistance). It
 publishes its state on `window.__chora` for tests.
 
+**Chora's way back into a workflow** (`src/chora/handback.js`; Methodos, `docs/plans/methodos.md`,
+section 5.3, stage 6). Opened as `chora.html#workflow=<id>`, where the id is letters, digits, `-` and
+`_`, at most 64 (anything else is refused in words, and never reaches the page or an address), a file
+saved, by the save dialogue or as a download, is handed back: a record in the hand-off's store
+(`plato-tools-chora`, `kv`) under its own key, `chora-handback`, of the hand-off's shape with the
+workflow and a format, `{ handback: 1, workflow, files: [{ type: 'dataset', name, size, sha256 }], at }`.
+`files` holds a reference, never the bytes: the shape of a Methodos hand-off (`isRef` and
+`checkHandoff` in `src/engine/methodos/handoffs.js`, on the branch `methodos-engine` until it is
+merged), the SHA-256 computed with SubtleCrypto over the very File that went to disk, before a copy
+kept here is let go. Then the save result offers **Back to the workflow**, a link to `./#workflow=<id>`;
+a click writes the record again, so that its two minutes (`FRESH`, as the hand-off's) are the
+navigation's, and Chora drops a stale one when it starts. Opened without `#workflow`, nothing is
+written. The main page's side is not built yet: on loading with `#workflow=<id>` it must find the
+workflow's record by that id, show the step waiting ("Draw or trace the places on a map", operation
+`place`), and only on the user's click `take(id)` the hand-back (read once, deleted, checked again by
+`check()`: another workflow's, another format's, a stale one or any reference not exactly one
+`dataset` is refused); then ask the user to choose the saved file, since the record names it and
+does not hold it; complete the step with `runner.complete(state, 'place', { dataset: record.files })`
+only when `refsDiffer(record.files, [file])` is empty; and drop a stale hand-back as it drops a stale
+hand-off. `test/chora-handback.test.js` pins the shape, the checks and the hash, and checks the
+reference against the Methodos module itself when that module is in the tree (or at
+`METHODOS_HANDOFFS`); the browser checks save in a workflow, compare the record with the downloaded
+file's size and SHA-256, follow the link, and save without one as the control.
+
 - **The worker** is the main page's, with commands of its own, sent one at a time: `chora-load`,
   `chora-search`, `chora-overview` (every place's point, at most 50,000), `chora-place` (one
   place's view, with its identities as Krisis reads the whole dataset) and `chora-save`.
