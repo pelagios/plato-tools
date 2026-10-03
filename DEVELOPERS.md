@@ -559,6 +559,12 @@ readers link to those headings, so keep them.
   rows), the store path keeps by place the first `within` (and `region`, below) each place's events
   give and puts them back on its record's event (`withinByPlace`, `pipeline.js`), so Krisis's
   `readSide`/`gather` and `match`, and the version check, see `within` on every **record** event.
+  **The first `within` for a place's address wins**: attestation-centric rows about one address that
+  give different chains (row 2 "Newton < Lancashire", row 9 "Newton < Cheshire", both about one
+  Wikidata place) give that place's record event one chain, the first row's, and the others' are not
+  carried on the event (their ContainedIn attestations, under a base address, are all still written).
+  That is enough for Methodos's stage 1, which reads one chain a place; a later stage that weighs
+  conflicting chains must read them from the attestations, not from `event.within`.
   **What PLATO is told**, as PLATO's worked example has it (`schemas/examples/place-centric-regions.json`
   and the guide's "Regions matched to a gazetteer", PLATO 1d2cf6e, a6bc022): with a base address of the user's
   own (`options.base`: the page's Options, `--base`), each distinct container, the same value under
