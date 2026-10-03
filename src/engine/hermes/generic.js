@@ -25,7 +25,11 @@ import { LOSS_TEXT } from '../report.js';
 import { tableIds } from '../../formats/tables.js';
 // The tables reader's own forms for a workbook's numbers and dates, so that a sheet reads alike either way.
 import { numberText, dateText } from '../pipeline.js';
-import { resolveColumns, applyColumns, GENERIC_KINDS, FEATURE_ID, FIELDS, OTHER } from './columns.js';
+import { resolveColumns, applyColumns, expandSplits, splitRow, GENERIC_KINDS, FEATURE_ID, FIELDS, OTHER } from './columns.js';
+import { containerKey, CONTAINED_IN } from './within.js';
+import { sha256 } from '../../lib/sha256.js';
+/** The id a region is minted with, under the base address: "region-" and 16 hex digits of the SHA-256 of its containerKey. */
+export const regionId = (key) => `region-${sha256(key).slice(0, 16)}`;
 
 // The CSV reader is shared with the spreadsheet tables (src/formats/csv.js); exported here as before.
 export { csvRecords };
@@ -347,13 +351,16 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
   const report = (kind, example) => rep.add(GENERIC_KINDS[kind] || 'loss', kind, LOSS_TEXT[kind] || kind, example);
   const sheet = sheetIn(input, options);
   const t = await open(input, sheet);
-  const { mapping, patterns, problems } = resolveColumns(t.headers, t.sample, options.columns, t.headerText, { ownGeometry: t.ownGeometry });
+  const { mapping, patterns, levels, splits, problems } = resolveColumns(t.headers, t.sample, options.columns, t.headerText, { ownGeometry: t.ownGeometry });
   for (const p of [...(t.headProblems || []), ...problems]) report(p.kind, p.example);
-  const fields = Object.values(mapping);
+  // A column split into levels is a column of its own for each part (columns.js, expandSplits).
+  const expanded = expandSplits(mapping, levels, splits);
+  const fields = Object.values(expanded.mapping);
   const byAddress = fields.includes('address'), hasId = fields.includes('id');
   // Rows with the same id as one place: each id, and the names its rows give (no row is kept).
   const sameId = options.sameId === true && hasId;
   const places = sameId ? new Map() : null;
+  const attestationCentric = byAddress || sameId;
   const what = input.container === 'workbook' ? `a table of places, the sheet "${sheet}" of a workbook` : input.format === 'csv' ? 'a table of places (CSV)' : 'plain GeoJSON';
   const title = options.title || (typeof t.head.title === 'string' && t.head.title) || (typeof t.head.name === 'string' && t.head.name) || `Places in ${file.name}`;
   yield { type: 'header', value: {
@@ -365,6 +372,45 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
   const base = options.base || defaultBase;
   if (!byAddress && !hasId) report('generic-no-ids', file.name);
   const minted = tableIds(base, () => null);
+  // The regions the rows' places lie in (within.js): with a base address of the user's own, each
+  // distinct container (the same value under the same parents, containerKey) is minted once as a
+  // place of its own, <base>place/region-<hex>, contained in its parent region, and each row's place
+  // gets one plato:ContainedIn attestation for each level of its chain. Without one, the chain is
+  // kept in the notes (columns.js, applyColumns), and that is said once. Only the keys of the regions
+  // made are held, never a row.
+  const containment = !!options.base;
+  const regionsMade = new Set();
+  let withinNoted = false;
+  const regionIri = (key) => minted.place(regionId(key));
+  // A ContainedIn attestation, citing what the row's attestation cites.
+  const containedIn = (c, iri, att) => ({ relations: [{ relationType: CONTAINED_IN, relatesTo: iri, relatedLabel: c.value }], sequence: c.level, sources: att.sources, citations: att.citations });
+  // For a row read as `a`: the events of the regions not yet made, and the place's ContainedIn attestations.
+  const regionsOf = (a) => {
+    const events = [], contained = [];
+    if (!a.within) return { events, contained };
+    if (!containment) {
+      if (!withinNoted) { withinNoted = true; report('generic-within-no-base', file.name); }
+      return { events, contained };
+    }
+    const parents = [];
+    let parentIri, parentLevel;
+    a.within.forEach((c, i) => {
+      const key = containerKey(c.level, c.value, parents), iri = regionIri(key);
+      contained.push(containedIn(c, iri, a.attestation));
+      if (!regionsMade.has(key)) {
+        regionsMade.add(key);
+        const up = parentIri ? containedIn({ level: parentLevel, value: parents[parents.length - 1] }, parentIri, a.attestation) : null;
+        const chain = a.within.slice(0, i);
+        const tags = { region: { level: c.level, key }, ...(chain.length ? { within: chain } : {}) };
+        const value = { '@id': iri, label: c.value, entityIdentifier: key, attestations: [] };
+        // Attestation-centric: a new place, its attestation given on its own, about it.
+        if (attestationCentric) { events.push({ type: 'record', newEntity: true, value, ...tags }); if (up) events.push({ type: 'attestation', value: { about: iri, ...up }, ...tags }); }
+        else { if (up) value.attestations.push(up); events.push({ type: 'record', value, ...tags }); }
+      }
+      parents.push(c.value); parentIri = iri; parentLevel = c.level;
+    });
+    return { events, contained };
+  };
   let standIn = false;
   const mint = (id) => { if (!options.base && !standIn) { standIn = true; report('generic-stand-in-base', base); } return minted.place(id); };
   // Each id met, with the number of its row (a number, not the row, so that a large file's ids are
@@ -383,9 +429,19 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
     for (const k of r.keys || []) report('generic-feature-key', k);
     // A cell holding an error carries nothing (it is read as empty), and is lost aloud.
     for (const e of r.cellErrors || []) report('generic-sheet-error-cell', `${r.where}, ${e.column.trim() ? `column "${e.column}"` : `column ${e.ref.replace(/\d+$/, '')} (no heading)`}, cell ${e.ref}: ${e.text}`);
-    const a = applyColumns(r.row, mapping, { where: r.where, report, fileName: file.name, geometry: r.geometry, idAsNote: byAddress, patterns });
+    const row = splitRow(r.row, splits, { report, where: r.where });
+    const a = applyColumns(row, expanded.mapping, { where: r.where, report, fileName: file.name, geometry: r.geometry, idAsNote: byAddress, patterns, levels: expanded.levels, from: expanded.from, withinNote: !containment });
     for (const c of a.skipped) skipped.add(c);
-    if (byAddress && a.address) { out++; yield { type: 'attestation', value: { about: a.address, ...a.attestation }, n }; continue; }
+    // The regions the row's place lies in, widest first, on the event and never in its value (within.js).
+    const w = a.within ? { within: a.within } : {};
+    if (byAddress && a.address) {
+      out++;
+      const { events, contained } = regionsOf(a);
+      yield* events;
+      yield { type: 'attestation', value: { about: a.address, ...a.attestation }, n, ...w };
+      for (const c of contained) yield { type: 'attestation', value: { about: a.address, ...c }, n, ...w };
+      continue;
+    }
     // A row about an address that gives none it can use is still read: with an id, it is a place of
     // its own (a new place, beside the attestations); without one, it has nothing to be about.
     if (byAddress && (a.id === undefined || !a.label)) {
@@ -402,7 +458,10 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
       if (!p) places.set(a.id, (p = { names: new Set() }));
       p.names.add(a.label);
       out++;
-      yield { type: 'attestation', value: { about: mint(a.id), ...a.attestation }, n };
+      const { events, contained } = regionsOf(a);
+      yield* events;
+      yield { type: 'attestation', value: { about: mint(a.id), ...a.attestation }, n, ...w };
+      for (const c of contained) yield { type: 'attestation', value: { about: mint(a.id), ...c }, n, ...w };
       continue;
     }
     const rec = {};
@@ -413,9 +472,11 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
     } else if (hasId) report('generic-id-empty', r.where);
     rec.label = a.label;
     if (a.id !== undefined) rec.entityIdentifier = a.id;
-    rec.attestations = [a.attestation];
+    const { events, contained } = regionsOf(a);
+    rec.attestations = [a.attestation, ...contained];
+    yield* events;
     out++;
-    yield byAddress ? { type: 'record', value: rec, n, newEntity: true } : { type: 'record', value: rec, n };
+    yield byAddress ? { type: 'record', value: rec, n, newEntity: true, ...w } : { type: 'record', value: rec, n, ...w };
   }
   // Each id read with options.sameId is one new place, its attestations the rows above. Its label is
   // the name its rows agree on; where they differ, none is picked: the label is the id, and the names

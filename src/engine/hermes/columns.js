@@ -20,6 +20,7 @@
 // latest end, a type column a type's label (and its identifier, when it is a web address).
 import { isAbsoluteIri } from '../../lib/context.js';
 import { placeAddress, addressNote, addressFromPattern, patternProblem, patternId, GAZETTEER_PATTERNS } from './addresses.js';
+import { withinNote } from './within.js';
 
 /** What each field of the mapping means, and whether one column only may be mapped to it. */
 export const FIELDS = {
@@ -37,6 +38,8 @@ export const FIELDS = {
   date: { single: true, words: 'the date as the source writes it' },
   start: { single: true, words: 'the earliest date: a year (such as -0500 or 1066) or an ISO date' },
   end: { single: true, words: 'the latest date: a year (such as -0500 or 1066) or an ISO date' },
+  within: { single: false, words: 'a region the place lies in (a parish, a county, a country…), with its level: 1 for the widest, then 2, 3…; given as {"field": "within", "level": 2}' },
+  split: { single: false, words: 'several regions in one cell, narrowest first, such as "Rotherhithe, Surrey, England": split on a separator into levels, given as {"field": "split", "separator": ", ", "levels": [3, 2, 1], "firstIsName": true}' },
 };
 export const OTHER = { note: 'kept in the notes, as "column: value"', skip: 'not carried over; the report says so' };
 
@@ -77,6 +80,9 @@ export const GENERIC_KINDS = {
   'generic-mapping-missing-column': 'warning',
   'generic-mapping-unknown-column': 'warning',
   'generic-mapping': 'error',
+  'generic-within-same-level': 'warning',
+  'generic-within-no-base': 'warning',
+  'generic-split-extra-parts': 'loss',
   'generic-nothing-converted': 'error',
   'generic-features-not-list': 'error',
   'generic-empty': 'warning',
@@ -135,7 +141,39 @@ const isNumber = (s) => NUMBER.test(s);
 const FIELD_WORDS = {
   name: "the place's name", alternativeNames: 'other names', latitude: 'latitude', longitude: 'longitude', wkt: 'Well-Known Text', geometry: 'a geometry',
   id: 'an identifier', address: "the place's web address", type: 'a type', language: 'a language', source: 'a source', date: 'a date', start: 'a start date', end: 'an end date',
+  within: 'a region the place lies in', split: 'several regions in one cell',
 };
+
+// ---- containing regions ("within") ------------------------------------------------------------------
+// The kind of region a heading names, ranked widest first by World Historical Gazetteer's own ranks
+// (whg3's reconciliation.js, ADMIN_RANK: country 0, region 10, county 20, district 30, hundred 40,
+// diocese 42, deanery 43, parish 45), so that a district sits above a hundred. The rank only orders
+// the guess: the levels are positional (within.js), the "within" columns numbered 1 (the widest) to n.
+// A country column is the widest region; it stays a "within" level here (a gazetteer lookup may send
+// it as a country filter; that is Krisis's to decide, not the reader's).
+const REGION_KINDS = [
+  { rank: 0, words: 'a country', test: /^(country|nation)(name|label)?$/ },
+  { rank: 10, words: 'a region, state or province', test: /^(region|state|province|land)(name|label)?$/ },
+  { rank: 20, words: 'a county, shire or department', test: /^(county|shire|department|departement|oblast)(name|label)?$/ },
+  { rank: 30, words: 'a district', test: /^(district|arrondissement)(name|label)?$/ },
+  { rank: 40, words: 'a hundred or wapentake', test: /^(hundred|wapentake)(name|label)?$/ },
+  { rank: 42, words: 'a diocese', test: /^diocese(name|label)?$/ },
+  { rank: 43, words: 'a deanery', test: /^deanery(name|label)?$/ },
+  { rank: 45, words: 'a parish, township or commune', test: /^(parish|civilparish|ecclesiasticalparish|township|commune|municipality)(name|label)?$/ },
+  // The region the place lies in, of no named kind: the narrowest, after every named kind.
+  { rank: 50, words: 'the region the place lies in', test: /^(containedin|within|partof|parent|parentplace|broader|locatedin|isin)(name|label)?$/ },
+];
+// GeoNames' and gazetteers' administrative levels (admin1, adm2): level 0 is the country, each next
+// level one narrower, on the same ranks (adm1 a region, adm2 a county, adm3 a district, adm4 a hundred).
+const ADMIN_LEVEL = /^adm(?:in)?([0-4])(name|label)?$/;
+/** The kind of region a normalised heading names, as { rank, words }, or undefined. */
+function regionKind(n) {
+  const a = ADMIN_LEVEL.exec(n);
+  if (a) return { rank: Number(a[1]) * 10, words: `administrative level ${a[1]}` };
+  return REGION_KINDS.find((k) => k.test.test(n));
+}
+const isLevel = (l) => Number.isInteger(l) && l >= 1;
+const ordinal = (n) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`;
 
 /** A cell as text: '' for nothing; a number or true/false as written; a list or object as JSON. */
 export function cellText(v) {
@@ -177,7 +215,7 @@ const GAZETTEER_WORDS = { pleiades: 'Pleiades', geonames: 'GeoNames', wikidata: 
  */
 export function guessColumns(headers, sampleRows = [], headerText = {}, { ownGeometry = false } = {}) {
   const mapping = Object.create(null), reasons = Object.create(null), taken = new Map();
-  const suggested = Object.create(null);
+  const suggested = Object.create(null), levels = Object.create(null), regions = [];
   const values = (h) => sampleRows.map((r) => cellText(r?.[h])).filter(Boolean);
   for (const h of headers) {
     const n = normaliseHeader(Object.hasOwn(headerText, h) ? headerText[h] : h);
@@ -185,6 +223,12 @@ export function guessColumns(headers, sampleRows = [], headerText = {}, { ownGeo
     let reason = h === FEATURE_ID ? "the GeoJSON feature's own id" : field ? `the heading "${h}" reads as ${FIELD_WORDS[field]}` : undefined;
     if (!field && (GAZETTEER_PREFIX.test(n) || ADDRESS_SUFFIX.test(n))) { field = 'address'; reason = `the heading "${h}" reads as a web address`; }
     const vs = values(h);
+    const kind = !field && h !== FEATURE_ID ? regionKind(n) : undefined;
+    if (kind) {
+      // A column of codes (admin1 = 12) is not a region's name: kept in the notes.
+      if (vs.length && vs.every(isNumber)) { field = 'note'; reason = `the heading "${h}" reads as ${kind.words}, but its values are numbers, not names, so it is kept in the notes`; }
+      else { field = 'within'; reason = `the heading "${h}" reads as ${kind.words}`; regions.push({ h, rank: kind.rank, at: regions.length }); }
+    }
     if (field === 'address' || field === 'id') {
       // A column of web addresses is the place's address, whatever it is called (an id column of
       // Pleiades addresses included): at least half of its values must name one, or, when its heading
@@ -228,6 +272,12 @@ export function guessColumns(headers, sampleRows = [], headerText = {}, { ownGeo
     if (single(field)) taken.set(field, h);
     mapping[h] = field; reasons[h] = reason;
   }
+  // The containing regions, widest first by the kind their headings name (in the file's order where
+  // two are of one kind), numbered 1 to n.
+  regions.sort((a, b) => a.rank - b.rank || a.at - b.at).forEach(({ h }, i) => {
+    levels[h] = i + 1;
+    reasons[h] += regions.length === 1 ? ', at level 1' : `, the ${i === 0 ? 'widest' : i === regions.length - 1 ? 'narrowest' : ordinal(i + 1)} of the ${regions.length} regions, so at level ${i + 1} (1 is the widest)`;
+  });
   // A suggestion only when no other column is the address already: one column only can be.
   for (const h of Object.keys(suggested)) if (Object.keys(mapping).some((c) => c !== h && mapping[c] === 'address')) delete suggested[h];
   for (const [h, s] of Object.entries(suggested)) {
@@ -236,7 +286,7 @@ export function guessColumns(headers, sampleRows = [], headerText = {}, { ownGeo
       ? `; ${have} the form of ${GAZETTEER_WORDS[s.gazetteer]} ids, which are made into web addresses with the pattern ${s.pattern} once you confirm that pattern, and are kept in the notes until then`
       : `; but ${have} the form of ${GAZETTEER_WORDS[s.gazetteer]} ids, so it can be read as the place's web address, made with the pattern ${s.pattern}, once you confirm that pattern`;
   }
-  return { mapping, patterns: Object.create(null), suggested, reasons, gazetteer: gazetteerColumns(headers, headerText) };
+  return { mapping, patterns: Object.create(null), levels, splits: Object.create(null), suggested, reasons, gazetteer: gazetteerColumns(headers, headerText) };
 }
 // How many of a column's sampled values are web addresses: "49 of its 50 sampled values are web addresses".
 const webAddresses = (k, n) => (n === 1 ? 'its one sampled value is a web address' : k === n ? `all ${n} of its sampled values are web addresses` : `${k} of its ${n} sampled values ${k === 1 ? 'is a web address' : 'are web addresses'}`);
@@ -258,6 +308,8 @@ export function resolveColumns(headers, sampleRows, saved, headerText, options) 
     return { ...guessColumns(headers, sampleRows, headerText, options), problems };
   }
   const mapping = Object.create(null), patterns = Object.create(null), reasons = Object.create(null), taken = new Map();
+  const levels = Object.create(null), splits = Object.create(null), usedLevels = new Map(), unlevelled = [];
+  const values = (h) => (sampleRows || []).map((r) => cellText(r?.[h])).filter(Boolean);
   for (const h of headers) {
     if (!Object.hasOwn(saved, h)) {
       mapping[h] = 'note'; reasons[h] = 'the mapping given does not name this column, so it is kept in the notes';
@@ -286,9 +338,47 @@ export function resolveColumns(headers, sampleRows, saved, headerText, options) 
       problems.push({ kind: 'generic-mapping', example: `${h}: ${f} is already column "${taken.get(f)}"` });
       continue;
     }
+    // A level goes with "within"; a separator, levels and firstIsName with "split".
+    const misplaced = entry ? Object.keys(given).filter((k) => (k === 'level' && f !== 'within') || ((k === 'separator' || k === 'levels' || k === 'firstIsName') && f !== 'split')) : [];
+    const bad = misplaced.length ? `${misplaced.map((k) => `"${k}"`).join(' and ')} ${misplaced.length === 1 ? 'goes' : 'go'} with ${misplaced.includes('level') ? '"within"' : '"split"'}, not "${f}"`
+      : f === 'within' && entry && Object.hasOwn(given, 'level') && !isLevel(given.level) ? `the level ${JSON.stringify(given.level)} is not a whole number of 1 or more (1 is the widest)`
+        : f === 'split' ? splitProblem(given) : null;
+    if (bad) {
+      mapping[h] = 'note'; reasons[h] = `the mapping given cannot be used for it (${bad}), so it is kept in the notes`;
+      problems.push({ kind: 'generic-mapping', example: `${h}: ${bad}` });
+      continue;
+    }
+    if (f === 'within' && entry && Object.hasOwn(given, 'level')) {
+      // Two columns cannot be one level: the second is kept in the notes.
+      if (usedLevels.has(given.level)) {
+        mapping[h] = 'note'; reasons[h] = `the mapping given puts it at level ${given.level}, which is already the column "${usedLevels.get(given.level)}", so it is kept in the notes`;
+        problems.push({ kind: 'generic-within-same-level', example: `${h}: level ${given.level} is already the column "${usedLevels.get(given.level)}"` });
+        continue;
+      }
+      usedLevels.set(given.level, h); levels[h] = given.level;
+    } else if (f === 'within') unlevelled.push(h);
+    if (f === 'split') {
+      const s = { separator: given.separator, levels: given.levels, firstIsName: given.firstIsName === true };
+      // No levels given: as many as the most parts a sampled value has, numbered widest (the last part) first.
+      if (s.levels === undefined) { const most = Math.max(0, ...values(h).map((v) => splitParts(v, s.separator).length - (s.firstIsName ? 1 : 0))); s.levels = Array.from({ length: most }, (_, i) => most - i); }
+      const clash = s.levels.find((l) => usedLevels.has(l));
+      if (clash !== undefined) {
+        mapping[h] = 'note'; reasons[h] = `the mapping given splits it into level ${clash}, which is already the column "${usedLevels.get(clash)}", so it is kept in the notes`;
+        problems.push({ kind: 'generic-within-same-level', example: `${h}: level ${clash} is already the column "${usedLevels.get(clash)}"` });
+        continue;
+      }
+      for (const l of s.levels) usedLevels.set(l, h);
+      splits[h] = s;
+    }
     if (single(f)) taken.set(f, h);
     mapping[h] = f; reasons[h] = pattern === undefined ? 'as the mapping given says' : `as the mapping given says, with each address made from the column's value through the pattern ${pattern}`;
     if (pattern !== undefined) patterns[h] = pattern;
+  }
+  // A "within" column given no level: the next level free, in the file's order, after those given.
+  for (const h of unlevelled) {
+    const l = Math.max(0, ...usedLevels.keys()) + 1;
+    usedLevels.set(l, h); levels[h] = l;
+    reasons[h] = `as the mapping given says; it gives no level, so it is at level ${l}, the next free (1 is the widest)`;
   }
   for (const k of Object.keys(saved)) if (!headers.includes(k)) problems.push({ kind: 'generic-mapping-unknown-column', example: k });
   const suggested = Object.create(null);
@@ -296,7 +386,17 @@ export function resolveColumns(headers, sampleRows, saved, headerText, options) 
     const guess = guessColumns(headers, sampleRows, headerText, options);
     for (const [h, s] of Object.entries(guess.suggested)) if (mapping[h] === 'note') suggested[h] = s;
   }
-  return { mapping, patterns, suggested, reasons, problems, gazetteer: gazetteerColumns(headers, headerText) };
+  return { mapping, patterns, levels, splits, suggested, reasons, problems, gazetteer: gazetteerColumns(headers, headerText) };
+}
+
+/** What is wrong with a "split" entry of a saved mapping, in words, or null when nothing is. */
+function splitProblem(given) {
+  if (given === null || typeof given !== 'object') return 'a split needs a separator: {"field": "split", "separator": ", ", "levels": [3, 2, 1]}';
+  if (typeof given.separator !== 'string' || given.separator === '') return 'a split needs a separator, such as ", "';
+  if (given.levels !== undefined && (!Array.isArray(given.levels) || !given.levels.length || !given.levels.every(isLevel))) return `its levels ${JSON.stringify(given.levels)} are not a list of whole numbers of 1 or more, narrowest first, such as [3, 2, 1]`;
+  if (given.levels !== undefined && new Set(given.levels).size !== given.levels.length) return `its levels ${JSON.stringify(given.levels)} name one level twice`;
+  if (given.firstIsName !== undefined && typeof given.firstIsName !== 'boolean') return 'firstIsName is true or false';
+  return null;
 }
 
 /**
@@ -304,9 +404,73 @@ export function resolveColumns(headers, sampleRows, saved, headerText, options) 
  * --columns, or on the page): each column's field, or { field: 'address', pattern } for a column
  * whose addresses are made through a pattern.
  */
-export function mappingToSave(mapping, patterns = {}) {
+export function mappingToSave(mapping, patterns = {}, levels = {}, splits = {}) {
   const out = Object.create(null);
-  for (const [h, f] of Object.entries(mapping)) out[h] = Object.hasOwn(patterns, h) ? { field: f, pattern: patterns[h] } : f;
+  for (const [h, f] of Object.entries(mapping)) {
+    if (f === 'address' && Object.hasOwn(patterns, h)) out[h] = { field: f, pattern: patterns[h] };
+    else if (f === 'within' && Object.hasOwn(levels, h)) out[h] = { field: f, level: levels[h] };
+    else if (f === 'split' && Object.hasOwn(splits, h)) out[h] = { field: f, separator: splits[h].separator, levels: [...splits[h].levels], firstIsName: !!splits[h].firstIsName };
+    else out[h] = f;
+  }
+  return out;
+}
+
+// ---- splitting a column into levels -------------------------------------------------------------
+// A column such as "Rotherhithe, Surrey, England" (narrowest first, as such columns usually are),
+// mapped as { field: 'split', separator, levels, firstIsName }: each row's cell is split on the
+// separator, the first part taken as the place's name if firstIsName, and the rest given, narrowest
+// first, to the levels (positional, 1 the widest: [3, 2, 1] for parish, county, country). It is a
+// transform of the mapping and of each row, made before applyColumns: expandSplits makes, once, a
+// mapping in which each part is a column of its own (a "within" column at its level, the name part a
+// "name" column), and splitRow fills those columns from each row. Parts beyond the levels given are
+// reported (generic-split-extra-parts), naming them. A row with fewer parts leaves the widest levels
+// empty for that row.
+const PART = '\u0000';   // joins a split column's name and its part's, in a name no file's heading has
+/** A cell's parts, split on the separator (spaces around it not counting, unless it is all space), each trimmed. */
+function splitParts(v, separator) {
+  const text = cellText(v);
+  if (!text) return [];
+  const sep = separator.trim() || separator;
+  return text.split(sep).map((x) => x.trim());
+}
+/** One cell split: { name, parts: [{ level, value }] (empty parts left out), extra: [the parts beyond the levels] }. */
+export function splitCell(v, { separator, levels, firstIsName = false }) {
+  const all = splitParts(v, separator);
+  const name = firstIsName ? all.shift() : undefined;
+  return {
+    ...(name ? { name } : {}),
+    parts: levels.slice(0, all.length).map((level, i) => ({ level, value: all[i] })).filter((p) => p.value !== ''),
+    extra: all.slice(levels.length).filter(Boolean),
+  };
+}
+/**
+ * The mapping applyColumns reads, with each split column made into its parts: { mapping, levels, from },
+ * `levels` the level of each "within" column (a split's parts included), `from` the column each
+ * part came from. The name part is the place's name, or one of its other names when another column
+ * (or an earlier split) is the name.
+ */
+export function expandSplits(mapping, levels = {}, splits = {}) {
+  const m = Object.create(null), lv = Object.create(null), from = Object.create(null);
+  let named = Object.values(mapping).includes('name');
+  for (const [h, f] of Object.entries(mapping)) {
+    if (f !== 'split' || !Object.hasOwn(splits, h)) { m[h] = f; if (f === 'within' && Object.hasOwn(levels, h)) lv[h] = levels[h]; continue; }
+    const s = splits[h];
+    if (s.firstIsName) { const k = h + PART + 'name'; m[k] = named ? 'alternativeNames' : 'name'; named = true; from[k] = h; }
+    for (const l of s.levels) { const k = h + PART + l; m[k] = 'within'; lv[k] = l; from[k] = h; }
+  }
+  return { mapping: m, levels: lv, from };
+}
+/** A row with each split column's parts as the columns expandSplits makes; parts beyond the levels are reported. */
+export function splitRow(row, splits = {}, { report = () => {}, where = '' } = {}) {
+  const cols = Object.keys(splits);
+  if (!cols.length) return row;
+  const out = Object.assign(Object.create(null), row);
+  for (const h of cols) {
+    const { name, parts, extra } = splitCell(row[h], splits[h]);
+    if (name !== undefined) out[h + PART + 'name'] = name;
+    for (const p of parts) out[h + PART + p.level] = p.value;
+    if (extra.length) report('generic-split-extra-parts', `${where}, ${h}: ${extra.map((x) => `"${x}"`).join(', ')} (${splits[h].levels.length} ${splits[h].levels.length === 1 ? 'level' : 'levels'} given)`);
+  }
   return out;
 }
 
@@ -444,9 +608,9 @@ export function geometryToPlato(g, report = () => {}, where = '') {
  * `patterns` (resolveColumns) gives the pattern an address column's ids are made into addresses by;
  * a value that is already a web address is read as one, not through the pattern.
  */
-export function applyColumns(row, mapping, { where = '', report = () => {}, fileName = 'the file', geometry, idAsNote = false, patterns = {} } = {}) {
+export function applyColumns(row, mapping, { where = '', report = () => {}, fileName = 'the file', geometry, idAsNote = false, patterns = {}, levels = {}, from = {}, withinNote: noteWithin = true } = {}) {
   let name, id, idCol, address, addressFrom, addressText, addressLost = false, language, languageCol, date, start, end, wkt, lat = '', lon = '', geomCell;
-  const alternatives = [], types = [], sources = [], notes = [], skipped = [];
+  const alternatives = [], types = [], sources = [], notes = [], skipped = [], within = [];
   const note = (col, v) => notes.push(`${col}: ${v}`);
   for (const [col, field] of Object.entries(mapping)) {
     const raw = row[col];
@@ -498,6 +662,8 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
       case 'start': if (ISO_OR_YEAR.test(pad(v))) start = pad(v); else report('generic-date-invalid', `${where}, ${col}: ${v}`); break;
       case 'end': if (ISO_OR_YEAR.test(pad(v))) end = pad(v); else report('generic-date-invalid', `${where}, ${col}: ${v}`); break;
       case 'skip': skipped.push(col); break;
+      // A region the place lies in, at its level (a split column's part names the column it came from).
+      case 'within': if (Object.hasOwn(levels, col)) { within.push({ level: levels[col], value: v, column: Object.hasOwn(from, col) ? from[col] : col }); break; } note(col, v); break;
       default: note(col, v);
     }
   }
@@ -513,6 +679,11 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
   for (const a of alternatives) if (a !== name) names.push({ toponym: a });
   // A row about an address keeps its id in the notes, since the place is not the file's to name.
   if (idAsNote && address && id !== undefined) note(idCol, id);
+  // The regions it lies in, widest first, kept in the notes as the source gives them (PLATO has no
+  // place for them yet; the reader's event carries them, within.js).
+  // `withinNote` false: the reader writes them as ContainedIn attestations instead (generic.js).
+  within.sort((a, b) => a.level - b.level);
+  if (within.length && noteWithin) notes.push(withinNote(within, name || alternatives[0]));
   if (address && addressFrom) notes.push(addressNote(addressFrom));
 
   const geometries = [];
@@ -544,5 +715,5 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
     citations: cited.map((c) => clean({ ...c })),
     notes: notes.join('\n') || undefined,
   });
-  return { label: name || alternatives[0], name, id, address, addressText, addressLost, attestation, skipped };
+  return { label: name || alternatives[0], name, id, address, addressText, addressLost, attestation, skipped, ...(within.length ? { within } : {}) };
 }

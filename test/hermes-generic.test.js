@@ -554,8 +554,9 @@ test('command line: columns whose headings are numbers are printed, and given in
   try {
     writeFileSync(join(d, 'census.csv'), 'parish,1801,1811,name\nAshby,120,131,Ashby\n');
     const r = cli('check', join(d, 'census.csv'));
-    assert.ok(r.out.includes('{"parish":"note","1801":"note","1811":"note","name":"name"}'), r.out);
-    assert.match(r.out, / {4}parish +note[^\n]*\n {4}1801 +note[^\n]*\n {4}1811 +note[^\n]*\n {4}name +name/);
+    // "parish" is a region the place lies in (within.js), printed with its level.
+    assert.ok(r.out.includes('{"parish":{"field":"within","level":1},"1801":"note","1811":"note","name":"name"}'), r.out);
+    assert.match(r.out, / {4}parish +within[^\n]*\n {4}1801 +note[^\n]*\n {4}1811 +note[^\n]*\n {4}name +name/);
     const j = JSON.parse(cli('check', '--json', join(d, 'census.csv')).out.split('\n')[0]);
     assert.deepEqual(j.columns.map((c) => c.column), ['parish', '1801', '1811', 'name']);
     // Control: an object of the same mapping would have put the numbers first.
