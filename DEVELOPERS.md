@@ -584,7 +584,7 @@ readers link to those headings, so keep them.
   the row's attestation cites (the file and the row where the region was first met). No `sequence`
   (it orders a route's members). Two "Newton"
   parishes under different chains are two regions, never merged; only the keys of the regions made
-  are held (`regionsMade`), bounded by the distinct containers. A region's events are tagged
+  are held (`regionsMade`), bounded by the distinct containers. Each region made is counted (`rep.count('regions')`), and the summary says them among the places: "Read 3 rows, 8 places (5 of them regions), 15 attestations." (`summary`, `words.js`). A region's events are tagged
   `event.region = { level, key }` and carry their parents as `within`. Linking a region to WHG is
   Krisis's (an identity relation after review), not Hermes's. **Without a base address**, nothing is
   minted (no address could be made: the no-id rule) and no relation written: each attestation gets
