@@ -1951,7 +1951,10 @@ from urllib.parse import urlparse
 GL = [] if '--no-gl-flags' in sys.argv else ['--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader']
 NOTOOLS = 'data:text/html,<title>no tools here</title><input id=picker type=file multiple>'
 EX = PLATO / 'schemas/examples'
-T = (lambda s: min(s, 6)) if PROVE else (lambda s: s)   # against the page with no tools every wait fails: sooner
+# Every wait in seconds, in one place. Against the page with no tools every wait fails: sooner. Against
+# the deployed site (--url=) the page fetches its chunks (the map's renderer, ink.js) over the network
+# from GitHub Pages, where locally they come from this computer: three times as long.
+T = (lambda s: min(s, 6)) if PROVE else (lambda s: s * 3) if REMOTE else (lambda s: s)
 SPELT = {'œ': 'oe', 'æ': 'ae', 'þ': 'th', 'ð': 'th', 'ß': 'ss', 'ς': 'σ', '\ufffe': '\ufffd', '\uffff': '\ufffd'}
 def chora_fold(t):
     """A label or name as Chora's search compares it (fold in src/engine/chora/fold.js): NFKD, marks (every category M)
@@ -3626,6 +3629,7 @@ def iiif_checks(pw, url, tmp):
     ctx = pw.chromium.launch_persistent_context(str(tmp / 'iiif-profile'), headless=True, accept_downloads=True, args=GL,
                                                 viewport={'width': 1400, 'height': 900}, reduced_motion='reduce')
     ctx.add_init_script('window.__plato_forceDownload = true;')
+    ctx.set_default_timeout(T(30) * 1000)                       # a click waits for its element: longer on the deployed site
     # The fixtures' sites are on this computer (127.0.0.1). Chromium lets a public site's page reach
     # them only with the local-network-access permission, which a real map server never needs: grant
     # it to the deployed site, so that a live run checks the page rather than this computer's network.
@@ -3658,7 +3662,15 @@ def iiif_checks(pw, url, tmp):
         # is gone by the time page.check() would look whether it is checked. The state is asked instead.
         for k in keys:
             page.click(f'#permissions-panel fieldset.perm[data-key="{k}"] input[value="{to}"]')
-            until(page, '([k, to]) => document.querySelector(`#permissions-panel fieldset.perm[data-key="${k}"] input[value="${to}"]`)?.checked', 10, [k, to])
+            # Set to Undecided while nothing on the page waits on it (no map of that server shown or waiting:
+            # on the deployed site the maps kept may not be back yet), it is no longer listed at all
+            # (permissions.js list(): known services, what is decided, what a page waits on), so its entry
+            # goes: then it is asked where it is kept, that it is no longer there.
+            until(page, """([k, to]) => { const f = document.querySelector(`#permissions-panel fieldset.perm[data-key="${k}"]`);
+              if (f) return !!f.querySelector(`input[value="${to}"]`)?.checked;
+              return to === 'undecided' && !(JSON.parse(localStorage.getItem('plato-tools.permissions') || '{}').grants || {})[k]; }""", 10, [k, to])
+            if not page.query_selector(f'#permissions-panel fieldset.perm[data-key="{k}"]'):
+                print(f'  note: {k}, set to Undecided, is no longer listed in the panel (nothing on the page waits on it); maps shown: {len((cstate(page) or {}).get("overlays") or [])}')
         if reload:
             with page.expect_navigation(timeout=T(60) * 1000): page.click('#permissions-panel [data-reload]')
             ready()
@@ -4130,7 +4142,8 @@ def iiif_checks(pw, url, tmp):
             ctx.unroute(page_url, strip_head)
         return (s['canary'] == 'not-enforced' and not meta and said and rows == [] and s['overlays'] == []), {'canary': s['canary'], 'said': text, 'census': rows, 'overlays': s['overlays']}
     attempt('Chora maps: on a page without its policy (the canary finds none), maps are refused in words, those kept included, and their server is asked nothing, though it is allowed', no_policy)
-    ink_checks(page, base, tmp, {'census': census, 'at_origin': at_origin, 'annotation': annotation, 'paste': paste, 'line': line, 'panel_set': panel_set, 'fx': fx})
+    ink_checks(page, base, tmp, {'census': census, 'at_origin': at_origin, 'annotation': annotation, 'paste': paste, 'line': line, 'panel_set': panel_set,
+                                 'shown': shown, 'ready': ready, 'fx': fx})
     attempt('Chora maps: across these checks, origin B was never asked for anything, and no page error', lambda: (len(census()) > 5 and at_origin(census(), B) == [] and not errors, {'census': len(census()), 'B': at_origin(census(), B), 'errors': errors[:5]}))
     ctx.close()
     stop_fixtures()
@@ -4170,8 +4183,9 @@ TRACE_TIP = '() => [...document.querySelectorAll("#draw-tools button[data-trace]
 
 def ink_checks(page, base, tmp, h):
     """The checks of tracing with assistance. `h`: the iiif checks' helpers (census, at_origin, annotation,
-    paste, line, panel_set, fx)."""
-    census, at_origin, annotation, paste, line, panel_set, fx = (h[k] for k in ('census', 'at_origin', 'annotation', 'paste', 'line', 'panel_set', 'fx'))
+    paste, line, panel_set, shown, ready, fx). Each check brings the page to the state it needs itself
+    (on_map), whatever the checks before it did or failed to do."""
+    census, at_origin, annotation, paste, line, panel_set, shown, ready, fx = (h[k] for k in ('census', 'at_origin', 'annotation', 'paste', 'line', 'panel_set', 'shown', 'ready', 'fx'))
     A, B, C = fx['A'], fx['B'], fx['C']
     IA, IC = f'iiif:{A}', f'iiif:{C}'
     ids = {k: f'https://annotations.allmaps.org/maps/00000000000000{k}' for k in ('e1', 'e2', 'e3', 'e4', 'e5')}
@@ -4193,10 +4207,33 @@ def ink_checks(page, base, tmp, h):
         key = next(o['key'] for o in cstate(page)['overlays'] if o['annotationId'] == id_)
         page.click(f'#overlay-list li[data-overlay="{key}"] button[data-fit]'); page.evaluate(SETTLE)
         return key
-    def show(a):
-        """Paste a map whose server is allowed already: it is drawn, with no "Needs permission" line."""
-        paste(a)
-        return soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.firstTile)', 40, a['id'])
+    GRANT = "k => (JSON.parse(localStorage.getItem('plato-tools.permissions') || '{}').grants || {})[k]?.state || 'undecided'"
+    def drawn(id_, tiles=True):
+        s = cstate(page)
+        return bool(s) and any(o['annotationId'] == id_ and (o['firstTile'] or not tiles) for o in s['overlays'])
+    def on_map(a, place=True, tiles=True, file=None):
+        """Set-up: the map `a` shown (and drawn, its first tile in, unless not `tiles`) and the only one, fitted;
+        its server allowed and in this load's policy, as a user does it (pasted, then from its "Needs
+        permission" line, one reload) if it is not; Cambridge chosen if `place`. Each step only if the page is
+        not so already, so on a page so already it costs a look. `file`: the page is opened afresh on it first,
+        if the map is not drawn there now. Raises if the map is not drawn: the check fails at its set-up."""
+        if not drawn(a['id'], tiles):
+            if file: chora_boot(page, base, [file])
+            in_policy = A in (page.evaluate('() => window.__platoCsp') or {}).get('origins', [])
+            if page.evaluate(GRANT, IA) != 'allowed' or not in_policy:
+                if page.evaluate(GRANT, IA) == 'never': panel_set([IA], 'undecided')   # left so by a check that failed: no line is shown for Never
+                paste(a)
+                said = line(IA)
+                if 'Needs permission' in said: panel_set([IA], reload=True, via=IA)
+                elif said:                                       # allowed since this page loaded: the line offers the reload
+                    with page.expect_navigation(timeout=T(60) * 1000): page.click(f'#map-needs [data-permission="{IA}"] button')
+                    ready()
+                else: raise RuntimeError(f'set-up: the map\'s server is not allowed ({page.evaluate(GRANT, IA)}, in the policy: {in_policy}), and no line asks for it')
+            elif not drawn(a['id'], False): paste(a)
+            ok = shown(a['id'], 40) if tiles else soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id)', 30, a['id'])
+            if not ok: raise RuntimeError('the map did not draw' if tiles else 'the map was not added')
+        if place and cstate(page)['phase'] != 'place': chora_pick(page, 'cambridge')
+        return only_map(a['id'])
     def click_image(id_, px, modifiers=None):
         [[x, y]] = page.evaluate(INK_TO_SCREEN, [id_, [list(px)]])
         page.mouse.move(x - 2, y - 2); page.mouse.move(x, y)
@@ -4209,8 +4246,9 @@ def ink_checks(page, base, tmp, h):
 
     def trace_line_save():
         # No map kept, and the map's server not allowed: the tools are there, not offered, and say why in a tooltip.
-        chora_boot(page, base); no_maps_kept()
-        if not page.evaluate("k => (JSON.parse(localStorage.getItem('plato-tools.permissions') || '{}').grants || {})[k]?.state !== 'allowed'", IA): panel_set([IA], 'undecided')
+        chora_boot(page, base)
+        no_maps_kept()
+        if page.evaluate(GRANT, IA) != 'undecided': panel_set([IA], 'undecided')     # allowed by the maps' checks (or Never, left by one that failed)
         f = place_file('ink-line.json'); chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
         page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
         buttons = page.evaluate(TRACE_TIP)
@@ -4279,8 +4317,7 @@ def ink_checks(page, base, tmp, h):
         f = place_file('ink-area.json'); chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
         since = len(census())
         a = ink_annotation('/iiif/ink', 'e2')
-        if not show(a): raise RuntimeError('the JPEG map did not draw')
-        only_map(a['id'])
+        on_map(a)
         before = cstate(page)['pendingCount']
         page.click('#draw-tools button[data-trace="area"]')
         click_image(a['id'], (520, 210))
@@ -4306,14 +4343,15 @@ def ink_checks(page, base, tmp, h):
     attempt('Chora ink: "Trace area" proposes the wash (within 2.5 px) from JPEG tiles; a slider moved proposes again asking the server nothing; Esc lets it go, and nothing is drawn', trace_area_esc)
 
     def withdrawn_lets_go():
-        # The map of the check before, traced again: its tiles are kept by the page. Withdrawn in the panel, every
-        # tile read from that server is let go at once, with the proposal made from them; allowed again, it is kept.
-        a_id = ids['e2']
-        if not any(o['annotationId'] == a_id and o['firstTile'] for o in cstate(page)['overlays']): raise RuntimeError('the map of the check before is not shown')
+        # A map traced: its tiles are kept by the page. Withdrawn in the panel, every tile read from that server
+        # is let go at once, with the proposal made from them; allowed again, it is kept. The map of the check
+        # before, if it is shown still (it costs nothing to trace it again), else a page opened afresh on it.
+        a = ink_annotation('/iiif/ink', 'e2'); a_id = a['id']
+        on_map(a, place=False, file=place_file('ink-withdrawn.json'))
         page.click('#draw-tools button[data-trace="area"]') if page.get_attribute('#draw-tools button[data-trace="area"]', 'aria-pressed') != 'true' else None
-        n = cstate(page)['ink']['proposals']
+        n = (cstate(page).get('ink') or {}).get('proposals', 0)
         click_image(a_id, (520, 210))
-        until(page, 'n => window.__chora.ink.proposals > n && window.__chora.ink.phase === "proposed"', 60, n)
+        until(page, 'n => !!window.__chora.ink && window.__chora.ink.proposals > n && window.__chora.ink.phase === "proposed"', 60, n)
         cached = page.evaluate('() => window.__chora_ink.cachedTiles'); let_go = cstate(page)['ink'].get('letGo') or 0
         # The worker's own tiles, asked of the worker itself (a 'count' message): some, before (the presence).
         in_worker = page.evaluate('() => window.__chora_ink.workerTiles()')
@@ -4334,11 +4372,10 @@ def ink_checks(page, base, tmp, h):
         # ink.js is loaded by the first press of a trace tool. On a slow connection a user who presses "Trace
         # area" and clicks the map at once clicks before it has arrived: the click waits for it, and is not lost.
         # Here the chunk is held by a route until the click has landed, then let through. (After the withdrawn
-        # check, which allows the map's server again as it ends; the check after this one opens the page afresh.)
+        # check; the check after this one opens the page afresh.) A page opened afresh, so ink.js is not loaded yet.
         f = place_file('ink-held.json'); chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
         a = ink_annotation('/iiif/ink', 'e3')
-        if not show(a): raise RuntimeError('the JPEG map did not draw')
-        only_map(a['id'])
+        on_map(a)
         held = []
         ink_chunk = re.compile(r'/assets/ink-[^/?]*\.js')
         page.route(ink_chunk, lambda r: held.append(r))
@@ -4367,8 +4404,7 @@ def ink_checks(page, base, tmp, h):
         f = place_file('ink-keys.json'); chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
         page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
         a = ink_annotation('/iiif/ink', 'e2')
-        if not any(o['annotationId'] == a['id'] and o['firstTile'] for o in cstate(page)['overlays']) and not show(a): raise RuntimeError('the map did not draw')
-        only_map(a['id'])
+        on_map(a)
         blur = '() => document.activeElement && document.activeElement.blur()'
         def propose():
             # The page was opened afresh: ink.js, and the ink state with it, is loaded by the first Trace click.
@@ -4406,8 +4442,7 @@ def ink_checks(page, base, tmp, h):
         f = place_file('ink-hole.json'); chora_boot(page, base, [f])
         page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
         a = ink_annotation('/iiif/inkpng', 'e5')
-        if not show(a): raise RuntimeError('the map did not draw')
-        only_map(a['id'])
+        on_map(a, place=False)                                   # no place chosen: that is what is checked first
         before = cstate(page)['pendingCount']
         page.click('#draw-tools button[data-trace="area"]')
         click_image(a['id'], (520, 210))
@@ -4446,9 +4481,7 @@ def ink_checks(page, base, tmp, h):
     def snap_to_ink():
         f = place_file('ink-snap.json'); chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
         a = ink_annotation('/iiif/inkpng', 'e1')
-        if not any(o['annotationId'] == a['id'] for o in cstate(page)['overlays']) and not show(a): raise RuntimeError('the map did not draw')
-        until(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.firstTile)', 40, a['id'])
-        only_map(a['id'])
+        on_map(a)
         page.click('#draw-tools button[data-mode="linestring"]')
         offered = page.is_visible('#snap-ink')
         page.mouse.move(1, 1); page.hover('#snap-ink')
@@ -4464,11 +4497,11 @@ def ink_checks(page, base, tmp, h):
         # The drawing is kept on the private file system a moment after it is counted: read until it is there.
         def lines_kept(n):
             ls = []
-            for _ in range(40):
+            for _ in range(int(T(10) * 4)):
                 ls = [k for k in kept(page, f.name) if k['geojson']['type'] == 'LineString']
                 if len(ls) >= n: return ls
                 page.wait_for_timeout(250)
-            raise RuntimeError(f'{n} line(s) drawn, {len(ls)} kept after 10 s')
+            raise RuntimeError(f'{n} line(s) drawn, {len(ls)} kept after {T(10)} s')
         d = lines_kept(1)[-1]
         img = page.evaluate(INK_TO_IMAGE, [a['id'], d['geojson']])
         first = img['coordinates'][0]; snapped = dist_line(first, INK_ROAD)
@@ -4493,9 +4526,7 @@ def ink_checks(page, base, tmp, h):
         # at the network until the permission is withdrawn: that they were asked for is the presence.
         f = place_file('ink-snap-wd.json'); chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
         a = ink_annotation('/iiif/inkpng', 'e1')
-        if not any(o['annotationId'] == a['id'] for o in cstate(page)['overlays']) and not show(a): raise RuntimeError('the map did not draw')
-        until(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.firstTile)', 40, a['id'])
-        only_map(a['id'])
+        on_map(a)
         held = []
         # The map's own tiles are drawn by MapLibre (already drawn, settled): the snap's are the requests now.
         pattern = A + '/iiif/inkpng/**'
@@ -4504,7 +4535,7 @@ def ink_checks(page, base, tmp, h):
             page.click('#draw-tools button[data-mode="linestring"]')
             builds = (cstate(page).get('ink') or {}).get('snapBuilds', 0)
             page.check('#snap-ink')
-            for _ in range(80):
+            for _ in range(int(T(8) * 10)):
                 if held: break
                 page.wait_for_timeout(100)
             asked = len(held)
@@ -4532,9 +4563,7 @@ def ink_checks(page, base, tmp, h):
         # moved while drawing a line, it is built again.
         f = place_file('ink-snap-hidden.json'); chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
         a = ink_annotation('/iiif/inkpng', 'e1')
-        if not any(o['annotationId'] == a['id'] for o in cstate(page)['overlays']) and not show(a): raise RuntimeError('the map did not draw')
-        until(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.firstTile)', 40, a['id'])
-        only_map(a['id'])
+        on_map(a)
         page.click('#draw-tools button[data-mode="linestring"]'); page.check('#snap-ink')
         until(page, '() => window.__chora.ink && window.__chora.ink.snapBuilds >= 1 && window.__chora.ink.snapPoints > 0', 30)
         pan = '([dx]) => window.__chora_map.panBy([dx, 0], { duration: 0 })'
@@ -4570,9 +4599,7 @@ def ink_checks(page, base, tmp, h):
         f = place_file('ink-403.json'); chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
         since = len(census()); before = cstate(page)['pendingCount']
         a = ink_annotation('/iiif/ink403', 'e4')
-        paste(a)
-        until(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id)', 30, a['id'])
-        only_map(a['id'])
+        on_map(a, tiles=False)                                   # added, not drawn: its full-resolution tiles are refused
         # Drawn from its coarser tiles (zoomed out), then traced close up, at full resolution, which is refused.
         page.evaluate('() => window.__chora_map.zoomTo(window.__chora_map.getZoom() - 2, { duration: 0 })'); page.evaluate(SETTLE)
         if not soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.firstTile)', 30, a['id']):
