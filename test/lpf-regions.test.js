@@ -188,3 +188,25 @@ test('a file given as a candidate set that is not one is warned of, and gives no
   assert.equal(containedIn(byId, ROTHERHITHE)[0].relationTo, WHG_SURREY);
   assert.equal(loss(r, 'region-match-no-score')?.count, 2);
 });
+
+test('the command line: --candidates SET with convert --to lpf; refused for anything else', () => {
+  const CLI = fileURLToPath(new URL('../bin/plato-tools.mjs', import.meta.url));
+  const dir = mkdtempSync(join(tmpdir(), 'plato-tools-regions-'));
+  try {
+    const cli = (...a) => spawnSync(process.execPath, [CLI, ...a], { encoding: 'utf8' });
+    const ok = cli('convert', '--to', 'lpf', '--out', dir, '--candidates', SET, DATASET);
+    assert.equal(ok.status, 0, ok.stderr + ok.stdout);
+    const fc = JSON.parse(readFileSync(join(dir, 'place-centric-regions.geojson'), 'utf8'));
+    const rel = fc.features.find((f) => f['@id'] === ROTHERHITHE).relations.find((x) => x.relationType === 'gvp:broaderPartitive');
+    assert.equal(rel.whg_match_score, 93);
+    const check = cli('check', '--candidates', SET, DATASET);
+    assert.equal(check.status, 2); assert.match(check.stderr, /--candidates is for convert --to lpf/);
+    const tables = cli('convert', '--to', 'tables', '--out', dir, '--candidates', SET, DATASET);
+    assert.equal(tables.status, 2); assert.match(tables.stderr, /--candidates is for convert --to lpf/);
+    const notASet = cli('convert', '--to', 'lpf', '--out', dir, '--overwrite', '--candidates', DATASET, DATASET);
+    assert.equal(notASet.status, 2); assert.match(notASet.stderr, /not a candidate set/);
+    const missing = join(dir, 'nowhere.json');
+    const gone = cli('convert', '--to', 'lpf', '--out', dir, '--overwrite', '--candidates', missing, DATASET);
+    assert.equal(gone.status, 2); assert.match(gone.stderr, /cannot be read/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

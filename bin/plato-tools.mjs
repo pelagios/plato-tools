@@ -154,6 +154,11 @@ does not apply to):
                     each figure from a statistical table: its qb:Observation type,
                     the measure as a direct statement, sdmx-dimension:refArea and refPeriod,
                     and the types of its table and structure. Without it, the plain PLATO graph.
+  --candidates SET  convert --to lpf or lpf-seq: a candidate set (PLATO JSON or JSON Lines, profile
+                    candidate-set) whose suggestions the dataset's region matches answer
+                    (promotedFrom); repeatable. Each gvp:broaderPartitive then carries the
+                    suggestion's score as whg_match_score. Without it, no score is written,
+                    and each missing one is reported.
   --release NAME    publish: the name of the release being made (its address is
                     <base>release/NAME).
   --previous FILE   publish: the previous release: minting keeps its attestations' addresses,
@@ -279,6 +284,7 @@ async function main(argv) {
         'same-id': { type: 'boolean', default: false }, 'list-places': { type: 'boolean', default: false },
         'header-places': { type: 'boolean', default: false }, 'commentary-places': { type: 'boolean', default: false },
         'key-pattern': { type: 'string', multiple: true, default: [] },
+        candidates: { type: 'string', multiple: true },
         with: { type: 'string' }, threshold: { type: 'string' }, 'max-distance': { type: 'string' }, top: { type: 'string' },
         review: { type: 'string' }, output: { type: 'string' }, reviewer: { type: 'string' }, orcid: { type: 'string' },
         'others-title': { type: 'string' },
@@ -317,6 +323,7 @@ async function main(argv) {
     if (typeof reading === 'string') return usage(reading);
     o.reading = reading;
   }
+  if (o.candidates && (action !== 'convert' || (o.to !== 'lpf' && o.to !== 'lpf-seq'))) return usage('--candidates is for convert --to lpf or lpf-seq.');
   if (action === 'datacube') return datacube(args, o);
   if (action === 'publish') return publishCommand(args, o, resources);
   if (o.sheet !== undefined && !reads) return usage('--sheet is for check, convert and preview.');
@@ -333,6 +340,18 @@ async function main(argv) {
   if (action !== 'convert' && (o.to || o.overwrite)) return usage('--to and --overwrite are for convert.');
   if (o.json && o.brief) return usage('choose --json or --brief, not both.');
   if (o.cube && o.to !== 'ntriples') return usage('--cube is for convert --to ntriples.');
+  // Candidate sets, for LPF's region matches (PLATO 1d2cf6e, #23): each must be one, or the command is wrong.
+  if (o.candidates) {
+    o.candidateInputs = [];
+    for (const p of o.candidates) {
+      try { if (!statSync(p).isFile()) return usage(`${p}, given with --candidates, is not a file.`); }
+      catch (e) { if (!isSystemError(e)) throw e; return usage(`${p}, given with --candidates, cannot be read: ${e.code === 'ENOENT' ? 'there is no such file' : e.message}.`); }
+      const { input, message } = await readInput({ label: p, paths: [p] });
+      if (!input) return usage(`${p}, given with --candidates, is not a candidate set: ${message}`);
+      if (input.profile !== 'candidate-set') return usage(`${p}, given with --candidates, is ${formatName(input)}, not a candidate set (PLATO JSON or JSON Lines with the profile candidate-set).`);
+      o.candidateInputs.push(input);
+    }
+  }
   if (o.columns) {
     try { o.savedColumns = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(o.columns))); }
     catch (e) { return usage(`--columns ${o.columns} cannot be read as JSON: ${e.message}`); }
@@ -658,7 +677,7 @@ async function runOne(item, action, o, resources, host, live, seen) {
   const xlsx = input.container === 'workbook' ? await import('xlsx') : undefined;
   const { env, finish } = host.env(resources, { progress, xlsx });
   let result = null, failure = null;
-  try { result = await run({ input, action, target: r.target, options: { base: o.base, typing: o.typing, cube: o.cube, name: input.format === 'csv' ? undefined : item.name, columns: o.savedColumns, ...reading } }, env); }
+  try { result = await run({ input, action, target: r.target, options: { base: o.base, typing: o.typing, cube: o.cube, name: input.format === 'csv' ? undefined : item.name, columns: o.savedColumns, candidates: o.candidateInputs, ...reading } }, env); }
   catch (e) { failure = e; }
   if (live) process.stderr.write('\r\x1b[K');
   // A file the engine could not read to the end comes back as a report marked incomplete; any
