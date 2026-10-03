@@ -986,12 +986,11 @@ section 5.3, stage 6). Opened as `chora.html#workflow=<id>`, where the id is let
 saved, by the save dialogue or as a download, is handed back: a record in the hand-off's store
 (`plato-tools-chora`, `kv`) under its own key, `chora-handback`, of the hand-off's shape with the
 workflow and a format, `{ handback: 1, workflow, files: [{ type: 'dataset', name, size, sha256 }], at }`.
-`files` holds a reference, never the bytes: the shape of a Methodos hand-off (`isRef` and
-`checkHandoff` in `src/engine/methodos/handoffs.js`, on the branch `methodos-engine` until it is
-merged), its SHA-256 computed over the very File that went to disk, before a copy kept here is let
-go, as a stream, by Krisis's `fileSha256` (`src/engine/krisis/digest.js`, which `fileRecords` and so
-Methodos's `refsOf` use), so that a saved dataset of DEEP's size is never in memory whole. Then the save result offers **Back to the workflow**, a link to `./#workflow=<id>`;
-a click writes the record again, so that its two minutes (`FRESH`, as the hand-off's) are the
+`files` holds a reference, never the bytes: a Methodos hand-off, made by Methodos's own `refsOf`
+(`src/engine/methodos/handoffs.js`) from the very File that went to disk, before a copy kept here is
+let go; `refsOf` hashes it as a stream (Krisis's `fileRecords` and `fileSha256`), so that a saved
+dataset of DEEP's size is never in memory whole. Then the save result offers **Back to the
+workflow**, a link to `./#workflow=<id>`; a click writes the record again, so that its two minutes (`FRESH`, as the hand-off's) are the
 navigation's, and Chora drops a stale one when it starts. Opened without `#workflow`, nothing is
 written. The main page's side is not built yet: on loading with `#workflow=<id>` it must find the
 workflow's record by that id, show the step waiting ("Draw or trace the places on a map", operation
@@ -1000,9 +999,9 @@ workflow's record by that id, show the step waiting ("Draw or trace the places o
 `dataset` is refused); then ask the user to choose the saved file, since the record names it and
 does not hold it; complete the step with `runner.complete(state, 'place', { dataset: record.files })`
 only when `refsDiffer(record.files, [file])` is empty; and drop a stale hand-back as it drops a stale
-hand-off. `test/chora-handback.test.js` pins the shape, the checks and the hash, and checks the
-reference against the Methodos module itself when that module is in the tree (or at
-`METHODOS_HANDOFFS`); the browser checks save in a workflow, compare the record with the downloaded
+hand-off. `test/chora-handback.test.js` checks the record, its refusals and the hash, that the file
+is read as a stream and never whole, and that Methodos's `isRef`, `checkHandoff` and `refsDiffer` take the
+reference; the browser checks save in a workflow, compare the record with the downloaded
 file's size and SHA-256, follow the link, and save without one as the control.
 
 - **The worker** is the main page's, with commands of its own, sent one at a time: `chora-load`,
@@ -1614,9 +1613,11 @@ workflow is not yet kept anywhere (both are later phases).
   lookup do; a conversion or a part of publishing is all or nothing, and the runner names what such
   a step had written for the host to remove: stopping the engine's call and removing its files are
   the host's, as the page does now). An operation that does not
-  exist yet (regions level by level, the containment relation, adopting a match's geometry, Chora's
-  hand-back, finding places in a text) is declared with the reason it is not available, and a
+  exist yet (regions level by level, the containment relation, adopting a match's geometry, finding
+  places in a text) is declared with the reason it is not available, and a
   workflow whose answers would reach it is refused at the start, in those words.
+  Chora's hand-back is no operation of its own: it is how the interactive step `place` gets its
+  result (below, "Chora's way back into a workflow").
 - **Recipes** (`recipes/`) are data: "Map your data" and "Publish a dataset". A step names an
   operation, where each input comes from (a file chosen at the start, `$files`, or an earlier step's
   output, `mint.dataset`, with `??` for "this, or that if it was skipped"), its options (literal or
