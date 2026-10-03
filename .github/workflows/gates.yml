@@ -1,0 +1,123 @@
+# The full gates on every branch pushed, before it lands on main: the unit and conversion tests, the
+# install as npx does it, the build, the browser checks, and the proof that the browser checks can fail.
+# Push the branch and watch the run (DEVELOPERS.md, Testing); main itself is tested by pages.yml.
+# No secrets: what needs a token (WHG_TOKEN) is skipped, as it is locally without one.
+name: Gates
+
+on:
+  push:
+    branches-ignore: [main, gh-pages]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Pinned PLATO commit
+        id: plato
+        run: echo "commit=$(node -p "require('./package.json').plato.commit")" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: pelagios/place-attestation-ontology
+          ref: ${{ steps.plato.outputs.commit }}
+          path: plato-repo
+      - run: npm ci
+      - name: Unit and conversion tests
+        shell: bash
+        run: npm test 2>&1 | tee unit.log
+        env:
+          PLATO_REPO: plato-repo
+      - name: Install as npx does, and run the command
+        shell: bash
+        run: node scripts/install-test.mjs 2>&1 | tee install.log
+      - name: Build (vendors PLATO's files at the pinned commit)
+        run: npm run build
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Unit and conversion tests"
+            echo '```'
+            grep -E '^ℹ (tests|suites|pass|fail|cancelled|skipped|todo|duration_ms) ' unit.log || echo "no test summary (the run stopped before it)"
+            echo '```'
+            if grep -q '^✖ failing tests:' unit.log 2>/dev/null; then echo "Failed:"; echo '```'; sed -n '/^✖ failing tests:/,$p' unit.log | head -60; echo '```'; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: unit-logs
+          path: '*.log'
+          if-no-files-found: ignore
+
+  # The browser checks, and the same checks pointed at a page with no tools (every one must fail).
+  e2e:
+    name: ${{ matrix.mode }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [e2e, prove-it-fails]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Pinned PLATO commit
+        id: plato
+        run: echo "commit=$(node -p "require('./package.json').plato.commit")" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: pelagios/place-attestation-ontology
+          ref: ${{ steps.plato.outputs.commit }}
+          path: plato-repo
+      - run: npm ci
+      - name: Build (vendors PLATO's files at the pinned commit)
+        run: npm run build
+      - name: Playwright and Chromium
+        run: |
+          python -m pip install --quiet playwright==1.59.0 pillow
+          python -m playwright install --with-deps chromium
+      - name: Browser checks (${{ matrix.mode }})
+        shell: bash
+        run: python e2e/app_test.py ${{ matrix.mode == 'prove-it-fails' && '--prove-it-fails' || '' }} 2>&1 | tee e2e.log
+        env:
+          PLATO_REPO: ${{ github.workspace }}/plato-repo
+          PYTHONUNBUFFERED: '1'
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Browser checks: ${{ matrix.mode }}"
+            echo '```'
+            grep -E '^(RESULT|PROVE-IT-FAILS):' e2e.log || echo "no RESULT line (the run stopped before it)"
+            echo "$(grep -c '^  PASS ' e2e.log || true) passed, $(grep -c '^  FAIL ' e2e.log || true) failed"
+            echo '```'
+            if [ "${{ matrix.mode }}" = e2e ] && grep -q '^  FAIL ' e2e.log; then echo "Failed:"; echo '```'; grep '^  FAIL ' e2e.log | head -40; echo '```'; fi
+            if [ "${{ matrix.mode }}" = prove-it-fails ] && grep -q '^  PASS ' e2e.log; then echo "Passed against a page with no tools:"; echo '```'; grep '^  PASS ' e2e.log | head -40; echo '```'; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ${{ matrix.mode }}-log
+          path: e2e.log
+          if-no-files-found: ignore
