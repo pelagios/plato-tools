@@ -329,9 +329,9 @@ def within_checks(page, tmp):
           and saved.get('Parish') == {'field': 'within', 'level': 1} and saved.get('Country') == {'field': 'within', 'level': 3} and saved.get('Name') == 'name',
           {'dom': d0, 'first': st0.get('levels'), 'chose': chose, 'after': st1.get('levels'), 'saved': saved})
     # Converted under a base address, each level is a ContainedIn attestation; the chain is no key of the output.
-    page.evaluate(f"() => {{ document.getElementById('base').value = {json.dumps(base)}; }}")
+    page.evaluate(f"() => {{ const b = document.getElementById('base'); if (b) b.value = {json.dumps(base)}; }}")
     r = reading_run(page)
-    page.evaluate("() => { document.getElementById('base').value = ''; }")
+    page.evaluate("() => { const b = document.getElementById('base'); if (b) b.value = ''; }")
     doc = reading_doc(page, r, tmp, 'within.json')
     text = json.dumps(doc)
     mill = next((p for p in doc.get('spatialEntities', []) if p['@id'] == base + 'place/1'), {})
