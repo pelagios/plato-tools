@@ -404,6 +404,7 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
       iri = regionIri(key);
       if (!regionsMade.has(key)) {
         regionsMade.add(key);
+        rep.count('regions');   // said apart in the summary: 8 places (5 of them regions)
         const own = [{ names: [{ toponym: c.value }], ...cites(a.attestation) }];
         if (parentIri) own.push(containedIn(parentIri, a.attestation));
         const chain = a.within.slice(0, i);

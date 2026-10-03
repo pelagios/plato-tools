@@ -22,7 +22,7 @@ import { PLATO_REPO } from './paths.js';
 import { pastedListCsv, pastedListFile, PASTED_FILE_NAME } from '../src/engine/hermes/pasted.js';
 import { isColumns } from '../src/engine/krisis/work.js';
 import { gather } from '../src/engine/krisis/match.js';
-import { columnWarnings } from '../src/engine/words.js';
+import { columnWarnings, summary } from '../src/engine/words.js';
 import { run } from '../src/engine/pipeline.js';
 import { sha256 } from '../src/lib/sha256.js';
 import { textFile, go, outText, env } from './engine.js';
@@ -199,6 +199,18 @@ test('each region is minted once, named, labelled with its parents, contained in
   assert.equal(narrowest(2), newtonC['@id']);
   assert.equal(narrowest(3), newtonC['@id']);
   assert.equal(narrowest(1), byLabel('Newton (Lancashire, England)')['@id']);   // control
+});
+test('the report counts the regions minted, and says them apart from the places: "8 places (5 of them regions)"; none without a base', async () => {
+  const withBase = await go([textFile(NEWTONS, 'places.csv')], 'check', undefined, { base: BASE });
+  assert.equal(withBase.report.counts.regions, 5);
+  assert.equal(summary(withBase.report).counted, 'Read 3 rows, 8 places (5 of them regions), 15 attestations.');
+  const one = await go([textFile('uri,Name,Country\nhttps://www.wikidata.org/entity/Q1,Mill,England\n', 'places.csv')], 'check', undefined, { base: BASE });
+  assert.equal(one.report.counts.regions, 1);
+  assert.match(summary(one.report).counted, /2 places \(1 of them a region\)/);   // the attestation-centric path too
+  // control: without a base nothing is minted, and the places are said alone
+  const none = await go([textFile(NEWTONS, 'places.csv')], 'check');
+  assert.equal(none.report.counts.regions, undefined);
+  assert.equal(summary(none.report).counted, 'Read 3 rows, 3 places, 3 attestations.');
 });
 test('tables with a base: a region\'s place_id is region-<hex>, never its containerKey, and reading back gives the same region addresses with no address losses', async () => {
   const json = await go([textFile(NEWTONS, 'places.csv')], 'convert', 'plato-json', { base: BASE });

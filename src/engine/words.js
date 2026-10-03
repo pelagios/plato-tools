@@ -53,7 +53,9 @@ export function summary(report, action) {
   if (action === 'publish') return publishSummary(report);
   if (action === 'match') return matchSummary(report);
   if (action === 'apply') return applySummary(report);
-  const counted = ['annotations', 'place names', 'rows', 'features', 'places', 'attestations', 'identity relations', 'candidates', 'triples', 'triples written', 'table rows', 'observations'].filter((k) => c[k]).map((k) => count(c[k], k)).join(', ');
+  // The regions a table's places lie in, minted as places (Hermes, generic.js), are among the places, and said apart.
+  const regions = (k) => (k === 'places' && c.regions ? ` (${c.regions.toLocaleString('en-GB')} of them ${c.regions === 1 ? 'a region' : 'regions'})` : '');
+  const counted = ['annotations', 'place names', 'rows', 'features', 'places', 'attestations', 'identity relations', 'candidates', 'triples', 'triples written', 'table rows', 'observations'].filter((k) => c[k]).map((k) => count(c[k], k) + regions(k)).join(', ');
   const nErr = report.errors;
   return {
     problems: nErr ? `${nErr.toLocaleString('en-GB')} problem${nErr === 1 ? '' : 's'} found.` : 'No problems found.',
