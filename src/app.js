@@ -3,8 +3,9 @@
 // The work happens in a worker (src/engine/worker.js). The page publishes its own state on
 // window.__plato for automated tests; nothing else reads it.
 import { fmtBytes, formatName, progressText, summary, groups, draftNote, explainedLines } from './engine/words.js';
-import { COLUMN_CHOICES, COLUMN_WORDS, columnWarnings, columnProblem, READING_WORDS } from './engine/words.js';
+import { COLUMN_CHOICES, COLUMN_WORDS, columnWarnings, columnProblem, READING_WORDS, PASTE_WORDS } from './engine/words.js';
 import { mappingToSave } from './engine/hermes/columns.js';
+import { pastedListFile } from './engine/hermes/pasted.js';
 import { review as W, POOL_BUSY, POOL_STUCK, PREVIEW_WORDS } from './engine/words.js';
 const REVIEW_WORDS = W;   // the review's words, where W names the words for the columns
 import { readable } from './engine/input.js';
@@ -241,7 +242,7 @@ let reviewColumnsAsked = 0, reviewMapping;
 // A matching as text, in the file's order, to compare two by.
 const mappingText = (m) => JSON.stringify(columns.headers.map((h) => [h, m[h]]));
 // The column options a run is given (Hermes's run, Krisis's match and finish): the matching shown, a pattern column in its object form.
-const columnOptions = () => mappingToSave(columns.mapping, columns.patterns);
+const columnOptions = () => mappingToSave(columns.mapping, columns.patterns, columns.levels, columns.splits);
 const isTable = (inp) => inp?.format === 'csv' || inp?.format === 'geojson';
 // A workbook read as a table of places: the sheet read (the first not hidden, until another is
 // chosen), sent with every command that reads the table.
@@ -275,7 +276,9 @@ function onColumns(d) {
   const own = (o) => Object.assign(Object.create(null), o);
   columns = { headers: d.headers, examples: own(d.examples), fields: d.fields, mapping: own(d.mapping), reasons: own(d.reasons), gazetteer: d.gazetteer || [],
     // A column of a gazetteer's ids: the pattern suggested for it, and the patterns confirmed (or saved).
-    patterns: own(d.patterns || {}), suggested: own(d.suggested || {}), first: own(d.mapping) };
+    patterns: own(d.patterns || {}), suggested: own(d.suggested || {}), first: own(d.mapping),
+    // A region's level ("within"), and a column split into levels, as the engine read them (columns.js).
+    levels: own(d.levels || {}), splits: own(Object.fromEntries(Object.entries(d.splits || {}).map(([h, x]) => [h, { ...x, levels: [...x.levels] }]))) };
   // A column the saved matching gives, and the engine took as given, says so in the page's words;
   // one it could not take keeps the engine's reason.
   if (d.saved) for (const h of d.headers) if (d.reasons[h] && d.problems.every((p) => p.example !== h && !String(p.example).startsWith(`${h}: `))) columns.reasons[h] = W.saved;
@@ -305,7 +308,7 @@ function renderColumns() {
     const ex = c.examples[h] || [];
     return `<tr><th scope="row"><code>${escapeHtml(h)}</code></th>`
       + `<td>${ex.length ? `<ul class="examples">${ex.map((v) => `<li>${escapeHtml(v.length > 60 ? v.slice(0, 59) + '…' : v)}</li>`).join('')}</ul>` : `<em>${W.noExamples}</em>`}</td>`
-      + `<td><label for="column-${i}" class="visually-hidden">${escapeHtml(W.selectLabel(h))}</label><select id="column-${i}" data-column="${i}" aria-describedby="column-why-${i}">${choiceOptions(c.mapping[h])}</select>${patternControl(h, i)}</td>`
+      + `<td><label for="column-${i}" class="visually-hidden">${escapeHtml(W.selectLabel(h))}</label><select id="column-${i}" data-column="${i}" aria-describedby="column-why-${i}">${choiceOptions(c.mapping[h])}</select>${patternControl(h, i)}<span id="column-extra-${i}" class="column-extra">${extraControls(h, i)}</span></td>`
       + `<td id="column-why-${i}" class="why-guess">${escapeHtml(c.reasons[h] || '')}</td></tr>`;
   }).join('');
   $('columns').innerHTML = `<h3 id="columns-h">${W.heading}</h3>${sheetControl()}<p>${escapeHtml(W.intro(geojson))} ${escapeHtml(W.base)}</p>`
@@ -328,6 +331,8 @@ function lockColumns() {
   const reviewing = !!work && !$('review').hidden;
   const selects = document.querySelectorAll('#columns select[data-column]');
   for (const sel of selects) sel.disabled = reviewing;
+  // A region's level and a split's controls too.
+  for (const el of document.querySelectorAll('#columns [data-level-column], #columns [data-split-column]')) el.disabled = reviewing;
   // The sheet too: a review was made of one sheet.
   if ($('columns-sheet')) $('columns-sheet').disabled = reviewing;
   // and says why, exactly when they are locked.
@@ -341,11 +346,88 @@ function patternControl(h, i) {
   if (!pattern) return '';
   return `<label class="use-pattern"><input type="checkbox" id="column-pattern-${i}" data-pattern-column="${i}"${Object.hasOwn(c.patterns, h) ? ' checked' : ''}> ${escapeHtml(COLUMN_WORDS.usePattern)} <code>${escapeHtml(pattern)}</code></label>`;
 }
+// ---- Hermes: the regions a place lies in ("within" columns, and a column split into levels) -------
+// A "within" column has a level beside its choice (1 the widest); a split column, its separator, its
+// levels (narrowest first) and whether its first part is the place's name. Levels are positional:
+// a column newly read as a region takes the next level; choosing a level another column has swaps
+// the two; a column no longer a region gives its level up, and the rest close up (columns.js, within.js).
+const usedLevels = () => {
+  const out = [];
+  for (const [h, f] of Object.entries(columns.mapping)) {
+    if (f === 'within' && Object.hasOwn(columns.levels, h)) out.push(columns.levels[h]);
+    else if (f === 'split' && Object.hasOwn(columns.splits, h)) out.push(...columns.splits[h].levels);
+  }
+  return out;
+};
+function extraControls(h, i) {
+  const W = COLUMN_WORDS, c = columns;
+  if (c.mapping[h] === 'within' && Object.hasOwn(c.levels, h)) {
+    const top = Math.max(c.levels[h], usedLevels().length);
+    const options = Array.from({ length: top }, (_, k) => k + 1).map((l) => `<option value="${l}"${l === c.levels[h] ? ' selected' : ''}>${l}</option>`).join('');
+    return ` <label class="column-level" data-tip="${escapeHtml(W.levelTip)}">${escapeHtml(W.level)} <select id="column-level-${i}" data-level-column="${i}" aria-label="${escapeHtml(W.levelLabel(h))}">${options}</select></label>`;
+  }
+  if (c.mapping[h] === 'split' && Object.hasOwn(c.splits, h)) {
+    const sp = c.splits[h];
+    return `<span class="column-split" data-tip="${escapeHtml(W.splitTip)}">`
+      + `<label>${escapeHtml(W.splitOn)} <input type="text" id="column-split-sep-${i}" data-split-column="${i}" data-split="separator" value="${escapeHtml(sp.separator)}" size="4" spellcheck="false" autocomplete="off" aria-label="${escapeHtml(W.splitOnLabel(h))}"></label> `
+      + `<label>${escapeHtml(W.splitLevels)} <input type="text" id="column-split-levels-${i}" data-split-column="${i}" data-split="levels" value="${escapeHtml(sp.levels.join(', '))}" size="8" spellcheck="false" autocomplete="off" aria-label="${escapeHtml(W.splitLevelsLabel(h))}"></label> `
+      + `<label><input type="checkbox" id="column-split-name-${i}" data-split-column="${i}" data-split="firstIsName"${sp.firstIsName ? ' checked' : ''}> ${escapeHtml(W.splitName)}</label></span>`;
+  }
+  return '';
+}
+function refreshExtras() {
+  columns.headers.forEach((h, i) => { const el = $(`column-extra-${i}`); if (el) el.innerHTML = extraControls(h, i); });
+  lockColumns();
+}
+// The parts of a column's examples, at most: the levels a split is first given, numbered widest (the last part) first.
+function splitDefault(h) {
+  const separator = ', ';
+  const most = Math.max(1, ...(columns.examples[h] || []).map((v) => v.split(separator.trim()).filter((x) => x.trim()).length));
+  return { separator, levels: Array.from({ length: most }, (_, k) => most - k), firstIsName: false };
+}
+// The "within" columns renumbered 1 to n in their order, once one has gone (with no split, whose levels are typed).
+function closeUpLevels() {
+  if (Object.values(columns.mapping).includes('split')) return;
+  const within = columns.headers.filter((h) => columns.mapping[h] === 'within' && Object.hasOwn(columns.levels, h)).sort((a, b) => columns.levels[a] - columns.levels[b]);
+  within.forEach((h, k) => { columns.levels[h] = k + 1; });
+}
+function chooseLevel(i, level) {
+  const h = columns.headers[i], was = columns.levels[h];
+  const other = columns.headers.find((o) => o !== h && columns.mapping[o] === 'within' && columns.levels[o] === level);
+  columns.levels[h] = level;
+  columns.reasons[h] = COLUMN_WORDS.youChose;
+  if (other !== undefined) {
+    columns.levels[other] = was;
+    columns.reasons[h] = COLUMN_WORDS.levelSwapped(other, level);
+    const j = columns.headers.indexOf(other);
+    columns.reasons[other] = COLUMN_WORDS.levelSwapped(h, was);
+    $(`column-why-${j}`).textContent = columns.reasons[other];
+  }
+  $(`column-why-${i}`).textContent = columns.reasons[h];
+  refreshExtras();
+  renderColumnWarnings();
+}
+function chooseSplit(i, what, el) {
+  const W = COLUMN_WORDS, h = columns.headers[i], sp = columns.splits[h];
+  if (what === 'firstIsName') sp.firstIsName = el.checked;
+  else if (what === 'separator') {
+    if (el.value === '') { $(`column-why-${i}`).textContent = W.splitSeparatorEmpty; el.value = sp.separator; return; }
+    sp.separator = el.value;
+  } else {
+    const ls = el.value.split(/[\s,;]+/).filter(Boolean).map(Number);
+    if (!ls.length || !ls.every((l) => Number.isInteger(l) && l >= 1) || new Set(ls).size !== ls.length) { $(`column-why-${i}`).textContent = W.splitLevelsBad; el.value = sp.levels.join(', '); return; }
+    sp.levels = ls;
+  }
+  columns.reasons[h] = W.youChose;
+  $(`column-why-${i}`).textContent = W.youChose;
+  renderColumnWarnings();
+}
 function renderColumnWarnings() {
-  const warnings = columnWarnings(columns.mapping, columns.gazetteer, columns.suggested, columns.patterns);
+  const warnings = columnWarnings(columns.mapping, columns.gazetteer, columns.suggested, columns.patterns, columns.levels, columns.splits);
   $('columns-warnings').innerHTML = warnings.map((w) => `<p class="warn">${escapeHtml(w)}</p>`).join('');
   state.columns = { headers: [...columns.headers], mapping: Object.assign(Object.create(null), columns.mapping), reasons: Object.assign(Object.create(null), columns.reasons), examples: columns.examples, warnings, messages: [...columns.messages],
-    patterns: Object.assign(Object.create(null), columns.patterns), suggested: Object.assign(Object.create(null), columns.suggested) };
+    patterns: Object.assign(Object.create(null), columns.patterns), suggested: Object.assign(Object.create(null), columns.suggested),
+    levels: Object.assign(Object.create(null), columns.levels), splits: JSON.parse(JSON.stringify(columns.splits)) };
 }
 // A choice for one column. A field one column only can be (the name, the id…) is taken from the
 // column that had it, which is then kept as a note, and says why.
@@ -359,9 +441,16 @@ function chooseColumn(i, field) {
       dropPattern(other, j);
     });
   }
+  const before = columns.mapping[h];
   columns.mapping[h] = field; columns.reasons[h] = W.youChose;
   clearPreview();
   $(`column-why-${i}`).textContent = W.youChose;
+  // A region takes the next level; one no longer a region gives its level up. A split starts from its examples.
+  if (field !== 'within' && Object.hasOwn(columns.levels, h)) { delete columns.levels[h]; closeUpLevels(); }
+  if (field !== 'split') delete columns.splits[h];
+  if (field === 'within' && before !== 'within') columns.levels[h] = Math.max(0, ...usedLevels()) + 1;
+  if (field === 'split' && before !== 'split') columns.splits[h] = splitDefault(h);
+  refreshExtras();
   // A pattern makes web addresses: it goes with the address, and with nothing else.
   if (field !== 'address') dropPattern(h, i);
   // Rows with the same id are one place only while a column is the id.
@@ -392,7 +481,7 @@ function saveMatching() {
   const a = document.createElement('a');
   // In the file's order, which an object would not keep for a column whose heading is a number.
   // A column made into web addresses through a pattern is saved in its object form (mappingToSave).
-  const saved = mappingToSave(columns.mapping, columns.patterns);
+  const saved = mappingToSave(columns.mapping, columns.patterns, columns.levels, columns.splits);
   const text = `{\n${columns.headers.map((h) => `  ${JSON.stringify(h)}: ${JSON.stringify(saved[h])}`).join(',\n')}\n}\n`;
   a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
   a.download = (files[0]?.name || 'table').replace(/\.gz$/i, '').replace(/\.[^.]+$/, '') + '-columns.json';
@@ -413,6 +502,8 @@ $('columns').addEventListener('change', (e) => {
   if (e.target.id === 'columns-sheet') chooseSheet(e.target.value);
   else if (e.target.matches('select[data-column]')) chooseColumn(Number(e.target.dataset.column), e.target.value);
   else if (e.target.matches('input[data-pattern-column]')) { choosePattern(Number(e.target.dataset.patternColumn), e.target.checked); clearPreview(); }
+  else if (e.target.matches('select[data-level-column]')) { chooseLevel(Number(e.target.dataset.levelColumn), Number(e.target.value)); clearPreview(); }
+  else if (e.target.matches('[data-split-column]')) { chooseSplit(Number(e.target.dataset.splitColumn), e.target.dataset.split, e.target); clearPreview(); }
 });
 
 // ---- Hermes: Reading options --------------------------------------------------------------------
@@ -577,6 +668,19 @@ function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&a
 
 // Cleared once read, so that choosing the same file again (after editing it) is a change too.
 $('picker').onchange = (e) => { choose(e.target.files); e.target.value = ''; };
+// Hermes: a pasted list of names, read as a one-column CSV file (src/engine/hermes/pasted.js) handed
+// in as a dropped file is, through the usual detection and matching of columns.
+{
+  const P = PASTE_WORDS;
+  $('paste').innerHTML = `<summary>${escapeHtml(P.summary)}</summary>`
+    + `<label for="paste-text">${escapeHtml(P.label)}</label><textarea id="paste-text" rows="6" spellcheck="false" aria-describedby="paste-note"></textarea>`
+    + `<p class="actions"><button type="button" id="paste-use">${escapeHtml(P.use)}</button> <small id="paste-note">${escapeHtml(P.note)}</small></p><p id="paste-message" class="warn" aria-live="polite"></p>`;
+  $('paste-use').onclick = () => {
+    const f = pastedListFile($('paste-text').value);
+    $('paste-message').textContent = f ? '' : P.empty;
+    if (f) choose([f]);
+  };
+}
 // Going to Chora's page with files chosen here hands them over (src/chora/handoff.js), and it offers
 // to open them. Only then, not on every choice: the browser may keep a copy of a stored file, and
 // the files here may be of any size.

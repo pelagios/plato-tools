@@ -123,7 +123,8 @@ export const COLUMN_CHOICES = {
   name: 'Name', alternativeNames: 'Alternative names', latitude: 'Latitude', longitude: 'Longitude',
   wkt: 'Point or shape, as WKT text', geometry: 'Point or shape, as GeoJSON', id: 'Place id', address: "Place's web address",
   type: 'Kind of place', language: 'Language of the name', source: 'Source', date: 'Date, as the source writes it',
-  start: 'Earliest date', end: 'Latest date', note: 'Keep as a note', skip: "Don't carry over",
+  start: 'Earliest date', end: 'Latest date', within: 'Region it lies in', split: 'Regions, to split into levels',
+  note: 'Keep as a note', skip: "Don't carry over",
 };
 export const COLUMN_WORDS = {
   heading: 'Which column holds what',
@@ -157,6 +158,19 @@ export const COLUMN_WORDS = {
   /** The row control that confirms a suggested pattern. */
   usePattern: 'Make web addresses',
   usePatternLabel: (col, pattern) => `Make the web addresses of the column “${col}” with ${pattern}`,
+  /** A region the place lies in (columns.js, "within"): its level, beside the choice. Levels count from the widest. */
+  level: 'Level',
+  levelLabel: (col) => `The level of the region in the column “${col}”: 1 is the widest`,
+  levelTip: 'Regions are numbered from the widest: 1 for the widest (a country, say), then 2, 3… for the regions inside it. Choosing a level another column has swaps the two.',
+  levelSwapped: (col, level) => `your choice: level ${level}, swapped with the column “${col}”`,
+  /** A column of several regions in one cell, split into levels (columns.js, "split"). */
+  splitOn: 'Split on', splitOnLabel: (col) => `What separates the parts of the column “${col}”`,
+  splitLevels: 'Levels, narrowest first', splitLevelsLabel: (col) => `The levels the parts of the column “${col}” go to, narrowest first`,
+  splitName: "The first part is the place's name",
+  splitTip: 'A cell such as “Rotherhithe, Surrey, England” is split where the separator is. Its parts, narrowest first, go to the levels given (1 is the widest): 3, 2, 1 for a parish, a county and a country. Parts beyond the levels given are named in the report.',
+  splitLevelsBad: 'Give the levels as whole numbers of 1 or more, each once, separated by commas, narrowest first, such as 3, 2, 1.',
+  splitSeparatorEmpty: 'Give what separates the parts, such as a comma.',
+  sameLevel: (cols, level) => `${cols.map((c) => `“${c}”`).join(' and ')} are both at level ${level}, and each level is one column: the second is kept as a note. Give each region a level of its own.`,
   gazetteerNotAddress: (col, cli) => `The column “${col}” is named for a gazetteer or a web address, but no column is read as the place's web address, so no row will be linked to a gazetteer's place: each is read as a new place. If “${col}” holds the places' addresses, ${cli ? 'map it to "address" in the mapping given with --columns' : 'choose “Place\'s web address” for it'}.`,
 };
 /**
@@ -164,9 +178,16 @@ export const COLUMN_WORDS = {
  * (`gazetteer`, columns.js's gazetteerColumns) when no column is the address, no ids or addresses,
  * half a coordinate pair.
  */
-export function columnWarnings(mapping, gazetteer = [], suggested = {}, patterns = {}) {
+export function columnWarnings(mapping, gazetteer = [], suggested = {}, patterns = {}, levels = {}, splits = {}) {
   const fields = new Set(Object.values(mapping || {}));
   const out = gazetteerWarnings(mapping, gazetteer, { suggested, patterns });
+  // Two regions at one level (a "within" column's, or a split's parts').
+  const at = new Map();
+  for (const [h, f] of Object.entries(mapping || {})) {
+    const ls = f === 'within' && Object.hasOwn(levels, h) ? [levels[h]] : f === 'split' && Object.hasOwn(splits, h) ? splits[h].levels : [];
+    for (const l of ls) at.set(l, [...(at.get(l) || []), h]);
+  }
+  for (const [l, cols] of at) if (new Set(cols).size > 1) out.push(COLUMN_WORDS.sameLevel([...new Set(cols)], l));
   if (!fields.has('address') && !fields.has('id')) out.push(COLUMN_WORDS.noIds);
   if (fields.has('latitude') && !fields.has('longitude')) out.push(COLUMN_WORDS.latOnly);
   if (fields.has('longitude') && !fields.has('latitude')) out.push(COLUMN_WORDS.lonOnly);
@@ -191,6 +212,17 @@ export function columnProblem(p) {
   if (p.kind === 'generic-mapping-unknown-column') return COLUMN_WORDS.unknown(p.example);
   return COLUMN_WORDS.unusable(p.example);
 }
+
+// ---- Hermes: a pasted list of names ---------------------------------------------------------------
+// The box under the drop zone (src/app.js): a list pasted, one name a line, is read as a table of
+// places of one column, "name" (src/engine/hermes/pasted.js), as a file dropped would be.
+export const PASTE_WORDS = {
+  summary: 'Or paste a list of names',
+  label: 'Paste a list of names, one per line',
+  use: 'Use this list',
+  note: 'Read as a table of places with one column, “name”, as a file dropped here would be.',
+  empty: 'There are no names to use: paste one name on each line.',
+};
 
 // ---- Hermes: Reading options --------------------------------------------------------------------
 // The page's one fieldset of reading options (src/app.js), shown only for a format that has some:
