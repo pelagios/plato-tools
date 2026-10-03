@@ -689,6 +689,9 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       // header said place-centric, which has no attestation on its own, and no schema to check one by.
       else if (ev.type === 'attestation') { rep.count('attestations'); rep.error('schema', 'An attestation is given on its own (it says what it is about), but the document is place-centric, where every attestation goes under its place. Put it under its place, or give the document the attestation-centric profile.', `${input.format === 'plato-jsonl' ? 'line' : 'attestation'} ${ev.n}${ev.value?.['@id'] ? `: ${ev.value['@id']}` : ''}`); }
       else if (ev.type === 'idr') { rep.count('identity relations'); dry.record('identityRelations', ev.value); }
+      // A region a table's reader minted (tagged `region`, src/engine/hermes/generic.js) comes before every
+      // place in it and has no pre-pass here: it is named as it passes, for LPF's broaderPartitive label.
+      if (regions && ev.region && ev.type === 'record' && typeof ev.value?.['@id'] === 'string') { regions.named.add(ev.value['@id']); regions.nameRecord(ev.value.attestations, ev.value['@id'], regionLabel(ev.value)); }
       if (writer) {
         try { await writer.event(augmented(ev)); }
         catch (e) { rep.error('record-failed', 'A record could not be written and is left out of the output; the rest of the file was still converted', `${ev.value?.['@id'] || `item ${ev.n}`}: ${e && e.message || e}`); }
