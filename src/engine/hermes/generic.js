@@ -30,6 +30,10 @@ import { containerKey, CONTAINED_IN } from './within.js';
 import { sha256 } from '../../lib/sha256.js';
 /** The id a region is minted with, under the base address: "region-" and 16 hex digits of the SHA-256 of its containerKey. */
 export const regionId = (key) => `region-${sha256(key).slice(0, 16)}`;
+// Spellings grouped for lookup (cluster.js): carried beside each record, never in place of its name.
+import { lookupSpellings } from './cluster.js';
+import { cellText } from './columns.js';
+import { CLUSTER_WORDS } from '../words.js';
 
 // The CSV reader is shared with the spreadsheet tables (src/formats/csv.js); exported here as before.
 export { csvRecords };
@@ -301,6 +305,17 @@ export async function columnsOf(input) {
   return { headers: t.headers, sample: t.sample };
 }
 /**
+ * Each row's value in one column, as the reader reads it (cellText: trimmed), for grouping its
+ * spellings (cluster.js); a row without the column gives ''. Streams: no row is kept. A column the
+ * input does not have is a DataError naming the columns it has.
+ */
+export async function* columnValues(input, column, sheet) {
+  const t = await open(input, sheet ?? input.sheet);
+  if (t.empty) throw new DataError(`${LOSS_TEXT['generic-sheet-empty']} (the sheet "${t.sheet}")`);
+  if (!t.headers.includes(column)) throw new DataError(`There is no column "${column}"; the columns are ${quoted(t.headers)}.`);
+  for await (const r of t.rows()) if (r.row) yield cellText(r.row[column]);
+}
+/**
  * The mapping a run of this input uses: { mapping, reasons, problems, gazetteer } (columns.js,
  * resolveColumns), and `headers`, the columns in the file's order (which the mapping, an object,
  * does not keep for a column whose heading is a number).
@@ -353,6 +368,11 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
   const t = await open(input, sheet);
   const { mapping, patterns, levels, splits, problems } = resolveColumns(t.headers, t.sample, options.columns, t.headerText, { ownGeometry: t.ownGeometry });
   for (const p of [...(t.headProblems || []), ...problems]) report(p.kind, p.example);
+  // Spellings grouped for lookup (options.clusters, the groups the user ticked): each grouped row's
+  // event carries its lookup spelling (lookupName, lookupValues) and its attestation a note; the name stays the source's.
+  const spell = options.clusters ? lookupSpellings(options.clusters) : null;
+  const nameColumn = Object.keys(mapping).find((h) => mapping[h] === 'name');
+  for (const c of spell?.columns || []) if (!t.headers.includes(c)) rep.add('warning', 'generic-clusters-unknown-column', CLUSTER_WORDS.noColumnKind, c);
   // A column split into levels is a column of its own for each part (columns.js, expandSplits).
   const expanded = expandSplits(mapping, levels, splits);
   const fields = Object.values(expanded.mapping);
@@ -443,11 +463,13 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
     for (const c of a.skipped) skipped.add(c);
     // The regions the row's place lies in, widest first, on the event and never in its value (within.js).
     const w = a.within ? { within: a.within } : {};
+    // The groups are keyed on the source's own headings, so they read the row as given.
+    const looked = spell?.apply(r.row, a.attestation, nameColumn);
     if (byAddress && a.address) {
       out++;
       const { events, contained } = regionsOf(a);
       yield* events;
-      yield { type: 'attestation', value: { about: a.address, ...a.attestation }, n, ...w };
+      yield { type: 'attestation', value: { about: a.address, ...a.attestation }, n, ...w, ...looked };
       for (const c of contained) yield { type: 'attestation', value: { about: a.address, ...c }, n, ...w };
       continue;
     }
@@ -469,7 +491,7 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
       out++;
       const { events, contained } = regionsOf(a);
       yield* events;
-      yield { type: 'attestation', value: { about: mint(a.id), ...a.attestation }, n, ...w };
+      yield { type: 'attestation', value: { about: mint(a.id), ...a.attestation }, n, ...w, ...looked };
       for (const c of contained) yield { type: 'attestation', value: { about: mint(a.id), ...c }, n, ...w };
       continue;
     }
@@ -485,7 +507,7 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
     rec.attestations = [a.attestation, ...contained];
     yield* events;
     out++;
-    yield byAddress ? { type: 'record', value: rec, n, newEntity: true, ...w } : { type: 'record', value: rec, n, ...w };
+    yield byAddress ? { type: 'record', value: rec, n, newEntity: true, ...w, ...looked } : { type: 'record', value: rec, n, ...w, ...looked };
   }
   // Each id read with options.sameId is one new place, its attestations the rows above. Its label is
   // the name its rows agree on; where they differ, none is picked: the label is the id, and the names
