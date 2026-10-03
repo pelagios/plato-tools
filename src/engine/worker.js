@@ -13,6 +13,9 @@ import { DataError } from './input.js';
 import { pragmas } from '../lib/store.js';
 import { detect, readable } from './input.js';
 import { columnsOf, mappingOf, withSheet } from './hermes/generic.js';
+// Hermes: grouping similar spellings for lookup.
+import { columnValues } from './hermes/generic.js';
+import { clusterCounter } from './hermes/cluster.js';
 import { FIELDS, cellText } from './hermes/columns.js';
 import { teiKeyPrefixes, EDITORIAL_IRI } from './hermes/tei.js';
 import { preview, previewLine, PREVIEW_LIMIT } from './hermes/preview.js';
@@ -207,6 +210,20 @@ self.onmessage = async ({ data }) => {
         postMessage({ type: 'columns', id: data.id, headers, examples, mapping, patterns, levels, splits, suggested, reasons, problems, gazetteer, fields, saved: data.saved !== undefined });
       } catch (e) {
         postMessage({ type: 'columns', id: data.id, error: String(e && e.message || e) });
+      }
+    } else if (data.cmd === 'cluster') {
+      // Hermes: groups of similar spellings in one column of a table of places (hermes/cluster.js),
+      // for the page to show, each unticked. Nothing is applied here: the page sends the groups the
+      // user ticks with the run's options. `id` is the page's: an answer about a file, a sheet or a
+      // column no longer chosen is set aside.
+      try {
+        const input = withSheet(await detect(data.files), data.sheet);
+        const counter = clusterCounter({ method: data.method });
+        let values = 0;
+        for await (const v of columnValues(input, data.column)) { values++; counter.add(v); }
+        postMessage({ type: 'cluster', id: data.id, column: data.column, method: counter.method, values, distinct: counter.distinct, clusters: counter.clusters() });
+      } catch (e) {
+        postMessage({ type: 'cluster', id: data.id, column: data.column, error: String(e && e.message || e) });
       }
     } else if (data.cmd === 'tei-keys') {
       // Hermes: the prefixes of a TEI file's keys on place names with no ref, each with a pattern to
