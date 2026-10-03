@@ -613,7 +613,7 @@ async function saveDataset() {
         return;
       }
       // Opened for a workflow: the file saved is handed back to it, by reference (handback.js), before
-      // a copy kept here is let go, and from the very bytes that went to the user's disk.
+      // a copy kept here is let go, and from the very file that went to the user's disk, read as a stream.
       if (done && workflow) await handBack(file, out.name);
       if (done === true) letGo('Saved.');
       else if (done === 'download' && !box.querySelector('[data-clear]')) {

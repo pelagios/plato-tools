@@ -988,8 +988,9 @@ saved, by the save dialogue or as a download, is handed back: a record in the ha
 workflow and a format, `{ handback: 1, workflow, files: [{ type: 'dataset', name, size, sha256 }], at }`.
 `files` holds a reference, never the bytes: the shape of a Methodos hand-off (`isRef` and
 `checkHandoff` in `src/engine/methodos/handoffs.js`, on the branch `methodos-engine` until it is
-merged), the SHA-256 computed with SubtleCrypto over the very File that went to disk, before a copy
-kept here is let go. Then the save result offers **Back to the workflow**, a link to `./#workflow=<id>`;
+merged), its SHA-256 computed over the very File that went to disk, before a copy kept here is let
+go, as a stream, by Krisis's `fileSha256` (`src/engine/krisis/digest.js`, which `fileRecords` and so
+Methodos's `refsOf` use), so that a saved dataset of DEEP's size is never in memory whole. Then the save result offers **Back to the workflow**, a link to `./#workflow=<id>`;
 a click writes the record again, so that its two minutes (`FRESH`, as the hand-off's) are the
 navigation's, and Chora drops a stale one when it starts. Opened without `#workflow`, nothing is
 written. The main page's side is not built yet: on loading with `#workflow=<id>` it must find the

@@ -8,8 +8,8 @@
 //   { handback: 1, workflow: '<id>', files: [{ type: 'dataset', name, size, sha256 }], at }
 // and `files` holds REFERENCES, never the bytes: a Methodos hand-off is a list of references to files
 // (src/engine/methodos/handoffs.js, isRef and checkHandoff, on the branch methodos-engine), each
-// { type, name, size, sha256 } with sha256 64 lower-case hexadecimal digits over the file's bytes,
-// as Krisis's work file records its inputs (fileRecords in src/engine/krisis/work.js). The reference
+// { type, name, size, sha256 } with sha256 64 lower-case hexadecimal digits over the file's bytes, hashed
+// as a stream by the same code, as Krisis's work file records its inputs (fileRecords in src/engine/krisis/work.js). The reference
 // here MUST stay that shape: test/chora-handback.test.js pins it, and checks it against the Methodos
 // module itself where that module is present. The main page completes the step with
 // runner.complete(state, stepId, { dataset: record.files }) once the user has chosen the saved file
@@ -21,6 +21,9 @@
 // as long as the hand-off is (FRESH, two minutes): it is written when the file is saved and written
 // again when the way back is taken, so the two minutes are the navigation's, as the hand-off's are.
 import { tx, isFresh } from './handoff.js';
+// The streaming SHA-256 Krisis's fileRecords uses (src/engine/krisis/work.js), so that a reference made
+// here is the one Methodos's refsOf makes, and a saved dataset of any size is never in memory whole.
+import { fileSha256 } from '../engine/krisis/digest.js';
 
 export const KEY = 'chora-handback';
 export const FORMAT = 1;
@@ -54,23 +57,17 @@ export function backTo(id, here) {
   return u.href;
 }
 
-/** The SHA-256 of `bytes` (an ArrayBuffer or a view), by the browser's own SubtleCrypto, in lower-case hexadecimal. */
-export async function sha256Hex(bytes) {
-  const d = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
-  let s = '';
-  for (const b of d) s += b.toString(16).padStart(2, '0');
-  return s;
-}
-
 /** Whether `r` is one reference to a dataset as Methodos's isRef takes it, its name one the page can show. */
 export const isDatasetRef = (r) => !!r && typeof r === 'object' && !Array.isArray(r) && Object.keys(r).length === 4
   && r.type === TYPE && typeof r.name === 'string' && NAME.test(r.name)
   && Number.isSafeInteger(r.size) && r.size >= 0 && typeof r.sha256 === 'string' && HEX64.test(r.sha256);
 
-/** The reference to `file` (a File, or a Blob with a name): its bytes read once, the size and the hash both of those bytes. */
+/**
+ * The reference to `file` (a File, or a Blob with a name), as Krisis's fileRecords makes one: its size,
+ * and the SHA-256 of its bytes read once as a stream, a chunk at a time, never the whole file at once.
+ */
 export async function refOf(file, name = file.name) {
-  const bytes = await file.arrayBuffer();
-  const ref = { type: TYPE, name, size: bytes.byteLength, sha256: await sha256Hex(bytes) };
+  const ref = { type: TYPE, name, size: file.size, sha256: await fileSha256(file) };
   if (!isDatasetRef(ref)) throw new Error(`${name} cannot be handed back: its name is not one the main page can show.`);
   return ref;
 }
