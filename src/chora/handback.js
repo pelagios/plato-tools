@@ -27,8 +27,12 @@ export const FORMAT = 1;
 export const TYPE = 'dataset';
 /** A workflow's id as an address may carry it: letters, digits, '-' and '_', at most 64, so that it is safe in an address and in the page. */
 const WORKFLOW_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
-// Beyond Methodos's own check, a name the main page can show: no path, no control characters, not absurdly long.
-const NAME = /^[^/\\\u0000-\u001f\u007f]{1,255}$/;
+// Beyond Methodos's own check, a name the main page can show as it is: no path, no control characters,
+// none of the invisible characters that make a name read as another (zero-width spaces and marks,
+// U+200B-U+200F; bidirectional embeddings and overrides, U+202A-U+202E; isolates, U+2066-U+2069; the
+// byte-order mark, U+FEFF), at most 255, something other than white space, and not "." or "..".
+const NAME_CHARS = /^[^/\\\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]{1,255}$/;
+const nameOk = (n) => typeof n === 'string' && NAME_CHARS.test(n) && /\S/.test(n) && n !== '.' && n !== '..';
 
 export const isWorkflowId = (id) => typeof id === 'string' && WORKFLOW_ID.test(id);
 
@@ -53,7 +57,7 @@ export function backTo(id, here) {
 }
 
 /** Whether `r` is one reference to a dataset, as Methodos's isRef takes it and with no other key, its name one the page can show. */
-export const isDatasetRef = (r) => isRef(r) && r.type === TYPE && Object.keys(r).length === 4 && NAME.test(r.name);
+export const isDatasetRef = (r) => isRef(r) && r.type === TYPE && Object.keys(r).length === 4 && nameOk(r.name);
 
 /** The reference to `file` (a File, or a Blob with a name), made by Methodos's refsOf: its size, and the SHA-256 of its bytes read as a stream. */
 export async function refOf(file) {
