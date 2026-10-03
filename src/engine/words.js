@@ -123,7 +123,7 @@ export function groups(action) {
 /** Each choice a column can be given, in the order the page offers them. `properties` is never one. */
 export const COLUMN_CHOICES = {
   name: 'Name', alternativeNames: 'Alternative names', latitude: 'Latitude', longitude: 'Longitude',
-  wkt: 'Point or shape, as WKT text', geometry: 'Point or shape, as GeoJSON', id: 'Place id', address: "Place's web address",
+  wkt: 'Point or shape, as WKT text', geometry: 'Point or shape, as GeoJSON', gridref: 'Grid reference (Ordnance Survey, Irish Grid)', id: 'Place id', address: "Place's web address",
   type: 'Kind of place', language: 'Language of the name', source: 'Source', date: 'Date, as the source writes it',
   start: 'Earliest date', end: 'Latest date', within: 'Region it lies in', split: 'Regions, to split into levels',
   note: 'Keep as a note', skip: "Don't carry over",

@@ -21,6 +21,7 @@
 import { isAbsoluteIri } from '../../lib/context.js';
 import { placeAddress, addressNote, addressFromPattern, patternProblem, patternId, GAZETTEER_PATTERNS } from './addresses.js';
 import { withinNote } from './within.js';
+import { parseGridRef, gridRefToWgs84, looksLikeGridRef } from './gridref.js';
 
 /** What each field of the mapping means, and whether one column only may be mapped to it. */
 export const FIELDS = {
@@ -30,6 +31,7 @@ export const FIELDS = {
   longitude: { single: true, words: 'longitude, in decimal degrees' },
   wkt: { single: true, words: 'a point or shape in Well-Known Text (WKT)' },
   geometry: { single: true, words: 'a GeoJSON geometry, written out in the cell' },
+  gridref: { single: true, words: 'a grid reference of the Ordnance Survey National Grid (TQ 33760 80560) or the Irish Grid (O 15 34), read as the centre of its square' },
   id: { single: true, words: "the place's own identifier in the file, from which its web address is made" },
   address: { single: true, words: "the place's web address in a gazetteer (Wikidata, Pleiades, GeoNames, the World Historical Gazetteer…): each row is then evidence about that place" },
   type: { single: false, words: 'what kind of place it is; several in one cell are separated by ; or |' },
@@ -55,6 +57,8 @@ export const GENERIC_KINDS = {
   'generic-geometry-collection': 'loss',
   'generic-geometry-invalid': 'loss',
   'generic-wkt-invalid': 'loss',
+  'generic-gridref-invalid': 'loss',
+  'generic-gridref-disagrees': 'warning',
   'generic-date-invalid': 'loss',
   'generic-language-invalid': 'loss',
   'generic-row-empty': 'loss',
@@ -119,6 +123,7 @@ const HEADINGS = {
   end: ['end', 'to', 'enddate', 'maxdate', 'latest', 'notafter', 'dateto', 'todate', 'yearto', 'toyear', 'endyear', 'until'],
   wkt: ['wkt', 'geowkt', 'geometrywkt', 'wktgeometry', 'shapewkt', 'coord', 'coords', 'coordinates'],
   geometry: ['geometry', 'geom', 'geojson', 'thegeom', 'shape'],
+  gridref: ['gridref', 'gridrefs', 'gridreference', 'gridreferences', 'ngr', 'osngr', 'osgb', 'osgb36', 'osgrid', 'osgridref', 'osgridreference', 'osref', 'bng', 'britishnationalgrid', 'nationalgrid', 'nationalgridref', 'nationalgridreference', 'irishgrid', 'irishgridref', 'irishgridreference', 'igr'],
 };
 const BY_HEADING = new Map(Object.entries(HEADINGS).flatMap(([f, hs]) => hs.map((h) => [h, f])));
 // A gazetteer's name at the start of a heading (wikidata_uri, pleiades_url, geonames_id) reads as an address column.
@@ -140,6 +145,7 @@ const NUMBER = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
 const isNumber = (s) => NUMBER.test(s);
 const FIELD_WORDS = {
   name: "the place's name", alternativeNames: 'other names', latitude: 'latitude', longitude: 'longitude', wkt: 'Well-Known Text', geometry: 'a geometry',
+  gridref: 'a grid reference',
   id: 'an identifier', address: "the place's web address", type: 'a type', language: 'a language', source: 'a source', date: 'a date', start: 'a start date', end: 'an end date',
   within: 'a region the place lies in', split: 'several regions in one cell',
 };
@@ -266,6 +272,15 @@ export function guessColumns(headers, sampleRows = [], headerText = {}, { ownGeo
       else if (vs.length) reason = `${reason}, and ${k === vs.length ? `all ${k} of its sampled values are` : `${k} of its ${vs.length} sampled values are`} Well-Known Text`;
     } else if (field === 'geometry') {
       if (!vs.length || !vs.every(geometryLike)) { reason = `the heading "${h}" reads as a geometry, but its values are not GeoJSON geometries, so it is kept in the notes`; field = 'note'; }
+    } else if (field === 'gridref') {
+      // At least half of its values must be grid references (gridref.js); letters alone count here.
+      const k = vs.filter((v) => !parseGridRef(v).error).length;
+      if (vs.length && 2 * k < vs.length) { reason = `the heading "${h}" reads as ${FIELD_WORDS.gridref}, but ${k ? `only ${k}` : 'none'} of its ${vs.length} sampled values ${k === 1 ? 'is' : 'are'} a grid reference (such as TQ 33760 80560, or O 15 34), so it is kept in the notes`; field = 'note'; }
+    }
+    // A column whose heading says nothing, at least half of whose values are grid references with digits.
+    if (!field && vs.length && 2 * vs.filter(looksLikeGridRef).length >= vs.length) {
+      const k = vs.filter(looksLikeGridRef).length;
+      field = 'gridref'; reason = `${k === vs.length ? (k === 1 ? 'its one sampled value is a grid reference' : `all ${k} of its sampled values are grid references`) : `${k} of its ${vs.length} sampled values ${k === 1 ? 'is a grid reference' : 'are grid references'}`} (such as TQ 33760 80560, or O 15 34)`;
     }
     if (field && single(field) && taken.has(field)) { reason = `${reason}, but ${FIELD_WORDS[field]} is already column "${taken.get(field)}", so it is kept in the notes`; field = 'note'; }
     if (!field) { field = 'note'; reason = 'the heading is not one these tools recognise, so it is kept in the notes'; }
@@ -621,6 +636,7 @@ export function geometryToPlato(g, report = () => {}, where = '') {
 export function applyColumns(row, mapping, { where = '', report = () => {}, fileName = 'the file', geometry, idAsNote = false, patterns = {}, levels = {}, from = {}, withinNote: noteWithin = true } = {}) {
   let name, id, idCol, address, addressFrom, addressText, addressLost = false, language, languageCol, date, start, end, wkt, lat = '', lon = '', geomCell;
   const alternatives = [], types = [], sources = [], notes = [], skipped = [], within = [];
+  let gridCell;
   const note = (col, v) => notes.push(`${col}: ${v}`);
   for (const [col, field] of Object.entries(mapping)) {
     const raw = row[col];
@@ -639,6 +655,7 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
         break;
       }
       case 'geometry': geomCell = { col, v }; break;
+      case 'gridref': gridCell = { col, v }; break;
       case 'id': id = v; idCol = col; break;
       case 'address': {
         // Put into the form `about` should carry (addresses.js): a gazetteer's forms of an address
@@ -708,6 +725,23 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
       wkt = undefined;
     }
   }
+  // A grid reference (gridref.js): the centre of its square in WGS 84, unless the latitude and longitude
+  // gave the row a location, which then wins, the reference kept in the notes.
+  if (gridCell) {
+    const g = gridRefToWgs84(gridCell.v);
+    const shown = gridCell.v.length > 60 ? gridCell.v.slice(0, 59) + '…' : gridCell.v;
+    if (g.error) report('generic-gridref-invalid', `${where}, ${gridCell.col}: ${g.error} (${shown})`);
+    if (geometries.length) {
+      note(gridCell.col, gridCell.v);
+      const [x, y] = geometries[0].reprPoint;
+      const allowed = g.error ? 0 : g.precisionKm + decimalsKm(lat, lon);
+      const km = g.error ? 0 : groundKm([x, y], [g.lon, g.lat]);
+      if (km > allowed) report('generic-gridref-disagrees', `${where}: the grid reference ${shown} (column "${gridCell.col}") is ${round3(km)} km from latitude ${lat}, longitude ${lon}, more than the ${round3(allowed)} km the two allow together; the latitude and longitude are used`);
+    } else if (!g.error) {
+      geometries.push(clean({ reprPoint: [g.lon, g.lat], geojson: { type: 'Point', coordinates: [g.lon, g.lat] }, spatialPrecision: g.approximate ? ['approximate'] : undefined, precisionKm: [g.precisionKm], sourceLabel: gridCell.v }));
+      notes.push(g.note);
+    }
+  }
   if (wkt) geometries.push({ wkt });
   if (geomCell) {
     let g;
@@ -726,4 +760,17 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
     notes: notes.join('\n') || undefined,
   });
   return { label: name || alternatives[0], name, id, address, addressText, addressLost, attestation, skipped, ...(within.length ? { within } : {}) };
+}
+
+// ---- a grid reference beside a latitude and longitude -----------------------------------------------
+const round3 = (x) => Math.round(x * 1000) / 1000;
+/** The ground distance in km between two [longitude, latitude] points (haversine, mean radius). */
+function groundKm([x1, y1], [x2, y2]) {
+  const r = Math.PI / 180, a = Math.sin((y2 - y1) * r / 2) ** 2 + Math.cos(y1 * r) * Math.cos(y2 * r) * Math.sin((x2 - x1) * r / 2) ** 2;
+  return 2 * 6371.0088 * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+/** How far a latitude and longitude may be from the place, in km, from their decimals: half the last place of each. */
+function decimalsKm(lat, lon) {
+  const half = (s) => 0.5 * 10 ** -((/\.(\d+)/.exec(s) || ['', ''])[1].length);
+  return Math.hypot(half(lat) * 111.32, half(lon) * 111.32 * Math.cos(Number(lat) * Math.PI / 180));
 }
