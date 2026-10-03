@@ -650,7 +650,9 @@ readers link to those headings, so keep them.
   missing value's marker in the column (R's `NA`, `N/A`, `NULL`, `NIL`, `NONE`, `NaN`, a dash, `?`:
   `isMissingMarker`) is an empty cell, with no location and nothing reported, since `NA` is otherwise
   the National Grid's 100 km square NA, in the Atlantic; other fields are unaffected. An
-  invalid reference is `generic-gridref-invalid` (a loss, with the value). A row with a latitude and
+  invalid reference is `generic-gridref-invalid` (a loss, with the value), and every reference of
+  letters only is `generic-gridref-square-only` (a warning, "read as a 100 km square"), so a column of
+  them, which may be codes rather than references, is seen. A row with a latitude and
   longitude too takes its location from those; the reference is kept in the notes, and
   `generic-gridref-disagrees` (a warning) is given when the two are farther apart than the
   reference's `precisionKm` plus half the last decimal place of the latitude and longitude. A POINT in

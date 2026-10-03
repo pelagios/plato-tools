@@ -321,3 +321,17 @@ test('with a WKT or GeoJSON point too, the point wins as a latitude and longitud
   const gpoly = read({ n: 'P', w: JSON.stringify({ type: 'Polygon', coordinates: [[[-0.2, 51.4], [0, 51.4], [0, 51.6], [-0.2, 51.4]]] }), g: 'TQ 30624 78388' }, { n: 'name', w: 'geometry', g: 'gridref' });
   assert.deepEqual(gpoly.a.attestation.geometries.map((x) => x.geojson.type), ['Point', 'Polygon']);
 });
+test('every letters-only reference is reported as read as a 100 km square, so a column of them is visible', () => {
+  assert.equal(GENERIC_KINDS['generic-gridref-square-only'], 'warning');
+  assert.match(LOSS_TEXT['generic-gridref-square-only'], /read as a 100 km square/);
+  for (const v of ['SU', 'nt', 'O']) {
+    const { a, reported } = read({ n: 'x', g: v }, { n: 'name', g: 'gridref' });
+    assert.deepEqual(reported.map(([k]) => k), ['generic-gridref-square-only'], v);
+    assert.match(reported[0][1], new RegExp(`^row 2, g: ${v}, .*read as a 100 km square$`));
+    assert.deepEqual(a.attestation.geometries[0].precisionKm, [70.710678], v);   // still the square's centre
+  }
+  // Beside a latitude and longitude, too (where it is a note).
+  assert.deepEqual(read({ n: 'x', la: '51.07', lo: '-1.8', g: 'SU' }, { n: 'name', la: 'latitude', lo: 'longitude', g: 'gridref' }).kinds, ['generic-gridref-square-only']);
+  // Control: a reference with digits, even a 10 km square, is not reported.
+  for (const v of ['SU13', 'SU1234', 'O 15 34']) assert.deepEqual(read({ n: 'x', g: v }, { n: 'name', g: 'gridref' }).reported, [], v);
+});

@@ -59,6 +59,7 @@ export const GENERIC_KINDS = {
   'generic-wkt-invalid': 'loss',
   'generic-gridref-invalid': 'loss',
   'generic-gridref-disagrees': 'warning',
+  'generic-gridref-square-only': 'warning',
   'generic-date-invalid': 'loss',
   'generic-language-invalid': 'loss',
   'generic-row-empty': 'loss',
@@ -732,6 +733,7 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
     const g = gridRefToWgs84(gridCell.v);
     const shown = gridCell.v.length > 60 ? gridCell.v.slice(0, 59) + '…' : gridCell.v;
     if (g.error) report('generic-gridref-invalid', `${where}, ${gridCell.col}: ${g.error} (${shown})`);
+    else if (g.sizeM === 100000) report('generic-gridref-square-only', `${where}, ${gridCell.col}: ${shown}, letters only, read as a 100 km square`);
     // A POINT in the WKT or GeoJSON geometry column wins as a latitude and longitude do (cellPoint);
     // a shape that is not a point (a polygon) is kept beside the reference's point.
     const own = geometries.length ? undefined : cellPoint(wkt, geomCell);
