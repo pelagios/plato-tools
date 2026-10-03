@@ -280,6 +280,40 @@ export const PREVIEW_WORDS = {
   unreadable: (message) => `The file could not be read past a problem, so the preview stops there: ${message}`,
 };
 
+// ---- Hermes: grouping similar spellings for lookup (src/engine/hermes/cluster.js) -------------------
+// Grouping never changes the source's spellings: a group the user ticks gives its members a spelling
+// to look the place up by, carried beside the record and noted in its attestation.
+const listed = (xs, most = 10) => (xs.length > most ? `${xs.slice(0, most).join(', ')} and ${xs.length - most} more` : xs.join(', '));
+export const CLUSTER_WORDS = {
+  methods: { fingerprint: 'Same letters and words (case, accents, punctuation and word order ignored)', 'ngram-fingerprint': 'Same pairs of letters (spacing ignored too; groups more, wrongly too)', phonetic: 'Sounds alike (Cologne phonetics; groups the most, wrongly too)' },
+  // The note on each attestation whose value was grouped: `others` the group's other spellings.
+  note: (others, chosen, column) => `${column ? `The column "${column}" grouped` : 'Grouped'} for lookup with: ${listed(others)} (spelling chosen: ${chosen})`,
+  unknownMethod: (m, methods) => `"${m}" is not a way of grouping spellings; the ways are ${methods.join(', ')}.`,
+  notAnObject: 'The groups of spellings must be one JSON object, {"column name": {"method": "fingerprint", "groups": [{"chosen": "…", "members": ["…", "…"]}]}}.',
+  columnShape: (c) => `The groups of spellings for the column "${c}" must be an object with a list of "groups".`,
+  groupShape: (c, n) => `Group ${n} of the spellings for the column "${c}" must have a "chosen" spelling and a list of "members", each a spelling.`,
+  memberTwice: (c, m) => `The spelling "${m}" is in two groups for the column "${c}", so which spelling it is looked up by cannot be told. Keep it in one group.`,
+  // The report: groups for a column the file does not have.
+  noColumnKind: 'Groups of spellings for a column the file does not have were not used',
+  // The page.
+  button: 'Group similar spellings…',
+  tip: 'Finds spellings in one column that may be the same name (Rotherhith, Rotherhithe), for you to group so that the place is looked up by one spelling. Nothing is changed unless you tick a group, and the names in the PLATO file always keep the source’s spelling.',
+  legend: 'Group similar spellings for lookup',
+  intro: 'Tick a group to look its spellings up by the spelling chosen. The names in the PLATO file keep the source’s own spellings; each grouped row gets a note saying what it was grouped with.',
+  columnLabel: 'Column', methodLabel: 'How', find: 'Find groups', close: 'Close',
+  finding: 'Reading the column…',
+  none: (column, n) => `No spellings in "${column}" group together this way (${n.toLocaleString('en-GB')} different ${n === 1 ? 'value' : 'values'} read).`,
+  found: (k, column, n) => `${k.toLocaleString('en-GB')} ${k === 1 ? 'group' : 'groups'} of similar spellings in "${column}" (${n.toLocaleString('en-GB')} different values read). None is used until you tick it.`,
+  caption: (column) => `Groups of similar spellings in "${column}"`,
+  use: 'Use', spellings: 'Spellings (rows)', chosen: 'Look up as',
+  useLabel: (chosen) => `Use the group looked up as “${chosen}”`,
+  chosenLabel: (first) => `The spelling to look up the group of “${first}” by`,
+  chosenEmpty: 'Give a spelling to look the group up by, or untick it.',
+  ticked: (n) => (n ? `${n} ${n === 1 ? 'group' : 'groups'} ticked: ${n === 1 ? 'its' : 'their'} rows are looked up by the spelling chosen.` : 'No group is ticked, so no spelling is grouped.'),
+  loaded: (n, columns) => `${n} ${n === 1 ? 'group' : 'groups'} of spellings loaded with the matching, for ${columns.map((c) => `"${c}"`).join(', ')}.`,
+  cannotRead: (message) => `The column could not be read: ${message}`,
+};
+
 // Krisis: review screen
 // What the page says while matches are reviewed one subject place at a time (src/app.js).
 const IDENTITY_WORDS = { exactMatch: 'the same place', closeMatch: 'much the same place', related: 'a related place' };
