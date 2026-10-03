@@ -1310,6 +1310,54 @@ def krisis_lookup_case(page, tmp, url):
           ft.get('for check (lookup, match, check)') == [False, False, True] and ft.get('for match') == [True, True, False] and ft.get('every action') == [True, True, True], ft)
     page.unroute(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'))
 
+def krisis_lookup_pattern(page, tmp, url):
+    """Krisis, gazetteer lookup of a table with a Hermes column pattern (after krisis_lookup_case, which
+    leaves WHG allowed): a CSV column of Pleiades ids, its suggested pattern ticked, is read for the lookup
+    by the same column options Match is given, so the places looked up are the pattern-built Pleiades
+    addresses that krisis_pattern_match finds Match uses; unticked (the control), they are not. WHG is a
+    fake (page.route), as in krisis_lookup_case: nothing goes online."""
+    import re
+    table = tmp / 'krisis-lookup-pleiades.csv'
+    table.write_text('id,name,pleiades_id,lat,lon\n1,Athenae,579885,37.97,23.72\n2,Roma,423025,41.89,12.49\n')
+    calls = []
+    cors = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+            'Access-Control-Allow-Headers': 'authorization, content-type, accept, user-agent'}
+    def fake_whg(route):
+        req = route.request
+        if req.method == 'OPTIONS': return route.fulfill(status=204, headers=cors)
+        calls.append(req.post_data or '')
+        out = {'attribution': LOOKUP_ATTRIBUTION, **{k: {'result': []} for k in json.loads(req.post_data)['queries']}}
+        route.fulfill(status=200, headers={**cors, 'Content-Type': 'application/json'}, body=json.dumps(out))
+    whg = re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/')
+    page.route(whg, fake_whg)
+    def looked_up(tick):
+        try:
+            at = len(calls)
+            page.goto(NOTOOLS if PROVE else url)
+            r = wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+            if r.get('phase') != 'ready': return {'ready': r.get('phase')}
+            page.evaluate("() => { document.getElementById('base').value = 'https://example.org/p/'; }")
+            page.set_input_files('#picker', [str(table)])
+            s = wait_state(page, lambda s: (s.get('columns') or {}).get('mapping'), 60, 'columns')
+            if not (s.get('columns') or {}).get('mapping'): return {'columns': None}
+            if tick: page.locator('#columns input[data-pattern-column]').check()
+            page.evaluate("() => { const r = document.getElementById('reviewer'); if (!r.value) { r.value = 'Lu Reviewer'; r.dispatchEvent(new Event('change')); } }")
+            if not page.evaluate("() => document.getElementById('lookup').open"): page.click('#lookup > summary')
+            page.fill('#whg-token', LOOKUP_TOKEN); page.press('#whg-token', 'Tab')
+            page.select_option('#lookup-places', 'all')
+            page.wait_for_function("() => /^Send 2 queries to WHG$/.test(document.getElementById('lookup-send').textContent) && !document.getElementById('lookup-send').disabled", timeout=60_000)
+            page.click('#lookup-send')
+            s = wait_state(page, lambda s: (s.get('lookup') or {}).get('running') is False and (s.get('work') or {}).get('lookups'), 60, 'lookup')
+            looks = (s.get('work') or {}).get('lookups') or [{}]
+            return {'places': sorted(looks[-1].get('queries', {})), 'sent': len(calls) - at,
+                    'columns': (s.get('columns') or {}).get('mapping', {}).get('pleiades_id'), 'stopped': (s.get('lookup') or {}).get('stopped')}
+        except Exception as e: return {'error': str(e).split('\n')[0][:200]}
+    try: on, off = looked_up(True), looked_up(False)
+    finally: page.unroute(whg)
+    check('lookup: a CSV column with a confirmed Pleiades pattern is looked up by the pattern-built addresses, as Match reads it; unconfirmed (the control), by the table\'s own',
+          on.get('sent') == 1 and on.get('places') == ['https://pleiades.stoa.org/places/423025', 'https://pleiades.stoa.org/places/579885']
+          and off.get('sent') == 1 and len(off.get('places') or []) == 2 and not any('pleiades' in x for x in off['places']), {'on': on, 'off': off})
+
 def download(page, name, dest):
     with page.expect_download(timeout=600_000) as d:
         page.evaluate(f'window.__plato_save({json.dumps(name)})')
@@ -1955,6 +2003,7 @@ def main():
             # After main_permissions, whose first check is that nothing above asked another site: the
             # lookup asks (a fake) WHG once it is allowed.
             krisis_lookup_case(page, tmp, url)
+            krisis_lookup_pattern(page, tmp, url)
             ctx.close()
             front = pw.chromium.launch(headless=True)
             try: front_page_checks(front, url); theme_checks(front, url); methodos_page_checks(front, url)
