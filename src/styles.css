@@ -22,14 +22,13 @@
 /* Alegreya Sans is small on its body for its size; the guide sets it at 108% for the same reason. */
 body { margin: 0; font: 18px/1.5 var(--font-text); color: var(--fg); background: var(--bg); }
 header.top, main, footer { max-width: 52rem; margin: 0 auto; padding: 0 1.25rem; }
-header.top { padding-top: 2rem; }
+header.top { padding-top: 1rem; }
 h1, h2, h3, .family { font-family: var(--font-headings); font-weight: 500; }
 h1 { margin: 0 0 .25rem; font-size: 2.4rem; line-height: 1.15; }
 /* PLATO's logo, the pin, set before the name at about cap height. */
 h1 .logo { height: .9em; width: auto; margin-right: .3em; vertical-align: -.08em; }
 /* The title row: the name, with the line that says whose it is, and the button that hides or shows
    the introduction. */
-.masthead { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .permissions-button .count:not(:empty) { display: inline-grid; place-items: center; min-width: 1.3rem; margin-left: .25rem; padding: 0 .3rem; border-radius: 999px; background: var(--accent); color: var(--accent-fg); font-size: .8rem; }
 /* The Permissions panel (src/lib/permissions-panel.js): a modal dialogue over either page. */
 .permissions-panel { max-width: min(44rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--fg); padding: 1rem 1.25rem; font-size: 1rem; }
@@ -161,8 +160,14 @@ a:visited { color: var(--accent); }
 @media (prefers-reduced-motion: reduce) { .tip { animation: none; } }
 @media (prefers-color-scheme: dark) { :where(:root:not([data-theme="light"])) .tip { border-color: var(--iris); border-top-color: var(--gold); } :where(:root:not([data-theme="light"])) .tip[data-side="above"], :where(:root:not([data-theme="light"])) .tip[data-side="left"], :where(:root:not([data-theme="light"])) .tip[data-side="right"] { border-top-color: var(--iris); } }
 :where(:root[data-theme="dark"]) .tip { border-color: var(--iris); border-top-color: var(--gold); } :where(:root[data-theme="dark"]) .tip[data-side="above"], :where(:root[data-theme="dark"]) .tip[data-side="left"], :where(:root[data-theme="dark"]) .tip[data-side="right"] { border-top-color: var(--iris); }
-.masthead > div:has(> .dev-badge) { display: flex; flex-wrap: wrap; align-items: center; column-gap: .75rem; }
-.masthead > div:has(> .dev-badge) > .family { flex-basis: 100%; }
+/* The masthead as a grid: the family line runs across the top, over the title and the controls alike;
+   the title and the badge take the left column, the controls the right. */
+.masthead { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 1rem; align-items: center; }
+.masthead > div:has(> .dev-badge) { display: contents; }
+.masthead .family { grid-column: 1 / -1; grid-row: 1; }
+.masthead h1 { grid-column: 1; grid-row: 2; }
+.masthead .dev-badge { grid-column: 1; grid-row: 3; justify-self: start; }
+.masthead-side { grid-column: 2; grid-row: 2 / span 2; }
 .dev-badge, .dev-badge:visited { display: inline-block; font: 700 .72rem/1.5 var(--font-text); letter-spacing: .06em; text-transform: uppercase; text-decoration: none; white-space: nowrap;
   border: 1px solid var(--gold-edge); border-radius: 999px; padding: .1rem .6rem; background: var(--gold); color: var(--pupil); cursor: help; }
 .dev-badge:hover { text-decoration: underline; }
@@ -432,10 +437,9 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; tex
 /* The main page at a phone's width: a narrower gutter, one column of tools, a smaller drawing. */
 @media (max-width: 34rem) {
   header.top, main, footer { padding: 0 1rem; }
-  header.top { padding-top: 1.25rem; }
+  header.top { padding-top: 1rem; }
   h1 { font-size: 2rem; }
-  .masthead { flex-wrap: wrap; align-items: flex-end; }
-  .masthead-side { flex: 1 1 100%; flex-wrap: wrap; justify-content: flex-start; gap: .4rem; }
+  .masthead-side { grid-column: 1 / -1; grid-row: 4; flex-wrap: wrap; justify-content: flex-start; gap: .4rem; margin-top: .5rem; }
   .intro-toggle, .permissions-button, a.button.guide-link, .theme-switch { font-size: .9rem; }
   .intro-toggle, .permissions-button, a.button.guide-link { padding: .3rem .6rem; }
   .theme-switch label { padding: .3rem .5rem; }
