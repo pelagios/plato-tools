@@ -1369,7 +1369,9 @@ def main():
             if s.connect_ex(('127.0.0.1', PORT)) == 0:
                 sys.exit(f'Port {PORT} is in use, so the page there is not this build: set E2E_PORT to a free port.')
         subprocess.run(['npx', 'vite', 'build'], cwd=ROOT, check=True, capture_output=True)
-        srv = subprocess.Popen(['npx', 'vite', 'preview', '--port', str(PORT), '--strictPort'], cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
+        # On 127.0.0.1, named: vite's own "localhost" was ::1 alone on GitHub's runners, where the checks
+        # that read the page at 127.0.0.1 (another origin than localhost) found nothing there.
+        srv = subprocess.Popen(['npx', 'vite', 'preview', '--host', '127.0.0.1', '--port', str(PORT), '--strictPort'], cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
         url = f'http://localhost:{PORT}/'
     for _ in range(60):
         try: urllib.request.urlopen(url, timeout=1); break
