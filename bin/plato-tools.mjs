@@ -140,6 +140,7 @@ Options:
                     Each row whose value is a member keeps the source's spelling in PLATO; its
                     attestation gets a note naming the group and the spelling chosen, which
                     the lookup can use. Groups are never applied without this option.
+                    Any other input is read without them, and a line on stderr says so.
   --column NAME     cluster: the column whose spellings to group.
   --method M        cluster: how values are grouped: ${CLUSTER_METHODS.join(', ')}
                     (default ${DEFAULT_METHOD}).
@@ -707,6 +708,7 @@ async function previewCommand(items, o, resources, seen) {
   const refusal = previewRefusal(input);
   if (refusal) return failed(refusal);
   const table = input.format === 'csv' || input.format === 'geojson';
+  if (!table && o.savedClusters) process.stderr.write(clustersUnused(item.label, input));
   const reading = input.format === 'tei' ? { ...o.reading?.tei } : table && o.reading?.sameId ? { sameId: true } : {};
   if (input.container === 'workbook' && input.format === 'csv') { r.sheet = o.sheet ?? input.sheet ?? null; r.sheets = input.sheets.map((s) => s.name); }
   if (o.georefFiles) { input.georefs = o.georefFiles; input.manifests = o.manifestFiles; }
@@ -758,6 +760,9 @@ async function clusterCommand(args, o) {
   return 0;
 }
 
+/** The line said when groups of spellings (--clusters) are given for an input that is not a table of places, which they cannot apply to. */
+const clustersUnused = (label, input) => `plato-tools: ${label} is ${formatName(input)}, not a table of places; the groups of spellings given with --clusters are not used for it.\n`;
+
 /** Check or convert one input, and say how it went, as an object that --json prints as it is. */
 async function runOne(item, action, o, resources, host, live, seen) {
   const t0 = Date.now();
@@ -769,6 +774,7 @@ async function runOne(item, action, o, resources, host, live, seen) {
   if (input.lpfVersion) r.lpfVersion = input.lpfVersion;
   // The reading options that apply to this input: a TEI edition's, or a table of places'.
   const table = input.format === 'csv' || input.format === 'geojson';
+  if (!table && o.savedClusters) process.stderr.write(clustersUnused(item.label, input));
   const reading = input.format === 'tei' ? { ...o.reading?.tei } : table && o.reading?.sameId ? { sameId: true } : {};
   if (input.format === 'tei' && reading.keyPatterns) r.keyPatterns = { ...reading.keyPatterns };
   // A workbook read as a table of places: the sheet given, else the one detection chose, named with the columns.

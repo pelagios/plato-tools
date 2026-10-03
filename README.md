@@ -225,6 +225,8 @@ node bin/plato-tools.mjs convert --to plato-json --clusters groups.json places.c
 - `--clusters FILE` takes that file, or the groups alone (`{"name": {"method": …, "groups": […]}}`).
   Given only as `--columns`, such a file's columns are used and its groups are not, and the command
   says so: groups are never applied without being asked for.
+  Given with an input that is not a table of places (a TEI edition, a Recogito export), they are not
+  used for it, and the command says so on stderr.
 
 ### Publishing
 

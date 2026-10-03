@@ -359,3 +359,30 @@ test('convert --clusters applies the saved groups: the notes are written, the na
   assert.equal(x.code, 2);
   assert.match(x.err, /in two groups/);
 });
+
+test('--clusters with an input that is not a table of places (TEI, a Recogito export) says, on stderr, that the groups are not used for it', () => {
+  const d = scratch(), f = join(d, 'r.csv'), g = join(d, 'groups.json');
+  writeFileSync(f, CSV);
+  writeFileSync(g, JSON.stringify(GROUPS));
+  const tei = fileURLToPath(new URL('./fixtures/tei/keys-constructed.xml', import.meta.url));
+  const recogito = fileURLToPath(new URL('./fixtures/annotations/recogito-studio-constructed.json', import.meta.url));
+  const said = /not a table of places; the groups of spellings given with --clusters are not used for it/;
+  for (const [file, what] of [[tei, 'TEI XML edition'], [recogito, 'W3C Web Annotations']]) {
+    for (const args of [['check', '--clusters', g, file], ['preview', '--clusters', g, file], ['convert', '--to', 'plato-json', '--out', scratch(), '--clusters', g, file]]) {
+      const r = cli(...args);
+      assert.ok(r.code === 0 || r.code === 1, `${args[0]} ${what}: ${r.err}`);
+      assert.match(r.err, said, `${args[0]} ${what}`);
+      assert.ok(r.err.includes(what), `${args[0]} ${what}`);
+      // The control, in the same run: without --clusters, nothing is said.
+      const plain = cli(...args.filter((a, i) => a !== '--clusters' && args[i - 1] !== '--clusters'));
+      assert.doesNotMatch(plain.err, said);
+    }
+  }
+  // The control: with a table of places, the groups are used and nothing is said; given both, it is said for the other only.
+  const t = cli('check', '--clusters', g, f);
+  assert.equal(t.code, 0, t.err);
+  assert.doesNotMatch(t.err, said);
+  const both = cli('check', '--clusters', g, f, tei);
+  assert.equal(both.err.match(new RegExp(said, 'g')).length, 1);
+  assert.ok(both.err.includes('keys-constructed.xml'));
+});
