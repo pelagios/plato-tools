@@ -89,7 +89,8 @@ export class ChoraStore {
         // Attestations that are not a list (the schema refuses them, and the place is still shown) are none.
         const atts = Array.isArray(rec.attestations) ? rec.attestations : [];
         collectWithdrawn(atts, edges);
-        ids.add(rec);
+        // The guarded list: Krisis's collector expects attestations as a list, and a record whose are not would throw there.
+        ids.add({ ...rec, attestations: atts });
         const related = [...new Set(atts.flatMap((a) => (a && Array.isArray(a.relations) ? a.relations : [])).map((r) => r && r.relatesTo).filter((x) => typeof x === 'string'))];
         const label = typeof rec.label === 'string' ? rec.label : key;
         insP.bind([n, key, label, JSON.stringify(Array.isArray(rec.ccodes) ? rec.ccodes : []), JSON.stringify(related), JSON.stringify(rec)]).stepReset();
@@ -263,7 +264,7 @@ export class ChoraStore {
     if (!rec) return null;
     // What the whole dataset withdraws of this place's attestations: the retraction may be elsewhere.
     const withdrawn = new Map();
-    for (const a of rec.attestations || []) {
+    for (const a of Array.isArray(rec.attestations) ? rec.attestations : []) {
       if (!a || typeof a['@id'] !== 'string') continue;
       const kind = this.one('SELECT kind FROM wd WHERE id=?', [a['@id']]);
       if (kind) withdrawn.set(a['@id'], kind);
