@@ -139,8 +139,8 @@ function toCartesian({ a, b }, lat, lon, h = 0) {
 }
 function fromCartesian({ a, b }, [x, y, z]) {
   const e2 = (a * a - b * b) / (a * a), p = Math.hypot(x, y);
-  let phi = Math.atan2(z, p * (1 - e2)), prev;
-  for (let i = 0; i < 20 && phi !== prev; i++) { prev = phi; const nu = a / Math.sqrt(1 - e2 * Math.sin(phi) ** 2); phi = Math.atan2(z + e2 * nu * Math.sin(phi), p); }
+  let phi = Math.atan2(z, p * (1 - e2)), prev = Infinity;
+  for (let i = 0; i < 20 && Math.abs(phi - prev) >= 1e-12; i++) { prev = phi; const nu = a / Math.sqrt(1 - e2 * Math.sin(phi) ** 2); phi = Math.atan2(z + e2 * nu * Math.sin(phi), p); }
   return [phi / RAD, Math.atan2(y, x) / RAD];
 }
 /** A Helmert transformation of Cartesian coordinates, position vector convention (the OS guide's D2). */
