@@ -1,7 +1,6 @@
 # Methodos: a workflow manager for the toolbox
 
-*Plan, 2 October 2026. Working name in the brief: Syntaktēs; name decided by Stephen the same day:
-Methodos (section 2). Status: decided (section 12 lists the decisions); nothing here is built. WHG
+*Plan, 2 October 2026. Name decided by Stephen the same day: Methodos (section 2). Status: decided (section 12 lists the decisions); nothing here is built. WHG
 confirmed and corrected Map your Data's stages (section 5.1) and surveyed what its collaboration
 machinery can expose (section 5.4), both on 2 October.*
 
@@ -40,11 +39,6 @@ panel, with the tool's name on it, so that a visitor who follows Map your data o
 toolbox.
 
 ## 2. The name
-
-**Syntaktēs** (συντάκτης) is "one who puts together", but it has three problems: in modern Greek it
-is the ordinary word for a newspaper editor or journalist; an English reader sees "syntax"; and the
-macron does not survive a URL hash (`#tool=syntaktes` loses it, and the page would then spell the
-name two ways).
 
 **Methodos** (μέθοδος) is the name, decided by Stephen on 2 October 2026: literally the pursuit along a way, Plato's own word for
 a systematic path of inquiry (Phaedrus 270c, Republic 533b), and the source of "method". It names
