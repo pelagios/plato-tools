@@ -64,7 +64,8 @@ export function createMap(container, { state, onPlaceClick, onStyleError }) {
   });
 
   // What Chora draws, kept here so that it can be put back when the basemap (the style) changes.
-  const data = { overview: EMPTY, place: EMPTY, context: EMPTY };
+  const data = { overview: EMPTY, place: EMPTY, context: EMPTY, preview: EMPTY };
+  let markers = [];   // a gazetteer's candidates, numbered (src/chora/adopt-ui.js): HTML markers, which need no glyphs from any style
   let draw = null, drawHandlers = {}, drawnKeep = [];
   // Snapping a vertex drawn by hand (src/chora/ink.js's "Snap to ink"): Terra Draw asks for it on every move.
   let snapHook = null, tracing = false;
@@ -74,6 +75,7 @@ export function createMap(container, { state, onPlaceClick, onStyleError }) {
     map.addSource('chora-overview', { type: 'geojson', data: data.overview, cluster: true, clusterRadius: 36, clusterMaxZoom: 11 });
     map.addSource('chora-context', { type: 'geojson', data: data.context });
     map.addSource('chora-place', { type: 'geojson', data: data.place });
+    map.addSource('chora-preview', { type: 'geojson', data: data.preview });
     const add = (l) => map.addLayer(l);
     add({ id: 'chora-overview-clusters', type: 'circle', source: 'chora-overview', filter: ['has', 'point_count'],
       paint: { 'circle-color': '#1f45b8', 'circle-opacity': 0.35, 'circle-stroke-color': '#1f45b8', 'circle-stroke-width': 1,
@@ -97,6 +99,14 @@ export function createMap(container, { state, onPlaceClick, onStyleError }) {
     add({ id: 'chora-place-points', type: 'circle', source: 'chora-place', filter: ['match', ['geometry-type'], ['Point', 'MultiPoint'], true, false],
       paint: { 'circle-color': ['case', ['==', ['get', 'status'], 'asserted'], status('#2757dd'), '#ffffff'], 'circle-radius': 7,
         'circle-stroke-color': status('#2757dd'), 'circle-stroke-width': 2.5, 'circle-opacity': faint, 'circle-stroke-opacity': faint } });
+    // Adopting from a gazetteer: the area a place's candidates are ranked by (kind 'reference'), and the
+    // record previewed (kind 'record'), dashed and in their own colour: neither is the place's yet.
+    add({ id: 'chora-preview-fill', type: 'fill', source: 'chora-preview', filter: ['all', ['==', ['get', 'kind'], 'record'], ['match', ['geometry-type'], ['Polygon', 'MultiPolygon'], true, false]],
+      paint: { 'fill-color': '#0f8b6c', 'fill-opacity': 0.12 } });
+    add({ id: 'chora-preview-line', type: 'line', source: 'chora-preview', filter: ['!', ['match', ['geometry-type'], ['Point', 'MultiPoint'], true, false]],
+      paint: { 'line-color': ['match', ['get', 'kind'], 'reference', '#8a6d1f', '#0f8b6c'], 'line-width': 2, 'line-dasharray': [2, 2] } });
+    add({ id: 'chora-preview-points', type: 'circle', source: 'chora-preview', filter: ['match', ['geometry-type'], ['Point', 'MultiPoint'], true, false],
+      paint: { 'circle-color': '#ffffff', 'circle-radius': 7, 'circle-stroke-color': '#0f8b6c', 'circle-stroke-width': 2.5 } });
   }
 
   const pointer = (on) => () => { map.getCanvas().style.cursor = on && !drawing() ? 'pointer' : ''; };
@@ -161,6 +171,24 @@ export function createMap(container, { state, onPlaceClick, onStyleError }) {
     setOverview(fc) { data.overview = fc || EMPTY; map.getSource('chora-overview')?.setData(data.overview); },
     setPlace(fc) { data.place = fc || EMPTY; map.getSource('chora-place')?.setData(data.place); },
     setContext(fc) { data.context = fc || EMPTY; map.getSource('chora-context')?.setData(data.context); },
+    /** The reference area and the record previewed, when adopting (features with properties.kind 'reference' | 'record'). */
+    setPreview(fc) { data.preview = fc || EMPTY; map.getSource('chora-preview')?.setData(data.preview); },
+    /**
+     * A gazetteer's candidates as numbered markers: [{ n, id, coords: [lon, lat], label }], each a button
+     * (its number the list's), which calls onPick(id). Those given are shown, all others removed.
+     */
+    setCandidates(list, onPick) {
+      for (const m of markers) m.remove();
+      markers = (list || []).filter((c) => Array.isArray(c.coords)).map((c) => {
+        const el = document.createElement('button');
+        el.type = 'button'; el.className = 'cand-marker'; el.textContent = String(c.n); el.dataset.cand = c.id;
+        el.setAttribute('aria-label', c.label); el.dataset.tip = c.label;
+        el.addEventListener('click', (e) => { e.stopPropagation(); onPick?.(c.id); });
+        return new maplibregl.Marker({ element: el }).setLngLat(c.coords).addTo(map);
+      });
+    },
+    /** The candidates' markers on the map now, for tests: [{ id, n, lngLat }]. */
+    candidateMarkers: () => markers.map((m) => ({ id: m.getElement().dataset.cand, n: Number(m.getElement().textContent), lngLat: m.getLngLat().toArray() })),
     fit(bbox, maxZoom = 9) {
       if (!bbox) return;
       // A box across the antimeridian (Russia, Fiji) has its west east of its east.

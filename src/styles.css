@@ -401,6 +401,22 @@ ul.pending { list-style: none; padding: 0 !important; }
 ul.pending li { border: 1px solid var(--line); border-radius: 6px; padding: .4rem .6rem; margin: .3rem 0; display: flex; flex-wrap: wrap; gap: .3rem .8rem; align-items: center; }
 ul.pending .kind { font-weight: 700; }
 ul.pending label { font-size: .88rem; }
+/* Adopting from a gazetteer (src/chora/adopt-ui.js): the candidates, numbered alike in the list and on the map. Theme variables only. */
+.adopt label { display: block; margin-top: .4rem; }
+.adopt input[type="search"], .adopt input[type="password"], .adopt input[type="text"], .adopt select { font: inherit; width: 100%; padding: .3rem .5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); }
+.adopt form button { margin-top: .3rem; }
+.adopt .adopt-geoms label { display: inline; margin: 0; }
+.adopt .adopt-geoms label.disabled { color: var(--muted); }
+ol.adopt-candidates { list-style: none; padding: 0 !important; }
+ol.adopt-candidates li { border: 1px solid var(--line); border-radius: 6px; padding: .4rem .6rem; margin: .3rem 0; }
+ol.adopt-candidates li.denied .cand-name { color: var(--muted); }
+.adopt .licence.warn { color: var(--warn); }
+.adopt .cand-actions { margin: .3rem 0 0; display: flex; flex-wrap: wrap; gap: .3rem .6rem; align-items: center; }
+.cand-n, .cand-marker { display: inline-flex; align-items: center; justify-content: center; min-width: 1.5rem; height: 1.5rem; padding: 0 .3rem; border-radius: 999px;
+  background: var(--accent); color: var(--accent-fg); font: 700 .8rem var(--font-text); border: 2px solid var(--card); }
+.cand-marker { cursor: pointer; box-shadow: 0 1px 3px rgba(0, 0, 0, .35); }
+.cand-marker:focus-visible { outline: 3px solid var(--fg); outline-offset: 1px; }
+.adopt-preview { border-top: 1px solid var(--line); margin-top: .6rem; padding-top: .4rem; }
 #contributor-form label { display: block; margin-top: .4rem; }
 #contributor-form input, #paste { font: inherit; width: 100%; padding: .3rem .5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); }
 /* The drawing tools and the basemap switcher float over the map. */

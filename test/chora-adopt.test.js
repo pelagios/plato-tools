@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { env, file, res } from './engine.js';
 import { detect } from '../src/engine/input.js';
 import { save, checkAddition } from '../src/engine/chora/save.js';
+import { load } from '../src/engine/chora/store.js';
 import { newGeometryAttestation } from '../src/engine/chora/draw.js';
 import { createLookup, GazetteerError, WHG_ENDPOINT, normaliseWhgIri } from '../src/engine/gazetteer/index.js';
 import * as adopt from '../src/engine/chora/adopt.js';
@@ -437,4 +438,25 @@ test('a hand-drawing for a record consulted, not copied, cites WHG with the reco
   assert.match(a.notes, /^Drawn by hand/);
   assert.ok(a.notes.includes(W3ID + 'place:tgn:7011781'));
   assert.match(a.notes, /nothing was copied/);
+});
+
+test("Chora's store gives each place its identities as Krisis reads the whole dataset: a relation stated under another place counts, a withdrawn one does not", async () => {
+  const doc = json('dataset.json');
+  // Under ANOTHER place: Newcastle said to be the same as the NSW record, then that attestation retracted; and Newcastle linked to a TGN record, standing.
+  doc.spatialEntities.push({ '@id': P + 'elsewhere', label: 'Elsewhere', attestations: [
+    { '@id': P + 'elsewhere#a-1', identities: [{ subject: P + 'newcastle', object: W3ID + 'place:gn:2155472', identityType: 'exactMatch' }], contributor: who, created: CREATED },
+    { '@id': P + 'elsewhere#a-2', identities: [{ subject: P + 'newcastle', object: W3ID + 'place:tgn:7011781', identityType: 'closeMatch' }], contributor: who, created: CREATED },
+    { '@id': P + 'elsewhere#a-3', meta: { targetAttestation: P + 'elsewhere#a-1', metaType: PLATO + 'Retracts' }, contributor: who, created: CREATED }] });
+  const e = env();
+  const store = await load(await detect([new File([JSON.stringify(doc)], 'ids.json')]), e, await e.openDb(), { name: 'ids.json' });
+  const nc = store.getPlace(P + 'newcastle').identities;
+  assert.deepEqual(nc.linked, [W3ID + 'place:tgn:7011781'], 'the standing link stated under another place counts; the retracted one does not');
+  assert.deepEqual(nc.exact, []);
+  assert.deepEqual(store.getPlace(P + 'novocastria').identities.exact, [W3ID + 'place:gn:2641673'], 'a legacy entity URL normalised');
+  assert.deepEqual(store.getPlace(P + 'newcastle-nsw').identities.denied, [W3ID + 'place:gn:2155472']);
+  assert.equal(store.getPlace('#4').identities, null, 'a place without an @id has none');
+  // The same as currentIdentities over the records, for each place.
+  const ref = currentIdentities(doc.spatialEntities);
+  for (const k of ['newcastle', 'novocastria', 'newcastle-nsw']) assert.deepEqual(store.getPlace(P + k).identities, Object.fromEntries(Object.entries(ref.get(P + k)).map(([x, v]) => [x, [...v]])));
+  store.close();
 });

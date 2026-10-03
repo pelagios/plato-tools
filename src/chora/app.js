@@ -20,6 +20,10 @@ import * as remote from './remote.js';
 import * as georef from '../engine/georef/index.js';
 import * as tracing from '../engine/chora/trace.js';
 import { DataError } from '../engine/input.js';
+// Adopting a location from a gazetteer match (src/chora/adopt-ui.js; the engine is src/engine/chora/adopt.js).
+import { createAdopt } from './adopt-ui.js';
+import { draftAttestations, consultedParts, isPlaceIri } from '../engine/chora/adopt.js';
+import { CHORA_ADOPT_PAGE } from '../engine/words.js';
 // The tools' own version, for the notes of a shape traced with assistance.
 import { version as toolsVersion } from '../../package.json';
 
@@ -66,6 +70,7 @@ async function open(list) {
   if (!files.length) return;
   Object.assign(state, { phase: 'opening', placeId: null, lastSave: null });
   for (const id of ['places', 'card', 'saving']) $(id).hidden = true;
+  adopt.close();
   $('handoff').hidden = true; $('save-result').innerHTML = ''; offered = null;
   $('dataset').hidden = false;
   $('dataset').innerHTML = `<ul>${files.map((f) => `<li><span class="name">${esc(f.name)}</span> <span class="count">${fmtBytes(f.size)}</span></li>`).join('')}</ul>`;
@@ -146,7 +151,8 @@ async function selectPlace(id) {
   mapApi.setPlace(placeFeatures(view));
   mapApi.setContext(contextFeatures(view, await countries(view), (view.ccodes || []).map((c) => [c, ccodeBoxes?.[c]]).filter(([, b]) => b)));
   showDrafts(drafts.filter((d) => d.placeId === id));
-  const mine = drafts.filter((d) => d.placeId === id).map((d) => d.geojson);
+  adopt.placeShown(view);
+  const mine = drafts.filter((d) => d.placeId === id && d.geojson).map((d) => d.geojson);
   mapApi.fit(view.fallback?.bbox || (mine.length ? boxOf(mine) : null), view.fallback?.kind === 'ccodes' ? 6 : 9);
   $('draw-tools').hidden = false;
   state.phase = 'place';
@@ -191,12 +197,20 @@ function renderCard() {
     <h3>Over time</h3>${timeline(v.timeline)}
     <h3>Sources</h3>${list(v.sources, (s) => (s.id && /^https?:/.test(s.id) ? `<a href="${esc(s.id)}" rel="noopener noreferrer">${esc(s.title || s.id)}</a>` : esc(s.title || s.id)))}
     ${v.withdrawn ? `<p class="muted">${n(v.withdrawn)} withdrawn attestation${v.withdrawn === 1 ? '' : 's'} not shown.</p>` : ''}
+    <h3>Gazetteer</h3>
+    <p><button type="button" id="adopt-find"${isPlaceIri(v.id) ? '' : ' disabled aria-describedby="adopt-why"'}>${esc(CHORA_ADOPT_PAGE.find)}</button>${isPlaceIri(v.id) ? '' : ` <span class="muted" id="adopt-why">${esc(CHORA_ADOPT_PAGE.noAddress)}</span>`}</p>
     <h3>Your drawings</h3>
     <p class="muted">Draw with the tools on the map. Each drawing is added as a new attestation of this place; nothing already there is changed.</p>
     ${drawError ? `<p class="warn" id="draw-error">${esc(drawError)}</p>` : ''}
     <ul class="pending">${mine.map(pendingItem).join('') || '<li class="muted">None yet.</li>'}</ul>`;
 }
 function pendingItem(d) {
+  // An adoption (two attestations, or one when the place was already linked): removed whole, never in part.
+  if (d.kind === 'adoption') {
+    return `<li data-draft="${esc(d.id)}" data-adoption><span class="kind">${esc(CHORA_ADOPT_PAGE.pendingItem(d.candidate.name || d.candidate.id))}</span>
+    <span class="muted">${esc(d.candidate.iri || d.candidate.id)}${d.feature ? `, ${esc(d.feature.geometry.type)}` : ''} · ${d.count === 1 ? 'the location' : 'the identity and the location'}</span>
+    <button type="button" data-remove>Remove</button></li>`;
+  }
   const opt = (vals, cur, words) => vals.map((x) => `<option value="${x}"${x === cur ? ' selected' : ''}>${esc(words(x))}</option>`).join('');
   // A drawing traced from a historical map may mark where the map writes the name (a label anchor).
   const roles = ['Extent', 'FeaturePoint', 'RepresentativePoint', ...(d.trace ? ['LabelAnchor'] : [])].filter((r) => ROLES.includes(r));
@@ -209,6 +223,7 @@ function pendingItem(d) {
     <label>How well known <select data-field="precision"><option value="">Not said</option>${opt(PRECISIONS, d.precision, (p) => p.replace('_', ' '))}</select></label>
     ${d.trace?.assisted ? `<p class="muted" data-assisted>Traced with assistance from: ${esc(d.trace.title || 'a historical map')}${d.trace.assisted.fromKey != null && d.trace.assisted.fromKey !== d.trace.key ? ` (proposed from the ink of: ${esc(d.trace.assisted.from || 'another map')})` : ''}</p>` : d.assistedUncited ? `<p class="muted" data-assisted>Proposed from the ink of: ${esc(d.assistedUncited.from || 'a historical map')} (not cited)</p>` : ''}
     ${d.traceNote ? `<p class="note" data-trace-note>${esc(d.traceNote)}</p>` : ''}
+    ${d.consulted ? `<p class="note" data-consulted>${esc(CHORA_ADOPT_PAGE.consultedItem(d.consulted.name || d.consulted.record))}</p>` : ''}
     <button type="button" data-remove>Remove</button></li>`;
 }
 const KIND = { Point: 'A point', LineString: 'A line', Polygon: 'An area' };
@@ -247,6 +262,7 @@ function timeline(items) {
 const trim = (s, k) => (s.length > k ? s.slice(0, k - 1) + '…' : s);
 
 $('card').addEventListener('click', (e) => {
+  if (e.target.closest('#adopt-find')) { if (view) adopt.openFor(view); return; }
   const a = e.target.closest('a[data-place]');
   if (a) { e.preventDefault(); selectPlace(a.dataset.place); return; }
   const rm = e.target.closest('button[data-remove]');
@@ -300,6 +316,8 @@ function newDraft(id, geojson, extra = {}) {
   // The basemap drawn on goes into the published notes: a built-in one by name, a pasted one not (its site may be private).
   const d = { id: String(id), placeId: state.placeId, placeLabel: view?.label || '', geojson, role: '', precision: '',
     basemap: basemaps.drawnOn(basemaps.byId(state.basemap)), zoom: mapApi.zoom(), drawnAt: new Date().toISOString(), ...extra };
+  // A record consulted and not copied (adopt-ui.js "Draw it yourself"): the next drawing of its place cites it.
+  if (consultArmed && consultArmed.placeId === d.placeId) { const { placeId, ...c } = consultArmed; d.consulted = c; consultArmed = null; }
   drafts.push(d);
   keepDrafts();
   renderCard();
@@ -381,12 +399,18 @@ async function traceDraft(d, { only = null, reshaped = false } = {}) {
   keepDrafts();
   if (view) renderCard();
 }
-function showDrafts(list) { showing = true; try { mapApi.showDrafts(list); } finally { showing = false; } }
+// Adoptions are not drawings: they are not given to the drawing tool (adopt-ui.js shows them).
+function showDrafts(list) { showing = true; try { mapApi.showDrafts(list.filter((d) => d.kind !== 'adoption')); } finally { showing = false; } }
+let consultArmed = null;   // { placeId, record, name, … }: the next drawing of that place cites the record as consulted
+/** An adoption, kept with the drawings until saved (one draft: its attestations go, and are removed, together). */
+function addAdoption(d) { drafts.push(d); keepDrafts(); renderCard(); }
 function removeDraft(id) {
+  const wasAdoption = drafts.some((d) => d.id === id && d.kind === 'adoption');
   drafts = drafts.filter((d) => d.id !== id);
-  try { mapApi.draw?.removeFeatures([id]); } catch {}
+  if (!wasAdoption) try { mapApi.draw?.removeFeatures([id]); } catch {}
   keepDrafts();
   renderCard();
+  if (wasAdoption) adopt.showAdopted();
 }
 function keepDrafts() {
   // The file last written holds the drawings as they were: once they change, it is not offered.
@@ -476,8 +500,10 @@ function showSaving() {
   if (!dataset) return;
   $('saving').hidden = false;
   const places = new Set(drafts.map((d) => d.placeId)).size;
+  const adoptions = drafts.filter((d) => d.kind === 'adoption').length, drawings = drafts.length - adoptions;
+  const what = [drawings ? `${n(drawings)} drawing${drawings === 1 ? '' : 's'}` : '', adoptions ? `${n(adoptions)} location${adoptions === 1 ? '' : 's'} adopted from a gazetteer` : ''].filter(Boolean).join(' and ');
   $('pending-total').textContent = drafts.length
-    ? `${n(drafts.length)} drawing${drafts.length === 1 ? '' : 's'} of ${n(places)} place${places === 1 ? '' : 's'}, not yet saved. ${permissions.keepWorkingData() ? 'They are kept in this browser until you save.' : 'Save them before you leave: you chose not to keep working data between visits.'}`
+    ? `${what} of ${n(places)} place${places === 1 ? '' : 's'}, not yet saved. ${permissions.keepWorkingData() ? 'They are kept in this browser until you save.' : 'Save them before you leave: you chose not to keep working data between visits.'}`
     : 'Nothing drawn yet. Choose a place, and draw on the map.';
   $('save').disabled = !drafts.length;
   const c = contributors.load();
@@ -517,11 +543,21 @@ async function saveDataset() {
   let additions;
   try {
     // A traced drawing cites the map and its georeference, and says so in its notes (trace.js).
-    additions = drafts.map((d) => ({ placeId: d.placeId, attestation: newGeometryAttestation({
-      geojson: d.geojson, role: d.role || undefined, precision: d.precision || undefined, contributor, created: d.drawnAt,
-      ...(d.trace ? tracing.tracedParts(d.trace, { zoom: d.zoom, role: d.role, geometry: d.geojson, version: toolsVersion })
-        : d.assistedUncited ? tracing.uncitedParts(d.assistedUncited, { zoom: d.zoom, geometry: d.geojson, version: toolsVersion })
-        : { notes: choraDrawingNote({ basemap: d.basemap, zoom: d.zoom }) }) }) }));
+    // An adoption gives its two attestations (one when the place was already linked), made now that the contributor is known.
+    additions = drafts.flatMap((d) => {
+      if (d.kind === 'adoption') {
+        const r = draftAttestations(d, contributor);
+        if (r.refused) throw new Error(`${CHORA_ADOPT_PAGE.pendingItem(d.candidate.name || d.candidate.id)}: ${r.refused.reason}`);
+        return r.attestations.map((attestation) => ({ placeId: d.placeId, attestation }));
+      }
+      const drawn = { notes: choraDrawingNote({ basemap: d.basemap, zoom: d.zoom }) };
+      return [{ placeId: d.placeId, attestation: newGeometryAttestation({
+        geojson: d.geojson, role: d.role || undefined, precision: d.precision || undefined, contributor, created: d.drawnAt,
+        ...(d.trace ? tracing.tracedParts(d.trace, { zoom: d.zoom, role: d.role, geometry: d.geojson, version: toolsVersion })
+          : d.assistedUncited ? tracing.uncitedParts(d.assistedUncited, { zoom: d.zoom, geometry: d.geojson, version: toolsVersion })
+          : d.consulted ? consultedParts(d.consulted, drawn.notes)
+          : drawn) }) }];
+    });
   } catch (e) { $('save-result').innerHTML = `<p class="warn">${esc(e.message)}</p>`; return; }
   const savedIds = new Set(drafts.map((d) => d.id));
   $('save').disabled = true;
@@ -1101,6 +1137,8 @@ mapApi.onDraw({
 });
 initMaps();
 updateTraceButtons();
+const adopt = createAdopt({ root: $('adopt'), mapApi, state, addAdoption, armConsult: (c) => { consultArmed = c; },
+  adopted: (placeId) => drafts.filter((d) => d.kind === 'adoption' && d.placeId === placeId) });
 // A click on the map while tracing is the trace's (Shift-click carries a line on). Made in the moment after
 // the first press of a trace tool, before ink.js has arrived, it waits for it: the first click of a user
 // who presses "Trace line" and clicks the river is not lost on a slow connection.
@@ -1144,6 +1182,8 @@ permissions.onBeforeReload(() => {}, { loses: () => ($('paste')?.value.trim() ? 
 permissions.onBeforeReload(() => {}, { loses: () => (state.phase === 'saving' ? RELOAD_LOSES.saving : null) });
 // A shape proposed from a map's ink and not yet accepted (RELOAD_LOSES.tracing, R2).
 permissions.onBeforeReload(() => {}, { loses: () => (inkTools?.proposal ? RELOAD_LOSES.tracing : null) });
+// The gazetteer's answers on screen, not yet adopted (an adoption made is kept with the drawings).
+permissions.onBeforeReload(() => {}, { loses: () => adopt.loses() });
 // Who was remembered, checked again (contributor.load): what is kept is written back as checked, so that an ORCID
 // that is not one, however it got into this browser's storage, is neither shown, saved nor listed in the panel.
 try { const c = contributors.load(); if (c) contributors.remember(c); else if (localStorage.getItem('chora-contributor') !== null) contributors.forget(); } catch { /* storage refused: nothing kept */ }
