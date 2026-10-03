@@ -23,6 +23,7 @@ references:
     authors:
       - family-names: Gadd
         given-names: Stephen
+      - name: "Pelagios Network Place Working Group"
     doi: 10.5281/zenodo.21688313
     url: "https://pelagios.org/place-attestation-ontology/"
 keywords:
