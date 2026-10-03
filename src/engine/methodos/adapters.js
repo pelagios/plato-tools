@@ -182,16 +182,19 @@ export async function runStep(state, host, { signal, adapters = ADAPTERS } = {})
 /**
  * Take and run steps until the workflow is no longer between automatic steps: it waits for the
  * user, stops, fails, is cancelled or is completed. Returns the state and each step's report.
+ * `opts.atBoundary(state)`, if given, is awaited at every step boundary (a step done, and where the
+ * run ends), so that the workflow's record can be saved there (src/methodos/store.js).
  */
 export async function drive(state, host, opts = {}) {
   const reports = {};
   let s = state;
   for (;;) {
     if (s.status === 'idle') s = runner.next(s);
-    if (s.status !== 'running') return { state: s, reports };
+    if (s.status !== 'running') { await opts.atBoundary?.(s); return { state: s, reports }; }
     const id = s.current;
     const r = await runStep(s, host, opts);
     s = r.state;
     if (r.report) reports[id] = r.report;
+    if (s.status === 'idle') await opts.atBoundary?.(s);
   }
 }

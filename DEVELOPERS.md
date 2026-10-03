@@ -1513,6 +1513,20 @@ workflow is not yet kept anywhere (both are later phases).
 `test/methodos.test.js` drives "Publish a dataset" through the real engine on PLATO's Antonine example
 and checks that every output the record names is the file the engine wrote, by size and SHA-256.
 
+**Saving and resuming** (phase 2). A workflow's record (`record.js`) is the runner's state with an id,
+a name and its times: references to files by name, size and SHA-256, never the files, and nothing in
+OPFS. `src/methodos/store.js` keeps it as its `.workflow.json` text in IndexedDB (`plato-tools-methodos`,
+store `workflows`), saved at every step boundary (`drive()`'s `atBoundary`); with "keep working data"
+off it is kept in sessionStorage for the tab alone, and what IndexedDB held is let go. On resume,
+`reconcile()` applies the version rule: the same digest continues; a recipe whose words alone changed
+(same version, the same steps with the same operations, inputs and options) continues and says so;
+anything else stays at its last finished step and offers `restartRemaining()` (the finished steps the
+new recipe begins with are kept) or to leave it. `checkChosen()` refuses files that are not the ones
+the record names, through `filesDiffer`. `exportRecord()` and `importRecord()` write and read the
+downloadable `.workflow.json`. Tested in `test/methodos-record.test.js`, and in the browser by
+`e2e/app_test.py` through a test hook (`e2e/methodos-hook.js`) the harness bundles and serves itself,
+until the page has a Methodos panel (phase 3).
+
 ## Permissions
 
 Nothing goes to another site unless the user allows it, in one panel for the whole toolbox: the

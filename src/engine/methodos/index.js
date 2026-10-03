@@ -7,3 +7,4 @@ export { RecipeError, check as checkRecipe, digest, canonical } from './recipe.j
 export { RECIPES } from './recipes/index.js';
 export * as runner from './runner.js';
 export { ADAPTERS, drive, runStep, stoppingKind, filesFor, problemOf } from './adapters.js';
+export { RecordError, recordOf, atBoundary, fileName, exportRecord, importRecord, reconcile, restartRemaining, checkFiles, checkChosen } from './record.js';
