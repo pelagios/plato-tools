@@ -498,7 +498,7 @@ readers link to those headings, so keep them.
   `suggested[column]` is `{ field: 'address', pattern, gazetteer, fit, sampled }` for a column named
   for Pleiades, GeoNames or Wikidata of which at least half the sampled values have that gazetteer's
   shape, when no other column is the address; the column stays `note`, and its reason names the
-  pattern, until the user confirms it. `mappingToSave(mapping, patterns)` gives the one JSON object
+  pattern, until the user confirms it. `mappingToSave(mapping, patterns, levels, splits)` gives the one JSON object
   to save (the object form for a pattern column). `mappingOf` (the worker's `columns` reply) passes
   `patterns` and `suggested` through; the page shows a *Make web addresses* box in a suggested
   column's row (`patternControl`), and sends, and saves, `mappingToSave(mapping, patterns)`; the
@@ -521,6 +521,85 @@ readers link to those headings, so keep them.
   and rows have no prototype, so a column called `__proto__` is kept. A CSV streams through Papa's
   chunk parser (`csvRecords`): the columns and guess read its header and first 50 rows, and the rows
   are read again, never kept. A FeatureCollection streams too, read twice (columns, then rows).
+- **The regions a place lies in** (`within.js`, `columns.js`, `generic.js`; Methodos stage 1,
+  `docs/plans/methodos.md` 5.3). A column read as `within` is a region the row's place lies in, at a
+  level; levels are **positional per mapping**: the `within` columns are numbered widest first, 1 to
+  n, with no gaps, and two columns cannot share one. `guessColumns` reads a heading (normalised:
+  case, spaces and punctuation aside) as a region's kind and orders the guess by World Historical
+  Gazetteer's own ranks (whg3 `reconciliation.js`, `ADMIN_RANK`): country 0 (`country`, `nation`),
+  region 10 (`region`, `state`, `province`, `land`), county 20 (`county`, `shire`, `department`,
+  `oblast`), district 30 (`district`, `arrondissement`), hundred 40 (`hundred`, `wapentake`), diocese
+  42, deanery 43, parish 45 (`parish`, `civilparish`, `township`, `commune`, `municipality`…), each
+  also with `name` or `label` after it; `admin0`…`admin4` and `adm0`…`adm4` at 0, 10, 20, 30, 40; and
+  `contained in`, `within`, `part of`, `parent`… (no named kind) at 50, the narrowest. Two of one rank
+  keep the file's order. A column of numbers under such a heading (`admin1` = 12) is codes, kept as a
+  note. The ranks only order the guess: the page's level selector and the saved mapping reorder
+  them. **A country column is the widest region**, an ordinary `within` level here; WHG takes
+  countries as `ccodes`, a hard filter, on the lookup side, and whether to send it so is Krisis's to
+  decide (Hermes never maps it to `ccodes`). The saved mapping is `{"Parish": {"field": "within",
+  "level": 3}}` (`resolveColumns` returns `levels`, `{ column: level }`, beside `patterns`;
+  `mappingToSave(mapping, patterns, levels, splits)` writes it back); a level that is not a whole
+  number of 1 or more is `generic-mapping`, a second column at one level is
+  `generic-within-same-level` (a warning, the column kept as a note), and a `within` column given no
+  level takes the next free one. **Split into levels**: `{"Place": {"field": "split", "separator":
+  ", ", "levels": [3, 2, 1], "firstIsName": true}}` (`splits`, `{ column: { separator, levels,
+  firstIsName } }`; levels guessed from the sampled values' most parts when not given), a transform
+  made before `applyColumns`: `expandSplits(mapping, levels, splits)` once gives a mapping in which
+  each part is a column of its own (`<column>\u0000<level>`, a `within` at its level, and
+  `<column>\u0000name` the name, or an other name when a column is already the name), and
+  `splitRow(row, splits, { report, where })` fills them per row (`splitCell` splits one cell: on the
+  separator with the spaces around it not counting, parts trimmed, given narrowest first to the
+  levels; a row with fewer parts leaves its widest levels empty). Parts beyond the levels are
+  `generic-split-extra-parts`, a loss naming them. `applyColumns` gathers the row's chain, and
+  `genericSource` puts it on every record and attestation event of the row as `event.within`:
+  `[{ level, value, column }]`, widest first, empty cells skipped, values trimmed (a split's parts
+  name the split column), and no `within` key when the chain is empty. **It is never a key of PLATO
+  JSON**: the writers write `ev.value` only, and the event passes intact through `runChecked` to a
+  writer or `options.sink` (`augmented` copies the event); read through the store (attestation-centric
+  rows), the store path keeps by place the first `within` (and `region`, below) each place's events
+  give and puts them back on its record's event (`withinByPlace`, `pipeline.js`), so Krisis's
+  `readSide`/`gather` and `match`, and the version check, see `within` on every **record** event.
+  **What PLATO is told**: with a base address of the user's own (`options.base`: the page's Options,
+  `--base`), each distinct container, the same value under the same parents, is minted once as a
+  place-centric record (a `newEntity` record, its ContainedIn given as an attestation about it, when
+  the rows are attestation-centric) `{ '@id': <base>place/region-<the first 16 hex of the SHA-256 of
+  its containerKey> (regionId, src/lib/sha256.js), label: value, entityIdentifier: containerKey,
+  attestations }`, its one attestation `plato:ContainedIn` its parent region (`sequence` the parent's
+  level; the widest has none), and each row's place gets one attestation per level, `{ relations:
+  [{ relationType: 'https://w3id.org/plato#ContainedIn', relatesTo: <the region>, relatedLabel:
+  <its value> }], sequence: <the level> }`, citing what the row's attestation cites. Two "Newton"
+  parishes under different chains are two regions, never merged; only the keys of the regions made
+  are held (`regionsMade`), bounded by the distinct containers. A region's events are tagged
+  `event.region = { level, key }` and carry their parents as `within`. Linking a region to WHG is
+  Krisis's (an identity relation after review), not Hermes's. **Without a base address**, nothing is
+  minted (no address could be made: the no-id rule) and no relation written: each attestation gets
+  the note `Within (as the source gives it): England > Surrey > Rotherhithe` (widest first, then the
+  place's name; `withinNote`), and `generic-within-no-base` (a warning) says so once.
+  `test/hermes-within.test.js` reads `plato:ContainedIn` from the vendored ontology, skipping visibly
+  should a pin lack it. Krisis's work file takes both object forms (`isColumns` in `krisis/work.js`).
+  **`src/engine/hermes/within.js`, for Krisis and Methodos**: `withinOf(event)` is the event's chain,
+  or, with no `within` on it, the chain its PLATO gives, read back from a record's (or an attestation's
+  own) ContainedIn attestations ordered by `sequence`, `{ level, value, iri }` (so the two agree on
+  levels and values; only the event knows the column); `[]` for none. `containerKey(level, value,
+  parentValues)` is `JSON.stringify([level, ...parentValues, value])`, parents widest first (labels
+  may hold "/" or ","), the one definition every grouping and the minting use. `withinChains(events)`
+  is `[{ name, chain, n, iri? }]`, one for each row's record or attestation event (not a region's
+  own). `withinLevels(events)` is `Map(level -> Map(containerKey -> { level, value, parents, rows }))`,
+  levels ascending, `rows` each `{ n, iri?, name? }`. `CONTAINED_IN` is the relation type's IRI.
+  **The page**: the column table offers *Region it lies in* with a *Level* selector beside it
+  (`extraControls`; choosing a level another column has swaps the two; a column that stops being a
+  region gives its level up and the rest close up, unless a split's typed levels are in play), and
+  *Regions, to split into levels* with its separator, its levels (narrowest first) and *The first
+  part is the place's name*; `columnWarnings(…, levels, splits)` warns of two regions at one level.
+  **The pasted list**: `<details id="paste">` under the drop zone (`PASTE_WORDS`): the lines that are
+  not blank, trimmed, become `pastedListCsv(text)`, a CSV headed `name` with every cell quoted (so a
+  `;`, `,` or tab is never taken for the separator), handed to `choose()` as `pasted-list.csv`
+  (`pastedListFile`, `src/engine/hermes/pasted.js`), through the usual detection and matching. The
+  command line reads files, and has none (its `--help` says so). **The command line**: `--split
+  COLUMN=SEP[:LEVELS]` (repeatable; LEVELS after the last `:`, narrowest first, `name` first for
+  `firstIsName`) puts a split into `--columns`, or into the guess saved as a mapping, for that column
+  only; the printed mapping and `--json`'s `columns` give `level`, or `separator`, `levels` and
+  `firstIsName`. Out of scope: OSGB and other grid coordinates, spelling clustering.
 - **Reading options** (the page and the command line). The page has one `<fieldset id="reading">`
   after `#columns`, filled by `src/app.js` (`renderReading`) in `words.js`'s `READING_WORDS`, shown
   only for TEI or a table of places, every control off: TEI's `listPlaces`, and a table of the keys'
