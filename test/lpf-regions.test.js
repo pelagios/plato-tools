@@ -205,6 +205,28 @@ test('a file given as a candidate set that is not one is warned of, and gives no
   assert.equal(loss(r, 'region-match-no-score')?.count, 2);
 });
 
+test("an unmatched region of the dataset is named as a matched one is: its toponym, else its label", async () => {
+  const unmatched = await lpf(withSurreyMatches([]), await sets(candidateSet()));
+  const [rel] = containedIn(unmatched.byId, ROTHERHITHE);
+  assert.deepEqual([rel.relationTo, rel.label, 'whg_match_score' in rel], [SURREY, 'Surrey', false]);
+  // A control: the matched region beside it keeps its gazetteer address and score.
+  assert.deepEqual(containedIn(unmatched.byId, SURREY).map((x) => [x.relationTo, x.label, x.whg_match_score]), [[WHG_ENGLAND, 'England', 98]]);
+  // A region listed before the places in it is named too (the file is read again for it).
+  const first = withSurreyMatches([]);
+  first.spatialEntities.reverse();
+  assert.equal(containedIn((await lpf(first, await sets(candidateSet()))).byId, ROTHERHITHE)[0].label, 'Surrey');
+  // From RDF, the same.
+  const nt = await go([textFile(JSON.stringify(withSurreyMatches([])), 'd.json')], 'convert', 'ntriples');
+  const fromRdf = await go([textFile(outText(nt.e, 'd.nt'), 'd.nt')], 'convert', 'lpf', { candidates: await sets(candidateSet()) });
+  const rdfRel = JSON.parse(outText(fromRdf.e, 'd.geojson')).features.find((f) => f['@id'] === ROTHERHITHE).relations[0];
+  assert.deepEqual([rdfRel.relationTo, rdfRel.label], [SURREY, 'Surrey']);
+  // With no name attestation, the region's label.
+  const nameless = withSurreyMatches([]);
+  const surrey = nameless.spatialEntities.find((e) => e['@id'] === SURREY);
+  surrey.attestations = surrey.attestations.filter((a) => !a.names);
+  assert.equal(containedIn((await lpf(nameless, await sets(candidateSet()))).byId, ROTHERHITHE)[0].label, 'Surrey (England)');
+});
+
 test('LPF -> PLATO reads gvp:broaderPartitive back as ContainedIn, prefixed or in full, and reports whg_match_score as lost', async () => {
   const { r } = await lpf(dataset(), await sets(candidateSet()));
   const fc = JSON.parse(outText(r.e, 'd.geojson'));

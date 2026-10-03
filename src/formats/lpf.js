@@ -278,7 +278,7 @@ export const regionLabel = (rec) => (typeof rec?.label === 'string' && rec.label
  * Candidates they were promoted from, from the candidate sets given (setCandidates).
  */
 export class RegionIndex {
-  constructor() { this.matches = new Map(); this.names = new Map(); this.labels = new Map(); this.targets = new Set(); this.candidates = null; this.cache = new Map(); }
+  constructor() { this.named = new Set(); this.matches = new Map(); this.names = new Map(); this.labels = new Map(); this.targets = new Set(); this.candidates = null; this.cache = new Map(); }
   /** Gather from the attestations of the record `subject`, whose name (regionLabel) is `label`. */
   add(attestations, subject, label) {
     for (const a of list(attestations)) {
@@ -295,9 +295,15 @@ export class RegionIndex {
       }
       for (const [region, stub] of own) (this.matches.get(region) || this.matches.set(region, []).get(region)).push(stub);
     }
-    // A name is kept only for a region with a match, so that the index stays small on a large file: one
-    // with none is written under its own address, where an LPF reader finds the region's feature.
-    if (typeof subject !== 'string' || !this.matches.has(subject)) return;
+    // A name is kept only for a region some place is ContainedIn (or one with a match, which may be), so
+    // that the index stays small on a large file. A region met before the places in it is named by
+    // nameLater(), on a second reading of the file.
+    if (typeof subject !== 'string' || (!this.targets.has(subject) && !this.matches.has(subject))) return;
+    this.named.add(subject);
+    this.nameRecord(attestations, subject, label);
+  }
+  /** Keep the name of `subject` from its label and its name attestations. */
+  nameRecord(attestations, subject, label) {
     if (label) this.labels.set(subject, label);
     // Its name attestations, reduced to what says whether each is current, and the first toponym.
     for (const a of list(attestations)) {
@@ -305,6 +311,15 @@ export class RegionIndex {
       const toponym = list(a.names).find((n) => typeof n?.toponym === 'string' && n.toponym)?.toponym;
       if (toponym) (this.names.get(subject) || this.names.set(subject, []).get(subject)).push({ '@id': a['@id'], negated: a.negated, toponym });
     }
+  }
+  /**
+   * The regions some place is ContainedIn whose record, if the file has one, came before every place in
+   * them, and so was not named by add(): a second reading names them (nameLater). Empty when none.
+   */
+  unnamed() { return new Set([...this.targets].filter((t) => !this.named.has(t))); }
+  /** Name `subject` if unnamed() listed it: from the second reading of the file. */
+  nameLater(attestations, subject, label, wanted) {
+    if (typeof subject === 'string' && wanted.has(subject) && !this.named.has(subject)) { this.named.add(subject); this.nameRecord(attestations, subject, label); }
   }
   /** Keep only what concerns the regions some place is ContainedIn; returns the Candidates wanted. */
   prune() {

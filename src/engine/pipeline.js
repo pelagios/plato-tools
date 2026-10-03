@@ -605,6 +605,13 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       else if (ev.type === 'attestation') collectWithdrawn([ev.value], withdrawn);
     }
     withdrawn = resolved(withdrawn, rep);
+    // A region whose record came before every place in it is named on a second reading, only when one
+    // may have (some region some place is ContainedIn was not named on the first).
+    const unnamed = regions?.unnamed();
+    if (unnamed?.size) {
+      const more = input.format === 'plato-jsonl' ? platoJsonl(input.files[0], new Report()) : platoJson(input.files[0]);
+      for await (const ev of more) if (ev.type === 'record') regions.nameLater(ev.value?.attestations, ev.value?.['@id'], regionLabel(ev.value), unnamed);
+    }
     if (regions) await regionCandidates(regions, options.candidates, rep, gazetteerId);
   }
   if (action === 'convert' && options.cube && target !== 'ntriples') rep.warning('cube-not-ntriples', 'The Data Cube export applies to N-Triples output only, so it is not made here.');
@@ -767,14 +774,15 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     for (const set of sets) notWritten(set);
     for (const c of looseCandidates(new Set(sets.flatMap((x) => [...objectsOf(store, x, PLATO + 'contains_candidate')])))) notWritten(c);
     if (action === 'convert' && isRdf) writer = await writerFor();
-    // The regions some place is ContainedIn that have a match (an attestation bundling identities, about
-    // the region), read once more, quietly (each is reported when it is written as a place), for LPF.
+    // The regions some place is ContainedIn that are places of the dataset, read once more, quietly (each
+    // is reported when it is written as a place), for LPF: their matches and their names.
     if (regions) {
       for (const a of store.subjects(PLATO + 'has_relation_type', PLATO + 'ContainedIn')) for (const t of objectsOf(store, a, PLATO + 'relates_to')) regions.targets.add(t);
-      const matched = new Set();
-      for (const a of distinctSubjectsWith(store, PLATO + 'attests_identity')) for (const e of objectsOf(store, a, PLATO + 'attests_about')) if (regions.targets.has(e)) matched.add(e);
+      // Every such region with attestations of its own: matched or not, it is named from them.
+      const about = (t) => { const it = store.subjects(PLATO + 'attests_about', t); try { return !it.next().done; } finally { it.return(); } };
+      const inData = [...regions.targets].filter(about);
       const quiet = new Rdf2Json(r2jSchemas, store, { withdrawn: storeWithdrawn });
-      for (const e of matched) { const rec = quiet.entity(e); regions.add(rec.attestations, e, regionLabel(rec)); }
+      for (const e of inData) { const rec = quiet.entity(e); regions.add(rec.attestations, e, regionLabel(rec)); }
       await regionCandidates(regions, options.candidates, rep, docId && !String(docId).startsWith('_:') ? docId : undefined);
     }
     const head = docId ? { $schema: 'https://w3id.org/plato/schemas/place-centric.schema.json', ...r2j.header(docId) } : { profile: 'place-centric', gazetteer: { title: input.files[0].name } };
