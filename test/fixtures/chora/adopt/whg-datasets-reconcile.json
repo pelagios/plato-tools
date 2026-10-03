@@ -1,0 +1,15 @@
+{
+  "q0": {
+    "result": [
+      { "id": "place:whg:1319:277", "name": "Newcastle", "score": 100, "match": true, "description": "Country: GB", "ccodes": ["GB"], "repr_point": [-1.611, 54.971], "has_geom": true, "namespace": "whg", "alt_names": [] },
+      { "id": "place:whg:1320:41", "name": "Newcastle", "score": 97, "match": true, "description": "Country: GB", "ccodes": ["GB"], "repr_point": [-1.614, 54.973], "has_geom": true, "namespace": "whg", "alt_names": [] }
+    ]
+  },
+  "attribution": {
+    "whg": { "name": "World Historical Gazetteer", "license": { "spdx_id": "CC-BY-4.0", "permits_commercial": true, "no_derivatives": false } },
+    "datasets": {
+      "1319": { "name": "A closed survey (illustrative)", "redistributable": false },
+      "1320": { "name": "An open survey (illustrative)", "license": { "spdx_id": "CC0-1.0", "permits_commercial": true, "no_derivatives": false }, "redistributable": true }
+    }
+  }
+}

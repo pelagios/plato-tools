@@ -12,13 +12,21 @@
 // the dataset says is a different place (Krisis changes that); a record whose source does not allow it
 // to be passed on (a 451, or `redistributable: false`), which is then consulted, not copied.
 //
-// Pure: no page, no network. The page fetches the Feature (createLookup().entity()), indexes the
-// dataset's identities (Krisis's currentIdentities) and passes Krisis's gazetteerSource(WHG_SERVICE) as
-// `source`; none of these is decided here.
-import { recordIdentity } from '../krisis/identity.js';
+// What this file takes from Krisis (main): the upstream licence (lookup.js upstreamLicence, never WHG's
+// own), the dataset's identities as Krisis reads them (identities.js: currentIdentities, linkState, a
+// link winning over a denial), WHG as a source (identity.js gazetteerSource(WHG_SERVICE)) and the
+// recording of an identity (recordIdentity). "May not be redistributed" is the licence's own
+// `redistributable === false`, tested directly; lookupPage.licenceWarns (words.js) only words the line.
+//
+// Pure: no page, no network. The page fetches the Feature (createLookup().entity()) and gives this
+// place's entry of currentIdentities, which the worker indexes over the whole dataset.
+import { recordIdentity, gazetteerSource } from '../krisis/identity.js';
+import { upstreamLicence, WHG_SERVICE, distanceKm } from '../krisis/lookup.js';
+import { linkState } from '../krisis/identities.js';
 import { normaliseWhgIri, namespaceOf, whgIri } from '../gazetteer/whg.js';
 import { newGeometryAttestation, checkGeoJSON, DrawError } from './draw.js';
-import { choraAdoptIdentityNote, choraAdoptGeometryNote, CHORA_ADOPT_TEXT } from '../words.js';
+import { reprPointOf } from './geo.js';
+import { choraAdoptIdentityNote, choraAdoptGeometryNote, choraConsultedNote, CHORA_ADOPT_TEXT, lookupPage } from '../words.js';
 
 export const CITES_AS_EVIDENCE = 'http://purl.org/spar/cito/citesAsEvidence';
 const SPDX = 'https://spdx.org/licenses/';
@@ -126,40 +134,49 @@ export function featureGeometries(feature) {
 const refusal = (e) => (e instanceof AdoptError ? { kind: 'when', reason: e.message } : e instanceof DrawError ? { kind: 'geometry', reason: e.message } : null);
 
 // ---- licence ------------------------------------------------------------------------------------------
-const spdxOf = (l) => (typeof l === 'string' ? l : isObject(l) && typeof l.spdx_id === 'string' ? l.spdx_id : null);
-/**
- * The licence the gazetteer's attribution gives for the record's UPSTREAM source: for an authority's
- * record, attribution.sources[namespace]; for WHG's own (namespace whg, or none), its dataset's in
- * attribution.datasets. Never attribution.whg, which is WHG's own curation layer, not the source's.
- * { spdx, uri, commercial, derivatives, redistributable, name } (each null when not stated), or null
- * when nothing is said. `redistributable` is false only when the service says false.
- */
-export function upstreamLicence(attribution, namespace, dataset) {
-  const entry = namespace && namespace !== 'whg' ? attribution?.sources?.[namespace] : dataset != null ? attribution?.datasets?.[dataset] : null;
-  if (!isObject(entry)) return null;
-  const l = entry.license, spdx = spdxOf(l);
-  const yes = (v) => (v === true || v === false ? v : null);
-  const redistributable = yes(entry.redistributable);
-  if (!spdx && redistributable !== false) return null;
-  return {
-    spdx,
-    uri: spdx && /^[A-Za-z0-9.+-]+$/.test(spdx) ? SPDX + spdx : null,
-    commercial: isObject(l) ? yes(l.permits_commercial) : null,
-    derivatives: isObject(l) ? (l.no_derivatives === true ? false : l.no_derivatives === false ? true : null) : null,
-    redistributable,
-    name: typeof entry.name === 'string' ? entry.name : null,
-  };
-}
+// The licence of what is copied is the UPSTREAM source's: Krisis's upstreamLicence (lookup.js), never
+// attribution.whg, which covers WHG's own curation layer. Written on the copied geometry's citation as
+// an SPDX address, when the service names an SPDX id.
+/** The SPDX address of a licence object's id, or null. */
+export const spdxUri = (l) => (typeof l?.spdx === 'string' && /^[A-Za-z0-9.+-]+$/.test(l.spdx) ? SPDX + l.spdx : null);
+/** WHG's own licence's SPDX id (attribution.whg), for the notes only, or null. */
+const whgLicenceOf = (attribution) => { const l = attribution?.whg?.license; return typeof l === 'string' ? l : isObject(l) && typeof l.spdx_id === 'string' ? l.spdx_id : null; };
 /** For WHG's own records, place:whg:<dataset>:<id>: the dataset. */
-const datasetOf = (id) => /^place:whg:([^:]+):/.exec(String(id ?? ''))?.[1] ?? null;
+export const datasetOf = (id) => /^place:whg:([^:]+):/.exec(String(id ?? ''))?.[1] ?? null;
 /** The id a record has in its upstream source: 2641673 for place:gn:2641673. */
 const localIdOf = (id) => /^place:(?:[A-Za-z][\w-]*:)?(.+)$/.exec(String(id ?? ''))?.[1] ?? null;
+const isWhgNative = (namespace) => !namespace || namespace === 'whg';
+
+/**
+ * What the dataset and the gazetteer say of a candidate, before anything is fetched: for the list, and
+ * the first refusals of adoptionAttestations.
+ *   identities  this place's entry of Krisis's currentIdentities (linked, exact, denied), or null
+ * Returns { record (its w3id, or null), namespace, whgNative, licence (upstreamLicence), linked
+ * ('exact' | 'loose' | null), denied, mayCopy (false for a source that may not be redistributed),
+ * licenceWarns (lookupPage.licenceWarns: unknown, non-commercial, not redistributable) }.
+ * A link wins over a denial (linkState); only an exactMatch is "already linked".
+ */
+export function candidateStatus(candidate, { identities = null, attribution = null } = {}) {
+  const record = normaliseWhgIri(candidate?.iri) || whgIri(candidate?.id) || null;
+  const namespace = candidate?.namespace ?? namespaceOf(candidate?.id);
+  const whgNative = isWhgNative(namespace);
+  const licence = upstreamLicence(attribution, whgNative ? null : namespace, whgNative ? datasetOf(candidate?.id) : null);
+  const c = { id: candidate?.id, iri: record };
+  const exact = identities && record ? linkState(identities, c, { exact: true }) === 'linked' : false;
+  const any = identities && record ? linkState(identities, c) : null;
+  return {
+    record, namespace: namespace ?? null, whgNative, licence,
+    linked: exact ? 'exact' : any === 'linked' ? 'loose' : null,
+    denied: any === 'denied',
+    // Tested directly, never through licenceWarns (which also covers non-commercial and unknown, which may be copied).
+    mayCopy: licence?.redistributable !== false,
+    licenceWarns: lookupPage.licenceWarns(licence),
+  };
+}
 
 // ---- the adoption ---------------------------------------------------------------------------------------
-const holds = (list, iri) => {
-  for (const x of list || []) if (x === iri || normaliseWhgIri(x) === iri) return true;
-  return false;
-};
+/** WHG, as the source both attestations cite: Krisis's gazetteerSource(WHG_SERVICE), the same as a Krisis identity's. */
+export const whgSource = () => gazetteerSource(WHG_SERVICE);
 
 /**
  * The attestations one adoption makes. Arguments:
@@ -173,27 +190,24 @@ const holds = (list, iri) => {
  *   contributor    { name, orcid? }; created: when (an ISO date-time); fetched: when the record was
  *                  fetched (default: created)
  *   attribution    the root attribution of the lookup's answer
- *   existing       this place's identities, as Krisis's currentIdentities gives them: { linked, denied,
- *                  exact } (sets or lists of IRIs). `exact` holds those linked by an exactMatch not
- *                  negated: only these mean "already linked". Without it, no link is taken as exact.
- *   source         the service as a PLATO source: Krisis's gazetteerSource(WHG_SERVICE)
+ *   identities     this place's entry of Krisis's currentIdentities ({ linked, exact, denied }), or
+ *                  null when it has none: an exactMatch already there means "already linked"
+ *                  (linkState with exact), a denial "ruled out" (linkState), a link winning over a denial
+ * Both cite WHG as Krisis's identities do (gazetteerSource(WHG_SERVICE)).
  * Returns { attestations: [identity?, geometry], notes: [{ kind, text }], refused?: { kind, reason } }.
- * A refusal has no attestations. Throws only for a caller's mistake (no source, no contributor, a bad date).
+ * A refusal has no attestations. Throws only for a caller's mistake (no contributor, a bad date).
  */
-export function adoptionAttestations({ place, candidate, feature = null, fetchError = null, geometryIndex, role, basis, contributor, created, fetched, attribution, existing, source } = {}) {
+export function adoptionAttestations({ place, candidate, feature = null, fetchError = null, geometryIndex, role, basis, contributor, created, fetched, attribution, identities = null } = {}) {
   const notes = [];
   const refuse = (kind, reason = CHORA_ADOPT_TEXT[kind]) => ({ attestations: [], notes, refused: { kind, reason } });
-  if (!isObject(source) || typeof source.title !== 'string') throw new Error('adoptionAttestations: give the service as a PLATO source (gazetteerSource(WHG_SERVICE)).');
+  const source = whgSource();
   const subject = place?.['@id'];
   if (!isIri(subject)) return refuse('no-address');
-  const record = normaliseWhgIri(candidate?.iri) || whgIri(candidate?.id);
+  const st = candidateStatus(candidate, { identities, attribution });
+  const record = st.record;
   if (!isIri(record)) return refuse('no-record');
-  if (holds(existing?.denied, record)) return refuse('denied');
-
-  const namespace = candidate.namespace ?? namespaceOf(candidate.id);
-  const whgNative = !namespace || namespace === 'whg';
-  const licence = upstreamLicence(attribution, namespace, whgNative ? datasetOf(candidate.id) : null);
-  if (fetchError?.kind === 'unavailable' || fetchError?.status === 451 || licence?.redistributable === false) return refuse('unavailable');
+  if (st.denied) return refuse('denied');
+  if (fetchError?.kind === 'unavailable' || fetchError?.status === 451 || !st.mayCopy) return refuse('unavailable');
 
   // Which geometry: one of the Feature's; or, when the record could not be fetched (not a 451), WHG's representative point.
   let chosen, fallback = false;
@@ -203,10 +217,10 @@ export function adoptionAttestations({ place, candidate, feature = null, fetchEr
       const o = Number.isInteger(geometryIndex) ? offered[geometryIndex] : offered.length === 1 ? offered[0] : null;
       if (!o) return refuse('no-geometry');
       if (o.refused) return refuse(o.refused.kind, o.refused.reason);
-      chosen = { ...geometryFrom(o.geojson, o.when), role: role ?? o.role };
+      chosen = { ...geometryFrom(o.geojson, o.when), role: role || o.role };
     } else {
       if (!Array.isArray(candidate.coords)) return refuse('no-geometry');
-      chosen = { ...geometryFrom({ type: 'Point', coordinates: candidate.coords }), role: role ?? 'RepresentativePoint' };
+      chosen = { ...geometryFrom({ type: 'Point', coordinates: candidate.coords }), role: role || 'RepresentativePoint' };
       fallback = true;
       notes.push({ kind: 'representative-point-only', text: CHORA_ADOPT_TEXT['representative-point-only'] });
     }
@@ -216,18 +230,18 @@ export function adoptionAttestations({ place, candidate, feature = null, fetchEr
     return refuse(r.kind, r.reason);
   }
 
-  const linked = holds(existing?.exact, record);
+  const linked = st.linked === 'exact';
   if (linked) notes.push({ kind: 'already-linked', text: CHORA_ADOPT_TEXT['already-linked'] });
-  else if (holds(existing?.linked, record)) notes.push({ kind: 'loosely-linked', text: CHORA_ADOPT_TEXT['loosely-linked'] });
-  if (!licence?.spdx) notes.push({ kind: 'licence-unknown', text: CHORA_ADOPT_TEXT['licence-unknown'] });
-  else if (licence.commercial === false || licence.derivatives === false || /-(NC|ND)(-|$)/i.test(licence.spdx)) notes.push({ kind: 'licence-restricted', text: CHORA_ADOPT_TEXT['licence-restricted'](licence.spdx), uri: licence.uri });
-  if (whgNative) notes.push({ kind: 'unstable-id', text: CHORA_ADOPT_TEXT['unstable-id'] });
+  else if (st.linked === 'loose') notes.push({ kind: 'loosely-linked', text: CHORA_ADOPT_TEXT['loosely-linked'] });
+  notes.push(...licenceNotes(st.licence));
+  if (st.whgNative) notes.push({ kind: 'unstable-id', text: CHORA_ADOPT_TEXT['unstable-id'] });
 
-  const words = { record, name: candidate.name || feature?.properties?.title || null, sourceName: licence?.name ?? null, namespace: whgNative ? null : namespace, localId: localIdOf(candidate.id) };
+  const licenceUri = spdxUri(st.licence);
+  const words = recordWordsOf(candidate, feature, st, attribution);
   const geometry = newGeometryAttestation({
     geojson: chosen.geojson, role: chosen.role, contributor, created,
-    citation: { source: licence?.uri ? { ...source, licence: licence.uri } : { ...source }, locator: record, citationFunction: CITES_AS_EVIDENCE },
-    notes: choraAdoptGeometryNote({ ...words, licence: licence?.spdx ?? null, whgLicence: spdxOf(attribution?.whg?.license), fetched: fetched ?? (created instanceof Date ? created.toISOString() : created), fallback, linked }),
+    citation: { source: licenceUri ? { ...source, licence: licenceUri } : { ...source }, locator: record, citationFunction: CITES_AS_EVIDENCE },
+    notes: choraAdoptGeometryNote({ ...words, licence: st.licence?.spdx ?? null, whgLicence: whgLicenceOf(attribution), fetched: fetched ?? (created instanceof Date ? created.toISOString() : created), fallback, linked }),
   });
   if (chosen.timespans.length) geometry.timespans = chosen.timespans;
   if (linked) return { attestations: [geometry], notes };
@@ -238,4 +252,136 @@ export function adoptionAttestations({ place, candidate, feature = null, fetchEr
     notes: choraAdoptIdentityNote(words),
   });
   return { attestations: [identity, geometry], notes };
+}
+
+/** How the notes name a record: its address, name, upstream source and id there. */
+function recordWordsOf(candidate, feature, st, attribution) {
+  const sourceName = st.whgNative ? attribution?.datasets?.[datasetOf(candidate?.id)]?.name : attribution?.sources?.[st.namespace]?.name;
+  return { record: st.record, name: candidate?.name || feature?.properties?.title || null, sourceName: typeof sourceName === 'string' ? sourceName : null,
+    namespace: st.whgNative ? null : st.namespace, localId: localIdOf(candidate?.id) };
+}
+
+/**
+ * The neutral licence line for what may be copied: unknown says so; one that warns (lookupPage.licenceWarns:
+ * non-commercial; or no derivatives, which bears as much on copying) gets one line, linked. Never a block.
+ */
+export function licenceNotes(l) {
+  if (!l || !l.spdx) return [{ kind: 'licence-unknown', text: CHORA_ADOPT_TEXT['licence-unknown'] }];
+  if (lookupPage.licenceWarns(l) || l.derivatives === false) return [{ kind: 'licence-restricted', text: CHORA_ADOPT_TEXT['licence-restricted'](l.spdx), uri: spdxUri(l) }];
+  return [];
+}
+
+// ---- a record that may not be copied ----------------------------------------------------------------------
+/**
+ * The parts of a drawing made by hand for a place whose gazetteer record was consulted and not copied
+ * (a 451, or a source that may not be redistributed): it cites WHG (cito:citesAsEvidence), with the
+ * record as the locator, and no licence (nothing of it is copied); its notes say so, after how it was
+ * drawn. `consulted` is consultation(): { record, name, namespace, localId, sourceName }.
+ */
+export function consultedParts(consulted, drawnNote) {
+  return {
+    citation: { source: whgSource(), locator: consulted.record, citationFunction: CITES_AS_EVIDENCE },
+    notes: `${drawnNote}. ${choraConsultedNote(consulted)}`,
+  };
+}
+/** What a hand-drawing keeps of a record consulted, not copied (no token, no geometry). */
+export function consultation(candidate, attribution) {
+  const st = candidateStatus(candidate, { attribution });
+  return recordWordsOf(candidate, null, st, attribution);
+}
+
+// ---- ranking, honestly --------------------------------------------------------------------------------------
+const insideBox = ([x, y], [w, s, e, n]) => y >= s && y <= n && (w <= e ? x >= w && x <= e : x >= w || x <= e);
+/**
+ * A place's geographic reference for ranking candidates, by what the place itself gives (view.js's view):
+ * its own current geometries (not denied) → { kind: 'point', points } (a distance is shown); else the
+ * places it is related to, or its countries → { kind: 'box', bbox, from: 'related' | 'ccodes' } (inside
+ * or outside only); else { kind: 'none' } (the dataset's box is no reference for one place).
+ */
+export function referenceOf(view) {
+  const own = (view?.geometries || []).filter((g) => g.status !== 'denied').map((g) => reprPointOf(g.geojson)).filter(Boolean);
+  if (own.length) return { kind: 'point', points: own };
+  const fb = view?.fallback;
+  if ((fb?.kind === 'related' || fb?.kind === 'ccodes') && Array.isArray(fb.bbox)) return { kind: 'box', bbox: fb.bbox, from: fb.kind };
+  return { kind: 'none' };
+}
+/**
+ * Candidates in the order to show them, numbered from 1, never preselected:
+ * - with a point: by distance from the nearest of the place's own points, then the gazetteer's order;
+ * - with a box: those inside it, then outside, each in the gazetteer's order;
+ * - with none: the gazetteer's order, as it gave it.
+ * A candidate without coordinates comes last (but with none), and says so. Each:
+ * { n, candidate, distanceKm (point only), inArea (box only), noCoords, sameSpelling (WHG's match) }.
+ */
+export function rankCandidates(reference, candidates) {
+  const rows = (candidates || []).map((c, order) => {
+    const has = Array.isArray(c.coords);
+    const row = { candidate: c, order, noCoords: !has, sameSpelling: c.match === true, distanceKm: null, inArea: null };
+    if (has && reference?.kind === 'point') row.distanceKm = Math.round(Math.min(...reference.points.map((p) => distanceKm(p, c.coords))) * 10) / 10;
+    if (has && reference?.kind === 'box') row.inArea = insideBox(c.coords, reference.bbox);
+    return row;
+  });
+  const key = reference?.kind === 'point' ? (r) => (r.noCoords ? Infinity : r.distanceKm)
+    : reference?.kind === 'box' ? (r) => (r.noCoords ? 2 : r.inArea ? 0 : 1) : () => 0;
+  rows.sort((a, b) => key(a) - key(b) || a.order - b.order);
+  return rows.map(({ order, ...r }, i) => ({ n: i + 1, ...r }));
+}
+
+// ---- what went wrong -----------------------------------------------------------------------------------------
+/**
+ * A lookup or a record fetch that did not give an answer, in words, and what to offer: `err` is what
+ * createLookup threw (GazetteerError, PermissionError) or null; `list` the one query's answer, whose
+ * `.unanswered` or `.error` mean "try again", never "nothing found". Returns null when there is nothing
+ * wrong, else { kind, text, offer: 'retry' | 'token' | 'tomorrow' | 'permissions' | null }:
+ * - a quota 401 keeps the token (it is not wrong) and says try tomorrow;
+ * - a refused token offers to give it again, or forget it;
+ * - a permission refused points at the Permissions panel.
+ * The texts are the module's (cleaned of the token) or ours; none repeats a request.
+ */
+export function lookupProblem(err, list = null) {
+  if (err) {
+    if (err.name === 'PermissionError') return { kind: 'permission', text: CHORA_ADOPT_TEXT.problem.permission, offer: 'permissions' };
+    const k = err.kind;
+    if (k === 'quota') return { kind: 'quota', text: CHORA_ADOPT_TEXT.problem.quota, offer: 'tomorrow' };
+    if (k === 'auth') return { kind: 'auth', text: CHORA_ADOPT_TEXT.problem.auth, offer: 'token' };
+    if (k === 'unavailable') return { kind: 'unavailable', text: CHORA_ADOPT_TEXT.unavailable, offer: null };
+    if (k === 'rate' || k === 'network') return { kind: k, text: CHORA_ADOPT_TEXT.problem[k], offer: 'retry' };
+    return { kind: 'server', text: CHORA_ADOPT_TEXT.problem.server, offer: 'retry' };
+  }
+  if (list?.unanswered || list?.error != null) return { kind: 'unanswered', text: CHORA_ADOPT_TEXT.problem.unanswered, offer: 'retry' };
+  return null;
+}
+
+// ---- the draft kept until saved ------------------------------------------------------------------------------
+/**
+ * The adoption as it is kept in the browser (OPFS, beside the drawings: src/chora/drafts.js) until saved:
+ * everything adoptionAttestations needs but the contributor, who is asked for when saving. The Feature is
+ * cut to the one geometry chosen (with its `when`), and the candidate to what the attestations use; the
+ * lookup, and its token, are not in it. `created` is the time of adopting.
+ */
+export function adoptionDraft({ id, place, candidate, feature, fetchError, geometryIndex, role, basis, attribution, identities, created, fetched }) {
+  let one = null;
+  if (feature) {
+    const o = featureGeometries(feature)[Number.isInteger(geometryIndex) ? geometryIndex : 0];
+    if (o) one = { type: 'Feature', properties: { title: feature.properties?.title ?? null }, geometry: o.when !== undefined ? { ...o.geojson, when: o.when } : { ...o.geojson } };
+  }
+  const st = candidateStatus(candidate, { attribution });
+  const keepAttribution = st.whgNative
+    ? { whg: attribution?.whg ?? null, datasets: { [datasetOf(candidate.id)]: attribution?.datasets?.[datasetOf(candidate.id)] ?? null } }
+    : { whg: attribution?.whg ?? null, sources: { [st.namespace]: attribution?.sources?.[st.namespace] ?? null } };
+  return {
+    id: String(id), kind: 'adoption', placeId: place['@id'], placeLabel: place.label ?? '',
+    candidate: { id: candidate.id, iri: candidate.iri ?? null, name: candidate.name ?? null, namespace: candidate.namespace ?? null, coords: candidate.coords ?? null },
+    feature: one, fetchError: fetchError ? { kind: fetchError.kind ?? null, status: fetchError.status ?? null } : null,
+    role: role || null, basis: basis || null, attribution: JSON.parse(JSON.stringify(keepAttribution)),
+    identities: identities ? { linked: [...(identities.linked || [])], exact: [...(identities.exact || [])], denied: [...(identities.denied || [])] } : null,
+    created, fetched: fetched ?? created,
+  };
+}
+/** The attestations of a kept adoption, now that the contributor is known. */
+export function draftAttestations(d, contributor) {
+  return adoptionAttestations({
+    place: { '@id': d.placeId, label: d.placeLabel }, candidate: d.candidate, feature: d.feature, fetchError: d.fetchError, geometryIndex: 0,
+    role: d.role || undefined, basis: d.basis || undefined, contributor, created: d.created, fetched: d.fetched, attribution: d.attribution, identities: d.identities,
+  });
 }
