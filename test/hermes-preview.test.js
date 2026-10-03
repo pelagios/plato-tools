@@ -286,7 +286,7 @@ test('plato-tools preview: JSON Lines to stdout and the losses to stderr, or bot
     }
     const elsewhere = cli('check', '--limit', '2', csv);
     assert.equal(elsewhere.code, 2);
-    assert.match(elsewhere.err, /--limit is for preview/);
+    assert.match(elsewhere.err, /--limit is for preview and lookup/);
     const nt = join(dir, 'x.nt');
     writeFileSync(nt, '<https://example.org/a> <http://www.w3.org/2000/01/rdf-schema#label> "a" .\n');
     const refused = cli('preview', nt);

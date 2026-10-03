@@ -84,6 +84,10 @@ test('a dry run says what would be sent and sends nothing; the run sends it', { 
   assert.match(dry.out, /Each place is looked up by its label only\./);
   assert.match(dry.out, /No filters/);
   assert.ok(dry.out.includes('{"query":"Newcastle","limit":10}'), dry.out);
+  // --limit, which preview takes too, is lookup's here: the most candidates asked for.
+  const fewer = await cli(['lookup', join(dir, 'a.json'), '--gazetteer', endpoint, '--token-env', 'MY_TOKEN', '--dry-run', '--limit', '3', '--out', dir], { MY_TOKEN: TOKEN });
+  assert.equal(fewer.code, 0, fewer.out + fewer.err);
+  assert.ok(fewer.out.includes('{"query":"Newcastle","limit":3}'), fewer.out);
   assert.equal(requests.length, 0, 'nothing sent');
   assert.ok(!existsSync(join(dir, 'a.krisis.json')), 'nothing written');
   const run = await cli(['lookup', join(dir, 'a.json'), '--gazetteer', endpoint, '--token-env', 'MY_TOKEN', '--out', dir], { MY_TOKEN: TOKEN });

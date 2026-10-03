@@ -309,8 +309,9 @@ async function main(argv) {
   const readingFlags = READING_FLAGS.filter((f) => f === 'key-pattern' ? o[f].length : o[f]);
   const reads = action === 'check' || action === 'convert' || action === 'preview';
   if (readingFlags.length && !reads) return usage(`${readingFlags.map((f) => `--${f}`).join(', ')} ${readingFlags.length === 1 ? 'is' : 'are'} for check, convert and preview.`);
-  if (o.limit !== undefined && action !== 'preview') return usage('--limit is for preview.');
-  if (o.limit !== undefined && !(/^\s*\d+\s*$/.test(o.limit) && Number(o.limit) >= 1)) return usage(`--limit ${o.limit}: ${PREVIEW_WORDS.limit(o.limit)}`);
+  // --limit is preview's (how many records) and lookup's (how many candidates), each checked by its command.
+  if (o.limit !== undefined && action !== 'preview' && action !== 'lookup') return usage('--limit is for preview and lookup.');
+  if (o.limit !== undefined && action === 'preview' && !(/^\s*\d+\s*$/.test(o.limit) && Number(o.limit) >= 1)) return usage(`--limit ${o.limit}: ${PREVIEW_WORDS.limit(o.limit)}`);
   if (readingFlags.length) {
     const reading = readingOf(o);
     if (typeof reading === 'string') return usage(reading);
@@ -321,7 +322,8 @@ async function main(argv) {
   if (o.sheet !== undefined && !reads) return usage('--sheet is for check, convert and preview.');
   if (action === 'match' || action === 'apply') return review(action, args, o, resources);
   if (action === 'lookup') return lookupCommand(args, o, resources);
-  if (o.gazetteer || o.places || o['all-names'] || o.countries || o.near || o.limit || o.batch || o['dry-run'] || o['token-env'] || o['gazetteer-iri']) return usage('--gazetteer, --token-env, --gazetteer-iri, --places, --all-names, --countries, --near, --limit, --batch and --dry-run are for lookup.');
+  // (--limit, for lookup and preview, is refused above for any other command.)
+  if (o.gazetteer || o.places || o['all-names'] || o.countries || o.near || o.batch || o['dry-run'] || o['token-env'] || o['gazetteer-iri']) return usage('--gazetteer, --token-env, --gazetteer-iri, --places, --all-names, --countries, --near, --batch and --dry-run are for lookup.');
   if (o.with || o.threshold || o['max-distance'] || o.top || o.review || o.output || o.reviewer || o.orcid || o['others-title'] !== undefined) return usage('--with, --threshold, --max-distance, --top, --review, --output, --reviewer, --orcid and --others-title are for match and apply.');
   if (!reads && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, preview, compare, publish, match, apply and datacube.`);
   if (!args.length) return usage(`name ${action === 'preview' ? 'the input' : 'at least one input'} to ${action}.`);
