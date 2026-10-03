@@ -643,7 +643,9 @@ readers link to those headings, so keep them.
   not used: its grid is about 15 MB. A column is guessed `gridref` from its heading (`grid ref`,
   `NGR`, `OSGB`, `OS grid`, `irish grid`… in `HEADINGS`) when at least half its sampled values are
   references, and from its values alone, when its heading says nothing, if at least half are
-  references with digits (`looksLikeGridRef`: letters alone, such as a state code, are not enough).
+  references of a 1 km square or finer, four digits or more (`looksLikeGridRef`: letters alone, such
+  as a state code, are not enough, and neither are UK postcode districts such as E14, SW11 or NW10,
+  which have at most two digits and would otherwise be read as 10 km and 100 km squares).
   Irish Transverse Mercator (ITM) coordinates, which are numbers with no letters, are not read. A
   missing value's marker in the column (R's `NA`, `N/A`, `NULL`, `NIL`, `NONE`, `NaN`, a dash, `?`:
   `isMissingMarker`) is an empty cell, with no location and nothing reported, since `NA` is otherwise

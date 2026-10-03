@@ -181,8 +181,13 @@ export function gridRefToWgs84(text) {
   return { lon: round(lon, 7), lat: round(lat, 7), precisionKm: round(precisionM / 1000, 6), approximate: r.sizeM >= 1000, sizeM: r.sizeM, grid: r.grid, note };
 }
 
-/** Whether a value has the shape of a grid reference with digits (for guessing a column from its values). */
-export const looksLikeGridRef = (v) => /\d/.test(String(v)) && !parseGridRef(v).error;
+/**
+ * Whether a value has the shape of a grid reference of a 1 km square or finer, at least four digits
+ * (for guessing a column from its values alone). Fewer would take UK postcode districts (E14, SW11,
+ * NW10), which never have more than two digits, for 10 km and 100 km squares; a column whose heading
+ * names grid references is not held to this.
+ */
+export const looksLikeGridRef = (v) => { const r = parseGridRef(v); return !r.error && r.digits >= 2; };
 
 /**
  * Whether a cell holds a marker of a missing value rather than a value: R's NA, N/A, NULL, a dash and

@@ -280,3 +280,17 @@ test("a missing value's marker (R's NA, N/A, NULL, a dash) in a grid reference c
   assert.equal(beta.sourceLabel, 'TQ3380');
   assert.ok(Math.abs(beta.reprPoint[1] - 51.508) < 0.01 && Math.abs(beta.reprPoint[0] + 0.078) < 0.01, JSON.stringify(beta));
 });
+test('from its values alone, a column is guessed as grid references only at 1 km or finer: postcode districts are not', () => {
+  const districts = ['E14', 'W12', 'SW11', 'NW10', 'SE10', 'N1', 'SE1', 'NW3'].map((d) => ({ district: d }));
+  // Each of them parses as a 10 km or 100 km square (E14 an Irish Grid one), which is why this matters...
+  assert.ok(districts.filter(({ district }) => !parseGridRef(district).error).length >= 5);
+  const d = guessColumns(['district'], districts);
+  assert.equal(d.mapping.district, 'note', d.reasons.district);
+  // Control: a column of six-figure references under a heading that says nothing is guessed.
+  const six = guessColumns(['where'], ['SU 123 456', 'TQ 337 805', 'NY 216 072'].map((w) => ({ where: w })));
+  assert.equal(six.mapping.where, 'gridref');
+  assert.match(six.reasons.where, /all 3 of its sampled values are grid references/);
+  // And four figures is enough; a heading that names grid references is not held to it.
+  assert.equal(guessColumns(['where'], [{ where: 'SU1234' }]).mapping.where, 'gridref');
+  assert.equal(guessColumns(['ngr'], [{ ngr: 'SU13' }, { ngr: 'TQ' }]).mapping.ngr, 'gridref');
+});
