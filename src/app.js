@@ -1233,7 +1233,7 @@ function lookupState(more) { state.lookup = { ...(state.lookup || {}), ...more }
 function gatherPlaces() {
   const base = $('base').value.trim() || undefined;
   // A table of places is read by the matching of its columns chosen, as Match reads it.
-  const cols = isTable(input) && columns ? { ...columns.mapping } : undefined, colsText = cols ? mappingText(cols) : undefined;
+  const cols = isTable(input) && columns ? columnOptions() : undefined, colsText = cols ? mappingText(cols) : undefined;
   if (gathered && gathered.files === files && gathered.base === base && gathered.cols === colsText) return Promise.resolve(gathered);
   if (placesWaiting) return placesWaiting.promise;
   if (busy || !readable(input)) return Promise.resolve(null);
