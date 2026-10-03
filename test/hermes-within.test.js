@@ -168,7 +168,10 @@ test('with a base address, each row\'s place is ContainedIn its narrowest region
   const mill = doc.spatialEntities.find((p) => p['@id'] === `${BASE}place/1`);
   const contained = mill.attestations.filter((a) => a.relations);
   const key = containerKey(3, 'Newton', ['England', 'Lancashire']);
-  assert.deepEqual(contained.map((a) => a.relations), [[{ relationType: CONTAINED_IN, relatesTo: `${BASE}place/region-${sha256(key).slice(0, 16)}`, relatedLabel: 'Newton' }]]);
+  assert.deepEqual(contained.map((a) => a.relations), [[{ relationType: CONTAINED_IN, relatesTo: `${BASE}place/region-${sha256(key).slice(0, 16)}` }]]);
+  // PLATO a6bc022: no relatedLabel or relationLabel on a minted region's relation (its name is its own name attestation)
+  assert.ok(!JSON.stringify(doc).includes('relatedLabel') && !JSON.stringify(doc).includes('relationLabel'));
+  assert.ok(JSON.stringify(doc).includes('"relatesTo"'));   // control: the relations are there
   assert.equal(regionId(key), `region-${sha256(key).slice(0, 16)}`);
   assert.deepEqual(contained[0].citations, mill.attestations[0].citations);   // the file and the row, as the row's attestation
   assert.equal(contained[0].citations[0].locator, 'row 2');
@@ -187,7 +190,7 @@ test('each region is minted once, named, labelled with its parents, contained in
   // Each region a name attestation, as its source writes it, citing the row it was first met in; the widest no parent.
   assert.deepEqual(england.attestations.map((a) => [a.names?.[0]?.toponym, a.relations, a.citations[0].locator]), [['England', undefined, 'row 2']]);
   const lancs = byLabel('Lancashire (England)');
-  assert.deepEqual(lancs.attestations.map((a) => a.names?.[0]?.toponym ?? a.relations[0]), ['Lancashire', { relationType: CONTAINED_IN, relatesTo: england['@id'], relatedLabel: 'England' }]);
+  assert.deepEqual(lancs.attestations.map((a) => a.names?.[0]?.toponym ?? a.relations[0]), ['Lancashire', { relationType: CONTAINED_IN, relatesTo: england['@id'] }]);
   assert.equal(newtonC.attestations[1].relations[0].relatesTo, byLabel('Cheshire (England)')['@id']);
   // Farm and Barn are in the same Newton; Mill in the other.
   const narrowest = (id) => doc.spatialEntities.find((p) => p['@id'] === `${BASE}place/${id}`).attestations.find((a) => a.relations).relations[0].relatesTo;
@@ -221,7 +224,7 @@ test('attestation-centric rows with a base: regions are new places, their attest
   const { events } = await eventsOf(csv, { base: BASE });
   const surrey = events.find((e) => e.region && e.type === 'record' && e.value.label === 'Surrey (England)');
   assert.equal(surrey.newEntity, true);
-  assert.ok(events.some((e) => e.type === 'attestation' && e.region && e.value.about === surrey.value['@id'] && e.value.relations?.[0].relatedLabel === 'England'));
+  assert.ok(events.some((e) => e.type === 'attestation' && e.region && e.value.about === surrey.value['@id'] && e.value.relations?.[0].relatesTo === events.find((x) => x.region && x.type === 'record' && x.value.label === 'England')?.value['@id'] && !Object.hasOwn(e.value.relations[0], 'relatedLabel')));
   assert.ok(events.some((e) => e.type === 'attestation' && e.region && e.value.about === surrey.value['@id'] && e.value.names?.[0].toponym === 'Surrey'));
   // Through run(): regrouped by place in the store, each record's event given back its chain.
   const seen = [];
