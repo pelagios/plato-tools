@@ -981,28 +981,48 @@ again or is left, once it is that old), and its engine `src/engine/chora/` (`sto
 publishes its state on `window.__chora` for tests.
 
 **Chora's way back into a workflow** (`src/chora/handback.js`; Methodos, `docs/plans/methodos.md`,
-section 5.3, stage 6). Opened as `chora.html#workflow=<id>`, where the id is letters, digits, `-` and
-`_`, at most 64 (anything else is refused in words, and never reaches the page or an address), a file
-saved, by the save dialogue or as a download, is handed back: a record in the hand-off's store
-(`plato-tools-chora`, `kv`) under its own key, `chora-handback`, of the hand-off's shape with the
-workflow and a format, `{ handback: 1, workflow, files: [{ type: 'dataset', name, size, sha256 }], at }`.
-`files` holds a reference, never the bytes: a Methodos hand-off, made by Methodos's own `refsOf`
+section 5.3, stage 6). Opened as `chora.html#workflow=<id>`, where the id starts with a letter or a
+digit and has only letters, digits, `-` and `_`, at most 64 in all (anything else is refused in
+words, and never reaches the page or an address), a file saved, by the save dialogue or as a
+download, is handed back: a record in the hand-off's store (`plato-tools-chora`, `kv`) under its own
+key, `chora-handback`, of the hand-off's shape with the workflow and a format,
+`{ handback: 1, workflow, files: [{ type: 'dataset', name, size, sha256 }], at }`. `files` holds a
+reference, never the bytes: a Methodos hand-off, made by Methodos's own `refsOf`
 (`src/engine/methodos/handoffs.js`) from the very File that went to disk, before a copy kept here is
 let go; `refsOf` hashes it as a stream (Krisis's `fileRecords` and `fileSha256`), so that a saved
-dataset of DEEP's size is never in memory whole. Then the save result offers **Back to the
-workflow**, a link to `./#workflow=<id>`; a click writes the record again, so that its two minutes (`FRESH`, as the hand-off's) are the
-navigation's, and Chora drops a stale one when it starts. Opened without `#workflow`, nothing is
-written. The main page's side is not built yet: on loading with `#workflow=<id>` it must find the
-workflow's record by that id, show the step waiting ("Draw or trace the places on a map", operation
-`place`), and only on the user's click `take(id)` the hand-back (read once, deleted, checked again by
-`check()`: another workflow's, another format's, a stale one or any reference not exactly one
-`dataset` is refused); then ask the user to choose the saved file, since the record names it and
-does not hold it; complete the step with `runner.complete(state, 'place', { dataset: record.files })`
-only when `refsDiffer(record.files, [file])` is empty; and drop a stale hand-back as it drops a stale
-hand-off. `test/chora-handback.test.js` checks the record, its refusals and the hash, that the file
-is read as a stream and never whole, and that Methodos's `isRef`, `checkHandoff` and `refsDiffer` take the
-reference; the browser checks save in a workflow, compare the record with the downloaded
-file's size and SHA-256, follow the link, and save without one as the control.
+dataset of DEEP's size is never in memory whole, and while it does, the Save button waits and the
+page says "Handing the file back to the workflow…". The name must be one the page can show as it
+is (no path, no control or invisible characters such as zero-width spaces, bidirectional overrides
+or a byte-order mark, not blank, not `.` or `..`). Then the save result offers **Back to the
+workflow**, a link to `./#workflow=<id>`; a click writes the record again, so that its two minutes
+(`FRESH`, as the hand-off's) are the navigation's, and Chora drops a stale one when it starts.
+Reading and deleting are one transaction (`take`, `dropStale`), so a record written meanwhile is
+never the one deleted. Opened without `#workflow`, nothing is written.
+
+The main page's side is not built yet. On loading with `#workflow=<id>` it must:
+
+- find the workflow's record by that id, and show the step waiting ("Draw or trace the places on a
+  map", operation `place`);
+- carry `#workflow=<id>` through `setHash` in `src/app.js`, which rewrites the fragment to
+  `#tool=<key>` (or nothing) on a toolbox click, and would otherwise lose the workflow;
+- only on the user's click, `take(id)` the hand-back (read once, deleted, checked again by
+  `check()`: another workflow's, another format's, a stale one, or any reference not exactly one
+  `dataset` with a name the page can show, is refused);
+- when `take(id)` returns null (none, stale, refused, or a browser that keeps nothing), fall back to
+  asking the user to choose the saved file by hand, as the step does today;
+- otherwise ask the user to choose the saved file, since the record names it and does not hold it,
+  and complete the step with `runner.complete(state, 'place', { dataset: record.files })` only when
+  `refsDiffer(record.files, [file])` is empty;
+- drop a stale hand-back (`dropStale`) where it drops a stale hand-off.
+
+`test/chora-handback.test.js` checks the record, its refusals and the hash, that the file is read as
+a stream and never whole, that a give() beside take() or dropStale() is not lost, and that Methodos's
+`isRef`, `checkHandoff` and `refsDiffer` take the reference and its step `place` is completed with
+it. The browser checks (`handback_given`, `handback_control`, `handback_bad_id` in
+`e2e/app_test.py`) save in a workflow and compare the record with the downloaded file's size and
+SHA-256, see the busy line and the record rewritten by the click, follow the link; save without
+`#workflow` as the control; and open an address whose workflow is markup, which is refused in words
+and reaches nothing.
 
 - **The worker** is the main page's, with commands of its own, sent one at a time: `chora-load`,
   `chora-search`, `chora-overview` (every place's point, at most 50,000), `chora-place` (one
