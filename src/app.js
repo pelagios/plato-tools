@@ -19,6 +19,8 @@ import { LOOKUP_WORDS, lookupPage as LW } from './engine/words.js';
 import { createLookup, WHG_ENDPOINT, isWhg } from './engine/gazetteer/index.js';
 import { runLookup, planLookup, gazetteerPermission, permittedFetch, serviceOf, iriFromTemplate, iriVia, manifestSettings, newWork, defaultChoice, licenceOf, PLACE_CHOICES, WHG_REQUESTS_A_DAY } from './engine/krisis/lookup.js';
 import { candidateSource } from './engine/krisis/identity.js';
+import { mountMethodos } from './methodos/page.js';
+import { pageStore } from './methodos/page-store.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
 let worker, files = [], input = null, targets = {}, busy = false;
@@ -634,6 +636,7 @@ const TOOLS = {
 };
 const EVERY_ACTION = $('action-what').textContent;
 let tool = null;
+let workflowStep = null;   // the step of a Methodos workflow the user is at, if they follow one: { tool, text, link }
 const toolFromHash = () => { const m = /^#tool=([a-z]+)$/.exec(location.hash); return m && TOOLS[m[1]] ? m[1] : null; };
 const reduceMotion = () => !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 function chooseTool(key) {
@@ -653,11 +656,17 @@ function chooseTool(key) {
     if (a.dataset.tool === tool) a.setAttribute('aria-current', 'true'); else a.removeAttribute('aria-current');
   }
   const note = $('for-tool');
-  note.hidden = !tool;
+  note.hidden = !tool && !workflowStep;
   note.textContent = '';
+  if (workflowStep) {                     // a Methodos workflow's step, said first (src/methodos/page.js)
+    const w = document.createElement('span');
+    w.className = 'workflow-step'; w.textContent = workflowStep.text;
+    if (workflowStep.link) { const a = document.createElement('a'); a.href = workflowStep.link.href; a.textContent = workflowStep.link.words; w.append(' ', a, '.'); }
+    note.append(w, ' ');
+  }
   if (tool) {
     const [anchor, words] = TOOLS[tool].guide;
-    note.innerHTML = `For <strong>${TOOLS[tool].name}</strong>, ${escapeHtml(TOOLS[tool].what)}. <a href="${GUIDE}#${anchor}">${words}</a>. `;
+    note.insertAdjacentHTML('beforeend', `For <strong>${TOOLS[tool].name}</strong>, ${escapeHtml(TOOLS[tool].what)}. <a href="${GUIDE}#${anchor}">${words}</a>. `);
     const all = document.createElement('button');
     all.type = 'button'; all.className = 'link'; all.id = 'every-action'; all.textContent = 'Show every action';
     all.onclick = () => { chooseTool(null); setHash(null); focusStep1(); };
@@ -708,8 +717,25 @@ $('toolbox').addEventListener('click', (e) => {
   }
   chooseTool(a.dataset.tool); setHash(a.dataset.tool); focusStep1();
 });
-window.addEventListener('hashchange', () => chooseTool(toolFromHash()));
+window.addEventListener('hashchange', () => { chooseTool(toolFromHash()); if (location.hash === '#methodos') methodos.open(); });
 chooseTool(toolFromHash());
+
+// ---- Methodos: the interview and the tracker (src/methodos/page.js) ------------------------------
+// Opened from its card (or an address ending #methodos); until then the page is as it was. Each step
+// the workflow comes to chooses that step's tool, as its card would, and is said in #for-tool.
+const methodos = mountMethodos({
+  banner: $('methodos-banner'), interview: $('methodos'), tracker: $('methodos-tracker'), tools: $('toolbox'), store: pageStore(),
+  onStep(step) {
+    if (!step && !workflowStep) return;
+    workflowStep = step;
+    chooseTool(step?.tool ?? null); setHash(step?.tool ?? null);
+  },
+});
+for (const id of ['methodos-card', 'methodos-ask']) $(id).addEventListener('click', (e) => {
+  if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;   // a first tap on the card's name shows its tooltip (src/lib/tooltip.js)
+  e.preventDefault(); methodos.open();
+});
+if (location.hash === '#methodos') methodos.open();
 
 // Krisis: match review. One subject place at a time, with its candidates; each decision is written
 // into the work object at once (decide() in engine/krisis/work.js), which "Save the review" saves

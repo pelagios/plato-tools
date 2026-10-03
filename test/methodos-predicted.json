@@ -1,0 +1,61 @@
+[
+ {
+  "have": "table",
+  "want": "map",
+  "yes": {
+   "has-regions": false,
+   "will-draw": true,
+   "will-publish": false
+  },
+  "recipe": "map-your-data",
+  "steps": [
+   "columns",
+   "check",
+   "dataset",
+   "lookup",
+   "review",
+   "apply",
+   "place",
+   "again",
+   "compare",
+   "out"
+  ]
+ },
+ {
+  "have": "table",
+  "want": "publish",
+  "yes": {
+   "has-regions": false,
+   "will-draw": false
+  },
+  "recipe": "map-your-data",
+  "steps": [
+   "columns",
+   "check",
+   "dataset",
+   "lookup",
+   "review",
+   "apply",
+   "again",
+   "compare",
+   "out",
+   "mint",
+   "report",
+   "site",
+   "w3id"
+  ]
+ },
+ {
+  "have": "plato",
+  "want": "publish",
+  "yes": {},
+  "recipe": "publish-a-dataset",
+  "steps": [
+   "check",
+   "mint",
+   "report",
+   "site",
+   "w3id"
+  ]
+ }
+]
