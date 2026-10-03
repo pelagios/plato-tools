@@ -84,7 +84,14 @@ export function checkMatchOptions(o = {}) {
  * { field, pattern } (Hermes's object form). True if it is one. The command line and match() check
  * a mapping by this rule before anything is written, so that no work file holds one readWork refuses.
  */
-const isColumn = (f) => typeof f === 'string' || (isObject(f) && Object.keys(f).length === 2 && typeof f.field === 'string' && typeof f.pattern === 'string');
+// Also a region the place lies in at its level, { field: 'within', level }, and a column split into
+// levels, { field: 'split', separator, levels, firstIsName } (Hermes, columns.js; within.js).
+const isLevel = (l) => Number.isInteger(l) && l >= 1;
+const isColumn = (f) => typeof f === 'string' || (isObject(f) && typeof f.field === 'string' && (
+  (Object.keys(f).length === 2 && typeof f.pattern === 'string')
+  || (f.field === 'within' && Object.keys(f).length === 2 && isLevel(f.level))
+  || (f.field === 'split' && Object.keys(f).every((k) => ['field', 'separator', 'levels', 'firstIsName'].includes(k)) && typeof f.separator === 'string' && f.separator !== ''
+    && (f.levels === undefined || (Array.isArray(f.levels) && f.levels.length > 0 && f.levels.every(isLevel))) && (f.firstIsName === undefined || typeof f.firstIsName === 'boolean'))));
 export const isColumns = (c) => isObject(c) && Object.values(c).every(isColumn);
 
 /** Where a dataset's title in a work file came from: its gazetteer, the person matching, or (neither given) its file's name. */
