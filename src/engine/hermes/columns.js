@@ -409,7 +409,8 @@ export function mappingToSave(mapping, patterns = {}, levels = {}, splits = {}) 
   for (const [h, f] of Object.entries(mapping)) {
     if (f === 'address' && Object.hasOwn(patterns, h)) out[h] = { field: f, pattern: patterns[h] };
     else if (f === 'within' && Object.hasOwn(levels, h)) out[h] = { field: f, level: levels[h] };
-    else if (f === 'split' && Object.hasOwn(splits, h)) out[h] = { field: f, separator: splits[h].separator, levels: [...splits[h].levels], firstIsName: !!splits[h].firstIsName };
+    // No levels (no sampled cell had a part): left out, as --columns refuses an empty list and guesses them again.
+    else if (f === 'split' && Object.hasOwn(splits, h)) out[h] = { field: f, separator: splits[h].separator, ...(splits[h].levels.length ? { levels: [...splits[h].levels] } : {}), firstIsName: !!splits[h].firstIsName };
     else out[h] = f;
   }
   return out;

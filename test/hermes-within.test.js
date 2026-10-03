@@ -443,6 +443,27 @@ test('command line: --split splits a column into levels, prints it in the mappin
     assert.ok(cli('check', join(d, 'places.csv')).out.includes('{"Place":"note"}'));
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
+test('command line: --split on a column whose sampled cells are all empty prints a mapping that --columns takes back (no "levels": [])', () => {
+  const d = mkdtempSync(join(tmpdir(), 'plato-tools-within-'));
+  const printed = (out) => out.split('\n').map((l) => l.trim()).find((l) => l.startsWith('{"'));
+  try {
+    writeFileSync(join(d, 'empty.csv'), 'Name,Place\nMill,\n');
+    const r = cli('check', '--split', 'Place=,', join(d, 'empty.csv'));
+    assert.equal(r.code, 0, r.out + r.err);
+    const saved = printed(r.out);
+    assert.equal(saved, '{"Name":"name","Place":{"field":"split","separator":",","firstIsName":false}}', r.out);
+    writeFileSync(join(d, 'mapping.json'), saved);
+    const back = cli('check', '--columns', join(d, 'mapping.json'), join(d, 'empty.csv'));
+    assert.equal(back.code, 0, back.out + back.err);
+    assert.equal(printed(back.out), saved);   // round-trips
+    // Control: with parts in the sampled cells, the levels are printed, and taken back too.
+    writeFileSync(join(d, 'full.csv'), 'Name,Place\nMill,"Surrey,England"\n');
+    const full = printed(cli('check', '--split', 'Place=,', join(d, 'full.csv')).out);
+    assert.equal(full, '{"Name":"name","Place":{"field":"split","separator":",","levels":[2,1],"firstIsName":false}}');
+    writeFileSync(join(d, 'mapping-full.json'), full);
+    assert.equal(cli('check', '--columns', join(d, 'mapping-full.json'), join(d, 'full.csv')).code, 0);
+  } finally { rmSync(d, { recursive: true, force: true }); }
+});
 test('command line: regions guessed from the headings are printed with their levels, and --help names --split and the pasted list', () => {
   const d = mkdtempSync(join(tmpdir(), 'plato-tools-within-'));
   try {
