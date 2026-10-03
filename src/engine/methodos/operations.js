@@ -40,8 +40,10 @@ export const OPERATIONS = Object.fromEntries([
     waitsFor: 'the candidates to be reviewed, in step 5', takes: { work: { types: ['work.krisis'] } }, gives: { work: 'work.krisis' } }),
   op({ key: 'apply', title: 'Record the decisions in the dataset', tool: 'Krisis',
     takes: { subjects: { types: ANY }, work: { types: ['work.krisis'] } }, gives: { dataset: 'dataset' } }),
+  // Chora hands the dataset saved there back to this step (src/chora/handback.js): a reference, which
+  // the page checks against the file chosen here again (refsDiffer) before it completes the step.
   op({ key: 'place', title: 'Draw or trace the places on a map', tool: 'Chora', kind: 'interactive',
-    waitsFor: 'the places to be drawn or traced in Chora, and the dataset saved there to be chosen here again',
+    waitsFor: 'the places to be drawn or traced in Chora, and the dataset saved there to be handed back ("Back to the workflow") and chosen here again',
     takes: { dataset: { types: ANY } }, gives: { dataset: 'dataset' } }),
   // Not yet: each declared, with its reason, so that a recipe can name it and the runner can say why
   // it cannot start, rather than doing something else under its name.
@@ -54,9 +56,6 @@ export const OPERATIONS = Object.fromEntries([
   op({ key: 'adopt', title: "Take each identified place's location from its match", tool: 'Chora',
     takes: { dataset: { types: ANY } }, gives: { dataset: 'dataset' },
     available: "Adopting a match's geometry is on a branch of Chora (chora-adopt) that has not been merged." }),
-  op({ key: 'place.handback', title: 'Bring the dataset back from Chora', tool: 'Chora',
-    takes: { dataset: { types: ANY } }, gives: { dataset: 'dataset' },
-    available: 'Chora cannot hand a saved dataset back to the main page yet: until it can, the saved file is chosen again by hand (the step "Draw or trace the places on a map").' }),
   op({ key: 'text.find', title: 'Find the places named in a text', tool: 'Hermes', networked: true, cancel: 'keeps-partial',
     takes: { files: { types: ['files'] } }, gives: { work: 'work.hermes-text' },
     available: 'Finding places in a text is deferred (the llm-extract branch).' }),
