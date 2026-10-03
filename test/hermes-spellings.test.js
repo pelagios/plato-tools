@@ -112,3 +112,31 @@ test('an answer for a column or way of grouping no longer chosen is set aside; t
   assert.deepEqual(last().rows.map((r) => r.members.map((m) => m.value)), [['St Mary', 'St. Mary']]);
   assert.match(last().message, /^1 group of similar spellings in "parish"/);
 });
+
+test('keyboard focus survives the panel being drawn again: on the column, the way of grouping, and the Find button once it answers', () => {
+  const { p, fire, asked, document, box } = panel();
+  fire('click', { id: 'spellings-open' });
+  assert.equal(document.activeElement?.id, 'spellings-column');   // opened: on to the first control
+  // The control: drawing the panel again does lose focus, unless it is given back.
+  box.querySelector('#spellings-method').focus();
+  box.innerHTML = box.innerHTML;
+  assert.equal(document.activeElement, document.body);
+  box.querySelector('#spellings-column').focus();
+  fire('change', { id: 'spellings-column', value: 'parish' });
+  assert.equal(document.activeElement?.id, 'spellings-column');
+  assert.equal(document.activeElement.box, box);
+  assert.match(box.innerHTML, /<option value="parish" selected>/);
+  box.querySelector('#spellings-method').focus();
+  fire('change', { id: 'spellings-method', value: 'phonetic' });
+  assert.equal(document.activeElement?.id, 'spellings-method');
+  // Find: the button is disabled while the column is read, and focused again when the answer comes.
+  box.querySelector('#spellings-find').focus();
+  fire('click', { id: 'spellings-find' });
+  assert.equal(box.querySelector('#spellings-find').disabled, true);
+  p.answer({ id: asked[asked.length - 1].id, column: 'parish', method: 'phonetic', distinct: 3, clusters: [cluster('St Mary', 'St. Mary')] });
+  assert.equal(document.activeElement?.id, 'spellings-find');
+  assert.equal(document.activeElement.disabled, false);
+  // Closed: on to the button that opens it again.
+  fire('click', { id: 'spellings-close' });
+  assert.equal(document.activeElement?.id, 'spellings-open');
+});

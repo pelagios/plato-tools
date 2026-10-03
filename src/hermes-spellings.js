@@ -25,6 +25,8 @@ export function spellingsPanel({ box, ask, changed = () => {}, publish = () => {
   // although the last "Find groups" did not find it.
   let shown = Object.create(null);
   let column, method = DEFAULT_METHOD;
+  // The control to give keyboard focus back to once it can take it (the Find button is disabled while reading).
+  let focusAfter = null;
 
   const confirmed = () => {
     let out = Object.create(null);
@@ -43,7 +45,25 @@ export function spellingsPanel({ box, ask, changed = () => {}, publish = () => {
     });
   }
 
-  function render() {
+  // Rendering replaces the panel's HTML, so the control that had keyboard focus is focused again
+  // afterwards, by its id (or `focus`, the one the user is to go on to).
+  const doc = () => box.ownerDocument || globalThis.document;
+  function focusedId() {
+    const a = doc()?.activeElement;
+    return a && a !== box && box.contains(a) && a.id ? a.id : null;
+  }
+  function refocus(id) {
+    if (!id) return;
+    const el = box.querySelector(`#${id}`);
+    if (el && !el.disabled) { el.focus(); focusAfter = null; } else focusAfter = el ? id : null;
+  }
+  function render(focus) {
+    const a = doc()?.activeElement;
+    const keep = focus || focusedId() || (focusAfter && (!a || a === doc()?.body) ? focusAfter : null);
+    paint();
+    refocus(keep);
+  }
+  function paint() {
     box.hidden = !on;
     if (!on) { box.innerHTML = ''; state(); return; }
     if (!open) {
@@ -79,14 +99,14 @@ export function spellingsPanel({ box, ask, changed = () => {}, publish = () => {
   }
 
   box.addEventListener('click', (e) => {
-    if (e.target.id === 'spellings-open') { open = true; render(); }
-    else if (e.target.id === 'spellings-close') { open = false; render(); }
+    if (e.target.id === 'spellings-open') { open = true; render('spellings-column'); }
+    else if (e.target.id === 'spellings-close') { open = false; render('spellings-open'); }
     else if (e.target.id === 'spellings-find') find();
   });
   box.addEventListener('change', (e) => {
     // A new column or way of grouping: an answer still to come for the old one is set aside (asked).
-    if (e.target.id === 'spellings-column') { column = e.target.value; method = shown[column]?.method || method; asked++; waiting = false; message = ''; render(); }
-    else if (e.target.id === 'spellings-method') { method = e.target.value; asked++; waiting = false; message = ''; render(); }
+    if (e.target.id === 'spellings-column') { column = e.target.value; method = shown[column]?.method || method; asked++; waiting = false; message = ''; render('spellings-column'); }
+    else if (e.target.id === 'spellings-method') { method = e.target.value; asked++; waiting = false; message = ''; render('spellings-method'); }
     else if (e.target.matches('input[data-spellings-use]')) {
       const r = shown[column]?.rows[Number(e.target.dataset.spellingsUse)];
       if (r) { r.ticked = e.target.checked; changed(); }
