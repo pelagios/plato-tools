@@ -1756,6 +1756,30 @@ python3 e2e/scale_test.py --input deep-plato.nt.gz --target plato-jsonl --out ou
 PERSEUS_P4_FILE=/path/to/text.xml node scripts/check-perseus-p4.mjs   # TEI P4 against a real Perseus file (opt-in)
 ```
 
+**The full gates run on GitHub, not here.** Every branch pushed (any but `main`) runs
+`.github/workflows/gates.yml`: three jobs side by side, each with PLATO checked out at the pinned
+commit.
+
+- **unit**: `npm test`, `scripts/install-test.mjs` (the tools installed as npx installs them, and
+  the command run) and `npm run build`.
+- **e2e**: `python e2e/app_test.py` against the build, in Playwright's Chromium. Its `RESULT:` line
+  is in the run's summary, with every failing check named.
+- **prove-it-fails**: `python e2e/app_test.py --prove-it-fails`, green only when every check fails
+  against a page with no tools on it (the harness can fail); a check that passed there is named in
+  the summary.
+
+```bash
+git push -u origin my-branch
+gh run list --branch my-branch --workflow Gates -L 1   # the run's id
+gh run watch <id> --exit-status                         # exits non-zero if any job failed
+```
+
+A branch lands on `main` when its Gates run is green: the hour-long browser runs on this desktop are
+no longer needed for landing. A new push to the branch cancels its run in progress. A job that
+fails uploads its log as an artifact (`gh run download <id>`). The run is given no secrets: what
+needs a token (`WHG_TOKEN`) is skipped, as it is locally without one. Keep quick, targeted checks
+local while working (`node --test test/x.test.js`, `npm test`), and push for the full gates.
+
 `npm test` reads PLATO's examples from a checkout of PLATO beside this one, or wherever
 `PLATO_REPO` says; it should be at the pinned commit, as it is in CI. The tests check that:
 
