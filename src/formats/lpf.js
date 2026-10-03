@@ -6,7 +6,7 @@
 // Writing LPF from PLATO is lossy by design (bundling, locators, form status, numeric certainty
 // and more have no LPF slot); every loss is reported, with counts.
 import { PLATO, isAbsoluteIri } from '../lib/context.js';
-import { list, isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey, isComputed, isComputedFacet, identityBundleLosses, evidenceSpanLosses } from './shared.js';
+import { list, isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey, isComputed, isComputedFacet, identityBundleLosses, evidenceSpanLosses, isContainedIn } from './shared.js';
 
 // The README's alias table, plus the vocabulary prefixes its own examples use.
 export const LPF_PREFIXES = {
@@ -253,12 +253,117 @@ export function collectionToGazetteer(fc, fallbackTitle, loss = () => {}) {
   return clean({ '@id': fc['@id'] || fc.id, title: typeof fc.title === 'string' && fc.title ? fc.title : fallbackTitle, description: d, licence });
 }
 
+// ---- regions matched to a gazetteer (PLATO 1d2cf6e, #23) -----------------------------------------
+// The dataset says a place is ContainedIn a region minted from its own data; a reviewer's attestation
+// says that region is the gazetteer's (an identity, closeMatch or exactMatch), and its promotedFrom
+// names the Candidate, in a candidate set published apart, that holds the matching software's score.
+// LPF writes the two as one relation, as WHG does: gvp:broaderPartitive, whose relationTo is the
+// identity's object, certainty the reviewer's level, whg_match_score the Candidate's score and label
+// the region's name. A region assigned by hand (ContainedIn straight at the gazetteer, or at a region
+// with no current match) is written as it stands. Where the writer cannot tell (several current
+// matches, a score it was not given), it writes no guess and reports it.
+const BROADER_PARTITIVE = 'gvp:broaderPartitive';
+const SAME_PLACE = new Set(['exactMatch', 'closeMatch']);
+/** A region's name where a record gives no relationLabel: its label, else its first toponym. */
+export const regionLabel = (rec) => (typeof rec?.label === 'string' && rec.label) || list(rec?.attestations).flatMap((a) => list(a?.names)).find((n) => typeof n?.toponym === 'string')?.toponym;
+
+/**
+ * What the whole document says of the regions its places are ContainedIn, gathered before any feature
+ * is written (a region's match may come anywhere in the file): the attestations bundling identities
+ * from each region, reduced to what is needed here, and the region's name; then the scores of the
+ * Candidates they were promoted from, from the candidate sets given (setCandidates).
+ */
+export class RegionIndex {
+  constructor() { this.matches = new Map(); this.labels = new Map(); this.targets = new Set(); this.candidates = null; this.cache = new Map(); }
+  /** Gather from the attestations of the record `subject`, whose name (regionLabel) is `label`. */
+  add(attestations, subject, label) {
+    for (const a of list(attestations)) {
+      if (!a || typeof a !== 'object') continue;
+      for (const r of list(a.relations)) if (r && isContainedIn(r.relationType) && typeof r.relatesTo === 'string') this.targets.add(r.relatesTo);
+      if (!Array.isArray(a.identities)) continue;
+      const own = new Map();   // region -> this attestation, with that region's identities only
+      for (const ir of a.identities) {
+        if (!ir || typeof ir !== 'object' || typeof ir.object !== 'string') continue;
+        const region = typeof ir.subject === 'string' ? ir.subject : typeof a.about === 'string' ? a.about : subject;
+        if (typeof region !== 'string') continue;
+        if (!own.has(region)) own.set(region, { '@id': a['@id'], negated: a.negated, certaintyLevel: a.certaintyLevel, identities: [] });
+        own.get(region).identities.push({ object: ir.object, identityType: ir.identityType, promotedFrom: ir.promotedFrom });
+      }
+      for (const [region, stub] of own) (this.matches.get(region) || this.matches.set(region, []).get(region)).push(stub);
+    }
+    // A name is kept only for a region with a match, so that the index stays small on a large file: one
+    // with none is written under its own address, where an LPF reader finds the region's feature.
+    if (typeof subject === 'string' && label && this.matches.has(subject)) this.labels.set(subject, label);
+  }
+  /** Keep only what concerns the regions some place is ContainedIn; returns the Candidates wanted. */
+  prune() {
+    for (const m of [this.matches, this.labels]) for (const k of [...m.keys()]) if (!this.targets.has(k)) m.delete(k);
+    const wanted = new Set();
+    for (const stubs of this.matches.values()) for (const s of stubs) for (const ir of s.identities) if (typeof ir.promotedFrom === 'string') wanted.add(ir.promotedFrom);
+    return wanted;
+  }
+  /** The Candidates found in the sets given: @id -> { subject, object, score }; null when none were given. */
+  setCandidates(found) { this.candidates = found; this.cache.clear(); }
+  /**
+   * What the document says of `region` now: { label, relationTo?, certaintyLevel?, score?, several?,
+   * noScore?, certaintyDiffers? }. Only the current state counts: an attestation the document
+   * withdraws (`withdrawn`, as for every attestation the writer leaves out) or a denial is not a match.
+   */
+  resolve(region, withdrawn) {
+    if (this.cache.has(region)) return this.cache.get(region);
+    const out = { label: this.labels.get(region) };
+    const live = currentAttestations({ attestations: this.matches.get(region) || [] }, withdrawn, () => {}).filter((a) => !isDenial(a));
+    const same = live.flatMap((a) => a.identities.filter((ir) => SAME_PLACE.has(ir.identityType)).map((ir) => ({ a, ir })));
+    const objects = [...new Set(same.map((x) => x.ir.object))];
+    if (objects.length > 1) out.several = objects;
+    else if (objects.length === 1) {
+      out.relationTo = objects[0];
+      const levels = [...new Set(same.map((x) => x.a.certaintyLevel ?? null))];
+      if (levels.length === 1) out.certaintyLevel = levels[0] ?? undefined; else out.certaintyDiffers = true;
+      // A score only from a Candidate for this pair (either way round, as promotedFrom allows), and only
+      // when every match promoted from one agrees on it; never a score found for another pair.
+      const promoted = [...new Set(same.map((x) => x.ir.promotedFrom).filter((p) => typeof p === 'string'))];
+      const scores = new Set();
+      for (const p of promoted) {
+        const c = this.candidates?.get(p);
+        const pair = c && ((c.subject === region && c.object === out.relationTo) || (c.subject === out.relationTo && c.object === region));
+        if (pair && typeof c.score === 'number') scores.add(c.score); else { out.noScore = p; break; }
+      }
+      if (!out.noScore && scores.size === 1) out.score = [...scores][0];
+      else if (!out.noScore && scores.size > 1) out.noScore = promoted[0];
+    }
+    this.cache.set(region, out);
+    return out;
+  }
+}
+
+/** One ContainedIn of attestation `a`, as LPF's gvp:broaderPartitive (see RegionIndex above). */
+function containment(r, a, when, cits, regions, withdrawn, loss) {
+  const m = regions ? regions.resolve(r.relatesTo, withdrawn) : {};
+  const own = certaintyWord(a.certaintyLevel, a.certaintyNote);
+  const rel = { relationType: BROADER_PARTITIVE, relationTo: r.relatesTo, label: r.relationLabel || m.label, when, citations: cits.length ? cits : undefined, certainty: own };
+  if (m.several) loss({ kind: 'region-match-several', value: r.relatesTo });
+  if (m.relationTo) {
+    rel.relationTo = m.relationTo;
+    rel.certainty = certaintyWord(m.certaintyLevel);
+    if (m.certaintyLevel && !rel.certainty) loss({ kind: 'certainty-level', value: m.certaintyLevel });
+    if (m.certaintyDiffers) loss({ kind: 'region-match-certainty', value: r.relatesTo });
+    // The containment's own certainty has no place beside the reviewer's.
+    if (own && own !== rel.certainty) loss({ kind: 'region-containment-certainty', value: a['@id'] || r.relatesTo });
+    if (m.score !== undefined) rel.whg_match_score = m.score;
+    else if (m.noScore) loss({ kind: 'region-match-no-score', value: m.noScore });
+  }
+  return clean(rel);
+}
+
 /**
  * PLATO place-centric record -> LPF Feature; `loss(l)` receives what LPF cannot hold. `withdrawn`
  * (attestation @id -> 'retracted' | 'superseded') is what the rest of the document withdraws or
  * replaces: LPF has no meta-attestations, so it shows the current state and leaves those out.
+ * `regions` (a RegionIndex) is what the document says of the regions its places are ContainedIn;
+ * without it, a ContainedIn is written as it stands.
  */
-export function recordToFeature(rec, idrs = [], loss = () => {}, withdrawn = null) {
+export function recordToFeature(rec, idrs = [], loss = () => {}, withdrawn = null, regions = null) {
   const f = { '@id': rec['@id'], type: 'Feature', properties: clean({ title: rec.label, ccodes: rec.ccodes?.length ? rec.ccodes : undefined }), names: [], types: [], relations: [], links: [], descriptions: [], depictions: [] };
   const geoms = [], fclasses = [], whens = [];
   dropKeys(rec, 'spatialEntity', KEEPS.spatialEntity, loss);
@@ -336,7 +441,7 @@ export function recordToFeature(rec, idrs = [], loss = () => {}, withdrawn = nul
       dropKeys(r, 'relation', KEEPS.relation, loss);
       targeted.push(r);
     }
-    for (const r of targeted) f.relations.push(clean({ relationType: r.relationType, relationTo: r.relatesTo, label: r.relationLabel, when, citations: cits.length ? cits : undefined, certainty: certaintyWord(a.certaintyLevel, a.certaintyNote) }));
+    for (const r of targeted) f.relations.push(isContainedIn(r.relationType) ? containment(r, a, when, cits, regions, withdrawn, loss) : clean({ relationType: r.relationType, relationTo: r.relatesTo, label: r.relationLabel, when, citations: cits.length ? cits : undefined, certainty: certaintyWord(a.certaintyLevel, a.certaintyNote) }));
     for (const p of list(a.properties)) {
       if (isFigure(p)) { loss({ kind: 'statistical-figure', value: p['@id'] || p.label || p.property }); continue; }
       qualificationLosses(p.qualification, [], loss);

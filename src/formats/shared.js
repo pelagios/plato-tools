@@ -180,6 +180,8 @@ export function identityBundleLosses(a, where, loss) {
 const plato = (iri) => (typeof iri === 'string' && iri.startsWith('plato:') ? PLATO + iri.slice(6) : iri);
 /** True when a relation type is plato:MemberOf, written in full or with the context's prefix. */
 export const isMemberOf = (rt) => plato(rt) === PLATO + 'MemberOf';
+/** True when a relation type is plato:ContainedIn, written in full or with the context's prefix. */
+export const isContainedIn = (rt) => plato(rt) === PLATO + 'ContainedIn';
 
 /**
  * Add to `into` (member -> Set of wholes) each plato:MemberOf that `rec`'s attestations state: the

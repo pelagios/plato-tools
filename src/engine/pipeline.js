@@ -12,7 +12,7 @@ import { Rdf2Json } from '../formats/rdf2json.js';
 import { tripleNT } from '../lib/ntriples.js';
 import { TripleStore, TableStore } from '../lib/store.js';
 import { PLATO, RDF } from '../lib/context.js';
-import { featureToRecord, recordToFeature, collectionHead, collectionToGazetteer } from '../formats/lpf.js';
+import { featureToRecord, recordToFeature, collectionHead, collectionToGazetteer, RegionIndex, regionLabel } from '../formats/lpf.js';
 import { list, collectWithdrawn, resolveWithdrawn, addWithdrawal, versionLosses, tableLosses, relationTypeLosses, collectMembership, membershipCycles } from '../formats/shared.js';
 import { CubeExport, CUBE_TEXT } from '../formats/cube.js';
 import { validateTables, checkTableRules, checkAboutRules, aboutToGazetteer, gazetteerToAbout, rowToAttestation, tableIds, recordToRows, settleRelatedPlaces, identityRow, ATTESTATION_SHEETS, tableSchemas, cellChecker, sourceLosses } from '../formats/tables.js';
@@ -582,6 +582,9 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   let writer = null;
   const idrsBySubject = new Map();
   const lpfTarget = target === 'lpf' || target === 'lpf-seq';
+  // What the document says of the regions its places are ContainedIn, for LPF's gvp:broaderPartitive
+  // (PLATO 1d2cf6e, #23): filled before any feature is written, below, and by the store's reading.
+  const regions = action === 'convert' && lpfTarget ? new RegionIndex() : null;
   // LPF and the tables have no meta-attestations, so they show the current state (see
   // src/formats/shared.js): what the document retracts or supersedes is left out, and reported.
   const currentOnly = action === 'convert' && (lpfTarget || target === 'tables');
@@ -596,15 +599,16 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     const again = input.format === 'plato-jsonl' ? platoJsonl(input.files[0], new Report()) : platoJson(input.files[0]);
     for await (const ev of again) {
       if (ev.type === 'idr') { if (lpfTarget) (idrsBySubject.get(ev.value.subject) || idrsBySubject.set(ev.value.subject, []).get(ev.value.subject)).push(ev.value); }
-      else if (ev.type === 'record') collectWithdrawn(ev.value?.attestations, withdrawn);
+      else if (ev.type === 'record') { collectWithdrawn(ev.value?.attestations, withdrawn); regions?.add(ev.value?.attestations, ev.value?.['@id'], regionLabel(ev.value)); }
       else if (ev.type === 'attestation') collectWithdrawn([ev.value], withdrawn);
     }
     withdrawn = resolved(withdrawn, rep);
+    if (regions) await regionCandidates(regions, options.candidates, rep);
   }
   if (action === 'convert' && options.cube && target !== 'ntriples') rep.warning('cube-not-ntriples', 'The Data Cube export applies to N-Triples output only, so it is not made here.');
   // RDF may hold a dataset or a candidate set, which are written by different writers: its writer is
   // made once the graph has been read and it is known which.
-  const writerFor = () => makeWriter(target, env, rep, { ...options, idrsBySubject, withdrawn }, typing, outputs, input);
+  const writerFor = () => makeWriter(target, env, rep, { ...options, idrsBySubject, withdrawn, regions }, typing, outputs, input);
   if (action === 'convert' && !isRdf && !candidateSet) writer = await writerFor();
   // The version check (src/engine/compare.js) reads the records itself, as a writer is given them:
   // every input then reaches it as place-centric records, whatever format it came in.
@@ -716,8 +720,10 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       if (first && seenNode.size < CAP) seenNode.add(nk);
       rep.loss('multiple-values', `A value that PLATO JSON holds once has several different values here; the first is kept and the others are left out (${i.key})`, first ? i.node : undefined);
     };
-    const r2j = new Rdf2Json({ context: res.context, core: res.core, profile: res.profiles['place-centric'], candidateProfile: res.profiles['candidate-set'], types: res.types }, store, {
-      withdrawn: currentOnly ? withdrawnInStore(store, rep) : null,
+    const r2jSchemas = { context: res.context, core: res.core, profile: res.profiles['place-centric'], candidateProfile: res.profiles['candidate-set'], types: res.types };
+    const storeWithdrawn = currentOnly ? withdrawnInStore(store, rep) : null;
+    const r2j = new Rdf2Json(r2jSchemas, store, {
+      withdrawn: storeWithdrawn,
       onLoss: (l) => rep.loss(l.kind, `${LOSS_TEXT[l.kind] || l.kind}`, l.predicate || l.value),
       onIssue: (i) => (i.kind === 'multiple-values' ? multipleValues(i) : rep.warning(i.kind, ISSUE_TEXT[i.kind] || i.kind, i.kind === 'figure-undeclared' ? i.key : i.node)),
     });
@@ -759,6 +765,16 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     for (const set of sets) notWritten(set);
     for (const c of looseCandidates(new Set(sets.flatMap((x) => [...objectsOf(store, x, PLATO + 'contains_candidate')])))) notWritten(c);
     if (action === 'convert' && isRdf) writer = await writerFor();
+    // The regions some place is ContainedIn that have a match (an attestation bundling identities, about
+    // the region), read once more, quietly (each is reported when it is written as a place), for LPF.
+    if (regions) {
+      for (const a of store.subjects(PLATO + 'has_relation_type', PLATO + 'ContainedIn')) for (const t of objectsOf(store, a, PLATO + 'relates_to')) regions.targets.add(t);
+      const matched = new Set();
+      for (const a of distinctSubjectsWith(store, PLATO + 'attests_identity')) for (const e of objectsOf(store, a, PLATO + 'attests_about')) if (regions.targets.has(e)) matched.add(e);
+      const quiet = new Rdf2Json(r2jSchemas, store, { withdrawn: storeWithdrawn });
+      for (const e of matched) { const rec = quiet.entity(e); regions.add(rec.attestations, e, regionLabel(rec)); }
+      await regionCandidates(regions, options.candidates, rep);
+    }
     const head = docId ? { $schema: 'https://w3id.org/plato/schemas/place-centric.schema.json', ...r2j.header(docId) } : { profile: 'place-centric', gazetteer: { title: input.files[0].name } };
     head.profile = 'place-centric';
     writer && writer.header(head);
@@ -796,6 +812,26 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   // cut short does: no outputs, and a host removes what was written.
   if (writer?.incomplete || short) return { report: rep.toJSON(), outputs: [], incomplete: true };
   return { report: rep.toJSON(), outputs };
+}
+/**
+ * Give `regions` the scores of the Candidates its matches were promoted from, read from the candidate
+ * sets given with the dataset (options.candidates: inputs detected as PLATO JSON or JSON Lines with the
+ * profile candidate-set). With none given, every score wanted is reported missing as it is met.
+ */
+async function regionCandidates(regions, sets, rep) {
+  const wanted = regions.prune();
+  if (!Array.isArray(sets) || !sets.length) return;
+  const found = new Map();
+  for (const set of sets) {
+    if (set?.profile !== 'candidate-set') { rep.warning('candidates-not-a-set', CANDIDATE_SET_TEXT['candidates-not-a-set'], set?.files?.[0]?.name); continue; }
+    if (!wanted.size) continue;
+    // The set's own faults are its own: it is read for its scores only, and checked on its own.
+    for await (const ev of candidateSetSource(set, new Report())) {
+      const c = ev.type === 'candidate' ? ev.value : null;
+      if (c && typeof c === 'object' && wanted.has(c['@id'])) found.set(c['@id'], { subject: c.subject, object: c.object, score: c.similarityScore });
+    }
+  }
+  regions.setCandidates(found);
 }
 /** Resolve a document's withdrawals, reporting any loop of them as an error in the data. */
 function resolved(edges, rep) {
@@ -868,6 +904,7 @@ function checkGraph(store, res, rep) {
 const CANDIDATE_SET_SCHEMA = 'https://w3id.org/plato/schemas/candidate-set.schema.json';
 export const CANDIDATE_SET_TEXT = {
   'candidate-set-target': 'A candidate set cannot be written as spreadsheet tables or Linked Places Format: neither has a place for suggestions made by software, which are claims by no one. Keep it as PLATO JSON or RDF.',
+  'candidates-not-a-set': 'A file given as a candidate set is not one (PLATO JSON or JSON Lines with the profile candidate-set), so no score is read from it.',
   'candidate-set-not-a-dataset': 'This is a candidate set, not a dataset: it holds matches suggested by software, and no places, attestations or identity relations, which are what this tool reads. A candidate set can be checked, and converted to PLATO JSON or RDF, on its own.',
 };
 /**
@@ -1064,7 +1101,7 @@ async function makeWriter(target, env, rep, options, typing, outputs, input) {
         if (ev.type === 'attestation') loss({ kind: 'attestation-centric', value: ev.value?.['@id'] || `item ${ev.n}` });
         if (ev.type !== 'record') return;
         placed.add(ev.value['@id']);
-        const f = recordToFeature(ev.value, options.idrsBySubject.get(ev.value['@id']) || [], loss, options.withdrawn);
+        const f = recordToFeature(ev.value, options.idrsBySubject.get(ev.value['@id']) || [], loss, options.withdrawn, options.regions);
         sink.write(target === 'lpf-seq' ? JSON.stringify(f) + '\n' : (first ? '' : ',') + JSON.stringify(f)); first = false;
       },
       async close() {
