@@ -142,6 +142,17 @@ test('a date cell is an ISO date, and a date with a time keeps its time, in any 
   assert.equal(sheetCellText(new Date(Date.UTC(1990, 4, 6))), '1990-05-06');
   assert.equal(sheetCellText(true), 'TRUE');
 });
+test('a sheet of one\'s own reads its numbers and times as the tables reader does: no exponent, a time of day as hh:mm:ss', async () => {
+  const rows = [['name', 'tiny', 'huge', 'opens'], ['Oxford', 1e-7, 1e21, { t: 'n', v: 0.5, z: 'hh:mm:ss' }]];
+  for (const name of ['forms.xlsx', 'forms.ods']) {
+    const { sample } = await columnsOf(await detect([workbookFile([['Places', rows]], name)]));
+    assert.deepEqual([sample[0].tiny, sample[0].huge, sample[0].opens], ['0.0000001', '1000000000000000000000', '12:00:00'], name);
+  }
+  // The control: read as before, by the value alone, the same cells were 1e-7, 1e+21 and a date in 1899.
+  const ws = XLSX.read(workbookBytes([['Places', rows]]), { type: 'array', cellDates: true, UTC: true }).Sheets.Places;
+  assert.deepEqual([String(ws.B2.v), String(ws.C2.v), ws.D2.v.getUTCFullYear()], ['1e-7', '1e+21', 1899]);
+  assert.equal(sheetCellText(1e-7), '0.0000001');
+});
 test('a hidden sheet of an xlsx workbook is reported, and not read unless chosen', async () => {
   const f = workbookFile([['Old', OTHER], ['Places', PLACES]], 'hidden.xlsx', { hidden: ['Old'] });
   const input = await detect([f]);

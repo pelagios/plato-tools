@@ -23,6 +23,8 @@ import { jsonDocument, DataError, jsonFaultWords, workbookSheets, xlsxLib } from
 import { csvRecords, textChunks } from '../../formats/csv.js';
 import { LOSS_TEXT } from '../report.js';
 import { tableIds } from '../../formats/tables.js';
+// The tables reader's own forms for a workbook's numbers and dates, so that a sheet reads alike either way.
+import { numberText, dateText } from '../pipeline.js';
 import { resolveColumns, applyColumns, GENERIC_KINDS, FEATURE_ID, FIELDS, OTHER } from './columns.js';
 
 // The CSV reader is shared with the spreadsheet tables (src/formats/csv.js); exported here as before.
@@ -87,16 +89,21 @@ const sheetMissing = (name, sheets) => `The workbook has no sheet "${name}"; its
 const WORKBOOK_WHOLE = 50 * 2 ** 20;   // as the tables reader warns (pipeline.js)
 // The text of a spreadsheet's error codes, for a cell that keeps the code and not its text.
 const ERROR_TEXT = { 0x00: '#NULL!', 0x07: '#DIV/0!', 0x0F: '#VALUE!', 0x17: '#REF!', 0x1D: '#NAME?', 0x24: '#NUM!', 0x2A: '#N/A', 0x2B: '#GETTING_DATA' };
-/** A cell's value as text: a date YYYY-MM-DD at midnight, else YYYY-MM-DDTHH:MM:SS (the time as the workbook gives it, in no time zone); TRUE or FALSE; a number in full. */
-export function sheetCellText(v) {
+/**
+ * A cell's value as text, as the tables reader writes it (pipeline.js, numberText and dateText): a
+ * date YYYY-MM-DD at midnight, else YYYY-MM-DDThh:mm:ss (the time as the workbook gives it, in no
+ * time zone), or hh:mm:ss where the cell's number format `z` shows no day nor year; TRUE or FALSE; a
+ * number in full, never as an exponent (1e-7 is 0.0000001).
+ */
+export function sheetCellText(v, z) {
   if (v === undefined || v === null) return '';
   if (v instanceof Date) {
     if (Number.isNaN(v.getTime())) return '';
     // Read with UTC: true, the date's UTC fields are the workbook's own: toISOString, never the local time.
-    const iso = v.toISOString();
-    return iso.endsWith('T00:00:00.000Z') ? iso.slice(0, 10) : iso.replace(/\.000Z$|Z$/, '');
+    return dateText(v, z);
   }
   if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
+  if (typeof v === 'number') return numberText(v);
   return String(v);
 }
 async function openSheet(file, name) {
@@ -114,7 +121,7 @@ async function openSheet(file, name) {
     // SheetJS would make a stub of every repeated empty cell (a styled row repeated to the sheet's end).
     const stubs = !file.name.toLowerCase().endsWith('.ods');
     let ws;
-    try { ws = XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: 'array', cellDates: true, UTC: true, sheets: [name], dense: true, sheetStubs: stubs }).Sheets[name]; }
+    try { ws = XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: 'array', cellDates: true, cellNF: true, UTC: true, sheets: [name], dense: true, sheetStubs: stubs }).Sheets[name]; }
     catch (e) { throw damaged(e); }
     if (!ws || !ws['!ref']) return { rows: [], top: 0, left: 0, formulas: [], errors: new Map() };
     const { s } = XLSX.utils.decode_range(ws['!ref']);
@@ -130,7 +137,11 @@ async function openSheet(file, name) {
       if (!errors.has(i)) errors.set(i, []);
       errors.get(i).push({ j: c - s.c, ref: XLSX.utils.encode_cell({ r, c }), text: typeof cell.w === 'string' && cell.w ? cell.w : ERROR_TEXT[cell.v] || `error ${cell.v}` });
     }));
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, UTC: true, defval: '', blankrows: true }).map((cells) => cells.map(sheetCellText));
+    // Each number and date as its text, with the cell's number format (a time of day shows no day nor year).
+    for (const cells of ws['!data'] || []) for (const cell of cells || []) {
+      if (cell && (cell.t === 'n' || cell.t === 'd') && (typeof cell.v === 'number' || cell.v instanceof Date)) cell.v = sheetCellText(cell.v, cell.z);
+    }
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, UTC: true, defval: '', blankrows: true }).map((cells) => cells.map((v) => sheetCellText(v)));
     return { rows, top: s.r, left: s.c, formulas, errors };
   };
   const { rows, top, left, formulas, errors } = await read();
