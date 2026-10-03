@@ -4,7 +4,7 @@
 // window.__plato for automated tests; nothing else reads it.
 import { fmtBytes, formatName, progressText, summary, groups, draftNote, explainedLines } from './engine/words.js';
 import { COLUMN_CHOICES, COLUMN_WORDS, columnWarnings, columnProblem, READING_WORDS, PASTE_WORDS } from './engine/words.js';
-import { mappingToSave } from './engine/hermes/columns.js';
+import { mappingToSave, levelChoices } from './engine/hermes/columns.js';
 import { pastedListFile } from './engine/hermes/pasted.js';
 import { review as W, POOL_BUSY, POOL_STUCK, PREVIEW_WORDS } from './engine/words.js';
 const REVIEW_WORDS = W;   // the review's words, where W names the words for the columns
@@ -364,8 +364,7 @@ const usedLevels = () => {
 function extraControls(h, i) {
   const W = COLUMN_WORDS, c = columns;
   if (c.mapping[h] === 'within' && Object.hasOwn(c.levels, h)) {
-    const top = Math.max(c.levels[h], usedLevels().length);
-    const options = Array.from({ length: top }, (_, k) => k + 1).map((l) => `<option value="${l}"${l === c.levels[h] ? ' selected' : ''}>${l}</option>`).join('');
+    const options = levelChoices(c.levels[h], usedLevels()).map((l) => `<option value="${l}"${l === c.levels[h] ? ' selected' : ''}>${l}</option>`).join('');
     return ` <label class="column-level" data-tip="${escapeHtml(W.levelTip)}">${escapeHtml(W.level)} <select id="column-level-${i}" data-level-column="${i}" aria-label="${escapeHtml(W.levelLabel(h))}">${options}</select></label>`;
   }
   if (c.mapping[h] === 'split' && Object.hasOwn(c.splits, h)) {

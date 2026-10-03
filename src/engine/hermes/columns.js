@@ -400,6 +400,15 @@ function splitProblem(given) {
 }
 
 /**
+ * The levels the page's selector offers a "within" column at `level`, given every level in use
+ * (`used`, a split's included): 1 to the highest in use, or one for each, whichever is more, so a
+ * gapped mapping ({1, 3, 6}) reaches its highest (6) from any column.
+ */
+export function levelChoices(level, used = []) {
+  const top = Math.max(level, ...used, used.length);
+  return Array.from({ length: top }, (_, k) => k + 1);
+}
+/**
  * A mapping and its patterns (resolveColumns) as the one JSON object to save and give back (with
  * --columns, or on the page): each column's field, or { field: 'address', pattern } for a column
  * whose addresses are made through a pattern.

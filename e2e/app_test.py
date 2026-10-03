@@ -343,6 +343,26 @@ def within_checks(page, tmp):
           r.get('phase') == 'done' and contained == ['England (Surrey, Rotherhithe)'] and no_label and region_labels == ['England (Surrey, Rotherhithe)', 'Rotherhithe', 'Surrey (Rotherhithe)']
           and '"within"' not in text and 'https://w3id.org/plato#ContainedIn' in text, {'phase': r.get('phase'), 'contained': contained, 'no_label': no_label, 'regions': region_labels})
 
+    # A loaded mapping with gapped levels, {1, 3, 6}: every level selector reaches the highest, 6.
+    LEVEL_OPTIONS = """() => Object.fromEntries([...document.querySelectorAll('#columns select[data-level-column]')].map((s) => [s.getAttribute('aria-label'), [...s.options].map((o) => o.value)]))"""
+    lab = lambda c: f'The level of the region in the column “{c}”: 1 is the widest'
+    gapped = tmp / 'gapped-levels.json'
+    gapped.write_text(json.dumps({'id': 'id', 'Name': 'name', 'Parish': {'field': 'within', 'level': 6}, 'County': {'field': 'within', 'level': 3}, 'Country': {'field': 'within', 'level': 1}}), encoding='utf-8')
+    s = reading_case(page, regions, columns=True)
+    opts0 = page.evaluate(LEVEL_OPTIONS) if s.get('columns') else {}
+    try:
+        page.set_input_files('#columns-file', [str(gapped)])
+        stg = wait_state(page, lambda s: (s.get('columns') or {}).get('levels', {}).get('Parish') == 6, 10, 'gapped levels').get('columns') or {}
+        opts1 = page.evaluate(LEVEL_OPTIONS)
+        page.get_by_label(lab('Country'), exact=True).select_option('6'); chose6 = True
+        st6 = wait_state(page, lambda s: (s.get('columns') or {}).get('levels', {}).get('Country') == 6, 10, 'level 6').get('columns') or {}
+    except Exception as e: stg = st6 = {}; opts1 = {}; chose6 = str(e).split('\n')[0][:200]
+    check('column table: with a loaded mapping of gapped levels (1, 3, 6), each level selector reaches 6, and choosing 6 for the country swaps it with the parish; guessed levels 1-3 offer only 1-3 (control)',
+          opts0.get(lab('Country')) == ['1', '2', '3']
+          and stg.get('levels') == {'Country': 1, 'County': 3, 'Parish': 6} and opts1.get(lab('Country')) == ['1', '2', '3', '4', '5', '6'] and opts1.get(lab('County')) == ['1', '2', '3', '4', '5', '6']
+          and chose6 is True and st6.get('levels') == {'Country': 6, 'County': 3, 'Parish': 1},
+          {'guessed': opts0, 'loaded': stg.get('levels'), 'options': opts1, 'chose': chose6, 'after': st6.get('levels')})
+
     # A column of several regions in one cell: no split controls until it is chosen; then a separator,
     # levels guessed from the examples, and "the first part is the place's name", unticked.
     places = tmp / 'split.csv'

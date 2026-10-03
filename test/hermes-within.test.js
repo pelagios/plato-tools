@@ -16,7 +16,7 @@ import { addPlatoFormats, strictFormatLogger } from '../src/lib/formats.js';
 import { detect } from '../src/engine/input.js';
 import { Report, LOSS_TEXT } from '../src/engine/report.js';
 import { genericSource, mappingOf, regionId, columnsOf } from '../src/engine/hermes/generic.js';
-import { guessColumns, resolveColumns, mappingToSave, splitCell, expandSplits, splitRow, applyColumns, GENERIC_KINDS } from '../src/engine/hermes/columns.js';
+import { guessColumns, resolveColumns, mappingToSave, levelChoices, splitCell, expandSplits, splitRow, applyColumns, GENERIC_KINDS } from '../src/engine/hermes/columns.js';
 import { withinOf, withinChains, withinLevels, containerKey, withinNote, regionIndex, CONTAINED_IN } from '../src/engine/hermes/within.js';
 import { PLATO_REPO } from './paths.js';
 import { pastedListCsv, pastedListFile, PASTED_FILE_NAME } from '../src/engine/hermes/pasted.js';
@@ -442,6 +442,12 @@ test('command line: --split splits a column into levels, prints it in the mappin
     // Control: without --split, the column is a note.
     assert.ok(cli('check', join(d, 'places.csv')).out.includes('{"Place":"note"}'));
   } finally { rmSync(d, { recursive: true, force: true }); }
+});
+test('the page\'s level selector reaches the highest level in use, so a gapped mapping\'s 6 is reachable from level 1', () => {
+  assert.deepEqual(levelChoices(1, [1, 3, 6]), [1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(levelChoices(3, [1, 3, 6]), [1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(levelChoices(1, [1, 2, 3]), [1, 2, 3]);   // control: levels with no gap offer one each
+  assert.deepEqual(levelChoices(2, [2, 1]), [1, 2]);
 });
 test('command line: --split on a column whose sampled cells are all empty prints a mapping that --columns takes back (no "levels": [])', () => {
   const d = mkdtempSync(join(tmpdir(), 'plato-tools-within-'));
