@@ -3143,6 +3143,11 @@ def chora_checks(pw, url, tmp):
         link = page.query_selector('#back-to-workflow')
         href = link.evaluate('a => a.href') if link else None; shown = link.is_visible() if link else False
         note = page.is_visible('#workflow') and 'workflow' in page.inner_text('#workflow')
+        s = cstate(page)
+        # While it hashed, the save button waited and the page said why; afterwards, both were put back.
+        busy = s.get('handingBack')
+        restored = page.is_enabled('#save-result button.primary') and 'Handing the file back' not in page.inner_text('#save-result')
+        published = (s.get('handback') or {}).get('files') == want
         ok_rec = (rec is not None and sorted(rec) == ['at', 'files', 'handback', 'workflow'] and rec['handback'] == 1 and rec['workflow'] == WF
                   and rec['files'] == want and 0 <= now - rec['at'] < 120000 and len(body) > 0)
         # The way back: the main page, with the workflow, and the record written again (fresh) on the way.
@@ -3151,8 +3156,11 @@ def chora_checks(pw, url, tmp):
         went = soon(page, 'u => location.href === u && !!window.__plato', 30, base + '#workflow=' + WF)
         after = page.evaluate(HANDBACK, 'get') if went else None
         return (ok_rec and note and shown and href == base + '#workflow=' + WF and went and page.url == base + '#workflow=' + WF
-                and after is not None and after['files'] == want and after['at'] >= at0), {
-                    'record': rec, 'expected files': want, 'link': href, 'note': note, 'went to': page.url, 'after the click': after}
+                and after is not None and after['files'] == want and after['at'] > at0
+                and busy == {'disabled': True, 'said': 'Handing the file back to the workflow…'} and restored and published), {
+                    'record': rec, 'expected files': want, 'link': href, 'note': note, 'went to': page.url, 'after the click': after,
+                    'rewritten on the click by (ms)': (after['at'] - at0) if after and at0 is not None else None,
+                    'while handing back': busy, 'restored after': restored, 'state.handback files as expected': published}
     attempt('Chora, in a workflow: a file saved is handed back by reference (name, size and SHA-256 of the file downloaded), and "Back to the workflow" goes to the main page with the id', handback_given)
     def handback_control():
         # The same save without #workflow: nothing written, nothing offered (the reader shown able to see a record, in this page, after).
@@ -3161,7 +3169,7 @@ def chora_checks(pw, url, tmp):
         page.evaluate(HANDBACK, 'put'); seen = page.evaluate(HANDBACK, 'get'); page.evaluate(HANDBACK, 'delete')
         s = cstate(page)
         return (out.stat().st_size > 0 and rec is None and link is None and not note and seen == {'probe': True}
-                and s.get('workflow') is None and s.get('handback') is None), {'record': rec, 'link': bool(link), 'note': note, 'reader sees a record put': seen, 'state': {k: s.get(k) for k in ('workflow', 'handback')}}
+                and s.get('workflow') is None and s.get('handback') is None and s.get('handingBack') is None), {'record': rec, 'link': bool(link), 'note': note, 'reader sees a record put': seen, 'state': {k: s.get(k) for k in ('workflow', 'handback', 'handingBack')}}
     attempt('Chora, not in a workflow (the control): the same save writes no hand-back and offers no way back', handback_control)
     def handback_bad_id():
         # A workflow id that is not one (markup, here) is neither used nor put in the page; the presence: the warning line is shown.
