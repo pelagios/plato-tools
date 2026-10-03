@@ -167,13 +167,22 @@ export function stop(state, stepId, problem) {
   return out;
 }
 
-/** An execution failure: a fault in the tools, not in the data. The workflow is kept, to try again. */
-export function fail(state, stepId, error) {
+/**
+ * An execution failure: a fault in the tools, not in the data. The workflow is kept, to try again.
+ * What the step had done before it failed (`partial`, references of the types it gives: a lookup's
+ * answers received before the service refused) is kept as cancel() keeps it, only if its operation
+ * keeps partial results, so that the step done again begins from it.
+ */
+export function fail(state, stepId, error, partial) {
   const out = clone(state);
   const s = current(out, stepId, ['running', 'waiting'], 'failed');
   s.state = 'failed';
   s.error = String(error && (error.message || error) || 'The step failed.').split('\n')[0];
   delete s.why;
+  if (partial && Object.keys(partial).length) {
+    if (OPERATIONS[s.op].cancel === 'keeps-partial') s.partial = checkOutputs(s, partial);
+    else s.discarded = Object.values(partial).flat().filter(isRef).map((r) => r.name);
+  }
   out.current = null; out.status = 'failed';
   return out;
 }
@@ -209,9 +218,9 @@ export function progress(state, stepId, counts) {
 /**
  * Do a step again: it, and every step that took its outputs (and so on, down), go back to pending,
  * as WHG resets the levels below a changed parent; so does a step that stopped, failed or was
- * cancelled, which has to be done again in any case. What a cancelled step kept is kept for the page
- * to begin from only when that step is the one done again: below it, it was made from what is now
- * reset. Not while a step is running, nor while another is waiting.
+ * cancelled, which has to be done again in any case. What a cancelled or failed step kept is kept for
+ * the step to begin from only when that step is the one done again: below it, it was made from what
+ * is now reset. Not while a step is running, nor while another is waiting.
  */
 export function invalidate(state, stepId) {
   const out = clone(state);
@@ -226,7 +235,7 @@ export function invalidate(state, stepId) {
   }
   for (const x of out.steps) {
     if (!reset.has(x.id) || x.state === 'skipped') continue;
-    const partial = x.id === stepId && x.state === 'cancelled' ? x.partial : undefined;
+    const partial = x.id === stepId && (x.state === 'cancelled' || x.state === 'failed') ? x.partial : undefined;
     clean(x); delete x.outputs;
     if (partial) x.partial = partial;
     x.state = 'pending';

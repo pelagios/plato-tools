@@ -330,3 +330,58 @@ test('a file that is not the one the record names is refused before the engine r
   assert.equal(state.status, 'stopped');
   assert.match(state.steps[0].problem.words, /^antonine\.json: not the file the workflow recorded \(the size or SHA-256 differs\), so nothing was run/);
 });
+
+// ---- Phase 2: a lookup the service stopped part-way keeps its answers ------------------------------
+
+test("a lookup stopped by the service part-way keeps the answers received, and done again asks only for the rest", async () => {
+  const { GazetteerError } = await import('../src/engine/gazetteer/index.js');
+  const { readWork } = await import('../src/engine/krisis/work.js');
+  const input = antonine();
+  const files = await refsOf([input], 'files');
+  // Every place asked for, as the user may choose: done again, it still asks only for the rest.
+  const one = recipe([{ id: 'lookup', op: 'lookup', from: { subjects: '$files' }, options: { places: 'all' } }]);
+  // A gazetteer that answers each query with one candidate of its name, until its allowance runs out.
+  let n = 0;
+  const gazetteer = (allowance = Infinity) => {
+    const asked = [];
+    return { asked, batchSize: 1, reconcile: async (qs) => {
+      if (asked.length >= allowance) throw new GazetteerError('The daily allowance is spent (401).', { status: 401, kind: 'quota' });
+      asked.push(...qs.map((q) => q.query));
+      return Object.assign(qs.map((q, i) => Object.assign([{ id: `place:t:${++n}`, iri: `https://w3id.org/whg/id/place:t:${n}`, name: q.query }], { key: q.key })), { attribution: null });
+    } };
+  };
+  // The presence: unhindered, it asks for every place, once.
+  const all = memoryHost([input]); all.lookup = gazetteer();
+  const whole = await drive(start(one, {}, { files }), all);
+  assert.equal(whole.state.status, 'completed', JSON.stringify(whole.state.steps));
+  const every = all.lookup.asked;
+  assert.ok(every.length >= 4, every);
+  // The service refuses after two answers: the step fails, keeping a work file with the two answers.
+  const host = memoryHost([input]); host.lookup = gazetteer(2);
+  const failed = await drive(start(one, {}, { files }), host);
+  const step = failed.state.steps[0];
+  assert.deepEqual([failed.state.status, step.state], ['failed', 'failed']);
+  assert.match(step.error, /stopped part-way: The daily allowance is spent/);
+  assert.equal(step.partial.work.length, 1);
+  assert.equal(step.partial.work[0].type, 'work.krisis');
+  const kept = readWork(await host.store.get(step.partial.work[0].name).text());
+  assert.deepEqual(kept.candidates.map((c) => c.other.label), every.slice(0, 2));
+  // It survives the record.
+  assert.deepEqual(deserialise(serialise(failed.state)), failed.state);
+  // Done again, with the allowance back: only the places not yet answered are asked for.
+  host.lookup = gazetteer();
+  const again = runner.invalidate(failed.state, 'lookup');
+  assert.deepEqual(again.steps[0].partial, step.partial);
+  const done = await drive(again, host);
+  assert.equal(done.state.status, 'completed', JSON.stringify(done.state.steps));
+  assert.deepEqual(host.lookup.asked, every.slice(2));
+  const final = readWork(await host.store.get(done.state.steps[0].outputs.work[0].name).text());
+  assert.deepEqual(final.candidates.map((c) => c.other.label).sort(), [...every].sort());
+  assert.equal(done.state.steps[0].partial, undefined);
+  // A permission refused is not a failure of the service: it waits, and nothing is kept.
+  const perm = memoryHost([input]);
+  perm.lookup = { batchSize: 1, reconcile: async () => { throw Object.assign(new Error('not allowed'), { name: 'PermissionError', kind: 'undecided' }); } };
+  const waited = await drive(start(one, {}, { files }), perm);
+  assert.equal(waited.state.status, 'waiting');
+  assert.equal(waited.state.steps[0].partial, undefined);
+});

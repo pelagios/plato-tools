@@ -5,6 +5,8 @@
 //
 // An adapter is async ({ inputs, options, host, signal }) => { outputs, report, problem?, partial? }:
 //   inputs   the step's hand-offs, references (runner.inputsOf);
+//   partial  what the step kept when it was last cancelled or failed, to begin from (its operation
+//            keeps partial results), or undefined;
 //   host     what the front end provides, the page's worker or Node:
 //              open(ref)   -> the File the reference names (the adapter checks it is that file);
 //              env()       -> { env, finish(failed) }: one run's environment, as NodeHost.env gives
@@ -13,6 +15,8 @@
 //              lookup      the gazetteer lookup (createLookup), made on the page thread through the
 //                          permissions module: only the lookup operation needs it;
 //   outputs  references to what the step wrote, of the types its operation gives.
+// An adapter that fails after doing part of its work throws an error with `partial` (references, of
+// the types its operation gives), which the runner keeps only if the operation keeps partial results.
 import { detect, readable, DataError } from '../input.js';
 import { run } from '../pipeline.js';
 import { compare } from '../compare.js';
@@ -120,24 +124,28 @@ export const ADAPTERS = {
   // The lookup is made on the page thread, through the permissions module (host.lookup); the places
   // are gathered by the engine, as the worker's 'places' command gathers them. Its work file is written
   // however far it got: queries not answered are left pending in it, as on the page, and a lookup
-  // cancelled keeps what it had (its operation keeps partial results).
-  async lookup({ inputs, options, host, signal }) {
+  // cancelled keeps what it had (its operation keeps partial results). So does a lookup the service
+  // stopped part-way (its quota spent, or a refusal): the answers received are kept as the step's
+  // partial result, and the lookup done again begins from them and asks only for the places not yet
+  // answered, so that no query is spent twice.
+  async lookup({ inputs, options, host, signal, partial }) {
     if (!host.lookup) throw new Error('No gazetteer lookup was given: the lookup is made on the page thread, through the permissions module.');
     const subjects = await inputOf(inputs.subjects, host, 'dataset');
-    const work = inputs.work ? readWork(await (await filesFor(inputs.work, host))[0].text()) : null;
+    const from = partial?.work || inputs.work;
+    const work = from ? readWork(await (await filesFor(from, host))[0].text()) : null;
     const g = await engine(host, null, (env) => gather({ subjects, options: {} }, env));
     if (g.problem) return g;
-    const r = await runLookup({ lookup: host.lookup, work, subjects: g.result.subjects, places: g.result.places, options, signal });
+    const r = await runLookup({ lookup: host.lookup, work, subjects: g.result.subjects, places: g.result.places, options: partial?.work ? { ...options, places: 'pending' } : options, signal });
     // Stopped short of the end other than by the user: a permission to decide is waiting for the
     // user; anything else (the service refusing, failing, or answering what cannot be right) is a fault.
     const st = r.stopped;
     if (st && st.kind === 'permission') throw Object.assign(new Error(`The gazetteer was not asked: ${st.refused === 'never' ? 'it is set to Never' : 'it is not allowed yet'} in the Permissions panel.`), { name: 'PermissionError', kind: st.refused });
-    if (st && st.kind !== 'stopped') throw new Error(`The lookup stopped part-way: ${st.message || `the gazetteer's answers could not be used (${st.kind})`}.`);
     const w = await engine(host, 'work.krisis', async (env) => {
       const o = await env.output(subjects.files[0].name.replace(/\.[^.]+$/, '') + '.krisis.json');
       o.write(serialiseWork(r.work));
       return { report: { counts: {}, errors: 0, items: [] }, outputs: [await o.close()] };
     });
+    if (st && st.kind !== 'stopped') throw Object.assign(new Error(`The lookup stopped part-way: ${st.message || `the gazetteer's answers could not be used (${st.kind})`}.`), w.outputs ? { partial: { work: w.outputs } } : {});
     return { report: g.report, outputs: { work: w.outputs } };
   },
 };
@@ -166,13 +174,13 @@ export async function runStep(state, host, { signal, adapters = ADAPTERS } = {})
   if (!adapter) return { state: runner.fail(state, id, `${OPERATIONS[step.op].title} has no adapter: it is not run by the tools.`), report: null };
   let r;
   try {
-    r = await adapter({ inputs: runner.inputsOf(state, id), options: step.options, host, signal });
+    r = await adapter({ inputs: runner.inputsOf(state, id), options: step.options, host, signal, partial: step.partial });
   } catch (e) {
     if (signal?.aborted) return { state: runner.cancel(state, id), report: null };
     const kind = stoppingKind(e);
     if (kind === 'waiting') return { state: runner.waiting(state, id, e.message), report: null };
     if (kind === 'stopped') return { state: runner.stop(state, id, { words: e.message }), report: null };
-    return { state: runner.fail(state, id, e), report: null };
+    return { state: runner.fail(state, id, e, e?.partial), report: null };
   }
   if (signal?.aborted) return { state: runner.cancel(state, id, r.outputs), report: r.report };
   if (r.problem) return { state: runner.stop(state, id, r.problem), report: r.report };

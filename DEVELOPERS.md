@@ -1522,7 +1522,9 @@ off it is kept in sessionStorage for the tab alone, and what IndexedDB held is l
 (same version, the same steps with the same operations, inputs and options) continues and says so;
 anything else stays at its last finished step and offers `restartRemaining()` (the finished steps the
 new recipe begins with are kept) or to leave it. `checkChosen()` refuses files that are not the ones
-the record names, through `filesDiffer`. `exportRecord()` and `importRecord()` write and read the
+the record names, through `filesDiffer`. A lookup the gazetteer stopped part-way (its quota spent, or a refusal; not a
+permission, which waits) fails keeping the answers received as its declared partial result, a work
+file; done again, it begins from that file and asks only for the places not yet answered. `exportRecord()` and `importRecord()` write and read the
 downloadable `.workflow.json`. Tested in `test/methodos-record.test.js`, and in the browser by
 `e2e/app_test.py` through a test hook (`e2e/methodos-hook.js`) the harness bundles and serves itself,
 until the page has a Methodos panel (phase 3).
