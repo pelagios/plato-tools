@@ -3107,6 +3107,72 @@ def chora_checks(pw, url, tmp):
         return offered and left is None and not stale and after is None, {'offered': offered, 'left in the browser': left, 'stale offered': stale, 'stale left': after}
     attempt('Chora: files handed over from the main page are let go by the browser as soon as they are offered, and an old hand-off is not offered', handoff_let_go)
 
+    # The way back into a Methodos workflow (src/chora/handback.js): opened as chora.html#workflow=<id>,
+    # a file saved is handed back by reference, in the hand-off's store, under 'chora-handback'.
+    HANDBACK = '''(op) => new Promise((resolve, reject) => { const q = indexedDB.open('plato-tools-chora', 1);
+      q.onupgradeneeded = () => q.result.createObjectStore('kv');
+      q.onsuccess = () => { const db = q.result, t = db.transaction('kv', op === 'get' ? 'readonly' : 'readwrite'), s = t.objectStore('kv');
+        const r = op === 'get' ? s.get('chora-handback') : op === 'delete' ? s.delete('chora-handback') : s.put({ probe: true }, 'chora-handback');
+        t.oncomplete = () => { db.close(); resolve(op === 'get' ? (r.result === undefined ? null : JSON.parse(JSON.stringify(r.result))) : true); };
+        t.onerror = () => reject(t.error); };
+      q.onerror = () => reject(q.error); })'''
+    WF = 'wf-e2e-7Kq2_x'
+    def saved_in(hash_, name):
+        """Chora opened at chora.html<hash_> afresh, a drawing saved and its file downloaded: the file, and the page's account."""
+        f = fixture(ant, name, tmp)
+        page.goto('about:blank')                                # a navigation, not a change of fragment: the page reads its address afresh
+        page.bring_to_front(); page.goto(NOTOOLS if PROVE else base + 'chora.html' + hash_)
+        until(page, 'window.__chora && window.__chora.phase === "ready" && window.__chora.mapReadyCount >= 1')
+        page.evaluate(HANDBACK, 'delete')                       # this check's own state: no hand-back from before
+        page.set_input_files('#picker', [str(f)]); until(page, '["loaded", "error", "unrecognised"].includes(window.__chora.phase)')
+        chora_pick(page, 'londinium')
+        page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
+        x, y = map_centre(page); draw(page, 'point', [(x + 60, y + 30)]); page.click('#draw-tools button[data-mode="static"]')
+        until(page, '() => window.__chora.pendingCount === 1', 10)
+        page.click('#save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+        if not (cstate(page)['lastSave'] or {}).get('passed'): raise RuntimeError('the save did not pass')
+        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#save-result button.primary')
+        out = tmp / ('downloaded-' + name); d.value.save_as(out)
+        # The handler hands back (or not) before it offers to let the drawings go: that offer is the point both ways.
+        until(page, '() => !!document.querySelector("#save-result button[data-clear]")', 20)
+        return out, d.value.suggested_filename
+    def handback_given():
+        out, named = saved_in('#workflow=' + WF, 'antonine-handback.json')
+        body = out.read_bytes(); rec = page.evaluate(HANDBACK, 'get'); now = page.evaluate('() => Date.now()')
+        want = [{'type': 'dataset', 'name': named, 'size': len(body), 'sha256': hashlib.sha256(body).hexdigest()}]
+        link = page.query_selector('#back-to-workflow')
+        href = link.evaluate('a => a.href') if link else None; shown = link.is_visible() if link else False
+        note = page.is_visible('#workflow') and 'workflow' in page.inner_text('#workflow')
+        ok_rec = (rec is not None and sorted(rec) == ['at', 'files', 'handback', 'workflow'] and rec['handback'] == 1 and rec['workflow'] == WF
+                  and rec['files'] == want and 0 <= now - rec['at'] < 120000 and len(body) > 0)
+        # The way back: the main page, with the workflow, and the record written again (fresh) on the way.
+        at0 = rec['at'] if rec else None
+        if shown: page.click('#back-to-workflow')
+        went = soon(page, 'u => location.href === u && !!window.__plato', 30, base + '#workflow=' + WF)
+        after = page.evaluate(HANDBACK, 'get') if went else None
+        return (ok_rec and note and shown and href == base + '#workflow=' + WF and went and page.url == base + '#workflow=' + WF
+                and after is not None and after['files'] == want and after['at'] >= at0), {
+                    'record': rec, 'expected files': want, 'link': href, 'note': note, 'went to': page.url, 'after the click': after}
+    attempt('Chora, in a workflow: a file saved is handed back by reference (name, size and SHA-256 of the file downloaded), and "Back to the workflow" goes to the main page with the id', handback_given)
+    def handback_control():
+        # The same save without #workflow: nothing written, nothing offered (the reader shown able to see a record, in this page, after).
+        out, named = saved_in('', 'antonine-handback-none.json')
+        rec = page.evaluate(HANDBACK, 'get'); link = page.query_selector('#back-to-workflow'); note = page.is_visible('#workflow')
+        page.evaluate(HANDBACK, 'put'); seen = page.evaluate(HANDBACK, 'get'); page.evaluate(HANDBACK, 'delete')
+        s = cstate(page)
+        return (out.stat().st_size > 0 and rec is None and link is None and not note and seen == {'probe': True}
+                and s.get('workflow') is None and s.get('handback') is None), {'record': rec, 'link': bool(link), 'note': note, 'reader sees a record put': seen, 'state': {k: s.get(k) for k in ('workflow', 'handback')}}
+    attempt('Chora, not in a workflow (the control): the same save writes no hand-back and offers no way back', handback_control)
+    def handback_bad_id():
+        # A workflow id that is not one (markup, here) is neither used nor put in the page; the presence: the warning line is shown.
+        page.goto('about:blank'); page.bring_to_front()
+        page.goto(NOTOOLS if PROVE else base + 'chora.html#workflow=%3Cimg%20src%3Dx%20onerror%3D%22window.__pwned%3D1%22%3E')
+        until(page, 'window.__chora && window.__chora.phase === "ready"')
+        s = cstate(page); shown = page.is_visible('#workflow'); text = page.inner_text('#workflow') if shown else ''
+        imgs = page.eval_on_selector_all('#workflow img, #save-result img', 'xs => xs.length'); pwned = page.evaluate('() => window.__pwned === 1')
+        return (shown and 'not in a form' in text and s.get('workflowRefused') is True and s.get('workflow') is None and imgs == 0 and not pwned), {'state': {k: s.get(k) for k in ('workflow', 'workflowRefused')}, 'said': text, 'img': imgs, 'ran': pwned}
+    attempt('Chora: an address whose workflow is not an id is refused in words, and nothing of it reaches the page', handback_bad_id)
+
     def two_tabs():
         page.goto('about:blank')                                # no other Chora tab: two of those share one pool
         a = main_page(ctx, base); b = ctx.new_page()
