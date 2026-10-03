@@ -221,7 +221,9 @@ node bin/plato-tools.mjs convert --to plato-json --clusters groups.json places.c
   column chosen, each **unticked**, with the spelling to look it up by, which you can change. Only
   ticked groups are used. *Save matching* then saves them beside the columns, as
   `{"columns": {…}, "clusters": {"name": {"method": "fingerprint", "groups": [{"chosen":
-  "Rotherhithe", "members": ["Rotherhith", "ROTHERHITHE."]}]}}}`, and *Load* shows them ticked again.
+  "Rotherhithe", "members": ["Rotherhith", "ROTHERHITHE."]}]}}}`, and *Load* shows them ticked again. A
+  ticked group that a later *Find groups* does not find again is kept at the end of the list, still
+  ticked, and marked as not found this way.
 - `--clusters FILE` takes that file, or the groups alone (`{"name": {"method": …, "groups": […]}}`).
   Given only as `--columns`, such a file's columns are used and its groups are not, and the command
   says so: groups are never applied without being asked for.
