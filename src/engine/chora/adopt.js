@@ -42,7 +42,14 @@ export class AdoptError extends Error {
 
 /** The role a geometry is given unless the person adopting chooses another: a point stands for the place, an area is its extent. */
 export function defaultRole(type) {
-  return type === 'Point' || type === 'MultiPoint' ? 'RepresentativePoint' : type === 'Polygon' || type === 'MultiPolygon' ? 'Extent' : undefined;
+  return rolesFor(type)[0];
+}
+/** The roles offered for a geometry of this type, the default first: a line is a route, or the whole place. */
+export function rolesFor(type) {
+  if (type === 'Point' || type === 'MultiPoint') return ['RepresentativePoint', 'FeaturePoint'];
+  if (type === 'LineString' || type === 'MultiLineString') return ['Itinerary', 'Extent'];
+  if (type === 'Polygon' || type === 'MultiPolygon') return ['Extent', 'RepresentativePoint', 'FeaturePoint'];
+  return [];
 }
 
 // ---- dates ------------------------------------------------------------------------------------------
@@ -210,6 +217,8 @@ export function adoptionAttestations({ place, candidate, feature = null, fetchEr
   if (!isIri(record)) return refuse('no-record');
   if (st.denied) return refuse('denied');
   if (fetchError?.kind === 'unavailable' || fetchError?.status === 451 || !st.mayCopy) return refuse('unavailable');
+  // The place's own address is the record's: it is that record already, and an identity with itself is no claim.
+  const sameAddress = record === subject;
 
   // Which geometry: one of the Feature's; or, when the record could not be fetched (not a 451), WHG's representative point.
   let chosen, fallback = false;
@@ -221,7 +230,8 @@ export function adoptionAttestations({ place, candidate, feature = null, fetchEr
       if (o.refused) return refuse(o.refused.kind, o.refused.reason);
       chosen = { ...geometryFrom(o.geojson, o.when), role: role || o.role };
     } else {
-      if (!Array.isArray(candidate.coords)) return refuse('no-geometry');
+      // Only when the record could not be had for a passing reason, and never from a WHG record whose licence cannot be known.
+      if (!Array.isArray(candidate.coords) || !fallbackAllowed(fetchError) || (st.whgNative && st.licence === null)) return refuse('no-geometry');
       chosen = { ...geometryFrom({ type: 'Point', coordinates: candidate.coords }), role: role || 'RepresentativePoint' };
       fallback = true;
       notes.push({ kind: 'representative-point-only', text: CHORA_ADOPT_TEXT['representative-point-only'] });
@@ -232,8 +242,9 @@ export function adoptionAttestations({ place, candidate, feature = null, fetchEr
     return refuse(r.kind, r.reason);
   }
 
-  const linked = st.linked === 'exact';
-  if (linked) notes.push({ kind: 'already-linked', text: CHORA_ADOPT_TEXT['already-linked'] });
+  const linked = st.linked === 'exact' || sameAddress;
+  if (sameAddress) notes.push({ kind: 'same-address', text: CHORA_ADOPT_TEXT['same-address'] });
+  else if (linked) notes.push({ kind: 'already-linked', text: CHORA_ADOPT_TEXT['already-linked'] });
   else if (st.linked === 'loose') notes.push({ kind: 'loosely-linked', text: CHORA_ADOPT_TEXT['loosely-linked'] });
   notes.push(...licenceNotes(st.licence));
   if (st.whgNative) notes.push({ kind: 'unstable-id', text: CHORA_ADOPT_TEXT['unstable-id'] });
@@ -260,7 +271,32 @@ export function adoptionAttestations({ place, candidate, feature = null, fetchEr
 function recordWordsOf(candidate, feature, st, attribution) {
   const sourceName = st.whgNative ? attribution?.datasets?.[datasetOf(candidate?.id)]?.name : attribution?.sources?.[st.namespace]?.name;
   return { record: st.record, name: candidate?.name || feature?.properties?.title || null, sourceName: typeof sourceName === 'string' ? sourceName : null,
-    namespace: st.whgNative ? null : st.namespace, localId: localIdOf(candidate?.id) };
+    namespace: st.whgNative ? null : st.namespace, localId: localIdOf(candidate?.id), dataset: st.whgNative ? datasetOf(candidate?.id) : null };
+}
+
+/**
+ * Whether a record that could not be fetched may stand in by WHG's representative point: only after a
+ * failure that says nothing of the record (no answer, too many requests, the server's own fault, 5xx),
+ * never after a refusal (403, 404 and the like) or with no failure given.
+ */
+export function fallbackAllowed(fetchError) {
+  if (!fetchError) return false;
+  if (fetchError.kind === 'network' || fetchError.kind === 'rate') return true;
+  return Number.isInteger(fetchError.status) && fetchError.status >= 500;
+}
+/** adoptionAttestations, with anything it throws (a caller's mistake, a check that refuses) given back as a refusal in words. */
+export function safeAdoption(args) {
+  try { return adoptionAttestations(args); } catch (e) {
+    return { attestations: [], notes: [], refused: { kind: 'error', reason: CHORA_ADOPT_TEXT.error(e?.message || String(e)) } };
+  }
+}
+/**
+ * The place's links to legacy WHG cluster pages (whgazetteer.org/places/<n>/portal/). A cluster cannot be
+ * told apart into records, so these are not counted as links to any candidate; the page says they exist.
+ */
+export function clusterLinks(identities) {
+  const re = /^https?:\/\/(www\.)?whgazetteer\.org\/places\/\d+\/portal\/?$/;
+  return [...new Set([...(identities?.linked || [])].filter((x) => typeof x === 'string' && re.test(x)))];
 }
 
 /**

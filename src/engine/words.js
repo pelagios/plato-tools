@@ -368,8 +368,10 @@ export const choraDrawingNote = ({ basemap = 'Natural Earth', zoom } = {}) =>
 // Adopting a location from a gazetteer match (src/engine/chora/adopt.js). Both notes give the record's
 // address verbatim, so that the two attestations of one adoption can be paired by their text.
 /** A record as the notes name it: its address, then its name, upstream source and id there. */
-const recordWords = ({ record, name, sourceName, namespace, localId }, more = []) =>
-  `${record} (${[name ? `"${name}"` : null, namespace ? `upstream source: ${sourceName ? `${sourceName} (${namespace})` : namespace}` : "the gazetteer's own record", localId ? `id ${localId}` : null, ...more].filter(Boolean).join('; ')})`;
+// A WHG record of its own (namespace whg) is named with its contributed dataset: its name and id, which outlast a re-upload's change of record id.
+const ownRecord = (sourceName, dataset) => `the gazetteer's own record${sourceName || dataset ? `, from dataset ${[sourceName ? `"${sourceName}"` : null, dataset ? `(${dataset})` : null].filter(Boolean).join(' ')}` : ''}`;
+const recordWords = ({ record, name, sourceName, namespace, localId, dataset }, more = []) =>
+  `${record} (${[name ? `"${name}"` : null, namespace ? `upstream source: ${sourceName ? `${sourceName} (${namespace})` : namespace}` : ownRecord(sourceName, dataset), localId ? `id ${localId}` : null, ...more].filter(Boolean).join('; ')})`;
 /** The identity's notes. */
 export const choraAdoptIdentityNote = (r) =>
   `Accepted in PLATO tools (Chora) when adopting the location of World Historical Gazetteer record ${recordWords(r)}. The location copied from the record is a separate attestation.`;
@@ -399,6 +401,8 @@ export const CHORA_ADOPT_TEXT = {
   unavailable: "The record's source does not allow the gazetteer to pass it on, so nothing is copied: the record was consulted, not copied. You can draw the location yourself, citing the record as evidence.",
   'no-geometry': "There is no geometry to adopt: choose one of the record's geometries.",
   'no-record': 'This candidate has no address in the gazetteer, so it cannot be adopted.',
+  'same-address': "This place's address is the record's own, so it is already that record: only its location is added.",
+  error: (why) => `This could not be adopted: ${why}`,
   /** A lookup or a record fetch that gave no answer (adopt.js lookupProblem). */
   problem: {
     quota: "The World Historical Gazetteer's allowance of requests for today is spent. Your token is kept: try again tomorrow.",
@@ -457,6 +461,8 @@ export const CHORA_ADOPT_PAGE = {
   when: (t) => `dated ${t}`,
   noRecordGeometry: 'The record gives no location.',
   repOnly: "WHG's representative point only",
+  cluster: 'This place is linked to a WHG cluster page; whether it holds this record is not known.',
+  cancelDraw: 'Cancel',
   reloadLoses: 'The gazetteer lookup on screen, and its answers (anything adopted is kept).',
 };
 /** A hand-drawing's notes, after how it was drawn, for a record consulted and not copied (adopt.js consultedParts). */

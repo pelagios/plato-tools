@@ -255,6 +255,8 @@ test("WHG's own records are adopted with a warning that their ids can change, an
   const attribution = { whg: { license: { spdx_id: 'CC-BY-4.0' } }, datasets: { 1319: { name: 'Tyneside survey', license: { spdx_id: 'CC0-1.0' } } } };
   const r = adopt.adoptionAttestations(args({ place: place('newcastle'), candidate: cand, feature: { type: 'Feature', geometry: { type: 'Point', coordinates: [-1.61, 54.97] } }, geometryIndex: 0, attribution }));
   assert.ok(r.notes.some((n) => n.kind === 'unstable-id'));
+  // As the unstable-id line promises: the dataset's name and id are kept in the notes of both.
+  for (const a of r.attestations) assert.match(a.notes, /the gazetteer's own record, from dataset "Tyneside survey" \(1319\)/, a.notes);
   assert.equal(r.attestations.at(-1).citations[0].source.licence, 'https://spdx.org/licenses/CC0-1.0');
   const gn = adopt.adoptionAttestations(args({ place: place('newcastle'), candidate: { ...cand, id: 'place:gn:2641673', iri: W3ID + 'place:gn:2641673', namespace: 'gn' }, feature: { type: 'Feature', geometry: { type: 'Point', coordinates: [-1.61, 54.97] } }, geometryIndex: 0, attribution }));
   assert.ok(!gn.notes.some((n) => n.kind === 'unstable-id'), 'control: an authority record has none');
@@ -262,7 +264,7 @@ test("WHG's own records are adopted with a warning that their ids can change, an
 
 test("with no Feature (the record could not be fetched), WHG's representative point only, labelled so; with none, nothing", async () => {
   const { byId, attribution } = await setup();
-  const base = args({ place: place('newcastle'), candidate: byId['place:gn:2641673'], feature: null, attribution });
+  const base = args({ place: place('newcastle'), candidate: byId['place:gn:2641673'], feature: null, fetchError: { kind: 'network', status: null }, attribution });
   const r = adopt.adoptionAttestations(base);
   const g = r.attestations.at(-1);
   assert.equal(valid(g), null);
@@ -458,5 +460,82 @@ test("Chora's store gives each place its identities as Krisis reads the whole da
   // The same as currentIdentities over the records, for each place.
   const ref = currentIdentities(doc.spatialEntities);
   for (const k of ['newcastle', 'novocastria', 'newcastle-nsw']) assert.deepEqual(store.getPlace(P + k).identities, Object.fromEntries(Object.entries(ref.get(P + k)).map(([x, v]) => [x, [...v]])));
+  store.close();
+});
+
+test('the representative point is offered only after a network or rate failure or a 5xx, never after a 403 or 404, nor from a WHG record whose licence is unknown', async () => {
+  const { byId, attribution } = await setup();
+  const base = args({ place: place('newcastle'), candidate: byId['place:gn:2641673'], feature: null, attribution });
+  for (const e of [{ kind: 'network', status: null }, { kind: 'rate', status: 429 }, { kind: 'server', status: 503 }, { kind: 'server', status: 500 }]) {
+    assert.equal(adopt.fallbackAllowed(e), true, JSON.stringify(e));
+    assert.equal(adopt.adoptionAttestations({ ...base, fetchError: e }).attestations.length, 2, JSON.stringify(e));
+  }
+  for (const e of [{ kind: 'server', status: 404 }, { kind: 'auth', status: 403 }, null]) {
+    assert.equal(adopt.fallbackAllowed(e), false, JSON.stringify(e));
+    const r = adopt.adoptionAttestations({ ...base, fetchError: e });
+    assert.equal(r.refused?.kind, 'no-geometry', JSON.stringify(e));
+    assert.deepEqual(r.attestations, []);
+  }
+  // A WHG record with no dataset in its id: its licence cannot be known, so its point is not copied; the control, a licensed one, is.
+  const bare = { id: 'place:whg:277', iri: W3ID + 'place:whg:277', name: 'Newcastle', namespace: 'whg', coords: [-1.61, 54.97] };
+  assert.equal(adopt.candidateStatus(bare, { attribution }).licence, null);
+  assert.equal(adopt.adoptionAttestations({ ...base, candidate: bare, fetchError: { kind: 'network' } }).refused?.kind, 'no-geometry');
+  const licensed = { ...bare, id: 'place:whg:1319:277', iri: W3ID + 'place:whg:1319:277' };
+  const dsAttr = { whg: { license: { spdx_id: 'CC-BY-4.0' } }, datasets: { 1319: { name: 'Tyneside survey', license: { spdx_id: 'CC0-1.0' } } } };
+  assert.equal(adopt.adoptionAttestations({ ...base, candidate: licensed, attribution: dsAttr, fetchError: { kind: 'network' } }).attestations.length, 2);
+});
+
+test("a place whose @id IS the record's address: the location only, with a note saying so; and nothing an adoption throws escapes safeAdoption", async () => {
+  const { byId, attribution } = await setup();
+  const cand = byId['place:gn:2641673'];
+  const r = adopt.adoptionAttestations(args({ place: { '@id': cand.iri, label: 'Newcastle upon Tyne' }, candidate: cand, feature: json('lpf-point.json'), geometryIndex: 0, attribution }));
+  assert.equal(r.refused, undefined);
+  assert.equal(r.attestations.length, 1);
+  assert.ok(r.attestations[0].geometries);
+  assert.ok(r.notes.some((n) => n.kind === 'same-address'));
+  assert.equal(valid(r.attestations[0]), null);
+  // Control: another place adopting the same record makes both.
+  assert.equal(adopt.adoptionAttestations(args({ place: place('newcastle'), candidate: cand, feature: json('lpf-point.json'), geometryIndex: 0, attribution })).attestations.length, 2);
+  // A throw (here, a contributor that is no one) becomes a refusal in words.
+  const bad = args({ place: place('newcastle'), candidate: cand, feature: json('lpf-point.json'), geometryIndex: 0, attribution, contributor: { name: '' } });
+  assert.throws(() => adopt.adoptionAttestations(bad));
+  const safe = adopt.safeAdoption(bad);
+  assert.equal(safe.refused?.kind, 'error');
+  assert.ok(safe.refused.reason.length > 10);
+  assert.deepEqual(safe.attestations, []);
+  assert.equal(adopt.safeAdoption(args({ place: place('newcastle'), candidate: cand, feature: json('lpf-point.json'), geometryIndex: 0, attribution })).attestations.length, 2, 'control: a good one passes through');
+});
+
+test("a line's default role is Itinerary, and Itinerary and Extent are the roles offered for it", () => {
+  assert.equal(adopt.defaultRole('LineString'), 'Itinerary');
+  assert.equal(adopt.defaultRole('MultiLineString'), 'Itinerary');
+  assert.deepEqual(adopt.rolesFor('LineString'), ['Itinerary', 'Extent']);
+  assert.deepEqual(adopt.rolesFor('Point'), ['RepresentativePoint', 'FeaturePoint']);
+  assert.deepEqual(adopt.rolesFor('Polygon'), ['Extent', 'RepresentativePoint', 'FeaturePoint']);
+  const f = { type: 'Feature', geometry: { type: 'LineString', coordinates: [[-1.6, 54.9], [-1.5, 55]] } };
+  assert.equal(adopt.featureGeometries(f)[0].role, 'Itinerary');
+  const r = adopt.adoptionAttestations(args({ place: place('newcastle'), candidate: { id: 'place:gn:1', iri: W3ID + 'place:gn:1', name: 'Road', namespace: 'gn' }, feature: f, geometryIndex: 0, attribution: { sources: { gn: { license: 'CC-BY-4.0' } } } }));
+  assert.equal(r.attestations.at(-1).geometries[0].role, PLATO + 'Itinerary');
+  assert.equal(valid(r.attestations.at(-1)), null);
+});
+
+test('a link to a legacy WHG cluster page is found and named, not counted as a link to the record', async () => {
+  const { byId } = await setup();
+  const ids = currentIdentities([{ '@id': P + 'tyne', label: 'Tyne', attestations: [{ identities: [{ subject: P + 'tyne', object: 'https://whgazetteer.org/places/123456/portal/', identityType: 'exactMatch' }] }] }]).get(P + 'tyne');
+  assert.deepEqual(adopt.clusterLinks(ids), ['https://whgazetteer.org/places/123456/portal/']);
+  assert.equal(adopt.candidateStatus(byId['place:gn:2641673'], { identities: ids }).linked, null, 'not counted as a link to this record');
+  assert.deepEqual(adopt.clusterLinks(IDS.get(P + 'novocastria')), [], 'control: a record link is not a cluster link');
+  assert.deepEqual(adopt.clusterLinks(null), []);
+});
+
+test("a place whose attestations are an object, not a list, stays in Chora's store beside one whose are a list, and the identities of the other are still read", async () => {
+  const doc = json('dataset.json');
+  doc.spatialEntities.push({ '@id': P + 'odd', label: 'Odd', attestations: { identities: [{ subject: P + 'odd', object: W3ID + 'place:gn:1', identityType: 'exactMatch' }] } });
+  const e = env();
+  const store = await load(await detect([new File([JSON.stringify(doc)], 'odd.json')]), e, await e.openDb(), { name: 'odd.json' });
+  assert.ok(store.getPlace(P + 'odd'), 'the place with an object for attestations is there');
+  assert.equal(store.getPlace(P + 'odd').identities, null);
+  assert.deepEqual(store.getPlace(P + 'novocastria').identities.exact, [W3ID + 'place:gn:2641673'], 'control: the list-valued place keeps its identities');
+  assert.equal(store.loaded.places, 5);
   store.close();
 });
