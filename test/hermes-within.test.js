@@ -219,6 +219,10 @@ test('tables with a base: a region\'s place_id is region-<hex>, never its contai
   const t = await go([textFile(NEWTONS, 'places.csv')], 'convert', 'tables', { base: BASE });
   const lost = t.report.items.filter((i) => i.kind === 'place-address');
   assert.deepEqual(lost, [], 'no place-address losses');
+  // The regions' containerKeys are not kept (reading back gives region-<hex>): said, for the 5 regions only, not for the places.
+  const dropped = t.report.items.find((i) => i.kind === 'dropped:spatialEntity.entityIdentifier');
+  assert.equal(dropped?.count, 5);
+  assert.ok(dropped.examples.every((x) => String(x).startsWith('[')), JSON.stringify(dropped.examples));
   const z = unzipSync(t.e.outs['places-tables.zip'][0]);
   const ids = Papa.parse(strFromU8(z['places.csv']), { header: true, skipEmptyLines: true }).data.map((r) => r.place_id);
   assert.ok(ids.includes('1') && ids.includes('2') && ids.includes('3'), `an ordinary place keeps its own id (control): ${ids}`);
