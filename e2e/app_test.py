@@ -295,6 +295,97 @@ def reading_checks(page, tmp):
           and 'https://pleiades.stoa.org/places/579885' in pleiades(doc1), {'box': box, 'off': abouts(doc0), 'on': abouts(doc1), 'saved': saved, 'state': st.get('columns')})
 
 
+# ---- Hermes: the regions a place lies in, and a pasted list (src/app.js extraControls, the paste box) ----
+WITHIN_DOM = """() => { const rows = [...document.querySelectorAll('#columns table.columns-table tbody tr')];
+  return { rows: rows.map((r) => ({ column: r.querySelector('th').textContent, field: r.querySelector('select[data-column]')?.value,
+      level: r.querySelector('select[data-level-column]')?.value ?? null, levelLabel: r.querySelector('select[data-level-column]')?.getAttribute('aria-label') ?? null,
+      split: r.querySelector('.column-split') ? { separator: r.querySelector('[data-split=separator]').value, levels: r.querySelector('[data-split=levels]').value,
+        name: r.querySelector('[data-split=firstIsName]').checked, nameLabel: r.querySelector('[data-split=firstIsName]').labels[0]?.textContent.trim() || '' } : null })),
+    titles: document.querySelectorAll('#files [title], #columns [title]').length }; }"""
+
+def within_checks(page, tmp):
+    """Hermes: a region's level beside its choice, the split into levels, and the pasted list. Each
+    check pairs an absence with a presence found in the same call, and a result with its control."""
+    base = 'https://example.org/within/'
+    regions = tmp / 'regions.csv'
+    regions.write_text('id,Name,Parish,County,Country\n1,Mill,Rotherhithe,Surrey,England\n', encoding='utf-8')
+    s = reading_case(page, regions, columns=True)
+    d0 = page.evaluate(WITHIN_DOM) if s.get('columns') else None
+    st0 = (s.get('columns') or {})
+    # Choosing level 1 for the parish swaps it with the country's.
+    try: page.get_by_label('The level of the region in the column “Parish”: 1 is the widest', exact=True).select_option('1'); chose = True
+    except Exception as e: chose = str(e).split('\n')[0][:200]
+    st1 = wait_state(page, lambda s: (s.get('columns') or {}).get('levels', {}).get('Parish') == 1, 10, 'level').get('columns') or {}
+    try:
+        with page.expect_download(timeout=30_000) as dl: page.click('#columns-save')
+        dl.value.save_as(tmp / 'within-matching.json'); saved = json.loads((tmp / 'within-matching.json').read_text())
+    except Exception as e: saved = {'error': str(e)[:200]}
+    row = lambda d, c: next((r for r in (d or {}).get('rows', []) if r['column'] == c), {})
+    check('column table: regions are guessed widest first, each with a level beside it (none beside the name); choosing a level another has swaps the two, and the saved matching keeps the levels',
+          d0 and row(d0, 'Parish').get('level') == '3' and row(d0, 'Country').get('level') == '1' and row(d0, 'County').get('field') == 'within'
+          and row(d0, 'Name').get('field') == 'name' and row(d0, 'Name').get('level') is None and d0['titles'] == 0
+          and st0.get('levels') == {'Country': 1, 'County': 2, 'Parish': 3}
+          and chose is True and st1.get('levels') == {'Country': 3, 'County': 2, 'Parish': 1}
+          and saved.get('Parish') == {'field': 'within', 'level': 1} and saved.get('Country') == {'field': 'within', 'level': 3} and saved.get('Name') == 'name',
+          {'dom': d0, 'first': st0.get('levels'), 'chose': chose, 'after': st1.get('levels'), 'saved': saved})
+    # Converted under a base address, each level is a ContainedIn attestation; the chain is no key of the output.
+    page.evaluate(f"() => {{ document.getElementById('base').value = {json.dumps(base)}; }}")
+    r = reading_run(page)
+    page.evaluate("() => { document.getElementById('base').value = ''; }")
+    doc = reading_doc(page, r, tmp, 'within.json')
+    text = json.dumps(doc)
+    mill = next((p for p in doc.get('spatialEntities', []) if p['@id'] == base + 'place/1'), {})
+    contained = sorted((a['sequence'], a['relations'][0]['relatedLabel']) for a in mill.get('attestations', []) if a.get('relations'))
+    region_labels = sorted(p['label'] for p in doc.get('spatialEntities', []) if '/place/region-' in p['@id'])
+    check('column table: converted under a base address, the place is ContainedIn each region at its level, each region minted once; no "within" key is written',
+          r.get('phase') == 'done' and contained == [(1, 'Rotherhithe'), (2, 'Surrey'), (3, 'England')] and region_labels == ['England', 'Rotherhithe', 'Surrey']
+          and '"within"' not in text and 'https://w3id.org/plato#ContainedIn' in text, {'phase': r.get('phase'), 'contained': contained, 'regions': region_labels})
+
+    # A column of several regions in one cell: no split controls until it is chosen; then a separator,
+    # levels guessed from the examples, and "the first part is the place's name", unticked.
+    places = tmp / 'split.csv'
+    places.write_text('Place\n"Rotherhithe, Surrey, England"\n', encoding='utf-8')
+    s = reading_case(page, places, columns=True)
+    d1 = page.evaluate(WITHIN_DOM) if s.get('columns') else None
+    try:
+        page.get_by_label('Read the column “Place” as', exact=True).select_option('split')
+        d2 = page.evaluate(WITHIN_DOM)
+        page.get_by_label("The first part is the place's name", exact=True).check()
+        page.get_by_label('The levels the parts of the column “Place” go to, narrowest first', exact=True).fill('2, 1')
+        page.get_by_label('The levels the parts of the column “Place” go to, narrowest first', exact=True).press('Tab')
+        done = True
+    except Exception as e: d2 = None; done = str(e).split('\n')[0][:200]
+    st = wait_state(page, lambda s: ((s.get('columns') or {}).get('splits', {}).get('Place') or {}).get('levels') == [2, 1], 10, 'split').get('columns') or {}
+    r = reading_run(page)
+    doc = reading_doc(page, r, tmp, 'split.json')
+    p0 = (doc.get('spatialEntities') or [{}])[0]
+    check('column table: "split into levels" shows its controls only once chosen; with the first part the name and levels 2, 1 the place is Rotherhithe within England > Surrey',
+          d1 and row(d1, 'Place').get('split') is None and row(d1, 'Place').get('field') == 'note'
+          and d2 and row(d2, 'Place').get('split') == {'separator': ', ', 'levels': '3, 2, 1', 'name': False, 'nameLabel': "The first part is the place's name"}
+          and done is True and st.get('splits', {}).get('Place') == {'separator': ', ', 'levels': [2, 1], 'firstIsName': True}
+          and r.get('phase') == 'done' and p0.get('label') == 'Rotherhithe'
+          and (p0.get('attestations') or [{}])[0].get('notes') == 'Within (as the source gives it): England > Surrey > Rotherhithe',
+          {'before': d1, 'after': d2, 'done': done, 'state': st.get('splits'), 'place': p0})
+
+    # A pasted list: nothing to use says so and chooses nothing; a list becomes a one-column table, "name".
+    try:
+        page.set_input_files('#picker', [])
+        if not page.locator('#paste').evaluate('(d) => d.open'): page.click('#paste summary')
+        page.get_by_label('Paste a list of names, one per line', exact=True).fill('  \n')
+        page.click('#paste-use')
+        empty = page.inner_text('#paste-message')
+        phase_empty = wait_state(page, lambda s: True, 2).get('phase')
+        page.get_by_label('Paste a list of names, one per line', exact=True).fill('Rotherhithe\nNewport, Isle of Wight\n')
+        page.click('#paste-use')
+        st = wait_state(page, lambda s: s.get('phase') == 'detected' and (s.get('columns') or {}).get('headers') == ['name'], 60, 'pasted list')
+        chosen = page.inner_text('#chosen'); message = page.inner_text('#paste-message'); ok = True
+    except Exception as e: st = {}; chosen = empty = message = ''; phase_empty = None; ok = str(e).split('\n')[0][:200]
+    ex = ((st.get('columns') or {}).get('examples') or {}).get('name')
+    check('pasted list: an empty list is refused with a message and nothing chosen; a list is read as a table of places of one column, "name", read as the name',
+          ok is True and 'paste one name on each line' in empty and phase_empty != 'detected'
+          and st.get('format') == 'csv' and (st.get('columns') or {}).get('mapping') == {'name': 'name'} and ex == ['Rotherhithe', 'Newport, Isle of Wight']
+          and 'pasted-list.csv' in chosen and message == '', {'ok': ok, 'empty': empty, 'phase': phase_empty, 'state': st.get('columns'), 'chosen': chosen[:200]})
+
 def krisis_place(iri, label, lon, lat, *also):
     return {'@id': iri, 'label': label, 'attestations': [{'names': [{'toponym': n} for n in (label, *also)],
             'geometries': [{'geojson': {'type': 'Point', 'coordinates': [lon, lat]}}], 'sources': [{'title': 'A survey'}]}]}
@@ -1618,6 +1709,7 @@ def main():
                   and ok2 and not geoms2 and len(doc2.get('spatialEntities', [])) == len(doc1.get('spatialEntities', [])) > 0,
                   {'placed': s1.get('phase'), 'shown': said1, 'anchors': len(anchors), 'alone': s2.get('phase'), 'geoms alone': len(geoms2)})
             reading_checks(page, tmp)
+            within_checks(page, tmp)
             krisis_case(page, tmp)
             krisis_pattern_match(page, tmp)
 
