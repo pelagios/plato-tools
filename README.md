@@ -81,6 +81,7 @@ A TEI edition and a table of places have **reading options**, each off until cho
 | CSV, GeoJSON | The regions a place lies in (a parish, a county, a country…), guessed from the headings and numbered widest first (1 the widest). Under a base address of your own each region becomes a place, each contained in the next, and each place is `plato:ContainedIn` its narrowest region, as PLATO's worked example of regions has it; without one they are kept in the notes | *Region it lies in*, with its *Level* beside it | `--columns` with `{"field": "within", "level": 2}` for the column |
 | CSV, GeoJSON | A column of several regions in one cell, narrowest first ("Rotherhithe, Surrey, England"), split into levels, its first part the place's name if you say so | *Regions, to split into levels*, with what separates the parts, the levels and *The first part is the place's name* | `--split 'Place=, :name,3,2,1'`, or `--columns` with `{"field": "split", "separator": ", ", "levels": [3, 2, 1], "firstIsName": true}` |
 | A list of names | Pasted, one name a line, it is read as a table of places of one column, "name" | *Or paste a list of names*, under the drop zone | (none: save the list as a CSV file headed `name`) |
+| CSV, GeoJSON | Variant spellings of one name (`Rotherhith`, `ROTHERHITHE.`) grouped, so that the place is looked up by one spelling; each grouped row keeps the source's spelling in PLATO, and gets a note *Grouped for lookup with: … (spelling chosen: …)* ([below](#grouping-similar-spellings)) | *Group similar spellings…*: choose the column and how, then tick the groups to use, each unticked until you do; saved with the matching | `cluster --column NAME` to propose, `--clusters FILE` to apply |
 
 ## From the command line
 
@@ -101,6 +102,7 @@ node bin/plato-tools.mjs preview --limit 5 my-places.csv                 # the f
 |---|---|
 | `check INPUT…` | Reports on each input in turn, then gives a total |
 | `convert --to TARGET INPUT…` | Also writes each input as `plato-jsonl`, `plato-json`, `ntriples`, `tables`, `lpf-seq` or `lpf`, into `--out` (by default the current directory), named after the input |
+| `cluster --column NAME [--method M] INPUT` | Proposes groups of similar spellings in one column of a table of places, as JSON for review, and applies nothing ([below](#grouping-similar-spellings)) |
 | `preview [--limit N] INPUT` | Shows the first N records (10 unless `--limit` says otherwise) of a table of places, a TEI edition or W3C Web Annotations, as a run reads them, and writes nothing ([below](#previewing-the-first-records)) |
 | `compare EARLIER LATER` | Checks that a published dataset was only added to ([what it reports](https://pelagios.org/place-attestation-ontology/guide/tools.html#comparing-two-versions)) |
 | `publish PART INPUT` | Prepares a dataset for publishing: `report`, `mint`, `site` or `w3id` ([below](#publishing)) |
@@ -192,6 +194,37 @@ node bin/plato-tools.mjs preview --json edition.xml                   # all of i
   either of which can need most of the file. The report says so too (`preview-partial`, a warning).
 - Exit status: 0 if the records read have no problems, 1 if they have, 2 if no preview could be
   made.
+
+### Grouping similar spellings
+
+Before places are looked up in a gazetteer, variant spellings of one name can be grouped, as
+OpenRefine's clustering does, so that `Rotherhith`, `ROTHERHITHE.` and `Rotherhithe` are looked up
+by one spelling. Nothing is grouped unless you say so, and the names in the PLATO output always
+keep the source's spellings: a grouped row is given a spelling to look it up by, beside its record,
+and its attestation a note, *Grouped for lookup with: Rotherhith, ROTHERHITHE. (spelling chosen:
+Rotherhithe)*.
+
+```bash
+node bin/plato-tools.mjs cluster --column name places.csv                         # propose, as JSON; nothing applied
+node bin/plato-tools.mjs cluster --column parish --method phonetic places.csv
+node bin/plato-tools.mjs convert --to plato-json --clusters groups.json places.csv  # apply the groups kept
+```
+
+- Three ways of grouping (`--method`): `fingerprint` (the default: case, accents, punctuation,
+  spacing and word order do not count, so `Newton, Upper` and `upper newton` are one),
+  `ngram-fingerprint` (the same pairs of letters: spacing does not count either; it groups more,
+  some wrongly) and `phonetic` (Cologne phonetics, word by word: names that sound alike; made for
+  German, it serves English and other names in the Latin alphabet passably, and groups the most,
+  some wrongly: `Rotherhithe` and `Redruth` sound alike to it). Each group lists its spellings,
+  with how many rows have each, and suggests the commonest.
+- On the page, *Group similar spellings…* (below the Reading options) proposes the groups for the
+  column chosen, each **unticked**, with the spelling to look it up by, which you can change. Only
+  ticked groups are used. *Save matching* then saves them beside the columns, as
+  `{"columns": {…}, "clusters": {"name": {"method": "fingerprint", "groups": [{"chosen":
+  "Rotherhithe", "members": ["Rotherhith", "ROTHERHITHE."]}]}}}`, and *Load* shows them ticked again.
+- `--clusters FILE` takes that file, or the groups alone (`{"name": {"method": …, "groups": […]}}`).
+  Given only as `--columns`, such a file's columns are used and its groups are not, and the command
+  says so: groups are never applied without being asked for.
 
 ### Publishing
 

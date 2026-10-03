@@ -739,6 +739,68 @@ readers link to those headings, so keep them.
   Lines to stdout, the rest to stderr, or one object with `--json`; exit 0, 1 with problems in what
   was read, 2 when none could be made) all call it.
 
+#### Grouping similar spellings for lookup, and lookupName on events (Methodos #28, stage 1)
+
+`src/engine/hermes/cluster.js` is OpenRefine-style key-collision clustering, written here with no
+dependency. `clusterValues(values, { method })` takes any iterable of strings (a column's cells, a
+level of containing regions once the 'within' role lands, a pasted list) and gives
+`[{ key, members: [{ value, count }], suggested }]`: only keys shared by two or more distinct values,
+members most frequent first (a tie: first met), `suggested` the first member, clusters by rows then
+member count then key, so the output depends only on the values. `clusterCounter` is the same,
+streamed (`add(value)`, `clusters()`, `distinct`): a Map of distinct values and their counts, which
+is all that is held (100,000 values in well under a second, `test/hermes-cluster.test.js`). Blank
+values are not counted, and a value whose key is empty (punctuation only) is not clustered.
+
+| Method | Key |
+|---|---|
+| `fingerprint` (default) | OpenRefine's fingerprint keyer: trim, lower-case, NFKD with combining marks dropped and ß æ œ ø ł đ ð þ ı ŋ ħ spelt out, Unicode punctuation, symbols and control characters (not whitespace) removed, split on whitespace, words de-duplicated, sorted, joined with a space |
+| `ngram-fingerprint` | OpenRefine's n-gram keyer, n = 2: as above with whitespace removed too, every 2-letter run, de-duplicated, sorted, joined with nothing; a value shorter than 2 is its own key |
+| `phonetic` | Cologne phonetics (Postel 1969), written from the published rules (no code ported; the tools' own licence), on each word of the fingerprint, the codes kept whole (not cut to 4), de-duplicated and sorted; a digit is kept as itself, a word with no Latin letter is kept as it is. German rules: coarse for English (`Rotherhithe` = `Redruth` = 7272), finer than Soundex (`Bradford` and `Bradfield`, both B631 there, stay apart) |
+
+Applying is never silent and never touches the source's spellings. The confirmed groups are
+`{ "<column>": { method, groups: [{ chosen, members }] } }`, checked by `checkClusters` (a member in
+two groups of one column, an empty `chosen`, an unknown method: a `DataError`), and given to a run
+as `options.clusters`. `genericSource` (generic.js) applies them with `lookupSpellings(clusters)`:
+for each row whose cell in a grouped column, trimmed as `cellText` trims it, is a member, the
+row's attestation gets a note of its own line, `Grouped for lookup with: <the group's other
+spellings> (spelling chosen: <chosen>)` (for a column other than the name, `The column "<c>"
+grouped for lookup with: …`), and the event gets:
+
+- **`lookupName` on events**: the chosen spelling, when the grouped column is the one mapped to
+  `name`. It is on the event (`{ type: 'record' | 'attestation', value, n, lookupName,
+  lookupValues }`), beside `value`, never in it: `value.label` and `value.attestations[].names` keep
+  the source's spelling, and nothing is written for it but the note. A lookup that reads the
+  reader's events (Krisis, Methodos's region levels) sends `ev.lookupName` where there is one, else the name it would have sent. A
+  lookup that reads a saved PLATO file instead has the note, and the groups file:
+  `lookupSpellings(clustersInFile(json)).apply(row, null, nameColumn)` gives the same answer for a row, and the
+  members of each group map to its `chosen`. Krisis's code is unchanged; it does not yet read
+  either.
+- `lookupValues`: `{ "<column>": chosen }` for every grouped column of the row, the name's
+  included: the per-level lookup value a 'within' level will use.
+
+A group for a column the file lacks is a warning, `generic-clusters-unknown-column`, and nothing
+else. Rows read with `sameId` carry it on each attestation, not on the place made at the end.
+
+Saving: inside the mapping no key is safe, since any text can be a column's heading (a
+`__clusters` column included). So the page's *Save matching* writes the mapping alone while no
+group is ticked, as before, and otherwise the envelope `{ "columns": {mapping}, "clusters": {…} }`
+(`matchingToSave`), which `savedColumns` already reads as options and `splitMatching` splits; a
+mapping whose columns are called `columns` and `clusters` is still told apart (`isMatchingEnvelope`:
+`columns` must be an object that is not a `{ field }`). `--clusters FILE` reads the envelope,
+`{ clusters }` or the groups alone (`clustersInFile`); `--columns` given an envelope uses its mapping
+and says on stderr that its groups need `--clusters`. `plato-tools cluster --column NAME [--method
+M] [--sheet NAME] INPUT` streams the column (`columnValues` in generic.js) and prints `{ input,
+column, method, values, distinct, clusters }`, applying nothing.
+
+On the page, `src/hermes-spellings.js` (`spellingsPanel`) owns `#spellings`, below the Reading
+options, for a table of places; `src/app.js` only calls it (reset on a new file or sheet, the
+columns when answered, `options()` into the run's and the preview's options, `confirmed()` into the
+saved matching, `load()` from a loaded one, `problem()` into `readingProblem`). The worker's
+`cluster` command answers `{ column, method, values, distinct, clusters }` for the page's `id`.
+Groups are shown unticked; `confirmedGroups(column, method, shown)` keeps only ticked ones with a
+spelling, and any tick or edit of a ticked spelling clears the preview. A group found again with
+the same members keeps its tick and spelling. Its state is `window.__plato.spellings`.
+
 #### Address rules, hermes-addresses 1 (2026-10-01)
 
 | Rule | Written as | Carried as |
