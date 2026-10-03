@@ -1467,6 +1467,48 @@ matching (below). This sends each place's name to the gazetteer, and its coordin
   and looks for the token in window.__plato, the page, the console, request addresses and bodies, and
   the saved work file, beside the control that it is in every request's Authorization header.
 
+## Workflows (Methodos)
+
+Methodos runs a workflow, a named sequence of the tools' own operations, from a recipe
+(`docs/plans/methodos.md`). It is a coordinator over the engine, not a second engine: plain ES modules
+in `src/engine/methodos/`, with no page, no storage and no framework, so that the same code runs in
+Node (the tests) and in the worker. Phases 0 and 1 are built; nothing on the page uses it yet, and a
+workflow is not yet kept anywhere (both are later phases).
+
+- **Operations** (`operations.js`) describe the calls the tools already make: each says whether it is
+  automatic or interactive (done by the user, so the step waits), what types it takes and gives,
+  which permissions it needs, and whether a cancelled run keeps what it had done (a review and a
+  lookup do; a conversion or a part of publishing is all or nothing). An operation that does not
+  exist yet (regions level by level, the containment relation, adopting a match's geometry, Chora's
+  hand-back, finding places in a text) is declared with the reason it is not available, and a
+  workflow whose answers would reach it is refused at the start, in those words.
+- **Recipes** (`recipes/`) are data: "Map your data" and "Publish a dataset". A step names an
+  operation, where each input comes from (a file chosen at the start, `$files`, or an earlier step's
+  output, `mint.dataset`, with `??` for "this, or that if it was skipped"), its options (literal or
+  from an answer) and the yes-or-no question under which it runs. `recipe.js` checks a recipe
+  (every input made before it is used, of a type the operation takes, and never only by a step that
+  may be skipped) and gives its digest: the SHA-256 of the whole recipe, its words included, which a
+  workflow records.
+- **Hand-offs** (`handoffs.js`) are references, never content: `{ type, name, size, sha256 }`, made by
+  Krisis's `fileRecords`, with a type from a closed list (`files`, `dataset`, `mapping`,
+  `work.krisis`, `work.hermes-text`, `deposit`, `site`, `w3id`). A hand-off of the wrong type is
+  refused in words; a file that is not the one a reference names is refused by Krisis's `filesDiffer`.
+- **The runner** (`runner.js`) is pure: a workflow's state is JSON, and `start`, `next`, `complete`,
+  `waiting`, `resume`, `stop`, `fail`, `cancel`, `progress` and `invalidate` each return a new state
+  or throw, in words, where they do not apply. It keeps the three ways of stopping apart: waiting
+  for the user (`waiting`, with what for), a data problem (`stopped`, with what to put right and the
+  step to run again) and an execution failure (`failed`, kept so that it can be tried again).
+  `invalidate` does a step again and resets every step that took its outputs.
+- **The adapters** (`adapters.js`) are one per automatic operation that has landed (check, convert,
+  compare, the four parts of publishing, match, apply, lookup), each calling the engine as the worker
+  does. The front end gives a host: `open(ref)` for the file a reference names, `env()` for one run's
+  environment, `file(output)` for what the run wrote, and, for the lookup, a lookup made on the page
+  thread through the permissions module. `drive()` runs the automatic steps until the workflow waits,
+  stops, fails or completes.
+
+`test/methodos.test.js` drives "Publish a dataset" through the real engine on PLATO's Antonine example
+and checks that every output the record names is the file the engine wrote, by size and SHA-256.
+
 ## Permissions
 
 Nothing goes to another site unless the user allows it, in one panel for the whole toolbox: the
