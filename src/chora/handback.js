@@ -93,20 +93,30 @@ export async function give(id, ref) {
 
 /**
  * For the main page: the hand-back for `workflow`, checked, or null; taken, so that it is used once.
- * Whatever is there goes, used or refused. Call it only on the user's click.
+ * Whatever is there goes, used or refused. Call it only on the user's click. Read and deleted in one
+ * transaction, so that a hand-back written meanwhile is never the one deleted.
  */
 export async function take(workflow) {
   let v;
-  try { v = await tx('readonly', (s) => s.get(KEY)); } catch { return null; }
-  if (v !== undefined) { try { await tx('readwrite', (s) => s.delete(KEY)); } catch {} }
+  try {
+    v = await tx('readwrite', (s) => {
+      const r = s.get(KEY);
+      r.onsuccess = () => { if (r.result !== undefined) s.delete(KEY); };
+      return r;
+    });
+  } catch { return null; }
   return check(v, workflow);
 }
 
-/** Let a hand-back go that is no longer fresh; a fresh one is kept. True if one went. */
+/** Let a hand-back go that is no longer fresh; a fresh one is kept. True if one went. Read, judged and deleted in one transaction. */
 export async function dropStale(now = Date.now()) {
-  let v;
-  try { v = await tx('readonly', (s) => s.get(KEY)); } catch { return false; }
-  if (v === undefined || isFresh(v, now)) return false;
-  try { await tx('readwrite', (s) => s.delete(KEY)); } catch { return false; }
-  return true;
+  let went = false;
+  try {
+    await tx('readwrite', (s) => {
+      const r = s.get(KEY);
+      r.onsuccess = () => { if (r.result !== undefined && !isFresh(r.result, now)) { s.delete(KEY); went = true; } };
+      return r;
+    });
+  } catch { return false; }
+  return went;
 }

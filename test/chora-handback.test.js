@@ -141,6 +141,23 @@ test('kept in the hand-off\'s store under a key of its own: given, taken once, a
   delete globalThis.indexedDB;
 });
 
+test('taking a hand-back, or letting a stale one go, reads and deletes in one transaction: a record written meanwhile is never lost', async () => {
+  globalThis.indexedDB = new IDBFactory();
+  const B = { ...REF, name: 'second.chora.json', sha256: hex('second') };
+  // take() and a give() started together: the give is queued after take's transaction, never inside it.
+  await give('wf-1', REF);
+  const [taken] = await Promise.all([take('wf-1'), give('wf-1', B)]);
+  assert.deepEqual(taken?.files, [REF], 'the record there when take began');
+  assert.deepEqual((await take('wf-1'))?.files, [B], 'the one written meanwhile is still there');
+  // dropStale() and a fresh give() started together: the stale one goes, the fresh one stays.
+  const { tx } = await import('../src/chora/handoff.js');
+  await tx('readwrite', (s) => s.put({ ...record('wf-1', REF), at: Date.now() - FRESH - 1 }, KEY));
+  const [dropped] = await Promise.all([dropStale(), give('wf-1', B)]);
+  assert.equal(dropped, true);
+  assert.deepEqual((await take('wf-1'))?.files, [B], 'the fresh one written meanwhile is kept');
+  delete globalThis.indexedDB;
+});
+
 test('the reference is one Methodos accepts as a hand-off of a dataset, made as Methodos makes one, and nothing Methodos refuses is used here', async () => {
   const text = '{"spatialEntities":[]}\n'; const file = new File([text], 'antonine.chora.json');
   const ref = await refOf(file);
