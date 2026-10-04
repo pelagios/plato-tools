@@ -29,6 +29,8 @@ import { reprPointOf } from './geo.js';
 import { choraAdoptIdentityNote, choraAdoptGeometryNote, choraConsultedNote, CHORA_ADOPT_TEXT, lookupPage } from '../words.js';
 
 export const CITES_AS_EVIDENCE = 'http://purl.org/spar/cito/citesAsEvidence';
+// A record consulted, not copied: the drawing is the user's own, informed by it (Stephen, 4 October 2026).
+export const CITES_FOR_INFORMATION = 'http://purl.org/spar/cito/citesForInformation';
 const SPDX = 'https://spdx.org/licenses/';
 const isIri = (s) => typeof s === 'string' && /^[A-Za-z][A-Za-z0-9+.-]*:\S+$/.test(s);
 /** Whether a place's key is an address (its @id), as adopting needs; Chora keys a place without one as #<n>. */
@@ -312,13 +314,14 @@ export function licenceNotes(l) {
 // ---- a record that may not be copied ----------------------------------------------------------------------
 /**
  * The parts of a drawing made by hand for a place whose gazetteer record was consulted and not copied
- * (a 451, or a source that may not be redistributed): it cites WHG (cito:citesAsEvidence), with the
+ * (a 451, or a source that may not be redistributed): it cites WHG (cito:citesForInformation: the user
+ * saw the record's name and description, never its location, so it is not the drawing's evidence), with the
  * record as the locator, and no licence (nothing of it is copied); its notes say so, after how it was
  * drawn. `consulted` is consultation(): { record, name, namespace, localId, sourceName }.
  */
 export function consultedParts(consulted, drawnNote) {
   return {
-    citation: { source: whgSource(), locator: consulted.record, citationFunction: CITES_AS_EVIDENCE },
+    citation: { source: whgSource(), locator: consulted.record, citationFunction: CITES_FOR_INFORMATION },
     notes: `${drawnNote}. ${choraConsultedNote(consulted)}`,
   };
 }

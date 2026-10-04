@@ -1567,7 +1567,8 @@ location as one act that records two claims: an identity (this place IS the reco
 - **Never copied:** a 451, or a source whose `redistributable` is `false` (Krisis's `upstreamLicence`,
   tested directly, not through `licenceWarns`). Its marker is hidden, the record is said to be consulted,
   not copied, and "Draw it yourself" makes the next drawing of the place cite it (`consultedParts`:
-  `citesAsEvidence`, the record as locator, no licence). Cancel beside it, closing the panel, or choosing
+  `citesForInformation`, since the user saw the record's name and description but never its location;
+  the record as locator, no licence). Cancel beside it, closing the panel, or choosing
   another place disarms it.
 - **The attestations** (`adoptionAttestations`) share `created` and the contributor and have no `@id`.
   Both cite `gazetteerSource(WHG_SERVICE)`; the geometry with `cito:citesAsEvidence`, the record's w3id as

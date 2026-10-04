@@ -435,7 +435,9 @@ test('a hand-drawing for a record consulted, not copied, cites WHG with the reco
   const parts = adopt.consultedParts(c, 'Drawn by hand on the Natural Earth basemap at zoom 9 in PLATO tools (Chora)');
   const a = newGeometryAttestation({ geojson: { type: 'Point', coordinates: [17.08, -22.57] }, contributor: who, created: CREATED, ...parts });
   assert.equal(valid(a), null);
-  assert.deepEqual(a.citations, [{ source: WHG, locator: W3ID + 'place:tgn:7011781', citationFunction: EVIDENCE }]);
+  // Cited for information, not as evidence: the user never saw the record's location (Stephen, 4 October 2026).
+  assert.deepEqual(a.citations, [{ source: WHG, locator: W3ID + 'place:tgn:7011781', citationFunction: 'http://purl.org/spar/cito/citesForInformation' }]);
+  assert.notEqual(a.citations[0].citationFunction, EVIDENCE);
   assert.equal(Object.hasOwn(a.citations[0].source, 'licence'), false);
   assert.match(a.notes, /^Drawn by hand/);
   assert.ok(a.notes.includes(W3ID + 'place:tgn:7011781'));
