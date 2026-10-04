@@ -4875,14 +4875,15 @@ def iiif_checks(pw, url, tmp):
         page.reload(); ready()
         back = soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.mapId)', 30, grid_id)
         o = next((x for x in cstate(page)['overlays'] if x['annotationId'] == grid_id), {})
-        return {'settled before': settled, 'held': held['on disk'] == (not show), 'held detail': held,
+        return {'settled before': settled, 'held': held['on disk'] == (not show) and (held['writes in flight'] or 0) >= 1, 'held detail': held,
                 'came back': back, 'visible': o.get('visible'), 'box ticked': page.is_checked(box) if back else None,
                 'drawn': shown(grid_id) if show and back else None}
     def hidden_at_once():
-        # The control: a map hidden and the page reloaded at once comes back hidden (so the check below can see one).
+        # The other way: a map hidden and the page reloaded at once comes back hidden (so the check below can see one).
+        # (The control for the fix itself is the unit test with the note taken away: test/chora-overlays-kept.test.js.)
         r = tick_and_reload(False)
         return r['settled before'] and r['held'] and r['came back'] and r['visible'] is False and r['box ticked'] is False, r
-    attempt('Chora maps: a map hidden and the page reloaded at once, before its record is written, comes back hidden (the control)', hidden_at_once)
+    attempt('Chora maps: a map hidden and the page reloaded at once, before its record is written, comes back hidden (the other way: back hidden)', hidden_at_once)
     def shown_at_once():
         r = tick_and_reload(True)
         if r['came back'] and r['visible'] is not True:   # left as the checks after this one expect: shown

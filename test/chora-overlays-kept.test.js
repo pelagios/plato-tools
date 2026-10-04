@@ -150,3 +150,28 @@ test('only a map\'s own file is read as kept: not the swap file of a write still
   assert.deepEqual(got.map((k) => k.key).sort(), [KEY, K].sort(), 'each map once, from its own file');
   assert.equal(got.find((k) => k.key === K).visible, false, 'as its file holds it, not as the swap file does');
 });
+
+// Another page of the site's origin can write this tab's sessionStorage and the folder (DEVELOPERS.md,
+// "The shared origin, plainly"): what is read is checked, a note that is not a shown state is let go.
+for (const planted of ['{}', '{"visible":"no"}', '{"opacity":50}', '{"visible":true,"opacity":"0.5"}', '{"visible":true,"opacity":null}']) {
+  test(`a note planted as ${planted} is not read over the record (the disk's state is), and is let go`, async () => {
+    const first = await load();
+    await first.keep(RECORD);   // hidden, opacity 1
+    sessionStorage.setItem('chora-overlays-shown', JSON.stringify({ [K]: JSON.parse(planted) }));
+    const next = await load();
+    const [k] = await next.kept();
+    assert.equal(k?.key, K, 'the map is kept');
+    assert.deepEqual([k.visible, k.opacity], [false, 1], "as the disk holds it");
+    assert.equal(sessionStorage.getItem('chora-overlays-shown'), null, 'the note let go');
+  });
+}
+test('a record on disk whose opacity or Show is not one is read as a map just added (shown, opaque); a good one as it is', async () => {
+  const ov = await load();
+  const files = () => disk.dirs.get('chora-overlays');
+  await ov.keep({ ...RECORD, opacity: 0.25 });
+  const B = 'b'.repeat(24);
+  files().set(`${B}.json`, JSON.stringify({ version: 1, ...RECORD, key: B, visible: 'no', opacity: 50 }));
+  const got = Object.fromEntries((await (await load()).kept()).map((k) => [k.key, [k.visible, k.opacity]]));
+  assert.deepEqual(got[K], [false, 0.25], 'a good record, as it is');
+  assert.deepEqual(got[B], [true, 1], 'a bad one, as a map just added');
+});

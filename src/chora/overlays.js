@@ -464,6 +464,9 @@ function setNote(key, shown) {
   } catch { /* storage refused: the write alone keeps it */ }
 }
 const shownOf = (x) => ({ opacity: x.opacity, visible: x.visible });
+// Another page of the site's origin can write sessionStorage and this folder (DEVELOPERS.md, "The shared
+// origin, plainly"): a shown state is one only with Show a boolean and the opacity a number from 0 to 1.
+const isShown = (x) => !!x && typeof x.visible === 'boolean' && typeof x.opacity === 'number' && Number.isFinite(x.opacity) && x.opacity >= 0 && x.opacity <= 1;
 async function write(rec) {
   const w = await (await (await dir()).getFileHandle(`${rec.key}.json`, { create: true })).createWritable();
   await w.write(JSON.stringify(rec));
@@ -519,7 +522,10 @@ export async function kept() {
         const e = JSON.parse(await (await h.getFile()).text());
         if (e?.version !== 1 || !e.item || `${e.key}.json` !== h.name) continue;
         if (queues.has(e.key) && !records.has(e.key)) continue;   // being let go
-        const note = n[e.key];
+        // A record whose state is not one is read as a map just added (app.js showMap: shown, opaque).
+        if (!isShown(e)) Object.assign(e, { visible: typeof e.visible === 'boolean' ? e.visible : true, opacity: isShown({ visible: true, opacity: e.opacity }) ? e.opacity : 1 });
+        let note = n[e.key];
+        if (note !== undefined && !isShown(note)) { setNote(e.key, null); note = undefined; }   // not a shown state: let go
         const latest = queues.has(e.key) && records.has(e.key) ? records.get(e.key)   // being written: what is being written
           : note ? { ...e, ...shownOf(note) } : e;
         records.set(e.key, latest);

@@ -1432,14 +1432,19 @@ and reaches nothing.
   file is written only when its writable closes, so a reload within those milliseconds (or, before
   the fix of 4 October 2026, while the folder was still being read first) brought a map back hidden;
   `kept()` reads the note over the record, and reads only a map's own file (`<24 hex>.json`, holding
-  that key): while a write is open Chrome lists its swap file, `<key>.json.crswap`, in the folder too,
-  holding the record being written (the old `kept()` read it as a second copy of the map). `window.__chora.overlayWrites` counts the writes not yet
+  that key): while a write is open Chrome lists its swap file, `<key>.json.crswap`, in the folder
+  too, holding the record being written (the old `kept()` read it as a second copy of the map). A
+  note is read only if Show is a boolean and the opacity a number from 0 to 1 (another page of the
+  origin can write it, below), and is otherwise let go; a record on disk whose state is not one is
+  read as a map just added (shown, opaque). `window.__chora.overlayWrites` counts the writes not yet
   on disk (as `draftWrites` does for drawings), and a reload for a permission waits for them
   (`keptWritten`). The unit test (`test/chora-overlays-kept.test.js`) holds a fake OPFS's close to
-  stand for the reload; the browser checks hold `FileSystemWritableFileStream.prototype.close` and
-  reload at once, hiding (the control: back hidden) and showing (back shown). **A permission withdrawn** takes its maps off the map at once (they stay kept, and come
-  back once it is allowed again); tiles the renderer has already asked for cannot be called back.
-  Each map's row names its image's site, with a "Permissions…" button that opens the panel there.
+  stand for the reload, with the note taken away as the control; the browser checks hold
+  `FileSystemWritableFileStream.prototype.close` and reload at once, showing (back shown) and the
+  other way (hidden: back hidden). **A permission withdrawn** takes its maps off the map at once
+  (they stay kept, and come back once it is allowed again); tiles the renderer has already asked for
+  cannot be called back. Each map's row names its image's site, with a "Permissions…" button that
+  opens the panel there.
 - **Why tiles cannot be guarded request by request** (the spike of 2026-09-30, @allmaps/maplibre
   1.0.0-beta.44, render beta.84): tiles are fetched in a pool of five workers, each made from a
   `blob:` (the renderer's own code, kept so by the build: the built chunk makes them with
@@ -1953,7 +1958,8 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
 - **The shared origin, plainly.** The tools are served on `pelagios.org`, which other Pelagios sites
   share. Everything the tools keep in this browser, permissions, choices, a pasted basemap's address
   and key, the WHG token if remembered, a reviewer's name, the working data (Chora's drafts, its
-  last output), can be read and changed by any page of `pelagios.org`, on that computer only. A
+  last output, the historical maps it keeps in `chora-overlays/` and their notes in sessionStorage),
+  can be read and changed by any page of `pelagios.org`, on that computer only. A
   page there could forge a grant; the panel lists whatever is kept, so a forged grant is seen and can
   be withdrawn, and the policy admits only plain sites. The panel says this in words. Moving the
   tools to an origin of their own was considered and not done (2026-10-01); the audit of that day
@@ -1963,7 +1969,9 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   sibling could write, such as `local` or `provider`; a click chooses the basemap as it was listed, at
   that address, not whatever storage holds by then, `sameBasemap`); a remembered
   contributor's or reviewer's ORCID is checked again on load (`orcidUri`, `checkReviewer`) and dropped,
-  and the cleaned value written back, if it is not one; files handed to Chora are usable for two
+  and the cleaned value written back, if it is not one; a historical map's shown state (its note or
+  its record) is read only if Show is a boolean and the opacity a number from 0 to 1, and a map kept
+  is admitted afresh, permissions and all, on every load; files handed to Chora are usable for two
   minutes and let go by either page after that.
 - **The frame and the referrer.** The head script also guards against framing: framed by another
   origin (the top window's address cannot be read), the page hides everything it has behind one line,
