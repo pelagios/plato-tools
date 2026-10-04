@@ -1186,12 +1186,12 @@ and reaches nothing.
   legend only when there is one, and it is never a location's own date. `WhenTrue`, the default,
   and any role PLATO does not define are shown as the date of the claim. A location given only
   relative to other places (a `qualification` with `relativeQualifier` or `relativeTo`, one anchor
-  or a list, #19, and no coordinates) is a line under Locations in words: "between Assuan and 1767,
-  as written “between U01 Assuan (2207) and U01 Philai (1767)” (relative; not drawn)", with its
-  distance and bearing when given. An anchor that is a place of the dataset is a link to it, any
-  other its address's last segment, so the source's own words follow where it gives them. It is
-  never drawn and never places
-  the place on the map. A location with coordinates and a qualification is drawn, as before; one
+  or a list, #19, and no coordinates) is a line under Locations in words, with its distance and
+  bearing when given. An anchor that is a place of the dataset is a link to it, any other its
+  address's last segment, so the source's own words follow where it gives them: in PLATO's
+  Trismegistos example neither anchor is a place of the dataset, so the card writes "between 2207
+  and 1767, as written “between U01 Assuan (2207) and U01 Philai (1767)” (relative; not drawn)".
+  It is never drawn and never places the place on the map. A location with coordinates and a qualification is drawn, as before; one
   with coordinates Chora cannot draw (a WKT polygon) and a qualification is not "only relative",
   and is left out as it was. A name
   is written with its language tag (else its script), its romanised form, and the system of
@@ -1512,11 +1512,12 @@ and reaches nothing.
     no holes, and the page says they were left out), cited from the map it was traced from exactly as one
     traced by hand is, its round trip checked. With no place chosen, Enter keeps the proposal and says to
     choose one. The draft keeps what was proposed and how (`trace.assisted`); its notes are
-    `choraAssistedNote` (`words.js`, the one place they are made) and then georefNote's: how it was
-    proposed (ε in image pixels, the gaps bridged, the holes left out) and "accepted as proposed" or
-    "edited by hand: moved k, added a, removed d, of n proposed", counted against the proposal
-    (`ink/edits.js`). Attested, not computed: a person accepted it. Moved off its map, it keeps saying it
-    was proposed from that map's ink, and that the citation was dropped (`uncitedParts`).
+    georefNote's fixed template first and then `choraAssistedNote` (`words.js`, the one place they are
+    made), appended after it: how it was proposed (ε in image pixels, the gaps bridged, the holes left
+    out) and "accepted as proposed" or "edited by hand: moved k, added a, removed d, of n proposed",
+    counted against the proposal (`ink/edits.js`). Attested, not computed: a person accepted it. Moved
+    off its map, it keeps saying it was proposed from that map's ink, and that the citation was dropped
+    (`uncitedParts`).
   - **Offered** once a map shown has drawn a tile (`maptileloaded`: the renderer's `firstmaptileloaded`
     comes only when the first tile it asked for loads, and never when that one is refused). Until then
     the buttons are `aria-disabled` (not `disabled`, so that they can be focused) and their tooltip says
@@ -2215,8 +2216,8 @@ A push to `main` runs the tests, builds the site and publishes it to GitHub Page
   `:root[data-theme="dark"]`, word for word; `test/theme.test.js` fails if a twin is missing or
   differs, so add a colour to both. The statuses' colours are tokens (`--status-…`), used by the
   card's labels and its timeline's bars alike. What does not change with the theme is the map: its
-  basemaps, the places drawn on it (`STATUS_COLOURS` in `src/chora/map.js`), and its controls
-  (MapLibre's own white control group).
+  basemaps, the places drawn on it (`STATUS_COLOURS`, defined in `src/chora/card.js` and imported
+  by `src/chora/map.js`), and its controls (MapLibre's own white control group).
 - **Tooltips** are the site's own (`src/lib/tooltip.js`, loaded by each page; its styles are the
   commented block in `src/styles.css`), never the browser's: give an element `data-tip="…"`, or
   `data-tip-template="id"` for a `<template>` of rich text (no links or controls: a tooltip cannot
