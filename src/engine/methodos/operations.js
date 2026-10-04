@@ -49,10 +49,14 @@ export const OPERATIONS = Object.fromEntries([
   // it cannot start, rather than doing something else under its name.
   op({ key: 'lookup.levels', title: 'Identify the containing regions, level by level', tool: 'Krisis', networked: true, permissions: [['gazetteer', 'whg']],
     takes: { subjects: { types: ANY } }, gives: { work: 'work.krisis' },
-    available: 'Regions cannot be identified yet: Hermes has no column role for a containing region, and Krisis has no level-by-level lookup in which a region constrains the one below it.' }),
+    available: 'Regions cannot be identified yet: Krisis has no level-by-level lookup in which a region constrains the one below it. (Hermes reads them: a column of the regions a place lies in, split into levels, is written as ContainedIn to regions it mints.)' }),
   op({ key: 'relate.containment', title: 'Record which region each place is in', tool: 'Krisis',
     takes: { subjects: { types: ANY }, work: { types: ['work.krisis'] } }, gives: { dataset: 'dataset' },
-    available: "PLATO has decided how containment is recorded (PLATO #23, option B: the source's ContainedIn points to a region minted under the full chain, and a reviewer's IdentityRelation links that region to the authority's), but the tools do not write it yet." }),
+    // Checked against Hermes's regions (main 3de9822): the source's half of PLATO #23, option B, is
+    // written when the table is converted (the step that makes the dataset), not by this operation, which
+    // takes a Krisis work file; its own half, a reviewer's IdentityRelation from each region to the
+    // authority's, needs the regions identified level by level first. So it stays unavailable.
+    available: "Hermes now records which region each place is in when the table is converted (PLATO #23, option B: ContainedIn to a region minted under the full chain); what this step adds, a reviewer's IdentityRelation linking each region to the authority's, waits on Krisis identifying the regions level by level." }),
   op({ key: 'adopt', title: "Take each identified place's location from its match", tool: 'Chora',
     takes: { dataset: { types: ANY } }, gives: { dataset: 'dataset' },
     available: "Adopting a match's geometry is on a branch of Chora (chora-adopt) that has not been merged." }),
