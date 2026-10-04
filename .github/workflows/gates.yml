@@ -130,6 +130,17 @@ jobs:
         env:
           PLATO_REPO: ${{ github.workspace }}/plato-repo
           PYTHONUNBUFFERED: '1'
+      # The names of the checks run, for same-checks below: sorted, not made unique, so a check run twice counts twice.
+      - name: Names of the checks run
+        if: always()
+        shell: bash
+        run: sed -nE 's/^  (PASS|FAIL)  (.*)$/\2/p' e2e.log | sed -E 's/  -- .*$//' | sort > names-${{ matrix.mode }}.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: names-${{ matrix.mode }}
+          path: names-${{ matrix.mode }}.txt
+          if-no-files-found: error
       - name: Summary
         if: always()
         shell: bash
@@ -149,3 +160,23 @@ jobs:
           name: ${{ matrix.mode }}-log
           path: e2e.log
           if-no-files-found: ignore
+
+  # prove-it-fails says every check that RAN failed; this says the same checks ran in both legs. A check
+  # that the page with no tools never reached (a section stopped early) is otherwise missed: it would be
+  # neither a pass there nor counted.
+  # Only where prove-it-fails runs (skipped, not failed, where the plan left it out).
+  same-checks:
+    needs: [plan, e2e]
+    if: ${{ always() && contains(needs.plan.outputs.modes, 'prove-it-fails') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: names-*
+          merge-multiple: true
+      - name: The same checks ran against the build and against the page with no tools
+        shell: bash
+        run: |
+          wc -l names-e2e.txt names-prove-it-fails.txt
+          test -s names-e2e.txt && cmp names-e2e.txt names-prove-it-fails.txt || { diff names-e2e.txt names-prove-it-fails.txt; exit 1; }

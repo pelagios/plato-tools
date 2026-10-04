@@ -2366,6 +2366,7 @@ commit. **unit** and **e2e** run on every branch. **prove-it-fails** tests the c
 tools, so a branch runs it only when it changes them (anything under `e2e/`, or the workflow
 itself); it runs in full every night on `main` (03:17 UTC), and by hand with
 `gh workflow run Gates --ref <branch>`, so whatever a branch skipped is caught within a day.
+**same-checks** runs whenever prove-it-fails does, and compares the two.
 
 - **unit**: `npm test`, `scripts/install-test.mjs` (the tools installed as npx installs them, and
   the command run) and `npm run build`.
@@ -2375,13 +2376,26 @@ itself); it runs in full every night on `main` (03:17 UTC), and by hand with
   against a page with no tools on it (the harness can fail); a check that passed there is named in
   the summary. Every check runs, as in **e2e**, but a wait on that page ends after a second
   (`FAST` in `e2e/app_test.py`) where it used to run its full timeout: the page has no script, so
-  what a check waits for there is true at once or never. Only waits on that page as loaded are cut
-  short (`toolless()`): not on any other page this mode opens, nor once the harness has put a script
-  into it (`add_script_tag`, `set_content`), and never a navigation or a fixed pause. A check that
-  passes there still passes, and still fails the job (three planted vacuous checks were each caught,
-  October 2026). The run's last lines give the number of checks and of waits cut short;
-  `PROVE_FULL_WAITS=1` waits in full, as before (some 85 minutes on GitHub, against under five
-  minutes now; the job is given 20).
+  what a check waits for there is true at once or never. Only waits on that page are cut short
+  (`toolless()`), not on a page other than the one with no tools (about:blank, a framing page, the
+  real page that a few checks open in this mode), and never a navigation or a fixed pause. Nor once
+  the harness may have put into it something that acts later: a script tag or new content
+  (`add_script_tag`, `set_content`) or an `evaluate()` naming a timer, a promise or an async
+  function (until the next navigation), or an init script naming one (for good, on the page or its
+  whole context, as init scripts run again on every navigation). A check that passes there fails the
+  job as before, with one limit: the test for "acts later" reads the script's text, so a script that
+  changes the page later without naming a timer, a promise or `async`, and a check that passes only
+  more than a second after that change, would be missed here and caught by `PROVE_FULL_WAITS=1`,
+  which waits in full everywhere (some 85 minutes on GitHub). Planted vacuous checks of each kind (a
+  wait on what the page has, an absence after a wait that timed out, a state set 3 s later by a
+  script tag, by `evaluate()`, by an init script) were each caught, October 2026. The run's last
+  lines give the number of checks and of waits cut short, and a run that cut none short fails (the
+  shortener no longer recognises the page). The step takes under five minutes on GitHub and the job
+  about five and a half; it is given 20.
+- **same-checks**: the names of the checks run in **e2e** and in **prove-it-fails**, sorted (a check
+  run twice counts twice), must be the same list. prove-it-fails says only that every check that ran
+  failed; a check it never reached (a section stopped early) would otherwise go unnoticed. A
+  difference is shown as a diff, and an empty list from **e2e** fails too.
 
 ```bash
 git push -u origin my-branch
