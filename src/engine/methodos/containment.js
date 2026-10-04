@@ -63,3 +63,22 @@ export function containment(doc, work) {
   }
   return { containedIn, regions: regions.size, identities, promoted, missing };
 }
+
+/**
+ * Whether a step writes its input out in the format it already has (Stephen, 4 October 2026): a
+ * conversion whose workflow-given format (`options.target`, as the interview set it) is the input's
+ * own (`target`, the input's format as a target key). Such a step is done by downloading the file
+ * as it is, never by converting it into itself, which the page does not offer.
+ */
+export const writesItself = (step, target) => !!step && step.op === 'convert' && typeof step.options?.target === 'string' && !!target && step.options.target === target;
+
+/**
+ * Words for a review whose saved address (work.subjects.uri, the address its candidates were exported
+ * for) is not the base address now in Options, or null: Finish writes for the review's address, so a
+ * base address changed since is said, not acted on.
+ */
+export function baseDiffers(work, base) {
+  const saved = work?.subjects?.uri, now = datasetAddress(base);
+  if (typeof saved !== 'string' || !saved || !now || saved === now) return null;
+  return `The base address in Options (${now}) is not the one this review was saved with (${saved}): Finish writes the attestations for ${saved}, the address its candidates were exported for. Set Options back to it if your places keep that address.`;
+}

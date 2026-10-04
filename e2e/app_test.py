@@ -2864,6 +2864,7 @@ def map_your_data_checks(pw, url, tmp):
         page.click('#methodos-ask'); until(page, "!document.getElementById('methodos').hidden", 5)
         page.check('input[name="methodos-have"][value="table"]'); page.check('input[name="methodos-want"][value="map"]')
         for k, v in (('has-regions', 'yes'), ('will-draw', 'yes'), ('will-publish', 'no')): page.check(f'input[name="methodos-ask-{k}"][value="{v}"]')
+        r['base shown'] = page.input_value('#methodos-base')   # pre-filled from Options
         planned = page.eval_on_selector_all('#methodos-plan li', 'ls => ls.map((l) => l.textContent)')
         page.click('#methodos-start'); until(page, "['pending', 'idle'].includes(document.getElementById('methodos-tracker').dataset.status)", 10)
         s = choose([MYDATA_CSV])
@@ -2873,9 +2874,10 @@ def map_your_data_checks(pw, url, tmp):
         t = track(); r['begun'] = t
         ok = (r['canary'] == 'enforced' and r['policy'] and all(re.match(r'^https://([a-z]+\.)?whgazetteer\.org$', o) for o in r['policy']) and t['steps'].get('columns') == 'current'
               and [k for k in t['steps']] == ['columns', 'check', 'dataset', 'regions', 'lookup', 'review', 'relate', 'place', 'again', 'compare', 'out']
-              and not any('not identified' in x or 'Not yet available' in x for x in planned) and r['columns'] == {'county': 1, 'parish': 2})
-        return ok, {'levels': r['columns'], 'planned': planned[:12], 'policy': r['policy'], 'canary': r['canary'], 'steps': t['steps']}
-    attempt('Map your data: the interview (a table, places on a map, with regions, drawing, no publishing) gives the eleven steps, the regions step and the step recording them available, with WHG alone in the page\'s policy', begin)
+              and not any('not identified' in x or 'Not yet available' in x for x in planned) and r['columns'] == {'county': 1, 'parish': 2}
+              and r['base shown'] == MYDATA_BASE)
+        return ok, {'base shown': r['base shown'], 'levels': r['columns'], 'planned': planned[:12], 'policy': r['policy'], 'canary': r['canary'], 'steps': t['steps']}
+    attempt('Map your data: the interview (a table, places on a map, with regions, drawing, no publishing) gives the eleven steps, the regions step and the step recording them available, the base address shown from Options, with WHG alone in the page\'s policy', begin)
 
     def through_convert():
         need('begun')
@@ -2983,6 +2985,18 @@ def map_your_data_checks(pw, url, tmp):
         until(page, "() => /Chora handed back/.test(document.getElementById('methodos-message').textContent)", 10)
         choose([r['drawn']]); step_is('place', 'done', 15)
         return (ls.get('passed') is True and ls.get('added') == 2 and track()['steps'].get('again') == 'current'), {'save': {k: ls.get(k) for k in ('passed', 'added')}, 'steps': track()['steps']}
+    def base_changed():
+        need('related')
+        page.evaluate("() => { const b = document.getElementById('base'); b.value = 'https://example.org/moved/'; b.dispatchEvent(new Event('change')); }")
+        s = run('#finish')
+        warned = page.inner_text('#review-warning') if page.is_visible('#review-warning') else ''
+        page.evaluate("() => { const b = document.getElementById('base'); b.value = %s; b.dispatchEvent(new Event('change')); }" % json.dumps(MYDATA_BASE))
+        s2 = run('#finish')
+        quiet = page.is_visible('#review-warning')
+        return (s.get('phase') == 'done' and 'is not the one this review was saved with (' + MYDATA_BASE + ')' in warned and s2.get('phase') == 'done' and quiet is False), \
+            {'phase': s.get('phase'), 'warned': warned[:240], 'shown with the same address': quiet}
+    attempt('Map your data: Finish with another base address in Options says it is not the review\'s saved address, and still writes (not blocked); with the same address, nothing is said', base_changed)
+
     attempt('Map your data: in Chora, opened from the tracker, Kirk House\'s location and identity adopted from the stub\'s record, saved (the version check passed), handed back, and the place step done with that file', adopt_in_chora)
 
     def to_the_end():
@@ -2993,20 +3007,20 @@ def map_your_data_checks(pw, url, tmp):
         step_is('compare', 'done')
         # The tracker narrows step 2 to the step's tool (Metaphrasis) once it comes to it.
         until(page, "() => { const t = document.getElementById('target'); return !!t && !!t.offsetParent; }", 30)
-        # The dataset handed back is PLATO JSON already, and the page offers no conversion of a format into
-        # itself: written out as PLATO JSON Lines, and the PLATO JSON handed back read as the result too.
-        offered = page.eval_on_selector_all('#target option', 'os => os.map((o) => o.value)')
-        page.select_option('#target', 'plato-jsonl')
-        s = run('#convert'); step_is('out', 'done')
-        r['final'] = saved(s, '.jsonl')
+        # The dataset handed back is PLATO JSON already, the format the workflow writes: the step is ready to
+        # download it as it is (the page offers no conversion of a format into itself), and is done once downloaded.
+        until(page, "() => !document.getElementById('methodos-download').hidden", 30)
+        ready = {'row': page.inner_text('#methodos-track li[data-step="out"]'), 'message': track()['message'], 'button': page.inner_text('#methodos-download')}
+        with page.expect_download(timeout=T(30) * 1000) as d: page.click('#methodos-download')
+        r['final'] = out / ('final-' + d.value.suggested_filename); d.value.save_as(r['final'])
+        step_is('out', 'done', 15)
         until(page, "document.getElementById('methodos-tracker').dataset.status === 'completed' || !document.querySelector('#methodos-track li.is-current')", 15)
-        lines = [json.loads(x) for x in r['final'].read_text().splitlines() if x.strip()]
-        head = next((x for x in lines if 'gazetteer' in x), {})
-        e = mydata_ends({'gazetteer': head.get('gazetteer'), 'spatialEntities': [x for x in lines if '@id' in x and 'gazetteer' not in x]}); r['ends'] = e
-        r['doc'] = json.loads(r['drawn'].read_text())
-        e2 = mydata_ends(r['doc'])
-        return (r['again'] == 'done' and 'plato-json' not in offered and mydata_complete(e) and mydata_complete(e2)), {'again': r['again'], 'offered': offered, 'ends': e, 'handed back': e2, 'steps': track()['steps']}
-    attempt('Map your data: checked again, compared with the dataset converted from the table, and written out (PLATO JSON as handed back from Chora, and PLATO JSON Lines), each with its ten places ContainedIn their parishes, its identities and adopted geometry citing the stub, and its identities naming their candidates', to_the_end)
+        r['doc'] = json.loads(r['final'].read_text())
+        e = mydata_ends(r['doc']); r['ends'] = e
+        same = r['final'].read_bytes() == r['drawn'].read_bytes()
+        return (r['again'] == 'done' and 'Ready to download' in ready['row'] and 'Ready to download' in ready['message'] and ready['button'] == f"Download {r['drawn'].name}"
+                and same and mydata_complete(e)), {'again': r['again'], 'ready': ready, 'same file': same, 'ends': e, 'steps': track()['steps']}
+    attempt('Map your data: checked again, compared with the dataset converted from the table, and, already PLATO JSON, ready to download and downloaded as it is (the step then done), with its ten places ContainedIn their parishes, its identities and adopted geometry citing the stub, and its identities naming their candidates', to_the_end)
 
     def can_fail():
         need('final', 'doc')
@@ -5561,7 +5575,17 @@ def methodos_page_checks(browser, url):
         # absences, beside the regions and relate steps planned, shown and begun as to come: the presences).
         ctx, page = fresh()
         try:
-            answer(page, 'table', 'map', {'has-regions': True, 'will-draw': False, 'will-publish': False})
+            # Options' base address is empty here: the interview asks for one (needed, the regions being minted
+            # under it), and Follow is not offered until it is given; typed, it is written to Options too.
+            before = {'options base': page.input_value('#base')}
+            answer(page, 'table', 'map', {'has-regions': False, 'will-draw': False, 'will-publish': False})
+            before['asked without regions'] = page.is_visible('#methodos-base')
+            page.check('input[name="methodos-ask-has-regions"][value="yes"]')
+            before.update({'asked': page.is_visible('#methodos-base'), 'shown': page.input_value('#methodos-base'), 'follow': page.is_visible('#methodos-start'),
+                           'verdict': page.inner_text('#methodos-verdict')})
+            page.fill('#methodos-base', 'https://example.org/asked/')
+            until(page, "() => !document.getElementById('methodos-start').hidden", 5)
+            before['options after'] = page.input_value('#base')
             a = st(page)
             page.click('#methodos-start'); until(page, "!document.getElementById('methodos-tracker').hidden", 5)
             b = st(page)
@@ -5576,10 +5600,12 @@ def methodos_page_checks(browser, url):
                   and b['tracker'] and ids(b['track']) == want and all(x['state'] != 'unavailable' for x in b['track'])
                   and ids(c['track']) == want and next((x['state'] for x in c['track'] if x['id'] == 'regions'), None) == 'todo'
                   and c['track'][0]['state'] == 'current' and c['where'].startswith(f"Step 1 of {len(want)}") and not last
-                  and 'Not yet available' not in page.evaluate("() => document.getElementById('methodos-tracker').textContent"))
-            return ok, {'plan': a, 'started': b, 'begun': c, 'last step notes': last}
+                  and 'Not yet available' not in page.evaluate("() => document.getElementById('methodos-tracker').textContent")
+                  and before['options base'] == '' and before['asked without regions'] is False and before['asked'] is True and before['shown'] == ''
+                  and before['follow'] is False and 'the base address among them' in before['verdict'] and before['options after'] == 'https://example.org/asked/')
+            return ok, {'base': before, 'plan': a, 'started': b, 'begun': c, 'last step notes': last}
         finally: ctx.close()
-    attempt('Methodos: with regions answered Yes the workflow is followed and begun with its regions step and the step recording them available, nothing "Not yet available", and no note at the end', unavailable)
+    attempt('Methodos: with regions answered Yes the base address is asked (not without regions), Follow waits for it, and it is written to Options; the workflow is then followed and begun with its regions step and the step recording them available, nothing "Not yet available", and no note at the end', unavailable)
 
     def unsure_and_none():
         # "Not sure" leads to the plain grid of cards; answers with no recipe say so and name the tools.

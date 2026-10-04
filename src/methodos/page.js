@@ -5,7 +5,7 @@
 // at through onStep, and narrows step 2 to that step's tool (#tool=) and says the step in #for-tool.
 // A visitor who never opens Methodos sees the page as it was: nothing here runs until they do, bar
 // reading the store for a workflow kept from before.
-import { HAVE, WANT, choose, questionsFor, answersFor, answered, plan, feedbackUrl } from '../engine/methodos/interview.js';
+import { HAVE, WANT, choose, questionsFor, answersFor, answered, plan, feedbackUrl, baseAsked } from '../engine/methodos/interview.js';
 import { OPERATIONS } from '../engine/methodos/operations.js';
 import { RECIPES } from '../engine/methodos/recipes/index.js';
 import * as runner from '../engine/methodos/runner.js';
@@ -14,7 +14,7 @@ import { atBoundary, reconcile, restartRemaining } from '../engine/methodos/reco
 import { take as takeHandback, isWorkflowId } from '../chora/handback.js';
 import { outputStore } from './outputs.js';
 import { fmtBytes } from '../engine/words.js';
-import { regionsSettled, notReviewed, relateProblem } from '../engine/methodos/containment.js';
+import { regionsSettled, notReviewed, relateProblem, writesItself } from '../engine/methodos/containment.js';
 
 // The input of each automatic operation that the page's run takes from the files chosen in step 1: a
 // run is the step's only if those files are the ones the step takes (by size and SHA-256).
@@ -89,7 +89,9 @@ function stepList(list, steps, at, done, notes = []) {
  *   ready()          a promise, settled when the engine is ready for a file;
  *   mapping()        the matching of columns shown, or null;
  *   review()         the review open, as { text, name }, or null;
- *   openWork(file)   open a Krisis work file, as "Resume a review" does;  pickWork()  choose one.
+ *   openWork(file)   open a Krisis work file, as "Resume a review" does;  pickWork()  choose one;
+ *   ownTarget()      the format of the files chosen, as a conversion's target key, or null;
+ *   base()           the base address in Options;  setBase(v)  write one there (the one store of it).
  * `workflow` is the id the page's address named (#workflow=<id>, Chora's way back), or null: that
  * workflow is the one taken up, and its step "place" offers Chora's hand-back.
  * Returns { open(), chosen(files), began(run), ended(run), keepChanged(on), id() }: the host
@@ -131,6 +133,29 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     }
   }
 
+  // The base address, asked only for a workflow that mints addresses (interview.js baseAsked): one
+  // field, pre-filled from Options' and written back there as it is typed, so that it has one store.
+  const texts = {};
+  function baseField() {
+    const asked = baseAsked(choice, yesNo);
+    let fs = q(more, '#methodos-base-q');
+    if (!asked) { fs?.remove(); more.hidden = !questionsFor(choice).length; return; }
+    if (!fs) {
+      const input = el('input', { type: 'url', id: 'methodos-base', name: 'methodos-base', autocomplete: 'url', spellcheck: false, value: page.base?.() || '' });
+      input.setAttribute('aria-describedby', 'methodos-base-help');
+      fs = el('fieldset', { id: 'methodos-base-q', className: 'methodos-text' }, el('legend', {}, el('label', { htmlFor: 'methodos-base', textContent: asked.question })), input,
+        el('p', { id: 'methodos-base-help', className: 'muted', textContent: `${asked.needed ? 'Needed: the regions are given addresses under it.' : 'Optional: minting takes it, where the dataset has none of its own.'} It is the base address in Options, which this changes too.` }));
+      more.append(fs);
+    } else if (q(fs, '#methodos-base') !== document.activeElement) q(fs, '#methodos-base').value = page.base?.() || q(fs, '#methodos-base').value;
+    texts.base = q(fs, '#methodos-base').value;
+    more.hidden = false;
+  }
+  interview.addEventListener('input', (e) => {
+    if (e.target.id !== 'methodos-base') return;
+    texts.base = e.target.value; page.setBase?.(e.target.value.trim());
+    verdictNow();
+  });
+
   function verdictNow() {
     startB.hidden = true; gridB.hidden = true; planEl.replaceChildren(); planEl.hidden = true;
     delete interview.dataset.recipe;
@@ -154,8 +179,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     }
     const recipe = RECIPES[choice.recipe];
     interview.dataset.recipe = recipe.key;
-    if (!answered(choice, yesNo)) { verdict.textContent = `This leads to the workflow “${recipe.title}”. Answer the questions under 3 to see its steps.`; return; }
-    const p = plan(choice.recipe, answersFor(choice, yesNo));
+    if (!answered(choice, yesNo, texts)) { verdict.textContent = `This leads to the workflow “${recipe.title}”. Answer the questions under 3${baseAsked(choice, yesNo)?.needed ? ', the base address among them,' : ''} to see its steps.`; return; }
+    const p = plan(choice.recipe, answersFor(choice, yesNo, texts));
     verdict.textContent = `Your workflow: ${p.title}, in ${runs(p).length} steps.`;
     const list = el('ol', { className: 'track' });
     list.setAttribute('role', 'list');   // list-style: none drops the list's semantics in Safari without it
@@ -168,6 +193,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
 
   interview.addEventListener('change', (e) => {
     const t = e.target;
+    if (t.id === 'methodos-base') return;   // said as it is typed (the input listener above)
     if (t.name?.startsWith('methodos-ask-')) yesNo[t.name.slice(13)] = t.value === 'yes';
     else {
       const was = choice && choice.kind === 'recipe' ? choice.recipe : null;
@@ -175,6 +201,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
       if (choice?.kind === 'recipe' && choice.recipe !== was) for (const k of Object.keys(yesNo)) if (!choice.ask.includes(k)) delete yesNo[k];
       askMore();
     }
+    baseField();
     verdictNow();
   });
   // A tool named meanwhile is chosen as its card chooses it (src/app.js: step 2 narrowed, focus on step 1);
@@ -194,12 +221,12 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   q(interview, '#methodos-close').addEventListener('click', () => close(true));
   startB.addEventListener('click', async () => {
     const recipe = RECIPES[choice.recipe];
-    const p = plan(recipe.key, answersFor(choice, yesNo));
+    const p = plan(recipe.key, answersFor(choice, yesNo, texts));
     // A workflow followed before, begun or not, is left for this one: its record and its files go.
     const was = pending?.id;
     if (was) await store.dropPending(was);
     if (wf || changed) { await outs.drop(madeBy(wf || changed.record)); await store.remove((wf || changed.record).id); }
-    pending = { key: recipe.key, answers: answersFor(choice, yesNo), id: `${recipe.key}-${Date.now().toString(36)}`, steps: p.steps.length };
+    pending = { key: recipe.key, answers: answersFor(choice, yesNo, texts), id: `${recipe.key}-${Date.now().toString(36)}`, steps: p.steps.length };
     wf = null; changed = null; note = null; fromChora = null; arrived = null; active = null;
     // Kept at once, before any file (Stephen, 4 October 2026): shown as not started, and discarded in one click.
     await store.savePending(pending);
@@ -234,6 +261,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   const tSaid = q(tracker, '#methodos-said'), tMsg = q(tracker, '#methodos-message');
   const doneB = q(tracker, '#methodos-done'), backB = q(tracker, '#methodos-back'), pickB = q(tracker, '#methodos-pick');
   const backB2 = q(tracker, '#methodos-handback');
+  const downloadB = q(tracker, '#methodos-download');
   const useB = q(tracker, '#methodos-use'), reopenB = q(tracker, '#methodos-reopen'), restartB = q(tracker, '#methodos-restart');
   let wf = null;            // the runner's state, as a record ({ id, name, created, saved, ...state })
   let changed = null;       // a record the version rule would not carry on: { record, words } (reconcile's 'changed' or 'refuse')
@@ -446,6 +474,23 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     say('The files the steps made are cleared from this browser: a step that takes one now asks for it to be chosen.');
     render(false);
   }));
+  // A step that writes its file in the format it already has: the file chosen, downloaded as it is, is the step's output.
+  downloadB.addEventListener('click', () => chain(async () => {
+    const s = atStep();
+    const files = page.files();
+    if (!wf || !s || !files.length || !writesItself(s, page.ownTarget?.())) return;
+    const main = mainInput(wf, s);
+    if (!main || !sameRefs(main, chosenRefs)) return;
+    const url = URL.createObjectURL(files[0]);
+    const a = el('a', { href: url, download: files[0].name });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    let w = wf.status === 'idle' ? runner.next(wf) : wf;
+    if (w.current !== s.id) return;
+    wf = runner.complete(w, s.id, { dataset: await refsHeld(files, 'dataset', { own: true }) });
+    say(`${names(main)}: downloaded as it is. The step is done.`);
+    await keep(); render(false);
+  }));
   backB2.addEventListener('click', () => chain(async () => {
     const s = atStep();
     if (!wf || !s || s.op !== 'place') return;
@@ -578,11 +623,18 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
       : changed ? changed.words : `Every one of the ${steps.length} steps is done.${pendingNotes(shown).length ? ` ${pendingNotes(shown).join(' ')}` : ''}`;
     tWhere.textContent = where;
     const run = s && RUN_WORDS[s.state] ? RUN_WORDS[s.state](s) : '';
+    // The file: chosen through the tracker (its handle kept, where the browser gives one) before the
+    // workflow starts, or after a reload when a step takes the file the workflow began with.
+    let main = null;
+    try { main = s && wf ? mainInput(wf, s) || (s.op === 'read.columns' ? runner.inputsOf(wf, s.id).files : null) : null; } catch { main = null; }
+    // Written out in the format it already has: ready to download as it is, and done once downloaded.
+    const ready = !!(s && wf && !changed && !run && writesItself(s, page.ownTarget?.()) && main && sameRefs(main, chosenRefs));
     // What the tracker says now: what is to be done next, in words, then any word about the last thing done.
     const op = s && OPERATIONS[s.op];
     let next = '';
     if (!shown) next = `Not started. Choose ${RECIPES[pending.key].files[fileKey(RECIPES[pending.key])].words.toLowerCase()} in step 1 to begin: Methodos starts when it is chosen. Or discard it.`;
     else if (s && op.kind === 'interactive') next = `This step is yours: it waits for ${op.waitsFor}. Say when it is done.`;
+    else if (ready) next = `Ready to download: ${names(main)} is already in the format this workflow writes, so it is not converted into itself. Download it, and the step is done.`;
     else if (s && !run) next = `Run ${OPERATIONS[s.op].tool ? `${OPERATIONS[s.op].tool}'s` : 'its'} ${lower(OPERATIONS[s.op].title)} below; the step is done when the run finishes.`;
     const message = [note?.words, next].filter(Boolean).join(' ');
     tMsg.textContent = message; tMsg.hidden = !message; tMsg.classList.toggle('warn', !!note?.warn);
@@ -591,10 +643,11 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     backB.disabled = !wf || changed || !wf.steps.some((x) => x.state === 'done');
     restartB.hidden = changed?.action !== 'changed';
     leaveB.textContent = !shown ? 'Discard this workflow' : 'Leave the workflow';
-    // The file: chosen through the tracker (its handle kept, where the browser gives one) before the
-    // workflow starts, or after a reload when a step takes the file the workflow began with.
-    let main = null;
-    try { main = s && wf ? mainInput(wf, s) || (s.op === 'read.columns' ? runner.inputsOf(wf, s.id).files : null) : null; } catch { main = null; }
+    downloadB.hidden = !ready;
+    if (ready) {
+      downloadB.textContent = `Download ${names(main)}`;
+      tList.querySelector('li.is-current .track-body')?.append(el('span', { className: 'track-run', textContent: 'Ready to download' }));
+    }
     const startFiles = wf ? wf.files[fileKey(recipeOf(wf) || { files: {} })] : null;
     const needStart = !shown || (main && startFiles && main.every((r) => startFiles.some((x) => x.sha256 === r.sha256)) && !sameRefs(main, chosenRefs));
     pickB.hidden = !needStart;
@@ -674,5 +727,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     } else changed = { action: v.action, record: r, words: v.words };
     render(false);
   })).catch(() => {});
-  return { open, chosen, began, ended, dropped, keepChanged, id: () => wf?.id || null };
+  // The files chosen are recognised (their format known): what the step at hand offers may change with it.
+  const detected = () => chain(async () => { if (wf) render(false); });
+  return { open, chosen, began, ended, dropped, keepChanged, detected, id: () => wf?.id || null };
 }

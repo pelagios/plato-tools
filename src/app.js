@@ -14,7 +14,7 @@ const REVIEW_WORDS = W;   // the review's words, where W names the words for the
 import { readable } from './engine/input.js';
 import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions, flag, noteOn, setRowState } from './engine/krisis/work.js';
 import { exportCandidates, readCandidateSet, serialiseCandidateSet } from './engine/krisis/candidates.js';
-import { datasetAddress } from './engine/methodos/containment.js';
+import { datasetAddress, baseDiffers } from './engine/methodos/containment.js';
 import { acceptGuarded, undoBatch, guardOf, guardsFirst, planGuarded } from './engine/krisis/guards.js';
 import { KRISIS_CANDIDATES, guardWords as GW, variantWords as VW, rowWords as RW } from './engine/words.js';
 import { stash as stashForChora, dropStale as dropStaleHandoff } from './chora/handoff.js';
@@ -109,6 +109,7 @@ function onDetected({ input: inp, targets: t }) {
     const o = document.createElement('option'); o.value = k; o.textContent = v.label; sel.appendChild(o);
   }
   if (tool) chooseTool(tool);   // a tool chosen first: narrowed again for this file (Arithmos: N-Triples, now that it is offered)
+  methodos.detected();   // Methodos: a step writing the file in its own format offers it to download
   document.querySelector('[data-for="tables-input"]').hidden = inp.format !== 'tables';
   // Hermes: a table of places shows which column holds what before it is run, and the web address
   // its place ids are made under.
@@ -923,6 +924,9 @@ const methodos = mountMethodos({
     review: () => (work ? { text: serialiseWork(work), name: workName } : null),
     openWork: (f) => resume(f),
     pickWork: () => $('workfile').click(),
+    ownTarget: () => (input && readable(input) ? INPUT_TO_TARGET[input.format] ?? null : null),
+    base: () => $('base').value,
+    setBase: (v) => { if ($('base').value === v) return; $('base').value = v; $('base').dispatchEvent(new Event('change', { bubbles: true })); },
   },
   workflow: arrivedFor,
   onStep(step) {
@@ -1184,6 +1188,8 @@ $('finish').onclick = () => {
   if (!reviewer()) return askName(true, W.nameNeeded);
   const problem = reviewerProblem(); if (problem) return showWarning(problem);
   work.cursor = cursor; work.reviewer = reviewer();
+  // Said, not acted on: the review's saved address is what Finish writes for.
+  showWarning(baseDiffers(work, $('base').value) || '');
   start('apply', document.querySelector('input[name="review-output"]:checked').value);
 };
 // Krisis: the suggestions exported as a candidate set (engine/krisis/candidates.js), made here on the

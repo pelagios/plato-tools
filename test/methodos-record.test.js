@@ -68,7 +68,7 @@ test('a changed step under the same version is not continued blindly', () => {
   const r = reconcile(rec, rewired);
   assert.equal(r.action, 'changed');
   assert.equal(r.lastDone, 'mint');
-  assert.match(r.words, /has changed since this workflow was saved \(version 1 then, 1 now\).*last finished step, "Give every place and source a permanent address".*start the remaining steps under the new recipe, or leave/);
+  assert.match(r.words, new RegExp(`has changed since this workflow was saved \\(version ${PUBLISH.version} then, ${PUBLISH.version} now\\).*last finished step, "Give every place and source a permanent address".*start the remaining steps under the new recipe, or leave`));
   assert.equal(r.state, undefined, 'no state to carry on from is offered');
   // A step's operation changed, ids kept.
   const swapped = copy(PUBLISH);
@@ -80,30 +80,30 @@ test('a changed step under the same version is not continued blindly', () => {
 test('a new version of the recipe: it stays at its last finished step and offers a restart', () => {
   const rec = midway();
   const v2 = copy(PUBLISH);
-  v2.version = 2;
+  v2.version = PUBLISH.version + 1;
   v2.steps.splice(2, 0, { id: 'compare', op: 'compare', title: 'Compare with the last release', from: { earlier: '$files', later: 'mint.dataset' } });
   const r = reconcile(rec, v2);
   assert.equal(r.action, 'changed');
-  assert.match(r.words, /version 1 then, 2 now/);
+  assert.match(r.words, new RegExp(`version ${PUBLISH.version} then, ${PUBLISH.version + 1} now`));
   // Restarting the remaining steps keeps check and mint (the same in both) and does the rest again.
   const s = restartRemaining(rec, v2);
   assert.deepEqual(s.steps.map((x) => [x.id, x.state]), [['check', 'done'], ['mint', 'done'], ['compare', 'pending'], ['report', 'pending'], ['site', 'pending'], ['w3id', 'pending']]);
   assert.deepEqual(s.steps[1].outputs, rec.steps[1].outputs);
   assert.equal(s.recipe.digest, digest(v2));
-  assert.equal(s.recipe.version, 2);
+  assert.equal(s.recipe.version, PUBLISH.version + 1);
   assert.equal(s.id, rec.id);
   assert.equal(runner.next(s).current, 'compare');
   // A first step that changed keeps nothing after it.
-  const v3 = copy(v2); v3.version = 3; v3.steps[0].title = 'Check'; v3.steps[1].options = {};
+  const v3 = copy(v2); v3.version = PUBLISH.version + 2; v3.steps[0].title = 'Check'; v3.steps[1].options = {};
   assert.deepEqual(restartRemaining(rec, v3).steps.map((x) => x.state), ['done', 'pending', 'pending', 'pending', 'pending', 'pending']);
   // The words branch is only for the same version: the same steps under a new version are a change.
-  const bumped = copy(PUBLISH); bumped.version = 2;
+  const bumped = copy(PUBLISH); bumped.version = PUBLISH.version + 1;
   assert.equal(reconcile(rec, bumped).action, 'changed');
 });
 
 test("a new recipe that cannot take the record's answers is refused in words", () => {
   const rec = midway();
-  const v2 = copy(PUBLISH); v2.version = 2; delete v2.asks.release;
+  const v2 = copy(PUBLISH); v2.version = PUBLISH.version + 1; delete v2.asks.release;
   v2.steps = v2.steps.map((s) => ({ ...s, options: Object.fromEntries(Object.entries(s.options || {}).filter(([, v]) => v !== '$release')) }));
   assert.equal(reconcile(rec, v2).action, 'changed');
   assert.throws(() => restartRemaining(rec, v2), (e) => e instanceof RecordError && /do not fit the new "Publish a dataset".*does not ask "release".*started afresh/.test(e.message));

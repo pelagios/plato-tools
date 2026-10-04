@@ -31,10 +31,13 @@ export const WANT = Object.freeze([
 
 // The answers that name a recipe: [have, want] -> the recipe, the answers the first two questions
 // settle, and the recipe's yes-or-no questions still to ask, in the recipe's order.
+// `base`: when the base address is asked (Stephen, 4 October 2026: only for workflows that mint
+// addresses): under a yes-or-no answer (Map your data, when the table gives regions, which are minted
+// under it), and then needed; or always (Publish a dataset, whose minting may take it), and then optional.
 const ROUTES = [
-  { have: 'table', want: 'map', recipe: 'map-your-data', set: { target: 'plato-json' }, ask: ['has-regions', 'will-draw', 'will-publish'] },
-  { have: 'table', want: 'publish', recipe: 'map-your-data', set: { target: 'plato-json', 'will-publish': true }, ask: ['has-regions', 'will-draw'] },
-  { have: 'plato', want: 'publish', recipe: 'publish-a-dataset', set: {}, ask: [] },
+  { have: 'table', want: 'map', recipe: 'map-your-data', set: { target: 'plato-json' }, ask: ['has-regions', 'will-draw', 'will-publish'], base: { when: 'has-regions', needed: true } },
+  { have: 'table', want: 'publish', recipe: 'map-your-data', set: { target: 'plato-json', 'will-publish': true }, ask: ['has-regions', 'will-draw'], base: { when: 'has-regions', needed: true } },
+  { have: 'plato', want: 'publish', recipe: 'publish-a-dataset', set: {}, ask: [], base: { needed: false } },
 ];
 
 // Answers that name no recipe yet: what to use meanwhile, by what is wanted, as the page's tool keys
@@ -58,7 +61,7 @@ export function choose(have, want) {
   if (!HAVE.some((h) => h.key === have) || !WANT.some((w) => w.key === want)) return null;
   if (want === 'unsure') return { kind: 'grid' };
   const r = ROUTES.find((x) => x.have === have && x.want === want);
-  if (r) return { kind: 'recipe', recipe: r.recipe, set: { ...r.set }, ask: [...r.ask] };
+  if (r) return { kind: 'recipe', recipe: r.recipe, set: { ...r.set }, ask: [...r.ask], ...(r.base ? { base: { ...r.base } } : {}) };
   const m = MEANWHILE[want];
   return { kind: 'none', why: have === 'text' && (want === 'map' || want === 'publish') ? TEXT : m.why, tools: [...m.tools] };
 }
@@ -66,15 +69,29 @@ export function choose(have, want) {
 /** The questions still to ask, with their words, from the recipe: [{ key, question }]. */
 export const questionsFor = (choice) => (choice?.kind === 'recipe' ? choice.ask.map((key) => ({ key, question: RECIPES[choice.recipe].asks[key].question })) : []);
 
-/** The recipe's answers: those the first two questions settled, and the yes-or-no answers given (true or false). */
-export function answersFor(choice, yesNo = {}) {
+/**
+ * Whether the base address is asked under these answers: { needed } (needed: a workflow that mints
+ * regions under it cannot go on without one), or null when it is not asked.
+ */
+export function baseAsked(choice, yesNo = {}) {
+  const b = choice?.kind === 'recipe' ? choice.base : null;
+  if (!b || (b.when && yesNo[b.when] !== true)) return null;
+  return { needed: !!b.needed, question: RECIPES[choice.recipe].asks.base.question };
+}
+/** A base address as the interview takes one: a web address, trimmed, or null. */
+export const baseAnswer = (v) => (typeof v === 'string' && /^https?:\/\/\S+$/.test(v.trim()) ? v.trim() : null);
+
+/** The recipe's answers: those the first two questions settled, the yes-or-no answers given (true or false), and the base address where it is asked and given. */
+export function answersFor(choice, yesNo = {}, { base } = {}) {
   const a = { ...choice.set };
   for (const k of choice.ask) if (typeof yesNo[k] === 'boolean') a[k] = yesNo[k];
+  if (baseAsked(choice, yesNo) && baseAnswer(base)) a.base = baseAnswer(base);
   return a;
 }
 
-/** Whether every question still to ask has been answered. */
-export const answered = (choice, yesNo = {}) => choice?.kind === 'recipe' && choice.ask.every((k) => typeof yesNo[k] === 'boolean');
+/** Whether every question still to ask has been answered, the base address among them where it is needed. */
+export const answered = (choice, yesNo = {}, { base } = {}) => choice?.kind === 'recipe' && choice.ask.every((k) => typeof yesNo[k] === 'boolean')
+  && !(baseAsked(choice, yesNo)?.needed && !baseAnswer(base));
 
 // What the end of a workflow says of a step that was skipped because it is not available yet, by the
 // step's operation; any other such step is named in the general words below. (The regions step, the
