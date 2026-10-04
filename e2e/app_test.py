@@ -5929,9 +5929,14 @@ def iiif_checks(pw, url, tmp):
             page.click(f'#overlay-list li[data-overlay="{x}"] button[data-remove-map]')
             until(page, 'x => !window.__chora.overlays.some((o) => o.key === x)', 10, x)
         left = page.evaluate('() => window.__chora_overlays.layer.getMapIds()')
-        kept_maps = opfs_names(page, 'chora-overlays')
+        # The folder read once the page's own writes are on disk: the map kept is written again for each change
+        # of its opacity and Show (in turn, each landing on its writable's close), and while a write is open Chrome
+        # lists its swap file (<key>.json.crswap) beside the file. Only a map's own file (<key>.json) is a map kept, as kept() reads them.
+        written = soon(page, '() => window.__chora.overlayWrites === 0', 20)
+        kept_maps = [n for n in opfs_names(page, 'chora-overlays') if re.fullmatch(r'[0-9a-f]{24}\.json', n)]
         return (abs(o['opacity'] - 0.4) < 1e-9 and o['visible'] is False and at['open'] and at['focusKey'] == IA and len(others) >= 3 and len(left) == 1
-                and kept_maps == [f'{k}.json'] and [x['key'] for x in cstate(page)['overlays']] == [k]), {'map options': o, 'panel': at, 'removed': len(others), 'left': left, 'kept': kept_maps}
+                and written and kept_maps == [f'{k}.json'] and [x['key'] for x in cstate(page)['overlays']] == [k]), {
+            'map options': o, 'panel': at, 'removed': len(others), 'left': left, 'writes on disk': written, 'kept': kept_maps}
     attempt('Chora maps: opacity and show reach the renderer; a map\'s Permissions… opens the panel at its server; a map removed leaves the map, the list and the browser\'s store', controls)
 
     def trace_save():
@@ -5970,8 +5975,13 @@ def iiif_checks(pw, url, tmp):
         PX = """async (px) => { const e = window.__chora_overlays.manager.entries[0];
           const w = (await window.__chora_overlays.georef.toWorld(e.g, { type: 'Point', coordinates: px }, { space: 'image' })).geojson.coordinates;
           const p = window.__chora_map.project(w), r = window.__chora_map.getCanvas().getBoundingClientRect(); return [r.left + p.x, r.top + p.y]; }"""
+        # A dataset's own file only (drafts.js fileName: 32 hex digits, .json), read once the page's writes of
+        # the drawings are on disk: until then the file still holds the drawings as they were (the point traced,
+        # with its defaults), and while a write is open Chrome lists its swap file (<name>.json.crswap) beside it,
+        # which is gone once the write closes (a read of it then is a NotFoundError).
         KEPT = """async () => { const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('chora-drafts');
-          for await (const h of d.values()) { const x = JSON.parse(await (await h.getFile()).text()); if (x.fingerprint.startsWith('cambridge.json')) return x.drafts.map((k) => [!!k.trace, k.role || '', k.precision || '']); } return null; }"""
+          for await (const h of d.values()) { if (h.kind !== 'file' || !/^[0-9a-f]{32}\\.json$/.test(h.name)) continue;
+            const x = JSON.parse(await (await h.getFile()).text()); if (x.fingerprint.startsWith('cambridge.json')) return x.drafts.map((k) => [!!k.trace, k.role || '', k.precision || '']); } return null; }"""
         page.evaluate(SETTLE)
         x, y = page.evaluate(PX, [200, 200]); n0 = cstate(page)['pendingCount']
         draw(page, 'point', [(x, y)]); page.click('#draw-tools button[data-mode="static"]')
@@ -5984,10 +5994,13 @@ def iiif_checks(pw, url, tmp):
         page.click('#draw-tools button[data-mode="static"]')
         dropped = soon(page, '() => window.__chora.lastTrace && !window.__chora.lastTrace.key', 15)
         note = page.inner_text('#card [data-trace-note]') if page.query_selector('#card [data-trace-note]') else ''
+        # The drop is kept in the same turn as lastTrace is set (app.js traceDraft, keepDrafts), so draftWrites counts it by now.
+        written = dropped and soon(page, '() => window.__chora.draftWrites === 0', 20)
         k = page.evaluate(KEPT)
         # Off the map, it is a point drawn on the basemap: the traced point's defaults go with the citation.
         # (The drawing saved by the check before is still kept: its download was not let go.)
-        return (traced and first and first.get('key') and dropped and 'no longer cites that map' in note and k and k[-1] == [False, '', '']), {'first': first, 'after': cstate(page).get('lastTrace'), 'note': note, 'kept': k}
+        return (traced and first and first.get('key') and dropped and 'no longer cites that map' in note and written and k and k[-1] == [False, '', '']), {
+            'first': first, 'after': cstate(page).get('lastTrace'), 'note': note, 'writes on disk': written, 'kept': k}
     attempt('Chora maps: a traced point moved off its map with the Edit tool no longer cites the map, the card says so, and its traced-point defaults go', moved_off)
 
     def reshaped_onto_another():
