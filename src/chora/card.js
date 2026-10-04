@@ -10,7 +10,7 @@ const STATUS_TITLES = {
   reported: 'The source reports this as said by others.', tentative: 'The source gives this tentatively.',
 };
 export function esc(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
-export const badge = (s) => (STATUS_WORDS[s] ? ` <span class="status status-${s}" data-tip="${esc(STATUS_TITLES[s])}">${s}</span>` : '');
+export const badge = (s) => (Object.hasOwn(STATUS_WORDS, s) ? ` <span class="status status-${s}" data-tip="${esc(STATUS_TITLES[s])}">${s}</span>` : '');
 export const tailOf = (iri) => (iri ? String(iri).split(/[#/]/).pop() : '');
 const trim = (s, k) => (s.length > k ? s.slice(0, k - 1) + '…' : s);
 
@@ -97,17 +97,17 @@ export function timeline(items) {
     const a = t.a ?? t.b, b = t.b ?? t.a, y = i * H;
     const s = Object.hasOwn(STATUS_COLOURS, t.status) ? t.status : 'asserted';
     const when = a === b ? `${a}` : `${a}–${b}`;
-    const st = STATUS_WORDS[t.status] ? `, ${t.status}` : '';
+    const st = Object.hasOwn(STATUS_WORDS, t.status) ? `, ${t.status}` : '';
     let tip, line, bar;
     if (t.evidence) {
       hatched.add(s);
       const what = t.text ? `${t.text}: ` : '';
       tip = `${what || 'M'}${what ? MENTIONED : MENTIONED.slice(1)} ${t.label || when}${st}`;
-      line = `${esc(trim(what, 30))}${MENTIONED} ${esc(when)}${STATUS_WORDS[t.status] ? ` · ${t.status}` : ''}`;
+      line = `${esc(trim(what, 30))}${MENTIONED} ${esc(when)}${Object.hasOwn(STATUS_WORDS, t.status) ? ` · ${t.status}` : ''}`;
       bar = `<rect x="${x(a)}" y="${y + 14}" width="${Math.max(3, x(b) - x(a))}" height="6" rx="2" class="tl-evidence" style="${hatch(s)}"/>`;
     } else {
       tip = `${t.text || t.facet} (${t.label || when})${st}`;
-      line = `${esc(trim(`${t.text || t.facet}`, 44))} · ${esc(when)}${STATUS_WORDS[t.status] ? ` · ${t.status}` : ''}`;
+      line = `${esc(trim(`${t.text || t.facet}`, 44))} · ${esc(when)}${Object.hasOwn(STATUS_WORDS, t.status) ? ` · ${t.status}` : ''}`;
       bar = `<rect x="${x(a)}" y="${y + 14}" width="${Math.max(3, x(b) - x(a))}" height="6" rx="2" class="tl-bar tl-${s}"${s !== 'asserted' ? ' fill-opacity=".45" stroke-dasharray="2 1"' : ''}/>`;
     }
     // Its whole text, shown on hover by src/lib/tooltip.js (the row's own text may be cut short).

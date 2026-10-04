@@ -5,7 +5,7 @@ import { PLATO_REPO } from './paths.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { relationItem, timeline, esc, relativeItem, locations, nameItem } from '../src/chora/card.js';
+import { relationItem, timeline, esc, relativeItem, locations, nameItem, badge } from '../src/chora/card.js';
 import { viewPlace } from '../src/engine/chora/view.js';
 
 const P = 'https://w3id.org/plato#';
@@ -58,6 +58,17 @@ test('a status that names a property every object inherits (__proto__, construct
     const ev = timeline([row({ facet: 'evidence', text: '', start: '0015', end: '0540', status, evidence: true })]);
     assert.match(ev, /<pattern id="tl-hatch-asserted"/, status);
     assert.doesNotMatch(claim + ev, new RegExp(`tl-${status}|tl-hatch-${status}|status-${status}`), status);
+  }
+});
+
+test('a status that names an inherited property (__proto__, constructor, toString) gets no badge and is not written as a status', () => {
+  assert.match(badge('doubted'), /class="status status-doubted"/, 'a status known has its badge');
+  for (const status of ['__proto__', 'constructor', 'toString']) {
+    assert.equal(badge(status), '', status);
+    const claim = timeline([row({ start: '0100', end: '0200', status })]);
+    const ev = timeline([row({ facet: 'evidence', text: '', start: '0015', end: '0540', status, evidence: true })]);
+    assert.match(claim, /Agathos Daimon · 100–200</, status);
+    assert.doesNotMatch(claim + ev, new RegExp(`[,·] ${status}`), status);
   }
 });
 
