@@ -6165,6 +6165,8 @@ def iiif_checks(pw, url, tmp):
         if said: panel_set([IA], reload=True, via=IA)
         both = soon(page, 'ids => ids.every((id) => window.__chora.overlays.some((o) => o.annotationId === id))', 40, [kid, pid])
         s = cstate(page); handed = (s.get('resumed') or {}).get('maps') or {}
+        # Their files let go once the page's own writes of them are on disk: a write still open would put a file back.
+        soon(page, '() => window.__chora.overlayWrites === 0', 20)
         for i in (kid, pid):
             page.evaluate("k => navigator.storage.getDirectory().then((r) => r.getDirectoryHandle('chora-overlays')).then((d) => d.removeEntry(k + '.json')).catch(() => {})", key(i))
         return (waiting and pasted_waits and f'Needs permission: {urlparse(A).netloc}' in said and kid not in before and pid not in before and both
@@ -6173,30 +6175,43 @@ def iiif_checks(pw, url, tmp):
             'overlays': [o['annotationId'] for o in s['overlays']]}
     attempt('Chora maps: a map kept waiting on a withdrawn site and a map pasted on it: allowed from the line, one reload brings back both (the maps kept never take the place of the map pasted)', kept_and_pasted)
 
+    # Only a map's own file, <key>.json, as the page's kept() reads them: while a write is open, Chrome lists its
+    # swap file (<key>.json.crswap) instead, holding the whole record. Read as a map kept, a new map's swap file
+    # was taken for its file, and the row looked for by that name (<key>.json.crswap) never came.
     KEPT_ITEMS = """async () => { const out = {}; try { const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('chora-overlays');
-      for await (const h of d.values()) out[h.name] = JSON.parse(await (await h.getFile()).text()).item; } catch {} return out; }"""
+      for await (const h of d.values()) if (h.kind === 'file' && /^[0-9a-f]{24}\\.json$/.test(h.name)) out[h.name] = JSON.parse(await (await h.getFile()).text()).item; } catch {} return out; }"""
+    WRITTEN = '() => window.__chora.overlayWrites === 0'              # every write of the maps kept is on disk (overlays.js writesPending; a page without the count never holds)
+    NO_ID = '() => window.__chora.overlays.find((o) => !o.annotationId && o.mapId)?.key || null'
     def kept_as_written():
         # A map with no georeference id, its image written with a trailing slash (which the image information
         # does not have): kept as written, so that the next load reads, cites and keys the same map, in one file.
         # (The http-to-https difference the unit test checks cannot be made here: this computer's sites stay http.)
         a = annotation(service='/iiif/grid/'); a.pop('id', None)
+        until(page, WRITTEN, 20)                                  # the check before this one's writes done, so that its files are in `before`
         before = set(page.evaluate(KEPT_ITEMS))
         paste(a)
-        got = soon(page, '() => window.__chora.overlays.some((o) => !o.annotationId && o.mapId)', 20)
-        first = {}
-        for _ in range(20):                                       # the keeping is not awaited by the page: asked until written
-            first = {k: v for k, v in page.evaluate(KEPT_ITEMS).items() if k not in before}
-            if first: break
-            page.wait_for_timeout(500)
-        written = bool(first)
+        # The keeping is not awaited by the page: it is queued as the map is shown (showMap), so once the map is
+        # shown, the page's count of writes not yet on disk includes it; the folder is read once that is 0.
+        got = soon(page, f'() => !!({NO_ID})()', 20)
+        shown_key = page.evaluate(NO_ID)
+        written = got and soon(page, WRITTEN, 20)
+        first = {k: v for k, v in page.evaluate(KEPT_ITEMS).items() if k not in before}
         page.reload(); ready()
-        back = soon(page, '() => window.__chora.overlays.some((o) => !o.annotationId && o.mapId)', 30)
-        page.wait_for_timeout(1000)
+        back = soon(page, f'() => !!({NO_ID})()', 30) and soon(page, WRITTEN, 20)
+        back_key = page.evaluate(NO_ID)
         second = {k: v for k, v in page.evaluate(KEPT_ITEMS).items() if k not in before}
         ids = [v['target']['source']['id'] for v in first.values()]
-        key = next(iter(first), '').removesuffix('.json')
-        if key: page.click(f'#overlay-list li[data-overlay="{key}"] button[data-remove-map]')
-        return (got and written and len(first) == 1 and ids == [A + '/iiif/grid/'] and back and second == first), {'shown': got, 'kept': ids, 'files before reload': list(first), 'files after': list(second), 'came back': back}
+        # Let the map go (for the checks after this one), from its row once the row is there.
+        row = f'#overlay-list li[data-overlay="{back_key}"]'
+        removed = False
+        if back_key and soon(page, 's => !!document.querySelector(s)', 10, row):
+            page.click(f'{row} button[data-remove-map]')
+            removed = soon(page, 's => !document.querySelector(s)', 10, row) and soon(page, WRITTEN, 20)
+        if not removed and shown_key:                             # no row to remove it from: its file let go directly, so that no later load brings it back
+            soon(page, WRITTEN, 20)
+            page.evaluate("k => navigator.storage.getDirectory().then((r) => r.getDirectoryHandle('chora-overlays')).then((d) => d.removeEntry(k + '.json')).catch(() => {})", shown_key)
+        return (got and written and list(first) == [f'{shown_key}.json'] and ids == [A + '/iiif/grid/'] and back and back_key == shown_key and second == first), {
+            'shown': got, 'key shown': shown_key, 'kept': ids, 'files before reload': list(first), 'files after': list(second), 'came back': back, 'key back': back_key, 'removed after': removed}
     attempt('Chora maps: a map is kept with its georeference as written (its image\'s id not rewritten), and comes back from the same one file', kept_as_written)
 
     def kept_server_down():
