@@ -2868,12 +2868,13 @@ def map_your_data_checks(pw, url, tmp):
         page.click('#methodos-start'); until(page, "['pending', 'idle'].includes(document.getElementById('methodos-tracker').dataset.status)", 10)
         s = choose([MYDATA_CSV])
         until(page, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+        s = wait_state(page, lambda s: ((s.get('columns') or {}).get('levels') or {}), T(30), 'columns')
         r['columns'] = (s.get('columns') or {}).get('levels')
         t = track(); r['begun'] = t
         ok = (r['canary'] == 'enforced' and r['policy'] and all(re.match(r'^https://([a-z]+\.)?whgazetteer\.org$', o) for o in r['policy']) and t['steps'].get('columns') == 'current'
               and [k for k in t['steps']] == ['columns', 'check', 'dataset', 'regions', 'lookup', 'review', 'relate', 'place', 'again', 'compare', 'out']
               and not any('not identified' in x or 'Not yet available' in x for x in planned) and r['columns'] == {'county': 1, 'parish': 2})
-        return ok, {'policy': r['policy'], 'canary': r['canary'], 'steps': t['steps'], 'planned': planned[:12], 'levels': r['columns']}
+        return ok, {'levels': r['columns'], 'planned': planned[:12], 'policy': r['policy'], 'canary': r['canary'], 'steps': t['steps']}
     attempt('Map your data: the interview (a table, places on a map, with regions, drawing, no publishing) gives the eleven steps, the regions step and the step recording them available, with WHG alone in the page\'s policy', begin)
 
     def through_convert():
