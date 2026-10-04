@@ -2953,7 +2953,7 @@ def map_your_data_checks(pw, url, tmp):
         choose([r['related']])
         link = page.get_attribute('#for-tool a[href^="./chora.html#workflow="]', 'href')
         r['wid'] = link.split('#workflow=')[1]
-        page.click('#for-tool a[href^="./chora.html#workflow="]')
+        with page.expect_navigation(url=re.compile(r'/chora\.html#workflow='), timeout=T(60) * 1000): page.click('#for-tool a[href^="./chora.html#workflow="]')
         until(page, 'window.__chora && window.__chora.phase === "ready" && window.__chora.mapReadyCount >= 1', 60)
         page.set_input_files('#picker', [str(r['related'])])
         until(page, '["loaded", "error", "unrecognised"].includes(window.__chora.phase)')
@@ -2972,7 +2972,7 @@ def map_your_data_checks(pw, url, tmp):
         with page.expect_download(timeout=T(60) * 1000) as d: page.click('#save-result button.primary')
         r['drawn'] = out / name; d.value.save_as(r['drawn'])
         until(page, '() => !!document.getElementById("back-to-workflow")', 60)
-        page.click('#back-to-workflow')
+        with page.expect_navigation(url=re.compile(r'#workflow='), timeout=T(60) * 1000): page.click('#back-to-workflow')
         wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready')
         until(page, "() => !document.getElementById('methodos-handback').hidden", 15)
         page.click('#methodos-handback')
