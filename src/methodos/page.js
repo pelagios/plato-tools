@@ -253,8 +253,9 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   // A run on the page is the current step's only if it is the step's operation, on the step's file.
   function began(run) {
     chain(async () => {
-      active = null;
-      if (!wf || changed) return;
+      // A run under way that is the step's stays the step's: another run beginning meanwhile (a lookup
+      // sent while a finishing runs) is not, and must not make the first one's end go unheard.
+      if (active || !wf || changed) return;
       const s = atStep();
       if (!s || s.op !== run.op || OPERATIONS[s.op].kind !== 'automatic') return;
       let w = ['stopped', 'failed', 'cancelled'].includes(s.state) ? runner.invalidate(wf, s.id) : wf;
@@ -440,7 +441,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     waiting: (s) => `Waiting: ${s.why}`,
     stopped: (s) => `Stopped: ${s.problem.words}${s.problem.errors ? ` (${s.problem.errors} ${s.problem.errors === 1 ? 'error' : 'errors'})` : ''} Put it right and run this step again.`,
     failed: (s) => `Failed: ${s.error}${/[.!?]$/.test(s.error) ? '' : '.'} Nothing is lost: run this step again.${s.partial ? ' What it had done is kept, to begin from.' : ''}`,
-    cancelled: () => 'Stopped by you: run this step again when you are ready.',
+    cancelled: (s) => `Stopped by you: run this step again when you are ready.${s.partial ? ' What it had done is kept, to begin from.' : ''}`,
   };
   function render(focus) {
     bannerNow();
@@ -494,7 +495,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     pickB.textContent = keptHandle && wf ? `Open ${keptHandle.name} again` : 'Choose the file';
     const usable = main && !sameRefs(main, chosenRefs) && main.every((r) => held.has(r.sha256)) ? main : null;
     useB.hidden = !usable || needStart; if (usable) useB.textContent = `Use ${names(usable)}${fromWhere(wf, s, usable)}`;
-    const partial = s?.state === 'failed' && s.partial ? Object.values(s.partial).flat()[0] : null;
+    const partial = (s?.state === 'failed' || s?.state === 'cancelled') && s.partial ? Object.values(s.partial).flat()[0] : null;
     reopenB.hidden = !partial;
     if (partial) reopenB.textContent = held.has(partial.sha256) ? `Reopen ${partial.name}` : `Choose ${partial.name} again`;
     if (s && !changed) {
@@ -505,7 +506,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     if (focus) show(q(tracker, 'h2'));
   }
   const sameRefs = (a, b) => !!a && !!b && a.length === b.length && a.every((r) => b.some((x) => x.sha256 === r.sha256 && x.size === r.size));
-  const pendingNotes = (state) => (state ? state.steps.filter((s) => s.unavailable).map((s) => plan(state.recipe.key, state.answers).notes[plan(state.recipe.key, state.answers).unavailable.indexOf(s.id)]).filter(Boolean)
+  const pendingNotes = (state) => (state ? (!RECIPES[state.recipe.key] ? [] : state.steps.filter((s) => s.unavailable).map((s) => plan(state.recipe.key, state.answers).notes[plan(state.recipe.key, state.answers).unavailable.indexOf(s.id)]).filter(Boolean))
     : plan(pending.key, pending.answers).notes);
 
   /** The tracker's list: each step with its state in words, and the step at hand with how its run went. */

@@ -2060,16 +2060,19 @@ def methodos_join_checks(browser, base, hook, tmp):
         choose(p, customs)
         until(p, "() => /These are not the files/.test(document.getElementById('methodos-message').textContent)", 30)
         no = js(p)
-        site = run(p, '#publish', 'site').get('phase'); p.wait_for_timeout(1000)
-        still = js(p)
+        site = run(p, '#publish', 'site').get('phase')
+        # The tracker hears the page in order: once it has said the right file is chosen, the run on the
+        # other file has been heard too, so the step's state then is the run's verdict, not a guess in time.
         choose(p, [r['minted']])
         until(p, "() => /the file this step takes/.test(document.getElementById('methodos-message').textContent)", 30)
-        yes = js(p)
+        yes = still = js(p)
+        # And a run on the right file is what completes it (the presence beside the absence).
+        done = run(p, '#publish', 'site').get('phase'); step_is(p, 'site', 'done'); after = js(p)
         ok = ('These are not the files' in no['message'] and r['minted'].name in no['message'] and site in ('done', 'error')
-              and still['steps']['site'] == 'current' and 'These are not the files' in still['message']
-              and 'not the files' not in yes['message'] and r['minted'].name in yes['message'])
+              and still['steps']['site'] == 'current' and 'not the files' not in yes['message'] and r['minted'].name in yes['message']
+              and done == 'done' and after['steps']['site'] == 'done' and after['steps']['w3id'] == 'current')
         r['ctx'].close()
-        return ok, {'other file': no, 'its run': site, 'after the run': still, 'the right file': yes}
+        return ok, {'other file': no, 'its run': site, 'the right file chosen': yes, 'run on the right file': after}
     attempt('Methodos: after a reload, a different file is refused in words and a run on it is not counted; the file the step takes is accepted', refused)
 
     def nothing_kept():
