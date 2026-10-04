@@ -456,7 +456,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
       render(false); page.pick();
     } else {
       fromChora = null;
-      say('Nothing usable came back from Chora (none was kept, it was more than two minutes old, or it was not for this workflow). Choose the dataset you saved in Chora in step 1, then say the step is done.', true);
+      say('Nothing usable came back from Chora (none was kept, it was more than thirty minutes old, or it was not for this workflow). Choose the dataset you saved in Chora in step 1, then say the step is done.', true);
       render(false);
     }
   }));
