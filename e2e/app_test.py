@@ -655,7 +655,7 @@ def krisis_case(page, tmp):
         except Exception as e: saved = {'error': str(e)[:200]}
     skinds = {c['candidate_source'].rsplit('/', 1)[-1]: (c.get('decision') or {}).get('kind') for c in saved.get('candidates', []) if c.get('decision')}
     check('match review: Save the review writes the work file with the decisions and the reviewer',
-          saved.get('krisis') == 2 and skinds == {'bristol': 'match', 'bath': 'distinct', 'wells': 'not-this'} and (saved.get('reviewer') or {}).get('name') == 'Ada Reviewer', saved.get('error') or skinds)
+          saved.get('krisis') == 3 and skinds == {'bristol': 'match', 'bath': 'distinct', 'wells': 'not-this'} and (saved.get('reviewer') or {}).get('name') == 'Ada Reviewer', saved.get('error') or {'krisis': saved.get('krisis'), 'decisions': skinds})
     # Finish with the default: the dataset, with the new attestations added, checked with the version check.
     ds, default, summ, left = {}, None, '', None
     if s.get('phase') == 'reviewing':
@@ -730,7 +730,7 @@ def krisis_case(page, tmp):
           and (out2.get('gazetteer') or {}).get('candidateSets') == [set_id], {'promotedFrom': pf, 'gazetteer': out2.get('gazetteer') if isinstance(out2, dict) else None} if out2 else (s.get('report') or s))
     # Resuming: the saved review, opened again, is back where it was, decisions and all.
     r = {}
-    if saved.get('krisis') == 2:
+    if saved.get('krisis') == 3:
         try:
             page.set_input_files('#workfile', [str(tmp / 'saved.krisis.json')])
             r = wait_state(page, lambda s: s.get('phase') == 'reviewing', 20, 'resume')
@@ -776,7 +776,7 @@ def krisis_case(page, tmp):
           'threshold must be above 0 and at most 1' in bad.get('summary', '') and 'Something went wrong' not in bad.get('summary', '') and bad.get('action') == 'check', bad)
     # Resuming with no dataset chosen says so, not that every file differs; with one chosen, the files are compared (above).
     nodata = ''
-    if saved.get('krisis') == 2 and 'other files than the ones chosen' in w:
+    if saved.get('krisis') == 3 and 'other files than the ones chosen' in w:
         try:
             page.reload()
             wait_state(page, lambda s: s.get('phase') == 'ready', 30, 'ready')
