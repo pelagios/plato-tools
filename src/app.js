@@ -138,7 +138,7 @@ async function storageCheck() {
   } catch { w.hidden = true; }
 }
 
-const buttons = (disabled) => { for (const id of ['check', 'check-candidates', 'convert', 'compare', 'publish', 'match', 'resume', 'finish', 'preview']) $(id).disabled = disabled; if (!disabled) gateOnColumns(); };
+const buttons = (disabled) => { for (const id of ['check', 'check-candidates', 'convert', 'compare', 'publish', 'match', 'resume', 'finish', 'preview', 'regions-start']) $(id).disabled = disabled; if (!disabled) gateOnColumns(); };
 // Krisis: a table of places is matched, and its review finished, by the matching of its columns: until
 // the worker's answer about them arrives, Match and Finish wait, or the table would be read by the guess.
 const columnsPending = () => isTable(input) && !columns && !state.columns?.error;

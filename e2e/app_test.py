@@ -1538,8 +1538,11 @@ def krisis_regions_case(page, tmp, url):
         page.fill('#whg-token', LOOKUP_TOKEN); page.press('#whg-token', 'Tab')
         page.wait_for_function("() => !document.getElementById('regions-offer').hidden", timeout=60_000)
         offer = page.inner_text('#regions-offer')
-        page.click('#regions-start')
-        s = wait_state(page, lambda s: rs(s).get('nav') and len((s.get('work') or {}).get('regions') or {}) == 6, 60, 'regions')
+        # The start button is disabled while the page is busy (reading the dataset's places); the click waits for it.
+        page.click('#regions-start', timeout=60_000)
+        s = wait_state(page, lambda s: rs(s).get('nav') and len((s.get('work') or {}).get('regions') or {}) == 6, 120, 'regions')
+        if s.get('timedOut'): return {'timedOut': s['timedOut'], 'offer': offer, 'offer shown': page.evaluate("() => !document.getElementById('regions-offer').hidden"), 'summary': s.get('summary')}
+        page.wait_for_selector('#regions-level button[data-rgo="level"]', timeout=30_000)
         return {'levels': (s.get('columns') or {}).get('levels'), 'offer': offer, 'nav': rs(s).get('nav'), 'level': rs(s).get('level'),
                 'keys': sorted((s.get('work') or {}).get('regions', {}).keys()), 'button': page.inner_text('#regions-level button[data-rgo="level"]')}
     su = step(setup)
