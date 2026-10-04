@@ -2361,8 +2361,11 @@ PERSEUS_P4_FILE=/path/to/text.xml node scripts/check-perseus-p4.mjs   # TEI P4 a
 ```
 
 **The full gates run on GitHub, not here.** Every branch pushed (any but `main`) runs
-`.github/workflows/gates.yml`: three jobs side by side, each with PLATO checked out at the pinned
-commit.
+`.github/workflows/gates.yml`: its jobs side by side, each with PLATO checked out at the pinned
+commit. **unit** and **e2e** run on every branch. **prove-it-fails** tests the checks rather than the
+tools, so a branch runs it only when it changes them (anything under `e2e/`, or the workflow
+itself); it runs in full every night on `main` (03:17 UTC), and by hand with
+`gh workflow run Gates --ref <branch>`, so whatever a branch skipped is caught within a day.
 
 - **unit**: `npm test`, `scripts/install-test.mjs` (the tools installed as npx installs them, and
   the command run) and `npm run build`.
@@ -2375,7 +2378,7 @@ commit.
 ```bash
 git push -u origin my-branch
 gh run list --branch my-branch --workflow Gates -L 1   # the run's id
-gh run watch <id> --exit-status                         # exits non-zero if any job failed
+gh run watch <id> --interval 300 --exit-status          # exits non-zero if any job failed; poll no faster
 ```
 
 A branch lands on `main` when its Gates run is green: the hour-long browser runs on this desktop are

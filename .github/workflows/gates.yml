@@ -1,6 +1,8 @@
-# The full gates on every branch pushed, before it lands on main: the unit and conversion tests, the
-# install as npx does it, the build, the browser checks, and the proof that the browser checks can fail.
-# Push the branch and watch the run (DEVELOPERS.md, Testing); main itself is tested by pages.yml.
+# The gates on every branch pushed, before it lands on main: the unit and conversion tests, the install
+# as npx does it, the build and the browser checks. The proof that the browser checks can fail tests the
+# checks, not the tools, so a branch runs it only when it changes the checks (e2e/ or this workflow);
+# every night it runs in full on main, so whatever a branch skipped is caught within a day.
+# Push the branch and watch the run (DEVELOPERS.md, Testing); main is also tested by pages.yml.
 # No secrets: what needs a token (WHG_TOKEN) is skipped, as it is locally without one.
 name: Gates
 
@@ -8,6 +10,8 @@ on:
   push:
     branches-ignore: [main, gh-pages]
   workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * *'   # nightly, in full, on main
 
 permissions:
   contents: read
@@ -17,6 +21,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Which browser runs this push needs: both at night or by hand, and on a branch that changes the
+  # checks; otherwise the browser checks alone.
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      modes: ${{ steps.modes.outputs.modes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: modes
+        shell: bash
+        run: |
+          both='["e2e","prove-it-fails"]'
+          if [ "${{ github.event_name }}" != push ]; then echo "modes=$both" >> "$GITHUB_OUTPUT"; echo "Both: ${{ github.event_name }}."; exit 0; fi
+          changed=$(git diff --name-only origin/main...HEAD)
+          if echo "$changed" | grep -qE '^(e2e/|\.github/workflows/gates\.yml$)'; then
+            echo "modes=$both" >> "$GITHUB_OUTPUT"; echo "Both: the checks changed:"; echo "$changed" | grep -E '^(e2e/|\.github/)'
+          else
+            echo 'modes=["e2e"]' >> "$GITHUB_OUTPUT"; echo "Browser checks only: nothing under e2e/ changed."
+          fi
+
   unit:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -66,12 +93,13 @@ jobs:
   # The browser checks, and the same checks pointed at a page with no tools (every one must fail).
   e2e:
     name: ${{ matrix.mode }}
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: ${{ matrix.mode == 'prove-it-fails' && 180 || 45 }}
     strategy:
       fail-fast: false
       matrix:
-        mode: [e2e, prove-it-fails]
+        mode: ${{ fromJSON(needs.plan.outputs.modes) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
