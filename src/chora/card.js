@@ -95,7 +95,7 @@ export function timeline(items) {
   const hatched = new Set();   // the statuses whose hatching is used
   const bars = rows.map((t, i) => {
     const a = t.a ?? t.b, b = t.b ?? t.a, y = i * H;
-    const s = STATUS_COLOURS[t.status] ? t.status : 'asserted';
+    const s = Object.hasOwn(STATUS_COLOURS, t.status) ? t.status : 'asserted';
     const when = a === b ? `${a}` : `${a}–${b}`;
     const st = STATUS_WORDS[t.status] ? `, ${t.status}` : '';
     let tip, line, bar;
@@ -120,7 +120,7 @@ export function timeline(items) {
   const [k0] = hatched;
   const legend = hatched.size ? `<g class="tl-legend"><rect x="${L}" y="${axisY + 6}" width="14" height="6" rx="2" style="${hatch(k0)}"/>
     <text x="${L + 18}" y="${axisY + 12}" class="tl-axis">hatched: when texts mention the place, not when what they say was so</text></g>` : '';
-  return `<svg class="timeline" viewBox="0 0 ${W} ${h}" role="img" aria-label="When each attestation applies, from ${lo} to ${hi}${hatched.size ? '; hatched bars are when texts mention the place' : ''}">${defs}${bars}
+  return `<svg class="timeline" viewBox="0 0 ${W} ${h}" role="img" aria-label="When each attestation applies or is attested, from ${lo} to ${hi}${hatched.size ? '; hatched bars are when texts mention the place' : ''}">${defs}${bars}
     <text x="${L}" y="${axisY}" class="tl-axis">${lo}</text><text x="${W - R}" y="${axisY}" class="tl-axis" text-anchor="end">${hi}</text>${legend}</svg>`
     + (undated ? `<p class="muted">Also dated only in words: ${words()}.</p>` : '');
 }

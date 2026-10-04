@@ -51,6 +51,23 @@ test('#20: the timeline writes an evidence span as "mentioned in texts dated", h
   assert.doesNotMatch(alone, /tl-hatch|tl-legend|mentioned in texts/);
 });
 
+test('a status that names a property every object inherits (__proto__, constructor) is drawn as asserted', () => {
+  for (const status of ['__proto__', 'constructor', 'toString']) {
+    const claim = timeline([row({ start: '0100', end: '0200', status })]);
+    assert.match(claim, /<rect [^>]*class="tl-bar tl-asserted"\/>/, status);
+    const ev = timeline([row({ facet: 'evidence', text: '', start: '0015', end: '0540', status, evidence: true })]);
+    assert.match(ev, /<pattern id="tl-hatch-asserted"/, status);
+    assert.doesNotMatch(claim + ev, new RegExp(`tl-${status}|tl-hatch-${status}|status-${status}`), status);
+  }
+});
+
+test('the timeline says what its bars are: when each attestation applies or is attested, and the hatched ones', () => {
+  const claim = row({ start: '0100', end: '0200' });
+  const ev = row({ facet: 'evidence', text: '', start: '0015', end: '0540', evidence: true });
+  assert.match(timeline([claim]), /aria-label="When each attestation applies or is attested, from \d+ to \d+">/);
+  assert.match(timeline([ev, claim]), /aria-label="When each attestation applies or is attested, from \d+ to \d+; hatched bars are when texts mention the place">/);
+});
+
 test('#20: an evidence span given only in words is written as a mention too, and a claim in words is not', () => {
   const out = timeline([row({ facet: 'evidence', text: '', label: 'Ptolemaic', evidence: true }), row({ label: 'undated' })]);
   assert.equal(out, `<p class="muted">Dated only in words: mentioned in texts dated “Ptolemaic”, “undated”.</p>`);
