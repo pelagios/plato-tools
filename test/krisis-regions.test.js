@@ -22,10 +22,10 @@ import { detect } from '../src/engine/input.js';
 import { createLookup, memoryLedger, WHG_ENDPOINT } from '../src/engine/gazetteer/index.js';
 import { gather, match } from '../src/engine/krisis/match.js';
 import { readWork, serialiseWork, decide, WORK_VERSION } from '../src/engine/krisis/work.js';
-import { newWork, runLevel, runPlaces, failedClosed } from '../src/engine/krisis/lookup.js';
+import { newWork, runLevel, runPlaces, runLookup, failedClosed } from '../src/engine/krisis/lookup.js';
 import {
   seedRegions, regionNodes, regionState, placeState, constraintFor, relaxStep, invalidate, undo, decideRegion, settleRegion, areaOf, bareId,
-  planLevels, levelsOf, RELAX_NAMES, CERTAINTY_LEVELS,
+  planLevels, levelsOf, RELAX_NAMES, CERTAINTY_LEVELS, areaIds, relaxAvailable,
 } from '../src/engine/krisis/regions.js';
 import { attestationsFrom, regionClaims } from '../src/engine/krisis/identity.js';
 import { apply } from '../src/engine/krisis/apply.js';
@@ -187,7 +187,8 @@ test('constraintFor: contained_in as a list of bare ids from the nearest matched
   decideRegion(work, candidateFor(work, cheshire, 'place:gn:2653941').id, 'match', { at: NOW });
   const newton = regionIri(3, 'Newton', ['England', 'Cheshire']);
   assert.deepEqual(constraintFor(work, newton).params.contained_in, ['gn:2653941'], 'the nearest: Cheshire');
-  assert.deepEqual(constraintFor(work, newton, { relax: 'ancestor' }), { from: england, kinds: ['area'], params: { lat: area.lat, lng: area.lng, radius: area.radius }, relaxed: 'ancestor' });
+  // England constrains as it would with nothing relaxed: its ids and its countries, not its area with the countries dropped.
+  assert.deepEqual(constraintFor(work, newton, { relax: 'ancestor' }), { from: england, kinds: ['contained_in', 'countries'], params: { contained_in: ['gn:6269131', 'wd:Q21'], countries: ['GB'] }, relaxed: 'ancestor', uncodedFail: true });
   assert.deepEqual(constraintFor(work, cheshire, { relax: 'ancestor' }), { from: null, kinds: [], params: {}, relaxed: 'ancestor' }, 'no ancestor above England');
   // 4. no constraint.
   assert.deepEqual(constraintFor(work, newton, { relax: 'all' }), { from: null, kinds: [], params: {}, relaxed: 'all' });
@@ -405,6 +406,47 @@ test('version 1 and 2 work files are read as version 3 with no regions; what ver
   refused((w) => { w.candidates[0].candidate_source = 'constructor'; }, /for a place the file does not list/);
 });
 
+test('a place answered by a plain lookup is never locked, even once the region review is begun; one not looked up waits for its regions', async () => {
+  const input = await detect([textFile(CSV, 'parishes.csv')]);
+  const g = await gather({ subjects: input, options: { base: BASE } }, env());
+  // A plain lookup of two places (the Mill and the Farm): no regions seeded.
+  const mill = `${BASE}place/1`, farm = `${BASE}place/2`, barn = `${BASE}place/3`;
+  const { work } = await runLookup({ lookup: lookupWith(fakeWhg()), work: newWork(g.subjects, { now: NOW }), places: g.places, options: { places: 'all', only: [mill, farm] }, now: clock() });
+  assert.deepEqual(work.regions ?? {}, {}, 'a plain lookup seeds no regions');
+  assert.deepEqual([placeState(work, mill), placeState(work, farm)], ['review', 'review']);
+  // The region review begun: the regions above are not settled, yet what was answered stays answered.
+  seedRegions(work, g);
+  assert.equal(regionState(work, keyOf(work, 'England')), 'ready');
+  assert.deepEqual([placeState(work, mill), placeState(work, farm)], ['review', 'review'], 'answered by a plain lookup: not locked');
+  assert.equal(placeState(work, barn), 'locked', 'control: the Barn, not looked up, waits for its regions');
+});
+
+test('relaxed to the region further up, the request carries ITS ids as contained_in, and its countries; its area only where it has no ids', async () => {
+  const { work, england, lookup, fake } = await englandMatched({ englands: ['place:gn:6269131', 'place:wd:Q21'] });
+  const cheshire = keyOf(work, 'Cheshire (England)'), newton = regionIri(3, 'Newton', ['England', 'Cheshire']);
+  await runLevel(work, 2, { lookup, now: clock() });
+  decideRegion(work, candidateFor(work, cheshire, 'place:gn:2653941').id, 'match', { at: NOW });
+  // The control: unrelaxed, Newton is asked within Cheshire.
+  await runLevel(work, 3, { lookup, only: [newton], now: clock() });
+  assert.deepEqual(queriesOf(fake.calls.at(-1)).map((q) => [q.query, q.contained_in, q.countries]), [['Newton', ['gn:2653941'], ['GB']]]);
+  const entities = fake.entities.length;
+  await runLevel(work, 3, { lookup, only: [newton], relax: 'ancestor', now: clock() });
+  const [q] = queriesOf(fake.calls.at(-1));
+  assert.deepEqual([q.query, q.contained_in, q.countries], ['Newton', ['gn:6269131', 'wd:Q21'], ['GB']], "England's own ids, unioned, and its countries");
+  assert.equal(q.lat, undefined, 'no area: England has ids');
+  assert.equal(fake.entities.length, entities, 'and no record fetched for an area');
+  // England matched only to records with no gazetteer id (local matches): its area, with its countries.
+  for (const c of work.candidates) if (c.candidate_source === england && c.decision?.kind === 'match') delete c.gazetteer.id;
+  const c = constraintFor(work, newton, { relax: 'ancestor' });
+  assert.deepEqual([c.from, c.kinds, c.needsArea], [england, ['countries'], england], 'its area is needed first');
+  work.regions[england].area = areaOf([FEATURES['place:gn:6269131'], FEATURES['place:wd:Q21']], areaIds(work, england));
+  await runLevel(work, 3, { lookup, only: [newton], relax: 'ancestor', now: clock() });
+  const [byArea] = queriesOf(fake.calls.at(-1));
+  assert.equal(byArea.contained_in, undefined);
+  assert.ok(byArea.radius > 0 && typeof byArea.lat === 'number', `England's area: ${JSON.stringify(byArea)}`);
+  assert.deepEqual(byArea.countries, ['GB']);
+});
+
 // ---- the claim -------------------------------------------------------------------------------------------
 const load = (f) => JSON.parse(readFileSync(`public/plato/${f}`, 'utf8'));
 const ajv = addPlatoFormats(new Ajv2020({ strict: false, allErrors: true, logger: strictFormatLogger }));
@@ -519,6 +561,35 @@ test('command line: lookup --levels --dry-run shows the plan level by level and 
     // Control: a table with no regions has nothing to review level by level.
     writeFileSync(join(d, 'flat.csv'), 'id,Name\n1,Mill\n');
     assert.match(cli('lookup', '--levels', '--dry-run', join(d, 'flat.csv')).out, /gives no regions for its places/);
+  } finally { rmSync(d, { recursive: true, force: true }); }
+});
+
+test('command line: a --relax step that does not apply to the regions to look up is refused, with the steps that do; never looked up unconstrained', async () => {
+  const d = mkdtempSync(join(tmpdir(), 'plato-tools-regions-'));
+  const cli = (...args) => { const r = spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', env: { ...process.env, WHG_TOKEN: '' } }); return { code: r.status, out: r.stdout, err: r.stderr }; };
+  try {
+    writeFileSync(join(d, 'parishes.csv'), CSV);
+    const { work, lookup } = await englandMatched();
+    writeFileSync(join(d, 'england.krisis.json'), serialiseWork(work));
+    const run = (...a) => cli('lookup', '--levels', '--dry-run', '--json', '--base', BASE, '--review', join(d, 'england.krisis.json'), ...a, join(d, 'parishes.csv'));
+    // The counties: England is the only matched region above them, so there is no region further up.
+    const refused = run('--level', '2', '--relax', 'ancestor');
+    assert.equal(refused.code, 2, refused.out + refused.err);
+    assert.match(refused.err, /--relax ancestor does not apply to the regions of level 2 .*The steps that apply: countries, contained-in, all\./);
+    assert.equal(refused.out, '', 'nothing planned, nothing looked up');
+    // Control: a step that applies is taken.
+    const taken = run('--level', '2', '--relax', 'countries');
+    assert.equal(taken.code, 0, taken.out + taken.err);
+    assert.equal(JSON.parse(taken.out).region.relax, 'countries');
+    // With Cheshire matched, its parish has England further up: 'ancestor' applies there.
+    await runLevel(work, 2, { lookup, now: clock() });
+    decideRegion(work, candidateFor(work, keyOf(work, 'Cheshire (England)'), 'place:gn:2653941').id, 'match', { at: NOW });
+    writeFileSync(join(d, 'england.krisis.json'), serialiseWork(work));
+    const newton = regionIri(3, 'Newton', ['England', 'Cheshire']);
+    const up = run('--level', '3', '--only', newton, '--relax', 'ancestor');
+    assert.equal(up.code, 0, up.out + up.err);
+    assert.deepEqual(JSON.parse(up.out).regionPlan.levels[2].ready.find((x) => x.key === newton).kinds, ['contained_in', 'countries']);
+    assert.deepEqual(relaxAvailable(work, [newton]), ['countries', 'contained-in', 'ancestor', 'all']);
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
 

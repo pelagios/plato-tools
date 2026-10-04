@@ -8,7 +8,7 @@
 // offered is offered where it changes something, a change that clears nothing beside one that does.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,10 +19,11 @@ import { createLookup, memoryLedger, WHG_ENDPOINT } from '../src/engine/gazettee
 import { gather } from '../src/engine/krisis/match.js';
 import { serialiseWork } from '../src/engine/krisis/work.js';
 import { newWork, runLevel, runPlaces } from '../src/engine/krisis/lookup.js';
-import { seedRegions, decideRegion, settleRegion, undo, selectLevel, RELAX_NAMES, RELAX_ORDER } from '../src/engine/krisis/regions.js';
+import { seedRegions, decideRegion, settleRegion, undo, selectLevel, constraintFor, RELAX_NAMES, RELAX_ORDER, CERTAINTY_LEVELS } from '../src/engine/krisis/regions.js';
+import { regionClaims } from '../src/engine/krisis/identity.js';
 import {
   navigator, firstOpen, nextTarget, levelNames, levelLabel, chainOf, constraintLine, notesOf, relaxOptions, costOf, unsettledOf, placesToLook, lockedPlaces,
-  wouldClear, priorOf, restorePrior, nameOf,
+  wouldClear, priorOf, restorePrior, nameOf, certaintyChoices, CERTAINTY_DEFAULT, regionMatchOptions, regionDomId,
 } from '../src/krisis/region-page.js';
 import { REGION_PAGE as RP } from '../src/engine/words.js';
 
@@ -126,6 +127,17 @@ test('failed closed: the notice in plain words, never "no match", and a relax wi
   const steps = relaxOptions(work, [hoxne]);
   assert.deepEqual(steps.map((s) => s.relax), ['countries', 'contained-in', 'ancestor', 'all']);
   assert.deepEqual(steps.map((s) => s.text), ['Again without the countries', 'Within the area instead', 'Within England instead', 'With no constraint']);
+  // The label says what is sent: "Within England" is England's ids, with its countries.
+  const up = constraintFor(work, hoxne, { relax: 'ancestor' });
+  assert.deepEqual([up.kinds, up.params.contained_in, up.params.countries], [['contained_in', 'countries'], ['gn:6269131'], ['GB']]);
+  assert.deepEqual(costOf(work, [hoxne], { relax: 'ancestor' }).fetches, 0, 'no area fetched for it');
+  // England matched to a record with no gazetteer id: its area is what is sent, and the button says so.
+  const eng = work.candidates.find((c) => c.candidate_source === keyOf(work, 'England') && c.decision?.kind === 'match');
+  const id = eng.gazetteer.id;
+  delete eng.gazetteer.id;
+  assert.deepEqual(constraintFor(work, hoxne, { relax: 'ancestor' }).needsArea, keyOf(work, 'England'));
+  assert.equal(relaxOptions(work, [hoxne]).find((s) => s.relax === 'ancestor').text, 'Within the area around England instead');
+  eng.gazetteer.id = id;
   // Its cost, as planned, is what runLevel then sends: one query in one request.
   assert.deepEqual(costOf(work, [hoxne], { relax: 'all' }), { queries: 1, requests: 1, fetches: 0 });
   const before = fake.calls.length;
@@ -204,4 +216,35 @@ test('the page\'s choices are the command line\'s: the same level looked up, the
   } finally { rmSync(d, { recursive: true, force: true }); }
   for (const step of RELAX_ORDER) assert.ok(RELAX_NAMES.includes(step), `${step} is a --relax the command line takes`);
   assert.deepEqual(Object.keys(RP.relax), RELAX_ORDER, 'a button for each step, in order');
+});
+
+test('certainty: PLATO\'s certainty levels, checked against the vendored ontology, the worked example\'s by default; the claim carries the one chosen', async () => {
+  const ttl = readFileSync('public/plato/ontology.ttl', 'utf8');
+  const choices = certaintyChoices();
+  assert.deepEqual(choices.map((c) => c.value), ['certain', 'less-certain', 'uncertain']);
+  for (const c of choices) {
+    const local = c.iri.replace('https://w3id.org/plato#', '');
+    assert.match(ttl, new RegExp(`^plato:${local}\\s+a plato:CertaintyLevel\\b`, 'm'), `${c.iri} is a CertaintyLevel of the vendored ontology`);
+    assert.ok(c.text, `${c.value} has words`);
+  }
+  assert.doesNotMatch(ttl, /^plato:Doubtful\s+a plato:CertaintyLevel\b/m, 'control: the check can fail');
+  assert.equal(CERTAINTY_LEVELS[CERTAINTY_DEFAULT], 'https://w3id.org/plato#Certain', "the default is the level PLATO's worked example gives");
+  for (const certainty of ['less-certain', 'uncertain', 'certain']) {
+    const { work, england } = await countiesLooked();
+    work.reviewer = { name: 'A. Reviewer' };
+    decideRegion(work, cand(work, england, 'place:gn:6269131').id, 'match', regionMatchOptions({ identityType: 'closeMatch', certainty }));
+    const claim = regionClaims(work).made.find((m) => m.subject === england).attestation;
+    assert.equal(claim.certaintyLevel, CERTAINTY_LEVELS[certainty], `the claim is ${certainty}, as chosen`);
+    assert.equal(claim.identities[0].identityType, 'closeMatch');
+  }
+  assert.equal(regionMatchOptions({ identityType: 'exactMatch' }).certainty, CERTAINTY_DEFAULT, 'nothing chosen: the default');
+});
+
+test('a region\'s heading id is short and safe for aria-labelledby whatever its key; the key stays in data-rkey', () => {
+  const keys = ['1\u0000England', '3\u0000Newton\u0000England\u0000Cheshire', 'Saint "Mary\'s" Church, Ely', 'https://example.org/suffolk/place/region-abc', ''];
+  const ids = keys.map(regionDomId);
+  for (const id of ids) assert.match(id, /^rh-[0-9a-z]{1,7}$/, `${id}: no spaces, quotes or other characters an id reference cannot carry`);
+  assert.equal(new Set(ids).size, keys.length, 'distinct keys, distinct ids');
+  assert.equal(regionDomId(keys[2]), ids[2], 'stable');
+  assert.doesNotMatch(`rh-${keys[2]}`, /^rh-[0-9a-z]{1,7}$/, 'control: the key itself fails the check');
 });

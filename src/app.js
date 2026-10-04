@@ -32,7 +32,7 @@ import { candidateSource } from './engine/krisis/identity.js';
 import { runLevel, runPlaces } from './engine/krisis/lookup.js';
 import { seedRegions, decideRegion, settleRegion, undo as undoRegion, selectLevel, matchesOf, lastQueryOf } from './engine/krisis/regions.js';
 import { REGION_PAGE as RP, REGION_WORDS } from './engine/words.js';
-import { levelNames, levelLabel, navigator, firstOpen, chainOf, placeChain, constraintLine, notesOf, relaxOptions, costOf, levelRegions, unsettledOf, placesToLook, lockedPlaces, wouldClear, priorOf, restorePrior, nameOf } from './krisis/region-page.js';
+import { levelNames, levelLabel, navigator, firstOpen, chainOf, placeChain, constraintLine, notesOf, relaxOptions, costOf, levelRegions, unsettledOf, placesToLook, lockedPlaces, wouldClear, priorOf, restorePrior, nameOf, regionDomId, certaintyChoices, CERTAINTY_DEFAULT, regionMatchOptions } from './krisis/region-page.js';
 import { mountMethodos } from './methodos/page.js';
 import { workflowStore } from './methodos/store.js';
 const $ = (id) => document.getElementById(id);
@@ -1487,7 +1487,8 @@ async function lookUp({ only = null, query = null, allNames, which } = {}) {
     lookup = svc.whg ? whgLookup() : createLookup({ endpoint: svc.service.endpoint, token: null, shared: false, iri: iriVia(template), fetch: gazetteerFetch });
   } catch (e) { return lookupSay(scrub(e.message), true); }
   const w = existing || newWork(g.subjects, { reviewer: reviewer() });
-  if (g?.regions?.length) seedRegions(w, g);   // Krisis: region review. The work file holds the dataset's regions.
+  // Krisis: region review. A plain lookup seeds no regions: they are seeded when the region review is begun
+  // (startRegions), so a place looked up here is never shown waiting for regions it was not looked up within.
   const name = existing ? workName : `${(files[0]?.name || 'review').replace(/\.gz$/i, '').replace(/\.[^.]+$/, '')}.krisis.json`;
   const before = new Set(w.candidates.map((c) => c.id));
   const service = shortName(svc.service);
@@ -1724,6 +1725,7 @@ function drawRegions() {
   box.hidden = false;
   $('regions-h').textContent = RP.heading; $('regions-how').textContent = RP.how;
   $('region-identity-label').textContent = RP.identityLabel;
+  $('region-certainty-label').textContent = RP.certaintyLabel;
   const names = regionNames(), nav = navigator(work, names);
   if (regionLevel === null || !nav.some((n) => n.level === regionLevel)) regionLevel = firstOpen(work);
   const navBox = $('regions-nav');
@@ -1761,7 +1763,8 @@ function levelHtml(level, names, may) {
 }
 function regionHtml(n, may) {
   const key = n.key, k = escapeHtml(key), cands = candidatesOf(work, key), st = n.state, settled = st === 'settled';
-  let out = `<article class="region region-${st}" data-rkey="${k}" tabindex="-1" aria-labelledby="rh-${k}"><h5 id="rh-${k}">${escapeHtml(n.names[0])}</h5>`
+  const hid = regionDomId(key);
+  let out = `<article class="region region-${st}" data-rkey="${k}" tabindex="-1" aria-labelledby="${hid}"><h5 id="${hid}">${escapeHtml(n.names[0])}</h5>`
     + `<p class="region-where">${escapeHtml(chainOf(work, key))} · ${escapeHtml(RP.places(n.count))} · <span class="region-state">${escapeHtml(RP.states[st])}</span></p>`;
   if (st === 'locked') return out + '</article>';
   out += `<p class="region-constraint">${escapeHtml(constraintLine(work, key))}</p>`;
@@ -1896,8 +1899,8 @@ $('regions').addEventListener('click', (e) => {
     return;
   }
   if (d.rcand) {
-    const kind = d.ract === 'undo' ? null : d.ract, identityType = $('region-identity').value;
-    return changeRegion(key, (w) => decideRegion(w, d.rcand, kind, kind === 'match' ? { identityType } : {}).snapshot);
+    const kind = d.ract === 'undo' ? null : d.ract, how = regionMatchOptions({ identityType: $('region-identity').value, certainty: $('region-certainty').value });
+    return changeRegion(key, (w) => decideRegion(w, d.rcand, kind, kind === 'match' ? how : {}).snapshot);
   }
   if (d.ract === 'none') {
     if (matchesOf(work, key).length) { regionSay(RP.noneButMatched, true); return drawRegions(); }
@@ -1907,4 +1910,5 @@ $('regions').addEventListener('click', (e) => {
 });
 $('regions').addEventListener('keydown', (e) => { if (e.key === 'Escape' && regionChange) { const k = regionChange.key; regionChange = null; drawRegions(); focusRegion(k); } });
 { const sel = $('region-identity'); sel.innerHTML = ['closeMatch', 'exactMatch'].map((t) => `<option value="${t}">${escapeHtml(RP.identity[t])}</option>`).join(''); }
+{ const sel = $('region-certainty'); sel.innerHTML = certaintyChoices().map((c) => `<option value="${c.value}"${c.value === CERTAINTY_DEFAULT ? ' selected' : ''}>${escapeHtml(c.text)}</option>`).join(''); }
 startWorker();

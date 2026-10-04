@@ -1000,6 +1000,10 @@ export const REGION_WORDS = {
     unconstrained: 'looked up before the regions above it were settled',
   },
   relaxUnknown: (v, list) => `--relax ${v} is not one of ${list.join(', ')}.`,
+  /** A step asked for that does not apply to what would be looked up (regions.js relaxAvailable): refused, never sent unconstrained. */
+  relaxUnavailable: (v, target, steps) => `--relax ${v} does not apply to ${target === 'places' ? 'the places within' : `the regions of level ${target}`}`
+    + `${v === 'ancestor' ? ' (not every one has a matched region further up that gives a constraint)' : ' (not every one is sent what it would drop)'}, so nothing was looked up. `
+    + `The steps that apply: ${steps.join(', ')}. Only --relax all${target === 'places' ? ' or --unconstrained' : ''} looks up without a constraint.`,
   /** Why a matched region has no area to constrain by (regions.js areaOf). */
   noArea: {
     'no-geometry': 'the gazetteer gives no geometry for its match',
@@ -1053,6 +1057,9 @@ export const REGION_PAGE = {
   },
   identityLabel: 'This one means',
   identity: { closeMatch: 'much the same region (close match)', exactMatch: 'the same region (exact match)' },
+  /** How certain the reviewer is of a match: PLATO's certainty levels (#Certain, #LessCertain, #Uncertain). */
+  certaintyLabel: 'How certain',
+  certainty: { certain: 'certain', 'less-certain': 'less certain', uncertain: 'uncertain' },
   /** Where a region lies: "in England › Suffolk". */
   chain: (names) => (names.length ? `in ${names.join(' › ')}` : 'the widest level'),
   places: (n) => plural(n, 'place'),
@@ -1078,8 +1085,18 @@ export const REGION_PAGE = {
   uncoded: "Places with no country codes can't pass a country filter: if WHG records no country for the right one, it is left out.",
   union: (n) => `Matched to ${plural(n, 'record')}: the regions and places within it are looked up within the union of their areas.`,
   unanswered: 'WHG did not answer for this region; this is not a finding that it has no match. Look it up again.',
-  /** The steps of relaxing, as buttons; each step includes those before it. */
+  /**
+   * The steps of relaxing, as buttons. 'contained-in' includes 'countries'; the 'ancestor' step is said
+   * by what it sends (region-page.js ancestorText): the region further up by its ids, else its area,
+   * else only its countries.
+   */
   relax: { countries: 'Again without the countries', 'contained-in': 'Within the area instead', ancestor: (name) => `Within ${name} instead`, all: 'With no constraint' },
+  /** The 'ancestor' step where the region further up is sent otherwise than by its ids. */
+  relaxAncestor: {
+    area: (name) => `Within the area around ${name} instead`,
+    countries: (countries) => `In ${countries} instead`,
+    mixed: 'Within the region above that, or the area around it, instead',
+  },
   ancestorAny: 'the region above that',
   /** A button with what it would send. */
   cost: (text, p, fetches = 0) => `${text} (${plural(p.queries, 'query', 'queries')} in ${plural(p.requests, 'request')}${fetches ? `, and ${plural(fetches, 'record')} fetched for an area` : ''})`,

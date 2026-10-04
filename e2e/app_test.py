@@ -1565,8 +1565,12 @@ def krisis_regions_case(page, tmp, url):
         out['suffolk line'] = page.inner_text(art(suf) + ' .region-constraint')
         out['suffolk where'] = page.inner_text(art(suf) + ' .region-where')
         out['suffolk notes'] = page.eval_on_selector_all(art(suf) + ' .region-note', 'els => els.map((e) => e.dataset.note)')
+        out['certainty options'] = page.eval_on_selector_all('#region-certainty option', 'os => os.map((o) => [o.value, o.selected])')
+        page.select_option('#region-certainty', 'less-certain')
         choose_candidate(suf, 'place:gn:2636561')
-        wait_state(page, lambda s: ((s.get('work') or {}).get('regions', {}).get(suf) or {}).get('outcome') == 'matched', 10, 'Suffolk settled')
+        s = wait_state(page, lambda s: ((s.get('work') or {}).get('regions', {}).get(suf) or {}).get('outcome') == 'matched', 10, 'Suffolk settled')
+        out['suffolk certainty'] = next((c['decision'].get('certainty') for c in (s.get('work') or {}).get('candidates', []) if c['candidate_source'] == suf and (c.get('decision') or {}).get('kind') == 'match'), None)
+        page.select_option('#region-certainty', 'certain')
         page.click(art(nor) + ' button[data-ract="none"]')
         s = wait_state(page, lambda s: ((s.get('work') or {}).get('regions', {}).get(nor) or {}).get('outcome') == 'no-match', 10, 'Norfolk settled')
         out['nav after 2'] = rs(s).get('nav')
@@ -1585,6 +1589,9 @@ def krisis_regions_case(page, tmp, url):
           l2.get('suffolk line') == 'Looked up within England (gn:6269131) and in GB.' and l2.get('suffolk where', '').startswith('in England · 2 places')
           and l2.get('suffolk notes') == ['uncoded'] and l2.get('england notes') == [],
           {k: l2.get(k) for k in ('suffolk line', 'suffolk where', 'suffolk notes', 'england notes', 'error')})
+    check("regions: the certainty select offers PLATO's three levels, certain by default; a match decided with 'less certain' is recorded so",
+          l2.get('certainty options') == [['certain', True], ['less-certain', False], ['uncertain', False]] and l2.get('suffolk certainty') == 'less-certain',
+          {k: l2.get(k) for k in ('certainty options', 'suffolk certainty', 'error')})
     check('regions: This one and None of these settle level 2', l2.get('nav after 2') == ['Country 1/1 settled', 'County 2/2 settled', 'Parish 0/3', 'Places 0/3'], l2)
 
     # Level 3: Hoxne's filter could not be applied (failed closed); relaxed, it is asked again without it.
@@ -1620,7 +1627,7 @@ def krisis_regions_case(page, tmp, url):
           l3.get('hoxne notes') == [FC] and l3.get('eye notes') == 0 and l3.get('eye candidates') == 1
           and (l3.get('hoxne state') or {}).get('failedClosed') is True and (l3.get('hoxne state') or {}).get('state') == 'unanswered', {k: l3.get(k) for k in ('hoxne notes', 'eye notes', 'eye candidates', 'hoxne state', 'error')})
     check('regions: the relax buttons name each step and its cost; "With no constraint" asks again without the constraint, and the notice goes',
-          l3.get('relax') == ['Again without the countries (1 query in 1 request)', 'Within the area instead (1 query in 1 request, and 1 record fetched for an area)', 'Within England instead (1 query in 1 request, and 1 record fetched for an area)', 'With no constraint (1 query in 1 request)']
+          l3.get('relax') == ['Again without the countries (1 query in 1 request)', 'Within the area instead (1 query in 1 request, and 1 record fetched for an area)', 'Within England instead (1 query in 1 request)', 'With no constraint (1 query in 1 request)']
           and l3.get('relaxed') == [{'query': 'Hoxne', 'type': 'Place', 'limit': 10}] and l3.get('hoxne after') == 0 and l3.get('hoxne candidates') == 1
           and l3.get('hoxne line') == 'Looked up with no constraint. Relaxed: no constraint.', {k: l3.get(k) for k in ('relax', 'relaxed', 'hoxne after', 'hoxne candidates', 'hoxne line', 'error')})
 

@@ -295,10 +295,11 @@ does not apply to):
                     places within them. Without --level, the first level with regions ready,
                     else the places. WHG only. The regions are decided on the page.
   --level N         lookup --levels: look up the ready regions of level N (1 is the widest).
-  --relax STEP      lookup --levels: loosen the constraint, each step including those before
-                    it: countries (drop the countries), contained-in or area (the area of the
-                    region above in place of the gazetteer's region), ancestor (the region above
-                    that), all (no constraint).
+  --relax STEP      lookup --levels: loosen the constraint: countries (drop the countries),
+                    contained-in or area (the area of the region above in place of the
+                    gazetteer's region, countries dropped too), ancestor (the region above that,
+                    by its gazetteer ids, else its area, with its countries), all (no constraint).
+                    A step that does not apply to every region to look up is refused.
   --only KEY        lookup --levels: only this region (its address, or its key) or place, which
                     may be asked again while it is still to review.
   --unconstrained   lookup --levels: also look up the places whose regions are not yet settled,
@@ -1061,7 +1062,7 @@ async function lookupCommand(args, o, resources) {
   if (o.json && o.brief) return usage('choose --json or --brief, not both.');
   // Krisis: region review. --levels, and what goes with it.
   if (!o.levels && (o.level !== undefined || o.relax !== undefined || o.only !== undefined || o.unconstrained)) return usage('--level, --relax, --only and --unconstrained go with --levels.');
-  const { RELAX_NAMES, relaxStep, seedRegions, levelsOf, selectLevel, planLevels } = await import('../src/engine/krisis/regions.js');
+  const { RELAX_NAMES, RELAX_ALIASES, relaxStep, relaxAvailable, seedRegions, levelsOf, selectLevel, placeState, planLevels } = await import('../src/engine/krisis/regions.js');
   const { REGION_WORDS } = await import('../src/engine/words.js');
   if (o.levels) {
     if (o.places || o['all-names'] || o.countries || o.near) return usage('--places, --all-names, --countries and --near are not for --levels: what each region or place is looked up within is the region review\'s constraint (--relax loosens it).');
@@ -1136,6 +1137,16 @@ async function lookupCommand(args, o, resources) {
     if (only && !placeOnly && !Object.hasOwn(work.regions, o.only)) { host.cleanup(); return usage(REGION_WORDS.onlyUnknown(o.only)); }
     const target = placeOnly ? 'places' : o.level !== undefined ? Number(o.level)
       : only ? work.regions[o.only].level : levelsOf(work).find((l) => selectLevel(work, l).length) ?? 'places';
+    // A relax step asked for must apply to every region (or place) it would be used on: one that does
+    // not (no region further up, say) would send less than it says, or nothing. Only --relax all and
+    // --unconstrained look up without a constraint.
+    if (o.relax !== undefined) {
+      const keys = target === 'places'
+        ? gathered.places.filter((p) => (!only || only.includes(p.iri)) && ['ready', ...(only ? ['review'] : [])].includes(placeState(work, p.iri, Object.hasOwn(work.places, p.iri) ? work.places[p.iri] : p))).map((p) => p.iri)
+        : selectLevel(work, target, { only }).map((n) => n.key);
+      const step = RELAX_ALIASES[o.relax] ?? o.relax, can = relaxAvailable(work, keys);
+      if (keys.length && !can.includes(step)) { host.cleanup(); return usage(REGION_WORDS.relaxUnavailable(o.relax, target, can)); }
+    }
     r.region = { target, relax: o.relax ?? null };
     if (o['dry-run']) {
       r.regionPlan = planLevels(work, { relax: o.relax, unconstrained: o.unconstrained, places: gathered.places });

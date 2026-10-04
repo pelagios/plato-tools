@@ -5,12 +5,23 @@
 // or changes the work file it is given (a change is tried on a copy). src/app.js draws it and runs
 // the lookups (lookup.js runLevel and runPlaces, as the command line's `lookup --levels` does).
 import {
-  regionNodes, levelsOf, ancestorsOf, matchesOf, constraintFor, RELAX_ORDER, lastQueryOf, placeState, selectLevel, areaIds,
+  regionNodes, levelsOf, ancestorsOf, matchesOf, constraintFor, RELAX_ORDER, lastQueryOf, placeState, selectLevel, areaIds, CERTAINTY_LEVELS,
 } from '../engine/krisis/regions.js';
+import { CERTAINTIES } from '../engine/krisis/work.js';
 import { planQueries } from '../engine/krisis/lookup.js';
 import { REGION_PAGE as RP } from '../engine/words.js';
 
 const isRegion = (work, key) => Object.hasOwn(work.regions || {}, key);
+/**
+ * How certain the reviewer is of a match, as the page offers it beside "This one means": PLATO's
+ * certainty levels (work.js CERTAINTIES, written as CERTAINTY_LEVELS), each { value, text, iri }.
+ * CERTAINTY_DEFAULT is the level PLATO's worked example of a region review gives (#Certain).
+ */
+export const certaintyChoices = () => CERTAINTIES.map((value) => ({ value, text: RP.certainty[value], iri: CERTAINTY_LEVELS[value] }));
+export const CERTAINTY_DEFAULT = 'certain';
+/** The options a match on the page is decided with (regions.js decideRegion): what the reviewer chose of each. */
+export const regionMatchOptions = ({ identityType, certainty = CERTAINTY_DEFAULT }) => ({ identityType, certainty });
+
 /** A region's own name ("Suffolk"), not its label with the regions above ("Suffolk (England)"). */
 export const nameOf = (work, key) => (isRegion(work, key) ? work.regions[key].names?.[0] ?? work.regions[key].label : key);
 
@@ -100,8 +111,8 @@ const sig = (c) => JSON.stringify([c.from ?? null, c.kinds, c.params, c.needsAre
 /**
  * The steps of relaxing worth offering for these keys (the regions or places to ask again), in
  * RELAX_ORDER: a step is offered when it changes what at least one of them would be asked with,
- * beyond the step before it ('ancestor' only where a region further up is matched). Each is
- * { relax, text }, `text` naming the region further up when it is one and the same for all.
+ * beyond the step before it ('ancestor' only where a region further up is matched and gives a
+ * constraint). Each is { relax, text }; the 'ancestor' step's text is ancestorText's.
  */
 export function relaxOptions(work, keys) {
   const out = [];
@@ -110,13 +121,43 @@ export function relaxOptions(work, keys) {
     const now = new Map(keys.map((k) => [k, constraintFor(work, k, { relax: step })]));
     const changes = keys.some((k) => sig(now.get(k)) !== prev.get(k));
     if (step === 'ancestor') {
-      const ups = [...new Set(keys.map((k) => now.get(k).from).filter((f) => f !== null && f !== undefined))];
-      if (changes && ups.length) out.push({ relax: step, text: RP.relax.ancestor(ups.length === 1 ? nameOf(work, ups[0]) : RP.ancestorAny) });
-      if (!ups.length) continue;   // no region further up: the next step (no constraint) is measured against the one before this
+      const text = ancestorText(work, keys.map((k) => now.get(k)));
+      if (changes && text) out.push({ relax: step, text });
+      if (!text) continue;   // no region further up gives a constraint: the next step (no constraint) is measured against the one before this
     } else if (changes) out.push({ relax: step, text: RP.relax[step] });
     prev = new Map([...now].map(([k, c]) => [k, sig(c)]));
   }
   return out;
+}
+
+/**
+ * The words of the 'ancestor' step, from the constraints it builds (constraintFor with relax
+ * 'ancestor'), so that they say exactly what is sent: "Within England instead" where the region
+ * further up is sent by its ids (contained_in), "Within the area around England instead" where its
+ * area is, "In GB instead" where only its countries are; null when none of them is constrained.
+ */
+export function ancestorText(work, constraints) {
+  const formOf = (c) => (c.kinds.includes('contained_in') ? 'ids' : c.kinds.includes('area') || c.needsArea ? 'area' : c.kinds.includes('countries') ? 'countries' : null);
+  const built = constraints.filter((c) => c.from !== null && c.from !== undefined && formOf(c));
+  if (!built.length) return null;
+  const forms = new Set(built.map(formOf)), ups = new Set(built.map((c) => c.from));
+  if (forms.size > 1) return RP.relaxAncestor.mixed;
+  const name = ups.size === 1 ? nameOf(work, built[0].from) : RP.ancestorAny, form = [...forms][0];
+  if (form === 'ids') return RP.relax.ancestor(name);
+  if (form === 'area') return RP.relaxAncestor.area(name);
+  const countries = new Set(built.map((c) => c.params.countries.join(', ')));
+  return countries.size === 1 ? RP.relaxAncestor.countries([...countries][0]) : RP.relaxAncestor.mixed;
+}
+
+/**
+ * The id of a region's heading on the page, for aria-labelledby: "rh-" and a short hash of its key
+ * (FNV-1a, base 36), since a key (a containerKey without a base address) can hold spaces and quotes.
+ * The key itself goes in data-rkey.
+ */
+export function regionDomId(key) {
+  let h = 0x811c9dc5;
+  for (const ch of String(key)) { h ^= ch.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0; }
+  return `rh-${h.toString(36)}`;
 }
 
 /** A key as runLevel and runPlaces send it: its names, and its constraint's params. */

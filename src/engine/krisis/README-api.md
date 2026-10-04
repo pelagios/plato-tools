@@ -218,7 +218,10 @@ words them all.
   (locked/ready/review/settled, gated by each node's own parent), `placeState`, `selectLevel`,
   `levelsOf`, `regionProgress`, `ancestorsOf`, `matchesOf`, `constraintFor(work, key, { relax, areas })`
   (`contained_in` list of bare ids, else the area as lat/lng/radius, plus countries; `needsArea`,
-  `noArea`, `uncodedFail`), `RELAX_ORDER`/`RELAX_NAMES`/`relaxStep`, `areaOf(features, from)`,
+  `noArea`, `uncodedFail`; at `relax: 'ancestor'` the region further up constrains as the nearest does
+  unrelaxed: its ids, else its area, with its own countries), `RELAX_ORDER`/`RELAX_NAMES`/`relaxStep`,
+  `relaxAvailable(work, keys)` (the steps that apply to every key; the CLI refuses any other),
+  `areaOf(features, from)`,
   `decideRegion(work, id, kind, opts) -> { candidate, snapshot }`, `settleRegion(work, key,
   'no-match'|null)`, `invalidate(work, key) -> snapshot`, `undo(work, snapshot)`, `planLevels`.
 - `src/engine/krisis/lookup.js`: `runLevel(work, level, { lookup, entity, relax, only, options,
@@ -230,6 +233,19 @@ words them all.
   place-centric-regions.json; `attestationsFrom` appends `made`. promotedFrom: see HOOK(candidate-sets).
 - CLI: `plato-tools lookup --levels [--level N] [--relax STEP] [--only KEY] [--unconstrained] [--dry-run]`.
 - Words: `REGION_WORDS` in words.js.
-- Page: `src/krisis/region-page.js` (pure: the navigator, constraint lines and notes, relax steps and their cost,
+- `placeState`: a place answered by a plain lookup (a query with no `constraint`) is never locked. The page
+  seeds regions only when the region review is begun (`startRegions`), never on a plain lookup.
+- Page: `src/krisis/region-page.js` (pure: the navigator, constraint lines and notes, relax steps and their cost
+  (`ancestorText` words the 'ancestor' step by what it sends), `certaintyChoices`/`CERTAINTY_DEFAULT`/`regionMatchOptions`
+  for the certainty select, `regionDomId` for heading ids,
   `wouldClear` for the in-page confirmation, `priorOf`/`restorePrior` for Undo with invalidate's snapshot), drawn and
   run by `src/app.js` (`drawRegions`, `regionRun`); its words are `REGION_PAGE` in words.js.
+
+> **NOTE for whoever merges branch `krisis-guards` into this one (`krisis-regions`).** Both branches
+> define `export const ROW_STATES = ['filter', 'exclude']` in `work.js`: keep ONE, in the version 3
+> section (beside `CERTAINTIES`). Guards' `startLookup` line
+> `if (!work.places[p.iri]) work.places[p.iri] = placeRecord(p)` must keep this branch's
+> `!isRegionKey(work, p.iri)` check (a region's answers stay under the region's key, never listed as a
+> place), i.e. `if (!isRegionKey(work, p.iri) && !Object.hasOwn(work.places, p.iri)) …`. Keep
+> `WORK_VERSION` 3: fold guards' prose on its optional fields into the version 3 block at the top of
+> `work.js` (and the version 3 bullet above), rather than adding a version.

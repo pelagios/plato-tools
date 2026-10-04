@@ -16,8 +16,9 @@
 //   area from its record (entity()), as lat/lng/radius. The match's countries are added, and are ANDed
 //   with it: a candidate with no country recorded cannot pass, which the constraint says. A region
 //   matched to several records is constrained by the union of them (decided by the maintainer).
-// - Relaxing, in order: drop the countries; the area in place of contained_in; the next ancestor up;
-//   no constraint. Each step includes those before it.
+// - Relaxing, in order: drop the countries; the area in place of contained_in (each includes the one
+//   before it); the next ancestor up, constrained as the nearest is (its contained_in where it has ids,
+//   else its area, and its own countries: the steps before are not carried up); no constraint.
 // - WHG says whether it applied a filter (`scope.applied`, and `scope.approximate`). A filter it could
 //   not apply that answered nothing (applied false, zero candidates) FAILED CLOSED: it is recorded as
 //   such and the node stays ready, never read as "no match" (lookup.js mergeAnswers).
@@ -27,7 +28,10 @@
 import { decide } from './work.js';
 import { REGION_WORDS } from '../words.js';
 
-/** The steps of relaxing a constraint, in order; each includes those before it. */
+/**
+ * The steps of relaxing a constraint, in order. 'contained-in' includes 'countries'; 'ancestor' starts
+ * afresh from the region further up (its contained_in, else its area, with its countries); 'all' is none.
+ */
 export const RELAX_ORDER = ['countries', 'contained-in', 'ancestor', 'all'];
 /** Other names for a step: "area" is the area in place of contained_in. */
 export const RELAX_ALIASES = { area: 'contained-in' };
@@ -107,15 +111,20 @@ export function regionState(work, key) {
 /**
  * A place's state in the review of the places within: 'locked' while any region of its chain is not
  * settled, 'settled' once one of its candidates is decided, 'review' when answered (and not made
- * stale), else 'ready'. A place in no region is never locked. `place` is its entry, if not the work file's.
+ * stale), else 'ready'. A place in no region is never locked, nor is one answered by a plain lookup
+ * (a query with no constraint record: looked up as any place is, outside the region review), which
+ * is reviewed as it is. `place` is its entry, if not the work file's.
  */
 export function placeState(work, iri, place = Object.hasOwn(work.places, iri) ? work.places[iri] : null) {
-  let k = place?.within ?? null;
-  const seen = new Set();
-  while (typeof k === 'string' && isRegion(work, k) && !seen.has(k)) { if (!settled(work, k)) return 'locked'; seen.add(k); k = work.regions[k].within; }
-  if (work.candidates.some((c) => c.candidate_source === iri && c.decision)) return 'settled';
   const q = lastQueryOf(work, iri);
-  return q && q.state === 'answered' && !q.stale ? 'review' : 'ready';
+  const answered = !!q && q.state === 'answered' && !q.stale;
+  if (!(answered && !Object.hasOwn(q, 'constraint'))) {
+    let k = place?.within ?? null;
+    const seen = new Set();
+    while (typeof k === 'string' && isRegion(work, k) && !seen.has(k)) { if (!settled(work, k)) return 'locked'; seen.add(k); k = work.regions[k].within; }
+  }
+  if (work.candidates.some((c) => c.candidate_source === iri && c.decision)) return 'settled';
+  return answered ? 'review' : 'ready';
 }
 /** The levels in use, widest first. */
 export const levelsOf = (work) => [...new Set(Object.values(work.regions || {}).map((r) => r.level))].sort((a, b) => a - b);
@@ -153,7 +162,7 @@ const sameList = (a, b) => Array.isArray(a) && a.length === b.length && a.every(
 
 /**
  * The constraint for looking up `key` (a region, or a place within regions), from the nearest region
- * above it with a match. options: relax (RELAX_NAMES; each step includes those before it), areas (a
+ * above it with a match. options: relax (RELAX_NAMES, RELAX_ORDER says what each step does), areas (a
  * Map of region key -> area for this run, consulted before the work file's). Returns
  * { from, kinds, params, relaxed } (the query record keeps these), and, when they apply:
  * `needsArea` (the key of the region whose area must be fetched first: entity(), lookup.js),
@@ -166,12 +175,15 @@ export function constraintFor(work, key, { relax, areas } = {}) {
   const none = { from: null, kinds: [], params: {}, relaxed };
   if (step >= RELAX_ORDER.indexOf('all')) return none;
   const matched = ancestorsOf(work, key).filter((k) => work.regions[k].outcome === 'matched' && matchesOf(work, k).length);
-  const from = matched[step >= RELAX_ORDER.indexOf('ancestor') ? 1 : 0];
+  // At 'ancestor', the region further up constrains as the nearest does with nothing relaxed: the steps before are not carried up.
+  const up = step === RELAX_ORDER.indexOf('ancestor');
+  const from = matched[up ? 1 : 0];
   if (from === undefined) return none;
   const ms = matchesOf(work, from);
   const ids = [...new Set(ms.map((c) => bareId(c.gazetteer?.id)).filter(Boolean))].sort();
   const out = { from, kinds: [], params: {}, relaxed };
-  if (step < RELAX_ORDER.indexOf('contained-in') && ids.length) {
+  const keepIds = up || step < RELAX_ORDER.indexOf('contained-in'), keepCountries = up || step < RELAX_ORDER.indexOf('countries');
+  if (keepIds && ids.length) {
     out.kinds.push('contained_in');
     out.params.contained_in = ids;
   } else {
@@ -181,12 +193,28 @@ export function constraintFor(work, key, { relax, areas } = {}) {
     else { out.kinds.push('area'); Object.assign(out.params, { lat: area.lat, lng: area.lng, radius: area.radius }); }
   }
   const countries = iso2(ms.flatMap((c) => c.other?.ccodes || []));
-  if (step < RELAX_ORDER.indexOf('countries') && countries.length) {
+  if (keepCountries && countries.length) {
     out.kinds.push('countries');
     out.params.countries = countries;
     out.uncodedFail = true;
   }
   return out;
+}
+/**
+ * The steps of relaxing that apply to every one of these keys (RELAX_ORDER's names), so that a step
+ * asked for never sends less than it says: 'countries' where countries are sent, 'contained-in' where
+ * contained_in is, 'ancestor' where a region further up is matched and gives a constraint, and 'all'
+ * always. A key with nothing to relax (no constraint at all) is passed over.
+ */
+export function relaxAvailable(work, keys) {
+  const has = (c) => c.kinds.length > 0 || !!c.needsArea;
+  const relaxable = keys.filter((k) => { const c = constraintFor(work, k); return has(c) || !!c.noArea; });
+  const applies = {
+    countries: (k) => constraintFor(work, k).kinds.includes('countries'),
+    'contained-in': (k) => constraintFor(work, k).kinds.includes('contained_in'),
+    ancestor: (k) => { const c = constraintFor(work, k, { relax: 'ancestor' }); return c.from !== null && has(c); },
+  };
+  return RELAX_ORDER.filter((s) => s === 'all' || (relaxable.length > 0 && relaxable.every(applies[s])));
 }
 /** What a query record keeps of a constraint. */
 export const storedConstraint = (c) => ({ from: c.from, kinds: [...c.kinds], params: structuredClone(c.params), relaxed: c.relaxed });
