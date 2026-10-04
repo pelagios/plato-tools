@@ -2992,17 +2992,24 @@ def map_your_data_checks(pw, url, tmp):
         step_is('compare', 'done')
         # The tracker narrows step 2 to the step's tool (Metaphrasis) once it comes to it.
         until(page, "() => { const t = document.getElementById('target'); return !!t && !!t.offsetParent; }", 30)
-        page.select_option('#target', 'plato-json')
+        # The dataset handed back is PLATO JSON already, and the page offers no conversion of a format into
+        # itself: written out as PLATO JSON Lines, and the PLATO JSON handed back read as the result too.
+        offered = page.eval_on_selector_all('#target option', 'os => os.map((o) => o.value)')
+        page.select_option('#target', 'plato-jsonl')
         s = run('#convert'); step_is('out', 'done')
-        r['final'] = saved(s, '.json')
+        r['final'] = saved(s, '.jsonl')
         until(page, "document.getElementById('methodos-tracker').dataset.status === 'completed' || !document.querySelector('#methodos-track li.is-current')", 15)
-        e = mydata_ends(json.loads(r['final'].read_text())); r['ends'] = e
-        return (r['again'] == 'done' and mydata_complete(e)), {'again': r['again'], 'ends': e, 'steps': track()['steps']}
-    attempt('Map your data: checked again, compared with the dataset converted from the table, and written out as PLATO JSON whose ten places are ContainedIn their parishes, whose identities and adopted geometry cite the stub, and whose identities name their candidates', to_the_end)
+        lines = [json.loads(x) for x in r['final'].read_text().splitlines() if x.strip()]
+        head = next((x for x in lines if 'gazetteer' in x), {})
+        e = mydata_ends({'gazetteer': head.get('gazetteer'), 'spatialEntities': [x for x in lines if '@id' in x and 'gazetteer' not in x]}); r['ends'] = e
+        r['doc'] = json.loads(r['drawn'].read_text())
+        e2 = mydata_ends(r['doc'])
+        return (r['again'] == 'done' and 'plato-json' not in offered and mydata_complete(e) and mydata_complete(e2)), {'again': r['again'], 'offered': offered, 'ends': e, 'handed back': e2, 'steps': track()['steps']}
+    attempt('Map your data: checked again, compared with the dataset converted from the table, and written out (PLATO JSON as handed back from Chora, and PLATO JSON Lines), each with its ten places ContainedIn their parishes, its identities and adopted geometry citing the stub, and its identities naming their candidates', to_the_end)
 
     def can_fail():
-        need('final')
-        doc = json.loads(r['final'].read_text())
+        need('final', 'doc')
+        doc = r['doc']
         # The same check on the same file as a step that skipped writing ContainedIn would have left it: it must fail.
         mutated = {**doc, 'spatialEntities': [{**e, 'attestations': [a for a in e.get('attestations') or []
                    if not any(x.get('relationType') == 'https://w3id.org/plato#ContainedIn' for x in a.get('relations') or [])]} for e in doc['spatialEntities']]}
