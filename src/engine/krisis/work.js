@@ -42,6 +42,8 @@
 //   may hold `scope: { applied, approximate }` (the service's word on a spatial filter), `failedClosed`
 //   (a filter the service could not apply, and so answered nothing: NOT "no match") and `stale` (the
 //   region above was decided again since it was asked).
+//   A candidate looked up under a constraint carries `match_parameters: { within?, ccodes?, radiusKm?,
+//   relaxed? }` (regions.js constraintParameters), which a candidate set publishes as its matchParameters.
 // Version 3 also has Krisis × Methodos's (#28) OPTIONAL fields (a file without them reads as before;
 // see checkMethodos; a version 2 file may carry them too): a place's `rowState: 'filter' | 'exclude'`
 // (none: reconcile); a candidate's `flagged: true` and `note` (text, kept in the work file only, never

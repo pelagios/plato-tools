@@ -218,6 +218,29 @@ export function relaxAvailable(work, keys) {
 }
 /** What a query record keeps of a constraint. */
 export const storedConstraint = (c) => ({ from: c.from, kinds: [...c.kinds], params: structuredClone(c.params), relaxed: c.relaxed });
+/**
+ * A looked-up candidate's match parameters, from the constraint its query was sent under (the query
+ * record's `constraint`): what the candidate set publishes as its matchParameters (candidates.js
+ * asCandidate), so that one pair sought within another match is another candidate, as in PLATO's
+ * schemas/examples/candidate-set-regions.json (Surrey sought within the match made for England:
+ * {"ccodes":["GB"],"within":"<England's match>"}). `within`: the address of the match of the region
+ * above that the lookup was confined to (a sorted list when it has several); `ccodes`: the countries;
+ * `radiusKm`: an area's radius, sought about that match rather than within its record; `relaxed`: how
+ * far the constraint was relaxed. null for a lookup neither constrained nor relaxed (level 1).
+ * Worked out when the answer is merged, so it is frozen with the candidate.
+ */
+export function constraintParameters(work, constraint) {
+  if (!constraint || (!constraint.kinds?.length && !constraint.relaxed)) return null;
+  const { kinds = [], params = {}, from = null, relaxed = null } = constraint, out = {};
+  if (from !== null && (kinds.includes('contained_in') || kinds.includes('area'))) {
+    const ms = [...new Set(matchesOf(work, from).map((c) => c.candidate_candidate))].sort();
+    if (ms.length) out.within = ms.length === 1 ? ms[0] : ms;
+  }
+  if (kinds.includes('countries') && Array.isArray(params.countries)) out.ccodes = [...params.countries];
+  if (kinds.includes('area') && typeof params.radius === 'number') out.radiusKm = params.radius;
+  if (relaxed) out.relaxed = relaxed;
+  return out;
+}
 
 const R = 6371.0088;
 function km([lon1, lat1], [lon2, lat2]) {

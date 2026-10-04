@@ -230,7 +230,11 @@ words them all.
   `params` are merged over its own filters (`filtersOf`); region answers stay under the region's key.
 - `src/engine/krisis/identity.js`: `regionClaims(work, { reviewer, date, promotedFrom }) -> { made,
   unwritten }` and `recordRegionClaim(...)`, PLATO #23's claim in the shape of PLATO's
-  place-centric-regions.json; `attestationsFrom` appends `made`. promotedFrom: see HOOK(candidate-sets).
+  place-centric-regions.json; `attestationsFrom` appends `made`. Each identity carries `promotedFrom`: the candidate's `iri` from
+  `exportCandidates` (none if never exported), as a place's answer does; a caller may pass `promotedFrom(c)`.
+- `regions.js` `constraintParameters(work, constraint)`: a constrained lookup's candidates carry it as
+  `match_parameters` (`{ within, ccodes, radiusKm?, relaxed? }`), so `exportCandidates` publishes region
+  candidates with the level constraint in `matchParameters`, as PLATO's candidate-set-regions.json does.
 - CLI: `plato-tools lookup --levels [--level N] [--relax STEP] [--only KEY] [--unconstrained] [--dry-run]`.
 - Words: `REGION_WORDS` in words.js.
 - `placeState`: a place answered by a plain lookup (a query with no `constraint`) is never locked. The page
@@ -240,12 +244,3 @@ words them all.
   for the certainty select, `regionDomId` for heading ids,
   `wouldClear` for the in-page confirmation, `priorOf`/`restorePrior` for Undo with invalidate's snapshot), drawn and
   run by `src/app.js` (`drawRegions`, `regionRun`); its words are `REGION_PAGE` in words.js.
-
-> **NOTE for whoever merges branch `krisis-guards` into this one (`krisis-regions`).** Both branches
-> define `export const ROW_STATES = ['filter', 'exclude']` in `work.js`: keep ONE, in the version 3
-> section (beside `CERTAINTIES`). Guards' `startLookup` line
-> `if (!work.places[p.iri]) work.places[p.iri] = placeRecord(p)` must keep this branch's
-> `!isRegionKey(work, p.iri)` check (a region's answers stay under the region's key, never listed as a
-> place), i.e. `if (!isRegionKey(work, p.iri) && !Object.hasOwn(work.places, p.iri)) …`. Keep
-> `WORK_VERSION` 3: fold guards' prose on its optional fields into the version 3 block at the top of
-> `work.js` (and the version 3 bullet above), rather than adding a version.

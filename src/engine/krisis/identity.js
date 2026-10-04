@@ -141,7 +141,8 @@ const claimSource = (s) => ({ ...(s['@id'] ? { '@id': s['@id'] } : {}), title: s
  * identity from the region to each record it was matched to (exactMatch or closeMatch, as decided,
  * each with a basis: the reviewer's, else the constraint it was looked up under). The containment
  * itself (the place ContainedIn the region) is never rewritten: a match changed later is a new claim.
- *   promotedFrom(candidate)  the address of the candidate in a published candidate set, or undefined.
+ *   promotedFrom(candidate)  optional: the address of the candidate in a published candidate set, or
+ *                            undefined; by default the candidate's own `iri` (set by exportCandidates).
  */
 export function recordRegionClaim({ region, key, matches, reviewer, date, source, basis, promotedFrom } = {}) {
   if (!isIri(key)) throw new Error('recordRegionClaim: the region must have an address of its own (a base address).');
@@ -151,12 +152,12 @@ export function recordRegionClaim({ region, key, matches, reviewer, date, source
   const identities = matches.map((c) => {
     const identityType = c.decision.identityType === 'exactMatch' ? 'exactMatch' : c.decision.identityType === 'closeMatch' ? 'closeMatch' : null;
     if (!identityType) throw new Error(`recordRegionClaim: a region is matched as exactMatch or closeMatch, not ${c.decision.identityType}.`);
-    // HOOK(candidate-sets): promotedFrom. This branch lacks the candidate-set export (branch
-    // candidate-sets, not yet on main): when it is rebased onto it, promotedFrom must be given here
-    // by default, as the candidate's @id in the published set (<set IRI>#c-<hash>), so that the
-    // identity points back at the suggestion it answers, as PLATO's worked example does. Until then
-    // it is written only when a caller passes promotedFrom(candidate).
-    const from = typeof promotedFrom === 'function' ? promotedFrom(c, region) : undefined;
+    // promotedFrom: the candidate's address in the candidate set it was exported to (candidates.js
+    // exportCandidates stores it in the work file as `iri`), as a place's answer has it (attestationsFrom):
+    // the identity points back at the suggestion it answers, as PLATO's worked example does. A candidate
+    // never exported has none, and its relation none. A caller may give promotedFrom(candidate) instead.
+    const from = typeof promotedFrom === 'function' ? promotedFrom(c, region) : c.iri;
+    if (from !== undefined && from !== null && !isIri(from)) throw new Error('recordRegionClaim: promotedFrom must be the IRI of a candidate.');
     return { subject: key, object: c.candidate_candidate, identityType, basis: (typeof c.decision.basis === 'string' && c.decision.basis.trim()) || basis, ...(isIri(from) ? { promotedFrom: from } : {}) };
   });
   const contributor = { name: reviewer.name.trim(), ...(reviewer.orcid ? { orcid: reviewer.orcid } : {}) };

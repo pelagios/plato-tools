@@ -433,9 +433,9 @@ test('old work files still read; a candidate looked up before the guard was stor
   const subjects = await detect([datasetFile(THREE())]);
   const others = await detect([textFile(JSON.stringify({ profile: 'place-centric', gazetteer: { title: 'B' }, spatialEntities: [{ '@id': X + 'b/n', label: 'Newcastle', attestations: [at(-1.6, 54.97)] }] }), 'b.json')]);
   const { work: local } = await match({ subjects, others, options: { now: NOW } }, env());
-  const v1 = { ...local, krisis: 1 }; delete v1.lookups;
+  const v1 = { ...local, krisis: 1 }; delete v1.lookups; delete v1.regions;   // version 1 had neither (regions came in version 3)
   const read1 = readWork(JSON.stringify(v1));
-  assert.equal(read1.krisis, 2);
+  assert.equal(read1.krisis, 3, 'read as the current version');
   assert.ok(read1.candidates.length > 0, 'control: it has candidates');
   assert.equal(guardOf(read1.candidates[0]).reason, 'not-recorded', 'a local candidate has no guard');
   // A version 2 file from before Methodos: the guard figures taken away.

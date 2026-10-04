@@ -41,7 +41,7 @@ import { similarity, queryVariants, MAX_VARIANTS } from './names.js';
 import { guard } from './guards.js';
 import { WORK_VERSION, canonicalEndpoint } from './work.js';
 import { linkState } from './identities.js';
-import { constraintFor, selectLevel, placeState, areaOf, areaIds, storedConstraint } from './regions.js';
+import { constraintFor, selectLevel, placeState, areaOf, areaIds, storedConstraint, constraintParameters } from './regions.js';
 export { authorityIris, currentIdentities } from './identities.js';
 // The note an attestation on a looked-up candidate carries, here too for the tools that use this file (Chora).
 export { krisisLookupNote } from '../words.js';
@@ -400,6 +400,8 @@ export function mergeAnswers(work, record, place, lists, { now = new Date().toIS
   const sameService = (x) => !localCandidate(x) && sameEndpoint(work.lookups.find((l) => l.id === x.lookup)?.service.endpoint, service.endpoint);
   if (state === 'answered' && !adds) work.candidates = work.candidates.filter((x) => !(x.candidate_source === iri && !x.decision && x.lookup !== record.id && sameService(x)));
   let added = 0, n = work.candidates.filter((x) => x.lookup === record.id).length;
+  // Region review: the constraint the query was sent under, as the candidate set publishes it (matchParameters).
+  const mp = constraintParameters(work, q.constraint);
   for (const r of rankGazetteer(place, [...byIri.values()], { maxDistanceKm })) {
     const g = r.candidate;
     if (g.iri === iri) { c.skipped.linked++; continue; }
@@ -412,6 +414,7 @@ export function mergeAnswers(work, record, place, lists, { now = new Date().toIS
     work.candidates.push({
       id, candidate_source: iri, candidate_candidate: g.iri, similarity_score: r.similarity_score, distance_km: r.distance_km,
       candidate_status: 'suggested', generated_at: now, algorithm_version: LOOKUP_ALGORITHM, lookup: record.id,
+      ...(mp ? { match_parameters: mp } : {}),
       ...(r.far ? { far: true } : {}), ccodes_agree: r.ccodes_agree,
       other: { label: g.name, names: [...new Set([g.name, ...(g.altNames || [])].filter(Boolean))], point: g.coords ?? null,
         source: { title: service.title, ...(service.uri ? { uri: service.uri } : {}) }, ...(g.ccodes ? { ccodes: g.ccodes } : {}), ...(g.types?.length ? { types: g.types.map((t) => t.name) } : {}) },

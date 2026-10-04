@@ -28,6 +28,8 @@ import {
   planLevels, levelsOf, RELAX_NAMES, CERTAINTY_LEVELS, areaIds, relaxAvailable,
 } from '../src/engine/krisis/regions.js';
 import { attestationsFrom, regionClaims } from '../src/engine/krisis/identity.js';
+import { exportCandidates } from '../src/engine/krisis/candidates.js';
+import { constraintParameters } from '../src/engine/krisis/regions.js';
 import { apply } from '../src/engine/krisis/apply.js';
 import { containerKey } from '../src/engine/hermes/within.js';
 import { regionId } from '../src/engine/hermes/generic.js';
@@ -480,11 +482,11 @@ test('a matched region is written as PLATO #23 has it: a claim ABOUT the minted 
   assert.equal(attestation.created, NOW);
   assert.ok(!Object.hasOwn(attestation, 'relations'), 'no containment is written: what the source says stays as it is');
   assert.equal(validPlaceCentric({ profile: 'place-centric', gazetteer: { title: 'T' }, spatialEntities: [{ '@id': england, label: 'England', attestations: [attestation] }] }), null);
-  // The worked example's shape: the same keys in the same order, but promotedFrom (the hook: the candidate-set export is not on this branch).
+  // The worked example's shape: the same keys in the same order, but promotedFrom (no candidate set exported yet: see the next test).
   const want = shapeOf(FIXTURE_CLAIM);
   assert.deepEqual({ ...shapeOf(attestation), contributor: 'uri' }, { ...want, identities: [want.identities[0].filter((k) => k !== 'promotedFrom')] });
   assert.equal(shapeOf(attestation).contributor, 'object', 'the reviewer inline (PLATO\'s contributorObject); the example names one by address');
-  // With promotedFrom given (the hook), exactly the example's shape.
+  // With promotedFrom given by the caller, exactly the example's shape.
   const hooked = regionClaims(work, { promotedFrom: (c) => `https://example.org/candidates/set-1#c-${c.id}` }).made[0].attestation;
   assert.deepEqual({ ...shapeOf(hooked), contributor: 'uri' }, want);
   assert.equal(validPlaceCentric({ profile: 'place-centric', gazetteer: { title: 'T' }, spatialEntities: [{ '@id': england, label: 'England', attestations: [hooked] }] }), null);
@@ -514,9 +516,62 @@ test('the claim\'s shape equals the worked example file\'s, where the pin has it
   decideRegion(work, candidateFor(work, england, 'place:gn:6269131').id, 'match', { identityType: 'closeMatch', basis: 'B', at: NOW });
   const hooked = regionClaims(work, { promotedFrom: (c) => `https://example.org/candidates/set-1#c-${c.id}` }).made[0].attestation;
   for (const c of claims) assert.deepEqual({ ...shapeOf(hooked), contributor: 'uri', certaintyLevel: c.certaintyLevel }, shapeOf(c));
-  // The candidate set that example answers names the level's constraint in its matchParameters (the hook's work, later).
+  // The candidate set that example answers names the level's constraint in its matchParameters (reproduced in the test below).
   const set = JSON.parse(readFileSync(`${PLATO_REPO}/schemas/examples/candidate-set-regions.json`, 'utf8'));
   assert.match(set.candidates[1].matchParameters, /within/);
+});
+
+test('a region\'s candidates are exported into a candidate set with the level constraint in matchParameters, and the region claim points at the candidate it answers (promotedFrom)', async () => {
+  const { work, lookup, england } = await englandMatched();
+  await runLevel(work, 2, { lookup, now: clock() });
+  const cheshire = keyOf(work, 'Cheshire (England)');
+  // Level 2 was sought within England's match: the candidate carries that constraint; level 1's, none.
+  const ch = candidateFor(work, cheshire, 'place:gn:2653941');
+  assert.deepEqual(ch.match_parameters, { ccodes: ['GB'], within: W3ID + 'place:gn:6269131' });
+  assert.ok(!Object.hasOwn(candidateFor(work, england, 'place:gn:6269131'), 'match_parameters'), 'level 1 was not constrained');
+  decideRegion(work, ch.id, 'match', { identityType: 'closeMatch', certainty: 'certain', at: NOW });
+  // Before any export: no promotedFrom (the control).
+  assert.ok(regionClaims(work).made.every((m) => m.attestation.identities.every((r) => !Object.hasOwn(r, 'promotedFrom'))));
+  work.subjects.uri = BASE + 'gazetteer';
+  const x = exportCandidates(work, { issued: '2026-10-04' });
+  const sub = (s) => x.set.candidates.filter((c) => c.subject === s);
+  assert.ok(sub(england).length && sub(cheshire).length, 'region candidates are in the set, subject the minted region');
+  assert.ok(cheshire.startsWith(BASE + 'place/region-'));
+  const exported = sub(cheshire).find((c) => c.object === W3ID + 'place:gn:2653941');
+  assert.equal(exported.matchParameters, JSON.stringify({ ccodes: ['GB'], within: W3ID + 'place:gn:6269131' }));
+  const stored = x.work.candidates.find((c) => c.id === ch.id).iri;
+  assert.equal(exported['@id'], stored);
+  // Each region claim's relation carries promotedFrom: the candidate's minted id, as a place's answer does.
+  const claims = regionClaims(x.work).made;
+  const claimOf = (k) => claims.find((m) => m.subject === k).attestation;
+  assert.deepEqual(claimOf(cheshire).identities.map((r) => r.promotedFrom), [stored]);
+  assert.deepEqual(claimOf(england).identities.map((r) => r.promotedFrom), [x.work.candidates.find((c) => c.candidate_source === england && c.decision?.kind === 'match').iri]);
+  assert.ok(attestationsFrom(x.work).some((m) => m.subject === cheshire && m.attestation.identities[0].promotedFrom === stored));
+  assert.equal(validPlaceCentric({ profile: 'place-centric', gazetteer: { title: 'T' }, spatialEntities: [{ '@id': cheshire, label: 'Cheshire', attestations: [claimOf(cheshire)] }] }), null);
+  assert.ok(readWork(serialiseWork(x.work)));
+});
+
+test('an exported region candidate reproduces PLATO\'s candidate-set-regions.json ids from the same inputs (#c-95321738: Surrey sought within the England match)', () => {
+  const EX = 'https://whgazetteer.org/example/', ALG = 'WHG reconciliation (illustrative)';
+  const englandKey = EX + 'entity/region/england', surreyKey = EX + 'entity/region/england/surrey';
+  const cand = (id, s, o, score, more = {}) => ({ id, candidate_source: s, candidate_candidate: o, similarity_score: score, candidate_status: 'suggested', generated_at: '2026-10-03T10:00:00Z', algorithm_version: ALG, decision: null, ...more });
+  const work = {
+    krisis: WORK_VERSION, generated_at: '2026-10-03T10:00:00Z', algorithm_version: ALG, match_parameters: {}, reviewer: REVIEWER,
+    subjects: { title: 'Parish list', uri: EX + 'gazetteer/parish-regions' }, others: null, places: {}, regions: {},
+    candidates: [cand('l1-1', englandKey, EX + 'whg/place/england', 98, { match_parameters: { ccodes: ['GB'] }, decision: { kind: 'match', identityType: 'closeMatch' } })],
+  };
+  // Surrey's constraint, as constraintFor gives it from England's match; its parameters as mergeAnswers stores them.
+  const mp = constraintParameters(work, { from: englandKey, kinds: ['contained_in', 'countries'], params: { contained_in: ['england'], countries: ['GB'] }, relaxed: null });
+  assert.deepEqual(mp, { ccodes: ['GB'], within: EX + 'whg/place/england' });
+  work.candidates.push(cand('l2-1', surreyKey, EX + 'whg/place/surrey', 93, { match_parameters: mp }));
+  const x = exportCandidates(work, { setIri: EX + 'candidates/regions-2026-10-03', issued: '2026-10-03' });
+  assert.deepEqual(x.set.candidates.map((c) => [c['@id'], c.matchParameters]), [
+    [EX + 'candidates/regions-2026-10-03#c-f129572e', '{"ccodes":["GB"]}'],
+    [EX + 'candidates/regions-2026-10-03#c-95321738', '{"ccodes":["GB"],"within":"https://whgazetteer.org/example/whg/place/england"}'],
+  ]);
+  // A different level constraint is a different candidate (the control): relaxed, Surrey's id changes.
+  const relaxed = exportCandidates({ ...work, candidates: [work.candidates[0], cand('l2-1', surreyKey, EX + 'whg/place/surrey', 93, { match_parameters: { within: mp.within, relaxed: 'countries' } })] }, { setIri: EX + 'candidates/regions-2026-10-03', issued: '2026-10-03' });
+  assert.notEqual(relaxed.set.candidates[1]['@id'], EX + 'candidates/regions-2026-10-03#c-95321738');
 });
 
 test('finishing a region review writes the claim onto the minted region in the dataset, next to the containment it leaves as it was', async () => {
