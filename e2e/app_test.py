@@ -2790,7 +2790,7 @@ def mydata_ends(doc):
                                                  for a in e.get('attestations') or [] for r in a.get('relations') or [])]
     ids = [(i, a) for e in ents for a in e.get('attestations') or [] for i in a.get('identities') or []]
     region_ids = [i for i, a in ids if i.get('subject') in regions]
-    geoms = [(e['@id'], a) for e in places for a in e.get('attestations') or [] if a.get('geometry') or a.get('locations') or a.get('location')]
+    geoms = [(e['@id'], a) for e in places for a in e.get('attestations') or [] if a.get('geometries')]
     return {'places': len(places), 'regions': len(regions), 'contained': len(contained),
             'identities': len(ids), 'stub': bool(ids) and all(i.get('object', '').startswith(MYDATA_W3) and cites_whg(a) for i, a in ids),
             'region identities': len(region_ids), 'regions promoted': bool(region_ids) and all((i.get('promotedFrom') or '').startswith(MYDATA_BASE + 'candidates/') for i in region_ids),
