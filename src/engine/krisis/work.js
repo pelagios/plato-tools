@@ -28,10 +28,22 @@
 // refused?, error?, suspect?, scopeNotApplied? } } }]` (see lookup.js); and a candidate from a lookup carries `lookup` (its id) and
 // `gazetteer: { service, id, score, confidence, match, answer_rank, description, namespace, query }`,
 // the service's own figures, kept apart from Krisis's similarity_score. `attribution` is the
-// service's, verbatim (a null stays null). readWork reads version 1 and gives it back as version 2.
+// service's, verbatim (a null stays null).
 //
-// Krisis × Methodos (#28) adds OPTIONAL fields to version 2 (a file without them reads as before, and
-// one with them is still version 2; see checkMethodos): a place's `rowState: 'filter' | 'exclude'`
+// Version 3 (Krisis: region review, Methodos stages 3 and 4) adds, to the above:
+//   regions: { <region key>: { label, names, level, container, within: <parent region key> | null,
+//     count, outcome: null | 'matched' | 'no-match', area?: { bbox: [w, s, e, n], lat, lng, radius, from: [id…] }
+//     | { none: reason, from }, rowState?: 'filter' | 'exclude' } }
+//   A region's key is its minted address (<base>place/region-<hex>) when the dataset has one, else
+//   its containerKey (Hermes, within.js), which is also `container` in either case. A region's
+//   candidates are in `candidates` like a place's, with the region's key as candidate_source.
+//   places[iri] gain `within` (the key of the narrowest region the place lies in) and `level` (that region's).
+//   A query record (lookups[].queries[key]) gains `constraint: { from, kinds, params, relaxed }`, and
+//   may hold `scope: { applied, approximate }` (the service's word on a spatial filter), `failedClosed`
+//   (a filter the service could not apply, and so answered nothing: NOT "no match") and `stale` (the
+//   region above was decided again since it was asked).
+// Version 3 also has Krisis × Methodos's (#28) OPTIONAL fields (a file without them reads as before;
+// see checkMethodos; a version 2 file may carry them too): a place's `rowState: 'filter' | 'exclude'`
 // (none: reconcile); a candidate's `flagged: true` and `note` (text, kept in the work file only, never
 // written to the dataset); in a looked-up candidate's `gazetteer`, what WHG's guard needs (guards.js):
 // `dice` (number | null), `withheld` (boolean), `tie` (boolean, or null when it was not the top of its
@@ -40,7 +52,9 @@
 // and `batch` ('b1', …) when the bulk accept made it; a lookup query's `variants: [{ text, how }]`
 // (aligned with `sent`) and a lookup's `parameters.variants`; and `batches: [{ id, at, identityType,
 // threshold, accepted, leftOut: { far, ccodes, total }, undone? }]`.
+// readWork reads versions 1 and 2 and gives them back as version 3, with no regions.
 import { DataError } from '../input.js';
+import { REGION_WORDS } from '../words.js';
 import { fileSha256 } from './digest.js';
 import { isWhg, WHG_ENDPOINT } from '../gazetteer/index.js';
 
@@ -53,7 +67,7 @@ export const canonicalEndpoint = (endpoint) => (isWhg(endpoint) ? WHG_ENDPOINT :
 // The problems of a dataset's own that stop part of it being read (the kinds the version check's
 // NOT_READ in compare.js lists): a matching, or a dataset finished, is then of less than the whole.
 export const NOT_READ_KINDS = ['json-syntax', 'rdf-syntax', 'record-failed', 'late-header', 'not-a-list', 'lpf-v2', 'lpf-not-a-feature', 'jsonl-not-an-object'];
-export const WORK_VERSION = 2;
+export const WORK_VERSION = 3;
 /** A candidate's IRI as the candidate set profile's pattern has it (candidates.js mints them). */
 export const CANDIDATE_IRI = /#c-(?:[0-9a-f]{4}){2,}$/;
 export const IDENTITY_TYPES = ['exactMatch', 'closeMatch', 'related'];
@@ -138,10 +152,16 @@ export function readWork(text) {
   if (cols !== undefined && !isColumns(cols)) bad('the mapping of its dataset\'s columns (match_parameters.columns) is not one: it must be {"column name": "field"}, or {"field": "address", "pattern": "…{id}…"} for a column.');
   try { checkSide(w.subjects, 'subjects'); if (!(w.krisis >= 2 && w.others === null)) checkSide(w.others, 'others'); } catch (e) { bad(e.message[0].toLowerCase() + e.message.slice(1)); }
   if (!isObject(w.places)) bad('it lists no places (places).');
+  const regions = w.krisis >= 3 ? w.regions : {};
+  checkRegions(regions, bad);
   for (const [iri, p] of Object.entries(w.places)) {
     if (!isIri(iri)) bad(`a place is listed by "${iri}", which is not a web address (an IRI).`);
     if (!isObject(p) || typeof p.label !== 'string' || !isNames(p.names) || !isPoint(p.point ?? null)) bad(`the place ${iri} is not given as a label, names and a point.`);
+    if (Object.hasOwn(p, 'within') && !(typeof p.within === 'string' && Object.hasOwn(regions, p.within))) bad(REGION_WORDS.work.placeWithin(iri, p.within));
+    if (Object.hasOwn(p, 'level') && !(isLevel(p.level) && Object.hasOwn(p, 'within') && regions[p.within].level === p.level)) bad(REGION_WORDS.work.placeLevel(iri));
   }
+  // A candidate is for a place or a region (version 3).
+  const listed = (k) => typeof k === 'string' && (Object.hasOwn(w.places, k) || Object.hasOwn(regions, k));
   if (!Array.isArray(w.candidates)) bad('it has no list of candidates (candidates).');
   const ids = new Set(), pairs = new Set();
   for (const c of w.candidates) {
@@ -149,7 +169,7 @@ export function readWork(text) {
     if (!isObject(c) || typeof c.id !== 'string' || !c.id) bad('a candidate has no id.');
     if (ids.has(c.id)) bad(`two candidates have the id ${c.id}.`);
     ids.add(c.id);
-    if (typeof c.candidate_source !== 'string' || !Object.hasOwn(w.places, c.candidate_source)) bad(`${where} is for a place the file does not list (${c.candidate_source}).`);
+    if (!listed(c.candidate_source)) bad(`${where} is for a place the file does not list (${c.candidate_source}).`);
     if (typeof c.candidate_candidate !== 'string' || !c.candidate_candidate) bad(`${where} does not say which place it suggests (candidate_candidate).`);
     if (!isIri(c.candidate_candidate)) bad(`${where} suggests "${c.candidate_candidate}", which is not a web address (an IRI).`);
     if (c.candidate_candidate === c.candidate_source) bad(`${where} suggests that a place is the same as itself.`);
@@ -171,6 +191,7 @@ export function readWork(text) {
     if (d.kind !== 'not-this' && !IDENTITY_TYPES.includes(d.identityType)) bad(`${where} does not say what kind of match it is (identityType).`);
     if (d.kind === 'distinct' && d.identityType !== 'exactMatch') bad(`${where} says two places are different, which PLATO records only of an exact match.`);
     if (d.kind === 'distinct' && !(typeof d.basis === 'string' && d.basis.trim())) bad(`${where} says two places are different without saying why (basis).`);
+    if (Object.hasOwn(d, 'certainty') && !CERTAINTIES.includes(d.certainty)) bad(REGION_WORDS.work.certainty(where, CERTAINTIES));
   }
   // The candidate sets exported from this review, last the latest: each with the earlier sets it was exported against.
   if (w.candidate_sets !== undefined && !(Array.isArray(w.candidate_sets) && w.candidate_sets.every((x) => isObject(x) && isIri(x['@id']) && !x['@id'].includes('#')
@@ -179,15 +200,61 @@ export function readWork(text) {
   if (w.cursor !== undefined && !(Number.isInteger(w.cursor) && w.cursor >= 0)) bad('its place in the review (cursor) is not a count.');
   checkLookups(w, bad);
   checkMethodos(w, bad);
+  if (w.krisis < 3 && w.regions !== undefined) bad(REGION_WORDS.work.noRegionsBefore(w.krisis));
   // WHG by its one address (canonicalEndpoint), however a file wrote it; nothing given is changed in place.
   const lookups = (w.lookups ?? []).map((l) => (canonicalEndpoint(l.service.endpoint) === l.service.endpoint ? l : { ...l, service: { ...l.service, endpoint: canonicalEndpoint(l.service.endpoint) } }));
   const candidates = w.candidates.map((c) => (typeof c.gazetteer?.service === 'string' && canonicalEndpoint(c.gazetteer.service) !== c.gazetteer.service ? { ...c, gazetteer: { ...c.gazetteer, service: canonicalEndpoint(c.gazetteer.service) } } : c));
-  return { reviewer: null, cursor: 0, ...w, krisis: WORK_VERSION, candidates, lookups };
+  return { reviewer: null, cursor: 0, ...w, krisis: WORK_VERSION, regions: w.krisis >= 3 ? w.regions : {}, candidates, lookups };
+}
+
+// ---- Krisis: region review (work file version 3) -----------------------------------------------------
+/** What a region's review came to: not yet (null), matched (a match decided), or settled with no match. */
+export const OUTCOMES = [null, 'matched', 'no-match'];
+/** A row's state in the review: looked up and written as usual (none), not looked up but written (filter), or left out of what is finished (exclude). */
+export const ROW_STATES = ['filter', 'exclude'];
+/** What a lookup's constraint may hold, from the region above (regions.js constraintFor). */
+export const CONSTRAINT_KINDS = ['contained_in', 'area', 'countries'];
+/** How far a constraint was relaxed, in order (regions.js RELAX_ORDER), or 'unconstrained' (a place looked up before its regions were settled). */
+export const RELAXED = ['countries', 'contained-in', 'ancestor', 'all', 'unconstrained'];
+/** The certainty a reviewer gives a region's match, written as PLATO's certaintyLevel (identity.js). */
+export const CERTAINTIES = ['certain', 'less-certain', 'uncertain'];
+const isNum = (x) => typeof x === 'number' && Number.isFinite(x);
+function checkRegions(regions, bad) {
+  const W = REGION_WORDS.work;
+  if (!isObject(regions)) bad(W.noRegions);
+  for (const [key, r] of Object.entries(regions)) {
+    if (!key) bad(W.regionNoKey);
+    if (!isObject(r) || typeof r.label !== 'string' || !isNames(r.names) || !isLevel(r.level)) bad(W.regionShape(key));
+    if (typeof r.container !== 'string' || !r.container) bad(W.regionContainer(key));
+    if (r.within !== null && !(typeof r.within === 'string' && Object.hasOwn(regions, r.within))) bad(W.regionWithin(key, r.within));
+    if (r.within !== null && !(regions[r.within].level < r.level)) bad(W.regionLevel(key));
+    if (!(Number.isInteger(r.count) && r.count >= 0)) bad(W.regionCount(key));
+    if (!OUTCOMES.includes(r.outcome)) bad(W.regionOutcome(key));
+    if (Object.hasOwn(r, 'rowState') && !ROW_STATES.includes(r.rowState)) bad(W.rowState(key));
+    if (Object.hasOwn(r, 'area')) {
+      const a = r.area;
+      const ok = isObject(a) && Array.isArray(a.from) && (typeof a.none === 'string'
+        || (Array.isArray(a.bbox) && a.bbox.length === 4 && a.bbox.every(isNum) && isNum(a.lat) && isNum(a.lng) && isNum(a.radius) && a.radius > 0));
+      if (!ok) bad(W.regionArea(key));
+    }
+  }
+  // A chain of regions that comes back to itself is no chain.
+  for (const key of Object.keys(regions)) {
+    const seen = new Set([key]);
+    for (let k = regions[key].within; k !== null; k = regions[k].within) { if (seen.has(k)) bad(W.regionLoop(key)); seen.add(k); }
+  }
+}
+function checkConstraint(c, where, regions, bad) {
+  const W = REGION_WORDS.work;
+  if (!isObject(c) || !(c.from === null || (typeof c.from === 'string' && Object.hasOwn(regions, c.from)))) bad(W.constraintFrom(where));
+  if (!Array.isArray(c.kinds) || !c.kinds.every((k) => CONSTRAINT_KINDS.includes(k))) bad(W.constraintKinds(where, CONSTRAINT_KINDS));
+  if (!isObject(c.params)) bad(W.constraintParams(where));
+  if (!(c.relaxed === null || RELAXED.includes(c.relaxed))) bad(W.constraintRelaxed(where, RELAXED));
 }
 
 // ---- Krisis: gazetteer lookup (work file version 2) --------------------------------------------------
 /** The versions readWork reads; an earlier one is given back as the current. */
-const READS = [1, 2];
+const READS = [1, 2, 3];
 export const QUERY_STATES = ['pending', 'answered', 'unanswered', 'stopped'];
 /** What version 2 adds, checked: the lookups, and the candidates that come from them. */
 function checkLookups(w, bad) {
@@ -202,8 +269,11 @@ function checkLookups(w, bad) {
     if (typeof l.started_at !== 'string' || !DATE_TIME.test(l.started_at)) bad(`lookup ${l.id} does not say when it began (started_at).`);
     if (l.attribution !== null && l.attribution !== undefined && !isObject(l.attribution)) bad(`lookup ${l.id} has an attribution that is not an object.`);
     if (!isObject(l.queries)) bad(`lookup ${l.id} does not list the places it looked up (queries).`);
+    const regions = w.krisis >= 3 ? w.regions : {};
     for (const [iri, q] of Object.entries(l.queries)) {
-      if (!Object.hasOwn(w.places, iri)) bad(`lookup ${l.id} looked up a place the file does not list (${iri}).`);
+      if (!Object.hasOwn(w.places, iri) && !Object.hasOwn(regions, iri)) bad(`lookup ${l.id} looked up a place the file does not list (${iri}).`);
+      if (Object.hasOwn(q, 'constraint')) checkConstraint(q.constraint, `lookup ${l.id}, ${iri}`, regions, bad);
+      if (Object.hasOwn(q, 'scope') && !(isObject(q.scope) && typeof q.scope.applied === 'boolean')) bad(REGION_WORDS.work.scope(l.id, iri));
       if (!isObject(q) || !QUERY_STATES.includes(q.state)) bad(`lookup ${l.id} has a place whose state is not pending, answered, unanswered or stopped (${iri}).`);
       if (!isNames(q.sent)) bad(`lookup ${l.id} does not say what it sent for ${iri}.`);
     }
@@ -215,8 +285,7 @@ function checkLookups(w, bad) {
   }
 }
 
-// ---- Krisis × Methodos (#28): optional fields of version 2 ------------------------------------------------
-export const ROW_STATES = ['filter', 'exclude'];
+// ---- Krisis × Methodos (#28): optional fields (versions 2 and 3; ROW_STATES is in the version 3 section) ----
 const BATCH = /^b[1-9]\d*$/;
 /** The optional fields Methodos adds, checked when present (see the top of this file). */
 function checkMethodos(w, bad) {
@@ -278,7 +347,7 @@ export function serialiseWork(work) { return JSON.stringify(work, null, 2) + '\n
  * 'not-this' (a quick no, nothing written to the dataset) and 'distinct' (the two are different
  * places, which is written, and needs a basis) reject it; null takes a decision back.
  */
-export function decide(work, candidateId, kind, { identityType = 'exactMatch', basis, at = new Date().toISOString() } = {}) {
+export function decide(work, candidateId, kind, { identityType = 'exactMatch', basis, certainty, at = new Date().toISOString() } = {}) {
   const c = work.candidates.find((x) => x.id === candidateId);
   if (!c) throw new Error(`No candidate ${candidateId}`);
   if (kind === null) { c.decision = null; c.candidate_status = 'suggested'; return c; }
@@ -289,6 +358,11 @@ export function decide(work, candidateId, kind, { identityType = 'exactMatch', b
   if (kind === 'match') d.identityType = identityType;
   if (kind === 'distinct') d.identityType = 'exactMatch';
   if (kind !== 'not-this' && typeof basis === 'string' && basis.trim()) d.basis = basis.trim();
+  // Krisis: region review. How certain the reviewer is of a match (CERTAINTIES), written as PLATO's certaintyLevel.
+  if (certainty !== undefined) {
+    if (!CERTAINTIES.includes(certainty)) throw new Error(`Not a certainty: ${certainty}`);
+    if (kind === 'match') d.certainty = certainty;
+  }
   c.decision = d; c.candidate_status = STATUS_OF[kind];
   return c;
 }
@@ -305,7 +379,8 @@ export const candidatesOf = (work, iri) => {
 /** A place is reviewed once any of its candidates has a decision. */
 export const isReviewed = (work, iri) => work.candidates.some((c) => c.candidate_source === iri && c.decision);
 export function reviewProgress(work) {
-  const decided = new Set(work.candidates.filter((c) => c.decision).map((c) => c.candidate_source));
+  // Places only: a region's decisions are counted by the region review (regions.js).
+  const decided = new Set(work.candidates.filter((c) => c.decision && Object.hasOwn(work.places, c.candidate_source)).map((c) => c.candidate_source));
   return { reviewed: decided.size, total: Object.keys(work.places).length };
 }
 

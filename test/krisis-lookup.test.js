@@ -151,7 +151,7 @@ test('the distance is match.js\'s', () => {
 });
 
 // ---- a lookup, end to end ---------------------------------------------------------------------------------
-test('a lookup without a local match makes a version 2 work file, which reads back; candidates carry the lookup and WHG\'s figures', async () => {
+test('a lookup without a local match makes a work file of the current version, which reads back; candidates carry the lookup and WHG\'s figures', async () => {
   const g = await gathered([tyne(), place('york', 'York', [at(-1.08, 53.96)])]);
   const fake = fakeWhg(byName({ Newcastle: NEWCASTLES, York: [] }));
   const batches = [];
@@ -321,15 +321,15 @@ test('the token never reaches the work file, the stop message or the summary (wi
 });
 
 // ---- the work file -------------------------------------------------------------------------------------------------
-test('a version 1 work file is read as version 2; what version 2 adds is checked', async () => {
+test('a version 1 work file is read as the current version; what version 2 adds is checked', async () => {
   const subjects = await detect([textFile(JSON.stringify(doc([tyne()])), 'a.json')]);
   const others = await detect([textFile(JSON.stringify({ profile: 'place-centric', gazetteer: { title: 'B' }, spatialEntities: [{ '@id': X + 'b/n', label: 'Newcastle', attestations: [at(-1.6, 54.97)] }] }), 'b.json')]);
   const { work } = await match({ subjects, others, options: { now: NOW } }, env());
-  const v1 = { ...work, krisis: 1 }; delete v1.lookups;
+  const v1 = { ...work, krisis: 1 }; delete v1.lookups; delete v1.regions;
   const read = readWork(JSON.stringify(v1));
-  assert.equal(read.krisis, 2);
+  assert.equal(read.krisis, WORK_VERSION);   // version 3 since the region review: a version 1 file reads as the current
   assert.deepEqual(read.lookups, []);
-  assert.deepEqual(read, work, 'the same as the version 2 match() writes');
+  assert.deepEqual(read, work, 'the same as match() writes');
   assert.throws(() => readWork(JSON.stringify({ ...v1, others: null })), /others/, 'version 1 must name the other dataset');
   const refused = (w, re) => assert.throws(() => readWork(JSON.stringify(w)), (e) => e.name === 'DataError' && re.test(e.message), re);
   const g = await gathered([tyne()]);

@@ -200,4 +200,33 @@ words them all.
   (`counts.leftOut`, attestations), and any still in the later version is `expected-missing-present`;
   any the earlier version never had is warned of (`expected-missing-unknown`), and finishing passes it on.
 - pipeline `options.augment(record)` may return null to leave the record out of the output.
-- Work-file fields (optional on version 2): see the top of work.js.
+- Work-file fields (optional, in version 3 as in version 2): see the top of work.js.
+## Region review (Methodos #28, stages 3 and 4)
+
+- `src/engine/krisis/match.js`: `gather()` also gives `regions` (`regionsOf(places, chains, minted)`:
+  `[{ key, container, label, names, level, within, count }]`, widest first, keyed by each region's
+  minted address, else its containerKey), and each place in regions `chain`, `within`, `level`. The
+  regions generic.js mints, and PLATO records that places lie in whose entityIdentifier is a
+  containerKey, are regions, not places (in `match()` too). Keys are Hermes's `containerKey` throughout.
+- Work file version 3 (see the top of `work.js`): `regions`, places' `within`/`level`, query records'
+  `constraint { from, kinds, params, relaxed }`, `scope { applied, approximate }`, `failedClosed`,
+  `stale`; a match decision may carry `certainty` (`CERTAINTIES`). `readWork` reads versions 1 and 2
+  as 3 (`regions: {}`). `reviewProgress` counts places only. Version 3 keeps the Methodos optional
+  fields above (rowState, flagged, note, batch, guard, gazetteer.dice/withheld/tie, variants), checked
+  by `checkMethodos` in every version.
+- `src/engine/krisis/regions.js` (pure): `seedRegions(work, gathered)`, `regionNodes`, `regionState`
+  (locked/ready/review/settled, gated by each node's own parent), `placeState`, `selectLevel`,
+  `levelsOf`, `regionProgress`, `ancestorsOf`, `matchesOf`, `constraintFor(work, key, { relax, areas })`
+  (`contained_in` list of bare ids, else the area as lat/lng/radius, plus countries; `needsArea`,
+  `noArea`, `uncodedFail`), `RELAX_ORDER`/`RELAX_NAMES`/`relaxStep`, `areaOf(features, from)`,
+  `decideRegion(work, id, kind, opts) -> { candidate, snapshot }`, `settleRegion(work, key,
+  'no-match'|null)`, `invalidate(work, key) -> snapshot`, `undo(work, snapshot)`, `planLevels`.
+- `src/engine/krisis/lookup.js`: `runLevel(work, level, { lookup, entity, relax, only, options,
+  signal, onBatch })` and `runPlaces(work, { lookup, entity, places, relax, only, unconstrained, … })`
+  -> runLookup's result plus `looked: [{ key, constraint }]`; `failedClosed(list)`. A pseudo-place's
+  `params` are merged over its own filters (`filtersOf`); region answers stay under the region's key.
+- `src/engine/krisis/identity.js`: `regionClaims(work, { reviewer, date, promotedFrom }) -> { made,
+  unwritten }` and `recordRegionClaim(...)`, PLATO #23's claim in the shape of PLATO's
+  place-centric-regions.json; `attestationsFrom` appends `made`. promotedFrom: see HOOK(candidate-sets).
+- CLI: `plato-tools lookup --levels [--level N] [--relax STEP] [--only KEY] [--unconstrained] [--dry-run]`.
+- Words: `REGION_WORDS` in words.js.

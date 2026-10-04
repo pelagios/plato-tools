@@ -23,6 +23,7 @@ import { WORK_VERSION, MATCH_DEFAULTS, fileRecords, serialiseWork, checkReviewer
 import { KRISIS_TEXT } from '../words.js';
 import { DataError } from '../input.js';
 import { createIdentityCollector } from './identities.js';
+import { CONTAINED_IN, containerKey, withinOf, withinLevels } from '../hermes/within.js';
 
 export const ALGORITHM = 'krisis-names 5';
 export const DEFAULTS = MATCH_DEFAULTS;
@@ -121,7 +122,7 @@ export function representativePoint(record, withdrawn = null) {
 /** What the pipeline writes one dataset's records to: the places, and the identity links it states. */
 function reader(side, rep, word, standIns = new Set()) {
   const link = (a, b, negated, att) => { if (typeof a === 'string' && typeof b === 'string' && a !== b) side.links.push({ a, b, negated, att }); };
-  const record = (rec) => {
+  const record = (rec, ev) => {
     const iri = rec['@id'];
     if (typeof iri !== 'string' || !iri) { rep.add('error', 'no-address', TEXT['no-address'](words(word)), rec.label ?? undefined); side.unaddressed++; return; }
     const names = [], seen = new Set();
@@ -142,6 +143,19 @@ function reader(side, rep, word, standIns = new Set()) {
     if (types.size) p.types = [...types];
     if (!side.places.has(iri)) side.places.set(iri, p);
     else { const q = side.places.get(iri); for (const n of names) if (!q.names.includes(n)) q.names.push(n); q.points.push(...p.points); }
+    // Krisis: region review. The regions the place lies in: the event's own chain (a table, read by
+    // Hermes), else what its PLATO says (its ContainedIn, read back once the regions are known). A record
+    // whose entityIdentifier is a containerKey may be a region itself: it is one if a place lies in it.
+    if (!side.chains.has(iri) && Array.isArray(ev?.within) && ev.within.length) side.chains.set(iri, ev.within.map((c) => ({ level: c.level, value: c.value })));
+    const up = containedIn(rec);
+    if (up !== undefined && !side.containedIn.has(iri)) side.containedIn.set(iri, up);
+    if (asContainerKey(rec.entityIdentifier)) side.maybeRegions.set(iri, lightRegion(rec, up));
+  };
+  // A region generic.js minted (tagged `region`): kept apart from the places, as Krisis reviews it by level.
+  const region = (rec, tag) => {
+    const iri = rec['@id'];
+    if (typeof iri !== 'string' || !iri || side.regions.has(iri)) return;
+    side.regions.set(iri, lightRegion(rec, containedIn(rec), tag.key));
   };
   return {
     header(head) {
@@ -152,7 +166,8 @@ function reader(side, rep, word, standIns = new Set()) {
       if (typeof g['@id'] === 'string') side.uri = g['@id'];
     },
     event(ev) {
-      if (ev.type === 'record' && ev.value) record(ev.value);
+      if (ev.type === 'record' && ev.value && ev.region) region(ev.value, ev.region);
+      else if (ev.type === 'record' && ev.value) record(ev.value, ev);
       else if (ev.type === 'idr' && ev.value) link(ev.value.subject, ev.value.object, false, null);
     },
     async close() {},
@@ -171,8 +186,75 @@ function standInTitles(input) {
   return out;
 }
 
+// ---- Krisis: region review ----------------------------------------------------------------------------
+/** A containerKey (Hermes, within.js) read back from an entityIdentifier: [level, ...parents, value], or null. */
+function asContainerKey(s) {
+  if (typeof s !== 'string' || !s.startsWith('[')) return null;
+  try { const k = JSON.parse(s); return Array.isArray(k) && k.length >= 2 && Number.isInteger(k[0]) && k[0] >= 1 && k.slice(1).every((x) => typeof x === 'string') ? k : null; } catch { return null; }
+}
+/** The region a record says it lies in (its first plato:ContainedIn not negated), or undefined. */
+function containedIn(rec) {
+  for (const a of Array.isArray(rec.attestations) ? rec.attestations : []) {
+    if (!a || a.negated) continue;
+    for (const r of Array.isArray(a.relations) ? a.relations : []) if (r && r.relationType === CONTAINED_IN && typeof r.relatesTo === 'string') return r.relatesTo;
+  }
+  return undefined;
+}
+/** What is kept of a region's record: enough for withinOf to read a chain back through it, and its label. */
+function lightRegion(rec, up, key = rec.entityIdentifier) {
+  return { '@id': rec['@id'], label: typeof rec.label === 'string' ? rec.label : undefined, entityIdentifier: key,
+    attestations: up === undefined ? [] : [{ relations: [{ relationType: CONTAINED_IN, relatesTo: up }] }] };
+}
+/**
+ * The regions of a side, once it is all read: those generic.js minted, and the records a place lies in
+ * whose entityIdentifier is a containerKey (PLATO written with regions, read back), taken out of the
+ * places; then each place's chain, read back through them where its event gave none.
+ */
+function settleRegions(side) {
+  const targets = new Set([...side.containedIn.values()]);
+  for (const r of side.regions.values()) for (const a of r.attestations) targets.add(a.relations[0].relatesTo);
+  for (const [iri, r] of side.maybeRegions) if (targets.has(iri) && !side.regions.has(iri)) side.regions.set(iri, r);
+  for (const iri of side.regions.keys()) { side.places.delete(iri); side.chains.delete(iri); }
+  for (const iri of side.places.keys()) {
+    if (side.chains.has(iri) || !side.containedIn.has(iri)) continue;
+    const chain = withinOf({ type: 'record', value: { attestations: [{ relations: [{ relationType: CONTAINED_IN, relatesTo: side.containedIn.get(iri) }] }] } }, side.regions);
+    if (chain.length) side.chains.set(iri, chain.map((c) => ({ level: c.level, value: c.value })));
+  }
+  delete side.maybeRegions; delete side.containedIn;
+}
+/**
+ * The regions the places lie in, as the region review keeps them (work.js, version 3), from the
+ * places' chains through Hermes's withinLevels, keyed by each region's minted address where the
+ * dataset has one, else by its containerKey: [{ key, container, label, names, level, within, count }],
+ * widest first; and for each place, the key of its narrowest region and that region's level.
+ */
+export function regionsOf(places, chains, minted = new Map()) {
+  const byContainer = new Map();
+  for (const r of minted.values()) if (typeof r.entityIdentifier === 'string') byContainer.set(r.entityIdentifier, r);
+  const keyOf = (container) => byContainer.get(container)?.['@id'] ?? container;
+  const events = [...places.keys()].filter((iri) => chains.has(iri)).map((iri) => ({ type: 'record', value: { '@id': iri, label: iri }, within: chains.get(iri) }));
+  const out = [], placeWithin = new Map();
+  for (const [, at] of withinLevels(events)) {
+    for (const [container, node] of at) {
+      // The region above: the one before it in the chain of the first row that names it.
+      const chain = chains.get(node.rows[0].iri);
+      const i = chain.findIndex((c, j) => c.level === node.level && containerKey(c.level, c.value, chain.slice(0, j).map((x) => x.value)) === container);
+      const parent = i > 0 ? containerKey(chain[i - 1].level, chain[i - 1].value, chain.slice(0, i - 1).map((x) => x.value)) : null;
+      const label = byContainer.get(container)?.label ?? (node.parents.length ? `${node.value} (${[...node.parents].reverse().join(', ')})` : node.value);
+      out.push({ key: keyOf(container), container, label, names: [node.value], level: node.level, within: parent === null ? null : keyOf(parent), count: node.rows.length });
+    }
+  }
+  for (const [iri, chain] of chains) {
+    if (!places.has(iri) || !chain.length) continue;
+    const last = chain.length - 1;
+    placeWithin.set(iri, { within: keyOf(containerKey(chain[last].level, chain[last].value, chain.slice(0, last).map((x) => x.value))), level: chain[last].level });
+  }
+  return { regions: out, placeWithin };
+}
+
 async function readSide(input, word, options, env, rep, progress, tap) {
-  const side = { title: input.files[0]?.name || 'Untitled dataset', titleFrom: 'file-name', uri: undefined, places: new Map(), links: [], withdrawals: new Map(), unaddressed: 0 };
+  const side = { title: input.files[0]?.name || 'Untitled dataset', titleFrom: 'file-name', uri: undefined, places: new Map(), links: [], withdrawals: new Map(), unaddressed: 0,
+    regions: new Map(), chains: new Map(), containedIn: new Map(), maybeRegions: new Map() };
   // A table of places (CSV, plain GeoJSON) is read by the mapping of its columns chosen for it (Hermes),
   // given for the subjects, the dataset chosen first; the other dataset's columns are guessed.
   const columns = word === 'subjects' ? options.columns : undefined;
@@ -194,6 +276,7 @@ async function readSide(input, word, options, env, rep, progress, tap) {
   side.links = side.links.filter((l) => !(l.att && withdrawn.has(l.att)));
   // And a point an attestation gave that a later one withdrew is not where the place is.
   for (const p of side.places.values()) { p.point = pickPoint(p.points, withdrawn); delete p.points; }
+  settleRegions(side);
   side.files = await fileRecords(input.files);
   return { side };
 }
@@ -315,7 +398,7 @@ export async function match({ subjects, others, options = {} }, env) {
     krisis: WORK_VERSION, generated_at, algorithm_version: ALGORITHM,
     match_parameters: { ...params, ...(options.base ? { base: options.base } : {}), ...(options.columns ? { columns: { ...options.columns } } : {}), blocking: { ...BLOCKING, rule: BLOCKING_RULE }, scoring: SCORING },
     subjects: sideRecord(S), others: sideRecord(O),
-    places, candidates, reviewer: options.reviewer || null, cursor: 0, lookups: [],
+    places, regions: {}, candidates, reviewer: options.reviewer || null, cursor: 0, lookups: [],
   };
   const outputs = [];
   const stem = (options.name || subjects.files[0].name).replace(/\.(gz)$/i, '').replace(/\.[^.]+$/, '');
@@ -334,6 +417,10 @@ export async function match({ subjects, others, options = {} }, env) {
  * incomplete? }: `subjects` the dataset as a work file records it ({ title, uri?, files }), `places`
  * [{ iri, label, names, point, ccodes?, types?, identities: { linked: [IRI], denied: [IRI] } }] in the
  * dataset's order, `identities` what the dataset currently says of the place (identities.js).
+ * Krisis: region review. A place in regions also has `chain` ([{ level, value }], widest first),
+ * `within` (its narrowest region's key) and `level`; `regions` is regionsOf()'s list. The regions
+ * generic.js mints (a table with a base address), and the records of a PLATO dataset that places lie
+ * in whose entityIdentifier is a containerKey, are regions, not places.
  */
 export async function gather({ subjects, options = {} }, env) {
   const rep = new Report();
@@ -349,8 +436,11 @@ export async function gather({ subjects, options = {} }, env) {
   }
   if (!side.places.size) rep.error('no-places', TEXT['no-places'](words('subjects')));
   const known = ids.result();
-  const places = [...side.places].map(([iri, p]) => ({ iri, ...p, identities: { linked: [...(known.get(iri)?.linked || [])], denied: [...(known.get(iri)?.denied || [])] } }));
-  rep.counts = { subjects: places.length, unaddressed: side.unaddressed };
+  // Krisis: region review. Each place's chain and narrowest region; the regions, level by level.
+  const { regions, placeWithin } = regionsOf(side.places, side.chains, side.regions);
+  const places = [...side.places].map(([iri, p]) => ({ iri, ...p, ...(side.chains.has(iri) ? { chain: side.chains.get(iri), ...placeWithin.get(iri) } : {}),
+    identities: { linked: [...(known.get(iri)?.linked || [])], denied: [...(known.get(iri)?.denied || [])] } }));
+  rep.counts = { subjects: places.length, unaddressed: side.unaddressed, ...(regions.length ? { regions: regions.length } : {}) };
   progress({ phase: 'done', places: places.length, elapsedMs: Date.now() - t0 });
-  return { report: rep.toJSON(), subjects: sideRecord(side), places };
+  return { report: rep.toJSON(), subjects: sideRecord(side), places, regions };
 }

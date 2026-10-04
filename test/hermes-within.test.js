@@ -453,9 +453,12 @@ test('Krisis gathers the places of a table with regions, read by a mapping with 
   const g = await gather({ subjects: input, options: { columns } }, env());
   assert.equal(g.incomplete, undefined);
   assert.deepEqual(g.places.map((p) => p.label), ['Mill', 'Farm', 'Barn']);
-  // With a base, the regions are places of their own too, which Krisis can look up.
+  // With a base, the regions are minted places of their own, which Krisis reviews level by level
+  // (regions.js): kept apart from the places, keyed by their minted addresses.
   const withBase = await gather({ subjects: input, options: { columns, base: BASE } }, env());
-  assert.ok(withBase.places.some((p) => p.label === 'Surrey (England)' && p.iri.includes('/place/region-')));
+  assert.ok(withBase.regions.some((r) => r.label === 'Surrey (England)' && r.key.includes('/place/region-')));
+  assert.ok(!withBase.places.some((p) => p.iri.includes('/place/region-')));
+  assert.deepEqual(withBase.places.map((p) => p.label), ['Mill', 'Farm', 'Barn']);   // control: the places are all there
 });
 
 // ---- the command line ------------------------------------------------------------------------------

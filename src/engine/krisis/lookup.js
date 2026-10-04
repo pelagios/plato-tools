@@ -41,6 +41,7 @@ import { similarity, queryVariants, MAX_VARIANTS } from './names.js';
 import { guard } from './guards.js';
 import { WORK_VERSION, canonicalEndpoint } from './work.js';
 import { linkState } from './identities.js';
+import { constraintFor, selectLevel, placeState, areaOf, areaIds, storedConstraint } from './regions.js';
 export { authorityIris, currentIdentities } from './identities.js';
 // The note an attestation on a looked-up candidate carries, here too for the tools that use this file (Chora).
 export { krisisLookupNote } from '../words.js';
@@ -201,6 +202,8 @@ export const MAX_RADIUS_KM = 20015;
  * of ISO 3166-1 alpha-2 codes, in capitals (as the gazetteer module's owner confirmed, 30 September
  * 2026); a code that is not two letters is not sent.
  */
+// Krisis: region review. A pseudo-place's `params` (its constraint, regions.js constraintFor) are
+// merged in last, over the place's own filters: the constraint is what was chosen for it.
 function filtersOf(place, { countries, nearKm }) {
   const params = {};
   const iso2 = countries && Array.isArray(place.ccodes)
@@ -210,6 +213,11 @@ function filtersOf(place, { countries, nearKm }) {
   if (nearKm > 0 && Array.isArray(p) && Math.abs(p[0]) <= 180 && Math.abs(p[1]) <= 90) {
     const r = (x) => Math.round(x * 1e6) / 1e6;
     Object.assign(params, { lat: r(p[1]), lng: r(p[0]), radius: Math.min(MAX_RADIUS_KM, nearKm) });
+  }
+  if (place.params && typeof place.params === 'object') {
+    // WHG does not combine spatial filters (contained_in wins over lat/lng/radius): a constraint's one replaces the place's own.
+    if (place.params.contained_in || place.params.radius !== undefined) { delete params.lat; delete params.lng; delete params.radius; }
+    Object.assign(params, structuredClone(place.params));
   }
   return Object.keys(params).length ? params : null;
 }
@@ -313,9 +321,12 @@ export function rankGazetteer(place, candidates, { maxDistanceKm = LOOKUP_DEFAUL
 /** A work file for places looked up without a local match: `subjects` as gather() records the dataset. */
 export function newWork(subjects, { now = new Date().toISOString(), reviewer = null } = {}) {
   return { krisis: WORK_VERSION, generated_at: now, algorithm_version: LOOKUP_ALGORITHM, match_parameters: {},
-    subjects, others: null, places: {}, candidates: [], reviewer, cursor: 0, lookups: [] };
+    subjects, others: null, places: {}, regions: {}, candidates: [], reviewer, cursor: 0, lookups: [] };
 }
-const placeRecord = (p) => ({ label: p.label, names: p.names || [p.label], point: p.point ?? null, ...(p.ccodes ? { ccodes: p.ccodes } : {}), ...(p.types ? { types: p.types } : {}) });
+const placeRecord = (p, work) => ({ label: p.label, names: p.names || [p.label], point: p.point ?? null, ...(p.ccodes ? { ccodes: p.ccodes } : {}), ...(p.types ? { types: p.types } : {}),
+  ...(typeof p.within === 'string' && Object.hasOwn(work?.regions || {}, p.within) ? { within: p.within, level: p.level } : {}) });
+/** Is this key one of the review's regions (work.js, version 3), not a place? */
+const isRegionKey = (work, key) => Object.hasOwn(work.regions || {}, key);
 const SKIPS = ['noIri', 'linked', 'denied', 'decided', 'duplicate'];
 function emptyCounts() {
   return { places: 0, withoutName: 0, queries: 0, requests: 0, answered: 0, notFound: 0, unanswered: 0, stopped: 0, found: 0, added: 0, far: 0, skipped: Object.fromEntries(SKIPS.map((k) => [k, 0])) };
@@ -326,9 +337,9 @@ export function startLookup(work, { service, parameters, plan, now = new Date().
   while (work.lookups.some((l) => l.id === `l${n}`)) n++;
   const queries = {};
   for (const p of plan.chunks.flatMap((c) => c.places)) {
-    if (!work.places[p.iri]) work.places[p.iri] = placeRecord(p);
+    if (!isRegionKey(work, p.iri) && !Object.hasOwn(work.places, p.iri)) work.places[p.iri] = placeRecord(p, work);
     const mine = plan.queries.filter((q) => q.key[0] === p.iri);
-    queries[p.iri] = { state: 'pending', sent: mine.map((q) => q.query) };
+    queries[p.iri] = { state: 'pending', sent: mine.map((q) => q.query), ...(p.constraint ? { constraint: storedConstraint(p.constraint) } : {}) };
     // Krisis × Methodos: with variants asked for, how each query was made from the place's names.
     if (mine.some((q) => q.how && q.how !== 'given')) queries[p.iri].variants = mine.map((q) => ({ text: q.query, how: q.how || 'given' }));
   }
@@ -348,8 +359,15 @@ export function startLookup(work, { service, parameters, plan, now = new Date().
  */
 export function mergeAnswers(work, record, place, lists, { now = new Date().toISOString(), maxDistanceKm = record.parameters?.maxDistanceKm ?? LOOKUP_DEFAULTS.maxDistanceKm, scoped = false, adds = false } = {}) {
   const iri = place.iri, c = record.counts, q = record.queries[iri] || (record.queries[iri] = { state: 'pending', sent: lists.map((l) => l.key?.[1]).filter(Boolean) });
-  if (!work.places[iri]) work.places[iri] = placeRecord(place);
-  const unanswered = lists.filter((l) => l.unanswered);
+  // Krisis: region review. A region's answers are kept under its key, in `regions`, never as a place.
+  if (!isRegionKey(work, iri) && !Object.hasOwn(work.places, iri)) work.places[iri] = placeRecord(place, work);
+  // The service's word on a spatial filter (WHG's scope), kept; and a filter it could not apply that so
+  // answered nothing (applied false, no candidates) FAILED CLOSED: not answered, never "no match".
+  const scope = lists.find((l) => l.scope && typeof l.scope === 'object')?.scope;
+  if (scope) q.scope = { applied: scope.applied === true, approximate: scope.approximate === true }; else delete q.scope;
+  const closed = lists.filter(failedClosed);
+  if (closed.length) { q.failedClosed = true; c.failedClosed = (c.failedClosed || 0) + 1; } else delete q.failedClosed;
+  const unanswered = lists.filter((l) => l.unanswered || failedClosed(l));
   // The state is set last, so that a fault part-way leaves the place as it was ('pending', then 'stopped').
   const state = unanswered.length ? 'unanswered' : 'answered';
   // A query the service refused (a malformed filter, say) inside a good answer, with the service's
@@ -358,7 +376,7 @@ export function mergeAnswers(work, record, place, lists, { now = new Date().toIS
   if (errors.length) { q.refused = true; q.error = errors.join('; '); }
   else { delete q.refused; delete q.error; }
   // A filter by distance sent and not applied (WHG says so in `scope.applied`): the answer is not filtered.
-  if (scoped && lists.some((l) => !l.unanswered && l.scope?.applied !== true)) { q.scopeNotApplied = true; c.scopeNotApplied = (c.scopeNotApplied || 0) + 1; }
+  if (scoped && lists.some((l) => !l.unanswered && !failedClosed(l) && l.scope?.applied !== true)) { q.scopeNotApplied = true; c.scopeNotApplied = (c.scopeNotApplied || 0) + 1; }
   else delete q.scopeNotApplied;
   // One entry per address, from the query that ranked it best, a head-word query's only when no other
   // found it (Krisis × Methodos). WHG's guard (guards.js) is judged in that query's answer, which
@@ -466,8 +484,14 @@ export const upstreamLicence = (attribution, namespace, dataset) => licenceFrom(
  * suspect: what is sent it is then fixed (the label, the module's own type, which WHG takes, and the
  * limit), so there is nothing to check, and a stop would only cost a second request for the same answer.
  */
+/** An answer to a filter the service could not apply, with nothing in it (WHG: scope.applied false): failed closed. */
+export const failedClosed = (l) => !l.unanswered && l.length === 0 && !!l.scope && l.scope.applied === false;
 const narrowed = (chunk, service) => chunk.queries.some((q) => q.params || (q.type && !isWhg(service.endpoint)));
-const suspect = (chunk, answers, service) => chunk.queries.length > 1 && narrowed(chunk, service) && answers.every((l) => !l.unanswered && l.length === 0);
+// A batch the service said it could not filter (failed closed) is recorded as that, not as suspect; nor
+// is one where the service said, of every query, that it applied the filter (scope.applied).
+const suspect = (chunk, answers, service) => chunk.queries.length > 1 && narrowed(chunk, service) && answers.every((l) => !l.unanswered && l.length === 0)
+  && !answers.some(failedClosed) && !answers.every((l) => l.scope?.applied === true);
+const spatial = (params) => !!params && (Array.isArray(params.contained_in) || params.radius !== undefined);
 /** What makes a lookup's answers what they are, to tell whether a suspect batch is sent again unchanged. */
 const SAME_ASKING = ['allNames', 'limit', 'countries', 'nearKm', 'type', 'variants'];
 /**
@@ -564,7 +588,7 @@ export async function runLookup({ lookup, work = null, subjects = null, places =
     try {
       for (const p of chunk.places) {
         const k = record.queries[p.iri].sent.length;
-        mergeAnswers(work, record, p, answers.slice(at, at + k), { now: stamp, maxDistanceKm: o.maxDistanceKm, scoped: o.nearKm > 0 && Array.isArray(p.point), adds: !!typed });
+        mergeAnswers(work, record, p, answers.slice(at, at + k), { now: stamp, maxDistanceKm: o.maxDistanceKm, scoped: (o.nearKm > 0 && Array.isArray(p.point)) || spatial(p.params), adds: !!typed });
         at += k;
       }
     } catch (e) {
@@ -577,4 +601,79 @@ export async function runLookup({ lookup, work = null, subjects = null, places =
   }
   record.finished_at = now();
   return { work, record, plan, stopped: null };
+}
+
+// ---- Krisis: region review (Methodos stages 3 and 4) ------------------------------------------------------
+/**
+ * Fetch the area of a region's matches (entity() of each, through the lookup's shared queue, paced
+ * and one request in flight), union them (regions.js areaOf), and keep it: in `areas` for this run,
+ * and on the region in the work file when it is an area or a lasting reason there is none. A record
+ * the service could not give (a GazetteerError) is left out; stopping (signal) is thrown on.
+ */
+async function fetchArea(work, key, { entity, signal, areas }) {
+  if (areas.has(key)) return areas.get(key);
+  if (typeof entity !== 'function') throw new TypeError('A region review needs the lookup\'s entity() to fetch an area');
+  const ids = areaIds(work, key), features = [];
+  let failed = 0;
+  for (const id of ids) {
+    try { features.push(await entity(id, { signal })); } catch (e) { if (signal?.aborted || e?.name !== 'GazetteerError') throw e; failed++; }
+  }
+  const area = failed && !features.length ? { none: 'unavailable', from: ids } : areaOf(features, ids);
+  areas.set(key, area);
+  if (area.none !== 'unavailable') work.regions[key].area = area;
+  return area;
+}
+/** The constraint for a key, with the area it needs fetched first; a key whose area cannot be had is constrained without it. */
+async function constrained(work, key, { relax, entity, signal, areas }) {
+  let c = constraintFor(work, key, { relax, areas });
+  if (c.needsArea) { await fetchArea(work, c.needsArea, { entity, signal, areas }); c = constraintFor(work, key, { relax, areas }); }
+  return c;
+}
+const pseudo = (base, c) => ({ ...base, ...(Object.keys(c.params).length ? { params: c.params } : {}), constraint: c });
+
+/**
+ * Look up the ready regions of one level, each constrained by the match of the region above it
+ * (regions.js constraintFor), and add what is found to the work file under each region's key.
+ *   work, level   the work file (version 3, with regions: regions.js seedRegions) and the level (1 = widest)
+ *   lookup        a lookup from createLookup(); `entity` defaults to its entity()
+ *   relax         a step of RELAX_NAMES, for every region looked up
+ *   only          region keys: just these (in review too, to ask again)
+ *   options       as runLookup()'s (limit, maxDistanceKm…); the places choice and the place filters are the review's
+ * Each region's area, when needed, is fetched once (fetchArea) and kept. Batching, pacing and the one
+ * request in flight are runLookup()'s and the lookup's, unchanged. Returns runLookup()'s result with
+ * `looked` ([{ key, constraint }]), or { looked: [] } and no record when nothing is ready.
+ */
+export async function runLevel(work, level, { lookup, entity = lookup?.entity, signal, onBatch, relax, only, options = {}, reviewer = null, now } = {}) {
+  const areas = new Map(), looked = [];
+  for (const n of selectLevel(work, level, { only })) {
+    const c = await constrained(work, n.key, { relax, entity, signal, areas });
+    looked.push(pseudo({ iri: n.key, label: n.names[0], names: n.names, point: null }, c));
+  }
+  if (!looked.length) return { work, record: null, plan: null, stopped: null, looked: [] };
+  const r = await runLookup({ lookup, work, places: looked, options: { ...options, places: 'all', countries: false, nearKm: null, only: undefined, query: undefined }, reviewer, signal, onBatch, ...(now ? { now } : {}) });
+  return { ...r, looked: looked.map((p) => ({ key: p.iri, constraint: storedConstraint(p.constraint) })) };
+}
+
+/**
+ * Look up the places within their regions (stage 4): those whose chain of regions is settled, each
+ * constrained by the nearest matched region above it. A place whose regions are not yet settled is
+ * locked, and skipped, unless `unconstrained` (then it is looked up without a constraint, and its
+ * query says so). A place in no region is looked up without one. `places`: gather()'s places (with the
+ * links the dataset states), else the work file's. `only`: place addresses (in review too). Returns as runLevel.
+ */
+export async function runPlaces(work, { lookup, entity = lookup?.entity, places = null, signal, onBatch, relax, only, unconstrained = false, options = {}, reviewer = null, now } = {}) {
+  const areas = new Map(), looked = [];
+  const list = places ? places : Object.entries(work.places).map(([iri, p]) => ({ iri, ...p }));
+  const keep = only ? new Set(only) : null;
+  for (const p of list) {
+    if (keep && !keep.has(p.iri)) continue;
+    const s = placeState(work, p.iri, Object.hasOwn(work.places, p.iri) ? work.places[p.iri] : p);
+    if (s === 'locked' && !unconstrained) continue;
+    if (s !== 'locked' && !(s === 'ready' || (keep && s === 'review'))) continue;
+    const c = s === 'locked' ? { from: null, kinds: [], params: {}, relaxed: 'unconstrained' } : await constrained(work, p.iri, { relax, entity, signal, areas });
+    looked.push(pseudo(p, c));
+  }
+  if (!looked.length) return { work, record: null, plan: null, stopped: null, looked: [] };
+  const r = await runLookup({ lookup, work, places: looked, options: { ...options, places: 'all', only: undefined, query: undefined }, reviewer, signal, onBatch, ...(now ? { now } : {}) });
+  return { ...r, looked: looked.map((p) => ({ key: p.iri, constraint: storedConstraint(p.constraint) })) };
 }

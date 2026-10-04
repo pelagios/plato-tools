@@ -20,7 +20,8 @@
 //
 // recordIdentity is shared with the Chora session (gazetteer reconciliation); its signature is agreed.
 import { checkReviewer, DATE_TIME, isIri } from './work.js';
-import { krisisNote, krisisLookupNote } from '../words.js';
+import { krisisNote, krisisLookupNote, REGION_WORDS } from '../words.js';
+import { CERTAINTY_LEVELS, matchesOf, lastQueryOf } from './regions.js';
 
 const TYPES = new Set(['exactMatch', 'closeMatch', 'related', 'unspecified']);
 
@@ -97,7 +98,7 @@ const latest = (dates) => dates.filter(Boolean).sort().at(-1);
  * up in a gazetteer cites the gazetteer whatever `source` says (one attestation per source).
  * Returns [{ subject, attestation }], in the order of the review.
  */
-export function attestationsFrom(work, { reviewer = work.reviewer, source, date } = {}) {
+export function attestationsFrom(work, { reviewer = work.reviewer, source, date, promotedFrom } = {}) {
   if (!reviewer) throw new Error('attestationsFrom: the review has no reviewer.');
   const out = [];
   const algorithm = (c) => c.algorithm_version || work.algorithm_version;
@@ -121,7 +122,65 @@ export function attestationsFrom(work, { reviewer = work.reviewer, source, date 
       }) });
     }
   }
+  // Krisis: region review. Each matched region with an address of its own, after the places (PLATO #23).
+  out.push(...regionClaims(work, { reviewer, date, promotedFrom }).made);
   return out;
+}
+
+// ---- Krisis: region review (PLATO #23, option B) --------------------------------------------------------
+/** The least certain of the certainties given (work.js CERTAINTIES), 'certain' when none is. */
+const ORDER = ['certain', 'less-certain', 'uncertain'];
+const leastCertain = (list) => ORDER[Math.max(0, ...list.map((c) => ORDER.indexOf(c ?? 'certain')))];
+/** A source as PLATO's worked example cites one in a region's claim: its address and title. */
+const claimSource = (s) => ({ ...(s['@id'] ? { '@id': s['@id'] } : {}), title: s.title });
+/**
+ * The reviewer's claim about one matched region, as PLATO's worked example writes it
+ * (schemas/examples/place-centric-regions.json, PLATO a6bc022): an attestation ABOUT the region made
+ * from the source's own data (its minted address), with the reviewer's certainty (certaintyLevel,
+ * the least certain of its matches'), the gazetteer as its source, the reviewer and when, bundling an
+ * identity from the region to each record it was matched to (exactMatch or closeMatch, as decided,
+ * each with a basis: the reviewer's, else the constraint it was looked up under). The containment
+ * itself (the place ContainedIn the region) is never rewritten: a match changed later is a new claim.
+ *   promotedFrom(candidate)  the address of the candidate in a published candidate set, or undefined.
+ */
+export function recordRegionClaim({ region, key, matches, reviewer, date, source, basis, promotedFrom } = {}) {
+  if (!isIri(key)) throw new Error('recordRegionClaim: the region must have an address of its own (a base address).');
+  if (!(typeof date === 'string' && DATE_TIME.test(date))) throw new Error('recordRegionClaim: date must be an ISO date-time, such as 2026-09-30T12:00:00Z.');
+  checkReviewer(reviewer, 'recordRegionClaim: the reviewer');
+  if (!matches.length) throw new Error('recordRegionClaim: the region has no match.');
+  const identities = matches.map((c) => {
+    const identityType = c.decision.identityType === 'exactMatch' ? 'exactMatch' : c.decision.identityType === 'closeMatch' ? 'closeMatch' : null;
+    if (!identityType) throw new Error(`recordRegionClaim: a region is matched as exactMatch or closeMatch, not ${c.decision.identityType}.`);
+    // HOOK(candidate-sets): promotedFrom. This branch lacks the candidate-set export (branch
+    // candidate-sets, not yet on main): when it is rebased onto it, promotedFrom must be given here
+    // by default, as the candidate's @id in the published set (<set IRI>#c-<hash>), so that the
+    // identity points back at the suggestion it answers, as PLATO's worked example does. Until then
+    // it is written only when a caller passes promotedFrom(candidate).
+    const from = typeof promotedFrom === 'function' ? promotedFrom(c, region) : undefined;
+    return { subject: key, object: c.candidate_candidate, identityType, basis: (typeof c.decision.basis === 'string' && c.decision.basis.trim()) || basis, ...(isIri(from) ? { promotedFrom: from } : {}) };
+  });
+  const contributor = { name: reviewer.name.trim(), ...(reviewer.orcid ? { orcid: reviewer.orcid } : {}) };
+  return { identities, certaintyLevel: CERTAINTY_LEVELS[leastCertain(matches.map((c) => c.decision.certainty))], sources: [claimSource(source)], contributor, created: date };
+}
+/**
+ * The claims of a region review: one for each matched region (outcome 'matched'), about the region.
+ * Returns { made: [{ subject, attestation }], unwritten: [key] }: a region keyed by its containerKey (the
+ * dataset has no base address, so no region of its own) cannot be written about, and is listed.
+ * A region's "different places" decisions are not written (only its matches are).
+ */
+export function regionClaims(work, { reviewer = work.reviewer, date, promotedFrom } = {}) {
+  const made = [], unwritten = [];
+  for (const [key, region] of Object.entries(work.regions || {})) {
+    if (region.outcome !== 'matched') continue;
+    const matches = matchesOf(work, key);
+    if (!matches.length) continue;
+    if (!isIri(key)) { unwritten.push(key); continue; }
+    const q = lastQueryOf(work, key);
+    made.push({ subject: key, attestation: recordRegionClaim({ region, key, matches, reviewer, promotedFrom,
+      date: date || latest(matches.map((c) => c.decision.decided_at)), source: candidateSource(work, matches[0]),
+      basis: REGION_WORDS.basis(q?.constraint, (k) => work.regions[k]?.label ?? k) }) });
+  }
+  return { made, unwritten };
 }
 
 // ---- Krisis: gazetteer lookup -------------------------------------------------------------------------

@@ -942,3 +942,89 @@ export const expectMissingWords = {
   present: 'A place the version check was told to expect missing (left out by the reviewer) is still in the later version, with what it said: it was not left out.',
   unknown: 'A place the version check was told to expect missing (left out by the reviewer) is not in the earlier version at all, so there was nothing of it to leave out: check that the review is of this dataset, and that the place was not renamed.',
 };
+/**
+ * Krisis: region review (Methodos stages 3 and 4; src/engine/krisis/regions.js): the regions a
+ * table's places lie in, looked up level by level from the widest, each constrained by the match of
+ * the region above; then the places within them.
+ */
+const quoted = (k) => (typeof k === 'string' ? `"${k}"` : JSON.stringify(k));
+export const REGION_WORDS = {
+  /** readWork's refusals of what version 3 adds (each completes "This work file cannot be used: …"). */
+  work: {
+    noRegionsBefore: (v) => `it is of version ${v}, which has no regions (regions came in version 3).`,
+    noRegions: 'it has no list of regions (regions).',
+    regionNoKey: 'a region has no key.',
+    regionShape: (k) => `the region ${quoted(k)} is not given as a label, names and a level (a whole number from 1, the widest).`,
+    regionContainer: (k) => `the region ${quoted(k)} does not say which container of the source it is (container).`,
+    regionWithin: (k, w) => `the region ${quoted(k)} lies within ${quoted(w)}, which is not a region the file lists.`,
+    regionLevel: (k) => `the region ${quoted(k)} is not at a narrower level than the region it lies within.`,
+    regionLoop: (k) => `the region ${quoted(k)} lies, through the regions above it, within itself.`,
+    regionCount: (k) => `the region ${quoted(k)} does not say how many rows name it (count).`,
+    regionOutcome: (k) => `the region ${quoted(k)} has an outcome that is not empty, matched or no-match.`,
+    rowState: (k) => `the region ${quoted(k)} has a state that is not filter or exclude (rowState).`,
+    regionArea: (k) => `the region ${quoted(k)} has an area that is not a box with a centre and a radius in kilometres, or a reason there is none.`,
+    placeWithin: (iri, w) => `the place ${iri} lies within ${quoted(w)}, which is not a region the file lists.`,
+    placeLevel: (iri) => `the place ${iri} gives a level that is not that of the region it lies within.`,
+    certainty: (where, list) => `${where} has a certainty that is not one of ${list.join(', ')}.`,
+    constraintFrom: (where) => `the lookup of ${where} was constrained by a region the file does not list (constraint.from).`,
+    constraintKinds: (where, list) => `the lookup of ${where} names a constraint that is not one of ${list.join(', ')} (constraint.kinds).`,
+    constraintParams: (where) => `the lookup of ${where} does not say what its constraint sent (constraint.params).`,
+    constraintRelaxed: (where, list) => `the lookup of ${where} was relaxed in a way that is not one of ${list.join(', ')} (constraint.relaxed).`,
+    scope: (id, iri) => `lookup ${id} records the gazetteer's word on a filter for ${iri} without saying whether it was applied (scope.applied).`,
+  },
+  /** A region's state in the review (regions.js regionState). */
+  states: {
+    locked: 'Waiting for the region above to be settled',
+    ready: 'Ready to look up',
+    review: 'Looked up; to review',
+    settled: 'Settled',
+  },
+  /** A filter the gazetteer could not apply (scope.applied false) and so answered nothing: never "no match". */
+  failedClosed: 'The gazetteer could not apply the region filter (it has no outline for the region above), so it answered nothing. This is not a finding that there is no match: look it up again with the filter relaxed.',
+  approximate: 'The gazetteer applied the filter approximately (by cells of its grid), so a candidate just outside it may be kept, or one just inside left out.',
+  /** What a constraint is, in words (regions.js constraintFor). */
+  constraint(c, label = (k) => k) {
+    if (!c.kinds.length) return c.relaxed === 'unconstrained' ? 'Looked up without a constraint, before the regions above it were settled.' : c.from === null && c.relaxed === null ? 'No constraint: no region above it is matched.' : 'No constraint (all relaxed).';
+    const parts = c.kinds.map((k) => (k === 'contained_in' ? `within the gazetteer's ${plural(c.params.contained_in.length, 'record')} for ${label(c.from)}`
+      : k === 'area' ? `within about ${c.params.radius.toLocaleString('en-GB')} km of the middle of ${label(c.from)}`
+      : `in ${c.params.countries.join(', ')} (from the match for ${label(c.from)})`));
+    return `Constrained to ${parts.join(', and ')}.${c.relaxed ? ` Relaxed: ${REGION_WORDS.relax[c.relaxed]}.` : ''}${c.kinds.includes('countries') ? ` ${REGION_WORDS.countriesAnded}` : ''}`;
+  },
+  countriesAnded: 'A filter by country leaves out every candidate with no country recorded, the right one too.',
+  /** Each step of relaxing a constraint, in order. */
+  relax: {
+    countries: 'the countries dropped',
+    'contained-in': 'an area in place of the gazetteer\'s region',
+    ancestor: 'the region above that instead',
+    all: 'no constraint',
+    unconstrained: 'looked up before the regions above it were settled',
+  },
+  relaxUnknown: (v, list) => `--relax ${v} is not one of ${list.join(', ')}.`,
+  /** Why a matched region has no area to constrain by (regions.js areaOf). */
+  noArea: {
+    'no-geometry': 'the gazetteer gives no geometry for its match',
+    'point-only': 'the gazetteer gives only a point for its match, which is no area',
+    unavailable: 'the gazetteer could not give its match\'s record',
+  },
+  /** The plan of a region review, level by level, before anything is sent (the command line's --dry-run). */
+  plan(levels, places) {
+    const out = [];
+    for (const l of levels) {
+      const s = l.states;
+      out.push(`Level ${l.level}: ${plural(l.nodes, 'region')} (${[s.settled ? `${s.settled} settled` : '', s.review ? `${s.review} to review` : '', s.ready ? `${s.ready} ready` : '', s.locked ? `${s.locked} waiting for the level above` : ''].filter(Boolean).join(', ') || 'none'}).`);
+      for (const r of l.ready.slice(0, 20)) out.push(`  ${r.label}: ${r.constraint}${r.needsArea ? ' (its area is fetched first)' : ''}`);
+      if (l.ready.length > 20) out.push(`  and ${plural(l.ready.length - 20, 'more region')}.`);
+    }
+    if (places) out.push(`Places within: ${plural(places.ready, 'place')} ready, ${plural(places.locked, 'place')} waiting for ${places.locked === 1 ? 'its' : 'their'} regions${places.unconstrained ? ' (looked up anyway, without a constraint)' : ''}.`);
+    return out;
+  },
+  /** What a run of one level, or of the places within, did. */
+  ran: (what, n, failedClosed) => `${what === 'places' ? 'Places within their regions' : `Level ${what}`}: ${plural(n, what === 'places' ? 'place' : 'region')} looked up${failedClosed ? `; for ${failedClosed.toLocaleString('en-GB')} of them the gazetteer could not apply the filter, which is not "no match"` : ''}.`,
+  nothingReady: 'Nothing is ready to look up: the regions above are not yet settled, or every region and place has been looked up.',
+};
+/** The basis a region's match is written with when the reviewer gave none: the constraint it was looked up under. */
+REGION_WORDS.basis = (c, label = (k) => k) => (c && c.kinds?.length
+  ? `Chosen by the reviewer from the gazetteer's candidates, looked up ${c.kinds.map((k) => (k === 'contained_in' ? `within the match for ${label(c.from)}` : k === 'area' ? `near the match for ${label(c.from)}` : `in ${c.params.countries.join(', ')}`)).join(' and ')}`
+  : "Chosen by the reviewer from the gazetteer's candidates");
+REGION_WORDS.noRegionsInData = 'The dataset gives no regions for its places (no column read as "within", and no ContainedIn to a region of its own), so there is nothing to review level by level.';
+REGION_WORDS.onlyUnknown = (k) => `--only ${k}: neither a region nor a place of this review.`;

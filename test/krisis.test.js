@@ -499,7 +499,7 @@ test('a work file that no review could have written is refused, saying why; the 
   const refused = (t, re) => assert.throws(() => readWork(t), (e) => e.name === 'DataError' && re.test(e.message), re);
   refused('{ not json', /not JSON/);
   refused('{}', /no "krisis" version/);
-  refused(tamper((w) => { w.krisis = 3; }), /later version of the tools/);
+  refused(tamper((w) => { w.krisis = 4; }), /later version of the tools/);
   refused(tamper((w) => { w.candidates[0].candidate_status = 'confirmed'; }), /confirmed, but no decision/);
   refused(tamper((w) => { w.candidates[0].decision = { kind: 'match', identityType: 'exactMatch', decided_at: '2026-09-30T13:00:00Z' }; }), /suggested, which disagrees/);
   refused(tamper((w) => { w.candidates[0].candidate_status = 'rejected'; w.candidates[0].decision = { kind: 'distinct', identityType: 'exactMatch', decided_at: '2026-09-30T13:00:00Z' }; }), /without saying why/);

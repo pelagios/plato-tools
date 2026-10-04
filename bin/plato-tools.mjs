@@ -288,6 +288,21 @@ does not apply to):
   --dry-run         lookup: say what would be sent, and the first queries exactly; send nothing.
                     With --review, also how many places have exactly one candidate passing
                     WHG's guards. They are never accepted here: that is done on the page only.
+                    With --levels, the plan level by level.
+  --levels          lookup: review the regions the places lie in (their "within" columns),
+                    level by level from the widest, each region's lookup constrained by the
+                    match of the region above it; once a place's regions are settled, the
+                    places within them. Without --level, the first level with regions ready,
+                    else the places. WHG only. The regions are decided on the page.
+  --level N         lookup --levels: look up the ready regions of level N (1 is the widest).
+  --relax STEP      lookup --levels: loosen the constraint, each step including those before
+                    it: countries (drop the countries), contained-in or area (the area of the
+                    region above in place of the gazetteer's region), ancestor (the region above
+                    that), all (no constraint).
+  --only KEY        lookup --levels: only this region (its address, or its key) or place, which
+                    may be asked again while it is still to review.
+  --unconstrained   lookup --levels: also look up the places whose regions are not yet settled,
+                    without a constraint.
   --json            print one JSON object per input, one per line, then one for the total.
                     Its "columns", for a table of places, is a list of {column, field, reason},
                     with pattern, level, or separator, levels and firstIsName where the field
@@ -386,6 +401,7 @@ async function main(argv) {
         gazetteer: { type: 'string' }, places: { type: 'string' }, 'all-names': { type: 'boolean', default: false }, variants: { type: 'boolean', default: false }, countries: { type: 'boolean', default: false },
         near: { type: 'string' }, limit: { type: 'string' }, batch: { type: 'string' }, 'dry-run': { type: 'boolean', default: false }, token: { type: 'string' },
         'token-env': { type: 'string' }, 'gazetteer-iri': { type: 'string' },
+        levels: { type: 'boolean', default: false }, level: { type: 'string' }, relax: { type: 'string' }, unconstrained: { type: 'boolean', default: false },
         'work-dir': { type: 'string' }, json: { type: 'boolean', default: false }, brief: { type: 'boolean', default: false },
         release: { type: 'string' }, previous: { type: 'string' }, 'concept-doi': { type: 'string' }, maintainer: { type: 'string', multiple: true, default: [] },
         repo: { type: 'string' }, 'site-url': { type: 'string' }, turtle: { type: 'boolean', default: false },
@@ -436,6 +452,7 @@ async function main(argv) {
   if (action === 'lookup') return lookupCommand(args, o, resources);
   // (--limit, for lookup and preview, is refused above for any other command.)
   if (o.gazetteer || o.places || o['all-names'] || o.variants || o.countries || o.near || o.batch || o['dry-run'] || o['token-env'] || o['gazetteer-iri']) return usage('--gazetteer, --token-env, --gazetteer-iri, --places, --all-names, --variants, --countries, --near, --batch and --dry-run are for lookup.');
+  if (o.levels || o.level !== undefined || o.relax !== undefined || o.unconstrained) return usage('--levels, --level, --relax and --unconstrained are for lookup.');
   if (o.with || o.threshold || o['max-distance'] || o.top || o.review || o.output || o.reviewer || o.orcid || o['others-title'] !== undefined) return usage('--with, --threshold, --max-distance, --top, --review, --output, --reviewer, --orcid and --others-title are for match and apply.');
   if (!reads && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, preview, cluster, compare, publish, match, apply, lookup, candidates and datacube.`);
   // Elenchos: candidate sets checked together, with no other input: the first is checked, with the others
@@ -1042,11 +1059,21 @@ async function lookupCommand(args, o, resources) {
   if (o.to) return usage('--to is for convert.');
   if (o.with || o.threshold || o.top || o.output) return usage('--with, --threshold, --top and --output are not for lookup.');
   if (o.json && o.brief) return usage('choose --json or --brief, not both.');
+  // Krisis: region review. --levels, and what goes with it.
+  if (!o.levels && (o.level !== undefined || o.relax !== undefined || o.only !== undefined || o.unconstrained)) return usage('--level, --relax, --only and --unconstrained go with --levels.');
+  const { RELAX_NAMES, relaxStep, seedRegions, levelsOf, selectLevel, planLevels } = await import('../src/engine/krisis/regions.js');
+  const { REGION_WORDS } = await import('../src/engine/words.js');
+  if (o.levels) {
+    if (o.places || o['all-names'] || o.countries || o.near) return usage('--places, --all-names, --countries and --near are not for --levels: what each region or place is looked up within is the region review\'s constraint (--relax loosens it).');
+    if (o.gazetteer && o.gazetteer !== 'whg') return usage('--levels is for the World Historical Gazetteer, whose filters by region it uses.');
+    if (o.level !== undefined && !(/^\s*\d+\s*$/.test(o.level) && Number(o.level) >= 1)) return usage(`--level ${o.level}: a level is a whole number from 1 (the widest).`);
+    try { relaxStep(o.relax); } catch { return usage(REGION_WORDS.relaxUnknown(o.relax, RELAX_NAMES)); }
+  }
   // The reviewer, if given, is written into the work file (the page asks for the name; here it is given).
   const { reviewer, problem } = reviewerOption(o);
   if (problem) return usage(problem);
   const { createLookup, WHG_ENDPOINT, isWhg } = await import('../src/engine/gazetteer/index.js');
-  const { runLookup, planLookup, serviceOf, iriFromTemplate, iriVia, manifestSettings, PLACE_CHOICES, WHG_REQUESTS_A_DAY } = await import('../src/engine/krisis/lookup.js');
+  const { runLookup, planLookup, serviceOf, iriFromTemplate, iriVia, manifestSettings, PLACE_CHOICES, WHG_REQUESTS_A_DAY, newWork, runLevel, runPlaces } = await import('../src/engine/krisis/lookup.js');
   const { gather } = await import('../src/engine/krisis/match.js');
   const { readWork, serialiseWork, filesDiffer } = await import('../src/engine/krisis/work.js');
   const { existsSync } = await import('node:fs');
@@ -1089,6 +1116,7 @@ async function lookupCommand(args, o, resources) {
     const lines = [`Places to look up: ${r.subjects.input}${r.subjects.format ? `: ${formatName(r.subjects)}` : ''}`];
     if (r.message) lines.push(`  Could not be done: ${r.message}`);
     if (r.preview) { lines.push(...L.preview(r.preview, { perDay: isWhgService ? WHG_REQUESTS_A_DAY : null }).map((l) => `  ${l}`)); for (const q of r.preview.first) lines.push(`    ${JSON.stringify(q)}`); }
+    if (r.regionPlan) lines.push(...REGION_WORDS.plan(r.regionPlan.levels, r.regionPlan.places).map((l) => `  ${l}`));
     if (r.summary) lines.push(`  ${r.summary.problems} ${r.summary.counted} (${fmtTime(r.elapsedMs)})`);
     for (const w of r.warnings) lines.push(`  ${w}`);
     if (!o.brief) lines.push(...itemLines(r.items, 'match'));
@@ -1096,6 +1124,55 @@ async function lookupCommand(args, o, resources) {
     process.stdout.write(lines.join('\n') + '\n');
     return r.exitCode;
   };
+  // Krisis: region review (--levels): the regions seeded into the work file from the dataset's chains,
+  // then one level's ready regions looked up, or the places within settled regions; or the plan.
+  async function levelsCommand() {
+    if (!work) work = newWork(gathered.subjects, { reviewer });
+    else if (reviewer) work.reviewer = reviewer;
+    seedRegions(work, gathered);
+    if (!Object.keys(work.regions).length) { host.cleanup(); r.message = REGION_WORDS.noRegionsInData; return finishUp(); }
+    const only = o.only !== undefined ? [o.only] : undefined;
+    const placeOnly = only && Object.hasOwn(work.places, o.only) && !Object.hasOwn(work.regions, o.only);
+    if (only && !placeOnly && !Object.hasOwn(work.regions, o.only)) { host.cleanup(); return usage(REGION_WORDS.onlyUnknown(o.only)); }
+    const target = placeOnly ? 'places' : o.level !== undefined ? Number(o.level)
+      : only ? work.regions[o.only].level : levelsOf(work).find((l) => selectLevel(work, l).length) ?? 'places';
+    r.region = { target, relax: o.relax ?? null };
+    if (o['dry-run']) {
+      r.regionPlan = planLevels(work, { relax: o.relax, unconstrained: o.unconstrained, places: gathered.places });
+      r.status = 'ok';
+      host.cleanup();
+      return finishUp();
+    }
+    const controller = new AbortController();
+    process.once('SIGINT', () => controller.abort());
+    const lookup = createLookup({ endpoint, token, ...(batch ? { batchSize: batch } : {}) });
+    const progress = live ? ({ done, total }) => process.stderr.write(`\r\x1b[K${done.toLocaleString('en-GB')} of ${total.toLocaleString('en-GB')} looked up`) : undefined;
+    const how = { lookup, relax: o.relax, only, options: { service, limit, maxDistanceKm }, reviewer, signal: controller.signal, onBatch: progress };
+    let result;
+    try { result = target === 'places' ? await runPlaces(work, { ...how, places: gathered.places, unconstrained: o.unconstrained }) : await runLevel(work, target, how); }
+    catch (e) { host.cleanup(); r.message = e instanceof TypeError && /relax/.test(e.message) ? e.message : toolsFault(e); return finishUp(); }
+    finally { if (live) process.stderr.write('\r\x1b[K'); }
+    r.region.looked = result.looked;
+    if (!result.record) r.warnings.push(REGION_WORDS.nothingReady);
+    else {
+      const c = result.record.counts;
+      r.counts = c;
+      r.summary = L.summary(c, service.title);
+      r.warnings.push(REGION_WORDS.ran(target, result.looked.length, c.failedClosed || 0));
+      if (result.stopped) r.warnings.push(L.stopped(result.stopped));
+    }
+    const w = host.env(resources, {});
+    try {
+      const out = await w.env.output(name);
+      out.write(serialiseWork(work));
+      const x = await out.close();
+      r.outputs.push({ path: x.path, size: x.size });
+      w.finish(false);
+    } catch (e) { w.finish(true); r.message = isSystemError(e) ? e.message : toolsFault(e); host.cleanup(); r.status = 'failed'; return finishUp(); }
+    host.cleanup();
+    r.status = result.stopped || result.record?.counts.unanswered || gathered.report.errors ? 'problems' : 'ok';
+    return finishUp();
+  }
   const { input, message } = await readInput(items[0]);
   if (!input) { r.message = message; return finishUp(); }
   Object.assign(r.subjects, { format: input.format, profile: input.profile || null });
@@ -1115,6 +1192,7 @@ async function lookupCommand(args, o, resources) {
     if (differ.length) r.warnings.push(`The work file was made from other files than ${differ.join(', ')}: its places may no longer match the data.`);
   }
   const options = { service, places: o.places, allNames: o['all-names'], variants: o.variants, countries: o.countries, nearKm: near, limit, maxDistanceKm };
+  if (o.levels) return levelsCommand();
   if (o['dry-run']) {
     // Planned as the lookup would plan it: in requests of --batch, or the gazetteer module's 25.
     r.preview = planLookup({ lookup: { batchSize: batch ?? 25 }, work, places: gathered.places, options }).preview;
