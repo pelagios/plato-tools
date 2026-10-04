@@ -940,4 +940,5 @@ export const rowWords = {
 /** The version check, told that places are left out on purpose (compare.js expectMissing). */
 export const expectMissingWords = {
   present: 'A place the version check was told to expect missing (left out by the reviewer) is still in the later version, with what it said: it was not left out.',
+  unknown: 'A place the version check was told to expect missing (left out by the reviewer) is not in the earlier version at all, so there was nothing of it to leave out: check that the review is of this dataset, and that the place was not renamed.',
 };

@@ -10,10 +10,12 @@
 // - Withheld. When the candidate has a numeric confidence, it is withheld when that is under 30, and
 //   the names are NOT compared. Only when it has none are the names compared: withheld when the best
 //   Sørensen–Dice coefficient over the query's forms and the candidate's name and first 20 other
-//   names is under 0.45. A pair of a Latin-script name with a name in another script is not compared;
-//   when no pair could be, the candidate is not withheld.
+//   names is under 0.45. An exact match with no confidence is never withheld (WHG's candidateResembles
+//   returns at once on cand.match). A pair is compared only when both names contain a Latin letter or
+//   neither does (WHG's comparableScripts); when no pair could be, the candidate is not withheld.
 // - Tie. Another candidate later in the same answer with a score at least the top's, unless it has
-//   the same name AND description as the top, or the top is an exact match and it is not.
+//   the same name AND description (an absent one the same as '') as the top, or the top is an exact
+//   match and it is not. As WHG's loop does, the look stops at the first later one scoring under the top.
 //
 // Only the top of an answer can pass (WHG's client looks at no other). Krisis adds one rule of its
 // own: a candidate found only by a head-word query (names.js queryVariants) never passes.
@@ -50,14 +52,13 @@ export function dice(a, b) {
   for (const g of bx) if (by.has(g)) both++;
   return (2 * both) / (bx.size + by.size);
 }
-/** Whether a name is written in the Latin script: it has a letter, and none of another script. */
+/** Whether a name contains a Latin letter (WHG's comparableScripts asks only that of each name). */
 export function isLatin(s) {
-  const letters = String(s ?? '').match(/\p{L}/gu) || [];
-  return letters.length > 0 && letters.every((l) => /\p{Script=Latin}/u.test(l));
+  return /\p{Script=Latin}/u.test(String(s ?? ''));
 }
 /**
  * The best Dice of the query's forms against the candidate's name and its first 20 other names,
- * skipping a pair of which one name is Latin and the other is not; null when no pair could be judged.
+ * skipping a pair of which one name contains a Latin letter and the other does not; null when no pair could be judged.
  */
 export function bestDice(forms, cand, { altNames = GUARD_DEFAULTS.altNames } = {}) {
   const theirs = [cand?.name, ...((cand?.altNames ?? cand?.alt_names ?? []).slice(0, altNames))].filter((n) => typeof n === 'string' && diceForm(n));
@@ -72,10 +73,11 @@ export function bestDice(forms, cand, { altNames = GUARD_DEFAULTS.altNames } = {
   return best;
 }
 const hasConfidence = (c) => typeof c?.confidence === 'number' && Number.isFinite(c.confidence);
-/** { withheld, dice }: by confidence when it has one (dice null, never consulted), else by Dice. */
+/** { withheld, dice }: by confidence when it has one (dice null, never consulted); else never when exact; else by Dice. */
 export function withheldOf(cand, forms, o = {}) {
   const { minConfidence, minDice } = { ...GUARD_DEFAULTS, ...o };
   if (hasConfidence(cand)) return { withheld: cand.confidence < minConfidence, dice: null };
+  if (cand?.match === true) return { withheld: false, dice: null };   // WHG: the service matched the name exactly
   const d = bestDice(forms, cand, o);
   return { withheld: d !== null && d < minDice, dice: d === null ? null : Math.round(d * 1000) / 1000 };
 }
@@ -86,9 +88,13 @@ export function tieOf(answer) {
   if (!top) return false;
   const s = num(top.score);
   if (s === null) return false;
-  return answer.slice(1).some((x) => num(x.score) !== null && x.score >= s
-    && !(x.name === top.name && (x.description ?? null) === (top.description ?? null))
-    && !(top.match === true && x.match !== true));
+  for (let i = 1; i < answer.length; i++) {
+    const x = answer[i];
+    if (!(num(x.score) !== null && x.score >= s)) break;   // WHG's loop stops at the first scoring under the top
+    if (top.match === true && x.match !== true) continue;
+    if (x.name !== top.name || (x.description || '') !== (top.description || '')) return true;
+  }
+  return false;
 }
 const strong = (c, threshold) => c?.match === true || (num(c?.score) !== null && c.score >= threshold);
 
@@ -125,17 +131,23 @@ export function guardOf(c, { threshold = GUARD_DEFAULTS.threshold } = {}) {
     : !strong(g, threshold) ? 'weak' : g.withheld ? 'withheld' : g.tie ? 'tie' : null;
   return { pass: reason === null, ...base, reason };
 }
+/** The work file's candidates by place (candidate_source), each in the file's order: one pass, so that nothing per place is a search of every candidate. */
+function bySource(work) {
+  const m = new Map();
+  for (const c of work.candidates) { const l = m.get(c.candidate_source); if (l) l.push(c); else m.set(c.candidate_source, [c]); }
+  return m;
+}
 /** The work file's candidates for a place that pass the guard. */
 export const passing = (work, iri, o) => work.candidates.filter((c) => c.candidate_source === iri && guardOf(c, o).pass);
 /** The places in `order` with a candidate passing the guard first, each group in the order given. */
 export function guardsFirst(work, order, o) {
-  const yes = [], no = [];
-  for (const iri of order) (passing(work, iri, o).length ? yes : no).push(iri);
+  const by = bySource(work), yes = [], no = [];
+  for (const iri of order) ((by.get(iri) || []).some((c) => guardOf(c, o).pass) ? yes : no).push(iri);
   return [...yes, ...no];
 }
 /** The greatest distance of a candidate's review: its lookup's, else the matching's, else 50 km. */
-function maxKmOf(work, c) {
-  const l = c.lookup ? (work.lookups || []).find((x) => x.id === c.lookup) : null;
+function maxKmOf(work, c, lookups) {
+  const l = c.lookup ? lookups.get(c.lookup) : null;
   return num(l?.parameters?.maxDistanceKm) ?? num(work.match_parameters?.maxDistanceKm) ?? 50;
 }
 const rowState = (work, iri) => work.places[iri]?.rowState ?? null;
@@ -150,15 +162,17 @@ const rowState = (work, iri) => work.places[iri]?.rowState ?? null;
 export function planGuarded(work, { threshold = GUARD_DEFAULTS.threshold } = {}) {
   const accept = [], leftOut = { far: 0, ccodes: 0, total: 0, examples: [] };
   let several = 0;
+  const by = bySource(work), lookups = new Map();
+  for (const l of work.lookups || []) if (!lookups.has(l.id)) lookups.set(l.id, l);
   for (const iri of Object.keys(work.places)) {
     if (rowState(work, iri)) continue;
-    const mine = work.candidates.filter((c) => c.candidate_source === iri);
+    const mine = by.get(iri) || [];
     if (mine.some((c) => c.decision)) continue;
     const ok = mine.filter((c) => guardOf(c, { threshold }).pass);
     if (ok.length > 1) { several++; continue; }
     if (!ok.length) continue;
     const c = ok[0];
-    const far = typeof c.distance_km === 'number' && c.distance_km > maxKmOf(work, c);
+    const far = typeof c.distance_km === 'number' && c.distance_km > maxKmOf(work, c, lookups);
     const ccodes = c.ccodes_agree === false || ccodesDisagree(work.places[iri], c);
     if (far || ccodes) {
       if (far) leftOut.far++; else leftOut.ccodes++;

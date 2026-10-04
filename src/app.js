@@ -20,6 +20,7 @@ import { stash as stashForChora, dropStale as dropStaleHandoff } from './chora/h
 import { dropStale as dropStaleHandback, workflowOf } from './chora/handback.js';
 import { storageNeed } from './engine/storage.js';
 import * as permissions from './lib/permissions.js';
+import { keepNotes, restoreNotes } from './lib/typed-notes.js';
 import { RELOAD_LOSES } from './lib/permission-words.js';
 // Krisis: gazetteer lookup, run on this thread (never the worker), through the permissions module, with
 // the token from its one keeper (permissions.token).
@@ -938,6 +939,7 @@ permissions.onChange(() => { const now = permissions.keepWorkingData(); if (now 
 // and Finish hands to the engine to make the attestations.
 let work = null, workName = 'review.krisis.json', order = [], cursor = 0, current = 0, basisFor = null, allDone = false;
 let unsaved = 0;   // decisions made since the review began or was last saved (a reload would lose them)
+let saves = 0;     // how many times it has been saved (Krisis × Methodos: with unsaved, whether the guards' plan may be stale)
 const REVIEWER_KEY = 'plato-tools.reviewer';
 /**
  * The reviewer remembered, checked again on load by the engine's own rule (checkReviewer), as before a
@@ -1058,19 +1060,20 @@ function render(focus) {
   drawBulk();   // Krisis × Methodos
   if (!order.length) { box.innerHTML = `<p>${escapeHtml(W.none)}</p>`; return; }
   const iri = order[cursor], place = work.places[iri] || {}, cands = candidatesOf(work, iri);
-  const typed = keepTyped(iri);
+  const typed = keepTyped(iri), notes = keepNotes(box, document.activeElement);   // Krisis × Methodos: a note half-typed
   box.innerHTML = (allDone ? `<p class="good">${escapeHtml(W.allDone)}</p>` : '')
     + `<div class="subject"><h3 id="review-subject">${escapeHtml(place.label || iri)}</h3>`
     + (W.names(place.label, place.names) ? `<p>${escapeHtml(W.names(place.label, place.names))}</p>` : '')
     + `<p>${escapeHtml(W.point(place.point))}</p><p class="iri">${escapeHtml(iri)}</p>` + rowStateHtml(place) + lookupPlaceHtml(iri, place) + '</div>'
     + (hasLookups() ? groupedHtml(cands)
       : `<p>${escapeHtml(W.candidates(cands.length))}</p><ol class="candidates">` + cands.map((c, i) => candidateHtml(c, i)).join('') + '</ol>');
-  restoreTyped(typed);
+  restoreTyped(typed); restoreNotes(box, notes);
   drawPermission();   // Krisis: gazetteer lookup
   // A form newly opened takes the focus; one redrawn (by a lookup's batch) has it back only if it had it.
   if (findFor === iri) { if (!typed.find || typed.find.focused) $('find-query')?.focus(); return; }
   if (basisFor) { if (!typed.basis || typed.basis.focused) $('basis-input')?.focus(); return; }
   if (!$('review-who').hidden) { $('review-name').focus(); return; }   // while the name is asked, it keeps the focus
+  if (notes.some((n) => n.focused) && box.contains(document.activeElement)) return;   // a note being typed keeps it
   if (focus) box.focus({ preventScroll: false });
 }
 /**
@@ -1166,7 +1169,7 @@ $('save-review').onclick = () => {
   const who = reviewer(); if (who) work.reviewer = who;
   saveBlob(new Blob([serialiseWork(work)], { type: 'application/json' }), workName);
   Object.assign(state, { reviewSaved: workName });
-  unsaved = 0;
+  unsaved = 0; saves++;
 };
 $('finish').onclick = () => {
   if (!work) return;
@@ -1208,6 +1211,14 @@ $('export-candidates').onclick = () => {
 // keeps any decision changed since). The order "WHG's guards first" puts the places with a candidate
 // that passes first; the candidates of a place keep their own order.
 let lastBulk = null;
+// planGuarded() reads every candidate: drawn on every render(), it is worked out again only when the
+// work may have changed (another work, a decision or flag or row state since, a save, a lookup's batch).
+let bulkPlan = null;
+function guardedPlan() {
+  const key = `${unsaved}|${saves}|${work.candidates.length}|${(work.lookups || []).length}`;
+  if (bulkPlan?.work !== work || bulkPlan.key !== key) bulkPlan = { work, key, plan: planGuarded(work) };
+  return bulkPlan.plan;
+}
 /** The places in the order chosen. */
 function placeOrder() { return $('review-order')?.value === 'guards' ? guardsFirst(work, reviewPlaces(work)) : reviewPlaces(work); }
 /** The order again (a lookup's batch, a new order chosen), the place on screen kept. */
@@ -1226,7 +1237,7 @@ function drawBulk() {
     $('bulk-accept').onclick = bulkAccept;
     $('review-bulk').addEventListener('click', (e) => { if (e.target.id === 'bulk-undo') bulkUndo(); });
   }
-  const plan = planGuarded(work), n = plan.accept.length;
+  const plan = guardedPlan(), n = plan.accept.length;
   $('bulk-accept').textContent = GW.accept(n);
   $('bulk-accept').disabled = !n || busy || !!looking;
   const res = $('bulk-result');
@@ -1267,14 +1278,17 @@ function rowStateHtml(place) {
     + Object.entries(RW.states).map(([k, t]) => `<option value="${k}"${k === now ? ' selected' : ''}>${escapeHtml(t)}</option>`).join('') + '</select></label>';
 }
 function keepNote(form) {
-  const input = form.querySelector('input[name="note"]');
-  noteOn(work, form.dataset.id, input.value); unsaved++;
+  const input = form.querySelector('input[name="note"]'), c = work.candidates.find((x) => x.id === form.dataset.id);
+  if (!c || input.value.trim() === (c.note || '')) return;   // nothing new (a change and a focusout both bring it)
+  noteOn(work, c.id, input.value); unsaved++;
 }
 $('review-place').addEventListener('change', (e) => {
   if (!work) return;
   if (e.target.matches('select[data-row-state]')) { setRowState(work, order[cursor], e.target.value === 'reconcile' ? null : e.target.value); unsaved++; render(false); }
   else if (e.target.matches('form.note input[name="note"]')) keepNote(e.target.form);
 });
+// A note put back after a redraw (restoreNotes) and left without more typing fires no change: kept on leaving it.
+$('review-place').addEventListener('focusout', (e) => { if (work && e.target.matches?.('form.note input[name="note"]') && e.target.isConnected) keepNote(e.target.form); });
 
 /** Save something made in the page, not by the engine: as save() does, to disk or as a download. */
 async function saveBlob(blob, name) {
@@ -1475,7 +1489,7 @@ async function lookUp({ only = null, query = null, allNames, which } = {}) {
   buttons(true);   // as while the worker runs: Match, Check, Resume and the rest would take the review away under the lookup
   lookupSay(LW.sending(service));
   lookupState({ running: true, done: 0, total: null, stopped: null, summary: null, single: !!only });
-  const show = () => { if (work !== w || $('review').hidden) beginReview(w, name, { focus: false }); else { reorder(); render(false); } };
+  const show = () => { bulkPlan = null; if (work !== w || $('review').hidden) beginReview(w, name, { focus: false }); else { reorder(); render(false); } };
   let result = null, fault = false, settings = null;
   if (!svc.whg) {
     // Its type, and its address template unless one was given, from its manifest (asked for without a token).

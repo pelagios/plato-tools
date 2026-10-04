@@ -198,7 +198,8 @@ export class Ledger {
 /**
  * The places expected missing from the later version (compare's options.expectMissing): each one
  * the later version still has (an attestation or match about it, or a statement of it) is an error;
- * then the earlier version's rows about them are set aside. Returns how many attestations of the
+ * each one the earlier version never had is a warning ('expected-missing-unknown'), so that a stale
+ * expectation is not met in silence; then the earlier version's rows about them are set aside. Returns how many attestations of the
  * earlier version were set aside.
  */
 function setAsideMissing(db, ledger, places, rep) {
@@ -207,6 +208,8 @@ function setAsideMissing(db, ledger, places, rep) {
   try { for (const s of places) if (typeof s === 'string') ins.bind([s]).stepReset(); } finally { ins.finalize(); }
   for (const q of ledger.rows('SELECT x.s FROM x WHERE EXISTS(SELECT 1 FROM a WHERE a.v=1 AND a.about=x.s) OR EXISTS(SELECT 1 FROM n WHERE n.v=1 AND n.s=x.s) ORDER BY x.s'))
     rep.error('expected-missing-present', expectMissingWords.present, q.get(0));
+  for (const q of ledger.rows('SELECT x.s FROM x WHERE NOT EXISTS(SELECT 1 FROM a WHERE a.v=0 AND a.about=x.s) AND NOT EXISTS(SELECT 1 FROM n WHERE n.v=0 AND n.s=x.s) ORDER BY x.s'))
+    rep.warning('expected-missing-unknown', expectMissingWords.unknown, q.get(0));
   const n = ledger.one('SELECT COUNT(*) FROM a WHERE v=0 AND k=0 AND about IN (SELECT s FROM x)');
   db.exec('DELETE FROM a WHERE v=0 AND about IN (SELECT s FROM x)');
   db.exec('DELETE FROM n WHERE v=0 AND s IN (SELECT s FROM x)');
@@ -314,7 +317,8 @@ export function attestationLines(context, out) {
  * place the reviewer leaves out of the dataset). Exactly those are expected missing: the earlier
  * version's attestations and identity matches about them, and what it says of them, are set aside
  * (counted as `leftOut`), and each one still found in the later version is an error
- * ('expected-missing-present'). Any other loss is reported as without it.
+ * ('expected-missing-present'), and each one the earlier version never had is a warning
+ * ('expected-missing-unknown'). Any other loss is reported as without it.
  */
 export async function compare({ earlier, later, options = {} }, env) {
   const rep = new Report();

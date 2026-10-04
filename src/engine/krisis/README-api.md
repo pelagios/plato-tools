@@ -197,6 +197,7 @@ words them all.
   EXCLUDE: apply leaves it out (no attestations, not in the dataset; report item `left-out-by-reviewer`,
   `counts.leftOut`, result `leftOut: [iri…]`) and passes `expectMissing` to the version check.
 - `compare(…, { options: { expectMissing: [place IRI…] } })`: those places' earlier rows are set aside
-  (`counts.leftOut`, attestations), and any still in the later version is `expected-missing-present`.
+  (`counts.leftOut`, attestations), and any still in the later version is `expected-missing-present`;
+  any the earlier version never had is warned of (`expected-missing-unknown`), and finishing passes it on.
 - pipeline `options.augment(record)` may return null to leave the record out of the output.
 - Work-file fields (optional on version 2): see the top of work.js.

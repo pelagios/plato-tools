@@ -95,6 +95,17 @@ test('withheld: a numeric confidence alone decides (under 30), Dice never consul
   assert.ok(bestDice(['Alton'], { name: 'Qqq', altNames: others(20) }) < 0.45, 'the 21st does not');
 });
 
+test('withheld, as WHG: an exact match with no confidence is never withheld; scripts compared by whether each name CONTAINS a Latin letter', () => {
+  assert.deepEqual(withheldOf({ name: 'Zzzzqqq', match: true, score: 100 }, ['Alton']), { withheld: false, dice: null }, 'exact, no confidence, unlike: not withheld');
+  assert.equal(withheldOf({ name: 'Zzzzqqq', match: false, score: 100 }, ['Alton']).withheld, true, 'control: not exact, it is');
+  assert.equal(withheldOf({ name: 'Zzzzqqq', match: true, confidence: 20 }, ['Alton']).withheld, true, 'control: a confidence still decides first');
+  const top = { name: 'Zzzzqqq', match: true, score: 100 };
+  assert.equal(guard(top, [top], { forms: ['Alton'] }).pass, true, 'so it passes the guard');
+  // 'Київ (Kyiv)' contains a Latin letter, as 'Kyiv' does: the pair is compared (and alike), not skipped.
+  assert.deepEqual(withheldOf({ name: 'Qqqzzz', altNames: ['Київ (Kyiv)'] }, ['Kyiv']), { withheld: false, dice: 1 }, 'a mixed-script name is compared with a Latin one');
+  assert.deepEqual(withheldOf({ name: 'Qqqzzz', altNames: ['Київ'] }, ['Kyiv']), { withheld: true, dice: 0 }, 'control: Cyrillic alone is skipped, and the Latin pair left is unlike');
+});
+
 test('the tie: a later candidate scoring at least the top, unless same name and description, or the top exact and it not', () => {
   const t = (top, later) => tieOf([{ name: 'Alton', description: 'Country: GB', match: false, score: 95, ...top }, { name: 'Elsewhere', description: 'Country: GB', match: false, score: 95, ...later }]);
   assert.equal(t({}, {}), true, 'equal scores: a tie');
@@ -105,6 +116,14 @@ test('the tie: a later candidate scoring at least the top, unless same name and 
   assert.equal(t({ match: true }, { match: false }), false, 'the top exact and it not: no tie');
   assert.equal(t({ match: true }, { match: true }), true, 'both exact: a tie');
   assert.equal(t({ match: false }, { match: true }), true, 'it exact and the top not: a tie');
+  // WHG compares descriptions as (d || ''): an absent one is the same as ''.
+  assert.equal(t({ name: 'A', description: '' }, { name: 'A', description: undefined }), false, "'' and none: the same description, no tie");
+  assert.equal(t({ name: 'A', description: '' }, { name: 'A', description: 'x' }), true, 'control: another description is a tie');
+  // WHG's loop stops at the first later candidate scoring under the top: one equal after it is not seen.
+  const top = { name: 'A', description: 'd', match: false, score: 95 };
+  assert.equal(tieOf([top, { name: 'B', description: 'd', match: false, score: 80 }, { name: 'C', description: 'd', match: false, score: 95 }]), false, 'stops at the lower one');
+  assert.equal(tieOf([top, { name: 'C', description: 'd', match: false, score: 95 }, { name: 'B', description: 'd', match: false, score: 80 }]), true, 'control: the equal one first is a tie');
+  assert.equal(tieOf([{ ...top, match: true }, { name: 'B', match: false, score: 95 }, { name: 'C', match: true, score: 95 }]), true, 'an inexact one at the top score is passed over, not a stop');
 });
 
 test('guard(): (exact OR score ≥ 90) AND not withheld AND no tie, the top of its answer only, never by a head word', () => {
@@ -169,7 +188,7 @@ test('acceptGuarded: one passing candidate each, as closeMatch by default, with 
     assert.equal(c.decision.guard.rule, GUARD_RULE);
     assert.match(c.decision.basis, /WHG's guard/);
   }
-  assert.deepEqual(alton.decision.guard, { rule: GUARD_RULE, threshold: 90, exact: true, score: 100, confidence: null, dice: 1 });
+  assert.deepEqual(alton.decision.guard, { rule: GUARD_RULE, threshold: 90, exact: true, score: 100, confidence: null, dice: null }, 'exact: the names are not compared (WHG)');
   assert.match(felton.decision.basis, /score 92, confidence 41/);
   for (const id of [3, 4, 5, 6, 2]) assert.equal(candOf(work, id).decision, null, `place:gn:${id} not accepted`);
   assert.equal(candOf(work, 7).decision.kind, 'not-this', 'a place already decided is left alone');
@@ -221,6 +240,26 @@ test('"WHG\'s guards first" orders the places with a passing candidate first; a 
     { Gorton: [cand(9, 'Gorton', { repr_point: [-2.2, 53.47] })], Gortun: [cand(10, 'Gortun', { repr_point: [-2.21, 53.47] })] }, { allNames: true });
   assert.equal(two.work.candidates.filter((c) => guardOf(c).pass).length, 2, 'control: both pass');
   assert.deepEqual(acceptGuarded(two.work, { at: NOW }), { batch: null, accepted: 0, leftOut: { far: 0, ccodes: 0, total: 0 }, several: 1 });
+});
+
+test('planGuarded and guardsFirst cost in proportion to the candidates, not places × candidates (2,400 places × 5 well under 100 ms)', () => {
+  const synth = (places) => {
+    const work = { places: {}, candidates: [], lookups: [{ id: 'l1', parameters: { maxDistanceKm: 50 } }], match_parameters: {} };
+    for (let p = 0; p < places; p++) {
+      const iri = `${X}p/${p}`;
+      work.places[iri] = { ccodes: ['GB'] };
+      for (let r = 1; r <= 5; r++) work.candidates.push({ id: `c${p}-${r}`, candidate_source: iri, lookup: 'l1', distance_km: 1, other: { ccodes: ['GB'] }, gazetteer: { match: r === 1, score: 100 - r, withheld: false, tie: false, answer_rank: r } });
+    }
+    return work;
+  };
+  const time = (work) => { let best = Infinity; for (let k = 0; k < 5; k++) { const t0 = performance.now(); planGuarded(work); guardsFirst(work, Object.keys(work.places)); best = Math.min(best, performance.now() - t0); } return best; };
+  const big = synth(2400), bigger = synth(9600);
+  assert.equal(planGuarded(big).accept.length, 2400, 'control: every place has one candidate passing');
+  time(big); time(bigger);   // warmed first: the first runs are the compiler's, not the work's
+  const t1 = time(big), t4 = time(bigger);
+  assert.ok(t1 < 100, `2,400 × 5 took ${t1.toFixed(1)} ms`);
+  // Four times the places: about four times the time when linear, sixteen when quadratic.
+  assert.ok(t4 < 10 * Math.max(t1, 2), `9,600 × 5 took ${t4.toFixed(1)} ms against ${t1.toFixed(1)} ms`);
 });
 
 // ---- query variants -----------------------------------------------------------------------------------------------
@@ -363,6 +402,30 @@ test('compare with expectMissing: exactly those places may be missing; any other
   const still = await cmp(version(['a', 'b', 'c'], { ...G, '@id': X + 'g/2' }), [`${X}place/a`]);
   assert.deepEqual(errorsOf(still), [['expected-missing-present', [`${X}place/a`]]]);
   assert.equal(without.counts.leftOut, undefined, 'the count only when told');
+});
+
+test('compare with expectMissing: a place never in the EARLIER version is warned of (a stale exclude), not passed in silence', async () => {
+  const G = { '@id': X + 'g/1', title: 't', status: 'published' };
+  const p = (id) => ({ '@id': `${X}place/${id}`, label: id, attestations: [{ '@id': `${X}att/${id}1`, names: [{ toponym: id }], sources: [src], created: NOW }] });
+  const version = (ids, g = G) => textFile(JSON.stringify({ profile: 'place-centric', gazetteer: g, spatialEntities: ids.map(p) }), 'v.json');
+  const r = (await compare({ earlier: await detect([version(['a', 'b'])]), later: await detect([version(['b'], { ...G, '@id': X + 'g/2' })]), options: { expectMissing: [`${X}place/a`, `${X}place/gone`] } }, env())).report;
+  const unknown = r.items.filter((i) => i.kind === 'expected-missing-unknown');
+  assert.deepEqual(unknown.map((i) => [i.severity, i.examples]), [['warning', [`${X}place/gone`]]], 'the one never there, and only it');
+  assert.match(unknown[0].message, /not in the earlier version/);
+  assert.equal(r.counts.leftOut, 1, 'control: the one that was there is set aside');
+  assert.equal(r.items.filter((i) => i.severity === 'error').length, 0);
+});
+
+test('finishing warns of a place left out by the reviewer that the dataset does not have (expected-missing-unknown)', async () => {
+  const { work } = await looked(THREE(), { Newcastle: NEWCASTLE, York: YORK });
+  decide(work, candOf(work, 20).id, 'match', { at: NOW });
+  setRowState(work, A('york'), 'exclude');
+  work.places[A('gone')] = { ...work.places[A('leeds')], label: 'Gone' }; setRowState(work, A('gone'), 'exclude');
+  const done = await apply({ subjects: await detect([datasetFile(THREE())]), work: serialiseWork(work), options: { output: 'dataset', reviewer: REVIEWER } }, env());
+  assert.equal(done.report.errors, 0, JSON.stringify(done.report.items));
+  const unknown = done.report.items.filter((i) => i.kind === 'expected-missing-unknown');
+  assert.deepEqual(unknown.map((i) => [i.severity, i.examples]), [['warning', [A('gone')]]], 'the stale exclude, and not York');
+  assert.equal(done.report.counts.versionCheck.leftOut, 2, "control: York's two attestations were expected missing");
 });
 
 // ---- old work files ---------------------------------------------------------------------------------------------------

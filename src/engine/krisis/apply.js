@@ -317,6 +317,7 @@ export async function checkAppendOnly({ earlier, later, added, options = {} }, e
       rep.add('error', 'not-append-only', `${K.notAppendOnly} ${i.message}`, i.examples[0], i.count);
       for (const x of i.explained || []) rep.explain('not-append-only', x.example, x.earlier, x.later);
     } else if (i.kind === 'expected-missing-present') rep.add('error', 'not-append-only', `${K.notAppendOnly} ${i.message}`, i.examples[0], i.count);
+    else if (i.kind === 'expected-missing-unknown') i.examples.forEach((x, j) => rep.add('warning', i.kind, i.message, x, j ? 0 : i.count));   // a stale "leave out": said, not passed in silence
     else if (i.kind === 'unreadable' || i.kind === 'version-not-read') rep.add('error', 'not-checked', `${K.notChecked}: ${i.message}`, i.examples[0], i.count);
     else if (i.kind === 'not-compared') rep.add('warning', i.kind, i.message, i.examples[0], i.count);
   }
