@@ -2123,6 +2123,50 @@ def methodos_join_checks(browser, base, hook, tmp):
         finally: ctx.close()
     attempt('Methodos: a step whose run fails says so in the tracker ("Failed: …, run this step again"), and run again it is done', failed)
 
+    def handed_back():
+        # Back from Chora (#workflow=<id>): the workflow named is taken up at its step "place", and the
+        # hand-back waits for the click (kept until then: the presence beside "taken" after it). The file
+        # Chora names is asked for: another is refused, that one completes the step. A toolbox click keeps
+        # the workflow in the address. Control: a workflow with nothing handed back falls back to choosing by hand.
+        ctx = fresh()
+        DRAWN = '{"places": ["Abingdon", "drawn"]}'
+        right, wrong = tmp / 'drawn.json', tmp / 'not-drawn.json'
+        right.write_text(DRAWN); wrong.write_text('{"places": ["Abingdon"]}')
+        try:
+            p = hooked(ready(ctx.new_page()))
+            got = {}
+            wid = p.evaluate("() => window.__methodos_e2e.placeAt('By hand')")
+            other = p.evaluate("() => window.__methodos_e2e.placeAt('Handed back')")
+            got['given'] = p.evaluate(f"() => window.__methodos_e2e.giveBack({json.dumps(other)}, {json.dumps(DRAWN)}, 'drawn.json')")
+            p.goto('about:blank'); p.goto(base + '#workflow=' + other); ready(p); hooked(p)
+            until(p, "() => !document.getElementById('methodos-handback').hidden", 15)
+            got['arrived'] = js(p)
+            got['kept before the click'] = p.evaluate('() => window.__methodos_e2e.handbackKept()')
+            p.click('#toolbox .tool-link[data-tool="check"]'); got['hash after a card'] = p.evaluate('() => location.hash')
+            p.click('#methodos-handback')
+            until(p, "() => /Chora handed back drawn.json/.test(document.getElementById('methodos-message').textContent)", 10)
+            got['kept after the click'] = p.evaluate('() => window.__methodos_e2e.handbackKept()')
+            choose(p, [wrong]); until(p, "() => /not the file Chora handed back/.test(document.getElementById('methodos-message').textContent)", 15)
+            got['other file'] = js(p)
+            choose(p, [right]); step_is(p, 'place', 'done', 15)
+            got['right file'] = js(p)
+            # The control: nothing handed back for this one.
+            p.goto('about:blank'); p.goto(base + '#workflow=' + wid); ready(p)
+            until(p, "() => !document.getElementById('methodos-handback').hidden", 15)
+            p.click('#methodos-handback')
+            until(p, "() => /Nothing usable came back from Chora/.test(document.getElementById('methodos-message').textContent)", 10)
+            got['none'] = js(p)
+            a, o, r_, n = got['arrived'], got['other file'], got['right file'], got['none']
+            ok = (got['given'] and a['steps'].get('place') == 'current' and a['steps'].get('apply') == 'done' and 'Back from Chora' in a['message']
+                  and got['kept before the click'] is True and got['kept after the click'] is False
+                  and got['hash after a card'] == f'#tool=check&workflow={other}'
+                  and o['steps']['place'] == 'current' and 'drawn.json' in o['message']
+                  and r_['steps']['place'] == 'done' and r_['steps'].get('again') == 'current' and 'Chora handed back, checked' in r_['message']
+                  and n['steps']['place'] == 'current' and n['done'])
+            return ok, got
+        finally: ctx.close()
+    attempt('Methodos: back from Chora (#workflow=<id>), the place step waits; the hand-back is taken only on a click, the file it names is asked for and checked (another refused), the step is then done, and a toolbox click keeps the workflow in the address; with nothing handed back, the file is chosen by hand', handed_back)
+
 # ---- Permissions (src/lib/permissions.js) on the main page ------------------------------------------
 # The page runs under the Content Security Policy written from the permissions allowed (none, here),
 # and every check above ran under it. The panel is the same on both pages; Chora's checks below allow,

@@ -1102,7 +1102,7 @@ once taken, and Chora drops a stale one when it starts.
 Reading and deleting are one transaction (`take`, `dropStale`), so a record written meanwhile is
 never the one deleted. Opened without `#workflow`, nothing is written.
 
-The main page's side is not built yet. On loading with `#workflow=<id>` it must:
+The main page's side is built (`src/methodos/page.js`, the tracker's "Take the dataset back from Chora"; `src/app.js` passes the id and keeps it in `setHash`). On loading with `#workflow=<id>` it does this:
 
 - find the workflow's record by that id, and show the step waiting ("Draw or trace the places on a
   map", operation `place`);
@@ -1115,7 +1115,7 @@ The main page's side is not built yet. On loading with `#workflow=<id>` it must:
   asking the user to choose the saved file by hand, as the step does today;
 - otherwise ask the user to choose the saved file, since the record names it and does not hold it,
   and complete the step with `runner.complete(state, 'place', { dataset: record.files })` only when
-  `refsDiffer(record.files, [file])` is empty;
+  `refsDiffer(record.files, [file])` is empty (checked in the browser by `handed_back`, in `methodos_join_checks`);
 - drop a stale hand-back (`dropStale`) where it drops a stale hand-off.
 
 `test/chora-handback.test.js` checks the record, its refusals and the hash, that the file is read as
@@ -1866,7 +1866,8 @@ changing them.
   the step (`stop`), a failure fails it (`fail`, keeping a lookup's partial work file, which the
   tracker reopens), a permission not given makes it wait: each is said in the tracker's words. Only
   an interactive step (matching columns, review, Chora's drawing) waits for "This step is done", its
-  result taken from the page as it stands; Chora's hand-back is `handBack(files)`. "Back a step" is
+  result taken from the page as it stands; Chora's step also takes Chora's hand-back (below, "Chora's
+  way back"), and the tracker's "Open Chora" opens `chora.html#workflow=<id>`. "Back a step" is
   `invalidate` of the last step done.
 - **Save and resume** are phase 2's `workflowStore()` (`src/methodos/store.js`), saved at every step
   boundary, and taken up on load by the version rule (`reconcile()`), whose words the tracker shows

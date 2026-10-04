@@ -11,6 +11,7 @@ import { RECIPES } from '../engine/methodos/recipes/index.js';
 import * as runner from '../engine/methodos/runner.js';
 import { refsOf, refsDiffer } from '../engine/methodos/handoffs.js';
 import { atBoundary, reconcile, restartRemaining } from '../engine/methodos/record.js';
+import { take as takeHandback, isWorkflowId } from '../chora/handback.js';
 
 // The input of each automatic operation that the page's run takes from the files chosen in step 1: a
 // run is the step's only if those files are the ones the step takes (by size and SHA-256).
@@ -81,11 +82,13 @@ function stepList(list, steps, at, done, notes = []) {
  *   mapping()        the matching of columns shown, or null;
  *   review()         the review open, as { text, name }, or null;
  *   openWork(file)   open a Krisis work file, as "Resume a review" does;  pickWork()  choose one.
- * Returns { open(), chosen(files), began(run), ended(run), handBack(files), keepChanged(on) }: the host
+ * `workflow` is the id the page's address named (#workflow=<id>, Chora's way back), or null: that
+ * workflow is the one taken up, and its step "place" offers Chora's hand-back.
+ * Returns { open(), chosen(files), began(run), ended(run), keepChanged(on), id() }: the host
  * tells it the files chosen, and each run of a tool as it begins ({ op, files }) and ends ({ op,
  * report, outputs, incomplete } or { op, error, partial } or { op, waiting } or { op, cancelled }).
  */
-export function mountMethodos({ banner, interview, tracker, store, onStep, tools, page }) {
+export function mountMethodos({ banner, interview, tracker, store, onStep, tools, page, workflow = null }) {
   const q = (root, sel) => root.querySelector(sel);
   const have = q(interview, '#mq-have'), want = q(interview, '#mq-want'), more = q(interview, '#mq-more');
   const verdict = q(interview, '#methodos-verdict'), planEl = q(interview, '#methodos-plan');
@@ -214,6 +217,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   const tList = q(tracker, '#methodos-track'), tTitle = q(tracker, '#methodos-tracker-title'), tWhere = q(tracker, '#methodos-tracker-where');
   const tSaid = q(tracker, '#methodos-said'), tMsg = q(tracker, '#methodos-message');
   const doneB = q(tracker, '#methodos-done'), backB = q(tracker, '#methodos-back'), pickB = q(tracker, '#methodos-pick');
+  const backB2 = q(tracker, '#methodos-handback');
   const useB = q(tracker, '#methodos-use'), reopenB = q(tracker, '#methodos-reopen'), restartB = q(tracker, '#methodos-restart');
   let wf = null;            // the runner's state, as a record ({ id, name, created, saved, ...state })
   let changed = null;       // a record the version rule would not carry on: { record, words } (reconcile's 'changed' or 'refuse')
@@ -222,6 +226,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   let chosenRefs = null;    // the files chosen in step 1, as references
   let handle = null, handleFile = null;   // the FileSystemFileHandle the workflow's file was chosen through, if any (Chromium)
   let keptHandle = null;    // the handle kept for a resumed workflow
+  let fromChora = null;     // Chora's hand-back, taken on the user's click: the references the file chosen next must match
+  let arrived = isWorkflowId(workflow) ? workflow : null;   // the workflow the address named, whose "place" step offers the hand-back
   const held = new Map();   // the outputs of steps done in this tab, by SHA-256, to hand on to the next step
   let queue = Promise.resolve();
   const chain = (fn) => (queue = queue.then(fn).catch((e) => { say(e.message || String(e), true); render(false); }));
@@ -327,6 +333,17 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
       if (!wf || changed) return;
       const s = atStep();
       if (!s) return;
+      if (s.op === 'place' && fromChora) {
+        // Chora's hand-back names the file it saved and does not hold it: the file chosen completes
+        // the step only if it is that file (by size and SHA-256).
+        const differ = await refsDiffer(fromChora, files);
+        if (differ.length) { say(`This is not the file Chora handed back: ${differ.join(', ')} ${differ.length === 1 ? 'differs' : 'differ'}. Choose ${names(fromChora)}, as it was saved in Chora.`, true); render(false); return; }
+        const refs = fromChora; fromChora = null;
+        files.forEach((f) => held.set(refs.find((r) => r.name === f.name)?.sha256 || refs[0].sha256, f));
+        await finishInteractive(s, { dataset: refs });
+        say(`${names(refs)}: the dataset Chora handed back, checked. The step is done.`); render(false);
+        return;
+      }
       let main = null;
       try { main = s.op === 'read.columns' ? runner.inputsOf(wf, s.id).files : mainInput(wf, s); } catch { main = null; }
       if (!main) return;
@@ -349,8 +366,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
       return { work: await refsHeld([new File([r.text], r.name, { type: 'application/json' })], 'work.krisis') };
     }
     if (s.op === 'place') {
-      // Chora's hand-back (branch chora-handback) calls handBack(files); until it lands, the dataset
-      // saved in Chora is chosen again in step 1, and taken from there.
+      // By hand: the dataset saved in Chora, chosen again in step 1 (when no hand-back came, or none was taken).
       const files = page.files();
       if (!files.length) throw new Error('Choose the dataset you saved in Chora in step 1 first.');
       return { dataset: await refsHeld(files, 'dataset') };
@@ -369,15 +385,22 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     try { await finishInteractive(s, await resultOf(s)); } catch (e) { say(e.message, true); render(false); return; }
     if (!atStep()) q(tracker, '#methodos-leave').focus();
   }));
-  /** Chora's hand-back (branch chora-handback): the dataset saved in Chora, as files, completes the step "Draw or trace the places". */
-  function handBack(files) {
-    return chain(async () => {
-      const s = atStep();
-      if (!s || s.op !== 'place') return false;
-      await finishInteractive(s, { dataset: await refsHeld([...files], 'dataset') });
-      return true;
-    });
-  }
+  // Chora's hand-back (src/chora/handback.js), taken only on this click: read once and let go. What it
+  // names is asked for in step 1 and checked (chosen()); with none to take, the file is chosen by hand.
+  backB2.addEventListener('click', () => chain(async () => {
+    const s = atStep();
+    if (!wf || !s || s.op !== 'place') return;
+    const r = await takeHandback(wf.id);
+    if (r) {
+      fromChora = r.files;
+      say(`Chora handed back ${names(r.files)}. Choose it in step 1: it is checked to be the file Chora saved, and then the step is done.`);
+      render(false); page.pick();
+    } else {
+      fromChora = null;
+      say('Nothing usable came back from Chora (none was kept, it was more than two minutes old, or it was not for this workflow). Choose the dataset you saved in Chora in step 1, then say the step is done.', true);
+      render(false);
+    }
+  }));
   backB.addEventListener('click', () => chain(async () => {
     const last = wf && [...wf.steps].reverse().find((s) => s.state === 'done');
     if (!last) return;
@@ -387,7 +410,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   }));
   q(tracker, '#methodos-leave').addEventListener('click', () => chain(async () => {
     const id = wf?.id || changed?.record.id;
-    wf = null; pending = null; changed = null; active = null; note = null; held.clear(); handle = handleFile = keptHandle = null;
+    wf = null; pending = null; changed = null; active = null; note = null; held.clear(); handle = handleFile = keptHandle = null; fromChora = null; arrived = null;
     if (id) await store.remove(id);
     render(false); backTo();
   }));
@@ -497,11 +520,12 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     useB.hidden = !usable || needStart; if (usable) useB.textContent = `Use ${names(usable)}${fromWhere(wf, s, usable)}`;
     const partial = (s?.state === 'failed' || s?.state === 'cancelled') && s.partial ? Object.values(s.partial).flat()[0] : null;
     reopenB.hidden = !partial;
+    backB2.hidden = !(s && s.op === 'place' && wf && !changed && arrived === wf.id && !fromChora);
     if (partial) reopenB.textContent = held.has(partial.sha256) ? `Reopen ${partial.name}` : `Choose ${partial.name} again`;
     if (s && !changed) {
       const p = wf ? { title: recipeOf(wf)?.title } : plan(pending.key, pending.answers);
       onStep({ tool: PAGE_TOOL[s.op] ?? null, text: `Methodos, ${p.title}, step ${i + 1} of ${steps.length}: ${op.tool ? `${op.tool}, ` : ''}${lower(s.title)}.${op.kind === 'interactive' && op.waitsFor ? ` This step is yours: it waits for ${op.waitsFor}.` : ''}`,
-        link: s.op === 'place' ? { href: './chora.html', words: 'Open Chora' } : null });
+        link: s.op === 'place' ? { href: wf && isWorkflowId(wf.id) ? `./chora.html#workflow=${wf.id}` : './chora.html', words: 'Open Chora' } : null });
     } else onStep(null);
     if (focus) show(q(tracker, 'h2'));
   }
@@ -531,7 +555,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   }
 
   // A workflow kept from before is taken up by the version rule (record.js, reconcile()), whose words the tracker shows.
-  store.list().then(([r]) => chain(async () => {
+  // Back from Chora (#workflow=<id>), the workflow it names is the one taken up; otherwise the newest.
+  (arrived ? store.load(arrived).then((r) => [r]) : store.list()).then(([r]) => chain(async () => {
     if (!r || wf || pending) return;
     const v = reconcile(r, recipeOf(r));
     if (v.action === 'continue') {
@@ -541,9 +566,10 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
       const s = atStep();
       let main = null;
       try { main = s ? mainInput(wf, s) || (s.op === 'read.columns' ? runner.inputsOf(wf, s.id).files : null) : null; } catch { main = null; }
-      say([v.words, main ? `Taken up where it was left. Choose ${names(main)} again in step 1 to carry on: the file is checked to be the one the workflow recorded.` : 'Taken up where it was left.'].filter(Boolean).join(' '));
+      if (arrived === wf.id && s?.op === 'place') say([v.words, 'Back from Chora: take the dataset you saved there ("Take the dataset back from Chora"), or choose it in step 1 by hand and say the step is done.'].filter(Boolean).join(' '));
+      else say([v.words, main ? `Taken up where it was left. Choose ${names(main)} again in step 1 to carry on: the file is checked to be the one the workflow recorded.` : 'Taken up where it was left.'].filter(Boolean).join(' '));
     } else changed = { action: v.action, record: r, words: v.words };
     render(false);
   })).catch(() => {});
-  return { open, chosen, began, ended, handBack, keepChanged };
+  return { open, chosen, began, ended, keepChanged, id: () => wf?.id || null };
 }

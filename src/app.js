@@ -11,6 +11,7 @@ const REVIEW_WORDS = W;   // the review's words, where W names the words for the
 import { readable } from './engine/input.js';
 import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions } from './engine/krisis/work.js';
 import { stash as stashForChora, dropStale as dropStaleHandoff } from './chora/handoff.js';
+import { dropStale as dropStaleHandback, workflowOf } from './chora/handback.js';
 import { storageNeed } from './engine/storage.js';
 import * as permissions from './lib/permissions.js';
 import { RELOAD_LOSES } from './lib/permission-words.js';
@@ -705,6 +706,9 @@ document.addEventListener('click', async (e) => {
 // once they are older than the hand-over allows. A fresh hand-over, on the way to Chora now, is kept.
 dropStaleHandoff();
 for (const ev of ['pageshow', 'pagehide']) window.addEventListener(ev, () => dropStaleHandoff());
+// Chora's hand-back is let go where the hand-off is, when stale (a fresh one waits for the user's click).
+dropStaleHandback();
+for (const ev of ['pageshow', 'pagehide']) window.addEventListener(ev, () => dropStaleHandback());
 const drop = $('drop');
 drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
 drop.ondragleave = () => drop.classList.remove('over');
@@ -747,7 +751,12 @@ const TOOLS = {
 const EVERY_ACTION = $('action-what').textContent;
 let tool = null;
 let workflowStep = null;   // the step of a Methodos workflow the user is at, if they follow one: { tool, text, link }
-const toolFromHash = () => { const m = /^#tool=([a-z]+)$/.exec(location.hash); return m && TOOLS[m[1]] ? m[1] : null; };
+// The fragment holds the tool chosen (#tool=<key>) and, back from Chora, the workflow it was opened for
+// (#workflow=<id>, src/chora/handback.js), together as #tool=<key>&workflow=<id>.
+const hashParam = (name) => { try { return new URLSearchParams(location.hash.replace(/^#/, '')).get(name); } catch { return null; } };
+const toolFromHash = () => { const k = hashParam('tool'); return k && /^[a-z]+$/.test(k) && TOOLS[k] ? k : null; };
+// The workflow the address named on arrival, carried through every rewrite of the fragment for as long as it is the one followed.
+const arrivedFor = workflowOf(location.hash)?.id || null;
 const reduceMotion = () => !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 function chooseTool(key) {
   const was = tool;
@@ -806,7 +815,10 @@ function leaveFigures() {
   beforeFigures = null;
 }
 function setHash(key) {
-  try { history.replaceState(history.state, '', location.pathname + location.search + (key ? `#tool=${key}` : '')); } catch {}
+  let w = null;
+  try { w = arrivedFor && methodos.id() === arrivedFor ? arrivedFor : null; } catch { /* before Methodos is mounted */ }
+  const parts = [key ? `tool=${key}` : null, w ? `workflow=${w}` : null].filter(Boolean);
+  try { history.replaceState(history.state, '', location.pathname + location.search + (parts.length ? `#${parts.join('&')}` : '')); } catch {}
 }
 function focusStep1() {
   const h = $('files-h');
@@ -846,6 +858,7 @@ const methodos = mountMethodos({
     openWork: (f) => resume(f),
     pickWork: () => $('workfile').click(),
   },
+  workflow: arrivedFor,
   onStep(step) {
     if (!step && !workflowStep) return;
     workflowStep = step;
