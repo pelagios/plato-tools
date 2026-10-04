@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { IDBFactory } from 'fake-indexeddb';
 import { FRESH, stash, take as takeHandoff } from '../src/chora/handoff.js';
+import { HANDBACK_FRESH } from '../src/chora/handback.js';
 import { isRef, checkHandoff, refsOf, refsDiffer, TYPES, OPERATIONS, RECIPES, runner } from '../src/engine/methodos/index.js';
 import { KEY, FORMAT, TYPE, workflowOf, isWorkflowId, backTo, refOf, isDatasetRef, record, check, give, take, dropStale } from '../src/chora/handback.js';
 
@@ -73,7 +74,11 @@ test('a hand-back read is used only if it is for this workflow, of this format, 
   const good = record('wf-1', REF, NOW);
   // The presence first: the good record is accepted, rebuilt, at any age under two minutes.
   assert.deepEqual(check(good, 'wf-1', NOW), good);
-  assert.deepEqual(check(good, 'wf-1', NOW + FRESH - 1), good);
+  assert.deepEqual(check(good, 'wf-1', NOW + HANDBACK_FRESH - 1), good);
+  // Thirty minutes, not the hand-off's two: ten minutes after the save it is still good.
+  assert.equal(HANDBACK_FRESH, 30 * 60 * 1000);
+  assert.ok(HANDBACK_FRESH > FRESH);
+  assert.deepEqual(check(good, 'wf-1', NOW + 10 * 60 * 1000), good);
   assert.notEqual(check(good, 'wf-1', NOW), good, 'rebuilt, not the object read');
   const f = (files) => ({ ...good, files });
   const refused = {
@@ -82,7 +87,7 @@ test('a hand-back read is used only if it is for this workflow, of this format, 
     'an older format': { ...good, handback: 0 }, 'a later format': { ...good, handback: 2 }, 'the format as text': { ...good, handback: '1' },
     'no format (a hand-off\'s shape)': { files: good.files, at: NOW, workflow: 'wf-1' },
     'a key more': { ...good, run: 'now' }, 'no time': { handback: 1, workflow: 'wf-1', files: good.files },
-    'two minutes old (old)': { ...good, at: NOW - FRESH }, 'ten minutes old': { ...good, at: NOW - 10 * 60 * 1000 },
+    'thirty minutes old (old)': { ...good, at: NOW - HANDBACK_FRESH }, 'an hour old': { ...good, at: NOW - 60 * 60 * 1000 },
     'from the future': { ...good, at: NOW + 1 }, 'time as text': { ...good, at: String(NOW) },
     'no files': f([]), 'files not a list': f(REF), 'two files': f([REF, REF]),
     'a File, as the hand-off keeps (bytes, not a reference)': f([new File(['x'], 'a.json')]),
@@ -144,7 +149,7 @@ test('kept in the hand-off\'s store under a key of its own: given, taken once, a
   assert.equal(await dropStale(), false);
   assert.ok(await take('wf-1'));
   await give('wf-1', REF);
-  assert.equal(await dropStale(Date.now() + FRESH + 1), true);
+  assert.equal(await dropStale(Date.now() + HANDBACK_FRESH + 1), true);
   assert.equal(await take('wf-1'), null);
   delete globalThis.indexedDB;
 });
@@ -159,7 +164,7 @@ test('taking a hand-back, or letting a stale one go, reads and deletes in one tr
   assert.deepEqual((await take('wf-1'))?.files, [B], 'the one written meanwhile is still there');
   // dropStale() and a fresh give() started together: the stale one goes, the fresh one stays.
   const { tx } = await import('../src/chora/handoff.js');
-  await tx('readwrite', (s) => s.put({ ...record('wf-1', REF), at: Date.now() - FRESH - 1 }, KEY));
+  await tx('readwrite', (s) => s.put({ ...record('wf-1', REF), at: Date.now() - HANDBACK_FRESH - 1 }, KEY));
   const [dropped] = await Promise.all([dropStale(), give('wf-1', B)]);
   assert.equal(dropped, true);
   assert.deepEqual((await take('wf-1'))?.files, [B], 'the fresh one written meanwhile is kept');

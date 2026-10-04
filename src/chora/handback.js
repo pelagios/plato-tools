@@ -16,12 +16,15 @@
 // Any page of the site's origin can write this store (DEVELOPERS.md, "The shared origin"), so what is
 // read is checked again (check(): the format, the workflow it is for, the reference's shape, the age),
 // a record never acts on its own (the main page offers it, and a click takes it), and it is usable for
-// as long as the hand-off is (FRESH, two minutes): it is written when the file is saved and written
-// again when the way back is taken, so the two minutes are the navigation's, as the hand-off's are.
-import { tx, isFresh } from './handoff.js';
+// HANDBACK_FRESH, thirty minutes (Stephen's decision, 4 October 2026), not the hand-off's two: the way
+// back may wait while the user checks what was saved. It is tied to its workflow's id, written when
+// the file is saved and again when the way back is taken, and deleted once taken.
+import { tx } from './handoff.js';
 import { isRef, refsOf, checkHandoff } from '../engine/methodos/handoffs.js';
 
 export const KEY = 'chora-handback';
+export const HANDBACK_FRESH = 30 * 60 * 1000;
+const isFresh = (v, now = Date.now()) => !!v && typeof v.at === 'number' && now - v.at >= 0 && now - v.at < HANDBACK_FRESH;
 export const FORMAT = 1;
 /** The type of the one reference handed back: Methodos's 'dataset', "a file of places the tools wrote". */
 export const TYPE = 'dataset';
@@ -76,7 +79,7 @@ export function record(id, ref, at = Date.now()) {
 /**
  * What was read, if it is a hand-back for `workflow` recent enough to use, rebuilt from its checked
  * fields alone; otherwise null. Refused: anything not an object of exactly the record's keys, another
- * format (an older or a later page's), another workflow's, one not FRESH (or from the future), one
+ * format (an older or a later page's), another workflow's, one not HANDBACK_FRESH (or from the future), one
  * whose `files` is not exactly one reference to a dataset (a hand-off's File objects are not).
  */
 export function check(v, workflow, now = Date.now()) {

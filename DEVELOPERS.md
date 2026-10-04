@@ -1091,8 +1091,9 @@ dataset of DEEP's size is never in memory whole, and while it does, the Save but
 page says "Handing the file back to the workflow…". The name must be one the page can show as it
 is (no path, no control or invisible characters such as zero-width spaces, bidirectional overrides
 or a byte-order mark, not blank, not `.` or `..`). Then the save result offers **Back to the
-workflow**, a link to `./#workflow=<id>`; a click writes the record again, so that its two minutes
-(`FRESH`, as the hand-off's) are the navigation's, and Chora drops a stale one when it starts.
+workflow**, a link to `./#workflow=<id>`; a click writes the record again. It is good for thirty
+minutes (`HANDBACK_FRESH`; the hand-off's `FRESH` stays two), tied to its workflow's id and deleted
+once taken, and Chora drops a stale one when it starts.
 Reading and deleting are one transaction (`take`, `dropStale`), so a record written meanwhile is
 never the one deleted. Opened without `#workflow`, nothing is written.
 
