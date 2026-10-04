@@ -7,7 +7,7 @@
     --no-gl-flags   start Chora's browser without the software-GL switches, to measure whether the map
                     still draws without them (it did on this machine, Chromium 147, September 2026)
 """
-import csv, json, os, pathlib, shutil, signal, socket, subprocess, sys, tempfile, time, urllib.request, zipfile
+import csv, json, os, pathlib, re, shutil, signal, socket, subprocess, sys, tempfile, time, urllib.request, zipfile
 from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -44,28 +44,41 @@ PROVE = '--prove-it-fails' in sys.argv
 # that takes a timeout (a wait for a function or a selector, an action on an element, an expected
 # download), given or the default. A wait whose condition holds still ends at once, as it always did,
 # and what each check then asserts is unchanged: only the waiting for what cannot come is cut short.
-# Where the page is another (a real page that some checks open in this mode too, about:blank, a frame
-# inside another page), or once the harness has put a script into it (add_script_tag, set_content),
-# the waits are as long as ever, and navigations and fixed pauses are never shortened.
-# PROVE_FULL_WAITS=1 waits in full everywhere, as before, to compare the two.
+# The waits are as long as ever on any page other than the one with no tools (about:blank, a framing
+# page, the real page a few checks open in this mode), and on that page once the harness may have put
+# something into it that changes later: a script tag or new content (add_script_tag, set_content), an
+# evaluate() whose script could act after it returns (ASYNC below: a timer, a promise, an async
+# function), until the next navigation; and an init script that could (ASYNC again), for good, as it
+# runs again on every navigation (on the context, for every page in it). Navigations and fixed pauses
+# are never shortened. The limit, stated: ASYNC is a reading of the script's text, not of what it
+# does. A script that changes the page later by a means it does not name (an event listener the page
+# itself never fires, being script-free, is harmless; a MutationObserver fires only on a change, which
+# only the harness makes) would still be cut short at FAST, and a check that passes only after such a
+# change, more than FAST later, would be missed here and caught by PROVE_FULL_WAITS=1, which waits in
+# full everywhere, as before. At the end of the run, no wait cut short at all fails the run: the
+# shortener's own control, so that a change that made it inert (and the run slow) is not missed.
 FAST = 1.0
 SHORTENED = [0]                 # how many waits ended early, said at the end of the run
 UNSHORTENED = {'goto', 'go_back', 'go_forward', 'reload', 'set_content', 'wait_for_load_state', 'wait_for_url', 'wait_for_timeout',
                'expect_navigation', 'expect_popup', 'expect_websocket', 'expect_worker', 'set_default_timeout',
                'set_default_navigation_timeout', 'screenshot', 'aria_snapshot'}
+ASYNC = re.compile(r'setTimeout|setInterval|requestAnimationFrame|\bPromise\b|\basync\b|\.then\(')
 def toolless(target):
-    """Whether `target` (a page, a frame or a locator) shows the page with no tools as it was loaded, no script put in it."""
+    """Whether `target` (a page, a frame or a locator) shows the page with no tools as it was loaded, nothing put
+    in it that could change it later."""
     if not PROVE or os.environ.get('PROVE_FULL_WAITS'): return False
     try:
         if hasattr(target, 'main_frame'): page, url = target, target.url          # a page
         elif hasattr(target, 'parent_frame'): page, url = target.page, target.url  # a frame: its own document
         else: page = target.page; url = page.url                                   # a locator: its page's
-        return url == NOTOOLS and not getattr(page, '_prove_scripted', False)
+        return (url == NOTOOLS and not getattr(page, '_prove_scripted', False) and not getattr(page, '_prove_init_scripted', False)
+                and not getattr(page.context, '_prove_init_scripted', False))
     except Exception: return False
 
 def prove_fast():
     import functools, inspect
-    from playwright.sync_api import Page, Frame, Locator
+    from playwright.sync_api import Page, Frame, Locator, BrowserContext
+    owner = lambda self: self if hasattr(self, 'main_frame') else self.page      # the page of a page, frame or locator
     def shorten(fn):
         @functools.wraps(fn)
         def wrapped(self, *a, **kw):
@@ -76,16 +89,32 @@ def prove_fast():
     def scripted(fn, flag):
         @functools.wraps(fn)
         def wrapped(self, *a, **kw):
-            (self if hasattr(self, 'main_frame') else self.page)._prove_scripted = flag
+            owner(self)._prove_scripted = flag
+            return fn(self, *a, **kw)
+        return wrapped
+    def evaluated(fn):                      # an evaluate() whose script could act after it returns
+        @functools.wraps(fn)
+        def wrapped(self, *a, **kw):
+            js = a[0] if a else kw.get('expression', '')
+            if isinstance(js, str) and ASYNC.search(js): owner(self)._prove_scripted = True
+            return fn(self, *a, **kw)
+        return wrapped
+    def init_scripted(fn):                  # an init script that could: for good, as it runs on every navigation
+        @functools.wraps(fn)
+        def wrapped(self, *a, **kw):
+            js = a[0] if a else kw.get('script')
+            if js is None or not isinstance(js, str) or ASYNC.search(js): self._prove_init_scripted = True
             return fn(self, *a, **kw)
         return wrapped
     for C in (Page, Frame, Locator):
         for name, fn in list(vars(C).items()):
             if name.startswith('_') or name in UNSHORTENED or not callable(fn): continue
             if 'timeout' in inspect.signature(fn).parameters: setattr(C, name, shorten(fn))
+        for name in ('evaluate', 'evaluate_handle'): setattr(C, name, evaluated(getattr(C, name)))
     for C in (Page, Frame):
         for name in ('add_script_tag', 'set_content'): setattr(C, name, scripted(getattr(C, name), True))
     for name in ('goto', 'reload'): setattr(Page, name, scripted(getattr(Page, name), False))   # a fresh document
+    for C in (Page, BrowserContext): C.add_init_script = init_scripted(C.add_init_script)
 if PROVE: prove_fast()
 # The preview server runs under npx, whose child (node vite preview) outlived a plain kill() and
 # held the port for the next run: it gets a session of its own, and the whole group is stopped.
@@ -1706,7 +1735,8 @@ def main():
             main_requests = []
             ctx.on('request', lambda r: main_requests.append(r.url))
             page.add_init_script('window.__plato_forceDownload = true;')
-            page.goto('data:text/html,<title>no tools here</title><input id=picker type=file multiple>' if PROVE else url)
+            page.goto(NOTOOLS if PROVE else url)
+            if PROVE and page.url != NOTOOLS: sys.exit(f'--prove-it-fails: the page with no tools reports its address as {page.url!r}, not NOTOOLS: no wait would be cut short')
             ready = wait_state(page, lambda s: s.get('phase') == 'ready', 30, 'ready')
             check('page is ready and names the PLATO commit it checks against', ready.get('phase') == 'ready' and len(ready.get('platoCommit') or '') == 40, ready)
             # The commit shown is the one served, and a draft pin (a PLATO branch, not a release) says so.
@@ -1970,7 +2000,7 @@ def main():
                 try:
                     p.add_init_script('''(() => { const real = navigator.storage.estimate.bind(navigator.storage); window.__estimates = 0;
                       navigator.storage.estimate = async () => { const e = await real(); window.__estimates++; return %s; }; })()''' % ('{ ...e, quota: %d }' % quota if quota else 'e'))
-                    p.goto('data:text/html,<title>no tools here</title><input id=picker type=file multiple>' if PROVE else url)
+                    p.goto(NOTOOLS if PROVE else url)
                     if wait_state(p, lambda s: s.get('phase') == 'ready', 30, 'ready').get('phase') != 'ready': return None
                     p.set_input_files('#picker', [str(f) for f in sorted((ex / 'customs').glob('*.csv'))])
                     if wait_state(p, lambda s: s.get('phase') == 'detected', 60, 'detection').get('phase') != 'detected': return None
@@ -1996,7 +2026,7 @@ def main():
                 small = sorted((ex / 'customs').glob('*.csv'))
                 two = ctx.new_page()
                 try:
-                    two.goto('data:text/html,<title>no tools here</title><input id=picker type=file multiple>' if PROVE else url)
+                    two.goto(NOTOOLS if PROVE else url)
                     if wait_state(two, lambda s: s.get('phase') == 'ready', 30, 'ready').get('phase') != 'ready': return None
                     said = lambda p: p.evaluate("() => document.getElementById('summary')?.textContent || ''")
                     alone = run_case(two, small, 'check')
@@ -2063,7 +2093,7 @@ def main():
                 r = {}
                 try:
                     for p in (holder, two):
-                        p.goto('data:text/html,<title>no tools here</title><input id=picker type=file multiple>' if PROVE else url)
+                        p.goto(NOTOOLS if PROVE else url)
                         if wait_state(p, lambda s: s.get('phase') == 'ready', 30, 'ready').get('phase') != 'ready': return None
                     # Both main pages have their pool, let go between runs, so the holder can take some of it.
                     r['first alone'] = run_case(page, small, 'check').get('phase')
@@ -2126,6 +2156,10 @@ def main():
     if PROVE:
         print(f'{len(results)} checks; {SHORTENED[0]} waits on the page with no tools ended after {FAST:g} s'
               + (' (none: PROVE_FULL_WAITS)' if os.environ.get('PROVE_FULL_WAITS') else ''))
+        if not os.environ.get('PROVE_FULL_WAITS') and SHORTENED[0] == 0:
+            # The shortener's own control: it found the page with no tools nowhere, so it is not doing what it says.
+            print('PROVE-IT-FAILS: no wait on the page with no tools was cut short: the shortener (toolless()) no longer recognises it')
+            sys.exit(1)
         print('PROVE-IT-FAILS:', 'every check failed, as it must' if len(failed) == len(results) else f'{len(results) - len(failed)} check(s) passed against a page with no tools: they cannot fail')
         sys.exit(0 if len(failed) == len(results) else 1)
     print('RESULT:', 'ALL PASS' if not failed else f'{len(failed)} FAILED'); sys.exit(1 if failed else 0)
