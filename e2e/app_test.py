@@ -2380,6 +2380,7 @@ def main():
             methodos_checks(pw, url, tmp)
             chora_checks(pw, url, tmp)
             chora_adopt_checks(pw, url, tmp)
+            map_your_data_checks(pw, url, tmp)
             iiif_checks(pw, url, tmp)
     finally:
         stop(srv)
@@ -2749,6 +2750,272 @@ def methodos_join_checks(browser, base, hook, tmp):
             return ok, got
         finally: ctx.close()
     attempt('Methodos: back from Chora (#workflow=<id>), the place step waits; the hand-back is taken only on a click, the file it names is asked for and checked (another refused), the step is then done, and a toolbox click keeps the workflow in the address; with nothing handed back, the file is chosen by hand', handed_back)
+
+# ---- Methodos, Map your data end to end (docs/plans/methodos.md, section 9, phase 4) ------------------
+# A ten-row CSV with county and parish columns walked through Methodos's "Map your data" on the page, as
+# a person would: the interview, the tracker, Hermes's columns (the "within" levels), the check, the
+# conversion under a base address, Krisis's region review level by level, the places looked up within
+# their regions and accepted, the decisions recorded with the region each place is in (the candidates
+# exported first), a place's location adopted from its gazetteer match in Chora and handed back, the
+# check again, the comparison, and PLATO JSON written. WHG is never called: the context routes it to a
+# stub, as the Krisis and Chora adoption checks do. Every request the two pages make is kept: none may go
+# to a site that was not allowed, beside the lookups that did go to the stub.
+MYDATA_W3 = 'https://w3id.org/whg/id/'
+MYDATA_BASE = 'https://example.org/parishes/'
+MYDATA_CSV = ROOT / 'test/fixtures/methodos/parishes.csv'
+def mydata_answer(id, name, point):
+    return {'id': id, 'name': name, 'score': 100, 'match': True, 'description': 'Country: GB', 'ccodes': ['GB'], 'repr_point': point,
+            'namespace': id.split(':')[1], 'alt_names': [], 'has_geom': True, 'confidence': 100}
+MYDATA_ANSWERS = {
+    'Cheshire': [mydata_answer('place:gn:2653941', 'Cheshire', [-2.5, 53.2])], 'Lancashire': [mydata_answer('place:gn:2644974', 'Lancashire', [-2.6, 53.8])],
+    'Newton': [mydata_answer('place:gn:2641434', 'Newton', [-2.4, 53.3])], 'Barton': [mydata_answer('place:gn:2656167', 'Barton', [-2.3, 53.1])],
+    'Ashby': [mydata_answer('place:gn:2657441', 'Ashby', [-2.7, 53.9])],
+    **{n: [mydata_answer(f'place:gn:90000{i:02d}', n, [-2.4 - i / 100, 53.3])] for i, n in enumerate(
+        ['Mill Farm', 'Church Barn', 'Hall Green', 'Low Mill', 'Moss Side', 'Brook End', 'High Cross', 'Old Hall', 'Wood Lane'], 1)},
+}
+# Kirk House has no candidate in the lookup: it is the place whose location (and identity) is adopted in Chora.
+MYDATA_KIRK = mydata_answer('place:gn:9000010', 'Kirk House', [-2.31, 53.12])
+MYDATA_KIRK_FEATURE = {'@id': 'https://whgazetteer.org/entity/place:gn:9000010/api', 'type': 'Feature', 'properties': {'title': 'Kirk House', 'ccodes': ['GB']},
+                       'geometry': {'type': 'Point', 'coordinates': [-2.3105, 53.1207]}, 'names': [{'toponym': 'Kirk House', 'lang': 'en'}]}
+
+def mydata_ends(doc):
+    """What the end of Map your data must hold, read from the PLATO JSON written: every place ContainedIn a region
+    minted from its row, every identity to a record of the stub, citing WHG, each region's (and each place's from
+    the review) promotedFrom a candidate of the set exported, and a geometry adopted from the stub's record."""
+    ents = doc.get('spatialEntities') or []
+    regions = {e['@id'] for e in ents if '/place/region-' in (e.get('@id') or '')}
+    places = [e for e in ents if e.get('@id') not in regions]
+    def cites_whg(a): return any('whgazetteer.org' in json.dumps(x) or 'World Historical Gazetteer' in json.dumps(x) for x in (a.get('sources') or []) + (a.get('citations') or []))
+    contained = [e['@id'] for e in places if any(r.get('relationType') == 'https://w3id.org/plato#ContainedIn' and r.get('relatesTo') in regions
+                                                 for a in e.get('attestations') or [] for r in a.get('relations') or [])]
+    ids = [(i, a) for e in ents for a in e.get('attestations') or [] for i in a.get('identities') or []]
+    region_ids = [i for i, a in ids if i.get('subject') in regions]
+    geoms = [(e['@id'], a) for e in places for a in e.get('attestations') or [] if a.get('geometry') or a.get('locations') or a.get('location')]
+    return {'places': len(places), 'regions': len(regions), 'contained': len(contained),
+            'identities': len(ids), 'stub': bool(ids) and all(i.get('object', '').startswith(MYDATA_W3) and cites_whg(a) for i, a in ids),
+            'region identities': len(region_ids), 'regions promoted': bool(region_ids) and all((i.get('promotedFrom') or '').startswith(MYDATA_BASE + 'candidates/') for i in region_ids),
+            'places promoted': sum(1 for i, a in ids if i.get('subject') not in regions and (i.get('promotedFrom') or '').startswith(MYDATA_BASE + 'candidates/')),
+            'geometries from the stub': sorted(pid.rsplit('/', 1)[-1] for pid, a in geoms if cites_whg(a)),
+            'candidate sets': (doc.get('gazetteer') or {}).get('candidateSets') or []}
+def mydata_complete(e):
+    return (e.get('places') == 10 and e.get('regions') == 6 and e.get('contained') == 10 and e.get('stub') is True
+            and e.get('region identities') == 6 and e.get('regions promoted') is True and e.get('places promoted') == 9
+            and e.get('geometries from the stub') == ['4'] and len(e.get('candidate sets') or []) == 1)
+
+def map_your_data_checks(pw, url, tmp):
+    import re
+    base = url.rstrip('/') + '/'
+    origin = re.match(r'^https?://[^/]+', base).group(0)
+    out = tmp / 'mydata'; out.mkdir(exist_ok=True)
+    browser = pw.chromium.launch(headless=True, args=GL)
+    ctx = browser.new_context(accept_downloads=True, viewport={'width': 1400, 'height': 900}, reduced_motion='reduce')
+    ctx.add_init_script('window.__plato_forceDownload = true;')
+    cors = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+            'Access-Control-Allow-Headers': 'authorization, content-type, accept, user-agent'}
+    posts, gets, asked, consoled = [], [], [], []
+    def stub(route):
+        req = route.request
+        if req.method == 'OPTIONS': return route.fulfill(status=204, headers=cors)
+        reply = lambda body, status=200: route.fulfill(status=status, headers={**cors, 'Content-Type': 'application/json'}, body=json.dumps(body))
+        if req.method == 'GET':
+            gets.append(req.url)
+            return reply(MYDATA_KIRK_FEATURE) if '/entity/place:gn:9000010/api' in req.url else reply({'detail': 'Not found'}, 404)
+        body = json.loads(req.post_data or '{}'); posts.append(body)
+        res = {'attribution': LOOKUP_ATTRIBUTION}
+        for k, q in (body.get('queries') or {}).items():
+            # The lookup finds no candidate for Kirk House; Chora's own search, by its words, finds the record to adopt.
+            found = [MYDATA_KIRK] if q.get('query') == 'Kirk House adopt' else MYDATA_ANSWERS.get(q.get('query'), [])
+            res[k] = {'result': found, **({'scope': {'applied': True}} if isinstance(q.get('contained_in'), list) else {})}
+        reply(res)
+    ctx.route(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'), stub)
+    # Every request either page makes, wherever it was going (a request the policy stops never reaches this; the console says so).
+    ctx.on('request', lambda r: asked.append(r.url))
+    page = ctx.new_page()
+    page.on('console', lambda m: consoled.append(m.text))
+    r = {}
+    track = lambda: page.evaluate(JOIN_STATE)
+    def step_is(step, state, timeout=60):
+        until(page, f"() => document.querySelector('#methodos-track li[data-step=\"{step}\"]')?.dataset.state === '{state}'", timeout)
+    def choose(fs):
+        page.set_input_files('#picker', [])
+        page.set_input_files('#picker', [str(f) for f in fs])
+        s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'detection')
+        if s.get('phase') != 'detected': raise RuntimeError(f'not detected: {s.get("phase")}')
+        return s
+    def run(button, timeout=180):
+        page.click(button)
+        return wait_state(page, lambda s: s.get('phase') in ('done', 'error'), T(timeout), 'run')
+    def saved(s, ending, name=None):
+        n = name or next((o['name'] for o in (s.get('outputs') or []) if o['name'].endswith(ending)), None)
+        if not n: raise RuntimeError(f'no output ending {ending}: {[o["name"] for o in s.get("outputs") or []]}')
+        return download(page, n, out / n)
+    def need(*keys):
+        missing = [k for k in keys if not r.get(k)]
+        if missing: raise RuntimeError(f'an earlier step did not finish ({", ".join(missing)})')
+
+    def begin():
+        # WHG allowed (the grant, as the Permissions panel writes it), the reviewer named; then the interview.
+        page.goto(NOTOOLS if PROVE else base)
+        page.evaluate("() => { localStorage.setItem('plato-tools.permissions', JSON.stringify({ version: 1, grants: { 'gazetteer:whg': { state: 'allowed', at: '2026-10-04T10:00:00Z' } } })); localStorage.setItem('plato-tools.reviewer', JSON.stringify({ name: 'Map Reviewer' })); localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Map Reviewer' })); }")
+        page.goto(NOTOOLS if PROVE else base)
+        s = wait_state(page, lambda s: s.get('phase') == 'ready' and s.get('canary') in ('enforced', 'not-enforced'), T(30), 'ready')
+        r['policy'] = page.evaluate('() => (window.__platoCsp || {}).origins || null'); r['canary'] = s.get('canary')
+        page.evaluate("() => { const b = document.getElementById('base'); b.value = %s; b.dispatchEvent(new Event('change')); const v = document.getElementById('reviewer'); v.value = 'Map Reviewer'; v.dispatchEvent(new Event('change')); }" % json.dumps(MYDATA_BASE))
+        page.click('#methodos-ask'); until(page, "!document.getElementById('methodos').hidden", 5)
+        page.check('input[name="methodos-have"][value="table"]'); page.check('input[name="methodos-want"][value="map"]')
+        for k, v in (('has-regions', 'yes'), ('will-draw', 'yes'), ('will-publish', 'no')): page.check(f'input[name="methodos-ask-{k}"][value="{v}"]')
+        planned = page.eval_on_selector_all('#methodos-plan li', 'ls => ls.map((l) => l.textContent)')
+        page.click('#methodos-start'); until(page, "['pending', 'idle'].includes(document.getElementById('methodos-tracker').dataset.status)", 10)
+        s = choose([MYDATA_CSV])
+        until(page, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+        r['columns'] = (s.get('columns') or {}).get('levels')
+        t = track(); r['begun'] = t
+        ok = (r['canary'] == 'enforced' and r['policy'] == ['https://whgazetteer.org'] and t['steps'].get('columns') == 'current'
+              and [k for k in t['steps']] == ['columns', 'check', 'dataset', 'regions', 'lookup', 'review', 'relate', 'place', 'again', 'compare', 'out']
+              and not any('not identified' in x or 'Not yet available' in x for x in planned) and r['columns'] == {'county': 1, 'parish': 2})
+        return ok, {'policy': r['policy'], 'canary': r['canary'], 'steps': t['steps'], 'planned': planned[:12], 'levels': r['columns']}
+    attempt('Map your data: the interview (a table, places on a map, with regions, drawing, no publishing) gives the eleven steps, the regions step and the step recording them available, with WHG alone in the page\'s policy', begin)
+
+    def through_convert():
+        need('begun')
+        page.click('#methodos-done'); step_is('columns', 'done', 15)
+        r['check'] = run('#check').get('phase'); step_is('check', 'done')
+        page.select_option('#target', 'plato-json')
+        s = run('#convert'); step_is('dataset', 'done')
+        r['converted'] = saved(s, '.json')
+        t = track()
+        return (r['check'] == 'done' and t['steps'].get('regions') == 'current' and r['converted'] is not None), {'check': r['check'], 'steps': t['steps'], 'message': t['message'][:200]}
+    attempt('Map your data: the columns matched (county and parish as levels), the table checked and converted under the base address, each step done by its run, and the workflow then waits at the regions', through_convert)
+
+    W = lambda: (wait_state(page, lambda s: True, 5).get('work') or {})
+    art = lambda k: f'#regions-level article[data-rkey="{k}"]'
+    def regions():
+        need('converted')
+        choose([r['converted']])
+        if not page.evaluate("() => document.getElementById('lookup').open"): page.click('#lookup > summary')
+        page.fill('#whg-token', LOOKUP_TOKEN); page.press('#whg-token', 'Tab')
+        page.wait_for_function("() => !document.getElementById('regions-offer').hidden", timeout=T(60) * 1000)
+        page.click('#regions-start')
+        wait_state(page, lambda s: len(((s.get('work') or {}).get('regions') or {})) == 6, T(60), 'regions')
+        early = None
+        for level in (1, 2):
+            page.click(f'#regions-nav button[data-rlevel="{level}"]')
+            n = len(posts)
+            page.click('#regions-level button[data-rgo="level"]')
+            wait_state(page, lambda s: (s.get('lookup') or {}).get('running') is False and len(posts) > n, T(60), f'level {level}')
+            if level == 1:   # the step is not done while a level is open: said, and still waiting
+                page.click('#methodos-done'); early = track()
+            keys = [k for k, g in (W().get('regions') or {}).items() if g['level'] == level]
+            for k in keys:
+                page.click(art(k) + ' li.candidate button[data-ract="match"]')
+                wait_state(page, lambda s: (((s.get('work') or {}).get('regions') or {}).get(k) or {}).get('outcome') == 'matched', T(10), 'settled')
+        r['level 2 sent'] = sorted(json.dumps(q.get('contained_in')) for q in posts[-1]['queries'].values()) if posts else []
+        page.click('#methodos-done'); step_is('regions', 'done', 15)
+        t = track(); r['regions done'] = True
+        return (early['steps'].get('regions') == 'current' and 'not settled yet' in early['message']
+                and r['level 2 sent'] == ['["gn:2644974"]', '["gn:2644974"]', '["gn:2653941"]', '["gn:2653941"]'] and t['steps'].get('lookup') == 'current'), \
+            {'early': {'step': early['steps'].get('regions'), 'message': early['message'][:200]}, 'level 2 sent': r['level 2 sent'], 'steps': t['steps']}
+    attempt('Map your data: the regions reviewed level by level on the dataset (level 2 sent within the county matched); "This step is done" is refused while a level is open, and taken once every region is settled', regions)
+
+    def places_and_review():
+        need('regions done')
+        page.click('#regions-nav button[data-rlevel="places"]')
+        n = len(posts)
+        page.click('#regions-level button[data-rgo="places"]')
+        step_is('lookup', 'done', 90)
+        within = {q['query']: q.get('contained_in') for q in posts[n]['queries'].values()} if len(posts) > n else {}
+        until(page, "() => !document.getElementById('bulk-accept').disabled", 30)
+        page.click('#bulk-accept')
+        wait_state(page, lambda s: sum(1 for c in (s.get('work') or {}).get('candidates', []) if (c.get('decision') or {}).get('kind') == 'match' and '/region-' not in c['candidate_source']) == 9, T(15), 'accepted')
+        page.click('#methodos-done'); step_is('review', 'done', 15)
+        r['reviewed'] = True
+        return (within.get('Mill Farm') == ['gn:2641434'] and within.get('Wood Lane') == ['gn:2657441'] and len(within) == 10 and track()['steps'].get('relate') == 'current'), {'within': within, 'steps': track()['steps']}
+    attempt('Map your data: the places looked up within their parishes as the lookup step, the nine that pass WHG\'s guards accepted in bulk, and the review step done', places_and_review)
+
+    def relate():
+        need('reviewed')
+        page.check('input[name="review-output"][value="dataset"]')
+        n = len(consoled)
+        s = run('#finish')
+        unexported = track()
+        page.click('#export-candidates')
+        until(page, "() => !!window.__plato.candidates && !!window.__plato.candidates.setIri", 15)
+        s = run('#finish'); step_is('relate', 'done', 30)
+        r['related'] = saved(s, '.krisis-dataset.json')
+        e = mydata_ends(json.loads(r['related'].read_text()))
+        return (unexported['steps'].get('relate') == 'current' and 'export the suggestions first' in unexported['message']
+                and e['contained'] == 10 and e['region identities'] == 6 and e['regions promoted'] and track()['steps'].get('place') == 'current'), \
+            {'before export': unexported['message'][:220], 'ends': e, 'steps': track()['steps']}
+    attempt('Map your data: Finish before the candidates are exported is not counted as recording the regions (said why); after, the dataset has each place ContainedIn its parish and each region\'s identity promotedFrom its candidate', relate)
+
+    def adopt_in_chora():
+        need('related')
+        choose([r['related']])
+        link = page.get_attribute('#for-tool a[href^="./chora.html#workflow="]', 'href')
+        r['wid'] = link.split('#workflow=')[1]
+        page.click('#for-tool a[href^="./chora.html#workflow="]')
+        until(page, 'window.__chora && window.__chora.phase === "ready" && window.__chora.mapReadyCount >= 1', 60)
+        page.set_input_files('#picker', [str(r['related'])])
+        until(page, '["loaded", "error", "unrecognised"].includes(window.__chora.phase)')
+        chora_pick(page, 'kirk house')
+        page.click('#adopt-find'); until(page, '() => window.__chora.adopt && window.__chora.adopt.open', 10)
+        if page.is_visible('#adopt-token'): page.fill('#adopt-token', LOOKUP_TOKEN); page.click('#adopt-token-form button[type="submit"]')
+        page.fill('#adopt-q', 'Kirk House adopt'); page.click('#adopt-send')
+        until(page, '() => ["answered", "problem"].includes(window.__chora.adopt.phase)', 30)
+        page.click('#adopt-candidates li[data-cand="place:gn:9000010"] button[data-preview]')
+        until(page, '() => window.__chora.adopt.phase === "preview"', 30)
+        page.click('#adopt-go'); until(page, '() => window.__chora.adopt.phase === "adopted"', 10)
+        until(page, '() => window.__chora.draftWrites === 0', 10)
+        page.click('#save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+        ls = cstate(page)['lastSave'] or {}
+        name = (ls.get('outputs') or [{}])[0].get('name')
+        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#save-result button.primary')
+        r['drawn'] = out / name; d.value.save_as(r['drawn'])
+        until(page, '() => !!document.getElementById("back-to-workflow")', 60)
+        page.click('#back-to-workflow')
+        wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+        until(page, "() => !document.getElementById('methodos-handback').hidden", 15)
+        page.click('#methodos-handback')
+        until(page, "() => /Chora handed back/.test(document.getElementById('methodos-message').textContent)", 10)
+        choose([r['drawn']]); step_is('place', 'done', 15)
+        return (ls.get('passed') is True and ls.get('added') == 2 and track()['steps'].get('again') == 'current'), {'save': {k: ls.get(k) for k in ('passed', 'added')}, 'steps': track()['steps']}
+    attempt('Map your data: in Chora, opened from the tracker, Kirk House\'s location and identity adopted from the stub\'s record, saved (the version check passed), handed back, and the place step done with that file', adopt_in_chora)
+
+    def to_the_end():
+        need('drawn', 'converted')
+        r['again'] = run('#check').get('phase'); step_is('again', 'done')
+        page.set_input_files('#earlier', [str(r['converted'])])
+        s = wait_state(page, lambda s: s.get('action') == 'compare' and s.get('phase') in ('done', 'error'), T(120), 'compare')
+        step_is('compare', 'done')
+        page.select_option('#target', 'plato-json')
+        s = run('#convert'); step_is('out', 'done')
+        r['final'] = saved(s, '.json')
+        until(page, "document.getElementById('methodos-tracker').dataset.status === 'completed' || !document.querySelector('#methodos-track li.is-current')", 15)
+        e = mydata_ends(json.loads(r['final'].read_text())); r['ends'] = e
+        return (r['again'] == 'done' and mydata_complete(e)), {'again': r['again'], 'ends': e, 'steps': track()['steps']}
+    attempt('Map your data: checked again, compared with the dataset converted from the table, and written out as PLATO JSON whose ten places are ContainedIn their parishes, whose identities and adopted geometry cite the stub, and whose identities name their candidates', to_the_end)
+
+    def can_fail():
+        need('final')
+        doc = json.loads(r['final'].read_text())
+        # The same check on the same file as a step that skipped writing ContainedIn would have left it: it must fail.
+        mutated = {**doc, 'spatialEntities': [{**e, 'attestations': [a for a in e.get('attestations') or []
+                   if not any(x.get('relationType') == 'https://w3id.org/plato#ContainedIn' for x in a.get('relations') or [])]} for e in doc['spatialEntities']]}
+        m = mydata_ends(mutated)
+        return mydata_complete(r['ends']) and not mydata_complete(m) and m['contained'] == 0, {'as written': mydata_complete(r['ends']), 'without ContainedIn': m}
+    attempt('Map your data: the end check fails on the same file with ContainedIn left out, as a step that skipped writing it would leave it (and passes as written)', can_fail)
+
+    def only_allowed():
+        need('final')
+        other = sorted({re.match(r'^[a-z]+:(//[^/]*)?', u).group(0) for u in asked
+                        if not (u.startswith(origin + '/') or u.startswith('data:') or u.startswith('blob:') or re.match(r'^https://([^/]*\.)?whgazetteer\.org/', u))})
+        refused = [m for m in consoled if 'Refused to connect' in m]
+        reconciled = [u for u in asked if re.match(r'^https://whgazetteer\.org/.*reconcile', u)]
+        return (not other and not refused and len(posts) >= 4 and len(reconciled) >= 4 and any('/entity/place:gn:9000010/api' in u for u in gets)), \
+            {'other sites': other, 'refused': refused[:3], 'lookups to the stub': len(posts), 'entity fetched': gets[-1:] if gets else []}
+    attempt('Map your data: every request either page made went to this site or to WHG, which the permissions module allowed (the regions, the places and Chora\'s search went to the stub, and the record was fetched from it), and none to another site, nor any stopped by the policy', only_allowed)
+    try: browser.close()
+    except Exception: pass
 
 # ---- Permissions (src/lib/permissions.js) on the main page ------------------------------------------
 # The page runs under the Content Security Policy written from the permissions allowed (none, here),
