@@ -21,6 +21,7 @@ import { exportRecord, recordOf } from '../engine/methodos/record.js';
 // not kept.
 export const DB = 'plato-tools-methodos', STORE = 'workflows', TAB = 'plato-tools.methodos.';
 export const HANDLES = 'plato-tools-methodos-handles';
+const PENDING = 'pending:';
 
 /**
  * A store of workflow records. Everything it is given can be replaced, for the tests: `indexedDB`,
@@ -122,5 +123,30 @@ export function workflowStore({ indexedDB, session, keep = keepWorkingData } = {
     },
     /** Let everything kept in IndexedDB go, the database too (when "keep working data" is turned off). */
     forgetKept,
+    // A workflow chosen before any file (Stephen, 4 October 2026): not a runner's state yet, only its
+    // recipe and answers, { id, key, answers, saved }, kept beside the records under 'pending:<id>',
+    // where list() and load() never take it for a record. It goes when its workflow begins, or is discarded.
+    async savePending({ id, key, answers }) {
+      const text = JSON.stringify({ methodosPending: 1, id, key, answers, saved: new Date().toISOString() });
+      if (keeping()) { try { await tx('readwrite', (st) => st.put(text, PENDING + id)); return 'browser'; } catch { /* the tab's, then */ } } else await forgetKept();
+      tab.put(PENDING + id, text);
+      return 'tab';
+    },
+    /** The workflows chosen before any file, newest first. */
+    async pendings() {
+      const texts = [];
+      try { if (ss) for (let i = 0; i < ss.length; i++) { const k = ss.key(i); if (k?.startsWith(TAB + PENDING)) texts.push(ss.getItem(k)); } } catch { /* refused */ }
+      for (const [k, v] of memory) if (k.startsWith(PENDING)) texts.push(v);
+      if (keeping()) { try { const keys = await tx('readonly', (st) => st.getAllKeys()); for (const k of keys) if (String(k).startsWith(PENDING)) texts.push(await tx('readonly', (st) => st.get(k))); } catch { /* the tab's only */ } }
+      const out = [];
+      for (const t of texts) { try { const v = JSON.parse(t); if (v?.methodosPending === 1 && typeof v.id === 'string' && typeof v.key === 'string' && v.answers && typeof v.answers === 'object') out.push(v); } catch { /* not one */ } }
+      return out.sort((a, b) => (a.saved < b.saved ? 1 : -1));
+    },
+    /** Let a workflow chosen before any file go. */
+    async dropPending(id) {
+      tab.drop(PENDING + id);
+      if (!keeping()) return;
+      try { await tx('readwrite', (st) => st.delete(PENDING + id)); } catch { /* none kept */ }
+    },
   };
 }

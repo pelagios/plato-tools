@@ -78,7 +78,7 @@ export const PANEL = {
   forget: 'Forget',
   workHeading: 'Your working data',
   keepWork: 'Keep my working data between visits',
-  keepWorkNote: 'Chora keeps the dataset you opened, your drawings not yet saved, the historical maps you showed, and the file it last wrote, in this browser, so that you can carry on next time. Turned off, they are cleared when you next open Chora, and the file it wrote is cleared once you have saved it: save your drawings before you leave.',
+  keepWorkNote: 'Chora keeps the dataset you opened, your drawings not yet saved, the historical maps you showed, and the file it last wrote, in this browser, so that you can carry on next time. Turned off, they are cleared when you next open Chora, and the file it wrote is cleared once you have saved it: save your drawings before you leave. Methodos keeps each workflow you follow (its steps, and references to your files by name, size and SHA-256, never your files), the files its steps made, so that the next step takes them after a reload, and, where the browser allows, a link to the file you began with. Turned off, these last for the tab only, and what was kept is cleared at once.',
   persist: 'Keep large datasets’ working files (ask the browser for persistent storage)',
   persistNote: 'A browser short of space may clear a site’s files, the working copy of a large dataset among them. Ticked, the browser is asked once to keep them; some browsers ask you, some decide for themselves. The answer cannot be undone from here: clearing this site’s data in the browser does that.',
   persistResult: {

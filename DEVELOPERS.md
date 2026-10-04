@@ -1878,6 +1878,16 @@ changing them.
   `plato-tools-methodos-handles`) and resuming is one click; elsewhere the file is chosen again.
   Turning "keep working data" off in the Permissions panel clears both databases at once
   (`keepChanged`), and the workflow carries on in the tab's sessionStorage.
+- **Stephen's decisions of 4 October 2026.** A workflow chosen before any file is kept too
+  (`savePending`, under `pending:<id>` beside the records, never read as one), shown after a reload as
+  not started, with "Discard this workflow". The files the steps make (a dataset, a work file, a
+  matching of columns) are kept as working data in OPFS, folder `methodos-outputs`, each under its
+  SHA-256 (`src/methodos/outputs.js`), overriding decision 3 for these files only: the record still
+  holds only references, the user's own files are never copied, and after a reload the next step's
+  file is chosen for it. The tracker says what is kept, with "Clear them"; "keep working data" off
+  keeps them for the tab only and clears the folder at once, and the Permissions panel's note says so.
+  A file dropped in step 1 gives a handle too where the browser can (`getAsFileSystemHandle`,
+  feature-detected; a folder's handle, or a refusal, gives none and the drop goes on).
 
 `test/methodos-interview.test.js` holds the interview to `test/methodos-predicted.json`, which the
 browser checks (`methodos_page_checks` in `e2e/app_test.py`) answer through the page and compare with what

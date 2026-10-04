@@ -23,6 +23,7 @@ if (window.__plato) {
     req.onsuccess = () => { const db = req.result, g = db.transaction(STORE).objectStore(STORE).getAllKeys(); g.onsuccess = () => { db.close(); resolve(g.result); }; g.onerror = () => { db.close(); resolve(['error: ' + g.error]); }; };
     req.onerror = () => resolve(['error: ' + req.error]);
   });
+  let made = 0;
   window.__methodos_e2e = {
     // Begin Publish a dataset with a file of `text`, and take it to the FAIR report, which stops on a
     // problem in the data; saved at each step boundary, as the page will.
@@ -47,6 +48,9 @@ if (window.__plato) {
       try { await checkChosen(rec, { files: [new File([text], 'p.json')] }); return 'ok'; } catch (e) { return e.message; }
     },
     list: async () => (await store.list()).map((r) => r.id),
+    pendings: async () => (await store.pendings()).map((p) => p.id),
+    // The steps' files kept in OPFS (src/methodos/outputs.js): their names, or null if the folder is not there.
+    outputsKept: async () => { try { const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('methodos-outputs'); const n = []; for await (const [k] of d.entries()) n.push(k); return n; } catch { return null; } },
     // Map your data, taken to its step "place" (drawing in Chora), and kept: its id.
     async placeAt(name) {
       const MAP = RECIPES['map-your-data'];
@@ -55,7 +59,7 @@ if (window.__plato) {
       for (const [id, out] of [['columns', { mapping: [ref('mapping', 'columns.json')] }], ['check', {}], ['dataset', { dataset: [ref('dataset', 'places.json')] }],
         ['lookup', { work: [ref('work.krisis', 'places.krisis.json')] }], ['review', { work: [ref('work.krisis', 'places.krisis.json')] }], ['apply', { dataset: [ref('dataset', 'applied.json')] }]])
         s = runner.complete(runner.next(s), id, out);
-      const { record } = await store.save({ ...s, id: `e2e-${Date.now().toString(36)}` }, { name });
+      const { record } = await store.save({ ...s, id: `e2e-${Date.now().toString(36)}-${(++made).toString(36)}` }, { name });
       return record.id;
     },
     // Chora's hand-back of a file of `text` called `name`, for workflow `id`, as Chora gives it on saving.

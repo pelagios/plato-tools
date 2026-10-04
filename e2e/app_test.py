@@ -1969,12 +1969,14 @@ def methodos_checks(pw, url, tmp):
 # it is kept at every step boundary in phase 2's store, and taken up again after a reload. Read through
 # the tracker's own words and states, and the store through the hook (as above).
 JOIN_STATE = '''() => { const t = document.getElementById('methodos-tracker'), v = (e) => !!e && !e.hidden && !e.closest('[hidden]');
-  return { shown: v(t), status: t.dataset.status || null, kept: t.dataset.kept || null,
+  return { shown: v(t), status: t.dataset.status || null,
     steps: Object.fromEntries([...t.querySelectorAll('li.track-step')].map((li) => [li.dataset.step, li.dataset.state + (li.dataset.run ? ':' + li.dataset.run : '')])),
     run: t.querySelector('li.is-current .track-run')?.textContent || null, message: document.getElementById('methodos-message').textContent,
     where: document.getElementById('methodos-tracker-where').textContent, done: v(document.getElementById('methodos-done')),
     use: v(document.getElementById('methodos-use')) ? document.getElementById('methodos-use').textContent : null,
-    pick: v(document.getElementById('methodos-pick')) ? document.getElementById('methodos-pick').textContent : null }; }'''
+    pick: v(document.getElementById('methodos-pick')) ? document.getElementById('methodos-pick').textContent : null,
+    kept: v(document.getElementById('methodos-kept')) ? document.getElementById('methodos-kept').textContent : null,
+    leave: document.getElementById('methodos-leave').textContent, keptAs: t.dataset.kept || null }; }'''
 METHODOS_HOLDER = '''async (n) => {
   const src = `let held = []; onmessage = async ({ data }) => {
     if (data === 'release') { for (const h of held) h.close(); held = []; postMessage(0); return; }
@@ -1984,6 +1986,7 @@ METHODOS_HOLDER = '''async (n) => {
   window.holder = window.holder || new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
   return new Promise((res) => { holder.onmessage = (e) => res(e.data); holder.postMessage(n); });
 }'''
+OUTPUTS_KEPT = '''async () => { try { const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('methodos-outputs'); const n = []; for await (const [k] of d.entries()) n.push(k); return n.sort(); } catch { return null; } }'''
 def methodos_join_checks(browser, base, hook, tmp):
     customs = sorted((PLATO / 'schemas/tables/examples/customs').glob('*.csv'))
     def fresh():
@@ -2003,7 +2006,7 @@ def methodos_join_checks(browser, base, hook, tmp):
     def follow_publish(p):
         p.click('#methodos-ask'); until(p, "!document.getElementById('methodos').hidden", 5)
         p.check('input[name="methodos-have"][value="plato"]'); p.check('input[name="methodos-want"][value="publish"]')
-        p.click('#methodos-start'); until(p, "document.getElementById('methodos-tracker').dataset.status === 'pending'", 5)
+        p.click('#methodos-start'); until(p, "['pending', 'idle'].includes(document.getElementById('methodos-tracker').dataset.status)", 10)
     def choose(p, fs):
         p.set_input_files('#picker', [])
         p.set_input_files('#picker', [str(f) for f in fs])
@@ -2038,7 +2041,7 @@ def methodos_join_checks(browser, base, hook, tmp):
         b, c, m, e = got['begun'], got['checked'], got['minted'], got['reported']
         ok = (got['pending']['shown'] and got['pending']['steps'].get('check') == 'current' and not got['pending']['done']
               and b['status'] == 'idle' and b['steps']['check'] == 'current' and not b['done']
-              and c['steps']['check'] == 'done' and c['steps']['mint'] == 'current' and not c['done'] and c['kept'] == 'browser'
+              and c['steps']['check'] == 'done' and c['steps']['mint'] == 'current' and not c['done'] and c['keptAs'] == 'browser'
               and m['steps']['mint'] == 'done' and m['steps']['report'] == 'current' and (m['use'] or '').startswith('Use ') and minted and minted in m['use']
               and e['steps']['report'] == 'done' and e['steps']['site'] == 'current' and e['where'].startswith('Step 4 of 5') and not e['done'] and r.get('minted'))
         return ok, got
@@ -2047,13 +2050,18 @@ def methodos_join_checks(browser, base, hook, tmp):
     def resumed():
         p = r['page']
         before = js(p)
-        p.reload(); ready(p)
+        # The page is ready, and then at once given the kept file (so 'ready' may be seen, or already passed).
+        p.reload(); wait_state(p, lambda s: s.get('phase') in ('ready', 'detecting', 'detected'), T(30), 'ready')
         until(p, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 15)
+        # The minted dataset, kept in this browser by the step that made it, is chosen for the next step: no re-choosing.
+        s_ = wait_state(p, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'detection')
+        until(p, "() => /the file this step takes/.test(document.getElementById('methodos-message').textContent) || /chosen in step 1 for you/.test(document.getElementById('methodos-message').textContent)", 15)
         after = js(p)
+        chosen_ = p.evaluate("() => [...document.querySelectorAll('#chosen .name')].map((e) => e.textContent)")
         ok = (before['steps']['site'] == 'current' and after['shown'] and after['steps'] == before['steps'] and after['where'] == before['where']
-              and 'Taken up where it was left' in after['message'] and r['minted'].name in after['message'])
-        return ok, {'before': before, 'after': after}
-    attempt('Methodos: a reload mid-workflow takes it up at the same step, every step as it was, and asks for the step\'s file by name', resumed)
+              and s_.get('phase') == 'detected' and chosen_ == [r['minted'].name] and after['kept'] and 'never your own files' in after['kept'])
+        return ok, {'before': before, 'after': after, 'chosen for the step': chosen_, 'phase': s_.get('phase'), 'minted': r['minted'].name}
+    attempt('Methodos: a reload mid-workflow takes it up at the same step, every step as it was, with the dataset the minting made kept in this browser and chosen for the next step, and says what is kept', resumed)
 
     def refused():
         p = r['page']
@@ -2071,9 +2079,79 @@ def methodos_join_checks(browser, base, hook, tmp):
         ok = ('These are not the files' in no['message'] and r['minted'].name in no['message'] and site in ('done', 'error')
               and still['steps']['site'] == 'current' and 'not the files' not in yes['message'] and r['minted'].name in yes['message']
               and done == 'done' and after['steps']['site'] == 'done' and after['steps']['w3id'] == 'current')
-        r['ctx'].close()
         return ok, {'other file': no, 'its run': site, 'the right file chosen': yes, 'run on the right file': after}
     attempt('Methodos: after a reload, a different file is refused in words and a run on it is not counted; the file the step takes is accepted', refused)
+
+    def cleared():
+        # What is kept (the presence: the minted dataset's SHA-256 in OPFS, said in the tracker) goes with "Clear them".
+        p = r['page']
+        try:
+            got = {'before': p.evaluate(OUTPUTS_KEPT), 'said before': js(p)['kept']}
+            p.click('#methodos-clear-kept')
+            until(p, "() => document.getElementById('methodos-kept').hidden", 10)
+            got.update({'after': p.evaluate(OUTPUTS_KEPT), 'said after': js(p)['kept'], 'message': js(p)['message']})
+            ok = (got['before'] and len(got['before']) >= 1 and got['said before'] and got['after'] is None and got['said after'] is None and 'cleared from this browser' in got['message'])
+            return ok, got
+        finally: r['ctx'].close()
+    attempt('Methodos: the files the steps made are kept in OPFS by SHA-256 and said in the tracker, and "Clear them" clears them', cleared)
+
+    def not_started():
+        # Chosen before any file, the workflow is kept, shown as not started after a reload, and discarded in one click.
+        ctx = fresh()
+        try:
+            p = hooked(ready(ctx.new_page()))
+            follow_publish(p)
+            got = {'kept': p.evaluate('() => window.__methodos_e2e.pendings()')}
+            p.reload(); ready(p); hooked(p)
+            until(p, "document.getElementById('methodos-tracker').dataset.status === 'pending'", 15)
+            got['after a reload'] = js(p)
+            p.click('#methodos-leave'); until(p, "() => document.getElementById('methodos-tracker').hidden", 10)
+            got['discarded'] = p.evaluate('() => window.__methodos_e2e.pendings()')
+            p.reload(); ready(p); p.wait_for_timeout(500)
+            got['after another reload'] = js(p)['shown']
+            a = got['after a reload']
+            ok = (len(got['kept']) == 1 and a['shown'] and 'Not started' in a['message'] and a['leave'] == 'Discard this workflow' and a['steps'].get('check') == 'current'
+                  and got['discarded'] == [] and got['after another reload'] is False)
+            return ok, got
+        finally: ctx.close()
+    attempt('Methodos: a workflow chosen before any file is kept, shown as not started after a reload, and discarded in one click', not_started)
+
+    def dropped():
+        # A file dropped gives its handle where the browser does (here a real handle, to a copy in OPFS, given
+        # as getAsFileSystemHandle would): after a reload, "Open … again" chooses it in one click. Control: a
+        # drop whose handle is a folder's still chooses the file, and resume asks for it to be chosen.
+        ex = sorted(EX.glob('place-centric-*.json'))[0]
+        text = ex.read_text()
+        DROP = '''async ([text, name, kind]) => {
+          const root = await navigator.storage.getDirectory();
+          const h = kind === 'file' ? await root.getFileHandle(name, { create: true }) : await root.getDirectoryHandle('a-folder', { create: true });
+          if (kind === 'file') { const w = await h.createWritable(); await w.write(text); await w.close(); }
+          DataTransferItem.prototype.getAsFileSystemHandle = async function () { return h; };
+          const dt = new DataTransfer(); dt.items.add(new File([text], name, { type: 'application/json' }));
+          document.getElementById('drop').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+        }'''
+        out = {}
+        for kind in ('file', 'folder'):
+            ctx = fresh()
+            try:
+                p = ready(ctx.new_page())
+                follow_publish(p)
+                p.evaluate(DROP, [text, ex.name, kind])
+                until(p, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+                got = {'detected': wait_state(p, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'detection').get('phase')}
+                p.reload(); ready(p)
+                until(p, "() => !document.getElementById('methodos-pick').hidden", 15)
+                got['pick'] = js(p)['pick']
+                if kind == 'file':
+                    p.click('#methodos-pick')
+                    until(p, "() => /the file this step takes/.test(document.getElementById('methodos-message').textContent)", 15)
+                    got['opened'] = p.evaluate("() => [...document.querySelectorAll('#chosen .name')].map((e) => e.textContent)")
+                out[kind] = got
+            finally: ctx.close()
+        ok = (out['file']['detected'] == 'detected' and out['file']['pick'] == f'Open {ex.name} again' and out['file']['opened'] == [ex.name]
+              and out['folder']['detected'] == 'detected' and out['folder']['pick'] == 'Choose the file')
+        return ok, out
+    attempt('Methodos: a dropped file keeps its handle where the browser gives one, so that resume opens it in one click; a folder\'s handle is not kept, and the drop still works', dropped)
 
     def nothing_kept():
         # Kept (the presence): a workflow begun is in IndexedDB. Turned off in the Permissions panel, it is
@@ -2083,21 +2161,28 @@ def methodos_join_checks(browser, base, hook, tmp):
             p = hooked(ready(ctx.new_page()))
             follow_publish(p); choose(p, customs)
             until(p, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
-            got = {'kept': p.evaluate('() => window.__methodos_e2e.keys()'), 'kept as': js(p)['kept']}
+            run(p, '#check'); step_is(p, 'check', 'done'); run(p, '#publish', 'mint'); step_is(p, 'mint', 'done')
+            got = {'kept': p.evaluate('() => window.__methodos_e2e.keys()'), 'kept as': js(p)['keptAs'], 'outputs kept': p.evaluate(OUTPUTS_KEPT)}
             p.click('#permissions-button'); until(p, '() => document.getElementById("permissions-panel")?.open', 10)
             p.uncheck('#perm-keep-work')
             until(p, "() => document.getElementById('methodos-tracker').dataset.kept === 'tab'", 10)
             got['off, at once'] = p.evaluate('() => window.__methodos_e2e.keys()')
+            until(p, "() => document.getElementById('methodos-kept').hidden", 10)
+            got['off, outputs at once'] = p.evaluate(OUTPUTS_KEPT)
             got['off, tracker'] = js(p)
+            got['panel says'] = p.evaluate("() => document.getElementById('perm-keep-note')?.textContent || ''")
             p.close()
             q = hooked(ready(ctx.new_page())); q.wait_for_timeout(500)
-            got['next tab'] = {'list': q.evaluate('() => window.__methodos_e2e.list()'), 'keys': q.evaluate('() => window.__methodos_e2e.keys()'), 'tracker': js(q)['shown']}
+            got['next tab'] = {'list': q.evaluate('() => window.__methodos_e2e.list()'), 'keys': q.evaluate('() => window.__methodos_e2e.keys()'), 'tracker': js(q)['shown'], 'outputs': q.evaluate(OUTPUTS_KEPT)}
             q.evaluate("() => localStorage.removeItem('plato-tools.keep-working-data')")
             ok = (len(got['kept']) == 1 and got['kept as'] == 'browser' and got['off, at once'] == [] and got['off, tracker']['shown']
-                  and got['off, tracker']['steps'].get('check') == 'current' and got['next tab'] == {'list': [], 'keys': [], 'tracker': False})
+                  and got['outputs kept'] and len(got['outputs kept']) >= 1 and got['off, outputs at once'] is None
+                  and got['off, tracker']['steps'].get('report') == 'current' and (got['off, tracker']['use'] or '').startswith('Use ')
+                  and 'the files its steps made' in got['panel says']
+                  and got['next tab'] == {'list': [], 'keys': [], 'tracker': False, 'outputs': None})
             return ok, got
         finally: ctx.close()
-    attempt('Methodos: turned off in the Permissions panel, "keep working data" clears the workflow from IndexedDB at once (where it was, the presence), and nothing is left after the tab', nothing_kept)
+    attempt('Methodos: turned off in the Permissions panel, "keep working data" clears the workflow from IndexedDB and the steps\' files from OPFS at once (where they were, the presence), the tab carries on, the panel says so, and nothing is left after the tab', nothing_kept)
 
     def failed():
         # The check is refused the working files (another worker holds them): the step fails, and says so;
@@ -2160,7 +2245,7 @@ def methodos_join_checks(browser, base, hook, tmp):
             ok = (got['given'] and a['steps'].get('place') == 'current' and a['steps'].get('apply') == 'done' and 'Back from Chora' in a['message']
                   and got['kept before the click'] is True and got['kept after the click'] is False
                   and got['hash after a card'] == f'#tool=check&workflow={other}'
-                  and o['steps']['place'] == 'current' and 'drawn.json' in o['message']
+                  and o['steps']['place'] == 'current' and 'not-drawn.json' in o['message'] and 'Choose drawn.json' in o['message']
                   and r_['steps']['place'] == 'done' and r_['steps'].get('again') == 'current' and 'Chora handed back, checked' in r_['message']
                   and n['steps']['place'] == 'current' and n['done'])
             return ok, got

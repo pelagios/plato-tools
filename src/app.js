@@ -26,7 +26,10 @@ import { workflowStore } from './methodos/store.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
 let worker, files = [], input = null, targets = {}, busy = false;
-let runOp = null;   // the Methodos operation of the run under way (src/methodos/page.js), told when it ends
+let runOp = null;
+// The engine is ready (its first 'ready' message): a file Methodos chooses on load waits for it, or the
+// page's 'ready' would come after, and over, the file's detection.
+let engineReady; const whenReady = new Promise((r) => { engineReady = r; });   // the Methodos operation of the run under way (src/methodos/page.js), told when it ends
 
 // The commit of PLATO tools this page was built from (scripts/build-info.mjs writes it before the
 // build), for the site's workflow to run the same; absent from a build made without it.
@@ -47,6 +50,7 @@ function onMessage({ data }) {
       + (v.draft ? ` <strong class="draft">${draftNote(v)}</strong>` : '');
     readingCaps = { editorial: !!data.reading?.editorial };
     Object.assign(state, { phase: 'ready', platoCommit: v.commit, platoDraft: v.draft ? v.ref : null });
+    engineReady();
   } else if (data.type === 'detected') onDetected(data);
   else if (data.type === 'progress') onProgress(data);
   else if (data.type === 'done') onDone(data);
@@ -695,7 +699,8 @@ $('picker').onchange = (e) => { choose(e.target.files); e.target.value = ''; };
 // the files here may be of any size.
 document.addEventListener('click', async (e) => {
   if (e.defaultPrevented) return;   // a first tap that showed a tooltip, not a choice of the way
-  const a = e.target.closest('a[href="./chora.html"]');
+  // Methodos's "Open Chora" carries the workflow (./chora.html#workflow=<id>), and hands the files over too.
+  const a = e.target.closest('a[href="./chora.html"], a[href^="./chora.html#workflow="]');
   if (!a || !files.length || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;
   e.preventDefault();
   await stashForChora(files);
@@ -712,7 +717,19 @@ for (const ev of ['pageshow', 'pagehide']) window.addEventListener(ev, () => dro
 const drop = $('drop');
 drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
 drop.ondragleave = () => drop.classList.remove('over');
-drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); choose(e.dataTransfer.files); };
+drop.ondrop = (e) => {
+  e.preventDefault(); drop.classList.remove('over');
+  // Methodos: a file dropped gives a handle too where the browser can (Chromium's getAsFileSystemHandle,
+  // asked for during the event, as it must be), for one-click resume. A folder, a refusal or a browser
+  // without it gives none, and the drop goes on as before.
+  const list = [...e.dataTransfer.files];
+  try {
+    const item = [...(e.dataTransfer.items || [])].find((i) => i.kind === 'file');
+    const asked = item && typeof item.getAsFileSystemHandle === 'function' ? item.getAsFileSystemHandle() : null;
+    if (asked && list.length === 1) methodos.dropped(Promise.resolve(asked).catch(() => null), list[0]);
+  } catch { /* no handle: chosen again on resume */ }
+  choose(list);
+};
 $('check').onclick = () => start('check');
 $('convert').onclick = () => start('convert');
 // Comparing asks for one more file, the earlier version, and starts once it is chosen.
@@ -852,6 +869,7 @@ const methodos = mountMethodos({
     files: () => files,
     choose: (list) => { const dt = new DataTransfer(); for (const f of list) dt.items.add(f); $('picker').files = dt.files; choose(list); },
     pick: () => $('picker').click(),
+    ready: () => whenReady,
     output: async (name) => (await (await (await navigator.storage.getDirectory()).getDirectoryHandle('outputs')).getFileHandle(name)).getFile(),
     mapping: () => (isTable(input) && columns && !columns.error ? columnOptions() : null),
     review: () => (work ? { text: serialiseWork(work), name: workName } : null),
