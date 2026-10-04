@@ -77,10 +77,9 @@ export function answersFor(choice, yesNo = {}) {
 export const answered = (choice, yesNo = {}) => choice?.kind === 'recipe' && choice.ask.every((k) => typeof yesNo[k] === 'boolean');
 
 // What the end of a workflow says of a step that was skipped because it is not available yet, by the
-// step's operation; any other such step is named in the general words below.
-const SKIPPED = {
-  'lookup.levels': 'The regions were not identified: identifying them is not yet available, so the places were looked up without them.',
-};
+// step's operation; any other such step is named in the general words below. (The regions step, the
+// one such step once, is available now: Krisis's region review, level by level.)
+const SKIPPED = {};
 
 /**
  * The workflow the answers give, as the tracker shows it: each step that runs, with its tool, its
@@ -88,8 +87,8 @@ const SKIPPED = {
  * leave out. A step not available yet does not stop the workflow: it is shown, and skipped
  * (`unavailable` lists them), and `notes` says at the end what was not done for it.
  */
-export function plan(recipeKey, answers) {
-  const recipe = RECIPES[recipeKey];
+export function plan(recipeKey, answers, { recipes = RECIPES } = {}) {
+  const recipe = recipes[recipeKey];
   const steps = [], left = [];
   for (const s of recipe.steps) {
     const op = OPERATIONS[s.op];

@@ -7,7 +7,9 @@
 //                         choices? (for 'choice'), optional? };
 //   steps                 in order, each { id, op, title?, from, options?, when? }:
 //     from      each input of the operation, from a file chosen at the start ('$files') or an earlier
-//               step's output ('mint.dataset'); 'a.x ?? b.y' takes the first of those that was made;
+//               step's output ('mint.dataset'); 'a.x ?? b.y' takes the first of those that was made
+//               (sure to be made when one of them is unconditional, or two run under opposite answers
+//               to one question, 'q' and '!q');
 //     options   the operation's options, literal or from an answer ('$release'; left out if not given);
 //     when      the yes-no question under which the step runs ('will-publish'), or '!' and one under
 //               which it does not; a step whose condition fails is skipped.
@@ -72,6 +74,7 @@ export function check(recipe) {
       if (from[slot] === undefined) { if (!take.optional) say(`the step "${s.id}" does not say where ${op.title} takes its "${slot}" from.`); continue; }
       const alts = alternatives(from[slot]);
       let sure = false;
+      const whens = new Set();   // the conditions of the steps it may come from: one under "q" and one under "!q" make it sure
       for (const a of alts) {
         let type, conditional;
         if (a.startsWith('$')) {
@@ -85,11 +88,14 @@ export function check(recipe) {
           const given = OPERATIONS[p.op].gives[out];
           if (!given) say(`the step "${s.id}" takes "${slot}" from "${a}", but ${OPERATIONS[p.op].title} gives no "${out}".`);
           type = [given]; conditional = p.when !== undefined && p.when !== s.when;
+          if (conditional) whens.add(p.when);
         }
         const wrong = type.filter((t) => !take.types.includes(t));
         if (wrong.length) say(`the step "${s.id}" hands ${typeWords(wrong)} ("${a}") to ${op.title} as "${slot}", which takes ${typeWords(take.types)}.`);
         if (!conditional) sure = true;
       }
+      // Two steps under opposite answers to one question ('has-regions' and '!has-regions'): one of them runs.
+      if ([...whens].some((w) => !w.startsWith('!') && whens.has(`!${w}`))) sure = true;
       if (!sure && !take.optional) say(`the step "${s.id}" takes "${slot}" only from a step that may be skipped (${alts.join(', ')}), so it may be used before it is produced.`);
     }
     for (const [k, v] of Object.entries(s.options || {}))

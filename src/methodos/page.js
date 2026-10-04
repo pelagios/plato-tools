@@ -14,11 +14,16 @@ import { atBoundary, reconcile, restartRemaining } from '../engine/methodos/reco
 import { take as takeHandback, isWorkflowId } from '../chora/handback.js';
 import { outputStore } from './outputs.js';
 import { fmtBytes } from '../engine/words.js';
+import { regionsSettled, notReviewed, relateProblem } from '../engine/methodos/containment.js';
 
 // The input of each automatic operation that the page's run takes from the files chosen in step 1: a
 // run is the step's only if those files are the ones the step takes (by size and SHA-256).
 const MAIN = { check: 'files', convert: 'files', compare: 'later', 'publish.report': 'dataset', 'publish.mint': 'dataset', 'publish.site': 'dataset',
-  'publish.w3id': 'dataset', match: 'subjects', lookup: 'subjects', apply: 'subjects' };
+  'publish.w3id': 'dataset', match: 'subjects', lookup: 'subjects', apply: 'subjects', 'relate.containment': 'subjects' };
+// The page's run that does a step whose operation is not a run of its own: recording the decisions with
+// the region each place is in is Krisis's Finish (its 'apply' run), on a review whose candidates are exported.
+const RUN_OF = { 'relate.containment': 'apply' };
+const runOf = (op) => RUN_OF[op] || op;
 /** What to put right, from a run's report with errors or a run that did not finish (as adapters.js's problemOf, without the engine). */
 function problemOf(r) {
   const errors = r?.report?.errors || 0;
@@ -276,14 +281,21 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
       // sent while a finishing runs) is not, and must not make the first one's end go unheard.
       if (active || !wf || changed) return;
       const s = atStep();
-      if (!s || s.op !== run.op || OPERATIONS[s.op].kind !== 'automatic') return;
+      if (!s || runOf(s.op) !== run.op || OPERATIONS[s.op].kind !== 'automatic') return;
       let w = ['stopped', 'failed', 'cancelled'].includes(s.state) ? runner.invalidate(wf, s.id) : wf;
       const main = mainInput(w, s);
       const differ = main ? await refsDiffer(main, [...(run.files || [])]) : [];
       if (differ.length) { say(notTheFiles(s, main, differ), true); render(false); return; }
+      // Finish counts as recording the regions only on a review that can be recorded so (PLATO #23, option B).
+      if (s.op === 'relate.containment') {
+        const r = page.review();
+        let why;
+        try { why = r ? relateProblem(JSON.parse(r.text)) : 'There is no review open.'; } catch { why = 'The review open cannot be read.'; }
+        if (why) { say(`This run is not counted as the step “${s.title}”: ${why}`, true); render(false); return; }
+      }
       w = w.status === 'waiting' && w.current === s.id ? runner.resume(w, s.id) : runner.next(w);
       if (w.current !== s.id) return;
-      wf = w; active = { id: s.id, op: s.op };
+      wf = w; active = { id: s.id, op: run.op };
       say(null); render(false);
     });
   }
@@ -379,6 +391,16 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
       const m = page.mapping();
       if (!m) throw new Error('Choose the table in step 1 and match its columns first: there is no matching of columns yet.');
       return { mapping: await refsHeld([new File([JSON.stringify(m, null, 2)], 'columns.json', { type: 'application/json' })], 'mapping') };
+    }
+    if (s.op === 'lookup.levels') {
+      // The region review open on the page, of the dataset this step takes, with every region settled.
+      const r = page.review();
+      if (!r) throw new Error('There is no review open: begin the region review ("Review the regions level by level", in step 5) on the dataset, and settle every region first.');
+      const work = JSON.parse(r.text);
+      const other = notReviewed(work, runner.inputsOf(wf, s.id).subjects || []);
+      if (other.length) throw new Error(`The review open was not made of ${other.join(', ')}, the dataset this step takes: choose it in step 1, and begin the region review on it.`);
+      regionsSettled(work);
+      return { work: await refsHeld([new File([r.text], r.name, { type: 'application/json' })], 'work.krisis') };
     }
     if (s.op === 'review') {
       const r = page.review();

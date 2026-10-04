@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { HAVE, WANT, choose, questionsFor, answersFor, answered, plan, feedbackUrl } from '../src/engine/methodos/interview.js';
-import { RECIPES, runner } from '../src/engine/methodos/index.js';
+import { RECIPES, OPERATIONS, runner } from '../src/engine/methodos/index.js';
 
 const ref = { type: 'files', name: 'places.csv', size: 10, sha256: 'a'.repeat(64) };
 
@@ -56,23 +56,29 @@ test('every other pair names no recipe, says why, and names tools that exist', (
   assert.match(choose('text', 'map').why, /text is not available yet/);
 });
 
-test('an answer that brings in a step not yet available does not refuse the workflow: the step is planned with its reason, skipped, and noted at the end', () => {
+test('regions answered Yes: the regions step and the step that records them are planned and available, with nothing noted; a step not available yet would be planned with its reason, skipped, and noted at the end', () => {
   const c = choose('table', 'map');
   const a = answersFor(c, { 'has-regions': true, 'will-draw': false, 'will-publish': false });
   const pl = plan(c.recipe, a);
-  const regions = pl.steps.find((s) => s.id === 'regions');
-  assert.ok(regions, 'the regions step is in the plan');
-  assert.match(regions.available, /Regions cannot be identified yet/);
-  assert.equal(pl.blocked, undefined, 'nothing blocks the workflow');
-  assert.deepEqual(pl.unavailable, ['regions']);
-  assert.ok(pl.steps.filter((s) => s.id !== 'regions').every((s) => s.available === true));
-  assert.equal(pl.notes.length, 1);
-  assert.match(pl.notes[0], /regions were not identified/);
-  assert.ok(pl.left.some((s) => s.id === 'place'), 'the drawing step is left out when not wanted');
-  // The same with the answer No: nothing unavailable, nothing noted.
+  const ids = pl.steps.map((s) => s.id);
+  assert.deepEqual(ids.slice(0, 7), ['columns', 'check', 'dataset', 'regions', 'lookup', 'review', 'relate']);
+  assert.ok(!ids.includes('apply'), 'the plain "Record the decisions" step is left out on this path');
+  assert.ok(pl.left.some((s) => s.id === 'apply') && pl.left.some((s) => s.id === 'place'));
+  assert.equal(pl.steps.find((s) => s.id === 'regions').kind, 'interactive');
+  assert.ok(pl.steps.every((s) => s.available === true));
+  assert.deepEqual([pl.unavailable, pl.notes], [[], []]);
+  assert.ok(!pl.notes.some((n) => /regions were not identified/.test(n)));
+  // The same with the answer No: the plain step records the decisions, and no regions step.
   const no = plan(c.recipe, answersFor(c, { 'has-regions': false, 'will-draw': false, 'will-publish': false }));
   assert.deepEqual([no.unavailable, no.notes], [[], []]);
-  assert.ok(!no.steps.some((s) => s.id === 'regions'));
+  assert.ok(!no.steps.some((s) => s.id === 'regions' || s.id === 'relate') && no.steps.some((s) => s.id === 'apply'));
+  // Stephen's rule, kept: a recipe naming a step not available yet plans it with its reason, skips it, and says so at the end.
+  const R = { ...RECIPES['map-your-data'], steps: [...RECIPES['map-your-data'].steps.slice(0, 3), { id: 'adopt', op: 'adopt', from: { dataset: 'dataset.dataset' } }] };
+  const sk = plan('map-your-data', a, { recipes: { 'map-your-data': R } });
+  assert.equal(sk.steps.find((s) => s.id === 'adopt').available, OPERATIONS.adopt.available);
+  assert.deepEqual(sk.unavailable, ['adopt']);
+  assert.equal(sk.blocked, undefined, 'nothing blocks the workflow');
+  assert.deepEqual(sk.notes, ['“Take each identified place\'s location from its match” was not done: it is not yet available.']);
 });
 
 test('the "no workflow yet" feedback link opens a new issue, labelled Methodos, titled with the two answers in words', () => {

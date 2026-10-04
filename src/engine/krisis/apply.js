@@ -215,7 +215,7 @@ export function candidateSetsOf(w, given, env, rep) {
  * writes). The text is held until the header is complete, then written with the sets in it. `seen`
  * is told whether the header was found (found) and had an @id (id).
  */
-function withCandidateSets(env, name, sets, seen) {
+function withCandidateSets(env, name, sets, seen, id) {
   if (!sets.length) return env;
   return { ...env, output: async (n, binary) => {
     const o = await env.output(n, binary);
@@ -225,7 +225,7 @@ function withCandidateSets(env, name, sets, seen) {
       write: (s) => {
         if (done) return o.write(s);
         held += s;
-        const head = headerWithSets(held, sets);
+        const head = headerWithSets(held, sets, id);
         if (!head) return;
         done = true; seen.found = true; seen.id = head.id;
         o.write(head.text);
@@ -235,8 +235,13 @@ function withCandidateSets(env, name, sets, seen) {
     };
   } };
 }
-/** The text with `sets` added to its header's gazetteer, once the header is all there; else null. */
-export function headerWithSets(text, sets) {
+/**
+ * The text with `sets` added to its header's gazetteer, once the header is all there; else null. A
+ * gazetteer with no @id is given `id`, the address the review's candidates were exported for (its
+ * candidatesFor: a table converted under a base address has none of its own until then); with no
+ * `id` either, nothing is added (`id: false`).
+ */
+export function headerWithSets(text, sets, id) {
   const KEY = '"spatialEntities":[';
   for (let at = text.indexOf(KEY); at > 0; at = text.indexOf(KEY, at + 1)) {
     if (text[at - 1] !== ',') continue;
@@ -245,7 +250,8 @@ export function headerWithSets(text, sets) {
     // inside a header value would leave it open.
     try { head = JSON.parse(text.slice(0, at - 1) + '}'); } catch { continue; }
     const g = head.gazetteer;
-    if (!g || typeof g !== 'object' || typeof g['@id'] !== 'string') return { text, id: false };
+    if (!g || typeof g !== 'object') return { text, id: false };
+    if (typeof g['@id'] !== 'string') { if (typeof id !== 'string' || !id) return { text, id: false }; g['@id'] = id; }
     g.candidateSets = [...new Set([...(Array.isArray(g.candidateSets) ? g.candidateSets : []), ...sets])];
     const s = JSON.stringify(head);
     return { text: s.slice(0, -1) + ',' + text.slice(at), id: true };
@@ -277,7 +283,7 @@ async function writeDataset({ subjects, made, work, options, sets = [] }, env, r
   // The candidate sets the answers point into go into the header as it is written (the pipeline hands
   // a caller each record, not the header): withCandidateSets says what it found there.
   const header = { found: !sets.length, id: true };
-  const r = await run({ input: subjects, action: 'convert', target: 'plato-json', options: { name, base: options.base, columns: options.columns, augment } }, withCandidateSets(teeing(env, kept), name, sets, header));
+  const r = await run({ input: subjects, action: 'convert', target: 'plato-json', options: { name, base: options.base, columns: options.columns, augment } }, withCandidateSets(teeing(env, kept), name, sets, header, work.subjects.uri));
   if (!header.found) rep.error('candidate-sets-not-written', KRISIS_CANDIDATES.setsNotWritten);
   else if (!header.id) rep.error('no-gazetteer-id', KRISIS_CANDIDATES.noGazetteerId);
   // What the conversion says of the dataset. Its own problems are its own, not the review's: they

@@ -14,6 +14,7 @@ const REVIEW_WORDS = W;   // the review's words, where W names the words for the
 import { readable } from './engine/input.js';
 import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions, flag, noteOn, setRowState } from './engine/krisis/work.js';
 import { exportCandidates, readCandidateSet, serialiseCandidateSet } from './engine/krisis/candidates.js';
+import { datasetAddress } from './engine/methodos/containment.js';
 import { acceptGuarded, undoBatch, guardOf, guardsFirst, planGuarded } from './engine/krisis/guards.js';
 import { KRISIS_CANDIDATES, guardWords as GW, variantWords as VW, rowWords as RW } from './engine/words.js';
 import { stash as stashForChora, dropStale as dropStaleHandoff } from './chora/handoff.js';
@@ -1201,8 +1202,12 @@ $('earlier-candidates-file').onchange = async (e) => {
 $('export-candidates').onclick = () => {
   if (!work || busy) return;
   let x;
+  // A table converted under a base address is that dataset (as Agora takes it): with no address of its
+  // own, its candidates are exported for the base address given in Options, and the review keeps it.
+  const forBase = !work.subjects.uri && datasetAddress($('base').value);
+  if (forBase) work.subjects.uri = forBase;
   try { x = exportCandidates(work, { previousSets: earlierSets }); }
-  catch (err) { if (err?.name !== 'DataError') throw err; candidatesStatus(err.message, true); return; }
+  catch (err) { if (forBase) delete work.subjects.uri; if (err?.name !== 'DataError') throw err; candidatesStatus(err.message, true); return; }
   work = x.work; exportedSet = x.set;
   const { problems, counted } = summary(x.report, 'candidates');
   candidatesStatus(`${problems} ${counted} ${KRISIS_CANDIDATES.saveReviewToo}`);
@@ -1851,7 +1856,10 @@ async function regionRun(kind, { level, relax, only, unconstrained = false } = {
   if (!token.get()) { $('lookup').open = true; lookupSay(LW.needToken, true); $('whg-token').focus(); return; }
   const g = kind === 'places' ? (await gatherPlaces(), await gatherPlaces()) : null;   // twice: as startRegions
   const w = work, service = LW.whg;
+  // Methodos: looking up every place within its settled regions is the lookup step's run (one place's, or one unconstrained, is not).
+  const whole = kind === 'places' && !only && !unconstrained;
   looking = new AbortController();
+  if (whole) methodos.began({ op: 'lookup', files });
   regionCleared = null; regionChange = null;
   buttons(true); $('lookup-stop').hidden = false;
   regionSay(LW.sending(service)); lookupSay(LW.sending(service));
@@ -1870,6 +1878,13 @@ async function regionRun(kind, { level, relax, only, unconstrained = false } = {
   else if (result) { const sum = LOOKUP_WORDS.summary(result.record.counts, svc.service.title); said.push(REGION_WORDS.ran(kind === 'places' ? 'places' : level, result.looked.length, result.record.counts.failedClosed || 0), sum.problems); }
   if (stopped) said.push(LOOKUP_WORDS.stopped(stopped), LW.kept);
   regionSay(said.join(' '), !!stopped); lookupSay(said.join(' '), !!stopped);
+  if (whole) {
+    const made = new File([serialiseWork(w)], workName, { type: 'application/json' });
+    if (!stopped) methodos.ended({ op: 'lookup', work: made, report: { errors: 0, items: [] } });
+    else if (stopped.kind === 'stopped') methodos.ended({ op: 'lookup', cancelled: true, partial: made });
+    else if (stopped.kind === 'permission') methodos.ended({ op: 'lookup', waiting: 'the gazetteer to be allowed in the Permissions panel; then look the places up again.' });
+    else methodos.ended({ op: 'lookup', error: LOOKUP_WORDS.stopped(stopped), partial: made });
+  }
   lookupState({ running: false, stopped: stopped?.kind || null, summary: said.join(' '), counts: result?.record?.counts || null, looked: result?.looked || [] });
   if (work === w) { reorder(); render(false); }
   if (stopped?.kind === 'auth') { $('lookup').open = true; $('whg-token').focus(); }

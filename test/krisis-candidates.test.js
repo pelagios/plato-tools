@@ -346,6 +346,11 @@ test('the header is found however the text arrives, and a key inside a header va
   assert.equal(headerWithSets(text.slice(0, 40), ['x']), null, 'not all there yet');
   const noId = JSON.stringify({ gazetteer: { title: 'T' } }).slice(0, -1) + ',"spatialEntities":[]}';
   assert.deepEqual(headerWithSets(noId, ['x']), { text: noId, id: false });
+  // With no @id of its own, the dataset takes the address its candidates were exported for (a table converted under a base address); one it has is kept.
+  const given = headerWithSets(noId, ['x'], 'https://ex.org/base/');
+  assert.equal(given.id, true);
+  assert.deepEqual(JSON.parse(given.text).gazetteer, { title: 'T', '@id': 'https://ex.org/base/', candidateSets: ['x'] });
+  assert.equal(JSON.parse(headerWithSets(text, ['x'], 'https://ex.org/other/').text).gazetteer['@id'], X + 'a');
 });
 
 test('apply answers a candidate left out of the latest set with its earlier IRI, lists both sets, and needs the earlier set given', async () => {

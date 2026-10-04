@@ -13,7 +13,7 @@
 //               engine's call is the host's too (the worker's run cancellation), as only the lookup
 //               takes a signal;
 //   available   true, or the reason it is not available yet: a step naming an operation that is
-//               not available is refused when the workflow starts, never run as something else.
+//               not available is skipped when the workflow starts (refused only if the runner is asked to), never run as something else.
 const ANY = ['files', 'dataset'];
 const op = (o) => ({ kind: 'automatic', networked: false, permissions: [], takes: {}, gives: {}, cancel: 'all-or-nothing', available: true, ...o });
 
@@ -45,21 +45,26 @@ export const OPERATIONS = Object.fromEntries([
   op({ key: 'place', title: 'Draw or trace the places on a map', tool: 'Chora', kind: 'interactive',
     waitsFor: 'the places to be drawn or traced in Chora, and the dataset saved there to be handed back ("Back to the workflow") and chosen here again',
     takes: { dataset: { types: ANY } }, gives: { dataset: 'dataset' } }),
+  // The regions a table's places lie in (Hermes's "within" columns, minted as regions of their own when
+  // the table is converted under a base address), identified level by level, the widest first, each
+  // level looked up within the match of the level above (Krisis's region review, src/engine/krisis/
+  // regions.js). The reviewer settles every region; the step is done with the work file that holds them.
+  op({ key: 'lookup.levels', title: 'Identify the containing regions, level by level', tool: 'Krisis', kind: 'interactive', networked: true, permissions: [['gazetteer', 'whg']],
+    cancel: 'keeps-partial',
+    waitsFor: 'the regions to be identified level by level, the widest first, in the region review of step 5 ("Review the regions level by level"), until every region is settled',
+    takes: { subjects: { types: ANY } }, gives: { work: 'work.krisis' } }),
+  // PLATO #23, option B: the source's half (each place ContainedIn the region minted from its row) is
+  // Hermes's, written when the table is converted; this step writes the reviewer's half, an
+  // IdentityRelation from each minted region to the authority's record, promotedFrom the candidate it
+  // answers (so the review's candidates are exported first), with the places' own identities. On the
+  // page it is Krisis's Finish run.
+  op({ key: 'relate.containment', title: 'Record the decisions, with the region each place is in', tool: 'Krisis',
+    takes: { subjects: { types: ANY }, work: { types: ['work.krisis'] } }, gives: { dataset: 'dataset' } }),
   // Not yet: each declared, with its reason, so that a recipe can name it and the runner can say why
   // it cannot start, rather than doing something else under its name.
-  op({ key: 'lookup.levels', title: 'Identify the containing regions, level by level', tool: 'Krisis', networked: true, permissions: [['gazetteer', 'whg']],
-    takes: { subjects: { types: ANY } }, gives: { work: 'work.krisis' },
-    available: 'Regions cannot be identified yet: Krisis has no level-by-level lookup in which a region constrains the one below it. (Hermes reads them: a column of the regions a place lies in, split into levels, is written as ContainedIn to regions it mints.)' }),
-  op({ key: 'relate.containment', title: 'Record which region each place is in', tool: 'Krisis',
-    takes: { subjects: { types: ANY }, work: { types: ['work.krisis'] } }, gives: { dataset: 'dataset' },
-    // Checked against Hermes's regions (main 3de9822): the source's half of PLATO #23, option B, is
-    // written when the table is converted (the step that makes the dataset), not by this operation, which
-    // takes a Krisis work file; its own half, a reviewer's IdentityRelation from each region to the
-    // authority's, needs the regions identified level by level first. So it stays unavailable.
-    available: "Hermes now records which region each place is in when the table is converted (PLATO #23, option B: ContainedIn to a region minted under the full chain); what this step adds, a reviewer's IdentityRelation linking each region to the authority's, waits on Krisis identifying the regions level by level." }),
   op({ key: 'adopt', title: "Take each identified place's location from its match", tool: 'Chora',
     takes: { dataset: { types: ANY } }, gives: { dataset: 'dataset' },
-    available: "Adopting a match's geometry is on a branch of Chora (chora-adopt) that has not been merged." }),
+    available: "Adopting a match's location is done by hand on Chora's page (\"Find in a gazetteer…\", then Adopt), within the step that draws or traces the places: it is not a step of its own." }),
   op({ key: 'text.find', title: 'Find the places named in a text', tool: 'Hermes', networked: true, cancel: 'keeps-partial',
     takes: { files: { types: ['files'] } }, gives: { work: 'work.hermes-text' },
     available: 'Finding places in a text is deferred (the llm-extract branch).' }),

@@ -66,7 +66,9 @@ Status: IMPLEMENTED; engine and CLI tests pass (test/krisis.test.js, test/krisis
     `options.candidates`: candidate sets (objects or text) the answers point into, beside the one last
     exported (recorded in the work file). Each relation of an answer carries `promotedFrom` (the
     candidate's stored `iri`), and both outputs' gazetteer `candidateSets` lists the sets pointed
-    into. Errors: `candidate-not-under-set`, `candidate-not-in-set`, `candidate-set-unreadable`,
+    into (a dataset with no `@id` of its own, as a table converted under a base address is, takes the
+    work file's `subjects.uri`, the address its candidates were exported for; `headerWithSets(text,
+    sets, id)`). Errors: `candidate-not-under-set`, `candidate-not-in-set`, `candidate-set-unreadable`,
     `candidate-set-not-valid`, `candidate-set-for-another`, `no-gazetteer-id`,
     `candidate-sets-not-written`; warnings `publish-candidate-sets` (one example per set),
     `answers-not-exported`.

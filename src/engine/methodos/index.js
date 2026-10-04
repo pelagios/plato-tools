@@ -6,5 +6,6 @@ export { TYPES, HandoffError, refsOf, refsDiffer, checkHandoff, isRef } from './
 export { RecipeError, check as checkRecipe, digest, canonical } from './recipe.js';
 export { RECIPES } from './recipes/index.js';
 export * as runner from './runner.js';
-export { ADAPTERS, drive, runStep, stoppingKind, filesFor, problemOf } from './adapters.js';
+export { ADAPTERS, REVIEWS, drive, runStep, review, stoppingKind, filesFor, problemOf } from './adapters.js';
+export { regionsSettled, notReviewed, relateProblem, datasetAddress, containment } from './containment.js';
 export { RecordError, recordOf, atBoundary, fileName, exportRecord, importRecord, reconcile, restartRemaining, checkFiles, checkChosen } from './record.js';

@@ -124,32 +124,39 @@ test('every transition that does not apply throws, and a transition never change
 });
 
 test('a step not available yet is skipped at the start, with its reason, and the workflow runs on past it; refused only when asked to be', () => {
+  // Stephen's rule: a step whose operation is not available is skipped, never refused (unless asked). The
+  // shipped recipes have none now (the regions step is available), so a recipe of its own names one: 'adopt'.
+  assert.notEqual(OPERATIONS.adopt.available, true);
+  const R = recipe([
+    { id: 'dataset', op: 'convert', from: { files: '$files' }, options: { target: 'plato-json' } },
+    { id: 'adopt', op: 'adopt', title: 'Adopt the locations', from: { dataset: 'dataset.dataset' }, when: 'adopt' },
+    { id: 'again', op: 'check', from: { files: 'adopt.dataset ?? dataset.dataset' } },
+  ], { asks: { adopt: { question: 'Adopt?', kind: 'yes-no' } } });
   const files = [ref('files', 'places.csv')];
   const { inputsOf } = runner;
-  const answers = { ...MAP_ANSWERS, 'has-regions': true };
-  const s = start(MAP, answers, { files });
-  const regions = s.steps.find((x) => x.id === 'regions');
+  const s = start(R, { adopt: true }, { files });
+  const adopt = s.steps.find((x) => x.id === 'adopt');
   // Skipped, and why (the presence): the operation's own reason, not run as something else.
-  assert.equal(regions.state, 'skipped');
-  assert.match(regions.unavailable, /^Regions cannot be identified yet/);
+  assert.equal(adopt.state, 'skipped');
+  assert.equal(adopt.unavailable, OPERATIONS.adopt.available);
   // A step left out by the answers is skipped too, but has no reason of that kind (the absence, beside the presence above).
-  assert.equal(start(MAP, MAP_ANSWERS, { files }).steps.find((x) => x.id === 'regions').unavailable, undefined);
-  // Every other step that runs is pending, and the lookup, which may take the regions' work, takes it from nowhere.
-  assert.deepEqual(s.steps.filter((x) => x.state === 'pending').map((x) => x.id), start(MAP, MAP_ANSWERS, { files }).steps.filter((x) => x.state === 'pending').map((x) => x.id));
-  let w = s;
-  w = complete(next(w), 'columns', { mapping: [ref('mapping', 'columns.json')] });
-  w = complete(next(w), 'check', {});
-  w = complete(next(w), 'dataset', { dataset: [ref('dataset', 'd.json')] });
+  assert.equal(start(R, { adopt: false }, { files }).steps.find((x) => x.id === 'adopt').unavailable, undefined);
+  let w = complete(next(s), 'dataset', { dataset: [ref('dataset', 'd.json')] });
   w = next(w);
-  assert.equal(w.current, 'lookup');
-  assert.deepEqual(Object.keys(inputsOf(w, 'lookup')), ['subjects']);
+  assert.equal(w.current, 'again');
+  assert.deepEqual(inputsOf(w, 'again').files.map((r) => r.name), ['d.json']);
   // Kept through a record's round trip, and through invalidate (a skipped step is never reset).
-  assert.equal(deserialise(serialise(w)).steps.find((x) => x.id === 'regions').unavailable, regions.unavailable);
-  assert.equal(invalidate(complete(w, 'lookup', { work: [ref('work.krisis', 'w.krisis.json')] }), 'dataset').steps.find((x) => x.id === 'regions').state, 'skipped');
+  assert.equal(deserialise(serialise(w)).steps.find((x) => x.id === 'adopt').unavailable, adopt.unavailable);
+  assert.equal(invalidate(complete(w, 'again', {}), 'dataset').steps.find((x) => x.id === 'adopt').state, 'skipped');
   // Refused at the start only when asked, in the words it had before.
-  assert.throws(() => start(MAP, answers, { files }, { unavailable: 'refuse' }), /"Identify the regions, the widest first" is not available yet\. Regions cannot be identified yet/);
-  assert.doesNotThrow(() => start(MAP, MAP_ANSWERS, { files }, { unavailable: 'refuse' }));
-  assert.throws(() => start(MAP, answers, { files }, { unavailable: 'run' }), /'skip' or 'refuse'/);
+  assert.throws(() => start(R, { adopt: true }, { files }, { unavailable: 'refuse' }), /"Adopt the locations" is not available yet\. Adopting a match's location is done by hand/);
+  assert.doesNotThrow(() => start(R, { adopt: false }, { files }, { unavailable: 'refuse' }));
+  assert.throws(() => start(R, { adopt: true }, { files }, { unavailable: 'run' }), /'skip' or 'refuse'/);
+  // Map your data with regions: the regions step and the step that records them are pending, not skipped, and nothing is unavailable.
+  const m = start(MAP, { ...MAP_ANSWERS, 'has-regions': true }, { files });
+  assert.deepEqual(['regions', 'relate', 'apply'].map((id) => m.steps.find((x) => x.id === id).state), ['pending', 'pending', 'skipped']);
+  assert.ok(m.steps.every((x) => x.unavailable === undefined));
+  assert.doesNotThrow(() => start(MAP, { ...MAP_ANSWERS, 'has-regions': true }, { files }, { unavailable: 'refuse' }));
 });
 
 test('invalidate resets the step and every step that took its outputs, and no other', () => {
