@@ -165,14 +165,16 @@ export function exportCandidates(work, options = {}) {
   items.push({ severity: 'loss', kind: 'work-file-only', message: K.workFileOnly, count: 1, examples: [] });
 
   const reviewer = w.reviewer;
+  // What the suggestions were sought in: the other dataset, or (a review by gazetteer lookup only, whose `others` is null) the gazetteers looked up.
+  const othersTitle = w.others?.title ?? K.gazetteers([...new Set((w.lookups || []).map((l) => l.service?.title || l.service?.endpoint).filter(Boolean))]);
   const creator = options.creator || (reviewer?.name ? [{ ...(reviewer.orcid ? { '@id': reviewer.orcid } : {}), name: reviewer.name }] : undefined);
   const set = {
     $schema: CANDIDATE_SET_SCHEMA,
     profile: 'candidate-set',
     candidateSet: {
       '@id': setIri,
-      title: options.title || K.title(w.subjects.title, w.others.title, issued),
-      description: options.description || K.description(w.subjects.title, w.others.title, [...new Set(rows.map((r) => r.out.algorithmVersion))].join(', ')),
+      title: options.title || K.title(w.subjects.title, othersTitle, issued),
+      description: options.description || K.description(w.subjects.title, othersTitle, [...new Set(rows.map((r) => r.out.algorithmVersion))].join(', ')),
       ...(creator ? { creator } : {}),
       ...(options.licence ? { licence: options.licence } : {}),
       issued,

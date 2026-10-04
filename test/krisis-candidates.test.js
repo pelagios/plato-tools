@@ -18,7 +18,7 @@ import jsonld from 'jsonld';
 import { env, res, textFile, go, outText } from './engine.js';
 import { detect } from '../src/engine/input.js';
 import { DataError } from '../src/engine/input.js';
-import { match } from '../src/engine/krisis/match.js';
+import { match, gather } from '../src/engine/krisis/match.js';
 import { readWork, serialiseWork, decide } from '../src/engine/krisis/work.js';
 import { apply, headerWithSets } from '../src/engine/krisis/apply.js';
 import { attestationsFrom } from '../src/engine/krisis/identity.js';
@@ -27,6 +27,8 @@ import { compare } from '../src/engine/compare.js';
 import { Json2Rdf, jcs } from '../src/formats/json2rdf.js';
 import { tripleNT } from '../src/lib/ntriples.js';
 import { summary, groups, KRISIS_CANDIDATES } from '../src/engine/words.js';
+import { createLookup, memoryLedger, WHG_ENDPOINT } from '../src/engine/gazetteer/index.js';
+import { runLookup } from '../src/engine/krisis/lookup.js';
 
 const X = 'https://example.org/';
 const src = { '@id': X + 'source/s', title: 'S', authorityType: 'source' };
@@ -453,4 +455,27 @@ test('the command line: candidates exports the set and stores the IRIs in the wo
   const help = cli('--help');
   assert.match(help.out, /plato-tools candidates \[options\] WORKFILE/);
   assert.match(help.out, /--candidates SET/);
+});
+
+test('a review by gazetteer lookup only (others is null) exports: the set is titled after the gazetteer looked up, and is valid', async () => {
+  // A fake WHG answering one place, as krisis-lookup.test.js's does: nothing goes on the network.
+  const fetch = async (url, init) => {
+    const out = { attribution: { whg: { license: 'CC-BY-4.0' } } };
+    for (const [k, q] of Object.entries(JSON.parse(init.body).queries)) {
+      out[k] = { result: q.query === 'Newton' ? [{ id: 'place:gn:2641434', name: 'Newton', score: 100, match: false, description: 'Country: GB', ccodes: ['GB'], repr_point: [-1.0, 52.0], namespace: 'gn', alt_names: [] }] : [] };
+    }
+    return new Response(JSON.stringify(out), { status: 200 });
+  };
+  const lookup = createLookup({ endpoint: WHG_ENDPOINT, token: 'test-token', fetch, sleep: () => Promise.resolve(), queryRate: null, shared: false, locks: null, ledger: memoryLedger() });
+  const g = await gather({ subjects: await subjectsInput(), options: {} }, env());
+  const { work: w } = await runLookup({ lookup, subjects: g.subjects, places: g.places, options: { places: 'all' }, reviewer, now: () => '2026-09-30T12:00:00Z' });
+  // The presence beside the absence: a lookup-only review, with candidates from WHG and no other dataset.
+  assert.equal(w.others, null);
+  assert.ok(w.candidates.length > 0 && w.candidates.every((c) => c.lookup), JSON.stringify(w.candidates));
+  const { set, setIri } = exportCandidates(w, { issued: ISSUED });
+  assert.equal(set.candidates.length, w.candidates.length);
+  assert.equal(set.candidateSet['@id'], setIri);
+  assert.equal(set.candidateSet.title, 'Matches suggested for Dataset A in World Historical Gazetteer, 2026-10-01');
+  assert.match(set.candidateSet.description, /for the places of Dataset A in World Historical Gazetteer\./);
+  await assertValidSet(set);
 });

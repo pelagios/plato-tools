@@ -458,6 +458,8 @@ export const KRISIS_CANDIDATES = {
   earlierExportNotGiven: 'This review was exported before, as the candidate set named here, which is not given now as an earlier set. If that set was published, give it as an earlier candidate set and export again: otherwise its candidates are published a second time, under new addresses. If it was not published, this set replaces it.',
   /** The candidate set's title and description. */
   title: (subjects, others, issued) => `Matches suggested for ${subjects} in ${others}, ${issued}`,
+  /** What a review by gazetteer lookup only sought its suggestions in, for the title and description. */
+  gazetteers: (titles) => (titles.length ? titles.join(', ') : 'a gazetteer'),
   description: (subjects, others, algorithm) => `What PLATO tools (Krisis) suggested by comparing names (${algorithm}), as it suggested it, for the places of ${subjects} in ${others}. What the reviewer made of each suggestion is in the dataset, in the attestations whose identity relations point here through promotedFrom.`,
   // Finishing a review that was exported (apply.js).
   notUnderSet: 'A suggestion the review answers has an address that is not under the candidate set last exported from this review, nor under an earlier candidate set given, so nothing was written. Export the suggestions again, or give the candidate set the address belongs to.',
