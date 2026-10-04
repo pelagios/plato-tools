@@ -19,7 +19,7 @@
 // nothing: the first score stands.
 //
 // Kept light (no pipeline, no schema library), like work.js, so that the page can export directly.
-import { sha256 } from '../../lib/sha256.js';
+import { candidateText, candidateHash } from '../candidate-id.js';
 import { DataError } from '../input.js';
 import { isIri, CANDIDATE_IRI } from './work.js';
 export { CANDIDATE_IRI };
@@ -38,10 +38,9 @@ export function byCodePoint(a, b) {
   return x.length - y.length;
 }
 
-/** The text a candidate's hash is taken of: the JCS form of [subject, object, algorithmVersion, matchParameters or ""]. */
-export const hashText = ({ subject, object, algorithmVersion, matchParameters }) => jcs([subject, object, algorithmVersion, matchParameters ?? '']);
-/** The full hash of a candidate's text. */
-export const candidateHash = (text) => sha256(text);
+/** The text a candidate's hash is taken of, and its full hash: the tools' one minting (candidate-id.js), which Elenchos checks by. */
+export const hashText = candidateText;
+export { candidateHash };
 /** The IRI a set's candidates are minted under: the set's own, without any fragment. */
 export const setIriOf = (setIri) => setIri.split('#')[0];
 

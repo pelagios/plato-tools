@@ -283,18 +283,18 @@ test('check --candidates: with a dataset, alone, and refused where it is not a c
     const [r] = alone.out.trim().split('\n').map((l) => JSON.parse(l));
     assert.equal(r.input, `${EX}/candidate-set-judgements.json`);
     assert.deepEqual(r.items.filter((i) => i.severity === 'error').map((i) => i.kind), ['already-published']);
-    // Refused: a dataset given as a candidate set, and --candidates on anything but check.
+    // Refused: a dataset given as a candidate set, and --candidates on anything but check, convert to LPF and apply.
     const notSet = cli('check', '--candidates', `${EX}/attestation-centric-judgements.json`);
     assert.equal(notSet.code, 2);
     assert.match(notSet.err, /given with --candidates, is a PLATO JSON document \(attestation-centric\), not a candidate set/);
     const convert = cli('convert', '--to', 'ntriples', '--out', dir, `${EX}/candidate-set-judgements.json`, '--candidates', `${EX}/candidate-set-judgements.json`);
     assert.equal(convert.code, 2);
-    assert.match(convert.err, /--candidates is for check and apply\./);
+    assert.match(convert.err, /--candidates is for check, convert --to lpf or lpf-seq, and apply\./);
     // The guard comes before match and apply are dispatched: match is refused by it, and apply passes
     // it, to be refused by apply itself for what it lacks (the guard's words absent, apply's present).
     const match = cli('match', `${EX}/attestation-centric-judgements.json`, '--candidates', `${EX}/candidate-set-judgements.json`);
     assert.equal(match.code, 2);
-    assert.match(match.err, /--candidates is for check and apply\./);
+    assert.match(match.err, /--candidates is for check, convert --to lpf or lpf-seq, and apply\./);
     const apply = cli('apply', '--candidates', `${EX}/candidate-set-judgements.json`);
     assert.equal(apply.code, 2);
     assert.match(apply.err, /apply takes one dataset of places to match; 0 were given/);

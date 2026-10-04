@@ -5,22 +5,14 @@
 // for each kind are CANDIDATE_CHECK_TEXT's (report.js), and the pipeline (runCandidateChecks) reports
 // them. Ported from the specification's prototype (elenchos.py, tested by neg.py), rule for rule.
 //
-// A candidate's @id (section 5): its candidate set's IRI without any fragment, "#c-", and the first 8
-// hex digits (or 12, 16 … where 8 would begin like another candidate's hash) of the SHA-256 of
-//   JCS([subject, object, algorithmVersion, matchParameters ?? ''])
-// that array in the JSON Canonicalization Scheme (RFC 8785; json2rdf's jcs, the tools' one
-// canonicaliser), hashed as UTF-8 with no
-// Unicode normalisation. generatedAt, similarityScore and status are not hashed: the four inputs are
-// what make one candidate the same as another.
-import { sha256 } from '../lib/sha256.js';
-import { jcs } from '../formats/json2rdf.js';
+// A candidate's @id (section 5) is minted as candidate-id.js says, the one function Krisis mints with
+// too: its candidate set's IRI without any fragment, "#c-", and a prefix of the SHA-256 of the JCS of
+// [subject, object, algorithmVersion, matchParameters ?? ''].
+import { candidateInputs, candidateText, candidateHash } from './candidate-id.js';
+export { candidateInputs, candidateText };
 
 const FIRST = 8, MORE = 4;
 const isObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
-/** The four inputs that make a candidate what it is. */
-export const candidateInputs = (c) => [c.subject, c.object, c.algorithmVersion, c.matchParameters ?? ''];
-/** The text a candidate's @id is the hash of. */
-export const candidateText = (c) => jcs(candidateInputs(c));
 const sameKey = (c) => candidateText(c);
 /** An IRI without its fragment. */
 const noFragment = (iri) => String(iri).split('#')[0];
@@ -70,7 +62,7 @@ export function checkSet(set) {
     if (m && set.id !== undefined) {
       if (noFragment(m[1]) !== noFragment(set.id)) out.push({ severity: 'error', kind: 'id-not-under-set', example: `${id}: the candidate set is ${noFragment(set.id)}` });
       else {
-        const hash = sha256(candidateText(c));
+        const hash = candidateHash(candidateText(c));
         if (!hash.startsWith(m[2])) out.push({ severity: 'warning', kind: 'id-not-minted', example: `${id}: its hash begins ${hash.slice(0, m[2].length)}` });
       }
     }
@@ -112,7 +104,7 @@ export function checkAcross(sets) {
     }
     if (copyOfEarlier || S === undefined) return;
     const base = setBase(S), earlier = digests.get(base) || [];
-    const mine = set.candidates.map((c) => ({ c, m: typeof c['@id'] === 'string' && ID.exec(c['@id']), h: sha256(candidateText(c)) }));
+    const mine = set.candidates.map((c) => ({ c, m: typeof c['@id'] === 'string' && ID.exec(c['@id']), h: candidateHash(candidateText(c)) }));
     const pool = [...earlier, ...mine.map((x) => x.h)];
     for (const { c, m, h } of mine) if (m && pool.some((o) => o !== h && o.startsWith(m[2]))) out.push({ severity: 'warning', kind: 'not-distinct', example: c['@id'] });
     digests.set(base, [...earlier, ...mine.map((x) => x.h)]);
