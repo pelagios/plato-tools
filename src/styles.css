@@ -225,7 +225,9 @@ a:visited { color: var(--accent); }
 .tool .label { margin: 0 0 .35rem; font-size: .85rem; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
 .tool p { margin: 0; font-size: .95rem; }
 .tool .note { margin-top: .35rem; color: var(--muted); font-size: .88rem; }
-.tool-link { color: inherit; text-decoration: none; display: block; }
+.tool-link { text-decoration: none; display: block; }
+/* :visited too, or `a:visited` (0,1,1) beats `.tool-link` (0,1,0) and a card whose #tool= address was visited is accent blue. */
+.tool-link, .tool-link:visited { color: inherit; }
 .tool-link:hover h4, .tool-link:focus-visible h4 { color: var(--tool-band); text-decoration: underline; }
 .tool:has(.tool-link:hover) { border-color: var(--tool-band); }
 /* Hover and choice tint the card with the logo's gold, mixed into the page's own background, so the

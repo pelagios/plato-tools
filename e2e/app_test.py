@@ -2140,7 +2140,7 @@ def main():
             krisis_lookup_pattern(page, tmp, url)
             ctx.close()
             front = pw.chromium.launch(headless=True)
-            try: front_page_checks(front, url); theme_checks(front, url); methodos_page_checks(front, url)
+            try: front_page_checks(front, url); card_chosen_checks(front, url, pw); theme_checks(front, url); methodos_page_checks(front, url)
             finally: front.close()
             methodos_checks(pw, url, tmp)
             chora_checks(pw, url, tmp)
@@ -2979,11 +2979,11 @@ def front_page_checks(browser, url):
               top: Math.round(a?.getBoundingClientRect().top ?? -1) }; }''')
             hermes = None
             page.click('#toolbox .tool-link[data-tool="read"]')
-            hermes = {'focus': page.evaluate('() => document.activeElement?.id'), 'hash': page.evaluate('() => location.hash'), 'current': page.eval_on_selector_all('#toolbox [aria-current]', 'es => es.length')}
+            hermes = {'focus': page.evaluate('() => document.activeElement?.id'), 'hash': page.evaluate('() => location.hash'), 'current': page.eval_on_selector_all('#toolbox [aria-current]', 'es => es.map((e) => e.dataset.tool ?? e.id)')}
             return (el['id'] == 'files-h' and el['tabindex'] == '-1' and 'Choose your data' in el['text'] and 0 <= el['top'] < 900
-                    and hermes['focus'] == 'picker' and hermes['hash'] == '' and hermes['current'] == 0), {'after a card': el, 'after Hermes': hermes}
+                    and hermes['focus'] == 'picker' and hermes['hash'] == '' and hermes['current'] == ['read']), {'after a card': el, 'after Hermes': hermes}
         finally: ctx.close()
-    attempt('front page: a card chosen by keyboard moves focus to step 1\'s heading, in view; Hermes\'s card goes to the drop zone and narrows nothing', focus_step1)
+    attempt('front page: a card chosen by keyboard moves focus to step 1\'s heading, in view; Hermes\'s card goes to the drop zone, is marked chosen, and keeps no #tool=', focus_step1)
 
     def by_address():
         ctx, page = fresh(hash='#tool=publish')
@@ -4875,6 +4875,96 @@ METHODOS_PAGE_STATE = '''() => { const v = (e) => !!e && !e.closest('[hidden]') 
     tracker: v(t), trackerRecipe: t?.dataset.recipe || null, track: steps('#methodos-track'), where: document.getElementById('methodos-tracker-where')?.textContent || '',
     hash: location.hash, tool: window.__plato?.tool ?? null, note: v(n) ? n.textContent : null, files: v(document.getElementById('files')),
     focus: document.activeElement ? (document.activeElement.id || document.activeElement.name || document.activeElement.tagName) : null }; }'''
+
+# ---- Cards marked chosen: Hermes (which narrows nothing) and Methodos (while its interview is open) ----
+# Each absence is read in the same call as a presence: the state moved to another card, or the card seen.
+CARDS = """() => { const li = (sel) => document.querySelector(sel)?.closest('li.tool'), bg = (sel) => li(sel) ? getComputedStyle(li(sel)).backgroundColor : null;
+  const note = document.getElementById('for-tool');
+  return { current: [...document.querySelectorAll('#toolbox [aria-current]')].map((e) => e.dataset.tool ?? e.id),
+    hermes: bg('#toolbox .tool-link[data-tool="read"]'), elenchos: bg('#toolbox .tool-link[data-tool="check"]'), methodos: bg('#methodos-card'),
+    plain: bg('#toolbox .tool-link[data-tool="convert"]'), note: note && !note.hidden ? note.textContent : null, hash: location.hash,
+    interview: !document.getElementById('methodos').hidden }; }"""
+def gold(c):
+    """The chosen card's tint of the gold (#f3c969, 26% into the page): red well above blue. Read as
+    rgb() or as color(srgb …), in which the browser gives a color-mix(), with 0–1 channels."""
+    try:
+        r, g, b = [float(x) for x in c[c.index('(') + 1:c.index(')')].replace('srgb', '').replace(',', ' ').split()[:3]]
+        if c.startswith('color('): r, b = r * 255, b * 255
+    except Exception: return False
+    return r - b > 30   # 26% gives 38, the hover tint (16%) 25, the page 3
+def cards(page):
+    """The cards' state, the pointer moved off them first: a card hovered has a paler tint of its own."""
+    page.mouse.move(1, 1); page.wait_for_timeout(400)
+    return page.evaluate(CARDS)
+def card_chosen_checks(browser, url, pw):
+    def fresh():
+        ctx = browser.new_context(viewport={'width': 1280, 'height': 900})
+        page = ctx.new_page(); page.set_default_timeout(T(8) * 1000)
+        page.goto(NOTOOLS if PROVE else url)
+        if wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready').get('phase') != 'ready': raise RuntimeError('the main page did not start')
+        return ctx, page
+    def hermes():
+        ctx, page = fresh()
+        try:
+            page.click('#toolbox .tool-link[data-tool="read"]')
+            chosen = cards(page); chosen['focus'] = page.evaluate('() => document.activeElement?.id')
+            page.set_input_files('#picker', str(FRONT_FILE))
+            wait_state(page, lambda s: s.get('phase') == 'detected', T(60), 'detection')
+            vis = page.evaluate(VISIBLE, ACTIONS); still = cards(page)
+            page.click('#toolbox .tool-link[data-tool="check"]'); page.wait_for_timeout(300)
+            moved = cards(page)
+            ok = (chosen['current'] == ['read'] and gold(chosen['hermes']) and chosen['hermes'] != chosen['plain'] and chosen['focus'] == 'picker' and chosen['hash'] == ''
+                  and (chosen['note'] or '').startswith('For Hermes, the readers: your file is read when you drop it') and 'Then choose what to do with it.' in chosen['note']
+                  and all(vis.values()) and still['current'] == ['read']
+                  and moved['current'] == ['check'] and gold(moved['elenchos']) and moved['hermes'] == moved['plain'] and 'Elenchos' in (moved['note'] or '') and 'Hermes' not in moved['note']
+                  and moved['hash'] == '#tool=check')
+            return ok, {'Hermes chosen': chosen, 'step 2 with a file': vis, 'after the file': still, 'Elenchos then': moved}
+        finally: ctx.close()
+    attempt('cards: Hermes chosen is marked (aria-current, gold) and said in #for-tool, keeps every action in step 2 and no #tool=; choosing Elenchos moves the mark and the sentence', hermes)
+    def methodos():
+        ctx, page = fresh()
+        try:
+            before = cards(page)
+            page.click('#methodos-card'); until(page, "!document.getElementById('methodos').hidden", 5)
+            opened = cards(page)
+            page.click('#methodos-close'); page.wait_for_timeout(200)
+            closed = cards(page)
+            ok = (before['methodos'] is not None and 'methodos-card' not in before['current']
+                  and opened['interview'] and opened['current'] == ['methodos-card'] and gold(opened['methodos']) and opened['methodos'] != opened['plain']
+                  and not closed['interview'] and closed['methodos'] is not None and closed['current'] == [] and closed['methodos'] == closed['plain'])
+            return ok, {'before': before, 'interview open': opened, 'after Close': closed}
+        finally: ctx.close()
+    attempt('cards: Methodos\'s card is marked (aria-current, gold) while its interview is open, and not after Close', methodos)
+    def visited():
+        # getComputedStyle reports a :visited link as unvisited (a privacy rule), so the colour is read
+        # from the pixels drawn: the card's text, in its own colour, and beside it a link to the same
+        # address that the test's own style turns blue only when visited, which shows that the address
+        # counts as visited here and that the blue can be seen. The test's style needs CSP bypassed.
+        # In Firefox: Playwright's headless Chromium draws no link as visited, with a profile or without
+        # (tried 4 October 2026), so there this check could not fail.
+        ff = pw.firefox.launch(headless=True)
+        ctx = ff.new_context(viewport={'width': 1280, 'height': 900}, bypass_csp=True)
+        try:
+            page = ctx.new_page(); page.set_default_timeout(T(8) * 1000)
+            page.goto(NOTOOLS if PROVE else url + '#tool=check'); page.wait_for_timeout(500)
+            page.goto('about:blank'); page.goto(NOTOOLS if PROVE else url)
+            wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+            page.add_style_tag(content='#e2e-visited { color: #555 !important; font-size: 20px; } #e2e-visited:visited { color: #1f45b8 !important; }')
+            page.evaluate("""() => { const a = document.createElement('a'); a.id = 'e2e-visited'; a.href = '#tool=check'; a.textContent = 'A link to the same address, blue only when visited';
+              document.querySelector('#toolbox .tool-link[data-tool="check"]').closest('li').after(a); }""")
+            page.mouse.move(1, 1); page.wait_for_timeout(1000)
+            count = """async (b64) => { const img = new Image(); img.src = 'data:image/png;base64,' + b64; await img.decode();
+              const c = document.createElement('canvas'); c.width = img.width; c.height = img.height; const x = c.getContext('2d'); x.drawImage(img, 0, 0);
+              const d = x.getImageData(0, 0, c.width, c.height).data; let blue = 0, ink = 0;
+              for (let i = 0; i < d.length; i += 4) { const [r, g, b] = [d[i], d[i + 1], d[i + 2]]; if (b - r > 60 && b > 120) blue++; else if (r + g + b < 450) ink++; }
+              return { blue, ink }; }"""
+            import base64
+            shot = lambda sel: base64.b64encode(page.locator(sel).screenshot()).decode()
+            card = page.evaluate(count, shot('#toolbox .tool-link[data-tool="check"] > p:not(.label)'))
+            plain = page.evaluate(count, shot('#e2e-visited'))
+            return plain['blue'] > 20 and card['ink'] > 20 and card['blue'] == 0, {'the card\'s text': card, 'a link blue only when visited': plain}
+        finally: ctx.close(); ff.close()
+    attempt('cards: a card whose address was visited keeps its text\'s own colour, not the visited link\'s blue', visited)
 
 def methodos_page_checks(browser, url):
     def fresh(width=1280, scheme='light'):

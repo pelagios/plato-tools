@@ -211,11 +211,13 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   function open() {
     opener = document.activeElement !== document.body ? document.activeElement : null;
     interview.hidden = false; bannerNow();
+    document.querySelector('#methodos-card')?.setAttribute('aria-current', 'true');   // marked as chosen while the interview is open
     if (!choice) verdictNow();
     show(heading);
   }
   function close(refocus) {
     interview.hidden = true; bannerNow();
+    document.querySelector('#methodos-card')?.removeAttribute('aria-current');
     if (refocus) { if (opener?.isConnected && opener.offsetParent && !interview.contains(opener)) opener.focus(); else backTo(); }
   }
 

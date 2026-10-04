@@ -113,7 +113,7 @@ jobs:
       - name: Playwright and Chromium
         run: |
           python -m pip install --quiet playwright==1.59.0 pillow
-          python -m playwright install --with-deps chromium
+          python -m playwright install --with-deps chromium firefox   # firefox: the visited-card check (e2e/app_test.py)
       - name: Browser checks (${{ matrix.mode }})
         shell: bash
         run: python e2e/app_test.py ${{ matrix.mode == 'prove-it-fails' && '--prove-it-fails' || '' }} 2>&1 | tee e2e.log

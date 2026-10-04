@@ -136,6 +136,7 @@ const columnsPending = () => isTable(input) && !columns && !state.columns?.error
 function gateOnColumns() { if (busy) return; const wait = columnsPending(); $('match').disabled = wait; $('finish').disabled = wait; state.columnsPending = wait; gatePreview(); }
 function start(action, earlier) {
   if (busy || looking || !input?.format || input.reason !== undefined) return;   // Krisis: nor while a lookup runs
+  if (hermesChosen) chooseTool(null);   // a file's action chosen: Hermes has done its part, and its card is no longer marked
   // A reading option that cannot be used is said plainly, and nothing is run.
   const readingRefused = action === 'check' || action === 'convert' ? readingProblem() : null;
   if (readingRefused) { readingMessage(readingRefused); return refuse(readingRefused); }
@@ -800,6 +801,10 @@ const TOOLS = {
 };
 const EVERY_ACTION = $('action-what').textContent;
 let tool = null;
+// Hermes chosen: it narrows nothing, and is not kept in the address, but its card is marked and #for-tool
+// says what it reads, until another card or a file's action is chosen.
+let hermesChosen = false;
+const HERMES = 'For <strong>Hermes</strong>, the readers: your file is read when you drop it, whether annotations from Recogito, a TEI edition, a CSV file or workbook, or GeoJSON. Then choose what to do with it.';
 let workflowStep = null;   // the step of a Methodos workflow the user is at, if they follow one: { tool, text, link }
 // The fragment holds the tool chosen (#tool=<key>) and, back from Chora, the workflow it was opened for
 // (#workflow=<id>, src/chora/handback.js), together as #tool=<key>&workflow=<id>.
@@ -811,6 +816,7 @@ const reduceMotion = () => !!window.matchMedia?.('(prefers-reduced-motion: reduc
 function chooseTool(key) {
   const was = tool;
   tool = TOOLS[key] ? key : null;
+  hermesChosen = key === 'read';
   if (was === 'figures' && tool !== 'figures') leaveFigures();
   // Arithmos with a file that is already N-Triples: there is nothing to convert it to that carries the
   // Data Cube, so the step offers the check instead, and says why.
@@ -822,10 +828,10 @@ function chooseTool(key) {
   $('action-what').textContent = asCheck ? 'Check it: it is already N-Triples' : tool ? TOOLS[tool].heading : EVERY_ACTION;
   $('action').classList.toggle('narrowed', !!tool);
   for (const a of document.querySelectorAll('#toolbox .tool-link[data-tool]')) {
-    if (a.dataset.tool === tool) a.setAttribute('aria-current', 'true'); else a.removeAttribute('aria-current');
+    if (a.dataset.tool === (hermesChosen ? 'read' : tool)) a.setAttribute('aria-current', 'true'); else a.removeAttribute('aria-current');
   }
   const note = $('for-tool');
-  note.hidden = !tool && !workflowStep;
+  note.hidden = !tool && !workflowStep && !hermesChosen;
   note.textContent = '';
   if (workflowStep) {                     // a Methodos workflow's step, said first (src/methodos/page.js)
     const w = document.createElement('span');
@@ -842,6 +848,7 @@ function chooseTool(key) {
     note.appendChild(all);
     if (tool === 'figures' && !asCheck) presetFigures();
   }
+  if (hermesChosen) note.insertAdjacentHTML('beforeend', HERMES);
   Object.assign(state, { tool });
 }
 // Arithmos: Convert to N-Triples, with the Data Cube option (in Options) ticked. Applied again when a
@@ -882,7 +889,7 @@ $('toolbox').addEventListener('click', (e) => {
   if (!a || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;
   e.preventDefault();
   if (a.dataset.tool === 'read') {          // Hermes: to the drop zone, with every action still offered
-    chooseTool(null); setHash(null);
+    chooseTool('read'); setHash(null);
     $('drop').scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'center' });
     $('picker').focus({ preventScroll: true });
     return;
