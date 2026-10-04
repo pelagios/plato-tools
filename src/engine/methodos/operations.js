@@ -64,7 +64,7 @@ export const OPERATIONS = Object.fromEntries([
   // it cannot start, rather than doing something else under its name.
   op({ key: 'adopt', title: "Take each identified place's location from its match", tool: 'Chora',
     takes: { dataset: { types: ANY } }, gives: { dataset: 'dataset' },
-    available: "Adopting a match's location is done by hand on Chora's page (\"Find in a gazetteer…\", then Adopt), within the step that draws or traces the places: it is not a step of its own." }),
+    available: "Adopting a match's location is done by hand on Chora's page (\"Find in a gazetteer…\", then \"Adopt: this place is that record, located there\"), within the step that draws or traces the places: it is not a step of its own." }),
   op({ key: 'text.find', title: 'Find the places named in a text', tool: 'Hermes', networked: true, cancel: 'keeps-partial',
     takes: { files: { types: ['files'] } }, gives: { work: 'work.hermes-text' },
     available: 'Finding places in a text is deferred (the llm-extract branch).' }),

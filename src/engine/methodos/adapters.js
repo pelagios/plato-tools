@@ -129,7 +129,8 @@ export const REVIEWS = {
     for (const level of levelsOf(work)) {
       const r = await runLevel(work, level, how);
       if (r.stopped && r.stopped.kind !== 'stopped') await stoppedShort(r.stopped, host, subjects, work);
-      if (signal?.aborted) break;
+      // Cancelled: what was done is kept (the operation keeps partial results), and the step is not done.
+      if (signal?.aborted) throw Object.assign(new Error('The region review was cancelled.'), { name: 'AbortError', partial: { work: await workFile(host, subjects, work) } });
       await reviewer({ work, level, nodes: regionNodes(work).filter((n) => n.level === level), again: (o = {}) => runLevel(work, level, { ...how, ...o }) });
       const open = regionNodes(work).filter((n) => n.level === level && n.state !== 'settled');
       if (open.length) {
@@ -143,7 +144,8 @@ export const REVIEWS = {
 
 /**
  * Do the interactive step the workflow waits at, through its entry in REVIEWS, with the reviewer
- * given, and complete it: returns { state, report }. A step with no entry is the page's alone.
+ * given, and complete it: returns { state, report }, and `error` when it was not done (the step then
+ * failed or was cancelled, keeping its partial work). A step with no entry is the page's alone.
  */
 export async function review(state, host, { reviewer, signal, reviews = REVIEWS } = {}) {
   const id = state.current;
@@ -151,8 +153,16 @@ export async function review(state, host, { reviewer, signal, reviews = REVIEWS 
   if (state.status !== 'waiting' || !step || OPERATIONS[step.op].kind !== 'interactive') throw new runner.TransitionError(`No step is waiting for the user (the workflow is ${state.status}).`);
   const fn = reviews[step.op];
   if (!fn) throw new runner.TransitionError(`${OPERATIONS[step.op].title} is done on the page, not here.`);
-  const r = await fn({ inputs: runner.inputsOf(state, id), options: step.options || {}, host, signal, reviewer, partial: step.partial });
-  if (r.problem) throw new DataError(r.problem.words);
+  let r;
+  // As runStep: cancelled, the step keeps what it had done; otherwise (a level left open, a permission not
+  // given, a fault) it is not done, and keeps its partial work to begin from (an interactive step waits,
+  // and the runner has no "stopped" from waiting: it fails, in the error's words). `error` is the error.
+  try { r = await fn({ inputs: runner.inputsOf(state, id), options: step.options || {}, host, signal, reviewer, partial: step.partial }); }
+  catch (e) {
+    if (signal?.aborted) return { state: runner.cancel(state, id, e?.partial), report: null };
+    return { state: runner.fail(state, id, e, e?.partial), report: null, error: e };
+  }
+  if (r.problem) return { state: runner.fail(state, id, new DataError(r.problem.words)), report: r.report, error: new DataError(r.problem.words) };
   return { state: runner.complete(state, id, r.outputs), report: r.report };
 }
 
@@ -243,7 +253,7 @@ export const ADAPTERS = {
     if (after) throw new Error(`The candidates were exported and still: ${after}`);
     const stem = subjects.files[0].name.replace(/\.[^.]+$/, '');
     const r = await engine(host, 'dataset', async (env) => {
-      const a = await apply({ subjects, work: serialiseWork(work), options: { ...without(options, 'base', 'issued'), output: 'dataset' } }, env);
+      const a = await apply({ subjects, work: serialiseWork(work), options: { ...without(options, 'issued'), output: 'dataset' } }, env);
       if (a.incomplete || a.report?.errors) return a;
       if (x.set) { const o = await env.output(`${stem}.candidates.json`); o.write(serialiseCandidateSet(x.set)); await o.close(); }
       return a;

@@ -209,7 +209,9 @@ test('the check of the end fails on a mutation: a convert that skips writing Con
   };
   const a = await begun({ host, adapters: { ...ADAPTERS, convert } });
   assert.equal(a.state.current, 'regions');
-  await assert.rejects(review(a.state, host, { reviewer: REVIEWER }), /gives no regions its places lie in/);
+  const refused = await review(a.state, host, { reviewer: REVIEWER });
+  assert.equal(refused.state.status, 'failed');
+  assert.match(refused.error.message, /gives no regions its places lie in/);
   const mutated = strip(JSON.parse(await host.store.get(a.state.steps.find((x) => x.id === 'dataset').outputs.dataset[0].name).text()));
   assert.equal(ends(mutated).contained, 0);
   assert.ok(containment(mutated, { regions: Object.fromEntries([...new Set(mutated.spatialEntities.filter((x) => /region-/.test(x['@id'])).map((x) => x['@id']))].map((k) => [k, { outcome: null }])) }).containedIn === 0);
@@ -224,16 +226,25 @@ test('the region step stops, keeping its work, while a level has a region open; 
   host.lookup = lookupWith(fake);
   const a = await begun({ host });
   const lazy = async ({ work, nodes }) => { const n = nodes.find((x) => x.names[0] === 'Cheshire'); decideRegion(work, work.candidates.find((x) => x.candidate_source === n.key).id, 'match', { at: AT }); };
-  const e = await review(a.state, host, { reviewer: lazy }).then(() => null, (x) => x);
-  assert.match(e?.message || '', /1 region of level 1 is not settled \(Lancashire\)/);
-  assert.ok(e.partial.work[0].name.endsWith('.krisis.json'));
+  const open = await review(a.state, host, { reviewer: lazy });
+  assert.match(open.error?.message || '', /1 region of level 1 is not settled \(Lancashire\)/);
+  const failed = open.state.steps.find((x) => x.id === 'regions');
+  assert.equal(failed.state, 'failed');
+  assert.ok(failed.partial.work[0].name.endsWith('.krisis.json'), 'the work so far is kept, to begin from');
+  // Cancelled (the control for done): the step is cancelled, not done, its work kept.
+  const host4 = memoryHost([new File([CSV], 'parishes.csv')]); host4.lookup = lookupWith(fakeWhg());
+  const st4 = (await begun({ host: host4 })).state;
+  const ac4 = new AbortController();
+  const cancelled = await review(st4, host4, { reviewer: async () => { ac4.abort(); }, signal: ac4.signal });
+  assert.equal(cancelled.state.steps.find((x) => x.id === 'regions').state, 'cancelled');
+  assert.notEqual(cancelled.state.status, 'completed');
   assert.equal(fake.bodies.length, 1, 'only level 1 was asked');
   // The control: settled, the level below is asked.
   const host2 = memoryHost([new File([CSV], 'parishes.csv')]); const f2 = fakeWhg(); host2.lookup = lookupWith(f2);
   await review((await begun({ host: host2 })).state, host2, { reviewer: REVIEWER });
   assert.equal(f2.bodies.length, 2);
   // No reviewer is refused; so is a step that does not wait for one.
-  await assert.rejects(review(a.state, host, {}), /no reviewer was given/);
+  assert.match((await review(runner.next(runner.invalidate(open.state, 'regions')), host, {})).error.message, /no reviewer was given/);
   await assert.rejects(review(runner.start(MAP, ANSWERS, { files: a.state.files.files }), host, { reviewer: REVIEWER }), /No step is waiting/);
 });
 

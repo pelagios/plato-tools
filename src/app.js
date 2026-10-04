@@ -1852,12 +1852,16 @@ async function regionRun(kind, { level, relax, only, unconstrained = false } = {
   if (looking || busy || !work) return;
   if ($('whg-token').value.trim()) commitToken();
   const svc = whgService();
-  if (!mayLookUp(svc)) { drawRegions(); $('regions-permission').querySelector('button')?.focus(); return; }
+  // Methodos: looking up every place within its settled regions is the lookup step's run (one place's, or one unconstrained, is not).
+  const whole = kind === 'places' && !only && !unconstrained;
+  if (!mayLookUp(svc)) {
+    // As the plain lookup: a workflow at its lookup waits for the permission, and says so.
+    if (whole) { methodos.began({ op: 'lookup', files }); methodos.ended({ op: 'lookup', waiting: 'the gazetteer to be allowed in the Permissions panel; then look the places up again.' }); }
+    drawRegions(); $('regions-permission').querySelector('button')?.focus(); return;
+  }
   if (!token.get()) { $('lookup').open = true; lookupSay(LW.needToken, true); $('whg-token').focus(); return; }
   const g = kind === 'places' ? (await gatherPlaces(), await gatherPlaces()) : null;   // twice: as startRegions
   const w = work, service = LW.whg;
-  // Methodos: looking up every place within its settled regions is the lookup step's run (one place's, or one unconstrained, is not).
-  const whole = kind === 'places' && !only && !unconstrained;
   looking = new AbortController();
   if (whole) methodos.began({ op: 'lookup', files });
   regionCleared = null; regionChange = null;

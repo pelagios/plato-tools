@@ -2904,7 +2904,9 @@ def map_your_data_checks(pw, url, tmp):
             page.click('#regions-level button[data-rgo="level"]')
             wait_state(page, lambda s: (s.get('lookup') or {}).get('running') is False and len(posts) > n, T(60), f'level {level}')
             if level == 1:   # the step is not done while a level is open: said, and still waiting
-                page.click('#methodos-done'); early = track()
+                page.click('#methodos-done')
+                soon(page, "() => /not settled yet/.test(document.getElementById('methodos-message').textContent)", 10)
+                early = track()
             keys = [k for k, g in (W().get('regions') or {}).items() if g['level'] == level]
             for k in keys:
                 page.click(art(k) + ' li.candidate button[data-ract="match"]')
@@ -2937,6 +2939,7 @@ def map_your_data_checks(pw, url, tmp):
         page.check('input[name="review-output"][value="dataset"]')
         n = len(consoled)
         s = run('#finish')
+        soon(page, "() => /export the suggestions first/.test(document.getElementById('methodos-message').textContent)", 10)
         unexported = track()
         page.click('#export-candidates')
         until(page, "() => !!window.__plato.candidates && !!window.__plato.candidates.setIri", 15)

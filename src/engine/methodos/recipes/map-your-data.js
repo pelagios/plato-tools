@@ -17,6 +17,7 @@ export default {
     'has-regions': { question: 'Does the table say which region each place is in (a parish, a county)?', kind: 'yes-no' },
     'will-draw': { question: 'Will you draw or trace places that the gazetteer cannot locate?', kind: 'yes-no' },
     'will-publish': { question: 'Will you publish the result?', kind: 'yes-no' },
+    // Asked of a caller that runs the recipe itself (Node); on the page the interview asks only yes or no, and the conversion and Finish take Options' base address.
     base: { question: 'Under what base address will your places and regions have web addresses of their own (for example https://example.org/places/)?', kind: 'text', optional: true },
     target: { question: 'In what format do you want the result?', kind: 'choice', choices: ['plato-json', 'plato-jsonl', 'tables', 'ntriples', 'lpf', 'lpf-seq'] },
     release: { question: 'What is this release called (for example 2026-10 or v1)?', kind: 'text', optional: true },
