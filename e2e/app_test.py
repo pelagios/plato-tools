@@ -2870,7 +2870,7 @@ def map_your_data_checks(pw, url, tmp):
         until(page, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
         r['columns'] = (s.get('columns') or {}).get('levels')
         t = track(); r['begun'] = t
-        ok = (r['canary'] == 'enforced' and r['policy'] == ['https://whgazetteer.org'] and t['steps'].get('columns') == 'current'
+        ok = (r['canary'] == 'enforced' and r['policy'] and all(re.match(r'^https://([a-z]+\.)?whgazetteer\.org$', o) for o in r['policy']) and t['steps'].get('columns') == 'current'
               and [k for k in t['steps']] == ['columns', 'check', 'dataset', 'regions', 'lookup', 'review', 'relate', 'place', 'again', 'compare', 'out']
               and not any('not identified' in x or 'Not yet available' in x for x in planned) and r['columns'] == {'county': 1, 'parish': 2})
         return ok, {'policy': r['policy'], 'canary': r['canary'], 'steps': t['steps'], 'planned': planned[:12], 'levels': r['columns']}
@@ -2990,6 +2990,8 @@ def map_your_data_checks(pw, url, tmp):
         page.set_input_files('#earlier', [str(r['converted'])])
         s = wait_state(page, lambda s: s.get('action') == 'compare' and s.get('phase') in ('done', 'error'), T(120), 'compare')
         step_is('compare', 'done')
+        # The tracker narrows step 2 to the step's tool (Metaphrasis) once it comes to it.
+        until(page, "() => { const t = document.getElementById('target'); return !!t && !!t.offsetParent; }", 30)
         page.select_option('#target', 'plato-json')
         s = run('#convert'); step_is('out', 'done')
         r['final'] = saved(s, '.json')
@@ -5546,35 +5548,30 @@ def methodos_page_checks(browser, url):
     attempt('Methodos: the tracker above step 1 shows the workflow\'s steps as now and to come, begins when a table is chosen, and each step chooses its tool (#tool=) and says itself in #for-tool; the columns step is said done by the user; back and leave undo it', tracker)
 
     def unavailable():
-        # Has regions, answered Yes: the workflow is not refused. The regions step is in the plan and the
-        # tracker, "Not yet available" with the engine's reason, and is skipped: the first step is now, the
-        # count leaves it out, Done never stops on it, and the last step notes that the regions were not
-        # identified. No "Answer No" (an absence, beside the Follow button and the reason, presences).
+        # Has regions, answered Yes: the regions step is available now (Krisis's region review), and so is the
+        # step that records the regions; nothing is "Not yet available" and the last step notes nothing (the
+        # absences, beside the regions and relate steps planned, shown and begun as to come: the presences).
         ctx, page = fresh()
         try:
             answer(page, 'table', 'map', {'has-regions': True, 'will-draw': False, 'will-publish': False})
             a = st(page)
             page.click('#methodos-start'); until(page, "!document.getElementById('methodos-tracker').hidden", 5)
             b = st(page)
-            # Begun (a table chosen), the runner takes the step as skipped, not refused: the workflow is under way.
             page.set_input_files('#picker', [str(ROOT / 'test/fixtures/generic/with-ids.csv')])
             until(page, "() => document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
             c = st(page)
-            seen = [x['id'] for x in c['track'] if x['state'] != 'unavailable']
             last = page.evaluate("() => document.querySelector('#methodos-track li.track-step:last-child .track-end')?.textContent || null")
-            r = next((x for x in a['plan'] if x['id'] == 'regions'), None)
-            t = next((x for x in b['track'] if x['id'] == 'regions'), None)
-            avail = [x['id'] for x in a['plan'] if x['id'] != 'regions']
-            ok = (r is not None and r['state'] == 'unavailable' and r['words'] == 'Not yet available' and 'Regions cannot be identified yet' in (r['why'] or '')
-                  and a['follow'] and a['blocked'] is None and 'Answer No' not in page.evaluate("() => document.getElementById('methodos').textContent")
-                  and f"in {len(avail)} steps" in a['verdict']
-                  and b['tracker'] and t is not None and t['state'] == 'unavailable' and 'Regions cannot be identified yet' in (t['why'] or '')
-                  and b['track'][0]['state'] == 'current' and b['where'].startswith(f"Step 1 of {len(avail)}")
-                  and seen == avail and 'regions were not identified' in (last or '')
-                  and next((x['state'] for x in c['track'] if x['id'] == 'regions'), None) == 'unavailable' and c['track'][0]['state'] == 'current' and c['where'].startswith(f"Step 1 of {len(avail)}"))
-            return ok, {'plan': a, 'started': b, 'begun': c, 'steps followed': seen, 'last step notes': last}
+            ids = lambda x: [y['id'] for y in x]
+            want = ['columns', 'check', 'dataset', 'regions', 'lookup', 'review', 'relate', 'again', 'compare', 'out']
+            ok = (ids(a['plan']) == want and all(x['state'] != 'unavailable' and not x['why'] for x in a['plan'])
+                  and a['follow'] and a['blocked'] is None and f"in {len(want)} steps" in a['verdict']
+                  and b['tracker'] and ids(b['track']) == want and all(x['state'] != 'unavailable' for x in b['track'])
+                  and ids(c['track']) == want and next((x['state'] for x in c['track'] if x['id'] == 'regions'), None) == 'todo'
+                  and c['track'][0]['state'] == 'current' and c['where'].startswith(f"Step 1 of {len(want)}") and not last
+                  and 'Not yet available' not in page.evaluate("() => document.getElementById('methodos-tracker').textContent"))
+            return ok, {'plan': a, 'started': b, 'begun': c, 'last step notes': last}
         finally: ctx.close()
-    attempt('Methodos: with regions answered Yes the workflow is followed and begun, its regions step shown as "Not yet available" with its reason and skipped, and the last step notes the regions were not identified', unavailable)
+    attempt('Methodos: with regions answered Yes the workflow is followed and begun with its regions step and the step recording them available, nothing "Not yet available", and no note at the end', unavailable)
 
     def unsure_and_none():
         # "Not sure" leads to the plain grid of cards; answers with no recipe say so and name the tools.
