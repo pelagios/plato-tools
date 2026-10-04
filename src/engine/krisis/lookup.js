@@ -37,7 +37,8 @@
 //   left null, on the lookup record, so the page can show each candidate's licence. No licence is ever
 //   written into an attestation, and none is assumed here.
 import { WHG_ENDPOINT, WHG_PLACE_TYPE, isWhg, normaliseWhgIri, mergeAttribution } from '../gazetteer/index.js';
-import { similarity } from './names.js';
+import { similarity, queryVariants, MAX_VARIANTS } from './names.js';
+import { guard } from './guards.js';
 import { WORK_VERSION, canonicalEndpoint } from './work.js';
 import { linkState } from './identities.js';
 export { authorityIris, currentIdentities } from './identities.js';
@@ -45,7 +46,7 @@ export { authorityIris, currentIdentities } from './identities.js';
 export { krisisLookupNote } from '../words.js';
 
 export const LOOKUP_ALGORITHM = 'krisis-lookup 1';
-export const LOOKUP_DEFAULTS = { limit: 10, maxDistanceKm: 50, allNames: false, countries: false, nearKm: null };
+export const LOOKUP_DEFAULTS = { limit: 10, maxDistanceKm: 50, allNames: false, countries: false, nearKm: null, variants: false };
 /** Which places a lookup takes (selectPlaces). */
 export const PLACE_CHOICES = ['unmatched', 'all', 'pending', 'unlinked'];
 /** How many queries the preview shows exactly as they would be sent. */
@@ -172,6 +173,8 @@ const lastState = (work, iri, service) => lastQuery(work, iri, service)?.query.s
 export function selectPlaces({ work = null, places = null, which, service, only } = {}) {
   let list = places ? places : Object.entries(work?.places || {}).map(([iri, p]) => ({ iri, ...p }));
   if (only) { const keep = new Set(only); list = list.filter((p) => keep.has(p.iri)); }
+  // Krisis × Methodos: a place the reviewer keeps without reconciling (row state 'filter') is never looked up.
+  list = list.filter((p) => (work?.places?.[p.iri]?.rowState ?? p.rowState) !== 'filter');
   const cands = work?.candidates || [];
   const choose = which ?? defaultChoice(work);
   if (!PLACE_CHOICES.includes(choose)) throw new TypeError(`Not a choice of places: ${choose}`);
@@ -215,17 +218,19 @@ function filtersOf(place, { countries, nearKm }) {
  * Its address is not a name (gather() gives a place without a label its address as label): a place
  * with no other name has none to send, and is not looked up.
  */
-function namesToSend(place, allNames) {
+function namesToSend(place, allNames, variants = false) {
   const all = [place.label, ...(place.names || [])].filter((n) => typeof n === 'string' && n.trim() && n.trim() !== place.iri);
   if (!all.length) return [];
-  if (!allNames) return [all[0]];
+  const chosen = allNames ? all : [all[0]];
   const seen = new Set(), out = [];
-  for (const n of all) {
-    const k = String(n).trim().toLowerCase();
-    if (!k || seen.has(k)) continue;
-    seen.add(k); out.push(n);
-  }
-  return out;
+  const add = (text, how) => { const k = String(text).trim().toLowerCase(); if (k && !seen.has(k)) { seen.add(k); out.push({ text, how }); } };
+  if (!variants) { for (const n of chosen) add(n, 'given'); return out; }
+  // Krisis × Methodos: each name's forms (queryVariants), each a query of its own, at most MAX_VARIANTS a
+  // place; the head words of all the names after every other form, so that they are the first cut.
+  const forms = chosen.map((n) => queryVariants(n));
+  for (const f of forms) for (const v of f) if (v.how !== 'head-word') add(v.text, v.how);
+  for (const f of forms) for (const v of f) if (v.how === 'head-word') add(v.text, v.how);
+  return out.slice(0, MAX_VARIANTS);
 }
 
 /**
@@ -245,13 +250,13 @@ export function planQueries(places, options = {}) {
   const queries = [], chunks = [];
   let chunk = null, withoutCountries = 0, withoutPoint = 0, withoutName = 0, looked = 0;
   for (const place of places) {
-    const names = namesToSend(place, o.allNames);
+    const names = namesToSend(place, o.allNames, o.variants);
     if (!names.length) { withoutName++; continue; }
     looked++;
     const params = filtersOf(place, o);
     if (o.countries && !params?.countries) withoutCountries++;
     if (o.nearKm > 0 && params?.radius === undefined) withoutPoint++;
-    const mine = names.map((name) => ({ key: [place.iri, name], query: name, limit: o.limit, ...(type ? { type } : {}), ...(params ? { params } : {}) }));
+    const mine = names.map(({ text, how }) => ({ key: [place.iri, text], query: text, how, limit: o.limit, ...(type ? { type } : {}), ...(params ? { params } : {}) }));
     queries.push(...mine);
     if (!chunk || (chunk.queries.length && chunk.queries.length + mine.length > o.batchSize)) chunks.push(chunk = { places: [], queries: [] });
     chunk.places.push(place); chunk.queries.push(...mine);
@@ -259,7 +264,7 @@ export function planQueries(places, options = {}) {
   const requests = chunks.reduce((n, c) => n + Math.ceil(c.queries.length / o.batchSize), 0);
   const filters = [...(o.countries ? ['countries'] : []), ...(o.nearKm > 0 ? ['near'] : [])];
   const preview = {
-    places: looked, queries: queries.length, requests, allNames: !!o.allNames, limit: o.limit, filters,
+    places: looked, queries: queries.length, requests, allNames: !!o.allNames, variants: !!o.variants, limit: o.limit, filters,
     sendsCoordinates: queries.some((q) => q.params?.radius !== undefined), withoutCountries, withoutPoint, withoutName, nearKm: o.nearKm > 0 ? Math.min(MAX_RADIUS_KM, o.nearKm) : null,
     service: o.service, first: queries.slice(0, PREVIEW_QUERIES).map(sent),
   };
@@ -322,7 +327,10 @@ export function startLookup(work, { service, parameters, plan, now = new Date().
   const queries = {};
   for (const p of plan.chunks.flatMap((c) => c.places)) {
     if (!work.places[p.iri]) work.places[p.iri] = placeRecord(p);
-    queries[p.iri] = { state: 'pending', sent: plan.queries.filter((q) => q.key[0] === p.iri).map((q) => q.query) };
+    const mine = plan.queries.filter((q) => q.key[0] === p.iri);
+    queries[p.iri] = { state: 'pending', sent: mine.map((q) => q.query) };
+    // Krisis × Methodos: with variants asked for, how each query was made from the place's names.
+    if (mine.some((q) => q.how && q.how !== 'given')) queries[p.iri].variants = mine.map((q) => ({ text: q.query, how: q.how || 'given' }));
   }
   const record = { id: `l${n}`, service, started_at: now, finished_at: null, algorithm_version: LOOKUP_ALGORITHM, parameters,
     attribution: null, counts: { ...emptyCounts(), places: plan.preview.places, withoutName: plan.preview.withoutName || 0, queries: plan.preview.queries, requests: plan.preview.requests }, stopped: null, queries };
@@ -352,12 +360,20 @@ export function mergeAnswers(work, record, place, lists, { now = new Date().toIS
   // A filter by distance sent and not applied (WHG says so in `scope.applied`): the answer is not filtered.
   if (scoped && lists.some((l) => !l.unanswered && l.scope?.applied !== true)) { q.scopeNotApplied = true; c.scopeNotApplied = (c.scopeNotApplied || 0) + 1; }
   else delete q.scopeNotApplied;
-  // One entry per address, from the query that ranked it best.
+  // One entry per address, from the query that ranked it best, a head-word query's only when no other
+  // found it (Krisis × Methodos). WHG's guard (guards.js) is judged in that query's answer, which
+  // only there is whole: whether it is withheld, its Dice, and (the top) whether it is tied.
   const byIri = new Map(), noIri = new Set();
+  const howOf = (j) => q.variants?.[j]?.how ?? 'given';
+  const forms = (q.sent || []).filter((t, j) => howOf(j) !== 'head-word');
   lists.forEach((list, j) => list.forEach((cand, rank) => {
     if (!cand.iri) { noIri.add(cand.id); return; }
+    const head = howOf(j) === 'head-word';
     const had = byIri.get(cand.iri);
-    if (!had || rank < had.answer_rank) byIri.set(cand.iri, { ...cand, answer_rank: rank + 1, query: q.sent[j] ?? list.key?.[1] ?? null });
+    const better = !had || (had.headWord && !head) || (had.headWord === head && rank + 1 < had.answer_rank);
+    if (!better) return;
+    const v = guard(cand, list, { forms: forms.length ? forms : [q.sent?.[j] ?? list.key?.[1]].filter(Boolean), headWord: head });
+    byIri.set(cand.iri, { ...cand, answer_rank: rank + 1, query: q.sent[j] ?? list.key?.[1] ?? null, how: howOf(j), headWord: head, guardFigures: { dice: v.dice, withheld: v.withheld, tie: v.tie } });
   }));
   c.skipped.noIri += noIri.size;
   q.found = byIri.size + noIri.size;
@@ -382,7 +398,10 @@ export function mergeAnswers(work, record, place, lists, { now = new Date().toIS
       other: { label: g.name, names: [...new Set([g.name, ...(g.altNames || [])].filter(Boolean))], point: g.coords ?? null,
         source: { title: service.title, ...(service.uri ? { uri: service.uri } : {}) }, ...(g.ccodes ? { ccodes: g.ccodes } : {}), ...(g.types?.length ? { types: g.types.map((t) => t.name) } : {}) },
       gazetteer: { service: service.endpoint, id: g.id, score: g.score, confidence: g.confidence, match: g.match, answer_rank: g.answer_rank,
-        description: g.description, namespace: g.namespace, query: g.query },
+        description: g.description, namespace: g.namespace, query: g.query,
+        // Krisis × Methodos: what WHG's guard needs (guards.js guardOf), judged in the answer that found it.
+        dice: g.guardFigures.dice, withheld: g.guardFigures.withheld, tie: g.guardFigures.tie,
+        ...(g.how !== 'given' ? { how: g.how } : {}), ...(g.headWord ? { head_word_only: true } : {}) },
       decision: null,
     });
     added++;
@@ -450,7 +469,7 @@ export const upstreamLicence = (attribution, namespace, dataset) => licenceFrom(
 const narrowed = (chunk, service) => chunk.queries.some((q) => q.params || (q.type && !isWhg(service.endpoint)));
 const suspect = (chunk, answers, service) => chunk.queries.length > 1 && narrowed(chunk, service) && answers.every((l) => !l.unanswered && l.length === 0);
 /** What makes a lookup's answers what they are, to tell whether a suspect batch is sent again unchanged. */
-const SAME_ASKING = ['allNames', 'limit', 'countries', 'nearKm', 'type'];
+const SAME_ASKING = ['allNames', 'limit', 'countries', 'nearKm', 'type', 'variants'];
 /**
  * Was this place in a suspect batch of this service, asked the same way? Sending it again is the
  * reviewer's word that the empty answers are genuine, and they are then accepted.
@@ -472,7 +491,7 @@ export function planLookup({ lookup, work = null, places = null, options = {} })
   let chosen = selectPlaces({ work, places, which: options.places, service, only: options.only });
   // The name typed is sent in place of the label; it is compared with the candidates beside the place's own names.
   if (typed) chosen = chosen.map((p) => ({ ...p, label: typed, names: [...new Set([typed, ...(p.names || [])])] }));
-  return planQueries(chosen, { ...options, ...(typed ? { allNames: false } : {}), service, batchSize: lookup?.batchSize ?? 25 });
+  return planQueries(chosen, { ...options, ...(typed ? { allNames: false, variants: false } : {}), service, batchSize: lookup?.batchSize ?? 25 });
 }
 
 /**
@@ -508,7 +527,7 @@ export async function runLookup({ lookup, work = null, subjects = null, places =
     work = newWork(subjects, { now: now(), reviewer });
   } else if (reviewer) work.reviewer = reviewer;
   const plan = planLookup({ lookup, work, places, options: { ...o, service } });
-  const parameters = { places: o.places ?? defaultChoice(work), allNames: typed ? false : !!o.allNames, limit: o.limit, countries: !!o.countries, nearKm: o.nearKm ?? null, maxDistanceKm: o.maxDistanceKm, type: plan.queries[0]?.type ?? null, linksKnown: !!places, ...(typed ? { query: typed } : {}) };
+  const parameters = { places: o.places ?? defaultChoice(work), allNames: typed ? false : !!o.allNames, limit: o.limit, countries: !!o.countries, nearKm: o.nearKm ?? null, maxDistanceKm: o.maxDistanceKm, type: plan.queries[0]?.type ?? null, linksKnown: !!places, ...(typed ? { query: typed } : {}), ...(o.variants && !typed ? { variants: true } : {}) };
   // Places of a suspect batch sent again, asked the same way: found before the new record is added.
   const confirmed = new Set(plan.chunks.flatMap((c) => c.places).filter((p) => wasSuspect(work, p.iri, service, parameters)).map((p) => p.iri));
   const record = startLookup(work, { service, parameters, plan, now: now() });

@@ -22,10 +22,9 @@ import { Report } from '../report.js';
 import { DataError, detect } from '../input.js';
 import { run, CANDIDATE_SET_TEXT } from '../pipeline.js';
 import { compare } from '../compare.js';
-import { KRISIS_TEXT } from '../words.js';
-import { readWork, filesDiffer, checkReviewer, NOT_READ_KINDS } from './work.js';
+import { KRISIS_TEXT, KRISIS_CANDIDATES, rowWords } from '../words.js';
+import { readWork, filesDiffer, checkReviewer, NOT_READ_KINDS, excludedPlaces } from './work.js';
 import { readCandidateSet, setIriOf } from './candidates.js';
-import { KRISIS_CANDIDATES } from '../words.js';
 import { attestationsFrom, datasetSource } from './identity.js';
 
 export const OUTPUTS = ['attestations', 'dataset'];
@@ -95,14 +94,21 @@ export async function apply({ subjects, work, options = {} }, env) {
   // The candidate sets the answers point into: checked before anything is made.
   const sets = candidateSetsOf(w, options.candidates || [], env, rep);
   if (rep.toJSON().errors) return fail();
-  const made = attestationsFrom(w, { reviewer, date: options.date, source: others ? datasetSource(others) : undefined });
+  // Krisis × Methodos: the places the reviewer leaves out of the dataset (row state 'exclude'): none of
+  // their attestations is made, the dataset written leaves them out, and the version check is told to
+  // expect exactly those missing. They are listed in the report (and all of them in `leftOut`).
+  const leftOut = excludedPlaces(w), out = new Set(leftOut);
+  for (const iri of leftOut) rep.add('warning', 'left-out-by-reviewer', rowWords.leftOutReport, iri);
+  const made = attestationsFrom(w, { reviewer, date: options.date, source: others ? datasetSource(others) : undefined }).filter((m) => !out.has(m.subject));
   rep.counts = {
     attestations: made.length,
     matchAttestations: made.filter((m) => !m.attestation.negated).length,
     distinctAttestations: made.filter((m) => m.attestation.negated).length,
     relations: made.reduce((n, m) => n + m.attestation.identities.length, 0),
+    ...(leftOut.length ? { leftOut: leftOut.length } : {}),
   };
-  if (!made.length) { rep.warning('nothing-decided', TEXT['nothing-decided']); return { report: rep.toJSON(), outputs: [], attestations: [] }; }
+  // A review that only leaves places out still writes the dataset (without them); with neither, there is nothing to write.
+  if (!made.length && !(leftOut.length && output === 'dataset')) { rep.warning('nothing-decided', TEXT['nothing-decided']); return { report: rep.toJSON(), outputs: [], attestations: [], leftOut }; }
   if (sets.length) { rep.counts.candidateSets = sets.length; for (const iri of sets) rep.warning('publish-candidate-sets', KRISIS_CANDIDATES.publishSets, iri); }
   if (output === 'dataset') {
     // Each attestation is checked as the checker would check it in a place-centric dataset, before anything is
@@ -112,7 +118,8 @@ export async function apply({ subjects, work, options = {} }, env) {
       if (!V({ '@id': subject, label: subject, attestations: [attestation] })) rep.error('not-valid', TEXT['not-valid'], `${subject}: ${V.errors.map((e) => `${e.instancePath} ${e.message}`).join('; ')}`);
     }
     if (rep.toJSON().errors) return fail();
-    return writeDataset({ subjects, made, work: w, options, sets }, env, rep, fail);
+    const r = await writeDataset({ subjects, made, work: w, options: { ...options, leftOut }, sets }, env, rep, fail);
+    return { ...r, leftOut };
   }
 
   if (sets.length && !w.subjects.uri) { rep.error('no-gazetteer-id', KRISIS_CANDIDATES.noGazetteerId); return fail(); }
@@ -125,7 +132,7 @@ export async function apply({ subjects, work, options = {} }, env) {
   o.write(JSON.stringify(doc, null, 2) + '\n');
   const outputs = [await o.close()];
   progress({ phase: 'done', attestations: made.length, elapsedMs: Date.now() - t0 });
-  return { report: rep.toJSON(), outputs, attestations: made };
+  return { report: rep.toJSON(), outputs, attestations: made, leftOut };
 }
 
 /** The new attestations as an attestation-centric PLATO document, about the subject dataset's places, listing the candidate sets they answer. */
@@ -256,10 +263,11 @@ async function writeDataset({ subjects, made, work, options, sets = [] }, env, r
   const t0 = Date.now();
   // Each place's new attestations, appended when the pipeline hands the place over: once, should
   // the dataset give the same place twice.
-  const bySubject = new Map(), met = new Set();
+  const bySubject = new Map(), met = new Set(), leaving = new Set(options.leftOut || []);
   for (const { subject, attestation } of made) (bySubject.get(subject) || bySubject.set(subject, []).get(subject)).push(attestation);
   const augment = (record) => {
     const id = record?.['@id'];
+    if (leaving.has(id)) return null;   // left out by the reviewer (pipeline.js: nothing of it is written)
     if (!bySubject.has(id) || met.has(id)) return record;
     met.add(id);
     return { ...record, attestations: [...(record.attestations || []), ...bySubject.get(id)] };
@@ -288,7 +296,7 @@ async function writeDataset({ subjects, made, work, options, sets = [] }, env, r
   if (r.incomplete || !parts || rep.toJSON().errors) return fail();
 
   progress({ phase: 'checking', elapsedMs: Date.now() - t0 });
-  const c = await checkAppendOnly({ earlier: subjects, later: new File(parts, name), added: made.length, options }, env, rep);
+  const c = await checkAppendOnly({ earlier: subjects, later: new File(parts, name), added: made.length, options: { ...options, expectMissing: options.leftOut } }, env, rep);
   kept.clear();
   if (c.incomplete || rep.toJSON().errors) return fail();
   progress({ phase: 'done', attestations: made.length, elapsedMs: Date.now() - t0 });
@@ -303,17 +311,18 @@ async function writeDataset({ subjects, made, work, options, sets = [] }, env, r
  */
 export async function checkAppendOnly({ earlier, later, added, options = {} }, env, rep) {
   const K = KRISIS_TEXT;
-  const c = await compare({ earlier, later: await detect([later]), options: { base: options.base, columns: options.columns } }, env);
+  const c = await compare({ earlier, later: await detect([later]), options: { base: options.base, columns: options.columns, ...(options.expectMissing?.length ? { expectMissing: options.expectMissing } : {}) } }, env);
   for (const i of c.report.items) {
     if (CHANGED.has(i.kind)) {
       rep.add('error', 'not-append-only', `${K.notAppendOnly} ${i.message}`, i.examples[0], i.count);
       for (const x of i.explained || []) rep.explain('not-append-only', x.example, x.earlier, x.later);
-    } else if (i.kind === 'unreadable' || i.kind === 'version-not-read') rep.add('error', 'not-checked', `${K.notChecked}: ${i.message}`, i.examples[0], i.count);
+    } else if (i.kind === 'expected-missing-present') rep.add('error', 'not-append-only', `${K.notAppendOnly} ${i.message}`, i.examples[0], i.count);
+    else if (i.kind === 'unreadable' || i.kind === 'version-not-read') rep.add('error', 'not-checked', `${K.notChecked}: ${i.message}`, i.examples[0], i.count);
     else if (i.kind === 'not-compared') rep.add('warning', i.kind, i.message, i.examples[0], i.count);
   }
   const k = c.report.counts;
   if (k.earlier !== undefined) {
-    rep.counts.versionCheck = { earlier: k.earlier, later: k.later, unchanged: k.unchanged, changed: k.changed, lost: k.lost, added: k.added };
+    rep.counts.versionCheck = { earlier: k.earlier, later: k.later, unchanged: k.unchanged, changed: k.changed, lost: k.lost, added: k.added, ...(k.leftOut !== undefined ? { leftOut: k.leftOut } : {}) };
     if (k.added !== added) rep.add('error', 'not-all-added', K.notAllAdded(added, k.added));
   }
   return c;

@@ -171,3 +171,48 @@ export function trigrams(normalised) {
   for (let i = 0; i + 3 <= s.length; i++) out.add(s.slice(i, i + 3));
   return out;
 }
+
+// ---- Krisis × Methodos (#28): query variants -----------------------------------------------------------
+// Forms of a name to send a gazetteer, each as a query of its own, opt-in (the lookup's `variants`). WHG's
+// gateway already derives forms of its own (head word, inversion, brackets: derived_forms in its answer);
+// these are the client's, as WHG's own client sends them, and nothing is de-duplicated against the
+// gateway's. A candidate found only by the head word never passes WHG's guards (guards.js).
+/** The words after a comma that are put back in front ("Melford, Long" → "Long Melford"); any other is not ("Rotherhithe, Surrey"). */
+export const INVERSION_QUALIFIERS = ['long', 'great', 'little', 'upper', 'lower', 'nether', 'old', 'new', 'north', 'south', 'east', 'west',
+  'north east', 'north west', 'south east', 'south west', 'market', 'saint', 'st', 'st.', 'sainte', 'ste', 'ste.', 'much', 'high', 'low', 'middle', 'over', 'church', 'king\'s', 'kings', 'bishop\'s', 'bishops'];
+/** The qualifiers a head word is found by dropping (not Saint, which is part of a name: St Albans is not "Albans"). */
+const HEAD_QUALIFIERS = new Set(['long', 'great', 'little', 'upper', 'lower', 'nether', 'old', 'new', 'north', 'south', 'east', 'west', 'market', 'much', 'high', 'low', 'middle', 'over']);
+export const MAX_VARIANTS = 10;
+const squash = (s) => s.replace(/\s+/g, ' ').replace(/ ,/g, ',').trim();
+/**
+ * A name's forms to send, the name itself first: [{ text, how }], how 'given' | 'brackets' (brackets
+ * and what is in them removed) | 'alternative' ("X, or Y" and "X or Y": each) | 'inverted' ("Melford,
+ * Long" → "Long Melford", only for a qualifier in INVERSION_QUALIFIERS) | 'head-word' (the name
+ * without its qualifiers, last). Each text once (ignoring case), at most MAX_VARIANTS.
+ */
+export function queryVariants(name) {
+  const given = squash(String(name ?? ''));
+  if (!given) return [];
+  const out = [], seen = new Set();
+  const add = (text, how) => { const t = squash(text); const k = t.toLowerCase(); if (t && !seen.has(k)) { seen.add(k); out.push({ text: t, how }); } };
+  add(given, 'given');
+  const unbracketed = squash(given.replace(/\s*[([{][^()[\]{}]*[)\]}]\s*/g, ' '));
+  if (unbracketed !== given) add(unbracketed, 'brackets');
+  const alternatives = unbracketed.split(/\s*,?\s+or\s+/).map(squash).filter(Boolean);
+  if (alternatives.length > 1) for (const a of alternatives) add(a, 'alternative');
+  const forms = alternatives.length > 1 ? alternatives : [unbracketed];
+  const inverted = [];
+  for (const f of forms) {
+    const m = /^([^,]+),\s*([^,]+)$/.exec(f);
+    if (m && INVERSION_QUALIFIERS.includes(m[2].trim().toLowerCase())) { const t = `${m[2].trim()} ${m[1].trim()}`; inverted.push(t); add(t, 'inverted'); }
+  }
+  // The head word, last: each form without its leading or trailing qualifiers, when that leaves a word.
+  for (const f of [...forms.map((f) => (/,/.test(f) ? null : f)).filter(Boolean), ...inverted]) {
+    const words = f.split(' ');
+    let i = 0, j = words.length;
+    while (i < j - 1 && HEAD_QUALIFIERS.has(words[i].toLowerCase())) i++;
+    while (j - 1 > i && HEAD_QUALIFIERS.has(words[j - 1].toLowerCase())) j--;
+    if (i > 0 || j < words.length) add(words.slice(i, j).join(' '), 'head-word');
+  }
+  return out.slice(0, MAX_VARIANTS);
+}

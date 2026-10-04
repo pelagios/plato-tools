@@ -12,9 +12,10 @@ import { splitMatching } from './engine/hermes/cluster.js';
 import { review as W, POOL_BUSY, POOL_STUCK, PREVIEW_WORDS } from './engine/words.js';
 const REVIEW_WORDS = W;   // the review's words, where W names the words for the columns
 import { readable } from './engine/input.js';
-import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions } from './engine/krisis/work.js';
+import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions, flag, noteOn, setRowState } from './engine/krisis/work.js';
 import { exportCandidates, readCandidateSet, serialiseCandidateSet } from './engine/krisis/candidates.js';
-import { KRISIS_CANDIDATES } from './engine/words.js';
+import { acceptGuarded, undoBatch, guardOf, guardsFirst, planGuarded } from './engine/krisis/guards.js';
+import { KRISIS_CANDIDATES, guardWords as GW, variantWords as VW, rowWords as RW } from './engine/words.js';
 import { stash as stashForChora, dropStale as dropStaleHandoff } from './chora/handoff.js';
 import { dropStale as dropStaleHandback, workflowOf } from './chora/handback.js';
 import { storageNeed } from './engine/storage.js';
@@ -999,7 +1000,7 @@ async function resume(file) {
 function beginReview(w, name, { focus = true } = {}) {
   work = w; workName = name || workName; basisFor = null; findFor = null; allDone = false; unsaved = 0;
   exportedSet = null; earlierSets = []; candidatesStatus('');
-  order = reviewPlaces(work);
+  order = placeOrder(); lastBulk = null;
   cursor = Math.min(Math.max(0, work.cursor || 0), Math.max(0, order.length - 1));
   // A place with no candidates has nothing to review: start at the first that has some.
   if (order.length && !candidatesOf(work, order[cursor]).length) cursor = Math.max(0, order.findIndex((iri) => candidatesOf(work, iri).length));
@@ -1054,13 +1055,14 @@ function render(focus) {
   $('review-prev').disabled = step(-1) === null; $('review-next').disabled = $('review-skip').disabled = step(1) === null;
   Object.assign(state, { phase: 'reviewing', work, review: { cursor, subject: order[cursor] || null, current, filter: $('review-filter').value, ...p } });
   $('finish-cites').textContent = LW.cites(citedSources());   // Krisis: gazetteer lookup, one attestation per source
+  drawBulk();   // Krisis × Methodos
   if (!order.length) { box.innerHTML = `<p>${escapeHtml(W.none)}</p>`; return; }
   const iri = order[cursor], place = work.places[iri] || {}, cands = candidatesOf(work, iri);
   const typed = keepTyped(iri);
   box.innerHTML = (allDone ? `<p class="good">${escapeHtml(W.allDone)}</p>` : '')
     + `<div class="subject"><h3 id="review-subject">${escapeHtml(place.label || iri)}</h3>`
     + (W.names(place.label, place.names) ? `<p>${escapeHtml(W.names(place.label, place.names))}</p>` : '')
-    + `<p>${escapeHtml(W.point(place.point))}</p><p class="iri">${escapeHtml(iri)}</p>` + lookupPlaceHtml(iri, place) + '</div>'
+    + `<p>${escapeHtml(W.point(place.point))}</p><p class="iri">${escapeHtml(iri)}</p>` + rowStateHtml(place) + lookupPlaceHtml(iri, place) + '</div>'
     + (hasLookups() ? groupedHtml(cands)
       : `<p>${escapeHtml(W.candidates(cands.length))}</p><ol class="candidates">` + cands.map((c, i) => candidateHtml(c, i)).join('') + '</ol>');
   restoreTyped(typed);
@@ -1096,11 +1098,14 @@ function candidateHtml(c, i) {
     + `<h4><span class="n">${i + 1}</span>${escapeHtml(o.label || c.candidate_candidate)}</h4>`
     + (W.names(o.label, o.names) ? `<p>${escapeHtml(W.names(o.label, o.names))}</p>` : '')
     + `<p class="facts">${escapeHtml(W.facts(c))}; ${escapeHtml(W.point(o.point))}</p>`
-    + (c.lookup ? gazetteerHtml(c) : '')
+    + (c.lookup ? gazetteerHtml(c) + guardHtml(c) : '')
     + `<p class="iri">${escapeHtml(c.candidate_candidate)}</p>`
     + `<p class="decision">${escapeHtml(W.decision(d))}</p>`
     + `<div class="acts">${btn('match', 'Same place', 'a')}${btn('not-this', 'Not this one', 'n')}${btn('distinct', 'Different places', 'd')}`
-    + (d ? `<button type="button" data-act="undo" data-id="${id}">Undo</button>` : '') + '</div>'
+    + (d ? `<button type="button" data-act="undo" data-id="${id}">Undo</button>` : '')
+    + `<button type="button" data-act="flag" data-id="${id}" aria-pressed="${!!c.flagged}">${escapeHtml(c.flagged ? RW.flagged : RW.flag)}</button>` + '</div>'
+    + `<form class="note" data-id="${id}"><label>${escapeHtml(RW.noteLabel)} <input type="text" name="note" value="${escapeHtml(c.note || '')}" autocomplete="off"></label>`
+    + `<button type="submit">${escapeHtml(RW.noteSave)}</button></form>`
     + (basisFor === c.id ? `<form class="basis" data-id="${id}"><label for="basis-input">${escapeHtml(W.basisLabel)}</label>`
       + `<input id="basis-input" type="text" value="${escapeHtml(d?.basis || '')}" autocomplete="off">`
       + `<button type="submit" class="primary">Record as different places</button><button type="button" data-act="cancel-basis">Cancel</button>`
@@ -1115,9 +1120,11 @@ $('review-place').addEventListener('click', (e) => {
   else if (act === 'distinct') openBasis(id);
   else if (act === 'undo') decideOn(id, null);
   else if (act === 'cancel-basis') { basisFor = null; render(true); }
+  else if (act === 'flag') { const c = work.candidates.find((x) => x.id === id); flag(work, id, !c?.flagged); unsaved++; render(false); }
 });
 $('review-place').addEventListener('submit', (e) => {
   e.preventDefault();
+  if (e.target.matches('form.note')) return keepNote(e.target);   // Krisis × Methodos
   if (!e.target.matches('form.basis')) return;   // Krisis: gazetteer lookup has a form of its own here
   const basis = $('basis-input').value.trim();
   if (!basis) { $('basis-warn').hidden = false; $('basis-input').focus(); return; }
@@ -1195,6 +1202,80 @@ $('export-candidates').onclick = () => {
   Object.assign(state, { candidates: { setIri: x.setIri, leftOut: x.leftOut, set: x.set, name: x.set ? name : null } });
   render();
 };
+// ---- Krisis × Methodos (#28): WHG's guards, the bulk accept, flags, notes and row states ------------------
+// Nothing is accepted for the reviewer: the bulk accept runs only when its button is pressed, takes the
+// identity type chosen beside it (closeMatch by default), and can be undone at once (undoBatch, which
+// keeps any decision changed since). The order "WHG's guards first" puts the places with a candidate
+// that passes first; the candidates of a place keep their own order.
+let lastBulk = null;
+/** The places in the order chosen. */
+function placeOrder() { return $('review-order')?.value === 'guards' ? guardsFirst(work, reviewPlaces(work)) : reviewPlaces(work); }
+/** The order again (a lookup's batch, a new order chosen), the place on screen kept. */
+function reorder() { const at = order[cursor]; order = placeOrder(); const i = order.indexOf(at); if (i >= 0) cursor = i; }
+function drawBulk() {
+  const box = $('review-bulk');
+  if (!box) return;
+  if (!box.firstChild) {
+    box.innerHTML = `<label for="review-order">${escapeHtml(GW.orderLabel)}</label><select id="review-order">`
+      + Object.entries(GW.orders).map(([k, t]) => `<option value="${k}">${escapeHtml(t)}</option>`).join('') + '</select>'
+      + '<button id="bulk-accept" type="button"></button>'
+      + `<label for="bulk-type">${escapeHtml(GW.typeLabel)}</label><select id="bulk-type">`
+      + ['closeMatch', 'exactMatch', 'related'].map((t) => `<option value="${t}"${t === 'closeMatch' ? ' selected' : ''}>${escapeHtml($('identity-type').querySelector(`option[value="${t}"]`)?.textContent || t)}</option>`).join('') + '</select>'
+      + '<p id="bulk-result" aria-live="polite"></p>';
+    $('review-order').onchange = () => { reorder(); render(false); };
+    $('bulk-accept').onclick = bulkAccept;
+    $('review-bulk').addEventListener('click', (e) => { if (e.target.id === 'bulk-undo') bulkUndo(); });
+  }
+  const plan = planGuarded(work), n = plan.accept.length;
+  $('bulk-accept').textContent = GW.accept(n);
+  $('bulk-accept').disabled = !n || busy || !!looking;
+  const res = $('bulk-result');
+  if (lastBulk?.undone !== undefined) res.textContent = GW.undone(lastBulk.undone);
+  else if (lastBulk) {
+    res.innerHTML = (lastBulk.batch ? `${escapeHtml(GW.accepted(lastBulk.accepted))} <button type="button" id="bulk-undo" class="link">${escapeHtml(GW.undo)}</button> ` : `${escapeHtml(GW.none)} `)
+      + escapeHtml(GW.leftOut(lastBulk.leftOut, lastBulk.several));
+  } else res.textContent = GW.leftOut(plan.leftOut, plan.several);
+}
+function bulkAccept() {
+  if (!work || busy || looking) return;
+  if (!reviewer()) return askName(true, W.nameNeeded);
+  const problem = reviewerProblem(); if (problem) return showWarning(problem);
+  lastBulk = acceptGuarded(work, { reviewer: reviewer(), identityType: $('bulk-type').value });
+  unsaved += lastBulk.accepted;
+  Object.assign(state, { bulk: { ...lastBulk } });
+  reorder(); render(false);
+  $('bulk-undo')?.focus();
+}
+function bulkUndo() {
+  if (!lastBulk?.batch) return;
+  const n = undoBatch(work, lastBulk.batch);
+  lastBulk = { ...lastBulk, undone: n };
+  unsaved++;
+  Object.assign(state, { bulk: { ...lastBulk } });
+  reorder(); render(false);
+}
+/** A looked-up candidate's badge: that it passes WHG's guard, and on what; or why not. */
+function guardHtml(c) {
+  const v = guardOf(c);
+  const how = c.gazetteer?.how ? `<p class="gazetteer">${escapeHtml(VW.foundBy(c.gazetteer.query, c.gazetteer.how))}</p>` : '';
+  return how + (v.pass ? `<p class="badge good">${escapeHtml(GW.passes(v))}</p>` : `<p class="badge">${escapeHtml(GW.fails(v.reason))}</p>`);
+}
+/** The place's row state: reconcile (none), keep without reconciling (filter), leave out of the dataset (exclude). */
+function rowStateHtml(place) {
+  const now = place.rowState || 'reconcile';
+  return `<label class="row-state">${escapeHtml(RW.stateLabel)} <select data-row-state>`
+    + Object.entries(RW.states).map(([k, t]) => `<option value="${k}"${k === now ? ' selected' : ''}>${escapeHtml(t)}</option>`).join('') + '</select></label>';
+}
+function keepNote(form) {
+  const input = form.querySelector('input[name="note"]');
+  noteOn(work, form.dataset.id, input.value); unsaved++;
+}
+$('review-place').addEventListener('change', (e) => {
+  if (!work) return;
+  if (e.target.matches('select[data-row-state]')) { setRowState(work, order[cursor], e.target.value === 'reconcile' ? null : e.target.value); unsaved++; render(false); }
+  else if (e.target.matches('form.note input[name="note"]')) keepNote(e.target.form);
+});
+
 /** Save something made in the page, not by the engine: as save() does, to disk or as a download. */
 async function saveBlob(blob, name) {
   if (window.showSaveFilePicker && !window.__plato_forceDownload) {
@@ -1308,7 +1389,7 @@ function lookupService() {
 }
 function lookupOptions(extra = {}) {
   const km = parseFloat($('lookup-near-km').value);
-  return { places: $('lookup-places').value, allNames: $('lookup-all-names').checked, countries: $('lookup-countries').checked,
+  return { places: $('lookup-places').value, allNames: $('lookup-all-names').checked, variants: $('lookup-variants').checked, countries: $('lookup-countries').checked,
     nearKm: $('lookup-near').checked && km > 0 ? km : null, maxDistanceKm: matchOptions().maxDistanceKm, ...extra };
 }
 /**
@@ -1394,7 +1475,7 @@ async function lookUp({ only = null, query = null, allNames, which } = {}) {
   buttons(true);   // as while the worker runs: Match, Check, Resume and the rest would take the review away under the lookup
   lookupSay(LW.sending(service));
   lookupState({ running: true, done: 0, total: null, stopped: null, summary: null, single: !!only });
-  const show = () => { if (work !== w || $('review').hidden) beginReview(w, name, { focus: false }); else { order = reviewPlaces(work); render(false); } };
+  const show = () => { if (work !== w || $('review').hidden) beginReview(w, name, { focus: false }); else { reorder(); render(false); } };
   let result = null, fault = false, settings = null;
   if (!svc.whg) {
     // Its type, and its address template unless one was given, from its manifest (asked for without a token).
@@ -1567,6 +1648,7 @@ permissions.onChange(() => {
 showTokenState();
 passToken();
 $('lookup-send').onclick = () => lookUp();
+$('lookup-variants-text').textContent = VW.option;
 $('lookup-stop').onclick = () => looking?.abort();
 $('lookup-resume').onclick = () => { $('lookup-resume').hidden = true; if (afterStop) lookUp({ which: 'pending' }); };
 startWorker();

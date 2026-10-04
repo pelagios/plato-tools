@@ -82,7 +82,7 @@ test('planQueries sends the label only, without filters, unless asked; the previ
   const label = planQueries(g.places);
   assert.deepEqual(label.queries.map((q) => q.query), ['Newcastle', 'York', 'Nowhere']);
   assert.ok(label.queries.every((q) => !q.params), 'no filters by default');
-  assert.deepEqual({ ...label.preview, first: undefined, service: undefined }, { places: 3, queries: 3, requests: 1, allNames: false, limit: 10, filters: [], sendsCoordinates: false, nearKm: null, withoutCountries: 0, withoutPoint: 0, withoutName: 0, first: undefined, service: undefined });
+  assert.deepEqual({ ...label.preview, first: undefined, service: undefined }, { places: 3, queries: 3, requests: 1, allNames: false, variants: false, limit: 10, filters: [], sendsCoordinates: false, nearKm: null, withoutCountries: 0, withoutPoint: 0, withoutName: 0, first: undefined, service: undefined });
   // The type in the form the gazetteer module sends WHG (it writes every form of Place as "Place"), so
   // that the preview below is what WHG receives.
   assert.ok(label.queries.every((q) => q.type === 'Place'), 'WHG is always sent its type');
@@ -170,7 +170,9 @@ test('a lookup without a local match makes a version 2 work file, which reads ba
   const top = cands[0];
   assert.equal(top.lookup, record.id);
   assert.equal(top.algorithm_version, LOOKUP_ALGORITHM);
-  assert.deepEqual(top.gazetteer, { service: WHG_ENDPOINT, id: 'place:gn:2641673', score: 100, confidence: 92, match: false, answer_rank: 3, description: 'Country: GB', namespace: 'gn', query: 'Newcastle' });
+  assert.deepEqual(top.gazetteer, { service: WHG_ENDPOINT, id: 'place:gn:2641673', score: 100, confidence: 92, match: false, answer_rank: 3, description: 'Country: GB', namespace: 'gn', query: 'Newcastle',
+    // What WHG's guard needs (guards.js), judged in the answer that found it: not the top there (answer_rank 3), so no tie is judged.
+    dice: null, withheld: false, tie: null });
   assert.deepEqual(top.other.source, { title: 'World Historical Gazetteer', uri: 'https://whgazetteer.org/' });
   assert.equal(cands[2].far, true);
   assert.equal(top.far, undefined);

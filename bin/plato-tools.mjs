@@ -275,6 +275,9 @@ does not apply to):
                     answered), or unlinked (not yet linked to the gazetteer).
   --all-names       lookup: also send each place's other names, one query each (the label only
                     by default).
+  --variants        lookup: also send forms of each name, one query each, at most 10 a place:
+                    "Melford, Long" inverted, "X, or Y" as each, brackets removed, and its head
+                    word last. A candidate found only by its head word never passes WHG's guards.
   --countries       lookup: send each place's own countries as a filter. A filter leaves out
                     every candidate outside it, the right one too if the data is wrong.
   --near KM         lookup: send each place's point and a radius of KM kilometres as a filter
@@ -283,6 +286,8 @@ does not apply to):
   --limit N         lookup: the most candidates asked for, for each query (default 10).
   --batch N         lookup: queries in one request, 1 to 50 (default 25).
   --dry-run         lookup: say what would be sent, and the first queries exactly; send nothing.
+                    With --review, also how many places have exactly one candidate passing
+                    WHG's guards. They are never accepted here: that is done on the page only.
   --json            print one JSON object per input, one per line, then one for the total.
                     Its "columns", for a table of places, is a list of {column, field, reason},
                     with pattern, level, or separator, levels and firstIsName where the field
@@ -378,7 +383,7 @@ async function main(argv) {
         'others-title': { type: 'string' },
         candidates: { type: 'string', multiple: true }, 'previous-candidates': { type: 'string', multiple: true }, 'set-iri': { type: 'string' },
         georef: { type: 'string', multiple: true }, manifest: { type: 'string', multiple: true },
-        gazetteer: { type: 'string' }, places: { type: 'string' }, 'all-names': { type: 'boolean', default: false }, countries: { type: 'boolean', default: false },
+        gazetteer: { type: 'string' }, places: { type: 'string' }, 'all-names': { type: 'boolean', default: false }, variants: { type: 'boolean', default: false }, countries: { type: 'boolean', default: false },
         near: { type: 'string' }, limit: { type: 'string' }, batch: { type: 'string' }, 'dry-run': { type: 'boolean', default: false }, token: { type: 'string' },
         'token-env': { type: 'string' }, 'gazetteer-iri': { type: 'string' },
         'work-dir': { type: 'string' }, json: { type: 'boolean', default: false }, brief: { type: 'boolean', default: false },
@@ -430,7 +435,7 @@ async function main(argv) {
   if (action === 'match' || action === 'apply') return review(action, args, o, resources);
   if (action === 'lookup') return lookupCommand(args, o, resources);
   // (--limit, for lookup and preview, is refused above for any other command.)
-  if (o.gazetteer || o.places || o['all-names'] || o.countries || o.near || o.batch || o['dry-run'] || o['token-env'] || o['gazetteer-iri']) return usage('--gazetteer, --token-env, --gazetteer-iri, --places, --all-names, --countries, --near, --batch and --dry-run are for lookup.');
+  if (o.gazetteer || o.places || o['all-names'] || o.variants || o.countries || o.near || o.batch || o['dry-run'] || o['token-env'] || o['gazetteer-iri']) return usage('--gazetteer, --token-env, --gazetteer-iri, --places, --all-names, --variants, --countries, --near, --batch and --dry-run are for lookup.');
   if (o.with || o.threshold || o['max-distance'] || o.top || o.review || o.output || o.reviewer || o.orcid || o['others-title'] !== undefined) return usage('--with, --threshold, --max-distance, --top, --review, --output, --reviewer, --orcid and --others-title are for match and apply.');
   if (!reads && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, preview, cluster, compare, publish, match, apply, lookup, candidates and datacube.`);
   // Elenchos: candidate sets checked together, with no other input: the first is checked, with the others
@@ -1109,10 +1114,18 @@ async function lookupCommand(args, o, resources) {
     const differ = await filesDiffer(work.subjects, input.files);
     if (differ.length) r.warnings.push(`The work file was made from other files than ${differ.join(', ')}: its places may no longer match the data.`);
   }
-  const options = { service, places: o.places, allNames: o['all-names'], countries: o.countries, nearKm: near, limit, maxDistanceKm };
+  const options = { service, places: o.places, allNames: o['all-names'], variants: o.variants, countries: o.countries, nearKm: near, limit, maxDistanceKm };
   if (o['dry-run']) {
     // Planned as the lookup would plan it: in requests of --batch, or the gazetteer module's 25.
     r.preview = planLookup({ lookup: { batchSize: batch ?? 25 }, work, places: gathered.places, options }).preview;
+    // Krisis × Methodos: what the page's bulk accept would take, counted only. The command line never accepts.
+    if (work) {
+      const { planGuarded } = await import('../src/engine/krisis/guards.js');
+      const { guardWords } = await import('../src/engine/words.js');
+      const p = planGuarded(work);
+      r.guarded = { pass: p.accept.length, leftOut: { far: p.leftOut.far, ccodes: p.leftOut.ccodes, total: p.leftOut.total }, several: p.several };
+      r.warnings.push(guardWords.dryRun(p.accept.length, p.leftOut));
+    }
     r.status = 'ok';
     host.cleanup();
     return finishUp();

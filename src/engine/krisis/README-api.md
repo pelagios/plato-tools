@@ -175,3 +175,28 @@ words them all.
 - worker.js `cmd: 'places'` `{ subjects, options: { base, columns? } }` → `{ type: 'places', subjects, places, report }`
   (`gather()`), for `runLookup`'s `places`; the lookup itself runs on the page's thread.
 - words.js `lookupPage` (the panel, progress, the review screen's additions, what Finish cites).
+
+## Krisis × Methodos (#28): WHG's guards, bulk accept, query variants, flags, notes, row states
+
+- `src/engine/krisis/guards.js` (pure): `guard(candidate, answer, { threshold = 90, forms, headWord })
+  -> { pass, exact, score, confidence, dice, withheld, tie, top, reason }` — WHG's rule (whg3
+  whg/webpack/js/reconciliation.js:5857-6000): (exact OR score ≥ threshold) AND not withheld AND no tie,
+  the top of its answer only; reason `not-top | head-word | weak | withheld | tie`. `dice(a, b)`,
+  `diceForm(s)`, `isLatin(s)`, `bestDice(forms, cand)`, `withheldOf(cand, forms)`, `tieOf(answer)`.
+  `guardOf(workCandidate)` — the same verdict from what mergeAnswers stored (`not-recorded` for a local
+  candidate or an older file). `passing(work, iri)`, `guardsFirst(work, order)`.
+  `planGuarded(work) -> { accept, leftOut: { far, ccodes, total, examples }, several }` (changes nothing),
+  `acceptGuarded(work, { reviewer, identityType = 'closeMatch', at, threshold }) -> { batch, accepted,
+  leftOut, several }` (page only: the CLI prints planGuarded's count with `lookup --dry-run --review`),
+  `undoBatch(work, 'bN') -> cleared` (only decisions still carrying the batch).
+- `names.js`: `queryVariants(name) -> [{ text, how }]`, how `given | brackets | alternative | inverted |
+  head-word` (head words last), at most `MAX_VARIANTS` (10); `INVERSION_QUALIFIERS`. Lookup option
+  `variants` (page checkbox, CLI `--variants`); a candidate found only by a head-word query never passes.
+- `work.js`: `flag(work, id, on)`, `noteOn(work, id, text)`, `setRowState(work, placeKey, 'filter' |
+  'exclude' | null)`, `excludedPlaces(work)`, `ROW_STATES`. FILTER: selectPlaces skips it, still written.
+  EXCLUDE: apply leaves it out (no attestations, not in the dataset; report item `left-out-by-reviewer`,
+  `counts.leftOut`, result `leftOut: [iri…]`) and passes `expectMissing` to the version check.
+- `compare(…, { options: { expectMissing: [place IRI…] } })`: those places' earlier rows are set aside
+  (`counts.leftOut`, attestations), and any still in the later version is `expected-missing-present`.
+- pipeline `options.augment(record)` may return null to leave the record out of the output.
+- Work-file fields (optional on version 2): see the top of work.js.

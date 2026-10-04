@@ -29,6 +29,17 @@
 // `gazetteer: { service, id, score, confidence, match, answer_rank, description, namespace, query }`,
 // the service's own figures, kept apart from Krisis's similarity_score. `attribution` is the
 // service's, verbatim (a null stays null). readWork reads version 1 and gives it back as version 2.
+//
+// Krisis × Methodos (#28) adds OPTIONAL fields to version 2 (a file without them reads as before, and
+// one with them is still version 2; see checkMethodos): a place's `rowState: 'filter' | 'exclude'`
+// (none: reconcile); a candidate's `flagged: true` and `note` (text, kept in the work file only, never
+// written to the dataset); in a looked-up candidate's `gazetteer`, what WHG's guard needs (guards.js):
+// `dice` (number | null), `withheld` (boolean), `tie` (boolean, or null when it was not the top of its
+// answer), `head_word_only: true`, `how` (the form of the name that found it, names.js queryVariants,
+// when not the name as given); a decision's `guard` ({ rule, threshold, exact, score, confidence, dice })
+// and `batch` ('b1', …) when the bulk accept made it; a lookup query's `variants: [{ text, how }]`
+// (aligned with `sent`) and a lookup's `parameters.variants`; and `batches: [{ id, at, identityType,
+// threshold, accepted, leftOut: { far, ccodes, total }, undone? }]`.
 import { DataError } from '../input.js';
 import { fileSha256 } from './digest.js';
 import { isWhg, WHG_ENDPOINT } from '../gazetteer/index.js';
@@ -167,6 +178,7 @@ export function readWork(text) {
   if (w.reviewer !== undefined && w.reviewer !== null) { try { checkReviewer(w.reviewer); } catch (e) { bad(e.message[0].toLowerCase() + e.message.slice(1)); } }
   if (w.cursor !== undefined && !(Number.isInteger(w.cursor) && w.cursor >= 0)) bad('its place in the review (cursor) is not a count.');
   checkLookups(w, bad);
+  checkMethodos(w, bad);
   // WHG by its one address (canonicalEndpoint), however a file wrote it; nothing given is changed in place.
   const lookups = (w.lookups ?? []).map((l) => (canonicalEndpoint(l.service.endpoint) === l.service.endpoint ? l : { ...l, service: { ...l.service, endpoint: canonicalEndpoint(l.service.endpoint) } }));
   const candidates = w.candidates.map((c) => (typeof c.gazetteer?.service === 'string' && canonicalEndpoint(c.gazetteer.service) !== c.gazetteer.service ? { ...c, gazetteer: { ...c.gazetteer, service: canonicalEndpoint(c.gazetteer.service) } } : c));
@@ -202,6 +214,61 @@ function checkLookups(w, bad) {
     if (!isObject(c.gazetteer)) bad(`candidate ${c.id} comes from a lookup but has no gazetteer figures (gazetteer).`);
   }
 }
+
+// ---- Krisis × Methodos (#28): optional fields of version 2 ------------------------------------------------
+export const ROW_STATES = ['filter', 'exclude'];
+const BATCH = /^b[1-9]\d*$/;
+/** The optional fields Methodos adds, checked when present (see the top of this file). */
+function checkMethodos(w, bad) {
+  for (const [iri, p] of Object.entries(w.places)) if (p.rowState !== undefined && p.rowState !== null && !ROW_STATES.includes(p.rowState)) bad(`the place ${iri} has a row state that is not filter or exclude (rowState).`);
+  for (const c of w.candidates) {
+    if (c.flagged !== undefined && typeof c.flagged !== 'boolean') bad(`candidate ${c.id} has a flag that is not true or false (flagged).`);
+    if (c.note !== undefined && typeof c.note !== 'string') bad(`candidate ${c.id} has a note that is not text (note).`);
+    const g = c.gazetteer;
+    if (isObject(g)) {
+      if (g.withheld !== undefined && typeof g.withheld !== 'boolean') bad(`candidate ${c.id} does not say whether WHG's guard withholds it as true or false (gazetteer.withheld).`);
+      if (g.tie !== undefined && g.tie !== null && typeof g.tie !== 'boolean') bad(`candidate ${c.id} does not say whether it is tied as true, false or null (gazetteer.tie).`);
+      if (g.dice !== undefined && g.dice !== null && !(typeof g.dice === 'number' && g.dice >= 0 && g.dice <= 1)) bad(`candidate ${c.id} has a Dice coefficient that is not between 0 and 1 (gazetteer.dice).`);
+    }
+    const d = c.decision;
+    if (isObject(d)) {
+      if (d.batch !== undefined && !(typeof d.batch === 'string' && BATCH.test(d.batch))) bad(`candidate ${c.id} names a batch that is not b1, b2, … (decision.batch).`);
+      if (d.guard !== undefined && !(isObject(d.guard) && typeof d.guard.rule === 'string')) bad(`candidate ${c.id} has a guard that does not name its rule (decision.guard).`);
+      if (d.batch !== undefined && d.kind !== 'match') bad(`candidate ${c.id} is in a batch of the bulk accept, which only accepts, but is ${d.kind}.`);
+    }
+  }
+  if (w.batches !== undefined && !(Array.isArray(w.batches) && w.batches.every((b) => isObject(b) && typeof b.id === 'string' && BATCH.test(b.id)))) bad('its batches of the bulk accept are not listed as b1, b2, … (batches).');
+  for (const l of w.lookups || []) for (const [iri, q] of Object.entries(l.queries || {})) {
+    if (q.variants !== undefined && !(Array.isArray(q.variants) && q.variants.length === q.sent.length && q.variants.every((v, i) => isObject(v) && v.text === q.sent[i] && typeof v.how === 'string')))
+      bad(`lookup ${l.id} records forms of the names of ${iri} that are not what it sent (variants).`);
+  }
+}
+const candidateOf = (work, id) => { const c = work.candidates.find((x) => x.id === id); if (!c) throw new Error(`No candidate ${id}`); return c; };
+/** Flag a candidate for a second look (on: true), or take the flag away. */
+export function flag(work, candidateId, on) {
+  const c = candidateOf(work, candidateId);
+  if (on) c.flagged = true; else delete c.flagged;
+  return c;
+}
+/** The reviewer's note on a candidate, kept in the work file only (never written to the dataset); empty text takes it away. */
+export function noteOn(work, candidateId, text) {
+  const c = candidateOf(work, candidateId), t = typeof text === 'string' ? text.trim() : '';
+  if (t) c.note = t; else delete c.note;
+  return c;
+}
+/**
+ * A place's row state: 'filter' (kept without reconciling: never looked up, still written), 'exclude'
+ * (left out of the dataset finishing writes, which the version check is told to expect), or null
+ * (reconcile, as every place is by default).
+ */
+export function setRowState(work, placeKey, state) {
+  if (!Object.hasOwn(work.places, placeKey)) throw new Error(`No place ${placeKey}`);
+  if (state !== null && !ROW_STATES.includes(state)) throw new Error(`Not a row state: ${state}`);
+  if (state) work.places[placeKey].rowState = state; else delete work.places[placeKey].rowState;
+  return work.places[placeKey];
+}
+/** The places the reviewer leaves out of the dataset (row state 'exclude'), in review order. */
+export const excludedPlaces = (work) => Object.keys(work.places).filter((iri) => work.places[iri].rowState === 'exclude');
 
 /** A work file's text. */
 export function serialiseWork(work) { return JSON.stringify(work, null, 2) + '\n'; }

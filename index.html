@@ -162,6 +162,8 @@
       <label for="lookup-places">Which places</label>
       <select id="lookup-places"></select>
       <label><input id="lookup-all-names" type="checkbox"> Also send each place's other names, one query each (the preview shows the cost)</label>
+      <!-- Krisis × Methodos: query variants (opt-in); its words are words.js variantWords, put in by src/app.js. -->
+      <label><input id="lookup-variants" type="checkbox"> <span id="lookup-variants-text"></span></label>
       <fieldset class="lookup-filters">
         <legend>Filters, each off unless you turn it on</legend>
         <label><input id="lookup-countries" type="checkbox"> Only candidates in the place's own countries. This is a filter: it hides everything outside it, including the right answer if the countries are wrong.</label>
@@ -266,6 +268,8 @@
         <option value="related">a related place</option>
       </select>
     </div>
+    <!-- Krisis × Methodos: the order of the places, and the bulk accept of what passes WHG's guards; drawn by src/app.js (words.js guardWords). -->
+    <div id="review-bulk" class="review-bulk"></div>
     <p id="review-warning" class="warn" hidden></p>
     <article id="review-place" tabindex="-1" aria-labelledby="review-subject"></article>
     <div class="review-nav">
