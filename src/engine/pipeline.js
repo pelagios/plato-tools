@@ -567,9 +567,10 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   // the writer or sink (another tool appending its attestations to the places they are about), after
   // the record has been checked and counted as read. Its additions are the caller's to check. A
   // caller may return null to leave the record out of the output (Krisis: a place the reviewer leaves
-  // out of the dataset); then nothing of it is written.
+  // out of the dataset); then nothing of it is written. A record read as null (an item of the file
+  // that is not a place) is not left out by being passed through as null: it is written as before.
   const augmented = (ev) => (options.augment && ev.type === 'record' ? { ...ev, value: options.augment(ev.value) } : ev);
-  const write = async (ev) => { const out = augmented(ev); if (out.type === 'record' && out.value === null) return; await writer.event(out); };
+  const write = async (ev) => { const out = augmented(ev); if (out.type === 'record' && out.value === null && ev.value !== null) return; await writer.event(out); };
   const res = env.resources;
   const progress = env.progress || (() => {});
   const t0 = Date.now();
