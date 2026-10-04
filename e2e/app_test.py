@@ -4838,10 +4838,10 @@ def iiif_checks(pw, url, tmp):
     def come_back():
         KEPT_MAPS = '''async () => { const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('chora-overlays'); const out = [];
           for await (const h of d.values()) { const x = JSON.parse(await (await h.getFile()).text()); out.push({ key: x.key, visible: x.visible, opacity: x.opacity }); } return out; }'''
-        # The map is shown, and kept as shown, before the reload: the check before this one ticked "Show" last,
-        # and the record is written after the tick, not with it (a reload at once would find it kept hidden).
+        # To begin with: the map shown, and kept as shown, every write of it on disk (the check before this one ticked "Show" last).
         grid_key = next(o['key'] for o in cstate(page)['overlays'] if o['annotationId'] == grid_id)
-        kept_shown = soon(page, 'k => window.__chora.overlays.some((o) => o.key === k && o.visible)', 10, grid_key) and soon(page, f'async (k) => ({KEPT_MAPS})().then((m) => m.some((x) => x.key === k && x.visible === true))', 10, grid_key)
+        kept_shown = (soon(page, 'k => window.__chora.overlays.some((o) => o.key === k && o.visible)', 10, grid_key) and soon(page, '() => !(window.__chora.overlayWrites > 0)', 10)
+                      and soon(page, f'async (k) => ({KEPT_MAPS})().then((m) => m.some((x) => x.key === k && x.visible === true))', 10, grid_key))
         page.reload(); ready()
         back = shown(grid_id)
         # Said on failure: what is kept of each map (shown or hidden), what the page shows, and where the map is.
@@ -4849,6 +4849,37 @@ def iiif_checks(pw, url, tmp):
         view = page.evaluate('() => { const m = window.__chora_map; return { zoom: m.getZoom(), center: m.getCenter().toArray() }; }')
         return kept_shown and back and at_origin(census(), B) == [], {'kept as shown before': kept_shown, 'came back': back, 'kept': kept_maps, 'overlays': cstate(page)['overlays'], 'view': view}
     attempt('Chora maps: a map shown comes back on the next load', come_back)
+
+    def tick_and_reload(show):
+        """Untick (show False) or tick "Show" and reload at once, while the record's write is still open: every
+        close() of a writable is held, so the page goes before its write reaches the disk (a reload within
+        milliseconds of the tick). Returns what came back, and that the write was indeed held."""
+        KEPT = '''async (k) => { const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('chora-overlays');
+          return JSON.parse(await (await (await d.getFileHandle(k + '.json')).getFile()).text()).visible; }'''
+        soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.mapId)', 30, grid_id)
+        grid_key = next(o['key'] for o in cstate(page)['overlays'] if o['annotationId'] == grid_id)
+        box = f'#overlay-list li[data-overlay="{grid_key}"] input[data-show]'
+        settled = soon(page, '() => !(window.__chora.overlayWrites > 0)', 10) and page.evaluate(KEPT, grid_key) == (not show) and page.is_checked(box) == (not show)
+        page.evaluate('() => { FileSystemWritableFileStream.prototype.close = function () { return new Promise(() => {}); }; }')
+        page.check(box) if show else page.uncheck(box)
+        held = {'writes in flight': page.evaluate('() => window.__chora.overlayWrites'), 'on disk': page.evaluate(KEPT, grid_key)}
+        page.reload(); ready()
+        back = soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.mapId)', 30, grid_id)
+        o = next((x for x in cstate(page)['overlays'] if x['annotationId'] == grid_id), {})
+        return {'settled before': settled, 'held': held['on disk'] == (not show), 'held detail': held,
+                'came back': back, 'visible': o.get('visible'), 'box ticked': page.is_checked(box) if back else None,
+                'drawn': shown(grid_id) if show and back else None}
+    def hidden_at_once():
+        # The control: a map hidden and the page reloaded at once comes back hidden (so the check below can see one).
+        r = tick_and_reload(False)
+        return r['settled before'] and r['held'] and r['came back'] and r['visible'] is False and r['box ticked'] is False, r
+    attempt('Chora maps: a map hidden and the page reloaded at once, before its record is written, comes back hidden (the control)', hidden_at_once)
+    def shown_at_once():
+        r = tick_and_reload(True)
+        if r['came back'] and r['visible'] is not True:   # left as the checks after this one expect: shown
+            page.check(f'#overlay-list li[data-overlay="{next(o["key"] for o in cstate(page)["overlays"] if o["annotationId"] == grid_id)}"] input[data-show]')
+        return r['settled before'] and r['held'] and r['came back'] and r['visible'] is True and r['box ticked'] is True and r['drawn'], r
+    attempt('Chora maps: a map ticked "Show" and the page reloaded at once, before its record is written, comes back shown', shown_at_once)
 
     def withdraw():
         back = shown(grid_id)

@@ -1424,7 +1424,18 @@ and reaches nothing.
   polynomial's order, and would draw an order-2 map at order 1. Maps shown are kept in OPFS
   (`chora-overlays/`, working data: cleared at the next load when the user keeps none) and admitted
   afresh on the next load; a change of basemap puts them back in a new layer without fetching
-  anything. **A permission withdrawn** takes its maps off the map at once (they stay kept, and come
+  anything. **What is shown survives a reload made at once**: ticking "Show" or moving the opacity
+  (`keepShown`) writes the map's record from the copy `overlays.js` holds, in turn with every other
+  write of that map (one queue per map, so a later write never lands under an earlier one and a map
+  let go is not written back), and notes the new state at once, synchronously, in sessionStorage
+  (`chora-overlays-shown`, this tab's only, let go once the record holding it is on disk). An OPFS
+  file is written only when its writable closes, so a reload within those milliseconds (or, before
+  the fix of 4 October 2026, while the folder was still being read first) brought a map back hidden;
+  `kept()` reads the note over the record. `window.__chora.overlayWrites` counts the writes not yet
+  on disk (as `draftWrites` does for drawings), and a reload for a permission waits for them
+  (`keptWritten`). The unit test (`test/chora-overlays-kept.test.js`) holds a fake OPFS's close to
+  stand for the reload; the browser checks hold `FileSystemWritableFileStream.prototype.close` and
+  reload at once, hiding (the control: back hidden) and showing (back shown). **A permission withdrawn** takes its maps off the map at once (they stay kept, and come
   back once it is allowed again); tiles the renderer has already asked for cannot be called back.
   Each map's row names its image's site, with a "Permissions…" button that opens the panel there.
 - **Why tiles cannot be guarded request by request** (the spike of 2026-09-30, @allmaps/maplibre
@@ -1966,7 +1977,7 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   says that following one is a visit the user makes, outside the permissions.
 - **Working data.** "Keep my working data between visits" (on by default,
   `plato-tools.keep-working-data` is `no` when off): off, Chora clears its drawings not saved, its
-  last output and the historical maps it keeps (`chora-overlays/`) at the next load (not at a reload for a permission), and the output once saved to disk.
+  last output and the historical maps it keeps (`chora-overlays/`, and their notes in sessionStorage) at the next load (not at a reload for a permission), and the output once saved to disk.
   The dataset's working copy, in Chora's SQLite pool, is cleared at every start anyway (`clearOnInit`).
 - **Persistent storage.** "Keep large datasets' working files (ask the browser for persistent
   storage)" calls `navigator.storage.persist()` once, when the user ticks it, never on load (Firefox

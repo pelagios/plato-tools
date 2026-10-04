@@ -425,26 +425,103 @@ export function waitRefused(need, state) {
 
 // ---- Keeping the maps shown --------------------------------------------------------------------
 
+// A map's record is written in turn with every other write of it (one queue per map, so a later write
+// never lands under an earlier one, and a map let go is not written back), from the record held here
+// (`records`), never from a read of the folder first. A change of what is shown (keepShown: Show
+// ticked, the opacity moved) is also noted at once, synchronously, in sessionStorage (NOTE), and the
+// note let go once the record holding it is on disk: a file is written only when its writable closes,
+// so a reload within those milliseconds would otherwise find the map as it was (hidden, say). kept()
+// reads a note over its record. sessionStorage is this tab's, and lasts through a reload, not a visit.
 const DIR = 'chora-overlays';
+const NOTE = 'chora-overlays-shown';
 async function dir() { return (await navigator.storage.getDirectory()).getDirectoryHandle(DIR, { create: true }); }
 /** A file name for a map: a hash of its georeference's id (or its image's). */
 export async function keyOf(g) {
   const d = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(g.annotationId || g.imageServiceId)));
   return [...d.slice(0, 12)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
-/** Keep a map shown: { key, item, manifest, manifestUrl, fetchedAt, opacity, visible, added }. */
-export async function keep(entry) {
-  const w = await (await (await dir()).getFileHandle(`${entry.key}.json`, { create: true })).createWritable();
-  await w.write(JSON.stringify({ version: 1, ...entry }));
+const records = new Map();   // key → the record as last kept or read (written from here)
+const queues = new Map();    // key → the writes of that map, in turn
+let writing = 0;
+/** How many writes of the maps kept are not yet on disk (for tests to wait on, like app.js's draftWrites). */
+export const writesPending = () => writing;
+/** Resolves once every write of the maps kept queued so far is done (before a reload for a permission). */
+export const keptWritten = () => Promise.all([...queues.values()]);
+function inTurn(key, job) {
+  writing++;
+  // Counted down before the caller's await resumes, so that writesPending() is current after it.
+  const run = (queues.get(key) || Promise.resolve()).then(job).finally(() => { writing--; if (queues.get(key) === settled) queues.delete(key); });
+  const settled = run.catch(() => {});
+  queues.set(key, settled);
+  return run;
+}
+function notes() { try { const n = JSON.parse(sessionStorage.getItem(NOTE) || '{}'); return n && typeof n === 'object' && !Array.isArray(n) ? n : {}; } catch { return {}; } }
+function setNote(key, shown) {
+  try {
+    const n = notes();
+    if (shown) n[key] = shown; else delete n[key];
+    if (Object.keys(n).length) sessionStorage.setItem(NOTE, JSON.stringify(n)); else sessionStorage.removeItem(NOTE);
+  } catch { /* storage refused: the write alone keeps it */ }
+}
+const shownOf = (x) => ({ opacity: x.opacity, visible: x.visible });
+async function write(rec) {
+  const w = await (await (await dir()).getFileHandle(`${rec.key}.json`, { create: true })).createWritable();
+  await w.write(JSON.stringify(rec));
   await w.close();
 }
-export async function letGo(key) { try { await (await dir()).removeEntry(`${key}.json`); } catch {} }
-/** The maps kept, oldest first. */
+// Writes the map's record as it is now (the latest change, however many were queued), then lets its note go
+// if what was written is what the note says.
+function writeLatest(key) {
+  return inTurn(key, async () => {
+    const rec = records.get(key);
+    if (!rec) return;   // let go meanwhile
+    await write(rec);
+    const n = notes()[key];
+    if (n && n.opacity === rec.opacity && n.visible === rec.visible) setNote(key, null);
+  });
+}
+/** Keep a map shown: { key, item, manifest, manifestUrl, fetchedAt, opacity, visible, added }. */
+export function keep(entry) {
+  records.set(entry.key, { version: 1, ...entry });
+  return writeLatest(entry.key);
+}
+/**
+ * A kept map's opacity and whether it is shown, changed: noted at once (it is what a reload finds),
+ * and its record written in turn. A map not kept (let go, or never kept) is not written.
+ */
+export function keepShown(key, shown) {
+  const rec = records.get(key);
+  if (!rec) return Promise.resolve();
+  records.set(key, { ...rec, ...shownOf(shown) });
+  setNote(key, shownOf(shown));
+  return writeLatest(key);
+}
+export function letGo(key) {
+  records.delete(key); setNote(key, null);
+  return inTurn(key, async () => { try { await (await dir()).removeEntry(`${key}.json`); } catch {} });
+}
+/** Let every map kept go, and its notes (the user keeps no working data between visits). */
+export async function forgetKept() {
+  await keptWritten();
+  records.clear();
+  try { sessionStorage.removeItem(NOTE); } catch {}
+  try { await (await navigator.storage.getDirectory()).removeEntry(DIR, { recursive: true }); } catch { /* none kept */ }
+}
+/** The maps kept, oldest first, each as last shown (a note read over its record). */
 export async function kept() {
-  const out = [];
+  const out = [], n = notes();
   try {
     for await (const h of (await dir()).values()) {
-      try { const e = JSON.parse(await (await h.getFile()).text()); if (e?.version === 1 && e.item) out.push(e); } catch {}
+      try {
+        const e = JSON.parse(await (await h.getFile()).text());
+        if (e?.version !== 1 || !e.item) continue;
+        if (queues.has(e.key) && !records.has(e.key)) continue;   // being let go
+        const note = n[e.key];
+        const latest = queues.has(e.key) && records.has(e.key) ? records.get(e.key)   // being written: what is being written
+          : note ? { ...e, ...shownOf(note) } : e;
+        records.set(e.key, latest);
+        out.push({ ...latest });
+      } catch {}
     }
   } catch {}
   return out.sort((a, b) => String(a.added).localeCompare(String(b.added)));

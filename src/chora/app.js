@@ -31,6 +31,8 @@ import { version as toolsVersion } from '../../package.json';
 
 const $ = (id) => document.getElementById(id);
 const state = (window.__chora = { phase: 'loading', placeId: null, pendingCount: 0, basemap: null, mapReadyCount: 0, blocked: 0, lastSave: null, overlays: [] });
+// The writes of the historical maps kept not yet on disk (overlays.js), for tests to wait on, like draftWrites.
+Object.defineProperty(state, 'overlayWrites', { get: ov.writesPending, enumerable: true });
 const PAGE = 50;
 let showing = false;   // true while the drawings shown are being replaced
 let worker, files = [], fp = null, dataset = null, drafts = [], view = null, total = 0, query = '';
@@ -1063,10 +1065,8 @@ $('overlay-list').addEventListener('click', (e) => {
     ov.letGo(key).then(() => { state.overlays = state.overlays.filter((x) => x.key !== key); renderMaps(); updateTraceButtons(); });
   }
 });
-async function keepOverlay(o) {
-  const k = (await ov.kept()).find((x) => x.key === o.key);
-  if (k) ov.keep({ ...k, opacity: o.opacity, visible: o.visible }).catch(() => {});
-}
+// Noted at once and written in turn (overlays.js keepShown), so that a reload straight after the tick finds it.
+function keepOverlay(o) { ov.keepShown(o.key, o).catch((err) => console.warn('Chora: the map could not be kept', err)); }
 /**
  * The maps kept from last time (and any withdrawn and allowed again), admitted afresh: those whose
  * permissions may be asked now are shown; the permissions the others need are asked for together, so
@@ -1186,6 +1186,7 @@ permissions.mount({ state }).then((r) => {
 permissions.onBeforeReload(async () => {
   state.phase = 'reloading';
   await draftsWritten();
+  await ov.keptWritten();
   const m = mapApi.map;
   // And the historical map pasted waiting on the permissions (it is added after the reload), whether maps
   // kept wait too (they are looked at again after every load), and what is typed in its box.
@@ -1229,7 +1230,8 @@ startWorker().then(async () => {
   if (!permissions.keepWorkingData()) {
     await forgetAllDrafts();
     // The historical maps shown last time (chora-overlays/) are working data too, as the panel says.
-    for (const dir of ['chora-outputs', 'chora-overlays']) { try { await (await navigator.storage.getDirectory()).removeEntry(dir, { recursive: true }); } catch { /* none kept */ } }
+    try { await (await navigator.storage.getDirectory()).removeEntry('chora-outputs', { recursive: true }); } catch { /* none kept */ }
+    await ov.forgetKept();
     state.workingCleared = true;
   }
   inTurn(() => readmitKept());
