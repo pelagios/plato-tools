@@ -173,8 +173,8 @@ const lastState = (work, iri, service) => lastQuery(work, iri, service)?.query.s
 export function selectPlaces({ work = null, places = null, which, service, only } = {}) {
   let list = places ? places : Object.entries(work?.places || {}).map(([iri, p]) => ({ iri, ...p }));
   if (only) { const keep = new Set(only); list = list.filter((p) => keep.has(p.iri)); }
-  // Krisis × Methodos: a place the reviewer keeps without reconciling (row state 'filter') is never looked up.
-  list = list.filter((p) => (work?.places?.[p.iri]?.rowState ?? p.rowState) !== 'filter');
+  // Krisis × Methodos: a place kept without reconciling ('filter') or left out of the dataset ('exclude') is never looked up.
+  list = list.filter((p) => (work?.places?.[p.iri]?.rowState ?? p.rowState) !== 'filter' && (work?.places?.[p.iri]?.rowState ?? p.rowState) !== 'exclude');
   const cands = work?.candidates || [];
   const choose = which ?? defaultChoice(work);
   if (!PLACE_CHOICES.includes(choose)) throw new TypeError(`Not a choice of places: ${choose}`);

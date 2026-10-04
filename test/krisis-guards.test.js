@@ -302,6 +302,8 @@ test('FILTER: never looked up (selectPlaces skips it), still written', async () 
   assert.deepEqual(pick(work), [A('newcastle'), A('leeds')]);
   setRowState(work, A('york'), null);
   assert.deepEqual(pick(work), [A('newcastle'), A('york'), A('leeds')], 'control: reconciled again, it is chosen');
+  setRowState(work, A('york'), 'exclude');
+  assert.deepEqual(pick(work), [A('newcastle'), A('leeds')], 'EXCLUDE: left out of the dataset, so not looked up either');
   setRowState(work, A('york'), 'filter');
   const g = await gathered(THREE());
   const fake = fakeWhg(byName({ Newcastle: NEWCASTLE, York: YORK }));
