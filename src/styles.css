@@ -361,6 +361,33 @@ kbd { font: .8em var(--font-mono); border: 1px solid var(--line); border-bottom-
 .basis label { flex-basis: 100%; font-size: .95rem; }
 .basis input { flex: 1 1 14rem; }
 .basis .warn { flex-basis: 100%; margin: 0; }
+/* Krisis: region review (Methodos #28, stages 3 and 4). */
+.regions { border: 1px solid var(--line); border-radius: 8px; padding: .5rem .75rem; margin: .75rem 0; }
+.regions h3 { margin: 0 0 .25rem; font-size: 1.15rem; }
+.regions h3:focus { outline: none; }
+.regions-nav { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .4rem; margin: .4rem 0; }
+.regions-nav .sep { color: var(--muted); }
+.regions-nav button { padding: .25rem .6rem; font-variant-numeric: lining-nums tabular-nums; }
+.regions-nav button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.regions-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; }
+.regions-confirm { border-left: 4px solid var(--gold); padding: .25rem .6rem; margin: .5rem 0; }
+.regions-confirm[hidden] { display: none; }
+.regions-confirm p { margin: 0 0 .4rem; font-weight: 700; }
+.regions-status { margin: .4rem 0; }
+.region { border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 8px; padding: .5rem .75rem; margin: .5rem 0; }
+.region.region-settled { border-left-color: var(--tool-band); }
+.region.region-locked { color: var(--muted); }
+.region:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.region h5 { margin: 0; font: 700 1.05rem/1.3 var(--font-text); overflow-wrap: anywhere; }
+.region p { margin: .15rem 0; overflow-wrap: anywhere; }
+.region .candidate h6 { margin: 0; font: 700 1rem/1.3 var(--font-text); overflow-wrap: anywhere; }
+.region > .acts, .region-relax { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin-top: .4rem; }
+.region-relax p { flex-basis: 100%; margin: 0; }
+.region-where, .region-constraint { color: var(--muted); font-size: .95rem; }
+.region-locked { margin: .25rem 0; padding-left: 1.2rem; }
+.region-locked li { margin: .15rem 0; overflow-wrap: anywhere; }
+.regions-offer { margin-top: .5rem; }
+.regions-offer[hidden] { display: none; }
 .review-nav { display: flex; flex-wrap: wrap; gap: .5rem; }
 .review-keys { color: var(--muted); font-size: .9rem; }
 .review-end { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; border-top: 1px solid var(--line); padding-top: .75rem; }

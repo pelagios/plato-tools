@@ -1028,3 +1028,90 @@ REGION_WORDS.basis = (c, label = (k) => k) => (c && c.kinds?.length
   : "Chosen by the reviewer from the gazetteer's candidates");
 REGION_WORDS.noRegionsInData = 'The dataset gives no regions for its places (no column read as "within", and no ContainedIn to a region of its own), so there is nothing to review level by level.';
 REGION_WORDS.onlyUnknown = (k) => `--only ${k}: neither a region nor a place of this review.`;
+
+/**
+ * Krisis: the region review on the page (src/app.js, src/krisis/region-page.js; Methodos #28, stages 3
+ * and 4): the levels, each region with its constraint and its candidates, relaxing, changing a settled
+ * region, and the places within. The engine's own words for these are REGION_WORDS.
+ */
+export const REGION_PAGE = {
+  heading: 'Regions, level by level',
+  how: 'The regions your places lie in are looked up first, from the widest. Each is looked up within the match of the region above it, so settle a level before the one below: settling a region unlocks the regions and places within it.',
+  /** The lookup panel's offer, once the dataset is read and gives regions. */
+  offer: (regions, levels) => `Your places lie in ${plural(regions, 'region')} at ${plural(levels, 'level')}. They can be looked up first, level by level, so that each place is looked up within its own regions.`,
+  start: 'Review the regions level by level',
+  noRegions: REGION_WORDS.noRegionsInData,
+  /** A level's name: the heading of its column, else its number. */
+  level: (n) => `Level ${n}`,
+  /** The navigator: "Country 1/1 settled · County 12/15 · Parish locked · Places 0/340". */
+  nav: {
+    label: 'The levels of the region review',
+    settled: (name, s, t) => `${name} ${s.toLocaleString('en-GB')}/${t.toLocaleString('en-GB')} settled`,
+    locked: (name) => `${name} locked`,
+    open: (name, s, t) => `${name} ${s.toLocaleString('en-GB')}/${t.toLocaleString('en-GB')}`,
+    places: (s, t) => `Places ${s.toLocaleString('en-GB')}/${t.toLocaleString('en-GB')}`,
+  },
+  identityLabel: 'This one means',
+  identity: { closeMatch: 'much the same region (close match)', exactMatch: 'the same region (exact match)' },
+  /** Where a region lies: "in England › Suffolk". */
+  chain: (names) => (names.length ? `in ${names.join(' › ')}` : 'the widest level'),
+  places: (n) => plural(n, 'place'),
+  states: { locked: 'locked until the region above is settled', ready: 'ready to look up', review: 'looked up; to review', settled: 'settled' },
+  /** What a region is (to be) looked up within, in words. */
+  constraint({ looked, kinds, name, ids, countries, radius, needsArea, noArea, relaxed, from, unconstrained }) {
+    const verb = looked ? 'Looked up' : 'To be looked up';
+    if (unconstrained) return `${verb} without the regions, before they were settled.`;
+    const parts = [];
+    if (kinds.includes('contained_in')) parts.push(`within ${name} (${ids.join(', ')})`);
+    if (kinds.includes('area')) parts.push(`within the area around ${name} (about ${radius.toLocaleString('en-GB')} km across from its middle)`);
+    if (needsArea) parts.push(`within the area around ${name} (its outline is fetched from WHG first)`);
+    if (kinds.includes('countries')) parts.push(`in ${countries.join(', ')}`);
+    const relaxedText = relaxed && relaxed !== 'unconstrained' ? ` Relaxed: ${REGION_WORDS.relax[relaxed]}.` : '';
+    if (!parts.length) {
+      const why = noArea ? ` (${name} has no area to look within: ${REGION_WORDS.noArea[noArea] || noArea})` : from === null && !relaxed ? ' (no region above it is matched)' : '';
+      return `${verb} with no constraint${why}.${relaxedText}`;
+    }
+    return `${verb} ${parts.join(' and ')}.${relaxedText}`;
+  },
+  failedClosed: (name) => `WHG could not narrow this search to ${name}, so it returned nothing. That is not 'no match': look it up again with the constraint relaxed.`,
+  approximate: (name) => `WHG narrowed this search to ${name} only approximately, by the cells of its grid: a candidate just outside may be kept, or one just inside left out.`,
+  uncoded: "Places with no country codes can't pass a country filter: if WHG records no country for the right one, it is left out.",
+  union: (n) => `Matched to ${plural(n, 'record')}: the regions and places within it are looked up within the union of their areas.`,
+  unanswered: 'WHG did not answer for this region; this is not a finding that it has no match. Look it up again.',
+  /** The steps of relaxing, as buttons; each step includes those before it. */
+  relax: { countries: 'Again without the countries', 'contained-in': 'Within the area instead', ancestor: (name) => `Within ${name} instead`, all: 'With no constraint' },
+  ancestorAny: 'the region above that',
+  /** A button with what it would send. */
+  cost: (text, p, fetches = 0) => `${text} (${plural(p.queries, 'query', 'queries')} in ${plural(p.requests, 'request')}${fetches ? `, and ${plural(fetches, 'record')} fetched for an area` : ''})`,
+  relaxOne: 'Ask WHG again for this region:',
+  relaxLevel: (name, n) => `Ask WHG again for ${n === 1 ? 'the unsettled region' : `all ${plural(n, 'unsettled region')}`} of ${name}:`,
+  lookLevel: (name, n) => `Look up the ${n === 1 ? 'ready region' : plural(n, 'ready region')} of ${name}`,
+  lookOne: 'Look up this region',
+  noneReady: (name) => `No region of ${name} is ready to look up: each is settled, looked up, or waiting for the region above it.`,
+  candidates: (n) => (n ? `${n === 1 ? 'One candidate' : `${n} candidates`} from WHG:` : 'No candidates from WHG.'),
+  buttons: { match: 'This one', notThis: 'Not this', none: 'None of these', skip: 'Skip', undo: 'Undo', reopen: 'Open it again' },
+  decided: { match: 'Decided: this one', 'not-this': 'Decided: not this one', distinct: 'Decided: a different place' },
+  settledNone: 'Settled: none of these is this region. What lies within it is looked up within the region above it.',
+  noneButMatched: 'Take back the match first: a region with a match cannot also have none.',
+  /** Changing a settled region: asked on the page first. */
+  confirm: (d, c, name) => `This clears ${plural(d, 'decision')} and ${plural(c, 'candidate')} below ${name}.`,
+  confirmYes: 'Clear them, and change it',
+  confirmNo: 'Keep it as it was',
+  cleared: (d, c, name) => `Cleared ${plural(d, 'decision')} and ${plural(c, 'candidate')} below ${name}.`,
+  undo: 'Undo',
+  undone: (name) => `Put back what was cleared below ${name}, and ${name} as it was.`,
+  more: (n) => `Show ${plural(n, 'more region')}`,
+  /** Stage 4: the places within their regions. */
+  placesHeading: 'Places within their regions',
+  lookPlaces: (n) => `Look up the ${n === 1 ? 'place' : plural(n, 'place')} in settled regions`,
+  noPlacesReady: 'No place is ready to look up: each is looked up already, or waiting for its regions.',
+  placesHow: 'Each place found is reviewed below, one at a time, as any other match.',
+  locked: (n) => `${plural(n, 'place')} waiting for ${n === 1 ? 'its' : 'their'} regions:`,
+  lockedReason: (name, level) => `waiting for ${name} (${level}) to be settled`,
+  unconstrained: 'Look up without the regions',
+  unconstrainedAll: (n) => `Look up ${n === 1 ? 'it' : `all ${plural(n, 'waiting place')}`} without the regions`,
+  andMore: (n) => `and ${plural(n, 'more place')}.`,
+  /** Where a place lies, on the review screen of places. */
+  placeWithin: (names) => `In ${names.join(' › ')}.`,
+  stop: 'Stop',
+};

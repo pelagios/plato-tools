@@ -179,6 +179,7 @@
         <button id="lookup-resume" type="button" hidden>Resume</button>
       </div>
       <p id="lookup-progress" aria-live="polite"></p>
+      <div id="regions-offer" class="regions-offer" hidden><p id="regions-offer-text"></p><button id="regions-start" type="button"></button></div>
     </details>
     <details id="options">
       <summary>Options</summary>
@@ -254,6 +255,21 @@
       <input id="review-name" type="text" autocomplete="name" size="30" required>
       <button type="submit">Use this name</button>
     </form>
+    <!-- Krisis: region review (Methodos #28, stages 3 and 4): the regions the places lie in, level by level; drawn by src/app.js drawRegions(), its words in words.js REGION_PAGE. -->
+    <section id="regions" class="regions" aria-labelledby="regions-h" hidden>
+      <h3 id="regions-h" tabindex="-1"></h3>
+      <p id="regions-how" class="note"></p>
+      <nav id="regions-nav" class="regions-nav"></nav>
+      <div class="regions-bar">
+        <label id="region-identity-label" for="region-identity"></label>
+        <select id="region-identity"></select>
+        <button id="regions-stop" type="button" hidden></button>
+      </div>
+      <p id="regions-permission" hidden></p>
+      <div id="regions-confirm" class="regions-confirm" role="group" aria-live="assertive" hidden></div>
+      <p id="regions-status" class="regions-status" aria-live="polite"></p>
+      <div id="regions-level"></div>
+    </section>
     <div class="review-bar">
       <p id="review-progress" aria-live="polite"></p>
       <label for="review-filter">Show</label>

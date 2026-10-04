@@ -325,7 +325,8 @@ self.onmessage = async ({ data }) => {
       const { env, tidy } = await runEnv();
       let result;
       try { result = await gather({ subjects, options: data.options || {} }, env); } finally { tidy(); }
-      postMessage({ type: 'places', subjects: result.subjects, places: result.incomplete ? null : result.places, report: result.report });
+      // Krisis: region review. The regions the places lie in, for the page to seed its work file with (regions.js seedRegions).
+      postMessage({ type: 'places', subjects: result.subjects, places: result.incomplete ? null : result.places, regions: result.incomplete ? [] : result.regions || [], report: result.report });
     }
   } catch (e) {
     postMessage({ type: 'error', message: String(e && e.message || e), stack: String(e && e.stack || ''), ...(e && e.kind ? { kind: e.kind } : {}) });

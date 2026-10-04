@@ -28,6 +28,11 @@ import { LOOKUP_WORDS, lookupPage as LW } from './engine/words.js';
 import { createLookup, WHG_ENDPOINT, isWhg } from './engine/gazetteer/index.js';
 import { runLookup, planLookup, gazetteerPermission, permittedFetch, serviceOf, iriFromTemplate, iriVia, manifestSettings, newWork, defaultChoice, licenceOf, PLACE_CHOICES, WHG_REQUESTS_A_DAY } from './engine/krisis/lookup.js';
 import { candidateSource } from './engine/krisis/identity.js';
+// Krisis: region review (Methodos #28, stages 3 and 4), run on this thread as the lookup is, through the same shared WHG lookup.
+import { runLevel, runPlaces } from './engine/krisis/lookup.js';
+import { seedRegions, decideRegion, settleRegion, undo as undoRegion, selectLevel, matchesOf, lastQueryOf } from './engine/krisis/regions.js';
+import { REGION_PAGE as RP, REGION_WORDS } from './engine/words.js';
+import { levelNames, levelLabel, navigator, firstOpen, chainOf, placeChain, constraintLine, notesOf, relaxOptions, costOf, levelRegions, unsettledOf, placesToLook, lockedPlaces, wouldClear, priorOf, restorePrior, nameOf } from './krisis/region-page.js';
 import { mountMethodos } from './methodos/page.js';
 import { workflowStore } from './methodos/store.js';
 const $ = (id) => document.getElementById(id);
@@ -1058,13 +1063,14 @@ function render(focus) {
   Object.assign(state, { phase: 'reviewing', work, review: { cursor, subject: order[cursor] || null, current, filter: $('review-filter').value, ...p } });
   $('finish-cites').textContent = LW.cites(citedSources());   // Krisis: gazetteer lookup, one attestation per source
   drawBulk();   // Krisis × Methodos
+  drawRegions();   // Krisis: region review
   if (!order.length) { box.innerHTML = `<p>${escapeHtml(W.none)}</p>`; return; }
   const iri = order[cursor], place = work.places[iri] || {}, cands = candidatesOf(work, iri);
   const typed = keepTyped(iri), notes = keepNotes(box, document.activeElement);   // Krisis × Methodos: a note half-typed
   box.innerHTML = (allDone ? `<p class="good">${escapeHtml(W.allDone)}</p>` : '')
     + `<div class="subject"><h3 id="review-subject">${escapeHtml(place.label || iri)}</h3>`
     + (W.names(place.label, place.names) ? `<p>${escapeHtml(W.names(place.label, place.names))}</p>` : '')
-    + `<p>${escapeHtml(W.point(place.point))}</p><p class="iri">${escapeHtml(iri)}</p>` + rowStateHtml(place) + lookupPlaceHtml(iri, place) + '</div>'
+    + `<p>${escapeHtml(W.point(place.point))}</p>` + placeRegionHtml(iri, place) + `<p class="iri">${escapeHtml(iri)}</p>` + rowStateHtml(place) + lookupPlaceHtml(iri, place) + '</div>'
     + (hasLookups() ? groupedHtml(cands)
       : `<p>${escapeHtml(W.candidates(cands.length))}</p><ol class="candidates">` + cands.map((c, i) => candidateHtml(c, i)).join('') + '</ol>');
   restoreTyped(typed); restoreNotes(box, notes);
@@ -1138,7 +1144,7 @@ $('review-place').addEventListener('keydown', (e) => { if (e.key === 'Escape' &&
 document.addEventListener('keydown', (e) => {
   if ($('review').hidden || busy || !work || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;
-  if (e.target.closest?.('#lookup, form.find-form')) return;   // Krisis: nor in the lookup panel, token field and all
+  if (e.target.closest?.('#lookup, form.find-form, #regions')) return;   // Krisis: nor in the lookup panel, token field and all, nor in the region review
   const cands = order.length ? candidatesOf(work, order[cursor]) : [], c = cands[current];
   const k = e.key;
   if (k === 'j' || k === 's') move(1);
@@ -1370,6 +1376,7 @@ function lookupState(more) { state.lookup = { ...(state.lookup || {}), ...more }
 function gatherPlaces() {
   const base = $('base').value.trim() || undefined;
   // A table of places is read by the matching of its columns chosen, as Match reads it.
+  // With the levels of its "within" columns (Krisis: region review), as Match sends them.
   const cols = isTable(input) && columns ? columnOptions() : undefined, colsText = cols ? mappingText(cols) : undefined;
   if (gathered && gathered.files === files && gathered.base === base && gathered.cols === colsText) return Promise.resolve(gathered);
   if (placesWaiting) return placesWaiting.promise;
@@ -1385,7 +1392,7 @@ function gatherPlaces() {
 function onPlaces(data) {
   const w = placesWaiting; placesWaiting = null;
   busy = false; buttons(!!looking);   // a lookup running keeps them disabled
-  gathered = { files: w.files, base: w.base, cols: w.cols, subjects: data.subjects || null, places: data.places || null };
+  gathered = { files: w.files, base: w.base, cols: w.cols, subjects: data.subjects || null, places: data.places || null, regions: data.regions || [] };
   lookupSay('');
   w.resolve(gathered);
 }
@@ -1435,6 +1442,7 @@ async function refreshPreview() {
   const g = await gatherPlaces();
   const places = g?.places ?? null;
   if (!places && !reviewWork()) { box.innerHTML = `<p class="warn">${escapeHtml(busy ? LW.busy : LW.placesNotRead)}</p>`; return; }
+  showRegionOffer(g);   // Krisis: region review
   const p = planFor(svc, lookupOptions(), places).preview;
   const lines = LOOKUP_WORDS.preview(p);
   if (svc.whg) lines.splice(1, 0, LW.share(p.requests, WHG_REQUESTS_A_DAY));
@@ -1479,6 +1487,7 @@ async function lookUp({ only = null, query = null, allNames, which } = {}) {
     lookup = svc.whg ? whgLookup() : createLookup({ endpoint: svc.service.endpoint, token: null, shared: false, iri: iriVia(template), fetch: gazetteerFetch });
   } catch (e) { return lookupSay(scrub(e.message), true); }
   const w = existing || newWork(g.subjects, { reviewer: reviewer() });
+  if (g?.regions?.length) seedRegions(w, g);   // Krisis: region review. The work file holds the dataset's regions.
   const name = existing ? workName : `${(files[0]?.name || 'review').replace(/\.gz$/i, '').replace(/\.[^.]+$/, '')}.krisis.json`;
   const before = new Set(w.candidates.map((c) => c.id));
   const service = shortName(svc.service);
@@ -1665,4 +1674,237 @@ $('lookup-send').onclick = () => lookUp();
 $('lookup-variants-text').textContent = VW.option;
 $('lookup-stop').onclick = () => looking?.abort();
 $('lookup-resume').onclick = () => { $('lookup-resume').hidden = true; if (afterStop) lookUp({ which: 'pending' }); };
+// Krisis: region review (Methodos #28, stages 3 and 4). The regions a table's places lie in (Hermes's
+// "within" columns) are looked up level by level from the widest, each within the match of the region
+// above (lookup.js runLevel, through the shared WHG lookup and the permissions module, as the lookup
+// above is); then the places within their regions (runPlaces). What is shown is worked out by
+// src/krisis/region-page.js from the work object, which every decision changes at once. A change to a
+// settled region that would clear what lies below it is asked on the page first, and can be undone.
+let regionLevel = null, regionChange = null, regionCleared = null, regionStatus = null;
+const regionShown = new Map();   // how many regions of each level are shown
+const REGION_PAGE_SIZE = 25;
+const whgService = () => ({ service: serviceOf(WHG_ENDPOINT), whg: true });
+const hasRegions = () => !!work && Object.keys(work.regions || {}).length > 0;
+const regionNames = () => levelNames(columns?.levels || {});
+const freshPlaces = () => (gathered && gathered.files === files ? gathered.places : null);
+const batchSize = () => whgLookup().batchSize ?? 25;
+function regionSay(text, warn = false) { regionStatus = text ? { text, warn } : null; }
+
+/** The lookup panel's offer of a region review, once the dataset is read and gives regions. */
+function showRegionOffer(g) {
+  const box = $('regions-offer'), n = g?.regions?.length || 0;
+  box.hidden = !n || (hasRegions() && !$('review').hidden);
+  if (box.hidden) return;
+  const levels = new Set(g.regions.map((r) => r.level)).size;
+  $('regions-offer-text').textContent = RP.offer(n, levels);
+  $('regions-start').textContent = RP.start;
+}
+/** Begin the region review: the dataset's regions into the review on screen, or into a new one. */
+async function startRegions() {
+  if (busy || looking) return;
+  // Asked twice: a reading already under way (begun with other columns or another base address) is
+  // awaited first, and the second call reads again only if what it was read with has changed since.
+  await gatherPlaces();
+  const g = await gatherPlaces();
+  if (!g?.regions?.length) return lookupSay(g?.subjects ? RP.noRegions : readable(input) ? LW.placesNotRead : LW.noDataset, true);
+  const existing = reviewWork();
+  const w = existing || newWork(g.subjects, { reviewer: reviewer() });
+  seedRegions(w, g);
+  regionLevel = firstOpen(w); regionChange = null; regionCleared = null; regionSay('');
+  if (existing) render(false);
+  else beginReview(w, `${(files[0]?.name || 'review').replace(/\.gz$/i, '').replace(/\.[^.]+$/, '')}.krisis.json`, { focus: false });
+  $('regions-offer').hidden = true;
+  $('regions-h').focus();
+}
+
+/** The region review, drawn again from the work object: the navigator, the level chosen (or the places), the confirmation and the status line. */
+function drawRegions() {
+  const box = $('regions');
+  if (!hasRegions()) { box.hidden = true; state.regions = null; return; }
+  box.hidden = false;
+  $('regions-h').textContent = RP.heading; $('regions-how').textContent = RP.how;
+  $('region-identity-label').textContent = RP.identityLabel;
+  const names = regionNames(), nav = navigator(work, names);
+  if (regionLevel === null || !nav.some((n) => n.level === regionLevel)) regionLevel = firstOpen(work);
+  const navBox = $('regions-nav');
+  navBox.setAttribute('aria-label', RP.nav.label);
+  navBox.innerHTML = nav.map((n) => `<button type="button" class="region-level" data-rlevel="${n.level}" aria-pressed="${n.level === regionLevel}">${escapeHtml(n.text)}</button>`).join('<span class="sep" aria-hidden="true">·</span>');
+  const svc = whgService(), may = mayLookUp(svc);
+  needsLine($('regions-permission'), svc);
+  const cf = $('regions-confirm');
+  cf.hidden = !regionChange;
+  cf.innerHTML = regionChange ? `<p>${escapeHtml(RP.confirm(regionChange.counts.decisions, regionChange.counts.candidates, nameOf(work, regionChange.key)))}</p>`
+    + `<button type="button" class="primary" data-rconfirm="yes">${escapeHtml(RP.confirmYes)}</button> <button type="button" data-rconfirm="no">${escapeHtml(RP.confirmNo)}</button>` : '';
+  const st = $('regions-status');
+  st.innerHTML = regionStatus ? `<span${regionStatus.warn ? ' class="warn"' : ''}>${escapeHtml(regionStatus.text)}</span>` + (regionCleared ? ` <button type="button" data-rundo="1">${escapeHtml(RP.undo)}</button>` : '') : '';
+  $('regions-stop').textContent = RP.stop; $('regions-stop').hidden = !looking;
+  $('regions-level').innerHTML = regionLevel === 'places' ? placesLevelHtml(may) : levelHtml(regionLevel, names, may);
+  state.regions = { level: regionLevel, nav: nav.map((n) => n.text), confirm: regionChange ? cf.querySelector('p').textContent : null, status: regionStatus?.text ?? null, undo: !!regionCleared };
+}
+const off = () => (busy || looking ? ' disabled' : '');
+const costed = (text, keys, opts = {}) => { const c = costOf(work, keys, { batchSize: batchSize(), ...opts }); return RP.cost(text, c, c.fetches); };
+function relaxButtons(keys, scope) {
+  return relaxOptions(work, keys).map((o) => `<button type="button" data-rrelax="${o.relax}" data-rscope="${scope}"${off()}>${escapeHtml(costed(o.text, keys, { relax: o.relax }))}</button>`).join(' ');
+}
+function levelHtml(level, names, may) {
+  const name = levelLabel(level, names), nodes = levelRegions(work, level), ready = selectLevel(work, level).map((n) => n.key), unsettled = unsettledOf(work, level);
+  let out = `<h4 class="region-level-name">${escapeHtml(name)}</h4>`;
+  if (may) {
+    out += ready.length ? `<p><button type="button" class="primary" data-rgo="level"${off()}>${escapeHtml(costed(RP.lookLevel(name, ready.length), ready))}</button></p>` : `<p class="note">${escapeHtml(RP.noneReady(name))}</p>`;
+    const relax = unsettled.length ? relaxButtons(unsettled, 'level') : '';
+    if (relax) out += `<div class="region-relax"><p>${escapeHtml(RP.relaxLevel(name, unsettled.length))}</p>${relax}</div>`;
+  }
+  const shown = regionShown.get(level) || REGION_PAGE_SIZE;
+  out += nodes.slice(0, shown).map((n) => regionHtml(n, may)).join('');
+  if (nodes.length > shown) out += `<p><button type="button" data-rmore="1">${escapeHtml(RP.more(Math.min(REGION_PAGE_SIZE, nodes.length - shown)))}</button></p>`;
+  return out;
+}
+function regionHtml(n, may) {
+  const key = n.key, k = escapeHtml(key), cands = candidatesOf(work, key), st = n.state, settled = st === 'settled';
+  let out = `<article class="region region-${st}" data-rkey="${k}" tabindex="-1" aria-labelledby="rh-${k}"><h5 id="rh-${k}">${escapeHtml(n.names[0])}</h5>`
+    + `<p class="region-where">${escapeHtml(chainOf(work, key))} · ${escapeHtml(RP.places(n.count))} · <span class="region-state">${escapeHtml(RP.states[st])}</span></p>`;
+  if (st === 'locked') return out + '</article>';
+  out += `<p class="region-constraint">${escapeHtml(constraintLine(work, key))}</p>`;
+  out += notesOf(work, key).map((x) => `<p class="region-note${x.kind === 'union' ? '' : ' warn'}" data-note="${x.kind}">${escapeHtml(x.text)}</p>`).join('');
+  if (settled && work.regions[key].outcome === 'no-match') out += `<p class="region-none">${escapeHtml(RP.settledNone)}</p><button type="button" data-ract="reopen"${off()}>${escapeHtml(RP.buttons.reopen)}</button>`;
+  if (cands.length) {
+    out += `<p>${escapeHtml(RP.candidates(cands.length))}</p><ol class="candidates">` + cands.map((c) => {
+      const o = c.other || {}, d = c.decision, id = escapeHtml(c.id);
+      const btn = (act, text) => `<button type="button" data-ract="${act}" data-rcand="${id}" aria-pressed="${d?.kind === act}"${off()}>${escapeHtml(text)}</button>`;
+      return `<li class="candidate${d ? ' decided' : ''}" data-id="${id}"><h6>${escapeHtml(o.label || c.candidate_candidate)}</h6>`
+        + (W.names(o.label, o.names) ? `<p>${escapeHtml(W.names(o.label, o.names))}</p>` : '')
+        + (c.lookup ? gazetteerHtml(c) : '') + `<p class="iri">${escapeHtml(c.candidate_candidate)}</p>`
+        + `<p class="decision">${escapeHtml(d ? RP.decided[d.kind] || W.decision(d) : W.decision(d))}</p>`
+        + `<div class="acts">${btn('match', RP.buttons.match)}${btn('not-this', RP.buttons.notThis)}${d ? `<button type="button" data-ract="undo" data-rcand="${id}"${off()}>${escapeHtml(RP.buttons.undo)}</button>` : ''}</div></li>`;
+    }).join('') + '</ol>';
+  } else if (lastQueryOf(work, key)?.state === 'answered' && !lastQueryOf(work, key).stale) out += `<p>${escapeHtml(RP.candidates(0))}</p>`;
+  if (!settled) out += `<div class="acts"><button type="button" data-ract="none"${off()}>${escapeHtml(RP.buttons.none)}</button> <button type="button" data-ract="skip">${escapeHtml(RP.buttons.skip)}</button></div>`;
+  if (may && (st === 'ready' || st === 'review')) {
+    if (st === 'ready') out += `<p><button type="button" data-rgo="one"${off()}>${escapeHtml(costed(RP.lookOne, [key]))}</button></p>`;
+    const relax = relaxButtons([key], 'one');
+    if (relax) out += `<div class="region-relax"><p>${escapeHtml(RP.relaxOne)}</p>${relax}</div>`;
+  }
+  return out + '</article>';
+}
+function placesLevelHtml(may) {
+  const places = freshPlaces(), ready = placesToLook(work, { places }), locked = lockedPlaces(work), names = regionNames();
+  let out = `<h4 class="region-level-name">${escapeHtml(RP.placesHeading)}</h4><p class="note">${escapeHtml(RP.placesHow)}</p>`;
+  if (may) out += ready.length ? `<p><button type="button" class="primary" data-rgo="places"${off()}>${escapeHtml(costed(RP.lookPlaces(ready.length), ready, { places }))}</button></p>` : `<p class="note">${escapeHtml(RP.noPlacesReady)}</p>`;
+  if (locked.length) {
+    out += `<p>${escapeHtml(RP.locked(locked.length))}</p><ul class="region-locked">` + locked.slice(0, 20).map((p) => `<li data-place="${escapeHtml(p.iri)}">${escapeHtml(p.label)}: `
+      + `${escapeHtml(RP.lockedReason(nameOf(work, p.region), levelLabel(work.regions[p.region].level, names)))}`
+      + (may ? ` <button type="button" data-runc="${escapeHtml(p.iri)}"${off()}>${escapeHtml(RP.unconstrained)}</button>` : '') + '</li>').join('') + '</ul>'
+      + (locked.length > 20 ? `<p>${escapeHtml(RP.andMore(locked.length - 20))}</p>` : '')
+      + (may ? `<p><button type="button" data-runc-all="1"${off()}>${escapeHtml(costed(RP.unconstrainedAll(locked.length), locked.map((p) => p.iri), { unconstrained: true, places }))}</button></p>` : '');
+  }
+  return out;
+}
+/** On the review screen of places: where the place lies, what it was looked up within, and the notes that go with it. */
+function placeRegionHtml(iri, place) {
+  if (!hasRegions() || typeof place.within !== 'string') return '';
+  return `<p class="region-where">${escapeHtml(RP.placeWithin(placeChain(work, iri)))}</p>`
+    + (lastQueryOf(work, iri) ? `<p class="region-constraint">${escapeHtml(constraintLine(work, iri))}</p>` + notesOf(work, iri).map((x) => `<p class="region-note warn" data-note="${x.kind}">${escapeHtml(x.text)}</p>`).join('') : '');
+}
+function focusRegion(key) { $('regions-level').querySelector(`[data-rkey="${CSS.escape(key)}"]`)?.focus({ preventScroll: false }); }
+
+/**
+ * Change a region's review: `act(work)` decides (decideRegion) or settles it (settleRegion) and gives
+ * the snapshot of what it cleared. Tried on a copy first: a change that would clear decisions or
+ * candidates below is asked on the page, never with window.confirm.
+ */
+function changeRegion(key, act) {
+  regionChange = null;
+  let counts;
+  try { counts = wouldClear(work, act); } catch (e) { regionSay(e.message, true); return drawRegions(); }
+  if (counts) { regionChange = { key, act, counts }; drawRegions(); $('regions-confirm').querySelector('[data-rconfirm="no"]')?.focus(); return; }
+  commitRegion(key, act);
+}
+function commitRegion(key, act) {
+  const prior = priorOf(work, key), snap = act(work);
+  unsaved++;
+  if (snap && (snap.counts.decisions || snap.counts.candidates)) { regionCleared = { key, snapshot: snap, prior }; regionSay(RP.cleared(snap.counts.decisions, snap.counts.candidates, nameOf(work, key))); }
+  else { regionCleared = null; regionSay(''); }
+  render(false); focusRegion(key);
+}
+/** Undo: what the change cleared (invalidate's snapshot, regions.js undo), and the change itself. */
+function undoRegionChange() {
+  const c = regionCleared; if (!c) return;
+  undoRegion(work, c.snapshot); restorePrior(work, c.key, c.prior);
+  regionCleared = null; unsaved++;
+  regionSay(RP.undone(nameOf(work, c.key)));
+  render(false); focusRegion(c.key);
+}
+
+/**
+ * Look up a level's regions (runLevel) or the places within (runPlaces), as the command line's lookup
+ * --levels does, with the same options: WHG's shared lookup, which the permissions module gates and
+ * which has the token; the request size its own.
+ */
+async function regionRun(kind, { level, relax, only, unconstrained = false } = {}) {
+  if (looking || busy || !work) return;
+  if ($('whg-token').value.trim()) commitToken();
+  const svc = whgService();
+  if (!mayLookUp(svc)) { drawRegions(); $('regions-permission').querySelector('button')?.focus(); return; }
+  if (!token.get()) { $('lookup').open = true; lookupSay(LW.needToken, true); $('whg-token').focus(); return; }
+  const g = kind === 'places' ? (await gatherPlaces(), await gatherPlaces()) : null;   // twice: as startRegions
+  const w = work, service = LW.whg;
+  looking = new AbortController();
+  regionCleared = null; regionChange = null;
+  buttons(true); $('lookup-stop').hidden = false;
+  regionSay(LW.sending(service)); lookupSay(LW.sending(service));
+  lookupState({ running: true, done: 0, total: null, stopped: null, summary: null, single: false, regions: kind === 'places' ? 'places' : level });
+  drawRegions();
+  const how = { lookup: whgLookup(), relax, only, options: { service: svc.service, maxDistanceKm: matchOptions().maxDistanceKm }, reviewer: reviewer(), signal: looking.signal,
+    onBatch: ({ done, total }) => { regionSay(LW.progress({ done, total }, service)); lookupState({ done, total }); if (work === w) render(false); } };
+  let result = null, fault = false;
+  try { result = kind === 'places' ? await runPlaces(w, { ...how, places: g?.places ?? null, unconstrained }) : await runLevel(w, level, how); }
+  catch (e) { fault = true; console.error('Krisis region lookup:', scrub(e?.stack || e?.message || e)); }
+  finally { looking = null; $('lookup-stop').hidden = true; buttons(busy); }
+  unsaved++;
+  const stopped = fault ? { kind: 'fault', message: null } : result.stopped;
+  const said = [];
+  if (result && !result.record) said.push(REGION_WORDS.nothingReady);
+  else if (result) { const sum = LOOKUP_WORDS.summary(result.record.counts, svc.service.title); said.push(REGION_WORDS.ran(kind === 'places' ? 'places' : level, result.looked.length, result.record.counts.failedClosed || 0), sum.problems); }
+  if (stopped) said.push(LOOKUP_WORDS.stopped(stopped), LW.kept);
+  regionSay(said.join(' '), !!stopped); lookupSay(said.join(' '), !!stopped);
+  lookupState({ running: false, stopped: stopped?.kind || null, summary: said.join(' '), counts: result?.record?.counts || null, looked: result?.looked || [] });
+  if (work === w) { reorder(); render(false); }
+  if (stopped?.kind === 'auth') { $('lookup').open = true; $('whg-token').focus(); }
+  else if (only?.length === 1 && kind !== 'places') focusRegion(only[0]);
+}
+
+$('regions-start').onclick = () => startRegions();
+$('regions-stop').onclick = () => looking?.abort();
+$('regions').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b || b.disabled) return;
+  const d = b.dataset;
+  if (d.rlevel !== undefined) { regionLevel = d.rlevel === 'places' ? 'places' : Number(d.rlevel); regionChange = null; drawRegions(); $('regions-level').querySelector('[data-rkey], button')?.focus(); return; }
+  if (d.rconfirm) { const ch = regionChange; regionChange = null; if (!ch) return; if (d.rconfirm === 'yes') commitRegion(ch.key, ch.act); else { drawRegions(); focusRegion(ch.key); } return; }
+  if (d.rundo) return undoRegionChange();
+  if (d.rmore) { regionShown.set(regionLevel, (regionShown.get(regionLevel) || REGION_PAGE_SIZE) + REGION_PAGE_SIZE); return drawRegions(); }
+  if (busy || looking || !work) return;
+  const art = b.closest('[data-rkey]'), key = art?.dataset.rkey;
+  if (d.rgo === 'level') return regionRun('level', { level: regionLevel });
+  if (d.rgo === 'one') return regionRun('level', { level: regionLevel, only: [key] });
+  if (d.rrelax) return regionRun('level', { level: regionLevel, relax: d.rrelax, only: d.rscope === 'level' ? unsettledOf(work, regionLevel) : [key] });
+  if (d.rgo === 'places') return regionRun('places');
+  if (d.runc) return regionRun('places', { unconstrained: true, only: [d.runc] });
+  if (d.runcAll) return regionRun('places', { unconstrained: true, only: lockedPlaces(work).map((p) => p.iri) });
+  if (d.ract === 'skip') {
+    const arts = [...$('regions-level').querySelectorAll('article.region:not(.region-settled):not(.region-locked)')];
+    (arts[arts.indexOf(art) + 1] || arts[0])?.focus();
+    return;
+  }
+  if (d.rcand) {
+    const kind = d.ract === 'undo' ? null : d.ract, identityType = $('region-identity').value;
+    return changeRegion(key, (w) => decideRegion(w, d.rcand, kind, kind === 'match' ? { identityType } : {}).snapshot);
+  }
+  if (d.ract === 'none') {
+    if (matchesOf(work, key).length) { regionSay(RP.noneButMatched, true); return drawRegions(); }
+    return changeRegion(key, (w) => settleRegion(w, key, 'no-match'));
+  }
+  if (d.ract === 'reopen') return changeRegion(key, (w) => settleRegion(w, key, null));
+});
+$('regions').addEventListener('keydown', (e) => { if (e.key === 'Escape' && regionChange) { const k = regionChange.key; regionChange = null; drawRegions(); focusRegion(k); } });
+{ const sel = $('region-identity'); sel.innerHTML = ['closeMatch', 'exactMatch'].map((t) => `<option value="${t}">${escapeHtml(RP.identity[t])}</option>`).join(''); }
 startWorker();

@@ -230,3 +230,6 @@ words them all.
   place-centric-regions.json; `attestationsFrom` appends `made`. promotedFrom: see HOOK(candidate-sets).
 - CLI: `plato-tools lookup --levels [--level N] [--relax STEP] [--only KEY] [--unconstrained] [--dry-run]`.
 - Words: `REGION_WORDS` in words.js.
+- Page: `src/krisis/region-page.js` (pure: the navigator, constraint lines and notes, relax steps and their cost,
+  `wouldClear` for the in-page confirmation, `priorOf`/`restorePrior` for Undo with invalidate's snapshot), drawn and
+  run by `src/app.js` (`drawRegions`, `regionRun`); its words are `REGION_PAGE` in words.js.

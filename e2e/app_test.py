@@ -1475,6 +1475,232 @@ def krisis_lookup_pattern(page, tmp, url):
           on.get('sent') == 1 and on.get('places') == ['https://pleiades.stoa.org/places/423025', 'https://pleiades.stoa.org/places/579885']
           and off.get('sent') == 1 and len(off.get('places') or []) == 2 and not any('pleiades' in x for x in off['places']), {'on': on, 'off': off})
 
+# Krisis: region review (Methodos #28, stages 3 and 4). WHG is never called: page.route answers for it
+# (as WHG answers a filtered query: `scope`, and for Hoxne within Suffolk a filter it could not apply,
+# which it answers with nothing: failed closed), and records each request's body.
+def region_answer(id, name):
+    return {'id': id, 'name': name, 'score': 100, 'match': True, 'description': 'Country: GB', 'ccodes': ['GB'], 'repr_point': [1.0, 52.3], 'namespace': id.split(':')[1], 'alt_names': []}
+REGION_ANSWERS = {
+    'England': [region_answer('place:gn:6269131', 'England'), region_answer('place:wd:Q21', 'England')],
+    'Suffolk': [region_answer('place:gn:2636561', 'Suffolk')], 'Norfolk': [region_answer('place:gn:2641455', 'Norfolk')],
+    'Hoxne': [region_answer('place:gn:2646340', 'Hoxne')], 'Eye': [region_answer('place:gn:2649660', 'Eye')], 'Diss': [region_answer('place:gn:2651188', 'Diss')],
+}
+
+def krisis_regions_case(page, tmp, url):
+    """Krisis, region review: a table's Country, County and Parish columns read as Hermes's "within" levels; level 1
+    looked up and settled, level 2 looked up within its match (contained_in, the bare id), a failed-closed answer
+    said in words and asked again relaxed, a change to level 1 asked on the page, clearing level 2, and undone; and
+    Finish writing the claim about the minted region into the dataset, which passes the version check. Run after
+    krisis_lookup_case, whose page has WHG allowed."""
+    import re
+    base = 'https://example.org/suffolk/'
+    W3 = 'https://w3id.org/whg/id/'
+    table = tmp / 'regions-review.csv'
+    table.write_text('id,Name,Parish,County,Country\n1,Mill,Hoxne,Suffolk,England\n2,Farm,Eye,Suffolk,England\n3,Barn,Diss,Norfolk,England\n', encoding='utf-8')
+    calls, dialogs = [], []
+    cors = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+            'Access-Control-Allow-Headers': 'authorization, content-type, accept, user-agent'}
+    def fake_whg(route):
+        req = route.request
+        if req.method == 'OPTIONS': return route.fulfill(status=204, headers=cors)
+        body = json.loads(req.post_data or '{}')
+        calls.append(body)
+        out = {'attribution': LOOKUP_ATTRIBUTION}
+        for k, q in (body.get('queries') or {}).items():
+            filtered = isinstance(q.get('contained_in'), list)
+            if filtered and q['query'] == 'Hoxne': out[k] = {'result': [], 'scope': {'applied': False}}
+            else: out[k] = {'result': REGION_ANSWERS.get(q['query'], []), **({'scope': {'applied': True}} if filtered else {})}
+        route.fulfill(status=200, headers={**cors, 'Content-Type': 'application/json'}, body=json.dumps(out))
+    WHG = re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/')
+    page.route(WHG, fake_whg)
+    page.on('dialog', lambda d: (dialogs.append(d.type), d.dismiss()))
+    def step(fn):
+        try: return fn()
+        except Exception as e: return {'error': str(e).split('\n')[0][:200]}
+    rs = lambda s: s.get('regions') or {}
+    def key(s, name): return next((k for k, r in ((s.get('work') or {}).get('regions') or {}).items() if r['names'][0] == name), None)
+    art = lambda k: f'#regions-level article[data-rkey="{k}"]'
+    def choose_candidate(k, rid, act='match'):
+        page.locator(art(k) + ' li.candidate').filter(has_text=W3 + rid).locator(f'button[data-ract="{act}"]').click()
+    def run_level(level_button):
+        n = len(calls)
+        page.click(level_button)
+        return wait_state(page, lambda s: (s.get('lookup') or {}).get('running') is False and len(calls) > n, 60, 'region lookup'), n
+
+    # The table, its columns read as levels, the base address its regions are minted under; the review begun from the lookup panel.
+    def setup():
+        page.evaluate(f"() => {{ document.getElementById('base').value = {json.dumps(base)}; const r = document.getElementById('reviewer'); r.value = 'Re Gion'; r.dispatchEvent(new Event('change')); }}")
+        page.set_input_files('#picker', [])
+        page.set_input_files('#picker', [str(table)])
+        s = wait_state(page, lambda s: s.get('phase') == 'detected' and ((s.get('columns') or {}).get('levels') or {}), 60, 'columns')
+        if s.get('phase') != 'detected': return {'phase': s.get('phase')}
+        if not page.evaluate("() => document.getElementById('lookup').open"): page.click('#lookup > summary')
+        page.fill('#whg-token', LOOKUP_TOKEN); page.press('#whg-token', 'Tab')
+        page.wait_for_function("() => !document.getElementById('regions-offer').hidden", timeout=60_000)
+        offer = page.inner_text('#regions-offer')
+        page.click('#regions-start')
+        s = wait_state(page, lambda s: rs(s).get('nav') and len((s.get('work') or {}).get('regions') or {}) == 6, 60, 'regions')
+        return {'levels': (s.get('columns') or {}).get('levels'), 'offer': offer, 'nav': rs(s).get('nav'), 'level': rs(s).get('level'),
+                'keys': sorted((s.get('work') or {}).get('regions', {}).keys()), 'button': page.inner_text('#regions-level button[data-rgo="level"]')}
+    su = step(setup)
+    check('regions: a table\'s Country, County and Parish columns are read as "within" levels 1-3; the lookup panel offers the review, which shows each level by its heading, Country first',
+          su.get('levels') == {'Country': 1, 'County': 2, 'Parish': 3} and 'Your places lie in 6 regions at 3 levels' in su.get('offer', '')
+          and su.get('nav') == ['Country 0/1', 'County locked', 'Parish locked', 'Places 0/3'] and su.get('level') == 1
+          and len(su.get('keys') or []) == 6 and all(k.startswith(base + 'place/region-') for k in su.get('keys') or []), su)
+    check('regions: the level\'s button says what it would send', su.get('button') == 'Look up the ready region of Country (1 query in 1 request)', su)
+
+    # Level 1, then settled; level 2 is asked within its match.
+    def levels_1_2():
+        s, n1 = run_level('#regions-level button[data-rgo="level"]')
+        eng = key(s, 'England')
+        out = {'first': list(calls[n1]['queries'].values()) if len(calls) > n1 else None, 'england': page.inner_text(art(eng)),
+               'england notes': page.eval_on_selector_all(art(eng) + ' .region-note', 'els => els.map((e) => e.dataset.note)')}
+        choose_candidate(eng, 'place:gn:6269131')
+        s = wait_state(page, lambda s: ((s.get('work') or {}).get('regions', {}).get(eng) or {}).get('outcome') == 'matched', 10, 'England settled')
+        out['nav after 1'] = rs(s).get('nav')
+        page.click('#regions-nav button[data-rlevel="2"]')
+        s, n2 = run_level('#regions-level button[data-rgo="level"]')
+        suf, nor = key(s, 'Suffolk'), key(s, 'Norfolk')
+        out['second'] = list(calls[n2]['queries'].values()) if len(calls) > n2 else None
+        out['suffolk line'] = page.inner_text(art(suf) + ' .region-constraint')
+        out['suffolk where'] = page.inner_text(art(suf) + ' .region-where')
+        out['suffolk notes'] = page.eval_on_selector_all(art(suf) + ' .region-note', 'els => els.map((e) => e.dataset.note)')
+        choose_candidate(suf, 'place:gn:2636561')
+        wait_state(page, lambda s: ((s.get('work') or {}).get('regions', {}).get(suf) or {}).get('outcome') == 'matched', 10, 'Suffolk settled')
+        page.click(art(nor) + ' button[data-ract="none"]')
+        s = wait_state(page, lambda s: ((s.get('work') or {}).get('regions', {}).get(nor) or {}).get('outcome') == 'no-match', 10, 'Norfolk settled')
+        out['nav after 2'] = rs(s).get('nav')
+        out['keys'] = {'eng': eng, 'suf': suf, 'nor': nor}
+        return out
+    l2 = step(levels_1_2) if su.get('nav') else {}
+    first, second = l2.get('first') or [], l2.get('second') or []
+    check('regions: level 1 is sent with no constraint (the control for the next); settling it unlocks level 2',
+          first == [{'query': 'England', 'type': 'Place', 'limit': 10}] and 'Looked up with no constraint' in l2.get('england', '')
+          and "WHG's own figures" in l2.get('england', '') and 'Licence of its source' in l2.get('england', '')
+          and l2.get('nav after 1') == ['Country 1/1 settled', 'County 0/2', 'Parish locked', 'Places 0/3'], {k: l2.get(k) for k in ('first', 'nav after 1', 'error')})
+    check("regions: the level 2 request carries contained_in, a list of the level 1 match's bare id, and its countries, for each region",
+          len(second) == 2 and sorted(q['query'] for q in second) == ['Norfolk', 'Suffolk']
+          and all(q.get('contained_in') == ['gn:6269131'] and q.get('countries') == ['GB'] and 'lat' not in q for q in second), second)
+    check('regions: each region says where it lies and what it was looked up within, in words, with the note on a country filter (not on England, which had none)',
+          l2.get('suffolk line') == 'Looked up within England (gn:6269131) and in GB.' and l2.get('suffolk where', '').startswith('in England · 2 places')
+          and l2.get('suffolk notes') == ['uncoded'] and l2.get('england notes') == [],
+          {k: l2.get(k) for k in ('suffolk line', 'suffolk where', 'suffolk notes', 'england notes', 'error')})
+    check('regions: This one and None of these settle level 2', l2.get('nav after 2') == ['Country 1/1 settled', 'County 2/2 settled', 'Parish 0/3', 'Places 0/3'], l2)
+
+    # Level 3: Hoxne's filter could not be applied (failed closed); relaxed, it is asked again without it.
+    FC = "WHG could not narrow this search to Suffolk, so it returned nothing. That is not 'no match': look it up again with the constraint relaxed."
+    def level_3():
+        ks = l2['keys']
+        page.click('#regions-nav button[data-rlevel="3"]')
+        s, n3 = run_level('#regions-level button[data-rgo="level"]')
+        hox, eye, diss = key(s, 'Hoxne'), key(s, 'Eye'), key(s, 'Diss')
+        sent = {q['query']: q for q in calls[n3]['queries'].values()} if len(calls) > n3 else {}
+        out = {'sent': sent, 'hoxne notes': page.eval_on_selector_all(art(hox) + ' .region-note[data-note="failed-closed"]', 'els => els.map((e) => e.textContent)'),
+               'eye notes': page.eval_on_selector_all(art(eye) + ' .region-note[data-note="failed-closed"]', 'els => els.length'),
+               'eye candidates': page.eval_on_selector_all(art(eye) + ' li.candidate', 'els => els.length'),
+               'hoxne state': (((s.get('work') or {}).get('lookups') or [{}])[-1].get('queries') or {}).get(hox),
+               'relax': page.eval_on_selector_all(art(hox) + ' button[data-rrelax]', 'bs => bs.map((b) => b.textContent)')}
+        n4 = len(calls)
+        page.click(art(hox) + ' button[data-rrelax="all"]')
+        s = wait_state(page, lambda s: (s.get('lookup') or {}).get('running') is False and len(calls) > n4, 60, 'relaxed')
+        out['relaxed'] = list(calls[n4]['queries'].values()) if len(calls) > n4 else None
+        out['hoxne after'] = page.eval_on_selector_all(art(hox) + ' .region-note[data-note="failed-closed"]', 'els => els.length')
+        out['hoxne candidates'] = page.eval_on_selector_all(art(hox) + ' li.candidate', 'els => els.length')
+        out['hoxne line'] = page.inner_text(art(hox) + ' .region-constraint')
+        choose_candidate(eye, 'place:gn:2649660')
+        wait_state(page, lambda s: ((s.get('work') or {}).get('regions', {}).get(eye) or {}).get('outcome') == 'matched', 10, 'Eye settled')
+        ks.update({'hox': hox, 'eye': eye, 'diss': diss})
+        return out
+    l3 = step(level_3) if l2.get('nav after 2') else {}
+    sent = l3.get('sent') or {}
+    check('regions: level 3 is asked within each parish\'s nearest matched region: Suffolk for Hoxne and Eye, England for Diss (Norfolk has none)',
+          (sent.get('Hoxne') or {}).get('contained_in') == ['gn:2636561'] and (sent.get('Eye') or {}).get('contained_in') == ['gn:2636561']
+          and (sent.get('Diss') or {}).get('contained_in') == ['gn:6269131'], sent)
+    check("regions: a failed-closed answer shows the notice in plain words, and is not \"no match\" (Eye, answered, shows none and has its candidate)",
+          l3.get('hoxne notes') == [FC] and l3.get('eye notes') == 0 and l3.get('eye candidates') == 1
+          and (l3.get('hoxne state') or {}).get('failedClosed') is True and (l3.get('hoxne state') or {}).get('state') == 'unanswered', {k: l3.get(k) for k in ('hoxne notes', 'eye notes', 'eye candidates', 'hoxne state', 'error')})
+    check('regions: the relax buttons name each step and its cost; "With no constraint" asks again without the constraint, and the notice goes',
+          l3.get('relax') == ['Again without the countries (1 query in 1 request)', 'Within the area instead (1 query in 1 request, and 1 record fetched for an area)', 'Within England instead (1 query in 1 request, and 1 record fetched for an area)', 'With no constraint (1 query in 1 request)']
+          and l3.get('relaxed') == [{'query': 'Hoxne', 'type': 'Place', 'limit': 10}] and l3.get('hoxne after') == 0 and l3.get('hoxne candidates') == 1
+          and l3.get('hoxne line') == 'Looked up with no constraint. Relaxed: no constraint.', {k: l3.get(k) for k in ('relax', 'relaxed', 'hoxne after', 'hoxne candidates', 'hoxne line', 'error')})
+
+    # Changing level 1 asks on the page first (never window.confirm), then clears level 2 and below; Undo puts it all back.
+    def change():
+        ks = l2['keys']
+        s0 = wait_state(page, lambda s: True, 5)
+        w0 = s0.get('work') or {}
+        below = {k for k in w0.get('regions', {}) if k != ks['eng']} | set(w0.get('places', {}))
+        expect = {'decisions': sum(1 for c in w0['candidates'] if c['candidate_source'] in below and c.get('decision')),
+                  'candidates': sum(1 for c in w0['candidates'] if c['candidate_source'] in below and c.get('lookup'))}
+        page.click('#regions-nav button[data-rlevel="1"]')
+        choose_candidate(ks['eng'], 'place:wd:Q21')
+        page.wait_for_function("() => !document.getElementById('regions-confirm').hidden", timeout=10_000)
+        s1 = wait_state(page, lambda s: rs(s).get('confirm'), 5)
+        out = {'expect': expect, 'confirm': rs(s1).get('confirm'), 'suffolk while asked': ((s1.get('work') or {}).get('regions', {}).get(ks['suf']) or {}).get('outcome'),
+               'q21 while asked': next((c.get('decision') for c in (s1.get('work') or {}).get('candidates', []) if c['candidate_candidate'] == W3 + 'place:wd:Q21'), 'none')}
+        page.click('#regions-confirm button[data-rconfirm="yes"]')
+        s2 = wait_state(page, lambda s: rs(s).get('undo'), 10, 'cleared')
+        w2 = s2.get('work') or {}
+        out.update({'status': rs(s2).get('status'), 'suffolk after': (w2.get('regions', {}).get(ks['suf']) or {}).get('outcome'),
+                    'suffolk candidates after': sum(1 for c in w2.get('candidates', []) if c['candidate_source'] == ks['suf']),
+                    'union': page.eval_on_selector_all(art(ks['eng']) + ' .region-note[data-note="union"]', 'els => els.map((e) => e.textContent)'),
+                    'nav after': rs(s2).get('nav')})
+        page.click('#regions-status button[data-rundo]')
+        s3 = wait_state(page, lambda s: rs(s).get('nav') and not rs(s).get('undo') and (rs(s).get('status') or '').startswith('Put back'), 10, 'undone')
+        w3 = s3.get('work') or {}
+        strip = lambda w: json.dumps({'candidates': w.get('candidates'), 'regions': w.get('regions')}, sort_keys=True)
+        out.update({'undone': rs(s3).get('status'), 'same as before': strip(w3) == strip(w0) and bool(w0.get('candidates')),
+                    'union after undo': page.eval_on_selector_all(art(ks['eng']) + ' .region-note[data-note="union"]', 'els => els.length'),
+                    'nav undone': rs(s3).get('nav'), 'nav before': rs(s0).get('nav')})
+        return out
+    ch = step(change) if l3.get('hoxne candidates') else {}
+    ex = ch.get('expect') or {}
+    check('regions: changing a settled level 1 is asked on the page, saying what it clears, and clears nothing until confirmed (no browser dialog)',
+          ex.get('decisions') == 2 and ex.get('candidates') == 5 and ch.get('confirm') == f"This clears {ex.get('decisions')} decisions and {ex.get('candidates')} candidates below England."
+          and ch.get('suffolk while asked') == 'matched' and ch.get('q21 while asked') is None and dialogs == [], {**{k: ch.get(k) for k in ('expect', 'confirm', 'suffolk while asked', 'q21 while asked', 'error')}, 'dialogs': dialogs})
+    check('regions: confirmed, level 2 is cleared (its decisions and candidates), England says it uses the union of its two records, and a status line offers Undo',
+          ch.get('suffolk after') is None and ch.get('suffolk candidates after') == 0 and ch.get('status') == f"Cleared {ex.get('decisions')} decisions and {ex.get('candidates')} candidates below England."
+          and len(ch.get('union') or []) == 1 and 'union of their areas' in (ch.get('union') or [''])[0] and (ch.get('nav after') or [None, ''])[1] == 'County 0/2', ch)
+    check('regions: Undo restores level 2 and everything below, and England as it was (the union note gone)',
+          ch.get('same as before') is True and ch.get('union after undo') == 0 and ch.get('undone') == 'Put back what was cleared below England, and England as it was.'
+          and ch.get('nav undone') == ch.get('nav before') and bool(ch.get('nav before')), {k: ch.get(k) for k in ('same as before', 'union after undo', 'undone', 'nav undone', 'nav before', 'error')})
+
+    # The places within: those whose regions are settled are offered, those waiting listed with the region they wait for.
+    def places():
+        page.click('#regions-nav button[data-rlevel="places"]')
+        return {'button': page.inner_text('#regions-level button[data-rgo="places"]'), 'locked': page.eval_on_selector_all('#regions-level .region-locked li', 'els => els.map((e) => e.textContent)'),
+                'unconstrained': page.eval_on_selector_all('#regions-level button[data-runc]', 'bs => bs.length')}
+    pl = step(places) if ch.get('same as before') else {}
+    check('regions: the places within: the one in a settled parish is offered, the two waiting are listed with the region they wait for, each with "Look up without the regions"',
+          pl.get('button') == 'Look up the place in settled regions (1 query in 1 request)' and pl.get('unconstrained') == 2
+          and any(t.startswith('Mill: waiting for Hoxne (Parish) to be settled') for t in pl.get('locked') or []) and any(t.startswith('Barn: waiting for Diss (Parish) to be settled') for t in pl.get('locked') or []), pl)
+
+    # Finishing writes the region claim: an attestation about the minted region, bundling the identity; the dataset passes the version check.
+    def finish():
+        ks = l2['keys']
+        page.check('input[name="review-output"][value="dataset"]')
+        page.click('#finish')
+        s = wait_state(page, lambda s: s.get('action') == 'apply' and s.get('phase') in ('done', 'error'), 120, 'finish')
+        name = next((o['name'] for o in s.get('outputs') or [] if o['name'].endswith('.json')), None)
+        doc = json.loads(download(page, name, tmp / name).read_text()) if name else {}
+        ents = {e['@id']: e for e in doc.get('spatialEntities', [])}
+        claims = lambda k: [a for a in (ents.get(k) or {}).get('attestations', []) if a.get('identities')]
+        contained = [a['relations'][0].get('relatesTo') for a in (ents.get(base + 'place/1') or {}).get('attestations', []) if a.get('relations')]
+        return {'phase': s.get('phase'), 'errors': (s.get('report') or {}).get('errors'), 'version check': ((s.get('report') or {}).get('counts') or {}).get('versionCheck'),
+                'england': claims(ks['eng']), 'suffolk': claims(ks['suf']), 'norfolk': claims(ks['nor']), 'contained': contained, 'hox': ks['hox'],
+                'items': [i.get('kind') for i in (s.get('report') or {}).get('items', [])]}
+    fi = step(finish) if l2.get('keys') else {}
+    eng_claim = (fi.get('england') or [{}])[0]
+    ident = (eng_claim.get('identities') or [{}])[0]
+    check('regions: Finish writes the claim about the minted region: an attestation bundling its identity with the WHG record, with a certainty, citing WHG; the settled-with-none region gets none (Suffolk, matched, does)',
+          len(fi.get('england') or []) == 1 and ident.get('subject') == l2.get('keys', {}).get('eng') and ident.get('object') == W3 + 'place:gn:6269131' and ident.get('identityType') == 'closeMatch'
+          and bool(eng_claim.get('certaintyLevel')) and any(src.get('title') == 'World Historical Gazetteer' for src in eng_claim.get('sources', []))
+          and len(fi.get('suffolk') or []) == 1 and fi.get('norfolk') == [], {k: fi.get(k) for k in ('england', 'suffolk', 'norfolk', 'error')})
+    check('regions: the dataset written passes the version check, and the place is still ContainedIn its region made from the data, not the gazetteer\'s',
+          fi.get('phase') == 'done' and fi.get('errors') == 0 and (fi.get('version check') or {}).get('lost') == 0 and (fi.get('version check') or {}).get('later', 0) > 0 and fi.get('contained') == [fi.get('hox')] and bool(fi.get('hox')),
+          {k: fi.get(k) for k in ('phase', 'errors', 'version check', 'items', 'contained', 'hox', 'error')})
+    page.unroute(WHG)
+
 def download(page, name, dest):
     with page.expect_download(timeout=600_000) as d:
         page.evaluate(f'window.__plato_save({json.dumps(name)})')
@@ -2138,6 +2364,8 @@ def main():
             # lookup asks (a fake) WHG once it is allowed.
             krisis_lookup_case(page, tmp, url)
             krisis_lookup_pattern(page, tmp, url)
+            # Then the region review, on the same page, WHG allowed (a fake WHG again: never the real one).
+            krisis_regions_case(page, tmp, url)
             ctx.close()
             front = pw.chromium.launch(headless=True)
             try: front_page_checks(front, url); card_chosen_checks(front, url, pw); theme_checks(front, url); methodos_page_checks(front, url)
