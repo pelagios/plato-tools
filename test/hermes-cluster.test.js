@@ -25,7 +25,7 @@ const made = [];
 const scratch = () => { const d = mkdtempSync(join(tmpdir(), 'plato-tools-cluster-')); made.push(d); return d; };
 after(() => { for (const d of made) rmSync(d, { recursive: true, force: true }); });
 
-const CSV = 'id,name,parish,lat,lon\n1,Rotherhithe,St Mary,51.5,-0.05\n2,Rotherhith,St. Mary,51.5,-0.05\n3,ROTHERHITHE.,Saint Mary,51.5,-0.05\n4,Rotherhithe,St Mary,51.5,-0.05\n5,Bermondsey,St Mary,51.49,-0.07\n';
+const CSV = 'id,name,church,lat,lon\n1,Rotherhithe,St Mary,51.5,-0.05\n2,Rotherhith,St. Mary,51.5,-0.05\n3,ROTHERHITHE.,Saint Mary,51.5,-0.05\n4,Rotherhithe,St Mary,51.5,-0.05\n5,Bermondsey,St Mary,51.49,-0.07\n';
 const GROUPS = { name: { method: 'fingerprint', groups: [{ chosen: 'Rotherhithe', members: ['Rotherhith', 'ROTHERHITHE.', 'Rotherhithe'] }] } };
 
 /** Read a CSV through the reader: the events after the header, and the report. */
@@ -157,8 +157,8 @@ test('the groups shown are applied only when ticked: unticked, no lookup spellin
   // A ticked group with no spelling chosen is not applied either.
   assert.equal(Object.keys(confirmedGroups('name', 'fingerprint', [{ ticked: true, chosen: '  ', members: ['a', 'A'] }])).length, 0);
   // Another column's groups are kept; this column's replaced whole.
-  const both = confirmedGroups('parish', 'fingerprint', [{ ticked: true, chosen: 'St Mary', members: ['St Mary', 'St. Mary'] }], c);
-  assert.deepEqual(Object.keys(both).sort(), ['name', 'parish']);
+  const both = confirmedGroups('church', 'fingerprint', [{ ticked: true, chosen: 'St Mary', members: ['St Mary', 'St. Mary'] }], c);
+  assert.deepEqual(Object.keys(both).sort(), ['church', 'name']);
 });
 
 test('read with no groups: no event has a lookup spelling, and the names are the source\'s', async () => {
@@ -180,23 +180,23 @@ test('read with a ticked group: lookupName on the event, the note on the attesta
   assert.deepEqual([r1, r2, r3, r4].map((e) => e.value.label), ['Rotherhithe', 'Rotherhith', 'ROTHERHITHE.', 'Rotherhithe']);
   assert.deepEqual(toponyms(r2), ['Rotherhith']);
   assert.deepEqual(toponyms(r3), ['ROTHERHITHE.']);
-  // The note is a line of its own after the row's other notes (the parish column is kept as one).
-  assert.equal(r2.value.attestations[0].notes, 'parish: St. Mary\nGrouped for lookup with: ROTHERHITHE., Rotherhithe (spelling chosen: Rotherhithe)');
-  assert.equal(r1.value.attestations[0].notes, 'parish: St Mary\nGrouped for lookup with: Rotherhith, ROTHERHITHE. (spelling chosen: Rotherhithe)');
+  // The note is a line of its own after the row's other notes (the church column is kept as one; "parish" would be a region).
+  assert.equal(r2.value.attestations[0].notes, 'church: St. Mary\nGrouped for lookup with: ROTHERHITHE., Rotherhithe (spelling chosen: Rotherhithe)');
+  assert.equal(r1.value.attestations[0].notes, 'church: St Mary\nGrouped for lookup with: Rotherhith, ROTHERHITHE. (spelling chosen: Rotherhithe)');
   // Not a member: nothing (the control for the four above).
   assert.ok(!('lookupName' in r5));
-  assert.equal(r5.value.attestations[0].notes, 'parish: St Mary');
+  assert.equal(r5.value.attestations[0].notes, 'church: St Mary');
   assert.equal(items.filter((i) => i.severity === 'error').length, 0);
 });
 
 test('a grouped column that is not the name gives a per-column lookup value, not lookupName; a column the file lacks is warned of', async () => {
-  const parish = { parish: { method: 'fingerprint', groups: [{ chosen: 'St Mary', members: ['St Mary', 'St. Mary'] }] }, county: { groups: [{ chosen: 'Surrey', members: ['Surrey', 'Surry'] }] } };
-  const { events, items } = await read(CSV, { clusters: parish });
+  const church = { church: { method: 'fingerprint', groups: [{ chosen: 'St Mary', members: ['St Mary', 'St. Mary'] }] }, county: { groups: [{ chosen: 'Surrey', members: ['Surrey', 'Surry'] }] } };
+  const { events, items } = await read(CSV, { clusters: church });
   const [r1, r2, r3] = events;
-  assert.equal(r2.lookupValues.parish, 'St Mary');
+  assert.equal(r2.lookupValues.church, 'St Mary');
   assert.ok(!('lookupName' in r2));
-  assert.match(r2.value.attestations[0].notes, /^parish: St\. Mary\nThe column "parish" grouped for lookup with: St Mary \(spelling chosen: St Mary\)$/);
-  assert.equal(r1.lookupValues.parish, 'St Mary');
+  assert.match(r2.value.attestations[0].notes, /^church: St\. Mary\nThe column "church" grouped for lookup with: St Mary \(spelling chosen: St Mary\)$/);
+  assert.equal(r1.lookupValues.church, 'St Mary');
   assert.ok(!('lookupValues' in r3));   // Saint Mary is in no group
   assert.ok(items.some((i) => i.kind === 'generic-clusters-unknown-column' && i.severity === 'warning' && i.examples.includes('county')));
 });
@@ -216,7 +216,7 @@ test('groups that cannot be used are refused, saying why', () => {
 
 // ---- saving and loading -----------------------------------------------------------------------------
 test('saved and loaded: the groups ride beside the mapping in { columns, clusters }, which no column heading can clash with', async () => {
-  const mapping = { id: 'id', name: 'name', parish: 'note', lat: 'latitude', lon: 'longitude' };
+  const mapping = { id: 'id', name: 'name', church: 'note', lat: 'latitude', lon: 'longitude' };
   // No group ticked: the mapping is saved alone, as before.
   assert.deepEqual(matchingToSave(mapping, {}), mapping);
   const text = JSON.stringify(matchingToSave(mapping, GROUPS));
@@ -252,7 +252,7 @@ const ODD_GROUPS = { name: { method: 'fingerprint', groups: [{ chosen: 'Rotherhi
 
 test('a saved matching for a table with columns headed "field", "columns" and "clusters" is still read as { columns, clusters }', async () => {
   // The control: an ordinary heading in place of each.
-  for (const [heading, why] of [['field', 'a column headed "field"'], ['columns', 'a column headed "columns"'], ['clusters', 'a column headed "clusters"'], ['parish', 'the control: an ordinary heading']]) {
+  for (const [heading, why] of [['field', 'a column headed "field"'], ['columns', 'a column headed "columns"'], ['clusters', 'a column headed "clusters"'], ['church', 'the control: an ordinary heading']]) {
     const mapping = { id: 'id', [heading]: 'note', name: 'name' };
     const saved = JSON.parse(JSON.stringify(matchingToSave(mapping, ODD_GROUPS)));
     assert.ok(isMatchingEnvelope(saved), why);
@@ -333,7 +333,7 @@ test('plato-tools cluster prints the proposed clusters as JSON and applies nothi
 test('convert --clusters applies the saved groups: the notes are written, the names are the source\'s; without it, nothing', () => {
   const d = scratch(), f = join(d, 'r.csv'), g = join(d, 'groups.json');
   writeFileSync(f, CSV);
-  writeFileSync(g, JSON.stringify(matchingToSave({ id: 'id', name: 'name', parish: 'note', lat: 'latitude', lon: 'longitude' }, GROUPS)));
+  writeFileSync(g, JSON.stringify(matchingToSave({ id: 'id', name: 'name', church: 'note', lat: 'latitude', lon: 'longitude' }, GROUPS)));
   const convert = (...args) => {
     const out = scratch();
     const r = cli('convert', '--to', 'plato-json', '--out', out, '--json', ...args);
