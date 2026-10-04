@@ -2390,8 +2390,10 @@ itself); it runs in full every night on `main` (03:17 UTC), and by hand with
   wait on what the page has, an absence after a wait that timed out, a state set 3 s later by a
   script tag, by `evaluate()`, by an init script) were each caught, October 2026. The run's last
   lines give the number of checks and of waits cut short, and a run that cut none short fails (the
-  shortener no longer recognises the page). The step takes under five minutes on GitHub and the job
-  about five and a half; it is given 20.
+  shortener no longer recognises the page). The step takes some twelve minutes on GitHub and the job
+  about thirteen; it is given 20. Most of what is left is the pages whose init scripts define an
+  async function (the stand-ins for `navigator.storage`, which Chora's context has), waited on in
+  full by the rule above.
 - **same-checks**: the names of the checks run in **e2e** and in **prove-it-fails**, sorted (a check
   run twice counts twice), must be the same list. prove-it-fails says only that every check that ran
   failed; a check it never reached (a section stopped early) would otherwise go unnoticed. A
