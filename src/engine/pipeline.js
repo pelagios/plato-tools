@@ -412,7 +412,7 @@ function readableMeta(meta, loaded) {
     ...(t.tableSchema.foreignKeys ? { foreignKeys: t.tableSchema.foreignKeys.filter((f) => !out(f.reference.resource)) } : {}) } })) };
 }
 
-async function* tablesSource(input, env, rep, options, action) {
+async function* tablesSource(input, env, rep, options, action, hooks = {}) {
   const t0 = Date.now();
   const progress = (p) => env.progress?.({ ...p, elapsedMs: Date.now() - t0 });
   const sheets = await tableSheetsOf(input, env, rep);
@@ -446,7 +446,8 @@ async function* tablesSource(input, env, rep, options, action) {
     checkAboutRules(aboutRows, rules, { base: options.base });
     const about = (aboutRows && aboutRows[0]) || {};
     const base = options.base || about.base_uri || DEFAULT_TABLE_BASE;
-    yield { type: 'header', value: { profile: 'place-centric', gazetteer: aboutToGazetteer(about, base, options.title || 'Converted from PLATO spreadsheet tables') } };
+    const gazetteer = aboutToGazetteer(about, base, options.title || 'Converted from PLATO spreadsheet tables');
+    yield { type: 'header', value: { profile: 'place-centric', gazetteer } };
 
     progress({ phase: 'indexing' });
     store.index();
@@ -480,8 +481,10 @@ async function* tablesSource(input, env, rep, options, action) {
     };
     // Each place, in the order of the places sheet, with the rows of the attestation sheets (in
     // ATTESTATION_SHEETS order, each in its own order) and of identities that give its place_id. A
-    // place_id given to two places gives both of them all of its rows.
-    if (known('places')) {
+    // place_id given to two places gives both of them all of its rows. Each call reads them afresh.
+    const places = function* () {
+      if (!known('places')) return;
+      n = 0;
       const P = loaded.get('places');
       let cur = null;
       for (const [rowid, pcells, sheet, cells] of store.joined(P.first, P.last, FIRST_JOINED)) {
@@ -494,7 +497,11 @@ async function* tablesSource(input, env, rep, options, action) {
         if (name === 'identities') cur.idrs.push(row); else cur.atts.push(rowToAttestation(name, row, ids));
       }
       if (cur) yield record(cur.p, cur.atts, cur.idrs);
-    }
+    };
+    // What must be read of every place before the first is written (the regions, for LPF: indexRegions),
+    // read from the working database, so the sheets are not loaded or checked again.
+    if (hooks.beforeRecords) await hooks.beforeRecords(places, gazetteer['@id']);
+    yield* places();
     // Without a sheet, the records are knowingly short: the run is incomplete, and writes nothing.
     if ([...loaded.values()].some((m) => m.unreadable)) yield { type: 'short' };
   } finally { store.close(); }
@@ -545,7 +552,7 @@ export function sourceFor(input, env, rep, options = {}, action = 'check', hooks
   return input.format === 'plato-jsonl' ? platoJsonl(input.files[0], rep)
     : input.format === 'plato-json' ? platoJson(input.files[0])
     : input.format === 'lpf' || input.format === 'lpf-seq' ? lpfSource(input.files[0], input.format === 'lpf-seq', rep)
-    : input.format === 'tables' ? tablesSource(input, env, rep, options, action)
+    : input.format === 'tables' ? tablesSource(input, env, rep, options, action, hooks)
     : input.format === 'w3c-annotations' ? annotationSource(input, rep)
     : input.format === 'tei' ? teiSource(input, rep, options, hooks)
     : input.format === 'csv' || input.format === 'geojson' ? genericSource(input, rep, options, DEFAULT_TABLE_BASE)
@@ -562,7 +569,15 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   let lastBeat = 0;
   const beat = (phase, extra = {}) => { const now = Date.now(); if (now - lastBeat > 250 || extra.force) { lastBeat = now; progress({ phase, ...rep.counts, elapsedMs: now - t0, ...extra }); } };
 
-  const source = sourceFor(input, env, rep, options, action);
+  const lpfTarget = target === 'lpf' || target === 'lpf-seq';
+  // What the document says of the regions its places are ContainedIn, for LPF's gvp:broaderPartitive
+  // (PLATO 1d2cf6e, #23): filled before any feature is written, below, by the tables' reader (from its
+  // working database, before its first place), and by the store's reading. A region a table of places
+  // mints is named as it streams past instead (ev.region, below), as it always comes before the places in
+  // it; in exported tables a region may come anywhere, so they are read through first.
+  const regions = action === 'convert' && lpfTarget ? new RegionIndex() : null;
+  const hooks = regions && input.format === 'tables' ? { beforeRecords: (read, gazetteerId) => indexRegions(regions, read, options.candidates, rep, gazetteerId) } : {};
+  const source = sourceFor(input, env, rep, options, action, hooks);
   if (!source) throw new Error(`Unsupported input: ${input.format}`);
   if ((input.format === 'lpf' || input.format === 'lpf-seq') && input.lpfVersion === 2) {
     rep.error('lpf-v2', 'Linked Places Format v2 is not yet specified, so it cannot be read. It will be supported once the specification is published.');
@@ -581,10 +596,6 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   const outputs = [];
   let writer = null;
   const idrsBySubject = new Map();
-  const lpfTarget = target === 'lpf' || target === 'lpf-seq';
-  // What the document says of the regions its places are ContainedIn, for LPF's gvp:broaderPartitive
-  // (PLATO 1d2cf6e, #23): filled before any feature is written, below, and by the store's reading.
-  const regions = action === 'convert' && lpfTarget ? new RegionIndex() : null;
   // LPF and the tables have no meta-attestations, so they show the current state (see
   // src/formats/shared.js): what the document retracts or supersedes is left out, and reported.
   const currentOnly = action === 'convert' && (lpfTarget || target === 'tables');
@@ -601,18 +612,11 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     for await (const ev of again) {
       if (ev.type === 'header') gazetteerId = ev.value?.gazetteer?.['@id'];
       if (ev.type === 'idr') { if (lpfTarget) (idrsBySubject.get(ev.value.subject) || idrsBySubject.set(ev.value.subject, []).get(ev.value.subject)).push(ev.value); }
-      else if (ev.type === 'record') { collectWithdrawn(ev.value?.attestations, withdrawn); regions?.add(ev.value?.attestations, ev.value?.['@id'], regionLabel(ev.value)); }
+      else if (ev.type === 'record') { collectWithdrawn(ev.value?.attestations, withdrawn); if (regions) gatherRegion(regions, ev); }
       else if (ev.type === 'attestation') collectWithdrawn([ev.value], withdrawn);
     }
     withdrawn = resolved(withdrawn, rep);
-    // A region whose record came before every place in it is named on a second reading, only when one
-    // may have (some region some place is ContainedIn was not named on the first).
-    const unnamed = regions?.unnamed();
-    if (unnamed?.size) {
-      const more = input.format === 'plato-jsonl' ? platoJsonl(input.files[0], new Report()) : platoJson(input.files[0]);
-      for await (const ev of more) if (ev.type === 'record') regions.nameLater(ev.value?.attestations, ev.value?.['@id'], regionLabel(ev.value), unnamed);
-    }
-    if (regions) await regionCandidates(regions, options.candidates, rep, gazetteerId);
+    if (regions) await settleRegions(regions, () => (input.format === 'plato-jsonl' ? platoJsonl(input.files[0], new Report()) : platoJson(input.files[0])), options.candidates, rep, gazetteerId);
   }
   if (action === 'convert' && options.cube && target !== 'ntriples') rep.warning('cube-not-ntriples', 'The Data Cube export applies to N-Triples output only, so it is not made here.');
   // RDF may hold a dataset or a candidate set, which are written by different writers: its writer is
@@ -837,6 +841,23 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   // cut short does: no outputs, and a host removes what was written.
   if (writer?.incomplete || short) return { report: rep.toJSON(), outputs: [], incomplete: true };
   return { report: rep.toJSON(), outputs };
+}
+/** Gather what record event `ev` says of the regions (RegionIndex.add), as every reading of a dataset does. */
+const gatherRegion = (regions, ev) => regions.add(ev.value?.attestations, ev.value?.['@id'], regionLabel(ev.value));
+/**
+ * After a first reading has gathered every record (gatherRegion): name a region whose record came before
+ * every place in it, on a second reading (`again()`, the records afresh), made only when one may have
+ * (some region some place is ContainedIn was not named on the first); then the Candidates' scores.
+ */
+async function settleRegions(regions, again, sets, rep, gazetteerId) {
+  const unnamed = regions.unnamed();
+  if (unnamed.size) for await (const ev of again()) if (ev.type === 'record') regions.nameLater(ev.value?.attestations, ev.value?.['@id'], regionLabel(ev.value), unnamed);
+  await regionCandidates(regions, sets, rep, gazetteerId);
+}
+/** Fill `regions` from a reader whose `read()` gives the records afresh each time (the tables'). */
+async function indexRegions(regions, read, sets, rep, gazetteerId) {
+  for await (const ev of read()) if (ev.type === 'record') gatherRegion(regions, ev);
+  await settleRegions(regions, read, sets, rep, gazetteerId);
 }
 /**
  * Give `regions` the scores of the Candidates its matches were promoted from, read from the candidate

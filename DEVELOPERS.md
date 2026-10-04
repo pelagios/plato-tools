@@ -87,9 +87,12 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   (England)*) where WHG wants the name (*Surrey*). Its `when`
   and citations are the containment attestation's, as for any relation. `RegionIndex` in `lpf.js`
   gathers what the document says of the regions before any feature is written: in the JSON pre-pass
-  that already finds withdrawals, or, for RDF and attestation-centric input, from the store (the
-  regions some place is `ContainedIn` that are places of the dataset, read once more through a quiet
-  `Rdf2Json`). Only current matches count, by the same `currentAttestations` every
+  that already finds withdrawals; for spreadsheet tables, by the tables' reader from its working
+  database once the sheets are loaded and checked, before its first place (`hooks.beforeRecords`, which
+  `indexRegions` in `pipeline.js` fills by the same `gatherRegion` and `settleRegions` as the JSON
+  pre-pass, so the sheets are not read twice); or, for RDF and attestation-centric input, from the store
+  (the regions some place is `ContainedIn` that are places of the dataset, read once more through a
+  quiet `Rdf2Json`). Only current matches count, by the same `currentAttestations` every
   writer uses, with denials left out. The cases: a `ContainedIn` straight at the gazetteer, or at a
   region with no current match, is written as it stands, with the containment's own certainty and no
   score (a region assigned by hand). Several current matches to different places: no guess, the
@@ -107,8 +110,10 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   faults left to checking it on its own. The page gives none yet, so its LPF has no scores, each
   reported. Names are kept only for the regions some place is `ContainedIn`, matched or not, so that the index
   stays small; a region whose record comes before every place in it is named on a second reading of the
-  file, made only when some target was not named on the first. `test/lpf-regions.test.js` has
-  each case on PLATO's `place-centric-regions.json` and `candidate-set-regions.json`.
+  file (for tables, of the places from the working database), made only when some target was not named
+  on the first. `test/lpf-regions.test.js` has each case on PLATO's `place-centric-regions.json` and
+  `candidate-set-regions.json`, and that example exported as tables, compared with the same tables read
+  as PLATO JSON first.
 - **The about sheet's authors.** Each item of `creator` is `Name <address>`, an address alone, or a
   name alone (PLATO 8385472; `creatorOf` in `tables.js`). An item alone is an address only with a
   scheme and `//`, or a `urn:`, `tag:`, `mailto:`, `doi:` or `info:` scheme, so that `Re:Place` is a

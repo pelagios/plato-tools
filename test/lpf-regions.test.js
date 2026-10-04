@@ -301,3 +301,42 @@ test('the command line: --candidates SET with convert --to lpf; refused for anyt
     assert.equal(gone.status, 2); assert.match(gone.stderr, /cannot be read/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// Exported tables carrying regions (Hermes): the tables' reader fills the RegionIndex too, from its working
+// database before the first place is written, so a ContainedIn is named as from PLATO JSON. The control is
+// the same tables read as PLATO JSON first (the path that already named them), and the two are compared.
+const bytesOf = (parts) => new Uint8Array(Buffer.concat(parts.map((b) => Buffer.from(b))));
+async function tablesAndControl(doc) {
+  const t = await go([textFile(JSON.stringify(doc), 'd.json')], 'convert', 'tables');
+  assert.equal(t.report.errors, 0);
+  const zip = new File([bytesOf(t.e.outs['d-tables.zip'])], 'd-tables.zip');
+  const direct = await go([zip], 'convert', 'lpf');
+  assert.equal(direct.input.format, 'tables');
+  const json = await go([zip], 'convert', 'plato-json');
+  const name = Object.keys(json.e.outs).find((k) => k.endsWith('.json'));
+  const control = await go([textFile(outText(json.e, name), 'c.json')], 'convert', 'lpf');
+  assert.equal(control.input.format, 'plato-json');
+  const rels = (r) => new Map(JSON.parse(outText(r.e, Object.keys(r.e.outs).find((k) => k.endsWith('.geojson')))).features
+    .map((f) => [f['@id'], (f.relations || []).filter((x) => x.relationType === 'gvp:broaderPartitive').map((x) => [x.relationTo, x.label])]));
+  return { direct: rels(direct), control: rels(control), report: direct.report };
+}
+const TB = 'https://example.org/my-dataset/place/';
+
+test('exported tables carrying regions give gvp:broaderPartitive its label, as the same data as PLATO JSON does', async () => {
+  const { direct, control, report } = await tablesAndControl(dataset());
+  assert.equal(report.errors, 0);
+  // The control names both regions, by the toponym of each one's name (not its display label).
+  assert.deepEqual(control.get(TB + 'rotherhithe'), [[TB + 'surrey', 'Surrey']]);
+  assert.deepEqual(control.get(TB + 'surrey'), [[TB + 'england', 'England']]);
+  assert.deepEqual([...direct], [...control]);
+});
+
+test('exported tables listing each region before the places in it name it too (the second reading)', async () => {
+  const d = dataset();
+  d.spatialEntities.reverse();
+  assert.equal(d.spatialEntities.at(-1)['@id'], ROTHERHITHE, 'the parish now comes after its regions');
+  const { direct, control } = await tablesAndControl(d);
+  assert.deepEqual(control.get(TB + 'rotherhithe'), [[TB + 'surrey', 'Surrey']]);
+  assert.deepEqual(control.get(TB + 'surrey'), [[TB + 'england', 'England']]);
+  assert.deepEqual([...direct], [...control]);
+});
