@@ -1,7 +1,7 @@
 # The gates on every branch pushed, before it lands on main: the unit and conversion tests, the install
-# as npx does it, the build and the browser checks. The proof that the browser checks can fail tests the
-# checks, not the tools, so a branch runs it only when it changes the checks (e2e/ or this workflow);
-# every night it runs in full on main, so whatever a branch skipped is caught within a day.
+# as npx does it, the build, the browser checks, and the proof that the browser checks can fail, side by
+# side (the proof takes about 13 minutes since its waits end early on the page with no tools). Every night
+# the same run checks main itself.
 # Push the branch and watch the run (DEVELOPERS.md, Testing); main is also tested by pages.yml.
 # No secrets: what needs a token (WHG_TOKEN) is skipped, as it is locally without one.
 name: Gates
@@ -21,28 +21,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Which browser runs this push needs: both at night or by hand, and on a branch that changes the
-  # checks; otherwise the browser checks alone.
+  # Which browser runs this push needs. Both, always: the proof became cheap enough (4 October 2026) to
+  # run on every branch. Kept as a job so that a run can be narrowed here again if ever it must.
   plan:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       modes: ${{ steps.modes.outputs.modes }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - id: modes
         shell: bash
         run: |
-          both='["e2e","prove-it-fails"]'
-          if [ "${{ github.event_name }}" != push ]; then echo "modes=$both" >> "$GITHUB_OUTPUT"; echo "Both: ${{ github.event_name }}."; exit 0; fi
-          changed=$(git diff --name-only origin/main...HEAD)
-          if echo "$changed" | grep -qE '^(e2e/|\.github/workflows/gates\.yml$)'; then
-            echo "modes=$both" >> "$GITHUB_OUTPUT"; echo "Both: the checks changed:"; echo "$changed" | grep -E '^(e2e/|\.github/)'
-          else
-            echo 'modes=["e2e"]' >> "$GITHUB_OUTPUT"; echo "Browser checks only: nothing under e2e/ changed."
-          fi
+          echo 'modes=["e2e","prove-it-fails"]' >> "$GITHUB_OUTPUT"
 
   unit:
     runs-on: ubuntu-latest

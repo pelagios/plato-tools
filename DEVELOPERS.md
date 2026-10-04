@@ -2362,10 +2362,8 @@ PERSEUS_P4_FILE=/path/to/text.xml node scripts/check-perseus-p4.mjs   # TEI P4 a
 
 **The full gates run on GitHub, not here.** Every branch pushed (any but `main`) runs
 `.github/workflows/gates.yml`: its jobs side by side, each with PLATO checked out at the pinned
-commit. **unit** and **e2e** run on every branch. **prove-it-fails** tests the checks rather than the
-tools, so a branch runs it only when it changes them (anything under `e2e/`, or the workflow
-itself); it runs in full every night on `main` (03:17 UTC), and by hand with
-`gh workflow run Gates --ref <branch>`, so whatever a branch skipped is caught within a day.
+commit, on every branch: **unit**, **e2e** and **prove-it-fails**, plus **same-checks**. They also run
+every night on `main` (03:17 UTC), and by hand with `gh workflow run Gates --ref <branch>`.
 **same-checks** runs whenever prove-it-fails does, and compares the two.
 
 - **unit**: `npm test`, `scripts/install-test.mjs` (the tools installed as npx installs them, and
