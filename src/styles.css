@@ -543,4 +543,8 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; tex
 .track-step.is-unavailable .track-tool, .track-step.is-unavailable .track-act, .track-step.is-unavailable .track-state, .track-step.is-unavailable .track-mark { color: var(--muted); }
 .track-why { color: var(--muted); }
 .track-end { display: block; margin-top: .2rem; color: var(--warn); font-size: .95rem; }
+.track-message { margin: .5rem 0 0; font-size: .95rem; }
+.track-message.warn { color: var(--warn); }
+.track-run { display: block; font-size: .95rem; }
+.track-run.warn { color: var(--warn); }
 .feedback-line { margin: .5rem 0 0; }

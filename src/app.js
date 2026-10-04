@@ -21,10 +21,11 @@ import { createLookup, WHG_ENDPOINT, isWhg } from './engine/gazetteer/index.js';
 import { runLookup, planLookup, gazetteerPermission, permittedFetch, serviceOf, iriFromTemplate, iriVia, manifestSettings, newWork, defaultChoice, licenceOf, PLACE_CHOICES, WHG_REQUESTS_A_DAY } from './engine/krisis/lookup.js';
 import { candidateSource } from './engine/krisis/identity.js';
 import { mountMethodos } from './methodos/page.js';
-import { pageStore } from './methodos/page-store.js';
+import { workflowStore } from './methodos/store.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
 let worker, files = [], input = null, targets = {}, busy = false;
+let runOp = null;   // the Methodos operation of the run under way (src/methodos/page.js), told when it ends
 
 // The commit of PLATO tools this page was built from (scripts/build-info.mjs writes it before the
 // build), for the site's workflow to run the same; absent from a build made without it.
@@ -63,6 +64,7 @@ function onMessage({ data }) {
 function choose(list) {
   files = [...list];
   if (!files.length) return;
+  methodos.chosen(files);   // a workflow followed begins with them, or checks they are its step's
   // A previous release chosen for another dataset is not this one's: it is chosen again, or not.
   $('previous').value = '';
   $('only').value = '';   // and so is a list of its places to publish
@@ -133,6 +135,9 @@ function start(action, earlier) {
   const base = $('base').value.trim() || undefined;
   // Krisis: a review on the page is put away (and its keys with it) while anything but its own finishing runs.
   if (action !== 'apply') { $('review').hidden = true; lockColumns(); }
+  // Methodos: the run is told, as the operation a workflow's step names, with the files it runs on.
+  runOp = action === 'publish' ? `publish.${$('part').value}` : action;
+  methodos.began({ op: runOp, files });
   // The version check: the files chosen are the later version, and `earlier` the one it is compared with.
   if (action === 'compare') worker.postMessage({ cmd: 'compare', earlier, later: files, options: { base } });
   else if (action === 'publish') onlyKeys().then(
@@ -177,8 +182,9 @@ function onProgress(p) {
   $('phase').textContent = progressText(p);
   Object.assign(state, { progress: p });
 }
-function onDone({ report, outputs, work: found }) {
+function onDone({ report, outputs, work: found, incomplete }) {
   busy = false;
+  if (runOp) { methodos.ended({ op: runOp, report, outputs: outputs || [], incomplete: !!incomplete }); runOp = null; }
   buttons(false);
   $('progress').hidden = true; $('result').hidden = false;
   const { problems, counted } = summary(report, state.action);
@@ -228,6 +234,7 @@ async function save(name) {
 window.__plato_save = save;
 function fail(message, words) {
   busy = false;
+  if (runOp) { methodos.ended({ op: runOp, error: words || message }); runOp = null; }
   buttons(false);
   $('progress').hidden = true; $('result').hidden = false;
   $('summary').innerHTML = `<span class="warn">${escapeHtml(words || `Something went wrong: ${message}`)}</span>`;
@@ -708,7 +715,7 @@ $('convert').onclick = () => start('convert');
 $('compare').onclick = () => $('earlier').click();
 $('earlier').onchange = (e) => { const earlier = [...e.target.files]; e.target.value = ''; if (earlier.length) start('compare', earlier); };
 $('publish').onclick = () => start('publish');
-$('cancel').onclick = () => { worker.terminate(); busy = false; $('progress').hidden = true; clearPreview(); buttons(false); Object.assign(state, { phase: 'cancelled' }); startWorker();
+$('cancel').onclick = () => { worker.terminate(); busy = false; if (runOp) { methodos.ended({ op: runOp, cancelled: true }); runOp = null; } $('progress').hidden = true; clearPreview(); buttons(false); Object.assign(state, { phase: 'cancelled' }); startWorker();
   // Krisis: an answer about the columns still being worked out went with the worker: it is asked for again, as it was
   // (for a resumed review, by the matching the review was made with), or Match and Finish would wait for it for ever.
   if (columnsPending()) { const forReview = reviewColumnsAsked === columnsAsked; requestColumns(columnsSaved, columnsFrom); if (forReview) reviewColumnsAsked = columnsAsked; } };
@@ -826,8 +833,19 @@ chooseTool(toolFromHash());
 // ---- Methodos: the interview and the tracker (src/methodos/page.js) ------------------------------
 // Opened from its card (or an address ending #methodos); until then the page is as it was. Each step
 // the workflow comes to chooses that step's tool, as its card would, and is said in #for-tool.
+const methodosStore = workflowStore();
 const methodos = mountMethodos({
-  banner: $('methodos-banner'), interview: $('methodos'), tracker: $('methodos-tracker'), tools: $('toolbox'), store: pageStore(),
+  banner: $('methodos-banner'), interview: $('methodos'), tracker: $('methodos-tracker'), tools: $('toolbox'), store: methodosStore,
+  page: {
+    files: () => files,
+    choose: (list) => { const dt = new DataTransfer(); for (const f of list) dt.items.add(f); $('picker').files = dt.files; choose(list); },
+    pick: () => $('picker').click(),
+    output: async (name) => (await (await (await navigator.storage.getDirectory()).getDirectoryHandle('outputs')).getFileHandle(name)).getFile(),
+    mapping: () => (isTable(input) && columns && !columns.error ? columnOptions() : null),
+    review: () => (work ? { text: serialiseWork(work), name: workName } : null),
+    openWork: (f) => resume(f),
+    pickWork: () => $('workfile').click(),
+  },
   onStep(step) {
     if (!step && !workflowStep) return;
     workflowStep = step;
@@ -839,6 +857,9 @@ for (const id of ['methodos-card', 'methodos-ask']) $(id).addEventListener('clic
   e.preventDefault(); methodos.open();
 });
 if (location.hash === '#methodos') methodos.open();
+// "Keep working data" turned off in the Permissions panel: Methodos's records go at once, not at its next save.
+let keptBefore = permissions.keepWorkingData();
+permissions.onChange(() => { const now = permissions.keepWorkingData(); if (now !== keptBefore) { keptBefore = now; methodos.keepChanged(now); } });
 
 // Krisis: match review. One subject place at a time, with its candidates; each decision is written
 // into the work object at once (decide() in engine/krisis/work.js), which "Save the review" saves
@@ -1243,6 +1264,8 @@ async function lookUp({ only = null, query = null, allNames, which } = {}) {
   if (svc.problem) { $('lookup').open = true; return lookupSay(svc.problem, true); }
   // Not allowed (not decided, or Never): nothing is sent; the panel shows the one line, whose button opens Permissions.
   if (!mayLookUp(svc)) {
+    // Methodos: a workflow at its lookup waits for the permission, and says so.
+    if (!only) { methodos.began({ op: 'lookup', files }); methodos.ended({ op: 'lookup', waiting: 'the gazetteer to be allowed in the Permissions panel; then look the places up again.' }); }
     $('lookup').open = true; lookupSay('');
     needsLine($('lookup-permission'), svc);
     $('lookup-permission').querySelector('button')?.focus();
@@ -1268,6 +1291,7 @@ async function lookUp({ only = null, query = null, allNames, which } = {}) {
   const service = shortName(svc.service);
   looking = new AbortController();
   afterStop = null;
+  if (!only) methodos.began({ op: 'lookup', files });   // Methodos: a whole lookup is the lookup step's run; one place's is not
   $('lookup-send').disabled = true; $('lookup-stop').hidden = false; $('lookup-resume').hidden = true;
   buttons(true);   // as while the worker runs: Match, Check, Resume and the rest would take the review away under the lookup
   lookupSay(LW.sending(service));
@@ -1293,6 +1317,14 @@ async function lookUp({ only = null, query = null, allNames, which } = {}) {
   }
   show();
   const stopped = fault ? { kind: 'fault', message: null } : result.stopped;
+  // Methodos: the lookup's work, as a file, is the step's result; stopped part-way, it is what the step had done.
+  if (!only) {
+    const made = new File([serialiseWork(w)], name, { type: 'application/json' });
+    if (!stopped) methodos.ended({ op: 'lookup', work: made, report: { errors: 0, items: [] } });
+    else if (stopped.kind === 'stopped') methodos.ended({ op: 'lookup', cancelled: true, partial: made });
+    else if (stopped.kind === 'permission') methodos.ended({ op: 'lookup', waiting: 'the gazetteer to be allowed in the Permissions panel; then look the places up again.' });
+    else methodos.ended({ op: 'lookup', error: LOOKUP_WORDS.stopped(stopped), partial: made });
+  }
   const said = [];
   if (settings && !settings.read) said.push(LOOKUP_WORDS.noManifest);
   if (result) { const sum = LOOKUP_WORDS.summary(result.record.counts, svc.service.title); said.push(sum.problems, sum.counted); }

@@ -1960,8 +1960,165 @@ def methodos_checks(pw, url, tmp):
             return (got['kept, a new tab'] == [id_] and got['kept, in IndexedDB'] == [id_] and got['not kept, saved'] == 'tab'
                     and got['not kept, in IndexedDB at once'] == [] and got['not kept, same tab'] == 'report' and got['not kept, a new tab'] == [] and got['not kept, in IndexedDB'] == []), got
         attempt('Methodos: with "keep working data" off nothing is left after the tab closes (with it on, the record outlives the tab)', nothing_left)
+        methodos_join_checks(browser, base, hook if built.returncode == 0 else None, tmp)
     finally:
         browser.close()
+
+# ---- Methodos joined to the tools' runs (src/methodos/page.js, the tracker) -------------------------------
+# A workflow followed on the page advances when the run of its step's tool finishes, on the step's file;
+# it is kept at every step boundary in phase 2's store, and taken up again after a reload. Read through
+# the tracker's own words and states, and the store through the hook (as above).
+JOIN_STATE = '''() => { const t = document.getElementById('methodos-tracker'), v = (e) => !!e && !e.hidden && !e.closest('[hidden]');
+  return { shown: v(t), status: t.dataset.status || null, kept: t.dataset.kept || null,
+    steps: Object.fromEntries([...t.querySelectorAll('li.track-step')].map((li) => [li.dataset.step, li.dataset.state + (li.dataset.run ? ':' + li.dataset.run : '')])),
+    run: t.querySelector('li.is-current .track-run')?.textContent || null, message: document.getElementById('methodos-message').textContent,
+    where: document.getElementById('methodos-tracker-where').textContent, done: v(document.getElementById('methodos-done')),
+    use: v(document.getElementById('methodos-use')) ? document.getElementById('methodos-use').textContent : null,
+    pick: v(document.getElementById('methodos-pick')) ? document.getElementById('methodos-pick').textContent : null }; }'''
+METHODOS_HOLDER = '''async (n) => {
+  const src = `let held = []; onmessage = async ({ data }) => {
+    if (data === 'release') { for (const h of held) h.close(); held = []; postMessage(0); return; }
+    const o = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('.opfs-sahpool')).getDirectoryHandle('.opaque');
+    for await (const [, h] of o) if (h.kind === 'file' && held.length < data) held.push(await h.createSyncAccessHandle());
+    postMessage(held.length); };`;
+  window.holder = window.holder || new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+  return new Promise((res) => { holder.onmessage = (e) => res(e.data); holder.postMessage(n); });
+}'''
+def methodos_join_checks(browser, base, hook, tmp):
+    customs = sorted((PLATO / 'schemas/tables/examples/customs').glob('*.csv'))
+    def fresh():
+        ctx = browser.new_context(accept_downloads=True)
+        ctx.add_init_script('window.__plato_forceDownload = true;')
+        if hook: ctx.route(base + HOOK_PATH, lambda r: r.fulfill(path=str(hook), content_type='text/javascript'))
+        return ctx
+    def ready(p):
+        if p.url in ('', 'about:blank'): p.goto(NOTOOLS if PROVE else base)
+        if wait_state(p, lambda s: s.get('phase') == 'ready', T(30), 'ready').get('phase') != 'ready': raise RuntimeError('the main page did not start')
+        return p
+    def hooked(p):
+        if not hook: raise RuntimeError('the hook did not bundle')
+        p.add_script_tag(url=base + HOOK_PATH); p.wait_for_function('() => !!window.__methodos_e2e', timeout=T(10) * 1000)
+        return p
+    js = lambda p: p.evaluate(JOIN_STATE)
+    def follow_publish(p):
+        p.click('#methodos-ask'); until(p, "!document.getElementById('methodos').hidden", 5)
+        p.check('input[name="methodos-have"][value="plato"]'); p.check('input[name="methodos-want"][value="publish"]')
+        p.click('#methodos-start'); until(p, "document.getElementById('methodos-tracker').dataset.status === 'pending'", 5)
+    def choose(p, fs):
+        p.set_input_files('#picker', [])
+        p.set_input_files('#picker', [str(f) for f in fs])
+        return wait_state(p, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'detection').get('phase') == 'detected'
+    def step_is(p, step, state, timeout=60):
+        until(p, f"() => document.querySelector('#methodos-track li[data-step=\"{step}\"]')?.dataset.state === '{state}'", timeout)
+    def run(p, button, part=None):
+        if part: p.select_option('#part', part)
+        p.click(button)
+        return wait_state(p, lambda s: s.get('phase') in ('done', 'error'), T(120), 'run')
+    r = {}
+
+    def advances():
+        # Publish a dataset on the customs tables: the check, minting and the FAIR report, each run with its
+        # own button, each step done by the run (no "This step is done": an absence, beside each step done).
+        ctx = fresh(); r['ctx'] = ctx
+        p = ready(ctx.new_page()); r['page'] = p
+        follow_publish(p)
+        got = {'pending': js(p)}
+        if not choose(p, customs): return False, {**got, 'detected': False}
+        until(p, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+        got['begun'] = js(p)
+        got['check run'] = run(p, '#check').get('phase'); step_is(p, 'check', 'done'); got['checked'] = js(p)
+        got['mint run'] = run(p, '#publish', 'mint').get('phase'); step_is(p, 'mint', 'done'); got['minted'] = js(p)
+        s = wait_state(p, lambda s: s.get('phase') == 'done', 5)
+        minted = next((o['name'] for o in (s.get('outputs') or []) if o['name'].endswith('-with-ids.jsonl')), None)
+        if minted: (tmp / 'methodos-minted').mkdir(exist_ok=True); r['minted'] = download(p, minted, tmp / 'methodos-minted' / minted)
+        # The minted dataset is handed on: the tracker offers it, and a run on it is the report's.
+        p.click('#methodos-use'); wait_state(p, lambda s: s.get('phase') == 'detected', T(60), 'detection')
+        until(p, "() => /the file this step takes/.test(document.getElementById('methodos-message').textContent)", 30)
+        got['report run'] = run(p, '#publish', 'report').get('phase'); step_is(p, 'report', 'done'); got['reported'] = js(p)
+        b, c, m, e = got['begun'], got['checked'], got['minted'], got['reported']
+        ok = (got['pending']['shown'] and got['pending']['steps'].get('check') == 'current' and not got['pending']['done']
+              and b['status'] == 'idle' and b['steps']['check'] == 'current' and not b['done']
+              and c['steps']['check'] == 'done' and c['steps']['mint'] == 'current' and not c['done'] and c['kept'] == 'browser'
+              and m['steps']['mint'] == 'done' and m['steps']['report'] == 'current' and (m['use'] or '').startswith('Use ') and minted and minted in m['use']
+              and e['steps']['report'] == 'done' and e['steps']['site'] == 'current' and e['where'].startswith('Step 4 of 5') and not e['done'] and r.get('minted'))
+        return ok, got
+    attempt('Methodos: a "Publish a dataset" workflow advances by itself as its tools\' runs finish (check, minting, then the FAIR report on the minted dataset it hands on), with no "This step is done"', advances)
+
+    def resumed():
+        p = r['page']
+        before = js(p)
+        p.reload(); ready(p)
+        until(p, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 15)
+        after = js(p)
+        ok = (before['steps']['site'] == 'current' and after['shown'] and after['steps'] == before['steps'] and after['where'] == before['where']
+              and 'Taken up where it was left' in after['message'] and r['minted'].name in after['message'])
+        return ok, {'before': before, 'after': after}
+    attempt('Methodos: a reload mid-workflow takes it up at the same step, every step as it was, and asks for the step\'s file by name', resumed)
+
+    def refused():
+        p = r['page']
+        choose(p, customs)
+        until(p, "() => /These are not the files/.test(document.getElementById('methodos-message').textContent)", 30)
+        no = js(p)
+        site = run(p, '#publish', 'site').get('phase'); p.wait_for_timeout(1000)
+        still = js(p)
+        choose(p, [r['minted']])
+        until(p, "() => /the file this step takes/.test(document.getElementById('methodos-message').textContent)", 30)
+        yes = js(p)
+        ok = ('These are not the files' in no['message'] and r['minted'].name in no['message'] and site in ('done', 'error')
+              and still['steps']['site'] == 'current' and 'These are not the files' in still['message']
+              and 'not the files' not in yes['message'] and r['minted'].name in yes['message'])
+        r['ctx'].close()
+        return ok, {'other file': no, 'its run': site, 'after the run': still, 'the right file': yes}
+    attempt('Methodos: after a reload, a different file is refused in words and a run on it is not counted; the file the step takes is accepted', refused)
+
+    def nothing_kept():
+        # Kept (the presence): a workflow begun is in IndexedDB. Turned off in the Permissions panel, it is
+        # gone from there at once, the tracker carries on in the tab, and after the tab nothing is left.
+        ctx = fresh()
+        try:
+            p = hooked(ready(ctx.new_page()))
+            follow_publish(p); choose(p, customs)
+            until(p, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+            got = {'kept': p.evaluate('() => window.__methodos_e2e.keys()'), 'kept as': js(p)['kept']}
+            p.click('#permissions-button'); until(p, '() => document.getElementById("permissions-panel")?.open', 10)
+            p.uncheck('#perm-keep-work')
+            until(p, "() => document.getElementById('methodos-tracker').dataset.kept === 'tab'", 10)
+            got['off, at once'] = p.evaluate('() => window.__methodos_e2e.keys()')
+            got['off, tracker'] = js(p)
+            p.close()
+            q = hooked(ready(ctx.new_page())); q.wait_for_timeout(500)
+            got['next tab'] = {'list': q.evaluate('() => window.__methodos_e2e.list()'), 'keys': q.evaluate('() => window.__methodos_e2e.keys()'), 'tracker': js(q)['shown']}
+            q.evaluate("() => localStorage.removeItem('plato-tools.keep-working-data')")
+            ok = (len(got['kept']) == 1 and got['kept as'] == 'browser' and got['off, at once'] == [] and got['off, tracker']['shown']
+                  and got['off, tracker']['steps'].get('check') == 'current' and got['next tab'] == {'list': [], 'keys': [], 'tracker': False})
+            return ok, got
+        finally: ctx.close()
+    attempt('Methodos: turned off in the Permissions panel, "keep working data" clears the workflow from IndexedDB at once (where it was, the presence), and nothing is left after the tab', nothing_kept)
+
+    def failed():
+        # The check is refused the working files (another worker holds them): the step fails, and says so;
+        # let go, the same step run again is done (the presence beside the failure).
+        ctx = fresh()
+        try:
+            p = ready(ctx.new_page()); holder = ready(ctx.new_page())
+            if not choose(p, customs): return False, 'not detected'
+            run(p, '#check')   # the pool is made, and let go between runs
+            follow_publish(p)
+            until(p, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+            got = {'held': holder.evaluate(METHODOS_HOLDER, 99)}
+            got['run'] = run(p, '#check').get('phase')
+            until(p, "document.getElementById('methodos-tracker').dataset.status === 'failed'", 15)
+            got['failed'] = js(p)
+            got['released'] = holder.evaluate(METHODOS_HOLDER, 'release')
+            got['again'] = run(p, '#check').get('phase'); step_is(p, 'check', 'done')
+            got['done'] = js(p)
+            f = got['failed']
+            ok = (got['held'] > 0 and got['run'] == 'error' and f['steps']['check'] == 'current:failed' and (f['run'] or '').startswith('Failed: ')
+                  and 'run this step again' in f['run'] and got['done']['steps']['check'] == 'done' and got['done']['steps']['mint'] == 'current')
+            return ok, got
+        finally: ctx.close()
+    attempt('Methodos: a step whose run fails says so in the tracker ("Failed: …, run this step again"), and run again it is done', failed)
 
 # ---- Permissions (src/lib/permissions.js) on the main page ------------------------------------------
 # The page runs under the Content Security Policy written from the permissions allowed (none, here),
@@ -4373,22 +4530,30 @@ def methodos_page_checks(browser, url):
             page.click('#methodos-start'); until(page, "!document.getElementById('methodos-tracker').hidden", 5)
             a = st(page)
             order = page.evaluate("() => { const t = document.getElementById('methodos-tracker'), f = document.getElementById('files'); return !!(t.compareDocumentPosition(f) & Node.DOCUMENT_POSITION_FOLLOWING); }")
-            page.click('#methodos-done'); b = st(page)
-            page.click('#methodos-back'); c = st(page)
-            page.click('#methodos-done'); page.click('#methodos-leave'); d = st(page)
+            # Before a file is chosen the workflow is not begun, and nothing can be said done (the absence,
+            # beside the tracker's words asking for the file); a table chosen begins it, and its columns,
+            # once read, are the result of the first step, which is the user's to say done.
+            a['done shown'] = page.evaluate("() => !document.getElementById('methodos-done').hidden")
+            a['message'] = page.evaluate("() => document.getElementById('methodos-message').textContent")
+            page.set_input_files('#picker', [str(ROOT / 'test/fixtures/generic/with-ids.csv')])
+            until(page, "() => window.__plato?.columns?.headers && document.getElementById('methodos-tracker').dataset.status === 'idle' && !document.getElementById('methodos-done').hidden", 30)
+            page.click('#methodos-done'); until(page, "() => document.querySelector('#methodos-track li[data-step=\"check\"]')?.dataset.state === 'current'", 10); b = st(page)
+            page.click('#methodos-back'); until(page, "() => document.querySelector('#methodos-track li[data-step=\"columns\"]')?.dataset.state === 'current'", 10); c = st(page)
+            page.click('#methodos-leave'); until(page, "() => document.getElementById('methodos-tracker').hidden", 10); d = st(page)
             ids = [x['id'] for x in a['track']]
             first_ok = (a['tracker'] and not a['interview'] and not a['banner'] and order and a['trackerRecipe'] == p['recipe'] and ids == p['steps']
                         and a['track'][0]['state'] == 'current' and a['track'][0]['current'] == 'step' and a['track'][0]['words'] == 'Now'
                         and all(x['state'] == 'todo' and x['current'] is None for x in a['track'][1:])
                         and a['hash'] == '' and a['tool'] is None and a['note'] and f"step 1 of {len(ids)}" in a['note'] and 'Hermes' in a['note']
-                        and a['where'].startswith(f"Step 1 of {len(ids)}") and '%' not in a['where'] + a['note'] and a['focus'] == 'methodos-tracker-h')
+                        and a['where'].startswith(f"Step 1 of {len(ids)}") and '%' not in a['where'] + a['note'] and a['focus'] == 'methodos-tracker-h'
+                        and a['done shown'] is False and 'in step 1 to begin' in a['message'])
             second_ok = (b['track'][0]['state'] == 'done' and b['track'][0]['words'] == 'Done' and b['track'][1]['state'] == 'current'
                          and b['hash'] == '#tool=check' and b['tool'] == 'check' and 'Elenchos' in (b['note'] or '') and f"step 2 of {len(ids)}" in (b['note'] or ''))
             back_ok = c['track'][0]['state'] == 'current' and c['hash'] == '' and c['tool'] is None
             left_ok = not d['tracker'] and d['banner'] and d['hash'] == '' and d['tool'] is None and d['note'] is None and d['files']
             return first_ok and second_ok and back_ok and left_ok, {'started': a, 'above step 1': order, 'one done': b, 'back': c, 'left': d}
         finally: ctx.close()
-    attempt('Methodos: the tracker above step 1 shows the workflow\'s steps as now and to come, and each step chooses its tool (#tool=) and says itself in #for-tool; back and leave undo it', tracker)
+    attempt('Methodos: the tracker above step 1 shows the workflow\'s steps as now and to come, begins when a table is chosen, and each step chooses its tool (#tool=) and says itself in #for-tool; the columns step is said done by the user; back and leave undo it', tracker)
 
     def unavailable():
         # Has regions, answered Yes: the workflow is not refused. The regions step is in the plan and the
@@ -4401,13 +4566,12 @@ def methodos_page_checks(browser, url):
             a = st(page)
             page.click('#methodos-start'); until(page, "!document.getElementById('methodos-tracker').hidden", 5)
             b = st(page)
-            seen = []
-            for _ in range(12):
-                cur = next((x['id'] for x in st(page)['track'] if x['state'] == 'current'), None)
-                if cur is None: break
-                seen.append(cur); page.click('#methodos-done')
-            last = page.evaluate("() => document.querySelector('#methodos-track li.track-step:last-child .track-end')?.textContent || null")
+            # Begun (a table chosen), the runner takes the step as skipped, not refused: the workflow is under way.
+            page.set_input_files('#picker', [str(ROOT / 'test/fixtures/generic/with-ids.csv')])
+            until(page, "() => document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
             c = st(page)
+            seen = [x['id'] for x in c['track'] if x['state'] != 'unavailable']
+            last = page.evaluate("() => document.querySelector('#methodos-track li.track-step:last-child .track-end')?.textContent || null")
             r = next((x for x in a['plan'] if x['id'] == 'regions'), None)
             t = next((x for x in b['track'] if x['id'] == 'regions'), None)
             avail = [x['id'] for x in a['plan'] if x['id'] != 'regions']
@@ -4416,10 +4580,11 @@ def methodos_page_checks(browser, url):
                   and f"in {len(avail)} steps" in a['verdict']
                   and b['tracker'] and t is not None and t['state'] == 'unavailable' and 'Regions cannot be identified yet' in (t['why'] or '')
                   and b['track'][0]['state'] == 'current' and b['where'].startswith(f"Step 1 of {len(avail)}")
-                  and seen == avail and 'regions were not identified' in (last or '') and c['where'].startswith('Every one'))
-            return ok, {'plan': a, 'started': b, 'steps taken': seen, 'last step notes': last, 'at the end': c['where']}
+                  and seen == avail and 'regions were not identified' in (last or '')
+                  and next((x['state'] for x in c['track'] if x['id'] == 'regions'), None) == 'unavailable' and c['track'][0]['state'] == 'current' and c['where'].startswith(f"Step 1 of {len(avail)}"))
+            return ok, {'plan': a, 'started': b, 'begun': c, 'steps followed': seen, 'last step notes': last}
         finally: ctx.close()
-    attempt('Methodos: with regions answered Yes the workflow is followed, its regions step shown as "Not yet available" with its reason and skipped, and the last step notes the regions were not identified', unavailable)
+    attempt('Methodos: with regions answered Yes the workflow is followed and begun, its regions step shown as "Not yet available" with its reason and skipped, and the last step notes the regions were not identified', unavailable)
 
     def unsure_and_none():
         # "Not sure" leads to the plain grid of cards; answers with no recipe say so and name the tools.

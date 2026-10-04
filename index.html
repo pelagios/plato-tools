@@ -61,8 +61,9 @@
     <h2 id="methodos-tracker-h" tabindex="-1">Your workflow: <span id="methodos-tracker-title"></span></h2>
     <p id="methodos-tracker-where" class="track-where"></p>
     <ol id="methodos-track" class="track" role="list"></ol>
-    <p class="track-note">Methodos keeps your place. It does not yet see what the tools have done, so say when you have finished a step.</p>
-    <p class="methodos-buttons"><button type="button" id="methodos-done" class="primary">This step is done</button> <button type="button" id="methodos-back">Back a step</button> <button type="button" id="methodos-leave">Leave the workflow</button></p>
+    <p id="methodos-message" class="track-message" hidden></p>
+    <p class="track-note">Methodos keeps your place and sees what the tools do: a step is done when its tool's run on the right file finishes, and a step that stops or fails says why. Only a step that is yours to do (matching columns, reviewing candidates, drawing in Chora) waits for you to say it is done.</p>
+    <p class="methodos-buttons"><button type="button" id="methodos-pick" class="primary" hidden>Choose the file</button> <button type="button" id="methodos-use" class="primary" hidden>Use the file</button> <button type="button" id="methodos-reopen" hidden>Reopen the partial work file</button> <button type="button" id="methodos-restart" hidden>Start the remaining steps under the new recipe</button> <button type="button" id="methodos-done" class="primary">This step is done</button> <button type="button" id="methodos-back">Back a step</button> <button type="button" id="methodos-leave">Leave the workflow</button></p>
     <p id="methodos-said" class="visually-hidden" aria-live="polite"></p>
   </section>
   <section id="files" aria-labelledby="files-h">

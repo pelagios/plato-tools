@@ -1854,14 +1854,29 @@ changing them.
   words (Done, Now, To come, Not yet available), the current one `aria-current="step"`, and "Step 3
   of 10" in a polite live region; no percentage, no time. The host's `onStep({ tool, text, link })`
   (`src/app.js`) chooses the step's tool as its card would (`#tool=`, step 2 narrowed) and says the
-  step first in `#for-tool`; `onStep(null)` when the workflow is left. Methodos does not yet see what
-  the tools did: the user says when a step is done (This step is done, Back a step).
-- **Save and resume** go through one interface, `pageStore()` in `src/methodos/page-store.js`:
-  `list()`, `save(record)`, `remove(id)`, each a promise, named as phase 2's `workflowStore()` names
-  them, and the record `{ id, methodos: 1, recipe: { key, version, digest }, answers, at, done }`. It is
-  a stub kept in memory for the tab; joining it to phase 2 means keeping the runner's state, once the
-  page starts the runner when step 1's file is chosen. A record is resumed only if its recipe's digest is
-  the one shipped.
+  step first in `#for-tool`; `onStep(null)` when the workflow is left.
+- **The join to the tools' runs.** Before a file is chosen the workflow is pending (its recipe and
+  answers, for the tab only); the runner starts (`runner.start`, which skips a step not yet available
+  and keeps its reason in `unavailable`) when step 1's file is chosen. The host tells Methodos each
+  run as it begins (`began({ op, files })`, `op` the operation a step names: `check`, `convert`,
+  `compare`, `publish.<part>`, `match`, `lookup`, `apply`) and ends (`ended(...)`, with its report and
+  outputs, or an error, a wait or a cancellation). A run is the current step's only if it is the step's
+  operation on the step's file (by size and SHA-256); its outputs, copied for the tab, become the
+  step's result, and the tracker offers them to the next step ("Use …"). A report with errors stops
+  the step (`stop`), a failure fails it (`fail`, keeping a lookup's partial work file, which the
+  tracker reopens), a permission not given makes it wait: each is said in the tracker's words. Only
+  an interactive step (matching columns, review, Chora's drawing) waits for "This step is done", its
+  result taken from the page as it stands; Chora's hand-back is `handBack(files)`. "Back a step" is
+  `invalidate` of the last step done.
+- **Save and resume** are phase 2's `workflowStore()` (`src/methodos/store.js`), saved at every step
+  boundary, and taken up on load by the version rule (`reconcile()`), whose words the tracker shows
+  ("Start the remaining steps under the new recipe" for a changed recipe). After a reload the step's
+  file is chosen again and checked (`refsDiffer`): a different one is refused in words and a run on it
+  is not counted. Where the browser gives a `FileSystemFileHandle` (Chromium's `showOpenFilePicker`,
+  through the tracker's "Choose the file"), it is kept beside the records (`keepHandle`, database
+  `plato-tools-methodos-handles`) and resuming is one click; elsewhere the file is chosen again.
+  Turning "keep working data" off in the Permissions panel clears both databases at once
+  (`keepChanged`), and the workflow carries on in the tab's sessionStorage.
 
 `test/methodos-interview.test.js` holds the interview to `test/methodos-predicted.json`, which the
 browser checks (`methodos_page_checks` in `e2e/app_test.py`) answer through the page and compare with what

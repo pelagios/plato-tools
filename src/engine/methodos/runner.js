@@ -31,10 +31,14 @@ const titleOf = (s) => `"${s.title}"`;
 /**
  * Begin a workflow: the recipe, the answers to its questions, and the files chosen, as references
  * ({ files: [{ type, name, size, sha256 }] }). Refuses, before anything runs, answers it does not
- * ask or that are missing, files of the wrong type, and a step that would run an operation that is
- * not available yet.
+ * ask or that are missing, and files of the wrong type. A step that would run an operation not
+ * available yet is skipped, never run as something else, and keeps the reason (`unavailable`), as
+ * the page shows it greyed (Stephen's decision, 2 October 2026): a later step that cannot do without
+ * its output is refused when it is reached. `{ unavailable: 'refuse' }` refuses such a step at the
+ * start instead.
  */
-export function start(recipe, answers = {}, files = {}) {
+export function start(recipe, answers = {}, files = {}, { unavailable = 'skip' } = {}) {
+  if (unavailable !== 'skip' && unavailable !== 'refuse') no(`"${unavailable}" is not a way to treat a step not available yet: it is 'skip' or 'refuse'.`);
   check(recipe);
   const asks = recipe.asks || {};
   for (const k of Object.keys(answers)) if (!Object.hasOwn(asks, k)) no(`"${recipe.title}" does not ask "${k}".`);
@@ -54,13 +58,14 @@ export function start(recipe, answers = {}, files = {}) {
   const steps = recipe.steps.map((s) => {
     const runs = applies(s, answers);
     const op = OPERATIONS[s.op];
-    if (runs && op.available !== true) no(`The step "${s.title || op.title}" is not available yet. ${op.available}`);
+    const missing = runs && op.available !== true;
+    if (missing && unavailable === 'refuse') no(`The step "${s.title || op.title}" is not available yet. ${op.available}`);
     const options = {};
     for (const [k, v] of Object.entries(s.options || {})) {
       const val = typeof v === 'string' && v.startsWith('$') ? answers[v.slice(1)] : v;
       if (val !== undefined) options[k] = val;
     }
-    return { id: s.id, op: s.op, title: s.title || op.title, from: { ...(s.from || {}) }, options, state: runs ? 'pending' : 'skipped' };
+    return { id: s.id, op: s.op, title: s.title || op.title, from: { ...(s.from || {}) }, options, state: runs && !missing ? 'pending' : 'skipped', ...(missing ? { unavailable: op.available } : {}) };
   });
   return { methodos: FORMAT, recipe: { key: recipe.key, version: recipe.version, digest: digest(recipe) }, answers: clone(answers), files: chosen, status: 'idle', current: null, steps };
 }

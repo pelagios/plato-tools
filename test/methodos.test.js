@@ -118,10 +118,38 @@ test('every transition that does not apply throws, and a transition never change
   assert.equal(p.status, 'completed');
   assert.throws(() => next(p), TransitionError);
   assert.throws(() => complete(p, 'w3id', { w3id: [ref('w3id', 'w.zip')] }), TransitionError);
-  // An unknown step, and a step not available yet, are refused by name.
+  // An unknown step is refused by name.
   assert.throws(() => complete(s1, 'nope', {}), /no step "nope"/);
-  assert.throws(() => start(MAP, { ...MAP_ANSWERS, 'has-regions': true }, { files }), /"Identify the regions, the widest first" is not available yet\. Regions cannot be identified yet/);
   assert.equal(start(MAP, MAP_ANSWERS, { files }).steps.find((x) => x.id === 'regions').state, 'skipped');
+});
+
+test('a step not available yet is skipped at the start, with its reason, and the workflow runs on past it; refused only when asked to be', () => {
+  const files = [ref('files', 'places.csv')];
+  const { inputsOf } = runner;
+  const answers = { ...MAP_ANSWERS, 'has-regions': true };
+  const s = start(MAP, answers, { files });
+  const regions = s.steps.find((x) => x.id === 'regions');
+  // Skipped, and why (the presence): the operation's own reason, not run as something else.
+  assert.equal(regions.state, 'skipped');
+  assert.match(regions.unavailable, /^Regions cannot be identified yet/);
+  // A step left out by the answers is skipped too, but has no reason of that kind (the absence, beside the presence above).
+  assert.equal(start(MAP, MAP_ANSWERS, { files }).steps.find((x) => x.id === 'regions').unavailable, undefined);
+  // Every other step that runs is pending, and the lookup, which may take the regions' work, takes it from nowhere.
+  assert.deepEqual(s.steps.filter((x) => x.state === 'pending').map((x) => x.id), start(MAP, MAP_ANSWERS, { files }).steps.filter((x) => x.state === 'pending').map((x) => x.id));
+  let w = s;
+  w = complete(next(w), 'columns', { mapping: [ref('mapping', 'columns.json')] });
+  w = complete(next(w), 'check', {});
+  w = complete(next(w), 'dataset', { dataset: [ref('dataset', 'd.json')] });
+  w = next(w);
+  assert.equal(w.current, 'lookup');
+  assert.deepEqual(Object.keys(inputsOf(w, 'lookup')), ['subjects']);
+  // Kept through a record's round trip, and through invalidate (a skipped step is never reset).
+  assert.equal(deserialise(serialise(w)).steps.find((x) => x.id === 'regions').unavailable, regions.unavailable);
+  assert.equal(invalidate(complete(w, 'lookup', { work: [ref('work.krisis', 'w.krisis.json')] }), 'dataset').steps.find((x) => x.id === 'regions').state, 'skipped');
+  // Refused at the start only when asked, in the words it had before.
+  assert.throws(() => start(MAP, answers, { files }, { unavailable: 'refuse' }), /"Identify the regions, the widest first" is not available yet\. Regions cannot be identified yet/);
+  assert.doesNotThrow(() => start(MAP, MAP_ANSWERS, { files }, { unavailable: 'refuse' }));
+  assert.throws(() => start(MAP, answers, { files }, { unavailable: 'run' }), /'skip' or 'refuse'/);
 });
 
 test('invalidate resets the step and every step that took its outputs, and no other', () => {

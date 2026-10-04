@@ -14,7 +14,13 @@ import { keepWorkingData } from '../lib/permissions.js';
 import { deserialise } from '../engine/methodos/runner.js';
 import { exportRecord, recordOf } from '../engine/methodos/record.js';
 
+// A FileSystemFileHandle to the file a workflow began with, where the browser can keep one (Chromium
+// lets a handle be stored in IndexedDB; Firefox and Safari give none), is kept beside the records, in a
+// database of its own, keyed by the record's id, so that resuming is one click (section 7). A handle is
+// not the file, and not text: it is let go with the record, and with the records when working data is
+// not kept.
 export const DB = 'plato-tools-methodos', STORE = 'workflows', TAB = 'plato-tools.methodos.';
+export const HANDLES = 'plato-tools-methodos-handles';
 
 /**
  * A store of workflow records. Everything it is given can be replaced, for the tests: `indexedDB`,
@@ -35,16 +41,16 @@ export function workflowStore({ indexedDB, session, keep = keepWorkingData } = {
       return [...out.values()];
     },
   };
-  const open = () => new Promise((resolve, reject) => {
+  const open = (name = DB) => new Promise((resolve, reject) => {
     if (!idb) { reject(new Error('IndexedDB is not available')); return; }
-    const req = idb.open(DB, 1);
+    const req = idb.open(name, 1);
     req.onupgradeneeded = () => req.result.createObjectStore(STORE);
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
     req.onblocked = () => reject(new Error('the workflows database is blocked'));
   });
-  const tx = async (mode, fn) => {
-    const db = await open();
+  const tx = async (mode, fn, name = DB) => {
+    const db = await open(name);
     try {
       return await new Promise((resolve, reject) => {
         const t = db.transaction(STORE, mode), req = fn(t.objectStore(STORE));
@@ -56,12 +62,13 @@ export function workflowStore({ indexedDB, session, keep = keepWorkingData } = {
   const keeping = () => { try { return keep() !== false; } catch { return true; } };
   // With working data not kept, nothing stays in IndexedDB: not a record, nor the database. (Its
   // connections are each closed when their transaction ends, so the deletion is not held up by them.)
-  const forgetKept = () => new Promise((resolve) => {
+  const forget = (name) => new Promise((resolve) => {
     try {
-      const req = idb.deleteDatabase(DB);
+      const req = idb.deleteDatabase(name);
       req.onsuccess = req.onerror = req.onblocked = () => resolve();
     } catch { resolve(); }
   });
+  const forgetKept = async () => { await forget(DB); await forget(HANDLES); };
   const read = (text) => { try { return text ? deserialise(text) : null; } catch { return null; } };
 
   return {
@@ -93,11 +100,25 @@ export function workflowStore({ indexedDB, session, keep = keepWorkingData } = {
       for (const r of texts.map(read).filter(Boolean)) if (!byId.has(r.id) || byId.get(r.id).saved < r.saved) byId.set(r.id, r);
       return [...byId.values()].sort((a, b) => (a.saved < b.saved ? 1 : -1));
     },
-    /** Let the record go, wherever it was kept. */
+    /** Let the record go, wherever it was kept, and the file handle kept with it. */
     async remove(id) {
       tab.drop(id);
       if (!keeping()) { await forgetKept(); return; }
       try { await tx('readwrite', (s) => s.delete(id)); } catch { /* none kept */ }
+      try { await tx('readwrite', (s) => s.delete(id), HANDLES); } catch { /* none kept */ }
+    },
+    /**
+     * Keep `handle` (a FileSystemFileHandle) for the record `id`, where working data is kept and the
+     * browser can store one: true if it was kept, false if not (it then lives only as long as the page).
+     */
+    async keepHandle(id, handle) {
+      if (!keeping() || !handle) return false;
+      try { await tx('readwrite', (s) => s.put(handle, id), HANDLES); return true; } catch { return false; }
+    },
+    /** The file handle kept for the record `id`, or null. */
+    async handleFor(id) {
+      if (!keeping()) return null;
+      try { return (await tx('readonly', (s) => s.get(id), HANDLES)) || null; } catch { return null; }
     },
     /** Let everything kept in IndexedDB go, the database too (when "keep working data" is turned off). */
     forgetKept,
