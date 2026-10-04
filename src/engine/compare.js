@@ -34,6 +34,7 @@ import { termNT } from '../lib/ntriples.js';
 import { PLATO } from '../lib/context.js';
 import { collectWithdrawn, resolveWithdrawn } from '../formats/shared.js';
 import { sha256 } from '../lib/sha256.js';
+import { expectMissingWords } from './words.js';
 
 const ABOUT = PLATO + 'attests_about', META_ABOUT = PLATO + 'meta_attestation_about', CREATED = PLATO + 'created';
 const CANDIDATE_SOURCE = PLATO + 'candidate_source', CANDIDATES_FOR = PLATO + 'candidates_for';
@@ -195,6 +196,25 @@ export class Ledger {
 }
 
 /**
+ * The places expected missing from the later version (compare's options.expectMissing): each one
+ * the later version still has (an attestation or match about it, or a statement of it) is an error;
+ * then the earlier version's rows about them are set aside. Returns how many attestations of the
+ * earlier version were set aside.
+ */
+function setAsideMissing(db, ledger, places, rep) {
+  db.exec('CREATE TEMP TABLE x(s TEXT PRIMARY KEY) WITHOUT ROWID');
+  const ins = db.prepare('INSERT OR IGNORE INTO x(s) VALUES (?)');
+  try { for (const s of places) if (typeof s === 'string') ins.bind([s]).stepReset(); } finally { ins.finalize(); }
+  for (const q of ledger.rows('SELECT x.s FROM x WHERE EXISTS(SELECT 1 FROM a WHERE a.v=1 AND a.about=x.s) OR EXISTS(SELECT 1 FROM n WHERE n.v=1 AND n.s=x.s) ORDER BY x.s'))
+    rep.error('expected-missing-present', expectMissingWords.present, q.get(0));
+  const n = ledger.one('SELECT COUNT(*) FROM a WHERE v=0 AND k=0 AND about IN (SELECT s FROM x)');
+  db.exec('DELETE FROM a WHERE v=0 AND about IN (SELECT s FROM x)');
+  db.exec('DELETE FROM n WHERE v=0 AND s IN (SELECT s FROM x)');
+  db.exec('DROP TABLE x');
+  return n;
+}
+
+/**
  * What the pipeline writes one version's records to (its options.sink): each record becomes RDF
  * statements, and `out` is given each attestation and identity match with what it says
  * (out.item), each statement about anything else with an address (out.statement), and each address
@@ -290,6 +310,11 @@ export function attestationLines(context, out) {
  * Compare two versions of a dataset. `earlier` and `later` are inputs as detect() describes them.
  * Returns { report, outputs: [] }, the report in the shape run() gives, with `incomplete` set when a
  * version could not be read to the end, so that nothing was compared.
+ * options.expectMissing: the addresses of places left out of the later version on purpose (Krisis: a
+ * place the reviewer leaves out of the dataset). Exactly those are expected missing: the earlier
+ * version's attestations and identity matches about them, and what it says of them, are set aside
+ * (counted as `leftOut`), and each one still found in the later version is an error
+ * ('expected-missing-present'). Any other loss is reported as without it.
  */
 export async function compare({ earlier, later, options = {} }, env) {
   const rep = new Report();
@@ -331,6 +356,8 @@ export async function compare({ earlier, later, options = {} }, env) {
     db.exec('BEGIN');
     // What the comparison is of: a dataset's attestations, or a candidate set's candidates.
     const OF = isSet ? CANDIDATE : ATTESTATION;
+    // Places left out on purpose (Krisis's exclude) are a dataset's; a candidate set has none.
+    const leftOut = options.expectMissing && !isSet ? setAsideMissing(db, ledger, options.expectMissing, rep) : null;
 
     // The rule binds from publication. Before it, what would break it is worth knowing, not wrong.
     // A candidate set has no status: it is published when it is issued, and frozen from then on.
@@ -435,7 +462,7 @@ export async function compare({ earlier, later, options = {} }, env) {
       }
     }
 
-    rep.counts = { ...(isSet ? { of: 'candidates' } : {}), earlier: had, later: has, unchanged: Math.max(0, had - lost - changed), changed, lost, added: Math.max(0, has - (had - lost)), retracted, superseded };
+    rep.counts = { ...(isSet ? { of: 'candidates' } : {}), earlier: had, later: has, unchanged: Math.max(0, had - lost - changed), changed, lost, added: Math.max(0, has - (had - lost)), retracted, superseded, ...(leftOut !== null ? { leftOut } : {}) };
     progress({ phase: 'done', elapsedMs: Date.now() - t0 });
     return { report: rep.toJSON(), outputs: [], versions: { earlier: old, later: neu } };
   } finally {

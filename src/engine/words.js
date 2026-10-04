@@ -889,3 +889,55 @@ export const lookupPage = {
     ? `Finishing makes one attestation for each source a place's decisions rest on, citing ${sources.map((s) => (s['@id'] ? `${s.title} (${s['@id']})` : s.title)).join('; ')}.`
     : 'Nothing is decided yet, so finishing would make no attestations.'),
 };
+
+// Krisis × Methodos (#28): WHG's guards, the bulk accept, query variants, flags, notes and row states
+// (src/engine/krisis/guards.js, names.js queryVariants, work.js; the review screen in src/app.js).
+const guardFigures = (g) => (g.exact ? 'exact title' : [g.score != null ? `score ${g.score.toLocaleString('en-GB')}` : '',
+  g.confidence != null ? `confidence ${g.confidence.toLocaleString('en-GB')}` : g.dice != null ? `names ${Math.round(g.dice * 100)}% alike by WHG's measure` : ''].filter(Boolean).join(', '));
+const GUARD_FAILS = {
+  'not-top': 'not the top of its answer', 'head-word': 'found only by its head word', weak: 'neither an exact title nor a score of 90 or more',
+  withheld: 'withheld: the name is too unlike', tie: 'tied with another candidate', 'not-recorded': 'looked up before the guard was recorded; look it up again to judge it',
+};
+export const guardWords = {
+  /** The basis each decision of the bulk accept carries, naming the guard (recorded with the attestation). */
+  basis: (g) => `Accepted in bulk by the reviewer as passing WHG's guard (${guardFigures(g)}).`,
+  /** The badge of a candidate that passes: "Passes WHG's guard: exact title", "…: score 94, confidence 41". */
+  passes: (g) => `Passes WHG's guard: ${guardFigures(g)}`,
+  /** Why a looked-up candidate does not pass. */
+  fails: (reason) => `Does not pass WHG's guard: ${GUARD_FAILS[reason] || reason}`,
+  orderLabel: 'Order',
+  orders: { file: 'As in the file', guards: "WHG's guards first" },
+  /** The bulk accept's button, and the type chosen beside it. */
+  accept: (n) => `Accept the ${n.toLocaleString('en-GB')} that pass WHG's guards`,
+  typeLabel: 'as',
+  none: "No place has exactly one candidate passing WHG's guards and no decision yet.",
+  /** After the bulk accept: how many, and that they are the reviewer's. */
+  accepted: (n) => `${n.toLocaleString('en-GB')} accepted as yours.`,
+  undo: 'Undo',
+  undone: (n) => `${n.toLocaleString('en-GB')} taken back; any you changed since are kept.`,
+  /** Those left out of the bulk accept, and why. */
+  leftOut: (l, several = 0) => [
+    l.total ? `${l.total.toLocaleString('en-GB')} left out: ${[l.far ? `${l.far.toLocaleString('en-GB')} further from the place than the greatest distance` : '', l.ccodes ? `${l.ccodes.toLocaleString('en-GB')} in another country than the place's own` : ''].filter(Boolean).join(', ')}. Decide on them yourself.` : '',
+    several ? `${several.toLocaleString('en-GB')} ${several === 1 ? 'place has' : 'places have'} more than one passing, and ${several === 1 ? 'is' : 'are'} left to you.` : ''].filter(Boolean).join(' '),
+  /** The command line's dry run of a review: the count only; it never accepts. */
+  dryRun: (n, l) => `${n.toLocaleString('en-GB')} ${n === 1 ? 'place has' : 'places have'} exactly one candidate passing WHG's guards (${l.total.toLocaleString('en-GB')} more left out as far or in another country). Accepting them is done on the page only.`,
+};
+export const variantWords = {
+  option: "Also send forms of each name (inverted, alternatives, without brackets, and its head word last), each as a query of its own (at most 10 a place; the preview shows the cost). A candidate found only by a head word never passes WHG's guards.",
+  how: { given: 'as given', inverted: 'inverted', alternative: 'an alternative', brackets: 'without brackets', 'head-word': 'its head word' },
+  /** Which form of the name found a candidate. */
+  foundBy: (text, how) => `Found by ${variantWords.how[how] || how}: ${text}`,
+};
+export const rowWords = {
+  flag: 'Flag', flagged: 'Flagged',
+  noteLabel: 'Note (kept in the review only, never written to the dataset)',
+  noteSave: 'Keep the note',
+  stateLabel: 'This place',
+  states: { reconcile: 'Reconcile', filter: 'Keep without reconciling', exclude: 'Leave out of the dataset' },
+  /** In the report of finishing, and the version check's expectation. */
+  leftOutReport: 'Left out of the dataset by the reviewer (row state "Leave out of the dataset"); the version check was told to expect exactly these missing',
+};
+/** The version check, told that places are left out on purpose (compare.js expectMissing). */
+export const expectMissingWords = {
+  present: 'A place the version check was told to expect missing (left out by the reviewer) is still in the later version, with what it said: it was not left out.',
+};
