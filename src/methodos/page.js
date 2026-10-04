@@ -190,8 +190,12 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   startB.addEventListener('click', async () => {
     const recipe = RECIPES[choice.recipe];
     const p = plan(recipe.key, answersFor(choice, yesNo));
+    // A workflow followed before, begun or not, is left for this one: its record and its files go.
+    const was = pending?.id;
+    if (was) await store.dropPending(was);
+    if (wf || changed) { await outs.drop(madeBy(wf || changed.record)); await store.remove((wf || changed.record).id); }
     pending = { key: recipe.key, answers: answersFor(choice, yesNo), id: `${recipe.key}-${Date.now().toString(36)}`, steps: p.steps.length };
-    wf = null; changed = null; note = null; fromChora = null; arrived = null;
+    wf = null; changed = null; note = null; fromChora = null; arrived = null; active = null;
     // Kept at once, before any file (Stephen, 4 October 2026): shown as not started, and discarded in one click.
     await store.savePending(pending);
     close(false);
@@ -502,7 +506,12 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
       if (wf && atBoundary(wf)) await keep();
       else if (!on) await store.forgetKept();
       if (pending) await store.savePending(pending);
-      if (!on) await outs.forget();   // the steps' files: for the tab only from now, and cleared from the browser at once
+      if (!on) {
+        await outs.forget();   // the steps' files: for the tab only from now, and cleared from the browser at once
+        // A kept file already chosen in step 1 is chosen again from the tab's copy, as the stored one is gone.
+        const now = page.files(), refs = chosenRefs || [];
+        if (now.length && refs.length === now.length && refs.every((x) => outs.held(x) && outs.held(x) !== now[refs.indexOf(x)])) page.choose(refs.map((x) => outs.held(x)));
+      }
       showKept();
       render(false);
     });
@@ -631,7 +640,13 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
       if (arrived === wf.id && s?.op === 'place') say([v.words, 'Back from Chora: take the dataset you saved there ("Take the dataset back from Chora"), or choose it in step 1 by hand and say the step is done.'].filter(Boolean).join(' '));
       else if (ready) say([v.words, `Taken up where it was left, with ${names(main)}${fromWhere(wf, s, main)}, kept in this browser: it is chosen in step 1 for you.`].filter(Boolean).join(' '));
       else say([v.words, main ? `Taken up where it was left. Choose ${names(main)} again in step 1 to carry on: the file is checked to be the one the workflow recorded.` : 'Taken up where it was left.'].filter(Boolean).join(' '));
-      if (ready) { render(false); await page.ready?.(); page.choose(ready); return; }
+      if (ready) {
+        render(false);
+        // Chosen for the step once the engine is ready, unless the user has chosen a file meanwhile.
+        const ok = await page.ready?.();
+        if (ok !== false && !chosenRefs) page.choose(ready);
+        return;
+      }
     } else changed = { action: v.action, record: r, words: v.words };
     render(false);
   })).catch(() => {});

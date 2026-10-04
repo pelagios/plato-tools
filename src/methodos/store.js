@@ -128,7 +128,7 @@ export function workflowStore({ indexedDB, session, keep = keepWorkingData } = {
     // where list() and load() never take it for a record. It goes when its workflow begins, or is discarded.
     async savePending({ id, key, answers }) {
       const text = JSON.stringify({ methodosPending: 1, id, key, answers, saved: new Date().toISOString() });
-      if (keeping()) { try { await tx('readwrite', (st) => st.put(text, PENDING + id)); return 'browser'; } catch { /* the tab's, then */ } } else await forgetKept();
+      if (keeping()) { try { await tx('readwrite', (st) => st.put(text, PENDING + id)); tab.drop(PENDING + id); return 'browser'; } catch { /* the tab's, then */ } } else await forgetKept();
       tab.put(PENDING + id, text);
       return 'tab';
     },
@@ -140,7 +140,9 @@ export function workflowStore({ indexedDB, session, keep = keepWorkingData } = {
       if (keeping()) { try { const keys = await tx('readonly', (st) => st.getAllKeys()); for (const k of keys) if (String(k).startsWith(PENDING)) texts.push(await tx('readonly', (st) => st.get(k))); } catch { /* the tab's only */ } }
       const out = [];
       for (const t of texts) { try { const v = JSON.parse(t); if (v?.methodosPending === 1 && typeof v.id === 'string' && typeof v.key === 'string' && v.answers && typeof v.answers === 'object') out.push(v); } catch { /* not one */ } }
-      return out.sort((a, b) => (a.saved < b.saved ? 1 : -1));
+      const byId = new Map();
+      for (const v of out) if (!byId.has(v.id) || byId.get(v.id).saved < v.saved) byId.set(v.id, v);
+      return [...byId.values()].sort((a, b) => (a.saved < b.saved ? 1 : -1));
     },
     /** Let a workflow chosen before any file go. */
     async dropPending(id) {

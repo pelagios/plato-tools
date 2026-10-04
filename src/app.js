@@ -26,10 +26,11 @@ import { workflowStore } from './methodos/store.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
 let worker, files = [], input = null, targets = {}, busy = false;
-let runOp = null;
+let runOp = null;   // the Methodos operation of the run under way (src/methodos/page.js), told when it ends
 // The engine is ready (its first 'ready' message): a file Methodos chooses on load waits for it, or the
-// page's 'ready' would come after, and over, the file's detection.
-let engineReady; const whenReady = new Promise((r) => { engineReady = r; });   // the Methodos operation of the run under way (src/methodos/page.js), told when it ends
+// page's 'ready' would come after, and over, the file's detection. An engine that fails settles it too,
+// with false, so that nothing waits on it for ever.
+let engineReady; const whenReady = new Promise((r) => { engineReady = r; });
 
 // The commit of PLATO tools this page was built from (scripts/build-info.mjs writes it before the
 // build), for the site's workflow to run the same; absent from a build made without it.
@@ -50,7 +51,7 @@ function onMessage({ data }) {
       + (v.draft ? ` <strong class="draft">${draftNote(v)}</strong>` : '');
     readingCaps = { editorial: !!data.reading?.editorial };
     Object.assign(state, { phase: 'ready', platoCommit: v.commit, platoDraft: v.draft ? v.ref : null });
-    engineReady();
+    engineReady(true);
   } else if (data.type === 'detected') onDetected(data);
   else if (data.type === 'progress') onProgress(data);
   else if (data.type === 'done') onDone(data);
@@ -239,6 +240,7 @@ async function save(name) {
 window.__plato_save = save;
 function fail(message, words) {
   busy = false;
+  engineReady(false);
   if (runOp) { methodos.ended({ op: runOp, error: words || message }); runOp = null; }
   buttons(false);
   $('progress').hidden = true; $('result').hidden = false;

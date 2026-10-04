@@ -23,6 +23,11 @@ export function outputStore({ root = () => navigator.storage.getDirectory(), kee
   const named = (f, ref) => new File([f], ref.name, { type: f.type });   // the kept file under its own name (no copy: a Blob of it)
   const remove = async () => { try { await (await root()).removeEntry(DIR, { recursive: true }); } catch { /* none kept */ } };
 
+  // With working data not kept, nothing stays in OPFS: a folder from an earlier visit (or a toggle in
+  // Chora's panel) goes the first time the store is asked.
+  let swept = false;
+  const sweep = async () => { if (!keeping() && !swept) { swept = true; await remove(); } else if (keeping()) swept = false; };
+
   return {
     /**
      * Keep `file` (an output, whose bytes the next run may overwrite) under `ref`: in OPFS when working
@@ -51,6 +56,7 @@ export function outputStore({ root = () => navigator.storage.getDirectory(), kee
     /** The file kept for `ref`, from the tab or from OPFS (after a reload), or null; one of another size is not it. */
     async get(ref) {
       if (tab.has(ref.sha256)) return tab.get(ref.sha256);
+      await sweep();
       if (!keeping() || !HEX64.test(ref.sha256)) return null;
       try {
         const f = await (await (await dir(false)).getFileHandle(ref.sha256)).getFile();
@@ -63,6 +69,7 @@ export function outputStore({ root = () => navigator.storage.getDirectory(), kee
     /** What is kept in OPFS: { count, bytes }. */
     async kept() {
       let count = 0, bytes = 0;
+      await sweep();
       if (!keeping()) return { count, bytes };
       try { for await (const [name, h] of (await dir(false)).entries()) if (h.kind === 'file' && HEX64.test(name)) { count++; bytes += (await h.getFile()).size; } } catch { /* none */ }
       return { count, bytes };
