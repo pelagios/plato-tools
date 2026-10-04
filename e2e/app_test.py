@@ -4837,7 +4837,8 @@ def iiif_checks(pw, url, tmp):
 
     def come_back():
         KEPT_MAPS = '''async () => { const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('chora-overlays'); const out = [];
-          for await (const h of d.values()) { const x = JSON.parse(await (await h.getFile()).text()); out.push({ key: x.key, visible: x.visible, opacity: x.opacity }); } return out; }'''
+          for await (const h of d.values()) { if (!h.name.endsWith('.json')) continue; const x = JSON.parse(await (await h.getFile()).text()); out.push({ key: x.key, visible: x.visible, opacity: x.opacity }); } return out; }'''
+        # (A write still open shows as its swap file, <key>.json.crswap, which is not a map kept.)
         # To begin with: the map shown, and kept as shown, every write of it on disk (the check before this one ticked "Show" last).
         grid_key = next(o['key'] for o in cstate(page)['overlays'] if o['annotationId'] == grid_id)
         kept_shown = (soon(page, 'k => window.__chora.overlays.some((o) => o.key === k && o.visible)', 10, grid_key) and soon(page, '() => !(window.__chora.overlayWrites > 0)', 10)
@@ -4859,7 +4860,15 @@ def iiif_checks(pw, url, tmp):
         soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.mapId)', 30, grid_id)
         grid_key = next(o['key'] for o in cstate(page)['overlays'] if o['annotationId'] == grid_id)
         box = f'#overlay-list li[data-overlay="{grid_key}"] input[data-show]'
-        settled = soon(page, '() => !(window.__chora.overlayWrites > 0)', 10) and page.evaluate(KEPT, grid_key) == (not show) and page.is_checked(box) == (not show)
+        # Each check sets its own starting state (the map hidden for the tick, shown for the untick), kept so on disk.
+        # (First the record as the box is, and every write of it done, so that no write from the load still
+        # landing follows the change.)
+        if page.is_checked(box) == show:
+            soon(page, '() => !(window.__chora.overlayWrites > 0)', 10)
+            soon(page, f'async ([k, v]) => ({KEPT})(k).then((x) => x === v)', 15, [grid_key, show])
+            page.uncheck(box) if show else page.check(box)
+        settled = (soon(page, '() => !(window.__chora.overlayWrites > 0)', 10) and page.is_checked(box) == (not show)
+                   and soon(page, f'async ([k, v]) => ({KEPT})(k).then((x) => x === v)', 15, [grid_key, not show]))
         page.evaluate('() => { FileSystemWritableFileStream.prototype.close = function () { return new Promise(() => {}); }; }')
         page.check(box) if show else page.uncheck(box)
         held = {'writes in flight': page.evaluate('() => window.__chora.overlayWrites'), 'on disk': page.evaluate(KEPT, grid_key)}

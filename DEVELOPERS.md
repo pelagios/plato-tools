@@ -1431,7 +1431,9 @@ and reaches nothing.
   (`chora-overlays-shown`, this tab's only, let go once the record holding it is on disk). An OPFS
   file is written only when its writable closes, so a reload within those milliseconds (or, before
   the fix of 4 October 2026, while the folder was still being read first) brought a map back hidden;
-  `kept()` reads the note over the record. `window.__chora.overlayWrites` counts the writes not yet
+  `kept()` reads the note over the record, and reads only a map's own file (`<24 hex>.json`, holding
+  that key): while a write is open Chrome lists its swap file, `<key>.json.crswap`, in the folder too,
+  holding the record being written (the old `kept()` read it as a second copy of the map). `window.__chora.overlayWrites` counts the writes not yet
   on disk (as `draftWrites` does for drawings), and a reload for a permission waits for them
   (`keptWritten`). The unit test (`test/chora-overlays-kept.test.js`) holds a fake OPFS's close to
   stand for the reload; the browser checks hold `FileSystemWritableFileStream.prototype.close` and

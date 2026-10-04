@@ -11,7 +11,7 @@ class Store { constructor() { this.m = new Map(); } getItem(k) { return this.m.h
 const notFound = () => Object.assign(new Error('not found'), { name: 'NotFoundError' });
 
 // The disk: { dirName: Map(fileName → text) }. hold: a close() made while it is set never finishes
-// (the page went first), and nothing it wrote reaches the disk.
+// (the page went first), and nothing it wrote reaches the file (only its swap file).
 function fakeDisk() {
   const dirs = new Map();
   const disk = { dirs, hold: false, file: (name) => dirs.get('chora-overlays')?.get(name) ?? null };
@@ -20,14 +20,17 @@ function fakeDisk() {
       if (!files.has(name)) { if (!create) throw notFound(); files.set(name, ''); }
       return {
         async getFile() { const t = files.get(name); if (t === undefined) throw notFound(); return { text: async () => t }; },
+        // As Chrome does: the data goes to a swap file (<name>.crswap), listed in the folder while the
+        // writable is open, and takes the file's place when it closes; a page gone first leaves it.
         async createWritable() {
-          let buf = '';
-          return { async write(s) { buf += s; }, close() { return disk.hold ? new Promise(() => {}) : (files.set(name, buf), Promise.resolve()); } };
+          let buf = ''; const swap = `${name}.crswap`; files.set(swap, '');
+          return { async write(s) { buf += s; files.set(swap, buf); },
+            close() { return disk.hold ? new Promise(() => {}) : (files.set(name, buf), files.delete(swap), Promise.resolve()); } };
         },
       };
     },
     async removeEntry(name) { if (!files.delete(name)) throw notFound(); },
-    async *values() { for (const name of [...files.keys()]) yield await this.getFileHandle(name); },
+    async *values() { for (const name of [...files.keys()]) yield { kind: 'file', name, ...(await this.getFileHandle(name)) }; },
   });
   const root = {
     async getDirectoryHandle(name, { create } = {}) {
@@ -47,22 +50,23 @@ beforeEach(() => {
 });
 // A page load: a fresh copy of the module, nothing of the last load's memory.
 const load = () => import(`../src/chora/overlays.js?load=${++loads}`);
-const RECORD = { key: 'k1', item: { type: 'Annotation', id: 'https://example.org/a' }, manifest: null, manifestUrl: null, fetchedAt: '2026-10-04T00:00:00Z', opacity: 1, visible: false, added: '2026-10-04T00:00:00Z' };
+const K = 'c'.repeat(24);   // a key as keyOf makes one (24 hex digits)
+const RECORD = { key: K, item: { type: 'Annotation', id: 'https://example.org/a' }, manifest: null, manifestUrl: null, fetchedAt: '2026-10-04T00:00:00Z', opacity: 1, visible: false, added: '2026-10-04T00:00:00Z' };
 const onDisk = (key) => { const t = disk.file(`${key}.json`); return t === null ? null : JSON.parse(t); };
 
 test('a map ticked Show and the page reloaded at once, before the record is on disk, comes back shown (and at the opacity set)', async () => {
   const first = await load();
   await first.keep(RECORD);
-  assert.equal(onDisk('k1').visible, false, 'kept hidden to begin with');
+  assert.equal(onDisk(K).visible, false, 'kept hidden to begin with');
   disk.hold = true;                     // the page goes before this write closes
-  first.keepShown('k1', { visible: true, opacity: 0.6 });
+  first.keepShown(K, { visible: true, opacity: 0.6 });
   assert.equal(first.writesPending(), 1, 'the write is in flight, and counted');
   const next = await load();            // the reload
   disk.hold = false;
   // The case is real: the write never reached the disk, which still says hidden.
-  assert.equal(onDisk('k1').visible, false, 'the write was lost with the page');
+  assert.equal(onDisk(K).visible, false, 'the write was lost with the page');
   const [k] = await next.kept();
-  assert.equal(k?.key, 'k1', 'the map is kept');
+  assert.equal(k?.key, K, 'the map is kept');
   assert.equal(k.visible, true, 'and comes back shown');
   assert.equal(k.opacity, 0.6);
 });
@@ -71,25 +75,25 @@ test('control: the same reload with only the disk to go by (no note, as before t
   const first = await load();
   await first.keep(RECORD);
   disk.hold = true;
-  first.keepShown('k1', { visible: true, opacity: 0.6 });
+  first.keepShown(K, { visible: true, opacity: 0.6 });
   sessionStorage.removeItem('chora-overlays-shown');   // the note taken away: the disk alone
   const next = await load();
   disk.hold = false;
   const [k] = await next.kept();
-  assert.equal(k?.key, 'k1', 'the map is kept');
+  assert.equal(k?.key, K, 'the map is kept');
   assert.equal(k.visible, false, 'without the note, the lost write brings it back hidden');
 });
 
 test('changes made in quick succession are written in turn, the last one last, and the note goes once the disk holds it', async () => {
   const ov = await load();
   ov.keep(RECORD);
-  ov.keepShown('k1', { visible: true, opacity: 1 });
-  ov.keepShown('k1', { visible: true, opacity: 0.4 });
-  ov.keepShown('k1', { visible: false, opacity: 0.3 });
+  ov.keepShown(K, { visible: true, opacity: 1 });
+  ov.keepShown(K, { visible: true, opacity: 0.4 });
+  ov.keepShown(K, { visible: false, opacity: 0.3 });
   assert.ok(sessionStorage.getItem('chora-overlays-shown'), 'noted at once, before any write');
   await ov.keptWritten();
-  assert.deepEqual([onDisk('k1').visible, onDisk('k1').opacity], [false, 0.3], 'the last change is what the disk holds');
-  assert.deepEqual(onDisk('k1').item, RECORD.item, 'with the rest of the record as kept');
+  assert.deepEqual([onDisk(K).visible, onDisk(K).opacity], [false, 0.3], 'the last change is what the disk holds');
+  assert.deepEqual(onDisk(K).item, RECORD.item, 'with the rest of the record as kept');
   assert.equal(ov.writesPending(), 0);
   assert.equal(sessionStorage.getItem('chora-overlays-shown'), null, 'the note let go');
 });
@@ -97,12 +101,12 @@ test('changes made in quick succession are written in turn, the last one last, a
 test('a map let go while a change of it is still being written is not written back', async () => {
   const ov = await load();
   await ov.keep(RECORD);
-  assert.ok(onDisk('k1'), 'kept, to begin with');
-  ov.keepShown('k1', { visible: true, opacity: 1 });
-  ov.letGo('k1');
-  ov.keepShown('k1', { visible: false, opacity: 1 });   // too late: nothing to write
+  assert.ok(onDisk(K), 'kept, to begin with');
+  ov.keepShown(K, { visible: true, opacity: 1 });
+  ov.letGo(K);
+  ov.keepShown(K, { visible: false, opacity: 1 });   // too late: nothing to write
   await ov.keptWritten();
-  assert.equal(onDisk('k1'), null, 'gone from the disk');
+  assert.equal(onDisk(K), null, 'gone from the disk');
   assert.deepEqual(await ov.kept(), []);
   assert.equal(sessionStorage.getItem('chora-overlays-shown'), null);
 });
@@ -110,22 +114,39 @@ test('a map let go while a change of it is still being written is not written ba
 test('a note left by a reload is written to the record when the map is shown again, and then let go', async () => {
   const first = await load();
   await first.keep(RECORD);
-  disk.hold = true; first.keepShown('k1', { visible: true, opacity: 0.6 });
+  disk.hold = true; first.keepShown(K, { visible: true, opacity: 0.6 });
   const next = await load(); disk.hold = false;
   const [k] = await next.kept();
   await next.keep(k);                   // as app.js's showMap does for a map kept
-  assert.deepEqual([onDisk('k1').visible, onDisk('k1').opacity], [true, 0.6]);
+  assert.deepEqual([onDisk(K).visible, onDisk(K).opacity], [true, 0.6]);
   assert.equal(sessionStorage.getItem('chora-overlays-shown'), null);
 });
 
 test('forgetKept lets every map kept go, and the notes with them', async () => {
   const ov = await load();
   await ov.keep(RECORD);
-  disk.hold = true; ov.keepShown('k1', { visible: true, opacity: 1 });
+  disk.hold = true; ov.keepShown(K, { visible: true, opacity: 1 });
   const next = await load(); disk.hold = false;
-  assert.ok(sessionStorage.getItem('chora-overlays-shown') && onDisk('k1'), 'a map kept and a note, to begin with');
+  assert.ok(sessionStorage.getItem('chora-overlays-shown') && onDisk(K), 'a map kept and a note, to begin with');
   await next.forgetKept();
   assert.equal(disk.dirs.has('chora-overlays'), false);
   assert.equal(sessionStorage.getItem('chora-overlays-shown'), null);
   assert.deepEqual(await next.kept(), []);
+});
+
+test('only a map\'s own file is read as kept: not the swap file of a write still open, nor a file holding another map\'s record', async () => {
+  const first = await load();
+  await first.keep(RECORD);
+  disk.hold = true; first.keepShown(K, { visible: true, opacity: 0.6 });
+  sessionStorage.removeItem('chora-overlays-shown');   // the disk alone
+  await new Promise((r) => setTimeout(r, 10));          // the write under way, held at its close
+  const files = disk.dirs.get('chora-overlays');
+  assert.ok(files.has(`${K}.json.crswap`) && JSON.parse(files.get(`${K}.json.crswap`)).visible === true, 'the swap file is there, holding the record being written');
+  const KEY = 'a'.repeat(24);
+  files.set(`${KEY}.json`, JSON.stringify({ version: 1, ...RECORD, key: KEY }));
+  files.set(`${'b'.repeat(24)}.json`, JSON.stringify({ version: 1, ...RECORD, key: KEY }));   // misnamed: not read
+  const next = await load(); disk.hold = false;
+  const got = await next.kept();
+  assert.deepEqual(got.map((k) => k.key).sort(), [KEY, K].sort(), 'each map once, from its own file');
+  assert.equal(got.find((k) => k.key === K).visible, false, 'as its file holds it, not as the swap file does');
 });

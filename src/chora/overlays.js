@@ -512,9 +512,12 @@ export async function kept() {
   const out = [], n = notes();
   try {
     for await (const h of (await dir()).values()) {
+      // Only a map's own file: while a write is open, Chrome lists its swap file (<key>.json.crswap)
+      // here too, holding the record being written (and refuses to read it from another writable).
+      if (h.kind === 'directory' || !/^[0-9a-f]{24}\.json$/.test(h.name)) continue;
       try {
         const e = JSON.parse(await (await h.getFile()).text());
-        if (e?.version !== 1 || !e.item) continue;
+        if (e?.version !== 1 || !e.item || `${e.key}.json` !== h.name) continue;
         if (queues.has(e.key) && !records.has(e.key)) continue;   // being let go
         const note = n[e.key];
         const latest = queues.has(e.key) && records.has(e.key) ? records.get(e.key)   // being written: what is being written
