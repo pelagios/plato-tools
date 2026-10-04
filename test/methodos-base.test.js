@@ -58,11 +58,13 @@ test('"Write it out" in the format the dataset already has is a download, not a 
 });
 
 test('at Finish, a base address in Options other than the review\'s saved address is said; the same one, or none, says nothing', () => {
-  const work = { subjects: { uri: BASE } };
+  const work = { subjects: { uri: BASE, uriFrom: 'base' } };
   const said = baseDiffers(work, 'https://example.org/other/');
   assert.match(said, /The base address in Options \(https:\/\/example\.org\/other\/\) is not the one this review was saved with \(https:\/\/example\.org\/parishes\/\)/);
   assert.equal(baseDiffers(work, BASE), null);
   assert.equal(baseDiffers(work, 'https://example.org/parishes'), null, 'the same address without its slash');
   assert.equal(baseDiffers(work, ''), null, 'no base address in Options');
   assert.equal(baseDiffers({ subjects: {} }, 'https://example.org/other/'), null, 'a review with no saved address');
+  // A dataset with an address of its own (its gazetteer's @id) is never compared with a base address.
+  assert.equal(baseDiffers({ subjects: { uri: BASE + 'release/v1' } }, BASE), null);
 });

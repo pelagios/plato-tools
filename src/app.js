@@ -926,7 +926,8 @@ const methodos = mountMethodos({
     pickWork: () => $('workfile').click(),
     ownTarget: () => (input && readable(input) ? INPUT_TO_TARGET[input.format] ?? null : null),
     base: () => $('base').value,
-    setBase: (v) => { if ($('base').value === v) return; $('base').value = v; $('base').dispatchEvent(new Event('change', { bubbles: true })); },
+    // As if typed in Options: its own listeners (the preview made under it is let go) hear 'input' and 'change'.
+    setBase: (v) => { if ($('base').value === v) return; $('base').value = v; for (const t of ['input', 'change']) $('base').dispatchEvent(new Event(t, { bubbles: true })); },
   },
   workflow: arrivedFor,
   onStep(step) {
@@ -935,6 +936,8 @@ const methodos = mountMethodos({
     chooseTool(step?.tool ?? null); setHash(step?.tool ?? null);
   },
 });
+// Methodos: the interview's base address field shows Options' base address, the one store of it.
+$('base').addEventListener('input', () => methodos.baseChanged());
 for (const id of ['methodos-card', 'methodos-ask']) $(id).addEventListener('click', (e) => {
   if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;   // a first tap on the card's name shows its tooltip (src/lib/tooltip.js)
   e.preventDefault(); methodos.open();
@@ -1211,9 +1214,9 @@ $('export-candidates').onclick = () => {
   // A table converted under a base address is that dataset (as Agora takes it): with no address of its
   // own, its candidates are exported for the base address given in Options, and the review keeps it.
   const forBase = !work.subjects.uri && datasetAddress($('base').value);
-  if (forBase) work.subjects.uri = forBase;
+  if (forBase) Object.assign(work.subjects, { uri: forBase, uriFrom: 'base' });
   try { x = exportCandidates(work, { previousSets: earlierSets }); }
-  catch (err) { if (forBase) delete work.subjects.uri; if (err?.name !== 'DataError') throw err; candidatesStatus(err.message, true); return; }
+  catch (err) { if (forBase) { delete work.subjects.uri; delete work.subjects.uriFrom; } if (err?.name !== 'DataError') throw err; candidatesStatus(err.message, true); return; }
   work = x.work; exportedSet = x.set;
   const { problems, counted } = summary(x.report, 'candidates');
   candidatesStatus(`${problems} ${counted} ${KRISIS_CANDIDATES.saveReviewToo}`);

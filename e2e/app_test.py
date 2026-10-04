@@ -3010,6 +3010,7 @@ def map_your_data_checks(pw, url, tmp):
         # The dataset handed back is PLATO JSON already, the format the workflow writes: the step is ready to
         # download it as it is (the page offers no conversion of a format into itself), and is done once downloaded.
         until(page, "() => !document.getElementById('methodos-download').hidden", 30)
+        offered = page.eval_on_selector_all('#target option', 'os => os.map((o) => o.value)')
         ready = {'row': page.inner_text('#methodos-track li[data-step="out"]'), 'message': track()['message'], 'button': page.inner_text('#methodos-download')}
         with page.expect_download(timeout=T(30) * 1000) as d: page.click('#methodos-download')
         r['final'] = out / ('final-' + d.value.suggested_filename); d.value.save_as(r['final'])
@@ -3018,8 +3019,8 @@ def map_your_data_checks(pw, url, tmp):
         r['doc'] = json.loads(r['final'].read_text())
         e = mydata_ends(r['doc']); r['ends'] = e
         same = r['final'].read_bytes() == r['drawn'].read_bytes()
-        return (r['again'] == 'done' and 'Ready to download' in ready['row'] and 'Ready to download' in ready['message'] and ready['button'] == f"Download {r['drawn'].name}"
-                and same and mydata_complete(e)), {'again': r['again'], 'ready': ready, 'same file': same, 'ends': e, 'steps': track()['steps']}
+        return (r['again'] == 'done' and 'plato-json' not in offered and bool(offered) and 'Ready to download' in ready['row'] and 'Ready to download' in ready['message'] and ready['button'] == f"Download {r['drawn'].name}"
+                and same and mydata_complete(e)), {'again': r['again'], 'offered': offered, 'ready': ready, 'same file': same, 'ends': e, 'steps': track()['steps']}
     attempt('Map your data: checked again, compared with the dataset converted from the table, and, already PLATO JSON, ready to download and downloaded as it is (the step then done), with its ten places ContainedIn their parishes, its identities and adopted geometry citing the stub, and its identities naming their candidates', to_the_end)
 
     def can_fail():

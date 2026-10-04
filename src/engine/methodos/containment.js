@@ -73,12 +73,13 @@ export function containment(doc, work) {
 export const writesItself = (step, target) => !!step && step.op === 'convert' && typeof step.options?.target === 'string' && !!target && step.options.target === target;
 
 /**
- * Words for a review whose saved address (work.subjects.uri, the address its candidates were exported
- * for) is not the base address now in Options, or null: Finish writes for the review's address, so a
- * base address changed since is said, not acted on.
+ * Words for a review whose saved address (work.subjects.uri) was taken from a base address when its
+ * candidates were exported (subjects.uriFrom 'base': a dataset with no address of its own) and is not
+ * the base address now in Options, or null: Finish writes for the review's address, so a base address
+ * changed since is said, not acted on. A dataset's own @id is never compared with a base address.
  */
 export function baseDiffers(work, base) {
   const saved = work?.subjects?.uri, now = datasetAddress(base);
-  if (typeof saved !== 'string' || !saved || !now || saved === now) return null;
+  if (work?.subjects?.uriFrom !== 'base' || typeof saved !== 'string' || !saved || !now || saved === now) return null;
   return `The base address in Options (${now}) is not the one this review was saved with (${saved}): Finish writes the attestations for ${saved}, the address its candidates were exported for. Set Options back to it if your places keep that address.`;
 }

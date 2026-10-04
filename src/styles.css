@@ -585,3 +585,8 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; tex
 .track-run { display: block; font-size: .95rem; }
 .track-run.warn { color: var(--warn); }
 .feedback-line { margin: .5rem 0 0; }
+
+/* Methodos: the base address asked in the interview (src/methodos/page.js baseField). */
+.interview .methodos-text { margin: 0.35rem 0 0.5rem; }
+.interview .methodos-text label { display: block; margin-bottom: 0.25rem; }
+.interview #methodos-base { width: 100%; max-width: 32rem; box-sizing: border-box; }

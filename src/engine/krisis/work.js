@@ -7,7 +7,8 @@
 //
 // The shape, version 1 (test/krisis.test.js holds an example of each part):
 //   { krisis: 1, generated_at, algorithm_version, match_parameters: { threshold, maxDistanceKm, topK, base?, columns?, blocking, scoring },
-//     subjects: { title, uri?, titleFrom?, files: [{ name, size, sha256 }] }, others: { title, uri?, titleFrom?, files },
+//     subjects: { title, uri?, titleFrom?, uriFrom?, files: [{ name, size, sha256 }] } (uriFrom 'base':
+//     the uri is the base address its candidates were exported for, the dataset having none of its own), others: { title, uri?, titleFrom?, files },
 //     (titleFrom: 'gazetteer', 'given' by the person matching, or 'file-name' when neither gave one)
 //     places: { <subject place IRI>: { label, names, point: [lon, lat] | null, ccodes?, types? } },
 //     candidates: [{ id, candidate_source, candidate_candidate, similarity_score, distance_km: number | null,

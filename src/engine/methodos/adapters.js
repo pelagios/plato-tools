@@ -245,7 +245,7 @@ export const ADAPTERS = {
     if (!work.subjects.uri) {
       const uri = datasetAddress(options.base);
       if (!uri) throw new DataError('The dataset has no address of its own, and no base address was given, so its candidates cannot be exported for it: give the base address the table was converted under.');
-      work.subjects.uri = uri;
+      Object.assign(work.subjects, { uri, uriFrom: 'base' });
     }
     const x = exportCandidates(work, { ...(options.issued ? { issued: options.issued } : {}) });
     work = x.work;

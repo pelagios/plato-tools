@@ -5,7 +5,7 @@
 // at through onStep, and narrows step 2 to that step's tool (#tool=) and says the step in #for-tool.
 // A visitor who never opens Methodos sees the page as it was: nothing here runs until they do, bar
 // reading the store for a workflow kept from before.
-import { HAVE, WANT, choose, questionsFor, answersFor, answered, plan, feedbackUrl, baseAsked } from '../engine/methodos/interview.js';
+import { HAVE, WANT, choose, questionsFor, answersFor, answered, plan, feedbackUrl, baseAsked, baseAnswer } from '../engine/methodos/interview.js';
 import { OPERATIONS } from '../engine/methodos/operations.js';
 import { RECIPES } from '../engine/methodos/recipes/index.js';
 import * as runner from '../engine/methodos/runner.js';
@@ -143,12 +143,21 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     if (!fs) {
       const input = el('input', { type: 'url', id: 'methodos-base', name: 'methodos-base', autocomplete: 'url', spellcheck: false, value: page.base?.() || '' });
       input.setAttribute('aria-describedby', 'methodos-base-help');
-      fs = el('fieldset', { id: 'methodos-base-q', className: 'methodos-text' }, el('legend', {}, el('label', { htmlFor: 'methodos-base', textContent: asked.question })), input,
+      fs = el('div', { id: 'methodos-base-q', className: 'methodos-text' }, el('label', { htmlFor: 'methodos-base', textContent: asked.question }), input,
         el('p', { id: 'methodos-base-help', className: 'muted', textContent: `${asked.needed ? 'Needed: the regions are given addresses under it.' : 'Optional: minting takes it, where the dataset has none of its own.'} It is the base address in Options, which this changes too.` }));
       more.append(fs);
     } else if (q(fs, '#methodos-base') !== document.activeElement) q(fs, '#methodos-base').value = page.base?.() || q(fs, '#methodos-base').value;
-    texts.base = q(fs, '#methodos-base').value;
+    const field = q(fs, '#methodos-base');
+    field.required = asked.needed; field.setAttribute('aria-required', String(asked.needed));
+    texts.base = field.value;
     more.hidden = false;
+  }
+  /** Options' base address changed by hand: the field shows it, and the workflow takes it (one store). */
+  function baseChanged() {
+    const f = q(more, '#methodos-base');
+    if (!f || f === document.activeElement) return;
+    f.value = page.base?.() || ''; texts.base = f.value;
+    verdictNow();
   }
   interview.addEventListener('input', (e) => {
     if (e.target.id !== 'methodos-base') return;
@@ -179,7 +188,11 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     }
     const recipe = RECIPES[choice.recipe];
     interview.dataset.recipe = recipe.key;
-    if (!answered(choice, yesNo, texts)) { verdict.textContent = `This leads to the workflow “${recipe.title}”. Answer the questions under 3${baseAsked(choice, yesNo)?.needed ? ', the base address among them,' : ''} to see its steps.`; return; }
+    if (!answered(choice, yesNo, texts)) {
+      const bad = baseAsked(choice, yesNo)?.needed && (texts.base || '').trim() && !baseAnswer(texts.base);
+      verdict.textContent = `This leads to the workflow “${recipe.title}”. Answer the questions under 3${baseAsked(choice, yesNo)?.needed ? ', the base address among them,' : ''} to see its steps.${bad ? ' The base address given is not a web address: it begins https:// (or http://).' : ''}`;
+      return;
+    }
     const p = plan(choice.recipe, answersFor(choice, yesNo, texts));
     verdict.textContent = `Your workflow: ${p.title}, in ${runs(p).length} steps.`;
     const list = el('ol', { className: 'track' });
@@ -486,7 +499,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     document.body.append(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
     let w = wf.status === 'idle' ? runner.next(wf) : wf;
-    if (w.current !== s.id) return;
+    if (w.current !== s.id) throw new Error(`The workflow is not at the step “${s.title}”.`);
     wf = runner.complete(w, s.id, { dataset: await refsHeld(files, 'dataset', { own: true }) });
     say(`${names(main)}: downloaded as it is. The step is done.`);
     await keep(); render(false);
@@ -729,5 +742,5 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   })).catch(() => {});
   // The files chosen are recognised (their format known): what the step at hand offers may change with it.
   const detected = () => chain(async () => { if (wf) render(false); });
-  return { open, chosen, began, ended, dropped, keepChanged, detected, id: () => wf?.id || null };
+  return { open, chosen, began, ended, dropped, keepChanged, detected, baseChanged, id: () => wf?.id || null };
 }
