@@ -32,7 +32,7 @@ import { candidateSource } from './engine/krisis/identity.js';
 import { runLevel, runPlaces } from './engine/krisis/lookup.js';
 import { seedRegions, decideRegion, settleRegion, undo as undoRegion, selectLevel, matchesOf, lastQueryOf } from './engine/krisis/regions.js';
 import { REGION_PAGE as RP, REGION_WORDS } from './engine/words.js';
-import { levelNames, levelLabel, navigator, firstOpen, chainOf, placeChain, constraintLine, notesOf, relaxOptions, costOf, levelRegions, unsettledOf, placesToLook, lockedPlaces, wouldClear, priorOf, restorePrior, nameOf, regionDomId, certaintyChoices, CERTAINTY_DEFAULT, regionMatchOptions } from './krisis/region-page.js';
+import { levelNames, levelLabel, navigator as levelNavigator, firstOpen, chainOf, placeChain, constraintLine, notesOf, relaxOptions, costOf, levelRegions, unsettledOf, placesToLook, lockedPlaces, wouldClear, priorOf, restorePrior, nameOf, regionDomId, certaintyChoices, CERTAINTY_DEFAULT, regionMatchOptions } from './krisis/region-page.js';
 import { mountMethodos } from './methodos/page.js';
 import { workflowStore } from './methodos/store.js';
 const $ = (id) => document.getElementById(id);
@@ -1726,7 +1726,7 @@ function drawRegions() {
   $('regions-h').textContent = RP.heading; $('regions-how').textContent = RP.how;
   $('region-identity-label').textContent = RP.identityLabel;
   $('region-certainty-label').textContent = RP.certaintyLabel;
-  const names = regionNames(), nav = navigator(work, names);
+  const names = regionNames(), nav = levelNavigator(work, names);
   if (regionLevel === null || !nav.some((n) => n.level === regionLevel)) regionLevel = firstOpen(work);
   const navBox = $('regions-nav');
   navBox.setAttribute('aria-label', RP.nav.label);
