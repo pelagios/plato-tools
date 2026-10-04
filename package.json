@@ -1,7 +1,7 @@
 {
   "name": "plato-tools",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.9.0-alpha.1",
   "type": "module",
   "description": "Tools that check and convert PLATO data on your own computer, in the browser or on the command line.",
   "bin": {

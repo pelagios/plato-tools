@@ -97,6 +97,6 @@ test("the page's site: the commit the page was built from pins the workflow; wit
   const over = await workflow({ toolsCommit: SHA1, toolsRef: 'v2.0.0' });
   assert.match(over.text, /plato-tools#v2\.0\.0'/);
   const none = await workflow({});
-  assert.match(none.text, /plato-tools#v\d+\.\d+\.\d+'/);
+  assert.match(none.text, /plato-tools#v\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?'/);
   assert.ok(none.kinds.includes('tools-ref-unpinned'));
 });

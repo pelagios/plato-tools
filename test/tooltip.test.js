@@ -56,8 +56,8 @@ test('the pages give no element a title attribute, and their tooltips are there 
   assert.ok(tipsIn(index).some((t) => t.startsWith('ἔλεγχος')));
   assert.deepEqual(tipsIn(chora).slice(0, 1), ['Draw a point']);
   for (const page of [index, chora]) {
-    assert.match(page, /<a class="dev-badge" href="https:\/\/github.com\/pelagios\/plato-tools\/issues" data-tip-template="dev-tip">Under development<\/a>/);
-    assert.match(page, /<template id="dev-tip">.*being built in the open/);
+    assert.match(page, /<a class="dev-badge" href="https:\/\/github.com\/pelagios\/plato-tools\/issues" data-tip-template="dev-tip">Experimental<\/a>/);
+    assert.match(page, /<template id="dev-tip">.*is experimental.*may change or break/);
     assert.match(page, /<script type="module" src=".\/src\/lib\/tooltip.js"><\/script>/);
   }
 });

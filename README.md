@@ -5,7 +5,11 @@
 
 # PLATO tools
 
-**Status: alpha — under development; not yet in beta testing.**
+[![DOI: 10.5281/zenodo.23133141](badges/doi.svg)](https://doi.org/10.5281/zenodo.23133141)
+[![status: experimental](badges/status.svg)](#status)
+[![version](badges/version.svg)](CITATION.cff)
+
+<a id="status"></a>**Status: experimental — under development; not yet in beta testing.**
 
 Tools for data about places in the formats of PLATO, the Place Attestation Ontology: check it,
 convert it, compare two versions of it, publish it. They run in your browser at

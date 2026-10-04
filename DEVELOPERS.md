@@ -2239,6 +2239,16 @@ npx vite build   # the same, with the PLATO files already in public/plato/
 A push to `main` runs the tests, builds the site and publishes it to GitHub Pages
 (`.github/workflows/pages.yml`).
 
+- **A release.** The version is in `package.json` (and `package-lock.json`), `CITATION.cff` and
+  `.zenodo.json`, which must agree, and the git tag (`v0.9.0-alpha.1` style). The `alpha.N` in a
+  version is for developers; everything a user reads calls the tools *experimental*. After updating
+  `CITATION.cff`, run `node scripts/badges.mjs`: it writes the README's three badges (DOI, status,
+  version) into `badges/` as static SVG files, from `CITATION.cff`'s `version` and its concept DOI
+  under `identifiers` (no badge service is used, since those can break). Commit them with the
+  release; `test/badges.test.js` fails while a committed badge differs from what the script makes,
+  and `node scripts/badges.mjs --check` says the same. Only the concept DOI
+  (`10.5281/zenodo.23133141`) belongs in the repository: a version's own DOI does not exist until
+  Zenodo has archived the tag.
 - **The toolbox.** The page opens with the introduction, step 1's drop zone, and one card per tool
   (`nav#toolbox` in `index.html`), and the README with a table of them. When a tool lands, update
   its card and its row in the same change. A card is a link to `#tool=<key>` (never a button's id),
