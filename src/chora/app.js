@@ -419,7 +419,8 @@ function keepDrafts() {
     $('save-result').insertAdjacentHTML('beforeend', '<p class="warn">The drawings have changed since that file was written, so it is no longer offered: save again to have them all.</p>');
   }
   state.pendingCount = drafts.length;
-  if (fp) saveDrafts(fp, drafts);
+  // Written in turn, asynchronously (drafts.js): draftWrites counts those not yet on disk, for tests to wait on.
+  if (fp) { state.draftWrites = (state.draftWrites || 0) + 1; saveDrafts(fp, drafts).finally(() => { state.draftWrites--; }); }
   showSaving();
 }
 $('draw-tools').onclick = (e) => {

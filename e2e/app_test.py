@@ -3934,6 +3934,8 @@ def chora_adopt_checks(pw, url, tmp):
         st['basis kept'] = page.input_value('#adopt-basis')
         page.click('#adopt-go')
         until(page, '() => window.__chora.adopt.phase === "adopted"', 10)
+        # The draft is written to OPFS asynchronously: read it once the page says its writes are done.
+        until(page, '() => window.__chora.draftWrites === 0', 10)
         k = kept(page, st['file'].name)
         return (len(gets) == 1 and gets[0]['url'].endswith('/entity/place:gn:2641673/api') and 'authorization' not in gets[0]['headers']
                 and drawn and before == 0 and cstate(page)['pendingCount'] == 1 and ad()['done']['count'] == 2
