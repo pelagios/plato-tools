@@ -95,7 +95,7 @@ jobs:
     name: ${{ matrix.mode }}
     needs: plan
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: ${{ matrix.mode == 'prove-it-fails' && 20 || 45 }}
     strategy:
       fail-fast: false
       matrix:

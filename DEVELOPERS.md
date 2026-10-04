@@ -2373,7 +2373,15 @@ itself); it runs in full every night on `main` (03:17 UTC), and by hand with
   is in the run's summary, with every failing check named.
 - **prove-it-fails**: `python e2e/app_test.py --prove-it-fails`, green only when every check fails
   against a page with no tools on it (the harness can fail); a check that passed there is named in
-  the summary.
+  the summary. Every check runs, as in **e2e**, but a wait on that page ends after a second
+  (`FAST` in `e2e/app_test.py`) where it used to run its full timeout: the page has no script, so
+  what a check waits for there is true at once or never. Only waits on that page as loaded are cut
+  short (`toolless()`): not on any other page this mode opens, nor once the harness has put a script
+  into it (`add_script_tag`, `set_content`), and never a navigation or a fixed pause. A check that
+  passes there still passes, and still fails the job (three planted vacuous checks were each caught,
+  October 2026). The run's last lines give the number of checks and of waits cut short;
+  `PROVE_FULL_WAITS=1` waits in full, as before (some 85 minutes on GitHub, against under five
+  minutes now; the job is given 20).
 
 ```bash
 git push -u origin my-branch
