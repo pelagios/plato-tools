@@ -35,6 +35,58 @@ def plato_at_pin():
             sys.exit(f'PLATO_REPO ({PLATO}) has a {f} that differs from the vendored pinned copy {pin[:7]}: '
                      f'set PLATO_REPO to a checkout of {pin[:7]} (or PLATO_REPO_ANY=1 to run anyway)')
 PROVE = '--prove-it-fails' in sys.argv
+# --prove-it-fails, fast. Against the page with no tools (NOTOOLS, below: a data: URL with a title and a
+# file input, and no script) every check must fail, and until October 2026 each did so by waiting out
+# its timeouts in full, one after another: 60 s for a detection that could never come, 30 s for a
+# button that was not there, over 300 checks, some 85 minutes. Nothing on that page can change while
+# the harness waits, as it runs no script: what a wait asks of it is true at once or never. So, on that
+# page and only there, every wait ends after FAST seconds: wait_state() here, and every Playwright call
+# that takes a timeout (a wait for a function or a selector, an action on an element, an expected
+# download), given or the default. A wait whose condition holds still ends at once, as it always did,
+# and what each check then asserts is unchanged: only the waiting for what cannot come is cut short.
+# Where the page is another (a real page that some checks open in this mode too, about:blank, a frame
+# inside another page), or once the harness has put a script into it (add_script_tag, set_content),
+# the waits are as long as ever, and navigations and fixed pauses are never shortened.
+# PROVE_FULL_WAITS=1 waits in full everywhere, as before, to compare the two.
+FAST = 1.0
+SHORTENED = [0]                 # how many waits ended early, said at the end of the run
+UNSHORTENED = {'goto', 'go_back', 'go_forward', 'reload', 'set_content', 'wait_for_load_state', 'wait_for_url', 'wait_for_timeout',
+               'expect_navigation', 'expect_popup', 'expect_websocket', 'expect_worker', 'set_default_timeout',
+               'set_default_navigation_timeout', 'screenshot', 'aria_snapshot'}
+def toolless(target):
+    """Whether `target` (a page, a frame or a locator) shows the page with no tools as it was loaded, no script put in it."""
+    if not PROVE or os.environ.get('PROVE_FULL_WAITS'): return False
+    try:
+        if hasattr(target, 'main_frame'): page, url = target, target.url          # a page
+        elif hasattr(target, 'parent_frame'): page, url = target.page, target.url  # a frame: its own document
+        else: page = target.page; url = page.url                                   # a locator: its page's
+        return url == NOTOOLS and not getattr(page, '_prove_scripted', False)
+    except Exception: return False
+
+def prove_fast():
+    import functools, inspect
+    from playwright.sync_api import Page, Frame, Locator
+    def shorten(fn):
+        @functools.wraps(fn)
+        def wrapped(self, *a, **kw):
+            if toolless(self) and (not kw.get('timeout') or kw['timeout'] > FAST * 1000):
+                kw['timeout'] = FAST * 1000; SHORTENED[0] += 1
+            return fn(self, *a, **kw)
+        return wrapped
+    def scripted(fn, flag):
+        @functools.wraps(fn)
+        def wrapped(self, *a, **kw):
+            (self if hasattr(self, 'main_frame') else self.page)._prove_scripted = flag
+            return fn(self, *a, **kw)
+        return wrapped
+    for C in (Page, Frame, Locator):
+        for name, fn in list(vars(C).items()):
+            if name.startswith('_') or name in UNSHORTENED or not callable(fn): continue
+            if 'timeout' in inspect.signature(fn).parameters: setattr(C, name, shorten(fn))
+    for C in (Page, Frame):
+        for name in ('add_script_tag', 'set_content'): setattr(C, name, scripted(getattr(C, name), True))
+    for name in ('goto', 'reload'): setattr(Page, name, scripted(getattr(Page, name), False))   # a fresh document
+if PROVE: prove_fast()
 # The preview server runs under npx, whose child (node vite preview) outlived a plain kill() and
 # held the port for the next run: it gets a session of its own, and the whole group is stopped.
 def stop(srv):
@@ -55,6 +107,7 @@ def check(name, cond, detail=''):
 def wait_state(page, pred, timeout=120, what=''):
     """Poll the page's own state; on timeout return it, with the page's account of why."""
     t0 = time.time(); last = None
+    if toolless(page) and timeout > FAST: timeout = FAST; SHORTENED[0] += 1    # the page with no tools: nothing can come
     while time.time() - t0 < timeout:
         try: last = page.evaluate('() => window.__plato ? JSON.parse(JSON.stringify(window.__plato)) : null')
         except Exception as e: last = {'phase': 'page-error', 'error': str(e)[:200]}
@@ -2071,6 +2124,8 @@ def main():
         shutil.rmtree(tmp, ignore_errors=True)
     failed = [r for r in results if not r[1]]
     if PROVE:
+        print(f'{len(results)} checks; {SHORTENED[0]} waits on the page with no tools ended after {FAST:g} s'
+              + (' (none: PROVE_FULL_WAITS)' if os.environ.get('PROVE_FULL_WAITS') else ''))
         print('PROVE-IT-FAILS:', 'every check failed, as it must' if len(failed) == len(results) else f'{len(results) - len(failed)} check(s) passed against a page with no tools: they cannot fail')
         sys.exit(0 if len(failed) == len(results) else 1)
     print('RESULT:', 'ALL PASS' if not failed else f'{len(failed)} FAILED'); sys.exit(1 if failed else 0)
