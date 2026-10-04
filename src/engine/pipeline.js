@@ -565,8 +565,11 @@ export function sourceFor(input, env, rep, options = {}, action = 'check', hooks
 async function runChecked({ input, action, target, options = {} }, env, rep) {
   // options.augment(record) -> record: a caller's change to each place-centric record on its way to
   // the writer or sink (another tool appending its attestations to the places they are about), after
-  // the record has been checked and counted as read. Its additions are the caller's to check.
+  // the record has been checked and counted as read. Its additions are the caller's to check. A
+  // caller may return null to leave the record out of the output (Krisis: a place the reviewer leaves
+  // out of the dataset); then nothing of it is written.
   const augmented = (ev) => (options.augment && ev.type === 'record' ? { ...ev, value: options.augment(ev.value) } : ev);
+  const write = async (ev) => { const out = augmented(ev); if (out.type === 'record' && out.value === null) return; await writer.event(out); };
   const res = env.resources;
   const progress = env.progress || (() => {});
   const t0 = Date.now();
@@ -708,7 +711,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       // place in it and has no pre-pass here: it is named as it passes, for LPF's broaderPartitive label.
       if (regions && ev.region && ev.type === 'record' && typeof ev.value?.['@id'] === 'string') { regions.named.add(ev.value['@id']); regions.nameRecord(ev.value.attestations, ev.value['@id'], regionLabel(ev.value)); }
       if (writer) {
-        try { await writer.event(augmented(ev)); }
+        try { await write(ev); }
         catch (e) { rep.error('record-failed', 'A record could not be written and is left out of the output; the rest of the file was still converted', `${ev.value?.['@id'] || `item ${ev.n}`}: ${e && e.message || e}`); }
       }
       beat('reading');
@@ -844,7 +847,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       if (isRdf && !V.entity(rec)) rep.error('schema', explainSchema(V.entity.errors, false), `${e}: ${ajvMessage(V.entity.errors)}`);
       collectMembership(rec.attestations, rec['@id'], membership);
       if (fromGraph) cands.record(rec);
-      if (writer) await writer.event(augmented({ type: 'record', value: rec, n, ...withinByPlace.get(e) }));
+      if (writer) await write({ type: 'record', value: rec, n, ...withinByPlace.get(e) });
       beat('writing', { places: n });
     }
     for (const i of idrIds) {
