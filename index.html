@@ -164,6 +164,8 @@
       <label><input id="lookup-all-names" type="checkbox"> Also send each place's other names, one query each (the preview shows the cost)</label>
       <!-- Krisis × Methodos: query variants (opt-in); its words are words.js variantWords, put in by src/app.js. -->
       <label><input id="lookup-variants" type="checkbox"> <span id="lookup-variants-text"></span></label>
+      <label for="lookup-lang">The dataset's language, for names that give none of their own: a code such as en, la or ang (for the World Historical Gazetteer only; leave it empty to send none)</label>
+      <input id="lookup-lang" type="text" autocomplete="off" spellcheck="false" maxlength="35" size="8" pattern="[A-Za-z]{2,3}([\-_][A-Za-z0-9]{1,8})*">
       <fieldset class="lookup-filters">
         <legend>Filters, each off unless you turn it on</legend>
         <label><input id="lookup-countries" type="checkbox"> Only candidates in the place's own countries. This is a filter: it hides everything outside it, including the right answer if the countries are wrong.</label>

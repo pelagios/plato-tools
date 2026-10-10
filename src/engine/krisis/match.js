@@ -125,13 +125,16 @@ function reader(side, rep, word, standIns = new Set()) {
   const record = (rec, ev) => {
     const iri = rec['@id'];
     if (typeof iri !== 'string' || !iri) { rep.add('error', 'no-address', TEXT['no-address'](words(word)), rec.label ?? undefined); side.unaddressed++; return; }
-    const names = [], seen = new Set();
+    const names = [], seen = new Set(), langs = {};
     const add = (n) => { if (typeof n !== 'string' || !n.trim() || seen.has(n)) return; seen.add(n); names.push(n); };
+    // A name's language tag, as the name states it (the first tag a name is given wins): a gazetteer
+    // lookup sends it with the name (lookup.js).
+    const tag = (n, lang) => { if (typeof n === 'string' && n.trim() && typeof lang === 'string' && lang.trim() && !Object.hasOwn(langs, n)) langs[n] = lang.trim(); };
     add(rec.label);
     const types = new Set();
     for (const a of rec.attestations || []) {
       if (!a || typeof a !== 'object') continue;
-      if (!a.negated) for (const n of a.names || []) { add(n?.toponym); add(n?.romanized); }
+      if (!a.negated) for (const n of a.names || []) { add(n?.toponym); add(n?.romanized); tag(n?.toponym, n?.language); tag(n?.romanized, n?.language); }
       if (!a.negated) for (const t of a.types || []) if (t && typeof t.label === 'string' && types.size < 5) types.add(t.label);
       for (const r of a.identities || []) link(r?.subject ?? iri, r?.object, !!a.negated, typeof a['@id'] === 'string' ? a['@id'] : null);
     }
@@ -141,8 +144,14 @@ function reader(side, rep, word, standIns = new Set()) {
     const p = { label: typeof rec.label === 'string' ? rec.label : iri, names, point: null, points: attestationPoints(rec) };
     if (Array.isArray(rec.ccodes) && rec.ccodes.length) p.ccodes = rec.ccodes.filter((c) => typeof c === 'string');
     if (types.size) p.types = [...types];
+    if (Object.keys(langs).length) p.langs = langs;
     if (!side.places.has(iri)) side.places.set(iri, p);
-    else { const q = side.places.get(iri); for (const n of names) if (!q.names.includes(n)) q.names.push(n); q.points.push(...p.points); }
+    else {
+      const q = side.places.get(iri);
+      for (const n of names) if (!q.names.includes(n)) q.names.push(n);
+      q.points.push(...p.points);
+      for (const [n, l] of Object.entries(langs)) if (!Object.hasOwn(q.langs ??= {}, n)) q.langs[n] = l;
+    }
     // Krisis: region review. The regions the place lies in: the event's own chain (a table, read by
     // Hermes), else what its PLATO says (its ContainedIn, read back once the regions are known). A record
     // whose entityIdentifier is a containerKey may be a region itself: it is one if a place lies in it.

@@ -69,6 +69,16 @@
 //    list as JSON text. A WHG-native place may have no centroid while its GeoNames or OSM siblings do.
 //    OPEN: whether whg:geometry_geojson gives full polygons for authority records, and the shape of
 //    an extend row for ids answered by WHG's upstream gateway rather than its own database.
+// A12 BUILT, NOT YET LIVE (place#323, built 10 October 2026, as WHG's session reported it). A query's
+//    `area_only: true` keeps only candidates with at least one areal geometry, by the same test as
+//    `has_geom` and containment: a filter, not a ranking, so `limit` still asks for that many areas.
+//    Candidates come from the top 200 name matches only, and WHG's legacy index (which has no shape
+//    flag) is not searched. A point-only record (a GeoNames town) cannot scope a lookup within it:
+//    WHG then refuses the scoped query (scope.applied false), so a region is matched to areas only.
+// A13 BUILT, NOT YET LIVE (place#324, as A12). A query's `lang`, an ISO 639-1 or 639-3 code, shapes
+//    WHG's own embedding of the name (its name model, Symphonym); WHG takes anything not two or three
+//    letters for "und" (undetermined), never an error. There is no other way to state a language, so
+//    these tools send one only when it is known, and never "und".
 
 export const WHG_ENDPOINT = 'https://whgazetteer.org/reconcile';
 /** Queries per POST (A3). */
@@ -90,6 +100,19 @@ export const isBlockedAgent = (ua) => BLOCKED_AGENTS.some((b) => String(ua).toLo
 export function isQuotaSpent(detail) {
   const d = String(detail ?? '');
   return /daily api limit/i.test(d) || (/limit/i.test(d) && /exceed|quota/i.test(d));
+}
+
+/** Language subtags that say no language is known: never sent (A13). */
+const NO_LANGUAGE = new Set(['und', 'mul', 'mis', 'zxx']);
+/**
+ * The code WHG is sent for a language tag (A13): the tag's primary subtag in lower case, "en" for
+ * "en-GB" and "la" for "la-Latn", if it is two or three letters and names a language; else null, and
+ * no language is sent.
+ */
+export function whgLang(tag) {
+  if (typeof tag !== 'string') return null;
+  const primary = tag.trim().split(/[-_]/)[0].toLowerCase();
+  return /^[a-z]{2,3}$/.test(primary) && !NO_LANGUAGE.has(primary) ? primary : null;
 }
 
 /** The type sent when a query gives none (A4). */

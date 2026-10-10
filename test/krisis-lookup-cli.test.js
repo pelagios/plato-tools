@@ -209,3 +209,26 @@ test('--reviewer is written into the work file a lookup makes; a wrong --orcid i
   assert.equal(bad.code, 2);
   assert.match(bad.err + bad.out, /ORCID in full/);
 });
+
+test('--lang gives WHG the dataset\'s language as its primary subtag; a code that names none, or another service, is refused', async () => {
+  const dir = fixture();
+  requests.length = 0;
+  const lang = await cli(['lookup', join(dir, 'a.json'), '--gazetteer', 'whg', '--lang', 'en-GB', '--dry-run', '--out', dir], { WHG_TOKEN: TOKEN });
+  assert.equal(lang.code, 0, lang.out + lang.err);
+  assert.match(lang.out, /A name with no language of its own is sent as en, the dataset's language\./);
+  assert.ok(lang.out.includes('{"lang":"en","query":"Newcastle","type":"Place","limit":10}'), lang.out);
+  const none = await cli(['lookup', join(dir, 'a.json'), '--gazetteer', 'whg', '--dry-run', '--out', dir], { WHG_TOKEN: TOKEN });
+  assert.equal(none.code, 0, none.out + none.err);
+  assert.ok(none.out.includes('{"query":"Newcastle","type":"Place","limit":10}'), 'control: without --lang, no language: ' + none.out);
+  assert.match(none.out, /2 queries are sent with no language/);
+  for (const bad of ['und', 'English']) {
+    const r = await cli(['lookup', join(dir, 'a.json'), '--gazetteer', 'whg', '--lang', bad, '--dry-run', '--out', dir], { WHG_TOKEN: TOKEN });
+    assert.equal(r.code, 2, `--lang ${bad} is refused: ` + r.out + r.err);
+    assert.match(r.err, new RegExp(`--lang ${bad} is not a language code`));
+  }
+  const other = await cli(['lookup', join(dir, 'a.json'), '--gazetteer', 'https://gaz.example.org/reconcile', '--lang', 'en', '--dry-run', '--out', dir]);
+  assert.equal(other.code, 2, other.out + other.err);
+  assert.match(other.err, /--lang is for the World Historical Gazetteer only/);
+  assert.equal(requests.length, 0, 'nothing sent');
+  noToken(lang, dir);
+});

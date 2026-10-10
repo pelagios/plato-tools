@@ -815,6 +815,9 @@ export const LOOKUP_WORDS = {
       + (perDay ? ` (the gazetteer allows ${perDay.toLocaleString('en-GB')} requests a day)` : '') + '.'];
     lines.push(p.allNames ? 'Each place is looked up by its label and each of its other names, one query for each.' : 'Each place is looked up by its label only.');
     lines.push(p.filters.length ? `Filters: ${p.filters.map((f) => (f === 'countries' ? "the place's own countries" : `within about ${p.nearKm.toLocaleString('en-GB')} km of its point (answered from the gazetteer's upstream sources only)`)).join(' and ')}. A filter leaves out every candidate outside it, the right one too if the data is wrong.` : 'No filters: nothing is left out by country or distance.');
+    if (p.areaOnly) lines.push('Only records with an outline are asked for: a region is matched to an area, never to a point, so that the places within it can be looked up inside it.');
+    if (p.lang) lines.push(`A name with no language of its own is sent as ${p.lang}, the dataset's language.`);
+    if (p.withoutLanguage) lines.push(`${plural(p.withoutLanguage, 'query is', 'queries are')} sent with no language: the name has none of its own${p.lang ? '' : ', and no language is set for the dataset'}.`);
     if (p.sendsCoordinates) lines.push("The places' coordinates are sent.");
     if (p.withoutCountries) lines.push(`${plural(p.withoutCountries, 'place has', 'places have')} no countries, and ${p.withoutCountries === 1 ? 'is' : 'are'} looked up without that filter.`);
     if (p.withoutName) lines.push(`${plural(p.withoutName, 'place has', 'places have')} no name (only a web address), and ${p.withoutName === 1 ? 'is' : 'are'} not looked up: an address is never sent as a name.`);

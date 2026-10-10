@@ -283,6 +283,9 @@ does not apply to):
   --near KM         lookup: send each place's point and a radius of KM kilometres as a filter
                     (this sends its coordinates). The edge is approximate, and WHG then answers
                     from its upstream sources only.
+  --lang CODE       lookup: the dataset's language (en, la, ang…), sent to the World Historical
+                    Gazetteer with each name that gives no language of its own. None is sent
+                    without it, never "und".
   --limit N         lookup: the most candidates asked for, for each query (default 10).
   --batch N         lookup: queries in one request, 1 to 50 (default 25).
   --dry-run         lookup: say what would be sent, and the first queries exactly; send nothing.
@@ -400,7 +403,7 @@ async function main(argv) {
         candidates: { type: 'string', multiple: true }, 'previous-candidates': { type: 'string', multiple: true }, 'set-iri': { type: 'string' },
         georef: { type: 'string', multiple: true }, manifest: { type: 'string', multiple: true },
         gazetteer: { type: 'string' }, places: { type: 'string' }, 'all-names': { type: 'boolean', default: false }, variants: { type: 'boolean', default: false }, countries: { type: 'boolean', default: false },
-        near: { type: 'string' }, limit: { type: 'string' }, batch: { type: 'string' }, 'dry-run': { type: 'boolean', default: false }, token: { type: 'string' },
+        near: { type: 'string' }, lang: { type: 'string' }, limit: { type: 'string' }, batch: { type: 'string' }, 'dry-run': { type: 'boolean', default: false }, token: { type: 'string' },
         'token-env': { type: 'string' }, 'gazetteer-iri': { type: 'string' },
         levels: { type: 'boolean', default: false }, level: { type: 'string' }, relax: { type: 'string' }, unconstrained: { type: 'boolean', default: false },
         'work-dir': { type: 'string' }, json: { type: 'boolean', default: false }, brief: { type: 'boolean', default: false },
@@ -452,7 +455,7 @@ async function main(argv) {
   if (action === 'match' || action === 'apply') return review(action, args, o, resources);
   if (action === 'lookup') return lookupCommand(args, o, resources);
   // (--limit, for lookup and preview, is refused above for any other command.)
-  if (o.gazetteer || o.places || o['all-names'] || o.variants || o.countries || o.near || o.batch || o['dry-run'] || o['token-env'] || o['gazetteer-iri']) return usage('--gazetteer, --token-env, --gazetteer-iri, --places, --all-names, --variants, --countries, --near, --batch and --dry-run are for lookup.');
+  if (o.gazetteer || o.places || o['all-names'] || o.variants || o.countries || o.near || o.lang || o.batch || o['dry-run'] || o['token-env'] || o['gazetteer-iri']) return usage('--gazetteer, --token-env, --gazetteer-iri, --places, --all-names, --variants, --countries, --near, --lang, --batch and --dry-run are for lookup.');
   if (o.levels || o.level !== undefined || o.relax !== undefined || o.unconstrained) return usage('--levels, --level, --relax and --unconstrained are for lookup.');
   if (o.with || o.threshold || o['max-distance'] || o.top || o.review || o.output || o.reviewer || o.orcid || o['others-title'] !== undefined) return usage('--with, --threshold, --max-distance, --top, --review, --output, --reviewer, --orcid and --others-title are for match and apply.');
   if (!reads && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, preview, cluster, compare, publish, match, apply, lookup, candidates and datacube.`);
@@ -1073,7 +1076,7 @@ async function lookupCommand(args, o, resources) {
   // The reviewer, if given, is written into the work file (the page asks for the name; here it is given).
   const { reviewer, problem } = reviewerOption(o);
   if (problem) return usage(problem);
-  const { createLookup, WHG_ENDPOINT, isWhg } = await import('../src/engine/gazetteer/index.js');
+  const { createLookup, WHG_ENDPOINT, isWhg, whgLang } = await import('../src/engine/gazetteer/index.js');
   const { runLookup, planLookup, serviceOf, iriFromTemplate, iriVia, manifestSettings, PLACE_CHOICES, WHG_REQUESTS_A_DAY, newWork, runLevel, runPlaces } = await import('../src/engine/krisis/lookup.js');
   const { gather } = await import('../src/engine/krisis/match.js');
   const { readWork, serialiseWork, filesDiffer } = await import('../src/engine/krisis/work.js');
@@ -1090,6 +1093,8 @@ async function lookupCommand(args, o, resources) {
     if (Number.isNaN(v)) return usage(`${flag} ${raw} is not allowed; see --help.`);
   // WHG's token comes from WHG_TOKEN and goes only to WHG; another service's from the variable --token-env names, and only over https.
   const isWhgService = isWhg(endpoint);
+  if (o.lang !== undefined && !isWhgService) return usage('--lang is for the World Historical Gazetteer only.');
+  if (o.lang !== undefined && !whgLang(o.lang)) return usage(`--lang ${o.lang} is not a language code such as en, la or ang.`);
   if (isWhgService && (o['token-env'] || o['gazetteer-iri'])) return usage("--token-env and --gazetteer-iri are for another service; WHG's token is read from WHG_TOKEN.");
   if (o['token-env'] && !process.env[o['token-env']]) return usage(L.tokenEnvMissing(o['token-env']));
   const token = (isWhgService ? process.env.WHG_TOKEN : o['token-env'] ? process.env[o['token-env']] : undefined) || undefined;
@@ -1158,7 +1163,7 @@ async function lookupCommand(args, o, resources) {
     process.once('SIGINT', () => controller.abort());
     const lookup = createLookup({ endpoint, token, ...(batch ? { batchSize: batch } : {}) });
     const progress = live ? ({ done, total }) => process.stderr.write(`\r\x1b[K${done.toLocaleString('en-GB')} of ${total.toLocaleString('en-GB')} looked up`) : undefined;
-    const how = { lookup, relax: o.relax, only, options: { service, limit, maxDistanceKm }, reviewer, signal: controller.signal, onBatch: progress };
+    const how = { lookup, relax: o.relax, only, options: { service, limit, maxDistanceKm, lang: o.lang ?? null }, reviewer, signal: controller.signal, onBatch: progress };
     let result;
     try { result = target === 'places' ? await runPlaces(work, { ...how, places: gathered.places, unconstrained: o.unconstrained }) : await runLevel(work, target, how); }
     catch (e) { host.cleanup(); r.message = e instanceof TypeError && /relax/.test(e.message) ? e.message : toolsFault(e); return finishUp(); }
@@ -1202,7 +1207,7 @@ async function lookupCommand(args, o, resources) {
     const differ = await filesDiffer(work.subjects, input.files);
     if (differ.length) r.warnings.push(`The work file was made from other files than ${differ.join(', ')}: its places may no longer match the data.`);
   }
-  const options = { service, places: o.places, allNames: o['all-names'], variants: o.variants, countries: o.countries, nearKm: near, limit, maxDistanceKm };
+  const options = { service, places: o.places, allNames: o['all-names'], variants: o.variants, countries: o.countries, nearKm: near, limit, maxDistanceKm, lang: o.lang ?? null };
   if (o.levels) return levelsCommand();
   if (o['dry-run']) {
     // Planned as the lookup would plan it: in requests of --batch, or the gazetteer module's 25.

@@ -1477,11 +1477,14 @@ def krisis_lookup_pattern(page, tmp, url):
 
 # Krisis: region review (Methodos #28, stages 3 and 4). WHG is never called: page.route answers for it
 # (as WHG answers a filtered query: `scope`, and for Hoxne within Suffolk a filter it could not apply,
-# which it answers with nothing: failed closed), and records each request's body.
-def region_answer(id, name):
-    return {'id': id, 'name': name, 'score': 100, 'match': True, 'description': 'Country: GB', 'ccodes': ['GB'], 'repr_point': [1.0, 52.3], 'namespace': id.split(':')[1], 'alt_names': []}
+# which it answers with nothing: failed closed; and, asked for areas only (area_only), as WHG's place#323 does:
+# without the records that have no outline), and records each request's body.
+def region_answer(id, name, has_geom=True):
+    return {'id': id, 'name': name, 'score': 100, 'match': True, 'description': 'Country: GB', 'ccodes': ['GB'], 'repr_point': [1.0, 52.3], 'namespace': id.split(':')[1], 'alt_names': [], 'has_geom': has_geom}
+# A point-only England (a farm of that name, say): never offered for a region, which is asked for areas only.
+REGION_POINT_ONLY = 'place:gn:9100001'
 REGION_ANSWERS = {
-    'England': [region_answer('place:gn:6269131', 'England'), region_answer('place:wd:Q21', 'England')],
+    'England': [region_answer('place:gn:6269131', 'England'), region_answer('place:wd:Q21', 'England'), region_answer(REGION_POINT_ONLY, 'England', has_geom=False)],
     'Suffolk': [region_answer('place:gn:2636561', 'Suffolk')], 'Norfolk': [region_answer('place:gn:2641455', 'Norfolk')],
     'Hoxne': [region_answer('place:gn:2646340', 'Hoxne')], 'Eye': [region_answer('place:gn:2649660', 'Eye')], 'Diss': [region_answer('place:gn:2651188', 'Diss')],
 }
@@ -1508,8 +1511,9 @@ def krisis_regions_case(page, tmp, url):
         out = {'attribution': LOOKUP_ATTRIBUTION}
         for k, q in (body.get('queries') or {}).items():
             filtered = isinstance(q.get('contained_in'), list)
+            found = [c for c in REGION_ANSWERS.get(q['query'], []) if c.get('has_geom') or not q.get('area_only')]
             if filtered and q['query'] == 'Hoxne': out[k] = {'result': [], 'scope': {'applied': False}}
-            else: out[k] = {'result': REGION_ANSWERS.get(q['query'], []), **({'scope': {'applied': True}} if filtered else {})}
+            else: out[k] = {'result': found, **({'scope': {'applied': True}} if filtered else {})}
         route.fulfill(status=200, headers={**cors, 'Content-Type': 'application/json'}, body=json.dumps(out))
     WHG = re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/')
     page.route(WHG, fake_whg)
@@ -1536,6 +1540,8 @@ def krisis_regions_case(page, tmp, url):
         if s.get('phase') != 'detected': return {'phase': s.get('phase')}
         if not page.evaluate("() => document.getElementById('lookup').open"): page.click('#lookup > summary')
         page.fill('#whg-token', LOOKUP_TOKEN); page.press('#whg-token', 'Tab')
+        # The dataset's language: its names give none of their own, so each is sent with this one.
+        page.fill('#lookup-lang', 'en')
         page.wait_for_function("() => !document.getElementById('regions-offer').hidden", timeout=60_000)
         offer = page.inner_text('#regions-offer')
         # The start button is disabled while the page is busy (reading the dataset's places); the click waits for it.
@@ -1581,10 +1587,13 @@ def krisis_regions_case(page, tmp, url):
         return out
     l2 = step(levels_1_2) if su.get('nav') else {}
     first, second = l2.get('first') or [], l2.get('second') or []
-    check('regions: level 1 is sent with no constraint (the control for the next); settling it unlocks level 2',
-          first == [{'query': 'England', 'type': 'Place', 'limit': 10}] and 'Looked up with no constraint' in l2.get('england', '')
+    check('regions: level 1 is sent with no constraint (the control for the next), for areas only and in the dataset\'s language; settling it unlocks level 2',
+          first == [{'area_only': True, 'lang': 'en', 'query': 'England', 'type': 'Place', 'limit': 10}] and 'Looked up with no constraint' in l2.get('england', '')
           and "WHG's own figures" in l2.get('england', '') and 'Licence of its source' in l2.get('england', '')
           and l2.get('nav after 1') == ['Country 1/1 settled', 'County 0/2', 'Parish locked', 'Places 0/3'], {k: l2.get(k) for k in ('first', 'nav after 1', 'error')})
+    check('regions: asked for areas only, England is offered the records with an outline, never the point-only one the gazetteer also holds',
+          W3 + 'place:gn:6269131' in l2.get('england', '') and W3 + 'place:wd:Q21' in l2.get('england', '') and W3 + REGION_POINT_ONLY not in l2.get('england', ''),
+          {k: l2.get(k) for k in ('england', 'error')})
     check("regions: the level 2 request carries contained_in, a list of the level 1 match's bare id, and its countries, for each region",
           len(second) == 2 and sorted(q['query'] for q in second) == ['Norfolk', 'Suffolk']
           and all(q.get('contained_in') == ['gn:6269131'] and q.get('countries') == ['GB'] and 'lat' not in q for q in second), second)
@@ -1631,7 +1640,7 @@ def krisis_regions_case(page, tmp, url):
           and (l3.get('hoxne state') or {}).get('failedClosed') is True and (l3.get('hoxne state') or {}).get('state') == 'unanswered', {k: l3.get(k) for k in ('hoxne notes', 'eye notes', 'eye candidates', 'hoxne state', 'error')})
     check('regions: the relax buttons name each step and its cost; "With no constraint" asks again without the constraint, and the notice goes',
           l3.get('relax') == ['Again without the countries (1 query in 1 request)', 'Within the area instead (1 query in 1 request, and 1 record fetched for an area)', 'Within England instead (1 query in 1 request)', 'With no constraint (1 query in 1 request)']
-          and l3.get('relaxed') == [{'query': 'Hoxne', 'type': 'Place', 'limit': 10}] and l3.get('hoxne after') == 0 and l3.get('hoxne candidates') == 1
+          and l3.get('relaxed') == [{'area_only': True, 'lang': 'en', 'query': 'Hoxne', 'type': 'Place', 'limit': 10}] and l3.get('hoxne after') == 0 and l3.get('hoxne candidates') == 1
           and l3.get('hoxne line') == 'Looked up with no constraint. Relaxed: no constraint.', {k: l3.get(k) for k in ('relax', 'relaxed', 'hoxne after', 'hoxne candidates', 'hoxne line', 'error')})
 
     # Changing level 1 asks on the page first (never window.confirm), then clears level 2 and below; Undo puts it all back.
@@ -2828,6 +2837,8 @@ def map_your_data_checks(pw, url, tmp):
         for k, q in (body.get('queries') or {}).items():
             # The lookup finds no candidate for Kirk House; Chora's own search, by its words, finds the record to adopt.
             found = [MYDATA_KIRK] if q.get('query') == 'Kirk House adopt' else MYDATA_ANSWERS.get(q.get('query'), [])
+            # As WHG's place#323: asked for areas only, a record with no outline is left out.
+            if q.get('area_only'): found = [c for c in found if c.get('has_geom')]
             res[k] = {'result': found, **({'scope': {'applied': True}} if isinstance(q.get('contained_in'), list) else {})}
         reply(res)
     ctx.route(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'), stub)

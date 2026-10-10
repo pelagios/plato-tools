@@ -143,7 +143,7 @@ test('failed closed: the notice in plain words, never "no match", and a relax wi
   const before = fake.calls.length;
   await runLevel(work, 3, { lookup, relax: 'all', only: [hoxne], now: clock() });
   assert.equal(fake.calls.length, before + 1);
-  assert.deepEqual(Object.values(fake.calls.at(-1).queries), [{ query: 'Hoxne', type: 'Place', limit: 10 }], 'asked again without the constraint');
+  assert.deepEqual(Object.values(fake.calls.at(-1).queries), [{ area_only: true, query: 'Hoxne', type: 'Place', limit: 10 }], 'asked again without the constraint (a region is still matched to areas only)');
   assert.deepEqual(notesOf(work, hoxne), [], 'the notice is gone');
   assert.equal(constraintLine(work, hoxne), 'Looked up with no constraint. Relaxed: no constraint.');
   // For a county, there is no region further up but England: no "within … instead" step.

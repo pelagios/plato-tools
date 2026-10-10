@@ -14,6 +14,9 @@
 //   and a wrong value silently drops the right place (WHG's country codes are patchy), so none is sent
 //   unless asked for: `countries` sends the place's own country codes, `nearKm` a box of that many
 //   kilometres about its point (which sends its coordinates).
+// - To WHG only: each name's language (whg.js A13), from the name's own tag, else the dataset's language
+//   (`lang`), else none, never "und"; and, for the regions of a region review, `area_only` (A12), so that
+//   a region is matched only to a record with an outline, which can scope a lookup within it.
 // - What comes back is ranked for the reviewer (rankGazetteer), never accepted: WHG's score is relative
 //   to the best in its own answer (the top is always about 100, however bad), and its confidence
 //   measures the name only. So the order is by distance, then whether the countries agree, then
@@ -36,7 +39,7 @@
 // - The service's `attribution` (the licences of the sources searched) is kept as it came, a null
 //   left null, on the lookup record, so the page can show each candidate's licence. No licence is ever
 //   written into an attestation, and none is assumed here.
-import { WHG_ENDPOINT, WHG_PLACE_TYPE, isWhg, normaliseWhgIri, mergeAttribution } from '../gazetteer/index.js';
+import { WHG_ENDPOINT, WHG_PLACE_TYPE, isWhg, normaliseWhgIri, mergeAttribution, whgLang } from '../gazetteer/index.js';
 import { similarity, queryVariants, MAX_VARIANTS } from './names.js';
 import { guard } from './guards.js';
 import { WORK_VERSION, canonicalEndpoint } from './work.js';
@@ -47,7 +50,7 @@ export { authorityIris, currentIdentities } from './identities.js';
 export { krisisLookupNote } from '../words.js';
 
 export const LOOKUP_ALGORITHM = 'krisis-lookup 1';
-export const LOOKUP_DEFAULTS = { limit: 10, maxDistanceKm: 50, allNames: false, countries: false, nearKm: null, variants: false };
+export const LOOKUP_DEFAULTS = { limit: 10, maxDistanceKm: 50, allNames: false, countries: false, nearKm: null, variants: false, lang: null, areaOnly: false };
 /** Which places a lookup takes (selectPlaces). */
 export const PLACE_CHOICES = ['unmatched', 'all', 'pending', 'unlinked'];
 /** How many queries the preview shows exactly as they would be sent. */
@@ -230,33 +233,39 @@ function namesToSend(place, allNames, variants = false) {
   const all = [place.label, ...(place.names || [])].filter((n) => typeof n === 'string' && n.trim() && n.trim() !== place.iri);
   if (!all.length) return [];
   const chosen = allNames ? all : [all[0]];
+  // A name's language tag, as the dataset gives it (gather()); a form made from a name is in its language.
+  const tagOf = (n) => (place.langs && Object.hasOwn(place.langs, n) ? place.langs[n] : null);
   const seen = new Set(), out = [];
-  const add = (text, how) => { const k = String(text).trim().toLowerCase(); if (k && !seen.has(k)) { seen.add(k); out.push({ text, how }); } };
-  if (!variants) { for (const n of chosen) add(n, 'given'); return out; }
+  const add = (text, how, tag) => { const k = String(text).trim().toLowerCase(); if (k && !seen.has(k)) { seen.add(k); out.push({ text, how, tag }); } };
+  if (!variants) { for (const n of chosen) add(n, 'given', tagOf(n)); return out; }
   // Krisis × Methodos: each name's forms (queryVariants), each a query of its own, at most MAX_VARIANTS a
   // place; the head words of all the names after every other form, so that they are the first cut.
-  const forms = chosen.map((n) => queryVariants(n));
-  for (const f of forms) for (const v of f) if (v.how !== 'head-word') add(v.text, v.how);
-  for (const f of forms) for (const v of f) if (v.how === 'head-word') add(v.text, v.how);
+  const forms = chosen.map((n) => queryVariants(n).map((v) => ({ ...v, tag: tagOf(n) })));
+  for (const f of forms) for (const v of f) if (v.how !== 'head-word') add(v.text, v.how, v.tag);
+  for (const f of forms) for (const v of f) if (v.how === 'head-word') add(v.text, v.how, v.tag);
   return out.slice(0, MAX_VARIANTS);
 }
 
 /**
  * The queries for `places`, and a preview of them. options: allNames, limit (10), countries (false),
  * nearKm (null), batchSize (the lookup's: 25), service, type (another service's: manifestSettings();
- * WHG's is always WHG_PLACE_TYPE). Returns { queries,
+ * WHG's is always WHG_PLACE_TYPE), and to WHG only: lang (the dataset's language, for a name with no
+ * tag of its own) and areaOnly (only records with an outline: a region review's regions). Returns { queries,
  * chunks, preview }: `queries` [{ key: [iri, name], query, limit, type?, params? }] in place order;
  * `chunks` the places in groups whose queries fill one batch (a place's queries are never split
  * across groups, so a place is answered all at once); `preview` { places, queries, requests,
  * allNames, filters: ['countries'|'near'], sendsCoordinates, nearKm, withoutCountries, withoutPoint,
- * withoutName (places with no name to send, which are left out: `places` does not count them), first:
+ * withoutName (places with no name to send, which are left out: `places` does not count them),
+ * withoutLanguage (WHG's queries sent with no language), lang (the dataset's, as sent, or null), areaOnly, first:
  * [the first PREVIEW_QUERIES queries as they are sent] }.
  */
 export function planQueries(places, options = {}) {
   const o = { ...LOOKUP_DEFAULTS, batchSize: 25, service: WHG_SERVICE, ...defined(options) };
-  const type = isWhg(o.service.endpoint) ? WHG_PLACE_TYPE : o.type || undefined;
+  const whg = isWhg(o.service.endpoint);
+  const type = whg ? WHG_PLACE_TYPE : o.type || undefined;
+  const datasetLang = whg ? whgLang(o.lang) : null, areaOnly = whg && !!o.areaOnly;
   const queries = [], chunks = [];
-  let chunk = null, withoutCountries = 0, withoutPoint = 0, withoutName = 0, looked = 0;
+  let chunk = null, withoutCountries = 0, withoutPoint = 0, withoutName = 0, withoutLanguage = 0, looked = 0;
   for (const place of places) {
     const names = namesToSend(place, o.allNames, o.variants);
     if (!names.length) { withoutName++; continue; }
@@ -264,7 +273,13 @@ export function planQueries(places, options = {}) {
     const params = filtersOf(place, o);
     if (o.countries && !params?.countries) withoutCountries++;
     if (o.nearKm > 0 && params?.radius === undefined) withoutPoint++;
-    const mine = names.map(({ text, how }) => ({ key: [place.iri, text], query: text, how, limit: o.limit, ...(type ? { type } : {}), ...(params ? { params } : {}) }));
+    const mine = names.map(({ text, how, tag }) => {
+      // WHG only: the name's own language, else the dataset's; none rather than "und" (whg.js A13).
+      const lang = whg ? whgLang(tag) ?? datasetLang : null;
+      if (whg && !lang) withoutLanguage++;
+      const own = { ...(params || {}), ...(areaOnly ? { area_only: true } : {}), ...(lang ? { lang } : {}) };
+      return { key: [place.iri, text], query: text, how, limit: o.limit, ...(type ? { type } : {}), ...(Object.keys(own).length ? { params: own } : {}) };
+    });
     queries.push(...mine);
     if (!chunk || (chunk.queries.length && chunk.queries.length + mine.length > o.batchSize)) chunks.push(chunk = { places: [], queries: [] });
     chunk.places.push(place); chunk.queries.push(...mine);
@@ -273,7 +288,8 @@ export function planQueries(places, options = {}) {
   const filters = [...(o.countries ? ['countries'] : []), ...(o.nearKm > 0 ? ['near'] : [])];
   const preview = {
     places: looked, queries: queries.length, requests, allNames: !!o.allNames, variants: !!o.variants, limit: o.limit, filters,
-    sendsCoordinates: queries.some((q) => q.params?.radius !== undefined), withoutCountries, withoutPoint, withoutName, nearKm: o.nearKm > 0 ? Math.min(MAX_RADIUS_KM, o.nearKm) : null,
+    sendsCoordinates: queries.some((q) => q.params?.radius !== undefined), withoutCountries, withoutPoint, withoutName, withoutLanguage, lang: datasetLang, areaOnly,
+    nearKm: o.nearKm > 0 ? Math.min(MAX_RADIUS_KM, o.nearKm) : null,
     service: o.service, first: queries.slice(0, PREVIEW_QUERIES).map(sent),
   };
   return { queries, chunks, preview };
@@ -489,14 +505,16 @@ export const upstreamLicence = (attribution, namespace, dataset) => licenceFrom(
  */
 /** An answer to a filter the service could not apply, with nothing in it (WHG: scope.applied false): failed closed. */
 export const failedClosed = (l) => !l.unanswered && l.length === 0 && !!l.scope && l.scope.applied === false;
-const narrowed = (chunk, service) => chunk.queries.some((q) => q.params || (q.type && !isWhg(service.endpoint)));
+// A language is not a filter (whg.js A13): it shapes how WHG reads the name, and leaves nothing out.
+const filters = (params) => !!params && Object.keys(params).some((k) => k !== 'lang');
+const narrowed = (chunk, service) => chunk.queries.some((q) => filters(q.params) || (q.type && !isWhg(service.endpoint)));
 // A batch the service said it could not filter (failed closed) is recorded as that, not as suspect; nor
 // is one where the service said, of every query, that it applied the filter (scope.applied).
 const suspect = (chunk, answers, service) => chunk.queries.length > 1 && narrowed(chunk, service) && answers.every((l) => !l.unanswered && l.length === 0)
   && !answers.some(failedClosed) && !answers.every((l) => l.scope?.applied === true);
 const spatial = (params) => !!params && (Array.isArray(params.contained_in) || params.radius !== undefined);
 /** What makes a lookup's answers what they are, to tell whether a suspect batch is sent again unchanged. */
-const SAME_ASKING = ['allNames', 'limit', 'countries', 'nearKm', 'type', 'variants'];
+const SAME_ASKING = ['allNames', 'limit', 'countries', 'nearKm', 'type', 'variants', 'lang', 'areaOnly'];
 /**
  * Was this place in a suspect batch of this service, asked the same way? Sending it again is the
  * reviewer's word that the empty answers are genuine, and they are then accepted.
@@ -554,7 +572,8 @@ export async function runLookup({ lookup, work = null, subjects = null, places =
     work = newWork(subjects, { now: now(), reviewer });
   } else if (reviewer) work.reviewer = reviewer;
   const plan = planLookup({ lookup, work, places, options: { ...o, service } });
-  const parameters = { places: o.places ?? defaultChoice(work), allNames: typed ? false : !!o.allNames, limit: o.limit, countries: !!o.countries, nearKm: o.nearKm ?? null, maxDistanceKm: o.maxDistanceKm, type: plan.queries[0]?.type ?? null, linksKnown: !!places, ...(typed ? { query: typed } : {}), ...(o.variants && !typed ? { variants: true } : {}) };
+  const parameters = { places: o.places ?? defaultChoice(work), allNames: typed ? false : !!o.allNames, limit: o.limit, countries: !!o.countries, nearKm: o.nearKm ?? null, maxDistanceKm: o.maxDistanceKm, type: plan.queries[0]?.type ?? null, linksKnown: !!places, ...(typed ? { query: typed } : {}), ...(o.variants && !typed ? { variants: true } : {}),
+    ...(plan.preview.lang ? { lang: plan.preview.lang } : {}), ...(plan.preview.areaOnly ? { areaOnly: true } : {}) };
   // Places of a suspect batch sent again, asked the same way: found before the new record is added.
   const confirmed = new Set(plan.chunks.flatMap((c) => c.places).filter((p) => wasSuspect(work, p.iri, service, parameters)).map((p) => p.iri));
   const record = startLookup(work, { service, parameters, plan, now: now() });
@@ -653,7 +672,9 @@ export async function runLevel(work, level, { lookup, entity = lookup?.entity, s
     looked.push(pseudo({ iri: n.key, label: n.names[0], names: n.names, point: null }, c));
   }
   if (!looked.length) return { work, record: null, plan: null, stopped: null, looked: [] };
-  const r = await runLookup({ lookup, work, places: looked, options: { ...options, places: 'all', countries: false, nearKm: null, only: undefined, query: undefined }, reviewer, signal, onBatch, ...(now ? { now } : {}) });
+  // A region is matched only to a record with an outline (whg.js A12): a point cannot scope the lookup
+  // of the places within it.
+  const r = await runLookup({ lookup, work, places: looked, options: { ...options, places: 'all', countries: false, nearKm: null, only: undefined, query: undefined, areaOnly: true }, reviewer, signal, onBatch, ...(now ? { now } : {}) });
   return { ...r, looked: looked.map((p) => ({ key: p.iri, constraint: storedConstraint(p.constraint) })) };
 }
 
@@ -677,6 +698,6 @@ export async function runPlaces(work, { lookup, entity = lookup?.entity, places 
     looked.push(pseudo(p, c));
   }
   if (!looked.length) return { work, record: null, plan: null, stopped: null, looked: [] };
-  const r = await runLookup({ lookup, work, places: looked, options: { ...options, places: 'all', only: undefined, query: undefined }, reviewer, signal, onBatch, ...(now ? { now } : {}) });
+  const r = await runLookup({ lookup, work, places: looked, options: { ...options, places: 'all', only: undefined, query: undefined, areaOnly: false }, reviewer, signal, onBatch, ...(now ? { now } : {}) });
   return { ...r, looked: looked.map((p) => ({ key: p.iri, constraint: storedConstraint(p.constraint) })) };
 }

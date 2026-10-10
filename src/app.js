@@ -1425,7 +1425,11 @@ function lookupService() {
 function lookupOptions(extra = {}) {
   const km = parseFloat($('lookup-near-km').value);
   return { places: $('lookup-places').value, allNames: $('lookup-all-names').checked, variants: $('lookup-variants').checked, countries: $('lookup-countries').checked,
-    nearKm: $('lookup-near').checked && km > 0 ? km : null, maxDistanceKm: matchOptions().maxDistanceKm, ...extra };
+    nearKm: $('lookup-near').checked && km > 0 ? km : null, maxDistanceKm: matchOptions().maxDistanceKm, lang: lookupLang(), ...extra };
+}
+/** The dataset's language, as typed in the lookup panel, or null: the lookup sends WHG its code (whg.js whgLang). */
+function lookupLang() {
+  return $('lookup-lang').value.trim() || null;
 }
 /**
  * The places a lookup would take and what it would send, planned by runLookup()'s own planLookup, in
@@ -1671,7 +1675,7 @@ $('lookup').addEventListener('change', (e) => {
   if (e.target.name === 'lookup-service') document.querySelector('.lookup-other').hidden = e.target.value !== 'other';
   refreshPreview();
 });
-$('lookup').addEventListener('input', (e) => { if (e.target.type === 'number' || e.target.type === 'url' || e.target.id === 'lookup-iri') refreshPreview(); });
+$('lookup').addEventListener('input', (e) => { if (e.target.type === 'number' || e.target.type === 'url' || e.target.id === 'lookup-iri' || e.target.id === 'lookup-lang') refreshPreview(); });
 // Forget: the shared lookup sends no token from its next request, and the keeper forgets it.
 $('whg-forget').onclick = () => { $('whg-token').value = ''; whgLookup().clearToken(); token.forget(); lookupSay(LW.forgotten); };
 // A token given or forgotten (here, in the Permissions panel, or in another tab) goes to the shared lookup.
@@ -1878,7 +1882,7 @@ async function regionRun(kind, { level, relax, only, unconstrained = false } = {
   regionSay(LW.sending(service)); lookupSay(LW.sending(service));
   lookupState({ running: true, done: 0, total: null, stopped: null, summary: null, single: false, regions: kind === 'places' ? 'places' : level });
   drawRegions();
-  const how = { lookup: whgLookup(), relax, only, options: { service: svc.service, maxDistanceKm: matchOptions().maxDistanceKm }, reviewer: reviewer(), signal: looking.signal,
+  const how = { lookup: whgLookup(), relax, only, options: { service: svc.service, maxDistanceKm: matchOptions().maxDistanceKm, lang: lookupLang() }, reviewer: reviewer(), signal: looking.signal,
     onBatch: ({ done, total }) => { regionSay(LW.progress({ done, total }, service)); lookupState({ done, total }); if (work === w) render(false); } };
   let result = null, fault = false;
   try { result = kind === 'places' ? await runPlaces(w, { ...how, places: g?.places ?? null, unconstrained }) : await runLevel(w, level, how); }

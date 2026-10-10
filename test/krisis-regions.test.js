@@ -209,10 +209,10 @@ test('constraintFor: contained_in as a list of bare ids from the nearest matched
   assert.deepEqual([c.kinds, c.uncodedFail], [['contained_in'], undefined]);
 });
 
-test('the request for the next level carries contained_in as a list, and the countries, never an area beside it; level 1 carries neither', async () => {
+test('the request for the next level carries contained_in as a list, and the countries, never an area beside it; level 1 carries neither; every level asks for areas only', async () => {
   const { work, fake, lookup } = await englandMatched();
   const first = queriesOf(fake.calls[0]);
-  assert.deepEqual(first, [{ query: 'England', type: 'Place', limit: 10 }], 'level 1: nothing to constrain it');
+  assert.deepEqual(first, [{ area_only: true, query: 'England', type: 'Place', limit: 10 }], 'level 1: nothing to constrain it, and only records with an outline');
   const r = await runLevel(work, 2, { lookup, now: clock() });
   assert.equal(r.stopped, null);
   const second = queriesOf(fake.calls.at(-1));
@@ -222,6 +222,7 @@ test('the request for the next level carries contained_in as a list, and the cou
     assert.ok(Array.isArray(q.contained_in), 'a list, not a string');
     assert.deepEqual(q.countries, ['GB']);
     assert.equal(q.type, 'Place');
+    assert.equal(q.area_only, true, 'a region is matched to an area only');
     assert.ok(!('lat' in q) && !('radius' in q) && !('bbox' in q) && !('bounds' in q));
   }
   // The query record keeps the constraint; the answers are the region's, not a place's.
@@ -241,7 +242,8 @@ test('the places within (stage 4): only those whose regions are settled, each by
   decideRegion(work, candidateFor(work, cheshire, 'place:gn:2653941').id, 'match', { at: NOW });
   // The Kirk lies in Cheshire (no parish): its chain is settled. The rest lie in parishes not yet settled.
   assert.deepEqual(g.places.map((p) => placeState(work, p.iri, p)), ['locked', 'locked', 'locked', 'ready']);
-  const r = await runPlaces(work, { lookup, places: g.places, now: clock() });
+  // Areas only is for regions: a place is looked up for any record, even when the options passed say otherwise.
+  const r = await runPlaces(work, { lookup, places: g.places, options: { areaOnly: true }, now: clock() });
   assert.deepEqual(r.looked.map((x) => x.key), [`${BASE}place/4`]);
   assert.deepEqual(queriesOf(fake.calls.at(-1)), [{ contained_in: ['gn:2653941'], countries: ['GB'], query: 'Kirk', type: 'Place', limit: 10 }]);
   // Control: asked for unconstrained, the locked places are looked up too, with no constraint, and their records say so.

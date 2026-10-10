@@ -230,6 +230,7 @@ words them all.
   signal, onBatch })` and `runPlaces(work, { lookup, entity, places, relax, only, unconstrained, … })`
   -> runLookup's result plus `looked: [{ key, constraint }]`; `failedClosed(list)`. A pseudo-place's
   `params` are merged over its own filters (`filtersOf`); region answers stay under the region's key.
+  `runLevel` always sends `area_only` (to WHG only); `runPlaces` never does, whatever its options say.
 - `src/engine/krisis/identity.js`: `regionClaims(work, { reviewer, date, promotedFrom }) -> { made,
   unwritten }` and `recordRegionClaim(...)`, PLATO #23's claim in the shape of PLATO's
   place-centric-regions.json; `attestationsFrom` appends `made`. Each identity carries `promotedFrom`: the candidate's `iri` from

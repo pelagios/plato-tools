@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { env, textFile } from './engine.js';
 import { detect } from '../src/engine/input.js';
-import { createLookup, memoryLedger, WHG_ENDPOINT, WHG_PLACE_TYPE as MODULE_PLACE_TYPE } from '../src/engine/gazetteer/index.js';
+import { createLookup, memoryLedger, WHG_ENDPOINT, WHG_PLACE_TYPE as MODULE_PLACE_TYPE, whgLang } from '../src/engine/gazetteer/index.js';
 import { match, gather, distanceKm as matchDistance } from '../src/engine/krisis/match.js';
 import { readWork, serialiseWork, decide, WORK_VERSION } from '../src/engine/krisis/work.js';
 import { attestationsFrom, gazetteerSource } from '../src/engine/krisis/identity.js';
@@ -82,7 +82,7 @@ test('planQueries sends the label only, without filters, unless asked; the previ
   const label = planQueries(g.places);
   assert.deepEqual(label.queries.map((q) => q.query), ['Newcastle', 'York', 'Nowhere']);
   assert.ok(label.queries.every((q) => !q.params), 'no filters by default');
-  assert.deepEqual({ ...label.preview, first: undefined, service: undefined }, { places: 3, queries: 3, requests: 1, allNames: false, variants: false, limit: 10, filters: [], sendsCoordinates: false, nearKm: null, withoutCountries: 0, withoutPoint: 0, withoutName: 0, first: undefined, service: undefined });
+  assert.deepEqual({ ...label.preview, first: undefined, service: undefined }, { places: 3, queries: 3, requests: 1, allNames: false, variants: false, limit: 10, filters: [], sendsCoordinates: false, nearKm: null, withoutCountries: 0, withoutPoint: 0, withoutName: 0, withoutLanguage: 3, lang: null, areaOnly: false, first: undefined, service: undefined });
   // The type in the form the gazetteer module sends WHG (it writes every form of Place as "Place"), so
   // that the preview below is what WHG receives.
   assert.ok(label.queries.every((q) => q.type === 'Place'), 'WHG is always sent its type');
@@ -876,4 +876,65 @@ test('local candidates keep change 1\'s algorithm (krisis-names 5), a lookup\'s 
   decide(w, w.candidates.find((c) => c.gazetteer?.id === 'place:gn:2641673').id, 'match', { at: NOW });
   const notes = attestationsFrom(w, { reviewer: REVIEWER }).map((x) => x.attestation.notes);
   assert.deepEqual(notes, [krisisNote('match', 'krisis-names 5'), krisisLookupNote('match', 'World Historical Gazetteer', LOOKUP_ALGORITHM)]);
+});
+
+// ---- WHG: the language of a name, and areas only (whg.js A12, A13; #19, #30) -----------------------------
+const tagged = (...pairs) => ({ names: pairs.map(([toponym, language]) => ({ toponym, ...(language ? { language } : {}) })), sources: [src] });
+
+test('a language tag is sent as its primary subtag when it names a language; "und", "mul" and anything else are not sent', () => {
+  for (const [tag, code] of [['en', 'en'], ['en-GB', 'en'], ['EN', 'en'], ['la-Latn', 'la'], ['ang', 'ang'], ['enm', 'enm'], ['grc', 'grc'], [' cy ', 'cy']]) assert.equal(whgLang(tag), code, tag);
+  for (const tag of ['und', 'mul', 'zxx', 'mis', 'und-Latn', 'english', 'e', '', '1a', null, undefined, 42]) assert.equal(whgLang(tag), null, String(tag));
+});
+
+test('each name is sent with its own language, else the dataset\'s, else none, never "und"; the preview counts those sent without one', async () => {
+  const g = await gathered([
+    place('york', 'York', [tagged(['York', 'en-GB'], ['Eboracum', 'la'], ['Jorvik', 'und'])]),
+    place('ely', 'Ely', [tagged(['Ely'])]),
+  ]);
+  assert.deepEqual(g.places[0].langs, { York: 'en-GB', Eboracum: 'la', Jorvik: 'und' }, 'gather keeps each name\'s tag');
+  assert.equal(g.places[1].langs, undefined, 'control: a place whose names give no language has none');
+  const by = (plan) => Object.fromEntries(plan.queries.map((q) => [q.query, q.params?.lang ?? null]));
+  const own = planQueries(g.places, { allNames: true });
+  assert.deepEqual(by(own), { York: 'en', Eboracum: 'la', Jorvik: null, Ely: null }, 'no dataset language: a tagged name has its own, "und" and an untagged name none');
+  assert.equal(own.preview.withoutLanguage, 2);
+  const set = planQueries(g.places, { allNames: true, lang: 'ang' });
+  assert.deepEqual(by(set), { York: 'en', Eboracum: 'la', Jorvik: 'ang', Ely: 'ang' }, 'the dataset\'s language fills in, never over a name\'s own');
+  assert.equal(set.preview.withoutLanguage, 0);
+  assert.equal(set.preview.lang, 'ang');
+  for (const bad of ['und', 'English', '']) {
+    const plan = planQueries(g.places, { allNames: true, lang: bad });
+    assert.deepEqual(by(plan), { York: 'en', Eboracum: 'la', Jorvik: null, Ely: null }, `a dataset language of ${JSON.stringify(bad)} sends none`);
+    assert.equal(plan.preview.lang, null);
+  }
+  assert.ok([own, set].every((p) => p.queries.every((q) => q.params?.lang !== 'und')), 'never "und"');
+  assert.match(LOOKUP_WORDS.preview(set.preview).join(' '), /A name with no language of its own is sent as ang/);
+  assert.match(LOOKUP_WORDS.preview(own.preview).join(' '), /2 queries are sent with no language: the name has none of its own, and no language is set for the dataset/);
+  assert.doesNotMatch(LOOKUP_WORDS.preview(set.preview).join(' '), /sent with no language/, 'control: none counted, none said');
+  // What the preview shows is what WHG receives.
+  const fake = fakeWhg();
+  await runLookup({ lookup: lookupWith(fake), subjects: g.subjects, places: g.places, options: { places: 'all', allNames: true, lang: 'ang' }, now: clock() });
+  assert.deepEqual(Object.values(fake.calls[0].body.queries).map((q) => [q.query, q.lang ?? null]), [['York', 'en'], ['Eboracum', 'la'], ['Jorvik', 'ang'], ['Ely', 'ang']]);
+});
+
+test('areas only is sent when asked, and to WHG only; another service is sent neither it nor a language', async () => {
+  const g = await gathered([place('york', 'York', [tagged(['York', 'en'])])]);
+  assert.equal(planQueries(g.places).queries[0].params?.area_only, undefined, 'not by default');
+  const areas = planQueries(g.places, { areaOnly: true });
+  assert.equal(areas.queries[0].params.area_only, true, 'control: sent when asked');
+  assert.equal(areas.preview.areaOnly, true);
+  assert.match(LOOKUP_WORDS.preview(areas.preview).join(' '), /Only records with an outline are asked for/);
+  const other = planQueries(g.places, { areaOnly: true, lang: 'en', service: serviceOf('https://gaz.example.org/reconcile') });
+  assert.equal(other.queries[0].params, undefined, 'another service: no area_only and no lang');
+  assert.equal(other.preview.withoutLanguage, 0, 'and none counted as sent without');
+});
+
+test('a language is not a filter: WHG sent only languages is never suspect; areas only is a filter, and can be', async () => {
+  const g = await gathered([tyne(), place('york', 'York', [at(-1.08, 53.96)])]);
+  const langs = await runLookup({ lookup: lookupWith(fakeWhg(), { batchSize: 2 }), subjects: g.subjects, places: g.places, options: { lang: 'en' }, now: clock() });
+  assert.ok(Object.values(langs.record.queries).length === 2, 'two places looked up');
+  assert.equal(langs.stopped, null, 'all empty, but only a language was sent');
+  assert.equal(langs.record.parameters.lang, 'en', 'the lookup records the language sent');
+  const areas = await runLookup({ lookup: lookupWith(fakeWhg(), { batchSize: 2 }), subjects: g.subjects, places: g.places, options: { areaOnly: true }, now: clock() });
+  assert.equal(areas.stopped?.kind, 'suspect', 'control: areas only can leave everything out');
+  assert.equal(areas.record.parameters.areaOnly, true);
 });
