@@ -23,7 +23,7 @@ export const CONFIRM_USD = 5;
  * it. `verified` is false for a table not read from the live page.
  */
 export const PRICES = Object.freeze({
-  checkedOn: '2026-10-01',
+  checkedOn: '2026-10-10',
   verified: true,
   source: 'https://platform.claude.com/docs/en/about-claude/pricing',
   usdPerMillion: {
@@ -40,6 +40,9 @@ export const PRICES = Object.freeze({
       'claude-sonnet-5': { input: 2, output: 10 },
       'claude-sonnet-4-6': { input: 3, output: 15 },
       'claude-sonnet-4-5': { input: 3, output: 15 },
+      // Claude Haiku 5.5's prices for a prompt up to 100,000 tokens; one over pays $0.50 and $2.50. A chunk
+      // (about 8,000 characters, with the prompt) is far below that, so the lower prices are the ones paid.
+      'claude-haiku-5-5': { input: 0.1, output: 0.5 },
       'claude-haiku-4-5': { input: 1, output: 5 },
     },
   },

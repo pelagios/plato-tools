@@ -261,6 +261,8 @@ test('the estimate: tokens always; money only for a priced model, as "about", an
   assert.ok(c.usd.low > 0 && c.usd.high > c.usd.low);
   assert.equal(c.pricesOf, T.PRICES.checkedOn);
   assert.deepEqual(T.costOf(e, 'anthropic', 'claude-haiku-4-5-20251001', { now: fresh }).usd !== null, true, 'a dated id is priced as its model');
+  const haiku = T.costOf(e, 'anthropic', 'claude-haiku-5-5', { now: fresh }).usd;
+  assert.ok(haiku && haiku.high < c.usd.low, 'Claude Haiku 5.5 is priced, at its prices for a prompt under 100,000 tokens');
   assert.equal(T.costOf(e, 'anthropic', 'some-new-model', { now: fresh }).why, 'unknown-model');
   assert.equal(T.costOf(e, 'openai-compatible', 'llama3', { now: fresh }).usd, null);
   const day91 = new Date(Date.parse(T.PRICES.checkedOn) + 91 * 86_400_000);
