@@ -1160,8 +1160,23 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   (Aston Magna and Aston, Llanfair Fawr and Llanfair are no longer raised). Any of them may be
   re-admitted only if the held-out Index Villaris check measures it separately and it does well;
   Mawr and Fach would go back with Fawr and Bach.
-  **Still to be measured**: the precision of the restricted list on a pair of gazetteers
-  not used to choose it (`e2e/qualifier_precision.mjs`, below), and recall on the DEEP perturbed sets.
+  **Measured on 10 October 2026** (the measurements, the harness and every judgement are in the
+  maintainers' notes, `krisis-archive/qualifier-measurements-2026-10-10/`):
+  - *Recall*, on the DEEP perturbed sets (data-2026-09-28, the 1 October trial's sets rebuilt from its
+    seeds): with the true match located, 23,064 of 23,448 originals suggested (98.4%), and with it
+    unlocated 10,415 of 11,682 (89.2%), with the rule on and off alike, none gained and none lost per
+    subject. Those copies keep any qualifier on both sides, so this shows only that the rule costs
+    nothing elsewhere.
+  - *Precision*, on a pair not used to choose the list (`e2e/qualifier_precision.mjs`): Index Villaris
+    1680 (24,000 places; its names cited only by Wikidata and its links left out) against Wikidata's
+    settlements in England and Wales (32,585). The pairs the rule marks, judged by hand: 5 of 9 the same
+    place, all 5 within 5 km and none of the 4 beyond. The same score band (0.85–0.89) without the rule,
+    a random sample judged by hand: 10 of 15 within 5 km, 0 of 15 beyond. As everywhere in matching,
+    distance is the real signal. Besides its marks, the rule's comparisons through the core found 4 or 5
+    more true pairs within 5 km (Clifton upon Dunsmore, Horton in Ribblesdale), and crowded one out of a
+    place's five (Chapel Ascote, behind Ascott-under-Wychwood, 40 km off, at 0.88).
+  - This check found the common-core guard lowering scores (above), and the fixed floor of 50 names
+    (rareNames()); both are fixed, and measured again.
 - **The lists of qualifiers** (`src/engine/krisis/qualifiers.js`, `QUALIFIER_LISTS`, version
   `QUALIFIER_TABLE_VERSION`, recorded with the ids of the lists used and their words in
   `match_parameters.qualifiers`). The tools have an international audience, and what is a qualifier

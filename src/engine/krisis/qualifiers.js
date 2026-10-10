@@ -50,7 +50,7 @@ export const QUALIFIER_LISTS = Object.freeze([
     // "en" takes one word that is not an article: Châlons-en-Champagne, not Chapel-en-le-Frith.
     phrases: [`^(?<core>.+?) (?<join>sur) ${TAIL}$`, `^(?<core>.+?) (?<join>en) (?!(?:le|la|les|l|de|du|des|d)$)(?<tail>[^ ]+)$`],
     same: {},
-    evidence: 'Not measured: off by default. In French place names "-sur-<river>" and "-en-<pays>" are long-standing distinguishing suffixes of one commune (Châtillon-sur-Seine, Châlons-en-Champagne), and the name is often given without them. Names are compared lowercased, so a river cannot be told from an ordinary word: "en" is read only before one word that is not an article (so not Chapel-en-le-Frith, whose core would otherwise be "Chapel"), but "sur" and "en" before any other word are still read as a qualifier, wrongly where the phrase is part of the name.',
+    evidence: 'Not measured: off by default. In French place names "-sur-<river>" and "-en-<pays>" are long-standing distinguishing suffixes of one commune (Châtillon-sur-Seine, Châlons-en-Champagne), and the name is often given without them. Names are compared lowercased, so a river cannot be told from an ordinary word: "en" is read only before one word that is not an article (so not Chapel-en-le-Frith, whose core would otherwise be "Chapel"), but "sur" and "en" before any other word are still read as a qualifier, wrongly where the phrase is part of the name. A known limit: Dutch "en" is "and", so with this list on Berg en Dal is read as Berg with a qualifier, and scored as Berg (the Fable review of 10 October 2026); a Dutch dataset should leave the list off.',
   },
   {
     id: 'de', language: ['de'], label: 'German', status: 'unmeasured', on: false,

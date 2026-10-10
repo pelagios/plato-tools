@@ -436,6 +436,7 @@ export function hermesTextNote({ model, provider, prompt, date, kindGuess, adjus
 export const KRISIS_TEXT = {
   /** A list of qualifiers asked for that there is not (src/engine/krisis/qualifiers.js). */
   noSuchQualifierList: (id, known) => `There is no list of qualifiers "${id}": the lists are ${known.join(', ')}, or none.`,
+  qualifierListsNotArray: (given) => `The lists of qualifiers are given as a list of their ids, such as ["fr"], not ${JSON.stringify(given)}.`,
   /** The other dataset gives no title, so the attestations would cite it by its file's name. */
   othersTitleIsFileName: (name) => `The other dataset does not give its title, so each attestation of this review would cite it as its source by its file's name, ${name}, and a published attestation is never changed. Give the other dataset's title (in the options on the page, or --others-title on the command line) before you finish.`,
   noDataset: 'Choose the dataset this review was made from: the new attestations are added to it. Nothing was written.',

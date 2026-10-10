@@ -54,6 +54,8 @@
 // Trigrams of the normalised name are what matching blocks on (blocking.js).
 
 import { QUALIFIER_LISTS, DEFAULT_QUALIFIER_LISTS, qualifierIds } from './qualifiers.js';
+import { DataError } from '../input.js';
+import { KRISIS_TEXT } from '../words.js';
 
 const SPELT = { ß: 'ss', æ: 'ae', œ: 'oe', ø: 'o', ł: 'l', đ: 'd', ð: 'd', þ: 'th', ı: 'i', ŋ: 'ng', ħ: 'h' };
 
@@ -181,9 +183,11 @@ const compiled = new Map();
  * The lists of qualifiers of `ids` (qualifiers.js; by default DEFAULT_QUALIFIER_LISTS, the measured
  * English, Welsh and Latin list), made ready for qualifiers(): { ids, front: [[normalised words], …]
  * longest first, back: Set, phrases: [RegExp], same, words: Set (every word in front or behind),
- * label: Map (normalised → as the list writes it), none }. A DataError for an id that is not a list's.
+ * label: Map (normalised → as the list writes it), none }. A DataError for an id that is not a list's,
+ * or for `ids` that are not an array (text such as "fr" is read by qualifierIds(), not here).
  */
 export function compileQualifiers(ids = DEFAULT_QUALIFIER_LISTS) {
+  if (!Array.isArray(ids)) throw new DataError(KRISIS_TEXT.qualifierListsNotArray(ids));
   const key = ids.join(',');
   let q = compiled.get(key);
   if (q) return q;

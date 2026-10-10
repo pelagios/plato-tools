@@ -972,6 +972,11 @@ test('qualifiers: the guards stay: each has its own (Bere Regis and Bere on Stou
   assert.ok(similarity('Market Farm', 'Farm', idx.weight) < QUALIFIER_CAP && similarity('Market Warsop', 'Warsop', idx.weight) === QUALIFIER_CAP, 'control: Warsop is raised, Farm is not');
   assert.ok(idx.best(['Market Warsop'], 0.85).has(WARSOP), 'and Market Warsop finds Warsop in matching');
 });
+test('compileQualifiers() takes an array of ids: text is refused with a DataError, not a TypeError', () => {
+  for (const given of ['fr', 'en-cy-la,fr', 7]) assert.throws(() => compileQualifiers(given), (e) => e instanceof DataError && /list of their ids/.test(e.message), `${given}`);
+  assert.throws(() => compileQualifiers(['xx']), (e) => e instanceof DataError && /no list of qualifiers "xx"/.test(e.message), 'an id that is not a list\'s');
+  assert.deepEqual(compileQualifiers(['fr']).ids, ['fr'], 'control: an array is read');
+});
 test('qualifiers: in a small dataset a common core is still common: the floor grows with the number of names', () => {
   // The Fable review's input (10 October 2026): 120 names, Farm in 31 of them. With a fixed floor of 50 names
   // every core was rare here, and Market Farm was raised to Farm at the cap.
