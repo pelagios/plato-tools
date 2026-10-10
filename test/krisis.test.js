@@ -980,6 +980,24 @@ test('qualifiers: the rule never lowers a score: every pair scores at least what
     if (w > n) raised++;
   }
   assert.ok(raised > 0, 'control: the lists raise some of these pairs');
+  // And so in matching, which scores in blocking.js: every place found with no lists is found with them, at
+  // no lower a score, and the lists find more.
+  const without = gazetteerIndex(none);
+  let checked = 0, more = 0;
+  for (const name of ['Market Farm', 'Chipping Ongar', 'Market Warsop', 'Long Sutton', 'Bere Regis', 'Abingdon', 'Market Harborough']) {
+    const a = without.best([name], 0.85), b = idx.best([name], 0.85);
+    for (const [place, score] of a) { checked++; assert.ok(b.has(place) && b.get(place) >= score, `${name}: place ${place} at ${score} without the lists, ${b.get(place)} with them`); }
+    more += b.size - a.size;
+  }
+  assert.ok(checked > 0, `control: there were places to keep (${checked})`);
+  // A common core: Market Farm and Farm are compared through the core (with no lists blocking never reads
+  // Farm's common trigrams), and kept at the score letters give them, neither raised to the cap nor marked as
+  // the rule's (until 10 October 2026 they were lowered to the core's share, under a half).
+  const farm = idx.best(['Market Farm'], 0.85);
+  assert.ok(!without.best(['Market Farm'], 0.85).has(FARM), 'control: with no lists blocking does not compare them');
+  assert.equal(farm.get(FARM), similarity('Market Farm', 'Farm', idx.weight, none), 'with the lists, as letters score them');
+  assert.ok(farm.get(FARM) < QUALIFIER_CAP && !farm.rule.has(FARM), 'not raised, not the rule\'s');
+  assert.ok(more > 0, 'control: the lists find places that letters do not');
 });
 test('qualifiers per language: a French list switched on finds Bar-sur-Aube for Bar, and switched off does not; German Bad Ems for Ems', () => {
   const on = compileQualifiers(['fr']), off = compileQualifiers(['en-cy-la']), both = compileQualifiers(['en-cy-la', 'fr', 'de']), none = compileQualifiers([]);
