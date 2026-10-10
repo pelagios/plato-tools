@@ -4,7 +4,7 @@
 // the permissions module's fetch, which asks only a site the user allowed, never with credentials and
 // never following a redirect; in tests, a fake. No adapter ever calls the global fetch.
 //
-// - 429, 503 and 529 (overloaded), and no answer at all, are tried again, at most `maxTries` tries in
+// - 408 (timed out), 429 (too many requests), 500, 502, 503, 504 and 529 (overloaded), and no answer at all, are tried again, at most `maxTries` tries in
 //   all, after the provider's Retry-After where it can be read (capped at a minute), else a growing pause.
 // - Each try is abandoned after `timeoutMs` and counts as no answer.
 // - A refusal by the permissions module (anything but its 'network' kind) is passed on as it is, at
@@ -14,7 +14,7 @@
 
 import { redact, clip } from '../redact.js';
 
-const RETRY = new Set([429, 503, 529]);
+const RETRY = new Set([408, 429, 500, 502, 503, 504, 529]);
 export const DEFAULT_TIMEOUT_MS = 180_000;
 export const DEFAULT_TRIES = 3;
 
@@ -22,10 +22,10 @@ export const DEFAULT_TRIES = 3;
  * Why a request to a provider failed. `kind`:
  * - 'auth': the key was refused (401, 403);
  * - 'rate': still too many requests after waiting (429);
- * - 'overloaded': the provider still busy after waiting (503, 529);
+ * - 'overloaded': the provider still busy, or not answering in time, after waiting (408, 502, 503, 504, 529);
  * - 'request': the request was refused as it is (400, 404, 413, 422: a model that does not exist, a
  *   text too long, a setting the model does not take);
- * - 'server': any other failure of the provider's, and an answer that could not be read;
+ * - 'server': any other failure of the provider's (500 after waiting), and an answer that could not be read;
  * - 'network': no answer, or none in time;
  * - 'refused': the model declined to answer (its stop reason says so).
  * It carries the status and the words, never the request, its headers or the answer's body.
@@ -49,7 +49,7 @@ const LEAD = {
 function kindOf(status) {
   if (status === 401 || status === 403) return 'auth';
   if (status === 429) return 'rate';
-  if (status === 503 || status === 529) return 'overloaded';
+  if (status === 408 || status === 502 || status === 503 || status === 504 || status === 529) return 'overloaded';
   if (status >= 400 && status < 500) return 'request';
   return 'server';
 }

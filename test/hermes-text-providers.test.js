@@ -188,6 +188,18 @@ test('429, 503 and 529 are tried again, at most three tries, after Retry-After; 
   assert.equal(refused.calls.length, 1);
   const unknown = fakeFetch(() => ({ status: 404, json: { error: { message: 'model: not-a-model' } } }));
   await assert.rejects(T.anthropic({ key: KEY, fetch: unknown, sleep: noSleep }).extract(CHUNK, { model: 'not-a-model' }), (e) => e.kind === 'request' && /not-a-model/.test(e.message));
+  assert.equal(unknown.calls.length, 1, 'a 404 is not tried again');
+});
+
+test('408, 500, 502, 503 and 504 are tried again too, and named as what they are when still failing', async () => {
+  for (const status of [408, 500, 502, 503, 504]) {
+    const once = fakeFetch((u, i, n) => (n === 1 ? { status, json: { error: { message: 'try later' } } } : anthropicReply()));
+    await T.anthropic({ key: KEY, fetch: once, sleep: noSleep }).extract(CHUNK, { model: 'm' });
+    assert.equal(once.calls.length, 2, `${status} is tried again`);
+    const always = fakeFetch(() => ({ status, json: { error: { message: 'try later' } } }));
+    await assert.rejects(T.anthropic({ key: KEY, fetch: always, sleep: noSleep }).extract(CHUNK, { model: 'm' }), { kind: status === 500 ? 'server' : 'overloaded', status });
+    assert.equal(always.calls.length, 3, `${status}: three tries in all`);
+  }
 });
 
 test('a try that does not answer in time counts as no answer; cancelling aborts the request in flight', async () => {
