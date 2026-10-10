@@ -1015,13 +1015,13 @@ test('qualifiers: the rule never lowers a score: every pair scores at least what
     more += b.size - a.size;
   }
   assert.ok(checked > 0, `control: there were places to keep (${checked})`);
-  // A common core: Market Farm and Farm are compared through the core (with no lists blocking never reads
-  // Farm's common trigrams), and kept at the score letters give them, neither raised to the cap nor marked as
-  // the rule's (until 10 October 2026 they were lowered to the core's share, under a half).
-  const farm = idx.best(['Market Farm'], 0.85);
-  assert.ok(!without.best(['Market Farm'], 0.85).has(FARM), 'control: with no lists blocking does not compare them');
-  assert.equal(farm.get(FARM), similarity('Market Farm', 'Farm', idx.weight, none), 'with the lists, as letters score them');
-  assert.ok(farm.get(FARM) < QUALIFIER_CAP && !farm.rule.has(FARM), 'not raised, not the rule\'s');
+  // A common core: blocking compares Market Farm and Farm only through the core (with no lists it never reads
+  // Farm's common trigrams), and the rule declines the common core, so the pair is let go: as with no lists.
+  // (Until 10 October 2026 it was lowered under a half; for a while after, kept at letters' 0.873.)
+  assert.ok(similarity('Market Farm', 'Farm', idx.weight, none) >= 0.85, 'control: letters alone would suggest them, if compared');
+  assert.ok(!without.best(['Market Farm'], 0.85).has(FARM), 'with no lists blocking does not compare them');
+  assert.ok(!idx.best(['Market Farm'], 0.85).has(FARM), 'and with the lists the outcome is the same');
+  assert.ok(idx.best(['Market Warsop'], 0.85).rule.has(WARSOP), 'control: a rare core is still raised, and marked');
   assert.ok(more > 0, 'control: the lists find places that letters do not');
 });
 test('qualifiers per language: a French list switched on finds Bar-sur-Aube for Bar, and switched off does not; German Bad Ems for Ems', () => {

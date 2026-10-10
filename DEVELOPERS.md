@@ -1126,8 +1126,10 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   version scored 0.88 times the cores' score, and in the trial below every pair it added that way was
   wrong (Bradfield and Great Bardfield, 0.851). **A common core is not a place**: when a qualifier
   word added (a phrase counted by its joining word) weighs more by inverse document frequency than the
-  core, the rule does not raise the pair, which keeps the score letters give it (where Farm is in
-  more names than Market, Market Farm and Farm keep their 0.873, as with no lists); it never lowers one
+  core, the rule does not raise the pair, which keeps the score letters give it, and matching keeps it
+  only if it would compare the pair with no lists at all (where Farm is in more names than Market,
+  blocking reaches Farm from Market Farm only through the core, so the pair is let go, as with no
+  lists; `NameIndex.best()`, `candidates(…, plain)`); it never lowers one
   (until the held-out check of 10 October 2026 such a pair scored the core's share of the weight if
   lower, and lost real pairs that letters find: Newton and Newton Regis, 0.9, 0.2 km apart); a core in no more than 50 names
   (`QUALIFIER_RARE`) is never common, as in a small dataset the qualifiers are rare too. **Only words

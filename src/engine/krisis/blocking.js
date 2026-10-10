@@ -102,9 +102,10 @@ export class NameIndex {
 
   /**
    * The numbers of the other names to compare with the normalised name `s`, for scores that must
-   * reach `threshold`. `core`: the core of the subject name, when it has qualifiers.
+   * reach `threshold`. `core`: the core of the subject name, when it has qualifiers. `plain`: as if no
+   * qualifier lists were in use (the names a matching with --qualifiers none would compare).
    */
-  candidates(s, threshold = 0, core = null) {
+  candidates(s, threshold = 0, core = null, plain = false) {
     const all = trigrams(s), known = [], start = new Map();
     // Each known trigram, with where it first begins in the padded name.
     const pad = '  ' + s + ' ';
@@ -133,7 +134,7 @@ export class NameIndex {
     const seen = this.seen ||= new Uint8Array(this.names.length), found = [];
     for (const id of keys) { const p = this.postings[id]; for (let i = 0; i < p.length; i++) if (!seen[p[i]]) { seen[p[i]] = 1; found.push(p[i]); } }
     const out = new Set(this.exact.get(s) || []);
-    const byQualifier = threshold <= QUALIFIER_CAP;
+    const byQualifier = threshold <= QUALIFIER_CAP && !plain;
     // The trigrams of the name's first three letters ("  b", " br", "bru"), when it has three.
     const words = s.split(' ').length, head = s.length >= 3 && !s.slice(0, 3).includes(' ') ? [0, 1, 2].map((i) => this.ids.get(pad.slice(i, i + 3))) : null;
     for (let j = 0; j < found.length; j++) {
@@ -176,7 +177,7 @@ export class NameIndex {
       if (!s) continue;
       const ss = sortWords(s), sq = qualifiers(s, this.Q);
       // A name with qualifiers is looked up by its core too (Chipping Ongar by "ongar"), each other name once.
-      let found = this.candidates(s, threshold, sq.core);
+      let found = this.candidates(s, threshold, sq.core), plainFound = null;
       if (byQualifier && sq.units.length) {
         found = new Set(found);
         for (const ni of this.candidates(sq.core, threshold, sq.core)) found.add(ni);
@@ -186,6 +187,10 @@ export class NameIndex {
         this.comparisons++;
         // Scored as names.js scores any pair (scored()), with the shortcut under the threshold.
         const r = scored(s, o.n, this.weight, sq, o.q, threshold, ss, o.sorted);
+        // A common core the rule declined (Market Farm and Farm) is kept only if the pair would be compared
+        // with no lists at all: one only the qualifiers brought in (by the core, or the looser length bound)
+        // is let go, so that its outcome is as with no lists.
+        if (r.common && !(plainFound ??= this.candidates(s, threshold, null, true)).has(ni)) continue;
         keep(o.pi, r.score, r.by && { added: r.by.added, names: [s, o.n] });
       }
     }
