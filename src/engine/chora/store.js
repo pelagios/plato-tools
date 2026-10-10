@@ -15,6 +15,7 @@ import { viewPlace, currentGeometries } from './view.js';
 import { unionBbox } from './geo.js';
 import { fold } from './fold.js';
 import { createIdentityCollector } from '../krisis/identities.js';
+import { adoptScope } from './adopt.js';
 
 /** The key a place goes by in Chora: its @id, or its position in the dataset when it has none. */
 export const placeKey = (rec, n) => (rec && typeof rec['@id'] === 'string' ? rec['@id'] : `#${n}`);
@@ -270,7 +271,17 @@ export class ChoraStore {
       if (kind) withdrawn.set(a['@id'], kind);
     }
     // Under the key it goes by here (placeKey), so that a place without an @id finds its drawings.
-    return { ...viewPlace(rec, { withdrawn, lookup: (other) => this.brief(other), ccodeBbox }), id, identities: this.identitiesOf(id) };
+    const view = { ...viewPlace(rec, { withdrawn, lookup: (other) => this.brief(other), ccodeBbox }), id, identities: this.identitiesOf(id) };
+    // Where a search for its gazetteer record looks (#32): its nearest regions the dataset identifies, and its countries.
+    view.scope = adoptScope(view, (r) => this.regionOf(r));
+    return view;
+  }
+  /** A region of the dataset, for adoptScope: its label, relations and countries (as viewPlace reads them), and identities. */
+  regionOf(id) {
+    const rec = this.record(id);
+    if (!rec) return null;
+    const v = viewPlace(rec);
+    return { label: v.label, relations: v.relations, ccodes: v.ccodes, identities: this.identitiesOf(id) };
   }
   /**
    * What the dataset currently says of a place's identities (Krisis's currentIdentities, read over the

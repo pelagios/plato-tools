@@ -10,9 +10,13 @@
 // with the token from its one keeper (permissions.token), as on the main page. No consent or privacy
 // notice of its own: until WHG is allowed, the module's one line, which opens the Permissions panel.
 //
+// Where it looks (#32): within the nearest regions the dataset identifies with WHG records, and in the
+// place's countries (adopt.js adoptScope), the query made by Krisis's own placeQuery (never area_only).
+// The line under the name says what is sent; nothing wider is searched unless "Search everywhere" is pressed.
+//
 // The page's state is published on window.__chora.adopt for automated tests; nothing else reads it.
-import { createLookup, WHG_ENDPOINT, WHG_PLACE_TYPE } from '../engine/gazetteer/index.js';
-import { permittedFetch, gazetteerPermission } from '../engine/krisis/lookup.js';
+import { createLookup, WHG_ENDPOINT } from '../engine/gazetteer/index.js';
+import { permittedFetch, gazetteerPermission, placeQuery, failedClosed } from '../engine/krisis/lookup.js';
 import * as A from '../engine/chora/adopt.js';
 import { ROLES } from '../engine/chora/draw.js';
 import { CHORA_ADOPT_PAGE as W, CHORA_ADOPT_TEXT, lookupPage as LW } from '../engine/words.js';
@@ -33,7 +37,7 @@ const whenText = (w) => {
  * drawing of the place cite a record consulted, not copied; `adopted(placeId)` the adoption drafts of a place.
  */
 export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adopted }) {
-  let s = null;   // { view, query, phase, problem, answer: { list, attribution }, ranked, statuses, dismissed, preview, done }
+  let s = null;   // { view, query, phase, problem, answer: { list, attribution }, ranked, statuses, dismissed, preview, done, widened, sent, searched, failedClosed }
   let inFlight = null;
   const token = permissions.token;
   // The one fetch every request is made with (the shared lookup keeps its first), as Krisis's on main.
@@ -47,6 +51,7 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
   const publish = () => {
     state.adopt = !s ? { open: false } : {
       open: true, placeId: s.view.id, phase: s.phase, problem: s.problem?.kind ?? null, query: s.query, reference: s.reference?.kind ?? null,
+      scope: s.view.scope ?? null, widened: s.widened, sent: s.sent, searchedWithin: !!s.searched, failedClosed: s.failedClosed,
       candidates: (s.ranked || []).filter((r) => !s.dismissed.has(r.candidate.id)).map((r) => {
         const st = s.statuses.get(r.candidate.id);
         return { n: r.n, id: r.candidate.id, distanceKm: r.distanceKm, inArea: r.inArea, noCoords: r.noCoords, linked: st.linked, denied: st.denied, mayCopy: st.mayCopy && !s.unavailable.has(r.candidate.id) };
@@ -82,7 +87,8 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
   function openFor(view) {
     if (!view || !A.isPlaceIri(view.id)) return;
     inFlight?.abort(); inFlight = null;
-    s = { view, query: view.label || '', phase: 'idle', problem: null, answer: null, ranked: null, statuses: new Map(), dismissed: new Set(), unavailable: new Set(), preview: null, done: null, reference: A.referenceOf(view) };
+    s = { view, query: view.label || '', phase: 'idle', problem: null, answer: null, ranked: null, statuses: new Map(), dismissed: new Set(), unavailable: new Set(), preview: null, done: null, reference: A.referenceOf(view),
+      widened: false, sent: null, searched: null, failedClosed: false };
     root.hidden = false;
     render();
     root.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
@@ -90,6 +96,16 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
   }
 
   const allowed = () => permissions.allowed('gazetteer', SUBJ);
+  /** Where the next search looks: the place's scope, unless widened or it has none (then null: everywhere). */
+  const searchScope = () => (s.widened || !A.scopes(s.view.scope) ? null : s.view.scope);
+  /** The query for `query` as it will be sent (Krisis's placeQuery), or null for no name. */
+  const planned = (query) => (query ? placeQuery(A.adoptSearchPlace(s.view, query, searchScope()), { countries: true, limit: 10 }) : null);
+  /** Where a query looks, for the words: the regions it is within (by label), their records and the countries. */
+  const whereOf = (sent, scope) => {
+    const ids = Array.isArray(sent?.contained_in) ? sent.contained_in : [];
+    return { ids, labels: ids.length ? (scope?.from || []).map((r) => r.label) : [], countries: Array.isArray(sent?.countries) ? sent.countries : [] };
+  };
+  const sendsLine = () => { const p = planned((root.querySelector('#adopt-q')?.value ?? s.query).trim() || s.view.label || ''); return p ? W.sends({ lang: p.sent.lang ?? null, ...whereOf(p.sent, searchScope()) }) : ''; };
   /** The permission's one line: the module's ("Needs permission: …"), or, while set to Never, "Not allowed" with a button to the panel (as Krisis on main). */
   function permissionLine(el) {
     if (permissions.needs(el, 'gazetteer', SUBJ) !== 'never') return;
@@ -121,7 +137,9 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
       <form id="adopt-form"><label for="adopt-q">${esc(W.queryLabel)}</label>
         <input id="adopt-q" type="search" autocomplete="off" value="${esc(s.query)}">
         <button type="submit" id="adopt-send" class="primary"${ok ? '' : ' hidden'}${s.phase === 'sending' ? ' disabled' : ''}>${esc(W.send)}</button></form>
+      <p id="adopt-sends" class="muted">${esc(sendsLine())}</p>
       <p id="adopt-status" role="status" aria-live="polite" class="${s.problem ? 'warn' : ''}">${esc(s.phase === 'sending' ? W.sending : s.phase === 'fetching' ? W.fetching : s.problem?.text || '')}${s.problem?.offer === 'retry' ? ` <button type="button" class="link" id="adopt-retry">Try again</button>` : ''}</p>
+      ${scopeHtml()}
       ${candidatesHtml()}
       ${previewHtml()}
       ${s.done ? `<p class="good" id="adopt-done" role="status">${esc(W.adopted(s.done.count))}</p>` : ''}
@@ -133,11 +151,20 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
     publish();
   }
 
+  /** After a search: the way to look everywhere (never taken for you), or back within the place's scope. */
+  function scopeHtml() {
+    if (!s.ranked || !A.scopes(s.view.scope)) return '';
+    if (s.searched) return `<p><button type="button" id="adopt-widen">${esc(W.widen)}</button></p>`;
+    return `<p><button type="button" id="adopt-narrow">${esc(W.narrow(W.where({ ...whereOf({ contained_in: s.view.scope.containedIn, countries: s.view.scope.countries }, s.view.scope) })))}</button></p>`;
+  }
   function candidatesHtml() {
     if (!s.ranked) return '';
     const shown = s.ranked.filter((r) => !s.dismissed.has(r.candidate.id));
     const order = s.reference.kind === 'point' ? W.order.point : s.reference.kind === 'box' ? W.order.box(s.reference.from) : W.order.none;
-    if (!s.ranked.length) return `<p id="adopt-none">${esc(W.none)}</p>`;
+    if (!s.ranked.length) {
+      const where = s.searched ? W.where(whereOf(s.sent, s.searched)) : '';
+      return `<p id="adopt-none">${esc(!where ? W.none : s.failedClosed ? W.notApplied(where) : W.noneWithin(where))}</p>`;
+    }
     return `<p class="muted" id="adopt-order">${esc(order)} ${esc(W.caveat)}</p>
       <p class="muted">${esc(W.krisisUnsaved)}</p>
       ${A.clusterLinks(s.view.identities).length ? `<p class="note" id="adopt-cluster">${esc(W.cluster)}</p>` : ''}
@@ -205,17 +232,20 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
     if (!allowed()) { render(); root.querySelector('#adopt-permission button')?.focus(); return; }
     if (!token.get()) { s.problem = { kind: 'token', text: W.tokenNeeded }; render(); root.querySelector('#adopt-token')?.focus(); return; }
     if (!s.query) return;
-    Object.assign(s, { phase: 'sending', problem: null, answer: null, ranked: null, preview: null, done: null });
+    const plan = planned(s.query);
+    if (!plan) return;
+    Object.assign(s, { phase: 'sending', problem: null, answer: null, ranked: null, preview: null, done: null, sent: plan.sent, searched: searchScope(), failedClosed: false });
     s.statuses = new Map(); s.unavailable = new Set();
     mapApi.setCandidates([]); showAdopted(s.view.id, referenceFeature());
     render();
     const me = (inFlight = new AbortController());
     let lists = null, err = null;
-    try { lists = await whg().reconcile([{ query: s.query, type: WHG_PLACE_TYPE, limit: 10 }], { signal: me.signal }); } catch (e) { err = me.signal.reason?.name === 'PermissionError' ? me.signal.reason : e; }
+    try { lists = await whg().reconcile([plan.query], { signal: me.signal }); } catch (e) { err = me.signal.reason?.name === 'PermissionError' ? me.signal.reason : e; }
     if (inFlight !== me || !s) return;   // closed, or another place chosen, meanwhile
     inFlight = null;
     const list = lists?.[0] ?? null;
     s.problem = A.lookupProblem(err, list);
+    s.failedClosed = !err && !!list && failedClosed(list);
     if (err && !s.problem) s.problem = { kind: 'server', text: CHORA_ADOPT_TEXT.problem.server, offer: 'retry' };
     if (!s.problem) {
       const attribution = lists.attribution ?? null;
@@ -310,12 +340,16 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
     if (b.id === 'adopt-close') close();
     else if (b.id === 'adopt-forget') { whg().clearToken(); token.forget(); s.problem = null; render(); root.querySelector('#adopt-token')?.focus(); }
     else if (b.id === 'adopt-retry') send();
+    else if (b.id === 'adopt-widen') { s.widened = true; send(); }
+    else if (b.id === 'adopt-narrow') { s.widened = false; send(); }
     else if (b.dataset.preview) preview(b.dataset.preview);
     else if (b.dataset.dismiss) { s.dismissed.add(b.dataset.dismiss); if (s.preview?.id === b.dataset.dismiss) s.preview = null; render(); drawMarkers(); }
     else if (b.id === 'adopt-go') adopt();
     else if (b.id === 'adopt-unarm') { s.preview.armed = false; armConsult(null); render(); }
     else if (b.id === 'adopt-draw') { s.preview.armed = true; armConsult({ placeId: s.view.id, ...A.consultation(s.preview.candidate, s.answer.attribution) }); render(); }
   });
+  // The line under the name follows what is typed (a name of the place's own goes with its language).
+  root.addEventListener('input', (e) => { if (s && e.target.id === 'adopt-q') { const l = root.querySelector('#adopt-sends'); if (l) l.textContent = sendsLine(); } });
   root.addEventListener('change', (e) => {
     if (!s?.preview) return;
     if (e.target.name === 'adopt-geom') { s.preview.chosen = Number(e.target.value); s.preview.role = ''; s.preview.basis = root.querySelector('#adopt-basis')?.value ?? s.preview.basis; render(); }

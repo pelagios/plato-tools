@@ -331,6 +331,70 @@ export function consultation(candidate, attribution) {
   return recordWordsOf(candidate, null, st, attribution);
 }
 
+// ---- where the search looks ---------------------------------------------------------------------------------
+// The search is scoped as Krisis scopes a place's lookup within its regions (#32): to the records the
+// dataset identifies its nearest region with (WHG's `contained_in`, bare ids, several unioned), and to the
+// place's countries (else that region's). It is a place lookup, so never `area_only` (lookup.js placeQuery).
+const CONTAINED_IN = 'https://w3id.org/plato#ContainedIn';
+const WHG_PLACE = /^https:\/\/w3id\.org\/whg\/id\/place:(\S+)$/;
+/** How far up the regions a scope is looked for: a parish in a hundred in a county in a country is four. */
+export const MAX_SCOPE_DEPTH = 8;
+const iso2 = (cs) => [...new Set((Array.isArray(cs) ? cs : []).filter((c) => typeof c === 'string' && /^[a-z]{2}$/i.test(c.trim())).map((c) => c.trim().toUpperCase()))];
+/** The WHG records a place's identities link it to (a link not withdrawn), as contained_in takes them: "gn:2644974". */
+export function whgIdsOf(identities) {
+  const out = new Set();
+  for (const iri of identities?.linked || []) { const m = WHG_PLACE.exec(normaliseWhgIri(iri)); if (m) out.add(decodeURIComponent(m[1])); }
+  return [...out].sort();
+}
+const regionsAbove = (v) => [...new Set((v?.relations || []).filter((r) => r && r.type === CONTAINED_IN && r.status !== 'denied' && typeof r.relatesTo === 'string').map((r) => r.relatesTo))];
+/**
+ * Where an adopt search for `view` looks: the nearest regions it is plato:ContainedIn (followed upwards,
+ * at most MAX_SCOPE_DEPTH steps) that the dataset identifies with WHG records, and the place's own
+ * countries, else the first of those regions' that has some. `regionOf(id)` gives a region of the dataset
+ * as { label, relations, ccodes, identities } (Chora's store), or null. Returns { containedIn (ids, or
+ * null), from ([{ id, label }]: the regions they identify), countries (ISO 3166-1 alpha-2, in capitals) }.
+ */
+export function adoptScope(view, regionOf) {
+  let countries = iso2(view?.ccodes);
+  const seen = new Set([view?.id]);
+  let level = regionsAbove(view);
+  for (let depth = 0; depth < MAX_SCOPE_DEPTH && level.length; depth++) {
+    const ids = new Set(), from = [], next = [];
+    for (const id of level) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const r = regionOf(id);
+      if (!r) continue;
+      if (!countries.length) countries = iso2(r.ccodes);
+      const mine = whgIdsOf(r.identities);
+      if (mine.length) { mine.forEach((x) => ids.add(x)); from.push({ id, label: r.label || id }); }
+      next.push(...regionsAbove(r));
+    }
+    if (ids.size) return { containedIn: [...ids].sort(), from, countries };
+    level = next;
+  }
+  return { containedIn: null, from: [], countries };
+}
+/**
+ * The place Krisis's placeQuery takes, for searching `query` from `view` within `scope` (adoptScope), or
+ * everywhere (`scope` null). A name of the place's own, typed as given, goes with its language tag.
+ */
+export function adoptSearchPlace(view, query, scope) {
+  const langs = {};
+  for (const n of view?.names || []) {
+    if (n?.status === 'denied' || typeof n?.toponym !== 'string' || typeof n.language !== 'string') continue;
+    const k = n.toponym.trim().toLowerCase();
+    if (!Object.hasOwn(langs, k)) langs[k] = n.language;
+  }
+  return {
+    iri: view?.id ?? null, label: query, names: [query], langs,
+    ccodes: scope ? scope.countries : [],
+    ...(scope?.containedIn?.length ? { params: { contained_in: [...scope.containedIn] } } : {}),
+  };
+}
+/** Whether a scope sends anything: a region's records, or countries. */
+export const scopes = (scope) => !!(scope && (scope.containedIn?.length || scope.countries?.length));
+
 // ---- ranking, honestly --------------------------------------------------------------------------------------
 const insideBox = ([x, y], [w, s, e, n]) => y >= s && y <= n && (w <= e ? x >= w && x <= e : x >= w || x <= e);
 /**

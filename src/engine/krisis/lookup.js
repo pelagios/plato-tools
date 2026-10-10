@@ -301,6 +301,16 @@ export function planQueries(places, options = {}) {
 /** A query as the gazetteer module writes it into a request (its params, then query, type and limit). */
 const defined = (o) => Object.fromEntries(Object.entries(o || {}).filter(([, v]) => v !== undefined && v !== null));
 const sent = (q) => ({ ...(q.params || {}), query: q.query, ...(q.type ? { type: q.type } : {}), limit: q.limit });
+/**
+ * One place's one query, made as planQueries makes a place's (its filters, its constraint's `params`, and to
+ * WHG the name's language), for a lookup made outside a run: Chora's adopt search. Always a place lookup, so
+ * never `area_only`, whatever the options. Returns { query (for the lookup's reconcile()), sent (the query as
+ * it goes into the request) }, or null when the place has no name to send.
+ */
+export function placeQuery(place, options = {}) {
+  const { queries } = planQueries([place], { ...options, allNames: false, variants: false, areaOnly: false });
+  return queries.length ? { query: queries[0], sent: sent(queries[0]) } : null;
+}
 
 // ---- ranking -----------------------------------------------------------------------------------------------
 /**

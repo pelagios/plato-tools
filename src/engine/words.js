@@ -561,13 +561,31 @@ export const CHORA_ADOPT_TEXT = {
     unanswered: 'The World Historical Gazetteer did not answer this query; this is not a finding that it has no such place. Try again.',
   },
 };
+/** Where an adopt search looks, in words (adopt.js adoptScope): "within Lancashire (WHG gn:2644974), in GB", or ''. */
+const scopeWords = ({ labels = [], ids = [], countries = [] } = {}) => [
+  labels.length ? `within ${labels.join(' or ')} (WHG ${ids.join(', ')})` : '',
+  countries.length ? `in ${countries.join(' or ')}` : '',
+].filter(Boolean).join(', ');
 /** Chora's page for adopting a location (src/chora/adopt-ui.js), in words. */
 export const CHORA_ADOPT_PAGE = {
   find: 'Find in a gazetteer…',
   /** Why the button is disabled, shown beside it. */
   noAddress: 'This place has no address (@id) in the dataset, so a gazetteer record cannot be adopted for it: give it one first.',
   heading: 'Find in the World Historical Gazetteer',
-  queryLabel: 'The name to look for (only this is sent, with the type Place)',
+  queryLabel: 'The name to look for',
+  /**
+   * What a search sends besides the name (#32), said beside it: the type, the name's language (its own tag,
+   * when the name typed is one of the place's), and where it looks (adopt.js adoptScope), or nowhere in particular.
+   */
+  sends: ({ lang, ...scope }) => {
+    const where = scopeWords(scope);
+    return `Sent: the name, with the type Place${lang ? `, its language (${lang})` : ''}, ${where ? `looked for only ${where}` : 'looked for everywhere'}.`;
+  },
+  where: (scope) => scopeWords(scope),
+  widen: 'Search everywhere',
+  narrow: (where) => `Search ${where} again`,
+  noneWithin: (where) => `The gazetteer found nothing of that name ${where}. Nothing wider is searched unless you ask.`,
+  notApplied: (where) => `The gazetteer could not look ${where} (it holds no outline for the region), so it answered nothing. Nothing wider is searched unless you ask.`,
   tokenLabel: 'Your WHG token',
   tokenUse: 'Use this token',
   tokenNeeded: 'Give your WHG token first: WHG answers only queries that carry one. It is kept as Permissions says.',
