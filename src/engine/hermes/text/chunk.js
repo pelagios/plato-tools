@@ -27,6 +27,9 @@ export function cpLength(s) {
   return n;
 }
 
+/** Whether a string is whole characters: no half of a surrogate pair without the other. */
+export const isWellFormed = (s) => !/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/.test(s);
+
 /** The UTF-16 index of code point `cp` in `s` (s.length if it is the end, -1 if beyond it). */
 export function cpToIndex(s, cp) {
   let i = 0;
@@ -110,19 +113,28 @@ export function chunkText(text, { target = CHUNKING.target, overlap = CHUNKING.o
 
 /**
  * A text cut in two near its middle, at the best break there (as chunkText cuts): for a chunk whose
- * reply was cut off. Returns the two parts as chunks (`start` in code points of the whole text), or
- * null when it is too short to cut.
+ * reply was cut off. The second part begins up to `overlap` characters before the first ends, at the
+ * start of a sentence (else of a word) in that stretch, as chunkText's chunks do, so that a name cut
+ * by the break is whole in the second; a mention found in both is kept once (dedupeMentions). Returns
+ * the two parts as chunks (`start` in code points of the whole text), or null when it is too short to cut.
  */
-export function halve(chunk, { min = 200 } = {}) {
+export function halve(chunk, { min = 200, overlap = CHUNKING.overlap } = {}) {
   const t = chunk.text;
   if (t.length < 2 * min) return null;
   const mid = Math.floor(t.length / 2);
   const cut = breakBetween(t, Math.max(1, mid - Math.floor(mid / 2)), mid + Math.floor(mid / 2));
   if (!(cut > 0 && cut < t.length)) return null;
-  const a = t.slice(0, cut), b = t.slice(cut), aEnd = chunk.start + cpLength(a);
+  let next = cut;
+  const ov = Math.min(overlap, Math.floor(cut / 2));
+  if (ov > 0) {
+    const lo = Math.max(1, cut - ov);
+    const found = [SENTENCE, SPACE].map((re) => firstEnd(re, t, lo, cut)).find((x) => x > lo - 1 && x < cut);
+    next = found ?? whole(t, lo);
+  }
+  const a = t.slice(0, cut), b = t.slice(next), aEnd = chunk.start + cpLength(a), bStart = chunk.start + cpLength(t.slice(0, next));
   return [
     { ...chunk, start: chunk.start, end: aEnd, text: a, sha256: sha256(a), part: true },
-    { ...chunk, start: aEnd, end: chunk.end, text: b, sha256: sha256(b), part: true },
+    { ...chunk, start: bStart, end: chunk.end, text: b, sha256: sha256(b), part: true },
   ];
 }
 

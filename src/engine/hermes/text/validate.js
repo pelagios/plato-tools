@@ -9,13 +9,15 @@
 // name themselves: every exact occurrence of its text in the chunk; of those, the ones whose context
 // agrees with the prefix and suffix the model gave (compared with runs of white space made one
 // space); of those, the ones no other mention of this reply has taken (if every one is taken, this
-// mention is a repeat, and refused); of those, the one nearest the `start` hint. A name that does not
-// occur in the chunk at all is refused (`text-not-in-text`): a model's invention, or a name planted
-// by instructions hidden in the text, never becomes a suggestion. The offsets recorded are the
-// tools', in code points of the whole text.
+// mention is a repeat, and refused); of those, the one nearest the `start` hint. A prefix or suffix
+// given without the space next to the name still agrees. A name that does not occur in the chunk, or
+// is not whole characters of it, is refused (`text-not-in-text`, `text-mention-invalid`): only words
+// actually in the text are ever suggested, and the reviewer decides whether each is a place. (Words in
+// the text may still have been put there by someone, instructions to a model included: being in the
+// text says nothing more than that.) The offsets recorded are the tools', in code points of the whole text.
 import { reply as validReply, mention as validMention } from './reply-validators.js';
 import { KINDS, MAX_NAME, MAX_CONTEXT } from './prompt.js';
-import { cpLength } from './chunk.js';
+import { cpLength, sliceCodePoints } from './chunk.js';
 
 /**
  * Each kind the reader reports, and how: 'error' (a chunk's reply could not be used at all) or
@@ -43,17 +45,21 @@ export const MAX_MENTIONS = 2000;
 const squash = (s) => s.replace(/\s+/g, ' ');
 // Whether the text before position i ends with `prefix` (white space compared as one space). Near the
 // chunk's start the model may give context from before the chunk: what there is must agree with the end of it.
+// The space next to the name is compared trimmed on both sides: a model often gives "then back to"
+// for "then back to ".
 function prefixAgrees(text, i, prefix) {
-  if (!prefix) return false;
-  const before = squash(text.slice(Math.max(0, i - 2 * prefix.length - 8), i)), p = squash(prefix);
+  const p = squash(prefix || '').trimEnd();
+  if (!p) return false;
+  const before = squash(text.slice(Math.max(0, i - 2 * prefix.length - 8), i)).trimEnd();
   if (before.endsWith(p)) return true;
-  return i < prefix.length * 2 && before.length > 0 && p.endsWith(squash(text.slice(0, i)));
+  return i < prefix.length * 2 && before.length > 0 && p.endsWith(before);
 }
 function suffixAgrees(text, j, suffix) {
-  if (!suffix) return false;
-  const after = squash(text.slice(j, j + 2 * suffix.length + 8)), s = squash(suffix);
+  const s = squash(suffix || '').trimStart();
+  if (!s) return false;
+  const after = squash(text.slice(j, j + 2 * suffix.length + 8)).trimStart();
   if (after.startsWith(s)) return true;
-  return text.length - j < suffix.length * 2 && after.length > 0 && s.startsWith(squash(text.slice(j)));
+  return text.length - j < suffix.length * 2 && after.length > 0 && s.startsWith(after);
 }
 // The last `n` code points of a string, and the first.
 const lastCps = (s, n) => { const a = Array.from(s); return a.length > n ? a.slice(-n).join('') : s; };
@@ -99,6 +105,9 @@ export function readReply(reply, chunk) {
     for (const x of pool) x.cp = cpLength(text.slice(0, x.i));
     pool.sort((a, b) => Math.abs(a.cp - m.start) - Math.abs(b.cp - m.start) || a.i - b.i);
     const pick = pool[0];
+    // Found by UTF-16 search, a name may begin or end inside a character (half of a surrogate pair): it
+    // must be exactly the characters of its span.
+    if (sliceCodePoints(text, pick.cp, pick.cp + len) !== m.text) { note('text-mention-invalid', `a name that is not whole characters of the text: ${JSON.stringify(m.text)}`); continue; }
     taken.add(pick.i + ':' + m.text.length);
     const start = chunk.start + pick.cp;
     const kind = typeof m.kind === 'string' ? m.kind.trim().toLowerCase() : '';

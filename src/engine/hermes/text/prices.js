@@ -20,11 +20,16 @@ export const CONFIRM_USD = 5;
  * US dollars per million tokens, input and output, by provider and model, as read on `checkedOn` from
  * `source` (the provider's own pricing page; base rates, no batch, cache or regional pricing). A model
  * the provider names with a date after it (claude-haiku-4-5-20251001) is priced as the model without
- * it. `verified` is false for a table not read from the live page.
+ * it. `verified` is { source, on }: the page read and the day it was read, or null for a table not
+ * read from the live page; a table counts as verified only when `on` is `checkedOn`.
  */
 export const PRICES = Object.freeze({
   checkedOn: '2026-10-10',
-  verified: true,
+  // Where and when each price was read, so that "verified" can be checked. Claude Haiku 5.5's row, as
+  // the page gives it: "Claude Haiku 5.5 (for prompts up to 100,000 tokens) | $0.10 / MTok | ... |
+  // $0.50 / MTok" and "Claude Haiku 5.5 (for prompts over 100,000 tokens) | $0.50 / MTok | ... |
+  // $2.50 / MTok"; the claude-api reference (cached 2026-10-06) agrees.
+  verified: Object.freeze({ source: 'https://platform.claude.com/docs/en/about-claude/pricing', on: '2026-10-10' }),
   source: 'https://platform.claude.com/docs/en/about-claude/pricing',
   usdPerMillion: {
     anthropic: {
@@ -110,7 +115,7 @@ const tokens = (n) => n.toLocaleString('en-GB');
  */
 export function estimateWords(estimate, cost) {
   const t = `About ${tokens(estimate.input)} tokens in and ${tokens(estimate.output.low)} to ${tokens(estimate.output.high)} out, for ${tokens(estimate.chunks)} ${estimate.chunks === 1 ? 'part' : 'parts'} of the text`;
-  const asOf = `prices as of ${cost.pricesOf}${PRICES.verified ? '' : ', not checked against the provider\'s page'}`;
+  const asOf = `prices as of ${cost.pricesOf}${PRICES.verified?.on === PRICES.checkedOn ? '' : ', not checked against the provider\'s page'}`;
   if (cost.usd) return `${t}: about ${usd(cost.usd.low)} to ${usd(cost.usd.high)}, at ${asOf}.`;
   if (cost.why === 'stale') return `${t}. No cost is shown: the ${asOf} are more than ${PRICE_STALE_DAYS} days old.`;
   return `${t}. No cost is shown: there is no price recorded for this model (${asOf}).`;

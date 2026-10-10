@@ -31,7 +31,7 @@ import { checkReviewer, DATE_TIME, isIri } from '../../krisis/work.js';
 import { placeAddress } from '../addresses.js';
 import { sha256 } from '../../../lib/sha256.js';
 import { PROMPT_VERSION, PROMPT_SHA256, SCHEMA_VERSION, KINDS, isLanguageTag } from './prompt.js';
-import { CHUNKING, cpLength, sliceCodePoints, dedupeMentions } from './chunk.js';
+import { CHUNKING, cpLength, sliceCodePoints, dedupeMentions, isWellFormed } from './chunk.js';
 
 export const WORK_VERSION = 1;
 export const STATUSES = ['confirmed', 'rejected'];
@@ -44,6 +44,10 @@ export const TYPE_KINDS = Object.freeze(KINDS.filter((k) => k !== 'other'));
 
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isCount = (n) => Number.isInteger(n) && n >= 0;
+/** How a linked place was found. */
+export const PLACE_FROM = Object.freeze(['pasted', 'whg']);
+// A model's name as a provider gives it (claude-sonnet-5-5-20261001, llama3.1:8b, org/model).
+const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$/;
 
 function checkSource(source) {
   if (!isObject(source) || typeof source.title !== 'string' || !source.title.trim()) throw new DataError('Give the title of the text, for the citation.');
@@ -86,7 +90,7 @@ export function isDone(work, chunk, provider, model) {
 export function addResult(work, { chunk, provider, model, modelReturned, settings = {}, usage = { input: 0, output: 0 }, mentions, refused = {}, generatedAt = new Date().toISOString() }) {
   const r = {
     chunk: { index: chunk.index, start: chunk.start, end: chunk.end, sha256: chunk.sha256 },
-    provider, model, model_returned: modelReturned ?? model,
+    provider, model, model_returned: typeof modelReturned === 'string' && MODEL_ID.test(modelReturned) ? modelReturned : model,
     prompt_version: PROMPT_VERSION, prompt_sha256: PROMPT_SHA256,
     settings: { ...settings }, generated_at: generatedAt,
     usage: { input: usage.input || 0, output: usage.output || 0 },
@@ -149,7 +153,10 @@ export function decide(work, text, id, d, { at = new Date().toISOString() } = {}
       if (a.lost) throw new DataError(`"${d.place}" cannot be the address of a place here (${a.lost === 'whg-staging' ? "it is on WHG's staging copy, not a citation target" : "it is a record's database key in WHG, not a place's address"}).`);
       if (!(typeof a.iri === 'string' && /^https?:\/\//i.test(a.iri) && isIri(a.iri))) throw new DataError(`"${d.place}" is not a place's web address, such as https://pleiades.stoa.org/places/579885.`);
       out.place = a.iri;
-      if (d.placeFrom !== undefined) out.place_from = String(d.placeFrom);
+      if (d.placeFrom !== undefined) {
+        if (!PLACE_FROM.includes(d.placeFrom)) throw new DataError(`How the place was found is one of ${PLACE_FROM.join(', ')}.`);
+        out.place_from = d.placeFrom;
+      }
     }
   }
   work.review.decisions[id] = out;
@@ -191,12 +198,14 @@ export function readWork(input) {
     const where = `result ${i + 1}`;
     if (!isObject(r) || !isObject(r.chunk) || !isCount(r.chunk.start) || !isCount(r.chunk.end) || !/^[0-9a-f]{64}$/.test(r.chunk.sha256)) bad(`${where} does not say which chunk it is of.`);
     if (typeof r.provider !== 'string' || !r.provider || typeof r.model !== 'string' || !r.model) bad(`${where} does not say which provider and model made it.`);
+    if (r.model_returned !== undefined && !(typeof r.model_returned === 'string' && MODEL_ID.test(r.model_returned))) bad(`${where} names the model that answered with something that is not a model's name.`);
     if (typeof r.prompt_version !== 'string' || typeof r.generated_at !== 'string' || !DATE_TIME.test(r.generated_at)) bad(`${where} does not say when, and with which prompt, it was made.`);
     if (!Array.isArray(r.mentions)) bad(`${where} has no list of mentions.`);
     for (const m of r.mentions) {
       if (!isObject(m) || !isCount(m.start) || !Number.isInteger(m.end) || m.end <= m.start || typeof m.text !== 'string' || !KINDS.includes(m.kind)) bad(`${where} has a mention that is not a span, a name and a kind.`);
-      if (m.start < r.chunk.start || m.end > w.text.characters) bad(`${where} has a mention outside its chunk or the text.`);
+      if (m.start < r.chunk.start || m.end > r.chunk.end || m.end > w.text.characters) bad(`${where} has a mention outside its chunk or the text.`);
       if (cpLength(m.text) !== m.end - m.start) bad(`${where} has a mention whose span is not as long as its name.`);
+      if (!isWellFormed(m.text)) bad(`${where} has a mention whose name is not whole characters.`);
     }
   }
   if (!isObject(w.review) || !isObject(w.review.decisions)) bad('it has no review (review.decisions).');
@@ -208,6 +217,7 @@ export function readWork(input) {
     if (d.place !== undefined && (d.status !== 'confirmed' || !isIri(d.place) || !/^https?:\/\//i.test(d.place))) bad(`the decision on ${id} links a place that is not an IRI, or links a rejected suggestion.`);
     if ((d.start !== undefined || d.end !== undefined) && !(isCount(d.start) && Number.isInteger(d.end) && d.end > d.start && d.end <= w.text.characters)) bad(`the decision on ${id} adjusts the span to something that is not one.`);
     if (d.type !== undefined && !TYPE_KINDS.includes(d.type)) bad(`the decision on ${id} has a type that is not one of ${TYPE_KINDS.join(', ')}.`);
+    if (d.place_from !== undefined && !(d.place !== undefined && PLACE_FROM.includes(d.place_from))) bad(`the decision on ${id} says how its place was found as something other than ${PLACE_FROM.join(' or ')}, or has no place.`);
   }
   return w;
 }

@@ -7,13 +7,13 @@
 // - CANCELLING: the signal aborts the request in flight; every chunk finished before stays in the
 //   work file, and the run returns { cancelled: true }.
 // - A reply cut off (max tokens) is never read in part: the chunk is cut in two near its middle, at a
-//   break (chunk.js, halve), and each half is sent; a half that is cut off too is halved again, down
+//   break (chunk.js, halve), the second half overlapping the first, and each half is sent; a half that is cut off too is halved again, down
 //   to MIN_HALF characters, below which the chunk is reported as failed.
 // - A reply that cannot be used (not JSON, not a list of mentions) leaves the chunk without a result,
 //   reported, so that resuming tries it again.
 // - A provider's refusal of the request (the key, a model that does not exist, a permission not
 //   given) stops the run: the next chunk would be refused alike. The error is passed on as it is.
-import { chunkText, halve } from './chunk.js';
+import { chunkText, halve, dedupeMentions } from './chunk.js';
 import { readReply, addCounts } from './validate.js';
 import { checkText, isDone, addResult } from './work.js';
 import { LlmError } from './providers/request.js';
@@ -77,7 +77,8 @@ export async function extractChunk(provider, chunk, { model, signal, language })
       if (g.failed) return { ...g, counts, usage };
       mentions.push(...g.mentions);
     }
-    return { mentions, counts, usage, model: r.model, settings: { ...r.settings, halved: true } };
+    // The halves overlap (halve), so a name in the overlap may be found in both: it is kept once.
+    return { mentions: dedupeMentions(mentions).kept, counts, usage, model: r.model, settings: { ...r.settings, halved: true } };
   }
   const read = readReply(r.reply, chunk);
   if (!read.ok) { const kind = Object.keys(read.counts)[0]; return { failed: kind, example: read.examples[kind], mentions: [], counts: read.counts, usage, model: r.model, settings: r.settings }; }

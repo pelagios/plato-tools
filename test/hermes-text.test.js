@@ -93,9 +93,11 @@ test('chunks: each chunk is the text between its start and end in code points, t
 test('chunks end at a paragraph break where there is one, else at the end of a sentence', () => {
   const text = itinerary(8);
   const chunks = T.chunkText(text, { target: 3000, overlap: 0 });
+  assert.ok(chunks.length > 1);
   for (const c of chunks.slice(0, -1)) assert.match(c.text, /\n\n$/, 'ends at a paragraph break');
   const flat = text.replace(/\n\n/g, ' ');
   const flatChunks = T.chunkText(flat, { target: 3000, overlap: 0 });
+  assert.ok(flatChunks.length > 1);
   for (const c of flatChunks.slice(0, -1)) assert.match(c.text, /[.] $/, 'ends after a sentence');
   assert.equal(flatChunks.map((c) => c.text).join(''), flat, 'with no overlap, the chunks are the text');
 });
@@ -179,6 +181,39 @@ test('alignment: the tools find the name themselves; a wrong start is only a hin
   const third = occ('Roma', 2);
   const h = T.readReply(JSON.stringify({ mentions: [{ text: 'Roma', prefix: '', suffix: '', start: third + 3, kind: 'settlement' }] }), CHUNK);
   assert.equal(h.mentions[0].start, CHUNK.start + third);
+});
+
+test('a prefix or suffix given without the space next to the name still chooses the occurrence', () => {
+  const chunk = { text: 'From Rome to Ostia, then back to Rome by the Via Ostiensis.', start: 0 };
+  const r = T.readReply(JSON.stringify({ mentions: [{ text: 'Rome', prefix: 'then back to', suffix: 'by the Via', start: 0, kind: 'settlement' }] }), chunk);
+  assert.equal(r.mentions[0].start, 33);
+  // Control: with context agreeing with neither, the hint chooses the first.
+  const h = T.readReply(JSON.stringify({ mentions: [{ text: 'Rome', prefix: 'sailing to', suffix: 'by sea', start: 0, kind: 'settlement' }] }), chunk);
+  assert.equal(h.mentions[0].start, 5);
+});
+
+test('a name that is not whole characters of the text (half of a surrogate pair) is refused and counted', () => {
+  const chunk = { text: 'In 𝔄Roma est urbs.', start: 0 };
+  const r = T.readReply(JSON.stringify({ mentions: [
+    { text: '\udd04Roma', prefix: '', suffix: ' est', start: 4, kind: 'settlement' },
+    { text: 'Roma', prefix: '𝔄', suffix: ' est', start: 4, kind: 'settlement' },
+  ] }), chunk);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.mentions.map((m) => [m.text, m.start, m.end]), [['Roma', 4, 8]], 'only the whole name, at code points 4 to 8');
+  assert.equal(r.counts['text-mention-invalid'], 1);
+  assert.match(r.examples['text-mention-invalid'], /not whole characters/);
+});
+
+test('a name cut by the break when a chunk is halved is whole in one half, the second overlapping the first', () => {
+  const text = 'x'.repeat(590) + 'Via Ostiensis' + 'y'.repeat(590);
+  const chunk = { index: 0, start: 0, end: T.cpLength(text), text, sha256: 'x' };
+  const parts = T.halve(chunk, { min: 250 });
+  assert.ok(parts.some((p) => p.text.includes('Via Ostiensis')), 'whole in one half');
+  for (const p of parts) assert.equal(T.sliceCodePoints(text, p.start, p.end), p.text);
+  assert.equal(parts[1].end, chunk.end);
+  // Control: with no overlap the break cuts it.
+  const bare = T.halve(chunk, { min: 250, overlap: 0 });
+  assert.ok(!bare.some((p) => p.text.includes('Via Ostiensis')), 'without the overlap the name is cut');
 });
 
 test('a name not in the text is refused and counted, beside one that is accepted (an invention, or one planted by instructions in the text)', () => {
@@ -270,7 +305,7 @@ test('the estimate: tokens always; money only for a priced model, as "about", an
   assert.equal(T.costOf(e, 'anthropic', 'claude-sonnet-5-5', { now: day91 }).why, 'stale');
   assert.ok(T.costOf(e, 'anthropic', 'claude-sonnet-5-5', { now: day89 }).usd, 'control: within 90 days it is shown');
   // The words always name the date of the prices, whether money is shown or not.
-  assert.equal(T.PRICES.verified, true);
+  assert.deepEqual({ ...T.PRICES.verified }, { source: T.PRICES.source, on: T.PRICES.checkedOn }, 'verified says where and when');
   assert.equal(T.PRICES.source, 'https://platform.claude.com/docs/en/about-claude/pricing');
   assert.match(T.estimateWords(e, c), new RegExp(`: about \\$[0-9.]+ to \\$[0-9.]+, at prices as of ${T.PRICES.checkedOn}\\.$`));
   assert.match(T.estimateWords(e, T.costOf(e, 'anthropic', 'claude-sonnet-5-5', { now: day91 })), new RegExp(`No cost is shown: the prices as of ${T.PRICES.checkedOn} are more than 90 days old\\.$`));
@@ -402,6 +437,12 @@ test('readWork refuses a file no run or review could have written', async () => 
   assert.throws(tamper((w) => { w.results[0].mentions[0].kind = 'city'; }), /a span, a name and a kind/);
   assert.throws(tamper((w) => { delete w.source.title; }), /title/);
   assert.throws(tamper((w) => { w.review.decisions[id].type = 'a walled town'; }), /type that is not one of/);
+  assert.throws(tamper((w) => { const r = w.results[0], m = r.mentions[0]; r.chunk.end = m.end - 1; }), /outside its chunk/);
+  assert.throws(tamper((w) => { w.results[0].model_returned = { id: 'm' }; }), /not a model's name/);
+  assert.throws(tamper((w) => { w.results[0].model_returned = 'a model, said the provider'; }), /not a model's name/);
+  assert.throws(tamper((w) => { w.review.decisions[id].place_from = { how: 'whg' }; }), /how its place was found/);
+  assert.throws(tamper((w) => { const m = w.results[0].mentions[0]; m.text = '\udd04' + m.text.slice(1); }), /not whole characters/);
+  assert.ok(tamper((w) => { w.review.decisions[id].place_from = 'whg'; })(), 'control: a place found through WHG is read');
 });
 
 // ---- review and attestations ---------------------------------------------------------------------
@@ -413,6 +454,7 @@ async function reviewed() {
   const id = (n) => T.suggestions(work).find((s) => s.text === n).id;
   T.setReviewer(work, REVIEWER);
   T.decide(work, text, id('Ostia'), { status: 'confirmed', place: 'https://pleiades.stoa.org/places/422995' }, { at: '2026-10-02T09:00:00Z' });
+  assert.throws(() => T.decide(work, text, id('Roma'), { status: 'confirmed', place: 'place:pl:423025', placeFrom: { from: 'whg' } }, { at: '2026-10-02T09:01:00Z' }), /How the place was found/);
   T.decide(work, text, id('Roma'), { status: 'confirmed', type: 'settlement', place: 'place:pl:423025', placeFrom: 'whg' }, { at: '2026-10-02T09:01:00Z' });
   T.decide(work, text, id('Capua'), { status: 'rejected' }, { at: '2026-10-02T09:02:00Z' });
   T.decide(work, text, id('Tarentum'), { status: 'confirmed' }, { at: '2026-10-02T09:03:00Z' });

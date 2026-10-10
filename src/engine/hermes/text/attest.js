@@ -51,6 +51,7 @@ export function attestationsFrom(work, text, { reviewer = work.review.reviewer }
     const start = d.start ?? s.start, end = d.end ?? s.end;
     const toponym = sliceCodePoints(text, start, end);
     if (toponym === null) throw new Error(`attestationsFrom: characters ${start} to ${end} are not in the text.`);
+    if (d.start === undefined && toponym !== s.text) throw new Error(`attestationsFrom: characters ${start} to ${end} of the text are not the name suggested there.`);
     const locator = locatorOf(start, end);
     if (!d.place) { unlinked.push({ id: s.id, text: toponym, start, end, locator, kind: d.type ?? s.kind }); continue; }
     const a = {
