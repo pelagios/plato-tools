@@ -1264,8 +1264,8 @@ function drawBulk() {
   if (lastBulk?.undone !== undefined) res.textContent = GW.undone(lastBulk.undone);
   else if (lastBulk) {
     res.innerHTML = (lastBulk.batch ? `${escapeHtml(GW.accepted(lastBulk.accepted))} <button type="button" id="bulk-undo" class="link">${escapeHtml(GW.undo)}</button> ` : `${escapeHtml(GW.none)} `)
-      + escapeHtml(GW.leftOut(lastBulk.leftOut, lastBulk.several));
-  } else res.textContent = GW.leftOut(plan.leftOut, plan.several);
+      + escapeHtml(GW.leftOut(lastBulk.leftOut, lastBulk.several, lastBulk.ties));
+  } else res.textContent = GW.leftOut(plan.leftOut, plan.several, plan.tied.length);
 }
 function bulkAccept() {
   if (!work || busy || looking) return;
@@ -1289,7 +1289,10 @@ function bulkUndo() {
 function guardHtml(c) {
   const v = guardOf(c);
   const how = c.gazetteer?.how ? `<p class="gazetteer">${escapeHtml(VW.foundBy(c.gazetteer.query, c.gazetteer.how))}</p>` : '';
-  return how + (v.pass ? `<p class="badge good">${escapeHtml(GW.passes(v))}</p>` : `<p class="badge">${escapeHtml(GW.fails(v.reason))}</p>`);
+  // #31: a passing candidate with namesakes where its place was looked for is left to the reviewer, and says so.
+  const tie = v.pass ? guardedPlan().tied.find((t) => t.id === c.id) : null;
+  return how + (v.pass ? `<p class="badge good">${escapeHtml(GW.passes(v))}</p>` : `<p class="badge">${escapeHtml(GW.fails(v.reason))}</p>`)
+    + (tie ? `<p class="badge namesakes">${escapeHtml(GW.namesakes(tie.count, tie.region))}</p>` : '');
 }
 /** The place's row state: reconcile (none), keep without reconciling (filter), leave out of the dataset (exclude). */
 function rowStateHtml(place) {

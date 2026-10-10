@@ -932,10 +932,13 @@ export const guardWords = {
   accepted: (n) => `${n.toLocaleString('en-GB')} accepted as yours.`,
   undo: 'Undo',
   undone: (n) => `${n.toLocaleString('en-GB')} taken back; any you changed since are kept.`,
+  /** A place left out of the bulk accept for having namesakes where it was looked for (#31), on its own screen. */
+  namesakes: (n, region) => `${n.toLocaleString('en-GB')} places of this name ${region ? `in ${region}` : 'where it was looked for'}: left for you, not accepted in bulk.`,
   /** Those left out of the bulk accept, and why. */
-  leftOut: (l, several = 0) => [
+  leftOut: (l, several = 0, ties = 0) => [
     l.total ? `${l.total.toLocaleString('en-GB')} left out: ${[l.far ? `${l.far.toLocaleString('en-GB')} further from the place than the greatest distance` : '', l.ccodes ? `${l.ccodes.toLocaleString('en-GB')} in another country than the place's own` : ''].filter(Boolean).join(', ')}. Decide on them yourself.` : '',
-    several ? `${several.toLocaleString('en-GB')} ${several === 1 ? 'place has' : 'places have'} more than one passing, and ${several === 1 ? 'is' : 'are'} left to you.` : ''].filter(Boolean).join(' '),
+    several ? `${several.toLocaleString('en-GB')} ${several === 1 ? 'place has' : 'places have'} more than one passing, and ${several === 1 ? 'is' : 'are'} left to you.` : '',
+    ties ? `${ties.toLocaleString('en-GB')} ${ties === 1 ? 'place has' : 'places have'} another place of the same name where ${ties === 1 ? 'it was' : 'they were'} looked for, and ${ties === 1 ? 'is' : 'are'} left to you.` : ''].filter(Boolean).join(' '),
   /** The command line's dry run of a review: the count only; it never accepts. */
   dryRun: (n, l) => `${n.toLocaleString('en-GB')} ${n === 1 ? 'place has' : 'places have'} exactly one candidate passing WHG's guards (${l.total.toLocaleString('en-GB')} more left out as far or in another country). Accepting them is done on the page only.`,
 };
