@@ -1213,7 +1213,7 @@ async function lookupCommand(args, o, resources) {
       const { guardWords } = await import('../src/engine/words.js');
       const p = planGuarded(work);
       r.guarded = { pass: p.accept.length, leftOut: { far: p.leftOut.far, ccodes: p.leftOut.ccodes, total: p.leftOut.total }, several: p.several, ties: p.tied.length };
-      r.warnings.push(guardWords.dryRun(p.accept.length, p.leftOut));
+      r.warnings.push(guardWords.dryRun(p.accept.length, p.leftOut, p.several, p.tied.map((t) => t.count)));
     }
     r.status = 'ok';
     host.cleanup();

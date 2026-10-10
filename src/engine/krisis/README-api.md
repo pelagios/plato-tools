@@ -187,9 +187,13 @@ words them all.
   `diceForm(s)`, `isLatin(s)`, `bestDice(forms, cand)`, `withheldOf(cand, forms)`, `tieOf(answer)`.
   `guardOf(workCandidate)` — the same verdict from what mergeAnswers stored (`not-recorded` for a local
   candidate or an older file). `passing(work, iri)`, `guardsFirst(work, order)`.
-  `planGuarded(work) -> { accept, leftOut: { far, ccodes, total, examples }, several }` (changes nothing),
+  `planGuarded(work) -> { accept, leftOut: { far, ccodes, total, examples }, several, tied: [{ id, place,
+  count, region }] }` (changes nothing; `tied`: places left out because `count` candidates of the passing
+  one's title were found under the same constraint, not in another country and, unless confined to a
+  region, not far; `region` the label of the region it was confined to, else null; #31),
   `acceptGuarded(work, { reviewer, identityType = 'closeMatch', at, threshold }) -> { batch, accepted,
-  leftOut, several }` (page only: the CLI prints planGuarded's count with `lookup --dry-run --review`),
+  leftOut, several, ties, tied }` (`ties` the number of such places, `tied` each one's count; page only:
+  the CLI prints planGuarded's counts, `guarded.ties` among them, with `lookup --dry-run --review`),
   `undoBatch(work, 'bN') -> cleared` (only decisions still carrying the batch).
 - `names.js`: `queryVariants(name) -> [{ text, how }]`, how `given | brackets | alternative | inverted |
   head-word` (head words last), at most `MAX_VARIANTS` (10); `INVERSION_QUALIFIERS`. Lookup option

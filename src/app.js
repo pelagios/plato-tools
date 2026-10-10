@@ -1264,8 +1264,8 @@ function drawBulk() {
   if (lastBulk?.undone !== undefined) res.textContent = GW.undone(lastBulk.undone);
   else if (lastBulk) {
     res.innerHTML = (lastBulk.batch ? `${escapeHtml(GW.accepted(lastBulk.accepted))} <button type="button" id="bulk-undo" class="link">${escapeHtml(GW.undo)}</button> ` : `${escapeHtml(GW.none)} `)
-      + escapeHtml(GW.leftOut(lastBulk.leftOut, lastBulk.several, lastBulk.ties));
-  } else res.textContent = GW.leftOut(plan.leftOut, plan.several, plan.tied.length);
+      + escapeHtml(GW.leftOut(lastBulk.leftOut, lastBulk.several, lastBulk.tied));
+  } else res.textContent = GW.leftOut(plan.leftOut, plan.several, plan.tied.map((t) => t.count));
 }
 function bulkAccept() {
   if (!work || busy || looking) return;
