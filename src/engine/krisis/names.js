@@ -99,7 +99,10 @@ export const sortWords = (s) => (s.includes(' ') ? s.split(' ').sort().join(' ')
 /** What the distinctive words of two names must reach for their likeness to count. */
 export const DISTINCT_GATE = 0.85;
 
-/** How alike two names are, from 0 to 1 (see the top of this file). `weight` as for similarityNormalised(). */
+/**
+ * How alike two names are, from 0 to 1 (see the top of this file). `weight` and `Q` as for
+ * similarityNormalised(): by default letters only, no qualifier lists, as before krisis-names 6.
+ */
 export function similarity(a, b, weight, Q) {
   const x = normalise(a), y = normalise(b);
   return similarityNormalised(x, y, weight, Q);
@@ -115,9 +118,11 @@ export function nameScore(x, y, xs = sortWords(x), ys = sortWords(y)) {
  * similarity() of names already normalised: nameScore(), lowered by distinctive() when the names
  * share a word. `weight(word)` is how much a word counts (the matcher gives its inverse document
  * frequency in the two datasets); by default every word counts alike. `Q`: the lists of qualifiers
- * in use (compileQualifiers(); by default, the measured English, Welsh and Latin list).
+ * in use (compileQualifiers()); by default NONE, letters only, so that a caller that chose no lists
+ * (the WHG lookup's ranking, `--qualifiers none`) never gets the rule by accident. Matching passes
+ * the lists chosen.
  */
-export function similarityNormalised(x, y, weight, Q = compileQualifiers()) {
+export function similarityNormalised(x, y, weight, Q = compileQualifiers([])) {
   const plain = plainScore(x, y, weight);
   if (plain === 1) return plain;
   const q = qualifierScore(x, y, weight, qualifiers(x, Q), qualifiers(y, Q));

@@ -9,6 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { env, textFile } from './engine.js';
 import { detect } from '../src/engine/input.js';
+import { similarity, compileQualifiers, QUALIFIER_CAP } from '../src/engine/krisis/names.js';
 import { createLookup, memoryLedger, WHG_ENDPOINT, WHG_PLACE_TYPE as MODULE_PLACE_TYPE, whgLang, nameLang } from '../src/engine/gazetteer/index.js';
 import { match, gather, distanceKm as matchDistance } from '../src/engine/krisis/match.js';
 import { readWork, serialiseWork, decide, WORK_VERSION } from '../src/engine/krisis/work.js';
@@ -137,6 +138,20 @@ test('three Newcastles, all scored 100 by WHG, are ranked by distance, the far o
   // Krisis's own similarity, not WHG's 100.
   assert.ok(r.every((x) => x.similarity_score === 1), 'every one is named Newcastle');
   assert.ok(r.every((x) => x.candidate.score === 100));
+});
+test('a lookup ranks by letters only, whatever qualifier lists the matching chose: its scores are those of main before the lists (krisis-lookup 1)', () => {
+  // The scores main gave (643af55, krisis-lookup 1, before the qualifier lists), to the last digit. The lookup
+  // ranks WHG's answers with Krisis's similarity, so the default lists once raised Chipping Hill and Hill to
+  // 0.88 there, whatever the reviewer chose: the lookup's algorithm would have changed without its name.
+  const mk = (names) => names.map((n, i) => ({ iri: 'x' + i, name: n, coords: null, answer_rank: i }));
+  const cands = mk(['Hill', 'Chipping Hull', 'Warsop', 'Market Warsop', 'Ongar', 'Abingdon-on-Thames', 'Newton Regis']);
+  const score = (names) => rankGazetteer({ names, point: null }, cands).map((r) => [r.candidate.name, r.similarity_score]);
+  assert.deepEqual(score(['Chipping Hill', 'Market Warsop']), [['Market Warsop', 1], ['Chipping Hull', 0.9], ['Newton Regis', 0.571], ['Abingdon-on-Thames', 0.554], ['Hill', 0.551], ['Ongar', 0.518], ['Warsop', 0.496]]);
+  assert.deepEqual(score(['Abingdon']), [['Abingdon-on-Thames', 0.889], ['Chipping Hull', 0.535], ['Warsop', 0.528], ['Ongar', 0.492], ['Newton Regis', 0.486], ['Market Warsop', 0.468], ['Hill', 0.458]]);
+  assert.equal(LOOKUP_ALGORITHM, 'krisis-lookup 1', 'so its name is unchanged');
+  // The presence beside the absence: with the lists, the rule would raise Hill to the cap.
+  assert.equal(similarity('Chipping Hill', 'Hill', undefined, compileQualifiers()), QUALIFIER_CAP, 'control: the lists raise Chipping Hill and Hill');
+  assert.equal(similarity('Chipping Hill', 'Hill'), similarity('Chipping Hill', 'Hill', undefined, compileQualifiers([])), 'similarity() uses no lists unless given them');
 });
 test('without distances, candidates are ranked by country, then name similarity, then the service order', () => {
   const p = { iri: A('x'), label: 'Newcastle', names: ['Newcastle'], point: null, ccodes: ['GB'] };

@@ -40,7 +40,7 @@
 //   left null, on the lookup record, so the page can show each candidate's licence. No licence is ever
 //   written into an attestation, and none is assumed here.
 import { WHG_ENDPOINT, WHG_PLACE_TYPE, isWhg, normaliseWhgIri, mergeAttribution, whgLang, nameLang } from '../gazetteer/index.js';
-import { similarity, queryVariants, MAX_VARIANTS } from './names.js';
+import { similarity, queryVariants, MAX_VARIANTS, compileQualifiers } from './names.js';
 import { guard } from './guards.js';
 import { WORK_VERSION, canonicalEndpoint } from './work.js';
 import { linkState } from './identities.js';
@@ -331,12 +331,14 @@ const round = (x, d) => Math.round(x * 10 ** d) / 10 ** d;
  * similarity, then the service's order. Returns [{ candidate, similarity_score, distance_km,
  * ccodes_agree: true|false|null, far }], nothing dropped.
  */
+const LETTERS_ONLY = compileQualifiers([]);
 export function rankGazetteer(place, candidates, { maxDistanceKm = LOOKUP_DEFAULTS.maxDistanceKm } = {}) {
   const mine = (place.names?.length ? place.names : [place.label]).filter(Boolean);
   const ranked = candidates.map((c, i) => {
     const theirs = [c.name, ...(c.altNames || [])].filter(Boolean);
     let best = 0;
-    for (const a of mine) for (const b of theirs) best = Math.max(best, similarity(a, b));
+    // Letters only, as before the qualifier lists (LOOKUP_ALGORITHM unchanged): the service has its own order.
+    for (const a of mine) for (const b of theirs) best = Math.max(best, similarity(a, b, undefined, LETTERS_ONLY));
     const distance = Array.isArray(place.point) && Array.isArray(c.coords) ? round(distanceKm(place.point, c.coords), 1) : null;
     const agree = place.ccodes?.length && c.ccodes?.length ? c.ccodes.some((x) => place.ccodes.includes(x)) : null;
     return { candidate: c, similarity_score: round(best, 3), distance_km: distance, ccodes_agree: agree, far: distance !== null && distance > maxDistanceKm, order: c.answer_rank ?? i };

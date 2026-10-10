@@ -12,9 +12,12 @@ import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { env, res, file, textFile, go, outText } from './engine.js';
 import { detect } from '../src/engine/input.js';
-import { normalise, similarity, similarityNormalised, nameScore, distinctive, expandedScore, oneEdit, jaroWinkler, trigrams, qualifiers, qualifierScore, compileQualifiers, QUALIFIER_CAP } from '../src/engine/krisis/names.js';
+import { normalise, similarity as similarityOf, similarityNormalised, nameScore, distinctive, expandedScore, oneEdit, jaroWinkler, trigrams, qualifiers, qualifierScore, compileQualifiers, QUALIFIER_CAP } from '../src/engine/krisis/names.js';
 import { QUALIFIER_LISTS, DEFAULT_QUALIFIER_LISTS, QUALIFIER_TABLE_VERSION, qualifierIds } from '../src/engine/krisis/qualifiers.js';
 import { NameIndex, BLOCKING } from '../src/engine/krisis/blocking.js';
+// These tests were written when similarity() used the measured lists by default; it now uses none (letters
+// only), so here it is given them, and the default itself is tested by name (similarityOf).
+const similarity = (a, b, weight, Q = compileQualifiers()) => similarityOf(a, b, weight, Q);
 import { syntheticNames, random } from './krisis-synthetic.js';
 import { DataError } from '../src/engine/input.js';
 import { Sha256, fileSha256 } from '../src/engine/krisis/digest.js';
