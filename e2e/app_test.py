@@ -2776,6 +2776,9 @@ MYDATA_ANSWERS = {
     **{n: [mydata_answer(f'place:gn:90000{i:02d}', n, [-2.4 - i / 100, 53.3])] for i, n in enumerate(
         ['Mill Farm', 'Church Barn', 'Hall Green', 'Low Mill', 'Moss Side', 'Brook End', 'High Cross', 'Old Hall', 'Wood Lane'], 1)},
 }
+# Wood Lane has a second place of its name in its parish, scoring under the first, so WHG's own tie lets the
+# first through: the bulk accept leaves it to the reviewer all the same (#31, "skip ties").
+MYDATA_ANSWERS['Wood Lane'] = MYDATA_ANSWERS['Wood Lane'] + [{**mydata_answer('place:gn:9000011', 'Wood Lane', [-2.52, 53.31]), 'score': 95, 'match': False, 'confidence': 90}]
 # Kirk House has no candidate in the lookup: it is the place whose location (and identity) is adopted in Chora.
 MYDATA_KIRK = mydata_answer('place:gn:9000010', 'Kirk House', [-2.31, 53.12])
 MYDATA_KIRK_FEATURE = {'@id': 'https://whgazetteer.org/entity/place:gn:9000010/api', 'type': 'Feature', 'properties': {'title': 'Kirk House', 'ccodes': ['GB']},
@@ -2802,7 +2805,7 @@ def mydata_ends(doc):
             'candidate sets': (doc.get('gazetteer') or {}).get('candidateSets') or []}
 def mydata_complete(e):
     return (e.get('places') == 10 and e.get('regions') == 6 and e.get('contained') == 10 and e.get('stub') is True
-            and e.get('region identities') == 6 and e.get('regions promoted') is True and e.get('places promoted') == 9
+            and e.get('region identities') == 6 and e.get('regions promoted') is True and e.get('places promoted') == 8
             and e.get('geometries from the stub') == ['4'] and len(e.get('candidate sets') or []) == 1)
 
 def map_your_data_checks(pw, url, tmp):
@@ -2934,11 +2937,15 @@ def map_your_data_checks(pw, url, tmp):
         within = {q['query']: q.get('contained_in') for q in posts[n]['queries'].values()} if len(posts) > n else {}
         until(page, "() => !document.getElementById('bulk-accept').disabled", 30)
         page.click('#bulk-accept')
-        wait_state(page, lambda s: sum(1 for c in (s.get('work') or {}).get('candidates', []) if (c.get('decision') or {}).get('kind') == 'match' and '/region-' not in c['candidate_source']) == 9, T(15), 'accepted')
+        wait_state(page, lambda s: sum(1 for c in (s.get('work') or {}).get('candidates', []) if (c.get('decision') or {}).get('kind') == 'match' and '/region-' not in c['candidate_source']) == 8, T(15), 'accepted')
+        said = page.evaluate("() => document.getElementById('bulk-result').textContent")
+        wood = [c for c in W().get('candidates', []) if (c.get('other') or {}).get('label') == 'Wood Lane']
         page.click('#methodos-done'); step_is('review', 'done', 15)
         r['reviewed'] = True
-        return (within.get('Mill Farm') == ['gn:2641434'] and within.get('Wood Lane') == ['gn:2657441'] and len(within) == 10 and track()['steps'].get('relate') == 'current'), {'within': within, 'steps': track()['steps']}
-    attempt('Map your data: the places looked up within their parishes as the lookup step, the nine that pass WHG\'s guards accepted in bulk, and the review step done', places_and_review)
+        return (within.get('Mill Farm') == ['gn:2641434'] and within.get('Wood Lane') == ['gn:2657441'] and len(within) == 10
+                and 'another place of the same name' in said and len(wood) == 2 and all(c.get('decision') is None for c in wood)
+                and track()['steps'].get('relate') == 'current'), {'within': within, 'said': said[:300], 'Wood Lane': [(c['gazetteer']['id'], c.get('decision')) for c in wood], 'steps': track()['steps']}
+    attempt('Map your data: the places looked up within their parishes as the lookup step, the eight that pass WHG\'s guards accepted in bulk, Wood Lane (two places of its name in its parish) left to the reviewer and said so, and the review step done', places_and_review)
 
     def relate():
         need('reviewed')

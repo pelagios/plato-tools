@@ -20,6 +20,12 @@
 // Only the top of an answer can pass (WHG's client looks at no other). Krisis adds one rule of its
 // own: a candidate found only by a head-word query (names.js queryVariants) never passes.
 //
+// The bulk accept adds another (#31, Stephen, 10 October 2026: "skip ties"): a place is never accepted
+// in bulk when another candidate of the same lookup has the passing one's name (diceForm) and is not
+// itself left out as far or in another country, that is, when two places of that name were found where
+// it was looked for. WHG's tie lets such a pair through when their scores differ, or when their names and
+// descriptions are the same; on the real WHG it took the wrong Agden of two in Cheshire, 47 km off.
+//
 // Nothing here decides on its own. acceptGuarded() is what the page's "Accept the N that pass WHG's
 // guards" button calls, on the reviewer's word, and every decision it makes carries its batch, so
 // that undoBatch() takes back exactly those still as it left them. Pure: no network, no pipeline.
@@ -151,16 +157,37 @@ function maxKmOf(work, c, lookups) {
   return num(l?.parameters?.maxDistanceKm) ?? num(work.match_parameters?.maxDistanceKm) ?? 50;
 }
 const rowState = (work, iri) => work.places[iri]?.rowState ?? null;
+const isFar = (work, c, lookups) => typeof c.distance_km === 'number' && c.distance_km > maxKmOf(work, c, lookups);
+const otherCountry = (work, iri, c) => c.ccodes_agree === false || ccodesDisagree(work.places[iri], c);
+/**
+ * The place's other candidates with c's name, from the same lookup, and neither far nor in another
+ * country: the namesakes found where it was looked for (#31). A candidate of another lookup, or one
+ * the bulk accept would leave out as outside, is not one.
+ */
+function namesakesOf(work, iri, c, mine, lookups) {
+  const name = diceForm(c.other?.label);
+  if (!name) return [];
+  return mine.filter((x) => x !== c && x.gazetteer && x.lookup === c.lookup && diceForm(x.other?.label) === name
+    && !isFar(work, x, lookups) && !otherCountry(work, iri, x));
+}
+/** The name of the region a place was looked up within (its query's constraint, else the region it lies in), or null. */
+function lookedWithin(work, iri, c, lookups) {
+  const from = lookups.get(c.lookup)?.queries?.[iri]?.constraint?.from ?? work.places[iri]?.within ?? null;
+  return (from && work.regions?.[from]?.label) || null;
+}
 /**
  * What acceptGuarded() would do, changing nothing: { accept: [candidate], leftOut: { far, ccodes,
- * total, examples: [{ id, why }] }, several }. A place is considered when it has no decision yet and
- * is to be reconciled (no row state). Exactly one of its candidates must pass the guard; that one is
- * left out (and counted) when it is further from the place's point than the review's greatest
- * distance, or its countries disagree with the place's own. A place with several passing is counted
- * in `several`, and nothing is accepted for it.
+ * total, examples: [{ id, why }] }, several, tied: [{ id, place, count, region }] }. A place is
+ * considered when it has no decision yet and is to be reconciled (no row state). Exactly one of its
+ * candidates must pass the guard; that one is left out (and counted) when it is further from the
+ * place's point than the review's greatest distance, or its countries disagree with the place's own.
+ * A place with several passing is counted in `several`, and nothing is accepted for it. A place whose
+ * passing candidate has namesakes where it was looked for (namesakesOf) is listed in `tied`, with how
+ * many places of that name there are and the region's name, and nothing is accepted for it (#31).
  */
 export function planGuarded(work, { threshold = GUARD_DEFAULTS.threshold } = {}) {
   const accept = [], leftOut = { far: 0, ccodes: 0, total: 0, examples: [] };
+  const tied = [];
   let several = 0;
   const by = bySource(work), lookups = new Map();
   for (const l of work.lookups || []) if (!lookups.has(l.id)) lookups.set(l.id, l);
@@ -172,16 +199,18 @@ export function planGuarded(work, { threshold = GUARD_DEFAULTS.threshold } = {})
     if (ok.length > 1) { several++; continue; }
     if (!ok.length) continue;
     const c = ok[0];
-    const far = typeof c.distance_km === 'number' && c.distance_km > maxKmOf(work, c, lookups);
-    const ccodes = c.ccodes_agree === false || ccodesDisagree(work.places[iri], c);
+    const far = isFar(work, c, lookups);
+    const ccodes = otherCountry(work, iri, c);
     if (far || ccodes) {
       if (far) leftOut.far++; else leftOut.ccodes++;
       leftOut.total++; leftOut.examples.push({ id: c.id, why: far ? 'far' : 'ccodes' });
       continue;
     }
+    const namesakes = namesakesOf(work, iri, c, mine, lookups);
+    if (namesakes.length) { tied.push({ id: c.id, place: iri, count: namesakes.length + 1, region: lookedWithin(work, iri, c, lookups) }); continue; }
     accept.push(c);
   }
-  return { accept, leftOut, several };
+  return { accept, leftOut, several, tied };
 }
 function ccodesDisagree(place, c) {
   const mine = place?.ccodes, theirs = c.other?.ccodes;
@@ -202,15 +231,16 @@ function nextBatch(work) {
  * (planGuarded). Called only on the reviewer's word (the page's button): nothing calls it by itself,
  * and the command line never does. Each decision is 'match' of `identityType` (closeMatch by default,
  * the reviewer's choice), with a basis naming the guard, `guard` (the figures it passed on) and
- * `batch`. The batch is recorded in work.batches. Returns { batch, accepted, leftOut, several }:
- * `batch` null when nothing passed.
+ * `batch`. The batch is recorded in work.batches. Returns { batch, accepted, leftOut, several, ties }:
+ * `batch` null when nothing passed; `ties` the places left to the reviewer as having namesakes (#31).
  */
 export function acceptGuarded(work, { reviewer, identityType = 'closeMatch', at = new Date().toISOString(), threshold = GUARD_DEFAULTS.threshold } = {}) {
   if (!IDENTITY_TYPES.includes(identityType)) throw new Error(`Not an identity type: ${identityType}`);
   if (reviewer) { checkReviewer(reviewer); work.reviewer = reviewer; }
   const plan = planGuarded(work, { threshold });
   const counts = { far: plan.leftOut.far, ccodes: plan.leftOut.ccodes, total: plan.leftOut.total };
-  if (!plan.accept.length) return { batch: null, accepted: 0, leftOut: counts, several: plan.several };
+  const ties = plan.tied.length;
+  if (!plan.accept.length) return { batch: null, accepted: 0, leftOut: counts, several: plan.several, ties };
   const batch = nextBatch(work);
   for (const c of plan.accept) {
     const v = guardOf(c, { threshold });
@@ -219,7 +249,7 @@ export function acceptGuarded(work, { reviewer, identityType = 'closeMatch', at 
     Object.assign(c.decision, { guard: g, batch });
   }
   (work.batches ||= []).push({ id: batch, at, identityType, threshold, accepted: plan.accept.length, leftOut: counts });
-  return { batch, accepted: plan.accept.length, leftOut: counts, several: plan.several };
+  return { batch, accepted: plan.accept.length, leftOut: counts, several: plan.several, ties };
 }
 /**
  * Take back a batch: clear the decisions that still carry it (a decision changed since, or taken back
