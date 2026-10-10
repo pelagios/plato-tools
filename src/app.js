@@ -1460,8 +1460,11 @@ function fillChoices() {
   sel.innerHTML = PLACE_CHOICES.map((k) => `<option value="${k}"${k === want ? ' selected' : ''}>${escapeHtml(LOOKUP_WORDS.choices[k])}</option>`).join('');
 }
 /** The preview: places, queries, requests, the share of WHG's allowance, and the first queries exactly as sent. */
+// Each refresh is numbered: one overtaken while it waited for the places draws nothing, so an older
+// preview (made before the dataset's language was refused, say) never covers a newer one.
+let previewRun = 0;
 async function refreshPreview() {
-  const box = $('lookup-preview'), send = $('lookup-send');
+  const box = $('lookup-preview'), send = $('lookup-send'), run = ++previewRun;
   if (!$('lookup').open) return;
   const svc = lookupService();
   send.disabled = true;
@@ -1471,6 +1474,7 @@ async function refreshPreview() {
   if (svc.problem) { box.innerHTML = `<p class="warn">${escapeHtml(svc.problem)}</p>`; return; }
   if (!readable(input) && !reviewWork()) { box.innerHTML = `<p>${escapeHtml(LW.noDataset)}</p>`; return; }
   const g = await gatherPlaces();
+  if (run !== previewRun) return;
   const places = g?.places ?? null;
   if (!places && !reviewWork()) { box.innerHTML = `<p class="warn">${escapeHtml(busy ? LW.busy : LW.placesNotRead)}</p>`; return; }
   showRegionOffer(g);   // Krisis: region review
