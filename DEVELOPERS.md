@@ -1131,8 +1131,11 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   blocking reaches Farm from Market Farm only through the core, so the pair is let go, as with no
   lists; `NameIndex.best()`, `candidates(…, plain)`); it never lowers one
   (until the held-out check of 10 October 2026 such a pair scored the core's share of the weight if
-  lower, and lost real pairs that letters find: Newton and Newton Regis, 0.9, 0.2 km apart); a core in no more than 50 names
-  (`QUALIFIER_RARE`) is never common, as in a small dataset the qualifiers are rare too. **Only words
+  lower, and lost real pairs that letters find: Newton and Newton Regis, 0.9, 0.2 km apart); a core in no more names than
+  the larger of 5 and 0.1% of the distinct names of both datasets (`rareNames(N)`, `QUALIFIER_RARE`,
+  `QUALIFIER_RARE_SHARE`) is never common, as in a small dataset the qualifiers are rare too (0.1% is 57
+  on the held-out pair below; a fixed 50, until 10 October 2026, made every core rare in a small dataset,
+  and Market Farm was raised to Farm with Farm in 31 of 120 names). **Only words
   that rarely mark a separate place** are qualifiers (the maintainer's ruling of 1 October 2026,
   `krisis-names 7`): `krisis-names 6` had sixty (Great, Little, Long, Old, New, North and the other
   points, Upper, Lower, Nether, High, Much, Steeple, King's, Bishop's, St, Hen, and the joining words

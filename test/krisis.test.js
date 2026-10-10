@@ -12,7 +12,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { env, res, file, textFile, go, outText } from './engine.js';
 import { detect } from '../src/engine/input.js';
-import { normalise, similarity as similarityOf, similarityNormalised, nameScore, distinctive, expandedScore, oneEdit, jaroWinkler, trigrams, qualifiers, qualifierScore, compileQualifiers, QUALIFIER_CAP } from '../src/engine/krisis/names.js';
+import { normalise, similarity as similarityOf, similarityNormalised, nameScore, distinctive, expandedScore, oneEdit, jaroWinkler, trigrams, qualifiers, qualifierScore, compileQualifiers, QUALIFIER_CAP, rareNames } from '../src/engine/krisis/names.js';
 import { QUALIFIER_LISTS, DEFAULT_QUALIFIER_LISTS, QUALIFIER_TABLE_VERSION, qualifierIds } from '../src/engine/krisis/qualifiers.js';
 import { NameIndex, BLOCKING } from '../src/engine/krisis/blocking.js';
 // These tests were written when similarity() used the measured lists by default; it now uses none (letters
@@ -972,6 +972,27 @@ test('qualifiers: the guards stay: each has its own (Bere Regis and Bere on Stou
   assert.ok(similarity('Market Farm', 'Farm', idx.weight) < QUALIFIER_CAP && similarity('Market Warsop', 'Warsop', idx.weight) === QUALIFIER_CAP, 'control: Warsop is raised, Farm is not');
   assert.ok(idx.best(['Market Warsop'], 0.85).has(WARSOP), 'and Market Warsop finds Warsop in matching');
 });
+test('qualifiers: in a small dataset a common core is still common: the floor grows with the number of names', () => {
+  // The Fable review's input (10 October 2026): 120 names, Farm in 31 of them. With a fixed floor of 50 names
+  // every core was rare here, and Market Farm was raised to Farm at the cap.
+  const others = [['Farm'], ['Hall'], ['Ongar']];
+  for (let i = 0; i < 30; i++) others.push([`Zq${i}abc Farm`]);
+  for (let i = 0; i < 80; i++) others.push([`Yk${i}lmn`]);
+  const idx = new NameIndex(others, [['Market Farm'], ['Chipping Hall'], ['Chipping Ongar']], compileQualifiers());
+  const none = compileQualifiers([]), at = (name, other) => idx.best([name], 0.85).get(others.findIndex(([n]) => n === other));
+  assert.equal(rareNames(120), 5, 'the floor in a small dataset');
+  assert.equal(Math.round(rareNames(56585)), 57, 'and at the size of the held-out pair');
+  assert.ok(idx.weight('farm') < idx.weight.rare, 'Farm, in 31 names, is common');
+  // Market Farm and Farm: the rule declines the common core, and they keep what letters give them.
+  assert.equal(at('Market Farm', 'Farm'), similarity('Market Farm', 'Farm', idx.weight, none), 'Market Farm and Farm as letters score them');
+  assert.ok(at('Market Farm', 'Farm') < QUALIFIER_CAP && !idx.best(['Market Farm'], 0.85).rule.size, 'not raised to the cap, not the rule\'s');
+  // The presence beside the absence: a core in two names is rare, and raised (Ongar; Hall too, as by frequency
+  // alone it cannot be told from Ongar: that Hall is a common English word is not in the data).
+  for (const [name, core] of [['Chipping Ongar', 'Ongar'], ['Chipping Hall', 'Hall']]) {
+    assert.equal(at(name, core), QUALIFIER_CAP, `${name} and ${core} at the cap`);
+    assert.ok(idx.best([name], 0.85).rule.size === 1, `${name} and ${core}: the rule's`);
+  }
+});
 test('matching scores every pair as similarityNormalised() does: one implementation (names.js scored())', () => {
   // The Fable review's agreement probe (10 October 2026): a gazetteer with common words, so the weights bite.
   const others = [['Ongar'], ['Chipping Ongar'], ['Saint Ongar'], ['St Ongar'], ['Warsop'], ['Farm'], ['Hill'], ['Hall'], ['Newton'], ['Newton Regis'],
@@ -1139,9 +1160,12 @@ test('a work file made before the qualifier rule was marked (no rule, no qualifi
 });
 test('qualifiers in blocking: a name with qualifiers is looked up by its core too, where its own keys all fall in the qualifier', () => {
   // The trigrams of "ongar" in many names (common), those of "chipping" in a few (rare): Chipping
-  // Ongar's keys are all in "chipping", and Ongar has none of them.
+  // Ongar's keys are all in "chipping", and Ongar has none of them. The many are single words ending in
+  // -ongar, and many begin On-, so the trigrams are common but the word Ongar is not (a core in a third of
+  // the names would be common, and the rule would rightly decline it: rareNames()).
   const L = 'bdfhjklmnrstvwz', others = [];
-  for (let i = 0; i < 120; i++) others.push([`${L[i % 15]}${L[(i * 7) % 15]}${L[(i * 4) % 15]} Ongar`]);
+  for (let i = 0; i < 120; i++) others.push([`${L[i % 15]}${L[(i * 7) % 15]}${L[(i * 4) % 15]}ongar`]);
+  for (let i = 0; i < 120; i++) others.push([`On${L[i % 15]}${L[(i * 7) % 15]}${L[(i * 4) % 15]}`]);
   for (let i = 0; i < 10; i++) others.push([`Chipping ${L[i]}e${L[(i * 7) % 15]}o`]);
   for (let i = 0; i < 4000; i++) others.push([`${L[i % 15]}a${L[(i * 5) % 15]}e${L[(i * 11) % 15]}u${L[(i * 13) % 15]}`]);
   const idx = new NameIndex([...others, ['Ongar']]), ongar = others.length;

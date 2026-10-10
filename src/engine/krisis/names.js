@@ -48,8 +48,9 @@
 // score letters give it: in a gazetteer where Farm is in more names than Market, Market Farm is not
 // raised to Farm. It never lowers one either: until the held-out check of 10 October 2026 the pair
 // scored the core's share of the weight if lower, and lost real pairs that letters find (Newton and
-// Newton Regis, 0.9; Sutton and Sutton-under-Brailes). A core whose words are in no more than
-// QUALIFIER_RARE (50) names is never common: in a small dataset Market is rare too.
+// Newton Regis, 0.9; Sutton and Sutton-under-Brailes). A core whose words are in no more names than
+// rareNames(N) (the larger of QUALIFIER_RARE, 5, and QUALIFIER_RARE_SHARE, 0.1%, of the N distinct
+// names) is never common: in a small dataset Market is rare too.
 // Trigrams of the normalised name are what matching blocks on (blocking.js).
 
 import { QUALIFIER_LISTS, DEFAULT_QUALIFIER_LISTS, qualifierIds } from './qualifiers.js';
@@ -163,11 +164,17 @@ function plainScore(x, y, weight) {
 /** What a pair of names that differ only by a qualifier scores, and the most a pair that differs by one can. */
 export const QUALIFIER_CAP = 0.88;
 /**
- * A core whose words are in no more names than this is never too common to stand for a place (the
- * matcher gives its weight as `weight.rare`): in a small dataset, a qualifier is rare too, and Market,
- * in one name, would outweigh Ongar, in two.
+ * A core whose words are in no more than rareNames(N) of the N distinct names of both datasets is never
+ * too common to stand for a place (the matcher gives its weight as `weight.rare`): in a small dataset a
+ * qualifier is rare too, and Market, in one name, would outweigh Ongar, in two. The bound grows with N:
+ * a fixed 50 (until 10 October 2026) made every core rare in a dataset of a few hundred names, so that
+ * Market Farm was raised to Farm with Farm in 31 of 120. 0.1% of N is 50 at about the size of the
+ * held-out pair the rule was measured on (Index Villaris and Wikidata, 56,585 names: 57), and the floor
+ * of 5 keeps Chipping Ongar and Ongar (Ongar in two names) in a small one.
  */
-export const QUALIFIER_RARE = 50;
+export const QUALIFIER_RARE = 5;
+export const QUALIFIER_RARE_SHARE = 0.001;
+export const rareNames = (N) => Math.max(QUALIFIER_RARE, QUALIFIER_RARE_SHARE * N);
 
 const compiled = new Map();
 /**
@@ -252,7 +259,7 @@ export function qualifierScore(x, y, weight = () => 1, qx = qualifiers(x), qy = 
   const [more, fewer] = xAdds.length ? [qx, qy] : [qy, qx];
   const fewerCore = fewer.units.length ? fewer.core : (more === qx ? y : x);
   // The core of the name with fewer qualifiers must weigh at least as much as each qualifier word
-  // added, unless it is rare in itself (weight.rare: the weight of a word in QUALIFIER_RARE names).
+  // added, unless it is rare in itself (weight.rare: the weight of a word in rareNames(N) names).
   let coreWeight = 0, addedWeight = 0, common = false;
   const added = [];
   for (const v of fewerCore.split(' ')) coreWeight += weight(v);

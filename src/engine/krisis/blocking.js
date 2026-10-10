@@ -44,7 +44,7 @@
 //
 // Scoring is names.js's, and each word is weighted by its inverse document frequency in the names of
 // both datasets, ln(1 + N / df), so that a common word counts for little.
-import { normalise, sortWords, trigrams, qualifiers, scored, compileQualifiers, QUALIFIER_CAP, QUALIFIER_RARE } from './names.js';
+import { normalise, sortWords, trigrams, qualifiers, scored, compileQualifiers, QUALIFIER_CAP, rareNames } from './names.js';
 
 export const BLOCKING = { share: 0.4, commonShare: 0.01, commonFloor: 50, keys: 4, spread: 4, far: 10 };
 export const BLOCKING_RULE = 'The names of the other dataset are indexed by their trigrams (normalised, padded with two spaces before and one after). '
@@ -96,8 +96,8 @@ export class NameIndex {
     const N = seen.size;
     const idf = new Map();
     this.weight = (w) => { let v = idf.get(w); if (v === undefined) { v = Math.log(1 + N / (df.get(w) || 1)); idf.set(w, v); } return v; };
-    // What a word in QUALIFIER_RARE names weighs: a core weighing this much is never too common (names.js).
-    this.weight.rare = Math.log(1 + N / QUALIFIER_RARE);
+    // What a word in rareNames(N) names weighs: a core weighing this much is never too common (names.js).
+    this.weight.rare = Math.log(1 + N / rareNames(N));
   }
 
   /**

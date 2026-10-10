@@ -17,7 +17,7 @@
 import { run } from '../pipeline.js';
 import { Report } from '../report.js';
 import { collectWithdrawn, resolveWithdrawn } from '../../formats/shared.js';
-import { DISTINCT_GATE, QUALIFIER_CAP, QUALIFIER_RARE, compileQualifiers, normalise } from './names.js';
+import { DISTINCT_GATE, QUALIFIER_CAP, QUALIFIER_RARE, QUALIFIER_RARE_SHARE, compileQualifiers, normalise } from './names.js';
 import { qualifierRecord } from './qualifiers.js';
 import { NameIndex, BLOCKING, BLOCKING_RULE } from './blocking.js';
 import { WORK_VERSION, MATCH_DEFAULTS, fileRecords, serialiseWork, checkReviewer, checkMatchOptions, NOT_READ_KINDS, isColumns } from './work.js';
@@ -44,7 +44,7 @@ export const SCORING = 'Each name of a place (its label and every toponym and ro
   + 'Chipping and Market in front of a name; Regis behind it; or at its end a phrase of on, upon, under, next, juxta or super and at most three words after it); the rest is the name\'s core, which keeps at least one word not on the lists. '
   + `When one name has every qualifier the other has and more, and their cores are the same (scoring 1 as above: the same words, but for their order or a short form), the pair scores ${QUALIFIER_CAP}, or the score as above if that is higher (the rule only raises a score: it never raises one past ${QUALIFIER_CAP}, a qualifier being still a difference, nor lowers one); if the cores differ, the score as above. `
   + 'When each has a qualifier the other has not (Chipping Ongar and Market Ongar), this does not apply. Nor does it when the core is common: its words must weigh at least as much as each qualifier word added (a phrase by its joining word), '
-  + `unless they are in no more than ${QUALIFIER_RARE} names. A suggestion that only this rule took over the threshold says so (rule: qualifier, and the qualifier). `
+  + `unless they are in no more names than the larger of ${QUALIFIER_RARE} and ${QUALIFIER_RARE_SHARE * 100}% of the distinct names of both datasets. A suggestion that only this rule took over the threshold says so (rule: qualifier, and the qualifier). `
   + 'Two places score the best of any pair of their names, over the pairs blocking allows (see blocking). '
   + "A place's point is the first Point geometry of its attestations, else the centre of the first bounding box, else none, passing over attestations that are negated or withdrawn (retracted or superseded); "
   + 'a pair whose points are further apart than maxDistanceKm (great-circle distance) is dropped, and a pair without two points is kept, with no distance. '
@@ -53,7 +53,7 @@ export const SCORING = 'Each name of a place (its label and every toponym and ro
   + 'starting with the group whose best scores higher (the places with a point on a tie), and when one group runs out the other fills the rest; '
   + 'when it has none, by score.';
 /** The lists of qualifiers of `ids` and their bounds, as the work file records them. */
-export const qualifierParameters = (ids) => ({ ...qualifierRecord(ids), cap: QUALIFIER_CAP, rare: QUALIFIER_RARE });
+export const qualifierParameters = (ids) => ({ ...qualifierRecord(ids), cap: QUALIFIER_CAP, rare: QUALIFIER_RARE, rareShare: QUALIFIER_RARE_SHARE });
 
 /**
  * The qualifiers the rule set aside, as the names write them where that can be found ("on Thames"
