@@ -2973,7 +2973,7 @@ def map_your_data_checks(pw, url, tmp):
         r['reviewed'] = True
         return (within.get('Mill Farm') == ['gn:2641434'] and within.get('Wood Lane') == ['gn:2657441'] and len(within) == 10
                 and '1 place has 2 candidates of its name where it was looked for' in said and len(wood) == 2 and all(c.get('decision') is None for c in wood)
-                and badge == ['2 places of this name in Ashby: left for you, not accepted in bulk.']
+                and badge == ['2 places of this name in Ashby (Lancashire): left for you, not accepted in bulk.']
                 and track()['steps'].get('relate') == 'current'), {'said': said[:300], 'badge': badge, 'at': page.inner_text('#review-subject')[:80], 'within': within, 'Wood Lane': [(c['gazetteer']['id'], c.get('decision')) for c in wood], 'steps': track()['steps']}
     attempt('Map your data: the places looked up within their parishes as the lookup step, the eight that pass WHG\'s guards accepted in bulk, Wood Lane (two places of its name in its parish) left to the reviewer and said so, and the review step done', places_and_review)
 
