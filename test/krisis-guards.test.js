@@ -179,7 +179,7 @@ test('acceptGuarded: one passing candidate each, as closeMatch by default, with 
   assert.equal(before.accept.length, 2, 'planGuarded changes nothing and says how many');
   assert.ok(work.candidates.every((c) => c.decision === null || c.gazetteer.id === 'place:gn:7'), 'planning decided nothing');
   const r = acceptGuarded(work, { reviewer: REVIEWER, at: NOW });
-  assert.deepEqual(r, { batch: 'b1', accepted: 2, leftOut: { far: 1, ccodes: 1, total: 2 }, several: 0 });
+  assert.deepEqual(r, { batch: 'b1', accepted: 2, leftOut: { far: 1, ccodes: 1, total: 2 }, several: 0, ties: 0 });
   const alton = candOf(work, 1), felton = candOf(work, 8);
   for (const c of [alton, felton]) {
     assert.equal(c.decision.kind, 'match');
@@ -239,7 +239,41 @@ test('"WHG\'s guards first" orders the places with a passing candidate first; a 
   const two = await looked([place('gorton', 'Gorton', -2.2, 53.47, { attestations: [named('Gorton', 'Gortun'), at(-2.2, 53.47)] })],
     { Gorton: [cand(9, 'Gorton', { repr_point: [-2.2, 53.47] })], Gortun: [cand(10, 'Gortun', { repr_point: [-2.21, 53.47] })] }, { allNames: true });
   assert.equal(two.work.candidates.filter((c) => guardOf(c).pass).length, 2, 'control: both pass');
-  assert.deepEqual(acceptGuarded(two.work, { at: NOW }), { batch: null, accepted: 0, leftOut: { far: 0, ccodes: 0, total: 0 }, several: 1 });
+  assert.deepEqual(acceptGuarded(two.work, { at: NOW }), { batch: null, accepted: 0, leftOut: { far: 0, ccodes: 0, total: 0 }, several: 1, ties: 0 });
+});
+
+// #31 (Stephen, 10 Oct 2026, "skip ties"): two places of one name where a place was looked for are never
+// accepted in bulk, even when WHG's own tie lets the top through (here the second scores under it).
+test('the bulk accept leaves a place to the reviewer when another candidate of its lookup has the same name; a namesake far off or in another country does not count', async () => {
+  const P = [place('agden', 'Agden', -2.4, 53.3), place('barton', 'Barton', -2.3, 53.1), place('cotton', 'Cotton', -2.6, 53.2), place('dutton', 'Dutton', -2.6, 53.3)];
+  const T = {
+    Agden: [cand(21, 'Agden', { repr_point: [-2.41, 53.3] }), cand(22, 'Agden', { score: 95, match: false, repr_point: [-2.6, 53.35] })],
+    Barton: [cand(23, 'Barton', { repr_point: [-2.3, 53.1] }), cand(24, 'Bartonhill', { score: 95, match: false, repr_point: [-2.31, 53.1] })],
+    Cotton: [cand(25, 'Cotton', { repr_point: [-2.6, 53.2] }), cand(26, 'Cotton', { score: 95, match: false, repr_point: [-2.6, 54.4] })],
+    Dutton: [cand(27, 'Dutton', { repr_point: [-2.6, 53.3] }), cand(28, 'Dutton', { score: 95, match: false, ccodes: ['FR'], repr_point: [-2.61, 53.3] })],
+  };
+  const { work } = await looked(P, T);
+  for (const id of [21, 23, 25, 27]) assert.equal(guardOf(candOf(work, id)).pass, true, `control: place:gn:${id} passes WHG's guard`);
+  assert.equal(candOf(work, 21).gazetteer.tie, false, "control: WHG's own tie does not catch the two Agdens");
+  assert.ok(candOf(work, 26).distance_km > 50, 'control: the second Cotton is far');
+  assert.equal(candOf(work, 28).ccodes_agree, false, 'control: the second Dutton is in another country');
+  const plan = planGuarded(work);
+  assert.deepEqual(plan.tied, [{ id: candOf(work, 21).id, place: A('agden'), count: 2, region: null }], 'Agden is tied');
+  assert.deepEqual(plan.accept.map((c) => c.gazetteer.id).sort(), ['place:gn:23', 'place:gn:25', 'place:gn:27'], 'a different name, a far namesake and one abroad do not tie');
+  const r = acceptGuarded(work, { at: NOW });
+  assert.deepEqual([r.accepted, r.ties], [3, 1]);
+  assert.equal(candOf(work, 21).decision, null, 'Agden left for the reviewer');
+  assert.equal(candOf(work, 23).decision.kind, 'match', 'control: Barton accepted in the same batch');
+  // A namesake found by another lookup (a name typed for the place, say) is not one of this lookup's.
+  const { work: w2 } = await looked(P.slice(0, 1), T);
+  candOf(w2, 22).lookup = 'another';
+  assert.deepEqual(planGuarded(w2).tied, [], 'another lookup\'s namesake does not tie');
+  assert.equal(acceptGuarded(w2, { at: NOW }).accepted, 1);
+  // What the page says.
+  assert.equal(guardWords.namesakes(2, 'Bucklow'), '2 places of this name in Bucklow: left for you, not accepted in bulk.');
+  assert.equal(guardWords.namesakes(3, null), '3 places of this name where it was looked for: left for you, not accepted in bulk.');
+  assert.match(guardWords.leftOut({ far: 0, ccodes: 0, total: 0 }, 0, 1), /^1 place has another place of the same name where it was looked for, and is left to you\.$/);
+  assert.equal(guardWords.leftOut({ far: 0, ccodes: 0, total: 0 }, 0, 0), '', 'control: nothing to say without ties');
 });
 
 test('planGuarded and guardsFirst cost in proportion to the candidates, not places × candidates (2,400 places × 5 well under 100 ms)', () => {
@@ -445,7 +479,7 @@ test('old work files still read; a candidate looked up before the guard was stor
   const back = readWork(JSON.stringify(old));
   assert.equal(guardOf(candOf(back, 1)).reason, 'not-recorded');
   assert.equal(guardOf(candOf(work, 1)).pass, true, 'control: with the figures, it passes');
-  assert.deepEqual(acceptGuarded(back, { at: NOW }), { batch: null, accepted: 0, leftOut: { far: 0, ccodes: 0, total: 0 }, several: 0 });
+  assert.deepEqual(acceptGuarded(back, { at: NOW }), { batch: null, accepted: 0, leftOut: { far: 0, ccodes: 0, total: 0 }, several: 0, ties: 0 });
   const refused = (f, re) => { const w = JSON.parse(serialiseWork(work)); f(w); assert.throws(() => readWork(JSON.stringify(w)), (e) => e.name === 'DataError' && re.test(e.message), re); };
   refused((w) => { w.places[A('alton')].rowState = 'drop'; }, /row state/);
   refused((w) => { w.candidates[0].flagged = 'yes'; }, /flag/);
@@ -475,7 +509,7 @@ test('the command line sends variants with --variants (dry run), and counts what
   const out = JSON.parse(r.stdout.trim().split('\n')[0]);
   assert.equal(out.status, 'ok', r.stdout + r.stderr);
   assert.equal(out.preview.variants, true);
-  assert.deepEqual(out.guarded, { pass: 2, leftOut: { far: 1, ccodes: 1, total: 2 }, several: 0 });
+  assert.deepEqual(out.guarded, { pass: 2, leftOut: { far: 1, ccodes: 1, total: 2 }, several: 0, ties: 0 });
   assert.ok(out.warnings.some((w) => /on the page only/.test(w)));
   assert.equal(readFileSync(review, 'utf8'), text, 'the work file is untouched: nothing accepted');
   const plain = JSON.parse(run().stdout.trim().split('\n')[0]);
