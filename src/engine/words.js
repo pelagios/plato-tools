@@ -857,6 +857,8 @@ export const lookupPage = {
   never: (name) => `Not allowed: ${name} is set to Never in Permissions.`,
   openPermissions: 'Permissions…',
   badEndpoint: "Give the reconciliation service's address, beginning https://.",
+  /** The dataset's language, typed, that is not a code WHG can be sent (whg.js whgLang): nothing is sent until it is put right. */
+  badLang: (v) => `"${v}" is not a language code such as en, la or ang, so nothing is sent: correct it, or empty the field to send names with no language.`,
   badTemplate: "Give how to make a candidate's address from its id, with {{id}} in it, such as https://www.wikidata.org/wiki/{{id}}; or leave it empty.",
   /** The share of WHG's daily allowance a lookup would use. */
   share: (requests, perDay) => `That is ${pct(requests, perDay)} of WHG's allowance of ${perDay.toLocaleString('en-GB')} requests a day.`,
@@ -891,7 +893,7 @@ export const lookupPage = {
   licenceWarns: (l) => !l || l.commercial === false || l.redistributable === false,
   /** Single-place lookups on the review screen. */
   find: (service) => `Find this place in ${service}…`,
-  findLabel: 'The name to look for. You may change it; only this name is sent. What it finds is added to the candidates already here, which it does not replace.',
+  findLabel: (lang = null) => `The name to look for. You may change it; only this name is sent, with ${lang ? `its own language tag, else the dataset's language (${lang})` : 'its own language tag, if it has one'}. What it finds is added to the candidates already here, which it does not replace.`,
   findSend: 'Send 1 query',
   tryNames: (n) => `Not found? Try its other names (${plural(n, 'query', 'queries')})`,
   again: 'Look it up again',

@@ -127,9 +127,13 @@ function reader(side, rep, word, standIns = new Set()) {
     if (typeof iri !== 'string' || !iri) { rep.add('error', 'no-address', TEXT['no-address'](words(word)), rec.label ?? undefined); side.unaddressed++; return; }
     const names = [], seen = new Set(), langs = {};
     const add = (n) => { if (typeof n !== 'string' || !n.trim() || seen.has(n)) return; seen.add(n); names.push(n); };
-    // A name's language tag, as the name states it (the first tag a name is given wins): a gazetteer
-    // lookup sends it with the name (lookup.js).
-    const tag = (n, lang) => { if (typeof n === 'string' && n.trim() && typeof lang === 'string' && lang.trim() && !Object.hasOwn(langs, n)) langs[n] = lang.trim(); };
+    // A name's language tag, as the name states it (the first tag a name is given wins), keyed by the name
+    // trimmed and in lower case, as a lookup tells names apart: it sends the tag with the name (lookup.js).
+    const tag = (n, lang) => {
+      if (typeof n !== 'string' || !n.trim() || typeof lang !== 'string' || !lang.trim()) return;
+      const k = n.trim().toLowerCase();
+      if (!Object.hasOwn(langs, k)) langs[k] = lang.trim();
+    };
     add(rec.label);
     const types = new Set();
     for (const a of rec.attestations || []) {

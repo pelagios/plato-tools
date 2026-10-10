@@ -1540,8 +1540,16 @@ def krisis_regions_case(page, tmp, url):
         if s.get('phase') != 'detected': return {'phase': s.get('phase')}
         if not page.evaluate("() => document.getElementById('lookup').open"): page.click('#lookup > summary')
         page.fill('#whg-token', LOOKUP_TOKEN); page.press('#whg-token', 'Tab')
-        # The dataset's language: its names give none of their own, so each is sent with this one.
+        # The dataset's language: its names give none of their own, so each is sent with this one. First one that
+        # is not a code (und), refused beside the field and in the preview, with Send disabled; then en, taken.
+        lang = {}
+        page.fill('#lookup-lang', 'und')
+        page.wait_for_function("() => !document.getElementById('lookup-lang-problem').hidden && document.getElementById('lookup-preview').textContent.includes('is not a language code')", timeout=30_000)
+        lang['bad'] = page.evaluate("() => ({ problem: document.getElementById('lookup-lang-problem').textContent, preview: document.getElementById('lookup-preview').textContent, "
+                                    "send: document.getElementById('lookup-send').disabled, invalid: document.getElementById('lookup-lang').getAttribute('aria-invalid') })")
         page.fill('#lookup-lang', 'en')
+        page.wait_for_function("() => document.getElementById('lookup-lang-problem').hidden && document.getElementById('lookup-preview').textContent.includes('is sent as en')", timeout=30_000)
+        lang['good'] = page.evaluate("() => ({ preview: document.getElementById('lookup-preview').textContent, invalid: document.getElementById('lookup-lang').getAttribute('aria-invalid') })")
         page.wait_for_function("() => !document.getElementById('regions-offer').hidden", timeout=60_000)
         offer = page.inner_text('#regions-offer')
         # The start button is disabled while the page is busy (reading the dataset's places); the click waits for it.
@@ -1549,7 +1557,7 @@ def krisis_regions_case(page, tmp, url):
         s = wait_state(page, lambda s: rs(s).get('nav') and len((s.get('work') or {}).get('regions') or {}) == 6, 120, 'regions')
         if s.get('timedOut'): return {'timedOut': s['timedOut'], 'offer': offer, 'offer shown': page.evaluate("() => !document.getElementById('regions-offer').hidden"), 'summary': s.get('summary')}
         page.wait_for_selector('#regions-level button[data-rgo="level"]', timeout=30_000)
-        return {'levels': (s.get('columns') or {}).get('levels'), 'offer': offer, 'nav': rs(s).get('nav'), 'level': rs(s).get('level'),
+        return {'lang': lang, 'levels': (s.get('columns') or {}).get('levels'), 'offer': offer, 'nav': rs(s).get('nav'), 'level': rs(s).get('level'),
                 'keys': sorted((s.get('work') or {}).get('regions', {}).keys()), 'button': page.inner_text('#regions-level button[data-rgo="level"]')}
     su = step(setup)
     check('regions: a table\'s Country, County and Parish columns are read as "within" levels 1-3; the lookup panel offers the review, which shows each level by its heading, Country first',
@@ -1557,6 +1565,12 @@ def krisis_regions_case(page, tmp, url):
           and su.get('nav') == ['Country 0/1', 'County locked', 'Parish locked', 'Places 0/3'] and su.get('level') == 1
           and len(su.get('keys') or []) == 6 and all(k.startswith(base + 'place/region-') for k in su.get('keys') or []), su)
     check('regions: the level\'s button says what it would send', su.get('button') == 'Look up the ready region of Country (1 query in 1 request)', su)
+    bad, good = (su.get('lang') or {}).get('bad') or {}, (su.get('lang') or {}).get('good') or {}
+    check('regions: a dataset language that is not a code (und) is refused beside the field and in the preview, with Send disabled, and the preview never says none is set; en is taken, and said',
+          (bad.get('problem') or '').startswith('"und" is not a language code') and 'is not a language code' in (bad.get('preview') or '') and bad.get('send') is True
+          and bad.get('invalid') == 'true' and 'no language is set' not in (bad.get('preview') or '')
+          and 'A name with no language of its own is sent as en' in (good.get('preview') or '') and good.get('invalid') == 'false' and 'no language is set' not in (good.get('preview') or ''),
+          su.get('lang') or su)
 
     # Level 1, then settled; level 2 is asked within its match.
     def levels_1_2():

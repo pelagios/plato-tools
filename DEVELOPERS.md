@@ -1838,9 +1838,11 @@ talking to the service is the shared gazetteer module's (`src/engine/gazetteer/`
 work, used here and never changed). The command line is `plato-tools lookup` (with `--dry-run` to see
 what would be sent); on the page it is the panel "Look up in a gazetteer (online, optional)" beside
 matching (below). This sends each place's name to the gazetteer, and its coordinates only with `--near`.
-To WHG it also sends each name's language (whg.js A13): the name's own tag, mapped to its primary subtag,
-else the dataset's language (`--lang`, or the panel's language field), else none, never `und`; a language
-is not a filter, so it never makes a batch suspect. The region review's levels ask for areas only
+To WHG it also sends each name's language (whg.js A13): the name's own tag, mapped to its primary subtag
+(two letters where the language has them: `eng` as `en`), else the dataset's language (`--lang`, or the
+panel's language field, either refused when it is not a code), else none, never `und`. A name tagged
+`und` or `mis` is taken as untagged; one tagged `mul` or `zxx` is sent with none; collective codes and
+grandfathered tags name no language. A language is not a filter, so it never makes a batch suspect. The region review's levels ask for areas only
 (`area_only`, A12), so that a region is never matched to a point, which could not scope the lookup of
 the places within it; the places themselves never send it.
 

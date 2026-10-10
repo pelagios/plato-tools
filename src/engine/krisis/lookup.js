@@ -39,7 +39,7 @@
 // - The service's `attribution` (the licences of the sources searched) is kept as it came, a null
 //   left null, on the lookup record, so the page can show each candidate's licence. No licence is ever
 //   written into an attestation, and none is assumed here.
-import { WHG_ENDPOINT, WHG_PLACE_TYPE, isWhg, normaliseWhgIri, mergeAttribution, whgLang } from '../gazetteer/index.js';
+import { WHG_ENDPOINT, WHG_PLACE_TYPE, isWhg, normaliseWhgIri, mergeAttribution, whgLang, nameLang } from '../gazetteer/index.js';
 import { similarity, queryVariants, MAX_VARIANTS } from './names.js';
 import { guard } from './guards.js';
 import { WORK_VERSION, canonicalEndpoint } from './work.js';
@@ -233,8 +233,9 @@ function namesToSend(place, allNames, variants = false) {
   const all = [place.label, ...(place.names || [])].filter((n) => typeof n === 'string' && n.trim() && n.trim() !== place.iri);
   if (!all.length) return [];
   const chosen = allNames ? all : [all[0]];
-  // A name's language tag, as the dataset gives it (gather()); a form made from a name is in its language.
-  const tagOf = (n) => (place.langs && Object.hasOwn(place.langs, n) ? place.langs[n] : null);
+  // A name's language tag, as the dataset gives it (gather(), keyed by the name trimmed and in lower case,
+  // as names are told apart here); a form made from a name is in its language.
+  const tagOf = (n) => { const k = String(n).trim().toLowerCase(); return place.langs && Object.hasOwn(place.langs, k) ? place.langs[k] : null; };
   const seen = new Set(), out = [];
   const add = (text, how, tag) => { const k = String(text).trim().toLowerCase(); if (k && !seen.has(k)) { seen.add(k); out.push({ text, how, tag }); } };
   if (!variants) { for (const n of chosen) add(n, 'given', tagOf(n)); return out; }
@@ -274,11 +275,14 @@ export function planQueries(places, options = {}) {
     if (o.countries && !params?.countries) withoutCountries++;
     if (o.nearKm > 0 && params?.radius === undefined) withoutPoint++;
     const mine = names.map(({ text, how, tag }) => {
-      // WHG only: the name's own language, else the dataset's; none rather than "und" (whg.js A13).
-      const lang = whg ? whgLang(tag) ?? datasetLang : null;
+      // WHG only (whg.js A13): the name's own language; untagged (or und, mis), the dataset's; tagged mul or
+      // zxx, none; never "und". Only a tag's primary subtag is sent: WHG takes a bare code, so a script
+      // (la-Latn) or a region (en-GB) is left out.
+      const own = whg ? nameLang(tag) : 'none';
+      const lang = !whg || own === 'none' ? null : own === 'untagged' ? datasetLang : own;
       if (whg && !lang) withoutLanguage++;
-      const own = { ...(params || {}), ...(areaOnly ? { area_only: true } : {}), ...(lang ? { lang } : {}) };
-      return { key: [place.iri, text], query: text, how, limit: o.limit, ...(type ? { type } : {}), ...(Object.keys(own).length ? { params: own } : {}) };
+      const sent = { ...(params || {}), ...(areaOnly ? { area_only: true } : {}), ...(lang ? { lang } : {}) };
+      return { key: [place.iri, text], query: text, how, limit: o.limit, ...(type ? { type } : {}), ...(Object.keys(sent).length ? { params: sent } : {}) };
     });
     queries.push(...mine);
     if (!chunk || (chunk.queries.length && chunk.queries.length + mine.length > o.batchSize)) chunks.push(chunk = { places: [], queries: [] });

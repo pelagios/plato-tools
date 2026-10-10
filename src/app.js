@@ -26,7 +26,7 @@ import { RELOAD_LOSES } from './lib/permission-words.js';
 // Krisis: gazetteer lookup, run on this thread (never the worker), through the permissions module, with
 // the token from its one keeper (permissions.token).
 import { LOOKUP_WORDS, lookupPage as LW } from './engine/words.js';
-import { createLookup, WHG_ENDPOINT, isWhg } from './engine/gazetteer/index.js';
+import { createLookup, WHG_ENDPOINT, isWhg, whgLang } from './engine/gazetteer/index.js';
 import { runLookup, planLookup, gazetteerPermission, permittedFetch, serviceOf, iriFromTemplate, iriVia, manifestSettings, newWork, defaultChoice, licenceOf, PLACE_CHOICES, WHG_REQUESTS_A_DAY } from './engine/krisis/lookup.js';
 import { candidateSource } from './engine/krisis/identity.js';
 // Krisis: region review (Methodos #28, stages 3 and 4), run on this thread as the lookup is, through the same shared WHG lookup.
@@ -1413,11 +1413,12 @@ function onPlaces(data) {
 
 /** The service chosen: WHG's, or another's by its address (and a template for its candidates' addresses). */
 function lookupService() {
-  if (document.querySelector('input[name="lookup-service"]:checked')?.value !== 'other') return { service: serviceOf(WHG_ENDPOINT), whg: true };
+  // The dataset's language is WHG's alone: one that is not a code refuses the lookup, as the command line's --lang does.
+  if (document.querySelector('input[name="lookup-service"]:checked')?.value !== 'other') { const bad = langProblem(); return bad ? { problem: bad } : { service: serviceOf(WHG_ENDPOINT), whg: true }; }
   const endpoint = $('lookup-endpoint').value.trim();
   let service;
   try { if (!/^https:\/\//i.test(endpoint)) throw new Error(); service = serviceOf(endpoint); } catch { return { problem: LW.badEndpoint }; }
-  if (isWhg(endpoint)) return { service: serviceOf(WHG_ENDPOINT), whg: true };
+  if (isWhg(endpoint)) { const bad = langProblem(); return bad ? { problem: bad } : { service: serviceOf(WHG_ENDPOINT), whg: true }; }
   const t = $('lookup-iri').value.trim();
   if (t) { try { iriFromTemplate(t); } catch { return { problem: LW.badTemplate }; } }
   return { service, whg: false, template: t || null };
@@ -1429,7 +1430,19 @@ function lookupOptions(extra = {}) {
 }
 /** The dataset's language, as typed in the lookup panel, or null: the lookup sends WHG its code (whg.js whgLang). */
 function lookupLang() {
-  return $('lookup-lang').value.trim() || null;
+  const v = $('lookup-lang').value.trim();
+  return v && whgLang(v) ? v : null;
+}
+/** The words refusing the dataset's language when it is typed and is not a code WHG can be sent, or null. */
+function langProblem() {
+  const v = $('lookup-lang').value.trim();
+  return v && !whgLang(v) ? LW.badLang(v) : null;
+}
+/** Say beside the field, as it is typed, whether the dataset's language can be sent. */
+function showLangProblem() {
+  const bad = langProblem(), el = $('lookup-lang-problem');
+  el.textContent = bad || ''; el.hidden = !bad;
+  $('lookup-lang').setAttribute('aria-invalid', bad ? 'true' : 'false');
 }
 /**
  * The places a lookup would take and what it would send, planned by runLookup()'s own planLookup, in
@@ -1607,7 +1620,7 @@ function lookupPlaceHtml(iri, place) {
   if (!may) return `<div class="find">${out}<p class="lookup-permission"></p></div>`;
   out += `<button type="button" data-look="find">${escapeHtml(LW.find(service))}</button>`;
   if (findFor === iri) {
-    out += `<form class="find-form" data-for="${escapeHtml(iri)}"><label for="find-query">${escapeHtml(LW.findLabel)}</label>`
+    out += `<form class="find-form" data-for="${escapeHtml(iri)}"><label for="find-query">${escapeHtml(LW.findLabel(lookupLang() ? whgLang(lookupLang()) : null))}</label>`
       + `<input id="find-query" type="text" value="${escapeHtml(place.label || '')}" autocomplete="off" spellcheck="false">`
       + `<button type="submit" class="primary">${escapeHtml(LW.findSend)}</button><button type="button" data-look="cancel">Cancel</button></form>`;
   }
@@ -1675,7 +1688,10 @@ $('lookup').addEventListener('change', (e) => {
   if (e.target.name === 'lookup-service') document.querySelector('.lookup-other').hidden = e.target.value !== 'other';
   refreshPreview();
 });
-$('lookup').addEventListener('input', (e) => { if (e.target.type === 'number' || e.target.type === 'url' || e.target.id === 'lookup-iri' || e.target.id === 'lookup-lang') refreshPreview(); });
+$('lookup').addEventListener('input', (e) => {
+  if (e.target.id === 'lookup-lang') showLangProblem();
+  if (e.target.type === 'number' || e.target.type === 'url' || e.target.id === 'lookup-iri' || e.target.id === 'lookup-lang') refreshPreview();
+});
 // Forget: the shared lookup sends no token from its next request, and the keeper forgets it.
 $('whg-forget').onclick = () => { $('whg-token').value = ''; whgLookup().clearToken(); token.forget(); lookupSay(LW.forgotten); };
 // A token given or forgotten (here, in the Permissions panel, or in another tab) goes to the shared lookup.
@@ -1865,6 +1881,9 @@ async function regionRun(kind, { level, relax, only, unconstrained = false } = {
   if (looking || busy || !work) return;
   if ($('whg-token').value.trim()) commitToken();
   const svc = whgService();
+  // A dataset's language that is not a code: nothing is sent until it is put right (as lookUp, through lookupService).
+  const badLang = langProblem();
+  if (badLang) { showLangProblem(); $('lookup').open = true; lookupSay(badLang, true); regionSay(badLang); $('lookup-lang').focus(); return; }
   // Methodos: looking up every place within its settled regions is the lookup step's run (one place's, or one unconstrained, is not).
   const whole = kind === 'places' && !only && !unconstrained;
   if (!mayLookUp(svc)) {

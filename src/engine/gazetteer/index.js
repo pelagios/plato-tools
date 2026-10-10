@@ -64,7 +64,7 @@ import {
 } from './whg.js';
 
 export {
-  WHG_ENDPOINT, WHG_PLACE_TYPE, BLOCKED_AGENTS, isWhg, whgIri, normaliseWhgIri, parseCentroid, parseGeojsonValues, mergeAttribution, whgLang,
+  WHG_ENDPOINT, WHG_PLACE_TYPE, BLOCKED_AGENTS, isWhg, whgIri, normaliseWhgIri, parseCentroid, parseGeojsonValues, mergeAttribution, whgLang, nameLang,
 } from './whg.js';
 
 const DEFAULT_BATCH = 25;

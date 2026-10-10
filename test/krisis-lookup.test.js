@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { env, textFile } from './engine.js';
 import { detect } from '../src/engine/input.js';
-import { createLookup, memoryLedger, WHG_ENDPOINT, WHG_PLACE_TYPE as MODULE_PLACE_TYPE, whgLang } from '../src/engine/gazetteer/index.js';
+import { createLookup, memoryLedger, WHG_ENDPOINT, WHG_PLACE_TYPE as MODULE_PLACE_TYPE, whgLang, nameLang } from '../src/engine/gazetteer/index.js';
 import { match, gather, distanceKm as matchDistance } from '../src/engine/krisis/match.js';
 import { readWork, serialiseWork, decide, WORK_VERSION } from '../src/engine/krisis/work.js';
 import { attestationsFrom, gazetteerSource } from '../src/engine/krisis/identity.js';
@@ -702,7 +702,9 @@ test('a name typed for one place adds what it finds beside the candidates alread
   const only = fakeWhg(byName({ Newcastle: [NEWCASTLES[0]] }));
   const again = await runLookup({ lookup: lookupWith(only), work: typed.work, places: g.places, options: { places: 'all', only: [A('newcastle')] }, now: clock() });
   assert.deepEqual(again.work.candidates.map((c) => c.candidate_candidate), [W3ID + NEWCASTLES[0].id]);
-  assert.match(lookupPage.findLabel, /added to the candidates already here, which it does not replace/, 'the find form says so');
+  assert.match(lookupPage.findLabel(), /added to the candidates already here, which it does not replace/, 'the find form says so');
+  assert.match(lookupPage.findLabel('en'), /only this name is sent, with its own language tag, else the dataset's language \(en\)/, 'and, with a dataset language set, that it goes with the name');
+  assert.doesNotMatch(lookupPage.findLabel(), /dataset's language/, 'control: none set, none named');
   await assert.rejects(runLookup({ lookup: lookupWith(fake), work: typed.work, places: g.places, options: { query: 'Anything' } }), /for one place/);
 });
 test('a place with no name is not looked up, and is counted: its address is never sent as a query', async () => {
@@ -881,39 +883,44 @@ test('local candidates keep change 1\'s algorithm (krisis-names 5), a lookup\'s 
 // ---- WHG: the language of a name, and areas only (whg.js A12, A13; #19, #30) -----------------------------
 const tagged = (...pairs) => ({ names: pairs.map(([toponym, language]) => ({ toponym, ...(language ? { language } : {}) })), sources: [src] });
 
-test('a language tag is sent as its primary subtag when it names a language; "und", "mul" and anything else are not sent', () => {
-  for (const [tag, code] of [['en', 'en'], ['en-GB', 'en'], ['EN', 'en'], ['la-Latn', 'la'], ['ang', 'ang'], ['enm', 'enm'], ['grc', 'grc'], [' cy ', 'cy']]) assert.equal(whgLang(tag), code, tag);
-  for (const tag of ['und', 'mul', 'zxx', 'mis', 'und-Latn', 'english', 'e', '', '1a', null, undefined, 42]) assert.equal(whgLang(tag), null, String(tag));
+test('a language tag is sent as its primary subtag, two letters where the language has them; a collective code, a grandfathered tag, "und", "mul" and anything else are not sent', () => {
+  for (const [tag, code] of [['en', 'en'], ['en-GB', 'en'], ['EN', 'en'], ['la-Latn', 'la'], ['ang', 'ang'], ['enm', 'enm'], ['grc', 'grc'], [' cy ', 'cy'],
+    ['eng', 'en'], ['lat', 'la'], ['deu', 'de'], ['ger', 'de'], ['fra', 'fr'], ['fre', 'fr'], ['cym', 'cy'], ['wel', 'cy'], ['ell', 'el'], ['gre', 'el'], ['zho-Hant', 'zh'], ['ara_EG', 'ar']]) assert.equal(whgLang(tag), code, tag);
+  for (const tag of ['und', 'mul', 'zxx', 'mis', 'und-Latn', 'art', 'cel', 'sgn', 'gem', 'bh', 'art-lojban', 'en-GB-oed', 'i-klingon', 'no-bok', 'zh-min-nan',
+    'english', 'e', '', '1a', null, undefined, 42]) assert.equal(whgLang(tag), null, String(tag));
+  // A name's own tag: und and mis are no tag (the dataset's language stands in); mul and zxx say there is no one language (none is sent).
+  assert.deepEqual(['und', 'mis', '', null, 'art', 'mul', 'zxx', 'zxx-Latn', 'eng'].map(nameLang), ['untagged', 'untagged', 'untagged', 'untagged', 'untagged', 'none', 'none', 'none', 'en']);
 });
 
 test('each name is sent with its own language, else the dataset\'s, else none, never "und"; the preview counts those sent without one', async () => {
   const g = await gathered([
-    place('york', 'York', [tagged(['York', 'en-GB'], ['Eboracum', 'la'], ['Jorvik', 'und'])]),
+    place('york', 'York', [tagged(['york', 'en-GB'], ['Eboracum', 'la'], ['Jorvik', 'und'], ['Yorke', 'mis'], ['Ebor.', 'zxx'])]),
     place('ely', 'Ely', [tagged(['Ely'])]),
   ]);
-  assert.deepEqual(g.places[0].langs, { York: 'en-GB', Eboracum: 'la', Jorvik: 'und' }, 'gather keeps each name\'s tag');
+  assert.deepEqual(g.places[0].langs, { york: 'en-GB', eboracum: 'la', jorvik: 'und', yorke: 'mis', 'ebor.': 'zxx' }, 'gather keeps each name\'s tag, by the name in lower case');
   assert.equal(g.places[1].langs, undefined, 'control: a place whose names give no language has none');
   const by = (plan) => Object.fromEntries(plan.queries.map((q) => [q.query, q.params?.lang ?? null]));
   const own = planQueries(g.places, { allNames: true });
-  assert.deepEqual(by(own), { York: 'en', Eboracum: 'la', Jorvik: null, Ely: null }, 'no dataset language: a tagged name has its own, "und" and an untagged name none');
-  assert.equal(own.preview.withoutLanguage, 2);
+  // The label York takes the tag of the toponym york: names are told apart without regard to case.
+  assert.deepEqual(by(own), { York: 'en', Eboracum: 'la', Jorvik: null, Yorke: null, 'Ebor.': null, Ely: null }, 'no dataset language: a tagged name has its own; "und", "mis", "zxx" and an untagged name none');
+  assert.equal(own.preview.withoutLanguage, 4);
   const set = planQueries(g.places, { allNames: true, lang: 'ang' });
-  assert.deepEqual(by(set), { York: 'en', Eboracum: 'la', Jorvik: 'ang', Ely: 'ang' }, 'the dataset\'s language fills in, never over a name\'s own');
-  assert.equal(set.preview.withoutLanguage, 0);
+  assert.deepEqual(by(set), { York: 'en', Eboracum: 'la', Jorvik: 'ang', Yorke: 'ang', 'Ebor.': null, Ely: 'ang' }, 'the dataset\'s language fills in for no tag, "und" or "mis"; never over a name\'s own, nor for one tagged zxx');
+  assert.equal(set.preview.withoutLanguage, 1);
   assert.equal(set.preview.lang, 'ang');
-  for (const bad of ['und', 'English', '']) {
+  for (const bad of ['und', 'English', '', 'art']) {
     const plan = planQueries(g.places, { allNames: true, lang: bad });
-    assert.deepEqual(by(plan), { York: 'en', Eboracum: 'la', Jorvik: null, Ely: null }, `a dataset language of ${JSON.stringify(bad)} sends none`);
+    assert.deepEqual(by(plan), { York: 'en', Eboracum: 'la', Jorvik: null, Yorke: null, 'Ebor.': null, Ely: null }, `a dataset language of ${JSON.stringify(bad)} sends none`);
     assert.equal(plan.preview.lang, null);
   }
   assert.ok([own, set].every((p) => p.queries.every((q) => q.params?.lang !== 'und')), 'never "und"');
   assert.match(LOOKUP_WORDS.preview(set.preview).join(' '), /A name with no language of its own is sent as ang/);
-  assert.match(LOOKUP_WORDS.preview(own.preview).join(' '), /2 queries are sent with no language: the name has none of its own, and no language is set for the dataset/);
-  assert.doesNotMatch(LOOKUP_WORDS.preview(set.preview).join(' '), /sent with no language/, 'control: none counted, none said');
+  assert.match(LOOKUP_WORDS.preview(own.preview).join(' '), /4 queries are sent with no language: the name has none of its own, and no language is set for the dataset/);
+  assert.match(LOOKUP_WORDS.preview(set.preview).join(' '), /1 query is sent with no language: the name has none of its own\.(?! and no language is set)/, 'set: the one tagged zxx, and never that no language is set');
   // What the preview shows is what WHG receives.
   const fake = fakeWhg();
   await runLookup({ lookup: lookupWith(fake), subjects: g.subjects, places: g.places, options: { places: 'all', allNames: true, lang: 'ang' }, now: clock() });
-  assert.deepEqual(Object.values(fake.calls[0].body.queries).map((q) => [q.query, q.lang ?? null]), [['York', 'en'], ['Eboracum', 'la'], ['Jorvik', 'ang'], ['Ely', 'ang']]);
+  assert.deepEqual(Object.values(fake.calls[0].body.queries).map((q) => [q.query, q.lang ?? null]), [['York', 'en'], ['Eboracum', 'la'], ['Jorvik', 'ang'], ['Yorke', 'ang'], ['Ebor.', null], ['Ely', 'ang']]);
 });
 
 test('areas only is sent when asked, and to WHG only; another service is sent neither it nor a language', async () => {

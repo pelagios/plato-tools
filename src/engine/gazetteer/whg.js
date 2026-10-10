@@ -102,17 +102,68 @@ export function isQuotaSpent(detail) {
   return /daily api limit/i.test(d) || (/limit/i.test(d) && /exceed|quota/i.test(d));
 }
 
-/** Language subtags that say no language is known: never sent (A13). */
+// Language codes (A13). A three-letter code of a language that also has a two-letter one (ISO 639-2/T
+// and /B, 639-3) is sent as the two-letter one, eng as en, ger and deu as de: from pycountry 24.6.1's
+// ISO 639-3 table, all 204 such codes.
+const TO_639_1 = new Map((
+  'aar:aa abk:ab afr:af aka:ak alb:sq amh:am ara:ar arg:an arm:hy asm:as ava:av ave:ae aym:ay aze:az bak:ba ' +
+  'bam:bm baq:eu bel:be ben:bn bis:bi bod:bo bos:bs bre:br bul:bg bur:my cat:ca ces:cs cha:ch che:ce chi:zh ' +
+  'chu:cu chv:cv cor:kw cos:co cre:cr cym:cy cze:cs dan:da deu:de div:dv dut:nl dzo:dz ell:el eng:en epo:eo ' +
+  'est:et eus:eu ewe:ee fao:fo fas:fa fij:fj fin:fi fra:fr fre:fr fry:fy ful:ff geo:ka ger:de gla:gd gle:ga ' +
+  'glg:gl glv:gv gre:el grn:gn guj:gu hat:ht hau:ha hbs:sh heb:he her:hz hin:hi hmo:ho hrv:hr hun:hu hye:hy ' +
+  'ibo:ig ice:is ido:io iii:ii iku:iu ile:ie ina:ia ind:id ipk:ik isl:is ita:it jav:jv jpn:ja kal:kl kan:kn ' +
+  'kas:ks kat:ka kau:kr kaz:kk khm:km kik:ki kin:rw kir:ky kom:kv kon:kg kor:ko kua:kj kur:ku lao:lo lat:la ' +
+  'lav:lv lim:li lin:ln lit:lt ltz:lb lub:lu lug:lg mac:mk mah:mh mal:ml mao:mi mar:mr may:ms mkd:mk mlg:mg ' +
+  'mlt:mt mon:mn mri:mi msa:ms mya:my nau:na nav:nv nbl:nr nde:nd ndo:ng nep:ne nld:nl nno:nn nob:nb nor:no ' +
+  'nya:ny oci:oc oji:oj ori:or orm:om oss:os pan:pa per:fa pli:pi pol:pl por:pt pus:ps que:qu roh:rm ron:ro ' +
+  'rum:ro run:rn rus:ru sag:sg san:sa sin:si slk:sk slo:sk slv:sl sme:se smo:sm sna:sn snd:sd som:so sot:st ' +
+  'spa:es sqi:sq srd:sc srp:sr ssw:ss sun:su swa:sw swe:sv tah:ty tam:ta tat:tt tel:te tgk:tg tgl:tl tha:th ' +
+  'tib:bo tir:ti ton:to tsn:tn tso:ts tuk:tk tur:tr twi:tw uig:ug ukr:uk urd:ur uzb:uz ven:ve vie:vi vol:vo ' +
+  'wel:cy wln:wa wol:wo xho:xh yid:yi yor:yo zha:za zho:zh zul:zu '
+  ).trim().split(' ').map((p) => p.split(':')));
+const COLLECTIVE = new Set((
+  'aav afa alg alv apa aqa aql art ath auf aus awd azc bad bai bat ber bh bih bnt btk cai cau cba ccn ccs ' +
+  'cdc cdd cel cmc cpe cpf cpp crp csu cus day dmn dra egx esx euq fiu fox gem gme gmq gmw grk hmx hok hyx ' +
+  'iir ijo inc ine ira iro itc jpx kar kdo khi kro map mkh mno mun myn nah nai ngf nic nub omq omv oto paa ' +
+  'phi plf poz pqe pqw pra qwe roa sai sal sdv sem sgn sio sit sla smi son sqj ssa syd tai tbq trk tup tut ' +
+  'tuw urj wak wen xgn xnd ypk zhx zle zls zlw znd '
+  ).trim().split(' '));
+// ISO 639-2 and 639-5 collective codes (families and groups: art, cel, sgn, and bh among two-letter
+// ones) name no one language, and are not sent.
+// Tags that are not one language: "und" undetermined, "mis" uncoded, "mul" several, "zxx" no linguistic
+// content. A name tagged und or mis is taken as untagged; one tagged mul or zxx is sent with no language.
 const NO_LANGUAGE = new Set(['und', 'mul', 'mis', 'zxx']);
+const UNTAGGED = new Set(['und', 'mis']);
+// BCP 47's grandfathered tags (RFC 5646, 2.2.8), irregular and regular: none is read as a language.
+const GRANDFATHERED = new Set(['en-gb-oed', 'i-ami', 'i-bnn', 'i-default', 'i-enochian', 'i-hak', 'i-klingon', 'i-lux', 'i-mingo',
+  'i-navajo', 'i-pwn', 'i-tao', 'i-tay', 'i-tsu', 'sgn-be-fr', 'sgn-be-nl', 'sgn-ch-de', 'art-lojban', 'cel-gaulish', 'no-bok',
+  'no-nyn', 'zh-guoyu', 'zh-hakka', 'zh-min', 'zh-min-nan', 'zh-xiang']);
 /**
- * The code WHG is sent for a language tag (A13): the tag's primary subtag in lower case, "en" for
- * "en-GB" and "la" for "la-Latn", if it is two or three letters and names a language; else null, and
- * no language is sent.
+ * The code WHG is sent for a language tag (A13), or null when it names no one language and nothing is
+ * sent. Only the tag's primary subtag is read, in lower case: its script and region are left out,
+ * "en" for "en-GB" and "la" for "la-Latn", for WHG takes a bare code. A three-letter code with a
+ * two-letter equivalent is sent as that (eng as en). A collective code, a grandfathered tag, und, mis,
+ * mul, zxx and anything not two or three letters give null.
  */
 export function whgLang(tag) {
   if (typeof tag !== 'string') return null;
-  const primary = tag.trim().split(/[-_]/)[0].toLowerCase();
-  return /^[a-z]{2,3}$/.test(primary) && !NO_LANGUAGE.has(primary) ? primary : null;
+  const t = tag.trim().toLowerCase().replace(/_/g, '-');
+  if (GRANDFATHERED.has(t)) return null;
+  const primary = t.split('-')[0];
+  if (!/^[a-z]{2,3}$/.test(primary) || NO_LANGUAGE.has(primary) || COLLECTIVE.has(primary)) return null;
+  return TO_639_1.get(primary) ?? primary;
+}
+/**
+ * What a name's own tag says of its language (A13): 'untagged' when it has none, or says und or mis
+ * (the dataset's language may then stand in), 'none' when it says mul or zxx (sent with no language),
+ * else the code whgLang() gives; a tag that names no one language otherwise counts as untagged.
+ */
+export function nameLang(tag) {
+  if (typeof tag !== 'string' || !tag.trim()) return 'untagged';
+  const primary = tag.trim().toLowerCase().replace(/_/g, '-').split('-')[0];
+  if (UNTAGGED.has(primary)) return 'untagged';
+  if (NO_LANGUAGE.has(primary)) return 'none';
+  return whgLang(tag) ?? 'untagged';
 }
 
 /** The type sent when a query gives none (A4). */
