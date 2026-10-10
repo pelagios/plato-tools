@@ -21,7 +21,8 @@ import { attestationsFrom } from '../src/engine/krisis/identity.js';
 import { apply } from '../src/engine/krisis/apply.js';
 import { runLookup, selectPlaces, planQueries, WHG_SERVICE } from '../src/engine/krisis/lookup.js';
 import { queryVariants, MAX_VARIANTS } from '../src/engine/krisis/names.js';
-import { guard, guardOf, dice, bestDice, tieOf, withheldOf, acceptGuarded, undoBatch, planGuarded, guardsFirst, GUARD_RULE } from '../src/engine/krisis/guards.js';
+import { guard, guardOf, dice, bestDice, tieOf, withheldOf, acceptGuarded, undoBatch, planGuarded, guardsFirst, GUARD_RULE, SAME_PLACE_KM } from '../src/engine/krisis/guards.js';
+import { distanceKm } from '../src/engine/krisis/match.js';
 import { guardWords } from '../src/engine/words.js';
 
 const X = 'https://example.org/';
@@ -179,7 +180,7 @@ test('acceptGuarded: one passing candidate each, as closeMatch by default, with 
   assert.equal(before.accept.length, 2, 'planGuarded changes nothing and says how many');
   assert.ok(work.candidates.every((c) => c.decision === null || c.gazetteer.id === 'place:gn:7'), 'planning decided nothing');
   const r = acceptGuarded(work, { reviewer: REVIEWER, at: NOW });
-  assert.deepEqual(r, { batch: 'b1', accepted: 2, leftOut: { far: 1, ccodes: 1, total: 2 }, several: 0, ties: 0 });
+  assert.deepEqual(r, { batch: 'b1', accepted: 2, leftOut: { far: 1, ccodes: 1, total: 2 }, several: 0, ties: 0, tied: [] });
   const alton = candOf(work, 1), felton = candOf(work, 8);
   for (const c of [alton, felton]) {
     assert.equal(c.decision.kind, 'match');
@@ -239,41 +240,92 @@ test('"WHG\'s guards first" orders the places with a passing candidate first; a 
   const two = await looked([place('gorton', 'Gorton', -2.2, 53.47, { attestations: [named('Gorton', 'Gortun'), at(-2.2, 53.47)] })],
     { Gorton: [cand(9, 'Gorton', { repr_point: [-2.2, 53.47] })], Gortun: [cand(10, 'Gortun', { repr_point: [-2.21, 53.47] })] }, { allNames: true });
   assert.equal(two.work.candidates.filter((c) => guardOf(c).pass).length, 2, 'control: both pass');
-  assert.deepEqual(acceptGuarded(two.work, { at: NOW }), { batch: null, accepted: 0, leftOut: { far: 0, ccodes: 0, total: 0 }, several: 1, ties: 0 });
+  assert.deepEqual(acceptGuarded(two.work, { at: NOW }), { batch: null, accepted: 0, leftOut: { far: 0, ccodes: 0, total: 0 }, several: 1, ties: 0, tied: [] });
 });
 
 // #31 (Stephen, 10 Oct 2026, "skip ties"): two places of one name where a place was looked for are never
 // accepted in bulk, even when WHG's own tie lets the top through (here the second scores under it).
-test('the bulk accept leaves a place to the reviewer when another candidate of its lookup has the same name; a namesake far off or in another country does not count', async () => {
-  const P = [place('agden', 'Agden', -2.4, 53.3), place('barton', 'Barton', -2.3, 53.1), place('cotton', 'Cotton', -2.6, 53.2), place('dutton', 'Dutton', -2.6, 53.3)];
-  const T = {
-    Agden: [cand(21, 'Agden', { repr_point: [-2.41, 53.3] }), cand(22, 'Agden', { score: 95, match: false, repr_point: [-2.6, 53.35] })],
-    Barton: [cand(23, 'Barton', { repr_point: [-2.3, 53.1] }), cand(24, 'Bartonhill', { score: 95, match: false, repr_point: [-2.31, 53.1] })],
-    Cotton: [cand(25, 'Cotton', { repr_point: [-2.6, 53.2] }), cand(26, 'Cotton', { score: 95, match: false, repr_point: [-2.6, 54.4] })],
-    Dutton: [cand(27, 'Dutton', { repr_point: [-2.6, 53.3] }), cand(28, 'Dutton', { score: 95, match: false, ccodes: ['FR'], repr_point: [-2.61, 53.3] })],
-  };
-  const { work } = await looked(P, T);
+const TIE_PLACES = () => [place('agden', 'Agden', -2.4, 53.3), place('barton', 'Barton', -2.3, 53.1), place('cotton', 'Cotton', -2.6, 53.2), place('dutton', 'Dutton', -2.6, 53.3)];
+const TIE_TABLE = {
+  Agden: [cand(21, 'Agden', { repr_point: [-2.41, 53.3] }), cand(22, 'Agden', { score: 95, match: false, repr_point: [-2.6, 53.35] })],
+  Barton: [cand(23, 'Barton', { repr_point: [-2.3, 53.1] }), cand(24, 'Bartonhill', { score: 95, match: false, repr_point: [-2.31, 53.1] })],
+  Cotton: [cand(25, 'Cotton', { repr_point: [-2.6, 53.2] }), cand(26, 'Cotton', { score: 95, match: false, repr_point: [-2.6, 54.4] })],
+  Dutton: [cand(27, 'Dutton', { repr_point: [-2.6, 53.3] }), cand(28, 'Dutton', { score: 95, match: false, ccodes: ['FR'], repr_point: [-2.61, 53.3] })],
+};
+/** A work file whose places were looked up under `constraint` (as the region review stores it), with a region Bucklow. */
+function underConstraint(work, constraint) {
+  work.regions = { 'k:bucklow': { label: 'Bucklow', names: ['Bucklow'], level: 1, count: 4 } };
+  for (const iri of Object.keys(work.places)) { work.places[iri].within = 'k:bucklow'; work.places[iri].level = 2; }
+  for (const l of work.lookups) for (const q of Object.values(l.queries)) q.constraint = structuredClone(constraint);
+  return work;
+}
+const IN_BUCKLOW = { from: 'k:bucklow', kinds: ['contained_in'], params: { contained_in: ['gn:1'] }, relaxed: null };
+const RELAXED = { from: null, kinds: [], params: {}, relaxed: 'all' };
+
+test('the bulk accept leaves a place to the reviewer when another candidate of its name was found where it was looked for; a different name, a far namesake (unconfined) or one abroad does not tie', async () => {
+  const { work } = await looked(TIE_PLACES(), TIE_TABLE);
   for (const id of [21, 23, 25, 27]) assert.equal(guardOf(candOf(work, id)).pass, true, `control: place:gn:${id} passes WHG's guard`);
   assert.equal(candOf(work, 21).gazetteer.tie, false, "control: WHG's own tie does not catch the two Agdens");
   assert.ok(candOf(work, 26).distance_km > 50, 'control: the second Cotton is far');
   assert.equal(candOf(work, 28).ccodes_agree, false, 'control: the second Dutton is in another country');
   const plan = planGuarded(work);
-  assert.deepEqual(plan.tied, [{ id: candOf(work, 21).id, place: A('agden'), count: 2, region: null }], 'Agden is tied');
-  assert.deepEqual(plan.accept.map((c) => c.gazetteer.id).sort(), ['place:gn:23', 'place:gn:25', 'place:gn:27'], 'a different name, a far namesake and one abroad do not tie');
+  assert.deepEqual(plan.tied, [{ id: candOf(work, 21).id, place: A('agden'), count: 2, region: null }], 'Agden is tied, and no region is named: none confined the query');
+  assert.deepEqual(plan.accept.map((c) => c.gazetteer.id).sort(), ['place:gn:23', 'place:gn:25', 'place:gn:27']);
   const r = acceptGuarded(work, { at: NOW });
-  assert.deepEqual([r.accepted, r.ties], [3, 1]);
+  assert.deepEqual([r.accepted, r.ties, r.tied], [3, 1, [2]]);
   assert.equal(candOf(work, 21).decision, null, 'Agden left for the reviewer');
   assert.equal(candOf(work, 23).decision.kind, 'match', 'control: Barton accepted in the same batch');
-  // A namesake found by another lookup (a name typed for the place, say) is not one of this lookup's.
-  const { work: w2 } = await looked(P.slice(0, 1), T);
-  candOf(w2, 22).lookup = 'another';
-  assert.deepEqual(planGuarded(w2).tied, [], 'another lookup\'s namesake does not tie');
-  assert.equal(acceptGuarded(w2, { at: NOW }).accepted, 1);
-  // What the page says.
+});
+
+test('within a region the namesake rule is blind to distance and names the region; relaxed out of it, it names none (never the region the place lies in)', async () => {
+  // Confined to Bucklow: the far Cotton is a namesake too (the region decides, not the distance); the one abroad still is not.
+  const inside = underConstraint((await looked(TIE_PLACES(), TIE_TABLE)).work, IN_BUCKLOW);
+  const p1 = planGuarded(inside);
+  assert.deepEqual(p1.tied.map((t) => [t.place, t.count, t.region]), [[A('agden'), 2, 'Bucklow'], [A('cotton'), 2, 'Bucklow']]);
+  assert.deepEqual(p1.accept.map((c) => c.gazetteer.id).sort(), ['place:gn:23', 'place:gn:27'], 'Barton and Dutton (namesake abroad) still accepted');
+  // Relaxed to all (Bucklow unmatched): the far Cotton is not a namesake again, and no region is named, though each place lies in Bucklow.
+  const relaxed = underConstraint((await looked(TIE_PLACES(), TIE_TABLE)).work, RELAXED);
+  assert.deepEqual(planGuarded(relaxed).tied.map((t) => [t.place, t.count, t.region]), [[A('agden'), 2, null]]);
+  assert.equal(guardWords.namesakes(2, null), '2 places of this name where it was looked for: left for you, not accepted in bulk.');
+});
+
+test('one place held twice (two records of its title within 2 km, as WHG holds GeoNames, OSM and Wikidata records of one village) is not a namesake; one without a point is', async () => {
+  const T = { ...TIE_TABLE, Agden: [cand(21, 'Agden', { repr_point: [-2.41, 53.3] }), cand(22, 'Agden', { score: 95, match: false, namespace: 'osm', repr_point: [-2.42, 53.305] })] };
+  const { work } = await looked(TIE_PLACES().slice(0, 1), T);
+  assert.ok(distanceKm(candOf(work, 21).other.point, candOf(work, 22).other.point) < SAME_PLACE_KM, 'control: the two Agdens are within 2 km');
+  assert.equal(planGuarded(work).tied.length, 0, 'within 2 km: one place, accepted');
+  assert.equal(acceptGuarded(work, { at: NOW }).accepted, 1);
+  const { work: w2 } = await looked(TIE_PLACES().slice(0, 1), T);
+  candOf(w2, 22).other.point = null;
+  assert.equal(planGuarded(w2).tied.length, 1, 'without a point it cannot be shown to be the same place: a namesake');
+  const { work: w3 } = await looked(TIE_PLACES().slice(0, 1), TIE_TABLE);
+  assert.ok(distanceKm(candOf(w3, 21).other.point, candOf(w3, 22).other.point) > SAME_PLACE_KM, 'control: 13 km apart');
+  assert.equal(planGuarded(w3).tied.length, 1, 'control: further apart, a namesake');
+});
+
+test('a namesake from another lookup counts when that lookup was sent under the same constraint, not when under another, nor when its lookup is unknown', async () => {
+  const fresh = async () => underConstraint((await looked(TIE_PLACES().slice(0, 1), TIE_TABLE)).work, IN_BUCKLOW);
+  const again = (work, constraint) => {   // the second Agden as found by a second lookup, sent under `constraint`
+    const l = structuredClone(work.lookups[0]); l.id = 'L2';
+    for (const q of Object.values(l.queries)) q.constraint = structuredClone(constraint);
+    work.lookups.push(l); candOf(work, 22).lookup = 'L2';
+    return work;
+  };
+  assert.equal(planGuarded(again(await fresh(), IN_BUCKLOW)).tied.length, 1, 'same constraint: a namesake');
+  assert.equal(planGuarded(again(await fresh(), { ...IN_BUCKLOW, from: 'k:other', params: { contained_in: ['gn:2'] } })).tied.length, 0, 'another constraint: not one');
+  const unknown = await fresh(); candOf(unknown, 22).lookup = 'nowhere';
+  assert.equal(planGuarded(unknown).tied.length, 0, 'a lookup not in the file: not one');
+});
+
+test('what the page and the command line say of places left out for namesakes', () => {
   assert.equal(guardWords.namesakes(2, 'Bucklow'), '2 places of this name in Bucklow: left for you, not accepted in bulk.');
-  assert.equal(guardWords.namesakes(3, null), '3 places of this name where it was looked for: left for you, not accepted in bulk.');
-  assert.match(guardWords.leftOut({ far: 0, ccodes: 0, total: 0 }, 0, 1), /^1 place has another place of the same name where it was looked for, and is left to you\.$/);
-  assert.equal(guardWords.leftOut({ far: 0, ccodes: 0, total: 0 }, 0, 0), '', 'control: nothing to say without ties');
+  const none = { far: 0, ccodes: 0, total: 0 };
+  assert.equal(guardWords.leftOut(none, 0, [2]), '1 place has 2 candidates of its name where it was looked for, and is left to you.');
+  assert.equal(guardWords.leftOut(none, 0, [3]), '1 place has 3 candidates of its name where it was looked for, and is left to you.');
+  assert.equal(guardWords.leftOut(none, 0, [2, 2]), '2 places have 2 candidates of their name where they were looked for, and are left to you.');
+  assert.equal(guardWords.leftOut(none, 0, [2, 3]), '2 places have 2 or more candidates of their name where they were looked for, and are left to you.');
+  assert.equal(guardWords.leftOut(none, 0, []), '', 'control: nothing to say without ties');
+  assert.equal(guardWords.dryRun(3, { total: 1 }, 2, [2]), "3 places have exactly one candidate passing WHG's guards and would be accepted (1 more left out as far or in another country, 2 with more than one passing, 1 with candidates of their name where they were looked for). Accepting them is done on the page only.");
 });
 
 test('planGuarded and guardsFirst cost in proportion to the candidates, not places × candidates (2,400 places × 5 well under 100 ms)', () => {
@@ -479,7 +531,7 @@ test('old work files still read; a candidate looked up before the guard was stor
   const back = readWork(JSON.stringify(old));
   assert.equal(guardOf(candOf(back, 1)).reason, 'not-recorded');
   assert.equal(guardOf(candOf(work, 1)).pass, true, 'control: with the figures, it passes');
-  assert.deepEqual(acceptGuarded(back, { at: NOW }), { batch: null, accepted: 0, leftOut: { far: 0, ccodes: 0, total: 0 }, several: 0, ties: 0 });
+  assert.deepEqual(acceptGuarded(back, { at: NOW }), { batch: null, accepted: 0, leftOut: { far: 0, ccodes: 0, total: 0 }, several: 0, ties: 0, tied: [] });
   const refused = (f, re) => { const w = JSON.parse(serialiseWork(work)); f(w); assert.throws(() => readWork(JSON.stringify(w)), (e) => e.name === 'DataError' && re.test(e.message), re); };
   refused((w) => { w.places[A('alton')].rowState = 'drop'; }, /row state/);
   refused((w) => { w.candidates[0].flagged = 'yes'; }, /flag/);

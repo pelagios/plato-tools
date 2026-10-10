@@ -2801,7 +2801,7 @@ MYDATA_ANSWERS = {
 }
 # Wood Lane has a second place of its name in its parish, scoring under the first, so WHG's own tie lets the
 # first through: the bulk accept leaves it to the reviewer all the same (#31, "skip ties").
-MYDATA_ANSWERS['Wood Lane'] = MYDATA_ANSWERS['Wood Lane'] + [{**mydata_answer('place:gn:9000011', 'Wood Lane', [-2.52, 53.31]), 'score': 95, 'match': False, 'confidence': 90}]
+MYDATA_ANSWERS['Wood Lane'] = MYDATA_ANSWERS['Wood Lane'] + [{**mydata_answer('place:gn:9000011', 'Wood Lane', [-2.6, 53.36]), 'score': 95, 'match': False, 'confidence': 90}]
 # Kirk House has no candidate in the lookup: it is the place whose location (and identity) is adopted in Chora.
 MYDATA_KIRK = mydata_answer('place:gn:9000010', 'Kirk House', [-2.31, 53.12])
 MYDATA_KIRK_FEATURE = {'@id': 'https://whgazetteer.org/entity/place:gn:9000010/api', 'type': 'Feature', 'properties': {'title': 'Kirk House', 'ccodes': ['GB']},
@@ -2965,11 +2965,16 @@ def map_your_data_checks(pw, url, tmp):
         wait_state(page, lambda s: sum(1 for c in (s.get('work') or {}).get('candidates', []) if (c.get('decision') or {}).get('kind') == 'match' and '/region-' not in c['candidate_source']) == 8, T(15), 'accepted')
         said = page.evaluate("() => document.getElementById('bulk-result').textContent")
         wood = [c for c in W().get('candidates', []) if (c.get('other') or {}).get('label') == 'Wood Lane']
+        for _ in range(12):   # Wood Lane's own screen, and the badge that says why it was left
+            if 'Wood Lane' in page.inner_text('#review-subject'): break
+            page.click('#review-next')
+        badge = page.eval_on_selector_all('#review-place .badge.namesakes', 'els => els.map((e) => e.textContent)')
         page.click('#methodos-done'); step_is('review', 'done', 15)
         r['reviewed'] = True
         return (within.get('Mill Farm') == ['gn:2641434'] and within.get('Wood Lane') == ['gn:2657441'] and len(within) == 10
-                and 'another place of the same name' in said and len(wood) == 2 and all(c.get('decision') is None for c in wood)
-                and track()['steps'].get('relate') == 'current'), {'within': within, 'said': said[:300], 'Wood Lane': [(c['gazetteer']['id'], c.get('decision')) for c in wood], 'steps': track()['steps']}
+                and '1 place has 2 candidates of its name where it was looked for' in said and len(wood) == 2 and all(c.get('decision') is None for c in wood)
+                and badge == ['2 places of this name in Ashby: left for you, not accepted in bulk.']
+                and track()['steps'].get('relate') == 'current'), {'within': within, 'said': said[:300], 'badge': badge, 'Wood Lane': [(c['gazetteer']['id'], c.get('decision')) for c in wood], 'steps': track()['steps']}
     attempt('Map your data: the places looked up within their parishes as the lookup step, the eight that pass WHG\'s guards accepted in bulk, Wood Lane (two places of its name in its parish) left to the reviewer and said so, and the review step done', places_and_review)
 
     def relate():

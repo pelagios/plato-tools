@@ -21,19 +21,35 @@
 // own: a candidate found only by a head-word query (names.js queryVariants) never passes.
 //
 // The bulk accept adds another (#31, Stephen, 10 October 2026: "skip ties"): a place is never accepted
-// in bulk when another candidate of the same lookup has the passing one's name (diceForm) and is not
-// itself left out as far or in another country, that is, when two places of that name were found where
-// it was looked for. WHG's tie lets such a pair through when their scores differ, or when their names and
-// descriptions are the same; on the real WHG it took the wrong Agden of two in Cheshire, 47 km off.
+// in bulk when another of its candidates, looked up under the same constraint, has the passing one's
+// title (diceForm) and is not in another country, that is, when two places of that name were found
+// where it was looked for. Within a region (contained_in or an area) distance does not count: every
+// namesake inside it is one. A query not confined to a region counts only namesakes within the review's
+// greatest distance. Titles only, deliberately, never other names: a record whose alternate name is the
+// place's title is a different-looking place the guard's own name test already weighs, and counting
+// alternates would tie places with every record that once bore their name. WHG's tie lets such a pair
+// through when their scores differ, or when their names and descriptions are the same; on the real WHG it
+// took the wrong Agden of two in Cheshire, 47 km off. Records of one title within SAME_PLACE_KM of each
+// other are one place, as WHG holds one place several times over; one without a point is a namesake.
 //
 // Nothing here decides on its own. acceptGuarded() is what the page's "Accept the N that pass WHG's
 // guards" button calls, on the reviewer's word, and every decision it makes carries its batch, so
 // that undoBatch() takes back exactly those still as it left them. Pure: no network, no pipeline.
 import { decide, IDENTITY_TYPES, checkReviewer } from './work.js';
 import { guardWords } from '../words.js';
+import { distanceKm } from './match.js';
 
 export const GUARD_DEFAULTS = { threshold: 90, minConfidence: 30, minDice: 0.45, altNames: 20 };
 export const GUARD_RULE = 'whg-guard';
+/**
+ * Two records of one title within this many kilometres of each other are taken for one place, not
+ * namesakes (#31). WHG returns one place several times under one title, a record from each of
+ * GeoNames, OpenStreetMap, Wikidata, a parish list and so on: measured on the real WHG on 10 October
+ * 2026 (33 Index Villaris rows, unconfined), the namesake rule held back 12 of the 24 places with a
+ * passing candidate without this, and 6 with it (the two Adlingtons and two Agdens of Cheshire and
+ * Lancashire, 45 and 47 km apart, among them).
+ */
+export const SAME_PLACE_KM = 2;
 
 // ---- names ---------------------------------------------------------------------------------------------
 /** A name as WHG's client compares it: NFD, combining marks U+0300–036F dropped, lower case, other than letters and digits a space. */
@@ -159,21 +175,39 @@ function maxKmOf(work, c, lookups) {
 const rowState = (work, iri) => work.places[iri]?.rowState ?? null;
 const isFar = (work, c, lookups) => typeof c.distance_km === 'number' && c.distance_km > maxKmOf(work, c, lookups);
 const otherCountry = (work, iri, c) => c.ccodes_agree === false || ccodesDisagree(work.places[iri], c);
+/** Whether two candidates are one place held twice: both have a point, within SAME_PLACE_KM. */
+const samePlace = (a, b) => {
+  const p = a.other?.point, q = b.other?.point;
+  return Array.isArray(p) && Array.isArray(q) && distanceKm(p, q) <= SAME_PLACE_KM;
+};
+/** The constraint a candidate's query was sent under (regions.js storedConstraint), null when it had none, undefined when its lookup is not known. */
+function constraintOf(lookups, iri, c) {
+  const l = lookups.get(c.lookup);
+  if (!l) return undefined;
+  return l.queries?.[iri]?.constraint ?? null;
+}
+/** Whether a constraint confines the lookup to a region: its matches (contained_in) or its area. */
+const confined = (k) => !!k && k.from != null && (k.kinds || []).some((x) => x === 'contained_in' || x === 'area');
+/** Whether two candidates' queries were sent under the same constraint (the relaxing aside, which only says how it came about). */
+const sameConstraint = (a, b) => a !== undefined && b !== undefined
+  && JSON.stringify(a && { from: a.from, kinds: a.kinds, params: a.params }) === JSON.stringify(b && { from: b.from, kinds: b.kinds, params: b.params });
 /**
- * The place's other candidates with c's name, from the same lookup, and neither far nor in another
- * country: the namesakes found where it was looked for (#31). A candidate of another lookup, or one
- * the bulk accept would leave out as outside, is not one.
+ * The place's other candidates with c's title, looked up under the same constraint (the same lookup, or
+ * another sent as it was), not in another country, and, when the query was not confined to a region,
+ * not far: the namesakes found where it was looked for (#31).
  */
 function namesakesOf(work, iri, c, mine, lookups) {
   const name = diceForm(c.other?.label);
   if (!name) return [];
-  return mine.filter((x) => x !== c && x.gazetteer && x.lookup === c.lookup && diceForm(x.other?.label) === name
-    && !isFar(work, x, lookups) && !otherCountry(work, iri, x));
+  const k = constraintOf(lookups, iri, c), inRegion = confined(k);
+  return mine.filter((x) => x !== c && x.gazetteer && diceForm(x.other?.label) === name
+    && (x.lookup === c.lookup || sameConstraint(k, constraintOf(lookups, iri, x)))
+    && !otherCountry(work, iri, x) && (inRegion || !isFar(work, x, lookups)) && !samePlace(c, x));
 }
-/** The name of the region a place was looked up within (its query's constraint, else the region it lies in), or null. */
+/** The name of the region the place's query was confined to, or null (not confined, or relaxed out of it): never the region it lies in, which may not be where it was looked for. */
 function lookedWithin(work, iri, c, lookups) {
-  const from = lookups.get(c.lookup)?.queries?.[iri]?.constraint?.from ?? work.places[iri]?.within ?? null;
-  return (from && work.regions?.[from]?.label) || null;
+  const k = constraintOf(lookups, iri, c);
+  return (confined(k) && work.regions?.[k.from]?.label) || null;
 }
 /**
  * What acceptGuarded() would do, changing nothing: { accept: [candidate], leftOut: { far, ccodes,
@@ -231,16 +265,17 @@ function nextBatch(work) {
  * (planGuarded). Called only on the reviewer's word (the page's button): nothing calls it by itself,
  * and the command line never does. Each decision is 'match' of `identityType` (closeMatch by default,
  * the reviewer's choice), with a basis naming the guard, `guard` (the figures it passed on) and
- * `batch`. The batch is recorded in work.batches. Returns { batch, accepted, leftOut, several, ties }:
- * `batch` null when nothing passed; `ties` the places left to the reviewer as having namesakes (#31).
+ * `batch`. The batch is recorded in work.batches. Returns { batch, accepted, leftOut, several, ties, tied }:
+ * `batch` null when nothing passed; `ties` the places left to the reviewer as having namesakes (#31),
+ * `tied` how many places of its name each has.
  */
 export function acceptGuarded(work, { reviewer, identityType = 'closeMatch', at = new Date().toISOString(), threshold = GUARD_DEFAULTS.threshold } = {}) {
   if (!IDENTITY_TYPES.includes(identityType)) throw new Error(`Not an identity type: ${identityType}`);
   if (reviewer) { checkReviewer(reviewer); work.reviewer = reviewer; }
   const plan = planGuarded(work, { threshold });
   const counts = { far: plan.leftOut.far, ccodes: plan.leftOut.ccodes, total: plan.leftOut.total };
-  const ties = plan.tied.length;
-  if (!plan.accept.length) return { batch: null, accepted: 0, leftOut: counts, several: plan.several, ties };
+  const ties = plan.tied.length, tied = plan.tied.map((t) => t.count);
+  if (!plan.accept.length) return { batch: null, accepted: 0, leftOut: counts, several: plan.several, ties, tied };
   const batch = nextBatch(work);
   for (const c of plan.accept) {
     const v = guardOf(c, { threshold });
@@ -249,7 +284,7 @@ export function acceptGuarded(work, { reviewer, identityType = 'closeMatch', at 
     Object.assign(c.decision, { guard: g, batch });
   }
   (work.batches ||= []).push({ id: batch, at, identityType, threshold, accepted: plan.accept.length, leftOut: counts });
-  return { batch, accepted: plan.accept.length, leftOut: counts, several: plan.several, ties };
+  return { batch, accepted: plan.accept.length, leftOut: counts, several: plan.several, ties, tied };
 }
 /**
  * Take back a batch: clear the decisions that still carry it (a decision changed since, or taken back
