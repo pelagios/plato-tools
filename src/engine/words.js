@@ -582,6 +582,7 @@ export const CHORA_ADOPT_PAGE = {
     return `Sent: the name, with the type Place${lang ? `, its language (${lang})` : ''}, ${where ? `looked for only ${where}` : 'looked for everywhere'}.`;
   },
   where: (scope) => scopeWords(scope),
+  noName: 'Type a name to look for: nothing is sent without one.',
   widen: 'Search everywhere',
   narrow: (where) => `Search ${where} again`,
   noneWithin: (where) => `The gazetteer found nothing of that name ${where}. Nothing wider is searched unless you ask.`,

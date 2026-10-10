@@ -20,7 +20,7 @@ import { createLookup, GazetteerError, WHG_ENDPOINT, normaliseWhgIri } from '../
 import * as adopt from '../src/engine/chora/adopt.js';
 import { currentIdentities } from '../src/engine/krisis/lookup.js';
 import { gazetteerSource } from '../src/engine/krisis/identity.js';
-import { WHG_SERVICE, upstreamLicence, placeQuery } from '../src/engine/krisis/lookup.js';
+import { WHG_SERVICE, upstreamLicence, placeQuery, planQueries } from '../src/engine/krisis/lookup.js';
 
 const F = 'test/fixtures/chora/adopt/';
 const json = (name) => JSON.parse(readFileSync(F + name, 'utf8'));
@@ -547,13 +547,15 @@ test("a place whose attestations are an object, not a list, stays in Chora's sto
 // were in Croatia and the USA. The search is now scoped as Krisis scopes a place within its regions.
 const IN = PLATO + 'ContainedIn';
 /** A dataset of Abram, ContainedIn a parish (no WHG identity), ContainedIn a county identified with gn:2644974. */
-function scopedDoc({ placeCcodes = ['GB'], countyLink = W3ID + 'place:gn:2644974', denyParish = false } = {}) {
-  const rel = (from, to, negated = false) => ({ '@id': from + '#a-in', ...(negated ? { negated: true } : {}), relations: [{ relationType: IN, relatesTo: to }], contributor: who, created: CREATED });
+function scopedDoc({ placeCcodes = ['GB'], countyLink = W3ID + 'place:gn:2644974', denyParish = false, parishType = IN, retractParish = false, parishCcodes = null, countyCcodes = ['GB'] } = {}) {
+  const rel = (from, to, negated = false, type = IN) => ({ '@id': from + '#a-in', ...(negated ? { negated: true } : {}), relations: [{ relationType: type, relatesTo: to }], contributor: who, created: CREATED });
   return { ...json('dataset.json'), spatialEntities: [
     { '@id': P + 'abram', label: 'Abram', ...(placeCcodes ? { ccodes: placeCcodes } : {}), attestations: [
-      { '@id': P + 'abram#a-names', names: [{ toponym: 'Abram', language: 'en-GB' }], contributor: who, created: CREATED }, rel(P + 'abram', P + 'region-wigan', denyParish)] },
-    { '@id': P + 'region-wigan', label: 'Wigan', attestations: [rel(P + 'region-wigan', P + 'region-lancashire')] },
-    { '@id': P + 'region-lancashire', label: 'Lancashire', ccodes: ['GB'], attestations: [
+      { '@id': P + 'abram#a-names', names: [{ toponym: 'Abram', language: 'en-GB' }], contributor: who, created: CREATED }, rel(P + 'abram', P + 'region-wigan', denyParish),
+      // A retraction stored under Abram, withdrawing what the PARISH says it lies in.
+      ...(retractParish ? [{ '@id': P + 'abram#a-retract', meta: { targetAttestation: P + 'region-wigan#a-in', metaType: PLATO + 'Retracts' }, contributor: who, created: CREATED }] : [])] },
+    { '@id': P + 'region-wigan', label: 'Wigan', ...(parishCcodes ? { ccodes: parishCcodes } : {}), attestations: [rel(P + 'region-wigan', P + 'region-lancashire', false, parishType)] },
+    { '@id': P + 'region-lancashire', label: 'Lancashire', ...(countyCcodes ? { ccodes: countyCcodes } : {}), attestations: [
       ...(countyLink ? [{ '@id': P + 'region-lancashire#a-id', identities: [{ subject: P + 'region-lancashire', object: countyLink, identityType: 'exactMatch' }], contributor: who, created: CREATED }] : []),
       { '@id': P + 'region-lancashire#a-names', names: [{ toponym: 'Lancashire', language: 'en' }], contributor: who, created: CREATED }] },
   ] };
@@ -573,8 +575,10 @@ test("an adopt search is scoped as Krisis scopes a place: the nearest region the
   assert.deepEqual(sent, { contained_in: ['gn:2644974'], countries: ['GB'], lang: 'en', query: 'Abram', type: 'Place', limit: 10 });
   assert.equal(Object.hasOwn(sent, 'area_only'), false, 'a place lookup never asks for areas only');
   // Even when asked for: placeQuery is a place's lookup (the control: planQueries does send it when asked).
-  const forced = placeQuery(adopt.adoptSearchPlace(view, 'Abram', view.scope), { countries: true, limit: 10, areaOnly: true }).sent;
+  const searched = adopt.adoptSearchPlace(view, 'Abram', view.scope);
+  const forced = placeQuery(searched, { countries: true, limit: 10, areaOnly: true }).sent;
   assert.equal(Object.hasOwn(forced, 'area_only'), false);
+  assert.equal(planQueries([searched], { countries: true, limit: 10, areaOnly: true }).preview.first[0].area_only, true, 'control: the same place, planned as a region is, does ask for areas only');
   // A name typed that is not one of the place's own goes with no language; the scope is the same.
   assert.deepEqual(bodyFor(view, 'Abrams', view.scope), { contained_in: ['gn:2644974'], countries: ['GB'], query: 'Abrams', type: 'Place', limit: 10 });
   // Everywhere: the name, the type, and its language only.
@@ -616,7 +620,38 @@ test('a region the dataset says the place is NOT in, or a link withdrawn, does n
   store.close();
   // Pure: a denied identity and a link that is not WHG's give no ids; a cycle of regions ends.
   assert.deepEqual(adopt.whgIdsOf({ linked: ['https://sws.geonames.org/2644974/', W3ID + 'period:p1', W3ID + 'place:wd:Q23077'], denied: [W3ID + 'place:gn:1'] }), ['wd:Q23077']);
+  // A cycle back to the place itself, which IS identified: it is not a region of its own, so nothing scopes it
+  // (the seen guard, not the depth cap, stops it: with the guard gone, a's record would be taken at depth 2).
   const cyc = { id: 'a', relations: [{ type: IN, relatesTo: 'b' }] };
-  const regions = { b: { label: 'B', relations: [{ type: IN, relatesTo: 'a' }], identities: null }, a: { label: 'A', relations: [{ type: IN, relatesTo: 'b' }], identities: null } };
+  const regions = { b: { label: 'B', relations: [{ type: IN, relatesTo: 'a' }], identities: null },
+    a: { label: 'A', relations: [{ type: IN, relatesTo: 'b' }], identities: { linked: [W3ID + 'place:gn:1'], exact: [], denied: [] } } };
   assert.deepEqual(adopt.adoptScope(cyc, (id) => regions[id] ?? null), { containedIn: null, from: [], countries: [] });
+  // Control: the same identity on b scopes it.
+  assert.deepEqual(adopt.adoptScope(cyc, (id) => (id === 'b' ? { ...regions.b, identities: regions.a.identities } : regions[id] ?? null)).containedIn, ['gn:1']);
+});
+
+test("the adopt search's scope reads ContainedIn written with the plato: prefix, honours a retraction stored under another record, takes WHG ids in any of their forms, and takes countries from the region giving the records", async () => {
+  // A prefixed relation type, as the formats accept it (shared.js isContainedIn).
+  let store = await storeOf(scopedDoc({ parishType: 'plato:ContainedIn' }));
+  assert.deepEqual(store.getPlace(P + 'abram').scope.containedIn, ['gn:2644974']);
+  store.close();
+  // The parish's ContainedIn retracted by an attestation under Abram: the county above it is not climbed.
+  store = await storeOf(scopedDoc({ retractParish: true }));
+  assert.deepEqual(store.getPlace(P + 'abram').scope.containedIn, null);
+  store.close();
+  // Control: without the retraction it is (the same dataset otherwise).
+  store = await storeOf(scopedDoc());
+  assert.deepEqual(store.getPlace(P + 'abram').scope.containedIn, ['gn:2644974']);
+  store.close();
+  // A last slash or a fragment on the record's address: the same bare id.
+  assert.deepEqual(adopt.whgIdsOf({ linked: [W3ID + 'place:gn:2644974/'] }), ['gn:2644974']);
+  assert.deepEqual(adopt.whgIdsOf({ linked: [W3ID + 'place:gn:2644974#x'] }), ['gn:2644974']);
+  // No countries of its own: the county's (which gives the records), not the nearer parish's.
+  store = await storeOf(scopedDoc({ placeCcodes: null, parishCcodes: ['IE'], countyCcodes: ['GB'] }));
+  assert.deepEqual(store.getPlace(P + 'abram').scope.countries, ['GB']);
+  store.close();
+  // With no records anywhere, the nearest region with countries gives them (countries alone then scope it).
+  store = await storeOf(scopedDoc({ placeCcodes: null, parishCcodes: ['IE'], countyLink: null }));
+  assert.deepEqual(store.getPlace(P + 'abram').scope, { containedIn: null, from: [], countries: ['IE'] });
+  store.close();
 });

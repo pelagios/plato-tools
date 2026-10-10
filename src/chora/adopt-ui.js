@@ -105,7 +105,8 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
     const ids = Array.isArray(sent?.contained_in) ? sent.contained_in : [];
     return { ids, labels: ids.length ? (scope?.from || []).map((r) => r.label) : [], countries: Array.isArray(sent?.countries) ? sent.countries : [] };
   };
-  const sendsLine = () => { const p = planned((root.querySelector('#adopt-q')?.value ?? s.query).trim() || s.view.label || ''); return p ? W.sends({ lang: p.sent.lang ?? null, ...whereOf(p.sent, searchScope()) }) : ''; };
+  // With no name typed nothing would be sent (send() refuses it): the line says so, not what a search would send.
+  const sendsLine = () => { const p = planned((root.querySelector('#adopt-q')?.value ?? s.query).trim()); return p ? W.sends({ lang: p.sent.lang ?? null, ...whereOf(p.sent, searchScope()) }) : W.noName; };
   /** The permission's one line: the module's ("Needs permission: …"), or, while set to Never, "Not allowed" with a button to the panel (as Krisis on main). */
   function permissionLine(el) {
     if (permissions.needs(el, 'gazetteer', SUBJ) !== 'never') return;

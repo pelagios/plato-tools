@@ -210,6 +210,8 @@ export function isWhg(endpoint) {
 }
 
 const W3ID = 'https://w3id.org/whg/id/';
+/** The characters of a WHG id after its kind ("gn:745044"): up to a slash, query, fragment or space. */
+const ID_CHARS = '[^/?#\\s]+';
 /** A candidate's persistent address (A8): https://w3id.org/whg/id/{id}, where id is e.g. place:gn:745044. */
 export function whgIri(id) {
   return typeof id === 'string' && /^(place|period):\S+$/.test(id) ? W3ID + id : null;
@@ -222,7 +224,7 @@ export function whgIri(id) {
  */
 export function normaliseWhgIri(s) {
   if (typeof s !== 'string') return s;
-  const m = /^https?:\/\/(?:www\.)?whgazetteer\.org\/entity\/((?:place|period):[^/?#\s]+)(?:\/api)?\/?(?:[?#].*)?$/.exec(s.trim());
+  const m = new RegExp(`^https?://(?:www\\.)?whgazetteer\\.org/entity/((?:place|period):${ID_CHARS})(?:/api)?/?(?:[?#].*)?$`).exec(s.trim());
   return m ? W3ID + decodeURIComponent(m[1]) : s;
 }
 
@@ -230,7 +232,15 @@ export function normaliseWhgIri(s) {
 function entityId(idOrIri) {
   const s = normaliseWhgIri(String(idOrIri ?? '').trim());
   const id = s.startsWith(W3ID) ? s.slice(W3ID.length) : s;
-  return /^(place|period):[^/?#\s]+$/.test(id) ? id : null;
+  return new RegExp(`^(place|period):${ID_CHARS}$`).test(id) ? id : null;
+}
+/**
+ * The bare id of a WHG place address, as contained_in takes it ("gn:2644974"): from its persistent form
+ * or a legacy entity URL, a last "/" and any query or fragment left out. Null for anything else.
+ */
+export function whgPlaceId(iri) {
+  const m = new RegExp(`^${W3ID.replace(/[.]/g, '\\.')}place:(${ID_CHARS})/?(?:[?#].*)?$`).exec(normaliseWhgIri(String(iri ?? '').trim()));
+  return m ? decodeURIComponent(m[1]) : null;
 }
 
 /** The namespace of a candidate id, "gn" for place:gn:745044, or null for WHG's own place:<number>. */

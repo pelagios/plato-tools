@@ -23,7 +23,8 @@
 import { recordIdentity, gazetteerSource } from '../krisis/identity.js';
 import { upstreamLicence, WHG_SERVICE, distanceKm } from '../krisis/lookup.js';
 import { linkState } from '../krisis/identities.js';
-import { normaliseWhgIri, namespaceOf, whgIri } from '../gazetteer/whg.js';
+import { normaliseWhgIri, namespaceOf, whgIri, whgPlaceId } from '../gazetteer/whg.js';
+import { isContainedIn } from '../../formats/shared.js';
 import { newGeometryAttestation, checkGeoJSON, DrawError } from './draw.js';
 import { reprPointOf } from './geo.js';
 import { choraAdoptIdentityNote, choraAdoptGeometryNote, choraConsultedNote, CHORA_ADOPT_TEXT, lookupPage } from '../words.js';
@@ -335,45 +336,46 @@ export function consultation(candidate, attribution) {
 // The search is scoped as Krisis scopes a place's lookup within its regions (#32): to the records the
 // dataset identifies its nearest region with (WHG's `contained_in`, bare ids, several unioned), and to the
 // place's countries (else that region's). It is a place lookup, so never `area_only` (lookup.js placeQuery).
-const CONTAINED_IN = 'https://w3id.org/plato#ContainedIn';
-const WHG_PLACE = /^https:\/\/w3id\.org\/whg\/id\/place:(\S+)$/;
 /** How far up the regions a scope is looked for: a parish in a hundred in a county in a country is four. */
 export const MAX_SCOPE_DEPTH = 8;
 const iso2 = (cs) => [...new Set((Array.isArray(cs) ? cs : []).filter((c) => typeof c === 'string' && /^[a-z]{2}$/i.test(c.trim())).map((c) => c.trim().toUpperCase()))];
 /** The WHG records a place's identities link it to (a link not withdrawn), as contained_in takes them: "gn:2644974". */
 export function whgIdsOf(identities) {
   const out = new Set();
-  for (const iri of identities?.linked || []) { const m = WHG_PLACE.exec(normaliseWhgIri(iri)); if (m) out.add(decodeURIComponent(m[1])); }
+  for (const iri of identities?.linked || []) { const id = whgPlaceId(iri); if (id) out.add(id); }
   return [...out].sort();
 }
-const regionsAbove = (v) => [...new Set((v?.relations || []).filter((r) => r && r.type === CONTAINED_IN && r.status !== 'denied' && typeof r.relatesTo === 'string').map((r) => r.relatesTo))];
+// plato:ContainedIn written in full or with the context's prefix, as the formats read it (shared.js).
+const regionsAbove = (v) => [...new Set((v?.relations || []).filter((r) => r && isContainedIn(r.type) && r.status !== 'denied' && typeof r.relatesTo === 'string').map((r) => r.relatesTo))];
 /**
  * Where an adopt search for `view` looks: the nearest regions it is plato:ContainedIn (followed upwards,
  * at most MAX_SCOPE_DEPTH steps) that the dataset identifies with WHG records, and the place's own
- * countries, else the first of those regions' that has some. `regionOf(id)` gives a region of the dataset
+ * countries, else those of the regions giving the records (else, with no records, of the nearest region
+ * that has any: countries alone then scope it). `regionOf(id)` gives a region of the dataset
  * as { label, relations, ccodes, identities } (Chora's store), or null. Returns { containedIn (ids, or
  * null), from ([{ id, label }]: the regions they identify), countries (ISO 3166-1 alpha-2, in capitals) }.
  */
 export function adoptScope(view, regionOf) {
-  let countries = iso2(view?.ccodes);
+  const own = iso2(view?.ccodes);
+  let nearest = [];   // the countries of the nearest region with any, for a scope of countries alone
   const seen = new Set([view?.id]);
   let level = regionsAbove(view);
   for (let depth = 0; depth < MAX_SCOPE_DEPTH && level.length; depth++) {
-    const ids = new Set(), from = [], next = [];
+    const ids = new Set(), from = [], theirs = [], next = [];
     for (const id of level) {
       if (seen.has(id)) continue;
       seen.add(id);
       const r = regionOf(id);
       if (!r) continue;
-      if (!countries.length) countries = iso2(r.ccodes);
+      if (!nearest.length) nearest = iso2(r.ccodes);
       const mine = whgIdsOf(r.identities);
-      if (mine.length) { mine.forEach((x) => ids.add(x)); from.push({ id, label: r.label || id }); }
+      if (mine.length) { mine.forEach((x) => ids.add(x)); from.push({ id, label: r.label || id }); theirs.push(...(r.ccodes || [])); }
       next.push(...regionsAbove(r));
     }
-    if (ids.size) return { containedIn: [...ids].sort(), from, countries };
+    if (ids.size) return { containedIn: [...ids].sort(), from, countries: own.length ? own : iso2(theirs) };
     level = next;
   }
-  return { containedIn: null, from: [], countries };
+  return { containedIn: null, from: [], countries: own.length ? own : nearest };
 }
 /**
  * The place Krisis's placeQuery takes, for searching `query` from `view` within `scope` (adoptScope), or

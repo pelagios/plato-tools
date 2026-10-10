@@ -5433,8 +5433,10 @@ def chora_adopt_checks(pw, url, tmp):
     def scoped():
         fresh(ALLOW); open_for('abram'); give_token()
         said = page.inner_text('#adopt-sends')
+        # With the name emptied, the line says nothing is sent (not what a search would send).
+        page.fill('#adopt-q', ''); empty = page.inner_text('#adopt-sends')
         posts = lambda since: [json.loads(c['body']) for c in calls[since:] if c['method'] == 'POST']
-        out = {'said': said}
+        out = {'said': said, 'empty': empty}
         n = len(calls); a = look_up('Abram'); sent = posts(n)
         out['within'] = {'sent': [list(b.get('queries', {}).values()) for b in sent], 'listed': [c['id'] for c in a.get('candidates') or []], 'widen': page.is_visible('#adopt-widen')}
         n = len(calls); page.click('#adopt-widen'); until(page, '() => window.__chora.adopt.phase === "answered" && window.__chora.adopt.widened', 30)
@@ -5448,6 +5450,7 @@ def chora_adopt_checks(pw, url, tmp):
         out['closed'] = {'failedClosed': a.get('failedClosed'), 'none': page.inner_text('#adopt-none') if page.is_visible('#adopt-none') else ''}
         w, e, nw, c = out['within'], out['everywhere'], out['nowhere'], out['closed']
         return ('looked for only within Lancashire (WHG gn:2644974), in GB' in said and 'its language (en)' in said
+                and 'nothing is sent without one' in empty and 'Sent:' not in empty
                 and w['sent'] == [[{'contained_in': ['gn:2644974'], 'countries': ['GB'], 'lang': 'en', 'query': 'Abram', 'type': 'Place', 'limit': 10}]]
                 and w['listed'] == ['place:gn:2657859'] and w['widen']
                 and e['sent'] == [[{'lang': 'en', 'query': 'Abram', 'type': 'Place', 'limit': 10}]]

@@ -263,24 +263,27 @@ export class ChoraStore {
   getPlace(id, { ccodeBbox } = {}) {
     const rec = this.record(id);
     if (!rec) return null;
-    // What the whole dataset withdraws of this place's attestations: the retraction may be elsewhere.
-    const withdrawn = new Map();
-    for (const a of Array.isArray(rec.attestations) ? rec.attestations : []) {
-      if (!a || typeof a['@id'] !== 'string') continue;
-      const kind = this.one('SELECT kind FROM wd WHERE id=?', [a['@id']]);
-      if (kind) withdrawn.set(a['@id'], kind);
-    }
     // Under the key it goes by here (placeKey), so that a place without an @id finds its drawings.
-    const view = { ...viewPlace(rec, { withdrawn, lookup: (other) => this.brief(other), ccodeBbox }), id, identities: this.identitiesOf(id) };
+    const view = { ...viewPlace(rec, { withdrawn: this.withdrawnOf(rec), lookup: (other) => this.brief(other), ccodeBbox }), id, identities: this.identitiesOf(id) };
     // Where a search for its gazetteer record looks (#32): its nearest regions the dataset identifies, and its countries.
     view.scope = adoptScope(view, (r) => this.regionOf(r));
     return view;
   }
-  /** A region of the dataset, for adoptScope: its label, relations and countries (as viewPlace reads them), and identities. */
+  /** What the whole dataset withdraws of a record's attestations: the retraction may be under another record. */
+  withdrawnOf(rec) {
+    const withdrawn = new Map();
+    for (const a of Array.isArray(rec?.attestations) ? rec.attestations : []) {
+      if (!a || typeof a['@id'] !== 'string') continue;
+      const kind = this.one('SELECT kind FROM wd WHERE id=?', [a['@id']]);
+      if (kind) withdrawn.set(a['@id'], kind);
+    }
+    return withdrawn;
+  }
+  /** A region of the dataset, for adoptScope: its label, relations and countries (as viewPlace reads them, withdrawals honoured), and identities. */
   regionOf(id) {
     const rec = this.record(id);
     if (!rec) return null;
-    const v = viewPlace(rec);
+    const v = viewPlace(rec, { withdrawn: this.withdrawnOf(rec) });
     return { label: v.label, relations: v.relations, ccodes: v.ccodes, identities: this.identitiesOf(id) };
   }
   /**
