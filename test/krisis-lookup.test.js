@@ -864,20 +864,20 @@ test('a lookup\'s candidates are not cut to the best few, nor do located and unl
   assert.ok(listed[4].similarity_score > listed[0].similarity_score, 'control: the unlocated are the more alike by name, so turns would put one second');
 });
 
-test('local candidates keep change 1\'s algorithm (krisis-names 5), a lookup\'s its own, in the work file and in each attestation\'s note', async () => {
+test('local candidates keep change 1\'s algorithm (krisis-names 7), a lookup\'s its own, in the work file and in each attestation\'s note', async () => {
   const subjects = await detect([textFile(JSON.stringify(doc([tyne()])), 'a.json')]);
   const others = await detect([textFile(JSON.stringify({ profile: 'place-centric', gazetteer: { title: 'Dataset B' }, spatialEntities: [{ '@id': X + 'b/newcastle', label: 'Newcastle', attestations: [at(-1.6, 54.97)] }] }), 'b.json')]);
   const m = await match({ subjects, others, options: { now: NOW } }, env());
   const g = await gather({ subjects, options: {} }, env());
   const r = await runLookup({ lookup: lookupWith(fakeWhg(byName({ Newcastle: NEWCASTLES }))), work: m.work, places: g.places, options: { places: 'all' }, now: clock() });
   const w = readWork(serialiseWork(r.work));
-  assert.equal(ALGORITHM, 'krisis-names 5');
+  assert.equal(ALGORITHM, 'krisis-names 7');
   assert.equal(w.algorithm_version, ALGORITHM, 'the file\'s, for its local candidates');
   assert.ok(w.candidates.filter((c) => c.lookup).every((c) => c.algorithm_version === LOOKUP_ALGORITHM));
   decide(w, w.candidates.find((c) => !c.lookup).id, 'match', { at: NOW });
   decide(w, w.candidates.find((c) => c.gazetteer?.id === 'place:gn:2641673').id, 'match', { at: NOW });
   const notes = attestationsFrom(w, { reviewer: REVIEWER }).map((x) => x.attestation.notes);
-  assert.deepEqual(notes, [krisisNote('match', 'krisis-names 5'), krisisLookupNote('match', 'World Historical Gazetteer', LOOKUP_ALGORITHM)]);
+  assert.deepEqual(notes, [krisisNote('match', 'krisis-names 7'), krisisLookupNote('match', 'World Historical Gazetteer', LOOKUP_ALGORITHM)]);
 });
 
 // ---- WHG: the language of a name, and areas only (whg.js A12, A13; #19, #30) -----------------------------
