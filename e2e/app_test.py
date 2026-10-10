@@ -5113,6 +5113,11 @@ AGREE_JS = """(pts) => { const o = window.__chora_overlays; return Promise.all(o
 # each absence beside the presence that shows the check could see it.
 ADOPT_FIX = ROOT / 'test/fixtures/chora/adopt'
 ADOPT_TOKEN = 'e2e-SECRET-adopt-token-91c07f3a'
+def abram(id, cc, point):
+    return {'id': id, 'name': 'Abram', 'score': 100, 'match': True, 'description': f'Country: {cc}', 'ccodes': [cc], 'repr_point': point,
+            'namespace': 'gn', 'alt_names': [], 'has_geom': False, 'confidence': 100}
+# The real run of 10 October 2026 (#32): WHG's first Abrams were in Croatia and the USA.
+ABRAM_HR, ABRAM_US, ABRAM_GB = abram('place:gn:3337500', 'HR', [15.9, 45.3]), abram('place:gn:4046000', 'US', [-88.3, 37.6]), abram('place:gn:2657859', 'GB', [-2.59, 53.51])
 
 def chora_adopt_checks(pw, url, tmp):
     import re
@@ -5133,6 +5138,13 @@ def chora_adopt_checks(pw, url, tmp):
         if req.method == 'POST':
             qs = json.loads(req.post_data)['queries']
             first = next(iter(qs.values()))['query']
+            if first.startswith('Abram'):
+                # #32: two Abrams abroad and one in Lancashire; asked within a region (contained_in), only the one in it,
+                # as WHG answers; 'Abram nowhere' has none within, 'Abram closed' a region WHG could not apply.
+                scoped = isinstance(next(iter(qs.values())).get('contained_in'), list)
+                found = ([] if first in ('Abram nowhere', 'Abram closed') else [ABRAM_GB]) if scoped else [ABRAM_HR, ABRAM_US, ABRAM_GB]
+                scope = {'scope': {'applied': first != 'Abram closed'}} if scoped else {}
+                return reply(route, 200, {**{k: {'result': found, **scope} for k in qs}, 'attribution': fx('whg-newcastle-reconcile.json')['attribution']})
             if first == 'Quota': return reply(route, 401, fx('whg-quota-401.json'))
             if first == 'Badtoken': return reply(route, 401, fx('whg-auth-401.json'))
             src = fx('whg-per-query-error.json') if first == 'Broken' else fx('whg-datasets-reconcile.json') if first == 'Tyneside' else fx('whg-newcastle-reconcile.json')
@@ -5153,6 +5165,15 @@ def chora_adopt_checks(pw, url, tmp):
     # A place linked only to a legacy WHG cluster page, and one whose @id IS a record's w3id.
     doc['spatialEntities'].append({'@id': P + 'portal-place', 'label': 'Portal place', 'attestations': [{'identities': [{'subject': P + 'portal-place', 'object': 'https://whgazetteer.org/places/123456/portal/', 'identityType': 'exactMatch'}], 'contributor': {'name': 'Ada'}, 'created': '2026-09-01T09:00:00Z'}]})
     doc['spatialEntities'].append({'@id': W3 + 'place:gn:2641673', 'label': 'Tyne record'})
+    # #32: Abram, ContainedIn its parish (no identity), ContainedIn Lancashire, identified with gn:2644974.
+    IN = 'https://w3id.org/plato#ContainedIn'
+    within = lambda a, b: {'@id': a + '#a-in', 'relations': [{'relationType': IN, 'relatesTo': b}], 'contributor': {'name': 'Ada'}, 'created': '2026-09-01T09:00:00Z'}
+    doc['spatialEntities'] += [
+        {'@id': P + 'abram', 'label': 'Abram', 'ccodes': ['GB'], 'attestations': [
+            {'@id': P + 'abram#a-names', 'names': [{'toponym': 'Abram', 'language': 'en'}], 'contributor': {'name': 'Ada'}, 'created': '2026-09-01T09:00:00Z'}, within(P + 'abram', P + 'region-wigan')]},
+        {'@id': P + 'region-wigan', 'label': 'Wigan parish', 'attestations': [within(P + 'region-wigan', P + 'region-lancashire')]},
+        {'@id': P + 'region-lancashire', 'label': 'Lancashire', 'attestations': [{'@id': P + 'region-lancashire#a-id', 'identities': [
+            {'subject': P + 'region-lancashire', 'object': W3 + 'place:gn:2644974', 'identityType': 'exactMatch'}], 'contributor': {'name': 'Ada'}, 'created': '2026-09-01T09:00:00Z'}]}]
     RESET = """([g]) => { localStorage.removeItem('plato-tools.permissions'); sessionStorage.clear(); localStorage.removeItem('plato-tools.whg-token');
       localStorage.removeItem('plato-tools.whg-token.remember');
       if (g) localStorage.setItem('plato-tools.permissions', JSON.stringify({ version: 1, grants: g })); }"""
@@ -5221,12 +5242,13 @@ def chora_adopt_checks(pw, url, tmp):
         st['lookup'] = a
         markers = page.evaluate('() => [...document.querySelectorAll(".cand-marker")].map((m) => [m.dataset.cand, m.textContent])')
         listed = page.eval_on_selector_all('#adopt-candidates li', 'ls => ls.map((l) => [l.dataset.cand, l.querySelector(".cand-n").textContent])')
-        return (len(posts) == 1 and list(body.get('queries', {}).values()) == [{'query': 'Newcastle', 'type': 'Place', 'limit': 10}]
+        # Newcastle's own country goes with it (#32); "Newcastle" is not one of its names ("Newcastle upon Tyne"), so no language.
+        return (len(posts) == 1 and list(body.get('queries', {}).values()) == [{'countries': ['GB'], 'query': 'Newcastle', 'type': 'Place', 'limit': 10}]
                 and [c['id'] for c in cands] == ['place:gn:2641591', 'place:gn:2641673', 'place:tgn:7011781', 'place:gn:2155472']
                 and [c['inArea'] for c in cands] == [True, True, False, False] and a.get('reference') == 'box'
                 and sorted(markers) == sorted(listed) and len(markers) == 4 and cstate(page)['pendingCount'] == 0), {
             'posts': len(posts), 'queries': body.get('queries'), 'order': [c['id'] for c in cands], 'markers': markers, 'listed': listed, 'pending': cstate(page)['pendingCount']}
-    attempt("Chora adopt: allowed, one query is sent (type Place, the name typed), and the four Newcastles are listed and on the map, numbered alike, GB's first (WHG gave Tyne last), nothing adopted yet", lookup)
+    attempt("Chora adopt: allowed, one query is sent (type Place, the name typed, the place's country), and the four Newcastles are listed and on the map, numbered alike, GB's first (WHG gave Tyne last), nothing adopted yet", lookup)
     def headers():
         posts = [c for c in calls if c['method'] == 'POST']
         auth = [c['headers'].get('authorization') for c in posts]
@@ -5405,6 +5427,35 @@ def chora_adopt_checks(pw, url, tmp):
         return ('whether it holds this record is not known' in cluster and st.get('cluster on novocastria') is False
                 and done.get('count') == 1 and not page.is_visible('#adopt-refused') and not errors), {'cluster': cluster, 'novocastria': st.get('cluster on novocastria'), 'done': done, 'errors': errors[:3]}
     attempt("Chora adopt: a place linked only to a WHG cluster page says so (one linked to a record does not); a place whose @id is the record's w3id adopts the location only, with no error", cluster_and_same)
+    # #32: within its region. Abram is in Lancashire, which the dataset identifies with gn:2644974: the search says so
+    # before anything is sent, sends contained_in with its country and language, and WHG's Abram there is the one listed.
+    # Everywhere only when asked (the control: the foreign Abrams come back); nothing within is said, never widened.
+    def scoped():
+        fresh(ALLOW); open_for('abram'); give_token()
+        said = page.inner_text('#adopt-sends')
+        posts = lambda since: [json.loads(c['body']) for c in calls[since:] if c['method'] == 'POST']
+        out = {'said': said}
+        n = len(calls); a = look_up('Abram'); sent = posts(n)
+        out['within'] = {'sent': [list(b.get('queries', {}).values()) for b in sent], 'listed': [c['id'] for c in a.get('candidates') or []], 'widen': page.is_visible('#adopt-widen')}
+        n = len(calls); page.click('#adopt-widen'); until(page, '() => window.__chora.adopt.phase === "answered" && window.__chora.adopt.widened', 30)
+        a = ad(); sent = posts(n)
+        out['everywhere'] = {'sent': [list(b.get('queries', {}).values()) for b in sent], 'listed': sorted(c['id'] for c in a.get('candidates') or []),
+                             'said': page.inner_text('#adopt-sends'), 'narrow': page.is_visible('#adopt-narrow')}
+        page.click('#adopt-narrow'); until(page, '() => window.__chora.adopt.phase === "answered" && !window.__chora.adopt.widened', 30)
+        n = len(calls); a = look_up('Abram nowhere'); page.wait_for_timeout(1500)
+        out['nowhere'] = {'posts': len(posts(n)), 'listed': len(a.get('candidates') or []), 'none': page.inner_text('#adopt-none') if page.is_visible('#adopt-none') else '', 'widen': page.is_visible('#adopt-widen')}
+        a = look_up('Abram closed')
+        out['closed'] = {'failedClosed': a.get('failedClosed'), 'none': page.inner_text('#adopt-none') if page.is_visible('#adopt-none') else ''}
+        w, e, nw, c = out['within'], out['everywhere'], out['nowhere'], out['closed']
+        return ('looked for only within Lancashire (WHG gn:2644974), in GB' in said and 'its language (en)' in said
+                and w['sent'] == [[{'contained_in': ['gn:2644974'], 'countries': ['GB'], 'lang': 'en', 'query': 'Abram', 'type': 'Place', 'limit': 10}]]
+                and w['listed'] == ['place:gn:2657859'] and w['widen']
+                and e['sent'] == [[{'lang': 'en', 'query': 'Abram', 'type': 'Place', 'limit': 10}]]
+                and e['listed'] == sorted(['place:gn:3337500', 'place:gn:4046000', 'place:gn:2657859']) and 'looked for everywhere' in e['said'] and e['narrow']
+                and nw['posts'] == 1 and nw['listed'] == 0 and 'nothing of that name within Lancashire' in nw['none'] and 'unless you ask' in nw['none'] and nw['widen']
+                and c['failedClosed'] is True and 'could not look within Lancashire' in c['none']
+                and not any('area_only' in json.dumps(json.loads(x['body'])) for x in calls if x['method'] == 'POST')), out
+    attempt("Chora adopt (#32): a place within a region the dataset identifies is searched within it (contained_in, its country, its name's language, said before sending), so only Lancashire's Abram is listed; everywhere only when asked (the foreign Abrams then come back); nothing within is said, and never widened by itself; no area_only ever sent", scoped)
     attempt('Chora adopt: no page error across these checks (and the checks ran: a request reached the fake WHG)', lambda: (not errors and len(calls) > 3, {'errors': errors[:5], 'calls': len(calls)}))
     ctx.close()
 
