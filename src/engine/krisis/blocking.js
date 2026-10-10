@@ -44,7 +44,7 @@
 //
 // Scoring is names.js's, and each word is weighted by its inverse document frequency in the names of
 // both datasets, ln(1 + N / df), so that a common word counts for little.
-import { normalise, nameScore, distinctive, expandedScore, sortWords, trigrams, qualifiers, qualifierScore, compileQualifiers, QUALIFIER_CAP, QUALIFIER_RARE } from './names.js';
+import { normalise, sortWords, trigrams, qualifiers, scored, compileQualifiers, QUALIFIER_CAP, QUALIFIER_RARE } from './names.js';
 
 export const BLOCKING = { share: 0.4, commonShare: 0.01, commonFloor: 50, keys: 4, spread: 4, far: 10 };
 export const BLOCKING_RULE = 'The names of the other dataset are indexed by their trigrams (normalised, padded with two spaces before and one after). '
@@ -174,7 +174,7 @@ export class NameIndex {
     const byQualifier = threshold <= QUALIFIER_CAP && !this.Q.none;
     for (const s of new Set(names.map(normalise))) {
       if (!s) continue;
-      const ss = sortWords(s), sw = s.split(' ').length, sq = qualifiers(s, this.Q);
+      const ss = sortWords(s), sq = qualifiers(s, this.Q);
       // A name with qualifiers is looked up by its core too (Chipping Ongar by "ongar"), each other name once.
       let found = this.candidates(s, threshold, sq.core);
       if (byQualifier && sq.units.length) {
@@ -184,30 +184,9 @@ export class NameIndex {
       for (const ni of found) {
         const o = this.names[ni];
         this.comparisons++;
-        let score = nameScore(s, o.n, ss, o.sorted);
-        // Names of the same words but for short forms are scored with them written out (names.js);
-        // otherwise a score under the threshold is let go, as lowering by the distinctive words cannot
-        // raise it, unless the names may differ only by qualifiers, which can (qualifierScore()).
-        const e = score < 1 && sw > 1 && o.words === sw && Math.abs(s.length - o.n.length) >= 2 ? expandedScore(s, o.n) : null;
-        if (e !== null) { if (e > score) score = e; }
-        if (score < 1 && (sq.units.length || o.q.units.length)) {
-          const q = qualifierScore(s, o.n, this.weight, sq, o.q);
-          // A common core is not raised, nor lowered: the pair is scored as below, as with no lists.
-          if (q !== null && !q.common) {
-            // The higher of the score as below and the cores' (at most the cap: the rule only raises,
-            // so a pair letters score over the cap keeps that score). Under the threshold the score as
-            // below cannot matter: the cores' then decides whether the pair is kept.
-            if (score >= threshold && e === null) { const d = distinctive(s, o.n, this.weight); if (d !== null && d < score) score = d; }
-            // Only the rule reached the threshold (the review says so, and names the qualifiers).
-            const by = score < threshold && q.score >= threshold ? { added: q.added, names: [s, o.n] } : null;
-            score = Math.max(score, Math.min(QUALIFIER_CAP, q.score));
-            keep(o.pi, score, by);
-            continue;
-          }
-        }
-        if (e !== null) { /* raised above, and not lowered */ } else if (score < threshold) continue;
-        else if (score < 1) { const d = distinctive(s, o.n, this.weight); if (d !== null && d < score) score = d; }
-        keep(o.pi, score, null);
+        // Scored as names.js scores any pair (scored()), with the shortcut under the threshold.
+        const r = scored(s, o.n, this.weight, sq, o.q, threshold, ss, o.sorted);
+        keep(o.pi, r.score, r.by && { added: r.by.added, names: [s, o.n] });
       }
     }
     return best;

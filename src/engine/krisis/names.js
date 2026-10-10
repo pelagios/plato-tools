@@ -123,13 +123,32 @@ export function nameScore(x, y, xs = sortWords(x), ys = sortWords(y)) {
  * the lists chosen.
  */
 export function similarityNormalised(x, y, weight, Q = compileQualifiers([])) {
-  const plain = plainScore(x, y, weight);
-  if (plain === 1) return plain;
-  const q = qualifierScore(x, y, weight, qualifiers(x, Q), qualifiers(y, Q));
-  if (q === null) return plain;
-  // The rule only ever raises a score (to the cap): a pair letters alone score higher keeps that score,
-  // and a pair whose core is common is not raised, never lowered (Newton and Newton Regis keep their 0.9).
-  return q.common ? plain : Math.max(plain, Math.min(QUALIFIER_CAP, q.score));
+  return scored(x, y, weight, qualifiers(x, Q), qualifiers(y, Q)).score;
+}
+/**
+ * How two normalised names score: the one implementation, which similarityNormalised() and matching
+ * (blocking.js, NameIndex.best()) both call. `qx`, `qy`: the names' qualifiers() by the lists in use;
+ * `xs`, `ys`: the names with their words sorted, if known. Letters (nameScore()), raised by short
+ * forms written out (expandedScore()), else lowered by the distinctive words (distinctive()); then
+ * raised by the qualifier rule (qualifierScore()), to QUALIFIER_CAP at most. The rule only ever raises
+ * a score: a pair letters alone score higher keeps that score, and a pair whose core is common is not
+ * raised, never lowered (Newton and Newton Regis keep their 0.9). `threshold`: the shortcut matching
+ * takes, not working out the lowering by the distinctive words of a pair already under it (lowering
+ * cannot raise it); so a score under `threshold` is only an upper bound, and with 0 it is exact.
+ * Returns { score, by, common }: `by`, when only the rule took the pair to `threshold`, { added: the
+ * labels of the qualifiers that made the difference }; `common`, when the rule declined a common core.
+ */
+export function scored(x, y, weight, qx, qy, threshold = 0, xs = sortWords(x), ys = sortWords(y)) {
+  const base = nameScore(x, y, xs, ys);
+  if (base === 1) return { score: 1, by: null, common: false };
+  let plain = base;
+  const e = base === 0 ? null : expandedScore(x, y);
+  if (e !== null) plain = Math.max(base, e);
+  else if (base > 0 && base >= threshold) { const d = distinctive(x, y, weight); if (d !== null && d < plain) plain = d; }
+  const q = qx.units.length || qy.units.length ? qualifierScore(x, y, weight, qx, qy) : null;
+  if (q === null || q.common) return { score: plain, by: null, common: !!q?.common };
+  const raised = Math.min(QUALIFIER_CAP, q.score);
+  return { score: Math.max(plain, raised), by: plain < threshold && raised >= threshold ? { added: q.added } : null, common: false };
 }
 /** similarityNormalised() but for qualifiers: the name score, raised by short forms or lowered by the distinctive words. */
 function plainScore(x, y, weight) {

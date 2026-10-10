@@ -972,6 +972,28 @@ test('qualifiers: the guards stay: each has its own (Bere Regis and Bere on Stou
   assert.ok(similarity('Market Farm', 'Farm', idx.weight) < QUALIFIER_CAP && similarity('Market Warsop', 'Warsop', idx.weight) === QUALIFIER_CAP, 'control: Warsop is raised, Farm is not');
   assert.ok(idx.best(['Market Warsop'], 0.85).has(WARSOP), 'and Market Warsop finds Warsop in matching');
 });
+test('matching scores every pair as similarityNormalised() does: one implementation (names.js scored())', () => {
+  // The Fable review's agreement probe (10 October 2026): a gazetteer with common words, so the weights bite.
+  const others = [['Ongar'], ['Chipping Ongar'], ['Saint Ongar'], ['St Ongar'], ['Warsop'], ['Farm'], ['Hill'], ['Hall'], ['Newton'], ['Newton Regis'],
+    ['Sutton'], ['Sutton under Brailes'], ['Stoke'], ['Stratford'], ['Newcastle'], ['Newcastle under Lyme'], ['Kingston upon Hull'], ['Marlow'],
+    ['Great Marlow'], ['Weighton'], ['Bere'], ['Bere Regis'], ['Abingdon-on-Thames'], ['Norton'], ['Chipping Norton'], ['Ash'], ['Mill Regis'],
+    ['Burnham on Sea'], ['Downham Market'], ['Downham'], ['Saint Martin'], ['St Martins']];
+  const subjects = [['Chipping Ongar'], ['Chipping St Ongar'], ['Ongar'], ['Market Warsop'], ['Market Farm'], ['Chipping Hill'], ['Market Hall'], ['Newton'],
+    ['Newton Regis'], ['Stoke on Trent'], ['Newcastle upon Tyne'], ['Kingston upon Thames'], ['Market Weighton'], ['Bere on Stour'], ['Abingdon'],
+    ['Norton'], ['Burnham'], ['Market Downham'], ['St Martin']];
+  for (let i = 0; i < 400; i++) others.push([`Place${i} Farm`], [`Place${i} Hill`], [`Place${i} Hall`], [`Market Place${i}`], [`Newton Place${i}`], [`Chipping Place${i % 40}`]);
+  const Q = compileQualifiers(), idx = new NameIndex(others, subjects, Q), T = 0.85;
+  let kept = 0, marked = 0;
+  for (const [name] of subjects) {
+    const best = idx.best([name], T), sn = normalise(name);
+    for (let pi = 0; pi < others.length; pi++) {
+      const ref = similarityNormalised(sn, normalise(others[pi][0]), idx.weight, Q), got = best.get(pi);
+      if (got !== undefined) { kept++; assert.ok(Math.abs(got - ref) < 1e-12, `${name} and ${others[pi][0]}: matching ${got}, names.js ${ref}`); }
+      if (best.rule.has(pi)) marked++;
+    }
+  }
+  assert.ok(kept > 20 && marked > 3, `control: pairs kept (${kept}) and marked as the rule's (${marked})`);
+});
 test('qualifiers: the rule never lowers a score: every pair scores at least what it scores with no lists', () => {
   const idx = gazetteerIndex(), none = compileQualifiers([]);
   const pairs = [['Market Farm', 'Farm'], ['Newton', 'Newton Regis'], ['Sutton', 'Sutton under Brailes'], ['Sutton upon Lound', 'Sutton'],
