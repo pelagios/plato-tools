@@ -958,11 +958,28 @@ test('qualifiers: the guards stay: each has its own (Bere Regis and Bere on Stou
     assert.ok(similarity(a, b) < 0.85, `${a} and ${b}: ${similarity(a, b)}`);
     assert.ok(nameScore(normalise(a.replace(/^(Chipping|Market) /, '')), normalise(b.replace(/^(Chipping|Market) /, ''))) > 0.95, `control: ${a} and ${b}: the cores alike`);
   }
-  // A common core is not a place: where Farm is in more names than Market, Market Farm is not Farm.
+  // A common core is not a place: where Farm is in more names than Market, the rule does not raise Market
+  // Farm to Farm, and it never lowers it either: the pair keeps the score letters give it, as with no lists
+  // (until 10 October 2026 it was lowered, and the held-out check lost Newton and Newton Regis, 0.9).
   assert.ok(idx.weight('farm') < idx.weight('market'), 'control: Farm is commoner than Market');
-  assert.ok(similarity('Market Farm', 'Farm') >= 0.85, 'control: with every word weighed alike, Market Farm and Farm are suggested');
-  assert.ok(similarity('Market Farm', 'Farm', idx.weight) < 0.5, `with Farm common, they are not: ${similarity('Market Farm', 'Farm', idx.weight)}`);
-  assert.ok(!idx.best(['Market Farm'], 0.85).has(FARM) && idx.best(['Market Warsop'], 0.85).has(WARSOP), 'and so in matching');
+  assert.equal(qualifierScore(normalise('Market Farm'), normalise('Farm'), idx.weight).common, true, 'control: the common-core guard applies');
+  assert.equal(qualifierScore(normalise('Market Warsop'), normalise('Warsop'), idx.weight).common, false, 'control: not for Warsop');
+  const none = compileQualifiers([]);
+  assert.equal(similarity('Market Farm', 'Farm', idx.weight), similarity('Market Farm', 'Farm', idx.weight, none), 'with Farm common, not raised: as with no lists');
+  assert.ok(similarity('Market Farm', 'Farm', idx.weight) < QUALIFIER_CAP && similarity('Market Warsop', 'Warsop', idx.weight) === QUALIFIER_CAP, 'control: Warsop is raised, Farm is not');
+  assert.ok(idx.best(['Market Warsop'], 0.85).has(WARSOP), 'and Market Warsop finds Warsop in matching');
+});
+test('qualifiers: the rule never lowers a score: every pair scores at least what it scores with no lists', () => {
+  const idx = gazetteerIndex(), none = compileQualifiers([]);
+  const pairs = [['Market Farm', 'Farm'], ['Newton', 'Newton Regis'], ['Sutton', 'Sutton under Brailes'], ['Sutton upon Lound', 'Sutton'],
+    ['Market Warsop', 'Warsop'], ['Chipping Ongar', 'Ongar'], ['Abingdon', 'Abingdon on Thames'], ['Bere Regis', 'Bere on Stour']];
+  let raised = 0;
+  for (const weight of [undefined, idx.weight]) for (const [a, b] of pairs) {
+    const w = similarity(a, b, weight), n = similarity(a, b, weight, none);
+    assert.ok(w >= n, `${a} and ${b}: ${w} with the lists, ${n} without`);
+    if (w > n) raised++;
+  }
+  assert.ok(raised > 0, 'control: the lists raise some of these pairs');
 });
 test('qualifiers per language: a French list switched on finds Bar-sur-Aube for Bar, and switched off does not; German Bad Ems for Ems', () => {
   const on = compileQualifiers(['fr']), off = compileQualifiers(['en-cy-la']), both = compileQualifiers(['en-cy-la', 'fr', 'de']), none = compileQualifiers([]);

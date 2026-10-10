@@ -1126,8 +1126,10 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   version scored 0.88 times the cores' score, and in the trial below every pair it added that way was
   wrong (Bradfield and Great Bardfield, 0.851). **A common core is not a place**: when a qualifier
   word added (a phrase counted by its joining word) weighs more by inverse document frequency than the
-  core, the pair scores the core's share of the weight, if lower (where Farm is in more names than
-  Market, Market Farm and Farm score under a half); a core in no more than 50 names
+  core, the rule does not raise the pair, which keeps the score letters give it (where Farm is in
+  more names than Market, Market Farm and Farm keep their 0.873, as with no lists); it never lowers one
+  (until the held-out check of 10 October 2026 such a pair scored the core's share of the weight if
+  lower, and lost real pairs that letters find: Newton and Newton Regis, 0.9, 0.2 km apart); a core in no more than 50 names
   (`QUALIFIER_RARE`) is never common, as in a small dataset the qualifiers are rare too. **Only words
   that rarely mark a separate place** are qualifiers (the maintainer's ruling of 1 October 2026,
   `krisis-names 7`): `krisis-names 6` had sixty (Great, Little, Long, Old, New, North and the other

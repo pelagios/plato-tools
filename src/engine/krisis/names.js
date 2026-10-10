@@ -44,9 +44,11 @@
 // as above. When each name has a qualifier the other has not (Chipping Ongar
 // and Market Ongar), this does not apply, and they score as above, low. And a
 // common core is not evidence of a place: when a qualifier word added (a phrase counted by its
-// joining word) weighs more than the core's words, the pair scores the core's share of the weight of
-// the two, as distinctive() scores the words shared, if that is lower: in a gazetteer where Farm is
-// in more names than Market, Market Farm is not Farm. A core whose words are in no more than
+// joining word) weighs more than the core's words, the rule does not raise the pair, which keeps the
+// score letters give it: in a gazetteer where Farm is in more names than Market, Market Farm is not
+// raised to Farm. It never lowers one either: until the held-out check of 10 October 2026 the pair
+// scored the core's share of the weight if lower, and lost real pairs that letters find (Newton and
+// Newton Regis, 0.9; Sutton and Sutton-under-Brailes). A core whose words are in no more than
 // QUALIFIER_RARE (50) names is never common: in a small dataset Market is rare too.
 // Trigrams of the normalised name are what matching blocks on (blocking.js).
 
@@ -120,8 +122,9 @@ export function similarityNormalised(x, y, weight, Q = compileQualifiers()) {
   if (plain === 1) return plain;
   const q = qualifierScore(x, y, weight, qualifiers(x, Q), qualifiers(y, Q));
   if (q === null) return plain;
-  // The rule only ever raises a score (to the cap): a pair letters alone score higher keeps that score.
-  return q.common ? Math.min(plain, q.score) : Math.max(plain, Math.min(QUALIFIER_CAP, q.score));
+  // The rule only ever raises a score (to the cap): a pair letters alone score higher keeps that score,
+  // and a pair whose core is common is not raised, never lowered (Newton and Newton Regis keep their 0.9).
+  return q.common ? plain : Math.max(plain, Math.min(QUALIFIER_CAP, q.score));
 }
 /** similarityNormalised() but for qualifiers: the name score, raised by short forms or lowered by the distinctive words. */
 function plainScore(x, y, weight) {
@@ -213,7 +216,7 @@ export function qualifiers(x, Q = compileQualifiers()) {
  * QUALIFIER_CAP when their cores are the same, else 0, common: false, added: the labels of the
  * qualifiers one has and the other has not }, the higher of which and the score without it is kept
  * (the rule only raises); or, when a qualifier word added weighs more than the core, { score: the core's
- * share of the weight, common: true }, the lower of which is kept; or null when it does not apply
+ * share of the weight, common: true }, when the rule does not raise the pair at all; or null when it does not apply
  * (neither has a qualifier the other has not, or each has one the other has not). `weight` as for
  * similarityNormalised(); `qx`, `qy`, the names' qualifiers() (by default, by the default lists).
  */
