@@ -23,8 +23,9 @@
 //   /types/expand/, or the bundled expansion, scope-data.js), and all of them are sent.
 // - With years given, WHG leaves out every place that has no dates, unless it is sent `undated: true`, which
 //   it takes only beside `start` and/or `end` (live end to end on production, 12 October 2026: "Newport", gn,
-//   1500 to 1600 gave 0 places without it and 100 with it). `temporal: true` is always sent with a year
-//   window: WHG's legacy arm ignores the years without it.
+//   1500 to 1600 gave 0 places without it and 100 with it). `temporal: true` goes with the years, as WHG's
+//   own Map your Data sends it (accepted, and harmless: since place#327 WHG applies the years without it). A
+//   window may be open at either end: an `end` alone is from any time up to it.
 //
 // Precedence. A lookup that already says where to look keeps it: a region's or a place's constraint from
 // the region review (its contained_in, its area, its countries, from the table's region columns, county
@@ -190,7 +191,7 @@ export function whereFields(scope) {
  * of a region review: its Where alone), `own` (the query's own keys: its filters, or its constraint),
  * `relaxed` (its constraint's relaxation: 'all' sends no Where), `undatedTaken` (UNDATED_TAKEN, given here
  * only by the tests). WHG's form (12 October 2026): `undated: true` only with `start` and/or `end`, and
- * `temporal: true` with every year window; `temporal_mode` ('possibly' | 'definitely') is not sent.
+ * `temporal: true` beside the years, as WHG's Map your Data sends it; `temporal_mode` ('possibly' | 'definitely') is not sent.
  */
 export function scopeFields(scope, { region = false, own = null, relaxed = null, undatedTaken = UNDATED_TAKEN } = {}) {
   const s = normaliseScope(scope), params = {}, parts = [];

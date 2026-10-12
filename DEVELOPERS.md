@@ -2304,7 +2304,8 @@ To WHG only: another service is sent nothing of it.
 - **Undated places.** With years given, WHG leaves out every place with no dates unless it is sent
   `undated: true`, which it takes only together with `start` and/or `end` (WHG, 12 October 2026: live end
   to end, gateway indexing a7f10bc; "Newport", gn, 1500 to 1600 gave 0 places without it and 100 with it).
-  `temporal: true` is always sent with a year window (WHG's legacy arm ignores the years without it);
+  `temporal: true` goes with the years, as WHG's own Map your Data sends it (accepted; since place#327, live
+  in whg3 7efaa4bab, WHG applies the years without it too). A window may have only a start or only an end;
   `temporal_mode` (`possibly` | `definitely`) is not sent. "Include places with no dates" can be ticked
   (`aria-describedby` a note of what it does); unticked, with years given, the tracker's line and the
   panel mark the Scope ("Places with no dates are left out", `excludesUndated()`). `UNDATED_TAKEN` in

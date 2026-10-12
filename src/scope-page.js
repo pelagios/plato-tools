@@ -37,6 +37,9 @@ import * as permissions from './lib/permissions.js';
 import { SCOPE_WORDS as SW } from './engine/words.js';
 import { normaliseScope, emptyScope, isEmptyScope, excludesUndated, yearsProblem, scopeType, containerId, areaCheck, UNDATED_TAKEN, WHERE_MODES, YEAR_RANGE } from './engine/krisis/scope.js';
 import { TYPE_SHORTLIST, BUNDLED_SOURCES, COUNTRY_CODES } from './engine/krisis/scope-data.js';
+import { tokenFieldHtml, giveToken, rememberToken, forgetToken, noteInput } from './lib/token-field.js';
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 const WHG = 'https://whgazetteer.org';
 const TAB_KEY = 'plato-tools.scope';
@@ -275,12 +278,12 @@ export function mountScope({ methodos, lookup, token, onChange, state }) {
     const form = h('form', { className: 'scope-place-form', onsubmit: (e) => { e.preventDefault(); placeName = q.value.trim(); findPlace(placeName); } },
       h('label', { htmlFor: 'scope-place-q' }, SW.where.placeLabel), q, ' ', h('button', { type: 'submit', id: 'scope-place-find' }, SW.where.placeFind));
     box.append(form, need, h('p', { className: 'note' }, SW.where.placeNote));
-    // WHG answers only a query that carries the token: given here, it goes to its one keeper, as from the lookup
-    // panel, and the field is emptied (the page keeps no copy).
+    // WHG answers only a query that carries the token: the shared token field (src/lib/token-field.js), as the
+    // lookup panel and Chora show it, in no <form>; only what is typed or pasted is taken, by its one keeper.
     if (!token.get()) {
-      const t = h('input', { type: 'password', id: 'scope-token', autocomplete: 'off', spellcheck: false });
-      box.append(h('form', { className: 'scope-place-form', onsubmit: (e) => { e.preventDefault(); if (t.value.trim()) { token.set(t.value); t.value = ''; placeSay = ''; drawEditor(); $('scope-place-q')?.focus(); } } },
-        h('label', { htmlFor: 'scope-token' }, SW.where.placeToken), t, ' ', h('button', { type: 'submit', id: 'scope-token-use' }, SW.where.placeTokenUse)));
+      const holder = h('div', { className: 'scope-token' });
+      holder.innerHTML = tokenFieldHtml(token, 'scope-token', esc);
+      box.append(holder);
     }
     if (!allowed()) permissions.needs(need, 'gazetteer', 'whg');
     if (placeSay) box.append(h('p', { className: 'scope-say' }, placeSay));
@@ -504,6 +507,18 @@ export function mountScope({ methodos, lookup, token, onChange, state }) {
     return fs;
   }
 
+  // The token field (drawn by placePart while there is no token): Enter gives it for the tab, Remember keeps it
+  // in this browser, Forget lets it go; then the name is asked for.
+  editor.addEventListener('input', (e) => { if (e.target.id === 'scope-token') noteInput(e); });
+  editor.addEventListener('keydown', (e) => {
+    if (e.target.id !== 'scope-token' || e.key !== 'Enter' || e.isComposing) return;
+    e.preventDefault(); giveToken(token, e.target); placeSay = ''; drawEditor(); $('scope-place-q')?.focus();
+  });
+  editor.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.id === 'scope-token-remember') { rememberToken(token, $('scope-token')); placeSay = ''; drawEditor(); $('scope-place-q')?.focus(); }
+    if (b.id === 'scope-token-forget') { forgetToken(token, lookup(), $('scope-token')); drawEditor(); $('scope-token')?.focus(); }
+  });
   permissions.onChange(() => { if (editing()) { if (sourcesFrom === 'bundled') loadSources(); drawEditor(); } });
   // The sources' names in the summary are the bundled list's until the editor has read WHG's (nothing is asked at load).
   show();

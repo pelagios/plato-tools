@@ -1287,8 +1287,6 @@ export const SCOPE_WORDS = {
     placeFound: (n) => `${plural(n, 'place')} with an outline found.`,
     placeUse: 'Use this one',
     placeNeedsToken: 'Give your WHG token first (below): WHG answers only queries that carry one.',
-    placeToken: 'Your WHG token, from your profile on whgazetteer.org (kept as the lookup panel keeps it)',
-    placeTokenUse: 'Use this token',
     areaDraw: 'Draw the area',
     areaRedraw: 'Draw it again',
     areaHow: 'Click on the map to place each corner, and click the first corner again to close the area. The map is Natural Earth, from this site: nothing is asked of another site to show it.',

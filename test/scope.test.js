@@ -68,6 +68,8 @@ test('types are sent with every narrower one, years with temporal, sources as na
   assert.equal(scopeFields(unticked).params.temporal, true);
   assert.equal(excludesUndated(unticked), true);
   assert.equal(excludesUndated({ when: { start: null, end: null } }), false);
+  // A window open at its start: an end year alone is sent, with temporal (and undated, ticked).
+  assert.deepEqual(scopeFields({ when: { start: null, end: 1600, undated: true } }).params, { end: 1600, temporal: true, undated: true });
   // Ticked with no year: nothing of When is sent, undated neither.
   assert.deepEqual(scopeFields({ when: { start: null, end: null, undated: true } }).params, {});
   // The switch forced off (were WHG ever not to take it): nothing sent, and left out said.
