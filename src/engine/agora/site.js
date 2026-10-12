@@ -489,7 +489,8 @@ export function create(ctx) {
           `A site of ${served.size.toLocaleString('en-GB')} place${served.size === 1 ? '' : 's'}${places - served.size ? ` (of ${places.toLocaleString('en-GB')})` : ''} and ${sourcePages.toLocaleString('en-GB')} source${sourcePages === 1 ? '' : 's'}, ${fmtBytes(size)} (estimated ${fmtBytes(Math.round(estimate))}).`,
           duplicated.n ? `${duplicated.n.toLocaleString('en-GB')} place${duplicated.n === 1 ? ' is' : 's are'} given by more than one record: only the first has a page, and the home page lists ${duplicated.n === 1 ? 'it' : 'them'}.` : '',
           unservable.n ? `${unservable.n.toLocaleString('en-GB')} place${unservable.n === 1 ? ' has an address' : 's have addresses'} it cannot serve, listed on its home page as held in the downloads.` : '',
-          draft ? 'Marked as a draft: not to be cited, and kept out of search engines.' : '',
+          draft ? 'Marked as a draft: not to be cited, and search engines are asked not to list it.' : '',
+          draft ? SHARED['draft-is-public'] : '',
         ].filter(Boolean),
       };
     },

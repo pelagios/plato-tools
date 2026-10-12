@@ -1081,6 +1081,34 @@ version check does, and each part is a module of its own, with its wording in it
   the places (`options.only`) keeps a site within it: a text file of place keys, one to a line,
   given as `--only FILE` or as *Only these places* on the page, and read the same way by both
   (lines trimmed, blank ones skipped) in `bin/plato-tools.mjs` and `src/app.js`.
+- **Licences that travel with a contribution** (Issue #24, WHG place#158). The report reads each
+  attestation's licence, which is that of a source it cites (`licence` on a source in `sources`, or on
+  a citation's source; not a source it was `derivedFrom`, whose licence is the original's, and not a
+  citation `cito:citesForInformation`, which copied nothing), against the dataset's own, and warns of
+  each that may not sit under it, counted, with up to five examples (`<attestation>: <SPDX id>, <source
+  title>`): `licence-nc` (non-commercial only, in a dataset that allows commercial use), `licence-nd`
+  (no adaptations), `licence-sa` (share-alike, in a dataset under another licence or an earlier version),
+  `licence-attribution` (credit asked, in a public-domain dataset), and `licence-unknown` (a licence the
+  table does not know, or a geometry cited as evidence from a dataset with no licence given, which is
+  what Chora's adoption writes when WHG names none). With the dataset's own licence missing or unknown,
+  one `licences-not-compared`. Each says what to do (relicense, remove those attestations, or ask the
+  source) and that it reads the licences' terms and is not legal advice; all are warnings, since only
+  the user knows whether an attestation copied from its source or only cites it for a fact.
+  `counts.licences` is `{ licensed, flagged }`, and a line of the summary says the same. The table
+  (`licence.js`) is small and over SPDX ids: `licenceTerms` reads an address (spdx.org, Creative
+  Commons 2.0 to 4.0 and their ports, CC0, the Public Domain Mark, Open Data Commons) or a bare id
+  into the four terms that decide it (BY, NC, ND, SA with its family and version, or public domain);
+  `licenceReasons(contained, dataset)` gives the reasons, and the same licence is never one. A licence
+  not in it is unknown, never guessed. Chora's traced maps write their licence on the map's citation too,
+  so a geometry traced from a non-commercial map is flagged in a dataset that allows commercial use.
+  `test/agora-licence.test.js` adopts with Chora's own engine from WHG fixtures, and holds
+  `test/fixtures/agora/licences.json`, which the browser checks report on, to what Chora makes today.
+  PLATO's examples raise none of these warnings (measured at the pin, October 2026).
+- **A draft is public once uploaded** (Issue #26, WHG place#310). The report and the site say so, for
+  any dataset whose status is not `published` (`draft-is-public` in `index.js`, the last line of the
+  summary): anyone with the address can read the pages and download the data, `noindex` and the banner
+  notwithstanding. WHG has no statement yet of what it keeps from a reconciliation query; link it there
+  when it does.
 - **The w3id rules in Apache.** `test/agora-w3id.test.js` serves the folder with Apache's own
   `httpd:2.4` image in Docker and asks for every row of `tests.tsv`, as curl would, then shows a
   copy without the `text/html` rule failing. It is skipped, visibly, when Docker or the image is
@@ -2091,7 +2119,9 @@ location as one act that records two claims: an identity (this place IS the reco
   which the notes give beside it). So the same source `@id` (`https://whgazetteer.org/`) carries different
   `licence` values across a dataset, one per upstream source copied from, and the notes give both the
   upstream licence and WHG's own. The record's address is in both notes, verbatim, to pair them; a WHG
-  record of its own is named with its dataset's name and id too. A licence that warns gets one neutral
+  record of its own is named with its dataset's name and id too. Agora's report reads that `licence` against
+  the dataset's own (see "Licences that travel with a contribution" under Publishing), and takes a geometry
+  copied this way with no licence (WHG gave none) for one of unknown licence. A licence that warns gets one neutral
   line, never a block.
 - **The draft** is one draft kind in `chora-drafts/` (`kind: 'adoption'`, `adoptionDraft`): the one
   geometry chosen, the candidate's address, name and point, the attribution entry used, the place's
@@ -2220,7 +2250,10 @@ the places within it; the places themselves never send it.
   reads a candidate's (its source's; for WHG's own records its dataset's, then WHG's), or null: "licence
   unknown". It gives `redistributable` as well: false only when the entry says `redistributable: false`
   ("not to be passed on"), and missing or null is not known, never true, like `permits_commercial` and
-  `no_derivatives` ("terms partly unknown"). No licence value is written in the code.
+  `no_derivatives` ("terms partly unknown"). No licence value is written in the code. How an entry is
+  read is WHG's (`whgLicence` in `whg.js`, A16, which also records that WHG gives the licences of the
+  sources searched, not of each record: a record's own licence is asked of WHG on place#158); which
+  entry applies is `licenceOf`'s.
   `upstreamLicence` is the same without WHG's own licence (its source's, or its contributed dataset's, else null), for data copied from a candidate, such as its geometry; `identities.js` keeps exactMatch links apart (`exact`), and `linkState(…, { exact: true })` counts only those.
 - **The work file, version 2** (`work.js`): `others` may be null; `places` may hold places without
   candidates; `lookups: [{ id, service, started_at, finished_at, algorithm_version, parameters,

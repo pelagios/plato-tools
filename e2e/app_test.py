@@ -2051,6 +2051,37 @@ def agora_checks(page, tmp):
               {'summary': shown, 'buttons': buttons, 'zip': names, 'state': s.get('phase'), 'error': s.get('error')})
     except Exception as e: check('publish report: the FAIR summary, a Save button for the deposit zip, and .zenodo.json, CITATION.cff and datacite.json in it', False, e)
 
+    # Licences that travel with a contribution (Issue #24): a CC BY dataset holding Chora's adoptions
+    # (test/fixtures/agora/licences.json, which test/agora-licence.test.js holds to what Chora makes),
+    # among them one from a CC BY-NC source (tynemouth) and one from a CC BY source (newcastle), in the
+    # same run. The NC one is flagged on the page, with its attestation; the CC BY one is read and
+    # counted (5 with a licence of their own) and is in no finding: the absence beside a presence.
+    name = 'publish report: an NC adoption in a CC BY dataset is flagged, with its attestation, and a CC BY adoption in the same run is not'
+    s = publish_case(page, [ROOT / 'test/fixtures/agora/licences.json'], 'report')
+    try:
+        done = s.get('phase') == 'done'
+        # The report's text whole: a finding's examples are in its <details>, closed until opened.
+        shown, summary = (page.text_content('#report') or '', page.inner_text('#summary')) if done else ('', '')
+        check(name, 'non-commercial use only (NC)' in shown and 'place/tynemouth#a-2: CC-BY-NC-4.0, World Historical Gazetteer' in shown
+              and '5 attestations cite a source with a licence of its own; 4 of them may not agree' in summary
+              and 'place/newcastle' not in shown and 'not legal advice' in shown,
+              {'summary': summary, 'report': shown[:1500], 'state': s.get('phase'), 'error': s.get('error')})
+        # A draft (this dataset is one) is public once its site is uploaded, noindex or not (Issue #26).
+        check('publish report: a draft is said to be public once its site is uploaded, though not indexed',
+              done and 'A draft is public once its site is uploaded: anyone with the address can read its pages' in summary and '(noindex)' in summary,
+              {'summary': summary, 'state': s.get('phase'), 'error': s.get('error')})
+    except Exception as e:
+        check(name, False, e)
+        check('publish report: a draft is said to be public once its site is uploaded, though not indexed', False, e)
+    # The same words are not said of a published dataset: its report is read (the FAIR summary is the presence).
+    src = tables_copy(tmp / 'published-src' / 'customs', base_uri=w3id, dataset_uri=w3id, status='published')
+    s = publish_case(page, src, 'report')
+    try:
+        summary = page.inner_text('#summary') if s.get('phase') == 'done' else ''
+        check('publish report: a published dataset is reported on, and not said to be a draft that is public',
+              ' FAIR checks pass' in summary and 'A draft is public' not in summary, {'summary': summary, 'state': s.get('phase'), 'error': s.get('error')})
+    except Exception as e: check('publish report: a published dataset is reported on, and not said to be a draft that is public', False, e)
+
     # Minting: every attestation of the tables gets an address under its place's, '#a-' and a digest.
     # The count is the presence control: an output with no attestations would pass the 'all' alone.
     s = publish_case(page, customs, 'mint')
@@ -2077,6 +2108,13 @@ def agora_checks(page, tmp):
               {'index.html', 'place/bristol/index.html', 'place/bristol.jsonld', 'place/deptford-strand.jsonld'} <= names
               and 'DRAFT, not citable' in home and 'noindex' in home, {'zip': sorted(names)[:30], 'state': s.get('phase'), 'report': s.get('report'), 'error': s.get('error')})
     except Exception as e: check('publish site: a zip with index.html, place/bristol/index.html and place/bristol.jsonld, and the draft banner on the home page', False, e)
+    # And the site step says a draft site is public once uploaded (Issue #26), beside what it made.
+    try:
+        summary = page.inner_text('#summary') if s.get('phase') == 'done' else ''
+        check('publish site: a draft site is said to be public once uploaded, beside the count of what it made',
+              'A site of 2 places' in summary and 'A draft is public once its site is uploaded: anyone with the address can read its pages' in summary,
+              {'summary': summary, 'state': s.get('phase'), 'error': s.get('error')})
+    except Exception as e: check('publish site: a draft site is said to be public once uploaded, beside the count of what it made', False, e)
 
     # A subset of the places ("Only these places"): a file naming bristol has bristol's page and not
     # deptford-strand's, which the full site above has. bristol's page is the presence control: a zip

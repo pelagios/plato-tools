@@ -3,7 +3,7 @@
 // (`extend`) for more about chosen candidates; the service's manifest (`manifest`); and, from WHG, a
 // whole record by itself (`entity`), since a candidate carries no geometry and no dates. Shared by
 // Chora (where a place is) and Krisis (which place it is). Everything particular to the World
-// Historical Gazetteer, and what is and is not verified about it, is in whg.js (A1 to A11 there).
+// Historical Gazetteer, and what is and is not verified about it, is in whg.js (A1 to A16 there).
 //
 // Pure engine code: no page. It runs in a Web Worker and in Node, and is given `fetch` so that tests
 // can stand in for the service. The only thing it keeps is the pacer's ledger (below).
@@ -64,7 +64,7 @@ import {
 } from './whg.js';
 
 export {
-  WHG_ENDPOINT, WHG_PLACE_TYPE, BLOCKED_AGENTS, dailyLimit, isWhg, whgIri, normaliseWhgIri, parseCentroid, parseGeojsonValues, mergeAttribution, whgLang, nameLang, whgPlaceTypes,
+  WHG_ENDPOINT, WHG_PLACE_TYPE, BLOCKED_AGENTS, dailyLimit, isWhg, whgIri, normaliseWhgIri, parseCentroid, parseGeojsonValues, mergeAttribution, whgLang, nameLang, whgPlaceTypes, whgLicence,
 } from './whg.js';
 
 // 25, as measured against the alternatives (whg.js A14, 12 October 2026): no size saves time, and 25 holds a WHG worker about 5 s.

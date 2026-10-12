@@ -1,0 +1,378 @@
+{
+ "profile": "place-centric",
+ "gazetteer": {
+  "@id": "https://w3id.org/licence-test/",
+  "title": "Towns of the north-east, for testing licences",
+  "description": "Towns of the north-east and their locations, some adopted from a gazetteer, to test the report on licences.",
+  "creator": [
+   {
+    "@id": "https://orcid.org/0000-0002-1825-0097",
+    "name": "Josiah Carberry"
+   }
+  ],
+  "licence": "https://creativecommons.org/licenses/by/4.0/",
+  "version": "1",
+  "status": "draft",
+  "keywords": [
+   "towns"
+  ],
+  "spatial": [
+   "http://www.wikidata.org/entity/Q21"
+  ],
+  "temporal": {
+   "startDate": "1080",
+   "endDate": "2026"
+  },
+  "uriSpace": "https://w3id.org/licence-test/"
+ },
+ "spatialEntities": [
+  {
+   "@id": "https://w3id.org/licence-test/place/newcastle",
+   "label": "newcastle",
+   "attestations": [
+    {
+     "@id": "https://w3id.org/licence-test/place/newcastle#a-1",
+     "contributor": {
+      "name": "Ada Surveyor",
+      "orcid": "https://orcid.org/0000-0002-1825-0097"
+     },
+     "created": "2026-10-01T10:00:00Z",
+     "identities": [
+      {
+       "subject": "https://w3id.org/licence-test/place/newcastle",
+       "object": "https://w3id.org/whg/id/place:gn:2641673",
+       "identityType": "exactMatch",
+       "basis": "The same town"
+      }
+     ],
+     "citations": [
+      {
+       "source": {
+        "title": "World Historical Gazetteer",
+        "authorityType": "dataset",
+        "@id": "https://whgazetteer.org/"
+       }
+      }
+     ],
+     "notes": "Accepted in PLATO tools (Chora) when adopting the location of World Historical Gazetteer record https://w3id.org/whg/id/place:gn:2641673 (\"Newcastle upon Tyne\"; upstream source: GeoNames (gn); id 2641673). The location copied from the record is a separate attestation."
+    },
+    {
+     "@id": "https://w3id.org/licence-test/place/newcastle#a-2",
+     "geometries": [
+      {
+       "geojson": {
+        "type": "Point",
+        "coordinates": [
+         -1.6139601,
+         54.97328
+        ]
+       },
+       "reprPoint": [
+        -1.6139601,
+        54.97328
+       ],
+       "role": "https://w3id.org/plato#RepresentativePoint"
+      }
+     ],
+     "contributor": {
+      "name": "Ada Surveyor",
+      "orcid": "https://orcid.org/0000-0002-1825-0097"
+     },
+     "created": "2026-10-01T10:00:00Z",
+     "citations": [
+      {
+       "source": {
+        "title": "World Historical Gazetteer",
+        "authorityType": "dataset",
+        "@id": "https://whgazetteer.org/",
+        "licence": "https://spdx.org/licenses/CC-BY-4.0"
+       },
+       "locator": "https://w3id.org/whg/id/place:gn:2641673",
+       "citationFunction": "http://purl.org/spar/cito/citesAsEvidence"
+      }
+     ],
+     "notes": "Copied from World Historical Gazetteer record https://w3id.org/whg/id/place:gn:2641673 (\"Newcastle upon Tyne\"; upstream source: GeoNames (gn); id 2641673; licence CC-BY-4.0; World Historical Gazetteer's own licence: CC-BY-4.0), fetched 2026-10-01; coordinates rounded to 7 decimal places; in PLATO tools (Chora). The identity with this record is a separate attestation.",
+     "timespans": [
+      {
+       "startEarliest": "1080",
+       "startLatest": "1080",
+       "endLatest": "2026",
+       "label": "from the castle onwards"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "@id": "https://w3id.org/licence-test/place/tynemouth",
+   "label": "tynemouth",
+   "attestations": [
+    {
+     "@id": "https://w3id.org/licence-test/place/tynemouth#a-1",
+     "contributor": {
+      "name": "Ada Surveyor",
+      "orcid": "https://orcid.org/0000-0002-1825-0097"
+     },
+     "created": "2026-10-01T10:00:00Z",
+     "identities": [
+      {
+       "subject": "https://w3id.org/licence-test/place/tynemouth",
+       "object": "https://w3id.org/whg/id/place:tgn:7011781",
+       "identityType": "exactMatch",
+       "basis": "The same town"
+      }
+     ],
+     "citations": [
+      {
+       "source": {
+        "title": "World Historical Gazetteer",
+        "authorityType": "dataset",
+        "@id": "https://whgazetteer.org/"
+       }
+      }
+     ],
+     "notes": "Accepted in PLATO tools (Chora) when adopting the location of World Historical Gazetteer record https://w3id.org/whg/id/place:tgn:7011781 (\"Newcastle\"; upstream source: Getty Thesaurus of Geographic Names (illustrative licence) (tgn); id 7011781). The location copied from the record is a separate attestation."
+    },
+    {
+     "@id": "https://w3id.org/licence-test/place/tynemouth#a-2",
+     "geometries": [
+      {
+       "geojson": {
+        "type": "Point",
+        "coordinates": [
+         -1.6139601,
+         54.97328
+        ]
+       },
+       "reprPoint": [
+        -1.6139601,
+        54.97328
+       ],
+       "role": "https://w3id.org/plato#RepresentativePoint"
+      }
+     ],
+     "contributor": {
+      "name": "Ada Surveyor",
+      "orcid": "https://orcid.org/0000-0002-1825-0097"
+     },
+     "created": "2026-10-01T10:00:00Z",
+     "citations": [
+      {
+       "source": {
+        "title": "World Historical Gazetteer",
+        "authorityType": "dataset",
+        "@id": "https://whgazetteer.org/",
+        "licence": "https://spdx.org/licenses/CC-BY-NC-4.0"
+       },
+       "locator": "https://w3id.org/whg/id/place:tgn:7011781",
+       "citationFunction": "http://purl.org/spar/cito/citesAsEvidence"
+      }
+     ],
+     "notes": "Copied from World Historical Gazetteer record https://w3id.org/whg/id/place:tgn:7011781 (\"Newcastle\"; upstream source: Getty Thesaurus of Geographic Names (illustrative licence) (tgn); id 7011781; licence CC-BY-NC-4.0; World Historical Gazetteer's own licence: CC-BY-4.0), fetched 2026-10-01; coordinates rounded to 7 decimal places; in PLATO tools (Chora). The identity with this record is a separate attestation.",
+     "timespans": [
+      {
+       "startEarliest": "1080",
+       "startLatest": "1080",
+       "endLatest": "2026",
+       "label": "from the castle onwards"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "@id": "https://w3id.org/licence-test/place/jarrow",
+   "label": "jarrow",
+   "attestations": [
+    {
+     "@id": "https://w3id.org/licence-test/place/jarrow#a-1",
+     "contributor": {
+      "name": "Ada Surveyor",
+      "orcid": "https://orcid.org/0000-0002-1825-0097"
+     },
+     "created": "2026-10-01T10:00:00Z",
+     "identities": [
+      {
+       "subject": "https://w3id.org/licence-test/place/jarrow",
+       "object": "https://w3id.org/whg/id/place:tgn:7011781",
+       "identityType": "exactMatch",
+       "basis": "The same town"
+      }
+     ],
+     "citations": [
+      {
+       "source": {
+        "title": "World Historical Gazetteer",
+        "authorityType": "dataset",
+        "@id": "https://whgazetteer.org/"
+       }
+      }
+     ],
+     "notes": "Accepted in PLATO tools (Chora) when adopting the location of World Historical Gazetteer record https://w3id.org/whg/id/place:tgn:7011781 (\"Newcastle\"; upstream source: tgn; id 7011781). The location copied from the record is a separate attestation."
+    },
+    {
+     "@id": "https://w3id.org/licence-test/place/jarrow#a-2",
+     "geometries": [
+      {
+       "geojson": {
+        "type": "Point",
+        "coordinates": [
+         -1.6139601,
+         54.97328
+        ]
+       },
+       "reprPoint": [
+        -1.6139601,
+        54.97328
+       ],
+       "role": "https://w3id.org/plato#RepresentativePoint"
+      }
+     ],
+     "contributor": {
+      "name": "Ada Surveyor",
+      "orcid": "https://orcid.org/0000-0002-1825-0097"
+     },
+     "created": "2026-10-01T10:00:00Z",
+     "citations": [
+      {
+       "source": {
+        "title": "World Historical Gazetteer",
+        "authorityType": "dataset",
+        "@id": "https://whgazetteer.org/"
+       },
+       "locator": "https://w3id.org/whg/id/place:tgn:7011781",
+       "citationFunction": "http://purl.org/spar/cito/citesAsEvidence"
+      }
+     ],
+     "notes": "Copied from World Historical Gazetteer record https://w3id.org/whg/id/place:tgn:7011781 (\"Newcastle\"; upstream source: tgn; id 7011781; licence not stated; World Historical Gazetteer's own licence: CC-BY-4.0), fetched 2026-10-01; coordinates rounded to 7 decimal places; in PLATO tools (Chora). The identity with this record is a separate attestation.",
+     "timespans": [
+      {
+       "startEarliest": "1080",
+       "startLatest": "1080",
+       "endLatest": "2026",
+       "label": "from the castle onwards"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "@id": "https://w3id.org/licence-test/place/hexham",
+   "label": "hexham",
+   "attestations": [
+    {
+     "@id": "https://w3id.org/licence-test/place/hexham#a-1",
+     "geometries": [
+      {
+       "geojson": {
+        "type": "Point",
+        "coordinates": [
+         -1.6,
+         54.9
+        ]
+       },
+       "reprPoint": [
+        -1.6,
+        54.9
+       ]
+      }
+     ],
+     "contributor": {
+      "name": "Ada Surveyor"
+     },
+     "created": "2026-10-01T10:00:00Z",
+     "citations": [
+      {
+       "source": {
+        "title": "A survey that allows no adaptations (illustrative)",
+        "authorityType": "dataset",
+        "@id": "https://example.org/",
+        "licence": "https://spdx.org/licenses/CC-BY-ND-4.0"
+       },
+       "locator": "https://example.org/r/1",
+       "citationFunction": "http://purl.org/spar/cito/citesAsEvidence"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "@id": "https://w3id.org/licence-test/place/alnwick",
+   "label": "alnwick",
+   "attestations": [
+    {
+     "@id": "https://w3id.org/licence-test/place/alnwick#a-1",
+     "geometries": [
+      {
+       "geojson": {
+        "type": "Point",
+        "coordinates": [
+         -1.6,
+         54.9
+        ]
+       },
+       "reprPoint": [
+        -1.6,
+        54.9
+       ]
+      }
+     ],
+     "contributor": {
+      "name": "Ada Surveyor"
+     },
+     "created": "2026-10-01T10:00:00Z",
+     "citations": [
+      {
+       "source": {
+        "title": "OpenStreetMap",
+        "authorityType": "dataset",
+        "@id": "https://example.org/",
+        "licence": "https://opendatacommons.org/licenses/odbl/1-0/"
+       },
+       "locator": "https://example.org/r/1",
+       "citationFunction": "http://purl.org/spar/cito/citesAsEvidence"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "@id": "https://w3id.org/licence-test/place/morpeth",
+   "label": "morpeth",
+   "attestations": [
+    {
+     "@id": "https://w3id.org/licence-test/place/morpeth#a-1",
+     "names": [
+      {
+       "toponym": "Morpeth"
+      }
+     ],
+     "sources": [
+      {
+       "title": "A charter",
+       "authorityType": "source"
+      }
+     ]
+    },
+    {
+     "@id": "https://w3id.org/licence-test/place/morpeth#a-2",
+     "names": [
+      {
+       "toponym": "Morpath"
+      }
+     ],
+     "citations": [
+      {
+       "source": {
+        "title": "A closed survey",
+        "authorityType": "dataset",
+        "licence": "https://spdx.org/licenses/CC-BY-NC-ND-4.0"
+       },
+       "citationFunction": "http://purl.org/spar/cito/citesForInformation"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

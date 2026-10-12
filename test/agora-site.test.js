@@ -17,7 +17,7 @@ import { env as memEnv, file, textFile, res } from './engine.js';
 import { PLATO_REPO } from './paths.js';
 import { detect } from '../src/engine/input.js';
 import { run } from '../src/engine/pipeline.js';
-import { publish } from '../src/engine/agora/index.js';
+import { publish, TEXT as SHARED } from '../src/engine/agora/index.js';
 import { NodeHost } from '../src/node/host.js';
 import { SITE_FILES } from '../src/engine/agora/w3id.js';
 import { scheme } from '../src/engine/agora/address.js';
@@ -258,6 +258,11 @@ test('a draft has a banner and is kept from search engines; a published dataset 
     assert.match(q, /<main>/, p);
   }
   assert.match(pub.read('index.html'), /<h2>How to cite<\/h2>\n<p>[^<]*version 2026-10\. https:\/\/whgazetteer\.org\/example\/king-john\//);
+  // And it says that a draft uploaded is public all the same (Issue #26); a published site, which is
+  // public by intent, does not. Both said something, so the absence is not an empty report's.
+  const said = (s) => s.r.report.counts.said || [];
+  assert.ok(said(draft).includes(SHARED['draft-is-public']), said(draft).join(' | '));
+  assert.ok(said(pub).length > 0 && !said(pub).some((x) => /public once its site is uploaded/.test(x)), said(pub).join(' | '));
 });
 
 test('the landing page describes the dataset, for people and in schema.org, with its downloads and places', async () => {

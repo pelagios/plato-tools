@@ -43,7 +43,7 @@
 // - The service's `attribution` (the licences of the sources searched) is kept as it came, a null
 //   left null, on the lookup record, so the page can show each candidate's licence. No licence is ever
 //   written into an attestation, and none is assumed here.
-import { WHG_ENDPOINT, WHG_PLACE_TYPE, isWhg, normaliseWhgIri, mergeAttribution, whgLang, nameLang, whgPlaceTypes } from '../gazetteer/index.js';
+import { WHG_ENDPOINT, WHG_PLACE_TYPE, isWhg, normaliseWhgIri, mergeAttribution, whgLang, nameLang, whgPlaceTypes, whgLicence } from '../gazetteer/index.js';
 import { similarity, queryVariants, MAX_VARIANTS, compileQualifiers } from './names.js';
 import { guard, SAME_PLACE_KM } from './guards.js';
 import { WORK_VERSION, canonicalEndpoint } from './work.js';
@@ -549,14 +549,8 @@ function licenceEntry(attribution, namespace, dataset, whg) {
   for (const e of tries) if (pick(e) || e?.redistributable === false) return { l: pick(e), entry: e };
   return { l: null, entry: null };
 }
-/** The licence object of licenceOf() and upstreamLicence(), from what licenceEntry() found. */
-function licenceFrom({ l, entry }) {
-  const yes = (v) => (v === true || v === false ? v : null);
-  const redistributable = yes(entry?.redistributable);
-  if (!l) return redistributable === false ? { spdx: null, commercial: null, derivatives: null, redistributable } : null;
-  if (typeof l === 'string') return { spdx: l, commercial: null, derivatives: null, redistributable };
-  return { spdx: typeof l.spdx_id === 'string' ? l.spdx_id : null, commercial: yes(l.permits_commercial), derivatives: l.no_derivatives === true ? false : l.no_derivatives === false ? true : null, redistributable };
-}
+/** The licence object of licenceOf() and upstreamLicence(), from what licenceEntry() found (whg.js, A16). */
+const licenceFrom = ({ l, entry }) => whgLicence(l, entry);
 /**
  * The licence a lookup's attribution gives for a candidate's source (its namespace; for WHG's own
  * records, whose namespace is null or whg, its dataset's in attribution.datasets, else WHG's own), as

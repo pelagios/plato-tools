@@ -126,6 +126,20 @@
 //    index.js): neither other size was better on time, and 25 keeps a worker's hold near 5 s while a day's
 //    allowance still covers 125,000 queries. Measured on a quiet WHG, with a warm cache after the first arm: a
 //    busy one, which place#274 is about, was not measured.
+// A16 Licences (Issue #24, WHG place#158). VERIFIED (whg3 production code, 30 September 2026) for the
+//    root `attribution` (A9): `sources.<namespace>` and, for WHG's own records, `datasets.<dataset id>`
+//    are {name, license, redistributable}. `license` is an SPDX id as a string, or {spdx_id,
+//    permits_commercial, no_derivatives}, where a null is "not known", never false. `redistributable:
+//    false` means the source may not be passed on (the entity's 451, A10); missing or null is not
+//    known, never true. `whg` is WHG's own licence (CC-BY-4.0 since 30 September 2026, CC-BY-NC-4.0
+//    before), covering WHG's curation layer only, beside each source's licence and never over it: the
+//    licence of what is copied from a record is its source's, never WHG's own. Read by whgLicence();
+//    which entry applies to a candidate is Krisis's licenceOf and upstreamLicence (krisis/lookup.js).
+//    These are the licences of the SOURCES searched, not of RECORDS. OPEN: a record's own licence. No
+//    licence of a record's own is known in a candidate (A7), an extend row (A11) or the entity's Feature
+//    (A10); WHG has been asked (place#158, part 3, waiting on the University) for each record's licence
+//    in extend and the entity, as an SPDX id with "unknown" distinct from "open". Until then a record's
+//    licence is its source's, as above; revisit this when that lands.
 
 export const WHG_ENDPOINT = 'https://whgazetteer.org/reconcile';
 /** Queries per POST (A3). */
@@ -263,6 +277,26 @@ export function mergeAttribution(into, attribution) {
     else out[k] = v && typeof v === 'object' && !Array.isArray(v) ? { ...v } : v;
   }
   return out;
+}
+
+/**
+ * A source's licence as an `attribution` entry gives it (A16): `license` (the entry's, an SPDX id or an
+ * object) and the `entry` it came from (for `redistributable`), as { spdx, commercial, derivatives,
+ * redistributable }, or null when neither says anything. `commercial` is permits_commercial and
+ * `derivatives` the opposite of no_derivatives, each true, false or null (not known); `redistributable`
+ * is false only when the entry says false. Nothing is assumed: a value left null stays null. An entry
+ * that says it is not redistributable, with no licence, still gives an object, so that it is not read
+ * as merely "licence unknown".
+ */
+export function whgLicence(license, entry) {
+  const yes = (v) => (v === true || v === false ? v : null);
+  const redistributable = yes(entry?.redistributable);
+  if (!license) return redistributable === false ? { spdx: null, commercial: null, derivatives: null, redistributable } : null;
+  if (typeof license === 'string') return { spdx: license, commercial: null, derivatives: null, redistributable };
+  return {
+    spdx: typeof license.spdx_id === 'string' ? license.spdx_id : null, commercial: yes(license.permits_commercial),
+    derivatives: license.no_derivatives === true ? false : license.no_derivatives === false ? true : null, redistributable,
+  };
 }
 
 /** Is this the WHG service? Its identifiers and extension values are read by WHG's rules if so. */

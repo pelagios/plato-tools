@@ -24,6 +24,10 @@
 // published dataset): a deposit is for good, and would carry them to every index that harvests it.
 import { baseKind, doiOf, doiOk, normaliseBase, releaseProblem, servability, sourcesOf, unservableExample } from './address.js';
 import { TEXT as SHARED } from './index.js';
+import { attestationLicences, licenceTerms } from './licence.js';
+
+// What to do about a licence that may not agree with the dataset's, and what the finding is not.
+const LICENCE_TAIL = "If what those attestations record was copied from the source (a geometry adopted from a gazetteer, say), the dataset cannot pass it on more freely than the source allows. Either publish the dataset under a licence compatible with the source's, remove those attestations (a location can be drawn again from evidence of your own), or ask the source's holder for permission. The examples give each attestation, its source's licence and the source. This is a reading of the licences' terms, not legal advice: an attestation that only cites a source for a fact, copying nothing from it, may not be bound by its licence.";
 
 export const TEXT = {
   'no-title': 'The dataset has no title: give it one (title), or nobody can cite it.',
@@ -64,7 +68,17 @@ export const TEXT = {
   'attestations-without-ids': "Attestations have no address of their own (@id), so nothing can link to them, retract them or replace them, and the dataset is published, so the deposit files are not written. Mint first: plato-tools publish mint writes a copy of the dataset in which every attestation has an address; commit that copy and deposit it.",
   'attestations-without-ids-draft': 'Attestations have no address of their own (@id). That will do for a draft, but mint first, before publishing (plato-tools publish mint), so that each can be linked to, retracted or replaced; the site is not made for a published dataset without them.',
   'no-publisher': "Nothing says who publishes the dataset, which DataCite requires: give a contributor by name, or an author's name, or fill in the publisher in datacite.json.",
+  // Licences that travel with a contribution (Issue #24; licence.js). An attestation's licence is that
+  // of the source it cites; each example is the attestation (or its place), the licence and the source.
+  'licence-nc': `Attestations cite a source licensed for non-commercial use only (NC), but the dataset's own licence allows commercial use. ${LICENCE_TAIL}`,
+  'licence-nd': `Attestations cite a source whose licence allows no adaptations (ND). Copying from it into a dataset, and changing it on the way (Chora rounds a copied geometry's coordinates, for one), may count as adapting it, and the dataset's own licence lets others adapt what it holds. ${LICENCE_TAIL}`,
+  'licence-sa': `Attestations cite a source under a share-alike licence (such as ODbL or CC BY-SA), which asks that what is made from it be shared under that same licence, and the dataset's own licence is a different one. ${LICENCE_TAIL}`,
+  'licence-attribution': `Attestations cite a source whose licence asks for credit (such as CC BY), but the dataset is in the public domain (CC0, PDDL or the Public Domain Mark), which asks for none, so those who reuse it would not know that the source must be credited. ${LICENCE_TAIL}`,
+  'licence-unknown': "Attestations cite a source whose licence these tools cannot read (its address is not one of the open licences they know), or record a geometry copied from another dataset without saying under what licence (Chora records none when the gazetteer gives none), so whether it may be held under the dataset's licence is not known. Find out the source's licence and record it on the source, as an address such as https://spdx.org/licenses/CC-BY-4.0; the report then compares it. The examples give each attestation and what its source says.",
+  'licences-not-compared': "Attestations cite sources that have licences of their own, but the dataset's own licence is not given as the address of an open licence these tools know, so they cannot say whether those may be held under it. Give the dataset's licence as such an address (such as https://creativecommons.org/licenses/by/4.0/), or compare them yourself. The example is the dataset's licence.",
 };
+/** The licence findings, in the order the report gives them. */
+const LICENCE_KINDS = ['nc', 'nd', 'sa', 'attribution', 'unknown'];
 
 // ---- identifiers of people and organisations -----------------------------------------------------
 
@@ -251,14 +265,35 @@ export function create(ctx) {
   const attestation = (a) => { for (const s of sourcesOf(a)) source(s); };
   // A place's attestations without an address of their own, counted as the site counts them.
   let unidentified = 0;
+  // Licences that travel with a contribution (licence.js): each attestation whose sources name a
+  // licence of their own, and those whose licence may not sit under the dataset's, by reason.
+  let datasetLicence = null;
+  const licences = { licensed: 0, flagged: 0, by: Object.fromEntries(LICENCE_KINDS.map((k) => [k, { n: 0, eg: [] }])) };
+  const licensing = (a, where) => {
+    const { licensed, reasons } = attestationLicences(a, datasetLicence);
+    if (!licensed) return;
+    licences.licensed++;
+    if (reasons.size) licences.flagged++;
+    const name = typeof a['@id'] === 'string' ? a['@id'] : `${where} (an attestation without an address)`;
+    for (const [k, r] of reasons) {
+      const o = licences.by[k];
+      o.n++;
+      if (o.eg.length < 5) o.eg.push(`${name}: ${r.licence}${r.source ? `, ${r.source}` : ''}`);
+    }
+  };
   return {
-    header() { if (ctx.scheme) found = servability(ctx.scheme); },
+    header() {
+      if (ctx.scheme) found = servability(ctx.scheme);
+      datasetLicence = licenceTerms(ctx.gazetteer?.licence);
+    },
     event(ev) {
       // Counted whatever else: what the report was given to read, which a test can hold it to.
       if (ev.type === 'record') rep.count('places');
       if (ev.type === 'record' && ev.value && typeof ev.value === 'object') {
         for (const a of list(ev.value.attestations)) if (a && typeof a === 'object' && typeof a['@id'] !== 'string') unidentified++;
-      }
+        const where = typeof ev.value['@id'] === 'string' ? ev.value['@id'] : 'a place without an address';
+        for (const a of list(ev.value.attestations)) if (a && typeof a === 'object') licensing(a, where);
+      } else if (ev.type === 'attestation' && ev.value && typeof ev.value === 'object') licensing(ev.value, 'an attestation');
       if (!ctx.scheme) return;
       if (ev.type === 'record' && ev.value) {
         const id = ev.value['@id'];
@@ -278,10 +313,23 @@ export function create(ctx) {
         const kind = 'attestations-without-ids';
         rep.add(published ? 'error' : 'warning', kind, TEXT[published ? kind : kind + '-draft'], undefined, unidentified);
       }
+      // Licences that travel with a contribution: warnings, for this reads the licences' terms and
+      // cannot know whether an attestation copied from its source or only cites it.
+      if (licences.licensed && !datasetLicence) rep.add('warning', 'licences-not-compared', TEXT['licences-not-compared'], str(g.licence) || 'none given', licences.licensed);
+      for (const k of LICENCE_KINDS) {
+        const o = licences.by[k];
+        o.eg.forEach((e, i) => rep.add('warning', `licence-${k}`, TEXT[`licence-${k}`], e, i === 0 ? o.n - o.eg.length + 1 : 1));
+      }
+      rep.counts.licences = { licensed: licences.licensed, flagged: licences.flagged };
       const passed = checks.filter((c) => c.passed).length;
       rep.counts.fair = { passed, of: checks.length };
       rep.counts.fairChecks = checks;
       const said = [`${passed} of ${checks.length} FAIR checks pass.`];
+      if (licences.licensed) {
+        const n = licences.licensed.toLocaleString('en-GB');
+        said.push(`${n} attestation${licences.licensed === 1 ? ' cites' : 's cite'} a source with a licence of its own; ${!datasetLicence ? "the dataset's licence is not one these tools know, so none was compared with it."
+          : licences.flagged ? `${licences.flagged.toLocaleString('en-GB')} of them may not agree with the dataset's licence (see the warnings).` : "none of them was found at odds with the dataset's licence."}`);
+      }
       if (ctx.scheme && !str(g.landingPage)) said.push(`The site will be the landing page, at ${ctx.scheme.base}.`);
       if (ctx.checkErrors) {
         rep.add('error', 'dataset-has-problems', SHARED['dataset-has-problems'], undefined, ctx.checkErrors);
@@ -306,6 +354,8 @@ export function create(ctx) {
         ctx.done(await tree.close());
         said.push(`The deposit files are in ${name}; its README.txt says which goes where.`);
       }
+      // A draft is no secret once its site is uploaded (Issue #26): said last, as the site says it.
+      if (g.status !== 'published') said.push(SHARED['draft-is-public']);
       rep.counts.said = said;
     },
   };
