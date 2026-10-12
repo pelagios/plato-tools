@@ -13,6 +13,8 @@
 // Where it looks (#32): within the nearest regions the dataset identifies with WHG records, and in the
 // place's countries (adopt.js adoptScope), the query made by Krisis's own placeQuery (never area_only).
 // The line under the name says what is sent; nothing wider is searched unless "Search everywhere" is pressed.
+// Opened for a workflow (#workflow=<id>), the workflow's Scope applies too (src/engine/krisis/scope.js): its kinds
+// of place, years and sources always, and its Where when the place's own regions and countries give none.
 //
 // The page's state is published on window.__chora.adopt for automated tests; nothing else reads it.
 import { createLookup, WHG_ENDPOINT } from '../engine/gazetteer/index.js';
@@ -37,7 +39,7 @@ const whenText = (w) => {
  * `addAdoption(draft)` keeps an adoption draft with the drawings; `armConsult(consulted)` makes the next
  * drawing of the place cite a record consulted, not copied; `adopted(placeId)` the adoption drafts of a place.
  */
-export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adopted }) {
+export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adopted, scope = () => null }) {
   let s = null;   // { view, query, phase, problem, answer: { list, attribution }, ranked, statuses, dismissed, preview, done, widened, sent, searched, failedClosed }
   let inFlight = null;
   const token = permissions.token;
@@ -100,7 +102,7 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
   /** Where the next search looks: the place's scope, unless widened or it has none (then null: everywhere). */
   const searchScope = () => (s.widened || !A.scopes(s.view.scope) ? null : s.view.scope);
   /** The query for `query` as it will be sent (Krisis's placeQuery), or null for no name. */
-  const planned = (query) => (query ? placeQuery(A.adoptSearchPlace(s.view, query, searchScope()), { countries: true, limit: 10 }) : null);
+  const planned = (query) => (query ? placeQuery(A.adoptSearchPlace(s.view, query, searchScope()), { countries: true, limit: 10, scope: scope() }) : null);
   /** Where a query looks, for the words: the regions it is within (by label), their records and the countries. */
   const whereOf = (sent, scope) => {
     const ids = Array.isArray(sent?.contained_in) ? sent.contained_in : [];

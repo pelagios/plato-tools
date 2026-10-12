@@ -856,6 +856,7 @@ export const LOOKUP_WORDS = {
     lines.push(p.allNames ? 'Each place is looked up by its label and each of its other names, one query for each.' : 'Each place is looked up by its label only.');
     lines.push(p.filters.length ? `Filters: ${p.filters.map((f) => (f === 'countries' ? "the place's own countries" : `within about ${p.nearKm.toLocaleString('en-GB')} km of its point (answered from the gazetteer's upstream sources only)`)).join(' and ')}. A filter leaves out every candidate outside it, the right one too if the data is wrong.` : 'No filters: nothing is left out by country or distance.');
     if (p.areaOnly) lines.push('Only records with an outline are asked for: a region is matched to an area, never to a point, so that the places within it can be looked up inside it.');
+    if (p.scope) lines.push(SCOPE_WORDS.preview(p.scope));
     if (p.lang) lines.push(`A name with no language of its own is sent as ${p.lang}, the dataset's language.`);
     if (p.withoutLanguage) lines.push(`${plural(p.withoutLanguage, 'query is', 'queries are')} sent with no language: the name has none of its own${p.lang ? '' : ', and no language is set for the dataset'}.`);
     if (p.sendsCoordinates) lines.push("The places' coordinates are sent.");
@@ -942,8 +943,11 @@ export const lookupPage = {
   findSend: 'Send 1 query',
   tryNames: (n) => `Not found? Try its other names (${plural(n, 'query', 'queries')})`,
   again: 'Look it up again',
+  /** Scope: one place's lookup again, with nothing of the Scope sent (never done by itself). */
+  unscoped: 'Look it up again without Scope',
   /** What a lookup said about this place, when it found nothing or could not answer. */
-  state: (service, q) => (q.state === 'answered' ? `${service}: ${LOOKUP_WORDS.notFound(q)}`
+  state: (service, q) => (q.scoped?.length && ((q.state === 'answered' && !q.found) || q.failedClosed) ? `${service}: ${SCOPE_WORDS.emptyRow(q.scoped)}`
+    : q.state === 'answered' ? `${service}: ${LOOKUP_WORDS.notFound(q)}`
     : q.state === 'unanswered' ? `${service}: ${LOOKUP_WORDS.unanswered}`
     : `${service}: the lookup stopped before this place was looked up; this is not a finding that it has no match. Look it up again.`),
   /** What finishing will cite: one attestation per source. */
@@ -1206,4 +1210,106 @@ export const REGION_PAGE = {
   /** Where a place lies, on the review screen of places. */
   placeWithin: (names) => `In ${names.join(' › ')}.`,
   stop: 'Stop',
+};
+
+// Scope (Issue #33, points 2 and 8; src/engine/krisis/scope.js, the page's src/scope-page.js): what every WHG
+// lookup of a workflow is confined to. `name(code)` gives a country's name (the page's Intl.DisplayNames).
+const SCOPE_PARTS = { where: 'Where', what: 'What', when: 'When', sources: 'Sources' };
+const yearText = (y) => (y < 0 ? `${-y} BCE` : String(y));
+export const SCOPE_WORDS = {
+  heading: 'Scope',
+  parts: SCOPE_PARTS,
+  edit: 'Edit',
+  editScope: 'Edit the Scope',
+  /** Whose Scope it is: the workflow's (kept with it), or this tab's, outside a workflow. */
+  whose: (workflow) => (workflow
+    ? 'This workflow\'s Scope: kept with the workflow, in this browser and in its downloaded record, and used by every WHG lookup it makes.'
+    : 'This tab\'s Scope, for the lookups made here outside a workflow: kept for this tab only. A workflow keeps a Scope of its own.'),
+  lede: 'Confine every lookup in the World Historical Gazetteer to a part of the world, kinds of place, years and sources. Each is a filter: WHG first takes about 200 candidates by name, then leaves out every one outside the Scope, so a narrow Scope can leave a place with nothing, the right answer too.',
+  /** The chips in the rail and the lookup panel: [{ key, text, warn? }]. */
+  chips(scope, name = (c) => c) {
+    const w = scope.where, out = [];
+    out.push({ key: 'where', text: w.mode === 'countries' ? (w.countries.length <= 3 ? w.countries.map((c) => name(c)).join(', ') : `${w.countries.length} countries`)
+      : w.mode === 'place' ? `within ${w.place.label}` : w.mode === 'area' ? 'an area drawn' : 'anywhere' });
+    out.push({ key: 'what', text: !scope.types.length ? 'every kind of place' : scope.types.length === 1 ? SCOPE_WORDS.typeLabel(scope.types[0]) : `${scope.types.length} kinds of place` });
+    const { start, end } = scope.when;
+    out.push({ key: 'when', text: start === null && end === null ? 'any time' : start !== null && end !== null ? `${yearText(start)} to ${yearText(end)}` : start !== null ? `from ${yearText(start)}` : `to ${yearText(end)}` });
+    out.push({ key: 'sources', text: scope.sources.length ? (scope.sources.length <= 3 ? scope.sources.join(', ') : `${scope.sources.length} sources`) : 'all sources' });
+    return out;
+  },
+  undatedMark: 'Places with no dates are left out',
+  /** A type with how many narrower ones it stands for (sent with it: WHG does not match a broader type's narrower ones itself). */
+  typeLabel: (t) => (t.narrower.length ? `${t.label} (and ${plural(t.narrower.length, 'narrower type')})` : t.label),
+  // The editor (centre column).
+  editorHeading: 'Scope of the lookups',
+  close: 'Done',
+  clear: 'Clear the Scope',
+  where: {
+    legend: 'Where',
+    modes: { anywhere: 'Anywhere', countries: 'In these countries', place: 'Within a place in WHG', area: 'Within an area drawn on a map' },
+    countriesFilter: 'Find a country',
+    countriesNone: 'No country chosen yet: until one is, the lookups are not confined by country.',
+    countriesNote: 'Sent as countries. A candidate with no country recorded in WHG is left out too.',
+    placeLabel: 'The name of a region, a country or any place with an outline in WHG',
+    placeFind: 'Find in WHG',
+    placeNote: 'Only records with an outline are offered (a point cannot hold places), and the one chosen is sent by its WHG id, as contained_in.',
+    placeNone: 'Nothing with an outline found under that name.',
+    placeChosen: (p) => `Within ${p.label} (${p.id})${p.description ? `: ${p.description}` : ''}.`,
+    placeSearching: 'Asking WHG…',
+    placeUse: 'Use this one',
+    placeNeedsToken: 'Give your WHG token first (below): WHG answers only queries that carry one.',
+    placeToken: 'Your WHG token, from your profile on whgazetteer.org (kept as the lookup panel keeps it)',
+    placeTokenUse: 'Use this token',
+    areaDraw: 'Draw the area',
+    areaRedraw: 'Draw it again',
+    areaHow: 'Click on the map to place each corner, and click the first corner again to close the area. The map is Natural Earth, from this site: nothing is asked of another site to show it.',
+    areaNone: 'No area drawn yet.',
+    areaChosen: (n, [w, s, e, nn]) => `An area of ${plural(n, 'corner')}, from ${w.toFixed(2)}° to ${e.toFixed(2)}° east and from ${s.toFixed(2)}° to ${nn.toFixed(2)}° north. Sent as bounds.`,
+    areaLoading: 'Loading the map…',
+    areaFailed: (why) => `The map could not be shown (${why}).`,
+    precedence: 'Where gives way, row by row, to what a row already says. Once the regions in your table\'s region columns (a county, then a parish) are matched, each place is looked up within its own regions, not within the Scope\'s Where, and so are the regions below the widest. A place\'s own filters in the lookup panel (its countries, near its point) win too. The kinds of place, years and sources still apply to every place.',
+  },
+  what: {
+    legend: 'What kinds of place',
+    note: 'Sent as types, a filter. WHG matches a type exactly, not the narrower ones under it, so each type chosen is sent with every narrower type, and its label says how many.',
+    more: 'More types…',
+    fewer: 'Hide the other types',
+    search: 'Search the AAT place types',
+    treeNote: 'The AAT\'s place types, as WHG holds them. Open a type to see the narrower ones; a heading in italics groups them, and is not a type.',
+    loading: 'Asking WHG for the types…',
+    notAllowed: 'The other types come from WHG, which is not allowed yet (Permissions): the list above still works.',
+    failed: 'WHG\'s types could not be read just now: the list above still works.',
+    expanding: (label) => `Asking WHG for the types under ${label}…`,
+    expandFailed: (label) => `WHG could not say which types lie under ${label}, so it is sent alone: only places typed exactly so are found.`,
+    chosen: 'Chosen:',
+    remove: (label) => `Remove ${label}`,
+    none: 'No kinds chosen: every kind of place.',
+    noMatch: 'No type of that name.',
+  },
+  when: {
+    legend: 'When',
+    start: 'From the year',
+    end: 'To the year',
+    note: 'Years before the common era are negative (-500 for 500 BCE). Sent as start and end.',
+    undated: 'Include places with no dates',
+    undatedWarn: 'WHG currently leaves out places with no dates whenever years are set',
+    startAfterEnd: 'The first year is after the last, so no years are sent until that is put right.',
+  },
+  sources: {
+    legend: 'Only these sources',
+    note: 'Sent as namespaces. Nothing chosen means every source.',
+    whg: 'Contributed datasets',
+    bundled: 'WHG\'s list of sources could not be read just now (or WHG is not allowed yet), so this is its list as it was on 12 October 2026.',
+    records: (n) => `${n.toLocaleString('en-GB')} records`,
+  },
+  /** The lookup panel's preview of what of the Scope is sent. */
+  preview(s) {
+    const what = { where: 'its Where', what: 'its kinds of place', when: 'its years', sources: 'its sources' };
+    const said = s.parts.length ? `The Scope is sent as ${s.keys.join(', ')} (${s.parts.map((p) => what[p]).join(', ')}). Each is a filter, applied by WHG to its best 200 or so matches by name: a narrow Scope can leave a place with nothing, the right answer too.`
+      : 'The Scope adds nothing to these queries.';
+    const gave = s.whereYielded ? ` For ${plural(s.whereYielded, 'place')}, the Scope's Where gives way to where the row already says to look.` : '';
+    return said + gave + (s.region ? ' A region is looked up within the Scope\'s Where alone.' : '');
+  },
+  /** One place a scoped lookup found nothing for: the likely cause, and never relaxed by itself. */
+  emptyRow: () => 'Nothing within the Scope among WHG\'s best name matches. The Scope may leave the right place out: look it up again without Scope to see.',
 };

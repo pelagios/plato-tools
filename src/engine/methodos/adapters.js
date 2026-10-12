@@ -116,7 +116,7 @@ async function stoppedShort(st, host, subjects, work) {
  * file so far as its partial result; the level below is never looked up before the one above is settled.
  */
 export const REVIEWS = {
-  async 'lookup.levels'({ inputs, options, host, signal, partial, reviewer }) {
+  async 'lookup.levels'({ inputs, options, host, signal, partial, reviewer, scope = null }) {
     if (!host.lookup) throw new Error('No gazetteer lookup was given: the lookup is made on the page thread, through the permissions module.');
     if (typeof reviewer !== 'function') throw new Error('The region review is the reviewer\'s: no reviewer was given to decide on the regions.');
     const subjects = await inputOf(inputs.subjects, host, 'dataset');
@@ -125,7 +125,7 @@ export const REVIEWS = {
     if (!g.result.regions?.length) throw new DataError('The dataset gives no regions its places lie in: its table was converted without "within" columns, or without a base address, so there is nothing to identify level by level.');
     let work = partial?.work ? readWork(await (await filesFor(partial.work, host))[0].text()) : newWork(g.result.subjects, { reviewer: options.reviewer ?? null });
     seedRegions(work, g.result);
-    const how = { lookup: host.lookup, signal, options: options.lookup || {}, reviewer: options.reviewer ?? null };
+    const how = { lookup: host.lookup, signal, options: { ...(options.lookup || {}), scope }, reviewer: options.reviewer ?? null };
     for (const level of levelsOf(work)) {
       const r = await runLevel(work, level, how);
       if (r.stopped && r.stopped.kind !== 'stopped') await stoppedShort(r.stopped, host, subjects, work);
@@ -157,7 +157,7 @@ export async function review(state, host, { reviewer, signal, reviews = REVIEWS 
   // As runStep: cancelled, the step keeps what it had done; otherwise (a level left open, a permission not
   // given, a fault) it is not done, and keeps its partial work to begin from (an interactive step waits,
   // and the runner has no "stopped" from waiting: it fails, in the error's words). `error` is the error.
-  try { r = await fn({ inputs: runner.inputsOf(state, id), options: step.options || {}, host, signal, reviewer, partial: step.partial }); }
+  try { r = await fn({ inputs: runner.inputsOf(state, id), options: step.options || {}, host, signal, reviewer, partial: step.partial, scope: state.scope ?? null }); }
   catch (e) {
     if (signal?.aborted) return { state: runner.cancel(state, id, e?.partial), report: null };
     return { state: runner.fail(state, id, e, e?.partial), report: null, error: e };
@@ -210,7 +210,7 @@ export const ADAPTERS = {
   // stopped part-way (its quota spent, or a refusal): the answers received are kept as the step's
   // partial result, and the lookup done again begins from them and asks only for the places not yet
   // answered, so that no query is spent twice.
-  async lookup({ inputs, options, host, signal, partial }) {
+  async lookup({ inputs, options, host, signal, partial, scope = null }) {
     if (!host.lookup) throw new Error('No gazetteer lookup was given: the lookup is made on the page thread, through the permissions module.');
     const subjects = await inputOf(inputs.subjects, host, 'dataset');
     const from = partial?.work || inputs.work;
@@ -221,8 +221,8 @@ export const ADAPTERS = {
     // each constrained by the nearest matched region above it (runPlaces), as the page's "Look up the
     // places" in the review does; else as any lookup.
     const within = !!work && Object.keys(work.regions || {}).length > 0;
-    const r = within ? await runPlaces(work, { lookup: host.lookup, places: g.result.places, options: without(options, 'places'), signal })
-      : await runLookup({ lookup: host.lookup, work, subjects: g.result.subjects, places: g.result.places, options: partial?.work ? { ...options, places: 'pending' } : options, signal });
+    const r = within ? await runPlaces(work, { lookup: host.lookup, places: g.result.places, options: { ...without(options, 'places'), scope }, signal })
+      : await runLookup({ lookup: host.lookup, work, subjects: g.result.subjects, places: g.result.places, options: { ...(partial?.work ? { ...options, places: 'pending' } : options), scope }, signal });
     // Stopped short of the end other than by the user: a permission to decide is waiting for the
     // user; anything else (the service refusing, failing, or answering what cannot be right) is a fault.
     const st = r.stopped;
@@ -293,7 +293,8 @@ export async function runStep(state, host, { signal, adapters = ADAPTERS } = {})
   if (!adapter) return { state: runner.fail(state, id, `${OPERATIONS[step.op].title} has no adapter: it is not run by the tools.`), report: null };
   let r;
   try {
-    r = await adapter({ inputs: runner.inputsOf(state, id), options: step.options, host, signal, partial: step.partial });
+    // The workflow's Scope (src/engine/krisis/scope.js), for the steps that ask WHG.
+    r = await adapter({ inputs: runner.inputsOf(state, id), options: step.options, host, signal, partial: step.partial, scope: state.scope ?? null });
   } catch (e) {
     if (signal?.aborted) return { state: runner.cancel(state, id), report: null };
     const kind = stoppingKind(e);

@@ -61,8 +61,9 @@
       <details class="track-about"><summary>How Methodos follows the tools</summary><p class="track-note">Methodos keeps your place and sees what the tools do: a step is done when its tool's run on the right file finishes, and a step that stops or fails says why. Only a step that is yours to do (matching columns, reviewing candidates, drawing in Chora) waits for you to say it is done.</p></details>
       <p id="methodos-said" class="visually-hidden" aria-live="polite"></p>
     </section>
-    <!-- Scope (Issue #33): what a workflow's dataset covers, shown beside the tracker. It comes later; its place in the rail is kept. -->
-    <section id="scope" hidden></section>
+    <!-- Scope (Issue #33): what every WHG lookup of the workflow is confined to, as chips, with Edit, under the tracker
+         while a workflow is followed; filled by src/scope-page.js, worded in src/engine/words.js (SCOPE_WORDS). -->
+    <section id="scope" class="scope-rail" aria-labelledby="scope-h" hidden></section>
   </div>
   <section id="methodos" class="methodos" aria-labelledby="methodos-h" hidden>
     <h2 id="methodos-h" tabindex="-1">Methodos: find your workflow</h2>
@@ -79,6 +80,9 @@
   <!-- A workflow followed: the step it is at, as the centre's title ("Step n of N: Tool, what it does"); #for-tool is moved in below it
        while the workflow is followed (src/app.js, onStep). -->
   <div id="workflow-head" class="workflow-head" hidden><h2 id="workflow-title" tabindex="-1"></h2></div>
+  <!-- Scope's editor, in the centre column (the area drawn needs the width): while it is open the rest of the centre is
+       hidden (body.scope-editing), and Done goes back to the step. Filled by src/scope-page.js. -->
+  <section id="scope-editor" class="scope-editor" aria-labelledby="scope-editor-h" hidden></section>
   <section id="files" aria-labelledby="files-h">
     <h2 id="files-h" tabindex="-1"><span class="step">1</span> Choose your data</h2>
     <p id="for-tool" class="for-tool" hidden></p>
@@ -195,6 +199,8 @@
         <label for="lookup-near-km">Near means within this many kilometres</label>
         <input id="lookup-near-km" type="number" min="1" max="20015" step="1" value="25">
       </fieldset>
+      <!-- Scope (Issue #33): the workflow's, or outside one this tab's, with a way to edit it (src/scope-page.js). -->
+      <div id="lookup-scope" class="lookup-scope"></div>
       <div id="lookup-preview"></div>
       <p id="lookup-permission" hidden></p>
       <div class="lookup-go">

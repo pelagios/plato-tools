@@ -110,7 +110,7 @@ function stepList(list, steps, at, done, notes = []) {
  * tells it the files chosen, and each run of a tool as it begins ({ op, files }) and ends ({ op,
  * report, outputs, incomplete } or { op, error, partial } or { op, waiting } or { op, cancelled }).
  */
-export function mountMethodos({ banner, interview, tracker, store, onStep, tools, page, workflow = null, outputs = null }) {
+export function mountMethodos({ banner, interview, tracker, store, onStep, onScope, tools, page, workflow = null, outputs = null }) {
   const q = (root, sel) => root.querySelector(sel);
   const have = q(interview, '#mq-have'), want = q(interview, '#mq-want'), more = q(interview, '#mq-more');
   const verdict = q(interview, '#methodos-verdict'), planEl = q(interview, '#methodos-plan');
@@ -410,7 +410,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
       chosenRefs = await refsOf(files, 'files');
       if (pending && !wf) {
         const recipe = RECIPES[pending.key];
-        wf = { ...runner.start(recipe, pending.answers, { [fileKey(recipe)]: chosenRefs }), id: pending.id };
+        // Its Scope, if one was given before the file (src/engine/krisis/scope.js), goes into the record.
+        wf = { ...runner.start(recipe, pending.answers, { [fileKey(recipe)]: chosenRefs }), id: pending.id, ...(pending.scope ? { scope: pending.scope } : {}) };
         pending = null;
         say(`Begun with ${names(chosenRefs)}.`);
         await keep(); await store.dropPending(wf.id); await keepOwn(files); render(false); return;
@@ -685,6 +686,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   };
   function render(focus) {
     bannerNow();
+    onScope?.();   // the Scope shown in the rail is the workflow's, or none (src/scope-page.js)
     const shown = wf || changed?.record;
     if (!pending && !shown) { tracker.hidden = true; delete tracker.dataset.status; closeStrip(); stripAt = null; onStep(null); return; }
     tracker.hidden = false;
@@ -795,7 +797,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     if (pd && (!r || pd.saved > r.saved)) {
       if (!RECIPES[pd.key]) { await store.dropPending(pd.id); return; }
       try { plan(pd.key, pd.answers); } catch { await store.dropPending(pd.id); return; }
-      pending = { id: pd.id, key: pd.key, answers: pd.answers };
+      pending = { id: pd.id, key: pd.key, answers: pd.answers, ...(pd.scope ? { scope: pd.scope } : {}) };
       say('Taken up where it was left: chosen before any file.');
       render(false); return;
     }
@@ -830,5 +832,19 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   // following(): a workflow is followed, begun or about to begin with the files chosen (pending): what is
   // chosen is the workflow's, so the main page does not choose its kept file over it on a return (src/app.js, keptAtStart).
   // takenUp(): settled once a workflow kept from before is taken up (and its file chosen again), or found to be none.
-  return { open, chosen, began, ended, dropped, keepChanged, detected, baseChanged, id: () => wf?.id || null, following: () => !!(wf || pending || changed), takenUp: () => takenUp };
+  // Scope (Issue #33): the workflow's, kept in its record (or with it while it is pending), saved when it is
+  // changed, and gone with the workflow. scope() is the record's as kept, to be read through scope.js's
+  // normaliseScope, or null; setScope(s) keeps a new one, refused (false) when no workflow can take it.
+  const scopeNow = () => (wf ? wf.scope : pending ? pending.scope : changed ? changed.record.scope : null) ?? null;
+  function setScope(s) {
+    if (!wf && !pending) return false;
+    chain(async () => {
+      if (wf) { wf = { ...wf, scope: s }; await keep(); }
+      else if (pending) { pending = { ...pending, scope: s }; await store.savePending(pending); }
+      render(false);
+    });
+    return true;
+  }
+  return { open, chosen, began, ended, dropped, keepChanged, detected, baseChanged, id: () => wf?.id || null, following: () => !!(wf || pending || changed), takenUp: () => takenUp,
+    scope: scopeNow, setScope, scoped: () => !!(wf || pending) };
 }

@@ -115,7 +115,8 @@ export function restartRemaining(record, recipe) {
     s.state = 'done';
     s.outputs = clone(o.outputs);
   }
-  return { ...fresh, id: record.id, name: record.name, created: record.created, saved: record.saved };
+  // Its Scope (src/engine/krisis/scope.js) belongs to the workflow, not to the recipe: it is kept.
+  return { ...fresh, id: record.id, name: record.name, created: record.created, saved: record.saved, ...(record.scope ? { scope: clone(record.scope) } : {}) };
 }
 
 /**

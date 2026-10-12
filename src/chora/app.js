@@ -19,6 +19,7 @@ import * as handback from './handback.js';
 // The workflow Chora was opened for, read where the main page keeps it (Methodos's store, and the files
 // it keeps), for the few words of it shown here and its current dataset (src/methodos/seams.js).
 import { workflowStore } from '../methodos/store.js';
+import { normaliseScope } from '../engine/krisis/scope.js';
 import { outputStore } from '../methodos/outputs.js';
 import { RECIPES } from '../engine/methodos/recipes/index.js';
 import { trackOf, currentInput, stepAt } from '../methodos/seams.js';
@@ -773,6 +774,8 @@ permissions.onChange(() => {
 // from its record kept in this browser (Methodos's store; in the tab's sessionStorage when working data
 // is not kept). The record, or null; read once, at the start.
 const workflowRecord = workflow ? workflowStore().load(workflow).catch(() => null) : Promise.resolve(null);
+let workflowScope = null;   // the workflow's Scope, for the adopt search (src/engine/krisis/scope.js), checked as it is read
+workflowRecord.then((r) => { workflowScope = r?.scope ? normaliseScope(r.scope) : null; state.scope = workflowScope; });
 workflowRecord.then((r) => {
   const t = r && trackOf(r, RECIPES[r.recipe?.key]);
   state.workflowStep = t ? { title: t.title, step: t.step, words: t.words } : null;
@@ -1274,7 +1277,9 @@ mapApi.onDraw({
 initMaps();
 updateTraceButtons();
 const adopt = createAdopt({ root: $('adopt'), mapApi, state, addAdoption, armConsult: (c) => { consultArmed = c; state.consultArmed = c ? c.record : null; },
-  adopted: (placeId) => drafts.filter((d) => d.kind === 'adoption' && d.placeId === placeId) });
+  adopted: (placeId) => drafts.filter((d) => d.kind === 'adoption' && d.placeId === placeId),
+  // The workflow's Scope (Issue #33), read from its record once it is read; none outside a workflow.
+  scope: () => workflowScope });
 // A click on the map while tracing is the trace's (Shift-click carries a line on). Made in the moment after
 // the first press of a trace tool, before ink.js has arrived, it waits for it: the first click of a user
 // who presses "Trace line" and clicks the river is not lost on a slow connection.

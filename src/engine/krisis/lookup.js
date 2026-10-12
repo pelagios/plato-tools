@@ -45,12 +45,14 @@ import { guard } from './guards.js';
 import { WORK_VERSION, canonicalEndpoint } from './work.js';
 import { linkState } from './identities.js';
 import { constraintFor, selectLevel, placeState, areaOf, areaIds, storedConstraint, constraintParameters } from './regions.js';
+import { normaliseScope, isEmptyScope, scopeFields } from './scope.js';
+const SCOPE_PARTS = ['where', 'what', 'when', 'sources'], SCOPE_KEYS = ['countries', 'contained_in', 'bounds', 'types', 'start', 'end', 'temporal', 'undated', 'namespaces'];
 export { authorityIris, currentIdentities } from './identities.js';
 // The note an attestation on a looked-up candidate carries, here too for the tools that use this file (Chora).
 export { krisisLookupNote } from '../words.js';
 
 export const LOOKUP_ALGORITHM = 'krisis-lookup 1';
-export const LOOKUP_DEFAULTS = { limit: 10, maxDistanceKm: 50, allNames: false, countries: false, nearKm: null, variants: false, lang: null, areaOnly: false };
+export const LOOKUP_DEFAULTS = { limit: 10, maxDistanceKm: 50, allNames: false, countries: false, nearKm: null, variants: false, lang: null, areaOnly: false, scope: null };
 /** Which places a lookup takes (selectPlaces). */
 export const PLACE_CHOICES = ['unmatched', 'all', 'pending', 'unlinked'];
 /** How many queries the preview shows exactly as they would be sent. */
@@ -250,14 +252,15 @@ function namesToSend(place, allNames, variants = false) {
 /**
  * The queries for `places`, and a preview of them. options: allNames, limit (10), countries (false),
  * nearKm (null), batchSize (the lookup's: 25), service, type (another service's: manifestSettings();
- * WHG's is always WHG_PLACE_TYPE), and to WHG only: lang (the dataset's language, for a name with no
+ * WHG's is always WHG_PLACE_TYPE), and to WHG only: scope (scope.js), lang (the dataset's language, for a name with no
  * tag of its own) and areaOnly (only records with an outline: a region review's regions). Returns { queries,
  * chunks, preview }: `queries` [{ key: [iri, name], query, limit, type?, params? }] in place order;
  * `chunks` the places in groups whose queries fill one batch (a place's queries are never split
  * across groups, so a place is answered all at once); `preview` { places, queries, requests,
  * allNames, filters: ['countries'|'near'], sendsCoordinates, nearKm, withoutCountries, withoutPoint,
  * withoutName (places with no name to send, which are left out: `places` does not count them),
- * withoutLanguage (WHG's queries sent with no language), lang (the dataset's, as sent, or null), areaOnly, first:
+ * withoutLanguage (WHG's queries sent with no language), lang (the dataset's, as sent, or null), areaOnly, scope ({ parts,
+ * keys, whereYielded, region }, or null: what of the Scope is sent, and to how many places its Where gave way), first:
  * [the first PREVIEW_QUERIES queries as they are sent] }.
  */
 export function planQueries(places, options = {}) {
@@ -265,8 +268,11 @@ export function planQueries(places, options = {}) {
   const whg = isWhg(o.service.endpoint);
   const type = whg ? WHG_PLACE_TYPE : o.type || undefined;
   const datasetLang = whg ? whgLang(o.lang) : null, areaOnly = whg && !!o.areaOnly;
+  // Scope (scope.js), to WHG only: what the workflow's (or the tab's) Scope adds to each query.
+  const scope = whg && o.scope && !isEmptyScope(o.scope) ? normaliseScope(o.scope) : null;
   const queries = [], chunks = [];
-  let chunk = null, withoutCountries = 0, withoutPoint = 0, withoutName = 0, withoutLanguage = 0, looked = 0;
+  let chunk = null, withoutCountries = 0, withoutPoint = 0, withoutName = 0, withoutLanguage = 0, looked = 0, whereYielded = 0;
+  const scopeParts = new Set(), scopeKeys = new Set();
   for (const place of places) {
     const names = namesToSend(place, o.allNames, o.variants);
     if (!names.length) { withoutName++; continue; }
@@ -274,6 +280,11 @@ export function planQueries(places, options = {}) {
     const params = filtersOf(place, o);
     if (o.countries && !params?.countries) withoutCountries++;
     if (o.nearKm > 0 && params?.radius === undefined) withoutPoint++;
+    // The place's own filters and its constraint from the region review win over Scope's Where (scope.js).
+    const sc = scope ? scopeFields(scope, { region: areaOnly, own: params, relaxed: place.constraint?.relaxed ?? null }) : null;
+    if (sc?.yielded) whereYielded++;
+    for (const p of sc?.parts || []) scopeParts.add(p);
+    for (const k of Object.keys(sc?.params || {})) scopeKeys.add(k);
     const mine = names.map(({ text, how, tag }) => {
       // WHG only (whg.js A13): the name's own language; untagged (or und, mis), the dataset's; tagged mul or
       // zxx, none; never "und". Only a tag's primary subtag is sent: WHG takes a bare code, so a script
@@ -281,8 +292,8 @@ export function planQueries(places, options = {}) {
       const own = whg ? nameLang(tag) : 'none';
       const lang = !whg || own === 'none' ? null : own === 'untagged' ? datasetLang : own;
       if (whg && !lang) withoutLanguage++;
-      const sent = { ...(params || {}), ...(areaOnly ? { area_only: true } : {}), ...(lang ? { lang } : {}) };
-      return { key: [place.iri, text], query: text, how, limit: o.limit, ...(type ? { type } : {}), ...(Object.keys(sent).length ? { params: sent } : {}) };
+      const sent = { ...(params || {}), ...(sc ? structuredClone(sc.params) : {}), ...(areaOnly ? { area_only: true } : {}), ...(lang ? { lang } : {}) };
+      return { key: [place.iri, text], query: text, how, limit: o.limit, ...(type ? { type } : {}), ...(Object.keys(sent).length ? { params: sent } : {}), ...(sc?.parts.length ? { scoped: [...sc.parts] } : {}) };
     });
     queries.push(...mine);
     if (!chunk || (chunk.queries.length && chunk.queries.length + mine.length > o.batchSize)) chunks.push(chunk = { places: [], queries: [] });
@@ -294,6 +305,7 @@ export function planQueries(places, options = {}) {
     places: looked, queries: queries.length, requests, allNames: !!o.allNames, variants: !!o.variants, limit: o.limit, filters,
     sendsCoordinates: queries.some((q) => q.params?.radius !== undefined), withoutCountries, withoutPoint, withoutName, withoutLanguage, lang: datasetLang, areaOnly,
     nearKm: o.nearKm > 0 ? Math.min(MAX_RADIUS_KM, o.nearKm) : null,
+    ...(scope ? { scope: { parts: SCOPE_PARTS.filter((x) => scopeParts.has(x)), keys: SCOPE_KEYS.filter((x) => scopeKeys.has(x)), whereYielded, region: areaOnly } } : {}),
     service: o.service, first: queries.slice(0, PREVIEW_QUERIES).map(sent),
   };
   return { queries, chunks, preview };
@@ -372,6 +384,9 @@ export function startLookup(work, { service, parameters, plan, now = new Date().
     if (!isRegionKey(work, p.iri) && !Object.hasOwn(work.places, p.iri)) work.places[p.iri] = placeRecord(p, work);
     const mine = plan.queries.filter((q) => q.key[0] === p.iri);
     queries[p.iri] = { state: 'pending', sent: mine.map((q) => q.query), ...(p.constraint ? { constraint: storedConstraint(p.constraint) } : {}) };
+    // Scope: which of its parts this place was sent under (scope.js), so that an empty answer can say why.
+    const scoped = [...new Set(mine.flatMap((q) => q.scoped || []))];
+    if (scoped.length) queries[p.iri].scoped = scoped;
     // Krisis × Methodos: with variants asked for, how each query was made from the place's names.
     if (mine.some((q) => q.how && q.how !== 'given')) queries[p.iri].variants = mine.map((q) => ({ text: q.query, how: q.how || 'given' }));
   }
@@ -530,14 +545,14 @@ const suspect = (chunk, answers, service) => chunk.queries.length > 1 && narrowe
   && !answers.some(failedClosed) && !answers.every((l) => l.scope?.applied === true);
 const spatial = (params) => !!params && (Array.isArray(params.contained_in) || params.radius !== undefined);
 /** What makes a lookup's answers what they are, to tell whether a suspect batch is sent again unchanged. */
-const SAME_ASKING = ['allNames', 'limit', 'countries', 'nearKm', 'type', 'variants', 'lang', 'areaOnly'];
+const SAME_ASKING = ['allNames', 'limit', 'countries', 'nearKm', 'type', 'variants', 'lang', 'areaOnly', 'scope'];
 /**
  * Was this place in a suspect batch of this service, asked the same way? Sending it again is the
  * reviewer's word that the empty answers are genuine, and they are then accepted.
  */
 function wasSuspect(work, iri, service, parameters) {
   const last = lastQuery(work, iri, service);
-  return !!last?.query.suspect && SAME_ASKING.every((k) => (last.lookup.parameters?.[k] ?? null) === (parameters[k] ?? null));
+  return !!last?.query.suspect && SAME_ASKING.every((k) => JSON.stringify(last.lookup.parameters?.[k] ?? null) === JSON.stringify(parameters[k] ?? null));
 }
 
 /**
@@ -565,6 +580,8 @@ export function planLookup({ lookup, work = null, places = null, options = {} })
  *              only (IRIs), allNames, limit, countries, nearKm, maxDistanceKm, type (another service's:
  *              manifestSettings()), query (a name to send for the one place `only` names, instead of
  *              its label; what it finds is added to the place's candidates, replacing none)
+ *              scope (to WHG only: a Scope, scope.js, whose fields are added to every query, the
+ *              place's own filters and constraint winning over its Where; null sends none)
  *   reviewer   the reviewer ({ name, orcid? }), recorded in the work file when given
  *   signal     stops it: what was answered is kept, the rest marked 'stopped'
  *   onBatch    ({ done, total, record, work }) after each batch of places, to show progress or save
@@ -589,7 +606,9 @@ export async function runLookup({ lookup, work = null, subjects = null, places =
   } else if (reviewer) work.reviewer = reviewer;
   const plan = planLookup({ lookup, work, places, options: { ...o, service } });
   const parameters = { places: o.places ?? defaultChoice(work), allNames: typed ? false : !!o.allNames, limit: o.limit, countries: !!o.countries, nearKm: o.nearKm ?? null, maxDistanceKm: o.maxDistanceKm, type: plan.queries[0]?.type ?? null, linksKnown: !!places, ...(typed ? { query: typed } : {}), ...(o.variants && !typed ? { variants: true } : {}),
-    ...(plan.preview.lang ? { lang: plan.preview.lang } : {}), ...(plan.preview.areaOnly ? { areaOnly: true } : {}) };
+    ...(plan.preview.lang ? { lang: plan.preview.lang } : {}), ...(plan.preview.areaOnly ? { areaOnly: true } : {}),
+    // Scope: as it was when the lookup was made (scope.js normaliseScope), so the work file says what confined it.
+    ...(plan.preview.scope ? { scope: normaliseScope(o.scope) } : {}) };
   // Places of a suspect batch sent again, asked the same way: found before the new record is added.
   const confirmed = new Set(plan.chunks.flatMap((c) => c.places).filter((p) => wasSuspect(work, p.iri, service, parameters)).map((p) => p.iri));
   const record = startLookup(work, { service, parameters, plan, now: now() });

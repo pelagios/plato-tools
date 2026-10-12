@@ -126,8 +126,8 @@ export function workflowStore({ indexedDB, session, keep = keepWorkingData } = {
     // A workflow chosen before any file (Stephen, 4 October 2026): not a runner's state yet, only its
     // recipe and answers, { id, key, answers, saved }, kept beside the records under 'pending:<id>',
     // where list() and load() never take it for a record. It goes when its workflow begins, or is discarded.
-    async savePending({ id, key, answers }) {
-      const text = JSON.stringify({ methodosPending: 1, id, key, answers, saved: new Date().toISOString() });
+    async savePending({ id, key, answers, scope }) {
+      const text = JSON.stringify({ methodosPending: 1, id, key, answers, ...(scope ? { scope } : {}), saved: new Date().toISOString() });
       if (keeping()) { try { await tx('readwrite', (st) => st.put(text, PENDING + id)); tab.drop(PENDING + id); return 'browser'; } catch { /* the tab's, then */ } } else await forgetKept();
       tab.put(PENDING + id, text);
       return 'tab';

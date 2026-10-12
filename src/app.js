@@ -39,6 +39,7 @@ import { seedRegions, decideRegion, settleRegion, undo as undoRegion, selectLeve
 import { REGION_PAGE as RP, REGION_WORDS } from './engine/words.js';
 import { levelNames, levelLabel, navigator as levelNavigator, firstOpen, chainOf, placeChain, constraintLine, notesOf, relaxOptions, costOf, levelRegions, unsettledOf, placesToLook, lockedPlaces, wouldClear, priorOf, restorePrior, nameOf, regionDomId, certaintyChoices, CERTAINTY_DEFAULT, regionMatchOptions } from './krisis/region-page.js';
 import { mountMethodos } from './methodos/page.js';
+import { mountScope } from './scope-page.js';
 import { workflowStore } from './methodos/store.js';
 import { chosenWords, wentOn, resultLabel } from './methodos/layout.js';
 const $ = (id) => document.getElementById(id);
@@ -1024,6 +1025,7 @@ chooseTool(toolFromHash());
 // Opened from its card (or an address ending #methodos); until then the page is as it was. Each step
 // the workflow comes to chooses that step's tool, as its card would, and is said in #for-tool.
 const methodosStore = workflowStore();
+let scopeUi = null;   // Scope (Issue #33; src/scope-page.js), mounted below, once Methodos is
 const methodos = mountMethodos({
   banner: $('methodos-banner'), interview: $('methodos'), tracker: $('methodos-tracker'), tools: $('toolbox'), store: methodosStore,
   page: {
@@ -1047,6 +1049,8 @@ const methodos = mountMethodos({
     reopenResult: () => { if (!parked) return; lingering = parked; parked = null; $('result').hidden = false; resultOf(lingering.label); methodos.detected(); showNext($('result-h'), { asked: true }); },
   },
   workflow: arrivedFor,
+  // The workflow's Scope is shown again whenever the tracker is drawn (begun, taken up, left).
+  onScope: () => scopeUi?.show(),
   onStep(step) {
     workflowMode(step);
     if (!step && !workflowStep) return;
@@ -1063,6 +1067,9 @@ const methodos = mountMethodos({
     }
   },
 });
+// Scope: the workflow's while one is followed, else this tab's; its chips in the rail and the lookup panel,
+// edited in the centre column. Every WHG lookup below takes it (lookupOptions, regionRun).
+scopeUi = mountScope({ methodos, lookup: () => whgLookup(), token: permissions.token, onChange: () => refreshPreview(), state });
 // ---- The page's layout while a workflow is followed (Issue #33; src/styles.css, body[data-workflow]) -----
 // One numbering: the page's own section numbers are hidden and the centre is titled with the workflow's
 // step; #for-tool goes under that title; step 1 folds to one line once its file is chosen; and the
@@ -1654,7 +1661,7 @@ function lookupService() {
 function lookupOptions(extra = {}) {
   const km = parseFloat($('lookup-near-km').value);
   return { places: $('lookup-places').value, allNames: $('lookup-all-names').checked, variants: $('lookup-variants').checked, countries: $('lookup-countries').checked,
-    nearKm: $('lookup-near').checked && km > 0 ? km : null, maxDistanceKm: matchOptions().maxDistanceKm, lang: lookupLang(), ...extra };
+    nearKm: $('lookup-near').checked && km > 0 ? km : null, maxDistanceKm: matchOptions().maxDistanceKm, lang: lookupLang(), scope: scopeUi?.current() ?? null, ...extra };
 }
 /** The dataset's language, as typed in the lookup panel, or null: the lookup sends WHG its code (whg.js whgLang). */
 function lookupLang() {
@@ -1736,7 +1743,7 @@ async function refreshPreview() {
  * Look places up. With nothing given, as the panel says; `only` (IRIs) for one place from the review
  * screen, with `query` the name to send instead of its label, or `allNames` to send its other names.
  */
-async function lookUp({ only = null, query = null, allNames, which } = {}) {
+async function lookUp({ only = null, query = null, allNames, which, unscoped = false } = {}) {
   if (looking) return;
   if ($('whg-token').value.trim()) commitToken();
   const svc = lookupService();
@@ -1756,7 +1763,8 @@ async function lookUp({ only = null, query = null, allNames, which } = {}) {
   const existing = reviewWork();
   if (!existing && !g?.subjects) return lookupSay(readable(input) ? LW.placesNotRead : LW.noDataset, true);
   // A name typed for one place is sent instead of its label, and what it finds is added beside the place's candidates (runLookup's query).
-  const opts = lookupOptions({ ...(which ? { places: which } : {}), ...(only ? { places: 'all', only } : {}), ...(allNames !== undefined ? { allNames } : {}), ...(only && query ? { query } : {}) });
+  // "Look it up again without Scope" (one place, asked for by the user, never done by itself): nothing of the Scope is sent.
+  const opts = lookupOptions({ ...(which ? { places: which } : {}), ...(only ? { places: 'all', only } : {}), ...(allNames !== undefined ? { allNames } : {}), ...(only && query ? { query } : {}), ...(only && unscoped ? { scope: null } : {}) });
   let lookup;
   // Another service's candidates' addresses: by the template given, else by its manifest's view.url (read below).
   const template = { template: svc.template ?? null };
@@ -1859,6 +1867,8 @@ function lookupPlaceHtml(iri, place) {
     const others = [...new Set((place.names || []).filter((n) => n && n.trim().toLowerCase() !== (place.label || '').trim().toLowerCase()))];
     if (may && last.q.state === 'answered' && !last.q.found && last.q.sent.length === 1 && others.length) out += `<button type="button" data-look="names">${escapeHtml(LW.tryNames(1 + others.length))}</button> `;
     if (may && last.q.state !== 'answered') out += `<button type="button" data-look="again">${escapeHtml(LW.again)}</button> `;
+    // Scope: a place a scoped lookup found nothing for (or could not filter) may be asked again without it, by the user.
+    if (may && last.q.scoped?.length && ((last.q.state === 'answered' && !last.q.found) || last.q.failedClosed)) out += `<button type="button" data-look="unscoped">${escapeHtml(LW.unscoped)}</button> `;
   }
   if (!may) return `<div class="find">${out}<p class="lookup-permission"></p></div>`;
   out += `<button type="button" data-look="find">${escapeHtml(LW.find(service))}</button>`;
@@ -1916,6 +1926,7 @@ $('review-place').addEventListener('click', (e) => {
   else if (look === 'cancel') { findFor = null; render(true); }
   else if (look === 'names') lookUp({ only: [iri], allNames: true });
   else if (look === 'again') lookUp({ only: [iri] });
+  else if (look === 'unscoped') lookUp({ only: [iri], unscoped: true });
 });
 $('review-place').addEventListener('submit', (e) => {
   if (!e.target.matches('form.find-form')) return;
@@ -2159,7 +2170,7 @@ async function regionRun(kind, { level, relax, only, unconstrained = false } = {
   regionSay(LW.sending(service)); lookupSay(LW.sending(service));
   lookupState({ running: true, done: 0, total: null, stopped: null, summary: null, single: false, regions: kind === 'places' ? 'places' : level });
   drawRegions();
-  const how = { lookup: whgLookup(), relax, only, options: { service: svc.service, maxDistanceKm: matchOptions().maxDistanceKm, lang: lookupLang() }, reviewer: reviewer(), signal: looking.signal,
+  const how = { lookup: whgLookup(), relax, only, options: { service: svc.service, maxDistanceKm: matchOptions().maxDistanceKm, lang: lookupLang(), scope: scopeUi?.current() ?? null }, reviewer: reviewer(), signal: looking.signal,
     onBatch: ({ done, total }) => { regionSay(LW.progress({ done, total }, service)); lookupState({ done, total }); if (work === w) render(false); } };
   let result = null, fault = false;
   try { result = kind === 'places' ? await runPlaces(w, { ...how, places: g?.places ?? null, unconstrained }) : await runLevel(w, level, how); }
