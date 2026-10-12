@@ -940,7 +940,13 @@ What it reports, and why, is in the guide:
   node that has one by its IRI, sorted, so that blank node labels, key order and form never
   matter.
 - **Only digests are kept**: 128 bits of SHA-256 per attestation and per statement about a named
-  thing, in a SQLite ledger (`src/lib/sha256.js`, synchronous because the pipeline's sink is).
+  thing, in a SQLite ledger (`src/lib/sha256.js`, synchronous because the pipeline's sink is). The
+  digest encodes into one buffer it keeps, reuses its message schedule and keeps its state in locals:
+  on 200,000 lines of DEEP's N-Triples (98 characters on average) it takes 1.86 µs a line where it
+  took 9.45, and 18.0 µs where it took 41.0 at 2,000 characters (Node 24, the median of seven
+  processes, 12 October 2026). It takes only a string, and says so: the browser's encoder would make
+  a string of anything else. `test/sha256.test.js` holds it to Node's digests at every block boundary,
+  beyond ASCII, and after a longer text, whose bytes a padding not zeroed would keep.
 - **Facets by address.** A named node that an earlier attestation points to by `attests_*` (other
   than `attests_about`) or `has_citation` is part of what it says (PLATO's `plato:Gazetteer`), so a
   lost statement about it is a breach, and an added one a warning. A facet no longer described that
