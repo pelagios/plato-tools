@@ -183,9 +183,17 @@ async function* lpfSource(file, seq, rep) {
 // maps' manifests, input.manifests: dropped with the export, or --georef and --manifest), each
 // annotation's regions are placed in the world (src/formats/regions.js); without them, nothing of
 // the georeference module is loaded and the annotations are read as before.
+// Every region on an image is reported by exactly one region kind (src/formats/regions.js): a placed one by
+// 'annotation-region-shape', the rest by these. Counted, so that the summary says how many of them were placed.
+const REGION_NOT_PLACED = new Set(['annotation-region-no-georef', 'annotation-region-outside-map', 'annotation-region-ambiguous',
+  'annotation-region-beyond-control-points', 'annotation-region-not-iiif', 'annotation-region-unplaced']);
 async function* annotationSource(input, rep) {
   const file = input.files[0];
-  const reader = new AnnotationReader((kind, example) => rep.add(ANNOTATION_KINDS[kind] || 'loss', kind, LOSS_TEXT[kind] || kind, example));
+  const reader = new AnnotationReader((kind, example) => {
+    if (kind === 'annotation-region-shape' || REGION_NOT_PLACED.has(kind)) rep.count('regions on images');
+    if (kind === 'annotation-region-shape') rep.count('regions placed');
+    rep.add(ANNOTATION_KINDS[kind] || 'loss', kind, LOSS_TEXT[kind] || kind, example);
+  });
   const placing = input.georefs?.length > 0;
   if (placing) await reader.useGeoreferences(input.georefs, input.manifests || []);
   else for (const m of input.manifests || []) rep.add(ANNOTATION_KINDS['annotation-manifest-unused'], 'annotation-manifest-unused', LOSS_TEXT['annotation-manifest-unused'], m.name);

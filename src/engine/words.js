@@ -21,7 +21,7 @@ function withGeorefs({ georefs, manifests }) {
 const ONE = { 'earlier attestations': 'earlier attestation', 'earlier candidates': 'earlier candidate', annotations: 'annotation', places: 'place', attestations: 'attestation', 'identity relations': 'identity relation', candidates: 'candidate', triples: 'triple', 'triples written': 'triple written', 'table rows': 'table row', observations: 'Data Cube observation' };
 const MANY = { observations: 'Data Cube observations' };
 ONE['place names'] = 'place name';
-ONE.rows = 'row'; ONE.features = 'feature';
+ONE.rows = 'row'; ONE.features = 'feature'; ONE['regions on images'] = 'region on an image';
 // The candidates of the candidate sets given with a check (Elenchos: --candidates), read beside its input.
 ONE['candidates given'] = 'candidate in the candidate sets given'; MANY['candidates given'] = 'candidates in the candidate sets given';
 const count = (n, what) => `${n.toLocaleString('en-GB')} ${n === 1 ? ONE[what] || what : MANY[what] || what}`;
@@ -58,7 +58,9 @@ export function summary(report, action) {
   if (action === 'candidates') return candidatesSummary(report);
   // The regions a table's places lie in, minted as places (Hermes, generic.js), are among the places, and said apart.
   const regions = (k) => (k === 'places' && c.regions ? ` (${c.regions.toLocaleString('en-GB')} of them ${c.regions === 1 ? 'a region' : 'regions'})` : '');
-  const counted = ['annotations', 'place names', 'rows', 'features', 'places', 'attestations', 'identity relations', 'candidates', 'candidates given', 'triples', 'triples written', 'table rows', 'observations'].filter((k) => c[k]).map((k) => count(c[k], k) + regions(k)).join(', ');
+  // The regions of an export read with georeferences (pipeline.js annotationSource): how many of them were placed.
+  const onImages = (k) => (k === 'annotations' && c['regions on images'] ? `, ${(c['regions placed'] || 0).toLocaleString('en-GB')} of ${count(c['regions on images'], 'regions on images')} placed on a map` : '');
+  const counted = ['annotations', 'place names', 'rows', 'features', 'places', 'attestations', 'identity relations', 'candidates', 'candidates given', 'triples', 'triples written', 'table rows', 'observations'].filter((k) => c[k]).map((k) => count(c[k], k) + regions(k) + onImages(k)).join(', ');
   const nErr = report.errors;
   return {
     problems: nErr ? `${nErr.toLocaleString('en-GB')} problem${nErr === 1 ? '' : 's'} found.` : 'No problems found.',
@@ -848,6 +850,7 @@ export const LOOKUP_WORDS = {
   choices: {
     unmatched: 'places without candidates from the other dataset', all: 'all places',
     pending: 'places not yet looked up, or not answered', unlinked: 'places not yet linked to the gazetteer',
+    nolink: 'places without a gazetteer link',
   },
   /** A place answered with no candidates: which names were sent, so that "none" is read for what it is. */
   notFound: (q) => (q.sent.length > 1 ? `No candidates (label and ${plural(q.sent.length - 1, 'other name')}).` : 'No candidates (label only).')
@@ -896,7 +899,9 @@ export const LOOKUP_WORDS = {
     const rest = [c.withoutName ? `${plural(c.withoutName, 'place was', 'places were')} not looked up, having no name (only a web address)` : '',
       c.unanswered ? `${plural(c.unanswered, 'place was', 'places were')} not answered, and can be looked up again` : '',
       c.scopeNotApplied ? `for ${plural(c.scopeNotApplied, 'place')} the gazetteer did not apply the distance filter, so its candidates are not filtered by distance` : '',
-      c.stopped ? `${plural(c.stopped, 'place was', 'places were')} not looked up before the lookup stopped` : ''].filter(Boolean);
+      c.stopped ? `${plural(c.stopped, 'place was', 'places were')} not looked up before the lookup stopped` : '',
+      c.refsDisagree ? `${plural(c.refsDisagree, 'place has its', 'places have their')} own gazetteer link far from WHG's best candidate, flagged for you` : '',
+      c.refsUnresolved ? `for ${plural(c.refsUnresolved, 'place')} the record its own gazetteer link names was not among WHG's answers, or has no point, so it could not be checked` : ''].filter(Boolean);
     return {
       problems: c.added ? `${plural(c.added, 'possible match', 'possible matches')} to review${c.far ? `, ${c.far.toLocaleString('en-GB')} of them far away` : ''}.` : 'No possible matches found.',
       counted: `Looked up ${plural(c.places, 'place')} in ${service}, with ${plural(c.queries, 'query', 'queries')}; ${plural(c.answered, 'place was', 'places were')} answered, ${c.notFound.toLocaleString('en-GB')} with no candidates.`
@@ -910,6 +915,23 @@ const LANG_EXAMPLES = ['en', 'la', 'ang'];
 const LANG_EXAMPLES_TEXT = `${LANG_EXAMPLES[0]}, ${LANG_EXAMPLES[1]} or ${LANG_EXAMPLES[2]}`;
 export const lookupPage = {
   whg: 'WHG',
+  /** The one click that chooses "places without a gazetteer link" (lookup.js 'nolink'). */
+  onlyUnlinked: 'Only places without a gazetteer link',
+  /**
+   * A place's own gazetteer address checked against WHG (lookup.js refCheck: work.places[iri].ref), on its
+   * review screen: the record the address names and WHG's best candidate, with the distance between them; or
+   * why it could not be checked. The address is kept whatever this says.
+   */
+  refCheck: (r) => {
+    if (!r) return '';
+    const at = (g) => `${g.label ? `${g.label}, ` : ''}${g.id}${Array.isArray(g.point) ? `, at ${review.point(g.point)}` : ''}`;
+    const km = (n) => `${n.toLocaleString('en-GB')} km`;
+    if (r.state === 'disagrees') return `Your gazetteer link names ${at(r.record)}; WHG's best candidate, ${at(r.best)}, is ${km(r.distance_km)} from it, more than ${km(r.limit_km)}. Your link is kept as the place's own; decide on WHG's candidates yourself: they are not accepted in bulk.`;
+    if (r.state === 'agrees') return `Your gazetteer link names ${at(r.record)}; WHG's best candidate is ${km(r.distance_km)} from it, within ${km(r.limit_km)}.`;
+    if (r.state === 'unchecked') return `Your gazetteer link names ${at(r.record)}; WHG gave no other candidate with a point to compare it with.`;
+    return r.why === 'no-point' ? `Your gazetteer link names ${r.id}, whose record in WHG has no point, so WHG's candidates could not be compared with it; your link is kept, and nothing is flagged.`
+      : `Your gazetteer link names ${r.id}, which WHG did not give among its answers, so WHG's candidates could not be compared with it; your link is kept, and nothing is flagged.`;
+  },
   reading: 'Reading the places of your dataset…',
   noDataset: 'Choose your dataset first: its places are what is looked up.',
   placesNotRead: 'The places of your dataset could not be read, so there is nothing to look up.',
@@ -1014,11 +1036,12 @@ export const guardWords = {
   /** A place left out of the bulk accept for having namesakes where it was looked for (#31), on its own screen. */
   namesakes: (n, region) => `${n.toLocaleString('en-GB')} places of this name ${region ? `in ${region}` : 'where it was looked for'}: left for you, not accepted in bulk.`,
   /** Those left out of the bulk accept, and why. */
-  leftOut: (l, several = 0, tied = []) => [
+  leftOut: (l, several = 0, tied = [], flagged = 0) => [
     l.total ? `${l.total.toLocaleString('en-GB')} left out: ${[l.far ? `${l.far.toLocaleString('en-GB')} further from the place than the greatest distance` : '', l.ccodes ? `${l.ccodes.toLocaleString('en-GB')} in another country than the place's own` : '',
       l.kind ? `${l.kind.toLocaleString('en-GB')} of another kind of place than the place's own (a lake for a town, say)` : ''].filter(Boolean).join(', ')}. Decide on them yourself.` : '',
     several ? `${several.toLocaleString('en-GB')} ${several === 1 ? 'place has' : 'places have'} more than one passing, and ${several === 1 ? 'is' : 'are'} left to you.` : '',
-    guardWords.ties(tied)].filter(Boolean).join(' '),
+    guardWords.ties(tied),
+    flagged ? `${flagged.toLocaleString('en-GB')} ${flagged === 1 ? 'place has its own gazetteer link' : 'places have their own gazetteer link'} far from WHG's best candidate, and ${flagged === 1 ? 'is' : 'are'} left to you.` : ''].filter(Boolean).join(' '),
   /** The places left out for namesakes (#31), from how many places of its name each has: "1 place has 2 candidates of its name …". */
   ties: (tied = []) => {
     if (!tied.length) return '';

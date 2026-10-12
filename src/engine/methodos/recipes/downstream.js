@@ -8,18 +8,18 @@
 // region each place is in as a table's "within" columns do, so there are no regions to identify, and
 // the decisions are recorded by the plain step (`apply`), as Map your data records them without regions.
 import mapYourData from './map-your-data.js';
+import { BASE } from './asks.js';
 
 const ask = (k) => ({ ...mapYourData.asks[k] });
 
 /**
  * The questions: drawing and publishing, Map your data's yes-or-no questions; the format written; and,
- * for publishing, what Publish a dataset asks (the base address optional, as there: minting takes it where
- * the dataset has none of its own).
+ * for publishing, the base address every publishing workflow asks (asks.js), optional: minting takes it.
  */
 export const ASKS = {
   'will-draw': ask('will-draw'),
   'will-publish': ask('will-publish'),
-  base: { question: 'Under what base address will your places have web addresses of their own (for example https://example.org/places/)?', kind: 'text', optional: true },
+  base: BASE,
   target: ask('target'),
   release: ask('release'),
   repo: ask('repo'),

@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { choose, answersFor, answered, baseAsked, baseAnswer, plan } from '../src/engine/methodos/interview.js';
-import { RECIPES, runner, writesItself, baseDiffers } from '../src/engine/methodos/index.js';
+import { RECIPES, runner, writesItself, baseDiffers, digest, recordOf, reconcile } from '../src/engine/methodos/index.js';
 
 const BASE = 'https://example.org/parishes/';
 
@@ -67,4 +67,58 @@ test('at Finish, a base address in Options other than the review\'s saved addres
   assert.equal(baseDiffers({ subjects: {} }, 'https://example.org/other/'), null, 'a review with no saved address');
   // A dataset with an address of its own (its gazetteer's @id) is never compared with a base address.
   assert.equal(baseDiffers({ subjects: { uri: BASE + 'release/v1' } }, BASE), null);
+});
+
+// ---- Stephen's decision of 12 October 2026: every workflow that publishes asks the base address, in one shared field ----
+test('every workflow that publishes asks the base address, in the same words (one shared question), optional where nothing is minted under it before publishing', () => {
+  const words = new Set(Object.values(RECIPES).map((r) => r.asks.base?.question));
+  assert.equal(words.size, 1, [...words].join(' | '));
+  assert.ok([...words][0]);
+  // Map your data without regions, publishing: asked, optional; given, it goes into the answers and so to the conversion.
+  const map = choose('table', 'map');
+  const pub = { 'has-regions': false, 'will-draw': false, 'will-publish': true };
+  assert.deepEqual(baseAsked(map, pub), { needed: false, question: RECIPES['map-your-data'].asks.base.question });
+  assert.equal(answered(map, pub), true, 'optional: answered without it');
+  assert.equal(answersFor(map, pub, { base: BASE }).base, BASE);
+  const files = { files: [{ type: 'files', name: 'd.csv', size: 1, sha256: 'a'.repeat(64) }] };
+  assert.equal(runner.start(RECIPES['map-your-data'], answersFor(map, pub, { base: BASE }), files).steps.find((s) => s.id === 'dataset').options.base, BASE);
+  // "A citable, published dataset" settles publishing: asked at once. Not publishing and no regions: not asked (the absence beside the presences).
+  assert.deepEqual(baseAsked(choose('table', 'publish'), { 'has-regions': false, 'will-draw': false }), { needed: false, question: RECIPES['map-your-data'].asks.base.question });
+  assert.equal(baseAsked(map, { ...pub, 'will-publish': false }), null);
+  // With regions it is still needed, publishing or not.
+  assert.equal(baseAsked(map, { ...pub, 'has-regions': true }).needed, true);
+  assert.equal(baseAsked(map, { ...pub, 'has-regions': true, 'will-publish': false }).needed, true);
+});
+
+test('a Map your data or Publish a dataset workflow kept from before the shared question is resumed: only the recipe\'s words changed, so it carries on, at its step', () => {
+  const OLD = {
+    'map-your-data': 'Under what base address will your places and regions have web addresses of their own (for example https://example.org/places/)?',
+    'publish-a-dataset': 'Under what base address will your places have web addresses of their own (for example https://example.org/places/)?',
+  };
+  const files = { files: [{ type: 'files', name: 'd.csv', size: 1, sha256: 'a'.repeat(64) }] };
+  const cases = [
+    ['map-your-data', { 'has-regions': true, 'will-draw': false, 'will-publish': true, target: 'plato-json', base: BASE }],
+    ['map-your-data', { 'has-regions': false, 'will-draw': true, 'will-publish': false, target: 'plato-json' }],
+    ['publish-a-dataset', { base: BASE }],
+  ];
+  for (const [key, answers] of cases) {
+    const now = RECIPES[key];
+    const { digest: _, ...plain } = now;
+    const before = { ...plain, asks: { ...plain.asks, base: { ...plain.asks.base, question: OLD[key] } } };
+    const was = digest(before);
+    assert.notEqual(was, now.digest, 'the digest did change');
+    // A record saved under the recipe as it was, two steps done.
+    let s = runner.start(before, answers, files);
+    s = runner.complete(runner.next(s), s.steps.find((x) => x.state === 'pending').id, key === 'map-your-data' ? { mapping: [{ type: 'mapping', name: 'columns.json', size: 2, sha256: 'b'.repeat(64) }] } : {});
+    const record = { ...recordOf(s, { name: 'd.csv' }) };
+    assert.equal(record.recipe.digest, was);
+    const v = reconcile(record, now);
+    assert.equal(v.action, 'continue', `${key}: ${v.words}`);
+    assert.match(v.words, /words of .* have changed since this workflow was saved; its steps have not, so it carries on/);
+    assert.equal(v.state.recipe.digest, now.digest);
+    assert.deepEqual(v.state.steps.map((x) => x.state), record.steps.map((x) => x.state), 'at the same step');
+    // The control: a recipe whose steps changed is not carried on blindly.
+    const changed = { ...plain, steps: plain.steps.map((x, i) => (i === plain.steps.length - 1 ? { ...x, options: { ...(x.options || {}), extra: 'x' } } : x)) };
+    assert.equal(reconcile(record, changed).action, 'changed');
+  }
 });

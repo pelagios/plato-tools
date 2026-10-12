@@ -3967,7 +3967,8 @@ def recipes_checks(pw, url, tmp):
                 name = q.get('query')
                 # Each name found as one record of its own (a GeoNames id the stub makes up, the same for the same name), but those it does not know.
                 if name not in ids: ids[name] = f'place:gn:{9200000 + len(ids)}'
-                res[k] = {'result': [] if name in RECIPES_NONE else [{'id': ids[name], 'name': name, 'score': 100, 'match': True, 'description': 'Country: US', 'ccodes': ['US'],
+                own = (expect.get('answers') or {}).get(name)
+                res[k] = {'result': own if own is not None else [] if name in RECIPES_NONE else [{'id': ids[name], 'name': name, 'score': 100, 'match': True, 'description': 'Country: US', 'ccodes': ['US'],
                                                                      'namespace': 'gn', 'alt_names': [], 'has_geom': True, 'confidence': 100}]}
             reply(res)
         ctx.route(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'), stub)
@@ -4028,8 +4029,6 @@ def recipes_checks(pw, url, tmp):
             ok = (r['canary'] == 'enforced' and table == 0 and recipe == expect['recipe'] and asked_now == ['will-draw', 'will-publish'] and planned == steps
                   and len(cannot) == expect['cannot'] and cannot[0].startswith(expect['cannot first']) and folded == cannot
                   and [k for k in t['steps']] == steps and t['steps'].get('check') == 'current' and t['status'] == 'idle')
-            if ok and shots and not PROVE:
-                page.click('#methodos-cannot > summary'); shot('1-begun-cannot-open'); page.click('#methodos-cannot > summary')
             return ok, {'recipe': recipe, 'asked': asked_now, 'planned': planned, 'cannot': [c[:60] for c in cannot], 'table cannot': table, 'tracker cannot': len(folded), 'steps': t['steps']}
         attempt(f'{title}: the interview ({expect["have words"]}, places on a map, no drawing, no publishing) gives its {len(steps)} steps, asks drawing and publishing but not regions, and says what it cannot carry, in the plan and folded in the tracker (a table says nothing)', begin)
 
@@ -4040,9 +4039,22 @@ def recipes_checks(pw, url, tmp):
             s = run('#convert'); step_is('dataset', 'done')
             r['converted'] = saved(s, '.json')
             d = recipes_ends(json.loads(r['converted'].read_text())); r['read'] = d
+            said = page.inner_text('#summary')
             return (r['check'] == 'done' and track()['steps'].get('lookup') == 'current' and d['places'] == expect['places'] and d['placed'] == expect['placed']
-                    and d['stub'] == 0), {'check': r['check'], 'read': {k: d[k] for k in ('places', 'placed', 'stub')}, 'steps': track()['steps']}
-        attempt(f'{title}: checked, and read by Hermes into a PLATO dataset ({expect["places"]} places, {expect["placed"]} placed, none yet identified in WHG), each step done by its run', read)
+                    and d['stub'] == 0 and (expect['said'] in said)), {'check': r['check'], 'read': {k: d[k] for k in ('places', 'placed', 'stub')}, 'summary': said[:300], 'steps': track()['steps']}
+        attempt(f'{title}: checked, and read by Hermes into a PLATO dataset ({expect["places"]} places, {expect["placed"]} placed, none yet identified in WHG; the summary says "{expect["said"]}"), each step done by its run', read)
+
+        def rail():
+            need('converted')   # at the lookup step, whose message is short: the tracker as it mostly stands
+            closed = page.evaluate(SCOPE_RAIL)
+            page.click('#methodos-cannot > summary')
+            until(page, "() => document.getElementById('methodos-cannot').open", 5)
+            opened = page.evaluate(SCOPE_RAIL); shot('1-cannot-open')
+            box = page.evaluate("() => { const d = document.getElementById('methodos-cannot'); return { h: d.getBoundingClientRect().height, rem: parseFloat(getComputedStyle(document.documentElement).fontSize), items: d.querySelectorAll('li').length, shown: !!d.offsetHeight, reach: (() => { const r = document.querySelector('.workflow-rail'); return r.scrollHeight > r.clientHeight || d.getBoundingClientRect().bottom <= innerHeight; })() }; }")
+            page.click('#methodos-cannot > summary')
+            return (opened['steps'] == len(steps) and opened['inView'] >= 8 and box['shown'] and box['items'] == expect['cannot'] and box['h'] <= 11 * box['rem'] + 1
+                    and box['reach']), {'closed': closed, 'opened': opened, 'cannot box': box}
+        attempt(f'{title}: at 1440 x 900, with "What this workflow cannot carry" open, its list scrolls within its own cap and at least 8 of the steps stay in view', rail)
 
         def look_and_review():
             need('converted')
@@ -4050,21 +4062,44 @@ def recipes_checks(pw, url, tmp):
             if not page.evaluate("() => document.getElementById('lookup').open"): page.click('#lookup > summary')
             page.fill('#whg-token', LOOKUP_TOKEN); page.press('#whg-token', 'Tab')
             until(page, "() => /^Send \\d+ quer/.test(document.getElementById('lookup-send').textContent) && !document.getElementById('lookup-send').disabled", 60)
+            n_places = len(expect['sent'])
+            soon(page, f"() => document.getElementById('lookup-preview').textContent.includes('Would look up {n_places} places')", 15)
+            every = {'preview': page.inner_text('#lookup-preview')[:120], 'choice': page.input_value('#lookup-places')}
+            # Only places without a gazetteer link, in one click: every place here has one (a ref, a link), so none is taken.
+            page.click('#lookup-only-unlinked')
+            soon(page, "() => document.getElementById('lookup-preview').textContent.includes('No places to look up with this choice')", 15)
+            only = {'preview': page.inner_text('#lookup-preview')[:200], 'choice': page.input_value('#lookup-places'), 'send off': page.evaluate("() => document.getElementById('lookup-send').disabled")}
+            page.select_option('#lookup-places', every['choice'])
+            until(page, f"() => document.getElementById('lookup-preview').textContent.includes('Would look up {n_places} places') && !document.getElementById('lookup-send').disabled", 30)
             sends = page.inner_text('#lookup-send')
             page.click('#lookup-send')
             step_is('lookup', 'done', 90)
             sent = sorted(q['query'] for b in posts for q in (b.get('queries') or {}).values())
+            batches = [len(b.get('queries') or {}) for b in posts]
             shot('2-review')
             until(page, "() => !document.getElementById('bulk-accept').disabled", 30)
             page.click('#bulk-accept')
             n = expect['accepted']
             wait_state(page, lambda s: sum(1 for c in (s.get('work') or {}).get('candidates', []) if (c.get('decision') or {}).get('kind') == 'match') == n, T(15), 'accepted')
             said = page.evaluate("() => document.getElementById('bulk-result').textContent")
+            # A place flagged (its own link far from WHG's best candidate) is shown with both, and left by the bulk accept.
+            flagged = {}
+            for name in expect.get('flagged') or []:
+                for _ in range(12):
+                    if name in page.inner_text('#review-place'): break
+                    page.click('#review-next')
+                flagged[name] = {'ref': page.evaluate("() => { const p = document.querySelector('#review-place .ref-check'); return p ? { state: p.dataset.ref, text: p.textContent } : null; }"),
+                                 'decided': page.evaluate('(iri) => (window.__plato.work?.candidates || []).filter((c) => c.candidate_source === iri && c.decision).length', name)}
+                shot('2b-flagged')
             page.click('#methodos-done'); step_is('review', 'done', 15)
             r['reviewed'] = True
-            return (sent == expect['sent'] and sends == f"Send {len(expect['sent'])} queries to WHG" and track()['steps'].get('apply') == 'current'), \
-                {'button': sends, 'sent': sent, 'bulk': said[:200], 'steps': track()['steps']}
-        attempt(f'{title}: the named places looked up in the stub of WHG as the lookup step ({len(expect["sent"])} queries), accepted in bulk, and the review step done', look_and_review)
+            flag_ok = all(f['ref'] and f['ref']['state'] == 'disagrees' and 'more than 25 km' in f['ref']['text'] and 'place:pl:' in f['ref']['text'] and not f['decided'] for f in flagged.values()) \
+                and len(flagged) == len(expect.get('flagged') or []) and (not flagged or 'far from WHG\'s best candidate, and is left to you' in said)
+            return (sent == expect['sent'] and sends == f"Send {n_places} queries to WHG" and batches == [n_places] and track()['steps'].get('apply') == 'current'
+                    and every['choice'] != 'nolink' and only['choice'] == 'nolink' and only['send off'] is True and flag_ok), \
+                {'button': sends, 'sent': sent, 'queries a POST': batches, 'every place': every, 'only without a link': only, 'bulk': said[:300], 'flagged': flagged, 'steps': track()['steps']}
+        flag_words = ", the flagged place shown with its link and WHG's best candidate and left to the reviewer" if expect.get('flagged') else ''
+        attempt(f'{title}: the count of places said before sending, none taken by "Only places without a gazetteer link" (each has one); the named places looked up in the stub of WHG in one batched POST ({len(expect["sent"])} queries), accepted in bulk{flag_words}, and the review step done', look_and_review)
 
         def record():
             need('reviewed')
@@ -4116,14 +4151,17 @@ def recipes_checks(pw, url, tmp):
 
     tei_steps = ['check', 'dataset', 'lookup', 'review', 'apply', 'again', 'compare', 'out']
     walk('tei', 'tei', [RECIPES_TEI], tei_steps, {
-        'title': 'Places from an edition (TEI)', 'recipe': 'places-from-tei', 'have words': 'an edition in TEI', 'cannot': 4, 'cannot first': 'A place name with no ref points to no place',
-        'places': 5, 'placed': 0, 'sent': ['Argos', 'Corinth', 'Kenchreai', 'Phlious', 'Sikyon'], 'accepted': 4, 'strip': ['identities'],
-        'holds': 'its five places keep the Pleiades addresses their refs gave (and Kenchreai its GeoNames ref), four identified in the stub\'s records, citing WHG',
-        'complete': lambda e: (e['addresses'] == RECIPES_PLEIADES and e['stub'] == 4 and e['cites WHG'] is True
+        'title': 'Places from an edition (TEI)', 'recipe': 'places-from-tei', 'have words': 'an edition in TEI', 'cannot': 4, 'cannot first': 'A place name with no ref, or a ref it cannot follow',
+        'places': 5, 'placed': 0, 'sent': ['Argos', 'Corinth', 'Kenchreai', 'Phlious', 'Sikyon'], 'accepted': 3, 'strip': ['identities'], 'said': 'Read 6 place names, 5 places',
+        'answers': {'Argos': [{'id': 'place:gn:9300001', 'name': 'Argos', 'score': 100, 'match': True, 'description': 'Country: US', 'ccodes': ['US'], 'repr_point': [-86.2453, 41.2373], 'namespace': 'gn', 'alt_names': [], 'has_geom': True, 'confidence': 100},
+                              {'id': 'place:pl:570106', 'name': 'Argos', 'score': 90, 'match': True, 'description': 'Country: GR', 'ccodes': ['GR'], 'repr_point': [22.7278, 37.6331], 'namespace': 'pl', 'alt_names': [], 'has_geom': True, 'confidence': 100}]},
+        'flagged': ['https://pleiades.stoa.org/places/570106'],
+        'holds': 'its five places keep the Pleiades addresses their refs gave (and Kenchreai its GeoNames ref), three identified in the stub\'s records, citing WHG, and Argos (flagged) not',
+        'complete': lambda e: (e['addresses'] == RECIPES_PLEIADES and e['stub'] == 3 and e['cites WHG'] is True
                                and e['others'] == [['https://pleiades.stoa.org/places/570536', 'https://sws.geonames.org/257880/']])})
     walk('recogito', 'recogito', RECIPES_REC, tei_steps, {
         'title': 'Places from Recogito', 'recipe': 'places-from-recogito', 'have words': 'annotations from Recogito, with the map\'s georeference', 'cannot': 4,
-        'cannot first': 'A mention marked as a place but never linked', 'places': 13, 'placed': 7,
+        'cannot first': 'A mention marked as a place but never linked', 'places': 13, 'placed': 7, 'said': '7 of 16 regions on images placed on a map',
         'sent': sorted(['120', '45', 'Boston', 'GULF OF MEXICO', 'LAKE ERIE', 'LAKE HURON', 'LAKE ONTARIO', 'Nantucket I.', 'St Georges Bank']), 'accepted': 9, 'strip': ['geometries'],
         'holds': 'its 13 places keep the Wikidata items Recogito linked them to, seven placed through the map\'s georeference and citing it, nine identified in the stub\'s records, citing WHG',
         'complete': lambda e: (e['places'] == 13 and all(a.startswith('http://www.wikidata.org/entity/Q') for a in e['addresses']) and e['placed'] == 7 and e['georef cited'] == 7

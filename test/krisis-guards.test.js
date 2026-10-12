@@ -180,7 +180,7 @@ test('acceptGuarded: one passing candidate each, as closeMatch by default, with 
   assert.equal(before.accept.length, 2, 'planGuarded changes nothing and says how many');
   assert.ok(work.candidates.every((c) => c.decision === null || c.gazetteer.id === 'place:gn:7'), 'planning decided nothing');
   const r = acceptGuarded(work, { reviewer: REVIEWER, at: NOW });
-  assert.deepEqual(r, { batch: 'b1', accepted: 2, leftOut: { far: 1, ccodes: 1, kind: 0, total: 2 }, several: 0, ties: 0, tied: [] });
+  assert.deepEqual(r, { batch: 'b1', accepted: 2, leftOut: { far: 1, ccodes: 1, kind: 0, total: 2 }, several: 0, ties: 0, tied: [], flagged: 0 });
   const alton = candOf(work, 1), felton = candOf(work, 8);
   for (const c of [alton, felton]) {
     assert.equal(c.decision.kind, 'match');
@@ -240,7 +240,7 @@ test('"WHG\'s guards first" orders the places with a passing candidate first; a 
   const two = await looked([place('gorton', 'Gorton', -2.2, 53.47, { attestations: [named('Gorton', 'Gortun'), at(-2.2, 53.47)] })],
     { Gorton: [cand(9, 'Gorton', { repr_point: [-2.2, 53.47] })], Gortun: [cand(10, 'Gortun', { repr_point: [-2.21, 53.47] })] }, { allNames: true });
   assert.equal(two.work.candidates.filter((c) => guardOf(c).pass).length, 2, 'control: both pass');
-  assert.deepEqual(acceptGuarded(two.work, { at: NOW }), { batch: null, accepted: 0, leftOut: { far: 0, ccodes: 0, kind: 0, total: 0 }, several: 1, ties: 0, tied: [] });
+  assert.deepEqual(acceptGuarded(two.work, { at: NOW }), { batch: null, accepted: 0, leftOut: { far: 0, ccodes: 0, kind: 0, total: 0 }, several: 1, ties: 0, tied: [], flagged: 0 });
 });
 
 // #31 (Stephen, 10 Oct 2026, "skip ties"): two places of one name where a place was looked for are never
@@ -531,7 +531,7 @@ test('old work files still read; a candidate looked up before the guard was stor
   const back = readWork(JSON.stringify(old));
   assert.equal(guardOf(candOf(back, 1)).reason, 'not-recorded');
   assert.equal(guardOf(candOf(work, 1)).pass, true, 'control: with the figures, it passes');
-  assert.deepEqual(acceptGuarded(back, { at: NOW }), { batch: null, accepted: 0, leftOut: { far: 0, ccodes: 0, kind: 0, total: 0 }, several: 0, ties: 0, tied: [] });
+  assert.deepEqual(acceptGuarded(back, { at: NOW }), { batch: null, accepted: 0, leftOut: { far: 0, ccodes: 0, kind: 0, total: 0 }, several: 0, ties: 0, tied: [], flagged: 0 });
   const refused = (f, re) => { const w = JSON.parse(serialiseWork(work)); f(w); assert.throws(() => readWork(JSON.stringify(w)), (e) => e.name === 'DataError' && re.test(e.message), re); };
   refused((w) => { w.places[A('alton')].rowState = 'drop'; }, /row state/);
   refused((w) => { w.candidates[0].flagged = 'yes'; }, /flag/);

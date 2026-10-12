@@ -2231,12 +2231,14 @@ the places within it; the places themselves never send it.
   dropped (`resolveWithdrawn`), WHG addresses in their w3id form and legacy `/places/<n>/portal/`
   addresses kept as found. For this comparison only, a WHG candidate also goes by its authority's
   address (`authorityIris`: `place:gn:2641673` is `https://sws.geonames.org/2641673/`, and likewise
-  Getty TGN, Wikidata, OpenStreetMap); the address a candidate is suggested and attested by is always
+  Getty TGN, Wikidata, OpenStreetMap, Pleiades as `place:pl:<n>`); the address a candidate is suggested and attested by is always
   WHG's w3id.
 - **Which places.** `unmatched` (the default after a match: those without a local candidate), `all`,
   `pending` (the default once a lookup has run: those a lookup of this service left unanswered,
-  stopped or pending; a place never looked up is not pending) and `unlinked` (not linked to the
-  service, legacy WHG addresses included, and with no confirmed candidate of it). Looking a place up
+  stopped or pending; a place never looked up is not pending), `unlinked` (not linked to the
+  service, legacy WHG addresses included, and with no confirmed candidate of it), and `nolink` (no
+  gazetteer link at all, "Only places without a gazetteer link": see "Places from an edition (TEI) and
+  Places from Recogito", below, for that and the check of a place's own gazetteer address). Looking a place up
   again (a batch, "Look it up again", "Try its other names") replaces its undecided candidates from that
   service and keeps the decided ones. A name typed for one place ("Find this place in WHG…",
   `options.query` with one place in `only`) adds what it finds beside the place's candidates, replacing
@@ -2752,27 +2754,65 @@ each step are Map your data's; nothing is forked. In the interview, "An edition 
 publishing (minting takes it, as Publish a dataset asks it: `baseAsked` reads an answer the first two
 questions settle too). Every other answer with either still names no workflow.
 
-What the readers cannot carry is said in each recipe's `cannot`, and two of its sentences are defaults
-chosen as close to Map your data as the code allows, not decided policy: a TEI `@ref`, or Recogito's
-link, is the place's own address (as a table's id column is), kept as its identification; the lookup
-still looks every place up in WHG (Krisis's default choice, the places with no local match), and a
-candidate that is the place's own address is not suggested again (`skipped.linked`). Recogito's link is
-therefore not offered as a candidate. A place name with no ref, an unlinked mention, and a region with
-no transcription or quoted name (whose name, in a Studio export, is only the gazetteer's title, which is
-not carried) give nothing to look up; the lookup counts the last as `withoutName`.
+What the readers cannot carry is said in each recipe's `cannot`. **A gazetteer reference is the place's own
+identification** (Stephen, 12 October 2026): a TEI `@ref`, a list of places' idno or Recogito's link is the
+place's address, as a table's id column is, and is never replaced. Every place is still looked up in WHG
+(Krisis's default choice); "Only places without a gazetteer link" in the lookup panel chooses, in one
+click, the places whose own address is no gazetteer's and that the dataset links to none (`nolink` in
+`selectPlaces`), and the preview says how many places will be looked up before anything is sent. The
+lookup goes through the gazetteer module's batched requests (25 queries a POST by default, 50 at most).
+
+- **The ref's own record is never suggested.** `mergeAnswers` skips a candidate whose addresses
+  (`addressesOf`: WHG's and the authority's) include the place's own, or whose id is the one the place's
+  address names (`whgIdOf`, the inverse of `authorityIris`, in `src/engine/krisis/identities.js`, for WHG,
+  GeoNames, Getty TGN, Wikidata, OpenStreetMap and, new, Pleiades: `pleiades.stoa.org/places/<n>` is
+  `place:pl:<n>`). It counts as `skipped.linked`.
+- **The ref is checked against WHG** (`refCheck` in `lookup.js`): that record's point is the ref's
+  location. When WHG's best other candidate (not one the dataset already links) is further from it than
+  `disagreeKm` (25 by default; "Flag a place whose own gazetteer link is further than …" in the lookup
+  panel, kept in the lookup's parameters), the place is flagged: `work.places[iri].ref` is
+  `{ state: 'disagrees', record, best, distance_km, limit_km }`, the review screen shows both records and
+  the distance (`lookupPage.refCheck`, `p.ref-check`), and the bulk accept never settles it
+  (`planGuarded`'s `flagged`, said in its words). A ref whose record WHG did not answer, or which has no
+  point, is `unresolved` (`why`: `not-found`, `no-point`), said so, and never flagged. The lookup's counts
+  hold `refsDisagree` and `refsUnresolved`, said in its summary.
+- **Regions placed are counted.** With georeferences, the conversion counts the regions on images
+  (`regions on images`, every region reported by a region kind) and those placed (`regions placed`), and
+  its summary says "7 of 16 regions on images placed on a map", so a georeference for another map, or a
+  manifest that does not match, is not silent in the step's summary.
+
+A place name with no ref, an unlinked mention, and a region with no transcription or quoted name (whose
+name, in a Studio export, is only the gazetteer's title, which is not carried) give nothing to look up;
+the lookup counts the last as `withoutName`.
+
+**The base address, in one field** (Stephen, 12 October 2026). Every workflow that publishes asks it in the
+interview, through the one field (`#methodos-base`), optional, filled in from Options and written back
+there; its question is one object, `recipes/asks.js` `BASE`, which every recipe's `asks.base` is. Map your
+data asks it with regions (needed) and when it publishes (optional, with or without regions): a route's
+`base.when` may list several answers, and `base.needed` may name the answer under which it is needed.
+Map your data's steps are unchanged (its conversion takes the base, and minting on the page takes Options'),
+so its digest changed only by the question's words, and a workflow kept from before carries on under the
+version rule (`test/methodos-base.test.js` resumes one of each of Map your data, with and without regions,
+and Publish a dataset).
 
 `test/methodos-tei-recogito.test.js` checks both recipes against Map your data's (the same questions,
 the same steps after the dataset, the same operations), the interview's routing, and walks each in Node
 through the real engine against a fake WHG: `test/fixtures/tei/prose-constructed.xml` (five places,
-their Pleiades refs kept, Kenchreai's GeoNames ref kept, four identified in WHG) and
-`test/fixtures/annotations/recogito-studio-regions-constructed.json` with the Rocque map's georeference
-and manifest (13 places, seven placed through the georeference and citing it, four with no name not
-looked up, nine identified); a TEI ref to WHG is not suggested again (`whg-constructed.xml`), and the
-export read without its georeference places none (the end check's control). The browser checks
-(`recipes_checks` in `e2e/app_test.py`) follow each from the interview to the dataset downloaded,
-against a stub of WHG, and read the downloaded file; each end check is shown failing on the same file
-with its identities (TEI) or geometries (Recogito) left out. `RECIPE_SHOTS=<dir>` saves the tracker at
-1440 × 900.
+their Pleiades refs kept, Kenchreai's GeoNames ref kept, the five queries in one POST, Argos flagged
+because WHG's best candidate, an Argos in Indiana, is 8,900 km from its Pleiades record, three identified
+by the bulk accept) and `test/fixtures/annotations/recogito-studio-regions-constructed.json` with the
+Rocque map's georeference and manifest (13 places, seven placed through the georeference and citing it,
+"7 of 16" in the summary, four with no name not looked up, nine identified). It also checks: a ref's own
+WHG record is not suggested, whether the ref is WHG's address or GeoNames' (`whg-constructed.xml`); a
+Pleiades ref agreeing, disagreeing, not answered and with no point, and the distance set by the reviewer;
+the export read without its georeference, or with another map's, places none and says "0 of 16"; and the
+addresses both ways for each authority. The browser checks (`recipes_checks` in `e2e/app_test.py`) follow
+each from the interview to the dataset downloaded, against a stub of WHG, and read the downloaded file:
+the count before sending, "Only places without a gazetteer link" taking none, the queries in one POST,
+the flagged Argos shown with both records and left by the bulk accept, the regions' summary, and, at
+1440 × 900, at least 8 steps in view with "What this workflow cannot carry" open (it scrolls within
+11rem). Each end check is shown failing on the same file with its identities (TEI) or geometries
+(Recogito) left out. `RECIPE_SHOTS=<dir>` saves the tracker at 1440 × 900.
 
 ## Permissions
 

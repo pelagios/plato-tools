@@ -47,7 +47,7 @@ import { WHG_ENDPOINT, WHG_PLACE_TYPE, isWhg, normaliseWhgIri, mergeAttribution,
 import { similarity, queryVariants, MAX_VARIANTS, compileQualifiers } from './names.js';
 import { guard, SAME_PLACE_KM } from './guards.js';
 import { WORK_VERSION, canonicalEndpoint } from './work.js';
-import { linkState } from './identities.js';
+import { linkState, addressesOf, whgIdOf } from './identities.js';
 import { constraintFor, selectLevel, placeState, areaOf, areaIds, storedConstraint, constraintParameters } from './regions.js';
 import { normaliseScope, isEmptyScope, scopeFields } from './scope.js';
 import { kindFit, isProtocolType } from './kinds.js';
@@ -63,9 +63,11 @@ export { krisisLookupNote } from '../words.js';
 // in the list, what the work file says of its kind (never published), and that placeholder records are no
 // longer suggested at all, which adds no candidate. So a re-lookup after the change keeps every address.
 export const LOOKUP_ALGORITHM = 'krisis-lookup 1';
-export const LOOKUP_DEFAULTS = { limit: 10, maxDistanceKm: 50, allNames: false, countries: false, nearKm: null, variants: false, lang: null, areaOnly: false, scope: null };
+// disagreeKm: a place whose own address is a gazetteer's (a TEI ref, a Recogito link) is flagged for the reviewer when
+// WHG's best candidate is further than this from the record that address names (Stephen, 12 October 2026: 25 km).
+export const LOOKUP_DEFAULTS = { limit: 10, maxDistanceKm: 50, allNames: false, countries: false, nearKm: null, variants: false, lang: null, areaOnly: false, scope: null, disagreeKm: 25 };
 /** Which places a lookup takes (selectPlaces). */
-export const PLACE_CHOICES = ['unmatched', 'all', 'pending', 'unlinked'];
+export const PLACE_CHOICES = ['unmatched', 'all', 'pending', 'unlinked', 'nolink'];
 /** How many queries the preview shows exactly as they would be sent. */
 export const PREVIEW_QUERIES = 20;
 /** WHG's allowance of requests a day, for the preview (whg.js, A3). */
@@ -185,6 +187,9 @@ const lastState = (work, iri, service) => lastQuery(work, iri, service)?.query.s
  *   pending); a place never looked up is not among them, but among 'unmatched' and 'all';
  * - 'unlinked': those the dataset does not link to a place of this service, and without a candidate
  *   of it confirmed in the review. A legacy WHG address (/places/<n>/portal/) counts as a link.
+ * - 'nolink': those with no gazetteer link at all: whose own address is no gazetteer's (whgIdOf: WHG,
+ *   GeoNames, Getty TGN, Wikidata, OpenStreetMap, Pleiades), that the dataset links to no such address,
+ *   and with no candidate confirmed in the review ("Only places without a gazetteer link").
  * `only`: IRIs to restrict it to (one place, from the review screen).
  */
 export function selectPlaces({ work = null, places = null, which, service, only } = {}) {
@@ -201,6 +206,10 @@ export function selectPlaces({ work = null, places = null, which, service, only 
     return list.filter((p) => !matched.has(p.iri));
   }
   if (choose === 'pending') return list.filter((p) => ['pending', 'unanswered', 'stopped'].includes(lastState(work, p.iri, service)));
+  if (choose === 'nolink') {
+    const matched = new Set(cands.filter((c) => c.decision?.kind === 'match').map((c) => c.candidate_source));
+    return list.filter((p) => !matched.has(p.iri) && !whgIdOf(p.iri) && ![...(p.identities?.linked || [])].some((x) => whgIdOf(x) || ofService(x, service)));
+  }
   const confirmed = new Set(cands.filter((c) => c.decision?.kind === 'match' && ofService(c.candidate_candidate, service)).map((c) => c.candidate_source));
   return list.filter((p) => !confirmed.has(p.iri) && ![...(p.identities?.linked || [])].some((iri) => ofService(iri, service)));
 }
@@ -448,7 +457,8 @@ export function startLookup(work, { service, parameters, plan, now = new Date().
  * replaced, unless `adds` (a name typed for one place: what it finds is added beside them, an address
  * already among them not twice). Returns the place's query record.
  */
-export function mergeAnswers(work, record, place, lists, { now = new Date().toISOString(), maxDistanceKm = record.parameters?.maxDistanceKm ?? LOOKUP_DEFAULTS.maxDistanceKm, scoped = false, adds = false } = {}) {
+export function mergeAnswers(work, record, place, lists, { now = new Date().toISOString(), maxDistanceKm = record.parameters?.maxDistanceKm ?? LOOKUP_DEFAULTS.maxDistanceKm,
+  disagreeKm = record.parameters?.disagreeKm ?? LOOKUP_DEFAULTS.disagreeKm, scoped = false, adds = false } = {}) {
   const iri = place.iri, c = record.counts, q = record.queries[iri] || (record.queries[iri] = { state: 'pending', sent: lists.map((l) => l.key?.[1]).filter(Boolean) });
   // Krisis: region review. A region's answers are kept under its key, in `regions`, never as a place.
   if (!isRegionKey(work, iri) && !Object.hasOwn(work.places, iri)) work.places[iri] = placeRecord(place, work);
@@ -498,10 +508,16 @@ export function mergeAnswers(work, record, place, lists, { now = new Date().toIS
   let added = 0, n = work.candidates.filter((x) => x.lookup === record.id).length;
   // Region review: the constraint the query was sent under, as the candidate set publishes it (matchParameters).
   const mp = constraintParameters(work, q.constraint);
+  // The record the place's own address names (a TEI ref, a Recogito link: whgIdOf), if WHG answered it, and WHG's
+  // best candidate besides it and besides what the dataset already links: for the check of the address (refCheck).
+  const ownId = isRegionKey(work, iri) ? null : whgIdOf(iri);
+  let own = null, best = null;
   for (const r of rankGazetteer(place, [...byIri.values()], { maxDistanceKm })) {
     const g = r.candidate;
-    if (g.iri === iri) { c.skipped.linked++; continue; }
+    // The place's own record, by WHG's address or the authority's (Pleiades, GeoNames…): never suggested again.
+    if (g.iri === iri || addressesOf(g).has(iri) || (ownId && g.id === ownId)) { own ||= g; c.skipped.linked++; continue; }
     const known = linkState(place.identities, g);
+    if (!best && known !== 'linked') best = g;
     if (known) { c.skipped[known]++; continue; }
     const there = work.candidates.find((x) => x.candidate_source === iri && x.candidate_candidate === g.iri);
     if (there) { c.skipped[there.decision ? 'decided' : 'duplicate']++; continue; }
@@ -526,9 +542,31 @@ export function mergeAnswers(work, record, place, lists, { now = new Date().toIS
   }
   q.added = added;
   c.added += added;
+  if (ownId && state === 'answered' && Object.hasOwn(work.places, iri)) refCheck(work.places[iri], ownId, own, best, disagreeKm, c);
   q.state = state;
   if (state === 'answered') { c.answered++; if (!q.found) c.notFound++; } else c.unanswered++;
   return q;
+}
+
+/**
+ * The check of a place's own gazetteer address against WHG (Stephen, 12 October 2026): the address is kept as
+ * the place's identification whatever is found, and the place is flagged for the reviewer ('disagrees') when
+ * WHG's best other candidate is further than `limitKm` from the record the address names. That record's point
+ * is the address's location: when WHG did not answer it, or it has none, the check cannot be made and says so
+ * ('unresolved'). Kept on the place in the work file as `ref`, replaced at each answer; counted in `counts`.
+ */
+function refCheck(placeRec, id, own, best, limitKm, c) {
+  const brief = (g) => ({ id: g.id, iri: g.iri, label: g.name ?? null, point: Array.isArray(g.coords) ? g.coords : null });
+  const limit = Number.isFinite(limitKm) && limitKm > 0 ? limitKm : LOOKUP_DEFAULTS.disagreeKm;
+  if (!own || !Array.isArray(own.coords)) {
+    placeRec.ref = { id, state: 'unresolved', why: own ? 'no-point' : 'not-found', limit_km: limit };
+    c.refsUnresolved = (c.refsUnresolved || 0) + 1;
+    return;
+  }
+  if (!best || !Array.isArray(best.coords)) { placeRec.ref = { id, state: 'unchecked', record: brief(own), limit_km: limit }; return; }
+  const d = Math.round(distanceKm(own.coords, best.coords) * 10) / 10;
+  placeRec.ref = { id, state: d > limit ? 'disagrees' : 'agrees', record: brief(own), best: brief(best), distance_km: d, limit_km: limit };
+  if (d > limit) c.refsDisagree = (c.refsDisagree || 0) + 1;
 }
 
 /** A lookup's candidates for one place, in the order ranked (the order they were added). */
@@ -652,7 +690,7 @@ export async function runLookup({ lookup, work = null, subjects = null, places =
     work = newWork(subjects, { now: now(), reviewer });
   } else if (reviewer) work.reviewer = reviewer;
   const plan = planLookup({ lookup, work, places, options: { ...o, service } });
-  const parameters = { places: o.places ?? defaultChoice(work), allNames: typed ? false : !!o.allNames, limit: o.limit, countries: !!o.countries, nearKm: o.nearKm ?? null, maxDistanceKm: o.maxDistanceKm, type: plan.queries[0]?.type ?? null, linksKnown: !!places, ...(typed ? { query: typed } : {}), ...(o.variants && !typed ? { variants: true } : {}),
+  const parameters = { places: o.places ?? defaultChoice(work), allNames: typed ? false : !!o.allNames, limit: o.limit, countries: !!o.countries, nearKm: o.nearKm ?? null, maxDistanceKm: o.maxDistanceKm, disagreeKm: o.disagreeKm, type: plan.queries[0]?.type ?? null, linksKnown: !!places, ...(typed ? { query: typed } : {}), ...(o.variants && !typed ? { variants: true } : {}),
     ...(plan.preview.lang ? { lang: plan.preview.lang } : {}), ...(plan.preview.areaOnly ? { areaOnly: true } : {}),
     // Scope: as it was when the lookup was made (scope.js normaliseScope), so the work file says what confined it.
     ...(plan.preview.scope ? { scope: normaliseScope(o.scope) } : {}) };

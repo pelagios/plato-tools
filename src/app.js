@@ -1325,7 +1325,7 @@ function render(focus) {
   box.innerHTML = (allDone ? `<p class="good">${escapeHtml(W.allDone)}</p>` : '')
     + `<div class="subject"><h3 id="review-subject">${escapeHtml(place.label || iri)}</h3>`
     + (W.names(place.label, place.names) ? `<p>${escapeHtml(W.names(place.label, place.names))}</p>` : '')
-    + `<p>${escapeHtml(W.point(place.point))}</p>` + placeRegionHtml(iri, place) + `<p class="iri">${escapeHtml(iri)}</p>` + rowStateHtml(place) + lookupPlaceHtml(iri, place) + '</div>'
+    + `<p>${escapeHtml(W.point(place.point))}</p>` + placeRegionHtml(iri, place) + `<p class="iri">${escapeHtml(iri)}</p>` + refCheckHtml(place) + rowStateHtml(place) + lookupPlaceHtml(iri, place) + '</div>'
     + (hasLookups() ? groupedHtml(cands)
       : `<p>${escapeHtml(W.candidates(cands.length))}</p><ol class="candidates">` + cands.map((c, i) => candidateHtml(c, i)).join('') + '</ol>');
   restoreTyped(typed); restoreNotes(box, notes);
@@ -1511,8 +1511,8 @@ function drawBulk() {
   if (lastBulk?.undone !== undefined) res.textContent = GW.undone(lastBulk.undone);
   else if (lastBulk) {
     res.innerHTML = (lastBulk.batch ? `${escapeHtml(GW.accepted(lastBulk.accepted))} <button type="button" id="bulk-undo" class="link">${escapeHtml(GW.undo)}</button> ` : `${escapeHtml(GW.none)} `)
-      + escapeHtml(GW.leftOut(lastBulk.leftOut, lastBulk.several, lastBulk.tied));
-  } else res.textContent = GW.leftOut(plan.leftOut, plan.several, plan.tied.map((t) => t.count));
+      + escapeHtml(GW.leftOut(lastBulk.leftOut, lastBulk.several, lastBulk.tied, lastBulk.flagged));
+  } else res.textContent = GW.leftOut(plan.leftOut, plan.several, plan.tied.map((t) => t.count), plan.flagged.length);
 }
 function bulkAccept() {
   if (!work || busy || looking) return;
@@ -1540,6 +1540,12 @@ function guardHtml(c) {
   const tie = v.pass ? guardedPlan().tied.find((t) => t.id === c.id) : null;
   return how + (v.pass ? `<p class="badge good">${escapeHtml(GW.passes(v))}</p>` : `<p class="badge">${escapeHtml(GW.fails(v.reason))}</p>`)
     + (tie ? `<p class="badge namesakes">${escapeHtml(GW.namesakes(tie.count, tie.region))}</p>` : '');
+}
+/** The check of the place's own gazetteer address against WHG (lookup.js refCheck), if one was made: flagged when they disagree. */
+function refCheckHtml(place) {
+  const r = place.ref;
+  if (!r || typeof r !== 'object') return '';
+  return `<p class="ref-check${r.state === 'disagrees' ? ' badge namesakes' : ''}" data-ref="${escapeHtml(String(r.state))}">${escapeHtml(LW.refCheck(r))}</p>`;
 }
 /** The place's row state: reconcile (none), keep without reconciling (filter), leave out of the dataset (exclude). */
 function rowStateHtml(place) {
@@ -1683,8 +1689,9 @@ function lookupService() {
   return { service, whg: false, template: t || null };
 }
 function lookupOptions(extra = {}) {
-  const km = parseFloat($('lookup-near-km').value);
+  const km = parseFloat($('lookup-near-km').value), apart = parseFloat($('lookup-disagree-km').value);
   return { places: $('lookup-places').value, allNames: $('lookup-all-names').checked, variants: $('lookup-variants').checked, countries: $('lookup-countries').checked,
+    ...(apart > 0 ? { disagreeKm: apart } : {}),
     nearKm: $('lookup-near').checked && km > 0 ? km : null, maxDistanceKm: matchOptions().maxDistanceKm, lang: lookupLang(), scope: scopeUi?.current() ?? null, ...extra };
 }
 /** The dataset's language, as typed in the lookup panel, or null: the lookup sends WHG its code (whg.js whgLang). */
@@ -2001,6 +2008,9 @@ $('review-place').addEventListener('submit', (e) => {
   lookUp({ only: [iri], query });
 });
 $('lookup').addEventListener('toggle', () => { if ($('lookup').open) { fillChoices(); refreshPreview(); } });
+// One click for "places without a gazetteer link" (lookup.js 'nolink'); the preview then says how many.
+$('lookup-only-unlinked').textContent = LW.onlyUnlinked;
+$('lookup-only-unlinked').onclick = () => { $('lookup-places').value = 'nolink'; refreshPreview(); };
 $('lookup').addEventListener('change', (e) => {
   if (e.target.id === 'whg-token') return commitToken();
   if (e.target.name === 'lookup-service') { document.querySelector('.lookup-other').hidden = e.target.value !== 'other'; tokenAsked = false; showTokenBox(); }

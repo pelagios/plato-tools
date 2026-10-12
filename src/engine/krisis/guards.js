@@ -224,11 +224,13 @@ function lookedWithin(work, iri, c, lookups) {
  * its kind of place conflicts with the place's own (kinds.js; why 'kind').
  * A place with several passing is counted in `several`, and nothing is accepted for it. A place whose
  * passing candidate has namesakes where it was looked for (namesakesOf) is listed in `tied`, with how
- * many places of that name there are and the region's name, and nothing is accepted for it (#31).
+ * many places of that name there are and the region's name, and nothing is accepted for it (#31). A place
+ * flagged because WHG's best candidate is far from the record its own gazetteer address names (lookup.js
+ * refCheck: `ref.state` 'disagrees') is listed in `flagged`, and nothing is accepted for it.
  */
 export function planGuarded(work, { threshold = GUARD_DEFAULTS.threshold } = {}) {
   const accept = [], leftOut = { far: 0, ccodes: 0, kind: 0, total: 0, examples: [] };
-  const tied = [];
+  const tied = [], flagged = [];
   let several = 0;
   const by = bySource(work), lookups = new Map();
   for (const l of work.lookups || []) if (!lookups.has(l.id)) lookups.set(l.id, l);
@@ -236,6 +238,8 @@ export function planGuarded(work, { threshold = GUARD_DEFAULTS.threshold } = {})
     if (rowState(work, iri)) continue;
     const mine = by.get(iri) || [];
     if (mine.some((c) => c.decision)) continue;
+    // A place whose own gazetteer address WHG's best candidate is far from (lookup.js refCheck) is the reviewer's, always.
+    if (work.places[iri]?.ref?.state === 'disagrees') { flagged.push(iri); continue; }
     const ok = mine.filter((c) => guardOf(c, { threshold }).pass);
     if (ok.length > 1) { several++; continue; }
     if (!ok.length) continue;
@@ -253,7 +257,7 @@ export function planGuarded(work, { threshold = GUARD_DEFAULTS.threshold } = {})
     if (namesakes.length) { tied.push({ id: c.id, place: iri, count: namesakes.length + 1, region: lookedWithin(work, iri, c, lookups) }); continue; }
     accept.push(c);
   }
-  return { accept, leftOut, several, tied };
+  return { accept, leftOut, several, tied, flagged };
 }
 /** Whether a candidate's kind of place conflicts with its place's own (kinds.js kindFit), both being known. */
 export const kindConflicts = (work, iri, c) => kindFit(work.places[iri], candidateTypes(c)).fit === 'conflict';
@@ -285,8 +289,8 @@ export function acceptGuarded(work, { reviewer, identityType = 'closeMatch', at 
   if (reviewer) { checkReviewer(reviewer); work.reviewer = reviewer; }
   const plan = planGuarded(work, { threshold });
   const counts = { far: plan.leftOut.far, ccodes: plan.leftOut.ccodes, kind: plan.leftOut.kind, total: plan.leftOut.total };
-  const ties = plan.tied.length, tied = plan.tied.map((t) => t.count);
-  if (!plan.accept.length) return { batch: null, accepted: 0, leftOut: counts, several: plan.several, ties, tied };
+  const ties = plan.tied.length, tied = plan.tied.map((t) => t.count), flagged = plan.flagged.length;
+  if (!plan.accept.length) return { batch: null, accepted: 0, leftOut: counts, several: plan.several, ties, tied, flagged };
   const batch = nextBatch(work);
   for (const c of plan.accept) {
     const v = guardOf(c, { threshold });
@@ -295,7 +299,7 @@ export function acceptGuarded(work, { reviewer, identityType = 'closeMatch', at 
     Object.assign(c.decision, { guard: g, batch });
   }
   (work.batches ||= []).push({ id: batch, at, identityType, threshold, accepted: plan.accept.length, leftOut: counts });
-  return { batch, accepted: plan.accept.length, leftOut: counts, several: plan.several, ties, tied };
+  return { batch, accepted: plan.accept.length, leftOut: counts, several: plan.several, ties, tied, flagged };
 }
 /**
  * Take back a batch: clear the decisions that still carry it (a decision changed since, or taken back

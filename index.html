@@ -190,6 +190,7 @@
       </div>
       <label for="lookup-places">Which places</label>
       <select id="lookup-places"></select>
+      <button id="lookup-only-unlinked" type="button" class="link">Only places without a gazetteer link</button>
       <label><input id="lookup-all-names" type="checkbox"> Also send each place's other names, one query each (the preview shows the cost)</label>
       <!-- Krisis × Methodos: query variants (opt-in); its words are words.js variantWords, put in by src/app.js. -->
       <label><input id="lookup-variants" type="checkbox"> <span id="lookup-variants-text"></span></label>
@@ -203,6 +204,9 @@
         <label for="lookup-near-km">Near means within this many kilometres</label>
         <input id="lookup-near-km" type="number" min="1" max="20015" step="1" value="25">
       </fieldset>
+      <!-- A place whose own address is a gazetteer's (a TEI ref, a Recogito link) is kept so, and flagged for the reviewer when WHG's best candidate is further than this (lookup.js refCheck). -->
+      <label for="lookup-disagree-km">Flag a place whose own gazetteer link is further than this many kilometres from WHG's best candidate (it is then left for you, never accepted in bulk)</label>
+      <input id="lookup-disagree-km" type="number" min="1" max="20015" step="1" value="25">
       <!-- Scope (Issue #33): the workflow's, or outside one this tab's, with a way to edit it (src/scope-page.js). -->
       <div id="lookup-scope" class="lookup-scope"></div>
       <div id="lookup-preview"></div>

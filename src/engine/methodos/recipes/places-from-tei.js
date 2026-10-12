@@ -14,10 +14,10 @@ export default {
   },
   // What the reader cannot carry, said in words before the workflow is followed and while it is.
   cannot: [
-    "A place name with no ref points to no place, so it is not carried; one with a key is carried only with a pattern for its prefix, in the Reading options. The conversion's report names each one left out.",
-    "A ref is kept as the place's own address, as the edition gives it: the lookup looks for the place in the World Historical Gazetteer beside it and does not check it, and the record the ref names is not suggested again.",
+    "A place name with no ref, or a ref it cannot follow, points to no place, so it is not carried; one with a key is carried only with a pattern for its prefix, in the Reading options. The conversion's report names each one left out.",
+    "A ref is kept as the place's own address, as the edition gives it, and is never replaced: the lookup looks for the place in the World Historical Gazetteer beside it, never suggests WHG's record of what the ref names (for a WHG, GeoNames, Getty TGN, Wikidata, OpenStreetMap or Pleiades address), and flags the place for you, never accepting it in bulk, when WHG's best candidate is more than 25 km from that record (the distance is set in the lookup panel).",
     "An edition does not say which region each place is in, as a table's columns can, so no regions are identified.",
-    "Coordinates in a place name's own <geo> are not carried, and are reported; a list of places, with its coordinates, is read only with “Read the list of places” ticked in the Reading options, and the header and the commentary only with theirs, as the editors' words.",
+    "Coordinates in a place name's own <geo> are not carried, and are reported; a list of places is read only with “Read the list of places” ticked in the Reading options, its coordinates only where the place's address is the edition's own; the header and the commentary are read only with their own options, as the editors' words.",
   ],
   asks: ASKS,
   steps: [

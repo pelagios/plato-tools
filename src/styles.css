@@ -693,7 +693,11 @@ body[data-workflow] #action:not([hidden]) + #progress:not([hidden]):has(+ #resul
   .workflow-rail > * { flex: none; }
   .workflow-rail > .methodos-tracker:not([hidden]) { display: flex; flex-direction: column; flex: 0 1 auto; min-height: 0; }
   .workflow-rail .methodos-tracker > * { flex: none; }
-  .workflow-rail .methodos-tracker > .track { flex: 0 1 auto; min-height: 5rem; overflow-y: auto; overscroll-behavior: contain; }
+  .workflow-rail .methodos-tracker > .track { flex: 0 1 auto; min-height: 10rem; overflow-y: auto; overscroll-behavior: contain; }
+  /* What the workflow cannot carry, opened: it scrolls within a cap of its own, and the list of steps is not shrunk
+     to make room for it (the rail scrolls to it instead), so that the steps stay in view (8 at 1440 x 900). */
+  .workflow-rail .methodos-tracker > #methodos-cannot { flex: 0 1 auto; min-height: 0; overflow-y: auto; max-height: 11rem; overscroll-behavior: contain; }
+  .workflow-rail > .methodos-tracker:not([hidden]):has(> #methodos-cannot[open]), .workflow-rail .methodos-tracker:has(> #methodos-cannot[open]) > .track { flex: none; }
   main.layout > .workflow-head { margin-top: 0; }
   .workflow-rail > section { margin: 0 0 1rem; }
   .workflow-rail .methodos-tracker { padding: .85rem 1rem; font-size: 1rem; }

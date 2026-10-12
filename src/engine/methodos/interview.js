@@ -32,13 +32,14 @@ export const WANT = Object.freeze([
 // The answers that name a recipe: [have, want] -> the recipe, the answers the first two questions
 // settle, and the recipe's yes-or-no questions still to ask, in the recipe's order.
 // `base`: when the base address is asked (Stephen, 4 October 2026: only for workflows that mint
-// addresses): under a yes-or-no answer (Map your data, when the table gives regions, which are minted
-// under it), and then needed; under the answer to publish (Places from an edition, Places from Recogito,
-// which mint only when they publish), and then optional; or always (Publish a dataset, whose minting may
-// take it), and then optional.
+// addresses; 12 October 2026: by every workflow that publishes, in one shared field, optional): under any of
+// the yes-or-no answers in `when` (given, or settled by the first two questions), else always; and needed
+// where `needed` is true, or names an answer that is yes (Map your data, when the table gives regions, which
+// are minted under it). Map your data asks it with regions (needed) and when publishing (optional); Places
+// from an edition and Places from Recogito when publishing; Publish a dataset always (optional).
 const ROUTES = [
-  { have: 'table', want: 'map', recipe: 'map-your-data', set: { target: 'plato-json' }, ask: ['has-regions', 'will-draw', 'will-publish'], base: { when: 'has-regions', needed: true } },
-  { have: 'table', want: 'publish', recipe: 'map-your-data', set: { target: 'plato-json', 'will-publish': true }, ask: ['has-regions', 'will-draw'], base: { when: 'has-regions', needed: true } },
+  { have: 'table', want: 'map', recipe: 'map-your-data', set: { target: 'plato-json' }, ask: ['has-regions', 'will-draw', 'will-publish'], base: { when: ['has-regions', 'will-publish'], needed: 'has-regions' } },
+  { have: 'table', want: 'publish', recipe: 'map-your-data', set: { target: 'plato-json', 'will-publish': true }, ask: ['has-regions', 'will-draw'], base: { when: ['has-regions', 'will-publish'], needed: 'has-regions' } },
   { have: 'plato', want: 'publish', recipe: 'publish-a-dataset', set: {}, ask: [], base: { needed: false } },
   // An edition, or annotations: Map your data's questions but the regions (neither says which region each place
   // is in); the base address when publishing, optional, as Publish a dataset asks it (minting takes it).
@@ -83,9 +84,11 @@ export const questionsFor = (choice) => (choice?.kind === 'recipe' ? choice.ask.
  */
 export function baseAsked(choice, yesNo = {}) {
   const b = choice?.kind === 'recipe' ? choice.base : null;
-  // The answer it depends on, given or settled by the first two questions ("A citable, published dataset" settles publishing).
-  if (!b || (b.when && (yesNo[b.when] ?? choice.set[b.when]) !== true)) return null;
-  return { needed: !!b.needed, question: RECIPES[choice.recipe].asks.base.question };
+  // An answer it depends on, given or settled by the first two questions ("A citable, published dataset" settles publishing).
+  const yes = (k) => (yesNo[k] ?? choice.set[k]) === true;
+  const when = [].concat(b?.when ?? []);
+  if (!b || (when.length && !when.some(yes))) return null;
+  return { needed: b.needed === true || (typeof b.needed === 'string' && yes(b.needed)), question: RECIPES[choice.recipe].asks.base.question };
 }
 /** A base address as the interview takes one: a web address, trimmed, or null. */
 export const baseAnswer = (v) => (typeof v === 'string' && /^https?:\/\/\S+$/.test(v.trim()) ? v.trim() : null);

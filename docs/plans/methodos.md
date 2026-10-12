@@ -433,20 +433,25 @@ copied into an export (so a region with no transcription or quoted name has noth
 region's outline (carried as its centre and a radius), and any region off its map, beyond its control
 points, or on a map with no georeference.
 
-**Open, defaulted as close to Map your data as the code allows (to put to Stephen):**
+**Decided by Stephen, 12 October 2026 (by interview), and built the same day:**
 
-1. *A TEI `@ref` (or a `<listPlace>` idno) to a gazetteer:* kept as the place's own address and its
-   identification, as a table's id column is in Map your data, and not reviewed; the lookup still looks
-   every place up in WHG, and a WHG record that is the ref itself is not suggested again. The other way:
-   offer the ref for review as a candidate, so that a reviewer confirms it.
-2. *Recogito's own gazetteer links:* the same: the link is the place's address, kept, not a candidate.
-3. *Which places are looked up:* every place (Krisis's default), not only those with no WHG link yet
-   ("unlinked"); the reviewer can choose otherwise in the lookup panel.
-4. *Georeferences for Recogito:* not asked as a question; the step 1 words say to drop them with the
-   export when its regions are on maps. A yes-or-no question ("Are its annotations regions on a map,
-   with the map's georeference?") would change no step, only the words.
-5. *The base address when publishing:* asked, optional, as Publish a dataset asks it. Map your data
-   without regions does not ask it, and minting then relies on Options.
+1. *A gazetteer reference* (a TEI `@ref`, a list of places' idno, a Recogito link) stays the place's own
+   identification and is never overwritten. WHG's record of it is never suggested (now also for Pleiades,
+   `place:pl:<n>`). The place is flagged for review when WHG's best candidate is more than 25 km from that
+   record (the distance adjustable in the lookup panel): the reviewer sees both, with the distance, and the
+   bulk accept never settles it. A ref WHG did not answer, or whose record has no point, is said so and not
+   flagged. Recogito's own links are treated the same way, not offered as candidates.
+2. *Which places are looked up:* every place by default; "Only places without a gazetteer link" in the
+   lookup panel is one click; the preview says how many places before anything is sent; the lookups go
+   through WHG's batched requests (25 queries a POST by default, 50 at most), as the tests assert of what
+   the stub received.
+3. *The base address:* asked in the interview by every workflow that publishes, in one shared field,
+   optional and filled in from Options; Map your data asks it whenever it publishes, regions or not.
+   Its recipe's words changed (the one shared question), not its steps, so a kept workflow carries on.
+
+Still not asked as a question: the georeferences for Recogito. The step 1 words say to drop them with the
+export, and the step that reads it now says how many of its regions were placed ("7 of 16 regions on
+images placed on a map"), so a georeference for another map is not silent.
 
 ## 7. Persistence
 

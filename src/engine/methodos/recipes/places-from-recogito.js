@@ -15,10 +15,10 @@ export default {
   },
   // What the reader cannot carry, said in words before the workflow is followed and while it is.
   cannot: [
-    "A mention marked as a place but never linked to one, and a link made by Recogito's own name recognition that no person saved, are not carried. The conversion's report names them.",
-    "Recogito's link is kept as the place's own address: the lookup looks for the place in the World Historical Gazetteer beside it and does not check it, and the record the link names is not suggested again.",
+    "A mention marked as a place but never linked to one, or linked by something that is not a web address, and a link made by Recogito's own name recognition that no person saved, are not carried. The conversion's report names them.",
+    "Recogito's link is kept as the place's own address, and is never replaced: the lookup looks for the place in the World Historical Gazetteer beside it, never suggests WHG's record of what the link names (for a WHG, GeoNames, Getty TGN, Wikidata, OpenStreetMap or Pleiades address), and flags the place for you, never accepting it in bulk, when WHG's best candidate is more than 25 km from that record (the distance is set in the lookup panel).",
     "What the export copies from the gazetteer (a place's title, its coordinates) is not carried, so a region with no transcription or quoted name has no name to look up, and is not looked up.",
-    "A region drawn on a map is placed only through the map's IIIF georeference, chosen with the export: as its centre, with a radius that holds it all, not as drawn. A region off the map, beyond its control points or on a map with no georeference is not placed, and is reported.",
+    "A region drawn on a map is placed only through the map's IIIF georeference, chosen with the export: as its centre, with a radius that holds it all, not as drawn. A region off the map, beyond its control points or on a map with no georeference is not placed, and is reported; the step that reads the export says how many of its regions were placed.",
   ],
   asks: ASKS,
   steps: [

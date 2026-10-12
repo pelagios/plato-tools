@@ -4,6 +4,8 @@
 // where wanted, checked again, compared with what came in, and written out; published if asked.
 // The decisions are recorded by one of two steps, by the answer about regions: `relate` where the
 // table gives them (PLATO #23, option B), `apply` where it does not.
+import { BASE } from './asks.js';
+
 const decided = 'relate.dataset ?? apply.dataset';
 const result = `place.dataset ?? ${decided}`;
 export default {
@@ -17,8 +19,8 @@ export default {
     'has-regions': { question: 'Does the table say which region each place is in (a parish, a county)?', kind: 'yes-no' },
     'will-draw': { question: 'Will you draw or trace places that the gazetteer cannot locate?', kind: 'yes-no' },
     'will-publish': { question: 'Will you publish the result?', kind: 'yes-no' },
-    // Asked by the interview when the table gives regions (interview.js baseAsked), pre-filled from Options and written back there.
-    base: { question: 'Under what base address will your places and regions have web addresses of their own (for example https://example.org/places/)?', kind: 'text', optional: true },
+    // Asked by the interview when the table gives regions, or the result is published (interview.js baseAsked), pre-filled from Options and written back there.
+    base: BASE,
     target: { question: 'In what format do you want the result?', kind: 'choice', choices: ['plato-json', 'plato-jsonl', 'tables', 'ntriples', 'lpf', 'lpf-seq'] },
     release: { question: 'What is this release called (for example 2026-10 or v1)?', kind: 'text', optional: true },
     repo: { question: 'Which GitHub repository will the site be published from (owner/name)?', kind: 'text', optional: true },

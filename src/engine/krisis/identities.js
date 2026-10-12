@@ -12,7 +12,8 @@
 // - `exact` holds the linked addresses whose relation's identityType is exactMatch (a missing type is
 //   not exact); `linked` holds every type.
 // - Comparing with a WHG candidate (linkState) also counts the authority's own address of the record
-//   (authorityIris: GeoNames, Getty TGN, Wikidata, OpenStreetMap) as the candidate's.
+//   (authorityIris: GeoNames, Getty TGN, Wikidata, OpenStreetMap, Pleiades) as the candidate's; whgIdOf
+//   goes the other way, from a place's own address to the WHG record that the authority's address names.
 import { collectWithdrawn, resolveWithdrawn } from '../../formats/shared.js';
 import { normaliseWhgIri } from '../gazetteer/index.js';
 
@@ -20,7 +21,7 @@ const OSM_KIND = { r: 'relation', w: 'way', n: 'node' };
 /**
  * The addresses the authority a WHG candidate comes from gives the same record: place:gn:2641673 is
  * GeoNames' https://sws.geonames.org/2641673/, place:wd:Q42 Wikidata's entity, place:tgn:… Getty's,
- * place:osm:r65606 OpenStreetMap's relation. Written as datasets write them (http or https, with or
+ * place:osm:r65606 OpenStreetMap's relation, place:pl:570106 Pleiades' place. Written as datasets write them (http or https, with or
  * without the last slash). For comparing with what a dataset links, never as the address an
  * attestation gives.
  */
@@ -32,11 +33,36 @@ export function authorityIris(id) {
   if (ns === 'gn' && /^\d+$/.test(local)) bases = [`sws.geonames.org/${local}`, `www.geonames.org/${local}`, `geonames.org/${local}`];
   else if (ns === 'tgn' && /^\d+$/.test(local)) bases = [`vocab.getty.edu/tgn/${local}`, `vocab.getty.edu/page/tgn/${local}`];
   else if (ns === 'wd' && /^Q\d+$/.test(local)) bases = [`www.wikidata.org/entity/${local}`, `www.wikidata.org/wiki/${local}`, `wikidata.org/entity/${local}`];
+  else if (ns === 'pl' && /^\d+$/.test(local)) bases = [`pleiades.stoa.org/places/${local}`];
   else if (ns === 'osm') {
     const o = /^([rwn])(\d+)$/.exec(local) || /^(relation|way|node)\/(\d+)$/.exec(local);
     if (o) bases = [`www.openstreetmap.org/${OSM_KIND[o[1]] || o[1]}/${o[2]}`, `openstreetmap.org/${OSM_KIND[o[1]] || o[1]}/${o[2]}`];
   }
   return bases.flatMap((b) => [`https://${b}`, `http://${b}`]).flatMap((u) => [u, u + '/']);
+}
+
+const WHG_W3ID = 'https://w3id.org/whg/id/';
+const OSM_LETTER = { relation: 'r', way: 'w', node: 'n' };
+/**
+ * The WHG record a place's own address names, as WHG's id ("place:pl:570106"), or null: a WHG address
+ * (any form normaliseWhgIri takes), or an authority's address that authorityIris() gives for a record
+ * (GeoNames, Getty TGN, Wikidata, OpenStreetMap, Pleiades). A gazetteer reference a TEI ref, a list of
+ * places' idno or a Recogito link gives; null for a project's own address, or a WHG cluster address.
+ */
+export function whgIdOf(iri) {
+  if (typeof iri !== 'string') return null;
+  const w = normaliseWhgIri(iri.trim());
+  if (w.startsWith(WHG_W3ID)) { const id = w.slice(WHG_W3ID.length); return /^place:[a-z]+:\S+$/.test(id) ? id : null; }
+  const u = /^https?:\/\/(.+?)\/?$/.exec(iri.trim());
+  if (!u) return null;
+  const rest = u[1];
+  let m;
+  if ((m = /^(?:sws\.|www\.)?geonames\.org\/(\d+)(?:\/.*)?$/.exec(rest))) return `place:gn:${m[1]}`;
+  if ((m = /^vocab\.getty\.edu\/(?:page\/)?tgn\/(\d+)$/.exec(rest))) return `place:tgn:${m[1]}`;
+  if ((m = /^(?:www\.)?wikidata\.org\/(?:entity|wiki)\/(Q\d+)$/.exec(rest))) return `place:wd:${m[1]}`;
+  if ((m = /^(?:www\.)?openstreetmap\.org\/(relation|way|node)\/(\d+)$/.exec(rest))) return `place:osm:${OSM_LETTER[m[1]]}${m[2]}`;
+  if ((m = /^pleiades\.stoa\.org\/places\/(\d+)$/.exec(rest))) return `place:pl:${m[1]}`;
+  return null;
 }
 
 /**
