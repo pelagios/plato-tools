@@ -27,7 +27,8 @@
 //
 // Nothing is held in memory but the record in hand: a digest of each attestation goes into a working
 // database, where the two versions are compared, so the check runs at any size, like the rest.
-import { run } from './pipeline.js';
+import { run, halt, Aborted } from './pipeline.js';
+import { RUN_TEXT } from './words.js';
 import { Report } from './report.js';
 import { Json2Rdf, jcs } from '../formats/json2rdf.js';
 import { termNT } from '../lib/ntriples.js';
@@ -321,6 +322,17 @@ export function attestationLines(context, out) {
  * ('expected-missing-unknown'). Any other loss is reported as without it.
  */
 export async function compare({ earlier, later, options = {} }, env) {
+  try { return await comparing({ earlier, later, options }, env); }
+  catch (e) {
+    // Stopped by the caller (options.signal, which each reading by run() is given too): said as such,
+    // not as a version that could not be read.
+    if (!(e instanceof Aborted)) throw e;
+    const rep = new Report();
+    rep.error('stopped', RUN_TEXT.stopped);
+    return { report: rep.toJSON(), outputs: [], incomplete: true, aborted: true };
+  }
+}
+async function comparing({ earlier, later, options }, env) {
   const rep = new Report();
   const t0 = Date.now();
   const progress = env.progress || (() => {});
@@ -334,6 +346,7 @@ export async function compare({ earlier, later, options = {} }, env) {
       const r = await run({ input, action: 'check', options: { ...options, sink: reader(env.resources.context, ledger.sink(v), side) } },
         { ...env, progress: (p) => progress({ ...p, version: word, phase: p.phase === 'done' ? 'read' : p.phase }) });
       db.exec('COMMIT');
+      if (r.aborted) throw new Aborted();
       if (r.incomplete) {
         rep.error('unreadable', `The ${word} version could not be read to the end, so the two versions were not compared`, r.report.items.find((i) => i.kind === 'unreadable')?.examples[0]);
         return { report: rep.toJSON(), outputs: [], incomplete: true };
@@ -452,13 +465,15 @@ export async function compare({ earlier, later, options = {} }, env) {
 
     // What changed, for the examples: both versions are read again, keeping the statements of those
     // few things only, and each is shown with what one version says of it and the other does not.
+    halt(options.signal);
     if (toExplain.size) {
       const wanted = new Set([...toExplain.values()].flat());
       const says = [new Map(), new Map()];
       for (const [v, input, word] of [[EARLIER, earlier, 'earlier'], [LATER, later, 'later']]) {
         const keep = (address, lines) => { if (!wanted.has(address)) return; const s = says[v].get(address) || says[v].set(address, new Set()).get(address); for (const l of lines) s.add(l); };
-        await run({ input, action: 'check', options: { ...options, sink: reader(env.resources.context, { item: (kind, id, about, lines) => keep(id, lines), statement: (s, line) => keep(s, [line]), facet: () => {} }) } },
+        const again = await run({ input, action: 'check', options: { ...options, sink: reader(env.resources.context, { item: (kind, id, about, lines) => keep(id, lines), statement: (s, line) => keep(s, [line]), facet: () => {} }) } },
           { ...env, progress: (p) => progress({ ...p, version: word, again: true, phase: p.phase === 'done' ? 'read' : p.phase }) });
+        if (again.aborted) throw new Aborted();
       }
       for (const [kind, addresses] of toExplain) for (const address of addresses) {
         const was = says[EARLIER].get(address) || new Set(), is = says[LATER].get(address) || new Set();

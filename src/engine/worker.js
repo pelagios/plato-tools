@@ -120,6 +120,23 @@ async function outputsDir(clear, name = 'outputs') {
   if (clear) { try { await root.removeEntry(name, { recursive: true }); } catch {} }
   return root.getDirectoryHandle(name, { create: true });
 }
+/**
+ * After Cancel ended the worker before this one in a run (the main page's only): remove the outputs
+ * folder, and take up the pool of working files and let it go, each tried again every 100 ms while a
+ * file is still held by the worker just ended, for up to `ms` in all. Returns how long it took, or null.
+ */
+async function afterCancel(ms = 15000) {
+  const t0 = Date.now(), later = () => new Promise((r) => setTimeout(r, 100));
+  const root = await navigator.storage.getDirectory();
+  for (;;) {
+    try { await root.removeEntry('outputs', { recursive: true }); break; }
+    catch (e) { if (e?.name === 'NotFoundError') break; if (Date.now() - t0 > ms) return null; await later(); }
+  }
+  for (;;) {
+    try { await sqlitePool(); pool.vfs.pauseVfs(); return Date.now() - t0; }
+    catch (e) { if (e?.kind !== 'pool-busy' || Date.now() - t0 > ms) return null; await later(); }
+  }
+}
 async function output(dir, name) {
   const h = await (await dir.getFileHandle(name, { create: true })).createSyncAccessHandle();
   h.truncate(0);
@@ -185,6 +202,13 @@ self.onmessage = async ({ data }) => {
       // A page with a pool of its own (Chora's) takes it now, so that a second tab of that page is
       // told at once that it cannot start, not when a file is first opened.
       if (poolName) await sqlitePool();
+      // Started again after the page's Cancel ended the worker before it in the middle of a run: what
+      // that run had begun writing is half a file, never offered, and removed here rather than left
+      // until the next run; and the working files that run held are taken up and let go, so that the
+      // next run finds them free. The browser lets go of an ended worker's access handles some time
+      // after, not at once, so each is tried again for a while (afterCancel); the page's buttons wait
+      // for 'ready'. Failing that, the next run removes the file, or says the files are in use.
+      if (data.clear) { const took = await afterCancel(); if (took === null || took > 1000) console.info(`PLATO tools: the working files were free again ${took === null ? 'not within 15 s' : `after ${took} ms`}`); }
       // Whether the TEI reading options for the editors' words may be offered (while EDITORIAL_IRI is set, as it is).
       postMessage({ type: 'ready', version: resources.version, reading: { editorial: EDITORIAL_IRI !== null } });
     } else if (data.cmd === 'detect') {

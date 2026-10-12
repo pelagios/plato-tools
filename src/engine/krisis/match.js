@@ -301,7 +301,7 @@ async function readSide(input, word, options, env, rep, progress, tap) {
   const sink = reader(side, rep, word, standInTitles(input));
   // Krisis: gazetteer lookup. `tap` (gather) sees each event too; match() gives none.
   if (tap) { const event = sink.event; sink.event = (ev) => { event(ev); tap(ev); }; }
-  const r = await run({ input, action: 'check', options: { base: options.base, columns, sink } },
+  const r = await run({ input, action: 'check', options: { base: options.base, columns, sink, signal: options.signal } },
     { ...env, progress: (p) => progress({ ...p, dataset: word, phase: p.phase === 'done' ? 'read' : p.phase }) });
   if (r.incomplete) return { side, failed: r.report.items.find((i) => i.kind === 'unreadable')?.examples[0] };
   let others = 0;

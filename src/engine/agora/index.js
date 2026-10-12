@@ -57,7 +57,7 @@ export async function publish({ part, input, previous, options = {} }, env) {
     rep, env, options, previous, input, outputs,
     gazetteer: {}, head: null, scheme: null, checkErrors: 0,
     /** Read the dataset (or another input) once more, handing its description and records to `sink`. */
-    read: (sink, what = input) => run({ input: what, action: 'check', options: { base: options.base, sink } }, env),
+    read: (sink, what = input) => run({ input: what, action: 'check', options: { base: options.base, sink, signal: options.signal } }, env),
     tree: (name) => openTree(env, name),
     put,
     /** Record an output that is finished. */

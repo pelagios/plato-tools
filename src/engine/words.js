@@ -511,6 +511,10 @@ const candidatesGroups = () => [
   { severity: 'warning', title: 'Warnings', intro: 'Worth a look before the candidate set is published.' },
   { severity: 'loss', title: 'Not exported', intro: 'A candidate set has no place for these.' },
 ];
+/** What a run says when its caller stopped it (options.signal, in src/engine/pipeline.js). */
+export const RUN_TEXT = {
+  stopped: 'Stopped before the end, as asked: only what was read before then was checked, and nothing was written',
+};
 // ---- Chora (the map viewer and editor) -----------------------------------------------------------
 /**
  * What a drawing's notes say of how it was made, since PLATO has no term for it: "Drawn by hand on

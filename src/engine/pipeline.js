@@ -22,6 +22,7 @@ import { genericSource, genericProfile } from './hermes/generic.js';
 import { lineChunks, lines, jsonDocument, annotationItems, TABLE_SHEETS, DataError, sheetOf, zipEntries, zipEntryText } from './input.js';
 import { csvRecords, textChunks, papaRecords, papaRow } from '../formats/csv.js';
 import { Report, LOSS_TEXT, droppedText, FORMAT_WORDS, WORKBOOK_TEXT, dateTimeWords, CANDIDATE_CHECK_TEXT, candidatesNotGivenText } from './report.js';
+import { RUN_TEXT } from './words.js';
 import { slimSet, checkSet, checkAcross, checkEnds, candidateIndex, answers, checkAnswer } from './candidates.js';
 
 export const TARGETS = {
@@ -384,7 +385,7 @@ async function tableSheetsOf(input, env, rep) {
  * sheet whose text stops it (not UTF-8, a quotation mark out of place, a damaged entry in the zip),
  * which is reported, and taken out, and the other sheets read.
  */
-async function loadSheets(sheets, store, rep, progress, action) {
+async function loadSheets(sheets, store, rep, progress, action, signal) {
   const loaded = new Map();
   let rows = 0;
   for (const [sheet, { label, chunks }] of sheets) {
@@ -392,6 +393,7 @@ async function loadSheets(sheets, store, rep, progress, action) {
     let fields = null, n = 0;
     try {
       for await (const cells of papaRecords(csvRecords(chunks(), { keepBlank: true }), (f) => { fields = f; })) {
+        halt(signal);
         store.add(no, ++n, rowKey(sheet, papaRow(fields, cells)), cells);
         if (++rows % 50000 === 0) progress({ phase: 'loading', rows });
       }
@@ -422,13 +424,13 @@ async function* tablesSource(input, env, rep, options, action, hooks = {}) {
   const sheets = await tableSheetsOf(input, env, rep);
   const store = new TableStore(await env.openDb({ store: true }));
   try {
-    const loaded = await loadSheets(sheets, store, rep, progress, action);
+    const loaded = await loadSheets(sheets, store, rep, progress, action, options.signal);
     const known = (n) => !!loaded.get(n) && !loaded.get(n).unreadable;
     // The checks are scans of the sheets, which at a million places take minutes: each 50,000 rows
     // scanned, of any sheet, is reported, so that the page does not sit on the last of the loading.
     let scanned = 0;
     const rows = (n) => { if (!known(n)) return []; const m = loaded.get(n); return (function* () {
-      for (const cells of store.rows(m.first, m.last)) { if (++scanned % 50000 === 0) progress({ phase: 'checking', rows: scanned }); yield papaRow(m.fields, cells); }
+      for (const cells of store.rows(m.first, m.last)) { halt(options.signal); if (++scanned % 50000 === 0) progress({ phase: 'checking', rows: scanned }); yield papaRow(m.fields, cells); }
     })(); };
     progress({ phase: 'checking' });
     await validateTables(readableMeta(env.csvMeta, loaded), {
@@ -520,11 +522,22 @@ class TextSink {
 }
 
 // ---- the run -------------------------------------------------------------------------------------
+/** Thrown inside a run whose options.signal has been aborted; run() ends the run there, cleanly. */
+export class Aborted extends Error { constructor() { super('stopped'); this.name = 'Aborted'; } }
+/** Throw Aborted if `signal` (an AbortSignal, or nothing) has been aborted: called between records. */
+export const halt = (signal) => { if (signal?.aborted) throw new Aborted(); };
+/** An async iterable's items, halting before each one: for a pass over the records made outside the main loops. */
+async function* halting(items, signal) { for await (const x of items) { halt(signal); yield x; } }
 /**
  * Check or convert one input. A file whose content stops the reader part-way (JSON cut short or
  * not well formed, damaged compression, a broken zip) is a problem in the data, so it ends in a
  * report like any other, with what was read before it and no outputs: only a failure of the tools
  * themselves is thrown.
+ *
+ * options.signal (an AbortSignal) stops the run at the next record (or row of a sheet, or place read
+ * back from the store): its outputs are closed and none is recorded, as for a file cut short, and it
+ * returns { report, outputs: [], incomplete: true, aborted: true }, the report saying it was stopped.
+ * A long SQLite step (indexing the store) is not interrupted: the stop comes when it ends.
  */
 export async function run(job, env) {
   const rep = new Report();
@@ -541,6 +554,7 @@ export async function run(job, env) {
   try { return await runChecked(job, { ...env, output }, rep); }
   catch (e) {
     for (const o of open) { try { await o.close(); } catch { /* closed as far as it can be */ } }
+    if (e instanceof Aborted) { rep.error('stopped', RUN_TEXT.stopped); return { report: rep.toJSON(), outputs: [], incomplete: true, aborted: true }; }
     if (!(e instanceof DataError)) throw e;
     rep.error('unreadable', 'The file could not be read to the end, so only the part before the problem was checked', e.message);
     return { report: rep.toJSON(), outputs: [], incomplete: true };
@@ -571,6 +585,10 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   // that is not a place) is not left out by being passed through as null: it is written as before.
   const augmented = (ev) => (options.augment && ev.type === 'record' ? { ...ev, value: options.augment(ev.value) } : ev);
   const write = async (ev) => { const out = augmented(ev); if (out.type === 'record' && out.value === null && ev.value !== null) return; await writer.event(out); };
+  // options.signal: checked at the top of every loop over the records, so that a caller can stop a
+  // long run at the next record (run(), above). A pass made by a helper is read through halting().
+  const signal = options.signal;
+  const stop = () => halt(signal);
   const res = env.resources;
   const progress = env.progress || (() => {});
   const t0 = Date.now();
@@ -584,7 +602,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   // mints is named as it streams past instead (ev.region, below), as it always comes before the places in
   // it; in exported tables a region may come anywhere, so they are read through first.
   const regions = action === 'convert' && lpfTarget ? new RegionIndex() : null;
-  const hooks = regions && input.format === 'tables' ? { beforeRecords: (read, gazetteerId) => indexRegions(regions, read, options.candidates, rep, gazetteerId) } : {};
+  const hooks = regions && input.format === 'tables' ? { beforeRecords: (read, gazetteerId) => indexRegions(regions, () => halting(read(), options.signal), options.candidates, rep, gazetteerId) } : {};
   const source = sourceFor(input, env, rep, options, action, hooks);
   if (!source) throw new Error(`Unsupported input: ${input.format}`);
   if ((input.format === 'lpf' || input.format === 'lpf-seq') && input.lpfVersion === 2) {
@@ -622,13 +640,14 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     const again = input.format === 'plato-jsonl' ? platoJsonl(input.files[0], new Report()) : platoJson(input.files[0]);
     let gazetteerId;
     for await (const ev of again) {
+      stop();
       if (ev.type === 'header') gazetteerId = ev.value?.gazetteer?.['@id'];
       if (ev.type === 'idr') { if (lpfTarget) (idrsBySubject.get(ev.value.subject) || idrsBySubject.set(ev.value.subject, []).get(ev.value.subject)).push(ev.value); }
       else if (ev.type === 'record') { collectWithdrawn(ev.value?.attestations, withdrawn); if (regions) gatherRegion(regions, ev); }
       else if (ev.type === 'attestation') collectWithdrawn([ev.value], withdrawn);
     }
     withdrawn = resolved(withdrawn, rep);
-    if (regions) await settleRegions(regions, () => (input.format === 'plato-jsonl' ? platoJsonl(input.files[0], new Report()) : platoJson(input.files[0])), options.candidates, rep, gazetteerId);
+    if (regions) await settleRegions(regions, () => halting(input.format === 'plato-jsonl' ? platoJsonl(input.files[0], new Report()) : platoJson(input.files[0]), signal), options.candidates, rep, gazetteerId);
   }
   if (action === 'convert' && options.cube && target !== 'ntriples') rep.warning('cube-not-ntriples', 'The Data Cube export applies to N-Triples output only, so it is not made here.');
   // RDF may hold a dataset or a candidate set, which are written by different writers: its writer is
@@ -679,7 +698,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     const refused = refuseCandidateSet({ action, target, options }, rep);
     if (refused) return refused;
     const w = action === 'convert' ? await candidateSetWriter(target, env, rep, typing, outputs, input, options) : readsCandidates(options);
-    await runCandidateSet(candidateSetSource(input, rep), { V, rep, writer: w, dry, notAList, collect: cands?.set });
+    await runCandidateSet(candidateSetSource(input, rep), { V, rep, writer: w, dry, notAList, collect: cands?.set, signal });
     cands?.finish();
     return { report: rep.toJSON(), outputs };
   }
@@ -690,6 +709,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   if (!needsStore) {
     let header = null;
     for await (const ev of source) {
+      stop();
       if (ev.type === 'late-header') { lateHeader(ev); continue; }
       if (ev.type === 'not-a-list') { notAList(ev); continue; }
       if (ev.type === 'short') { short = true; continue; }
@@ -713,153 +733,157 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       if (regions && ev.region && ev.type === 'record' && typeof ev.value?.['@id'] === 'string') { regions.named.add(ev.value['@id']); regions.nameRecord(ev.value.attestations, ev.value['@id'], regionLabel(ev.value)); }
       if (writer) {
         try { await write(ev); }
-        catch (e) { rep.error('record-failed', 'A record could not be written and is left out of the output; the rest of the file was still converted', `${ev.value?.['@id'] || `item ${ev.n}`}: ${e && e.message || e}`); }
+        catch (e) { if (e instanceof Aborted) throw e; rep.error('record-failed', 'A record could not be written and is left out of the output; the rest of the file was still converted', `${ev.value?.['@id'] || `item ${ev.n}`}: ${e && e.message || e}`); }
       }
       beat('reading');
     }
   } else {
     // Gather everything in the on-disk store first, then read it back one place at a time.
     const store = new TripleStore(await env.openDb({ store: true }));
-    // Here the store's converter is the only one that sees the records, so it reports.
-    const w = new Json2Rdf(res.context, (s, p, o) => store.add(s, p, o), { onIssue: jsonIssue });
-    let header = null, batch = 0;
-    // The regions a place lies in (a table of places' `within`, and `region` on a region's own events:
-    // src/engine/hermes/within.js and generic.js) ride on the reader's events, never in PLATO: kept here
-    // by place, the first each place's events give, and put back on its record's event when the place
-    // is read back, for a sink that reads them.
-    const withinByPlace = new Map();
-    const keepWithin = (ev) => {
-      const iri = ev.type === 'attestation' ? ev.value?.about : ev.type === 'record' ? ev.value?.['@id'] : undefined;
-      if (typeof iri !== 'string' || withinByPlace.has(iri)) return;
-      const within = Array.isArray(ev.within) && ev.within.length ? { within: ev.within } : {};
-      if (within.within || ev.region) withinByPlace.set(iri, { ...within, ...(ev.region ? { region: ev.region } : {}) });
-    };
-    store.beginBatch();
-    for await (const ev of source) {
-      if (ev.type === 'triple') { store.add(ev.s, ev.p, ev.o); if (++batch % 50000 === 0) { store.endBatch(); store.beginBatch(); beat('loading', { triples: store.count }); } continue; }
-      if (ev.type === 'late-header') { lateHeader(ev); continue; }
-      if (ev.type === 'not-a-list') { notAList(ev); continue; }
-      // The header goes to the store's converter alone, which reports what it cannot use: given to
-      // `dry` as well, each of its problems was reported twice. The candidate checks still read it.
-      if (ev.type === 'header') { header = ev.value; w.header(header); cands?.dataset(header); if (!V.header(header)) rep.error('schema', `The document header does not match the PLATO JSON Schema: ${ajvMessage(V.header.errors)}`); continue; }
-      checkRecord(ev);
-      keepWithin(ev);
-      if (cands && ev.value) cands.record(ev.value);
-      w.record(ev.type === 'idr' ? 'identityRelations' : ev.type === 'attestation' ? 'attestations' : ev.newEntity ? 'newSpatialEntities' : 'spatialEntities', ev.value);
-      if (++batch % 5000 === 0) { store.endBatch(); store.beginBatch(); beat('loading', { triples: store.count }); }
-    }
-    store.endBatch();
-    rep.count('triples', store.count);
-    beat('indexing', { triples: store.count, force: true });
-    store.index();
-    if (isRdf) checkGraph(store, res, rep);
-    // A node with several different values where PLATO JSON holds one: the others are not carried
-    // over, so it is a loss, counted once per distinct value dropped. The same node is met again
-    // wherever it is cited (a source in thousands of records), and counting each meeting made
-    // Pleiades' 35,294 dropped values read as 265 million. Each node and key is shown once.
-    const seenValue = new Set(), seenNode = new Set(), CAP = 2_000_000;
-    const multipleValues = (i) => {
-      const nk = i.node + '\u0001' + i.key, vk = nk + '\u0001' + (i.value ?? '');
-      if (seenValue.has(vk)) return;
-      if (seenValue.size < CAP) seenValue.add(vk);
-      const first = !seenNode.has(nk);
-      if (first && seenNode.size < CAP) seenNode.add(nk);
-      rep.loss('multiple-values', `A value that PLATO JSON holds once has several different values here; the first is kept and the others are left out (${i.key})`, first ? i.node : undefined);
-    };
-    const r2jSchemas = { context: res.context, core: res.core, profile: res.profiles['place-centric'], candidateProfile: res.profiles['candidate-set'], types: res.types };
-    const storeWithdrawn = currentOnly ? withdrawnInStore(store, rep) : null;
-    const r2j = new Rdf2Json(r2jSchemas, store, {
-      withdrawn: storeWithdrawn,
-      onLoss: (l) => rep.loss(l.kind, `${LOSS_TEXT[l.kind] || l.kind}`, l.predicate || l.value),
-      onIssue: (i) => (i.kind === 'multiple-values' ? multipleValues(i) : rep.warning(i.kind, ISSUE_TEXT[i.kind] || i.kind, i.kind === 'figure-undeclared' ? i.key : i.node)),
-    });
-    const docs = [...store.subjects(TYPE, PLATO + 'Gazetteer')];
-    const docId = docs[0] || firstSubjectWith(store, PLATO + 'contains_entity') || firstSubjectWith(store, PLATO + 'contains_attestation');
-    // Candidate sets (PLATO 53c5a40), and candidates in none. A graph with no dataset in it (no
-    // gazetteer, place, attestation or identity relation) and a candidate set is written as that
-    // candidate set; otherwise the dataset is written, and the candidates are reported as not written,
-    // never merged into it.
-    const sets = [...new Set([...store.subjects(TYPE, PLATO + 'CandidateSet'), ...distinctSubjectsWith(store, PLATO + 'contains_candidate')])];
-    // What makes a dataset is a gazetteer with something said of it beyond its type, an attestation or an
-    // identity relation. Typed N-Triples type the dataset a candidate set is for as plato:Gazetteer (the
-    // range of candidates_for), and a candidate's two places as plato:SpatialEntity (the range of
-    // candidate_source and candidate_candidate); a place described a little more (a label added to a
-    // candidate set's graph) is still a place the candidates name, not a dataset of empty places.
-    const described = (id) => store.out(id).some((t) => t.p !== TYPE);
-    const isDataset = !!(docs.some(described) || firstSubjectWith(store, PLATO + 'contains_entity') || firstSubjectWith(store, PLATO + 'contains_attestation')
-      || firstSubjectWith(store, PLATO + 'attests_about') || store.subjects(TYPE, PLATO + 'Attestation').next().value
-      || store.subjects(TYPE, PLATO + 'IdentityRelation').next().value || firstSubjectWith(store, PLATO + 'identity_subject'));
-    const looseCandidates = (keep) => [...new Set([...store.subjects(TYPE, PLATO + 'Candidate'), ...distinctSubjectsWith(store, PLATO + 'candidate_source')])].filter((c) => !keep.has(c));
-    const notWritten = (v) => rep.loss('candidate-set-not-written', LOSS_TEXT['candidate-set-not-written'], v);
-    if (!isDataset && (sets.length || looseCandidates(new Set()).length)) {
-      const refused = refuseCandidateSet({ action, target, options }, rep);
-      if (refused) { store.close(); return refused; }
-      const setId = sets[0];
-      const ids = setId ? [...objectsOf(store, setId, PLATO + 'contains_candidate')] : looseCandidates(new Set());
-      for (const other of sets.slice(1)) notWritten(other);
-      if (setId) for (const c of looseCandidates(new Set(ids))) notWritten(c);
-      const w = action === 'convert' ? await candidateSetWriter(target, env, rep, typing, outputs, input, options) : readsCandidates(options);
-      const events = (function* () {
-        yield { type: 'header', value: setId ? { $schema: CANDIDATE_SET_SCHEMA, ...r2j.candidateSetHeader(setId) } : { $schema: CANDIDATE_SET_SCHEMA, profile: 'candidate-set', candidateSet: {} } };
-        let n = 0;
-        for (const c of ids) yield { type: 'candidate', value: r2j.candidate(c), n: ++n };
-      })();
-      await runCandidateSet(events, { V: res.validators['candidate-set'], rep, writer: w, dry: null, notAList, collect: cands?.set });
-      store.close();
-      cands?.finish();
-      return { report: rep.toJSON(), outputs };
-    }
-    for (const set of sets) notWritten(set);
-    for (const c of looseCandidates(new Set(sets.flatMap((x) => [...objectsOf(store, x, PLATO + 'contains_candidate')])))) notWritten(c);
-    if (action === 'convert' && isRdf) writer = await writerFor();
-    // The regions some place is ContainedIn that are places of the dataset, read once more, quietly (each
-    // is reported when it is written as a place), for LPF: their matches and their names.
-    if (regions) {
-      for (const a of store.subjects(PLATO + 'has_relation_type', PLATO + 'ContainedIn')) for (const t of objectsOf(store, a, PLATO + 'relates_to')) regions.targets.add(t);
-      // Every such region with attestations of its own: matched or not, it is named from them.
-      const about = (t) => { const it = store.subjects(PLATO + 'attests_about', t); try { return !it.next().done; } finally { it.return(); } };
-      const inData = [...regions.targets].filter(about);
-      const quiet = new Rdf2Json(r2jSchemas, store, { withdrawn: storeWithdrawn });
-      for (const e of inData) { const rec = quiet.entity(e); regions.add(rec.attestations, e, regionLabel(rec)); }
-      await regionCandidates(regions, options.candidates, rep, docId && !String(docId).startsWith('_:') ? docId : undefined);
-    }
-    const head = docId ? { $schema: 'https://w3id.org/plato/schemas/place-centric.schema.json', ...r2j.header(docId) } : { profile: 'place-centric', gazetteer: { title: input.files[0].name } };
-    head.profile = 'place-centric';
-    writer && writer.header(head);
-    // From RDF, what the candidate set rules read is in the records as they are read back.
-    const fromGraph = isRdf && cands;
-    if (fromGraph) cands.dataset(head);
-    // Without a document node, every identity relation is one of the document's own, except those an
-    // attestation bundles (plato:attests_identity), which are read under their attestation.
-    const idrIds = docId ? [...objectsOf(store, docId, PLATO + 'contains_identity_relation')]
-      : [...store.subjects(TYPE, PLATO + 'IdentityRelation')].filter((i) => !store.in(PLATO + 'attests_identity', i).length);
-    if (target === 'lpf' || target === 'lpf-seq') for (const i of idrIds) { const v = r2j.identityRelation(i); (idrsBySubject.get(v.subject) || idrsBySubject.set(v.subject, []).get(v.subject)).push(v); }
-    // The places the document lists, then any other place its attestations are about: an
-    // attestation-centric document's attestations are about existing places, which it need not list
-    // (only its newSpatialEntities are), and they were once left out whenever it listed any.
-    const entities = docId && firstSubjectWith(store, PLATO + 'contains_entity') ? listedThenOthers(store, docId) : distinctEntities(store);
-    let n = 0;
-    for (const e of entities) {
-      const rec = r2j.entity(e);
-      // A table of places whose rows are about gazetteer addresses gives no place a label (the
-      // attestation-centric profile has none), but its name column names each place, as a row's name
-      // is a place-centric row's label: where its rows agree on the name, that is the label.
-      if (!rec.label && generic) { const names = new Set(list(rec.attestations).map((a) => a?.names?.[0]?.toponym).filter(Boolean)); if (names.size === 1) rec.label = [...names][0]; }
-      if (!rec.label) { rec.label = e; rep.warning('no-label', 'A place has no label; its identifier is used as its label', e); }
-      n++; rep.count('places'); rep.count('attestations', rec.attestations?.length || 0);
-      if (isRdf && !V.entity(rec)) rep.error('schema', explainSchema(V.entity.errors, false), `${e}: ${ajvMessage(V.entity.errors)}`);
-      collectMembership(rec.attestations, rec['@id'], membership);
-      if (fromGraph) cands.record(rec);
-      if (writer) await write({ type: 'record', value: rec, n, ...withinByPlace.get(e) });
-      beat('writing', { places: n });
-    }
-    for (const i of idrIds) {
-      rep.count('identity relations');
-      const value = writer || fromGraph ? r2j.identityRelation(i) : null;
-      if (fromGraph) cands.record(value);
-      if (writer) await writer.event({ type: 'idr', value });
-    }
-    store.close();
+    // Closed however the reading ends: stopped, or a file cut short, as well as at the end.
+    try {
+      // Here the store's converter is the only one that sees the records, so it reports.
+      const w = new Json2Rdf(res.context, (s, p, o) => store.add(s, p, o), { onIssue: jsonIssue });
+      let header = null, batch = 0;
+      // The regions a place lies in (a table of places' `within`, and `region` on a region's own events:
+      // src/engine/hermes/within.js and generic.js) ride on the reader's events, never in PLATO: kept here
+      // by place, the first each place's events give, and put back on its record's event when the place
+      // is read back, for a sink that reads them.
+      const withinByPlace = new Map();
+      const keepWithin = (ev) => {
+        const iri = ev.type === 'attestation' ? ev.value?.about : ev.type === 'record' ? ev.value?.['@id'] : undefined;
+        if (typeof iri !== 'string' || withinByPlace.has(iri)) return;
+        const within = Array.isArray(ev.within) && ev.within.length ? { within: ev.within } : {};
+        if (within.within || ev.region) withinByPlace.set(iri, { ...within, ...(ev.region ? { region: ev.region } : {}) });
+      };
+      store.beginBatch();
+      for await (const ev of source) {
+        stop();
+        if (ev.type === 'triple') { store.add(ev.s, ev.p, ev.o); if (++batch % 50000 === 0) { store.endBatch(); store.beginBatch(); beat('loading', { triples: store.count }); } continue; }
+        if (ev.type === 'late-header') { lateHeader(ev); continue; }
+        if (ev.type === 'not-a-list') { notAList(ev); continue; }
+        // The header goes to the store's converter alone, which reports what it cannot use: given to
+        // `dry` as well, each of its problems was reported twice. The candidate checks still read it.
+        if (ev.type === 'header') { header = ev.value; w.header(header); cands?.dataset(header); if (!V.header(header)) rep.error('schema', `The document header does not match the PLATO JSON Schema: ${ajvMessage(V.header.errors)}`); continue; }
+        checkRecord(ev);
+        keepWithin(ev);
+        if (cands && ev.value) cands.record(ev.value);
+        w.record(ev.type === 'idr' ? 'identityRelations' : ev.type === 'attestation' ? 'attestations' : ev.newEntity ? 'newSpatialEntities' : 'spatialEntities', ev.value);
+        if (++batch % 5000 === 0) { store.endBatch(); store.beginBatch(); beat('loading', { triples: store.count }); }
+      }
+      store.endBatch();
+      rep.count('triples', store.count);
+      beat('indexing', { triples: store.count, force: true });
+      store.index();
+      if (isRdf) checkGraph(store, res, rep);
+      // A node with several different values where PLATO JSON holds one: the others are not carried
+      // over, so it is a loss, counted once per distinct value dropped. The same node is met again
+      // wherever it is cited (a source in thousands of records), and counting each meeting made
+      // Pleiades' 35,294 dropped values read as 265 million. Each node and key is shown once.
+      const seenValue = new Set(), seenNode = new Set(), CAP = 2_000_000;
+      const multipleValues = (i) => {
+        const nk = i.node + '\u0001' + i.key, vk = nk + '\u0001' + (i.value ?? '');
+        if (seenValue.has(vk)) return;
+        if (seenValue.size < CAP) seenValue.add(vk);
+        const first = !seenNode.has(nk);
+        if (first && seenNode.size < CAP) seenNode.add(nk);
+        rep.loss('multiple-values', `A value that PLATO JSON holds once has several different values here; the first is kept and the others are left out (${i.key})`, first ? i.node : undefined);
+      };
+      const r2jSchemas = { context: res.context, core: res.core, profile: res.profiles['place-centric'], candidateProfile: res.profiles['candidate-set'], types: res.types };
+      const storeWithdrawn = currentOnly ? withdrawnInStore(store, rep) : null;
+      const r2j = new Rdf2Json(r2jSchemas, store, {
+        withdrawn: storeWithdrawn,
+        onLoss: (l) => rep.loss(l.kind, `${LOSS_TEXT[l.kind] || l.kind}`, l.predicate || l.value),
+        onIssue: (i) => (i.kind === 'multiple-values' ? multipleValues(i) : rep.warning(i.kind, ISSUE_TEXT[i.kind] || i.kind, i.kind === 'figure-undeclared' ? i.key : i.node)),
+      });
+      const docs = [...store.subjects(TYPE, PLATO + 'Gazetteer')];
+      const docId = docs[0] || firstSubjectWith(store, PLATO + 'contains_entity') || firstSubjectWith(store, PLATO + 'contains_attestation');
+      // Candidate sets (PLATO 53c5a40), and candidates in none. A graph with no dataset in it (no
+      // gazetteer, place, attestation or identity relation) and a candidate set is written as that
+      // candidate set; otherwise the dataset is written, and the candidates are reported as not written,
+      // never merged into it.
+      const sets = [...new Set([...store.subjects(TYPE, PLATO + 'CandidateSet'), ...distinctSubjectsWith(store, PLATO + 'contains_candidate')])];
+      // What makes a dataset is a gazetteer with something said of it beyond its type, an attestation or an
+      // identity relation. Typed N-Triples type the dataset a candidate set is for as plato:Gazetteer (the
+      // range of candidates_for), and a candidate's two places as plato:SpatialEntity (the range of
+      // candidate_source and candidate_candidate); a place described a little more (a label added to a
+      // candidate set's graph) is still a place the candidates name, not a dataset of empty places.
+      const described = (id) => store.out(id).some((t) => t.p !== TYPE);
+      const isDataset = !!(docs.some(described) || firstSubjectWith(store, PLATO + 'contains_entity') || firstSubjectWith(store, PLATO + 'contains_attestation')
+        || firstSubjectWith(store, PLATO + 'attests_about') || store.subjects(TYPE, PLATO + 'Attestation').next().value
+        || store.subjects(TYPE, PLATO + 'IdentityRelation').next().value || firstSubjectWith(store, PLATO + 'identity_subject'));
+      const looseCandidates = (keep) => [...new Set([...store.subjects(TYPE, PLATO + 'Candidate'), ...distinctSubjectsWith(store, PLATO + 'candidate_source')])].filter((c) => !keep.has(c));
+      const notWritten = (v) => rep.loss('candidate-set-not-written', LOSS_TEXT['candidate-set-not-written'], v);
+      if (!isDataset && (sets.length || looseCandidates(new Set()).length)) {
+        const refused = refuseCandidateSet({ action, target, options }, rep);
+        if (refused) return refused;
+        const setId = sets[0];
+        const ids = setId ? [...objectsOf(store, setId, PLATO + 'contains_candidate')] : looseCandidates(new Set());
+        for (const other of sets.slice(1)) notWritten(other);
+        if (setId) for (const c of looseCandidates(new Set(ids))) notWritten(c);
+        const w = action === 'convert' ? await candidateSetWriter(target, env, rep, typing, outputs, input, options) : readsCandidates(options);
+        const events = (function* () {
+          yield { type: 'header', value: setId ? { $schema: CANDIDATE_SET_SCHEMA, ...r2j.candidateSetHeader(setId) } : { $schema: CANDIDATE_SET_SCHEMA, profile: 'candidate-set', candidateSet: {} } };
+          let n = 0;
+          for (const c of ids) yield { type: 'candidate', value: r2j.candidate(c), n: ++n };
+        })();
+        await runCandidateSet(events, { V: res.validators['candidate-set'], rep, writer: w, dry: null, notAList, collect: cands?.set, signal });
+        cands?.finish();
+        return { report: rep.toJSON(), outputs };
+      }
+      for (const set of sets) notWritten(set);
+      for (const c of looseCandidates(new Set(sets.flatMap((x) => [...objectsOf(store, x, PLATO + 'contains_candidate')])))) notWritten(c);
+      if (action === 'convert' && isRdf) writer = await writerFor();
+      // The regions some place is ContainedIn that are places of the dataset, read once more, quietly (each
+      // is reported when it is written as a place), for LPF: their matches and their names.
+      if (regions) {
+        for (const a of store.subjects(PLATO + 'has_relation_type', PLATO + 'ContainedIn')) for (const t of objectsOf(store, a, PLATO + 'relates_to')) regions.targets.add(t);
+        // Every such region with attestations of its own: matched or not, it is named from them.
+        const about = (t) => { const it = store.subjects(PLATO + 'attests_about', t); try { return !it.next().done; } finally { it.return(); } };
+        const inData = [...regions.targets].filter(about);
+        const quiet = new Rdf2Json(r2jSchemas, store, { withdrawn: storeWithdrawn });
+        for (const e of inData) { stop(); const rec = quiet.entity(e); regions.add(rec.attestations, e, regionLabel(rec)); }
+        await regionCandidates(regions, options.candidates, rep, docId && !String(docId).startsWith('_:') ? docId : undefined);
+      }
+      const head = docId ? { $schema: 'https://w3id.org/plato/schemas/place-centric.schema.json', ...r2j.header(docId) } : { profile: 'place-centric', gazetteer: { title: input.files[0].name } };
+      head.profile = 'place-centric';
+      writer && writer.header(head);
+      // From RDF, what the candidate set rules read is in the records as they are read back.
+      const fromGraph = isRdf && cands;
+      if (fromGraph) cands.dataset(head);
+      // Without a document node, every identity relation is one of the document's own, except those an
+      // attestation bundles (plato:attests_identity), which are read under their attestation.
+      const idrIds = docId ? [...objectsOf(store, docId, PLATO + 'contains_identity_relation')]
+        : [...store.subjects(TYPE, PLATO + 'IdentityRelation')].filter((i) => !store.in(PLATO + 'attests_identity', i).length);
+      if (target === 'lpf' || target === 'lpf-seq') for (const i of idrIds) { const v = r2j.identityRelation(i); (idrsBySubject.get(v.subject) || idrsBySubject.set(v.subject, []).get(v.subject)).push(v); }
+      // The places the document lists, then any other place its attestations are about: an
+      // attestation-centric document's attestations are about existing places, which it need not list
+      // (only its newSpatialEntities are), and they were once left out whenever it listed any.
+      const entities = docId && firstSubjectWith(store, PLATO + 'contains_entity') ? listedThenOthers(store, docId) : distinctEntities(store);
+      let n = 0;
+      for (const e of entities) {
+        stop();
+        const rec = r2j.entity(e);
+        // A table of places whose rows are about gazetteer addresses gives no place a label (the
+        // attestation-centric profile has none), but its name column names each place, as a row's name
+        // is a place-centric row's label: where its rows agree on the name, that is the label.
+        if (!rec.label && generic) { const names = new Set(list(rec.attestations).map((a) => a?.names?.[0]?.toponym).filter(Boolean)); if (names.size === 1) rec.label = [...names][0]; }
+        if (!rec.label) { rec.label = e; rep.warning('no-label', 'A place has no label; its identifier is used as its label', e); }
+        n++; rep.count('places'); rep.count('attestations', rec.attestations?.length || 0);
+        if (isRdf && !V.entity(rec)) rep.error('schema', explainSchema(V.entity.errors, false), `${e}: ${ajvMessage(V.entity.errors)}`);
+        collectMembership(rec.attestations, rec['@id'], membership);
+        if (fromGraph) cands.record(rec);
+        if (writer) await write({ type: 'record', value: rec, n, ...withinByPlace.get(e) });
+        beat('writing', { places: n });
+      }
+      for (const i of idrIds) {
+        stop();
+        rep.count('identity relations');
+        const value = writer || fromGraph ? r2j.identityRelation(i) : null;
+        if (fromGraph) cands.record(value);
+        if (writer) await writer.event({ type: 'idr', value });
+      }
+    } finally { store.close(); }
   }
   cands?.finish();
   for (const c of membershipCycles(membership)) rep.error('membership-cycle', 'A route, itinerary or network is, through its members, a member of itself (MemberOf, followed round, comes back to where it started)', c);
@@ -1028,8 +1052,9 @@ async function* candidateSetSource(input, rep) {
   }
 }
 /** Check each event of a candidate set against its profile, and write it if there is a writer. */
-async function runCandidateSet(events, { V, rep, writer, dry, notAList, collect }) {
+async function runCandidateSet(events, { V, rep, writer, dry, notAList, collect, signal }) {
   for await (const ev of events) {
+    halt(signal);
     if (ev.type === 'not-a-list') { notAList(ev); continue; }
     if (ev.type === 'header') {
       if (!V.header(ev.value)) rep.error('schema', `The document header does not match the PLATO JSON Schema: ${ajvMessage(V.header.errors)}`);
@@ -1044,7 +1069,7 @@ async function runCandidateSet(events, { V, rep, writer, dry, notAList, collect 
     if (dry) dry.record('candidates', ev.value);
     if (writer) {
       try { writer.candidate(ev.value); }
-      catch (e) { rep.error('record-failed', 'A record could not be written and is left out of the output; the rest of the file was still converted', `${ev.value?.['@id'] || `candidate ${ev.n}`}: ${e && e.message || e}`); }
+      catch (e) { if (e instanceof Aborted) throw e; rep.error('record-failed', 'A record could not be written and is left out of the output; the rest of the file was still converted', `${ev.value?.['@id'] || `candidate ${ev.n}`}: ${e && e.message || e}`); }
     }
   }
   if (writer) await writer.close();

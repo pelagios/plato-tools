@@ -82,11 +82,11 @@ export function problemOf(r) {
 
 const without = (o, ...keys) => Object.fromEntries(Object.entries(o).filter(([k]) => !keys.includes(k)));
 /** One of Agora's parts: its one output, of the type the operation gives. */
-const part = (name) => async ({ inputs, options, host }) => {
+const part = (name) => async ({ inputs, options, host, signal }) => {
   const [[slot, type]] = Object.entries(OPERATIONS[`publish.${name}`].gives);
   const input = await inputOf(inputs.dataset, host, 'dataset');
   const previous = inputs.previous ? await inputOf(inputs.previous, host, 'previous release') : undefined;
-  const r = await engine(host, type, (env) => publish({ part: name, input, previous, options }, env));
+  const r = await engine(host, type, (env) => publish({ part: name, input, previous, options: { ...options, signal } }, env));
   return r.problem ? r : { report: r.report, outputs: { [slot]: r.outputs } };
 };
 
@@ -120,7 +120,7 @@ export const REVIEWS = {
     if (!host.lookup) throw new Error('No gazetteer lookup was given: the lookup is made on the page thread, through the permissions module.');
     if (typeof reviewer !== 'function') throw new Error('The region review is the reviewer\'s: no reviewer was given to decide on the regions.');
     const subjects = await inputOf(inputs.subjects, host, 'dataset');
-    const g = await engine(host, null, (env) => gather({ subjects, options: {} }, env));
+    const g = await engine(host, null, (env) => gather({ subjects, options: { signal } }, env));
     if (g.problem) return g;
     if (!g.result.regions?.length) throw new DataError('The dataset gives no regions its places lie in: its table was converted without "within" columns, or without a base address, so there is nothing to identify level by level.');
     let work = partial?.work ? readWork(await (await filesFor(partial.work, host))[0].text()) : newWork(g.result.subjects, { reviewer: options.reviewer ?? null });
@@ -171,36 +171,36 @@ export const ADAPTERS = {
     const input = await inputOf(inputs.files, host, 'file');
     return { outputs: {}, report: { counts: { format: input.format }, errors: 0, items: [] } };
   },
-  async check({ inputs, host }) {
+  async check({ inputs, host, signal }) {
     const input = await inputOf(inputs.files, host, 'file');
     const columns = await columnsOf(inputs.mapping, host);
-    const r = await engine(host, null, (env) => run({ input, action: 'check', options: { ...(columns ? { columns } : {}) } }, env));
+    const r = await engine(host, null, (env) => run({ input, action: 'check', options: { ...(columns ? { columns } : {}), signal } }, env));
     return r.problem ? r : { report: r.report, outputs: {} };
   },
-  async convert({ inputs, options, host }) {
+  async convert({ inputs, options, host, signal }) {
     const input = await inputOf(inputs.files, host, 'file');
     const columns = await columnsOf(inputs.mapping, host);
-    const r = await engine(host, 'dataset', (env) => run({ input, action: 'convert', target: options.target, options: { ...without(options, 'target'), ...(columns ? { columns } : {}) } }, env));
+    const r = await engine(host, 'dataset', (env) => run({ input, action: 'convert', target: options.target, options: { ...without(options, 'target'), ...(columns ? { columns } : {}), signal } }, env));
     return r.problem ? r : { report: r.report, outputs: { dataset: r.outputs } };
   },
-  async compare({ inputs, host }) {
+  async compare({ inputs, host, signal }) {
     const earlier = await inputOf(inputs.earlier, host, 'earlier version'), later = await inputOf(inputs.later, host, 'later version');
-    const r = await engine(host, null, (env) => compare({ earlier, later }, env));
+    const r = await engine(host, null, (env) => compare({ earlier, later, options: { signal } }, env));
     return r.problem ? r : { report: r.report, outputs: {} };
   },
   'publish.report': part('report'),
   'publish.mint': part('mint'),
   'publish.site': part('site'),
   'publish.w3id': part('w3id'),
-  async match({ inputs, options, host }) {
+  async match({ inputs, options, host, signal }) {
     const subjects = await inputOf(inputs.subjects, host, 'dataset'), others = await inputOf(inputs.others, host, 'other dataset');
-    const r = await engine(host, 'work.krisis', (env) => match({ subjects, others, options }, env));
+    const r = await engine(host, 'work.krisis', (env) => match({ subjects, others, options: { ...options, signal } }, env));
     return r.problem ? r : { report: r.report, outputs: { work: r.outputs } };
   },
-  async apply({ inputs, options, host }) {
+  async apply({ inputs, options, host, signal }) {
     const subjects = await inputOf(inputs.subjects, host, 'dataset');
     const [work] = await filesFor(inputs.work, host);
-    const r = await engine(host, 'dataset', async (env) => apply({ subjects, work: await work.text(), options: { ...options, output: 'dataset' } }, env));
+    const r = await engine(host, 'dataset', async (env) => apply({ subjects, work: await work.text(), options: { ...options, output: 'dataset', signal } }, env));
     return r.problem ? r : { report: r.report, outputs: { dataset: r.outputs } };
   },
   // The lookup is made on the page thread, through the permissions module (host.lookup); the places
@@ -215,7 +215,7 @@ export const ADAPTERS = {
     const subjects = await inputOf(inputs.subjects, host, 'dataset');
     const from = partial?.work || inputs.work;
     const work = from ? readWork(await (await filesFor(from, host))[0].text()) : null;
-    const g = await engine(host, null, (env) => gather({ subjects, options: {} }, env));
+    const g = await engine(host, null, (env) => gather({ subjects, options: { signal } }, env));
     if (g.problem) return g;
     // After the region review (its work file handed on), the places are looked up within their regions,
     // each constrained by the nearest matched region above it (runPlaces), as the page's "Look up the
@@ -236,7 +236,7 @@ export const ADAPTERS = {
   // authority's record, points at the candidate it answers (promotedFrom); then the decisions are
   // applied. A review whose regions have no address of their own is refused in words. The candidate
   // set is made for the dataset's own address, else the base address the table was converted under.
-  async 'relate.containment'({ inputs, options, host }) {
+  async 'relate.containment'({ inputs, options, host, signal }) {
     const subjects = await inputOf(inputs.subjects, host, 'dataset');
     const [wf] = await filesFor(inputs.work, host);
     let work = readWork(await wf.text());
@@ -253,7 +253,7 @@ export const ADAPTERS = {
     if (after) throw new Error(`The candidates were exported and still: ${after}`);
     const stem = subjects.files[0].name.replace(/\.[^.]+$/, '');
     const r = await engine(host, 'dataset', async (env) => {
-      const a = await apply({ subjects, work: serialiseWork(work), options: { ...without(options, 'issued'), output: 'dataset' } }, env);
+      const a = await apply({ subjects, work: serialiseWork(work), options: { ...without(options, 'issued'), output: 'dataset', signal } }, env);
       if (a.incomplete || a.report?.errors) return a;
       if (x.set) { const o = await env.output(`${stem}.candidates.json`); o.write(serialiseCandidateSet(x.set)); await o.close(); }
       return a;

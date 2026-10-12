@@ -157,6 +157,27 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   `src/engine/input.js`; `run()` turns it into a problem in the report, marked incomplete. A new
   reader must throw `DataError` for bad input, or a fault in the data will look like a fault in
   the tools, which is the only thing shown as one.
+- **Stopping a run.** `options.signal`, an `AbortSignal`, stops `run()` at the next record: checked
+  (`halt`, throwing `Aborted`) at the top of every loop over the records, as they stream, as they are
+  loaded into the store and read back from it, the rows of a spreadsheet's sheets as they are loaded
+  and checked, the passes made first (withdrawals, regions) and a candidate set's candidates. Its
+  outputs are closed and none recorded, its store closed (in a `finally`, however the reading ends),
+  and it returns `incomplete` and `aborted`, the report saying it was stopped (`RUN_TEXT` in
+  `words.js`); a host then removes what it had begun, as for a file cut short. An `Aborted` thrown by
+  an augment or a writer stops it too, and is not a record that failed. `compare()` passes the signal
+  to both its readings and says it was stopped, not that a version could not be read; Krisis's match
+  and apply and Agora's readings pass it on too. Methodos's adapters give each engine call the step's
+  signal, so cancelling a step (`runStep(state, host, { signal })`) stops its run at the next record
+  and keeps nothing it wrote (`test/methodos.test.js`). A long SQLite step (indexing the store) is not
+  interrupted: the stop comes when it ends. The page's Cancel still ends the worker, which stops at
+  once even there (a worker busy in a run takes no message until it yields, so a signal from the page
+  would wait for the step). The browser lets go of an ended worker's files only some time after (1.6 s
+  in a measured case, 12 October 2026), and a run begun before then was refused its working files, as if
+  another tab held them; so the new worker removes the half-written output from the outputs folder in
+  OPFS, and takes up the pool of working files and lets it go, each tried again until it can be, for up
+  to 15 s (`afterCancel` in `worker.js`), before it says it is ready, and the page's buttons wait for
+  that (`restarting` in `src/app.js`). The page offers nothing of the run. Tested in
+  `test/abort.test.js`, and on the page by `cancel_case` and Methodos's `cancelled` in `e2e/app_test.py`.
 - **Text is UTF-8, strictly.** Every text input is decoded by `textStream` (or, for a sheet in a
   zip, `zipEntryText`) with a fatal decoder: a byte that is not UTF-8 is a `DataError` naming the file,
   the line and the byte, and saying how to save it as UTF-8, never a replacement character. A
@@ -2444,7 +2465,9 @@ page's interview and tracker (below); keeping a workflow beyond the tab is phase
   environment, `file(output)` for what the run wrote, and, for the lookup, a lookup made on the page
   thread through the permissions module. `drive()` runs the automatic steps until the workflow waits,
   stops, fails or completes. A run whose report counts errors stops the workflow but keeps what it
-  wrote, as the page and the command line do; one that did not finish leaves nothing. A permission
+  wrote, as the page and the command line do; one that did not finish leaves nothing. Each engine call
+  is given the step's `signal` (`runStep`'s), so a step cancelled stops its run at the next record, a run
+  that did not finish, and keeps nothing it wrote (see "Stopping a run", above). A permission
   still to decide, set to Never, or needing a reload is waiting; any other refusal is a failure.
 
 `test/methodos.test.js` drives "Publish a dataset" through the real engine on PLATO's Antonine example
@@ -2775,7 +2798,8 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   parts, so about the size of the file in UTF-8, on top of what the conversion and the check need. A
   very large dataset may need the attestations-only output instead.
 - **A long SQLite step cannot be interrupted** from the command line: Ctrl-C takes effect when it
-  ends.
+  ends. Nor by a stop between records (`options.signal`), which comes when it ends; the page's Cancel,
+  which ends the worker, stops at once.
 - **Memory that grows with the named things written.** Streaming keeps memory flat in the number
   of records, except for two sets that grow, linearly, with the distinct addresses written: with
   `--typing`, `Json2Rdf` keeps each named node it has typed (`typedNamed`, one set of addresses per

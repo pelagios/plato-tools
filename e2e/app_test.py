@@ -1945,6 +1945,52 @@ def download(page, name, dest):
         page.evaluate(f'window.__plato_save({json.dumps(name)})')
     d.value.save_as(dest); return pathlib.Path(dest)
 
+def many_places(tmp, copies):
+    """PLATO's Antonine example, its places `copies` times over, each copy under an address of its own: a
+    run long enough to be stopped part-way (1,000 copies: 11,000 places, 40 MB)."""
+    path = tmp / f'many-{copies}.json'
+    if not path.exists():
+        d = json.loads((PLATO / 'schemas/examples/place-centric-antonine.json').read_text())
+        places = json.dumps(d['spatialEntities'])
+        d['spatialEntities'] = [p for i in range(copies) for p in json.loads(places.replace('https://whgazetteer.org/example/antonine/', f'https://whgazetteer.org/example/antonine/c{i}/'))]
+        path.write_text(json.dumps(d))
+    return path
+
+# The names of the files in the main page's outputs folder in the browser's storage (OPFS): [] only when there
+# is no such folder. Any other failure to read it is given as ['error: <name>'], never as an empty folder,
+# so that "nothing left" cannot pass on a listing that failed; a listing is tried three times.
+OUTPUTS_LIST = '''async () => { let last;
+  for (let i = 0; i < 3; i++) {
+    try { const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('outputs'); const n = []; for await (const [k] of d.entries()) n.push(k); return n.sort(); }
+    catch (e) { if (e?.name === 'NotFoundError') return []; last = e; await new Promise((r) => setTimeout(r, 50)); }
+  }
+  return ['error: ' + (last?.name || last)]; }'''
+
+def cancel_case(page, tmp):
+    """A conversion cancelled while it writes, then the same conversion let finish (the presence)."""
+    big = many_places(tmp, 1000)
+    name = big.name.replace('.json', '.nt')
+    page.set_input_files('#picker', [str(big)])
+    s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), 60, 'detection')
+    if s.get('phase') != 'detected': return False, s
+    page.select_option('#target', 'ntriples')
+    page.click('#convert')
+    # Under way: its output begun in the browser's storage, and places read; not done.
+    # The listing that found the file is kept by the wait itself, as it held: one made after may differ.
+    until(page, f"async () => {{ const n = await ({OUTPUTS_LIST})(); const ok = n.includes({json.dumps(name)}) && (window.__plato.progress?.places || 0) > 0 && window.__plato.phase === 'running'; if (ok) window.__during = n; return ok; }}", 120)
+    got = {'during': page.evaluate('() => window.__during || []'), 'places read': page.evaluate('() => window.__plato.progress?.places')}
+    page.click('#cancel')
+    after = wait_state(page, lambda s: s.get('phase') == 'ready', 60, 'ready after Cancel')
+    got.update({'after Cancel': after.get('phase'), 'left': page.evaluate(OUTPUTS_LIST), 'offered': after.get('outputs'),
+                'result shown': page.evaluate("() => !document.getElementById('result').hidden")})
+    page.click('#convert')
+    done = wait_state(page, lambda s: s.get('phase') in ('done', 'error'), 600, 'run')
+    got.update({'let finish': done.get('phase'), 'error': done.get('error'), 'places': (done.get('report') or {}).get('counts', {}).get('places'),
+                'its outputs': [o['name'] for o in done.get('outputs') or []], 'kept': page.evaluate(OUTPUTS_LIST)})
+    ok = (name in got['during'] and 0 < got['places read'] < 11000 and got['after Cancel'] == 'ready' and got['left'] == [] and not got['offered']
+          and not got['result shown'] and got['let finish'] == 'done' and got['places'] == 11000 and got['its outputs'] == [name] and got['kept'] == [name])
+    return ok, got
+
 def agora_checks(page, tmp):
     """Agora, the page's publishing action (the part chosen in #part, then Prepare): one check per part,
     each on a dataset of its own, each finding its output by opening what the page saves."""
@@ -2257,6 +2303,8 @@ def main():
             ok = s.get('phase') == 'done' and s.get('outputs')
             nt = download(page, s['outputs'][0]['name'], tmp / 'c.nt').read_text() if ok else ''
             check('Constantinople JSON -> N-Triples: triples written and saved', ok and nt.count(' .\n') > 50 and 'attests_about' in nt, s if not ok else nt[:200])
+            attempt('Cancel during a conversion: the run stops, and the half-written file it had begun in the browser\'s storage is removed, not offered; let finish, the same conversion\'s file is there and offered',
+                    lambda: cancel_case(page, tmp))
             # A source's denial (plato:negated) must never reach LPF as an assertion: Littleworth
             # had no market, so its feature must carry no market, and the page must say why.
             s = run_case(page, [PLATO / 'schemas/examples/place-centric-judgements.json'], 'convert', 'lpf')
@@ -2948,6 +2996,38 @@ def methodos_join_checks(browser, base, hook, tmp):
             return ok, got
         finally: ctx.close()
     attempt('Methodos: a step whose run fails says so in the tracker ("Failed: …, run this step again"), and run again it is done', failed)
+
+    def cancelled():
+        # The check, a step of the workflow, cancelled with the page's Cancel part-way through a long file:
+        # the run ends there (no more progress, nothing reported), and the tracker says the step was stopped
+        # by the user, the step after it still to come; run again and let finish, the same step is done.
+        ctx = fresh()
+        try:
+            p = ready(ctx.new_page())
+            big = many_places(tmp, 1000)
+            follow_publish(p)
+            if not choose(p, [big]): return False, 'not detected'
+            until(p, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+            p.click('#check')
+            until(p, "() => (window.__plato.progress?.places || 0) > 0 && window.__plato.phase === 'running'", 120)
+            got = {'places read': p.evaluate('() => window.__plato.progress?.places')}
+            p.click('#cancel')
+            got['progress at Cancel'] = p.evaluate('() => window.__plato.progress?.places')
+            until(p, "document.getElementById('methodos-tracker').dataset.status === 'cancelled'", 15)
+            got['cancelled'] = js(p)
+            s = wait_state(p, lambda s: s.get('phase') == 'ready', 60, 'ready after Cancel')
+            p.wait_for_timeout(1000)   # a run not stopped would report, or move on, in this time
+            got['after'] = {'phase': s.get('phase'), 'report': s.get('report'), 'progress': p.evaluate('() => window.__plato.progress?.places'), 'tracker': js(p)}
+            got['again'] = run(p, '#check').get('phase'); step_is(p, 'check', 'done')
+            got['done'] = js(p); got['places'] = (wait_state(p, lambda s: s.get('phase') == 'done', 5).get('report') or {}).get('counts', {}).get('places')
+            c, a = got['cancelled'], got['after']
+            ok = (0 < got['places read'] < 11000 and c['status'] == 'cancelled' and 'cancelled' in c['steps']['check'] and (c['run'] or '').startswith('Stopped by you')
+                  and c['steps']['mint'] not in ('done', 'current') and a['phase'] == 'ready' and a['report'] is None and a['progress'] == got['progress at Cancel']
+                  and a['tracker']['steps'] == c['steps'] and got['again'] == 'done' and got['places'] == 11000
+                  and got['done']['steps']['check'] == 'done' and got['done']['steps']['mint'] == 'current')
+            return ok, got
+        finally: ctx.close()
+    attempt('Methodos: a step\'s run cancelled part-way (the page\'s Cancel) ends there, the tracker says "Stopped by you" and nothing more is done; run again and let finish, the step is done', cancelled)
 
     def handed_back():
         # Back from Chora (#workflow=<id>): the workflow named is taken up at its step "place", and the

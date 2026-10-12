@@ -56,11 +56,16 @@ let engineReady; const whenReady = new Promise((r) => { engineReady = r; });
 const BUILD = Object.values(import.meta.glob('./build-info.json', { eager: true, import: 'default' }))[0] || {};
 const INPUT_TO_TARGET = { tables: 'tables', 'plato-json': 'plato-json', 'plato-jsonl': 'plato-jsonl', ntriples: 'ntriples', lpf: 'lpf', 'lpf-seq': 'lpf-seq' };
 
-function startWorker() {
+// Started again after Cancel: the buttons wait for the new worker to say it is ready, having removed
+// what the run it replaced had begun writing and found the working files free (worker.js, afterCancel).
+let restarting = false;
+/** `clear`: after Cancel, the new worker removes what the run it ended had begun writing (worker.js, init). */
+function startWorker({ clear = false } = {}) {
+  restarting = clear;
   worker = new Worker(new URL('./engine/worker.js', import.meta.url), { type: 'module' });
   worker.onmessage = onMessage;
   worker.onerror = (e) => fail(`The engine stopped: ${e.message || 'unknown error'}`);
-  worker.postMessage({ cmd: 'init', base: new URL('./', location.href).href });
+  worker.postMessage({ cmd: 'init', base: new URL('./', location.href).href, ...(clear ? { clear: true } : {}) });
 }
 function onMessage({ data }) {
   if (data.type === 'ready') {
@@ -71,6 +76,7 @@ function onMessage({ data }) {
     readingCaps = { editorial: !!data.reading?.editorial };
     Object.assign(state, { phase: 'ready', platoCommit: v.commit, platoDraft: v.draft ? v.ref : null });
     engineReady(true);
+    if (restarting) { restarting = false; buttons(false); }
   } else if (data.type === 'detected') onDetected(data);
   else if (data.type === 'progress') onProgress(data);
   else if (data.type === 'done') onDone(data);
@@ -885,7 +891,12 @@ $('check-candidates').onclick = () => $('candidate-sets').click();
 $('candidate-sets').onchange = (e) => { const sets = [...e.target.files]; e.target.value = ''; if (sets.length) start('check', sets); };
 $('earlier').onchange = (e) => { const earlier = [...e.target.files]; e.target.value = ''; if (earlier.length) start('compare', earlier); };
 $('publish').onclick = () => start('publish');
-$('cancel').onclick = () => { worker.terminate(); busy = false; if (runOp) { methodos.ended({ op: runOp, cancelled: true }); runOp = null; } $('progress').hidden = true; clearPreview(); buttons(false); Object.assign(state, { phase: 'cancelled' }); startWorker();
+// Cancel ends the worker, which stops its run at once, even in a long SQLite step, where a stop between
+// records (run()'s options.signal, which Methodos's adapters pass on) would wait for the step to end: a
+// worker busy in a run takes no message until it yields. Methodos is told the step was cancelled. The new
+// worker removes the half-written output, and waits for the ended worker's working files to be free,
+// before it says it is ready, when the buttons come back: a run begun sooner was refused those files.
+$('cancel').onclick = () => { worker.terminate(); busy = false; if (runOp) { methodos.ended({ op: runOp, cancelled: true }); runOp = null; } $('progress').hidden = true; clearPreview(); buttons(true); Object.assign(state, { phase: 'cancelled' }); startWorker({ clear: true });
   // Krisis: an answer about the columns still being worked out went with the worker: it is asked for again, as it was
   // (for a resumed review, by the matching the review was made with), or Match and Finish would wait for it for ever.
   if (columnsPending()) { const forReview = reviewColumnsAsked === columnsAsked; requestColumns(columnsSaved, columnsFrom); if (forReview) reviewColumnsAsked = columnsAsked; } };

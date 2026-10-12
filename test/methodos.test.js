@@ -12,7 +12,7 @@ import { openSqlite } from '../src/lib/store.js';
 import { res } from './engine.js';
 import { PLATO_REPO } from './paths.js';
 import { DataError } from '../src/engine/input.js';
-import { OPERATIONS, RECIPES, TYPES, HandoffError, RecipeError, checkRecipe, digest, refsOf, runner, drive, ADAPTERS, stoppingKind } from '../src/engine/methodos/index.js';
+import { OPERATIONS, RECIPES, TYPES, HandoffError, RecipeError, checkRecipe, digest, refsOf, runner, drive, runStep, ADAPTERS, stoppingKind } from '../src/engine/methodos/index.js';
 
 const { start, serialise, deserialise, TransitionError } = runner;
 // Every transition the tests call is called through this, which asserts that it left the state it was given unchanged.
@@ -420,3 +420,43 @@ test("a lookup stopped by the service part-way keeps the answers received, and d
   assert.equal(waited.state.status, 'waiting');
   assert.equal(waited.state.steps[0].partial, undefined);
 });
+
+// ---- A step cancelled stops the engine's run at the next record --------------------------------------
+
+/** Antonine's places 300 times over, each copy under an address of its own: a run long enough to stop. */
+function manyPlaces(copies = 300) {
+  const d = JSON.parse(readFileSync(join(PLATO_REPO, 'schemas/examples/place-centric-antonine.json'), 'utf8'));
+  const places = JSON.stringify(d.spatialEntities);
+  d.spatialEntities = Array.from({ length: copies }, (_, i) => JSON.parse(places.replaceAll('https://whgazetteer.org/example/antonine/', `https://whgazetteer.org/example/antonine/c${i}/`))).flat();
+  return new File([JSON.stringify(d)], 'many.json');
+}
+for (const op of ['convert', 'check']) {
+  test(`a ${op} step cancelled part-way stops the run at the next record, and keeps nothing it wrote`, async () => {
+    const input = manyPlaces();
+    const steps = [{ id: 'step', op, from: { files: '$files' }, ...(op === 'convert' ? { options: { target: 'plato-jsonl' } } : {}) }];
+    for (const stopping of [true, false]) {
+      const host = memoryHost([input]);
+      const ac = new AbortController();
+      // The run's first beat of progress comes as its first record is read: the step is cancelled there.
+      const env = host.env;
+      host.env = () => { const e = env(); e.env.progress = (p) => { if (stopping && p.phase === 'reading') ac.abort(); }; return e; };
+      const s = next(start(recipe(steps), {}, { files: await refsOf([input], 'files') }));
+      const { state, report } = await runStep(s, host, { signal: ac.signal });
+      const step = state.steps[0];
+      const written = [...host.store.keys()].filter((n) => n !== 'many.json');
+      if (stopping) {
+        assert.deepEqual([state.status, step.state], ['cancelled', 'cancelled']);
+        // Stopped by the run itself, at the next record: not read to the end and then thrown away.
+        assert.ok(report.items.some((i) => i.kind === 'stopped'), JSON.stringify(report.items.map((i) => i.kind)));
+        assert.ok(report.counts.places < 3300 && report.counts.places >= 1, `${report.counts.places} places read`);
+        assert.deepEqual(written, [], 'nothing it wrote is kept');
+        assert.equal(step.discarded, undefined, 'and nothing is left for the host to remove');
+      } else {
+        // Control: not cancelled, the same step reads every place and keeps what it wrote.
+        assert.deepEqual([state.status, step.state], ['idle', 'done']);
+        assert.equal(report.counts.places, 3300);
+        assert.deepEqual(written, op === 'convert' ? ['many.jsonl'] : []);
+      }
+    }
+  });
+}

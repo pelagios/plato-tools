@@ -283,7 +283,7 @@ async function writeDataset({ subjects, made, work, options, sets = [] }, env, r
   // The candidate sets the answers point into go into the header as it is written (the pipeline hands
   // a caller each record, not the header): withCandidateSets says what it found there.
   const header = { found: !sets.length, id: true };
-  const r = await run({ input: subjects, action: 'convert', target: 'plato-json', options: { name, base: options.base, columns: options.columns, augment } }, withCandidateSets(teeing(env, kept), name, sets, header, work.subjects.uri));
+  const r = await run({ input: subjects, action: 'convert', target: 'plato-json', options: { name, base: options.base, columns: options.columns, augment, signal: options.signal } }, withCandidateSets(teeing(env, kept), name, sets, header, work.subjects.uri));
   if (!header.found) rep.error('candidate-sets-not-written', KRISIS_CANDIDATES.setsNotWritten);
   else if (!header.id) rep.error('no-gazetteer-id', KRISIS_CANDIDATES.noGazetteerId);
   // What the conversion says of the dataset. Its own problems are its own, not the review's: they

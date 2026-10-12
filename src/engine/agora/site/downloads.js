@@ -33,7 +33,7 @@ export async function writeDownload(tree, d, { input, env, options, stem }) {
     };
   };
   // The typing N-Triples has by default on the page and the command line (node types, typed dates).
-  const r = await run({ input, action: 'convert', target: d.target, options: { base: options.base, name: options.name, typing: true } }, { ...env, progress: env.progress ? (p) => env.progress({ ...p, phase: `download ${file}: ${p.phase}` }) : undefined, output });
+  const r = await run({ input, action: 'convert', target: d.target, options: { base: options.base, name: options.name, typing: true, signal: options.signal } }, { ...env, progress: env.progress ? (p) => env.progress({ ...p, phase: `download ${file}: ${p.phase}` }) : undefined, output });
   // A conversion that stops part-way opens its output and never closes it; the tree allows one
   // file open at a time, so close it here, and say the download is incomplete.
   if (r.incomplete && opened) { try { await opened.close(); } catch { /* already closed */ } }
