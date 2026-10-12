@@ -5646,16 +5646,19 @@ def chora_vague_checks(page, base, tmp):
         chora_boot(page, base, [fixture(VAGUE, 'vague-key.json', tmp)])
         hidden_before = page.evaluate('() => document.getElementById("map-key")?.hidden')
         chora_pick(page, 'old ford')
+        # Closed at first, so that it covers none of the map; a click on its line opens it.
+        closed = page.evaluate('() => !document.getElementById("map-key").open')
+        page.click('#map-key summary')
         rows = page.evaluate('() => { ' + PIXELS + ''' return [...document.querySelectorAll('#map-key li[data-key]')].map((li) => { const c = li.querySelector('canvas'), r = li.getBoundingClientRect();
           return { key: li.dataset.key, text: li.textContent.replace(/\\s+/g, ' ').trim(), shown: r.width > 0 && r.height > 0, svg: !!li.querySelector('svg'),
             ...(c ? sum(c.getContext('2d').getImageData(0, 0, c.width, c.height).data) : { ink: 0, h: null }) }; }); }''')
         by = {r['key']: r for r in rows}
-        ok = (hidden_before is True and len(values) >= 4
+        ok = (hidden_before is True and closed and len(values) >= 4
               and all(v in by and by[v]['shown'] and by[v]['ink'] > 50 and v.replace('_', ' ') in by[v]['text'].lower() for v in values)
               and len({by[v]['h'] for v in values if v in by}) == len(values)
               and 'circle' in by and by['circle']['svg'] and by['circle']['shown'] and 'none' in by)
-        return ok, {'PLATO values': values, 'rows': rows, 'hidden before a place': hidden_before}
-    attempt("Chora: the map's key has an entry for each spatialPrecision PLATO defines, each drawn and none alike, and one for the circle, shown once a place is", key_entries)
+        return ok, {'PLATO values': values, 'rows': rows, 'hidden before a place': hidden_before, 'closed at first': closed}
+    attempt("Chora: the map's key has an entry for each spatialPrecision PLATO defines, each drawn and none alike, and one for the circle, shown once a place is, and opened by a click", key_entries)
 
     def card_words():
         chora_boot(page, base, [fixture(VAGUE, 'vague-card.json', tmp)]); chora_pick(page, 'roughly north')
@@ -6420,8 +6423,8 @@ def chora_checks(pw, url, tmp):
         trap = {'imgs': page.eval_on_selector_all('#card img', 'x => x.length'), 'pwned': page.evaluate('() => window.__pwned ?? null'), 'card': page.inner_text('#card')}
         chora_pick(page, 'control'); ctl = page.inner_text('#card')
         # The control: a radius that is a number is shown; the subject: the card was the trapdoor's, and holds a location.
-        return (trap['imgs'] == 0 and trap['pwned'] is None and 'Trapdoor' in trap['card'] and 'Point' in trap['card'] and '±' not in trap['card']
-                and '(±12.5 km)' in ctl), {'trapdoor': trap, 'control card': ctl[:300]}
+        return (trap['imgs'] == 0 and trap['pwned'] is None and 'Trapdoor' in trap['card'] and 'Point' in trap['card'] and 'to within' not in trap['card']
+                and 'Point, to within 12.5 km' in ctl), {'trapdoor': trap, 'control card': ctl[:300]}
     attempt('Chora: a place card shows a radius only when it is a number, and markup in a dataset is never run (a numeric one is shown)', markup_not_run)
     def draw_and_save(name, place, make=None):
         f = (make or odd_dataset)(name); chora_boot(page, base, [f]); chora_pick(page, place)

@@ -1271,7 +1271,8 @@ const mapApi = createMap($('map'), { state, onPlaceClick: (id) => selectPlace(id
 
 // ---- The map's key: how well a location is known (src/chora/vague.js) ------------------------------
 // Each mark drawn by the function that draws it on the map, around the disc of a point asserted, as the
-// map draws it; the circle as the map edges it. Open on a wide screen, a line to open on a narrow one.
+// map draws it; the circle as the map edges it. Closed at first, one line to open, so that it covers
+// none of the map until it is wanted.
 function renderKey() {
   const ink = STATUS_COLOURS.asserted, half = MARK_SIZE / 2;
   const circle = `<svg viewBox="0 0 ${MARK_SIZE} ${MARK_SIZE}"><circle cx="${half}" cy="${half}" r="15" fill="${ink}" fill-opacity=".1" stroke="${ink}" stroke-width="2" stroke-linecap="round" stroke-dasharray="0.1 5"/><circle cx="${half}" cy="${half}" r="3" fill="${ink}"/></svg>`;
@@ -1285,7 +1286,6 @@ function renderKey() {
     ctx.beginPath(); ctx.arc(half, half, 8.25, 0, 2 * Math.PI); ctx.fillStyle = ink; ctx.fill();
     drawMark(ctx, c.closest('li').dataset.key, MARK_SIZE);
   }
-  $('map-key').open = !matchMedia('(max-width: 52rem)').matches;
 }
 renderKey();
 mapApi.onDraw({

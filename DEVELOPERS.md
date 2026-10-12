@@ -1780,8 +1780,9 @@ and reaches nothing.
   - **The key**, `#map-key` at the map's lower right, shown once a place is: each mark around the disc
     of a point as the map draws it, the circle, and "No mark", each named in words with PLATO's gloss
     (`keyRows`). Its symbols sit on a patch of the basemap's grey in both themes, as the map itself
-    does not change with the theme; the panel round them follows it. Open on a wide screen, a line to
-    open on a narrow one (below 52rem, where it moves to the top right).
+    does not change with the theme; the panel round them follows it. Closed at first, one line to open,
+    so that it covers none of the map until it is wanted (open, it took a corner of the map that a
+    click to draw could land on); below 52rem it is at the top right.
   - **The card** names the precision in words with PLATO's gloss and how far out the location may be:
     "Point, approximate (estimated from maps or descriptions), to within 25 km", "to within 10 m"
     below a kilometre (`precisionWords` in `card.js`). A value PLATO does not define is written as given.
