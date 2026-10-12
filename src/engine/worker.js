@@ -122,11 +122,14 @@ async function outputsDir(clear, name = 'outputs') {
 }
 /**
  * After Cancel ended the worker before this one in a run (the main page's only): remove the outputs
- * folder, and take up the pool of working files and let it go, each tried again every 100 ms while a
- * file is still held by the worker just ended, for up to `ms` in all. Returns how long it took, or null.
+ * folder, tried again every 100 ms while a file in it is still held by the worker just ended; then take
+ * up the pool of working files and let it go, for up to `ms` in all. Returns how long it took, or null.
+ * A take-up refused is tried again only 1.2 s after, as sqlitePool() does after a refusal: sqlite-wasm
+ * asks for every file's handle at once and keeps the grants that come after the refusal, so a try made
+ * sooner could be refused by this worker's own strays, which a try every 100 ms would never outwait.
  */
 async function afterCancel(ms = 15000) {
-  const t0 = Date.now(), later = () => new Promise((r) => setTimeout(r, 100));
+  const t0 = Date.now(), later = (wait = 100) => new Promise((r) => setTimeout(r, wait));
   const root = await navigator.storage.getDirectory();
   for (;;) {
     try { await root.removeEntry('outputs', { recursive: true }); break; }
@@ -134,7 +137,7 @@ async function afterCancel(ms = 15000) {
   }
   for (;;) {
     try { await sqlitePool(); pool.vfs.pauseVfs(); return Date.now() - t0; }
-    catch (e) { if (e?.kind !== 'pool-busy' || Date.now() - t0 > ms) return null; await later(); }
+    catch (e) { if (e?.kind !== 'pool-busy' || Date.now() - t0 > ms) return null; await later(1200); }
   }
 }
 async function output(dir, name) {
@@ -207,10 +210,11 @@ self.onmessage = async ({ data }) => {
       // until the next run; and the working files that run held are taken up and let go, so that the
       // next run finds them free. The browser lets go of an ended worker's access handles some time
       // after, not at once, so each is tried again for a while (afterCancel); the page's buttons wait
-      // for 'ready'. Failing that, the next run removes the file, or says the files are in use.
-      if (data.clear) { const took = await afterCancel(); if (took === null || took > 1000) console.info(`PLATO tools: the working files were free again ${took === null ? 'not within 15 s' : `after ${took} ms`}`); }
+      // for 'ready'. Failing that, 'ready' says so (`releasing`), and the page says to try again soon.
+      let releasing = false;
+      if (data.clear) { const took = await afterCancel(); releasing = took === null; if (releasing || took > 1000) console.info(`PLATO tools: the working files were free again ${releasing ? 'not within 15 s' : `after ${took} ms`}`); }
       // Whether the TEI reading options for the editors' words may be offered (while EDITORIAL_IRI is set, as it is).
-      postMessage({ type: 'ready', version: resources.version, reading: { editorial: EDITORIAL_IRI !== null } });
+      postMessage({ type: 'ready', version: resources.version, reading: { editorial: EDITORIAL_IRI !== null }, ...(releasing ? { releasing: true } : {}) });
     } else if (data.cmd === 'detect') {
       const input = await detect(data.files);
       // File objects stay here; the page is told what was found, and the run detects the files again.

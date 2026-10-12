@@ -9,7 +9,7 @@ import { pastedListFile } from './engine/hermes/pasted.js';
 // Hermes: grouping similar spellings for lookup, a panel of its own (src/hermes-spellings.js).
 import { spellingsPanel } from './hermes-spellings.js';
 import { splitMatching } from './engine/hermes/cluster.js';
-import { review as W, POOL_BUSY, POOL_STUCK, PREVIEW_WORDS } from './engine/words.js';
+import { review as W, POOL_BUSY, POOL_STUCK, PREVIEW_WORDS, CANCEL_RELEASING } from './engine/words.js';
 const REVIEW_WORDS = W;   // the review's words, where W names the words for the columns
 import { readable } from './engine/input.js';
 import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions, flag, noteOn, setRowState } from './engine/krisis/work.js';
@@ -49,19 +49,30 @@ let runOp = null;   // the Methodos operation of the run under way (src/methodos
 // The engine is ready (its first 'ready' message): a file Methodos chooses on load waits for it, or the
 // page's 'ready' would come after, and over, the file's detection. An engine that fails settles it too,
 // with false, so that nothing waits on it for ever.
-let engineReady; const whenReady = new Promise((r) => { engineReady = r; });
+// A fresh promise for each worker started (startWorker): one awaited before a Cancel follows the new worker.
+let engineReady = null, whenReady = null;
+function renewReady() {
+  const before = engineReady;
+  whenReady = new Promise((r) => { engineReady = r; });
+  before?.(whenReady);
+}
+renewReady();
 
 // The commit of PLATO tools this page was built from (scripts/build-info.mjs writes it before the
 // build), for the site's workflow to run the same; absent from a build made without it.
 const BUILD = Object.values(import.meta.glob('./build-info.json', { eager: true, import: 'default' }))[0] || {};
 const INPUT_TO_TARGET = { tables: 'tables', 'plato-json': 'plato-json', 'plato-jsonl': 'plato-jsonl', ntriples: 'ntriples', lpf: 'lpf', 'lpf-seq': 'lpf-seq' };
 
-// Started again after Cancel: the buttons wait for the new worker to say it is ready, having removed
-// what the run it replaced had begun writing and found the working files free (worker.js, afterCancel).
-let restarting = false;
+// Started again after Cancel, the page is busy (`busy`, which every way to the worker checks) until the
+// new worker says it is ready, having removed what the run it replaced had begun writing and found the
+// working files free (worker.js, afterCancel). If they were still held when it gave up waiting, it says
+// so (`releasing`), and so does the page, beside the buttons, until a run finishes.
+let restarting = false, releasing = false;
+const saysReleasing = (on) => { releasing = on; $('releasing').textContent = on ? CANCEL_RELEASING : ''; $('releasing').hidden = !on; };
 /** `clear`: after Cancel, the new worker removes what the run it ended had begun writing (worker.js, init). */
 function startWorker({ clear = false } = {}) {
   restarting = clear;
+  if (clear) renewReady();
   worker = new Worker(new URL('./engine/worker.js', import.meta.url), { type: 'module' });
   worker.onmessage = onMessage;
   worker.onerror = (e) => fail(`The engine stopped: ${e.message || 'unknown error'}`);
@@ -76,7 +87,7 @@ function onMessage({ data }) {
     readingCaps = { editorial: !!data.reading?.editorial };
     Object.assign(state, { phase: 'ready', platoCommit: v.commit, platoDraft: v.draft ? v.ref : null });
     engineReady(true);
-    if (restarting) { restarting = false; buttons(false); }
+    if (restarting) { restarting = false; busy = false; saysReleasing(!!data.releasing); buttons(false); }
   } else if (data.type === 'detected') onDetected(data);
   else if (data.type === 'progress') onProgress(data);
   else if (data.type === 'done') onDone(data);
@@ -87,7 +98,7 @@ function onMessage({ data }) {
   else if (data.type === 'preview') onPreview(data);
   else if (data.type === 'cluster') spellings.answer(data);   // Hermes: groups of similar spellings
   // Another tab of the main page is running: said in words, and the run may be tried again.
-  else if (data.type === 'error' && data.kind === 'pool-busy') fail(data.message, POOL_BUSY);
+  else if (data.type === 'error' && data.kind === 'pool-busy') fail(data.message, releasing ? CANCEL_RELEASING : POOL_BUSY);
   // This tab could not let go of the working files: no other tab is to blame, and a reload frees them.
   else if (data.type === 'error' && data.kind === 'pool-stuck') fail(data.message, POOL_STUCK);
   else if (data.type === 'error') fail(data.message);
@@ -230,6 +241,7 @@ function onProgress(p) {
 }
 function onDone({ report, outputs, work: found, incomplete }) {
   busy = false;
+  if (releasing) saysReleasing(false);
   if (runOp) { methodos.ended({ op: runOp, report, outputs: outputs || [], incomplete: !!incomplete }); runOp = null; }
   buttons(false);
   $('progress').hidden = true; $('result').hidden = false;
@@ -896,7 +908,7 @@ $('publish').onclick = () => start('publish');
 // worker busy in a run takes no message until it yields. Methodos is told the step was cancelled. The new
 // worker removes the half-written output, and waits for the ended worker's working files to be free,
 // before it says it is ready, when the buttons come back: a run begun sooner was refused those files.
-$('cancel').onclick = () => { worker.terminate(); busy = false; if (runOp) { methodos.ended({ op: runOp, cancelled: true }); runOp = null; } $('progress').hidden = true; clearPreview(); buttons(true); Object.assign(state, { phase: 'cancelled' }); startWorker({ clear: true });
+$('cancel').onclick = () => { worker.terminate(); busy = true; if (runOp) { methodos.ended({ op: runOp, cancelled: true }); runOp = null; } $('progress').hidden = true; clearPreview(); buttons(true); Object.assign(state, { phase: 'cancelled' }); startWorker({ clear: true });
   // Krisis: an answer about the columns still being worked out went with the worker: it is asked for again, as it was
   // (for a resumed review, by the matching the review was made with), or Match and Finish would wait for it for ever.
   if (columnsPending()) { const forReview = reviewColumnsAsked === columnsAsked; requestColumns(columnsSaved, columnsFrom); if (forReview) reviewColumnsAsked = columnsAsked; } };

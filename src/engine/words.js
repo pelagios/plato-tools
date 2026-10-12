@@ -664,6 +664,8 @@ export const choraConsultedNote = (r) =>
  * tab at a time hold them (src/engine/worker.js, sqlitePool), and its own words for that are not ours.
  */
 export const POOL_BUSY = 'Another tab of PLATO tools in this browser is working on a file. Wait for it to finish, or close it, then try again.';
+/** After Cancel, the run it ended still held the working files when the new engine gave up waiting (worker.js, afterCancel). */
+export const CANCEL_RELEASING = "The cancelled run's files are still being released; try again in a moment.";
 /** This tab could not let go of the working files it was granted in part (worker.js, letGo). */
 export const POOL_STUCK = 'PLATO tools could not free its storage in this tab. Reload the page and try again.';
 /** How a drawing traced from a historical map was made; it follows georefNote's fixed template, after it (src/engine/chora/trace.js). */
