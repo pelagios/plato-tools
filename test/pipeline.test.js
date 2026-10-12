@@ -272,3 +272,30 @@ test('JSON Lines -> N-Triples: a node shared by distant places is typed once, an
   assert.equal(nt.length, new Set(nt).size, 'no line is written twice');
   assert.equal(r.report.counts['triples written'], nt.length, 'the count reported is the lines written');
 });
+
+// Read through the store (attestation-centric input), the document header reached two converters,
+// the store's and the one that only reports, and each said what it could not use: twice over. The
+// candidate checks must still see the header there (the sets it lists, named when none is given).
+const SET = 'https://example.org/candidate-sets/1';
+const nullInHeader = (profile) => JSON.stringify({ profile, gazetteer: { title: 't', description: null, candidateSets: [SET] },
+  ...(profile === 'attestation-centric'
+    ? { attestations: [{ about: 'https://example.org/p', names: [{ toponym: 'N' }], sources: [{ title: 's' }] }] }
+    : { spatialEntities: [{ '@id': 'https://example.org/p', label: 'N', attestations: [{ names: [{ toponym: 'N' }], sources: [{ title: 's' }] }] }] }) });
+for (const profile of ['attestation-centric', 'place-centric']) {
+  for (const action of ['check', 'convert']) {
+    test(`a header's empty value is reported once, read ${profile === 'attestation-centric' ? 'through the store' : 'as it streams (control)'}, by ${action}`, async () => {
+      const files = [textFile(nullInHeader(profile), `${profile}.json`)];
+      const r = action === 'check' ? await go(files, 'check') : await go(files, 'convert', 'plato-jsonl');
+      const nulls = r.report.items.filter((i) => i.kind === 'null-value');
+      assert.equal(nulls.length, 1, JSON.stringify(r.report.items.map((i) => i.kind)));
+      assert.equal(nulls[0].count, 1, JSON.stringify(nulls[0]));
+      assert.match(nulls[0].examples[0], /description/, 'the empty value found is the header\'s');
+      if (action === 'check') {
+        // The candidate checks were given the header: the set it lists is named, once.
+        const notGiven = r.report.items.filter((i) => i.kind === 'candidates-not-given');
+        assert.equal(notGiven.length, 1, JSON.stringify(r.report.items.map((i) => i.kind)));
+        assert.deepEqual(notGiven[0].examples, [SET]);
+      }
+    });
+  }
+}

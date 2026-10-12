@@ -739,7 +739,9 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       if (ev.type === 'triple') { store.add(ev.s, ev.p, ev.o); if (++batch % 50000 === 0) { store.endBatch(); store.beginBatch(); beat('loading', { triples: store.count }); } continue; }
       if (ev.type === 'late-header') { lateHeader(ev); continue; }
       if (ev.type === 'not-a-list') { notAList(ev); continue; }
-      if (ev.type === 'header') { header = ev.value; w.header(header); dry.header(header); cands?.dataset(header); if (!V.header(header)) rep.error('schema', `The document header does not match the PLATO JSON Schema: ${ajvMessage(V.header.errors)}`); continue; }
+      // The header goes to the store's converter alone, which reports what it cannot use: given to
+      // `dry` as well, each of its problems was reported twice. The candidate checks still read it.
+      if (ev.type === 'header') { header = ev.value; w.header(header); cands?.dataset(header); if (!V.header(header)) rep.error('schema', `The document header does not match the PLATO JSON Schema: ${ajvMessage(V.header.errors)}`); continue; }
       checkRecord(ev);
       keepWithin(ev);
       if (cands && ev.value) cands.record(ev.value);
