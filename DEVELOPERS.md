@@ -2271,6 +2271,87 @@ the places within it; the places themselves never send it.
   never given, the typeahead by "ang" and by "Old Eng", the refusal held back while languages are
   offered and shown otherwise, the typeahead's keys, pointer and live region, and the chips.
 
+### Scope
+
+What every WHG lookup is confined to, as WHG's own Map your Data has it (Issue #33, points 2 and 8;
+Stephen's decisions of 12 October 2026). The pure parts are `src/engine/krisis/scope.js`, the bundled data
+`src/engine/krisis/scope-data.js`, the page `src/scope-page.js`, the words `SCOPE_WORDS` in `words.js`.
+To WHG only: another service is sent nothing of it.
+
+- **The Scope** is `{ where, types, when, sources }`, always read through `normaliseScope()` (what a
+  record or storage holds may have been written by another page of the origin): codes checked and in
+  capitals, ids bare, an area a closed polygon of at most 1,000 corners, years whole numbers, anything
+  else dropped. **Where**: `countries` (ISO 3166-1 alpha-2, all 249 bundled, named by the browser's
+  `Intl.DisplayNames`), a WHG place used as a container (`contained_in: [<bare id>]`, case kept: WHG's ids
+  are case-sensitive and a full address fails; `containerId()`), or an area drawn on a map (`bounds`, a
+  GeoJSON Polygon). **What**: AAT place types, `types: ["aat:…"]`. **When**: `start`, `end` and
+  `temporal: true`, as WHG's Map your Data sends them (not verified against /reconcile's code: its session
+  gave this form). **Sources**: `namespaces`, lower case, ORed; none chosen is every source.
+- **WHG's facts** (its session, 12 October 2026): every field is a hard filter applied after a window of
+  about 200 candidates by name, so a narrow Scope can starve a lookup; a scoped query with nothing in it
+  is answered empty (fail-closed, `scope.applied`, read as before by `mergeAnswers`); a spatial filter
+  turns WHG's legacy index off. **Types are not matched hierarchically** (the gateway's `aat_paths` are
+  reported empty): each type chosen is kept with its narrower ones, from `GET /types/expand/?ids=aat:<n>`
+  (`{ ids }`, the type itself among them), cached with the Scope, and all are sent (`typeIds()`); the
+  label says how many ("Villages (and 1 narrower type)"). The shortlist (19 types: inhabited places,
+  cities, towns, villages, hamlets, deserted settlements, ports, parishes, parishes as religious
+  divisions, townships, counties, dioceses, manors, farms, rivers, streams, islands, castles,
+  monasteries) carries the expansions fetched on 12 October 2026, used when WHG cannot be asked; inhabited
+  places stands for 241 narrower types, so a query choosing it is some 3 KB larger.
+- **Undated places.** With years given, WHG leaves out every place with no dates. "Include places with
+  no dates" is shown, disabled, with "WHG currently leaves out places with no dates whenever years are
+  set", and the rail marks the Scope when undated places are left out (`excludesUndated()`). WHG is to
+  take `undated: true`; `UNDATED_TAKEN` in `scope.js` is the one switch that enables the tick and sends it.
+- **Precedence** (`scopeFields(scope, { region, own, relaxed })`): a query that already says where to
+  look keeps it, and the Scope's Where is not sent for it (`WHERE_KEYS`: `countries`, `contained_in`,
+  `lat`, `lng`, `radius`, `bounds`): a place's or a region's constraint from the region review (the
+  table's region columns, county then parish, through `constraintFor`), and the panel's own filters (the
+  place's countries, near its point). Its types, years and sources are still sent. A region of the region
+  review takes the Where alone (`areaOnly`), so the widest regions, and any whose region above has no
+  match, are confined by it, and the narrower ones by their container. "With no constraint" (relax `all`)
+  sends no Where. `planQueries` adds the Scope to each query and records which parts each place was sent
+  under (`queries[iri].scoped`); the preview says which keys are sent and to how many places the Where
+  gave way, and lists the queries exactly as WHG receives them. `runLookup` keeps the Scope in the
+  lookup's `parameters.scope`, and a suspect batch is passed only when asked again under the same Scope.
+- **An empty scoped row** (answered with nothing, or failed closed, while sent under the Scope) says
+  "Nothing within the Scope among WHG's best name matches…" and offers "Look it up again without Scope",
+  one place, nothing of the Scope sent. Nothing is ever relaxed by itself. In the region review, the
+  existing "With no constraint" drops the Where.
+- **Where it lives.** In a workflow, in its record (`state.scope`, beside the runner's state, which
+  carries it through every transition; `restartRemaining` keeps it; a pending workflow keeps it too, in
+  `savePending`): saved when changed (`methodos.setScope`), taken up after a reload, downloaded in the
+  `.workflow.json`, and gone when the workflow is left. Methodos's adapters give each step the workflow's
+  Scope (`runStep` and `review` pass `scope`; `lookup` and `lookup.levels` send it). **Outside a workflow**
+  the lookup panel uses this tab's own Scope, kept in sessionStorage (`plato-tools.scope`) for the tab
+  alone: a Scope that outlived the tab with no workflow to belong to would confine lookups nobody
+  remembers asking for. Chora's adopt search takes the workflow's Scope when opened for one
+  (`#workflow=<id>`, read from its record), the place's own regions and countries winning over Where.
+- **On the page.** The rail's `section#scope`, under the tracker while a workflow is followed, shows the
+  Scope as four chips (Where, What, When, Sources), the undated mark and Edit; the lookup panel shows the
+  same in `#lookup-scope`, whosever it is, with "Edit the Scope". Editing opens `section#scope-editor` in
+  the centre column (`body.scope-editing` hides the rest of the centre meanwhile), and Done returns the
+  focus to where it was. Changes apply as they are made. The WHG place is found by the region review's
+  kind of search, a query of the shared lookup with `area_only` (a point cannot hold places), and needs the
+  token (given there or in the lookup panel; its one keeper takes it). The drawn area uses Chora's
+  `createMap` with its drawing, on the Natural Earth basemap from this site, imported with `import()` only
+  when that mode is first opened: `vite.config.js` keeps `src/chora/map.js` and `basemaps.js` out of the
+  shared chunk, so the main page preloads no MapLibre (measured: the map chunk is 1.2 MB, the shared one
+  527 KB). The page's policy needs nothing more for it (the worker is a `blob:`, the style, glyphs and
+  tiles are this site's). **What WHG is asked, and how:** `GET /types/tree/` (the roots), `/types/tree/<n>/`
+  (a node's children; `guide: true` nodes are headings, shown in italics and not choosable),
+  `/types/tree/search/?q=`, `/types/expand/?ids=` and `/api/sources/`, all anonymous, all readable from
+  another origin (`Access-Control-Allow-Origin: *`, checked 12 October 2026), each through
+  `permissions.fetch` under `gazetteer:whg` and only once it is allowed, and cached in localStorage for a
+  week (`plato-tools.whg-cache.<path>`, read back only when it has the shape asked for). Without the
+  permission, or when a request fails, the shortlist and the bundled sources (WHG's list of 12 October
+  2026) still work, and the editor says so. `/types/vocab/` (a flat label map, 1,084 concepts that day) is
+  not needed: the tree's nodes carry their labels.
+- **Tests.** `test/scope.test.js`: the fields for each part, precedence beside its control, the preview,
+  the empty row's words beside the unscoped ones, the record's round trip (export, import, reconcile,
+  restartRemaining, IndexedDB, a pending workflow), a step's adapter given the Scope, and the bundled data's
+  shape. The browser checks are `scope_checks` in `e2e/app_test.py`, against a stub of WHG that answers
+  the tree, the expansion, the sources and the queries, and records what it receives.
+
 ## Workflows (Methodos)
 
 Methodos runs a workflow, a named sequence of the tools' own operations, from a recipe
@@ -2823,7 +2904,8 @@ A push to `main` runs the tests, builds the site and publishes it to GitHub Page
   under "More" as `.more-lede`, copied there by `src/app.js`), the steps in the centre (about 46rem),
   and the workflow rail on the right (`#workflow-rail`, about 18rem, sticky: the tracker while a
   workflow is followed, else the one line that opens the interview, so that nothing moves when a
-  workflow begins; and an empty, hidden `section#scope`, kept for Scope). From 60rem to 78rem, the
+  workflow begins; and, under the tracker while a workflow is followed, `section#scope`, its Scope: see
+  "Scope" above, whose editor, `section#scope-editor`, opens in the centre). From 60rem to 78rem, the
   centre and the workflow rail, with the cards as a grid below the steps. Below 60rem one column, the
   rail's contents flowing with the page (`display: contents`), and the tracker a strip held at the top
   of the window (`#methodos-strip`, "Step n of N: Tool, what it does ▾"), which opens to the whole
