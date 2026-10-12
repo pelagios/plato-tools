@@ -12,8 +12,14 @@ import { esc, badge, nameItem, relationItem, timeline, locations, ROLE_WORDS } f
 import * as basemaps from './basemaps.js';
 import * as contributors from './contributor.js';
 import { fingerprint, loadDrafts, saveDrafts, draftsWritten, forgetAllDrafts } from './drafts.js';
-import { take as takeHandoff, clear as clearHandoff, keepForReload, takeResume } from './handoff.js';
+import { take as takeHandoff, clear as clearHandoff, keepForReload, takeResume, returnKept } from './handoff.js';
 import * as handback from './handback.js';
+// The workflow Chora was opened for, read where the main page keeps it (Methodos's store, and the files
+// it keeps), for the few words of it shown here and its current dataset (src/methodos/seams.js).
+import { workflowStore } from '../methodos/store.js';
+import { outputStore } from '../methodos/outputs.js';
+import { RECIPES } from '../engine/methodos/recipes/index.js';
+import { trackOf, currentInput } from '../methodos/seams.js';
 import { serialQueue, pageRequest, answers } from './queue.js';
 import * as permissions from '../lib/permissions.js';
 import { RELOAD_LOSES, REFUSED as PERMISSION_REFUSED, NEEDS, REMEMBERED_BASEMAP } from '../lib/permission-words.js';
@@ -677,9 +683,60 @@ state.workflow = workflow; state.workflowRefused = !!wf?.refused; state.handback
 if (wf) {
   const p = $('workflow');
   p.className = workflow ? 'note' : 'warn';
-  p.textContent = workflow ? 'Opened for a workflow on the main page: once you have saved the dataset, you are offered the way back to it.'
+  p.textContent = workflow ? 'Opened for a workflow on the main page: save the dataset here to hand it back to the workflow. Going back without saving hands nothing back.'
     : 'This address names a workflow, but not in a form these tools use, so nothing saved here is handed back to it.';
   p.hidden = false;
+}
+// The way back, offered in the masthead from the start (Stephen, 12 October 2026, Issue #33 point 5):
+// "Back to the workflow" (./#workflow=<id>) when opened for one, else "Back to PLATO tools", where the
+// file chosen before is chosen again (handoff.js, the round trip). Before a save it says that nothing is
+// handed back; after one, a click hands back the file saved, as the save's own link does.
+let handedBack = null;   // the reference to the file handed back at the last save in this load
+let returning = null;    // outside a workflow: the names of the files the main page chooses again, if kept
+function wayBack() {
+  const a = $('way-back'), note = $('way-back-note');
+  if (workflow) {
+    a.textContent = 'Back to the workflow'; a.href = handback.backTo(workflow, location.href);
+    note.textContent = handedBack ? ` Hands back ${handedBack.name} (${fmtBytes(handedBack.size)}), the file you saved, to the workflow.`
+      : ' Nothing is handed back until you save the dataset here: going back now leaves the workflow at this step, with its dataset as it was.';
+  } else {
+    a.textContent = 'Back to PLATO tools'; a.href = new URL('./', location.href).href;
+    note.textContent = returning?.length ? ` ${returning.join(', ')} ${returning.length === 1 ? 'is' : 'are'} chosen there again.` : '';
+  }
+  $('way-back-line').hidden = false;
+  state.wayBack = { words: a.textContent, href: a.href, said: note.textContent.trim(), handsBack: !!handedBack };
+}
+$('way-back').addEventListener('click', async (e) => {
+  if (!workflow || !handedBack || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  // After a save, the hand-back is written again first, so that the main page finds it fresh.
+  e.preventDefault();
+  await handback.give(workflow, handedBack);
+  location.assign($('way-back').href);
+});
+wayBack();
+if (!workflow) returnKept().then((names) => { returning = names; wayBack(); });
+
+// The workflow's few words, read-only, in the panel: its title, "Step n of N", and this step's words,
+// from its record kept in this browser (Methodos's store; in the tab's sessionStorage when working data
+// is not kept). The record, or null; read once, at the start.
+const workflowRecord = workflow ? workflowStore().load(workflow).catch(() => null) : Promise.resolve(null);
+workflowRecord.then((r) => {
+  const t = r && trackOf(r, RECIPES[r.recipe?.key]);
+  state.workflowStep = t ? { title: t.title, step: t.step, words: t.words } : null;
+  if (!t) return;
+  const box = $('workflow-track'), head = document.createElement('p'), title = document.createElement('strong'), what = document.createElement('p');
+  title.textContent = t.title; head.append(title, ` · ${t.step}`);
+  what.textContent = `${t.words}${/[.!?]$/.test(t.words) ? '' : '.'}`;
+  box.replaceChildren(head, what); box.hidden = false;
+});
+/** The workflow's current dataset, as the main page keeps it (its own file, or a step's), or null: Chora opens it when no file was handed over. */
+async function workflowDataset() {
+  const r = await workflowRecord;
+  const refs = r && currentInput(r);
+  if (!refs?.length) return null;
+  const outs = outputStore(), got = [];
+  for (const ref of refs) { const f = await outs.get(ref); if (!f) return null; got.push(f); }
+  return got;
 }
 async function handBack(file) {
   const name = file.name;
@@ -690,6 +747,7 @@ async function handBack(file) {
   }
   const kept = await handback.give(workflow, ref);
   state.handback = kept ? { ...kept, files: kept.files.map((r) => ({ ...r })) } : null;
+  handedBack = kept ? ref : null; wayBack();   // a hand-back the browser would not keep is not promised
   $('back-to-workflow')?.closest('p')?.remove();
   const p = document.createElement('p'), a = document.createElement('a');
   a.id = 'back-to-workflow'; a.className = 'button'; a.textContent = 'Back to the workflow';
@@ -1236,14 +1294,16 @@ startWorker().then(async () => {
   }
   inTurn(() => readmitKept());
   handback.dropStale();
-  // Files chosen on the main page, offered here.
+  // Files chosen on the main page, opened here at once (Stephen, 12 October 2026: no offer to click).
   const handed = await takeHandoff();
   if (handed && !files.length) {
-    const p = $('handoff');
-    p.innerHTML = `<button type="button" class="primary" id="open-handoff">Open ${esc(handed.map((f) => f.name).join(', '))}</button>, chosen on the main page.`;
-    p.hidden = false;
-    $('open-handoff').onclick = () => open(handed);
     state.handoff = handed.map((f) => f.name);
+    await open(handed);
+    return;
   }
+  // Opened for a workflow with nothing handed over (a link opened in another tab, or this page
+  // reloaded): the workflow's current dataset, where the main page keeps it.
+  const kept = workflow && !files.length ? await workflowDataset() : null;
+  if (kept && !files.length) { state.fromWorkflow = kept.map((f) => f.name); await open(kept); }
 // A second tab offers nothing, so files handed to it are let go there too, not left in the browser.
 }).catch((e) => (e.kind === 'pool-busy' ? clearHandoff().then(inAnotherTab) : fail(e.message)));

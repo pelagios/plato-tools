@@ -13,7 +13,7 @@ import { refsOf, refsDiffer } from '../engine/methodos/handoffs.js';
 import { atBoundary, reconcile, restartRemaining } from '../engine/methodos/record.js';
 import { take as takeHandback, isWorkflowId } from '../chora/handback.js';
 import { outputStore } from './outputs.js';
-import { fmtBytes } from '../engine/words.js';
+import { stepAt, currentInput, startFiles, keptBy, keptWords } from './seams.js';
 import { regionsSettled, notReviewed, relateProblem, writesItself } from '../engine/methodos/containment.js';
 import { stepMark, whereWords, lower } from './layout.js';
 
@@ -248,7 +248,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     // A workflow followed before, begun or not, is left for this one: its record and its files go.
     const was = pending?.id;
     if (was) await store.dropPending(was);
-    if (wf || changed) { await outs.drop(madeBy(wf || changed.record)); await store.remove((wf || changed.record).id); }
+    if (wf || changed) { await outs.drop(keptBy(wf || changed.record)); await store.remove((wf || changed.record).id); }
     pending = { key: recipe.key, answers: answersFor(choice, yesNo, texts), id: `${recipe.key}-${Date.now().toString(36)}`, steps: p.steps.length };
     wf = null; changed = null; note = null; fromChora = null; arrived = null; active = null;
     // Kept at once, before any file (Stephen, 4 October 2026): shown as not started, and discarded in one click.
@@ -301,7 +301,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   let handle = null, handleFile = null;   // the FileSystemFileHandle the workflow's file was chosen through, if any (Chromium)
   let keptHandle = null;    // the handle kept for a resumed workflow
   let fromChora = null;     // Chora's hand-back, taken on the user's click: the references the file chosen next must match
-  let arrived = isWorkflowId(workflow) ? workflow : null;   // the workflow the address named, whose "place" step offers the hand-back
+  let arrived = isWorkflowId(workflow) ? workflow : null;   // the workflow the address named (back from Chora by its link), taken up first
   const outs = outputs || outputStore();   // the files the steps made, by SHA-256, to hand on to the next step (src/methodos/outputs.js)
   const heldFor = (r) => outs.held(r);
   let queue = Promise.resolve();
@@ -311,11 +311,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   const fileKey = (recipe) => Object.keys(recipe.files || {})[0];
 
   /** The step the workflow is at: the one running or waiting, else the one that stopped, failed or was cancelled, else the next to do. */
-  function atStep(state = wf) {
-    if (!state || state.status === 'completed') return null;
-    if (state.current) return state.steps.find((s) => s.id === state.current);
-    return state.steps.find((s) => ['stopped', 'failed', 'cancelled'].includes(s.state)) || state.steps.find((s) => s.state === 'pending') || null;
-  }
+  const atStep = (state = wf) => stepAt(state);
   const followed = (state) => state.steps.filter((s) => s.state !== 'skipped');
   /** The references the step at hand takes from the files chosen in step 1 (its main input), or null; throws in words if an earlier step is not done. */
   function mainInput(state, s) {
@@ -389,8 +385,6 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     showKept();
     return refs;
   }
-  /** Every file the workflow's steps made, as references. */
-  const madeBy = (state) => (state ? state.steps.flatMap((x) => [...Object.values(x.outputs || {}), ...Object.values(x.partial || {})].flat()) : []);
   async function outputsOf(op, run) {
     const gives = Object.entries(OPERATIONS[op].gives);
     if (!gives.length) return {};
@@ -417,9 +411,10 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
         wf = { ...runner.start(recipe, pending.answers, { [fileKey(recipe)]: chosenRefs }), id: pending.id };
         pending = null;
         say(`Begun with ${names(chosenRefs)}.`);
-        await keep(); await store.dropPending(wf.id); render(false); return;
+        await keep(); await store.dropPending(wf.id); await keepOwn(files); render(false); return;
       }
       if (!wf || changed) return;
+      await keepOwn(files);
       const s = atStep();
       if (!s) return;
       if (s.op === 'place' && fromChora) {
@@ -441,6 +436,18 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
       say(differ.length ? notTheFiles(s, main, differ) : `${names(main)}: the file${main.length === 1 ? '' : 's'} this step takes.`, !!differ.length);
       render(false);
     });
+  }
+
+  /**
+   * The user's own file(s) the workflow began with, chosen now: kept in this browser for the workflow's
+   * lifetime (outputs.js keepOwn; Stephen, 12 October 2026), where working data is kept, so that the main
+   * page chooses them again by itself, back from Chora or after a reload, in any browser.
+   */
+  async function keepOwn(files) {
+    const start = startFiles(wf);
+    if (!wf || !start.length || !sameRefs(start, chosenRefs)) return;
+    for (const r of start) { const i = chosenRefs.findIndex((x) => x.sha256 === r.sha256); if (i >= 0) await outs.keepOwn(r, files[i]); }
+    showKept();
   }
 
   // ---- What only the user can say: an interactive step's result, taken from the page as it stands.
@@ -489,19 +496,23 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   // Chora's hand-back (src/chora/handback.js), taken only on this click: read once and let go. What it
   // names is asked for in step 1 and checked (chosen()); with none to take, the file is chosen by hand.
   const leaveB = q(tracker, '#methodos-leave'), keptEl = q(tracker, '#methodos-kept'), clearB = q(tracker, '#methodos-clear-kept');
-  /** What of the steps' files this browser keeps, said beside a way to clear it. */
+  /** What of the workflow's files this browser keeps (the user's own and the steps'), said beside a way to clear it; or that nothing is kept. */
   let keptAsked = 0;
   function showKept() {
     const n = ++keptAsked;
-    outs.kept().then(({ count, bytes }) => {
+    outs.kept().then(({ files }) => {
       if (n !== keptAsked) return;
-      keptEl.hidden = !count || tracker.hidden;
-      keptEl.firstChild.textContent = count ? `Kept in this browser for the next steps: ${count} ${count === 1 ? 'file' : 'files'} the steps made (${fmtBytes(bytes)}), never your own files. ` : '';
+      const keeping = outs.keeping ? outs.keeping() : true;
+      const words = keptWords({ files, own: startFiles(wf || changed?.record), keeping, workflow: !!(wf || changed || pending) });
+      keptEl.hidden = !words || tracker.hidden;
+      keptEl.firstChild.textContent = words;
+      clearB.hidden = !keeping;
+      tracker.dataset.keptOwn = String(keeping && files.some((f) => startFiles(wf || changed?.record).some((r) => r.sha256 === f.sha256)));
     }).catch(() => { keptEl.hidden = true; });
   }
   clearB.addEventListener('click', () => chain(async () => {
     await outs.clear(); showKept();
-    say('The files the steps made are cleared from this browser: a step that takes one now asks for it to be chosen.');
+    say('Your file and the files the steps made are cleared from this browser: a step that takes one now asks for it to be chosen.');
     render(false);
   }));
   // A step that writes its file in the format it already has: the file chosen, downloaded as it is, is the step's output.
@@ -544,7 +555,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   }));
   q(tracker, '#methodos-leave').addEventListener('click', () => chain(async () => {
     const id = wf?.id || changed?.record.id, was = pending?.id;
-    await outs.drop(madeBy(wf || changed?.record));
+    await outs.drop(keptBy(wf || changed?.record));
     wf = null; pending = null; changed = null; active = null; note = null; handle = handleFile = keptHandle = null; fromChora = null; arrived = null;
     if (id) await store.remove(id);
     if (was) await store.dropPending(was);
@@ -605,8 +616,10 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
       if (wf && atBoundary(wf)) await keep();
       else if (!on) await store.forgetKept();
       if (pending) await store.savePending(pending);
+      // Turned on: the user's own file, held for the tab, is kept from now as the steps' files are.
+      if (on && wf) for (const r of startFiles(wf)) { const f = outs.held(r); if (f) await outs.keepOwn(r, f); }
       if (!on) {
-        await outs.forget();   // the steps' files: for the tab only from now, and cleared from the browser at once
+        await outs.forget();   // the workflow's files: for the tab only from now, and cleared from the browser at once
         // A kept file already chosen in step 1 is chosen again from the tab's copy, as the stored one is gone.
         const now = page.files(), refs = chosenRefs || [];
         if (now.length && refs.length === now.length && refs.every((x) => outs.held(x) && outs.held(x) !== now[refs.indexOf(x)])) page.choose(refs.map((x) => outs.held(x)));
@@ -681,15 +694,16 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
       downloadB.textContent = `Download ${names(main)}`;
       tList.querySelector('li.is-current .track-body')?.append(el('span', { className: 'track-run', textContent: 'Ready to download' }));
     }
-    const startFiles = wf ? wf.files[fileKey(recipeOf(wf) || { files: {} })] : null;
-    const needStart = !shown || (main && startFiles && main.every((r) => startFiles.some((x) => x.sha256 === r.sha256)) && !sameRefs(main, chosenRefs));
+    const begun = wf ? wf.files[fileKey(recipeOf(wf) || { files: {} })] : null;
+    const needStart = !shown || (main && begun && main.every((r) => begun.some((x) => x.sha256 === r.sha256)) && !sameRefs(main, chosenRefs) && !main.every((r) => !!heldFor(r)));
     pickB.hidden = !needStart;
     pickB.textContent = keptHandle && wf ? `Open ${keptHandle.name} again` : 'Choose the file';
     const usable = main && !sameRefs(main, chosenRefs) && main.every((r) => !!heldFor(r)) ? main : null;
     useB.hidden = !usable || needStart; if (usable) useB.textContent = `Use ${names(usable)}${fromWhere(wf, s, usable)}`;
     const partial = (s?.state === 'failed' || s?.state === 'cancelled') && s.partial ? Object.values(s.partial).flat()[0] : null;
     reopenB.hidden = !partial;
-    backB2.hidden = !(s && s.op === 'place' && wf && !changed && arrived === wf.id && !fromChora);
+    // At Chora's step, however the page came back (its link, the browser's Back, a reload), the hand-back can be taken.
+    backB2.hidden = !(s && s.op === 'place' && wf && !changed && !fromChora);
     if (partial) reopenB.textContent = heldFor(partial) ? `Reopen ${partial.name}` : `Choose ${partial.name} again`;
     if (s && !changed) {
       const p = wf ? { title: recipeOf(wf)?.title } : plan(pending.key, pending.answers);
@@ -743,19 +757,21 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
       wf = v.state;
       if (wf.status !== r.status) await keep();   // a step the page was closed in is failed, and kept so
       keptHandle = await store.handleFor?.(wf.id) || null;
-      for (const ref of madeBy(wf)) await outs.get(ref);   // the steps' files kept in this browser, for the tab
+      for (const ref of keptBy(wf)) await outs.get(ref);   // the user's file and the steps' kept in this browser, for the tab
       const s = atStep();
-      let main = null;
-      try { main = s ? mainInput(wf, s) || (s.op === 'read.columns' ? runner.inputsOf(wf, s.id).files : null) : null; } catch { main = null; }
+      // The file the step works on, the user's own or a step's, is chosen again (seams.js currentInput):
+      // at Chora's step, the dataset that went to the map, so that it is shown without choosing it.
+      const main = currentInput(wf, s);
       const ready = main && main.every((x) => !!heldFor(x)) ? main.map(heldFor) : null;
-      if (arrived === wf.id && s?.op === 'place') say([v.words, 'Back from Chora: take the dataset you saved there ("Take the dataset back from Chora"), or choose it in step 1 by hand and say the step is done.'].filter(Boolean).join(' '));
+      const chosenAgain = ready ? ` ${names(main)} is chosen in step 1 again.` : '';
+      if (s?.op === 'place') say([v.words, `${arrived === wf.id ? 'Back from Chora' : 'At Chora\'s step'}:${chosenAgain} If you saved the dataset there, take it back ("Take the dataset back from Chora"), or choose it in step 1 by hand and say the step is done.`].filter(Boolean).join(' '));
       else if (ready) say([v.words, `Taken up where it was left, with ${names(main)}${fromWhere(wf, s, main)}, kept in this browser: it is chosen in step 1 for you.`].filter(Boolean).join(' '));
       else say([v.words, main ? `Taken up where it was left. Choose ${names(main)} again in step 1 to carry on: the file is checked to be the one the workflow recorded.` : 'Taken up where it was left.'].filter(Boolean).join(' '));
       if (ready) {
         render(false);
         // Chosen for the step once the engine is ready, unless the user has chosen a file meanwhile.
         const ok = await page.ready?.();
-        if (ok !== false && !chosenRefs) page.choose(ready);
+        if (ok !== false && !chosenRefs && !page.files().length) page.choose(ready);
         return;
       }
     } else changed = { action: v.action, record: r, words: v.words };

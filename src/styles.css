@@ -424,6 +424,11 @@ body.chora main.chora-main { max-width: none; width: 100%; margin: 0; padding: 0
 body.chora footer { max-width: none; padding: .5rem 1.25rem 1rem; font-size: .8rem; }
 .muted { color: var(--muted); }
 body.chora .note { color: var(--muted); font-size: .92rem; }
+/* Chora's way back, in the masthead from the start, and the workflow's few words in the panel (src/chora/app.js). */
+body.chora .way-back { margin: .4rem 0 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem; font-size: .92rem; }
+body.chora .way-back a.button { padding: .25rem .8rem; }
+body.chora .workflow-track { border-left: 3px solid var(--accent); padding: .15rem .6rem; margin: .5rem 0; font-size: .92rem; }
+body.chora .workflow-track p { margin: 0; }
 .dataset-title { font-family: var(--font-headings); font-size: 1.1rem; margin: .3rem 0 0; }
 #q { width: 100%; font: inherit; padding: .35rem .5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); }
 .place-list { list-style: none; padding: 0 !important; max-height: 18rem; overflow-y: auto; }

@@ -2413,6 +2413,7 @@ def main():
             chora_checks(pw, url, tmp)
             chora_adopt_checks(pw, url, tmp)
             map_your_data_checks(pw, url, tmp)
+            chora_seams_checks(pw, url, tmp)
             iiif_checks(pw, url, tmp)
     finally:
         stop(srv)
@@ -2590,9 +2591,9 @@ def methodos_join_checks(browser, base, hook, tmp):
         after = js(p)
         chosen_ = p.evaluate("() => [...document.querySelectorAll('#chosen .name')].map((e) => e.textContent)")
         ok = (before['steps']['site'] == 'current' and after['shown'] and after['steps'] == before['steps'] and after['where'] == before['where']
-              and s_.get('phase') == 'detected' and chosen_ == [r['minted'].name] and after['kept'] and 'never your own files' in after['kept'])
+              and s_.get('phase') == 'detected' and chosen_ == [r['minted'].name] and after['kept'] and 'files the steps made' in after['kept'] and 'your ' in after['kept'] and 'Nothing leaves this computer' in after['kept'])
         return ok, {'before': before, 'after': after, 'chosen for the step': chosen_, 'phase': s_.get('phase'), 'minted': r['minted'].name}
-    attempt('Methodos: a reload mid-workflow takes it up at the same step, every step as it was, with the dataset the minting made kept in this browser and chosen for the next step, and says what is kept', resumed)
+    attempt('Methodos: a reload mid-workflow takes it up at the same step, every step as it was, with the dataset the minting made kept in this browser and chosen for the next step, and says what is kept (the user\'s files and the steps\')', resumed)
 
     def refused():
         p = r['page']
@@ -2670,6 +2671,10 @@ def methodos_join_checks(browser, base, hook, tmp):
                 p.evaluate(DROP, [text, ex.name, kind])
                 until(p, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
                 got = {'detected': wait_state(p, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'detection').get('phase')}
+                # The file is kept in this browser too (12 October 2026), and would be chosen again by itself:
+                # cleared, so that what the reload has is the handle (or, for the folder, nothing).
+                until(p, "document.getElementById('methodos-tracker').dataset.keptOwn === 'true'", 30)
+                p.click('#methodos-clear-kept'); until(p, "() => document.getElementById('methodos-kept').hidden", 10)
                 p.reload(); ready(p)
                 until(p, "() => !document.getElementById('methodos-pick').hidden", 15)
                 got['pick'] = js(p)['pick']
@@ -2698,7 +2703,8 @@ def methodos_join_checks(browser, base, hook, tmp):
             p.uncheck('#perm-keep-work')
             until(p, "() => document.getElementById('methodos-tracker').dataset.kept === 'tab'", 10)
             got['off, at once'] = p.evaluate('() => window.__methodos_e2e.keys()')
-            until(p, "() => document.getElementById('methodos-kept').hidden", 10)
+            # Said, rather than hidden (12 October 2026): nothing of the user's is kept.
+            until(p, "() => /Nothing of yours is kept/.test(document.getElementById('methodos-kept').textContent)", 10)
             got['off, outputs at once'] = p.evaluate(OUTPUTS_KEPT)
             got['off, tracker'] = js(p)
             got['panel says'] = p.evaluate("() => document.getElementById('perm-keep-note')?.textContent || ''")
@@ -2709,6 +2715,7 @@ def methodos_join_checks(browser, base, hook, tmp):
             ok = (len(got['kept']) == 1 and got['kept as'] == 'browser' and got['off, at once'] == [] and got['off, tracker']['shown']
                   and got['outputs kept'] and len(got['outputs kept']) >= 1 and got['off, outputs at once'] is None
                   and got['off, tracker']['steps'].get('report') == 'current' and (got['off, tracker']['use'] or '').startswith('Use ')
+                  and 'Nothing of yours is kept' in (got['off, tracker']['kept'] or '')
                   and 'the files its steps made' in got['panel says']
                   and got['next tab'] == {'list': [], 'keys': [], 'tracker': False, 'outputs': None})
             return ok, got
@@ -2782,6 +2789,255 @@ def methodos_join_checks(browser, base, hook, tmp):
             return ok, got
         finally: ctx.close()
     attempt('Methodos: back from Chora (#workflow=<id>), the place step waits; the hand-back is taken only on a click, the file it names is asked for and checked (another refused), the step is then done, and a toolbox click keeps the workflow in the address; with nothing handed back, the file is chosen by hand', handed_back)
+
+# ---- Chora's seams (Stephen, 12 October 2026, Issue #33 point 5) ----------------------------------------
+# Chora stays a page of its own, in the same tab, with its seams mended: a file handed over is opened at
+# once; the way back is in its masthead from the start ("Back to the workflow", or "Back to PLATO tools");
+# going back, by that link or the browser's Back, finds the main page with its dataset chosen again; the
+# workflow keeps the user's own file for its lifetime (under "Keep my working data") and chooses it again
+# after a reload, in any browser (no file handle used: Playwright's set_input_files gives none); and with
+# working data off nothing of the user's is kept, and the tracker says so. Each check finds the presence
+# it needs before it trusts an absence, and fails on the page as it was (an offer to click, a way back
+# only after a save, the user's file never kept).
+SEAM_OVERVIEW = '''() => { const m = window.__chora_map; return ['chora-overview-clusters', 'chora-overview-points'].reduce((n, l) => n + (m.getLayer(l) ? m.queryRenderedFeatures({ layers: [l] }).length : 0), 0); }'''
+SEAM_CHOSEN = "() => [...document.querySelectorAll('#chosen .name')].map((e) => e.textContent)"
+SEAM_RETURN = '''() => new Promise((resolve) => { const q = indexedDB.open('plato-tools-chora', 1); q.onupgradeneeded = () => q.result.createObjectStore('kv');
+  q.onsuccess = () => { const db = q.result, r = db.transaction('kv').objectStore('kv').get('main-return'); r.onsuccess = () => { db.close(); resolve(r.result ? (r.result.files || []).map((f) => f.name) : null); }; };
+  q.onerror = () => resolve('error'); })'''
+def chora_seams_checks(pw, url, tmp):
+    base = url.rstrip('/') + '/'
+    hook = tmp / 'methodos-hook-seams.js'
+    built = subprocess.run(['node', str(ROOT / 'e2e/methodos-hook.mjs'), str(hook)], cwd=ROOT, capture_output=True, text=True)
+    browser = pw.chromium.launch(headless=True, args=GL)
+    ant = EX / 'place-centric-antonine.json'; ant_places = len(json.loads(ant.read_text())['spatialEntities'])
+    customs = sorted((PLATO / 'schemas/tables/examples/customs').glob('*.csv'))
+    d = tmp / 'seams'; d.mkdir(exist_ok=True)
+    def fresh():
+        ctx = browser.new_context(accept_downloads=True, viewport={'width': 1400, 'height': 900}, reduced_motion='reduce')
+        ctx.add_init_script('window.__plato_forceDownload = true;')
+        # Whether a page was shown again from the browser's memory (the back-forward cache) or started afresh.
+        ctx.add_init_script("window.__shownFrom = 'started'; addEventListener('pageshow', (e) => { if (e.persisted) window.__shownFrom = 'kept'; });")
+        if built.returncode == 0: ctx.route(base + HOOK_PATH, lambda r: r.fulfill(path=str(hook), content_type='text/javascript'))
+        return ctx
+    def main_ready(p, at=''):
+        p.goto(NOTOOLS if PROVE else base + at)
+        if wait_state(p, lambda s: s.get('phase') == 'ready', T(30), 'ready').get('phase') != 'ready': raise RuntimeError('the main page did not start')
+        return p
+    def hooked(p):
+        if built.returncode != 0: raise RuntimeError('the hook did not bundle: ' + built.stderr[-240:])
+        p.add_script_tag(url=base + HOOK_PATH); p.wait_for_function('() => !!window.__methodos_e2e', timeout=T(10) * 1000)
+        return p
+    def choose(p, fs):
+        p.set_input_files('#picker', [str(f) for f in fs])
+        return wait_state(p, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'detection').get('phase') == 'detected'
+    def chora_loaded(p):
+        # Opened with no click: the page loads what it was handed, and its places are drawn on the map.
+        until(p, '() => window.__chora && ["loaded", "error", "unrecognised"].includes(window.__chora.phase) && window.__chora.mapReadyCount >= 1', 90)
+        p.evaluate(SETTLE)
+        return cstate(p), p.evaluate(SEAM_OVERVIEW)
+    def detected_again(p, names):
+        # The main page back, its dataset chosen again (by the page, or kept as it was by the browser).
+        return soon(p, '(n) => JSON.stringify([...document.querySelectorAll("#chosen .name")].map((e) => e.textContent)) === JSON.stringify(n) && !!window.__plato && ["detected", "done"].includes(window.__plato.phase)', 60, names)
+    shown_from = lambda p: p.evaluate('() => window.__shownFrom')
+    r = {}
+
+    def opened_at_once():
+        ctx = fresh(); r['plain'] = ctx
+        p = main_ready(ctx.new_page()); r['p'] = p
+        f = d / 'antonine-seams.json'; shutil.copyfile(ant, f); r['f'] = f
+        if not choose(p, [f]): return False, 'not detected'
+        p.click('#to-chora')
+        s, drawn = chora_loaded(p)
+        back = p.is_visible('#way-back'); words = p.inner_text('#way-back-line') if back else ''
+        return (s['phase'] == 'loaded' and s.get('handoff') == [f.name] and s['places'] == ant_places and drawn > 0 and not p.query_selector('#open-handoff')
+                and back and words.startswith('Back to PLATO tools') and f'{f.name} is chosen there again' in words and p.url == base + 'chora.html'), {
+                    'state': {k: s.get(k) for k in ('phase', 'handoff', 'places')}, 'features drawn': drawn, 'way back': words, 'url': p.url}
+    attempt('Chora\'s seams: a file chosen on the main page opens on Chora\'s page at once, its places drawn on the map, with no click, and "Back to PLATO tools" is offered at once, saying the file is chosen there again', opened_at_once)
+
+    def plain_back():
+        p, f = r['p'], r['f']
+        got = {}
+        # Its link: the main page starts again, and chooses the file it had.
+        with p.expect_navigation(timeout=T(60) * 1000): p.click('#way-back')
+        got['by the link'] = detected_again(p, [f.name]); got['link: shown from'] = shown_from(p)
+        got['link: chosen again'] = p.evaluate('() => window.__plato.chosenAgain || null')
+        got['link: round trip left'] = p.evaluate(SEAM_RETURN)
+        # The browser's Back, from Chora opened again: the main page with its file (kept by the browser, or chosen again).
+        p.click('#to-chora'); chora_loaded(p)
+        p.go_back(); got['by Back'] = detected_again(p, [f.name]); got['Back: shown from'] = shown_from(p)
+        got['Back: chosen'] = p.evaluate(SEAM_CHOSEN)
+        return (got['by the link'] and got['link: shown from'] == 'started' and got['link: chosen again'] == [f.name] and got['link: round trip left'] is None
+                and got['by Back'] and got['Back: chosen'] == [f.name]), got
+    attempt('Chora\'s seams: back from Chora outside a workflow, by its link or the browser\'s Back, the main page has the file it had chosen, chosen again, and keeps nothing after', plain_back)
+
+    def plain_back_restarted():
+        # The browser's Back to a main page that starts afresh (a browser that keeps no page in its memory,
+        # the back-forward cache turned off): the file is chosen again from what was kept for the round
+        # trip. And an address typed is no return: the main page starts as it always did, the round trip
+        # left for a return still to come (the presence: it is there, and is taken by the Back after).
+        r['plain'].close()
+        nocache = pw.chromium.launch(headless=True, args=GL + ['--disable-features=BackForwardCache'])
+        try:
+            ctx = nocache.new_context(viewport={'width': 1400, 'height': 900}, reduced_motion='reduce')
+            ctx.add_init_script("window.__shownFrom = 'started'; addEventListener('pageshow', (e) => { if (e.persisted) window.__shownFrom = 'kept'; });")
+            p, f = main_ready(ctx.new_page()), r['f']
+            if not choose(p, [f]): return False, 'not detected'
+            p.click('#to-chora'); chora_loaded(p)
+            got = {'kept for the round trip': p.evaluate(SEAM_RETURN)}
+            p.goto(NOTOOLS if PROVE else base); wait_state(p, lambda s: s.get('phase') == 'ready', T(30), 'ready'); p.wait_for_timeout(1500)
+            got['typed: chosen'] = p.evaluate(SEAM_CHOSEN); got['typed: still kept'] = p.evaluate(SEAM_RETURN)
+            p.go_back(); until(p, "window.__chora && window.__chora.phase === \"ready\"", 60)   # Chora again, with nothing handed over now
+            p.go_back()
+            got['by Back'] = detected_again(p, [f.name]); got['shown from'] = shown_from(p)
+            got['chosen again'] = p.evaluate('() => window.__plato.chosenAgain || null'); got['left'] = p.evaluate(SEAM_RETURN)
+            return (got['kept for the round trip'] == [f.name] and got['typed: chosen'] == [] and got['typed: still kept'] == [f.name]
+                    and got['by Back'] and got['shown from'] == 'started' and got['chosen again'] == [f.name] and got['left'] is None), got
+        finally: nocache.close()
+    attempt('Chora\'s seams: the browser\'s Back to a main page that starts afresh chooses the file again, from what was kept for the round trip; an address typed is no return, and chooses nothing', plain_back_restarted)
+
+    def workflow_open():
+        ctx = fresh(); r['wctx'] = ctx
+        p = hooked(main_ready(ctx.new_page())); r['wp'] = p
+        wid = p.evaluate('([t, a]) => window.__methodos_e2e.placeAtKept("Seams", "name,lat,lon\\nAbingdon,51.67,-1.28\\n", t, a)', [ant.read_text(), 'applied.json'])
+        r['wid'] = wid
+        p.reload(); wait_state(p, lambda s: s.get('phase') in ('ready', 'detecting', 'detected'), T(30), 'ready')
+        # Taken up at Chora's step, its dataset (a step's, kept in this browser) chosen in step 1 by the page.
+        before = detected_again(p, ['applied.json'])
+        until(p, '() => !!document.querySelector(\'#for-tool a[href^="./chora.html#workflow="]\')', 15)
+        link = p.get_attribute('#for-tool a[href^="./chora.html#workflow="]', 'href')
+        with p.expect_navigation(url=re.compile(r'/chora\.html#workflow='), timeout=T(60) * 1000): p.click('#for-tool a[href^="./chora.html#workflow="]')
+        # At once, before the dataset has loaded: the way back to the workflow.
+        p.wait_for_selector('#way-back', state='visible', timeout=T(15) * 1000)
+        at_once = {'words': p.inner_text('#way-back'), 'note': p.inner_text('#way-back-note'), 'href': p.get_attribute('#way-back', 'href'), 'phase': cstate(p).get('phase')}
+        s, drawn = chora_loaded(p)
+        track = p.inner_text('#workflow-track') if p.is_visible('#workflow-track') else None
+        return (before and link == f'./chora.html#workflow={wid}' and at_once['words'] == 'Back to the workflow' and 'Nothing is handed back' in at_once['note']
+                and at_once['href'] == base + '#workflow=' + wid and s['phase'] == 'loaded' and s.get('handoff') == ['applied.json'] and drawn > 0
+                and track and 'Map your data' in track and 'Step 7 of 10' in track and 'Draw or trace the places still without a location' in track), {
+                    'chosen before': before, 'link': link, 'at once': at_once, 'state': {k: s.get(k) for k in ('phase', 'handoff', 'workflowStep')}, 'drawn': drawn, 'track': track}
+    attempt('Chora\'s seams, in a workflow: "Open Chora" opens the workflow\'s dataset at once, drawn on the map; "Back to the workflow" is there from the start, saying nothing is handed back yet; the panel shows the workflow, "Step 7 of 10" and the step', workflow_open)
+
+    def workflow_back_unsaved():
+        p, wid = r['wp'], r['wid']
+        with p.expect_navigation(url=re.compile(r'#workflow='), timeout=T(60) * 1000): p.click('#way-back')
+        wait_state(p, lambda s: s.get('phase') in ('ready', 'detecting', 'detected'), T(30), 'ready')
+        hooked(p)
+        ok = detected_again(p, ['applied.json'])
+        until(p, "() => /Back from Chora/.test(document.getElementById('methodos-message').textContent)", 15)
+        t = p.evaluate(JOIN_STATE)
+        handback = p.evaluate('() => window.__methodos_e2e.handbackKept()')
+        return (ok and t['steps'].get('place') == 'current' and 'applied.json is chosen in step 1 again' in t['message']
+                and handback is False and p.url == base + '#workflow=' + wid), {'tracker': {k: t[k] for k in ('steps', 'message')}, 'hand-back kept': handback, 'url': p.url, 'chosen': p.evaluate(SEAM_CHOSEN)}
+    attempt('Chora\'s seams, in a workflow: back without saving, the workflow is at the same step with its dataset chosen again, and nothing was handed back', workflow_back_unsaved)
+
+    def workflow_browser_back():
+        p = r['wp']
+        with p.expect_navigation(url=re.compile(r'/chora\.html#workflow='), timeout=T(60) * 1000): p.click('#for-tool a[href^="./chora.html#workflow="]')
+        chora_loaded(p)
+        p.go_back()
+        wait_state(p, lambda s: s.get('phase') in ('ready', 'detecting', 'detected'), T(30), 'ready')
+        ok = detected_again(p, ['applied.json'])
+        until(p, "() => document.querySelector('#methodos-track li[data-step=\"place\"]')?.dataset.state === 'current'", 15)
+        t = p.evaluate(JOIN_STATE)
+        return (ok and t['steps'].get('place') == 'current' and p.is_visible('#methodos-handback')), {'shown from': shown_from(p), 'tracker': t['steps'], 'chosen': p.evaluate(SEAM_CHOSEN), 'url': p.url}
+    attempt('Chora\'s seams, in a workflow: the browser\'s Back from Chora finds the workflow at its step with its dataset chosen, and the hand-back can be taken', workflow_browser_back)
+
+    def workflow_no_handoff():
+        # Chora opened for the workflow with nothing handed over (a fresh navigation): it opens the
+        # workflow's current dataset itself, from the files the main page keeps.
+        p, wid = r['wp'], r['wid']
+        p.goto('about:blank'); p.goto(NOTOOLS if PROVE else base + 'chora.html#workflow=' + wid)
+        s, drawn = chora_loaded(p)
+        return (s['phase'] == 'loaded' and s.get('fromWorkflow') == ['applied.json'] and not s.get('handoff') and drawn > 0), {'state': {k: s.get(k) for k in ('phase', 'fromWorkflow', 'handoff')}, 'drawn': drawn}
+    attempt('Chora\'s seams, in a workflow: Chora opened with nothing handed over opens the workflow\'s current dataset itself, from what the main page keeps', workflow_no_handoff)
+
+    def workflow_saved():
+        # After a save, the masthead's way back hands the file back, and the step is done with it, as before.
+        p = r['wp']
+        try:
+            chora_pick(p, 'londinium')
+            p.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
+            x, y = map_centre(p); draw(p, 'point', [(x + 50, y + 25)]); p.click('#draw-tools button[data-mode="static"]')
+            until(p, '() => window.__chora.pendingCount === 1', 10)
+            p.click('#save'); until(p, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+            if not (cstate(p)['lastSave'] or {}).get('passed'): raise RuntimeError('the save did not pass')
+            with p.expect_download(timeout=T(60) * 1000) as dl: p.click('#save-result button.primary')
+            saved = d / dl.value.suggested_filename; dl.value.save_as(saved)
+            until(p, '() => window.__chora.wayBack && window.__chora.wayBack.handsBack', 30)
+            note = p.inner_text('#way-back-note')
+            with p.expect_navigation(url=re.compile(r'#workflow='), timeout=T(60) * 1000): p.click('#way-back')
+            wait_state(p, lambda s: s.get('phase') in ('ready', 'detecting', 'detected'), T(30), 'ready')
+            until(p, "() => !document.getElementById('methodos-handback').hidden", 15)
+            p.click('#methodos-handback')
+            until(p, "() => /Chora handed back/.test(document.getElementById('methodos-message').textContent)", 10)
+            p.set_input_files('#picker', [])
+            choose(p, [saved])
+            until(p, "() => document.querySelector('#methodos-track li[data-step=\"place\"]')?.dataset.state === 'done'", 15)
+            t = p.evaluate(JOIN_STATE)
+            return (f'Hands back {saved.name}' in note and t['steps'].get('place') == 'done' and t['steps'].get('again') == 'current'), {'note': note, 'steps': t['steps']}
+        finally: r['wctx'].close()
+    attempt('Chora\'s seams, in a workflow: after a save, the masthead\'s "Back to the workflow" says it hands the file back, and the hand-back completes the step as before', workflow_saved)
+
+    def follow_publish(p):
+        p.click('#methodos-ask'); until(p, "!document.getElementById('methodos').hidden", 5)
+        p.check('input[name="methodos-have"][value="plato"]'); p.check('input[name="methodos-want"][value="publish"]')
+        p.click('#methodos-start'); until(p, "document.getElementById('methodos-tracker').dataset.status === 'pending'", 10)
+
+    def own_kept():
+        # The user's own files, chosen in step 1, are kept for the workflow and chosen again after a reload
+        # (no file handle: set_input_files gives none), and the tracker says so; Leave lets them go.
+        ctx = fresh()
+        try:
+            p = main_ready(ctx.new_page())
+            follow_publish(p)
+            if not choose(p, customs): return False, 'not detected'
+            until(p, "document.getElementById('methodos-tracker').dataset.keptOwn === 'true'", 30)
+            got = {'said': p.evaluate(JOIN_STATE)['kept'], 'kept': p.evaluate(OUTPUTS_KEPT)}
+            p.reload(); wait_state(p, lambda s: s.get('phase') in ('ready', 'detecting', 'detected'), T(30), 'ready')
+            names = sorted(f.name for f in customs)
+            got['chosen again'] = soon(p, '(n) => JSON.stringify([...document.querySelectorAll("#chosen .name")].map((e) => e.textContent).sort()) === JSON.stringify(n) && window.__plato.phase === "detected"', 60, names)
+            until(p, "() => /chosen in step 1 for you|the files this step takes/.test(document.getElementById('methodos-message').textContent)", 15)
+            t = p.evaluate(JOIN_STATE); got['after'] = {k: t[k] for k in ('message', 'kept', 'pick', 'steps')}
+            p.click('#methodos-leave'); until(p, "() => document.getElementById('methodos-tracker').hidden", 10)
+            got['left'] = p.evaluate(OUTPUTS_KEPT)
+            ok = (got['said'] and got['said'].startswith(f'Kept in this browser for the next steps: your {len(customs)} files') and 'Nothing leaves this computer' in got['said']
+                  and got['kept'] and len(got['kept']) == len(customs) and got['chosen again'] and t['steps'].get('check') == 'current'
+                  and t['pick'] is None and got['left'] in (None, []))
+            return ok, got
+        finally: ctx.close()
+    attempt('Chora\'s seams: the user\'s own files are kept for the workflow (the tracker says so), chosen again after a reload with no file handle, and let go with the workflow', own_kept)
+
+    def nothing_of_yours():
+        # "Keep my working data" off: nothing of the user's is kept, the tracker says so, a reload asks for
+        # the file again, and the round trip to Chora keeps nothing either.
+        ctx = fresh()
+        try:
+            p = ctx.new_page(); main_ready(p)
+            p.evaluate("() => localStorage.setItem('plato-tools.keep-working-data', 'no')")
+            main_ready(p)
+            follow_publish(p)
+            if not choose(p, customs): return False, 'not detected'
+            until(p, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+            until(p, "() => /Nothing of yours is kept/.test(document.getElementById('methodos-kept').textContent) && !document.getElementById('methodos-kept').hidden", 15)
+            got = {'said': p.evaluate(JOIN_STATE)['kept'], 'kept': p.evaluate(OUTPUTS_KEPT), 'clear offered': p.is_visible('#methodos-clear-kept')}
+            p.reload(); wait_state(p, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+            until(p, "() => !document.getElementById('methodos-pick').hidden", 15); p.wait_for_timeout(1000)
+            got['after a reload'] = {'chosen': p.evaluate(SEAM_CHOSEN), 'pick': p.evaluate(JOIN_STATE)['pick']}
+            p.click('#methodos-leave'); until(p, "() => document.getElementById('methodos-tracker').hidden", 10)
+            # Outside a workflow: the round trip to Chora keeps nothing.
+            f = d / 'antonine-not-kept.json'; shutil.copyfile(ant, f)
+            choose(p, [f]); p.click('#to-chora'); chora_loaded(p)
+            got['round trip'] = p.evaluate(SEAM_RETURN); got['Chora says'] = p.inner_text('#way-back-line')
+            with p.expect_navigation(timeout=T(60) * 1000): p.click('#way-back')
+            wait_state(p, lambda s: s.get('phase') == 'ready', T(30), 'ready'); p.wait_for_timeout(1500)
+            got['back'] = p.evaluate(SEAM_CHOSEN)
+            ok = (got['said'] and 'Nothing of yours is kept in this browser' in got['said'] and got['kept'] is None and not got['clear offered']
+                  and got['after a reload']['chosen'] == [] and got['after a reload']['pick'] == 'Choose the file'
+                  and got['round trip'] is None and got['Chora says'].strip() == 'Back to PLATO tools' and got['back'] == [])
+            return ok, got
+        finally: ctx.close()
+    attempt('Chora\'s seams: with "Keep my working data" off nothing of the user\'s is kept, the tracker says so, and after a reload or a visit to Chora the file is chosen again by hand', nothing_of_yours)
+    browser.close()
 
 # ---- Methodos, Map your data end to end (docs/plans/methodos.md, section 9, phase 4) ------------------
 # A ten-row CSV with county and parish columns walked through Methodos's "Map your data" on the page, as
@@ -3006,9 +3262,9 @@ def map_your_data_checks(pw, url, tmp):
         link = page.get_attribute('#for-tool a[href^="./chora.html#workflow="]', 'href')
         r['wid'] = link.split('#workflow=')[1]
         with page.expect_navigation(url=re.compile(r'/chora\.html#workflow='), timeout=T(60) * 1000): page.click('#for-tool a[href^="./chora.html#workflow="]')
-        until(page, 'window.__chora && window.__chora.phase === "ready" && window.__chora.mapReadyCount >= 1', 60)
-        page.set_input_files('#picker', [str(r['related'])])
-        until(page, '["loaded", "error", "unrecognised"].includes(window.__chora.phase)')
+        # The dataset chosen on the main page is opened at once (12 October 2026; it was chosen again here before).
+        until(page, 'window.__chora && window.__chora.mapReadyCount >= 1 && ["loaded", "error", "unrecognised"].includes(window.__chora.phase)', 90)
+        if (cstate(page).get('handoff') or []) != [r['related'].name]: raise RuntimeError(f'not opened at once: {cstate(page).get("handoff")}')
         chora_pick(page, 'kirk house')
         page.click('#adopt-find'); until(page, '() => window.__chora.adopt && window.__chora.adopt.open', 10)
         if page.is_visible('#adopt-token'): page.fill('#adopt-token', LOOKUP_TOKEN); page.click('#adopt-token-form button[type="submit"]')
@@ -4347,14 +4603,13 @@ def chora_checks(pw, url, tmp):
         page.set_input_files('#picker', str(f))
         until(page, '() => window.__plato.phase === "detected"', 30)
         page.click('#toolbox a.tool-link[href="./chora.html"]')
-        until(page, '() => window.__chora && window.__chora.handoff', 30)
-        offer = page.inner_text('#handoff'); page.click('#open-handoff')
-        until(page, '() => ["loaded", "error"].includes(window.__chora.phase)', 60); s = cstate(page)
-        # Once opened, the files are let go: the page opened again offers nothing.
+        # Opened at once, with no click (Stephen, 12 October 2026: it was an offer, "Open <file>", until then).
+        until(page, '() => window.__chora && window.__chora.handoff && ["loaded", "error"].includes(window.__chora.phase)', 60); s = cstate(page)
+        # Once opened, the files are let go: the page opened again opens nothing.
         page.reload(); until(page, '() => window.__chora.phase === "ready"', 60); page.wait_for_timeout(500)
-        again = page.is_visible('#handoff') or bool(cstate(page).get('handoff'))
-        return f.name in offer and s['phase'] == 'loaded' and s['places'] == ant_places and not again, {'offer': offer, 'state': s, 'offered again': again}
-    attempt('Chora: a file chosen on the main page is offered on Chora\'s page, opens there, and is not kept after', handoff)
+        again = page.is_visible('#handoff') or bool(cstate(page).get('handoff')) or cstate(page).get('phase') != 'ready'
+        return s.get('handoff') == [f.name] and s['phase'] == 'loaded' and s['places'] == ant_places and not again, {'state': s, 'opened again': again}
+    attempt('Chora: a file chosen on the main page is opened on Chora\'s page at once, with no click, and is not kept after', handoff)
 
     def handoff_from_step2():
         # The same hand-over from step 2's "Show on the map (Chora)", offered with no tool chosen; with a
@@ -4367,9 +4622,9 @@ def chora_checks(pw, url, tmp):
         offered = page.is_visible('#to-chora')
         page.click('#toolbox .tool-link[href="#tool=check"]'); narrowed = page.is_visible('#to-chora')
         page.click('#every-action'); page.click('#to-chora')
-        until(page, '() => window.__chora && window.__chora.handoff', 30)
-        offer = page.inner_text('#handoff')
-        return offered and not narrowed and f.name in offer and page.url.endswith('chora.html'), {'offered': offered, 'with Elenchos chosen': narrowed, 'offer': offer, 'url': page.url}
+        until(page, '() => window.__chora && window.__chora.handoff && ["loaded", "error"].includes(window.__chora.phase)', 60)
+        opened = cstate(page).get('handoff') or []
+        return offered and not narrowed and f.name in opened and page.url.endswith('chora.html'), {'offered': offered, 'with Elenchos chosen': narrowed, 'opened': opened, 'url': page.url}
     attempt('Chora: step 2\'s "Show on the map (Chora)" hands the chosen file to Chora\'s page, and is not offered once a tool is chosen', handoff_from_step2)
     IDB = '''(put) => new Promise((resolve, reject) => { const q = indexedDB.open('plato-tools-chora', 1);
       q.onupgradeneeded = () => q.result.createObjectStore('kv');
@@ -4390,13 +4645,14 @@ def chora_checks(pw, url, tmp):
         page.set_input_files('#picker', str(f)); until(page, '() => window.__plato.phase === "detected"', 30)
         page.click('#toolbox a.tool-link[href="./chora.html"]')
         until(page, '() => window.__chora && window.__chora.handoff', 30)
-        offered = f.name in page.inner_text('#handoff')
-        left = page.evaluate(IDB, False)                         # not opened yet: already let go, held in the page alone
+        offered = f.name in (cstate(page).get('handoff') or [])
+        left = page.evaluate(IDB, False)                         # taken: already let go, held in the page alone
+        until(page, '() => ["loaded", "error"].includes(window.__chora.phase)', 60)
         # A hand-off older than a few minutes is not offered, and is let go too.
         page.evaluate(IDB, True); page.reload(); until(page, '() => window.__chora.phase === "ready"', 60); page.wait_for_timeout(500)
         stale = page.is_visible('#handoff') or bool(cstate(page).get('handoff')); after = page.evaluate(IDB, False)
         return offered and left is None and not stale and after is None, {'offered': offered, 'left in the browser': left, 'stale offered': stale, 'stale left': after}
-    attempt('Chora: files handed over from the main page are let go by the browser as soon as they are offered, and an old hand-off is not offered', handoff_let_go)
+    attempt('Chora: files handed over from the main page are let go by the browser as soon as they are taken, and an old hand-off is not opened', handoff_let_go)
 
     # The way back into a Methodos workflow (src/chora/handback.js): opened as chora.html#workflow=<id>,
     # a file saved is handed back by reference, in the hand-off's store, under 'chora-handback'.

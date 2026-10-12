@@ -1415,8 +1415,9 @@ guard and drawing; `card.js`, what the place card writes, pure so that it is tes
 `basemaps.js`; `overlays.js` and `remote.js`, the historical maps; `ink.js`,
 `ink.worker.js` and `inkfetch.js`, tracing with assistance; `contributor.js`; `drafts.js`; `handoff.js`,
 which passes files chosen on the main page through IndexedDB, taken out of it as soon as Chora's page
-starts, not offered if older than two minutes, and let go by the main page too, when it starts, is shown
-again or is left, once it is that old), and its engine `src/engine/chora/` (`store.js`, `view.js`,
+starts and opened there at once, with no offer to click (Stephen, 12 October 2026), not opened if
+older than two minutes, and let go by the main page too, when it starts, is shown again or is left,
+once it is that old; and keeps the round trip, below), and its engine `src/engine/chora/` (`store.js`, `view.js`,
 `draw.js`, `save.js`, `geo.js`, `trace.js`, and `ink/`, the pixel work of tracing with assistance). It
 publishes its state on `window.__chora` for tests.
 
@@ -1440,10 +1441,51 @@ once taken, and Chora drops a stale one when it starts.
 Reading and deleting are one transaction (`take`, `dropStale`), so a record written meanwhile is
 never the one deleted. Opened without `#workflow`, nothing is written.
 
+**Chora's seams** (Stephen, 12 October 2026, Issue #33 point 5: Chora stays a page of its own, in the
+same tab, and its seams are mended). `test/methodos-seams.test.js` and `chora_seams_checks` in
+`e2e/app_test.py` hold these.
+
+- **Opened at once.** A fresh hand-off is opened when Chora's page starts (`state.handoff` names it),
+  from step 2's "Show on the map (Chora)", a tool card, or the workflow's "Open Chora". Opened as
+  `#workflow=<id>` with nothing handed over (a link opened in another tab, or the page reloaded), Chora
+  opens the workflow's current dataset itself (`state.fromWorkflow`): it reads the workflow's record
+  from Methodos's store (`src/methodos/store.js`, the same IndexedDB, or the tab's sessionStorage with
+  working data off) and the file from the files Methodos keeps (`src/methodos/outputs.js`, OPFS), the
+  step's input as `currentInput()` in `src/methodos/seams.js` gives it (at the step `place`, its
+  `dataset`). Nothing kept, nothing opened.
+- **The way back, from the start.** The masthead's `#way-back` is shown as the page opens:
+  "Back to the workflow" (`./#workflow=<id>`) when opened for one, saying that nothing is handed back
+  until the dataset is saved here; after a save it says it hands back the file saved, and a click writes
+  the hand-back again before going, as the save's own link (`#back-to-workflow`, kept) does. Without a
+  workflow it is "Back to PLATO tools" (`./`), saying which file is chosen there again when one is kept
+  for the round trip (below). `state.wayBack` publishes it.
+- **The workflow's few words**, read-only, in the panel (`#workflow-track`): its title, "Step n of N"
+  of the steps followed, and the step's words (`trackOf()` in `seams.js`; `state.workflowStep`).
+- **Back on the main page**, by Chora's link or the browser's Back (shown again from the back-forward
+  cache, or started afresh), the dataset is chosen again without the user choosing it. In a workflow,
+  the tracker re-chooses the step's file (`currentInput()`: a step's main input, the table whose columns
+  are matched, or the dataset that went to Chora), the user's own or a step's, from what it keeps; at
+  the step `place` it says so ("Back from Chora: … is chosen in step 1 again"), and "Take the dataset
+  back from Chora" is offered at that step however the page came back (it was offered only on arriving
+  by `#workflow=`). Outside a workflow, the main page keeps the files chosen for the **round trip**
+  when the way to Chora is taken (`keepForReturn` in `handoff.js`): in the same store, under
+  `main-return`, as the File objects, only where working data is kept, tied to the tab by an id in its
+  sessionStorage (`plato-tools.chora-return`), taken once by the main page when it is back: reached
+  from Chora's page (its referrer, which the site's referrer policy sends whole within the site), by
+  the browser's Back or Forward (the navigation's type), or shown again from the browser's memory
+  (`pageshow`, persisted). An address typed, or a reload, starts as it always did and leaves it for a
+  return still to come. Taking it is `takeReturn`: read, judged by `returnOf` and deleted in one
+  transaction; another tab's is left unless stale. It is not used if older than twelve hours
+  (`RETURN_FRESH`), and is let go when working data is turned off. The tool chosen then (`#tool=`) is
+  chosen again with it. In a workflow it is not written (one written before is let go), and back at a
+  workflow it is taken and not used: the workflow's own files are chosen instead.
+  `window.__plato.chosenAgain` names what was.
+
 The main page's side is built (`src/methodos/page.js`, the tracker's "Take the dataset back from Chora"; `src/app.js` passes the id and keeps it in `setHash`). On loading with `#workflow=<id>` it does this:
 
 - find the workflow's record by that id, and show the step waiting ("Draw or trace the places on a
-  map", operation `place`);
+  map", operation `place`), with the dataset that went to Chora chosen again in step 1 (above,
+  "Chora's seams");
 - carry `#workflow=<id>` through `setHash` in `src/app.js`, which rewrites the fragment to
   `#tool=<key>` (or nothing) on a toolbox click, and would otherwise lose the workflow;
 - only on the user's click, `take(id)` the hand-back (read once, deleted, checked again by
@@ -2237,9 +2279,21 @@ changing them.
   not started, with "Discard this workflow". The files the steps make (a dataset, a work file, a
   matching of columns) are kept as working data in OPFS, folder `methodos-outputs`, each under its
   SHA-256 (`src/methodos/outputs.js`), overriding decision 3 for these files only: the record still
-  holds only references, the user's own files are never copied, and after a reload the next step's
-  file is chosen for it. The tracker says what is kept, with "Clear them"; "keep working data" off
-  keeps them for the tab only and clears the folder at once, and the Permissions panel's note says so.
+  holds only references, and after a reload the next step's file is chosen for it. The tracker says
+  what is kept, with "Clear them"; "keep working data" off keeps them for the tab only and clears the
+  folder at once, and the Permissions panel's note says so.
+- **Stephen's decision of 12 October 2026** (Issue #33 point 5): the user's own file, the one the
+  workflow began with, is kept too, for the workflow's lifetime, under the same permission
+  (`keepOwn` in `outputs.js`: a copy in the same folder under its SHA-256, written when step 1's file is
+  chosen and is the workflow's), so that the main page, back from Chora or after a reload, chooses it
+  again by itself in any browser, Firefox and Safari included, not only through Chromium's file
+  handles (which still serve where the copy was cleared). It goes with the workflow (Leave, or another
+  workflow followed: `keptBy()` in `src/methodos/seams.js`, the user's files and the steps') and with
+  "Clear them"; with working data off it is held for the tab only and never written. The tracker says
+  so (`keptWords()`): "Kept in this browser for the next steps: your file and 2 files the steps made
+  (…). Nothing leaves this computer.", or, with working data off, "Nothing of yours is kept in this
+  browser: …", where it used to promise "never your own files". On any reload, the step's file, the
+  user's own or a step's, is chosen again when it is kept (`currentInput()`).
   A file dropped in step 1 gives a handle too where the browser can (`getAsFileSystemHandle`,
   feature-detected; a folder's handle, or a refusal, gives none and the drop goes on).
 
@@ -2357,7 +2411,10 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   and the cleaned value written back, if it is not one; a historical map's shown state (its note or
   its record) is read only if Show is a boolean and the opacity a number from 0 to 1, and a map kept
   is admitted afresh, permissions and all, on every load; files handed to Chora are usable for two
-  minutes and let go by either page after that.
+  minutes and let go by either page after that. Files are chosen from storage without a click in three
+  places (Stephen, 12 October 2026): a hand-off opened by Chora at once, a workflow's kept file chosen
+  again, and the round trip to Chora; each only reads the file in this browser (nothing is sent), the
+  page names what it chose, and the round trip is tied to the tab and used once.
 - **The frame and the referrer.** The head script also guards against framing: framed by another
   origin (the top window's address cannot be read), the page hides everything it has behind one line,
   "PLATO tools cannot be used inside another site's page", and publishes `__platoCsp.framed`. Framed
@@ -2374,6 +2431,8 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   `plato-tools.keep-working-data` is `no` when off): off, Chora clears its drawings not saved, its
   last output and the historical maps it keeps (`chora-overlays/`, and their notes in sessionStorage) at the next load (not at a reload for a permission), and the output once saved to disk.
   The dataset's working copy, in Chora's SQLite pool, is cleared at every start anyway (`clearOnInit`).
+  Off, Methodos keeps a workflow, its files and the user's own file for the tab only (above), and the
+  main page keeps nothing for the round trip to Chora.
 - **Persistent storage.** "Keep large datasets' working files (ask the browser for persistent
   storage)" calls `navigator.storage.persist()` once, when the user ticks it, never on load (Firefox
   asks the user, which is why Chora no longer calls it itself), and remembers the browser's answer

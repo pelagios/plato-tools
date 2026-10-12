@@ -33,12 +33,15 @@
       <button type="button" id="permissions-button" class="permissions-button" aria-haspopup="dialog">Permissions <span class="count"></span></button>
     </div>
   </div>
+  <!-- The way back, from the start: to the workflow Chora was opened for, or to the main page (src/chora/app.js, wayBack). -->
+  <p class="way-back" id="way-back-line" hidden><a class="button" id="way-back" href="./">Back to PLATO tools</a><span id="way-back-note" class="muted"></span></p>
 </header>
 <main class="chora-main">
   <div class="chora-panel" id="panel">
     <section id="files" aria-labelledby="files-h">
       <h2 id="files-h"><span class="step">1</span> Choose your data</h2>
       <p id="handoff" hidden></p>
+      <div id="workflow-track" class="workflow-track" role="status" hidden></div>
       <p id="workflow" hidden></p>
       <label class="drop" id="drop">
         <input type="file" id="picker" multiple>

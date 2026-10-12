@@ -11,6 +11,7 @@ import { reconcile, checkChosen } from '../src/engine/methodos/record.js';
 import { workflowStore, DB, STORE } from '../src/methodos/store.js';
 import { give, refOf, KEY as HANDBACK } from '../src/chora/handback.js';
 import { tx as choraTx } from '../src/chora/handoff.js';
+import { outputStore } from '../src/methodos/outputs.js';
 
 if (window.__plato) {
   const store = workflowStore();
@@ -60,6 +61,23 @@ if (window.__plato) {
         ['lookup', { work: [ref('work.krisis', 'places.krisis.json')] }], ['review', { work: [ref('work.krisis', 'places.krisis.json')] }], ['apply', { dataset: [ref('dataset', 'applied.json')] }]])
         s = runner.complete(runner.next(s), id, out);
       const { record } = await store.save({ ...s, id: `e2e-${Date.now().toString(36)}-${(++made).toString(36)}` }, { name });
+      return record.id;
+    },
+    // Map your data at its step "place", as placeAt, but with real files kept as the page keeps them
+    // (src/methodos/outputs.js): the user's own table (`own`, keepOwn) and the dataset the decisions were
+    // recorded in (`text`, called `name`, put as a step's output), so that the main page and Chora find
+    // them. Its id.
+    async placeAtKept(label, own, text, name) {
+      const outs = outputStore();
+      const MAP = RECIPES['map-your-data'];
+      const table = new File([own], 'places.csv', { type: 'text/csv' }), dataset = new File([text], name, { type: 'application/json' });
+      const files = await refsOf([table], 'files'), [applied] = await refsOf([dataset], 'dataset');
+      await outs.keepOwn(files[0], table); await outs.put(applied, dataset);
+      let s = runner.start(MAP, { 'has-regions': false, 'will-draw': true, 'will-publish': false, target: 'lpf' }, { files });
+      for (const [id, out] of [['columns', { mapping: [ref('mapping', 'columns.json')] }], ['check', {}], ['dataset', { dataset: [ref('dataset', 'places.json')] }],
+        ['lookup', { work: [ref('work.krisis', 'places.krisis.json')] }], ['review', { work: [ref('work.krisis', 'places.krisis.json')] }], ['apply', { dataset: [applied] }]])
+        s = runner.complete(runner.next(s), id, out);
+      const { record } = await store.save({ ...s, id: `e2e-${Date.now().toString(36)}-${(++made).toString(36)}` }, { name: label });
       return record.id;
     },
     // Chora's hand-back of a file of `text` called `name`, for workflow `id`, as Chora gives it on saving.
