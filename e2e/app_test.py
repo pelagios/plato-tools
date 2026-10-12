@@ -1442,7 +1442,8 @@ LOOKUP_PANEL = """() => { const $ = (id) => document.getElementById(id), shown =
     state: $('whg-token-state')?.textContent ?? null, progress: $('lookup-progress')?.textContent ?? null,
     help: $('whg-token-help')?.textContent ?? null, panel: $('lookup')?.innerText ?? '',
     focus: document.activeElement && document.activeElement.id,
-    session: sessionStorage.getItem('plato-tools.whg-token'), local: localStorage.getItem('plato-tools.whg-token') }; }"""
+    ...(() => { try { return { session: sessionStorage.getItem('plato-tools.whg-token'), local: localStorage.getItem('plato-tools.whg-token') }; }
+      catch { return { session: 'no storage', local: 'no storage' }; } })() }; }"""
 PANEL_TOKEN = 'e2e-SECRET-panel-token-41d2'
 
 def lookup_panel_case(page, tmp, url):
@@ -1458,7 +1459,7 @@ def lookup_panel_case(page, tmp, url):
         except Exception as e: return {'error': str(e).split('\n')[0][:200]}
     def setup():
         page.goto(NOTOOLS if PROVE else url)
-        page.evaluate("() => { sessionStorage.removeItem('plato-tools.whg-token'); localStorage.removeItem('plato-tools.whg-token'); localStorage.removeItem('plato-tools.whg-token.remember'); }")
+        page.evaluate("() => { try { sessionStorage.removeItem('plato-tools.whg-token'); localStorage.removeItem('plato-tools.whg-token'); localStorage.removeItem('plato-tools.whg-token.remember'); } catch { /* no storage here */ } }")
         page.goto(NOTOOLS if PROVE else url)
         wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready')
         page.set_input_files('#picker', [str(subjects)])
@@ -1466,8 +1467,8 @@ def lookup_panel_case(page, tmp, url):
         if s.get('phase') != 'detected': return {'phase': s.get('phase')}
         if not page.evaluate("() => document.getElementById('lookup').open"): page.click('#lookup > summary')
         return {'phase': 'open'}
+    # Each step below is tried whatever the setup gave, so that each check fails, or passes, on what it looks at.
     su = step(setup)
-    opened = su.get('phase') == 'open'
 
     # Only with WHG: another service chosen hides the token (its own address field shown: the control that the
     # panel is drawn); WHG chosen shows it.
@@ -1476,7 +1477,7 @@ def lookup_panel_case(page, tmp, url):
         other = page.evaluate(LOOKUP_PANEL)
         page.check('input[name="lookup-service"][value="whg"]')
         return {'other': other, 'whg': page.evaluate(LOOKUP_PANEL)}
-    sv = step(services) if opened else su
+    sv = {**step(services), 'setup': su}
     o, w = sv.get('other') or {}, sv.get('whg') or {}
     check('lookup panel: the token field is hidden while another service is chosen (its address field shown), and shown while WHG is',
           o.get('endpoint') is True and o.get('tokenBox') is False and o.get('field') is False
@@ -1500,7 +1501,7 @@ def lookup_panel_case(page, tmp, url):
         out['in page'] = page.evaluate("""(t) => document.documentElement.outerHTML.includes(t) || [...document.querySelectorAll('input, textarea')].some((x) => x.value.includes(t))
           || JSON.stringify(window.__plato || {}).includes(t)""", PANEL_TOKEN)
         return out
-    rm = step(remember) if opened else su
+    rm = step(remember)
     check('lookup panel, token remembered: the field empty with a masked placeholder, "Token remembered in this browser" beside it, "Forget the token" shown and "Remember my token" not',
           rm.get('value') == '' and rm.get('placeholder') == '••••••••' and rm.get('state') == 'Token remembered in this browser'
           and rm.get('forget') is True and rm.get('remember') is False and rm.get('focus') == 'whg-token', {k: v for k, v in rm.items() if k not in ('panel', 'session', 'local')})
@@ -1514,7 +1515,7 @@ def lookup_panel_case(page, tmp, url):
         page.click('#whg-forget')
         page.wait_for_function("() => document.getElementById('whg-forget').hidden", timeout=T(10) * 1000)
         return page.evaluate(LOOKUP_PANEL)
-    fg = step(forget) if rm.get('forget') else rm
+    fg = step(forget)
     panel_words = fg.get('panel', '')
     check('lookup panel, Forget: back to the empty field, its placeholder where to get the token, "Remember my token" again, no Forget, the focus in the field, the token gone',
           fg.get('value') == '' and 'whgazetteer.org' in (fg.get('placeholder') or '') and fg.get('remember') is True and fg.get('forget') is False
@@ -1543,7 +1544,7 @@ def lookup_panel_case(page, tmp, url):
         out['problem hidden'] = True
         page.fill('#lookup-lang', '')
         return out
-    ta = step(typeahead) if opened else su
+    ta = step(typeahead)
     ang = lambda r: next((x for x in (r or {}).get('options', []) if x.get('code') == 'ang'), None)
     check('lookup panel: the language field\'s typeahead finds ang by its code ("ang") and by its name ("Old Eng"), shown as "ang · Old English"',
           (ta.get('ang') or {}).get('shown') is True and (ta.get('ang') or {}).get('expanded') == 'true' and (ta.get('ang') or {}).get('role') == 'combobox'
@@ -1560,7 +1561,7 @@ def lookup_panel_case(page, tmp, url):
       const st = cs[0] ? getComputedStyle(cs[0]) : null;
       return { text: l ? l.textContent : '', codes: cs.map((c) => c.textContent), chips: cs.length > 0 && cs.every((c) => c.classList.contains('code-chip')),
         mono: st ? /mono|consol|menlo|courier/i.test(st.fontFamily) : false, border: st ? parseFloat(st.borderTopWidth) > 0 && parseFloat(st.borderTopLeftRadius) > 0 : false }; }"""
-    cd = step(lambda: page.evaluate(CODES)) if opened else su
+    cd = step(lambda: page.evaluate(CODES))
     check('lookup panel: the language codes in the help ("en, la or ang") are <code> chips (monospace, bordered), as in the typeahead\'s options',
           'a code such as en, la or ang' in (cd.get('text') or '') and cd.get('codes') == ['en', 'la', 'ang'] and cd.get('chips') is True
           and cd.get('mono') is True and cd.get('border') is True and (ang(ta.get('ang')) or {}).get('chip') == 'ang', cd)
