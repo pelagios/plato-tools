@@ -21,6 +21,7 @@ import * as A from '../engine/chora/adopt.js';
 import { ROLES } from '../engine/chora/draw.js';
 import { CHORA_ADOPT_PAGE as W, CHORA_ADOPT_TEXT, lookupPage as LW } from '../engine/words.js';
 import * as permissions from '../lib/permissions.js';
+import { tokenFieldHtml, giveToken, rememberToken, forgetToken } from '../lib/token-field.js';
 
 const SUBJ = gazetteerPermission(WHG_ENDPOINT);   // 'whg'
 const ROLE_WORDS = { RepresentativePoint: 'a point standing for it', Extent: 'the whole place', FeaturePoint: 'a feature of it', LabelAnchor: 'where its label goes', Itinerary: 'a route' };
@@ -128,13 +129,11 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
     const was = root.querySelector('#adopt-permission');
     if (was) permissions.unneed(was);   // the line is drawn afresh below; the module keeps no element gone from the page
     if (typed !== undefined) s.query = typed;
-    const ok = allowed(), hasToken = token.get() !== null;
+    const ok = allowed();
     root.innerHTML = `<h2 id="adopt-h">${esc(W.heading)}</h2>
       <p class="muted">${esc(s.view.label)} <span class="place-id">${esc(s.view.id)}</span></p>
       <p id="adopt-permission"></p>
-      ${hasToken ? `<p class="adopt-token-state">${esc(W.tokenGiven)} <button type="button" class="link" id="adopt-forget">${esc(W.forget)}</button></p>`
-        : `<form id="adopt-token-form" class="adopt-token"><label for="adopt-token">${esc(W.tokenLabel)}</label>
-          <input id="adopt-token" type="password" autocomplete="off" spellcheck="false"> <button type="submit">${esc(W.tokenUse)}</button></form>`}
+      <form id="adopt-token-form" class="adopt-token">${tokenFieldHtml(token, 'adopt-token', esc)}</form>
       <form id="adopt-form"><label for="adopt-q">${esc(W.queryLabel)}</label>
         <input id="adopt-q" type="search" autocomplete="off" value="${esc(s.query)}">
         <button type="submit" id="adopt-send" class="primary"${ok ? '' : ' hidden'}${s.phase === 'sending' ? ' disabled' : ''}>${esc(W.send)}</button></form>
@@ -259,7 +258,7 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
     const shown = drawMarkers();
     const pts = shown.map((c) => c.coords);
     if (pts.length) mapApi.fit(boxOfPoints(pts), 9);
-    if (s.problem?.offer === 'token') { root.querySelector('#adopt-forget')?.focus(); }
+    if (s.problem?.offer === 'token') { root.querySelector('#adopt-token')?.focus(); }
   }
   const boxOfPoints = (pts) => [Math.min(...pts.map((p) => p[0])), Math.min(...pts.map((p) => p[1])), Math.max(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1]))];
 
@@ -327,10 +326,10 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
   root.addEventListener('submit', (e) => {
     e.preventDefault();
     if (e.target.id === 'adopt-form') send();
+    // Enter in the token field: given for the tab (as on the main page), and the focus goes on to the name.
     if (e.target.id === 'adopt-token-form') {
       const f = root.querySelector('#adopt-token');
-      if (f.value.trim()) token.set(f.value);
-      f.value = '';   // the token is kept by its keeper only, not in the field
+      giveToken(token, f);
       if (s?.problem?.kind === 'token' || s?.problem?.kind === 'auth') s.problem = null;
       render(); root.querySelector('#adopt-q')?.focus();
     }
@@ -339,7 +338,13 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
     const b = e.target.closest('button');
     if (!b || !s) return;
     if (b.id === 'adopt-close') close();
-    else if (b.id === 'adopt-forget') { whg().clearToken(); token.forget(); s.problem = null; render(); root.querySelector('#adopt-token')?.focus(); }
+    // Remember: as the main page's; the focus stays in the field (drawn again, empty and masked).
+    else if (b.id === 'adopt-token-remember') {
+      if (rememberToken(token, root.querySelector('#adopt-token')) && (s.problem?.kind === 'token' || s.problem?.kind === 'auth')) s.problem = null;
+      render(); root.querySelector('#adopt-token')?.focus();
+    }
+    // Forget: no confirmation and no message; the token and the choice to remember it, and the focus back in the empty field.
+    else if (b.id === 'adopt-token-forget') { forgetToken(token, whg(), root.querySelector('#adopt-token')); s.problem = null; render(); root.querySelector('#adopt-token')?.focus(); }
     else if (b.id === 'adopt-retry') send();
     else if (b.id === 'adopt-widen') { s.widened = true; send(); }
     else if (b.id === 'adopt-narrow') { s.widened = false; send(); }

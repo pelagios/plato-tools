@@ -576,6 +576,22 @@ const scopeWords = ({ labels = [], ids = [], countries = [] } = {}) => [
   countries.length ? `in ${countries.join(' or ')}` : '',
 ].filter(Boolean).join(', ');
 /** Chora's page for adopting a location (src/chora/adopt-ui.js), in words. */
+/**
+ * The WHG token's field, the same on the main page's lookup panel and Chora's adopt panel
+ * (src/lib/token-field.js): empty with where to get the token, then masked with where it is kept.
+ */
+export const TOKEN_FIELD = {
+  label: 'Your WHG token',
+  placeholder: 'From your profile on whgazetteer.org',
+  mask: '••••••••',
+  remember: 'Remember my token',
+  forget: 'Forget the token',
+  /** Beside the field once a token is given: where it is kept. */
+  remembered: 'Token remembered in this browser',
+  forTab: 'Token kept for this tab only',
+  /** Under the field, always: how to give it, and that forgetting it does not revoke it (never a message on Forget). */
+  help: 'Press Enter to use it in this tab only, or Remember my token to keep it in this browser. Forgetting a token does not revoke it: only regenerating it in your WHG profile does.',
+};
 export const CHORA_ADOPT_PAGE = {
   find: 'Find in a gazetteer…',
   /** Why the button is disabled, shown beside it. */
@@ -596,11 +612,7 @@ export const CHORA_ADOPT_PAGE = {
   narrow: (where) => `Search ${where} again`,
   noneWithin: (where) => `The gazetteer found nothing of that name ${where}. Nothing wider is searched unless you ask.`,
   notApplied: (where) => `The gazetteer could not look ${where} (it holds no outline for the region), so it answered nothing. Nothing wider is searched unless you ask.`,
-  tokenLabel: 'Your WHG token',
-  tokenUse: 'Use this token',
   tokenNeeded: 'Give your WHG token first: WHG answers only queries that carry one. It is kept as Permissions says.',
-  tokenGiven: 'A token is given.',
-  forget: 'Forget the token',
   send: 'Look up',
   sending: 'Asking the World Historical Gazetteer…',
   close: 'Close',
@@ -878,10 +890,6 @@ export const lookupPage = {
   placesNotRead: 'The places of your dataset could not be read, so there is nothing to look up.',
   busy: 'Wait for the work in hand to finish, then look up.',
   needToken: 'Give your WHG token first: WHG answers only queries that carry one.',
-  /** Beside the token field once a token is given (the field is then empty, its placeholder masked): where it is kept. */
-  tokenRemembered: 'Token remembered in this browser',
-  tokenForTab: 'Token kept for this tab only',
-  tokenMask: '••••••••',
   /** The one line in place of Send (and of Find on the review screen) while the service's permission is set to Never, and its button, which opens Permissions there. */
   never: (name) => `Not allowed: ${name} is set to Never in Permissions.`,
   openPermissions: 'Permissions…',

@@ -2002,7 +2002,9 @@ location as one act that records two claims: an identity (this place IS the reco
   the reason beside it, for a place Chora keys as `#<n>`.
 - **Asking WHG** goes through the shared lookup (`createLookup`, one queue per page) with Krisis's
   `permittedFetch`, under the same permission (`gazetteer:whg`) and the same token keeper
-  (`permissions.token`) as Krisis on the main page. Until it is allowed, the module's one "Needs
+  (`permissions.token`) as Krisis on the main page, and the token's field is the main page's
+  (`tokenFieldHtml` in `src/lib/token-field.js`, `#adopt-token`, with the same states, words and
+  Remember and Forget; Enter gives it for the tab and moves on to the name). Until it is allowed, the module's one "Needs
   permission" line stands in for Look up; there is no notice or consent of Chora's own. One query, the
   name typed, always with `type: 'Place'` and `limit: 10`; no filters (WHG's filters remove candidates, never rank them).
 - **Ranking, honestly** (`referenceOf`, `rankCandidates`): by distance only when the place has its own
@@ -2196,7 +2198,11 @@ the places within it; the places themselves never send it.
   remembered in this browser" beside it (`#whg-token-state`, a status), and "Forget the token", which is
   shown only while there is a token, as "Remember my token" only while it is not remembered
   (`showTokenState()`, drawn from the keeper's `get()` and `remembered()`, on its `onChange` and on the
-  permissions' `onChange`, which is where `remember()` is heard). Forget calls the lookup's
+  permissions' `onChange`, which is where `remember()` is heard). The field's states, words
+  (`TOKEN_FIELD` in `words.js`) and actions are `src/lib/token-field.js`'s, shared with Chora's adopt
+  panel (`tokenView`, `giveToken`, `rememberToken`, `forgetToken`; `test/token-field.test.js`); both
+  empty the field before telling the keeper, whose `onChange` may draw a panel again (Chora's keeps
+  what is half typed, and kept the token in the field until the e2e caught it). Forget calls the lookup's
   `clearToken()` and the keeper's `remember(false)` and `forget()`, and puts the focus back in the
   field, with no message: the empty field says it, and that forgetting does not revoke a token (only
   regenerating it in WHG does) is the field's static help (`#whg-token-help`), as in the Permissions

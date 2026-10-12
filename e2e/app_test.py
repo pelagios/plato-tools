@@ -3591,7 +3591,7 @@ def map_your_data_checks(pw, url, tmp):
         if (cstate(page).get('handoff') or []) != [r['related'].name]: raise RuntimeError(f'not opened at once: {cstate(page).get("handoff")}')
         chora_pick(page, 'kirk house')
         page.click('#adopt-find'); until(page, '() => window.__chora.adopt && window.__chora.adopt.open', 10)
-        if page.is_visible('#adopt-token'): page.fill('#adopt-token', LOOKUP_TOKEN); page.click('#adopt-token-form button[type="submit"]')
+        if not page.is_visible('#adopt-token-forget'): page.fill('#adopt-token', LOOKUP_TOKEN); page.press('#adopt-token', 'Enter')
         page.fill('#adopt-q', 'Kirk House adopt'); page.click('#adopt-send')
         until(page, '() => ["answered", "problem"].includes(window.__chora.adopt.phase)', 30)
         page.click('#adopt-candidates li[data-cand="place:gn:9000010"] button[data-preview]')
@@ -5787,8 +5787,8 @@ def chora_adopt_checks(pw, url, tmp):
         page.click('#adopt-find')
         until(page, '() => window.__chora.adopt && window.__chora.adopt.open', 10)
     def give_token():
-        page.fill('#adopt-token', ADOPT_TOKEN); page.click('#adopt-token-form button[type="submit"]')
-        until(page, '() => !document.getElementById("adopt-token")', 10)
+        page.fill('#adopt-token', ADOPT_TOKEN); page.press('#adopt-token', 'Enter')
+        until(page, '() => document.getElementById("adopt-token-forget")?.hidden === false', 10)
     def look_up(q):
         page.fill('#adopt-q', q); page.click('#adopt-send')
         until(page, '() => ["answered", "problem"].includes(window.__chora.adopt.phase)', 30)
@@ -5810,7 +5810,7 @@ def chora_adopt_checks(pw, url, tmp):
         page.click('#adopt-permission button'); until(page, '() => document.getElementById("permissions-panel")?.open', 10)
         out['opened'] = page.evaluate(PANEL_STATE)
         return (line.startswith('Needs permission: World Historical Gazetteer') and send_shown is False and out['sent'] == 0 and out['policy'] == []
-                and W3 not in panel and 'Your WHG token' in panel and 'privacy' not in panel.lower() and 'this tab' not in panel
+                and W3 not in panel and 'Your WHG token' in panel and 'privacy' not in panel.lower() and 'forgotten when the tab is closed' not in panel
                 and out['opened'].get('focusKey') == 'gazetteer:whg'), out
     attempt('Chora adopt, not allowed: one "Needs permission" line opening the Permissions panel at WHG, no Look up, nothing sent by a script\'s click, no notice of its own (the token field is there, the control)', not_allowed)
 
@@ -5991,7 +5991,7 @@ def chora_adopt_checks(pw, url, tmp):
         t = look_up('Badtoken'); tt = page.inner_text('#adopt-status')
         return (q.get('problem') == 'quota' and 'try again tomorrow' in qt and kept_after_quota == ADOPT_TOKEN
                 and b.get('problem') == 'unanswered' and 'not a finding' in bt and retry and not b.get('candidates')
-                and t.get('problem') == 'auth' and 'Give it again' in tt and page.is_visible('#adopt-forget')), {'quota': [q.get('problem'), qt], 'broken': [b.get('problem'), bt, retry], 'auth': [t.get('problem'), tt]}
+                and t.get('problem') == 'auth' and 'Give it again' in tt and page.is_visible('#adopt-token-forget')), {'quota': [q.get('problem'), qt], 'broken': [b.get('problem'), bt, retry], 'auth': [t.get('problem'), tt]}
     attempt('Chora adopt: a spent allowance keeps the token and says try tomorrow; a per-query error is "try again", not "nothing found"; a refused token offers to give it again or forget it', problems)
 
     # Never: the line says so, with a button to the panel; nothing sent.
@@ -6007,6 +6007,61 @@ def chora_adopt_checks(pw, url, tmp):
         typed = page.input_value('#adopt-token')
         return 'set to Never in Permissions' in line and not page.is_visible('#adopt-send') and len(calls) + len(asked) == before and typed == 'half-typed', {'line': line, 'token field': typed}
     attempt('Chora adopt, Never: the line says it is set to Never, with a button to the panel, and nothing is sent; a token half typed survives the panel being drawn again', never)
+
+    # The token's field, as the main page's lookup panel (src/lib/token-field.js): before a token, an empty password
+    # field saying where to get it, Remember, and no Forget (in the page, hidden); remembered, the field empty and
+    # masked, where it is kept beside it, Forget, and the token nowhere in the page (the control: it was typed, and is
+    # kept); Forget, with no message, back to the empty state with the focus in the field; Enter, for the tab only.
+    TOKEN_STATE = """(t) => { const $ = (id) => document.getElementById(id), shown = (el) => !!el && !el.hidden && el.getClientRects().length > 0, f = $('adopt-token');
+      const kept = (() => { try { return { session: sessionStorage.getItem('plato-tools.whg-token'), local: localStorage.getItem('plato-tools.whg-token') }; } catch { return { session: 'no storage', local: 'no storage' }; } })();
+      return { field: shown(f), type: f?.type ?? null, value: f?.value ?? null, placeholder: f?.placeholder ?? null,
+        remember: shown($('adopt-token-remember')), forget: shown($('adopt-token-forget')), forgetInDom: !!$('adopt-token-forget'),
+        state: $('adopt-token-state')?.textContent ?? null, help: $('adopt-token-help')?.textContent ?? null,
+        status: $('adopt-status')?.textContent ?? null, panel: $('adopt')?.innerText ?? '', focus: document.activeElement && document.activeElement.id,
+        inPage: !!t && (document.documentElement.outerHTML.includes(t) || [...document.querySelectorAll('input, textarea')].some((x) => x.value.includes(t)) || JSON.stringify(window.__chora || {}).includes(t)),
+        ...kept }; }"""
+    tk = {}
+    def token_states():
+        if tk: return tk
+        fresh(ALLOW); open_for('newcastle upon')
+        tk['before'] = page.evaluate(TOKEN_STATE, None)
+        page.fill('#adopt-token', ADOPT_TOKEN)
+        tk['typed'] = ADOPT_TOKEN in page.input_value('#adopt-token')
+        page.click('#adopt-token-remember')
+        until(page, '() => document.getElementById("adopt-token-forget")?.hidden === false', 10)
+        tk['remembered'] = page.evaluate(TOKEN_STATE, ADOPT_TOKEN)
+        page.click('#adopt-token-forget')
+        until(page, '() => document.getElementById("adopt-token-forget")?.hidden === true', 10)
+        tk['forgotten'] = page.evaluate(TOKEN_STATE, ADOPT_TOKEN)
+        page.fill('#adopt-token', ADOPT_TOKEN); page.press('#adopt-token', 'Enter')
+        until(page, '() => document.getElementById("adopt-token-forget")?.hidden === false', 10)
+        tk['tab'] = page.evaluate(TOKEN_STATE, ADOPT_TOKEN)
+        return tk
+    def step(fn):
+        try: return fn()
+        except Exception as e: return {'error': 'harness error: ' + str(e).split('\n')[0][:200]}
+    def before():
+        b = step(token_states).get('before') or {}
+        return (b.get('field') is True and b.get('type') == 'password' and b.get('value') == '' and 'whgazetteer.org' in (b.get('placeholder') or '')
+                and b.get('remember') is True and b.get('forgetInDom') is True and b.get('forget') is False and b.get('state') == ''), {k: v for k, v in b.items() if k != 'panel'} or tk
+    attempt('Chora adopt, no token yet: an empty password field with a placeholder saying where to get it, "Remember my token" shown, "Forget the token" not shown', before)
+    def remembered():
+        r = step(token_states).get('remembered') or {}
+        return (r.get('value') == '' and r.get('placeholder') == '••••••••' and r.get('state') == 'Token remembered in this browser'
+                and r.get('forget') is True and r.get('remember') is False and r.get('focus') == 'adopt-token'
+                and tk.get('typed') is True and r.get('inPage') is False and r.get('local') == ADOPT_TOKEN), {k: v for k, v in r.items() if k not in ('panel', 'session', 'local')} or tk
+    attempt('Chora adopt, token remembered: the field empty with a masked placeholder, "Token remembered in this browser" beside it, Forget shown and Remember not, and the token nowhere in the page (the control: it was typed, and is kept in this browser)', remembered)
+    def forgotten():
+        g = step(token_states).get('forgotten') or {}
+        return (g.get('value') == '' and 'whgazetteer.org' in (g.get('placeholder') or '') and g.get('remember') is True and g.get('forget') is False
+                and g.get('state') == '' and g.get('focus') == 'adopt-token' and g.get('session') is None and g.get('local') is None
+                and (g.get('status') or '') == '' and 'is forgotten' not in g.get('panel', '') and 'regenerating it' in (g.get('help') or '')), {k: v for k, v in g.items() if k != 'panel'} or tk
+    attempt('Chora adopt, Forget: no confirmation and no message, back to the empty field with "Remember my token", the focus in the field, the token and the choice to remember it gone (the control: the revoking advice is in the static help)', forgotten)
+    def for_tab():
+        t = step(token_states).get('tab') or {}
+        return (t.get('state') == 'Token kept for this tab only' and t.get('remember') is True and t.get('forget') is True and t.get('placeholder') == '••••••••'
+                and t.get('session') == ADOPT_TOKEN and t.get('local') is None and t.get('inPage') is False and t.get('focus') == 'adopt-q'), {k: v for k, v in t.items() if k != 'panel'} or tk
+    attempt('Chora adopt, Enter in the token field: kept for this tab only (said beside it, not in localStorage), Remember still offered, the field masked, and the focus on to the name', for_tab)
 
     # A legacy cluster link is named (Novocastria, with a record link, has no such line: the control); a place whose @id is the record's adopts the location only.
     def cluster_and_same():

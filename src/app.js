@@ -27,9 +27,10 @@ import { keepNotes, restoreNotes } from './lib/typed-notes.js';
 import { RELOAD_LOSES } from './lib/permission-words.js';
 // Krisis: gazetteer lookup, run on this thread (never the worker), through the permissions module, with
 // the token from its one keeper (permissions.token).
-import { LOOKUP_WORDS, lookupPage as LW } from './engine/words.js';
+import { LOOKUP_WORDS, lookupPage as LW, TOKEN_FIELD } from './engine/words.js';
 import { createLookup, WHG_ENDPOINT, isWhg, whgLang } from './engine/gazetteer/index.js';
 import { languageCombobox } from './krisis/lang-combobox.js';
+import { showTokenView, giveToken, rememberToken, forgetToken } from './lib/token-field.js';
 import { runLookup, planLookup, gazetteerPermission, permittedFetch, serviceOf, iriFromTemplate, iriVia, manifestSettings, newWork, defaultChoice, licenceOf, PLACE_CHOICES, WHG_REQUESTS_A_DAY } from './engine/krisis/lookup.js';
 import { candidateSource } from './engine/krisis/identity.js';
 // Krisis: region review (Methodos #28, stages 3 and 4), run on this thread as the lookup is, through the same shared WHG lookup.
@@ -1593,19 +1594,8 @@ function needsLine(el, svc) {
 }
 /** The shared lookup takes the keeper's token, or none: at start (a token kept from before) and on every change. */
 const passToken = () => { const t = token.get(); if (t) whgLookup().setToken(t); else whgLookup().clearToken(); };
-/**
- * The token's part of the panel, drawn from its keeper, which says whether there is a token and where it
- * is kept, never what it is: the field is always empty once it is given (the token is never put back
- * into the page), with a masked placeholder; "Remember my token" while it is not remembered, "Forget the
- * token" only while there is one, and beside them where it is kept.
- */
-function showTokenState() {
-  const has = token.get() !== null, kept = has && token.remembered();
-  $('whg-token').placeholder = has ? LW.tokenMask : $('whg-token').dataset.placeholder;
-  $('whg-remember').hidden = kept;
-  $('whg-forget').hidden = !has;
-  $('whg-token-state').textContent = has ? (kept ? LW.tokenRemembered : LW.tokenForTab) : '';
-}
+/** The token's part of the panel, drawn from its keeper as Chora's is (src/lib/token-field.js). */
+const showTokenState = () => showTokenView(token, { field: $('whg-token'), remember: $('whg-remember'), forget: $('whg-forget'), state: $('whg-token-state') });
 /** WHG is the service chosen (its button, or another service's address that is WHG's). */
 const whgChosen = () => document.querySelector('input[name="lookup-service"]:checked')?.value !== 'other' || isWhg($('lookup-endpoint').value.trim());
 // The region review looks up in WHG whatever service is chosen: when it asks for the token, the field is shown until the service is chosen again.
@@ -1847,9 +1837,7 @@ async function offerResume(svc) {
 }
 function commitToken() {
   const f = $('whg-token');
-  if (!f.value.trim()) return;
-  token.set(f.value);
-  f.value = '';   // the token is kept by its keeper only, not in the field
+  if (f.value.trim()) giveToken(token, f);
 }
 
 // Places and candidates on the review screen.
@@ -1950,19 +1938,11 @@ $('lookup').addEventListener('input', (e) => {
 });
 // Remember my token: the token typed (or the one kept for the tab) is kept in this browser, as the
 // Permissions panel's "Remember my token in this browser" does; the field is emptied, and keeps the focus.
-$('whg-remember').onclick = () => {
-  const f = $('whg-token');
-  if (f.value.trim() || token.get()) { token.remember(true); commitToken(); }
-  f.focus();
-};
+$('whg-remember').onclick = () => { rememberToken(token, $('whg-token')); $('whg-token').focus(); };
 // Forget: the shared lookup sends no token from its next request, and the keeper forgets it and the
 // choice to remember it, so that the panel is as before a token was given. No message: the field's empty
 // state says it, and the advice on revoking a token is in the panel's help, not a message on Forget.
-$('whg-forget').onclick = () => {
-  const f = $('whg-token');
-  f.value = ''; whgLookup().clearToken(); token.remember(false); token.forget();
-  f.focus();
-};
+$('whg-forget').onclick = () => { forgetToken(token, whgLookup(), $('whg-token')); $('whg-token').focus(); };
 // A token given or forgotten (here, in the Permissions panel, or in another tab) goes to the shared lookup.
 token.onChange(() => { showTokenState(); passToken(); });
 // A permission allowed or withdrawn (in the panel, or another tab): Send, and the review screen's buttons, follow.
@@ -1973,7 +1953,9 @@ permissions.onChange(() => {
   if (afterStop) { const svc = lookupService(); if (mayLookUp(svc)) offerResume(svc); else $('lookup-resume').hidden = true; }
   if (work && !$('review').hidden && order.length) render(false);
 });
-$('whg-token').dataset.placeholder = $('whg-token').placeholder;
+// The token field's words, from the one place Chora's are from too.
+document.querySelector('label[for="whg-token"]').textContent = TOKEN_FIELD.label;
+$('whg-remember').textContent = TOKEN_FIELD.remember; $('whg-forget').textContent = TOKEN_FIELD.forget; $('whg-token-help').textContent = TOKEN_FIELD.help;
 showTokenState();
 showTokenBox();
 passToken();

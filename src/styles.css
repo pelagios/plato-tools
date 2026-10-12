@@ -536,13 +536,15 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; tex
 .lookup input[type=number] { width: 7rem; }
 .lookup select { max-width: 100%; }
 .lookup-other[hidden], .lookup-token[hidden] { display: none; }
-/* The token: the field, its buttons and where the token is kept, on one line where they fit. */
-.lookup-token-row { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .5rem; }
-.lookup-token-row input { flex: 0 1 18rem; min-width: 0; }
-.lookup-token-row button[hidden] { display: none; }
+/* The WHG token (src/lib/token-field.js), here and in Chora's adopt panel: the field, its buttons and
+   where the token is kept, on one line where they fit, and its help under them. */
+.token-row { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .5rem; }
+.token-row input { flex: 0 1 18rem; min-width: 0; }
+.token-row button { margin-top: 0; }
+.token-row button[hidden] { display: none; }
 .token-state { color: var(--ok); font-size: .95rem; }
 .token-state:empty { display: none; }
-#whg-token-help { margin-top: .2rem; }
+#whg-token-help, .token-help { display: block; margin-top: .2rem; color: var(--muted); font-size: .85rem; }
 /* A language code, wherever the panel names one, and in the typeahead's suggestions: a chip, never plain text. */
 code.code-chip { font-family: var(--font-mono); font-size: .85em; padding: 0 .3em; border: 1px solid var(--line); border-radius: 4px;
   background: color-mix(in srgb, var(--line) 45%, transparent); color: var(--fg); white-space: nowrap; }
