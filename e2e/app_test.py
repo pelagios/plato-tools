@@ -1028,9 +1028,13 @@ def krisis_lookup_case(page, tmp, url):
     redirect = {'on': False}   # while on, WHG answers by sending the request elsewhere (302)
     cors = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
             'Access-Control-Allow-Headers': 'authorization, content-type, accept, user-agent'}
+    vocab = []   # the review's anonymous GET of WHG's labels for kinds of place (#20): no lookup, so not among the calls
     def fake_whg(route):
         req = route.request
         if req.method == 'OPTIONS': return route.fulfill(status=204, headers=cors)
+        if req.method == 'GET' and req.url.endswith('/types/vocab/'):
+            vocab.append({'url': req.url, 'headers': req.all_headers()})
+            return route.fulfill(status=404, headers={**cors, 'Content-Type': 'application/json'}, body='{"detail": "Not found"}')
         calls.append({'url': req.url, 'headers': req.all_headers(), 'body': req.post_data or ''})
         if redirect['on']: return route.fulfill(status=302, headers={**cors, 'Location': 'https://elsewhere.example/reconcile'}, body='')
         if held['on']: held['routes'].append(route); return
