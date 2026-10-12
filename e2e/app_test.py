@@ -2006,6 +2006,22 @@ def gzip_case(page, tmp, plain_text, plain_outputs):
           and same and len(z) < len(plain_text.encode('utf-8')) and tables == ['place-centric-constantinople-tables.zip'] and got['tables warned'] == ['gzip-zip'])
     return ok, {**got, 'the same text once gunzipped': same}
 
+def begun_output(page, name, timeout):
+    """Wait until the run under way has begun `name` in the outputs folder and read a place, and is still
+    running: (the listing, the places read) as they were seen together. Polled from here: OUTPUTS_LIST is
+    async, and wait_for_function (until()) takes the promise an async predicate returns for true at once,
+    so a wait made that way did not wait at all (a live run of 12 October 2026 pressed Cancel at once)."""
+    t0 = time.time()
+    if toolless(page) and timeout > FAST: timeout = FAST; SHORTENED[0] += 1    # the page with no tools: nothing can come
+    last = None
+    while time.time() - t0 < T(timeout):
+        listing = page.evaluate(OUTPUTS_LIST)
+        s = page.evaluate('() => ({ places: window.__plato?.progress?.places || 0, phase: window.__plato?.phase })')
+        last = (listing, s)
+        if name in listing and s['places'] > 0 and s['phase'] == 'running': return listing, s['places']
+        time.sleep(0.05)
+    raise RuntimeError(f'waited {time.time() - t0:.0f}s for {name} to be begun and a place read: {last}')
+
 def cancel_case(page, tmp):
     """A conversion cancelled while it writes, then the same conversion let finish (the presence)."""
     big = many_places(tmp, 1000)
@@ -2015,10 +2031,10 @@ def cancel_case(page, tmp):
     if s.get('phase') != 'detected': return False, s
     page.select_option('#target', 'ntriples')
     page.click('#convert')
-    # Under way: its output begun in the browser's storage, and places read; not done.
-    # The listing that found the file is kept by the wait itself, as it held: one made after may differ.
-    until(page, f"async () => {{ const n = await ({OUTPUTS_LIST})(); const ok = n.includes({json.dumps(name)}) && (window.__plato.progress?.places || 0) > 0 && window.__plato.phase === 'running'; if (ok) window.__during = n; return ok; }}", 120)
-    got = {'during': page.evaluate('() => window.__during || []'), 'places read': page.evaluate('() => window.__plato.progress?.places')}
+    # Under way: its output begun in the browser's storage, and places read; not done. Cancel is pressed
+    # only once both are seen, by the listing kept here (begun_output), so the presence cannot be missed.
+    during, read = begun_output(page, name, 120)
+    got = {'during': during, 'places read': read}
     page.click('#cancel')
     after = wait_state(page, lambda s: s.get('phase') == 'ready', 60, 'ready after Cancel')
     got.update({'after Cancel': after.get('phase'), 'left': page.evaluate(OUTPUTS_LIST), 'offered': after.get('outputs'),
@@ -4708,6 +4724,9 @@ def until(page, js, timeout=60, arg=None):
     """Wait for `js` to hold; a timeout says what the page was doing (a hidden tab never draws a map, and
     looks exactly like a map that cannot), in the words the page itself shows."""
     t0 = time.time()
+    # wait_for_function takes the promise an async function returns for true at once: such a wait would
+    # not wait at all. Poll an async predicate from Python with evaluate() instead (begun_output).
+    if re.match(r'\s*async\b', js): raise ValueError(f'until() cannot wait on an async function, whose promise counts as true at once: {js[:60]!r}')
     # The pages run under a Content Security Policy without 'unsafe-eval', and Playwright evaluates a
     # bare expression with eval(): an expression is given as a function, which it calls instead.
     if not re.match(r'\s*(async\s+)?(\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>', js): js = f'() => ({js})'
