@@ -18,7 +18,7 @@ import { exportCandidates, readCandidateSet, serialiseCandidateSet } from './eng
 import { datasetAddress, baseDiffers } from './engine/methodos/containment.js';
 import { acceptGuarded, undoBatch, guardOf, guardsFirst, planGuarded } from './engine/krisis/guards.js';
 import { KRISIS_CANDIDATES, guardWords as GW, variantWords as VW, rowWords as RW } from './engine/words.js';
-import { stash as stashForChora, dropStale as dropStaleHandoff, keepForReturn, takeReturn } from './chora/handoff.js';
+import { stash as stashForChora, dropStale as dropStaleHandoff, takeReturn, dropStaleReturn, forgetReturn } from './chora/handoff.js';
 import { dropStale as dropStaleHandback, workflowOf } from './chora/handback.js';
 import { storageNeed } from './engine/storage.js';
 import * as permissions from './lib/permissions.js';
@@ -745,17 +745,17 @@ $('picker').onchange = (e) => { choose(e.target.files); e.target.value = ''; };
 }
 // Going to Chora's page with files chosen here hands them over (src/chora/handoff.js), and it opens
 // them at once. Only then, not on every choice: the browser may keep a copy of a stored file, and
-// the files here may be of any size. Outside a workflow they are kept for the way back too (the round
-// trip, keepForReturn, where working data is kept), so that this page chooses them again when it is
-// back; in a workflow, the workflow's own files are chosen again instead (src/methodos/page.js).
+// the files here may be of any size. Outside a workflow the same record is marked as the round trip
+// too (handoff.js, where working data is kept), so that this page chooses them again when it is back;
+// in a workflow, or one about to begin with these files, the workflow's own files are chosen again
+// instead (src/methodos/page.js), so it is not marked.
 document.addEventListener('click', async (e) => {
   if (e.defaultPrevented) return;   // a first tap that showed a tooltip, not a choice of the way
   // Methodos's "Open Chora" carries the workflow (./chora.html#workflow=<id>), and hands the files over too.
   const a = e.target.closest('a[href="./chora.html"], a[href^="./chora.html#workflow="]');
   if (!a || !files.length || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;
   e.preventDefault();
-  await stashForChora(files);
-  await keepForReturn(methodos.id() ? [] : files, { tool, keep: permissions.keepWorkingData() });
+  await stashForChora(files, { forReturn: methodos.following() || !permissions.keepWorkingData() ? null : { tool } });
   location.href = a.href;
 });
 // Back from Chora outside a workflow (its "Back to PLATO tools", or the browser's Back to a page that
@@ -768,10 +768,11 @@ const fromChora = () => { try { const u = new URL(document.referrer); return u.o
 const byHistory = () => { try { return performance.getEntriesByType('navigation')[0]?.type === 'back_forward'; } catch { return false; } };
 async function chosenAgain(shownAgain = false) {
   if (!shownAgain && !fromChora() && !byHistory()) return;
-  const back = await takeReturn();
+  // Working data no longer kept: what was kept is let go, and not used.
+  const back = await takeReturn({ keep: permissions.keepWorkingData() });
   if (!back || files.length) return;
   // Back to a workflow (its address, or one taken up), the workflow chooses its own file instead.
-  if (await whenReady === false || files.length || arrivedFor || methodos.id()) return;
+  if (await whenReady === false || files.length || arrivedFor || methodos.following()) return;
   const dt = new DataTransfer(); for (const f of back.files) dt.items.add(f); $('picker').files = dt.files;
   choose(back.files);
   if (back.tool && TOOLS[back.tool] && !tool && !workflowStep) { chooseTool(back.tool); setHash(back.tool); }
@@ -781,8 +782,9 @@ window.addEventListener('pageshow', (e) => { if (e.persisted) chosenAgain(true);
 // Files handed over that Chora's page never took (the way taken, its page not started) are not left
 // in the browser: let go here when this page starts, is shown again (back from Chora) or is left,
 // once they are older than the hand-over allows. A fresh hand-over, on the way to Chora now, is kept.
-dropStaleHandoff();
-for (const ev of ['pageshow', 'pagehide']) window.addEventListener(ev, () => dropStaleHandoff());
+// The round trip goes too, once Chora's page has not said it is alive for five minutes (dropStaleReturn).
+dropStaleHandoff(); dropStaleReturn();
+for (const ev of ['pageshow', 'pagehide']) window.addEventListener(ev, () => { dropStaleHandoff(); dropStaleReturn(); });
 // Chora's hand-back is let go where the hand-off is, when stale (a fresh one waits for the user's click).
 dropStaleHandback();
 for (const ev of ['pageshow', 'pagehide']) window.addEventListener(ev, () => dropStaleHandback());
@@ -1076,7 +1078,7 @@ for (const id of ['methodos-card', 'methodos-ask']) $(id).addEventListener('clic
 if (location.hash === '#methodos') methodos.open();
 // "Keep working data" turned off in the Permissions panel: Methodos's records go at once, not at its next save.
 let keptBefore = permissions.keepWorkingData();
-permissions.onChange(() => { const now = permissions.keepWorkingData(); if (now !== keptBefore) { keptBefore = now; methodos.keepChanged(now); if (!now) keepForReturn([], { keep: false }); } });
+permissions.onChange(() => { const now = permissions.keepWorkingData(); if (now !== keptBefore) { keptBefore = now; methodos.keepChanged(now); if (!now) forgetReturn(); } });
 // Back from Chora outside a workflow: what was chosen before is chosen again (chosenAgain, above).
 chosenAgain();
 

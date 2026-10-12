@@ -46,15 +46,17 @@ export const keptBy = (state) => [...startFiles(state), ...madeBy(state)];
  * with their size; or, with working data not kept (`keeping` false), that nothing of theirs is. An
  * empty string when nothing is kept and nothing needs saying.
  */
-export function keptWords({ files = [], own = [], keeping = true, workflow = true } = {}) {
+export function keptWords({ files = [], own = [], keeping = true, workflow = true, missed = [] } = {}) {
   if (!keeping) return workflow ? 'Nothing of yours is kept in this browser: “Keep my working data” is off (Permissions), so after a reload, or back from Chora, you choose your file again. ' : '';
   const mine = new Set(own.map((r) => r.sha256));
   const ownKept = files.filter((f) => mine.has(f.sha256)), made = files.filter((f) => !mine.has(f.sha256));
-  if (!files.length) return '';
+  // The user's own files that could not be kept (`missed`, each { name, why: 'short' | 'failed' }), said by name.
+  const notKept = missed.length ? `${missed.map((m) => m.name).join(', ')} could not be kept in this browser (${missed.some((m) => m.why === 'short') ? 'it has not room enough' : 'it would not keep it'}): after a reload, or back from Chora, choose ${missed.length === 1 ? 'it' : 'them'} again. ` : '';
+  if (!files.length) return notKept;
   const bytes = files.reduce((n, f) => n + (f.size || 0), 0);
   const parts = [ownKept.length ? (ownKept.length === 1 ? 'your file' : `your ${ownKept.length} files`) : null,
     made.length ? `${made.length} ${made.length === 1 ? 'file' : 'files'} the steps made` : null].filter(Boolean);
-  return `Kept in this browser for the next steps: ${parts.join(' and ')} (${fmtBytes(bytes)}). Nothing leaves this computer. `;
+  return `Kept in this browser for the next steps: ${parts.join(' and ')} (${fmtBytes(bytes)}). Nothing leaves this computer. ${notKept}`;
 }
 
 /** Chora's few words of the workflow it was opened for: its title, "Step n of N", and the step's words; null when there is no step to show. */

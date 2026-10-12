@@ -2,14 +2,14 @@
 // in this browser (the user's own file now, beside the files its steps made, under "Keep my working
 // data"), the file chosen again when the main page is back (src/methodos/seams.js), the words the
 // tracker says of it, Chora's few words of the workflow, and the round trip outside a workflow
-// (src/chora/handoff.js: kept for the tab, taken once, never older than twelve hours).
+// (src/chora/handoff.js: one record for the hand-off and the round trip, kept for the tab while Chora's page lives).
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { IDBFactory } from 'fake-indexeddb';
 import { RECIPES, runner } from '../src/engine/methodos/index.js';
 import { stepAt, currentInput, startFiles, madeBy, keptBy, keptWords, trackOf } from '../src/methodos/seams.js';
 import { outputStore } from '../src/methodos/outputs.js';
-import { RETURN_FRESH, returnOf, keepForReturn, takeReturn, returnKept, FRESH, take as takeHandoff, stash } from '../src/chora/handoff.js';
+import { RETURN_FRESH, returnOf, takeReturn, returnKept, FRESH, take as takeHandoff, stash, stamp, dropStale, dropStaleReturn, forgetReturn, tx } from '../src/chora/handoff.js';
 
 const ref = (type, name, c) => ({ type, name, size: name.length, sha256: c.repeat(64) });
 const OWN = ref('files', 'places.csv', 'a');
@@ -145,69 +145,138 @@ test('with "Keep my working data" off, nothing of the user\'s is written to the 
   assert.deepEqual(await off.kept(), { count: 0, bytes: 0, files: [] });
 });
 
-test('"Clear them", and working data turned off, keep the user\'s file usable in the tab though its kept copy goes', async () => {
+test('"Clear them", and working data turned off, never read the user\'s own file into memory: held as chosen it stays, read from OPFS it is no longer held; the steps\' files are copied', async () => {
   const disk = fakeOpfs();
-  const file = new File(['x,y\n'], 'own.csv');
+  const file = new File(['x,y\n'], 'own.csv'), made = new File(['{"made":1}'], 'made.json');
   const r = { type: 'files', name: file.name, size: file.size, sha256: await sha(file) };
+  const m = { type: 'dataset', name: made.name, size: made.size, sha256: await sha(made) };
   await outputStore({ root: disk.root, keep: () => true }).keepOwn(r, file);
-  // A later page holds it from the disk (a File over OPFS), and is the one the user carries on in.
+  await outputStore({ root: disk.root, keep: () => true }).put(m, made);
+  // A later page holds both from the disk (after a reload).
   let keeping = true;
   const page = outputStore({ root: disk.root, keep: () => keeping });
-  await page.get(r);
-  page.hold(r, await page.get(r));   // chosen again in step 1 (as the page does: the user's own)
-  await page.clear();
+  const fromDisk = await page.get(r);
+  await page.keepOwn(r, fromDisk); await page.get(m);   // chosen again in step 1, as the page does: its own
+  // Held as read from OPFS, then marked as the user's (as the page does on choosing it): watched for whole reads.
+  let readWhole = 0;
+  for (const k of ['arrayBuffer', 'text', 'bytes']) { const f = page.held(r); const orig = f[k].bind(f); f[k] = (...a) => { readWhole++; return orig(...a); }; }
+  keeping = false; await page.forget();
   assert.equal(disk.dirs.has('methodos-outputs'), false);
-  assert.equal(await page.held(r).text(), 'x,y\n', 'still readable in the tab');
-  // And turned off with a file read from OPFS: copied into memory before the folder goes.
-  await outputStore({ root: disk.root, keep: () => true }).keepOwn(r, file);
-  const later = outputStore({ root: disk.root, keep: () => keeping });
-  await later.get(r);
-  keeping = false; await later.forget();
+  assert.equal(readWhole, 0, 'the user\'s own file was not read into memory');
+  assert.equal(page.held(r), undefined, 'no longer held: it is chosen again by hand');
+  assert.equal(await page.held(m).text(), '{"made":1}', 'the steps\' file is copied into memory, as before');
+  // The user's own File as they chose it (no copy) stays held through "Clear them".
+  keeping = true;
+  const page2 = outputStore({ root: disk.root, keep: () => keeping });
+  assert.equal(await page2.keepOwn(r, file), 'browser');
+  await page2.clear();
+  assert.equal(page2.held(r), file);
   assert.equal(disk.dirs.has('methodos-outputs'), false);
-  assert.equal(await later.held(r).text(), 'x,y\n');
 });
 
-// ---- The round trip outside a workflow (src/chora/handoff.js) -------------------------------------
+test('the user\'s own file is not written where the browser says there is not room for it, and a failed write is said', async () => {
+  const disk = fakeOpfs();
+  const file = new File(['a'.repeat(5000)], 'big.csv');
+  const r = { type: 'files', name: file.name, size: file.size, sha256: await sha(file) };
+  const short = outputStore({ root: disk.root, keep: () => true, estimate: async () => ({ quota: 2_000_000, usage: 1_500_000 }) });
+  assert.equal(await short.keepOwn(r, file), 'short');
+  assert.equal(disk.dirs.get('methodos-outputs')?.has(r.sha256) ?? false, false, 'nothing written');
+  assert.equal(short.held(r), file, 'still chosen in the tab');
+  // The control: with room, it is kept.
+  const roomy = outputStore({ root: disk.root, keep: () => true, estimate: async () => ({ quota: 1e9, usage: 0 }) });
+  assert.equal(await roomy.keepOwn(r, file), 'browser');
+  // A write the browser refuses is 'failed', and leaves nothing.
+  const broken = { root: async () => ({ getDirectoryHandle: async () => ({ getFileHandle: async (n, o) => { if (!o?.create) throw Object.assign(new Error('nf'), { name: 'NotFoundError' }); return { createWritable: async () => { throw new Error('QuotaExceededError'); } }; }, removeEntry: async () => {} }) }) };
+  assert.equal(await outputStore({ ...broken, keep: () => true, estimate: async () => ({ quota: 1e9, usage: 0 }) }).keepOwn(r, file), 'failed');
+  // The tracker says it, by name.
+  assert.match(keptWords({ files: [], own: [r], missed: [{ name: 'big.csv', why: 'short' }] }), /^big\.csv could not be kept in this browser \(it has not room enough\): after a reload, or back from Chora, choose it again/);
+  assert.match(keptWords({ files: [{ sha256: 'c'.repeat(64), size: 10 }], own: [r], missed: [{ name: 'big.csv', why: 'failed' }] }), /file the steps made .*big\.csv could not be kept in this browser \(it would not keep it\)/);
+});
+
+// ---- One record for the hand-off and the round trip (src/chora/handoff.js) ------------------------
 class Session { constructor() { this.m = new Map(); } getItem(k) { return this.m.has(k) ? this.m.get(k) : null; } setItem(k, v) { this.m.set(k, String(v)); } removeItem(k) { this.m.delete(k); } }
 beforeEach(() => { globalThis.indexedDB = new IDBFactory(); });
+const raw = () => tx('readonly', (s) => s.getAll());
 
-test('the round trip is judged on read: this tab\'s, fresh (twelve hours), files that are files, and a tool that is a key', () => {
+test('the round trip is judged on read: this tab\'s, taken by Chora, alive within five minutes of its last stamp, files that are files, a tool that is a key', () => {
   const NOW = 1_800_000_000_000, f = new File(['{}'], 'a.json');
-  const v = { tab: 't1', files: [f], tool: 'check', at: NOW - 1000 };
-  assert.deepEqual(returnOf(v, 't1', NOW), { files: [f], tool: 'check' });
-  assert.equal(RETURN_FRESH, 12 * 60 * 60 * 1000);
-  assert.ok(RETURN_FRESH > FRESH, 'longer than the hand-off\'s two minutes: the user works in Chora meanwhile');
-  assert.equal(returnOf({ ...v, at: NOW - RETURN_FRESH }, 't1', NOW), null, 'stale');
-  assert.equal(returnOf({ ...v, at: NOW - RETURN_FRESH + 1 }, 't1', NOW)?.files.length, 1);
-  assert.equal(returnOf({ ...v, at: NOW + 60_000 }, 't1', NOW), null, 'from the future');
-  assert.equal(returnOf(v, 't2', NOW), null, 'another tab\'s');
-  assert.equal(returnOf(v, null, NOW), null, 'a tab with no id');
-  assert.equal(returnOf({ ...v, files: [] }, 't1', NOW), null);
-  assert.equal(returnOf({ ...v, files: [{ name: 'x', size: 1 }] }, 't1', NOW), null, 'not a file');
-  assert.equal(returnOf({ ...v, tool: '<img src=x>' }, 't1', NOW).tool, null, 'a tool that is not a key is dropped');
+  const v = { files: [f], at: NOW - 3_600_000, id: 'r1', ret: { tab: 't1', tool: 'check' } }, a = { id: 'r1', at: NOW - 1000 };
+  assert.deepEqual(returnOf(v, a, 't1', NOW), { files: [f], tool: 'check' }, 'an hour old, and alive: the record\'s own age does not count');
+  assert.equal(RETURN_FRESH, 5 * 60 * 1000);
+  assert.ok(RETURN_FRESH > FRESH);
+  assert.equal(returnOf(v, { ...a, at: NOW - RETURN_FRESH }, 't1', NOW), null, 'not stamped for five minutes');
+  assert.equal(returnOf(v, { ...a, at: NOW - RETURN_FRESH + 1 }, 't1', NOW)?.files.length, 1);
+  assert.equal(returnOf(v, { ...a, at: NOW + 60_000 }, 't1', NOW), null, 'a stamp from the future');
+  assert.equal(returnOf(v, null, 't1', NOW), null, 'never taken by Chora');
+  assert.equal(returnOf(v, { ...a, id: 'other' }, 't1', NOW), null, 'another record\'s stamp');
+  assert.equal(returnOf(v, a, 't2', NOW), null, 'another tab\'s');
+  assert.equal(returnOf({ ...v, ret: undefined }, a, 't1', NOW), null, 'a plain hand-off');
+  assert.equal(returnOf({ ...v, files: [{ name: 'x', size: 1 }] }, a, 't1', NOW), null, 'not a file');
+  assert.equal(returnOf({ ...v, ret: { tab: 't1', tool: '<img src=x>' } }, a, 't1', NOW).tool, null);
 });
 
-test('kept for the round trip, taken once by the main page in the same tab; another tab\'s is left; with working data off nothing is kept', async () => {
+test('the files are written once: Chora takes the hand-off, which stays as the round trip, never opened twice; the main page takes it once on return', async () => {
   const tab = new Session(), other = new Session();
   const f = new File(['{"places":[]}'], 'mine.json');
-  assert.equal(await keepForReturn([f], { tool: 'check', session: tab }), true);
+  assert.equal(await stash([f], { forReturn: { tool: 'check' }, session: tab }), true);
+  assert.equal((await raw()).length, 1, 'one record: the files, once');
+  assert.equal(await returnKept({ session: tab }), null, 'not a round trip until Chora has taken it');
+  assert.equal((await takeHandoff())[0].name, 'mine.json', 'Chora opens it');
+  assert.equal(await takeHandoff(), null, 'and never twice (a reload of Chora opens nothing)');
   assert.deepEqual(await returnKept({ session: tab }), ['mine.json'], 'Chora can say it is kept, without taking it');
   assert.equal(await takeReturn({ session: other }), null, 'another tab does not take it');
   const got = await takeReturn({ session: tab });
   assert.equal(got.files[0].name, 'mine.json'); assert.equal(got.tool, 'check');
   assert.equal(await takeReturn({ session: tab }), null, 'taken once');
-  // Stale, it is let go by whichever tab looks.
-  await keepForReturn([f], { session: tab });
-  assert.equal(await takeReturn({ session: other, now: Date.now() + RETURN_FRESH + 1 }), null);
-  assert.equal(await takeReturn({ session: tab }), null, 'gone');
-  // Working data not kept: nothing is written, and one kept before goes (the presence first).
-  await keepForReturn([f], { session: tab });
-  assert.deepEqual(await returnKept({ session: tab }), ['mine.json']);
-  assert.equal(await keepForReturn([f], { session: tab, keep: false }), false);
-  assert.equal(await returnKept({ session: tab }), null);
-  assert.equal(await takeReturn({ session: tab }), null);
-  // Separate from the hand-off: Chora's taking the hand-off leaves the round trip.
-  await stash([f]); await keepForReturn([f], { session: tab });
+  assert.deepEqual(await raw(), [], 'nothing left: record and stamp');
+  // A plain hand-off (a workflow's, or with working data off) is let go by Chora at once, as before.
+  await stash([f], { session: tab });
   assert.equal((await takeHandoff())[0].name, 'mine.json');
+  assert.deepEqual(await raw(), []);
+  // Marked, but taken where working data is no longer kept: let go at once too.
+  await stash([f], { forReturn: { tool: null }, session: tab });
+  await takeHandoff({ keep: false });
+  assert.deepEqual(await raw(), []);
+});
+
+test('the round trip lives while Chora stamps it: a stamp rewrites no files; five minutes unstamped, it is swept by whichever page looks', async () => {
+  const tab = new Session(), f = new File(['{}'], 'mine.json');
+  await stash([f], { forReturn: {}, session: tab });
+  const t0 = Date.now();
+  await takeHandoff({ now: t0 });
+  // Stamped later: the stamp moves, the record (the files) is the same object kept.
+  await stamp(t0 + 4 * 60_000);
+  const stampKept = await tx('readonly', (s) => s.get('chora-handoff-alive'));
+  assert.equal(stampKept.at, t0 + 4 * 60_000);
+  assert.deepEqual(Object.keys(stampKept).sort(), ['at', 'id'], 'the stamp holds an id and a time, nothing else');
+  // Alive (stamped four minutes after the start): a sweep at eight minutes leaves it.
+  assert.equal(await dropStaleReturn(t0 + 8 * 60_000), false);
+  assert.equal(await dropStale(t0 + 8 * 60_000), false, 'the hand-off\'s own two minutes do not sweep a round trip that is alive');
+  assert.deepEqual(await returnKept({ session: tab, now: t0 + 8 * 60_000 }), ['mine.json']);
+  // Nine minutes and more after the last stamp: swept, record and stamp.
+  assert.equal(await dropStaleReturn(t0 + 9 * 60_000 + 1), true);
+  assert.deepEqual(await raw(), []);
+  // A stamp with no record goes too; a hand-off never taken goes after two minutes (dropStale), as before.
+  await tx('readwrite', (s) => s.put({ id: 'orphan', at: Date.now() }, 'chora-handoff-alive'));
+  assert.equal(await dropStaleReturn(), true);
+  await stash([f], { forReturn: {}, session: tab });
+  assert.equal(await dropStale(Date.now() + FRESH + 1), true);
+  assert.deepEqual(await raw(), []);
+});
+
+test('working data turned off: the round trip is let go, and a return does not act on it but deletes it', async () => {
+  const tab = new Session(), f = new File(['{}'], 'mine.json');
+  // Presence first: kept and taken by Chora.
+  await stash([f], { forReturn: {}, session: tab }); await takeHandoff();
   assert.deepEqual(await returnKept({ session: tab }), ['mine.json']);
+  await forgetReturn();
+  assert.deepEqual(await raw(), []);
+  // A return after the permission was turned off: not used, and deleted.
+  await stash([f], { forReturn: {}, session: tab }); await takeHandoff();
+  assert.equal(await takeReturn({ keep: false, session: tab }), null);
+  assert.deepEqual(await raw(), []);
+  // A plain hand-off on its way to Chora is not the round trip's, and stays.
+  await stash([f], { session: tab });
+  await forgetReturn();
+  assert.equal((await raw()).length, 1);
 });

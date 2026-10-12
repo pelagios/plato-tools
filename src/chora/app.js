@@ -12,14 +12,14 @@ import { esc, badge, nameItem, relationItem, timeline, locations, ROLE_WORDS } f
 import * as basemaps from './basemaps.js';
 import * as contributors from './contributor.js';
 import { fingerprint, loadDrafts, saveDrafts, draftsWritten, forgetAllDrafts } from './drafts.js';
-import { take as takeHandoff, clear as clearHandoff, keepForReload, takeResume, returnKept } from './handoff.js';
+import { take as takeHandoff, clear as clearHandoff, keepForReload, takeResume, returnKept, stamp as stampReturn, dropStaleReturn, forgetReturn, STAMP_EVERY } from './handoff.js';
 import * as handback from './handback.js';
 // The workflow Chora was opened for, read where the main page keeps it (Methodos's store, and the files
 // it keeps), for the few words of it shown here and its current dataset (src/methodos/seams.js).
 import { workflowStore } from '../methodos/store.js';
 import { outputStore } from '../methodos/outputs.js';
 import { RECIPES } from '../engine/methodos/recipes/index.js';
-import { trackOf, currentInput } from '../methodos/seams.js';
+import { trackOf, currentInput, stepAt } from '../methodos/seams.js';
 import { serialQueue, pageRequest, answers } from './queue.js';
 import * as permissions from '../lib/permissions.js';
 import { RELOAD_LOSES, REFUSED as PERMISSION_REFUSED, NEEDS, REMEMBERED_BASEMAP } from '../lib/permission-words.js';
@@ -692,29 +692,81 @@ if (wf) {
 // file chosen before is chosen again (handoff.js, the round trip). Before a save it says that nothing is
 // handed back; after one, a click hands back the file saved, as the save's own link does.
 let handedBack = null;   // the reference to the file handed back at the last save in this load
+let refused = null;      // the name of the file saved whose hand-back this browser would not keep, or could not make
+let pastStep = false;    // the workflow has gone past this step since (a page shown again from the browser's memory)
 let returning = null;    // outside a workflow: the names of the files the main page chooses again, if kept
 function wayBack() {
   const a = $('way-back'), note = $('way-back-note');
   if (workflow) {
     a.textContent = 'Back to the workflow'; a.href = handback.backTo(workflow, location.href);
-    note.textContent = handedBack ? ` Hands back ${handedBack.name} (${fmtBytes(handedBack.size)}), the file you saved, to the workflow.`
+    note.textContent = pastStep ? ' The workflow has gone past this step since: nothing is handed back to it from here.'
+      : handedBack ? ` Hands back ${handedBack.name} (${fmtBytes(handedBack.size)}), the file you saved, to the workflow.`
+      : refused ? ` ${refused} could not be handed back from here: choose it by hand on the main page, in step 1, when it asks.`
       : ' Nothing is handed back until you save the dataset here: going back now leaves the workflow at this step, with its dataset as it was.';
   } else {
     a.textContent = 'Back to PLATO tools'; a.href = new URL('./', location.href).href;
     note.textContent = returning?.length ? ` ${returning.join(', ')} ${returning.length === 1 ? 'is' : 'are'} chosen there again.` : '';
   }
   $('way-back-line').hidden = false;
-  state.wayBack = { words: a.textContent, href: a.href, said: note.textContent.trim(), handsBack: !!handedBack };
+  state.wayBack = { words: a.textContent, href: a.href, said: note.textContent.trim(), handsBack: !!handedBack && !pastStep, refused: !!refused };
+}
+/**
+ * Whether the workflow, as kept in this browser now, still waits at Chora's step: false once it has
+ * gone past it (a page shown again from the browser's memory after the step was done), when nothing is
+ * handed back. A workflow this browser does not hold (none kept, or another tab's) is not judged: true.
+ */
+async function atChorasStep() {
+  let r = null;
+  try { r = await workflowStore().load(workflow); } catch { return true; }
+  return !r || stepAt(r)?.op === 'place';
+}
+/** Hand `ref` back once more before going back (so that the main page finds it fresh), unless the workflow has gone past this step. */
+async function handBackAgain(ref) {
+  if (await atChorasStep()) { await handback.give(workflow, ref); return true; }
+  pastStep = true; wayBack();
+  return false;
 }
 $('way-back').addEventListener('click', async (e) => {
   if (!workflow || !handedBack || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   // After a save, the hand-back is written again first, so that the main page finds it fresh.
   e.preventDefault();
-  await handback.give(workflow, handedBack);
+  await handBackAgain(handedBack);
   location.assign($('way-back').href);
 });
 wayBack();
-if (!workflow) returnKept().then((names) => { returning = names; wayBack(); });
+/** Outside a workflow, say which files the main page chooses again (once the hand-over is taken, below). */
+const sayReturning = () => { if (!workflow) returnKept().then((names) => { returning = names; wayBack(); }); };
+// Shown again from the browser's memory: the workflow may have gone on meanwhile, and the round trip
+// is said again as it stands.
+window.addEventListener('pageshow', (e) => {
+  if (!e.persisted) return;
+  if (workflow && handedBack) atChorasStep().then((at) => { pastStep = !at; wayBack(); });
+  sayReturning();
+});
+// The round trip lives while this page does (handoff.js): it says so every minute, and when it is
+// hidden, shown or left, with a small write that does not rewrite the files.
+setInterval(() => stampReturn(), STAMP_EVERY);
+document.addEventListener('visibilitychange', () => stampReturn());
+window.addEventListener('pagehide', () => stampReturn());
+// "Keep my working data" turned off here: what the main page keeps for the way back goes at once, as the
+// panel says: the round trip, Methodos's kept files (the user's own copy among them, in
+// methodos-outputs/), and the workflow's record moves to the tab (sessionStorage), as the main page
+// moves it. Also at the start, when it is off (below).
+async function forgetMainPagesData() {
+  await forgetReturn();
+  try { await (await navigator.storage.getDirectory()).removeEntry('methodos-outputs', { recursive: true }); } catch { /* none kept */ }
+  returning = null; wayBack();
+}
+let keptHere = permissions.keepWorkingData();
+permissions.onChange(() => {
+  const now = permissions.keepWorkingData();
+  if (now === keptHere) return;
+  keptHere = now;
+  if (now) return;
+  forgetMainPagesData();
+  if (workflow) workflowRecord.then((r) => { if (r) workflowStore().save(r).catch(() => {}); });
+  state.workingForgotten = true;
+});
 
 // The workflow's few words, read-only, in the panel: its title, "Step n of N", and this step's words,
 // from its record kept in this browser (Methodos's store; in the tab's sessionStorage when working data
@@ -732,7 +784,9 @@ workflowRecord.then((r) => {
 /** The workflow's current dataset, as the main page keeps it (its own file, or a step's), or null: Chora opens it when no file was handed over. */
 async function workflowDataset() {
   const r = await workflowRecord;
-  const refs = r && currentInput(r);
+  // Only at Chora's own step: at any other, Chora opens nothing of the workflow's by itself.
+  if (!r || stepAt(r)?.op !== 'place') return null;
+  const refs = currentInput(r);
   if (!refs?.length) return null;
   const outs = outputStore(), got = [];
   for (const ref of refs) { const f = await outs.get(ref); if (!f) return null; got.push(f); }
@@ -743,11 +797,15 @@ async function handBack(file) {
   let ref;
   try { ref = await handback.refOf(file); } catch (e) {
     $('save-result').insertAdjacentHTML('beforeend', `<p class="warn">${esc(name)} could not be handed back to the workflow (${esc(e.message)}): choose it on the main page.</p>`);
+    handedBack = null; refused = name; wayBack();
     return;
   }
+  // The workflow kept here may have gone past this step (this page shown again from the browser's memory).
+  if (!(await atChorasStep())) { pastStep = true; handedBack = null; wayBack(); return; }
   const kept = await handback.give(workflow, ref);
   state.handback = kept ? { ...kept, files: kept.files.map((r) => ({ ...r })) } : null;
-  handedBack = kept ? ref : null; wayBack();   // a hand-back the browser would not keep is not promised
+  // A hand-back the browser would not keep is not promised: the masthead says to choose the file by hand.
+  handedBack = kept ? ref : null; refused = kept ? null : ref.name; wayBack();
   $('back-to-workflow')?.closest('p')?.remove();
   const p = document.createElement('p'), a = document.createElement('a');
   a.id = 'back-to-workflow'; a.className = 'button'; a.textContent = 'Back to the workflow';
@@ -757,7 +815,7 @@ async function handBack(file) {
   a.addEventListener('click', async (e) => {
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     e.preventDefault();
-    await handback.give(workflow, ref);
+    await handBackAgain(ref);
     location.assign(a.href);
   });
   p.append(a, Object.assign(document.createElement('span'), { className: 'muted',
@@ -1290,12 +1348,16 @@ startWorker().then(async () => {
     // The historical maps shown last time (chora-overlays/) are working data too, as the panel says.
     try { await (await navigator.storage.getDirectory()).removeEntry('chora-outputs', { recursive: true }); } catch { /* none kept */ }
     await ov.forgetKept();
+    // And what the main page keeps for the way back, and Methodos's kept files.
+    await forgetMainPagesData();
     state.workingCleared = true;
   }
   inTurn(() => readmitKept());
-  handback.dropStale();
+  handback.dropStale(); dropStaleReturn();
   // Files chosen on the main page, opened here at once (Stephen, 12 October 2026: no offer to click).
-  const handed = await takeHandoff();
+  // A round trip (handoff.js) stays, stamped as taken, where working data is kept.
+  const handed = await takeHandoff({ keep: permissions.keepWorkingData() });
+  sayReturning();
   if (handed && !files.length) {
     state.handoff = handed.map((f) => f.name);
     await open(handed);

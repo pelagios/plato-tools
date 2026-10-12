@@ -104,7 +104,7 @@ function stepList(list, steps, at, done, notes = []) {
  *   reopenResult()   show that result again.
  * `workflow` is the id the page's address named (#workflow=<id>, Chora's way back), or null: that
  * workflow is the one taken up, and its step "place" offers Chora's hand-back.
- * Returns { open(), chosen(files), began(run), ended(run), keepChanged(on), id() }: the host
+ * Returns { open(), chosen(files), began(run), ended(run), keepChanged(on), id(), following() }: the host
  * tells it the files chosen, and each run of a tool as it begins ({ op, files }) and ends ({ op,
  * report, outputs, incomplete } or { op, error, partial } or { op, waiting } or { op, cancelled }).
  */
@@ -446,9 +446,18 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   async function keepOwn(files) {
     const start = startFiles(wf);
     if (!wf || !start.length || !sameRefs(start, chosenRefs)) return;
-    for (const r of start) { const i = chosenRefs.findIndex((x) => x.sha256 === r.sha256); if (i >= 0) await outs.keepOwn(r, files[i]); }
+    // What could not be kept (no room, or the browser would not) is said in the tracker, by name.
+    const missed = [];
+    for (const r of start) {
+      const i = chosenRefs.findIndex((x) => x.sha256 === r.sha256);
+      if (i < 0) continue;
+      const how = await outs.keepOwn(r, files[i]);
+      if (how === 'short' || how === 'failed') missed.push({ name: r.name, why: how });
+    }
+    ownMissed = missed;
     showKept();
   }
+  let ownMissed = [];   // the user's own files that could not be kept in this browser, and why
 
   // ---- What only the user can say: an interactive step's result, taken from the page as it stands.
   async function resultOf(s) {
@@ -476,6 +485,13 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
       // By hand: the dataset saved in Chora, chosen again in step 1 (when no hand-back came, or none was taken).
       const files = page.files();
       if (!files.length) throw new Error('Choose the dataset you saved in Chora in step 1 first.');
+      // The very dataset that went to Chora (chosen again on return) is not taken as the step's result
+      // unasked: nothing drawn there is in it. Two plain ways on: the file saved there, or "Nothing to draw".
+      const went = currentInput(wf, s), refs = await refsOf(files, 'dataset');
+      if (went && sameRefs(went, refs)) {
+        asIs = s.id;
+        throw new Error(`${names(went)} is the dataset that went to Chora, as it was: nothing drawn there is in it. Take the dataset back from Chora, or choose the file you saved there in step 1; or, if there was nothing to draw, say so (“Nothing to draw: go on with this dataset”).`);
+      }
       return { dataset: await refsHeld(files, 'dataset', { own: true }) };
     }
     throw new Error(`The step “${s.title}” is done by the tools, when its run finishes.`);
@@ -485,8 +501,22 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     if (w.current !== s.id) throw new Error(`The workflow is not at the step “${s.title}”.`);
     wf = runner.complete(w, s.id, outputs);
     if (s.op === 'place') fromChora = null;   // done (by the hand-back or by hand): a hand-back taken is not another step's
+    asIs = null;
     say(null); await keep(); render(false);
   }
+  // "Nothing to draw: go on with this dataset": offered once "This step is done" found the dataset that
+  // went to Chora unchanged; the step is done with it, as it went, said in words.
+  let asIs = null;   // the step "place" whose "This step is done" found the dataset unchanged
+  const asIsB = el('button', { type: 'button', id: 'methodos-as-is', hidden: true, textContent: 'Nothing to draw: go on with this dataset' });
+  doneB.after(' ', asIsB);
+  asIsB.addEventListener('click', () => chain(async () => {
+    const s = atStep();
+    if (!s || s.op !== 'place' || asIs !== s.id) return;
+    const went = currentInput(wf, s);
+    if (!went) return;
+    await finishInteractive(s, { dataset: went });
+    say(`Nothing drawn in Chora: the workflow goes on with ${names(went)}, as it went there.`); render(false);
+  }));
   doneB.addEventListener('click', () => chain(async () => {
     const s = atStep();
     if (!s || OPERATIONS[s.op].kind !== 'interactive') return;
@@ -503,7 +533,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     outs.kept().then(({ files }) => {
       if (n !== keptAsked) return;
       const keeping = outs.keeping ? outs.keeping() : true;
-      const words = keptWords({ files, own: startFiles(wf || changed?.record), keeping, workflow: !!(wf || changed || pending) });
+      const words = keptWords({ files, own: startFiles(wf || changed?.record), keeping, workflow: !!(wf || changed || pending), missed: wf ? ownMissed : [] });
       keptEl.hidden = !words || tracker.hidden;
       keptEl.firstChild.textContent = words;
       clearB.hidden = !keeping;
@@ -549,14 +579,14 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   backB.addEventListener('click', () => chain(async () => {
     const last = wf && [...wf.steps].reverse().find((s) => s.state === 'done');
     if (!last) return;
-    wf = runner.invalidate(wf, last.id); active = null; fromChora = null;
+    wf = runner.invalidate(wf, last.id); active = null; fromChora = null; asIs = null;
     say(null); await keep(); render(false);
     if (backB.disabled) doneB.focus();
   }));
   q(tracker, '#methodos-leave').addEventListener('click', () => chain(async () => {
     const id = wf?.id || changed?.record.id, was = pending?.id;
     await outs.drop(keptBy(wf || changed?.record));
-    wf = null; pending = null; changed = null; active = null; note = null; handle = handleFile = keptHandle = null; fromChora = null; arrived = null;
+    wf = null; pending = null; changed = null; active = null; note = null; handle = handleFile = keptHandle = null; fromChora = null; arrived = null; asIs = null; ownMissed = [];
     if (id) await store.remove(id);
     if (was) await store.dropPending(was);
     render(false); backTo();
@@ -617,7 +647,11 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
       else if (!on) await store.forgetKept();
       if (pending) await store.savePending(pending);
       // Turned on: the user's own file, held for the tab, is kept from now as the steps' files are.
-      if (on && wf) for (const r of startFiles(wf)) { const f = outs.held(r); if (f) await outs.keepOwn(r, f); }
+      if (on && wf) {
+        const missed = [];
+        for (const r of startFiles(wf)) { const f = outs.held(r); if (f) { const how = await outs.keepOwn(r, f); if (how === 'short' || how === 'failed') missed.push({ name: r.name, why: how }); } }
+        ownMissed = missed;
+      }
       if (!on) {
         await outs.forget();   // the workflow's files: for the tab only from now, and cleared from the browser at once
         // A kept file already chosen in step 1 is chosen again from the tab's copy, as the stored one is gone.
@@ -686,6 +720,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     tMsg.textContent = message; tMsg.hidden = !message; tMsg.classList.toggle('warn', !!note?.warn);
     tSaid.textContent = [where, run, message].filter(Boolean).join(' ');
     doneB.hidden = !(s && op.kind === 'interactive' && !changed && wf);
+    asIsB.hidden = !(s && s.op === 'place' && asIs === s.id && wf && !changed);
     backB.disabled = !wf || changed || !wf.steps.some((x) => x.state === 'done');
     restartB.hidden = changed?.action !== 'changed';
     leaveB.textContent = !shown ? 'Discard this workflow' : 'Leave the workflow';
@@ -779,5 +814,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   })).catch(() => {});
   // The files chosen are recognised (their format known): what the step at hand offers may change with it.
   const detected = () => chain(async () => { if (wf) render(false); });
-  return { open, chosen, began, ended, dropped, keepChanged, detected, baseChanged, id: () => wf?.id || null };
+  // following(): a workflow is followed, begun or about to begin with the files chosen (pending): what is
+  // chosen is the workflow's, so the main page keeps no round trip of it (src/chora/handoff.js).
+  return { open, chosen, began, ended, dropped, keepChanged, detected, baseChanged, id: () => wf?.id || null, following: () => !!(wf || pending || changed) };
 }
