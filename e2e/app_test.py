@@ -4720,21 +4720,41 @@ def attempt(name, fn):
 DIAG = '''() => { const m = window.__chora_map; return { hidden: document.hidden, phase: window.__chora?.phase, mapReadyCount: window.__chora?.mapReadyCount,
   styleLoaded: m ? m.isStyleLoaded() : null, loaded: m ? m.loaded() : null, says: document.getElementById('phase')?.textContent || document.title }; }'''
 
+ASYNC_PREDICATE = re.compile(r'^\s*async\b|\.then\(|\bawait\b')
 def until(page, js, timeout=60, arg=None):
     """Wait for `js` to hold; a timeout says what the page was doing (a hidden tab never draws a map, and
-    looks exactly like a map that cannot), in the words the page itself shows."""
+    looks exactly like a map that cannot), in the words the page itself shows.
+
+    wait_for_function takes a promise for true at once, so an async predicate (one that reads OPFS, say)
+    given to it never waited: three of Chora's maps checks passed that way, and a cancel check pressed
+    Cancel at once (October 2026). An async predicate is therefore polled from here, with evaluate(),
+    which awaits it; and a predicate given to wait_for_function that returns a promise anyway is
+    refused, in the page, rather than taken for true."""
     t0 = time.time()
-    # wait_for_function takes the promise an async function returns for true at once: such a wait would
-    # not wait at all. Poll an async predicate from Python with evaluate() instead (begun_output).
-    if re.match(r'\s*async\b', js): raise ValueError(f'until() cannot wait on an async function, whose promise counts as true at once: {js[:60]!r}')
     # The pages run under a Content Security Policy without 'unsafe-eval', and Playwright evaluates a
     # bare expression with eval(): an expression is given as a function, which it calls instead.
     if not re.match(r'\s*(async\s+)?(\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>', js): js = f'() => ({js})'
-    try: page.wait_for_function(js, arg=arg, timeout=T(timeout) * 1000)
+    if ASYNC_PREDICATE.search(js): return poll(page, js, timeout, arg, t0)
+    guarded = f'(a) => {{ const r = ({js})(a); if (r && typeof r.then === "function") throw new Error("this wait\'s predicate returned a promise"); return r; }}'
+    try: page.wait_for_function(guarded, arg=arg, timeout=T(timeout) * 1000)
     except Exception as e:
         try: d = page.evaluate(DIAG)
         except Exception as e2: d = str(e2).split('\n')[0][:100]
-        raise RuntimeError(f'waited {time.time() - t0:.0f}s for {js[:90]!r}: {d}') from e
+        raise RuntimeError(f'waited {time.time() - t0:.0f}s for {js[:90]!r}: {d} ({str(e).splitlines()[0][:120]})') from e
+
+def poll(page, js, timeout, arg, t0):
+    """until() for an async predicate: evaluated again every 50 ms, each answer awaited, until it is truthy."""
+    if toolless(page) and timeout > FAST: timeout = FAST; SHORTENED[0] += 1    # the page with no tools: nothing can come
+    last = None
+    while time.time() - t0 < T(timeout):
+        try:
+            last = page.evaluate(js, arg)
+            if last: return last
+        except Exception as e: last = 'error: ' + str(e).split('\n')[0][:120]
+        time.sleep(0.05)
+    try: d = page.evaluate(DIAG)
+    except Exception as e2: d = str(e2).split('\n')[0][:100]
+    raise RuntimeError(f'waited {time.time() - t0:.0f}s for {js[:90]!r} (last {last!r}): {d}')
 
 def soon(page, js, timeout=15, arg=None):
     """As until(), but a timeout is an answer (False), for a check that reports what it found instead."""

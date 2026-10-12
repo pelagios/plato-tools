@@ -37,7 +37,11 @@ import re
 # Chora's policy forbids evaluating a string: a predicate is given as a function (e2e/app_test.py's rule).
 FUNCTION = re.compile(r'^\s*(async\s+)?(\(|[A-Za-z_$][\w$]*\s*=>|function\b)')
 def as_function(js): return js if FUNCTION.match(js) else f'() => ({js})'
-def until(page, js, timeout=60, arg=None): page.wait_for_function(as_function(js), arg=arg, timeout=timeout * 1000)
+# wait_for_function takes a promise for true at once, so an async predicate would not wait at all
+# (e2e/app_test.py's until() polls one from Python instead): none is used here, and one is refused.
+def until(page, js, timeout=60, arg=None):
+    if re.search(r'^\s*async\b|\.then\(|\bawait\b', js): raise ValueError(f'an async predicate would not be waited on: {js[:60]!r}')
+    page.wait_for_function(as_function(js), arg=arg, timeout=timeout * 1000)
 def free_port():
     with socket.socket() as s: s.bind(('127.0.0.1', 0)); return s.getsockname()[1]
 def stop(p):
