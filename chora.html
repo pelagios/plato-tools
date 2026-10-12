@@ -112,6 +112,11 @@
       <label class="snap-ink" id="snap-ink-label" hidden><input type="checkbox" id="snap-ink" data-tip="A vertex placed within 10 screen pixels of the map's ink goes onto it (hold Alt not to)"> Snap to ink</label>
     </div>
     <div class="ink-panel" id="ink-panel" role="group" aria-label="Tracing from the map's ink" hidden></div>
+    <!-- How well each location of the place chosen is known (src/chora/vague.js): shown with a place. -->
+    <details class="map-key" id="map-key" hidden>
+      <summary>Key: how well a location is known</summary>
+      <ul id="map-key-list"></ul>
+    </details>
     <details class="basemaps" id="basemaps">
       <summary>Basemap: <span id="basemap-name">Natural Earth (this site)</span></summary>
       <div id="basemap-options"></div>

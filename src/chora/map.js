@@ -14,6 +14,7 @@ import { TerraDraw, TerraDrawPointMode, TerraDrawLineStringMode, TerraDrawPolygo
 import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter';
 import { transformRequest, blobWorkerUrl } from '../lib/permissions.js';
 import { STATUS_COLOURS } from './card.js';
+import { PRECISIONS, MARK_SIZE, drawMark, markImage } from './vague.js';
 
 // A worker made from a blob: takes the page's policy; one made from this site's address would not.
 maplibregl.setWorkerUrl(blobWorkerUrl(mapWorkerUrl));
@@ -65,7 +66,7 @@ export function createMap(container, { state, onPlaceClick, onStyleError, polygo
   });
 
   // What Chora draws, kept here so that it can be put back when the basemap (the style) changes.
-  const data = { overview: EMPTY, place: EMPTY, context: EMPTY, preview: EMPTY };
+  const data = { overview: EMPTY, place: EMPTY, vague: EMPTY, context: EMPTY, preview: EMPTY };
   let markers = [];   // a gazetteer's candidates, numbered (src/chora/adopt-ui.js): HTML markers, which need no glyphs from any style
   let draw = null, drawHandlers = {}, drawnKeep = [];
   // Snapping a vertex drawn by hand (src/chora/ink.js's "Snap to ink"): Terra Draw asks for it on every move.
@@ -76,6 +77,10 @@ export function createMap(container, { state, onPlaceClick, onStyleError, polygo
     map.addSource('chora-overview', { type: 'geojson', data: data.overview, cluster: true, clusterRadius: 36, clusterMaxZoom: 11 });
     map.addSource('chora-context', { type: 'geojson', data: data.context });
     map.addSource('chora-place', { type: 'geojson', data: data.place });
+    map.addSource('chora-vague', { type: 'geojson', data: data.vague });
+    // The marks of precision (vague.js), as images: a style's own sprite is not needed, and a new
+    // style (a basemap changed) has none of them, so they are added each time.
+    for (const p of PRECISIONS) if (!map.hasImage(markImage(p))) map.addImage(markImage(p), markPixels(p), { pixelRatio: MARK_RATIO });
     map.addSource('chora-preview', { type: 'geojson', data: data.preview });
     const add = (l) => map.addLayer(l);
     add({ id: 'chora-overview-clusters', type: 'circle', source: 'chora-overview', filter: ['has', 'point_count'],
@@ -91,6 +96,13 @@ export function createMap(container, { state, onPlaceClick, onStyleError, polygo
     // The chosen place: each geometry in the colour of its attestation's status; asserted ones solid,
     // the others dashed, and a denied one (where the place is NOT) faint.
     const faint = ['case', ['==', ['get', 'status'], 'denied'], 0.35, 1];
+    // How far the true position may be (precisionKm): a circle on the ground (circleAround in geo.js),
+    // under the place's own geometries, faintly filled in its status's colour and edged with dots, which
+    // no status's line uses.
+    add({ id: 'chora-vague-circle', type: 'fill', source: 'chora-vague', filter: ['==', ['geometry-type'], 'Polygon'],
+      paint: { 'fill-color': status('#2757dd'), 'fill-opacity': ['case', ['==', ['get', 'status'], 'denied'], 0.04, 0.1] } });
+    add({ id: 'chora-vague-circle-edge', type: 'line', source: 'chora-vague', filter: ['==', ['geometry-type'], 'Polygon'],
+      layout: { 'line-cap': 'round' }, paint: { 'line-color': status('#2757dd'), 'line-width': 2, 'line-dasharray': [0.1, 2.5], 'line-opacity': faint } });
     add({ id: 'chora-place-fill', type: 'fill', source: 'chora-place', filter: ['match', ['geometry-type'], ['Polygon', 'MultiPolygon'], true, false],
       paint: { 'fill-color': status('#2757dd'), 'fill-opacity': ['case', ['==', ['get', 'status'], 'asserted'], 0.18, 0.08] } });
     add({ id: 'chora-place-line', type: 'line', source: 'chora-place', filter: ['all', ['!', ['match', ['geometry-type'], ['Point', 'MultiPoint'], true, false]], ['==', ['get', 'status'], 'asserted']],
@@ -100,6 +112,10 @@ export function createMap(container, { state, onPlaceClick, onStyleError, polygo
     add({ id: 'chora-place-points', type: 'circle', source: 'chora-place', filter: ['match', ['geometry-type'], ['Point', 'MultiPoint'], true, false],
       paint: { 'circle-color': ['case', ['==', ['get', 'status'], 'asserted'], status('#2757dd'), '#ffffff'], 'circle-radius': 7,
         'circle-stroke-color': status('#2757dd'), 'circle-stroke-width': 2.5, 'circle-opacity': faint, 'circle-stroke-opacity': faint } });
+    // How well each location is known (spatialPrecision): a mark around its point, by its shape alone.
+    add({ id: 'chora-vague-marks', type: 'symbol', source: 'chora-vague', filter: ['==', ['geometry-type'], 'Point'],
+      layout: { 'icon-image': ['concat', 'chora-precision-', ['get', 'precision']], 'icon-allow-overlap': true, 'icon-ignore-placement': true },
+      paint: { 'icon-opacity': faint } });
     // Adopting from a gazetteer: the area a place's candidates are ranked by (kind 'reference'), and the
     // record previewed (kind 'record'), dashed and in their own colour: neither is the place's yet.
     add({ id: 'chora-preview-fill', type: 'fill', source: 'chora-preview', filter: ['all', ['==', ['get', 'kind'], 'record'], ['match', ['geometry-type'], ['Polygon', 'MultiPolygon'], true, false]],
@@ -170,7 +186,11 @@ export function createMap(container, { state, onPlaceClick, onStyleError, polygo
     /** Call fn(map) whenever a style has loaded, after Chora's own layers are added (and now, if one has). */
     onStyleLoad(fn) { styleHooks.push(fn); if (map.isStyleLoaded() && map.getLayer('chora-overview-clusters')) fn(map); },
     setOverview(fc) { data.overview = fc || EMPTY; map.getSource('chora-overview')?.setData(data.overview); },
-    setPlace(fc) { data.place = fc || EMPTY; map.getSource('chora-place')?.setData(data.place); },
+    /** The chosen place's geometries (placeFeatures), and what is drawn of how well they are known (vagueFeatures in vague.js). */
+    setPlace(fc, vague = null) {
+      data.place = fc || EMPTY; map.getSource('chora-place')?.setData(data.place);
+      data.vague = vague || EMPTY; map.getSource('chora-vague')?.setData(data.vague);
+    },
     setContext(fc) { data.context = fc || EMPTY; map.getSource('chora-context')?.setData(data.context); },
     /** The reference area and the record previewed, when adopting (features with properties.kind 'reference' | 'record'). */
     setPreview(fc) { data.preview = fc || EMPTY; map.getSource('chora-preview')?.setData(data.preview); },
@@ -222,6 +242,18 @@ export function createMap(container, { state, onPlaceClick, onStyleError, polygo
   };
 }
 const MODE_OF = { Point: 'point', LineString: 'linestring', Polygon: 'polygon' };
+
+// A mark of precision as the pixels of an image, drawn at twice its size so that it is sharp on a
+// finer screen; MapLibre scales it by MARK_RATIO.
+const MARK_RATIO = 2;
+function markPixels(p) {
+  const c = document.createElement('canvas'), px = MARK_SIZE * MARK_RATIO;
+  c.width = c.height = px;
+  const ctx = c.getContext('2d');
+  ctx.scale(MARK_RATIO, MARK_RATIO); drawMark(ctx, p, MARK_SIZE);
+  const img = ctx.getImageData(0, 0, px, px);
+  return { width: px, height: px, data: new Uint8Array(img.data.buffer) };
+}
 
 /** A FeatureCollection of a place view's geometries, for the map; each carries its status. */
 export function placeFeatures(view) {

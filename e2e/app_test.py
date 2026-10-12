@@ -4948,7 +4948,7 @@ def main_permissions(ctx, page, url, requests):
 # The map is WebGL: the software-GL switches are kept as insurance (with none, the map still drew on
 # this machine), and --no-gl-flags measures that again. Waits are on the page's own state
 # (window.__chora) and on the map instance, never on a fixed sleep.
-import csv, re, unicodedata
+import csv, math, re, unicodedata
 from urllib.parse import urlparse
 GL = [] if '--no-gl-flags' in sys.argv else ['--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader']
 NOTOOLS = 'data:text/html,<title>no tools here</title><input id=picker type=file multiple>'
@@ -5570,6 +5570,101 @@ def theme_checks(browser, url):
         finally: ctx.close()
     attempt('theme: a theme chosen on the main page is taken up at once by Chora open in another tab, and Auto too', other_tabs)
 
+# ---- Chora: how well a location is known (Issue #16) ---------------------------------------------
+# A mark per spatialPrecision, the circle of precisionKm drawn on the ground, the key, and the card's
+# words, on test/fixtures/chora/place-centric-vagueness.json. Each absence beside a presence in the same
+# check: a precise point has no circle while its own point and mark are drawn, and another place's circle is.
+VAGUE = ROOT / 'test/fixtures/chora/place-centric-vagueness.json'
+EARTH_KM = 6371.0088
+# The edge of what a layer draws, along one direction from a point on the screen: found by halving,
+# between a distance where the layer is there and one where it is not (both asserted first, so that the
+# measure is never taken of nothing).
+EDGE = '''([lon, lat, dx, dy, lo, hi, layer]) => { const m = window.__chora_map, c = m.project([lon, lat]);
+  const at = (r) => m.queryRenderedFeatures([c.x + dx * r, c.y + dy * r], { layers: [layer] }).length > 0;
+  const ends = { inside: at(lo), outside: !at(hi) };
+  if (!ends.inside || !ends.outside) return ends;
+  for (let i = 0; i < 30; i++) { const mid = (lo + hi) / 2; if (at(mid)) lo = mid; else hi = mid; }
+  return { ...ends, r: (lo + hi) / 2 }; }'''
+# What an image or a canvas holds: a hash of its pixels, and how many are not transparent.
+PIXELS = '''const sum = (d) => { let h = 0, ink = 0; for (let k = 0; k < d.length; k += 4) { h = (h * 31 + d[k] + 7 * d[k + 3]) >>> 0; if (d[k + 3] > 0) ink++; } return { h, ink }; };'''
+
+def chora_vague_checks(page, base, tmp):
+    places = {p['label']: p for p in json.loads(VAGUE.read_text())['spatialEntities']}
+    geom = lambda label: places[label]['attestations'][0]['geometries'][0]
+    # The values PLATO defines, from the pinned schema, not typed here.
+    def enum(o):
+        if isinstance(o, dict):
+            if isinstance(o.get('spatialPrecision'), dict): return o['spatialPrecision']['items']['enum']
+            return next((x for x in map(enum, o.values()) if x), None)
+        if isinstance(o, list): return next((x for x in map(enum, o) if x), None)
+        return None
+    values = enum(json.loads((PLATO / 'schemas/plato.schema.json').read_text())) or []
+    marks = lambda: page.evaluate('() => window.__chora_map.queryRenderedFeatures({ layers: ["chora-vague-marks"] }).map((f) => f.properties.precision)')
+
+    def circle_to_scale():
+        chora_boot(page, base, [fixture(VAGUE, 'vague-circle.json', tmp)]); chora_pick(page, 'roughly north')
+        g = geom('Roughly North'); (lon, lat), km = g['geojson']['coordinates'], g['precisionKm'][0]
+        got = {}
+        for z in (6, 8):
+            page.evaluate('([c, z]) => window.__chora_map.jumpTo({ center: c, zoom: z })', [[lon, lat], z]); page.evaluate(SETTLE)
+            # km / R radians of latitude, which Web Mercator draws sec(latitude) times larger, in a world 512 × 2^z pixels round.
+            want = km / EARTH_KM / math.cos(math.radians(lat)) * 512 * 2 ** z / (2 * math.pi)
+            for name, (dx, dy) in (('east', (1, 0)), ('north', (0, -1))):
+                e = page.evaluate(EDGE, [lon, lat, dx, dy, want * 0.5, want * 1.5, 'chora-vague-circle'])
+                got[f'z{z} {name}'] = {**e, 'want': round(want, 1)}
+        ok = all(v.get('r') and abs(v['r'] / v['want'] - 1) < 0.03 for v in got.values())
+        # A circle of fixed pixels would be the same at both zooms: drawn on the ground, it is four times as large two zooms up.
+        grow = got['z8 east'].get('r', 0) / max(got['z6 east'].get('r', 0), 1e-9)
+        return ok and abs(grow - 4) < 0.15, {**got, 'z8/z6': round(grow, 3)}
+    attempt('Chora: a point with precisionKm has a circle whose rendered radius is its km on the ground, at zoom 6 and at 8 (59.9° north; east and north)', circle_to_scale)
+
+    def precise_no_circle():
+        chora_boot(page, base, [fixture(VAGUE, 'vague-precise.json', tmp)])
+        layers = ['chora-place-points', 'chora-vague-marks', 'chora-vague-circle']
+        chora_pick(page, 'surveyed cross'); exact = rendered(page, layers); exact_marks = marks()
+        chora_pick(page, 'unsaid well'); unsaid = rendered(page, layers)
+        # The control, in the same run: a point with a radius has its circle.
+        chora_pick(page, 'old ford'); ford = rendered(page, layers)
+        return (exact['chora-place-points'] > 0 and exact_marks == ['exact'] and exact['chora-vague-circle'] == 0
+                and unsaid['chora-place-points'] > 0 and unsaid['chora-vague-marks'] == 0 and unsaid['chora-vague-circle'] == 0
+                and ford['chora-place-points'] > 0 and ford['chora-vague-circle'] > 0), {'exact': exact, 'exact marks': exact_marks, 'not said': unsaid, 'control (2 km)': ford}
+    attempt('Chora: a precise point (exact, no precisionKm) is drawn with its mark and no circle; one with no precision has neither; one with a radius has its circle', precise_no_circle)
+
+    def each_drawn():
+        chora_boot(page, base, [fixture(VAGUE, 'vague-marks.json', tmp)])
+        seen = {}
+        for label in places:
+            want = (geom(label).get('spatialPrecision') or [None])[0]
+            if want: chora_pick(page, label.lower()); seen[label] = [want, marks()]
+        # Each value's image on the map (drawn by the key's own function): there, inked, and no two alike.
+        images = page.evaluate('(vs) => { ' + PIXELS + ' return vs.map((v) => { const i = window.__chora_map.style.getImage("chora-precision-" + v); return i ? sum(i.data.data) : null; }); }', values)
+        return (len(values) >= 4 and sorted({w for w, _ in seen.values()}) == sorted(values) and all(got == [w] for w, got in seen.values())
+                and all(i and i['ink'] > 50 for i in images) and len({i['h'] for i in images if i}) == len(values)), {'PLATO values': values, 'drawn': seen, 'images': images}
+    attempt("Chora: each spatialPrecision PLATO defines is drawn on the map in a mark of its own (a point's, and a line's at its middle)", each_drawn)
+
+    def key_entries():
+        chora_boot(page, base, [fixture(VAGUE, 'vague-key.json', tmp)])
+        hidden_before = page.evaluate('() => document.getElementById("map-key")?.hidden')
+        chora_pick(page, 'old ford')
+        rows = page.evaluate('() => { ' + PIXELS + ''' return [...document.querySelectorAll('#map-key li[data-key]')].map((li) => { const c = li.querySelector('canvas'), r = li.getBoundingClientRect();
+          return { key: li.dataset.key, text: li.textContent.replace(/\\s+/g, ' ').trim(), shown: r.width > 0 && r.height > 0, svg: !!li.querySelector('svg'),
+            ...(c ? sum(c.getContext('2d').getImageData(0, 0, c.width, c.height).data) : { ink: 0, h: null }) }; }); }''')
+        by = {r['key']: r for r in rows}
+        ok = (hidden_before is True and len(values) >= 4
+              and all(v in by and by[v]['shown'] and by[v]['ink'] > 50 and v.replace('_', ' ') in by[v]['text'].lower() for v in values)
+              and len({by[v]['h'] for v in values if v in by}) == len(values)
+              and 'circle' in by and by['circle']['svg'] and by['circle']['shown'] and 'none' in by)
+        return ok, {'PLATO values': values, 'rows': rows, 'hidden before a place': hidden_before}
+    attempt("Chora: the map's key has an entry for each spatialPrecision PLATO defines, each drawn and none alike, and one for the circle, shown once a place is", key_entries)
+
+    def card_words():
+        chora_boot(page, base, [fixture(VAGUE, 'vague-card.json', tmp)]); chora_pick(page, 'roughly north')
+        LOC = '() => [...document.querySelectorAll("#card h3")].find((h) => h.textContent === "Locations")?.nextElementSibling?.textContent'
+        loc = page.evaluate(LOC)
+        chora_pick(page, 'unsaid well'); ctl = page.evaluate(LOC)
+        return loc == 'Point, approximate (estimated from maps or descriptions), to within 25 km' and ctl == 'Point', {'Roughly North': loc, 'Unsaid Well': ctl}
+    attempt("Chora: the place card names a location's precision in words, with PLATO's gloss, and how far out it may be", card_words)
+
 def chora_checks(pw, url, tmp):
     base = url.rstrip('/') + '/'; here = urlparse(base).netloc
     ctx = pw.chromium.launch_persistent_context(str(tmp / 'chora-profile'), headless=True, accept_downloads=True, args=GL,
@@ -5888,6 +5983,7 @@ def chora_checks(pw, url, tmp):
                 and ctl['bars'] == 1 and ctl['evidence'] == 0 and ctl['legend'] == 0
                 and names == ['Agathos Daimon', 'Sṯt (egy-Latn-t-egy-egyd) in Egyptological transliteration']), {'related': rel, 'locations': locs, 'drawn': drawn, 'control locations': ctl_locs, 'control drawn': ctl_drawn, 'timeline': tl, 'note': note, 'control links': ctl_rel, 'control timeline': ctl, 'names': names}
     attempt('Chora: a relation named only is plain text that places nothing, a location between two places is a line in words that is not drawn, the span of the texts is drawn hatched as a mention (a drawn location and a dated claim are not), and a name known only in transliteration says so', name_only_and_evidence)
+    chora_vague_checks(page, base, tmp)
 
     # Drawing, in one file: each check below opens it afresh and finds what the one before left.
     draws = {'file': fixture(ant, 'antonine-draw.json', tmp)}

@@ -8,7 +8,8 @@ import { sizeRead, loadNeed, saveNeed, storageShort } from '../engine/chora/stor
 import { detect } from '../engine/input.js';
 import { newGeometryAttestation, checkGeoJSON, wrapLongitudes, DrawError, ROLES, PRECISIONS } from '../engine/chora/draw.js';
 import { createMap, placeFeatures, contextFeatures } from './map.js';
-import { esc, badge, nameItem, relationItem, timeline, locations, ROLE_WORDS } from './card.js';
+import { esc, badge, nameItem, relationItem, timeline, locations, ROLE_WORDS, STATUS_COLOURS } from './card.js';
+import { vagueFeatures, keyRows, drawMark, MARK_SIZE } from './vague.js';
 import * as basemaps from './basemaps.js';
 import * as contributors from './contributor.js';
 import { fingerprint, loadDrafts, saveDrafts, draftsWritten, forgetAllDrafts } from './drafts.js';
@@ -105,7 +106,7 @@ async function open(list) {
   drafts = await loadDrafts(fp);
   const ov = await request({ cmd: 'chora-overview' }, 'chora-overview');
   mapApi.setOverview(ov.geojson);
-  mapApi.setPlace(null); mapApi.setContext(null); showDrafts([]);
+  mapApi.setPlace(null); mapApi.setContext(null); showDrafts([]); $('map-key').hidden = true;
   if (ov.capped || ov.geojson?.capped) $('dataset').insertAdjacentHTML('beforeend', `<p class="muted">The map shows the first ${n(ov.geojson.features.length)} places; find others by name.</p>`);
   if (dataset.bbox) mapApi.fit(dataset.bbox, 8);
   $('places').hidden = false;
@@ -161,7 +162,10 @@ async function selectPlace(id) {
   for (const b of $('list').querySelectorAll('button[data-id]')) b.classList.toggle('current', b.dataset.id === id);
   renderCard();
   $('card').scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
-  mapApi.setPlace(placeFeatures(view));
+  const vague = vagueFeatures(view);
+  mapApi.setPlace(placeFeatures(view), vague);
+  state.vague = { marks: vague.features.filter((f) => f.geometry.type === 'Point').length, circles: vague.features.filter((f) => f.geometry.type === 'Polygon').length };
+  $('map-key').hidden = false;
   mapApi.setContext(contextFeatures(view, await countries(view), (view.ccodes || []).map((c) => [c, ccodeBoxes?.[c]]).filter(([, b]) => b)));
   showDrafts(drafts.filter((d) => d.placeId === id));
   adopt.placeShown(view);
@@ -1264,6 +1268,26 @@ function styleFailed(why, b = basemaps.byId(state.basemap)) {
   useBasemap(basemaps.byId('natural-earth'));
 }
 const mapApi = createMap($('map'), { state, onPlaceClick: (id) => selectPlace(id), onStyleError: styleFailed });
+
+// ---- The map's key: how well a location is known (src/chora/vague.js) ------------------------------
+// Each mark drawn by the function that draws it on the map, around the disc of a point asserted, as the
+// map draws it; the circle as the map edges it. Open on a wide screen, a line to open on a narrow one.
+function renderKey() {
+  const ink = STATUS_COLOURS.asserted, half = MARK_SIZE / 2;
+  const circle = `<svg viewBox="0 0 ${MARK_SIZE} ${MARK_SIZE}"><circle cx="${half}" cy="${half}" r="15" fill="${ink}" fill-opacity=".1" stroke="${ink}" stroke-width="2" stroke-linecap="round" stroke-dasharray="0.1 5"/><circle cx="${half}" cy="${half}" r="3" fill="${ink}"/></svg>`;
+  $('map-key-list').innerHTML = keyRows().map((r) => `<li data-key="${esc(r.key)}"><span class="key-sym" aria-hidden="true">${r.key === 'circle' ? circle : '<canvas></canvas>'}</span>
+    <span><strong>${esc(r.name)}</strong>: ${esc(r.gloss)}</span></li>`).join('');
+  const ratio = Math.max(1, Math.ceil(globalThis.devicePixelRatio || 1));
+  for (const c of $('map-key-list').querySelectorAll('canvas')) {
+    c.width = c.height = MARK_SIZE * ratio;
+    const ctx = c.getContext('2d');
+    ctx.scale(ratio, ratio);
+    ctx.beginPath(); ctx.arc(half, half, 8.25, 0, 2 * Math.PI); ctx.fillStyle = ink; ctx.fill();
+    drawMark(ctx, c.closest('li').dataset.key, MARK_SIZE);
+  }
+  $('map-key').open = !matchMedia('(max-width: 52rem)').matches;
+}
+renderKey();
 mapApi.onDraw({
   finish: onFinish,
   // A drawing deleted with the Edit tool (its Delete key) is removed from the drafts too. Clearing

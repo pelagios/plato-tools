@@ -1,0 +1,60 @@
+{
+  "$schema": "https://w3id.org/plato/schemas/place-centric.schema.json",
+  "profile": "place-centric",
+  "gazetteer": {
+    "@id": "https://example.org/vague/",
+    "title": "How well a location is known (illustrative, for Chora's map: Issue #16)",
+    "status": "draft",
+    "licence": "https://creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "spatialEntities": [
+    {
+      "@id": "https://example.org/vague/place/surveyed-cross",
+      "label": "Surveyed Cross",
+      "attestations": [
+        { "@id": "https://example.org/vague/attestation/surveyed-cross", "names": [{ "toponym": "Surveyed Cross", "language": "en" }],
+          "geometries": [{ "geojson": { "type": "Point", "coordinates": [-1.2577, 51.752] }, "spatialPrecision": ["exact"] }] }
+      ]
+    },
+    {
+      "@id": "https://example.org/vague/place/roughly-north",
+      "label": "Roughly North",
+      "attestations": [
+        { "@id": "https://example.org/vague/attestation/roughly-north", "names": [{ "toponym": "Roughly North", "language": "en" }],
+          "geometries": [{ "geojson": { "type": "Point", "coordinates": [10.75, 59.91] }, "spatialPrecision": ["approximate"], "precisionKm": [25] }] }
+      ]
+    },
+    {
+      "@id": "https://example.org/vague/place/one-of-several",
+      "label": "One of Several",
+      "attestations": [
+        { "@id": "https://example.org/vague/attestation/one-of-several", "names": [{ "toponym": "One of Several", "language": "en" }],
+          "geometries": [{ "geojson": { "type": "Point", "coordinates": [31.13, 29.98] }, "spatialPrecision": ["uncertain"], "precisionKm": [5] }] }
+      ]
+    },
+    {
+      "@id": "https://example.org/vague/place/old-ford",
+      "label": "Old Ford",
+      "attestations": [
+        { "@id": "https://example.org/vague/attestation/old-ford", "names": [{ "toponym": "Old Ford", "language": "en" }],
+          "geometries": [{ "geojson": { "type": "Point", "coordinates": [-0.03, 51.53] }, "spatialPrecision": ["historical_approximate"], "precisionKm": [2] }] }
+      ]
+    },
+    {
+      "@id": "https://example.org/vague/place/vague-road",
+      "label": "Vague Road",
+      "attestations": [
+        { "@id": "https://example.org/vague/attestation/vague-road", "names": [{ "toponym": "Vague Road", "language": "en" }],
+          "geometries": [{ "geojson": { "type": "LineString", "coordinates": [[-2.0, 52.0], [-1.5, 52.2], [-1.0, 52.1]] }, "spatialPrecision": ["approximate"] }] }
+      ]
+    },
+    {
+      "@id": "https://example.org/vague/place/unsaid-well",
+      "label": "Unsaid Well",
+      "attestations": [
+        { "@id": "https://example.org/vague/attestation/unsaid-well", "names": [{ "toponym": "Unsaid Well", "language": "en" }],
+          "geometries": [{ "geojson": { "type": "Point", "coordinates": [-3.0, 53.0] } }] }
+      ]
+    }
+  ]
+}

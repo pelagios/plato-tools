@@ -498,10 +498,19 @@ ol.adopt-candidates li.denied .cand-name { color: var(--muted); }
 .basemaps small { display: block; color: var(--muted); }
 button.link { border: 0; background: none; color: var(--accent); padding: 0; text-decoration: underline; font-size: .85rem; }
 .maplibregl-map { font: inherit; }
+/* The map's key (src/chora/vague.js): each symbol on a patch of the basemap's own grey, in both themes,
+   since the map itself does not change with the theme; the marks are ink cased in white, so they read on it. */
+.map-key { position: absolute; right: .6rem; bottom: 2.2rem; max-width: min(22rem, calc(100% - 1.2rem)); max-height: 60%; overflow-y: auto; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: .3rem .7rem; font-size: .85rem; box-shadow: 0 1px 4px rgb(0 0 0 / .15); }
+.map-key summary { cursor: pointer; }
+.map-key ul { list-style: none; margin: .3rem 0; padding: 0; }
+.map-key li { display: flex; gap: .55rem; align-items: center; margin: .25rem 0; }
+.map-key .key-sym { flex: none; width: 36px; height: 36px; border-radius: 6px; background: #dde3ea; }
+.map-key .key-sym canvas, .map-key .key-sym svg { display: block; width: 36px; height: 36px; }
 @media (max-width: 52rem) {
   body.chora { height: auto; }
   body.chora main.chora-main { display: flex; flex-direction: column-reverse; }
   .chora-mapwrap { height: 55vh; }
+  .map-key { top: 4.6rem; bottom: auto; }
   .chora-panel { overflow: visible; padding: 0 1rem; }
 }
 

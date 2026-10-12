@@ -1,6 +1,7 @@
 // Geometry arithmetic for Chora (src/engine/chora/): bounding boxes and representative points of
 // GeoJSON geometries, in longitude and latitude. Pure, and small: nothing here projects, so areas
 // and lengths are in degrees, which is enough to choose a point to show and a box to fit the map to.
+// The one measure on the ground is a circle of uncertainty (circleAround), in kilometres on a sphere.
 
 /** The geometry types PLATO accepts (plato.schema.json, $defs/geometry): no GeometryCollection. */
 export const GEOMETRY_TYPES = ['Point', 'MultiPoint', 'LineString', 'MultiLineString', 'Polygon', 'MultiPolygon'];
@@ -135,4 +136,46 @@ export function drawable(g) {
   const m = typeof g.wkt === 'string' && g.wkt.match(/^\s*POINT\s*Z?\s*\(\s*(-?[\d.eE+-]+)\s+(-?[\d.eE+-]+)/i);
   if (m && Number.isFinite(+m[1]) && Number.isFinite(+m[2])) return { type: 'Point', coordinates: [+m[1], +m[2]] };
   return null;
+}
+
+/** The earth's mean radius, in kilometres (IUGG): a circle of uncertainty is drawn on a sphere of it. */
+export const EARTH_KM = 6371.0088;
+const RAD = Math.PI / 180;
+/**
+ * A circle of `km` kilometres around [lon, lat], as a GeoJSON Polygon: `n` points at that great-circle
+ * distance, one every 360/n degrees of bearing from north. It is drawn on the earth, not on the screen,
+ * so the map projects it with everything else: its size is right at any zoom and at any latitude
+ * (Web Mercator, being conformal, draws a small one round, and larger toward the poles, as it draws
+ * everything there). A fixed radius in pixels would be right at one zoom and one latitude only. A
+ * sphere, not the ellipsoid: the difference is at most about 0.5% of the radius, below what an
+ * uncertainty given in kilometres says.
+ * Longitudes run on unbroken from the centre's, past 180 where the circle crosses the antimeridian, as
+ * MapLibre draws them. A circle around a pole (the pole within `km`) goes round it, and is closed
+ * through the pole. Null for no centre, or a radius that is not a finite number above 0; a radius is
+ * taken at most half the earth's circumference, the circle that covers it.
+ */
+export function circleAround(centre, km, n = 64) {
+  if (!isPosition(centre) || !Number.isFinite(km) || km <= 0 || !(n >= 3)) return null;
+  const d = Math.min(km / EARTH_KM, Math.PI);
+  const [lon0, lat0] = centre, φ1 = lat0 * RAD, λ1 = lon0 * RAD;
+  const ring = [];
+  let prev = lon0;
+  for (let i = 0; i < n; i++) {
+    const θ = (2 * Math.PI * i) / n;
+    const φ2 = Math.asin(Math.min(1, Math.max(-1, Math.sin(φ1) * Math.cos(d) + Math.cos(φ1) * Math.sin(d) * Math.cos(θ))));
+    let λ2 = (λ1 + Math.atan2(Math.sin(θ) * Math.sin(d) * Math.cos(φ1), Math.cos(d) - Math.sin(φ1) * Math.sin(φ2))) / RAD;
+    // Unbroken from the point before: never a jump of more than half the world.
+    λ2 += Math.round((prev - λ2) / 360) * 360;
+    ring.push([λ2, φ2 / RAD]); prev = λ2;
+  }
+  // The first point again, as near as it lies to the last: 360 degrees away when the ring went once
+  // round, so that the circle holds a pole. It is then carried on to the first point again through
+  // that pole (its latitude, ±90), and the polygon covers the cap around it, as on the ground.
+  const again = ring[0][0] + Math.round((prev - ring[0][0]) / 360) * 360;
+  if (again !== ring[0][0]) {
+    const pole = (90 - lat0) * RAD < d ? 90 : -90;
+    ring.push([again, ring[0][1]], [again, pole], [ring[0][0], pole]);
+  }
+  ring.push([ring[0][0], ring[0][1]]);
+  return { type: 'Polygon', coordinates: [ring] };
 }

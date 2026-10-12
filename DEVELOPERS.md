@@ -1508,6 +1508,7 @@ What it does is in the guide:
 It is a page of its own, `chora.html`, a second entry in `vite.config.js`, so that MapLibre GL JS,
 Terra Draw and Allmaps load only there. The page is `src/chora/` (`app.js`; `map.js`, the map, the
 guard and drawing; `card.js`, what the place card writes, pure so that it is tested without a page;
+`vague.js`, how well a location is known, drawn and written (below);
 `basemaps.js`; `overlays.js` and `remote.js`, the historical maps; `ink.js`,
 `ink.worker.js` and `inkfetch.js`, tracing with assistance; `contributor.js`; `drafts.js`; `handoff.js`,
 which passes files chosen on the main page through IndexedDB, taken out of it as soon as Chora's page
@@ -1745,6 +1746,58 @@ and reaches nothing.
   Trismegistos example (`schemas/examples/place-centric-trismegistos.json`, read from
   `PLATO_REPO`, so a missing checkout fails them) through the view and the card, with the expected
   words taken from the example.
+- **How well a location is known** (Issue #16; WHG's place#64 and place#9), drawn for the chosen place
+  only (`src/chora/vague.js`, pure but for drawing on a canvas context it is given). PLATO says it two
+  ways, and the map draws each, and nothing it does not say: a location with no `spatialPrecision` has no
+  mark, and one with no `precisionKm` no circle.
+  - **A mark per `spatialPrecision`**, around the location's point (a point's, each point of a
+    MultiPoint, a line's or an area's representative point, `reprPointOf`): `exact` four ticks out from
+    the point; `approximate` a dashed ring; `uncertain` a dotted ring and a "?" badge; `historical_approximate`
+    the dashed ring and an hourglass badge. They are told apart by shape alone, in dark ink cased in
+    white, so that no colour carries the meaning and they read on a light basemap and a dark one (CARTO's
+    Dark Matter); the status keeps its colour, fill and dashes as before, on the disc inside the mark.
+    `drawMark` draws each on a 2D context: the map makes its images with it (`chora-precision-<value>`,
+    added again at every `style.load`, since a new style has none; drawn at twice the size for a finer
+    screen), and the key draws the same marks with it, so that the two cannot differ. The values are
+    `PRECISIONS` in `src/engine/chora/draw.js`, which the unit test holds to the pinned schema's enum.
+  - **A circle of `precisionKm`** around a point, or each point of a MultiPoint: `circleAround` in
+    `src/engine/chora/geo.js`, 64 points at that great-circle distance on a sphere of the earth's mean
+    radius (6371.0088 km), drawn as a polygon on the ground, so that MapLibre projects it with
+    everything else and it is the right size at every zoom and latitude (a radius in pixels would be
+    right at one zoom and one latitude only). Its longitudes run on past 180 across the antimeridian, and a
+    circle that holds a pole is closed through it. Faintly filled in its status's colour, edged with
+    dots, which no status's line uses, under the place's own geometries. A line's or an area's
+    `precisionKm` is its boundary's uncertainty (PLATO), which a circle would not show: it is written
+    on the card and not drawn. Where a location gives a list of precisions or radii (PLATO allows one
+    "for heterogeneous geometries"), the first is drawn and written, as the view keeps it.
+  - **Layers and cost.** One GeoJSON source more, `chora-vague` (`setPlace(fc, vague)`, from
+    `vagueFeatures(view)`), and three layers: `chora-vague-circle` (fill) and `chora-vague-circle-edge`
+    under the place's geometries, `chora-vague-marks` (symbol, icons only, no glyphs) above its points.
+    A denied location's mark and circle are faint, as its geometry is. Nothing is added per feature to
+    the page, and the overview (every place's point, up to 50,000, clustered) is drawn as before: its
+    index (`pov`) holds no precision, and a place's several locations may differ in it.
+    `window.__chora.vague` counts the marks and circles of the place shown.
+  - **The key**, `#map-key` at the map's lower right, shown once a place is: each mark around the disc
+    of a point as the map draws it, the circle, and "No mark", each named in words with PLATO's gloss
+    (`keyRows`). Its symbols sit on a patch of the basemap's grey in both themes, as the map itself
+    does not change with the theme; the panel round them follows it. Open on a wide screen, a line to
+    open on a narrow one (below 52rem, where it moves to the top right).
+  - **The card** names the precision in words with PLATO's gloss and how far out the location may be:
+    "Point, approximate (estimated from maps or descriptions), to within 25 km", "to within 10 m"
+    below a kilometre (`precisionWords` in `card.js`). A value PLATO does not define is written as given.
+  - **Not drawn, by design**: directional relations ("south of", "on the way to", place#64), which PLATO
+    has not settled; `relativeQualifier`'s `Near`, `Beyond`, `UpstreamOf` and `BetweenXAndY`, which stay
+    a line in words on the card as before (#19). A place with no location of its own is shown by
+    the places it is related to, or its country, as before. Your drawings (Terra Draw's) are not styled by the precision chosen for them.
+  - **Tests.** `test/chora-vague.test.js`: every point of a circle that many km from its centre by an
+    independent haversine, at the equator, 30°, 60°, 80° and southward; its radius in Web Mercator
+    pixels at three latitudes and two zooms; the antimeridian and the poles; each mark drawn
+    differently in ink and casing only; the key; the card's words. In the browser (`chora_vague_checks`
+    in `e2e/app_test.py`, on `test/fixtures/chora/place-centric-vagueness.json`): the circle's rendered
+    edge, found by halving between a point inside and one outside with `queryRenderedFeatures`, within 3%
+    of its km at zoom 6 and 8, east and north, at 59.9° north; a precise point drawn with its mark and no
+    circle beside one with a circle; each value PLATO's schema defines drawn in its own image; the key's
+    entries; the card's words.
 - **The overview** reads a covering index of the places with a point (`pov`), not the records.
 - **A pool and an outputs folder of its own.** A SQLite SAHPool holds every file in its folder open,
   so a second tab on the same pool cannot start. Chora's page asks the worker for its own
