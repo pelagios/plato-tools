@@ -8,7 +8,7 @@
 //          | { mode: 'countries', countries: ['GB', …] }                      sent as countries
 //          | { mode: 'place', place: { id: 'gn:2635167', label, description? } }   sent as contained_in: [id]
 //          | { mode: 'area', area: <GeoJSON Polygon> },                        sent as bounds
-//     types: [{ id: 'aat:…', label, narrower: ['aat:…', …], from: 'whg' | 'bundled' }],   sent as types
+//     types: [{ id: 'aat:…', label, narrower: ['aat:…', …], from: 'whg' | 'cache' | 'bundled', at? }],   sent as types
 //     when: { start, end, undated },                                          sent as start, end, temporal
 //     sources: ['gn', 'tgn', …] }                                             sent as namespaces
 //
@@ -21,8 +21,10 @@
 // - Types are NOT matched hierarchically (the gateway's aat_paths are reported empty): a type matches only
 //   places typed with exactly that concept. So each type chosen keeps its narrower ones (WHG's
 //   /types/expand/, or the bundled expansion, scope-data.js), and all of them are sent.
-// - With years given, WHG leaves out every place that has no dates. WHG is to add `undated: true` to keep
-//   them; until it confirms, the choice is shown and cannot be ticked (UNDATED_TAKEN).
+// - With years given, WHG leaves out every place that has no dates, unless it is sent `undated: true`, which
+//   it takes only beside `start` and/or `end` (live end to end on production, 12 October 2026: "Newport", gn,
+//   1500 to 1600 gave 0 places without it and 100 with it). `temporal: true` is always sent with a year
+//   window: WHG's legacy arm ignores the years without it.
 //
 // Precedence. A lookup that already says where to look keeps it: a region's or a place's constraint from
 // the region review (its contained_in, its area, its countries, from the table's region columns, county
@@ -33,8 +35,8 @@
 // (relax 'all') sends no Where either.
 import { whgPlaceId } from '../gazetteer/whg.js';
 
-/** The one switch for WHG's `undated: true` (its session, 12 October 2026): false until WHG confirms it takes it. */
-export const UNDATED_TAKEN = false;
+/** The one switch for WHG's `undated: true`: on since WHG's gateway took it (12 October 2026, indexing a7f10bc). */
+export const UNDATED_TAKEN = true;
 export const WHERE_MODES = ['anywhere', 'countries', 'place', 'area'];
 /** The keys of a query that already say where to look: a lookup sending one of them takes no Where from Scope. */
 export const WHERE_KEYS = ['countries', 'contained_in', 'lat', 'lng', 'radius', 'bounds'];
@@ -67,20 +69,54 @@ export function containerId(v) {
   return BARE.test(bare) ? bare : null;
 }
 
-/** A GeoJSON Polygon of one closed ring, its points rounded to six places, or null if it is not one. */
-export function areaPolygon(g) {
+/** A longitude brought into [-180, 180] (a map scrolled round the world gives 190 for -170). */
+export const wrapLon = (x) => (x >= -180 && x <= 180 ? x : ((((x + 180) % 360) + 360) % 360) - 180);
+/** Twice the signed area of a closed ring, in degrees: positive when it runs counter-clockwise. */
+export function ringArea(ring) {
+  let s = 0;
+  for (let i = 0; i < ring.length - 1; i++) s += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1];
+  return s;
+}
+const orient = (a, b, c) => Math.sign((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]));
+const onSegment = (a, b, p) => Math.min(a[0], b[0]) <= p[0] && p[0] <= Math.max(a[0], b[0]) && Math.min(a[1], b[1]) <= p[1] && p[1] <= Math.max(a[1], b[1]);
+function crosses(a, b, c, d) {
+  const o1 = orient(a, b, c), o2 = orient(a, b, d), o3 = orient(c, d, a), o4 = orient(c, d, b);
+  if (o1 !== o2 && o3 !== o4) return true;
+  return (o1 === 0 && onSegment(a, b, c)) || (o2 === 0 && onSegment(a, b, d)) || (o3 === 0 && onSegment(c, d, a)) || (o4 === 0 && onSegment(c, d, b));
+}
+/** Does a closed ring cross or touch itself anywhere but where each side meets the next? */
+export function selfIntersects(ring) {
+  const n = ring.length - 1;   // sides
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+    if (j === i + 1 || (i === 0 && j === n - 1)) continue;   // neighbours share a corner
+    if (crosses(ring[i], ring[i + 1], ring[j], ring[j + 1])) return true;
+  }
+  return false;
+}
+/**
+ * An area drawn, made what WHG's `bounds` takes (RFC 7946): { area } a GeoJSON Polygon of one closed ring,
+ * its points rounded to six places, longitudes in [-180, 180], running counter-clockwise; or { problem }:
+ * 'not-polygon', 'too-few' (fewer than three corners), 'too-many' (over MAX_AREA_POINTS), 'out-of-range'
+ * (a latitude beyond the poles, or a coordinate that is not a number), 'self-intersects'. Never silently
+ * mended beyond the wrapping, the closing and the direction: a problem is said (SCOPE_WORDS.where.areaProblem).
+ */
+export function areaCheck(g) {
   const ring = g && g.type === 'Polygon' && Array.isArray(g.coordinates) ? g.coordinates[0] : null;
-  if (!Array.isArray(ring) || ring.length < 4 || ring.length > MAX_AREA_POINTS + 1) return null;
+  if (!Array.isArray(ring)) return { problem: 'not-polygon' };
+  if (ring.length > MAX_AREA_POINTS + 1) return { problem: 'too-many' };
   const pts = [];
   for (const p of ring) {
-    if (!Array.isArray(p) || typeof p[0] !== 'number' || typeof p[1] !== 'number' || !Number.isFinite(p[0]) || !Number.isFinite(p[1]) || Math.abs(p[0]) > 180 || Math.abs(p[1]) > 90) return null;
-    pts.push([r6(p[0]), r6(p[1])]);
+    if (!Array.isArray(p) || typeof p[0] !== 'number' || typeof p[1] !== 'number' || !Number.isFinite(p[0]) || !Number.isFinite(p[1]) || Math.abs(p[1]) > 90) return { problem: 'out-of-range' };
+    pts.push([r6(wrapLon(p[0])), r6(p[1])]);
   }
-  const [a, z] = [pts[0], pts[pts.length - 1]];
-  if (a[0] !== z[0] || a[1] !== z[1]) pts.push([...a]);
-  if (new Set(pts.slice(0, -1).map((p) => p.join(','))).size < 3) return null;
-  return { type: 'Polygon', coordinates: [pts] };
+  if (pts.length && (pts[0][0] !== pts[pts.length - 1][0] || pts[0][1] !== pts[pts.length - 1][1])) pts.push([...pts[0]]);
+  if (pts.length < 4 || new Set(pts.slice(0, -1).map((p) => p.join(','))).size < 3) return { problem: 'too-few' };
+  if (selfIntersects(pts)) return { problem: 'self-intersects' };
+  if (ringArea(pts) < 0) pts.reverse();
+  return { area: { type: 'Polygon', coordinates: [pts] } };
 }
+/** The area as WHG takes it (areaCheck), or null when it is not one. */
+export const areaPolygon = (g) => areaCheck(g).area ?? null;
 
 /**
  * A Scope made safe to use, from anything (a record, storage, the page): each part checked and kept only
@@ -106,7 +142,11 @@ export function normaliseScope(x) {
     if (!t || typeof t.id !== 'string' || !AAT.test(t.id) || seen.has(t.id)) continue;
     seen.add(t.id);
     const narrower = [...new Set((Array.isArray(t.narrower) ? t.narrower : []).filter((n) => typeof n === 'string' && AAT.test(n) && n !== t.id))].sort();
-    out.types.push({ id: t.id, label: str(t.label) || t.id, narrower, from: t.from === 'whg' ? 'whg' : 'bundled' });
+    // Where its narrower ones came from: WHG asked then ('whg'), WHG's answer kept in this browser from an
+    // earlier day ('cache', with `at`), or the bundled expansion ('bundled'); the label says the last two.
+    const from = ['whg', 'cache'].includes(t.from) ? t.from : 'bundled';
+    const at = typeof t.at === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.at) ? t.at : null;
+    out.types.push({ id: t.id, label: str(t.label) || t.id, narrower, from, ...(from !== 'bundled' && at ? { at } : {}) });
   }
   const when = x.when && typeof x.when === 'object' ? x.when : {};
   out.when = { start: year(when.start), end: year(when.end), undated: when.undated === true };
@@ -148,9 +188,11 @@ export function whereFields(scope) {
  * `parts` the parts of the Scope sent ('where', 'what', 'when', 'sources'); `yielded` true when the Scope
  * has a Where that was not sent because the lookup already says where to look. options: `region` (a region
  * of a region review: its Where alone), `own` (the query's own keys: its filters, or its constraint),
- * `relaxed` (its constraint's relaxation: 'all' sends no Where).
+ * `relaxed` (its constraint's relaxation: 'all' sends no Where), `undatedTaken` (UNDATED_TAKEN, given here
+ * only by the tests). WHG's form (12 October 2026): `undated: true` only with `start` and/or `end`, and
+ * `temporal: true` with every year window; `temporal_mode` ('possibly' | 'definitely') is not sent.
  */
-export function scopeFields(scope, { region = false, own = null, relaxed = null } = {}) {
+export function scopeFields(scope, { region = false, own = null, relaxed = null, undatedTaken = UNDATED_TAKEN } = {}) {
   const s = normaliseScope(scope), params = {}, parts = [];
   const where = whereFields(s);
   const hasWhere = Object.keys(where).length > 0;
@@ -167,7 +209,7 @@ export function scopeFields(scope, { region = false, own = null, relaxed = null 
     if (s.when.start !== null) params.start = s.when.start;
     if (s.when.end !== null) params.end = s.when.end;
     params.temporal = true;
-    if (UNDATED_TAKEN && s.when.undated) params.undated = true;
+    if (undatedTaken && s.when.undated) params.undated = true;   // exactly undated: true, and only beside a year (WHG, 12 October 2026)
     parts.push('when');
   }
   if (s.sources.length) { params.namespaces = [...s.sources]; parts.push('sources'); }
@@ -184,6 +226,6 @@ export function excludesUndated(scope) {
  * A type as Scope keeps it, from a node of WHG's tree ({ id, text }) or a shortlist entry, with its narrower
  * ones (from /types/expand/'s { ids }, which lists the type itself too, or the bundled expansion).
  */
-export function scopeType({ id, label }, expandedIds = [], from = 'whg') {
-  return normaliseScope({ types: [{ id, label, narrower: expandedIds, from }] }).types[0] ?? null;
+export function scopeType({ id, label }, expandedIds = [], from = 'whg', at = null) {
+  return normaliseScope({ types: [{ id, label, narrower: expandedIds, from, at }] }).types[0] ?? null;
 }

@@ -27,7 +27,7 @@ import { keepNotes, restoreNotes } from './lib/typed-notes.js';
 import { RELOAD_LOSES } from './lib/permission-words.js';
 // Krisis: gazetteer lookup, run on this thread (never the worker), through the permissions module, with
 // the token from its one keeper (permissions.token).
-import { LOOKUP_WORDS, lookupPage as LW, TOKEN_FIELD } from './engine/words.js';
+import { LOOKUP_WORDS, lookupPage as LW, TOKEN_FIELD, SCOPE_WORDS } from './engine/words.js';
 import { createLookup, WHG_ENDPOINT, isWhg, whgLang } from './engine/gazetteer/index.js';
 import { languageCombobox } from './krisis/lang-combobox.js';
 import { showTokenView, giveToken, rememberToken, forgetToken, noteInput } from './lib/token-field.js';
@@ -1702,6 +1702,13 @@ function planFor(svc, opts, places) {
     options: { ...opts, service: svc.service, type: svc.whg ? undefined : manifests.get(svc.service.endpoint)?.type || undefined } });
 }
 
+// Scope's types (each with its narrower ones) can be hundreds of ids: a query shows them as "[241 AAT ids]",
+// and the ids themselves are listed once below the queries, folded (what is sent is unchanged).
+const shortTypes = (q) => (Array.isArray(q.types) && q.types.length > 3 ? { ...q, types: SCOPE_WORDS.typesElided(q.types.length) } : q);
+function typesSent(first) {
+  const lists = [...new Set(first.filter((q) => Array.isArray(q.types) && q.types.length > 3).map((q) => q.types.join(' ')))];
+  return lists.map((l) => { const ids = l.split(' '); return `<details class="lookup-types"><summary>${escapeHtml(SCOPE_WORDS.typesSent(ids.length))}</summary><code>${escapeHtml(ids.join(', '))}</code></details>`; }).join('');
+}
 // The choice of places: after a match, those it found nothing for; once a lookup has run, those not answered.
 function fillChoices() {
   const sel = $('lookup-places'), want = defaultChoice(reviewWork());
@@ -1733,7 +1740,7 @@ async function refreshPreview() {
   // The dataset's language, where the preview names it, is shown as code.
   const said = lines.map(escapeHtml).join(' '), at = p.lang ? ` sent as ${escapeHtml(p.lang)}, ` : null;
   box.innerHTML = `<p>${at ? said.replace(at, ` sent as <code class="code-chip">${escapeHtml(p.lang)}</code>, `) : said}</p>`
-    + (p.first.length ? `<ol class="lookup-queries">${p.first.map((q) => `<li><code>${escapeHtml(JSON.stringify(q))}</code></li>`).join('')}</ol>` : `<p>${escapeHtml(LOOKUP_WORDS.noPlaces)}</p>`);
+    + (p.first.length ? `<ol class="lookup-queries">${p.first.map((q) => `<li><code>${escapeHtml(JSON.stringify(shortTypes(q)))}</code></li>`).join('')}</ol>` + typesSent(p.first) : `<p>${escapeHtml(LOOKUP_WORDS.noPlaces)}</p>`);
   send.textContent = LW.send(p.queries, shortName(svc.service));
   send.disabled = !p.queries || !!looking;
   lookupState({ preview: { places: p.places, queries: p.queries, requests: p.requests, first: p.first } });
@@ -1868,7 +1875,7 @@ function lookupPlaceHtml(iri, place) {
     if (may && last.q.state === 'answered' && !last.q.found && last.q.sent.length === 1 && others.length) out += `<button type="button" data-look="names">${escapeHtml(LW.tryNames(1 + others.length))}</button> `;
     if (may && last.q.state !== 'answered') out += `<button type="button" data-look="again">${escapeHtml(LW.again)}</button> `;
     // Scope: a place a scoped lookup found nothing for (or could not filter) may be asked again without it, by the user.
-    if (may && last.q.scoped?.length && ((last.q.state === 'answered' && !last.q.found) || last.q.failedClosed)) out += `<button type="button" data-look="unscoped">${escapeHtml(LW.unscoped)}</button> `;
+    if (may && last.q.scoped?.length && ((last.q.state === 'answered' && !last.q.found) || last.q.failedClosed || last.q.suspect)) out += `<button type="button" data-look="unscoped">${escapeHtml(LW.unscoped)}</button> `;
   }
   if (!may) return `<div class="find">${out}<p class="lookup-permission"></p></div>`;
   out += `<button type="button" data-look="find">${escapeHtml(LW.find(service))}</button>`;

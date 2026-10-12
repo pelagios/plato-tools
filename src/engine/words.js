@@ -823,7 +823,8 @@ const REFUSED_LOOKUP = {
 
 export const LOOKUP_WORDS = {
   /** Why a lookup stopped ({ kind, message } from runLookup), with what the gazetteer said. */
-  stopped: (s) => (s.kind === 'permission' ? REFUSED_LOOKUP[s.refused] || REFUSED_LOOKUP.undecided : (STOPPED[s.kind] || STOPPED.server) + (s.message ? ` (${s.message})` : '')),
+  stopped: (s) => (s.kind === 'permission' ? REFUSED_LOOKUP[s.refused] || REFUSED_LOOKUP.undecided : s.kind === 'suspect' && s.scoped ? SCOPE_WORDS.suspect
+    : (STOPPED[s.kind] || STOPPED.server) + (s.message ? ` (${s.message})` : '')),
   /** The same, for each kind of refusal by the permissions module. */
   refused: REFUSED_LOOKUP,
   /** The places a lookup takes, as the options name them. */
@@ -946,7 +947,9 @@ export const lookupPage = {
   /** Scope: one place's lookup again, with nothing of the Scope sent (never done by itself). */
   unscoped: 'Look it up again without Scope',
   /** What a lookup said about this place, when it found nothing or could not answer. */
-  state: (service, q) => (q.scoped?.length && ((q.state === 'answered' && !q.found) || q.failedClosed) ? `${service}: ${SCOPE_WORDS.emptyRow(q.scoped)}`
+  state: (service, q) => (q.scoped?.length && q.failedClosed ? `${service}: ${SCOPE_WORDS.notApplied}`
+    : q.scoped?.length && q.suspect ? `${service}: ${SCOPE_WORDS.suspectRow}`
+    : q.scoped?.length && q.state === 'answered' && !q.found ? `${service}: ${SCOPE_WORDS.emptyRow(q.scoped)}`
     : q.state === 'answered' ? `${service}: ${LOOKUP_WORDS.notFound(q)}`
     : q.state === 'unanswered' ? `${service}: ${LOOKUP_WORDS.unanswered}`
     : `${service}: the lookup stopped before this place was looked up; this is not a finding that it has no match. Look it up again.`),
@@ -1227,22 +1230,44 @@ export const SCOPE_WORDS = {
     : 'This tab\'s Scope, for the lookups made here outside a workflow: kept for this tab only. A workflow keeps a Scope of its own.'),
   lede: 'Confine every lookup in the World Historical Gazetteer to a part of the world, kinds of place, years and sources. Each is a filter: WHG first takes about 200 candidates by name, then leaves out every one outside the Scope, so a narrow Scope can leave a place with nothing, the right answer too.',
   /** The chips in the rail and the lookup panel: [{ key, text, warn? }]. */
-  chips(scope, name = (c) => c) {
+  chips(scope, names = {}) {
+    const country = names.country || ((c) => c), source = names.source || ((s) => s);
     const w = scope.where, out = [];
-    out.push({ key: 'where', text: w.mode === 'countries' ? (w.countries.length <= 3 ? w.countries.map((c) => name(c)).join(', ') : `${w.countries.length} countries`)
+    out.push({ key: 'where', text: w.mode === 'countries' ? (w.countries.length <= 3 ? w.countries.map((c) => country(c)).join(', ') : `${w.countries.length} countries`)
       : w.mode === 'place' ? `within ${w.place.label}` : w.mode === 'area' ? 'an area drawn' : 'anywhere' });
     out.push({ key: 'what', text: !scope.types.length ? 'every kind of place' : scope.types.length === 1 ? SCOPE_WORDS.typeLabel(scope.types[0]) : `${scope.types.length} kinds of place` });
     const { start, end } = scope.when;
     out.push({ key: 'when', text: start === null && end === null ? 'any time' : start !== null && end !== null ? `${yearText(start)} to ${yearText(end)}` : start !== null ? `from ${yearText(start)}` : `to ${yearText(end)}` });
-    out.push({ key: 'sources', text: scope.sources.length ? (scope.sources.length <= 3 ? scope.sources.join(', ') : `${scope.sources.length} sources`) : 'all sources' });
+    out.push({ key: 'sources', text: scope.sources.length ? (scope.sources.length <= 3 ? scope.sources.map((s) => source(s)).join(', ') : `${scope.sources.length} sources`) : 'all sources' });
     return out;
   },
+  /** The tracker's one line: what is set, in few words (codes), "Scope: none" when nothing is. */
+  line(scope) {
+    const w = scope.where, parts = [];
+    if (w.mode === 'countries') parts.push(w.countries.length <= 4 ? w.countries.join(', ') : `${w.countries.length} countries`);
+    if (w.mode === 'place') parts.push(`within ${w.place.label}`);
+    if (w.mode === 'area') parts.push('an area drawn');
+    if (scope.types.length) parts.push(scope.types.length <= 2 ? scope.types.map((x) => x.label).join(', ') : `${scope.types.length} kinds of place`);
+    const { start, end } = scope.when;
+    if (start !== null || end !== null) parts.push(start !== null && end !== null ? `${yearText(start)} to ${yearText(end)}` : start !== null ? `from ${yearText(start)}` : `to ${yearText(end)}`);
+    if (scope.sources.length) parts.push(scope.sources.length <= 3 ? scope.sources.join(', ') : `${scope.sources.length} sources`);
+    return `Scope: ${parts.length ? parts.join(' · ') : 'none'}`;
+  },
+  /** The line's tooltip: each part in full, the sources by name. */
+  lineTip: (scope, names = {}) => SCOPE_WORDS.chips(scope, names).map((c) => `${SCOPE_PARTS[c.key]}: ${c.text}`).join('. ') + '.',
+  /** A workflow begun while this tab had a Scope of its own: offered, never taken in silently. */
+  offer: (line) => `This tab has a Scope of its own (${line.replace(/^Scope: /, '')}). Use it for this workflow?`,
+  offerYes: 'Use it',
+  offerNo: 'No',
   undatedMark: 'Places with no dates are left out',
   /** Whose Scope the lookup panel uses (said in full in the editor, SCOPE_WORDS.whose). */
   panelWorkflow: 'the workflow\'s.',
   panelTab: 'for the lookups made here, outside a workflow.',
   /** A type with how many narrower ones it stands for (sent with it: WHG does not match a broader type's narrower ones itself). */
-  typeLabel: (t) => (t.narrower.length ? `${t.label} (and ${plural(t.narrower.length, 'narrower type')})` : t.label),
+  typeLabel: (t) => {
+    const from = t.from === 'cache' ? `, as WHG gave them${t.at ? ` on ${t.at}` : ''}, kept in this browser` : '';
+    return t.narrower.length ? `${t.label} (and ${plural(t.narrower.length, 'narrower type')}${from})` : t.label;
+  },
   // The editor (centre column).
   editorHeading: 'Scope of the lookups',
   close: 'Done',
@@ -1259,6 +1284,7 @@ export const SCOPE_WORDS = {
     placeNone: 'Nothing with an outline found under that name.',
     placeChosen: (p) => `Within ${p.label} (${p.id})${p.description ? `: ${p.description}` : ''}.`,
     placeSearching: 'Asking WHG…',
+    placeFound: (n) => `${plural(n, 'place')} with an outline found.`,
     placeUse: 'Use this one',
     placeNeedsToken: 'Give your WHG token first (below): WHG answers only queries that carry one.',
     placeToken: 'Your WHG token, from your profile on whgazetteer.org (kept as the lookup panel keeps it)',
@@ -1269,8 +1295,17 @@ export const SCOPE_WORDS = {
     areaNone: 'No area drawn yet.',
     areaChosen: (n, [w, s, e, nn]) => `An area of ${plural(n, 'corner')}, from ${w.toFixed(2)}° to ${e.toFixed(2)}° east and from ${s.toFixed(2)}° to ${nn.toFixed(2)}° north. Sent as bounds.`,
     areaLoading: 'Loading the map…',
+    areaTaken: 'The area drawn is the Scope\'s Where.',
+    /** A drawing refused (scope.js areaCheck, or Terra Draw's own check as it is drawn), and why. */
+    areaProblem: {
+      'self-intersects': 'That area crosses itself, so it is not taken: draw it again with no side crossing another.',
+      'too-few': 'An area needs at least three corners: draw it again.',
+      'too-many': 'That area has more than 1,000 corners: draw it again with fewer.',
+      'out-of-range': 'A corner of that area is not on the map: draw it again.',
+      'not-polygon': 'That drawing is not an area: draw it again.',
+    },
     areaFailed: (why) => `The map could not be shown (${why}).`,
-    precedence: 'Where gives way, row by row, to what a row already says. Once the regions in your table\'s region columns (a county, then a parish) are matched, each place is looked up within its own regions, not within the Scope\'s Where, and so are the regions below the widest. A place\'s own filters in the lookup panel (its countries, near its point) win too. The kinds of place, years and sources still apply to every place.',
+    precedence: 'Where gives way, row by row, to what a row already says. Once the regions in your table\'s region columns (a county, then a parish) are matched, each place is looked up within its own regions, not within the Scope\'s Where, and so are the regions below the widest. A place\'s own filters in the lookup panel (its countries, near its point) win too. A place looked up before its regions are settled ("without its regions") keeps the Scope\'s Where, and "With no constraint" drops it. The kinds of place, years and sources still apply to every place.',
   },
   what: {
     legend: 'What kinds of place',
@@ -1278,6 +1313,8 @@ export const SCOPE_WORDS = {
     more: 'More types…',
     fewer: 'Hide the other types',
     search: 'Search the AAT place types',
+    searchGo: 'Search',
+    foundCount: (n) => `${plural(n, 'type')} found.`,
     treeNote: 'The AAT\'s place types, as WHG holds them. Open a type to see the narrower ones; a heading in italics groups them, and is not a type.',
     loading: 'Asking WHG for the types…',
     notAllowed: 'The other types come from WHG, which is not allowed yet (Permissions): the list above still works.',
@@ -1296,6 +1333,7 @@ export const SCOPE_WORDS = {
     note: 'Years before the common era are negative (-500 for 500 BCE). Sent as start and end.',
     undated: 'Include places with no dates',
     undatedWarn: 'WHG currently leaves out places with no dates whenever years are set',
+    undatedNote: 'Unticked, a place with no dates is left out whenever years are given. Sent as undated, with the years only.',
     startAfterEnd: 'The first year is after the last, so no years are sent until that is put right.',
   },
   sources: {
@@ -1305,6 +1343,9 @@ export const SCOPE_WORDS = {
     bundled: 'WHG\'s list of sources could not be read just now (or WHG is not allowed yet), so this is its list as it was on 12 October 2026.',
     records: (n) => `${n.toLocaleString('en-GB')} records`,
   },
+  /** A long list of types in a query shown in the preview, and the list itself, folded below the queries. */
+  typesElided: (n) => `[${n.toLocaleString('en-GB')} AAT ids]`,
+  typesSent: (n) => `The ${n.toLocaleString('en-GB')} AAT ids sent as types`,
   /** The lookup panel's preview of what of the Scope is sent. */
   preview(s) {
     const what = { where: 'its Where', what: 'its kinds of place', when: 'its years', sources: 'its sources' };
@@ -1315,4 +1356,9 @@ export const SCOPE_WORDS = {
   },
   /** One place a scoped lookup found nothing for: the likely cause, and never relaxed by itself. */
   emptyRow: () => 'Nothing within the Scope among WHG\'s best name matches. The Scope may leave the right place out: look it up again without Scope to see.',
+  /** WHG could not apply the Scope's Where to one place (scope.applied false, nothing in it): fail-closed, never "no match". */
+  notApplied: 'WHG could not apply the Scope\'s Where to this place, so it answered nothing. That is not a finding that it has no match: look it up again without Scope.',
+  /** A first batch sent under the Scope's Where that came back empty, every query of it. */
+  suspect: 'The lookup stopped: WHG answered nothing at all to any query of the first batch, sent within the Scope\'s Where. The Where may be wrong, or not taken. Those places are marked not answered, not "no match": look one up again without Scope to see, change the Scope, or send the same places again unchanged (resume) to accept the empty answers as genuine.',
+  suspectRow: 'Not answered: the first batch, sent within the Scope\'s Where, came back empty for every place, so the lookup stopped. Look it up again without Scope to see.',
 };

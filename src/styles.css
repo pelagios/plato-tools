@@ -693,7 +693,9 @@ body[data-workflow] #action:not([hidden]) + #progress:not([hidden]):has(+ #resul
   .workflow-rail > section { margin: 0 0 1rem; }
   .workflow-rail .methodos-tracker { padding: .85rem 1rem; font-size: 1rem; }
   .workflow-rail .methodos-tracker h2 { font-size: 1.1rem; }
-  .workflow-rail .track-step { padding: .3rem .4rem; }
+  /* Compact steps in the rail, so that at 1440 x 900 at least 8 of 11 are in view with the step's message, its buttons and the Scope's line (layout and Scope checks). */
+  .workflow-rail .track-step { padding: .15rem .35rem; font-size: .9rem; line-height: 1.3; }
+  .workflow-rail .track-message, .workflow-rail .track-scope { font-size: .9rem; line-height: 1.35; }
   .workflow-rail .methodos-buttons button { flex: 1 1 auto; font-size: .95rem; }
   /* No workflow followed: the line that opens the interview, as a quiet panel where the tracker will be. */
   .workflow-rail .methodos-banner { margin: 0; padding: .75rem 1rem; border: 1px dashed var(--line); border-radius: 10px; font-size: .95rem; }
@@ -744,7 +746,12 @@ body[data-workflow] #action:not([hidden]) + #progress:not([hidden]):has(+ #resul
 @media (width < 60rem) and (prefers-reduced-motion: reduce) { .track-strip .strip-mark { transition: none; } }
 /* Scope (Issue #33; src/scope-page.js): its chips in the workflow rail and the lookup panel, and its editor in the centre
    column, which hides the rest of the centre while it is open (body.scope-editing) so that the map drawn on has the width. */
-.scope-rail .scope-h { font-size: 1.1rem; margin: 0 0 .4rem; }
+.track-scope { margin: .6rem 0 0; font-size: .95rem; }
+.scope-line-row { display: flex; align-items: baseline; gap: .5rem; }
+.scope-more { flex: 1; min-width: 0; }
+.scope-more > summary { cursor: pointer; overflow-wrap: anywhere; }
+.scope-more[open] > summary { margin-bottom: .3rem; }
+.scope-offer { margin: .4rem 0 0; }
 .scope-chips { list-style: none; margin: .25rem 0; padding: 0; display: flex; flex-wrap: wrap; gap: .3rem; }
 .scope-chip { border: 1px solid var(--line); border-radius: 999px; padding: .05rem .55rem; font-size: .9rem; background: var(--bg); overflow-wrap: anywhere; }
 .scope-chip-key { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .03em; }

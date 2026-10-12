@@ -3756,9 +3756,18 @@ SCOPE_SOURCES = {'sources': [{'namespace': 'gn', 'name': 'GeoNames', 'record_cou
 SCOPE_ENGLAND = {'id': 'place:wd:Q21', 'name': 'England', 'score': 100, 'match': True, 'description': 'Country: GB', 'ccodes': ['GB'], 'repr_point': [-1.5, 52.6],
                  'namespace': 'wd', 'alt_names': [], 'has_geom': True}
 SCOPE_STATE = '''() => { const r = document.getElementById('scope'), v = (e) => !!e && !e.hidden && !e.closest('[hidden]') && !!e.getClientRects().length;
-  return { rail: v(r), chips: [...(r?.querySelectorAll('.scope-chip') || [])].map((c) => c.textContent.replace(/\\s+/g, ' ').trim()),
-    undated: v(r?.querySelector('[data-mark="undated"]')), editor: v(document.getElementById('scope-editor')), files: v(document.getElementById('files')),
-    tracker: v(document.getElementById('methodos-tracker')), state: window.__plato && window.__plato.scope ? JSON.parse(JSON.stringify(window.__plato.scope)) : null }; }'''
+  return { rail: v(r), line: r?.querySelector('.scope-line-text')?.textContent || null, chips: [...(r?.querySelectorAll('.scope-chip') || [])].map((c) => c.textContent.replace(/\\s+/g, ' ').trim()),
+    undated: !!r?.querySelector('[data-mark="undated"]') && v(r), offer: v(document.getElementById('scope-offer')),
+    editor: v(document.getElementById('scope-editor')), files: v(document.getElementById('files')),
+    tracker: v(document.getElementById('methodos-tracker')), focus: document.activeElement ? document.activeElement.id || document.activeElement.className || document.activeElement.tagName : null,
+    state: window.__plato && window.__plato.scope ? JSON.parse(JSON.stringify(window.__plato.scope)) : null }; }'''
+# The tracker in a 1440 x 900 window: "This step is done" in view, and how many of its steps are wholly in view.
+SCOPE_RAIL = '''() => { const v = (e) => { const r = e.getBoundingClientRect(), l = document.getElementById('methodos-track').getBoundingClientRect();
+    return r.height > 0 && r.top >= Math.max(0, l.top) - 1 && r.bottom <= Math.min(innerHeight, l.bottom) + 1; };
+  const done = document.getElementById('methodos-done').getBoundingClientRect();
+  return { steps: document.querySelectorAll('#methodos-track li.track-step').length, inView: [...document.querySelectorAll('#methodos-track li.track-step')].filter(v).length,
+    done: done.height > 0 && done.top >= 0 && done.bottom <= innerHeight, line: !!document.querySelector('#methodos-tracker #scope .scope-line-text'),
+    card: !!document.querySelector('#workflow-rail > #scope') }; }'''
 
 def scope_checks(pw, url, tmp):
     import re
@@ -3769,6 +3778,7 @@ def scope_checks(pw, url, tmp):
     cors = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
             'Access-Control-Allow-Headers': 'authorization, content-type, accept, user-agent'}
     posts, gets, asked = [], [], []
+    empty_types = {'on': False}   # while on, every query sent types is answered with nothing (WHG says no scope for types)
     def stub(route):
         req = route.request
         if req.method == 'OPTIONS': return route.fulfill(status=204, headers=cors)
@@ -3787,17 +3797,22 @@ def scope_checks(pw, url, tmp):
         body = json.loads(req.post_data or '{}'); posts.append(body)
         res = {'attribution': LOOKUP_ATTRIBUTION}
         for k, q in (body.get('queries') or {}).items():
-            if q.get('query') == 'England' and q.get('area_only'): found = [SCOPE_ENGLAND]
-            # Mill Farm has nothing of its kind within the Scope: WHG answers a scoped query with nothing, fail-closed.
+            spatial = any(x in q for x in ('contained_in', 'bounds', 'countries'))
+            if empty_types['on'] and q.get('types'): res[k] = {'result': []}; continue
+            if q.get('query') == 'England' and q.get('area_only'): found = [SCOPE_ENGLAND, {**SCOPE_ENGLAND, 'id': 'place:gn:9100001', 'has_geom': False}]
+            # Mill Farm has nothing of its kind within the Scope: WHG answers the scoped query with nothing, the filter applied.
             elif q.get('query') == 'Mill Farm' and q.get('types'): res[k] = {'result': [], 'scope': {'applied': True}}; continue
+            # Low Mill: WHG could not apply the Scope's Where (no outline to look within): nothing, applied false, fail-closed.
+            elif q.get('query') == 'Low Mill' and q.get('contained_in'): res[k] = {'result': [], 'scope': {'applied': False}}; continue
             else: found = MYDATA_ANSWERS.get(q.get('query'), [])
-            if q.get('area_only'): found = [c for c in found if c.get('has_geom')]
-            res[k] = {'result': found, **({'scope': {'applied': True}} if any(x in q for x in ('contained_in', 'bounds', 'countries')) else {})}
+            if q.get('area_only'): found = [c for c in found if c.get('has_geom') is not False] if q.get('query') != 'England' else found
+            res[k] = {'result': found, **({'scope': {'applied': True}} if spatial else {})}
         reply(res)
     ctx.route(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'), stub)
     ctx.on('request', lambda r: asked.append(r.url))
     page = ctx.new_page()
     S = lambda: page.evaluate(SCOPE_STATE)
+    focus = lambda: page.evaluate('() => document.activeElement && document.activeElement.id')
     r = {}
     def need(*keys):
         missing = [k for k in keys if not r.get(k)]
@@ -3812,14 +3827,22 @@ def scope_checks(pw, url, tmp):
         until(page, "() => !document.getElementById('scope-editor').hidden", 10)
     def done():
         page.click('#scope-done'); until(page, "() => document.getElementById('scope-editor').hidden", 10)
-    def chips(): return S()['chips']
     map_chunk = lambda: [u for u in asked if re.search(r'/assets/map-[\w-]+\.js$', u)]
+    def to_place(name):
+        page.select_option('#review-filter', 'all')   # a place with no candidate is among all places, not those still to decide
+        for way in ('#review-prev', '#review-next'):   # wherever the review opened, the place is reached one way or the other
+            for _ in range(12):
+                if name in page.inner_text('#review-subject') or not page.is_enabled(way): break
+                page.click(way)
+        return name in page.inner_text('#review-subject')
 
     def begin():
         page.goto(NOTOOLS if PROVE else base)
         page.evaluate("() => { localStorage.setItem('plato-tools.permissions', JSON.stringify({ version: 1, grants: { 'gazetteer:whg': { state: 'allowed', at: '2026-10-12T10:00:00Z' } } })); localStorage.setItem('plato-tools.reviewer', JSON.stringify({ name: 'Scope Reviewer' })); }")
         page.goto(NOTOOLS if PROVE else base)
         wait_state(page, lambda s: s.get('phase') == 'ready' and s.get('canary') in ('enforced', 'not-enforced'), T(30), 'ready')
+        # This tab has a Scope of its own (Ireland) before the workflow begins: the workflow offers to take it in, never silently.
+        page.evaluate("() => sessionStorage.setItem('plato-tools.scope', JSON.stringify({ where: { mode: 'countries', countries: ['IE'] } }))")
         # The base address the regions are minted under (the workflow asks for one), as Options holds it.
         page.evaluate("() => { const b = document.getElementById('base'); b.value = %s; b.dispatchEvent(new Event('change')); }" % json.dumps(MYDATA_BASE))
         page.click('#methodos-ask'); until(page, "!document.getElementById('methodos').hidden", 5)
@@ -3828,44 +3851,91 @@ def scope_checks(pw, url, tmp):
         page.click('#methodos-start'); until(page, "['pending', 'idle'].includes(document.getElementById('methodos-tracker').dataset.status)", 10)
         choose([MYDATA_CSV])
         until(page, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+        offered = S()
+        page.click('#scope-offer-no')
+        until(page, "() => !document.getElementById('scope-offer')", 10)
         s = S(); r['begun'] = s
-        return (s['rail'] and s['tracker'] and s['chips'] == ['Where anywhere', 'What every kind of place', 'When any time', 'Sources all sources']
-                and (s['state'] or {}).get('whose') == 'workflow' and not s['undated']), s
-    attempt('Scope: a workflow followed shows its Scope in the rail under the tracker, as four chips (Where, What, When, Sources), all of it open at first', begin)
+        return (offered['offer'] and offered['state']['scope']['where']['mode'] == 'anywhere' and not s['offer']
+                and s['rail'] and s['tracker'] and s['line'] == 'Scope: none' and s['chips'] == ['Where anywhere', 'What every kind of place', 'When any time', 'Sources all sources']
+                and (s['state'] or {}).get('whose') == 'workflow' and not s['undated']), {'offered': offered['offer'], 'after': s}
+    attempt('Scope: a workflow followed shows its Scope as one line in the tracker ("Scope: none" at first), which opens to four chips; begun while the tab had a Scope of its own, it offers to take it in, and declined, keeps none', begin)
+
+    def rail_layout():
+        need('begun')
+        lay = page.evaluate(SCOPE_RAIL)
+        return (lay['steps'] == 11 and lay['inView'] >= 8 and lay['done'] and lay['line'] and not lay['card']), lay
+    attempt('Scope: at 1440 x 900 the Scope is folded into the tracker (no card of its own in the rail): "This step is done" is in view, and at least 8 of the 11 steps listed', rail_layout)
 
     def editor_in_centre():
         need('begun')
-        before = page.evaluate('() => document.activeElement && document.activeElement.id')
         edit()
         s = S()
         width = page.evaluate("() => document.getElementById('scope-editor').getBoundingClientRect().width")
-        page.check('#scope-where input[value="countries"]')
+        page.check('#scope-where-countries')
         page.fill('#scope-country-filter', 'United Kingdom')
-        page.check('#scope-country-list input[value="GB"]')
+        page.check('#scope-c-GB')
+        # In a workflow, the editor shows at once what was ticked (it draws from the Scope just made, not the one before).
+        one = page.evaluate("() => ({ gb: document.getElementById('scope-c-GB')?.checked, chosen: document.querySelector('#scope-countries .scope-chosen')?.textContent })")
+        page.fill('#scope-country-filter', 'Ireland'); page.check('#scope-c-IE')
+        two = page.evaluate("() => ({ ie: document.getElementById('scope-c-IE')?.checked, chosen: document.querySelector('#scope-countries .scope-chosen')?.textContent })")
+        page.fill('#scope-country-filter', '')
         page.fill('#scope-start', '1500'); page.press('#scope-start', 'Tab')
         page.fill('#scope-end', '1600'); page.press('#scope-end', 'Tab')
-        page.check('#scope-shortlist input[value="aat:300008372"]')   # Villages, sent with its narrower types
+        page.check('#scope-t-aat\\:300008372')   # Villages, sent with its narrower types
         until(page, "() => (window.__plato.scope.scope.types[0] || {}).narrower", 15)
-        until(page, "() => !!document.querySelector('#scope-source-list input[value=\"stubns\"]')", 15)
+        until(page, "() => !!document.getElementById('scope-s-stubns')", 15)
         sources = page.eval_on_selector_all('#scope-source-list label', 'ls => ls.map((l) => l.textContent.replace(/\\s+/g, " ").trim())')
-        page.check('#scope-source-list input[value="gn"]')
-        undated = page.evaluate("() => ({ disabled: document.getElementById('scope-undated').disabled, warn: document.getElementById('scope-undated-warn').textContent })")
+        page.check('#scope-s-gn')
+        undated = page.evaluate("() => { const b = document.getElementById('scope-undated'), d = document.getElementById(b.getAttribute('aria-describedby')); return { disabled: b.disabled, checked: b.checked, describedBy: b.getAttribute('aria-describedby'), note: d ? d.textContent : null, warn: !!document.getElementById('scope-undated-warn') }; }")
         done()
         after = S()
         r['chips'] = after['chips']; r['undated'] = undated; r['sources'] = sources
-        ok = (s['editor'] and not s['files'] and width > 600 and after['chips'] == ['Where United Kingdom (GB)', 'What Villages (and 1 narrower type)', 'When 1500 to 1600', 'Sources gn']
-              and after['undated'] and not r['begun']['undated'] and not after['editor'] and after['files']
-              and undated['disabled'] is True and 'WHG currently leaves out places with no dates whenever years are set' in undated['warn']
-              and any('Stub Gazetteer (stubns)' in x for x in sources) and any(x.startswith('Contributed datasets (whg)') for x in sources))
-        return ok, {'opened': {k: s[k] for k in ('editor', 'files')}, 'width': width, 'chips': after['chips'], 'undated mark': after['undated'], 'tick': undated, 'sources': sources, 'focus before': before}
-    attempt('Scope: Edit opens the editor in the centre column (the steps hidden meanwhile); Done returns; the rail chips then say the countries, the type with its narrower ones, the years and the source, with the mark that places with no dates are left out', editor_in_centre)
+        ok = (s['editor'] and not s['files'] and width > 600 and one == {'gb': True, 'chosen': 'United Kingdom (GB)'} and two == {'ie': True, 'chosen': 'United Kingdom (GB), Ireland (IE)'}
+              and after['chips'] == ['Where United Kingdom (GB), Ireland (IE)', 'What Villages (and 1 narrower type)', 'When 1500 to 1600', 'Sources GeoNames (gn)']
+              and after['line'] == 'Scope: GB, IE · Villages · 1500 to 1600 · gn' and after['undated'] and not r['begun']['undated'] and not after['editor'] and after['files'])
+        return ok, {'opened': {k: s[k] for k in ('editor', 'files')}, 'width': width, 'one ticked': one, 'two ticked': two, 'chips': after['chips'], 'line': after['line'], 'undated mark': after['undated']}
+    attempt('Scope: in a workflow, Edit opens the editor in the centre (the steps hidden); a country ticked shows ticked at once, and a second beside it; Done returns, and the tracker\'s line and chips say the countries, the type with its narrower ones, the years and the source by name, with the mark that undated places are left out', editor_in_centre)
+
     def undated_and_sources():
         need('chips')
         u, src = r.get('undated') or {}, r.get('sources') or []
-        return (u.get('disabled') is True and 'WHG currently leaves out places with no dates whenever years are set' in u.get('warn', '')
+        return (u.get('disabled') is False and u.get('checked') is False and u.get('warn') is False and u.get('describedBy') == 'scope-undated-note' and 'left out whenever years are given' in (u.get('note') or '')
                 and S()['state']['scope']['when']['undated'] is False and S()['state']['sources'] == 'whg'
                 and any('Stub Gazetteer (stubns)' in x for x in src) and any(x.startswith('Contributed datasets (whg)') for x in src)), {'tick': u, 'sources': src, 'from': S()['state'].get('sources')}
-    attempt('Scope: "Include places with no dates" is shown disabled, with WHG\'s present behaviour said beside it; the sources offered are WHG\'s (from the stub), with the contributed datasets (whg) added', undated_and_sources)
+    attempt('Scope: "Include places with no dates" can be ticked (WHG takes undated), unticked at first and described by what it does, with no warning that WHG leaves them out; the sources offered are WHG\'s (from the stub), with the contributed datasets (whg) added', undated_and_sources)
+
+    def keyboard():
+        need('chips')
+        edit()
+        out = {}
+        # Arrows through the Where's modes: the focus stays on the mode chosen, which is drawn with its own part.
+        page.focus('#scope-where-countries'); page.keyboard.press('ArrowRight')
+        until(page, "() => document.getElementById('scope-where-place')?.checked", 10)
+        out['arrow'] = focus()
+        # Back to the countries: the countries chosen before come back (each mode's last value is kept).
+        page.keyboard.press('ArrowLeft')
+        until(page, "() => document.getElementById('scope-where-countries')?.checked", 10)
+        out['arrow back'] = focus(); out['restored'] = S()['state']['scope']['where']
+        # Space on a box: the focus stays on it.
+        page.fill('#scope-country-filter', 'France'); page.focus('#scope-c-FR'); page.keyboard.press('Space')
+        until(page, "() => window.__plato.scope.scope.where.countries.includes('FR')", 10)
+        out['space'] = focus()
+        page.keyboard.press('Space')
+        until(page, "() => !window.__plato.scope.scope.where.countries.includes('FR')", 10)
+        page.fill('#scope-country-filter', '')
+        # Tab out of a year: the focus goes on to the next field, and stays there once the change is drawn.
+        page.focus('#scope-start'); page.keyboard.press('Control+A'); page.keyboard.type('1510'); page.keyboard.press('Tab')
+        until(page, "() => window.__plato.scope.scope.when.start === 1510", 10)
+        out['tab'] = focus()
+        page.focus('#scope-start'); page.keyboard.press('Control+A'); page.keyboard.type('1500'); page.keyboard.press('Tab')
+        until(page, "() => window.__plato.scope.scope.when.start === 1500", 10)
+        # Done: the focus goes back to the Edit control that opened the editor (in the tracker), found again.
+        done()
+        out['closed'] = page.evaluate("() => !!document.activeElement && document.activeElement.matches('#scope .scope-edit')")
+        out['label'] = page.get_attribute('#scope .scope-edit', 'aria-label')
+        return (out['arrow'] == 'scope-where-place' and out['arrow back'] == 'scope-where-countries' and (out['restored'].get('countries') == ['GB', 'IE'])
+                and out['space'] == 'scope-c-FR' and out['tab'] == 'scope-end' and out['closed'] is True and out['label'] == 'Edit the Scope'), out
+    attempt('Scope: the keyboard keeps its place through every redraw: arrows through the Where\'s modes (and back, the countries chosen before restored), Space on a country, Tab out of a year; Done gives the focus back to the tracker\'s Edit control (labelled "Edit the Scope")', keyboard)
 
     def survives_reload():
         need('chips')
@@ -3886,26 +3956,28 @@ def scope_checks(pw, url, tmp):
         page.click('#scope-tree li[data-aat="aat:300008407"] > .scope-twist')
         until(page, "() => !!document.querySelector('#scope-tree li[data-aat=\"aat:300008419\"] input')", 15)
         guide_box = page.evaluate("() => !!document.querySelector('#scope-tree li[data-aat=\"aat:300008407\"] > label input')")
+        roles = page.evaluate("() => document.querySelectorAll('#scope-editor [role=tree], #scope-editor [role=radiogroup], #scope-editor [role=group]').length")
         page.check('#scope-tree li[data-aat="aat:300008419"] input')
         until(page, "() => window.__plato.scope.scope.types.some((t) => t.id === 'aat:300008419')", 15)
         label = page.inner_text('#scope-tree li[data-aat="aat:300008419"] label')
         page.fill('#scope-type-search', 'parish'); page.press('#scope-type-search', 'Enter')
         until(page, "() => !!document.querySelector('#scope-type-found li[data-aat=\"aat:300008419\"]')", 15)
+        said = page.inner_text('#scope-live')
         searched = any('/types/tree/search/?q=parish' in u for u in gets)
         expanded = any('/types/expand/?ids=aat%3A300008419' in u or '/types/expand/?ids=aat:300008419' in u for u in gets)
         done()
         r['tree'] = True
-        return (not guide_box and label.strip() == 'parish seats (and 1 narrower type)' and searched and expanded
-                and any(u.endswith('/types/tree/300008347/') for u in gets)), {'label': label, 'guide selectable': guide_box, 'gets': [re.sub(r'^https?://[^/]+', '', u) for u in gets][-8:]}
-    attempt('Scope: "More types…" opens WHG\'s tree of AAT place types (roots, then a node\'s children, a guide heading not choosable), searches it, and a type chosen is expanded by WHG and labelled with its narrower types', tree)
+        return (not guide_box and roles == 0 and label.strip() == 'parish seats (and 1 narrower type)' and searched and expanded and said == '1 type found.'
+                and any(u.endswith('/types/tree/300008347/') for u in gets)), {'label': label, 'guide selectable': guide_box, 'roles': roles, 'live': said, 'gets': [re.sub(r'^https?://[^/]+', '', u) for u in gets][-8:]}
+    attempt('Scope: "More types…" opens WHG\'s tree of AAT place types (roots, then a node\'s children, a guide heading not choosable, no tree role it does not keep), searches it (said in the one live region), and a type chosen is expanded by WHG and labelled with its narrower types', tree)
 
     def leave_goes():
         need('chips')
         page.click('#methodos-leave'); until(page, "() => document.getElementById('methodos-tracker').hidden", 10)
         s = S()
-        return (not s['rail'] and s['state']['whose'] == 'tab' and s['state']['scope']['where']['mode'] == 'anywhere' and not s['state']['scope']['types']
+        return (not s['rail'] and s['state']['whose'] == 'tab' and s['state']['scope']['where'] == {'mode': 'countries', 'countries': ['IE']} and not s['state']['scope']['types']
                 and r['begun']['rail']), s
-    attempt('Scope: leaving the workflow, its Scope goes with it: the rail shows none, and the lookup panel has this tab\'s own, empty', leave_goes)
+    attempt('Scope: leaving the workflow, its Scope goes with it: the tracker\'s line goes, and the lookup panel has this tab\'s own again (Ireland, as it was, never taken in)', leave_goes)
 
     # Outside a workflow, the lookup panel uses this tab's Scope. The table again, with a base address, so its regions are minted.
     def look(which='all'):
@@ -3922,13 +3994,13 @@ def scope_checks(pw, url, tmp):
         if not page.evaluate("() => document.getElementById('lookup').open"): page.click('#lookup > summary')
         page.fill('#whg-token', LOOKUP_TOKEN); page.press('#whg-token', 'Tab')
         edit()
-        page.check('#scope-where input[value="countries"]')
-        page.check('#scope-country-list input[value="GB"]')
-        page.check('#scope-shortlist input[value="aat:300008369"]')   # Hamlets
+        page.check('#scope-where-countries')   # Ireland, the tab's, comes back with the mode
+        page.uncheck('#scope-c-IE'); page.check('#scope-c-GB')
+        page.check('#scope-t-aat\\:300008369')   # Hamlets
         until(page, "() => (window.__plato.scope.scope.types[0] || {}).from === 'whg'", 15)
         page.fill('#scope-start', '1500'); page.press('#scope-start', 'Tab'); page.fill('#scope-end', '1600'); page.press('#scope-end', 'Tab')
-        until(page, "() => !!document.querySelector('#scope-source-list input[value=\"gn\"]')", 15)
-        page.check('#scope-source-list input[value="gn"]')
+        until(page, "() => !!document.getElementById('scope-s-gn')", 15)
+        page.check('#scope-s-gn')
         done()
         preview = page.inner_text('#lookup-preview')
         sent = look()
@@ -3941,11 +4013,7 @@ def scope_checks(pw, url, tmp):
 
     def empty_row():
         need('plain')
-        page.select_option('#review-filter', 'all')   # Mill Farm has no candidate: it is among all places, not those still to decide
-        for way in ('#review-prev', '#review-next'):   # wherever the review opened, Mill Farm is reached one way or the other
-            for _ in range(12):
-                if 'Mill Farm' in page.inner_text('#review-subject') or not page.is_enabled(way): break
-                page.click(way)
+        reached = to_place('Mill Farm')
         said = page.inner_text('#review-place .lookup-state') if page.is_visible('#review-place .lookup-state') else ''
         offered = page.is_visible('#review-place button[data-look="unscoped"]')
         n = len(posts)
@@ -3954,58 +4022,125 @@ def scope_checks(pw, url, tmp):
         again = [q for b in posts[n:] for q in (b.get('queries') or {}).values()]
         before = next((q for q in r['plain'] if q.get('query') == 'Mill Farm'), {})
         cands = page.eval_on_selector_all('#review-place li.candidate', 'ls => ls.length')
-        return ("Nothing within the Scope among WHG's best name matches" in said and offered and before.get('types')
+        return (reached and "Nothing within the Scope among WHG's best name matches" in said and offered and before.get('types')
                 and len(again) == 1 and again[0].get('query') == 'Mill Farm' and not any(k in again[0] for k in ('types', 'countries', 'start', 'end', 'temporal', 'namespaces'))
                 and cands >= 1), {'said': said, 'offered': offered, 'before': before, 'again': again, 'candidates': cands}
     attempt('Scope: a place a scoped lookup found nothing for says so, with the likely cause, and offers "Look it up again without Scope", which sends the place with nothing of the Scope (and finds it)', empty_row)
 
+    def undated_tick():
+        need('plain')
+        marked = lambda: page.evaluate("() => !!document.querySelector('#lookup-scope [data-mark=\"undated\"]')")
+        before = marked()   # years set, the box unticked: undated places left out, and marked (the control)
+        edit(); page.check('#scope-undated')
+        until(page, "() => window.__plato.scope.scope.when.undated === true", 10)
+        done()
+        after = marked()
+        ticked = look()
+        # Ticked, with no years: nothing of When is sent, undated neither (the control for "beside a year").
+        edit(); page.fill('#scope-start', ''); page.press('#scope-start', 'Tab'); page.fill('#scope-end', ''); page.press('#scope-end', 'Tab')
+        until(page, "() => window.__plato.scope.scope.when.start === null && window.__plato.scope.scope.when.end === null", 10)
+        done()
+        yearless = look()
+        edit(); page.fill('#scope-start', '1500'); page.press('#scope-start', 'Tab'); page.fill('#scope-end', '1600'); page.press('#scope-end', 'Tab')
+        until(page, "() => window.__plato.scope.scope.when.end === 1600", 10)
+        done()
+        unticked = r['plain']
+        return (before is True and after is False and len(ticked) == 10 and all(q.get('undated') is True and q.get('start') == 1500 and q.get('end') == 1600 and q.get('temporal') is True for q in ticked)
+                and all('undated' not in q for q in unticked) and len(yearless) == 10 and all(not any(k in q for k in ('undated', 'start', 'end', 'temporal')) for q in yearless)), \
+            {'marked before': before, 'marked after': after, 'ticked': ticked[:1], 'yearless': yearless[:1]}
+    attempt('Scope: "Include places with no dates" ticked sends undated: true beside the years and temporal (unticked, none was sent, and the panel marked them left out; ticked, the mark goes); ticked with no years, nothing of When is sent', undated_tick)
+
+    def types_only():
+        need('plain')
+        # A Scope of types (and years and sources) alone, and WHG answering the whole first batch with nothing: not a stop.
+        edit(); page.check('#scope-where-anywhere'); done()
+        empty_types['on'] = True
+        try: sent = look()
+        finally: empty_types['on'] = False
+        s = wait_state(page, lambda s: True, 5)
+        lk = s.get('lookup') or {}
+        reached = to_place('Hall Green')
+        said = page.inner_text('#review-place .lookup-state') if page.is_visible('#review-place .lookup-state') else ''
+        return (len(sent) == 10 and all(q.get('types') and 'countries' not in q for q in sent) and lk.get('stopped') is None
+                and reached and "Nothing within the Scope among WHG's best name matches" in said and page.is_visible('#review-place button[data-look="unscoped"]')), \
+            {'stopped': lk.get('stopped'), 'summary': (lk.get('summary') or '')[:200], 'said': said, 'n': len(sent)}
+    attempt('Scope: a Scope of kinds of place, years and sources alone whose first batch WHG answers with nothing is not taken for a filter not applied (no stop): each place says it found nothing within the Scope, and offers the lookup without it', types_only)
+
     def where_place():
         need('plain')
         edit()
-        page.check('#scope-where input[value="place"]')
+        page.check('#scope-where-place')
         n = len(posts)
         page.fill('#scope-place-q', 'England'); page.click('#scope-place-find')
         until(page, "() => !!document.querySelector('#scope-place-found button')", 15)
         searched = [q for b in posts[n:] for q in (b.get('queries') or {}).values()]
+        offered = page.eval_on_selector_all('#scope-place-found li', 'ls => ls.map((l) => l.dataset.id)')
         page.click('#scope-place-found li[data-id="wd:Q21"] button')
         until(page, "() => (window.__plato.scope.scope.where.place || {}).id === 'wd:Q21'", 10)
         done()
         sent = look()
-        return (searched == [{'area_only': True, 'query': 'England', 'type': 'Place', 'limit': 10}] and len(sent) == 10
-                and all(q.get('contained_in') == ['wd:Q21'] and 'countries' not in q for q in sent)), {'searched': searched, 'sent': sent[:2]}
-    attempt('Scope: Where as a WHG place, found by name for areas only (area_only), reaches every query as contained_in, its bare id in a list (wd:Q21), and no longer the countries', where_place)
+        # Low Mill: WHG could not apply the Where (applied false, nothing): fail-closed, said so, and the lookup without Scope offered.
+        reached = to_place('Low Mill')
+        said = page.inner_text('#review-place .lookup-state') if page.is_visible('#review-place .lookup-state') else ''
+        unscoped = page.is_visible('#review-place button[data-look="unscoped"]')
+        return (searched == [{'area_only': True, 'query': 'England', 'type': 'Place', 'limit': 10}] and offered == ['wd:Q21'] and len(sent) == 10
+                and all(q.get('contained_in') == ['wd:Q21'] and 'countries' not in q for q in sent)
+                and reached and "WHG could not apply the Scope's Where to this place" in said and unscoped), {'searched': searched, 'offered': offered, 'sent': sent[:2], 'Low Mill': said, 'unscoped': unscoped}
+    attempt('Scope: Where as a WHG place, found by name for areas only (area_only; a point WHG still offers is not), reaches every query as contained_in, its bare id in a list (wd:Q21); a place WHG could not apply it to (applied false) says so, and offers the lookup without Scope', where_place)
 
     def where_area():
         need('plain')
         edit()
         before = {'map chunk': map_chunk(), 'map shown': page.evaluate("() => !!document.querySelector('.maplibregl-map')"),
+                  'maplibre global': page.evaluate("() => typeof window.maplibregl !== 'undefined'"),
                   'main code': any(re.search(r'/assets/main-[\w-]+\.js$', u) for u in asked)}
-        page.check('#scope-where input[value="area"]')
+        page.check('#scope-where-area')
         until(page, "() => window.__plato.scope.map === 'ready' && !!document.querySelector('#scope-map .maplibregl-canvas')", 60)
         until(page, "() => window.__scope_map && window.__scope_map.isStyleLoaded()", 60)
         page.wait_for_timeout(500)
         box = page.query_selector('#scope-map').bounding_box()
         x, y = box['x'] + box['width'] / 2, box['y'] + box['height'] / 2
+        # Drawn clockwise: taken counter-clockwise (RFC 7946).
         for px, py in ((x - 120, y - 80), (x + 120, y - 80), (x + 120, y + 80), (x - 120, y + 80), (x - 120, y - 80)): tap(page, px, py)
         until(page, "() => window.__plato.scope.scope.where.mode === 'area'", 15)
-        after = {'map chunk': map_chunk(), 'other sites': sorted({re.match(r'^[a-z]+:(//[^/]*)?', u).group(0) for u in asked
+        after = {'map chunk': map_chunk(), 'map shown': page.evaluate("() => !!document.querySelector('.maplibregl-map')"),
+                 'other sites': sorted({re.match(r'^[a-z]+:(//[^/]*)?', u).group(0) for u in asked
                  if not (u.startswith(origin + '/') or u.startswith('data:') or u.startswith('blob:') or re.match(r'^https://([^/]*\.)?whgazetteer\.org/', u))})}
         done()
         sent = look()
         rings = [((q.get('bounds') or {}).get('coordinates') or [[]])[0] for q in sent]
+        ccw = lambda ring: sum(ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1] for i in range(len(ring) - 1)) > 0
         r['area'] = True
-        return (before['main code'] and not before['map chunk'] and not before['map shown'] and after['map chunk'] and not after['other sites']
-                and len(sent) == 10 and all((q.get('bounds') or {}).get('type') == 'Polygon' and len(ring) == 5 and ring[0] == ring[-1] and 'contained_in' not in q for q, ring in zip(sent, rings))), \
+        return (before['main code'] and not before['map chunk'] and not before['map shown'] and not before['maplibre global'] and after['map chunk'] and after['map shown'] and not after['other sites']
+                and len(sent) == 10 and all((q.get('bounds') or {}).get('type') == 'Polygon' and len(ring) == 5 and ring[0] == ring[-1] and ccw(ring) and 'contained_in' not in q for q, ring in zip(sent, rings))), \
             {'before': before, 'after': after, 'bounds': sent[0].get('bounds') if sent else None}
-    attempt('Scope: the drawn area\'s map is not loaded until that mode is opened (no map code asked for, no map, while the page\'s own code was); opened, Chora\'s map draws on Natural Earth asking no other site, and the area drawn reaches every query as bounds, a closed polygon', where_area)
+    attempt('Scope: the drawn area\'s map is not loaded until that mode is opened (no map code, no map, no MapLibre global, while the page\'s own code was); opened, Chora\'s map draws on Natural Earth asking no other site, and the area drawn clockwise reaches every query as bounds, a closed counter-clockwise polygon', where_area)
+
+    def area_refused():
+        need('area')
+        edit()
+        until(page, "() => window.__scope_map && window.__scope_map.isStyleLoaded()", 60)
+        page.click('#scope-area-draw'); page.wait_for_timeout(300)
+        box = page.query_selector('#scope-map').bounding_box()
+        x, y = box['x'] + box['width'] / 2, box['y'] + box['height'] / 2
+        was = S()['state']['scope']['where']
+        # A bow tie: its fourth corner would cross the first side; Terra Draw's check refuses it, and that is said.
+        for px, py in ((x - 100, y - 60), (x + 100, y + 60), (x + 100, y - 60), (x - 100, y + 60)): tap(page, px, py)
+        refused = soon(page, "() => /crosses itself/.test(document.getElementById('scope-live').textContent)", 10)
+        said = page.inner_text('#scope-area-say') if page.is_visible('#scope-area-say') else ''
+        now = S()['state']['scope']['where']
+        page.keyboard.press('Escape'); done()
+        return refused and 'crosses itself' in said and now == was and was.get('mode') == 'area', {'said': said, 'live': page.inner_text('#scope-live'), 'where kept': now == was}
+    attempt('Scope: an area drawn that crosses itself is refused as it is drawn, said in words beside the map and in the live region, and the area in force is kept', area_refused)
 
     def regions_override():
         need('plain')
         edit()
-        page.check('#scope-where input[value="countries"]')
-        page.check('#scope-country-list input[value="FR"]')
+        page.check('#scope-where-countries')
+        page.fill('#scope-country-filter', 'France'); page.check('#scope-c-FR'); page.fill('#scope-country-filter', '')
         until(page, "() => window.__plato.scope.scope.where.mode === 'countries'", 10)
         done()
+        scope_now = S()['state']['scope']
         page.wait_for_function("() => !document.getElementById('regions-offer').hidden", timeout=T(60) * 1000)
         page.click('#regions-start', timeout=T(60) * 1000)
         wait_state(page, lambda s: len(((s.get('work') or {}).get('regions') or {})) == 6, T(60), 'regions')
@@ -4024,10 +4159,12 @@ def scope_checks(pw, url, tmp):
                         page.click(art(k) + ' li.candidate button[data-ract="match"]')
                         wait_state(page, lambda s: (((s.get('work') or {}).get('regions') or {}).get(k) or {}).get('outcome') == 'matched', T(10), 'settled')
         one, two = sent.get(1) or [], sent.get(2) or []
-        return (len(one) == 2 and all(q.get('countries') == ['FR'] and q.get('area_only') is True and 'types' not in q and 'start' not in q for q in one)
+        # The Scope has types, years and sources too (the control that a region is sent none of them because it is a region).
+        return (bool(scope_now['types']) and scope_now['when']['start'] == 1500 and scope_now['sources'] == ['gn'] and scope_now['where']['countries'] == ['FR']
+                and len(one) == 2 and all(q.get('countries') == ['FR'] and q.get('area_only') is True and 'types' not in q and 'start' not in q and 'namespaces' not in q for q in one)
                 and len(two) == 4 and all(q.get('contained_in') in (['gn:2653941'], ['gn:2644974']) and q.get('countries') == ['GB'] and 'types' not in q for q in two)), \
-            {'level 1': one, 'level 2': two}
-    attempt('Scope: the table\'s region columns win over Where: the widest regions (counties) are sent the Scope\'s countries (FR) and nothing else of it, and the parishes within their county\'s match (contained_in) and its countries, never FR', regions_override)
+            {'scope': scope_now, 'level 1': one, 'level 2': two}
+    attempt('Scope: the table\'s region columns win over Where: with a Scope of countries (FR), kinds of place, years and sources, the widest regions (counties) are sent the countries alone, and the parishes within their county\'s match (contained_in) and its countries, never FR', regions_override)
     try: browser.close()
     except Exception: pass
 

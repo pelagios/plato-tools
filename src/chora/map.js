@@ -34,9 +34,10 @@ const kindOf = (e) => (e?.tile ? 'a tile' : e?.sourceId ? 'a source' : 'the styl
 /**
  * The map in `container`. `state` is window.__chora: blocked, blockedOrigins and mapReadyCount are
  * kept up to date on it. `onPlaceClick(id)` is called when a place on the map is clicked, and
- * `onStyleError(why)` when a basemap's style (not a tile of it) cannot be loaded.
+ * `onStyleError(why)` when a basemap's style (not a tile of it) cannot be loaded. `polygonValidation`, if
+ * given, is Terra Draw's validation for the polygons drawn (Scope's area: src/scope-page.js); Chora gives none.
  */
-export function createMap(container, { state, onPlaceClick, onStyleError }) {
+export function createMap(container, { state, onPlaceClick, onStyleError, polygonValidation = null }) {
   let subjects = [];   // the permissions of the basemap shown, [category, subject] pairs
   state.blocked = 0; state.blockedOrigins = [];
   const guard = transformRequest(() => subjects, { onBlocked: (origin) => {
@@ -127,7 +128,7 @@ export function createMap(container, { state, onPlaceClick, onStyleError }) {
   function startDraw() {
     draw = new TerraDraw({
       adapter: new TerraDrawMapLibreGLAdapter({ map }),
-      modes: [new TerraDrawPointMode(), new TerraDrawLineStringMode({ snapping }), new TerraDrawPolygonMode({ snapping }),
+      modes: [new TerraDrawPointMode(), new TerraDrawLineStringMode({ snapping }), new TerraDrawPolygonMode({ snapping, ...(polygonValidation ? { validation: polygonValidation } : {}) }),
         new TerraDrawSelectMode({ flags: Object.fromEntries(['point', 'linestring', 'polygon'].map((m) => [m, { feature: { draggable: true, coordinates: m === 'point' ? undefined : { midpoints: true, draggable: true, deletable: true } } }])) })],
     });
     draw.start();

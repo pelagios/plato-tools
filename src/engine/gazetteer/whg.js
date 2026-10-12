@@ -69,7 +69,8 @@
 //    list as JSON text. A WHG-native place may have no centroid while its GeoNames or OSM siblings do.
 //    OPEN: whether whg:geometry_geojson gives full polygons for authority records, and the shape of
 //    an extend row for ids answered by WHG's upstream gateway rather than its own database.
-// A12 BUILT, NOT YET LIVE (place#323, built 10 October 2026, as WHG's session reported it). A query's
+// A12 LIVE on WHG's production since 10 October 2026 (place#323: gateway de9baa7, whg3 b0c751635, as WHG's
+//    session reported it on 12 October; not probed from here, as a query needs a token). A query's
 //    `area_only: true` keeps only candidates with at least one areal geometry, by the same test as
 //    `has_geom` and containment: a filter, not a ranking, so `limit` still asks for that many areas.
 //    Candidates come from the top 200 name matches only, and WHG's legacy index (which has no shape

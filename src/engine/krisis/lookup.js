@@ -537,7 +537,11 @@ export const upstreamLicence = (attribution, namespace, dataset) => licenceFrom(
 /** An answer to a filter the service could not apply, with nothing in it (WHG: scope.applied false): failed closed. */
 export const failedClosed = (l) => !l.unanswered && l.length === 0 && !!l.scope && l.scope.applied === false;
 // A language is not a filter (whg.js A13): it shapes how WHG reads the name, and leaves nothing out.
-const filters = (params) => !!params && Object.keys(params).some((k) => k !== 'lang');
+// Nor are a Scope's kinds of place, years and sources (scope.js): WHG answers `scope` for a spatial filter only,
+// so a first batch emptied by them alone could never be told from one it did not take, and is the likely
+// answer of a narrow Scope, said row by row (lookupPage.state), never a stop.
+const NOT_SUSPECT = new Set(['lang', 'types', 'start', 'end', 'temporal', 'undated', 'namespaces']);
+const filters = (params) => !!params && Object.keys(params).some((k) => !NOT_SUSPECT.has(k));
 const narrowed = (chunk, service) => chunk.queries.some((q) => filters(q.params) || (q.type && !isWhg(service.endpoint)));
 // A batch the service said it could not filter (failed closed) is recorded as that, not as suspect; nor
 // is one where the service said, of every query, that it applied the filter (scope.applied).
@@ -637,7 +641,8 @@ export async function runLookup({ lookup, work = null, subjects = null, places =
     if (i === 0 && suspect(chunk, answers, service) && !chunk.places.every((p) => confirmed.has(p.iri))) {
       for (const p of chunk.places) { Object.assign(record.queries[p.iri], { state: 'unanswered', suspect: true }); record.counts.unanswered++; }
       stopRest(1);
-      record.stopped = { kind: 'suspect', status: null, message: null };
+      // Sent under the Scope: the stop is worded for it, and its places offer the lookup again without it.
+      record.stopped = { kind: 'suspect', status: null, message: null, ...(chunk.places.some((p) => record.queries[p.iri].scoped?.length) ? { scoped: true } : {}) };
       return { work, record, plan, stopped: record.stopped };
     }
     let at = 0;
@@ -645,7 +650,7 @@ export async function runLookup({ lookup, work = null, subjects = null, places =
     try {
       for (const p of chunk.places) {
         const k = record.queries[p.iri].sent.length;
-        mergeAnswers(work, record, p, answers.slice(at, at + k), { now: stamp, maxDistanceKm: o.maxDistanceKm, scoped: (o.nearKm > 0 && Array.isArray(p.point)) || spatial(p.params), adds: !!typed });
+        mergeAnswers(work, record, p, answers.slice(at, at + k), { now: stamp, maxDistanceKm: o.maxDistanceKm, scoped: (o.nearKm > 0 && Array.isArray(p.point)) || spatial(p.params) || (record.queries[p.iri].scoped || []).includes('where'), adds: !!typed });
         at += k;
       }
     } catch (e) {

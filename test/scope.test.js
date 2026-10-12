@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { IDBFactory } from 'fake-indexeddb';
-import { normaliseScope, emptyScope, isEmptyScope, scopeFields, typeIds, containerId, areaPolygon, excludesUndated, yearsProblem, scopeType, UNDATED_TAKEN, WHERE_KEYS } from '../src/engine/krisis/scope.js';
+import { normaliseScope, emptyScope, isEmptyScope, scopeFields, typeIds, containerId, areaPolygon, areaCheck, ringArea, selfIntersects, wrapLon, excludesUndated, yearsProblem, scopeType, UNDATED_TAKEN, WHERE_KEYS } from '../src/engine/krisis/scope.js';
 import { TYPE_SHORTLIST, BUNDLED_SOURCES, COUNTRY_CODES } from '../src/engine/krisis/scope-data.js';
 import { planQueries, runLookup, newWork, placeQuery } from '../src/engine/krisis/lookup.js';
 import { LOOKUP_WORDS, SCOPE_WORDS, lookupPage } from '../src/engine/words.js';
@@ -35,8 +35,9 @@ test('a Scope is made safe as it is read: codes in capitals and checked, ids bar
   // What is not a Scope gives the empty one; an area that is no polygon is dropped, one left open is closed.
   assert.deepEqual(normaliseScope('nonsense'), emptyScope());
   assert.equal(normaliseScope({ where: { mode: 'area', area: { type: 'Point', coordinates: [1, 2] } } }).where.mode, 'anywhere');
-  const open = areaPolygon({ type: 'Polygon', coordinates: [[[-3, 53], [-2, 53], [-2, 54]]] });
-  assert.equal(open, null);   // three corners, not closed: three distinct points need a fourth to close
+  // Three corners left open are a triangle, closed; two are not an area.
+  assert.deepEqual(areaPolygon({ type: 'Polygon', coordinates: [[[-3, 53], [-2, 53], [-2, 54]]] }).coordinates[0], [[-3, 53], [-2, 53], [-2, 54], [-3, 53]]);
+  assert.equal(areaPolygon({ type: 'Polygon', coordinates: [[[-3, 53], [-2, 53]]] }), null);
   assert.deepEqual(areaPolygon({ type: 'Polygon', coordinates: [[[-3, 53], [-2, 53], [-2, 54], [-3, 54]]] }), SQUARE);
   assert.equal(isEmptyScope(emptyScope()), true);
   assert.equal(isEmptyScope(FULL), false);
@@ -50,18 +51,31 @@ test('each Where reaches the request as its own field: countries, contained_in (
   assert.deepEqual(where({ mode: 'anywhere' }), {});
 });
 
-test('types are sent with every narrower one, years with temporal, sources as namespaces; undated only once WHG takes it', () => {
+test('types are sent with every narrower one, years with temporal, sources as namespaces; undated only when ticked and beside a year', () => {
   const { params, parts } = scopeFields(FULL);
   assert.deepEqual(params.types, ['aat:300008347', 'aat:300008375', 'aat:300008389']);
   assert.deepEqual(typeIds(FULL), params.types);
   assert.deepEqual([params.start, params.end, params.temporal], [1500, 1600, true]);
   assert.deepEqual(params.namespaces, ['gn', 'tgn']);
   assert.deepEqual(parts, ['where', 'what', 'when', 'sources']);
-  // The one switch: off, a ticked "undated" sends nothing, and places with no dates are said to be left out.
-  assert.equal(UNDATED_TAKEN, false);
-  assert.equal('undated' in params, false);
-  assert.equal(excludesUndated(FULL), true);
+  // The one switch is on (WHG takes it, 12 October 2026): ticked, exactly undated: true beside the years, and
+  // nothing marked as left out; unticked (the control), no undated, and places with no dates marked as left out.
+  assert.equal(UNDATED_TAKEN, true);
+  assert.equal(params.undated, true);
+  assert.equal(excludesUndated(FULL), false);
+  const unticked = { ...FULL, when: { start: 1500, end: 1600, undated: false } };
+  assert.equal('undated' in scopeFields(unticked).params, false);
+  assert.equal(scopeFields(unticked).params.temporal, true);
+  assert.equal(excludesUndated(unticked), true);
   assert.equal(excludesUndated({ when: { start: null, end: null } }), false);
+  // Ticked with no year: nothing of When is sent, undated neither.
+  assert.deepEqual(scopeFields({ when: { start: null, end: null, undated: true } }).params, {});
+  // The switch forced off (were WHG ever not to take it): nothing sent, and left out said.
+  assert.equal('undated' in scopeFields(FULL, { undatedTaken: false }).params, false);
+  assert.equal(scopeFields(FULL, { undatedTaken: true }).params.undated, true);
+  assert.deepEqual(Object.keys(scopeFields({ when: { start: 1500, end: null, undated: true } }, { undatedTaken: true }).params), ['start', 'temporal', 'undated']);
+  assert.equal('undated' in scopeFields({ when: { start: null, end: null, undated: true } }, { undatedTaken: true }).params, false);
+  assert.equal('undated' in scopeFields({ when: { start: 1500, end: 1600, undated: false } }, { undatedTaken: true }).params, false);
   // A start after the end is no years at all, and said.
   const backwards = { when: { start: 1700, end: 1600 } };
   assert.equal(yearsProblem(backwards), 'start-after-end');
@@ -98,7 +112,7 @@ test('planned queries: region columns override Where row by row, the widest regi
   assert.equal(preview.scope.whereYielded, 1);
   assert.deepEqual(preview.first[1], { ...lone, query: 'Lone Farm', type: 'Place', limit: 10 });
   const said = LOOKUP_WORDS.preview(preview).join(' ');
-  assert.match(said, /The Scope is sent as countries, types, start, end, temporal, namespaces/);
+  assert.match(said, /The Scope is sent as countries, types, start, end, temporal, undated, namespaces/);
   assert.match(said, /For 1 place, the Scope's Where gives way/);
   // A region review's widest level: Where alone, beside area_only.
   const regions = planQueries([{ iri: 'r:1', label: 'Cheshire', constraint: { from: null, kinds: [], params: {}, relaxed: null } }], { scope: FULL, areaOnly: true });
@@ -135,10 +149,72 @@ test('a scoped place answered with nothing is said so, with the likely cause; un
   assert.equal(lookupPage.state('WHG', p), 'WHG: No candidates (label only).');
 });
 
-test('the rail chips say each part of the Scope', () => {
-  const chips = SCOPE_WORDS.chips(normaliseScope(FULL), (c) => ({ GB: 'United Kingdom', IE: 'Ireland' })[c]);
-  assert.deepEqual(chips.map((c) => [c.key, c.text]), [['where', 'United Kingdom, Ireland'], ['what', 'Settlements (and 2 narrower types)'], ['when', '1500 to 1600'], ['sources', 'gn, tgn']]);
+test("the tracker's line and the chips say each part of the Scope, the sources by name where there is room", () => {
+  const names = { country: (c) => ({ GB: 'United Kingdom', IE: 'Ireland' })[c], source: (s) => ({ gn: 'GeoNames (gn)', tgn: 'Getty TGN (tgn)' })[s] };
+  const chips = SCOPE_WORDS.chips(normaliseScope(FULL), names);
+  assert.deepEqual(chips.map((c) => [c.key, c.text]), [['where', 'United Kingdom, Ireland'], ['what', 'Settlements (and 2 narrower types)'], ['when', '1500 to 1600'], ['sources', 'GeoNames (gn), Getty TGN (tgn)']]);
   assert.deepEqual(SCOPE_WORDS.chips(emptyScope()).map((c) => c.text), ['anywhere', 'every kind of place', 'any time', 'all sources']);
+  assert.equal(SCOPE_WORDS.line(normaliseScope(FULL)), 'Scope: GB, IE · Settlements · 1500 to 1600 · gn, tgn');
+  assert.equal(SCOPE_WORDS.line(emptyScope()), 'Scope: none');
+  assert.match(SCOPE_WORDS.lineTip(normaliseScope(FULL), names), /Sources: GeoNames \(gn\), Getty TGN \(tgn\)\./);
+});
+
+test('a type expanded from a cached answer says so in its label, with its count: nothing kept acts unseen', () => {
+  const t = scopeType({ id: 'aat:1', label: 'Villages' }, ['aat:1', 'aat:2'], 'cache', '2026-10-05');
+  assert.deepEqual([t.from, t.at], ['cache', '2026-10-05']);
+  assert.equal(SCOPE_WORDS.typeLabel(t), 'Villages (and 1 narrower type, as WHG gave them on 2026-10-05, kept in this browser)');
+  assert.equal(SCOPE_WORDS.typeLabel(scopeType({ id: 'aat:1', label: 'Villages' }, ['aat:2'], 'whg', '2026-10-12')), 'Villages (and 1 narrower type)');
+  assert.equal(normaliseScope({ types: [{ id: 'aat:1', from: 'forged', at: 'tomorrow' }] }).types[0].from, 'bundled');
+});
+
+test('an area drawn: longitudes wrapped into [-180, 180], the ring made counter-clockwise, and one that crosses itself refused with its reason', () => {
+  assert.equal(wrapLon(190), -170); assert.equal(wrapLon(-190), 170); assert.equal(wrapLon(45), 45);
+  // Drawn clockwise, on a map scrolled once round the world (357 for -3): wrapped, and turned to run counter-clockwise.
+  const cw = { type: 'Polygon', coordinates: [[[357, 53], [357, 54], [358, 54], [358, 53], [357, 53]]] };
+  const { area } = areaCheck(cw);
+  assert.deepEqual(area.coordinates[0], [[-3, 53], [-2, 53], [-2, 54], [-3, 54], [-3, 53]]);
+  assert.ok(ringArea(area.coordinates[0]) > 0);
+  assert.ok(ringArea(cw.coordinates[0]) < 0);   // the control: as drawn, it ran clockwise
+  // A bow tie crosses itself: refused, in words, never sent.
+  const bow = { type: 'Polygon', coordinates: [[[0, 0], [2, 2], [2, 0], [0, 2], [0, 0]]] };
+  assert.equal(selfIntersects(bow.coordinates[0]), true);
+  assert.deepEqual(areaCheck(bow), { problem: 'self-intersects' });
+  assert.equal(selfIntersects(SQUARE.coordinates[0]), false);   // the control
+  assert.match(SCOPE_WORDS.where.areaProblem['self-intersects'], /crosses itself/);
+  assert.deepEqual(areaCheck({ type: 'Polygon', coordinates: [[[0, 0], [1, 1], [0, 0]]] }), { problem: 'too-few' });
+  assert.deepEqual(areaCheck({ type: 'Polygon', coordinates: [[[0, 0], [1, 95], [2, 0], [0, 0]]] }), { problem: 'out-of-range' });
+  assert.deepEqual(areaCheck({ type: 'Point', coordinates: [0, 0] }), { problem: 'not-polygon' });
+  for (const k of ['self-intersects', 'too-few', 'too-many', 'out-of-range', 'not-polygon']) assert.ok(SCOPE_WORDS.where.areaProblem[k], k);
+});
+
+test("a first batch emptied by the Scope's types, years or sources alone is not suspect; under its Where it is, worded for Scope", async () => {
+  const empty = { batchSize: 25, reconcile: async (qs) => Object.assign(qs.map((q) => Object.assign([], { key: q.key })), { attribution: null }) };
+  const subjects = { title: 'T', files: [] };
+  const places = [{ iri: 'p:1', label: 'One' }, { iri: 'p:2', label: 'Two' }];
+  const typesOnly = await runLookup({ lookup: empty, subjects, places, options: { places: 'all', scope: { types: FULL.types } } });
+  assert.equal(typesOnly.stopped, null);
+  assert.deepEqual(['p:1', 'p:2'].map((k) => typesOnly.record.queries[k].state), ['answered', 'answered']);
+  assert.equal(lookupPage.state('WHG', typesOnly.record.queries['p:1']), `WHG: ${SCOPE_WORDS.emptyRow()}`);
+  // The control: the same empty answers under the Scope's Where (countries, with no scope.applied said) stop, in Scope's words.
+  const where = await runLookup({ lookup: empty, subjects, places, options: { places: 'all', scope: FULL } });
+  assert.deepEqual([where.stopped.kind, where.stopped.scoped], ['suspect', true]);
+  assert.equal(LOOKUP_WORDS.stopped(where.stopped), SCOPE_WORDS.suspect);
+  assert.equal(lookupPage.state('WHG', where.record.queries['p:1']), `WHG: ${SCOPE_WORDS.suspectRow}`);
+});
+
+test("WHG's scope.applied is read for the Scope's own Where: false with nothing is fail-closed, said as such", async () => {
+  const closed = { batchSize: 25, reconcile: async (qs) => Object.assign(qs.map((q) => Object.assign([], { key: q.key, scope: { applied: false } })), { attribution: null }) };
+  const subjects = { title: 'T', files: [] };
+  const r = await runLookup({ lookup: closed, subjects, places: [{ iri: 'p:1', label: 'One' }], options: { places: 'all', scope: FULL } });
+  const q = r.record.queries['p:1'];
+  assert.deepEqual([q.state, q.failedClosed], ['unanswered', true]);
+  assert.equal(lookupPage.state('WHG', q), `WHG: ${SCOPE_WORDS.notApplied}`);
+  // A candidate answered with applied false (the filter not taken): counted as not applied, for the Scope's Where too.
+  const loose = { batchSize: 25, reconcile: async (qs) => Object.assign(qs.map((x) => Object.assign([{ id: 'place:gn:1', iri: 'https://w3id.org/whg/id/place:gn:1', name: 'One', altNames: [] }], { key: x.key, scope: { applied: false } })), { attribution: null }) };
+  const l = await runLookup({ lookup: loose, subjects, places: [{ iri: 'p:1', label: 'One' }], options: { places: 'all', scope: FULL } });
+  assert.equal(l.record.queries['p:1'].scopeNotApplied, true);
+  const noWhere = await runLookup({ lookup: loose, subjects, places: [{ iri: 'p:1', label: 'One' }], options: { places: 'all', scope: { types: FULL.types } } });
+  assert.equal(noWhere.record.queries['p:1'].scopeNotApplied, undefined);   // the control: no Where sent, nothing to apply
 });
 
 // ---- the workflow's record ----------------------------------------------------------------------------

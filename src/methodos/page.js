@@ -252,7 +252,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     if (was) await store.dropPending(was);
     if (wf || changed) { await handOver(wf || changed.record); await outs.drop(keptBy(wf || changed.record)); await store.remove((wf || changed.record).id); }
     pending = { key: recipe.key, answers: answersFor(choice, yesNo, texts), id: `${recipe.key}-${Date.now().toString(36)}`, steps: p.steps.length };
-    wf = null; changed = null; note = null; fromChora = null; arrived = null; active = null;
+    wf = null; wfScope = null; changed = null; note = null; fromChora = null; arrived = null; active = null;
     // Kept at once, before any file (Stephen, 4 October 2026): shown as not started, and discarded in one click.
     await store.savePending(pending);
     close(false);
@@ -296,6 +296,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   const downloadB = q(tracker, '#methodos-download');
   const useB = q(tracker, '#methodos-use'), reopenB = q(tracker, '#methodos-reopen'), restartB = q(tracker, '#methodos-restart');
   let wf = null;            // the runner's state, as a record ({ id, name, created, saved, ...state })
+  let wfScope = null;       // the workflow's Scope (Issue #33), kept beside the runner's state and written with it (keep())
   let changed = null;       // a record the version rule would not carry on: { record, words } (reconcile's 'changed' or 'refuse')
   let note = null;          // what the tracker says beside the steps: { words, warn }
   let active = null;        // the run under way that is the current step's: { id, op }
@@ -323,7 +324,11 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   }
   async function keep() {
     if (!wf || !atBoundary(wf)) return;
-    const { record, kept } = await store.save(wf, { name: wf.name || (chosenRefs?.[0]?.name) });
+    // The Scope is the page's own copy (wfScope), never a transition's: a step's run that began before the Scope
+    // was changed, and ends after, writes its state without losing the change.
+    const state = { ...wf };
+    delete state.scope;
+    const { record, kept } = await store.save(wfScope ? { ...state, scope: wfScope } : state, { name: wf.name || (chosenRefs?.[0]?.name) });
     wf = record;
     tracker.dataset.kept = kept;
     // The handle is kept only for the file the workflow began with (a later file chosen is a step's, not this).
@@ -411,7 +416,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       if (pending && !wf) {
         const recipe = RECIPES[pending.key];
         // Its Scope, if one was given before the file (src/engine/krisis/scope.js), goes into the record.
-        wf = { ...runner.start(recipe, pending.answers, { [fileKey(recipe)]: chosenRefs }), id: pending.id, ...(pending.scope ? { scope: pending.scope } : {}) };
+        wf = { ...runner.start(recipe, pending.answers, { [fileKey(recipe)]: chosenRefs }), id: pending.id };
+        wfScope = pending.scope ?? null;
         pending = null;
         say(`Begun with ${names(chosenRefs)}.`);
         await keep(); await store.dropPending(wf.id); await keepOwn(files); render(false); return;
@@ -600,14 +606,14 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     const id = wf?.id || changed?.record.id, was = pending?.id;
     if (wf || changed) await handOver(wf || changed.record);
     await outs.drop(keptBy(wf || changed?.record));
-    wf = null; pending = null; changed = null; active = null; note = null; handle = handleFile = keptHandle = null; fromChora = null; arrived = null; asIs = null; ownMissed = [];
+    wf = null; wfScope = null; pending = null; changed = null; active = null; note = null; handle = handleFile = keptHandle = null; fromChora = null; arrived = null; asIs = null; ownMissed = [];
     if (id) await store.remove(id);
     if (was) await store.dropPending(was);
     render(false); backTo();
   }));
   restartB.addEventListener('click', () => chain(async () => {
     if (!changed || changed.action !== 'changed') return;
-    wf = restartRemaining(changed.record, recipeOf(changed.record)); changed = null;
+    wf = restartRemaining(changed.record, recipeOf(changed.record)); wfScope = wf.scope ?? null; changed = null;
     say(`Carried on under the recipe as it is now. Choose ${names(wf.files[fileKey(recipeOf(wf))] || [])} again in step 1.`);
     await keep(); render(false);
   }));
@@ -804,7 +810,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     if (!r) return;
     const v = reconcile(r, recipeOf(r));
     if (v.action === 'continue') {
-      wf = v.state;
+      wf = v.state; wfScope = wf.scope ?? null;
       if (wf.status !== r.status) await keep();   // a step the page was closed in is failed, and kept so
       keptHandle = await store.handleFor?.(wf.id) || null;
       for (const ref of keptBy(wf)) await outs.get(ref);   // the user's file and the steps' kept in this browser, for the tab
@@ -835,16 +841,23 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   // Scope (Issue #33): the workflow's, kept in its record (or with it while it is pending), saved when it is
   // changed, and gone with the workflow. scope() is the record's as kept, to be read through scope.js's
   // normaliseScope, or null; setScope(s) keeps a new one, refused (false) when no workflow can take it.
-  const scopeNow = () => (wf ? wf.scope : pending ? pending.scope : changed ? changed.record.scope : null) ?? null;
+  // The new Scope is the workflow's at once (what is drawn next reads it); only the writing waits its turn.
+  // A record the version rule would not carry on (`changed`) has its Scope too, edited and kept with it.
+  const scopeNow = () => (wf ? wfScope : pending ? pending.scope : changed ? changed.record.scope : null) ?? null;
   function setScope(s) {
-    if (!wf && !pending) return false;
+    if (!wf && !pending && !changed) return false;
+    if (wf) wfScope = s;
+    else if (pending) pending = { ...pending, scope: s };
+    else changed = { ...changed, record: { ...changed.record, scope: s } };
+    const was = { wf: !!wf, pending, record: changed?.record };
     chain(async () => {
-      if (wf) { wf = { ...wf, scope: s }; await keep(); }
-      else if (pending) { pending = { ...pending, scope: s }; await store.savePending(pending); }
+      if (was.wf) await keep();
+      else if (was.pending) await store.savePending(was.pending);
+      else if (was.record) await store.save(was.record);
       render(false);
     });
     return true;
   }
   return { open, chosen, began, ended, dropped, keepChanged, detected, baseChanged, id: () => wf?.id || null, following: () => !!(wf || pending || changed), takenUp: () => takenUp,
-    scope: scopeNow, setScope, scoped: () => !!(wf || pending) };
+    scope: scopeNow, setScope, scoped: () => !!(wf || pending || changed) };
 }
