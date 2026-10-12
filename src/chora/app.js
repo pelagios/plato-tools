@@ -701,7 +701,7 @@ function wayBack() {
     a.textContent = 'Back to the workflow'; a.href = handback.backTo(workflow, location.href);
     note.textContent = pastStep ? ' The workflow has gone past this step since: nothing is handed back to it from here.'
       : handedBack ? ` Hands back ${handedBack.name} (${fmtBytes(handedBack.size)}), the file you saved, to the workflow.`
-      : refused ? ` ${refused} could not be handed back from here: choose it by hand on the main page, in step 1, when it asks.`
+      : refused ? ` ${refused} could not be handed back from here: choose it by hand on the main page, in “Choose your data”, when it asks.`
       : ' Nothing is handed back until you save the dataset here: going back now leaves the workflow at this step, with its dataset as it was.';
   } else {
     a.textContent = 'Back to PLATO tools'; a.href = new URL('./', location.href).href;

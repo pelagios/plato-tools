@@ -2931,7 +2931,7 @@ def chora_seams_checks(pw, url, tmp):
         until(p, "() => /Back from Chora/.test(document.getElementById('methodos-message').textContent)", 15)
         t = p.evaluate(JOIN_STATE)
         handback = p.evaluate('() => window.__methodos_e2e.handbackKept()')
-        return (ok and t['steps'].get('place') == 'current' and 'applied.json is chosen in step 1 again' in t['message']
+        return (ok and t['steps'].get('place') == 'current' and 'applied.json is chosen again in “Choose your data”' in t['message']
                 and handback is False and p.url == base + '#workflow=' + wid), {'tracker': {k: t[k] for k in ('steps', 'message')}, 'hand-back kept': handback, 'url': p.url, 'chosen': p.evaluate(SEAM_CHOSEN)}
     attempt('Chora\'s seams, in a workflow: back without saving, the workflow is at the same step with its dataset chosen again, and nothing was handed back', workflow_back_unsaved)
 

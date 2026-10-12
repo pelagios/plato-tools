@@ -490,7 +490,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
       const went = currentInput(wf, s), refs = await refsOf(files, 'dataset');
       if (went && sameRefs(went, refs)) {
         asIs = s.id;
-        throw new Error(`${names(went)} is the dataset that went to Chora, as it was: nothing drawn there is in it. Take the dataset back from Chora, or choose the file you saved there in step 1; or, if there was nothing to draw, say so (“Nothing to draw: go on with this dataset”).`);
+        throw new Error(`${names(went)} is the dataset that went to Chora, as it was: nothing drawn there is in it. Take the dataset back from Chora, or choose the file you saved there in “Choose your data”; or, if there was nothing to draw, say so (“Nothing to draw: go on with this dataset”).`);
       }
       return { dataset: await refsHeld(files, 'dataset', { own: true }) };
     }
@@ -798,8 +798,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
       // at Chora's step, the dataset that went to the map, so that it is shown without choosing it.
       const main = currentInput(wf, s);
       const ready = main && main.every((x) => !!heldFor(x)) ? main.map(heldFor) : null;
-      const chosenAgain = ready ? ` ${names(main)} is chosen in step 1 again.` : '';
-      if (s?.op === 'place') say([v.words, `${arrived === wf.id ? 'Back from Chora' : 'At Chora\'s step'}:${chosenAgain} If you saved the dataset there, take it back ("Take the dataset back from Chora"), or choose it in step 1 by hand and say the step is done.`].filter(Boolean).join(' '));
+      const chosenAgain = ready ? ` ${names(main)} is chosen again in “Choose your data”.` : '';
+      if (s?.op === 'place') say([v.words, `${arrived === wf.id ? 'Back from Chora' : 'At Chora\'s step'}:${chosenAgain} If you saved the dataset there, take it back ("Take the dataset back from Chora"), or choose it by hand in “Choose your data” and say the step is done.`].filter(Boolean).join(' '));
       else if (ready) say([v.words, `Taken up where it was left, with ${names(main)}${fromWhere(wf, s, main)}, kept in this browser: it is chosen in step 1 for you.`].filter(Boolean).join(' '));
       else say([v.words, main ? `Taken up where it was left. Choose ${names(main)} again in step 1 to carry on: the file is checked to be the one the workflow recorded.` : 'Taken up where it was left.'].filter(Boolean).join(' '));
       if (ready) {

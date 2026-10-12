@@ -1470,7 +1470,7 @@ same tab, and its seams are mended). `test/methodos-seams.test.js` and `chora_se
   cache, or started afresh), the dataset is chosen again without the user choosing it. In a workflow,
   the tracker re-chooses the step's file (`currentInput()`: a step's main input, the table whose columns
   are matched, or the dataset that went to Chora), the user's own or a step's, from what it keeps; at
-  the step `place` it says so ("Back from Chora: … is chosen in step 1 again"), and "Take the dataset
+  the step `place` it says so ("Back from Chora: … is chosen again in “Choose your data”"), and "Take the dataset
   back from Chora" is offered at that step however the page came back (it was offered only on arriving
   by `#workflow=`). "This step is done" with that very dataset still chosen does not complete the step
   silently with its input as its output: it says that nothing drawn in Chora is in it, and offers two
