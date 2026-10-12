@@ -12,7 +12,9 @@ import { esc, badge, nameItem, relationItem, timeline, locations, ROLE_WORDS } f
 import * as basemaps from './basemaps.js';
 import * as contributors from './contributor.js';
 import { fingerprint, loadDrafts, saveDrafts, draftsWritten, forgetAllDrafts } from './drafts.js';
-import { take as takeHandoff, clear as clearHandoff, keepForReload, takeResume, returnKept, stamp as stampReturn, dropStaleReturn, forgetReturn, STAMP_EVERY } from './handoff.js';
+import { take as takeHandoff, clear as clearHandoff, keepForReload, takeResume } from './handoff.js';
+// The file the user chose on the main page, kept there for as long as they want it: chosen again on the way back.
+import { keptFileStore, onChange as keptChanged } from '../lib/kept-file.js';
 import * as handback from './handback.js';
 // The workflow Chora was opened for, read where the main page keeps it (Methodos's store, and the files
 // it keeps), for the few words of it shown here and its current dataset (src/methodos/seams.js).
@@ -689,12 +691,12 @@ if (wf) {
 }
 // The way back, offered in the masthead from the start (Stephen, 12 October 2026, Issue #33 point 5):
 // "Back to the workflow" (./#workflow=<id>) when opened for one, else "Back to PLATO tools", where the
-// file chosen before is chosen again (handoff.js, the round trip). Before a save it says that nothing is
+// file chosen before is chosen again (the kept file, src/lib/kept-file.js). Before a save it says that nothing is
 // handed back; after one, a click hands back the file saved, as the save's own link does.
 let handedBack = null;   // the reference to the file handed back at the last save in this load
 let refused = null;      // the name of the file saved whose hand-back this browser would not keep, or could not make
 let pastStep = false;    // the workflow has gone past this step since (a page shown again from the browser's memory)
-let returning = null;    // outside a workflow: the names of the files the main page chooses again, if kept
+let returning = null;    // outside a workflow: the names of the files the main page chooses again (its kept file), if kept
 function wayBack() {
   const a = $('way-back'), note = $('way-back-note');
   if (workflow) {
@@ -734,26 +736,25 @@ $('way-back').addEventListener('click', async (e) => {
   location.assign($('way-back').href);
 });
 wayBack();
-/** Outside a workflow, say which files the main page chooses again (once the hand-over is taken, below). */
-const sayReturning = () => { if (!workflow) returnKept().then((names) => { returning = names; wayBack(); }); };
-// Shown again from the browser's memory: the workflow may have gone on meanwhile, and the round trip
+/** Outside a workflow, say which files the main page chooses again (at the start, below; and again when the kept file changes, as when it is forgotten in the Permissions panel). */
+const sayReturning = () => {
+  if (workflow || !permissions.keepWorkingData()) return;
+  keptFileStore().about().then((k) => { returning = k ? k.files.map((f) => f.name) : null; wayBack(); }).catch(() => {});
+};
+// Shown again from the browser's memory: the workflow may have gone on meanwhile, and the kept file
 // is said again as it stands.
+keptChanged(() => sayReturning());
 window.addEventListener('pageshow', (e) => {
   if (!e.persisted) return;
   if (workflow && handedBack) atChorasStep().then((at) => { pastStep = !at; wayBack(); });
   sayReturning();
 });
-// The round trip lives while this page does (handoff.js): it says so every minute, and when it is
-// hidden, shown or left, with a small write that does not rewrite the files.
-setInterval(() => stampReturn(), STAMP_EVERY);
-document.addEventListener('visibilitychange', () => stampReturn());
-window.addEventListener('pagehide', () => stampReturn());
-// "Keep my working data" turned off here: what the main page keeps for the way back goes at once, as the
-// panel says: the round trip, Methodos's kept files (the user's own copy among them, in
-// methodos-outputs/), and the workflow's record moves to the tab (sessionStorage), as the main page
-// moves it. Also at the start, when it is off (below).
+// "Keep my working data" turned off here: what the main page keeps goes at once, as the panel says:
+// the file the user chose there (src/lib/kept-file.js), Methodos's kept files (the user's own copy
+// among them, in methodos-outputs/), and the workflow's record moves to the tab (sessionStorage), as
+// the main page moves it. Also at the start, when it is off (below).
 async function forgetMainPagesData() {
-  await forgetReturn();
+  await keptFileStore().forget();
   try { await (await navigator.storage.getDirectory()).removeEntry('methodos-outputs', { recursive: true }); } catch { /* none kept */ }
   returning = null; wayBack();
 }
@@ -1353,11 +1354,10 @@ startWorker().then(async () => {
     state.workingCleared = true;
   }
   inTurn(() => readmitKept());
-  handback.dropStale(); dropStaleReturn();
-  // Files chosen on the main page, opened here at once (Stephen, 12 October 2026: no offer to click).
-  // A round trip (handoff.js) stays, stamped as taken, where working data is kept.
-  const handed = await takeHandoff({ keep: permissions.keepWorkingData() });
+  handback.dropStale();
   sayReturning();
+  // Files chosen on the main page, opened here at once (Stephen, 12 October 2026: no offer to click).
+  const handed = await takeHandoff();
   if (handed && !files.length) {
     state.handoff = handed.map((f) => f.name);
     await open(handed);

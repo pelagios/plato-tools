@@ -82,6 +82,8 @@
   <section id="files" aria-labelledby="files-h">
     <h2 id="files-h" tabindex="-1"><span class="step">1</span> Choose your data</h2>
     <p id="for-tool" class="for-tool" hidden></p>
+    <!-- The file kept from last time (src/lib/kept-file.js), offered on a new visit or a reload; filled by src/app.js (keptOffer). -->
+    <p id="kept-file" class="kept-file" role="status" hidden><span class="kept-what"></span> <button type="button" id="kept-use" class="primary">Use it</button> <button type="button" id="kept-forget">Forget it</button></p>
     <label class="drop compact-drop" id="drop">
       <input type="file" id="picker" multiple>
       <span>Drop a file here, or <u>choose one</u>.</span>

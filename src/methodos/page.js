@@ -100,6 +100,7 @@ function stepList(list, steps, at, done, notes = []) {
  *   openWork(file)   open a Krisis work file, as "Resume a review" does;  pickWork()  choose one;
  *   ownTarget()      the format of the files chosen, as a conversion's target key, or null;
  *   base()           the base address in Options;  setBase(v)  write one there (the one store of it);
+ *   forgetKept()     let the file kept from the main page go (src/lib/kept-file.js), with "Clear them".
  *   parked()         the result of an earlier step's run, put away as the workflow went on, as { step, words }, or null;
  *   reopenResult()   show that result again.
  * `workflow` is the id the page's address named (#workflow=<id>, Chora's way back), or null: that
@@ -541,7 +542,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     }).catch(() => { keptEl.hidden = true; });
   }
   clearB.addEventListener('click', () => chain(async () => {
-    await outs.clear(); showKept();
+    await outs.clear(); await page.forgetKept?.(); showKept();   // the file kept from the main page (src/lib/kept-file.js) goes too
     say('Your file and the files the steps made are cleared from this browser: a step that takes one now asks for it to be chosen.');
     render(false);
   }));
@@ -777,7 +778,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   // A workflow kept from before is taken up by the version rule (record.js, reconcile()), whose words the tracker shows.
   // Back from Chora (#workflow=<id>), the workflow it names is the one taken up; otherwise the newest,
   // begun or not.
-  Promise.all([arrived ? store.load(arrived).then((r) => [r]) : store.list(), arrived ? [] : store.pendings()]).then(([[r], [pd]]) => chain(async () => {
+  const takenUp = Promise.all([arrived ? store.load(arrived).then((r) => [r]) : store.list(), arrived ? [] : store.pendings()]).then(([[r], [pd]]) => chain(async () => {
     if (wf || pending) return;
     if (pd && (!r || pd.saved > r.saved)) {
       if (!RECIPES[pd.key]) { await store.dropPending(pd.id); return; }
@@ -815,6 +816,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   // The files chosen are recognised (their format known): what the step at hand offers may change with it.
   const detected = () => chain(async () => { if (wf) render(false); });
   // following(): a workflow is followed, begun or about to begin with the files chosen (pending): what is
-  // chosen is the workflow's, so the main page keeps no round trip of it (src/chora/handoff.js).
-  return { open, chosen, began, ended, dropped, keepChanged, detected, baseChanged, id: () => wf?.id || null, following: () => !!(wf || pending || changed) };
+  // chosen is the workflow's, so the main page does not choose its kept file over it on a return (src/app.js, keptAtStart).
+  // takenUp(): settled once a workflow kept from before is taken up (and its file chosen again), or found to be none.
+  return { open, chosen, began, ended, dropped, keepChanged, detected, baseChanged, id: () => wf?.id || null, following: () => !!(wf || pending || changed), takenUp: () => takenUp };
 }

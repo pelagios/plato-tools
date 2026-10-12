@@ -4,6 +4,8 @@
 // functions (src/lib/permissions.js) and has no state of its own: every change goes through them, and
 // the panel is drawn again from what they say, here and in any other tab (the storage event).
 import { PROMISE, PANEL, CATEGORY_WORDS } from './permission-words.js';
+// The file kept from the main page (kept-file.js): listed among the working data, with a way to forget it.
+import { keptFileStore, keptLine } from './kept-file.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const date = (at) => { try { const d = new Date(at); return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }); } catch { return ''; } };
@@ -82,6 +84,7 @@ function render(api) {
       <h3 id="perm-work-h">${esc(PANEL.workHeading)}</h3>
       <label><input type="checkbox" id="perm-keep-work"${api.keepWorkingData() ? ' checked' : ''} aria-describedby="perm-keep-note"> ${esc(PANEL.keepWork)}</label>
       <p class="muted" id="perm-keep-note">${esc(PANEL.keepWorkNote)}</p>
+      <p id="perm-kept-file" aria-live="polite"></p>
       <label><input type="checkbox" id="perm-persist"${persist ? ' checked' : ''} aria-describedby="perm-persist-note"> ${esc(PANEL.persist)}</label>
       <p class="muted" id="perm-persist-note">${esc(PANEL.persistNote)}</p>
       <p role="status" id="perm-persist-result">${persist ? esc(persist.unsupported ? PANEL.persistResult.unsupported : persist.granted ? PANEL.persistResult.granted : PANEL.persistResult.refused) : ''}</p>
@@ -115,10 +118,22 @@ function create(api) {
     else if (b.hasAttribute('data-forget-all')) { api.forgetAll(); const s = dialog.querySelector('#perm-forgot'); if (s) s.textContent = PANEL.forgotAll; }
     else if (b.hasAttribute('data-token-forget')) api.token.forget();
     else if (b.dataset.forget) api.forgetRemembered(b.dataset.forget);
+    else if (b.hasAttribute('data-kept-forget')) keptFileStore().forget().then(() => { showKept(); dialog.querySelector('#perm-keep-work')?.focus(); });
   });
   // The focus goes back to what opened the panel, however it was closed (Esc, Close).
   dialog.addEventListener('close', () => { confirming = false; if (opener?.isConnected) opener.focus(); opener = null; });
   document.body.appendChild(dialog);
+}
+
+/** The file kept from the main page, read from its store (asynchronously, once the panel is drawn): its name, size and date, and "Forget it". */
+function showKept() {
+  const el = dialog?.querySelector('#perm-kept-file');
+  if (!el) return;
+  keptFileStore().about().then((a) => {
+    if (!el.isConnected) return;
+    el.textContent = a ? `${PANEL.keptFile(keptLine(a))} ` : PANEL.keptNone;
+    if (a) { const b = document.createElement('button'); b.type = 'button'; b.dataset.keptForget = ''; b.textContent = PANEL.keptForget; el.append(b); }
+  }).catch(() => { el.textContent = PANEL.keptNone; });
 }
 
 /** Draw the panel again, if it is open, keeping the focus where it was. */
@@ -127,6 +142,7 @@ export function refreshPanel(api) {
   const a = document.activeElement;
   const where = a && dialog.contains(a) ? { name: a.name, value: a.value, id: a.id, data: a.dataset ? { ...a.dataset } : {} } : null;
   dialog.innerHTML = render(api);
+  showKept();
   if (!where) return;
   let back = null;
   if (where.name) back = [...dialog.querySelectorAll('input')].find((x) => x.name === where.name && x.value === where.value);
@@ -144,6 +160,7 @@ export function openPanel(api, { focus, confirmReload } = {}) {
   if (!dialog.open) {
     opener = document.activeElement && document.activeElement !== document.body ? document.activeElement : null;
     dialog.innerHTML = render(api);
+    showKept();
     dialog.showModal();
   }
   const set = focus ? [...dialog.querySelectorAll('fieldset.perm')].find((f) => f.dataset.key === focus) : null;
