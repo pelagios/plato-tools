@@ -1238,6 +1238,9 @@ export const SCOPE_WORDS = {
     return out;
   },
   undatedMark: 'Places with no dates are left out',
+  /** Whose Scope the lookup panel uses (said in full in the editor, SCOPE_WORDS.whose). */
+  panelWorkflow: 'the workflow\'s.',
+  panelTab: 'for the lookups made here, outside a workflow.',
   /** A type with how many narrower ones it stands for (sent with it: WHG does not match a broader type's narrower ones itself). */
   typeLabel: (t) => (t.narrower.length ? `${t.label} (and ${plural(t.narrower.length, 'narrower type')})` : t.label),
   // The editor (centre column).

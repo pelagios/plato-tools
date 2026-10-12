@@ -115,7 +115,7 @@ export function mountScope({ methodos, lookup, token, onChange, state }) {
   function summary(box, s, { heading }) {
     box.replaceChildren();
     if (heading) box.append(h('h2', { id: 'scope-h', className: 'scope-h' }, SW.heading));
-    else box.append(h('p', { className: 'scope-line' }, h('strong', {}, `${SW.heading}: `), inWorkflow() ? 'this workflow\'s.' : 'this tab\'s.'));
+    else box.append(h('p', { className: 'scope-line' }, h('strong', {}, `${SW.heading}: `), inWorkflow() ? SW.panelWorkflow : SW.panelTab));
     box.append(chipsList(s));
     if (excludesUndated(s)) box.append(h('p', { className: 'scope-undated warn', dataset: { mark: 'undated' } }, h('span', { 'aria-hidden': 'true' }, '⚠ '), SW.undatedMark));
     box.append(h('p', { className: 'scope-edit-line' }, h('button', { type: 'button', className: 'link scope-edit', onclick: open }, heading ? SW.edit : SW.editScope)));
