@@ -527,6 +527,33 @@ class TextSink {
 export class Aborted extends Error { constructor() { super('stopped'); this.name = 'Aborted'; } }
 /** Throw Aborted if `signal` (an AbortSignal, or nothing) has been aborted: called between records. */
 export const halt = (signal) => { if (signal?.aborted) throw new Aborted(); };
+/**
+ * `call(env)`, a tool's call that reads through run() and writes outputs of its own (publishing, a
+ * match, applying a review), ended as a run stopped is when it is stopped: when it throws Aborted (a
+ * reading of its own stopped by `signal`), or returns after `signal` was aborted. What it had opened
+ * is closed, for the host to remove, and it returns { report, outputs: [], incomplete, aborted }, the
+ * report saying it was stopped: never a result made of less than the whole, worded as something else.
+ */
+export async function stoppable(signal, env, call) {
+  const open = new Set();
+  const output = async (...a) => {
+    const o = await env.output(...a), close = o.close;
+    open.add(o);
+    o.close = async (...b) => { open.delete(o); return close.apply(o, b); };
+    return o;
+  };
+  try {
+    const r = await call(env.output ? { ...env, output } : env);
+    if (signal?.aborted) throw new Aborted();
+    return r;
+  } catch (e) {
+    if (!(e instanceof Aborted)) throw e;
+    for (const o of open) { try { await o.close(); } catch { /* closed as far as it can be */ } }
+    const rep = new Report();
+    rep.error('stopped', RUN_TEXT.stopped);
+    return { report: rep.toJSON(), outputs: [], incomplete: true, aborted: true };
+  }
+}
 /** An async iterable's items, halting before each one: for a pass over the records made outside the main loops. */
 async function* halting(items, signal) { for await (const x of items) { halt(signal); yield x; } }
 /**
@@ -603,7 +630,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   // mints is named as it streams past instead (ev.region, below), as it always comes before the places in
   // it; in exported tables a region may come anywhere, so they are read through first.
   const regions = action === 'convert' && lpfTarget ? new RegionIndex() : null;
-  const hooks = regions && input.format === 'tables' ? { beforeRecords: (read, gazetteerId) => indexRegions(regions, () => halting(read(), options.signal), options.candidates, rep, gazetteerId) } : {};
+  const hooks = regions && input.format === 'tables' ? { beforeRecords: (read, gazetteerId) => indexRegions(regions, () => halting(read(), options.signal), options.candidates, rep, gazetteerId, options.signal) } : {};
   const source = sourceFor(input, env, rep, options, action, hooks);
   if (!source) throw new Error(`Unsupported input: ${input.format}`);
   if ((input.format === 'lpf' || input.format === 'lpf-seq') && input.lpfVersion === 2) {
@@ -621,7 +648,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   // Elenchos: the candidate sets given with the input (options.candidates: the command line's
   // --candidates, the page's "Check with candidate sets"), read before it, and the rules no schema
   // can make of candidate sets (src/engine/candidates.js). Checking only.
-  const cands = action === 'check' ? await candidateCheck(options.candidates, res, rep) : null;
+  const cands = action === 'check' ? await candidateCheck(options.candidates, res, rep, options.signal) : null;
 
   // Where the records go: a writer for the target, or nothing when checking.
   const outputs = [];
@@ -648,7 +675,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       else if (ev.type === 'attestation') collectWithdrawn([ev.value], withdrawn);
     }
     withdrawn = resolved(withdrawn, rep);
-    if (regions) await settleRegions(regions, () => halting(input.format === 'plato-jsonl' ? platoJsonl(input.files[0], new Report()) : platoJson(input.files[0]), signal), options.candidates, rep, gazetteerId);
+    if (regions) await settleRegions(regions, () => halting(input.format === 'plato-jsonl' ? platoJsonl(input.files[0], new Report()) : platoJson(input.files[0]), signal), options.candidates, rep, gazetteerId, signal);
   }
   if (action === 'convert' && options.cube && target !== 'ntriples') rep.warning('cube-not-ntriples', 'The Data Cube export applies to N-Triples output only, so it is not made here.');
   if (action === 'convert' && options.gzip && target === 'tables') rep.warning('gzip-zip', 'The tables are written as a zip, which is compressed already, so they are not gzipped as well.');
@@ -845,7 +872,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
         const inData = [...regions.targets].filter(about);
         const quiet = new Rdf2Json(r2jSchemas, store, { withdrawn: storeWithdrawn });
         for (const e of inData) { stop(); const rec = quiet.entity(e); regions.add(rec.attestations, e, regionLabel(rec)); }
-        await regionCandidates(regions, options.candidates, rep, docId && !String(docId).startsWith('_:') ? docId : undefined);
+        await regionCandidates(regions, options.candidates, rep, docId && !String(docId).startsWith('_:') ? docId : undefined, signal);
       }
       const head = docId ? { $schema: 'https://w3id.org/plato/schemas/place-centric.schema.json', ...r2j.header(docId) } : { profile: 'place-centric', gazetteer: { title: input.files[0].name } };
       head.profile = 'place-centric';
@@ -857,7 +884,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       // attestation bundles (plato:attests_identity), which are read under their attestation.
       const idrIds = docId ? [...objectsOf(store, docId, PLATO + 'contains_identity_relation')]
         : [...store.subjects(TYPE, PLATO + 'IdentityRelation')].filter((i) => !store.in(PLATO + 'attests_identity', i).length);
-      if (target === 'lpf' || target === 'lpf-seq') for (const i of idrIds) { const v = r2j.identityRelation(i); (idrsBySubject.get(v.subject) || idrsBySubject.set(v.subject, []).get(v.subject)).push(v); }
+      if (target === 'lpf' || target === 'lpf-seq') for (const i of idrIds) { stop(); const v = r2j.identityRelation(i); (idrsBySubject.get(v.subject) || idrsBySubject.set(v.subject, []).get(v.subject)).push(v); }
       // The places the document lists, then any other place its attestations are about: an
       // attestation-centric document's attestations are about existing places, which it need not list
       // (only its newSpatialEntities are), and they were once left out whenever it listed any.
@@ -904,22 +931,22 @@ const gatherRegion = (regions, ev) => regions.add(ev.value?.attestations, ev.val
  * every place in it, on a second reading (`again()`, the records afresh), made only when one may have
  * (some region some place is ContainedIn was not named on the first); then the Candidates' scores.
  */
-async function settleRegions(regions, again, sets, rep, gazetteerId) {
+async function settleRegions(regions, again, sets, rep, gazetteerId, signal) {
   const unnamed = regions.unnamed();
   if (unnamed.size) for await (const ev of again()) if (ev.type === 'record') regions.nameLater(ev.value?.attestations, ev.value?.['@id'], regionLabel(ev.value), unnamed);
-  await regionCandidates(regions, sets, rep, gazetteerId);
+  await regionCandidates(regions, sets, rep, gazetteerId, signal);
 }
 /** Fill `regions` from a reader whose `read()` gives the records afresh each time (the tables'). */
-async function indexRegions(regions, read, sets, rep, gazetteerId) {
+async function indexRegions(regions, read, sets, rep, gazetteerId, signal) {
   for await (const ev of read()) if (ev.type === 'record') gatherRegion(regions, ev);
-  await settleRegions(regions, read, sets, rep, gazetteerId);
+  await settleRegions(regions, read, sets, rep, gazetteerId, signal);
 }
 /**
  * Give `regions` the scores of the Candidates its matches were promoted from, read from the candidate
  * sets given with the dataset (options.candidates: inputs detected as PLATO JSON or JSON Lines with the
  * profile candidate-set). With none given, every score wanted is reported missing as it is met.
  */
-async function regionCandidates(regions, sets, rep, gazetteerId) {
+async function regionCandidates(regions, sets, rep, gazetteerId, signal) {
   const wanted = regions.prune();
   if (!Array.isArray(sets) || !sets.length) return;
   const found = new Map();
@@ -927,7 +954,7 @@ async function regionCandidates(regions, sets, rep, gazetteerId) {
     if (set?.profile !== 'candidate-set') { rep.warning('candidates-not-a-set', CANDIDATE_SET_TEXT['candidates-not-a-set'], set?.files?.[0]?.name); continue; }
     if (!wanted.size) continue;
     // The set's own faults are its own: it is read for its scores only, and checked on its own.
-    for await (const ev of candidateSetSource(set, new Report())) {
+    for await (const ev of halting(candidateSetSource(set, new Report()), signal)) {
       // A set made for another dataset may still hold a pair of this one's: warned of, and each pair checked.
       const forId = ev.type === 'header' ? ev.value?.candidateSet?.candidatesFor : undefined;
       if (typeof forId === 'string' && typeof gazetteerId === 'string' && forId !== gazetteerId) rep.warning('candidates-other-dataset', CANDIDATE_SET_TEXT['candidates-other-dataset'], `${set.files?.[0]?.name}: ${forId}`);
@@ -1085,7 +1112,7 @@ async function runCandidateSet(events, { V, rep, writer, dry, notAList, collect,
  * whose answers to candidates (promotedFrom) are checked against the sets given as they pass, so that
  * only the candidates are held. `finish` makes the rules that need everything read.
  */
-async function candidateCheck(given, res, rep) {
+async function candidateCheck(given, res, rep, signal) {
   const V = res.validators['candidate-set'];
   const say = (f) => rep.add(f.severity, f.kind, CANDIDATE_CHECK_TEXT[f.kind], f.example);
   const sets = [];
@@ -1098,7 +1125,7 @@ async function candidateCheck(given, res, rep) {
     const sub = new Report(), head = {}, list = [];
     const collect = { header: (h) => Object.assign(head, h), candidate: (c) => list.push(c) };
     try {
-      await runCandidateSet(candidateSetSource(input, sub), { V, rep: sub, writer: null, dry: null, collect,
+      await runCandidateSet(candidateSetSource(input, sub), { V, rep: sub, writer: null, dry: null, collect, signal,
         notAList: (ev) => sub.error('not-a-list', notAListText(ev.key, ev.shape), ev.key) });
     } catch (e) {
       if (!(e instanceof DataError)) throw e;

@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { res, file, go } from './engine.js';
 import { run, Aborted } from '../src/engine/pipeline.js';
 import { compare } from '../src/engine/compare.js';
+import { match, gather } from '../src/engine/krisis/match.js';
 import { detect } from '../src/engine/input.js';
 import { NodeHost } from '../src/node/host.js';
 import { env as memEnv } from './engine.js';
@@ -154,6 +155,43 @@ test('a conversion from RDF stopped as its places are read back from the store s
     } else {
       assert.equal(r.aborted, undefined);
       assert.equal(s.seen.length, 19);
+    }
+  }
+});
+
+// Krisis: a match or a gathering stopped is said to be stopped, never a dataset that could not be read.
+for (const [name, call] of [['match', (e, o) => match({ subjects: o.subjects, others: o.others, options: { signal: o.signal } }, e)], ['gather', (e, o) => gather({ subjects: o.subjects, options: { signal: o.signal } }, e)]]) {
+  test(`a Krisis ${name} stopped part-way says it was stopped, not that a dataset was not read`, async () => {
+    for (const stopping of [true, false]) {
+      const ac = new AbortController(), phases = [];
+      const e = { ...memEnv(), progress: (p) => { phases.push(p.phase); if (stopping && p.phase === 'reading') ac.abort(); } };
+      const r = await call(e, { subjects: await detect([file(KING_JOHN)]), others: await detect([file(KING_JOHN)]), signal: ac.signal });
+      assert.ok(phases.includes('reading'), 'the dataset was being read');
+      if (stopping) {
+        assert.equal(r.aborted, true);
+        assert.deepEqual(kinds(r), ['stopped']);
+      } else {
+        assert.equal(r.aborted, undefined);
+        assert.ok(!kinds(r).includes('stopped') && !kinds(r).includes('dataset-not-read') && !kinds(r).includes('unreadable'), JSON.stringify(kinds(r)));
+      }
+    }
+  });
+}
+
+// Elenchos: the candidate sets given with a check are read before the input, and a stop there stops it.
+test('a check with candidate sets, stopped while it reads the sets, stops there', async () => {
+  const set = await detect([file(`${EX}/candidate-set-judgements.json`)]);
+  for (const stopping of [true, false]) {
+    const ac = new AbortController();
+    if (stopping) ac.abort();
+    const r = await run({ input: await detect([file(`${EX}/place-centric-judgements.json`)]), action: 'check', options: { candidates: [set], signal: ac.signal } }, memEnv());
+    if (stopping) {
+      assert.equal(r.aborted, true);
+      assert.deepEqual(kinds(r), ['stopped']);
+      assert.equal(r.report.counts['candidates given'], undefined, 'the sets were not read to the end');
+    } else {
+      assert.equal(r.aborted, undefined);
+      assert.ok(r.report.counts['candidates given'] > 0);
     }
   }
 });

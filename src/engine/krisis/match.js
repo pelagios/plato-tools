@@ -14,7 +14,7 @@
 // than the greatest distance (when both have a point), and the datasets do not already link them,
 // or say that they are different places. Each subject place keeps its best few, the places near it
 // and those with no point taking turns (bestFew()).
-import { run } from '../pipeline.js';
+import { run, Aborted, stoppable } from '../pipeline.js';
 import { Report } from '../report.js';
 import { collectWithdrawn, resolveWithdrawn } from '../../formats/shared.js';
 import { DISTINCT_GATE, QUALIFIER_CAP, QUALIFIER_RARE, QUALIFIER_RARE_SHARE, compileQualifiers, normalise } from './names.js';
@@ -303,6 +303,8 @@ async function readSide(input, word, options, env, rep, progress, tap) {
   if (tap) { const event = sink.event; sink.event = (ev) => { event(ev); tap(ev); }; }
   const r = await run({ input, action: 'check', options: { base: options.base, columns, sink, signal: options.signal } },
     { ...env, progress: (p) => progress({ ...p, dataset: word, phase: p.phase === 'done' ? 'read' : p.phase }) });
+  // Stopped by the caller (options.signal): the match or gather is stopped (stoppable), not a dataset unreadable.
+  if (r.aborted) throw new Aborted();
   if (r.incomplete) return { side, failed: r.report.items.find((i) => i.kind === 'unreadable')?.examples[0] };
   let others = 0;
   for (const i of r.report.items) {
@@ -356,6 +358,9 @@ const sideRecord = (s) => ({ title: s.title, titleFrom: s.titleFrom, ...(s.uri ?
  * report in the shape run() gives, with `incomplete` set when a dataset could not be read to the end.
  */
 export async function match({ subjects, others, options = {} }, env) {
+  return stoppable(options.signal, env, (e) => matching({ subjects, others, options }, e));
+}
+async function matching({ subjects, others, options }, env) {
   const rep = new Report();
   const t0 = Date.now();
   const progress = env.progress || (() => {});
@@ -464,6 +469,9 @@ export async function match({ subjects, others, options = {} }, env) {
  * in whose entityIdentifier is a containerKey, are regions, not places.
  */
 export async function gather({ subjects, options = {} }, env) {
+  return stoppable(options.signal, env, (e) => gathering({ subjects, options }, e));
+}
+async function gathering({ subjects, options }, env) {
   const rep = new Report();
   const t0 = Date.now();
   const progress = env.progress || (() => {});

@@ -20,7 +20,7 @@
 // does not hold its candidate.
 import { Report } from '../report.js';
 import { DataError, detect } from '../input.js';
-import { run, CANDIDATE_SET_TEXT } from '../pipeline.js';
+import { run, CANDIDATE_SET_TEXT, Aborted, stoppable } from '../pipeline.js';
 import { compare } from '../compare.js';
 import { KRISIS_TEXT, KRISIS_CANDIDATES, rowWords } from '../words.js';
 import { readWork, filesDiffer, checkReviewer, NOT_READ_KINDS, excludedPlaces } from './work.js';
@@ -59,6 +59,9 @@ const stemOf = (subjects, work, options) => (options.name || subjects?.files?.[0
  * Returns { report, outputs, attestations }, with `incomplete` when nothing could be written.
  */
 export async function apply({ subjects, work, options = {} }, env) {
+  return stoppable(options.signal, env, (e) => applying({ subjects, work, options }, e));
+}
+async function applying({ subjects, work, options }, env) {
   const rep = new Report();
   const progress = env.progress || (() => {});
   const t0 = Date.now();
@@ -284,6 +287,8 @@ async function writeDataset({ subjects, made, work, options, sets = [] }, env, r
   // a caller each record, not the header): withCandidateSets says what it found there.
   const header = { found: !sets.length, id: true };
   const r = await run({ input: subjects, action: 'convert', target: 'plato-json', options: { name, base: options.base, columns: options.columns, augment, signal: options.signal } }, withCandidateSets(teeing(env, kept), name, sets, header, work.subjects.uri));
+  // Stopped by the caller (options.signal): the review's finishing is stopped (stoppable), not a dataset unreadable.
+  if (r.aborted) throw new Aborted();
   if (!header.found) rep.error('candidate-sets-not-written', KRISIS_CANDIDATES.setsNotWritten);
   else if (!header.id) rep.error('no-gazetteer-id', KRISIS_CANDIDATES.noGazetteerId);
   // What the conversion says of the dataset. Its own problems are its own, not the review's: they

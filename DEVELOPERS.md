@@ -160,24 +160,37 @@ they are tested, and the conventions to keep. For what the tools are and how to 
 - **Stopping a run.** `options.signal`, an `AbortSignal`, stops `run()` at the next record: checked
   (`halt`, throwing `Aborted`) at the top of every loop over the records, as they stream, as they are
   loaded into the store and read back from it, the rows of a spreadsheet's sheets as they are loaded
-  and checked, the passes made first (withdrawals, regions) and a candidate set's candidates. Its
-  outputs are closed and none recorded, its store closed (in a `finally`, however the reading ends),
-  and it returns `incomplete` and `aborted`, the report saying it was stopped (`RUN_TEXT` in
-  `words.js`); a host then removes what it had begun, as for a file cut short. An `Aborted` thrown by
-  an augment or a writer stops it too, and is not a record that failed. `compare()` passes the signal
-  to both its readings and says it was stopped, not that a version could not be read; Krisis's match
-  and apply and Agora's readings pass it on too. Methodos's adapters give each engine call the step's
-  signal, so cancelling a step (`runStep(state, host, { signal })`) stops its run at the next record
-  and keeps nothing it wrote (`test/methodos.test.js`). A long SQLite step (indexing the store) is not
-  interrupted: the stop comes when it ends. The page's Cancel still ends the worker, which stops at
-  once even there (a worker busy in a run takes no message until it yields, so a signal from the page
-  would wait for the step). The browser lets go of an ended worker's files only some time after (1.6 s
-  in a measured case, 12 October 2026), and a run begun before then was refused its working files, as if
-  another tab held them; so the new worker removes the half-written output from the outputs folder in
-  OPFS, and takes up the pool of working files and lets it go, each tried again until it can be, for up
-  to 15 s (`afterCancel` in `worker.js`), before it says it is ready, and the page's buttons wait for
-  that (`restarting` in `src/app.js`). The page offers nothing of the run. Tested in
-  `test/abort.test.js`, and on the page by `cancel_case` and Methodos's `cancelled` in `e2e/app_test.py`.
+  and checked, the passes made first (withdrawals, regions, the regions' candidates), the identity
+  relations held for LPF, and the candidate sets given with a check (`candidateCheck`) and a candidate
+  set's candidates. Its outputs are closed and none recorded, its store closed (in a `finally`, however
+  the reading ends), and it returns `incomplete` and `aborted`, the report saying it was stopped
+  (`RUN_TEXT` in `words.js`); a host then removes what it had begun, as for a file cut short. An
+  `Aborted` thrown by an augment or a writer stops it too, and is not a record that failed.
+  `compare()` passes the signal to both its readings and says it was stopped, not that a version could
+  not be read. The tools that read through `run()` and write outputs of their own end the same way,
+  through `stoppable()` in `pipeline.js`: publishing (`publish()`: any reading of the dataset, the site's
+  downloads, minting's comparison with the previous release and the lines of its copy, each throwing
+  `Aborted` when stopped, so that no site is made with a download missing, and no copy is kept cut
+  short), and Krisis's match, gathering and applying (`readSide`, `writeDataset`; `stopped` is among
+  `NOT_READ_KINDS`, never a dataset that could not be read). Methodos's adapters give each engine call
+  the step's signal, so cancelling a step (`runStep(state, host, { signal })`) stops its run at the next
+  record and keeps nothing it wrote (`test/methodos.test.js`, a conversion and a site among them). A
+  long SQLite step (indexing the store) is not interrupted: the stop comes when it ends. The page's
+  Cancel still ends the worker, which stops at once even there (a worker busy in a run takes no message
+  until it yields, so a signal from the page would wait for the step). The browser lets go of an ended
+  worker's files only some time after (1.6 s in a measured case, 12 October 2026), and a run begun
+  before then was refused its working files, as if another tab held them; so the new worker removes
+  the half-written output from the outputs folder in OPFS (tried again every 100 ms), and takes up the
+  pool of working files and lets it go (tried again 1.2 s after each refusal, as `sqlitePool()` does:
+  sqlite-wasm keeps the grants that come after a refusal, and a try made sooner could be refused by
+  this worker's own), for up to 15 s (`afterCancel` in `worker.js`), before it says it is ready. Until
+  then the page is busy (`busy`, which every way to the worker checks, the gazetteer lookup's included),
+  and `whenReady` is a fresh promise for the new worker. If the files were still held when it gave up,
+  'ready' says so (`releasing`), and the page says, beside the buttons, "The cancelled run's files are
+  still being released; try again in a moment." (`CANCEL_RELEASING`), as it does for a run refused its
+  files then, in place of the words for another tab, until a run finishes. The page offers nothing of
+  the run. Tested in `test/abort.test.js`, and on the page by `cancel_case` and Methodos's `cancelled`
+  in `e2e/app_test.py`.
 - **Gzipped output.** `options.gzip` (`--gzip`, the page's *Gzip the converted file*) gzips each text
   output as it is written and adds `.gz` to its name (`textOutput` in `pipeline.js`), a candidate set's
   too; the tables, a zip already, are not, with a warning (`gzip-zip`). The gzip is `src/lib/gzip.js`,

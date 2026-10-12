@@ -71,7 +71,7 @@ export const canonicalEndpoint = (endpoint) => (isWhg(endpoint) ? WHG_ENDPOINT :
 
 // The problems of a dataset's own that stop part of it being read (the kinds the version check's
 // NOT_READ in compare.js lists): a matching, or a dataset finished, is then of less than the whole.
-export const NOT_READ_KINDS = ['json-syntax', 'rdf-syntax', 'record-failed', 'late-header', 'not-a-list', 'lpf-v2', 'lpf-not-a-feature', 'jsonl-not-an-object'];
+export const NOT_READ_KINDS = ['json-syntax', 'rdf-syntax', 'record-failed', 'late-header', 'not-a-list', 'lpf-v2', 'lpf-not-a-feature', 'jsonl-not-an-object', 'stopped'];
 export const WORK_VERSION = 3;
 /** A candidate's IRI as the candidate set profile's pattern has it (candidates.js mints them). */
 export const CANDIDATE_IRI = /#c-(?:[0-9a-f]{4}){2,}$/;

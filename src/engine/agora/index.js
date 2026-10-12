@@ -11,9 +11,8 @@
 // version check does, receiving the gazetteer's description and then one place-centric record at a
 // time, so that it works at any size. The check's own findings count: a part that writes something
 // to be published does not write it from a dataset that has problems.
-import { run, Aborted } from '../pipeline.js';
+import { run, Aborted, stoppable } from '../pipeline.js';
 import { Report } from '../report.js';
-import { RUN_TEXT } from '../words.js';
 import { noBaseKind, scheme } from './address.js';
 import { openTree, put } from './tree.js';
 import * as fair from './fair.js';
@@ -53,24 +52,7 @@ export async function publish({ part, input, previous, options = {} }, env) {
   // options.signal stops a part at the next record of any reading (run()'s, the site's downloads', a
   // comparison's): it ends as a run stopped does, incomplete and aborted, with no outputs, and what it
   // had opened closed for the host to remove, never as a part that finished with something missing.
-  const open = new Set();
-  const output = async (...a) => {
-    const o = await env.output(...a), close = o.close;
-    open.add(o);
-    o.close = async (...b) => { open.delete(o); return close.apply(o, b); };
-    return o;
-  };
-  try {
-    const r = await publishing({ part, input, previous, options }, { ...env, output });
-    if (options.signal?.aborted) throw new Aborted();
-    return r;
-  } catch (e) {
-    if (!(e instanceof Aborted)) throw e;
-    for (const o of open) { try { await o.close(); } catch { /* closed as far as it can be */ } }
-    const rep = new Report();
-    rep.error('stopped', RUN_TEXT.stopped);
-    return { report: rep.toJSON(), outputs: [], incomplete: true, aborted: true };
-  }
+  return stoppable(options.signal, env, (e) => publishing({ part, input, previous, options }, e));
 }
 async function publishing({ part, input, previous, options }, env) {
   const impl = PUBLISH_PARTS[part];
