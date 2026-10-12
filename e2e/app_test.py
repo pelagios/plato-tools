@@ -709,8 +709,9 @@ def krisis_case(page, tmp):
           left == 'Their places, as given' and cites == ['Their places, as given'], {'field after matching': left, 'cited': cites})
     # A title left in the field is not a resumed review's: resuming clears it (checked below).
     page.evaluate("() => { const t = document.getElementById('others-title'); if (t) t.value = 'A title for another review'; }")
-    check('match review: the file made is the new attestations only, in PLATO JSON, with no @id minted', bool(atts) and out.get('profile') == 'attestation-centric'
-          and not any('@id' in a for a in atts), {k: v for k, v in out.items() if k != 'attestations'} if isinstance(out, dict) else out)
+    # Krisis gives each answer the address Agora's minting would (withdraw.js), so that a changed decision can withdraw it.
+    check('match review: the file made is the new attestations only, in PLATO JSON, each with an address in Agora\'s form (<place>#a-<hash>)', bool(atts) and out.get('profile') == 'attestation-centric'
+          and all(re.fullmatch(re.escape(a.get('about', '')) + r'#a-[0-9a-f]{8}', a.get('@id', '')) for a in atts), {k: v for k, v in out.items() if k != 'attestations'} if isinstance(out, dict) else out)
     # Krisis: the suggestions exported as a candidate set on the review screen, and Finish then pointing at it.
     cset, out2, status = {}, {}, ''
     if s.get('phase') == 'done' and page.is_visible('#export-candidates'):
@@ -828,6 +829,97 @@ def krisis_case(page, tmp):
     krisis_seams(page, tmp, subjects)
 
 GEOREF = ROOT / 'test/fixtures/hermes-detect/loc-chesapeake-annotationpage.json'
+
+def krisis_withdraw_case(page, tmp):
+    """Krisis: a decision changed after Finish withdraws the earlier answer. Review, Finish into the dataset, resume the
+    review on the dataset written, change the decision, Finish again: the dataset has exactly one current answer and the
+    retraction, and the version check passes it. The control: the same without the change writes nothing new. And the
+    version check on the page finds the change without its retraction (answered both ways)."""
+    a, b = 'https://example.org/wa/', 'https://example.org/wb/'
+    subjects = tmp / 'withdraw-subjects.json'; others = tmp / 'withdraw-others.json'
+    subjects.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': a, 'title': 'Our places', 'status': 'published', 'version': '1'},
+                                    'spatialEntities': [krisis_place(a + 'newton', 'Newton', -1.0, 52.0)]}))
+    others.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': b, 'title': 'Their places'},
+                                  'spatialEntities': [krisis_place(b + 'newton', 'Newton', -1.01, 52.01)]}))
+    saved, v1p, v2p = tmp / 'withdraw.krisis.json', tmp / 'withdraw-v1.json', tmp / 'withdraw-v2.json'
+    def finish(what):
+        page.check('input[name="review-output"][value="dataset"]')
+        page.click('#finish')
+        return wait_state(page, lambda s: s.get('action') == 'apply' and s.get('phase') in ('done', 'error'), 120, what)
+    def first():
+        page.reload(); wait_state(page, lambda s: s.get('phase') == 'ready', 30, 'ready')
+        s = match_case(page, subjects, others)
+        if s.get('phase') != 'reviewing': return False, s
+        if page.is_visible('#review-name'): page.fill('#review-name', 'Ada Reviewer'); page.press('#review-name', 'Enter')
+        page.keyboard.press('a')
+        s = wait_state(page, lambda s: s.get('phase') == 'reviewing' and (s.get('review') or {}).get('reviewed') == 1, 10, 'decision')
+        with page.expect_download(timeout=30_000) as d: page.click('#save-review')
+        d.value.save_as(saved)
+        s = finish('finish')
+        if s.get('phase') != 'done' or not s.get('outputs'): return False, s.get('report') or s
+        download(page, s['outputs'][0]['name'], v1p)
+        return True, s
+    ok, s1 = False, {}
+    try: ok, s1 = first()
+    except Exception as e: s1 = {'phase': 'harness-error', 'error': str(e).split('\n')[0][:200]}
+    newton = lambda doc: next((p.get('attestations', []) for p in doc.get('spatialEntities', []) if p.get('@id') == a + 'newton'), [])
+    def current(doc):
+        atts = newton(doc)
+        gone = {x['meta']['targetAttestation'] for x in atts if (x.get('meta') or {}).get('metaType', '').endswith(('#Retracts', '#Supersedes'))}
+        return sorted(('not ' if x.get('negated') else '') + ' '.join(r.get('object', '').rsplit('/', 1)[-1] for r in x['identities']) for x in atts if x.get('identities') and x.get('@id') not in gone)
+    v1 = json.loads(v1p.read_text()) if ok else {}
+    answer = next((x for x in newton(v1) if x.get('identities')), {})
+    check('withdraw: the first Finish writes one answer, with an address in Agora\'s form', ok and current(v1) == ['newton']
+          and re.fullmatch(re.escape(a + 'newton') + r'#a-[0-9a-f]{8}', answer.get('@id', '')), s1 if not ok else newton(v1))
+    def again(change):
+        page.set_input_files('#picker', [str(v1p)])
+        wait_state(page, lambda s: s.get('phase') == 'detected', 30, 'detection')
+        page.set_input_files('#workfile', [str(saved)])
+        s = wait_state(page, lambda s: s.get('phase') == 'reviewing', 20, 'resume')
+        if s.get('phase') != 'reviewing': return s, None
+        if change:
+            page.keyboard.press('d'); page.keyboard.type('The mill, not the village'); page.keyboard.press('Enter')
+            s = wait_state(page, lambda s: any((c.get('decision') or {}).get('kind') == 'distinct' for c in (s.get('work') or {}).get('candidates', [])), 10, 'changed')
+        s = finish('finish again')
+        doc = json.loads(download(page, s['outputs'][0]['name'], v2p).read_text()) if s.get('phase') == 'done' and s.get('outputs') else None
+        return s, doc
+    # The control first: resumed on the dataset written and finished again with no change, nothing new is written.
+    c = {}
+    if ok:
+        try: c, cdoc = again(False); c = {'phase': c.get('phase'), 'outputs': c.get('outputs'), 'items': {i['kind']: i.get('count') for i in (c.get('report') or {}).get('items', [])}}
+        except Exception as e: c = {'error': str(e).split('\n')[0][:200]}
+    check('withdraw (control): finished again on the dataset written, with no decision changed, nothing new is written, and the page says so',
+          c.get('phase') == 'done' and not c.get('outputs') and 'nothing-new' in (c.get('items') or {}) and (c.get('items') or {}).get('already-answered') == 1
+          and 'is in the dataset already' in (page.inner_text('#report') if c.get('phase') == 'done' else ''), c)
+    s2, v2 = {}, None
+    if ok:
+        try: s2, v2 = again(True)
+        except Exception as e: s2 = {'phase': 'harness-error', 'error': str(e).split('\n')[0][:200]}
+    v2 = v2 or {}
+    retractions = [x for x in newton(v2) if (x.get('meta') or {}).get('metaType') == 'https://w3id.org/plato#Retracts']
+    summ = page.inner_text('#summary') if s2.get('phase') == 'done' else ''
+    check('withdraw: the decision changed and finished again, the dataset has exactly one current answer (the denial) and the retraction of the first, which it keeps',
+          s2.get('phase') == 'done' and current(v2) == ['not newton'] and len(retractions) == 1 and retractions[0]['meta']['targetAttestation'] == answer.get('@id')
+          and any(x.get('@id') == answer.get('@id') and x.get('identities') == answer.get('identities') for x in newton(v2))
+          and ((s2.get('report') or {}).get('counts') or {}).get('versionCheck', {}).get('retracted') == 1 and 'withdrawing an earlier answer' in summ,
+          {'current': current(v2), 'summary': summ, 'report': (s2.get('report') or {}).get('items')} if v2 else s2)
+    # The version check on the page, as a user would run it on the two versions: it passes, and counts the retraction.
+    m = compare_case(page, v2p, v1p) if v2 else {}
+    check('withdraw: the version check passes the dataset written against the first, counting one answer retracted',
+          m.get('phase') == 'done' and (m.get('report') or {}).get('errors') == 0 and ((m.get('report') or {}).get('counts') or {}).get('retracted') == 1
+          and not any(i['kind'] == 'answered-both-ways' for i in (m.get('report') or {}).get('items', [])), m.get('report') or m)
+    # And without the retraction, the same change is answered both ways: the check can find it.
+    bad = {}
+    if v2:
+        badp = tmp / 'withdraw-v2-unretracted.json'
+        d = json.loads(v2p.read_text())
+        for p in d['spatialEntities']:
+            p['attestations'] = [x for x in p.get('attestations', []) if not (x.get('meta') or {}).get('metaType', '').endswith('#Retracts')]
+        badp.write_text(json.dumps(d))
+        bad = compare_case(page, badp, v1p)
+    found = next((i for i in (bad.get('report') or {}).get('items', []) if i['kind'] == 'answered-both-ways'), None)
+    check('withdraw: the version check finds the change without its retraction answered both ways, and names the reviewer and the places',
+          found is not None and found['severity'] == 'error' and any('Ada Reviewer' in x and a + 'newton' in x and b + 'newton' in x for x in found.get('examples', [])), bad.get('report') or bad)
 
 def krisis_pattern_match(page, tmp):
     """Krisis with a Hermes column pattern: a CSV column of Pleiades ids, its suggested pattern ticked,
@@ -2600,6 +2692,7 @@ def main():
             spellings_checks(page, tmp)
             krisis_case(page, tmp)
             krisis_pattern_match(page, tmp)
+            krisis_withdraw_case(page, tmp)
 
             # The storage warning (src/app.js, storageCheck): shown when the browser's quota is below
             # what the tables need, and hidden, the control, with the same tables and the real quota.

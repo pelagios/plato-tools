@@ -1040,6 +1040,19 @@ What it reports, and why, is in the guide:
   description of itself, not an attestation; a set added is reported and allowed, as 13.4 says
   (`candidate-set-listed`, a warning, as a corrected description is). `test/compare-candidates.test.js`
   has a failing case and a control for each.
+- **Answered both ways** (`answered-both-ways`, `answeredBothWays()`; the candidate set specification,
+  2.3). Until October 2026 the check only said, in the words of `attestation-changed`, how a correction
+  should be made; nothing checked that a changed answer withdrew the one it changed, and Krisis finishing
+  twice wrote "yes" beside "no". Now each version's answers (attestations bundling identity relations
+  that say who made them: their address, yes or no, the contributor, by ORCID, else address, else name,
+  and each pair of places) are kept in memory, the only thing the check keeps there besides the
+  withdrawals, and resolved against the version's withdrawals as the current state is: a pair one
+  contributor answers both ways in the later version, and did not in the earlier, is a breach (an error
+  against a published version, a warning against a draft), named `<contributor>: <place> and <place>`.
+  Two contributors may disagree (not reported), and a version already both ways is not this one's
+  doing. It cannot see a match replaced by another left unwithdrawn (A then B), which PLATO does not
+  forbid (a place may be the same as two records); Krisis's own count (above) covers that for its
+  output. `test/krisis-withdraw.test.js` finds it, and passes the same with the retraction.
 - **At scale**: DEEP's export against itself, 1.4 million attestations a side, took under six
   minutes on the command line, 520 MB of memory and a working database of 860 MB.
   `e2e/compare_scale.mjs` deletes, changes and adds one attestation in a hundred of a published
@@ -1058,7 +1071,8 @@ version check does, and each part is a module of its own, with its wording in it
   the deposit files (`.zenodo.json`, `CITATION.cff`, DataCite 4.7 JSON, which agree with each
   other); `mint` (`mint.js`) writes a copy in which every attestation has an address,
   `<place>#a-<hash>` from the digest the version check uses, inherited from a previous release
-  where it has one and never changed once given; `site` (`site.js`, `site/`) writes a page and a
+  where it has one and never changed once given (the address itself is made by `mintAddress`, which
+  Krisis uses too for the answers it writes, so that Agora would have made the same); `site` (`site.js`, `site/`) writes a page and a
   JSON-LD document for every place and source, for GitHub Pages, with the workflow that builds it;
   `w3id` (`w3id.js`, `w3id/`) writes the `.htaccess` for a w3id.org namespace and the addresses to
   test it with. A part that writes something to publish writes nothing from a dataset the check
@@ -1425,8 +1439,10 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   relation to each (`identity.js`, `recordIdentity`, whose signature is shared with Chora), so they
   share provenance and are withdrawn together; a consumer chains exactMatch only within one
   attestation. Each is dated by its last decision, cites the other dataset as its source
-  (`authorityType: dataset`), names the reviewer as its contributor, and has no `@id` (the saver
-  mints one). **Withdrawn:** the earlier statement here that an attestation has "no `promotedFrom`
+  (`authorityType: dataset`), names the reviewer as its contributor, and is given its `@id` when it
+  is written (below: a changed decision). **Withdrawn:** the statement here until October 2026 that
+  an answer "has no `@id` (the saver mints one)": `recordIdentity` still makes none (its signature is
+  Chora's too), and `apply` gives each answer one, in Agora's form. **Withdrawn:** the earlier statement here that an attestation has "no `promotedFrom`
   (the candidate is not published)", and Krisis's first decision that its output carries none, no
   longer hold since PLATO 05cf78a gave candidates a published form (the candidate set): once the
   suggestions are exported as one (below), each answer points at the candidate it answers. A review
@@ -1478,9 +1494,72 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   header, so `apply.js` adds them to the header text as it is written (`headerWithSets`), and the
   version check, reading the original as the earlier version, still finds only the new attestations
   added. The report says to publish each of those sets wherever the dataset is published
-  (`publish-candidate-sets`). Not done yet: a decision changed after its answer was published should
-  retract or supersede the earlier answer in the same run (the specification's section 13.5); apply
-  does not yet read the dataset's earlier answers to do so.
+  (`publish-candidate-sets`). **Withdrawn:** "Not done yet: a decision changed after its answer was
+  published should retract or supersede the earlier answer in the same run": it is done (below).
+- **A changed decision** (`withdraw.js`; plan #34, item A4; #6's leftover, part of #23). Finishing a
+  review twice with a decision changed published the pair "answered both ways" (the candidate set
+  specification, 2.3): attestations are never edited, so the earlier answer stayed current beside the
+  new one. Now `apply` reads the dataset it is given first (`earlierCollector`, one more reading of
+  it, keeping only the attestations of the review's places and every withdrawal), and `reconcile()`
+  sets the new answers against **this review's earlier answers**: current attestations (not retracted
+  or superseded anywhere in the dataset, as `resolveWithdrawn` decides) about a place of the review,
+  bundling identity relations from that place only, by the same contributor (by ORCID when both give
+  one, else by name: `plato:Retracts` is for "a claim its maker takes back", so another reviewer's
+  answer is never withdrawn), to at least one place the review suggested for it. Then, per place:
+  - an earlier answer saying what the review now says (the same places, types, bases, certainties
+    and candidates, yes or no; not its date, notes or source) is kept, and the new one **not written
+    again** (`already-answered`, counted; with nothing else to write, `nothing-new`, and no output);
+  - an acceptance replaced by an acceptance (A then B; A then A and B; a basis corrected), or a denial
+    by a denial of the same pair, is **superseded**: the new answer carries `meta: { targetAttestation,
+    metaType: plato:Supersedes }` itself, since `plato:Supersedes` "replaces the target attestation
+    with newer information" (the ontology), so the newer information is in the superseding
+    attestation, and the schema's `meta` names one target;
+  - anything else (accepted then "different places", "different places" then accepted, either then
+    "not this one") is **retracted** by an attestation of its own, `meta` with `plato:Retracts`, the
+    reviewer as contributor, dated by the changed decision (or the date given), citing what the answer
+    cited, as PLATO's examples write a retraction (identity-judgements.ttl, Act 2; the bad import in
+    place-centric-judgements.json); the new answer, if any, is written beside it. An acceptance never
+    supersedes a denial, nor a denial an acceptance: "that was wrong" is not "replaced by this", and
+    PLATO's own worked example of a match found wrong retracts it.
+  - A candidate with no decision (never made, or taken back with `decide(…, null)`) says nothing: an
+    answer about it alone is kept, and one withdrawn for another place's change is withdrawn whole,
+    with a warning naming it (`withdrawn-with-undecided`). An answer that also names places the review
+    did not suggest is not withdrawn, and nothing is written (`answer-bundles-others`).
+  The published dataset keeps every earlier answer as it was (PLATO's `plato:Gazetteer`: once published,
+  "an attestation is never deleted or changed"), and so does a draft: the default, the conservative
+  reading, is to withdraw in a draft as in a published dataset, since a draft is public once uploaded
+  (Agora, above). The report counts `retracted`, `superseded` and `unchanged`, and the summary says them.
+  **The version check verifies it:** `checkAppendOnly` requires the version check's own counts of
+  answers retracted and superseded (`counts.retracted`, `counts.superseded`) to be exactly those the
+  review withdrew (`not-all-withdrawn` otherwise), as it requires the attestations added, and treats
+  the version check's `answered-both-ways` (below) as a fault in the tools. A review is finished again
+  on **the dataset written** (or the published version), not on the original: finished on the original,
+  there is nothing to withdraw, and its output simply replaces the first (and the files given differ
+  from those the review was made of, which is warned of, `subjects-differ`, as before).
+- **Addresses** (`withdraw.js`, `mintAddress` in `agora/mint.js`). A withdrawal points at its target's
+  `@id`, so every attestation `apply` writes (each answer, each retraction) is given one, by Agora's
+  own rule and digest: `<place>#a-<8 hex>` of the SHA-256 of what it says (the version check's lines),
+  lengthened against the digests of the place's other attestations, and counted on while taken. Agora's
+  minting keeps any address an attestation has (its rule 1) and would itself have made the same, so a
+  review's output minted with Agora keeps them all (the tests mint one and compare). One function,
+  `mintAddress`, makes the address for both, so they cannot drift apart. Only a place under the
+  dataset's base address is given one (the base given for tables, else `uriSpace`, else the folder of the
+  dataset's own address, as a candidate set's base is found): a place under another's address (Pleiades',
+  say) is not ours to mint in, as Agora refuses it too; such attestations are written without, counted
+  (`attestations-unaddressed`). **A dataset whose answers have no addresses** (finished before October
+  2026, or never minted): an earlier answer that must be withdrawn is given, in the dataset written,
+  the address Agora would give it (`answers-addressed`; nothing else in it changes, and the version
+  check counts its withdrawal through `QUERIES.withAddress`, which accepts an address the later version
+  gives an attestation the earlier one had without one). The attestations-only output cannot add an
+  address to the dataset, and refuses (`answer-unaddressed`), and without the dataset given it cannot
+  read the earlier answers at all, and says so (`earlier-answers-not-read`). The same addresses answer
+  the "Krisis id-minting question" Chora's adoption bundle waits on: an adoption's two attestations can
+  be given their addresses by `mintAddress` and the same digest, and so be bundled by a `plato:Bundles`
+  meta-attestation, as Chora's hand-off asks. Not done: a region review's claims (`regionClaims`) pass
+  through the same rule only while the region is matched (a claim the region's record in the dataset
+  already holds, the same, is not written again; a changed match would supersede it, as an acceptance
+  does, but no test holds that yet), and a region settled with no match since is not examined, so its
+  earlier claim stays current.
 - **The output**, by default, is the subject dataset with the new attestations appended to their
   places (`apply.js`, `writeDataset`). The dataset is converted to a PLATO JSON document by `run()`
   with `options.augment`, whatever format it came in (tables, LPF, RDF: the report says the output is

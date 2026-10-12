@@ -8,8 +8,10 @@
 // that two places are NOT the same is an attestation that is negated and bundles exactly one
 // exactMatch. No identity is canonical and nothing is merged.
 //
-// The attestation is given no @id: whatever saves it mints one (<place IRI>#a-<8 hex>), and these
-// tools never mint one in that form.
+// The attestation is given no @id here: recordIdentity's signature is shared with Chora. Finishing a
+// review (apply.js, withdraw.js) gives each one it writes its address, <place IRI>#a-<hash>, by Agora's
+// own rule (agora/mint.js, mintAddress), so that a changed decision can withdraw it. WITHDRAWN: "and
+// these tools never mint one in that form", true until October 2026.
 //
 // WITHDRAWN (PLATO 05cf78a, the candidate set): "It is given no promotedFrom either: the suggestion
 // it came from lives only in the work file, which is not published." A review's suggestions can now

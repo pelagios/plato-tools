@@ -109,6 +109,23 @@ function tables(db) {
 }
 
 /**
+ * Rule 3 for one attestation of `place` whose digest is `d`: the place's address, '#a-' and as many
+ * hex digits of `d` as tell it from every other digest of the place's (`digests`, which may include
+ * `d` itself), then a counter while the address is taken (`isTaken(id)`). Returns { id, lengthened,
+ * twin }. The one rule for every attestation address these tools make: Agora's minting here, and
+ * Krisis's for the answers it writes (krisis/withdraw.js), so that the two cannot drift apart and
+ * Agora, which keeps any address an attestation has (rule 1), would have made the same.
+ */
+export function mintAddress(place, d, digests, isTaken, attestation = (p, h) => p.split('#')[0] + '#a-' + h) {
+  let len = FIRST;
+  while (len < WHOLE && digests.some((x) => x !== d && x.slice(0, len) === d.slice(0, len))) len += MORE;
+  const bare = attestation(place, d.slice(0, len));
+  let id = bare, k = 1;
+  while (isTaken(id)) id = `${bare}-${++k}`;
+  return { id, lengthened: len > FIRST, twin: k > 1 };
+}
+
+/**
  * A sink for run() that hands `each(record, digests, ev)` every place with the digest of what each
  * of its attestations says (by position; null where one could not be read), and `other(ev)`
  * everything else. Exported for the tests, which hash by hand to see the form above kept.
@@ -231,13 +248,9 @@ export function create(ctx) {
       // Rule 3: as many digits as it takes to tell this digest from every other of the place's.
       const digests = [...new Set(group.map((g) => g.d).filter(Boolean))];
       for (const g of rest) {
-        let len = FIRST;
-        while (len < WHOLE && digests.some((d) => d !== g.d && d.slice(0, len) === g.d.slice(0, len))) len += MORE;
-        if (len > FIRST) counts.lengthened++;
-        const bare = ctx.scheme.attestation(at, g.d.slice(0, len));
-        let id = bare, k = 1;
-        while (isTaken(id)) id = `${bare}-${++k}`;
-        if (k > 1) counts.twins++;
+        const { id, lengthened, twin } = mintAddress(at, g.d, digests, isTaken, ctx.scheme.attestation);
+        if (lengthened) counts.lengthened++;
+        if (twin) counts.twins++;
         give(g, id, MINTED);
         counts.minted++;
       }

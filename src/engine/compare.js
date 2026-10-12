@@ -34,6 +34,7 @@ import { Json2Rdf, jcs } from '../formats/json2rdf.js';
 import { termNT } from '../lib/ntriples.js';
 import { PLATO } from '../lib/context.js';
 import { collectWithdrawn, resolveWithdrawn } from '../formats/shared.js';
+import { contributorKey } from './krisis/withdraw.js';
 import { sha256 } from '../lib/sha256.js';
 import { expectMissingWords } from './words.js';
 
@@ -95,6 +96,7 @@ const TEXT = {
   'different-gazetteer': 'The two files say they are versions of different gazetteers (isVersionOf).',
   'same-version': 'Both files give the same version. A changed dataset needs a new one, or a citation of the version no longer says which state was meant.',
   'nothing-to-compare': 'The earlier version holds no attestations, so there was nothing for the later one to have kept, and nothing was tested.',
+  'answered-both-ways': 'In the later version, one contributor says both that two places are the same and that they are not, and both answers are current: a decision changed without withdrawing the earlier answer. Withdraw it with a new attestation that retracts it (plato:Retracts), or let the new answer replace it (plato:Supersedes). The example names the contributor and the two places.',
 };
 
 // The comparison's queries. Each looks up, for every row of one version, its counterpart in the other,
@@ -134,7 +136,10 @@ export const QUERIES = {
   facetsAddedTo: `SELECT f.s FROM f WHERE f.v=0 AND EXISTS(SELECT 1 FROM n o WHERE o.v=0 AND o.s=f.s)
       AND EXISTS(SELECT 1 FROM n x WHERE x.v=1 AND x.s=f.s AND NOT EXISTS(SELECT 1 FROM n o WHERE o.v=0 AND o.s=x.s AND o.h=x.h))
       AND NOT EXISTS(SELECT 1 FROM n o WHERE o.v=0 AND o.s=f.s AND NOT EXISTS(SELECT 1 FROM n x WHERE x.v=1 AND x.s=o.s AND x.h=o.h))`,
-  withAddress: 'SELECT 1 FROM a INDEXED BY ai WHERE v=0 AND id=? LIMIT 1',
+  // An address the earlier version has, or one the later version gives an attestation the earlier
+  // version had without one (Krisis gives an earlier answer the address its withdrawal points to).
+  withAddress: `SELECT EXISTS(SELECT 1 FROM a INDEXED BY ai WHERE v=0 AND id=?1)
+      OR EXISTS(SELECT 1 FROM a n INDEXED BY ai WHERE n.v=1 AND n.id=?1 AND EXISTS(SELECT 1 FROM a o INDEXED BY ah WHERE o.v=0 AND o.h=n.h AND o.id IS NULL))`,
   // Candidates the later copy of a candidate set has and the earlier does not: neither under its
   // address nor saying the same (one saying the same under another address is readdressed, which is
   // reported as such).
@@ -288,6 +293,7 @@ function reader(context, out, side = { withdrawals: new Map() }) {
     event(ev) {
       const atts = ev.type === 'attestation' ? [ev.value] : ev.type === 'record' && ev.value && Array.isArray(ev.value.attestations) ? ev.value.attestations : [];
       collectWithdrawn(atts, side.withdrawals);
+      if (side.answers && atts.length) collectAnswers(atts, ev.type === 'record' ? ev.value['@id'] : null, side.answers);
       j2r.record(ev.type === 'idr' ? 'identityRelations' : ev.type === 'attestation' ? 'attestations' : ev.newEntity ? 'newSpatialEntities' : 'spatialEntities', ev.value);
       take();
     },
@@ -298,6 +304,37 @@ function reader(context, out, side = { withdrawals: new Map() }) {
     },
     async close() {},
   };
+}
+
+/**
+ * Each attestation of `atts` that answers whether places are the same (it bundles identity relations)
+ * and says who made it, into `into`: { id, negated, who, pairs }, a pair being the two places in
+ * order of their addresses. Only these are kept in memory, for the answered-both-ways check.
+ */
+function collectAnswers(atts, place, into) {
+  for (const a of atts) {
+    if (!a || typeof a !== 'object' || !Array.isArray(a.identities) || !a.identities.length) continue;
+    const who = contributorKey(a.contributor);
+    if (!who) continue;
+    const pairs = [];
+    for (const r of a.identities) {
+      const s = r?.subject ?? place ?? a.about, o = r?.object;
+      if (typeof s === 'string' && typeof o === 'string' && s !== o) pairs.push(s < o ? `${s} and ${o}` : `${o} and ${s}`);
+    }
+    if (pairs.length) into.push({ id: typeof a['@id'] === 'string' ? a['@id'] : null, negated: !!a.negated, who, pairs });
+  }
+}
+/**
+ * The pairs of places one contributor says both are and are not the same, both answers current
+ * (the candidate set specification, 2.3: "answered both ways"), as "<contributor>: <a> and <b>".
+ */
+export function answeredBothWays(answers, withdrawn) {
+  const yes = new Set(), no = new Set();
+  for (const x of answers) {
+    if (x.id && withdrawn.has(x.id)) continue;
+    for (const p of x.pairs) (x.negated ? no : yes).add(`${x.who}: ${p}`);
+  }
+  return [...yes].filter((k) => no.has(k)).sort();
 }
 
 /**
@@ -341,7 +378,7 @@ async function comparing({ earlier, later, options }, env) {
     const ledger = new Ledger(db);
     const sides = [];
     for (const [v, input, word] of [[EARLIER, earlier, 'earlier'], [LATER, later, 'later']]) {
-      const side = { kind: null, gazetteer: {}, withdrawals: new Map() };
+      const side = { kind: null, gazetteer: {}, withdrawals: new Map(), answers: [] };
       db.exec('BEGIN');
       const r = await run({ input, action: 'check', options: { ...options, sink: reader(env.resources.context, ledger.sink(v), side) } },
         { ...env, progress: (p) => progress({ ...p, version: word, phase: p.phase === 'done' ? 'read' : p.phase }) });
@@ -444,9 +481,15 @@ async function comparing({ earlier, later, options }, env) {
     // And what it withdraws or replaces of the earlier version, the way the rule asks.
     // Only what was still current in the earlier version counts: a retraction it already held is not news.
     let retracted = 0, superseded = 0;
-    const before = resolveWithdrawn(sides[EARLIER].withdrawals).status;
-    for (const [target, kind] of resolveWithdrawn(sides[LATER].withdrawals).status) {
-      if (before.has(target) || ledger.one(QUERIES.withAddress, [target]) === null) continue;
+    const before = resolveWithdrawn(sides[EARLIER].withdrawals).status, after = resolveWithdrawn(sides[LATER].withdrawals).status;
+    // A changed answer must withdraw the one it changes: a pair one contributor now answers both ways,
+    // and did not before, breaks that (the earlier answer is still current beside the new one).
+    if (!isSet) {
+      const was = new Set(answeredBothWays(sides[EARLIER].answers, before));
+      for (const k of answeredBothWays(sides[LATER].answers, after)) if (!was.has(k)) rep.add(breach, 'answered-both-ways', TEXT['answered-both-ways'], k);
+    }
+    for (const [target, kind] of after) {
+      if (before.has(target) || !ledger.one(QUERIES.withAddress, [target])) continue;
       if (kind === 'retracted') retracted++; else superseded++;
     }
 

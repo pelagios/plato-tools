@@ -397,7 +397,10 @@ function matchSummary(report) {
 function applySummary(report) {
   const c = report.counts, nErr = report.errors, v = c.versionCheck;
   if (c.attestations === undefined) return { problems: nErr ? `${plural(nErr, 'problem')} found.` : '', counted: '' };
-  const made = `Made ${plural(c.attestations, 'new attestation')}: ${c.matchAttestations.toLocaleString('en-GB')} accepting ${plural(c.relations - c.distinctAttestations, 'match', 'matches')}, ${c.distinctAttestations.toLocaleString('en-GB')} saying that two places are different.`;
+  // Krisis: a changed decision withdraws the earlier answer (withdraw.js), and one made again is not written again.
+  const made = `Made ${plural(c.attestations, 'new attestation')}: ${c.matchAttestations.toLocaleString('en-GB')} accepting ${plural(c.relations - c.distinctAttestations, 'match', 'matches')}, ${c.distinctAttestations.toLocaleString('en-GB')} saying that two places are different${c.retracted ? `, ${c.retracted.toLocaleString('en-GB')} withdrawing an earlier answer (plato:Retracts)` : ''}.`
+    + (c.superseded ? ` ${plural(c.superseded, 'new answer replaces an earlier one', 'new answers replace earlier ones')} (plato:Supersedes).` : '')
+    + (c.unchanged ? ` ${plural(c.unchanged, 'decision was', 'decisions were')} in the dataset already, saying the same, and not written again.` : '');
   if (!v) return { problems: nErr ? `${plural(nErr, 'problem')} found.` : c.attestations ? 'The review was made into attestations.' : 'Nothing to write.', counted: made };
   const kept = v.changed || v.lost ? `the version check found ${[v.changed ? `${plural(v.changed, 'attestation')} changed` : '', v.lost ? `${plural(v.lost, 'attestation')} no longer there` : ''].filter(Boolean).join(' and ')}`
     : 'the version check found nothing deleted or changed';
@@ -457,6 +460,22 @@ export const KRISIS_TEXT = {
   columnsNotAMapping: 'The matching of columns given is not one: it must be {"column name": "field"}, each column given the name of a field (or, made into web addresses, {"field": "address", "pattern": "…{id}…"}).',
   /** The version check does not find every new attestation in the dataset written. */
   notAllAdded: (made, added) => `The review made ${plural(made, 'new attestation')}, but the version check finds ${plural(added || 0, 'attestation')} added to the dataset written, which is a fault in the tools (please report it); nothing was written.`,
+};
+// Krisis: a decision changed after its answer was written (src/engine/krisis/withdraw.js).
+export const KRISIS_WITHDRAW = {
+  retractNote: 'Withdrawn by the reviewer, who changed this decision in a match review (PLATO tools, Krisis).',
+  unchanged: 'Decisions this review has already written into the dataset, saying the same, are not written again. The count says how many.',
+  nothingNew: 'Every decision of this review that makes an attestation is in the dataset already, saying the same, so there is nothing new to write.',
+  retracted: 'Earlier answers of this review that a changed decision no longer holds are withdrawn (plato:Retracts), not deleted: the dataset keeps them, so that what it said before can still be read. The count says how many.',
+  superseded: 'Earlier answers of this review that a changed decision replaces are kept, and the new answer replaces each (plato:Supersedes). The count says how many.',
+  addressed: 'Earlier answers withdrawn here had no web address of their own (@id), which a withdrawal must point to: each is given the address Agora\'s minting would give it, and nothing else in it changes. The count says how many.',
+  unaddressed: 'Places of this review are not under the dataset\'s base address, so the attestations about them are given no web address (@id) here, and a later change of decision cannot withdraw them. Give the dataset its base address (its uriSpace, or the base address in the options). The count says how many attestations.',
+  notRead: 'The dataset was not given, so the answers this review may already have written into it could not be read: if a decision has changed since, the earlier answer is not withdrawn. Finish with the dataset chosen.',
+  bundlesOthers: 'An earlier answer of yours that a changed decision contradicts also says that the place is the same as places this review did not suggest for it, so withdrawing it would withdraw those too. Nothing was written. Withdraw it by hand, or decide on those places in this review. The example names the answer and those places.',
+  withUndecided: 'An earlier answer withdrawn because a decision changed also names places this review no longer decides on (a decision taken back), and is withdrawn with them. Decide on them again if they still hold. The example names the place and those places.',
+  unaddressable: 'An earlier answer of yours that a changed decision contradicts has no web address (@id), and its place is not under the dataset\'s base address, so it cannot be given one and nothing can withdraw it. Nothing was written. Give the dataset its base address (its uriSpace, or the base address in the options). The example names the place.',
+  unaddressedEarlier: 'An earlier answer of yours that a changed decision contradicts has no web address (@id), which a withdrawal must point to, and a file of the new attestations only cannot give it one. Nothing was written. Finish with the dataset written (the default), which gives it its address, or give the dataset addresses with Agora\'s minting first. The example names the place.',
+  notAllWithdrawn: (want, got) => `The review withdraws ${plural(want, 'earlier answer')}, but the version check finds ${plural(got || 0, 'answer')} withdrawn in the dataset written, which is a fault in the tools (please report it); nothing was written.`,
 };
 // Krisis: the suggestions exported as a candidate set (src/engine/krisis/candidates.js), and the
 // answers that point back at them (promotedFrom), on the page and the command line.
