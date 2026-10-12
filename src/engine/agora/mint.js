@@ -60,6 +60,7 @@
 // by the version check, which reads the copy from the database too). The working database holds
 // about as much as the copy written.
 import { compare, attestationLines } from '../compare.js';
+import { halt, Aborted } from '../pipeline.js';
 import { sha256 } from '../../lib/sha256.js';
 import { normaliseBase } from './address.js';
 import { gzipped } from '../../lib/gzip.js';
@@ -261,7 +262,8 @@ export function create(ctx) {
   let drafted = null;
   async function gate() {
     const later = { format: 'plato-jsonl', profile: 'place-centric', files: [copyFile()] };
-    const r = await compare({ earlier: ctx.previous, later, options: { base: options.base } }, ctx.env);
+    const r = await compare({ earlier: ctx.previous, later, options: { base: options.base, signal: options.signal } }, ctx.env);
+    if (r.aborted) throw new Aborted();
     for (const i of r.report.items) {
       const message = TEXT['against-previous'] + i.message;
       rep.add(i.severity, i.kind, message, i.examples[0], i.count);
@@ -369,7 +371,9 @@ export function create(ctx) {
         }
         const raw = await ctx.env.output(name());
         const out = name().endsWith('.gz') ? gzipped(raw) : raw;
-        for (const s of copy()) out.write(s);
+        // A stop between the lines of the copy (options.signal) ends the part as stopped (publish()),
+        // its copy cut short and closed by publish() for the host to remove.
+        for (const s of copy()) { halt(options.signal); out.write(s); }
         ctx.done(await out.close());
       } finally {
         try { db.close(); } catch { /* closed already */ }

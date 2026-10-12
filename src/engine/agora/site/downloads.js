@@ -2,7 +2,7 @@
 // for any conversion (run() in pipeline.js), each writing into the site's tree instead of an output
 // file of its own. The text formats are gzipped as they are written, so nothing is held whole.
 import { gzipped } from '../../../lib/gzip.js';
-import { run } from '../../pipeline.js';
+import { run, Aborted } from '../../pipeline.js';
 import { PARTS, SITE } from '../address.js';
 
 const enc = new TextEncoder();
@@ -38,5 +38,8 @@ export async function writeDownload(tree, d, { input, env, options, stem }) {
   // A conversion that stops part-way opens its output and never closes it; the tree allows one
   // file open at a time, so close it here, and say the download is incomplete.
   if (r.incomplete && opened) { try { await opened.close(); } catch { /* already closed */ } }
+  // Stopped by the caller (options.signal): not a download that failed, but the whole part stopped, so
+  // that a site is never made with a download missing and its links dead (agora/index.js, publish()).
+  if (r.aborted) throw new Aborted();
   return { file, path, size, format: d.format, mime: d.mime, ok: !r.incomplete, losses: r.report?.losses || 0 };
 }

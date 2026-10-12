@@ -280,8 +280,9 @@ test('cancel keeps partial results only where the operation declares it keeps th
 /** A front end in memory: files by name, the engine's outputs collected as bytes, trees as zips (as in the browser). */
 function memoryHost(initial) {
   const store = new Map(initial.map((f) => [f.name, f]));
+  const begun = [];   // every output opened, in order, closed or not: what a run had begun writing
   return {
-    store,
+    store, begun,
     open: async (r) => store.get(r.name) || new File([], r.name),
     file: async (o) => store.get(o.name),
     env() {
@@ -290,6 +291,7 @@ function memoryHost(initial) {
         resources: res, csvMeta: res.csvMeta, xlsx: XLSX,
         openDb: () => openSqlite(sqlite3InitModule, { memory: true }),
         output: async (name) => {
+          begun.push(name);
           const parts = [];
           return { write: (s) => parts.push(s), writeBytes: (b) => parts.push(b), close: async () => { const f = new File(parts, name); store.set(name, f); made.push(name); return { name, size: f.size }; } };
         },
@@ -449,6 +451,8 @@ for (const op of ['convert', 'check']) {
         // Stopped by the run itself, at the next record: not read to the end and then thrown away.
         assert.ok(report.items.some((i) => i.kind === 'stopped'), JSON.stringify(report.items.map((i) => i.kind)));
         assert.ok(report.counts.places < 3300 && report.counts.places >= 1, `${report.counts.places} places read`);
+        // A conversion had begun its file before it was stopped (a check writes none): what is gone was there.
+        assert.deepEqual(host.begun, op === 'convert' ? ['many.jsonl'] : []);
         assert.deepEqual(written, [], 'nothing it wrote is kept');
         assert.equal(step.discarded, undefined, 'and nothing is left for the host to remove');
       } else {
@@ -460,3 +464,37 @@ for (const op of ['convert', 'check']) {
     }
   });
 }
+
+test('building the site, cancelled while it writes the downloads, stops: no site is kept with a download missing', async () => {
+  const input = antonine();
+  // The site is built from the minted dataset (every attestation with its address), minted first, not stopped.
+  const steps = [{ id: 'mint', op: 'publish.mint', from: { dataset: '$files' } }, { id: 'site', op: 'publish.site', from: { dataset: 'mint.dataset' } }];
+  for (const stopping of [true, false]) {
+    const host = memoryHost([input]);
+    const ac = new AbortController(), phases = [];
+    const env = host.env;
+    // Cancelled as the first download's conversion reads its first place.
+    host.env = () => { const e = env(); e.env.progress = (p) => { phases.push(p.phase); if (stopping && /^download .*: reading$/.test(p.phase)) ac.abort(); }; return e; };
+    const minted = await runStep(next(start(recipe(steps), {}, { files: await refsOf([input], 'files') })), host);
+    assert.equal(minted.state.steps[0].state, 'done', JSON.stringify(minted.report?.items));
+    const before = new Set(host.store.keys()), begunBefore = host.begun.length;
+    phases.length = 0;
+    const { state, report } = await runStep(next(minted.state), host, { signal: ac.signal });
+    const step = state.steps[1];
+    const written = [...host.store.keys()].filter((n) => !before.has(n)), begun = host.begun.slice(begunBefore);
+    assert.ok(phases.some((p) => /^download .*: reading$/.test(p)), 'a download was being written: ' + JSON.stringify([phases, report?.items]));
+    assert.ok(begun.length >= 1, 'the site had been begun');
+    if (stopping) {
+      assert.deepEqual([state.status, step.state], ['cancelled', 'cancelled']);
+      assert.ok(report.items.some((i) => i.kind === 'stopped'), JSON.stringify(report.items.map((i) => i.kind)));
+      assert.ok(!report.items.some((i) => i.kind === 'download-failed'), 'not a site with a download that failed');
+      assert.deepEqual(written, [], 'nothing it wrote is kept');
+      assert.equal(step.discarded, undefined);
+    } else {
+      // Control: not cancelled, the same step makes its site, and keeps it.
+      assert.deepEqual([state.status, step.state], ['idle', 'done'], JSON.stringify(report?.items?.map((i) => i.kind)));
+      assert.deepEqual(written, begun);
+      assert.ok(!report.items.some((i) => i.kind === 'download-failed'));
+    }
+  }
+});
