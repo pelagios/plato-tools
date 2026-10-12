@@ -43,8 +43,26 @@
     <p class="lede">Check and convert data about places in the formats of PLATO, compare the versions of a dataset, prepare it for publishing, and see it on the map; the <a href="https://pelagios.org/place-attestation-ontology/guide/">PLATO guide</a> explains the formats, and <a href="https://pelagios.org/place-attestation-ontology/guide/tools.html">how to use each tool</a>. <span class="promise">Your files stay on your computer, and nothing is sent to any other site unless you allow it.</span> A dataset of a million places has been checked and converted in this page; <a href="https://pelagios.org/place-attestation-ontology/guide/tools.html#large-datasets">how large a dataset your browser can take</a>, and what changes on <a href="https://github.com/pelagios/plato-tools#from-the-command-line">the command line</a>, which also takes many files at once, is in the guide.</p>
   </div>
 </header>
-<main>
-  <p id="methodos-banner" class="methodos-banner"><a href="#methodos" id="methodos-ask">Not sure where to start? Answer three questions</a></p>
+<main class="layout">
+  <!-- The workflow rail: beside the steps from 60rem (src/styles.css), sticky, it holds the one line that opens Methodos's
+       interview while no workflow is followed, and the tracker while one is; below 60rem its contents flow with the page. -->
+  <div id="workflow-rail" class="workflow-rail">
+    <p id="methodos-banner" class="methodos-banner"><a href="#methodos" id="methodos-ask">Not sure where to start? Answer three questions</a></p>
+    <section id="methodos-tracker" class="methodos-tracker" aria-labelledby="methodos-tracker-h" hidden>
+      <h2 id="methodos-tracker-h" tabindex="-1">Your workflow: <span id="methodos-tracker-title"></span></h2>
+      <!-- Below 60rem, the tracker is a strip at the top of the window, "Step n of N: Tool, what it does", which opens to the whole tracker (src/methodos/page.js). -->
+      <button type="button" id="methodos-strip" class="track-strip" aria-expanded="false" aria-controls="methodos-tracker"><span class="strip-where"></span> <span class="strip-mark" aria-hidden="true">▾</span></button>
+      <p id="methodos-tracker-where" class="track-where"></p>
+      <ol id="methodos-track" class="track" role="list"></ol>
+      <p id="methodos-message" class="track-message" hidden></p>
+      <p id="methodos-kept" class="track-message" hidden><span></span><button type="button" id="methodos-clear-kept" class="link">Clear them</button></p>
+      <p class="track-note">Methodos keeps your place and sees what the tools do: a step is done when its tool's run on the right file finishes, and a step that stops or fails says why. Only a step that is yours to do (matching columns, reviewing candidates, drawing in Chora) waits for you to say it is done.</p>
+      <p class="methodos-buttons"><button type="button" id="methodos-pick" class="primary" hidden>Choose the file</button> <button type="button" id="methodos-use" class="primary" hidden>Use the file</button> <button type="button" id="methodos-download" class="primary" hidden>Download</button> <button type="button" id="methodos-handback" class="primary" hidden>Take the dataset back from Chora</button> <button type="button" id="methodos-reopen" hidden>Reopen the partial work file</button> <button type="button" id="methodos-restart" hidden>Start the remaining steps under the new recipe</button> <button type="button" id="methodos-done" class="primary">This step is done</button> <button type="button" id="methodos-back">Back a step</button> <button type="button" id="methodos-leave">Leave the workflow</button></p>
+      <p id="methodos-said" class="visually-hidden" aria-live="polite"></p>
+    </section>
+    <!-- Scope (Issue #33): what a workflow's dataset covers, shown beside the tracker. It comes later; its place in the rail is kept. -->
+    <section id="scope" hidden></section>
+  </div>
   <section id="methodos" class="methodos" aria-labelledby="methodos-h" hidden>
     <h2 id="methodos-h" tabindex="-1">Methodos: find your workflow</h2>
     <p class="methodos-lede">Say what you have and what you want at the end, and Methodos names the workflow that gets you there, through the tools, step by step.</p>
@@ -57,31 +75,26 @@
     <div id="methodos-plan" class="methodos-plan" hidden></div>
     <p class="methodos-buttons"><button type="button" id="methodos-start" class="primary" hidden>Follow this workflow</button> <button type="button" id="methodos-grid" class="primary" hidden>Show me the tools</button> <button type="button" id="methodos-close">Close</button></p>
   </section>
-  <section id="methodos-tracker" class="methodos-tracker" aria-labelledby="methodos-tracker-h" hidden>
-    <h2 id="methodos-tracker-h" tabindex="-1">Your workflow: <span id="methodos-tracker-title"></span></h2>
-    <p id="methodos-tracker-where" class="track-where"></p>
-    <ol id="methodos-track" class="track" role="list"></ol>
-    <p id="methodos-message" class="track-message" hidden></p>
-    <p id="methodos-kept" class="track-message" hidden><span></span><button type="button" id="methodos-clear-kept" class="link">Clear them</button></p>
-    <p class="track-note">Methodos keeps your place and sees what the tools do: a step is done when its tool's run on the right file finishes, and a step that stops or fails says why. Only a step that is yours to do (matching columns, reviewing candidates, drawing in Chora) waits for you to say it is done.</p>
-    <p class="methodos-buttons"><button type="button" id="methodos-pick" class="primary" hidden>Choose the file</button> <button type="button" id="methodos-use" class="primary" hidden>Use the file</button> <button type="button" id="methodos-download" class="primary" hidden>Download</button> <button type="button" id="methodos-handback" class="primary" hidden>Take the dataset back from Chora</button> <button type="button" id="methodos-reopen" hidden>Reopen the partial work file</button> <button type="button" id="methodos-restart" hidden>Start the remaining steps under the new recipe</button> <button type="button" id="methodos-done" class="primary">This step is done</button> <button type="button" id="methodos-back">Back a step</button> <button type="button" id="methodos-leave">Leave the workflow</button></p>
-    <p id="methodos-said" class="visually-hidden" aria-live="polite"></p>
-  </section>
+  <!-- A workflow followed: the step it is at, as the centre's title ("Step n of N: Tool, what it does"); #for-tool is moved in below it
+       while the workflow is followed (src/app.js, onStep). -->
+  <div id="workflow-head" class="workflow-head" hidden><h2 id="workflow-title" tabindex="-1"></h2></div>
   <section id="files" aria-labelledby="files-h">
     <h2 id="files-h" tabindex="-1"><span class="step">1</span> Choose your data</h2>
     <p id="for-tool" class="for-tool" hidden></p>
     <label class="drop compact-drop" id="drop">
       <input type="file" id="picker" multiple>
       <span>Drop a file here, or <u>choose one</u>.</span>
-      <small>Any format PLATO tools reads (<a href="https://pelagios.org/place-attestation-ontology/guide/tools.html#what-it-reads-and-writes">which</a>). Then choose what to do with it, or start from a tool below. No data to hand? <a id="try-files" href="./try/plato-tools-try-files.zip" download>Download example files</a> (zip, 344 KB), with what each should show. New to PLATO? Start from <a id="get-templato" href="https://pelagios.org/place-attestation-ontology/guide/spreadsheets/index.html#get-templato">temPlato</a>, the spreadsheet template: fill its sheets, and drop the workbook here.</small>
+      <small>Any format PLATO tools reads (<a href="https://pelagios.org/place-attestation-ontology/guide/tools.html#what-it-reads-and-writes">which</a>). Then choose what to do with it, or start from one of the tools. No data to hand? <a id="try-files" href="./try/plato-tools-try-files.zip" download>Download example files</a> (zip, 344 KB), with what each should show. New to PLATO? Start from <a id="get-templato" href="https://pelagios.org/place-attestation-ontology/guide/spreadsheets/index.html#get-templato">temPlato</a>, the spreadsheet template: fill its sheets, and drop the workbook here.</small>
     </label>
     <!-- Hermes: a pasted list of names, read as a table of places of one column; filled by src/app.js, worded in src/engine/words.js (PASTE_WORDS). -->
     <details id="paste" class="paste"></details>
     <div id="chosen" hidden></div>
+    <!-- In a workflow, once its file is chosen and recognised, step 1 folds to this one line, with a way to open it again (src/app.js, foldFiles). -->
+    <p id="chosen-line" class="chosen-line" hidden><span class="chosen-what"></span> <button type="button" id="change-file" class="link" aria-controls="files">Change</button></p>
   </section>
 
   <section id="action" aria-labelledby="action-h" hidden>
-    <h2 id="action-h"><span class="step">2</span> <span id="action-what">Check it, convert it, compare it, publish it, match it, or see it on the map</span></h2>
+    <h2 id="action-h" tabindex="-1"><span class="step">2</span> <span id="action-what">Check it, convert it, compare it, publish it, match it, or see it on the map</span></h2>
     <!-- Hermes: for a table of places (CSV, or plain GeoJSON), which column holds what, as guessed; filled by src/app.js. -->
     <div id="columns" class="columns" data-for="generic-input" role="group" aria-labelledby="columns-h" hidden></div>
     <!-- Hermes: the reading options of a TEI edition or a table of places, every one off until chosen; filled by src/app.js, worded in src/engine/words.js (READING_WORDS). -->
@@ -246,7 +259,7 @@
   </section>
 
   <section id="result" aria-labelledby="result-h" hidden>
-    <h2 id="result-h"><span class="step">4</span> Result</h2>
+    <h2 id="result-h" tabindex="-1"><span class="step">4</span> Result</h2>
     <p id="summary"></p>
     <div id="saves"></div>
     <div id="report"></div>
@@ -329,7 +342,7 @@
     <div class="tool-set" data-cards="1">
       <h3 class="tool-group" id="tg-start">Guided workflows</h3>
       <ul class="tools choose" aria-labelledby="tg-start">
-        <li class="tool"><a class="tool-link" id="methodos-card" href="#methodos"><h4><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></svg><span class="why" data-tip="μέθοδος: the pursuit along a way, Plato's word for a path of inquiry followed step by step, which is what a workflow is.">Methodos</span></h4><p class="label">Workflows</p><p>Not sure where to begin? Say what you have and what you want, and follow a workflow through the tools, step by step, with your place kept. First: <strong>Map your data</strong>, from a list of names to places identified, located and citable.</p><span class="go">Choose <span class="arrow" aria-hidden="true">→</span></span></a><details class="more"><summary><span class="when-closed">More</span><span class="when-open">Less</span><span class="visually-hidden"> about Methodos</span></summary><div class="more-body"><p>Three short questions choose a workflow: what you have, what you want at the end, and, where the workflow needs it, a yes or no or two. The workflows so far are <strong>Map your data</strong> and <strong>Publish a dataset</strong>; others, such as Release a new version and Places from a text, are to come. Answers that lead to no workflow yet say which tools do the work meanwhile.</p><p>Each step is one of the tools below, named with what it does, and the workflow's steps are shown above step 1 as done, now, or to come. A step that the tools cannot do yet says so, and why. Workflows are named in plain English; the tools keep their Greek names.</p><p class="in-guide">Its plan, and what is still to come, are in <a href="https://github.com/pelagios/plato-tools/issues">the issues</a>.</p></div></details></li>
+        <li class="tool"><a class="tool-link" id="methodos-card" href="#methodos"><h4><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></svg><span class="why" data-tip="μέθοδος: the pursuit along a way, Plato's word for a path of inquiry followed step by step, which is what a workflow is.">Methodos</span></h4><p class="label">Workflows</p><p>Not sure where to begin? Say what you have and what you want, and follow a workflow through the tools, step by step, with your place kept. First: <strong>Map your data</strong>, from a list of names to places identified, located and citable.</p><span class="go">Choose <span class="arrow" aria-hidden="true">→</span></span></a><details class="more"><summary><span class="when-closed">More</span><span class="when-open">Less</span><span class="visually-hidden"> about Methodos</span></summary><div class="more-body"><p>Three short questions choose a workflow: what you have, what you want at the end, and, where the workflow needs it, a yes or no or two. The workflows so far are <strong>Map your data</strong> and <strong>Publish a dataset</strong>; others, such as Release a new version and Places from a text, are to come. Answers that lead to no workflow yet say which tools do the work meanwhile.</p><p>Each step is one of the tools, named with what it does, and the workflow's steps are shown beside the steps of the page, ticked as they are done. A step that the tools cannot do yet says so, and why. Workflows are named in plain English; the tools keep their Greek names.</p><p class="in-guide">Its plan, and what is still to come, are in <a href="https://github.com/pelagios/plato-tools/issues">the issues</a>.</p></div></details></li>
       </ul>
     </div>
     <div class="tool-set" data-cards="1">

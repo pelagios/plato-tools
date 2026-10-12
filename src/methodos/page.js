@@ -15,6 +15,7 @@ import { take as takeHandback, isWorkflowId } from '../chora/handback.js';
 import { outputStore } from './outputs.js';
 import { fmtBytes } from '../engine/words.js';
 import { regionsSettled, notReviewed, relateProblem, writesItself } from '../engine/methodos/containment.js';
+import { stepMark, whereWords, lower } from './layout.js';
 
 // The input of each automatic operation that the page's run takes from the files chosen in step 1: a
 // run is the step's only if those files are the ones the step takes (by size and SHA-256).
@@ -45,11 +46,22 @@ const TOOL_LINKS = {
   publish: ['Agora', '#tool=publish', 'prepare it for publishing'], match: ['Krisis', '#tool=match', 'match it with another dataset, or a gazetteer'],
   chora: ['Chora', './chora.html', 'see it on the map, and draw places'],
 };
-const STATE_WORDS = { done: 'Done', current: 'Now', todo: 'To come', unavailable: 'Not yet available' };
-const MARKS = { done: '✓', current: '●', todo: '○', unavailable: '–' };
-const mark = (t) => { const m = el('span', { className: 'track-mark', textContent: t }); m.setAttribute('aria-hidden', 'true'); return m; };
-// A title within a sentence: its first letter in lower case, unless the first word is all capitals (FAIR, PLATO).
-const lower = (t) => (/^[A-Z]{2,}\b/.test(t) ? t : t.charAt(0).toLowerCase() + t.slice(1));
+/**
+ * One step of a list, as a row: a disabled checkbox (ticked when done, marked when current: layout.js,
+ * stepMark), labelled by the step, whose state is also said in words, visually hidden, for a screen reader.
+ * The state stays in li[data-step][data-state], which the browser checks read.
+ */
+function stepRow(id, st, ...body) {
+  const m = stepMark(st);
+  const li = el('li', { className: `track-step is-${st}` });
+  li.dataset.step = id; li.dataset.state = st;
+  if (m.current) li.setAttribute('aria-current', 'step');
+  const box = el('input', { type: 'checkbox', className: 'track-check', disabled: true, checked: m.checked });
+  if (m.current) box.dataset.current = '';
+  li.append(el('label', { className: 'track-label' }, box,
+    el('span', { className: 'track-body' }, el('span', { className: 'track-state visually-hidden', textContent: m.words }), ' ', ...body)));
+  return li;
+}
 // The steps that are followed: a step not yet available is shown, and skipped.
 const runs = (p) => p.steps.filter((s) => s.available === true);
 const reduceMotion = () => !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -64,17 +76,11 @@ function stepList(list, steps, at, done, notes = []) {
   list.replaceChildren();
   for (const [n, s] of steps.entries()) {
     const st = s.available !== true ? 'unavailable' : done.includes(s.id) ? 'done' : s.id === at ? 'current' : 'todo';
-    const li = el('li', { className: `track-step is-${st}` });
-    li.dataset.step = s.id; li.dataset.state = st;
-    if (st === 'current') li.setAttribute('aria-current', 'step');
-    li.append(mark(MARKS[st]),
-      el('span', { className: 'track-body' },
-        el('span', { className: 'track-state', textContent: STATE_WORDS[st] }), ' ',
-        s.tool ? el('span', { className: 'track-tool', textContent: s.tool }) : null, s.tool ? ': ' : null,
-        el('span', { className: 'track-act', textContent: s.title }),
-        st === 'unavailable' ? el('span', { className: 'track-why', textContent: s.available }) : null,
-        n === steps.length - 1 && notes.length ? el('span', { className: 'track-end', textContent: notes.join(' ') }) : null));
-    list.append(li);
+    list.append(stepRow(s.id, st,
+      s.tool ? el('span', { className: 'track-tool', textContent: s.tool }) : null, s.tool ? ': ' : null,
+      el('span', { className: 'track-act', textContent: s.title }),
+      st === 'unavailable' ? el('span', { className: 'track-why', textContent: s.available }) : null,
+      n === steps.length - 1 && notes.length ? el('span', { className: 'track-end', textContent: notes.join(' ') }) : null));
   }
 }
 
@@ -82,8 +88,9 @@ function stepList(list, steps, at, done, notes = []) {
  * Mount Methodos: `banner` is the one line that opens the interview, hidden while the interview is
  * open or a workflow is followed; `interview` and `tracker` are the two components' elements
  * (index.html); `store` is phase 2's store (src/methodos/store.js, workflowStore()); `onStep(step)` is
- * told each step the workflow comes to, as { tool, text, link } (tool: a #tool= key or null), and null
- * when it is left. `page` is what the host gives of itself:
+ * told each step the workflow comes to, as { id, n, title, tool, text, link } (n: its place among the
+ * steps followed, from 0; title: "Step n of N: Tool, what it does"; tool: a #tool= key or null), and null
+ * when it is left or every step is done. `page` is what the host gives of itself:
  *   files()          the files chosen in step 1;          choose(files)  choose these in step 1;
  *   pick()           open step 1's file picker;           output(name)   a File the last run wrote;
  *   ready()          a promise, settled when the engine is ready for a file;
@@ -91,7 +98,9 @@ function stepList(list, steps, at, done, notes = []) {
  *   review()         the review open, as { text, name }, or null;
  *   openWork(file)   open a Krisis work file, as "Resume a review" does;  pickWork()  choose one;
  *   ownTarget()      the format of the files chosen, as a conversion's target key, or null;
- *   base()           the base address in Options;  setBase(v)  write one there (the one store of it).
+ *   base()           the base address in Options;  setBase(v)  write one there (the one store of it);
+ *   parked()         the result of an earlier step's run, put away as the workflow went on, as { step, words }, or null;
+ *   reopenResult()   show that result again.
  * `workflow` is the id the page's address named (#workflow=<id>, Chora's way back), or null: that
  * workflow is the one taken up, and its step "place" offers Chora's hand-back.
  * Returns { open(), chosen(files), began(run), ended(run), keepChanged(on), id() }: the host
@@ -266,7 +275,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     if (refocus) { if (opener?.isConnected && opener.offsetParent && !interview.contains(opener)) opener.focus(); else backTo(); }
   }
 
-  // ---- The tracker: the workflow's steps, done, now, and to come, above step 1. -------------------
+  // ---- The tracker: the workflow's steps, done, now, and to come, in the workflow rail. ------------
   // Before a file is chosen the workflow is `pending` (its recipe and answers, for this tab): the
   // runner starts when step 1's file is chosen (chosen()), and from then on the workflow is the
   // runner's state, kept as a record (src/engine/methodos/record.js) at every step boundary.
@@ -274,6 +283,10 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   const tSaid = q(tracker, '#methodos-said'), tMsg = q(tracker, '#methodos-message');
   const doneB = q(tracker, '#methodos-done'), backB = q(tracker, '#methodos-back'), pickB = q(tracker, '#methodos-pick');
   const backB2 = q(tracker, '#methodos-handback');
+  // At a phone's width the tracker is a strip, "Step n of N: …", that opens to the whole tracker and closes again.
+  const strip = q(tracker, '#methodos-strip');
+  strip.addEventListener('click', () => { const open = tracker.classList.toggle('open'); strip.setAttribute('aria-expanded', String(open)); });
+  tList.addEventListener('click', (e) => { if (e.target.closest('.track-reopen')) page.reopenResult?.(); });
   const downloadB = q(tracker, '#methodos-download');
   const useB = q(tracker, '#methodos-use'), reopenB = q(tracker, '#methodos-reopen'), restartB = q(tracker, '#methodos-restart');
   let wf = null;            // the runner's state, as a record ({ id, name, created, saved, ...state })
@@ -632,9 +645,11 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     trackList(tList, rows, pendingNotes(shown));
     const i = at ? steps.findIndex((s) => s.id === at.id) : -1;
     const s = i >= 0 ? steps[i] : null;
-    const where = s ? `Step ${i + 1} of ${steps.length}: ${OPERATIONS[s.op].tool ? `${OPERATIONS[s.op].tool}, ` : ''}${lower(s.title)}.`
+    const title = s ? whereWords(i, steps.length, OPERATIONS[s.op].tool, s.title) : null;   // also the centre's title, and the strip's words
+    const where = s ? `${title}.`
       : changed ? changed.words : `Every one of the ${steps.length} steps is done.${pendingNotes(shown).length ? ` ${pendingNotes(shown).join(' ')}` : ''}`;
     tWhere.textContent = where;
+    strip.querySelector('.strip-where').textContent = title || where.replace(/\.$/, '');
     const run = s && RUN_WORDS[s.state] ? RUN_WORDS[s.state](s) : '';
     // The file: chosen through the tracker (its handle kept, where the browser gives one) before the
     // workflow starts, or after a reload when a step takes the file the workflow began with.
@@ -648,7 +663,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     if (!shown) next = `Not started. Choose ${RECIPES[pending.key].files[fileKey(RECIPES[pending.key])].words.toLowerCase()} in step 1 to begin: Methodos starts when it is chosen. Or discard it.`;
     else if (s && op.kind === 'interactive') next = `This step is yours: it waits for ${op.waitsFor}. Say when it is done.`;
     else if (ready) next = `Ready to download: ${names(main)} is already in the format this workflow writes, so it is not converted into itself. Download it, and the step is done.`;
-    else if (s && !run) next = `Run ${OPERATIONS[s.op].tool ? `${OPERATIONS[s.op].tool}'s` : 'its'} ${lower(OPERATIONS[s.op].title)} below; the step is done when the run finishes.`;
+    else if (s && !run) next = `Run ${OPERATIONS[s.op].tool ? `${OPERATIONS[s.op].tool}'s` : 'its'} ${lower(OPERATIONS[s.op].title)}; the step is done when the run finishes.`;
     const message = [note?.words, next].filter(Boolean).join(' ');
     tMsg.textContent = message; tMsg.hidden = !message; tMsg.classList.toggle('warn', !!note?.warn);
     tSaid.textContent = [where, run, message].filter(Boolean).join(' ');
@@ -673,33 +688,34 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     if (partial) reopenB.textContent = heldFor(partial) ? `Reopen ${partial.name}` : `Choose ${partial.name} again`;
     if (s && !changed) {
       const p = wf ? { title: recipeOf(wf)?.title } : plan(pending.key, pending.answers);
-      onStep({ tool: PAGE_TOOL[s.op] ?? null, text: `Methodos, ${p.title}, step ${i + 1} of ${steps.length}: ${op.tool ? `${op.tool}, ` : ''}${lower(s.title)}.${op.kind === 'interactive' && op.waitsFor ? ` This step is yours: it waits for ${op.waitsFor}.` : ''}`,
+      onStep({ id: s.id, n: i, title, tool: PAGE_TOOL[s.op] ?? null, text: `Methodos, ${p.title}, step ${i + 1} of ${steps.length}: ${op.tool ? `${op.tool}, ` : ''}${lower(s.title)}.${op.kind === 'interactive' && op.waitsFor ? ` This step is yours: it waits for ${op.waitsFor}.` : ''}`,
         link: s.op === 'place' ? { href: wf && isWorkflowId(wf.id) ? `./chora.html#workflow=${wf.id}` : './chora.html', words: 'Open Chora' } : null });
     } else onStep(null);
+    // The result of an earlier step's run, put away by the host as the workflow went on (src/app.js), is
+    // summed up in that step's row, with a way to show it again.
+    const parked = page.parked?.();
+    const row = parked && tList.querySelector(`li[data-step="${CSS.escape(parked.step)}"][data-state="done"]`);
+    if (row) row.append(el('span', { className: 'track-result' }, `${parked.words} `, el('button', { type: 'button', className: 'link track-reopen', textContent: 'Show its result' })));
     showKept();
-    if (focus) show(q(tracker, 'h2'));
+    // Focus on the tracker's heading, or, at a phone's width, where the heading is not shown, on its strip.
+    if (focus) show(strip.offsetParent ? strip : q(tracker, 'h2'));
   }
   const sameRefs = (a, b) => !!a && !!b && a.length === b.length && a.every((r) => b.some((x) => x.sha256 === r.sha256 && x.size === r.size));
   const pendingNotes = (state) => (state ? (!RECIPES[state.recipe.key] ? [] : state.steps.filter((s) => s.unavailable).map((s) => plan(state.recipe.key, state.answers).notes[plan(state.recipe.key, state.answers).unavailable.indexOf(s.id)]).filter(Boolean))
     : plan(pending.key, pending.answers).notes);
 
-  /** The tracker's list: each step with its state in words, and the step at hand with how its run went. */
+  /** The tracker's list: each step with its checkbox and its state in words, and the step at hand with how its run went. */
   function trackList(list, rows, notes) {
     list.replaceChildren();
     for (const [n, s] of rows.entries()) {
-      const li = el('li', { className: `track-step is-${s.st}` });
-      li.dataset.step = s.id; li.dataset.state = s.st;
-      if (s.run && s.run.state !== 'pending') li.dataset.run = s.run.state;
-      if (s.st === 'current') li.setAttribute('aria-current', 'step');
       const words = s.run && RUN_WORDS[s.run.state] ? RUN_WORDS[s.run.state](s.run) : '';
-      li.append(mark(MARKS[s.st]),
-        el('span', { className: 'track-body' },
-          el('span', { className: 'track-state', textContent: STATE_WORDS[s.st] }), ' ',
-          s.tool ? el('span', { className: 'track-tool', textContent: s.tool }) : null, s.tool ? ': ' : null,
-          el('span', { className: 'track-act', textContent: s.title }),
-          s.st === 'unavailable' ? el('span', { className: 'track-why', textContent: s.available }) : null,
-          words ? el('span', { className: `track-run${['stopped', 'failed'].includes(s.run.state) ? ' warn' : ''}`, textContent: words }) : null,
-          n === rows.length - 1 && notes.length ? el('span', { className: 'track-end', textContent: notes.join(' ') }) : null));
+      const li = stepRow(s.id, s.st,
+        s.tool ? el('span', { className: 'track-tool', textContent: s.tool }) : null, s.tool ? ': ' : null,
+        el('span', { className: 'track-act', textContent: s.title }),
+        s.st === 'unavailable' ? el('span', { className: 'track-why', textContent: s.available }) : null,
+        words ? el('span', { className: `track-run${['stopped', 'failed'].includes(s.run.state) ? ' warn' : ''}`, textContent: words }) : null,
+        n === rows.length - 1 && notes.length ? el('span', { className: 'track-end', textContent: notes.join(' ') }) : null);
+      if (s.run && s.run.state !== 'pending') li.dataset.run = s.run.state;
       list.append(li);
     }
   }

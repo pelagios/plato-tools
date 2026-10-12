@@ -2183,7 +2183,7 @@ until the page has a Methodos panel (phase 3).
 `src/methodos/page.js` on elements the host gives it, so that where they sit can change without
 changing them.
 
-- **The interview** (`section#methodos`, opened by the one-line banner above step 1, the Methodos
+- **The interview** (`section#methodos`, opened by the one-line banner in the workflow rail, the Methodos
   card, or an address ending `#methodos`) asks three questions as radio groups, each a `fieldset`
   with its question as `legend`. The words and the routing are engine code,
   `src/engine/methodos/interview.js`: `choose(have, want)` gives a recipe and the yes-or-no questions
@@ -2195,9 +2195,14 @@ changing them.
   the last step says what was not done for it (`notes`: "The regions were not identified…"). Answers
   that lead to no workflow also offer "Tell us what you wanted to do": a new GitHub issue, in a new
   tab, titled with the two answers and labelled Methodos (`feedbackUrl()`).
-- **The tracker** (`section#methodos-tracker`, above step 1) lists the steps, each with its state in
-  words (Done, Now, To come, Not yet available), the current one `aria-current="step"`, and "Step 3
-  of 10" in a polite live region; no percentage, no time. The host's `onStep({ tool, text, link })`
+- **The tracker** (`section#methodos-tracker`, in the workflow rail: before step 1 in the page's order,
+  beside the steps on a wide screen; see the page's layout, below) lists the steps, each with a
+  disabled checkbox (`input.track-check`: ticked when done; the current step marked by `data-current`, a
+  ring and a dot, never a tick; unticked and greyed to come; dashed when not yet available, with its
+  reason), its state also in words for a screen reader (Done, Now, To come, Not yet available, visually
+  hidden in `.track-state`; `stepMark()` in `src/methodos/layout.js`), the state itself in
+  `li[data-step][data-state]`, the current one `aria-current="step"`, and "Step 3 of 10" in a polite
+  live region; no percentage, no time. The host's `onStep({ tool, text, link })`
   (`src/app.js`) chooses the step's tool as its card would (`#tool=`, step 2 narrowed) and says the
   step first in `#for-tool`; `onStep(null)` when the workflow is left.
 - **The join to the tools' runs.** Before a file is chosen the workflow is pending (its recipe and
@@ -2622,6 +2627,33 @@ A push to `main` runs the tests, builds the site and publishes it to GitHub Page
   and `node scripts/badges.mjs --check` says the same. Only the concept DOI
   (`10.5281/zenodo.23133141`) belongs in the repository: a version's own DOI does not exist until
   Zenodo has archived the tag.
+- **The page's layout** (Issue #33, Stephen's decision of 12 October 2026), desktop first, after the
+  Furo layout of the PLATO guide: `main.layout` is a grid in `src/styles.css`. From 78rem, three
+  columns: the tools as a rail on the left (`#toolbox`, each card its name and label, its sentence moved
+  under "More" as `.more-lede`, copied there by `src/app.js`), the steps in the centre (about 46rem),
+  and the workflow rail on the right (`#workflow-rail`, about 18rem, sticky: the tracker while a
+  workflow is followed, else the one line that opens the interview, so that nothing moves when a
+  workflow begins; and an empty, hidden `section#scope`, kept for Scope). From 60rem to 78rem, the
+  centre and the workflow rail, with the cards as a grid below the steps. Below 60rem one column, the
+  rail's contents flowing with the page (`display: contents`), and the tracker a strip held at the top
+  of the window (`#methodos-strip`, "Step n of N: Tool, what it does ▾"), which opens to the whole
+  tracker (`.open`, `aria-expanded`). The rails are placed by grid line and span every row (the rows
+  are given, the last flexible), so the order of reading and of the keyboard is unchanged: the tracker
+  before step 1, the tools after the steps. The masthead and footer span the columns.
+  **While a workflow is followed** (the tracker shown: `body[data-workflow]`, the recipe's key, set by
+  `workflowMode()` in `src/app.js` from `onStep`), there is one numbering: the page's own section
+  numbers are hidden, and the centre is titled with the tracker's current step (`#workflow-title`
+  in `#workflow-head`, the same words as the tracker's line, `whereWords()`), with `#for-tool` moved
+  under it. Once its file is chosen and recognised, step 1 folds to one line (`#files.folded`,
+  `#chosen-line`: the file's name, size and format, and "Change", which opens it again). A run's
+  Working and Result join step 2's panel. When the workflow goes on to a later step (`wentOn()`), the
+  last run's result is put away (`parked`) and summed up in its step's row of the tracker, with "Show its
+  result". After a file is chosen and recognised, and whenever the workflow goes on, what is to be done
+  next (step 2's action, under the step's title) is scrolled into view and its heading given the focus
+  (`showNext()`), politely: only when the focus is on the page itself, in step 1, the rail or the title,
+  or on a button of steps 2 to 4, never taken from a field elsewhere. Outside a workflow the page keeps
+  its numbered sections. The pure parts are in `src/methodos/layout.js` (`test/methodos-layout.test.js`);
+  the browser checks are `layout_checks` in `e2e/app_test.py`, at 1440, 1000 and 600 px.
 - **The toolbox.** The page opens with the introduction, step 1's drop zone, and one card per tool
   (`nav#toolbox` in `index.html`), and the README with a table of them. When a tool lands, update
   its card and its row in the same change. A card is a link to `#tool=<key>` (never a button's id),
@@ -2633,7 +2665,7 @@ A push to `main` runs the tests, builds the site and publishes it to GitHub Page
   Bring your data in, Check and convert, Identify and locate, Publish and keep, Explore), with each
   card's name an `h4`; the order is decided in `docs/plans/methodos.md` (11.2). Each group is a
   `div.tool-set` with `data-cards` (its number of cards), and the groups flow in one grid of card-wide
-  columns (3, 2 or 1, by container query), each spanning as many columns as it has cards, so that a
+  columns (3, 2 or 1, by container query: 1 in the tools rail from 78rem), each spanning as many columns as it has cards, so that a
   group of one shares a row; its list is on those columns by `subgrid`. A planned card
   (`li.tool.coming`: Peripleo, last) has a badge and no link, and is never chosen. Methodos's card,
   first, is a link (`#methodos-card`, no `data-tool`) that opens the interview. A

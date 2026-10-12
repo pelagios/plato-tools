@@ -37,6 +37,7 @@ import { REGION_PAGE as RP, REGION_WORDS } from './engine/words.js';
 import { levelNames, levelLabel, navigator as levelNavigator, firstOpen, chainOf, placeChain, constraintLine, notesOf, relaxOptions, costOf, levelRegions, unsettledOf, placesToLook, lockedPlaces, wouldClear, priorOf, restorePrior, nameOf, regionDomId, certaintyChoices, CERTAINTY_DEFAULT, regionMatchOptions } from './krisis/region-page.js';
 import { mountMethodos } from './methodos/page.js';
 import { workflowStore } from './methodos/store.js';
+import { chosenWords, wentOn } from './methodos/layout.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
 let worker, files = [], input = null, targets = {}, busy = false;
@@ -91,6 +92,7 @@ function choose(list) {
   $('only').value = '';   // and so is a list of its places to publish
   const c = $('chosen'); c.hidden = false;
   c.innerHTML = `<ul>${files.map((f) => `<li><span class="name">${escapeHtml(f.name)}</span> <span class="count">${fmtBytes(f.size)}</span></li>`).join('')}</ul><p>Looking at it…</p>`;
+  $('chosen-line').querySelector('.chosen-what').textContent = chosenWords(files);
   $('action').hidden = true; $('result').hidden = true; $('review').hidden = true;
   clearPreview();
   Object.assign(state, { phase: 'detecting' });
@@ -100,8 +102,9 @@ function onDetected({ input: inp, targets: t }) {
   input = inp; targets = t;
   const p = $('chosen').querySelector('p');
   // Not recognised, or recognised and refused with a reason (a IIIF Georeference Annotation): input.js, readable().
-  if (!inp.format || inp.reason !== undefined) { p.innerHTML = `<span class="warn">${escapeHtml(inp.reason)}</span>`; Object.assign(state, { phase: 'unrecognised', reason: inp.reason }); return; }
+  if (!inp.format || inp.reason !== undefined) { foldFiles(false); p.innerHTML = `<span class="warn">${escapeHtml(inp.reason)}</span>`; Object.assign(state, { phase: 'unrecognised', reason: inp.reason }); return; }
   const what = formatName(inp);
+  $('chosen-line').querySelector('.chosen-what').textContent = `${chosenWords(files)}: ${what}`;
   // Escaped: a workbook's sheet, named in it, is the file's own text.
   p.innerHTML = `This looks like <span class="detected">${escapeHtml(what)}</span>.`;
   const sel = $('target'); sel.innerHTML = '';
@@ -125,6 +128,10 @@ function onDetected({ input: inp, targets: t }) {
   clearPreview();
   gateOnColumns();
   $('action').hidden = false;
+  // In a workflow, step 1 has done its part: it folds to one line. Either way, what is to be done next
+  // (step 2) is brought into view, and given the focus if the user is not busy elsewhere.
+  if (document.body.dataset.workflow) foldFiles(true);
+  showNext($('action-h'), { from: stepHead() });
   Object.assign(state, { phase: 'detected', format: inp.format, profile: inp.profile || null });
   storageCheck();
   if ($('lookup').open) refreshPreview();   // Krisis: gazetteer lookup
@@ -151,6 +158,7 @@ function start(action, earlier) {
   const readingRefused = action === 'check' || action === 'convert' ? readingProblem() : null;
   if (readingRefused) { readingMessage(readingRefused); return refuse(readingRefused); }
   busy = true;
+  parked = null;   // a new run: the result of an earlier step's, put away, is about to be replaced
   const target = action === 'convert' ? $('target').value : null;
   $('progress').hidden = false; $('result').hidden = true;
   buttons(true);
@@ -815,7 +823,8 @@ let tool = null;
 // says what it reads, until another card or a file's action is chosen.
 let hermesChosen = false;
 const HERMES = 'For <strong>Hermes</strong>, the readers: your file is read when you drop it, whether annotations from Recogito, a TEI edition, a CSV file or workbook, or GeoJSON. Then choose what to do with it.';
-let workflowStep = null;   // the step of a Methodos workflow the user is at, if they follow one: { tool, text, link }
+let workflowStep = null;   // the step of a Methodos workflow the user is at, if they follow one: { id, n, title, tool, text, link }
+let parked = null;         // { step, words }: the result of the run that did an earlier step, put away as the workflow went on (workflowMode)
 // The fragment holds the tool chosen (#tool=<key>) and, back from Chora, the workflow it was opened for
 // (#workflow=<id>, src/chora/handback.js), together as #tool=<key>&workflow=<id>.
 const hashParam = (name) => { try { return new URLSearchParams(location.hash.replace(/^#/, '')).get(name); } catch { return null; } };
@@ -859,6 +868,8 @@ function chooseTool(key) {
     if (tool === 'figures' && !asCheck) presetFigures();
   }
   if (hermesChosen) note.insertAdjacentHTML('beforeend', HERMES);
+  // In a workflow #for-tool sits under the step's title (workflowMode): the two shown or hidden together.
+  if (note.parentElement === $('workflow-head')) $('workflow-head').hidden = $('workflow-title').hidden && note.hidden;
   Object.assign(state, { tool });
 }
 // Arithmos: Convert to N-Triples, with the Data Cube option (in Options) ticked. Applied again when a
@@ -888,7 +899,8 @@ function setHash(key) {
   try { history.replaceState(history.state, '', location.pathname + location.search + (parts.length ? `#${parts.join('&')}` : '')); } catch {}
 }
 function focusStep1() {
-  const h = $('files-h');
+  // Step 1 folded to its one line (in a workflow, its file chosen): step 2, which the tool narrowed, instead.
+  const h = $('files').classList.contains('folded') && !$('action').hidden ? $('action-h') : $('files-h');
   h.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' });
   h.focus({ preventScroll: true });
 }
@@ -929,14 +941,74 @@ const methodos = mountMethodos({
     base: () => $('base').value,
     // As if typed in Options: its own listeners (the preview made under it is let go) hear 'input' and 'change'.
     setBase: (v) => { if ($('base').value === v) return; $('base').value = v; for (const t of ['input', 'change']) $('base').dispatchEvent(new Event(t, { bubbles: true })); },
+    parked: () => parked,
+    reopenResult: () => { if (!parked) return; $('result').hidden = false; showNext($('result-h'), { asked: true }); },
   },
   workflow: arrivedFor,
   onStep(step) {
+    workflowMode(step);
     if (!step && !workflowStep) return;
+    const was = workflowStep;
     workflowStep = step;
     chooseTool(step?.tool ?? null); setHash(step?.tool ?? null);
+    // Gone on to the next step: the last run's result is put away (summed up in its step's row, to be shown
+    // again from there), and what the new step needs is brought into view, as at a file chosen.
+    if (wentOn(was, step)) {
+      if (!$('result').hidden) { parked = { step: was.id, words: $('summary').textContent.trim() }; $('result').hidden = true; }
+      showNext(!$('action').hidden ? $('action-h') : $('workflow-title'), { from: stepHead() });
+    }
   },
 });
+// ---- The page's layout while a workflow is followed (Issue #33; src/styles.css, body[data-workflow]) -----
+// One numbering: the page's own section numbers are hidden and the centre is titled with the workflow's
+// step; #for-tool goes under that title; step 1 folds to one line once its file is chosen; and the
+// result of a step's run is put away when the workflow goes on (`parked`, offered again from the tracker).
+function workflowMode(step) {
+  const tracker = $('methodos-tracker'), on = !tracker.hidden, note = $('for-tool'), head = $('workflow-head');
+  if (on) document.body.dataset.workflow = tracker.dataset.recipe || 'workflow'; else delete document.body.dataset.workflow;
+  if (on && note.parentElement !== head) head.append(note);
+  if (!on && note.parentElement === head) $('files-h').after(note);
+  $('workflow-title').textContent = on && step ? step.title : '';
+  $('workflow-title').hidden = !(on && step);
+  head.hidden = !on || ($('workflow-title').hidden && note.hidden);
+  if (!on) { foldFiles(false); parked = null; }
+  // The rail scrolls on its own when the tracker is taller than the window: the step at hand is kept in sight
+  // in it (the rail alone is scrolled, never the page).
+  const rail = $('workflow-rail'), now = tracker.querySelector('li[aria-current]');
+  if (on && now && rail.scrollHeight > rail.clientHeight) {
+    const r = rail.getBoundingClientRect(), n = now.getBoundingClientRect();
+    if (n.top < r.top || n.bottom > r.bottom) rail.scrollTop += n.top - r.top - r.height / 3;
+  }
+}
+/** Step 1 folded to one line (the files chosen, and "Change"), or opened again. */
+function foldFiles(on) {
+  $('files').classList.toggle('folded', on);
+  $('chosen-line').hidden = !on;
+}
+$('change-file').addEventListener('click', () => { foldFiles(false); showNext($('files-h'), { asked: true }); });
+/** In a workflow, the centre's title, shown: what is scrolled to, so that the step's title is seen with what it needs. */
+const stepHead = () => (document.body.dataset.workflow && !$('workflow-head').hidden ? $('workflow-head') : undefined);
+/**
+ * What is to be done next, brought into view and given the focus, as an accordion opens its next panel:
+ * politely, only when the user is not busy elsewhere (the focus on the page itself, in step 1, the
+ * workflow's rail or title, or on a button of steps 2 to 4), unless `asked` (a click that asked for it).
+ * The view is scrolled to `from` (the heading's section, unless given: a workflow's title above it).
+ */
+function showNext(heading, { asked = false, from } = {}) {
+  if (!heading || !heading.getClientRects().length) return;
+  const a = document.activeElement;
+  const free = asked || !a || a === document.body || !!a.closest('#files, #workflow-rail, #workflow-head')
+    || (!!a.closest('#action, #progress, #result') && a.matches('button, summary'));
+  if (!free) return;
+  (from || heading.closest('section') || heading).scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' });
+  heading.focus({ preventScroll: true });
+}
+// The tools rail (from 78rem) shows each card's name and label: its sentence is shown again at the head of
+// its "More" (styled to show only there), so that it can still be read.
+for (const li of document.querySelectorAll('#toolbox .tool')) {
+  const p = li.querySelector(':scope > .tool-link > p:not(.label), :scope > p:not(.label)'), body = li.querySelector('.more-body');
+  if (p && body) { const copy = p.cloneNode(true); copy.className = 'more-lede'; body.prepend(copy); }
+}
 // Methodos: the interview's base address field shows Options' base address, the one store of it.
 $('base').addEventListener('input', () => methodos.baseChanged());
 for (const id of ['methodos-card', 'methodos-ask']) $(id).addEventListener('click', (e) => {

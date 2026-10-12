@@ -88,8 +88,10 @@ h2 { font-size: 1.2rem; margin: 0 0 .75rem; display: flex; align-items: center; 
 .drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .drop small { display: block; color: var(--muted); margin-top: .5rem; }
 .compact-drop small { margin-top: .25rem; }
-#files-h:focus { outline: none; }
-#files-h:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Headings given the focus by the page (a card chosen, step 2 brought into view, a workflow's step): no ring for a
+   click, the ring for the keyboard. */
+:is(#files-h, #action-h, #result-h, #workflow-title):focus { outline: none; }
+:is(#files-h, #action-h, #result-h, #workflow-title):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* A tool chosen: what step 2 is narrowed to, and the way back to every action. */
 .for-tool { margin: -.35rem 0 .75rem; color: var(--muted); font-size: .95rem; }
 .for-tool strong { color: var(--fg); }
@@ -498,6 +500,9 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; tex
   .chora-panel { overflow: visible; padding: 0 1rem; }
 }
 
+/* Below 52rem the masthead's controls go below the title, as on a phone, where beside it they would run over
+   the name (Issue #33's screenshots, at 600px). */
+@media (max-width: 52rem) { .masthead-side { grid-column: 1 / -1; grid-row: 4; flex-wrap: wrap; justify-content: flex-start; gap: .4rem; margin-top: .5rem; } }
 /* The main page at a phone's width: a narrower gutter, one column of tools, a smaller drawing. */
 @media (max-width: 34rem) {
   header.top, main, footer { padding: 0 1rem; }
@@ -542,7 +547,7 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; tex
 .candidate .licence.warn { color: var(--warn); }
 .candidate:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (max-width: 34rem) { .lookup { padding: .5rem .6rem; } .lookup-queries { padding-left: 1.4rem; } }
-/* Methodos (src/methodos/page.js): the interview, and the tracker above step 1. Colours are the
+/* Methodos (src/methodos/page.js): the interview, and the tracker in the workflow rail. Colours are the
    page's tokens only, so the dark scheme needs no rule of its own here. */
 #methodos-h:focus, #methodos-tracker-h:focus { outline: none; }
 #methodos-h:focus-visible, #methodos-tracker-h:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -560,28 +565,40 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; tex
 .methodos-tracker { border-color: var(--accent); }
 .track-where { margin: 0 0 .5rem; font-weight: 700; }
 .track { list-style: none; margin: 0; padding: 0; counter-reset: track; }
-.track-step { counter-increment: track; display: flex; gap: .55rem; align-items: baseline; padding: .3rem .5rem; border-radius: 6px; }
-.track-step::before { content: counter(track) "."; min-width: 1.6rem; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
-.track-mark { width: 1rem; text-align: center; color: var(--muted); }
+.track-step { counter-increment: track; display: flex; flex-wrap: wrap; gap: 0 .5rem; align-items: baseline; padding: .3rem .5rem; border-radius: 6px; }
+.track-step::before { content: counter(track) "."; min-width: 1.4rem; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.track-label { flex: 1; min-width: 0; display: flex; gap: .5rem; align-items: baseline; }
 .track-body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.track-state { display: inline-block; min-width: 4.5rem; font-size: .85rem; font-weight: 700; color: var(--muted); }
 .track-tool { font-family: var(--font-headings); }
 .track-why { display: block; color: var(--warn); font-size: .95rem; }
-.track-step.is-done .track-mark, .track-step.is-done .track-state { color: var(--ok); }
+/* Each step's checkbox, disabled and drawn by the page (appearance: none), so that its three looks are its
+   own in both themes: ticked on the green of a step done; for the step at hand, a ring and a dot in the
+   accent, never a tick; and for a step to come, an empty box, greyed with its words. A step not yet
+   available has a dashed box. Its state is said in words too (.track-state, visually hidden). */
+.track-check { appearance: none; -webkit-appearance: none; flex: none; position: relative; top: .14rem; width: 1rem; height: 1rem; margin: 0; border: 1.5px solid var(--muted); border-radius: 3px; background: var(--card); opacity: 1; }
+.track-check:checked { background: var(--ok); border-color: var(--ok); }
+.track-check:checked::after { content: ""; position: absolute; left: .27rem; top: .06rem; width: .28rem; height: .55rem; border: solid var(--card); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.track-check[data-current] { border: 2px solid var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent); }
+.track-check[data-current]::after { content: ""; position: absolute; inset: .17rem; border-radius: 50%; background: var(--accent); }
+.track-step.is-todo .track-check { border-color: color-mix(in srgb, var(--muted) 65%, var(--card)); }
+.track-step.is-unavailable .track-check { border-style: dashed; }
 .track-step.is-current { background: color-mix(in srgb, var(--accent) 12%, var(--card)); box-shadow: inset 3px 0 0 var(--accent); }
-.track-step.is-current .track-mark, .track-step.is-current .track-state { color: var(--accent); }
+.track-step.is-current .track-act, .track-step.is-current .track-tool { font-weight: 700; }
 .track-step.is-todo .track-act, .track-step.is-todo .track-tool { color: var(--muted); }
+/* The result of a step's run, put away as the workflow went on: summed up under its step, to be shown again. */
+.track-result { flex-basis: 100%; padding-left: 3.4rem; color: var(--muted); font-size: .9rem; }
+.track-result button.link { font-size: inherit; }
 .track-left, .track-note { color: var(--muted); font-size: .95rem; margin: .5rem 0 0; }
 .workflow-step { color: var(--fg); }
-@media (max-width: 34rem) { .methodos, .methodos-tracker { padding: .85rem .8rem; } .track-state { min-width: 0; display: block; } .methodos-buttons button { flex: 1 1 auto; } }
-/* The one line above step 1 that opens the interview: quiet, and secondary to step 1's drop zone. */
+@media (max-width: 34rem) { .methodos, .methodos-tracker { padding: .85rem .8rem; } .methodos-buttons button { flex: 1 1 auto; } }
+/* The one line that opens the interview (in the workflow rail; above step 1 on a narrow screen): quiet, and secondary to step 1's drop zone. */
 .methodos-banner { margin: 1.25rem 0 -.5rem; font-size: .95rem; color: var(--muted); }
 .methodos-banner a { color: var(--accent); }
 #methodos-tracker-h { display: block; }
 /* A step not yet available is greyed, not numbered and skipped; the reason stays readable. */
 .track-step.is-unavailable { counter-increment: none; border: 1px dashed var(--line); }
 .track-step.is-unavailable::before { content: ""; }
-.track-step.is-unavailable .track-tool, .track-step.is-unavailable .track-act, .track-step.is-unavailable .track-state, .track-step.is-unavailable .track-mark { color: var(--muted); }
+.track-step.is-unavailable .track-tool, .track-step.is-unavailable .track-act { color: var(--muted); }
 .track-why { color: var(--muted); }
 .track-end { display: block; margin-top: .2rem; color: var(--warn); font-size: .95rem; }
 .track-message { margin: .5rem 0 0; font-size: .95rem; }
@@ -594,3 +611,94 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; tex
 .interview .methodos-text { margin: 0.35rem 0 0.5rem; }
 .interview .methodos-text label { display: block; margin-bottom: 0.25rem; }
 .interview #methodos-base { width: 100%; max-width: 32rem; box-sizing: border-box; }
+
+/* ---- The main page's layout (Issue #33, Stephen's decision of 12 October 2026), desktop first, after the
+   Furo layout of the PLATO guide. From 78rem, three columns: the tools as a rail on the left (#toolbox,
+   compact: each card's name and label, its sentence under "More"), the steps in the centre (about 46rem),
+   and the workflow rail on the right (about 18rem, sticky: the tracker while a workflow is followed, else
+   the one line that opens Methodos's interview, so that nothing moves when a workflow begins). From 60rem
+   to 78rem, the centre and the workflow rail, with the tools as the grid of cards below the steps. Below
+   60rem, one column, the tracker a strip at the top of the window. The masthead and the footer span the
+   columns. The rails are placed by grid line, not moved in the page: the order of reading and of the
+   keyboard is as before (the tracker before step 1, the tools after the steps). Each rail spans every row
+   (1 / -1: the rows are given, and the last is flexible, which takes a tall rail's height), so that it is
+   as tall as the steps, and can stick. */
+.workflow-head { margin: 1.25rem 0; }
+.workflow-head h2 { font-size: 1.45rem; margin: 0 0 .35rem; }
+.workflow-head .for-tool { margin: 0; }
+.chosen-line { margin: 0; }
+.chosen-line .chosen-what { font-weight: 700; overflow-wrap: anywhere; }
+.chosen-line button.link { font-size: .95rem; margin-left: .35rem; }
+/* Step 1 folded (in a workflow, its file chosen and recognised): the one line, and nothing else. */
+#files.folded { padding-top: .6rem; padding-bottom: .6rem; }
+#files.folded > :not(.chosen-line) { display: none; }
+.more-lede { display: none; }
+.track-strip { display: none; }
+/* In a workflow, one numbering: the page's own numbers are hidden, the centre's title is the step's. A run's
+   Working and Result join step 2's panel, below a dashed line, as part of the step at hand. */
+body[data-workflow] main .step { display: none; }
+main.layout > section, .workflow-head, #methodos-tracker-h, #methodos-h { scroll-margin-top: 1rem; }
+body[data-workflow] #action:not([hidden]):has(+ #progress:not([hidden]), + #progress[hidden] + #result:not([hidden])) { border-bottom: 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0; margin-bottom: 0; }
+body[data-workflow] #action:not([hidden]) + #progress:not([hidden]),
+body[data-workflow] #action:not([hidden]) + #progress[hidden] + #result:not([hidden]),
+body[data-workflow] #action:not([hidden]) + #progress:not([hidden]) + #result:not([hidden]) { margin-top: 0; border-top: 1px dashed var(--line); border-top-left-radius: 0; border-top-right-radius: 0; }
+body[data-workflow] #action:not([hidden]) + #progress:not([hidden]):has(+ #result:not([hidden])) { border-bottom: 0; border-radius: 0; margin-bottom: 0; }
+@media (min-width: 60rem) {
+  header.top, main.layout, footer { max-width: 74rem; }
+  main.layout { display: grid; grid-template-columns: minmax(0, 1fr) 18rem; grid-template-rows: repeat(12, auto) 1fr; column-gap: 1.5rem; align-items: start; padding-top: 1.25rem; }
+  main.layout > * { grid-column: 1; margin-top: 0; margin-bottom: 1.25rem; }
+  main.layout > .workflow-rail { grid-column: 2; grid-row: 1 / -1; position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow-y: auto; overscroll-behavior: contain; margin: 0; }
+  main.layout > .workflow-head { margin-top: 0; }
+  .workflow-rail > section { margin: 0 0 1rem; }
+  .workflow-rail .methodos-tracker { padding: .85rem 1rem; font-size: 1rem; }
+  .workflow-rail .methodos-tracker h2 { font-size: 1.1rem; }
+  .workflow-rail .track-step { padding: .3rem .4rem; }
+  .workflow-rail .track-note { font-size: .88rem; }
+  .workflow-rail .methodos-buttons button { flex: 1 1 auto; font-size: .95rem; }
+  /* No workflow followed: the line that opens the interview, as a quiet panel where the tracker will be. */
+  .workflow-rail .methodos-banner { margin: 0; padding: .75rem 1rem; border: 1px dashed var(--line); border-radius: 10px; font-size: .95rem; }
+}
+@media (min-width: 78rem) {
+  header.top, main.layout, footer { max-width: 84rem; }
+  main.layout { grid-template-columns: 13.5rem minmax(0, 46rem) 18rem; column-gap: 2rem; justify-content: center; }
+  main.layout > * { grid-column: 2; }
+  main.layout > .workflow-rail { grid-column: 3; }
+  main.layout > #toolbox { grid-column: 1; grid-row: 1 / -1; position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow-y: auto; overscroll-behavior: contain; margin: 0; padding: 0 .2rem .5rem 0; }
+  /* The tools rail: each card its name and label, the whole card still the link to the tool (Chora's to its
+     own page); its sentence is under "More", at the head of what that shows (.more-lede, src/app.js). */
+  #toolbox .tool-sets { row-gap: .75rem; }
+  #toolbox .tool-group { font-size: .95rem; margin-bottom: .3rem; }
+  #toolbox .tools { gap: .4rem; }
+  #toolbox .tools.choose .tool-link { padding: calc(.4rem + 11px) .65rem .3rem; }
+  #toolbox .tools.choose .tool.coming { padding: .45rem .65rem .35rem; }
+  #toolbox .tool h4 { font-size: 1.05rem; }
+  #toolbox .tool .label { margin: .05rem 0 0; font-size: .72rem; }
+  #toolbox .tool-link > p:not(.label), #toolbox .tool.coming > p:not(.label), #toolbox .tool .go { display: none; }
+  /* "More" sits at the right of the label's line, and what it opens flows below the card's name. */
+  #toolbox .tool .more { padding: 0 .65rem; font-size: .88rem; }
+  #toolbox .tool .more[open] { padding-bottom: .4rem; }
+  #toolbox .tool .more > summary { position: absolute; right: .6rem; top: calc(.4rem + 11px + 1.3rem); padding: 0; font-size: .8rem; }
+  #toolbox .tools.choose .tool.coming .more { padding: 0; }
+  #toolbox .tools.choose .tool.coming .more > summary { top: calc(.45rem + 1.3rem); }
+  #toolbox .tool .more[open] > .more-body { margin-top: .3rem; }
+  #toolbox .tool .more-lede { display: block; }
+  #toolbox .badge { top: .4rem; right: .45rem; font-size: .65rem; }
+}
+/* Below 60rem the rail's contents flow with the page (display: contents), and the tracker is a strip held at
+   the top of the window: "Step n of N: Tool, what it does ▾", which opens to the whole tracker. Closed, it
+   shows the strip alone, with a warning the tracker gives (its live region is still read out). */
+@media (max-width: 59.99rem) {
+  .workflow-rail { display: contents; }
+  .methodos-tracker { position: sticky; top: 0; z-index: 3; box-shadow: 0 2px 8px rgb(0 0 0 / .14); }
+  .methodos-tracker:not(.open) { padding-top: .35rem; padding-bottom: .35rem; }
+  .methodos-tracker:not(.open) > :not(.track-strip, #methodos-said, .track-message.warn) { display: none; }
+  .methodos-tracker.open { max-height: 85vh; overflow-y: auto; }
+  .methodos-tracker .track-where { display: none; }   /* the strip says it */
+  .track-strip { display: flex; width: 100%; align-items: baseline; gap: .5rem; padding: .35rem 0; border: 0; background: none; color: var(--fg); text-align: left; font-weight: 700; }
+  .track-strip .strip-where { flex: 1; min-width: 0; }
+  .track-strip .strip-mark { color: var(--accent); transition: transform .12s; }
+  .methodos-tracker.open .track-strip { margin-bottom: .4rem; border-bottom: 1px solid var(--line); }
+  .methodos-tracker.open .track-strip .strip-mark { transform: rotate(180deg); }
+  body[data-workflow] main :is(section, .workflow-head) { scroll-margin-top: 4.5rem; }
+}
+@media (max-width: 59.99rem) and (prefers-reduced-motion: reduce) { .track-strip .strip-mark { transition: none; } }

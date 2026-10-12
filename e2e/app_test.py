@@ -2407,7 +2407,7 @@ def main():
             krisis_regions_case(page, tmp, url)
             ctx.close()
             front = pw.chromium.launch(headless=True)
-            try: front_page_checks(front, url); card_chosen_checks(front, url, pw); theme_checks(front, url); methodos_page_checks(front, url)
+            try: front_page_checks(front, url); card_chosen_checks(front, url, pw); theme_checks(front, url); methodos_page_checks(front, url); layout_checks(front, url)
             finally: front.close()
             methodos_checks(pw, url, tmp)
             chora_checks(pw, url, tmp)
@@ -3623,11 +3623,19 @@ def front_page_checks(browser, url):
                        cards: ul ? [...ul.children].map((li) => li.tagName === 'LI' ? li.querySelector('h4')?.textContent.trim() : '!' + li.tagName) : [] }; })""")
             first = page.evaluate("() => { const c = document.querySelector('#toolbox .tool'); return c && { name: c.querySelector('h4')?.textContent.trim(), coming: c.classList.contains('coming'), link: !!c.querySelector('.tool-link') }; }")
             every = page.eval_on_selector_all('#toolbox .tool', 'es => es.length')
-            # The groups flow (Stephen, 2 October): a group of one shares a row with the next, so Start
-            # here sits beside Bring your data in, and Publish and keep beside Explore; the groups of
-            # three and two that follow each other start rows of their own. Tops of the headings, by group.
-            rows = page.evaluate("""() => Object.fromEntries([...document.querySelectorAll('#toolbox h3.tool-group')].map((h) => [h.id.slice(3), Math.round(h.getBoundingClientRect().top)]))""")
+            # The groups flow (Stephen, 2 October) where the cards are a grid below the steps (from 60rem to
+            # 78rem, here 1200 px: three columns): a group of one shares a row with the next, so Start here
+            # sits beside Bring your data in, and Publish and keep beside Explore; the groups of three and two
+            # that follow each other start rows of their own. Tops of the headings, by group. From 78rem (1280
+            # px) the tools are a rail of one column left of the steps (Issue #33): one left edge, each group below the last.
+            heads = """() => Object.fromEntries([...document.querySelectorAll('#toolbox h3.tool-group')].map((h) => [h.id.slice(3), [Math.round(h.getBoundingClientRect().top), Math.round(h.getBoundingClientRect().left)]]))"""
+            rail = page.evaluate(heads)
+            page.set_viewport_size({'width': 1200, 'height': 900})
+            rows = {k: v[0] for k, v in page.evaluate(heads).items()}
             vw = page.evaluate('() => innerWidth')
+            page.set_viewport_size({'width': 1280, 'height': 900})
+            order = ['start', 'in', 'check', 'locate', 'publish', 'explore']
+            one_column = len(rail) == 6 and len({v[1] for v in rail.values()}) == 1 and all(rail[a][0] < rail[b][0] for a, b in zip(order, order[1:]))
             page.click('#toolbox ul[aria-labelledby="tg-check"] .tool-link[data-tool="check"]')
             chose = {'hash': page.evaluate('() => location.hash'), 'tool': page.evaluate('() => window.__plato.tool ?? null'),
                      'current': page.eval_on_selector_all('#toolbox [aria-current]', 'es => es.map((e) => e.dataset.tool)')}
@@ -3636,10 +3644,10 @@ def front_page_checks(browser, url):
             return ([(g['heading'], g['cards']) for g in got] == want and all(g['visible'] and g['list'] for g in got) and every == 10
                     and first == {'name': 'Methodos', 'coming': False, 'link': True}
                     and chose == {'hash': '#tool=check', 'tool': 'check', 'current': ['check']}
-                    and vw >= 1000 and rows.get('start') == rows.get('in') and rows.get('publish') == rows.get('explore')
-                    and rows['in'] < rows['check'] < rows['locate'] < rows['publish']), {'groups': got, 'first card': first, 'cards': every, 'Elenchos chosen': chose, 'heading tops': rows, 'width': vw}
+                    and vw == 1200 and rows.get('start') == rows.get('in') and rows.get('publish') == rows.get('explore')
+                    and rows['in'] < rows['check'] < rows['locate'] < rows['publish'] and one_column), {'groups': got, 'first card': first, 'cards': every, 'Elenchos chosen': chose, 'heading tops at 1200 px': rows, 'width': vw, 'the rail at 1280 px (top, left)': rail}
         finally: ctx.close()
-    attempt('front page: the ten cards are in six groups under plain headings, in the order decided, Methodos (a link to its interview) first, the groups of one sharing a row, and a card in a group is still chosen', grouped)
+    attempt('front page: the ten cards are in six groups under plain headings, in the order decided, Methodos (a link to its interview) first, the groups of one sharing a row as cards below the steps and in one column as the tools rail, and a card in a group is still chosen', grouped)
 
     def guide_links():
         # The masthead's Guide and step 1's temPlato link go where the guide has them: the presence is
@@ -5590,7 +5598,9 @@ def card_chosen_checks(browser, url, pw):
               return { blue, ink }; }"""
             import base64
             shot = lambda sel: base64.b64encode(page.locator(sel).screenshot()).decode()
-            card = page.evaluate(count, shot('#toolbox .tool-link[data-tool="check"] > p:not(.label)'))
+            # The card's name (its words, not its icon, which is drawn in the band's blue): from 78rem the tools are a
+            # rail whose cards show their name and label only, with "More" beside the label (Issue #33).
+            card = page.evaluate(count, shot('#toolbox .tool-link[data-tool="check"] h4 .why'))
             plain = page.evaluate(count, shot('#e2e-visited'))
             return plain['blue'] > 20 and card['ink'] > 20 and card['blue'] == 0, {'the card\'s text': card, 'a link blue only when visited': plain}
         finally: ctx.close(); ff.close()
@@ -5635,7 +5645,7 @@ def methodos_page_checks(browser, url):
     attempt("Methodos: the interview's answers give the recipe and the steps test/methodos-predicted.json predicts, for each of its rows", predicted)
 
     def tracker():
-        # Follow the first prediction (Map your data): the tracker above step 1 shows every step, the first
+        # Follow the first prediction (Map your data): the tracker (before step 1 in the page) shows every step, the first
         # now and the rest to come; the first is Hermes's columns (no #tool=, said in #for-tool); a step
         # done moves to Elenchos's check, which chooses #tool=check; back a step returns; leaving clears all.
         p = METHODOS_PREDICTED[0]
@@ -5784,6 +5794,113 @@ def methodos_page_checks(browser, url):
             return ok, {'overflow (interview, tracker)': (wide1, wide2), **r}
         finally: ctx.close()
     attempt('Methodos at 390 px in dark: no sideways scroll, dark colours, and no inline script, inline handler or title attribute with the interview and tracker open', clean_and_narrow)
+
+# ---- The main page's layout (Issue #33; src/styles.css, src/methodos/layout.js) ---------------------------
+# Three columns from 78rem (the tools rail, the steps, the workflow rail), two from 60rem, one below with the
+# tracker a strip; in a workflow, one numbering (the page's numbers hidden, the centre titled with the step),
+# the tracker's steps as checkboxes, step 1 folded once its file is chosen, and what is to be done next
+# brought into view. Measured, not read from classes: each position and each absence has a presence beside
+# it in the same reading (the tracker beside the step and the step in view; the numbers hidden, and shown
+# before; a tick on the step done and none on the current one).
+LAYOUT = """() => { const r = (id) => { const e = document.getElementById(id); if (!e || e.closest('[hidden]') || !e.getClientRects().length) return null;
+    const b = e.getBoundingClientRect(); return { left: Math.round(b.left), right: Math.round(b.right), top: Math.round(b.top), bottom: Math.round(b.bottom), width: Math.round(b.width) }; };
+  const steps = [...document.querySelectorAll('#methodos-track li.track-step')].map((li) => { const c = li.querySelector('input.track-check'), w = li.querySelector('.track-state');
+    return { id: li.dataset.step, state: li.dataset.state, box: !!c && c.type === 'checkbox' && c.disabled, checked: !!c?.checked, current: !!c && c.hasAttribute('data-current'),
+      words: w?.textContent || null, wordsShown: !!w && w.getBoundingClientRect().width > 2 }; });
+  const numbers = [...document.querySelectorAll('main .step')].filter((e) => !e.closest('[hidden]'));
+  const strip = document.getElementById('methodos-strip');
+  return { w: innerWidth, h: innerHeight, scrollY: Math.round(scrollY), tracker: r('methodos-tracker'), files: r('files'), action: r('action'), actionH: r('action-h'), toolbox: r('toolbox'),
+    title: r('workflow-title') ? document.getElementById('workflow-title').textContent : null,
+    where: document.getElementById('methodos-tracker-where')?.textContent || '', list: r('methodos-track'), strip: r('methodos-strip'), stripWords: strip?.textContent.replace('▾', '').trim() || null,
+    expanded: strip?.getAttribute('aria-expanded') || null, line: r('chosen-line'), drop: r('drop'),
+    numbersShown: numbers.filter((e) => e.getClientRects().length).length, numbersAll: numbers.length,
+    workflow: document.body.dataset.workflow || null, focus: document.activeElement?.id || null, steps }; }"""
+def layout_checks(browser, url):
+    def fresh(width, height=900):
+        ctx = browser.new_context(viewport={'width': width, 'height': height}, reduced_motion='reduce')
+        page = ctx.new_page(); page.set_default_timeout(T(8) * 1000)
+        page.goto(NOTOOLS if PROVE else url)
+        if wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready').get('phase') != 'ready': raise RuntimeError('the main page did not start')
+        return ctx, page
+    L = lambda page: page.evaluate(LAYOUT)
+    def follow(page):
+        # Map your data, as in the screenshots asked for: a table, places on a map, with regions, drawing, no publishing.
+        page.click('#methodos-ask'); until(page, "!document.getElementById('methodos').hidden", 5)
+        page.check('input[name="methodos-have"][value="table"]'); page.check('input[name="methodos-want"][value="map"]')
+        for k, v in (('has-regions', 'yes'), ('will-draw', 'yes'), ('will-publish', 'no')): page.check(f'input[name="methodos-ask-{k}"][value="{v}"]')
+        page.fill('#methodos-base', 'https://example.org/parishes/')
+        until(page, "() => !document.getElementById('methodos-start').hidden", 5)
+        page.click('#methodos-start'); until(page, "!document.getElementById('methodos-tracker').hidden", 5)
+    def chosen(page):
+        # From the top of the page, the focus on the page itself, as after a click elsewhere.
+        page.evaluate('() => { document.activeElement?.blur(); scrollTo(0, 0); }')
+        page.set_input_files('#picker', [str(MYDATA_CSV)])
+        until(page, "() => window.__plato?.phase === 'detected' && document.getElementById('methodos-tracker').dataset.status === 'idle' && !!window.__plato.columns?.headers", 30)
+        page.wait_for_timeout(300)
+    err = lambda r: {'error': r['error']} if 'error' in r else {}
+
+    r = {}
+    try:
+        ctx, page = fresh(1440)
+        try:
+            r['landing'] = L(page)
+            follow(page); r['pending'] = L(page)
+            chosen(page); r['chosen'] = L(page)
+            page.click('#methodos-done'); until(page, "() => document.querySelector('#methodos-track li[data-step=\"check\"]')?.dataset.state === 'current'", 10)
+            page.wait_for_timeout(300); r['step2'] = L(page)
+        finally: ctx.close()
+    except Exception as e: r['error'] = 'harness error: ' + str(e).split('\n')[0][:200]
+    a, p, c, d = (r.get(k) or {} for k in ('landing', 'pending', 'chosen', 'step2'))
+    inview = lambda x, box: bool(box) and 0 <= box['top'] < x['h']
+    beside = lambda x: (bool(x.get('tracker')) and bool(x.get('action')) and x['tracker']['left'] >= x['action']['right']
+                        and x['tracker']['top'] < x['h'] and x['tracker']['bottom'] > 0)
+    check('layout at 1440×900: three columns, the tools rail left of the steps, and the tracker beside the step, in view, while the workflow runs',
+          beside(c) and beside(d) and inview(d, d.get('actionH')) and bool(a.get('toolbox')) and bool(a.get('files')) and a['toolbox']['right'] <= a['files']['left'],
+          {k: {x: (r.get(k) or {}).get(x) for x in ('tracker', 'action', 'toolbox', 'files', 'h')} for k in ('landing', 'chosen', 'step2')} | err(r))
+    check('layout: once the file is chosen and recognised, step 2\'s action is brought into view (the page scrolled) and takes the focus, and step 1 folds to its one line',
+          not p.get('action') and inview(c, c.get('actionH')) and c.get('scrollY', 0) > 0 and c.get('focus') == 'action-h'
+          and bool(c.get('line')) and not c.get('drop') and bool(p.get('drop')) and not p.get('line'),
+          {'before': {x: p.get(x) for x in ('action', 'drop', 'line')}, 'after': {x: c.get(x) for x in ('actionH', 'scrollY', 'focus', 'line', 'drop')}} | err(r))
+    check('layout: the workflow going on to step 2 brings its action into view again, with the focus',
+          inview(d, d.get('actionH')) and d.get('focus') == 'action-h' and (d.get('title') or '').startswith('Step 2 of '), {x: d.get(x) for x in ('actionH', 'focus', 'title')} | err(r))
+    check('layout in a workflow: the page\'s own section numbers are hidden (shown before it), and the centre is titled with the tracker\'s current step',
+          a.get('numbersShown', 0) >= 1 and d.get('numbersAll', 0) >= 2 and d.get('numbersShown') == 0 and d.get('workflow') == 'map-your-data' and not a.get('workflow')
+          and bool(d.get('title')) and d['title'] + '.' == d.get('where') and d['title'].startswith('Step 2 of ') and 'Elenchos' in d['title']
+          and bool(p.get('title')) and p['title'] + '.' == p.get('where') and p['title'].startswith('Step 1 of '),
+          {'numbers before': a.get('numbersShown'), 'numbers in the workflow': [d.get('numbersShown'), d.get('numbersAll')], 'title': [p.get('title'), d.get('title')], 'where': [p.get('where'), d.get('where')]} | err(r))
+    def boxes_match(x):
+        st = x.get('steps') or []
+        return (len(st) >= 5 and all(s['box'] and s['checked'] == (s['state'] == 'done') and s['current'] == (s['state'] == 'current') and s['words'] and not s['wordsShown'] for s in st)
+                and sum(s['state'] == 'current' for s in st) == 1 and any(s['state'] == 'todo' for s in st))
+    st2 = d.get('steps') or []
+    check('layout: each step of the tracker has a disabled checkbox, ticked exactly when done, the current one marked and not ticked, its words kept for a screen reader (visually hidden)',
+          boxes_match(c) and boxes_match(d) and not any(s['checked'] for s in c.get('steps') or [])
+          and [s['state'] for s in st2[:2]] == ['done', 'current'] and st2[0]['checked'] and not st2[1]['checked'],
+          {'step 1': c.get('steps'), 'step 2': st2} | err(r))
+
+    r = {}
+    try:
+        ctx, page = fresh(1000)
+        try: follow(page); chosen(page); r['two'] = L(page)
+        finally: ctx.close()
+        ctx, page = fresh(600)
+        try:
+            follow(page); chosen(page); r['one'] = L(page)
+            page.click('#methodos-strip'); page.wait_for_timeout(200); r['open'] = L(page)
+            page.click('#methodos-strip'); page.evaluate('() => scrollTo(0, document.documentElement.scrollHeight)'); page.wait_for_timeout(300); r['scrolled'] = L(page)
+        finally: ctx.close()
+    except Exception as e: r['error'] = 'harness error: ' + str(e).split('\n')[0][:200]
+    t, o, op, sc = (r.get(k) or {} for k in ('two', 'one', 'open', 'scrolled'))
+    check('layout at 1000 px: two columns, the steps and the tracker beside them, with the tools as cards below the steps',
+          beside(t) and bool(t.get('toolbox')) and bool(t.get('action')) and t['toolbox']['left'] == t['action']['left'] and t['toolbox']['top'] > t['action']['top'] and not t.get('strip'),
+          {x: t.get(x) for x in ('tracker', 'action', 'toolbox', 'strip')} | err(r))
+    check('layout at 600 px: one column, the tracker a strip saying the step ("Step 1 of …") with its list folded away, which opens to the list, and stays at the top of the window when scrolled',
+          bool(o.get('tracker')) and bool(o.get('action')) and abs(o['tracker']['left'] - o['action']['left']) <= 2 and o['tracker']['width'] == o['action']['width']
+          and bool(o.get('strip')) and (o.get('stripWords') or '') + '.' == o.get('where') and (o.get('stripWords') or '').startswith('Step 1 of ') and not o.get('list') and o.get('expanded') == 'false'
+          and bool(op.get('list')) and op.get('expanded') == 'true'
+          and bool(sc.get('tracker')) and sc['tracker']['top'] <= 1 and sc.get('scrollY', 0) > 500 and sc['w'] <= 600,
+          {'one': {x: o.get(x) for x in ('tracker', 'action', 'strip', 'stripWords', 'where', 'list', 'expanded')}, 'opened': {x: op.get(x) for x in ('list', 'expanded')},
+           'scrolled': {x: sc.get(x) for x in ('tracker', 'scrollY')}} | err(r))
 
 def iiif_checks(pw, url, tmp):
     fx = start_fixtures(tmp); A, B, log = fx['A'], fx['B'], fx['log']
