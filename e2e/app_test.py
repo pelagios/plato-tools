@@ -2801,9 +2801,12 @@ def methodos_join_checks(browser, base, hook, tmp):
 # only after a save, the user's file never kept).
 SEAM_OVERVIEW = '''() => { const m = window.__chora_map; return ['chora-overview-clusters', 'chora-overview-points'].reduce((n, l) => n + (m.getLayer(l) ? m.queryRenderedFeatures({ layers: [l] }).length : 0), 0); }'''
 SEAM_CHOSEN = "() => [...document.querySelectorAll('#chosen .name')].map((e) => e.textContent)"
-# The file kept from the main page (src/lib/kept-file.js): the names in its about.json, in OPFS, or null when none is kept.
-SEAM_KEPT = '''async () => { try { const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('kept-file');
-  return JSON.parse(await (await (await d.getFileHandle('about.json')).getFile()).text()).files.map((f) => f.name); } catch { return null; } }'''
+# The file kept from the main page (src/lib/kept-file.js): the names in the newest whole kept-file-* folder's about.json, in OPFS, or null when none is kept.
+SEAM_KEPT = '''async () => { try { const r = await navigator.storage.getDirectory(), names = [];
+  for await (const [n, h] of r.entries()) if (h.kind === 'directory' && n.startsWith('kept-file-')) names.push(n);
+  for (const n of names.sort().reverse()) { try { const d = await r.getDirectoryHandle(n);
+    return JSON.parse(await (await (await d.getFileHandle('about.json')).getFile()).text()).files.map((f) => f.name); } catch { /* not whole */ } }
+  return null; } catch { return null; } }'''
 # The offer under "Choose your data": its words if shown, else null.
 SEAM_SHOWN = "() => { const e = document.getElementById('kept-file'); return !!e && !e.hidden; }"
 SEAM_OFFER = "() => { const e = document.getElementById('kept-file'); return e && !e.hidden ? e.textContent.replace(/\\s+/g, ' ').trim() : null; }"
@@ -2897,7 +2900,9 @@ def chora_seams_checks(pw, url, tmp):
             p.goto(NOTOOLS if PROVE else base); wait_state(p, lambda s: s.get('phase') == 'ready', T(30), 'ready')
             soon(p, SEAM_SHOWN, 15); p.wait_for_timeout(500)
             got['typed: chosen'] = p.evaluate(SEAM_CHOSEN); got['typed: offered'] = p.evaluate(SEAM_OFFER)
-            p.go_back(); until(p, "window.__chora && window.__chora.phase === \"ready\"", 60)   # Chora again, with nothing handed over now
+            # The typed visit took the mark of the way to Chora: the way taken again, then the browser's Back.
+            p.click('#kept-use'); detected_again(p, [f.name])
+            p.click('#to-chora'); chora_loaded(p)
             p.go_back()
             got['by Back'] = detected_again(p, [f.name]); got['shown from'] = shown_from(p)
             got['chosen again'] = p.evaluate('() => window.__plato.chosenAgain || null'); got['left'] = p.evaluate(SEAM_KEPT)
@@ -3011,7 +3016,7 @@ def chora_seams_checks(pw, url, tmp):
             follow_publish(p)
             if not choose(p, customs): return False, 'not detected'
             until(p, "document.getElementById('methodos-tracker').dataset.keptOwn === 'true'", 30)
-            got = {'said': p.evaluate(JOIN_STATE)['kept'], 'kept': p.evaluate(OUTPUTS_KEPT)}
+            got = {'said': p.evaluate(JOIN_STATE)['kept'], 'kept': p.evaluate(OUTPUTS_KEPT), 'main page\'s copy too': p.evaluate(SEAM_KEPT)}
             p.reload(); wait_state(p, lambda s: s.get('phase') in ('ready', 'detecting', 'detected'), T(30), 'ready')
             names = sorted(f.name for f in customs)
             got['chosen again'] = soon(p, '(n) => JSON.stringify([...document.querySelectorAll("#chosen .name")].map((e) => e.textContent).sort()) === JSON.stringify(n) && window.__plato.phase === "detected"', 60, names)
@@ -3019,12 +3024,41 @@ def chora_seams_checks(pw, url, tmp):
             t = p.evaluate(JOIN_STATE); got['after'] = {k: t[k] for k in ('message', 'kept', 'pick', 'steps')}
             p.click('#methodos-leave'); until(p, "() => document.getElementById('methodos-tracker').hidden", 10)
             got['left'] = p.evaluate(OUTPUTS_KEPT)
+            # Let go, the workflow hands its user's files over as the main page's kept file: one copy, once.
+            got['handed over'] = kept_is(p, [f.name for f in customs]); got['kept after Leave'] = p.evaluate(SEAM_KEPT)
             ok = (got['said'] and got['said'].startswith(f'Kept in this browser for the next steps: your {len(customs)} files') and 'Nothing leaves this computer' in got['said']
-                  and got['kept'] and len(got['kept']) == len(customs) and got['chosen again'] and t['steps'].get('check') == 'current'
-                  and t['pick'] is None and got['left'] in (None, []))
+                  and got['kept'] and len(got['kept']) == len(customs) and got['main page\'s copy too'] is None and got['chosen again'] and t['steps'].get('check') == 'current'
+                  and t['pick'] is None and got['left'] in (None, []) and got['handed over'])
             return ok, got
         finally: ctx.close()
-    attempt('Chora\'s seams: the user\'s own files are kept for the workflow (the tracker says so), chosen again after a reload with no file handle, and let go with the workflow', own_kept)
+    attempt('Chora\'s seams: the user\'s own files are kept for the workflow alone (the tracker says so; no second copy as the main page\'s kept file), chosen again after a reload with no file handle, and handed over as the kept file when the workflow is left', own_kept)
+
+    def not_from_chora():
+        # The negative control: a Back into the main page that is not back from Chora (the way to Chora
+        # never taken from this tab) only offers the kept file; the same Back after the way to Chora was
+        # taken (the presence) chooses it again. In the browser that keeps no page in its memory.
+        ctx = fresh(nocache)
+        try:
+            p = main_ready(ctx.new_page())
+            f = d / 'not-from-chora.json'; shutil.copyfile(ant, f)
+            if not choose(p, [f]): return False, 'not detected'
+            if not kept_is(p, [f.name]): return False, {'kept': p.evaluate(SEAM_KEPT)}
+            got = {}
+            p.goto(NOTOOLS if PROVE else base); wait_state(p, lambda s: s.get('phase') == 'ready', T(30), 'ready')   # typed
+            p.goto('about:blank'); p.go_back()                                                                         # another page, and Back
+            wait_state(p, lambda s: s.get('phase') in ('ready', 'detecting', 'detected'), T(30), 'ready')
+            soon(p, SEAM_SHOWN, 15); p.wait_for_timeout(1000)
+            got['other page, Back'] = {'shown from': shown_from(p), 'chosen': p.evaluate(SEAM_CHOSEN), 'offered': p.evaluate(SEAM_OFFER), 'back from Chora': p.evaluate('() => window.__plato.backFromChora')}
+            p.click('#kept-use'); detected_again(p, [f.name])
+            p.click('#to-chora'); chora_loaded(p)
+            p.go_back()
+            got['Chora, Back'] = {'chosen again': detected_again(p, [f.name]), 'shown from': shown_from(p), 'offered': p.evaluate(SEAM_OFFER)}
+            o, c = got['other page, Back'], got['Chora, Back']
+            ok = (o['shown from'] == 'started' and o['chosen'] == [] and o['offered'] and f.name in o['offered'] and o['back from Chora'] is False
+                  and c['chosen again'] and c['shown from'] == 'started' and c['offered'] is None)
+            return ok, got
+        finally: ctx.close()
+    attempt('The kept file: a Back into the main page from any page but Chora (the way to Chora not taken from this tab) only offers it; Back from Chora chooses it again', not_from_chora)
 
     def nothing_of_yours():
         # "Keep my working data" off: nothing of the user's is kept, the tracker says so, a reload asks for
@@ -3137,7 +3171,7 @@ def chora_seams_checks(pw, url, tmp):
             p = main_ready(ctx.new_page())
             f = d / 'parishes-kept.json'; shutil.copyfile(ant, f)
             if not choose(p, [f]): return False, 'not detected'
-            kept_is(p, [f.name])
+            if not kept_is(p, [f.name]): return False, {'kept': p.evaluate(SEAM_KEPT)}
             p.reload(); wait_state(p, lambda s: s.get('phase') == 'ready', T(30), 'ready')
             soon(p, SEAM_SHOWN, 15); p.wait_for_timeout(1000)
             got = {'offered': p.evaluate(SEAM_OFFER), 'chosen before Use it': p.evaluate(SEAM_CHOSEN), 'phase': p.evaluate('() => window.__plato.phase'),
@@ -3159,8 +3193,10 @@ def chora_seams_checks(pw, url, tmp):
         try:
             p = main_ready(ctx.new_page())
             a, b = d / 'first-choice.json', d / 'second-choice.json'; shutil.copyfile(ant, a); b.write_text(ant.read_text() + '\n')
-            choose(p, [a]); kept_is(p, [a.name])
-            p.set_input_files('#picker', []); choose(p, [b]); kept_is(p, [b.name])
+            choose(p, [a])
+            if not kept_is(p, [a.name]): return False, {'first not kept': p.evaluate(SEAM_KEPT)}
+            p.set_input_files('#picker', []); choose(p, [b])
+            if not kept_is(p, [b.name]): return False, {'second not kept': p.evaluate(SEAM_KEPT)}
             got = {'kept after the second': p.evaluate(SEAM_KEPT)}
             p.reload(); wait_state(p, lambda s: s.get('phase') == 'ready', T(30), 'ready'); soon(p, SEAM_SHOWN, 15)
             got['offered'] = p.evaluate(SEAM_OFFER)
@@ -3175,7 +3211,8 @@ def chora_seams_checks(pw, url, tmp):
             p.reload(); wait_state(p, lambda s: s.get('phase') == 'ready', T(30), 'ready'); p.wait_for_timeout(1500)
             got['after a reload'] = {'kept': p.evaluate(SEAM_KEPT), 'offered': p.evaluate(SEAM_OFFER), 'chosen': p.evaluate(SEAM_CHOSEN)}
             # And forgotten from the panel: kept again (the presence), then let go there.
-            choose(p, [a]); kept_is(p, [a.name])
+            choose(p, [a])
+            if not kept_is(p, [a.name]): return False, {**got, 'kept again': p.evaluate(SEAM_KEPT)}
             p.click('#permissions-button'); until(p, '() => document.getElementById("permissions-panel")?.open', 10)
             until(p, "() => !!document.querySelector('#perm-kept-file button[data-kept-forget]')", 10)
             p.click('#perm-kept-file button[data-kept-forget]')

@@ -100,7 +100,8 @@ function stepList(list, steps, at, done, notes = []) {
  *   openWork(file)   open a Krisis work file, as "Resume a review" does;  pickWork()  choose one;
  *   ownTarget()      the format of the files chosen, as a conversion's target key, or null;
  *   base()           the base address in Options;  setBase(v)  write one there (the one store of it);
- *   forgetKept()     let the file kept from the main page go (src/lib/kept-file.js), with "Clear them".
+ *   forgetKept()     let the file kept from the main page go (src/lib/kept-file.js), with "Clear them";
+ *   letGo(files)     a workflow is let go: keep the user's own files it held as the main page's kept file.
  *   parked()         the result of an earlier step's run, put away as the workflow went on, as { step, words }, or null;
  *   reopenResult()   show that result again.
  * `workflow` is the id the page's address named (#workflow=<id>, Chora's way back), or null: that
@@ -249,7 +250,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     // A workflow followed before, begun or not, is left for this one: its record and its files go.
     const was = pending?.id;
     if (was) await store.dropPending(was);
-    if (wf || changed) { await outs.drop(keptBy(wf || changed.record)); await store.remove((wf || changed.record).id); }
+    if (wf || changed) { await handOver(wf || changed.record); await outs.drop(keptBy(wf || changed.record)); await store.remove((wf || changed.record).id); }
     pending = { key: recipe.key, answers: answersFor(choice, yesNo, texts), id: `${recipe.key}-${Date.now().toString(36)}`, steps: p.steps.length };
     wf = null; changed = null; note = null; fromChora = null; arrived = null; active = null;
     // Kept at once, before any file (Stephen, 4 October 2026): shown as not started, and discarded in one click.
@@ -460,6 +461,16 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   }
   let ownMissed = [];   // the user's own files that could not be kept in this browser, and why
 
+  /**
+   * A workflow let go (Leave, or another followed): the user's own file it holds goes on being kept, as
+   * the main page keeps the file chosen outside a workflow (page.letGo, src/lib/kept-file.js), once,
+   * before the workflow's copy is let go: one copy at a time, never two.
+   */
+  async function handOver(state) {
+    const held = startFiles(state).map((r) => outs.held(r));
+    if (held.length && held.every(Boolean)) { try { await page.letGo?.(held); } catch { /* not kept: the user chooses it again */ } }
+  }
+
   // ---- What only the user can say: an interactive step's result, taken from the page as it stands.
   async function resultOf(s) {
     if (s.op === 'read.columns') {
@@ -586,6 +597,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   }));
   q(tracker, '#methodos-leave').addEventListener('click', () => chain(async () => {
     const id = wf?.id || changed?.record.id, was = pending?.id;
+    if (wf || changed) await handOver(wf || changed.record);
     await outs.drop(keptBy(wf || changed?.record));
     wf = null; pending = null; changed = null; active = null; note = null; handle = handleFile = keptHandle = null; fromChora = null; arrived = null; asIs = null; ownMissed = [];
     if (id) await store.remove(id);

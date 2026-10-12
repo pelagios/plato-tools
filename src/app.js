@@ -19,7 +19,7 @@ import { datasetAddress, baseDiffers } from './engine/methodos/containment.js';
 import { acceptGuarded, undoBatch, guardOf, guardsFirst, planGuarded } from './engine/krisis/guards.js';
 import { KRISIS_CANDIDATES, guardWords as GW, variantWords as VW, rowWords as RW } from './engine/words.js';
 import { stash as stashForChora, dropStale as dropStaleHandoff } from './chora/handoff.js';
-import { keptFileStore, keptLine, onChange as keptChanged } from './lib/kept-file.js';
+import { keptFileStore, keptLine, sameAbout, onChange as keptChanged } from './lib/kept-file.js';
 import { dropStale as dropStaleHandback, workflowOf } from './chora/handback.js';
 import { storageNeed } from './engine/storage.js';
 import * as permissions from './lib/permissions.js';
@@ -756,18 +756,28 @@ document.addEventListener('click', async (e) => {
   if (!a || !files.length || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;
   e.preventDefault();
   await stashForChora(files);
+  markWayToChora();
   location.href = a.href;
 });
 // ---- The kept file (src/lib/kept-file.js; Stephen, 12 October 2026) --------------------------------
 // While "Keep my working data" is on, the latest file (or files) the user chose here, dropped, picked or
 // pasted, is kept in this browser until they forget it, clear the workflow's files, turn the setting
 // off, or choose another. Kept by the user's own choices only (keepChoice), never by a file the page or
-// a workflow chose for them. On a new visit or a reload it is offered, above the drop zone ("Kept from
-// last time: … Use it / Forget it"), never chosen silently; back from Chora mid-task (a page reached from
-// Chora's, by the referrer the site's policy sends whole within the site, or by the browser's Back or
-// Forward) it is chosen again by itself, unless a workflow is followed, which chooses its own file.
-const kept = keptFileStore();
-let keptQueue = Promise.resolve();
+// a workflow chose for them; and not while a workflow is followed, which keeps its own copy and hands
+// it here when it is let go (letGo), so that there is one copy at a time. On a new visit or a reload it
+// is offered, above the drop zone ("Kept from last time: … Use it / Forget it"), never chosen
+// silently; back from Chora mid-task it is chosen again by itself, unless a workflow is followed, which
+// chooses its own file. Back from Chora means: the way to Chora was taken from this tab (a mark in its
+// sessionStorage, set on the way and taken when the page next starts, whatever way it starts), and the
+// page was reached from Chora's by a link (the referrer, which the site's policy sends whole within the
+// site) or by the browser's Back or Forward. Any other Back or Forward, or a reload, only offers it.
+const kept = keptFileStore({ keep: () => permissions.keepWorkingData() });
+const TO_CHORA = 'plato-tools.to-chora';
+function markWayToChora() { try { sessionStorage.setItem(TO_CHORA, '1'); } catch { /* refused: the way back offers the file */ } }
+/** Whether the way to Chora was taken from this tab; the mark is taken, so that it counts once. */
+function tookWayToChora() { try { const m = sessionStorage.getItem(TO_CHORA) === '1'; sessionStorage.removeItem(TO_CHORA); return m; } catch { return false; } }
+const wentToChora = tookWayToChora();   // read as the page starts, whatever way it starts
+let shownOffer = null;   // the kept file as the offer shows it
 /** Show the kept file's line: `what` is { offer: about } (the offer), { said: words } (a warning), or null (hidden). */
 function keptOffer(what) {
   const p = $('kept-file');
@@ -775,19 +785,30 @@ function keptOffer(what) {
   p.classList.toggle('warn', !!what?.said);
   p.querySelector('.kept-what').textContent = what?.offer ? `Kept from last time: ${keptLine(what.offer)}.` : what?.said || '';
   for (const b of p.querySelectorAll('button')) b.hidden = !what?.offer;
+  shownOffer = what?.offer || null;
   state.keptOffer = what?.offer ? what.offer.files.map((f) => f.name) : null;
 }
-/** The user chose `list` (dropped, picked, pasted, or "Use it"): kept in place of what was, where working data is kept; a file that cannot be kept is said. */
-function keepChoice(list) {
+let latestChoice = 0;
+/**
+ * The user chose `list` (dropped, picked, pasted, or "Use it"): kept in place of what was, where working
+ * data is kept; a file that cannot be kept is said. While a workflow is followed, nothing is written here
+ * (the workflow keeps its own copy) and an earlier choice goes, as it is no longer the latest; `force`
+ * is the workflow handing its file over when it is let go. A result for a choice no longer the latest
+ * is not said. The promise settles with the result.
+ */
+async function keepChoice(list, { force = false } = {}) {
   list = [...list];
-  if (!list.length) return keptQueue;
-  keptQueue = keptQueue.then(async () => {
-    if (!permissions.keepWorkingData()) return;
-    const r = await kept.keep(list);
-    state.kept = r;
-    if (r === 'short' || r === 'failed') keptOffer({ said: `${list.map((f) => f.name).join(', ')} could not be kept in this browser (${r === 'short' ? 'it has not room enough' : 'it would not keep it'}): after a reload, choose ${list.length === 1 ? 'it' : 'them'} again.` });
-  }).catch(() => {});
-  return keptQueue;
+  if (!list.length || !permissions.keepWorkingData()) return null;
+  const mine = ++latestChoice;
+  // In a workflow: an earlier choice goes; but the kept file itself, chosen again ("Use it"), is not
+  // taken from under the workflow while it reads it (both copies stay, until either is let go).
+  if (!force && methodos.following()) { if (!list.every((f) => kept.isKept(f))) await kept.forget(); return 'workflow'; }
+  const r = await kept.keep(list);
+  if (mine !== latestChoice) return r;
+  state.kept = r;
+  if (r === 'short' || r === 'failed') keptOffer({ said: `${list.map((f) => f.name).join(', ')} could not be kept in this browser (${r === 'short' ? 'it has not room enough' : 'it would not keep it'}): after a reload, choose ${list.length === 1 ? 'it' : 'them'} again.` });
+  else if (r === 'kept' && $('kept-file').classList.contains('warn')) keptOffer(null);
+  return r;
 }
 // A reload keeps its referrer: only a navigation (a link followed) counts as reached from Chora's page.
 const navType = () => { try { return performance.getEntriesByType('navigation')[0]?.type || null; } catch { return null; } };
@@ -795,8 +816,9 @@ const fromChora = () => { try { const u = new URL(document.referrer); return nav
 const byHistory = () => navType() === 'back_forward';
 /** As the page starts: the kept file chosen again (back from Chora, outside a workflow), or offered. */
 async function keptAtStart() {
-  if (!permissions.keepWorkingData()) return;   // nothing is kept, and nothing offered
-  const back = fromChora() || byHistory();
+  if (!permissions.keepWorkingData()) { kept.forget(); return; }   // nothing is kept (a keep left in flight goes too), and nothing offered
+  const back = wentToChora && (fromChora() || byHistory());
+  state.backFromChora = back;
   if (await whenReady === false) return;
   await methodos.takenUp();                     // a workflow taken up chooses its own file first
   if (files.length) return;
@@ -812,9 +834,12 @@ async function keptAtStart() {
   }
   keptOffer({ offer: about });
 }
+// Shown again from the browser's memory: the page is as it was, and the way to Chora counts no more.
+window.addEventListener('pageshow', (e) => { if (e.persisted) tookWayToChora(); });
 $('kept-use').onclick = async () => {
   const list = await kept.files();
-  if (!list) { keptOffer(null); return; }
+  // Another tab changed it since the offer was drawn: the offer is drawn again, and nothing is chosen.
+  if (!list || !sameAbout(list.about, shownOffer)) { keptOffer(list ? { offer: list.about } : null); return; }
   const dt = new DataTransfer(); for (const f of list) dt.items.add(f); $('picker').files = dt.files;
   choose(list); keepChoice(list);   // as if just dropped
 };
@@ -822,8 +847,8 @@ $('kept-forget').onclick = async () => {
   await kept.forget();
   $('files-h').focus({ preventScroll: true });
 };
-// Forgotten elsewhere (the Permissions panel), or replaced: the offer goes with it.
-keptChanged(() => { if (!$('kept-file').hidden && !$('kept-file').classList.contains('warn')) kept.about().then((a) => { if (!a) keptOffer(null); }); });
+// Forgotten or replaced, here (the Permissions panel) or in another tab: the offer is drawn again as it stands.
+keptChanged(() => { if (!$('kept-file').hidden && !$('kept-file').classList.contains('warn')) kept.about().then((a) => { if (!files.length) keptOffer(a ? { offer: a } : null); }); });
 // Files handed over that Chora's page never took (the way taken, its page not started) are not left
 // in the browser: let go here when this page starts, is shown again (back from Chora) or is left,
 // once they are older than the hand-over allows. A fresh hand-over, on the way to Chora now, is kept.
@@ -1010,6 +1035,7 @@ const methodos = mountMethodos({
     openWork: (f) => resume(f),
     pickWork: () => $('workfile').click(),
     forgetKept: () => kept.forget(),   // "Clear them" lets the kept file go too
+    letGo: (list) => keepChoice(list, { force: true }),   // a workflow let go hands its user's file over: one copy at a time
     ownTarget: () => (input && readable(input) ? INPUT_TO_TARGET[input.format] ?? null : null),
     base: () => $('base').value,
     // As if typed in Options: its own listeners (the preview made under it is let go) hear 'input' and 'change'.

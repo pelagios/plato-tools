@@ -19,6 +19,7 @@ export function fakeOpfs() {
   });
   const root = {
     async getDirectoryHandle(name, { create } = {}) { if (!dirs.has(name)) { if (!create) throw notFound(); dirs.set(name, new Map()); } return dirHandle(dirs.get(name)); },
+    async *entries() { for (const name of [...dirs.keys()]) yield [name, { kind: 'directory', name }]; },
     async removeEntry(name) { if (!dirs.delete(name)) throw notFound(); },
   };
   return { dirs, root: async () => root };

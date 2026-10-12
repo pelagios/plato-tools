@@ -1479,38 +1479,64 @@ same tab, and its seams are mended). `test/methodos-seams.test.js` and `chora_se
   right.
 - **The kept file** (`src/lib/kept-file.js`; Stephen, 12 October 2026: "Users would find it useful to
   have their data kept indefinitely"). While "Keep my working data" is on, the latest file (or files)
-  the user chose on the main page, dropped, picked, pasted or taken with "Use it", inside a workflow or
-  not, is copied into OPFS, folder `kept-file/` (`0`, `1`, … and `about.json`,
-  `{ kept: 1, chosen, files: [{ name, size, type }] }`, written last so that a half-written copy is never
-  taken for one), once the browser has said there is room for it and a margin, a tenth and a megabyte
+  the user chose on the main page, dropped, picked, pasted or taken with "Use it", is copied into OPFS,
+  once the browser has said there is room for it and a margin, a tenth and a megabyte
   (`navigator.storage.estimate()`); with too little, or a write refused, nothing is kept and the line
-  under "Choose your data" names the file and says to choose it again. Kept only by the user's own
-  choices (`keepChoice` in `src/app.js`), never by a file the page or a workflow chose for them; a new
-  choice replaces it (only the latest is kept; a workflow's own file is kept under its record as
-  before). It stays, with no time limit, until the user forgets it ("Forget it" under "Choose your
-  data", or in the Permissions panel, which lists it with its name, size and date), "Clear them" in
-  the tracker, the setting turned off on either page, or another choice. What `about.json` says is
-  checked when read (`aboutOf`: the format, names the page can show as they are, sizes, and each file
-  there at its size); anything else is let go. How the main page uses it depends on how the user
-  arrives:
-  - **A new visit, or a reload** (no workflow taken up that chooses its own file): it is offered, never
-    chosen silently: `#kept-file`, above the drop zone, `role="status"` (announced politely), "Kept
-    from last time: parishes.csv (313 bytes), chosen 12 Oct. [Use it] [Forget it]" (`keptLine`). "Use
-    it" chooses it as if just dropped; "Forget it" lets it go and the line goes (the focus moves to the
-    heading). A file chosen any other way takes the line away.
+  under "Choose your data" names the file and says to choose it again (a later choice that is kept
+  clears that line; a result for a choice no longer the latest is not said).
+  - **Its folders.** Each choice is written into a folder of its own, `kept-file-<time>-<count>` (`0`,
+    `1`, … and `about.json`, `{ kept: 1, chosen, files: [{ name, size, type }] }`, written last so that
+    a half-written copy is never taken for one); only once it is whole are the folders of earlier
+    choices removed. So the last choice stays kept while the next is written (a way taken to Chora
+    meanwhile loses neither), and a folder left over (a removal that failed, a write never finished) is
+    swept when the store is next read: older whole choices and damaged ones at once, unfinished ones
+    once they are ten minutes old (another tab may be writing one).
+  - **One queue, and the setting asked again.** Every write and removal, from any store in the page
+    (the main page's, the Permissions panel's, Chora's), goes through one queue, so that a "Forget it",
+    "Clear them" or the setting turned off is never overtaken by a keep in flight; and a keep asks the
+    setting again (`keep()`, given by the main page) once its files are written, before `about.json`:
+    turned off meanwhile, nothing is kept (`'off'`). At the main page's start with the setting off,
+    whatever is there is let go.
+  - **Whose choices.** The user's own (`keepChoice` in `src/app.js`), never a file the page or a
+    workflow chose for them. A new choice replaces the kept one. **One copy at a time:** while a
+    workflow is followed (`methodos.following()`) nothing is written here, since the workflow keeps its
+    own copy under its record (and an earlier kept choice goes, as it is no longer the latest; the kept
+    file itself, chosen again with "Use it", is left while the workflow copies it). When the workflow
+    lets its file go (Leave, or another workflow followed), Methodos hands the File it still holds over
+    (`page.letGo`, before its own copy is dropped), and it is kept here once.
+  - **How long.** With no time limit, until the user forgets it ("Forget it" under "Choose your data",
+    or in the Permissions panel, which lists it with its name, size and date), "Clear them" in the
+    tracker, the setting turned off on either page, or another choice.
+  - **Read back as checked** (`aboutOf`): the format, names the page can show as they are, sizes, each
+    file there at its size, and a media type of the plain shape `type/subtype`, at most 100 characters;
+    anything else is let go.
+  - **Two tabs.** A change is told to other tabs through localStorage (`plato-tools.kept-file`, a time
+    stamp alone), and their line is drawn again. "Use it" compares the kept file with the one its line
+    names (`sameAbout`): if another tab has changed it since, the line is drawn again, and nothing is
+    chosen.
+
+  How the main page uses it depends on how the user arrives:
+  - **A new visit, a reload, or any other Back or Forward** (no workflow taken up that chooses its own
+    file): it is offered, never chosen silently: `#kept-file`, above the drop zone, `role="status"`
+    (announced politely), "Kept from last time: parishes.csv (313 bytes), chosen 12 Oct. [Use it]
+    [Forget it]" (`keptLine`). "Use it" chooses it as if just dropped; "Forget it" lets it go and the
+    line goes (the focus moves to the heading). A file chosen any other way takes the line away.
   - **Back from Chora mid-task**, outside a workflow: chosen again by itself (`keptAtStart`,
-    `window.__plato.chosenAgain`). The page counts as back when it was reached from Chora's page by a
-    link (the referrer, which the site's referrer policy sends whole within the site, on a navigation
-    of type `navigate`: a reload keeps its referrer, and is not a return), or by the browser's Back or
-    Forward (type `back_forward`); a page shown again from the browser's memory keeps its file anyway.
-    It waits for Methodos to take up a workflow first (`methodos.takenUp()`): with one followed
-    (`methodos.following()`), the workflow chooses its own file instead, as before.
+    `window.__plato.chosenAgain`; `window.__plato.backFromChora` says whether the page counted as
+    back). The page counts as back only when the way to Chora was taken from this tab (a mark in its
+    sessionStorage, `plato-tools.to-chora`, set when the way is taken and taken off when the page next
+    starts, whatever way it starts, or is shown again from the browser's memory) and it was reached from
+    Chora's page by a link (the referrer, which the site's referrer policy sends whole within the site,
+    on a navigation of type `navigate`: a reload keeps its referrer, and is not a return) or by the
+    browser's Back or Forward (type `back_forward`). A page shown again from the browser's memory keeps
+    its file anyway. It waits for Methodos to take up a workflow first (`methodos.takenUp()`): with one
+    followed, the workflow chooses its own file instead, as before.
   Chora's "Back to PLATO tools" says which file is chosen there again, from the kept file. The round
   trip of the branch before (a hand-off record marked `ret`, a liveness stamp, five minutes after it)
   is gone: the hand-off is again taken once and deleted (`take`, read and deleted in one transaction),
   and `dropStale` also deletes the old stamp's key, `chora-handoff-alive`, where one was left.
 - **"Keep my working data" turned off on Chora's page** (or off when it starts) lets go at once what the
-  main page keeps for it: the kept file (`kept-file/`), Methodos's kept files in `methodos-outputs/`
+  main page keeps for it: the kept file (`kept-file-*/`), Methodos's kept files in `methodos-outputs/`
   (the user's own copy among them), and moves the workflow's record to the tab's sessionStorage, as the
   main page does (`state.workingForgotten`).
 
