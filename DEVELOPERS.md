@@ -2601,13 +2601,17 @@ page's interview and tracker (below); keeping a workflow beyond the tab is phase
   workflow whose answers would reach it is refused at the start, in those words.
   Chora's hand-back is no operation of its own: it is how the interactive step `place` gets its
   result (below, "Chora's way back into a workflow").
-- **Recipes** (`recipes/`) are data: "Map your data" and "Publish a dataset". A step names an
+- **Recipes** (`recipes/`) are data: "Map your data", "Publish a dataset", "Places from an edition
+  (TEI)" and "Places from Recogito" (below). A step names an
   operation, where each input comes from (a file chosen at the start, `$files`, or an earlier step's
   output, `mint.dataset`, with `??` for "this, or that if it was skipped"), its options (literal or
   from an answer) and the yes-or-no question under which it runs. `recipe.js` checks a recipe
   (every input made before it is used, of a type the operation takes, and never only by a step that
   may be skipped) and gives its digest: the SHA-256 of the whole recipe, its words included, which a
-  workflow records.
+  workflow records. A recipe may also say what it cannot carry from the files it begins with
+  (`cannot`, a list of sentences: a reader's limits, in words), which `plan()` gives and the page shows
+  under the interview's plan and, folded, in the tracker (`#methodos-cannot`, hidden for a recipe that
+  names nothing).
 - **Hand-offs** (`handoffs.js`) are references, never content: `{ type, name, size, sha256 }`, made by
   Krisis's `fileRecords`, with a type from a closed list (`files`, `dataset`, `mapping`,
   `work.krisis`, `work.hermes-text`, `deposit`, `site`, `w3id`). A hand-off of the wrong type is
@@ -2731,6 +2735,44 @@ changing them.
 `test/methodos-interview.test.js` holds the interview to `test/methodos-predicted.json`, which the
 browser checks (`methodos_page_checks` in `e2e/app_test.py`) answer through the page and compare with what
 it shows.
+
+**Places from an edition (TEI) and Places from Recogito** (#28 phase 5; plan #34, item 2). Two recipes
+built on Hermes's readers, `recipes/places-from-tei.js` and `recipes/places-from-recogito.js`: Elenchos
+checks the file chosen, Metaphrasis reads it into PLATO JSON through the reader (a TEI edition, with the
+Reading options in force; a Recogito export, with the IIIF georeferences and manifests of its maps dropped
+with it, one input, as "Georeferenced regions" above has it), and then the steps Map your data takes
+without regions, from `recipes/downstream.js`: the lookup in WHG, the review, the decisions recorded
+(`apply`), Chora where drawing is wanted, the check again, the comparison with the dataset read, the
+writing out, and Agora's four parts when publishing. The questions are Map your data's own objects
+(`ASKS` takes them from its recipe, so the words cannot drift), less the regions: an edition and an
+export do not say which region a place is in. The operations, the adapters and the page's handling of
+each step are Map your data's; nothing is forked. In the interview, "An edition in TEI" and
+"Annotations from Recogito", with "Places on a map…" or "A citable, published dataset", lead to them
+(`ROUTES`); drawing and publishing are asked as in Map your data, and the base address, optional, when
+publishing (minting takes it, as Publish a dataset asks it: `baseAsked` reads an answer the first two
+questions settle too). Every other answer with either still names no workflow.
+
+What the readers cannot carry is said in each recipe's `cannot`, and two of its sentences are defaults
+chosen as close to Map your data as the code allows, not decided policy: a TEI `@ref`, or Recogito's
+link, is the place's own address (as a table's id column is), kept as its identification; the lookup
+still looks every place up in WHG (Krisis's default choice, the places with no local match), and a
+candidate that is the place's own address is not suggested again (`skipped.linked`). Recogito's link is
+therefore not offered as a candidate. A place name with no ref, an unlinked mention, and a region with
+no transcription or quoted name (whose name, in a Studio export, is only the gazetteer's title, which is
+not carried) give nothing to look up; the lookup counts the last as `withoutName`.
+
+`test/methodos-tei-recogito.test.js` checks both recipes against Map your data's (the same questions,
+the same steps after the dataset, the same operations), the interview's routing, and walks each in Node
+through the real engine against a fake WHG: `test/fixtures/tei/prose-constructed.xml` (five places,
+their Pleiades refs kept, Kenchreai's GeoNames ref kept, four identified in WHG) and
+`test/fixtures/annotations/recogito-studio-regions-constructed.json` with the Rocque map's georeference
+and manifest (13 places, seven placed through the georeference and citing it, four with no name not
+looked up, nine identified); a TEI ref to WHG is not suggested again (`whg-constructed.xml`), and the
+export read without its georeference places none (the end check's control). The browser checks
+(`recipes_checks` in `e2e/app_test.py`) follow each from the interview to the dataset downloaded,
+against a stub of WHG, and read the downloaded file; each end check is shown failing on the same file
+with its identities (TEI) or geometries (Recogito) left out. `RECIPE_SHOTS=<dir>` saves the tracker at
+1440 × 900.
 
 ## Permissions
 

@@ -57,5 +57,89 @@
    "site",
    "w3id"
   ]
+ },
+ {
+  "have": "tei",
+  "want": "map",
+  "yes": {
+   "will-draw": true,
+   "will-publish": false
+  },
+  "recipe": "places-from-tei",
+  "steps": [
+   "check",
+   "dataset",
+   "lookup",
+   "review",
+   "apply",
+   "place",
+   "again",
+   "compare",
+   "out"
+  ]
+ },
+ {
+  "have": "tei",
+  "want": "publish",
+  "yes": {
+   "will-draw": false
+  },
+  "recipe": "places-from-tei",
+  "steps": [
+   "check",
+   "dataset",
+   "lookup",
+   "review",
+   "apply",
+   "again",
+   "compare",
+   "out",
+   "mint",
+   "report",
+   "site",
+   "w3id"
+  ]
+ },
+ {
+  "have": "recogito",
+  "want": "map",
+  "yes": {
+   "will-draw": false,
+   "will-publish": false
+  },
+  "recipe": "places-from-recogito",
+  "steps": [
+   "check",
+   "dataset",
+   "lookup",
+   "review",
+   "apply",
+   "again",
+   "compare",
+   "out"
+  ]
+ },
+ {
+  "have": "recogito",
+  "want": "publish",
+  "yes": {
+   "will-draw": true
+  },
+  "recipe": "places-from-recogito",
+  "steps": [
+   "check",
+   "dataset",
+   "lookup",
+   "review",
+   "apply",
+   "place",
+   "again",
+   "compare",
+   "out",
+   "mint",
+   "report",
+   "site",
+   "w3id"
+  ]
  }
 ]

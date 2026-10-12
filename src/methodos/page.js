@@ -62,6 +62,8 @@ function stepRow(id, st, ...body) {
     el('span', { className: 'track-body' }, el('span', { className: 'track-state visually-hidden', textContent: m.words }), ' ', ...body)));
   return li;
 }
+/** What a workflow cannot carry (its recipe's `cannot`), each sentence a list item. */
+const cannotItems = (cannot) => cannot.map((c) => el('li', { textContent: c }));
 // The steps that are followed: a step not yet available is shown, and skipped.
 const runs = (p) => p.steps.filter((s) => s.available === true);
 const reduceMotion = () => !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -212,6 +214,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     stepList(list, p.steps, null, [], p.notes);
     planEl.append(list);
     if (p.left.length) planEl.append(el('p', { className: 'track-left', textContent: `Left out by your answers: ${p.left.map((s) => lower(s.title)).join('; ')}.` }));
+    // What the workflow cannot carry from the files it begins with (the recipe's `cannot`), said before it is followed.
+    if (p.cannot.length) planEl.append(el('p', { className: 'track-left', textContent: 'What it cannot carry from your files:' }), el('ul', { className: 'track-note track-cannot' }, ...cannotItems(p.cannot)));
     startB.textContent = `Follow “${p.title}”`; startB.hidden = false;
     planEl.hidden = false;
   }
@@ -294,6 +298,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   let stripAt = null;   // the step the strip was last said for
   tList.addEventListener('click', (e) => { if (e.target.closest('.track-reopen')) page.reopenResult?.(); });
   const downloadB = q(tracker, '#methodos-download');
+  const cannotEl = q(tracker, '#methodos-cannot');
   const useB = q(tracker, '#methodos-use'), reopenB = q(tracker, '#methodos-reopen'), restartB = q(tracker, '#methodos-restart');
   let wf = null;            // the runner's state, as a record ({ id, name, created, saved, ...state })
   let wfScope = null;       // the workflow's Scope (Issue #33), kept beside the runner's state and written with it (keep())
@@ -715,6 +720,10 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       tracker.dataset.status = changed ? 'changed' : shown.status;
     }
     trackList(tList, rows, pendingNotes(shown));
+    // What the workflow cannot carry from its files, folded below the buttons; hidden for a recipe that names nothing.
+    const cannot = (shown ? recipeOf(shown) : RECIPES[pending.key])?.cannot || [];
+    cannotEl.hidden = !cannot.length;
+    cannotEl.querySelector('ul').replaceChildren(...cannotItems(cannot));
     const i = at ? steps.findIndex((s) => s.id === at.id) : -1;
     const s = i >= 0 ? steps[i] : null;
     const title = s ? whereWords(i, steps.length, OPERATIONS[s.op].tool, s.title) : null;   // also the centre's title, and the strip's words
@@ -733,7 +742,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     // What the tracker says now: what is to be done next, in words, then any word about the last thing done.
     const op = s && OPERATIONS[s.op];
     let next = '';
-    if (!shown) next = `Not started. Choose ${RECIPES[pending.key].files[fileKey(RECIPES[pending.key])].words.toLowerCase()} in step 1 to begin: Methodos starts when it is chosen. Or discard it.`;
+    if (!shown) next = `Not started. Choose ${lower(RECIPES[pending.key].files[fileKey(RECIPES[pending.key])].words)} in step 1 to begin: Methodos starts when it is chosen. Or discard it.`;
     else if (s && op.kind === 'interactive') next = `This step is yours: it waits for ${op.waitsFor}. Say when it is done.`;
     else if (ready) next = `Ready to download: ${names(main)} is already in the format this workflow writes, so it is not converted into itself. Download it, and the step is done.`;
     else if (s && !run) next = `Run ${OPERATIONS[s.op].tool ? `${OPERATIONS[s.op].tool}'s` : 'its'} ${lower(OPERATIONS[s.op].title)}; the step is done when the run finishes.`;

@@ -402,14 +402,51 @@ written now; the rest wait on a branch.
 | **Release a new version** | Elenchos → Mneme against the previous release → Agora mint with `--previous` → site | Nothing |
 | **Match two datasets** | Elenchos on both → Krisis match → review → apply → Mneme | Nothing |
 | **Census figures as a Data Cube** | Hermes columns → Arithmos (convert, cube) → `datacube` check → Publish | Nothing |
-| **Places from an edition (TEI)** | Hermes TEI → Elenchos → Krisis against a gazetteer → Publish | `hermes-next`/`hermes-p4` (TEI options), Krisis lookup |
-| **Places from Recogito** | Hermes annotations (+ georeferenced regions) → Elenchos → Chora → Publish | Regions reader in flight |
+| **Places from an edition (TEI)** | Elenchos → Hermes TEI → Krisis lookup → review → apply → Chora (if drawing) → Elenchos → Mneme → write out → Publish (if publishing) | Built (phase 5, 12 October 2026): section 6.1 |
+| **Places from Recogito** | Elenchos → Hermes annotations (+ georeferenced regions) → Krisis lookup → review → apply → Chora (if drawing) → Elenchos → Mneme → write out → Publish (if publishing) | Built (phase 5, 12 October 2026): section 6.1 |
 | **Places from a text** | Hermes text (a hosted model, or later an in-browser one) → review → Krisis → Chora → Publish | `llm-extract` deferred |
 | **Trace a historical map** | Chora: IIIF map, georeference, trace → save → Elenchos → Publish | Nothing |
 | **Map your data** | Section 5 | Krisis lookup, adoption, region columns, hand-back |
 
 "Convert for WHG" and "Convert for Peripleo" are not workflows: each is Metaphrasis to LPF, one step,
 and the interview's "a file in another format" answer covers them.
+
+### 6.1 Places from an edition (TEI) and Places from Recogito, as built
+
+*12 October 2026 (#28 phase 5; plan #34, item 2).* Both are recipes over readers that had landed:
+`src/engine/methodos/recipes/places-from-tei.js` and `places-from-recogito.js`. Each checks the file
+chosen, reads it into PLATO JSON through Hermes's reader (Metaphrasis's conversion, with the page's
+Reading options for TEI; for Recogito, the export with the IIIF georeferences and manifests of its maps,
+dropped together as one input, so that its regions are placed), and then takes Map your data's steps
+without regions, shared in `recipes/downstream.js`: Krisis's lookup in WHG, the review, the decisions
+recorded, Chora if the visitor will draw, Elenchos again, Mneme against the dataset read, the writing
+out, and Agora's four parts if publishing. The questions are Map your data's, less the regions (an
+edition and an export do not say which region a place is in), and the base address is asked, optional,
+when publishing. In the interview, "An edition in TEI" and "Annotations from Recogito" with "Places on a
+map" or "A citable, published dataset" now lead to them; every other answer with either still names
+none.
+
+What the readers cannot carry, each recipe says in words (its `cannot`, shown under the interview's plan
+and folded in the tracker): a TEI place name with no ref, or a key with no pattern; a Recogito mention
+never linked, or linked by its name recognition and never saved; the gazetteer's title and coordinates
+copied into an export (so a region with no transcription or quoted name has nothing to look up); a
+region's outline (carried as its centre and a radius), and any region off its map, beyond its control
+points, or on a map with no georeference.
+
+**Open, defaulted as close to Map your data as the code allows (to put to Stephen):**
+
+1. *A TEI `@ref` (or a `<listPlace>` idno) to a gazetteer:* kept as the place's own address and its
+   identification, as a table's id column is in Map your data, and not reviewed; the lookup still looks
+   every place up in WHG, and a WHG record that is the ref itself is not suggested again. The other way:
+   offer the ref for review as a candidate, so that a reviewer confirms it.
+2. *Recogito's own gazetteer links:* the same: the link is the place's address, kept, not a candidate.
+3. *Which places are looked up:* every place (Krisis's default), not only those with no WHG link yet
+   ("unlinked"); the reviewer can choose otherwise in the lookup panel.
+4. *Georeferences for Recogito:* not asked as a question; the step 1 words say to drop them with the
+   export when its regions are on maps. A yes-or-no question ("Are its annotations regions on a map,
+   with the map's georeference?") would change no step, only the words.
+5. *The base address when publishing:* asked, optional, as Publish a dataset asks it. Map your data
+   without regions does not ask it, and minting then relies on Options.
 
 ## 7. Persistence
 
@@ -473,7 +510,7 @@ the pinned commit; `e2e/app_test.py` through `~/.config/plato-tools/heavy.sh`, o
 | **2. Persistence** | The IndexedDB record; save and resume; the version rule | Node: resume against a changed recipe takes each branch of the rule. Browser (`e2e/app_test.py`): reload mid-workflow and find the same step; a record naming a different file is refused by `filesDiffer`; with "keep working data" off nothing is left after the tab |
 | **3. The page** | The card (section 11); the interview; the tracker panel above step 1; `#tool=` and `#for-tool` driven by the step; Chora's hand-back | Browser: the interview's answers give the recipe the unit test predicts; the Planned card has no inline script and no `title=`; `--prove-it-fails` fails every new check |
 | **4. Map your data, end to end** | Needs: Krisis lookup (in flight), region columns in Hermes (new), level-by-level constrained lookup (new), adoption in Chora (in flight), hand-back (new), containment relation (PLATO) | Browser, with the gazetteer stubbed as `test/gazetteer.test.js` stubs it: a ten-row CSV with county and parish columns ends as a PLATO file whose identities and geometries cite the stub; every request went through the module and none to an unallowed site |
-| **5. The other recipes** | Each as a guide page and a recipe, as its tools land | Each recipe walks in Node; the guide page's steps equal the recipe's (a test reads both) |
+| **5. The other recipes** | Each as a guide page and a recipe, as its tools land. *Built 12 October 2026: Places from an edition (TEI) and Places from Recogito (section 6.1); their guide pages are PLATO's, to write* | Each recipe walks in Node; the guide page's steps equal the recipe's (a test reads both, once the pages exist) |
 | **6. Sharing through WHG** | Waits on the WHG-side dependency (section 5.4). A WHG project of the PLATO `doc_type` as a copy of the record and work files, through the permissions module with the WHG token; the client's three-way merge on `409 conflict`; the size check; the share link | Node: the merge takes each branch (one side decided; both decided alike; both decided differently is a conflict); a `409 conflict` leads to a merge and a retry with the new `base_version`, never an overwrite, and no field of the record is lost through a merge (every field round-trips); a snapshot over the limit pushes the record alone and says so. Browser: without a token nothing is sent (asserted beside the lookup's one allowed request); with one, the token is in the header and in no address |
 | **7. Live editing** | Only once WHG has an origin check, `iss` and `aud`, a membership re-check, a typed store and a per-key `meta` merge for the PLATO `doc_type` | As WHG specifies |
 | **8. Optional** | `plato-tools workflow` on the CLI; custom recipes | Only if asked for |

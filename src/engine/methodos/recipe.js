@@ -3,6 +3,8 @@
 // A recipe is a plain object (recipes/<key>.js):
 //   key, title, version   a key, a plain-English title, and a whole number raised when its steps change;
 //   files                 the files the user chooses at the start, each { words, types, optional? };
+//   cannot                optionally, what the workflow cannot carry from those files, each in a sentence,
+//                         said before it is followed and while it is (a reader's limits, in words);
 //   asks                  the questions it asks, each { question, kind: 'yes-no' | 'text' | 'list' | 'choice',
 //                         choices? (for 'choice'), optional? };
 //   steps                 in order, each { id, op, title?, from, options?, when? }:
@@ -57,6 +59,8 @@ export function check(recipe) {
     if (!KINDS.includes(q.kind)) say(`the question "${k}" is of no known kind (${KINDS.join(', ')}).`);
     if (q.kind === 'choice' && !(Array.isArray(q.choices) && q.choices.length)) say(`the question "${k}" has no choices.`);
   }
+  if (r.cannot !== undefined && !(Array.isArray(r.cannot) && r.cannot.every((c) => typeof c === 'string' && c.trim())))
+    say('what it cannot carry ("cannot") must be a list of sentences.');
   if (!Array.isArray(r.steps) || !r.steps.length) say('it has no steps.');
   const seen = new Map();
   for (const s of r.steps) {

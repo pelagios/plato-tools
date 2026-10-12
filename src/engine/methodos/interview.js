@@ -33,11 +33,19 @@ export const WANT = Object.freeze([
 // settle, and the recipe's yes-or-no questions still to ask, in the recipe's order.
 // `base`: when the base address is asked (Stephen, 4 October 2026: only for workflows that mint
 // addresses): under a yes-or-no answer (Map your data, when the table gives regions, which are minted
-// under it), and then needed; or always (Publish a dataset, whose minting may take it), and then optional.
+// under it), and then needed; under the answer to publish (Places from an edition, Places from Recogito,
+// which mint only when they publish), and then optional; or always (Publish a dataset, whose minting may
+// take it), and then optional.
 const ROUTES = [
   { have: 'table', want: 'map', recipe: 'map-your-data', set: { target: 'plato-json' }, ask: ['has-regions', 'will-draw', 'will-publish'], base: { when: 'has-regions', needed: true } },
   { have: 'table', want: 'publish', recipe: 'map-your-data', set: { target: 'plato-json', 'will-publish': true }, ask: ['has-regions', 'will-draw'], base: { when: 'has-regions', needed: true } },
   { have: 'plato', want: 'publish', recipe: 'publish-a-dataset', set: {}, ask: [], base: { needed: false } },
+  // An edition, or annotations: Map your data's questions but the regions (neither says which region each place
+  // is in); the base address when publishing, optional, as Publish a dataset asks it (minting takes it).
+  ...[['tei', 'places-from-tei'], ['recogito', 'places-from-recogito']].flatMap(([have, recipe]) => [
+    { have, want: 'map', recipe, set: { target: 'plato-json' }, ask: ['will-draw', 'will-publish'], base: { when: 'will-publish', needed: false } },
+    { have, want: 'publish', recipe, set: { target: 'plato-json', 'will-publish': true }, ask: ['will-draw'], base: { when: 'will-publish', needed: false } },
+  ]),
 ];
 
 // Answers that name no recipe yet: what to use meanwhile, by what is wanted, as the page's tool keys
@@ -75,7 +83,8 @@ export const questionsFor = (choice) => (choice?.kind === 'recipe' ? choice.ask.
  */
 export function baseAsked(choice, yesNo = {}) {
   const b = choice?.kind === 'recipe' ? choice.base : null;
-  if (!b || (b.when && yesNo[b.when] !== true)) return null;
+  // The answer it depends on, given or settled by the first two questions ("A citable, published dataset" settles publishing).
+  if (!b || (b.when && (yesNo[b.when] ?? choice.set[b.when]) !== true)) return null;
   return { needed: !!b.needed, question: RECIPES[choice.recipe].asks.base.question };
 }
 /** A base address as the interview takes one: a web address, trimmed, or null. */
@@ -100,9 +109,10 @@ const SKIPPED = {};
 
 /**
  * The workflow the answers give, as the tracker shows it: each step that runs, with its tool, its
- * act in plain English and, where its operation is not available yet, why; and the steps the answers
- * leave out. A step not available yet does not stop the workflow: it is shown, and skipped
- * (`unavailable` lists them), and `notes` says at the end what was not done for it.
+ * act in plain English and, where its operation is not available yet, why; the steps the answers
+ * leave out; and what the workflow cannot carry from the files it begins with (`cannot`), in words.
+ * A step not available yet does not stop the workflow: it is shown, and skipped (`unavailable` lists
+ * them), and `notes` says at the end what was not done for it.
  */
 export function plan(recipeKey, answers, { recipes = RECIPES } = {}) {
   const recipe = recipes[recipeKey];
@@ -114,6 +124,7 @@ export function plan(recipeKey, answers, { recipes = RECIPES } = {}) {
   }
   const skipped = steps.filter((s) => s.available !== true);
   return { key: recipe.key, title: recipe.title, version: recipe.version, digest: recipe.digest, steps, left,
+    cannot: [...(recipe.cannot || [])],
     unavailable: skipped.map((s) => s.id),
     notes: skipped.map((s) => SKIPPED[s.op] || `“${s.title}” was not done: it is not yet available.`) };
 }

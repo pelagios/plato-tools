@@ -28,7 +28,7 @@ const MAP_ANSWERS = { 'has-regions': false, 'will-draw': true, 'will-publish': f
 const recipe = (steps, more = {}) => ({ key: 'test', title: 'A test', version: 1, files: { files: { words: 'Some files', types: ['files'] } }, asks: {}, steps, ...more });
 
 test('every recipe shipped is well formed: every input is produced before it is used', () => {
-  assert.deepEqual(Object.keys(RECIPES).sort(), ['map-your-data', 'publish-a-dataset']);
+  assert.deepEqual(Object.keys(RECIPES).sort(), ['map-your-data', 'places-from-recogito', 'places-from-tei', 'publish-a-dataset']);
   for (const r of Object.values(RECIPES)) {
     assert.equal(checkRecipe(r), r);
     // Walked directly too: each step's inputs come from a file chosen or an earlier step's output.

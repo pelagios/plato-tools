@@ -2760,6 +2760,7 @@ def main():
             chora_checks(pw, url, tmp)
             chora_adopt_checks(pw, url, tmp)
             map_your_data_checks(pw, url, tmp)
+            recipes_checks(pw, url, tmp)
             scope_checks(pw, url, tmp)
             quality_checks(pw, url, tmp)
             chora_seams_checks(pw, url, tmp)
@@ -3913,6 +3914,220 @@ def map_your_data_checks(pw, url, tmp):
         return (not other and not refused and len(posts) >= 4 and len(reconciled) >= 4 and any('/entity/place:gn:9000010/api' in u for u in gets)), \
             {'other sites': other, 'refused': refused[:3], 'lookups to the stub': len(posts), 'entity fetched': gets[-1:] if gets else []}
     attempt('Map your data: every request either page made went to this site or to WHG, which the permissions module allowed (the regions, the places and Chora\'s search went to the stub, and the record was fetched from it), and none to another site, nor any stopped by the policy', only_allowed)
+    try: browser.close()
+    except Exception: pass
+
+# ---- Methodos: Places from an edition (TEI) and Places from Recogito (#28 phase 5; plan #34, item 2) ----------
+# Each workflow walked through on the page as a visitor follows it, from the interview to the dataset downloaded at
+# its end, against a stub of WHG (never the real one), which answers every name it is sent and records each request:
+# Hermes's reader makes the dataset (the TEI edition; the Recogito export with the map's IIIF georeference and
+# manifest, dropped together), Krisis looks the places up and the reviewer accepts in bulk, the decisions are
+# recorded, the result checked again, compared with the dataset read, and, already PLATO JSON, downloaded as it is.
+# The end check reads the file downloaded; each is shown failing on the same file as a step that skipped its work
+# would leave it. RECIPE_SHOTS=<dir> saves screenshots of the tracker at 1440 x 900.
+RECIPES_TEI = ROOT / 'test/fixtures/tei/prose-constructed.xml'
+RECIPES_REC = [ROOT / 'test/fixtures/annotations/recogito-studio-regions-constructed.json', ROOT / 'test/fixtures/georef/bpl-rocque-annotation.json',
+               ROOT / 'test/fixtures/georef/bpl-rocque-manifest.json']
+RECIPES_PLEIADES = ['https://pleiades.stoa.org/places/570106', 'https://pleiades.stoa.org/places/570182', 'https://pleiades.stoa.org/places/570536',
+                    'https://pleiades.stoa.org/places/570642', 'https://pleiades.stoa.org/places/570700']
+RECIPES_NONE = {'Phlious'}   # a name the stub finds nothing for
+def recipes_ends(doc):
+    """What the end of either workflow holds, read from the PLATO JSON downloaded: the places' own addresses (the refs or
+    Recogito's links, kept), the identities to the stub's records citing WHG, and the places placed (a geometry)."""
+    ents = doc.get('spatialEntities') or []
+    def cites_whg(a): return any('World Historical Gazetteer' in json.dumps(x) for x in (a.get('sources') or []) + (a.get('citations') or []))
+    ids = [(i, a) for e in ents for a in e.get('attestations') or [] for i in a.get('identities') or []]
+    stub = [(i, a) for i, a in ids if (i.get('object') or '').startswith(MYDATA_W3)]
+    return {'places': len(ents), 'addresses': sorted(e.get('@id') for e in ents), 'stub': len(stub), 'cites WHG': bool(stub) and all(cites_whg(a) for i, a in stub),
+            'others': sorted([i.get('subject'), i.get('object')] for i, a in ids if not (i.get('object') or '').startswith(MYDATA_W3)),
+            'placed': sum(1 for e in ents if any(a.get('geometries') for a in e.get('attestations') or [])),
+            'georef cited': sum(1 for e in ents for a in e.get('attestations') or [] if a.get('geometries') and 'annotations.allmaps.org' in json.dumps(a.get('citations') or []))}
+
+def recipes_checks(pw, url, tmp):
+    import re
+    base = url.rstrip('/') + '/'
+    origin = re.match(r'^https?://[^/]+', base).group(0)
+    shots = os.environ.get('RECIPE_SHOTS')
+    browser = pw.chromium.launch(headless=True, args=GL)
+    def walk(key, have, files, steps, expect):
+        out = tmp / f'recipes-{key}'; out.mkdir(exist_ok=True)
+        ctx = browser.new_context(accept_downloads=True, viewport={'width': 1440, 'height': 900}, reduced_motion='reduce')
+        ctx.add_init_script('window.__plato_forceDownload = true;')
+        cors = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+                'Access-Control-Allow-Headers': 'authorization, content-type, accept, user-agent'}
+        posts, asked, consoled, ids = [], [], [], {}
+        def stub(route):
+            req = route.request
+            if req.method == 'OPTIONS': return route.fulfill(status=204, headers=cors)
+            reply = lambda body, status=200: route.fulfill(status=status, headers={**cors, 'Content-Type': 'application/json'}, body=json.dumps(body))
+            if req.method == 'GET': return reply({'detail': 'Not found'}, 404)
+            body = json.loads(req.post_data or '{}'); posts.append(body)
+            res = {'attribution': LOOKUP_ATTRIBUTION}
+            for k, q in (body.get('queries') or {}).items():
+                name = q.get('query')
+                # Each name found as one record of its own (a GeoNames id the stub makes up, the same for the same name), but those it does not know.
+                if name not in ids: ids[name] = f'place:gn:{9200000 + len(ids)}'
+                res[k] = {'result': [] if name in RECIPES_NONE else [{'id': ids[name], 'name': name, 'score': 100, 'match': True, 'description': 'Country: US', 'ccodes': ['US'],
+                                                                     'namespace': 'gn', 'alt_names': [], 'has_geom': True, 'confidence': 100}]}
+            reply(res)
+        ctx.route(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'), stub)
+        ctx.on('request', lambda r: asked.append(r.url))
+        page = ctx.new_page()
+        page.on('console', lambda m: consoled.append(m.text))
+        r = {}
+        track = lambda: page.evaluate(JOIN_STATE)
+        def shot(name):
+            if shots and not PROVE:
+                pathlib.Path(shots).mkdir(parents=True, exist_ok=True)
+                page.mouse.move(1, 1)   # no tooltip over the picture
+                page.screenshot(path=str(pathlib.Path(shots) / f'{key}-{name}.png'), full_page=False)
+        def step_is(step, state, timeout=60):
+            until(page, f"() => document.querySelector('#methodos-track li[data-step=\"{step}\"]')?.dataset.state === '{state}'", timeout)
+        def choose(fs):
+            page.set_input_files('#picker', [])
+            page.set_input_files('#picker', [str(f) for f in fs])
+            s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'detection')
+            if s.get('phase') != 'detected': raise RuntimeError(f'not detected: {s.get("phase")}')
+            return s
+        def run(button, timeout=180):
+            page.click(button)
+            return wait_state(page, lambda s: s.get('phase') in ('done', 'error'), T(timeout), 'run')
+        def saved(s, ending):
+            n = next((o['name'] for o in (s.get('outputs') or []) if o['name'].endswith(ending)), None)
+            if not n: raise RuntimeError(f'no output ending {ending}: {[o["name"] for o in s.get("outputs") or []]}')
+            return download(page, n, out / n)
+        def need(*keys):
+            missing = [k for k in keys if not r.get(k)]
+            if missing: raise RuntimeError(f'an earlier step did not finish ({", ".join(missing)})')
+        title = expect['title']
+
+        def begin():
+            page.goto(NOTOOLS if PROVE else base)
+            page.evaluate("() => { localStorage.setItem('plato-tools.permissions', JSON.stringify({ version: 1, grants: { 'gazetteer:whg': { state: 'allowed', at: '2026-10-12T10:00:00Z' } } })); localStorage.setItem('plato-tools.reviewer', JSON.stringify({ name: 'Recipe Reviewer' })); }")
+            page.goto(NOTOOLS if PROVE else base)
+            s = wait_state(page, lambda s: s.get('phase') == 'ready' and s.get('canary') in ('enforced', 'not-enforced'), T(30), 'ready')
+            r['canary'] = s.get('canary')
+            page.evaluate("() => { const v = document.getElementById('reviewer'); v.value = 'Recipe Reviewer'; v.dispatchEvent(new Event('change')); }")
+            page.click('#methodos-ask'); until(page, "!document.getElementById('methodos').hidden", 5)
+            # The presence beside the absence, in one call: a table names nothing it cannot carry; the edition or the export does.
+            page.check('input[name="methodos-have"][value="table"]'); page.check('input[name="methodos-want"][value="map"]')
+            for k in ('has-regions', 'will-draw', 'will-publish'): page.check(f'input[name="methodos-ask-{k}"][value="no"]')
+            table = page.eval_on_selector_all('#methodos-plan .track-cannot li', 'ls => ls.length')
+            page.check(f'input[name="methodos-have"][value="{have}"]')
+            asked_now = page.eval_on_selector_all('#mq-more fieldset[data-ask]', 'fs => fs.map((f) => f.dataset.ask)')
+            for k in ('will-draw', 'will-publish'): page.check(f'input[name="methodos-ask-{k}"][value="no"]')
+            planned = page.eval_on_selector_all('#methodos-plan li.track-step', 'ls => ls.map((l) => l.dataset.step)')
+            cannot = page.eval_on_selector_all('#methodos-plan .track-cannot li', 'ls => ls.map((l) => l.textContent)')
+            recipe = page.evaluate("() => document.getElementById('methodos').dataset.recipe || null")
+            if shots and not PROVE: page.locator('#methodos-plan').scroll_into_view_if_needed(); shot('0-interview')
+            page.click('#methodos-start'); until(page, "['pending', 'idle'].includes(document.getElementById('methodos-tracker').dataset.status)", 10)
+            choose(files)
+            until(page, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+            t = track(); r['begun'] = t
+            folded = page.eval_on_selector_all('#methodos-cannot:not([hidden]) li', 'ls => ls.map((l) => l.textContent)')
+            ok = (r['canary'] == 'enforced' and table == 0 and recipe == expect['recipe'] and asked_now == ['will-draw', 'will-publish'] and planned == steps
+                  and len(cannot) == expect['cannot'] and cannot[0].startswith(expect['cannot first']) and folded == cannot
+                  and [k for k in t['steps']] == steps and t['steps'].get('check') == 'current' and t['status'] == 'idle')
+            if ok and shots and not PROVE:
+                page.click('#methodos-cannot > summary'); shot('1-begun-cannot-open'); page.click('#methodos-cannot > summary')
+            return ok, {'recipe': recipe, 'asked': asked_now, 'planned': planned, 'cannot': [c[:60] for c in cannot], 'table cannot': table, 'tracker cannot': len(folded), 'steps': t['steps']}
+        attempt(f'{title}: the interview ({expect["have words"]}, places on a map, no drawing, no publishing) gives its {len(steps)} steps, asks drawing and publishing but not regions, and says what it cannot carry, in the plan and folded in the tracker (a table says nothing)', begin)
+
+        def read():
+            need('begun')
+            r['check'] = run('#check').get('phase'); step_is('check', 'done')
+            page.select_option('#target', 'plato-json')
+            s = run('#convert'); step_is('dataset', 'done')
+            r['converted'] = saved(s, '.json')
+            d = recipes_ends(json.loads(r['converted'].read_text())); r['read'] = d
+            return (r['check'] == 'done' and track()['steps'].get('lookup') == 'current' and d['places'] == expect['places'] and d['placed'] == expect['placed']
+                    and d['stub'] == 0), {'check': r['check'], 'read': {k: d[k] for k in ('places', 'placed', 'stub')}, 'steps': track()['steps']}
+        attempt(f'{title}: checked, and read by Hermes into a PLATO dataset ({expect["places"]} places, {expect["placed"]} placed, none yet identified in WHG), each step done by its run', read)
+
+        def look_and_review():
+            need('converted')
+            choose([r['converted']])
+            if not page.evaluate("() => document.getElementById('lookup').open"): page.click('#lookup > summary')
+            page.fill('#whg-token', LOOKUP_TOKEN); page.press('#whg-token', 'Tab')
+            until(page, "() => /^Send \\d+ quer/.test(document.getElementById('lookup-send').textContent) && !document.getElementById('lookup-send').disabled", 60)
+            sends = page.inner_text('#lookup-send')
+            page.click('#lookup-send')
+            step_is('lookup', 'done', 90)
+            sent = sorted(q['query'] for b in posts for q in (b.get('queries') or {}).values())
+            shot('2-review')
+            until(page, "() => !document.getElementById('bulk-accept').disabled", 30)
+            page.click('#bulk-accept')
+            n = expect['accepted']
+            wait_state(page, lambda s: sum(1 for c in (s.get('work') or {}).get('candidates', []) if (c.get('decision') or {}).get('kind') == 'match') == n, T(15), 'accepted')
+            said = page.evaluate("() => document.getElementById('bulk-result').textContent")
+            page.click('#methodos-done'); step_is('review', 'done', 15)
+            r['reviewed'] = True
+            return (sent == expect['sent'] and sends == f"Send {len(expect['sent'])} queries to WHG" and track()['steps'].get('apply') == 'current'), \
+                {'button': sends, 'sent': sent, 'bulk': said[:200], 'steps': track()['steps']}
+        attempt(f'{title}: the named places looked up in the stub of WHG as the lookup step ({len(expect["sent"])} queries), accepted in bulk, and the review step done', look_and_review)
+
+        def record():
+            need('reviewed')
+            page.check('input[name="review-output"][value="dataset"]')
+            s = run('#finish'); step_is('apply', 'done', 30)
+            r['applied'] = saved(s, '.krisis-dataset.json')
+            return track()['steps'].get('again') == 'current', {'phase': s.get('phase'), 'steps': track()['steps']}
+        attempt(f'{title}: the decisions recorded in the dataset (Krisis\'s Finish, as the dataset) as the step that records them', record)
+
+        def to_the_end():
+            need('applied', 'converted')
+            choose([r['applied']])
+            r['again'] = run('#check').get('phase'); step_is('again', 'done')
+            page.set_input_files('#earlier', [str(r['converted'])])
+            s = wait_state(page, lambda s: s.get('action') == 'compare' and s.get('phase') in ('done', 'error'), T(120), 'compare')
+            r['compared'] = (s.get('report') or {}).get('errors')
+            step_is('compare', 'done')
+            until(page, "() => !document.getElementById('methodos-download').hidden", 30)
+            with page.expect_download(timeout=T(30) * 1000) as d: page.click('#methodos-download')
+            r['final'] = out / ('final-' + d.value.suggested_filename); d.value.save_as(r['final'])
+            step_is('out', 'done', 15)
+            until(page, "document.getElementById('methodos-tracker').dataset.status === 'completed' || !document.querySelector('#methodos-track li.is-current')", 15)
+            shot('3-done')
+            r['doc'] = json.loads(r['final'].read_text())
+            e = recipes_ends(r['doc']); r['ends'] = e
+            same = r['final'].read_bytes() == r['applied'].read_bytes()
+            return (r['again'] == 'done' and r['compared'] == 0 and same and expect['complete'](e) and all(v.startswith('done') for v in track()['steps'].values())), \
+                {'again': r['again'], 'compare errors': r['compared'], 'same file': same, 'ends': {k: v for k, v in e.items() if k != 'addresses'}, 'steps': track()['steps']}
+        attempt(f'{title}: checked again, compared with the dataset read (nothing taken away), and downloaded as it is, every step done; {expect["holds"]}', to_the_end)
+
+        def can_fail():
+            need('doc')
+            doc = r['doc']
+            mutated = {**doc, 'spatialEntities': [{**e, 'attestations': [{k: v for k, v in a.items() if k not in expect['strip']} for a in e.get('attestations') or []]} for e in doc['spatialEntities']]}
+            m = recipes_ends(mutated)
+            return expect['complete'](r['ends']) and not expect['complete'](m), {'as written': expect['complete'](r['ends']), f'without {", ".join(expect["strip"])}': {k: v for k, v in m.items() if k != 'addresses'}}
+        attempt(f'{title}: the end check fails on the same file with its {" and ".join(expect["strip"])} left out, as a step that skipped them would leave it (and passes as written)', can_fail)
+
+        def only_allowed():
+            need('final')
+            other = sorted({re.match(r'^[a-z]+:(//[^/]*)?', u).group(0) for u in asked
+                            if not (u.startswith(origin + '/') or u.startswith('data:') or u.startswith('blob:') or re.match(r'^https://([^/]*\.)?whgazetteer\.org/', u))})
+            refused = [m for m in consoled if 'Refused to connect' in m]
+            reconciled = [u for u in asked if re.match(r'^https://whgazetteer\.org/.*reconcile', u)]
+            return (not other and not refused and len(posts) >= 1 and len(reconciled) >= 1), {'other sites': other, 'refused': refused[:3], 'lookups to the stub': len(posts)}
+        attempt(f'{title}: every request the page made went to this site or to WHG (the stub, which the permissions module allowed, was asked), and none to another site, nor any stopped by the policy', only_allowed)
+        try: ctx.close()
+        except Exception: pass
+
+    tei_steps = ['check', 'dataset', 'lookup', 'review', 'apply', 'again', 'compare', 'out']
+    walk('tei', 'tei', [RECIPES_TEI], tei_steps, {
+        'title': 'Places from an edition (TEI)', 'recipe': 'places-from-tei', 'have words': 'an edition in TEI', 'cannot': 4, 'cannot first': 'A place name with no ref points to no place',
+        'places': 5, 'placed': 0, 'sent': ['Argos', 'Corinth', 'Kenchreai', 'Phlious', 'Sikyon'], 'accepted': 4, 'strip': ['identities'],
+        'holds': 'its five places keep the Pleiades addresses their refs gave (and Kenchreai its GeoNames ref), four identified in the stub\'s records, citing WHG',
+        'complete': lambda e: (e['addresses'] == RECIPES_PLEIADES and e['stub'] == 4 and e['cites WHG'] is True
+                               and e['others'] == [['https://pleiades.stoa.org/places/570536', 'https://sws.geonames.org/257880/']])})
+    walk('recogito', 'recogito', RECIPES_REC, tei_steps, {
+        'title': 'Places from Recogito', 'recipe': 'places-from-recogito', 'have words': 'annotations from Recogito, with the map\'s georeference', 'cannot': 4,
+        'cannot first': 'A mention marked as a place but never linked', 'places': 13, 'placed': 7,
+        'sent': sorted(['120', '45', 'Boston', 'GULF OF MEXICO', 'LAKE ERIE', 'LAKE HURON', 'LAKE ONTARIO', 'Nantucket I.', 'St Georges Bank']), 'accepted': 9, 'strip': ['geometries'],
+        'holds': 'its 13 places keep the Wikidata items Recogito linked them to, seven placed through the map\'s georeference and citing it, nine identified in the stub\'s records, citing WHG',
+        'complete': lambda e: (e['places'] == 13 and all(a.startswith('http://www.wikidata.org/entity/Q') for a in e['addresses']) and e['placed'] == 7 and e['georef cited'] == 7
+                               and e['stub'] == 9 and e['cites WHG'] is True)})
     try: browser.close()
     except Exception: pass
 
