@@ -1,3 +1,4 @@
+// paths.js first: it stops the tests unless PLATO_REPO holds the pinned PLATO, whose examples are read below.
 import { PLATO_REPO } from './paths.js';
 // Licences that travel with a contribution (Issue #24): the table of licences and their terms
 // (src/engine/agora/licence.js), and the report's warnings when an attestation's licence may not sit
@@ -9,19 +10,21 @@ import { PLATO_REPO } from './paths.js';
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { env as baseEnv, textFile } from './engine.js';
 import { detect } from '../src/engine/input.js';
 import { publish, TEXT as SHARED } from '../src/engine/agora/index.js';
-import { licenceTerms, licenceReasons, attestationLicences, KNOWN_LICENCES } from '../src/engine/agora/licence.js';
-import { TEXT } from '../src/engine/agora/fair.js';
+import { licenceTerms, licenceReasons, attestationLicences, rightsStatement, KNOWN_LICENCES } from '../src/engine/agora/licence.js';
+import { TEXT, recogniseLicence } from '../src/engine/agora/fair.js';
 import { createLookup, WHG_ENDPOINT, whgLicence } from '../src/engine/gazetteer/index.js';
 import * as adopt from '../src/engine/chora/adopt.js';
+import * as georef from '../src/engine/georef/index.js';
+import * as trace from '../src/engine/chora/trace.js';
+import { newGeometryAttestation } from '../src/engine/chora/draw.js';
 
-void PLATO_REPO;
 const CLI = fileURLToPath(new URL('../bin/plato-tools.mjs', import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), 'agora-licence-'));
 after(() => rmSync(dir, { recursive: true, force: true }));
@@ -45,11 +48,27 @@ test('licences are read from their addresses, however written, and from bare SPD
   assert.equal(id('https://opendatacommons.org/licenses/odbl/1-0/'), 'ODbL-1.0');
   assert.equal(id('https://opendatacommons.org/licenses/by/1.0/'), 'ODC-By-1.0');
   assert.equal(id('https://opendatacommons.org/licenses/pddl/1-0/'), 'PDDL-1.0');
+  // ...and with no version at all, as OpenStreetMap links ODbL.
+  assert.equal(id('https://opendatacommons.org/licenses/odbl/'), 'ODbL-1.0');
+  // A deed in a locale with a region, written with an underscore.
+  assert.equal(id('https://creativecommons.org/licenses/by-nc/4.0/deed.pt_BR'), 'CC-BY-NC-4.0');
+  assert.equal(id('https://creativecommons.org/licenses/by/4.0/legalcode.zh-hans'), 'CC-BY-4.0');
+  // The Open Government Licence by its own address.
+  assert.equal(id('https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/'), 'OGL-UK-3.0');
+  // A port says which country's, and is read as the licence it ports.
+  assert.equal(licenceTerms('https://creativecommons.org/licenses/by/3.0/de/').port, 'de');
+  assert.equal(licenceTerms('https://creativecommons.org/licenses/by/3.0/').port, undefined);
   // A bare SPDX id, in any case.
   assert.equal(id('cc-by-sa-4.0'), 'CC-BY-SA-4.0');
-  // Unknown: a bespoke licence, a version or licence not in the table, nothing at all.
-  for (const v of ['https://example.org/our-licence', 'https://creativecommons.org/licenses/by/1.0/', 'https://spdx.org/licenses/GPL-3.0-only', 'MIT', '', null, 42])
+  // Unknown: a bespoke licence, a version or licence not in the table, a rights statement (no
+  // licence at all), nothing at all.
+  for (const v of ['https://example.org/our-licence', 'https://creativecommons.org/licenses/by/1.0/', 'https://spdx.org/licenses/GPL-3.0-only', 'MIT',
+    'https://www.nationalarchives.gov.uk/doc/open-government-licence/version/2/', 'http://rightsstatements.org/vocab/InC/1.0/', '', null, 42])
     assert.equal(licenceTerms(v), null, String(v));
+  // A rights statement is read as one, and nothing else is.
+  assert.equal(rightsStatement('http://rightsstatements.org/vocab/InC/1.0/'), 'InC 1.0');
+  assert.equal(rightsStatement('https://rightsstatements.org/page/NoC-NC/1.0/?language=en'), 'NoC-NC 1.0');
+  assert.equal(rightsStatement('https://creativecommons.org/licenses/by/4.0/'), null);
   // Every licence in the table is read back from its SPDX address.
   assert.ok(KNOWN_LICENCES.length >= 30, KNOWN_LICENCES.join());
   for (const k of KNOWN_LICENCES) assert.equal(id(`https://spdx.org/licenses/${k}`), k);
@@ -70,7 +89,11 @@ test('compatibility: what may not sit under the dataset\'s licence, and why; wha
   const CASES = [
     // [contained, dataset, reasons]
     ['CC-BY-NC-4.0', 'CC-BY-4.0', ['nc']],              // NC inside a dataset that allows commercial use
-    ['CC-BY-NC-4.0', 'CC-BY-NC-4.0', []],               // the same licence: never a reason
+    ['CC-BY-NC-4.0', 'CC-BY-NC-4.0', []],               // the same licence: no reason but ND
+    ['ODbL-1.0', 'ODbL-1.0', []],
+    ['CC-BY-4.0', 'CC-BY-4.0', []],
+    ['CC-BY-ND-4.0', 'CC-BY-ND-4.0', ['nd']],           // ND even under the same licence: the copy may have been changed
+    ['CC-BY-NC-ND-4.0', 'CC-BY-NC-ND-4.0', ['nd']],
     ['CC-BY-NC-4.0', 'CC-BY-NC-SA-4.0', []],            // the dataset is NC too
     ['CC-BY-NC-ND-4.0', 'CC-BY-4.0', ['nc', 'nd']],
     ['CC-BY-ND-4.0', 'CC-BY-4.0', ['nd']],              // no adaptations
@@ -143,6 +166,8 @@ async function dataset(licence) {
       placeOf('jarrow', adopted('jarrow', byId['place:tgn:7011781'], noLicence)),
       placeOf('hexham', [copied('hexham', 'https://spdx.org/licenses/CC-BY-ND-4.0', 'A survey that allows no adaptations (illustrative)')]),
       placeOf('alnwick', [copied('alnwick', 'https://opendatacommons.org/licenses/odbl/1-0/', 'OpenStreetMap')]),
+      // A name from a source in `sources` (not a citation), licensed for non-commercial use only.
+      placeOf('blyth', [{ '@id': `${BASE}place/blyth#a-1`, names: [{ toponym: 'Blyth' }], sources: [{ title: 'An atlas (illustrative)', authorityType: 'source', licence: 'https://creativecommons.org/licenses/by-nc/4.0/' }] }]),
       // No licence of its own: a book cited, and a record consulted for information only (nothing copied).
       placeOf('morpeth', [
         { '@id': `${BASE}place/morpeth#a-1`, names: [{ toponym: 'Morpeth' }], sources: [{ title: 'A charter', authorityType: 'source' }] },
@@ -160,7 +185,7 @@ async function report(d) {
   return r.report;
 }
 const item = (r, kind) => r.items.find((i) => i.kind === kind);
-const licenceKinds = (r) => r.items.filter((i) => /^licence-(nc|nd|sa|attribution|unknown)$|^licences-not-compared$/.test(i.kind)).map((i) => `${i.severity}:${i.kind}`).sort();
+const licenceKinds = (r) => r.items.filter((i) => /^licence-(nc|nd|sa|attribution|unknown)$|^licences-not-compared$|^rights-statement$/.test(i.kind)).map((i) => `${i.severity}:${i.kind}`).sort();
 
 test("Chora's adoption writes the upstream licence where Agora reads it, and none when WHG gives none", async () => {
   const d = await dataset('https://creativecommons.org/licenses/by/4.0/');
@@ -178,12 +203,12 @@ test("Chora's adoption writes the upstream licence where Agora reads it, and non
 
 test('a CC BY dataset: the NC, ND, share-alike and unknown licences are flagged, each with its attestation; the CC BY adoption is not', async () => {
   const r = await report(await dataset('https://creativecommons.org/licenses/by/4.0/'));
-  assert.equal(r.counts.places, 6, 'every place was read');
-  // newcastle's geometry, tynemouth's, jarrow's, hexham's and alnwick's; not morpeth's two.
-  assert.deepEqual(r.counts.licences, { licensed: 5, flagged: 4 });
+  assert.equal(r.counts.places, 7, 'every place was read');
+  // newcastle's geometry, tynemouth's, jarrow's, hexham's, alnwick's and blyth's name; not morpeth's two.
+  assert.deepEqual(r.counts.licences, { licensed: 6, flagged: 5 });
   assert.deepEqual(licenceKinds(r), ['warning:licence-nc', 'warning:licence-nd', 'warning:licence-sa', 'warning:licence-unknown']);
-  assert.deepEqual(item(r, 'licence-nc').examples, [`${BASE}place/tynemouth#a-2: CC-BY-NC-4.0, World Historical Gazetteer`]);
-  assert.equal(item(r, 'licence-nc').count, 1);
+  assert.deepEqual(item(r, 'licence-nc').examples, [`${BASE}place/tynemouth#a-2: CC-BY-NC-4.0, World Historical Gazetteer`, `${BASE}place/blyth#a-1: CC-BY-NC-4.0, An atlas (illustrative)`]);
+  assert.equal(item(r, 'licence-nc').count, 2);
   assert.deepEqual(item(r, 'licence-nd').examples, [`${BASE}place/hexham#a-1: CC-BY-ND-4.0, A survey that allows no adaptations (illustrative)`]);
   assert.deepEqual(item(r, 'licence-sa').examples, [`${BASE}place/alnwick#a-1: ODbL-1.0, OpenStreetMap`]);
   assert.deepEqual(item(r, 'licence-unknown').examples, [`${BASE}place/jarrow#a-2: none given, World Historical Gazetteer`]);
@@ -192,7 +217,7 @@ test('a CC BY dataset: the NC, ND, share-alike and unknown licences are flagged,
   // What to do, and what it is not, in plain words.
   assert.match(item(r, 'licence-nc').message, /publish the dataset under a licence compatible with the source's, remove those attestations/);
   assert.match(item(r, 'licence-nc').message, /not legal advice/);
-  assert.ok(r.counts.said.includes("5 attestations cite a source with a licence of its own; 4 of them may not agree with the dataset's licence (see the warnings)."), r.counts.said.join(' | '));
+  assert.ok(r.counts.said.includes("6 attestations cite a source with a licence of its own; 5 of them may not agree with the dataset's licence (see the warnings)."), r.counts.said.join(' | '));
   // Warnings only: the deposit files are still written.
   assert.equal(r.errors, 0);
 });
@@ -205,13 +230,99 @@ test('the same attestations under other dataset licences: NC, public domain, and
   const pd = await report(await dataset('https://creativecommons.org/publicdomain/zero/1.0/'));
   assert.deepEqual(licenceKinds(pd), ['warning:licence-attribution', 'warning:licence-nc', 'warning:licence-nd', 'warning:licence-sa', 'warning:licence-unknown']);
   assert.ok(item(pd, 'licence-attribution').examples.includes(`${BASE}place/newcastle#a-2: CC-BY-4.0, World Historical Gazetteer`));
-  assert.equal(item(pd, 'licence-attribution').count, 4, 'GeoNames, TGN, the ND survey and OpenStreetMap all ask for credit');
+  assert.equal(item(pd, 'licence-attribution').count, 5, 'GeoNames, TGN, the ND survey, OpenStreetMap and the atlas all ask for credit');
   // A licence not known here: nothing compared, and said so once, with the count and the licence.
   const odd = await report(await dataset('https://example.org/our-own-licence'));
   assert.deepEqual(licenceKinds(odd), ['warning:licences-not-compared']);
-  assert.equal(item(odd, 'licences-not-compared').count, 5);
+  assert.equal(item(odd, 'licences-not-compared').count, 6);
   assert.deepEqual(item(odd, 'licences-not-compared').examples, ['https://example.org/our-own-licence']);
-  assert.deepEqual(odd.counts.licences, { licensed: 5, flagged: 0 });
+  assert.deepEqual(odd.counts.licences, { licensed: 6, flagged: 0 });
+  assert.ok(odd.counts.said.some((s) => /the dataset's licence is not one these tools know, so none was compared/.test(s)), odd.counts.said.join(' | '));
+});
+
+test('a dataset with no licence yet: no-licence says what to do, once; nothing is compared, and the summary says why', async () => {
+  const r = await report(await dataset(undefined));
+  assert.equal(item(r, 'no-licence')?.severity, 'warning');
+  assert.equal(item(r, 'licences-not-compared'), undefined, 'not a second warning about the same missing licence');
+  assert.deepEqual(licenceKinds(r), []);
+  assert.deepEqual(r.counts.licences, { licensed: 6, flagged: 0 }, 'the attestations were read');
+  assert.ok(r.counts.said.includes('6 attestations cite a source with a licence of its own; the dataset has no licence yet, so none was compared.'), r.counts.said.join(' | '));
+});
+
+test('a rights statement is not read as an unknown licence: its own warning, which does not ask for an SPDX address', async () => {
+  const d = await dataset('https://creativecommons.org/licenses/by/4.0/');
+  d.spatialEntities.push(placeOf('wooler', [copied('wooler', 'http://rightsstatements.org/vocab/InC/1.0/', 'An estate map')]));
+  const r = await report(d);
+  assert.deepEqual(item(r, 'rights-statement')?.examples, [`${BASE}place/wooler#a-1: rights statement InC 1.0, An estate map`]);
+  assert.equal(item(r, 'rights-statement').severity, 'warning');
+  assert.match(TEXT['rights-statement'], /need the holder's permission to publish/);
+  assert.doesNotMatch(TEXT['rights-statement'], /spdx/i);
+  // The unknown licence beside it (jarrow) is still unknown, and wooler is not among them.
+  assert.deepEqual(item(r, 'licence-unknown').examples, [`${BASE}place/jarrow#a-2: none given, World Historical Gazetteer`]);
+});
+
+test('an attestation without an address is named by its place; an attestation-centric dataset is read too, by what it is about', async () => {
+  const nc = 'https://creativecommons.org/licenses/by-nc/4.0/';
+  const d = await dataset('https://creativecommons.org/licenses/by/4.0/');
+  d.spatialEntities = [placeOf('amble', [{ names: [{ toponym: 'Amble' }], sources: [{ title: 'An atlas', licence: nc }] }]), placeOf('newbiggin', [{ '@id': `${BASE}place/newbiggin#a-1`, names: [{ toponym: 'Newbiggin' }], sources: [{ title: 'A charter' }] }])];
+  const p = await report(d);
+  assert.equal(p.counts.places, 2);
+  assert.deepEqual(item(p, 'licence-nc')?.examples, [`${BASE}place/amble, an attestation without an address: CC-BY-NC-4.0, An atlas`]);
+  const about = 'https://whgazetteer.org/example/entity/cambridge';
+  const ac = {
+    profile: 'attestation-centric', gazetteer: { ...gazetteer('https://creativecommons.org/licenses/by/4.0/') },
+    attestations: [
+      { about, names: [{ toponym: 'Grantanbrycg' }], sources: [{ title: 'An atlas', licence: nc }] },
+      { '@id': `${BASE}a/2`, about, names: [{ toponym: 'Cambridge' }], sources: [{ title: 'A gazetteer', licence: 'https://creativecommons.org/licenses/by/4.0/' }] },
+    ],
+  };
+  const a = await report(ac);
+  assert.deepEqual(a.counts.licences, { licensed: 2, flagged: 1 }, 'both read');
+  assert.deepEqual(item(a, 'licence-nc')?.examples, [`${about}, an attestation without an address: CC-BY-NC-4.0, An atlas`]);
+});
+
+test("a drawing traced from a CC BY-NC-SA 3.0 map, as Chora's tracing cites it, is flagged in a CC BY dataset", async () => {
+  const fx = (f) => JSON.parse(readFileSync(f, 'utf8'));
+  const g = await georef.readGeoreference(fx('test/fixtures/chora-iiif/annotation.json'), { manifest: fx('test/fixtures/chora-iiif/manifest-rumsey-shaped.json') });
+  const drawn = { type: 'Point', coordinates: (await georef.toWorld(g, { type: 'Point', coordinates: [256, 256] }, { space: 'image', precision: 12 })).geojson.coordinates };
+  const t = await trace.traceFor(g, drawn, { key: 'grid', fetchedAt: '2026-09-30T13:55:00.000Z', licence: 'https://creativecommons.org/licenses/by-nc-sa/3.0/' });
+  const traced = newGeometryAttestation({ geojson: drawn, ...trace.TRACED_POINT_DEFAULTS, contributor: { name: who.name }, created: '2026-09-30T14:00:00Z', ...trace.tracedParts(t, { zoom: 14 }) });
+  const d = await dataset('https://creativecommons.org/licenses/by/4.0/');
+  d.spatialEntities = [placeOf('rothbury', [{ '@id': `${BASE}place/rothbury#a-1`, ...traced }])];
+  const r = await report(d);
+  assert.deepEqual(r.counts.licences, { licensed: 1, flagged: 1 });
+  assert.ok(item(r, 'licence-nc')?.examples[0].startsWith(`${BASE}place/rothbury#a-1: CC-BY-NC-SA-3.0, `), JSON.stringify(item(r, 'licence-nc')));
+  assert.ok(item(r, 'licence-sa')?.examples[0].startsWith(`${BASE}place/rothbury#a-1: CC-BY-NC-SA-3.0, `));
+  // Its georeference, cited too, carries no licence and is not counted as one.
+  assert.deepEqual(licenceKinds(r), ['warning:licence-nc', 'warning:licence-sa']);
+});
+
+test("PLATO's examples raise no licence warning (what DEVELOPERS.md says), while their licensed attestations are read", async () => {
+  const dirEx = `${PLATO_REPO}/schemas/examples`;
+  const files = readdirSync(dirEx).filter((f) => /^(place|attestation)-centric-.*\.json$/.test(f));
+  assert.ok(files.length >= 10, files.join());
+  let licensed = 0;
+  for (const f of files) {
+    const r = await report(JSON.parse(readFileSync(join(dirEx, f), 'utf8')));
+    assert.equal(r.counts.licences.flagged, 0, `${f}: ${JSON.stringify(r.items.filter((i) => /licen|rights/.test(i.kind)))}`);
+    licensed += r.counts.licences.licensed;
+  }
+  assert.ok(licensed > 0, 'some attestations had a licence of their own: the absence is not an empty reading');
+});
+
+test("the FAIR check and the deposit files know a dataset's licence by the same table", () => {
+  assert.equal(recogniseLicence('https://creativecommons.org/licenses/by-nc/4.0/deed.pt_BR')?.spdx, 'CC-BY-NC-4.0');
+  assert.deepEqual(recogniseLicence('https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/'), {
+    spdx: 'OGL-UK-3.0', name: 'Open Government Licence v3.0', zenodo: 'ogl-uk-3.0', uri: 'https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/' });
+  assert.equal(recogniseLicence('https://opendatacommons.org/licenses/odbl/')?.spdx, 'ODbL-1.0');
+  assert.equal(recogniseLicence('https://creativecommons.org/licenses/by-nd/3.0/')?.name, 'Creative Commons Attribution-NoDerivs 3.0 Unported');
+  // A port is compared, but not named in the deposit files; its unported licence is (the control).
+  assert.ok(licenceTerms('https://creativecommons.org/licenses/by/3.0/de/'));
+  assert.equal(recogniseLicence('https://creativecommons.org/licenses/by/3.0/de/'), null);
+  assert.equal(recogniseLicence('https://creativecommons.org/licenses/by/3.0/')?.spdx, 'CC-BY-3.0');
+  // An address only: a bare id is not one, for the dataset's licence.
+  assert.equal(recogniseLicence('CC-BY-4.0'), null);
+  for (const k of KNOWN_LICENCES) assert.equal(recogniseLicence(`https://spdx.org/licenses/${k}`)?.spdx, k);
 });
 
 test('a dataset with no licence of its own anywhere says nothing of licences', async () => {
@@ -252,10 +363,10 @@ test('the command line gives the same warnings', async () => {
   for (const k of ['licence-nc', 'licence-nd', 'licence-sa', 'licence-unknown']) assert.ok(r.stdout.includes(TEXT[k]), k);
   assert.ok(!r.stdout.includes(TEXT['licence-attribution']), 'and not the one that does not apply');
   assert.match(r.stdout, /place\/tynemouth#a-2: CC-BY-NC-4\.0, World Historical Gazetteer/);
-  assert.match(r.stdout, /5 attestations cite a source with a licence of its own; 4 of them may not agree/);
+  assert.match(r.stdout, /6 attestations cite a source with a licence of its own; 5 of them may not agree/);
   assert.ok(r.stdout.includes(SHARED['draft-is-public']));
   const j = JSON.parse(spawnSync(process.execPath, [CLI, 'publish', 'report', '--json', '--overwrite', '--out', join(dir, 'out'), f], { encoding: 'utf8' }).stdout);
-  assert.deepEqual(j.counts.licences, { licensed: 5, flagged: 4 });
+  assert.deepEqual(j.counts.licences, { licensed: 6, flagged: 5 });
 });
 
 // ---- WHG's licence fields (whg.js, A16) -------------------------------------------------------------

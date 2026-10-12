@@ -1090,25 +1090,40 @@ version check does, and each part is a module of its own, with its wording in it
   (no adaptations), `licence-sa` (share-alike, in a dataset under another licence or an earlier version),
   `licence-attribution` (credit asked, in a public-domain dataset), and `licence-unknown` (a licence the
   table does not know, or a geometry cited as evidence from a dataset with no licence given, which is
-  what Chora's adoption writes when WHG names none). With the dataset's own licence missing or unknown,
-  one `licences-not-compared`. Each says what to do (relicense, remove those attestations, or ask the
-  source) and that it reads the licences' terms and is not legal advice; all are warnings, since only
-  the user knows whether an attestation copied from its source or only cites it for a fact.
-  `counts.licences` is `{ licensed, flagged }`, and a line of the summary says the same. The table
-  (`licence.js`) is small and over SPDX ids: `licenceTerms` reads an address (spdx.org, Creative
-  Commons 2.0 to 4.0 and their ports, CC0, the Public Domain Mark, Open Data Commons) or a bare id
-  into the four terms that decide it (BY, NC, ND, SA with its family and version, or public domain);
-  `licenceReasons(contained, dataset)` gives the reasons, and the same licence is never one. A licence
-  not in it is unknown, never guessed. Chora's traced maps write their licence on the map's citation too,
-  so a geometry traced from a non-commercial map is flagged in a dataset that allows commercial use.
+  what Chora's adoption writes when WHG names none). A rights statement (rightsstatements.org, such as
+  In Copyright) is not a licence and not an unknown one: it is `rights-statement`, whose words say the
+  holder's permission may be needed and do not ask for an SPDX address. With the dataset's own licence
+  given but not known here, one `licences-not-compared`; with none at all, nothing more than `no-licence`
+  (or, once published, the PLATO check), and the summary says "the dataset has no licence yet, so none
+  was compared". An attestation without an `@id` is named by its place (`<place>, an attestation without
+  an address`), and in an attestation-centric dataset by what it is `about`. Each says what to do
+  (relicense, remove those attestations, or ask the source) and that it reads the licences' terms and
+  is not legal advice; all are warnings, since only the user knows whether an attestation copied from
+  its source or only cites it for a fact. `counts.licences` is `{ licensed, flagged }`, and a line of the
+  summary says the same. The table (`licence.js`) is small and over SPDX ids, and is the ONE table: the
+  FAIR check's "licence recognised" and the deposit files (`recogniseLicence` in `fair.js`) are derived
+  from it, with the same address normaliser (`licenceKey`: scheme, `www.`, a closing `/`, `legalcode`,
+  `deed.<locale>` with `_` or `-`, as in `deed.pt_BR`), so one report has one meaning of "a licence these
+  tools know". `licenceTerms` reads an address (spdx.org; Creative Commons 2.0 to 4.0, CC0 and the Public
+  Domain Mark; Open Data Commons ODbL, ODC-By and PDDL, with or without `1-0`; the Open Government
+  Licence v3.0 at the National Archives) or a bare id into the four terms that decide it (BY, NC, ND, SA
+  with its family and version, or public domain). A Creative Commons port to one country (`by/3.0/de`) is
+  compared as the licence it ports (`port: 'de'`), but has an SPDX id of its own the table does not
+  hold, so the deposit files do not name it and `licence-unrecognised` says why. `licenceReasons(contained,
+  dataset)` gives the reasons; under the same licence only ND is one (a copy under the same ND licence may
+  still have been changed). A licence not in the table is unknown, never guessed. Chora's traced maps write
+  their licence on the map's citation, so a geometry traced from a CC BY-NC-SA 3.0 map is flagged (NC and
+  SA) in a CC BY dataset; the test traces one with Chora's own `traceFor` and `tracedParts`.
   `test/agora-licence.test.js` adopts with Chora's own engine from WHG fixtures, and holds
-  `test/fixtures/agora/licences.json`, which the browser checks report on, to what Chora makes today.
-  PLATO's examples raise none of these warnings (measured at the pin, October 2026).
+  `test/fixtures/agora/licences.json`, which the browser checks report on, to what Chora makes today. It
+  also reports on every place- and attestation-centric example of PLATO at the pin and fails if any is
+  flagged, so "PLATO's examples raise none of these warnings" is held, not only measured once.
 - **A draft is public once uploaded** (Issue #26, WHG place#310). The report and the site say so, for
   any dataset whose status is not `published` (`draft-is-public` in `index.js`, the last line of the
   summary): anyone with the address can read the pages and download the data, `noindex` and the banner
-  notwithstanding. WHG has no statement yet of what it keeps from a reconciliation query; link it there
-  when it does.
+  notwithstanding, and GitHub Pages serves a site from a private repository to everyone too (only an
+  Enterprise organisation can restrict it). WHG has no statement yet of what it keeps from a
+  reconciliation query; link it there when it does.
 - **The w3id rules in Apache.** `test/agora-w3id.test.js` serves the folder with Apache's own
   `httpd:2.4` image in Docker and asks for every row of `tests.tsv`, as curl would, then shows a
   copy without the `text/html` rule failing. It is skipped, visibly, when Docker or the image is

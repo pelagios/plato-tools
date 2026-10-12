@@ -2055,7 +2055,7 @@ def agora_checks(page, tmp):
     # (test/fixtures/agora/licences.json, which test/agora-licence.test.js holds to what Chora makes),
     # among them one from a CC BY-NC source (tynemouth) and one from a CC BY source (newcastle), in the
     # same run. The NC one is flagged on the page, with its attestation; the CC BY one is read and
-    # counted (5 with a licence of their own) and is in no finding: the absence beside a presence.
+    # counted (6 with a licence of their own) and is in no finding: the absence beside a presence.
     name = 'publish report: an NC adoption in a CC BY dataset is flagged, with its attestation, and a CC BY adoption in the same run is not'
     s = publish_case(page, [ROOT / 'test/fixtures/agora/licences.json'], 'report')
     try:
@@ -2063,12 +2063,13 @@ def agora_checks(page, tmp):
         # The report's text whole: a finding's examples are in its <details>, closed until opened.
         shown, summary = (page.text_content('#report') or '', page.inner_text('#summary')) if done else ('', '')
         check(name, 'non-commercial use only (NC)' in shown and 'place/tynemouth#a-2: CC-BY-NC-4.0, World Historical Gazetteer' in shown
-              and '5 attestations cite a source with a licence of its own; 4 of them may not agree' in summary
+              and '6 attestations cite a source with a licence of its own; 5 of them may not agree' in summary
               and 'place/newcastle' not in shown and 'not legal advice' in shown,
               {'summary': summary, 'report': shown[:1500], 'state': s.get('phase'), 'error': s.get('error')})
         # A draft (this dataset is one) is public once its site is uploaded, noindex or not (Issue #26).
         check('publish report: a draft is said to be public once its site is uploaded, though not indexed',
-              done and 'A draft is public once its site is uploaded: anyone with the address can read its pages' in summary and '(noindex)' in summary,
+              done and 'A draft is public once its site is uploaded: anyone with the address can read its pages' in summary and '(noindex)' in summary
+              and 'GitHub Pages serves a site from a private repository to everyone too' in summary,
               {'summary': summary, 'state': s.get('phase'), 'error': s.get('error')})
     except Exception as e:
         check(name, False, e)

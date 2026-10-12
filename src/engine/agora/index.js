@@ -30,7 +30,7 @@ export const TEXT = {
   'bad-doi': "The concept DOI (--concept-doi) is not a DOI: give it as 10.<digits>/<suffix>, or as its https://doi.org/ address, as Zenodo shows it. Nothing that would carry it is written.",
   'base-is-fragment': "The base address ends in '#', so every place's address would be a fragment of one document (<base>#place/<id>). PLATO allows that, but a web server never sees what follows '#', so a static site cannot give each place a page of its own, nor w3id a rule of its own: nothing is published from it. Give a base that ends in '/' instead (the about sheet's base_uri, or uriSpace in PLATO JSON, or one for this run), while the dataset is a draft.",
   // Said by the report and the site of every dataset not published (Issue #26, WHG place#310).
-  'draft-is-public': "A draft is public once its site is uploaded: anyone with the address can read its pages and download its data, though each page says DRAFT and asks search engines not to list it (noindex), and an address is easily passed on. Until the dataset is ready to be seen, keep the site on your own computer.",
+  'draft-is-public': "A draft is public once its site is uploaded: anyone with the address can read its pages and download its data, though each page says DRAFT and asks search engines not to list it (noindex), and an address is easily passed on. GitHub Pages serves a site from a private repository to everyone too (only an Enterprise organisation can restrict it). Until the dataset is ready to be seen, keep the site on your own computer.",
   'no-base': "The dataset does not say under what address its places are published: give its base address (the about sheet's base_uri, or uriSpace in PLATO JSON), or give one for this run.",
 };
 

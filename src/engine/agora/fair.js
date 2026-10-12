@@ -24,7 +24,7 @@
 // published dataset): a deposit is for good, and would carry them to every index that harvests it.
 import { baseKind, doiOf, doiOk, normaliseBase, releaseProblem, servability, sourcesOf, unservableExample } from './address.js';
 import { TEXT as SHARED } from './index.js';
-import { attestationLicences, licenceTerms } from './licence.js';
+import { attestationLicences, licenceKey, licenceTerms } from './licence.js';
 
 // What to do about a licence that may not agree with the dataset's, and what the finding is not.
 const LICENCE_TAIL = "If what those attestations record was copied from the source (a geometry adopted from a gazetteer, say), the dataset cannot pass it on more freely than the source allows. Either publish the dataset under a licence compatible with the source's, remove those attestations (a location can be drawn again from evidence of your own), or ask the source's holder for permission. The examples give each attestation, its source's licence and the source. This is a reading of the licences' terms, not legal advice: an attestation that only cites a source for a fact, copying nothing from it, may not be bound by its licence.";
@@ -43,7 +43,7 @@ export const TEXT = {
   'creator-without-name': "An author is given by ORCID only, so the deposit files cannot give their name, which Zenodo and CITATION.cff need: the ORCID stands in for it in .zenodo.json and datacite.json, and CITATION.cff says to fill it in. Replace it with the author's name before depositing. In PLATO JSON give the name beside the ORCID; in the about sheet, write the author as 'Name <ORCID>'.",
   'no-licence': "The dataset does not say under what licence it may be reused (licence): give the licence's address, such as https://creativecommons.org/licenses/by/4.0/. It is required once status is 'published'.",
   'licence-not-uri': 'The licence is not given as a web address, so no machine can tell what it allows: give the address of the licence, such as https://creativecommons.org/licenses/by/4.0/.',
-  'licence-unrecognised': "The licence's address is not one of the common open licences these tools recognise (Creative Commons 4.0, CC0, ODbL, ODC-By, PDDL), so the deposit files leave it for you to choose on the repository's form. Check that it is right, and that it is open enough for others to reuse the data.",
+  'licence-unrecognised': "The licence's address is not one of the common open licences these tools recognise (Creative Commons 2.0 to 4.0, CC0, the Public Domain Mark, ODbL, ODC-By, PDDL and the UK's Open Government Licence 3.0, by their own addresses or SPDX's), or is a Creative Commons licence ported to one country's law, which has an SPDX id of its own that these tools do not hold: so the deposit files leave it for you to choose on the repository's form. Check that it is right, and that it is open enough for others to reuse the data. A ported licence is still compared, as the licence it ports, with the licences of the sources the dataset cites.",
   'no-keywords': 'The dataset has no keywords: give a few words or phrases a person might search for it by (keywords).',
   'no-spatial': 'The dataset does not say what part of the world it covers (spatial): give the addresses of the regions or places, from Wikidata or GeoNames, such as http://www.wikidata.org/entity/Q21.',
   'no-temporal': 'The dataset does not say what period it covers (temporal): give the first and last years (startDate, endDate).',
@@ -74,11 +74,14 @@ export const TEXT = {
   'licence-nd': `Attestations cite a source whose licence allows no adaptations (ND). Copying from it into a dataset, and changing it on the way (Chora rounds a copied geometry's coordinates, for one), may count as adapting it, and the dataset's own licence lets others adapt what it holds. ${LICENCE_TAIL}`,
   'licence-sa': `Attestations cite a source under a share-alike licence (such as ODbL or CC BY-SA), which asks that what is made from it be shared under that same licence, and the dataset's own licence is a different one. ${LICENCE_TAIL}`,
   'licence-attribution': `Attestations cite a source whose licence asks for credit (such as CC BY), but the dataset is in the public domain (CC0, PDDL or the Public Domain Mark), which asks for none, so those who reuse it would not know that the source must be credited. ${LICENCE_TAIL}`,
+  'rights-statement': "Attestations cite a source that has a rights statement (rightsstatements.org), not an open licence: it says what is known of the source's copyright, such as In Copyright, and grants nothing. If what they record was copied or traced from it, you may need the holder's permission to publish it; if the statement is one of no copyright (NoC), check the conditions it names. The examples give each attestation, the statement and the source. This is a reading of the statement, not legal advice.",
   'licence-unknown': "Attestations cite a source whose licence these tools cannot read (its address is not one of the open licences they know), or record a geometry copied from another dataset without saying under what licence (Chora records none when the gazetteer gives none), so whether it may be held under the dataset's licence is not known. Find out the source's licence and record it on the source, as an address such as https://spdx.org/licenses/CC-BY-4.0; the report then compares it. The examples give each attestation and what its source says.",
   'licences-not-compared': "Attestations cite sources that have licences of their own, but the dataset's own licence is not given as the address of an open licence these tools know, so they cannot say whether those may be held under it. Give the dataset's licence as such an address (such as https://creativecommons.org/licenses/by/4.0/), or compare them yourself. The example is the dataset's licence.",
 };
 /** The licence findings, in the order the report gives them. */
-const LICENCE_KINDS = ['nc', 'nd', 'sa', 'attribution', 'unknown'];
+const LICENCE_KINDS = ['nc', 'nd', 'sa', 'attribution', 'rights-statement', 'unknown'];
+/** A licence finding's kind: licence-<reason>, but a rights statement is not a licence. */
+const licenceKind = (k) => (k === 'rights-statement' ? k : `licence-${k}`);
 
 // ---- identifiers of people and organisations -----------------------------------------------------
 
@@ -106,29 +109,19 @@ const orcidId = (iri) => ORCID.exec(iri)?.[1] || null;
 
 // ---- licences ----------------------------------------------------------------------------------
 
-// The open licences a dataset is commonly given, by their address with the scheme, 'www.', a closing
-// '/', 'legalcode' and 'deed.<lang>' taken off, with the SPDX id (CITATION.cff and DataCite name a
-// licence by it) and the id in Zenodo's licence list (the SPDX id in lower case). Another licence is
-// left for the depositor to choose, rather than guessed.
-const CC4 = ['by', 'by-sa', 'by-nd', 'by-nc', 'by-nc-sa', 'by-nc-nd'];
-const CC_WORDS = { sa: '-ShareAlike', nd: '-NoDerivatives', nc: '-NonCommercial' };
-const ODBL = { spdx: 'ODbL-1.0', name: 'Open Data Commons Open Database License v1.0' };
-const ODCBY = { spdx: 'ODC-By-1.0', name: 'Open Data Commons Attribution License v1.0' };
-const PDDL = { spdx: 'PDDL-1.0', name: 'Open Data Commons Public Domain Dedication & License 1.0' };
-const LICENCES = new Map([
-  ...CC4.map((k) => [`creativecommons.org/licenses/${k}/4.0`, { spdx: `CC-${k.toUpperCase()}-4.0`, name: `Creative Commons Attribution${k.split('-').slice(1).map((p) => CC_WORDS[p]).join('')} 4.0 International` }]),
-  ['creativecommons.org/publicdomain/zero/1.0', { spdx: 'CC0-1.0', name: 'Creative Commons Zero v1.0 Universal' }],
-  ['opendatacommons.org/licenses/odbl/1-0', ODBL], ['opendatacommons.org/licenses/odbl/1.0', ODBL],
-  ['opendatacommons.org/licenses/by/1-0', ODCBY], ['opendatacommons.org/licenses/by/1.0', ODCBY],
-  ['opendatacommons.org/licenses/pddl/1-0', PDDL], ['opendatacommons.org/licenses/pddl/1.0', PDDL],
-]);
+// The licences a dataset's own licence is known by are licence.js's table, the same one the licences of
+// its attestations are compared by, read from the licence's address (licenceKey takes off the scheme,
+// 'www.', a closing '/', 'legalcode' and 'deed.<locale>'). Each has its SPDX id (CITATION.cff and
+// DataCite name a licence by it) and the id in Zenodo's licence list (the SPDX id in lower case). One
+// exception: a Creative Commons licence ported to one country's law (by/3.0/de) is compared as the
+// licence it ports, but has an SPDX id of its own (CC-BY-3.0-DE) that the table does not hold, so the
+// deposit files do not name it, rather than name the wrong licence. Another licence is left for the
+// depositor to choose, rather than guessed.
 /** A licence address -> { spdx, zenodo, name, uri }, or null if it is not one recognised here. */
 export function recogniseLicence(uri) {
-  if (typeof uri !== 'string' || !/^https?:\/\//i.test(uri.trim())) return null;
-  const key = uri.trim().toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/[?#].*$/, '')
-    .replace(/\/+$/, '').replace(/\/(legalcode(\.[a-z-]+)?|deed\.[a-z-]+)$/, '').replace(/\/+$/, '');
-  const l = LICENCES.get(key);
-  return l ? { ...l, zenodo: l.spdx.toLowerCase(), uri: uri.trim() } : null;
+  if (licenceKey(uri) === null) return null;
+  const t = licenceTerms(uri);
+  return t && !t.port ? { spdx: t.id, name: t.name, zenodo: t.id.toLowerCase(), uri: uri.trim() } : null;
 }
 
 // ---- small helpers -----------------------------------------------------------------------------
@@ -274,7 +267,7 @@ export function create(ctx) {
     if (!licensed) return;
     licences.licensed++;
     if (reasons.size) licences.flagged++;
-    const name = typeof a['@id'] === 'string' ? a['@id'] : `${where} (an attestation without an address)`;
+    const name = typeof a['@id'] === 'string' ? a['@id'] : `${where}, an attestation without an address`;
     for (const [k, r] of reasons) {
       const o = licences.by[k];
       o.n++;
@@ -293,7 +286,7 @@ export function create(ctx) {
         for (const a of list(ev.value.attestations)) if (a && typeof a === 'object' && typeof a['@id'] !== 'string') unidentified++;
         const where = typeof ev.value['@id'] === 'string' ? ev.value['@id'] : 'a place without an address';
         for (const a of list(ev.value.attestations)) if (a && typeof a === 'object') licensing(a, where);
-      } else if (ev.type === 'attestation' && ev.value && typeof ev.value === 'object') licensing(ev.value, 'an attestation');
+      } else if (ev.type === 'attestation' && ev.value && typeof ev.value === 'object') licensing(ev.value, typeof ev.value.about === 'string' ? ev.value.about : 'a place without an address');
       if (!ctx.scheme) return;
       if (ev.type === 'record' && ev.value) {
         const id = ev.value['@id'];
@@ -315,10 +308,12 @@ export function create(ctx) {
       }
       // Licences that travel with a contribution: warnings, for this reads the licences' terms and
       // cannot know whether an attestation copied from its source or only cites it.
-      if (licences.licensed && !datasetLicence) rep.add('warning', 'licences-not-compared', TEXT['licences-not-compared'], str(g.licence) || 'none given', licences.licensed);
+      // A dataset with no licence at all is told what to do by no-licence (or, once published, by the
+      // PLATO check), so licences-not-compared is only for a licence given but not known here.
+      if (licences.licensed && !datasetLicence && str(g.licence)) rep.add('warning', 'licences-not-compared', TEXT['licences-not-compared'], str(g.licence), licences.licensed);
       for (const k of LICENCE_KINDS) {
         const o = licences.by[k];
-        o.eg.forEach((e, i) => rep.add('warning', `licence-${k}`, TEXT[`licence-${k}`], e, i === 0 ? o.n - o.eg.length + 1 : 1));
+        o.eg.forEach((e, i) => rep.add('warning', licenceKind(k), TEXT[licenceKind(k)], e, i === 0 ? o.n - o.eg.length + 1 : 1));
       }
       rep.counts.licences = { licensed: licences.licensed, flagged: licences.flagged };
       const passed = checks.filter((c) => c.passed).length;
@@ -327,7 +322,7 @@ export function create(ctx) {
       const said = [`${passed} of ${checks.length} FAIR checks pass.`];
       if (licences.licensed) {
         const n = licences.licensed.toLocaleString('en-GB');
-        said.push(`${n} attestation${licences.licensed === 1 ? ' cites' : 's cite'} a source with a licence of its own; ${!datasetLicence ? "the dataset's licence is not one these tools know, so none was compared with it."
+        said.push(`${n} attestation${licences.licensed === 1 ? ' cites' : 's cite'} a source with a licence of its own; ${!str(g.licence) ? 'the dataset has no licence yet, so none was compared.' : !datasetLicence ? "the dataset's licence is not one these tools know, so none was compared with it."
           : licences.flagged ? `${licences.flagged.toLocaleString('en-GB')} of them may not agree with the dataset's licence (see the warnings).` : "none of them was found at odds with the dataset's licence."}`);
       }
       if (ctx.scheme && !str(g.landingPage)) said.push(`The site will be the landing page, at ${ctx.scheme.base}.`);

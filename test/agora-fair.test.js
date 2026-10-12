@@ -149,7 +149,10 @@ test('licences are recognised by address, however written, and mapped to SPDX an
     recogniseLicence('https://creativecommons.org/licenses/by-nc/4.0/deed.en')?.spdx, recogniseLicence('https://creativecommons.org/publicdomain/zero/1.0/')?.zenodo,
     recogniseLicence('https://opendatacommons.org/licenses/odbl/1-0/')?.spdx, recogniseLicence('https://www.opendatacommons.org/licenses/by/1.0/')?.zenodo],
   ['CC-BY-4.0', 'CC-BY-SA-4.0', 'CC-BY-NC-4.0', 'cc0-1.0', 'ODbL-1.0', 'odc-by-1.0']);
-  assert.equal(recogniseLicence('https://creativecommons.org/licenses/by/3.0/'), null);
+  // The same table as the licences of attestations are compared by (licence.js): 3.0 is known too;
+  // a version or licence outside it is not.
+  assert.equal(recogniseLicence('https://creativecommons.org/licenses/by/3.0/')?.spdx, 'CC-BY-3.0');
+  assert.equal(recogniseLicence('https://creativecommons.org/licenses/by/1.0/'), null);
   assert.equal(recogniseLicence('CC BY 4.0'), null);
 });
 
