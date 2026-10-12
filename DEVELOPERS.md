@@ -1103,7 +1103,10 @@ version check does, and each part is a module of its own, with its wording in it
   summary says the same. The table (`licence.js`) is small and over SPDX ids, and is the ONE table: the
   FAIR check's "licence recognised" and the deposit files (`recogniseLicence` in `fair.js`) are derived
   from it, with the same address normaliser (`licenceKey`: scheme, `www.`, a closing `/`, `legalcode`,
-  `deed.<locale>` with `_` or `-`, as in `deed.pt_BR`), so one report has one meaning of "a licence these
+  `deed.<locale>` with `_` or `-`, as in `deed.pt_BR`). `.zenodo.json` names each by Zenodo's id, the
+  SPDX id in lower case, every one checked against Zenodo's vocabulary (`/api/vocabularies/licenses/<id>`)
+  on 12 October 2026 and pinned by a test; Zenodo has no entry for the Public Domain Mark (`cc-pdm-1.0` is
+  404), so it is given as `other-pd`, "Other (Public Domain)", which is what the Mark states. With one table, one report has one meaning of "a licence these
   tools know". `licenceTerms` reads an address (spdx.org; Creative Commons 2.0 to 4.0, CC0 and the Public
   Domain Mark; Open Data Commons ODbL, ODC-By and PDDL, with or without `1-0`; the Open Government
   Licence v3.0 at the National Archives) or a bare id into the four terms that decide it (BY, NC, ND, SA

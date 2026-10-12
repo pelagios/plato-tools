@@ -325,6 +325,19 @@ test("the FAIR check and the deposit files know a dataset's licence by the same 
   for (const k of KNOWN_LICENCES) assert.equal(recogniseLicence(`https://spdx.org/licenses/${k}`)?.spdx, k);
 });
 
+test("each licence the table knows has the id Zenodo's vocabulary has for it (checked 12 October 2026)", () => {
+  // Pinned by hand from Zenodo's /api/vocabularies/licenses/<id>, each 200 on 12 October 2026, so that a
+  // change to the table's ids shows here. cc-pdm-1.0 was 404: the Mark is Zenodo's other-pd.
+  const cc = ['by', 'by-sa', 'by-nc', 'by-nd', 'by-nc-sa', 'by-nc-nd'].flatMap((k) => ['2.0', '2.5', '3.0', '4.0'].map((v) => [`CC-${k.toUpperCase()}-${v}`, `cc-${k}-${v}`]));
+  const want = Object.fromEntries([...cc, ['CC0-1.0', 'cc0-1.0'], ['ODbL-1.0', 'odbl-1.0'], ['ODC-By-1.0', 'odc-by-1.0'], ['PDDL-1.0', 'pddl-1.0'],
+    ['OGL-UK-3.0', 'ogl-uk-3.0'], ['CC-PDM-1.0', 'other-pd']]);
+  assert.deepEqual(Object.keys(want).sort(), [...KNOWN_LICENCES].sort(), 'every licence the table knows is pinned, and no other');
+  for (const k of KNOWN_LICENCES) assert.equal(recogniseLicence(`https://spdx.org/licenses/${k}`)?.zenodo, want[k], k);
+  // The Mark is still recognised, and compared as the public domain.
+  assert.equal(recogniseLicence('https://creativecommons.org/publicdomain/mark/1.0/')?.zenodo, 'other-pd');
+  assert.equal(licenceTerms('https://creativecommons.org/publicdomain/mark/1.0/').pd, true);
+});
+
 test('a dataset with no licence of its own anywhere says nothing of licences', async () => {
   const d = await dataset('https://creativecommons.org/licenses/by/4.0/');
   d.spatialEntities = d.spatialEntities.filter((p) => p['@id'].endsWith('morpeth'));

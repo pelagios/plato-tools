@@ -117,11 +117,16 @@ const orcidId = (iri) => ORCID.exec(iri)?.[1] || null;
 // licence it ports, but has an SPDX id of its own (CC-BY-3.0-DE) that the table does not hold, so the
 // deposit files do not name it, rather than name the wrong licence. Another licence is left for the
 // depositor to choose, rather than guessed.
+// Zenodo's licence id is the SPDX id in lower case (checked against Zenodo's vocabulary,
+// /api/vocabularies/licenses/<id>, 12 October 2026), except where Zenodo has no entry of its own: the
+// Public Domain Mark (cc-pdm-1.0 is not there) is "Other (Public Domain)", which is what the Mark
+// says, that the work is in the public domain, rather than a licence left out.
+const ZENODO = { 'CC-PDM-1.0': 'other-pd' };
 /** A licence address -> { spdx, zenodo, name, uri }, or null if it is not one recognised here. */
 export function recogniseLicence(uri) {
   if (licenceKey(uri) === null) return null;
   const t = licenceTerms(uri);
-  return t && !t.port ? { spdx: t.id, name: t.name, zenodo: t.id.toLowerCase(), uri: uri.trim() } : null;
+  return t && !t.port ? { spdx: t.id, name: t.name, zenodo: ZENODO[t.id] ?? t.id.toLowerCase(), uri: uri.trim() } : null;
 }
 
 // ---- small helpers -----------------------------------------------------------------------------
