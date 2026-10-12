@@ -1953,8 +1953,10 @@ function kindHtml(c) {
   askKindLabels();
   const types = candidateTypes(c), chip = (t) => `<code class="code-chip">${escapeHtml(t)}</code>`;
   const items = types.map((t) => (aatName(t) ? `${escapeHtml(aatName(t))} ${chip(t)}` : chip(t)));
-  const fit = kindFit(work.places[c.candidate_source], types);
-  const theirs = (k) => aatName(k.id) || k.id, yours = (k) => k.label || aatName(k.aat) || k.id;
+  const place = work.places[c.candidate_source], fit = kindFit(place, types);
+  // The place's kind in the dataset's own word where it has one: a type given by address and label is one type.
+  const own = Array.isArray(place?.types) && place.types.length === 1 ? place.types[0] : null;
+  const theirs = (k) => aatName(k.id) || k.id, yours = (k) => k.label || own || aatName(k.aat) || k.id;
   const why = fit.fit === 'match' ? `<p class="kind-why good">${escapeHtml(LW.kindMatch(theirs(fit.candidate), yours(fit.place)))}</p>`
     : fit.fit === 'conflict' ? `<p class="kind-why warn">${escapeHtml(LW.kindConflict(theirs(fit.candidate), yours(fit.place)))}</p>` : '';
   return `<p class="kind" data-kind="${types.length ? 'known' : 'unknown'}" data-fit="${fit.fit}">${escapeHtml(LW.kindLabel)} `

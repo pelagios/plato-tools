@@ -3938,10 +3938,17 @@ def quality_checks(pw, url, tmp):
     r = {}
     W = lambda: (wait_state(page, lambda s: True, 5).get('work') or {})
     def to_subject(name):
+        # Every place (Nowhere has no candidate, and the default filter skips it), from the first.
+        if page.input_value('#review-filter') != 'all': page.select_option('#review-filter', 'all')
+        for _ in range(8):
+            if page.is_disabled('#review-prev'): break
+            page.click('#review-prev')
         for _ in range(8):
             if page.inner_text('#review-subject').strip() == name: return True
+            if page.is_disabled('#review-next'): break
             page.click('#review-next')
-        return page.inner_text('#review-subject').strip() == name
+        if page.inner_text('#review-subject').strip() != name: raise RuntimeError(f'{name} not found in the review')
+        return True
     def rows():
         return page.eval_on_selector_all('#review-place li.candidate', '''els => els.map((e) => ({ iri: e.querySelector('.iri')?.textContent,
             kind: e.querySelector('p.kind')?.textContent || null, fit: e.querySelector('p.kind')?.dataset.fit || null,
