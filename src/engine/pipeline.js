@@ -23,6 +23,7 @@ import { lineChunks, lines, jsonDocument, annotationItems, TABLE_SHEETS, DataErr
 import { csvRecords, textChunks, papaRecords, papaRow } from '../formats/csv.js';
 import { Report, LOSS_TEXT, droppedText, FORMAT_WORDS, WORKBOOK_TEXT, dateTimeWords, CANDIDATE_CHECK_TEXT, candidatesNotGivenText } from './report.js';
 import { RUN_TEXT } from './words.js';
+import { gzipped } from '../lib/gzip.js';
 import { slimSet, checkSet, checkAcross, checkEnds, candidateIndex, answers, checkAnswer } from './candidates.js';
 
 export const TARGETS = {
@@ -650,6 +651,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     if (regions) await settleRegions(regions, () => halting(input.format === 'plato-jsonl' ? platoJsonl(input.files[0], new Report()) : platoJson(input.files[0]), signal), options.candidates, rep, gazetteerId);
   }
   if (action === 'convert' && options.cube && target !== 'ntriples') rep.warning('cube-not-ntriples', 'The Data Cube export applies to N-Triples output only, so it is not made here.');
+  if (action === 'convert' && options.gzip && target === 'tables') rep.warning('gzip-zip', 'The tables are written as a zip, which is compressed already, so they are not gzipped as well.');
   // RDF may hold a dataset or a candidate set, which are written by different writers: its writer is
   // made once the graph has been read and it is known which.
   const writerFor = () => makeWriter(target, env, rep, { ...options, idrsBySubject, withdrawn, regions }, typing, outputs, input);
@@ -1147,7 +1149,7 @@ async function candidateCheck(given, res, rep) {
 }
 async function candidateSetWriter(target, env, rep, typing, outputs, input, options) {
   const stem = (options.name || input.files[0].name).replace(/\.(gz)$/i, '').replace(/\.[^.]+$/, '');
-  const sink = new TextSink(await env.output(stem + TARGETS[target].ext));
+  const sink = await textOutput(env, stem + TARGETS[target].ext, options);
   if (target === 'ntriples') {
     let triples = 0;
     const w = new Json2Rdf(env.resources.context, (s, p, o) => { triples++; sink.write(tripleNT(s, p, o)); }, { ...typing, onIssue: () => {} });
@@ -1171,9 +1173,18 @@ async function candidateSetWriter(target, env, rep, typing, outputs, input, opti
 }
 
 // ---- writers ---------------------------------------------------------------------------------
+/**
+ * A text output named `name`, for a writer: gathered into pieces of a megabyte (TextSink), and, with
+ * options.gzip, gzipped as it is written, its name ending in .gz (src/lib/gzip.js: one member, level 6,
+ * no time in the header, so that the same data gives the same bytes, and a trailer that gives its size).
+ */
+async function textOutput(env, name, options) {
+  const o = await env.output(name + (options.gzip ? '.gz' : ''));
+  return new TextSink(options.gzip ? gzipped(o) : o);
+}
 async function makeWriter(target, env, rep, options, typing, outputs, input) {
   const stem = (options.name || input.files[0].name).replace(/\.(gz)$/i, '').replace(/\.[^.]+$/, '');
-  const open = async (ext) => { const o = await env.output(stem + ext); return new TextSink(o); };
+  const open = (ext) => textOutput(env, stem + ext, options);
   // A key the target has no place for is reported by its own name, one line per key (report.js).
   const loss = (l) => (l.kind === 'dropped' ? rep.loss(`dropped:${l.key}`, droppedText(l.key, FORMAT_WORDS[target]), l.value) : rep.loss(l.kind, LOSS_TEXT[l.kind] || l.kind, l.value));
   if (target === 'plato-jsonl' || target === 'plato-json') {

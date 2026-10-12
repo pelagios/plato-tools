@@ -178,6 +178,16 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   to 15 s (`afterCancel` in `worker.js`), before it says it is ready, and the page's buttons wait for
   that (`restarting` in `src/app.js`). The page offers nothing of the run. Tested in
   `test/abort.test.js`, and on the page by `cancel_case` and Methodos's `cancelled` in `e2e/app_test.py`.
+- **Gzipped output.** `options.gzip` (`--gzip`, the page's *Gzip the converted file*) gzips each text
+  output as it is written and adds `.gz` to its name (`textOutput` in `pipeline.js`), a candidate set's
+  too; the tables, a zip already, are not, with a warning (`gzip-zip`). The gzip is `src/lib/gzip.js`,
+  shared with Agora's copy with ids (`mint.js`) and the site's downloads (`site/downloads.js`): level 6
+  and no time in the header, so that the same data gives the same bytes, and one member whose trailer
+  gives the text's size, which is what the storage estimate reads of a gzip (`uncompressedSize` in
+  `src/engine/chora/storage.js`). What fflate makes depends on where its pieces end, so each caller
+  keeps the pieces it had (64 KB of text, or each write as it comes for the downloads), and
+  `test/gzip.test.js` holds both to the bytes they made before they shared it. A gzipped run stopped
+  part-way leaves a gzip with no trailer, which is removed with the rest.
 - **Text is UTF-8, strictly.** Every text input is decoded by `textStream` (or, for a sheet in a
   zip, `zipEntryText`) with a fatal decoder: a byte that is not UTF-8 is a `DataError` naming the file,
   the line and the byte, and saying how to save it as UTF-8, never a replacement character. A

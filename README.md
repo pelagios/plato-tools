@@ -145,7 +145,9 @@ node bin/plato-tools.mjs preview --limit 5 my-places.csv                 # the f
 - `--base URL` gives the base for the web addresses of spreadsheet identifiers
   ([web addresses for your identifiers](https://pelagios.org/place-attestation-ontology/guide/tools.html#converting)). `--no-typing` leaves out the
   node types and typed dates that N-Triples output otherwise has. `--cube` adds what Data Cube
-  expects of statistical figures.
+  expects of statistical figures. `--gzip` gzips the output as it is written, adding `.gz` to its
+  name; the same data gives the same bytes (not `--to tables`, which is a zip already). On the page,
+  the same is *Gzip the converted file*, under Options.
 - **`--georef FILE`** and **`--manifest FILE`** (each repeatable), for a Recogito export: the IIIF
   Georeference Annotation of a map its regions are drawn on (from Allmaps), and the map's IIIF
   manifest if you have it. Each region inside the map becomes a point, citing the map and the

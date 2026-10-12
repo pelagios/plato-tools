@@ -196,7 +196,7 @@ function start(action, earlier) {
     // A table is finished by the review's own matching of its columns, unless another has been loaded since: that is sent, and said to differ.
     ...(isTable(input) && columns && reviewMapping !== undefined && mappingText(columnOptions()) !== reviewMapping ? { columns: columnOptions() } : {}) } });
   // Elenchos: a check given candidate sets (`earlier`), one file for each, to check the files chosen with.
-  else worker.postMessage({ cmd: 'run', files, action, target, candidates: action === 'check' && earlier?.length ? earlier : undefined, options: { base, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked,
+  else worker.postMessage({ cmd: 'run', files, action, target, candidates: action === 'check' && earlier?.length ? earlier : undefined, options: { base, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked, gzip: action === 'convert' && $('gzip').checked,
     // Hermes: the matching of columns shown, as chosen (the same JSON as the command line's --columns,
     // a pattern column in its object form), and the reading options chosen.
     ...(isTable(input) && columns ? { columns: columnOptions() } : {}), ...sheetOption(), ...readingOptions(), ...(isTable(input) ? spellings.options() : {}) } });

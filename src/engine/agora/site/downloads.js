@@ -1,7 +1,7 @@
 // The site's downloads: the whole dataset in three formats, made by the converters the tools use
 // for any conversion (run() in pipeline.js), each writing into the site's tree instead of an output
 // file of its own. The text formats are gzipped as they are written, so nothing is held whole.
-import { Gzip } from 'fflate';
+import { gzipped } from '../../../lib/gzip.js';
 import { run } from '../../pipeline.js';
 import { PARTS, SITE } from '../address.js';
 
@@ -25,11 +25,12 @@ export async function writeDownload(tree, d, { input, env, options, stem }) {
     const f = await tree.file(path);
     opened = f;
     if (!d.gzip) return { write: (s) => { const b = enc.encode(s); size += b.length; f.writeBytes(b); }, writeBytes: (b) => { size += b.length; f.writeBytes(b); }, close: async () => { await f.close(); return { name: path, size }; } };
-    const gz = new Gzip({ level: 6, mtime: 0 }, (chunk) => { size += chunk.length; f.writeBytes(chunk); });
+    // Each write compressed as it comes (piece 0): run()'s writers hand over a megabyte at a time already.
+    const gz = gzipped(f, { piece: 0 });
     return {
-      write: (s) => gz.push(enc.encode(s)),
-      writeBytes: (b) => gz.push(b),
-      close: async () => { gz.push(new Uint8Array(0), true); await f.close(); return { name: path, size }; },
+      write: (s) => gz.write(s),
+      writeBytes: (b) => gz.writeBytes(b),
+      close: async () => { await gz.close(); size = gz.size; return { name: path, size }; },
     };
   };
   // The typing N-Triples has by default on the page and the command line (node types, typed dates).

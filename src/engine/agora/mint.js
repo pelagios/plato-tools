@@ -62,7 +62,7 @@
 import { compare, attestationLines } from '../compare.js';
 import { sha256 } from '../../lib/sha256.js';
 import { normaliseBase } from './address.js';
-import { Gzip } from 'fflate';
+import { gzipped } from '../../lib/gzip.js';
 
 export const TEXT = {
   'base-written': "A base address was given for this run that is not the dataset's own (uriSpace, the about sheet's base_uri): the addresses were made under the base given, and the copy records it as its uriSpace, so that the site and the w3id rules made from the copy use the same one. Put it in the dataset too.",
@@ -93,21 +93,6 @@ export const outputName = (name) => {
   const s = String(name || 'dataset').replace(/\/+$/, '');
   return s.replace(/\.gz$/i, '').replace(/\.[^./]+$/, '') + '-with-ids.jsonl' + (/\.gz$/i.test(s) ? '.gz' : '');
 };
-
-/**
- * An output that gzips what is written to it, as the site's downloads are gzipped (site/downloads.js):
- * level 6, and no time in the header, so that the same copy is the same bytes. Text is gathered into
- * pieces of 64 KB before it is compressed, rather than handed over a line at a time.
- */
-function gzipped(out) {
-  const enc = new TextEncoder();
-  const gz = new Gzip({ level: 6, mtime: 0 }, (chunk) => out.writeBytes(chunk));
-  let held = '';
-  return {
-    write(s) { held += s; if (held.length >= 1 << 16) { gz.push(enc.encode(held)); held = ''; } },
-    async close() { gz.push(enc.encode(held), true); held = ''; return out.close(); },
-  };
-}
 
 /**
  * The working database. rec: each record (a place or an identity relation) as read, in file order.

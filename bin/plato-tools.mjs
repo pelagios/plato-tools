@@ -193,6 +193,8 @@ does not apply to):
                     each figure from a statistical table: its qb:Observation type,
                     the measure as a direct statement, sdmx-dimension:refArea and refPeriod,
                     and the types of its table and structure. Without it, the plain PLATO graph.
+  --gzip            convert: gzip the output as it is written, and add .gz to its name; the
+                    same data gives the same bytes. Not --to tables, which is a zip already.
   --candidates SET  check, convert --to lpf or lpf-seq, apply: a candidate set (PLATO JSON or
                     JSON Lines, profile candidate-set); give it once for each set.
                     check: check a dataset or candidate set together with these candidate
@@ -395,7 +397,7 @@ async function main(argv) {
       args: argv, allowPositionals: true, allowNegative: true, strict: true,
       options: {
         to: { type: 'string' }, out: { type: 'string', default: '.' }, overwrite: { type: 'boolean', default: false },
-        base: { type: 'string' }, typing: { type: 'boolean', default: true }, cube: { type: 'boolean', default: false },
+        base: { type: 'string' }, typing: { type: 'boolean', default: true }, cube: { type: 'boolean', default: false }, gzip: { type: 'boolean', default: false },
         columns: { type: 'string' }, sheet: { type: 'string' }, limit: { type: 'string' }, split: { type: 'string', multiple: true, default: [] },
         clusters: { type: 'string' }, column: { type: 'string' }, method: { type: 'string' },
         'same-id': { type: 'boolean', default: false }, 'list-places': { type: 'boolean', default: false },
@@ -443,6 +445,7 @@ async function main(argv) {
   }
   // --candidates is check's (sets checked together), convert's (LPF's region matches) and apply's (what the answers point into).
   if (o.candidates && action !== 'check' && action !== 'apply' && (action !== 'convert' || (o.to !== 'lpf' && o.to !== 'lpf-seq'))) return usage('--candidates is for check, convert --to lpf or lpf-seq, and apply.');
+  if (o.gzip && action !== 'convert') return usage('--gzip is for convert.');
   if (action === 'cluster') return clusterCommand(args, o);
   if (o.column !== undefined || o.method !== undefined) return usage('--column and --method are for cluster.');
   if (o.clusters !== undefined && !reads) return usage('--clusters is for check, convert and preview.');
@@ -874,7 +877,7 @@ async function runOne(item, action, o, resources, host, live, seen) {
   const xlsx = input.container === 'workbook' ? await import('xlsx') : undefined;
   const { env, finish } = host.env(resources, { progress, xlsx });
   let result = null, failure = null;
-  try { result = await run({ input, action, target: r.target, options: { base: o.base, typing: o.typing, cube: o.cube, name: input.format === 'csv' ? undefined : item.name, columns: columnsFor(item, o), ...(table && o.savedClusters ? { clusters: o.savedClusters } : {}), candidates: o.candidateInputs, ...reading } }, env); }
+  try { result = await run({ input, action, target: r.target, options: { base: o.base, typing: o.typing, cube: o.cube, gzip: o.gzip, name: input.format === 'csv' ? undefined : item.name, columns: columnsFor(item, o), ...(table && o.savedClusters ? { clusters: o.savedClusters } : {}), candidates: o.candidateInputs, ...reading } }, env); }
   catch (e) { failure = e; }
   if (live) process.stderr.write('\r\x1b[K');
   // A file the engine could not read to the end comes back as a report marked incomplete; any

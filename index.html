@@ -240,6 +240,10 @@
         <input id="only" type="file" accept=".txt,text/plain">
         <small>For the website: a text file of the keys of the places to include, one to a line. A place's key is the last part of its address (<code>bristol</code> in <code>…/place/bristol</code>). The addresses of places left out lead to the site's downloads, which hold every place.</small>
       </div>
+      <div class="opt" data-for="convert-output">
+        <label><input id="gzip" type="checkbox"> Gzip the converted file</label>
+        <small>Compressed as it is written, with <code>.gz</code> added to its name; the same data gives the same bytes. Not the spreadsheet tables, which are a zip already.</small>
+      </div>
       <div class="opt" data-for="ntriples-output">
         <label><input id="typing" type="checkbox" checked> Add node types and typed dates, as the DEEP RDF export does</label>
         <small>Adds <code>rdf:type</code> from the ontology's domains and ranges, <code>xsd:gYear</code> on year bounds, and WKT points.</small>

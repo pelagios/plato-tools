@@ -1966,6 +1966,28 @@ OUTPUTS_LIST = '''async () => { let last;
   }
   return ['error: ' + (last?.name || last)]; }'''
 
+def gzip_case(page, tmp, plain_text, plain_outputs):
+    """The conversion just made with "Gzip the converted file" unticked (plain_text, plain_outputs: the
+    control), made again ticked: .gz added, the same text once gunzipped; and the tables, a zip already."""
+    import gzip
+    const = PLATO / 'schemas/examples/place-centric-constantinople.json'
+    page.evaluate("() => { document.getElementById('options').open = true; }")
+    page.check('#gzip')
+    try:
+        s = run_case(page, [const], 'convert', 'ntriples')
+        names = [o['name'] for o in s.get('outputs') or []]
+        z = download(page, names[0], tmp / names[0]).read_bytes() if s.get('phase') == 'done' and names else b''
+        t = run_case(page, [const], 'convert', 'tables')
+        tables = [o['name'] for o in t.get('outputs') or []]
+    finally:
+        page.uncheck('#gzip')
+    got = {'plain': [o['name'] for o in plain_outputs or []], 'gzipped': names, 'gzip bytes': len(z), 'tables': tables,
+           'tables warned': [i['kind'] for i in (t.get('report') or {}).get('items', []) if i['kind'] == 'gzip-zip']}
+    same = z[:2] == b'\x1f\x8b' and gzip.decompress(z).decode('utf-8') == plain_text
+    ok = (got['plain'] == ['place-centric-constantinople.nt'] and plain_text.count(' .\n') > 50 and names == ['place-centric-constantinople.nt.gz']
+          and same and len(z) < len(plain_text.encode('utf-8')) and tables == ['place-centric-constantinople-tables.zip'] and got['tables warned'] == ['gzip-zip'])
+    return ok, {**got, 'the same text once gunzipped': same}
+
 def cancel_case(page, tmp):
     """A conversion cancelled while it writes, then the same conversion let finish (the presence)."""
     big = many_places(tmp, 1000)
@@ -2303,6 +2325,8 @@ def main():
             ok = s.get('phase') == 'done' and s.get('outputs')
             nt = download(page, s['outputs'][0]['name'], tmp / 'c.nt').read_text() if ok else ''
             check('Constantinople JSON -> N-Triples: triples written and saved', ok and nt.count(' .\n') > 50 and 'attests_about' in nt, s if not ok else nt[:200])
+            attempt('"Gzip the converted file": the N-Triples above, gzipped as written, named .nt.gz, the same text once gunzipped; the tables are a zip already, not gzipped, and say so',
+                    lambda: gzip_case(page, tmp, nt, s.get('outputs') if ok else None))
             attempt('Cancel during a conversion: the run stops, and the half-written file it had begun in the browser\'s storage is removed, not offered; let finish, the same conversion\'s file is there and offered',
                     lambda: cancel_case(page, tmp))
             # A source's denial (plato:negated) must never reach LPF as an assertion: Littleworth
