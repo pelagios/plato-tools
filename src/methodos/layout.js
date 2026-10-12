@@ -41,3 +41,12 @@ export function chosenWords(files) {
  * step, or staying at one, is not going on.
  */
 export const wentOn = (was, now) => !!was && !!now && was.id !== now.id && now.n > was.n;
+
+/**
+ * What a result is labelled with once the workflow has gone on from its step, from that step's title
+ * (whereWords): "Step 2 of 10: Elenchos, check the table" gives "Result of step 2: Elenchos, check the table".
+ */
+export function resultLabel(title) {
+  const m = /^Step (\d+) of \d+: (.+)$/.exec(title || '');
+  return m ? `Result of step ${m[1]}: ${m[2]}` : '';
+}

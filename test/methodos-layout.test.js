@@ -4,7 +4,7 @@
 // (e2e/app_test.py, layout_checks) hold the page to the same.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { STATE_WORDS, stepMark, lower, whereWords, chosenWords, wentOn } from '../src/methodos/layout.js';
+import { STATE_WORDS, stepMark, lower, whereWords, chosenWords, wentOn, resultLabel } from '../src/methodos/layout.js';
 import { plan } from '../src/engine/methodos/interview.js';
 import { OPERATIONS } from '../src/engine/methodos/index.js';
 
@@ -49,4 +49,12 @@ test('a run\'s result is put away only when the workflow goes on to a later step
   assert.equal(wentOn(b, { ...b }), false);
   assert.equal(wentOn(null, b), false);  // the workflow begins
   assert.equal(wentOn(b, null), false);  // left, or every step done
+});
+
+test('a result kept in view as the workflow goes on is labelled with the step it was of', () => {
+  assert.equal(resultLabel(whereWords(1, 10, 'Elenchos', 'Check the table')), 'Result of step 2: Elenchos, check the table');
+  assert.equal(resultLabel(whereWords(0, 3, null, 'Choose the file')), 'Result of step 1: choose the file');
+  assert.equal(resultLabel(''), '');
+  assert.equal(resultLabel(undefined), '');
+  assert.equal(resultLabel('Every one of the 10 steps is done.'), '');
 });

@@ -89,7 +89,8 @@ function stepList(list, steps, at, done, notes = []) {
  * open or a workflow is followed; `interview` and `tracker` are the two components' elements
  * (index.html); `store` is phase 2's store (src/methodos/store.js, workflowStore()); `onStep(step)` is
  * told each step the workflow comes to, as { id, n, title, tool, text, link } (n: its place among the
- * steps followed, from 0; title: "Step n of N: Tool, what it does"; tool: a #tool= key or null), and null
+ * steps followed, from 0; title: "Step n of N: Tool, what it does"; tool: a #tool= key or null; text: what
+ * #for-tool says of the workflow, the step itself left to the title), and null
  * when it is left or every step is done. `page` is what the host gives of itself:
  *   files()          the files chosen in step 1;          choose(files)  choose these in step 1;
  *   pick()           open step 1's file picker;           output(name)   a File the last run wrote;
@@ -286,6 +287,9 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   // At a phone's width the tracker is a strip, "Step n of N: …", that opens to the whole tracker and closes again.
   const strip = q(tracker, '#methodos-strip');
   strip.addEventListener('click', () => { const open = tracker.classList.toggle('open'); strip.setAttribute('aria-expanded', String(open)); });
+  // Opened, it is closed again when the workflow comes to another step, or the tracker goes, so that it does not stay over the step.
+  const closeStrip = () => { tracker.classList.remove('open'); strip.setAttribute('aria-expanded', 'false'); };
+  let stripAt = null;   // the step the strip was last said for
   tList.addEventListener('click', (e) => { if (e.target.closest('.track-reopen')) page.reopenResult?.(); });
   const downloadB = q(tracker, '#methodos-download');
   const useB = q(tracker, '#methodos-use'), reopenB = q(tracker, '#methodos-reopen'), restartB = q(tracker, '#methodos-restart');
@@ -622,7 +626,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
   function render(focus) {
     bannerNow();
     const shown = wf || changed?.record;
-    if (!pending && !shown) { tracker.hidden = true; delete tracker.dataset.status; onStep(null); return; }
+    if (!pending && !shown) { tracker.hidden = true; delete tracker.dataset.status; closeStrip(); stripAt = null; onStep(null); return; }
     tracker.hidden = false;
     let steps, at, rows;
     if (!shown) {
@@ -650,6 +654,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
       : changed ? changed.words : `Every one of the ${steps.length} steps is done.${pendingNotes(shown).length ? ` ${pendingNotes(shown).join(' ')}` : ''}`;
     tWhere.textContent = where;
     strip.querySelector('.strip-where').textContent = title || where.replace(/\.$/, '');
+    if ((s?.id ?? null) !== stripAt) { closeStrip(); stripAt = s?.id ?? null; }
     const run = s && RUN_WORDS[s.state] ? RUN_WORDS[s.state](s) : '';
     // The file: chosen through the tracker (its handle kept, where the browser gives one) before the
     // workflow starts, or after a reload when a step takes the file the workflow began with.
@@ -688,7 +693,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, tools
     if (partial) reopenB.textContent = heldFor(partial) ? `Reopen ${partial.name}` : `Choose ${partial.name} again`;
     if (s && !changed) {
       const p = wf ? { title: recipeOf(wf)?.title } : plan(pending.key, pending.answers);
-      onStep({ id: s.id, n: i, title, tool: PAGE_TOOL[s.op] ?? null, text: `Methodos, ${p.title}, step ${i + 1} of ${steps.length}: ${op.tool ? `${op.tool}, ` : ''}${lower(s.title)}.${op.kind === 'interactive' && op.waitsFor ? ` This step is yours: it waits for ${op.waitsFor}.` : ''}`,
+      onStep({ id: s.id, n: i, title, tool: PAGE_TOOL[s.op] ?? null, text: `Methodos, ${p.title}.${op.kind === 'interactive' && op.waitsFor ? ` This step is yours: it waits for ${op.waitsFor}.` : ''}`,
         link: s.op === 'place' ? { href: wf && isWorkflowId(wf.id) ? `./chora.html#workflow=${wf.id}` : './chora.html', words: 'Open Chora' } : null });
     } else onStep(null);
     // The result of an earlier step's run, put away by the host as the workflow went on (src/app.js), is

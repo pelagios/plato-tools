@@ -3629,6 +3629,7 @@ def front_page_checks(browser, url):
             # that follow each other start rows of their own. Tops of the headings, by group. From 78rem (1280
             # px) the tools are a rail of one column left of the steps (Issue #33): one left edge, each group below the last.
             heads = """() => Object.fromEntries([...document.querySelectorAll('#toolbox h3.tool-group')].map((h) => [h.id.slice(3), [Math.round(h.getBoundingClientRect().top), Math.round(h.getBoundingClientRect().left)]]))"""
+            page.set_viewport_size({'width': 1280, 'height': 900}); page.wait_for_timeout(100)
             rail = page.evaluate(heads)
             page.set_viewport_size({'width': 1200, 'height': 900})
             rows = {k: v[0] for k, v in page.evaluate(heads).items()}
@@ -5512,6 +5513,7 @@ METHODOS_PAGE_STATE = '''() => { const v = (e) => !!e && !e.closest('[hidden]') 
     blocked: document.querySelector('#methodos-plan .track-blocked')?.textContent || null, grid: v(document.getElementById('methodos-grid')),
     tracker: v(t), trackerRecipe: t?.dataset.recipe || null, track: steps('#methodos-track'), where: document.getElementById('methodos-tracker-where')?.textContent || '',
     hash: location.hash, tool: window.__plato?.tool ?? null, note: v(n) ? n.textContent : null, files: v(document.getElementById('files')),
+    title: v(document.getElementById('workflow-title')) ? document.getElementById('workflow-title').textContent : null,
     focus: document.activeElement ? (document.activeElement.id || document.activeElement.name || document.activeElement.tagName) : null }; }'''
 
 # ---- Cards marked chosen: Hermes (which narrows nothing) and Methodos (while its interview is open) ----
@@ -5669,16 +5671,16 @@ def methodos_page_checks(browser, url):
             first_ok = (a['tracker'] and not a['interview'] and not a['banner'] and order and a['trackerRecipe'] == p['recipe'] and ids == p['steps']
                         and a['track'][0]['state'] == 'current' and a['track'][0]['current'] == 'step' and a['track'][0]['words'] == 'Now'
                         and all(x['state'] == 'todo' and x['current'] is None for x in a['track'][1:])
-                        and a['hash'] == '' and a['tool'] is None and a['note'] and f"step 1 of {len(ids)}" in a['note'] and 'Hermes' in a['note']
+                        and a['hash'] == '' and a['tool'] is None and a['note'] and (a['title'] or '').startswith(f"Step 1 of {len(ids)}: Hermes") and 'step 1 of' not in a['note'].lower()
                         and a['where'].startswith(f"Step 1 of {len(ids)}") and '%' not in a['where'] + a['note'] and a['focus'] == 'methodos-tracker-h'
                         and a['done shown'] is False and 'in step 1 to begin' in a['message'])
             second_ok = (b['track'][0]['state'] == 'done' and b['track'][0]['words'] == 'Done' and b['track'][1]['state'] == 'current'
-                         and b['hash'] == '#tool=check' and b['tool'] == 'check' and 'Elenchos' in (b['note'] or '') and f"step 2 of {len(ids)}" in (b['note'] or ''))
+                         and b['hash'] == '#tool=check' and b['tool'] == 'check' and 'Elenchos' in (b['note'] or '') and (b['title'] or '').startswith(f"Step 2 of {len(ids)}: Elenchos") and 'step 2 of' not in (b['note'] or '').lower())
             back_ok = c['track'][0]['state'] == 'current' and c['hash'] == '' and c['tool'] is None
             left_ok = not d['tracker'] and d['banner'] and d['hash'] == '' and d['tool'] is None and d['note'] is None and d['files']
             return first_ok and second_ok and back_ok and left_ok, {'started': a, 'above step 1': order, 'one done': b, 'back': c, 'left': d}
         finally: ctx.close()
-    attempt('Methodos: the tracker above step 1 shows the workflow\'s steps as now and to come, begins when a table is chosen, and each step chooses its tool (#tool=) and says itself in #for-tool; the columns step is said done by the user; back and leave undo it', tracker)
+    attempt('Methodos: the tracker above step 1 shows the workflow\'s steps as now and to come, begins when a table is chosen, and each step chooses its tool (#tool=) and is the centre\'s title, not said again in #for-tool; the columns step is said done by the user; back and leave undo it', tracker)
 
     def unavailable():
         # Has regions, answered Yes: the regions step is available now (Krisis's region review), and so is the
@@ -5814,7 +5816,12 @@ LAYOUT = """() => { const r = (id) => { const e = document.getElementById(id); i
     where: document.getElementById('methodos-tracker-where')?.textContent || '', list: r('methodos-track'), strip: r('methodos-strip'), stripWords: strip?.textContent.replace('▾', '').trim() || null,
     expanded: strip?.getAttribute('aria-expanded') || null, line: r('chosen-line'), drop: r('drop'),
     numbersShown: numbers.filter((e) => e.getClientRects().length).length, numbersAll: numbers.length,
-    workflow: document.body.dataset.workflow || null, focus: document.activeElement?.id || null, steps }; }"""
+    workflow: document.body.dataset.workflow || null, focus: document.activeElement?.id || null, steps,
+    done: r('methodos-done'), railScrolled: Math.round(document.getElementById('workflow-rail')?.scrollTop || 0),
+    listOverflows: (() => { const t = document.getElementById('methodos-track'); return !!t && t.scrollHeight > t.clientHeight + 1; })(),
+    result: r('result'), resultOf: r('result-of') ? document.getElementById('result-of').textContent : null,
+    parked: document.querySelector('#methodos-track .track-result')?.textContent || null,
+    kids: (() => { const m = document.querySelector('main.layout'); return m ? [...m.children].filter((e) => getComputedStyle(e).display !== 'none').length : null; })() }; }"""
 def layout_checks(browser, url):
     def fresh(width, height=900):
         ctx = browser.new_context(viewport={'width': width, 'height': height}, reduced_motion='reduce')
@@ -5848,9 +5855,56 @@ def layout_checks(browser, url):
             chosen(page); r['chosen'] = L(page)
             page.click('#methodos-done'); until(page, "() => document.querySelector('#methodos-track li[data-step=\"check\"]')?.dataset.state === 'current'", 10)
             page.wait_for_timeout(300); r['step2'] = L(page)
+            # Check run in the workflow: the step done, the workflow goes on to step 3, and the result stays in
+            # view, labelled as step 2's, until the user first acts on step 3 (a click in its action); then
+            # it is put away, summed up in step 2's row, from which it is shown again.
+            page.click('#check'); until(page, "() => document.querySelector('#methodos-track li[data-step=\"check\"]')?.dataset.state === 'done'", 60)
+            page.wait_for_timeout(400); r['checked'] = L(page)
+            page.click('#action-h'); until(page, "() => !!document.querySelector('#methodos-track .track-reopen')", 10); r['parked'] = L(page)
+            page.click('#methodos-track .track-reopen'); page.wait_for_timeout(300); r['reopened'] = L(page)
+        finally: ctx.close()
+        # The file dropped first, then the workflow followed: step 1 folds as soon as the workflow begins.
+        ctx, page = fresh(1440)
+        try:
+            page.set_input_files('#picker', [str(MYDATA_CSV)])
+            until(page, "() => window.__plato?.phase === 'detected'", 30); r['dropped'] = L(page)
+            follow(page); until(page, "() => document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+            page.wait_for_timeout(300); r['followed'] = L(page)
+        finally: ctx.close()
+        # Outside a workflow, a field being typed in keeps the focus and the view when a file is recognised;
+        # with the focus on the page itself, step 2's heading takes it (the presence).
+        ctx, page = fresh(1440)
+        try:
+            page.set_input_files('#picker', [str(MYDATA_CSV)]); until(page, "() => window.__plato?.phase === 'detected'", 30); page.wait_for_timeout(300)
+            r['free'] = L(page)
+            page.evaluate("() => { document.getElementById('paste').open = true; }")
+            page.focus('#paste-text'); page.wait_for_timeout(200); before = L(page)
+            page.set_input_files('#picker', [str(ROOT / 'test/fixtures/generic/with-ids.csv')])
+            until(page, "() => window.__plato?.phase === 'detected' && /with-ids/.test(document.getElementById('chosen').textContent)", 30); page.wait_for_timeout(400)
+            r['typing'] = {'before': before, 'after': L(page)}
         finally: ctx.close()
     except Exception as e: r['error'] = 'harness error: ' + str(e).split('\n')[0][:200]
     a, p, c, d = (r.get(k) or {} for k in ('landing', 'pending', 'chosen', 'step2'))
+    k3, pk, ro = (r.get(k) or {} for k in ('checked', 'parked', 'reopened'))
+    check('layout at 1440×900: the rail\'s step list scrolls on its own, and the step\'s buttons ("This step is done") stay in view below it, the rail itself not scrolled',
+          bool(c.get('done')) and c['done']['bottom'] <= c['h'] and c['done']['top'] >= 0 and c.get('listOverflows') is True and c.get('railScrolled') == 0,
+          {x: c.get(x) for x in ('done', 'h', 'listOverflows', 'railScrolled')} | err(r))
+    check('layout: a check run in the workflow does its step, the title goes on to step 3, and the result stays in view labelled "Result of step 2"; acted on, step 3 puts it away into step 2\'s row, from which it is shown again',
+          (k3.get('title') or '').startswith('Step 3 of ') and bool(k3.get('result')) and (k3.get('resultOf') or '').startswith('Result of step 2: Elenchos')
+          and not pk.get('result') and 'Show its result' in (pk.get('parked') or '') and bool(ro.get('result')) and (ro.get('resultOf') or '').startswith('Result of step 2: '),
+          {'checked': {x: k3.get(x) for x in ('title', 'result', 'resultOf')}, 'acted on': {x: pk.get(x) for x in ('result', 'parked')}, 'shown again': {x: ro.get(x) for x in ('result', 'resultOf')}} | err(r))
+    dr, fo = r.get('dropped') or {}, r.get('followed') or {}
+    check('layout: a file dropped first and a workflow followed after folds step 1 to its line as the workflow begins (open before it)',
+          bool(dr.get('drop')) and not dr.get('line') and bool(fo.get('line')) and not fo.get('drop') and fo.get('workflow') == 'map-your-data',
+          {'dropped': {x: dr.get(x) for x in ('drop', 'line')}, 'followed': {x: fo.get(x) for x in ('drop', 'line', 'workflow')}} | err(r))
+    ty, fr = r.get('typing') or {}, r.get('free') or {}
+    tb, ta = ty.get('before') or {}, ty.get('after') or {}
+    check('layout: a file recognised while a field (step 1\'s pasted list) has the focus leaves the focus and the view where they were; with the focus on the page, step 2\'s heading takes it',
+          fr.get('focus') == 'action-h' and tb.get('focus') == 'paste-text' and ta.get('focus') == 'paste-text' and ta.get('scrollY') == tb.get('scrollY'),
+          {'free': fr.get('focus'), 'before': {x: tb.get(x) for x in ('focus', 'scrollY')}, 'after': {x: ta.get(x) for x in ('focus', 'scrollY')}} | err(r))
+    states = [x for x in (a, p, c, d, k3, pk, ro, dr, fo) if x]
+    check('layout: the page\'s grid has rows enough: at most twelve of main\'s children shown at once, in every state above (at least three: the rail, step 1 and the tools)',
+          len(states) == 9 and all(isinstance(x.get('kids'), int) and 3 <= x['kids'] <= 12 for x in states), [x.get('kids') for x in states] + ([r['error']] if 'error' in r else []))
     inview = lambda x, box: bool(box) and 0 <= box['top'] < x['h']
     beside = lambda x: (bool(x.get('tracker')) and bool(x.get('action')) and x['tracker']['left'] >= x['action']['right']
                         and x['tracker']['top'] < x['h'] and x['tracker']['bottom'] > 0)
@@ -5888,9 +5942,18 @@ def layout_checks(browser, url):
             follow(page); chosen(page); r['one'] = L(page)
             page.click('#methodos-strip'); page.wait_for_timeout(200); r['open'] = L(page)
             page.click('#methodos-strip'); page.evaluate('() => scrollTo(0, document.documentElement.scrollHeight)'); page.wait_for_timeout(300); r['scrolled'] = L(page)
+            # Opened, and the step said done from it: the workflow goes on, and the strip closes over the next step.
+            page.evaluate('() => scrollTo(0, 0)'); page.click('#methodos-strip'); page.wait_for_timeout(200); r['reopened'] = L(page)
+            page.click('#methodos-done'); until(page, "() => document.querySelector('#methodos-track li[data-step=\"check\"]')?.dataset.state === 'current'", 10)
+            page.wait_for_timeout(300); r['went on'] = L(page)
         finally: ctx.close()
     except Exception as e: r['error'] = 'harness error: ' + str(e).split('\n')[0][:200]
     t, o, op, sc = (r.get(k) or {} for k in ('two', 'one', 'open', 'scrolled'))
+    rp, wo = r.get('reopened') or {}, r.get('went on') or {}
+    check('layout at 600 px: the strip, opened, closes when the workflow goes on to the next step, which is brought into view below it',
+          rp.get('expanded') == 'true' and bool(rp.get('list')) and wo.get('expanded') == 'false' and not wo.get('list') and (wo.get('stripWords') or '').startswith('Step 2 of ')
+          and bool(wo.get('actionH')) and bool(wo.get('strip')) and wo['actionH']['top'] >= wo['strip']['bottom'] and wo['actionH']['top'] < wo['h'],
+          {'opened': {x: rp.get(x) for x in ('expanded', 'list')}, 'went on': {x: wo.get(x) for x in ('expanded', 'list', 'stripWords', 'actionH', 'strip')}} | err(r))
     check('layout at 1000 px: two columns, the steps and the tracker beside them, with the tools as cards below the steps',
           beside(t) and bool(t.get('toolbox')) and bool(t.get('action')) and t['toolbox']['left'] == t['action']['left'] and t['toolbox']['top'] > t['action']['top'] and not t.get('strip'),
           {x: t.get(x) for x in ('tracker', 'action', 'toolbox', 'strip')} | err(r))

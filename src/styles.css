@@ -589,6 +589,12 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; tex
 .track-result { flex-basis: 100%; padding-left: 3.4rem; color: var(--muted); font-size: .9rem; }
 .track-result button.link { font-size: inherit; }
 .track-left, .track-note { color: var(--muted); font-size: .95rem; margin: .5rem 0 0; }
+/* How Methodos follows the tools: folded, after the buttons. */
+.track-about { margin: .6rem 0 0; color: var(--muted); font-size: .9rem; }
+.track-about > summary { cursor: pointer; color: var(--accent); }
+.track-about .track-note { margin-top: .3rem; font-size: inherit; }
+/* Which step a result was of, once the workflow has gone on (src/app.js). */
+.result-of { margin: -.35rem 0 .6rem; color: var(--muted); font-weight: 700; }
 .workflow-step { color: var(--fg); }
 @media (max-width: 34rem) { .methodos, .methodos-tracker { padding: .85rem .8rem; } .methodos-buttons button { flex: 1 1 auto; } }
 /* The one line that opens the interview (in the workflow rail; above step 1 on a narrow screen): quiet, and secondary to step 1's drop zone. */
@@ -645,15 +651,24 @@ body[data-workflow] #action:not([hidden]) + #progress:not([hidden]) + #result:no
 body[data-workflow] #action:not([hidden]) + #progress:not([hidden]):has(+ #result:not([hidden])) { border-bottom: 0; border-radius: 0; margin-bottom: 0; }
 @media (min-width: 60rem) {
   header.top, main.layout, footer { max-width: 74rem; }
+  /* Twelve rows for the centre's children shown at once (at most ten today: the interview, the workflow's title,
+     steps 1 to 5, the storage warning, and, from 60rem to 78rem, the tools; the browser checks hold it to twelve
+     or fewer, layout_checks), then the flexible row that a rail taller than the steps fills. */
   main.layout { display: grid; grid-template-columns: minmax(0, 1fr) 18rem; grid-template-rows: repeat(12, auto) 1fr; column-gap: 1.5rem; align-items: start; padding-top: 1.25rem; }
   main.layout > * { grid-column: 1; margin-top: 0; margin-bottom: 1.25rem; }
-  main.layout > .workflow-rail { grid-column: 2; grid-row: 1 / -1; position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow-y: auto; overscroll-behavior: contain; margin: 0; }
+  main.layout > .workflow-rail { grid-column: 2; grid-row: 1 / -1; position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow-y: auto; overscroll-behavior: contain; margin: 0;
+    display: flex; flex-direction: column; }
+  /* The tracker as a column in the rail, of which only the list of steps scrolls: the step's message and its
+     buttons ("This step is done", Back, Leave) stay in view however long the list. */
+  .workflow-rail > * { flex: none; }
+  .workflow-rail > .methodos-tracker:not([hidden]) { display: flex; flex-direction: column; flex: 0 1 auto; min-height: 0; }
+  .workflow-rail .methodos-tracker > * { flex: none; }
+  .workflow-rail .methodos-tracker > .track { flex: 0 1 auto; min-height: 5rem; overflow-y: auto; overscroll-behavior: contain; }
   main.layout > .workflow-head { margin-top: 0; }
   .workflow-rail > section { margin: 0 0 1rem; }
   .workflow-rail .methodos-tracker { padding: .85rem 1rem; font-size: 1rem; }
   .workflow-rail .methodos-tracker h2 { font-size: 1.1rem; }
   .workflow-rail .track-step { padding: .3rem .4rem; }
-  .workflow-rail .track-note { font-size: .88rem; }
   .workflow-rail .methodos-buttons button { flex: 1 1 auto; font-size: .95rem; }
   /* No workflow followed: the line that opens the interview, as a quiet panel where the tracker will be. */
   .workflow-rail .methodos-banner { margin: 0; padding: .75rem 1rem; border: 1px dashed var(--line); border-radius: 10px; font-size: .95rem; }
@@ -687,7 +702,7 @@ body[data-workflow] #action:not([hidden]) + #progress:not([hidden]):has(+ #resul
 /* Below 60rem the rail's contents flow with the page (display: contents), and the tracker is a strip held at
    the top of the window: "Step n of N: Tool, what it does ▾", which opens to the whole tracker. Closed, it
    shows the strip alone, with a warning the tracker gives (its live region is still read out). */
-@media (max-width: 59.99rem) {
+@media (width < 60rem) {
   .workflow-rail { display: contents; }
   .methodos-tracker { position: sticky; top: 0; z-index: 3; box-shadow: 0 2px 8px rgb(0 0 0 / .14); }
   .methodos-tracker:not(.open) { padding-top: .35rem; padding-bottom: .35rem; }
@@ -699,6 +714,6 @@ body[data-workflow] #action:not([hidden]) + #progress:not([hidden]):has(+ #resul
   .track-strip .strip-mark { color: var(--accent); transition: transform .12s; }
   .methodos-tracker.open .track-strip { margin-bottom: .4rem; border-bottom: 1px solid var(--line); }
   .methodos-tracker.open .track-strip .strip-mark { transform: rotate(180deg); }
-  body[data-workflow] main :is(section, .workflow-head) { scroll-margin-top: 4.5rem; }
+  body[data-workflow] main :is(section, .workflow-head, #files-h, #action-h, #result-h, #workflow-title) { scroll-margin-top: 4.5rem; }
 }
-@media (max-width: 59.99rem) and (prefers-reduced-motion: reduce) { .track-strip .strip-mark { transition: none; } }
+@media (width < 60rem) and (prefers-reduced-motion: reduce) { .track-strip .strip-mark { transition: none; } }

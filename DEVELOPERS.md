@@ -2202,9 +2202,13 @@ changing them.
   reason), its state also in words for a screen reader (Done, Now, To come, Not yet available, visually
   hidden in `.track-state`; `stepMark()` in `src/methodos/layout.js`), the state itself in
   `li[data-step][data-state]`, the current one `aria-current="step"`, and "Step 3 of 10" in a polite
-  live region; no percentage, no time. The host's `onStep({ tool, text, link })`
-  (`src/app.js`) chooses the step's tool as its card would (`#tool=`, step 2 narrowed) and says the
-  step first in `#for-tool`; `onStep(null)` when the workflow is left.
+  live region; no percentage, no time. The host's `onStep({ id, n, title, tool, text, link })`
+  (`src/app.js`) is told each step the workflow comes to: `id` the step's, `n` its place among the steps
+  followed (from 0, for `wentOn()`), `title` "Step n of N: Tool, what it does" (the centre's title),
+  `tool` a `#tool=` key or null, chosen as its card would choose it (step 2 narrowed), `text` what
+  `#for-tool` says of the workflow (its name, and whether the step waits for the user; the step itself
+  is the title's, not said again), and `link` Chora's "Open Chora", if any. `onStep(null)` when the
+  workflow is left, or every step is done.
 - **The join to the tools' runs.** Before a file is chosen the workflow is pending (its recipe and
   answers, for the tab only); the runner starts (`runner.start`, which skips a step not yet available
   and keeps its reason in `unavailable`) when step 1's file is chosen. The host tells Methodos each
@@ -2637,7 +2641,13 @@ A push to `main` runs the tests, builds the site and publishes it to GitHub Page
   centre and the workflow rail, with the cards as a grid below the steps. Below 60rem one column, the
   rail's contents flowing with the page (`display: contents`), and the tracker a strip held at the top
   of the window (`#methodos-strip`, "Step n of N: Tool, what it does ▾"), which opens to the whole
-  tracker (`.open`, `aria-expanded`). The rails are placed by grid line and span every row (the rows
+  tracker (`.open`, `aria-expanded`, controlling `#methodos-track`) and closes again when the workflow
+  comes to another step, when the page brings the next thing into view, and when the tracker goes. In the
+  rail the tracker is a flex column of which only the list of steps scrolls, so that the step's message
+  and its buttons ("This step is done", Back, Leave) are always in view; how Methodos follows the tools
+  is folded after the buttons (`details.track-about`). The grid has twelve rows for the centre's
+  children shown at once (at most ten today), then a flexible row: `layout_checks` fails if more than
+  twelve of `main.layout`'s children are shown. The rails are placed by grid line and span every row (the rows
   are given, the last flexible), so the order of reading and of the keyboard is unchanged: the tracker
   before step 1, the tools after the steps. The masthead and footer span the columns.
   **While a workflow is followed** (the tracker shown: `body[data-workflow]`, the recipe's key, set by
@@ -2645,14 +2655,20 @@ A push to `main` runs the tests, builds the site and publishes it to GitHub Page
   numbers are hidden, and the centre is titled with the tracker's current step (`#workflow-title`
   in `#workflow-head`, the same words as the tracker's line, `whereWords()`), with `#for-tool` moved
   under it. Once its file is chosen and recognised, step 1 folds to one line (`#files.folded`,
-  `#chosen-line`: the file's name, size and format, and "Change", which opens it again). A run's
-  Working and Result join step 2's panel. When the workflow goes on to a later step (`wentOn()`), the
-  last run's result is put away (`parked`) and summed up in its step's row of the tracker, with "Show its
-  result". After a file is chosen and recognised, and whenever the workflow goes on, what is to be done
-  next (step 2's action, under the step's title) is scrolled into view and its heading given the focus
-  (`showNext()`), politely: only when the focus is on the page itself, in step 1, the rail or the title,
-  or on a button of steps 2 to 4, never taken from a field elsewhere. Outside a workflow the page keeps
-  its numbered sections. The pure parts are in `src/methodos/layout.js` (`test/methodos-layout.test.js`);
+  `#chosen-line`: the file's name, size and format, and "Change", which opens it again); a workflow
+  followed with its file already recognised folds it as it begins. A run's Working and Result join step
+  2's panel. When the workflow goes on to a later step (`wentOn()`), the last run's result stays in view,
+  labelled as the step's it was (`#result-of`, "Result of step 2: Elenchos, check the table",
+  `resultLabel()`), until the user first acts on the new step (a click in step 2's panel, `park()`): it is
+  then put away (`parked`) and summed up in its step's row of the tracker, with "Show its result", which
+  shows it again, labelled. A new run lets it go; going back to its step, or leaving the workflow, shows
+  it again as the page's own. After a file is chosen and recognised, and whenever the workflow goes on,
+  what is to be done next (step 2's action, under the step's title) is scrolled into view and its
+  heading given the focus (`showNext()`), politely: only when the focus is on the page itself, on step
+  1, the rail or the title (not a field being typed in, such as the pasted list), or on a button of
+  steps 2 to 4. In a workflow the view is scrolled from the step's title down; outside one only as far
+  as needed (`block: 'nearest'`), so that step 1's line saying what the file is stays in view with step 2
+  where both fit. Outside a workflow the page keeps its numbered sections. The pure parts are in `src/methodos/layout.js` (`test/methodos-layout.test.js`);
   the browser checks are `layout_checks` in `e2e/app_test.py`, at 1440, 1000 and 600 px.
 - **The toolbox.** The page opens with the introduction, step 1's drop zone, and one card per tool
   (`nav#toolbox` in `index.html`), and the README with a table of them. When a tool lands, update

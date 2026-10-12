@@ -37,7 +37,7 @@ import { REGION_PAGE as RP, REGION_WORDS } from './engine/words.js';
 import { levelNames, levelLabel, navigator as levelNavigator, firstOpen, chainOf, placeChain, constraintLine, notesOf, relaxOptions, costOf, levelRegions, unsettledOf, placesToLook, lockedPlaces, wouldClear, priorOf, restorePrior, nameOf, regionDomId, certaintyChoices, CERTAINTY_DEFAULT, regionMatchOptions } from './krisis/region-page.js';
 import { mountMethodos } from './methodos/page.js';
 import { workflowStore } from './methodos/store.js';
-import { chosenWords, wentOn } from './methodos/layout.js';
+import { chosenWords, wentOn, resultLabel } from './methodos/layout.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
 let worker, files = [], input = null, targets = {}, busy = false;
@@ -158,7 +158,7 @@ function start(action, earlier) {
   const readingRefused = action === 'check' || action === 'convert' ? readingProblem() : null;
   if (readingRefused) { readingMessage(readingRefused); return refuse(readingRefused); }
   busy = true;
-  parked = null;   // a new run: the result of an earlier step's, put away, is about to be replaced
+  parked = null; lingering = null; resultOf(null);   // a new run: the result of an earlier step's, kept or put away, is about to be replaced
   const target = action === 'convert' ? $('target').value : null;
   $('progress').hidden = false; $('result').hidden = true;
   buttons(true);
@@ -824,7 +824,10 @@ let tool = null;
 let hermesChosen = false;
 const HERMES = 'For <strong>Hermes</strong>, the readers: your file is read when you drop it, whether annotations from Recogito, a TEI edition, a CSV file or workbook, or GeoJSON. Then choose what to do with it.';
 let workflowStep = null;   // the step of a Methodos workflow the user is at, if they follow one: { id, n, title, tool, text, link }
-let parked = null;         // { step, words }: the result of the run that did an earlier step, put away as the workflow went on (workflowMode)
+// The result of the run that did an earlier step, once the workflow has gone on (workflowMode): `lingering`
+// while it is still shown, labelled as that step's, until the user first acts on the new step; then `parked`,
+// put away and summed up in its step's row of the tracker. Each { step, words, label }.
+let lingering = null, parked = null;
 // The fragment holds the tool chosen (#tool=<key>) and, back from Chora, the workflow it was opened for
 // (#workflow=<id>, src/chora/handback.js), together as #tool=<key>&workflow=<id>.
 const hashParam = (name) => { try { return new URLSearchParams(location.hash.replace(/^#/, '')).get(name); } catch { return null; } };
@@ -942,7 +945,8 @@ const methodos = mountMethodos({
     // As if typed in Options: its own listeners (the preview made under it is let go) hear 'input' and 'change'.
     setBase: (v) => { if ($('base').value === v) return; $('base').value = v; for (const t of ['input', 'change']) $('base').dispatchEvent(new Event(t, { bubbles: true })); },
     parked: () => parked,
-    reopenResult: () => { if (!parked) return; $('result').hidden = false; showNext($('result-h'), { asked: true }); },
+    // Shown again, with its label, until the user next acts on the step at hand.
+    reopenResult: () => { if (!parked) return; lingering = parked; parked = null; $('result').hidden = false; resultOf(lingering.label); methodos.detected(); showNext($('result-h'), { asked: true }); },
   },
   workflow: arrivedFor,
   onStep(step) {
@@ -951,10 +955,12 @@ const methodos = mountMethodos({
     const was = workflowStep;
     workflowStep = step;
     chooseTool(step?.tool ?? null); setHash(step?.tool ?? null);
-    // Gone on to the next step: the last run's result is put away (summed up in its step's row, to be shown
-    // again from there), and what the new step needs is brought into view, as at a file chosen.
+    // Back at the step a result was of (Back a step): it is that step's result again, shown, unlabelled.
+    if (step && (lingering?.step === step.id || parked?.step === step.id)) { $('result').hidden = false; lingering = parked = null; resultOf(null); }
+    // Gone on to the next step: the last run's result stays in view, labelled as the step's it was, until the
+    // user first acts on the new step (park()); what the new step needs is brought into view, as at a file chosen.
     if (wentOn(was, step)) {
-      if (!$('result').hidden) { parked = { step: was.id, words: $('summary').textContent.trim() }; $('result').hidden = true; }
+      if (!$('result').hidden && !lingering) { lingering = { step: was.id, words: $('summary').textContent.trim(), label: resultLabel(was.title) }; resultOf(lingering.label); }
       showNext(!$('action').hidden ? $('action-h') : $('workflow-title'), { from: stepHead() });
     }
   },
@@ -963,23 +969,45 @@ const methodos = mountMethodos({
 // One numbering: the page's own section numbers are hidden and the centre is titled with the workflow's
 // step; #for-tool goes under that title; step 1 folds to one line once its file is chosen; and the
 // result of a step's run is put away when the workflow goes on (`parked`, offered again from the tracker).
+let railAt = null;   // the step the tracker's list was last scrolled to
 function workflowMode(step) {
   const tracker = $('methodos-tracker'), on = !tracker.hidden, note = $('for-tool'), head = $('workflow-head');
+  const began = on && !document.body.dataset.workflow;
   if (on) document.body.dataset.workflow = tracker.dataset.recipe || 'workflow'; else delete document.body.dataset.workflow;
   if (on && note.parentElement !== head) head.append(note);
   if (!on && note.parentElement === head) $('files-h').after(note);
   $('workflow-title').textContent = on && step ? step.title : '';
   $('workflow-title').hidden = !(on && step);
   head.hidden = !on || ($('workflow-title').hidden && note.hidden);
-  if (!on) { foldFiles(false); parked = null; }
-  // The rail scrolls on its own when the tracker is taller than the window: the step at hand is kept in sight
-  // in it (the rail alone is scrolled, never the page).
-  const rail = $('workflow-rail'), now = tracker.querySelector('li[aria-current]');
-  if (on && now && rail.scrollHeight > rail.clientHeight) {
-    const r = rail.getBoundingClientRect(), n = now.getBoundingClientRect();
-    if (n.top < r.top || n.bottom > r.bottom) rail.scrollTop += n.top - r.top - r.height / 3;
+  // A workflow followed with its file already chosen and recognised (dropped first, then followed): step 1 folds at once.
+  if (began && files.length && input?.format && input.reason === undefined && state.phase !== 'detecting') foldFiles(true);
+  if (!on) {
+    // Left: step 1 open again, and a result put away shown again, as the page's own.
+    foldFiles(false);
+    if (parked) $('result').hidden = false;
+    lingering = parked = null; resultOf(null); railAt = null;
+  }
+  // The list of steps scrolls on its own in the rail when it is longer than the room: the step at hand is
+  // brought into sight in it when the workflow comes to another step (the list alone, never the page).
+  const list = $('methodos-track'), now = list.querySelector('li[aria-current]');
+  if (on && now && now.dataset.step !== railAt) {
+    railAt = now.dataset.step;
+    if (list.scrollHeight > list.clientHeight) {
+      const r = list.getBoundingClientRect(), n = now.getBoundingClientRect();
+      if (n.top < r.top || n.bottom > r.bottom) list.scrollTop += n.top - r.top - r.height / 3;
+    }
   }
 }
+/** The label that says which step a result shown was of (#result-of), or none. */
+function resultOf(label) { $('result-of').textContent = label || ''; $('result-of').hidden = !label; }
+/** The user acts on the step at hand: a result still shown from an earlier step is put away, summed up in its row. */
+function park() {
+  if (!lingering) return;
+  parked = lingering; lingering = null;
+  $('result').hidden = true; resultOf(null);
+  methodos.detected();   // the tracker drawn again, with the row's summary
+}
+$('action').addEventListener('click', park, true);
 /** Step 1 folded to one line (the files chosen, and "Change"), or opened again. */
 function foldFiles(on) {
   $('files').classList.toggle('folded', on);
@@ -997,10 +1025,17 @@ const stepHead = () => (document.body.dataset.workflow && !$('workflow-head').hi
 function showNext(heading, { asked = false, from } = {}) {
   if (!heading || !heading.getClientRects().length) return;
   const a = document.activeElement;
-  const free = asked || !a || a === document.body || !!a.closest('#files, #workflow-rail, #workflow-head')
+  // A field being typed in (the pasted list in step 1, a field of Options) keeps the focus, and the view.
+  const typing = !!a?.matches?.('textarea, select, [contenteditable], input:not([type=file]):not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit])');
+  const free = asked || !a || a === document.body || (!typing && !!a.closest('#files, #workflow-rail, #workflow-head'))
     || (!!a.closest('#action, #progress, #result') && a.matches('button, summary'));
   if (!free) return;
-  (from || heading.closest('section') || heading).scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' });
+  // At a phone's width the tracker's strip, if opened, is closed, so that it does not cover what is shown.
+  $('methodos-tracker').classList.remove('open'); $('methodos-strip').setAttribute('aria-expanded', 'false');
+  // In a workflow, from the step's title down; outside one, only as far as needed, so that step 1's line
+  // saying what the file is stays in view with step 2 where both fit.
+  const block = asked || document.body.dataset.workflow ? 'start' : 'nearest';
+  (from || heading.closest('section') || heading).scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block });
   heading.focus({ preventScroll: true });
 }
 // The tools rail (from 78rem) shows each card's name and label: its sentence is shown again at the head of
@@ -1074,6 +1109,7 @@ function matchOptions() {
 function matchProblem() { try { checkMatchOptions(matchOptions()); return null; } catch (e) { return e.message; } }
 /** Say plainly why something cannot be done, where results are shown. */
 function refuse(message) {
+  resultOf(null);
   $('result').hidden = false; $('saves').innerHTML = ''; $('report').innerHTML = '';
   $('summary').innerHTML = `<span class="warn">${escapeHtml(message)}</span>`;
   Object.assign(state, { phase: 'error', error: message });
