@@ -4301,13 +4301,23 @@ def scope_checks(pw, url, tmp):
         until(page, "() => !!document.getElementById('scope-s-gn')", 15)
         page.check('#scope-s-gn')
         done()
+        # The preview is drawn again after each change of the Scope, asynchronously (it reads the places from the worker
+        # first): read it once the page says it is the preview of this Scope, not the one drawn before the last box was
+        # ticked (the live run of 12 October 2026 read it a moment too soon, once).
+        keys = ['countries', 'types', 'start', 'end', 'temporal', 'namespaces']
+        drawn = soon(page, "(keys) => JSON.stringify(((window.__plato.lookup || {}).preview || {}).scope || []) === JSON.stringify(keys)", 30, keys)
         preview = page.inner_text('#lookup-preview')
         sent = look()
         r['plain'] = sent
-        ok = (len(sent) == 10 and all(q.get('countries') == ['GB'] and q.get('types') == ['aat:300008369', SCOPE_NARROWER] and q.get('start') == 1500 and q.get('end') == 1600
-                                       and q.get('temporal') is True and q.get('namespaces') == ['gn'] and 'undated' not in q and 'area_only' not in q for q in sent)
-              and 'The Scope is sent as countries, types, start, end, temporal, namespaces' in preview)
-        return ok, {'sent': sent[:2], 'n': len(sent), 'preview': preview[-400:]}
+        conditions = {
+            'ten queries sent (one per place)': len(sent) == 10,
+            'each query carries the Scope as WHG received it': bool(sent) and all(q.get('countries') == ['GB'] and q.get('types') == ['aat:300008369', SCOPE_NARROWER] and q.get('start') == 1500
+                and q.get('end') == 1600 and q.get('temporal') is True and q.get('namespaces') == ['gn'] and 'undated' not in q and 'area_only' not in q for q in sent),
+            'the preview was drawn for this Scope': drawn,
+            'the preview says what is sent': 'The Scope is sent as countries, types, start, end, temporal, namespaces' in preview,
+        }
+        return all(conditions.values()), {'failed': [k for k, v in conditions.items() if not v], 'n': len(sent), 'sent': sent[:2],
+                                          'preview scope': page.evaluate("() => ((window.__plato.lookup || {}).preview || {}).scope || null"), 'preview tail': preview[-300:]}
     attempt('Scope: outside a workflow the tab\'s Scope is sent by the lookup panel, read from what WHG received: countries, types (the type with its narrower one), start, end and temporal, and namespaces; no undated, and the preview says it', tab_scope)
 
     def empty_row():

@@ -1767,7 +1767,8 @@ async function refreshPreview() {
     + (p.first.length ? `<ol class="lookup-queries">${p.first.map((q) => `<li><code>${escapeHtml(JSON.stringify(shortTypes(q)))}</code></li>`).join('')}</ol>` + typesSent(p.first) : `<p>${escapeHtml(LOOKUP_WORDS.noPlaces)}</p>`);
   send.textContent = LW.send(p.queries, shortName(svc.service));
   send.disabled = !p.queries || !!looking;
-  lookupState({ preview: { places: p.places, queries: p.queries, requests: p.requests, first: p.first } });
+  // `scope`: the keys of the Scope this preview was drawn with, so that a check can wait for the preview of the Scope in force (it is drawn again, asynchronously, after each change).
+  lookupState({ preview: { places: p.places, queries: p.queries, requests: p.requests, first: p.first, scope: p.scope?.keys ?? [] } });
 }
 
 /**

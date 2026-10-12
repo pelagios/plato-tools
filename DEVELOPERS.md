@@ -2526,6 +2526,10 @@ To WHG only: another service is sent nothing of it.
   sources and the queries, and records what it receives; they include the keyboard's place through
   redraws (`document.activeElement`), a country ticked shown at once in a workflow, the rail's layout at
   1440 × 900, a types-only Scope whose first batch is empty, a fail-closed Where, and a drawing refused.
+  The lookup panel's preview is drawn again after each change of the Scope, asynchronously (it reads the
+  places from the worker first), so a check reads it only once `window.__plato.lookup.preview.scope` (the keys
+  it was drawn with) is the Scope's: on the live site on 12 October 2026 the check read it a moment before the
+  last change was drawn, and failed once (brought out locally by delaying the worker's answers 1.5 s).
 
 ## Workflows (Methodos)
 
