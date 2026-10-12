@@ -14,10 +14,10 @@
 //    histories and error messages.
 // A3 VERIFIED. Limits. At most 50 queries a POST: more is refused with 400 and nothing is processed.
 //    600 queries a minute per user, in a fixed window, counting QUERIES, not requests; beyond it,
-//    429 with Retry-After. 5,000 REQUESTS a day; spent, it is a 401 whose detail is "Daily API limit
-//    (5000 calls) exceeded" (kind 'quota', told from a refused token by that text; so that a
-//    rewording is not taken for a refused token, a 401 or 403 whose detail says "limit" with
-//    "exceed" or "quota" is taken for it too). A query's default `limit` is 100 candidates, so these
+//    429 with Retry-After. 5,000 REQUESTS a day; spent, it was a 401 whose detail is "Daily API limit
+//    (5000 calls) exceeded" until 12 October 2026, and is now a 429 with a code (A15; kind 'quota',
+//    dailyLimit()). Only that phrase is read as the cap on a 401 or 403 (narrowed on 12 October 2026 from
+//    any "limit" with "exceed" or "quota"); any other is a refused token. A query's default `limit` is 100 candidates, so these
 //    tools send one of their own. ONE request in flight, for the whole site has only 16 slots and
 //    WHG fans each batch out itself: one per page or worker (a shared lookup per endpoint), and one
 //    across tabs (a Web Lock per site, 'plato-tools:gazetteer:whgazetteer.org' with or without
@@ -149,7 +149,7 @@ export const isBlockedAgent = (ua) => BLOCKED_AGENTS.some((b) => String(ua).toLo
  * (website 940fd89dc): a 429 whose JSON says `code: "daily_limit_exceeded"`, with `resets_at` (always the next
  * midnight UTC) and Retry-After; any other 429 is the per-minute limit. FALLBACK, TO BE RETIRED once no older
  * or cached answer can come back: a 401 or 403 whose detail says "Daily API limit (N calls) exceeded"
- * (isQuotaSpent), which is how WHG said it until 12 October. `resetsAt` is `resets_at` as an ISO date-time
+ * (that phrase alone, nothing looser: any other 401 or 403 is a refused token), which is how WHG said it until 12 October. `resetsAt` is `resets_at` as an ISO date-time
  * when readable, else null ("tomorrow"). A spent allowance is never a refused token: the lookup stops, keeps
  * what was answered, and the token is kept and not asked for again.
  */
@@ -160,13 +160,7 @@ export function dailyLimit(status, text) {
   if (status === 429) return j && j.code === 'daily_limit_exceeded' ? { resetsAt: at } : null;
   if (status !== 401 && status !== 403) return null;
   const said = ['detail', 'error', 'message'].map((k) => j?.[k]).find((v) => typeof v === 'string') ?? (j ? '' : String(text ?? ''));
-  return isQuotaSpent(said) ? { resetsAt: at } : null;
-}
-
-/** Is a 401's or 403's detail a spent allowance rather than a refused token (A3)? */
-export function isQuotaSpent(detail) {
-  const d = String(detail ?? '');
-  return /daily api limit/i.test(d) || (/limit/i.test(d) && /exceed|quota/i.test(d));
+  return /daily api limit/i.test(said) ? { resetsAt: at } : null;
 }
 
 // Language codes (A13). A three-letter code of a language that also has a two-letter one (ISO 639-2/T

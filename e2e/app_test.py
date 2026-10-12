@@ -1106,6 +1106,7 @@ def krisis_lookup_case(page, tmp, url):
         out['permissions panel'] = page.inner_text('#permissions-panel')
         return out
     na = step(not_allowed, {})
+    vocab_not_allowed = len(vocab)   # the review's labels for kinds are asked for only once WHG is allowed
     nfirst = [json.loads(x) for x in na.get('first', [])]
     check('lookup, not allowed: the page loaded with no gazetteer allowed shows ONE line, "Needs permission: World Historical Gazetteer", in place of Send',
           na.get('canary') == 'enforced' and na.get('policy') == [] and na.get('line', '').startswith('Needs permission: World Historical Gazetteer')
@@ -1353,6 +1354,12 @@ def krisis_lookup_case(page, tmp, url):
         resume_before = page.is_visible('#lookup-resume')
         set_to('never')
         page.wait_for_function("() => !!document.querySelector('#review-place .find .needs-permission:not([hidden])') && !document.getElementById('lookup-permission').hidden", timeout=10_000)
+        # The review drawn again while Never (a place's candidates, each with its kind): no GET of WHG's labels.
+        vocab_at = len(vocab)
+        pair = ('#review-next', '#review-prev') if not page.is_disabled('#review-next') else ('#review-prev', '#review-next')
+        if not page.is_disabled(pair[0]): page.click(pair[0]); page.click(pair[1])   # away and back: the same place after
+        page.wait_for_timeout(1000)
+        vocab_never = len(vocab) - vocab_at
         out = {'resume before': resume_before,
                'review line': page.inner_text('#review-place .find .needs-permission'), 'review buttons': page.eval_on_selector_all('#review-place button[data-look]', 'bs => bs.length'),
                'review line button': page.eval_on_selector_all('#review-place .find .needs-permission button', 'bs => bs.length'),
@@ -1383,6 +1390,7 @@ def krisis_lookup_case(page, tmp, url):
         s = wait_state(page, lambda s: lk(s).get('running') is False and len(calls) > at, 60, 'resume after Never')
         out['resumed sent'] = len(calls) - at
         out['resumed stopped'] = lk(s).get('stopped')
+        out['vocab while never'] = vocab_never
         return out
     nv = step(never, {}) if rn.get('rel') else {}
     check('lookup, Never: the lookup panel and the review screen each show ONE line, "Not allowed: World Historical Gazetteer is set to Never in Permissions.", with a button; Send and Find are gone',
@@ -1395,6 +1403,12 @@ def krisis_lookup_case(page, tmp, url):
     check('lookup, Never then Allow (the positive control): Send, Find and Resume are back without a reload, the line is gone, and Resume IS sent',
           (nv.get('allowed') or {}).get('send hidden') is False and (nv.get('allowed') or {}).get('line hidden') is True and (nv.get('allowed') or {}).get('find', 0) >= 1
           and (nv.get('allowed') or {}).get('resume', '').startswith('Resume: send') and nv.get('resumed sent', 0) >= 1, nv)
+
+    # The review's GET of WHG's labels for kinds of place (#20): anonymous (no Authorization header, so no token),
+    # and made only while WHG is allowed: none before it was, none while it was Never, beside those made once it was.
+    check('lookup: the review asks WHG for its labels of kinds of place without the token, and only while WHG is allowed (none before, none while Never; some once allowed)',
+          vocab_not_allowed == 0 and nv.get('vocab while never') == 0 and len(vocab) >= 1 and all('authorization' not in v['headers'] for v in vocab),
+          {'before allowed': vocab_not_allowed, 'while never': nv.get('vocab while never'), 'made': len(vocab), 'with authorization': sum(1 for v in vocab if 'authorization' in v['headers'])})
 
     # Every lookup of WHG in this page session is given the one fetch (gazetteerFetch): the shared lookup
     # warns, naming fetch, when a later call gives another. The presence: several lookups were made in it.
@@ -4007,11 +4021,11 @@ def quality_checks(pw, url, tmp):
         if not k: raise RuntimeError('Windermere was not reviewed')
         to_subject('Ashby'); a = rows(); shot('review-ashby-parish.png'); r['ashby'] = a
         return ([x['iri'].rsplit('/', 1)[-1] for x in k] == ['place:osm:r1', 'place:gn:2634000'] and [x['fit'] for x in k] == ['match', 'conflict']
-                and k[0]['why'] == 'Ranked up: osm:town is the kind of place yours is (town), or a narrower kind.'
-                and k[1]['why'] == 'Ranked down: gn:H.LK, where yours is town. Never accepted in bulk; decide on it yourself.'
+                and k[0]['why'] == 'osm:town is the kind of place yours is (town), or a narrower kind: it comes first among records of one place (within 2 km of each other).'
+                and k[1]['why'] == 'Ranked down: gn:H.LK, where yours is town; after the other candidates as near. Never accepted in bulk; decide on it yourself.'
                 and [x['iri'].rsplit('/', 1)[-1] for x in a] == ['place:kain_par:100', 'place:gn:2657000'] and [x['fit'] for x in a] == ['match', 'other']
-                and a[0]['why'] == 'Ranked up: kain_par:parish is the kind of place yours is (parish), or a narrower kind.' and a[1]['why'] is None), {'windermere': k, 'ashby': a}
-    attempt("lookup quality: a candidate of the place's own kind is ranked first though WHG put it second and it is further (Ashby's parish, Windermere's town), a lake for a town last, and the review says why of each, and nothing of a kind that goes together", preferred)
+                and a[0]['why'] == 'kain_par:parish is the kind of place yours is (parish), or a narrower kind: it comes first among records of one place (within 2 km of each other).' and a[1]['why'] is None), {'windermere': k, 'ashby': a}
+    attempt("lookup quality: among records of one place (within 2 km), the one of the place's own kind comes first though WHG put it second and it is a little further (Ashby's parish); a lake for a town goes last; the review says why of each, and nothing of a kind that goes together", preferred)
 
     def placeholders():
         if not r.get('looked'): raise RuntimeError('the lookup did not run')
@@ -6635,9 +6649,11 @@ def chora_adopt_checks(pw, url, tmp):
     def ranked_words():
         text = page.inner_text('#adopt-candidates') if page.is_visible('#adopt-candidates') else ''
         order = page.inner_text('#adopt-order') if page.is_visible('#adopt-order') else ''
+        kinds = page.eval_on_selector_all('#adopt-candidates .adopt-kind', 'els => els.map((e) => e.textContent)') if text else []
         return ('inside the area' in text and 'outside the area' in text and 'km away' not in text and 'same spelling' in text and 'Licence of its source' in text
-                and "relative to the best in this search" in text and 'its countries first' in order and 'Nothing is chosen for you' in order), {'order': order, 'text': text[:500]}
-    attempt('Chora adopt: with only a country, each candidate says inside or outside the area (no distance), same spelling, its licence, and WHG\'s figures with their caveat', ranked_words)
+                and "relative to the best in this search" in text and 'its countries first' in order and 'Nothing is chosen for you' in order
+                and 'Kind of place: inhabited places aat:300008347' in kinds and 'Kind of place: gn:P.PPL' in kinds and not any('Place' in k.replace('Kind of place', '') for k in kinds)), {'order': order, 'kinds': kinds, 'text': text[:500]}
+    attempt('Chora adopt: with only a country, each candidate says inside or outside the area (no distance), same spelling, its kind of place (an AAT id by its label, a code as a code, never the protocol\'s Place), its licence, and WHG\'s figures with their caveat', ranked_words)
 
     # A 451: the record is consulted, not copied: its marker goes, a hand-drawing is offered; the control, another's marker, stays.
     def unavailable():

@@ -952,9 +952,9 @@ export const lookupPage = {
   /** A candidate's kind of place (#20): its types, an AAT id by WHG's label for it, a source's code as a code; or not known. */
   kindLabel: 'Kind of place:',
   kindUnknown: 'type unknown',
-  /** Why a candidate was ranked up or down for its kind (kinds.js kindFit), naming the place's kind as the dataset says it. */
-  kindMatch: (theirs, yours) => `Ranked up: ${theirs} is the kind of place yours is (${yours}), or a narrower kind.`,
-  kindConflict: (theirs, yours) => `Ranked down: ${theirs}, where yours is ${yours}. Never accepted in bulk; decide on it yourself.`,
+  /** What a candidate's kind did to its rank (kinds.js kindFit; lookup.js rankGazetteer), naming the place's kind as the dataset says it. */
+  kindMatch: (theirs, yours) => `${theirs} is the kind of place yours is (${yours}), or a narrower kind: it comes first among records of one place (within 2 km of each other).`,
+  kindConflict: (theirs, yours) => `Ranked down: ${theirs}, where yours is ${yours}; after the other candidates as near. Never accepted in bulk; decide on it yourself.`,
   /** A candidate far away: shown, marked, never hidden. */
   far: (km) => `Far: ${LOOKUP_WORDS.far(km)}`,
   /** A candidate's licence, from the attribution the service sent; a warning when it limits use, and "licence unknown" never shown as fine. */

@@ -18,7 +18,8 @@
 //
 // The page's state is published on window.__chora.adopt for automated tests; nothing else reads it.
 import { createLookup, WHG_ENDPOINT } from '../engine/gazetteer/index.js';
-import { permittedFetch, gazetteerPermission, placeQuery, failedClosed } from '../engine/krisis/lookup.js';
+import { permittedFetch, gazetteerPermission, placeQuery, failedClosed, typesOf } from '../engine/krisis/lookup.js';
+import { bundledAatLabel } from '../engine/krisis/kinds.js';
 import * as A from '../engine/chora/adopt.js';
 import { ROLES } from '../engine/chora/draw.js';
 import { CHORA_ADOPT_PAGE as W, CHORA_ADOPT_TEXT, lookupPage as LW } from '../engine/words.js';
@@ -178,12 +179,15 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
     const c = r.candidate, st = s.statuses.get(c.id), unavailable = !st.mayCopy || s.unavailable.has(c.id);
     const where = r.noCoords ? W.noCoords : r.distanceKm !== null ? W.distance(r.distanceKm) : r.inArea === true ? W.inside : r.inArea === false ? W.outside : '';
     const facts = [c.namespace, c.ccodes?.length ? c.ccodes.join(', ') : null, where, r.sameSpelling ? W.sameSpelling : null].filter(Boolean).join(' · ');
-    const types = (c.types || []).map((t) => t.name).filter(Boolean).join(', ');
+    // #20: the record's kind of place, as the review shows it (an AAT id by its label, Scope's bundled ones here; a
+    // source's code as a code; "type unknown"), never the protocol's Place that every WHG record carries.
+    const kinds = typesOf(c).map((t) => (bundledAatLabel(t) ? `${esc(bundledAatLabel(t))} <code class="code-chip">${esc(t)}</code>` : `<code class="code-chip">${esc(t)}</code>`));
+    const types = `${esc(LW.kindLabel)} ${kinds.length ? kinds.join(', ') : `<i>${esc(LW.kindUnknown)}</i>`}`;
     const figures = LW.figures({ score: c.score, confidence: c.confidence }, 'WHG');
     const name = `${esc(c.name)}`;
     return `<li class="adopt-cand${st.denied ? ' denied' : ''}" data-cand="${esc(c.id)}"><span class="cand-n" aria-hidden="true">${r.n}</span>
       <span class="cand-name">${st.denied ? `<s>${name}</s>` : name}</span> <span class="muted">${esc(facts)}</span>
-      ${types ? `<br><span class="muted">${esc(types)}</span>` : ''}${c.description ? `<br><span class="muted">${esc(LW.described('WHG', c.description))}</span>` : ''}
+      <br><span class="muted adopt-kind">${types}</span>${c.description ? `<br><span class="muted">${esc(LW.described('WHG', c.description))}</span>` : ''}
       <br><span class="licence${st.licenceWarns ? ' warn' : ''}">${esc(LW.licence(st.licence))}</span>
       ${figures ? `<br><span class="muted figures">${esc(figures)}</span>` : ''}
       ${st.linked === 'exact' ? `<p class="note">${esc(W.linked)}</p>` : st.linked === 'loose' ? `<p class="note">${esc(W.loose)}</p>` : ''}

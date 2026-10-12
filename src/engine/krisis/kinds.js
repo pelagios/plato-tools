@@ -13,38 +13,49 @@
 //   one of its narrower ones (by the expansions bundled with Scope, scope-data.js; WHG's gateway does not
 //   match types hierarchically, its aat_paths being empty, place#142);
 // - a facet: settlement, division (administrative or ecclesiastical), water, landform or built. Two
-//   kinds conflict only when both facets are known and differ, a settlement and a division excepted (a
-//   parish and the village it is named after are commonly one place in the sources these tools serve).
-//   A farm or a manor has no facet: a minor name is a farm and a hamlet as often as not.
+//   kinds conflict only when both facets are known and do not go together: a settlement, a division and a
+//   landform go together (a parish and the village it is named after are commonly one place in the sources
+//   these tools serve, and a village is named after its hill). A farm, a manor, an island, a bay and most
+//   GeoNames spots (class S: a ruin, an estate, a church) have no facet: each is often the place itself.
 // Nothing is ever dropped for its kind: a conflicting candidate is ranked lower, said so, and never
 // accepted in bulk (guards.js). A code not in the tables is shown as it is, and decides nothing.
 import { TYPE_SHORTLIST } from './scope-data.js';
 
 export const FACETS = ['settlement', 'division', 'water', 'landform', 'built'];
-/** How a candidate's kind stands to the place's: ranked in this order (lookup.js rankGazetteer). */
-export const FIT_RANK = { match: 0, other: 1, unknown: 1, conflict: 2 };
 
 const INHABITED = 'aat:300008347', CITIES = 'aat:300008389', TOWNS = 'aat:300008375', VILLAGES = 'aat:300008372', HAMLETS = 'aat:300008369';
 const PARISHES = 'aat:300387092', LAKES = 'aat:300008680', AIRFIELDS = 'aat:300000679', AIRPORTS = 'aat:300000681';
 // The facet of an AAT id said outright; an id not here takes the facet of the first root below whose
-// bundled expansion holds it. Airports are among WHG's narrower kinds of inhabited places (by ports), and
-// are built here.
+// bundled expansion holds it. Airports, heliports and the other transport facilities under ports
+// (300007915, 300007917 to 300007919) are among WHG's narrower kinds of inhabited places (by ports): they are
+// built here, and taken out of those expansions, so that an airport is never "of the kind" of a settlement
+// (the Fable review of 12 October 2026 found an airport bulk-accepted for an inhabited place).
 const AAT_FACET = {
   [INHABITED]: 'settlement', [CITIES]: 'settlement', [TOWNS]: 'settlement', [VILLAGES]: 'settlement', [HAMLETS]: 'settlement',
   'aat:300167671': 'settlement', 'aat:300120599': 'settlement', 'aat:300387200': 'settlement',
   [PARISHES]: 'division', 'aat:300000773': 'division', 'aat:300000792': 'division', 'aat:300000771': 'division', 'aat:300000799': 'division',
   'aat:300232418': 'division', 'aat:300000707': 'division', 'aat:300236112': 'division', 'aat:300387330': 'division', 'aat:300000769': 'division',
   'aat:300008707': 'water', 'aat:300008699': 'water', [LAKES]: 'water', 'aat:300132312': 'water', 'aat:300006075': 'water',
-  'aat:300008791': 'landform',
+  // Islands have no facet: an island is often its settlement's name (Lindisfarne, Holy Island).
+  'aat:300008791': null,
   'aat:300006891': 'built', 'aat:300000641': 'built', [AIRFIELDS]: 'built', [AIRPORTS]: 'built', 'aat:300404093': 'built',
+  'aat:300000686': 'built', 'aat:300007915': 'built', 'aat:300007917': 'built', 'aat:300007918': 'built', 'aat:300007919': 'built',
   'aat:300000238': null, 'aat:300000206': null,
 };
-const FACET_ROOTS = [['aat:300008699', 'water'], ['aat:300008707', 'water'], ['aat:300008791', 'landform'], ['aat:300006891', 'built'],
+const FACET_ROOTS = [['aat:300008699', 'water'], ['aat:300008707', 'water'], ['aat:300006891', 'built'],
   ['aat:300000641', 'built'], ['aat:300000771', 'division'], [INHABITED, 'settlement']];
-/** Each shortlisted AAT id with its narrower ones (the type itself among them), as Scope bundles them. */
-const CLOSURE = new Map(TYPE_SHORTLIST.map((t) => [t.id, new Set([t.id, ...t.narrower])]));
+/**
+ * Each shortlisted AAT id with its narrower ones (the type itself among them), as Scope bundles them, less any
+ * whose facet is said outright to be another than the type's own (the airports under inhabited places).
+ */
+const CLOSURE = new Map(TYPE_SHORTLIST.map((t) => {
+  const own = AAT_FACET[t.id];
+  return [t.id, new Set([t.id, ...t.narrower.filter((n) => !(Object.hasOwn(AAT_FACET, n) && AAT_FACET[n] && own && AAT_FACET[n] !== own))])];
+}));
+// Two AAT concepts for one kind: parishes, and parishes as religious divisions (the review, 12 October 2026).
+const SAME = new Map([[PARISHES, 'aat:300000773'], ['aat:300000773', PARISHES]]);
 /** Is `b` the AAT kind `a`, or one of its narrower kinds (as far as the bundled expansions know)? */
-export const sameOrNarrower = (a, b) => a === b || !!CLOSURE.get(a)?.has(b);
+export const sameOrNarrower = (a, b) => a === b || SAME.get(a) === b || !!CLOSURE.get(a)?.has(b) || !!CLOSURE.get(SAME.get(a))?.has(b);
 function aatFacet(id) {
   if (Object.hasOwn(AAT_FACET, id)) return AAT_FACET[id];
   for (const [root, facet] of FACET_ROOTS) if (CLOSURE.get(root)?.has(id)) return facet;
@@ -65,8 +76,9 @@ const WORDS = {
   'registration district': [null, 'division'], 'historic county': ['aat:300000771', 'division'], 'extra parochial place': [null, 'division'],
   manor: ['aat:300000238', null], farm: ['aat:300000206', null],
   river: ['aat:300008707', 'water'], stream: ['aat:300008699', 'water'], lake: [LAKES, 'water'],
-  island: ['aat:300008791', 'landform'], hill: [null, 'landform'],
-  canal: ['aat:300006075', 'water'], bay: [null, 'water'],
+  // An island or a bay has no facet: each is often the name of the place on it (Lindisfarne, Whitley Bay).
+  island: ['aat:300008791', null], hill: [null, 'landform'],
+  canal: ['aat:300006075', 'water'], bay: [null, null],
   castle: ['aat:300006891', 'built'], monastery: ['aat:300000641', 'built'], abbey: [null, 'built'], building: [null, 'built'],
   church: [null, 'built'], chapel: [null, 'built'], fort: [null, 'built'],
   aerodrome: [AIRFIELDS, 'built'], airfield: [AIRFIELDS, 'built'], airport: [AIRPORTS, 'built'],
@@ -77,11 +89,14 @@ const WIKIDATA = {
   Q102496: 'parish', Q1115575: 'civil parish', Q23397: 'lake', Q4022: 'river', Q47521: 'stream', Q23442: 'island', Q23413: 'castle',
   Q44613: 'monastery', Q1248784: 'airport',
 };
-// GeoNames: a feature class gives the facet; a few codes an AAT id (or, a farm, take the facet away).
-const GN_CLASS = { P: 'settlement', A: 'division', H: 'water', U: 'water', T: 'landform', S: 'built', R: 'built' };
+// GeoNames: a feature class gives the facet; a few codes an AAT id (or take the facet away). Class S (spots,
+// buildings) has none by default: a ruin, an estate, a church or an ancient site is often the historical place
+// itself (S.RUIN, S.EST, S.CH, S.ANS, S.HSTS); only the codes listed are built.
+const GN_CLASS = { P: 'settlement', A: 'division', H: 'water', U: 'water', T: 'landform', R: 'built' };
 const GN_CODE = { 'P.PPLQ': ['aat:300167671', 'settlement'], 'H.LK': [LAKES, 'water'], 'H.LKS': [LAKES, 'water'], 'H.STM': ['aat:300008699', 'water'],
-  'T.ISL': ['aat:300008791', 'landform'], 'S.AIRF': [AIRFIELDS, 'built'], 'S.AIRP': [AIRPORTS, 'built'], 'S.CSTL': ['aat:300006891', 'built'],
-  'S.MSTY': ['aat:300000641', 'built'], 'S.FRM': ['aat:300000206', null], 'S.FRMS': ['aat:300000206', null] };
+  'H.BAY': [null, null], 'T.ISL': ['aat:300008791', null], 'T.ISLS': ['aat:300008791', null], 'S.AIRF': [AIRFIELDS, 'built'], 'S.AIRP': [AIRPORTS, 'built'],
+  'S.AIRH': ['aat:300000686', 'built'], 'S.CSTL': ['aat:300006891', 'built'], 'S.MSTY': ['aat:300000641', 'built'], 'S.FRM': ['aat:300000206', null],
+  'S.FRMS': ['aat:300000206', null] };
 
 const norm = (s) => String(s ?? '').toLowerCase().replace(/\([^)]*\)/g, ' ').replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
 const singulars = (w) => [w, w.replace(/ies$/, 'y'), w.replace(/(s|sh|ch|x)es$/, '$1'), w.replace(/s$/, '')];
@@ -134,7 +149,11 @@ export function placeKinds(place) {
   for (const l of labels) if (typeof l === 'string' && word(l)) { const h = word(l); add({ id: `label:${norm(l)}`, aat: h[0], facet: h[1] }, l); }
   return out;
 }
-const compatible = (a, b) => a === b || (a === 'settlement' && b === 'division') || (a === 'division' && b === 'settlement');
+// A settlement, a division and a landform go together: a parish is named after its village, and a village after
+// its hill, often enough that neither is a sign of the wrong place.
+const TOGETHER = new Set(['settlement', 'division', 'landform']);
+const compatible = (a, b) => a === b || (TOGETHER.has(a) && TOGETHER.has(b));
+const clashes = (p, c) => !!(p.facet && c.facet && !compatible(p.facet, c.facet));
 /**
  * How a candidate's kind stands to the place's: { fit, place, candidate } where fit is
  *   'match'    one of the candidate's kinds is one of the place's, or narrower (by AAT);
@@ -147,11 +166,15 @@ export function kindFit(place, candidateTypes) {
   const mine = placeKinds(place);
   const theirs = (Array.isArray(candidateTypes) ? candidateTypes : []).map(kindOf).filter((k) => k && (k.aat || k.facet));
   if (!mine.length || !theirs.length) return { fit: 'unknown', place: mine[0] ?? null, candidate: theirs[0] ?? null };
-  for (const p of mine) for (const c of theirs) if (p.aat && c.aat && sameOrNarrower(p.aat, c.aat)) return { fit: 'match', place: p, candidate: c };
   const pairs = mine.flatMap((p) => theirs.map((c) => [p, c]));
-  const clash = pairs.find(([p, c]) => p.facet && c.facet && !compatible(p.facet, c.facet));
-  if (clash && pairs.every(([p, c]) => p.facet && c.facet && !compatible(p.facet, c.facet))) return { fit: 'conflict', place: clash[0], candidate: clash[1] };
+  // Facets first: two kinds whose facets are known and do not go together are never a match, whatever the AAT
+  // expansions say.
+  if (pairs.every(([p, c]) => clashes(p, c))) return { fit: 'conflict', place: pairs[0][0], candidate: pairs[0][1] };
+  for (const [p, c] of pairs) if (p.aat && c.aat && !clashes(p, c) && sameOrNarrower(p.aat, c.aat)) return { fit: 'match', place: p, candidate: c };
   return { fit: 'other', place: mine[0], candidate: theirs[0] };
 }
 /** The kinds a candidate in the work file says it is: its `other.types`, the protocol's own type left out. */
 export const candidateTypes = (c) => (Array.isArray(c?.other?.types) ? c.other.types.filter((t) => typeof t === 'string' && !isProtocolType(t)) : []);
+const BUNDLED_LABELS = new Map(TYPE_SHORTLIST.map((t) => [t.id, t.aat]));
+/** AAT's label for an id Scope bundles (its 19 shortlisted kinds), or null: for a page that asks WHG for no more. */
+export const bundledAatLabel = (id) => BUNDLED_LABELS.get(id) ?? null;

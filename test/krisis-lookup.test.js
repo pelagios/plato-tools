@@ -148,7 +148,7 @@ test('a lookup ranks by letters only, whatever qualifier lists the matching chos
   const score = (names) => rankGazetteer({ names, point: null }, cands).map((r) => [r.candidate.name, r.similarity_score]);
   assert.deepEqual(score(['Chipping Hill', 'Market Warsop']), [['Market Warsop', 1], ['Chipping Hull', 0.9], ['Newton Regis', 0.571], ['Abingdon-on-Thames', 0.554], ['Hill', 0.551], ['Ongar', 0.518], ['Warsop', 0.496]]);
   assert.deepEqual(score(['Abingdon']), [['Abingdon-on-Thames', 0.889], ['Chipping Hull', 0.535], ['Warsop', 0.528], ['Ongar', 0.492], ['Newton Regis', 0.486], ['Market Warsop', 0.468], ['Hill', 0.458]]);
-  assert.equal(LOOKUP_ALGORITHM, 'krisis-lookup 2', 'renamed for kinds and placeholders (#20, #21), its scores unchanged');
+  assert.equal(LOOKUP_ALGORITHM, 'krisis-lookup 1', 'so its name is unchanged');
   // The presence beside the absence: with the lists, the rule would raise Hill to the cap.
   assert.equal(similarity('Chipping Hill', 'Hill', undefined, compileQualifiers()), QUALIFIER_CAP, 'control: the lists raise Chipping Hill and Hill');
   assert.equal(similarity('Chipping Hill', 'Hill'), similarity('Chipping Hill', 'Hill', undefined, compileQualifiers([])), 'similarity() uses no lists unless given them');

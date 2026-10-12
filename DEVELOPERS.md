@@ -2163,12 +2163,14 @@ the places within it; the places themselves never send it.
   looked up, and is counted (`withoutName`) in the preview and the summary: its address is never sent as
   a query.
 - **Ranking, never accepting.** WHG's score is relative to the best in its own answer (the top is about
-  100 however bad) and its confidence measures the name only, so neither decides anything. Candidates
-  within `maxDistanceKm` come before those further, then by kind of place (below: the place's own kind or a
-  narrower one first, a conflicting kind last), then by distance, then whether the countries agree (yes,
-  unknown, no), then Krisis's own name similarity (`names.js`, which is every candidate's
-  `similarity_score`), then the service's order (`krisis-lookup 2`; a place that says nothing of its kind is
-  ranked as by `krisis-lookup 1`).
+  100 however bad) and its confidence measures the name only, so neither decides anything. Distance is
+  primary: candidates within `maxDistanceKm` come before those further or with no point; within each, a
+  candidate whose kind of place conflicts with the place's (below) comes after the rest; then by distance,
+  then whether the countries agree (yes, unknown, no), then Krisis's own name similarity (`names.js`, which is
+  every candidate's `similarity_score`), then the service's order. The place's own kind is only a tiebreak:
+  among candidates within 2 km of each other (`SAME_PLACE_KM`, one place held by several sources), one of the
+  place's kind or a narrower one comes first. A place that says nothing of its kind is ranked exactly as
+  before the kinds were read.
   A candidate further than `maxDistanceKm` (50) is kept and marked `far`, never dropped (the test has
   three Newcastles, all 100: GB first, Namibia and Australia marked far). WHG's own figures are kept
   apart under `gazetteer: { service, id, score, confidence, match, answer_rank, description, namespace,
@@ -2328,7 +2330,7 @@ the places within it; the places themselves never send it.
 
 - **What a candidate says of its kind** (whg.js A7, probed live on 12 October 2026). A WHG candidate's
   `type` is the reconciliation protocol's, `Place`, on every one of 13,500 candidates measured: it says
-  nothing of the kind of place, and is never shown or kept as one (`isProtocolType`; until `krisis-lookup 2`
+  nothing of the kind of place, and is never shown or kept as one (`isProtocolType`; until 12 October 2026
   every looked-up candidate kept `types: ["Place"]`). The kind is in `place_types`, a list of
   `{identifier, label}` whose shape differs by namespace (A7 lists them): an AAT id from `tgn`, `ofs` and
   some `whg` records only; everywhere else a bare code. `whgPlaceTypes()` reads it as one id per type,
@@ -2338,20 +2340,28 @@ the places within it; the places themselves never send it.
 - **On the review screen** each looked-up candidate has "Kind of place:" with each type: an AAT id by its
   label and the id as a code (`code.code-chip`), any other as its code alone, never a label made up for it;
   "type unknown" when it has none. The labels are WHG's, `GET /types/vocab/` (1,084 concepts), asked for
-  through `scope-page.js`'s `whgGet` (the permissions module, `gazetteer:whg`, only once allowed) and kept in
-  localStorage for a week, the labels alone (`aatLabels()`); until it answers, and without the permission,
+  through `scope-page.js`'s `whgGet` (the permissions module, `gazetteer:whg`, only once allowed; anonymous,
+  no token) and kept in localStorage for a week, the labels alone (`aatLabels()`), under a key of its own
+  (`plato-tools.whg-vocab`) so that the pruning of Scope's newest 60 answers never pushes it out; until it answers, and without the permission,
   those Scope bundles for its 19 shortlisted types (`BUNDLED_AAT_LABELS`). `window.__plato.kindLabels` says
-  which (`from: 'whg' | 'cache'`).
+  which (`from: 'whg' | 'cache'`). Chora's *Find in a gazetteer…* panel shows each record's kind the same
+  way (`.adopt-kind`), with Scope's bundled labels only: it asks WHG for no labels.
 - **The place's own kind** is its PLATO types (`gather()` keeps their labels, as before, and now their
   addresses as `typeIds`; a table's type column is read into the same types). `kinds.js` reads both sides by
-  two small hand-made tables: an AAT id where one is known (the place's AAT kind or one of its narrower ones,
-  by Scope's bundled expansions, is a **match**; WHG's gateway does not match types hierarchically), and a
-  facet (settlement, division, water, landform, built). A candidate whose every known facet differs from
-  every one of the place's is a **conflict**, a settlement and a division excepted (a parish and the village
-  it is named after are commonly one place); a farm or a manor has no facet, and never conflicts. A code the
-  tables do not know decides nothing. The review says why: "Ranked up: osm:town is the kind of place yours
-  is (town), or a narrower kind." or "Ranked down: gn:H.LK, where yours is town. Never accepted in bulk;
-  decide on it yourself." Nothing is said of a kind that goes together, or of one not known.
+  two small hand-made tables: an AAT id where one is known, and a facet (settlement, division, water,
+  landform, built). Facets are tested first: two kinds whose facets are known and do not go together
+  **conflict**, and are never a match whatever the AAT expansions say (Scope's expansion of inhabited places
+  holds airports and heliports, under ports; those are taken out of it and are built). Otherwise the place's
+  AAT kind or one of its narrower ones, by Scope's bundled expansions, is a **match** (WHG's gateway does not
+  match types hierarchically; parishes and parishes as religious divisions are one kind). A settlement, a
+  division and a landform go together (a parish named after its village, a village after its hill). A farm,
+  a manor, an island, a bay and GeoNames spots (class S) other than the few listed (airfield, airport,
+  heliport, castle, monastery) have no facet, and never conflict: a ruin, an estate, a church, Lindisfarne
+  or Whitley Bay is often the place itself. A code the tables do not know decides nothing. The review says
+  why: "osm:town is the kind of place yours is (town), or a narrower kind: it comes first among records of one
+  place (within 2 km of each other)." or "Ranked down: gn:H.LK, where yours is town; after the other
+  candidates as near. Never accepted in bulk; decide on it yourself."
+  Nothing is said of a kind that goes together, or of one not known.
 - **The bulk accept** (`guards.js planGuarded`) never takes a candidate whose kind conflicts with the
   place's: the place is left to the reviewer and counted (`leftOut.kind`, why `kind`), and the result says
   "1 of another kind of place than the place's own". 16.6% of 2,200 accepted WHG matches in a CCEd run were
@@ -2365,11 +2375,17 @@ the places within it; the places themselves never send it.
   name beside it (kain_par:11771, Halton Holegate) is kept.
 - **WHG's limits** (whg.js A15, live 12 October 2026): 600 queries a minute per identity (a batch of 50
   counts 50), at most 50 a request, 5,000 requests a day per token. The daily cap is a 429 with `code:
-  "daily_limit_exceeded"` and `resets_at` (`dailyLimit()`; the old 401/403 "Daily API limit … exceeded" is
-  still read, as a fallback to retire): the lookup stops at once (no retry), keeps what was answered, says
+  "daily_limit_exceeded"` and `resets_at` (`dailyLimit()`; on a 401 or 403 the old "Daily API limit …
+  exceeded", and only that phrase, is still read, as a fallback to retire; any other is a refused token): the lookup stops at once (no retry), keeps what was answered, says
   "WHG's daily limit for this token is reached; it resets at 01:00 BST on 13 October 2026" in the reader's
   own time (or "tomorrow"), and neither asks for the token again nor calls it bad. Any other 429 is the
   per-minute limit, waited out by its Retry-After, which WHG's /reconcile now exposes to a page.
+- **Candidate addresses are unchanged.** `LOOKUP_ALGORITHM` stays `krisis-lookup 1`: it is part of every
+  candidate's published address (subject, object, algorithm, match parameters are hashed), and a pair
+  suggested before is the same suggestion now, with the same score. Only its place in the list changed, what
+  the work file says of its kind (never published), and that placeholder records are not suggested, which
+  adds no candidate. So a re-lookup after this change keeps every candidate's address, as do Resume (the
+  pending places only) and decided candidates.
 - **The batch size** stays 25 (`DEFAULT_BATCH`), measured against 10 and 50 on 12 October 2026 (whg.js A14):
   the same 150 DEEP names took 31 to 33 s whatever the size (about 210 ms a query), with no 429, error or
   unanswered query in 72 requests; a larger batch only holds a WHG worker longer (10.4 s at 50, 5.3 s at
@@ -2380,7 +2396,9 @@ the places within it; the places themselves never send it.
   and `test/gazetteer.test.js` (`dailyLimit`, the cap never retried beside a per-minute 429 waited out, and
   the backoff where Retry-After cannot be read). The browser checks are `quality_checks` in
   `e2e/app_test.py`, against a stub of WHG in its probed shapes, at 1440 × 900 in London time
-  (`QUALITY_SHOTS=<dir>` saves screenshots).
+  (`QUALITY_SHOTS=<dir>` saves screenshots); `krisis_lookup_case` checks that the labels' GET carries no
+  Authorization header and is not made before WHG is allowed or while it is Never; Chora's adoption checks
+  look for the kinds in its panel.
 
 ### Scope
 

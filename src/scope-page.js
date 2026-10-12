@@ -45,6 +45,7 @@ const WHG = 'https://whgazetteer.org';
 const TAB_KEY = 'plato-tools.scope';
 const CACHE_KEY = 'plato-tools.whg-cache.';
 const CACHE_DAYS = 7, CACHE_MAX = 60;
+const VOCAB_KEY = 'plato-tools.whg-vocab';
 const allowed = () => permissions.allowed('gazetteer', 'whg');
 
 function h(tag, props = {}, ...kids) {
@@ -92,10 +93,10 @@ function pruneCache() {
  * One of WHG's anonymous answers, through the permissions module: { v, cached, at } (at: the day it was had),
  * or null when it cannot be had. Kept in this browser for a week; read back only when it has the shape
  * asked for (`ok`). `keep` makes what is kept (and given) from the answer: the part needed, where the whole
- * would be larger than it is worth keeping; what is kept must still pass `ok`.
+ * would be larger than it is worth keeping; what is kept must still pass `ok`. `key` is where it is kept: under
+ * CACHE_KEY (pruned to the newest CACHE_MAX at mount) by default.
  */
-async function whgGet(path, ok, keep = (v) => v) {
-  const key = CACHE_KEY + path;
+async function whgGet(path, ok, keep = (v) => v, key = CACHE_KEY + path) {
   const kept = keptAnswer(key, ok);
   if (kept) return { v: kept.v, cached: true, at: new Date(kept.at).toISOString().slice(0, 10) };
   if (!allowed()) return null;
@@ -129,7 +130,9 @@ export const BUNDLED_AAT_LABELS = new Map(TYPE_SHORTLIST.map((t) => [t.id, t.aat
 export function aatLabels() {
   if (vocabAsked) return vocabAsked;
   const shrink = (v) => ({ byId: Object.fromEntries(Object.entries(v.byId).map(([k, x]) => [k, { label: x.label }])) });
-  vocabAsked = whgGet('/types/vocab/', isVocab, shrink).then((got) => (got
+  // Kept under a key of its own, out of the pruning of the newest 60 answers (searches would push it out, and it
+  // is asked for again only after a week); still never used older than a week.
+  vocabAsked = whgGet('/types/vocab/', isVocab, shrink, VOCAB_KEY).then((got) => (got
     ? { labels: new Map(Object.entries(got.v.byId).map(([k, x]) => [k, x.label])), from: got.cached ? 'cache' : 'whg', at: got.at }
     : { labels: BUNDLED_AAT_LABELS, from: 'bundled', at: null }));
   // Not had (no permission yet, or WHG not answering): asked again next time, rather than for ever bundled.

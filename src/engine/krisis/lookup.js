@@ -19,11 +19,12 @@
 //   a region is matched only to a record with an outline, which can scope a lookup within it.
 // - What comes back is ranked for the reviewer (rankGazetteer), never accepted: WHG's score is relative
 //   to the best in its own answer (the top is always about 100, however bad), and its confidence
-//   measures the name only. So the order is: those within maxDistanceKm before those further (kept and
-//   marked `far`, not dropped), then by kind (kinds.js: of the place's own kind or a narrower one first, a
-//   conflicting kind last, when the place says what kind it is), then by distance, then whether the
-//   countries agree, then Krisis's own name similarity (names.js, the similarity_score of every candidate),
-//   then the service's order. The service's own figures are kept apart, under `gazetteer`.
+//   measures the name only. So the order is by distance (a candidate further than maxDistanceKm kept and
+//   marked `far`, not dropped), a candidate of a kind that conflicts with the place's (kinds.js) after the
+//   rest of its group, then whether the countries agree, then Krisis's own name similarity (names.js, the
+//   similarity_score of every candidate), then the service's order; the place's own kind breaks the tie
+//   between records of one place (within 2 km of each other). The service's own figures are kept apart, under
+//   `gazetteer`.
 // - A record whose every name is a cataloguing placeholder ("Oknoname 037068 Dam", WHG place#216;
 //   placeholders.js) is left out and counted (`skipped.placeholder`), never suggested.
 // - An answer the service could not give (`.unanswered`) is not "nothing found": the place is marked
@@ -44,21 +45,24 @@
 //   written into an attestation, and none is assumed here.
 import { WHG_ENDPOINT, WHG_PLACE_TYPE, isWhg, normaliseWhgIri, mergeAttribution, whgLang, nameLang, whgPlaceTypes } from '../gazetteer/index.js';
 import { similarity, queryVariants, MAX_VARIANTS, compileQualifiers } from './names.js';
-import { guard } from './guards.js';
+import { guard, SAME_PLACE_KM } from './guards.js';
 import { WORK_VERSION, canonicalEndpoint } from './work.js';
 import { linkState } from './identities.js';
 import { constraintFor, selectLevel, placeState, areaOf, areaIds, storedConstraint, constraintParameters } from './regions.js';
 import { normaliseScope, isEmptyScope, scopeFields } from './scope.js';
-import { kindFit, isProtocolType, FIT_RANK } from './kinds.js';
+import { kindFit, isProtocolType } from './kinds.js';
 import { placeholderRecord } from './placeholders.js';
 const SCOPE_PARTS = ['where', 'what', 'when', 'sources'], SCOPE_KEYS = ['countries', 'contained_in', 'bounds', 'types', 'start', 'end', 'temporal', 'undated', 'namespaces'];
 export { authorityIris, currentIdentities } from './identities.js';
 // The note an attestation on a looked-up candidate carries, here too for the tools that use this file (Chora).
 export { krisisLookupNote } from '../words.js';
 
-// krisis-lookup 2 (#20, #21): a candidate of the place's own kind is ranked up and one of a conflicting kind down
-// (kinds.js), and a record whose only name is a placeholder is left out and counted (placeholders.js).
-export const LOOKUP_ALGORITHM = 'krisis-lookup 2';
+// Unchanged by the kinds of place and placeholders (#20, #21; decided 12 October 2026): the name is part of
+// every candidate's published address (candidates.js hashes subject, object, algorithm and match parameters),
+// and a pair suggested before is the same suggestion now, with the same score. What changed is only its place
+// in the list, what the work file says of its kind (never published), and that placeholder records are no
+// longer suggested at all, which adds no candidate. So a re-lookup after the change keeps every address.
+export const LOOKUP_ALGORITHM = 'krisis-lookup 1';
 export const LOOKUP_DEFAULTS = { limit: 10, maxDistanceKm: 50, allNames: false, countries: false, nearKm: null, variants: false, lang: null, areaOnly: false, scope: null };
 /** Which places a lookup takes (selectPlaces). */
 export const PLACE_CHOICES = ['unmatched', 'all', 'pending', 'unlinked'];
@@ -354,12 +358,14 @@ export function typesOf(c) {
 }
 /**
  * A place's candidates from a gazetteer (the module's Candidate objects, each with `answer_rank`, its
- * place in the service's answer, and `query`, the name that found it), ranked for the reviewer: those
- * within maxDistanceKm before those further (or with no distance), then by kind (kinds.js kindFit: of the
- * place's own kind or narrower, then not known or another, then a conflicting kind; all alike when the place
- * says nothing of its kind), then by distance (none last), then whether the countries agree (yes, not known,
- * no), then Krisis's own name similarity, then the service's order. Returns [{ candidate, similarity_score,
- * distance_km, ccodes_agree: true|false|null, far, kind: 'match'|'other'|'unknown'|'conflict' }], nothing dropped.
+ * place in the service's answer, and `query`, the name that found it), ranked for the reviewer. Distance stays
+ * primary (the Fable review of 12 October 2026): those within maxDistanceKm before those further or with no
+ * distance; within each, a candidate whose kind conflicts with the place's (kinds.js kindFit) after the rest;
+ * then by distance, whether the countries agree (yes, not known, no), Krisis's own name similarity, and the
+ * service's order. The place's own kind (or a narrower one) is only a tiebreak, between candidates within
+ * SAME_PLACE_KM (2 km) of each other: one place held by several sources. A place that says nothing of its
+ * kind is ranked exactly as before the kinds were read (12 October 2026). Returns [{ candidate, similarity_score, distance_km,
+ * ccodes_agree: true|false|null, far, kind: 'match'|'other'|'unknown'|'conflict' }], nothing dropped.
  */
 const LETTERS_ONLY = compileQualifiers([]);
 export function rankGazetteer(place, candidates, { maxDistanceKm = LOOKUP_DEFAULTS.maxDistanceKm } = {}) {
@@ -375,10 +381,27 @@ export function rankGazetteer(place, candidates, { maxDistanceKm = LOOKUP_DEFAUL
     return { candidate: c, similarity_score: round(best, 3), distance_km: distance, ccodes_agree: agree, far: distance !== null && distance > maxDistanceKm, kind, order: c.answer_rank ?? i };
   });
   const agreeKey = (x) => (x === true ? 0 : x === null ? 1 : 2);
-  ranked.sort((a, b) => Number(a.far) - Number(b.far) || FIT_RANK[a.kind] - FIT_RANK[b.kind]
+  // Beyond the greatest distance (or with no distance) last, as distance always put them; a conflicting kind
+  // after the rest of its group; then as before the kinds were read: distance, countries, letters, the service's order.
+  const beyond = (r) => Number((r.distance_km ?? Infinity) > maxDistanceKm), clash = (r) => Number(r.kind === 'conflict');
+  ranked.sort((a, b) => beyond(a) - beyond(b) || clash(a) - clash(b)
     || (a.distance_km ?? Infinity) - (b.distance_km ?? Infinity) || agreeKey(a.ccodes_agree) - agreeKey(b.ccodes_agree)
     || b.similarity_score - a.similarity_score || a.order - b.order);
-  return ranked.map(({ order, ...r }) => r);
+  // The place's own kind is only a tiebreak, between records of one place from several sources: in a run of
+  // candidates within SAME_PLACE_KM of the run's first, one of the place's kind (or narrower) comes first.
+  const out = [];
+  for (let i = 0; i < ranked.length;) {
+    const head = ranked[i].candidate.coords;
+    let j = i + 1;
+    if (Array.isArray(head) && ranked[i].distance_km !== null) {
+      while (j < ranked.length && Array.isArray(ranked[j].candidate.coords) && ranked[j].distance_km !== null && beyond(ranked[j]) === beyond(ranked[i])
+        && clash(ranked[j]) === clash(ranked[i]) && distanceKm(head, ranked[j].candidate.coords) <= SAME_PLACE_KM) j++;
+    }
+    const run = ranked.slice(i, j);
+    out.push(...run.filter((r) => r.kind === 'match'), ...run.filter((r) => r.kind !== 'match'));
+    i = j;
+  }
+  return out.map(({ order, ...r }) => r);
 }
 
 // ---- keeping the answers -----------------------------------------------------------------------------------

@@ -749,11 +749,14 @@ test("by default the platform's navigator.locks is used (Node has one): two priv
   assert.equal(apart.maxInFlight, 2);
 });
 
-test('a spent allowance is kind quota however WHG words it, with what it said (token cleaned); a refused token stays auth', async () => {
+test('on a 401 or 403 only "Daily API limit" is a spent allowance (kind quota, with what it said, token cleaned); any other wording, a "limit" or a "quota" too, is a refused token', async () => {
   const cases = [
-    [401, `Request limit exceeded for ${TOKEN}`, 'quota'],
-    [403, 'Your API QUOTA limit has been reached', 'quota'],
+    [401, `Daily API limit (5000 calls) exceeded for ${TOKEN}`, 'quota'],
+    [403, 'daily api limit (5000 calls) exceeded', 'quota'],
     [401, 'Daily API limit (5000 calls) exceeded', 'quota'],
+    // Narrowed on 12 October 2026 (the review): these were read as the cap before.
+    [401, `Request limit exceeded for ${TOKEN}`, 'auth'],
+    [403, 'Your API QUOTA limit has been reached', 'auth'],
     [401, 'Invalid token', 'auth'],
     [403, 'No limit on this page; token refused', 'auth'],
   ];

@@ -62,6 +62,7 @@ test('kindOf reads AAT ids, GeoNames codes, source words and Wikidata classes; a
   assert.deepEqual(kindOf('gn:P.PPL'), { id: 'gn:P.PPL', aat: 'aat:300008347', facet: 'settlement' });
   assert.deepEqual(kindOf('gn:H.LK'), { id: 'gn:H.LK', aat: 'aat:300008680', facet: 'water' });
   assert.deepEqual(kindOf('gn:S.AIRF'), { id: 'gn:S.AIRF', aat: 'aat:300000679', facet: 'built' });
+  assert.deepEqual(kindOf('gn:S.CH'), { id: 'gn:S.CH', aat: null, facet: null }, 'a spot not listed has no facet');
   assert.deepEqual(kindOf('gn:S.FRM'), { id: 'gn:S.FRM', aat: 'aat:300000206', facet: null }, 'a farm has no facet: it never conflicts');
   assert.deepEqual(kindOf('kain_par:parish'), { id: 'kain_par:parish', aat: 'aat:300387092', facet: 'division' });
   assert.deepEqual(kindOf('wikidata:Q532'), { id: 'wikidata:Q532', aat: 'aat:300008372', facet: 'settlement' });
@@ -96,17 +97,78 @@ test('kindFit: of the place\'s kind or narrower is a match; a lake for a parish 
   assert.deepEqual([f.place.label, f.candidate.id], ['parish', 'gn:H.LK'], 'it says which kinds decided');
 });
 
-test('the ranking puts the place\'s own kind first and a conflicting kind last among the near; the far stay after; with no kind it is as before', () => {
+test('an airport or another transport facility is never of an inhabited place\'s kind, though WHG has them under ports and inhabited places; a real village is (the review of 12 October 2026)', () => {
+  const settlement = { types: ['settlement'] }, inhabited = { typeIds: ['http://vocab.getty.edu/aat/300008347'] };
+  assert.equal(kindFit(settlement, ['gn:S.AIRP']).fit, 'conflict');
+  assert.equal(kindFit(settlement, ['osm:village']).fit, 'match', 'control: a village');
+  assert.equal(kindFit(inhabited, ['aat:300000681']).fit, 'conflict', 'airports');
+  assert.equal(kindFit(inhabited, ['aat:300000686']).fit, 'conflict', 'heliports');
+  assert.equal(kindFit(inhabited, ['aat:300007917']).fit, 'conflict', 'a transport facility under ports');
+  assert.equal(kindFit(inhabited, ['aat:300008372']).fit, 'match', 'control: villages');
+  assert.equal(kindFit({ types: ['port'] }, ['aat:300000681']).fit, 'conflict', 'nor of a port\'s kind');
+  assert.equal(kindFit({ types: ['port'] }, ['aat:300387511']).fit, 'match', 'control: seaports are ports');
+});
+
+test('a GeoNames spot (a church, an estate, a ruin), an island and a bay never conflict with a settlement or a parish; the listed built codes still do', () => {
+  assert.equal(kindFit({ types: ['parish'] }, ['gn:S.CH']).fit, 'unknown');
+  assert.equal(kindFit({ types: ['parish'] }, ['gn:S.EST']).fit, 'unknown');
+  assert.equal(kindFit({ types: ['town'] }, ['gn:S.RUIN']).fit, 'unknown');
+  assert.equal(kindFit({ types: ['village'] }, ['gn:T.ISL']).fit, 'other', 'Lindisfarne');
+  assert.equal(kindFit({ types: ['village'] }, ['osm:island']).fit, 'other');
+  assert.equal(kindFit({ types: ['town'] }, ['osm:bay']).fit, 'unknown', 'Whitley Bay');
+  assert.equal(kindFit({ types: ['town'] }, ['gn:H.BAY']).fit, 'unknown');
+  assert.equal(kindFit({ types: ['village'] }, ['gn:T.HLL']).fit, 'other', 'a village named after its hill');
+  assert.equal(kindFit({ types: ['parish'] }, ['gn:S.CSTL']).fit, 'conflict', 'control: a castle still conflicts');
+  assert.equal(kindFit({ types: ['town'] }, ['gn:H.LK']).fit, 'conflict', 'control: a lake still conflicts');
+});
+
+test('parishes as religious divisions and parishes are one kind', () => {
+  assert.equal(kindFit({ typeIds: ['http://vocab.getty.edu/aat/300000773'] }, ['kain_par:parish']).fit, 'match');
+  assert.equal(kindFit({ types: ['parish'] }, ['aat:300000773']).fit, 'match');
+  assert.equal(kindFit({ types: ['parish'] }, ['aat:300000792']).fit, 'other', 'control: a township is not a parish');
+});
+
+test('distance stays primary: a conflicting kind goes after the rest of its group, and the place\'s own kind only breaks the tie between records within 2 km of each other', () => {
   const p = { iri: A('ashby'), label: 'Ashby', names: ['Ashby'], point: [-1.47, 52.75], types: ['parish'] };
-  const c = (id, point, types) => ({ id, iri: W3ID + id, name: 'Ashby', altNames: [], coords: point, ccodes: ['GB'], kinds: types, answer_rank: 1 });
+  const c = (id, point, types, rank = 1) => ({ id, iri: W3ID + id, name: 'Ashby', altNames: [], coords: point, ccodes: ['GB'], kinds: types, answer_rank: rank });
   const lake = c('place:gn:1', [-1.471, 52.751], ['gn:H.LK']), village = c('place:gn:2', [-1.48, 52.75], ['gn:P.PPL']);
   const parish = c('place:kain_par:3', [-1.50, 52.76], ['kain_par:parish']), far = c('place:kain_par:4', [-3, 55], ['kain_par:parish']);
   const r = rankGazetteer(p, [lake, village, far, parish]);
+  // The parish, 1.5 km from the village record, is the same place held by another source: its kind breaks the tie.
   assert.deepEqual(r.map((x) => [x.candidate.id, x.kind]), [['place:kain_par:3', 'match'], ['place:gn:2', 'other'], ['place:gn:1', 'conflict'], ['place:kain_par:4', 'match']]);
   // The control: the same candidates for a place that says nothing of its kind are ranked by distance, as before.
   const plain = rankGazetteer({ ...p, types: undefined }, [lake, village, far, parish]);
   assert.deepEqual(plain.map((x) => x.candidate.id), ['place:gn:1', 'place:gn:2', 'place:kain_par:3', 'place:kain_par:4']);
-  assert.equal(LOOKUP_ALGORITHM, 'krisis-lookup 2');
+  assert.equal(LOOKUP_ALGORITHM, 'krisis-lookup 1', 'a candidate\'s address is unchanged by the kinds');
+});
+
+test('a record of the place\'s own kind 45 km off ranks BELOW the records of the right village 1 km off (the review of 12 October 2026: distance stays primary)', () => {
+  const p = { iri: A('v'), label: 'Newton', names: ['Newton'], point: [-2.0, 53.0], types: ['village'] };
+  const c = (id, point, types, rank) => ({ id, iri: W3ID + id, name: 'Newton', altNames: [], coords: point, ccodes: ['GB'], kinds: types, answer_rank: rank });
+  const osmFar = c('place:osm:1', [-2.0, 53.405], ['osm:village'], 1), gn = c('place:gn:2', [-2.0, 53.009], ['gn:P.PPL'], 2), tgn = c('place:tgn:3', [-2.002, 53.01], ['aat:300008347'], 3);
+  const r = rankGazetteer(p, [osmFar, gn, tgn]);
+  assert.deepEqual(r.map((x) => [x.candidate.id, x.kind]), [['place:gn:2', 'other'], ['place:tgn:3', 'other'], ['place:osm:1', 'match']]);
+  assert.ok(r[2].distance_km > 40 && r[2].distance_km < 50 && !r[2].far, 'within the greatest distance, so only distance put it last');
+  // The control: an OSM village record beside the GeoNames one (within 2 km) is put first among them by its kind.
+  const osmNear = c('place:osm:4', [-2.001, 53.012], ['osm:village'], 4);
+  assert.deepEqual(rankGazetteer(p, [osmFar, gn, tgn, osmNear]).map((x) => x.candidate.id), ['place:osm:4', 'place:gn:2', 'place:tgn:3', 'place:osm:1']);
+});
+
+test('a place with no types ranks exactly as before the kinds were read, a candidate with no point among them', () => {
+  const p = { iri: A('x'), label: 'Newcastle', names: ['Newcastle'], point: [-1.6, 54.97], ccodes: ['GB'] };
+  const c = (id, coords, ccodes, rank, kinds) => ({ id, iri: W3ID + id, name: 'Newcastle', altNames: [], coords, ccodes, answer_rank: rank, kinds });
+  const list = [c('place:a:1', null, ['GB'], 1, ['gn:H.LK']), c('place:a:2', [17, -22], ['NA'], 2, ['gn:P.PPL']), c('place:a:3', [-1.61, 54.97], ['GB'], 3, ['gn:S.AIRP']), c('place:a:4', null, null, 4, [])];
+  // krisis-lookup 1's order: by distance, none last; then countries, letters, the service's order.
+  const v1 = [...list].sort((a, b) => {
+    const d = (x) => (x.coords ? Math.hypot(x.coords[0] + 1.6, x.coords[1] - 54.97) : Infinity);
+    return d(a) - d(b) || (a.ccodes?.includes('GB') ? 0 : a.ccodes ? 2 : 1) - (b.ccodes?.includes('GB') ? 0 : b.ccodes ? 2 : 1) || a.answer_rank - b.answer_rank;
+  }).map((x) => x.id);
+  assert.deepEqual(rankGazetteer(p, list).map((x) => x.candidate.id), v1);
+  assert.deepEqual(v1, ['place:a:3', 'place:a:2', 'place:a:1', 'place:a:4']);
+  // The control: for a town, an airport (a conflicting kind) goes after a village further off, both near.
+  const two = [c('place:a:3', [-1.61, 54.97], ['GB'], 1, ['gn:S.AIRP']), c('place:a:5', [-1.65, 54.97], ['GB'], 2, ['gn:P.PPL'])];
+  assert.deepEqual(rankGazetteer(p, two).map((x) => x.candidate.id), ['place:a:3', 'place:a:5'], 'no types: by distance');
+  assert.deepEqual(rankGazetteer({ ...p, types: ['town'] }, two).map((x) => x.candidate.id), ['place:a:5', 'place:a:3'], 'a town: the airport after');
 });
 
 // ---- the lookup end to end: kinds kept, placeholders left out, the bulk accept refusing a conflict ----
@@ -180,8 +242,8 @@ test('the bulk accept never takes a candidate of a conflicting kind: the place i
 
 test('the review\'s words: the kind line, "type unknown", and why a candidate was ranked up or down', () => {
   assert.equal(lookupPage.kindUnknown, 'type unknown');
-  assert.equal(lookupPage.kindMatch('kain_par:parish', 'parish'), 'Ranked up: kain_par:parish is the kind of place yours is (parish), or a narrower kind.');
-  assert.equal(lookupPage.kindConflict('lakes (bodies of water)', 'town'), 'Ranked down: lakes (bodies of water), where yours is town. Never accepted in bulk; decide on it yourself.');
+  assert.equal(lookupPage.kindMatch('kain_par:parish', 'parish'), 'kain_par:parish is the kind of place yours is (parish), or a narrower kind: it comes first among records of one place (within 2 km of each other).');
+  assert.equal(lookupPage.kindConflict('lakes (bodies of water)', 'town'), 'Ranked down: lakes (bodies of water), where yours is town; after the other candidates as near. Never accepted in bulk; decide on it yourself.');
 });
 
 // ---- WHG's daily cap (#22; whg.js A15), in WHG's own shapes (live since 12 October 2026) --------------------

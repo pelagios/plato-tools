@@ -48,7 +48,7 @@ Status: IMPLEMENTED; engine and CLI tests pass (test/krisis.test.js, test/krisis
     `rule` in words), `qualifiers` (`{ table, lists, definitions, cap, rare }`) and `scoring` (in words);
     `algorithm_version` is `krisis-names 7` (`ALGORITHM`). A candidate only the qualifier rule suggested has
     `rule: 'qualifier'` and `qualifier` (the qualifiers, as written: `'Chipping'`). A candidate from a
-    lookup carries its own, `krisis-lookup 2` (`LOOKUP_ALGORITHM`), which overrides the file's.
+    lookup carries its own, `krisis-lookup 1` (`LOOKUP_ALGORITHM`), which overrides the file's.
 - `src/engine/krisis/apply.js`:
   - `apply({ subjects, work, options: { output = 'dataset', reviewer, date, base, othersTitle } }, env) -> { report, outputs, incomplete? }`
     `work` is a work object or its text. `reviewer` ({ name, orcid? }) overrides `work.reviewer`;
