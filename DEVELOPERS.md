@@ -2184,26 +2184,37 @@ the places within it; the places themselves never send it.
   module's one line (`permissions.needs(el, …)`, whose button opens the panel at that permission) is
   shown in its place, nothing is sent, and the preview of what would be sent is still shown (it is
   information, not consent). There is no inline privacy note: what a gazetteer learns, and what keeping
-  the token means, are said in the panel; beside the token field is only where it is kept. A request the module refuses (`PermissionError`) stops the
+  the token means, are said in the Permissions panel; beside the token field are only where it is kept and
+  a line of static help (how to give it, and that forgetting it does not revoke it). A request the module refuses (`PermissionError`) stops the
   lookup: `onRefused` aborts it with the error, and runLookup records `stopped: { kind: 'permission',
   refused: <the error's kind> }`, worded by `LOOKUP_WORDS.refused` (address, never, undecided, reload,
   unprotected, moved, network); `network` is left to the gazetteer module's retries, as any failure to
   reach the service is, and stops as its `network`. The token has one keeper, `permissions.token`
-  (`get`, `set`, `forget`, `onChange`, `remember(on)`, `remembered()`): kept for the tab unless the user
+  (`get`, `set`, `forget`, `onChange`, `remember(on)`, `remembered()`, `scope()`): kept for the tab unless the user
   chooses to remember it in this browser (the Permissions panel's "Remember my token in this browser",
   or the lookup panel's "Remember my token"), where the Permissions panel states its scope. The page
-  keeps no copy, and never puts the token back into the page: the field is emptied once the token is
+  keeps no copy, and never puts the token back into the page. A browser's own saved copy is outside the
+  page's control: the field asks for a new password (`autocomplete="new-password"`, which Chrome may
+  still ignore) and is in no `<form>`, so that nothing is submitted for a password manager to offer to
+  save, and only what is typed or pasted into it is taken (`noteInput`, on each input event: an
+  `inputType` of `insertText`, `insertFromPaste` and the like marks it typed; anything else, such as an
+  autofill's input event, empties it), so that a password a browser saved for another pelagios.org site
+  and filled in is never sent to WHG. The field is emptied once the token is
   given (Enter or leaving the field gives it for the tab, "Remember my token" for this browser), and
-  then shows a masked placeholder (`LW.tokenMask`), "Token kept for this tab only" or "Token
+  then shows a masked placeholder (`TOKEN_FIELD.mask`), "Token kept for this tab only" or "Token
   remembered in this browser" beside it (`#whg-token-state`, a status), and "Forget the token", which is
   shown only while there is a token, as "Remember my token" only while it is not remembered
-  (`showTokenState()`, drawn from the keeper's `get()` and `remembered()`, on its `onChange` and on the
-  permissions' `onChange`, which is where `remember()` is heard). The field's states, words
+  (`showTokenState()`, drawn from the keeper's `scope()`, which says which store answered: `'browser'`
+  when this tab's token is the one remembered, `'tab'` when it is this tab's own, though another tab
+  may have remembered another, on the keeper's `onChange` and on the permissions' `onChange`, which is
+  where `remember()` is heard). The field's states, words
   (`TOKEN_FIELD` in `words.js`) and actions are `src/lib/token-field.js`'s, shared with Chora's adopt
   panel (`tokenView`, `giveToken`, `rememberToken`, `forgetToken`; `test/token-field.test.js`); both
   empty the field before telling the keeper, whose `onChange` may draw a panel again (Chora's keeps
   what is half typed, and kept the token in the field until the e2e caught it). Forget calls the lookup's
-  `clearToken()` and the keeper's `remember(false)` and `forget()`, and puts the focus back in the
+  `clearToken()` and the keeper's `remember(false)` and `forget()`, which forgets the token everywhere in
+  this browser that the tab can reach (this tab's copy and the remembered one; another tab's own,
+  kept for that tab only, stays until that tab forgets it or is closed), and puts the focus back in the
   field, with no message: the empty field says it, and that forgetting does not revoke a token (only
   regenerating it in WHG does) is the field's static help (`#whg-token-help`), as in the Permissions
   panel, whose Forget does the same and is shown only while there is a token. The token field and its
@@ -2236,8 +2247,10 @@ the places within it; the places themselves never send it.
   and looks for the token in window.__plato, the page, the console, request addresses and bodies, and
   the saved work file, beside the control that it is in every request's Authorization header.
 - **The dataset's language on the page** (`#lookup-lang`) has a typeahead (`src/krisis/lang-combobox.js`,
-  WAI-ARIA's list autocomplete: a text field with `role="combobox"` and a listbox, Up and Down, Enter or a
-  click to choose, Escape to close). A native `<datalist>` was not used: its options cannot show a code as
+  WAI-ARIA's list autocomplete: a text field with `role="combobox"` and a listbox; Up and Down, and Home
+  and End while it is open, move the active option, as the pointer does; Enter or a click chooses; Escape
+  closes the list, or, closed, empties the field; how many are offered is said in a visually hidden polite
+  live region, `#lookup-lang-offered`; its words are `LW.langList` and `LW.langOffered`). A native `<datalist>` was not used: its options cannot show a code as
   code, and each browser matches them its own way. The languages are a data module, `src/lib/languages.js`
   (`LANGUAGES`: every ISO 639-1 code that names one language, a few common 639-3 ones, and the historical
   languages a gazetteer's names are often in, `grc`, `ang`, `enm`, `fro`, `sga`, `ota`, `akk`, `egy`,
@@ -2250,10 +2263,13 @@ the places within it; the places themselves never send it.
   languages for what is typed, the line saying it is not a code is held back (a name being typed is not
   yet wrong); it is shown once nothing is offered, and when the list closes. Wherever the panel names a
   language code (the field's help, "en, la or ang"; the line refusing one; the preview's "sent as `en`";
-  the options, "`ang` · Old English"), it is a `<code class="code-chip">`, styled from the page's tokens.
+  the options, "`ang` · Old English"), it is a `<code class="code-chip">`, styled from the page's tokens;
+  in the line refusing one, only the words' own phrase (`LW.langExamplesText`, the last in the line) is
+  chipped, never the value typed, quoted before it (`withCodes`).
   The e2e (`lookup_panel_case`) checks the token field shown for WHG only, Remember and Forget in each
-  state, the token nowhere in the page, Forget with no message, the typeahead by "ang" and by "Old Eng",
-  and the chips.
+  state, the token nowhere in the page, Forget with no message, Enter for the tab, an autofilled value
+  never given, the typeahead by "ang" and by "Old Eng", the refusal held back while languages are
+  offered and shown otherwise, the typeahead's keys, pointer and live region, and the chips.
 
 ## Workflows (Methodos)
 

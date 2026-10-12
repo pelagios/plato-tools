@@ -883,6 +883,8 @@ export const LOOKUP_WORDS = {
 };
 /** Krisis: gazetteer lookup on the page (src/app.js): the panel, the progress, and the review screen's additions. */
 const pct = (part, whole) => { const x = (100 * part) / whole; return x > 0 && x < 1 ? 'under 1%' : `${Math.round(x).toLocaleString('en-GB')}%`; };
+const LANG_EXAMPLES = ['en', 'la', 'ang'];
+const LANG_EXAMPLES_TEXT = `${LANG_EXAMPLES[0]}, ${LANG_EXAMPLES[1]} or ${LANG_EXAMPLES[2]}`;
 export const lookupPage = {
   whg: 'WHG',
   reading: 'Reading the places of your dataset…',
@@ -895,7 +897,13 @@ export const lookupPage = {
   openPermissions: 'Permissions…',
   badEndpoint: "Give the reconciliation service's address, beginning https://.",
   /** The dataset's language, typed, that is not a code WHG can be sent (whg.js whgLang): nothing is sent until it is put right. */
-  badLang: (v) => `"${v}" is not a language code such as en, la or ang, so nothing is sent: correct it, or empty the field to send names with no language.`,
+  badLang: (v) => `"${v}" is not a language code such as ${LANG_EXAMPLES_TEXT}, so nothing is sent: correct it, or empty the field to send names with no language.`,
+  /** The example codes the panel names ("en, la or ang"), which the page shows as code, and only them (never what was typed). */
+  langExamples: LANG_EXAMPLES,
+  langExamplesText: LANG_EXAMPLES_TEXT,
+  /** The language field's typeahead (src/krisis/lang-combobox.js): its list's name, and what it says, politely, of what it offers. */
+  langList: 'Language codes',
+  langOffered: (n) => (n ? `${plural(n, 'language')} suggested; Up and Down to choose.` : 'No language suggested.'),
   badTemplate: "Give how to make a candidate's address from its id, with {{id}} in it, such as https://www.wikidata.org/wiki/{{id}}; or leave it empty.",
   /** The share of WHG's daily allowance a lookup would use. */
   share: (requests, perDay) => `That is ${pct(requests, perDay)} of WHG's allowance of ${perDay.toLocaleString('en-GB')} requests a day.`,

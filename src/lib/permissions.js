@@ -448,6 +448,19 @@ export const token = {
     if (token.remembered()) { try { const t = local()?.getItem(TOKEN); if (t) return t; } catch { /* storage refused */ } }
     return memory;
   },
+  /**
+   * Where the token get() gives is kept: 'browser' when it is the copy remembered in this browser (this
+   * tab's copy, if any, being the same), 'tab' when it is this tab's own (another tab may have remembered
+   * a different one, or forgotten its own), or null when there is none. What the field's line says.
+   */
+  scope() {
+    let tab = null, kept = null;
+    try { tab = session()?.getItem(TOKEN) || null; } catch { /* storage refused */ }
+    if (token.remembered()) { try { kept = local()?.getItem(TOKEN) || null; } catch { /* storage refused */ } }
+    if (tab) return tab === kept ? 'browser' : 'tab';
+    if (kept) return 'browser';
+    return memory ? 'tab' : null;
+  },
   /** Keep a token (trimmed); an empty one is forget(). */
   set(t) {
     const v = typeof t === 'string' ? t.trim() : '';
@@ -457,7 +470,7 @@ export const token = {
     if (token.remembered()) put(local(), TOKEN, v);
     tokenNotify(); notify();
   },
-  /** Forget it, everywhere it was kept. */
+  /** Forget it, everywhere in this browser it was kept: this tab's copy and the one remembered (another tab's own copy stays until that tab forgets it or closes). */
   forget() {
     memory = null;
     drop(session(), TOKEN); drop(local(), TOKEN);

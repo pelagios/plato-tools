@@ -554,7 +554,6 @@ code.code-chip { font-family: var(--font-mono); font-size: .85em; padding: 0 .3e
   margin: 0; padding: .2rem 0; list-style: none; background: var(--card); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 4px 14px rgb(0 0 0 / .15); }
 .lang-options[hidden] { display: none; }
 .lang-options li { padding: .25rem .6rem; cursor: pointer; }
-.lang-options li:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .lang-options li[aria-selected="true"] { background: var(--accent); color: var(--accent-fg); }
 .lang-options li[aria-selected="true"] code.code-chip { color: var(--accent-fg); border-color: currentColor; background: transparent; }
 #lookup-preview p { margin: .5rem 0 .25rem; }

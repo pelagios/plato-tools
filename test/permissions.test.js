@@ -173,8 +173,15 @@ test('the token is never in list(), in the panel\'s data or in an error; it is k
   assert.equal(permissions.token.get(), T);
   assert.equal(sessionStorage.getItem('plato-tools.whg-token'), T);
   assert.equal(localStorage.getItem('plato-tools.whg-token'), null, 'not remembered by default');
+  assert.equal(permissions.token.scope(), 'tab');
   permissions.token.remember(true);
   assert.equal(localStorage.getItem('plato-tools.whg-token'), T);
+  assert.equal(permissions.token.scope(), 'browser');
+  // Another tab remembered a different token: this tab's own is still for this tab only, and says so.
+  localStorage.setItem('plato-tools.whg-token', 'ANOTHER-TABS-TOKEN');
+  assert.equal(permissions.token.get(), T);
+  assert.equal(permissions.token.scope(), 'tab');
+  localStorage.setItem('plato-tools.whg-token', T);
   assert.ok(!JSON.stringify(permissions.list()).includes(T));
   assert.ok(!JSON.stringify(permissions.remembered()).includes(T));
   let err;
@@ -184,10 +191,12 @@ test('the token is never in list(), in the panel\'s data or in an error; it is k
   // A new tab: the remembered token is found in the browser; not remembered, it is gone with the tab.
   sessionStorage.clear();
   assert.equal(permissions.token.get(), T);
+  assert.equal(permissions.token.scope(), 'browser');
   permissions.token.remember(false);
   assert.equal(localStorage.getItem('plato-tools.whg-token'), null);
   permissions.token.forget();
   assert.equal(permissions.token.get(), null);
+  assert.equal(permissions.token.scope(), null);
 });
 
 test('forget and forget all: the permission is undecided again; keep working data is on by default', () => {

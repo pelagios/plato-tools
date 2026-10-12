@@ -1,16 +1,17 @@
 // Language codes with their English names, for the typeahead of the lookup panel's language field
-// (#lookup-lang). Every ISO 639-1 code that names one language, then ISO 639-3 (and 639-2) codes of the
-// historical languages a gazetteer's names are often in. A language with a two-letter code is listed by
+// (#lookup-lang). Every ISO 639-1 code that names one language, then the historical languages a
+// gazetteer's names are often in: the four with ISO 639-1 codes (sa, pi, ae, cu), and ISO 639-3 (and
+// 639-2) codes. A language with a two-letter code is listed by
 // that code only, as whgLang() sends it (eng as en, lat as la). Every code is one that WHG takes
 // (^[a-z]{2,3}$) and that whgLang() sends as itself; test/languages.test.js checks both. The names are
 // ISO's English reference names, shortened where ISO adds dates or qualifiers.
 // This is a list of suggestions, not of what may be typed: the field takes any tag whgLang() reads.
 
 const MODERN = (
-  'aa Afar|ab Abkhazian|ae Avestan|af Afrikaans|ak Akan|am Amharic|an Aragonese|ar Arabic|as Assamese|' +
+  'aa Afar|ab Abkhazian|af Afrikaans|ak Akan|am Amharic|an Aragonese|ar Arabic|as Assamese|' +
   'av Avaric|ay Aymara|az Azerbaijani|ba Bashkir|be Belarusian|bg Bulgarian|bi Bislama|bm Bambara|bn Bengali|' +
   'bo Tibetan|br Breton|bs Bosnian|ca Catalan|ce Chechen|ch Chamorro|co Corsican|cr Cree|cs Czech|' +
-  'cu Church Slavonic|cv Chuvash|cy Welsh|da Danish|de German|dv Dhivehi|dz Dzongkha|ee Ewe|el Modern Greek|' +
+  'cv Chuvash|cy Welsh|da Danish|de German|dv Dhivehi|dz Dzongkha|ee Ewe|el Modern Greek|' +
   'en English|eo Esperanto|es Spanish|et Estonian|eu Basque|fa Persian|ff Fulah|fi Finnish|fj Fijian|' +
   'fo Faroese|fr French|fy Western Frisian|ga Irish|gd Scottish Gaelic|gl Galician|gn Guarani|gu Gujarati|' +
   'gv Manx|ha Hausa|he Hebrew|hi Hindi|ho Hiri Motu|hr Croatian|ht Haitian Creole|hu Hungarian|hy Armenian|' +
@@ -21,8 +22,8 @@ const MODERN = (
   'lu Luba-Katanga|lv Latvian|mg Malagasy|mh Marshallese|mi Maori|mk Macedonian|ml Malayalam|mn Mongolian|' +
   'mr Marathi|ms Malay|mt Maltese|my Burmese|na Nauru|nb Norwegian Bokmål|nd North Ndebele|ne Nepali|' +
   'ng Ndonga|nl Dutch|nn Norwegian Nynorsk|no Norwegian|nr South Ndebele|nv Navajo|ny Chichewa|oc Occitan|' +
-  'oj Ojibwa|om Oromo|or Odia|os Ossetian|pa Punjabi|pi Pali|pl Polish|ps Pashto|pt Portuguese|qu Quechua|' +
-  'rm Romansh|rn Rundi|ro Romanian|ru Russian|rw Kinyarwanda|sa Sanskrit|sc Sardinian|sd Sindhi|' +
+  'oj Ojibwa|om Oromo|or Odia|os Ossetian|pa Punjabi|pl Polish|ps Pashto|pt Portuguese|qu Quechua|' +
+  'rm Romansh|rn Rundi|ro Romanian|ru Russian|rw Kinyarwanda|sc Sardinian|sd Sindhi|' +
   'se Northern Sami|sg Sango|sh Serbo-Croatian|si Sinhala|sk Slovak|sl Slovenian|sm Samoan|sn Shona|' +
   'so Somali|sq Albanian|sr Serbian|ss Swati|st Southern Sotho|su Sundanese|sv Swedish|sw Swahili|ta Tamil|' +
   'te Telugu|tg Tajik|th Thai|ti Tigrinya|tk Turkmen|tl Tagalog|tn Tswana|to Tongan|tr Turkish|ts Tsonga|' +
@@ -31,16 +32,17 @@ const MODERN = (
   'lad Ladino|nds Low German|sco Scots|yue Cantonese|cmn Mandarin Chinese|arb Standard Arabic'
 );
 const HISTORICAL = (
-  'grc Ancient Greek|gmy Mycenaean Greek|ang Old English|enm Middle English|xno Anglo-Norman|fro Old French|' +
+  'sa Sanskrit|pi Pali|ae Avestan|cu Church Slavonic|' +
+  'grc Ancient Greek|gmy Mycenaean Greek|xmk Ancient Macedonian|ang Old English|enm Middle English|xno Anglo-Norman|fro Old French|' +
   'frm Middle French|pro Old Occitan|osp Old Spanish|mxi Mozarabic|goh Old High German|gmh Middle High German|' +
   'osx Old Saxon|gml Middle Low German|odt Old Dutch|dum Middle Dutch|ofs Old Frisian|frk Frankish|' +
   'non Old Norse|got Gothic|sga Old Irish|mga Middle Irish|pgl Primitive Irish|owl Old Welsh|wlm Middle Welsh|' +
-  'obt Old Breton|cnx Middle Cornish|xcb Cumbric|xpi Pictish|xtg Transalpine Gaulish|xcg Cisalpine Gaulish|' +
-  'ett Etruscan|osc Oscan|xum Umbrian|xve Venetic|orv Old Russian|xcl Classical Armenian|oge Old Georgian|' +
+  'obt Old Breton|oco Old Cornish|cnx Middle Cornish|xcb Cumbric|xpi Pictish|xtg Transalpine Gaulish|xcg Cisalpine Gaulish|' +
+  'ett Etruscan|osc Oscan|xum Umbrian|xve Venetic|orv Old Russian|prg Old Prussian|xcl Classical Armenian|oge Old Georgian|' +
   'ota Ottoman Turkish|otk Old Turkic|chg Chagatai|peo Old Persian|pal Pahlavi|sog Sogdian|xbc Bactrian|' +
-  'txb Tocharian B|xto Tocharian A|akk Akkadian|sux Sumerian|hit Hittite|xlu Cuneiform Luwian|xld Lydian|' +
+  'txb Tocharian B|xto Tocharian A|akk Akkadian|sux Sumerian|hit Hittite|xlu Cuneiform Luwian|hlu Hieroglyphic Luwian|xld Lydian|' +
   'xlc Lycian|xcr Carian|xpg Phrygian|uga Ugaritic|phn Phoenician|xpu Punic|egy Ancient Egyptian|cop Coptic|' +
-  'gez Geez|syc Classical Syriac|arc Imperial Aramaic|hbo Ancient Hebrew|xct Classical Tibetan|' +
+  'gez Geez|syc Classical Syriac|oar Old Aramaic|arc Imperial Aramaic|hbo Ancient Hebrew|xct Classical Tibetan|' +
   'lzh Literary Chinese|och Old Chinese|ltc Late Middle Chinese|ojp Old Japanese|oko Old Korean|okm Middle Korean|' +
   'kaw Old Javanese|omr Old Marathi|nci Classical Nahuatl'
 );

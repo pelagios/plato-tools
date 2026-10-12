@@ -30,7 +30,7 @@ import { RELOAD_LOSES } from './lib/permission-words.js';
 import { LOOKUP_WORDS, lookupPage as LW, TOKEN_FIELD } from './engine/words.js';
 import { createLookup, WHG_ENDPOINT, isWhg, whgLang } from './engine/gazetteer/index.js';
 import { languageCombobox } from './krisis/lang-combobox.js';
-import { showTokenView, giveToken, rememberToken, forgetToken } from './lib/token-field.js';
+import { showTokenView, giveToken, rememberToken, forgetToken, noteInput } from './lib/token-field.js';
 import { runLookup, planLookup, gazetteerPermission, permittedFetch, serviceOf, iriFromTemplate, iriVia, manifestSettings, newWork, defaultChoice, licenceOf, PLACE_CHOICES, WHG_REQUESTS_A_DAY } from './engine/krisis/lookup.js';
 import { candidateSource } from './engine/krisis/identity.js';
 // Krisis: region review (Methodos #28, stages 3 and 4), run on this thread as the lookup is, through the same shared WHG lookup.
@@ -1668,10 +1668,12 @@ function langProblem() {
 }
 /** Put text into el, the example codes it names (en, la, ang) shown as code, as in the field's label. */
 function withCodes(el, text) {
-  el.replaceChildren(...String(text).split(/\b(en|la|ang)\b/).map((part, i) => {
-    if (i % 2 === 0) return part;
-    const c = document.createElement('code'); c.className = 'code-chip'; c.textContent = part; return c;
-  }));
+  // Only the words' own phrase, the last in the text (a typed value, quoted before it, is never chipped, even if it holds the phrase).
+  const t = String(text), at = t.lastIndexOf(LW.langExamplesText);
+  if (at < 0) return el.replaceChildren(t);
+  const chip = (code) => { const c = document.createElement('code'); c.className = 'code-chip'; c.textContent = code; return c; };
+  const [a, b, c] = LW.langExamples;
+  el.replaceChildren(t.slice(0, at), chip(a), ', ', chip(b), ' or ', chip(c), t.slice(at + LW.langExamplesText.length));
 }
 /**
  * Say beside the field, as it is typed, whether the dataset's language can be sent; not while the
@@ -1835,10 +1837,8 @@ async function offerResume(svc) {
   afterStop = true;
   b.textContent = LW.resume(p.queries); b.hidden = !mayLookUp(svc);
 }
-function commitToken() {
-  const f = $('whg-token');
-  if (f.value.trim()) giveToken(token, f);
-}
+/** Give what was typed in the token field (never what a browser filled in: token-field.js), for the tab. */
+function commitToken() { giveToken(token, $('whg-token')); }
 
 // Places and candidates on the review screen.
 /** The latest lookup's word on a place, or null if it was never looked up. */
@@ -1932,12 +1932,15 @@ $('lookup').addEventListener('change', (e) => {
   refreshPreview();
 });
 $('lookup').addEventListener('input', (e) => {
+  if (e.target.id === 'whg-token') return noteInput(e);   // only what is typed or pasted is taken, never a browser's autofill
   if (e.target.id === 'lookup-lang') showLangProblem();
   if (e.target.id === 'lookup-endpoint') showTokenBox();
   if (e.target.type === 'number' || e.target.type === 'url' || e.target.id === 'lookup-iri' || e.target.id === 'lookup-lang') refreshPreview();
 });
 // Remember my token: the token typed (or the one kept for the tab) is kept in this browser, as the
 // Permissions panel's "Remember my token in this browser" does; the field is emptied, and keeps the focus.
+// Enter in the token field gives it for the tab (leaving the field does too, by its change event).
+$('whg-token').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); commitToken(); } });
 $('whg-remember').onclick = () => { rememberToken(token, $('whg-token')); $('whg-token').focus(); };
 // Forget: the shared lookup sends no token from its next request, and the keeper forgets it and the
 // choice to remember it, so that the panel is as before a token was given. No message: the field's empty

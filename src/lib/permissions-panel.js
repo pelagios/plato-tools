@@ -70,7 +70,7 @@ function render(api) {
     </section>
     <section aria-labelledby="perm-token-h">
       <h3 id="perm-token-h">${esc(PANEL.tokenHeading)}</h3>
-      <p>${esc(t ? PANEL.tokenHeld(api.token.remembered()) : PANEL.tokenNone)}</p>
+      <p>${esc(t ? PANEL.tokenHeld(api.token.scope() === 'browser') : PANEL.tokenNone)}</p>
       <label><input type="checkbox" id="perm-token-remember"${api.token.remembered() ? ' checked' : ''} aria-describedby="perm-token-note"> ${esc(PANEL.tokenRemember)}</label>
       <p class="muted" id="perm-token-note">${esc(PANEL.tokenRememberNote)}</p>
       ${t ? `<p><button type="button" data-token-forget>${esc(PANEL.tokenForget)}</button></p>` : ''}

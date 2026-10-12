@@ -1524,18 +1524,67 @@ def lookup_panel_case(page, tmp, url):
           'regenerating it' in (fg.get('help') or '') and (fg.get('progress') or '') == '' and 'is forgotten' not in panel_words
           and 'that is the only way to revoke it' not in panel_words and 'Your WHG token' in panel_words, {'progress': fg.get('progress'), 'help': fg.get('help'), 'error': fg.get('error')})
 
+    # Enter gives the token for the tab, said beside the field; a value the browser puts in the field (an autofill:
+    # an input event with no inputType, or no event at all) is emptied and never given. The control for both
+    # absences: the same token typed, then Enter, is given.
+    def enter_and_autofill():
+        out = {}
+        page.evaluate("""(t) => { const f = document.getElementById('whg-token'); f.focus(); f.value = t; f.dispatchEvent(new Event('input', { bubbles: true })); }""", PANEL_TOKEN)
+        out['filled value'] = page.input_value('#whg-token')
+        page.press('#whg-token', 'Enter')
+        out['filled'] = page.evaluate(LOOKUP_PANEL)
+        page.evaluate("(t) => { document.getElementById('whg-token').value = t; }", PANEL_TOKEN)
+        page.press('#whg-token', 'Enter')
+        out['silent'] = page.evaluate(LOOKUP_PANEL)
+        page.fill('#whg-token', PANEL_TOKEN); page.press('#whg-token', 'Enter')
+        page.wait_for_function("() => !document.getElementById('whg-forget').hidden", timeout=T(10) * 1000)
+        out['typed'] = page.evaluate(LOOKUP_PANEL)
+        page.click('#whg-forget')
+        page.wait_for_function("() => document.getElementById('whg-forget').hidden", timeout=T(10) * 1000)
+        return out
+    ea = step(enter_and_autofill)
+    ty, fi, si = ea.get('typed') or {}, ea.get('filled') or {}, ea.get('silent') or {}
+    check('lookup panel: Enter in the token field gives it for this tab, "Token kept for this tab only" beside it (kept for the tab, not in this browser), the field empty and masked',
+          ty.get('state') == 'Token kept for this tab only' and ty.get('session') == PANEL_TOKEN and ty.get('local') is None and ty.get('value') == ''
+          and ty.get('placeholder') == '••••••••' and ty.get('remember') is True and ty.get('forget') is True, {k: v for k, v in ty.items() if k not in ('panel', 'session', 'local')} or ea)
+    check('lookup panel: a value the browser fills into the token field (no typing or pasting) is emptied and never given, with or without an input event (the control: the same typed is given)',
+          ea.get('filled value') == '' and fi.get('session') is None and fi.get('state') == '' and si.get('session') is None and si.get('value') == ''
+          and si.get('state') == '' and ty.get('session') == PANEL_TOKEN, {'filled value': ea.get('filled value'), 'filled': fi.get('session'), 'silent': si.get('session'), 'typed': ty.get('session') == PANEL_TOKEN, 'error': ea.get('error')})
+
     # The language field's typeahead: "ang" and "Old Eng" each offer ang, shown as "ang · Old English", its code as
     # code; a text that names no language offers nothing (beside the two that do); the keyboard chooses.
     OPTIONS = """() => { const l = document.getElementById('lookup-lang-options'), f = document.getElementById('lookup-lang');
       return { shown: !!l && !l.hidden && l.getClientRects().length > 0, expanded: f.getAttribute('aria-expanded'), role: f.getAttribute('role'),
         options: l ? [...l.querySelectorAll('[role=option]')].map((o) => ({ code: o.dataset.code, text: o.textContent, chip: o.querySelector('code.code-chip')?.textContent ?? null })) : [],
-        value: f.value }; }"""
+        value: f.value, problem: !document.getElementById('lookup-lang-problem').hidden, active: f.getAttribute('aria-activedescendant'),
+        ids: l ? [...l.querySelectorAll('[role=option]')].map((o) => o.id) : [], offered: document.getElementById('lookup-lang-offered')?.textContent ?? null,
+        live: document.getElementById('lookup-lang-offered')?.getAttribute('aria-live') ?? null }; }"""
     def typeahead():
         out = {}
         for q in ('ang', 'Old Eng', 'qqzz'):
             page.fill('#lookup-lang', '')
             page.type('#lookup-lang', q)
             out[q] = page.evaluate(OPTIONS)
+        # A name typed and left unchosen: the refusal is shown once the field is left.
+        page.fill('#lookup-lang', '')
+        page.type('#lookup-lang', 'old eng')
+        out['typing'] = page.evaluate(OPTIONS)
+        page.press('#lookup-lang', 'Tab')
+        out['left'] = page.evaluate(OPTIONS)
+        # A value that holds codes of its own, refused: only the words' example codes are chips, never what was typed.
+        page.fill('#lookup-lang', 'en, la or ang'); page.press('#lookup-lang', 'Tab')
+        page.wait_for_function("() => !document.getElementById('lookup-lang-problem').hidden", timeout=T(10) * 1000)
+        out['chips'] = page.evaluate("""() => { const p = document.getElementById('lookup-lang-problem');
+          return { text: p.textContent, codes: [...p.querySelectorAll('code')].map((c) => c.textContent), quoted: [...p.childNodes][0]?.nodeType === 3 ? p.childNodes[0].textContent : null }; }""")
+        # The keys and the pointer: End and Home, the pointer over the third, then Escape twice.
+        page.fill('#lookup-lang', '')
+        page.type('#lookup-lang', 'an')
+        out['an'] = page.evaluate(OPTIONS)
+        page.keyboard.press('ArrowDown'); page.keyboard.press('End'); out['end'] = page.evaluate(OPTIONS)
+        page.keyboard.press('Home'); out['home'] = page.evaluate(OPTIONS)
+        page.hover('#lookup-lang-options [role=option]:nth-child(3)'); out['hover'] = page.evaluate(OPTIONS)
+        page.keyboard.press('Escape'); out['escape'] = page.evaluate(OPTIONS)
+        page.keyboard.press('Escape'); out['escape again'] = page.evaluate(OPTIONS)
         page.fill('#lookup-lang', '')
         page.type('#lookup-lang', 'old eng')
         page.keyboard.press('ArrowDown'); page.keyboard.press('Enter')
@@ -1554,6 +1603,23 @@ def lookup_panel_case(page, tmp, url):
           (ta.get('qqzz') or {}).get('shown') is False and (ta.get('qqzz') or {}).get('options') == [] and bool(ang(ta.get('ang')))
           and (ta.get('chosen') or {}).get('value') == 'ang' and (ta.get('chosen') or {}).get('shown') is False and ta.get('problem hidden') is True,
           {k: ta.get(k) for k in ('qqzz', 'chosen', 'error')})
+    pick = lambda r, *ks: {k: (r or {}).get(k) for k in ks}
+    check('lookup panel: the line refusing a code is held back while "Old Eng" is typed and languages are offered, shown for "qqzz" (nothing offered), and shown when the field is left with a name unchosen',
+          (ta.get('Old Eng') or {}).get('shown') is True and (ta.get('Old Eng') or {}).get('problem') is False
+          and (ta.get('qqzz') or {}).get('problem') is True and (ta.get('typing') or {}).get('problem') is False
+          and (ta.get('left') or {}).get('shown') is False and (ta.get('left') or {}).get('problem') is True and (ta.get('left') or {}).get('value') == 'old eng',
+          {k: pick(ta.get(k), 'shown', 'problem', 'value') for k in ('Old Eng', 'qqzz', 'typing', 'left')} | {'error': ta.get('error')})
+    ch = ta.get('chips') or {}
+    check('lookup panel: in the line refusing a value, only the words\' own example codes are chips, never the value typed, even when it holds the same codes',
+          ch.get('text', '').startswith('"en, la or ang" is not a language code such as en, la or ang') and ch.get('codes') == ['en', 'la', 'ang']
+          and ch.get('quoted', '').startswith('"en, la or ang" is not a language code such as '), ch or ta.get('error'))
+    an, en, ho, hv = (ta.get(k) or {} for k in ('an', 'end', 'home', 'hover'))
+    ids = an.get('ids') or []
+    check('lookup panel: the typeahead says politely how many it offers, Home and End go to the first and the last, the pointer moves the active one, and Escape closes the list, then empties the field',
+          len(ids) >= 3 and an.get('live') == 'polite' and an.get('offered') == f'{len(ids)} languages suggested; Up and Down to choose.'
+          and en.get('active') == ids[-1] and ho.get('active') == ids[0] and hv.get('active') == ids[2]
+          and (ta.get('escape') or {}).get('shown') is False and (ta.get('escape') or {}).get('value') == 'an' and (ta.get('escape again') or {}).get('value') == '',
+          {k: pick(ta.get(k), 'shown', 'active', 'value', 'offered', 'live') for k in ('an', 'end', 'home', 'hover', 'escape', 'escape again')} | {'ids': ids, 'error': ta.get('error')})
 
     # The codes as code: the field's help names en, la and ang each in a chip (styled, not plain text), and the
     # typeahead's options too; the control: the help's words around them are there as text.
@@ -6022,7 +6088,12 @@ def chora_adopt_checks(pw, url, tmp):
         ...kept }; }"""
     tk = {}
     def token_states():
+        # Run once for the attempts below; a harness error is kept, so that every later attempt reports it too.
         if tk: return tk
+        try: token_steps()
+        except Exception as e: tk['error'] = 'harness error: ' + str(e).split('\n')[0][:200]
+        return tk
+    def token_steps():
         fresh(ALLOW); open_for('newcastle upon')
         tk['before'] = page.evaluate(TOKEN_STATE, None)
         page.fill('#adopt-token', ADOPT_TOKEN)
@@ -6036,10 +6107,17 @@ def chora_adopt_checks(pw, url, tmp):
         page.fill('#adopt-token', ADOPT_TOKEN); page.press('#adopt-token', 'Enter')
         until(page, '() => document.getElementById("adopt-token-forget")?.hidden === false', 10)
         tk['tab'] = page.evaluate(TOKEN_STATE, ADOPT_TOKEN)
-        return tk
-    def step(fn):
-        try: return fn()
-        except Exception as e: return {'error': 'harness error: ' + str(e).split('\n')[0][:200]}
+        # A value the browser fills in (an input event with no inputType, as an autofill), then Enter: emptied, never given.
+        page.click('#adopt-token-forget')
+        until(page, '() => document.getElementById("adopt-token-forget")?.hidden === true', 10)
+        page.evaluate("""(t) => { const f = document.getElementById('adopt-token'); f.focus(); f.value = t; f.dispatchEvent(new Event('input', { bubbles: true })); }""", ADOPT_TOKEN)
+        tk['filled value'] = page.input_value('#adopt-token')
+        page.evaluate("(t) => { document.getElementById('adopt-token').value = t; }", ADOPT_TOKEN)
+        page.press('#adopt-token', 'Enter')
+        tk['filled'] = page.evaluate(TOKEN_STATE, ADOPT_TOKEN)
+        tk['form'] = page.evaluate("() => !!document.getElementById('adopt-token')?.closest('form')")
+        tk['autocomplete'] = page.get_attribute('#adopt-token', 'autocomplete')
+    step = lambda fn: fn()
     def before():
         b = step(token_states).get('before') or {}
         return (b.get('field') is True and b.get('type') == 'password' and b.get('value') == '' and 'whgazetteer.org' in (b.get('placeholder') or '')
@@ -6062,6 +6140,12 @@ def chora_adopt_checks(pw, url, tmp):
         return (t.get('state') == 'Token kept for this tab only' and t.get('remember') is True and t.get('forget') is True and t.get('placeholder') == '••••••••'
                 and t.get('session') == ADOPT_TOKEN and t.get('local') is None and t.get('inPage') is False and t.get('focus') == 'adopt-q'), {k: v for k, v in t.items() if k != 'panel'} or tk
     attempt('Chora adopt, Enter in the token field: kept for this tab only (said beside it, not in localStorage), Remember still offered, the field masked, and the focus on to the name', for_tab)
+    def autofilled():
+        f, t = step(token_states).get('filled') or {}, tk.get('tab') or {}
+        return (tk.get('filled value') == '' and f.get('session') is None and f.get('state') == '' and f.get('value') == ''
+                and tk.get('form') is False and tk.get('autocomplete') == 'new-password' and t.get('session') == ADOPT_TOKEN), \
+            {'filled value': tk.get('filled value'), 'filled': f.get('session'), 'form': tk.get('form'), 'autocomplete': tk.get('autocomplete'), 'typed (the control)': t.get('session') == ADOPT_TOKEN, 'error': tk.get('error')}
+    attempt('Chora adopt: the token field is in no form and asks for a new password, and a value the browser fills in is emptied and never given (the control: the same typed is given)', autofilled)
 
     # A legacy cluster link is named (Novocastria, with a record link, has no such line: the control); a place whose @id is the record's adopts the location only.
     def cluster_and_same():

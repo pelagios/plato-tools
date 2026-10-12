@@ -21,7 +21,7 @@ import * as A from '../engine/chora/adopt.js';
 import { ROLES } from '../engine/chora/draw.js';
 import { CHORA_ADOPT_PAGE as W, CHORA_ADOPT_TEXT, lookupPage as LW } from '../engine/words.js';
 import * as permissions from '../lib/permissions.js';
-import { tokenFieldHtml, giveToken, rememberToken, forgetToken } from '../lib/token-field.js';
+import { tokenFieldHtml, giveToken, rememberToken, forgetToken, noteInput } from '../lib/token-field.js';
 
 const SUBJ = gazetteerPermission(WHG_ENDPOINT);   // 'whg'
 const ROLE_WORDS = { RepresentativePoint: 'a point standing for it', Extent: 'the whole place', FeaturePoint: 'a feature of it', LabelAnchor: 'where its label goes', Itinerary: 'a route' };
@@ -125,7 +125,8 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
     // What is half typed survives the panel being drawn again (a change of permission or token): the basis, and a token not yet given.
     const basisTyped = root.querySelector('#adopt-basis')?.value;
     if (basisTyped !== undefined && s.preview) s.preview.basis = basisTyped;
-    const tokenTyped = root.querySelector('#adopt-token')?.value ?? '';
+    // Only what was typed (token-field.js noteInput) is kept across the drawing, with its mark.
+    const tokenTyped = root.querySelector('#adopt-token')?.dataset.typed === 'yes' ? root.querySelector('#adopt-token').value : '';
     const was = root.querySelector('#adopt-permission');
     if (was) permissions.unneed(was);   // the line is drawn afresh below; the module keeps no element gone from the page
     if (typed !== undefined) s.query = typed;
@@ -133,7 +134,7 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
     root.innerHTML = `<h2 id="adopt-h">${esc(W.heading)}</h2>
       <p class="muted">${esc(s.view.label)} <span class="place-id">${esc(s.view.id)}</span></p>
       <p id="adopt-permission"></p>
-      <form id="adopt-token-form" class="adopt-token">${tokenFieldHtml(token, 'adopt-token', esc)}</form>
+      <div id="adopt-token-box" class="adopt-token">${tokenFieldHtml(token, 'adopt-token', esc)}</div>
       <form id="adopt-form"><label for="adopt-q">${esc(W.queryLabel)}</label>
         <input id="adopt-q" type="search" autocomplete="off" value="${esc(s.query)}">
         <button type="submit" id="adopt-send" class="primary"${ok ? '' : ' hidden'}${s.phase === 'sending' ? ' disabled' : ''}>${esc(W.send)}</button></form>
@@ -147,7 +148,7 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
     const line = root.querySelector('#adopt-permission');
     if (ok) { permissions.unneed(line); line.hidden = true; } else permissionLine(line);
     const tf = root.querySelector('#adopt-token');
-    if (tf && tokenTyped) tf.value = tokenTyped;
+    if (tf && tokenTyped) { tf.value = tokenTyped; tf.dataset.typed = 'yes'; }
     publish();
   }
 
@@ -326,13 +327,16 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
   root.addEventListener('submit', (e) => {
     e.preventDefault();
     if (e.target.id === 'adopt-form') send();
-    // Enter in the token field: given for the tab (as on the main page), and the focus goes on to the name.
-    if (e.target.id === 'adopt-token-form') {
-      const f = root.querySelector('#adopt-token');
-      giveToken(token, f);
-      if (s?.problem?.kind === 'token' || s?.problem?.kind === 'auth') s.problem = null;
-      render(); root.querySelector('#adopt-q')?.focus();
-    }
+  });
+  // The token field is in no <form> (a form submitted with a password in it invites the browser to save
+  // it): Enter in it gives the token for the tab (as on the main page), and the focus goes on to the name.
+  root.addEventListener('input', (e) => { if (e.target.id === 'adopt-token') noteInput(e); });
+  root.addEventListener('keydown', (e) => {
+    if (e.target.id !== 'adopt-token' || e.key !== 'Enter' || e.isComposing) return;
+    e.preventDefault();
+    giveToken(token, e.target);
+    if (s?.problem?.kind === 'token' || s?.problem?.kind === 'auth') s.problem = null;
+    render(); root.querySelector('#adopt-q')?.focus();
   });
   root.addEventListener('click', (e) => {
     const b = e.target.closest('button');

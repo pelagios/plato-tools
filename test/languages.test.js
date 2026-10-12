@@ -26,6 +26,14 @@ test('the historical languages relevant to gazetteers are all listed, and the ma
     'en', 'fr', 'de', 'es', 'it', 'pt', 'ru', 'zh', 'ja', 'ar', 'hi', 'tr', 'fa', 'el', 'he', 'nl', 'cy', 'ga'];
   const have = new Set(LANGUAGES.map((l) => l.code));
   assert.deepEqual(want.filter((c) => !have.has(c)), []);
+  // Added after review: Old Prussian, Old Cornish, Old Aramaic, Hieroglyphic Luwian, Ancient Macedonian.
+  assert.deepEqual(['prg', 'oco', 'oar', 'hlu', 'xmk'].filter((c) => !have.has(c)), []);
+});
+
+test('the historical languages are marked so, those with two-letter codes too, and modern ones are not', () => {
+  const by = Object.fromEntries(LANGUAGES.map((l) => [l.code, l]));
+  for (const c of ['sa', 'pi', 'cu', 'ae', 'grc', 'ang', 'prg', 'oco', 'oar', 'hlu', 'xmk']) assert.equal(by[c].historical, true, c);
+  for (const c of ['en', 'fr', 'el', 'he', 'cy']) assert.equal(by[c].historical, false, c);   // the control: a flag that is not always true
 });
 
 test('by code: "ang" finds Old English first, and "an" finds ang (after an itself)', () => {
