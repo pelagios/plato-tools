@@ -4088,12 +4088,12 @@ def recipes_checks(pw, url, tmp):
                 for _ in range(12):
                     if name in page.inner_text('#review-place'): break
                     page.click('#review-next')
-                flagged[name] = {'ref': page.evaluate("() => { const p = document.querySelector('#review-place .ref-check'); return p ? { state: p.dataset.ref, text: p.textContent } : null; }"),
+                flagged[name] = {'ref': page.evaluate("() => { const p = document.querySelector('#review-place .ref-check'); const b = p?.getBoundingClientRect(), box = document.getElementById('review-place').getBoundingClientRect(); return p ? { state: p.dataset.ref, text: p.textContent, inFlow: getComputedStyle(p).position === 'static' && b.height > 0 && b.left >= box.left && b.right <= box.right + 1 } : null; }"),
                                  'decided': page.evaluate('(iri) => (window.__plato.work?.candidates || []).filter((c) => c.candidate_source === iri && c.decision).length', name)}
                 shot('2b-flagged')
             page.click('#methodos-done'); step_is('review', 'done', 15)
             r['reviewed'] = True
-            flag_ok = all(f['ref'] and f['ref']['state'] == 'disagrees' and 'more than 25 km' in f['ref']['text'] and 'place:pl:' in f['ref']['text'] and not f['decided'] for f in flagged.values()) \
+            flag_ok = all(f['ref'] and f['ref']['state'] == 'disagrees' and f['ref']['inFlow'] is True and 'more than 25 km' in f['ref']['text'] and 'place:pl:' in f['ref']['text'] and not f['decided'] for f in flagged.values()) \
                 and len(flagged) == len(expect.get('flagged') or []) and (not flagged or 'far from WHG\'s best candidate, and is left to you' in said)
             return (sent == expect['sent'] and sends == f"Send {n_places} queries to WHG" and batches == [n_places] and track()['steps'].get('apply') == 'current'
                     and every['choice'] != 'nolink' and only['choice'] == 'nolink' and only['send off'] is True and flag_ok), \

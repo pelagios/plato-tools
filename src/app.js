@@ -1545,7 +1545,7 @@ function guardHtml(c) {
 function refCheckHtml(place) {
   const r = place.ref;
   if (!r || typeof r !== 'object') return '';
-  return `<p class="ref-check${r.state === 'disagrees' ? ' badge namesakes' : ''}" data-ref="${escapeHtml(String(r.state))}">${escapeHtml(LW.refCheck(r))}</p>`;
+  return `<p class="ref-check" data-ref="${escapeHtml(String(r.state))}">${escapeHtml(LW.refCheck(r))}</p>`;
 }
 /** The place's row state: reconcile (none), keep without reconciling (filter), leave out of the dataset (exclude). */
 function rowStateHtml(place) {

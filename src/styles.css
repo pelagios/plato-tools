@@ -620,6 +620,9 @@ code.code-chip { font-family: var(--font-mono); font-size: .85em; padding: 0 .3e
 .track-about { margin: .6rem 0 0; color: var(--muted); font-size: .9rem; }
 .track-about > summary { cursor: pointer; color: var(--accent); }
 .track-about .track-note { margin-top: .3rem; font-size: inherit; }
+/* Krisis: the check of a place's own gazetteer address against WHG, on its review screen (src/app.js refCheckHtml); flagged when they disagree. */
+.ref-check { margin: .4rem 0; font-size: .95rem; color: var(--muted); }
+.ref-check[data-ref="disagrees"] { color: var(--warn); border-left: 3px solid var(--warn); padding-left: .6rem; }
 /* What a workflow cannot carry from its files (a recipe's `cannot`): a short list, in the interview's plan and folded in the tracker. */
 .track-cannot { padding-left: 1.2rem; margin: .3rem 0 0; color: var(--muted); font-size: .95rem; }
 .track-cannot li + li { margin-top: .25rem; }
