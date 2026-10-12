@@ -535,7 +535,26 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; tex
 .lookup input[type=url], .lookup input[type=text], .lookup input[type=password], .lookup input[type=number], .find-form input { font: inherit; padding: .3rem .4rem; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); max-width: 100%; }
 .lookup input[type=number] { width: 7rem; }
 .lookup select { max-width: 100%; }
-.lookup-other[hidden] { display: none; }
+.lookup-other[hidden], .lookup-token[hidden] { display: none; }
+/* The token: the field, its buttons and where the token is kept, on one line where they fit. */
+.lookup-token-row { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .5rem; }
+.lookup-token-row input { flex: 0 1 18rem; min-width: 0; }
+.lookup-token-row button[hidden] { display: none; }
+.token-state { color: var(--ok); font-size: .95rem; }
+.token-state:empty { display: none; }
+#whg-token-help { margin-top: .2rem; }
+/* A language code, wherever the panel names one, and in the typeahead's suggestions: a chip, never plain text. */
+code.code-chip { font-family: var(--font-mono); font-size: .85em; padding: 0 .3em; border: 1px solid var(--line); border-radius: 4px;
+  background: color-mix(in srgb, var(--line) 45%, transparent); color: var(--fg); white-space: nowrap; }
+/* The language field's typeahead (src/krisis/lang-combobox.js), a list under the field. */
+.lang-box { position: relative; display: inline-block; max-width: 100%; }
+.lang-options { position: absolute; z-index: 20; left: 0; top: calc(100% + 2px); min-width: 18rem; max-width: min(28rem, 90vw); max-height: 16rem; overflow: auto;
+  margin: 0; padding: .2rem 0; list-style: none; background: var(--card); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 4px 14px rgb(0 0 0 / .15); }
+.lang-options[hidden] { display: none; }
+.lang-options li { padding: .25rem .6rem; cursor: pointer; }
+.lang-options li:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.lang-options li[aria-selected="true"] { background: var(--accent); color: var(--accent-fg); }
+.lang-options li[aria-selected="true"] code.code-chip { color: var(--accent-fg); border-color: currentColor; background: transparent; }
 #lookup-preview p { margin: .5rem 0 .25rem; }
 .lookup-queries { margin: 0; padding-left: 2rem; max-height: 14rem; overflow: auto; font-size: .85rem; }
 .lookup-queries code { font-family: var(--font-mono); overflow-wrap: anywhere; }

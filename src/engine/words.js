@@ -878,9 +878,10 @@ export const lookupPage = {
   placesNotRead: 'The places of your dataset could not be read, so there is nothing to look up.',
   busy: 'Wait for the work in hand to finish, then look up.',
   needToken: 'Give your WHG token first: WHG answers only queries that carry one.',
-  tokenGiven: 'A token is given',
-  tokenNone: 'No token given yet',
-  forgotten: 'The token is forgotten. If it may have been seen anywhere else, regenerate it in WHG: that is the only way to revoke it.',
+  /** Beside the token field once a token is given (the field is then empty, its placeholder masked): where it is kept. */
+  tokenRemembered: 'Token remembered in this browser',
+  tokenForTab: 'Token kept for this tab only',
+  tokenMask: '••••••••',
   /** The one line in place of Send (and of Find on the review screen) while the service's permission is set to Never, and its button, which opens Permissions there. */
   never: (name) => `Not allowed: ${name} is set to Never in Permissions.`,
   openPermissions: 'Permissions…',

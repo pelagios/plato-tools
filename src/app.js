@@ -29,6 +29,7 @@ import { RELOAD_LOSES } from './lib/permission-words.js';
 // the token from its one keeper (permissions.token).
 import { LOOKUP_WORDS, lookupPage as LW } from './engine/words.js';
 import { createLookup, WHG_ENDPOINT, isWhg, whgLang } from './engine/gazetteer/index.js';
+import { languageCombobox } from './krisis/lang-combobox.js';
 import { runLookup, planLookup, gazetteerPermission, permittedFetch, serviceOf, iriFromTemplate, iriVia, manifestSettings, newWork, defaultChoice, licenceOf, PLACE_CHOICES, WHG_REQUESTS_A_DAY } from './engine/krisis/lookup.js';
 import { candidateSource } from './engine/krisis/identity.js';
 // Krisis: region review (Methodos #28, stages 3 and 4), run on this thread as the lookup is, through the same shared WHG lookup.
@@ -1592,7 +1593,27 @@ function needsLine(el, svc) {
 }
 /** The shared lookup takes the keeper's token, or none: at start (a token kept from before) and on every change. */
 const passToken = () => { const t = token.get(); if (t) whgLookup().setToken(t); else whgLookup().clearToken(); };
-const showTokenState = () => { $('whg-token-state').textContent = token.get() ? LW.tokenGiven : LW.tokenNone; };
+/**
+ * The token's part of the panel, drawn from its keeper, which says whether there is a token and where it
+ * is kept, never what it is: the field is always empty once it is given (the token is never put back
+ * into the page), with a masked placeholder; "Remember my token" while it is not remembered, "Forget the
+ * token" only while there is one, and beside them where it is kept.
+ */
+function showTokenState() {
+  const has = token.get() !== null, kept = has && token.remembered();
+  $('whg-token').placeholder = has ? LW.tokenMask : $('whg-token').dataset.placeholder;
+  $('whg-remember').hidden = kept;
+  $('whg-forget').hidden = !has;
+  $('whg-token-state').textContent = has ? (kept ? LW.tokenRemembered : LW.tokenForTab) : '';
+}
+/** WHG is the service chosen (its button, or another service's address that is WHG's). */
+const whgChosen = () => document.querySelector('input[name="lookup-service"]:checked')?.value !== 'other' || isWhg($('lookup-endpoint').value.trim());
+// The region review looks up in WHG whatever service is chosen: when it asks for the token, the field is shown until the service is chosen again.
+let tokenAsked = false;
+/** The token field and its buttons are shown only while WHG is the service (or the region review asks for the token). */
+function showTokenBox() { $('lookup-token').hidden = !(whgChosen() || tokenAsked); }
+/** Open the panel at the token field, shown, with the focus in it. */
+function focusToken() { $('lookup').open = true; tokenAsked = !whgChosen(); showTokenBox(); $('whg-token').focus(); }
 /** The review on screen, which a lookup adds to; null when none is (a lookup then begins one). */
 const reviewWork = () => (work && !$('review').hidden ? work : null);
 const hasLookups = () => !!work && ((work.lookups || []).length > 0 || work.others === null);
@@ -1655,10 +1676,21 @@ function langProblem() {
   const v = $('lookup-lang').value.trim();
   return v && !whgLang(v) ? LW.badLang(v) : null;
 }
-/** Say beside the field, as it is typed, whether the dataset's language can be sent. */
+/** Put text into el, the example codes it names (en, la, ang) shown as code, as in the field's label. */
+function withCodes(el, text) {
+  el.replaceChildren(...String(text).split(/\b(en|la|ang)\b/).map((part, i) => {
+    if (i % 2 === 0) return part;
+    const c = document.createElement('code'); c.className = 'code-chip'; c.textContent = part; return c;
+  }));
+}
+/**
+ * Say beside the field, as it is typed, whether the dataset's language can be sent; not while the
+ * typeahead offers languages for what is typed (a name being typed to find its code is not yet wrong),
+ * but once it offers none, and when the field is left.
+ */
 function showLangProblem() {
-  const bad = langProblem(), el = $('lookup-lang-problem');
-  el.textContent = bad || ''; el.hidden = !bad;
+  const bad = langProblem(), el = $('lookup-lang-problem'), finding = $('lookup-lang').getAttribute('aria-expanded') === 'true';
+  withCodes(el, bad && !finding ? bad : ''); el.hidden = !bad || finding;
   $('lookup-lang').setAttribute('aria-invalid', bad ? 'true' : 'false');
 }
 /**
@@ -1688,7 +1720,7 @@ async function refreshPreview() {
   // Send is offered once the permission allows it; until then, the module's one line in its place.
   needsLine($('lookup-permission'), svc);
   send.hidden = !mayLookUp(svc);
-  if (svc.problem) { box.innerHTML = `<p class="warn">${escapeHtml(svc.problem)}</p>`; return; }
+  if (svc.problem) { const w = document.createElement('p'); w.className = 'warn'; withCodes(w, svc.problem); box.replaceChildren(w); return; }
   if (!readable(input) && !reviewWork()) { box.innerHTML = `<p>${escapeHtml(LW.noDataset)}</p>`; return; }
   const g = await gatherPlaces();
   if (run !== previewRun) return;
@@ -1699,7 +1731,9 @@ async function refreshPreview() {
   const lines = LOOKUP_WORDS.preview(p);
   if (svc.whg) lines.splice(1, 0, LW.share(p.requests, WHG_REQUESTS_A_DAY));
   if (!places) lines.push(LOOKUP_WORDS.linksUnknown);
-  box.innerHTML = `<p>${lines.map(escapeHtml).join(' ')}</p>`
+  // The dataset's language, where the preview names it, is shown as code.
+  const said = lines.map(escapeHtml).join(' '), at = p.lang ? ` sent as ${escapeHtml(p.lang)}, ` : null;
+  box.innerHTML = `<p>${at ? said.replace(at, ` sent as <code class="code-chip">${escapeHtml(p.lang)}</code>, `) : said}</p>`
     + (p.first.length ? `<ol class="lookup-queries">${p.first.map((q) => `<li><code>${escapeHtml(JSON.stringify(q))}</code></li>`).join('')}</ol>` : `<p>${escapeHtml(LOOKUP_WORDS.noPlaces)}</p>`);
   send.textContent = LW.send(p.queries, shortName(svc.service));
   send.disabled = !p.queries || !!looking;
@@ -1724,7 +1758,7 @@ async function lookUp({ only = null, query = null, allNames, which } = {}) {
     $('lookup-permission').querySelector('button')?.focus();
     return;
   }
-  if (svc.whg && !token.get()) { $('lookup').open = true; lookupSay(LW.needToken, true); $('whg-token').focus(); return; }
+  if (svc.whg && !token.get()) { lookupSay(LW.needToken, true); focusToken(); return; }
   const g = await gatherPlaces();
   const places = g?.places ?? null;
   const existing = reviewWork();
@@ -1790,7 +1824,7 @@ async function lookUp({ only = null, query = null, allNames, which } = {}) {
   fillChoices();
   if (stopped && stopped.kind !== 'fault') offerResume(svc);
   await refreshPreview();
-  if (stopped?.kind === 'auth') { $('lookup').open = true; $('whg-token').focus(); }   // a field in a closed panel cannot take the focus
+  if (stopped?.kind === 'auth') focusToken();   // a field in a closed panel cannot take the focus
   // After one place's lookup, the focus goes to the first new candidate, if any.
   if (only && order[cursor] && only.includes(order[cursor])) {
     const fresh = candidatesOf(work, order[cursor]).findIndex((c) => !before.has(c.id));
@@ -1906,26 +1940,44 @@ $('review-place').addEventListener('submit', (e) => {
 $('lookup').addEventListener('toggle', () => { if ($('lookup').open) { fillChoices(); refreshPreview(); } });
 $('lookup').addEventListener('change', (e) => {
   if (e.target.id === 'whg-token') return commitToken();
-  if (e.target.name === 'lookup-service') document.querySelector('.lookup-other').hidden = e.target.value !== 'other';
+  if (e.target.name === 'lookup-service') { document.querySelector('.lookup-other').hidden = e.target.value !== 'other'; tokenAsked = false; showTokenBox(); }
   refreshPreview();
 });
 $('lookup').addEventListener('input', (e) => {
   if (e.target.id === 'lookup-lang') showLangProblem();
+  if (e.target.id === 'lookup-endpoint') showTokenBox();
   if (e.target.type === 'number' || e.target.type === 'url' || e.target.id === 'lookup-iri' || e.target.id === 'lookup-lang') refreshPreview();
 });
-// Forget: the shared lookup sends no token from its next request, and the keeper forgets it.
-$('whg-forget').onclick = () => { $('whg-token').value = ''; whgLookup().clearToken(); token.forget(); lookupSay(LW.forgotten); };
+// Remember my token: the token typed (or the one kept for the tab) is kept in this browser, as the
+// Permissions panel's "Remember my token in this browser" does; the field is emptied, and keeps the focus.
+$('whg-remember').onclick = () => {
+  const f = $('whg-token');
+  if (f.value.trim() || token.get()) { token.remember(true); commitToken(); }
+  f.focus();
+};
+// Forget: the shared lookup sends no token from its next request, and the keeper forgets it and the
+// choice to remember it, so that the panel is as before a token was given. No message: the field's empty
+// state says it, and the advice on revoking a token is in the panel's help, not a message on Forget.
+$('whg-forget').onclick = () => {
+  const f = $('whg-token');
+  f.value = ''; whgLookup().clearToken(); token.remember(false); token.forget();
+  f.focus();
+};
 // A token given or forgotten (here, in the Permissions panel, or in another tab) goes to the shared lookup.
 token.onChange(() => { showTokenState(); passToken(); });
 // A permission allowed or withdrawn (in the panel, or another tab): Send, and the review screen's buttons, follow.
 permissions.onChange(() => {
+  showTokenState();   // remembering the token (here or in the Permissions panel) is a change of permissions, not of the token
   if (looking) return;
   refreshPreview();
   if (afterStop) { const svc = lookupService(); if (mayLookUp(svc)) offerResume(svc); else $('lookup-resume').hidden = true; }
   if (work && !$('review').hidden && order.length) render(false);
 });
+$('whg-token').dataset.placeholder = $('whg-token').placeholder;
 showTokenState();
+showTokenBox();
 passToken();
+languageCombobox($('lookup-lang'), { onClose: showLangProblem });
 $('lookup-send').onclick = () => lookUp();
 $('lookup-variants-text').textContent = VW.option;
 $('lookup-stop').onclick = () => looking?.abort();
@@ -2112,7 +2164,7 @@ async function regionRun(kind, { level, relax, only, unconstrained = false } = {
     if (whole) { methodos.began({ op: 'lookup', files }); methodos.ended({ op: 'lookup', waiting: 'the gazetteer to be allowed in the Permissions panel; then look the places up again.' }); }
     drawRegions(); $('regions-permission').querySelector('button')?.focus(); return;
   }
-  if (!token.get()) { $('lookup').open = true; lookupSay(LW.needToken, true); $('whg-token').focus(); return; }
+  if (!token.get()) { lookupSay(LW.needToken, true); focusToken(); return; }
   const g = kind === 'places' ? (await gatherPlaces(), await gatherPlaces()) : null;   // twice: as startRegions
   const w = work, service = LW.whg;
   looking = new AbortController();
@@ -2144,7 +2196,7 @@ async function regionRun(kind, { level, relax, only, unconstrained = false } = {
   }
   lookupState({ running: false, stopped: stopped?.kind || null, summary: said.join(' '), counts: result?.record?.counts || null, looked: result?.looked || [] });
   if (work === w) { reorder(); render(false); }
-  if (stopped?.kind === 'auth') { $('lookup').open = true; $('whg-token').focus(); }
+  if (stopped?.kind === 'auth') focusToken();
   else if (only?.length === 1 && kind !== 'places') focusRegion(only[0]);
 }
 

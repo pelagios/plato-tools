@@ -2181,18 +2181,32 @@ the places within it; the places themselves never send it.
   Try its other names) is offered only while `permissions.allowed('gazetteer', subj)`; otherwise the
   module's one line (`permissions.needs(el, …)`, whose button opens the panel at that permission) is
   shown in its place, nothing is sent, and the preview of what would be sent is still shown (it is
-  information, not consent). There is no inline privacy note: what a gazetteer learns, and where the
-  token is kept, are said in the panel. A request the module refuses (`PermissionError`) stops the
+  information, not consent). There is no inline privacy note: what a gazetteer learns, and what keeping
+  the token means, are said in the panel; beside the token field is only where it is kept. A request the module refuses (`PermissionError`) stops the
   lookup: `onRefused` aborts it with the error, and runLookup records `stopped: { kind: 'permission',
   refused: <the error's kind> }`, worded by `LOOKUP_WORDS.refused` (address, never, undecided, reload,
   unprotected, moved, network); `network` is left to the gazetteer module's retries, as any failure to
   reach the service is, and stops as its `network`. The token has one keeper, `permissions.token`
   (`get`, `set`, `forget`, `onChange`, `remember(on)`, `remembered()`): kept for the tab unless the user
-  chooses, in the Permissions panel, to remember it in this browser, where the panel states its scope.
-  The page keeps no
-  copy: the field is emptied once the token is given, and the keeper's token is handed to the shared
-  WHG lookup at start and on every change (`setToken`, through the keeper's `onChange`); Forget calls
-  the lookup's `clearToken()` and the keeper's `forget()`, and no `createLookup` call carries a token. No
+  chooses to remember it in this browser (the Permissions panel's "Remember my token in this browser",
+  or the lookup panel's "Remember my token"), where the Permissions panel states its scope. The page
+  keeps no copy, and never puts the token back into the page: the field is emptied once the token is
+  given (Enter or leaving the field gives it for the tab, "Remember my token" for this browser), and
+  then shows a masked placeholder (`LW.tokenMask`), "Token kept for this tab only" or "Token
+  remembered in this browser" beside it (`#whg-token-state`, a status), and "Forget the token", which is
+  shown only while there is a token, as "Remember my token" only while it is not remembered
+  (`showTokenState()`, drawn from the keeper's `get()` and `remembered()`, on its `onChange` and on the
+  permissions' `onChange`, which is where `remember()` is heard). Forget calls the lookup's
+  `clearToken()` and the keeper's `remember(false)` and `forget()`, and puts the focus back in the
+  field, with no message: the empty field says it, and that forgetting does not revoke a token (only
+  regenerating it in WHG does) is the field's static help (`#whg-token-help`), as in the Permissions
+  panel, whose Forget does the same and is shown only while there is a token. The token field and its
+  buttons (`#lookup-token`) are shown only while WHG is the service chosen (its button, or another
+  service's address that is WHG's: `whgChosen()`), or while the region review, which looks up in WHG
+  whatever is chosen, has asked for the token (`focusToken()`, until the service is chosen again). The
+  keeper's token is handed to the shared
+  WHG lookup at start and on every change (`setToken`, through the keeper's `onChange`), and no
+  `createLookup` call carries a token. No
   token is sent to another service. What the service says (a stop's message, a query's `error`) is
   cleaned of the token by the module, and Krisis keeps it as it comes; only a fault's stack, which is
   not the module's, is cleaned on the page before the console. The panel previews places, queries, requests, the share of WHG's
@@ -2215,6 +2229,25 @@ the places within it; the places themselves never send it.
   will cite. The e2e (`krisis_lookup_case`) answers for WHG with `page.route`, never the real service,
   and looks for the token in window.__plato, the page, the console, request addresses and bodies, and
   the saved work file, beside the control that it is in every request's Authorization header.
+- **The dataset's language on the page** (`#lookup-lang`) has a typeahead (`src/krisis/lang-combobox.js`,
+  WAI-ARIA's list autocomplete: a text field with `role="combobox"` and a listbox, Up and Down, Enter or a
+  click to choose, Escape to close). A native `<datalist>` was not used: its options cannot show a code as
+  code, and each browser matches them its own way. The languages are a data module, `src/lib/languages.js`
+  (`LANGUAGES`: every ISO 639-1 code that names one language, a few common 639-3 ones, and the historical
+  languages a gazetteer's names are often in, `grc`, `ang`, `enm`, `fro`, `sga`, `ota`, `akk`, `egy`,
+  `lzh`, `och` and others, each by the code `whgLang()` sends, which `test/languages.test.js` checks).
+  `matchLanguages(text)` finds them by code (exactly, then beginning with it: "an" finds `an` and `ang`)
+  and by name (beginning with it, then every typed word beginning a word of the name: "old eng" finds
+  `ang`), never a word's middle, so that "und" is offered nothing. The list suggests; the field still
+  takes any tag `whgLang()` reads, and everything it fed before (`lookupLang()`, `langProblem()`, the
+  preview, `--lang` on the command line, a name's own tag) is unchanged. While the typeahead offers
+  languages for what is typed, the line saying it is not a code is held back (a name being typed is not
+  yet wrong); it is shown once nothing is offered, and when the list closes. Wherever the panel names a
+  language code (the field's help, "en, la or ang"; the line refusing one; the preview's "sent as `en`";
+  the options, "`ang` · Old English"), it is a `<code class="code-chip">`, styled from the page's tokens.
+  The e2e (`lookup_panel_case`) checks the token field shown for WHG only, Remember and Forget in each
+  state, the token nowhere in the page, Forget with no message, the typeahead by "ang" and by "Old Eng",
+  and the chips.
 
 ## Workflows (Methodos)
 
@@ -2412,7 +2445,8 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   `token`, the World Historical Gazetteer token's one keeper (`permissions.token`: `get`, `set`, `forget`,
   `onChange`, the API Krisis's own keeper had before it moved here, and `remember(on)`, `remembered()`:
   kept for the tab unless the user chooses to remember it; the panel says which, and that only
-  regenerating the token in WHG revokes it); there is no other.
+  regenerating the token in WHG revokes it, and offers Forget only while there is a token, forgetting
+  the choice to remember it too, as the lookup panel's Forget does); there is no other.
 - **The Content Security Policy.** The first script in each page's `<head>` is the pure core, its
   `export`s removed, and `src/lib/csp-head.js`, put there inline by `scripts/vite-csp.mjs` at the
   page's `<!-- plato:csp -->` (a page without the mark fails the build). It writes, from the grants,

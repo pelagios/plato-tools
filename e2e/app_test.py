@@ -1114,7 +1114,7 @@ def krisis_lookup_case(page, tmp, url):
           na.get('phase') == 'shown' and na.get('refused during') == [] and na.get('refused control', 0) >= 1, {k: na.get(k) for k in ('phase', 'refused during', 'refused control', 'error')})
     check("lookup: no privacy paragraph or consent of its own in the lookup panel (the panel's own text is there, the control)",
           na.get('privacy') == 0 and 'Which places' in na.get('panel text', '') and 'Your WHG token' in na.get('panel text', '')
-          and 'optional and goes online' not in na.get('panel text', '') and 'this tab' not in na.get('panel text', '') and 'No token is sent' not in na.get('panel text', ''), na.get('panel text', na))
+          and 'optional and goes online' not in na.get('panel text', '') and 'forgotten when the tab is closed' not in na.get('panel text', '') and 'No token is sent' not in na.get('panel text', ''), na.get('panel text', na))
     check("lookup, not allowed: the line's button opens the Permissions panel at the World Historical Gazetteer's entry",
           (na.get('opened') or {}).get('open') is True and (na.get('opened') or {}).get('focusKey') == 'gazetteer:whg', na.get('opened') or na)
     pt = na.get('permissions panel', '')
@@ -1151,7 +1151,7 @@ def krisis_lookup_case(page, tmp, url):
     o = step(open_panel, {}) if al.get('canary') == 'enforced' else {}
     check('lookup, allowed: Send is offered and the line is gone', o.get('phase') == 'open' and o.get('line hidden') is True and o.get('send shown') is True, o)
     check('lookup: the token is kept for the tab (sessionStorage), not in the field and not in localStorage unless remembered',
-          o.get('session') == LOOKUP_TOKEN and o.get('local') is None and o.get('field') == '' and 'A token is given' in o.get('tokenState', ''), {k: v for k, v in o.items() if k in ('field', 'local', 'tokenState', 'error')})
+          o.get('session') == LOOKUP_TOKEN and o.get('local') is None and o.get('field') == '' and o.get('tokenState', '') == 'Token kept for this tab only', {k: v for k, v in o.items() if k in ('field', 'local', 'tokenState', 'error')})
     first = [json.loads(x) for x in o.get('first', [])]
     check('lookup: the preview gives places, queries, requests and the share of the allowance, filters off, and the first 20 queries exactly',
           'Would look up 30 places in World Historical Gazetteer: 30 queries in 2 requests' in o.get('preview', '') and "under 1% of WHG's allowance of 5,000 requests a day" in o.get('preview', '')
@@ -1432,6 +1432,139 @@ def krisis_lookup_case(page, tmp, url):
     check('lookup: the panel goes with Match when step 2 is narrowed to one tool: hidden for Check (as Match is), shown for Match and for "Show every action"',
           ft.get('for check (lookup, match, check)') == [False, False, True] and ft.get('for match') == [True, True, False] and ft.get('every action') == [True, True, True], ft)
     page.unroute(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'))
+
+# Krisis: the lookup panel's token and language fields (Issue #33, Stephen's points 6 and 7). Nothing is sent:
+# no gazetteer is asked here (the token is given, remembered and forgotten; no Send).
+LOOKUP_PANEL = """() => { const $ = (id) => document.getElementById(id), shown = (el) => !!el && !el.hidden && el.offsetParent !== null && el.getClientRects().length > 0;
+  return { tokenBox: shown($('lookup-token')), field: shown($('whg-token')), endpoint: shown($('lookup-endpoint')),
+    remember: shown($('whg-remember')), forget: shown($('whg-forget')), forgetInDom: !!$('whg-forget'),
+    value: $('whg-token')?.value ?? null, type: $('whg-token')?.type ?? null, placeholder: $('whg-token')?.placeholder ?? null,
+    state: $('whg-token-state')?.textContent ?? null, progress: $('lookup-progress')?.textContent ?? null,
+    help: $('whg-token-help')?.textContent ?? null, panel: $('lookup')?.innerText ?? '',
+    focus: document.activeElement && document.activeElement.id,
+    session: sessionStorage.getItem('plato-tools.whg-token'), local: localStorage.getItem('plato-tools.whg-token') }; }"""
+PANEL_TOKEN = 'e2e-SECRET-panel-token-41d2'
+
+def lookup_panel_case(page, tmp, url):
+    """The lookup panel's token (shown only for WHG; Remember, then the masked field and Forget, never the token in
+    the page; Forget back to the empty state with no message) and its language field (a typeahead by code and by
+    name; the codes shown as code)."""
+    a = 'https://example.org/p/'
+    subjects = tmp / 'lookup-panel.json'
+    subjects.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': a, 'title': 'Places for the panel'},
+                                    'spatialEntities': [krisis_place(a + 'york', 'York', -1.0819, 53.9590)]}))
+    def step(fn):
+        try: return fn()
+        except Exception as e: return {'error': str(e).split('\n')[0][:200]}
+    def setup():
+        page.goto(NOTOOLS if PROVE else url)
+        page.evaluate("() => { sessionStorage.removeItem('plato-tools.whg-token'); localStorage.removeItem('plato-tools.whg-token'); localStorage.removeItem('plato-tools.whg-token.remember'); }")
+        page.goto(NOTOOLS if PROVE else url)
+        wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+        page.set_input_files('#picker', [str(subjects)])
+        s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), 60, 'detection')
+        if s.get('phase') != 'detected': return {'phase': s.get('phase')}
+        if not page.evaluate("() => document.getElementById('lookup').open"): page.click('#lookup > summary')
+        return {'phase': 'open'}
+    su = step(setup)
+    opened = su.get('phase') == 'open'
+
+    # Only with WHG: another service chosen hides the token (its own address field shown: the control that the
+    # panel is drawn); WHG chosen shows it.
+    def services():
+        page.check('input[name="lookup-service"][value="other"]')
+        other = page.evaluate(LOOKUP_PANEL)
+        page.check('input[name="lookup-service"][value="whg"]')
+        return {'other': other, 'whg': page.evaluate(LOOKUP_PANEL)}
+    sv = step(services) if opened else su
+    o, w = sv.get('other') or {}, sv.get('whg') or {}
+    check('lookup panel: the token field is hidden while another service is chosen (its address field shown), and shown while WHG is',
+          o.get('endpoint') is True and o.get('tokenBox') is False and o.get('field') is False
+          and w.get('tokenBox') is True and w.get('field') is True and w.get('endpoint') is False, sv)
+
+    # No token yet: an empty password field saying where the token comes from, Remember, and no Forget (which is
+    # in the page, hidden: the absence is of a button that exists).
+    check('lookup panel, no token yet: an empty password field with a placeholder saying where to get it, "Remember my token" shown, "Forget the token" not shown',
+          w.get('type') == 'password' and w.get('value') == '' and 'whgazetteer.org' in (w.get('placeholder') or '')
+          and w.get('remember') is True and w.get('forgetInDom') is True and w.get('forget') is False and w.get('state') == '', w)
+
+    # Given and remembered: the field empty, its placeholder masked, where it is kept said beside it, Forget shown,
+    # and the token nowhere in the page; the control: it IS kept (in this browser), so it was given.
+    def remember():
+        page.fill('#whg-token', PANEL_TOKEN)
+        typed = PANEL_TOKEN in page.evaluate("() => document.getElementById('whg-token').value")   # the control for "not in the DOM"
+        page.click('#whg-remember')
+        page.wait_for_function("() => !document.getElementById('whg-forget').hidden", timeout=T(10) * 1000)
+        out = page.evaluate(LOOKUP_PANEL)
+        out['typed'] = typed
+        out['in page'] = page.evaluate("""(t) => document.documentElement.outerHTML.includes(t) || [...document.querySelectorAll('input, textarea')].some((x) => x.value.includes(t))
+          || JSON.stringify(window.__plato || {}).includes(t)""", PANEL_TOKEN)
+        return out
+    rm = step(remember) if opened else su
+    check('lookup panel, token remembered: the field empty with a masked placeholder, "Token remembered in this browser" beside it, "Forget the token" shown and "Remember my token" not',
+          rm.get('value') == '' and rm.get('placeholder') == '••••••••' and rm.get('state') == 'Token remembered in this browser'
+          and rm.get('forget') is True and rm.get('remember') is False and rm.get('focus') == 'whg-token', {k: v for k, v in rm.items() if k not in ('panel', 'session', 'local')})
+    check('lookup panel: the token given is nowhere in the page (DOM, fields, window.__plato), and is kept in this browser (the control: it was given, and was in the field as typed)',
+          rm.get('typed') is True and rm.get('in page') is False and rm.get('local') == PANEL_TOKEN and rm.get('session') == PANEL_TOKEN,
+          {'typed': rm.get('typed'), 'in page': rm.get('in page'), 'kept': rm.get('local') == PANEL_TOKEN, 'error': rm.get('error')})
+
+    # Forget: back to the empty state, Remember again, the focus in the field, the token gone, and no message:
+    # the progress line says nothing of it (the control: the revoking advice is in the panel's static help).
+    def forget():
+        page.click('#whg-forget')
+        page.wait_for_function("() => document.getElementById('whg-forget').hidden", timeout=T(10) * 1000)
+        return page.evaluate(LOOKUP_PANEL)
+    fg = step(forget) if rm.get('forget') else rm
+    panel_words = fg.get('panel', '')
+    check('lookup panel, Forget: back to the empty field, its placeholder where to get the token, "Remember my token" again, no Forget, the focus in the field, the token gone',
+          fg.get('value') == '' and 'whgazetteer.org' in (fg.get('placeholder') or '') and fg.get('remember') is True and fg.get('forget') is False
+          and fg.get('state') == '' and fg.get('focus') == 'whg-token' and fg.get('session') is None and fg.get('local') is None, {k: v for k, v in fg.items() if k != 'panel'})
+    check('lookup panel, Forget: no message of it ("The token is forgotten…"), the advice on revoking it being in the static help (the control)',
+          'regenerating it' in (fg.get('help') or '') and (fg.get('progress') or '') == '' and 'is forgotten' not in panel_words
+          and 'that is the only way to revoke it' not in panel_words and 'Your WHG token' in panel_words, {'progress': fg.get('progress'), 'help': fg.get('help'), 'error': fg.get('error')})
+
+    # The language field's typeahead: "ang" and "Old Eng" each offer ang, shown as "ang · Old English", its code as
+    # code; a text that names no language offers nothing (beside the two that do); the keyboard chooses.
+    OPTIONS = """() => { const l = document.getElementById('lookup-lang-options'), f = document.getElementById('lookup-lang');
+      return { shown: !!l && !l.hidden && l.getClientRects().length > 0, expanded: f.getAttribute('aria-expanded'), role: f.getAttribute('role'),
+        options: l ? [...l.querySelectorAll('[role=option]')].map((o) => ({ code: o.dataset.code, text: o.textContent, chip: o.querySelector('code.code-chip')?.textContent ?? null })) : [],
+        value: f.value }; }"""
+    def typeahead():
+        out = {}
+        for q in ('ang', 'Old Eng', 'qqzz'):
+            page.fill('#lookup-lang', '')
+            page.type('#lookup-lang', q)
+            out[q] = page.evaluate(OPTIONS)
+        page.fill('#lookup-lang', '')
+        page.type('#lookup-lang', 'old eng')
+        page.keyboard.press('ArrowDown'); page.keyboard.press('Enter')
+        out['chosen'] = page.evaluate(OPTIONS)
+        page.wait_for_function("() => document.getElementById('lookup-lang-problem').hidden", timeout=T(10) * 1000)
+        out['problem hidden'] = True
+        page.fill('#lookup-lang', '')
+        return out
+    ta = step(typeahead) if opened else su
+    ang = lambda r: next((x for x in (r or {}).get('options', []) if x.get('code') == 'ang'), None)
+    check('lookup panel: the language field\'s typeahead finds ang by its code ("ang") and by its name ("Old Eng"), shown as "ang · Old English"',
+          (ta.get('ang') or {}).get('shown') is True and (ta.get('ang') or {}).get('expanded') == 'true' and (ta.get('ang') or {}).get('role') == 'combobox'
+          and (ang(ta.get('ang')) or {}).get('text') == 'ang · Old English' and (ta.get('Old Eng') or {}).get('shown') is True
+          and (ang(ta.get('Old Eng')) or {}).get('text') == 'ang · Old English', {k: ta.get(k) for k in ('ang', 'Old Eng', 'error')})
+    check('lookup panel: a text naming no language offers nothing (beside those that do), and Down then Enter puts the code chosen in the field',
+          (ta.get('qqzz') or {}).get('shown') is False and (ta.get('qqzz') or {}).get('options') == [] and bool(ang(ta.get('ang')))
+          and (ta.get('chosen') or {}).get('value') == 'ang' and (ta.get('chosen') or {}).get('shown') is False and ta.get('problem hidden') is True,
+          {k: ta.get(k) for k in ('qqzz', 'chosen', 'error')})
+
+    # The codes as code: the field's help names en, la and ang each in a chip (styled, not plain text), and the
+    # typeahead's options too; the control: the help's words around them are there as text.
+    CODES = """() => { const l = document.querySelector('label[for="lookup-lang"]'), cs = l ? [...l.querySelectorAll('code')] : [];
+      const st = cs[0] ? getComputedStyle(cs[0]) : null;
+      return { text: l ? l.textContent : '', codes: cs.map((c) => c.textContent), chips: cs.length > 0 && cs.every((c) => c.classList.contains('code-chip')),
+        mono: st ? /mono|consol|menlo|courier/i.test(st.fontFamily) : false, border: st ? parseFloat(st.borderTopWidth) > 0 && parseFloat(st.borderTopLeftRadius) > 0 : false }; }"""
+    cd = step(lambda: page.evaluate(CODES)) if opened else su
+    check('lookup panel: the language codes in the help ("en, la or ang") are <code> chips (monospace, bordered), as in the typeahead\'s options',
+          'a code such as en, la or ang' in (cd.get('text') or '') and cd.get('codes') == ['en', 'la', 'ang'] and cd.get('chips') is True
+          and cd.get('mono') is True and cd.get('border') is True and (ang(ta.get('ang')) or {}).get('chip') == 'ang', cd)
+
 
 def krisis_lookup_pattern(page, tmp, url):
     """Krisis, gazetteer lookup of a table with a Hermes column pattern (after krisis_lookup_case, which
@@ -2405,6 +2538,8 @@ def main():
             krisis_lookup_pattern(page, tmp, url)
             # Then the region review, on the same page, WHG allowed (a fake WHG again: never the real one).
             krisis_regions_case(page, tmp, url)
+            # The lookup panel's token and language fields (Issue #33, points 6 and 7); nothing is sent.
+            lookup_panel_case(page, tmp, url)
             ctx.close()
             front = pw.chromium.launch(headless=True)
             try: front_page_checks(front, url); card_chosen_checks(front, url, pw); theme_checks(front, url); methodos_page_checks(front, url); layout_checks(front, url)

@@ -169,19 +169,24 @@
           <input id="lookup-iri" type="text" placeholder="https://www.wikidata.org/wiki/{{id}}" size="40">
         </div>
       </fieldset>
-      <div class="lookup-token">
-        <label for="whg-token">Your WHG token, from your profile on whgazetteer.org</label>
-        <input id="whg-token" type="password" autocomplete="off" spellcheck="false" size="30">
-        <button id="whg-forget" type="button">Forget the token</button>
-        <small id="whg-token-state">No token given yet</small>
+      <!-- Shown only while WHG is the service (src/app.js, showTokenBox). The token is never put back into the field: once given, the field is empty with a masked placeholder. -->
+      <div id="lookup-token" class="lookup-token">
+        <label for="whg-token">Your WHG token</label>
+        <div class="lookup-token-row">
+          <input id="whg-token" type="password" autocomplete="off" spellcheck="false" size="30" placeholder="From your profile on whgazetteer.org" aria-describedby="whg-token-state whg-token-help">
+          <button id="whg-remember" type="button">Remember my token</button>
+          <button id="whg-forget" type="button" hidden>Forget the token</button>
+          <span id="whg-token-state" class="token-state" role="status"></span>
+        </div>
+        <small id="whg-token-help">Press Enter to use it in this tab only, or Remember my token to keep it in this browser. Forgetting a token does not revoke it: only regenerating it in your WHG profile does.</small>
       </div>
       <label for="lookup-places">Which places</label>
       <select id="lookup-places"></select>
       <label><input id="lookup-all-names" type="checkbox"> Also send each place's other names, one query each (the preview shows the cost)</label>
       <!-- Krisis × Methodos: query variants (opt-in); its words are words.js variantWords, put in by src/app.js. -->
       <label><input id="lookup-variants" type="checkbox"> <span id="lookup-variants-text"></span></label>
-      <label for="lookup-lang">The dataset's language, for names that give none of their own: a code such as en, la or ang (for the World Historical Gazetteer only; leave it empty to send none)</label>
-      <input id="lookup-lang" type="text" autocomplete="off" spellcheck="false" maxlength="35" size="8" aria-describedby="lookup-lang-problem">
+      <label for="lookup-lang">The dataset's language, for names that give none of their own: a code such as <code class="code-chip">en</code>, <code class="code-chip">la</code> or <code class="code-chip">ang</code>, or type a language's name to find its code (for the World Historical Gazetteer only; leave it empty to send none)</label>
+      <div class="lang-box"><input id="lookup-lang" type="text" autocomplete="off" spellcheck="false" maxlength="35" size="8" aria-describedby="lookup-lang-problem"></div>
       <p id="lookup-lang-problem" class="warn" role="alert" hidden></p>
       <fieldset class="lookup-filters">
         <legend>Filters, each off unless you turn it on</legend>

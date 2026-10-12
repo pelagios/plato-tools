@@ -73,7 +73,7 @@ function render(api) {
       <p>${esc(t ? PANEL.tokenHeld(api.token.remembered()) : PANEL.tokenNone)}</p>
       <label><input type="checkbox" id="perm-token-remember"${api.token.remembered() ? ' checked' : ''} aria-describedby="perm-token-note"> ${esc(PANEL.tokenRemember)}</label>
       <p class="muted" id="perm-token-note">${esc(PANEL.tokenRememberNote)}</p>
-      <p><button type="button" data-token-forget${t ? '' : ' disabled'}>${esc(PANEL.tokenForget)}</button></p>
+      ${t ? `<p><button type="button" data-token-forget>${esc(PANEL.tokenForget)}</button></p>` : ''}
       <p class="muted">${esc(PANEL.tokenRevoke)}</p>
     </section>
     <section aria-labelledby="perm-remembered-h">
@@ -116,7 +116,8 @@ function create(api) {
     else if (b.hasAttribute('data-reload-confirmed')) api.reload({ confirmed: true });
     else if (b.hasAttribute('data-reload-cancel')) { confirming = false; refreshPanel(api); dialog.querySelector('[data-reload]')?.focus(); }
     else if (b.hasAttribute('data-forget-all')) { api.forgetAll(); const s = dialog.querySelector('#perm-forgot'); if (s) s.textContent = PANEL.forgotAll; }
-    else if (b.hasAttribute('data-token-forget')) api.token.forget();
+    // As the lookup panel's Forget: the token and the choice to remember it, then the focus on that choice (the button is gone).
+    else if (b.hasAttribute('data-token-forget')) { api.token.remember(false); api.token.forget(); dialog.querySelector('#perm-token-remember')?.focus(); }
     else if (b.dataset.forget) api.forgetRemembered(b.dataset.forget);
     else if (b.hasAttribute('data-kept-forget')) keptFileStore().forget().then(() => { showKept(); dialog.querySelector('#perm-keep-work')?.focus(); });
   });
