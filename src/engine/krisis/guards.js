@@ -32,12 +32,18 @@
 // took the wrong Agden of two in Cheshire, 47 km off. Records of one title within SAME_PLACE_KM of each
 // other are one place, as WHG holds one place several times over; one without a point is a namesake.
 //
+// Nor is a candidate whose kind of place conflicts with the place's own (#20; kinds.js kindFit: a lake for a
+// town, an airfield for a parish, as WHG place#273 found in 16.6% of 2,200 matches accepted in a CCEd run),
+// whatever its guard: the place is left to the reviewer, and the review says why. A kind not known on either
+// side never holds a place back.
+//
 // Nothing here decides on its own. acceptGuarded() is what the page's "Accept the N that pass WHG's
 // guards" button calls, on the reviewer's word, and every decision it makes carries its batch, so
 // that undoBatch() takes back exactly those still as it left them. Pure: no network, no pipeline.
 import { decide, IDENTITY_TYPES, checkReviewer } from './work.js';
 import { guardWords } from '../words.js';
 import { distanceKm } from './match.js';
+import { kindFit, candidateTypes } from './kinds.js';
 
 export const GUARD_DEFAULTS = { threshold: 90, minConfidence: 30, minDice: 0.45, altNames: 20 };
 export const GUARD_RULE = 'whg-guard';
@@ -210,17 +216,18 @@ function lookedWithin(work, iri, c, lookups) {
   return (confined(k) && work.regions?.[k.from]?.label) || null;
 }
 /**
- * What acceptGuarded() would do, changing nothing: { accept: [candidate], leftOut: { far, ccodes,
+ * What acceptGuarded() would do, changing nothing: { accept: [candidate], leftOut: { far, ccodes, kind,
  * total, examples: [{ id, why }] }, several, tied: [{ id, place, count, region }] }. A place is
  * considered when it has no decision yet and is to be reconciled (no row state). Exactly one of its
  * candidates must pass the guard; that one is left out (and counted) when it is further from the
- * place's point than the review's greatest distance, or its countries disagree with the place's own.
+ * place's point than the review's greatest distance, its countries disagree with the place's own, or
+ * its kind of place conflicts with the place's own (kinds.js; why 'kind').
  * A place with several passing is counted in `several`, and nothing is accepted for it. A place whose
  * passing candidate has namesakes where it was looked for (namesakesOf) is listed in `tied`, with how
  * many places of that name there are and the region's name, and nothing is accepted for it (#31).
  */
 export function planGuarded(work, { threshold = GUARD_DEFAULTS.threshold } = {}) {
-  const accept = [], leftOut = { far: 0, ccodes: 0, total: 0, examples: [] };
+  const accept = [], leftOut = { far: 0, ccodes: 0, kind: 0, total: 0, examples: [] };
   const tied = [];
   let several = 0;
   const by = bySource(work), lookups = new Map();
@@ -235,9 +242,11 @@ export function planGuarded(work, { threshold = GUARD_DEFAULTS.threshold } = {})
     const c = ok[0];
     const far = isFar(work, c, lookups);
     const ccodes = otherCountry(work, iri, c);
-    if (far || ccodes) {
-      if (far) leftOut.far++; else leftOut.ccodes++;
-      leftOut.total++; leftOut.examples.push({ id: c.id, why: far ? 'far' : 'ccodes' });
+    const kind = kindConflicts(work, iri, c);
+    if (far || ccodes || kind) {
+      const why = far ? 'far' : ccodes ? 'ccodes' : 'kind';
+      leftOut[why]++;
+      leftOut.total++; leftOut.examples.push({ id: c.id, why });
       continue;
     }
     const namesakes = namesakesOf(work, iri, c, mine, lookups);
@@ -246,6 +255,8 @@ export function planGuarded(work, { threshold = GUARD_DEFAULTS.threshold } = {})
   }
   return { accept, leftOut, several, tied };
 }
+/** Whether a candidate's kind of place conflicts with its place's own (kinds.js kindFit), both being known. */
+export const kindConflicts = (work, iri, c) => kindFit(work.places[iri], candidateTypes(c)).fit === 'conflict';
 function ccodesDisagree(place, c) {
   const mine = place?.ccodes, theirs = c.other?.ccodes;
   if (!Array.isArray(mine) || !mine.length || !Array.isArray(theirs) || !theirs.length) return false;
@@ -273,7 +284,7 @@ export function acceptGuarded(work, { reviewer, identityType = 'closeMatch', at 
   if (!IDENTITY_TYPES.includes(identityType)) throw new Error(`Not an identity type: ${identityType}`);
   if (reviewer) { checkReviewer(reviewer); work.reviewer = reviewer; }
   const plan = planGuarded(work, { threshold });
-  const counts = { far: plan.leftOut.far, ccodes: plan.leftOut.ccodes, total: plan.leftOut.total };
+  const counts = { far: plan.leftOut.far, ccodes: plan.leftOut.ccodes, kind: plan.leftOut.kind, total: plan.leftOut.total };
   const ties = plan.tied.length, tied = plan.tied.map((t) => t.count);
   if (!plan.accept.length) return { batch: null, accepted: 0, leftOut: counts, several: plan.several, ties, tied };
   const batch = nextBatch(work);

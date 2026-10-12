@@ -148,7 +148,7 @@ test('a lookup ranks by letters only, whatever qualifier lists the matching chos
   const score = (names) => rankGazetteer({ names, point: null }, cands).map((r) => [r.candidate.name, r.similarity_score]);
   assert.deepEqual(score(['Chipping Hill', 'Market Warsop']), [['Market Warsop', 1], ['Chipping Hull', 0.9], ['Newton Regis', 0.571], ['Abingdon-on-Thames', 0.554], ['Hill', 0.551], ['Ongar', 0.518], ['Warsop', 0.496]]);
   assert.deepEqual(score(['Abingdon']), [['Abingdon-on-Thames', 0.889], ['Chipping Hull', 0.535], ['Warsop', 0.528], ['Ongar', 0.492], ['Newton Regis', 0.486], ['Market Warsop', 0.468], ['Hill', 0.458]]);
-  assert.equal(LOOKUP_ALGORITHM, 'krisis-lookup 1', 'so its name is unchanged');
+  assert.equal(LOOKUP_ALGORITHM, 'krisis-lookup 2', 'renamed for kinds and placeholders (#20, #21), its scores unchanged');
   // The presence beside the absence: with the lists, the rule would raise Hill to the cap.
   assert.equal(similarity('Chipping Hill', 'Hill', undefined, compileQualifiers()), QUALIFIER_CAP, 'control: the lists raise Chipping Hill and Hill');
   assert.equal(similarity('Chipping Hill', 'Hill'), similarity('Chipping Hill', 'Hill', undefined, compileQualifiers([])), 'similarity() uses no lists unless given them');
@@ -195,7 +195,7 @@ test('a lookup without a local match makes a work file of the current version, w
   assert.ok(work.candidates.every((c) => c.decision === null));
   // The attribution as it came, the nulls left null.
   assert.deepEqual(record.attribution, ATTRIBUTION);
-  assert.deepEqual(record.counts, { places: 2, withoutName: 0, queries: 2, requests: 1, answered: 2, notFound: 1, unanswered: 0, stopped: 0, found: 3, added: 3, far: 2, skipped: { noIri: 0, linked: 0, denied: 0, decided: 0, duplicate: 0 } });
+  assert.deepEqual(record.counts, { places: 2, withoutName: 0, queries: 2, requests: 1, answered: 2, notFound: 1, unanswered: 0, stopped: 0, found: 3, added: 3, far: 2, skipped: { noIri: 0, linked: 0, denied: 0, decided: 0, duplicate: 0, placeholder: 0 } });
   assert.match(LOOKUP_WORDS.summary(record.counts, 'World Historical Gazetteer').problems, /^3 possible matches to review, 2 of them far away\.$/);
 });
 test('an unanswered query means "try again", never "no match"; a lookup of the pending places asks for it again', async () => {
@@ -228,7 +228,7 @@ test('candidates without an address, already linked, said to be different or alr
   const fake = fakeWhg(byName({ Newcastle: cands }));
   const first = await runLookup({ lookup: lookupWith(fake), subjects: g.subjects, places: g.places, now: clock() });
   assert.deepEqual(first.work.candidates.map((c) => c.gazetteer.id), ['place:gn:3', 'place:gn:4']);
-  assert.deepEqual(first.record.counts.skipped, { noIri: 1, linked: 1, denied: 1, decided: 0, duplicate: 0 });
+  assert.deepEqual(first.record.counts.skipped, { noIri: 1, linked: 1, denied: 1, decided: 0, duplicate: 0, placeholder: 0 });
   // Decide one, look again: the decided one is kept and not suggested twice; the undecided is replaced.
   decide(first.work, first.work.candidates[0].id, 'not-this', { at: NOW });
   const again = await runLookup({ lookup: lookupWith(fake), work: first.work, places: g.places, options: { places: 'all' }, now: clock() });
@@ -299,7 +299,7 @@ test('a lookup that stops keeps what was answered and marks the rest stopped; a 
   assert.equal(r.work.candidates.length, 1, 'the answer before it is kept');
   assert.ok(r.record.finished_at);
   assert.deepEqual(readWork(serialiseWork(r.work)), r.work, 'a stopped lookup can be saved');
-  assert.match(LOOKUP_WORDS.stopped(r.stopped), /allowance of requests for today is spent/);
+  assert.match(LOOKUP_WORDS.stopped(r.stopped), /WHG's daily limit for this token is reached; it resets tomorrow/);
   const refused = await runLookup({ lookup: lookupWith(fakeWhg(() => new Response('{"detail":"Invalid token."}', { status: 401 }))), subjects: g.subjects, places: g.places, now: clock() });
   assert.equal(refused.stopped.kind, 'auth', 'control: a refused token is not a spent allowance');
 });

@@ -19,10 +19,13 @@
 //   a region is matched only to a record with an outline, which can scope a lookup within it.
 // - What comes back is ranked for the reviewer (rankGazetteer), never accepted: WHG's score is relative
 //   to the best in its own answer (the top is always about 100, however bad), and its confidence
-//   measures the name only. So the order is by distance, then whether the countries agree, then
-//   Krisis's own name similarity (names.js, the similarity_score of every candidate), then the
-//   service's order. A candidate further than maxDistanceKm is kept and marked `far`, not dropped.
-//   The service's own figures are kept apart, under `gazetteer`.
+//   measures the name only. So the order is: those within maxDistanceKm before those further (kept and
+//   marked `far`, not dropped), then by kind (kinds.js: of the place's own kind or a narrower one first, a
+//   conflicting kind last, when the place says what kind it is), then by distance, then whether the
+//   countries agree, then Krisis's own name similarity (names.js, the similarity_score of every candidate),
+//   then the service's order. The service's own figures are kept apart, under `gazetteer`.
+// - A record whose every name is a cataloguing placeholder ("Oknoname 037068 Dam", WHG place#216;
+//   placeholders.js) is left out and counted (`skipped.placeholder`), never suggested.
 // - An answer the service could not give (`.unanswered`) is not "nothing found": the place is marked
 //   'unanswered', to be tried again. An error that stops the lookup (a refused token, the day's
 //   allowance spent, too many queries, no answer, a failure) keeps what was answered and marks the rest
@@ -39,19 +42,23 @@
 // - The service's `attribution` (the licences of the sources searched) is kept as it came, a null
 //   left null, on the lookup record, so the page can show each candidate's licence. No licence is ever
 //   written into an attestation, and none is assumed here.
-import { WHG_ENDPOINT, WHG_PLACE_TYPE, isWhg, normaliseWhgIri, mergeAttribution, whgLang, nameLang } from '../gazetteer/index.js';
+import { WHG_ENDPOINT, WHG_PLACE_TYPE, isWhg, normaliseWhgIri, mergeAttribution, whgLang, nameLang, whgPlaceTypes } from '../gazetteer/index.js';
 import { similarity, queryVariants, MAX_VARIANTS, compileQualifiers } from './names.js';
 import { guard } from './guards.js';
 import { WORK_VERSION, canonicalEndpoint } from './work.js';
 import { linkState } from './identities.js';
 import { constraintFor, selectLevel, placeState, areaOf, areaIds, storedConstraint, constraintParameters } from './regions.js';
 import { normaliseScope, isEmptyScope, scopeFields } from './scope.js';
+import { kindFit, isProtocolType, FIT_RANK } from './kinds.js';
+import { placeholderRecord } from './placeholders.js';
 const SCOPE_PARTS = ['where', 'what', 'when', 'sources'], SCOPE_KEYS = ['countries', 'contained_in', 'bounds', 'types', 'start', 'end', 'temporal', 'undated', 'namespaces'];
 export { authorityIris, currentIdentities } from './identities.js';
 // The note an attestation on a looked-up candidate carries, here too for the tools that use this file (Chora).
 export { krisisLookupNote } from '../words.js';
 
-export const LOOKUP_ALGORITHM = 'krisis-lookup 1';
+// krisis-lookup 2 (#20, #21): a candidate of the place's own kind is ranked up and one of a conflicting kind down
+// (kinds.js), and a record whose only name is a placeholder is left out and counted (placeholders.js).
+export const LOOKUP_ALGORITHM = 'krisis-lookup 2';
 export const LOOKUP_DEFAULTS = { limit: 10, maxDistanceKm: 50, allNames: false, countries: false, nearKm: null, variants: false, lang: null, areaOnly: false, scope: null };
 /** Which places a lookup takes (selectPlaces). */
 export const PLACE_CHOICES = ['unmatched', 'all', 'pending', 'unlinked'];
@@ -337,11 +344,22 @@ export function distanceKm([lon1, lat1], [lon2, lat2]) {
 const round = (x, d) => Math.round(x * 10 ** d) / 10 ** d;
 
 /**
+ * A candidate's kinds of place, as the work file keeps them (`other.types`): WHG's from its place_types
+ * (whg.js A7, whgPlaceTypes: "aat:300008347", "gn:P.PPL", "osm:village"), another service's from the
+ * protocol's type (its names). The protocol's own "Place", which every WHG candidate carries, is not a kind.
+ */
+export function typesOf(c) {
+  if (Array.isArray(c?.raw?.place_types)) return whgPlaceTypes(c.raw);
+  return [...new Set((c?.types || []).map((t) => t?.name ?? t?.id).filter((t) => typeof t === 'string' && t.trim() && !isProtocolType(t)))];
+}
+/**
  * A place's candidates from a gazetteer (the module's Candidate objects, each with `answer_rank`, its
- * place in the service's answer, and `query`, the name that found it), ranked for the reviewer: by
- * distance (none last), then whether the countries agree (yes, not known, no), then Krisis's own name
- * similarity, then the service's order. Returns [{ candidate, similarity_score, distance_km,
- * ccodes_agree: true|false|null, far }], nothing dropped.
+ * place in the service's answer, and `query`, the name that found it), ranked for the reviewer: those
+ * within maxDistanceKm before those further (or with no distance), then by kind (kinds.js kindFit: of the
+ * place's own kind or narrower, then not known or another, then a conflicting kind; all alike when the place
+ * says nothing of its kind), then by distance (none last), then whether the countries agree (yes, not known,
+ * no), then Krisis's own name similarity, then the service's order. Returns [{ candidate, similarity_score,
+ * distance_km, ccodes_agree: true|false|null, far, kind: 'match'|'other'|'unknown'|'conflict' }], nothing dropped.
  */
 const LETTERS_ONLY = compileQualifiers([]);
 export function rankGazetteer(place, candidates, { maxDistanceKm = LOOKUP_DEFAULTS.maxDistanceKm } = {}) {
@@ -353,10 +371,12 @@ export function rankGazetteer(place, candidates, { maxDistanceKm = LOOKUP_DEFAUL
     for (const a of mine) for (const b of theirs) best = Math.max(best, similarity(a, b, undefined, LETTERS_ONLY));
     const distance = Array.isArray(place.point) && Array.isArray(c.coords) ? round(distanceKm(place.point, c.coords), 1) : null;
     const agree = place.ccodes?.length && c.ccodes?.length ? c.ccodes.some((x) => place.ccodes.includes(x)) : null;
-    return { candidate: c, similarity_score: round(best, 3), distance_km: distance, ccodes_agree: agree, far: distance !== null && distance > maxDistanceKm, order: c.answer_rank ?? i };
+    const kind = kindFit(place, c.kinds ?? typesOf(c)).fit;
+    return { candidate: c, similarity_score: round(best, 3), distance_km: distance, ccodes_agree: agree, far: distance !== null && distance > maxDistanceKm, kind, order: c.answer_rank ?? i };
   });
   const agreeKey = (x) => (x === true ? 0 : x === null ? 1 : 2);
-  ranked.sort((a, b) => (a.distance_km ?? Infinity) - (b.distance_km ?? Infinity) || agreeKey(a.ccodes_agree) - agreeKey(b.ccodes_agree)
+  ranked.sort((a, b) => Number(a.far) - Number(b.far) || FIT_RANK[a.kind] - FIT_RANK[b.kind]
+    || (a.distance_km ?? Infinity) - (b.distance_km ?? Infinity) || agreeKey(a.ccodes_agree) - agreeKey(b.ccodes_agree)
     || b.similarity_score - a.similarity_score || a.order - b.order);
   return ranked.map(({ order, ...r }) => r);
 }
@@ -367,11 +387,12 @@ export function newWork(subjects, { now = new Date().toISOString(), reviewer = n
   return { krisis: WORK_VERSION, generated_at: now, algorithm_version: LOOKUP_ALGORITHM, match_parameters: {},
     subjects, others: null, places: {}, regions: {}, candidates: [], reviewer, cursor: 0, lookups: [] };
 }
-const placeRecord = (p, work) => ({ label: p.label, names: p.names || [p.label], point: p.point ?? null, ...(p.ccodes ? { ccodes: p.ccodes } : {}), ...(p.types ? { types: p.types } : {}),
+const placeRecord = (p, work) => ({ label: p.label, names: p.names || [p.label], point: p.point ?? null, ...(p.ccodes ? { ccodes: p.ccodes } : {}), ...(p.types ? { types: p.types } : {}), ...(p.typeIds ? { typeIds: p.typeIds } : {}),
   ...(typeof p.within === 'string' && Object.hasOwn(work?.regions || {}, p.within) ? { within: p.within, level: p.level } : {}) });
 /** Is this key one of the review's regions (work.js, version 3), not a place? */
 const isRegionKey = (work, key) => Object.hasOwn(work.regions || {}, key);
-const SKIPS = ['noIri', 'linked', 'denied', 'decided', 'duplicate'];
+// placeholder (#21): a record whose every name is a cataloguing placeholder (placeholders.js), counted once per answer it was in.
+const SKIPS = ['noIri', 'linked', 'denied', 'decided', 'duplicate', 'placeholder'];
 function emptyCounts() {
   return { places: 0, withoutName: 0, queries: 0, requests: 0, answered: 0, notFound: 0, unanswered: 0, stopped: 0, found: 0, added: 0, far: 0, skipped: Object.fromEntries(SKIPS.map((k) => [k, 0])) };
 }
@@ -431,16 +452,21 @@ export function mergeAnswers(work, record, place, lists, { now = new Date().toIS
   const byIri = new Map(), noIri = new Set();
   const howOf = (j) => q.variants?.[j]?.how ?? 'given';
   const forms = (q.sent || []).filter((t, j) => howOf(j) !== 'head-word');
+  const placeholders = new Set();
   lists.forEach((list, j) => list.forEach((cand, rank) => {
+    // A placeholder record (WHG place#216) is left out before anything else: it is no name match at all.
+    if (placeholderRecord(cand)) { placeholders.add(cand.id); return; }
     if (!cand.iri) { noIri.add(cand.id); return; }
     const head = howOf(j) === 'head-word';
     const had = byIri.get(cand.iri);
     const better = !had || (had.headWord && !head) || (had.headWord === head && rank + 1 < had.answer_rank);
     if (!better) return;
     const v = guard(cand, list, { forms: forms.length ? forms : [q.sent?.[j] ?? list.key?.[1]].filter(Boolean), headWord: head });
-    byIri.set(cand.iri, { ...cand, answer_rank: rank + 1, query: q.sent[j] ?? list.key?.[1] ?? null, how: howOf(j), headWord: head, guardFigures: { dice: v.dice, withheld: v.withheld, tie: v.tie } });
+    byIri.set(cand.iri, { ...cand, kinds: typesOf(cand), answer_rank: rank + 1, query: q.sent[j] ?? list.key?.[1] ?? null, how: howOf(j), headWord: head, guardFigures: { dice: v.dice, withheld: v.withheld, tie: v.tie } });
   }));
   c.skipped.noIri += noIri.size;
+  c.skipped.placeholder = (c.skipped.placeholder || 0) + placeholders.size;
+  if (placeholders.size) q.placeholders = placeholders.size; else delete q.placeholders;
   q.found = byIri.size + noIri.size;
   c.found += q.found;
   const service = record.service;
@@ -464,7 +490,7 @@ export function mergeAnswers(work, record, place, lists, { now = new Date().toIS
       ...(mp ? { match_parameters: mp } : {}),
       ...(r.far ? { far: true } : {}), ccodes_agree: r.ccodes_agree,
       other: { label: g.name, names: [...new Set([g.name, ...(g.altNames || [])].filter(Boolean))], point: g.coords ?? null,
-        source: { title: service.title, ...(service.uri ? { uri: service.uri } : {}) }, ...(g.ccodes ? { ccodes: g.ccodes } : {}), ...(g.types?.length ? { types: g.types.map((t) => t.name) } : {}) },
+        source: { title: service.title, ...(service.uri ? { uri: service.uri } : {}) }, ...(g.ccodes ? { ccodes: g.ccodes } : {}), ...(g.kinds.length ? { types: g.kinds } : {}) },
       gazetteer: { service: service.endpoint, id: g.id, score: g.score, confidence: g.confidence, match: g.match, answer_rank: g.answer_rank,
         description: g.description, namespace: g.namespace, query: g.query,
         // Krisis × Methodos: what WHG's guard needs (guards.js guardOf), judged in the answer that found it.
@@ -633,7 +659,8 @@ export async function runLookup({ lookup, work = null, subjects = null, places =
       const refused = [signal?.aborted ? signal.reason : null, e].find((x) => x?.name === 'PermissionError');
       if (refused) record.stopped = { kind: 'permission', refused: refused.kind, status: null, message: null };
       else if (signal?.aborted) record.stopped = { kind: 'stopped', status: null, message: null };
-      else if (e?.name === 'GazetteerError') record.stopped = { kind: e.kind, status: e.status ?? null, message: e.message };
+      // The day's allowance spent (whg.js A15): when it comes back, if the service said; the token is kept and is not at fault.
+      else if (e?.name === 'GazetteerError') record.stopped = { kind: e.kind, status: e.status ?? null, message: e.message, ...(e.kind === 'quota' ? { resetsAt: e.resetsAt ?? null } : {}) };
       else throw e;
       return { work, record, plan, stopped: record.stopped };
     }

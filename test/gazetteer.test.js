@@ -1519,3 +1519,58 @@ test('a later createLookup for a shared endpoint with another fetch throws, nami
   assert.equal(warn.mock.callCount(), 1);
   assert.match(String(warn.mock.calls[0].arguments[0]), /batchSize/);
 });
+
+// ---- WHG's daily cap and a per-minute 429 (whg.js A15, dailyLimit; live on WHG since 12 October 2026) ----
+// The answers exactly as WHG sends them (website 940fd89dc): the daily cap a 429 with its code and Retry-After to
+// the reset; the per-minute limit a 429 with Retry-After and an {error} body, no code; a refused token a 401.
+const DAILY = { code: 'daily_limit_exceeded', detail: 'Daily API limit (5000 calls) exceeded', limit: 5000, resets_at: '2026-10-13T00:00:00Z' };
+const dailyReply = () => reply(429, DAILY, { 'Retry-After': '41234' });
+const minuteReply = () => reply(429, { error: 'Rate limit exceeded: 600 queries per minute' }, { 'Retry-After': '7' });
+const badToken = () => reply(401, { detail: 'Invalid API token' }, { 'WWW-Authenticate': 'Bearer' });
+
+test('dailyLimit: the code daily_limit_exceeded is the daily cap, with when it resets; any other 429 is the per-minute limit; the old 401/403 wording is still read, as a fallback', () => {
+  assert.deepEqual(gz.dailyLimit(429, JSON.stringify(DAILY)), { resetsAt: '2026-10-13T00:00:00.000Z' });
+  assert.deepEqual(gz.dailyLimit(429, JSON.stringify({ ...DAILY, resets_at: 'soon' })), { resetsAt: null }, 'an unreadable time is not invented');
+  assert.equal(gz.dailyLimit(429, JSON.stringify({ error: 'Rate limit exceeded: 600 queries per minute' })), null, 'the per-minute 429');
+  assert.equal(gz.dailyLimit(429, JSON.stringify({ detail: 'Daily API limit (5000 calls) exceeded' })), null, 'a 429 is the daily cap by its code alone');
+  assert.equal(gz.dailyLimit(401, JSON.stringify({ detail: 'Invalid API token' })), null, 'a refused token');
+  assert.equal(gz.dailyLimit(500, JSON.stringify(DAILY)), null);
+  // The fallback (to be retired): the daily cap as WHG sent it until 12 October, an authentication failure.
+  assert.deepEqual(gz.dailyLimit(401, JSON.stringify({ detail: 'Daily API limit (5000 calls) exceeded' })), { resetsAt: null });
+  assert.deepEqual(gz.dailyLimit(403, JSON.stringify({ detail: 'Daily API limit (5000 calls) exceeded' })), { resetsAt: null });
+  assert.deepEqual(gz.dailyLimit(401, 'Daily API limit (5000 calls) exceeded'), { resetsAt: null }, 'plain text is read too');
+});
+
+test('the daily cap stops at once (kind quota, with when it resets), never waited out by its Retry-After; a per-minute 429 is tried again after its Retry-After', async () => {
+  const daily = service({ answer: dailyReply });
+  const waits = [];
+  const err = await lookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: daily.fetch, sleep: async (ms) => { waits.push(ms); } }).reconcile([{ query: 'a' }]).catch((e) => e);
+  assert.ok(err instanceof GazetteerError, String(err));
+  assert.equal(err.kind, 'quota');
+  assert.equal(err.status, 429);
+  assert.equal(err.resetsAt, '2026-10-13T00:00:00.000Z');
+  assert.equal(daily.calls.length, 1, 'not asked again');
+  assert.deepEqual(waits, [], 'and not waited for (its Retry-After is hours)');
+  let n = 0;
+  const minute = service({ answer: (sent) => (++n === 1 ? minuteReply() : echo(sent)) });
+  const waited = [];
+  const [[c]] = await lookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: minute.fetch, sleep: async (ms) => { waited.push(ms); } }).reconcile([{ query: 'a' }]);
+  assert.equal(c.name, 'a');
+  assert.deepEqual(waited, [7000], 'the Retry-After the page can now read');
+  assert.equal(minute.calls.length, 2);
+  // Where the page cannot read it (CORS hides it), the lookup's own backoff.
+  let m = 0;
+  const hidden = service({ answer: async (sent) => (++m === 1 ? corsFiltered(minuteReply()) : echo(sent)) });
+  const backed = [];
+  await lookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: hidden.fetch, sleep: async (ms) => { backed.push(ms); } }).reconcile([{ query: 'a' }]);
+  assert.ok(backed.length === 1 && backed[0] >= 3000 && backed[0] <= 4000, `backed off ${backed}`);
+});
+
+test('a refused token (401, Invalid API token) is kind auth with no reset time; the old daily wording on a 401 is kind quota', async () => {
+  for (const [answer, kind] of [[badToken, 'auth'], [() => reply(401, { detail: 'Daily API limit (5000 calls) exceeded' }), 'quota']]) {
+    const s = service({ answer });
+    const err = await lookup({ endpoint: WHG_ENDPOINT, token: TOKEN, fetch: s.fetch, sleep: noSleep }).reconcile([{ query: 'a' }]).catch((e) => e);
+    assert.equal(err.kind, kind);
+    assert.equal(err.resetsAt, kind === 'quota' ? null : undefined, 'only a spent allowance says when it comes back');
+  }
+});

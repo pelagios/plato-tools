@@ -39,7 +39,8 @@ import { seedRegions, decideRegion, settleRegion, undo as undoRegion, selectLeve
 import { REGION_PAGE as RP, REGION_WORDS } from './engine/words.js';
 import { levelNames, levelLabel, navigator as levelNavigator, firstOpen, chainOf, placeChain, constraintLine, notesOf, relaxOptions, costOf, levelRegions, unsettledOf, placesToLook, lockedPlaces, wouldClear, priorOf, restorePrior, nameOf, regionDomId, certaintyChoices, CERTAINTY_DEFAULT, regionMatchOptions } from './krisis/region-page.js';
 import { mountMethodos } from './methodos/page.js';
-import { mountScope } from './scope-page.js';
+import { mountScope, aatLabels, BUNDLED_AAT_LABELS } from './scope-page.js';
+import { kindFit, candidateTypes } from './engine/krisis/kinds.js';
 import { workflowStore } from './methodos/store.js';
 import { chosenWords, wentOn, resultLabel } from './methodos/layout.js';
 const $ = (id) => document.getElementById(id);
@@ -1929,11 +1930,41 @@ function groupedHtml(cands) {
     + groups.map((g) => `<section class="source-group" aria-label="${escapeHtml(g.title)}"><h4 class="source">${escapeHtml(g.title)}</h4><ol class="candidates">${g.items.join('')}</ol></section>`).join('');
 }
 /** What a looked-up candidate adds: far or not, the service's own figures (as its own), and its source's licence. */
+// Krisis (#20): the labels of AAT kinds of place, WHG's (GET /types/vocab/, asked once WHG is allowed, and
+// kept in this browser for a week by scope-page.js aatLabels), else those Scope bundles for its shortlist.
+let kindLabels = { labels: BUNDLED_AAT_LABELS, from: 'bundled', at: null }, kindLabelsAt = 0;
+function askKindLabels() {
+  if (kindLabels.from !== 'bundled' || Date.now() - kindLabelsAt < 60_000 || !permissions.allowed('gazetteer', 'whg')) return;
+  kindLabelsAt = Date.now();
+  aatLabels().then((r) => {
+    if (r.from === 'bundled') return;
+    kindLabels = r; state.kindLabels = { from: r.from, at: r.at, count: r.labels.size };
+    if (work && !$('review').hidden) render(false);
+  });
+}
+const aatName = (id) => (typeof id === 'string' && /^aat:\d+$/.test(id) && kindLabels.labels.get(id)) || null;
+/**
+ * A looked-up candidate's kind of place (#20): each of its types, an AAT id by its label with the id as a
+ * code, a source's code as a code; "type unknown" when it has none. Then, when the place says what kind it
+ * is, why the candidate was ranked up (of that kind, or narrower) or down (a conflicting kind, never accepted
+ * in bulk), as kinds.js kindFit judged it for the ranking.
+ */
+function kindHtml(c) {
+  askKindLabels();
+  const types = candidateTypes(c), chip = (t) => `<code class="code-chip">${escapeHtml(t)}</code>`;
+  const items = types.map((t) => (aatName(t) ? `${escapeHtml(aatName(t))} ${chip(t)}` : chip(t)));
+  const fit = kindFit(work.places[c.candidate_source], types);
+  const theirs = (k) => aatName(k.id) || k.id, yours = (k) => k.label || aatName(k.aat) || k.id;
+  const why = fit.fit === 'match' ? `<p class="kind-why good">${escapeHtml(LW.kindMatch(theirs(fit.candidate), yours(fit.place)))}</p>`
+    : fit.fit === 'conflict' ? `<p class="kind-why warn">${escapeHtml(LW.kindConflict(theirs(fit.candidate), yours(fit.place)))}</p>` : '';
+  return `<p class="kind" data-kind="${types.length ? 'known' : 'unknown'}" data-fit="${fit.fit}">${escapeHtml(LW.kindLabel)} `
+    + (items.length ? items.join(', ') : `<span class="kind-unknown">${escapeHtml(LW.kindUnknown)}</span>`) + '</p>' + why;
+}
 function gazetteerHtml(c) {
   const l = lookupOf(c.lookup), g = c.gazetteer || {}, service = l ? shortName(l.service) : LW.whg;
   const km = l?.parameters?.maxDistanceKm ?? 50;
   const lic = licenceOf(l?.attribution ?? null, g.namespace ?? null);
-  return (c.far ? `<p class="far">${escapeHtml(LW.far(km))}</p>` : '')
+  return kindHtml(c) + (c.far ? `<p class="far">${escapeHtml(LW.far(km))}</p>` : '')
     + (LW.figures(g, service) ? `<p class="gazetteer">${escapeHtml(LW.figures(g, service))}</p>` : '')
     + (g.description ? `<p class="gazetteer">${escapeHtml(LW.described(service, g.description))}</p>` : '')
     + `<p class="licence${LW.licenceWarns(lic) ? ' warn' : ''}">${escapeHtml(LW.licence(lic))}</p>`;

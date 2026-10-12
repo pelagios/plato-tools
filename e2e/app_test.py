@@ -1169,7 +1169,7 @@ def krisis_lookup_case(page, tmp, url):
     check('lookup, allowed: the request IS sent (the positive control for "nothing sent" above)', o.get('phase') == 'open' and len(calls) >= 1 and len(asked) >= 1 and na.get('sent') == 0, {'calls': len(calls), 'asked': len(asked)})
     check('lookup: the first 20 queries in the preview are those WHG received', bool(calls) and bool(first) and list(json.loads(calls[0]['body'])['queries'].values())[:20] == first, calls[:1])
     check('lookup: a quota stop keeps what was answered, says so in words, and offers Resume',
-          lk(s).get('stopped') == 'quota' and states == {'answered': 24, 'unanswered': 1, 'stopped': 5} and "allowance of requests for today is spent" in s.get('progress', '')
+          lk(s).get('stopped') == 'quota' and states == {'answered': 24, 'unanswered': 1, 'stopped': 5} and "WHG's daily limit for this token is reached; it resets tomorrow" in s.get('progress', '')
           and s.get('resume') == 'Resume: send 6 queries' and s.get('phase') == 'reviewing', {'lookup': lk(s), 'states': states, 'progress': s.get('progress'), 'resume': s.get('resume')})
 
     # The review screen: Newcastle, its candidates from WHG in the lookup's order, not WHG's and not by name.
@@ -2688,6 +2688,7 @@ def main():
             chora_adopt_checks(pw, url, tmp)
             map_your_data_checks(pw, url, tmp)
             scope_checks(pw, url, tmp)
+            quality_checks(pw, url, tmp)
             chora_seams_checks(pw, url, tmp)
             iiif_checks(pw, url, tmp)
     finally:
@@ -3872,6 +3873,175 @@ SCOPE_RAIL = '''() => { const v = (e) => { const r = e.getBoundingClientRect(), 
   return { steps: document.querySelectorAll('#methodos-track li.track-step').length, inView: [...document.querySelectorAll('#methodos-track li.track-step')].filter(v).length,
     done: done.height > 0 && done.top >= 0 && done.bottom <= innerHeight, line: !!document.querySelector('#methodos-tracker #scope .scope-line-text'),
     card: !!document.querySelector('#workflow-rail > #scope') }; }'''
+
+# ---- Krisis: the quality of what a lookup suggests (Issue #34, item 1: #20, #21, #22) ------------------------
+# Against a stub of WHG that answers as it was probed on 12 October 2026 (whg.js A7: the kind in place_types,
+# the protocol's Place in type), and its /types/vocab/. Each check is paired so that it can fail: a kind shown
+# beside "type unknown", a candidate ranked up beside one ranked down, a place left out of the bulk accept for
+# its kind beside one accepted, a placeholder counted beside a real place kept, a daily cap with a time beside
+# the one without (krisis_lookup_case). QUALITY_SHOTS=<dir> saves screenshots of the review at 1440 x 900.
+QUALITY_BASE = 'https://example.org/q/'
+QUALITY_PROTOCOL = [{'id': 'https://whgazetteer.org/static/whg_schema.jsonld#Place', 'name': 'Place'}]
+def quality_answer(id, name, point, place_types, score=100, match=True, rest=None):
+    return {'id': id, 'name': name, 'score': score, 'match': match, 'description': 'Country: GB', 'ccodes': ['GB'], 'repr_point': point,
+            'namespace': id.split(':')[1], 'alt_names': (rest or {}).get('alt_names', []), 'type': QUALITY_PROTOCOL, 'place_types': place_types, 'confidence': 100 if match else 80}
+QUALITY_ANSWERS = {
+    # A town: WHG's top is the lake (it passes WHG's guard), the town second. The review puts the town first, the lake
+    # last, and the bulk accept leaves Windermere for the reviewer (#20; WHG place#273).
+    'Windermere': [quality_answer('place:gn:2634000', 'Windermere', [-2.94, 54.35], [{'identifier': 'LK', 'label': 'H'}]),
+                   quality_answer('place:osm:r1', 'Windermere', [-2.906, 54.38], [{'identifier': 'town', 'label': 'osm'}], 95, False)],
+    # A parish: WHG's top is a GeoNames populated place, nearer; the parish (kain_par) is ranked first, as yours is a parish.
+    'Ashby': [quality_answer('place:gn:2657000', 'Ashby', [-1.47, 52.75], [{'identifier': 'PPL', 'label': 'P'}]),
+              quality_answer('place:kain_par:100', 'Ashby', [-1.49, 52.76], [{'identifier': 'parish', 'label': 'kain_par'}], 95, False)],
+    # No kind of its own: a TGN record of a kind only WHG's vocabulary names, and a Wikidata record with no type.
+    'Kendal': [quality_answer('place:tgn:7011000', 'Kendal', [-2.746, 54.328], [{'identifier': 'aat:300008416', 'label': 'tgn'}]),
+               quality_answer('place:wd:Q1000', 'Kendal', [-2.75, 54.33], [], 90, False)],
+    # Placeholders (#21): the Oknoname record left out, the real Lanach kept; Nowhere answered by a placeholder alone.
+    'Barony Lanach': [quality_answer('place:gn:4500000', 'Oknoname 037068 Dam', [-97.1, 35.2], [{'identifier': 'DAM', 'label': 'S'}], rest={'alt_names': ['Oknoname Dam']}),
+                      quality_answer('place:gn:2645000', 'Lanach', [-3.51, 55.61], [{'identifier': 'PPL', 'label': 'P'}], 80, False)],
+    'Nowhere': [quality_answer('place:osm:w1', 'Unnamed', [0.0, 51.0], [{'identifier': 'water', 'label': 'osm'}])],
+}
+QUALITY_VOCAB = {'byId': {'aat:300008416': {'label': 'county seats', 'desc': 'Seats of a county.'}, 'aat:300008347': {'label': 'inhabited places', 'desc': ''}}}
+
+def quality_checks(pw, url, tmp):
+    import re
+    base = url.rstrip('/') + '/'
+    shots = os.environ.get('QUALITY_SHOTS')
+    browser = pw.chromium.launch(headless=True, args=GL)
+    # In London's time, so that the daily cap's reset (midnight UTC) is said in the reader's own: 01:00 BST.
+    ctx = browser.new_context(accept_downloads=True, viewport={'width': 1440, 'height': 900}, reduced_motion='reduce', timezone_id='Europe/London')
+    cors = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+            'Access-Control-Allow-Headers': 'authorization, content-type, accept, user-agent'}
+    posts, gets, mode = [], [], {'daily': False}
+    def stub(route):
+        req = route.request
+        if req.method == 'OPTIONS': return route.fulfill(status=204, headers=cors)
+        reply = lambda body, status=200: route.fulfill(status=status, headers={**cors, 'Content-Type': 'application/json'}, body=json.dumps(body))
+        if req.method == 'GET':
+            gets.append(req.url)
+            return reply(QUALITY_VOCAB) if req.url.endswith('/types/vocab/') else reply({'detail': 'Not found'}, 404)
+        body = json.loads(req.post_data or '{}'); posts.append(body)
+        # WHG's daily cap as it has been asked to send it (whg.js A15): a 429 with its code and when it resets.
+        if mode['daily']: return route.fulfill(status=429, headers={**cors, 'Content-Type': 'application/json', 'Retry-After': '41234', 'Access-Control-Expose-Headers': 'Content-Length,Content-Range,Retry-After'}, body=json.dumps({'code': 'daily_limit_exceeded', 'detail': 'Daily API limit (5000 calls) exceeded', 'limit': 5000, 'resets_at': '2026-10-13T00:00:00Z'}))
+        res = {'attribution': LOOKUP_ATTRIBUTION}
+        for k, q in (body.get('queries') or {}).items(): res[k] = {'result': QUALITY_ANSWERS.get(q.get('query'), [])}
+        reply(res)
+    ctx.route(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'), stub)
+    page = ctx.new_page()
+    subjects = tmp / 'quality.json'
+    def typed(p, t): p['attestations'][0]['types'] = [t]; return p
+    places = [typed(krisis_place(QUALITY_BASE + 'windermere', 'Windermere', -2.905, 54.38), {'label': 'town'}),
+              typed(krisis_place(QUALITY_BASE + 'ashby', 'Ashby', -1.47, 52.75), {'identifier': 'http://vocab.getty.edu/aat/300387092', 'label': 'parish'}),
+              krisis_place(QUALITY_BASE + 'kendal', 'Kendal', -2.745, 54.33), krisis_place(QUALITY_BASE + 'lanach', 'Barony Lanach', -3.5, 55.6),
+              krisis_place(QUALITY_BASE + 'nowhere', 'Nowhere', 0.0, 51.0)]
+    subjects.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': QUALITY_BASE, 'title': 'Places of several kinds'}, 'spatialEntities': places}))
+    r = {}
+    W = lambda: (wait_state(page, lambda s: True, 5).get('work') or {})
+    def to_subject(name):
+        for _ in range(8):
+            if page.inner_text('#review-subject').strip() == name: return True
+            page.click('#review-next')
+        return page.inner_text('#review-subject').strip() == name
+    def rows():
+        return page.eval_on_selector_all('#review-place li.candidate', '''els => els.map((e) => ({ iri: e.querySelector('.iri')?.textContent,
+            kind: e.querySelector('p.kind')?.textContent || null, fit: e.querySelector('p.kind')?.dataset.fit || null,
+            chips: [...e.querySelectorAll('p.kind code.code-chip')].map((c) => c.textContent),
+            why: e.querySelector('p.kind-why')?.textContent || null, decision: e.querySelector('.decision')?.textContent }))''')
+    def shot(name):
+        if shots and not PROVE:
+            pathlib.Path(shots).mkdir(parents=True, exist_ok=True)
+            page.screenshot(path=str(pathlib.Path(shots) / name), full_page=False)
+
+    def looked_up():
+        page.goto(NOTOOLS if PROVE else base)
+        page.evaluate("() => { localStorage.setItem('plato-tools.permissions', JSON.stringify({ version: 1, grants: { 'gazetteer:whg': { state: 'allowed', at: '2026-10-12T10:00:00Z' } } })); localStorage.setItem('plato-tools.reviewer', JSON.stringify({ name: 'Quality Reviewer' })); }")
+        page.goto(NOTOOLS if PROVE else base)
+        wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+        page.set_input_files('#picker', [str(subjects)])
+        s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'detection')
+        if s.get('phase') != 'detected': raise RuntimeError(f'not detected: {s.get("phase")}')
+        if not page.evaluate("() => document.getElementById('lookup').open"): page.click('#lookup > summary')
+        page.fill('#whg-token', LOOKUP_TOKEN); page.press('#whg-token', 'Tab')
+        until(page, "() => /^Send 5 queries to WHG$/.test(document.getElementById('lookup-send').textContent) && !document.getElementById('lookup-send').disabled", 60)
+        page.click('#lookup-send')
+        s = wait_state(page, lambda s: (s.get('lookup') or {}).get('running') is False and s.get('phase') == 'reviewing', T(60), 'lookup')
+        r['summary'] = page.inner_text('#lookup-progress'); r['looked'] = True
+        r['counts'] = ((s.get('work') or {}).get('lookups') or [{}])[0].get('counts') or {}
+        # WHG's labels for AAT kinds come once WHG is allowed (scope-page.js aatLabels): wait for the redraw that uses them.
+        soon(page, "() => (window.__plato.kindLabels || {}).from === 'whg'", 15)
+        r['labels'] = page.evaluate('() => window.__plato.kindLabels || null')
+        return (len(posts) == 1 and r['counts'].get('added') == 7), {'posts': len(posts), 'counts': r['counts'], 'summary': r['summary'][:300]}
+    attempt('lookup quality: five places looked up in the stub of WHG, seven candidates added', looked_up)
+
+    def kinds_shown():
+        if not r.get('looked'): raise RuntimeError('the lookup did not run')
+        to_subject('Kendal'); k = rows(); shot('review-kendal-kinds.png')
+        r['kendal'] = k
+        tgn = next((x for x in k if (x['iri'] or '').endswith('place:tgn:7011000')), {})
+        wd = next((x for x in k if (x['iri'] or '').endswith('place:wd:Q1000')), {})
+        return (tgn.get('kind') == 'Kind of place: county seats aat:300008416' and tgn.get('chips') == ['aat:300008416']
+                and (r.get('labels') or {}).get('from') == 'whg' and any('/types/vocab/' in g for g in gets)
+                and wd.get('kind') == 'Kind of place: type unknown' and wd.get('chips') == []
+                and not any('Place' in (x.get('kind') or '') for x in k)), {'rows': k, 'labels': r.get('labels'), 'gets': gets[:3]}
+    attempt("lookup quality: a candidate's kind is shown, an AAT id by WHG's own label (from /types/vocab/, never the protocol's Place), and a candidate with none says \"type unknown\"", kinds_shown)
+
+    def codes_shown():
+        if not r.get('looked'): raise RuntimeError('the lookup did not run')
+        to_subject('Windermere'); k = rows(); shot('review-windermere-ranked.png'); r['windermere'] = k
+        return ([x['chips'] for x in k] == [['osm:town'], ['gn:H.LK']] and all((x['kind'] or '').startswith('Kind of place: ') for x in k)), k
+    attempt("lookup quality: a source's bare code is shown as a code (osm:town, gn:H.LK), with no label made up for it", codes_shown)
+
+    def preferred():
+        k = r.get('windermere') or []
+        if not k: raise RuntimeError('Windermere was not reviewed')
+        to_subject('Ashby'); a = rows(); shot('review-ashby-parish.png'); r['ashby'] = a
+        return ([x['iri'].rsplit('/', 1)[-1] for x in k] == ['place:osm:r1', 'place:gn:2634000'] and [x['fit'] for x in k] == ['match', 'conflict']
+                and k[0]['why'] == 'Ranked up: osm:town is the kind of place yours is (town), or a narrower kind.'
+                and k[1]['why'] == 'Ranked down: gn:H.LK, where yours is town. Never accepted in bulk; decide on it yourself.'
+                and [x['iri'].rsplit('/', 1)[-1] for x in a] == ['place:kain_par:100', 'place:gn:2657000'] and [x['fit'] for x in a] == ['match', 'other']
+                and a[0]['why'] == 'Ranked up: kain_par:parish is the kind of place yours is (parish), or a narrower kind.' and a[1]['why'] is None), {'windermere': k, 'ashby': a}
+    attempt("lookup quality: a candidate of the place's own kind is ranked first though WHG put it second and it is further (Ashby's parish, Windermere's town), a lake for a town last, and the review says why of each, and nothing of a kind that goes together", preferred)
+
+    def placeholders():
+        if not r.get('looked'): raise RuntimeError('the lookup did not run')
+        to_subject('Barony Lanach'); lan = rows()
+        to_subject('Nowhere'); said = page.inner_text('#review-place')
+        cands = W().get('candidates', [])
+        return (r['counts'].get('skipped', {}).get('placeholder') == 2
+                and 'Not suggested: 2 records whose only name is a placeholder (such as "Oknoname 037068 Dam")' in r['summary']
+                and [x['iri'].rsplit('/', 1)[-1] for x in lan] == ['place:gn:2645000'] and cands and not any('Oknoname' in json.dumps(c) for c in cands)
+                and '1 record whose only name is a placeholder (such as "Oknoname 037068 Dam") was left out.' in said), {'counts': r['counts'], 'summary': r['summary'][:400], 'lanach': lan, 'nowhere': said[:300]}
+    attempt("lookup quality: WHG's placeholder records (Oknoname, Unnamed) are left out and counted in the summary and on the place, the real Lanach beside them kept", placeholders)
+
+    def bulk():
+        if not r.get('looked'): raise RuntimeError('the lookup did not run')
+        until(page, "() => !document.getElementById('bulk-accept').disabled", 15)
+        page.click('#bulk-accept')
+        wait_state(page, lambda s: any((c.get('decision') or {}).get('kind') == 'match' for c in (s.get('work') or {}).get('candidates', [])), T(15), 'accepted')
+        said = page.inner_text('#bulk-result'); shot('review-bulk-refused.png')
+        cands = W().get('candidates', [])
+        dec = {c['gazetteer']['id']: (c.get('decision') or {}).get('kind') for c in cands}
+        return (dec.get('place:gn:2634000') is None and dec.get('place:osm:r1') is None and dec.get('place:tgn:7011000') == 'match' and dec.get('place:gn:2657000') == 'match'
+                and "1 of another kind of place than the place's own" in said and '2 accepted as yours.' in said), {'said': said[:300], 'decisions': dec}
+    attempt("lookup quality: the bulk accept leaves Windermere (its passing candidate a lake, the place a town) for the reviewer and says so, and accepts Kendal and Ashby", bulk)
+
+    def daily():
+        if not r.get('looked'): raise RuntimeError('the lookup did not run')
+        mode['daily'] = True
+        page.select_option('#lookup-places', 'all')
+        until(page, "() => /^Send 5 queries to WHG$/.test(document.getElementById('lookup-send').textContent) && !document.getElementById('lookup-send').disabled", 30)
+        n = len(posts)
+        page.click('#lookup-send')
+        s = wait_state(page, lambda s: (s.get('lookup') or {}).get('running') is False and (s.get('lookup') or {}).get('stopped'), T(60), 'daily cap')
+        out = {'stopped': (s.get('lookup') or {}).get('stopped'), 'said': page.inner_text('#lookup-progress'), 'sent': len(posts) - n,
+               'token state': page.inner_text('#whg-token-state'), 'session': page.evaluate("() => sessionStorage.getItem('plato-tools.whg-token') !== null"),
+               'focus': page.evaluate("() => document.activeElement?.id || null"),
+               'kept': sum(1 for c in (s.get('work') or {}).get('candidates', []) if c.get('lookup'))}
+        shot('lookup-daily-cap.png')
+        return (out['stopped'] == 'quota' and "WHG's daily limit for this token is reached; it resets at 01:00 BST on 13 October 2026" in out['said']
+                and out['sent'] == 1 and out['token state'] == 'Token kept for this tab only' and out['session'] is True and out['focus'] != 'whg-token' and out['kept'] == 7), out
+    attempt("lookup quality: WHG's daily cap (a 429 with code daily_limit_exceeded) stops the lookup at once, saying when it resets in the reader's own time; what was answered is kept, and the token is kept, not asked for again", daily)
+    browser.close()
 
 def scope_checks(pw, url, tmp):
     import re

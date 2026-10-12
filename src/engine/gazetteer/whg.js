@@ -37,15 +37,36 @@
 //    `extend` twice (Django, then unquote_plus), turning a `+` into a space, so JSON is the default.
 // A6 VERIFIED. User-Agent: a bot filter refuses an agent containing any of BLOCKED_AGENTS (a valid
 //    token exempts the request, but an anonymous entity request has none). CORS allows the
-//    `authorization` and `User-Agent` request headers, but EXPOSES only Content-Length and
-//    Content-Range: a page cannot read Retry-After, so in the browser a 429 or 503 always waits by
-//    the lookup's own backoff. Browsers may also not send a User-Agent a page sets.
+//    `authorization` and `User-Agent` request headers. It EXPOSED only Content-Length and Content-Range
+//    until 12 October 2026, when /reconcile added Retry-After (A15): a page reads a 429's wait from it
+//    there, and where it cannot (the entity endpoint, unless WHG says otherwise) waits by the lookup's own
+//    backoff. Browsers may also not send a User-Agent a page sets.
 // A7 VERIFIED. A candidate is {id, name, score, match, description ("Country: XX, YY"), type
 //    [{id, name}], ccodes (ISO 3166-1 alpha-2, often []), repr_point ([lon, lat] or null), has_geom
 //    (a POLYGON exists), namespace, alt_names, confidence, place_types, wikipedia}. It carries no
 //    geometry and no dates: for those, the entity (A10). `score` is relative within one response (the
 //    top candidate is always about 100); `confidence` (0 to 100, the name match only) can be compared
 //    across queries, but is present only for gateway candidates in fuzzy or phonetic mode.
+//    PROBED LIVE (12 October 2026, one POST of 10 names, then the 72 of the batch measurement, A14):
+//    `type` is the reconciliation protocol's type, the same for every candidate,
+//    [{id: "https://whgazetteer.org/static/whg_schema.jsonld#Place", name: "Place"}], and says nothing of
+//    the kind of place. The kind is in `place_types`, a list of {identifier, label}, whose shape differs
+//    by namespace (WHG place#305; the issue's "bare codes"):
+//      gn        {identifier: "PPL", label: "P"}: a GeoNames feature code, its class as the label;
+//      tgn       {identifier: "aat:300008347", label: "tgn"}: an AAT id, the only namespace that gives one;
+//      osm, ohm  {identifier: "town" | "village" | "administrative", label: "osm" | "ohm"}: a tag's value;
+//      wd        {identifier: "Q3957", label: "wikidata"}: a Wikidata class;
+//      iv        {identifier: "settlement" | "market-town", label: "indexvillaris"};
+//      kain_par  {identifier: "parish" | "ancient-parish" | "township", label: "kain_par"};
+//      vob_lgd, vob_rd  {identifier: "local-government-district" | "registration-district", label: the namespace};
+//      tm        {identifier: "place", label: "trismegistos"};
+//      pl, ukhc  {identifier: "fort-2" | "historic-county", label: "pleiades" | "ukhc"};
+//      ofs       {identifier: "aat:300008347", label: "ottnfs"}: an AAT id too;
+//      whg       {identifier: "aat:300008372", label: "villages"} (the AAT label), or {identifier: "", label:
+//                "Village"}: a contributed dataset's own word, with no identifier.
+//    Over the 13,500 candidates of the measurement (A14): every one's `type` was the protocol's Place; 27 of
+//    4,527 wd candidates had an empty place_types, every other candidate of every namespace had one or more.
+//    whgPlaceTypes() reads it as one id per type (below); a candidate with none is "type unknown".
 // A8 VERIFIED. An id is "place:<namespace>:<local id>"; its persistent address is
 //    https://w3id.org/whg/id/<id> (normaliseWhgIri for the other forms). A legacy cluster address,
 //    https://whgazetteer.org/places/<n>/portal/, is a different thing and is left as it is.
@@ -80,6 +101,31 @@
 //    WHG's own embedding of the name (its name model, Symphonym); WHG takes anything not two or three
 //    letters for "und" (undetermined), never an error. There is no other way to state a language, so
 //    these tools send one only when it is known, and never "und".
+// A15 VERIFIED by WHG's session, 12 October 2026 (Stephen's decision; the limits on production): 600 queries a
+//    minute per identity, a batch of 50 counting as 50; at most 50 queries a request, otherwise 400; 5,000
+//    calls a day per token, counted in requests, not queries. LIVE since 12 October 2026 (website 940fd89dc):
+//    the daily cap is a 429 with Retry-After (seconds to the reset) and {"code": "daily_limit_exceeded",
+//    "detail": "Daily API limit (5000 calls) exceeded", "limit": 5000, "resets_at": "<next midnight UTC>"}; a
+//    per-minute 429 has Retry-After and an {"error": …} body with no code; a refused token is a 401 with
+//    WWW-Authenticate and {"detail": "Invalid API token"}. Until then the daily cap was an authentication
+//    failure (401 or 403) with that detail and no Retry-After, which dailyLimit() still reads as a fallback.
+//    /reconcile now exposes Retry-After to CORS (Access-Control-Expose-Headers: Content-Length,
+//    Content-Range, Retry-After), so a page honours a per-minute 429's wait (index.js), and falls back to its
+//    own backoff where it cannot read it (another service, the entity endpoint).
+// A14 MEASURED (Issue #22; WHG place#274: one POST holds a WHG web worker for its whole fan-out). On 12 October
+//    2026, the same 150 names (every 3,500th labelled place of DEEP's export) sent to POST /reconcile in batches
+//    of 10, 25 and 50 (type Place, limit 10, nothing else), three rounds with the arms' order rotated, one
+//    request in flight, under 500 queries a minute: 72 requests, 1,350 queries. Wall time for the 150 names, the
+//    median of the three rounds: 10: 32.9 s (rounds 56.3, 32.9, 31.0; the first round's first arm met every
+//    name for the first time, and WHG's cache warm after it), 25: 31.8 s (34.1, 31.8, 31.1), 50: 31.3 s (31.4,
+//    31.2, 31.3). A request's median: 2.27 s for 10 (45 requests, longest 4.4 s), 5.29 s for 25 (18, 6.8 s),
+//    10.42 s for 50 (9, 11.6 s): about 210 ms a query whatever the batch. No 429, no 5xx, no error inside a 200,
+//    no `gateway.answered: false`, no query missing from an answer, in any arm. So a larger batch saves no
+//    time; it holds a worker longer (place#274's concern) and spends fewer of the 5,000 requests a day (a day's
+//    allowance is 50,000 queries at 10, 125,000 at 25, 250,000 at 50). 25 stays the default (DEFAULT_BATCH in
+//    index.js): neither other size was better on time, and 25 keeps a worker's hold near 5 s while a day's
+//    allowance still covers 125,000 queries. Measured on a quiet WHG, with a warm cache after the first arm: a
+//    busy one, which place#274 is about, was not measured.
 
 export const WHG_ENDPOINT = 'https://whgazetteer.org/reconcile';
 /** Queries per POST (A3). */
@@ -96,6 +142,26 @@ export const BLOCKED_AGENTS = ['curl', 'python-requests', 'Go-http-client', 'nod
 
 /** Would WHG's bot filter refuse this User-Agent (A6)? */
 export const isBlockedAgent = (ua) => BLOCKED_AGENTS.some((b) => String(ua).toLowerCase().includes(b.toLowerCase()));
+
+/**
+ * WHG's daily cap (A3, A15): from an answer's status and body text, { resetsAt } when it says this token's
+ * day's allowance of requests is spent, else null. As WHG sends it on production since 12 October 2026
+ * (website 940fd89dc): a 429 whose JSON says `code: "daily_limit_exceeded"`, with `resets_at` (always the next
+ * midnight UTC) and Retry-After; any other 429 is the per-minute limit. FALLBACK, TO BE RETIRED once no older
+ * or cached answer can come back: a 401 or 403 whose detail says "Daily API limit (N calls) exceeded"
+ * (isQuotaSpent), which is how WHG said it until 12 October. `resetsAt` is `resets_at` as an ISO date-time
+ * when readable, else null ("tomorrow"). A spent allowance is never a refused token: the lookup stops, keeps
+ * what was answered, and the token is kept and not asked for again.
+ */
+export function dailyLimit(status, text) {
+  let j = null;
+  try { j = JSON.parse(String(text ?? '')); } catch { /* not JSON: the text as it is */ }
+  const at = j && typeof j.resets_at === 'string' && Number.isFinite(Date.parse(j.resets_at)) ? new Date(Date.parse(j.resets_at)).toISOString() : null;
+  if (status === 429) return j && j.code === 'daily_limit_exceeded' ? { resetsAt: at } : null;
+  if (status !== 401 && status !== 403) return null;
+  const said = ['detail', 'error', 'message'].map((k) => j?.[k]).find((v) => typeof v === 'string') ?? (j ? '' : String(text ?? ''));
+  return isQuotaSpent(said) ? { resetsAt: at } : null;
+}
 
 /** Is a 401's or 403's detail a spent allowance rather than a refused token (A3)? */
 export function isQuotaSpent(detail) {
@@ -269,6 +335,31 @@ const isLat = (x) => typeof x === 'number' && Number.isFinite(x) && x >= -90 && 
 export function reprPoint(candidate) {
   const p = candidate?.repr_point;
   return Array.isArray(p) && p.length >= 2 && isLon(p[0]) && isLat(p[1]) ? [p[0], p[1]] : null;
+}
+
+/**
+ * A candidate's kinds of place (A7), from its `place_types`, one id each, in the order given and each once:
+ * an AAT id as it comes ("aat:300008347"); a GeoNames code as "gn:<class>.<code>" ("gn:P.PPL"); any other as
+ * "<label>:<identifier>" ("osm:village", "wikidata:Q3957", "kain_par:parish"), the label being WHG's name for
+ * the source, else the namespace; a label with no identifier (WHG's own records) as "<namespace>:<label>"
+ * ("whg:Village"). A bare string, as an older answer or another service may give, is "<namespace>:<string>".
+ * [] when it gives none: the kind is not known.
+ */
+export function whgPlaceTypes(candidate) {
+  const ns = typeof candidate?.namespace === 'string' && candidate.namespace ? candidate.namespace : namespaceOf(candidate?.id);
+  const out = [];
+  const add = (x) => { if (x && !out.includes(x)) out.push(x); };
+  const clean = (s) => (typeof s === 'string' ? s.trim().replace(/\s+/g, ' ') : '');
+  for (const t of Array.isArray(candidate?.place_types) ? candidate.place_types : []) {
+    if (typeof t === 'string') { const s = clean(t); if (s) add(/^aat:\d+$/.test(s) ? s : `${ns || 'type'}:${s}`); continue; }
+    const id = clean(t?.identifier), label = clean(t?.label);
+    // WHG's own records (namespace whg) may give a label alone, the contributor's word ("Village", "Cave").
+    if (!id) { if (label) add(`${ns || 'type'}:${label}`); continue; }
+    if (/^aat:\d+$/.test(id)) add(id);
+    else if (ns === 'gn' && /^[A-Z]$/.test(label)) add(`gn:${label}.${id}`);
+    else add(`${label || ns || 'type'}:${id}`);
+  }
+  return out;
 }
 
 const CCODE = /^[A-Za-z]{2}$/;

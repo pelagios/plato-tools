@@ -162,11 +162,13 @@ function reader(side, rep, word, standIns = new Set()) {
       if (!Object.hasOwn(langs, k)) langs[k] = lang.trim();
     };
     add(rec.label);
-    const types = new Set();
+    const types = new Set(), typeIds = new Set();
     for (const a of rec.attestations || []) {
       if (!a || typeof a !== 'object') continue;
       if (!a.negated) for (const n of a.names || []) { add(n?.toponym); add(n?.romanized); tag(n?.toponym, n?.language); tag(n?.romanized, n?.language); }
       if (!a.negated) for (const t of a.types || []) if (t && typeof t.label === 'string' && types.size < 5) types.add(t.label);
+      // Krisis (#20): the types' addresses too (an AAT concept's), so that a lookup can prefer a candidate of the place's kind (kinds.js).
+      if (!a.negated) for (const t of a.types || []) if (t && typeof t.identifier === 'string' && /^https?:\/\//.test(t.identifier) && typeIds.size < 5) typeIds.add(t.identifier);
       for (const r of a.identities || []) link(r?.subject ?? iri, r?.object, !!a.negated, typeof a['@id'] === 'string' ? a['@id'] : null);
     }
     collectWithdrawn(rec.attestations, side.withdrawals);
@@ -175,6 +177,7 @@ function reader(side, rep, word, standIns = new Set()) {
     const p = { label: typeof rec.label === 'string' ? rec.label : iri, names, point: null, points: attestationPoints(rec) };
     if (Array.isArray(rec.ccodes) && rec.ccodes.length) p.ccodes = rec.ccodes.filter((c) => typeof c === 'string');
     if (types.size) p.types = [...types];
+    if (typeIds.size) p.typeIds = [...typeIds];
     if (Object.keys(langs).length) p.langs = langs;
     if (!side.places.has(iri)) side.places.set(iri, p);
     else {

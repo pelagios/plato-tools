@@ -91,9 +91,10 @@ function pruneCache() {
 /**
  * One of WHG's anonymous answers, through the permissions module: { v, cached, at } (at: the day it was had),
  * or null when it cannot be had. Kept in this browser for a week; read back only when it has the shape
- * asked for (`ok`).
+ * asked for (`ok`). `keep` makes what is kept (and given) from the answer: the part needed, where the whole
+ * would be larger than it is worth keeping; what is kept must still pass `ok`.
  */
-async function whgGet(path, ok) {
+async function whgGet(path, ok, keep = (v) => v) {
   const key = CACHE_KEY + path;
   const kept = keptAnswer(key, ok);
   if (kept) return { v: kept.v, cached: true, at: new Date(kept.at).toISOString().slice(0, 10) };
@@ -101,8 +102,9 @@ async function whgGet(path, ok) {
   try {
     const r = await permissions.fetch(WHG + path, { cat: 'gazetteer', subj: 'whg' });
     if (!r.ok) return null;
-    const v = await r.json();
-    if (!ok(v)) return null;
+    const got = await r.json();
+    const v = ok(got) ? keep(got) : null;
+    if (v === null || !ok(v)) return null;
     try { localStorage.setItem(key, JSON.stringify({ at: Date.now(), v })); } catch { /* not kept: asked again next time */ }
     return { v, cached: false, at: today() };
   } catch { return null; }
@@ -112,6 +114,28 @@ const isFound = (v) => Array.isArray(v) && v.every((n) => n && typeof n.text ===
 const isExpanded = (v) => !!v && Array.isArray(v.ids) && v.ids.every((x) => typeof x === 'string' && /^aat:\d+$/.test(x));
 const isSources = (v) => !!v && Array.isArray(v.sources) && v.sources.every((s) => s && typeof s.namespace === 'string');
 const aatOf = (n) => (typeof n.aat_id === 'number' ? `aat:${n.aat_id}` : n.id);
+const isVocab = (v) => !!v && !!v.byId && typeof v.byId === 'object' && Object.entries(v.byId).every(([k, x]) => /^aat:\d+$/.test(k) && x && typeof x.label === 'string');
+
+/**
+ * The labels of AAT place types, for the kind of place a review shows for each candidate (Issue #20): WHG's
+ * flat map, GET /types/vocab/ ({ byId: { "aat:<id>": { label, desc } } }, 1,084 concepts on 12 October 2026),
+ * asked for as Scope asks WHG anything (anonymously, through the permissions module, only once it is
+ * allowed) and kept in this browser for a week, the labels alone (the descriptions are most of its 268 KB).
+ * Until it comes, or without the permission, the labels Scope bundles for its shortlist. Resolves to
+ * { labels: Map(id → label), from: 'whg' | 'cache' | 'bundled', at }; asked once a page.
+ */
+let vocabAsked = null;
+export const BUNDLED_AAT_LABELS = new Map(TYPE_SHORTLIST.map((t) => [t.id, t.aat]));
+export function aatLabels() {
+  if (vocabAsked) return vocabAsked;
+  const shrink = (v) => ({ byId: Object.fromEntries(Object.entries(v.byId).map(([k, x]) => [k, { label: x.label }])) });
+  vocabAsked = whgGet('/types/vocab/', isVocab, shrink).then((got) => (got
+    ? { labels: new Map(Object.entries(got.v.byId).map(([k, x]) => [k, x.label])), from: got.cached ? 'cache' : 'whg', at: got.at }
+    : { labels: BUNDLED_AAT_LABELS, from: 'bundled', at: null }));
+  // Not had (no permission yet, or WHG not answering): asked again next time, rather than for ever bundled.
+  vocabAsked.then((r) => { if (r.from === 'bundled') vocabAsked = null; });
+  return vocabAsked;
+}
 
 /**
  * Mount Scope. `methodos` is Methodos's page (scope(), setScope(s), scoped(), following(), id()); `lookup()`

@@ -43,7 +43,7 @@
 //   token once, when it is first sent, and its retries send the same one; a change of token takes
 //   effect from the next request (for reconcile and extend, the next batch).
 // - 429 (too many queries), and 502, 503, 504 or no answer at all, are tried again after a pause:
-//   the service's Retry-After when it can be read (capped; a page cannot read it from WHG, A6),
+//   the service's Retry-After when it can be read (capped; a page can read WHG's on /reconcile, A15),
 //   else a growing one; the lock is let go for the pause. 401, 403 and 451 are final at once: a
 //   token refused, a day's allowance spent or a source's terms will not change by asking again, and
 //   WHG blocks clients that keep asking.
@@ -60,13 +60,14 @@
 //   its wait for the lock, and its requests still waiting their turn.
 import {
   isWhg, whgIri, reprPoint, candidateCcodes, answerStatus, mergeAttribution, namespaceOf, entityRequest,
-  isBlockedAgent, isQuotaSpent, whgQueryType, WHG_BATCH_LIMIT, WHG_DEFAULT_LIMIT, WHG_ENCODING, WHG_QUERY_RATE, WHG_ENTITY_RATE,
+  isBlockedAgent, dailyLimit, whgQueryType, WHG_BATCH_LIMIT, WHG_DEFAULT_LIMIT, WHG_ENCODING, WHG_QUERY_RATE, WHG_ENTITY_RATE,
 } from './whg.js';
 
 export {
-  WHG_ENDPOINT, WHG_PLACE_TYPE, BLOCKED_AGENTS, isWhg, whgIri, normaliseWhgIri, parseCentroid, parseGeojsonValues, mergeAttribution, whgLang, nameLang,
+  WHG_ENDPOINT, WHG_PLACE_TYPE, BLOCKED_AGENTS, dailyLimit, isWhg, whgIri, normaliseWhgIri, parseCentroid, parseGeojsonValues, mergeAttribution, whgLang, nameLang, whgPlaceTypes,
 } from './whg.js';
 
+// 25, as measured against the alternatives (whg.js A14, 12 October 2026): no size saves time, and 25 holds a WHG worker about 5 s.
 const DEFAULT_BATCH = 25;
 const DEFAULT_TIMEOUT_MS = 60_000;
 // Tokens replaced are kept this long for cleaning what the service says back: enough for a few
@@ -81,7 +82,8 @@ const LOCK_PREFIX = 'plato-tools:gazetteer:';
 /**
  * Why a lookup failed. `kind` is:
  * - 'auth': the token was refused (401, 403);
- * - 'quota': the day's allowance of requests is spent (a 401 that says so; A3);
+ * - 'quota': the day's allowance of requests is spent (a 401 or 403 that says so, or a 429 with WHG's
+ *   code daily_limit_exceeded: whg.js dailyLimit, A15); `resetsAt` is when it comes back (ISO), or null;
  * - 'rate': still too many queries after waiting (429);
  * - 'unavailable': the source does not allow the record to be passed on (451; A10);
  * - 'network': no answer, or none within the timeout;
@@ -95,8 +97,9 @@ const LOCK_PREFIX = 'plato-tools:gazetteer:';
  * `status` is the HTTP status, or null. It carries nothing else: no request, no headers, no cause.
  */
 export class GazetteerError extends Error {
-  constructor(message, { status = null, kind, refusal }) {
+  constructor(message, { status = null, kind, refusal, resetsAt }) {
     super(message);
+    if (kind === 'quota') this.resetsAt = resetsAt ?? null;
     this.name = 'GazetteerError';
     this.status = status;
     this.kind = kind;
@@ -523,8 +526,10 @@ function makeLookup({
           throw new GazetteerError('The gazetteer answered with something that is not JSON.', { status: res.status, kind: 'server' });
         }
       }
-      if (RETRY_STATUS.has(res.status) && tries < maxRetries) {
-        // Null in a browser talking to WHG, whose CORS does not expose Retry-After (A6).
+      // The day's allowance spent (A15) is never tried again, whatever its status: not before it resets.
+      const daily = dailyLimit(res.status, text);
+      if (RETRY_STATUS.has(res.status) && tries < maxRetries && !daily) {
+        // Null where a page cannot read it (CORS): WHG's /reconcile exposes it since 12 October 2026 (A15).
         const asked = retryAfter(res.headers?.get?.('Retry-After'));
         // Without it, a 429 waits longer: WHG's window is a minute (A3).
         const wait = asked ?? backoff(tries, res.status === 429 ? 4000 : 1000);
@@ -533,7 +538,7 @@ function makeLookup({
       }
       const raw = detail(text);
       const said = clip(scrub(raw, tok));
-      const kind = res.status === 401 || res.status === 403 ? (isQuotaSpent(raw) ? 'quota' : 'auth')
+      const kind = daily ? 'quota' : res.status === 401 || res.status === 403 ? 'auth'
         : res.status === 451 ? 'unavailable' : res.status === 429 ? 'rate' : 'server';
       const lead = {
         auth: 'The gazetteer refused the token',
@@ -542,7 +547,7 @@ function makeLookup({
         rate: 'The gazetteer is still refusing queries as too many, after waiting',
         server: 'The gazetteer refused or failed the request',
       }[kind];
-      throw new GazetteerError(`${lead} (${res.status}${said ? ': ' + said : ''}).`, { status: res.status, kind });
+      throw new GazetteerError(`${lead} (${res.status}${said ? ': ' + said : ''}).`, { status: res.status, kind, ...(daily ? { resetsAt: daily.resetsAt } : {}) });
     }
   }
   const post = (payload, cost, signal) => send({ method: 'POST', url: endpoint, payload, auth: true, pacer: queryPacer, cost }, signal);

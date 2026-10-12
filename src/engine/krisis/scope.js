@@ -13,8 +13,10 @@
 //     sources: ['gn', 'tgn', …] }                                             sent as namespaces
 //
 // What WHG said of these (its session, 12 October 2026):
-// - Every one is a hard filter, applied after a window of about 200 candidates by name: a narrow Scope can
-//   leave a place with nothing, which is said, row by row, and never relaxed by itself.
+// - Sources (namespaces) narrow the search itself, before WHG's window of about 200 candidates by name (a
+//   gateway change of 12 October 2026). Where, kinds of place and years are hard filters applied after that
+//   window: a narrow Scope of those can leave a place with nothing, which is said, row by row, and never
+//   relaxed by itself.
 // - A scoped query with nothing in it is answered empty (fail-closed), with scope.applied (lookup.js).
 // - A spatial filter turns WHG's legacy index off.
 // - Ids are case-sensitive, and contained_in takes them bare ("gn:2635167"), never a full address.

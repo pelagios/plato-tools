@@ -68,7 +68,7 @@ export function seedRegions(work, { regions = [], places = [] } = {}) {
   }
   for (const p of places) {
     if (!(typeof p.within === 'string' && isRegion(work, p.within))) continue;
-    if (!Object.hasOwn(work.places, p.iri)) work.places[p.iri] = { label: p.label, names: p.names || [p.label], point: p.point ?? null, ...(p.ccodes ? { ccodes: p.ccodes } : {}), ...(p.types ? { types: p.types } : {}) };
+    if (!Object.hasOwn(work.places, p.iri)) work.places[p.iri] = { label: p.label, names: p.names || [p.label], point: p.point ?? null, ...(p.ccodes ? { ccodes: p.ccodes } : {}), ...(p.types ? { types: p.types } : {}), ...(p.typeIds ? { typeIds: p.typeIds } : {}) };
     Object.assign(work.places[p.iri], { within: p.within, level: p.level });
   }
   return work;

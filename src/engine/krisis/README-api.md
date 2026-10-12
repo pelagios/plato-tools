@@ -48,7 +48,7 @@ Status: IMPLEMENTED; engine and CLI tests pass (test/krisis.test.js, test/krisis
     `rule` in words), `qualifiers` (`{ table, lists, definitions, cap, rare }`) and `scoring` (in words);
     `algorithm_version` is `krisis-names 7` (`ALGORITHM`). A candidate only the qualifier rule suggested has
     `rule: 'qualifier'` and `qualifier` (the qualifiers, as written: `'Chipping'`). A candidate from a
-    lookup carries its own, `krisis-lookup 1` (`LOOKUP_ALGORITHM`), which overrides the file's.
+    lookup carries its own, `krisis-lookup 2` (`LOOKUP_ALGORITHM`), which overrides the file's.
 - `src/engine/krisis/apply.js`:
   - `apply({ subjects, work, options: { output = 'dataset', reviewer, date, base, othersTitle } }, env) -> { report, outputs, incomplete? }`
     `work` is a work object or its text. `reviewer` ({ name, orcid? }) overrides `work.reviewer`;
@@ -195,7 +195,7 @@ words them all.
   `diceForm(s)`, `isLatin(s)`, `bestDice(forms, cand)`, `withheldOf(cand, forms)`, `tieOf(answer)`.
   `guardOf(workCandidate)` — the same verdict from what mergeAnswers stored (`not-recorded` for a local
   candidate or an older file). `passing(work, iri)`, `guardsFirst(work, order)`.
-  `planGuarded(work) -> { accept, leftOut: { far, ccodes, total, examples }, several, tied: [{ id, place,
+  `planGuarded(work) -> { accept, leftOut: { far, ccodes, kind, total, examples }, several, tied: [{ id, place,
   count, region }] }` (changes nothing; `tied`: places left out because `count` candidates of the passing
   one's title were found under the same constraint, not in another country and, unless confined to a
   region, not far; `region` the label of the region it was confined to, else null; #31),

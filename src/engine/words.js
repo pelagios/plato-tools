@@ -807,7 +807,6 @@ export function krisisLookupNote(kind, title, algorithm) {
 }
 const STOPPED = {
   auth: "The lookup stopped: the gazetteer refused the token, or today's allowance of requests is spent. Check the token, and resume the lookup (tomorrow, if the allowance is spent).",
-  quota: "The lookup stopped: the gazetteer's allowance of requests for today is spent. Resume it tomorrow.",
   rate: 'The lookup stopped: the gazetteer still refused the queries as too many after waiting. Resume it later.',
   unavailable: 'The lookup stopped: the gazetteer may not pass on what was asked for.',
   network: 'The lookup stopped: the gazetteer could not be reached. Resume it when it can.',
@@ -830,16 +829,31 @@ const REFUSED_LOOKUP = {
 export const LOOKUP_WORDS = {
   /** Why a lookup stopped ({ kind, message } from runLookup), with what the gazetteer said. */
   stopped: (s) => (s.kind === 'permission' ? REFUSED_LOOKUP[s.refused] || REFUSED_LOOKUP.undecided : s.kind === 'suspect' && s.scoped ? SCOPE_WORDS.suspect
+    : s.kind === 'quota' ? LOOKUP_WORDS.dailyLimit(s.resetsAt)
     : (STOPPED[s.kind] || STOPPED.server) + (s.message ? ` (${s.message})` : '')),
   /** The same, for each kind of refusal by the permissions module. */
   refused: REFUSED_LOOKUP,
+  /**
+   * The day's allowance of requests spent (whg.js dailyLimit, A15): when it resets (an ISO date-time; WHG's is
+   * always the next midnight UTC), said in the reader's own time and zone ("01:00 BST on 13 October 2026"),
+   * or "tomorrow" when the service did not say. `timeZone` is for the tests. The token is not at fault, and is kept.
+   */
+  dailyLimit: (resetsAt, timeZone) => {
+    const t = typeof resetsAt === 'string' && Number.isFinite(Date.parse(resetsAt)) ? new Date(resetsAt) : null;
+    const tz = timeZone ? { timeZone } : {};
+    const when = t ? `at ${t.toLocaleTimeString('en-GB', { ...tz, hour: '2-digit', minute: '2-digit', timeZoneName: 'short' })} on ${t.toLocaleDateString('en-GB', { ...tz, day: 'numeric', month: 'long', year: 'numeric' })}` : 'tomorrow';
+    return `The lookup stopped: WHG's daily limit for this token is reached; it resets ${when}. What was answered is kept, and your token is kept: resume the lookup then.`;
+  },
   /** The places a lookup takes, as the options name them. */
   choices: {
     unmatched: 'places without candidates from the other dataset', all: 'all places',
     pending: 'places not yet looked up, or not answered', unlinked: 'places not yet linked to the gazetteer',
   },
   /** A place answered with no candidates: which names were sent, so that "none" is read for what it is. */
-  notFound: (q) => (q.sent.length > 1 ? `No candidates (label and ${plural(q.sent.length - 1, 'other name')}).` : 'No candidates (label only).'),
+  notFound: (q) => (q.sent.length > 1 ? `No candidates (label and ${plural(q.sent.length - 1, 'other name')}).` : 'No candidates (label only).')
+    + (q.placeholders ? ` ${LOOKUP_WORDS.placeholders(q.placeholders)}` : ''),
+  /** Records whose only name is a cataloguing placeholder (Krisis placeholders.js; WHG place#216), left out. */
+  placeholders: (n) => `${plural(n, 'record', 'records')} whose only name is a placeholder (such as "Oknoname 037068 Dam") ${n === 1 ? 'was' : 'were'} left out.`,
   /** A place the gazetteer did not answer: not "no match". */
   unanswered: 'The gazetteer did not answer for this place; this is not a finding that it has no match. Look it up again.',
   far: (km) => `further than ${km.toLocaleString('en-GB')} km`,
@@ -877,7 +891,8 @@ export const LOOKUP_WORDS = {
   summary(c, service) {
     const skipped = [c.skipped.noIri ? `${plural(c.skipped.noIri, 'candidate')} without a web address` : '', c.skipped.linked ? `${plural(c.skipped.linked, 'candidate')} already linked` : '',
       c.skipped.denied ? `${plural(c.skipped.denied, 'candidate')} already said to be a different place` : '', c.skipped.decided ? `${plural(c.skipped.decided, 'candidate')} already decided in this review` : '',
-      c.skipped.duplicate ? `${plural(c.skipped.duplicate, 'candidate')} already suggested` : ''].filter(Boolean);
+      c.skipped.duplicate ? `${plural(c.skipped.duplicate, 'candidate')} already suggested` : '',
+      c.skipped.placeholder ? `${plural(c.skipped.placeholder, 'record')} whose only name is a placeholder (such as "Oknoname 037068 Dam")` : ''].filter(Boolean);
     const rest = [c.withoutName ? `${plural(c.withoutName, 'place was', 'places were')} not looked up, having no name (only a web address)` : '',
       c.unanswered ? `${plural(c.unanswered, 'place was', 'places were')} not answered, and can be looked up again` : '',
       c.scopeNotApplied ? `for ${plural(c.scopeNotApplied, 'place')} the gazetteer did not apply the distance filter, so its candidates are not filtered by distance` : '',
@@ -934,6 +949,12 @@ export const lookupPage = {
     return parts.length ? `${service}'s own figures: ${parts.join(', ')}. Neither says it is the same place.` : '';
   },
   described: (service, text) => `${service} describes it: ${text}`,
+  /** A candidate's kind of place (#20): its types, an AAT id by WHG's label for it, a source's code as a code; or not known. */
+  kindLabel: 'Kind of place:',
+  kindUnknown: 'type unknown',
+  /** Why a candidate was ranked up or down for its kind (kinds.js kindFit), naming the place's kind as the dataset says it. */
+  kindMatch: (theirs, yours) => `Ranked up: ${theirs} is the kind of place yours is (${yours}), or a narrower kind.`,
+  kindConflict: (theirs, yours) => `Ranked down: ${theirs}, where yours is ${yours}. Never accepted in bulk; decide on it yourself.`,
   /** A candidate far away: shown, marked, never hidden. */
   far: (km) => `Far: ${LOOKUP_WORDS.far(km)}`,
   /** A candidate's licence, from the attribution the service sent; a warning when it limits use, and "licence unknown" never shown as fine. */
@@ -994,7 +1015,8 @@ export const guardWords = {
   namesakes: (n, region) => `${n.toLocaleString('en-GB')} places of this name ${region ? `in ${region}` : 'where it was looked for'}: left for you, not accepted in bulk.`,
   /** Those left out of the bulk accept, and why. */
   leftOut: (l, several = 0, tied = []) => [
-    l.total ? `${l.total.toLocaleString('en-GB')} left out: ${[l.far ? `${l.far.toLocaleString('en-GB')} further from the place than the greatest distance` : '', l.ccodes ? `${l.ccodes.toLocaleString('en-GB')} in another country than the place's own` : ''].filter(Boolean).join(', ')}. Decide on them yourself.` : '',
+    l.total ? `${l.total.toLocaleString('en-GB')} left out: ${[l.far ? `${l.far.toLocaleString('en-GB')} further from the place than the greatest distance` : '', l.ccodes ? `${l.ccodes.toLocaleString('en-GB')} in another country than the place's own` : '',
+      l.kind ? `${l.kind.toLocaleString('en-GB')} of another kind of place than the place's own (a lake for a town, say)` : ''].filter(Boolean).join(', ')}. Decide on them yourself.` : '',
     several ? `${several.toLocaleString('en-GB')} ${several === 1 ? 'place has' : 'places have'} more than one passing, and ${several === 1 ? 'is' : 'are'} left to you.` : '',
     guardWords.ties(tied)].filter(Boolean).join(' '),
   /** The places left out for namesakes (#31), from how many places of its name each has: "1 place has 2 candidates of its name …". */
@@ -1006,7 +1028,7 @@ export const guardWords = {
   },
   /** The command line's dry run of a review: the count only; it never accepts. */
   dryRun: (n, l, several = 0, tied = []) => `${n.toLocaleString('en-GB')} ${n === 1 ? 'place has' : 'places have'} exactly one candidate passing WHG's guards and would be accepted (${[
-    `${l.total.toLocaleString('en-GB')} more left out as far or in another country`,
+    `${l.total.toLocaleString('en-GB')} more left out as far, in another country or of another kind of place`,
     `${several.toLocaleString('en-GB')} with more than one passing`,
     `${tied.length.toLocaleString('en-GB')} with candidates of their name where they were looked for`].join(', ')}). Accepting them is done on the page only.`,
 };
@@ -1234,7 +1256,7 @@ export const SCOPE_WORDS = {
   whose: (workflow) => (workflow
     ? 'This workflow\'s Scope: kept with the workflow, in this browser and in its downloaded record, and used by every WHG lookup it makes.'
     : 'This tab\'s Scope, for the lookups made here outside a workflow: kept for this tab only. A workflow keeps a Scope of its own.'),
-  lede: 'Confine every lookup in the World Historical Gazetteer to a part of the world, kinds of place, years and sources. Each is a filter: WHG first takes about 200 candidates by name, then leaves out every one outside the Scope, so a narrow Scope can leave a place with nothing, the right answer too.',
+  lede: 'Confine every lookup in the World Historical Gazetteer to a part of the world, kinds of place, years and sources. Sources narrow WHG\'s search itself. Where, kinds of place and years are filters: WHG first takes its best 200 or so matches by name, then leaves out every one outside them, so a narrow Scope of those can leave a place with nothing, the right answer too.',
   /** The chips in the rail and the lookup panel: [{ key, text, warn? }]. */
   chips(scope, names = {}) {
     const country = names.country || ((c) => c), source = names.source || ((s) => s);
@@ -1353,7 +1375,13 @@ export const SCOPE_WORDS = {
   /** The lookup panel's preview of what of the Scope is sent. */
   preview(s) {
     const what = { where: 'its Where', what: 'its kinds of place', when: 'its years', sources: 'its sources' };
-    const said = s.parts.length ? `The Scope is sent as ${s.keys.join(', ')} (${s.parts.map((p) => what[p]).join(', ')}). Each is a filter, applied by WHG to its best 200 or so matches by name: a narrow Scope can leave a place with nothing, the right answer too.`
+    // WHG, 12 October 2026: the sources (namespaces) narrow the search itself, before its window of about 200
+    // matches by name; Where, kinds of place and years are applied to that window after it.
+    const after = s.parts.filter((p) => p !== 'sources'), named = { where: 'Its Where', what: 'its kinds of place', when: 'its years' };
+    const list = after.map((p, i) => (i ? named[p] : named[p].replace(/^i/, 'I'))).join(after.length > 2 ? ', ' : ' and ').replace(/, ([^,]*)$/, ' and $1');
+    const how = [s.parts.includes('sources') ? " Its sources narrow WHG's search itself." : '',
+      after.length ? ` ${list} ${after.length === 1 && after[0] === 'where' ? 'is a filter' : 'are filters'} on WHG's best 200 or so matches by name: a narrow Scope of ${after.length === 1 && after[0] === 'where' ? 'it' : 'them'} can leave a place with nothing, the right answer too.` : ''].join('');
+    const said = s.parts.length ? `The Scope is sent as ${s.keys.join(', ')} (${s.parts.map((p) => what[p]).join(', ')}).${how}`
       : 'The Scope adds nothing to these queries.';
     const gave = s.whereYielded ? ` For ${plural(s.whereYielded, 'place')}, the Scope's Where gives way to where the row already says to look.` : '';
     return said + gave + (s.region ? ' A region is looked up within the Scope\'s Where alone.' : '');
