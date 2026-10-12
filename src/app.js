@@ -39,6 +39,7 @@ import { seedRegions, decideRegion, settleRegion, undo as undoRegion, selectLeve
 import { REGION_PAGE as RP, REGION_WORDS } from './engine/words.js';
 import { levelNames, levelLabel, navigator as levelNavigator, firstOpen, chainOf, placeChain, constraintLine, notesOf, relaxOptions, costOf, levelRegions, unsettledOf, placesToLook, lockedPlaces, wouldClear, priorOf, restorePrior, nameOf, regionDomId, certaintyChoices, CERTAINTY_DEFAULT, regionMatchOptions } from './krisis/region-page.js';
 import { mountMethodos } from './methodos/page.js';
+import { version as TOOLS_VERSION } from '../package.json';
 import { mountScope, aatLabels, BUNDLED_AAT_LABELS } from './scope-page.js';
 import { kindFit, candidateTypes } from './engine/krisis/kinds.js';
 import { workflowStore } from './methodos/store.js';
@@ -1045,6 +1046,26 @@ $('toolbox').addEventListener('click', (e) => {
 window.addEventListener('hashchange', () => { chooseTool(toolFromHash()); if (location.hash === '#methodos') methodos.open(); });
 chooseTool(toolFromHash());
 
+// The project file's destination, asked for at the click "Save the project": where the browser has a save
+// dialogue (Chromium), the zip is written straight into the file chosen, a chunk at a time; elsewhere it
+// is gathered and downloaded, as "Save the review" does. A promise of { write, close, abort }, or of null
+// when the dialogue was closed.
+function projectTarget(name) {
+  const download = () => {
+    let parts = [];
+    return { write: (c) => { parts.push(c); }, abort: () => { parts = []; },
+      close: () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(parts, { type: 'application/zip' })); parts = []; a.download = name; a.rel = 'noopener'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 60000); } };
+  };
+  if (!window.showSaveFilePicker || window.__plato_forceDownload) return Promise.resolve(download());
+  return window.showSaveFilePicker({ suggestedName: name, types: [{ description: 'PLATO tools project', accept: { 'application/zip': ['.platoproj'] } }] })
+    .then(async (h) => { const w = await h.createWritable(); return { write: (c) => w.write(c), close: () => w.close(), abort: () => w.abort() }; })
+    .catch((e) => (e?.name === 'AbortError' ? null : download()));
+}
+/** Settled once the files chosen are recognised, or found not to be (state.phase), or when none is being looked at. */
+function detectionSettled() {
+  return new Promise((resolve) => { const t = () => (state.phase === 'detecting' ? setTimeout(t, 50) : resolve()); t(); });
+}
+
 // ---- Methodos: the interview and the tracker (src/methodos/page.js) ------------------------------
 // Opened from its card (or an address ending #methodos); until then the page is as it was. Each step
 // the workflow comes to chooses that step's tool, as its card would, and is said in #for-tool.
@@ -1069,10 +1090,20 @@ const methodos = mountMethodos({
     // As if typed in Options: its own listeners (the preview made under it is let go) hear 'input' and 'change'.
     setBase: (v) => { if ($('base').value === v) return; $('base').value = v; for (const t of ['input', 'change']) $('base').dispatchEvent(new Event(t, { bubbles: true })); },
     parked: () => parked,
+    // The project file (src/engine/methodos/project.js): where it is saved, asked at the click; what it must never hold; a review read from it.
+    saveTarget: projectTarget,
+    secrets: () => [permissions.token.get()].filter(Boolean),
+    openReview: async (f, list) => {
+      if (list.length && !files.length && await whenReady !== false) { const dt = new DataTransfer(); for (const x of list) dt.items.add(x); $('picker').files = dt.files; choose(list); }
+      await detectionSettled();
+      await resume(f);
+    },
     // Shown again, with its label, until the user next acts on the step at hand.
     reopenResult: () => { if (!parked) return; lingering = parked; parked = null; $('result').hidden = false; resultOf(lingering.label); methodos.detected(); showNext($('result-h'), { asked: true }); },
   },
   workflow: arrivedFor,
+  build: { version: TOOLS_VERSION, commit: BUILD.commit || null },
+  projectFile: $('methodos-project-file'), projectSaid: $('methodos-project-said'),
   // The workflow's Scope is shown again whenever the tracker is drawn (begun, taken up, left).
   onScope: () => scopeUi?.show(),
   onStep(step) {

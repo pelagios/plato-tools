@@ -59,6 +59,27 @@ export function keptWords({ files = [], own = [], keeping = true, workflow = tru
   return `Kept in this browser for the next steps: ${parts.join(' and ')} (${fmtBytes(bytes)}). Nothing leaves this computer. ${notKept}`;
 }
 
+const and = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+/** Each file once, by SHA-256. */
+export const distinct = (refs) => [...new Map(refs.map((r) => [r.sha256, r])).values()];
+
+/**
+ * What the project file holds (src/engine/methodos/project.js), said where "Save the project" is: the
+ * user's own data, plainly, and what is never in it. `state` the workflow; `review` the name of the
+ * review open, or null; `withOwn` whether the user's own file goes in (the box beside the button).
+ */
+export function projectWords(state, { review = null, withOwn = true } = {}) {
+  const own = distinct(startFiles(state)), mine = new Set(own.map((r) => r.sha256));
+  const made = distinct(madeBy(state)).filter((r) => !mine.has(r.sha256));
+  const parts = ['the workflow, with your answers and its Scope'];
+  if (own.length && withOwn) parts.push(`your file ${and(own.map((r) => r.name))}`);
+  if (made.length) parts.push(made.length === 1 ? 'the file its steps made' : `the ${made.length} files its steps made`);
+  if (review) parts.push(`the review open (${review}), with its decisions`);
+  const left = own.length && !withOwn ? ` Your file ${and(own.map((r) => r.name))} is left out: whoever opens the project chooses it again where a step needs it.` : '';
+  return `The project file holds your own data, to carry on in another browser or on another computer, or to give to a colleague: ${and(parts)}.${left} `
+    + 'Never in it: your WHG token or any other key, the permissions you gave, and your other workflows; the reviewer\'s name is in it only where the review records who decided.';
+}
+
 /** Chora's few words of the workflow it was opened for: its title, "Step n of N", and the step's words; null when there is no step to show. */
 export function trackOf(state, recipe) {
   const s = stepAt(state);

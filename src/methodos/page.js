@@ -10,10 +10,12 @@ import { OPERATIONS } from '../engine/methodos/operations.js';
 import { RECIPES } from '../engine/methodos/recipes/index.js';
 import * as runner from '../engine/methodos/runner.js';
 import { refsOf, refsDiffer } from '../engine/methodos/handoffs.js';
-import { atBoundary, reconcile, restartRemaining } from '../engine/methodos/record.js';
-import { take as takeHandback, isWorkflowId } from '../chora/handback.js';
+import { atBoundary, reconcile, restartRemaining, recordOf } from '../engine/methodos/record.js';
+import { writeProject, readProject, projectName, ProjectError } from '../engine/methodos/project.js';
+import { fmtBytes } from '../engine/words.js';
+import { take as takeHandback, peek as peekHandback, isWorkflowId } from '../chora/handback.js';
 import { outputStore } from './outputs.js';
-import { stepAt, currentInput, startFiles, keptBy, keptWords } from './seams.js';
+import { stepAt, currentInput, startFiles, keptBy, keptWords, distinct, projectWords } from './seams.js';
 import { regionsSettled, notReviewed, relateProblem, writesItself } from '../engine/methodos/containment.js';
 import { stepMark, whereWords, lower } from './layout.js';
 
@@ -106,13 +108,19 @@ function stepList(list, steps, at, done, notes = []) {
  *   letGo(files)     a workflow is let go: keep the user's own files it held as the main page's kept file.
  *   parked()         the result of an earlier step's run, put away as the workflow went on, as { step, words }, or null;
  *   reopenResult()   show that result again.
+ *   saveTarget(name) where a project is saved, asked for at the click: a promise of { write(chunk),
+ *                    close(), abort() }, or of null when the user closed the save dialogue;
+ *   secrets()        what a project must never hold (the WHG token), to refuse a part that does;
+ *   openReview(file, files)  open a review read from a project, on `files` (chosen first, if none is).
  * `workflow` is the id the page's address named (#workflow=<id>, Chora's way back), or null: that
- * workflow is the one taken up, and its step "place" offers Chora's hand-back.
+ * workflow is the one taken up, and its step "place" offers Chora's hand-back. `build` is { version,
+ * commit } of these tools, written into a project; `projectFile` the input that chooses a project to
+ * open, and `projectSaid` where what came of it is said while the tracker is not shown.
  * Returns { open(), chosen(files), began(run), ended(run), keepChanged(on), id(), following() }: the host
  * tells it the files chosen, and each run of a tool as it begins ({ op, files }) and ends ({ op,
  * report, outputs, incomplete } or { op, error, partial } or { op, waiting } or { op, cancelled }).
  */
-export function mountMethodos({ banner, interview, tracker, store, onStep, onScope, tools, page, workflow = null, outputs = null }) {
+export function mountMethodos({ banner, interview, tracker, store, onStep, onScope, tools, page, workflow = null, outputs = null, build = null, projectFile = null, projectSaid = null }) {
   const q = (root, sel) => root.querySelector(sel);
   const have = q(interview, '#mq-have'), want = q(interview, '#mq-want'), more = q(interview, '#mq-more');
   const verdict = q(interview, '#methodos-verdict'), planEl = q(interview, '#methodos-plan');
@@ -290,6 +298,12 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   const tSaid = q(tracker, '#methodos-said'), tMsg = q(tracker, '#methodos-message');
   const doneB = q(tracker, '#methodos-done'), backB = q(tracker, '#methodos-back'), pickB = q(tracker, '#methodos-pick');
   const backB2 = q(tracker, '#methodos-handback');
+  // The project file's (below, "The project file"): looked up here, as render() draws them.
+  const projectEl = q(tracker, '#methodos-project'), projectWhat = q(tracker, '#methodos-project-what');
+  const ownBox = q(tracker, '#methodos-project-own'), ownWords = q(tracker, '#methodos-project-own-words');
+  const saveP = q(tracker, '#methodos-save-project'), openP = q(tracker, '#methodos-open-project');
+  const replaceEl = q(tracker, '#methodos-replace'), replaceWords = q(tracker, '#methodos-replace-words');
+  const openBanner = banner.querySelector('#methodos-open-banner');
   // At a phone's width the tracker is a strip, "Step n of N: …", that opens to the whole tracker and closes again.
   const strip = q(tracker, '#methodos-strip');
   strip.addEventListener('click', () => { const open = tracker.classList.toggle('open'); strip.setAttribute('aria-expanded', String(open)); });
@@ -781,6 +795,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     const row = parked && tList.querySelector(`li[data-step="${CSS.escape(parked.step)}"][data-state="done"]`);
     if (row) row.append(el('span', { className: 'track-result' }, `${parked.words} `, el('button', { type: 'button', className: 'link track-reopen', textContent: 'Show its result' })));
     showKept();
+    projectShow();
     // Focus on the tracker's heading, or, at a phone's width, where the heading is not shown, on its strip.
     if (focus) show(strip.offsetParent ? strip : q(tracker, 'h2'));
   }
@@ -818,30 +833,36 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     }
     if (!r) return;
     const v = reconcile(r, recipeOf(r));
-    if (v.action === 'continue') {
-      wf = v.state; wfScope = wf.scope ?? null;
-      if (wf.status !== r.status) await keep();   // a step the page was closed in is failed, and kept so
-      keptHandle = await store.handleFor?.(wf.id) || null;
-      for (const ref of keptBy(wf)) await outs.get(ref);   // the user's file and the steps' kept in this browser, for the tab
-      const s = atStep();
-      // The file the step works on, the user's own or a step's, is chosen again (seams.js currentInput):
-      // at Chora's step, the dataset that went to the map, so that it is shown without choosing it.
-      const main = currentInput(wf, s);
-      const ready = main && main.every((x) => !!heldFor(x)) ? main.map(heldFor) : null;
-      const chosenAgain = ready ? ` ${names(main)} is chosen again in “Choose your data”.` : '';
-      if (s?.op === 'place') say([v.words, `${arrived === wf.id ? 'Back from Chora' : 'At Chora\'s step'}:${chosenAgain} If you saved the dataset there, take it back ("Take the dataset back from Chora"), or choose it by hand in “Choose your data” and say the step is done.`].filter(Boolean).join(' '));
-      else if (ready) say([v.words, `Taken up where it was left, with ${names(main)}${fromWhere(wf, s, main)}, kept in this browser: it is chosen in step 1 for you.`].filter(Boolean).join(' '));
-      else say([v.words, main ? `Taken up where it was left. Choose ${names(main)} again in step 1 to carry on: the file is checked to be the one the workflow recorded.` : 'Taken up where it was left.'].filter(Boolean).join(' '));
-      if (ready) {
-        render(false);
-        // Chosen for the step once the engine is ready, unless the user has chosen a file meanwhile.
-        const ok = await page.ready?.();
-        if (ok !== false && !chosenRefs && !page.files().length) page.choose(ready);
-        return;
-      }
-    } else changed = { action: v.action, record: r, words: v.words };
+    if (v.action === 'continue') { if (await takeUp(v, r)) return; } else changed = { action: v.action, record: r, words: v.words };
     render(false);
   })).catch(() => {});
+  /**
+   * Carry on with `v.state`, the version rule's 'continue' for the record `r` (kept from before, or read
+   * from a project): the files kept in this browser are taken for the tab, and the file the step works
+   * on, the user's own or a step's, is chosen again (seams.js currentInput): at Chora's step, the dataset
+   * that went to the map, so that it is shown without choosing it. `opened` is said first (a project
+   * opened, whose record is kept here from now). True once it has drawn the tracker and chosen the file.
+   */
+  async function takeUp(v, r, opened = '') {
+    wf = v.state; wfScope = wf.scope ?? null;
+    if (wf.status !== r.status || opened) await keep();   // a step the page was closed in is failed, and kept so
+    keptHandle = await store.handleFor?.(wf.id) || null;
+    for (const ref of keptBy(wf)) await outs.get(ref);   // the user's file and the steps' kept in this browser, for the tab
+    const s = atStep();
+    const main = currentInput(wf, s);
+    const ready = main && main.every((x) => !!heldFor(x)) ? main.map(heldFor) : null;
+    const chosenAgain = ready ? ` ${names(main)} is chosen again in “Choose your data”.` : '';
+    const first = [opened, v.words].filter(Boolean).join(' ');
+    if (s?.op === 'place') say([first, `${arrived === wf.id ? 'Back from Chora' : 'At Chora\'s step'}:${chosenAgain} If you saved the dataset there, take it back ("Take the dataset back from Chora"), or choose it by hand in “Choose your data” and say the step is done.`].filter(Boolean).join(' '));
+    else if (ready) say([first, `Taken up where it was left, with ${names(main)}${fromWhere(wf, s, main)}, kept in this browser: it is chosen in step 1 for you.`].filter(Boolean).join(' '));
+    else say([first, main ? `Taken up where it was left. Choose ${names(main)} again in step 1 to carry on: the file is checked to be the one the workflow recorded.` : 'Taken up where it was left.'].filter(Boolean).join(' '));
+    if (!ready) return false;
+    render(false);
+    // Chosen for the step once the engine is ready, unless the user has chosen a file meanwhile.
+    const ok = await page.ready?.();
+    if (ok !== false && !chosenRefs && !page.files().length) page.choose(ready);
+    return true;
+  }
   // The files chosen are recognised (their format known): what the step at hand offers may change with it.
   const detected = () => chain(async () => { if (wf) render(false); });
   // following(): a workflow is followed, begun or about to begin with the files chosen (pending): what is
@@ -866,6 +887,150 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       render(false);
     });
     return true;
+  }
+  // ---- The project file (src/engine/methodos/project.js; plan #34, item A2) --------------------------
+  // "Save the project" writes the whole workflow into one .platoproj: its record (the Scope in it), the
+  // user's own file (unless the box is unticked), the files its steps made, the review open, and Chora's
+  // hand-back if one waits; never the token (refused if a part holds it), a permission or this browser's
+  // storage (the reviewer's name only where a review records who decided). "Open a project" reads one
+  // back, checking every part's hash as it streams, writing the
+  // files into this browser's outputs folder as they arrive, and takes the workflow up at its step as a
+  // reload does; a workflow already open is let go only once the user has said so. Nothing read from it
+  // runs or asks anything: the user carries on.
+  let replacing = null;   // the project chosen while a workflow is open, until the user says whether to replace it
+  /** Where the project's words go: the tracker's message while it is shown, else the line under the banner. */
+  function tell(words, warn = false) {
+    if (!tracker.hidden) { say(words, warn); render(false); return; }
+    if (!projectSaid) return;
+    projectSaid.textContent = words; projectSaid.hidden = !words; projectSaid.classList.toggle('warn', warn);
+  }
+  /** The workflow as a record to save: the runner's state with the page's Scope, as keep() writes it; or a record the version rule would not carry on. */
+  const toSave = () => {
+    if (wf) { const st = { ...wf }; delete st.scope; return recordOf(wfScope ? { ...st, scope: wfScope } : st, { name: wf.name || chosenRefs?.[0]?.name }); }
+    return changed ? changed.record : null;
+  };
+  function projectShow() {
+    const st = wf || changed?.record;
+    if (projectSaid && !tracker.hidden) projectSaid.hidden = true;   // what was said under the banner is the tracker's to say now
+    // A workflow chosen before any file has nothing to save yet; a project can be opened in its place.
+    q(projectEl, '#methodos-project-save').hidden = !st; saveP.hidden = !st;
+    if (!st) return;
+    const own = startFiles(st);
+    ownBox.closest('label').hidden = !own.length;
+    ownWords.textContent = own.length ? `Put my own file in it (${own.map((r) => `${r.name}, ${fmtBytes(r.size)}`).join('; ')})` : '';
+    projectWhat.textContent = projectWords(st, { review: page.review?.()?.name || null, withOwn: ownBox.checked });
+    saveP.disabled = !!wf && !atBoundary(wf);
+  }
+  projectEl.addEventListener('toggle', projectShow);
+  ownBox.addEventListener('change', projectShow);
+  saveP.addEventListener('click', () => {
+    const record = toSave();
+    if (!record) return;
+    if (wf && !atBoundary(wf)) { say('A step is running: save the project once it has finished.', true); render(false); return; }
+    const name = projectName(record);
+    // Asked for at the click, where the browser's save dialogue may be opened; written once it is chosen.
+    const target = page.saveTarget(name);
+    chain(async () => {
+      const out = await target;
+      if (!out) return;   // the save dialogue was closed
+      try {
+        const mine = new Set(startFiles(record).map((r) => r.sha256));
+        const files = [], left = [];
+        for (const ref of distinct(keptBy(record))) {
+          if (!ownBox.checked && mine.has(ref.sha256)) { left.push({ ref, why: 'left-out' }); continue; }
+          const f = await outs.get(ref);
+          if (f) files.push({ ref, blob: f }); else left.push({ ref, why: 'not-kept' });
+        }
+        const r = page.review?.();
+        const handback = isWorkflowId(record.id) ? await peekHandback(record.id) : null;
+        const { size } = await writeProject({ record, files, left, review: r ? { name: r.name, text: r.text } : null, handback, tools: build, refuse: page.secrets?.() || [] }, (c) => out.write(c));
+        await out.close();
+        const missed = left.filter((x) => x.why === 'not-kept').map((x) => x.ref.name);
+        tracker.dataset.project = name;
+        say(`Saved ${name} (${fmtBytes(size)}): ${files.length} ${files.length === 1 ? 'file' : 'files'}${r ? `, the review open (${r.name})` : ''} and the workflow at its step. Keep it as you would your data.${missed.length ? ` Not in it, as this browser no longer keeps ${missed.length === 1 ? 'it' : 'them'}: ${missed.join(', ')}; whoever opens it chooses ${missed.length === 1 ? 'it' : 'them'} again where a step needs ${missed.length === 1 ? 'it' : 'them'}.` : ''}`);
+      } catch (e) {
+        try { await out.abort(); } catch { /* nothing written */ }
+        say(e.message || String(e), true);
+      }
+      render(false);
+    });
+  });
+  const pickProject = () => { if (projectFile) { projectFile.value = ''; projectFile.click(); } };
+  openP.addEventListener('click', pickProject);
+  openBanner?.addEventListener('click', pickProject);
+  projectFile?.addEventListener('change', () => {
+    const [f] = projectFile.files || [];
+    if (!f) return;
+    if (wf || pending || changed) {
+      // A workflow is open: asked first, in words, with the safe choice focused.
+      replacing = f;
+      const now = wf || changed?.record;
+      replaceWords.textContent = `“${now ? now.name || recipeOf(now)?.title : RECIPES[pending.key].title}” is open. Open ${f.name} in its place? This workflow, and the files this browser keeps for it, are let go: save it as a project first to keep it.`;
+      replaceEl.hidden = false; projectEl.open = true;
+      q(replaceEl, '#methodos-replace-no').focus();
+      return;
+    }
+    chain(() => openProject(f));
+  });
+  q(replaceEl, '#methodos-replace-yes').addEventListener('click', () => { const f = replacing; replacing = null; replaceEl.hidden = true; if (f) chain(() => openProject(f)); });
+  q(replaceEl, '#methodos-replace-no').addEventListener('click', () => { replacing = null; replaceEl.hidden = true; say('The project was not opened: this workflow stays as it was.'); render(false); openP.focus(); });
+
+  /** Open the project `file`: read and checked whole before anything of the workflow open is let go. */
+  async function openProject(file) {
+    tell(`Reading ${file.name}…`);
+    const old = wf || changed?.record || null;
+    const ours = new Set([...(old ? keptBy(old) : []).map((r) => r.sha256), ...(await outs.kept()).files.map((f) => f.sha256)]);
+    // What a refused project wrote into this browser, and nothing kept before it, goes again.
+    const undo = async (closed) => outs.drop((closed || []).map((c) => c.part).filter((p) => !ours.has(p.sha256)).map((p) => ({ sha256: p.sha256 })));
+    let read;
+    try {
+      read = await readProject(file.stream(), {
+        name: file.name,
+        sink: async (part) => {
+          const w = await outs.writer({ type: 'files', name: part.name, size: part.size, sha256: part.sha256 }, { own: part.own });
+          const kept = (e) => new ProjectError(`${part.name} could not be kept in this browser (${e?.name === 'QuotaExceededError' ? 'it has not room enough' : 'it would not keep it'}), so the project was not opened.`);
+          return { write: async (c) => { try { await w.write(c); } catch (e) { throw kept(e); } }, close: async () => { try { return await w.close(); } catch (e) { throw kept(e); } }, abort: () => w.abort() };
+        },
+      });
+    } catch (e) {
+      await undo(e.closed);
+      tell(`${file.name} was not opened. ${e.message || e}`, true);
+      return;
+    }
+    const recipe = RECIPES[read.record.recipe.key];
+    const v = reconcile(read.record, recipe);
+    if (v.action === 'refuse') { await undo(read.files); tell(`${file.name} was not opened. ${v.words}`, true); return; }
+    // The workflow open is let go, now that the project is read whole: its user's file handed over as Leave does.
+    const fresh = new Set(read.files.map((c) => c.part.sha256));
+    if (old) { await handOver(old); await outs.drop(keptBy(old).filter((r) => !fresh.has(r.sha256))); await store.remove(old.id); }
+    if (pending) await store.dropPending(pending.id);
+    wf = null; wfScope = null; pending = null; changed = null; active = null; note = null; handle = handleFile = keptHandle = null; fromChora = null; arrived = null; asIs = null; ownMissed = [];
+    chosenRefs = null;
+    if (projectSaid) { projectSaid.hidden = true; projectSaid.textContent = ''; }
+    const by = read.manifest.tools.version === build?.version ? '' : ` (saved by PLATO tools ${read.manifest.tools.version})`;
+    const opened = `Opened the project ${file.name}${by}, every part checked.`;
+    // The base address the workflow was begun under, into Options if it has none (said; nothing is run with it).
+    const base = typeof read.record.answers?.base === 'string' ? read.record.answers.base : '';
+    const baseSet = base && !page.base?.() ? (page.setBase?.(base), ` The base address in Options is set to ${base}, the workflow's.`) : '';
+    // Chora's hand-back, at Chora's step only: the file chosen next must be the one it names, as after "Take the dataset back".
+    const atPlace = v.action === 'continue' && stepAt(v.state)?.op === 'place';
+    const hb = atPlace && read.handback ? ` Chora had handed back ${names(read.handback.files)}: choose it in step 1, and it is checked to be that file.` : '';
+    if (v.action !== 'continue') {
+      changed = { action: v.action, record: read.record, words: v.words };
+      await store.save(read.record);
+      say(`${opened}${baseSet} ${v.words}`);
+      render(true); return;
+    }
+    const took = await takeUp(v, read.record, `${opened}${baseSet}${hb}`);
+    if (atPlace && read.handback) fromChora = read.handback.files;
+    if (!took) render(true); else show(strip.offsetParent ? strip : q(tracker, 'h2'));
+    // The review open when it was saved is opened again, on the dataset it was made of, as "Resume a review" opens one.
+    if (read.review) {
+      const subjects = read.review.work.subjects?.files || [];
+      const held = subjects.map((r) => outs.held(r)).filter(Boolean);
+      await page.openReview?.(new File([read.review.text], read.review.name, { type: 'application/json' }), held.length === subjects.length ? held : []);
+      projectShow();
+    }
   }
   return { open, chosen, began, ended, dropped, keepChanged, detected, baseChanged, id: () => wf?.id || null, following: () => !!(wf || pending || changed), takenUp: () => takenUp,
     scope: scopeNow, setScope, scoped: () => !!(wf || pending || changed) };

@@ -88,6 +88,44 @@ export function outputStore({ root = () => navigator.storage.getDirectory(), kee
         return 'browser';
       } catch { try { await (await dir(false)).removeEntry(ref.sha256); } catch { /* none */ } return 'failed'; }
     },
+    /**
+     * A file of a project being opened (src/engine/methodos/project.js), written as its bytes arrive, so
+     * that it is never held whole twice: into OPFS under its SHA-256 where working data is kept (a copy
+     * already kept whole is used as it is, and the bytes arriving are only checked), else gathered for the
+     * tab. `own`: it is the user's own file the workflow began with (as keepOwn's). Returns
+     * { write(chunk), close() -> { file, kept }, abort() }; nothing is kept until close(), which the
+     * reader calls only once the bytes' SHA-256 is the one the project names.
+     */
+    async writer(ref, { own: mine = false } = {}) {
+      const done = (file, where) => { tab.set(ref.sha256, file); if (where === 'browser') backed.add(ref.sha256); else backed.delete(ref.sha256); if (mine) own.add(ref.sha256); return { file, kept: where }; };
+      if (keeping()) {
+        try {
+          const d = await dir(true);
+          try {
+            const there = await (await d.getFileHandle(ref.sha256)).getFile();
+            if (there.size === ref.size) return { write() {}, close: async () => done(named(there, ref), 'browser'), async abort() {} };
+          } catch { /* not kept yet */ }
+          const h = await d.getFileHandle(ref.sha256, { create: true });
+          const w = await h.createWritable();   // written to the side, and in place only at close()
+          return {
+            write: (c) => w.write(c),
+            async close() {
+              await w.close();
+              const kept = named(await h.getFile(), ref);
+              if (kept.size !== ref.size) { try { await d.removeEntry(ref.sha256); } catch { /* none */ } throw new Error(`${ref.name} could not be kept whole in this browser.`); }
+              return done(kept, 'browser');
+            },
+            async abort() { try { await w.abort(); } catch { /* gone */ } try { if (!(await (await d.getFileHandle(ref.sha256)).getFile()).size) await d.removeEntry(ref.sha256); } catch { /* none */ } },
+          };
+        } catch { /* the tab's, then */ }
+      } else await remove();
+      let parts = [];
+      return {
+        write(c) { parts.push(c); },
+        async close() { const f = new File(parts, ref.name, { type: '' }); parts = []; return done(f, 'tab'); },
+        async abort() { parts = []; },
+      };
+    },
     /** Whether working data is kept between visits (the Permissions panel's choice), as the store obeys it. */
     keeping,
     /** Hold `file` for the tab only, as it is (a file the user chose, not copied here). */

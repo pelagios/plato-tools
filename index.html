@@ -47,7 +47,10 @@
   <!-- The workflow rail: beside the steps from 60rem (src/styles.css), sticky, it holds the one line that opens Methodos's
        interview while no workflow is followed, and the tracker while one is; below 60rem its contents flow with the page. -->
   <div id="workflow-rail" class="workflow-rail">
-    <p id="methodos-banner" class="methodos-banner"><a href="#methodos" id="methodos-ask">Not sure where to start? Answer three questions</a></p>
+    <p id="methodos-banner" class="methodos-banner"><a href="#methodos" id="methodos-ask">Not sure where to start? Answer three questions</a><span class="banner-or">, or <button type="button" id="methodos-open-banner" class="link">open a project</button> saved before.</span></p>
+    <!-- A project (.platoproj, src/engine/methodos/project.js) chosen here or in the tracker; what came of it is said here while no workflow is shown. -->
+    <input type="file" id="methodos-project-file" accept=".platoproj" hidden>
+    <p id="methodos-project-said" class="methodos-project-said" role="status" hidden></p>
     <section id="methodos-tracker" class="methodos-tracker" aria-labelledby="methodos-tracker-h" hidden>
       <h2 id="methodos-tracker-h" tabindex="-1">Your workflow: <span id="methodos-tracker-title"></span></h2>
       <!-- Below 60rem, the tracker is a strip at the top of the window, "Step n of N: Tool, what it does", which opens to the whole tracker (src/methodos/page.js). -->
@@ -62,6 +65,16 @@
       <div id="scope" class="track-scope" hidden></div>
       <!-- What the workflow cannot carry from the files it begins with (a recipe's `cannot`: a reader's limits, in words), folded below the buttons; hidden for a workflow that names none. -->
       <details id="methodos-cannot" class="track-about" hidden><summary>What this workflow cannot carry</summary><ul class="track-note track-cannot"></ul></details>
+      <!-- The project file (src/engine/methodos/project.js): the whole workflow in one .platoproj, to carry on elsewhere or hand on.
+           Folded, so that the steps and the buttons stay in view; what goes into it is said beside its button. -->
+      <details id="methodos-project" class="track-about track-project"><summary>Save or open the project</summary>
+        <div id="methodos-project-save">
+          <p id="methodos-project-what" class="track-note"></p>
+          <label class="track-own"><input type="checkbox" id="methodos-project-own" checked> <span id="methodos-project-own-words"></span></label>
+        </div>
+        <p class="methodos-buttons"><button type="button" id="methodos-save-project">Save the project</button> <button type="button" id="methodos-open-project">Open a project</button></p>
+        <p id="methodos-replace" class="track-message warn" hidden><span id="methodos-replace-words"></span> <button type="button" id="methodos-replace-yes">Open it in its place</button> <button type="button" id="methodos-replace-no">Keep this workflow</button></p>
+      </details>
       <!-- How Methodos follows the tools: below the buttons and folded, so that the step list, the message and the buttons stay in view in the rail. -->
       <details class="track-about"><summary>How Methodos follows the tools</summary><p class="track-note">Methodos keeps your place and sees what the tools do: a step is done when its tool's run on the right file finishes, and a step that stops or fails says why. Only a step that is yours to do (matching columns, reviewing candidates, drawing in Chora) waits for you to say it is done.</p></details>
       <p id="methodos-said" class="visually-hidden" aria-live="polite"></p>

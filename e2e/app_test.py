@@ -2761,6 +2761,7 @@ def main():
             chora_adopt_checks(pw, url, tmp)
             map_your_data_checks(pw, url, tmp)
             recipes_checks(pw, url, tmp)
+            project_checks(pw, url, tmp)
             scope_checks(pw, url, tmp)
             quality_checks(pw, url, tmp)
             chora_seams_checks(pw, url, tmp)
@@ -4166,6 +4167,224 @@ def recipes_checks(pw, url, tmp):
         'holds': 'its 13 places keep the Wikidata items Recogito linked them to, seven placed through the map\'s georeference and citing it, nine identified in the stub\'s records, citing WHG',
         'complete': lambda e: (e['places'] == 13 and all(a.startswith('http://www.wikidata.org/entity/Q') for a in e['addresses']) and e['placed'] == 7 and e['georef cited'] == 7
                                and e['stub'] == 9 and e['cites WHG'] is True)})
+    try: browser.close()
+    except Exception: pass
+
+# ---- The project file (plan #34, item A2; src/engine/methodos/project.js) ------------------------------------
+# Map your data saved mid-review as a .platoproj in one browser, then opened in another with a fresh profile (a new
+# context: no storage, no OPFS), refused first when tampered with, and carried on to the end with the same decisions.
+# Against the same stub of WHG as Map your data. Each check is paired so that it can fail: the token absent from the
+# project beside the user's data present in it; the tampered copy refused beside the same copy untouched opened; the
+# fresh browser holding nothing beside the first holding the workflow's files; the question before replacing a
+# workflow beside the workflow left as it was. PROJECT_SHOTS=<dir> saves screenshots at 1440 x 900.
+def project_checks(pw, url, tmp):
+    import re, zipfile
+    base = url.rstrip('/') + '/'
+    out = tmp / 'project'; out.mkdir(exist_ok=True)
+    shots = os.environ.get('PROJECT_SHOTS')
+    if shots: pathlib.Path(shots).mkdir(parents=True, exist_ok=True)
+    def shot(page, name):
+        if shots and not PROVE:
+            try: page.screenshot(path=str(pathlib.Path(shots) / name))
+            except Exception: pass
+    cors = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+            'Access-Control-Allow-Headers': 'authorization, content-type, accept, user-agent'}
+    posts = []
+    def stub(route):
+        req = route.request
+        if req.method == 'OPTIONS': return route.fulfill(status=204, headers=cors)
+        reply = lambda body, status=200: route.fulfill(status=status, headers={**cors, 'Content-Type': 'application/json'}, body=json.dumps(body))
+        if req.method == 'GET': return reply({'detail': 'Not found'}, 404)
+        body = json.loads(req.post_data or '{}'); posts.append(body)
+        res = {'attribution': LOOKUP_ATTRIBUTION}
+        for k, q in (body.get('queries') or {}).items():
+            found = MYDATA_ANSWERS.get(q.get('query'), [])
+            if q.get('area_only'): found = [c for c in found if c.get('has_geom')]
+            res[k] = {'result': found, **({'scope': {'applied': True}} if isinstance(q.get('contained_in'), list) else {})}
+        reply(res)
+    def context(browser):
+        ctx = browser.new_context(accept_downloads=True, viewport={'width': 1440, 'height': 900}, reduced_motion='reduce')
+        ctx.add_init_script('window.__plato_forceDownload = true;')
+        ctx.route(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'), stub)
+        return ctx
+    browser = pw.chromium.launch(headless=True, args=GL)
+    one, two = context(browser), context(browser)
+    page = one.new_page()
+    r = {}
+    track = lambda p: p.evaluate(JOIN_STATE)
+    def step_is(p, step, state, timeout=60):
+        until(p, f"() => document.querySelector('#methodos-track li[data-step=\"{step}\"]')?.dataset.state === '{state}'", timeout)
+    def choose(fs):
+        page.set_input_files('#picker', [])
+        page.set_input_files('#picker', [str(f) for f in fs])
+        s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'detection')
+        if s.get('phase') != 'detected': raise RuntimeError(f'not detected: {s.get("phase")}')
+    def run(p, button, timeout=180):
+        p.click(button)
+        return wait_state(p, lambda s: s.get('phase') in ('done', 'error'), T(timeout), 'run')
+    def need(*keys):
+        missing = [k for k in keys if not r.get(k)]
+        if missing: raise RuntimeError(f'an earlier step did not finish ({", ".join(missing)})')
+    W = lambda p: (wait_state(p, lambda s: True, 5).get('work') or {})
+    decisions = lambda w: {c['id']: (c.get('decision') or {}).get('kind') for c in (w.get('candidates') or [])}
+
+    def mid_review():
+        # As Map your data begins: WHG allowed, the reviewer named, the interview answered, the table chosen.
+        page.goto(NOTOOLS if PROVE else base)
+        page.evaluate("() => { localStorage.setItem('plato-tools.permissions', JSON.stringify({ version: 1, grants: { 'gazetteer:whg': { state: 'allowed', at: '2026-10-04T10:00:00Z' } } })); localStorage.setItem('plato-tools.reviewer', JSON.stringify({ name: 'Remembered Reviewer' })); }")
+        page.goto(NOTOOLS if PROVE else base)
+        wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+        page.evaluate("() => { const b = document.getElementById('base'); b.value = %s; b.dispatchEvent(new Event('change')); }" % json.dumps(MYDATA_BASE))
+        page.click('#methodos-ask'); until(page, "!document.getElementById('methodos').hidden", 5)
+        page.check('input[name="methodos-have"][value="table"]'); page.check('input[name="methodos-want"][value="map"]')
+        for k, v in (('has-regions', 'yes'), ('will-draw', 'yes'), ('will-publish', 'no')): page.check(f'input[name="methodos-ask-{k}"][value="{v}"]')
+        page.click('#methodos-start'); until(page, "['pending', 'idle'].includes(document.getElementById('methodos-tracker').dataset.status)", 10)
+        choose([MYDATA_CSV])
+        wait_state(page, lambda s: ((s.get('columns') or {}).get('levels') or {}), T(30), 'columns')
+        page.click('#methodos-done'); step_is(page, 'columns', 'done', 15)
+        run(page, '#check'); step_is(page, 'check', 'done')
+        page.select_option('#target', 'plato-json')
+        s = run(page, '#convert'); step_is(page, 'dataset', 'done')
+        n = next(o['name'] for o in (s.get('outputs') or []) if o['name'].endswith('.json'))
+        r['converted'] = download(page, n, out / n)
+        choose([r['converted']])
+        if not page.evaluate("() => document.getElementById('lookup').open"): page.click('#lookup > summary')
+        page.fill('#whg-token', LOOKUP_TOKEN); page.press('#whg-token', 'Tab')
+        page.wait_for_function("() => !document.getElementById('regions-offer').hidden", timeout=T(60) * 1000)
+        page.click('#regions-start')
+        wait_state(page, lambda s: len(((s.get('work') or {}).get('regions') or {})) == 6, T(60), 'regions')
+        for level in (1, 2):
+            page.click(f'#regions-nav button[data-rlevel="{level}"]')
+            k0 = len(posts)
+            page.click('#regions-level button[data-rgo="level"]')
+            wait_state(page, lambda s: (s.get('lookup') or {}).get('running') is False and len(posts) > k0, T(60), f'level {level}')
+            for k in [k for k, g in (W(page).get('regions') or {}).items() if g['level'] == level]:
+                page.click(f'#regions-level article[data-rkey="{k}"] li.candidate button[data-ract="match"]')
+                wait_state(page, lambda s: (((s.get('work') or {}).get('regions') or {}).get(k) or {}).get('outcome') == 'matched', T(10), 'settled')
+        page.click('#methodos-done'); step_is(page, 'regions', 'done', 15)
+        page.click('#regions-nav button[data-rlevel="places"]')
+        page.click('#regions-level button[data-rgo="places"]')
+        step_is(page, 'lookup', 'done', 90)
+        until(page, "() => !document.getElementById('bulk-accept').disabled", 30)
+        page.click('#bulk-accept')
+        wait_state(page, lambda s: sum(1 for c in (s.get('work') or {}).get('candidates', []) if (c.get('decision') or {}).get('kind') == 'match' and '/region-' not in c['candidate_source']) == 8, T(15), 'accepted')
+        r['decisions'] = decisions(W(page))
+        t = track(page)
+        r['mid'] = t['steps'].get('review') == 'current' and sum(1 for v in r['decisions'].values() if v == 'match') == 14
+        # Where Methodos keeps the workflow's files in this browser: the control for the fresh browser holding none.
+        r['kept here'] = opfs_names(page, 'methodos-outputs')
+        return r['mid'] and len(r['kept here']) >= 4, {'review': t['steps'].get('review'), 'matches': sum(1 for v in r['decisions'].values() if v == 'match'), 'kept': len(r['kept here'])}
+    attempt('Project file: Map your data reaches the review mid-way (regions settled, places looked up, eight accepted in bulk, Wood Lane left), its files kept in this browser', mid_review)
+
+    def save():
+        need('mid')
+        page.click('#methodos-project > summary')
+        until(page, "() => document.getElementById('methodos-project').open && !!document.getElementById('methodos-project-what').textContent", 10)
+        said = page.inner_text('#methodos-project-what'); own = page.inner_text('#methodos-project-own-words')
+        shot(page, 'save-project.png')
+        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#methodos-save-project')
+        r['project'] = out / d.value.suggested_filename; d.value.save_as(r['project'])
+        until(page, "() => /^Saved .*\\.platoproj/.test(document.getElementById('methodos-message').textContent)", 15)
+        r['saved said'] = track(page)['message']
+        return (r['project'].name.endswith('.platoproj') and 'your own data' in said and 'parishes.csv' in said and 'the review open' in said
+                and 'Never in it: your WHG token' in said and 'only where the review records who decided' in said and 'parishes.csv' in own and 'Saved' in r['saved said']), \
+            {'file': r['project'].name, 'what': said[:300], 'own': own, 'said': r['saved said'][:200]}
+    attempt('Project file: "Save the project" says beside it what goes in (the workflow, the user\'s file, the steps\' files, the review open) and what never does, and downloads a .platoproj', save)
+
+    def contents():
+        need('project')
+        with zipfile.ZipFile(r['project']) as z:
+            names = z.namelist()
+            manifest = json.loads(z.read('manifest.json'))
+            text = '\n'.join(z.read(n).decode('utf-8', 'replace') for n in names)
+            record = z.read('workflow.json').decode() + z.read('manifest.json').decode()
+            review = z.read('review.krisis.json').decode()
+        roles = sorted(p['role'] for p in manifest['parts'])
+        # The presence: the same search finds the user's data and the decisions; the absence: the token and the keys
+        # of this browser's storage. The reviewer's name is in the review, which records who decided (as "Save the
+        # review" saves it), and nowhere else: not in the workflow's record or the manifest.
+        present = all(x in text for x in ('Mill Farm,Newton,Cheshire', '"kind": "match"', MYDATA_BASE)) and 'Remembered Reviewer' in review
+        absent = [x for x in (LOOKUP_TOKEN, 'plato-tools.permissions', 'plato-tools.whg-token', 'plato-tools.reviewer') if x in text] + (['reviewer in the record'] if 'Remembered Reviewer' in record else [])
+        # Read by the command line too: the browser's zip, checked by the Node reader.
+        info = subprocess.run(['node', str(ROOT / 'bin/plato-tools.mjs'), 'project', 'info', str(r['project'])], capture_output=True, text=True)
+        r['manifest'] = manifest
+        return (names[0] == 'manifest.json' and manifest['format'] == 'plato-tools-project' and manifest['version'] == 1 and manifest['workflow']['at'] == 'review'
+                and roles.count('record') == 1 and roles.count('review') == 1 and roles.count('file') >= 4 and any(p.get('own') for p in manifest['parts'])
+                and present and not absent and info.returncode == 0 and 'Parts (each size and SHA-256 checked)' in info.stdout), \
+            {'first': names[:2], 'roles': roles, 'at': manifest['workflow']['at'], 'present': present, 'absent': absent, 'info': (info.stdout or info.stderr)[:200]}
+    attempt('Project file: the zip holds its manifest first, the record at the review, the review open, the user\'s own file and the steps\' files; the user\'s data is in it, the reviewer\'s name only in the review, and the WHG token and this browser\'s storage keys not at all; plato-tools project info reads it', contents)
+
+    p2 = two.new_page()
+    def fresh_and_tampered():
+        need('project', 'manifest')
+        p2.goto(NOTOOLS if PROVE else base)
+        wait_state(p2, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+        empty = {'tracker': track(p2)['shown'], 'kept': opfs_names(p2, 'methodos-outputs'), 'banner': p2.is_visible('#methodos-open-banner')}
+        # One byte of the dataset's part changed, the manifest kept: re-zipped, the manifest first.
+        bad = out / 'tampered.platoproj'
+        dataset = next(p['path'] for p in r['manifest']['parts'] if p['role'] == 'file' and p['name'] == r['converted'].name)
+        with zipfile.ZipFile(r['project']) as z, zipfile.ZipFile(bad, 'w', zipfile.ZIP_DEFLATED) as w:
+            for n in z.namelist():
+                b = bytearray(z.read(n))
+                if n == dataset: b[10] ^= 1
+                w.writestr(n, bytes(b))
+        p2.set_input_files('#methodos-project-file', str(bad))
+        until(p2, "() => !document.getElementById('methodos-project-said').hidden && /not opened/.test(document.getElementById('methodos-project-said').textContent)", 30)
+        said = p2.inner_text('#methodos-project-said')
+        shot(p2, 'tampered-refused.png')
+        after = {'tracker': track(p2)['shown'], 'kept': opfs_names(p2, 'methodos-outputs')}
+        r['refused'] = True
+        return (empty['tracker'] is False and empty['kept'] == [] and empty['banner'] is True and len(r['kept here']) >= 4
+                and 'is not the file its manifest names' in said and r['converted'].name in said and after['tracker'] is False and after['kept'] == []), \
+            {'fresh': empty, 'said': said[:300], 'after': after}
+    attempt('Project file: a fresh browser holds no workflow and no kept files (the first browser holds them); there, the project with one byte of the dataset changed is refused in words naming the file, and leaves nothing behind', fresh_and_tampered)
+
+    def opened():
+        need('refused')
+        p2.set_input_files('#methodos-project-file', str(r['project']))
+        until(p2, "() => !document.getElementById('methodos-tracker').hidden && document.querySelector('#methodos-track li[data-step=\"review\"]')?.dataset.state === 'current'", 60)
+        until(p2, "() => /Opened the project/.test(document.getElementById('methodos-message').textContent)", 15)
+        until(p2, "() => !document.getElementById('review').hidden", 60)
+        wait_state(p2, lambda s: (s.get('work') or {}).get('candidates'), T(30), 'review open')
+        t = track(p2); got = decisions(W(p2))
+        base_now = p2.input_value('#base')
+        kept = opfs_names(p2, 'methodos-outputs')
+        shot(p2, 'project-opened.png')
+        r['opened'] = got == r['decisions']
+        return (r['opened'] and t['steps'].get('review') == 'current' and all(t['steps'].get(k) == 'done' for k in ('columns', 'check', 'dataset', 'regions', 'lookup'))
+                and 'Opened the project' in t['message'] and base_now == MYDATA_BASE and len(kept) >= 4), \
+            {'steps': t['steps'], 'message': t['message'][:240], 'same decisions': got == r['decisions'], 'decided': sum(1 for v in got.values() if v), 'base': base_now, 'kept': len(kept)}
+    attempt('Project file: opened in the fresh browser, the workflow is at the review with the five steps before it done, the review open with the very decisions made before saving, the base address in Options from the workflow, and its files kept here', opened)
+
+    def finish():
+        need('opened')
+        p2.evaluate("() => { const v = document.getElementById('reviewer'); v.value = 'Map Reviewer'; v.dispatchEvent(new Event('change')); }")
+        p2.click('#methodos-done'); step_is(p2, 'review', 'done', 15)
+        p2.check('input[name="review-output"][value="dataset"]')
+        p2.click('#export-candidates')
+        until(p2, "() => !!window.__plato.candidates && !!window.__plato.candidates.setIri", 15)
+        s = run(p2, '#finish'); step_is(p2, 'relate', 'done', 30)
+        n = next(o['name'] for o in (s.get('outputs') or []) if o['name'].endswith('.krisis-dataset.json'))
+        e = mydata_ends(json.loads(download(p2, n, out / n).read_text()))
+        r['finished'] = True
+        return (e['contained'] == 10 and e['region identities'] == 6 and e['regions promoted'] and e['places promoted'] == 8 and track(p2)['steps'].get('place') == 'current'), \
+            {'ends': e, 'steps': track(p2)['steps']}
+    attempt('Project file: carried on in the fresh browser, the review done and the decisions recorded give every place ContainedIn its parish, the six regions\' identities and the eight places accepted before saving, and the workflow goes on to Chora\'s step', finish)
+
+    def replace_asked():
+        need('finished')
+        before = track(p2)['steps']
+        p2.set_input_files('#methodos-project-file', [])   # as "Open a project" clears it: the same file chosen again is a change
+        p2.set_input_files('#methodos-project-file', str(r['project']))
+        until(p2, "() => !document.getElementById('methodos-replace').hidden", 15)
+        words = p2.inner_text('#methodos-replace-words'); focus = p2.evaluate('() => document.activeElement?.id')
+        shot(p2, 'replace-asked.png')
+        p2.click('#methodos-replace-no')
+        until(p2, "() => document.getElementById('methodos-replace').hidden", 10)
+        after = track(p2)
+        return ('is open. Open' in words and focus == 'methodos-replace-no' and after['steps'] == before and before.get('place') == 'current' and 'was not opened' in after['message']), \
+            {'words': words[:200], 'focus': focus, 'steps after': after['steps'], 'message': after['message'][:160]}
+    attempt('Project file: choosing a project while a workflow is open asks first (the safe answer focused); "Keep this workflow" leaves it exactly as it was', replace_asked)
     try: browser.close()
     except Exception: pass
 

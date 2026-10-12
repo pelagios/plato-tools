@@ -2896,6 +2896,87 @@ the flagged Argos shown with both records and left by the bulk accept, the regio
 11rem). Each end check is shown failing on the same file with its identities (TEI) or geometries
 (Recogito) left out. `RECIPE_SHOTS=<dir>` saves the tracker at 1440 × 900.
 
+### The project file
+
+A whole workflow in one file, `<name>.platoproj`, so that work moves to another browser or computer, or
+to a colleague (plan #34, item A2; Stephen, 12 October 2026: "PLATO Tools should have its own `proj`
+files and not handle WHG's"). It is the file WHG's Workbench will store for sharing (item A1, its `plato`
+doc_type), so **the format is a contract**: the spec is [docs/project-file.md](docs/project-file.md),
+and any change to it raises its version. The tools never read WHG's `.whgproj` files or synced projects:
+one is refused in words ("open it in WHG's Map your Data").
+
+- **The format** (`src/engine/methodos/project.js`, pure, run by the page and the command line alike): a
+  zip, every entry deflated, whose first entry is `manifest.json` (`format: 'plato-tools-project'`,
+  `version: 1`, `tools: { version, commit }`, `created`, `workflow: { id, name, recipe: { key, version },
+  at }`, `parts`, and `left` for the files the workflow names that are not in it), then the parts it lists,
+  each once, each with its size and SHA-256: `workflow.json` (the record, exactly its `.workflow.json`,
+  the Scope in it), `review.krisis.json` (the review open on the page: decisions, candidates, regions;
+  a Krisis work file), `chora-handback.json` (Chora's hand-back for this workflow, if one waits:
+  references only), and `files/<sha256>` (each file the record names: the user's own, `own: true`, and the
+  files the steps made). The extension is `.platoproj`; its media type is `application/zip`.
+- **Save the project** (the tracker's folded "Save or open the project", after the Scope's line, so that
+  the steps and buttons stay in view at 1440 × 900). Beside the button it says what goes in, from the
+  workflow itself (`projectWords()` in `src/methodos/seams.js`): "The project file holds your own data …:
+  the workflow, with your answers and its Scope, your file parishes.csv, the 4 files its steps made and
+  the review open (…), with its decisions. … Never in it: your WHG token or any other key, the permissions
+  you gave, and your other workflows; the reviewer's name is in it only where the review records who
+  decided." A box, ticked by default, puts the user's own file in (`left-out` in the manifest when
+  unticked); a file the browser no longer keeps (cleared, or never kept) is listed as `not-kept`, said
+  after saving, and chosen again where a step needs it, as after a reload. The files are read from the
+  outputs folder (`outputs.js` `get()`) as streams, hashed as they go, and a file whose bytes are not the
+  ones the record names is refused rather than saved under another's hash. The zip goes, a chunk at a
+  time, into the file chosen in Chromium's save dialogue (`projectTarget()` in `src/app.js`, asked at the
+  click), or is gathered and downloaded elsewhere (one copy, the compressed zip). Refused while a step
+  runs.
+- **What is never in it.** The WHG token (the page passes it as `secrets()`; a JSON part that holds it is
+  refused and nothing is written), any key, the permission grants, the file handles, the hand-off, and
+  this browser's storage keys. The reviewer's name and ORCID are in it only as the review records them
+  (a work file's `reviewer`, which a bulk accept or a lookup writes, as "Save the review" saves it); the
+  name remembered in this browser (`plato-tools.reviewer`) is not. The manifest and the record name the
+  user's files by name, size and SHA-256, as the record always has.
+- **Open a project**: from the banner while no workflow is followed ("…, or open a project saved
+  before"), or the tracker's "Open a project". It is untrusted input, like any file the user chooses:
+  `readProject()` refuses, in words, a file that is not a zip, a zip whose first entry is not
+  `manifest.json`, another format, a newer version ("saved by newer PLATO tools (PLATO tools 1.4.0), in
+  version 2 …"), any key, role, path or entry it does not know, a part listed twice or missing, a part
+  longer or shorter than its manifest says or whose SHA-256 differs, a record that `importRecord()`
+  refuses, a review that `readWork()` refuses, a hand-back not for its workflow, and a file the record
+  does not name. Each part is inflated, hashed and handed to its sink as it arrives: the files are written
+  straight into the outputs folder under their SHA-256 (`outputs.js` `writer()`: OPFS's writable, put in
+  place only at `close()`, which comes only once the hash matches; in memory where working data is not
+  kept), the JSON parts are read into memory, bounded (`LIMITS`: manifest 1 MB, record 4 MB, review 256 MB,
+  hand-back 64 KB). A refused project leaves nothing behind (the files it had written, and nothing kept
+  before, are dropped). A workflow already open is let go only once the user has said so ("… is open. Open
+  … in its place? This workflow, and the files this browser keeps for it, are let go: save it as a
+  project first to keep it.", with "Keep this workflow" focused), and only after the project has been
+  read whole. It is then taken up by the version rule (`reconcile()`) at the step it had reached, exactly
+  as after a reload (`takeUp()` in `src/methodos/page.js`, shared with the load): its file chosen again
+  where the step takes one, and the review in the project opened again (`openReview`, after choosing the
+  dataset it was made of). Nothing read from it runs or asks another site: the base address the workflow
+  was begun under is written into Options only if Options has none, and said; Chora's hand-back, at
+  Chora's step only, makes the file chosen next the one it names (as "Take the dataset back" does), and is
+  never written to storage.
+- **Size.** Nothing is held twice: the parts stream both ways (a part is read from its Blob a chunk at a
+  time, deflated at level 6, or 1 over 16 MB; the reader awaits each sink's write before the next chunk).
+  A project is about the size of the workflow's kept files (what the tracker's "Kept in this browser" line
+  counts) plus the review open, deflated.
+- **On the command line**, `plato-tools project info [--json] FILE` lists the manifest and reads every
+  part through, checking its size and SHA-256, as the page does before opening it; 0 when it would open, 1
+  when it is refused (with the page's words), 2 when the file cannot be read. There is no runner for
+  workflows on the command line.
+- **Tests.** `test/methodos-project.test.js`: the manifest round trip (every part back byte for byte,
+  read in pieces of 4 KB and of one byte), restoring at the right step (with the control a step earlier),
+  a changed byte, a cut part, a longer part and a missing one refused with the part named (the same
+  project untouched opening), a newer version refused (re-zipped unchanged, it opens), unknown keys,
+  roles, paths, entries and files refused, WHG's `.whgproj` and other non-projects refused, nothing secret
+  in it (the token, the grants and the reviewer remembered absent beside the user's data and decisions
+  present; a review holding the token refused, and the same review with no secret to refuse written), a
+  kept file changed refused, the user's own file left out and listed, and the command line's exit
+  statuses. In the browser, `project_checks` in `e2e/app_test.py`: Map your data saved mid-review, a
+  fresh profile (a new context) holding nothing, a tampered copy refused there and leaving nothing, the
+  project opened at the review with the same decisions, carried on to the decisions recorded, and the
+  question before replacing a workflow. `PROJECT_SHOTS=<dir>` saves screenshots at 1440 × 900.
+
 ## Permissions
 
 Nothing goes to another site unless the user allows it, in one panel for the whole toolbox: the

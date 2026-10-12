@@ -87,6 +87,9 @@ Usage:
   plato-tools datacube [--json] FILE...     check a cube export (convert --to ntriples --cube)
                                             against the RDF Data Cube integrity constraints IC-1,
                                             IC-2, IC-11, IC-12 and IC-14
+  plato-tools project info [--json] FILE    list what a PLATO tools project (.platoproj, saved
+                                            by Methodos on the page) holds, and check the size
+                                            and SHA-256 of every part; exit 1 if it is refused
 
 Each INPUT is one file, or one set of spreadsheet tables:
   - the sheets of the tables (places.csv, names.csv...) are one set of tables per directory,
@@ -431,6 +434,7 @@ async function main(argv) {
   }
   const [action, ...args] = positionals;
   if (!action) return usage('say what to do: check, convert, preview, compare, publish, match or apply.');
+  if (action === 'project') return projectCommand(args, o);
   // The reading options are the readers' (TEI, a table of places), for check, convert and preview only.
   const readingFlags = READING_FLAGS.filter((f) => f === 'key-pattern' ? o[f].length : o[f]);
   const reads = action === 'check' || action === 'convert' || action === 'preview';
@@ -465,7 +469,7 @@ async function main(argv) {
   if (o.gazetteer || o.places || o['all-names'] || o.variants || o.countries || o.near || o.lang || o.batch || o['dry-run'] || o['token-env'] || o['gazetteer-iri']) return usage('--gazetteer, --token-env, --gazetteer-iri, --places, --all-names, --variants, --countries, --near, --lang, --batch and --dry-run are for lookup.');
   if (o.levels || o.level !== undefined || o.relax !== undefined || o.unconstrained) return usage('--levels, --level, --relax and --unconstrained are for lookup.');
   if (o.with || o.threshold || o['max-distance'] || o.top || o.qualifiers !== undefined || o.review || o.output || o.reviewer || o.orcid || o['others-title'] !== undefined) return usage('--with, --threshold, --max-distance, --top, --qualifiers, --review, --output, --reviewer, --orcid and --others-title are for match and apply.');
-  if (!reads && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, preview, cluster, compare, publish, match, apply, lookup, candidates and datacube.`);
+  if (!reads && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, preview, cluster, compare, publish, match, apply, lookup, candidates, datacube and project.`);
   // Elenchos: candidate sets checked together, with no other input: the first is checked, with the others
   // (each is first made sure of below, so that a dataset given with --candidates is refused, not checked).
   const alone = action === 'check' && !args.length && !!o.candidates;
@@ -1042,6 +1046,26 @@ async function review(action, args, o, resources) {
  * but its graph is held in memory to be checked, so a cube larger than memory cannot be. Exit 0 when every constraint passed, 1 when any failed or had nothing to
  * evaluate (a constraint over nothing is not tested, never passed), 2 when a file cannot be read.
  */
+// Methodos's project file (src/engine/methodos/project.js): its manifest listed, and every part read
+// through, its size and SHA-256 checked, as the page checks it before opening it. Nothing is written.
+async function projectCommand(args, o) {
+  const [sub, file, ...rest] = args;
+  if (sub !== 'info') return usage(`${sub ? `"project ${sub}" is not a command; ` : ''}the project command is "project info FILE": it lists what a project holds and checks every part's hash.`);
+  if (!file || rest.length) return usage('project info takes one file, a PLATO tools project (.platoproj).');
+  const { readProject, describe } = await import('../src/engine/methodos/project.js');
+  const { createReadStream } = await import('node:fs');
+  try { if (!statSync(file).isFile()) return usage(`${file} is not a file.`); } catch (e) { process.stderr.write(`plato-tools: ${file} cannot be read (${e.code || e.message}).\n`); return 2; }
+  let read;
+  try { read = await readProject(createReadStream(file), { name: file }); } catch (e) {
+    if (o.json) process.stdout.write(JSON.stringify({ file, ok: false, problem: e.message }, null, 2) + '\n');
+    else process.stdout.write(`${file}: ${e.message}\n`);
+    return 1;
+  }
+  if (o.json) process.stdout.write(JSON.stringify({ file, ok: true, manifest: read.manifest }, null, 2) + '\n');
+  else process.stdout.write(`${file}\n${describe(read).join('\n')}\n`);
+  return 0;
+}
+
 async function datacube(files, o) {
   if (!files.length) return usage('name at least one N-Triples cube export to check.');
   const { integrityOfFile } = await import('../src/lib/datacube.js');

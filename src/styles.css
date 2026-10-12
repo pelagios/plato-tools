@@ -645,6 +645,13 @@ code.code-chip { font-family: var(--font-mono); font-size: .85em; padding: 0 .3e
 /* What a workflow cannot carry from its files (a recipe's `cannot`): a short list, in the interview's plan and folded in the tracker. */
 .track-cannot { padding-left: 1.2rem; margin: .3rem 0 0; color: var(--muted); font-size: .95rem; }
 .track-cannot li + li { margin-top: .25rem; }
+/* The project file: folded like it, what goes into it said beside its button, in the page's own colour. */
+.track-project .track-note { color: var(--fg); }
+.track-project .track-own { display: flex; gap: .4rem; align-items: baseline; margin: .45rem 0 0; color: var(--fg); }
+.track-project .methodos-buttons { margin-top: .5rem; }
+.track-project .track-message button { margin: .35rem .35rem 0 0; }
+.methodos-banner button.link { font-size: inherit; }
+.methodos-project-said { margin: .5rem 0 0; font-size: .9rem; }
 /* Which step a result was of, once the workflow has gone on (src/app.js). */
 .result-of { margin: -.35rem 0 .6rem; color: var(--muted); font-weight: 700; }
 .workflow-step { color: var(--fg); }

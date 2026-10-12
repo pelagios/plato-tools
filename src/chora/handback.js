@@ -115,6 +115,16 @@ export async function take(workflow) {
   return check(v, workflow);
 }
 
+/**
+ * For the main page's project file (src/engine/methodos/project.js): the hand-back for `workflow`,
+ * checked as take() checks it, or null; read, not taken, so that it is still there to take.
+ */
+export async function peek(workflow) {
+  let v;
+  try { v = await tx('readonly', (s) => s.get(KEY)); } catch { return null; }
+  return check(v, workflow);
+}
+
 /** Let a hand-back go that is no longer fresh; a fresh one is kept. True if one went. Read, judged and deleted in one transaction. */
 export async function dropStale(now = Date.now()) {
   let went = false;
