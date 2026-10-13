@@ -68,14 +68,18 @@ Status: IMPLEMENTED; engine and CLI tests pass (test/krisis.test.js, test/krisis
     'attestations' writes `<subjects stem>.krisis-attestations.json` (attestation-centric PLATO).
     Both read `subjects` first for this review's earlier answers (`withdraw.js`, `reconcile()`): one
     the same is not written again (warning `already-answered`, counted; `nothing-new` when nothing is
-    left), one a changed decision contradicts is retracted (`answers-retracted`) or, replaced by an
-    answer of the same kind, superseded by it (`answers-superseded`). Every attestation written about
-    a place under the dataset's base address gets an `@id`, `<place>#a-<hash>`, by Agora's
+    left; `answers-not-relinked` when only its `promotedFrom` differs), one a changed decision
+    contradicts or replaces is retracted (`answers-retracted`; never superseded), or, in a dataset not
+    published whose review chose `options.draftAnswers` / `work.draft_answers` 'replace', taken out
+    (`answers-replaced`; `replace-not-for-published`, `replace-needs-dataset`). Every attestation written
+    about a place under the dataset's base address gets an `@id`, `<place>#a-<hash>`, by Agora's
     `mintAddress` (`attestations-unaddressed` counts those outside it). Errors: `answer-bundles-others`,
     `answer-unaddressable` (an earlier answer with no address, outside the base), `answer-unaddressed`
     (the same, in the attestations-only output, which cannot give it one), `not-all-withdrawn` (the
     version check's count of withdrawals differs: a fault in the tools); warnings
-    `withdrawn-with-undecided`, `answers-addressed`, `earlier-answers-not-read` (no dataset given).
+    `withdrawn-with-undecided`, `answers-addressed`, `answers-withdrawn-by-name`, `reviewer-differs`,
+    `finished-before`, `earlier-answers-not-read` (no dataset given). A Finish that wrote something
+    returns `work`: the work file with the Finish recorded (`finished`) and the choice (`draft_answers`).
     `options.candidates`: candidate sets (objects or text) the answers point into, beside the one last
     exported (recorded in the work file). Each relation of an answer carries `promotedFrom` (the
     candidate's stored `iri`), and both outputs' gazetteer `candidateSets` lists the sets pointed
@@ -137,9 +141,9 @@ subject places with at least one candidate, in review order. `reviewer: null | {
 - `match()` result `{ report, outputs: [{ name, size }], work }`; `report.counts` keys: subjects,
   others, candidates, suggestedFor, linked, judgedDifferent, tooFar, unaddressed, comparisons.
 - `apply()` result `{ report, outputs, attestations }`; counts: attestations, matchAttestations,
-  distinctAttestations, relations, and when non-zero unchanged, retracted, superseded; with output
+  distinctAttestations, relations, and when non-zero unchanged, retracted, replaced; with output
   'dataset' also `places` and `versionCheck: { earlier, later, unchanged, changed, lost, added }`
-  (compare's counts, with `retracted` and `superseded` when anything is withdrawn). Report kinds of the dataset output:
+  (compare's counts, with `retracted` and `superseded` when anything is withdrawn, `replaced` when taken out). Report kinds of the dataset output:
   errors `no-dataset`, `dataset-not-read`, `not-in-dataset` (a subject IRI in the decisions that no
   record of the dataset has), `not-append-only` (compare found something deleted or changed: a fault
   in the tools), `not-checked`, `not-all-added`; warnings `dataset-has-problems` (the dataset's own

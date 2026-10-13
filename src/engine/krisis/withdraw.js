@@ -25,15 +25,23 @@
 // made, or taken back) says nothing, and an answer about it alone is kept.
 //
 // Which withdrawal (the rule, per place):
-//   - an answer that says what the review now says (the same places, types, bases, certainties and
-//     candidates, yes or no): kept, and the new one not written;
-//   - an acceptance replaced by an acceptance (A then B; A then A and B; a basis corrected): the new
-//     one supersedes it;
-//   - a denial replaced by a denial of the same pair (its basis corrected): the new one supersedes it;
-//   - anything else (accepted then rejected, rejected then accepted, either then "not this one"): the
-//     earlier answer is retracted, and the new answer, if any, written beside the retraction. An
-//     acceptance never supersedes a denial, nor a denial an acceptance: "that was wrong" is not
-//     "replaced by this", and PLATO's own worked example of a match found wrong (Act 2) retracts it.
+//   - an answer that says what the review now says (the same places, types, bases and certainties, yes
+//     or no): kept, and the new one not written. A candidate's address gained since (promotedFrom, once
+//     the suggestions were exported) is not a change: nothing new is written for it, and it is said;
+//   - any other earlier answer the review now contradicts or replaces (accepted then rejected, rejected
+//     then accepted, A then B, A then A and B, a basis corrected, either then "not this one"): it is
+//     retracted by a plato:Retracts of its own, and the new answer, if any, is written beside it.
+//   Krisis never writes plato:Supersedes, and never withdraws a retraction. A supersession takes effect
+//   only while it holds (plato:Retracts: "retracting it withdraws the withdrawal"; shared.js resolves
+//   chains so), so had the new answer superseded the old, retracting the new answer later would have
+//   brought the old one back: accepted A, then B, then "different places" from B, would read A again.
+//   A retraction that nothing ever withdraws cannot bring anything back. PLATO's own worked example of a
+//   match found wrong (identity-judgements.ttl, Act 2) retracts it and states the right one beside it.
+//
+// A dataset not yet published (status other than 'published') may instead have the earlier answer
+// REPLACED: taken out, and the new answer written (the work file's `draft_answers: 'replace'`, chosen in
+// the Finish area). PLATO binds only from publication (plato:Gazetteer), so this is the user's choice;
+// the default keeps the history ('withdraw'). A published dataset's answers are never replaced.
 //
 // Addresses. A withdrawal points at its target's @id, so every attestation Krisis writes is given one,
 // in Agora's form and by Agora's rule (agora/mint.js, mintAddress and the digest of what it says):
@@ -43,7 +51,9 @@
 // else the folder of its own address, as a candidate set's base is found): a place under another's
 // address is not ours to mint in, as Agora refuses it too. An earlier answer with no address of its own
 // (one written before Krisis gave them) is given its address when it must be withdrawn, in the
-// dataset written; the attestations-only output cannot give it one, and refuses.
+// dataset written; the attestations-only output cannot give it one, and refuses. Two addresses being
+// made whose hashes begin alike are each lengthened against the other, as Agora does; the one difference
+// is that a retraction's own hash is not known when its target's address is made, since it holds it.
 import { jcs } from '../../formats/json2rdf.js';
 import { PLATO } from '../../lib/context.js';
 import { sha256 } from '../../lib/sha256.js';
@@ -52,7 +62,8 @@ import { normaliseBase } from '../agora/address.js';
 import { defaultBase } from './candidates.js';
 import { KRISIS_WITHDRAW } from '../words.js';
 
-export const RETRACTS = PLATO + 'Retracts', SUPERSEDES = PLATO + 'Supersedes';
+export const RETRACTS = PLATO + 'Retracts';
+export const DRAFT_ANSWERS = ['withdraw', 'replace'];
 const isObject = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
 const hasId = (a) => isObject(a) && typeof a['@id'] === 'string' && a['@id'] !== '';
 const ORCID = /(\d{4}-\d{4}-\d{4}-\d{3}[\dX])\s*$/;
@@ -60,14 +71,15 @@ const orcidOf = (o) => (typeof o === 'string' ? ORCID.exec(o)?.[1] ?? o.trim() :
 
 /**
  * Whether a contributor as an attestation gives it (an IRI or { @id?, name?, orcid? }) is `reviewer`
- * ({ name, orcid? }): by ORCID when both give one, else by name.
+ * ({ name, orcid? }): 'orcid' when both give one and it is the same, 'name' when either gives none and
+ * the names are the same, else false.
  */
 export function sameContributor(c, reviewer) {
   if (!reviewer) return false;
-  if (typeof c === 'string') return !!reviewer.orcid && orcidOf(c) === orcidOf(reviewer.orcid);
+  if (typeof c === 'string') return !!reviewer.orcid && orcidOf(c) === orcidOf(reviewer.orcid) && 'orcid';
   if (!isObject(c)) return false;
-  if (c.orcid && reviewer.orcid) return orcidOf(c.orcid) === orcidOf(reviewer.orcid);
-  return typeof c.name === 'string' && typeof reviewer.name === 'string' && c.name.trim() === reviewer.name.trim();
+  if (c.orcid && reviewer.orcid) return orcidOf(c.orcid) === orcidOf(reviewer.orcid) && 'orcid';
+  return typeof c.name === 'string' && typeof reviewer.name === 'string' && c.name.trim() === reviewer.name.trim() && 'name';
 }
 /** Who made an attestation, as one key (the version check's answered-both-ways): an ORCID, else an address, else a name. */
 export function contributorKey(c) {
@@ -76,9 +88,12 @@ export function contributorKey(c) {
   return (c.orcid && orcidOf(c.orcid)) || (typeof c['@id'] === 'string' && c['@id']) || (typeof c.name === 'string' && c.name.trim()) || '';
 }
 
-const relationSig = (r) => jcs([r.object ?? null, r.identityType ?? null, r.basis ?? null, r.certainty ?? null, r.promotedFrom ?? null]);
-/** What an answer says, as one text: yes or no, and each relation, whatever their order. */
-export const answerSig = (a) => jcs([!!a.negated, (a.identities || []).map(relationSig).sort()]);
+// What a relation says, for telling a changed answer from one made again: not the candidate it answers
+// (promotedFrom), which an export after the answer gives it without changing what the reviewer said.
+const relationSig = (r) => jcs([r.object ?? null, r.identityType ?? null, r.basis ?? null, r.certainty ?? null]);
+/** What an answer says, as one text: yes or no, its certainty (a region claim's level), and each relation, whatever their order. */
+export const answerSig = (a) => jcs([!!a.negated, a.certaintyLevel ?? a.certainty ?? null, (a.identities || []).map(relationSig).sort()]);
+const linksOf = (a) => jcs((a.identities || []).map((r) => [r.object ?? null, r.promotedFrom ?? null]).sort());
 
 /** The base address a place must be under to be given attestation addresses here (see above), or null. */
 export function baseFor({ base, header, work }) {
@@ -127,8 +142,6 @@ export function earlierCollector(places, collectWithdrawn) {
 }
 
 const latest = (dates) => dates.filter(Boolean).sort().at(-1);
-const objectsOf = (a) => (a.identities || []).map((r) => r.object);
-const sourceSig = (a) => jcs(a.citations?.[0]?.source ?? a.sources?.[0] ?? null);
 
 /**
  * The review's new answers, set against the earlier answers the dataset holds.
@@ -138,90 +151,107 @@ const sourceSig = (a) => jcs(a.citations?.[0]?.source ?? a.sources?.[0] ?? null)
  *              dataset was not read (then nothing is withdrawn, and only the addresses are given)
  *   withdrawn  the whole dataset's resolveWithdrawn().status
  *   reviewer   { name, orcid? }; date: the date given for every attestation, if any
+ *   sourceOf   (candidate) => the source an answer to it cites (identity.js): what a retraction cites
+ *   leftOut    the places the reviewer leaves out of the dataset: not examined (they are not written)
+ *   replace    true: an earlier answer is taken out, not retracted (a draft whose review chose so)
  *   base       the base address (baseFor()); context: the JSON-LD context; header: the dataset's header
  *   canAddress whether an earlier answer without an address may be given one (the dataset output)
  * Returns { write: [{ subject, attestation }], give: Map<place, [{ text, id }]> (earlier answers given
- * an address: the JCS text of the attestation as read, and the address), counts: { unchanged,
- * retracted, superseded, kept, addressed, unaddressed }, problems: [{ severity, kind, example }] }.
+ * an address: the JCS text of the attestation as read, and the address), remove: Map<place, [{ text,
+ * attestation }]> (earlier answers taken out, replace only), counts: { unchanged, unlinked, retracted,
+ * replaced, kept, ours, byName, addressed, unaddressed }, problems: [{ severity, kind, example }] }.
  * Pure. Every attestation in `write` has its @id when its place is under the base.
  */
-export function reconcile({ work, made, earlier, withdrawn = new Map(), reviewer, date, base, context, header, canAddress = true }) {
-  const counts = { unchanged: 0, retracted: 0, superseded: 0, kept: 0, addressed: 0, unaddressed: 0 };
-  const problems = [], give = new Map(), retractions = [], dropped = new Set();
+export function reconcile({ work, made, earlier, withdrawn = new Map(), reviewer, date, sourceOf = () => undefined, leftOut = new Set(), replace = false, base, context, header, canAddress = true }) {
+  const counts = { unchanged: 0, unlinked: 0, retracted: 0, replaced: 0, kept: 0, ours: 0, byName: 0, addressed: 0, unaddressed: 0 };
+  const problems = [], give = new Map(), remove = new Map(), retractions = [], dropped = new Set();
   const contributor = { name: reviewer.name.trim(), ...(reviewer.orcid ? { orcid: reviewer.orcid } : {}) };
   // The places whose answers may have changed: those of the review that have a decision, and those of the new answers.
   const places = new Set(made.map((m) => m.subject));
   for (const c of work.candidates) if (c.decision && Object.hasOwn(work.places, c.candidate_source)) places.add(c.candidate_source);
-  const targets = new Map();   // an earlier answer to withdraw -> its place, for its address
+  const targets = new Map();   // an earlier answer to retract -> its place, for its address
   for (const P of earlier ? places : []) {
+    if (leftOut.has(P)) continue;
     const cands = new Map(work.candidates.filter((c) => c.candidate_source === P).map((c) => [c.candidate_candidate, c]));
-    const live = (earlier.get(P) || []).filter((a) => Array.isArray(a.identities) && a.identities.length
-      && !(hasId(a) && withdrawn.has(a['@id'])) && sameContributor(a.contributor, reviewer)
-      && a.identities.every((r) => isObject(r) && (r.subject ?? P) === P) && a.identities.some((r) => cands.has(r.object)));
+    const by = new Map();
+    const live = (earlier.get(P) || []).filter((a) => {
+      if (!(Array.isArray(a.identities) && a.identities.length && !(hasId(a) && withdrawn.has(a['@id'])))) return false;
+      if (!(a.identities.every((r) => isObject(r) && (r.subject ?? P) === P) && a.identities.some((r) => cands.has(r.object)))) return false;
+      const how = sameContributor(a.contributor, reviewer);
+      if (how) by.set(a, how);
+      return !!how;
+    });
+    counts.ours += live.length;
     const here = made.filter((m) => m.subject === P);
     // What the review now says of each place: the relation it writes, yes or no; none for "not this one".
     const now = new Map();
-    for (const m of here) for (const r of m.attestation.identities) now.set(r.object, { negated: !!m.attestation.negated, sig: relationSig(r) });
-    // 1. Said already, the same: kept, and not written again.
+    for (const m of here) for (const r of m.attestation.identities || []) now.set(r.object, { negated: !!m.attestation.negated, sig: relationSig(r) });
+    const decided = (r) => !!cands.get(r.object)?.decision;
+    // 1. Said already, the same: kept, and not written again (a candidate's address gained since is said).
     const used = new Set();
     for (const m of here) {
       const e = live.find((x) => !used.has(x) && answerSig(x) === answerSig(m.attestation));
-      if (e) { used.add(e); dropped.add(m); counts.unchanged++; }
+      if (!e) continue;
+      used.add(e); dropped.add(m); counts.unchanged++;
+      if (linksOf(e) !== linksOf(m.attestation)) counts.unlinked++;
     }
-    const fresh = here.filter((m) => !dropped.has(m));
-    const accepting = fresh.filter((m) => !m.attestation.negated), denying = fresh.filter((m) => m.attestation.negated);
-    // 2. Which of the rest the review now contradicts, or replaces.
-    const affected = [];
+    const accepting = here.filter((m) => !dropped.has(m) && !m.attestation.negated);
+    // 2. Which of the rest the review now contradicts, or replaces: each is retracted (or, replace, taken out).
     for (const e of live.filter((x) => !used.has(x))) {
       const changed = e.identities.some((r) => {
-        if (!cands.get(r.object)?.decision) return false;
+        if (!decided(r)) return false;
         const n = now.get(r.object);
-        return !n || n.negated !== !!e.negated || n.sig !== relationSig(r) || (!e.negated && accepting.some((m) => objectsOf(m.attestation).includes(r.object)));
+        return !n || n.negated !== !!e.negated || n.sig !== relationSig(r) || (!e.negated && accepting.some((m) => m.attestation.identities.some((x) => x.object === r.object)));
       });
       if (!changed) { counts.kept++; continue; }
       const others = e.identities.filter((r) => !cands.has(r.object)).map((r) => r.object);
       if (others.length) { problems.push({ severity: 'error', kind: 'answer-bundles-others', example: `${e['@id'] || P}: ${others.join(', ')}` }); continue; }
-      const undecided = e.identities.filter((r) => !cands.get(r.object)?.decision).map((r) => r.object);
+      const undecided = e.identities.filter((r) => !decided(r)).map((r) => r.object);
       if (undecided.length) problems.push({ severity: 'warning', kind: 'withdrawn-with-undecided', example: `${P}: ${undecided.join(', ')}` });
+      if (replace) { (remove.get(P) || remove.set(P, []).get(P)).push({ text: jcs(e), attestation: e }); counts.replaced++; continue; }
       if (!hasId(e) && !(canAddress && base && P.startsWith(base))) { problems.push({ severity: 'error', kind: canAddress ? 'answer-unaddressable' : 'answer-unaddressed', example: P }); continue; }
-      affected.push(e);
-    }
-    // 3. Each affected answer superseded by a new one of the same kind (one target each), else retracted.
-    const taken = new Set();
-    for (const e of affected) {
+      const byName = by.get(e) === 'name';
+      if (byName) counts.byName++;
       targets.set(e, P);
-      const n = e.negated
-        ? denying.find((m) => !taken.has(m) && objectsOf(m.attestation)[0] === objectsOf(e)[0])
-        : (accepting.find((m) => !taken.has(m) && sourceSig(m.attestation) === sourceSig(e)) || accepting.find((m) => !taken.has(m)));
-      const when = date || latest(e.identities.map((r) => cands.get(r.object)?.decision?.decided_at));
-      if (n) { taken.add(n); n.supersedes = e; counts.superseded++; continue; }
-      retractions.push({ subject: P, target: e, attestation: { contributor, created: when,
-        ...(Array.isArray(e.citations) ? { citations: e.citations } : Array.isArray(e.sources) ? { sources: e.sources } : {}),
-        notes: KRISIS_WITHDRAW.retractNote } });
+      // What the retraction rests on: the source of the decision that changed it, as PLATO's Act 2 cites
+      // the second review. Dated by that decision, else by the review's latest decision on the place.
+      const changedBy = e.identities.map((r) => cands.get(r.object)).filter((c) => c?.decision);
+      const src = sourceOf(changedBy[0]);
+      const when = date || latest(changedBy.map((c) => c.decision.decided_at)) || latest([...cands.values()].map((c) => c.decision?.decided_at)) || new Date().toISOString();
+      // Withdrawn by whoever made it: an answer matched by name only is retracted in the name it was made in.
+      retractions.push({ subject: P, target: e, attestation: { contributor: byName && e.contributor ? e.contributor : contributor, created: when,
+        ...(src !== undefined && src !== null ? { citations: [{ source: src }] } : {}), notes: KRISIS_WITHDRAW.retractNote } });
       counts.retracted++;
     }
   }
   const write = made.filter((m) => !dropped.has(m));
 
-  // Addresses: the earlier answers withdrawn first (what withdraws them names them), then what is written.
+  // Addresses: the earlier answers retracted first (what retracts them names them), then what is written.
+  // Every hash of the place is known before any address is made (but a retraction's: it holds its
+  // target's), so that two beginning alike are each lengthened against the other, as Agora's are.
   const perPlace = new Map();
   const placeOf = (P) => {
     if (perPlace.has(P)) return perPlace.get(P);
     const atts = earlier?.get(P) || [];
     const digests = digestsOf(context, P, atts, header);
-    const st = { atts, digests: digests.filter(Boolean), byAtt: new Map(atts.map((a, i) => [a, digests[i]])), ids: new Set(atts.filter(hasId).map((a) => a['@id'])) };
+    const st = { digests: digests.filter(Boolean), byAtt: new Map(atts.map((a, i) => [a, digests[i]])), ids: new Set(atts.filter(hasId).map((a) => a['@id'])) };
     perPlace.set(P, st);
     return st;
   };
-  const mint = (P, att) => {
+  const digestOf = (P, att) => {
     const st = placeOf(P);
-    const d = st.byAtt.get(att) ?? digestsOf(context, P, [att], header)[0];
+    if (!st.byAtt.has(att)) { const d = digestsOf(context, P, [att], header)[0]; st.byAtt.set(att, d); if (d && !st.digests.includes(d)) st.digests.push(d); }
+    return st.byAtt.get(att);
+  };
+  const mint = (P, att) => {
+    const st = placeOf(P), d = digestOf(P, att);
     if (!d) return null;
-    if (!st.digests.includes(d)) st.digests.push(d);
     const { id } = mintAddress(P, d, st.digests, (x) => st.ids.has(x));
     st.ids.add(id);
     return id;
   };
+  const under = (P) => !!base && P.startsWith(base);
+  for (const m of write) if (under(m.subject)) digestOf(m.subject, m.attestation);
   const idOf = new Map();
   for (const [e, P] of targets) {
     if (hasId(e)) { idOf.set(e, e['@id']); continue; }
@@ -230,18 +260,14 @@ export function reconcile({ work, made, earlier, withdrawn = new Map(), reviewer
     (give.get(P) || give.set(P, []).get(P)).push({ text: jcs(e), id });
     counts.addressed++;
   }
-  const out = [];
-  for (const m of write) {
-    const { supersedes, ...item } = m;
-    const attestation = supersedes ? { ...m.attestation, meta: { targetAttestation: idOf.get(supersedes), metaType: SUPERSEDES } } : m.attestation;
-    out.push({ ...item, attestation });
-  }
+  const out = write.map((m) => ({ ...m }));
   for (const r of retractions) out.push({ subject: r.subject, attestation: { meta: { targetAttestation: idOf.get(r.target), metaType: RETRACTS }, ...r.attestation } });
+  for (const m of out) if (m.attestation.meta && under(m.subject)) digestOf(m.subject, m.attestation);
   // Every attestation written is given its address, under the base only.
   for (const m of out) {
-    if (!(base && m.subject.startsWith(base))) { counts.unaddressed++; continue; }
+    if (!under(m.subject)) { counts.unaddressed++; continue; }
     const id = mint(m.subject, m.attestation);
     if (id) m.attestation = { '@id': id, ...m.attestation };
   }
-  return { write: out, give, counts, problems };
+  return { write: out, give, remove, counts, problems };
 }

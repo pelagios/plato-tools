@@ -105,7 +105,7 @@ export function attestationsFrom(work, { reviewer = work.reviewer, source, date,
   const out = [];
   const algorithm = (c) => c.algorithm_version || work.algorithm_version;
   // `source` stands for the other dataset only: a candidate looked up in a gazetteer always cites the gazetteer.
-  const sourceOf = (c) => (lookupOf(work, c) || !source ? candidateSource(work, c) : source);
+  const sourceOf = (c) => answerSource(work, c, source);
   for (const subject of Object.keys(work.places)) {
     const decided = work.candidates.filter((c) => c.candidate_source === subject && c.decision);
     // One attestation per source (Krisis: gazetteer lookup): matches from the other dataset and from a gazetteer are cited apart.
@@ -204,6 +204,12 @@ export function candidateSource(work, c) {
   if (l) return gazetteerSource(l.service);
   return datasetSource(work.others || c.other?.source || {});
 }
+/**
+ * What an answer to candidate `c` cites: the gazetteer it was looked up in, else `source` (the other
+ * dataset, as given for this Finish), else the other dataset as the work file describes it. A
+ * retraction of an earlier answer cites the same (withdraw.js), as PLATO's Act 2 cites the second review.
+ */
+export const answerSource = (work, c, source) => (lookupOf(work, c) || !source ? candidateSource(work, c) : source);
 /** Candidates grouped by the source they cite, in order of first appearance. */
 function bySource(cands, sourceOf) {
   const groups = new Map();

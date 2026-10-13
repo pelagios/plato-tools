@@ -17,7 +17,7 @@ import { QUALIFIER_LISTS } from './engine/krisis/qualifiers.js';
 import { exportCandidates, readCandidateSet, serialiseCandidateSet } from './engine/krisis/candidates.js';
 import { datasetAddress, baseDiffers } from './engine/methodos/containment.js';
 import { acceptGuarded, undoBatch, guardOf, guardsFirst, planGuarded } from './engine/krisis/guards.js';
-import { KRISIS_CANDIDATES, guardWords as GW, variantWords as VW, rowWords as RW } from './engine/words.js';
+import { KRISIS_CANDIDATES, KRISIS_WITHDRAW, guardWords as GW, variantWords as VW, rowWords as RW } from './engine/words.js';
 import { stash as stashForChora, dropStale as dropStaleHandoff } from './chora/handoff.js';
 import { keptFileStore, keptLine, sameAbout, onChange as keptChanged } from './lib/kept-file.js';
 import { dropStale as dropStaleHandback, workflowOf } from './chora/handback.js';
@@ -205,6 +205,7 @@ function start(action, earlier) {
   // The title in the options is cited only when the review has none but a file's name: one left there from an earlier match must not replace the review's own.
   // The candidate set exported on the page, and the earlier sets given, are what the answers point into (promotedFrom).
   else if (action === 'apply') worker.postMessage({ cmd: 'apply', subjects: files, work, options: { output: earlier, reviewer: reviewer(), othersTitle: work.others?.titleFrom === 'file-name' ? matchOptions().othersTitle : undefined, base, ...sheetOption(),
+    draftAnswers: document.querySelector('input[name="draft-answers"]:checked')?.value || 'withdraw',
     candidates: [exportedSet, ...earlierSets].filter(Boolean),
     // A table is finished by the review's own matching of its columns, unless another has been loaded since: that is sent, and said to differ.
     ...(isTable(input) && columns && reviewMapping !== undefined && mappingText(columnOptions()) !== reviewMapping ? { columns: columnOptions() } : {}) } });
@@ -259,6 +260,12 @@ function onDone({ report, outputs, work: found, incomplete }) {
   renderReport(report);
   Object.assign(state, { phase: 'done', report, outputs });
   if (state.action === 'match' && found) beginReview(found, outputs?.find((o) => /\.krisis\.json$/.test(o.name))?.name);
+  // Krisis: a Finish that wrote something is recorded in the review (withdraw.js), with the choice for drafts:
+  // kept in the review on the page, which asks to be saved again so that a later Finish can tell its dataset.
+  if (state.action === 'apply' && found && work && !incomplete) {
+    Object.assign(work, { finished: found.finished, draft_answers: found.draft_answers });
+    unsaved++; showWarning(KRISIS_WITHDRAW.recorded);
+  }
 }
 function renderReport(report) { $('report').innerHTML = reportHtml(report, state.action); }
 /** A report's findings, group by group, as the page shows them. */
@@ -1312,6 +1319,8 @@ async function resume(file) {
 function beginReview(w, name, { focus = true } = {}) {
   work = w; workName = name || workName; basisFor = null; findFor = null; allDone = false; unsaved = 0;
   exportedSet = null; earlierSets = []; candidatesStatus('');
+  // Krisis: what a Finish does with an earlier answer in a draft, as the review last chose (withdraw.js).
+  for (const r of document.querySelectorAll('input[name="draft-answers"]')) r.checked = r.value === (work.draft_answers || 'withdraw');
   order = placeOrder(); lastBulk = null;
   cursor = Math.min(Math.max(0, work.cursor || 0), Math.max(0, order.length - 1));
   // A place with no candidates has nothing to review: start at the first that has some.

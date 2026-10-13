@@ -56,6 +56,10 @@
 // and `batch` ('b1', …) when the bulk accept made it; a lookup query's `variants: [{ text, how }]`
 // (aligned with `sent`) and a lookup's `parameters.variants`; and `batches: [{ id, at, identityType,
 // threshold, accepted, leftOut: { far, ccodes, total }, undone? }]`.
+// Any version may also carry, OPTIONAL (withdraw.js): `draft_answers: 'withdraw' | 'replace'` (what a
+// Finish does with an earlier answer a changed decision contradicts, in a dataset not yet published;
+// withdraw when absent) and `finished: [{ at, output, sha256, gazetteer?, reviewer: { name, orcid? } }]`
+// (each Finish, the latest last: the file it wrote and its SHA-256).
 // readWork reads versions 1 and 2 and gives them back as version 3, with no regions.
 import { DataError } from '../input.js';
 import { REGION_WORDS } from '../words.js';
@@ -207,6 +211,12 @@ export function readWork(text) {
   // The candidate sets exported from this review, last the latest: each with the earlier sets it was exported against.
   if (w.candidate_sets !== undefined && !(Array.isArray(w.candidate_sets) && w.candidate_sets.every((x) => isObject(x) && isIri(x['@id']) && !x['@id'].includes('#')
     && typeof x.issued === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x.issued) && Array.isArray(x.previous) && x.previous.every(isIri)))) bad('the candidate sets exported from it (candidate_sets) are not listed as an address, a date of issue and the earlier sets each.');
+  // Krisis: a changed decision (withdraw.js). What to do with an earlier answer in a dataset not yet
+  // published, and each Finish (what it wrote, its SHA-256, the dataset's address, the reviewer, when).
+  if (w.draft_answers !== undefined && !['withdraw', 'replace'].includes(w.draft_answers)) bad('what to do with an earlier answer in a dataset not yet published (draft_answers) is not withdraw or replace.');
+  if (w.finished !== undefined && !(Array.isArray(w.finished) && w.finished.every((f) => isObject(f) && typeof f.output === 'string' && /^[0-9a-f]{64}$/.test(f.sha256)
+    && typeof f.at === 'string' && DATE_TIME.test(f.at) && (f.gazetteer === undefined || isIri(f.gazetteer)) && isObject(f.reviewer) && typeof f.reviewer.name === 'string')))
+    bad('the Finishes it records (finished) are not each a file written, its SHA-256 digest, when, and by whom.');
   if (w.reviewer !== undefined && w.reviewer !== null) { try { checkReviewer(w.reviewer); } catch (e) { bad(e.message[0].toLowerCase() + e.message.slice(1)); } }
   if (w.cursor !== undefined && !(Number.isInteger(w.cursor) && w.cursor >= 0)) bad('its place in the review (cursor) is not a count.');
   checkLookups(w, bad);

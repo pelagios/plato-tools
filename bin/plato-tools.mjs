@@ -264,6 +264,11 @@ ${QUALIFIER_LISTS.map((l) => `                    ${l.id}: ${l.label}${l.status 
   --reviewer NAME   match, apply, lookup: who reviews, recorded as each attestation's contributor
                     (apply: default, the name in the work file; lookup: written into the work file).
   --orcid URL       match, apply, lookup: the reviewer's ORCID, as https://orcid.org/0000-0000-0000-0000.
+  --draft-answers withdraw|replace
+                    apply: what to do with an earlier answer a changed decision no longer holds,
+                    in a dataset that is not yet published: withdraw it and keep it (the default,
+                    as the review last chose), or replace it (take it out). A published dataset's
+                    answers are always withdrawn. The choice is kept in the work file.
   --others-title TEXT
                     match, apply: the other dataset's title, which each attestation cites as its
                     source (default: the title the other dataset gives; if it gives none, its
@@ -409,6 +414,7 @@ async function main(argv) {
         with: { type: 'string' }, threshold: { type: 'string' }, 'max-distance': { type: 'string' }, top: { type: 'string' }, qualifiers: { type: 'string' },
         review: { type: 'string' }, output: { type: 'string' }, reviewer: { type: 'string' }, orcid: { type: 'string' },
         'others-title': { type: 'string' },
+        'draft-answers': { type: 'string' },
         candidates: { type: 'string', multiple: true }, 'previous-candidates': { type: 'string', multiple: true }, 'set-iri': { type: 'string' },
         georef: { type: 'string', multiple: true }, manifest: { type: 'string', multiple: true },
         gazetteer: { type: 'string' }, places: { type: 'string' }, 'all-names': { type: 'boolean', default: false }, variants: { type: 'boolean', default: false }, countries: { type: 'boolean', default: false },
@@ -468,7 +474,7 @@ async function main(argv) {
   // (--limit, for lookup and preview, is refused above for any other command.)
   if (o.gazetteer || o.places || o['all-names'] || o.variants || o.countries || o.near || o.lang || o.batch || o['dry-run'] || o['token-env'] || o['gazetteer-iri']) return usage('--gazetteer, --token-env, --gazetteer-iri, --places, --all-names, --variants, --countries, --near, --lang, --batch and --dry-run are for lookup.');
   if (o.levels || o.level !== undefined || o.relax !== undefined || o.unconstrained) return usage('--levels, --level, --relax and --unconstrained are for lookup.');
-  if (o.with || o.threshold || o['max-distance'] || o.top || o.qualifiers !== undefined || o.review || o.output || o.reviewer || o.orcid || o['others-title'] !== undefined) return usage('--with, --threshold, --max-distance, --top, --qualifiers, --review, --output, --reviewer, --orcid and --others-title are for match and apply.');
+  if (o.with || o.threshold || o['max-distance'] || o.top || o.qualifiers !== undefined || o.review || o.output || o.reviewer || o.orcid || o['others-title'] !== undefined || o['draft-answers'] !== undefined) return usage('--with, --threshold, --max-distance, --top, --qualifiers, --review, --output, --reviewer, --orcid, --others-title and --draft-answers are for match and apply.');
   if (!reads && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, preview, cluster, compare, publish, match, apply, lookup, candidates, datacube and project.`);
   // Elenchos: candidate sets checked together, with no other input: the first is checked, with the others
   // (each is first made sure of below, so that a dataset given with --candidates is refused, not checked).
@@ -985,7 +991,8 @@ async function review(action, args, o, resources) {
     if (o.output && !REVIEW_OUTPUTS.includes(o.output)) return usage(`"${o.output}" is not an output; the outputs are ${REVIEW_OUTPUTS.join(' and ')}.`);
     try { work = readFileSync(o.review, 'utf8'); }
     catch (e) { return usage(`the work file ${o.review} cannot be read: ${e.code === 'ENOENT' ? 'there is no such file.' : e.message}`); }
-    options = { output: o.output || 'dataset', reviewer: reviewer || undefined, name: items[0].name, base: o.base, othersTitle: o['others-title'], columns };
+    if (o['draft-answers'] !== undefined && !['withdraw', 'replace'].includes(o['draft-answers'])) return usage(`--draft-answers is withdraw or replace, not ${o['draft-answers']}.`);
+    options = { output: o.output || 'dataset', reviewer: reviewer || undefined, name: items[0].name, base: o.base, othersTitle: o['others-title'], columns, draftAnswers: o['draft-answers'] };
     // Krisis: the candidate sets the answers point into (promotedFrom), read as text; apply checks them.
     if (o.candidates) {
       options.candidates = [];
@@ -1020,6 +1027,12 @@ async function review(action, args, o, resources) {
     if (failure) r.message = isSystemError(failure) ? (failure.code === 'EEXIST' ? `${failure.path} already exists; give --overwrite to replace it, or --out for somewhere else.` : failure.message) : failure instanceof DataError ? failure.message : toolsFault(failure);
     else Object.assign(r, { status: result.incomplete ? 'failed' : result.report.errors ? 'problems' : 'ok', errors: result.report.errors, counts: result.report.counts, items: result.report.items,
       outputs: result.outputs.map(({ path, size }) => ({ path, size })) });
+    // Krisis: a Finish that wrote something is recorded in the work file (withdraw.js), as the page keeps it.
+    if (action === 'apply' && result?.work && !result.incomplete && result.outputs.length) {
+      const { writeFileSync, renameSync } = await import('node:fs');
+      const { serialiseWork } = await import('../src/engine/krisis/work.js');
+      writeFileSync(o.review + '.tmp', serialiseWork(result.work)); renameSync(o.review + '.tmp', o.review); r.recorded = o.review;
+    }
   }
   host.cleanup();
   r.elapsedMs = Date.now() - t0;
@@ -1036,6 +1049,7 @@ async function review(action, args, o, resources) {
       if (!o.brief) lines.push(...itemLines(r.items, action));
     }
     for (const x of r.outputs) lines.push(`  Wrote ${x.path} (${fmtBytes(x.size)})`);
+    if (r.recorded) lines.push(`  Recorded this Finish in ${r.recorded}`);
     process.stdout.write(lines.join('\n') + '\n');
   }
   return r.exitCode;

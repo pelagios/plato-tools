@@ -13,7 +13,9 @@ import assert from 'node:assert/strict';
 import { env, textFile, outText } from './engine.js';
 import { detect } from '../src/engine/input.js';
 import { match } from '../src/engine/krisis/match.js';
-import { serialiseWork, decide } from '../src/engine/krisis/work.js';
+import { serialiseWork, decide, setRowState } from '../src/engine/krisis/work.js';
+import { exportCandidates } from '../src/engine/krisis/candidates.js';
+import { mintAddress } from '../src/engine/agora/mint.js';
 import { apply, checkAppendOnly } from '../src/engine/krisis/apply.js';
 import { answerSig, sameContributor } from '../src/engine/krisis/withdraw.js';
 import { compare } from '../src/engine/compare.js';
@@ -29,16 +31,16 @@ const src = { '@id': X + 'source/s', title: 'S' };
 const at = (lon, lat) => ({ geometries: [{ geojson: { type: 'Point', coordinates: [lon, lat] } }], sources: [src] });
 const place = (iri, label, attestations) => ({ '@id': iri, label, attestations });
 const G = { '@id': X + 'a/', title: 'Dataset A', licence: 'https://creativecommons.org/licenses/by/4.0/', status: 'published', version: '1' };
-const subjectsDoc = (g = G) => ({ profile: 'place-centric', gazetteer: g, spatialEntities: [place(A('newton'), 'Newton', [at(-1.0, 52.0)])] });
-const othersDoc = () => ({ profile: 'place-centric', gazetteer: { '@id': X + 'b/', title: 'Dataset B' }, spatialEntities: [
+const subjectsDoc = (g = G, more = []) => ({ profile: 'place-centric', gazetteer: g, spatialEntities: [place(A('newton'), 'Newton', [at(-1.0, 52.0)]), ...more] });
+const othersDoc = (g = { '@id': X + 'b/', title: 'Dataset B' }) => ({ profile: 'place-centric', gazetteer: g, spatialEntities: [
   place(B('newton'), 'Newton', [at(-1.01, 52.01)]), place(B('newtown'), 'Newtown', [at(-1.02, 52.0)])] });
 const json = (d, name) => textFile(JSON.stringify(d), name);
 const reviewer = { name: 'A. Reviewer', orcid: 'https://orcid.org/0000-0002-1825-0097' };
 
 /** A review of Newton against B's Newton and Newtown, with `decisions` ({ object: [kind, options] }) made. */
-async function reviewed(decisions, g) {
-  const subjects = await detect([json(subjectsDoc(g), 'a.json')]);
-  const { work } = await match({ subjects, others: await detect([json(othersDoc(), 'b.json')]), options: {} }, env());
+async function reviewed(decisions, g, og, more) {
+  const subjects = await detect([json(subjectsDoc(g, more), 'a.json')]);
+  const { work } = await match({ subjects, others: await detect([json(othersDoc(og), 'b.json')]), options: {} }, env());
   assert.deepEqual(work.candidates.map((c) => c.candidate_candidate).sort(), [B('newton'), B('newtown')], 'both of B\'s places are suggested');
   work.reviewer = reviewer;
   redecide(work, decisions);
@@ -87,7 +89,8 @@ test('accepted, then rejected ("different places"): the acceptance is retracted,
   const retraction = newton(v2.doc).find((a) => a.meta);
   assert.equal(retraction.created, '2026-10-02T09:00:00Z', 'dated by the changed decision');
   assert.deepEqual(retraction.contributor, { name: reviewer.name, orcid: reviewer.orcid }, 'withdrawn by whoever made it');
-  assert.ok(newton(v2.doc).includes(first) || newton(v2.doc).some((a) => a['@id'] === first['@id'] && answerSig(a) === answerSig(first)), 'the earlier answer is kept, as it was');
+  assert.deepEqual(retraction.citations, [{ source: { title: 'Dataset B', authorityType: 'dataset', '@id': X + 'b/' } }], 'it cites what the changed decision rests on, as PLATO\'s Act 2 cites the second review');
+  assert.equal(newton(v2.doc).filter((a) => JSON.stringify(a) === JSON.stringify(first)).length, 1, 'the earlier answer is kept, exactly as it was');
   assert.equal(v2.r.report.counts.retracted, 1);
   assert.deepEqual([v2.r.report.counts.versionCheck.retracted, v2.r.report.counts.versionCheck.superseded], [1, 0]);
   // The version check, as a user would run it on the two versions: nothing deleted or changed, the retraction counted, no answer both ways.
@@ -109,7 +112,7 @@ test('accepted, then "not this one": the acceptance is retracted and nothing els
   assert.equal(newton(v2.doc).length, newton(v1.doc).length + 1, 'one attestation added: the retraction');
 });
 
-test('accepted A, then B: the acceptance of B supersedes that of A', async () => {
+test('accepted A, then B: the acceptance of A is retracted, and that of B written beside it (Krisis never supersedes)', async () => {
   const { subjects, work } = await reviewed({ [B('newton')]: ['match', { at: '2026-10-01T09:00:00Z' }] });
   const v1 = await finish(subjects, work);
   const first = newton(v1.doc).find((a) => a.identities);
@@ -117,11 +120,11 @@ test('accepted A, then B: the acceptance of B supersedes that of A', async () =>
   const v2 = await finish(await asInput(v1.text), work);
   assert.equal(v2.r.report.errors, 0, JSON.stringify(v2.r.report.items));
   assert.deepEqual(current(v2.doc), ['b/newtown'], 'exactly one current answer: B');
-  assert.deepEqual(metas(v2.doc), [['Supersedes', first['@id'], true]], 'the new answer is itself the supersession (plato:Supersedes replaces its target with newer information)');
-  assert.deepEqual([v2.r.report.counts.superseded, v2.r.report.counts.retracted ?? 0], [1, 0]);
+  assert.deepEqual(metas(v2.doc), [['Retracts', first['@id'], false]], 'a retraction of its own: the new answer carries no meta');
+  assert.deepEqual([v2.r.report.counts.retracted, v2.r.report.counts.superseded ?? 0], [1, 0]);
   const m = await mneme(v1.text, v2.text);
   assert.equal(m.errors, 0, JSON.stringify(m.items));
-  assert.deepEqual([m.counts.superseded, m.counts.retracted], [1, 0]);
+  assert.deepEqual([m.counts.retracted, m.counts.superseded], [1, 0]);
 });
 
 test('rejected ("different places"), then accepted: the denial is retracted and the acceptance written', async () => {
@@ -154,11 +157,11 @@ test('a decision made again, unchanged, writes nothing new; the control, the sam
   const control = await finish(subjects, work);
   assert.equal(control.r.report.counts.attestations, 2);
   assert.ok(!kinds(control.r).includes('already-answered'));
-  // And a basis corrected is a change: the denial is superseded by the corrected one (presence beside the absence above).
+  // And a basis corrected is a change: the denial is retracted, and the corrected one written (presence beside the absence above).
   redecide(work, { [B('newtown')]: ['distinct', { basis: 'A farm, on the tithe map.', at: '2026-10-06T09:00:00Z' }] });
   const corrected = await finish(await asInput(v1.text), work);
   assert.equal(corrected.r.report.errors, 0, JSON.stringify(corrected.r.report.items));
-  assert.deepEqual(metas(corrected.doc).map((x) => x[0]), ['Supersedes']);
+  assert.deepEqual(metas(corrected.doc).map((x) => x[0]), ['Retracts']);
   assert.deepEqual(current(corrected.doc).sort(), ['b/newton', 'not b/newtown']);
   assert.equal(corrected.r.report.counts.unchanged, 1, 'the acceptance, unchanged, is not written again');
 });
@@ -178,14 +181,16 @@ test('a taken-back decision says nothing: the earlier answer is kept', async () 
 test('another reviewer\'s answer is never withdrawn', async () => {
   const { subjects, work } = await reviewed({ [B('newton')]: ['match', { at: '2026-10-01T09:00:00Z' }] });
   const v1 = await finish(subjects, work);
-  redecide(work, { [B('newton')]: ['not-this', { at: '2026-10-02T09:00:00Z' }] });
-  work.reviewer = { name: 'Someone Else' };
-  const v2 = await finish(await asInput(v1.text), work);
-  assert.deepEqual(v2.r.outputs, [], 'nothing to write: not this one writes nothing, and the answer is not this reviewer\'s');
-  assert.ok(kinds(v2.r).includes('nothing-decided'));
-  // Control: the reviewer who made it withdraws it.
-  work.reviewer = reviewer;
-  const v3 = await finish(await asInput(v1.text), work);
+  // Finished as another reviewer, from the work file the first Finish recorded itself in.
+  const w1 = redecide(v1.r.work, { [B('newton')]: ['distinct', { basis: 'Not the village.', at: '2026-10-02T09:00:00Z' }] });
+  const v2 = await finish(await asInput(v1.text), w1, { reviewer: { name: 'Someone Else' } });
+  assert.equal(v2.r.report.errors, 0, JSON.stringify(v2.r.report.items));
+  assert.deepEqual(current(v2.doc), ['b/newton', 'not b/newton'], 'both stay current: two reviewers may disagree');
+  assert.deepEqual(metas(v2.doc), [], 'nothing withdrawn');
+  assert.ok(kinds(v2.r).includes('reviewer-differs'), 'and the change of reviewer is said');
+  // Control: the reviewer who made it withdraws it, and no change of reviewer is said.
+  const v3 = await finish(await asInput(v1.text), w1);
+  assert.ok(!kinds(v3.r).includes('reviewer-differs'), JSON.stringify(v3.r.report.items));
   assert.deepEqual(metas(v3.doc).map((x) => x[0]), ['Retracts']);
   assert.ok(sameContributor({ name: 'A. Reviewer', orcid: '0000-0002-1825-0097' }, reviewer), 'an ORCID is the same written bare or as an address');
   assert.ok(!sameContributor({ name: 'A. Reviewer', orcid: '0000-0002-1825-0098' }, reviewer), 'two ORCIDs: the name is not enough');
@@ -236,6 +241,158 @@ test('Agora\'s minting keeps every address Krisis gives', async () => {
   assert.equal(after.filter((a) => a['@id'] && !ids.includes(a['@id'])).length, 1, 'presence: the point attestation, which had none, was given one');
 });
 
+test('three Finishes: a claim once withdrawn never comes back (A; then not A, but B; then "different places" from B)', async () => {
+  const { subjects, work } = await reviewed({ [B('newton')]: ['match', { at: '2026-10-01T09:00:00Z' }] });
+  const v1 = await finish(subjects, work);
+  redecide(work, { [B('newton')]: ['not-this', { at: '2026-10-02T09:00:00Z' }], [B('newtown')]: ['match', { at: '2026-10-02T09:01:00Z' }] });
+  const v2 = await finish(await asInput(v1.text), work);
+  assert.deepEqual(current(v2.doc), ['b/newtown']);
+  redecide(work, { [B('newtown')]: ['distinct', { basis: 'A farm.', at: '2026-10-03T09:00:00Z' }] });
+  const v3 = await finish(await asInput(v2.text), work);
+  assert.equal(v3.r.report.errors, 0, JSON.stringify(v3.r.report.items));
+  assert.deepEqual(current(v3.doc), ['not b/newtown'], 'A, withdrawn at the second Finish, does not come back when B is withdrawn at the third');
+  assert.deepEqual(metas(v3.doc).map((x) => x[0]), ['Retracts', 'Retracts'], 'presence: two retractions, nothing superseded');
+  // The whole history is there: every answer ever written is still in the file.
+  assert.equal(newton(v3.doc).filter((a) => a.identities).length, 3);
+  const m = await mneme(v2.text, v3.text);
+  assert.equal(m.errors, 0, JSON.stringify(m.items));
+});
+test('three Finishes: A, then B, then A again: one current answer, A, and B once withdrawn stays withdrawn', async () => {
+  const { subjects, work } = await reviewed({ [B('newton')]: ['match', { at: '2026-10-01T09:00:00Z' }] });
+  const v1 = await finish(subjects, work);
+  redecide(work, { [B('newton')]: ['not-this', { at: '2026-10-02T09:00:00Z' }], [B('newtown')]: ['match', { at: '2026-10-02T09:01:00Z' }] });
+  const v2 = await finish(await asInput(v1.text), work);
+  redecide(work, { [B('newton')]: ['match', { at: '2026-10-03T09:00:00Z' }], [B('newtown')]: ['not-this', { at: '2026-10-03T09:01:00Z' }] });
+  const v3 = await finish(await asInput(v2.text), work);
+  assert.equal(v3.r.report.errors, 0, JSON.stringify(v3.r.report.items));
+  assert.deepEqual(current(v3.doc), ['b/newton'], 'exactly one current answer');
+  assert.equal(newton(v3.doc).filter((a) => a.identities && !a.negated && a.identities[0].object === B('newton')).length, 2, 'A answered anew, beside the A withdrawn');
+  assert.equal(new Set(newton(v3.doc).map((a) => a['@id'])).size, newton(v3.doc).length, 'every address different');
+});
+
+test('a draft whose review chose to replace: the earlier answer is taken out, not retracted, the choice is kept, and the version check passes; withdraw, the default, retracts', async () => {
+  const draft = { ...G, status: 'draft' };
+  for (const choice of ['replace', 'withdraw']) {
+    const { subjects, work } = await reviewed({ [B('newton')]: ['match', { at: '2026-10-01T09:00:00Z' }] }, draft);
+    const v1 = await finish(subjects, work);
+    const first = newton(v1.doc).find((a) => a.identities);
+    redecide(work, { [B('newton')]: ['distinct', { basis: 'The mill.', at: '2026-10-02T09:00:00Z' }] });
+    const v2 = await finish(await asInput(v1.text), work, { draftAnswers: choice });
+    assert.equal(v2.r.report.errors, 0, `${choice}: ${JSON.stringify(v2.r.report.items)}`);
+    assert.deepEqual(current(v2.doc), ['not b/newton'], choice);
+    assert.equal(v2.r.work.draft_answers, choice, 'the choice is recorded in the work file');
+    const m = await mneme(v1.text, v2.text);
+    assert.equal(m.errors, 0, JSON.stringify(m.items));
+    assert.ok(!m.items.some((i) => i.kind === 'answered-both-ways'), `${choice}: the old answer is gone or withdrawn, so not both ways`);
+    if (choice === 'replace') {
+      assert.ok(!newton(v2.doc).some((a) => a['@id'] === first['@id']), 'the acceptance is gone');
+      assert.deepEqual(metas(v2.doc), [], 'and nothing retracts it');
+      assert.equal(v2.r.report.counts.versionCheck.replaced, 1, 'the version check set aside exactly the one taken out');
+      assert.ok(m.items.some((i) => i.kind === 'attestation-removed' && i.severity === 'warning'), 'presence: a draft binds nothing, and the version check says what went');
+    } else {
+      assert.deepEqual(metas(v2.doc), [['Retracts', first['@id'], false]]);
+    }
+  }
+});
+test('a published dataset is never replaced, whatever the review chose, and the attestations-only file cannot replace', async () => {
+  const { subjects, work } = await reviewed({ [B('newton')]: ['match', { at: '2026-10-01T09:00:00Z' }] });
+  const v1 = await finish(subjects, work);
+  redecide(work, { [B('newton')]: ['distinct', { basis: 'The mill.', at: '2026-10-02T09:00:00Z' }] });
+  const v2 = await finish(await asInput(v1.text), work, { draftAnswers: 'replace' });
+  assert.equal(v2.r.report.errors, 0, JSON.stringify(v2.r.report.items));
+  assert.ok(kinds(v2.r).includes('replace-not-for-published'));
+  assert.deepEqual(metas(v2.doc).map((x) => x[0]), ['Retracts'], 'withdrawn, not replaced');
+  const draft = { ...G, status: 'draft' };
+  const d = await reviewed({ [B('newton')]: ['match', { at: '2026-10-01T09:00:00Z' }] }, draft);
+  const d1 = await finish(d.subjects, d.work);
+  redecide(d.work, { [B('newton')]: ['distinct', { basis: 'The mill.', at: '2026-10-02T09:00:00Z' }] });
+  const a = await apply({ subjects: await asInput(d1.text), work: JSON.parse(serialiseWork(d.work)), options: { output: 'attestations', draftAnswers: 'replace' } }, env());
+  assert.ok(a.incomplete && kinds(a).includes('replace-needs-dataset'), JSON.stringify(a.report.items));
+});
+
+test('Finish recorded in the work file: finished again on the original after a change is said (finished-before); on the dataset written it is not, nor said to differ', async () => {
+  const { subjects, work } = await reviewed({ [B('newton')]: ['match', { at: '2026-10-01T09:00:00Z' }] });
+  const v1 = await finish(subjects, work);
+  const w1 = v1.r.work;
+  assert.equal(w1.finished.length, 1);
+  assert.equal(w1.finished[0].output, 'a.krisis-dataset.json');
+  assert.match(w1.finished[0].sha256, /^[0-9a-f]{64}$/);
+  redecide(w1, { [B('newton')]: ['distinct', { basis: 'The mill.', at: '2026-10-02T09:00:00Z' }] });
+  const wrong = await finish(subjects, w1);
+  assert.ok(kinds(wrong.r).includes('finished-before'), JSON.stringify(wrong.r.report.items));
+  const right = await finish(await asInput(v1.text), w1);
+  assert.ok(!kinds(right.r).includes('finished-before') && !kinds(right.r).includes('subjects-differ'), JSON.stringify(right.r.report.items));
+  assert.deepEqual(metas(right.doc).map((x) => x[0]), ['Retracts'], 'presence: the right dataset was read, and the answer withdrawn');
+  // Control for the absence of subjects-differ: another file, not the one written, is said to differ.
+  const other = JSON.parse(v1.text); other.spatialEntities[0].label = 'Newton, altered';
+  assert.ok(kinds((await finish(await asInput(JSON.stringify(other)), w1)).r).includes('subjects-differ'));
+});
+
+test('an answer recognised by name only: said, and retracted in the name it was made in', async () => {
+  const { subjects, work } = await reviewed({ [B('newton')]: ['match', { at: '2026-10-01T09:00:00Z' }] });
+  work.reviewer = { name: 'A. Reviewer' };
+  const v1 = await finish(subjects, work);
+  work.reviewer = reviewer;   // the same name, with an ORCID now
+  redecide(work, { [B('newton')]: ['not-this', { at: '2026-10-02T09:00:00Z' }] });
+  const v2 = await finish(await asInput(v1.text), work);
+  assert.equal(v2.r.report.errors, 0, JSON.stringify(v2.r.report.items));
+  assert.ok(kinds(v2.r).includes('answers-withdrawn-by-name'));
+  assert.deepEqual(newton(v2.doc).find((a) => a.meta).contributor, { name: 'A. Reviewer' }, 'the answer\'s own contributor');
+  // Control: with an ORCID both times, nothing is said.
+  const o = await reviewed({ [B('newton')]: ['match', { at: '2026-10-01T09:00:00Z' }] });
+  const o1 = await finish(o.subjects, o.work);
+  redecide(o.work, { [B('newton')]: ['not-this', { at: '2026-10-02T09:00:00Z' }] });
+  const o2 = await finish(await asInput(o1.text), o.work);
+  assert.ok(!kinds(o2.r).includes('answers-withdrawn-by-name') && kinds(o2.r).includes('answers-retracted'));
+});
+
+test('a candidate set exported after the answer: its promotedFrom is not a change, and nothing new is written', async () => {
+  const { subjects, work } = await reviewed({ [B('newton')]: ['match', { at: '2026-10-01T09:00:00Z' }] });
+  const v1 = await finish(subjects, work);
+  const x = exportCandidates(work);
+  const v2 = await finish(await asInput(v1.text), x.work, { candidates: [x.set] });
+  assert.equal(v2.r.report.errors, 0, JSON.stringify(v2.r.report.items));
+  assert.deepEqual(v2.r.outputs, [], 'nothing written');
+  assert.ok(kinds(v2.r).includes('answers-not-relinked') && kinds(v2.r).includes('nothing-new'), JSON.stringify(v2.r.report.items));
+  // Control: a real change after the export is withdrawn, and the new answer points at its candidate.
+  redecide(x.work, { [B('newton')]: ['distinct', { basis: 'The mill.', at: '2026-10-02T09:00:00Z' }] });
+  const v3 = await finish(await asInput(v1.text), x.work, { candidates: [x.set] });
+  assert.deepEqual(metas(v3.doc).map((y) => y[0]), ['Retracts']);
+  assert.ok(newton(v3.doc).find((a) => a.negated).identities[0].promotedFrom);
+});
+
+test('a place left out of the dataset whose decision changed: Finish writes the dataset without it, and withdraws nothing there', async () => {
+  // Another place cites the same sources, and the other dataset has no address of its own: a source cited
+  // only by the place left out would go with it, which the version check reports (a limit of leaving
+  // places out, met here, not of withdrawing).
+  const { subjects, work } = await reviewed({ [B('newton')]: ['match', { at: '2026-10-01T09:00:00Z' }] }, undefined, { title: 'Dataset B' }, [place(A('elsewhere'), 'Elsewhere', [at(30, 10)])]);
+  const v1 = await finish(subjects, work);
+  redecide(work, { [B('newton')]: ['distinct', { basis: 'The mill.', at: '2026-10-02T09:00:00Z' }] });
+  setRowState(work, A('newton'), 'exclude');
+  const v2 = await finish(await asInput(v1.text), work);
+  assert.equal(v2.r.report.errors, 0, JSON.stringify(v2.r.report.items));
+  assert.ok(!v2.doc.spatialEntities.some((p) => p['@id'] === A('newton')), 'left out');
+  assert.equal(v2.r.report.counts.retracted ?? 0, 0);
+  // Control: not left out, the same change is withdrawn.
+  setRowState(work, A('newton'), null);
+  assert.deepEqual(metas((await finish(await asInput(v1.text), work)).doc).map((y) => y[0]), ['Retracts']);
+});
+
+test('what an answer says includes its certainty level (a region claim\'s)', () => {
+  const base = { identities: [{ subject: A('r'), object: B('r'), identityType: 'closeMatch' }] };
+  assert.notEqual(answerSig({ ...base, certaintyLevel: P + 'Certain' }), answerSig({ ...base, certaintyLevel: P + 'Uncertain' }));
+  assert.equal(answerSig({ ...base, certaintyLevel: P + 'Certain' }), answerSig({ ...base, certaintyLevel: P + 'Certain' }));
+  assert.equal(answerSig({ ...base, identities: [{ ...base.identities[0], promotedFrom: X + 'c#c-1' }] }), answerSig(base), 'not the candidate it answers');
+});
+
+test('two addresses whose hashes begin alike are each lengthened against the other, as Agora\'s are', () => {
+  const d1 = 'abcdef01' + '1'.repeat(56), d2 = 'abcdef01' + '2'.repeat(56);
+  const taken = () => false;
+  assert.equal(mintAddress(A('p'), d1, [d1, d2], taken).id, A('p') + '#a-abcdef011111');
+  assert.equal(mintAddress(A('p'), d2, [d1, d2], taken).id, A('p') + '#a-abcdef012222');
+  assert.equal(mintAddress(A('p'), d1, [d1], taken).id, A('p') + '#a-abcdef01', 'control: alone, 8 digits');
+});
+
 // ---- the version check: answered both ways ------------------------------------------------------------
 const answer = (id, object, negated, who = { name: 'Ada' }) => ({ '@id': A('newton') + '#' + id, identities: [{ subject: A('newton'), object, identityType: 'exactMatch' }], ...(negated ? { negated: true } : {}), contributor: who, created: '2026-10-01T09:00:00Z', sources: [src] });
 const retract = (id, target) => ({ '@id': A('newton') + '#' + id, meta: { targetAttestation: A('newton') + '#' + target, metaType: P + 'Retracts' }, contributor: { name: 'Ada' }, created: '2026-10-02T09:00:00Z', sources: [src] });
@@ -257,6 +414,11 @@ test('the version check: a changed answer that does not withdraw the earlier one
   // Both ways already in the earlier version is not this version's doing.
   const old = version([answer('yes', B('newton'), false), answer('no', B('newton'), true)]);
   assert.ok(!(await mneme(old, old)).items.some((i) => i.kind === 'answered-both-ways'));
+  // A denial beside a close match is coherent: only an exact match is the opposite of a denial.
+  const close = { ...answer('close', B('newton'), false), identities: [{ subject: A('newton'), object: B('newton'), identityType: 'closeMatch' }] };
+  const coherent = await mneme(v1, version([answer('yes', B('newton'), false), retract('r', 'yes'), close, answer('no', B('newton'), true)]));
+  assert.ok(!coherent.items.some((i) => i.kind === 'answered-both-ways'), JSON.stringify(coherent.items));
+  assert.equal(coherent.counts.retracted, 1, 'presence: the version was read');
   // A draft binds nothing yet: said as a warning.
   const draft = { ...G, status: 'draft' };
   const d = await mneme(version([answer('yes', B('newton'), false)], draft), version([answer('yes', B('newton'), false), answer('no', B('newton'), true)], draft));

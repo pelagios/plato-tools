@@ -96,6 +96,8 @@ const TEXT = {
   'different-gazetteer': 'The two files say they are versions of different gazetteers (isVersionOf).',
   'same-version': 'Both files give the same version. A changed dataset needs a new one, or a citation of the version no longer says which state was meant.',
   'nothing-to-compare': 'The earlier version holds no attestations, so there was nothing for the later one to have kept, and nothing was tested.',
+  'expected-removed-published': 'Attestations were to be taken out of a published version, which is never done: a published attestation is withdrawn, not removed. This is a fault in the tools; please report it.',
+  'expected-removed-unknown': 'An attestation that was to be taken out of the earlier version is not in it, which is a fault in the tools; please report it. The example is its digest.',
   'answered-both-ways': 'In the later version, one contributor says both that two places are the same and that they are not, and both answers are current: a decision changed without withdrawing the earlier answer. Withdraw it with a new attestation that retracts it (plato:Retracts), or let the new answer replace it (plato:Supersedes). The example names the contributor and the two places.',
 };
 
@@ -318,11 +320,42 @@ function collectAnswers(atts, place, into) {
     if (!who) continue;
     const pairs = [];
     for (const r of a.identities) {
+      // Only an exact match is the opposite of a denial (a negated exactMatch, the one form PLATO gives
+      // a denial): "not the same" beside "closely matches" is coherent, and is not counted.
+      if (r?.identityType !== 'exactMatch') continue;
       const s = r?.subject ?? place ?? a.about, o = r?.object;
       if (typeof s === 'string' && typeof o === 'string' && s !== o) pairs.push(s < o ? `${s} and ${o}` : `${o} and ${s}`);
     }
     if (pairs.length) into.push({ id: typeof a['@id'] === 'string' ? a['@id'] : null, negated: !!a.negated, who, pairs });
   }
+}
+/**
+ * The digest the version check gives `attestation` of `place` (`header`: its dataset's), as its ledger
+ * keeps it: what compare()'s options.expectRemoved names an attestation taken out of a draft by.
+ */
+export function attestationDigest(context, place, attestation, header = {}) {
+  let h = null;
+  const r = reader(context, { item: (kind, id, about, lines) => { if (kind === ATTESTATION && h === null) h = digest(lines.join('\n')); }, statement: () => {}, facet: () => {} });
+  r.header(header && typeof header === 'object' ? header : {});
+  r.event({ type: 'record', value: { '@id': place, attestations: [attestation] } });
+  return h;
+}
+/**
+ * The attestations of the earlier version taken out on purpose (compare's options.expectRemoved, by
+ * their digests: Krisis replacing an earlier answer in a draft, as its review chose). Each is set aside,
+ * one row for each digest given; one not found is an error, as is any against a published version,
+ * whose attestations are never taken out. Returns how many were set aside.
+ */
+function setAsideRemoved(db, ledger, digests, published, rep) {
+  if (published) { rep.error('expected-removed-published', TEXT['expected-removed-published'], undefined); return 0; }
+  let n = 0;
+  for (const h of digests) {
+    const row = ledger.one('SELECT rowid FROM a INDEXED BY ah WHERE v=0 AND h=? AND k=0 LIMIT 1', [h]);
+    if (row === null) { rep.error('expected-removed-unknown', TEXT['expected-removed-unknown'], h); continue; }
+    db.exec(`DELETE FROM a WHERE rowid=${Number(row)}`);
+    n++;
+  }
+  return n;
 }
 /**
  * The pairs of places one contributor says both are and are not the same, both answers current
@@ -416,6 +449,7 @@ async function comparing({ earlier, later, options }, env) {
     // The rule binds from publication. Before it, what would break it is worth knowing, not wrong.
     // A candidate set has no status: it is published when it is issued, and frozen from then on.
     const published = isSet || old.status === 'published';
+    const replaced = options.expectRemoved?.length && !isSet ? setAsideRemoved(db, ledger, options.expectRemoved, published, rep) : null;
     const breach = published ? 'error' : 'warning';
     if (isSet) {
       // Frozen as a whole: its date of issue and its dataset with its candidates. Its description
@@ -524,7 +558,7 @@ async function comparing({ earlier, later, options }, env) {
       }
     }
 
-    rep.counts = { ...(isSet ? { of: 'candidates' } : {}), earlier: had, later: has, unchanged: Math.max(0, had - lost - changed), changed, lost, added: Math.max(0, has - (had - lost)), retracted, superseded, ...(leftOut !== null ? { leftOut } : {}) };
+    rep.counts = { ...(isSet ? { of: 'candidates' } : {}), earlier: had, later: has, unchanged: Math.max(0, had - lost - changed), changed, lost, added: Math.max(0, has - (had - lost)), retracted, superseded, ...(leftOut !== null ? { leftOut } : {}), ...(replaced !== null ? { replaced } : {}) };
     progress({ phase: 'done', elapsedMs: Date.now() - t0 });
     return { report: rep.toJSON(), outputs: [], versions: { earlier: old, later: neu } };
   } finally {

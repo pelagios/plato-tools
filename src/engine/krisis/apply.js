@@ -21,12 +21,13 @@
 import { Report } from '../report.js';
 import { DataError, detect } from '../input.js';
 import { run, CANDIDATE_SET_TEXT, Aborted, stoppable } from '../pipeline.js';
-import { compare } from '../compare.js';
+import { compare, attestationDigest } from '../compare.js';
 import { KRISIS_TEXT, KRISIS_CANDIDATES, KRISIS_WITHDRAW, rowWords } from '../words.js';
-import { readWork, filesDiffer, checkReviewer, NOT_READ_KINDS, excludedPlaces } from './work.js';
+import { readWork, filesDiffer, fileRecords, checkReviewer, NOT_READ_KINDS, excludedPlaces } from './work.js';
+import { fileSha256 } from './digest.js';
 import { readCandidateSet, setIriOf } from './candidates.js';
-import { attestationsFrom, datasetSource } from './identity.js';
-import { earlierCollector, reconcile, baseFor } from './withdraw.js';
+import { attestationsFrom, datasetSource, answerSource } from './identity.js';
+import { earlierCollector, reconcile, baseFor, sameContributor, DRAFT_ANSWERS } from './withdraw.js';
 import { collectWithdrawn, resolveWithdrawn } from '../../formats/shared.js';
 import { jcs } from '../../formats/json2rdf.js';
 
@@ -86,10 +87,22 @@ async function applying({ subjects, work, options }, env) {
   if (options.columns && (subjects?.format === 'csv' || subjects?.format === 'geojson') && (!reviewedColumns || !sameMapping(options.columns, reviewedColumns)))
     rep.warning('columns-differ', KRISIS_TEXT.columnsDiffer);
   options = { ...options, columns };
+  // The dataset given may be the one this review's last Finish wrote (w.finished, below): it differs
+  // from the files the review was made of by design, so it is not said to differ, and is said to be that.
+  let ownOutput = null;
   if (subjects?.files) {
     const differ = await filesDiffer(w.subjects, subjects.files);
-    if (differ.length) rep.add('warning', 'subjects-differ', TEXT['subjects-differ'], differ.join(', '), differ.length);
+    const given = differ.length && subjects.files.length === 1 && w.finished?.length ? (await fileRecords(subjects.files))[0] : null;
+    ownOutput = given && w.finished.find((f) => f.sha256 === given.sha256) || null;
+    if (differ.length && !ownOutput) rep.add('warning', 'subjects-differ', TEXT['subjects-differ'], differ.join(', '), differ.length);
   }
+  // The reviewer of this Finish against the one the work file was saved with, and the one its last Finish wrote as.
+  const last = w.finished?.at(-1);
+  for (const was of [w.reviewer, last?.reviewer]) {
+    if (was && !sameContributor(was, reviewer)) { rep.warning('reviewer-differs', KRISIS_WITHDRAW.reviewerDiffers(was, reviewer)); break; }
+  }
+  const draftAnswers = options.draftAnswers ?? w.draft_answers ?? 'withdraw';
+  if (!DRAFT_ANSWERS.includes(draftAnswers)) throw new DataError(KRISIS_WITHDRAW.notADraftChoice(draftAnswers));
   progress({ phase: 'applying', elapsedMs: Date.now() - t0 });
   // The source the attestations cite: the other dataset, by the title given now, else the work file's.
   // It is the source of the other dataset's candidates only: one looked up in a gazetteer cites the
@@ -117,17 +130,31 @@ async function applying({ subjects, work, options }, env) {
     if (r.aborted) throw new Aborted();
     if (r.incomplete) { rep.error('dataset-not-read', `${KRISIS_TEXT.datasetNotRead}: ${r.report.items.find((i) => i.kind === 'unreadable')?.examples[0] ?? ''}`); return fail(); }
   } else if (output === 'attestations') rep.warning('earlier-answers-not-read', KRISIS_WITHDRAW.notRead);
+  // A draft whose review chose to replace (draft_answers), and only a draft: a published dataset's answers are withdrawn.
+  const published = earlier?.header?.gazetteer?.status === 'published';
+  if (draftAnswers === 'replace' && published) rep.warning('replace-not-for-published', KRISIS_WITHDRAW.replaceNotForPublished);
+  const replace = draftAnswers === 'replace' && !!earlier && !published;
   const settled = reconcile({ work: w, made: answers, earlier: earlier?.atts ?? null, withdrawn: earlier ? resolveWithdrawn(earlier.withdrawals).status : new Map(),
-    reviewer, date: options.date, base: baseFor({ base: options.base, header: earlier?.header, work: w }), context: env.resources.context, header: earlier?.header ?? {}, canAddress: output === 'dataset' });
+    reviewer, date: options.date, sourceOf: (c) => (c ? answerSource(w, c, others ? datasetSource(others) : undefined) : undefined), leftOut: out, replace,
+    base: baseFor({ base: options.base, header: earlier?.header, work: w }), context: env.resources.context, header: earlier?.header ?? {}, canAddress: output === 'dataset' });
   for (const p of settled.problems) rep.add(p.severity, p.kind, KRISIS_WITHDRAW[{ 'answer-bundles-others': 'bundlesOthers', 'withdrawn-with-undecided': 'withUndecided', 'answer-unaddressable': 'unaddressable', 'answer-unaddressed': 'unaddressedEarlier' }[p.kind]], p.example);
+  const sc = settled.counts;
+  if (sc.replaced && output !== 'dataset') rep.error('replace-needs-dataset', KRISIS_WITHDRAW.replaceNeedsDataset);
   if (rep.toJSON().errors) return fail();
-  const made = settled.write, sc = settled.counts;
+  const made = settled.write;
+  // Finished before, but the dataset given holds none of this reviewer's answers: the original, most likely,
+  // where nothing can be withdrawn. Said, as the right dataset would have been read without a word.
+  if (earlier && last && !ownOutput && !sc.ours) rep.warning('finished-before', KRISIS_WITHDRAW.finishedBefore(last));
   if (sc.unchanged) rep.add('warning', 'already-answered', KRISIS_WITHDRAW.unchanged, undefined, sc.unchanged);
+  if (sc.unlinked) rep.add('warning', 'answers-not-relinked', KRISIS_WITHDRAW.unlinked, undefined, sc.unlinked);
   if (sc.retracted) rep.add('warning', 'answers-retracted', KRISIS_WITHDRAW.retracted, undefined, sc.retracted);
-  if (sc.superseded) rep.add('warning', 'answers-superseded', KRISIS_WITHDRAW.superseded, undefined, sc.superseded);
+  if (sc.byName) rep.add('warning', 'answers-withdrawn-by-name', KRISIS_WITHDRAW.byName, undefined, sc.byName);
+  if (sc.replaced) rep.add('warning', 'answers-replaced', KRISIS_WITHDRAW.replaced, undefined, sc.replaced);
   if (sc.addressed) rep.add('warning', 'answers-addressed', KRISIS_WITHDRAW.addressed, undefined, sc.addressed);
   if (sc.unaddressed) rep.add('warning', 'attestations-unaddressed', KRISIS_WITHDRAW.unaddressed, undefined, sc.unaddressed);
-  const withdrawing = { retracted: sc.retracted, superseded: sc.superseded };
+  // What the version check must find withdrawn, and taken out (by its own digests of what each says).
+  const removing = [...settled.remove].flatMap(([place, list]) => list.map((x) => attestationDigest(env.resources.context, place, x.attestation, earlier?.header ?? {})));
+  const withdrawing = { retracted: sc.retracted, superseded: 0, replaced: removing };
   rep.counts = {
     attestations: made.length,
     matchAttestations: made.filter((m) => !m.attestation.negated && m.attestation.identities).length,
@@ -135,11 +162,11 @@ async function applying({ subjects, work, options }, env) {
     relations: made.reduce((n, m) => n + (m.attestation.identities || []).length, 0),
     ...(sc.unchanged ? { unchanged: sc.unchanged } : {}),
     ...(sc.retracted ? { retracted: sc.retracted } : {}),
-    ...(sc.superseded ? { superseded: sc.superseded } : {}),
+    ...(sc.replaced ? { replaced: sc.replaced } : {}),
     ...(leftOut.length ? { leftOut: leftOut.length } : {}),
   };
   // A review that only leaves places out still writes the dataset (without them); with neither, there is nothing to write.
-  if (!made.length && !(leftOut.length && output === 'dataset')) {
+  if (!made.length && !((leftOut.length || sc.replaced) && output === 'dataset')) {
     if (sc.unchanged) rep.warning('nothing-new', KRISIS_WITHDRAW.nothingNew); else rep.warning('nothing-decided', TEXT['nothing-decided']);
     return { report: rep.toJSON(), outputs: [], attestations: [], leftOut };
   }
@@ -152,8 +179,8 @@ async function applying({ subjects, work, options }, env) {
       if (!V({ '@id': subject, label: subject, attestations: [attestation] })) rep.error('not-valid', TEXT['not-valid'], `${subject}: ${V.errors.map((e) => `${e.instancePath} ${e.message}`).join('; ')}`);
     }
     if (rep.toJSON().errors) return fail();
-    const r = await writeDataset({ subjects, made, work: w, options: { ...options, leftOut }, sets, give: settled.give, withdrawing }, env, rep, fail);
-    return { ...r, leftOut };
+    const r = await writeDataset({ subjects, made, work: w, options: { ...options, leftOut }, sets, give: settled.give, remove: settled.remove, withdrawing }, env, rep, fail);
+    return { ...r, leftOut, ...(r.incomplete ? {} : { work: finished(w, r.finishedAs, { reviewer, draftAnswers, gazetteer: earlier?.header?.gazetteer?.['@id'] ?? w.subjects.uri }) }) };
   }
 
   if (sets.length && !w.subjects.uri) { rep.error('no-gazetteer-id', KRISIS_CANDIDATES.noGazetteerId); return fail(); }
@@ -162,11 +189,25 @@ async function applying({ subjects, work, options }, env) {
   const V = env.resources.validators['attestation-centric'];
   for (const a of doc.attestations) if (!V.attestation(a)) rep.error('not-valid', TEXT['not-valid'], `${a.about}: ${V.attestation.errors.map((e) => `${e.instancePath} ${e.message}`).join('; ')}`);
   if (rep.toJSON().errors) return fail();
-  const o = await env.output(stemOf(subjects, w, options) + '.krisis-attestations.json');
-  o.write(JSON.stringify(doc, null, 2) + '\n');
+  const name = stemOf(subjects, w, options) + '.krisis-attestations.json', text = JSON.stringify(doc, null, 2) + '\n';
+  const o = await env.output(name);
+  o.write(text);
   const outputs = [await o.close()];
   progress({ phase: 'done', attestations: made.length, elapsedMs: Date.now() - t0 });
-  return { report: rep.toJSON(), outputs, attestations: made, leftOut };
+  const as = { output: name, sha256: await fileSha256(new File([text], name)) };
+  return { report: rep.toJSON(), outputs, attestations: made, leftOut, work: finished(w, as, { reviewer, draftAnswers, gazetteer: w.subjects.uri }) };
+}
+
+/**
+ * The work file with this Finish recorded (work.finished, the latest last: what was written, its
+ * SHA-256, the dataset's address, the reviewer, when) and the draft choice made (draft_answers), so that
+ * a later Finish can tell the dataset this one wrote from the original (finished-before, and no
+ * subjects-differ for it). The page and the command line keep it (the page asks for the review to be saved again).
+ */
+function finished(w, as, { reviewer, draftAnswers, gazetteer }) {
+  const at = new Date().toISOString();
+  const entry = { at, output: as.output, sha256: as.sha256, ...(typeof gazetteer === 'string' ? { gazetteer } : {}), reviewer: { name: reviewer.name, ...(reviewer.orcid ? { orcid: reviewer.orcid } : {}) } };
+  return { ...w, reviewer: w.reviewer ?? entry.reviewer, draft_answers: draftAnswers, finished: [...(w.finished || []), entry] };
 }
 
 /** The new attestations as an attestation-centric PLATO document, about the subject dataset's places, listing the candidate sets they answer. */
@@ -293,7 +334,7 @@ export function headerWithSets(text, sets, id) {
   return null;
 }
 
-async function writeDataset({ subjects, made, work, options, sets = [], give = new Map(), withdrawing }, env, rep, fail) {
+async function writeDataset({ subjects, made, work, options, sets = [], give = new Map(), remove = new Map(), withdrawing }, env, rep, fail) {
   const K = KRISIS_TEXT;
   if (!subjects?.format) { rep.error('no-dataset', K.noDataset); return fail(); }
   // A candidate set (PLATO 53c5a40) holds no places to add attestations to: refused, as the other tools
@@ -312,12 +353,16 @@ async function writeDataset({ subjects, made, work, options, sets = [], give = n
     met.add(id);
     // An earlier answer withdrawn here that had no address is given the one its withdrawal points to
     // (withdraw.js), and nothing else in it changes.
-    const giving = give.get(id) || [];
-    const own = (record.attestations || []).map((a) => {
-      const g = giving.find((x) => !x.done && x.text === jcs(a));
-      if (!g) return a;
+    // In a draft whose review chose to replace them, an earlier answer it changes is taken out.
+    const giving = give.get(id) || [], removing = remove.get(id) || [];
+    const own = (record.attestations || []).flatMap((a) => {
+      const t = (giving.length || removing.length) ? jcs(a) : null;
+      const r = removing.find((x) => !x.done && x.text === t);
+      if (r) { r.done = true; return []; }
+      const g = giving.find((x) => !x.done && x.text === t);
+      if (!g) return [a];
       g.done = true;
-      return { '@id': g.id, ...a };
+      return [{ '@id': g.id, ...a }];
     });
     return { ...record, attestations: [...own, ...bySubject.get(id)] };
   };
@@ -342,17 +387,19 @@ async function writeDataset({ subjects, made, work, options, sets = [], give = n
   if (own) rep.add('warning', 'dataset-has-problems', K.datasetHasProblems, undefined, own);
   if (subjects.format !== 'plato-json' || subjects.profile === 'attestation-centric') rep.add('warning', 'dataset-now-plato-json', K.datasetNowPlatoJson(subjects), name);
   for (const [subject, list] of bySubject) if (!met.has(subject)) rep.add('error', 'not-in-dataset', K.notInDataset, subject, list.length);
-  for (const [subject, list] of give) if (list.some((x) => !x.done)) rep.add('error', 'not-append-only', K.notAppendOnly, subject);
+  for (const [subject, list] of [...give, ...remove]) if (list.some((x) => !x.done)) rep.add('error', 'not-append-only', K.notAppendOnly, subject);
   rep.counts.places = r.report.counts.places || 0;
   const parts = kept.get(name);
   if (r.incomplete || !parts || rep.toJSON().errors) return fail();
 
   progress({ phase: 'checking', elapsedMs: Date.now() - t0 });
-  const c = await checkAppendOnly({ earlier: subjects, later: new File(parts, name), added: made.length, withdrawing, options: { ...options, expectMissing: options.leftOut } }, env, rep);
+  const written = new File(parts, name);
+  const c = await checkAppendOnly({ earlier: subjects, later: written, added: made.length, withdrawing, options: { ...options, expectMissing: options.leftOut } }, env, rep);
+  const sha256 = await fileSha256(written);
   kept.clear();
   if (c.incomplete || rep.toJSON().errors) return fail();
   progress({ phase: 'done', attestations: made.length, elapsedMs: Date.now() - t0 });
-  return { report: rep.toJSON(), outputs: r.outputs, attestations: made };
+  return { report: rep.toJSON(), outputs: r.outputs, attestations: made, finishedAs: { output: name, sha256 } };
 }
 
 /**
@@ -363,12 +410,13 @@ async function writeDataset({ subjects, made, work, options, sets = [], give = n
  */
 export async function checkAppendOnly({ earlier, later, added, withdrawing, options = {} }, env, rep) {
   const K = KRISIS_TEXT;
-  const c = await compare({ earlier, later: await detect([later]), options: { base: options.base, columns: options.columns, ...(options.expectMissing?.length ? { expectMissing: options.expectMissing } : {}) } }, env);
+  const c = await compare({ earlier, later: await detect([later]), options: { base: options.base, columns: options.columns, ...(options.expectMissing?.length ? { expectMissing: options.expectMissing } : {}),
+    ...(withdrawing?.replaced?.length ? { expectRemoved: withdrawing.replaced } : {}) } }, env);
   for (const i of c.report.items) {
     if (CHANGED.has(i.kind)) {
       rep.add('error', 'not-append-only', `${K.notAppendOnly} ${i.message}`, i.examples[0], i.count);
       for (const x of i.explained || []) rep.explain('not-append-only', x.example, x.earlier, x.later);
-    } else if (i.kind === 'expected-missing-present') rep.add('error', 'not-append-only', `${K.notAppendOnly} ${i.message}`, i.examples[0], i.count);
+    } else if (i.kind === 'expected-missing-present' || i.kind === 'expected-removed-published' || i.kind === 'expected-removed-unknown') rep.add('error', 'not-append-only', `${K.notAppendOnly} ${i.message}`, i.examples[0], i.count);
     else if (i.kind === 'expected-missing-unknown') i.examples.forEach((x, j) => rep.add('warning', i.kind, i.message, x, j ? 0 : i.count));   // a stale "leave out": said, not passed in silence
     else if (i.kind === 'unreadable' || i.kind === 'version-not-read') rep.add('error', 'not-checked', `${K.notChecked}: ${i.message}`, i.examples[0], i.count);
     else if (i.kind === 'not-compared') rep.add('warning', i.kind, i.message, i.examples[0], i.count);
@@ -379,9 +427,11 @@ export async function checkAppendOnly({ earlier, later, added, withdrawing, opti
     if (k.added !== added) rep.add('error', 'not-all-added', K.notAllAdded(added, k.added));
     // Every earlier answer the review withdraws, withdrawn in the dataset written, by the version check's own count.
     if (withdrawing) {
-      if (k.retracted || k.superseded || withdrawing.retracted || withdrawing.superseded) Object.assign(rep.counts.versionCheck, { retracted: k.retracted, superseded: k.superseded });
-      const want = withdrawing.retracted + withdrawing.superseded, got = (k.retracted || 0) + (k.superseded || 0);
-      if (k.retracted !== withdrawing.retracted || k.superseded !== withdrawing.superseded) rep.add('error', 'not-all-withdrawn', KRISIS_WITHDRAW.notAllWithdrawn(want, got));
+      if (k.retracted || k.superseded || withdrawing.retracted) Object.assign(rep.counts.versionCheck, { retracted: k.retracted, superseded: k.superseded });
+      if (k.replaced !== undefined) rep.counts.versionCheck.replaced = k.replaced;
+      const want = withdrawing.retracted + (withdrawing.superseded || 0), got = (k.retracted || 0) + (k.superseded || 0);
+      if (k.retracted !== withdrawing.retracted || k.superseded !== (withdrawing.superseded || 0)) rep.add('error', 'not-all-withdrawn', KRISIS_WITHDRAW.notAllWithdrawn(want, got));
+      if ((k.replaced || 0) !== (withdrawing.replaced?.length || 0)) rep.add('error', 'not-all-withdrawn', KRISIS_WITHDRAW.notAllReplaced(withdrawing.replaced?.length || 0, k.replaced || 0));
     }
   }
   return c;

@@ -368,6 +368,12 @@
         <legend>Finish: what to make of your decisions</legend>
         <label><input type="radio" name="review-output" value="dataset" checked> Your dataset with the new attestations added, as a PLATO JSON document, checked with the version check</label>
         <label><input type="radio" name="review-output" value="attestations"> A PLATO file of only the new attestations</label>
+        <fieldset class="draft-answers">
+          <legend>If you have changed a decision since you last finished, and your dataset is not yet published</legend>
+          <label><input type="radio" name="draft-answers" value="withdraw" checked> Withdraw the earlier answer, and keep it in the dataset (keep the history)</label>
+          <label><input type="radio" name="draft-answers" value="replace"> Replace the earlier answer: take it out, and write the new one</label>
+          <small>A published dataset always keeps its earlier answers: there, a changed decision withdraws them, whichever you choose.</small>
+        </fieldset>
         <p id="finish-cites" class="note"></p>
         <button id="finish" type="button" class="primary">Finish</button>
       </fieldset>

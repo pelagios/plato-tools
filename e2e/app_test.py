@@ -830,6 +830,66 @@ def krisis_case(page, tmp):
 
 GEOREF = ROOT / 'test/fixtures/hermes-detect/loc-chesapeake-annotationpage.json'
 
+def krisis_withdraw_draft_case(page, tmp):
+    """Krisis: in a dataset not yet published, the review may choose in the Finish area to replace an earlier answer
+    rather than withdraw it. Chosen, the changed decision's earlier answer is taken out, nothing retracts it, the version
+    check finds no answer both ways, and the choice is kept in the review saved. The default is withdraw (checked here,
+    and by krisis_withdraw_case, whose Finish leaves it)."""
+    a, b = 'https://example.org/da/', 'https://example.org/db/'
+    subjects = tmp / 'draft-subjects.json'; others = tmp / 'draft-others.json'
+    subjects.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': a, 'title': 'Our draft', 'status': 'draft'},
+                                    'spatialEntities': [krisis_place(a + 'newton', 'Newton', -1.0, 52.0)]}))
+    others.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': b, 'title': 'Their places'},
+                                  'spatialEntities': [krisis_place(b + 'newton', 'Newton', -1.01, 52.01)]}))
+    saved, saved2, v1p, v2p = tmp / 'draft.krisis.json', tmp / 'draft-after.krisis.json', tmp / 'draft-v1.json', tmp / 'draft-v2.json'
+    def finish(what):
+        page.check('input[name="review-output"][value="dataset"]')
+        page.click('#finish')
+        return wait_state(page, lambda s: s.get('action') == 'apply' and s.get('phase') in ('done', 'error'), 120, what)
+    got = {}
+    try:
+        page.reload(); wait_state(page, lambda s: s.get('phase') == 'ready', 30, 'ready')
+        s = match_case(page, subjects, others)
+        if s.get('phase') == 'reviewing':
+            if page.is_visible('#review-name'): page.fill('#review-name', 'Ada Reviewer'); page.press('#review-name', 'Enter')
+            got['default'] = page.evaluate("() => document.querySelector('input[name=\"draft-answers\"]:checked')?.value || null")
+            page.keyboard.press('a')
+            wait_state(page, lambda s: (s.get('review') or {}).get('reviewed') == 1, 10, 'decision')
+            with page.expect_download(timeout=30_000) as d: page.click('#save-review')
+            d.value.save_as(saved)
+            s = finish('finish')
+            if s.get('phase') == 'done' and s.get('outputs'):
+                download(page, s['outputs'][0]['name'], v1p)
+                page.set_input_files('#picker', [str(v1p)])
+                wait_state(page, lambda s: s.get('phase') == 'detected', 30, 'detection')
+                page.set_input_files('#workfile', [str(saved)])
+                wait_state(page, lambda s: s.get('phase') == 'reviewing', 20, 'resume')
+                page.keyboard.press('d'); page.keyboard.type('The mill, not the village'); page.keyboard.press('Enter')
+                wait_state(page, lambda s: any((c.get('decision') or {}).get('kind') == 'distinct' for c in (s.get('work') or {}).get('candidates', [])), 10, 'changed')
+                page.check('input[name="draft-answers"][value="replace"]')   # after the keys: a radio with the focus takes them
+                s2 = finish('finish again')
+                got['report'] = {i['kind']: i.get('count') for i in (s2.get('report') or {}).get('items', [])}
+                got['counts'] = (s2.get('report') or {}).get('counts')
+                if s2.get('phase') == 'done' and s2.get('outputs'):
+                    v2 = json.loads(download(page, s2['outputs'][0]['name'], v2p).read_text())
+                    atts = next((p['attestations'] for p in v2['spatialEntities'] if p['@id'] == a + 'newton'), [])
+                    got['answers'] = sorted(('not ' if x.get('negated') else '') + x['identities'][0]['object'].rsplit('/', 1)[-1] for x in atts if x.get('identities'))
+                    got['metas'] = [x for x in atts if x.get('meta')]
+                    with page.expect_download(timeout=30_000) as d: page.click('#save-review')
+                    d.value.save_as(saved2); w = json.loads(saved2.read_text())
+                    got['kept'] = {'draft_answers': w.get('draft_answers'), 'finished': len(w.get('finished') or [])}
+    except Exception as e: got['error'] = str(e).split('\n')[0][:200]
+    check('withdraw, draft: the Finish area offers withdraw (keep the history) by default; chosen, replace takes the earlier answer out of the draft, writes the denial, and retracts nothing',
+          got.get('default') == 'withdraw' and got.get('answers') == ['not newton'] and got.get('metas') == [] and (got.get('report') or {}).get('answers-replaced') == 1
+          and ((got.get('counts') or {}).get('versionCheck') or {}).get('replaced') == 1, got)
+    check('withdraw, draft: the choice to replace is kept in the review saved after Finish, with the Finish recorded',
+          (got.get('kept') or {}).get('draft_answers') == 'replace' and (got.get('kept') or {}).get('finished') == 1, got.get('kept') or got)
+    m = compare_case(page, v2p, v1p) if got.get('answers') else {}
+    items = (m.get('report') or {}).get('items', [])
+    check('withdraw, draft: the version check finds no answer both ways once the earlier one is replaced, and says, as a warning, what went from the draft',
+          m.get('phase') == 'done' and (m.get('report') or {}).get('errors') == 0 and not any(i['kind'] == 'answered-both-ways' for i in items)
+          and any(i['kind'] == 'attestation-removed' and i['severity'] == 'warning' for i in items), m.get('report') or m)
+
 def krisis_withdraw_case(page, tmp):
     """Krisis: a decision changed after Finish withdraws the earlier answer. Review, Finish into the dataset, resume the
     review on the dataset written, change the decision, Finish again: the dataset has exactly one current answer and the
@@ -2693,6 +2753,7 @@ def main():
             krisis_case(page, tmp)
             krisis_pattern_match(page, tmp)
             krisis_withdraw_case(page, tmp)
+            krisis_withdraw_draft_case(page, tmp)
 
             # The storage warning (src/app.js, storageCheck): shown when the browser's quota is below
             # what the tables need, and hidden, the control, with the same tables and the real quota.
