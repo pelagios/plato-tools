@@ -818,6 +818,7 @@ section.chora .chora-main { display: grid; grid-template-columns: minmax(17rem, 
 section.chora .chora-panel { padding: 0 .6rem .8rem .8rem; }
 section.chora .chora-panel section { padding: .6rem .7rem; }
 section.chora .note { color: var(--muted); font-size: .92rem; }
+#methodos-chora[hidden], body[data-chora] #methodos-chora { display: none; }   /* the tracker's "Open Chora": hidden but at the step "place" (a.button would show it), and while Chora is shown */
 @container (width < 50rem) {
   section.chora .chora-main { display: flex; flex-direction: column-reverse; height: auto; min-height: 0; overflow: visible; }
   section.chora .chora-mapwrap { height: 60vh; }

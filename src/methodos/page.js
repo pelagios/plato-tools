@@ -113,9 +113,10 @@ function stepList(list, steps, at, done, notes = []) {
  *   openReview(file, files)  open a review read from a project, on `files` (chosen first, if none is).
  * `build` is { version, commit } of these tools, written into a project; `projectFile` the input that chooses a project to
  * open, and `projectSaid` where what came of it is said while the tracker is not shown.
- * Returns { open(), chosen(files), began(run), ended(run), keepChanged(on), id(), following() }: the host
- * tells it the files chosen, and each run of a tool as it begins ({ op, files }) and ends ({ op,
- * report, outputs, incomplete } or { op, error, partial } or { op, waiting } or { op, cancelled }).
+ * Returns { open(), chosen(files), placed(files), began(run), ended(run), keepChanged(on), id(), following() }:
+ * the host tells it the files chosen, the dataset a save in Chora wrote (placed), and each run of a tool as
+ * it begins ({ op, files }) and ends ({ op, report, outputs, incomplete } or { op, error, partial } or
+ * { op, waiting } or { op, cancelled }).
  */
 export function mountMethodos({ banner, interview, tracker, store, onStep, onScope, tools, page, outputs = null, build = null, projectFile = null, projectSaid = null }) {
   const q = (root, sel) => root.querySelector(sel);
@@ -308,6 +309,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   let stripAt = null;   // the step the strip was last said for
   tList.addEventListener('click', (e) => { if (e.target.closest('.track-reopen')) page.reopenResult?.(); });
   const downloadB = q(tracker, '#methodos-download');
+  const choraB = q(tracker, '#methodos-chora');   // Chora's step: "Open Chora" (#chora), in the tracker as under the centre's title
   const cannotEl = q(tracker, '#methodos-cannot');
   const useB = q(tracker, '#methodos-use'), reopenB = q(tracker, '#methodos-reopen'), restartB = q(tracker, '#methodos-restart');
   let wf = null;            // the runner's state, as a record ({ id, name, created, saved, ...state })
@@ -523,6 +525,21 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     asIs = null;
     say(null); await keep(); render(false);
   }
+  /**
+   * The dataset a save in Chora wrote (`files`, as chosen in step 1 by the page): with the workflow at its
+   * step "place", the step's result, and the step is done (kept like a run's output). Resolves with what
+   * to say of it under Chora's save, in words, or null when the workflow is not at that step.
+   */
+  function placed(files) {
+    return new Promise((resolve) => chain(async () => {
+      const s = wf && !changed ? atStep() : null;
+      if (!s || s.op !== 'place') { resolve(null); return; }
+      try { await finishInteractive(s, { dataset: await refsHeld([...files], 'dataset') }); } catch (e) { say(e.message, true); render(false); resolve(null); return; }
+      const next = atStep();
+      say(`${names(files)}, saved in Chora: the step “${s.title}” is done with it.`); render(false);
+      resolve(`The workflow's step “${s.title}” is done with it${next ? `, and the workflow goes on to “${next.title}”: leave the map to carry on` : ''}.`);
+    }).then(() => resolve(null)));
+  }
   // "Nothing to draw: go on with this dataset": offered once "This step is done" found the dataset that
   // went to Chora unchanged; the step is done with it, as it went, said in words.
   let asIs = null;   // the step "place" whose "This step is done" found the dataset unchanged
@@ -734,6 +751,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     restartB.hidden = changed?.action !== 'changed';
     leaveB.textContent = !shown ? 'Discard this workflow' : 'Leave the workflow';
     downloadB.hidden = !ready;
+    choraB.hidden = !(s && s.op === 'place' && wf && !changed);
     if (ready) {
       downloadB.textContent = `Download ${names(main)}`;
       tList.querySelector('li.is-current .track-body')?.append(el('span', { className: 'track-run', textContent: 'Ready to download' }));
@@ -815,7 +833,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     const ready = main && main.every((x) => !!heldFor(x)) ? main.map(heldFor) : null;
     const chosenAgain = ready ? ` ${names(main)} is chosen again in “Choose your data”.` : '';
     const first = [opened, v.words].filter(Boolean).join(' ');
-    if (s?.op === 'place') say([first, `At Chora's step:${chosenAgain} Open Chora to draw; its save chooses the dataset it writes in “Choose your data”. Or choose a dataset you saved in Chora before, and say the step is done.`].filter(Boolean).join(' '));
+    if (s?.op === 'place') say([first, `At Chora's step:${chosenAgain} Open Chora to draw: its save does this step with the dataset it writes. Or choose a dataset you saved in Chora before, and say the step is done.`].filter(Boolean).join(' '));
     else if (ready) say([first, `Taken up where it was left, with ${names(main)}${fromWhere(wf, s, main)}, kept in this browser: it is chosen in step 1 for you.`].filter(Boolean).join(' '));
     else say([first, main ? `Taken up where it was left. Choose ${names(main)} again in step 1 to carry on: the file is checked to be the one the workflow recorded.` : 'Taken up where it was left.'].filter(Boolean).join(' '));
     if (!ready) return false;
@@ -1010,6 +1028,6 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       projectShow();
     }
   }
-  return { open, chosen, began, ended, dropped, keepChanged, detected, baseChanged, id: () => wf?.id || null, following: () => !!(wf || pending || changed), takenUp: () => takenUp,
+  return { open, chosen, placed, began, ended, dropped, keepChanged, detected, baseChanged, id: () => wf?.id || null, following: () => !!(wf || pending || changed), takenUp: () => takenUp,
     scope: scopeNow, setScope, scoped: () => !!(wf || pending || changed) };
 }

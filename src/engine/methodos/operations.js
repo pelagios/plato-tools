@@ -40,10 +40,10 @@ export const OPERATIONS = Object.fromEntries([
     waitsFor: 'the candidates to be reviewed, in step 5', takes: { work: { types: ['work.krisis'] } }, gives: { work: 'work.krisis' } }),
   op({ key: 'apply', title: 'Record the decisions in the dataset', tool: 'Krisis',
     takes: { subjects: { types: ANY }, work: { types: ['work.krisis'] } }, gives: { dataset: 'dataset' } }),
-  // Chora hands the dataset saved there back to this step (src/chora/handback.js): a reference, which
-  // the page checks against the file chosen here again (refsDiffer) before it completes the step.
+  // Chora, in the page, gives the dataset its save wrote to this step (src/methodos/page.js, placed): the
+  // step is done with it. "This step is done" takes the dataset chosen in step 1, as for any interactive step.
   op({ key: 'place', title: 'Draw or trace the places on a map', tool: 'Chora', kind: 'interactive',
-    waitsFor: 'the places to be drawn or traced in Chora, and the dataset saved there to be handed back ("Back to the workflow") and chosen here again',
+    waitsFor: 'the places to be drawn or traced in Chora, and the dataset saved there, which does the step',
     takes: { dataset: { types: ANY } }, gives: { dataset: 'dataset' } }),
   // The regions a table's places lie in (Hermes's "within" columns, minted as regions of their own when
   // the table is converted under a base address), identified level by level, the widest first, each

@@ -1055,12 +1055,14 @@ function leaveChora() {
 }
 /**
  * A dataset saved in Chora: the page's from now, chosen in step 1 as if just dropped (and kept, as the
- * user's own choice is), so that the other tools take it. Returns what to say of it, in words.
+ * user's own choice is), so that the other tools take it; and, in a workflow at Chora's step, that step's
+ * result (Methodos's placed). Returns what to say of it, in words.
  */
 async function choraSaved(file) {
   const dt = new DataTransfer(); dt.items.add(file); $('picker').files = dt.files;
   choose([file]); keepChoice([file]);
-  return CHORA_HANDOVER.chosen(file.name);
+  const step = await methodos.placed([file]);
+  return [CHORA_HANDOVER.chosen(file.name), step].filter(Boolean).join(' ');
 }
 $('chora-leave').addEventListener('click', () => { leaveChora(); focusStep1(); });
 if (choraInHash()) openChora();

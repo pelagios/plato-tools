@@ -3396,14 +3396,16 @@ def chora_seams_checks(pw, url, tmp):
         before = detected_again(p, ['applied.json'])
         until(p, '() => !!document.querySelector(\'#for-tool a[href="#chora"]\')', 15)
         link = p.get_attribute('#for-tool a[href="#chora"]', 'href')
+        in_tracker = p.is_visible('#methodos-chora') and p.get_attribute('#methodos-chora', 'href') == '#chora'
         p.evaluate('() => { window.__samePage = true; }')
-        p.click('#for-tool a[href="#chora"]')
+        p.click('#methodos-chora')
         s, drawn = chora_loaded(p)
         t = p.evaluate(JOIN_STATE)
-        return (before and link == '#chora' and s['phase'] == 'loaded' and drawn > 0 and p.evaluate('() => window.__samePage === true')
-                and t['steps'].get('place') == 'current' and 'Step 7 of 10' in t['where'] and p.is_visible('#methodos-tracker')), {
-                    'chosen before': before, 'link': link, 'state': {k: s.get(k) for k in ('phase', 'places')}, 'drawn': drawn, 'tracker': {k: t.get(k) for k in ('steps', 'where')}}
-    attempt('Chora\'s seams, in a workflow: "Open Chora" opens the workflow\'s dataset in the page at once, drawn on the map, with the tracker beside it at "Step 7 of 10"', workflow_open)
+        return (before and link == '#chora' and in_tracker and s['phase'] == 'loaded' and drawn > 0 and p.evaluate('() => window.__samePage === true')
+                and t['steps'].get('place') == 'current' and 'Step 7 of 10' in t['where'] and p.is_visible('#methodos-tracker') and not p.is_visible('#methodos-chora')), {
+                    'chosen before': before, 'link': link, 'in the tracker': in_tracker, 'state': {k: s.get(k) for k in ('phase', 'places')}, 'drawn': drawn,
+                    'tracker': {k: t.get(k) for k in ('steps', 'where')}, 'tracker\'s Open Chora after': p.is_visible('#methodos-chora')}
+    attempt('Chora\'s seams, in a workflow: "Open Chora", under the step\'s title and in the tracker, opens the workflow\'s dataset in the page at once, drawn on the map, with the tracker beside it at "Step 7 of 10" (its "Open Chora" gone while the map is shown)', workflow_open)
 
     def workflow_back_unsaved():
         p = r['wp']
@@ -3437,24 +3439,35 @@ def chora_seams_checks(pw, url, tmp):
     attempt('Chora\'s seams, in a workflow: the page loaded at #chora takes the workflow up, chooses its dataset from what it keeps, and Chora shows it', workflow_reloaded)
 
     def workflow_saved():
-        # A save in Chora chooses the file it wrote in step 1, and "This step is done" completes the step with it.
+        # A save in Chora does the workflow's step "place" by itself (no "This step is done"), with the very
+        # file it wrote: the record names it by the size and SHA-256 of the file downloaded. Before the save
+        # (the presence), the step is the current one.
         p = r['wp']
         try:
             chora_pick(p, 'londinium')
+            before = p.evaluate(JOIN_STATE)['steps'].get('place')
             p.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
             x, y = map_centre(p); draw(p, 'point', [(x + 50, y + 25)]); p.click('#chora-draw-tools button[data-mode="static"]')
             until(p, '() => window.__chora.pendingCount === 1', 10)
             p.click('#chora-save'); until(p, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
             if not (cstate(p)['lastSave'] or {}).get('passed'): raise RuntimeError('the save did not pass')
             until(p, '() => !!window.__chora.handedOver', 30)
-            name = cstate(p)['handedOver']['name']
-            chosen = detected_again(p, [name])
-            p.click('#methodos-done')
-            until(p, "() => document.querySelector('#methodos-track li[data-step=\"place\"]')?.dataset.state === 'done'", 15)
-            t = p.evaluate(JOIN_STATE)
-            return (chosen and name == 'applied.chora.json' and t['steps'].get('place') == 'done' and t['steps'].get('again') == 'current'), {'handed over': cstate(p).get('handedOver'), 'steps': t['steps']}
+            until(p, "() => document.querySelector('#methodos-track li[data-step=\"place\"]')?.dataset.state === 'done'", 30)
+            t = p.evaluate(JOIN_STATE); h = cstate(p)['handedOver']
+            with p.expect_download(timeout=T(60) * 1000) as dl: p.click('#chora-save-result button.primary')
+            body = pathlib.Path(dl.value.path()).read_bytes()
+            rec = p.evaluate('''async (id) => { const q = indexedDB.open('plato-tools-methodos', 1);
+              const db = await new Promise((r, j) => { q.onsuccess = () => r(q.result); q.onerror = () => j(q.error); });
+              const v = await new Promise((r) => { const g = db.transaction('workflows').objectStore('workflows').get(id); g.onsuccess = () => r(g.result); g.onerror = () => r(null); });
+              db.close(); const s = (typeof v === 'string' ? JSON.parse(v) : v)?.steps?.find((x) => x.id === 'place'); return s ? s.outputs : null; }''', r['wid'])
+            said = p.inner_text('#chora-handed') if p.is_visible('#chora-handed') else ''
+            want = [{'type': 'dataset', 'name': 'applied.chora.json', 'size': len(body), 'sha256': hashlib.sha256(body).hexdigest()}]
+            got = [{k: x.get(k) for k in ('type', 'name', 'size', 'sha256')} for x in ((rec or {}).get('dataset') or [])]
+            return (before == 'current' and h['name'] == 'applied.chora.json' and t['steps'].get('place') == 'done' and t['steps'].get('again') == 'current'
+                    and got == want and 'is done with it' in said and p.evaluate(SEAM_CHOSEN) == ['applied.chora.json'] and chora_shown(p)), {
+                        'before': before, 'handed over': h, 'steps': t['steps'], 'recorded': got, 'downloaded': want, 'said': said}
         finally: r['wctx'].close()
-    attempt('Chora\'s seams, in a workflow: a save in Chora chooses the file it wrote in step 1, and the step is done with it', workflow_saved)
+    attempt('Chora\'s seams, in a workflow: a save in Chora does the step "place" by itself, with the file it wrote (the record names it by the size and SHA-256 of the file downloaded), chosen in step 1, and says so under the save', workflow_saved)
 
     def follow_publish(p):
         p.click('#methodos-ask'); until(p, "!document.getElementById('methodos').hidden", 5)
@@ -3889,9 +3902,9 @@ def map_your_data_checks(pw, url, tmp):
         name = (ls.get('outputs') or [{}])[0].get('name')
         with page.expect_download(timeout=T(60) * 1000) as d: page.click('#chora-save-result button.primary')
         r['drawn'] = out / name; d.value.save_as(r['drawn'])
-        # The file saved is chosen in step 1, and the step is done with it.
+        # The file saved is chosen in step 1, and the step is done with it, by the save itself.
         until(page, '() => !!window.__chora.handedOver && window.__plato.phase === "detected"', 60)
-        page.click('#methodos-done'); step_is('place', 'done', 15)
+        step_is('place', 'done', 15)
         page.click('#chora-leave')
         return (ls.get('passed') is True and ls.get('added') == 2 and track()['steps'].get('again') == 'current'), {'save': {k: ls.get(k) for k in ('passed', 'added')}, 'steps': track()['steps']}
     def base_changed():
@@ -3906,7 +3919,7 @@ def map_your_data_checks(pw, url, tmp):
             {'phase': s.get('phase'), 'warned': warned[:240], 'shown with the same address': quiet}
     attempt('Map your data: Finish with another base address in Options says it is not the review\'s saved address, and still writes (not blocked); with the same address, nothing is said', base_changed)
 
-    attempt('Map your data: in Chora, opened from the tracker, Kirk House\'s location and identity adopted from the stub\'s record, saved (the version check passed), chosen in step 1, and the place step done with that file', adopt_in_chora)
+    attempt('Map your data: in Chora, opened from the tracker, Kirk House\'s location and identity adopted from the stub\'s record, saved (the version check passed), and the place step done by the save with that file, chosen in step 1', adopt_in_chora)
 
     def to_the_end():
         need('drawn', 'converted')
