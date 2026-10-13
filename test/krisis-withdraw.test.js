@@ -403,6 +403,9 @@ test('the version check: a changed answer that does not withdraw the earlier one
   const found = both.items.find((i) => i.kind === 'answered-both-ways');
   assert.ok(found && found.severity === 'error', JSON.stringify(both.items));
   assert.deepEqual(found.examples, [`Ada: ${A('newton')} and ${B('newton')}`]);
+  // The advice is to withdraw (presence), never to supersede: a withdrawn superseder revives the earlier answer.
+  assert.match(found.message, /retracts it \(plato:Retracts\)/);
+  assert.doesNotMatch(found.message, /or let the new answer replace it/);
   // Control: the same with the yes retracted passes, and the retraction is counted (presence).
   const withdrawn = await mneme(v1, version([answer('yes', B('newton'), false), answer('no', B('newton'), true), retract('r', 'yes')]));
   assert.equal(withdrawn.errors, 0, JSON.stringify(withdrawn.items));

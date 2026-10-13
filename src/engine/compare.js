@@ -98,7 +98,7 @@ const TEXT = {
   'nothing-to-compare': 'The earlier version holds no attestations, so there was nothing for the later one to have kept, and nothing was tested.',
   'expected-removed-published': 'Attestations were to be taken out of a published version, which is never done: a published attestation is withdrawn, not removed. This is a fault in the tools; please report it.',
   'expected-removed-unknown': 'An attestation that was to be taken out of the earlier version is not in it, which is a fault in the tools; please report it. The example is its digest.',
-  'answered-both-ways': 'In the later version, one contributor says both that two places are the same and that they are not, and both answers are current: a decision changed without withdrawing the earlier answer. Withdraw it with a new attestation that retracts it (plato:Retracts), or let the new answer replace it (plato:Supersedes). The example names the contributor and the two places.',
+  'answered-both-ways': 'In the later version, one contributor says both that two places are the same and that they are not, and both answers are current: a decision changed without withdrawing the earlier answer. Withdraw it with a new attestation that retracts it (plato:Retracts). Do not let the new answer replace it with plato:Supersedes: if that answer is ever withdrawn, the earlier one becomes current again. The example names the contributor and the two places.',
 };
 
 // The comparison's queries. Each looks up, for every row of one version, its counterpart in the other,
