@@ -264,7 +264,8 @@ function onDone({ report, outputs, work: found, incomplete }) {
   // kept in the review on the page, which asks to be saved again so that a later Finish can tell its dataset.
   if (state.action === 'apply' && found && work && !incomplete) {
     Object.assign(work, { finished: found.finished, draft_answers: found.draft_answers });
-    unsaved++; showWarning(KRISIS_WITHDRAW.recorded);
+    // Said with the result, not in the review's warning, which is for what is wrong with this Finish (a base address that differs).
+    unsaved++; $('summary').insertAdjacentText('beforeend', ' ' + KRISIS_WITHDRAW.recorded);
   }
 }
 function renderReport(report) { $('report').innerHTML = reportHtml(report, state.action); }

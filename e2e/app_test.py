@@ -870,6 +870,7 @@ def krisis_withdraw_draft_case(page, tmp):
                 s2 = finish('finish again')
                 got['report'] = {i['kind']: i.get('count') for i in (s2.get('report') or {}).get('items', [])}
                 got['counts'] = (s2.get('report') or {}).get('counts')
+                got['says'] = 'save the review again' in (page.inner_text('#summary') if s2.get('phase') == 'done' else '')
                 if s2.get('phase') == 'done' and s2.get('outputs'):
                     v2 = json.loads(download(page, s2['outputs'][0]['name'], v2p).read_text())
                     atts = next((p['attestations'] for p in v2['spatialEntities'] if p['@id'] == a + 'newton'), [])
@@ -882,8 +883,8 @@ def krisis_withdraw_draft_case(page, tmp):
     check('withdraw, draft: the Finish area offers withdraw (keep the history) by default; chosen, replace takes the earlier answer out of the draft, writes the denial, and retracts nothing',
           got.get('default') == 'withdraw' and got.get('answers') == ['not newton'] and got.get('metas') == [] and (got.get('report') or {}).get('answers-replaced') == 1
           and ((got.get('counts') or {}).get('versionCheck') or {}).get('replaced') == 1, got)
-    check('withdraw, draft: the choice to replace is kept in the review saved after Finish, with the Finish recorded',
-          (got.get('kept') or {}).get('draft_answers') == 'replace' and (got.get('kept') or {}).get('finished') == 1, got.get('kept') or got)
+    check('withdraw, draft: the choice to replace is kept in the review saved after Finish, with the Finish recorded, and the result says to save the review again',
+          got.get('says') is True and (got.get('kept') or {}).get('draft_answers') == 'replace' and (got.get('kept') or {}).get('finished') == 1, got.get('kept') or got)
     m = compare_case(page, v2p, v1p) if got.get('answers') else {}
     items = (m.get('report') or {}).get('items', [])
     check('withdraw, draft: the version check finds no answer both ways once the earlier one is replaced, and says, as a warning, what went from the draft',
