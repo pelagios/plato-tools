@@ -120,7 +120,7 @@ a.button:hover { border-color: var(--accent); }
 details#options { margin-top: .75rem; }
 .opt { margin: .6rem 0; }
 .opt small { display: block; color: var(--muted); }
-#phase { font-variant-numeric: lining-nums tabular-nums; }
+#phase, #chora-phase { font-variant-numeric: lining-nums tabular-nums; }
 .report-group h3 { font-size: 1.05rem; margin: 1rem 0 .4rem; }
 .report-group.error h3 { color: var(--err); } .report-group.warning h3 { color: var(--warn); } .report-group.loss h3, .report-group.note h3 { color: var(--muted); }
 .item { border-top: 1px solid var(--line); padding: .45rem 0; }
@@ -306,7 +306,7 @@ a:visited { color: var(--accent); }
 .columns-table .use-pattern code { font: .8rem/1.45 var(--font-mono); overflow-wrap: anywhere; }
 .columns-table .column-level, .columns-table .column-split { display: block; margin-top: .3rem; font-size: .85rem; }
 .columns-table .column-split label { display: inline-block; margin: 0 .6rem .2rem 0; }
-.paste { margin-top: .6rem; }
+.paste { margin-top: .6rem; width: 100%; padding: .3rem .5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); }
 .paste summary { cursor: pointer; }
 .paste label { display: block; margin: .5rem 0 .25rem; }
 .paste textarea { width: 100%; box-sizing: border-box; font: .9rem/1.45 var(--font-mono); }
@@ -419,8 +419,8 @@ body.chora main.chora-main { max-width: none; width: 100%; margin: 0; padding: 0
 .chora-panel h3 { font-size: 1rem; margin: .8rem 0 .2rem; }
 .chora-panel ul { margin: .2rem 0; padding-left: 1.2rem; }
 .chora-mapwrap { position: relative; min-height: 20rem; }
-#map { position: absolute; inset: 0; }
-#map.drawing canvas { cursor: crosshair; }
+#chora-map { position: absolute; inset: 0; }
+#chora-map.drawing canvas { cursor: crosshair; }
 body.chora footer { max-width: none; padding: .5rem 1.25rem 1rem; font-size: .8rem; }
 .muted { color: var(--muted); }
 body.chora .note { color: var(--muted); font-size: .92rem; }
@@ -430,7 +430,7 @@ body.chora .way-back a.button { padding: .25rem .8rem; }
 body.chora .workflow-track { border-left: 3px solid var(--accent); padding: .15rem .6rem; margin: .5rem 0; font-size: .92rem; }
 body.chora .workflow-track p { margin: 0; }
 .dataset-title { font-family: var(--font-headings); font-size: 1.1rem; margin: .3rem 0 0; }
-#q { width: 100%; font: inherit; padding: .35rem .5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); }
+#chora-q { width: 100%; font: inherit; padding: .35rem .5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); }
 .place-list { list-style: none; padding: 0 !important; max-height: 18rem; overflow-y: auto; }
 .place-list button.place { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: .3rem .2rem; background: none; }
 .place-list button.place:hover, .place-list button.place.current { background: var(--bg); color: var(--accent); }
@@ -472,8 +472,8 @@ ol.adopt-candidates li.denied .cand-name { color: var(--muted); }
 .cand-marker { cursor: pointer; box-shadow: 0 1px 3px rgba(0, 0, 0, .35); }
 .cand-marker:focus-visible { outline: 3px solid var(--fg); outline-offset: 1px; }
 .adopt-preview { border-top: 1px solid var(--line); margin-top: .6rem; padding-top: .4rem; }
-#contributor-form label { display: block; margin-top: .4rem; }
-#contributor-form input, #paste { font: inherit; width: 100%; padding: .3rem .5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); }
+#chora-contributor-form label { display: block; margin-top: .4rem; }
+#chora-contributor-form input, #chora-paste { font: inherit; width: 100%; padding: .3rem .5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); }
 /* The drawing tools and the basemap switcher float over the map. */
 .map-tools { position: absolute; top: .6rem; left: .6rem; display: flex; gap: 2px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 2px; box-shadow: 0 1px 4px rgb(0 0 0 / .15); }
 .map-tools button { padding: .25rem .6rem; border: 0; font-size: .9rem; }
@@ -798,6 +798,29 @@ body[data-workflow] #action:not([hidden]) + #progress:not([hidden]):has(+ #resul
 .lookup-scope { margin: .6rem 0; padding: .4rem .6rem; border: 1px dashed var(--line); border-radius: 8px; }
 .lookup-scope .scope-line { margin: 0; }
 body.scope-editing main.layout > :not(#workflow-rail, #toolbox, #scope-editor) { display: none; }
+/* ---- Chora, the map, in the centre column (src/chora/app.js; src/app.js, openChora) -------------------
+   While it is shown (body[data-chora]) the rest of the centre is hidden. Its panel beside its map, as tall as the
+   window less a little; in a column narrower than 50rem (the centre column beside both rails) the two stack, the map first. */
+body[data-chora] main.layout > :not(#workflow-rail, #toolbox, #chora) { display: none; }
+section.chora { padding: .75rem .9rem .9rem; }
+.chora-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem 1rem; margin-bottom: .5rem; }
+.chora-head h2 { margin: 0; flex: 1; }
+.chora-head h2:focus { outline: none; }
+.chora-head h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chora-head .label { font-family: var(--font-text); font-size: .8rem; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-left: .4rem; }
+section.chora { container-type: inline-size; }
+section.chora .chora-main { display: grid; grid-template-columns: minmax(17rem, 24rem) 1fr; height: calc(100vh - 6rem); min-height: 28rem; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+section.chora .chora-panel { padding: 0 .6rem .8rem .8rem; }
+section.chora .chora-panel section { padding: .6rem .7rem; }
+section.chora .note { color: var(--muted); font-size: .92rem; }
+@container (width < 50rem) {
+  section.chora .chora-main { display: flex; flex-direction: column-reverse; height: auto; min-height: 0; overflow: visible; }
+  section.chora .chora-mapwrap { height: 60vh; }
+  section.chora .chora-panel { overflow: visible; }
+}
+/* A map narrower than the basemap's switcher and the key side by side: the key goes to the top right, under the zoom buttons. */
+section.chora .chora-mapwrap { container: chora-map / inline-size; }
+@container chora-map (width < 34rem) { .map-key { top: 4.6rem; bottom: auto; } }
 .scope-editor h2:focus { outline: none; }
 .scope-editor h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .scope-editor fieldset { border: 1px solid var(--line); border-radius: 8px; margin: .75rem 0; padding: .4rem .85rem .7rem; min-width: 0; }

@@ -78,7 +78,7 @@ def main():
         with sync_playwright() as pw:
             ctx = pw.chromium.launch_persistent_context(str(tmp / 'profile'), headless=True, args=GL, viewport={'width': 1400, 'height': 900}, reduced_motion='reduce')
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
-            page.goto(base + 'chora.html')
+            page.goto(base + '#chora')   # Chora, in the main page
             # A measurement, not a check: the map's server is allowed in storage, as the panel would keep it
             # (src/lib/permissions.js), and the page's policy names it from the next load.
             page.evaluate("a => localStorage.setItem('plato-tools.permissions', JSON.stringify({ version: 1, grants: { ['iiif:' + a]: { state: 'allowed', at: new Date().toISOString() } } }))", A)
@@ -86,14 +86,14 @@ def main():
             f = tmp / 'place.json'
             f.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': 'https://example.org/g', 'title': 'Budget'}, 'spatialEntities': [
                 {'@id': 'https://example.org/p/cambridge', 'label': 'Cambridge', 'attestations': [{'names': [{'toponym': 'Cambridge'}], 'sources': [{'title': 's'}]}]}]}))
-            page.set_input_files('#picker', [str(f)]); until(page, '() => window.__chora.phase === "loaded"', 60)
-            page.click('#list button[data-id]'); until(page, '() => window.__chora.phase === "place"', 30)
+            page.set_input_files('#chora-picker', [str(f)]); until(page, '() => window.__chora.phase === "loaded"', 60)
+            page.click('#chora-list button[data-id]'); until(page, '() => window.__chora.phase === "place"', 30)
             ann = json.loads((FIX / 'annotation-ink.json').read_text().replace('https://iiif.example.org', A))
             ann['id'] = 'https://annotations.allmaps.org/maps/00000000000000b9'
             src = ann['target']['source']; src['id'] = A + '/iiif/inkbig'; src['width'], src['height'] = 4097, 3073
             ann['target']['selector']['value'] = '<svg width="4097" height="3073"><polygon points="0,0 4097,0 4097,3073 0,3073 0,0" /></svg>'
             for feat, rc in zip(ann['body']['features'], [[0, 0], [4097, 0], [4097, 3073], [0, 3073]]): feat['properties']['resourceCoords'] = rc
-            page.fill('#map-input', json.dumps(ann)); page.click('#map-form button[type=submit]')
+            page.fill('#chora-map-input', json.dumps(ann)); page.click('#chora-map-form button[type=submit]')
             until(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.firstTile)', 60, ann['id'])
             page.evaluate(SETTLE)
             def at_ratio(target):
@@ -117,9 +117,9 @@ def main():
             # The worker finds the ink's points; the page carries them into the world (toWorld) and onto the
             # screen (project, binned), the latter again on every moveend. Timed by the page (ink.snapBuild).
             key = page.evaluate('id => window.__chora.overlays.find((o) => o.annotationId === id).key', ann['id'])
-            page.click(f'#overlay-list li[data-overlay="{key}"] button[data-fit]'); page.evaluate(SETTLE)
+            page.click(f'#chora-overlay-list li[data-overlay="{key}"] button[data-fit]'); page.evaluate(SETTLE)
             out['snap build: image px per screen px'] = round(page.evaluate(RATIO, ann['id']), 3)
-            page.click('#draw-tools button[data-mode="linestring"]'); page.check('#snap-ink')
+            page.click('#chora-draw-tools button[data-mode="linestring"]'); page.check('#chora-snap-ink')
             until(page, '() => window.__chora.ink && window.__chora.ink.snapBuilds >= 1 && window.__chora.ink.snapBuild', 120)
             def snap_builds(label):
                 builds, moves = [page.evaluate('() => window.__chora.ink.snapBuild')], []
@@ -144,11 +144,11 @@ def main():
             until(page, 'n => window.__chora.ink.snapBuilds > n', 120, n)
             out['snap build: image px per screen px, at the finest window'] = round(page.evaluate(RATIO, ann['id']), 3)
             snap_builds('at the largest window at 1/1')
-            page.uncheck('#snap-ink'); page.click('#draw-tools button[data-mode="static"]') if page.query_selector('#draw-tools button[data-mode="static"]') else None
+            page.uncheck('#chora-snap-ink'); page.click('#chora-draw-tools button[data-mode="static"]') if page.query_selector('#chora-draw-tools button[data-mode="static"]') else None
             if SNAP_ONLY: raise StopIteration
 
             # ---- An area, its window grown to 1024 x 1024 at full resolution ----
-            page.click('#draw-tools button[data-trace="area"]')
+            page.click('#chora-draw-tools button[data-trace="area"]')
             out['area: image px per screen px'] = round(at_ratio(1.0), 3)
             centre_on(BIG_WASH_CENTRE)
             ink = trace('area', BIG_WASH_CENTRE); first = ink['lastMs']; out['area: window'] = ink['last']['frame']
@@ -156,7 +156,7 @@ def main():
             for run in range(RUNS):
                 page.evaluate('() => window.__chora_ink.discard()')
                 cached.append(trace('area', BIG_WASH_CENTRE)['lastMs'])
-                page.fill('#ink-panel input[data-p="tolerance"]', str(14 + run))
+                page.fill('#chora-ink-panel input[data-p="tolerance"]', str(14 + run))
                 slider.append(trace('area', None, again=True)['lastMs'])
             out['area: first click, tiles fetched (ms)'] = round(first)
             out['area: click again, tiles kept (ms, median)'] = round(statistics.median(cached))
@@ -164,7 +164,7 @@ def main():
             page.evaluate('() => window.__chora_ink.discard()')
 
             # ---- A line, followed until its window is the whole map at 1/2 (2049 x 1537) ----
-            page.click('#draw-tools button[data-trace="line"]')
+            page.click('#chora-draw-tools button[data-trace="line"]')
             out['line: image px per screen px'] = round(at_ratio(3.0), 3)
             centre_on(BIG_RIVER[300])
             line_first, line_again = [], []
@@ -180,22 +180,22 @@ def main():
             afresh = []
             for run in range(RUNS):
                 if run:   # the line's window again, to put the wash's out of the worker
-                    page.click('#draw-tools button[data-trace="line"]'); at_ratio(3.0); centre_on(BIG_RIVER[300])
+                    page.click('#chora-draw-tools button[data-trace="line"]'); at_ratio(3.0); centre_on(BIG_RIVER[300])
                     trace('line', BIG_RIVER[300]); page.evaluate('() => window.__chora_ink.discard()')
-                page.click('#draw-tools button[data-trace="area"]'); at_ratio(1.0); centre_on(BIG_WASH_CENTRE)
+                page.click('#chora-draw-tools button[data-trace="area"]'); at_ratio(1.0); centre_on(BIG_WASH_CENTRE)
                 afresh.append(trace('area', BIG_WASH_CENTRE)['lastMs'])
             out['area: tiles kept, windows made afresh (ms, median)'] = round(statistics.median(afresh))
             out['area: windows made afresh, its steps (the last run)'] = page.evaluate('() => window.__chora.ink.steps')
             out['area: windows made afresh, into the world (ms)'] = page.evaluate('() => window.__chora.ink.last.worldMs')
             page.evaluate('() => window.__chora_ink.discard()')
-            page.click('#draw-tools button[data-trace="line"]')
+            page.click('#chora-draw-tools button[data-trace="line"]')
             out['line: first click, tiles fetched (ms)'] = round(line_first[0])
             out['line: click again, tiles kept (ms, median)'] = round(statistics.median(line_again)) if line_again else None
             page.evaluate('() => window.__chora_ink.discard()')
 
             # ---- A snap lookup ----
-            page.click('#draw-tools button[data-trace="line"]')   # off again
-            page.click('#draw-tools button[data-mode="linestring"]'); page.check('#snap-ink')
+            page.click('#chora-draw-tools button[data-trace="line"]')   # off again
+            page.click('#chora-draw-tools button[data-mode="linestring"]'); page.check('#chora-snap-ink')
             until(page, '() => window.__chora.ink.snapBuilds >= 1 && window.__chora.ink.snapPoints > 0', 60)
             snap = page.evaluate('''() => { const c = window.__chora_map.getCanvas(), w = c.clientWidth, h = c.clientHeight, n = 20000; let hits = 0, worst = 0;
               const t0 = performance.now();

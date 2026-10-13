@@ -24,11 +24,14 @@ export default defineConfig({
       // named for what it is, shared-[hash].js and shared-[hash].css. Left to itself the bundler
       // names such a chunk after the first module in it, which is an accident of imports. Only this
       // repository's src/ is grouped, so that Vite's module-preload polyfill, which the spike page
-      // shares too, stays a chunk of its own and the spike page loads nothing of the tools. Chora's map
-      // (src/chora/map.js, with MapLibre and Terra Draw) and its basemaps are left out of it: the main page
-      // imports them only when Scope's drawn area is opened (src/scope-page.js), so they are never preloaded there.
+      // shares too, stays a chunk of its own and the spike page loads nothing of the tools. Chora
+      // (src/chora/, but for the hand-off and the hand-back, which the main page imports) is left out of
+      // it, since a module the group takes brings everything it imports with it: the main page imports
+      // Chora only when it is opened (src/app.js, openChora), and Chora's map (src/chora/map.js, with
+      // MapLibre and Terra Draw) and its basemaps when Scope's drawn area is (src/scope-page.js), so
+      // that none of them is ever preloaded there.
       output: {
-        codeSplitting: { groups: [{ name: 'shared', test: /[\\/]src[\\/](?!chora[\\/](?:map|basemaps)\.js$)/, minShareCount: 2 }] },
+        codeSplitting: { groups: [{ name: 'shared', test: /[\\/]src[\\/](?!chora[\\/](?!hand(?:off|back)\.js$))/, minShareCount: 2 }] },
       },
     },
   },

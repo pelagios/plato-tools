@@ -40,13 +40,16 @@ const whenText = (w) => {
  * `addAdoption(draft)` keeps an adoption draft with the drawings; `armConsult(consulted)` makes the next
  * drawing of the place cite a record consulted, not copied; `adopted(placeId)` the adoption drafts of a place.
  */
-export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adopted, scope = () => null }) {
+export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adopted, scope = () => null, lookup = null, onRefused = null }) {
   let s = null;   // { view, query, phase, problem, answer: { list, attribution }, ranked, statuses, dismissed, preview, done, widened, sent, searched, failedClosed }
   let inFlight = null;
   const token = permissions.token;
-  // The one fetch every request is made with (the shared lookup keeps its first), as Krisis's on main.
-  const fetchVia = permittedFetch(permissions.fetch, (e) => inFlight?.abort(e));
-  const whg = () => createLookup({ endpoint: WHG_ENDPOINT, fetch: fetchVia });
+  // The page's WHG lookup when it gives one (`lookup`, the one in the page: one queue, whoever asks), told
+  // through `onRefused` when a request is refused for want of permission; else one made here, with the one
+  // fetch every request is made with (the shared lookup keeps its first), as Krisis's on main.
+  const fetchVia = lookup ? null : permittedFetch(permissions.fetch, (e) => inFlight?.abort(e));
+  onRefused?.((e) => inFlight?.abort(e));
+  const whg = lookup || (() => createLookup({ endpoint: WHG_ENDPOINT, fetch: fetchVia }));
   const passToken = () => { const t = token.get(); if (t) whg().setToken(t); else whg().clearToken(); };
   passToken();
   token.onChange(() => { passToken(); if (s) render(); });

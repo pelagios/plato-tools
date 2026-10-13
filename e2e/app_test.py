@@ -3466,7 +3466,7 @@ def chora_seams_checks(pw, url, tmp):
         p.wait_for_selector('#way-back', state='visible', timeout=T(15) * 1000)
         at_once = {'words': p.inner_text('#way-back'), 'note': p.inner_text('#way-back-note'), 'href': p.get_attribute('#way-back', 'href'), 'phase': cstate(p).get('phase')}
         s, drawn = chora_loaded(p)
-        track = p.inner_text('#workflow-track') if p.is_visible('#workflow-track') else None
+        track = p.inner_text('#chora-workflow-track') if p.is_visible('#chora-workflow-track') else None
         return (before and link == f'./chora.html#workflow={wid}' and at_once['words'] == 'Back to the workflow' and 'Nothing is handed back' in at_once['note']
                 and at_once['href'] == base + '#workflow=' + wid and s['phase'] == 'loaded' and s.get('handoff') == ['applied.json'] and drawn > 0
                 and track and 'Map your data' in track and 'Step 7 of 10' in track and 'Draw or trace the places still without a location' in track), {
@@ -3519,11 +3519,11 @@ def chora_seams_checks(pw, url, tmp):
         try:
             chora_pick(p, 'londinium')
             p.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
-            x, y = map_centre(p); draw(p, 'point', [(x + 50, y + 25)]); p.click('#draw-tools button[data-mode="static"]')
+            x, y = map_centre(p); draw(p, 'point', [(x + 50, y + 25)]); p.click('#chora-draw-tools button[data-mode="static"]')
             until(p, '() => window.__chora.pendingCount === 1', 10)
-            p.click('#save'); until(p, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+            p.click('#chora-save'); until(p, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
             if not (cstate(p)['lastSave'] or {}).get('passed'): raise RuntimeError('the save did not pass')
-            with p.expect_download(timeout=T(60) * 1000) as dl: p.click('#save-result button.primary')
+            with p.expect_download(timeout=T(60) * 1000) as dl: p.click('#chora-save-result button.primary')
             saved = d / dl.value.suggested_filename; dl.value.save_as(saved)
             until(p, '() => window.__chora.wayBack && window.__chora.wayBack.handsBack', 30)
             note = p.inner_text('#way-back-note')
@@ -4000,13 +4000,13 @@ def map_your_data_checks(pw, url, tmp):
         until(page, '() => window.__chora.adopt.phase === "preview"', 30)
         page.click('#adopt-go'); until(page, '() => window.__chora.adopt.phase === "adopted"', 10)
         until(page, '() => window.__chora.draftWrites === 0', 10)
-        page.click('#save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+        page.click('#chora-save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
         ls = cstate(page)['lastSave'] or {}
         name = (ls.get('outputs') or [{}])[0].get('name')
-        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#save-result button.primary')
+        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#chora-save-result button.primary')
         r['drawn'] = out / name; d.value.save_as(r['drawn'])
-        until(page, '() => !!document.getElementById("back-to-workflow")', 60)
-        with page.expect_navigation(url=re.compile(r'#workflow='), timeout=T(60) * 1000): page.click('#back-to-workflow')
+        until(page, '() => !!document.getElementById("chora-back-to-workflow")', 60)
+        with page.expect_navigation(url=re.compile(r'#workflow='), timeout=T(60) * 1000): page.click('#chora-back-to-workflow')
         wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready')
         until(page, "() => !document.getElementById('methodos-handback').hidden", 15)
         page.click('#methodos-handback')
@@ -5357,7 +5357,7 @@ def main_permissions(ctx, page, url, requests):
             p.close()
     attempt('main page: "Keep large datasets\' working files" asks the browser only when ticked, shows and remembers its answer, and is not asked again on the next visit', persist)
 
-# ---- Chora (chora.html): the map page ------------------------------------------------------------
+# ---- Chora, the map, in the main page (#chora) ------------------------------------------------------
 # Chora has a browser profile of its own, so that its storage (the drawings kept, the contributor
 # remembered, its SQLite pool) is this run's alone and nothing the main page's checks did is in it.
 # The map is WebGL: the software-GL switches are kept as insurance (with none, the map still drew on
@@ -5439,11 +5439,12 @@ def fixture(src, name, tmp):
     shutil.copyfile(src, d / name); return d / name
 
 def chora_boot(page, base, files=None):
-    """Open chora.html afresh (a navigation: nothing is carried over in memory), and the files if any."""
-    page.bring_to_front(); page.goto(NOTOOLS if PROVE else base + 'chora.html')
+    """Open Chora in the main page (#chora) afresh (a navigation, from another page: nothing is carried over in
+    memory, and a change of fragment alone would not load the page again), and the files if any."""
+    page.bring_to_front(); page.goto('about:blank'); page.goto(NOTOOLS if PROVE else base + '#chora')
     until(page, 'window.__chora && window.__chora.phase === "ready" && window.__chora.mapReadyCount >= 1')
     if files:
-        page.set_input_files('#picker', [str(f) for f in files])
+        page.set_input_files('#chora-picker', [str(f) for f in files])
         until(page, '["loaded", "error", "unrecognised"].includes(window.__chora.phase)')
     return cstate(page)
 
@@ -5453,11 +5454,11 @@ SETTLE = '''() => new Promise((r) => { const m = window.__chora_map, t = setTime
 
 def chora_pick(page, text):
     """Find `text` in the place list and choose the first place found, as a user does; its id."""
-    page.fill('#q', text)
-    until(page, 't => { const b = [...document.querySelectorAll("#list button[data-id]")]; return b.length && b.every((x) => x.textContent.toLowerCase().includes(t)); }', 20, text.lower())
-    pid = page.get_attribute('#list button[data-id]', 'data-id')
+    page.fill('#chora-q', text)
+    until(page, 't => { const b = [...document.querySelectorAll("#chora-list button[data-id]")]; return b.length && b.every((x) => x.textContent.toLowerCase().includes(t)); }', 20, text.lower())
+    pid = page.get_attribute('#chora-list button[data-id]', 'data-id')
     drawn = page.evaluate('window.__chora.mapReadyCount')   # before the change: the place is drawn once it moves
-    page.click('#list button[data-id]')
+    page.click('#chora-list button[data-id]')
     until(page, 'id => window.__chora.phase === "place" && window.__chora.placeId === id', 30, pid)
     until(page, 'n => window.__chora.mapReadyCount > n', 30, drawn)
     page.evaluate(SETTLE)
@@ -5481,15 +5482,15 @@ def opfs_names(page, directory):
       for await (const k of d.keys()) n.push(k); return n; } catch { return []; } }''', directory)
 
 def map_centre(page):
-    page.query_selector('#map').scroll_into_view_if_needed()
-    b = page.query_selector('#map').bounding_box(); return b['x'] + b['width'] / 2, b['y'] + b['height'] / 2
+    page.query_selector('#chora-map').scroll_into_view_if_needed()
+    b = page.query_selector('#chora-map').bounding_box(); return b['x'] + b['width'] / 2, b['y'] + b['height'] / 2
 
 def tap(page, x, y):
     # Terra Draw reads pointer events on the canvas; a mouse arrives at a point before pressing on it.
     page.mouse.move(x - 3, y - 3); page.mouse.move(x, y); page.mouse.down(); page.mouse.up(); page.wait_for_timeout(150)
 
 def draw(page, mode, points):
-    page.click(f'#draw-tools button[data-mode="{mode}"]')
+    page.click(f'#chora-draw-tools button[data-mode="{mode}"]')
     for x, y in points: tap(page, x, y)
 
 def kinds(page):
@@ -5889,7 +5890,7 @@ def front_page_checks(browser, url):
 THEME_STATE = """() => { const lum = (c) => { const m = c && c.match(/[\\d.]+/g); if (!m) return null; const [r, g, b] = m.map(Number); return (0.299 * r + 0.587 * g + 0.114 * b) > 128 ? 'light' : 'dark'; };
   const css = (e, p) => e ? getComputedStyle(e)[p] : null, root = document.documentElement, group = document.getElementById('theme-switch');
   const checked = group ? [...group.querySelectorAll('input[name="plato-theme"]')].filter((i) => i.checked).map((i) => i.value) : null;
-  return { page: lum(css(document.body, 'backgroundColor')), body: css(document.body, 'backgroundColor'), panel: lum(css(document.getElementById('files'), 'backgroundColor')),
+  return { page: lum(css(document.body, 'backgroundColor')), body: css(document.body, 'backgroundColor'), panel: lum(css(document.getElementById('files') || document.getElementById('chora-files'), 'backgroundColor')),
     band: css(document.querySelector('#toolbox .tool:not(.coming) .icon'), 'stroke'), mark: css(document.querySelector('#intro .plato-mark'), 'filter'),
     colorScheme: css(root, 'colorScheme'), attr: root.getAttribute('data-theme'), checked, group: !!group && !!group.offsetWidth,
     stored: (() => { try { return localStorage.getItem('plato-tools.theme'); } catch { return 'refused'; } })(),
@@ -6101,13 +6102,13 @@ def chora_vague_checks(page, base, tmp):
 
     def key_entries():
         chora_boot(page, base, [fixture(VAGUE, 'vague-key.json', tmp)])
-        hidden_before = page.evaluate('() => document.getElementById("map-key")?.hidden')
+        hidden_before = page.evaluate('() => document.getElementById("chora-map-key")?.hidden')
         chora_pick(page, 'old ford')
         # Closed at first, so that it covers none of the map; a click on its line opens it.
-        closed = page.evaluate('() => !document.getElementById("map-key").open')
-        page.click('#map-key summary')
+        closed = page.evaluate('() => !document.getElementById("chora-map-key").open')
+        page.click('#chora-map-key summary')
         rows = page.evaluate('() => { ' + PIXELS + ''' const of = (c) => (c ? sum(c.getContext('2d').getImageData(0, 0, c.width, c.height).data) : { ink: 0, h: null });
-          return [...document.querySelectorAll('#map-key li[data-key]')].map((li) => { const r = li.getBoundingClientRect();
+          return [...document.querySelectorAll('#chora-map-key li[data-key]')].map((li) => { const r = li.getBoundingClientRect();
           return { key: li.dataset.key, text: li.textContent.replace(/\\s+/g, ' ').trim(), shown: r.width > 0 && r.height > 0, svg: !!li.querySelector('svg'),
             ...of(li.querySelector('canvas[data-sym="point"]')), line: of(li.querySelector('canvas[data-sym="line"]')) }; }); }''')
         by = {r['key']: r for r in rows}
@@ -6122,7 +6123,7 @@ def chora_vague_checks(page, base, tmp):
 
     def card_words():
         chora_boot(page, base, [fixture(VAGUE, 'vague-card.json', tmp)]); chora_pick(page, 'roughly north')
-        LOC = '() => [...document.querySelectorAll("#card h3")].find((h) => h.textContent === "Locations")?.nextElementSibling?.textContent'
+        LOC = '() => [...document.querySelectorAll("#chora-card h3")].find((h) => h.textContent === "Locations")?.nextElementSibling?.textContent'
         loc = page.evaluate(LOC)
         chora_pick(page, 'unsaid well'); ctl = page.evaluate(LOC)
         return loc == 'Point, approximate (estimated from maps or descriptions), to within 25 km' and ctl == 'Point', {'Roughly North': loc, 'Unsaid Well': ctl}
@@ -6211,18 +6212,18 @@ def chora_checks(pw, url, tmp):
 
     def load_plato():
         s = chora_boot(page, base, [fixture(ant, 'antonine-load.json', tmp)]); loads.append(s['phase'])
-        listed = page.eval_on_selector_all('#list button[data-id]', 'bs => bs.length')
-        unplaced = page.eval_on_selector_all('#list .tag', 'ts => ts.filter((t) => t.textContent === "no location").length')
+        listed = page.eval_on_selector_all('#chora-list button[data-id]', 'bs => bs.length')
+        unplaced = page.eval_on_selector_all('#chora-list .tag', 'ts => ts.filter((t) => t.textContent === "no location").length')
         ov = page.evaluate('() => { const d = window.__chora_map.getSource("chora-overview").serialize().data; return (d.features || d.geojson?.features || []).length; }')
         dots = soon(page, '() => window.__chora_map.queryRenderedFeatures({ layers: ["chora-overview-points", "chora-overview-clusters"] }).length > 0', 20)
-        text = page.inner_text('#dataset')
+        text = page.inner_text('#chora-dataset')
         return (s['phase'] == 'loaded' and s['places'] == ant_places and listed == ant_places and unplaced == ant_places - ant_located and ov == ant_located and dots
                 and f'{ant_places} places, {ant_located} with a location' in text), {'state': s, 'listed': listed, 'no location': unplaced, 'on the map': ov, 'drawn': dots, 'text': text}
     attempt(f'Chora: a PLATO JSON file opens: its {ant_places} places listed, the {ant_located} with a location on the map', load_plato)
     def load_tables():
         rows = list(csv.DictReader((PLATO / 'schemas/tables/examples/customs/places.csv').open(newline='')))
         s = chora_boot(page, base, sorted((PLATO / 'schemas/tables/examples/customs').glob('*.csv'))); loads.append(s['phase'])
-        labels = page.eval_on_selector_all('#list button[data-id]', 'bs => bs.map((b) => b.firstChild.textContent.trim())')
+        labels = page.eval_on_selector_all('#chora-list button[data-id]', 'bs => bs.map((b) => b.firstChild.textContent.trim())')
         return s['phase'] == 'loaded' and s['places'] == len(rows) and sorted(labels) == sorted(r['label'] for r in rows), {'state': s, 'listed': labels}
     attempt('Chora: the PLATO spreadsheet tables open, each place in places.csv listed', load_tables)
 
@@ -6230,7 +6231,7 @@ def chora_checks(pw, url, tmp):
         # A IIIF Georeference Annotation is not a dataset: Chora says why, in the readers' own words.
         # The control: the same page then opens a dataset.
         s = chora_boot(page, base, [ROOT / 'test/fixtures/hermes-detect/bpl-rocque-annotation.json'])
-        said = page.inner_text('#phase')
+        said = page.inner_text('#chora-phase')
         # On Chora the advice is to paste it under Historical maps, not the main page's (drop it with the Recogito export).
         ok = (s['phase'] == 'unrecognised' and 'IIIF Georeference Annotation' in said and 'Unsupported input' not in said
               and 'under Historical maps' in said and 'Recogito' not in said)
@@ -6240,15 +6241,15 @@ def chora_checks(pw, url, tmp):
 
     def search():
         chora_boot(page, base, [fixture(ant, 'antonine-search.json', tmp)])
-        labels = lambda: sorted(page.eval_on_selector_all('#list button[data-id]', 'bs => bs.map((b) => b.firstChild.textContent.trim())'))
+        labels = lambda: sorted(page.eval_on_selector_all('#chora-list button[data-id]', 'bs => bs.map((b) => b.firstChild.textContent.trim())'))
         # What should be found, worked out from the file, folded as the page says it folds (chora_fold).
         fold = chora_fold
         want = sorted(p['label'] for p in antj['spatialEntities'] if 'road' in fold(p['label']))
         want_dover = sorted(p['label'] for p in antj['spatialEntities'] if 'dover' in fold(p['label']))
-        page.fill('#q', 'ROAD'); until(page, '() => /found/.test(document.getElementById("found").textContent)', 20)
-        roads, was = labels(), page.inner_text('#found')
+        page.fill('#chora-q', 'ROAD'); until(page, '() => /found/.test(document.getElementById("chora-found").textContent)', 20)
+        roads, was = labels(), page.inner_text('#chora-found')
         # Diacritics are folded on both sides: "dóver" finds Dover.
-        page.fill('#q', 'dóver'); until(page, 'w => document.getElementById("found").textContent !== w', 20, was)
+        page.fill('#chora-q', 'dóver'); until(page, 'w => document.getElementById("chora-found").textContent !== w', 20, was)
         dover = labels()
         return 0 < len(want) < ant_places and roads == want and want_dover and dover == want_dover, {'road': roads, 'wanted': want, 'dóver': dover, 'wanted for dóver': want_dover}
     attempt('Chora: search finds by part of a name, whatever the case and accents, and only those', search)
@@ -6259,9 +6260,9 @@ def chora_checks(pw, url, tmp):
         # only a search of the names can find them. Worked out from the file, not typed in.
         want = sorted((p['label'], n['toponym']) for p in antj['spatialEntities'] for a in p['attestations'] for n in a.get('names', [])
                       if 'ad portum' in fold(n['toponym']) and 'ad portum' not in fold(p['label']))
-        was = page.inner_text('#found')                         # "11 places.": the list before the search
-        page.fill('#q', 'AD PÓRTUM'); until(page, 'w => document.getElementById("found").textContent !== w', 20, was)
-        got = sorted(page.eval_on_selector_all('#list button[data-id]', 'bs => bs.map((b) => [b.firstChild.textContent.trim(), b.querySelector(".also")?.textContent || null])'))
+        was = page.inner_text('#chora-found')                         # "11 places.": the list before the search
+        page.fill('#chora-q', 'AD PÓRTUM'); until(page, 'w => document.getElementById("chora-found").textContent !== w', 20, was)
+        got = sorted(page.eval_on_selector_all('#chora-list button[data-id]', 'bs => bs.map((b) => [b.firstChild.textContent.trim(), b.querySelector(".also")?.textContent || null])'))
         return len(want) == 2 and got == [[l, f'— also {n}'] for l, n in want], {'listed': got, 'wanted': want}
     attempt('Chora: search finds a place by a name that is not its label, and shows the name it matched', search_names)
     def paging():
@@ -6275,15 +6276,15 @@ def chora_checks(pw, url, tmp):
         f.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': 'https://example.org/g', 'title': 'Paging', 'status': 'draft', 'version': '1'},
             'spatialEntities': [{'@id': u, 'label': label[u], 'attestations': []} for u in order]}))
         chora_boot(page, base, [f])
-        shown = lambda: page.eval_on_selector_all('#list button[data-id]', 'bs => bs.map((b) => [b.dataset.id, b.firstChild.textContent.trim()])')
+        shown = lambda: page.eval_on_selector_all('#chora-list button[data-id]', 'bs => bs.map((b) => [b.dataset.id, b.firstChild.textContent.trim()])')
         last = lambda: cstate(page).get('lastSearch') or {}
         seen, sent, prev = [], [], None
         for step in ['start', 'next', 'next', 'prev']:
-            was = page.inner_text('#found')
+            was = page.inner_text('#chora-found')
             if step != 'start':
-                page.click(f'#{step}'); until(page, 'w => document.getElementById("found").textContent !== w', 20, was)
+                page.click(f'#chora-{step}'); until(page, 'w => document.getElementById("chora-found").textContent !== w', 20, was)
             ls, items = last(), shown()
-            seen.append([page.inner_text('#found'), [i for i, _ in items], [l for _, l in items], page.is_disabled('#prev'), page.is_disabled('#next')])
+            seen.append([page.inner_text('#chora-found'), [i for i, _ in items], [l for _, l in items], page.is_disabled('#chora-prev'), page.is_disabled('#chora-next')])
             # What each request asked for: after which place, and what the reply before it said came next.
             sent.append([step, ls.get('after'), (prev or {}).get('next'), ls.get('shown') == [i for i, _ in items]])
             prev = ls
@@ -6306,10 +6307,10 @@ def chora_checks(pw, url, tmp):
         f.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': 'https://example.org/g2', 'title': 'Paging twice', 'status': 'draft', 'version': '1'},
             'spatialEntities': [{'@id': f'https://example.org/q/{i}', 'label': f'Holm {i:03d}', 'attestations': []} for i in range(1, 121)]}))
         chora_boot(page, base, [f])
-        before = page.inner_text('#found')
-        page.evaluate('() => { const b = document.getElementById("next"); b.click(); b.click(); }')
-        got = soon(page, '() => /101–120/.test(document.getElementById("found").textContent)', 20)
-        after = page.inner_text('#found'); first = page.eval_on_selector_all('#list button[data-id]', 'bs => bs[0]?.firstChild.textContent.trim()')
+        before = page.inner_text('#chora-found')
+        page.evaluate('() => { const b = document.getElementById("chora-next"); b.click(); b.click(); }')
+        got = soon(page, '() => /101–120/.test(document.getElementById("chora-found").textContent)', 20)
+        after = page.inner_text('#chora-found'); first = page.eval_on_selector_all('#chora-list button[data-id]', 'bs => bs[0]?.firstChild.textContent.trim()')
         return before == '120 places, showing 1–50.' and got and first == 'Holm 101', {'before': before, 'after': after, 'first': first}
     attempt('Chora: Next clicked twice goes on two pages', paging_twice)
     def paging_then_typed():
@@ -6323,7 +6324,7 @@ def chora_checks(pw, url, tmp):
         f.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': 'https://example.org/g3', 'title': 'Paging, then typed', 'status': 'draft', 'version': '1'},
             'spatialEntities': [{'@id': f'https://example.org/t/{i}', 'label': f'Holm {i:03d}', 'attestations': []} for i in range(1, 121)]}))
         chora_boot(page, base, [f])
-        before = page.inner_text('#found')
+        before = page.inner_text('#chora-found')
         page.evaluate("""() => { window.__sent = []; window.__held = []; window.__hold = true;
           const post = Worker.prototype.postMessage;
           Worker.prototype.postMessage = function (m, ...rest) {
@@ -6332,16 +6333,16 @@ def chora_checks(pw, url, tmp):
             if (window.__hold) window.__held.push([this, m]); else post.call(this, m);
           };
           window.__release = () => { window.__hold = false; for (const [w, m] of window.__held.splice(0)) post.call(w, m); }; }""")
-        page.evaluate('() => document.querySelector("#list button[data-id]").click()')   # chora-place: held, so the worker is busy
+        page.evaluate('() => document.querySelector("#chora-list button[data-id]").click()')   # chora-place: held, so the worker is busy
         until(page, '() => window.__sent.length === 1', 10)
-        page.click('#next')                                                                  # for "", from page 1: waits behind it
-        page.fill('#q', 'HOLM 1')                                                            # then typed ...
+        page.click('#chora-next')                                                                  # for "", from page 1: waits behind it
+        page.fill('#chora-q', 'HOLM 1')                                                            # then typed ...
         page.wait_for_timeout(600)                                                           # ... and settled (200 ms) while still held
         page.evaluate('() => window.__release()')
-        got = soon(page, '() => /found/.test(document.getElementById("found").textContent)', 20)
+        got = soon(page, '() => /found/.test(document.getElementById("chora-found").textContent)', 20)
         page.wait_for_timeout(300)
         sent = page.evaluate('() => window.__sent')
-        found, ls = page.inner_text('#found'), cstate(page).get('lastSearch') or {}
+        found, ls = page.inner_text('#chora-found'), cstate(page).get('lastSearch') or {}
         searches = [x for x in sent if x[0] == 'chora-search']
         return (before == '120 places, showing 1–50.' and got and sent[0] == ['chora-place'] and searches == [['chora-search', 'HOLM 1', 0]]
                 and found == '21 found.' and ls.get('after') == 0), {'before': before, 'sent': sent, 'found': found, 'lastSearch after': ls.get('after')}
@@ -6349,9 +6350,9 @@ def chora_checks(pw, url, tmp):
 
     def statuses():
         chora_boot(page, base, [fixture(judgements, 'judgements-card.json', tmp)])
-        chora_pick(page, 'kingsbury'); kb = sorted(page.eval_on_selector_all('#card .status', 'x => x.map((e) => e.textContent)'))
-        bars = page.eval_on_selector_all('#card svg.timeline rect', 'r => r.length')
-        chora_pick(page, 'littleworth'); lw = sorted(page.eval_on_selector_all('#card .status', 'x => x.map((e) => e.textContent)'))
+        chora_pick(page, 'kingsbury'); kb = sorted(page.eval_on_selector_all('#chora-card .status', 'x => x.map((e) => e.textContent)'))
+        bars = page.eval_on_selector_all('#chora-card svg.timeline rect', 'r => r.length')
+        chora_pick(page, 'littleworth'); lw = sorted(page.eval_on_selector_all('#chora-card .status', 'x => x.map((e) => e.textContent)'))
         # Kingsbury's two markets: one reported, one doubted, each dated; Littleworth's market is denied.
         return kb == ['doubted', 'reported'] and bars == 2 and lw == ['denied'], {'kingsbury': kb, 'bars': bars, 'littleworth': lw}
     attempt('Chora: the place card labels what a source reports, doubts and denies, and dates them on its timeline', statuses)
@@ -6359,7 +6360,7 @@ def chora_checks(pw, url, tmp):
     def timeline_theme():
         # The timeline's bars take their status's colour from the stylesheet, as the labels do, so they
         # follow the theme: a doubted bar is the doubted label's grey, darker in Light, lighter in Dark.
-        BAR = """() => { const r = document.querySelector('#card svg.timeline rect.tl-doubted'), s = document.querySelector('#card .status-doubted');
+        BAR = """() => { const r = document.querySelector('#chora-card svg.timeline rect.tl-doubted'), s = document.querySelector('#chora-card .status-doubted');
           return r && s ? { bar: getComputedStyle(r).fill, edge: getComputedStyle(r).stroke, label: getComputedStyle(s).color, theme: document.documentElement.getAttribute('data-theme') } : null; }"""
         chora_boot(page, base, [fixture(judgements, 'judgements-theme.json', tmp)])
         chora_pick(page, 'kingsbury')
@@ -6373,17 +6374,21 @@ def chora_checks(pw, url, tmp):
     attempt('Chora: a timeline bar is in its status\'s colour from the stylesheet, as its label is, and follows the theme (a doubted bar, Light then Dark)', timeline_theme)
     # The tooltips: those the page writes (a status's meaning, on the card), MapLibre's (its zoom
     # buttons, at the window's right edge, given title attributes by the library), and the badge's.
+    # At 600 pixels, where Chora has the page's one column and its map reaches the window's right edge
+    # (wider, the workflow rail is beside it).
+    page.set_viewport_size({'width': 600, 'height': 900})
     try:
         chora_boot(page, base, [fixture(judgements, 'judgements-tips.json', tmp)]); chora_pick(page, 'kingsbury')
     except Exception as e: print('  (Chora tooltips: the page did not open the dataset:', str(e).split('\n')[0][:200], ')')
-    tooltip_checks(page, 'Chora tooltips', ('#card .status-reported', 'as said by others'), ('#card .status-doubted', 'and doubts it'),
+    tooltip_checks(page, 'Chora tooltips', ('#chora-card .status-reported', 'as said by others'), ('#chora-card .status-doubted', 'and doubts it'),
                    ('.maplibregl-ctrl-zoom-in', 'Zoom in', 'right', '.maplibregl-ctrl-zoom-out'))
+    page.set_viewport_size({'width': 1400, 'height': 900})
     no_titles(page, 'Chora tooltips', ['Draw a point', 'Stop drawing', 'Show a historical map to trace from it', "goes onto it (hold Alt not to)", 'Zoom in', 'Zoom out', 'The source reports this as said by others.', 'market (1673), reported', 'being built in the open'])
     def withdrawn():
         chora_boot(page, base, [fixture(judgements, 'judgements-withdrawn.json', tmp)])
         chora_pick(page, 'littleworth')
-        text = page.inner_text('#card')
-        where = page.evaluate('() => [...document.querySelectorAll("#card h3")].find((h) => h.textContent === "Locations")?.nextElementSibling?.textContent')
+        text = page.inner_text('#chora-card')
+        where = page.evaluate('() => [...document.querySelectorAll("#chora-card h3")].find((h) => h.textContent === "Locations")?.nextElementSibling?.textContent')
         # The file does give Littleworth a location, in the attestation a later one retracts: so "none
         # recorded" is the retraction honoured, not a location never there.
         lw = next(p for p in json.loads(judgements.read_text())['spatialEntities'] if p['@id'].endswith('/littleworth'))
@@ -6399,7 +6404,7 @@ def chora_checks(pw, url, tmp):
         chora_boot(page, base, [f])
         chora_pick(page, 'somewhere')
         outlined = soon(page, '() => window.__chora_map.queryRenderedFeatures({ layers: ["chora-context-area"] }).length > 0', 20)
-        note = page.inner_text('#card .note'); c = page.evaluate('() => window.__chora_map.getCenter().toArray()')
+        note = page.inner_text('#chora-card .note'); c = page.evaluate('() => window.__chora_map.getCenter().toArray()')
         w, s, e, n = json.loads(urllib.request.urlopen(base + 'basemap/ccodes.json', timeout=10).read())['GR']
         # The control: a place with a location of its own gets no country outline, and is drawn itself.
         chora_pick(page, 'athens'); ctl = rendered(page, ['chora-context-area', 'chora-place-points'])
@@ -6425,18 +6430,18 @@ def chora_checks(pw, url, tmp):
                 {'relations': [{'relationType': P + 'ContainedIn', 'relatesTo': 'https://example.org/p/agathos'}], 'sources': s}]}]}))
         chora_boot(page, base, [f])
         chora_pick(page, 'agathos')
-        rel = page.evaluate('() => { const ul = [...document.querySelectorAll("#card h3")].find((h) => h.textContent === "Related places")?.nextElementSibling; return ul ? { text: ul.textContent, links: ul.querySelectorAll("a").length } : null; }')
-        tl = page.evaluate('() => { const s = document.querySelector("#card svg.timeline"); return s ? { text: s.textContent, evidence: s.querySelectorAll("rect.tl-evidence").length, legend: s.querySelectorAll(".tl-legend").length } : null; }')
-        note = page.inner_text('#card .note')
-        locs = page.evaluate('() => { const ul = [...document.querySelectorAll("#card h3")].find((h) => h.textContent === "Locations")?.nextElementSibling; return ul ? { text: ul.textContent, links: [...ul.querySelectorAll("a[data-place]")].map((a) => a.dataset.place) } : null; }')
+        rel = page.evaluate('() => { const ul = [...document.querySelectorAll("#chora-card h3")].find((h) => h.textContent === "Related places")?.nextElementSibling; return ul ? { text: ul.textContent, links: ul.querySelectorAll("a").length } : null; }')
+        tl = page.evaluate('() => { const s = document.querySelector("#chora-card svg.timeline"); return s ? { text: s.textContent, evidence: s.querySelectorAll("rect.tl-evidence").length, legend: s.querySelectorAll(".tl-legend").length } : null; }')
+        note = page.inner_text('#chora-card .note')
+        locs = page.evaluate('() => { const ul = [...document.querySelectorAll("#chora-card h3")].find((h) => h.textContent === "Locations")?.nextElementSibling; return ul ? { text: ul.textContent, links: [...ul.querySelectorAll("a[data-place]")].map((a) => a.dataset.place) } : null; }')
         drawn = rendered(page, ['chora-place-points'])['chora-place-points']
-        names = page.evaluate('() => { const ul = [...document.querySelectorAll("#card h3")].find((h) => h.textContent === "Names")?.nextElementSibling; return ul ? [...ul.querySelectorAll("li")].map((li) => li.textContent) : null; }')
+        names = page.evaluate('() => { const ul = [...document.querySelectorAll("#chora-card h3")].find((h) => h.textContent === "Names")?.nextElementSibling; return ul ? [...ul.querySelectorAll("li")].map((li) => li.textContent) : null; }')
         # The control: a location with coordinates is drawn and not written as relative; a dated claim is a solid bar with no legend, and a relation to a place of the dataset is a link.
         chora_pick(page, 'kom control')
-        ctl_locs = page.evaluate('() => [...document.querySelectorAll("#card h3")].find((h) => h.textContent === "Locations")?.nextElementSibling?.textContent')
+        ctl_locs = page.evaluate('() => [...document.querySelectorAll("#chora-card h3")].find((h) => h.textContent === "Locations")?.nextElementSibling?.textContent')
         ctl_drawn = rendered(page, ['chora-place-points'])['chora-place-points']
-        ctl_rel = page.evaluate('() => [...document.querySelectorAll("#card h3")].find((h) => h.textContent === "Related places")?.nextElementSibling?.querySelectorAll("a[data-place]").length')
-        ctl = page.evaluate('() => { const s = document.querySelector("#card svg.timeline"); return s ? { text: s.textContent, bars: s.querySelectorAll("rect").length, evidence: s.querySelectorAll("rect.tl-evidence").length, legend: s.querySelectorAll(".tl-legend").length } : null; }')
+        ctl_rel = page.evaluate('() => [...document.querySelectorAll("#chora-card h3")].find((h) => h.textContent === "Related places")?.nextElementSibling?.querySelectorAll("a[data-place]").length')
+        ctl = page.evaluate('() => { const s = document.querySelector("#chora-card svg.timeline"); return s ? { text: s.textContent, bars: s.querySelectorAll("rect").length, evidence: s.querySelectorAll("rect.tl-evidence").length, legend: s.querySelectorAll(".tl-legend").length } : null; }')
         return (rel and 'ContainedIn: the Delta' in rel['text'] and rel['links'] == 0
                 and 'Located only relative to other places; showing its country (EG)' in note
                 and locs and 'between Kom Control and 1767, as written “between Kom and Philai” (relative; not drawn)' in locs['text'] and locs['links'] == ['https://example.org/p/kom'] and drawn == 0
@@ -6456,7 +6461,7 @@ def chora_checks(pw, url, tmp):
         draw(page, 'point', [(x + 150, y + 60)])
         draw(page, 'linestring', [(x - 200, y - 100), (x - 100, y - 150), (x, y - 100), (x, y - 100)])   # the last vertex again ends the line
         draw(page, 'polygon', [(x - 200, y + 100), (x - 100, y + 100), (x - 150, y + 200), (x - 200, y + 100)])   # the first corner again closes it
-        page.click('#draw-tools button[data-mode="static"]')
+        page.click('#chora-draw-tools button[data-mode="static"]')
         soon(page, '() => window.__chora.pendingCount === 3', 10)
         on_map = soon(page, 'ls => ls.every((l) => window.__chora_map.queryRenderedFeatures({ layers: [l] }).length > 0)', 10, ['td-point', 'td-linestring', 'td-polygon'])
         k = kept(page, f.name)
@@ -6469,10 +6474,10 @@ def chora_checks(pw, url, tmp):
         before = next(d for d in kept(page, f.name) if d['geojson']['type'] == 'Point')['geojson']['coordinates']
         at = 'c => { const p = window.__chora_map.project(c), r = window.__chora_map.getCanvas().getBoundingClientRect(); return [r.left + p.x, r.top + p.y]; }'
         px, py = page.evaluate(at, before)
-        page.click('#draw-tools button[data-mode="select"]')
+        page.click('#chora-draw-tools button[data-mode="select"]')
         tap(page, px, py)                                       # select it, then drag it
         page.mouse.move(px, py); page.mouse.down(); page.mouse.move(px + 30, py + 20, steps=6); page.mouse.move(px + 60, py + 40, steps=6); page.mouse.up()
-        page.click('#draw-tools button[data-mode="static"]')
+        page.click('#chora-draw-tools button[data-mode="static"]')
         target = page.evaluate('([x, y]) => { const r = window.__chora_map.getCanvas().getBoundingClientRect(); return window.__chora_map.unproject([x - r.left, y - r.top]).toArray(); }', [px + 60, py + 40])
         t0 = time.time(); after = before
         while time.time() - t0 < T(10) and after == before:
@@ -6490,7 +6495,7 @@ def chora_checks(pw, url, tmp):
         return gone and r['td-point'] > 0 and r['td-polygon'] > 0 and k == ['Point', 'Polygon'] and kinds(page) == ['A point', 'An area'], {'on the map': r, 'kept': k, 'listed': kinds(page)}
     attempt('Chora: a drawing removed is gone from the map, the list and the store, and the others stay', remove_line)
     def survive():
-        f = draws['file']; s = chora_boot(page, base, [f]); note = page.inner_text('#dataset')
+        f = draws['file']; s = chora_boot(page, base, [f]); note = page.inner_text('#chora-dataset')
         chora_pick(page, 'londinium')
         on_map = soon(page, '() => window.__chora_map.queryRenderedFeatures({ layers: ["td-point"] }).length > 0 && window.__chora_map.queryRenderedFeatures({ layers: ["td-polygon"] }).length > 0', 10)
         r = rendered(page, ['td-point', 'td-linestring', 'td-polygon'])
@@ -6502,33 +6507,33 @@ def chora_checks(pw, url, tmp):
     def contributor():
         f = draws['file']; chora_boot(page, base, [f])
         page.evaluate("() => localStorage.removeItem('chora-contributor')")
-        page.click('#save')
-        asked = page.is_visible('#contributor-form')
-        page.fill('#c-name', 'Ada Test'); page.fill('#c-orcid', '0000-0002-1825-0098')   # the check digit should be 7
-        page.click('#contributor-form button[type=submit]')
-        err = page.inner_text('#c-error') if page.is_visible('#c-error') else ''
-        refused = page.is_visible('#contributor-form') and cstate(page)['lastSave'] is None and page.evaluate("() => localStorage.getItem('chora-contributor')") is None
+        page.click('#chora-save')
+        asked = page.is_visible('#chora-contributor-form')
+        page.fill('#chora-c-name', 'Ada Test'); page.fill('#chora-c-orcid', '0000-0002-1825-0098')   # the check digit should be 7
+        page.click('#chora-contributor-form button[type=submit]')
+        err = page.inner_text('#chora-c-error') if page.is_visible('#chora-c-error') else ''
+        refused = page.is_visible('#chora-contributor-form') and cstate(page)['lastSave'] is None and page.evaluate("() => localStorage.getItem('chora-contributor')") is None
         if not refused: return False, {'error': err, 'the mistyped iD was taken': cstate(page).get('lastSave') or page.evaluate("() => localStorage.getItem('chora-contributor')")}
-        page.fill('#c-orcid', '0000-0002-1825-0097'); page.click('#contributor-form button[type=submit]')
+        page.fill('#chora-c-orcid', '0000-0002-1825-0097'); page.click('#chora-contributor-form button[type=submit]')
         until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
         c = json.loads(page.evaluate("() => localStorage.getItem('chora-contributor')") or 'null')
-        line = page.inner_text('#contributor-line')
+        line = page.inner_text('#chora-contributor-line')
         return asked and 'ORCID' in err and refused and c == {'name': 'Ada Test', 'orcid': 'https://orcid.org/0000-0002-1825-0097'} and 'Saving as Ada Test' in line, {'error': err, 'remembered': c, 'line': line}
     attempt('Chora: the first save asks who is saving; a mistyped ORCID iD (its check digit) is refused, a right one remembered', contributor)
     def save():
         f = draws['file']; s = chora_boot(page, base, [f])
         if page.evaluate("() => localStorage.getItem('chora-contributor')") is None:   # this check's own state, if the one before failed
             page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test', orcid: 'https://orcid.org/0000-0002-1825-0097' }))")
-        page.click('#save')
+        page.click('#chora-save')
         until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
-        ls = cstate(page)['lastSave'] or {}; said = page.inner_text('#save-result')
+        ls = cstate(page)['lastSave'] or {}; said = page.inner_text('#chora-save-result')
         return s['pendingCount'] == 2 and ls.get('passed') and ls.get('added') == 2 and [o['name'] for o in ls['outputs']] == ['antonine-draw.chora.json'] and 'Mneme' in said, {'kept': s['pendingCount'], 'save': ls, 'said': said}
     attempt('Chora: saving passes the version check (Mneme) with exactly the two drawings added', save)
     saved = tmp / 'chora-saved.json'
     def saved_file():
         f = draws['file']
-        if not page.is_visible('#save-result button.primary'): raise RuntimeError('no saved file offered (the save before did not pass)')
-        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#save-result button.primary')
+        if not page.is_visible('#chora-save-result button.primary'): raise RuntimeError('no saved file offered (the save before did not pass)')
+        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#chora-save-result button.primary')
         d.value.save_as(saved)
         out, inp = json.loads(saved.read_text()), json.loads(f.read_text())
         was = {p['@id']: p for p in inp['spatialEntities']}
@@ -6544,11 +6549,11 @@ def chora_checks(pw, url, tmp):
         # A download cannot be seen to finish (__plato_forceDownload): the drafts are kept, the file still
         # offered, and the page says to save again if it did not complete, until the user lets them go.
         page.wait_for_timeout(500)
-        after_download = {'pending': cstate(page)['pendingCount'], 'kept': len(kept(page, f.name)), 'offered': page.is_visible('#save-result button.primary'),
-                          'said': page.inner_text('#save-result')}
+        after_download = {'pending': cstate(page)['pendingCount'], 'kept': len(kept(page, f.name)), 'offered': page.is_visible('#chora-save-result button.primary'),
+                          'said': page.inner_text('#chora-save-result')}
         held = after_download['pending'] == 2 and after_download['kept'] == 2 and after_download['offered'] and 'If the download did not complete, save again' in after_download['said']
-        if page.is_visible('#save-result button[data-clear]'): page.click('#save-result button[data-clear]')
-        cleared = soon(page, '() => window.__chora.pendingCount === 0', 10) and kept(page, f.name) == [] and not page.is_visible('#save-result button.primary')
+        if page.is_visible('#chora-save-result button[data-clear]'): page.click('#chora-save-result button[data-clear]')
+        cleared = soon(page, '() => window.__chora.pendingCount === 0', 10) and kept(page, f.name) == [] and not page.is_visible('#chora-save-result button.primary')
         # The file keeps seven decimals (about a centimetre); the drawing kept in the browser, all of them.
         same_place = moved and draws.get('moved') and all(abs(a - b) < 1e-6 for a, b in zip(moved, draws['moved']))
         return kept_all and ok_new and same_place and held and cleared, {'new': new, 'all kept': kept_all, 'point': moved, 'moved to': draws.get('moved'), 'after the download': after_download, 'drafts cleared when asked': cleared}
@@ -6569,28 +6574,28 @@ def chora_checks(pw, url, tmp):
     def resave():
         f = fixture(ant, 'antonine-resave.json', tmp); chora_boot(page, base, [f]); chora_pick(page, 'londinium')
         page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
-        x, y = map_centre(page); draw(page, 'point', [(x + 90, y + 50)]); page.click('#draw-tools button[data-mode="static"]')
+        x, y = map_centre(page); draw(page, 'point', [(x + 90, y + 50)]); page.click('#chora-draw-tools button[data-mode="static"]')
         until(page, '() => window.__chora.pendingCount === 1', 10)
-        page.click('#save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
-        offered = (cstate(page)['lastSave'] or {}).get('passed') and page.is_visible('#save-result button.primary')
+        page.click('#chora-save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+        offered = (cstate(page)['lastSave'] or {}).get('passed') and page.is_visible('#chora-save-result button.primary')
         # A drawing made after the save is not in the file that save wrote.
-        draw(page, 'point', [(x - 90, y - 50)]); page.click('#draw-tools button[data-mode="static"]')
+        draw(page, 'point', [(x - 90, y - 50)]); page.click('#chora-draw-tools button[data-mode="static"]')
         until(page, '() => window.__chora.pendingCount === 2', 10)
-        stale = page.is_visible('#save-result button.primary') and page.is_enabled('#save-result button.primary')
+        stale = page.is_visible('#chora-save-result button.primary') and page.is_enabled('#chora-save-result button.primary')
         if stale:                                               # as a user would: saving that file let both drawings go
-            with page.expect_download(timeout=T(60) * 1000): page.click('#save-result button.primary')
+            with page.expect_download(timeout=T(60) * 1000): page.click('#chora-save-result button.primary')
             page.wait_for_timeout(500)
-        left, k, text = cstate(page)['pendingCount'], len(kept(page, f.name)), page.inner_text('#save-result')
+        left, k, text = cstate(page)['pendingCount'], len(kept(page, f.name)), page.inner_text('#chora-save-result')
         return offered and not stale and left == 2 and k == 2 and 'save again' in text, {'offered after the save': offered, 'still offered after drawing': stale, 'pending': left, 'kept': k, 'said': text}
     attempt('Chora: a drawing made after a save withdraws that save\'s file, and no drawing is let go that the file does not hold', resave)
     def conversion_said():
         tables = sorted((ROOT / 'test/fixtures/tables-routes').glob('*.csv'))
         chora_boot(page, base, tables); chora_pick(page, 'cambridge')
         page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
-        x, y = map_centre(page); draw(page, 'point', [(x + 40, y + 40)]); page.click('#draw-tools button[data-mode="static"]')
+        x, y = map_centre(page); draw(page, 'point', [(x + 40, y + 40)]); page.click('#chora-draw-tools button[data-mode="static"]')
         until(page, '() => window.__chora.pendingCount >= 1', 10)
-        page.click('#save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
-        ls = cstate(page)['lastSave'] or {}; text = page.inner_text('#save-result')
+        page.click('#chora-save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+        ls = cstate(page)['lastSave'] or {}; text = page.inner_text('#chora-save-result')
         # The conversion's warnings, from the worker's own report, each shown on the page.
         warned = [i['message'] for i in (ls.get('report') or {}).get('items', []) if i['severity'] == 'warning']
         return (ls.get('passed') and warned and all(w in text for w in warned) and 'conversion' in text and 'PLATO JSON' in text and 'spreadsheet tables' in text), {'warnings': warned, 'said': text}
@@ -6601,16 +6606,16 @@ def chora_checks(pw, url, tmp):
         page.evaluate('c => window.__chora_map.jumpTo({ center: [c[0] + 360, c[1]] })', c); page.evaluate(SETTLE)
         x, y = map_centre(page)
         here = page.evaluate('([x, y]) => { const r = window.__chora_map.getCanvas().getBoundingClientRect(); return window.__chora_map.unproject([x - r.left, y - r.top]).toArray(); }', [x, y])
-        draw(page, 'point', [(x, y)]); page.click('#draw-tools button[data-mode="static"]')
+        draw(page, 'point', [(x, y)]); page.click('#chora-draw-tools button[data-mode="static"]')
         got = soon(page, '() => window.__chora.pendingCount === 1', 10)
         k = kept(page, f.name); lon = k[0]['geojson']['coordinates'][0] if k else None
         on_copy = here[0] > 180                                   # the point was drawn where longitudes run past 180
         ok_point = got and len(k) == 1 and lon is not None and -180 <= lon <= 180 and abs(lon - (here[0] - 360)) < 0.01
         # A line across the antimeridian cannot be a PLATO geometry as drawn: refused, in words, and not kept.
         page.evaluate('() => window.__chora_map.jumpTo({ center: [180, -17], zoom: 6 })'); page.evaluate(SETTLE)
-        draw(page, 'linestring', [(x - 80, y), (x + 80, y), (x + 80, y)]); page.click('#draw-tools button[data-mode="static"]')
+        draw(page, 'linestring', [(x - 80, y), (x + 80, y), (x + 80, y)]); page.click('#chora-draw-tools button[data-mode="static"]')
         refused = soon(page, '() => !!window.__chora.drawError', 10)
-        text = page.inner_text('#card'); k2 = kept(page, f.name)
+        text = page.inner_text('#chora-card'); k2 = kept(page, f.name)
         line_gone = soon(page, '() => window.__chora_map.queryRenderedFeatures({ layers: ["td-linestring"] }).length === 0', 5)
         return (on_copy and ok_point and refused and 'was not kept' in text and 'longitude must be between -180 and 180' in text
                 and len(k2) == 1 and cstate(page)['pendingCount'] == 1 and line_gone), {'drawn at': here, 'kept': [d['geojson'] for d in k2], 'error': cstate(page).get('drawError'), 'line gone': line_gone}
@@ -6627,7 +6632,7 @@ def chora_checks(pw, url, tmp):
         until(page, '() => window.__chora && window.__chora.handoff && ["loaded", "error"].includes(window.__chora.phase)', 60); s = cstate(page)
         # Once opened, the files are let go: the page opened again opens nothing.
         page.reload(); until(page, '() => window.__chora.phase === "ready"', 60); page.wait_for_timeout(500)
-        again = page.is_visible('#handoff') or bool(cstate(page).get('handoff')) or cstate(page).get('phase') != 'ready'
+        again = page.is_visible('#chora-handoff') or bool(cstate(page).get('handoff')) or cstate(page).get('phase') != 'ready'
         return s.get('handoff') == [f.name] and s['phase'] == 'loaded' and s['places'] == ant_places and not again, {'state': s, 'opened again': again}
     attempt('Chora: a file chosen on the main page is opened on Chora\'s page at once, with no click, and is not kept after', handoff)
 
@@ -6670,7 +6675,7 @@ def chora_checks(pw, url, tmp):
         until(page, '() => ["loaded", "error"].includes(window.__chora.phase)', 60)
         # A hand-off older than a few minutes is not offered, and is let go too.
         page.evaluate(IDB, True); page.reload(); until(page, '() => window.__chora.phase === "ready"', 60); page.wait_for_timeout(500)
-        stale = page.is_visible('#handoff') or bool(cstate(page).get('handoff')); after = page.evaluate(IDB, False)
+        stale = page.is_visible('#chora-handoff') or bool(cstate(page).get('handoff')); after = page.evaluate(IDB, False)
         return offered and left is None and not stale and after is None, {'offered': offered, 'left in the browser': left, 'stale offered': stale, 'stale left': after}
     attempt('Chora: files handed over from the main page are let go by the browser as soon as they are taken , and an old hand-off is not opened', handoff_let_go)
 
@@ -6691,35 +6696,35 @@ def chora_checks(pw, url, tmp):
         page.bring_to_front(); page.goto(NOTOOLS if PROVE else base + 'chora.html' + hash_)
         until(page, 'window.__chora && window.__chora.phase === "ready" && window.__chora.mapReadyCount >= 1')
         page.evaluate(HANDBACK, 'delete')                       # this check's own state: no hand-back from before
-        page.set_input_files('#picker', [str(f)]); until(page, '["loaded", "error", "unrecognised"].includes(window.__chora.phase)')
+        page.set_input_files('#chora-picker', [str(f)]); until(page, '["loaded", "error", "unrecognised"].includes(window.__chora.phase)')
         chora_pick(page, 'londinium')
         page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
-        x, y = map_centre(page); draw(page, 'point', [(x + 60, y + 30)]); page.click('#draw-tools button[data-mode="static"]')
+        x, y = map_centre(page); draw(page, 'point', [(x + 60, y + 30)]); page.click('#chora-draw-tools button[data-mode="static"]')
         until(page, '() => window.__chora.pendingCount === 1', 10)
-        page.click('#save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+        page.click('#chora-save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
         if not (cstate(page)['lastSave'] or {}).get('passed'): raise RuntimeError('the save did not pass')
-        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#save-result button.primary')
+        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#chora-save-result button.primary')
         out = tmp / ('downloaded-' + name); d.value.save_as(out)
         # The handler hands back (or not) before it offers to let the drawings go: that offer is the point both ways.
-        until(page, '() => !!document.querySelector("#save-result button[data-clear]")', 20)
+        until(page, '() => !!document.querySelector("#chora-save-result button[data-clear]")', 20)
         return out, d.value.suggested_filename
     def handback_given():
         out, named = saved_in('#workflow=' + WF, 'antonine-handback.json')
         body = out.read_bytes(); rec = page.evaluate(HANDBACK, 'get'); now = page.evaluate('() => Date.now()')
         want = [{'type': 'dataset', 'name': named, 'size': len(body), 'sha256': hashlib.sha256(body).hexdigest()}]
-        link = page.query_selector('#back-to-workflow')
+        link = page.query_selector('#chora-back-to-workflow')
         href = link.evaluate('a => a.href') if link else None; shown = link.is_visible() if link else False
-        note = page.is_visible('#workflow') and 'workflow' in page.inner_text('#workflow')
+        note = page.is_visible('#chora-workflow') and 'workflow' in page.inner_text('#chora-workflow')
         s = cstate(page)
         # While it hashed, the save button waited and the page said why; afterwards, both were put back.
         busy = s.get('handingBack')
-        restored = page.is_enabled('#save-result button.primary') and 'Handing the file back' not in page.inner_text('#save-result')
+        restored = page.is_enabled('#chora-save-result button.primary') and 'Handing the file back' not in page.inner_text('#chora-save-result')
         published = (s.get('handback') or {}).get('files') == want
         ok_rec = (rec is not None and sorted(rec) == ['at', 'files', 'handback', 'workflow'] and rec['handback'] == 1 and rec['workflow'] == WF
                   and rec['files'] == want and 0 <= now - rec['at'] < 120000 and len(body) > 0)
         # The way back: the main page, with the workflow, and the record written again (fresh) on the way.
         at0 = rec['at'] if rec else None
-        if shown: page.click('#back-to-workflow')
+        if shown: page.click('#chora-back-to-workflow')
         went = soon(page, 'u => location.href === u && !!window.__plato', 30, base + '#workflow=' + WF)
         after = page.evaluate(HANDBACK, 'get') if went else None
         return (ok_rec and note and shown and href == base + '#workflow=' + WF and went and page.url == base + '#workflow=' + WF
@@ -6732,7 +6737,7 @@ def chora_checks(pw, url, tmp):
     def handback_control():
         # The same save without #workflow: nothing written, nothing offered (the reader shown able to see a record, in this page, after).
         out, named = saved_in('', 'antonine-handback-none.json')
-        rec = page.evaluate(HANDBACK, 'get'); link = page.query_selector('#back-to-workflow'); note = page.is_visible('#workflow')
+        rec = page.evaluate(HANDBACK, 'get'); link = page.query_selector('#chora-back-to-workflow'); note = page.is_visible('#chora-workflow')
         page.evaluate(HANDBACK, 'put'); seen = page.evaluate(HANDBACK, 'get'); page.evaluate(HANDBACK, 'delete')
         s = cstate(page)
         return (out.stat().st_size > 0 and rec is None and link is None and not note and seen == {'probe': True}
@@ -6743,8 +6748,8 @@ def chora_checks(pw, url, tmp):
         page.goto('about:blank'); page.bring_to_front()
         page.goto(NOTOOLS if PROVE else base + 'chora.html#workflow=%3Cimg%20src%3Dx%20onerror%3D%22window.__pwned%3D1%22%3E')
         until(page, 'window.__chora && window.__chora.phase === "ready"')
-        s = cstate(page); shown = page.is_visible('#workflow'); text = page.inner_text('#workflow') if shown else ''
-        imgs = page.eval_on_selector_all('#workflow img, #save-result img', 'xs => xs.length'); pwned = page.evaluate('() => window.__pwned === 1')
+        s = cstate(page); shown = page.is_visible('#chora-workflow'); text = page.inner_text('#chora-workflow') if shown else ''
+        imgs = page.eval_on_selector_all('#chora-workflow img, #chora-save-result img', 'xs => xs.length'); pwned = page.evaluate('() => window.__pwned === 1')
         return (shown and 'not in a form' in text and s.get('workflowRefused') is True and s.get('workflow') is None and imgs == 0 and not pwned), {'state': {k: s.get(k) for k in ('workflow', 'workflowRefused')}, 'said': text, 'img': imgs, 'ran': pwned}
     attempt('Chora: an address whose workflow is not an id is refused in words, and nothing of it reaches the page', handback_bad_id)
 
@@ -6758,10 +6763,10 @@ def chora_checks(pw, url, tmp):
             b.bring_to_front()
             a_out = [o['name'] for o in first.get('outputs') or []]
             s = chora_boot(b, base, [fixture(ant, 'antonine-twotabs.json', tmp)]); chora_pick(b, 'londinium')
-            x, y = map_centre(b); draw(b, 'point', [(x + 80, y + 40)]); b.click('#draw-tools button[data-mode="static"]')
+            x, y = map_centre(b); draw(b, 'point', [(x + 80, y + 40)]); b.click('#chora-draw-tools button[data-mode="static"]')
             soon(b, '() => window.__chora.pendingCount === 1', 10)
             b.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
-            b.click('#save'); until(b, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+            b.click('#chora-save'); until(b, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
             sb = cstate(b); a.bring_to_front(); outs, chora_outs = opfs_names(a, 'outputs'), opfs_names(a, 'chora-outputs')
             lines = download(a, a_out[0], tmp / 'twotabs.jsonl').read_text().strip().split('\n') if a_out and a_out[0] in outs else []
             again = run_case(a, [fixture(EX / 'place-centric-king-john.json', 'king-john-twotabs.json', tmp)], 'check')
@@ -6787,11 +6792,11 @@ def chora_checks(pw, url, tmp):
             # Files handed over from the main page, as if the way to Chora had been taken again: the
             # second tab offers nothing, so it must let them go, not leave them in the browser.
             one.evaluate(IDB_FRESH); handed = one.evaluate(IDB, False)
-            two.bring_to_front(); two.goto(NOTOOLS if PROVE else base + 'chora.html')
+            two.bring_to_front(); two.goto(NOTOOLS if PROVE else base + '#chora')
             until(two, '() => window.__chora && ["in-another-tab", "error", "ready"].includes(window.__chora.phase)', 60)
-            two.bring_to_front(); s2 = cstate(two); said = two.inner_text('#phase'); shut = two.is_disabled('#picker')
+            two.bring_to_front(); s2 = cstate(two); said = two.inner_text('#chora-phase'); shut = two.is_disabled('#chora-picker')
             left = two.evaluate(IDB, False)
-            one.bring_to_front(); one.set_input_files('#picker', [str(fixture(judgements, 'judgements-another-tab.json', tmp))])
+            one.bring_to_front(); one.set_input_files('#chora-picker', [str(fixture(judgements, 'judgements-another-tab.json', tmp))])
             until(one, '["loaded", "error", "unrecognised"].includes(window.__chora.phase)'); s1 = cstate(one)
             one.close()                                         # its worker, and the pool with it, let go
             two.bring_to_front(); two.reload()
@@ -6831,10 +6836,10 @@ def chora_checks(pw, url, tmp):
         try:
             one.add_init_script(WORKERS); chora_boot(one, base)
             ran = one.evaluate(RUN_EMPTY, ant.read_text())
-            two.bring_to_front(); two.goto(NOTOOLS if PROVE else base + 'chora.html')
+            two.bring_to_front(); two.goto(NOTOOLS if PROVE else base + '#chora')
             until(two, '() => window.__chora && ["in-another-tab", "error", "ready"].includes(window.__chora.phase)', 60)
             s2 = cstate(two); two.close()
-            one.bring_to_front(); one.set_input_files('#picker', [str(fixture(judgements, 'judgements-held.json', tmp))])
+            one.bring_to_front(); one.set_input_files('#chora-picker', [str(fixture(judgements, 'judgements-held.json', tmp))])
             until(one, '["loaded", "error", "unrecognised"].includes(window.__chora.phase)'); s1 = cstate(one)
             return {'run': ran, 'second': s2.get('phase'), 'first': s1.get('phase'), 'error': s1.get('error') or s2.get('error')}
         finally:
@@ -6854,8 +6859,8 @@ def chora_checks(pw, url, tmp):
             chora_boot(n, base, [fixture(ant, 'antonine-narrow.json', tmp)])
             chora_pick(n, 'londinium')                           # a real click: the list is there, and nothing covers it
             wide = n.evaluate('() => [document.documentElement.scrollWidth, document.documentElement.clientWidth, innerWidth]')
-            panel = n.query_selector('#panel').bounding_box(); canvas = n.query_selector('#map canvas').bounding_box()
-            x, y = map_centre(n); draw(n, 'point', [(x, y + 30)]); n.click('#draw-tools button[data-mode="static"]')
+            panel = n.query_selector('#chora-panel').bounding_box(); canvas = n.query_selector('#chora-map canvas').bounding_box()
+            x, y = map_centre(n); draw(n, 'point', [(x, y + 30)]); n.click('#chora-draw-tools button[data-mode="static"]')
             drew = soon(n, '() => window.__chora.pendingCount === 1 && window.__chora_map.queryRenderedFeatures({ layers: ["td-point"] }).length > 0', 10)
             return (wide[2] == 390 and wide[0] <= wide[1] and 300 <= panel['width'] <= 390 and canvas['width'] >= 300 and canvas['height'] >= 250 and drew), {
                 'scrollWidth, clientWidth, innerWidth': wide, 'panel': panel, 'map': canvas, 'drew': drew}
@@ -6880,8 +6885,8 @@ def chora_checks(pw, url, tmp):
     def markup_not_run():
         chora_boot(page, base, [odd_dataset('odd-card.json')]); chora_pick(page, 'trapdoor')
         page.wait_for_timeout(500)                              # time for an image that errors to run its handler
-        trap = {'imgs': page.eval_on_selector_all('#card img', 'x => x.length'), 'pwned': page.evaluate('() => window.__pwned ?? null'), 'card': page.inner_text('#card')}
-        chora_pick(page, 'control'); ctl = page.inner_text('#card')
+        trap = {'imgs': page.eval_on_selector_all('#chora-card img', 'x => x.length'), 'pwned': page.evaluate('() => window.__pwned ?? null'), 'card': page.inner_text('#chora-card')}
+        chora_pick(page, 'control'); ctl = page.inner_text('#chora-card')
         # The control: a radius that is a number is shown; the subject: the card was the trapdoor's, and holds a location.
         return (trap['imgs'] == 0 and trap['pwned'] is None and 'Trapdoor' in trap['card'] and 'Point' in trap['card'] and 'to within' not in trap['card']
                 and 'Point, to within 12.5 km' in ctl), {'trapdoor': trap, 'control card': ctl[:300]}
@@ -6889,10 +6894,10 @@ def chora_checks(pw, url, tmp):
     def draw_and_save(name, place, make=None):
         f = (make or odd_dataset)(name); chora_boot(page, base, [f]); chora_pick(page, place)
         page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
-        x, y = map_centre(page); draw(page, 'point', [(x + 50, y + 30)]); page.click('#draw-tools button[data-mode="static"]')
+        x, y = map_centre(page); draw(page, 'point', [(x + 50, y + 30)]); page.click('#chora-draw-tools button[data-mode="static"]')
         until(page, '() => window.__chora.pendingCount === 1', 10)
-        page.click('#save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
-        return f, cstate(page), page.inner_text('#save-result')
+        page.click('#chora-save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+        return f, cstate(page), page.inner_text('#chora-save-result')
     def problems_shown():
         _, s, text = draw_and_save('odd-problems.json', 'trapdoor'); ls = s.get('lastSave') or {}
         errs = [i for i in (ls.get('report') or {}).get('items', []) if i['severity'] == 'error']
@@ -6902,7 +6907,7 @@ def chora_checks(pw, url, tmp):
         f, s, text = draw_and_save('odd-unlisted.json', 'oddity'); ls = s.get('lastSave') or {}
         written = opfs_names(page, 'chora-outputs')
         return (ls.get('passed') is False and 'attestations are not a list' in text and 'Oddity (https://example.org/p/oddity)' in text
-                and not page.is_visible('#save-result button.primary') and 'odd-unlisted.chora.json' not in written and s['pendingCount'] == 1), {
+                and not page.is_visible('#chora-save-result button.primary') and 'odd-unlisted.chora.json' not in written and s['pendingCount'] == 1), {
                 'save': {k: ls.get(k) for k in ('passed', 'added')}, 'said': text[:300], 'chora-outputs': written, 'pending': s.get('pendingCount')}
     attempt('Chora: a drawing for a place whose attestations are not a list is refused, naming the place, and no file is written or offered', not_a_list)
 
@@ -6917,9 +6922,9 @@ def chora_checks(pw, url, tmp):
         (d / name).write_text(''.join(json.dumps(r) + '\n' for r in rows)); return d / name
     def jsonl_saved():
         # The control first: a PLATO JSON document is saved as one.
-        chora_boot(page, base, [odd_dataset('lines-control.json')]); as_json = page.inner_text('#save')
+        chora_boot(page, base, [odd_dataset('lines-control.json')]); as_json = page.inner_text('#chora-save')
         f, s, text = draw_and_save('lines.jsonl', 'after', jsonl_dataset); ls = s.get('lastSave') or {}
-        as_lines = page.inner_text('#save')
+        as_lines = page.inner_text('#chora-save')
         return (as_json == 'Save as PLATO JSON' and as_lines == 'Save as PLATO JSON Lines' and ls.get('passed') and ls.get('added') == 1
                 and [o['name'] for o in ls.get('outputs', [])] == ['lines.chora.jsonl'] and 'The saved file is PLATO JSON Lines, as the dataset is' in text), {
             'button, JSON': as_json, 'button, JSON Lines': as_lines, 'save': {k: ls.get(k) for k in ('passed', 'added', 'outputs')}, 'said': text[:300]}
@@ -6932,7 +6937,7 @@ def chora_checks(pw, url, tmp):
         return (ls.get('passed') and has(r'^Saving, step 1 of 2, writing the file: 2 of 2 attestations')
                 and has(r'^Saving, step 2 of 2, the version check \(Mneme\), reading the dataset as opened: 2 of 2 attestations')
                 and has(r'^Saving, step 2 of 2, the version check \(Mneme\), reading the file written: 3 of 3 attestations')
-                and has(r'comparing the two') and not page.is_visible('#save-progress')), {'passed': ls.get('passed'), 'steps': steps, 'still shown': page.is_visible('#save-progress')}
+                and has(r'comparing the two') and not page.is_visible('#chora-save-progress')), {'passed': ls.get('passed'), 'steps': steps, 'still shown': page.is_visible('#chora-save-progress')}
     attempt('Chora: a save shows each step on the page: writing the file, then the version check reading each version, n of N attestations, then comparing', save_steps)
     # The browser's storage: navigator.storage.estimate() is answered by the init script from
     # localStorage, set for these checks alone, so that a browser short of room can be had on demand.
@@ -6941,13 +6946,13 @@ def chora_checks(pw, url, tmp):
         try:
             page.evaluate('([k, v]) => localStorage.setItem(k, v)', [STUB, json.dumps({'quota': 1000000, 'usage': 999500})])
             f, s, text = draw_and_save('storage-short.json', 'control'); ls = s.get('lastSave') or {}
-            load_warning = page.inner_text('#storage-warning') if page.is_visible('#storage-warning') else ''
-            save_warning = page.inner_text('#save-storage-warning') if page.is_visible('#save-storage-warning') else ''
+            load_warning = page.inner_text('#chora-storage-warning') if page.is_visible('#chora-storage-warning') else ''
+            save_warning = page.inner_text('#chora-save-storage-warning') if page.is_visible('#chora-save-storage-warning') else ''
             short = s.get('storage') or {}
             # The control: with room, the same kind of file opens with no warning, and the answer given is the stub's.
             page.evaluate('([k, v]) => localStorage.setItem(k, v)', [STUB, json.dumps({'quota': 1e12, 'usage': 0})])
             room = chora_boot(page, base, [odd_dataset('storage-room.json')])
-            quiet = not page.is_visible('#storage-warning') and room.get('phase') == 'loaded' and (room.get('storage') or {}).get('quota') == 1e12 and (room.get('storage') or {}).get('short') is False
+            quiet = not page.is_visible('#chora-storage-warning') and room.get('phase') == 'loaded' and (room.get('storage') or {}).get('quota') == 1e12 and (room.get('storage') or {}).get('short') is False
             return (short.get('quota') == 1000000 and short.get('short') and 'Opening this dataset needs about' in load_warning and 'only 500 bytes left' in load_warning
                     and 'Saving needs about' in save_warning and ls.get('passed') and quiet), {
                 'short': short, 'load warning': load_warning, 'save warning': save_warning, 'saved all the same': ls.get('passed'), 'with room': room.get('storage'), 'quiet with room': quiet}
@@ -6976,7 +6981,7 @@ def chora_checks(pw, url, tmp):
             page.evaluate('([k, v]) => localStorage.setItem(k, v)', [STUB, json.dumps({'quota': 1e8, 'usage': 0})])
             s = chora_boot(page, base, [big]); st = s.get('storage') or {}
             calls = page.evaluate('() => window.__e2e_persistCalls')
-            warning = page.inner_text('#storage-warning') if page.is_visible('#storage-warning') else ''
+            warning = page.inner_text('#chora-storage-warning') if page.is_visible('#chora-storage-warning') else ''
             note = page.query_selector('#storage-note')
             # The control: the recorder sees a call made directly.
             page.evaluate('() => navigator.storage.persist()')
@@ -7020,7 +7025,7 @@ def chora_checks(pw, url, tmp):
         until(page, '() => window.__chora && window.__chora.phase !== "reloading" && window.__chora.mapReadyCount >= 1 && window.__chora.canary !== "pending"', 60)
         return at
     def choose(bid):
-        page.evaluate("() => { document.getElementById('basemaps').open = true; }")
+        page.evaluate("() => { document.getElementById('chora-basemaps').open = true; }")
         page.check(f'input[name="basemap"][value="{bid}"]')
     META = '''() => document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.content || null'''
 
@@ -7041,14 +7046,14 @@ def chora_checks(pw, url, tmp):
     attempt('Chora: OpenStreetMap chosen asks nothing and says "Needs permission"; its button opens the panel at that permission; allowed and reloaded, its tiles are fetched, with the dataset still open', allow_reload)
     def chora_asks():
         fresh(); choose('osm')
-        page.fill('#paste', 'https://tiles.example.org/style.json')   # typed, not yet added
+        page.fill('#chora-paste', 'https://tiles.example.org/style.json')   # typed, not yet added
         page.click('[data-permission="basemap:osm"] button')
         until(page, '() => document.getElementById("permissions-panel")?.open', 10)
         page.check('#permissions-panel fieldset.perm[data-key="basemap:osm"] input[value="allowed"]')
         page.click('#permissions-panel [data-reload]')
         asked = page.inner_text('#permissions-panel .perm-confirm') if page.is_visible('#permissions-panel .perm-confirm') else ''
         page.click('#permissions-panel [data-reload-cancel]'); page.keyboard.press('Escape')
-        kept = page.input_value('#paste') if page.is_visible('#paste') else ''
+        kept = page.input_value('#chora-paste') if page.is_visible('#chora-paste') else ''
         page.evaluate(RESET, [None, None])
         return 'pasting a basemap, not yet added' in asked and kept == 'https://tiles.example.org/style.json', {'asked': asked, 'kept': kept}
     attempt('Chora: a reload for a permission while an address waits in the paste box says so first, and Cancel keeps it', chora_asks)
@@ -7094,11 +7099,11 @@ def chora_checks(pw, url, tmp):
                 and 'basemap:nosuch' not in keys and checked == 'allowed' and 'Added on 1 September 2026' in entry and 'You added' not in entry), {'policy': csp['origins'], 'keys': keys, 'entry': entry, 'checked': checked}
     attempt('Chora: a grant forged in storage is in the policy and listed in the panel, as kept; an injected site and an unknown provider are in neither', forged)
     def no_policy():
-        page_url = base + 'chora.html'
+        page_url = base                                         # the page as served: Chora is in it, at #chora
         fresh({'basemap:osm': {'state': 'allowed'}}, 'osm'); h0 = hits['osm']
         ctx.route(page_url, strip_head)
         try:
-            page.goto(NOTOOLS if PROVE else page_url)
+            page.goto('about:blank'); page.goto(NOTOOLS if PROVE else page_url + '#chora')
             until(page, '() => window.__chora && window.__chora.canary && window.__chora.canary !== "pending" && window.__chora.mapReadyCount >= 1', 30)
             soon(page, '() => !!window.__chora.basemapError', 10)
             page.wait_for_timeout(1000)
@@ -7111,7 +7116,7 @@ def chora_checks(pw, url, tmp):
     def keep_off():
         name = 'antonine-keepoff.json'; f = fixture(ant, name, tmp)
         fresh(files=[f]); chora_pick(page, 'londinium')
-        x, y = map_centre(page); draw(page, 'point', [(x + 150, y + 60)]); page.click('#draw-tools button[data-mode="static"]')
+        x, y = map_centre(page); draw(page, 'point', [(x + 150, y + 60)]); page.click('#chora-draw-tools button[data-mode="static"]')
         until(page, '() => window.__chora.pendingCount === 1', 10)
         page.wait_for_timeout(500); held = len(kept(page, name))
         # A historical map shown, as Chora keeps one (chora-overlays/): a file put there stands for it.
@@ -7136,13 +7141,13 @@ def chora_checks(pw, url, tmp):
     CORS = {'Access-Control-Allow-Origin': '*'}
     ctx.route(STYLES + '/**', lambda route: route.fulfill(status=200, content_type='application/json', body=GOOD, headers=CORS) if route.request.url.endswith('/good.json') else route.fulfill(status=404, body='not here', headers=CORS))
     def paste(address):
-        page.evaluate("() => { document.getElementById('basemaps').open = true; }")
-        page.fill('#paste', address); page.click('#paste-form button[type=submit]')
+        page.evaluate("() => { document.getElementById('chora-basemaps').open = true; }")
+        page.fill('#chora-paste', address); page.click('#chora-paste-form button[type=submit]')
     def use_remembered():
         """After a reload, a pasted basemap is only remembered, never used until asked for in this load: ask (H2)."""
-        page.evaluate("() => { document.getElementById('basemaps').open = true; }")
-        until(page, '() => !!document.getElementById("use-remembered")', 10)
-        page.click('#use-remembered')
+        page.evaluate("() => { document.getElementById('chora-basemaps').open = true; }")
+        until(page, '() => !!document.getElementById("chora-use-remembered")', 10)
+        page.click('#chora-use-remembered')
     def bad_style():
         fresh(); since = len(requests)
         # The control: a style that loads is kept, once its site is allowed (and the page reloaded).
@@ -7153,7 +7158,7 @@ def chora_checks(pw, url, tmp):
         back = soon(page, '() => window.__chora.basemap === "natural-earth" && !!window.__chora.basemapError', 20)
         asked = any(u.endswith('/missing.json') for u in requests[since:])   # it failed for being missing, not for never being asked
         drew = soon(page, '() => window.__chora_map.getStyle()?.name?.includes("Natural Earth") && window.__chora_map.queryRenderedFeatures({ layers: ["land"] }).length > 0', 30)
-        text = page.inner_text('#basemap-options'); s = cstate(page)
+        text = page.inner_text('#chora-basemap-options'); s = cstate(page)
         return (kept_good and asked and back and drew and 'Natural Earth' in text and 'could not be loaded' in text and s['basemapError'] in text), {
             'the good style kept': kept_good, 'asked for the missing one': asked, 'state': {k: s.get(k) for k in ('basemap', 'basemapError')}, 'said': text[:300]}
     attempt('Chora: a basemap whose style cannot be loaded gives way to Natural Earth, and the page says why (a style that loads is kept)', bad_style)
@@ -7222,11 +7227,11 @@ def chora_checks(pw, url, tmp):
         csp = page.evaluate('() => window.__platoCsp')
         before = {'basemap': cstate(page)['basemap'], 'asked': hits['injected'] - h0 + len([u for u in requests[since:] if u.startswith(INJECTED)]),
                   'remembered': cstate(page).get('basemapRemembered'), 'in policy': INJECTED in csp['origins'], 'canary': s.get('canary')}
-        page.evaluate("() => { document.getElementById('basemaps').open = true; }")
-        line = page.inner_text('#basemap-remembered') if page.is_visible('#basemap-remembered') else ''
+        page.evaluate("() => { document.getElementById('chora-basemaps').open = true; }")
+        line = page.inner_text('#chora-basemap-remembered') if page.is_visible('#chora-basemap-remembered') else ''
         checked = page.evaluate('() => document.querySelector("input[name=basemap]:checked")?.value || null')
         # The control: asked for by a click in this load, it is used and its tiles fetched.
-        page.click('#use-remembered')
+        page.click('#chora-use-remembered')
         used = soon(page, 'id => window.__chora.basemap === id && window.__chora_map.isStyleLoaded()', 20, PID)
         got = soon(page, '() => window.__chora_map.isSourceLoaded("basemap")', 20) and hits['injected'] > h0
         page.evaluate(RESET, [None, None])
@@ -7314,7 +7319,7 @@ def chora_checks(pw, url, tmp):
         chora_boot(page, base)
         page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test', orcid: 'https://orcid.org/0000-0002-1825-0097' }))")
         chora_boot(page, base, [f]); chora_pick(page, 'londinium')
-        links = page.eval_on_selector_all('#card a[href^="http"], #contributor-line a[href^="http"]', 'as => as.map((a) => ({ href: a.getAttribute("href"), rel: a.rel }))')
+        links = page.eval_on_selector_all('#chora-card a[href^="http"], #chora-contributor-line a[href^="http"]', 'as => as.map((a) => ({ href: a.getAttribute("href"), rel: a.rel }))')
         page.click('#permissions-button'); until(page, '() => document.getElementById("permissions-panel")?.open', 10)
         text = page.inner_text('#permissions-panel'); page.keyboard.press('Escape')
         hrefs = ' '.join(l['href'] for l in links)
@@ -7329,11 +7334,11 @@ def chora_checks(pw, url, tmp):
         chora_boot(page, base)
         page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test', orcid: 'javascript:alert(1)' }))")
         chora_boot(page, base, [f])
-        bad = {'line': page.inner_text('#contributor-line'), 'links': page.eval_on_selector_all('#contributor-line a[href]', 'as => as.map((a) => a.getAttribute("href"))'),
+        bad = {'line': page.inner_text('#chora-contributor-line'), 'links': page.eval_on_selector_all('#chora-contributor-line a[href]', 'as => as.map((a) => a.getAttribute("href"))'),
                'stored': json.loads(page.evaluate("() => localStorage.getItem('chora-contributor')") or 'null')}
         page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test', orcid: '0000-0002-1825-0097' }))")
         chora_boot(page, base, [f])
-        good = {'links': page.eval_on_selector_all('#contributor-line a[href]', 'as => as.map((a) => a.getAttribute("href"))'), 'stored': json.loads(page.evaluate("() => localStorage.getItem('chora-contributor')") or 'null')}
+        good = {'links': page.eval_on_selector_all('#chora-contributor-line a[href]', 'as => as.map((a) => a.getAttribute("href"))'), 'stored': json.loads(page.evaluate("() => localStorage.getItem('chora-contributor')") or 'null')}
         page.evaluate("() => localStorage.removeItem('chora-contributor')")
         return ('Saving as Ada Test' in bad['line'] and 'javascript' not in bad['line'] and bad['links'] == ['#', '#'] and bad['stored'] == {'name': 'Ada Test'}
                 and good['links'] == ['https://orcid.org/0000-0002-1825-0097', '#', '#'] and good['stored'] == {'name': 'Ada Test', 'orcid': 'https://orcid.org/0000-0002-1825-0097'}), {'planted': bad, 'right': good}
@@ -7500,7 +7505,7 @@ def chora_adopt_checks(pw, url, tmp):
         before = len(calls) + len(asked)
         page.evaluate("() => { document.getElementById('adopt-q').value = 'Newcastle'; document.getElementById('adopt-send').click(); document.getElementById('adopt-form').requestSubmit(); }")
         page.wait_for_timeout(1500)
-        panel = page.inner_text('#adopt')
+        panel = page.inner_text('#chora-adopt')
         out = {'line': line, 'send shown': send_shown, 'sent': len(calls) + len(asked) - before, 'panel': panel[:400],
                'policy': page.evaluate('() => (window.__platoCsp || {}).origins || null')}
         page.click('#adopt-permission button'); until(page, '() => document.getElementById("permissions-panel")?.open', 10)
@@ -7643,8 +7648,8 @@ def chora_adopt_checks(pw, url, tmp):
         one = ad()['done']['count']
         page.click('#adopt-close')
         # Newcastle (NSW) is the second "Newcastle" in the list: the one with that exact label.
-        page.fill('#q', 'newcastle'); until(page, '() => document.querySelectorAll("#list button[data-id]").length >= 2', 10)
-        page.click(f'#list button[data-id="{P}newcastle-nsw"]'); until(page, f'() => window.__chora.placeId === "{P}newcastle-nsw"', 10)
+        page.fill('#chora-q', 'newcastle'); until(page, '() => document.querySelectorAll("#chora-list button[data-id]").length >= 2', 10)
+        page.click(f'#chora-list button[data-id="{P}newcastle-nsw"]'); until(page, f'() => window.__chora.placeId === "{P}newcastle-nsw"', 10)
         page.click('#adopt-find'); until(page, '() => window.__chora.adopt && window.__chora.adopt.open', 10)
         b = look_up('Newcastle')
         nsw = next((c for c in b.get('candidates', []) if c['id'] == 'place:gn:2155472'), {})
@@ -7661,9 +7666,9 @@ def chora_adopt_checks(pw, url, tmp):
     def save():
         page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
         page.click('#adopt-close')
-        page.click('#save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+        page.click('#chora-save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
         ls = cstate(page).get('lastSave') or {}
-        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#save-result button.primary')
+        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#chora-save-result button.primary')
         d.value.save_as(tmp / 'adopted.chora.json'); saved = json.loads((tmp / 'adopted.chora.json').read_text())
         nc = next(p for p in saved['spatialEntities'] if p.get('@id') == P + 'newcastle')['attestations'][1:]
         nv = next(p for p in saved['spatialEntities'] if p.get('@id') == P + 'novocastria')['attestations'][1:]
@@ -7681,7 +7686,7 @@ def chora_adopt_checks(pw, url, tmp):
 
     # What went wrong, in words: a quota 401 keeps the token; a refused token offers it again; a per-query error is "try again".
     def problems():
-        page.click('#card #adopt-find') if page.is_visible('#card #adopt-find') else None
+        page.click('#chora-card #adopt-find') if page.is_visible('#chora-card #adopt-find') else None
         until(page, '() => window.__chora.adopt && window.__chora.adopt.open', 10)
         q = look_up('Quota'); qt = page.inner_text('#adopt-status')
         kept_after_quota = page.evaluate("() => sessionStorage.getItem('plato-tools.whg-token')")
@@ -7789,7 +7794,7 @@ def chora_adopt_checks(pw, url, tmp):
         until(page, '() => window.__chora.adopt.phase === "preview"', 30)
         page.click('#adopt-go'); until(page, '() => ["adopted"].includes(window.__chora.adopt.phase) || !!document.getElementById("adopt-refused")', 10)
         done = ad().get('done') or {}
-        notes = page.inner_text('#adopt') 
+        notes = page.inner_text('#chora-adopt') 
         return ('whether it holds this record is not known' in cluster and st.get('cluster on novocastria') is False
                 and done.get('count') == 1 and not page.is_visible('#adopt-refused') and not errors), {'cluster': cluster, 'novocastria': st.get('cluster on novocastria'), 'done': done, 'errors': errors[:3]}
     attempt("Chora adopt: a place linked only to a WHG cluster page says so (one linked to a record does not); a place whose @id is the record's w3id adopts the location only, with no error", cluster_and_same)
@@ -8342,15 +8347,15 @@ def iiif_checks(pw, url, tmp):
         if id: a['id'] = id
         return a
     def paste(text):
-        page.fill('#map-input', text if isinstance(text, str) else json.dumps(text)); page.click('#map-form button[type=submit]')
+        page.fill('#chora-map-input', text if isinstance(text, str) else json.dumps(text)); page.click('#chora-map-form button[type=submit]')
     def ready():
         until(page, '() => window.__chora && window.__chora.phase !== "reloading" && window.__chora.mapReadyCount >= 1 && window.__chora.canary && window.__chora.canary !== "pending"', 60)
     def line(key):
-        sel = f'#map-needs [data-permission="{key}"]'
+        sel = f'#chora-map-needs [data-permission="{key}"]'
         return page.inner_text(sel) if soon(page, 's => { const e = document.querySelector(s); return !!e && !e.hidden; }', 15, sel) else ''
     def panel_set(keys, to='allowed', reload=False, via=None):
         """Open the panel (from a map's "Needs permission" line when `via` is given, else the header's button), set each permission, and reload as the panel offers."""
-        page.click(f'#map-needs [data-permission="{via}"] button' if via else '#permissions-button')
+        page.click(f'#chora-map-needs [data-permission="{via}"] button' if via else '#permissions-button')
         until(page, '() => document.getElementById("permissions-panel")?.open', 10)
         # Clicked, not page.check(): the panel is drawn again once a permission changes, so the radio clicked
         # is gone by the time page.check() would look whether it is checked. The state is asked instead.
@@ -8399,7 +8404,7 @@ def iiif_checks(pw, url, tmp):
         page.remove_listener('framenavigated', listen)
         rows = census(since); s = cstate(page); csp = page.evaluate('() => window.__platoCsp')
         paths = [r['path'] for r in at_origin(rows, A)]
-        typed = page.input_value('#map-input')
+        typed = page.input_value('#chora-map-input')
         return (f'Needs permission: {urlparse(A).netloc}' in said and early == [] and len(navs) == 1 and s['canary'] == 'enforced'
                 and drew and '/iiif/grid/info.json' in paths and any(p.endswith('/default.jpg') for p in paths) and at_origin(rows, B) == []
                 and A in csp['origins'] and B not in csp['origins'] and s['overlays'][0]['transformation'] == 'polynomial1'
@@ -8430,10 +8435,10 @@ def iiif_checks(pw, url, tmp):
         older = annotation(id='https://annotations.allmaps.org/maps/00000000000000a1'); older['modified'] = '2026-09-01T10:00:00.000Z'
         newer = annotation('annotation-order2.json', id='https://annotations.allmaps.org/maps/00000000000000a2'); newer['modified'] = '2026-09-30T10:00:00.000Z'
         paste({'id': 'https://annotations.allmaps.org/images/e564650581f5f6bb', 'type': 'AnnotationPage', 'items': [older, newer]})
-        offered = soon(page, '() => document.querySelectorAll("#map-choice input[name=georef-choice]").length === 2', 15)
-        said = page.inner_text('#map-status')
-        checked = page.get_attribute('#map-choice input[name=georef-choice]:checked', 'value') if offered else None
-        if offered: page.click('#map-choose')
+        offered = soon(page, '() => document.querySelectorAll("#chora-map-choice input[name=georef-choice]").length === 2', 15)
+        said = page.inner_text('#chora-map-status')
+        checked = page.get_attribute('#chora-map-choice input[name=georef-choice]:checked', 'value') if offered else None
+        if offered: page.click('#chora-map-choose')
         got = soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id)', 20, newer['id'])
         return (offered and checked == '1' and '4 control points' in said and '9 control points' in said and '2026-09-30' in said and '2026-09-01' in said
                 and 'index option' not in said and got and not any(o['annotationId'] == older['id'] for o in cstate(page)['overlays'])), {'said': said, 'default': checked, 'shown': got}
@@ -8454,9 +8459,9 @@ def iiif_checks(pw, url, tmp):
     def bad_site():
         before = len(errors); since = len(census())
         paste('http://my_host.example.org/maps/grid/manifest')
-        said = soon(page, '() => /plain https address/.test(document.getElementById("map-status").textContent)', 10)
-        text = page.inner_text('#map-status')
-        return (said and 'my_host.example.org' in text and not page.query_selector('#map-needs [data-permission]') and len(errors) == before and census(since) == []), {'said': text, 'page errors': errors[before:]}
+        said = soon(page, '() => /plain https address/.test(document.getElementById("chora-map-status").textContent)', 10)
+        text = page.inner_text('#chora-map-status')
+        return (said and 'my_host.example.org' in text and not page.query_selector('#chora-map-needs [data-permission]') and len(errors) == before and census(since) == []), {'said': text, 'page errors': errors[before:]}
     attempt('Chora maps: a map on a site that cannot be a permission (nor in the page\'s policy) is refused in plain words, with no line asking for it and no error in the page', bad_site)
 
     def forwards():
@@ -8464,9 +8469,9 @@ def iiif_checks(pw, url, tmp):
         # words, naming no host, with the address offered as a link to open in a new tab; B is asked nothing.
         since = len(census()); ark = A + '/ark/50959/x/manifest'
         paste(ark)
-        said = soon(page, '() => /forwards to another one/.test(document.getElementById("map-status").textContent)', 15)
-        text = page.inner_text('#map-status')
-        link = page.evaluate('() => { const a = document.getElementById("map-forwards"); return a ? { href: a.href, target: a.target, rel: a.rel } : null; }')
+        said = soon(page, '() => /forwards to another one/.test(document.getElementById("chora-map-status").textContent)', 15)
+        text = page.inner_text('#chora-map-status')
+        link = page.evaluate('() => { const a = document.getElementById("chora-map-forwards"); return a ? { href: a.href, target: a.target, rel: a.rel } : null; }')
         rows = census(since)
         return (said and 'Open it in a new tab, and paste the address it ends at.' in text and urlparse(B).netloc not in text and link and link['href'] == ark
                 and link['target'] == '_blank' and 'noopener' in link['rel'] and [r['status'] for r in at_origin(rows, A)] == [302] and at_origin(rows, B) == []), {
@@ -8476,8 +8481,8 @@ def iiif_checks(pw, url, tmp):
     def foreign_id():
         since = len(census())
         paste(annotation(service='/iiif/foreign', id='https://annotations.allmaps.org/maps/000000000000000f'))
-        refused = soon(page, '() => /not shown/.test(document.getElementById("map-status").textContent)', 20)
-        said = page.inner_text('#map-status'); rows = census(since)
+        refused = soon(page, '() => /not shown/.test(document.getElementById("chora-map-status").textContent)', 20)
+        said = page.inner_text('#chora-map-status'); rows = census(since)
         return (refused and B in said and '/iiif/foreign/info.json' in [r['path'] for r in at_origin(rows, A)]
                 and not any('default.jpg' in r['path'] for r in at_origin(rows, A)) and at_origin(rows, B) == []
                 and not any(o['annotationId'].endswith('00f') for o in cstate(page)['overlays'])), {'said': said, 'census': [(r['port'], r['path']) for r in rows]}
@@ -8494,7 +8499,7 @@ def iiif_checks(pw, url, tmp):
         page.wait_for_timeout(1500)
         rows = census(since); a_paths = [r['path'] for r in at_origin(rows, A)]
         honest = next((o for o in cstate(page)['overlays'] if o['annotationId'] == grid_id), {})
-        said = page.inner_text('#overlay-list'); csp = page.evaluate('() => window.__platoCsp')
+        said = page.inner_text('#chora-overlay-list'); csp = page.evaluate('() => window.__platoCsp')
         return (admitted and failed and any(p.startswith('/iiif/redirect/') and p.endswith('default.jpg') for p in a_paths)
                 and any(r['status'] == 302 for r in at_origin(rows, A)) and at_origin(census(), B) == [] and honest.get('tilesLoaded', 0) > 0
                 and A in csp['origins'] and B not in csp['origins'] and 'could not be loaded' in said), {
@@ -8505,17 +8510,17 @@ def iiif_checks(pw, url, tmp):
     def lookup():
         hits = len(allmaps_hits)
         paste(A + '/manifests/grid/manifest')
-        offered = soon(page, '() => !!document.getElementById("map-lookup")', 20)
-        offer = page.inner_text('#map-status')
-        editor_before = page.query_selector('#map-editor, #overlay-list a[data-editor]') is not None
-        page.click('#map-lookup')
+        offered = soon(page, '() => !!document.getElementById("chora-map-lookup")', 20)
+        offer = page.inner_text('#chora-map-status')
+        editor_before = page.query_selector('#chora-map-editor, #chora-overlay-list a[data-editor]') is not None
+        page.click('#chora-map-lookup')
         said = line(ALLMAPS_KEY)
         page.wait_for_timeout(500)
         before = len(allmaps_hits) - hits                          # nothing asked of Allmaps before it is allowed
         panel_set([ALLMAPS_KEY], reload=True, via=ALLMAPS_KEY)
         got = soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id)', 30, 'https://annotations.allmaps.org/maps/0000000000000003')
         asked = allmaps_hits[hits:]
-        editor = page.get_attribute('#overlay-list a[data-editor]', 'href') if page.query_selector('#overlay-list a[data-editor]') else ''
+        editor = page.get_attribute('#chora-overlay-list a[data-editor]', 'href') if page.query_selector('#chora-overlay-list a[data-editor]') else ''
         return (offered and editor_before and 'sends this map' in offer and 'Allmaps learns' not in offer and 'asks Allmaps' not in offer and before == 0 and 'Needs permission: Allmaps' in said
                 and got and asked and all(urlparse(u).path.startswith('/images/') and '?url=' not in u for u in asked)
                 and editor.startswith('https://editor.allmaps.org/images?url=')), {
@@ -8530,12 +8535,12 @@ def iiif_checks(pw, url, tmp):
         hits = len(allmaps_hits)
         panel_set([ALLMAPS_KEY], to='never')
         paste(A + '/manifests/grid/manifest')
-        offered = soon(page, '() => /no georeference/.test(document.getElementById("map-status")?.innerText || "")', 20)
-        editor = page.query_selector('#map-editor, #overlay-list a[data-editor]') is not None
+        offered = soon(page, '() => /no georeference/.test(document.getElementById("chora-map-status")?.innerText || "")', 20)
+        editor = page.query_selector('#chora-map-editor, #chora-overlay-list a[data-editor]') is not None
         listed = page.evaluate('() => window.__chora.overlays.length')
         asked = len(allmaps_hits) - hits
         panel_set([ALLMAPS_KEY], to='allowed')                   # put back for the checks after this one
-        back = soon(page, '() => !!document.querySelector("#overlay-list a[data-editor]")', 20) if listed else True
+        back = soon(page, '() => !!document.querySelector("#chora-overlay-list a[data-editor]")', 20) if listed else True
         return offered and not editor and asked == 0 and back, {'offered': offered, 'editor shown under Never': editor, 'Allmaps asked': asked, 'back once allowed': back}
     attempt('Chora maps: with Allmaps set to Never the Editor link is absent (the offer is still made, and Allmaps is asked nothing); allowed again, it is back', editor_never)
 
@@ -8543,7 +8548,7 @@ def iiif_checks(pw, url, tmp):
         s = cstate(page); keys = [o['key'] for o in s['overlays']]
         if not keys: raise RuntimeError('no map shown')
         k = next(o['key'] for o in s['overlays'] if o['annotationId'] == grid_id)
-        row = f'#overlay-list li[data-overlay="{k}"]'
+        row = f'#chora-overlay-list li[data-overlay="{k}"]'
         page.fill(f'{row} input[data-opacity]', '40')
         page.uncheck(f'{row} input[data-show]')
         o = page.evaluate('k => { const e = window.__chora_overlays.manager.entries.find((x) => x.key === k); const m = window.__chora_overlays.layer.getMapOptions(e.mapId); return { opacity: m.opacity, visible: m.visible }; }', k)
@@ -8554,7 +8559,7 @@ def iiif_checks(pw, url, tmp):
         at = page.evaluate(PANEL_STATE); page.keyboard.press('Escape')
         others = [x for x in keys if x != k]
         for x in others:
-            page.click(f'#overlay-list li[data-overlay="{x}"] button[data-remove-map]')
+            page.click(f'#chora-overlay-list li[data-overlay="{x}"] button[data-remove-map]')
             until(page, 'x => !window.__chora.overlays.some((o) => o.key === x)', 10, x)
         left = page.evaluate('() => window.__chora_overlays.layer.getMapIds()')
         # The folder read once the page's own writes are on disk: the map kept is written again for each change
@@ -8573,18 +8578,18 @@ def iiif_checks(pw, url, tmp):
             {'@id': 'https://example.org/p/cambridge', 'label': 'Cambridge', 'attestations': [{'names': [{'toponym': 'Cambridge'}], 'sources': [{'title': 's'}]}]}]}))
         chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
         until(page, '() => window.__chora.overlays.length === 1 && window.__chora.overlays[0].firstTile', 30)
-        page.click('#overlay-list button[data-fit]'); page.evaluate(SETTLE)
+        page.click('#chora-overlay-list button[data-fit]'); page.evaluate(SETTLE)
         page.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
         xy = page.evaluate("""async () => { const e = window.__chora_overlays.manager.entries[0];
           const w = (await window.__chora_overlays.georef.toWorld(e.g, { type: 'Point', coordinates: [256, 256] }, { space: 'image' })).geojson.coordinates;
           const p = window.__chora_map.project(w), r = window.__chora_map.getCanvas().getBoundingClientRect(); return [r.left + p.x, r.top + p.y]; }""")
-        draw(page, 'point', [tuple(xy)]); page.click('#draw-tools button[data-mode="static"]')
+        draw(page, 'point', [tuple(xy)]); page.click('#chora-draw-tools button[data-mode="static"]')
         traced = soon(page, '() => window.__chora.lastTrace && window.__chora.lastTrace.key', 15)
-        card = page.inner_text('#card'); lt = cstate(page).get('lastTrace') or {}
-        page.click('#save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+        card = page.inner_text('#chora-card'); lt = cstate(page).get('lastTrace') or {}
+        page.click('#chora-save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
         ls = cstate(page)['lastSave'] or {}
         if not ls.get('passed'): return False, {'save': ls, 'card': card[-400:]}
-        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#save-result button.primary')
+        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#chora-save-result button.primary')
         out = tmp / 'traced.json'; d.value.save_as(out)
         new = json.loads(out.read_text())['spatialEntities'][0]['attestations'][-1]
         cits = new.get('citations', []); fns = [c.get('citationFunction') for c in cits]
@@ -8612,16 +8617,16 @@ def iiif_checks(pw, url, tmp):
             const x = JSON.parse(await (await h.getFile()).text()); if (x.fingerprint.startsWith('cambridge.json')) return x.drafts.map((k) => [!!k.trace, k.role || '', k.precision || '']); } return null; }"""
         page.evaluate(SETTLE)
         x, y = page.evaluate(PX, [200, 200]); n0 = cstate(page)['pendingCount']
-        draw(page, 'point', [(x, y)]); page.click('#draw-tools button[data-mode="static"]')
+        draw(page, 'point', [(x, y)]); page.click('#chora-draw-tools button[data-mode="static"]')
         traced = soon(page, 'n => window.__chora.lastTrace && window.__chora.lastTrace.key && window.__chora.pendingCount === n + 1', 15, n0)
         first = cstate(page).get('lastTrace')
         tx, ty = page.evaluate(PX, [504, 256])                  # on the image, outside the mask (16 to 496)
-        page.click('#draw-tools button[data-mode="select"]')
+        page.click('#chora-draw-tools button[data-mode="select"]')
         tap(page, x, y)
         page.mouse.move(x, y); page.mouse.down(); page.mouse.move((x + tx) / 2, (y + ty) / 2, steps=6); page.mouse.move(tx, ty, steps=6); page.mouse.up()
-        page.click('#draw-tools button[data-mode="static"]')
+        page.click('#chora-draw-tools button[data-mode="static"]')
         dropped = soon(page, '() => window.__chora.lastTrace && !window.__chora.lastTrace.key', 15)
-        note = page.inner_text('#card [data-trace-note]') if page.query_selector('#card [data-trace-note]') else ''
+        note = page.inner_text('#chora-card [data-trace-note]') if page.query_selector('#chora-card [data-trace-note]') else ''
         # The drop is kept in the same turn as lastTrace is set (app.js traceDraft, keepDrafts), so draftWrites counts it by now.
         written = dropped and soon(page, '() => window.__chora.draftWrites === 0', 20)
         k = page.evaluate(KEPT)
@@ -8638,31 +8643,31 @@ def iiif_checks(pw, url, tmp):
             a = annotation(id=mid); a['target']['selector'] = {'type': 'SvgSelector', 'value': f'<svg width="512" height="512"><polygon points="{pts}" /></svg>'}; return a
         xid, yid = 'https://annotations.allmaps.org/maps/00000000000000f1', 'https://annotations.allmaps.org/maps/00000000000000f2'
         grid_key = next(o['key'] for o in cstate(page)['overlays'] if o['annotationId'] == grid_id)
-        page.uncheck(f'#overlay-list li[data-overlay="{grid_key}"] input[data-show]')
+        page.uncheck(f'#chora-overlay-list li[data-overlay="{grid_key}"] input[data-show]')
         for mid, pts in ((xid, '16,16 250,16 250,250 16,250 16,16'), (yid, '260,260 496,260 496,496 260,496 260,260')):
             paste(corner(mid, pts))
             if not soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.mapId)', 20, mid): return False, {'not shown': mid}
         keys = {o['annotationId']: o['key'] for o in cstate(page)['overlays']}
-        page.click(f'#overlay-list li[data-overlay="{grid_key}"] button[data-fit]'); page.evaluate(SETTLE)
+        page.click(f'#chora-overlay-list li[data-overlay="{grid_key}"] button[data-fit]'); page.evaluate(SETTLE)
         PX = """async (px) => { const e = window.__chora_overlays.manager.entries[0];
           const w = (await window.__chora_overlays.georef.toWorld(e.g, { type: 'Point', coordinates: px }, { space: 'image' })).geojson.coordinates;
           const p = window.__chora_map.project(w), r = window.__chora_map.getCanvas().getBoundingClientRect(); return [r.left + p.x, r.top + p.y]; }"""
         x, y = page.evaluate(PX, [100, 100]); n0 = cstate(page)['pendingCount']
-        draw(page, 'point', [(x, y)]); page.click('#draw-tools button[data-mode="static"]')
+        draw(page, 'point', [(x, y)]); page.click('#chora-draw-tools button[data-mode="static"]')
         first = soon(page, '([k, n]) => window.__chora.lastTrace && window.__chora.lastTrace.key === k && window.__chora.pendingCount === n + 1', 15, [keys[xid], n0])
         tx, ty = page.evaluate(PX, [400, 400])
-        page.click('#draw-tools button[data-mode="select"]')
+        page.click('#chora-draw-tools button[data-mode="select"]')
         tap(page, x, y)
         page.mouse.move(x, y); page.mouse.down(); page.mouse.move((x + tx) / 2, (y + ty) / 2, steps=6); page.mouse.move(tx, ty, steps=6); page.mouse.up()
-        page.click('#draw-tools button[data-mode="static"]')
+        page.click('#chora-draw-tools button[data-mode="static"]')
         moved = soon(page, 'k => window.__chora.lastTrace && window.__chora.lastTrace.key === k', 15, keys[yid])
         lt = cstate(page).get('lastTrace') or {}
-        offered = page.evaluate('() => [...document.querySelectorAll(\'#card li[data-draft]:last-child select[data-field="tracedFrom"] option\')].map((o) => o.value)')
+        offered = page.evaluate('() => [...document.querySelectorAll(\'#chora-card li[data-draft]:last-child select[data-field="tracedFrom"] option\')].map((o) => o.value)')
         # Back as the checks after this one expect: the corners gone, the grid shown.
         for mid in (xid, yid):
-            page.click(f'#overlay-list li[data-overlay="{keys[mid]}"] button[data-remove-map]')
+            page.click(f'#chora-overlay-list li[data-overlay="{keys[mid]}"] button[data-remove-map]')
             until(page, 'k => !window.__chora.overlays.some((o) => o.key === k)', 10, keys[mid])
-        page.check(f'#overlay-list li[data-overlay="{grid_key}"] input[data-show]')
+        page.check(f'#chora-overlay-list li[data-overlay="{grid_key}"] input[data-show]')
         return (first and moved and lt.get('options') == [keys[yid]] and keys[xid] not in offered and keys[yid] in offered), {'first': first, 'moved': moved, 'trace': lt, 'offered': offered}
     attempt('Chora maps: a point traced from one map and moved onto another it alone lies on is traced from that one, which alone is offered', reshaped_onto_another)
 
@@ -8690,7 +8695,7 @@ def iiif_checks(pw, url, tmp):
           return JSON.parse(await (await (await d.getFileHandle(k + '.json')).getFile()).text()).visible; }'''
         soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.mapId)', 30, grid_id)
         grid_key = next(o['key'] for o in cstate(page)['overlays'] if o['annotationId'] == grid_id)
-        box = f'#overlay-list li[data-overlay="{grid_key}"] input[data-show]'
+        box = f'#chora-overlay-list li[data-overlay="{grid_key}"] input[data-show]'
         # Each check sets its own starting state (the map hidden for the tick, shown for the untick), kept so on disk.
         # (First the record as the box is, and every write of it done, so that no write from the load still
         # landing follows the change.)
@@ -8718,7 +8723,7 @@ def iiif_checks(pw, url, tmp):
     def shown_at_once():
         r = tick_and_reload(True)
         if r['came back'] and r['visible'] is not True:   # left as the checks after this one expect: shown
-            page.check(f'#overlay-list li[data-overlay="{next(o["key"] for o in cstate(page)["overlays"] if o["annotationId"] == grid_id)}"] input[data-show]')
+            page.check(f'#chora-overlay-list li[data-overlay="{next(o["key"] for o in cstate(page)["overlays"] if o["annotationId"] == grid_id)}"] input[data-show]')
         return r['settled before'] and r['held'] and r['came back'] and r['visible'] is True and r['box ticked'] is True and r['drawn'], r
     attempt('Chora maps: a map ticked "Show" and the page reloaded at once, before its record is written, comes back shown', shown_at_once)
 
@@ -8744,14 +8749,14 @@ def iiif_checks(pw, url, tmp):
         panel_set([IA], 'never')
         gone = soon(page, '() => window.__chora.overlays.length === 0 && window.__chora_overlays.layer.getMapIds().length === 0', 10)
         page.wait_for_timeout(500)
-        silent = page.evaluate('() => [...document.querySelectorAll("#map-needs [data-permission]")].filter((e) => !e.hidden).length') == 0 and page.inner_text('#map-status').strip() == ''
+        silent = page.evaluate('() => [...document.querySelectorAll("#chora-map-needs [data-permission]")].filter((e) => !e.hidden).length') == 0 and page.inner_text('#chora-map-status').strip() == ''
         since = len(census())
         paste(annotation(id='https://annotations.allmaps.org/maps/0000000000000099'))
-        said = soon(page, '() => /set to Never in Permissions/.test(document.getElementById("map-status").textContent)', 10)
+        said = soon(page, '() => /set to Never in Permissions/.test(document.getElementById("chora-map-status").textContent)', 10)
         page.wait_for_timeout(1000)
         rows = census(since)
         panel_set([IA], 'allowed')                               # for the checks after this one
-        return (gone and silent and said and rows == []), {'taken off': gone, 'nothing said of the kept map': silent, 'said of the new one': page.inner_text('#map-status'), 'census': rows}
+        return (gone and silent and said and rows == []), {'taken off': gone, 'nothing said of the kept map': silent, 'said of the new one': page.inner_text('#chora-map-status'), 'census': rows}
     attempt('Chora maps: set to Never, a map\'s server is done without: its maps go, nothing is said of them, and a map pasted on it says only that it is set to Never; nothing is asked', never)
 
     def kept_together():
@@ -8766,11 +8771,11 @@ def iiif_checks(pw, url, tmp):
           const w = await (await d.getFileHandle(e.key + '.json', { create: true })).createWritable(); await w.write(JSON.stringify(e)); await w.close(); }""", entry)
         panel_set([IA], 'undecided')
         page.reload(); ready()
-        both_lines = soon(page, 'ks => ks.every((k) => { const e = document.querySelector(`#map-needs [data-permission="${k}"]`); return e && !e.hidden; })', 30, [IA, f'iiif:{A2}'])
+        both_lines = soon(page, 'ks => ks.every((k) => { const e = document.querySelector(`#chora-map-needs [data-permission="${k}"]`); return e && !e.hidden; })', 30, [IA, f'iiif:{A2}'])
         navs = []; listen = lambda fr: navs.append(fr.url) if fr == page.main_frame else None
         page.on('framenavigated', listen)
         if both_lines:
-            page.click(f'#map-needs [data-permission="{IA}"] button')
+            page.click(f'#chora-map-needs [data-permission="{IA}"] button')
             until(page, '() => document.getElementById("permissions-panel")?.open', 10)
             for k in (IA, f'iiif:{A2}'):
                 page.click(f'#permissions-panel fieldset.perm[data-key="{k}"] input[value="allowed"]')
@@ -8779,7 +8784,7 @@ def iiif_checks(pw, url, tmp):
             ready()
         both = soon(page, 'ids => ids.every((id) => window.__chora.overlays.some((o) => o.annotationId === id))', 40, [grid_id, pid])
         page.wait_for_timeout(1000); page.remove_listener('framenavigated', listen)
-        return (both_lines and both and len(navs) == 1 and not page.query_selector('#map-needs [data-permission]:not([hidden])')), {
+        return (both_lines and both and len(navs) == 1 and not page.query_selector('#chora-map-needs [data-permission]:not([hidden])')), {
             'both lines': both_lines, 'both back': both, 'navigations': navs, 'overlays': [o['annotationId'] for o in cstate(page)['overlays']]}
     attempt('Chora maps: maps kept on two sites not allowed say "Needs permission" for both at once, and come back after one reload', kept_together)
 
@@ -8843,7 +8848,7 @@ def iiif_checks(pw, url, tmp):
         second = {k: v for k, v in page.evaluate(KEPT_ITEMS).items() if k not in before}
         ids = [v['target']['source']['id'] for v in first.values()]
         # Let the map go (for the checks after this one), from its row once the row is there.
-        row = f'#overlay-list li[data-overlay="{back_key}"]'
+        row = f'#chora-overlay-list li[data-overlay="{back_key}"]'
         removed = False
         if back_key and soon(page, 's => !!document.querySelector(s)', 10, row):
             page.click(f'{row} button[data-remove-map]')
@@ -8865,11 +8870,11 @@ def iiif_checks(pw, url, tmp):
           const w = await (await d.getFileHandle(e.key + '.json', { create: true })).createWritable(); await w.write(JSON.stringify(e)); await w.close(); }""", entry)
         page.reload(); ready()
         tried = soon(page, '() => !!window.__chora.keptError', 30)
-        at_load = page.inner_text('#map-status').strip()
+        at_load = page.inner_text('#chora-map-status').strip()
         paste(annotation())                                       # shown already: its status line
-        said = soon(page, '() => /is shown already/.test(document.getElementById("map-status").textContent)', 15)
+        said = soon(page, '() => /is shown already/.test(document.getElementById("chora-map-status").textContent)', 15)
         panel_set([ALLMAPS_KEY], 'allowed'); page.wait_for_timeout(1500)
-        after = page.inner_text('#map-status')
+        after = page.inner_text('#chora-map-status')
         panel_set([ALLMAPS_KEY], 'undecided')
         page.evaluate("k => navigator.storage.getDirectory().then((r) => r.getDirectoryHandle('chora-overlays')).then((d) => d.removeEntry(k + '.json'))", entry['key'])
         return (tried and 'missing' not in at_load and said and 'is shown already' in after), {'kept error': cstate(page).get('keptError'), 'status at load': at_load, 'status after a permission changed': after}
@@ -8882,24 +8887,24 @@ def iiif_checks(pw, url, tmp):
         paste(annotation(id='https://annotations.allmaps.org/maps/00000000000000e1'))
         said = line(IA)
         if said: panel_set([IA], 'never', via=IA)
-        told = soon(page, '() => /set to Never in Permissions/.test(document.getElementById("map-status").textContent)', 10)
-        lines = page.evaluate('() => [...document.querySelectorAll("#map-needs [data-permission]")].filter((e) => !e.hidden).length')
+        told = soon(page, '() => /set to Never in Permissions/.test(document.getElementById("chora-map-status").textContent)', 10)
+        lines = page.evaluate('() => [...document.querySelectorAll("#chora-map-needs [data-permission]")].filter((e) => !e.hidden).length')
         rows = at_origin(census(since), A)
-        text = page.inner_text('#map-status')
+        text = page.inner_text('#chora-map-status')
         panel_set([IA], 'allowed')                               # for the checks after this one
         return (f'Needs permission: {urlparse(A).netloc}' in said and told and lines == 0 and rows == []), {'line': said, 'status': text, 'lines left': lines, 'asked of A': rows}
     attempt('Chora maps: a map pasted, waiting on "Needs permission", set to Never in the panel says its site is set to Never, and its line goes', never_after_line)
 
     def no_policy():
-        page_url = base + 'chora.html'
+        page_url = base                                         # the page as served: Chora is in it, at #chora
         ctx.route(page_url, strip_head)
         try:
-            page.goto(NOTOOLS if PROVE else page_url)
+            page.goto('about:blank'); page.goto(NOTOOLS if PROVE else page_url + '#chora')
             until(page, '() => window.__chora && window.__chora.canary && window.__chora.canary !== "pending" && window.__chora.mapReadyCount >= 1', 30)
             since = len(census())
             paste(annotation(id='https://annotations.allmaps.org/maps/0000000000000011'))
-            said = soon(page, '() => /cannot be shown in this browser/.test(document.getElementById("map-status").textContent)', 20)
-            text = page.inner_text('#map-status'); page.wait_for_timeout(1000)
+            said = soon(page, '() => /cannot be shown in this browser/.test(document.getElementById("chora-map-status").textContent)', 20)
+            text = page.inner_text('#chora-map-status'); page.wait_for_timeout(1000)
             rows = census(since); s = cstate(page); meta = page.evaluate('() => !!document.querySelector(\'meta[http-equiv="Content-Security-Policy"]\')')
         finally:
             ctx.unroute(page_url, strip_head)
@@ -8942,7 +8947,7 @@ INK_TO_SCREEN = """async ([id, pts]) => { const e = window.__chora_overlays.mana
 INK_TO_IMAGE = """async ([id, geometry]) => { const e = window.__chora_overlays.manager.entries.find((x) => x.g.annotationId === id);
   return (await window.__chora_overlays.georef.toPixels(e.g, geometry, { space: 'image' })).geometry; }"""
 PROPOSAL_DRAWN = '() => window.__chora_map.queryRenderedFeatures({ layers: ["chora-ink-proposal"] }).length > 0'
-TRACE_TIP = '() => [...document.querySelectorAll("#draw-tools button[data-trace]")].map((b) => [b.getAttribute("aria-disabled"), b.disabled, b.dataset.tip, b.hasAttribute("title")])'
+TRACE_TIP = '() => [...document.querySelectorAll("#chora-draw-tools button[data-trace]")].map((b) => [b.getAttribute("aria-disabled"), b.disabled, b.dataset.tip, b.hasAttribute("title")])'
 
 def ink_checks(page, base, tmp, h):
     """The checks of tracing with assistance. `h`: the iiif checks' helpers (census, at_origin, annotation,
@@ -8965,10 +8970,10 @@ def ink_checks(page, base, tmp, h):
         """Every other map shown let go (each check stands on its own), this one fitted and settled."""
         for o in cstate(page)['overlays']:
             if o['annotationId'] != id_:
-                page.click(f'#overlay-list li[data-overlay="{o["key"]}"] button[data-remove-map]')
+                page.click(f'#chora-overlay-list li[data-overlay="{o["key"]}"] button[data-remove-map]')
                 until(page, 'k => !window.__chora.overlays.some((o) => o.key === k)', 10, o['key'])
         key = next(o['key'] for o in cstate(page)['overlays'] if o['annotationId'] == id_)
-        page.click(f'#overlay-list li[data-overlay="{key}"] button[data-fit]'); page.evaluate(SETTLE)
+        page.click(f'#chora-overlay-list li[data-overlay="{key}"] button[data-fit]'); page.evaluate(SETTLE)
         return key
     GRANT = "k => (JSON.parse(localStorage.getItem('plato-tools.permissions') || '{}').grants || {})[k]?.state || 'undecided'"
     def drawn(id_, tiles=True):
@@ -8989,7 +8994,7 @@ def ink_checks(page, base, tmp, h):
                 said = line(IA)
                 if 'Needs permission' in said: panel_set([IA], reload=True, via=IA)
                 elif said:                                       # allowed since this page loaded: the line offers the reload
-                    with page.expect_navigation(timeout=T(60) * 1000): page.click(f'#map-needs [data-permission="{IA}"] button')
+                    with page.expect_navigation(timeout=T(60) * 1000): page.click(f'#chora-map-needs [data-permission="{IA}"] button')
                     ready()
                 else: raise RuntimeError(f'set-up: the map\'s server is not allowed ({page.evaluate(GRANT, IA)}, in the policy: {in_policy}), and no line asks for it')
             elif not drawn(a['id'], False): paste(a)
@@ -9024,13 +9029,13 @@ def ink_checks(page, base, tmp, h):
         buttons = page.evaluate(TRACE_TIP)
         # What the page started with, said first if the check fails: the maps shown and the server's permission.
         start = {'grant': page.evaluate(GRANT, IA), 'shown': [(o['annotationId'][-4:], o['permission'].replace(A, 'A'), o['firstTile']) for o in cstate(page)['overlays']]}
-        page.mouse.move(1, 1); page.hover('#draw-tools button[data-trace="line"]')
+        page.mouse.move(1, 1); page.hover('#chora-draw-tools button[data-trace="line"]')
         tip_before = [t['text'] for t in shown_tips(page, 'Show a historical map to trace from it')]
         waiting = (cstate(page).get('traceReady') is False and all(b[0] == 'true' and b[1] is False and not b[3] for b in buttons) and tip_before == ['Show a historical map to trace from it'])
         # Clicked while not offered, it does nothing. A plain page.click would wait for ever: Playwright (1.59)
         # counts a button with aria-disabled="true" as disabled, so force=True clicks it where it is, as a user does.
-        page.click('#draw-tools button[data-trace="line"]', force=True); page.wait_for_timeout(300)
-        inert = page.get_attribute('#draw-tools button[data-trace="line"]', 'aria-pressed') != 'true' and not page.evaluate('() => !!window.__chora_ink?.mode')
+        page.click('#chora-draw-tools button[data-trace="line"]', force=True); page.wait_for_timeout(300)
+        inert = page.get_attribute('#chora-draw-tools button[data-trace="line"]', 'aria-pressed') != 'true' and not page.evaluate('() => !!window.__chora_ink?.mode')
         since = len(census())
         a = ink_annotation('/iiif/inkpng', 'e1'); paste(a)
         said = line(IA)
@@ -9042,7 +9047,7 @@ def ink_checks(page, base, tmp, h):
         buttons_after = page.evaluate(TRACE_TIP)
         offered = cstate(page).get('traceReady') is True and all(b[0] == 'false' for b in buttons_after) and 'followed both ways' in buttons_after[1][2]
         before = cstate(page)['pendingCount']
-        page.click('#draw-tools button[data-trace="line"]')
+        page.click('#chora-draw-tools button[data-trace="line"]')
         click_image(a['id'], INK_RIVER[50])
         until(page, '() => ["proposed", "error"].includes(window.__chora.ink?.phase)', 60)
         ink = cstate(page)['ink']
@@ -9062,11 +9067,11 @@ def ink_checks(page, base, tmp, h):
         traced_again = cstate(page)['ink']['last'].get('seedsTraced')
         page.keyboard.press('Enter')
         until(page, 'n => window.__chora.pendingCount === n + 1 && window.__chora.lastTrace && window.__chora.lastTrace.key', 20, before)
-        card = page.inner_text('#card')
-        page.click('#save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+        card = page.inner_text('#chora-card')
+        page.click('#chora-save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
         ls = cstate(page)['lastSave'] or {}
         if not ls.get('passed'): return False, {'start': start, 'save': ls, 'card': card[-300:]}
-        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#save-result button.primary')
+        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#chora-save-result button.primary')
         out = tmp / 'ink-line-saved.json'; d.value.save_as(out)
         new = json.loads(out.read_text())['spatialEntities'][0]['attestations'][-1]
         cits = new.get('citations', []); notes = new.get('notes', '')
@@ -9091,7 +9096,7 @@ def ink_checks(page, base, tmp, h):
         a = ink_annotation('/iiif/ink', 'e2')
         on_map(a)
         before = cstate(page)['pendingCount']
-        page.click('#draw-tools button[data-trace="area"]')
+        page.click('#chora-draw-tools button[data-trace="area"]')
         click_image(a['id'], (520, 210))
         until(page, '() => ["proposed", "error"].includes(window.__chora.ink?.phase)', 60)
         ink = cstate(page)['ink']
@@ -9101,7 +9106,7 @@ def ink_checks(page, base, tmp, h):
         drawn = soon(page, PROPOSAL_DRAWN, 10)
         # A slider moved proposes again from the window already read: the server is asked for nothing more.
         n, asked_before = ink['proposals'], len(census())
-        page.fill('#ink-panel input[data-p="tolerance"]', '22')
+        page.fill('#chora-ink-panel input[data-p="tolerance"]', '22')
         rerun = soon(page, 'n => window.__chora.ink.proposals > n && window.__chora.ink.phase === "proposed"', 20, n)
         page.wait_for_timeout(300)
         quiet = census(asked_before) == []
@@ -9120,7 +9125,7 @@ def ink_checks(page, base, tmp, h):
         # before, if it is shown still (it costs nothing to trace it again), else a page opened afresh on it.
         a = ink_annotation('/iiif/ink', 'e2'); a_id = a['id']
         on_map(a, place=False, file=place_file('ink-withdrawn.json'))
-        page.click('#draw-tools button[data-trace="area"]') if page.get_attribute('#draw-tools button[data-trace="area"]', 'aria-pressed') != 'true' else None
+        page.click('#chora-draw-tools button[data-trace="area"]') if page.get_attribute('#chora-draw-tools button[data-trace="area"]', 'aria-pressed') != 'true' else None
         n = (cstate(page).get('ink') or {}).get('proposals', 0)
         click_image(a_id, (520, 210))
         until(page, 'n => !!window.__chora.ink && window.__chora.ink.proposals > n && window.__chora.ink.phase === "proposed"', 60, n)
@@ -9152,8 +9157,8 @@ def ink_checks(page, base, tmp, h):
         ink_chunk = re.compile(r'/assets/ink-[^/?]*\.js')
         page.route(ink_chunk, lambda r: held.append(r))
         try:
-            page.click('#draw-tools button[data-trace="area"]')
-            soon(page, '() => document.querySelector(\'#draw-tools button[data-trace="area"]\').getAttribute("aria-pressed") === "true"', 5)
+            page.click('#chora-draw-tools button[data-trace="area"]')
+            soon(page, '() => document.querySelector(\'#chora-draw-tools button[data-trace="area"]\').getAttribute("aria-pressed") === "true"', 5)
             click_image(a['id'], (520, 210))
             page.wait_for_timeout(500)
             before = cstate(page)
@@ -9166,7 +9171,7 @@ def ink_checks(page, base, tmp, h):
         ink = (cstate(page).get('ink') or {})
         drawn = proposed and soon(page, PROPOSAL_DRAWN, 10)
         page.keyboard.press('Escape')
-        return (not_yet and proposed and drawn and ink.get('mode') == 'area'), {'held': len(held), 'before the chunk': {'ink': before.get('ink'), 'pressed': page.get_attribute('#draw-tools button[data-trace="area"]', 'aria-pressed')}, 'proposed': proposed, 'drawn': drawn, 'ink': {k: ink.get(k) for k in ('phase', 'mode', 'proposals', 'lastError')}}
+        return (not_yet and proposed and drawn and ink.get('mode') == 'area'), {'held': len(held), 'before the chunk': {'ink': before.get('ink'), 'pressed': page.get_attribute('#chora-draw-tools button[data-trace="area"]', 'aria-pressed')}, 'proposed': proposed, 'drawn': drawn, 'ink': {k: ink.get(k) for k in ('phase', 'mode', 'proposals', 'lastError')}}
     attempt('Chora ink: a click on the map made while ink.js is still arriving, after the first press of "Trace area", is not lost: once it has arrived, the proposal is made from that click', click_before_ink_arrives)
 
     def keys_are_the_controls():
@@ -9181,7 +9186,7 @@ def ink_checks(page, base, tmp, h):
         def propose():
             # The page was opened afresh: ink.js, and the ink state with it, is loaded by the first Trace click.
             n = (cstate(page).get('ink') or {}).get('proposals', 0)
-            if page.get_attribute('#draw-tools button[data-trace="area"]', 'aria-pressed') != 'true': page.click('#draw-tools button[data-trace="area"]')
+            if page.get_attribute('#chora-draw-tools button[data-trace="area"]', 'aria-pressed') != 'true': page.click('#chora-draw-tools button[data-trace="area"]')
             click_image(a['id'], (520, 210))
             until(page, 'n => !!window.__chora.ink && window.__chora.ink.proposals > n && window.__chora.ink.phase === "proposed"', 60, n)
         # Enter with nothing focused accepts (the positive control; it also makes a drawing, so Save can be used).
@@ -9191,7 +9196,7 @@ def ink_checks(page, base, tmp, h):
         # Enter on Save, a proposal live: Save saves, and the proposal is not accepted.
         propose()
         acc1 = cstate(page)['ink']['accepted']
-        page.focus('#save'); page.keyboard.press('Enter')
+        page.focus('#chora-save'); page.keyboard.press('Enter')
         saved = soon(page, '() => !!window.__chora.lastSave || window.__chora.phase === "saving"', 60)
         page.wait_for_timeout(300)
         s1 = cstate(page)
@@ -9216,7 +9221,7 @@ def ink_checks(page, base, tmp, h):
         a = ink_annotation('/iiif/inkpng', 'e5')
         on_map(a, place=False)                                   # no place chosen: that is what is checked first
         before = cstate(page)['pendingCount']
-        page.click('#draw-tools button[data-trace="area"]')
+        page.click('#chora-draw-tools button[data-trace="area"]')
         click_image(a['id'], (520, 210))
         until(page, '() => ["proposed", "error"].includes(window.__chora.ink?.phase)', 60)
         ink = cstate(page)['ink']
@@ -9225,17 +9230,17 @@ def ink_checks(page, base, tmp, h):
         # No place chosen yet: Enter keeps the proposal and says to choose a place; nothing is drawn.
         page.evaluate('() => document.activeElement && document.activeElement.blur()')
         page.keyboard.press('Enter'); page.wait_for_timeout(500)
-        s0 = cstate(page); status0 = page.inner_text('#ink-panel [data-ink-status]')
+        s0 = cstate(page); status0 = page.inner_text('#chora-ink-panel [data-ink-status]')
         kept_ = s0['ink']['phase'] == 'proposed' and s0['pendingCount'] == before and soon(page, PROPOSAL_DRAWN, 10)
         chora_pick(page, 'cambridge')
         page.evaluate('() => document.activeElement && document.activeElement.blur()')
         page.keyboard.press('Enter')
         until(page, 'n => window.__chora.pendingCount === n + 1 && window.__chora.lastTrace && window.__chora.lastTrace.key', 20, before)
-        lt = cstate(page)['lastTrace']; card = page.inner_text('#card')
-        page.click('#save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+        lt = cstate(page)['lastTrace']; card = page.inner_text('#chora-card')
+        page.click('#chora-save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
         ls = cstate(page)['lastSave'] or {}
         if not ls.get('passed'): return False, {'save': ls, 'card': card[-300:]}
-        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#save-result button.primary')
+        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#chora-save-result button.primary')
         out = tmp / 'ink-hole-saved.json'; d.value.save_as(out)
         new = json.loads(out.read_text())['spatialEntities'][0]['attestations'][-1]
         cits = new.get('citations', []); notes = new.get('notes', ''); geom = new['geometries'][0]['geojson']
@@ -9254,11 +9259,11 @@ def ink_checks(page, base, tmp, h):
         f = place_file('ink-snap.json'); chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
         a = ink_annotation('/iiif/inkpng', 'e1')
         on_map(a)
-        page.click('#draw-tools button[data-mode="linestring"]')
-        offered = page.is_visible('#snap-ink')
-        page.mouse.move(1, 1); page.hover('#snap-ink')
+        page.click('#chora-draw-tools button[data-mode="linestring"]')
+        offered = page.is_visible('#chora-snap-ink')
+        page.mouse.move(1, 1); page.hover('#chora-snap-ink')
         tip = [t['text'] for t in shown_tips(page, 'goes onto it')]
-        page.check('#snap-ink')
+        page.check('#chora-snap-ink')
         until(page, '() => window.__chora.ink && window.__chora.ink.snapBuilds >= 1 && window.__chora.ink.snapPoints > 0', 30)
         # 5 screen pixels above the road at image x 300, then a second vertex, then the last again to finish.
         road_y = lambda x: INK_ROAD[0][1] + (INK_ROAD[1][1] - INK_ROAD[0][1]) * (x - INK_ROAD[0][0]) / (INK_ROAD[1][0] - INK_ROAD[0][0])
@@ -9278,7 +9283,7 @@ def ink_checks(page, base, tmp, h):
         img = page.evaluate(INK_TO_IMAGE, [a['id'], d['geojson']])
         first = img['coordinates'][0]; snapped = dist_line(first, INK_ROAD)
         # The control: the same, with Alt held, is not snapped.
-        page.click('#draw-tools button[data-mode="linestring"]')
+        page.click('#chora-draw-tools button[data-mode="linestring"]')
         page.keyboard.down('Alt'); tap(page, x, y - 5); page.keyboard.up('Alt')
         for (px, py) in [(x2 + 40, y2), (x2 + 40, y2)]: tap(page, px, py)
         until(page, 'n => window.__chora.pendingCount === n + 2', 15, before)
@@ -9304,9 +9309,9 @@ def ink_checks(page, base, tmp, h):
         pattern = A + '/iiif/inkpng/**'
         page.route(pattern, lambda r: held.append(r))
         try:
-            page.click('#draw-tools button[data-mode="linestring"]')
+            page.click('#chora-draw-tools button[data-mode="linestring"]')
             builds = (cstate(page).get('ink') or {}).get('snapBuilds', 0)
-            page.check('#snap-ink')
+            page.check('#chora-snap-ink')
             for _ in range(int(T(8) * 10)):
                 if held: break
                 page.wait_for_timeout(100)
@@ -9336,14 +9341,14 @@ def ink_checks(page, base, tmp, h):
         f = place_file('ink-snap-hidden.json'); chora_boot(page, base, [f]); chora_pick(page, 'cambridge')
         a = ink_annotation('/iiif/inkpng', 'e1')
         on_map(a)
-        page.click('#draw-tools button[data-mode="linestring"]'); page.check('#snap-ink')
+        page.click('#chora-draw-tools button[data-mode="linestring"]'); page.check('#chora-snap-ink')
         until(page, '() => window.__chora.ink && window.__chora.ink.snapBuilds >= 1 && window.__chora.ink.snapPoints > 0', 30)
         pan = '([dx]) => window.__chora_map.panBy([dx, 0], { duration: 0 })'
         n0 = cstate(page)['ink']['snapBuilds']
         page.evaluate(pan, [40]); page.evaluate(SETTLE)
         rebuilt = soon(page, 'n => window.__chora.ink.snapBuilds > n', 15, n0)
-        page.click('#draw-tools button[data-mode="point"]')
-        hidden = page.is_hidden('#snap-ink-label')
+        page.click('#chora-draw-tools button[data-mode="point"]')
+        hidden = page.is_hidden('#chora-snap-ink-label')
         n1 = cstate(page)['ink']['snapBuilds']
         page.evaluate(pan, [-40]); page.evaluate(SETTLE); page.wait_for_timeout(1000)
         quiet = cstate(page)['ink']['snapBuilds'] == n1
@@ -9358,8 +9363,8 @@ def ink_checks(page, base, tmp, h):
         said = line(IC)
         page.wait_for_timeout(800); early = at_origin(census(since), C)
         if said: panel_set([IC], reload=True, via=IC)
-        refused = soon(page, '() => /may not allow other sites to read it/.test(document.getElementById("map-status").textContent)', 30)
-        text = page.inner_text('#map-status')
+        refused = soon(page, '() => /may not allow other sites to read it/.test(document.getElementById("chora-map-status").textContent)', 30)
+        text = page.inner_text('#chora-map-status')
         rows = census(since); s = cstate(page)
         return (f'Needs permission: {urlparse(C).netloc}' in said and early == [] and refused and urlparse(C).netloc in text and at_origin(rows, C)
                 and all(r['path'] == '/iiif/ink/info.json' for r in at_origin(rows, C))
@@ -9377,10 +9382,10 @@ def ink_checks(page, base, tmp, h):
         if not soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.firstTile)', 30, a['id']):
             return False, {'not drawn; asked': [(r['status'], r['path']) for r in at_origin(census(since), A)][-6:], 'events': cstate(page).get('overlayEvents')}
         page.evaluate('() => window.__chora_map.zoomTo(window.__chora_map.getZoom() + 3, { duration: 0 })'); page.evaluate(SETTLE)
-        page.click('#draw-tools button[data-trace="line"]')
+        page.click('#chora-draw-tools button[data-trace="line"]')
         click_image(a['id'], INK_RIVER[50])
         until(page, '() => ["proposed", "error"].includes(window.__chora.ink?.phase)', 60)
-        s = cstate(page); panel = page.inner_text('#ink-panel')
+        s = cstate(page); panel = page.inner_text('#chora-ink-panel')
         page.keyboard.press('Enter'); page.wait_for_timeout(500)
         rows = census(since)
         return (s['ink']['phase'] == 'error' and '403' in (s['ink']['lastError'] or '') and 'IIIF Auth' in s['ink']['lastError'] and '403' in panel

@@ -1028,7 +1028,8 @@ function leaveFigures() {
 function setHash(key) {
   let w = null;
   try { w = arrivedFor && methodos.id() === arrivedFor ? arrivedFor : null; } catch { /* before Methodos is mounted */ }
-  const parts = [key ? `tool=${key}` : null, w ? `workflow=${w}` : null].filter(Boolean);
+  // While Chora is on screen the address is #chora, so that a reload or a link comes back to it.
+  const parts = [choraShown() ? 'chora' : key ? `tool=${key}` : null, w ? `workflow=${w}` : null].filter(Boolean);
   try { history.replaceState(history.state, '', location.pathname + location.search + (parts.length ? `#${parts.join('&')}` : '')); } catch {}
 }
 function focusStep1() {
@@ -1051,8 +1052,47 @@ $('toolbox').addEventListener('click', (e) => {
   }
   chooseTool(a.dataset.tool); setHash(a.dataset.tool); focusStep1();
 });
-window.addEventListener('hashchange', () => { chooseTool(toolFromHash()); if (location.hash === '#methodos') methodos.open(); });
+window.addEventListener('hashchange', () => {
+  if (choraInHash()) { openChora(); return; }
+  if (choraShown()) leaveChora();
+  chooseTool(toolFromHash()); if (location.hash === '#methodos') methodos.open();
+});
 chooseTool(toolFromHash());
+
+// ---- Chora, the map, in the centre column (src/chora/app.js) -----------------------------------------
+// Opened at #chora. The module, and with it MapLibre, Terra Draw and Allmaps, is loaded the first time it
+// is opened, and only then (a chunk of its own: vite.config.js); it is mounted once, and shown and hidden
+// after that, so that what it has open stays as it was. While it is shown, the rest of the centre is hidden.
+let chora = null, choraLoading = null;
+const choraShown = () => !$('chora').hidden;
+const choraInHash = () => { try { return new URLSearchParams(location.hash.replace(/^#/, '')).has('chora'); } catch { return false; } };
+async function openChora() {
+  if (choraShown()) return;
+  $('chora').hidden = false; document.body.dataset.chora = '';
+  setHash(tool);
+  $('chora').scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' });
+  $('chora-h').focus({ preventScroll: true });
+  try {
+    choraLoading ??= import('./chora/app.js').then((m) => (chora = m.mountChora($('chora-root'), {
+      // WHG's lookup, the page's one (one queue, whoever asks), for adopting a location from it; and what it does when a request is refused.
+      lookup: () => whgLookup(), onRefused: (f) => refusedToo.add(f),
+    })));
+    await choraLoading;
+  } catch (e) {
+    choraLoading = null;
+    $('chora-root').textContent = `The map could not be loaded (${e.message}): reload the page to try again.`;
+    return;
+  }
+  if (choraShown()) chora.show();
+}
+function leaveChora() {
+  if (!choraShown()) return;
+  chora?.hide();
+  $('chora').hidden = true; delete document.body.dataset.chora;
+  setHash(tool);
+}
+$('chora-leave').addEventListener('click', () => { leaveChora(); focusStep1(); });
+if (choraInHash()) openChora();
 
 // The project file's destination, asked for at the click "Save the project": where the browser has a save
 // dialogue (Chromium), the zip is written straight into the file chosen, a chunk at a time; elsewhere it
@@ -1665,8 +1705,9 @@ let gathered = null, placesWaiting = null, looking = null, findFor = null, after
 // What another service's manifest said (manifestSettings), by its address, once a lookup has read it: the preview then shows its type.
 const manifests = new Map();
 const token = permissions.token;
-/** The fetch every lookup is made with, the same function for all (the shared lookup keeps its first). */
-const gazetteerFetch = permittedFetch(permissions.fetch, (e) => looking?.abort(e));
+/** The fetch every lookup is made with, the same function for all (the shared lookup keeps its first): Krisis's and Chora's adoption's. */
+const refusedToo = new Set();   // what else stops when a request is refused for want of permission (Chora's adoption: onRefused)
+const gazetteerFetch = permittedFetch(permissions.fetch, (e) => { looking?.abort(e); for (const f of refusedToo) f(e); });
 /** WHG's lookup: the one shared in the page (one request in flight, whoever asks). */
 const whgLookup = () => createLookup({ endpoint: WHG_ENDPOINT, fetch: gazetteerFetch });
 /** Whether the permissions module allows a lookup of this service now (allowed, and in this load's policy). */

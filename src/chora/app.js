@@ -1,8 +1,10 @@
-// Chora's page: open a dataset, find a place, see on the map and in its card everything the
+// Chora, the map: open a dataset, find a place, see on the map and in its card everything the
 // attestations say of it over time; draw a point, line or area as a new attestation; save the whole
 // dataset with the drawings added, checked by the version check (Mneme) against what was opened.
-// The engine is the same worker as the main page's (src/engine/worker.js, its chora-* commands). The
-// page publishes its state on window.__chora for automated tests; nothing else reads it.
+// A module mounted into a page (mountChora, at the end): its DOM is in the root it is given, and every
+// id it makes starts with `chora-` (the adoption panel's with `adopt-`), so that none clashes with the
+// page's. The engine is the same worker as the main page's (src/engine/worker.js, its chora-* commands),
+// a worker of its own. It publishes its state on window.__chora for automated tests; nothing else reads it.
 import { fmtBytes, formatName, progressText, summary, draftNote, choraDrawingNote, choraSaveText, choraSavedFormat, choraSaveProgress, choraStorageWarning, choraProblemText, CHORA_TEXT } from '../engine/words.js';
 import { sizeRead, loadNeed, saveNeed, storageShort } from '../engine/chora/storage.js';
 import { detect } from '../engine/input.js';
@@ -40,10 +42,100 @@ import { CHORA_ADOPT_PAGE } from '../engine/words.js';
 // The tools' own version, for the notes of a shape traced with assistance.
 import { version as toolsVersion } from '../../package.json';
 
-const $ = (id) => document.getElementById(id);
-const state = (window.__chora = { phase: 'loading', placeId: null, pendingCount: 0, basemap: null, mapReadyCount: 0, blocked: 0, lastSave: null, overlays: [] });
-// The writes of the historical maps kept not yet on disk (overlays.js), for tests to wait on, like draftWrites.
-Object.defineProperty(state, 'overlayWrites', { get: ov.writesPending, enumerable: true });
+// What Chora puts into its root: the panel (the dataset, the historical maps, the places, the card, the
+// adoption and the save), beside the map with its tools. `files`: its own "Choose your data", for a host
+// that gives it no files.
+const html = ({ files }) => `<div class="chora-panel" id="chora-panel">
+    ${files ? `<section id="chora-files" aria-labelledby="chora-files-h">
+      <h2 id="chora-files-h"><span class="step">1</span> Choose your data</h2>
+      <p id="chora-handoff" hidden></p>
+      <div id="chora-workflow-track" class="workflow-track" role="status" hidden></div>
+      <p id="chora-workflow" hidden></p>
+      <label class="drop" id="chora-drop">
+        <input type="file" id="chora-picker" multiple>
+        <span>Drop a file here, or <u>choose one</u>.</span>
+        <small>Any dataset PLATO tools reads: PLATO JSON or JSON Lines, RDF, Linked Places Format, Recogito's web annotations, or the PLATO spreadsheet tables.</small>
+      </label>` : '<section id="chora-files" class="chora-data" aria-label="Your data">'}
+      <p id="chora-phase" aria-live="polite"></p>
+      <p id="chora-storage-warning" class="warn" hidden></p>
+      <div id="chora-dataset" hidden></div>
+    </section>
+
+    <section id="chora-maps" aria-labelledby="chora-maps-h">
+      <h2 id="chora-maps-h">Historical maps</h2>
+      <p class="muted">Lay a georeferenced historical map over the basemap, and trace places from it: what you trace cites the map, and the georeference that places it.</p>
+      <form id="chora-map-form">
+        <label for="chora-map-input">A georeference (a IIIF Georeference Annotation), or the address of one (Allmaps), of a IIIF manifest, or of a IIIF image</label>
+        <textarea id="chora-map-input" rows="2" autocomplete="off" spellcheck="false" placeholder="https://annotations.allmaps.org/maps/…"></textarea>
+        <p><button type="submit">Add the map</button></p>
+      </form>
+      <div id="chora-map-needs"></div>
+      <div id="chora-map-status" role="status" aria-live="polite"></div>
+      <ul id="chora-overlay-list" class="overlays"></ul>
+    </section>
+
+    <section id="chora-places" aria-labelledby="chora-places-h" hidden>
+      <h2 id="chora-places-h"><span class="step">2</span> Places</h2>
+      <label for="chora-q" class="visually-hidden">Find a place by name</label>
+      <input id="chora-q" type="search" placeholder="Find a place by name" autocomplete="off">
+      <p id="chora-found" class="muted"></p>
+      <ul id="chora-list" class="place-list"></ul>
+      <p class="pager"><button id="chora-prev" type="button">Previous</button> <button id="chora-next" type="button">Next</button></p>
+    </section>
+
+    <section id="chora-card" aria-labelledby="chora-card-h" hidden></section>
+
+    <section id="chora-adopt" class="adopt" aria-labelledby="adopt-h" hidden></section>
+
+    <section id="chora-saving" aria-labelledby="chora-saving-h" hidden>
+      <h2 id="chora-saving-h"><span class="step">3</span> Save</h2>
+      <p id="chora-pending-total"></p>
+      <form id="chora-contributor-form" hidden>
+        <p>Your drawings will be saved as attestations made by you. Who are you?</p>
+        <label for="chora-c-name">Your name</label>
+        <input id="chora-c-name" required autocomplete="name">
+        <label for="chora-c-orcid">ORCID iD <small>(optional)</small></label>
+        <input id="chora-c-orcid" placeholder="0000-0002-1825-0097" autocomplete="off">
+        <p id="chora-c-error" class="warn" hidden></p>
+        <p><button class="primary" type="submit">Continue</button> <button type="button" id="chora-c-cancel">Cancel</button></p>
+      </form>
+      <p id="chora-contributor-line" hidden></p>
+      <p><button id="chora-save" class="primary" type="button">Save as PLATO JSON</button></p>
+      <p id="chora-save-progress" aria-live="polite" hidden></p>
+      <p id="chora-save-storage-warning" class="warn" hidden></p>
+      <div id="chora-save-result"></div>
+    </section>
+  </div>
+
+  <div class="chora-mapwrap">
+    <div id="chora-map" class="chora-map" aria-label="Map"></div>
+    <div class="map-tools" id="chora-draw-tools" role="toolbar" aria-label="Draw" hidden>
+      <button type="button" data-mode="point" data-tip="Draw a point">Point</button>
+      <button type="button" data-mode="linestring" data-tip="Draw a line: click each vertex, and click the last one again to finish">Line</button>
+      <button type="button" data-mode="polygon" data-tip="Draw an area: click each corner, and click the first one again to finish">Area</button>
+      <button type="button" data-mode="select" data-tip="Select a drawing to move or reshape it">Edit</button>
+      <button type="button" data-mode="static" data-tip="Stop drawing">Stop</button>
+      <button type="button" data-trace="area" aria-disabled="true" data-tip="Show a historical map to trace from it">Trace area</button>
+      <button type="button" data-trace="line" aria-disabled="true" data-tip="Show a historical map to trace from it">Trace line</button>
+      <label class="snap-ink" id="chora-snap-ink-label" hidden><input type="checkbox" id="chora-snap-ink" data-tip="A vertex placed within 10 screen pixels of the map's ink goes onto it (hold Alt not to)"> Snap to ink</label>
+    </div>
+    <div class="ink-panel" id="chora-ink-panel" role="group" aria-label="Tracing from the map's ink" hidden></div>
+    <!-- How well each location of the place chosen is known (src/chora/vague.js): shown with a place. -->
+    <details class="map-key" id="chora-map-key" hidden>
+      <summary>Key: how well a location is known</summary>
+      <ul id="chora-map-key-list"></ul>
+    </details>
+    <details class="basemaps" id="chora-basemaps">
+      <summary>Basemap: <span id="chora-basemap-name">Natural Earth (this site)</span></summary>
+      <div id="chora-basemap-options"></div>
+    </details>
+  </div>`;
+
+let root = null;                // the element Chora is mounted in (mountChora)
+let host = {};                  // what the host page gives it (mountChora)
+let state = null;               // window.__chora
+let mapApi = null, adopt = null;
+const $ = (id) => root.querySelector(`#chora-${id}`);
 const PAGE = 50;
 let showing = false;   // true while the drawings shown are being replaced
 let worker, files = [], fp = null, dataset = null, drafts = [], view = null, total = 0, query = '';
@@ -70,9 +162,10 @@ const request = (msg, replyType, opts) => enqueue(() => {
 function startWorker() {
   worker = new Worker(new URL('../engine/worker.js', import.meta.url), { type: 'module' });
   worker.onerror = (e) => fail(`The engine stopped: ${e.message || 'unknown error'}`);
-  // A SQLite pool of Chora's own, so that this page and the main page can be open at once.
+  // A SQLite pool of Chora's own, so that its working copy and the page's runs are apart.
   return request({ cmd: 'init', base: new URL('./', location.href).href, pool: 'chora' }, 'ready').then(({ version: v }) => {
-    $('plato-version').innerHTML = `${v.versionInfo} at <a href="${v.repository}/tree/${v.commit}">${v.commit.slice(0, 7)}</a>`
+    // On a page of its own, the footer's PLATO commit is Chora's to write; in the main page it is the page's.
+    if (host.standalone) document.getElementById('plato-version').innerHTML = `${v.versionInfo} at <a href="${v.repository}/tree/${v.commit}">${v.commit.slice(0, 7)}</a>`
       + (v.draft ? ` <strong class="draft">${draftNote(v)}</strong>` : '');
     Object.assign(state, { phase: 'ready', platoCommit: v.commit });
   });
@@ -147,10 +240,6 @@ async function search(to = 'first') {
   $('prev').parentElement.hidden = total <= PAGE;
 }
 let typing;
-$('q').oninput = () => { clearTimeout(typing); typing = setTimeout(() => { query = $('q').value.trim(); search('first'); }, 200); };
-$('prev').onclick = () => search('prev');
-$('next').onclick = () => search('next');
-$('list').onclick = (e) => { const b = e.target.closest('button[data-id]'); if (b) selectPlace(b.dataset.id); };
 
 // ---- One place -----------------------------------------------------------------------------------
 async function selectPlace(id) {
@@ -204,7 +293,7 @@ function renderCard() {
     : `<p class="note">${none}, and nothing to place it by.</p>`;
   const list = (items, fn) => (items.length ? `<ul>${items.map((x) => `<li>${fn(x)}</li>`).join('')}</ul>` : '<p class="muted">None recorded.</p>');
   const mine = drafts.filter((d) => d.placeId === v.id);
-  card.innerHTML = `<h2 id="card-h">${esc(v.label)}</h2>
+  card.innerHTML = `<h2 id="chora-card-h">${esc(v.label)}</h2>
     <p class="muted place-id">${esc(v.id)}${v.ccodes.length ? ` · ${esc(v.ccodes.join(', '))}` : ''}</p>${where}
     <h3>Names</h3>${list(v.names, nameItem)}
     <h3>Types</h3>${list(v.types, (x) => `${esc(x.label || '')}${badge(x.status)}`)}
@@ -217,7 +306,7 @@ function renderCard() {
     <p><button type="button" id="adopt-find"${isPlaceIri(v.id) ? '' : ' disabled aria-describedby="adopt-why"'}>${esc(CHORA_ADOPT_PAGE.find)}</button>${isPlaceIri(v.id) ? '' : ` <span class="muted" id="adopt-why">${esc(CHORA_ADOPT_PAGE.noAddress)}</span>`}</p>
     <h3>Your drawings</h3>
     <p class="muted">Draw with the tools on the map. Each drawing is added as a new attestation of this place; nothing already there is changed.</p>
-    ${drawError ? `<p class="warn" id="draw-error">${esc(drawError)}</p>` : ''}
+    ${drawError ? `<p class="warn" id="chora-draw-error">${esc(drawError)}</p>` : ''}
     <ul class="pending">${mine.map(pendingItem).join('') || '<li class="muted">None yet.</li>'}</ul>`;
 }
 function pendingItem(d) {
@@ -243,16 +332,14 @@ function pendingItem(d) {
     <button type="button" data-remove>Remove</button></li>`;
 }
 const KIND = { Point: 'A point', LineString: 'A line', Polygon: 'An area' };
-
-
-$('card').addEventListener('click', (e) => {
+function cardClicked(e) {
   if (e.target.closest('#adopt-find')) { if (view) adopt.openFor(view); return; }
   const a = e.target.closest('a[data-place]');
   if (a) { e.preventDefault(); selectPlace(a.dataset.place); return; }
   const rm = e.target.closest('button[data-remove]');
   if (rm) removeDraft(rm.closest('[data-draft]').dataset.draft);
-});
-$('card').addEventListener('change', (e) => {
+}
+function cardChanged(e) {
   const sel = e.target.closest('select[data-field]');
   if (!sel) return;
   const d = drafts.find((x) => x.id === sel.closest('[data-draft]').dataset.draft);
@@ -265,7 +352,7 @@ $('card').addEventListener('change', (e) => {
   }
   // Chosen by the user: no longer the default a traced point was given.
   d[sel.dataset.field] = sel.value; d.defaulted = false; keepDrafts();
-});
+}
 
 // ---- Drawing -------------------------------------------------------------------------------------
 function onFinish(id, ctx) {
@@ -407,7 +494,7 @@ function keepDrafts() {
   if (fp) { state.draftWrites = (state.draftWrites || 0) + 1; saveDrafts(fp, drafts).finally(() => { state.draftWrites--; }); }
   showSaving();
 }
-$('draw-tools').onclick = (e) => {
+function drawToolsClicked(e) {
   // A Trace button not yet usable says why in its tooltip (aria-disabled, not disabled, so that it can be focused and its tooltip read).
   const t = e.target.closest('button[data-trace]');
   if (t) { if (t.getAttribute('aria-disabled') !== 'true') setTraceMode(t.getAttribute('aria-pressed') === 'true' ? null : t.dataset.trace); return; }
@@ -420,7 +507,7 @@ $('draw-tools').onclick = (e) => {
   $('snap-ink-label').hidden = !['linestring', 'polygon'].includes(b.dataset.mode) || !traceReady();
   // Snapping is not built again while it is not offered (ink.js): back to drawing with it on, it is built for this view.
   if (!$('snap-ink-label').hidden && $('snap-ink').checked && inkTools) inkTools.setSnap(true);
-};
+}
 
 // ---- Tracing with assistance (src/chora/ink.js, loaded when first wanted) ------------------------------
 // "Trace area" and "Trace line" propose a shape from a historical map's own pixels; they are offered once
@@ -465,7 +552,7 @@ async function setTraceMode(m) {
   if (!m && !inkTools) return;
   try { const tools = await loadInk(); tools.setMode(traceWanted); } catch (e) { drawError = state.drawError = `Tracing could not start (${e.message}).`; if (view) renderCard(); }
 }
-$('snap-ink').onchange = async (e) => { try { (await loadInk()).setSnap(e.target.checked); } catch {} };
+const snapChanged = async (e) => { try { (await loadInk()).setSnap(e.target.checked); } catch {} };
 /**
  * A proposal accepted: an ordinary drawing, cited from the map it was traced from, its round trip checked.
  * Returns null when it is a drawing now, else why not in words (the proposal is then kept).
@@ -494,12 +581,12 @@ function showSaving() {
   const c = contributors.load();
   const line = $('contributor-line');
   line.hidden = !c;
-  if (c) line.innerHTML = `Saving as <strong>${esc(c.name)}</strong>${c.orcid ? ` (<a href="${esc(c.orcid)}" rel="noopener noreferrer">${esc(c.orcid.replace('https://orcid.org/', ''))}</a>)` : ''} — <a href="#" id="c-change">change</a> / <a href="#" id="c-forget">forget me</a>`;
+  if (c) line.innerHTML = `Saving as <strong>${esc(c.name)}</strong>${c.orcid ? ` (<a href="${esc(c.orcid)}" rel="noopener noreferrer">${esc(c.orcid.replace('https://orcid.org/', ''))}</a>)` : ''} — <a href="#" id="chora-c-change">change</a> / <a href="#" id="chora-c-forget">forget me</a>`;
 }
-$('saving').addEventListener('click', (e) => {
-  if (e.target.id === 'c-change') { e.preventDefault(); askContributor(); }
-  if (e.target.id === 'c-forget') { e.preventDefault(); contributors.forget(); showSaving(); }
-});
+function savingClicked(e) {
+  if (e.target.id === 'chora-c-change') { e.preventDefault(); askContributor(); }
+  if (e.target.id === 'chora-c-forget') { e.preventDefault(); contributors.forget(); showSaving(); }
+}
 function askContributor() {
   const c = contributors.load() || {};
   $('c-name').value = c.name || ''; $('c-orcid').value = c.orcid ? c.orcid.replace('https://orcid.org/', '') : '';
@@ -508,7 +595,7 @@ function askContributor() {
   $('c-name').focus();
 }
 let saveAfterAsking = false;
-$('contributor-form').onsubmit = (e) => {
+function contributorGiven(e) {
   e.preventDefault();
   const c = contributors.fromForm($('c-name').value, $('c-orcid').value);
   if (c.error) { $('c-error').textContent = c.error; $('c-error').hidden = false; return; }
@@ -516,12 +603,12 @@ $('contributor-form').onsubmit = (e) => {
   $('contributor-form').hidden = true;
   showSaving();
   if (saveAfterAsking) { saveAfterAsking = false; saveDataset(); }
-};
-$('c-cancel').onclick = () => { saveAfterAsking = false; $('contributor-form').hidden = true; showSaving(); };
-$('save').onclick = () => {
+}
+const contributorCancelled = () => { saveAfterAsking = false; $('contributor-form').hidden = true; showSaving(); };
+function saveClicked() {
   if (!contributors.load()) { saveAfterAsking = true; askContributor(); return; }
   saveDataset();
-};
+}
 
 async function saveDataset() {
   const contributor = contributors.load();
@@ -683,22 +770,25 @@ async function saveFile(file, name) {
   setTimeout(() => URL.revokeObjectURL(a.href), 60000);
   return 'download';
 }
-window.__chora_save = save;
 
 // ---- The way back into a workflow (handback.js) --------------------------------------------------
 // Opened from a Methodos workflow (chora.html#workflow=<id>), a file saved is handed back to it: a
 // record in this browser naming the file by name, size and SHA-256, never the file, and a link to the
 // main page at the workflow. The id is read once, from the address, and used only if it is one; it
 // reaches the page and the link as text and as a checked address, never as markup.
-const wf = handback.workflowOf(location.hash);
-const workflow = wf?.id || null;
-state.workflow = workflow; state.workflowRefused = !!wf?.refused; state.handback = null;
-if (wf) {
-  const p = $('workflow');
-  p.className = workflow ? 'note' : 'warn';
-  p.textContent = workflow ? 'Opened for a workflow on the main page: save the dataset here to hand it back to the workflow. Going back without saving hands nothing back.'
-    : 'This address names a workflow, but not in a form these tools use, so nothing saved here is handed back to it.';
-  p.hidden = false;
+// On Chora's own page only (chora.html, host.standalone): in the main page there is no other page to go back to.
+let wf = null, workflow = null;
+function workflowNamed() {
+  wf = handback.workflowOf(location.hash);
+  workflow = wf?.id || null;
+  state.workflow = workflow; state.workflowRefused = !!wf?.refused; state.handback = null;
+  if (wf) {
+    const p = $('workflow');
+    p.className = workflow ? 'note' : 'warn';
+    p.textContent = workflow ? 'Opened for a workflow on the main page: save the dataset here to hand it back to the workflow. Going back without saving hands nothing back.'
+      : 'This address names a workflow, but not in a form these tools use, so nothing saved here is handed back to it.';
+    p.hidden = false;
+  }
 }
 // The way back, offered in the masthead from the start (Stephen, 12 October 2026, Issue #33 point 5):
 // "Back to the workflow" (./#workflow=<id>) when opened for one, else "Back to PLATO tools", where the
@@ -709,7 +799,8 @@ let refused = null;      // the name of the file saved whose hand-back this brow
 let pastStep = false;    // the workflow has gone past this step since (a page shown again from the browser's memory)
 let returning = null;    // outside a workflow: the names of the files the main page chooses again (its kept file), if kept
 function wayBack() {
-  const a = $('way-back'), note = $('way-back-note');
+  const a = document.getElementById('way-back'), note = document.getElementById('way-back-note');
+  if (!a) return;
   if (workflow) {
     a.textContent = 'Back to the workflow'; a.href = handback.backTo(workflow, location.href);
     note.textContent = pastStep ? ' The workflow has gone past this step since: nothing is handed back to it from here.'
@@ -720,7 +811,7 @@ function wayBack() {
     a.textContent = 'Back to PLATO tools'; a.href = new URL('./', location.href).href;
     note.textContent = returning?.length ? ` ${returning.join(', ')} ${returning.length === 1 ? 'is' : 'are'} chosen there again.` : '';
   }
-  $('way-back-line').hidden = false;
+  document.getElementById('way-back-line').hidden = false;
   state.wayBack = { words: a.textContent, href: a.href, said: note.textContent.trim(), handsBack: !!handedBack && !pastStep, refused: !!refused };
 }
 /**
@@ -739,14 +830,13 @@ async function handBackAgain(ref) {
   pastStep = true; wayBack();
   return false;
 }
-$('way-back').addEventListener('click', async (e) => {
+async function wayBackClicked(e) {
   if (!workflow || !handedBack || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   // After a save, the hand-back is written again first, so that the main page finds it fresh.
   e.preventDefault();
   await handBackAgain(handedBack);
-  location.assign($('way-back').href);
-});
-wayBack();
+  location.assign(e.currentTarget.href);
+}
 /** Outside a workflow, say which files the main page chooses again (at the start, below; and again when the kept file changes, as when it is forgotten in the Permissions panel). */
 const sayReturning = () => {
   if (workflow || !permissions.keepWorkingData()) return;
@@ -754,12 +844,11 @@ const sayReturning = () => {
 };
 // Shown again from the browser's memory: the workflow may have gone on meanwhile, and the kept file
 // is said again as it stands.
-keptChanged(() => sayReturning());
-window.addEventListener('pageshow', (e) => {
+function shownAgain(e) {
   if (!e.persisted) return;
   if (workflow && handedBack) atChorasStep().then((at) => { pastStep = !at; wayBack(); });
   sayReturning();
-});
+}
 // "Keep my working data" turned off here: what the main page keeps goes at once, as the panel says:
 // the file the user chose there (src/lib/kept-file.js), Methodos's kept files (the user's own copy
 // among them, in methodos-outputs/), and the workflow's record moves to the tab (sessionStorage), as
@@ -769,8 +858,8 @@ async function forgetMainPagesData() {
   try { await (await navigator.storage.getDirectory()).removeEntry('methodos-outputs', { recursive: true }); } catch { /* none kept */ }
   returning = null; wayBack();
 }
-let keptHere = permissions.keepWorkingData();
-permissions.onChange(() => {
+let keptHere = true;
+function keepingChanged() {
   const now = permissions.keepWorkingData();
   if (now === keptHere) return;
   keptHere = now;
@@ -778,23 +867,26 @@ permissions.onChange(() => {
   forgetMainPagesData();
   if (workflow) workflowRecord.then((r) => { if (r) workflowStore().save(r).catch(() => {}); });
   state.workingForgotten = true;
-});
+}
 
 // The workflow's few words, read-only, in the panel: its title, "Step n of N", and this step's words,
 // from its record kept in this browser (Methodos's store; in the tab's sessionStorage when working data
 // is not kept). The record, or null; read once, at the start.
-const workflowRecord = workflow ? workflowStore().load(workflow).catch(() => null) : Promise.resolve(null);
+let workflowRecord = Promise.resolve(null);
 let workflowScope = null;   // the workflow's Scope, for the adopt search (src/engine/krisis/scope.js), checked as it is read
-workflowRecord.then((r) => { workflowScope = r?.scope ? normaliseScope(r.scope) : null; state.scope = workflowScope; });
-workflowRecord.then((r) => {
-  const t = r && trackOf(r, RECIPES[r.recipe?.key]);
-  state.workflowStep = t ? { title: t.title, step: t.step, words: t.words } : null;
-  if (!t) return;
-  const box = $('workflow-track'), head = document.createElement('p'), title = document.createElement('strong'), what = document.createElement('p');
-  title.textContent = t.title; head.append(title, ` · ${t.step}`);
-  what.textContent = `${t.words}${/[.!?]$/.test(t.words) ? '' : '.'}`;
-  box.replaceChildren(head, what); box.hidden = false;
-});
+function workflowRead() {
+  workflowRecord = workflow ? workflowStore().load(workflow).catch(() => null) : Promise.resolve(null);
+  workflowRecord.then((r) => { workflowScope = r?.scope ? normaliseScope(r.scope) : null; state.scope = workflowScope; });
+  workflowRecord.then((r) => {
+    const t = r && trackOf(r, RECIPES[r.recipe?.key]);
+    state.workflowStep = t ? { title: t.title, step: t.step, words: t.words } : null;
+    if (!t) return;
+    const box = $('workflow-track'), head = document.createElement('p'), title = document.createElement('strong'), what = document.createElement('p');
+    title.textContent = t.title; head.append(title, ` · ${t.step}`);
+    what.textContent = `${t.words}${/[.!?]$/.test(t.words) ? '' : '.'}`;
+    box.replaceChildren(head, what); box.hidden = false;
+  });
+}
 /** The workflow's current dataset, as the main page keeps it (its own file, or a step's), or null: Chora opens it when no file was handed over. */
 async function workflowDataset() {
   const r = await workflowRecord;
@@ -822,7 +914,7 @@ async function handBack(file) {
   handedBack = kept ? ref : null; refused = kept ? null : ref.name; wayBack();
   $('back-to-workflow')?.closest('p')?.remove();
   const p = document.createElement('p'), a = document.createElement('a');
-  a.id = 'back-to-workflow'; a.className = 'button'; a.textContent = 'Back to the workflow';
+  a.id = 'chora-back-to-workflow'; a.className = 'button'; a.textContent = 'Back to the workflow';
   a.href = handback.backTo(workflow, location.href);
   // Taken by a click, the record is written again first, so that the main page finds it fresh (two
   // minutes, as the hand-off: handoff.js); a link opened in another tab finds the one written at the save.
@@ -868,13 +960,13 @@ function renderBasemaps() {
   const typed = $('paste')?.value || '';
   // The line asking for permission goes first, where it is seen without scrolling the list.
   $('basemap-options').innerHTML = (basemapError ? `<p class="warn" role="status">${esc(basemapError)}</p>` : '')
-    + (remembered ? `<p class="needs-permission" id="basemap-remembered">${esc(REMEMBERED_BASEMAP.line(remembered.name))} <button type="button" class="link" id="use-remembered">${esc(REMEMBERED_BASEMAP.use)}</button></p>` : '')
-    + '<div id="basemap-needs"></div>' + [...groups].map(([g, bs]) => `<fieldset><legend>${esc(g)}</legend>${bs.map((b) => `<label class="${b.disabled ? 'disabled' : ''}">
+    + (remembered ? `<p class="needs-permission" id="chora-basemap-remembered">${esc(REMEMBERED_BASEMAP.line(remembered.name))} <button type="button" class="link" id="chora-use-remembered">${esc(REMEMBERED_BASEMAP.use)}</button></p>` : '')
+    + '<div id="chora-basemap-needs"></div>' + [...groups].map(([g, bs]) => `<fieldset><legend>${esc(g)}</legend>${bs.map((b) => `<label class="${b.disabled ? 'disabled' : ''}">
       <input type="radio" name="basemap" value="${esc(b.id)}"${b.id === (waiting || cur).id ? ' checked' : ''}${b.disabled ? ' disabled' : ''}> ${esc(b.name)}${b.disabled ? ` <small>(${esc(b.disabled)})</small>` : ''}
       ${b.group === 'Pasted' ? ` <button type="button" class="link" data-unpaste="${esc(b.id)}">remove</button>` : ''}</label>`).join('')}</fieldset>`).join('')
-    + `<form id="paste-form"><label for="paste">Paste a style address or a tile template</label>
-      <input id="paste" type="url" placeholder="https://…/style.json or https://…/{z}/{x}/{y}.png" autocomplete="off">
-      <button type="submit">Add</button> <span id="paste-error" class="warn"></span></form>`
+    + `<form id="chora-paste-form"><label for="chora-paste">Paste a style address or a tile template</label>
+      <input id="chora-paste" type="url" placeholder="https://…/style.json or https://…/{z}/{x}/{y}.png" autocomplete="off">
+      <button type="submit">Add</button> <span id="chora-paste-error" class="warn"></span></form>`
     + (state.blocked ? `<p class="muted">Refused ${n(state.blocked)} request${state.blocked === 1 ? '' : 's'} to ${esc(state.blockedOrigins.join(', '))}, not the basemap's site.</p>` : '');
   if (typed) $('paste').value = typed;
   // One line for each permission the basemap wanted still needs (a pasted style may name several sites).
@@ -895,28 +987,28 @@ function want(b) {
   if (basemaps.permitted(b)) useBasemap(b);
   else { $('basemaps').open = true; renderBasemaps(); }
 }
-$('basemap-options').addEventListener('change', (e) => {
+function basemapChanged(e) {
   if (e.target.name !== 'basemap') return;
   const b = listed.get(e.target.value);
   if (b && !b.disabled) want(b);
-});
-$('basemap-options').addEventListener('click', (e) => {
-  if (e.target.id === 'use-remembered') { const w = listed.get(state.basemapRemembered); if (w) want(w); return; }
+}
+function basemapClicked(e) {
+  if (e.target.id === 'chora-use-remembered') { const w = listed.get(state.basemapRemembered); if (w) want(w); return; }
   if (e.target.dataset.unpaste) {
     const id = e.target.dataset.unpaste;
     basemaps.removePasted(id);
     if (chosenHere?.id === id) chosenHere = null;
     if (currentNow().id === id || state.basemap === id || basemaps.wanted() === null) want(basemaps.byId('natural-earth')); else renderBasemaps();
   }
-});
-$('basemap-options').addEventListener('submit', (e) => {
+}
+function basemapPasted(e) {
   e.preventDefault();
   const b = basemaps.fromPaste($('paste').value);
   if (!b) { $('paste-error').textContent = 'That is not an https address.'; return; }
   basemaps.addPasted(b);
   $('paste').value = '';   // added: nothing waits in the box now
   want(b);
-});
+}
 async function useBasemap(b) {
   if (!b.local) {
     basemapError = state.basemapError = null;
@@ -951,13 +1043,13 @@ async function useBasemap(b) {
 // Natural Earth at once; one wanted that now may be used (allowed again within this load's policy) is
 // used, if it is automatic or was chosen here (a change may come from another tab, or another page of
 // the origin, which must not put a pasted basemap on the map).
-permissions.onChange(() => {
+function basemapPermissionChanged() {
   const shown = basemaps.byId(state.basemap);
   if (shown && !shown.local && !basemaps.permitted(shown)) { useBasemap(basemaps.byId('natural-earth')); return; }
   const w = basemaps.wanted();
   if (w && !w.disabled && w.id !== state.basemap && basemaps.permitted(w) && (basemaps.automatic(w) || basemaps.sameBasemap(w, chosenHere))) { useBasemap(basemaps.automatic(w) ? w : chosenHere); return; }
   renderBasemaps();
-});
+}
 
 // ---- Historical maps -----------------------------------------------------------------------------
 // A georeferenced map over the basemap (src/chora/overlays.js has how it gets there; src/chora/
@@ -1098,8 +1190,8 @@ function overlayEvent(type, e) {
 // A tile the renderer's worker could not fetch (refused by the page's policy, say, when its server
 // sent the request elsewhere) is reported by the renderer only to the console, as a ResourceFetchError
 // naming the tile's address (@allmaps/render 1.0.0-beta.84, CacheableWorkerImageDataTile: no event is
-// dispatched). So the page listens there, for the tiles of its own maps only, and says so in plain words.
-{
+// dispatched). So Chora listens there, from when it is mounted, for the tiles of its own maps only, and says so in plain words.
+function listenForTileErrors() {
   const toConsole = console.error.bind(console);
   console.error = (...args) => {
     try {
@@ -1132,21 +1224,21 @@ function renderMaps() {
   let html = '';
   if (mapChoice) {
     const one = (c) => `Georeference ${c.index + 1}${c.label ? `: ${esc(c.label)}` : ''} <span class="muted">(${c.modified ? `changed ${esc(c.modified.slice(0, 10))}` : 'no date given'}, ${c.gcps === null ? 'control points not given' : `${c.gcps} control point${c.gcps === 1 ? '' : 's'}`}${c.id ? `; ${esc(c.id)}` : ''})</span>`;
-    html += `<div class="choice" id="map-choice" role="group" aria-labelledby="map-choice-text"><p id="map-choice-text">This holds ${mapChoice.choices.length} georeferences of the map, made separately. Choose the one to show (the most recently changed is chosen):</p>
+    html += `<div class="choice" id="chora-map-choice" role="group" aria-labelledby="chora-map-choice-text"><p id="chora-map-choice-text">This holds ${mapChoice.choices.length} georeferences of the map, made separately. Choose the one to show (the most recently changed is chosen):</p>
       <ul class="choices">${mapChoice.choices.map((c) => `<li><label><input type="radio" name="georef-choice" value="${c.index}"${c.index === mapChoice.chosen ? ' checked' : ''}> ${one(c)}</label></li>`).join('')}</ul>
-      <p><button type="button" class="primary" id="map-choose">Show this one</button> <button type="button" id="map-choose-no">Not now</button></p></div>`;
+      <p><button type="button" class="primary" id="chora-map-choose">Show this one</button> <button type="button" id="chora-map-choose-no">Not now</button></p></div>`;
   }
   if (mapOffer) {
     const name = mapOffer.title ? `“${esc(mapOffer.title)}”` : 'This map';
     // The Editor is linked unless Allmaps is set to Never, saying what following it sends (overlays.js).
-    const editor = editorShown() ? `<a href="${esc(ov.editorUrl(mapOffer.manifestUrl, mapOffer.services[0]))}" target="_blank" rel="noopener noreferrer" id="map-editor">${esc(ov.EDITOR_LINK_TEXT)}</a>` : '';
+    const editor = editorShown() ? `<a href="${esc(ov.editorUrl(mapOffer.manifestUrl, mapOffer.services[0]))}" target="_blank" rel="noopener noreferrer" id="chora-map-editor">${esc(ov.EDITOR_LINK_TEXT)}</a>` : '';
     html += `<div class="offer"><p>${name} came with no georeference${mapOffer.notFound ? ', and Allmaps has none for it' : ''}.</p>
-      ${mapOffer.notFound ? '' : '<p><button type="button" class="primary" id="map-lookup">Look for a georeference</button></p>'}
+      ${mapOffer.notFound ? '' : '<p><button type="button" class="primary" id="chora-map-lookup">Look for a georeference</button></p>'}
       ${editor ? `<p>${mapOffer.notFound ? 'You can' : 'Or'} georeference it in the Allmaps Editor, and paste here the georeference it makes: ${editor}</p>` : `<p>${mapOffer.notFound ? 'You can georeference it elsewhere, and' : 'Or'} paste a georeference of it here.</p>`}</div>`;
   }
   if (mapStatus) {
     const warn = mapStatus.startsWith('warn:');
-    html += `<p class="${warn ? 'warn' : 'muted'}">${esc(mapStatus.replace(/^warn:/, ''))}${mapLink ? ` <a href="${esc(mapLink)}" target="_blank" rel="noopener noreferrer" id="map-forwards">${esc(mapLink)}</a>` : ''}</p>`;
+    html += `<p class="${warn ? 'warn' : 'muted'}">${esc(mapStatus.replace(/^warn:/, ''))}${mapLink ? ` <a href="${esc(mapLink)}" target="_blank" rel="noopener noreferrer" id="chora-map-forwards">${esc(mapLink)}</a>` : ''}</p>`;
   }
   $('map-status').innerHTML = html;
   $('overlay-list').innerHTML = state.overlays.map((o) => {
@@ -1166,26 +1258,26 @@ function renderMaps() {
       ${editorShown() ? `<p><a href="${esc(ov.editorUrl(e.manifestUrl, e.g.imageServiceId))}" target="_blank" rel="noopener noreferrer" data-editor>${esc(ov.EDITOR_LINK_TEXT)}</a></p>` : ''}</li>`;
   }).join('');
 }
-$('map-form').onsubmit = (e) => { e.preventDefault(); mapOffer = null; mapChoice = null; addMap({ text: $('map-input').value }); };
-$('map-status').addEventListener('click', (e) => {
-  if (e.target.id === 'map-choose' && mapChoice) {
+const mapPasted = (e) => { e.preventDefault(); mapOffer = null; mapChoice = null; addMap({ text: $('map-input').value }); };
+function mapStatusClicked(e) {
+  if (e.target.id === 'chora-map-choose' && mapChoice) {
     const picked = $('map-status').querySelector('input[name="georef-choice"]:checked');
     const { parsed, manifestUrl, chosen } = mapChoice; mapChoice = null;
     addMap({ parsed: { ...parsed, index: picked ? Number(picked.value) : chosen }, manifestUrl });
-  } else if (e.target.id === 'map-choose-no') { mapChoice = null; setStatus(''); renderMaps(); }
-  else if (e.target.id === 'map-lookup' && mapOffer) addMap({ text: mapOffer.text, lookup: true });
-});
-$('overlay-list').addEventListener('input', (e) => {
+  } else if (e.target.id === 'chora-map-choose-no') { mapChoice = null; setStatus(''); renderMaps(); }
+  else if (e.target.id === 'chora-map-lookup' && mapOffer) addMap({ text: mapOffer.text, lookup: true });
+}
+function overlayInput(e) {
   const li = e.target.closest('[data-overlay]'); if (!li) return;
   const o = state.overlays.find((x) => x.key === li.dataset.overlay);
   if (e.target.matches('[data-opacity]')) { o.opacity = Number(e.target.value) / 100; layers.set(o.key, { opacity: o.opacity }); keepOverlay(o); }
-});
-$('overlay-list').addEventListener('change', (e) => {
+}
+function overlayChanged(e) {
   const li = e.target.closest('[data-overlay]'); if (!li) return;
   const o = state.overlays.find((x) => x.key === li.dataset.overlay);
   if (e.target.matches('[data-show]')) { o.visible = e.target.checked; layers.set(o.key, { visible: o.visible }); keepOverlay(o); updateTraceButtons(); }
-});
-$('overlay-list').addEventListener('click', (e) => {
+}
+function overlayClicked(e) {
   const li = e.target.closest('[data-overlay]'); if (!li) return;
   const key = li.dataset.overlay;
   if (e.target.matches('[data-permissions]')) permissions.open({ focus: e.target.dataset.permissions });
@@ -1194,7 +1286,7 @@ $('overlay-list').addEventListener('click', (e) => {
     layers.remove(key);
     ov.letGo(key).then(() => { state.overlays = state.overlays.filter((x) => x.key !== key); renderMaps(); updateTraceButtons(); });
   }
-});
+}
 // Noted at once and written in turn (overlays.js keepShown), so that a reload straight after the tick finds it.
 function keepOverlay(o) { ov.keepShown(o.key, o).catch((err) => console.warn('Chora: the map could not be kept', err)); }
 /**
@@ -1259,12 +1351,6 @@ function boxOf(geoms) {
   return w === Infinity ? null : [w, s, e, nn];
 }
 
-$('picker').onchange = (e) => open(e.target.files);
-const drop = $('drop');
-drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
-drop.ondragleave = () => drop.classList.remove('over');
-drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); open(e.dataTransfer.files); };
-
 // A basemap whose style cannot be loaded leaves no map to draw on: Natural Earth, from this site, instead.
 function styleFailed(why, b = basemaps.byId(state.basemap)) {
   if (!b || b.local) return;
@@ -1273,7 +1359,6 @@ function styleFailed(why, b = basemaps.byId(state.basemap)) {
   basemaps.choose(basemaps.byId('natural-earth'));
   useBasemap(basemaps.byId('natural-earth'));
 }
-const mapApi = createMap($('map'), { state, onPlaceClick: (id) => selectPlace(id), onStyleError: styleFailed });
 
 // ---- The map's key: how well a location is known (src/chora/vague.js) ------------------------------
 // Each precision twice, drawn by the functions that draw it on the map: its mark around the disc of a
@@ -1305,114 +1390,192 @@ function renderKey() {
     }
   }
 }
-renderKey();
-mapApi.onDraw({
-  finish: onFinish,
-  // A drawing deleted with the Edit tool (its Delete key) is removed from the drafts too. Clearing
-  // the tool to show another place's drawings also deletes, so only the user's own deletions count.
-  change: (ids, type, ctx) => {
-    if (type !== 'delete' || ctx?.origin === 'api' || showing) return;
-    const gone = new Set(ids.map(String));
-    if (drafts.some((d) => gone.has(d.id))) { drafts = drafts.filter((d) => !gone.has(d.id)); keepDrafts(); if (view) renderCard(); }
-  },
-});
-initMaps();
-updateTraceButtons();
-const adopt = createAdopt({ root: $('adopt'), mapApi, state, addAdoption, armConsult: (c) => { consultArmed = c; state.consultArmed = c ? c.record : null; },
-  adopted: (placeId) => drafts.filter((d) => d.kind === 'adoption' && d.placeId === placeId),
-  // The workflow's Scope (Issue #33), read from its record once it is read; none outside a workflow.
-  scope: () => workflowScope });
-// A click on the map while tracing is the trace's (Shift-click carries a line on). Made in the moment after
-// the first press of a trace tool, before ink.js has arrived, it waits for it: the first click of a user
-// who presses "Trace line" and clicks the river is not lost on a slow connection.
-mapApi.map.on('click', async (e) => {
-  if (!traceWanted) return;
-  const lngLat = e.lngLat, point = [e.point.x, e.point.y], shift = !!e.originalEvent?.shiftKey;
-  let tools = inkTools;
-  if (!tools) try { tools = await loadInk(); } catch { return; }   // said by setTraceMode, which failed the same way
-  if (traceWanted && tools.mode) tools.click(lngLat, point, shift);
-});
-// A permission changed: maps whose permission is withdrawn go at once; maps waiting on one go on.
-permissions.onChange(permissionsChanged);
-// The map and the drawing tool, for automated tests; nothing else reads them.
-window.__chora_map = mapApi.map;
-Object.defineProperty(window, '__chora_draw', { get: () => mapApi.draw });
-// The Permissions panel, from the header's button, and the proof that the page's policy is enforced
-// (state.canary): until it has come, no other site is asked; unless it holds, none ever is.
-permissions.mount({ state }).then((r) => {
-  // Not enforced: a basemap chosen from another site is not used (current() never offers it, as it is
-  // in no policy), and the page says why rather than offering a reload that would change nothing.
-  const w = basemaps.wanted();
-  if (!r?.enforced && w && !w.local) { unprotected(w); $('basemaps').open = true; renderBasemaps(); }
-});
-// The page's policy is written at load, so a permission allowed is in it from the next one: before
-// the page reloads for it, what is open is kept (the files, the place, the view), and taken back after.
-permissions.onBeforeReload(async () => {
-  state.phase = 'reloading';
-  await draftsWritten();
-  await ov.keptWritten();
-  const m = mapApi.map;
-  // And the historical map pasted waiting on the permissions (it is added after the reload), whether maps
-  // kept wait too (they are looked at again after every load), and what is typed in its box.
-  await keepForReload({ files, placeId: state.placeId, camera: { center: m.getCenter().toArray(), zoom: m.getZoom(), bearing: m.getBearing(), pitch: m.getPitch() },
-    maps: { ...ov.reloadHandOver(mapNeed), typed: $('map-input').value || '' } });
-});
-// What the reload keeps not: a line or area still being drawn (finished drawings are kept), an
-// address in the paste box not yet added, a save running. Each is said in the panel first, with Cancel.
-permissions.onBeforeReload(() => {}, { loses: () => {
-  try { return mapApi.draw?.getSnapshot().some((f) => f.properties?.currentlyDrawing) ? RELOAD_LOSES.drawing : null; } catch { return null; }
-} });
-permissions.onBeforeReload(() => {}, { loses: () => ($('paste')?.value.trim() ? RELOAD_LOSES.pasted : null) });
-permissions.onBeforeReload(() => {}, { loses: () => (state.phase === 'saving' ? RELOAD_LOSES.saving : null) });
-// A shape proposed from a map's ink and not yet accepted (RELOAD_LOSES.tracing, R2).
-permissions.onBeforeReload(() => {}, { loses: () => (inkTools?.proposal ? RELOAD_LOSES.tracing : null) });
-// The gazetteer's answers on screen, not yet adopted (an adoption made is kept with the drawings).
-permissions.onBeforeReload(() => {}, { loses: () => adopt.loses() });
-// Who was remembered, checked again (contributor.load): what is kept is written back as checked, so that an ORCID
-// that is not one, however it got into this browser's storage, is neither shown, saved nor listed in the panel.
-try { const c = contributors.load(); if (c) contributors.remember(c); else if (localStorage.getItem('chora-contributor') !== null) contributors.forget(); } catch { /* storage refused: nothing kept */ }
-useBasemap(currentNow());
-startWorker().then(async () => {
-  // Back from a reload for a permission: the dataset, the place and the view as they were.
-  const resumed = await takeResume();
-  if (resumed) {
-    if (resumed.files?.length) {
-      await open(resumed.files);
-      if (resumed.placeId && dataset) await selectPlace(resumed.placeId);
+
+// ---- Mounting ------------------------------------------------------------------------------------
+/**
+ * Mount Chora in `rootEl`, once in a page's life: its panel and its map are put into it, the map made,
+ * and its engine started. `context` is what the host page gives it:
+ *   standalone   true on Chora's own page (chora.html), which has its own masthead, footer and
+ *                Permissions panel, and the way back to the main page.
+ *   lookup()     the page's WHG lookup, and onRefused(fn) what to tell when a request of it is refused
+ *                for want of permission: the adoption asks WHG through the page's one lookup.
+ * Returns { state, show(), hide() }: the host shows and hides the root; Chora is told, so that the map
+ * is fitted to the room it has again.
+ */
+export function mountChora(rootEl, context = {}) {
+  if (root) throw new Error('Chora is mounted once in a page.');
+  root = rootEl; host = context;
+  state = (window.__chora = { phase: 'loading', placeId: null, pendingCount: 0, basemap: null, mapReadyCount: 0, blocked: 0, lastSave: null, overlays: [] });
+  // The writes of the historical maps kept not yet on disk (overlays.js), for tests to wait on, like draftWrites.
+  Object.defineProperty(state, 'overlayWrites', { get: ov.writesPending, enumerable: true });
+  root.innerHTML = html({ files: true });
+  window.__chora_save = save;
+
+  // The panel's controls.
+  $('q').oninput = () => { clearTimeout(typing); typing = setTimeout(() => { query = $('q').value.trim(); search('first'); }, 200); };
+  $('prev').onclick = () => search('prev');
+  $('next').onclick = () => search('next');
+  $('list').onclick = (e) => { const b = e.target.closest('button[data-id]'); if (b) selectPlace(b.dataset.id); };
+  $('card').addEventListener('click', cardClicked);
+  $('card').addEventListener('change', cardChanged);
+  $('draw-tools').onclick = drawToolsClicked;
+  $('snap-ink').onchange = snapChanged;
+  $('saving').addEventListener('click', savingClicked);
+  $('contributor-form').onsubmit = contributorGiven;
+  $('c-cancel').onclick = contributorCancelled;
+  $('save').onclick = saveClicked;
+  $('basemap-options').addEventListener('change', basemapChanged);
+  $('basemap-options').addEventListener('click', basemapClicked);
+  $('basemap-options').addEventListener('submit', basemapPasted);
+  $('map-form').onsubmit = mapPasted;
+  $('map-status').addEventListener('click', mapStatusClicked);
+  $('overlay-list').addEventListener('input', overlayInput);
+  $('overlay-list').addEventListener('change', overlayChanged);
+  $('overlay-list').addEventListener('click', overlayClicked);
+  $('picker').onchange = (e) => open(e.target.files);
+  const drop = $('drop');
+  drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
+  drop.ondragleave = () => drop.classList.remove('over');
+  drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); open(e.dataTransfer.files); };
+
+  // On Chora's own page: the workflow it was opened for, and the way back.
+  if (host.standalone) {
+    workflowNamed();
+    document.getElementById('way-back').addEventListener('click', wayBackClicked);
+    wayBack();
+    keptChanged(() => sayReturning());
+    window.addEventListener('pageshow', shownAgain);
+    keptHere = permissions.keepWorkingData();
+    permissions.onChange(keepingChanged);
+    workflowRead();
+  }
+
+  // The map, its key, its drawing and its historical maps.
+  listenForTileErrors();
+  mapApi = createMap($('map'), { state, onPlaceClick: (id) => selectPlace(id), onStyleError: styleFailed });
+  renderKey();
+  mapApi.onDraw({
+    finish: onFinish,
+    // A drawing deleted with the Edit tool (its Delete key) is removed from the drafts too. Clearing
+    // the tool to show another place's drawings also deletes, so only the user's own deletions count.
+    change: (ids, type, ctx) => {
+      if (type !== 'delete' || ctx?.origin === 'api' || showing) return;
+      const gone = new Set(ids.map(String));
+      if (drafts.some((d) => gone.has(d.id))) { drafts = drafts.filter((d) => !gone.has(d.id)); keepDrafts(); if (view) renderCard(); }
+    },
+  });
+  initMaps();
+  updateTraceButtons();
+  adopt = createAdopt({ root: $('adopt'), mapApi, state, addAdoption, armConsult: (c) => { consultArmed = c; state.consultArmed = c ? c.record : null; },
+    adopted: (placeId) => drafts.filter((d) => d.kind === 'adoption' && d.placeId === placeId),
+    // The workflow's Scope (Issue #33), read from its record once it is read; none outside a workflow.
+    scope: () => workflowScope, lookup: host.lookup, onRefused: host.onRefused });
+  // A click on the map while tracing is the trace's (Shift-click carries a line on). Made in the moment after
+  // the first press of a trace tool, before ink.js has arrived, it waits for it: the first click of a user
+  // who presses "Trace line" and clicks the river is not lost on a slow connection.
+  mapApi.map.on('click', async (e) => {
+    if (!traceWanted) return;
+    const lngLat = e.lngLat, point = [e.point.x, e.point.y], shift = !!e.originalEvent?.shiftKey;
+    let tools = inkTools;
+    if (!tools) try { tools = await loadInk(); } catch { return; }   // said by setTraceMode, which failed the same way
+    if (traceWanted && tools.mode) tools.click(lngLat, point, shift);
+  });
+  // A permission changed, here or in another tab: the basemap shown, and the historical maps, answer it.
+  permissions.onChange(basemapPermissionChanged);
+  permissions.onChange(permissionsChanged);
+  // The map and the drawing tool, for automated tests; nothing else reads them.
+  window.__chora_map = mapApi.map;
+  Object.defineProperty(window, '__chora_draw', { get: () => mapApi.draw, configurable: true });
+  // The proof that the page's policy is enforced (state.canary): until it has come, no other site is
+  // asked; unless it holds, none ever is. On Chora's own page, with the Permissions panel from its header's button.
+  const canary = host.standalone ? permissions.mount({ state })
+    : (state.canary = 'pending', permissions.enforced().then((ok) => {
+      Object.assign(state, { canary: ok ? 'enforced' : 'not-enforced', canaryWhy: permissions.canaryState()?.why || null });
+      return permissions.canaryState();
+    }));
+  canary.then((r) => {
+    // Not enforced: a basemap chosen from another site is not used (current() never offers it, as it is
+    // in no policy), and the page says why rather than offering a reload that would change nothing.
+    const w = basemaps.wanted();
+    if (!r?.enforced && w && !w.local) { unprotected(w); $('basemaps').open = true; renderBasemaps(); }
+  });
+  // The page's policy is written at load, so a permission allowed is in it from the next one: before
+  // the page reloads for it, what is open is kept (the files, the place, the view), and taken back after.
+  permissions.onBeforeReload(async () => {
+    state.phase = 'reloading';
+    await draftsWritten();
+    await ov.keptWritten();
+    const m = mapApi.map;
+    // And the historical map pasted waiting on the permissions (it is added after the reload), whether maps
+    // kept wait too (they are looked at again after every load), and what is typed in its box.
+    await keepForReload({ files, placeId: state.placeId, camera: { center: m.getCenter().toArray(), zoom: m.getZoom(), bearing: m.getBearing(), pitch: m.getPitch() },
+      maps: { ...ov.reloadHandOver(mapNeed), typed: $('map-input').value || '' } });
+  });
+  // What the reload keeps not: a line or area still being drawn (finished drawings are kept), an
+  // address in the paste box not yet added, a save running. Each is said in the panel first, with Cancel.
+  permissions.onBeforeReload(() => {}, { loses: () => {
+    try { return mapApi.draw?.getSnapshot().some((f) => f.properties?.currentlyDrawing) ? RELOAD_LOSES.drawing : null; } catch { return null; }
+  } });
+  permissions.onBeforeReload(() => {}, { loses: () => ($('paste')?.value.trim() ? RELOAD_LOSES.pasted : null) });
+  permissions.onBeforeReload(() => {}, { loses: () => (state.phase === 'saving' ? RELOAD_LOSES.saving : null) });
+  // A shape proposed from a map's ink and not yet accepted (RELOAD_LOSES.tracing, R2).
+  permissions.onBeforeReload(() => {}, { loses: () => (inkTools?.proposal ? RELOAD_LOSES.tracing : null) });
+  // The gazetteer's answers on screen, not yet adopted (an adoption made is kept with the drawings).
+  permissions.onBeforeReload(() => {}, { loses: () => adopt.loses() });
+  // Who was remembered, checked again (contributor.load): what is kept is written back as checked, so that an ORCID
+  // that is not one, however it got into this browser's storage, is neither shown, saved nor listed in the panel.
+  try { const c = contributors.load(); if (c) contributors.remember(c); else if (localStorage.getItem('chora-contributor') !== null) contributors.forget(); } catch { /* storage refused: nothing kept */ }
+  useBasemap(currentNow());
+  startWorker().then(async () => {
+    // Back from a reload for a permission: the dataset, the place and the view as they were.
+    const resumed = await takeResume();
+    if (resumed) {
+      if (resumed.files?.length) {
+        await open(resumed.files);
+        if (resumed.placeId && dataset) await selectPlace(resumed.placeId);
+      }
+      if (resumed.camera) mapApi.map.jumpTo(resumed.camera);
+      state.resumed = { files: (resumed.files || []).map((f) => f.name), placeId: resumed.placeId || null, maps: resumed.maps || null };
+      if (resumed.maps?.typed) $('map-input').value = resumed.maps.typed;
+      await inTurn(() => readmitKept());
+      // The map pasted that was waiting on the permissions just allowed (the maps kept are back already).
+      const pending = resumed.maps?.pending;
+      if (pending) await addMap(pending);
+      return;
     }
-    if (resumed.camera) mapApi.map.jumpTo(resumed.camera);
-    state.resumed = { files: (resumed.files || []).map((f) => f.name), placeId: resumed.placeId || null, maps: resumed.maps || null };
-    if (resumed.maps?.typed) $('map-input').value = resumed.maps.typed;
-    await inTurn(() => readmitKept());
-    // The map pasted that was waiting on the permissions just allowed (the maps kept are back already).
-    const pending = resumed.maps?.pending;
-    if (pending) await addMap(pending);
-    return;
-  }
-  // The user keeps no working data between visits: the drawings not saved and the file last written
-  // go now. (The dataset's working copy, in Chora's SQLite pool, is cleared at every start anyway.)
-  if (!permissions.keepWorkingData()) {
-    await forgetAllDrafts();
-    // The historical maps shown last time (chora-overlays/) are working data too, as the panel says.
-    try { await (await navigator.storage.getDirectory()).removeEntry('chora-outputs', { recursive: true }); } catch { /* none kept */ }
-    await ov.forgetKept();
-    // And what the main page keeps for the way back, and Methodos's kept files.
-    await forgetMainPagesData();
-    state.workingCleared = true;
-  }
-  inTurn(() => readmitKept());
-  handback.dropStale();
-  sayReturning();
-  // Files chosen on the main page, opened here at once (Stephen, 12 October 2026: no offer to click).
-  const handed = await takeHandoff();
-  if (handed && !files.length) {
-    state.handoff = handed.map((f) => f.name);
-    await open(handed);
-    return;
-  }
-  // Opened for a workflow with nothing handed over (a link opened in another tab, or this page
-  // reloaded): the workflow's current dataset, where the main page keeps it.
-  const kept = workflow && !files.length ? await workflowDataset() : null;
-  if (kept && !files.length) { state.fromWorkflow = kept.map((f) => f.name); await open(kept); }
-// A second tab offers nothing, so files handed to it are let go there too, not left in the browser.
-}).catch((e) => (e.kind === 'pool-busy' ? clearHandoff().then(inAnotherTab) : fail(e.message)));
+    // The user keeps no working data between visits: the drawings not saved and the file last written
+    // go now. (The dataset's working copy, in Chora's SQLite pool, is cleared at every start anyway.)
+    if (!permissions.keepWorkingData()) {
+      await forgetAllDrafts();
+      // The historical maps shown last time (chora-overlays/) are working data too, as the panel says.
+      try { await (await navigator.storage.getDirectory()).removeEntry('chora-outputs', { recursive: true }); } catch { /* none kept */ }
+      await ov.forgetKept();
+      // And what the main page keeps for the way back, and Methodos's kept files.
+      if (host.standalone) await forgetMainPagesData();
+      state.workingCleared = true;
+    }
+    inTurn(() => readmitKept());
+    if (!host.standalone) return;
+    handback.dropStale();
+    sayReturning();
+    // Files chosen on the main page, opened here at once (Stephen, 12 October 2026: no offer to click).
+    const handed = await takeHandoff();
+    if (handed && !files.length) {
+      state.handoff = handed.map((f) => f.name);
+      await open(handed);
+      return;
+    }
+    // Opened for a workflow with nothing handed over (a link opened in another tab, or this page
+    // reloaded): the workflow's current dataset, where the main page keeps it.
+    const kept = workflow && !files.length ? await workflowDataset() : null;
+    if (kept && !files.length) { state.fromWorkflow = kept.map((f) => f.name); await open(kept); }
+  // A second tab offers nothing, so files handed to it are let go there too, not left in the browser.
+  }).catch((e) => (e.kind === 'pool-busy' ? clearHandoff().then(inAnotherTab) : fail(e.message)));
+  return {
+    state,
+    // Shown again: the map is fitted to its room, which it could not measure while hidden.
+    show() { mapApi.map.resize(); },
+    // Hidden: a drawing or a trace under way is stopped, so that nothing waits on a map not seen.
+    hide() { if (traceWanted) setTraceMode(null); mapApi.setMode('static'); for (const x of $('draw-tools').querySelectorAll('button')) x.setAttribute('aria-pressed', 'false'); },
+  };
+}
