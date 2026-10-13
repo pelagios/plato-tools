@@ -14,7 +14,7 @@ import { TerraDraw, TerraDrawPointMode, TerraDrawLineStringMode, TerraDrawPolygo
 import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter';
 import { transformRequest, blobWorkerUrl } from '../lib/permissions.js';
 import { STATUS_COLOURS } from './card.js';
-import { PRECISIONS, MARK_SIZE, drawMark, markImage } from './vague.js';
+import { PRECISIONS, MARK_SIZE, drawMark, markImage, isPrecision, LINE_DASHES, LINE_CASING, LINE_WHITE, INK, CASING } from './vague.js';
 
 // A worker made from a blob: takes the page's policy; one made from this site's address would not.
 maplibregl.setWorkerUrl(blobWorkerUrl(mapWorkerUrl));
@@ -105,6 +105,18 @@ export function createMap(container, { state, onPlaceClick, onStyleError, polygo
       layout: { 'line-cap': 'round' }, paint: { 'line-color': status('#2757dd'), 'line-width': 2, 'line-dasharray': [0.1, 2.5], 'line-opacity': faint } });
     add({ id: 'chora-place-fill', type: 'fill', source: 'chora-place', filter: ['match', ['geometry-type'], ['Polygon', 'MultiPolygon'], true, false],
       paint: { 'fill-color': status('#2757dd'), 'fill-opacity': ['case', ['==', ['get', 'status'], 'asserted'], 0.18, 0.08] } });
+    // How well a line or an area's outline is known (spatialPrecision): an ink casing under its own
+    // line, on unbroken white, of the precision's pattern (vague.js, LINE_DASHES). One layer each, so
+    // that the status keeps its own line's dashes. Lines and areas only: a point has its mark.
+    const outline = ['!', ['match', ['geometry-type'], ['Point', 'MultiPoint'], true, false]];
+    add({ id: 'chora-vague-casing-white', type: 'line', source: 'chora-place', filter: ['all', outline, ['in', ['get', 'precision'], ['literal', PRECISIONS]]],
+      paint: { 'line-color': CASING, 'line-width': LINE_WHITE, 'line-opacity': faint } });
+    for (const p of PRECISIONS) {
+      const dots = LINE_DASHES[p]?.includes(0.01);
+      add({ id: `chora-vague-casing-${p}`, type: 'line', source: 'chora-place', filter: ['all', outline, ['==', ['get', 'precision'], p]],
+        layout: { 'line-cap': dots ? 'round' : 'butt' },
+        paint: { 'line-color': INK, 'line-width': LINE_CASING, 'line-opacity': faint, ...(LINE_DASHES[p] ? { 'line-dasharray': LINE_DASHES[p] } : {}) } });
+    }
     add({ id: 'chora-place-line', type: 'line', source: 'chora-place', filter: ['all', ['!', ['match', ['geometry-type'], ['Point', 'MultiPoint'], true, false]], ['==', ['get', 'status'], 'asserted']],
       paint: { 'line-color': status('#2757dd'), 'line-width': 2.5 } });
     add({ id: 'chora-place-line-dashed', type: 'line', source: 'chora-place', filter: ['all', ['!', ['match', ['geometry-type'], ['Point', 'MultiPoint'], true, false]], ['!=', ['get', 'status'], 'asserted']],
@@ -255,9 +267,9 @@ function markPixels(p) {
   return { width: px, height: px, data: new Uint8Array(img.data.buffer) };
 }
 
-/** A FeatureCollection of a place view's geometries, for the map; each carries its status. */
+/** A FeatureCollection of a place view's geometries, for the map; each carries its status, role and precision (a value PLATO defines, else ''). */
 export function placeFeatures(view) {
-  return { type: 'FeatureCollection', features: (view?.geometries || []).map((g, i) => ({ type: 'Feature', id: i, geometry: g.geojson, properties: { status: g.status, role: g.role || '' } })) };
+  return { type: 'FeatureCollection', features: (view?.geometries || []).map((g, i) => ({ type: 'Feature', id: i, geometry: g.geojson, properties: { status: g.status, role: g.role || '', precision: isPrecision(g.precision) ? g.precision : '' } })) };
 }
 /**
  * What to show around a place with no location of its own: the places it is related to, and the

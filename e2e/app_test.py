@@ -5588,6 +5588,28 @@ EDGE = '''([lon, lat, dx, dy, lo, hi, layer]) => { const m = window.__chora_map,
 # What an image or a canvas holds: a hash of its pixels, and how many are not transparent.
 PIXELS = '''const sum = (d) => { let h = 0, ink = 0; for (let k = 0; k < d.length; k += 4) { h = (h * 31 + d[k] + 7 * d[k + 3]) >>> 0; if (d[k + 3] > 0) ink++; } return { h, ink }; };'''
 
+def map_pixel(page, xy):
+    """The colour of the map's canvas at a point given in the map's own pixels: the mean of a 3 × 3 patch of a screenshot."""
+    from PIL import Image
+    import io
+    box = page.evaluate('() => { const b = window.__chora_map.getCanvas().getBoundingClientRect(); return [b.left, b.top]; }')
+    png = page.screenshot(clip={'x': box[0] + xy[0] - 1, 'y': box[1] + xy[1] - 1, 'width': 3, 'height': 3})
+    px = list(Image.open(io.BytesIO(png)).convert('RGB').getdata())
+    return [sum(p[i] for p in px) / len(px) for i in range(3)]
+
+def pixel_change(page, lon, lat, r, layer):
+    """How far a pixel inside a circle of radius r (map pixels, about lon, lat) and one outside it change, in the
+    largest of their channels, when `layer` is hidden: inside at 0.6 r and outside at 1.4 r, to the north-east
+    (clear of the mark, the drawing tools, the basemaps and the key)."""
+    c = page.evaluate('(ll) => { const p = window.__chora_map.project(ll); return [p.x, p.y]; }', [lon, lat])
+    at = lambda f: [c[0] + f * r * 0.7071, c[1] - f * r * 0.7071]
+    before = [map_pixel(page, at(0.6)), map_pixel(page, at(1.4))]
+    page.evaluate('(l) => window.__chora_map.setLayoutProperty(l, "visibility", "none")', layer); page.evaluate(SETTLE)
+    try: after = [map_pixel(page, at(0.6)), map_pixel(page, at(1.4))]
+    finally: page.evaluate('(l) => window.__chora_map.setLayoutProperty(l, "visibility", "visible")', layer); page.evaluate(SETTLE)
+    moved = lambda a, b: round(max(abs(x - y) for x, y in zip(a, b)), 1)
+    return {'inside moved': moved(before[0], after[0]), 'outside moved': moved(before[1], after[1]), 'inside': before[0], 'inside hidden': after[0]}
+
 def chora_vague_checks(page, base, tmp):
     places = {p['label']: p for p in json.loads(VAGUE.read_text())['spatialEntities']}
     geom = lambda label: places[label]['attestations'][0]['geometries'][0]
@@ -5604,7 +5626,16 @@ def chora_vague_checks(page, base, tmp):
     def circle_to_scale():
         chora_boot(page, base, [fixture(VAGUE, 'vague-circle.json', tmp)]); chora_pick(page, 'roughly north')
         g = geom('Roughly North'); (lon, lat), km = g['geojson']['coordinates'], g['precisionKm'][0]
-        got = {}
+        # As the place is chosen, before the view is moved: the map is fitted to the circle too, so its
+        # edge is on the canvas, with the circle inside it and the map beyond, every way from the point.
+        room = page.evaluate('() => { const c = window.__chora_map.getCanvas(); return Math.min(c.clientWidth, c.clientHeight) / 2 - 2; }')
+        fitted = {name: page.evaluate(EDGE, [lon, lat, dx, dy, 22, room, 'chora-vague-circle']) for name, (dx, dy) in
+                  (('east', (1, 0)), ('north', (0, -1)), ('west', (-1, 0)), ('south', (0, 1)))}
+        # And it is drawn, not only there to be queried: a pixel inside it changes when its fill is hidden, and
+        # one outside it does not (the control: hiding the fill changes nothing else).
+        r = fitted['east'].get('r') or 0
+        drawn = pixel_change(page, lon, lat, r, 'chora-vague-circle') if r else {}
+        got = {'as chosen': fitted, 'pixels': drawn}
         for z in (6, 8):
             page.evaluate('([c, z]) => window.__chora_map.jumpTo({ center: c, zoom: z })', [[lon, lat], z]); page.evaluate(SETTLE)
             # km / R radians of latitude, which Web Mercator draws sec(latitude) times larger, in a world 512 × 2^z pixels round.
@@ -5612,11 +5643,12 @@ def chora_vague_checks(page, base, tmp):
             for name, (dx, dy) in (('east', (1, 0)), ('north', (0, -1))):
                 e = page.evaluate(EDGE, [lon, lat, dx, dy, want * 0.5, want * 1.5, 'chora-vague-circle'])
                 got[f'z{z} {name}'] = {**e, 'want': round(want, 1)}
-        ok = all(v.get('r') and abs(v['r'] / v['want'] - 1) < 0.03 for v in got.values())
+        ok = all(v.get('r') and abs(v['r'] / v['want'] - 1) < 0.03 for k, v in got.items() if k.startswith('z'))
         # A circle of fixed pixels would be the same at both zooms: drawn on the ground, it is four times as large two zooms up.
         grow = got['z8 east'].get('r', 0) / max(got['z6 east'].get('r', 0), 1e-9)
-        return ok and abs(grow - 4) < 0.15, {**got, 'z8/z6': round(grow, 3)}
-    attempt('Chora: a point with precisionKm has a circle whose rendered radius is its km on the ground, at zoom 6 and at 8 (59.9° north; east and north)', circle_to_scale)
+        whole = all(v.get('inside') and v.get('outside') for v in fitted.values())
+        return (ok and abs(grow - 4) < 0.15 and whole and drawn.get('inside moved', 0) >= 6 and drawn.get('outside moved', 99) <= 2), {**got, 'z8/z6': round(grow, 3)}
+    attempt('Chora: a point with precisionKm has a circle seen whole as the place is chosen, drawn (its pixels), and its rendered radius is its km on the ground at zoom 6 and at 8 (59.9° north; east and north)', circle_to_scale)
 
     def precise_no_circle():
         chora_boot(page, base, [fixture(VAGUE, 'vague-precise.json', tmp)])
@@ -5638,9 +5670,19 @@ def chora_vague_checks(page, base, tmp):
             if want: chora_pick(page, label.lower()); seen[label] = [want, marks()]
         # Each value's image on the map (drawn by the key's own function): there, inked, and no two alike.
         images = page.evaluate('(vs) => { ' + PIXELS + ' return vs.map((v) => { const i = window.__chora_map.style.getImage("chora-precision-" + v); return i ? sum(i.data.data) : null; }); }', values)
+        # A line has no mark: its own outline is cased in its precision's pattern, and in no other.
+        casings = ['chora-vague-casing-white', *[f'chora-vague-casing-{v}' for v in values]]
+        line_marks = seen.pop('Vague Road', [None, None])[1]
+        chora_pick(page, 'vague road'); road = rendered(page, casings); road_marks = marks()
+        others = {k: n for k, n in road.items() if k not in ('chora-vague-casing-white', 'chora-vague-casing-approximate')}
+        # The control: a point's location has no casing.
+        chora_pick(page, 'surveyed cross'); point = rendered(page, casings)
         return (len(values) >= 4 and sorted({w for w, _ in seen.values()}) == sorted(values) and all(got == [w] for w, got in seen.values())
-                and all(i and i['ink'] > 50 for i in images) and len({i['h'] for i in images if i}) == len(values)), {'PLATO values': values, 'drawn': seen, 'images': images}
-    attempt("Chora: each spatialPrecision PLATO defines is drawn on the map in a mark of its own (a point's, and a line's at its middle)", each_drawn)
+                and all(i and i['ink'] > 50 for i in images) and len({i['h'] for i in images if i}) == len(values)
+                and line_marks == [] and road_marks == [] and road['chora-vague-casing-white'] > 0 and road['chora-vague-casing-approximate'] > 0
+                and all(n == 0 for n in others.values()) and all(n == 0 for n in point.values())), {
+                    'PLATO values': values, 'drawn': seen, 'images': images, 'line marks': line_marks, 'line casings': road, 'point casings': point}
+    attempt("Chora: each spatialPrecision PLATO defines is drawn on the map in a mark of its own around a point, and a line is cased in its precision's pattern with no mark", each_drawn)
 
     def key_entries():
         chora_boot(page, base, [fixture(VAGUE, 'vague-key.json', tmp)])
@@ -5649,16 +5691,19 @@ def chora_vague_checks(page, base, tmp):
         # Closed at first, so that it covers none of the map; a click on its line opens it.
         closed = page.evaluate('() => !document.getElementById("map-key").open')
         page.click('#map-key summary')
-        rows = page.evaluate('() => { ' + PIXELS + ''' return [...document.querySelectorAll('#map-key li[data-key]')].map((li) => { const c = li.querySelector('canvas'), r = li.getBoundingClientRect();
+        rows = page.evaluate('() => { ' + PIXELS + ''' const of = (c) => (c ? sum(c.getContext('2d').getImageData(0, 0, c.width, c.height).data) : { ink: 0, h: null });
+          return [...document.querySelectorAll('#map-key li[data-key]')].map((li) => { const r = li.getBoundingClientRect();
           return { key: li.dataset.key, text: li.textContent.replace(/\\s+/g, ' ').trim(), shown: r.width > 0 && r.height > 0, svg: !!li.querySelector('svg'),
-            ...(c ? sum(c.getContext('2d').getImageData(0, 0, c.width, c.height).data) : { ink: 0, h: null }) }; }); }''')
+            ...of(li.querySelector('canvas[data-sym="point"]')), line: of(li.querySelector('canvas[data-sym="line"]')) }; }); }''')
         by = {r['key']: r for r in rows}
         ok = (hidden_before is True and closed and len(values) >= 4
               and all(v in by and by[v]['shown'] and by[v]['ink'] > 50 and v.replace('_', ' ') in by[v]['text'].lower() for v in values)
               and len({by[v]['h'] for v in values if v in by}) == len(values)
+              and all(by[v]['line']['ink'] > 50 for v in values if v in by) and len({by[v]['line']['h'] for v in values if v in by}) == len(values)
+              and 'lines' in by and 'line or an area outline drawn like this' in by['lines']['text'] and 'points only' in by.get('circle', {}).get('text', '')
               and 'circle' in by and by['circle']['svg'] and by['circle']['shown'] and 'none' in by)
         return ok, {'PLATO values': values, 'rows': rows, 'hidden before a place': hidden_before, 'closed at first': closed}
-    attempt("Chora: the map's key has an entry for each spatialPrecision PLATO defines, each drawn and none alike, and one for the circle, shown once a place is, and opened by a click", key_entries)
+    attempt("Chora: the map's key has an entry for each spatialPrecision PLATO defines, a point's mark and a line's casing each drawn and none alike, and one for the circle (points only), shown once a place is, and opened by a click", key_entries)
 
     def card_words():
         chora_boot(page, base, [fixture(VAGUE, 'vague-card.json', tmp)]); chora_pick(page, 'roughly north')

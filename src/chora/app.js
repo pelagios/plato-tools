@@ -9,7 +9,8 @@ import { detect } from '../engine/input.js';
 import { newGeometryAttestation, checkGeoJSON, wrapLongitudes, DrawError, ROLES, PRECISIONS } from '../engine/chora/draw.js';
 import { createMap, placeFeatures, contextFeatures } from './map.js';
 import { esc, badge, nameItem, relationItem, timeline, locations, ROLE_WORDS, STATUS_COLOURS } from './card.js';
-import { vagueFeatures, keyRows, drawMark, MARK_SIZE } from './vague.js';
+import { vagueFeatures, keyRows, drawMark, drawLineSample, MARK_SIZE } from './vague.js';
+import { bboxOf, unionBbox } from '../engine/chora/geo.js';
 import * as basemaps from './basemaps.js';
 import * as contributors from './contributor.js';
 import { fingerprint, loadDrafts, saveDrafts, draftsWritten, forgetAllDrafts } from './drafts.js';
@@ -82,7 +83,7 @@ async function open(list) {
   if (state.phase === 'in-another-tab') return;
   files = [...list];
   if (!files.length) return;
-  Object.assign(state, { phase: 'opening', placeId: null, lastSave: null });
+  Object.assign(state, { phase: 'opening', placeId: null, lastSave: null, vague: { marks: 0, circles: 0 } });
   for (const id of ['places', 'card', 'saving']) $(id).hidden = true;
   adopt.close();
   $('handoff').hidden = true; $('save-result').innerHTML = ''; offered = null;
@@ -170,7 +171,12 @@ async function selectPlace(id) {
   showDrafts(drafts.filter((d) => d.placeId === id));
   adopt.placeShown(view);
   const mine = drafts.filter((d) => d.placeId === id && d.geojson).map((d) => d.geojson);
-  mapApi.fit(view.fallback?.bbox || (mine.length ? boxOf(mine) : null), view.fallback?.kind === 'ccodes' ? 6 : 9);
+  // The place's own geometries and their circles of uncertainty together, so that a circle is seen
+  // whole when the place is chosen: a point alone would be fitted at zoom 9, where 25 km is some 650
+  // pixels from it.
+  const circles = view.fallback?.kind === 'geometry' ? vague.features.filter((f) => f.geometry.type === 'Polygon').map((f) => bboxOf(f.geometry)) : [];
+  const box = view.fallback?.bbox ? unionBbox([view.fallback.bbox, ...circles]) : null;
+  mapApi.fit(box || (mine.length ? boxOf(mine) : null), view.fallback?.kind === 'ccodes' ? 6 : 9);
   $('draw-tools').hidden = false;
   state.phase = 'place';
 }
@@ -1270,21 +1276,33 @@ function styleFailed(why, b = basemaps.byId(state.basemap)) {
 const mapApi = createMap($('map'), { state, onPlaceClick: (id) => selectPlace(id), onStyleError: styleFailed });
 
 // ---- The map's key: how well a location is known (src/chora/vague.js) ------------------------------
-// Each mark drawn by the function that draws it on the map, around the disc of a point asserted, as the
-// map draws it; the circle as the map edges it. Closed at first, one line to open, so that it covers
-// none of the map until it is wanted.
+// Each precision twice, drawn by the functions that draw it on the map: its mark around the disc of a
+// point asserted, and a line as an asserted line or area outline is drawn with its casing. Then the
+// circle as the map edges it, and no mark. Closed at first, one line to open, so that it covers none of
+// the map until it is wanted.
+const KEY_LINE = 56;
 function renderKey() {
   const ink = STATUS_COLOURS.asserted, half = MARK_SIZE / 2;
-  const circle = `<svg viewBox="0 0 ${MARK_SIZE} ${MARK_SIZE}"><circle cx="${half}" cy="${half}" r="15" fill="${ink}" fill-opacity=".1" stroke="${ink}" stroke-width="2" stroke-linecap="round" stroke-dasharray="0.1 5"/><circle cx="${half}" cy="${half}" r="3" fill="${ink}"/></svg>`;
-  $('map-key-list').innerHTML = keyRows().map((r) => `<li data-key="${esc(r.key)}"><span class="key-sym" aria-hidden="true">${r.key === 'circle' ? circle : '<canvas></canvas>'}</span>
+  const circle = `<svg viewBox="0 0 ${MARK_SIZE} ${MARK_SIZE}"><circle cx="${half}" cy="${half}" r="17" fill="${ink}" fill-opacity=".1" stroke="${ink}" stroke-width="2" stroke-linecap="round" stroke-dasharray="0.1 5"/><circle cx="${half}" cy="${half}" r="3" fill="${ink}"/></svg>`;
+  const syms = (r) => (r.key === 'circle' ? `<span class="key-sym">${circle}</span><span class="key-sym key-line"></span>`
+    : `<span class="key-sym"><canvas data-sym="point"></canvas></span><span class="key-sym key-line"><canvas data-sym="line"></canvas></span>`);
+  $('map-key-list').innerHTML = `<li class="key-head" data-key="lines"><span class="key-sym-head" aria-hidden="true"><span>point</span><span>line, area</span></span>
+    <span>Around a point, its mark; a line or an area outline drawn like this</span></li>`
+    + keyRows().map((r) => `<li data-key="${esc(r.key)}"><span class="key-syms" aria-hidden="true">${syms(r)}</span>
     <span><strong>${esc(r.name)}</strong>: ${esc(r.gloss)}</span></li>`).join('');
   const ratio = Math.max(1, Math.ceil(globalThis.devicePixelRatio || 1));
   for (const c of $('map-key-list').querySelectorAll('canvas')) {
-    c.width = c.height = MARK_SIZE * ratio;
+    const key = c.closest('li').dataset.key, line = c.dataset.sym === 'line', w = line ? KEY_LINE : MARK_SIZE;
+    c.width = w * ratio; c.height = MARK_SIZE * ratio;
     const ctx = c.getContext('2d');
     ctx.scale(ratio, ratio);
-    ctx.beginPath(); ctx.arc(half, half, 8.25, 0, 2 * Math.PI); ctx.fillStyle = ink; ctx.fill();
-    drawMark(ctx, c.closest('li').dataset.key, MARK_SIZE);
+    if (line) {
+      // A precision's casing and the line on it; with no precision said, the line alone.
+      if (!drawLineSample(ctx, key, w, MARK_SIZE, ink)) { ctx.beginPath(); ctx.moveTo(4, half); ctx.lineTo(w - 4, half); ctx.lineWidth = 2.5; ctx.strokeStyle = ink; ctx.stroke(); }
+    } else {
+      ctx.beginPath(); ctx.arc(half, half, 8.25, 0, 2 * Math.PI); ctx.fillStyle = ink; ctx.fill();
+      drawMark(ctx, key, MARK_SIZE);
+    }
   }
 }
 renderKey();

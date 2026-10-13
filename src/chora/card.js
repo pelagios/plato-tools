@@ -1,6 +1,7 @@
 // What Chora's place card writes, from the view of a place (src/engine/chora/view.js): pure, so that
 // it can be tested without a page. The card itself (renderCard in app.js) puts these together.
 import { PRECISION_WORDS, isPrecision } from './vague.js';
+import { circleTooLarge, positions } from '../engine/chora/geo.js';
 
 // Colours of the statuses on the map (map.js), the same as the light theme's in styles.css (--status-…),
 // which the card uses, so that the card follows the colour theme.
@@ -30,18 +31,24 @@ export function nameItem(n) {
 }
 
 // A distance in words: metres below a kilometre, else kilometres to a tenth.
-const metres = (m) => (m >= 1000 ? `${+(m / 1000).toFixed(1)} km` : `${+m.toFixed(0)} m`);
+const metres = (m) => (m >= 1000 ? `${(+(m / 1000).toFixed(1)).toLocaleString('en-GB')} km` : `${+m.toFixed(0)} m`);
 export const ROLE_WORDS = { Extent: 'the whole place', FeaturePoint: 'a feature of it', RepresentativePoint: 'a point standing for it', LabelAnchor: 'where its label goes', Itinerary: 'a route' };
 const dated = (t) => (t?.label || t?.start ? ` <span class="muted">${esc(t.label || `${t.start ?? ''}–${t.end ?? ''}`)}</span>` : '');
 /**
  * How well a location is known, in words (Issue #16): its precision, with PLATO's gloss of it ("approximate
- * (estimated from maps or descriptions)"), and how far out it may be ("to within 2 km", "to within
- * 10 m"). A precision PLATO does not define is written as given.
+ * (estimated from maps or descriptions)"), and how far out it may be: a point "to within 2 km" (or
+ * "to within 10 m"), with "(too large to draw)" where its circle is not drawn (circleTooLarge); a line or
+ * an area "boundary to within 2 km", since PLATO's precisionKm of an area is its boundary's (of a line,
+ * PLATO says nothing, and the tools read it as an area's). A precision PLATO does not define is
+ * written as given.
  */
 export function precisionWords(g) {
   const p = g.precision, w = isPrecision(p) ? PRECISION_WORDS[p] : null;
   const said = p ? (w ? `, ${esc(w.name)} <span class="muted">(${esc(w.gloss)})</span>` : `, ${esc(p.replace(/_/g, ' '))}`) : '';
-  return said + (g.precisionKm != null ? `, to within ${esc(metres(g.precisionKm * 1000))}` : '');
+  if (g.precisionKm == null) return said;
+  const type = g.geojson?.type, points = type === 'Point' || type === 'MultiPoint';
+  const far = points && [...positions(g.geojson.coordinates)].some((c) => circleTooLarge(c, g.precisionKm)) ? ' (too large to draw)' : '';
+  return `${said}, ${points ? '' : 'boundary '}to within ${esc(metres(g.precisionKm * 1000))}${far}`;
 }
 /** One location drawn on the map: its kind, what it marks, how well it is known, and its date. */
 export const geometryItem = (g) => `${esc(g.geojson.type)}${g.role ? `, ${esc(ROLE_WORDS[tailOf(g.role)] || tailOf(g.role))}` : ''}${precisionWords(g)}${dated(g.timespan)}${badge(g.status)}`;

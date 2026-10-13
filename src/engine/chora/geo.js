@@ -143,7 +143,8 @@ export const EARTH_KM = 6371.0088;
 const RAD = Math.PI / 180;
 /**
  * A circle of `km` kilometres around [lon, lat], as a GeoJSON Polygon: `n` points at that great-circle
- * distance, one every 360/n degrees of bearing from north. It is drawn on the earth, not on the screen,
+ * distance, one every 360/n degrees of bearing, from north and anticlockwise (west first), as RFC 7946
+ * winds an outer ring. It is drawn on the earth, not on the screen,
  * so the map projects it with everything else: its size is right at any zoom and at any latitude
  * (Web Mercator, being conformal, draws a small one round, and larger toward the poles, as it draws
  * everything there). A fixed radius in pixels would be right at one zoom and one latitude only. A
@@ -151,17 +152,20 @@ const RAD = Math.PI / 180;
  * uncertainty given in kilometres says.
  * Longitudes run on unbroken from the centre's, past 180 where the circle crosses the antimeridian, as
  * MapLibre draws them. A circle around a pole (the pole within `km`) goes round it, and is closed
- * through the pole. Null for no centre, or a radius that is not a finite number above 0; a radius is
- * taken at most half the earth's circumference, the circle that covers it.
+ * through the pole. Null for no centre, or a radius that is not a finite number above 0; null too for
+ * a radius that reaches past the equator by more than the centre's own latitude (km / R ≥ π/2 + |lat|):
+ * such a circle would hold more of the far hemisphere than of its own, and as a polygon on the map it
+ * fills the world outside a small hole (circleTooLarge says which, for the card).
  */
+export const circleTooLarge = (centre, km) => isPosition(centre) && Number.isFinite(km) && km / EARTH_KM >= Math.PI / 2 + Math.abs(centre[1]) * RAD;
 export function circleAround(centre, km, n = 64) {
-  if (!isPosition(centre) || !Number.isFinite(km) || km <= 0 || !(n >= 3)) return null;
-  const d = Math.min(km / EARTH_KM, Math.PI);
+  if (!isPosition(centre) || !Number.isFinite(km) || km <= 0 || !(n >= 3) || circleTooLarge(centre, km)) return null;
+  const d = km / EARTH_KM;
   const [lon0, lat0] = centre, φ1 = lat0 * RAD, λ1 = lon0 * RAD;
   const ring = [];
   let prev = lon0;
   for (let i = 0; i < n; i++) {
-    const θ = (2 * Math.PI * i) / n;
+    const θ = (-2 * Math.PI * i) / n;
     const φ2 = Math.asin(Math.min(1, Math.max(-1, Math.sin(φ1) * Math.cos(d) + Math.cos(φ1) * Math.sin(d) * Math.cos(θ))));
     let λ2 = (λ1 + Math.atan2(Math.sin(θ) * Math.sin(d) * Math.cos(φ1), Math.cos(d) - Math.sin(φ1) * Math.sin(φ2))) / RAD;
     // Unbroken from the point before: never a jump of more than half the world.
@@ -177,5 +181,7 @@ export function circleAround(centre, km, n = 64) {
     ring.push([again, ring[0][1]], [again, pole], [ring[0][0], pole]);
   }
   ring.push([ring[0][0], ring[0][1]]);
+  // Anticlockwise on the map's plane, which a ring closed through a pole may not be as made.
+  if (ringCentroid(ring).a < 0) ring.reverse();
   return { type: 'Polygon', coordinates: [ring] };
 }

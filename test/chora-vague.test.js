@@ -6,9 +6,9 @@ import { PLATO_REPO } from './paths.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { circleAround, EARTH_KM } from '../src/engine/chora/geo.js';
+import { circleAround, circleTooLarge, EARTH_KM } from '../src/engine/chora/geo.js';
 import { viewPlace } from '../src/engine/chora/view.js';
-import { PRECISIONS, PRECISION_WORDS, drawMark, vagueFeatures, keyRows, isPrecision } from '../src/chora/vague.js';
+import { PRECISIONS, PRECISION_WORDS, drawMark, drawLineSample, LINE_DASHES, LINE_CASING, vagueFeatures, keyRows, isPrecision } from '../src/chora/vague.js';
 import { geometryItem, precisionWords } from '../src/chora/card.js';
 
 const RAD = Math.PI / 180;
@@ -70,13 +70,39 @@ test('a circle across the antimeridian runs on past 180 without a jump; one arou
   assert.ok(antarctic.filter((p) => p[1] === -90).length === 2, 'two at the south pole');
 });
 
+// Twice the signed area of a ring on the map's plane (the shoelace formula): above 0 when anticlockwise.
+const signedArea = (r) => { let a = 0; for (let i = 0; i + 1 < r.length; i++) a += r[i][0] * r[i + 1][1] - r[i + 1][0] * r[i][1]; return a; };
+test('every circle winds anticlockwise, as RFC 7946 has an outer ring, around a pole too', () => {
+  for (const [c, km] of [[[0, 0], 10], [[12.5, 60], 500], [[179.9, -17], 50], [[0, 89], 500], [[0, -88], 400], [[-70, -30], 9000]]) {
+    const ring = circleAround(c, km).coordinates[0];
+    assert.ok(signedArea(ring) > 0, `${km} km at ${c}: ${signedArea(ring)}`);
+  }
+  // The control: the same ring reversed is clockwise, so the sign can tell.
+  assert.ok(signedArea([...circleAround([0, 0], 10).coordinates[0]].reverse()) < 0);
+});
+
+test('a radius reaching past the equator by more than the centre\'s latitude has no circle (it would fill the far hemisphere), and the card says why', () => {
+  // At the equator the limit is a quarter of the earth round (10,007.5 km); at 60° a third more.
+  const quarter = (EARTH_KM * Math.PI) / 2;
+  assert.ok(circleAround([0, 0], quarter - 1), 'just under: drawn');
+  assert.equal(circleAround([0, 0], quarter + 1), null);
+  assert.ok(circleAround([0, 60], quarter * (5 / 3) - 1), 'at 60°, up to 150° of arc');
+  assert.equal(circleAround([0, -60], quarter * (5 / 3) + 1), null);
+  assert.equal(circleTooLarge([0, 0], 12000), true); assert.equal(circleTooLarge([0, 60], 12000), false);
+  const g = (km, lat) => ({ geojson: { type: 'Point', coordinates: [0, lat] }, precision: 'approximate', precisionKm: km });
+  assert.equal(precisionWords(g(12000, 0)), ', approximate <span class="muted">(estimated from maps or descriptions)</span>, to within 12,000 km (too large to draw)');
+  assert.equal(precisionWords(g(12000, 60)), ', approximate <span class="muted">(estimated from maps or descriptions)</span>, to within 12,000 km');
+  assert.equal(vagueFeatures({ geometries: [{ ...g(12000, 0), status: 'asserted' }] }).features.filter((f) => f.geometry.type === 'Polygon').length, 0);
+  assert.equal(vagueFeatures({ geometries: [{ ...g(12000, 60), status: 'asserted' }] }).features.filter((f) => f.geometry.type === 'Polygon').length, 1);
+});
+
 test('no circle for a radius that is not a number above 0, or no centre', () => {
   assert.ok(circleAround([0, 0], 1), 'the control: 1 km draws');
   for (const km of [0, -1, NaN, Infinity, null, '5']) assert.equal(circleAround([0, 0], km), null, String(km));
   for (const c of [null, [0], ['a', 1], [NaN, 0]]) assert.equal(circleAround(c, 5), null, JSON.stringify(c));
 });
 
-test('vagueFeatures: a mark for each precision said, on its point or a line\'s middle; a circle only around a point with precisionKm', () => {
+test('vagueFeatures: a mark for each precision said, around a point; a circle only around a point with precisionKm; nothing floating on a line or an area', () => {
   const of = (slug) => vagueFeatures(viewOf(slug)).features;
   const marks = (fs) => fs.filter((f) => f.geometry.type === 'Point'), circles = (fs) => fs.filter((f) => f.geometry.type === 'Polygon');
   // Exact, no radius: its mark, and no circle.
@@ -92,16 +118,14 @@ test('vagueFeatures: a mark for each precision said, on its point or a line\'s m
     assert.equal(c.properties.km, km);
     assert.ok(Math.abs(haversineKm(centre, c.geometry.coordinates[0][7]) - km) < 1e-9);
   }
-  // A line: its mark half way along it, and no circle (its precisionKm would be its boundary's).
-  const road = of('vague-road');
-  assert.equal(marks(road).length, 1); assert.equal(circles(road).length, 0);
-  assert.equal(marks(road)[0].properties.precision, 'approximate');
+  // A line: no mark and no circle (its own outline is cased, map.js; its precisionKm is its boundary's).
+  assert.deepEqual(of('vague-road'), []);
   // Not said: nothing at all, beside a place that has something.
   assert.deepEqual(of('unsaid-well'), []);
   // Every precision in the file is marked, once each place.
   assert.deepEqual(FIXTURE.spatialEntities.flatMap((p) => marks(vagueFeatures(viewPlace(p)).features).map((f) => f.properties.precision)).sort(),
-    ['approximate', 'approximate', 'exact', 'historical_approximate', 'uncertain']);
-  // A MultiPoint: a mark and a circle at each point; a polygon with a radius, its mark and no circle;
+    ['approximate', 'exact', 'historical_approximate', 'uncertain']);
+  // A MultiPoint: a mark and a circle at each point; a polygon with a radius, neither;
   // a status carried (a denied one is drawn faint by the map); a precision PLATO does not define, no mark.
   const v = { geometries: [
     { geojson: { type: 'MultiPoint', coordinates: [[0, 0], [1, 1]] }, precision: 'uncertain', precisionKm: 3, status: 'denied' },
@@ -110,7 +134,7 @@ test('vagueFeatures: a mark for each precision said, on its point or a line\'s m
   ] };
   const fs = vagueFeatures(v).features;
   assert.deepEqual(marks(fs).map((f) => [f.properties.precision, f.properties.status, f.geometry.coordinates]),
-    [['uncertain', 'denied', [0, 0]], ['uncertain', 'denied', [1, 1]], ['exact', 'asserted', [1, 1]]]);
+    [['uncertain', 'denied', [0, 0]], ['uncertain', 'denied', [1, 1]]]);
   assert.deepEqual(circles(fs).map((f) => [f.properties.status, f.properties.km]), [['denied', 3], ['denied', 3]]);
   assert.deepEqual(vagueFeatures(null).features, []);
 });
@@ -143,11 +167,32 @@ test('each precision PLATO defines has a mark of its own, drawn by its shape, wi
   assert.equal(isPrecision('toString'), false);
 });
 
-test('the key names every precision in words, then the circle and no mark', () => {
+test('a line or an area outline has a casing of its own per precision, dots spaced at least twice the casing\'s width, drawn in the key as on the map', () => {
+  assert.deepEqual(Object.keys(LINE_DASHES).sort(), [...PRECISIONS].sort());
+  assert.equal(new Set(Object.values(LINE_DASHES).map((d) => JSON.stringify(d))).size, PRECISIONS.length, 'no two alike');
+  for (const [p, d] of Object.entries(LINE_DASHES)) {
+    if (!d) continue;
+    // A dot (a dash of 0.01, round-capped) is LINE_CASING wide; the pattern's period, in widths, is at least 2 of them.
+    if (d.includes(0.01)) assert.ok(d.reduce((a, b) => a + b, 0) >= 2, `${p}: period ${d.reduce((a, b) => a + b, 0)} widths`);
+  }
+  const drawn = {};
+  for (const p of PRECISIONS) {
+    const ctx = recorder();
+    assert.equal(drawLineSample(ctx, p, 56, 40, '#2757dd'), true);
+    const dashes = ctx.ops.filter(([k]) => k === 'setLineDash').map(([, d]) => d);
+    assert.deepEqual(dashes.find((d) => d.length) || [], (LINE_DASHES[p] || []).map((x) => +(x * LINE_CASING).toFixed(2)), p);
+    drawn[p] = JSON.stringify(ctx.ops);
+  }
+  assert.equal(new Set(Object.values(drawn)).size, PRECISIONS.length);
+  const none = recorder(); assert.equal(drawLineSample(none, 'roughly', 56, 40, '#000'), false); assert.equal(none.ops.length, 0);
+});
+
+test('the key names every precision in words, then the circle (points only) and no mark', () => {
   const rows = keyRows();
   assert.deepEqual(rows.map((r) => r.key), [...PRECISIONS, 'circle', 'none']);
   for (const r of rows) assert.ok(r.name && r.gloss, r.key);
   assert.equal(rows.find((r) => r.key === 'historical_approximate').name, 'Historical approximate');
+  assert.match(rows.find((r) => r.key === 'circle').gloss, /\(points only\)$/);
 });
 
 test('the card names the precision in words, with PLATO\'s gloss, and how far out it may be', () => {
@@ -162,5 +207,8 @@ test('the card names the precision in words, with PLATO\'s gloss, and how far ou
   // From the view, through the card's line for the location.
   assert.match(geometryItem(viewOf('old-ford').geometries[0]), /^Point, historical approximate <span class="muted">\(from historical sources, imprecise by nature\)<\/span>, to within 2 km$/);
   assert.equal(geometryItem(viewOf('unsaid-well').geometries[0]), 'Point');
+  // A line's or an area's radius is its boundary's.
+  assert.equal(precisionWords({ geojson: { type: 'Polygon', coordinates: [] }, precision: null, precisionKm: 2 }), ', boundary to within 2 km');
+  assert.equal(precisionWords({ geojson: { type: 'LineString', coordinates: [] }, precision: null, precisionKm: 0.5 }), ', boundary to within 500 m');
   for (const p of PRECISIONS) assert.ok(PRECISION_WORDS[p], p);
 });
