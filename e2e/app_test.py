@@ -3399,22 +3399,26 @@ def chora_seams_checks(pw, url, tmp):
         link = p.get_attribute('#for-tool a[href="#chora"]', 'href')
         in_tracker = p.is_visible('#methodos-chora') and p.get_attribute('#methodos-chora', 'href') == '#chora'
         p.evaluate('() => { window.__samePage = true; }')
+        step_link = p.is_visible('#for-tool a[href="#chora"]')
         p.click('#methodos-chora')
         s, drawn = chora_loaded(p)
         t = p.evaluate(JOIN_STATE)
+        step_link_after = p.is_visible('#for-tool a[href="#chora"]')
         return (before and link == '#chora' and in_tracker and s['phase'] == 'loaded' and drawn > 0 and p.evaluate('() => window.__samePage === true')
-                and t['steps'].get('place') == 'current' and 'Step 7 of 10' in t['where'] and p.is_visible('#methodos-tracker') and not p.is_visible('#methodos-chora')), {
+                and t['steps'].get('place') == 'current' and 'Step 7 of 10' in t['where'] and p.is_visible('#methodos-tracker') and not p.is_visible('#methodos-chora')
+                and step_link and not step_link_after), {'step\'s link before': step_link, 'step\'s link while shown': step_link_after,
                     'chosen before': before, 'link': link, 'in the tracker': in_tracker, 'state': {k: s.get(k) for k in ('phase', 'places')}, 'drawn': drawn,
                     'tracker': {k: t.get(k) for k in ('steps', 'where')}, 'tracker\'s Open Chora after': p.is_visible('#methodos-chora')}
-    attempt('Chora\'s seams, in a workflow: "Open Chora", under the step\'s title and in the tracker, opens the workflow\'s dataset in the page at once, drawn on the map, with the tracker beside it at "Step 7 of 10" (its "Open Chora" gone while the map is shown)', workflow_open)
+    attempt('Chora\'s seams, in a workflow: "Open Chora", under the step\'s title and in the tracker, opens the workflow\'s dataset in the page at once, drawn on the map, with the tracker beside it at "Step 7 of 10" (its "Open Chora", and the step\'s under the title, gone while the map is shown)', workflow_open)
 
     def workflow_back_unsaved():
         p = r['wp']
         p.click('#chora-leave')
         ok = detected_again(p, ['applied.json'])
         t = p.evaluate(JOIN_STATE)
-        return (ok and not chora_shown(p) and t['steps'].get('place') == 'current' and p.evaluate(SEAM_CHOSEN) == ['applied.json']), {'tracker': {k: t[k] for k in ('steps', 'message')}, 'chosen': p.evaluate(SEAM_CHOSEN)}
-    attempt('Chora\'s seams, in a workflow: leaving the map without saving, the workflow is at the same step with its dataset still chosen, and nothing is done', workflow_back_unsaved)
+        link = p.is_visible('#for-tool a[href="#chora"]')
+        return (ok and not chora_shown(p) and t['steps'].get('place') == 'current' and p.evaluate(SEAM_CHOSEN) == ['applied.json'] and link), {'tracker': {k: t[k] for k in ('steps', 'message')}, 'chosen': p.evaluate(SEAM_CHOSEN), 'step\'s Open Chora': link}
+    attempt('Chora\'s seams, in a workflow: leaving the map without saving, the workflow is at the same step with its dataset still chosen (its "Open Chora" back under the title), and nothing is done', workflow_back_unsaved)
 
     def workflow_browser_back():
         # Chora opened from the tracker's link, then the browser's Back: the steps, the workflow at its step.
@@ -7177,7 +7181,7 @@ def chora_checks(pw, url, tmp):
 # gives the three columns back. Its module, and MapLibre with it, is loaded only when it is first opened.
 # Measured at 1440 × 900, in a browser context of its own, against the page's own boxes.
 CHORA_BOXES = '''() => { const box = (id) => { const e = document.getElementById(id); if (!e) return null; const r = e.getBoundingClientRect();
-    return r.width && r.height ? { left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width) } : null; };
+    return r.width && r.height ? { left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width), top: Math.round(r.top), bottom: Math.round(r.bottom) } : null; };
   return { toolbox: box('toolbox'), rail: box('workflow-rail'), files: box('files'), chora: box('chora'), map: box('chora-map'),
     shown: !document.getElementById('chora').hidden, tools: document.getElementById('chora-tools')?.getAttribute('aria-expanded') ?? null,
     hash: location.hash }; }'''
@@ -7223,8 +7227,9 @@ def chora_layout_checks(pw, url):
             return (three['toolbox'] and three['files'] and three['rail'] and three['toolbox']['right'] < three['files']['left'] < three['rail']['left']
                     and on['shown'] and on['toolbox'] is None and on['rail'] and on['rail']['left'] == three['rail']['left']
                     and abs(on['chora']['left'] - three['toolbox']['left']) <= 2 and on['chora']['right'] < on['rail']['left']
-                    and on['chora']['width'] > three['files']['width'] + 150 and on['map']['width'] >= 500 and on['tools'] == 'false' and on['hash'] == '#chora'), {'three columns': three, 'Chora shown': on}
-        attempt('Chora in the page at 1440 × 900: the tools rail folds away and the centre takes its place, the workflow rail stays where it was, and the map has the width', folds)
+                    and on['chora']['width'] > three['files']['width'] + 150 and on['map']['width'] >= 500 and on['tools'] == 'false' and on['hash'] == '#chora'
+                    and on['files'] and on['files']['bottom'] <= on['chora']['top']), {'three columns': three, 'Chora shown': on}
+        attempt('Chora in the page at 1440 × 900: the tools rail folds away and the centre takes its place, the workflow rail stays where it was, the map has the width, and step 1\'s line (its file) is above the map', folds)
 
         def toggled():
             page = lay['page']
@@ -7243,7 +7248,8 @@ def chora_layout_checks(pw, url):
             page.click('#chora-tools')                            # left with the tools shown: the page is as it was all the same
             page.click('#chora-leave'); page.wait_for_timeout(300)
             after = page.evaluate(CHORA_BOXES); three = lay['three']
-            return (not after['shown'] and after['toolbox'] == three['toolbox'] and after['files'] == three['files'] and after['rail'] == three['rail']
+            h = lambda b: b and {k: b[k] for k in ('left', 'right', 'width')}
+            return (not after['shown'] and h(after['toolbox']) == h(three['toolbox']) and h(after['files']) == h(three['files']) and h(after['rail']) == h(three['rail'])
                     and after['tools'] == 'false' and '#chora' not in after['hash'] and not page.evaluate('() => document.body.hasAttribute("data-chora") || document.body.hasAttribute("data-chora-tools")')), {
                 'three columns before': three, 'after leaving': after}
         attempt('Chora in the page: leaving the map gives the three columns back as they were', left)
@@ -7257,6 +7263,39 @@ def chora_layout_checks(pw, url):
             return (box['shown'] and box['hash'] == '#chora' and box['toolbox'] is None and s['phase'] == 'ready' and s['mapReadyCount'] >= 1 and offered), {
                 'boxes': box, 'state': {k: s.get(k) for k in ('phase', 'mapReadyCount')}, 'kept file offered': offered}
         attempt('Chora in the page: the page reloaded at #chora opens Chora again at once (the file kept from before offered above it, as on any reload)', reloads)
+
+        def narrow_order():
+            # On a phone (600 px): step 1's line, then the map, as at every width (the order of the page).
+            ctx = browser.new_context(viewport={'width': 600, 'height': 900}, reduced_motion='reduce')
+            try:
+                page = ctx.new_page(); page.set_default_timeout(T(30) * 1000); ready(page)
+                page.set_input_files('#picker', [str(f)]); wait_state(page, lambda s: s.get('phase') == 'detected', T(60), 'detection')
+                page.click('#to-chora'); opened(page); until(page, '() => window.__chora.phase === "loaded"', 60); page.evaluate(SETTLE)
+                b = page.evaluate(CHORA_BOXES)
+                line = page.is_visible('#chosen-line')
+                return (b['shown'] and line and b['files'] and b['chora'] and b['files']['bottom'] <= b['chora']['top'] and b['map']['width'] >= 400), {'boxes': b, 'step 1\'s line shown': line}
+            finally: ctx.close()
+        attempt('Chora in the page at 600 px: step 1\'s line (its file) is above the map, and the map takes the column', narrow_order)
+
+        def chunk_fails():
+            # The map's code refused once (the network down, say): said where the map would be, with the way to
+            # try again (a reload: the browser keeps a module that failed as failed), which comes back to the map
+            # and loads it (the presence after the absence).
+            ctx, page, asked = fresh()
+            try:
+                ready(page)
+                chunk = re.compile(r'/assets/app-[\w-]+\.js(\?.*)?$')
+                page.route(chunk, lambda r: r.abort())
+                page.click('#toolbox .tool-link[href="#chora"]')
+                said = soon(page, "() => /could not be loaded/.test(document.getElementById('chora-root').textContent)", 20)
+                text = page.inner_text('#chora-root')
+                page.unroute(chunk)
+                with page.expect_navigation(timeout=T(30) * 1000): page.click('#chora-root button:has-text("Reload the page")')
+                again = soon(page, '() => !!window.__chora && window.__chora.mapReadyCount >= 1', 60)
+                return (said and 'Reload the page to try again' in text and again and page.is_visible('#chora-map') and page.url.endswith('#chora')), {
+                    'said': text[:200], 'loaded after the reload': again, 'url': page.url}
+            finally: ctx.close()
+        attempt('Chora in the page: when the map\'s code cannot be loaded it says so where the map would be, with the way to try again (a reload, which comes back to the map and loads it)', chunk_fails)
     finally:
         if lay.get('ctx'): lay['ctx'].close()
         browser.close()

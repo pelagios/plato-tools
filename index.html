@@ -98,17 +98,6 @@
   <!-- Scope's editor, in the centre column (the area drawn needs the width): while it is open the rest of the centre is
        hidden (body.scope-editing), and Done goes back to the step. Filled by src/scope-page.js. -->
   <section id="scope-editor" class="scope-editor" aria-labelledby="scope-editor-h" hidden></section>
-  <!-- Chora, the map (src/chora/app.js), in the centre column at #chora: loaded, with its map libraries, and mounted into #chora-root the
-       first time it is opened (src/app.js, openChora), and only then. While it is shown the rest of the centre is hidden (body[data-chora]). -->
-  <section id="chora" class="chora" aria-labelledby="chora-h" hidden>
-    <div class="chora-head">
-      <!-- The tools, folded away while the map is shown (body[data-chora]), and back with this (body[data-chora-tools]): src/app.js. -->
-      <button type="button" id="chora-tools" class="chora-tools" aria-expanded="false" aria-controls="toolbox"><span class="if-folded">Tools <span aria-hidden="true">▸</span></span><span class="if-unfolded"><span aria-hidden="true">◂</span> Tools</span></button>
-      <h2 id="chora-h" tabindex="-1">Chora <span class="label">Place on the map</span></h2>
-      <button type="button" id="chora-leave">Leave the map</button>
-    </div>
-    <div id="chora-root" class="chora-main"></div>
-  </section>
   <section id="files" aria-labelledby="files-h">
     <h2 id="files-h" tabindex="-1"><span class="step">1</span> Choose your data</h2>
     <p id="for-tool" class="for-tool" hidden></p>
@@ -124,6 +113,18 @@
     <div id="chosen" hidden></div>
     <!-- In a workflow, once its file is chosen and recognised, step 1 folds to this one line, with a way to open it again (src/app.js, foldFiles). -->
     <p id="chosen-line" class="chosen-line" hidden><span class="chosen-what"></span> <button type="button" id="change-file" class="link" aria-controls="files">Change</button></p>
+  </section>
+  <!-- Chora, the map (src/chora/app.js), in the centre column at #chora: loaded, with its map libraries, and mounted into #chora-root the
+       first time it is opened (src/app.js, openChora), and only then. While it is shown the rest of the centre is hidden (body[data-chora]),
+       step 1's line (its file) above it. -->
+  <section id="chora" class="chora" aria-labelledby="chora-h" hidden>
+    <div class="chora-head">
+      <!-- The tools, folded away while the map is shown (body[data-chora]), and back with this (body[data-chora-tools]): src/app.js. -->
+      <button type="button" id="chora-tools" class="chora-tools" aria-expanded="false" aria-controls="toolbox"><span class="if-folded">Tools <span aria-hidden="true">▸</span></span><span class="if-unfolded"><span aria-hidden="true">◂</span> Tools</span></button>
+      <h2 id="chora-h" tabindex="-1">Chora <span class="label">Place on the map</span></h2>
+      <button type="button" id="chora-leave">Leave the map</button>
+    </div>
+    <div id="chora-root" class="chora-main"></div>
   </section>
 
   <section id="action" aria-labelledby="action-h" hidden>

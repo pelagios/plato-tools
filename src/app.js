@@ -938,7 +938,12 @@ function chooseTool(key) {
   if (workflowStep) {                     // a Methodos workflow's step, said first (src/methodos/page.js)
     const w = document.createElement('span');
     w.className = 'workflow-step'; w.textContent = workflowStep.text;
-    if (workflowStep.link) { const a = document.createElement('a'); a.href = workflowStep.link.href; a.textContent = workflowStep.link.words; w.append(' ', a, '.'); }
+    if (workflowStep.link) {
+      // The step's link ("Open Chora"), with its full stop: hidden while what it opens is shown (styles.css).
+      const a = document.createElement('a'); a.href = workflowStep.link.href; a.textContent = workflowStep.link.words;
+      const s = document.createElement('span'); s.className = 'step-link'; s.append(a, '.');
+      w.append(' ', s);
+    }
     note.append(w, ' ');
   }
   if (tool) {
@@ -1042,7 +1047,13 @@ async function openChora() {
     await choraLoading;
   } catch (e) {
     choraLoading = null;
-    $('chora-root').textContent = `The map could not be loaded (${e.message}): reload the page to try again.`;
+    // Said where the map would be. The browser keeps a module that failed to load as failed for the page's
+    // life (Chromium: opened again, the same import fails at once), so the way to try again is a reload, which
+    // comes back to the map (#chora).
+    const said = Object.assign(document.createElement('p'), { className: 'warn', textContent: `The map could not be loaded (${e.message}). Reload the page to try again: it opens at the map.` });
+    const again = Object.assign(document.createElement('button'), { type: 'button', textContent: 'Reload the page' });
+    again.onclick = () => location.reload();
+    $('chora-root').replaceChildren(said, again);
     return;
   }
   if (choraShown()) chora.show();
