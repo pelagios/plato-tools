@@ -134,6 +134,19 @@ test('the manifest round trip: written and read back, every part is what was put
   assert.match(describe(r).join('\n'), /A PLATO tools project, format version 1\.0.*\n.*"Parishes", following map-your-data.*4 of 9 steps done, at "Decide which candidates are the same place"/);
 });
 
+test('a review saved in a project keeps what its Finishes recorded (finished) and the choice for drafts (draft_answers), and a bad one is refused', async () => {
+  const p = await atReview();
+  const w = JSON.parse(p.review.text);
+  w.draft_answers = 'replace';
+  w.finished = [{ at: '2026-10-13T09:00:00Z', output: 'parishes.krisis-dataset.json', sha256: 'a'.repeat(64), gazetteer: 'https://example.org/parishes/', reviewer: { name: 'Ada Reviewer' } }];
+  const review = { name: p.review.name, text: JSON.stringify(w, null, 2) + '\n' };
+  const r = await read((await written({ record: p.record, files: p.files, review })).bytes);
+  assert.equal(r.review.work.draft_answers, 'replace');
+  assert.deepEqual(r.review.work.finished, w.finished);
+  // Control: the same fields, written wrong, are refused when the project is opened, so they are read, not passed by.
+  const bad = { ...w, draft_answers: 'delete' };
+  await refused(read((await written({ record: p.record, files: p.files, review: { name: p.review.name, text: JSON.stringify(bad) } })).bytes), /draft_answers/);
+});
 test('restored at the right step: the workflow read back is at the review, as resuming after a reload finds it', async () => {
   const p = await atReview();
   const r = await read((await written({ record: p.record, files: p.files, review: p.review })).bytes);
