@@ -306,7 +306,7 @@ a:visited { color: var(--accent); }
 .columns-table .use-pattern code { font: .8rem/1.45 var(--font-mono); overflow-wrap: anywhere; }
 .columns-table .column-level, .columns-table .column-split { display: block; margin-top: .3rem; font-size: .85rem; }
 .columns-table .column-split label { display: inline-block; margin: 0 .6rem .2rem 0; }
-.paste { margin-top: .6rem; width: 100%; padding: .3rem .5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); }
+.paste { margin-top: .6rem; }
 .paste summary { cursor: pointer; }
 .paste label { display: block; margin: .5rem 0 .25rem; }
 .paste textarea { width: 100%; box-sizing: border-box; font: .9rem/1.45 var(--font-mono); }

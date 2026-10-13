@@ -13,7 +13,7 @@
 // Where it looks (#32): within the nearest regions the dataset identifies with WHG records, and in the
 // place's countries (adopt.js adoptScope), the query made by Krisis's own placeQuery (never area_only).
 // The line under the name says what is sent; nothing wider is searched unless "Search everywhere" is pressed.
-// Opened for a workflow (#workflow=<id>), the workflow's Scope applies too (src/engine/krisis/scope.js): its kinds
+// In a workflow (the page's, as Methodos keeps it: the host's scope()), the workflow's Scope applies too (src/engine/krisis/scope.js): its kinds
 // of place, years and sources always, and its Where when the place's own regions and countries give none.
 //
 // The page's state is published on window.__chora.adopt for automated tests; nothing else reads it.
