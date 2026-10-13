@@ -1641,19 +1641,27 @@ below), and its engine `src/engine/chora/` (`store.js`, `view.js`, `draw.js`, `s
   for a map no one is looking at. Step 1 stays above the map, folded to its line once a file is
   recognised (`#chosen-line`, with "Change"); with none chosen, its drop zone, and the kept file's
   offer, are there. Chora has no "Choose your data" of its own. A reload for a permission keeps
-  Chora's files (below), and they are chosen in step 1 again (`host.choose`).
-- **Its save is the page's.** A save that passes the version check hands the file it wrote (from
-  `chora-outputs/`) to the page (`host.saved`, `choraSaved` in `src/app.js`): chosen in step 1 as if
-  just dropped, and kept as the user's own choice is (the kept file, below); and, in a workflow at its
-  step `place`, Methodos completes the step with it (`placed()` in `src/methodos/page.js`), by
-  reference, the file kept as a run's output is. Chora says so under the save (`CHORA_HANDOVER` in
+  the page's files (below), and Chora opens them again.
+- **Its save is the page's.** A save that passes the version check hands the file it wrote to the
+  page (`host.saved(file, base)`, `choraSaved` in `src/app.js`): chosen in step 1 as if just dropped,
+  and kept as the user's own choice is (the kept file, below); and, in a workflow at its step `place`,
+  Methodos completes the step with it (`placed()` in `src/methodos/page.js`), by reference, the file
+  kept as a run's output is, when `base`, the dataset Chora had open, is the one that went to the step
+  (by size and SHA-256). Saved from another dataset (chosen in step 1 while Chora was shown), the step
+  is not done, and the tracker and the save say why. The file handed over is first moved out of the
+  worker's `chora-outputs/` (which every save clears as it starts, and where a refused save is
+  removed) into a folder of its own under `chora-saved/` (`keepSaved`), so that step 1 still reads it
+  after a later save, refused or not, even of the same name; it is removed once neither the page nor
+  Chora has it (`forgetOtherSaved`), and with working data not kept, at Chora's next start. Chora says so under the save (`CHORA_HANDOVER` in
   `words.js`, and Methodos's words: "… is chosen in “Choose your data”, for the other tools. The
   workflow's step “Draw or trace the places still without a location” is done with it, and the workflow
   goes on to “…”: leave the map to carry on."), and while the file is read through for its SHA-256 it
-  says "Choosing it in “Choose your data”…" (`state.handingOver`; `state.handedOver` after). Chora does
-  not open the file it handed over (it keeps the dataset it has open, with its drawings, until they are
-  saved to disk and let go, as before), and, with working data not kept, does not remove it from
-  `chora-outputs/` while the page has it chosen.
+  says "Choosing it in “Choose your data”…" (`state.handedOver` after). Until the file is saved to disk
+  and its drawings let go, Chora keeps the dataset it has open, with its drawings (choosing the file
+  handed over again in step 1 opens nothing); once they are let go, and the page still has the file
+  chosen, Chora opens it as its dataset (`rebase`: the place and the view kept, drawings made since the
+  save carried over, `state.rebased`), so that the next save builds on it and holds both saves'
+  drawings.
 - **The page's Permissions panel, theme, tooltips and Methodos tracker** are Chora's: it registers its
   reload hooks with the page's module (keeping its files, place and view, and saying what a reload
   would lose, only while it is shown), takes the canary's answer from `permissions.enforced()`, asks
@@ -1680,17 +1688,27 @@ below), and its engine `src/engine/chora/` (`store.js`, `view.js`, `draw.js`, `s
   unchanged: docs/project-file.md): at Chora's step the tracker names the file Chora had saved, to be
   chosen in step 1, and the step is done by hand.
 - **Kept across a reload for a permission** (`src/chora/resume.js`; the policy is written at load, so a
-  site allowed is reachable only from the next one): while Chora is shown, the files it has open, the
-  place chosen, where the map was and the historical map waiting, in IndexedDB (`plato-tools-chora`,
-  `kv`, `chora-resume`), taken once (read and deleted in one transaction) and not used if older than two
-  minutes. The page comes back to `#chora` (a reload keeps the fragment), and Chora opens them again.
+  site allowed is reachable only from the next one): while Chora is shown, the page's files (step 1's,
+  which after a save are the file saved, not the dataset it was saved from), the place chosen, where the
+  map was and the historical map waiting, in IndexedDB (`plato-tools-chora`, `kv`, `chora-resume`),
+  taken once (read and deleted in one transaction) and not used if older than two minutes. The page
+  comes back to `#chora` (a reload keeps the fragment); Chora waits for what the page chooses as it
+  starts (`host.settled`, Methodos's `takenUp()`: a workflow taken up chooses its step's file) and opens
+  that, or, when the page chose nothing, the files kept, chosen in step 1 again. The page's own reload
+  hook says the chosen files would be lost unless Chora is shown with them open (`holds()`): not while
+  it is starting, or its engine is in another tab.
 - **Tests.** Chora's browser checks open it in the main page (`chora_boot` in `e2e/app_test.py` goes to
   `#chora` from another page, so that the page loads afresh, and chooses the files in step 1); the
   checks of Chora in the page are `chora_layout_checks` (no map code before it is opened; the tools rail
-  folded and the workflow rail kept at 1440 × 900; "Tools ▸"; leaving; a reload at `#chora`), and, in
+  folded and the workflow rail kept at 1440 × 900; "Tools ▸"; leaving; a reload at `#chora`; step 1's
+  line above the map at 1440 and 600 px; the map's code refused, then the reload offered), and, in
   `chora_seams_checks`, the file chosen shown at once with no reload, leaving by "Leave the map" or the
-  browser's Back, and, in a workflow, "Open Chora", a reload at `#chora`, and a save that does the step
-  `place` with the very file it wrote.
+  browser's Back (a line being drawn stopped), and, in a workflow, "Open Chora", a reload at `#chora`, a
+  save from another dataset that does not do the step, a save that does the step `place` with the very
+  file it wrote, and reloads for a permission (while Chora starts, the file said lost; open, nothing,
+  and the file, place and view back; after a save, the file saved kept in step 1). In `chora_checks`,
+  a second save after the first's drawings are let go holds both, and a refused save leaves step 1's
+  file readable.
 
 - **The kept file** (`src/lib/kept-file.js`; Stephen, 12 October 2026: "Users would find it useful to
   have their data kept indefinitely"). While "Keep my working data" is on, the latest file (or files)
@@ -1946,9 +1964,9 @@ below), and its engine `src/engine/chora/` (`store.js`, `view.js`, `draw.js`, `s
   with no outputs to go by, removes the file by those names and the name expected (`discard`).
 - **Known: a save cut off with its page** (the tab closed or crashed mid-save) leaves its partial
   file in `chora-outputs/` until the next save, which clears that folder first. Opening a dataset
-  leaves the folder as it is (the last saved file is kept there, and its download cannot be seen to
-  finish), and a partial file cannot be told there from a completed save without a record of which
-  saves completed.
+  leaves the folder as it is, and a partial file cannot be told there from a completed save without a
+  record of which saves completed. A save that completed and passed is not there: it was moved to
+  `chora-saved/` when it was handed to the page.
 - **Progress** of a save is shown under its button, step by step: each event from `save()` says
   which (`save`: `finding`, `writing`, `checking`) and, where known, how many attestations that step
   reads (`total`), in words by `choraSaveProgress`.

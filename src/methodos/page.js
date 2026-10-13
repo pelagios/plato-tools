@@ -526,14 +526,22 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     say(null); await keep(); render(false);
   }
   /**
-   * The dataset a save in Chora wrote (`files`, as chosen in step 1 by the page): with the workflow at its
-   * step "place", the step's result, and the step is done (kept like a run's output). Resolves with what
-   * to say of it under Chora's save, in words, or null when the workflow is not at that step.
+   * The dataset a save in Chora wrote (`files`, as chosen in step 1 by the page), from the dataset Chora
+   * had open (`base`): with the workflow at its step "place", and `base` the dataset that went to that
+   * step, the step's result, and the step is done (kept like a run's output). Saved from another dataset,
+   * the step is not done, and both here and under the save it is said why. Resolves with what to say of it
+   * under Chora's save, in words, or null when the workflow is not at that step.
    */
-  function placed(files) {
+  function placed(files, base) {
     return new Promise((resolve) => chain(async () => {
       const s = wf && !changed ? atStep() : null;
       if (!s || s.op !== 'place') { resolve(null); return; }
+      const went = currentInput(wf, s);
+      if (went && base && !sameRefs(went, await refsOf([...base], 'dataset'))) {
+        const why = `It was saved from ${[...base].map((f) => f.name).join(', ')}, not from ${names(went)}, the dataset that went to the step “${s.title}”, so the step is not done with it.`;
+        say(`${why} Open ${names(went)} in Chora and save there, or choose a file saved from it and say the step is done.`, true); render(false);
+        resolve(why); return;
+      }
       try { await finishInteractive(s, { dataset: await refsHeld([...files], 'dataset') }); } catch (e) { say(e.message, true); render(false); resolve(null); return; }
       const next = atStep();
       say(`${names(files)}, saved in Chora: the step “${s.title}” is done with it.`); render(false);

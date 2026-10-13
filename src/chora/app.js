@@ -661,16 +661,28 @@ async function saveDataset() {
     const box = document.createElement('p'), b = document.createElement('button'); b.className = 'primary';
     b.textContent = `Save ${out.name} (${fmtBytes(out.size)})`;
     // The drawings in that file need not be kept here once it is on the user's disk; any others still are.
-    const letGo = (said) => {
+    const letGo = async (said) => {
       offered = null; box.remove();
-      // The file is on the user's disk: one who keeps no working data has no copy of it left here, unless the page still has it chosen.
-      if (!permissions.keepWorkingData() && !(handed && host.files?.().includes(handed))) navigator.storage.getDirectory().then((r) => r.getDirectoryHandle('chora-outputs')).then((d) => d.removeEntry(out.name)).catch(() => {});
-      drafts = drafts.filter((d) => !savedIds.has(d.id)); keepDrafts(); showDrafts(drafts.filter((d) => d.placeId === state.placeId)); if (view) renderCard();
+      const rest = drafts.filter((d) => !savedIds.has(d.id));
+      // The file the page has chosen (handed to it, and still chosen there) is Chora's dataset from now: what
+      // is drawn next is added to it, and saved from it, the drawings let go here being in it.
+      const mine = out.file && out.file === handed && host.files?.().includes(handed);
+      if (mine) {
+        await rebase(handed, rest);
+        $('save-result').insertAdjacentHTML('beforeend', `<p>${said} ${esc(handed.name)} is open here now: what is drawn next is added to it.</p>`);
+        return;
+      }
+      // The file is on the user's disk: one who keeps no working data has no copy of it left here.
+      if (!permissions.keepWorkingData()) {
+        navigator.storage.getDirectory().then((r) => r.getDirectoryHandle('chora-outputs')).then((d) => d.removeEntry(out.name)).catch(() => {});
+        if (out.file) forgetSaved(out.file);
+      }
+      drafts = rest; keepDrafts(); showDrafts(drafts.filter((d) => d.placeId === state.placeId)); if (view) renderCard();
       $('save-result').insertAdjacentHTML('beforeend', `<p>${said} To add more, open ${esc(out.name)}.</p>`);
     };
     b.onclick = async () => {
       let done, file;
-      try { file = await outputFile(out.name); done = await saveFile(file, out.name); } catch (e) {
+      try { file = out.file || await outputFile(out.name); done = await saveFile(file, out.name); } catch (e) {
         offered = null; box.remove();
         $('save-result').insertAdjacentHTML('beforeend', `<p class="warn">${esc(out.name)} is no longer there to save (${esc(e.message)}): save again.</p>`);
         return;
@@ -701,14 +713,15 @@ async function saveDataset() {
 async function handOver(out) {
   if (!host.saved) return;
   let file;
-  try { file = await outputFile(out.name); } catch { return; }
-  handed = file;
+  try { file = await keepSaved(out.name); } catch { return; }
+  out.file = handed = file;
   const busy = Object.assign(document.createElement('p'), { className: 'muted', id: 'chora-handing', textContent: CHORA_HANDOVER.busy });
   busy.setAttribute('role', 'status');
   $('save-result').append(busy);
   state.handingOver = { said: busy.textContent };
   let said = null;
-  try { said = await host.saved(file); } catch (e) { said = CHORA_HANDOVER.failed(e.message); } finally { busy.remove(); }
+  try { said = await host.saved(file, files); } catch (e) { said = CHORA_HANDOVER.failed(e.message); } finally { busy.remove(); }
+  forgetOtherSaved();
   if (said) $('save-result').append(Object.assign(document.createElement('p'), { className: 'note', id: 'chora-handed', textContent: said }));
   state.handedOver = { name: file.name, size: file.size, said };
 }
@@ -755,6 +768,58 @@ async function storageCheck(when, el) {
 // dialogue, which returns when the file is written; 'download' for a download, which cannot be seen
 // to finish; false if the user cancelled.
 async function save(name) { return saveFile(await outputFile(name), name); }
+/**
+ * The files handed to the page live apart from the worker's folder (chora-outputs/, which every save
+ * clears as it starts, and where a save refused is removed): each in a folder of its own under
+ * chora-saved/, so that the page's step 1 still reads the file a save handed it after a later save, which
+ * may write a file of the same name, has cleared chora-outputs/ or been refused. A file is moved there
+ * (a copy where the browser cannot move one), and removed once neither the page nor Chora has it.
+ */
+const SAVED = 'chora-saved';
+const savedDirs = new Map();   // File handed -> the name of its folder under chora-saved/
+async function keepSaved(name) {
+  const opfs = await navigator.storage.getDirectory();
+  const from = await (await opfs.getDirectoryHandle('chora-outputs')).getFileHandle(name);
+  const folder = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const to = await (await opfs.getDirectoryHandle(SAVED, { create: true })).getDirectoryHandle(folder, { create: true });
+  let h;
+  if (typeof from.move === 'function') { await from.move(to, name); h = from; }
+  else {
+    h = await to.getFileHandle(name, { create: true });
+    await (await from.getFile()).stream().pipeTo(await h.createWritable());
+    await (await opfs.getDirectoryHandle('chora-outputs')).removeEntry(name);
+  }
+  const file = await h.getFile();
+  savedDirs.set(file, folder);
+  return file;
+}
+async function forgetSaved(file) {
+  const folder = savedDirs.get(file);
+  if (!folder) return;
+  savedDirs.delete(file);
+  try { await (await (await navigator.storage.getDirectory()).getDirectoryHandle(SAVED)).removeEntry(folder, { recursive: true }); } catch { /* gone already */ }
+}
+/** The files handed before, that neither the page (step 1) nor Chora (its dataset) has now, go. */
+function forgetOtherSaved() {
+  const held = new Set([...(host.files?.() || []), ...files, handed]);
+  for (const f of [...savedDirs.keys()]) if (!held.has(f)) forgetSaved(f);
+}
+/**
+ * The file a save wrote, handed to the page and still chosen there, opened as Chora's dataset once the
+ * drawings it holds are let go (its "Save" done): the next save builds on it, so that it holds what was
+ * saved before too. The drawings made since the save are carried over; the place and the view stay.
+ */
+async function rebase(file, rest) {
+  const m = mapApi.map, camera = { center: m.getCenter().toArray(), zoom: m.getZoom(), bearing: m.getBearing(), pitch: m.getPitch() };
+  const place = state.placeId, last = state.lastSave, given = state.handedOver;
+  drafts = []; keepDrafts();   // the old dataset's: those saved are in the file, the rest go with it
+  await open([file]);
+  handed = file;
+  if (rest.length) { drafts = [...drafts, ...rest]; keepDrafts(); }
+  Object.assign(state, { lastSave: last, handedOver: given, rebased: file.name });
+  if (place && dataset) await selectPlace(place);
+  m.jumpTo(camera);
+}
 /** The file the worker wrote for Chora, on the origin private file system: the bytes saved, and handed to the page. */
 async function outputFile(name) {
   const root = await navigator.storage.getDirectory();
@@ -1253,12 +1318,13 @@ function chosen(list) {
  * and its engine started. `context` is what the page gives it:
  *   files()       the files chosen in the page's step 1, which Chora opens (and chosen(), below, when they change);
  *   choose(files) choose these in step 1 (Chora's own, after a reload for a permission);
- *   saved(file)   take the dataset a save wrote: chosen in step 1, and in a workflow the result of its
- *                 step; a promise of what to say of it, in words;
+ *   saved(file, base) take the dataset a save wrote from `base` (the files Chora had open): chosen in step 1,
+ *                 and in a workflow the result of its step, if `base` went to it; a promise of what to say, in words;
  *   scope()       the workflow's Scope (Methodos's, as kept), for the adoption's search, or null;
  *   lookup()      the page's WHG lookup, and onRefused(fn) what to tell when a request of it is refused
  *                 for want of permission: the adoption asks WHG through the page's one lookup.
- * Returns { state, chosen(files), show(), hide() }: the page tells it the files chosen in step 1, and
+ *   settled()     a promise, settled once the page has chosen what it chooses as it starts (Methodos's takenUp).
+ * Returns { state, chosen(files), holds(files), show(), hide() }: the page tells it the files chosen in step 1, and
  * shows and hides it (the map is fitted to its room again; a drawing under way is stopped).
  */
 export function mountChora(rootEl, context = {}) {
@@ -1340,8 +1406,8 @@ export function mountChora(rootEl, context = {}) {
     if (!ok && w && !w.local) { unprotected(w); $('basemaps').open = true; renderBasemaps(); }
   });
   // The page's policy is written at load, so a permission allowed is in it from the next one: before
-  // the page reloads for it, what Chora shows is kept (the files, the place, the view), and taken back
-  // after, when the page comes back to #chora. Hidden, it keeps nothing, and says it would lose nothing.
+  // the page reloads for it, what Chora shows is kept (the page's files, the place, the view), and taken
+  // back after, when the page comes back to #chora. Hidden, it keeps nothing, and says it would lose nothing.
   permissions.onBeforeReload(async () => {
     if (!shown) return;
     state.phase = 'reloading';
@@ -1350,7 +1416,7 @@ export function mountChora(rootEl, context = {}) {
     const m = mapApi.map;
     // And the historical map pasted waiting on the permissions (it is added after the reload), whether maps
     // kept wait too (they are looked at again after every load), and what is typed in its box.
-    await keepForReload({ files, placeId: state.placeId, camera: { center: m.getCenter().toArray(), zoom: m.getZoom(), bearing: m.getBearing(), pitch: m.getPitch() },
+    await keepForReload({ files: host.files?.() || [], placeId: state.placeId, camera: { center: m.getCenter().toArray(), zoom: m.getZoom(), bearing: m.getBearing(), pitch: m.getPitch() },
       maps: { ...ov.reloadHandOver(mapNeed), typed: $('map-input').value || '' } });
   });
   // What the reload keeps not: a line or area still being drawn (finished drawings are kept), an
@@ -1370,17 +1436,21 @@ export function mountChora(rootEl, context = {}) {
   try { const c = contributors.load(); if (c) contributors.remember(c); else if (localStorage.getItem('chora-contributor') !== null) contributors.forget(); } catch { /* storage refused: nothing kept */ }
   useBasemap(currentNow());
   started = startWorker().then(async () => {
-    // Back from a reload for a permission: the dataset, the place and the view as they were, the dataset
-    // chosen in the page's step 1 again.
+    // Back from a reload for a permission: the page's dataset, the place and the view as they were. What
+    // the page chose as it started (a workflow taken up chooses its step's file) is shown; when it chose
+    // none, the files kept are chosen in step 1 again.
     const resumed = await takeResume();
     if (resumed) {
-      if (resumed.files?.length) {
-        await open(resumed.files);
-        host.choose?.(resumed.files);
+      await host.settled?.();
+      const given = host.files?.() || [];
+      const list = given.length ? given : resumed.files || [];
+      if (list.length) {
+        await open(list);
+        if (!given.length) host.choose?.(list);
         if (resumed.placeId && dataset) await selectPlace(resumed.placeId);
       }
       if (resumed.camera) mapApi.map.jumpTo(resumed.camera);
-      state.resumed = { files: (resumed.files || []).map((f) => f.name), placeId: resumed.placeId || null, maps: resumed.maps || null };
+      state.resumed = { files: list.map((f) => f.name), placeId: resumed.placeId || null, maps: resumed.maps || null };
       if (resumed.maps?.typed) $('map-input').value = resumed.maps.typed;
       await inTurn(() => readmitKept());
       // The map pasted that was waiting on the permissions just allowed (the maps kept are back already).
@@ -1393,7 +1463,7 @@ export function mountChora(rootEl, context = {}) {
     if (!permissions.keepWorkingData()) {
       await forgetAllDrafts();
       // The historical maps shown last time (chora-overlays/) are working data too, as the panel says.
-      try { await (await navigator.storage.getDirectory()).removeEntry('chora-outputs', { recursive: true }); } catch { /* none kept */ }
+      for (const d of ['chora-outputs', SAVED]) try { await (await navigator.storage.getDirectory()).removeEntry(d, { recursive: true }); } catch { /* none kept */ }
       await ov.forgetKept();
       state.workingCleared = true;
     }
@@ -1405,6 +1475,9 @@ export function mountChora(rootEl, context = {}) {
   return {
     state,
     chosen,
+    // Whether Chora, shown, has these files open: a reload for a permission brings them back (the page's own
+    // reload hook says nothing of them then). Not while it is starting, or its engine is in another tab.
+    holds: (list) => shown && !!dataset && state.phase !== 'in-another-tab' && isOpen([...(list || [])]),
     // Shown again: the map is fitted to its room, which it could not measure while hidden, and the files
     // chosen in step 1 meanwhile are opened.
     show() { shown = true; mapApi.map.resize(); chosen(host.files?.() || []); },

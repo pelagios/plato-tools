@@ -1043,6 +1043,7 @@ async function openChora() {
       scope: () => methodos.scope(),
       // WHG's lookup, the page's one (one queue, whoever asks); and what it does when a request is refused.
       lookup: () => whgLookup(), onRefused: (f) => refusedToo.add(f),
+      settled: () => methodos.takenUp(),
     })));
     await choraLoading;
   } catch (e) {
@@ -1069,12 +1070,13 @@ function leaveChora() {
 /**
  * A dataset saved in Chora: the page's from now, chosen in step 1 as if just dropped (and kept, as the
  * user's own choice is), so that the other tools take it; and, in a workflow at Chora's step, that step's
- * result (Methodos's placed). Returns what to say of it, in words.
+ * result (Methodos's placed), when `base`, the dataset Chora had open, is the one that went to the step.
+ * Returns what to say of it, in words.
  */
-async function choraSaved(file) {
+async function choraSaved(file, base) {
   const dt = new DataTransfer(); dt.items.add(file); $('picker').files = dt.files;
   choose([file]); keepChoice([file]);
-  const step = await methodos.placed([file]);
+  const step = await methodos.placed([file], base);
   return [CHORA_HANDOVER.chosen(file.name), step].filter(Boolean).join(' ');
 }
 /**
@@ -1686,8 +1688,9 @@ permissions.mount({ state });
 // A reload for a permission cannot keep the files chosen here (the browser gives a page no way back to
 // a file without the user choosing it again): it says so in the panel first, and may be cancelled.
 // A tool that keeps more (Krisis's review) says what it would lose the same way, with onBeforeReload.
-// While Chora is shown, it keeps them across the reload, and they are chosen here again (src/chora/resume.js).
-permissions.onBeforeReload(() => {}, { loses: () => (files.length && !(choraShown() && chora) ? RELOAD_LOSES.files(files.map((f) => f.name)) : null) });
+// Chora, shown with these files open, keeps them across the reload, and they are chosen here again
+// (src/chora/resume.js); while it is starting, or its engine is in another tab, they are lost as on any reload.
+permissions.onBeforeReload(() => {}, { loses: () => (files.length && !(choraShown() && chora?.holds(files)) ? RELOAD_LOSES.files(files.map((f) => f.name)) : null) });
 permissions.onBeforeReload(() => {}, { loses: () => (busy ? RELOAD_LOSES.running : null) });
 permissions.onBeforeReload(() => {}, { loses: () => (work && unsaved ? RELOAD_LOSES.review(unsaved) : null) });
 // Krisis: gazetteer lookup (online, optional). The places of the dataset are looked up in WHG, or

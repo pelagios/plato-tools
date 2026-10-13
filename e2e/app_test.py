@@ -3317,8 +3317,6 @@ def chora_seams_checks(pw, url, tmp):
     def fresh(b=None):
         ctx = (b or browser).new_context(accept_downloads=True, viewport={'width': 1400, 'height': 900}, reduced_motion='reduce')
         ctx.add_init_script('window.__plato_forceDownload = true;')
-        # Whether a page was shown again from the browser's memory (the back-forward cache) or started afresh.
-        ctx.add_init_script("window.__shownFrom = 'started'; addEventListener('pageshow', (e) => { if (e.persisted) window.__shownFrom = 'kept'; });")
         if built.returncode == 0: ctx.route(base + HOOK_PATH, lambda r: r.fulfill(path=str(hook), content_type='text/javascript'))
         return ctx
     def main_ready(p, at=''):
@@ -3340,7 +3338,6 @@ def chora_seams_checks(pw, url, tmp):
     def detected_again(p, names):
         # The main page back, its dataset chosen again (by the page, or kept as it was by the browser).
         return soon(p, '(n) => JSON.stringify([...document.querySelectorAll("#chosen .name")].map((e) => e.textContent)) === JSON.stringify(n) && !!window.__plato && ["detected", "done"].includes(window.__plato.phase)', 60, names)
-    shown_from = lambda p: p.evaluate('() => window.__shownFrom')
     def kept_is(p, names, timeout=15):
         # The kept file's names, as its store holds them, once they are `names` (a write is asynchronous).
         t0 = time.time()
@@ -3351,6 +3348,22 @@ def chora_seams_checks(pw, url, tmp):
     r = {}
     def chora_shown(p):
         return p.evaluate('() => !document.getElementById("chora").hidden && document.body.hasAttribute("data-chora")')
+    def perm_reload(p):
+        """WHG allowed in the Permissions panel, and the reload it offers asked for: what the panel says the reload
+        would lose, shown first ('' when there is nothing, and the page reloads at once)."""
+        p.click('#permissions-button'); until(p, '() => document.getElementById("permissions-panel")?.open', 10)
+        p.check('#permissions-panel fieldset.perm[data-key="gazetteer:whg"] input[value="allowed"]')
+        p.evaluate('() => { window.__beforePermReload = true; }')
+        p.click('#permissions-panel [data-reload]')
+        t0 = time.time()
+        while time.time() - t0 < T(20):
+            try:
+                if p.is_visible('#permissions-panel .perm-confirm'): return p.inner_text('#permissions-panel .perm-confirm')
+                if not p.evaluate('() => window.__beforePermReload === true'): return ''
+            except Exception: pass                              # the page going: reloaded
+            time.sleep(0.2)
+        raise RuntimeError('the panel neither asked nor reloaded')
+    CAMERA = '() => { const m = window.__chora_map, c = m.getCenter(); return [c.lng, c.lat, m.getZoom()]; }'
 
     def opened_at_once():
         ctx = fresh(); r['plain'] = ctx
@@ -3384,6 +3397,19 @@ def chora_seams_checks(pw, url, tmp):
         return (reopened and not l['shown'] and l['chosen'] == [f.name] and l['same page'] and '#chora' not in l['url'] and l['step 2']
                 and not b['shown'] and b['chosen'] == [f.name] and b['same page'] and '#chora' not in b['url'] and b['step 2'] and b['kept'] == [f.name]), got
     attempt('Chora\'s seams: leaving the map, by "Leave the map" or the browser\'s Back, gives the steps back in the same page with the file still chosen (and still kept)', plain_back)
+
+    def hide_stops():
+        # A line begun (one vertex: still being drawn), then "Leave the map": the drawing is stopped, no tool pressed.
+        p = r['p']
+        p.click('#to-chora'); until(p, '() => !document.getElementById("chora").hidden && window.__chora.phase === "loaded"', 30)
+        chora_pick(p, 'londinium')
+        x, y = map_centre(p); draw(p, 'linestring', [(x + 40, y + 20)])
+        DRAWING = '() => ({ mode: window.__chora_draw.getMode(), drawing: window.__chora_draw.getSnapshot().some((f) => f.properties?.currentlyDrawing), pressed: [...document.querySelectorAll("#chora-draw-tools button[aria-pressed=true]")].map((b) => b.dataset.mode || b.dataset.trace) })'
+        before = p.evaluate(DRAWING)
+        p.click('#chora-leave'); until(p, '() => document.getElementById("chora").hidden', 10)
+        after = p.evaluate(DRAWING)
+        return (before['mode'] == 'linestring' and before['drawing'] and after['mode'] == 'static' and not after['drawing'] and after['pressed'] == []), {'while drawing': before, 'after leaving': after}
+    attempt('Chora\'s seams: leaving the map while a line is being drawn stops the drawing (the tool back to none, no button pressed)', hide_stops)
 
     def workflow_open():
         # In the browser that keeps no page in its memory, as before: a reload starts the page afresh.
@@ -3443,6 +3469,36 @@ def chora_seams_checks(pw, url, tmp):
             'state': {k: s.get(k) for k in ('phase', 'places')}, 'drawn': drawn, 'chosen': p.evaluate(SEAM_CHOSEN)}
     attempt('Chora\'s seams, in a workflow: the page loaded at #chora takes the workflow up, chooses its dataset from what it keeps, and Chora shows it', workflow_reloaded)
 
+    def workflow_other_file():
+        # At the step "place", another dataset chosen in step 1 (as Chora is shown, it opens it), drawn on and
+        # saved: the save is handed to the page, but the step is not done with it, and both the tracker and the
+        # save say why. (The presence, the step done by a save from the step's dataset, is the check after this.)
+        ctx = fresh(nocache)
+        try:
+            p = hooked(main_ready(ctx.new_page()))
+            p.evaluate('([t, a]) => window.__methodos_e2e.placeAtKept("Other", "name,lat,lon\\nAbingdon,51.67,-1.28\\n", t, a)', [ant.read_text(), 'applied.json'])
+            p.reload(); wait_state(p, lambda s: s.get('phase') in ('ready', 'detecting', 'detected'), T(30), 'ready')
+            detected_again(p, ['applied.json'])
+            until(p, '() => !document.getElementById("methodos-chora").hidden', 15)
+            p.click('#methodos-chora'); chora_loaded(p)
+            other = d / 'antonine-other.json'; other.write_text(ant.read_text() + '\n')
+            p.evaluate('() => { window.__chora.phase = "e2e-waiting"; }')
+            p.set_input_files('#picker', [str(other)])
+            until(p, '() => window.__chora.phase === "loaded"', 60)
+            chora_pick(p, 'londinium')
+            p.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
+            x, y = map_centre(p); draw(p, 'point', [(x + 50, y + 25)]); p.click('#chora-draw-tools button[data-mode="static"]')
+            until(p, '() => window.__chora.pendingCount === 1', 10)
+            p.click('#chora-save'); until(p, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+            if not (cstate(p)['lastSave'] or {}).get('passed'): raise RuntimeError('the save did not pass')
+            until(p, '() => !!window.__chora.handedOver', 30)
+            t = p.evaluate(JOIN_STATE); said = p.inner_text('#chora-handed') if p.is_visible('#chora-handed') else ''
+            return (t['steps'].get('place') == 'current' and 'not done' in said and other.name in said and 'applied.json' in said
+                    and 'not done' in (t.get('message') or '') and p.evaluate(SEAM_CHOSEN) == ['antonine-other.chora.json']), {
+                        'steps': t['steps'], 'said under the save': said, 'tracker': t.get('message'), 'chosen': p.evaluate(SEAM_CHOSEN)}
+        finally: ctx.close()
+    attempt('Chora\'s seams, in a workflow: a save in Chora from another dataset than the step\'s does not do the step "place": the file is chosen in step 1, and the tracker and the save say why', workflow_other_file)
+
     def workflow_saved():
         # A save in Chora does the workflow's step "place" by itself (no "This step is done"), with the very
         # file it wrote: the record names it by the size and SHA-256 of the file downloaded. Before the save
@@ -3471,8 +3527,54 @@ def chora_seams_checks(pw, url, tmp):
             return (before == 'current' and h['name'] == 'applied.chora.json' and t['steps'].get('place') == 'done' and t['steps'].get('again') == 'current'
                     and got == want and 'is done with it' in said and p.evaluate(SEAM_CHOSEN) == ['applied.chora.json'] and chora_shown(p)), {
                         'before': before, 'handed over': h, 'steps': t['steps'], 'recorded': got, 'downloaded': want, 'said': said}
-        finally: r['wctx'].close()
+        except Exception: r['wctx'].close(); raise
     attempt('Chora\'s seams, in a workflow: a save in Chora does the step "place" by itself, with the file it wrote (the record names it by the size and SHA-256 of the file downloaded), chosen in step 1, and says so under the save', workflow_saved)
+
+    def workflow_saved_reloaded():
+        # Then a reload for a permission: nothing is said lost (Chora has the page's file, the one it saved), and
+        # after it step 1 still has the file saved, as Chora does, not the dataset that went to the step.
+        p = r['wp']
+        try:
+            asked = perm_reload(p)
+            until(p, '() => window.__chora && window.__chora.resumed && ["loaded", "place"].includes(window.__chora.phase)', 90)
+            soon(p, '(n) => JSON.stringify([...document.querySelectorAll("#chosen .name")].map((e) => e.textContent)) === JSON.stringify(n)', 30, ['applied.chora.json'])
+            s = cstate(p)
+            return (asked == '' and p.evaluate(SEAM_CHOSEN) == ['applied.chora.json'] and (s.get('resumed') or {}).get('files') == ['applied.chora.json']), {
+                'asked': asked, 'chosen': p.evaluate(SEAM_CHOSEN), 'resumed': s.get('resumed')}
+        finally: r['wctx'].close()
+    attempt('Chora\'s seams, in a workflow: after a save, a reload for a permission says nothing is lost, and step 1 and Chora have the file saved after it', workflow_saved_reloaded)
+
+    def reload_while_starting():
+        # A reload for a permission while Chora is still starting (its engine held back): the page's file is said
+        # to be lost, as Chora has not opened it; once Chora has it open, nothing is said lost, and after the
+        # reload the file, the place and the view are back.
+        ctx = fresh()
+        try:
+            p = main_ready(ctx.new_page())
+            f = d / 'antonine-starting.json'; shutil.copyfile(ant, f)
+            if not choose(p, [f]): return False, 'not detected'
+            held = []; pat = re.compile(r'/assets/worker-[\w-]+\.js(\?.*)?$')
+            ctx.route(pat, lambda rt: held.append(rt))
+            p.click('#to-chora'); until(p, '() => !!window.__chora', 30)
+            p.wait_for_timeout(500)
+            starting = cstate(p)['phase']
+            asked = perm_reload(p)
+            p.click('#permissions-panel [data-reload-cancel]'); p.keyboard.press('Escape')
+            ctx.unroute(pat)
+            for rt in held: rt.continue_()
+            until(p, '() => window.__chora.phase === "loaded" && window.__chora.mapReadyCount >= 1', 90)
+            pid = chora_pick(p, 'londinium')
+            p.evaluate('() => window.__chora_map.jumpTo({ center: [-0.42, 51.31], zoom: 7.25 })'); p.evaluate(SETTLE)
+            asked_open = perm_reload(p)
+            until(p, '() => window.__chora && window.__chora.resumed && window.__chora.phase === "place"', 90)
+            p.evaluate(SETTLE)
+            s = cstate(p); cam = p.evaluate(CAMERA)
+            back = {'chosen': p.evaluate(SEAM_CHOSEN), 'place': s.get('placeId'), 'camera': cam, 'resumed': s.get('resumed')}
+            return (starting in ('loading', 'ready') and len(held) >= 1 and f.name in asked and asked_open == ''
+                    and back['chosen'] == [f.name] and back['place'] == pid and abs(cam[0] + 0.42) < 0.01 and abs(cam[1] - 51.31) < 0.01 and abs(cam[2] - 7.25) < 0.01), {
+                        'phase when asked': starting, 'held': len(held), 'said while starting': asked, 'said once open': asked_open, 'after the reload': back}
+        finally: ctx.close()
+    attempt('Chora\'s seams: a reload for a permission while Chora is starting says the file chosen would be lost; with it open in Chora nothing is, and the reload brings back the file, the place and the view', reload_while_starting)
 
     def follow_publish(p):
         p.click('#methodos-ask'); until(p, "!document.getElementById('methodos').hidden", 5)
@@ -5381,6 +5483,11 @@ def opfs_names(page, directory):
     return page.evaluate('''async (dir) => { try { const d = await (await navigator.storage.getDirectory()).getDirectoryHandle(dir); const n = [];
       for await (const k of d.keys()) n.push(k); return n; } catch { return []; } }''', directory)
 
+def chora_saved_names(page):
+    """The files Chora's saves handed to the page, each in a folder of its own under chora-saved/ (src/chora/app.js, keepSaved)."""
+    return page.evaluate('''async () => { const n = []; try { const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('chora-saved');
+      for await (const [, h] of d.entries()) if (h.kind === 'directory') for await (const k of h.keys()) n.push(k); } catch {} return n; }''')
+
 def map_centre(page):
     page.query_selector('#chora-map').scroll_into_view_if_needed()
     b = page.query_selector('#chora-map').bounding_box(); return b['x'] + b['width'] / 2, b['y'] + b['height'] / 2
@@ -6578,10 +6685,10 @@ def chora_checks(pw, url, tmp):
             soon(b, '() => window.__chora.pendingCount === 1', 10)
             b.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Ada Test' }))")
             b.click('#chora-save'); until(b, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
-            sb = cstate(b); a.bring_to_front(); outs, chora_outs = opfs_names(a, 'outputs'), opfs_names(a, 'chora-outputs')
+            sb = cstate(b); a.bring_to_front(); outs, chora_outs = opfs_names(a, 'outputs'), chora_saved_names(a)
             lines = download(a, a_out[0], tmp / 'twotabs.jsonl').read_text().strip().split('\n') if a_out and a_out[0] in outs else []
             again = run_case(a, [fixture(EX / 'place-centric-king-john.json', 'king-john-twotabs.json', tmp)], 'check')
-            return {'first': first.get('phase'), 'a_out': a_out, 'chora': s, 'save': sb.get('lastSave'), 'error': sb.get('error'), 'outputs': outs, 'chora-outputs': chora_outs, 'lines': len(lines), 'again': again.get('phase'), 'again errors': (again.get('report') or {}).get('errors')}
+            return {'first': first.get('phase'), 'a_out': a_out, 'chora': s, 'save': sb.get('lastSave'), 'error': sb.get('error'), 'outputs': outs, 'chora-saved': chora_outs, 'lines': len(lines), 'again': again.get('phase'), 'again errors': (again.get('report') or {}).get('errors')}
         finally: a.close(); b.close()
     both = {}
     def two_tabs_run():
@@ -6589,7 +6696,7 @@ def chora_checks(pw, url, tmp):
         return (r['first'] == 'done' and r['chora']['phase'] == 'loaded' and (r['save'] or {}).get('passed') and r['again'] == 'done' and r['again errors'] == 0), r
     attempt('Chora and the main page open at once: Chora opens and saves a dataset, and the main page still runs', two_tabs_run)
     attempt('Chora and the main page open at once: Chora\'s save leaves the main page\'s unsaved output in place, and it saves',
-            lambda: (bool(both) and both['a_out'] and both['a_out'][0] in both['outputs'] and 'antonine-twotabs.chora.json' in both['chora-outputs'] and both['lines'] > 1, both))
+            lambda: (bool(both) and both['a_out'] and both['a_out'][0] in both['outputs'] and 'antonine-twotabs.chora.json' in both['chora-saved'] and both['lines'] > 1, both))
 
     # Chora's working database is in a SQLite pool one tab alone can hold, so a second Chora tab cannot
     # start. It must say so in words, not show the browser's createSyncAccessHandle error; the first tab
@@ -6720,6 +6827,55 @@ def chora_checks(pw, url, tmp):
                 and not page.is_visible('#chora-save-result button.primary') and 'odd-unlisted.chora.json' not in written and s['pendingCount'] == 1), {
                 'save': {k: ls.get(k) for k in ('passed', 'added')}, 'said': text[:300], 'chora-outputs': written, 'pending': s.get('pendingCount')}
     attempt('Chora: a drawing for a place whose attestations are not a list is refused, naming the place, and no file is written or offered', not_a_list)
+
+    STEP1 = '''async () => { const f = document.getElementById('picker').files[0]; if (!f) return null;
+      try { return { name: f.name, bytes: (await f.arrayBuffer()).byteLength }; } catch (e) { return { name: f.name, error: e.name }; } }'''
+    def save_again(place):
+        # A drawing for `place`, saved; the save's state (lastSave cleared first, so that this save's is waited for).
+        chora_pick(page, place)
+        x, y = map_centre(page); draw(page, 'point', [(x + 40, y - 30)]); page.click('#chora-draw-tools button[data-mode="static"]')
+        until(page, '() => window.__chora.pendingCount >= 1', 10)
+        page.evaluate('() => { window.__chora.lastSave = null; window.__chora.handedOver = null; }')
+        page.click('#chora-save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+        return cstate(page).get('lastSave') or {}
+    def downloaded():
+        with page.expect_download(timeout=T(60) * 1000) as dl: page.click('#chora-save-result button.primary')
+        return json.loads(pathlib.Path(dl.value.path()).read_text())
+    by_label = lambda doc, label: next((x for x in doc['spatialEntities'] if x.get('label') == label), None)
+    drawn_on = lambda doc, label: 'Ada Test' in json.dumps(by_label(doc, label) or {})
+
+    def builds_on_saved():
+        # Saved, the file downloaded and its drawings let go: Chora has the file it saved open from then on, so
+        # that a second save holds the first's drawing too (the first file holds only its own: the presence).
+        f, s, _ = draw_and_save('odd-twice.json', 'control')
+        if not (s.get('lastSave') or {}).get('passed'): raise RuntimeError('the first save did not pass')
+        until(page, '() => !!window.__chora.handedOver', 30)
+        first = downloaded()
+        page.click('#chora-save-result button[data-clear]')
+        until(page, '() => window.__chora.rebased === "odd-twice.chora.json" && window.__chora.pendingCount === 0', 60)
+        said = page.inner_text('#chora-save-result')
+        ls = save_again('trapdoor')
+        if not ls.get('passed'): return False, {'second save': ls}
+        second = downloaded()
+        got = {'first': {'control': drawn_on(first, 'Control'), 'trapdoor': drawn_on(first, 'Trapdoor')},
+               'second': {'control': drawn_on(second, 'Control'), 'trapdoor': drawn_on(second, 'Trapdoor')},
+               'second file': (ls.get('outputs') or [{}])[0].get('name'), 'said': said[-200:]}
+        return (got['first'] == {'control': True, 'trapdoor': False} and got['second'] == {'control': True, 'trapdoor': True}
+                and 'is open here now' in said), got
+    attempt('Chora: once a saved file\'s drawings are let go, Chora has that file open, and the next save builds on it: it holds the first save\'s drawing and the second\'s', builds_on_saved)
+
+    def refused_keeps_step1():
+        # A save handed to the page (chosen in step 1), then a second save, from the same dataset, refused by its
+        # check: step 1's file can still be read, as it could before (the presence).
+        f, s, _ = draw_and_save('odd-refused.json', 'control')
+        if not (s.get('lastSave') or {}).get('passed'): raise RuntimeError('the first save did not pass')
+        until(page, '() => !!window.__chora.handedOver', 30)
+        before = page.evaluate(STEP1)
+        ls = save_again('oddity')
+        after = page.evaluate(STEP1)
+        return (before and before.get('name') == 'odd-refused.chora.json' and before.get('bytes', 0) > 0 and ls.get('passed') is False
+                and after == before), {'step 1 before': before, 'second save passed': ls.get('passed'), 'step 1 after': after}
+    attempt('Chora: a later save refused by its check (after clearing the folder it writes in) leaves the file an earlier save handed to step 1 readable there', refused_keeps_step1)
 
     # ---- At DEEP's scale (1.4 million attestations; a save of 14 minutes, most of it the version check).
     def jsonl_dataset(name):
