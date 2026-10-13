@@ -1061,6 +1061,25 @@ function projectTarget(name) {
     .then(async (h) => { const w = await h.createWritable(); return { write: (c) => w.write(c), close: () => w.close(), abort: () => w.abort() }; })
     .catch((e) => (e?.name === 'AbortError' ? null : download()));
 }
+/**
+ * What a project must never hold (src/engine/methodos/project.js searches every part for each): the WHG
+ * token, the CARTO key this build was given, and the values in the addresses of the basemaps pasted in
+ * Chora (`chora-basemaps`, where a key such as ?api_key=… is kept), read as plain text, never acted on.
+ * The project refuses anything 8 characters or longer, so short values (z, x, y) are not searched for.
+ */
+function projectSecrets() {
+  const out = [permissions.token.get(), import.meta.env?.VITE_CARTO_API_KEY];
+  try {
+    const pasted = JSON.parse(localStorage.getItem('chora-basemaps') || '[]');
+    for (const b of Array.isArray(pasted) ? pasted : []) {
+      for (const a of [b?.url, b?.tiles]) {
+        if (typeof a !== 'string') continue;
+        try { for (const [, v] of new URL(a.replace(/[{}]/g, '_')).searchParams) out.push(v); } catch { /* not an address */ }
+      }
+    }
+  } catch { /* none kept */ }
+  return out.filter((s) => typeof s === 'string' && s.length >= 8);
+}
 /** Settled once the files chosen are recognised, or found not to be (state.phase), or when none is being looked at. */
 function detectionSettled() {
   return new Promise((resolve) => { const t = () => (state.phase === 'detecting' ? setTimeout(t, 50) : resolve()); t(); });
@@ -1092,7 +1111,7 @@ const methodos = mountMethodos({
     parked: () => parked,
     // The project file (src/engine/methodos/project.js): where it is saved, asked at the click; what it must never hold; a review read from it.
     saveTarget: projectTarget,
-    secrets: () => [permissions.token.get()].filter(Boolean),
+    secrets: projectSecrets,
     openReview: async (f, list) => {
       if (list.length && !files.length && await whenReady !== false) { const dt = new DataTransfer(); for (const x of list) dt.items.add(x); $('picker').files = dt.files; choose(list); }
       await detectionSettled();

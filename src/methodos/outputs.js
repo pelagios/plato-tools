@@ -106,7 +106,7 @@ export function outputStore({ root = () => navigator.storage.getDirectory(), kee
             if (there.size === ref.size) return { write() {}, close: async () => done(named(there, ref), 'browser'), async abort() {} };
           } catch { /* not kept yet */ }
           const h = await d.getFileHandle(ref.sha256, { create: true });
-          const w = await h.createWritable();   // written to the side, and in place only at close()
+          const w = (await h.createWritable()).getWriter();   // written to the side, and in place only at close()
           return {
             write: (c) => w.write(c),
             async close() {

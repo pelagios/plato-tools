@@ -1041,11 +1041,6 @@ async function review(action, args, o, resources) {
   return r.exitCode;
 }
 
-/**
- * Check cube exports against the Data Cube integrity constraints. Each file is read as a stream,
- * but its graph is held in memory to be checked, so a cube larger than memory cannot be. Exit 0 when every constraint passed, 1 when any failed or had nothing to
- * evaluate (a constraint over nothing is not tested, never passed), 2 when a file cannot be read.
- */
 // Methodos's project file (src/engine/methodos/project.js): its manifest listed, and every part read
 // through, its size and SHA-256 checked, as the page checks it before opening it. Nothing is written.
 async function projectCommand(args, o) {
@@ -1053,19 +1048,27 @@ async function projectCommand(args, o) {
   if (sub !== 'info') return usage(`${sub ? `"project ${sub}" is not a command; ` : ''}the project command is "project info FILE": it lists what a project holds and checks every part's hash.`);
   if (!file || rest.length) return usage('project info takes one file, a PLATO tools project (.platoproj).');
   const { readProject, describe } = await import('../src/engine/methodos/project.js');
-  const { createReadStream } = await import('node:fs');
+  const { open } = await import('node:fs/promises');
   try { if (!statSync(file).isFile()) return usage(`${file} is not a file.`); } catch (e) { process.stderr.write(`plato-tools: ${file} cannot be read (${e.code || e.message}).\n`); return 2; }
   let read;
-  try { read = await readProject(createReadStream(file), { name: file }); } catch (e) {
+  // Read by offset, as the page reads the File: the zip's central directory first, then each entry where it says.
+  const fh = await open(file, 'r');
+  const src = { size: (await fh.stat()).size, read: async (a, b) => { const buf = Buffer.alloc(b - a); const { bytesRead } = await fh.read(buf, 0, b - a, a); return new Uint8Array(buf.buffer, buf.byteOffset, bytesRead); } };
+  try { read = await readProject(src, { name: file }); } catch (e) {
     if (o.json) process.stdout.write(JSON.stringify({ file, ok: false, problem: e.message }, null, 2) + '\n');
     else process.stdout.write(`${file}: ${e.message}\n`);
     return 1;
-  }
+  } finally { await fh.close(); }
   if (o.json) process.stdout.write(JSON.stringify({ file, ok: true, manifest: read.manifest }, null, 2) + '\n');
   else process.stdout.write(`${file}\n${describe(read).join('\n')}\n`);
   return 0;
 }
 
+/**
+ * Check cube exports against the Data Cube integrity constraints. Each file is read as a stream,
+ * but its graph is held in memory to be checked, so a cube larger than memory cannot be. Exit 0 when every constraint passed, 1 when any failed or had nothing to
+ * evaluate (a constraint over nothing is not tested, never passed), 2 when a file cannot be read.
+ */
 async function datacube(files, o) {
   if (!files.length) return usage('name at least one N-Triples cube export to check.');
   const { integrityOfFile } = await import('../src/lib/datacube.js');

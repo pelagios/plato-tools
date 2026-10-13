@@ -11,7 +11,7 @@ import { RECIPES } from '../engine/methodos/recipes/index.js';
 import * as runner from '../engine/methodos/runner.js';
 import { refsOf, refsDiffer } from '../engine/methodos/handoffs.js';
 import { atBoundary, reconcile, restartRemaining, recordOf } from '../engine/methodos/record.js';
-import { writeProject, readProject, projectName, ProjectError } from '../engine/methodos/project.js';
+import { writeProject, readProject, projectName, ProjectError, blobSource, newerWords } from '../engine/methodos/project.js';
 import { fmtBytes } from '../engine/words.js';
 import { take as takeHandback, peek as peekHandback, isWorkflowId } from '../chora/handback.js';
 import { outputStore } from './outputs.js';
@@ -898,6 +898,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   // reload does; a workflow already open is let go only once the user has said so. Nothing read from it
   // runs or asks anything: the user carries on.
   let replacing = null;   // the project chosen while a workflow is open, until the user says whether to replace it
+  let fromNewer = null;   // the id of a workflow opened from a project of a later minor: what newer tools added is not saved again
+  const IN_MEMORY = 512 * 1024 * 1024;   // the most a project's files may come to, held in the tab's memory (working data not kept)
   /** Where the project's words go: the tracker's message while it is shown, else the line under the banner. */
   function tell(words, warn = false) {
     if (!tracker.hidden) { say(words, warn); render(false); return; }
@@ -947,7 +949,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
         await out.close();
         const missed = left.filter((x) => x.why === 'not-kept').map((x) => x.ref.name);
         tracker.dataset.project = name;
-        say(`Saved ${name} (${fmtBytes(size)}): ${files.length} ${files.length === 1 ? 'file' : 'files'}${r ? `, the review open (${r.name})` : ''} and the workflow at its step. Keep it as you would your data.${missed.length ? ` Not in it, as this browser no longer keeps ${missed.length === 1 ? 'it' : 'them'}: ${missed.join(', ')}; whoever opens it chooses ${missed.length === 1 ? 'it' : 'them'} again where a step needs ${missed.length === 1 ? 'it' : 'them'}.` : ''}`);
+        say(`Saved ${name} (${fmtBytes(size)}): ${files.length} ${files.length === 1 ? 'file' : 'files'}${r ? `, the review open (${r.name})` : ''} and the workflow at its step. Keep it as you would your data.${fromNewer === record.id ? ' What newer PLATO tools had added to the project it was opened from is not in it.' : ''}${missed.length ? ` Not in it, as this browser no longer keeps ${missed.length === 1 ? 'it' : 'them'}: ${missed.join(', ')}; whoever opens it chooses ${missed.length === 1 ? 'it' : 'them'} again where a step needs ${missed.length === 1 ? 'it' : 'them'}.` : ''}`);
       } catch (e) {
         try { await out.abort(); } catch { /* nothing written */ }
         say(e.message || String(e), true);
@@ -980,12 +982,24 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     tell(`Reading ${file.name}…`);
     const old = wf || changed?.record || null;
     const ours = new Set([...(old ? keptBy(old) : []).map((r) => r.sha256), ...(await outs.kept()).files.map((f) => f.sha256)]);
-    // What a refused project wrote into this browser, and nothing kept before it, goes again.
-    const undo = async (closed) => outs.drop((closed || []).map((c) => c.part).filter((p) => !ours.has(p.sha256)).map((p) => ({ sha256: p.sha256 })));
+    // What a refused project may have written into this browser (any file part it names, whole or begun), and was not kept before it, goes again.
+    const undo = async (parts) => outs.drop((parts || []).filter((p) => !ours.has(p.sha256)).map((p) => ({ sha256: p.sha256 })));
     let read;
     try {
-      read = await readProject(file.stream(), {
+      read = await readProject(blobSource(file), {
         name: file.name,
+        // Room for its files before any is written: the browser's own estimate, with a margin (a tenth, and
+        // a megabyte); held in memory (working data not kept), at most IN_MEMORY.
+        room: async (bytes) => {
+          if (!outs.keeping()) {
+            if (bytes > IN_MEMORY) throw new ProjectError(`Its files come to ${fmtBytes(bytes)}, and with "Keep my working data" off they would be held in this tab's memory, which takes at most ${fmtBytes(IN_MEMORY)}: turn it on (Permissions) and open the project again.`);
+            return;
+          }
+          let e = null;
+          try { e = await navigator.storage?.estimate?.(); } catch { /* not said */ }
+          if (e && typeof e.quota === 'number' && e.quota - (e.usage || 0) < bytes * 1.1 + 1e6)
+            throw new ProjectError(`Its files come to ${fmtBytes(bytes)}, and this browser has room for ${fmtBytes(Math.max(0, e.quota - (e.usage || 0)))} (a private window has very little), so nothing of it was written.`);
+        },
         sink: async (part) => {
           const w = await outs.writer({ type: 'files', name: part.name, size: part.size, sha256: part.sha256 }, { own: part.own });
           const kept = (e) => new ProjectError(`${part.name} could not be kept in this browser (${e?.name === 'QuotaExceededError' ? 'it has not room enough' : 'it would not keep it'}), so the project was not opened.`);
@@ -993,22 +1007,25 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
         },
       });
     } catch (e) {
-      await undo(e.closed);
+      await undo(e.fileParts);
       tell(`${file.name} was not opened. ${e.message || e}`, true);
       return;
     }
     const recipe = RECIPES[read.record.recipe.key];
     const v = reconcile(read.record, recipe);
-    if (v.action === 'refuse') { await undo(read.files); tell(`${file.name} was not opened. ${v.words}`, true); return; }
-    // The workflow open is let go, now that the project is read whole: its user's file handed over as Leave does.
+    if (v.action === 'refuse') { await undo(read.files.map((c) => c.part)); tell(`${file.name} was not opened. ${v.words}`, true); return; }
+    // The new record is kept first, and only then the workflow open let go (its user's file handed over as
+    // Leave does): a tab that dies between the two leaves two workflows, never none.
+    await store.save(v.action === 'continue' ? v.state : read.record);
     const fresh = new Set(read.files.map((c) => c.part.sha256));
-    if (old) { await handOver(old); await outs.drop(keptBy(old).filter((r) => !fresh.has(r.sha256))); await store.remove(old.id); }
+    if (old) { await handOver(old); await outs.drop(keptBy(old).filter((r) => !fresh.has(r.sha256))); if (old.id !== read.record.id) await store.remove(old.id); }
     if (pending) await store.dropPending(pending.id);
+    fromNewer = read.newer ? read.record.id : null;
     wf = null; wfScope = null; pending = null; changed = null; active = null; note = null; handle = handleFile = keptHandle = null; fromChora = null; arrived = null; asIs = null; ownMissed = [];
     chosenRefs = null;
     if (projectSaid) { projectSaid.hidden = true; projectSaid.textContent = ''; }
     const by = read.manifest.tools.version === build?.version ? '' : ` (saved by PLATO tools ${read.manifest.tools.version})`;
-    const opened = `Opened the project ${file.name}${by}, every part checked.`;
+    const opened = `Opened the project ${file.name}${by}, every part checked.${read.newer ? ` ${newerWords(read.manifest)}` : ''}`;
     // The base address the workflow was begun under, into Options if it has none (said; nothing is run with it).
     const base = typeof read.record.answers?.base === 'string' ? read.record.answers.base : '';
     const baseSet = base && !page.base?.() ? (page.setBase?.(base), ` The base address in Options is set to ${base}, the workflow's.`) : '';

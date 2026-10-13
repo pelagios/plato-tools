@@ -4385,6 +4385,47 @@ def project_checks(pw, url, tmp):
         return ('is open. Open' in words and focus == 'methodos-replace-no' and after['steps'] == before and before.get('place') == 'current' and 'was not opened' in after['message']), \
             {'words': words[:200], 'focus': focus, 'steps after': after['steps'], 'message': after['message'][:160]}
     attempt('Project file: choosing a project while a workflow is open asks first (the safe answer focused); "Keep this workflow" leaves it exactly as it was', replace_asked)
+
+    # A workbook as the user's own file: a zip inside the project's zip, whose bytes hold PK\x03\x04 (a reader that
+    # scanned for signatures refused every such project). Begun with it, saved, and opened in another fresh profile.
+    three = context(browser)
+    def workbook():
+        import hashlib
+        xlsx = out / 'parishes.xlsx'
+        subprocess.run(['node', '--input-type=module', '-e', "import * as XLSX from 'xlsx'; import { readFileSync, writeFileSync } from 'node:fs'; "
+                        "const wb = XLSX.read(readFileSync(process.argv[1], 'utf8'), { type: 'string' }); writeFileSync(process.argv[2], XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));", str(MYDATA_CSV), str(xlsx)],
+                       cwd=ROOT, check=True, capture_output=True)
+        raw = xlsx.read_bytes(); sha = hashlib.sha256(raw).hexdigest()
+        p3 = three.new_page()
+        p3.goto(NOTOOLS if PROVE else base)
+        wait_state(p3, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+        p3.click('#methodos-ask'); until(p3, "!document.getElementById('methodos').hidden", 5)
+        p3.check('input[name="methodos-have"][value="table"]'); p3.check('input[name="methodos-want"][value="map"]')
+        for k, v in (('has-regions', 'no'), ('will-draw', 'no'), ('will-publish', 'no')): p3.check(f'input[name="methodos-ask-{k}"][value="{v}"]')
+        p3.click('#methodos-start'); until(p3, "['pending', 'idle'].includes(document.getElementById('methodos-tracker').dataset.status)", 10)
+        p3.set_input_files('#picker', [str(xlsx)])
+        wait_state(p3, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'detection')
+        until(p3, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+        p3.click('#methodos-project > summary')
+        with p3.expect_download(timeout=T(60) * 1000) as d: p3.click('#methodos-save-project')
+        saved = out / ('workbook-' + d.value.suggested_filename); d.value.save_as(saved)
+        with zipfile.ZipFile(saved) as z:
+            own = z.read(f'files/{sha}') if f'files/{sha}' in z.namelist() else b''
+        p4 = context(browser).new_page()   # another fresh profile
+        p4.goto(NOTOOLS if PROVE else base)
+        wait_state(p4, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+        p4.set_input_files('#methodos-project-file', str(saved))
+        until(p4, "() => /Opened the project/.test(document.getElementById('methodos-message').textContent)", 60)
+        s = wait_state(p4, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'chosen again')
+        chosen = p4.evaluate("() => [...document.querySelectorAll('#chosen .name')].map((e) => e.textContent)")
+        kept = opfs_names(p4, 'methodos-outputs')
+        t = track(p4)
+        shot(p4, 'workbook-opened.png')
+        p4.context.close()
+        return (own == raw and raw[:4] == b'PK\x03\x04' and raw.count(b'PK\x03\x04') > 1 and t['steps'].get('columns') == 'current'
+                and chosen == ['parishes.xlsx'] and s.get('phase') == 'detected' and sha in kept), \
+            {'in the project whole': own == raw, 'signatures in it': raw.count(b'PK\x03\x04'), 'steps': t['steps'], 'chosen': chosen, 'phase': s.get('phase'), 'kept': sha in kept, 'message': t['message'][:200]}
+    attempt('Project file: a workflow begun with a workbook (.xlsx, itself a zip) is saved with the workbook whole in it, and opened in a fresh profile at the columns step with the workbook kept and chosen again', workbook)
     try: browser.close()
     except Exception: pass
 

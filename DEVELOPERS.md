@@ -2906,14 +2906,27 @@ and any change to it raises its version. The tools never read WHG's `.whgproj` f
 one is refused in words ("open it in WHG's Map your Data").
 
 - **The format** (`src/engine/methodos/project.js`, pure, run by the page and the command line alike): a
-  zip, every entry deflated, whose first entry is `manifest.json` (`format: 'plato-tools-project'`,
-  `version: 1`, `tools: { version, commit }`, `created`, `workflow: { id, name, recipe: { key, version },
-  at }`, `parts`, and `left` for the files the workflow names that are not in it), then the parts it lists,
+  zip whose first entry is `manifest.json` (`format: 'plato-tools-project'`, `version: 1` (the major),
+  `minor: 0`, `tools: { version, commit }`, `created`, `workflow: { id, name, recipe: { key, version }, at
+  }`, `parts`, and `left` for the files the workflow names that are not in it), then the parts it lists,
   each once, each with its size and SHA-256: `workflow.json` (the record, exactly its `.workflow.json`,
   the Scope in it), `review.krisis.json` (the review open on the page: decisions, candidates, regions;
   a Krisis work file), `chora-handback.json` (Chora's hand-back for this workflow, if one waits:
   references only), and `files/<sha256>` (each file the record names: the user's own, `own: true`, and the
-  files the steps made). The extension is `.platoproj`; its media type is `application/zip`.
+  files the steps made). The extension is `.platoproj`; its media type is `application/zip`. **Versions**:
+  a greater major is refused; a greater minor of the same major opens, says "saved by newer PLATO tools;
+  what they added is not read" (`newerWords()`), ignores the keys it does not know, and a later save says
+  that what they added is not kept; a role or an entry it does not know is never ignored unless its part
+  is marked `optional: true`; at its own minor or below, an unknown key is damage.
+- **The zip is read by its central directory**, which is authoritative, as for Python's reader and WHG's:
+  the end record is found, the directory read, each local header checked against its entry (name,
+  method, and CRC and sizes where the header carries them), the entries checked not to overlap, and each
+  entry read by its offset and compressed size (`blobSource(file)`: `file.slice()` in the browser; the
+  command line reads its file by offset with `fs`), never scanned for signatures. (fflate's streaming
+  `Unzip` did scan, and refused any project whose own file was a workbook or a zip: a part's stored bytes
+  holding `PK\x03\x04` read as a new entry. Found in review, 13 October 2026.) A file with no central
+  directory, ZIP64, an encrypted entry, a method other than stored or DEFLATE, a name that is not UTF-8 or
+  comes twice, or a directory that disagrees with its entries, is refused in words.
 - **Save the project** (the tracker's folded "Save or open the project", after the Scope's line, so that
   the steps and buttons stay in view at 1440 × 900). Beside the button it says what goes in, from the
   workflow itself (`projectWords()` in `src/methodos/seams.js`): "The project file holds your own data …:
@@ -2927,9 +2940,14 @@ one is refused in words ("open it in WHG's Map your Data").
   ones the record names is refused rather than saved under another's hash. The zip goes, a chunk at a
   time, into the file chosen in Chromium's save dialogue (`projectTarget()` in `src/app.js`, asked at the
   click), or is gathered and downloaded elsewhere (one copy, the compressed zip). Refused while a step
-  runs.
-- **What is never in it.** The WHG token (the page passes it as `secrets()`; a JSON part that holds it is
-  refused and nothing is written), any key, the permission grants, the file handles, the hand-off, and
+  runs, and refused in words over 4 GiB, a part or the whole (no ZIP64), or with a review over 64 MB.
+- **What is never in it.** The WHG token, the CARTO key the build was given, and the values in the
+  addresses of the basemaps pasted in Chora (`chora-basemaps`, where an `?api_key=` is kept): the page
+  passes them as `secrets()` (`projectSecrets()` in `src/app.js`), and every part is searched for each
+  (`secretSearch()`: the JSON parts as text before they are encoded, the files a chunk at a time with the
+  last bytes of each chunk kept, so that one split across two is found); a part that holds one, the
+  user's own file included, is refused ("parishes.csv holds your WHG token or another key, which a project
+  never does, so the project was not saved") and what was written is aborted. Nor any other key, the permission grants, the file handles, the hand-off, and
   this browser's storage keys. The reviewer's name and ORCID are in it only as the review records them
   (a work file's `reviewer`, which a bulk accept or a lookup writes, as "Save the review" saves it); the
   name remembered in this browser (`plato-tools.reviewer`) is not. The manifest and the record name the
@@ -2941,12 +2959,18 @@ one is refused in words ("open it in WHG's Map your Data").
   version 2 …"), any key, role, path or entry it does not know, a part listed twice or missing, a part
   longer or shorter than its manifest says or whose SHA-256 differs, a record that `importRecord()`
   refuses, a review that `readWork()` refuses, a hand-back not for its workflow, and a file the record
-  does not name. Each part is inflated, hashed and handed to its sink as it arrives: the files are written
-  straight into the outputs folder under their SHA-256 (`outputs.js` `writer()`: OPFS's writable, put in
-  place only at `close()`, which comes only once the hash matches; in memory where working data is not
-  kept), the JSON parts are read into memory, bounded (`LIMITS`: manifest 1 MB, record 4 MB, review 256 MB,
-  hand-back 64 KB). A refused project leaves nothing behind (the files it had written, and nothing kept
-  before, are dropped). A workflow already open is let go only once the user has said so ("… is open. Open
+  does not name, nor one whose manifest's `workflow` (its id, name, recipe, or the step it is at)
+  disagrees with the record. Before any file is written, the sum of the file parts' sizes is checked
+  against the room the browser reports (`navigator.storage.estimate()`, with a tenth and a megabyte to
+  spare), or, with working data not kept (held in memory), against 512 MB, and refused in words. Each part
+  is read a slice at a time, inflated, hashed and handed to its sink: the files are written straight into
+  the outputs folder under their SHA-256 (`outputs.js` `writer()`: OPFS's writable, put in place only at
+  `close()`, which comes only once the hash matches; in memory where working data is not kept), the JSON
+  parts are read into memory, bounded (`LIMITS`: manifest 1 MB, record 4 MB, review 64 MB, hand-back 64
+  KB). A refused project leaves nothing behind: the sink in flight is aborted, and every file part the
+  manifest named that was not kept before is dropped (`fileParts` on the error). The new record is saved
+  before the workflow it replaces is removed, so that a tab that dies between the two leaves two
+  workflows, never none. A workflow already open is let go only once the user has said so ("… is open. Open
   … in its place? This workflow, and the files this browser keeps for it, are let go: save it as a
   project first to keep it.", with "Keep this workflow" focused), and only after the project has been
   read whole. It is then taken up by the version rule (`reconcile()`) at the step it had reached, exactly
@@ -2965,17 +2989,25 @@ one is refused in words ("open it in WHG's Map your Data").
   when it is refused (with the page's words), 2 when the file cannot be read. There is no runner for
   workflows on the command line.
 - **Tests.** `test/methodos-project.test.js`: the manifest round trip (every part back byte for byte,
-  read in pieces of 4 KB and of one byte), restoring at the right step (with the control a step earlier),
-  a changed byte, a cut part, a longer part and a missing one refused with the part named (the same
-  project untouched opening), a newer version refused (re-zipped unchanged, it opens), unknown keys,
-  roles, paths, entries and files refused, WHG's `.whgproj` and other non-projects refused, nothing secret
-  in it (the token, the grants and the reviewer remembered absent beside the user's data and decisions
-  present; a review holding the token refused, and the same review with no secret to refuse written), a
-  kept file changed refused, the user's own file left out and listed, and the command line's exit
-  statuses. In the browser, `project_checks` in `e2e/app_test.py`: Map your data saved mid-review, a
-  fresh profile (a new context) holding nothing, a tampered copy refused there and leaving nothing, the
-  project opened at the review with the same decisions, carried on to the decisions recorded, and the
-  question before replacing a workflow. `PROJECT_SHOTS=<dir>` saves screenshots at 1440 × 900.
+  from a Blob and from bytes), restoring at the right step (with the control a step earlier), a changed
+  byte, a cut part, a part longer than its declared size and a missing one refused with the part named
+  (the same project untouched opening), the versions (a greater major refused; a greater minor opened
+  with its note, its unknown keys and an optional unknown part ignored; the same keys at minor 0 refused,
+  as is an unknown role not marked optional), `at` and `name` disagreeing with the record, the central
+  directory (none, one disagreeing with a local header, an entry twice, stored entries read, a 3 GiB
+  declared size, room asked before any sink), a workbook and a 300 KB file holding `PK\x03\x04` seven
+  times as the user's own file, a sink failing mid-part leaving the outputs folder empty (beside the same
+  project keeping its four files), unknown keys, roles, paths, entries and files refused, WHG's `.whgproj`
+  and other non-projects refused, nothing secret in it (absent beside present; the token planted in the
+  review and in a step's output refused, each beside its control; a secret split across two chunks
+  found), a part over 4 GiB refused, a kept file changed refused, the user's own file left out and listed,
+  and the command line's exit statuses. Seventeen deliberate breaks of the reader and writer were each
+  caught by them (13 October 2026). In the browser, `project_checks` in `e2e/app_test.py`: Map your data
+  saved mid-review, a fresh profile (a new context) holding nothing, a tampered copy refused there and
+  leaving nothing, the project opened at the review with the same decisions, carried on to the decisions
+  recorded, the question before replacing a workflow, and a workflow begun with a workbook (.xlsx) saved
+  and opened in a fresh profile with the workbook chosen again, byte for byte. `PROJECT_SHOTS=<dir>` saves
+  screenshots at 1440 × 900.
 
 ## Permissions
 
