@@ -1757,7 +1757,7 @@ and reaches nothing.
     (radius 8, the glyph 12 pixels tall) clear of the status's disc. Dark ink on white, so that no colour carries the meaning and
     they read on a light basemap and a dark one (CARTO's Dark Matter); a dashed ring's white is unbroken
     under its dashes, so that a gap shows white and not the map. The status keeps its colour, fill and
-    dashes on the disc inside the mark, as before. `drawMark` draws each on a 2D context, 40 pixels
+    dashes on the disc inside the mark, as before. `drawMark` draws each on a 2D context, 44 pixels
     square: the map makes its images with it (`chora-precision-<value>`, added again at every
     `style.load`, since a new style has none; drawn at twice the size for a finer screen), and the key
     draws the same marks with it, so that the two cannot differ. The values are `PRECISIONS` in
