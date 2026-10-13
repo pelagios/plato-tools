@@ -1,4 +1,4 @@
-// Assisted ink tracing on Chora's page: "Trace area" and "Trace line" on a historical map shown, and "Snap
+// Assisted ink tracing in Chora: "Trace area" and "Trace line" on a historical map shown, and "Snap
 // to ink" for drawing by hand. Loaded only when first wanted (a chunk of its own), with its worker.
 //
 // A click on a map shown (the topmost whose mask holds the click) is placed on the map's image through

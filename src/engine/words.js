@@ -609,7 +609,7 @@ const scopeWords = ({ labels = [], ids = [], countries = [] } = {}) => [
   labels.length ? `within ${labels.join(' or ')} (WHG ${ids.join(', ')})` : '',
   countries.length ? `in ${countries.join(' or ')}` : '',
 ].filter(Boolean).join(', ');
-/** Chora's page for adopting a location (src/chora/adopt-ui.js), in words. */
+/** Chora's panel for adopting a location (src/chora/adopt-ui.js), in words. */
 /**
  * The WHG token's field, the same on the main page's lookup panel and Chora's adopt panel
  * (src/lib/token-field.js): empty with where to get the token, then masked with where it is kept.

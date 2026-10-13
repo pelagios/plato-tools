@@ -1,7 +1,8 @@
 # The PLATO tools project file, version 1.0
 
 A PLATO tools project holds one Methodos workflow whole: its record, its Scope, the files its steps
-made, the user's own starting file, the Krisis review open, and Chora's hand-back if one waits. It is
+made, the user's own starting file, the Krisis review open, and, in a project saved before 13 October
+2026, Chora's hand-back if one waited. It is
 written and read by `src/engine/methodos/project.js`; DEVELOPERS.md ("The project file") says how the page
 uses it. This page is the contract that WHG's Workbench stores it under (its `plato` doc_type).
 
@@ -94,7 +95,9 @@ U+202E, U+2066 to U+2069, U+FEFF), not only white space, and not `.` or `..`.
   its decisions, candidates and regions.
 - **`chora-handback.json`**: `{ "handback": 1, "workflow": "<the record's id>", "files": [{ "type":
   "dataset", "name", "size", "sha256" }], "at": <ms since 1970> }`, a reference to the dataset saved in
-  Chora, never its bytes.
+  Chora, never its bytes. PLATO tools wrote one until 13 October 2026, when Chora came into the main page
+  and its save began to complete the workflow's step itself; the format is unchanged, and a reader still
+  reads it (the tools name the file it refers to, to be chosen by hand).
 - **`files/<sha256>`**: a file the record names, byte for byte: the user's own (`own: true`) or one a step
   made. Every `file` part must be named by the record, by SHA-256 and size.
 

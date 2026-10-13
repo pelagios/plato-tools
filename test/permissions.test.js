@@ -214,7 +214,7 @@ test('forget and forget all: the permission is undecided again; keep working dat
 });
 
 test('MapLibre\'s transformRequest: this site goes, an allowed provider goes, and once withdrawn it is refused at once and counted', async () => {
-  globalThis.location = { origin: 'https://pelagios.org', href: 'https://pelagios.org/plato-tools/chora.html' };
+  globalThis.location = { origin: 'https://pelagios.org', href: 'https://pelagios.org/plato-tools/#chora' };
   try {
     inPolicy(OSM); permissions.set('basemap', 'osm', 'allowed');
     await permissions.enforced();
@@ -287,7 +287,7 @@ test('the head script carries Chora\'s old consents over, as the module does, an
 
 test('the build puts the head script where each page marks it, and refuses a page without the mark', () => {
   const plugin = cspPlugin(), root = new URL('../', import.meta.url).pathname;
-  const out = plugin.transformIndexHtml.handler(`<head><meta charset="utf-8">${HEAD_MARK}</head>`, { filename: `${root}chora.html` });
+  const out = plugin.transformIndexHtml.handler(`<head><meta charset="utf-8">${HEAD_MARK}</head>`, { filename: `${root}index.html` });
   assert.ok(out.includes('<script>') && out.includes('Content-Security-Policy') && !/^\s*export\b/m.test(out));
   assert.throws(() => plugin.transformIndexHtml.handler('<head></head>', { filename: `${root}index.html` }), /plato:csp/);
   assert.throws(() => plugin.transformIndexHtml.handler('<head></head>', { filename: `${root}spike/index.html` }), /plato:csp/);
@@ -341,7 +341,7 @@ test('the head script hides the page behind one line when it is framed by anothe
 
 test('each page sends another site its origin at most, never its address (the referrer policy), and the panel says a link followed is a visit of the user\'s own', () => {
   const root = new URL('../', import.meta.url);
-  for (const f of ['index.html', 'chora.html', 'spike/index.html']) {
+  for (const f of ['index.html', 'spike/index.html']) {
     const html = readFileSync(new URL(f, root), 'utf8');
     const metas = html.match(/<meta name="referrer"[^>]*>/g) || [];
     assert.equal(metas.length, 1, `${f} has one referrer policy`);
@@ -349,7 +349,7 @@ test('each page sends another site its origin at most, never its address (the re
     assert.ok(html.indexOf(metas[0]) < Math.min(...['<link', '<script'].map((t) => html.indexOf(t)).filter((i) => i >= 0)), `${f}: before any link or script`);
   }
   // Not no-referrer: OpenStreetMap's tile usage policy requires a Referer on requests to tile.openstreetmap.org, and CARTO's key is scoped by it.
-  assert.ok(!readFileSync(new URL('chora.html', root), 'utf8').includes('no-referrer'));
+  assert.ok(!readFileSync(new URL('index.html', root), 'utf8').includes('no-referrer'));
   assert.match(words.PANEL.links, /a visit you make yourself/);
   assert.match(words.PANEL.links, /told nothing of this page/);
   // The data-derived links Chora writes carry neither the page nor a window handle to the site visited.

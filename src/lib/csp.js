@@ -1,5 +1,5 @@
 // The page's side of the hard block (the policy itself is written by the first script in the <head>
-// of index.html and chora.html, src/lib/csp-head.js, and published on window.__platoCsp).
+// of index.html, src/lib/csp-head.js, and published on window.__platoCsp).
 //
 // - canary(): proof, at startup, of two things, and only both count as enforced.
 //   1. That a policy is enforced at all in a worker made from a blob: (as MapLibre's is): the worker

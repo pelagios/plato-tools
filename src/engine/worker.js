@@ -361,12 +361,12 @@ self.onmessage = async ({ data }) => {
   }
 };
 
-// ---- Chora (chora.html): the map viewer and editor --------------------------------------------------
+// ---- Chora (src/chora/app.js, at #chora): the map viewer and editor --------------------------------------------------
 // Chora keeps one working database for the session, /chora.sqlite3 in the same pool as the runs'
 // (src/engine/chora/store.js), holding the dataset last opened; a run's own databases come and go
 // beside it. Saving goes through runEnv like any conversion, but its file is in chora-outputs/, not
-// outputs/: each page clears its own outputs when it runs, and the main page may be open beside this
-// one with a file not yet saved.
+// outputs/: a run clears its own outputs folder when it starts, and the page's runs and Chora's saves,
+// in one tab, would otherwise clear each other's file not yet saved.
 const CHORA_DB = '/chora.sqlite3', CHORA_OUT = 'chora-outputs';
 const session = { store: null, fingerprint: null, ccodes: null, base: null };
 const fingerprint = (files) => files.map((f) => `${f.name}|${f.size}|${f.lastModified}`).join('\n');

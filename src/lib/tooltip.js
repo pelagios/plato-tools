@@ -1,6 +1,6 @@
 // Tooltips for every page of the tools, in place of the browser's own `title` tooltips, which cannot
 // be reached by keyboard, cannot be dismissed, vanish before they can be read and look like nothing
-// else on the site. Loaded as a page script of its own (index.html, chora.html), so the pages' own
+// else on the site. Loaded as a page script of its own (index.html), so the page's own
 // code needs no change beyond saying what a tooltip says.
 //
 // What an element says: `data-tip="text"`, or `data-tip-template="id"` for the content of a

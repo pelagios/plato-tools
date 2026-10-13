@@ -1,4 +1,4 @@
-// The colour theme of both pages (index.html, chora.html): Auto, which follows the device's setting
+// The colour theme of the page (index.html, Chora in it too): Auto, which follows the device's setting
 // (prefers-color-scheme), Light or Dark, chosen in the header (#theme-switch, a group of three radio
 // buttons) and remembered by this browser (localStorage, 'plato-tools.theme' = 'light' | 'dark';
 // nothing for Auto). A classic script loaded from <head>, before the stylesheet, so that it runs before

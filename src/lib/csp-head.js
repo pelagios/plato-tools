@@ -1,6 +1,6 @@
 // The hard block. scripts/vite-csp.mjs puts this, after the pure core of the permissions
 // (src/lib/permissions-core.js, its `export`s removed), inline as the FIRST script in the <head> of
-// index.html and chora.html, before anything on the page is requested. It writes a Content Security
+// index.html, before anything on the page is requested. It writes a Content Security
 // Policy in a <meta> tag that lets the page, and every worker it makes from a blob: (MapLibre's among
 // them), connect to and show images from this site and the sites of the permissions allowed in this
 // browser, and no other. CSP Level 3 checks each hop of a redirect, so a server that answers with a

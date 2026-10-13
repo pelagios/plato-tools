@@ -1613,105 +1613,116 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
 
 What it does is in the guide:
 [Placing on the map](https://pelagios.org/place-attestation-ontology/guide/tools.html#chora).
-It is a page of its own, `chora.html`, a second entry in `vite.config.js`, so that MapLibre GL JS,
-Terra Draw and Allmaps load only there. The page is `src/chora/` (`app.js`; `map.js`, the map, the
-guard and drawing; `card.js`, what the place card writes, pure so that it is tested without a page;
-`vague.js`, how well a location is known, drawn and written (below);
-`basemaps.js`; `overlays.js` and `remote.js`, the historical maps; `ink.js`,
-`ink.worker.js` and `inkfetch.js`, tracing with assistance; `contributor.js`; `drafts.js`; `handoff.js`,
-which passes files chosen on the main page through IndexedDB, taken out of it as soon as Chora's page
-starts and opened there at once, with no offer to click (Stephen, 12 October 2026), not opened if
-older than two minutes, and let go by the main page too, when it starts, is shown again or is left,
-once it is that old; the way back is the kept file's, below), and its engine `src/engine/chora/` (`store.js`, `view.js`,
-`draw.js`, `save.js`, `geo.js`, `trace.js`, and `ink/`, the pixel work of tracing with assistance). It
-publishes its state on `window.__chora` for tests.
+It is a module mounted in the main page's centre column (Stephen, 13 October 2026; it was a page of its
+own, `chora.html`, until then, "the odd one out and unintegrated"): `mountChora(root, host)` in
+`src/chora/app.js`, into `#chora-root` in `section#chora`, at the address `#chora`. Its card (a link to
+`#chora`), step 2's "Show on the map (Chora)", a workflow's "Open Chora" and the address itself open it
+(`openChora` in `src/app.js`, from the `hashchange` and at load); "Leave the map", the browser's Back, or
+choosing a tool, Methodos's interview or another `#tool=` gives the steps back (`leaveChora`). The
+module, and with it MapLibre GL JS, Terra Draw and Allmaps, is loaded with `import()` the first time
+Chora is opened, and only then; it is mounted once, and shown and hidden after that, so that what it
+has open stays as it was (`show()` fits the map to its room again and opens the files chosen
+meanwhile; `hide()` stops a drawing or a trace under way). Every id it makes starts with `chora-`
+(the adoption panel's with `adopt-`), and none is the page's (`test/chora-ids.test.js` reads the
+sources on both sides). The module is `src/chora/` (`app.js`; `map.js`, the map, the guard and drawing;
+`card.js`, what the place card writes, pure so that it is tested without a page; `vague.js`, how well a
+location is known, drawn and written (below); `basemaps.js`; `overlays.js` and `remote.js`, the
+historical maps; `ink.js`, `ink.worker.js` and `inkfetch.js`, tracing with assistance;
+`contributor.js`; `drafts.js`; `resume.js`, what is kept across the page's reload for a permission,
+below), and its engine `src/engine/chora/` (`store.js`, `view.js`, `draw.js`, `save.js`, `geo.js`,
+`trace.js`, and `ink/`, the pixel work of tracing with assistance). It publishes its state on
+`window.__chora` for tests.
 
-**Chora's way back into a workflow** (`src/chora/handback.js`; Methodos, `docs/plans/methodos.md`,
-section 5.3, stage 6). Opened as `chora.html#workflow=<id>`, where the id starts with a letter or a
-digit and has only letters, digits, `-` and `_`, at most 64 in all (anything else is refused in
-words, and never reaches the page or an address), a file saved, by the save dialogue or as a
-download, is handed back: a record in the hand-off's store (`plato-tools-chora`, `kv`) under its own
-key, `chora-handback`, of the hand-off's shape with the workflow and a format,
-`{ handback: 1, workflow, files: [{ type: 'dataset', name, size, sha256 }], at }`. `files` holds a
-reference, never the bytes: a Methodos hand-off, made by Methodos's own `refsOf`
-(`src/engine/methodos/handoffs.js`) from the very File that went to disk, before a copy kept here is
-let go; `refsOf` hashes it as a stream (Krisis's `fileRecords` and `fileSha256`), so that a saved
-dataset of DEEP's size is never in memory whole, and while it does, the Save button waits and the
-page says "Handing the file back to the workflow…". The name must be one the page can show as it
-is (no path, no control or invisible characters such as zero-width spaces, bidirectional overrides
-or a byte-order mark, not blank, not `.` or `..`). Then the save result offers **Back to the
-workflow**, a link to `./#workflow=<id>`; a click writes the record again. It is good for thirty
-minutes (`HANDBACK_FRESH`; the hand-off's `FRESH` stays two), tied to its workflow's id and deleted
-once taken, and Chora drops a stale one when it starts.
-Reading and deleting are one transaction (`take`, `dropStale`), so a record written meanwhile is
-never the one deleted. Opened without `#workflow`, nothing is written.
+**Chora in the page.** What the host gives it (`mountChora`'s `host`), and what it shares:
 
-**Chora's seams** (Stephen, 12 October 2026, Issue #33 point 5: Chora stays a page of its own, in the
-same tab, and its seams are mended). `test/methodos-seams.test.js` and `chora_seams_checks` in
-`e2e/app_test.py` hold these.
+- **Its data is the page's.** Chora shows the files chosen in step 1 (`host.files()`, and the page's
+  `choose()` tells it, `chosen(files)`, each time they change): opened at once, with no reload and no
+  offer to click; while it is hidden they are opened when it is next shown, so that no dataset is read
+  for a map no one is looking at. Step 1 stays above the map, folded to its line once a file is
+  recognised (`#chosen-line`, with "Change"); with none chosen, its drop zone, and the kept file's
+  offer, are there. Chora has no "Choose your data" of its own. A reload for a permission keeps
+  Chora's files (below), and they are chosen in step 1 again (`host.choose`).
+- **Its save is the page's.** A save that passes the version check hands the file it wrote (from
+  `chora-outputs/`) to the page (`host.saved`, `choraSaved` in `src/app.js`): chosen in step 1 as if
+  just dropped, and kept as the user's own choice is (the kept file, below); and, in a workflow at its
+  step `place`, Methodos completes the step with it (`placed()` in `src/methodos/page.js`), by
+  reference, the file kept as a run's output is. Chora says so under the save (`CHORA_HANDOVER` in
+  `words.js`, and Methodos's words: "… is chosen in “Choose your data”, for the other tools. The
+  workflow's step “Draw or trace the places still without a location” is done with it, and the workflow
+  goes on to “…”: leave the map to carry on."), and while the file is read through for its SHA-256 it
+  says "Choosing it in “Choose your data”…" (`state.handingOver`; `state.handedOver` after). Chora does
+  not open the file it handed over (it keeps the dataset it has open, with its drawings, until they are
+  saved to disk and let go, as before), and, with working data not kept, does not remove it from
+  `chora-outputs/` while the page has it chosen.
+- **The page's Permissions panel, theme, tooltips and Methodos tracker** are Chora's: it registers its
+  reload hooks with the page's module (keeping its files, place and view, and saying what a reload
+  would lose, only while it is shown), takes the canary's answer from `permissions.enforced()`, asks
+  WHG through the page's one lookup (`host.lookup`, and `host.onRefused`, so that a refusal stops the
+  adoption's request as it stops Krisis's), and adopts within the workflow's Scope (`host.scope()`,
+  Methodos's own, read through `normaliseScope`). The workflow's title and step are the tracker's, in
+  the rail beside the map, and the centre's title above it; at the step `place` both offer "Open Chora"
+  (the tracker's `#methodos-chora`, not shown while the map is).
+- **Its worker is its own**, as before (`init` with `pool: 'chora'`), so that its working copy and the
+  page's runs are apart: Chora's working database and the page's are both open at once, in one tab.
+- **The layout** while Chora is shown is in "The page's layout", below.
+- **What went with its own page** (Stephen, 13 October 2026: "At this prototyping stage I don't want to
+  start accruing sticking plasters"): `chora.html`, its entry in `vite.config.js`, its masthead and its
+  Permissions panel; the hand-off of the files chosen on the main page (`src/chora/handoff.js`, through
+  IndexedDB) and the hand-back of a saved dataset to a workflow (`src/chora/handback.js`, with "Back to
+  the workflow" and the tracker's "Take the dataset back from Chora"); "Back to PLATO tools"; the
+  address `#workflow=<id>` that took a workflow up on the way back; the main page's way of knowing it was
+  back from Chora (the `plato-tools.to-chora` mark in sessionStorage, the referrer, the kind of
+  navigation, and the back-forward cache's `pageshow`), and with it the kept file chosen again by itself
+  on a return; and Chora's own few words of the workflow (`trackOf`). Records the page split left in
+  this browser's IndexedDB (`plato-tools-chora`, `kv`: `chora-handoff`, `chora-handback` and
+  `chora-handoff-alive`) are let go when Chora next starts, in the transaction that takes what was kept
+  for a reload (`takeResume`). A project saved before with a hand-back in it still opens (the format is
+  unchanged: docs/project-file.md): at Chora's step the tracker names the file Chora had saved, to be
+  chosen in step 1, and the step is done by hand.
+- **Kept across a reload for a permission** (`src/chora/resume.js`; the policy is written at load, so a
+  site allowed is reachable only from the next one): while Chora is shown, the files it has open, the
+  place chosen, where the map was and the historical map waiting, in IndexedDB (`plato-tools-chora`,
+  `kv`, `chora-resume`), taken once (read and deleted in one transaction) and not used if older than two
+  minutes. The page comes back to `#chora` (a reload keeps the fragment), and Chora opens them again.
+- **Tests.** Chora's browser checks open it in the main page (`chora_boot` in `e2e/app_test.py` goes to
+  `#chora` from another page, so that the page loads afresh, and chooses the files in step 1); the
+  checks of Chora in the page are `chora_layout_checks` (no map code before it is opened; the tools rail
+  folded and the workflow rail kept at 1440 × 900; "Tools ▸"; leaving; a reload at `#chora`), and, in
+  `chora_seams_checks`, the file chosen shown at once with no reload, leaving by "Leave the map" or the
+  browser's Back, and, in a workflow, "Open Chora", a reload at `#chora`, and a save that does the step
+  `place` with the very file it wrote.
 
-- **Opened at once.** A fresh hand-off is opened when Chora's page starts (`state.handoff` names it),
-  from step 2's "Show on the map (Chora)", a tool card, or the workflow's "Open Chora". Opened as
-  `#workflow=<id>` with nothing handed over (a link opened in another tab, or the page reloaded), Chora
-  opens the workflow's current dataset itself (`state.fromWorkflow`), only while the workflow is at
-  its step `place` (`stepAt()`; at any other step it opens nothing of the workflow's): it reads the
-  workflow's record from Methodos's store (`src/methodos/store.js`, the same IndexedDB, or the tab's
-  sessionStorage with working data off) and the file from the files Methodos keeps
-  (`src/methodos/outputs.js`, OPFS), the step's `dataset` as `currentInput()` in
-  `src/methodos/seams.js` gives it. Nothing kept, nothing opened.
-- **The way back, from the start.** The masthead's `#way-back` is shown as the page opens:
-  "Back to the workflow" (`./#workflow=<id>`) when opened for one, saying that nothing is handed back
-  until the dataset is saved here; after a save it says it hands back the file saved, and a click writes
-  the hand-back again before going, as the save's own link (`#back-to-workflow`, kept) does. A save
-  whose hand-back this browser would not keep, or could not make, says instead that the file is to be
-  chosen by hand on the main page. Before any hand-back is written, at the save or on the way back,
-  the workflow's record is read again: once it has gone past the step `place` (a Chora page shown again
-  from the browser's memory after the step was done), nothing is handed back, and the masthead says so.
-  Without a workflow it is "Back to PLATO tools" (`./`), saying which file is chosen there again when
-  the main page keeps the file chosen there (the kept file, below). `state.wayBack` publishes it.
-- **The workflow's few words**, read-only, in the panel (`#workflow-track`): its title, "Step n of N"
-  of the steps followed, and the step's words (`trackOf()` in `seams.js`; `state.workflowStep`).
-- **Back on the main page**, by Chora's link or the browser's Back (shown again from the back-forward
-  cache, or started afresh), the dataset is chosen again without the user choosing it. In a workflow,
-  the tracker re-chooses the step's file (`currentInput()`: a step's main input, the table whose columns
-  are matched, or the dataset that went to Chora), the user's own or a step's, from what it keeps; at
-  the step `place` it says so ("Back from Chora: … is chosen again in “Choose your data”"), and "Take the dataset
-  back from Chora" is offered at that step however the page came back (it was offered only on arriving
-  by `#workflow=`). "This step is done" with that very dataset still chosen does not complete the step
-  silently with its input as its output: it says that nothing drawn in Chora is in it, and offers two
-  ways on, the hand-back (or the file saved there, chosen in step 1), or **"Nothing to draw: go on
-  with this dataset"** (`#methodos-as-is`), which completes the step with it, as drawing nothing may be
-  right.
 - **The kept file** (`src/lib/kept-file.js`; Stephen, 12 October 2026: "Users would find it useful to
   have their data kept indefinitely"). While "Keep my working data" is on, the latest file (or files)
-  the user chose on the main page, dropped, picked, pasted or taken with "Use it", is copied into OPFS,
-  once the browser has said there is room for it and a margin, a tenth and a megabyte
+  the user chose in step 1, dropped, picked or pasted, taken with "Use it", or saved in Chora, is copied
+  into OPFS, once the browser has said there is room for it and a margin, a tenth and a megabyte
   (`navigator.storage.estimate()`); with too little, or a write refused, nothing is kept and the line
   under "Choose your data" names the file and says to choose it again (a later choice that is kept
   clears that line; a result for a choice no longer the latest is not said).
   - **Its folders.** Each choice is written into a folder of its own, `kept-file-<time>-<count>` (`0`,
     `1`, … and `about.json`, `{ kept: 1, chosen, files: [{ name, size, type }] }`, written last so that
     a half-written copy is never taken for one); only once it is whole are the folders of earlier
-    choices removed. So the last choice stays kept while the next is written (a way taken to Chora
-    meanwhile loses neither), and a folder left over (a removal that failed, a write never finished) is
-    swept when the store is next read: older whole choices and damaged ones at once, unfinished ones
-    once they are ten minutes old (another tab may be writing one).
+    choices removed. So the last choice stays kept while the next is written (a reload meanwhile loses
+    neither), and a folder left over (a removal that failed, a write never finished) is swept when the
+    store is next read: older whole choices and damaged ones at once, unfinished ones once they are ten
+    minutes old (another tab may be writing one).
   - **One queue, and the setting asked again.** Every write and removal, from any store in the page
-    (the main page's, the Permissions panel's, Chora's), goes through one queue, so that a "Forget it",
-    "Clear them" or the setting turned off is never overtaken by a keep in flight; and a keep asks the
-    setting again (`keep()`, given by the main page) once its files are written, before `about.json`:
-    turned off meanwhile, nothing is kept (`'off'`). At the main page's start with the setting off,
-    whatever is there is let go.
-  - **Whose choices.** The user's own (`keepChoice` in `src/app.js`), never a file the page or a
-    workflow chose for them. A new choice replaces the kept one. **One copy at a time:** while a
-    workflow is followed (`methodos.following()`) nothing is written here, since the workflow keeps its
-    own copy under its record (and an earlier kept choice goes, as it is no longer the latest; the kept
-    file itself, chosen again with "Use it", is left while the workflow copies it). When the workflow
-    lets its file go (Leave, or another workflow followed), Methodos hands the File it still holds over
-    (`page.letGo`, before its own copy is dropped), and it is kept here once.
+    (the page's and the Permissions panel's), goes through one queue, so that a "Forget it", "Clear
+    them" or the setting turned off is never overtaken by a keep in flight; and a keep asks the setting
+    again (`keep()`, given by the page) once its files are written, before `about.json`: turned off
+    meanwhile, nothing is kept (`'off'`). At the page's start with the setting off, whatever is there is
+    let go.
+  - **Whose choices.** The user's own (`keepChoice` in `src/app.js`), a dataset saved in Chora among
+    them, never a file the page or a workflow chose for them. A new choice replaces the kept one. **One
+    copy at a time:** while a workflow is followed (`methodos.following()`) nothing is written here,
+    since the workflow keeps its own copy under its record (and an earlier kept choice goes, as it is no
+    longer the latest; the kept file itself, chosen again with "Use it", is left while the workflow
+    copies it). When the workflow lets its file go (Leave, or another workflow followed), Methodos hands
+    the File it still holds over (`page.letGo`, before its own copy is dropped), and it is kept here
+    once.
   - **How long.** With no time limit, until the user forgets it ("Forget it" under "Choose your data",
     or in the Permissions panel, which lists it with its name, size and date), "Clear them" in the
-    tracker, the setting turned off on either page, or another choice.
+    tracker, the setting turned off, or another choice.
   - **Read back as checked** (`aboutOf`): the format, names the page can show as they are, sizes, each
     file there at its size, and a media type of the plain shape `type/subtype`, at most 100 characters;
     anything else is let go.
@@ -1719,59 +1730,14 @@ same tab, and its seams are mended). `test/methodos-seams.test.js` and `chora_se
     stamp alone), and their line is drawn again. "Use it" compares the kept file with the one its line
     names (`sameAbout`): if another tab has changed it since, the line is drawn again, and nothing is
     chosen.
+  - **Offered, never chosen silently**, on a new visit, a reload (at `#chora` too), or any Back or
+    Forward, unless a workflow taken up chooses its own file (`keptAtStart`, after `methodos.takenUp()`):
+    `#kept-file`, above the drop zone, `role="status"` (announced politely), "Kept from last time:
+    parishes.csv (313 bytes), chosen 12 Oct. [Use it] [Forget it]" (`keptLine`). "Use it" chooses it as
+    if just dropped; "Forget it" lets it go and the line goes (the focus moves to the heading). A file
+    chosen any other way takes the line away.
 
-  How the main page uses it depends on how the user arrives:
-  - **A new visit, a reload, or any other Back or Forward** (no workflow taken up that chooses its own
-    file): it is offered, never chosen silently: `#kept-file`, above the drop zone, `role="status"`
-    (announced politely), "Kept from last time: parishes.csv (313 bytes), chosen 12 Oct. [Use it]
-    [Forget it]" (`keptLine`). "Use it" chooses it as if just dropped; "Forget it" lets it go and the
-    line goes (the focus moves to the heading). A file chosen any other way takes the line away.
-  - **Back from Chora mid-task**, outside a workflow: chosen again by itself (`keptAtStart`,
-    `window.__plato.chosenAgain`; `window.__plato.backFromChora` says whether the page counted as
-    back). The page counts as back only when the way to Chora was taken from this tab (a mark in its
-    sessionStorage, `plato-tools.to-chora`, set when the way is taken and taken off when the page next
-    starts, whatever way it starts, or is shown again from the browser's memory) and it was reached from
-    Chora's page by a link (the referrer, which the site's referrer policy sends whole within the site,
-    on a navigation of type `navigate`: a reload keeps its referrer, and is not a return) or by the
-    browser's Back or Forward (type `back_forward`). A page shown again from the browser's memory keeps
-    its file anyway. It waits for Methodos to take up a workflow first (`methodos.takenUp()`): with one
-    followed, the workflow chooses its own file instead, as before.
-  Chora's "Back to PLATO tools" says which file is chosen there again, from the kept file. The round
-  trip of the branch before (a hand-off record marked `ret`, a liveness stamp, five minutes after it)
-  is gone: the hand-off is again taken once and deleted (`take`, read and deleted in one transaction),
-  and `dropStale` also deletes the old stamp's key, `chora-handoff-alive`, where one was left.
-- **"Keep my working data" turned off on Chora's page** (or off when it starts) lets go at once what the
-  main page keeps for it: the kept file (`kept-file-*/`), Methodos's kept files in `methodos-outputs/`
-  (the user's own copy among them), and moves the workflow's record to the tab's sessionStorage, as the
-  main page does (`state.workingForgotten`).
-
-The main page's side is built (`src/methodos/page.js`, the tracker's "Take the dataset back from Chora"; `src/app.js` passes the id and keeps it in `setHash`). On loading with `#workflow=<id>` it does this:
-
-- find the workflow's record by that id, and show the step waiting ("Draw or trace the places on a
-  map", operation `place`), with the dataset that went to Chora chosen again in step 1 (above,
-  "Chora's seams");
-- carry `#workflow=<id>` through `setHash` in `src/app.js`, which rewrites the fragment to
-  `#tool=<key>` (or nothing) on a toolbox click, and would otherwise lose the workflow;
-- only on the user's click, `take(id)` the hand-back (read once, deleted, checked again by
-  `check()`: another workflow's, another format's, a stale one, or any reference not exactly one
-  `dataset` with a name the page can show, is refused);
-- when `take(id)` returns null (none, stale, refused, or a browser that keeps nothing), fall back to
-  asking the user to choose the saved file by hand, as the step does today;
-- otherwise ask the user to choose the saved file, since the record names it and does not hold it,
-  and complete the step with `runner.complete(state, 'place', { dataset: record.files })` only when
-  `refsDiffer(record.files, [file])` is empty (checked in the browser by `handed_back`, in `methodos_join_checks`);
-- drop a stale hand-back (`dropStale`) where it drops a stale hand-off.
-
-`test/chora-handback.test.js` checks the record, its refusals and the hash, that the file is read as
-a stream and never whole, that a give() beside take() or dropStale() is not lost, and that Methodos's
-`isRef`, `checkHandoff` and `refsDiffer` take the reference and its step `place` is completed with
-it. The browser checks (`handback_given`, `handback_control`, `handback_bad_id` in
-`e2e/app_test.py`) save in a workflow and compare the record with the downloaded file's size and
-SHA-256, see the busy line and the record rewritten by the click, follow the link; save without
-`#workflow` as the control; and open an address whose workflow is markup, which is refused in words
-and reaches nothing.
-
-- **The worker** is the main page's, with commands of its own, sent one at a time: `chora-load`,
+- **The worker** is the page's engine, a worker of Chora's own, with commands of its own, sent one at a time: `chora-load`,
   `chora-search`, `chora-overview` (every place's point, at most 50,000), `chora-place` (one
   place's view, with its identities as Krisis reads the whole dataset) and `chora-save`.
 - **The session database.** `chora-load` reads the dataset with `run()` and `options.sink`, so every
@@ -1902,14 +1868,14 @@ and reaches nothing.
     (every place's point, up to 50,000, clustered) is drawn as before: its index (`pov`) holds no
     precision, and a place's several locations may differ in it. `window.__chora.vague` counts the marks
     and circles of the place shown, and is reset to none when a dataset is opened.
-  - **The key**, `#map-key` at the map's lower right, shown once a place is: a line saying that each row
+  - **The key**, `#chora-map-key` at the map's lower right, shown once a place is: a line saying that each row
     shows a point's mark and then a line or an area outline drawn like this; each precision, its mark
     around the disc of a point as the map draws it and its casing under an asserted line, named in words
     with PLATO's gloss (`keyRows`); the circle ("points only"); and "No mark". Its symbols sit on a patch
     of the basemap's grey in both themes, as the map itself does not change with the theme; the panel
     round them follows it. Closed at first, one line to open, so that it covers none of the map until it
-    is wanted (open, it took a corner of the map that a click to draw could land on); below 52rem it is
-    at the top right.
+    is wanted (open, it took a corner of the map that a click to draw could land on); on a map narrower
+    than 34rem it is at the top right, under the zoom buttons.
   - **The card** names the precision in words with PLATO's gloss and how far out the location may be:
     "Point, approximate (estimated from maps or descriptions), to within 25 km", "to within 10 m"
     below a kilometre, "to within 12,000 km (too large to draw)" past `circleTooLarge`; for a line or an
@@ -1937,14 +1903,14 @@ and reaches nothing.
     precision's pattern alone, with no mark; the key's entries; the card's words.
 - **The overview** reads a covering index of the places with a point (`pov`), not the records.
 - **A pool and an outputs folder of its own.** A SQLite SAHPool holds every file in its folder open,
-  so a second tab on the same pool cannot start. Chora's page asks the worker for its own
-  (`init` with `pool: 'chora'`, `.opfs-sahpool-chora/`), and saves to `chora-outputs/`, since each
-  page clears its outputs folder when it runs: the main page and Chora can be open at once, and
-  neither loses the other's file. Two Chora tabs still share one pool, and the second cannot start:
+  so a second tab on the same pool cannot start. Chora asks its worker for its own pool
+  (`init` with `pool: 'chora'`, `.opfs-sahpool-chora/`), and saves to `chora-outputs/`, since a run
+  clears its outputs folder when it starts: the page's runs and Chora's saves, in one tab, never lose
+  each other's file. Two tabs with Chora open still share one pool, and the second's Chora cannot start:
   Chora's `init` takes the pool at once, and when the browser refuses a file another tab holds
   (`createSyncAccessHandle`, a `NoModificationAllowedError`) the worker's error says `kind:
-  'pool-busy'`, and the page says Chora is open in another tab (`CHORA_TEXT` in `words.js`), not
-  the browser's words.
+  'pool-busy'`, and Chora says it is open in another tab (`CHORA_TEXT` in `words.js`), not
+  the browser's words, and opens nothing chosen there; the page's own tools work in that tab as ever.
 - **Saving** writes the whole dataset as PLATO JSON Lines, `<input>.chora.jsonl`, if it was read
   from them, and otherwise as PLATO JSON, `<input>.chora.json` (`choraSavedFormat` in `words.js`,
   which the page's button and its note on the saved file follow too), each record as it was
@@ -2046,7 +2012,7 @@ and reaches nothing.
   remembered as the one wanted (`basemaps.wanted()`), the map stays as it is, and one "Needs
   permission" line opens the panel at it; allowed, it is used from the next load, and the page
   reloads with the files, the place and the view kept (`keepForReload` and `takeResume` in
-  `handoff.js`). Withdrawn, the map goes back to Natural Earth at once; set to Never, the basemap is
+  `resume.js`, above). Withdrawn, the map goes back to Natural Earth at once; set to Never, the basemap is
   not offered. A pasted style is read by the page, through the module's `fetch`, once its own site
   is allowed; any further sites it names (`styleOrigins`) each get a line, and the map does not use
   it until they are allowed too. Sites named only by a TileJSON are not found this way, and are
@@ -2724,9 +2690,9 @@ To WHG only: another service is sent nothing of it.
   tab's own Scope, kept in sessionStorage (`plato-tools.scope`) for the tab alone: a Scope that outlived
   the tab with no workflow to belong to would confine lookups nobody remembers asking for. A workflow begun
   while the tab has one offers, in the tracker, to take it in ("Use it" / "No"), never silently; declined,
-  the tab's stays the tab's. **Chora** reads the workflow's Scope once, when it is opened for one
-  (`#workflow=<id>`, from its record): a change made on the main page meanwhile reaches it when it is
-  opened again. Its adopt search keeps the place's own regions and countries over the Where.
+  the tab's stays the tab's. **Chora** asks Methodos for the workflow's Scope at each search
+  (`host.scope()`), so that a change made in the tracker reaches it at once. Its adopt search keeps the
+  place's own regions and countries over the Where.
 - **On the page.** In the tracker, while a workflow is followed, the Scope is one line after its buttons
   (`div#scope`, like `details.track-about`): "Scope: GB, IE · Villages · 1500 to 1600 · gn ⚠"
   (`SCOPE_WORDS.line`, codes, its tooltip giving each part, the sources by name), which opens to four
@@ -2791,8 +2757,8 @@ page's interview and tracker (below); keeping a workflow beyond the tab is phase
   exist yet (regions level by level, the containment relation, adopting a match's geometry, finding
   places in a text) is declared with the reason it is not available, and a
   workflow whose answers would reach it is refused at the start, in those words.
-  Chora's hand-back is no operation of its own: it is how the interactive step `place` gets its
-  result (below, "Chora's way back into a workflow").
+  Chora's save is no operation of its own: it completes the interactive step `place` (`placed()` in
+  `src/methodos/page.js`; "Chora, the map", above).
 - **Recipes** (`recipes/`) are data: "Map your data", "Publish a dataset", "Places from an edition
   (TEI)" and "Places from Recogito" (below). A step names an
   operation, where each input comes from (a file chosen at the start, `$files`, or an earlier step's
@@ -2885,8 +2851,8 @@ changing them.
   the step (`stop`), a failure fails it (`fail`, keeping a lookup's partial work file, which the
   tracker reopens), a permission not given makes it wait: each is said in the tracker's words. Only
   an interactive step (matching columns, review, Chora's drawing) waits for "This step is done", its
-  result taken from the page as it stands; Chora's step also takes Chora's hand-back (below, "Chora's
-  way back"), and the tracker's "Open Chora" opens `chora.html#workflow=<id>`. "Back a step" is
+  result taken from the page as it stands; Chora's step is also done by a save in Chora (`placed()`),
+  and its "Open Chora" (`#for-tool`'s link) opens Chora in the page, at `#chora`. "Back a step" is
   `invalidate` of the last step done.
 - **Save and resume** are phase 2's `workflowStore()` (`src/methodos/store.js`), saved at every step
   boundary, and taken up on load by the version rule (`reconcile()`), whose words the tracker shows
@@ -2910,11 +2876,11 @@ changing them.
   (`keepOwn` in `outputs.js`: a copy in the same folder under its SHA-256, written when step 1's file is
   chosen and is the workflow's, once the browser has said there is room for it and a margin, a tenth
   and a megabyte, through `navigator.storage.estimate()`; with too little, or a write refused, nothing is
-  kept and the tracker names the file and says to choose it again after a reload), so that the main page, back from Chora or after a reload, chooses it
+  kept and the tracker names the file and says to choose it again after a reload), so that the page, after a reload, chooses it
   again by itself in any browser, Firefox and Safari included, not only through Chromium's file
   handles (which still serve where the copy was cleared). It goes with the workflow (Leave, or another
   workflow followed: `keptBy()` in `src/methodos/seams.js`, the user's files and the steps') and with
-  "Clear them" (which lets the kept file go too: "Chora's seams"); with working data off it is held for the tab only and never written. Neither "Clear
+  "Clear them" (which lets the kept file go too: "Chora, the map"); with working data off it is held for the tab only and never written. Neither "Clear
   them" nor turning the setting off reads it into memory, as they do the steps' files: the File the user
   chose stays held; a copy read from OPFS (after a reload) is no longer held, and is chosen again. The tracker says
   so (`keptWords()`): "Kept in this browser for the next steps: your file and 2 files the steps made
@@ -3019,8 +2985,8 @@ one is refused in words ("open it in WHG's Map your Data").
   }`, `parts`, and `left` for the files the workflow names that are not in it), then the parts it lists,
   each once, each with its size and SHA-256: `workflow.json` (the record, exactly its `.workflow.json`,
   the Scope in it), `review.krisis.json` (the review open on the page: decisions, candidates, regions;
-  a Krisis work file), `chora-handback.json` (Chora's hand-back for this workflow, if one waits:
-  references only), and `files/<sha256>` (each file the record names: the user's own, `own: true`, and the
+  a Krisis work file), `chora-handback.json` (Chora's hand-back for this workflow: references only;
+  the page wrote one until 13 October 2026, and reads it still), and `files/<sha256>` (each file the record names: the user's own, `own: true`, and the
   files the steps made). The extension is `.platoproj`; its media type is `application/zip`. **Versions**:
   a greater major is refused; a greater minor of the same major opens, says "saved by newer PLATO tools;
   what they added is not read" (`newerWords()`), ignores the keys it does not know, and a later save says
@@ -3055,7 +3021,7 @@ one is refused in words ("open it in WHG's Map your Data").
   (`secretSearch()`: the JSON parts as text before they are encoded, the files a chunk at a time with the
   last bytes of each chunk kept, so that one split across two is found); a part that holds one, the
   user's own file included, is refused ("parishes.csv holds your WHG token or another key, which a project
-  never does, so the project was not saved") and what was written is aborted. Nor any other key, the permission grants, the file handles, the hand-off, and
+  never does, so the project was not saved") and what was written is aborted. Nor any other key, the permission grants, the file handles, and
   this browser's storage keys. The reviewer's name and ORCID are in it only as the review records them
   (a work file's `reviewer`, which a bulk accept or a lookup writes, as "Save the review" saves it); the
   name remembered in this browser (`plato-tools.reviewer`) is not. The manifest and the record name the
@@ -3085,9 +3051,9 @@ one is refused in words ("open it in WHG's Map your Data").
   as after a reload (`takeUp()` in `src/methodos/page.js`, shared with the load): its file chosen again
   where the step takes one, and the review in the project opened again (`openReview`, after choosing the
   dataset it was made of). Nothing read from it runs or asks another site: the base address the workflow
-  was begun under is written into Options only if Options has none, and said; Chora's hand-back, at
-  Chora's step only, makes the file chosen next the one it names (as "Take the dataset back" does), and is
-  never written to storage.
+  was begun under is written into Options only if Options has none, and said; a hand-back in a project
+  saved before 13 October 2026, at Chora's step only, is named in the tracker, the file to be chosen in
+  step 1 and the step said done by hand, and is never written to storage.
 - **Size.** Nothing is held twice: the parts stream both ways (a part is read from its Blob a chunk at a
   time, deflated at level 6, or 1 over 16 MB; the reader awaits each sink's write before the next chunk).
   A project is about the size of the workflow's kept files (what the tracker's "Kept in this browser" line
@@ -3120,7 +3086,7 @@ one is refused in words ("open it in WHG's Map your Data").
 ## Permissions
 
 Nothing goes to another site unless the user allows it, in one panel for the whole toolbox: the
-header's **Permissions** button, on both pages. `src/lib/permissions.js` is the only way a tool asks
+header's **Permissions** button, Chora's included. `src/lib/permissions.js` is the only way a tool asks
 another site, and `src/lib/permissions-panel.js` the panel; its words are in
 `src/lib/permission-words.js`.
 
@@ -3160,7 +3126,7 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   line naming those still to allow; the panel opens at the first); `open({ focus: 'cat:subj' })`; `onBeforeReload(fn, { loses })`, `reloadLosses()` and `reload({ confirmed })` (a part of the page that
   cannot keep something across the reload says so in `loses()`, and the panel then asks first, with
   Cancel: the main page names the files chosen, a run in progress and the review decisions not yet
-  saved; Chora a line or area still being drawn, an address typed in the paste box and a save running); `mount({ state })`
+  saved; Chora, while it is shown, a line or area still being drawn, an address typed in the paste box and a save running); `mount({ state })`
   for the header button and the canary; `keepWorkingData()`; `persistChoice()` and `choosePersist(on)`; and
   `token`, the World Historical Gazetteer token's one keeper (`permissions.token`: `get`, `set`, `forget`,
   `onChange`, the API Krisis's own keeper had before it moved here, and `remember(on)`, `remembered()`:
@@ -3176,7 +3142,7 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   where `<sites>` are the sites of the permissions allowed, each checked against a strict origin rule
   twice (https, or http only for localhost and 127.0.0.1; a port no higher than 65535), so nothing
   kept in storage can add a directive. Storage that cannot be read gives the policy
-  of nothing allowed. With nothing allowed it is the same on both pages. The policy cannot be widened
+  of nothing allowed. The policy cannot be widened
   while the page runs: a permission allowed takes effect from the next load (the panel offers the
   reload, and Chora keeps what is open); one withdrawn is refused at once by `fetch` and
   `transformRequest`. No `'wasm-unsafe-eval'` is needed: SQLite's WebAssembly runs in the engine's
@@ -3227,17 +3193,17 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   contributor's or reviewer's ORCID is checked again on load (`orcidUri`, `checkReviewer`) and dropped,
   and the cleaned value written back, if it is not one; a historical map's shown state (its note or
   its record) is read only if Show is a boolean and the opacity a number from 0 to 1, and a map kept
-  is admitted afresh, permissions and all, on every load; files handed to Chora are usable for two
-  minutes and let go by either page after that. That exposure, plainly: the kept file (above,
-  "Chora's seams"), the user's latest choice on the main page, stays in this origin's OPFS, where any
+  is admitted afresh, permissions and all, on every load; what Chora keeps across a reload for a
+  permission is usable for two minutes, and taken once. That exposure, plainly: the kept file (above,
+  "Chora, the map"), the user's latest choice in step 1, stays in this origin's OPFS, where any
   page of `pelagios.org` open on that computer could read it, for as long as it is kept, with no time
   limit: until the user forgets it, clears it, chooses another, or turns working data off; with working
   data off it is not kept at all. A workflow's own files (its user's file included) stay in OPFS,
   readable the same way, for the workflow's lifetime. The panel says both. Files are chosen from
-  storage without a click in three places (Stephen, 12 October 2026): a hand-off opened by Chora at
-  once, a workflow's kept file chosen again, and the kept file back from Chora; each only reads the file
-  in this browser (nothing is sent), and the page names what it chose. On a new visit or a reload the
-  kept file is only offered.
+  storage without a click in two places: a workflow's kept file chosen again (Stephen, 12 October 2026),
+  and the files Chora kept across a reload for a permission; each only reads the file in this browser
+  (nothing is sent), and the page names what it chose. On a new visit or a reload the kept file is only
+  offered.
 - **The frame and the referrer.** The head script also guards against framing: framed by another
   origin (the top window's address cannot be read), the page hides everything it has behind one line,
   "PLATO tools cannot be used inside another site's page", and publishes `__platoCsp.framed`. Framed
@@ -3255,8 +3221,8 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   last output and the historical maps it keeps (`chora-overlays/`, and their notes in sessionStorage) at the next load (not at a reload for a permission), and the output once saved to disk.
   The dataset's working copy, in Chora's SQLite pool, is cleared at every start anyway (`clearOnInit`).
   Off, Methodos keeps a workflow, its files and the user's own file for the tab only (above), and the
-  main page keeps no file of the user's (the kept file) and offers none. Turned off on either page, what
-  was kept for these goes at once (on Chora's page too: "Chora's seams"). The panel lists the kept file
+  page keeps no file of the user's (the kept file) and offers none. Turned off, what was kept for these
+  goes at once, Chora shown or not. The panel lists the kept file
   under "Your working data" (`#perm-kept-file`), with "Forget it".
 - **Persistent storage.** "Keep large datasets' working files (ask the browser for persistent
   storage)" calls `navigator.storage.persist()` once, when the user ticks it, never on load (Firefox
@@ -3457,15 +3423,14 @@ local while working (`node --test test/x.test.js`, `npm test`), and push for the
   threshold fails), specks and JPEG blocks, gaps, colours, the seam between tiles; and its tiles are
   asked only through the permissions, and let go once a site's permission is withdrawn.
 
-The browser checks run every page under its Content Security Policy, and check that with nothing
-allowed neither page asks another site; that a permission allowed in the panel, from its "Needs
+The browser checks run the page under its Content Security Policy, and check that with nothing
+allowed it asks no other site, Chora open or not; that a permission allowed in the panel, from its "Needs
 permission" line, is used after the reload and refused at once when withdrawn; that a page served
 without its policy is found unprotected by the canary and asks nothing; and that turning off "Keep
 my working data" clears Chora's drawings, and the historical maps it keeps, at the next load; that a
 pasted basemap written into storage as allowed and chosen is not used, and its site asked nothing,
 until a click; that a page framed by another origin hides itself; that a link carries the origin at
-most, and a data link nothing; that a planted ORCID is dropped on load; and that a stale hand-off is
-let go by the main page.
+most, and a data link nothing; and that a planted ORCID is dropped on load.
 
 Chora's historical maps are checked against a real second origin: `e2e/iiif_fixture_server.py`
 serves `test/fixtures/chora-iiif/` on three free ports, A (the image server allowed), B (never to
@@ -3556,13 +3521,30 @@ A push to `main` runs the tests, builds the site and publishes it to GitHub Page
   as needed (`block: 'nearest'`), so that step 1's line saying what the file is stays in view with step 2
   where both fit. Outside a workflow the page keeps its numbered sections. The pure parts are in `src/methodos/layout.js` (`test/methodos-layout.test.js`);
   the browser checks are `layout_checks` in `e2e/app_test.py`, at 1440, 1000 and 600 px.
+  **While Chora is shown** (`body[data-chora]`; Stephen's decision of 13 October 2026) the centre holds
+  the workflow's title (in a workflow), step 1, folded to its line once its file is recognised, and
+  `section#chora`, which the page scrolls to from the first of them as Chora opens; the rest of the
+  centre is hidden (Scope's editor, opened, has the centre to itself as ever). From 78rem the tools
+  rail folds away and the centre takes its place (`grid-column: 1 / 3`), and the workflow rail stays
+  where it was, with the tracker and Scope. "Tools ▸" (`#chora-tools`, first in Chora's head,
+  `aria-expanded`, controlling `#toolbox`; `body[data-chora-tools]`) brings the rail back beside the map,
+  and "◂ Tools" folds it again. Below 78rem the tools' grid of cards is not shown under the map, and
+  "Tools ▸" shows it there; below 60rem the tracker's strip stays at the top of the window, and the map
+  takes the column. Chora's panel is beside its map while `section.chora` is at least 50rem wide (a
+  container query), as tall as the window less a little, the panel scrolling on its own (choosing a
+  place scrolls the panel, not the page, so that the map stays in view); narrower, the two stack, the
+  map first at 60% of the window's height, and the page scrolls to the card. Where the map is narrower
+  than 34rem its key goes to the top right, under the zoom buttons, clear of the basemap's switcher.
+  Leaving the map gives the layout back as it was, the tools unfolded: the fold is Chora's alone. The
+  browser checks are `chora_layout_checks`.
 - **The toolbox.** The page opens with the introduction, step 1's drop zone, and one card per tool
   (`nav#toolbox` in `index.html`), and the README with a table of them. When a tool lands, update
   its card and its row in the same change. A card is a link to `#tool=<key>` (never a button's id),
   which narrows step 2 to that tool: each part of step 2 names in `data-tools` the tools it is for,
   and `src/app.js` (`TOOLS`, `chooseTool`) does the rest. With no tool chosen, step 2 offers every
-  action, Chora's map included. Hermes's card goes to the drop zone; Chora's opens `chora.html`,
-  with the chosen file (`src/chora/handoff.js`).
+  action, Chora's map included. Hermes's card goes to the drop zone; Chora's is a link to `#chora`,
+  which opens the map in the centre with the file chosen, and is marked (`aria-current`) while it is
+  shown; a tool's card chosen while the map is shown goes back to the steps.
   The cards are grouped, one `ul.tools.choose` under each plain `h3.tool-group` heading (Guided workflows,
   Bring your data in, Check and convert, Identify and locate, Publish and keep, Explore), with each
   card's name an `h4`; the order is decided in `docs/plans/methodos.md` (11.2). Each group is a
@@ -3576,8 +3558,8 @@ A push to `main` runs the tests, builds the site and publishes it to GitHub Page
   `plato-tools.intro`). `public/intro.js`, a classic script in `<head>`, sets `html.intro-hidden`
   before the first paint; it is a file, not an inline script, so that a policy of
   `script-src 'self'` allows it.
-- **The colour theme** is Auto (the device's setting), Light or Dark, chosen in the header of both
-  pages (`#theme-switch`, three radio buttons) and remembered per browser (localStorage
+- **The colour theme** is Auto (the device's setting), Light or Dark, chosen in the page's header
+  (`#theme-switch`, three radio buttons; Chora's too) and remembered per browser (localStorage
   `plato-tools.theme`; nothing for Auto). `public/theme.js`, a classic script in `<head>` before the
   stylesheet, sets `html[data-theme="light|dark"]` before the first paint, and takes up a choice
   made in another tab. In `src/styles.css` every dark rule is written twice, under
@@ -3587,7 +3569,7 @@ A push to `main` runs the tests, builds the site and publishes it to GitHub Page
   card's labels and its timeline's bars alike. What does not change with the theme is the map: its
   basemaps, the places drawn on it (`STATUS_COLOURS`, defined in `src/chora/card.js` and imported
   by `src/chora/map.js`), and its controls (MapLibre's own white control group).
-- **Tooltips** are the site's own (`src/lib/tooltip.js`, loaded by each page; its styles are the
+- **Tooltips** are the site's own (`src/lib/tooltip.js`, loaded by the page; its styles are the
   commented block in `src/styles.css`), never the browser's: give an element `data-tip="…"`, or
   `data-tip-template="id"` for a `<template>` of rich text (no links or controls: a tooltip cannot
   be entered), not `title`. A `title` that appears anyway, such as MapLibre's on its buttons, is
@@ -3595,7 +3577,7 @@ A push to `main` runs the tests, builds the site and publishes it to GitHub Page
   pointer is on it, closes with Esc (which still reaches the page: Terra Draw and the match review use it), and is named by its element's `aria-describedby`; an element
   that cannot take focus, and is not inside a link or button that can, is given `tabindex="0"`
   (except in an SVG drawing). `npm test` and the browser checks fail if a `title` attribute is left
-  on either page. The pages Agora writes carry no script and no tooltips.
+  on the page, or written by its scripts, Chora's among them. The pages Agora writes carry no script and no tooltips.
 - **Wording** lives in `src/engine/words.js` and `src/engine/report.js`, so that the page and the
   command line say the same thing. British spelling, plain words.
 - **The PLATO guide links to this repository** in two places: the README's

@@ -46,21 +46,17 @@ const titles = (s) => [...s.matchAll(/<[a-z][^>]*\stitle=/gi), ...s.matchAll(/<t
 
 test('the pages give no element a title attribute, and their tooltips are there instead', () => {
   const index = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  const chora = readFileSync(new URL('../chora.html', import.meta.url), 'utf8');
-  // Only the document's own <title> in each.
+  // Only the document's own <title>.
   assert.deepEqual(titles(index).map((m) => m[0]), ['<title>']);
-  assert.deepEqual(titles(chora).map((m) => m[0]), ['<title>']);
   assert.equal(tipsIn(index).length, 10);   // the ten tools' names, Methodos's and Peripleo's (planned) included
   assert.ok(tipsIn(index).some((t) => t.startsWith('μέθοδος')));
   assert.ok(tipsIn(index).some((t) => t.startsWith('περιπλέω')));
   assert.ok(tipsIn(index).some((t) => t.startsWith('ἔλεγχος')));
   // Chora's own controls are in what it puts into its root, in its module (src/chora/app.js).
   assert.deepEqual(tipsIn(readFileSync(new URL('../src/chora/app.js', import.meta.url), 'utf8')).slice(0, 1), ['Draw a point']);
-  for (const page of [index, chora]) {
-    assert.match(page, /<a class="dev-badge" href="https:\/\/github.com\/pelagios\/plato-tools\/issues" data-tip-template="dev-tip">Experimental<\/a>/);
-    assert.match(page, /<template id="dev-tip">.*is experimental.*may change or break/);
-    assert.match(page, /<script type="module" src=".\/src\/lib\/tooltip.js"><\/script>/);
-  }
+  assert.match(index, /<a class="dev-badge" href="https:\/\/github.com\/pelagios\/plato-tools\/issues" data-tip-template="dev-tip">Experimental<\/a>/);
+  assert.match(index, /<template id="dev-tip">.*is experimental.*may change or break/);
+  assert.match(index, /<script type="module" src=".\/src\/lib\/tooltip.js"><\/script>/);
 });
 
 test('the page scripts write no title attribute or SVG title, and say their tooltips with data-tip', () => {

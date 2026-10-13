@@ -2332,7 +2332,7 @@ def agora_checks(page, tmp):
         check('choosing a new dataset clears the previous release chosen for the last one', False, str(e).split('\n')[0][:200])
         check('choosing a new dataset clears the list of places to include chosen for the last one', False, str(e).split('\n')[0][:200])
 
-# ---- Tooltips (src/lib/tooltip.js), on both pages ------------------------------------------------
+# ---- Tooltips (src/lib/tooltip.js), on the page, Chora's included ---------------------------------
 # Each check waits on the tooltip element itself; each absence (no tooltip after Esc, no title left)
 # is asserted beside a presence in the same check (a tooltip shown first, the tooltips' texts found),
 # so that a page with no tooltips at all fails every one.
@@ -3747,7 +3747,7 @@ def map_your_data_checks(pw, url, tmp):
             res[k] = {'result': found, **({'scope': {'applied': True}} if isinstance(q.get('contained_in'), list) else {})}
         reply(res)
     ctx.route(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'), stub)
-    # Every request either page makes, wherever it was going (a request the policy stops never reaches this; the console says so).
+    # Every request the page makes, Chora's included, wherever it was going (a request the policy stops never reaches this; the console says so).
     ctx.on('request', lambda r: asked.append(r.url))
     page = ctx.new_page()
     page.on('console', lambda m: consoled.append(m.text))
@@ -3964,7 +3964,7 @@ def map_your_data_checks(pw, url, tmp):
         reconciled = [u for u in asked if re.match(r'^https://whgazetteer\.org/.*reconcile', u)]
         return (not other and not refused and len(posts) >= 4 and len(reconciled) >= 4 and any('/entity/place:gn:9000010/api' in u for u in gets)), \
             {'other sites': other, 'refused': refused[:3], 'lookups to the stub': len(posts), 'entity fetched': gets[-1:] if gets else []}
-    attempt('Map your data: every request either page made went to this site or to WHG, which the permissions module allowed (the regions, the places and Chora\'s search went to the stub, and the record was fetched from it), and none to another site, nor any stopped by the policy', only_allowed)
+    attempt('Map your data: every request the page made (Chora\'s too) went to this site or to WHG, which the permissions module allowed (the regions, the places and Chora\'s search went to the stub, and the record was fetched from it), and none to another site, nor any stopped by the policy', only_allowed)
     try: browser.close()
     except Exception: pass
 
@@ -5097,7 +5097,7 @@ def scope_checks(pw, url, tmp):
 
 # ---- Permissions (src/lib/permissions.js) on the main page ------------------------------------------
 # The page runs under the Content Security Policy written from the permissions allowed (none, here),
-# and every check above ran under it. The panel is the same on both pages; Chora's checks below allow,
+# and every check above ran under it. The panel is the page's, Chora's included; Chora's checks below allow,
 # reload, withdraw and forge permissions.
 PANEL_STATE = '''() => { const d = document.getElementById('permissions-panel'), a = document.activeElement;
   return { open: !!d && d.open, focus: a ? (a.id || a.name || a.tagName) : null, focusValue: a && a.value || null,
@@ -6046,7 +6046,7 @@ def chora_checks(pw, url, tmp):
     requests, errors, loads = [], [], []
     ctx.on('request', lambda r: requests.append(r.url))
     ctx.on('page', lambda p: p.on('pageerror', lambda e: errors.append(str(e)[:200])))
-    said = []                                                   # what Chora's pages wrote to the console
+    said = []                                                   # what the pages Chora was in wrote to the console
     ctx.on('console', lambda m: said.append(m.text))
     # The host the guard must refuse: were a request to reach the network it would be recorded here, then stopped.
     ctx.route('https://tiles.example.net/**', lambda route: route.abort())
@@ -8892,7 +8892,7 @@ def ink_checks(page, base, tmp, h):
         if modifiers: page.keyboard.up(modifiers)
         return x, y
     def no_maps_kept():
-        """The maps kept let go, from a page of the same site that is not Chora's: a Chora page brings its maps kept
+        """The maps kept let go, from the page with Chora not opened: Chora, mounted, brings its maps kept
         back as it starts, and keeps one again once shown, so while it runs it can write what is removed here
         (on the deployed site the map kept_together kept, on localhost, came back that way). Then it is read
         that none is kept."""

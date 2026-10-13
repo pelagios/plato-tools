@@ -1,4 +1,4 @@
-// Tracing from a historical map on Chora's page: which map a drawing was traced from, where it lies on
+// Tracing from a historical map in Chora: which map a drawing was traced from, where it lies on
 // that map, and what the attestation it becomes says of it (PLATO's pattern for a geometry traced
 // from a georeferenced map, PLATO 3acab8e: the map cited as the evidence, with the canvas and a box on
 // it as the locator; the georeference cited as the method, derived from the map; the fixed sentences of

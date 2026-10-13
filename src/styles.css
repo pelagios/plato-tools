@@ -405,15 +405,10 @@ kbd { font: .8em var(--font-mono); border: 1px solid var(--line); border-bottom-
 #candidates-status { flex-basis: 100%; margin: 0; }
 #candidates-status[hidden] { display: none; }
 @media (max-width: 34rem) { #review { padding: .85rem .8rem; } .candidate .acts button { flex: 1 1 auto; } }
-/* ---- Chora (chora.html): the map page ---------------------------------------------------------
-   The page fills the window: a short header, then a panel of the dataset, its places and the chosen
-   place's card beside a map of full height. On a narrow screen the two stack, the map first at half
-   the window's height. The statuses have the same colours here as on the map (src/chora/map.js). */
-body.chora { display: flex; flex-direction: column; height: 100vh; }
-body.chora header.top { max-width: none; margin: 0; align-self: stretch; padding: .6rem 1.25rem .4rem; }
-body.chora h1 { font-size: 1.6rem; }
-body.chora h1 .label { font-family: var(--font-text); font-size: .8rem; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-left: .5rem; }
-body.chora main.chora-main { max-width: none; width: 100%; margin: 0; padding: 0; flex: 1; display: grid; grid-template-columns: minmax(20rem, 28rem) 1fr; min-height: 0; }
+/* ---- Chora, the map (src/chora/app.js): its panel and its map --------------------------------------
+   A panel of the dataset, its places and the chosen place's card beside a map (how they sit in the page is
+   below, "Chora, the map, in the centre column"). The statuses have the same colours here as on the map
+   (src/chora/map.js). */
 .chora-panel { overflow-y: auto; padding: 0 .9rem 1rem 1.25rem; overflow-wrap: anywhere; }   /* a source known only by its address has no space to wrap at */
 .chora-panel section { margin: .8rem 0; padding: .8rem 1rem; }
 .chora-panel h3 { font-size: 1rem; margin: .8rem 0 .2rem; }
@@ -421,14 +416,7 @@ body.chora main.chora-main { max-width: none; width: 100%; margin: 0; padding: 0
 .chora-mapwrap { position: relative; min-height: 20rem; }
 #chora-map { position: absolute; inset: 0; }
 #chora-map.drawing canvas { cursor: crosshair; }
-body.chora footer { max-width: none; padding: .5rem 1.25rem 1rem; font-size: .8rem; }
 .muted { color: var(--muted); }
-body.chora .note { color: var(--muted); font-size: .92rem; }
-/* Chora's way back, in the masthead from the start, and the workflow's few words in the panel (src/chora/app.js). */
-body.chora .way-back { margin: .4rem 0 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem; font-size: .92rem; }
-body.chora .way-back a.button { padding: .25rem .8rem; }
-body.chora .workflow-track { border-left: 3px solid var(--accent); padding: .15rem .6rem; margin: .5rem 0; font-size: .92rem; }
-body.chora .workflow-track p { margin: 0; }
 .dataset-title { font-family: var(--font-headings); font-size: 1.1rem; margin: .3rem 0 0; }
 #chora-q { width: 100%; font: inherit; padding: .35rem .5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); }
 .place-list { list-style: none; padding: 0 !important; max-height: 18rem; overflow-y: auto; }
@@ -516,13 +504,6 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; tex
 .map-key .key-sym-head span { width: 44px; font-size: .7rem; color: var(--muted); text-align: center; }
 .map-key .key-sym-head span + span { width: 56px; }
 .map-key li.key-head { font-size: .8rem; color: var(--muted); }
-@media (max-width: 52rem) {
-  body.chora { height: auto; }
-  body.chora main.chora-main { display: flex; flex-direction: column-reverse; }
-  .chora-mapwrap { height: 55vh; }
-  .map-key { top: 4.6rem; bottom: auto; }
-  .chora-panel { overflow: visible; padding: 0 1rem; }
-}
 
 /* Below 52rem the masthead's controls go below the title, as on a phone, where beside it they would run over
    the name (Issue #33's screenshots, at 600px). */

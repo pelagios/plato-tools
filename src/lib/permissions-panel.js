@@ -1,4 +1,4 @@
-// The Permissions panel, one for the whole toolbox, on index.html and chora.html alike: a native
+// The Permissions panel, one for the whole toolbox, Chora's included (it is in the page): a native
 // <dialog> opened with showModal(), its heading (or the permission asked about) given the focus, closed
 // by Esc or its Close button, the focus going back to what opened it. It is given the module's
 // functions (src/lib/permissions.js) and has no state of its own: every change goes through them, and

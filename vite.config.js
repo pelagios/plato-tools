@@ -16,23 +16,15 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: fileURLToPath(new URL('index.html', import.meta.url)),
-        // Chora, the map, is a page of its own, so that the map libraries load only there.
-        chora: fileURLToPath(new URL('chora.html', import.meta.url)),
         spike: fileURLToPath(new URL('spike/index.html', import.meta.url)),
       },
-      // The code both pages load (styles.css, words.js, src/chora/handoff.js) goes in one chunk
-      // named for what it is, shared-[hash].js and shared-[hash].css. Left to itself the bundler
-      // names such a chunk after the first module in it, which is an accident of imports. Only this
-      // repository's src/ is grouped, so that Vite's module-preload polyfill, which the spike page
-      // shares too, stays a chunk of its own and the spike page loads nothing of the tools. Chora
-      // (src/chora/, but for the hand-off and the hand-back, which the main page imports) is left out of
-      // it, since a module the group takes brings everything it imports with it: the main page imports
-      // Chora only when it is opened (src/app.js, openChora), and Chora's map (src/chora/map.js, with
-      // MapLibre and Terra Draw) and its basemaps when Scope's drawn area is (src/scope-page.js), so
-      // that none of them is ever preloaded there.
-      output: {
-        codeSplitting: { groups: [{ name: 'shared', test: /[\\/]src[\\/](?!chora[\\/](?!hand(?:off|back)\.js$))/, minShareCount: 2 }] },
-      },
+      // The page's own code is its entry's chunk, main-[hash].js and main-[hash].css; what it imports
+      // with import() is left to the bundler's own chunks, loaded when imported: Chora (src/chora/app.js,
+      // with MapLibre, Terra Draw and Allmaps), when it is first opened (src/app.js, openChora), and
+      // Chora's map alone (src/chora/map.js and its basemaps), when Scope's drawn area is
+      // (src/scope-page.js). No group gathers code into a chunk the page preloads: a module a group
+      // takes brings everything it imports with it, and Chora's would have brought the map libraries
+      // into the page's start. The spike page, a page of its own, loads nothing of the tools.
     },
   },
 });

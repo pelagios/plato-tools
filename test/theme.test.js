@@ -1,4 +1,4 @@
-// The colour theme (public/theme.js, src/styles.css, the switch in both pages' headers). Each dark rule
+// The colour theme (public/theme.js, src/styles.css, the switch in the page's header). Each dark rule
 // in the stylesheet is written twice, once for a device set to dark with Light not chosen, once for
 // Dark chosen: these hold the two copies to the same words, so that a colour changed in one is not
 // left behind in the other. The behaviour in a browser is checked in e2e/app_test.py. Each absence
@@ -85,7 +85,7 @@ test('the light scheme sets color-scheme light on the root, and the dark, dark, 
   assert.match(css, new RegExp(`^${DARK.replace(/[[\]().*"]/g, '\\$&')} \\{ color-scheme: dark; --fg:`, 'm'));
 });
 
-for (const page of ['index.html', 'chora.html']) {
+for (const page of ['index.html']) {
   test(`${page} loads public/theme.js in its head before the stylesheet, and has the three-way switch in its header`, () => {
     const html = readFileSync(new URL(`../${page}`, import.meta.url), 'utf8');
     const head = html.slice(0, html.indexOf('</head>')), script = head.indexOf('<script src="./theme.js"></script>');

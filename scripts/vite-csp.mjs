@@ -1,4 +1,4 @@
-// A Vite plugin that puts the hard block into index.html and chora.html, inline, where each page marks
+// A Vite plugin that puts the hard block into index.html (and the spike's page), inline, where each page marks
 // it: the first script in its <head>, so that the Content Security Policy it writes is in force before
 // the page requests anything. In the dev server and in the build alike. The script is the pure core of
 // the permissions (src/lib/permissions-core.js) with its `export`s removed, then src/lib/csp-head.js,
@@ -11,10 +11,10 @@ export const HEAD_MARK = '<!-- plato:csp -->';
 const CORE = fileURLToPath(new URL('../src/lib/permissions-core.js', import.meta.url));
 const HEAD = fileURLToPath(new URL('../src/lib/csp-head.js', import.meta.url));
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
-// Every page the site serves: the two pages of the tools, and the spike's page, which is no part of the
-// tools but shares their address, and so their storage. A page left out would be a page of this site
-// without the block.
-const PAGES = ['index.html', 'chora.html', 'spike/index.html'].map((p) => ROOT + p);
+// Every page the site serves: the tools' page, and the spike's page, which is no part of the tools but
+// shares their address, and so their storage. A page left out would be a page of this site without the
+// block.
+const PAGES = ['index.html', 'spike/index.html'].map((p) => ROOT + p);
 
 /** The inline script: the core, as a classic script, and the head's own code, in one function. */
 export function headScript() {

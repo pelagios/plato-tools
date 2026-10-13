@@ -456,7 +456,7 @@ test('no page asks the browser to keep its storage on its own: only the Permissi
   const CALL = /\.persist(ed)?\s*\(/;
   assert.match('try { kept = (await navigator.storage.persisted()) || (await navigator.storage.persist()); }', CALL, 'the pattern finds a call');
   const chora = files.find((f) => f.endsWith('/src/chora/app.js'));
-  assert.ok(chora && files.length > 50, `${files.length} files, Chora's page among them`);
+  assert.ok(chora && files.length > 50, `${files.length} files, Chora's module among them`);
   assert.match(readFileSync(chora, 'utf8'), /navigator\.storage\.estimate\(\)/, 'the same scan sees the estimate');
   const calls = files.filter((f) => CALL.test(readFileSync(f, 'utf8')));
   // The one caller is the Permissions window's "keep working data" choice, asked when the user ticks it.
