@@ -5,7 +5,7 @@
 // id it makes starts with `chora-` (the adoption panel's with `adopt-`), so that none clashes with the
 // page's. The engine is the same worker as the main page's (src/engine/worker.js, its chora-* commands),
 // a worker of its own. It publishes its state on window.__chora for automated tests; nothing else reads it.
-import { fmtBytes, formatName, progressText, summary, draftNote, choraDrawingNote, choraSaveText, choraSavedFormat, choraSaveProgress, choraStorageWarning, choraProblemText, CHORA_TEXT } from '../engine/words.js';
+import { fmtBytes, formatName, progressText, summary, choraDrawingNote, choraSaveText, choraSavedFormat, choraSaveProgress, choraStorageWarning, choraProblemText, CHORA_TEXT } from '../engine/words.js';
 import { sizeRead, loadNeed, saveNeed, storageShort } from '../engine/chora/storage.js';
 import { detect } from '../engine/input.js';
 import { newGeometryAttestation, checkGeoJSON, wrapLongitudes, DrawError, ROLES, PRECISIONS } from '../engine/chora/draw.js';
@@ -16,17 +16,10 @@ import { bboxOf, unionBbox } from '../engine/chora/geo.js';
 import * as basemaps from './basemaps.js';
 import * as contributors from './contributor.js';
 import { fingerprint, loadDrafts, saveDrafts, draftsWritten, forgetAllDrafts } from './drafts.js';
-import { take as takeHandoff, clear as clearHandoff, keepForReload, takeResume } from './handoff.js';
-// The file the user chose on the main page, kept there for as long as they want it: chosen again on the way back.
-import { keptFileStore, onChange as keptChanged } from '../lib/kept-file.js';
-import * as handback from './handback.js';
-// The workflow Chora was opened for, read where the main page keeps it (Methodos's store, and the files
-// it keeps), for the few words of it shown here and its current dataset (src/methodos/seams.js).
-import { workflowStore } from '../methodos/store.js';
+// What Chora keeps across the page's reload for a permission (the files, the place, the view).
+import { keepForReload, takeResume } from './resume.js';
+// The workflow's Scope, as the page gives it (Methodos's), checked as it is read.
 import { normaliseScope } from '../engine/krisis/scope.js';
-import { outputStore } from '../methodos/outputs.js';
-import { RECIPES } from '../engine/methodos/recipes/index.js';
-import { trackOf, currentInput, stepAt } from '../methodos/seams.js';
 import { serialQueue, pageRequest, answers } from './queue.js';
 import * as permissions from '../lib/permissions.js';
 import { RELOAD_LOSES, REFUSED as PERMISSION_REFUSED, NEEDS, REMEMBERED_BASEMAP } from '../lib/permission-words.js';
@@ -38,24 +31,14 @@ import { DataError } from '../engine/input.js';
 // Adopting a location from a gazetteer match (src/chora/adopt-ui.js; the engine is src/engine/chora/adopt.js).
 import { createAdopt } from './adopt-ui.js';
 import { draftAttestations, consultedParts, isPlaceIri } from '../engine/chora/adopt.js';
-import { CHORA_ADOPT_PAGE } from '../engine/words.js';
+import { CHORA_ADOPT_PAGE, CHORA_HANDOVER } from '../engine/words.js';
 // The tools' own version, for the notes of a shape traced with assistance.
 import { version as toolsVersion } from '../../package.json';
 
 // What Chora puts into its root: the panel (the dataset, the historical maps, the places, the card, the
-// adoption and the save), beside the map with its tools. `files`: its own "Choose your data", for a host
-// that gives it no files.
-const html = ({ files }) => `<div class="chora-panel" id="chora-panel">
-    ${files ? `<section id="chora-files" aria-labelledby="chora-files-h">
-      <h2 id="chora-files-h"><span class="step">1</span> Choose your data</h2>
-      <p id="chora-handoff" hidden></p>
-      <div id="chora-workflow-track" class="workflow-track" role="status" hidden></div>
-      <p id="chora-workflow" hidden></p>
-      <label class="drop" id="chora-drop">
-        <input type="file" id="chora-picker" multiple>
-        <span>Drop a file here, or <u>choose one</u>.</span>
-        <small>Any dataset PLATO tools reads: PLATO JSON or JSON Lines, RDF, Linked Places Format, Recogito's web annotations, or the PLATO spreadsheet tables.</small>
-      </label>` : '<section id="chora-files" class="chora-data" aria-label="Your data">'}
+// adoption and the save), beside the map with its tools. The dataset is the page's, chosen in its step 1.
+const html = () => `<div class="chora-panel" id="chora-panel">
+    <section id="chora-data" class="chora-data" aria-label="The dataset on the map">
       <p id="chora-phase" aria-live="polite"></p>
       <p id="chora-storage-warning" class="warn" hidden></p>
       <div id="chora-dataset" hidden></div>
@@ -132,7 +115,8 @@ const html = ({ files }) => `<div class="chora-panel" id="chora-panel">
   </div>`;
 
 let root = null;                // the element Chora is mounted in (mountChora)
-let host = {};                  // what the host page gives it (mountChora)
+let host = {};                  // what the page gives it (mountChora)
+let shown = true;               // whether the page shows it (show(), hide())
 let state = null;               // window.__chora
 let mapApi = null, adopt = null;
 const $ = (id) => root.querySelector(`#chora-${id}`);
@@ -141,6 +125,7 @@ let showing = false;   // true while the drawings shown are being replaced
 let worker, files = [], fp = null, dataset = null, drafts = [], view = null, total = 0, query = '';
 let starts = [0], nextAfter = null;   // where each page of the list shown so far begins (after which place), and where the next would
 let offered = null;    // the button that saves the file last written, while the drawings are those it holds
+let handed = null;     // the file the last save wrote, as handed to the page (host.saved): chosen there, and not to be removed while it is
 let drawError = null;  // why the last drawing was not kept, shown in the card
 
 // ---- The engine ----------------------------------------------------------------------------------
@@ -164,9 +149,6 @@ function startWorker() {
   worker.onerror = (e) => fail(`The engine stopped: ${e.message || 'unknown error'}`);
   // A SQLite pool of Chora's own, so that its working copy and the page's runs are apart.
   return request({ cmd: 'init', base: new URL('./', location.href).href, pool: 'chora' }, 'ready').then(({ version: v }) => {
-    // On a page of its own, the footer's PLATO commit is Chora's to write; in the main page it is the page's.
-    if (host.standalone) document.getElementById('plato-version').innerHTML = `${v.versionInfo} at <a href="${v.repository}/tree/${v.commit}">${v.commit.slice(0, 7)}</a>`
-      + (v.draft ? ` <strong class="draft">${draftNote(v)}</strong>` : '');
     Object.assign(state, { phase: 'ready', platoCommit: v.commit });
   });
 }
@@ -179,7 +161,7 @@ async function open(list) {
   Object.assign(state, { phase: 'opening', placeId: null, lastSave: null, vague: { marks: 0, circles: 0 } });
   for (const id of ['places', 'card', 'saving']) $(id).hidden = true;
   adopt.close();
-  $('handoff').hidden = true; $('save-result').innerHTML = ''; offered = null;
+  $('save-result').innerHTML = ''; offered = handed = null;
   $('dataset').hidden = false;
   $('dataset').innerHTML = `<ul>${files.map((f) => `<li><span class="name">${esc(f.name)}</span> <span class="count">${fmtBytes(f.size)}</span></li>`).join('')}</ul>`;
   $('phase').textContent = 'Reading…';
@@ -191,7 +173,7 @@ async function open(list) {
   } catch (e) { return fail(e.message); }
   if (dataset.failure) { $('phase').innerHTML = `<span class="warn">${esc(dataset.failure)}</span>`; Object.assign(state, { phase: 'unrecognised', reason: dataset.failure }); dataset = null; return; }
   const h = dataset.header || {};
-  const problems = dataset.report?.errors ? ` <span class="warn">${esc(summary(dataset.report, 'check').problems)} Check it on the <a href="./">main page</a> to see them.</span>` : '';
+  const problems = dataset.report?.errors ? ` <span class="warn">${esc(summary(dataset.report, 'check').problems)} <a href="#tool=check">Check it with Elenchos</a> to see them.</span>` : '';
   $('phase').textContent = '';
   $('dataset').innerHTML = `<p class="dataset-title">${esc(h.title || dataset.input?.name || files[0].name)}</p>`
     + `<p>${n(dataset.places)} place${dataset.places === 1 ? '' : 's'}, ${n(dataset.withGeometry)} with a location on record.${problems}</p>`;
@@ -251,7 +233,7 @@ async function selectPlace(id) {
   drawError = state.drawError = null;
   for (const b of $('list').querySelectorAll('button[data-id]')) b.classList.toggle('current', b.dataset.id === id);
   renderCard();
-  $('card').scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  showCard();
   const vague = vagueFeatures(view);
   mapApi.setPlace(placeFeatures(view), vague);
   state.vague = { marks: vague.features.filter((f) => f.geometry.type === 'Point').length, circles: vague.features.filter((f) => f.geometry.type === 'Polygon').length };
@@ -268,6 +250,17 @@ async function selectPlace(id) {
   mapApi.fit(box || (mine.length ? boxOf(mine) : null), view.fallback?.kind === 'ccodes' ? 6 : 9);
   $('draw-tools').hidden = false;
   state.phase = 'place';
+}
+
+/**
+ * The card of the place chosen, brought into view: beside the map, where the panel scrolls on its own, by
+ * scrolling the panel alone, so that the page and the map stay where they are; with the panel under the
+ * map (a narrow column), by scrolling the page to it.
+ */
+function showCard() {
+  const panel = $('panel'), card = $('card'), behavior = matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+  if (getComputedStyle(panel).overflowY !== 'visible') panel.scrollBy({ top: card.getBoundingClientRect().top - panel.getBoundingClientRect().top, behavior });
+  else card.scrollIntoView({ block: 'start', behavior });
 }
 
 // The outlines of a place's countries, from Natural Earth on this site, fetched once when first needed.
@@ -670,8 +663,8 @@ async function saveDataset() {
     // The drawings in that file need not be kept here once it is on the user's disk; any others still are.
     const letGo = (said) => {
       offered = null; box.remove();
-      // The file is on the user's disk: one who keeps no working data has no copy of it left here.
-      if (!permissions.keepWorkingData()) navigator.storage.getDirectory().then((r) => r.getDirectoryHandle('chora-outputs')).then((d) => d.removeEntry(out.name)).catch(() => {});
+      // The file is on the user's disk: one who keeps no working data has no copy of it left here, unless the page still has it chosen.
+      if (!permissions.keepWorkingData() && !(handed && host.files?.().includes(handed))) navigator.storage.getDirectory().then((r) => r.getDirectoryHandle('chora-outputs')).then((d) => d.removeEntry(out.name)).catch(() => {});
       drafts = drafts.filter((d) => !savedIds.has(d.id)); keepDrafts(); showDrafts(drafts.filter((d) => d.placeId === state.placeId)); if (view) renderCard();
       $('save-result').insertAdjacentHTML('beforeend', `<p>${said} To add more, open ${esc(out.name)}.</p>`);
     };
@@ -681,16 +674,6 @@ async function saveDataset() {
         offered = null; box.remove();
         $('save-result').insertAdjacentHTML('beforeend', `<p class="warn">${esc(out.name)} is no longer there to save (${esc(e.message)}): save again.</p>`);
         return;
-      }
-      // Opened for a workflow: the file saved is handed back to it, by reference (handback.js), before
-      // a copy kept here is let go, and from the very file that went to the user's disk, read as a stream.
-      if (done && workflow) {
-        // Hashing a large file takes a while: the button waits, and the page says why (state.handingBack, for tests).
-        b.disabled = true;
-        const busy = Object.assign(document.createElement('span'), { className: 'muted', textContent: ' Handing the file back to the workflow…' });
-        busy.setAttribute('role', 'status'); box.append(busy);
-        state.handingBack = { disabled: b.disabled, said: busy.textContent.trim() };
-        try { await handBack(file); } finally { busy.remove(); b.disabled = false; }
       }
       if (done === true) letGo('Saved.');
       else if (done === 'download' && !box.querySelector('[data-clear]')) {
@@ -707,7 +690,27 @@ async function saveDataset() {
     offered = box;
   }
   state.lastSave = { passed, added, outputs: r.outputs || [], mneme: r.mneme || null, report: r.report || null, converted };
+  if (passed && out) await handOver(out);
   state.phase = 'saved';
+}
+/**
+ * The dataset a save wrote is the page's from now: handed to it (host.saved, which chooses it in step 1),
+ * from the file on the origin private file system, and what the page did with it said under the save.
+ * While it does (a large file is read through, to know it by its SHA-256), the page says so.
+ */
+async function handOver(out) {
+  if (!host.saved) return;
+  let file;
+  try { file = await outputFile(out.name); } catch { return; }
+  handed = file;
+  const busy = Object.assign(document.createElement('p'), { className: 'muted', id: 'chora-handing', textContent: CHORA_HANDOVER.busy });
+  busy.setAttribute('role', 'status');
+  $('save-result').append(busy);
+  state.handingOver = { said: busy.textContent };
+  let said = null;
+  try { said = await host.saved(file); } catch (e) { said = CHORA_HANDOVER.failed(e.message); } finally { busy.remove(); }
+  if (said) $('save-result').append(Object.assign(document.createElement('p'), { className: 'note', id: 'chora-handed', textContent: said }));
+  state.handedOver = { name: file.name, size: file.size, said };
 }
 // A save's steps, shown under its button, and kept for tests, one entry for each step and phase.
 function saveProgress(p) {
@@ -752,7 +755,7 @@ async function storageCheck(when, el) {
 // dialogue, which returns when the file is written; 'download' for a download, which cannot be seen
 // to finish; false if the user cancelled.
 async function save(name) { return saveFile(await outputFile(name), name); }
-/** The file the worker wrote for Chora, on the origin private file system: the bytes saved, and handed back (handback.js). */
+/** The file the worker wrote for Chora, on the origin private file system: the bytes saved, and handed to the page. */
 async function outputFile(name) {
   const root = await navigator.storage.getDirectory();
   return (await (await root.getDirectoryHandle('chora-outputs')).getFileHandle(name)).getFile();
@@ -769,165 +772,6 @@ async function saveFile(file, name) {
   a.href = URL.createObjectURL(file); a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 60000);
   return 'download';
-}
-
-// ---- The way back into a workflow (handback.js) --------------------------------------------------
-// Opened from a Methodos workflow (chora.html#workflow=<id>), a file saved is handed back to it: a
-// record in this browser naming the file by name, size and SHA-256, never the file, and a link to the
-// main page at the workflow. The id is read once, from the address, and used only if it is one; it
-// reaches the page and the link as text and as a checked address, never as markup.
-// On Chora's own page only (chora.html, host.standalone): in the main page there is no other page to go back to.
-let wf = null, workflow = null;
-function workflowNamed() {
-  wf = handback.workflowOf(location.hash);
-  workflow = wf?.id || null;
-  state.workflow = workflow; state.workflowRefused = !!wf?.refused; state.handback = null;
-  if (wf) {
-    const p = $('workflow');
-    p.className = workflow ? 'note' : 'warn';
-    p.textContent = workflow ? 'Opened for a workflow on the main page: save the dataset here to hand it back to the workflow. Going back without saving hands nothing back.'
-      : 'This address names a workflow, but not in a form these tools use, so nothing saved here is handed back to it.';
-    p.hidden = false;
-  }
-}
-// The way back, offered in the masthead from the start (Stephen, 12 October 2026, Issue #33 point 5):
-// "Back to the workflow" (./#workflow=<id>) when opened for one, else "Back to PLATO tools", where the
-// file chosen before is chosen again (the kept file, src/lib/kept-file.js). Before a save it says that nothing is
-// handed back; after one, a click hands back the file saved, as the save's own link does.
-let handedBack = null;   // the reference to the file handed back at the last save in this load
-let refused = null;      // the name of the file saved whose hand-back this browser would not keep, or could not make
-let pastStep = false;    // the workflow has gone past this step since (a page shown again from the browser's memory)
-let returning = null;    // outside a workflow: the names of the files the main page chooses again (its kept file), if kept
-function wayBack() {
-  const a = document.getElementById('way-back'), note = document.getElementById('way-back-note');
-  if (!a) return;
-  if (workflow) {
-    a.textContent = 'Back to the workflow'; a.href = handback.backTo(workflow, location.href);
-    note.textContent = pastStep ? ' The workflow has gone past this step since: nothing is handed back to it from here.'
-      : handedBack ? ` Hands back ${handedBack.name} (${fmtBytes(handedBack.size)}), the file you saved, to the workflow.`
-      : refused ? ` ${refused} could not be handed back from here: choose it by hand on the main page, in “Choose your data”, when it asks.`
-      : ' Nothing is handed back until you save the dataset here: going back now leaves the workflow at this step, with its dataset as it was.';
-  } else {
-    a.textContent = 'Back to PLATO tools'; a.href = new URL('./', location.href).href;
-    note.textContent = returning?.length ? ` ${returning.join(', ')} ${returning.length === 1 ? 'is' : 'are'} chosen there again.` : '';
-  }
-  document.getElementById('way-back-line').hidden = false;
-  state.wayBack = { words: a.textContent, href: a.href, said: note.textContent.trim(), handsBack: !!handedBack && !pastStep, refused: !!refused };
-}
-/**
- * Whether the workflow, as kept in this browser now, still waits at Chora's step: false once it has
- * gone past it (a page shown again from the browser's memory after the step was done), when nothing is
- * handed back. A workflow this browser does not hold (none kept, or another tab's) is not judged: true.
- */
-async function atChorasStep() {
-  let r = null;
-  try { r = await workflowStore().load(workflow); } catch { return true; }
-  return !r || stepAt(r)?.op === 'place';
-}
-/** Hand `ref` back once more before going back (so that the main page finds it fresh), unless the workflow has gone past this step. */
-async function handBackAgain(ref) {
-  if (await atChorasStep()) { await handback.give(workflow, ref); return true; }
-  pastStep = true; wayBack();
-  return false;
-}
-async function wayBackClicked(e) {
-  if (!workflow || !handedBack || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-  // After a save, the hand-back is written again first, so that the main page finds it fresh.
-  e.preventDefault();
-  await handBackAgain(handedBack);
-  location.assign(e.currentTarget.href);
-}
-/** Outside a workflow, say which files the main page chooses again (at the start, below; and again when the kept file changes, as when it is forgotten in the Permissions panel). */
-const sayReturning = () => {
-  if (workflow || !permissions.keepWorkingData()) return;
-  keptFileStore().about().then((k) => { returning = k ? k.files.map((f) => f.name) : null; wayBack(); }).catch(() => {});
-};
-// Shown again from the browser's memory: the workflow may have gone on meanwhile, and the kept file
-// is said again as it stands.
-function shownAgain(e) {
-  if (!e.persisted) return;
-  if (workflow && handedBack) atChorasStep().then((at) => { pastStep = !at; wayBack(); });
-  sayReturning();
-}
-// "Keep my working data" turned off here: what the main page keeps goes at once, as the panel says:
-// the file the user chose there (src/lib/kept-file.js), Methodos's kept files (the user's own copy
-// among them, in methodos-outputs/), and the workflow's record moves to the tab (sessionStorage), as
-// the main page moves it. Also at the start, when it is off (below).
-async function forgetMainPagesData() {
-  await keptFileStore().forget();
-  try { await (await navigator.storage.getDirectory()).removeEntry('methodos-outputs', { recursive: true }); } catch { /* none kept */ }
-  returning = null; wayBack();
-}
-let keptHere = true;
-function keepingChanged() {
-  const now = permissions.keepWorkingData();
-  if (now === keptHere) return;
-  keptHere = now;
-  if (now) return;
-  forgetMainPagesData();
-  if (workflow) workflowRecord.then((r) => { if (r) workflowStore().save(r).catch(() => {}); });
-  state.workingForgotten = true;
-}
-
-// The workflow's few words, read-only, in the panel: its title, "Step n of N", and this step's words,
-// from its record kept in this browser (Methodos's store; in the tab's sessionStorage when working data
-// is not kept). The record, or null; read once, at the start.
-let workflowRecord = Promise.resolve(null);
-let workflowScope = null;   // the workflow's Scope, for the adopt search (src/engine/krisis/scope.js), checked as it is read
-function workflowRead() {
-  workflowRecord = workflow ? workflowStore().load(workflow).catch(() => null) : Promise.resolve(null);
-  workflowRecord.then((r) => { workflowScope = r?.scope ? normaliseScope(r.scope) : null; state.scope = workflowScope; });
-  workflowRecord.then((r) => {
-    const t = r && trackOf(r, RECIPES[r.recipe?.key]);
-    state.workflowStep = t ? { title: t.title, step: t.step, words: t.words } : null;
-    if (!t) return;
-    const box = $('workflow-track'), head = document.createElement('p'), title = document.createElement('strong'), what = document.createElement('p');
-    title.textContent = t.title; head.append(title, ` · ${t.step}`);
-    what.textContent = `${t.words}${/[.!?]$/.test(t.words) ? '' : '.'}`;
-    box.replaceChildren(head, what); box.hidden = false;
-  });
-}
-/** The workflow's current dataset, as the main page keeps it (its own file, or a step's), or null: Chora opens it when no file was handed over. */
-async function workflowDataset() {
-  const r = await workflowRecord;
-  // Only at Chora's own step: at any other, Chora opens nothing of the workflow's by itself.
-  if (!r || stepAt(r)?.op !== 'place') return null;
-  const refs = currentInput(r);
-  if (!refs?.length) return null;
-  const outs = outputStore(), got = [];
-  for (const ref of refs) { const f = await outs.get(ref); if (!f) return null; got.push(f); }
-  return got;
-}
-async function handBack(file) {
-  const name = file.name;
-  let ref;
-  try { ref = await handback.refOf(file); } catch (e) {
-    $('save-result').insertAdjacentHTML('beforeend', `<p class="warn">${esc(name)} could not be handed back to the workflow (${esc(e.message)}): choose it on the main page.</p>`);
-    handedBack = null; refused = name; wayBack();
-    return;
-  }
-  // The workflow kept here may have gone past this step (this page shown again from the browser's memory).
-  if (!(await atChorasStep())) { pastStep = true; handedBack = null; wayBack(); return; }
-  const kept = await handback.give(workflow, ref);
-  state.handback = kept ? { ...kept, files: kept.files.map((r) => ({ ...r })) } : null;
-  // A hand-back the browser would not keep is not promised: the masthead says to choose the file by hand.
-  handedBack = kept ? ref : null; refused = kept ? null : ref.name; wayBack();
-  $('back-to-workflow')?.closest('p')?.remove();
-  const p = document.createElement('p'), a = document.createElement('a');
-  a.id = 'chora-back-to-workflow'; a.className = 'button'; a.textContent = 'Back to the workflow';
-  a.href = handback.backTo(workflow, location.href);
-  // Taken by a click, the record is written again first, so that the main page finds it fresh (two
-  // minutes, as the hand-off: handoff.js); a link opened in another tab finds the one written at the save.
-  a.addEventListener('click', async (e) => {
-    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-    e.preventDefault();
-    await handBackAgain(ref);
-    location.assign(a.href);
-  });
-  p.append(a, Object.assign(document.createElement('span'), { className: 'muted',
-    textContent: kept ? ` The main page takes the workflow up again after this step, and asks you there for ${ref.name} (${fmtBytes(ref.size)}), the file just saved.`
-      : ` This browser would not keep the hand-back, so choose ${ref.name} on the main page when it asks.` }));
-  $('save-result').appendChild(p);
 }
 
 // ---- Basemaps ------------------------------------------------------------------------------------
@@ -1332,11 +1176,10 @@ function permissionsChanged() {
 }
 
 // ---- The rest ------------------------------------------------------------------------------------
-// Chora's working database is in a pool that one tab alone can hold (src/engine/worker.js), so a
-// second Chora tab cannot start: it says so, and offers nothing to open.
+// Chora's working database is in a pool that one tab alone can hold (src/engine/worker.js), so Chora in a
+// second tab cannot start: it says so, and opens nothing (the page's own tools work as ever).
 function inAnotherTab() {
   $('phase').innerHTML = `<span class="warn">${esc(CHORA_TEXT['chora-in-another-tab'])}</span>`;
-  $('picker').disabled = true;
   Object.assign(state, { phase: 'in-another-tab' });
 }
 function fail(message) {
@@ -1392,15 +1235,31 @@ function renderKey() {
 }
 
 // ---- Mounting ------------------------------------------------------------------------------------
+/** Whether `list` is the files Chora has open (the very File objects), or the one its last save handed to the page. */
+const isOpen = (list) => (list.length === files.length && list.every((f, i) => f === files[i])) || (list.length === 1 && list[0] === handed);
+let started = null;   // the engine's start (startWorker), which the files chosen meanwhile wait for
+/**
+ * The files chosen in the page's step 1 changed: Chora, shown, opens them (once its engine has started),
+ * unless they are what it has open, or the file its save handed over; hidden, it opens them when it is
+ * next shown (show()), so that a dataset is not read for a map no one is looking at.
+ */
+function chosen(list) {
+  list = [...(list || [])];
+  if (!shown || !list.length || isOpen(list)) return;
+  started.then(() => { if (shown && state.phase !== 'in-another-tab' && !isOpen(list)) open(list); });
+}
 /**
  * Mount Chora in `rootEl`, once in a page's life: its panel and its map are put into it, the map made,
- * and its engine started. `context` is what the host page gives it:
- *   standalone   true on Chora's own page (chora.html), which has its own masthead, footer and
- *                Permissions panel, and the way back to the main page.
- *   lookup()     the page's WHG lookup, and onRefused(fn) what to tell when a request of it is refused
- *                for want of permission: the adoption asks WHG through the page's one lookup.
- * Returns { state, show(), hide() }: the host shows and hides the root; Chora is told, so that the map
- * is fitted to the room it has again.
+ * and its engine started. `context` is what the page gives it:
+ *   files()       the files chosen in the page's step 1, which Chora opens (and chosen(), below, when they change);
+ *   choose(files) choose these in step 1 (Chora's own, after a reload for a permission);
+ *   saved(file)   take the dataset a save wrote: chosen in step 1, and in a workflow the result of its
+ *                 step; a promise of what to say of it, in words;
+ *   scope()       the workflow's Scope (Methodos's, as kept), for the adoption's search, or null;
+ *   lookup()      the page's WHG lookup, and onRefused(fn) what to tell when a request of it is refused
+ *                 for want of permission: the adoption asks WHG through the page's one lookup.
+ * Returns { state, chosen(files), show(), hide() }: the page tells it the files chosen in step 1, and
+ * shows and hides it (the map is fitted to its room again; a drawing under way is stopped).
  */
 export function mountChora(rootEl, context = {}) {
   if (root) throw new Error('Chora is mounted once in a page.');
@@ -1408,7 +1267,7 @@ export function mountChora(rootEl, context = {}) {
   state = (window.__chora = { phase: 'loading', placeId: null, pendingCount: 0, basemap: null, mapReadyCount: 0, blocked: 0, lastSave: null, overlays: [] });
   // The writes of the historical maps kept not yet on disk (overlays.js), for tests to wait on, like draftWrites.
   Object.defineProperty(state, 'overlayWrites', { get: ov.writesPending, enumerable: true });
-  root.innerHTML = html({ files: true });
+  root.innerHTML = html();
   window.__chora_save = save;
 
   // The panel's controls.
@@ -1432,23 +1291,6 @@ export function mountChora(rootEl, context = {}) {
   $('overlay-list').addEventListener('input', overlayInput);
   $('overlay-list').addEventListener('change', overlayChanged);
   $('overlay-list').addEventListener('click', overlayClicked);
-  $('picker').onchange = (e) => open(e.target.files);
-  const drop = $('drop');
-  drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
-  drop.ondragleave = () => drop.classList.remove('over');
-  drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); open(e.dataTransfer.files); };
-
-  // On Chora's own page: the workflow it was opened for, and the way back.
-  if (host.standalone) {
-    workflowNamed();
-    document.getElementById('way-back').addEventListener('click', wayBackClicked);
-    wayBack();
-    keptChanged(() => sayReturning());
-    window.addEventListener('pageshow', shownAgain);
-    keptHere = permissions.keepWorkingData();
-    permissions.onChange(keepingChanged);
-    workflowRead();
-  }
 
   // The map, its key, its drawing and its historical maps.
   listenForTileErrors();
@@ -1468,8 +1310,9 @@ export function mountChora(rootEl, context = {}) {
   updateTraceButtons();
   adopt = createAdopt({ root: $('adopt'), mapApi, state, addAdoption, armConsult: (c) => { consultArmed = c; state.consultArmed = c ? c.record : null; },
     adopted: (placeId) => drafts.filter((d) => d.kind === 'adoption' && d.placeId === placeId),
-    // The workflow's Scope (Issue #33), read from its record once it is read; none outside a workflow.
-    scope: () => workflowScope, lookup: host.lookup, onRefused: host.onRefused });
+    // The workflow's Scope (Issue #33), as Methodos keeps it; none outside a workflow.
+    scope: () => { const s = host.scope?.(); return s ? normaliseScope(s) : null; },
+    lookup: host.lookup, onRefused: host.onRefused });
   // A click on the map while tracing is the trace's (Shift-click carries a line on). Made in the moment after
   // the first press of a trace tool, before ink.js has arrived, it waits for it: the first click of a user
   // who presses "Trace line" and clicks the river is not lost on a slow connection.
@@ -1486,22 +1329,21 @@ export function mountChora(rootEl, context = {}) {
   // The map and the drawing tool, for automated tests; nothing else reads them.
   window.__chora_map = mapApi.map;
   Object.defineProperty(window, '__chora_draw', { get: () => mapApi.draw, configurable: true });
-  // The proof that the page's policy is enforced (state.canary): until it has come, no other site is
-  // asked; unless it holds, none ever is. On Chora's own page, with the Permissions panel from its header's button.
-  const canary = host.standalone ? permissions.mount({ state })
-    : (state.canary = 'pending', permissions.enforced().then((ok) => {
-      Object.assign(state, { canary: ok ? 'enforced' : 'not-enforced', canaryWhy: permissions.canaryState()?.why || null });
-      return permissions.canaryState();
-    }));
-  canary.then((r) => {
+  // The proof that the page's policy is enforced (state.canary; the page's Permissions panel runs it):
+  // until it has come, no other site is asked; unless it holds, none ever is.
+  state.canary = 'pending';
+  permissions.enforced().then((ok) => {
+    Object.assign(state, { canary: ok ? 'enforced' : 'not-enforced', canaryWhy: permissions.canaryState()?.why || null });
     // Not enforced: a basemap chosen from another site is not used (current() never offers it, as it is
-    // in no policy), and the page says why rather than offering a reload that would change nothing.
+    // in no policy), and Chora says why rather than offering a reload that would change nothing.
     const w = basemaps.wanted();
-    if (!r?.enforced && w && !w.local) { unprotected(w); $('basemaps').open = true; renderBasemaps(); }
+    if (!ok && w && !w.local) { unprotected(w); $('basemaps').open = true; renderBasemaps(); }
   });
   // The page's policy is written at load, so a permission allowed is in it from the next one: before
-  // the page reloads for it, what is open is kept (the files, the place, the view), and taken back after.
+  // the page reloads for it, what Chora shows is kept (the files, the place, the view), and taken back
+  // after, when the page comes back to #chora. Hidden, it keeps nothing, and says it would lose nothing.
   permissions.onBeforeReload(async () => {
+    if (!shown) return;
     state.phase = 'reloading';
     await draftsWritten();
     await ov.keptWritten();
@@ -1513,25 +1355,28 @@ export function mountChora(rootEl, context = {}) {
   });
   // What the reload keeps not: a line or area still being drawn (finished drawings are kept), an
   // address in the paste box not yet added, a save running. Each is said in the panel first, with Cancel.
-  permissions.onBeforeReload(() => {}, { loses: () => {
+  const whileShown = (loses) => () => (shown ? loses() : null);
+  permissions.onBeforeReload(() => {}, { loses: whileShown(() => {
     try { return mapApi.draw?.getSnapshot().some((f) => f.properties?.currentlyDrawing) ? RELOAD_LOSES.drawing : null; } catch { return null; }
-  } });
-  permissions.onBeforeReload(() => {}, { loses: () => ($('paste')?.value.trim() ? RELOAD_LOSES.pasted : null) });
+  }) });
+  permissions.onBeforeReload(() => {}, { loses: whileShown(() => ($('paste')?.value.trim() ? RELOAD_LOSES.pasted : null)) });
   permissions.onBeforeReload(() => {}, { loses: () => (state.phase === 'saving' ? RELOAD_LOSES.saving : null) });
   // A shape proposed from a map's ink and not yet accepted (RELOAD_LOSES.tracing, R2).
-  permissions.onBeforeReload(() => {}, { loses: () => (inkTools?.proposal ? RELOAD_LOSES.tracing : null) });
+  permissions.onBeforeReload(() => {}, { loses: whileShown(() => (inkTools?.proposal ? RELOAD_LOSES.tracing : null)) });
   // The gazetteer's answers on screen, not yet adopted (an adoption made is kept with the drawings).
-  permissions.onBeforeReload(() => {}, { loses: () => adopt.loses() });
+  permissions.onBeforeReload(() => {}, { loses: whileShown(() => adopt.loses()) });
   // Who was remembered, checked again (contributor.load): what is kept is written back as checked, so that an ORCID
   // that is not one, however it got into this browser's storage, is neither shown, saved nor listed in the panel.
   try { const c = contributors.load(); if (c) contributors.remember(c); else if (localStorage.getItem('chora-contributor') !== null) contributors.forget(); } catch { /* storage refused: nothing kept */ }
   useBasemap(currentNow());
-  startWorker().then(async () => {
-    // Back from a reload for a permission: the dataset, the place and the view as they were.
+  started = startWorker().then(async () => {
+    // Back from a reload for a permission: the dataset, the place and the view as they were, the dataset
+    // chosen in the page's step 1 again.
     const resumed = await takeResume();
     if (resumed) {
       if (resumed.files?.length) {
         await open(resumed.files);
+        host.choose?.(resumed.files);
         if (resumed.placeId && dataset) await selectPlace(resumed.placeId);
       }
       if (resumed.camera) mapApi.map.jumpTo(resumed.camera);
@@ -1550,32 +1395,25 @@ export function mountChora(rootEl, context = {}) {
       // The historical maps shown last time (chora-overlays/) are working data too, as the panel says.
       try { await (await navigator.storage.getDirectory()).removeEntry('chora-outputs', { recursive: true }); } catch { /* none kept */ }
       await ov.forgetKept();
-      // And what the main page keeps for the way back, and Methodos's kept files.
-      if (host.standalone) await forgetMainPagesData();
       state.workingCleared = true;
     }
     inTurn(() => readmitKept());
-    if (!host.standalone) return;
-    handback.dropStale();
-    sayReturning();
-    // Files chosen on the main page, opened here at once (Stephen, 12 October 2026: no offer to click).
-    const handed = await takeHandoff();
-    if (handed && !files.length) {
-      state.handoff = handed.map((f) => f.name);
-      await open(handed);
-      return;
-    }
-    // Opened for a workflow with nothing handed over (a link opened in another tab, or this page
-    // reloaded): the workflow's current dataset, where the main page keeps it.
-    const kept = workflow && !files.length ? await workflowDataset() : null;
-    if (kept && !files.length) { state.fromWorkflow = kept.map((f) => f.name); await open(kept); }
-  // A second tab offers nothing, so files handed to it are let go there too, not left in the browser.
-  }).catch((e) => (e.kind === 'pool-busy' ? clearHandoff().then(inAnotherTab) : fail(e.message)));
+    // The dataset chosen in the page's step 1, if there is one, shown at once.
+    const given = host.files?.() || [];
+    if (given.length && !files.length) await open(given);
+  }).catch((e) => (e.kind === 'pool-busy' ? inAnotherTab() : fail(e.message)));
   return {
     state,
-    // Shown again: the map is fitted to its room, which it could not measure while hidden.
-    show() { mapApi.map.resize(); },
+    chosen,
+    // Shown again: the map is fitted to its room, which it could not measure while hidden, and the files
+    // chosen in step 1 meanwhile are opened.
+    show() { shown = true; mapApi.map.resize(); chosen(host.files?.() || []); },
     // Hidden: a drawing or a trace under way is stopped, so that nothing waits on a map not seen.
-    hide() { if (traceWanted) setTraceMode(null); mapApi.setMode('static'); for (const x of $('draw-tools').querySelectorAll('button')) x.setAttribute('aria-pressed', 'false'); },
+    hide() {
+      shown = false;
+      if (traceWanted) setTraceMode(null);
+      mapApi.setMode('static');
+      for (const x of $('draw-tools').querySelectorAll('button')) x.setAttribute('aria-pressed', 'false');
+    },
   };
 }

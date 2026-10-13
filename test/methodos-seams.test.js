@@ -1,15 +1,12 @@
-// Methodos at its seams with Chora (Stephen, 12 October 2026, Issue #33 point 5): what a workflow keeps
-// in this browser (the user's own file now, beside the files its steps made, under "Keep my working
-// data"), the file chosen again when the main page is back (src/methodos/seams.js), the words the
-// tracker says of it, Chora's few words of the workflow, and the round trip outside a workflow
-// (src/chora/handoff.js: the hand-off to Chora, taken once; the way back is the kept file's, test/kept-file.test.js).
-import { test, beforeEach } from 'node:test';
+// Methodos at its seams with the page (Stephen, 12 October 2026, Issue #33 point 5): what a workflow
+// keeps in this browser (the user's own file now, beside the files its steps made, under "Keep my
+// working data"), the file chosen again when the page starts again (src/methodos/seams.js), and the
+// words the tracker says of it.
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { IDBFactory } from 'fake-indexeddb';
 import { RECIPES, runner } from '../src/engine/methodos/index.js';
-import { stepAt, currentInput, startFiles, madeBy, keptBy, keptWords, trackOf } from '../src/methodos/seams.js';
+import { stepAt, currentInput, startFiles, madeBy, keptBy, keptWords } from '../src/methodos/seams.js';
 import { outputStore } from '../src/methodos/outputs.js';
-import { FRESH, take as takeHandoff, stash, dropStale, tx } from '../src/chora/handoff.js';
 import { fakeOpfs } from './opfs-fake.js';
 
 const ref = (type, name, c) => ({ type, name, size: name.length, sha256: c.repeat(64) });
@@ -70,18 +67,8 @@ test('the tracker says what is kept honestly: your file, the steps\' files, thei
   assert.equal(keptWords({ files: [], own }), '', 'nothing kept, nothing said');
   const off = keptWords({ files: [], own, keeping: false });
   assert.match(off, /^Nothing of yours is kept in this browser: “Keep my working data” is off/);
-  assert.match(off, /back from Chora, you choose your file again/);
+  assert.match(off, /so after a reload you choose your file again/);
   assert.equal(keptWords({ keeping: false, workflow: false }), '', 'no workflow, nothing to say');
-});
-
-test('Chora\'s few words of the workflow: its title, "Step n of N" of the steps followed, and the step\'s words', () => {
-  const p = atPlace();
-  const t = trackOf(p, RECIPES['map-your-data']);
-  const followed = p.steps.filter((s) => s.state !== 'skipped');
-  assert.deepEqual({ title: t.title, step: t.step, words: t.words, op: t.op, tool: t.tool },
-    { title: 'Map your data', step: `Step ${followed.findIndex((s) => s.id === 'place') + 1} of ${followed.length}`, words: 'Draw or trace the places still without a location', op: 'place', tool: 'Chora' });
-  assert.equal(t.step, 'Step 7 of 10');
-  assert.equal(trackOf({ ...p, status: 'completed' }, RECIPES['map-your-data']), null);
 });
 
 // ---- The user's own file kept in OPFS (src/methodos/outputs.js keepOwn), under "Keep my working data".
@@ -97,7 +84,7 @@ test('the user\'s own file is kept in the browser where working data is kept, fo
   const { files } = await page1.kept();
   assert.deepEqual(files, [{ sha256: r.sha256, size: file.size }]);
   assert.match(keptWords({ files, own: [r] }), /your file \(/);
-  // A later page (after a reload, or back from Chora) finds it, the same bytes under the same name.
+  // A later page (after a reload) finds it, the same bytes under the same name.
   const page2 = outputStore({ root: disk.root, keep: () => true });
   const again = await page2.get(r);
   assert.equal(again.name, 'places.csv');
@@ -167,30 +154,6 @@ test('the user\'s own file is not written where the browser says there is not ro
   const broken = { root: async () => ({ getDirectoryHandle: async () => ({ getFileHandle: async (n, o) => { if (!o?.create) throw Object.assign(new Error('nf'), { name: 'NotFoundError' }); return { createWritable: async () => { throw new Error('QuotaExceededError'); } }; }, removeEntry: async () => {} }) }) };
   assert.equal(await outputStore({ ...broken, keep: () => true, estimate: async () => ({ quota: 1e9, usage: 0 }) }).keepOwn(r, file), 'failed');
   // The tracker says it, by name.
-  assert.match(keptWords({ files: [], own: [r], missed: [{ name: 'big.csv', why: 'short' }] }), /^big\.csv could not be kept in this browser \(it has not room enough\): after a reload, or back from Chora, choose it again/);
+  assert.match(keptWords({ files: [], own: [r], missed: [{ name: 'big.csv', why: 'short' }] }), /^big\.csv could not be kept in this browser \(it has not room enough\): after a reload, choose it again/);
   assert.match(keptWords({ files: [{ sha256: 'c'.repeat(64), size: 10 }], own: [r], missed: [{ name: 'big.csv', why: 'failed' }] }), /file the steps made .*big\.csv could not be kept in this browser \(it would not keep it\)/);
-});
-
-
-// ---- The hand-off to Chora (src/chora/handoff.js): taken once, two minutes at most -----------------
-beforeEach(() => { globalThis.indexedDB = new IDBFactory(); });
-const raw = () => tx('readonly', (s) => s.getAll());
-
-test('the hand-off is opened once, read and deleted in one transaction; a stale one is not opened, and is swept, with the stamp of the round trip of before', async () => {
-  const f = new File(['{"places":[]}'], 'mine.json');
-  await stash([f]);
-  assert.equal((await takeHandoff())[0].name, 'mine.json');
-  assert.equal(await takeHandoff(), null, 'never twice');
-  assert.deepEqual(await raw(), []);
-  // Stale: not opened, and gone.
-  await stash([f]);
-  assert.equal(await takeHandoff(Date.now() + FRESH + 1), null);
-  assert.deepEqual(await raw(), []);
-  // Swept by dropStale once stale (a fresh one stays: the presence), and a stamp left by the branch before goes.
-  await stash([f]);
-  await tx('readwrite', (s) => s.put({ id: 'x', at: Date.now() }, 'chora-handoff-alive'));
-  assert.equal(await dropStale(), false);
-  assert.equal((await raw()).length, 1, 'the fresh hand-off stays; the old stamp went');
-  assert.equal(await dropStale(Date.now() + FRESH + 1), true);
-  assert.deepEqual(await raw(), []);
 });

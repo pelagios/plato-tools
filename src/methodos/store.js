@@ -2,7 +2,7 @@
 // 3). One small record per workflow (src/engine/methodos/record.js): references to the user's files by
 // name, size and SHA-256, never the files, and nothing in OPFS. Kept as its .workflow.json text in
 // IndexedDB, database 'plato-tools-methodos', store 'workflows', keyed by the record's id, with
-// Chora's hand-over's best-effort pattern (src/chora/handoff.js): a browser that refuses storage (a
+// a best-effort pattern, as Chora's own stores have (src/chora/resume.js): a browser that refuses storage (a
 // private window, say) gets a workflow that lives for the tab.
 //
 // "Keep working data" (keepWorkingData() in src/lib/permissions.js) applies: with it off, a record is

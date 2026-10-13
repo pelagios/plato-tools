@@ -16,7 +16,10 @@
 //                                   Scope in it; one, always
 //   review    review.krisis.json    the Krisis review open on the page (decisions, candidates, regions),
 //                                   a work file; at most one; `name` is the name it is saved under
-//   handback  chora-handback.json   Chora's hand-back for this workflow, references only; at most one
+//   handback  chora-handback.json   Chora's hand-back for this workflow, references only; at most one. The page
+//                                   wrote one until 13 October 2026, when Chora came into it and its save
+//                                   began to complete the workflow's step itself: still read, so that a
+//                                   project saved before opens, and written if a caller gives one
 //   file      files/<sha256>        a file the record names: the user's own (`own`: true) or one a step
 //                                   made; `name` is the record's name for it
 //
@@ -59,7 +62,7 @@ const HEX64 = /^[0-9a-f]{64}$/, SHA1 = /^[0-9a-f]{40}$/;
 const FILE_PATH = /^files\/([0-9a-f]{64})$/;
 // A path an optional part of a later minor may have: relative, plain segments, no '..'.
 const SAFE_PATH = /^(?!.*(?:^|\/)\.\.?(?:\/|$))[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/;
-const WORKFLOW_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;   // as src/chora/handback.js isWorkflowId: safe in an address and in the page
+const WORKFLOW_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;   // a workflow's id: safe in an address and in the page
 // A name the page can show as it is (as src/lib/kept-file.js): no path, no control or invisible characters, at most 255.
 const NAME = /^[^/\\\u0000-\u001f\u007f​-‏‪-‮⁦-⁩﻿]{1,255}$/;
 const nameOk = (n) => typeof n === 'string' && NAME.test(n) && /\S/.test(n) && n !== '.' && n !== '..';
@@ -180,7 +183,7 @@ export function checkManifest(m) {
   return { manifest: { ...m, minor, parts, ...(skipped.length ? { skipped } : {}) }, newer };
 }
 
-/** What `hb` is, if it is a hand-back from Chora for workflow `id` (src/chora/handback.js, format 1), else null. */
+/** What `hb` is, if it is a hand-back from Chora for workflow `id` (format 1, as Chora's page of before wrote it), else null. */
 function handbackOf(hb, id) {
   if (!keysAre(hb, ['handback', 'workflow', 'files', 'at']) || hb.handback !== 1 || hb.workflow !== id || !Number.isSafeInteger(hb.at)) return null;
   if (!Array.isArray(hb.files) || hb.files.length !== 1) return null;

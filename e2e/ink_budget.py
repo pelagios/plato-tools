@@ -86,7 +86,7 @@ def main():
             f = tmp / 'place.json'
             f.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': 'https://example.org/g', 'title': 'Budget'}, 'spatialEntities': [
                 {'@id': 'https://example.org/p/cambridge', 'label': 'Cambridge', 'attestations': [{'names': [{'toponym': 'Cambridge'}], 'sources': [{'title': 's'}]}]}]}))
-            page.set_input_files('#chora-picker', [str(f)]); until(page, '() => window.__chora.phase === "loaded"', 60)
+            page.set_input_files('#picker', [str(f)]); until(page, '() => window.__chora.phase === "loaded"', 60)   # chosen in the page's step 1, which Chora shows
             page.click('#chora-list button[data-id]'); until(page, '() => window.__chora.phase === "place"', 30)
             ann = json.loads((FIX / 'annotation-ink.json').read_text().replace('https://iiif.example.org', A))
             ann['id'] = 'https://annotations.allmaps.org/maps/00000000000000b9'

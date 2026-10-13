@@ -782,6 +782,15 @@ export function choraProblemText(i) {
   return i.examples?.length ? `${text}${text.endsWith(':') ? ' ' : ': '}${i.examples.slice(0, 3).join('; ')}` : text;
 }
 /**
+ * What becomes of the dataset a save in Chora wrote (src/chora/app.js, handOver; src/app.js, choraSaved):
+ * it is the page's from then, chosen in step 1 for the other tools.
+ */
+export const CHORA_HANDOVER = {
+  busy: 'Choosing it in “Choose your data”…',
+  chosen: (name) => `${name} is chosen in “Choose your data”, for the other tools.`,
+  failed: (why) => `It could not be chosen in “Choose your data” (${why}): choose it there by hand.`,
+};
+/**
  * The storage warning, for `when` 'load' or 'save', from storageShort() (src/engine/chora/storage.js):
  * what is needed, what is left, and what to do about it.
  */

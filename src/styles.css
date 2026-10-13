@@ -799,9 +799,14 @@ body[data-workflow] #action:not([hidden]) + #progress:not([hidden]):has(+ #resul
 .lookup-scope .scope-line { margin: 0; }
 body.scope-editing main.layout > :not(#workflow-rail, #toolbox, #scope-editor) { display: none; }
 /* ---- Chora, the map, in the centre column (src/chora/app.js; src/app.js, openChora) -------------------
-   While it is shown (body[data-chora]) the rest of the centre is hidden. Its panel beside its map, as tall as the
-   window less a little; in a column narrower than 50rem (the centre column beside both rails) the two stack, the map first. */
-body[data-chora] main.layout > :not(#workflow-rail, #toolbox, #chora) { display: none; }
+   While it is shown (body[data-chora]) the rest of the centre is hidden, but for the workflow's title and step 1
+   (folded to its line once a file is chosen: the dataset Chora shows); Scope's editor, opened, has the centre to
+   itself. Its panel beside its map, as tall as the window less a little; in a column narrower than 50rem (the
+   centre column beside both rails) the two stack, the map first. */
+body[data-chora]:not(.scope-editing) main.layout > :not(#workflow-rail, #toolbox, #workflow-head, #files, #chora) { display: none; }
+/* The map has the width: from 78rem the centre takes the tools rail's place, the tools folded away. */
+body[data-chora] main.layout > #toolbox { display: none; }
+@media (min-width: 78rem) { body[data-chora] main.layout > :not(#toolbox, .workflow-rail) { grid-column: 1 / 3; } }
 section.chora { padding: .75rem .9rem .9rem; }
 .chora-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem 1rem; margin-bottom: .5rem; }
 .chora-head h2 { margin: 0; flex: 1; }

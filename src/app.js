@@ -9,7 +9,7 @@ import { pastedListFile } from './engine/hermes/pasted.js';
 // Hermes: grouping similar spellings for lookup, a panel of its own (src/hermes-spellings.js).
 import { spellingsPanel } from './hermes-spellings.js';
 import { splitMatching } from './engine/hermes/cluster.js';
-import { review as W, POOL_BUSY, POOL_STUCK, PREVIEW_WORDS, CANCEL_RELEASING } from './engine/words.js';
+import { review as W, POOL_BUSY, POOL_STUCK, PREVIEW_WORDS, CANCEL_RELEASING, CHORA_HANDOVER } from './engine/words.js';
 const REVIEW_WORDS = W;   // the review's words, where W names the words for the columns
 import { readable } from './engine/input.js';
 import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions, flag, noteOn, setRowState } from './engine/krisis/work.js';
@@ -18,9 +18,7 @@ import { exportCandidates, readCandidateSet, serialiseCandidateSet } from './eng
 import { datasetAddress, baseDiffers } from './engine/methodos/containment.js';
 import { acceptGuarded, undoBatch, guardOf, guardsFirst, planGuarded } from './engine/krisis/guards.js';
 import { KRISIS_CANDIDATES, KRISIS_WITHDRAW, guardWords as GW, variantWords as VW, rowWords as RW } from './engine/words.js';
-import { stash as stashForChora, dropStale as dropStaleHandoff } from './chora/handoff.js';
 import { keptFileStore, keptLine, sameAbout, onChange as keptChanged } from './lib/kept-file.js';
-import { dropStale as dropStaleHandback, workflowOf } from './chora/handback.js';
 import { storageNeed } from './engine/storage.js';
 import * as permissions from './lib/permissions.js';
 import { keepNotes, restoreNotes } from './lib/typed-notes.js';
@@ -47,6 +45,7 @@ import { chosenWords, wentOn, resultLabel } from './methodos/layout.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
 let worker, files = [], input = null, targets = {}, busy = false;
+let chora = null;   // Chora, the map, once mounted (openChora, below): told the files chosen in step 1
 let runOp = null;   // the Methodos operation of the run under way (src/methodos/page.js), told when it ends
 // The engine is ready (its first 'ready' message): a file Methodos chooses on load waits for it, or the
 // page's 'ready' would come after, and over, the file's detection. An engine that fails settles it too,
@@ -111,6 +110,7 @@ function choose(list) {
   if (!files.length) return;
   keptOffer(null);   // a file chosen: the kept one is no longer offered
   methodos.chosen(files);   // a workflow followed begins with them, or checks they are its step's
+  chora?.chosen(files);     // Chora, if shown, opens them (src/chora/app.js)
   // A previous release chosen for another dataset is not this one's: it is chosen again, or not.
   $('previous').value = '';
   $('only').value = '';   // and so is a list of its places to publish
@@ -154,7 +154,7 @@ function onDetected({ input: inp, targets: t }) {
   $('action').hidden = false;
   // In a workflow, step 1 has done its part: it folds to one line. Either way, what is to be done next
   // (step 2) is brought into view, and given the focus if the user is not busy elsewhere.
-  if (document.body.dataset.workflow) foldFiles(true);
+  if (document.body.dataset.workflow || choraShown()) foldFiles(true);
   showNext($('action-h'), { from: stepHead() });
   Object.assign(state, { phase: 'detected', format: inp.format, profile: inp.profile || null });
   storageCheck();
@@ -776,38 +776,15 @@ $('picker').onchange = (e) => { const list = [...e.target.files]; choose(list); 
     if (f) { choose([f]); keepChoice([f]); }
   };
 }
-// Going to Chora's page with files chosen here hands them over (src/chora/handoff.js), and it opens
-// them at once. Only then, not on every choice: the browser may keep a copy of a stored file, and
-// the files here may be of any size. The way back needs nothing of it: the file the user chose is kept
-// (below, "The kept file"), and chosen again when this page is back from Chora.
-document.addEventListener('click', async (e) => {
-  if (e.defaultPrevented) return;   // a first tap that showed a tooltip, not a choice of the way
-  // Methodos's "Open Chora" carries the workflow (./chora.html#workflow=<id>), and hands the files over too.
-  const a = e.target.closest('a[href="./chora.html"], a[href^="./chora.html#workflow="]');
-  if (!a || !files.length || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;
-  e.preventDefault();
-  await stashForChora(files);
-  markWayToChora();
-  location.href = a.href;
-});
 // ---- The kept file (src/lib/kept-file.js; Stephen, 12 October 2026) --------------------------------
 // While "Keep my working data" is on, the latest file (or files) the user chose here, dropped, picked or
-// pasted, is kept in this browser until they forget it, clear the workflow's files, turn the setting
-// off, or choose another. Kept by the user's own choices only (keepChoice), never by a file the page or
-// a workflow chose for them; and not while a workflow is followed, which keeps its own copy and hands
-// it here when it is let go (letGo), so that there is one copy at a time. On a new visit or a reload it
-// is offered, above the drop zone ("Kept from last time: … Use it / Forget it"), never chosen
-// silently; back from Chora mid-task it is chosen again by itself, unless a workflow is followed, which
-// chooses its own file. Back from Chora means: the way to Chora was taken from this tab (a mark in its
-// sessionStorage, set on the way and taken when the page next starts, whatever way it starts), and the
-// page was reached from Chora's by a link (the referrer, which the site's policy sends whole within the
-// site) or by the browser's Back or Forward. Any other Back or Forward, or a reload, only offers it.
+// pasted (or saved in Chora), is kept in this browser until they forget it, clear the workflow's files,
+// turn the setting off, or choose another. Kept by the user's own choices only (keepChoice), never by a
+// file the page or a workflow chose for them; and not while a workflow is followed, which keeps its own
+// copy and hands it here when it is let go (letGo), so that there is one copy at a time. On a new visit
+// or a reload it is offered, above the drop zone ("Kept from last time: … Use it / Forget it"), never
+// chosen silently.
 const kept = keptFileStore({ keep: () => permissions.keepWorkingData() });
-const TO_CHORA = 'plato-tools.to-chora';
-function markWayToChora() { try { sessionStorage.setItem(TO_CHORA, '1'); } catch { /* refused: the way back offers the file */ } }
-/** Whether the way to Chora was taken from this tab; the mark is taken, so that it counts once. */
-function tookWayToChora() { try { const m = sessionStorage.getItem(TO_CHORA) === '1'; sessionStorage.removeItem(TO_CHORA); return m; } catch { return false; } }
-const wentToChora = tookWayToChora();   // read as the page starts, whatever way it starts
 let shownOffer = null;   // the kept file as the offer shows it
 /** Show the kept file's line: `what` is { offer: about } (the offer), { said: words } (a warning), or null (hidden). */
 function keptOffer(what) {
@@ -841,32 +818,16 @@ async function keepChoice(list, { force = false } = {}) {
   else if (r === 'kept' && $('kept-file').classList.contains('warn')) keptOffer(null);
   return r;
 }
-// A reload keeps its referrer: only a navigation (a link followed) counts as reached from Chora's page.
-const navType = () => { try { return performance.getEntriesByType('navigation')[0]?.type || null; } catch { return null; } };
-const fromChora = () => { try { const u = new URL(document.referrer); return navType() === 'navigate' && u.origin === location.origin && u.pathname.endsWith('/chora.html'); } catch { return false; } };
-const byHistory = () => navType() === 'back_forward';
-/** As the page starts: the kept file chosen again (back from Chora, outside a workflow), or offered. */
+/** As the page starts: the kept file offered, unless a workflow taken up chooses its own file, or a file is chosen meanwhile. */
 async function keptAtStart() {
   if (!permissions.keepWorkingData()) { kept.forget(); return; }   // nothing is kept (a keep left in flight goes too), and nothing offered
-  const back = wentToChora && (fromChora() || byHistory());
-  state.backFromChora = back;
   if (await whenReady === false) return;
   await methodos.takenUp();                     // a workflow taken up chooses its own file first
   if (files.length) return;
   const about = await kept.about();
   if (!about || files.length || !permissions.keepWorkingData()) return;
-  if (back && !methodos.following()) {
-    const list = await kept.files();
-    if (!list || files.length) return;
-    const dt = new DataTransfer(); for (const f of list) dt.items.add(f); $('picker').files = dt.files;
-    choose(list);
-    state.chosenAgain = list.map((f) => f.name);
-    return;
-  }
   keptOffer({ offer: about });
 }
-// Shown again from the browser's memory: the page is as it was, and the way to Chora counts no more.
-window.addEventListener('pageshow', (e) => { if (e.persisted) tookWayToChora(); });
 $('kept-use').onclick = async () => {
   const list = await kept.files();
   // Another tab changed it since the offer was drawn: the offer is drawn again, and nothing is chosen.
@@ -880,14 +841,6 @@ $('kept-forget').onclick = async () => {
 };
 // Forgotten or replaced, here (the Permissions panel) or in another tab: the offer is drawn again as it stands.
 keptChanged(() => { if (!$('kept-file').hidden && !$('kept-file').classList.contains('warn')) kept.about().then((a) => { if (!files.length) keptOffer(a ? { offer: a } : null); }); });
-// Files handed over that Chora's page never took (the way taken, its page not started) are not left
-// in the browser: let go here when this page starts, is shown again (back from Chora) or is left,
-// once they are older than the hand-over allows. A fresh hand-over, on the way to Chora now, is kept.
-dropStaleHandoff();
-for (const ev of ['pageshow', 'pagehide']) window.addEventListener(ev, () => dropStaleHandoff());
-// Chora's hand-back is let go where the hand-off is, when stale (a fresh one waits for the user's click).
-dropStaleHandback();
-for (const ev of ['pageshow', 'pagehide']) window.addEventListener(ev, () => dropStaleHandback());
 const drop = $('drop');
 drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
 drop.ondragleave = () => drop.classList.remove('over');
@@ -937,7 +890,7 @@ $('target').onchange = () => { document.querySelector('[data-for="ntriples-outpu
 // kept in the address as #tool=<key>, replaced rather than added to the history, so that a reload or
 // a link keeps it. The keys are not the ids of step 2's buttons (#check would scroll to the button,
 // not choose the tool). Hermes, the readers, narrows nothing: its card goes to the drop zone. Chora's
-// card is a link to its own page, which takes the chosen file with it (the click handler above).
+// card is a link to #chora, which opens it here, with the files chosen (openChora, below).
 const GUIDE = 'https://pelagios.org/place-attestation-ontology/guide/tools.html';
 const TOOLS = {
   check: { name: 'Elenchos', what: 'the check', heading: 'Check it', guide: ['checking', 'What it checks'] },
@@ -958,12 +911,9 @@ let workflowStep = null;   // the step of a Methodos workflow the user is at, if
 // while it is still shown, labelled as that step's, until the user first acts on the new step; then `parked`,
 // put away and summed up in its step's row of the tracker. Each { step, words, label }.
 let lingering = null, parked = null;
-// The fragment holds the tool chosen (#tool=<key>) and, back from Chora, the workflow it was opened for
-// (#workflow=<id>, src/chora/handback.js), together as #tool=<key>&workflow=<id>.
+// The fragment holds the tool chosen (#tool=<key>), or, while Chora is shown, #chora.
 const hashParam = (name) => { try { return new URLSearchParams(location.hash.replace(/^#/, '')).get(name); } catch { return null; } };
 const toolFromHash = () => { const k = hashParam('tool'); return k && /^[a-z]+$/.test(k) && TOOLS[k] ? k : null; };
-// The workflow the address named on arrival, carried through every rewrite of the fragment for as long as it is the one followed.
-const arrivedFor = workflowOf(location.hash)?.id || null;
 const reduceMotion = () => !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 function chooseTool(key) {
   const was = tool;
@@ -1026,11 +976,10 @@ function leaveFigures() {
   beforeFigures = null;
 }
 function setHash(key) {
-  let w = null;
-  try { w = arrivedFor && methodos.id() === arrivedFor ? arrivedFor : null; } catch { /* before Methodos is mounted */ }
   // While Chora is on screen the address is #chora, so that a reload or a link comes back to it.
-  const parts = [choraShown() ? 'chora' : key ? `tool=${key}` : null, w ? `workflow=${w}` : null].filter(Boolean);
-  try { history.replaceState(history.state, '', location.pathname + location.search + (parts.length ? `#${parts.join('&')}` : '')); } catch {}
+  const hash = choraShown() ? '#chora' : key ? `#tool=${key}` : '';
+  if (hash === location.hash) return;   // as it is: no entry rewritten for nothing
+  try { history.replaceState(history.state, '', location.pathname + location.search + hash); } catch {}
 }
 function focusStep1() {
   // Step 1 folded to its one line (in a workflow, its file chosen): step 2, which the tool narrowed, instead.
@@ -1044,6 +993,7 @@ $('toolbox').addEventListener('click', (e) => {
   const a = e.target.closest('.tool-link[data-tool]');
   if (!a || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;
   e.preventDefault();
+  leaveChora();                              // a tool chosen while the map is shown: back to the steps
   if (a.dataset.tool === 'read') {          // Hermes: to the drop zone, with every action still offered
     chooseTool('read'); setHash(null);
     $('drop').scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'center' });
@@ -1060,21 +1010,31 @@ window.addEventListener('hashchange', () => {
 chooseTool(toolFromHash());
 
 // ---- Chora, the map, in the centre column (src/chora/app.js) -----------------------------------------
-// Opened at #chora. The module, and with it MapLibre, Terra Draw and Allmaps, is loaded the first time it
-// is opened, and only then (a chunk of its own: vite.config.js); it is mounted once, and shown and hidden
-// after that, so that what it has open stays as it was. While it is shown, the rest of the centre is hidden.
-let chora = null, choraLoading = null;
+// Opened at #chora (its card, step 2's "Show on the map", the workflow's "Open Chora", or the address).
+// The module, and with it MapLibre, Terra Draw and Allmaps, is loaded the first time it is opened, and
+// only then (a chunk of its own: vite.config.js); it is mounted once, and shown and hidden after that, so
+// that what it has open stays as it was. It shows the files chosen in step 1, and a dataset saved in it is
+// chosen there (choraSaved). While it is shown, the rest of the centre is hidden but for the workflow's
+// title and step 1, folded to its line once a file is chosen.
+let choraLoading = null;
 const choraShown = () => !$('chora').hidden;
 const choraInHash = () => { try { return new URLSearchParams(location.hash.replace(/^#/, '')).has('chora'); } catch { return false; } };
 async function openChora() {
   if (choraShown()) return;
   $('chora').hidden = false; document.body.dataset.chora = '';
+  $('toolbox').querySelector('.tool-link[href="#chora"]')?.setAttribute('aria-current', 'true');   // its card marked, as a tool's is when chosen
+  if (files.length && input?.format && input.reason === undefined) foldFiles(true);   // step 1, its file recognised: one line above the map
   setHash(tool);
   $('chora').scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' });
   $('chora-h').focus({ preventScroll: true });
   try {
     choraLoading ??= import('./chora/app.js').then((m) => (chora = m.mountChora($('chora-root'), {
-      // WHG's lookup, the page's one (one queue, whoever asks), for adopting a location from it; and what it does when a request is refused.
+      files: () => files,
+      choose: (list) => { const dt = new DataTransfer(); for (const f of list) dt.items.add(f); $('picker').files = dt.files; choose(list); },
+      saved: choraSaved,
+      // The workflow's Scope (Methodos's), for adopting a location from WHG.
+      scope: () => methodos.scope(),
+      // WHG's lookup, the page's one (one queue, whoever asks); and what it does when a request is refused.
       lookup: () => whgLookup(), onRefused: (f) => refusedToo.add(f),
     })));
     await choraLoading;
@@ -1089,7 +1049,18 @@ function leaveChora() {
   if (!choraShown()) return;
   chora?.hide();
   $('chora').hidden = true; delete document.body.dataset.chora;
+  $('toolbox').querySelector('.tool-link[href="#chora"]')?.removeAttribute('aria-current');
+  if (!document.body.dataset.workflow) foldFiles(false);   // step 1 open again, as outside a workflow it is
   setHash(tool);
+}
+/**
+ * A dataset saved in Chora: the page's from now, chosen in step 1 as if just dropped (and kept, as the
+ * user's own choice is), so that the other tools take it. Returns what to say of it, in words.
+ */
+async function choraSaved(file) {
+  const dt = new DataTransfer(); dt.items.add(file); $('picker').files = dt.files;
+  choose([file]); keepChoice([file]);
+  return CHORA_HANDOVER.chosen(file.name);
 }
 $('chora-leave').addEventListener('click', () => { leaveChora(); focusStep1(); });
 if (choraInHash()) openChora();
@@ -1168,7 +1139,6 @@ const methodos = mountMethodos({
     // Shown again, with its label, until the user next acts on the step at hand.
     reopenResult: () => { if (!parked) return; lingering = parked; parked = null; $('result').hidden = false; resultOf(lingering.label); methodos.detected(); showNext($('result-h'), { asked: true }); },
   },
-  workflow: arrivedFor,
   build: { version: TOOLS_VERSION, commit: BUILD.commit || null },
   projectFile: $('methodos-project-file'), projectSaid: $('methodos-project-said'),
   // The workflow's Scope is shown again whenever the tracker is drawn (begun, taken up, left).
@@ -1275,13 +1245,13 @@ for (const li of document.querySelectorAll('#toolbox .tool')) {
 $('base').addEventListener('input', () => methodos.baseChanged());
 for (const id of ['methodos-card', 'methodos-ask']) $(id).addEventListener('click', (e) => {
   if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;   // a first tap on the card's name shows its tooltip (src/lib/tooltip.js)
-  e.preventDefault(); methodos.open();
+  e.preventDefault(); leaveChora(); methodos.open();   // the interview is in the centre, where the map is while it is shown
 });
 if (location.hash === '#methodos') methodos.open();
 // "Keep working data" turned off in the Permissions panel: Methodos's records go at once, not at its next save.
 let keptBefore = permissions.keepWorkingData();
 permissions.onChange(() => { const now = permissions.keepWorkingData(); if (now !== keptBefore) { keptBefore = now; methodos.keepChanged(now); if (!now) { kept.forget(); keptOffer(null); } } });
-// The kept file: chosen again back from Chora, or offered (keptAtStart, above).
+// The kept file, offered (keptAtStart, above).
 keptAtStart();
 
 // Krisis: match review. One subject place at a time, with its candidates; each decision is written
@@ -1685,7 +1655,8 @@ permissions.mount({ state });
 // A reload for a permission cannot keep the files chosen here (the browser gives a page no way back to
 // a file without the user choosing it again): it says so in the panel first, and may be cancelled.
 // A tool that keeps more (Krisis's review) says what it would lose the same way, with onBeforeReload.
-permissions.onBeforeReload(() => {}, { loses: () => (files.length ? RELOAD_LOSES.files(files.map((f) => f.name)) : null) });
+// While Chora is shown, it keeps them across the reload, and they are chosen here again (src/chora/resume.js).
+permissions.onBeforeReload(() => {}, { loses: () => (files.length && !(choraShown() && chora) ? RELOAD_LOSES.files(files.map((f) => f.name)) : null) });
 permissions.onBeforeReload(() => {}, { loses: () => (busy ? RELOAD_LOSES.running : null) });
 permissions.onBeforeReload(() => {}, { loses: () => (work && unsaved ? RELOAD_LOSES.review(unsaved) : null) });
 // Krisis: gazetteer lookup (online, optional). The places of the dataset are looked up in WHG, or

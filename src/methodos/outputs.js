@@ -4,8 +4,8 @@
 // own, 'methodos-outputs', each file under its SHA-256, so that after a reload the next step takes it
 // without its being chosen again. The workflow's record still holds only references (name, size,
 // SHA-256). The user's own file, the one the workflow began with, is kept here too, for the workflow's
-// lifetime (Stephen, 12 October 2026, Issue #33 point 5): so that the main page, back from Chora or
-// after a reload, chooses it again in any browser, not only where Chromium gives a file handle. It is
+// lifetime (Stephen, 12 October 2026, Issue #33 point 5): so that the main page, after a reload or
+// with a project opened, chooses it again in any browser, not only where Chromium gives a file handle. It is
 // let go with the workflow (Leave), or with "Clear them".
 //
 // "Keep working data" (keepWorkingData() in src/lib/permissions.js) applies: with it off, the files

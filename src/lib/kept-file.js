@@ -1,18 +1,18 @@
 // The file chosen on the main page, kept in this browser for as long as the user wants it (Stephen,
 // 12 October 2026: "Users would find it useful to have their data kept indefinitely"). While "Keep my
 // working data" is on, the latest file (or files) the user chose in "Choose your data", dropped,
-// picked or pasted, outside a workflow (a workflow keeps its own copy, and hands it here when it is let
+// picked, pasted or saved in Chora, outside a workflow (a workflow keeps its own copy, and hands it here when it is let
 // go: one copy at a time), is copied into this browser's private file storage (OPFS). Each choice is
 // written into a folder of its own, 'kept-file-<stamp>': the files as '0', '1', … and, written last so
 // that a half-written copy is never taken for one, 'about.json' ({ kept: 1, chosen, files: [{ name,
 // size, type }] }); only once it is whole are the folders of earlier choices removed, so that the last
-// choice stays kept while the next is being written (a way taken to Chora meanwhile loses neither), and
+// choice stays kept while the next is being written (a reload meanwhile loses neither), and
 // any folder left over (a removal that failed, a write never finished) is swept when the store is read.
 // It stays until the user forgets it ("Forget it", under "Choose your data" or in the Permissions
-// panel), clears the workflow's files ("Clear them"), turns the setting off (on either page), or
+// panel), clears the workflow's files ("Clear them"), turns the setting off, or
 // chooses another file, which replaces it. Nothing leaves the computer; what OPFS holds can be read by
 // any page of the site's origin on this computer (DEVELOPERS.md, "The shared origin"), so what is read
-// back is checked (aboutOf) and only offered, or chosen on a return from Chora, never acted on otherwise.
+// back is checked (aboutOf) and only offered, never acted on otherwise.
 //
 // Every write and removal, from any store in the page, goes through one queue, so that a "Forget it" or
 // the setting turned off is never overtaken by a keep still in flight; and a keep looks at the setting

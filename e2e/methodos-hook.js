@@ -9,8 +9,6 @@ import * as runner from '../src/engine/methodos/runner.js';
 import { refsOf } from '../src/engine/methodos/handoffs.js';
 import { reconcile, checkChosen } from '../src/engine/methodos/record.js';
 import { workflowStore, DB, STORE } from '../src/methodos/store.js';
-import { give, refOf, KEY as HANDBACK } from '../src/chora/handback.js';
-import { tx as choraTx } from '../src/chora/handoff.js';
 import { outputStore } from '../src/methodos/outputs.js';
 
 if (window.__plato) {
@@ -80,10 +78,6 @@ if (window.__plato) {
       const { record } = await store.save({ ...s, id: `e2e-${Date.now().toString(36)}-${(++made).toString(36)}` }, { name: label });
       return record.id;
     },
-    // Chora's hand-back of a file of `text` called `name`, for workflow `id`, as Chora gives it on saving.
-    giveBack: async (id, text, name) => !!(await give(id, await refOf(new File([text], name)))),
-    // Whether a hand-back is kept (it is taken, and so let go, only on the user's click).
-    handbackKept: async () => { try { return (await choraTx('readonly', (st) => st.get(HANDBACK))) !== undefined; } catch (e) { return 'error: ' + e.message; } },
     keys,
   };
 }
