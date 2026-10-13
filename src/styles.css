@@ -804,9 +804,15 @@ body.scope-editing main.layout > :not(#workflow-rail, #toolbox, #scope-editor) {
    itself. Its panel beside its map, as tall as the window less a little; in a column narrower than 50rem (the
    centre column beside both rails) the two stack, the map first. */
 body[data-chora]:not(.scope-editing) main.layout > :not(#workflow-rail, #toolbox, #workflow-head, #files, #chora) { display: none; }
-/* The map has the width: from 78rem the centre takes the tools rail's place, the tools folded away. */
-body[data-chora] main.layout > #toolbox { display: none; }
-@media (min-width: 78rem) { body[data-chora] main.layout > :not(#toolbox, .workflow-rail) { grid-column: 1 / 3; } }
+/* The map has the width: the tools are folded away while it is shown (from 78rem the centre takes their rail's
+   place; below, their cards are not shown under the map), and "Tools ▸" brings them back (body[data-chora-tools]):
+   from 78rem in their rail, the map in the centre beside it; below, as cards under the map. The workflow rail
+   stays, with the tracker and Scope; below 60rem its strip stays at the top of the window, the map taking the
+   column. Leaving the map leaves the three columns as they were. */
+body[data-chora]:not([data-chora-tools]) main.layout > #toolbox { display: none; }
+@media (min-width: 78rem) { body[data-chora]:not([data-chora-tools]) main.layout > :not(#toolbox, .workflow-rail) { grid-column: 1 / 3; } }
+.chora-tools .if-unfolded, body[data-chora-tools] .chora-tools .if-folded { display: none; }
+body[data-chora-tools] .chora-tools .if-unfolded { display: inline; }
 section.chora { padding: .75rem .9rem .9rem; }
 .chora-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem 1rem; margin-bottom: .5rem; }
 .chora-head h2 { margin: 0; flex: 1; }
@@ -814,7 +820,7 @@ section.chora { padding: .75rem .9rem .9rem; }
 .chora-head h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .chora-head .label { font-family: var(--font-text); font-size: .8rem; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-left: .4rem; }
 section.chora { container-type: inline-size; }
-section.chora .chora-main { display: grid; grid-template-columns: minmax(17rem, 24rem) 1fr; height: calc(100vh - 6rem); min-height: 28rem; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+section.chora .chora-main { display: grid; grid-template-columns: minmax(16rem, 21rem) 1fr; height: calc(100vh - 6rem); min-height: 28rem; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 section.chora .chora-panel { padding: 0 .6rem .8rem .8rem; }
 section.chora .chora-panel section { padding: .6rem .7rem; }
 section.chora .note { color: var(--muted); font-size: .92rem; }
@@ -827,6 +833,12 @@ section.chora .note { color: var(--muted); font-size: .92rem; }
 /* A map narrower than the basemap's switcher and the key side by side: the key goes to the top right, under the zoom buttons. */
 section.chora .chora-mapwrap { container: chora-map / inline-size; }
 @container chora-map (width < 34rem) { .map-key { top: 4.6rem; bottom: auto; } }
+/* A map narrower than Chora's own page gave it (beside the workflow rail, or in a narrow column): the panel of
+   tracing with assistance narrower and smaller, so that it leaves the map's middle, where a trace is clicked, clear. */
+@container chora-map (width < 44rem) {
+  .ink-panel { width: min(17rem, calc(100% - 1.2rem)); font-size: .82rem; padding: .3rem .55rem; }
+  .ink-panel .ink-range input { width: 4.5rem; }
+}
 .scope-editor h2:focus { outline: none; }
 .scope-editor h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .scope-editor fieldset { border: 1px solid var(--line); border-radius: 8px; margin: .75rem 0; padding: .4rem .85rem .7rem; min-width: 0; }

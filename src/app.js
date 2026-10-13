@@ -1021,11 +1021,13 @@ const choraShown = () => !$('chora').hidden;
 const choraInHash = () => { try { return new URLSearchParams(location.hash.replace(/^#/, '')).has('chora'); } catch { return false; } };
 async function openChora() {
   if (choraShown()) return;
-  $('chora').hidden = false; document.body.dataset.chora = '';
+  $('chora').hidden = false; document.body.dataset.chora = ''; toolsShown(false);
   $('toolbox').querySelector('.tool-link[href="#chora"]')?.setAttribute('aria-current', 'true');   // its card marked, as a tool's is when chosen
   if (files.length && input?.format && input.reason === undefined) foldFiles(true);   // step 1, its file recognised: one line above the map
   setHash(tool);
-  $('chora').scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' });
+  // From the workflow's title, or step 1's line, down: what the map shows is said above it.
+  const top = [$('workflow-head'), $('files'), $('chora')].find((e) => !e.hidden && e.getClientRects().length);
+  top.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' });
   $('chora-h').focus({ preventScroll: true });
   try {
     choraLoading ??= import('./chora/app.js').then((m) => (chora = m.mountChora($('chora-root'), {
@@ -1048,7 +1050,7 @@ async function openChora() {
 function leaveChora() {
   if (!choraShown()) return;
   chora?.hide();
-  $('chora').hidden = true; delete document.body.dataset.chora;
+  $('chora').hidden = true; delete document.body.dataset.chora; toolsShown(false);
   $('toolbox').querySelector('.tool-link[href="#chora"]')?.removeAttribute('aria-current');
   if (!document.body.dataset.workflow) foldFiles(false);   // step 1 open again, as outside a workflow it is
   setHash(tool);
@@ -1064,6 +1066,22 @@ async function choraSaved(file) {
   const step = await methodos.placed([file]);
   return [CHORA_HANDOVER.chosen(file.name), step].filter(Boolean).join(' ');
 }
+/**
+ * The tools while the map is shown: folded away (the centre takes their rail from 78rem, and below it
+ * their grid of cards is not shown under the map), or shown again with "Tools ▸", in their rail beside
+ * the map, or below it. Leaving the map folds nothing: the page is as it was.
+ */
+function toolsShown(on) {
+  if (on) document.body.dataset.choraTools = ''; else delete document.body.dataset.choraTools;
+  $('chora-tools').setAttribute('aria-expanded', String(on));
+}
+$('chora-tools').addEventListener('click', () => {
+  const on = !document.body.hasAttribute('data-chora-tools');
+  toolsShown(on);
+  if (on && !$('toolbox').getBoundingClientRect().width) return;
+  // Below 78rem the cards are under the map: brought into view.
+  if (on && $('toolbox').getBoundingClientRect().top > innerHeight) $('toolbox').scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' });
+});
 $('chora-leave').addEventListener('click', () => { leaveChora(); focusStep1(); });
 if (choraInHash()) openChora();
 

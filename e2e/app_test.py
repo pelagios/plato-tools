@@ -2912,6 +2912,7 @@ def main():
             try: front_page_checks(front, url); card_chosen_checks(front, url, pw); theme_checks(front, url); methodos_page_checks(front, url); layout_checks(front, url)
             finally: front.close()
             methodos_checks(pw, url, tmp)
+            chora_layout_checks(pw, url)
             chora_checks(pw, url, tmp)
             chora_adopt_checks(pw, url, tmp)
             map_your_data_checks(pw, url, tmp)
@@ -7168,6 +7169,97 @@ def chora_checks(pw, url, tmp):
     attempt('main page: a remembered reviewer\'s ORCID that is not one is dropped on load and not written back; a right one is kept and shown', planted_reviewer)
 
     ctx.close()
+
+
+# ---- Chora in the page: its layout, its loading, its address (Stephen, 13 October 2026) -------------------
+# Chora is in the main page's centre column at #chora: while it is shown the tools rail folds away (the
+# centre takes its place) and the workflow rail stays; "Tools ▸" brings the tools back; leaving the map
+# gives the three columns back. Its module, and MapLibre with it, is loaded only when it is first opened.
+# Measured at 1440 × 900, in a browser context of its own, against the page's own boxes.
+CHORA_BOXES = '''() => { const box = (id) => { const e = document.getElementById(id); if (!e) return null; const r = e.getBoundingClientRect();
+    return r.width && r.height ? { left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width) } : null; };
+  return { toolbox: box('toolbox'), rail: box('workflow-rail'), files: box('files'), chora: box('chora'), map: box('chora-map'),
+    shown: !document.getElementById('chora').hidden, tools: document.getElementById('chora-tools')?.getAttribute('aria-expanded') ?? null,
+    hash: location.hash }; }'''
+def chora_layout_checks(pw, url):
+    base = url.rstrip('/') + '/'
+    browser = pw.chromium.launch(headless=True, args=GL)
+    def fresh():
+        ctx = browser.new_context(viewport={'width': 1440, 'height': 900}, reduced_motion='reduce')
+        page = ctx.new_page(); page.set_default_timeout(T(30) * 1000)
+        asked = []; page.on('request', lambda r: asked.append(r.url))
+        return ctx, page, asked
+    def ready(page):
+        page.goto(NOTOOLS if PROVE else base)
+        if wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready').get('phase') != 'ready': raise RuntimeError('the main page did not start')
+    def opened(page):
+        until(page, '() => window.__chora && window.__chora.phase !== "loading" && window.__chora.mapReadyCount >= 1', 60)
+    f = EX / 'place-centric-antonine.json'
+    try:
+        def not_before():
+            ctx, page, asked = fresh()
+            try:
+                ready(page)
+                page.set_input_files('#picker', [str(f)]); wait_state(page, lambda s: s.get('phase') == 'detected', T(60), 'detection')
+                map_chunk = lambda: [u for u in asked if re.search(r'/assets/map-[\w-]+\.js$', u)]
+                before = {'main code': any(re.search(r'/assets/main-[\w-]+\.js$', u) for u in asked), 'map chunk': map_chunk(),
+                          'map': page.evaluate("() => !!document.querySelector('.maplibregl-map')"), 'maplibre global': page.evaluate("() => typeof window.maplibregl !== 'undefined'"),
+                          'Chora': page.evaluate('() => !!window.__chora')}
+                page.click('#toolbox .tool-link[href="#chora"]'); opened(page)
+                after = {'map chunk': map_chunk(), 'map': page.evaluate("() => !!document.querySelector('#chora .maplibregl-map')"), 'Chora': page.evaluate('() => !!window.__chora')}
+                return (before['main code'] and not before['map chunk'] and not before['map'] and not before['maplibre global'] and not before['Chora']
+                        and after['map chunk'] and after['map'] and after['Chora']), {'before': before, 'after': after}
+            finally: ctx.close()
+        attempt('Chora in the page: no map code is loaded before Chora is opened (no map chunk, no map, no MapLibre global, no Chora, with a file chosen and the page\'s own code loaded); opened, all are there', not_before)
+
+        lay = {}
+        def folds():
+            ctx, page, asked = fresh(); lay['ctx'] = ctx; lay['page'] = page
+            ready(page)
+            page.set_input_files('#picker', [str(f)]); wait_state(page, lambda s: s.get('phase') == 'detected', T(60), 'detection')
+            three = page.evaluate(CHORA_BOXES); lay['three'] = three
+            page.click('#to-chora'); opened(page); until(page, '() => window.__chora.phase === "loaded"', 60); page.evaluate(SETTLE)
+            on = page.evaluate(CHORA_BOXES); lay['on'] = on
+            return (three['toolbox'] and three['files'] and three['rail'] and three['toolbox']['right'] < three['files']['left'] < three['rail']['left']
+                    and on['shown'] and on['toolbox'] is None and on['rail'] and on['rail']['left'] == three['rail']['left']
+                    and abs(on['chora']['left'] - three['toolbox']['left']) <= 2 and on['chora']['right'] < on['rail']['left']
+                    and on['chora']['width'] > three['files']['width'] + 150 and on['map']['width'] >= 500 and on['tools'] == 'false' and on['hash'] == '#chora'), {'three columns': three, 'Chora shown': on}
+        attempt('Chora in the page at 1440 × 900: the tools rail folds away and the centre takes its place, the workflow rail stays where it was, and the map has the width', folds)
+
+        def toggled():
+            page = lay['page']
+            page.click('#chora-tools'); page.evaluate(SETTLE)
+            back = page.evaluate(CHORA_BOXES)
+            page.click('#chora-tools'); page.evaluate(SETTLE)
+            folded = page.evaluate(CHORA_BOXES)
+            three = lay['three']
+            return (back['tools'] == 'true' and back['shown'] and back['toolbox'] and back['toolbox']['left'] == three['toolbox']['left'] and back['toolbox']['right'] < back['chora']['left']
+                    and back['rail']['left'] == three['rail']['left'] and back['map']['width'] >= 300
+                    and folded['tools'] == 'false' and folded['toolbox'] is None and folded['chora']['left'] == lay['on']['chora']['left']), {'tools shown': back, 'folded again': folded}
+        attempt('Chora in the page: "Tools ▸" brings the tools rail back beside the map, and folds it away again', toggled)
+
+        def left():
+            page = lay['page']
+            page.click('#chora-tools')                            # left with the tools shown: the page is as it was all the same
+            page.click('#chora-leave'); page.wait_for_timeout(300)
+            after = page.evaluate(CHORA_BOXES); three = lay['three']
+            return (not after['shown'] and after['toolbox'] == three['toolbox'] and after['files'] == three['files'] and after['rail'] == three['rail']
+                    and after['tools'] == 'false' and '#chora' not in after['hash'] and not page.evaluate('() => document.body.hasAttribute("data-chora") || document.body.hasAttribute("data-chora-tools")')), {
+                'three columns before': three, 'after leaving': after}
+        attempt('Chora in the page: leaving the map gives the three columns back as they were', left)
+
+        def reloads():
+            page = lay['page']
+            page.click('#to-chora'); opened(page); until(page, '() => window.__chora.phase === "loaded"', 60)
+            page.reload(); wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready'); opened(page)
+            s = cstate(page); box = page.evaluate(CHORA_BOXES)
+            offered = soon(page, "() => { const e = document.getElementById('kept-file'); return !!e && !e.hidden; }", 15)
+            return (box['shown'] and box['hash'] == '#chora' and box['toolbox'] is None and s['phase'] == 'ready' and s['mapReadyCount'] >= 1 and offered), {
+                'boxes': box, 'state': {k: s.get(k) for k in ('phase', 'mapReadyCount')}, 'kept file offered': offered}
+        attempt('Chora in the page: the page reloaded at #chora opens Chora again at once (the file kept from before offered above it, as on any reload)', reloads)
+    finally:
+        if lay.get('ctx'): lay['ctx'].close()
+        browser.close()
 
 # ---- Chora's historical maps (IIIF), against a real second origin ---------------------------------
 # The map's servers are e2e/iiif_fixture_server.py on two free ports of 127.0.0.1: origin A, the image
