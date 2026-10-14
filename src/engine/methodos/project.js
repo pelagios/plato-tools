@@ -5,12 +5,15 @@
 // DEVELOPERS.md, "The project file". It never reads WHG's own .whgproj files or synced projects.
 //
 // A zip (extension .platoproj) whose first entry is manifest.json:
-//   { format: 'plato-tools-project', version: 1, minor: 0,
+//   { format: 'plato-tools-project', version: 1, minor: 1,
 //     tools: { version, commit },                       the PLATO tools that wrote it (commit null when unknown)
 //     created,                                          ISO 8601
 //     workflow: { id, name, recipe: { key, version }, at },   at: the step it is at, or null when completed
 //     parts: [{ path, role, size, sha256, optional?, … }],   every other entry, each once
-//     left?: [{ name, size, sha256, why }] }            files the workflow names that are not in it
+//     left?: [{ name, size, sha256, why }] }            files the workflow names that are not in it; why:
+//                                                       'left-out' (the user's choice), 'not-kept' (no longer
+//                                                       kept in the browser), or, from 1.1, 'too-large' (left
+//                                                       out to fit WHG's Workbench: src/engine/workbench.js)
 // and the parts, by role:
 //   record    workflow.json         the workflow's record, exactly its .workflow.json (record.js), the
 //                                   Scope in it; one, always
@@ -26,6 +29,8 @@
 // Versions. `version` is the major: a reader refuses a greater one. `minor` (default 0) is what a
 // writer may add without breaking a reader of the same major: a reader opens a greater minor, says so,
 // and ignores the keys it does not know; at its own minor or below, a key it does not know is damage.
+// 1.1 (14 October 2026) added the why 'too-large'; a 1.0 reader opens a 1.1 project as of a later minor,
+// and takes a why it does not know as it takes any other later minor's value (checkManifest, `left`).
 // A role or an entry it does not know is never ignored, unless the manifest marks the part `optional`.
 //
 // The zip's CENTRAL DIRECTORY is authoritative (as for every other reader of zips, Python's and WHG's
@@ -45,7 +50,7 @@ import { exportRecord, importRecord } from './record.js';
 
 export const FORMAT = 'plato-tools-project';
 /** The major version of the format these tools write and read, and the minor they write. */
-export const VERSION = 1, MINOR = 0;
+export const VERSION = 1, MINOR = 1;
 export const EXTENSION = '.platoproj';
 export const MEDIA_TYPE = 'application/zip';
 export const MANIFEST = 'manifest.json', RECORD = 'workflow.json', REVIEW = 'review.krisis.json', HANDBACK = 'chora-handback.json';
@@ -129,7 +134,7 @@ const ROLES = {
   file: { path: (p) => FILE_PATH.test(p), keys: ['path', 'role', 'size', 'sha256', 'name', 'own'], limit: LIMITS.file },
 };
 const TOP = ['format', 'version', 'tools', 'created', 'workflow', 'parts'], TOP_OPTIONAL = ['minor', 'left'];
-const LEFT_WHY = ['left-out', 'not-kept'];
+const LEFT_WHY = ['left-out', 'not-kept', 'too-large'];
 
 /**
  * The manifest `m`, checked: returns { manifest, newer } (newer: it is of a later minor of this major, so
@@ -198,7 +203,7 @@ function handbackOf(hb, id) {
  * `write(chunk)` (awaited, a chunk of the zip at a time). `files`: [{ ref, blob }], each a file the
  * record names, read as a stream and checked to be the bytes `ref` names (a file changed in storage is
  * refused, never saved under another's hash); `left`: the files the record names that are not given,
- * each { ref, why: 'left-out' | 'not-kept' }; `review`: { name, text } of the review open, or null;
+ * each { ref, why: 'left-out' | 'not-kept' | 'too-large' }; `review`: { name, text } of the review open, or null;
  * `handback`: Chora's hand-back for this workflow, or null; `tools`: { version, commit }; `refuse`: the
  * secrets that must not be in it (the WHG token, keys): a part that holds one, the user's own file
  * included, is refused, and the project is not saved (the caller aborts what `write` was given). A part
@@ -491,6 +496,6 @@ export function describe(read) {
     ...m.parts.map((p) => `  ${p.path.padEnd(72)} ${String(p.size).padStart(12)} bytes  ${p.role}${p.role === 'file' ? `: ${p.name}${p.own ? ' (the file the workflow began with)' : ''}` : p.role === 'review' ? `: ${p.name}` : ''}`),
   ];
   if (m.skipped?.length) lines.push('Optional parts these tools do not read:', ...m.skipped.map((p) => `  ${p.path} (${p.role})`));
-  if (m.left?.length) lines.push('Named by the workflow but not in the project:', ...m.left.map((x) => `  ${x.name} (${x.size} bytes): ${x.why === 'left-out' ? 'left out when it was saved' : x.why === 'not-kept' ? 'not kept in the browser it was saved from' : x.why}`));
+  if (m.left?.length) lines.push('Named by the workflow but not in the project:', ...m.left.map((x) => `  ${x.name} (${x.size} bytes): ${x.why === 'left-out' ? 'left out when it was saved' : x.why === 'not-kept' ? 'not kept in the browser it was saved from' : x.why === 'too-large' ? 'left out to fit WHG\'s Workbench' : x.why}`));
   return lines;
 }

@@ -1,4 +1,4 @@
-# The PLATO tools project file, version 1.0
+# The PLATO tools project file, version 1.1
 
 A PLATO tools project holds one Methodos workflow whole: its record, its Scope, the files its steps
 made, the user's own starting file, the Krisis review open, and, in a project saved before 13 October
@@ -48,12 +48,12 @@ UTF-8 JSON, an object with these keys (`minor` and `left` optional):
 |---|---|
 | `format` | `"plato-tools-project"` |
 | `version` | `1`: the **major** version |
-| `minor` | `0`: the minor version (absent means 0) |
+| `minor` | `1`: the minor version (absent means 0) |
 | `tools` | `{ "version": "<package version>", "commit": "<40 hex>" or null }`: the PLATO tools that wrote it |
 | `created` | ISO 8601 date and time |
 | `workflow` | `{ "id", "name", "recipe": { "key", "version" }, "at" }`: `id` is 1 to 64 of `A-Z a-z 0-9 _ -`, beginning with a letter or digit; `name` is the record's name (its first 255 characters); `at` is the id of the step it is at, or null when every step is done. Each must agree with the record. |
 | `parts` | the entries after the manifest, at least one, at most 1000, the record first: see below |
-| `left` | optional: `[{ "name", "size", "sha256", "why" }]`, files the record names that are not in the project; `why` is `"left-out"` (the user chose to leave it out) or `"not-kept"` (the browser that saved it no longer kept it) |
+| `left` | optional: `[{ "name", "size", "sha256", "why" }]`, files the record names that are not in the project; `why` is `"left-out"` (the user chose to leave it out), `"not-kept"` (the browser that saved it no longer kept it) or, from 1.1, `"too-large"` (left out so that the project fits WHG's Workbench: see "Stored in WHG") |
 
 Each part has exactly the keys of its role, and may have `"optional": true`:
 
@@ -81,6 +81,10 @@ U+202E, U+2066 to U+2069, U+FEFF), not only white space, and not `.` or `..`.
   that part `"optional": true` (whose path is then plain, relative, with no `..`); an optional part of an
   unknown role is not read and not checked.
 - **At the reader's own minor or below, a key it does not know is damage**, and the project is refused.
+- **The history.** 1.0 (12 October 2026), the first. 1.1 (14 October 2026) adds one value, the `why`
+  `"too-large"` in `left`. A 1.0 reader opens a 1.1 project as one of a later minor, saying so, and takes
+  that `why` as it takes any value of a later minor it does not know; a 1.1 reader refuses an unknown `why`
+  in a project of minor 1 or 0, and opens one in a project of minor 2 or more.
 - **The parts carry their own versions**, which the manifest's do not change: the record is `methodos: 1`
   (`src/engine/methodos/runner.js`), the review a Krisis work file of `krisis: 3`
   (`src/engine/krisis/work.js`), the hand-back `handback: 1`. A reader checks each by its own rules.

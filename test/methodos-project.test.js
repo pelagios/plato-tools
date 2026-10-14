@@ -131,7 +131,7 @@ test('the manifest round trip: written and read back, every part is what was put
   }
   // Read from bytes in memory too (the tests' source), as from the Blob.
   assert.deepEqual((await readProject(blobSource(bytes), { sink: memorySink })).record, p.record);
-  assert.match(describe(r).join('\n'), /A PLATO tools project, format version 1\.0.*\n.*"Parishes", following map-your-data.*4 of 9 steps done, at "Decide which candidates are the same place"/);
+  assert.match(describe(r).join('\n'), /A PLATO tools project, format version 1\.1.*\n.*"Parishes", following map-your-data.*4 of 9 steps done, at "Decide which candidates are the same place"/);
 });
 
 test('a review saved in a project keeps what its Finishes recorded (finished) and the choice for drafts (draft_answers), and a bad one is refused', async () => {
@@ -199,11 +199,31 @@ test('versions: a greater major is refused; a greater minor opens and says so, i
   const r = await read(withManifest(bytes, later));
   assert.equal(r.newer, true);
   assert.deepEqual(r.record, p.record);
-  assert.match(describe(r).join('\n'), /saved by newer PLATO tools \(PLATO tools 1\.2\.0, project format 1\.3\); what they added is not read \(notes\/later\.json\)/);
+  assert.match(describe(r).join('\n'), /saved by newer PLATO tools \(PLATO tools 1\.2\.0, project format 1\.4\); what they added is not read \(notes\/later\.json\)/);
   // Not optional, a role it does not know is refused even at a later minor; at its own minor, the same keys are damage.
   await refused(read(withManifest(bytes, (m, e) => { later(m, e); delete m.parts[m.parts.length - 1].optional; })), /a part these tools do not know \(a "notes"\)/);
   await refused(read(withManifest(bytes, (m) => { m.parts[0].encoding = 'utf-8'; })), /lists the part "workflow\.json" in a way these tools do not know/);
   await refused(read(withManifest(bytes, (m) => { m.annotations = {}; })), /manifest has keys these tools do not know \(annotations\)/);
+});
+
+test('format 1.1: a file left out to fit WHG (why "too-large") is listed and said; a why of a later minor opens, at its own minor it is damage, as a 1.0 reader took 1.1\'s', async () => {
+  assert.equal(`${VERSION}.${MINOR}`, '1.1');
+  const p = await atReview();
+  const { manifest, bytes } = await written({ record: p.record, files: p.files.filter((f) => f.ref !== p.refs.table), left: [{ ref: p.refs.table, why: 'too-large' }] });
+  assert.equal(manifest.minor, 1);
+  assert.deepEqual(manifest.left, [{ name: 'parishes.csv', size: TABLE.size, sha256: p.refs.table.sha256, why: 'too-large' }]);
+  const r = await read(bytes);
+  assert.equal(r.newer, false);
+  assert.match(describe(r).join('\n'), /parishes\.csv \(\d+ bytes\): left out to fit WHG's Workbench/);
+  // The rule a 1.0 reader followed for 1.1's 'too-large', kept for what a 1.2 may add: a why it does not know,
+  // in a project of a later minor, opens (and says it is newer); in one of its own minor, it is damage.
+  const later = await read(withManifest(bytes, (m) => { m.minor = MINOR + 1; m.left[0].why = 'some-later-why'; }));
+  assert.equal(later.newer, true);
+  assert.match(describe(later).join('\n'), /parishes\.csv \(\d+ bytes\): some-later-why/);
+  await refused(read(withManifest(bytes, (m) => { m.left[0].why = 'some-later-why'; })), /lists the files left out of it in a way these tools do not know/);
+  // A 1.0 project (minor 0) still opens, with its own whys, and is not called newer.
+  const old = await read(withManifest(bytes, (m) => { m.minor = 0; m.left[0].why = 'left-out'; }));
+  assert.equal(old.newer, false);
 });
 
 test('the manifest and the record must agree: the step it is at, and its name', async () => {
@@ -348,7 +368,7 @@ test('plato-tools project info lists the manifest and checks every hash: 0 for a
     writeFileSync(join(dir, 'Parishes.platoproj'), bytes);
     const ok = cli('project', 'info', join(dir, 'Parishes.platoproj'));
     assert.equal(ok.code, 0, ok.err);
-    assert.match(ok.out, /A PLATO tools project, format version 1\.0/);
+    assert.match(ok.out, /A PLATO tools project, format version 1\.1/);
     assert.match(ok.out, /files\/[0-9a-f]{64} +\d+ bytes {2}file: parishes\.csv \(the file the workflow began with\)/);
     const json = JSON.parse(cli('project', 'info', '--json', join(dir, 'Parishes.platoproj')).out);
     assert.equal(json.ok, true); assert.equal(json.manifest.parts.length, 6);
