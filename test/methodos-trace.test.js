@@ -9,7 +9,7 @@ import * as XLSX from 'xlsx';
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { openSqlite } from '../src/lib/store.js';
 import { res, env as testEnv } from './engine.js';
-import { HAVE, choose, questionsFor, answersFor, answered, plan, baseAsked } from '../src/engine/methodos/interview.js';
+import { HAVE, choose, questionsFor, answersFor, answered, plan, baseAsked, baseWhy } from '../src/engine/methodos/interview.js';
 import { RECIPES, OPERATIONS, runner, checkRecipe, digest, drive, refsOf } from '../src/engine/methodos/index.js';
 import { createLookup, memoryLedger, WHG_ENDPOINT } from '../src/engine/gazetteer/index.js';
 import { readWork, serialiseWork } from '../src/engine/krisis/work.js';
@@ -55,7 +55,8 @@ test('the interview: a map, to a map or to publish, leads to it; the base addres
     assert.equal(answersFor(c, yes, { base: BASE }).base, BASE);
   }
   // Map your data's regions keep their own words.
-  assert.equal(baseAsked(choose('table', 'map'), { 'has-regions': true }).why, 'Needed: the regions are given addresses under it.');
+  assert.equal(baseWhy(baseAsked(choose('table', 'map'), { 'has-regions': true })), 'Needed: the regions are given addresses under it.');
+  assert.equal(baseAsked(choose('table', 'map'), { 'has-regions': true }).why, undefined, "Map your data's answer is as it was");
 });
 
 test('the plan: the lookup, its review and the decisions only when identifying, saying WHG\'s daily cap of 5,000 requests per token; publishing adds Agora\'s steps', () => {

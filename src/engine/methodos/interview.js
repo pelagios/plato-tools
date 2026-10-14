@@ -41,6 +41,8 @@ export const WANT = Object.freeze([
 // (REGIONS), or every place traced from a map is (TRACED).
 const REGIONS = 'Needed: the regions are given addresses under it.';
 const TRACED = 'Needed: every place you trace is given its address under it as you name it.';
+/** The words under the base address's field saying why it is needed (baseAsked's `why`, else the regions'). */
+export const baseWhy = (asked) => asked?.why || REGIONS;
 const ROUTES = [
   { have: 'table', want: 'map', recipe: 'map-your-data', set: { target: 'plato-json' }, ask: ['has-regions', 'will-draw', 'will-publish'], base: { when: ['has-regions', 'will-publish'], needed: 'has-regions' } },
   { have: 'table', want: 'publish', recipe: 'map-your-data', set: { target: 'plato-json', 'will-publish': true }, ask: ['has-regions', 'will-draw'], base: { when: ['has-regions', 'will-publish'], needed: 'has-regions' } },
@@ -101,9 +103,9 @@ export const questionsFor = (choice) => (choice?.kind === 'recipe' ? choice.ask.
 const given = (choice, yesNo, k) => (typeof yesNo[k] === 'boolean' ? yesNo[k] : RECIPES[choice.recipe].asks[k].default);
 
 /**
- * Whether the base address is asked under these answers: { needed, question, why } (needed: a workflow that
- * mints regions, or traced places, under it cannot go on without one; why: the words that say so), or null
- * when it is not asked.
+ * Whether the base address is asked under these answers: { needed, question, why? } (needed: a workflow that
+ * mints regions, or traced places, under it cannot go on without one; why: the words that say so, given by a
+ * route that names its own, else baseWhy's), or null when it is not asked.
  */
 export function baseAsked(choice, yesNo = {}) {
   const b = choice?.kind === 'recipe' ? choice.base : null;
@@ -111,7 +113,9 @@ export function baseAsked(choice, yesNo = {}) {
   const yes = (k) => (yesNo[k] ?? choice.set[k] ?? RECIPES[choice.recipe].asks[k]?.default) === true;
   const when = [].concat(b?.when ?? []);
   if (!b || (when.length && !when.some(yes))) return null;
-  return { needed: b.needed === true || (typeof b.needed === 'string' && yes(b.needed)), question: RECIPES[choice.recipe].asks.base.question, why: b.why || REGIONS };
+  const needed = b.needed === true || (typeof b.needed === 'string' && yes(b.needed));
+  // Why it is needed, in words, only where it is (a route's own `why`, else the regions').
+  return { needed, question: RECIPES[choice.recipe].asks.base.question, ...(needed && b.why ? { why: b.why } : {}) };
 }
 /** A base address as the interview takes one: a web address, trimmed, or null. */
 export const baseAnswer = (v) => (typeof v === 'string' && /^https?:\/\/\S+$/.test(v.trim()) ? v.trim() : null);
