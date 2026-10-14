@@ -4816,6 +4816,27 @@ def whg_checks(pw, url, tmp):
             {'empty': empty, 'list': listed['list'], 'focus': focus, 'kept': kept, 'after delete': gone, 'dialogs': dialogs, 'opened': opened['message'][:160], 'link': links.get(r['wid'])}
     attempt('WHG: in a fresh browser, "one kept in WHG" lists the projects there (title, role, when saved); Delete asks in the page, "Keep it" focused, keeps it, then deletes it; another opens as the same workflow, linked at its version', fresh_browser_open_and_delete)
 
+    def list_without_token():
+        need('second')
+        # No workflow open, no token: "one kept in WHG" asks for the token where the list is (no tracker is shown), and sends nothing;
+        # the token given there, the same link lists the projects.
+        n = context(grant=True)
+        log(clear=True)
+        n.click('#whg-open-banner')
+        until(n, "() => /Your WHG token is needed first/.test(document.getElementById('whg-projects-said').textContent)", 15)
+        asked = n.evaluate('''() => { const b = document.getElementById('whgp-token-box'); return { inList: !!b.closest('#whg-projects'), shown: !b.hidden && !!b.getClientRects().length,
+          focus: document.activeElement?.id, tracker: !document.getElementById('methodos-tracker').hidden }; }''')
+        sent = log()
+        n.fill('#whgp-token', WHG_E2E_TOKEN); n.press('#whgp-token', 'Enter')
+        n.click('#whg-open-banner')
+        until(n, "() => document.querySelectorAll('#whg-projects-list li').length >= 1", 20)
+        listed = len(n.evaluate("() => [...document.querySelectorAll('#whg-projects-list li')]"))
+        after = [(e['method'], e['path']) for e in log()]
+        n.context.close()
+        return (asked == {'inList': True, 'shown': True, 'focus': 'whgp-token', 'tracker': False} and sent == [] and listed >= 1 and ('GET', '/reconciliation/projects/?doc_type=plato') in after), \
+            {'asked': asked, 'sent before': len(sent), 'listed': listed, 'after': after}
+    attempt('WHG: with no workflow open and no token, "one kept in WHG" shows the token field beside the list, focused, and sends nothing; the token given there, it lists the projects', list_without_token)
+
     def matched():
         need('b', 'second')
         # The workflow as a project file from the first browser, opened in a third: no link there, but WHG holds it.

@@ -1059,7 +1059,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     chosenRefs = null;
     if (projectSaid) { projectSaid.hidden = true; projectSaid.textContent = ''; }
     const by = read.manifest.tools.version === build?.version ? '' : ` (saved by PLATO tools ${read.manifest.tools.version})`;
-    const what = copy ? `Your own copy of “${copy.title || read.record.name}”, shared from WHG (version ${copy.version} there): a new workflow of this browser's, not linked to the one shared, its project${by} read with every part checked.`
+    const what = copy ? `Your own copy of “${copy.title || read.record.name}”, shared from WHG (version ${copy.version} there)${by}, every part checked: a new workflow of this browser's, not linked to the one shared.`
       : got ? `Opened “${got.title || read.record.name}” from WHG (version ${got.version})${by}, every part checked.` : `Opened the project ${file.name}${by}, every part checked.`;
     const opened = `${what}${read.newer ? ` ${newerWords(read.manifest)}` : ''}${(read.manifest.left || []).some((x) => x.why === 'too-large') ? ` Left out to fit WHG: ${read.manifest.left.filter((x) => x.why === 'too-large').map((x) => x.name).join(', ')}; choose ${read.manifest.left.filter((x) => x.why === 'too-large').length === 1 ? 'it' : 'them'} again where a step needs ${read.manifest.left.filter((x) => x.why === 'too-large').length === 1 ? 'it' : 'them'}.` : ''}`;
     // What is kept of WHG beside the workflow, once it is open: its link (opened from there), or where a copy came from.
@@ -1129,7 +1129,12 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   };
   /** A refusal, in words, where it was asked: the token field opened for a token refused or missing, WHG's page named for its beta. */
   function whgFailed(e, action, sayIt = whgSay) {
-    if (e?.kind === 'token' || e?.kind === 'unauthenticated') { askedToken = true; whgTokenBox.hidden = false; projectEl.open = true; page.askToken?.(); }
+    if (e?.kind === 'token' || e?.kind === 'unauthenticated') {
+      askedToken = true;
+      // The field where the request was asked: the list of your projects, shown with no workflow open, or the tracker's part.
+      if (sayIt === listSay && tracker.hidden) listSaidEl.after(whgTokenBox); else { whgNeeds.after(whgTokenBox); projectEl.open = true; }
+      whgTokenBox.hidden = false; page.askToken?.();
+    }
     const link = e?.kind === 'beta' ? el('a', { href: ENROL, target: '_blank', rel: 'noopener noreferrer', textContent: 'WHG’s development page (opens in a new tab)' }) : null;
     sayIt(whyWords(e, action), true, link);
   }
@@ -1140,8 +1145,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     if (!whg) return;
     const st = viewing ? null : wf || changed?.record;
     page.collaborate?.(whgNeeds);
-    whgTokenBox.hidden = !(askedToken || !page.hasToken?.());
-    if (page.hasToken?.() && !askedToken) whgTokenBox.hidden = true;
+    if (!tracker.hidden && whgTokenBox.parentElement !== whgEl) whgNeeds.after(whgTokenBox);
+    whgTokenBox.hidden = !askedToken && !!page.hasToken?.();
     whgSaveB.hidden = !st; whgShareB.hidden = !st;
     whgSaveB.disabled = !!wf && !atBoundary(wf);
     if (!st) { whgState.textContent = 'Open a project kept in WHG, or save a workflow there once one is begun.'; whgLeaves.hidden = true; whgUnshareB.hidden = true; return; }
@@ -1153,22 +1158,23 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     whgUnshareB.hidden = !l?.shared;
     whgShareB.textContent = l?.shared ? 'Show the read-only link' : 'Share a read-only link';
     if (!projectEl.open) return;   // what follows is measured only while it is shown
-    const now = stateOf(toSave(), page.review?.()?.text ?? null);
+    const review = page.review?.() || null;   // serialised once here, for the digest and the plan
+    const now = stateOf(toSave(), review?.text ?? null);
     whgState.textContent = !l
       ? `Not saved to WHG.${whgLink?.origin ? ` This is your own copy of “${whgLink.origin.title || 'a workflow'}”, shared from WHG (version ${whgLink.origin.version} there), and is not linked to it.` : ''} Saved there, it is kept in your own workbench, as the project file holds it.`
       : `${l.state === now ? `Saved to WHG ${whenWords(l.savedAt)}, as version ${l.version}.` : `Not saved to WHG since ${whenWords(l.savedAt)}: the workflow has changed since (WHG has version ${l.version}).`}${l.shared ? ' Shared: anyone with its link can read it.' : ''}`;
-    planLeaves(st);
+    planLeaves(st, review);
   }
   /** What a save to WHG would leave out now, measured as it would be sent (whg.js fit()), said before saving; once for each state of the workflow. */
-  function planLeaves(st) {
+  function planLeaves(st, review) {
     if (wf && !atBoundary(wf)) return;
-    const key = `${st.id}|${st.saved}|${ownBox.checked}|${page.review?.()?.name || ''}|${page.review?.()?.text?.length || 0}`;
+    const key = `${st.id}|${st.saved}|${ownBox.checked}|${review?.name || ''}|${review?.text?.length || 0}`;
     if (planned?.key === key) { whgLeaves.textContent = planned.words || ''; whgLeaves.hidden = !planned.words; return; }
     planned = { key, words: null };
     const record = toSave();
     projectParts(record).then((parts) => whg.fit(parts, whgLink?.projectId ? whgLink : null)).then((f) => {
       const n = f.tooLarge.length;
-      return n ? `Too large for WHG with every file: ${f.tooLarge.map((r) => r.name).join(', ')} will not go to WHG (it takes at most 2 MB a project). The workflow${page.review?.() ? ' and the review' : ''} will, and ${n === 1 ? 'the file left out is' : 'each file left out is'} listed in it, to be chosen again where a step needs ${n === 1 ? 'it' : 'them'}.` : '';
+      return n ? `Too large for WHG with every file: ${f.tooLarge.map((r) => r.name).join(', ')} will not go to WHG (it takes at most 2 MB a project). The workflow${review ? ' and the review' : ''} will, and ${n === 1 ? 'the file left out is' : 'each file left out is'} listed in it, to be chosen again where a step needs ${n === 1 ? 'it' : 'them'}.` : '';
     }, (e) => (e instanceof WorkbenchError || e instanceof ProjectError ? e.message : '')).then((words) => {
       if (planned?.key !== key) return;
       planned.words = words; whgLeaves.textContent = words; whgLeaves.hidden = !words;
@@ -1234,6 +1240,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   function openFromWhg() {
     if (!whg) return;
     listBox.hidden = false; listUl.replaceChildren(); listSay('Asking WHG for your projects…');
+    page.collaborate?.(document.getElementById('whg-projects-needs'));
     show(document.getElementById('whg-projects-h'));
     chain(async () => {
       let list;
